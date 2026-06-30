@@ -128,29 +128,42 @@ impl BalPrewarmPool {
 pub(crate) const DEFAULT_BAL_PREWARM_THREADS: usize = 128;
 
 fn prewarm_loop(rx: crossbeam_channel::Receiver<PrewarmMsg>) {
-    // The provider (and its MDBX read txn) held for the current block, between `BeginBlock` and
-    // `EndBlock`. `None` while idle, so no read txn is pinned across the inter-block gap.
-    let mut provider: Option<CachedStateProvider<StateProviderBox>> = None;
+    struct ActiveBlock {
+        build: Arc<BuildProviderFn>,
+        caches: ExecutionCache,
+        provider: Option<CachedStateProvider<StateProviderBox>>,
+    }
+
+    // The provider (and its MDBX read txn) is opened lazily on the first warm request for this
+    // worker. `None` while idle, so no read txn is pinned across the inter-block gap.
+    let mut active_block: Option<ActiveBlock> = None;
 
     // Blocks when idle; the channel disconnects (and the loop ends) when the pool is dropped.
     while let Ok(msg) = rx.recv() {
         match msg {
             PrewarmMsg::BeginBlock { build, caches } => {
-                provider = match (build)() {
-                    Ok(inner) => Some(CachedStateProvider::new_prewarm(inner, caches)),
-                    Err(err) => {
-                        trace!(target: "engine::tree::bal_prewarm_pool", %err, "failed to build provider");
-                        None
-                    }
-                };
+                active_block = Some(ActiveBlock { build, caches, provider: None });
             }
             PrewarmMsg::Warm(target) => {
-                let Some(provider) = provider.as_ref() else { continue };
+                let Some(active_block) = active_block.as_mut() else { continue };
+                if active_block.provider.is_none() {
+                    active_block.provider = match (active_block.build)() {
+                        Ok(inner) => Some(CachedStateProvider::new_prewarm(
+                            inner,
+                            active_block.caches.clone(),
+                        )),
+                        Err(err) => {
+                            trace!(target: "engine::tree::bal_prewarm_pool", %err, "failed to build provider");
+                            None
+                        }
+                    };
+                }
+                let Some(provider) = active_block.provider.as_ref() else { continue };
                 match target {
                     PrewarmTarget::Account(addr) => {
-                        if let Ok(Some(account)) = provider.basic_account(&addr) &&
-                            let Some(code_hash) = account.bytecode_hash &&
-                            code_hash != alloy_consensus::constants::KECCAK_EMPTY
+                        if let Ok(Some(account)) = provider.basic_account(&addr)
+                            && let Some(code_hash) = account.bytecode_hash
+                            && code_hash != alloy_consensus::constants::KECCAK_EMPTY
                         {
                             let _ = provider.bytecode_by_hash(&code_hash);
                         }
@@ -161,7 +174,7 @@ fn prewarm_loop(rx: crossbeam_channel::Receiver<PrewarmMsg>) {
                 }
             }
             PrewarmMsg::EndBlock(end_tx) => {
-                provider = None;
+                active_block = None;
                 drop(end_tx);
             }
         }
