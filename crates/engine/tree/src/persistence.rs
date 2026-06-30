@@ -567,7 +567,7 @@ mod tests {
             .unwrap()
             .unwrap();
         let stored = StoredBlockAccessList::decompress(&stored).unwrap();
-        assert_eq!(stored.into_verified_raw().unwrap().into_raw(), raw_bal.clone());
+        assert_eq!(stored.into_verified_raw().unwrap().into_raw(), raw_bal);
         assert_eq!(get_bal_by_hash(&provider, num_hash.hash).unwrap(), Some(raw_bal));
     }
 
