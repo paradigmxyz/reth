@@ -481,7 +481,11 @@ where
             );
             self.executor.spawn_blocking_named("tx-iterator", move || {
                 let (transactions, convert) = transactions.into_parts();
-                convert_serial(transactions.into_iter(), &convert, &prewarm_tx, &execute_tx);
+                if parallel_bal_execution {
+                    convert_serial_execute_only(transactions.into_iter(), &convert, &execute_tx);
+                } else {
+                    convert_serial(transactions.into_iter(), &convert, &prewarm_tx, &execute_tx);
+                }
             });
         } else {
             // Parallel path — recover signatures in parallel on rayon, stream results
@@ -501,11 +505,7 @@ where
                                 (i, tx)
                             })
                             .for_each(|(idx, tx)| {
-                                let tx = tx.map(|tx| {
-                                    let tx = WithTxEnv::new(tx);
-                                    let _ = prewarm_tx.send((idx, tx.clone()));
-                                    tx
-                                });
+                                let tx = tx.map(WithTxEnv::new);
                                 let _ = execute_tx.send((idx, tx));
                                 trace!(target: "engine::tree::payload_processor", idx, "yielded transaction");
                             });
@@ -830,6 +830,22 @@ where
             *cached = Some(new_cache);
             debug!(target: "engine::caching", ?block_with_parent, "Updated execution cache for inserted block");
         });
+    }
+}
+
+/// Converts transactions sequentially and sends them only to the execute channel.
+fn convert_serial_execute_only<RawTx, Tx, TxEnv, InnerTx, Recovered, Err, C>(
+    iter: impl Iterator<Item = RawTx>,
+    convert: &C,
+    execute_tx: &ExecuteTxSender<TxEnv, Recovered, Err>,
+) where
+    Tx: ExecutableTxParts<TxEnv, InnerTx, Recovered = Recovered>,
+    C: ConvertTx<RawTx, Tx = Tx, Error = Err>,
+{
+    for (idx, raw_tx) in iter.enumerate() {
+        let tx = convert.convert(raw_tx).map(WithTxEnv::new);
+        let _ = execute_tx.send((idx, tx));
+        trace!(target: "engine::tree::payload_processor", idx, "yielded transaction");
     }
 }
 
