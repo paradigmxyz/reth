@@ -138,21 +138,22 @@ impl<N: NodePrimitives> StaticFileWriters<N> {
     pub(crate) fn commit(&self) -> ProviderResult<()> {
         debug!(target: "providers::static_file", "Committing all static file segments");
 
-        for writer_lock in [
-            &self.headers,
-            &self.transactions,
-            &self.receipts,
-            &self.transaction_senders,
-            &self.account_change_sets,
-            &self.storage_change_sets,
-        ] {
-            let mut writer = writer_lock.write();
-            if let Some(writer) = writer.as_mut() {
-                writer.commit()?;
-            }
-        }
+        Self::commit_writer(&self.headers)?;
+        Self::commit_writer(&self.transactions)?;
+        Self::commit_writer(&self.receipts)?;
+        Self::commit_writer(&self.transaction_senders)?;
+        Self::commit_writer(&self.account_change_sets)?;
+        Self::commit_writer(&self.storage_change_sets)?;
 
         debug!(target: "providers::static_file", "Committed all static file segments");
+        Ok(())
+    }
+
+    fn commit_writer(writer_lock: &RwLock<Option<StaticFileProviderRW<N>>>) -> ProviderResult<()> {
+        let mut writer = writer_lock.write();
+        if let Some(writer) = writer.as_mut() {
+            writer.commit()?;
+        }
         Ok(())
     }
 
@@ -188,21 +189,24 @@ impl<N: NodePrimitives> StaticFileWriters<N> {
     pub(crate) fn finalize(&self) -> ProviderResult<()> {
         debug!(target: "providers::static_file", "Finalizing all static file segments into disk");
 
-        for writer_lock in [
-            &self.headers,
-            &self.transactions,
-            &self.receipts,
-            &self.transaction_senders,
-            &self.account_change_sets,
-            &self.storage_change_sets,
-        ] {
-            let mut writer = writer_lock.write();
-            if let Some(writer) = writer.as_mut() {
-                writer.finalize()?;
-            }
-        }
+        Self::finalize_writer(&self.headers)?;
+        Self::finalize_writer(&self.transactions)?;
+        Self::finalize_writer(&self.receipts)?;
+        Self::finalize_writer(&self.transaction_senders)?;
+        Self::finalize_writer(&self.account_change_sets)?;
+        Self::finalize_writer(&self.storage_change_sets)?;
 
         debug!(target: "providers::static_file", "Finalized all static file segments into disk");
+        Ok(())
+    }
+
+    fn finalize_writer(
+        writer_lock: &RwLock<Option<StaticFileProviderRW<N>>>,
+    ) -> ProviderResult<()> {
+        let mut writer = writer_lock.write();
+        if let Some(writer) = writer.as_mut() {
+            writer.finalize()?;
+        }
         Ok(())
     }
 }
