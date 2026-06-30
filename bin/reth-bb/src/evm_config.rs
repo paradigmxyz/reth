@@ -98,9 +98,7 @@ impl<C> BbEvmConfig<C> {
 /// At each segment boundary the executor calls this to populate the ring buffer
 /// with the 256 block hashes relevant to the new segment's block number window.
 fn seed_state_block_hashes<DB>(state: &mut &mut revm::database::State<DB>, hashes: &[(u64, B256)]) {
-    for &(number, hash) in hashes {
-        state.block_hashes.insert(number, hash);
-    }
+    state.block_hashes.extend(hashes.iter().copied());
 }
 
 /// Reads the BAL index from a `&mut State<DB>`.
