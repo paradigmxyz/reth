@@ -83,12 +83,15 @@ type V2StorageProofCalculator<'a, Provider> = proof_v2::StorageProofCalculator<
 
 /// Tracks worker availability counts.
 ///
-/// It uses cacheline-aligned flags to avoid core-to-core chatter.
+/// It uses cacheline-aligned flags and a cacheline-aligned idle count to avoid core-to-core
+/// chatter in proof dispatch decisions.
 #[derive(Debug)]
 struct AvailabilitySheet {
     /// One flag per worker, each on its own cacheline. Workers store `true` when idle,
     /// `false` when busy. Only the owning worker writes; the dispatcher only reads.
     flags: Vec<crossbeam_utils::CachePadded<AtomicBool>>,
+    /// Number of workers that are currently marked idle.
+    idle_count: crossbeam_utils::CachePadded<AtomicUsize>,
 }
 
 impl AvailabilitySheet {
@@ -96,7 +99,7 @@ impl AvailabilitySheet {
     fn new(count: usize) -> Self {
         let flags =
             (0..count).map(|_| crossbeam_utils::CachePadded::new(AtomicBool::new(false))).collect();
-        Self { flags }
+        Self { flags, idle_count: crossbeam_utils::CachePadded::new(AtomicUsize::new(0)) }
     }
 
     /// Returns `true` if more than one worker is currently idle.
@@ -104,26 +107,21 @@ impl AvailabilitySheet {
     /// Note, that this is somewhat racy since a flag that was just saying `idle` and we counted it
     /// as such might turn into `busy` right away.
     fn has_multiple_idle(&self) -> bool {
-        let mut idle = 0u32;
-        for flag in &self.flags {
-            if flag.load(Ordering::Relaxed) {
-                idle += 1;
-                if idle > 1 {
-                    return true;
-                }
-            }
-        }
-        false
+        self.idle_count.load(Ordering::Relaxed) > 1
     }
 
     /// Marks the given worker as idle.
     fn mark_idle(&self, worker_id: usize) {
-        self.flags[worker_id].store(true, Ordering::Relaxed);
+        if !self.flags[worker_id].swap(true, Ordering::Relaxed) {
+            self.idle_count.fetch_add(1, Ordering::Relaxed);
+        }
     }
 
     /// Marks the given worker as busy.
     fn mark_busy(&self, worker_id: usize) {
-        self.flags[worker_id].store(false, Ordering::Relaxed);
+        if self.flags[worker_id].swap(false, Ordering::Relaxed) {
+            self.idle_count.fetch_sub(1, Ordering::Relaxed);
+        }
     }
 }
 
