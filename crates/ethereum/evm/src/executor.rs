@@ -108,7 +108,6 @@ where
     type Primitives = EthPrimitives;
     type Transaction = EthTxEnv;
     type TransactionOutput = GasOutput;
-    type Error = BlockExecutionError;
 
     fn evm(&self) -> &Evm<BaseEvmTypes> {
         &self.evm
@@ -121,7 +120,7 @@ where
     fn apply_pre_execution_changes<H>(
         &mut self,
         on_hashed_state_update: &mut H,
-    ) -> Result<(), Self::Error>
+    ) -> Result<(), BlockExecutionError>
     where
         H: FnMut(HashedPostState),
     {
@@ -150,7 +149,7 @@ where
         &mut self,
         transaction: Self::Transaction,
         on_hashed_state_update: &mut H,
-    ) -> Result<Self::TransactionOutput, Self::Error>
+    ) -> Result<Self::TransactionOutput, BlockExecutionError>
     where
         H: FnMut(HashedPostState),
     {
@@ -184,7 +183,7 @@ where
     fn finish<H>(
         mut self,
         on_hashed_state_update: &mut H,
-    ) -> Result<BlockExecutionOutput<Receipt>, Self::Error>
+    ) -> Result<BlockExecutionOutput<Receipt>, BlockExecutionError>
     where
         H: FnMut(HashedPostState),
     {
