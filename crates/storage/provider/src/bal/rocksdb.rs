@@ -17,7 +17,7 @@ use std::{
     sync::Arc,
 };
 
-/// Number of recent blocks kept in the in-memory RocksDB BAL buffer.
+/// Number of recent blocks kept in the in-memory `RocksDB` BAL buffer.
 const DEFAULT_BAL_BUFFER_RETENTION_DISTANCE: u64 = 32;
 
 /// RocksDB-backed BAL store.
