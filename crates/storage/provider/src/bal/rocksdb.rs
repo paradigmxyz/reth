@@ -23,7 +23,7 @@ const DEFAULT_BAL_BUFFER_RETENTION_DISTANCE: u64 = 32;
 /// RocksDB-backed BAL store.
 ///
 /// Persisted BALs are keyed by `(block_number, block_hash)`. Hash-only lookups only read the
-/// pending buffer.
+/// in-memory buffer.
 #[derive(Clone)]
 pub struct RocksDBBalStore {
     /// Retention policy for persisted BALs.
@@ -125,15 +125,16 @@ impl std::fmt::Debug for RocksDBBalStore {
     }
 }
 
-/// Buffered BALs waiting to be flushed to `RocksDB`.
+/// In-memory BAL buffer for recent hash lookups and pending disk writes.
 #[derive(Debug, Default)]
 struct RocksDBBalStoreBuffer {
-    // Hash index for serving hash-only lookups before flush.
+    /// Hash index for serving recent hash-only lookups.
     entries: HashMap<BlockHash, RocksDBBalEntry>,
-    // Block-number index for pruning buffered entries.
+    /// Block-number index for pruning buffered entries.
     hashes_by_number: BTreeMap<BlockNumber, Vec<BlockHash>>,
-    // Ordered writes waiting for flush.
+    /// Ordered writes waiting for flush.
     pending: BTreeMap<StoredBlockAccessListKey, RawBal>,
+    /// Highest block number inserted into the buffer.
     highest_block_number: Option<BlockNumber>,
 }
 
@@ -246,7 +247,9 @@ impl RocksDBBalStoreBuffer {
 /// Buffered BAL entry with its block number.
 #[derive(Debug)]
 struct RocksDBBalEntry {
+    /// Block number for this hash-indexed BAL.
     block_number: BlockNumber,
+    /// Raw BAL payload.
     bal: RawBal,
 }
 
