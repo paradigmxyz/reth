@@ -40,6 +40,66 @@ impl BlockchainTests {
     pub const fn new(suite_path: PathBuf) -> Self {
         Self { suite_path }
     }
+
+    /// Run all tests and print per-test results as a JSON array.
+    /// Run all tests and print per-test results as a JSON array.
+    ///
+    /// Uses the same `par_bridge_buffered` pattern as `Case::run` to
+    /// avoid thread exhaustion while keeping parallelism.
+    pub fn run_json(&self) {
+        use crate::result::CaseResult;
+        use reth_primitives_traits::ParallelBridgeBuffered;
+        use walkdir::{DirEntry, WalkDir};
+
+        fn find_json_files(path: &Path) -> Vec<PathBuf> {
+            WalkDir::new(path)
+                .into_iter()
+                .filter_map(Result::ok)
+                .filter(|e| e.file_name().to_string_lossy().ends_with(".json"))
+                .map(DirEntry::into_path)
+                .collect()
+        }
+
+        let mut all_results: Vec<CaseResult> = Vec::new();
+
+        // Sequential over subdirectories (like Suite::run)
+        for entry in WalkDir::new(&self.suite_path)
+            .min_depth(1)
+            .max_depth(1)
+        {
+            let entry = match entry {
+                Ok(e) if e.file_type().is_dir() => e,
+                _ => continue,
+            };
+
+            for path in find_json_files(&entry.into_path()) {
+                let case = match BlockchainTestCase::load(&path) {
+                    Ok(c) => c,
+                    Err(_) => continue,
+                };
+
+                // Same parallelism as BlockchainTestCase::run()
+                let results: Vec<CaseResult> = case
+                    .tests
+                    .into_iter()
+                    .filter(|(_, t)| {
+                        !BlockchainTestCase::excluded_fork(t.network)
+                    })
+                    .par_bridge_buffered()
+                    .with_min_len(64)
+                    .map(|(name, test)| {
+                        let result =
+                            BlockchainTestCase::run_single_case(&name, &test);
+                        CaseResult::new(&path, name, result)
+                    })
+                    .collect();
+
+                all_results.extend(results);
+            }
+        }
+
+        crate::result::print_json_array(&all_results);
+    }
 }
 
 impl Suite for BlockchainTests {

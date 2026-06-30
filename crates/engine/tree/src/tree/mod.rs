@@ -151,7 +151,8 @@ pub struct EngineApiTreeState<N: NodePrimitives> {
 }
 
 impl<N: NodePrimitives> EngineApiTreeState<N> {
-    fn new(
+    /// Creates a new [`EngineApiTreeState`].
+    pub fn new(
         block_buffer_limit: u32,
         max_invalid_header_cache_length: u32,
         invalid_header_hit_eviction_threshold: u8,
@@ -1525,7 +1526,7 @@ where
     /// Handles a message from the engine.
     ///
     /// Returns `ControlFlow::Break(())` if the engine should terminate.
-    fn on_engine_message(
+    pub fn on_engine_message(
         &mut self,
         msg: FromEngine<EngineApiRequest<T, N>, N::Block>,
     ) -> Result<ops::ControlFlow<()>, InsertBlockFatalError> {
