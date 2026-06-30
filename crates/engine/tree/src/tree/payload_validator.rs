@@ -697,8 +697,11 @@ where
         }
         let (output, senders, receipt_root_rx, built_bal) = ensure_ok!(execution_result);
 
-        // After executing the block we can stop prewarming transactions
-        handle.stop_prewarming_execution();
+        // After executing a non-BAL block we can stop transaction prewarming. BAL prewarm does
+        // not execute transactions, so avoid sending an unused stop event on that path.
+        if !parallel_bal_execution {
+            handle.stop_prewarming_execution();
+        }
 
         // Create ExecutionOutcome early so we can terminate caching before validation and state
         // root computation. Using Arc allows sharing with both the caching task and the deferred
