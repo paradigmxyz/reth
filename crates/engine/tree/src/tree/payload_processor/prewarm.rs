@@ -33,7 +33,7 @@ use reth_provider::{
 use reth_revm::database::StateProviderDatabase;
 use reth_tasks::{pool::WorkerPool, Runtime};
 use reth_trie_common::MultiProofTargetsV2;
-use revm_state::bal::AccountBal as RevmAccountBal;
+use revm::state::bal::AccountBal as RevmAccountBal;
 use std::sync::{
     atomic::{AtomicBool, AtomicUsize, Ordering},
     mpsc::{self, channel, Receiver, Sender},
@@ -789,7 +789,7 @@ mod tests {
     use super::*;
     use alloy_eip7928::BlockAccessIndex;
     use alloy_primitives::bytes;
-    use revm_state::{bal::BalWrites, Bytecode};
+    use revm::state::{bal::BalWrites, Bytecode};
 
     fn account_with_storage_read(slot: U256) -> RevmAccountBal {
         let mut account = RevmAccountBal::default();
