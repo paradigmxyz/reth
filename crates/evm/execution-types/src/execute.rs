@@ -12,7 +12,7 @@ use evm2::{
     evm::{AccountInfo, BlockStateAccumulator, StateChangeSink, StateChangeSource, Tracked},
 };
 use reth_primitives_traits::{Account, Bytecode};
-use reth_trie_common::HashedPostState;
+use reth_trie_common::{HashedPostState, KeyHasher};
 #[cfg(feature = "std")]
 use std::sync::OnceLock as OnceCell;
 
@@ -83,6 +83,13 @@ impl<T> BlockExecutionOutput<T> {
     pub fn with_hashed_state(mut self, hashed_state: Option<HashedPostState>) -> Self {
         self.hashed_state = hashed_state;
         self
+    }
+
+    /// Returns the hashed post-state for this block output.
+    pub fn hash_state_slow<KH: KeyHasher>(&self) -> HashedPostState {
+        self.hashed_state
+            .clone()
+            .unwrap_or_else(|| crate::hashed_post_state_from_state_source::<KH, _>(&self.state))
     }
 
     /// Return bytecode if known.

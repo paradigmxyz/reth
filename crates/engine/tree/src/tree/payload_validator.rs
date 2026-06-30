@@ -135,7 +135,6 @@ use reth_evm::{
     ConfigureEvm, EvmEnvFor, ExecutionCtxFor,
 };
 use reth_execution_cache::{CacheFillMode, CacheStats, SavedCache};
-use reth_execution_types::hashed_post_state_from_state_source;
 use reth_payload_primitives::{
     BuiltPayload, BuiltPayloadExecutedBlock, InvalidPayloadAttributesError, NewPayloadError,
     PayloadTypes,
@@ -166,13 +165,6 @@ pub use crate::tree::types::ValidationOutcome;
 
 /// Handle to a [`HashedPostState`] computed on a background thread.
 type LazyHashedPostState = reth_tasks::LazyHandle<Arc<HashedPostState>>;
-
-fn block_output_hashed_state<T>(output: &BlockExecutionOutput<T>) -> HashedPostState {
-    output
-        .hashed_state
-        .clone()
-        .unwrap_or_else(|| hashed_post_state_from_state_source::<KeccakKeyHasher, _>(&output.state))
-}
 
 /// Multiplier over the parent's gas limit beyond which a block's claimed gas usage cannot be
 /// legitimate. Gas limit can change by at most 1/1024 per block, so anything over this is rejected
@@ -724,7 +716,7 @@ where
                 let state = if let Some(Ok(state)) = hashed_state_rx.as_mut().map(|rx| rx.recv()) {
                     state
                 } else {
-                    block_output_hashed_state(&hashed_state_output)
+                    hashed_state_output.hash_state_slow::<KeccakKeyHasher>()
                 };
                 Arc::new(state)
             })
@@ -873,7 +865,7 @@ where
                 // validation.
                 if maybe_new_hashed_state.is_some() || state_root_task_failed {
                     hashed_state = maybe_new_hashed_state.unwrap_or_else(|| {
-                        LazyHandle::ready(Arc::new(block_output_hashed_state(&output)))
+                        LazyHandle::ready(Arc::new(output.hash_state_slow::<KeccakKeyHasher>()))
                     });
                     hashed_state_validate_result =
                         self.validator.validate_block_post_execution_with_hashed_state(
@@ -1224,7 +1216,7 @@ where
         drop(receipt_tx);
 
         if !streamed_state_updates && let Some(updates_tx) = handle.sparse_trie_updates_tx() {
-            let hashed_state = block_output_hashed_state(&output);
+            let hashed_state = output.hash_state_slow::<KeccakKeyHasher>();
             let _ = updates_tx.send(StateRootMessage::HashedStateUpdate(hashed_state));
             let _ = updates_tx.send(StateRootMessage::FinishedStateUpdates);
         }
@@ -1343,8 +1335,9 @@ where
 
                 self.payload_processor.executor().spawn_blocking_named("serial-root", move || {
                     let result = state_provider_builder.build().and_then(|provider| {
-                        let hashed_state =
-                            LazyHandle::ready(Arc::new(block_output_hashed_state(&output)));
+                        let hashed_state = LazyHandle::ready(Arc::new(
+                            output.hash_state_slow::<KeccakKeyHasher>(),
+                        ));
                         let (state_root, trie_updates) =
                             Self::compute_state_root_serial(provider, &hashed_state)?;
 
@@ -1428,7 +1421,7 @@ where
         debug!(target: "engine::tree::payload_validator", "Comparing trie updates with serial computation");
 
         match state_provider_builder.build().and_then(|provider| {
-            let hashed_state = Arc::new(block_output_hashed_state(output));
+            let hashed_state = Arc::new(output.hash_state_slow::<KeccakKeyHasher>());
             Self::compute_state_root_serial(provider, &LazyHandle::ready(hashed_state))
         }) {
             Ok((serial_root, serial_trie_updates)) => {

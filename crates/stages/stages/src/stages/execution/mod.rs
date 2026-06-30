@@ -7,7 +7,7 @@ use reth_config::config::ExecutionConfig;
 use reth_consensus::FullConsensus;
 use reth_db::{static_file::HeaderMask, tables};
 use reth_evm::{execute::Executor, metrics::ExecutorMetrics, ConfigureEvm};
-use reth_execution_types::{hashed_post_state_sorted_from_execution_state, Chain};
+use reth_execution_types::Chain;
 use reth_exex::{ExExManagerHandle, ExExNotification, ExExNotificationSource};
 use reth_primitives_traits::{format_gas_throughput, BlockBody, NodePrimitives};
 use reth_provider::{
@@ -497,9 +497,7 @@ where
         provider.write_state(&state, OriginalValuesKnown::Yes, StateWriteConfig::default())?;
 
         if provider.cached_storage_settings().use_hashed_state() {
-            let hashed_state = hashed_post_state_sorted_from_execution_state::<KeccakKeyHasher>(
-                state.execution_state_ref(),
-            );
+            let hashed_state = state.hash_state_slow::<KeccakKeyHasher>().into_sorted();
             provider.write_hashed_state(&hashed_state)?;
         }
 

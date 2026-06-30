@@ -24,7 +24,6 @@ use reth_engine_primitives::{
 };
 use reth_errors::{ConsensusError, ProviderResult};
 use reth_evm::ConfigureEvm;
-use reth_execution_types::hashed_post_state_sorted_from_execution_state;
 use reth_payload_builder::{BuildNewPayload, PayloadBuilderHandle};
 use reth_payload_primitives::{BuiltPayload, NewPayloadError, PayloadTypes};
 use reth_primitives_traits::{
@@ -2185,9 +2184,8 @@ where
             .get_state(block.header().number())?
             .ok_or_else(|| ProviderError::StateForNumberNotFound(block.header().number()))?;
         let block_state = execution_output.execution_state();
-        let hashed_state = hashed_post_state_sorted_from_execution_state::<
-            reth_trie::KeccakKeyHasher,
-        >(&block_state);
+        let hashed_state =
+            execution_output.hash_state_slow::<reth_trie::KeccakKeyHasher>().into_sorted();
 
         debug!(
             target: "engine::tree",
