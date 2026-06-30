@@ -32,6 +32,7 @@ use rocksdb::{
     WriteBatchWithTransaction, WriteBufferManager, WriteOptions, DB,
 };
 use std::{
+    cmp::Ordering,
     collections::BTreeMap,
     fmt,
     path::{Path, PathBuf},
@@ -1745,6 +1746,65 @@ pub struct PrunedIndices {
     pub unchanged: usize,
 }
 
+/// Maximum number of nearby history keys to scan before falling back to a RocksDB seek.
+const PRUNE_HISTORY_LINEAR_SCAN_LIMIT: usize = 16;
+
+enum PruneBatchIteratorPosition {
+    Match,
+    Missing,
+    Exhausted,
+}
+
+fn rocksdb_raw_iter_status(iter: &RocksDBRawIterEnum<'_>) -> ProviderResult<()> {
+    iter.status().map_err(|e| {
+        ProviderError::Database(DatabaseError::Read(DatabaseErrorInfo {
+            message: e.to_string().into(),
+            code: -1,
+        }))
+    })
+}
+
+fn position_prune_history_iter(
+    iter: &mut RocksDBRawIterEnum<'_>,
+    start_key: impl AsRef<[u8]>,
+    target_prefix: &[u8],
+    prefix_len: usize,
+) -> ProviderResult<PruneBatchIteratorPosition> {
+    let mut advanced = 0;
+
+    while iter.valid() {
+        let Some(current_key) = iter.key() else { break };
+        let Some(current_prefix) = current_key.get(..prefix_len) else { break };
+
+        match current_prefix.cmp(target_prefix) {
+            Ordering::Less if advanced < PRUNE_HISTORY_LINEAR_SCAN_LIMIT => {
+                iter.next();
+                advanced += 1;
+            }
+            Ordering::Less => break,
+            Ordering::Equal => return Ok(PruneBatchIteratorPosition::Match),
+            Ordering::Greater => return Ok(PruneBatchIteratorPosition::Missing),
+        }
+    }
+
+    iter.seek(start_key);
+    rocksdb_raw_iter_status(iter)?;
+
+    if !iter.valid() {
+        return Ok(PruneBatchIteratorPosition::Exhausted);
+    }
+
+    let Some(current_key) = iter.key() else {
+        return Ok(PruneBatchIteratorPosition::Exhausted);
+    };
+
+    Ok(match current_key.get(..prefix_len).map(|prefix| prefix.cmp(target_prefix)) {
+        Some(Ordering::Equal) => PruneBatchIteratorPosition::Match,
+        Some(Ordering::Greater) => PruneBatchIteratorPosition::Missing,
+        _ => PruneBatchIteratorPosition::Missing,
+    })
+}
+
 /// Handle for building a batch of operations atomically.
 ///
 /// Uses `WriteBatchWithTransaction` for atomic writes without full transaction overhead.
@@ -2164,37 +2224,21 @@ impl<'a> RocksDBBatch<'a> {
         let mut iter = self.provider.0.raw_iterator_cf(cf);
         let mut outcomes = PrunedIndices::default();
 
-        for (address, to_block) in targets {
+        for (idx, (address, to_block)) in targets.iter().enumerate() {
             // Build the target prefix (first 20 bytes = address)
             let start_key = ShardedKey::new(*address, 0u64).encode();
             let target_prefix = &start_key[..PREFIX_LEN];
 
-            // Check if we need to seek or if the iterator is already positioned correctly.
-            // After processing the previous target, the iterator is either:
-            // 1. Positioned at a key with a different prefix (we iterated past our shards)
-            // 2. Invalid (no more keys)
-            // If the current key's prefix >= our target prefix, we may be able to skip the seek.
-            let needs_seek = if iter.valid() {
-                if let Some(current_key) = iter.key() {
-                    // If current key's prefix < target prefix, we need to seek forward
-                    // If current key's prefix > target prefix, this target has no shards (skip)
-                    // If current key's prefix == target prefix, we're already positioned
-                    current_key.get(..PREFIX_LEN).is_none_or(|p| p < target_prefix)
-                } else {
-                    true
+            match position_prune_history_iter(&mut iter, &start_key, target_prefix, PREFIX_LEN)? {
+                PruneBatchIteratorPosition::Match => {}
+                PruneBatchIteratorPosition::Missing => {
+                    outcomes.unchanged += 1;
+                    continue;
                 }
-            } else {
-                true
-            };
-
-            if needs_seek {
-                iter.seek(start_key);
-                iter.status().map_err(|e| {
-                    ProviderError::Database(DatabaseError::Read(DatabaseErrorInfo {
-                        message: e.to_string().into(),
-                        code: -1,
-                    }))
-                })?;
+                PruneBatchIteratorPosition::Exhausted => {
+                    outcomes.unchanged += targets.len() - idx;
+                    break;
+                }
             }
 
             // Collect all shards for this address using raw prefix comparison
@@ -2291,37 +2335,21 @@ impl<'a> RocksDBBatch<'a> {
         let mut iter = self.provider.0.raw_iterator_cf(cf);
         let mut outcomes = PrunedIndices::default();
 
-        for ((address, storage_key), to_block) in targets {
+        for (idx, ((address, storage_key), to_block)) in targets.iter().enumerate() {
             // Build the target prefix (first 52 bytes of encoded key)
             let start_key = StorageShardedKey::new(*address, *storage_key, 0u64).encode();
             let target_prefix = &start_key[..PREFIX_LEN];
 
-            // Check if we need to seek or if the iterator is already positioned correctly.
-            // After processing the previous target, the iterator is either:
-            // 1. Positioned at a key with a different prefix (we iterated past our shards)
-            // 2. Invalid (no more keys)
-            // If the current key's prefix >= our target prefix, we may be able to skip the seek.
-            let needs_seek = if iter.valid() {
-                if let Some(current_key) = iter.key() {
-                    // If current key's prefix < target prefix, we need to seek forward
-                    // If current key's prefix > target prefix, this target has no shards (skip)
-                    // If current key's prefix == target prefix, we're already positioned
-                    current_key.get(..PREFIX_LEN).is_none_or(|p| p < target_prefix)
-                } else {
-                    true
+            match position_prune_history_iter(&mut iter, &start_key, target_prefix, PREFIX_LEN)? {
+                PruneBatchIteratorPosition::Match => {}
+                PruneBatchIteratorPosition::Missing => {
+                    outcomes.unchanged += 1;
+                    continue;
                 }
-            } else {
-                true
-            };
-
-            if needs_seek {
-                iter.seek(start_key);
-                iter.status().map_err(|e| {
-                    ProviderError::Database(DatabaseError::Read(DatabaseErrorInfo {
-                        message: e.to_string().into(),
-                        code: -1,
-                    }))
-                })?;
+                PruneBatchIteratorPosition::Exhausted => {
+                    outcomes.unchanged += targets.len() - idx;
+                    break;
+                }
             }
 
             // Collect all shards for this (address, storage_key) pair using prefix comparison
@@ -4321,6 +4349,55 @@ mod tests {
 
         let shards3 = provider.account_history_shards(addr3).unwrap();
         assert_eq!(shards3[0].1.iter().collect::<Vec<_>>(), vec![40]);
+    }
+
+    #[test]
+    fn test_prune_account_history_batch_scans_untargeted_neighbor() {
+        let temp_dir = TempDir::new().unwrap();
+        let provider = RocksDBBuilder::new(temp_dir.path()).with_default_tables().build().unwrap();
+
+        let addr1 = Address::from([0x01; 20]);
+        let addr2 = Address::from([0x02; 20]);
+        let addr3 = Address::from([0x03; 20]);
+
+        let mut batch = provider.batch();
+        batch
+            .put::<tables::AccountsHistory>(
+                ShardedKey::new(addr1, u64::MAX),
+                &BlockNumberList::new_pre_sorted([10, 20]),
+            )
+            .unwrap();
+        batch
+            .put::<tables::AccountsHistory>(
+                ShardedKey::new(addr2, u64::MAX),
+                &BlockNumberList::new_pre_sorted([30, 40]),
+            )
+            .unwrap();
+        batch
+            .put::<tables::AccountsHistory>(
+                ShardedKey::new(addr3, u64::MAX),
+                &BlockNumberList::new_pre_sorted([50, 60]),
+            )
+            .unwrap();
+        batch.commit().unwrap();
+
+        let targets = vec![(addr1, 15), (addr3, 55)];
+
+        let mut batch = provider.batch();
+        let outcomes = batch.prune_account_history_batch(&targets).unwrap();
+        batch.commit().unwrap();
+
+        assert_eq!(outcomes.updated, 2);
+        assert_eq!(outcomes.unchanged, 0);
+
+        let shards1 = provider.account_history_shards(addr1).unwrap();
+        assert_eq!(shards1[0].1.iter().collect::<Vec<_>>(), vec![20]);
+
+        let shards2 = provider.account_history_shards(addr2).unwrap();
+        assert_eq!(shards2[0].1.iter().collect::<Vec<_>>(), vec![30, 40]);
+
+        let shards3 = provider.account_history_shards(addr3).unwrap();
+        assert_eq!(shards3[0].1.iter().collect::<Vec<_>>(), vec![60]);
     }
 
     #[test]
