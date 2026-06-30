@@ -48,9 +48,8 @@ impl EngineApiMetrics {
     pub fn record_block_execution<R>(
         &self,
         output: &BlockExecutionOutput<R>,
-        execution_duration: Duration,
+        execution_secs: f64,
     ) {
-        let execution_secs = execution_duration.as_secs_f64();
         let gas_used = output.result.gas_used;
 
         // Update gas metrics
@@ -87,11 +86,11 @@ impl EngineApiMetrics {
     }
 
     /// Records execution duration into the gas-bucketed execution histogram.
-    pub fn record_block_execution_gas_bucket(&self, gas_used: u64, elapsed: Duration) {
+    pub fn record_block_execution_gas_bucket(&self, gas_used: u64, elapsed_secs: f64) {
         let idx = GasBucketMetrics::bucket_index(gas_used);
         self.execution_gas_buckets.buckets[idx]
             .execution_gas_bucket_histogram
-            .record(elapsed.as_secs_f64());
+            .record(elapsed_secs);
     }
 
     /// Records state root duration into the gas-bucketed block validation histogram.
@@ -600,7 +599,7 @@ mod tests {
             },
         };
 
-        metrics.record_block_execution(&output, Duration::from_millis(100));
+        metrics.record_block_execution(&output, 0.1);
 
         let snapshot = snapshotter.snapshot().into_vec();
 

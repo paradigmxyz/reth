@@ -1185,8 +1185,9 @@ where
         let output = BlockExecutionOutput { result, state: db.take_bundle() };
 
         let execution_duration = execution_start.elapsed();
-        self.metrics.record_block_execution(&output, execution_duration);
-        self.metrics.record_block_execution_gas_bucket(output.result.gas_used, execution_duration);
+        let execution_secs = execution_duration.as_secs_f64();
+        self.metrics.record_block_execution(&output, execution_secs);
+        self.metrics.record_block_execution_gas_bucket(output.result.gas_used, execution_secs);
         debug!(target: "engine::tree::payload_validator", elapsed = ?execution_duration, "Executed block");
 
         Ok((output, senders, result_rx, built_bal))
@@ -1274,9 +1275,10 @@ where
             receipt_tx,
         )?;
         let execution_duration = execution_start.elapsed();
+        let execution_secs = execution_duration.as_secs_f64();
 
-        self.metrics.record_block_execution(&output, execution_duration);
-        self.metrics.record_block_execution_gas_bucket(output.result.gas_used, execution_duration);
+        self.metrics.record_block_execution(&output, execution_secs);
+        self.metrics.record_block_execution_gas_bucket(output.result.gas_used, execution_secs);
         debug!(
             target: "engine::tree::payload_validator",
             elapsed = ?execution_duration,
