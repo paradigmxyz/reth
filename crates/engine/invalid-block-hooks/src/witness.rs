@@ -4,9 +4,7 @@ use alloy_rpc_types_debug::ExecutionWitness;
 use pretty_assertions::Comparison;
 use reth_engine_primitives::InvalidBlockHook;
 use reth_evm::{execute::Executor, ConfigureEvm};
-use reth_execution_types::{
-    hashed_post_state_from_state_source, ExecutionAccountInfo, ExecutionState,
-};
+use reth_execution_types::{ExecutionAccountInfo, ExecutionState};
 use reth_primitives_traits::{NodePrimitives, RecoveredBlock, SealedHeader};
 use reth_provider::{
     BlockExecutionOutput, SharedEvmStateProviderDatabase, StateProvider, StateProviderFactory,
@@ -17,8 +15,7 @@ use reth_trie::updates::TrieUpdates;
 use serde::Serialize;
 use std::{collections::BTreeMap, fmt::Debug, fs::File, io::Write, path::PathBuf};
 
-type CollectionResult =
-    (BTreeMap<B256, Bytes>, BTreeMap<B256, Bytes>, reth_trie::HashedPostState, ExecutionState);
+type CollectionResult = (BTreeMap<B256, Bytes>, BTreeMap<B256, Bytes>, ExecutionState);
 
 #[derive(Debug, PartialEq, Eq, Serialize)]
 struct BlockStateSorted {
@@ -89,13 +86,10 @@ fn account_info_sorted(info: &ExecutionAccountInfo) -> AccountInfoSorted {
     }
 }
 
-/// Extracts execution data including codes, preimages, and hashed state from execution state
-/// changes.
+/// Extracts codes and preimages from execution state changes.
 fn collect_execution_data(block_state: ExecutionState) -> eyre::Result<CollectionResult> {
     let mut codes = BTreeMap::new();
     let mut preimages = BTreeMap::new();
-    let hashed_state =
-        hashed_post_state_from_state_source::<reth_trie::KeccakKeyHasher, _>(&block_state);
 
     // Collect codes
     block_state.code().for_each(|(_, code)| {
@@ -120,7 +114,7 @@ fn collect_execution_data(block_state: ExecutionState) -> eyre::Result<Collectio
         preimages.insert(hashed_slot, alloy_rlp::encode(slot_bytes).into());
     }
 
-    Ok((codes, preimages, hashed_state, block_state))
+    Ok((codes, preimages, block_state))
 }
 
 /// Generates execution witness from collected codes, preimages, and hashed state
@@ -183,7 +177,7 @@ where
         &self,
         parent_header: &SealedHeader<N::BlockHeader>,
         block: &RecoveredBlock<N::Block>,
-    ) -> eyre::Result<(ExecutionWitness, ExecutionState)> {
+    ) -> eyre::Result<(ExecutionWitness, ExecutionState, reth_trie::HashedPostState)> {
         let state_provider = self.provider.state_by_block_hash(parent_header.hash())?;
         // SAFETY: The shared database is consumed by this synchronous execution call and does not
         // outlive the state provider borrowed here.
@@ -193,11 +187,11 @@ where
             .executor(database)
             .execute(block)
             .map_err(|err| eyre::eyre!(err.to_string()))?;
-        let (codes, preimages, hashed_state, block_state) =
-            collect_execution_data(output.state.into_inner())?;
-        let witness = generate(codes, preimages, hashed_state, state_provider)?;
+        let hashed_state = output.hash_state_slow::<reth_trie::KeccakKeyHasher>();
+        let (codes, preimages, block_state) = collect_execution_data(output.state.into_inner())?;
+        let witness = generate(codes, preimages, hashed_state.clone(), state_provider)?;
 
-        Ok((witness, block_state))
+        Ok((witness, block_state, hashed_state))
     }
 
     /// Handles witness generation, saving, and comparison with healthy node
@@ -272,15 +266,13 @@ where
         &self,
         parent_header: &SealedHeader<N::BlockHeader>,
         block: &RecoveredBlock<N::Block>,
-        block_state: &ExecutionState,
+        hashed_state: &reth_trie::HashedPostState,
         trie_updates: Option<(&TrieUpdates, B256)>,
         block_prefix: &str,
     ) -> eyre::Result<()> {
         let state_provider = self.provider.state_by_block_hash(parent_header.hash())?;
-        let hashed_state =
-            hashed_post_state_from_state_source::<reth_trie::KeccakKeyHasher, _>(block_state);
         let (re_executed_root, trie_output) =
-            state_provider.state_root_with_updates(hashed_state)?;
+            state_provider.state_root_with_updates(hashed_state.clone())?;
 
         if let Some((original_updates, original_root)) = trie_updates {
             if re_executed_root != original_root {
@@ -323,7 +315,7 @@ where
         trie_updates: Option<(&TrieUpdates, B256)>,
     ) -> eyre::Result<()> {
         // TODO(alexey): unify with `DebugApi::debug_execution_witness`
-        let (witness, block_state) = self.re_execute_block(parent_header, block)?;
+        let (witness, block_state, hashed_state) = self.re_execute_block(parent_header, block)?;
 
         let block_prefix = format!("{}_{}", block.number(), block.hash());
         self.handle_witness_operations(&witness, &block_prefix, block.number())?;
@@ -333,7 +325,7 @@ where
         self.validate_state_root_and_trie(
             parent_header,
             block,
-            &block_state,
+            &hashed_state,
             trie_updates,
             &block_prefix,
         )?;
@@ -433,6 +425,11 @@ mod tests {
         execution_state_from_init(state_accounts, contracts)
     }
 
+    fn hashed_state_for_block_state(block_state: ExecutionState) -> reth_trie::HashedPostState {
+        BlockExecutionOutput::<()>::new(Default::default(), block_state)
+            .hash_state_slow::<reth_trie::KeccakKeyHasher>()
+    }
+
     #[test]
     fn test_sort_block_state_for_comparison() {
         // Use the fixture function to create test data
@@ -469,7 +466,7 @@ mod tests {
         // Verify the function returns successfully
         assert!(result.is_ok());
 
-        let (codes, _preimages, _hashed_state, returned_block_state) = result.unwrap();
+        let (codes, _preimages, returned_block_state) = result.unwrap();
 
         // Verify that the returned data contains expected values
         // Since we used the fixture data, we should have some codes and state
@@ -708,12 +705,13 @@ mod tests {
         let trie_updates = create_test_trie_updates();
         let original_root = B256::from([2u8; 32]); // Different from what will be computed
         let block_prefix = "test_state_root_with_trie";
+        let hashed_state = hashed_state_for_block_state(block_state);
 
         // Test with trie updates - this will likely produce warnings due to mock data
         let result = hook.validate_state_root_and_trie(
             &parent_header,
             &recovered_block,
-            &block_state,
+            &hashed_state,
             Some((&trie_updates, original_root)),
             block_prefix,
         );
@@ -890,12 +888,13 @@ mod tests {
         .unwrap();
 
         let block_prefix = "no_trie_updates_test";
+        let hashed_state = hashed_state_for_block_state(block_state);
 
         // Test without trie updates (None case)
         let result = hook.validate_state_root_and_trie(
             &parent_header,
             &recovered_block,
-            &block_state,
+            &hashed_state,
             None,
             block_prefix,
         );
@@ -932,7 +931,7 @@ mod tests {
         let state_root_result = hook.validate_state_root_and_trie(
             &parent_header,
             &invalid_block,
-            &block_state,
+            &hashed_state_for_block_state(block_state.clone()),
             Some((&trie_updates, B256::random())),
             "integration_test",
         );
