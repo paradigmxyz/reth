@@ -3291,11 +3291,26 @@ where
         let skip_state_root = self.config.skip_state_root();
         let trie_handle =
             if self.config.share_sparse_trie_with_payload_builder() && !skip_state_root {
-                self.payload_validator.sparse_trie_handle_for(
-                    state.head_block_hash,
-                    head.state_root(),
-                    &self.state,
-                )
+                if !self
+                    .state
+                    .tree_state
+                    .state_trie_overlays
+                    .sparse_trie_is_based_on_parent_state_root(head.state_root())
+                {
+                    debug!(
+                        target: "engine::tree",
+                        parent_hash = %state.head_block_hash,
+                        parent_state_root = %head.state_root(),
+                        "not sharing sparse trie with payload builder - trie is not based on parent"
+                    );
+                    None
+                } else {
+                    self.payload_validator.sparse_trie_handle_for(
+                        state.head_block_hash,
+                        head.state_root(),
+                        &self.state,
+                    )
+                }
             } else {
                 None
             };

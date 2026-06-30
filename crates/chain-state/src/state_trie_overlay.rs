@@ -4,7 +4,9 @@
 //! parent has not been persisted yet. [`StateTrieOverlayManager`] tracks those in-memory blocks and
 //! builds reusable flattened state trie overlays on demand.
 
-use crate::{EthPrimitives, ExecutedBlock, PreservedSparseTrie, PreservedTrieGuard};
+use crate::{
+    EthPrimitives, ExecutedBlock, PreservedSparseTrie, PreservedSparseTrieState, PreservedTrieGuard,
+};
 use alloy_primitives::B256;
 use parking_lot::Mutex;
 use reth_metrics::{
@@ -33,7 +35,7 @@ use tracing::{debug, trace};
 pub struct StateTrieOverlayManager<N: NodePrimitives = EthPrimitives> {
     blocks: Arc<DashMap<B256, ExecutedBlock<N>>>,
     overlays: Arc<DashMap<OverlayCacheKey, OverlayCacheEntry>>,
-    preserved_sparse_trie: Arc<Mutex<Option<PreservedSparseTrie>>>,
+    preserved_sparse_trie: Arc<Mutex<PreservedSparseTrieState>>,
     #[cfg(feature = "rayon")]
     worker_pool: Option<Arc<WorkerPool>>,
     metrics: StateTrieOverlayMetrics,
@@ -86,9 +88,19 @@ impl<N: NodePrimitives> StateTrieOverlayManager<N> {
         }
     }
 
-    /// Takes the preserved sparse trie if present, leaving `None` in its place.
+    /// Takes the preserved sparse trie if present, leaving its previous state root in its place.
     pub fn take_sparse_trie(&self) -> Option<PreservedSparseTrie> {
         self.preserved_sparse_trie.lock().take()
+    }
+
+    /// Returns true if the sparse trie is or was anchored to the given parent block.
+    pub fn sparse_trie_is_based_on_parent<H: AlloyBlockHeader>(&self, parent: &H) -> bool {
+        self.sparse_trie_is_based_on_parent_state_root(parent.state_root())
+    }
+
+    /// Returns true if the sparse trie is or was anchored to the given parent state root.
+    pub fn sparse_trie_is_based_on_parent_state_root(&self, parent_state_root: B256) -> bool {
+        self.preserved_sparse_trie.lock().is_based_on_parent_state_root(parent_state_root)
     }
 
     /// Acquires a guard that blocks taking the trie until dropped.
@@ -667,7 +679,9 @@ fn extend_overlay(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{test_utils::TestBlockBuilder, ComputedTrieData, EthPrimitives, ExecutedBlock};
+    use crate::{
+        test_utils::TestBlockBuilder, ComputedTrieData, EthPrimitives, ExecutedBlock, SparseTrie,
+    };
     use alloy_primitives::U256;
     use reth_primitives_traits::Account;
     use reth_trie::{updates::TrieUpdatesSorted, HashedPostState, HashedStorage};
@@ -779,6 +793,34 @@ mod tests {
             manager.anchor_for_parent(blocks[2].recovered_block().hash(), db_tip_hash),
             Some(db_tip_hash)
         );
+    }
+
+    #[test]
+    fn taking_sparse_trie_leaves_anchor_state_root() {
+        let manager = StateTrieOverlayManager::<EthPrimitives>::default();
+        let state_root = B256::with_last_byte(1);
+        let other_state_root = B256::with_last_byte(2);
+
+        {
+            let mut guard = manager.lock_sparse_trie();
+            guard.store(PreservedSparseTrie::anchored(SparseTrie::default(), state_root));
+        }
+
+        assert!(manager.sparse_trie_is_based_on_parent_state_root(state_root));
+        assert!(!manager.sparse_trie_is_based_on_parent_state_root(other_state_root));
+
+        let preserved = manager.take_sparse_trie().expect("preserved trie should be available");
+        assert_eq!(preserved.state_root(), state_root);
+        assert!(manager.sparse_trie_is_based_on_parent_state_root(state_root));
+        assert!(preserved.into_trie_for(other_state_root).is_none());
+        assert!(manager.take_sparse_trie().is_none());
+
+        {
+            let mut guard = manager.lock_sparse_trie();
+            guard.clear();
+        }
+
+        assert!(!manager.sparse_trie_is_based_on_parent_state_root(state_root));
     }
 
     #[test]
