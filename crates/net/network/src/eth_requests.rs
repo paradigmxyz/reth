@@ -6,6 +6,7 @@ use crate::{
 };
 use alloy_consensus::{BlockHeader, ReceiptWithBloom};
 use alloy_eips::BlockHashOrNumber;
+use alloy_primitives::B256;
 use alloy_rlp::Encodable;
 use futures::StreamExt;
 use reth_eth_wire::{
@@ -368,17 +369,40 @@ where
     fn on_block_access_lists_request(
         &self,
         _peer_id: PeerId,
-        mut request: GetBlockAccessLists,
+        request: GetBlockAccessLists,
         response: oneshot::Sender<RequestResult<BlockAccessLists>>,
     ) {
         self.metrics.eth_block_access_lists_requests_received_total.increment(1);
-        request.0.truncate(MAX_BLOCK_ACCESS_LISTS_SERVE);
-
-        let limit = GetBlockAccessListLimit::ResponseSizeSoftLimit(SOFT_RESPONSE_LIMIT);
         let access_lists =
-            self.client.bal_store().get_by_hashes_with_limit(&request.0, limit).unwrap_or_default();
-        let _ = response.send(Ok(BlockAccessLists(access_lists)));
+            build_block_access_lists_response(&self.client, request.0, SOFT_RESPONSE_LIMIT);
+        let _ = response.send(Ok(access_lists));
     }
+}
+
+/// Builds a [`BlockAccessLists`] response for the given block hashes.
+///
+/// Truncates to [`MAX_BLOCK_ACCESS_LISTS_SERVE`] hashes, serves BALs in request order with
+/// unavailable BALs as empty entries, and stops once `response_bytes` (capped at
+/// [`SOFT_RESPONSE_LIMIT`]) is exceeded. Store errors yield an empty response.
+pub(crate) fn build_block_access_lists_response<P>(
+    provider: &P,
+    mut hashes: Vec<B256>,
+    response_bytes: usize,
+) -> BlockAccessLists
+where
+    P: BalProvider,
+{
+    hashes.truncate(MAX_BLOCK_ACCESS_LISTS_SERVE);
+    let limit =
+        GetBlockAccessListLimit::ResponseSizeSoftLimit(response_bytes.min(SOFT_RESPONSE_LIMIT));
+    let access_lists = provider
+        .bal_store()
+        .get_by_hashes_with_limit(&hashes, limit)
+        .inspect_err(|err| {
+            tracing::debug!(target: "net::eth", %err, "failed to read block access lists from store");
+        })
+        .unwrap_or_default();
+    BlockAccessLists(access_lists)
 }
 
 /// An endless future.
@@ -693,5 +717,46 @@ mod tests {
         let cells = rx.await.unwrap().unwrap();
         assert!(cells.hashes.is_empty());
         assert_eq!(get_cells_calls.load(Ordering::Relaxed), MAX_CELLS_SERVE);
+    }
+
+    /// Provider backed by the no-op BAL store: every hash resolves to a missing (empty) entry.
+    #[derive(Default)]
+    struct BalOnlyProvider {
+        store: reth_storage_api::BalStoreHandle,
+    }
+
+    impl BalProvider for BalOnlyProvider {
+        fn bal_store(&self) -> &reth_storage_api::BalStoreHandle {
+            &self.store
+        }
+    }
+
+    #[test]
+    fn build_bal_response_caps_to_requested_bytes() {
+        let provider = BalOnlyProvider::default();
+        let hashes =
+            vec![B256::with_last_byte(1), B256::with_last_byte(2), B256::with_last_byte(3)];
+        // Each missing entry counts as one byte, so a 1-byte budget stops after the entry that
+        // first exceeds it (the second), truncating the tail.
+        let resp = build_block_access_lists_response(&provider, hashes, 1);
+        assert_eq!(resp.0.len(), 2);
+    }
+
+    #[test]
+    fn build_bal_response_serves_all_within_limit() {
+        let provider = BalOnlyProvider::default();
+        let hashes =
+            vec![B256::with_last_byte(1), B256::with_last_byte(2), B256::with_last_byte(3)];
+        let resp = build_block_access_lists_response(&provider, hashes.clone(), usize::MAX);
+        assert_eq!(resp.0.len(), hashes.len());
+        assert!(resp.0.iter().all(Option::is_none));
+    }
+
+    #[test]
+    fn build_bal_response_truncates_to_max_serve() {
+        let provider = BalOnlyProvider::default();
+        let hashes = vec![B256::ZERO; MAX_BLOCK_ACCESS_LISTS_SERVE + 5];
+        let resp = build_block_access_lists_response(&provider, hashes, usize::MAX);
+        assert_eq!(resp.0.len(), MAX_BLOCK_ACCESS_LISTS_SERVE);
     }
 }
