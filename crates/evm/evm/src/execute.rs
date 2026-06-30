@@ -162,6 +162,7 @@ pub trait BlockExecutorFactory: Clone + Debug + Send + Sync + Unpin {
     type Executor<'a, DB>: BlockExecutor<
         Primitives = Self::Primitives,
         Transaction = Self::Transaction,
+        TransactionOutput = GasOutput,
     >
     where
         Self: 'a,
@@ -267,16 +268,26 @@ pub trait BlockBuilder {
     /// The primitive types used by the inner [`BlockExecutor`].
     type Primitives: NodePrimitives;
     /// Inner block executor.
-    type Executor: BlockExecutor<Primitives = Self::Primitives>;
+    type Executor: BlockExecutor<Primitives = Self::Primitives, TransactionOutput = GasOutput>;
 
     /// Applies pre-execution block changes.
     fn apply_pre_execution_changes(&mut self) -> Result<(), BlockExecutionError>;
+
+    /// Executes a transaction, invokes `f` with the transaction output, and saves it for block
+    /// assembly.
+    fn execute_transaction_with_result_closure(
+        &mut self,
+        tx: impl ExecutorTx<Self::Executor>,
+        f: impl FnOnce(&GasOutput),
+    ) -> Result<GasOutput, BlockExecutionError>;
 
     /// Executes a transaction and saves it for block assembly.
     fn execute_transaction(
         &mut self,
         tx: impl ExecutorTx<Self::Executor>,
-    ) -> Result<<Self::Executor as BlockExecutor>::TransactionOutput, BlockExecutionError>;
+    ) -> Result<GasOutput, BlockExecutionError> {
+        self.execute_transaction_with_result_closure(tx, |_| ())
+    }
 
     /// Completes block building.
     fn finish(
@@ -353,7 +364,8 @@ impl<'a, F, Executor, Assembler, N> BlockBuilder
     for BasicBlockBuilder<'a, F, Executor, Assembler, N>
 where
     F: BlockExecutorFactory<Primitives = N>,
-    Executor: BlockExecutor<Primitives = N, Transaction = F::Transaction>,
+    Executor:
+        BlockExecutor<Primitives = N, Transaction = F::Transaction, TransactionOutput = GasOutput>,
     Assembler: BlockAssembler<F, Block = N::Block>,
     N: NodePrimitives,
     TxTy<N>: Clone,
@@ -365,10 +377,11 @@ where
         self.executor.apply_pre_execution_changes(&mut |_| {}).map_err(BlockExecutionError::other)
     }
 
-    fn execute_transaction(
+    fn execute_transaction_with_result_closure(
         &mut self,
         tx: impl ExecutorTx<Self::Executor>,
-    ) -> Result<<Self::Executor as BlockExecutor>::TransactionOutput, BlockExecutionError> {
+        f: impl FnOnce(&GasOutput),
+    ) -> Result<GasOutput, BlockExecutionError> {
         let (tx_env, tx) = tx.into_parts();
         let transaction = tx.tx().clone();
         let sender = *tx.signer();
@@ -376,6 +389,7 @@ where
             .executor
             .execute_transaction(tx_env, &mut |_| {})
             .map_err(BlockExecutionError::other)?;
+        f(&output);
         self.transactions.push(transaction);
         self.senders.push(sender);
         Ok(output)

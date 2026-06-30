@@ -8,33 +8,40 @@
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 #![cfg_attr(docsrs, feature(doc_cfg))]
 
-use alloy_consensus::{
-    proofs::{calculate_ommers_root, calculate_transaction_root, calculate_withdrawals_root},
-    Block, BlockBody, Header, TxReceipt,
-};
-use alloy_primitives::{Bloom, U256};
+use alloy_consensus::{Header, Transaction as _};
+use alloy_primitives::U256;
+use alloy_rlp::Encodable;
 use alloy_rpc_types_engine::PayloadAttributes as EthPayloadAttributes;
 use reth_basic_payload_builder::{
     is_better_payload, BuildArguments, BuildOutcome, MissingPayloadBehaviour, PayloadBuilder,
     PayloadConfig,
 };
-use reth_chainspec::{ChainSpecProvider, EthChainSpec, EthExecutorSpec, EthereumHardforks};
+use reth_chainspec::{ChainSpecProvider, EthChainSpec, EthereumHardforks};
+use reth_consensus_common::validation::MAX_RLP_BLOCK_SIZE;
+use reth_errors::ConsensusError;
 use reth_ethereum_primitives::{EthPrimitives, TransactionSigned};
-use reth_evm::{execute::Executor, ConfigureEvm};
+use reth_evm::{
+    execute::{
+        BlockBuilder, BlockBuilderOutcome, BlockExecutionError, BlockExecutorFactory,
+        BlockValidationError, HashedStateMode,
+    },
+    ConfigureEvm, ExecutionCtxFor, NextBlockEnvAttributes,
+};
 use reth_evm_ethereum::EthEvmConfig;
-use reth_execution_types::hashed_post_state_sorted_from_execution_state;
+use reth_execution_cache::{CachedStateMetrics, CachedStateMetricsSource, CachedStateProvider};
 use reth_payload_builder::{BlobSidecars, EthBuiltPayload};
 use reth_payload_builder_primitives::PayloadBuilderError;
 use reth_payload_primitives::PayloadAttributes as _;
-use reth_primitives_traits::RecoveredBlock;
+use reth_primitives_traits::transaction::error::InvalidTransactionError;
 use reth_storage_api::{BorrowedEvmStateProviderDatabase, StateProviderFactory};
 use reth_transaction_pool::{
+    error::{Eip4844PoolTransactionError, InvalidPoolTransactionError},
     BestTransactions, BestTransactionsAttributes, PoolTransaction, TransactionPool,
     ValidPoolTransaction,
 };
-use reth_trie_common::{HashedPostState, KeccakKeyHasher};
+use reth_trie_common::updates::TrieUpdates;
 use std::sync::Arc;
-use tracing::{debug, trace};
+use tracing::{debug, trace, warn};
 
 mod config;
 pub use config::*;
@@ -74,11 +81,14 @@ impl<Pool, Client, EvmConfig> EthereumPayloadBuilder<Pool, Client, EvmConfig> {
 // Default implementation of [PayloadBuilder] for unit type
 impl<Pool, Client, EvmConfig> PayloadBuilder for EthereumPayloadBuilder<Pool, Client, EvmConfig>
 where
-    EvmConfig: ConfigureEvm<Primitives = EthPrimitives>,
+    EvmConfig: ConfigureEvm<Primitives = EthPrimitives, NextBlockEnvCtx = NextBlockEnvAttributes>
+        + 'static,
+    EvmConfig::BlockExecutorFactory: 'static,
+    for<'a> EvmConfig::BlockExecutorFactory:
+        BlockExecutorFactory<ExecutionCtx<'a> = ExecutionCtxFor<'a, EvmConfig>>,
     Client: StateProviderFactory
-        + ChainSpecProvider<
-            ChainSpec: EthereumHardforks + EthExecutorSpec + EthChainSpec<Header = Header>,
-        > + Clone,
+        + ChainSpecProvider<ChainSpec: EthereumHardforks + EthChainSpec<Header = Header>>
+        + Clone,
     Pool: TransactionPool<Transaction: PoolTransaction<Consensus = TransactionSigned>>,
 {
     type Attributes = EthPayloadAttributes;
@@ -144,31 +154,32 @@ where
 pub fn default_ethereum_payload<EvmConfig, Client, Pool, F>(
     evm_config: EvmConfig,
     client: Client,
-    _pool: Pool,
+    pool: Pool,
     builder_config: EthereumBuilderConfig,
     args: BuildArguments<EthPayloadAttributes, EthBuiltPayload>,
     best_txs: F,
 ) -> Result<BuildOutcome<EthBuiltPayload>, PayloadBuilderError>
 where
-    EvmConfig: ConfigureEvm<Primitives = EthPrimitives>,
+    EvmConfig: ConfigureEvm<Primitives = EthPrimitives, NextBlockEnvCtx = NextBlockEnvAttributes>
+        + 'static,
+    EvmConfig::BlockExecutorFactory: 'static,
+    for<'a> EvmConfig::BlockExecutorFactory:
+        BlockExecutorFactory<ExecutionCtx<'a> = ExecutionCtxFor<'a, EvmConfig>>,
     Client: StateProviderFactory
-        + ChainSpecProvider<
-            ChainSpec: EthereumHardforks + EthExecutorSpec + EthChainSpec<Header = Header>,
-        >,
+        + ChainSpecProvider<ChainSpec: EthereumHardforks + EthChainSpec<Header = Header>>,
     Pool: TransactionPool<Transaction: PoolTransaction<Consensus = TransactionSigned>>,
     F: FnOnce(BestTransactionsAttributes) -> BestTransactionsIter<Pool>,
 {
     let BuildArguments {
         mut cached_reads,
         execution_cache,
-        trie_handle,
+        trie_handle: _trie_handle,
         config,
         cancel,
         best_payload,
     } = args;
     let PayloadConfig { parent_header, attributes, payload_id, .. } = config;
     let skip_state_root = builder_config.skip_state_root;
-    let _ = (execution_cache, trie_handle);
 
     if client.chain_spec().is_amsterdam_active_at_timestamp(attributes.timestamp()) {
         return Err(PayloadBuilderError::other(std::io::Error::new(
@@ -177,7 +188,14 @@ where
         )))
     }
 
-    let state_provider = client.state_by_block_hash(parent_header.hash())?;
+    let mut state_provider = client.state_by_block_hash(parent_header.hash())?;
+    if let Some(execution_cache) = execution_cache {
+        state_provider = Box::new(CachedStateProvider::new(
+            state_provider,
+            execution_cache.cache().clone(),
+            Some(CachedStateMetrics::zeroed(CachedStateMetricsSource::Builder)),
+        ));
+    }
     let chain_spec = client.chain_spec();
     let gas_limit = builder_config
         .gas_limit_with_target(parent_header.gas_limit, attributes.target_gas_limit());
@@ -192,23 +210,6 @@ where
             parent_header.base_fee_per_gas.unwrap_or(0),
         )
     });
-    let block_env_header = Header {
-        parent_hash: parent_header.hash(),
-        beneficiary: attributes.suggested_fee_recipient,
-        timestamp: attributes.timestamp(),
-        number: parent_header.number + 1,
-        gas_limit,
-        base_fee_per_gas: Some(base_fee),
-        mix_hash: attributes.prev_randao,
-        parent_beacon_block_root: attributes.parent_beacon_block_root(),
-        excess_blob_gas,
-        withdrawals_root: attributes
-            .withdrawals
-            .as_ref()
-            .map(|withdrawals| calculate_withdrawals_root(withdrawals.as_slice())),
-        slot_number: attributes.slot_number(),
-        ..Default::default()
-    };
 
     debug!(
         target: "payload_builder",
@@ -218,108 +219,237 @@ where
         "building payload"
     );
 
-    let best_txs = best_txs(BestTransactionsAttributes::new(
+    // SAFETY: The borrowed EVM database is consumed by this synchronous payload build and cannot
+    // outlive `state_provider`.
+    let db = unsafe { BorrowedEvmStateProviderDatabase::new(state_provider.as_ref()) };
+    let cached_db = cached_reads.as_db_mut(db);
+    let cached_db_handle = cached_db.clone();
+    let evm_config = evm_config.with_jit_support();
+    let mut builder = evm_config
+        .builder_for_next_block(
+            cached_db,
+            &parent_header,
+            NextBlockEnvAttributes {
+                timestamp: attributes.timestamp(),
+                suggested_fee_recipient: attributes.suggested_fee_recipient,
+                prev_randao: attributes.prev_randao,
+                gas_limit,
+                parent_beacon_block_root: attributes.parent_beacon_block_root(),
+                withdrawals: attributes.withdrawals.clone().map(Into::into),
+                extra_data: builder_config.extra_data.clone(),
+                slot_number: attributes.slot_number(),
+            },
+            HashedStateMode::OutputOnly,
+        )
+        .map_err(PayloadBuilderError::other)?;
+
+    builder.apply_pre_execution_changes().map_err(|err| {
+        warn!(target: "payload_builder", %err, "failed to apply pre-execution changes");
+        PayloadBuilderError::Internal(err.into())
+    })?;
+
+    let mut best_txs = best_txs(BestTransactionsAttributes::new(
         base_fee,
         blob_params.and_then(|params| excess_blob_gas.map(|gas| params.calc_blob_fee(gas) as u64)),
     ));
-    let mut transactions = Vec::new();
-    let mut senders = Vec::new();
-    let mut cumulative_gas_limit = 0u64;
+    let mut total_fees = U256::ZERO;
+    let mut cumulative_tx_gas_used = 0u64;
+    let mut blob_sidecars = BlobSidecars::Empty;
+    let mut block_blob_count = 0;
+    let mut block_transactions_rlp_length = 0;
+    let protocol_max_blob_count =
+        blob_params.as_ref().map(|params| params.max_blob_count).unwrap_or_default();
+    let max_blob_count = builder_config
+        .max_blobs_per_block
+        .map(|user_limit| std::cmp::min(user_limit, protocol_max_blob_count).max(1))
+        .unwrap_or(protocol_max_blob_count);
+    let is_osaka = chain_spec.is_osaka_active_at_timestamp(attributes.timestamp());
+    let withdrawals_rlp_length =
+        attributes.withdrawals.as_ref().map(|withdrawals| withdrawals.length()).unwrap_or(0);
 
-    for pool_tx in best_txs {
+    while let Some(pool_tx) = best_txs.next() {
         if cancel.is_cancelled() {
             return Ok(BuildOutcome::Cancelled)
         }
 
-        let tx_gas_limit = pool_tx.gas_limit();
-        if cumulative_gas_limit.saturating_add(tx_gas_limit) > gas_limit {
-            trace!(
-                target: "payload_builder",
-                ?payload_id,
-                tx_hash = ?pool_tx.hash(),
-                tx_gas_limit,
-                gas_limit,
-                cumulative_gas_limit,
-                "skipping transaction because it would exceed the block gas limit"
+        let block_available_gas = gas_limit.saturating_sub(cumulative_tx_gas_used);
+        if pool_tx.gas_limit() > block_available_gas {
+            best_txs.mark_invalid(
+                &pool_tx,
+                InvalidPoolTransactionError::ExceedsGasLimit(
+                    pool_tx.gas_limit(),
+                    block_available_gas,
+                ),
             );
             continue
         }
 
-        let recovered = pool_tx.to_consensus();
-        let (tx, sender) = recovered.into_parts();
-        transactions.push(tx);
-        senders.push(sender);
-        cumulative_gas_limit += tx_gas_limit;
+        let tx = pool_tx.to_consensus();
+        let tx_rlp_len = tx.inner().length();
+        let estimated_block_size_with_tx =
+            block_transactions_rlp_length + tx_rlp_len + withdrawals_rlp_length + 1024;
+
+        if is_osaka && estimated_block_size_with_tx > MAX_RLP_BLOCK_SIZE {
+            best_txs.mark_invalid(
+                &pool_tx,
+                InvalidPoolTransactionError::OversizedData {
+                    size: estimated_block_size_with_tx,
+                    limit: MAX_RLP_BLOCK_SIZE,
+                },
+            );
+            continue
+        }
+
+        let mut blob_tx_sidecar = None;
+        let tx_blob_count = tx.blob_count();
+        if let Some(tx_blob_count) = tx_blob_count {
+            if block_blob_count + tx_blob_count > max_blob_count {
+                trace!(
+                    target: "payload_builder",
+                    tx = ?tx.hash(),
+                    ?block_blob_count,
+                    "skipping blob transaction because it would exceed the max blob count per block"
+                );
+                best_txs.mark_invalid(
+                    &pool_tx,
+                    InvalidPoolTransactionError::Eip4844(
+                        Eip4844PoolTransactionError::TooManyEip4844Blobs {
+                            have: block_blob_count + tx_blob_count,
+                            permitted: max_blob_count,
+                        },
+                    ),
+                );
+                continue
+            }
+
+            let blob_sidecar_result = 'sidecar: {
+                let Some(sidecar) =
+                    pool.get_blob(*tx.hash()).map_err(PayloadBuilderError::other)?
+                else {
+                    break 'sidecar Err(Eip4844PoolTransactionError::MissingEip4844BlobSidecar)
+                };
+
+                if is_osaka {
+                    if sidecar.is_eip7594() {
+                        Ok(sidecar)
+                    } else {
+                        Err(Eip4844PoolTransactionError::UnexpectedEip4844SidecarAfterOsaka)
+                    }
+                } else if sidecar.is_eip4844() {
+                    Ok(sidecar)
+                } else {
+                    Err(Eip4844PoolTransactionError::UnexpectedEip7594SidecarBeforeOsaka)
+                }
+            };
+
+            blob_tx_sidecar = match blob_sidecar_result {
+                Ok(sidecar) => Some(sidecar),
+                Err(error) => {
+                    best_txs.mark_invalid(&pool_tx, InvalidPoolTransactionError::Eip4844(error));
+                    continue
+                }
+            };
+        }
+
+        let miner_fee = tx.effective_tip_per_gas(base_fee);
+        let tx_hash = *tx.tx_hash();
+        let gas_output = match builder.execute_transaction(tx) {
+            Ok(gas_output) => gas_output,
+            Err(BlockExecutionError::Validation(BlockValidationError::InvalidTx {
+                error, ..
+            })) => {
+                if error.is_nonce_too_low() {
+                    trace!(target: "payload_builder", %error, ?tx_hash, "skipping nonce too low transaction");
+                } else {
+                    trace!(target: "payload_builder", %error, ?tx_hash, "skipping invalid transaction and its descendants");
+                    best_txs.mark_invalid(
+                        &pool_tx,
+                        InvalidPoolTransactionError::Consensus(
+                            InvalidTransactionError::TxTypeNotSupported,
+                        ),
+                    );
+                }
+                continue
+            }
+            Err(BlockExecutionError::Validation(
+                BlockValidationError::TransactionGasLimitMoreThanAvailableBlockGas {
+                    transaction_gas_limit,
+                    block_available_gas,
+                },
+            )) => {
+                trace!(target: "payload_builder", %transaction_gas_limit, %block_available_gas, ?tx_hash, "skipping transaction exceeding block gas limit");
+                best_txs.mark_invalid(
+                    &pool_tx,
+                    InvalidPoolTransactionError::ExceedsGasLimit(
+                        transaction_gas_limit,
+                        block_available_gas,
+                    ),
+                );
+                continue
+            }
+            Err(err) => return Err(PayloadBuilderError::evm(err)),
+        };
+
+        if let Some(blob_count) = tx_blob_count {
+            block_blob_count += blob_count;
+            if block_blob_count == max_blob_count {
+                best_txs.skip_blobs();
+            }
+        }
+
+        block_transactions_rlp_length += tx_rlp_len;
+
+        let gas_used = gas_output.tx_gas_used();
+        let miner_fee = miner_fee.expect("fee is always valid; execution succeeded");
+        total_fees += U256::from(miner_fee) * U256::from(gas_used);
+        cumulative_tx_gas_used += gas_used;
+
+        if let Some(sidecar) = blob_tx_sidecar {
+            blob_sidecars.push_sidecar_variant(sidecar.as_ref().clone());
+        }
     }
 
-    let body = BlockBody {
-        transactions,
-        ommers: Vec::new(),
-        withdrawals: attributes.withdrawals.clone().map(Into::into),
-    };
-    let execution_header = Header {
-        transactions_root: calculate_transaction_root(&body.transactions),
-        ommers_hash: calculate_ommers_root(&body.ommers),
-        withdrawals_root: body
-            .withdrawals
-            .as_ref()
-            .map(|withdrawals| calculate_withdrawals_root(withdrawals.as_slice())),
-        ..block_env_header
-    };
-    let execution_block = RecoveredBlock::new_unhashed(
-        Block { header: execution_header, body: body.clone() },
-        senders.clone(),
-    );
-    // SAFETY: The borrowed EVM database is consumed by this synchronous block execution call and
-    // cannot outlive `state_provider`.
-    let db = unsafe { BorrowedEvmStateProviderDatabase::new(state_provider.as_ref()) };
-    let cached_db = cached_reads.as_db_mut(db);
-    let cached_db_handle = cached_db.clone();
-    let output = evm_config
-        .executor(cached_db)
-        .execute(&execution_block)
-        .map_err(PayloadBuilderError::evm)?;
-    cached_db_handle.sync(&mut cached_reads);
-
-    let total_fees = U256::ZERO;
     if !is_better_payload(best_payload.as_ref(), total_fees) {
+        drop(builder);
+        cached_db_handle.sync(&mut cached_reads);
         return Ok(BuildOutcome::Aborted { fees: total_fees, cached_reads })
     }
 
-    let state_root = if skip_state_root {
+    let state_root_precomputed = if skip_state_root {
         debug!(
             target: "payload_builder",
             id = %payload_id,
             state_root = ?parent_header.state_root,
             "skipping payload state-root computation"
         );
-        parent_header.state_root
+        Some((parent_header.state_root, TrieUpdates::default()))
     } else {
-        let hashed_state = output.hashed_state.clone().map_or_else(
-            || hashed_post_state_sorted_from_execution_state::<KeccakKeyHasher>(&output.state),
-            HashedPostState::into_sorted,
-        );
-        state_provider.state_root_sorted(hashed_state)?
+        None
     };
-    let receipts_root =
-        reth_ethereum_primitives::calculate_receipt_root_no_memo(&output.result.receipts);
-    let logs_bloom =
-        output.result.receipts.iter().fold(Bloom::ZERO, |bloom, receipt| bloom | receipt.bloom());
+    let BlockBuilderOutcome { execution_result, block, block_access_list, .. } =
+        builder.finish(state_provider.as_ref(), state_root_precomputed)?;
+    cached_db_handle.sync(&mut cached_reads);
 
-    let header = Header {
-        state_root,
-        receipts_root,
-        logs_bloom,
-        gas_used: output.result.gas_used,
-        blob_gas_used: blob_params.map(|_| output.result.blob_gas_used),
-        ..execution_block.header().clone()
-    };
-    let block = RecoveredBlock::new_unhashed(Block { header, body }, senders);
     let requests = chain_spec
         .is_prague_active_at_timestamp(attributes.timestamp())
-        .then_some(output.result.requests);
-    let payload = EthBuiltPayload::new(Arc::new(block), total_fees, requests, None)
-        .with_sidecars(BlobSidecars::Empty);
+        .then_some(execution_result.requests);
+
+    debug!(
+        target: "payload_builder",
+        id = %payload_id,
+        sealed_block_header = ?block.sealed_header(),
+        "sealed built block"
+    );
+
+    if is_osaka && block.rlp_length() > MAX_RLP_BLOCK_SIZE {
+        return Err(PayloadBuilderError::other(ConsensusError::BlockTooLarge {
+            rlp_length: block.rlp_length(),
+            max_rlp_length: MAX_RLP_BLOCK_SIZE,
+        }));
+    }
+
+    let payload = EthBuiltPayload::new(Arc::new(block), total_fees, requests, block_access_list)
+        .with_sidecars(blob_sidecars);
 
     Ok(BuildOutcome::Better { payload, cached_reads })
 }
