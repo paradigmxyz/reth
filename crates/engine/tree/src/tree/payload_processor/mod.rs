@@ -524,6 +524,7 @@ where
                     let mut iter = iter.enumerate();
 
                     let mut batch_size = Self::FIRST_PARALLEL_TX_WINDOW_SIZE;
+                    let mut converted = Vec::with_capacity(batch_size);
 
                     // Without BALs, we need to preserve the initial order of transactions.
                     // Process exponentially increasing windows to make sure that first transactions are prioritized.
@@ -539,16 +540,17 @@ where
 
                             batch_size = batch_size.saturating_mul(2);
 
-                            let chunk = chunk
+                            converted.clear();
+                            chunk
                                 .into_par_iter()
                                 .map(|(i, tx)| {
                                     let idx = i + prefetch;
                                     let tx = convert.convert(tx).map(WithTxEnv::new);
                                     (idx, tx)
                                 })
-                                .collect::<Vec<_>>();
+                                .collect_into_vec(&mut converted);
 
-                            for (idx, tx) in chunk {
+                            for (idx, tx) in converted.drain(..) {
                                 if let Ok(tx) = &tx {
                                     let _ = prewarm_tx.send((idx, tx.clone()));
                                 }
