@@ -319,9 +319,9 @@ where
                 self.promote_pending_account_updates()?;
                 self.metrics.sparse_trie_process_updates_duration_histogram.record(t.elapsed());
 
-                if self.finished_state_updates &&
-                    self.account_updates.is_empty() &&
-                    self.storage_updates.iter().all(|(_, updates)| updates.is_empty())
+                if self.finished_state_updates
+                    && self.account_updates.is_empty()
+                    && self.storage_updates.iter().all(|(_, updates)| updates.is_empty())
                 {
                     break;
                 }
@@ -422,22 +422,45 @@ where
     fn on_prewarm_targets(&mut self, targets: MultiProofTargetsV2) {
         for target in targets.account_targets {
             // Only touch accounts that are not yet present in the updates set.
-            self.new_account_updates.entry(target.key()).or_insert(LeafUpdate::Touched);
+            self.touch_account_for_prewarm(target.key());
         }
 
         for (address, slots) in targets.storage_targets {
             if !slots.is_empty() {
-                // Look up outer map once per address instead of once per slot.
+                let pending_slots = slots
+                    .iter()
+                    .filter(|slot| {
+                        !self
+                            .storage_updates
+                            .get(&address)
+                            .is_some_and(|updates| updates.contains_key(&slot.key()))
+                    })
+                    .count();
+
+                if pending_slots == 0 {
+                    self.touch_account_for_prewarm(address);
+                    continue;
+                }
+
+                // Look up outer map once per address instead of once per slot, and avoid
+                // rehashing while staging large prewarm batches.
                 let new_updates = self.new_storage_updates.entry(address).or_default();
+                new_updates.reserve(pending_slots);
                 for slot in slots {
                     // Only touch storages that are not yet present in the updates set.
-                    new_updates.entry(slot.key()).or_insert(LeafUpdate::Touched);
+                    if !self
+                        .storage_updates
+                        .get(&address)
+                        .is_some_and(|updates| updates.contains_key(&slot.key()))
+                    {
+                        new_updates.entry(slot.key()).or_insert(LeafUpdate::Touched);
+                    }
                 }
             }
 
             // Touch corresponding account leaf to make sure its revealed in accounts trie for
             // storage root update.
-            self.new_account_updates.entry(address).or_insert(LeafUpdate::Touched);
+            self.touch_account_for_prewarm(address);
         }
     }
 
@@ -450,8 +473,10 @@ where
     fn on_hashed_state_update(&mut self, hashed_state_update: HashedPostState) {
         for (&address, storage) in &hashed_state_update.storages {
             if !storage.storage.is_empty() {
-                // Look up outer maps once per address instead of once per slot.
+                // Look up outer maps once per address instead of once per slot, and reserve for
+                // BAL-sized storage update batches before inserting each slot.
                 let new_updates = self.new_storage_updates.entry(address).or_default();
+                new_updates.reserve(storage.storage.len());
                 let mut existing_updates = self.storage_updates.get_mut(&address);
 
                 for (&slot, &value) in &storage.storage {
@@ -495,6 +520,12 @@ where
         }
 
         self.final_hashed_state.extend(hashed_state_update);
+    }
+
+    fn touch_account_for_prewarm(&mut self, address: B256) {
+        if !self.account_updates.contains_key(&address) {
+            self.new_account_updates.entry(address).or_insert(LeafUpdate::Touched);
+        }
     }
 
     fn on_proof_result(
@@ -670,8 +701,8 @@ where
         let mut tries_to_compute_roots: Vec<(B256, SendStorageTriePtr<S>)> =
             Vec::with_capacity(addresses_to_compute_roots.len());
         for address in addresses_to_compute_roots {
-            if let Some(trie) = self.trie.storage_tries_mut().get_mut(&address) &&
-                !trie.is_root_cached()
+            if let Some(trie) = self.trie.storage_tries_mut().get_mut(&address)
+                && !trie.is_root_cached()
             {
                 tries_to_compute_roots.push((address, SendStorageTriePtr(trie)));
             }
@@ -783,7 +814,7 @@ where
             // We need to keep iterating if any updates are being drained because that might
             // indicate that more pending account updates can be promoted.
             if num_promoted == 0 || !self.process_account_leaf_updates(false)? {
-                break
+                break;
             }
         }
 
@@ -899,6 +930,44 @@ mod tests {
     use reth_trie_parallel::proof_task::ProofTaskCtx;
     use reth_trie_sparse::ArenaParallelSparseTrie;
 
+    fn ingestion_test_task(
+    ) -> (reth_tasks::Runtime, SparseTrieCacheTask<ArenaParallelSparseTrie, ArenaParallelSparseTrie>)
+    {
+        let runtime = reth_tasks::Runtime::test();
+        let provider_factory = create_test_provider_factory();
+        let anchor_hash = provider_factory.chain_spec().genesis_hash();
+        let overlay_factory = OverlayStateProviderFactory::new(
+            provider_factory,
+            OverlayBuilder::<reth_chain_state::EthPrimitives>::new(
+                anchor_hash,
+                ChangesetCache::new(),
+            ),
+        );
+        let proof_worker_handle =
+            ProofWorkerHandle::new(&runtime, ProofTaskCtx::new(overlay_factory), false);
+
+        let default_trie = RevealableSparseTrie::blind_from(ArenaParallelSparseTrie::default());
+        let trie = SparseStateTrie::default()
+            .with_accounts_trie(default_trie.clone())
+            .with_default_storage_trie(default_trie)
+            .with_updates(true);
+
+        let (_updates_tx, updates_rx) = crossbeam_channel::unbounded();
+        let (final_hashed_state_tx, _final_hashed_state_rx) = std::sync::mpsc::channel();
+        let task = SparseTrieCacheTask::new_with_trie(
+            &runtime,
+            updates_rx,
+            final_hashed_state_tx,
+            proof_worker_handle,
+            MultiProofTaskMetrics::default(),
+            trie,
+            B256::ZERO,
+            1,
+        );
+
+        (runtime, task)
+    }
+
     #[test]
     fn test_run_hashing_task_hashed_state_update_forwards() {
         let (updates_tx, updates_rx) = crossbeam_channel::unbounded();
@@ -976,6 +1045,52 @@ mod tests {
         assert_eq!(decoded.balance, U256::from(42));
         assert_eq!(decoded.storage_root, storage_root);
         assert_eq!(account_rlp_buf, encoded);
+    }
+
+    #[test]
+    fn prewarm_account_target_does_not_shadow_pending_account_update() {
+        let (_runtime, mut task) = ingestion_test_task();
+        let address = B256::from([0x11; 32]);
+
+        task.account_updates.insert(address, LeafUpdate::Changed(vec![0x01]));
+
+        let mut targets = MultiProofTargetsV2::default();
+        targets.account_targets.push(ProofV2Target::new(address));
+        task.on_prewarm_targets(targets);
+
+        assert!(
+            !task.new_account_updates.contains_key(&address),
+            "prefetch touch should not be staged when a real account update is pending"
+        );
+        assert!(matches!(task.account_updates.get(&address), Some(LeafUpdate::Changed(_))));
+    }
+
+    #[test]
+    fn prewarm_storage_target_skips_slot_with_pending_storage_update() {
+        let (_runtime, mut task) = ingestion_test_task();
+        let address = B256::from([0x22; 32]);
+        let pending_slot = B256::from([0x33; 32]);
+        let prefetch_slot = B256::from([0x44; 32]);
+
+        let mut pending_updates = B256Map::default();
+        pending_updates.insert(pending_slot, LeafUpdate::Changed(vec![0x01]));
+        task.storage_updates.insert(address, pending_updates);
+
+        let mut targets = MultiProofTargetsV2::default();
+        targets.storage_targets.insert(
+            address,
+            vec![ProofV2Target::new(pending_slot), ProofV2Target::new(prefetch_slot)],
+        );
+        task.on_prewarm_targets(targets);
+
+        let new_updates =
+            task.new_storage_updates.get(&address).expect("prefetch slot should be staged");
+        assert!(
+            !new_updates.contains_key(&pending_slot),
+            "prefetch touch should not be staged for a slot with a real pending update"
+        );
+        assert!(matches!(new_updates.get(&prefetch_slot), Some(LeafUpdate::Touched)));
+        assert!(matches!(task.new_account_updates.get(&address), Some(LeafUpdate::Touched)));
     }
 
     #[test]
