@@ -36,6 +36,8 @@ use reth_trie_sparse::{
 };
 use tracing::{debug, debug_span, error, instrument, trace_span};
 
+const MIN_PARALLEL_STORAGE_ROOTS: usize = 4;
+
 /// Sparse trie task implementation that uses in-memory sparse trie data to schedule proof fetching.
 pub(super) struct SparseTrieCacheTask<A = ArenaParallelSparseTrie, S = ArenaParallelSparseTrie> {
     /// Sender for proof results.
@@ -683,22 +685,19 @@ where
 
         let parent_span =
             debug_span!("compute_drained_storage_roots", n = tries_to_compute_roots.len());
-        tries_to_compute_roots.into_par_iter().for_each(|(address, SendStorageTriePtr(trie))| {
-            let span = if tracing::enabled!(tracing::Level::TRACE) {
-                debug_span!(
+        let _enter = parent_span.clone().entered();
+
+        let compute_root = |address: B256, SendStorageTriePtr(trie): SendStorageTriePtr<S>| {
+            let _enter = tracing::enabled!(tracing::Level::TRACE).then(|| {
+                trace_span!(
                     target: "engine::tree::payload_processor::sparse_trie",
                     parent: &parent_span,
                     "storage_root",
                     ?address
                 )
-            } else {
-                debug_span!(
-                    target: "engine::tree::payload_processor::sparse_trie",
-                    parent: &parent_span,
-                    "storage_root",
-                )
-            };
-            let _enter = span.entered();
+                .entered()
+            });
+
             // SAFETY:
             // - pointers are created from `storage_tries_mut().get_mut(address)` above;
             // - `addresses_to_compute_roots` comes from map iteration, so addresses are unique;
@@ -706,7 +705,17 @@ where
             //   stay valid and map reallocation cannot occur;
             // - each pointer is consumed by at most one rayon task, so no aliasing mutable access.
             unsafe { (*trie).root().expect("updates are drained, trie should be revealed by now") };
-        });
+        };
+
+        if tries_to_compute_roots.len() < MIN_PARALLEL_STORAGE_ROOTS {
+            tries_to_compute_roots
+                .into_iter()
+                .for_each(|(address, trie)| compute_root(address, trie));
+        } else {
+            tries_to_compute_roots
+                .into_par_iter()
+                .for_each(|(address, trie)| compute_root(address, trie));
+        }
     }
 
     /// Iterates through all storage tries for which all updates were processed, computes their
