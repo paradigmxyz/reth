@@ -7,7 +7,7 @@ use crate::{
     EthTransactionValidator, PoolTransaction, TransactionOrigin, TransactionValidationOutcome,
     TransactionValidator,
 };
-use futures_util::{lock::Mutex, StreamExt};
+use futures_util::lock::Mutex;
 use reth_chainspec::{ChainSpecProvider, EthereumHardforks};
 use reth_evm::ConfigureEvm;
 use reth_primitives_traits::{HeaderTy, SealedBlock};
@@ -18,13 +18,12 @@ use tokio::{
     sync,
     sync::{mpsc, oneshot},
 };
-use tokio_stream::wrappers::ReceiverStream;
 
 /// Represents a future outputting unit type and is sendable.
 type ValidationFuture = Pin<Box<dyn Future<Output = ()> + Send>>;
 
 /// Represents a stream of validation futures.
-type ValidationStream = ReceiverStream<ValidationFuture>;
+type ValidationStream = mpsc::Receiver<ValidationFuture>;
 
 /// A service that performs validation jobs.
 ///
@@ -34,6 +33,7 @@ type ValidationStream = ReceiverStream<ValidationFuture>;
 #[derive(Clone)]
 pub struct ValidationTask {
     validation_jobs: Arc<Mutex<ValidationStream>>,
+    metrics: TxPoolValidatorMetrics,
 }
 
 impl ValidationTask {
@@ -48,20 +48,44 @@ impl ValidationTask {
     pub fn with_capacity(capacity: usize) -> (ValidationJobSender, Self) {
         let (tx, rx) = mpsc::channel(capacity);
         let metrics = TxPoolValidatorMetrics::default();
-        (ValidationJobSender { tx, metrics }, Self::with_receiver(rx))
+        (
+            ValidationJobSender { tx, metrics: metrics.clone() },
+            Self::with_receiver_and_metrics(rx, metrics),
+        )
     }
 
     /// Creates a new task with the given receiver.
     pub fn with_receiver(jobs: mpsc::Receiver<Pin<Box<dyn Future<Output = ()> + Send>>>) -> Self {
-        Self { validation_jobs: Arc::new(Mutex::new(ReceiverStream::new(jobs))) }
+        Self::with_receiver_and_metrics(jobs, TxPoolValidatorMetrics::default())
+    }
+
+    /// Creates a new task with the given receiver and metrics.
+    fn with_receiver_and_metrics(
+        jobs: mpsc::Receiver<Pin<Box<dyn Future<Output = ()> + Send>>>,
+        metrics: TxPoolValidatorMetrics,
+    ) -> Self {
+        Self { validation_jobs: Arc::new(Mutex::new(jobs)), metrics }
+    }
+
+    fn record_channel_state(&self, jobs: &mpsc::Receiver<ValidationFuture>) {
+        self.metrics.queued_validation_jobs.set(jobs.len() as f64);
+        self.metrics.validation_job_channel_available_capacity.set(jobs.capacity() as f64);
+        self.metrics.validation_job_channel_max_capacity.set(jobs.max_capacity() as f64);
     }
 
     /// Executes all new validation jobs that come in.
     ///
     /// This will run as long as the channel is alive and is expected to be spawned as a task.
     pub async fn run(self) {
-        while let Some(task) = self.validation_jobs.lock().await.next().await {
+        while let Some(task) = {
+            let mut validation_jobs = self.validation_jobs.lock().await;
+            let task = validation_jobs.recv().await;
+            self.record_channel_state(&validation_jobs);
+            task
+        } {
+            self.metrics.active_validation_jobs.increment(1.0);
             task.await;
+            self.metrics.active_validation_jobs.decrement(1.0);
         }
     }
 }
@@ -80,11 +104,20 @@ pub struct ValidationJobSender {
 }
 
 impl ValidationJobSender {
+    fn record_channel_state(&self) {
+        self.metrics
+            .queued_validation_jobs
+            .set((self.tx.max_capacity() - self.tx.capacity()) as f64);
+        self.metrics.validation_job_channel_available_capacity.set(self.tx.capacity() as f64);
+        self.metrics.validation_job_channel_max_capacity.set(self.tx.max_capacity() as f64);
+    }
+
     /// Sends the given job to the validation task.
     pub async fn send(
         &self,
         job: Pin<Box<dyn Future<Output = ()> + Send>>,
     ) -> Result<(), TransactionValidatorError> {
+        self.record_channel_state();
         self.metrics.inflight_validation_jobs.increment(1);
         let res = self
             .tx
@@ -92,7 +125,15 @@ impl ValidationJobSender {
             .await
             .map_err(|_| TransactionValidatorError::ValidationServiceUnreachable);
         self.metrics.inflight_validation_jobs.decrement(1);
+        if res.is_ok() {
+            self.metrics.submitted_validation_jobs.increment(1);
+        }
+        self.record_channel_state();
         res
+    }
+
+    fn metrics(&self) -> TxPoolValidatorMetrics {
+        self.metrics.clone()
     }
 }
 
@@ -104,6 +145,8 @@ pub struct TransactionValidationTaskExecutor<V> {
     pub validator: Arc<V>,
     /// The sender half to validation tasks that perform the actual validation.
     pub to_validation_task: Arc<sync::Mutex<ValidationJobSender>>,
+    /// Metrics shared with validation task senders and workers.
+    metrics: TxPoolValidatorMetrics,
 }
 
 impl<V> Clone for TransactionValidationTaskExecutor<V> {
@@ -111,6 +154,7 @@ impl<V> Clone for TransactionValidationTaskExecutor<V> {
         Self {
             validator: self.validator.clone(),
             to_validation_task: self.to_validation_task.clone(),
+            metrics: self.metrics.clone(),
         }
     }
 }
@@ -141,6 +185,7 @@ impl<V> TransactionValidationTaskExecutor<V> {
         TransactionValidationTaskExecutor {
             validator: Arc::new(f(Arc::into_inner(self.validator).unwrap())),
             to_validation_task: self.to_validation_task,
+            metrics: self.metrics,
         }
     }
 
@@ -198,10 +243,12 @@ impl<V> TransactionValidationTaskExecutor<V> {
     /// validation tasks.
     pub fn new(validator: V) -> (Self, ValidationTask) {
         let (tx, task) = ValidationTask::new();
+        let metrics = tx.metrics();
         (
             Self {
                 validator: Arc::new(validator),
                 to_validation_task: Arc::new(sync::Mutex::new(tx)),
+                metrics,
             },
             task,
         )
@@ -213,6 +260,7 @@ impl<V> TransactionValidationTaskExecutor<V> {
     /// for the validation service.
     pub fn spawn(validator: V, tasks: &Runtime, additional_tasks: usize) -> Self {
         let (tx, task) = ValidationTask::new();
+        let metrics = tx.metrics();
 
         for _ in 0..additional_tasks {
             let task = task.clone();
@@ -225,7 +273,32 @@ impl<V> TransactionValidationTaskExecutor<V> {
             task.run().await;
         });
 
-        Self { validator: Arc::new(validator), to_validation_task: Arc::new(sync::Mutex::new(tx)) }
+        Self {
+            validator: Arc::new(validator),
+            to_validation_task: Arc::new(sync::Mutex::new(tx)),
+            metrics,
+        }
+    }
+}
+
+struct ValidationResultWaitGuard {
+    metrics: TxPoolValidatorMetrics,
+    transactions: usize,
+}
+
+impl ValidationResultWaitGuard {
+    fn new(metrics: TxPoolValidatorMetrics, transactions: usize) -> Self {
+        metrics.validation_result_waiters.increment(1.0);
+        metrics.validation_result_waiting_transactions.increment(transactions as f64);
+        metrics.submitted_validation_transactions.increment(transactions as u64);
+        Self { metrics, transactions }
+    }
+}
+
+impl Drop for ValidationResultWaitGuard {
+    fn drop(&mut self) {
+        self.metrics.validation_result_waiters.decrement(1.0);
+        self.metrics.validation_result_waiting_transactions.decrement(self.transactions as f64);
     }
 }
 
@@ -262,6 +335,7 @@ where
             }
         }
 
+        let _wait_guard = ValidationResultWaitGuard::new(self.metrics.clone(), 1);
         match rx.await {
             Ok(res) => res,
             Err(_) => TransactionValidationOutcome::Error(
@@ -302,6 +376,7 @@ where
                     .collect();
             }
         }
+        let _wait_guard = ValidationResultWaitGuard::new(self.metrics.clone(), hashes.len());
         match rx.await {
             Ok(res) => res,
             Err(_) => hashes

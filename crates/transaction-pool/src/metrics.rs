@@ -148,9 +148,25 @@ pub struct TxPoolValidationMetrics {
 }
 
 /// Transaction pool validator task metrics
-#[derive(Metrics)]
+#[derive(Metrics, Clone)]
 #[metrics(scope = "transaction_pool")]
 pub struct TxPoolValidatorMetrics {
     /// Number of in-flight validation job sends waiting for channel capacity
     pub inflight_validation_jobs: Gauge,
+    /// Number of validation jobs currently queued in the validation task channel.
+    pub queued_validation_jobs: Gauge,
+    /// Number of available slots in the validation task channel.
+    pub validation_job_channel_available_capacity: Gauge,
+    /// Maximum capacity of the validation task channel.
+    pub validation_job_channel_max_capacity: Gauge,
+    /// Number of validation jobs currently being executed by validation workers.
+    pub active_validation_jobs: Gauge,
+    /// Total number of validation jobs submitted to the validation task channel.
+    pub submitted_validation_jobs: Counter,
+    /// Total number of transactions submitted to validation jobs.
+    pub submitted_validation_transactions: Counter,
+    /// Number of callers awaiting validation job results.
+    pub validation_result_waiters: Gauge,
+    /// Number of transactions inside jobs whose callers are awaiting validation results.
+    pub validation_result_waiting_transactions: Gauge,
 }
