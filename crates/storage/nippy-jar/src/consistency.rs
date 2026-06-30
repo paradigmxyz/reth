@@ -1,4 +1,7 @@
-use crate::{writer::OFFSET_SIZE_BYTES, NippyJar, NippyJarError, NippyJarHeader};
+use crate::{
+    writer::{DATA_FILE_BUFFER_CAPACITY, OFFSETS_FILE_BUFFER_CAPACITY, OFFSET_SIZE_BYTES},
+    NippyJar, NippyJarError, NippyJarHeader,
+};
 use std::{
     cmp::Ordering,
     fs::{File, OpenOptions},
@@ -153,15 +156,19 @@ impl<H: NippyJarHeader> NippyJarChecker<H> {
 
     /// Loads data and offsets files.
     fn load_files(&mut self, mode: ConsistencyFailStrategy) -> Result<(), NippyJarError> {
-        let load_file = |path: &Path| -> Result<BufWriter<File>, NippyJarError> {
+        let load_file = |path: &Path, capacity: usize| -> Result<BufWriter<File>, NippyJarError> {
             let path = path
                 .exists()
                 .then_some(path)
                 .ok_or_else(|| NippyJarError::MissingFile(path.to_path_buf()))?;
-            Ok(BufWriter::new(OpenOptions::new().read(true).write(mode.should_heal()).open(path)?))
+            Ok(BufWriter::with_capacity(
+                capacity,
+                OpenOptions::new().read(true).write(mode.should_heal()).open(path)?,
+            ))
         };
-        self.data_file = Some(load_file(self.jar.data_path())?);
-        self.offsets_file = Some(load_file(&self.jar.offsets_path())?);
+        self.data_file = Some(load_file(self.jar.data_path(), DATA_FILE_BUFFER_CAPACITY)?);
+        self.offsets_file =
+            Some(load_file(&self.jar.offsets_path(), OFFSETS_FILE_BUFFER_CAPACITY)?);
         Ok(())
     }
 

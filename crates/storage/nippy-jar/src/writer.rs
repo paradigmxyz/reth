@@ -10,6 +10,10 @@ use std::{
 
 /// Size of one offset in bytes.
 pub(crate) const OFFSET_SIZE_BYTES: u8 = 8;
+/// Buffer size for static-file row data writes.
+pub(crate) const DATA_FILE_BUFFER_CAPACITY: usize = 1024 * 1024;
+/// Buffer size for static-file offset writes.
+pub(crate) const OFFSETS_FILE_BUFFER_CAPACITY: usize = 256 * 1024;
 
 /// Writer of [`NippyJar`]. Handles table data and offsets only.
 ///
@@ -57,7 +61,11 @@ impl<H: NippyJarHeader> NippyJarWriter<H> {
             // Makes sure we don't have dangling data and offset files when we just created the file
             jar.freeze_config()?;
 
-            (jar, BufWriter::new(data_file), BufWriter::new(offsets_file))
+            (
+                jar,
+                BufWriter::with_capacity(DATA_FILE_BUFFER_CAPACITY, data_file),
+                BufWriter::with_capacity(OFFSETS_FILE_BUFFER_CAPACITY, offsets_file),
+            )
         } else {
             // If we are opening a previously created jar, we need to check its consistency, and
             // make changes if necessary.
