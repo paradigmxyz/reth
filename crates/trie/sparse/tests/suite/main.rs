@@ -278,6 +278,7 @@ sparse_trie_tests! {
     // changed_paths
     test_changed_paths_record_base_paths_for_branches_and_leaves,
     test_changed_paths_skip_dirty_ancestor_branch_when_descendant_changed,
+    test_changed_paths_record_inserted_branch_on_short_key_split,
     test_changed_paths_record_removed_subtrie_leaf_and_collapsed_parent_branch,
 
     // prune

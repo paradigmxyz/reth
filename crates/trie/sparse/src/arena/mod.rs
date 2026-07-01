@@ -434,6 +434,7 @@ impl ArenaSparseSubtrie {
                         full_path,
                         value,
                         find_result,
+                        &mut self.buffers.changed_paths,
                     );
                     self.num_leaves = (self.num_leaves as i64 + deltas.num_leaves_delta) as u64;
                     self.num_dirty_leaves =
@@ -1057,16 +1058,10 @@ impl ArenaParallelSparseTrie {
 
             if count == 0 {
                 if branch_idx == self.root {
-                    if let Some(changed_paths) = self.buffers.changed_paths.as_mut() {
-                        changed_paths.insert(branch_path);
-                    }
                     self.upper_arena[branch_idx] = ArenaSparseNode::EmptyRoot;
                     return;
                 }
                 // Remove the empty branch from its parent.
-                if let Some(changed_paths) = self.buffers.changed_paths.as_mut() {
-                    changed_paths.insert(branch_path);
-                }
                 let branch_nibble = branch_path.last().expect("non-root branch");
                 cursor.pop(&mut self.upper_arena);
                 self.upper_arena.remove(branch_idx);
@@ -1123,7 +1118,6 @@ impl ArenaParallelSparseTrie {
                 cursor,
                 &mut self.root,
                 &mut self.buffers.updates,
-                &mut self.buffers.changed_paths,
             );
 
             // After collapse, the remaining child (now at cursor head) may be a
@@ -1617,11 +1611,13 @@ impl ArenaParallelSparseTrie {
         root: &mut Index,
         new_leaf_path: Nibbles,
         value: &[u8],
+        changed_paths: &mut Option<HashSet<Nibbles>>,
     ) -> bool {
         let old_child_entry = cursor.head().expect("cursor must have head");
         let old_child_idx = old_child_entry.index;
         let old_child_short_key = arena[old_child_idx].short_key().expect("top of stack is a leaf");
         let diverge_len = new_leaf_path.common_prefix_length(old_child_short_key);
+        let splits_branch = matches!(&arena[old_child_idx], ArenaSparseNode::Branch(_));
 
         trace!(
             target: TRACE_TARGET,
@@ -1683,6 +1679,14 @@ impl ArenaParallelSparseTrie {
             branch_masks: BranchNodeMasks::default(),
         }));
 
+        if splits_branch &&
+            !old_child_entry.path.is_empty() &&
+            let Some(changed_paths) = changed_paths.as_mut()
+        {
+            // The inserted branch can be suppressed by dirty descendant emission during hashing.
+            changed_paths.insert(old_child_entry.path);
+        }
+
         cursor.replace_head_index(arena, root, new_branch_idx);
         newly_dirtied_existing
     }
@@ -1709,6 +1713,7 @@ impl ArenaParallelSparseTrie {
         full_path: &Nibbles,
         value: &[u8],
         find_result: SeekResult,
+        changed_paths: &mut Option<HashSet<Nibbles>>,
     ) -> (UpsertLeafResult, SubtrieCounterDeltas) {
         trace!(target: TRACE_TARGET, ?find_result, "Upserting leaf");
         let head = cursor.head().expect("cursor is non-empty");
@@ -1755,8 +1760,14 @@ impl ArenaParallelSparseTrie {
                 let head_path = head.path;
                 let full_path_from_head = full_path.slice(head_path.len()..);
 
-                let split_dirtied_existing =
-                    Self::split_and_insert_leaf(arena, cursor, root, full_path_from_head, value);
+                let split_dirtied_existing = Self::split_and_insert_leaf(
+                    arena,
+                    cursor,
+                    root,
+                    full_path_from_head,
+                    value,
+                    changed_paths,
+                );
 
                 let result = if cursor.depth() >= 1 {
                     UpsertLeafResult::NewChild
@@ -1911,13 +1922,7 @@ impl ArenaParallelSparseTrie {
                 // If the branch now has only one child, collapse it. The blinded sibling
                 // case was already handled above before any mutations.
                 let collapse_dirtied_leaf = if parent_branch.state_mask.count_bits() == 1 {
-                    Self::collapse_branch(
-                        arena,
-                        cursor,
-                        root,
-                        &mut buffers.updates,
-                        &mut buffers.changed_paths,
-                    )
+                    Self::collapse_branch(arena, cursor, root, &mut buffers.updates)
                 } else {
                     false
                 };
@@ -2015,11 +2020,9 @@ impl ArenaParallelSparseTrie {
         cursor: &mut ArenaCursor,
         root: &mut Index,
         updates: &mut Option<SparseTrieUpdates>,
-        changed_paths: &mut Option<HashSet<Nibbles>>,
     ) -> bool {
         let branch_entry = cursor.head().expect("cursor is non-empty");
         let branch_idx = branch_entry.index;
-        let branch_path = branch_entry.path;
         let branch = arena[branch_idx].branch_ref();
         let remaining_nibble =
             branch.state_mask.iter().next().expect("branch has at least one child");
@@ -2054,10 +2057,6 @@ impl ArenaParallelSparseTrie {
                 trie_updates.updated_nodes.remove(&logical_path);
                 trie_updates.removed_nodes.insert(logical_path);
             }
-        }
-
-        if let Some(changed_paths) = changed_paths.as_mut() {
-            changed_paths.insert(branch_path);
         }
 
         // Build the prefix: branch's short_key + remaining child's nibble.
@@ -3096,6 +3095,7 @@ impl SparseTrie for ArenaParallelSparseTrie {
                             full_path,
                             v,
                             find_result,
+                            &mut self.buffers.changed_paths,
                         );
                         match result {
                             UpsertLeafResult::NewChild => {
