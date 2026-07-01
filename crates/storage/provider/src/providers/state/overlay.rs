@@ -1,5 +1,5 @@
 use alloy_eips::BlockNumHash;
-use alloy_primitives::{Address, BlockHash, BlockNumber, B256};
+use alloy_primitives::{keccak256, Address, BlockHash, BlockNumber, B256};
 use metrics::{Counter, Histogram};
 use reth_chain_state::{EthPrimitives, StateTrieOverlayManager};
 use reth_db_api::{tables, transaction::DbTx, DatabaseError};
@@ -730,7 +730,19 @@ where
         accounts: &[Address],
     ) -> ProviderResult<HashedPostState> {
         let mut state = self.provider.hashed_post_state_for_accounts(accounts)?;
-        state.extend_from_sorted(&self.hashed_post_state);
+        for address in accounts {
+            let hashed_address = keccak256(address);
+            if let Some(account) =
+                self.hashed_post_state.accounts.iter().find_map(|(address, account)| {
+                    (*address == hashed_address).then_some(*account)
+                })
+            {
+                state.accounts.insert(hashed_address, account);
+            }
+            if let Some(storage) = self.hashed_post_state.storages.get(&hashed_address) {
+                state.storages.insert(hashed_address, storage.clone().into());
+            }
+        }
         Ok(state)
     }
 }
