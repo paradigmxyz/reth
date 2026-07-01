@@ -5,7 +5,7 @@ use crate::{
 };
 use alloy_chains::Chain;
 use alloy_primitives::B256;
-use reth_eth_wire_types::EthVersion;
+use reth_eth_wire_types::{snap::SnapProtocolError, EthVersion};
 use reth_ethereum_forks::ValidationError;
 use reth_primitives_traits::{GotExpected, GotExpectedBoxed};
 use std::io;
@@ -25,6 +25,9 @@ pub enum EthStreamError {
     /// Thrown when decoding a message failed.
     #[error(transparent)]
     InvalidMessage(#[from] MessageError),
+    /// Thrown when decoding an inbound `snap` protocol message failed.
+    #[error(transparent)]
+    InvalidSnapMessage(#[from] SnapProtocolError),
     #[error("message size ({0}) exceeds max length (10MB)")]
     /// Received a message whose size exceeds the standard limit.
     MessageTooBig(usize),
@@ -71,6 +74,7 @@ impl EthStreamError {
         matches!(
             self,
             Self::InvalidMessage(_) |
+                Self::InvalidSnapMessage(_) |
                 Self::MessageTooBig(_) |
                 Self::TransactionHashesInvalidLenOfFields { .. } |
                 Self::UnsupportedMessage { .. } |

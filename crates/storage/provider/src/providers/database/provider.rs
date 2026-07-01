@@ -70,7 +70,7 @@ use reth_trie::{
     HashedPostStateSorted,
 };
 use reth_trie_db::{ChangesetCache, DatabaseStorageTrieCursor, TrieTableAdapter};
-use revm_database::states::{
+use revm::database::states::{
     PlainStateReverts, PlainStorageChangeset, PlainStorageRevert, StateChangeset,
 };
 use smallvec::SmallVec;
@@ -3967,8 +3967,7 @@ mod tests {
     use reth_trie::{
         HashedPostState, KeccakKeyHasher, Nibbles, StoredNibbles, StoredNibblesSubKey,
     };
-    use revm_database::BundleState;
-    use revm_state::AccountInfo;
+    use revm::{database::BundleState, state::AccountInfo};
     use std::{sync::mpsc, time::Duration};
 
     #[test]
@@ -4910,8 +4909,7 @@ mod tests {
     fn test_write_state_and_historical_read_hashed() {
         use reth_storage_api::StateProvider;
         use reth_trie::{HashedPostState, KeccakKeyHasher};
-        use revm_database::BundleState;
-        use revm_state::AccountInfo;
+        use revm::{database::BundleState, state::AccountInfo};
 
         let factory = create_test_provider_factory();
         factory.set_storage_settings_cache(StorageSettings::v2());
