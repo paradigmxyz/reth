@@ -8,7 +8,7 @@ use crate::{
     errors::{EthHandshakeError, EthStreamError},
     handshake::EthereumEthHandshake,
     message::{EthBroadcastMessage, MAX_MESSAGE_SIZE, TX_MEMORY_BUDGET_MULTIPLIER},
-    p2pstream::HANDSHAKE_TIMEOUT,
+    p2pstream::{P2PStream, HANDSHAKE_TIMEOUT},
     CanDisconnect, DisconnectReason, EthMessage, EthNetworkPrimitives, EthVersion, ProtocolMessage,
     UnifiedStatus,
 };
@@ -19,6 +19,7 @@ use reth_eth_wire_types::{EthMessageID, NetworkPrimitives, RawCapabilityMessage}
 use reth_ethereum_forks::ForkFilter;
 use std::{
     future::Future,
+    io,
     pin::Pin,
     task::{Context, Poll},
     time::Duration,
@@ -146,6 +147,11 @@ where
 
     /// Decodes incoming bytes into an [`EthMessage`].
     pub fn decode_message(&self, bytes: BytesMut) -> Result<EthMessage<N>, EthStreamError> {
+        self.decode_message_from_slice(&bytes)
+    }
+
+    /// Decodes incoming bytes into an [`EthMessage`].
+    pub fn decode_message_from_slice(&self, bytes: &[u8]) -> Result<EthMessage<N>, EthStreamError> {
         if bytes.len() > self.max_message_size {
             return Err(EthStreamError::MessageTooBig(bytes.len()));
         }
@@ -159,7 +165,7 @@ where
 
         let msg = match ProtocolMessage::decode_message_with_tx_memory_budget(
             self.version,
-            &mut bytes.as_ref(),
+            &mut &bytes[..],
             self.max_message_size * TX_MEMORY_BUDGET_MULTIPLIER,
         ) {
             Ok(m) => m,
@@ -299,6 +305,34 @@ where
     }
 }
 
+impl<S, N> EthStream<P2PStream<S>, N>
+where
+    S: Stream<Item = io::Result<BytesMut>> + Sink<Bytes, Error = io::Error> + Unpin,
+    N: NetworkPrimitives,
+{
+    /// Polls the underlying p2p stream and decodes the next eth message without returning an
+    /// intermediate p2p [`BytesMut`] to the caller.
+    pub fn poll_next_eth_message(
+        self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        decode_buf: &mut BytesMut,
+    ) -> Poll<Option<Result<EthMessage<N>, EthStreamError>>> {
+        let this = self.project();
+        let eth = this.eth;
+
+        let res = ready!(this
+            .inner
+            .poll_next_with(cx, decode_buf, |bytes| eth.decode_message_from_slice(bytes)));
+
+        match res {
+            Some(Ok(Ok(msg))) => Poll::Ready(Some(Ok(msg))),
+            Some(Ok(Err(err))) => Poll::Ready(Some(Err(err))),
+            Some(Err(err)) => Poll::Ready(Some(Err(err.into()))),
+            None => Poll::Ready(None),
+        }
+    }
+}
+
 impl<S, N> Sink<EthMessage<N>> for EthStream<S, N>
 where
     S: CanDisconnect<Bytes> + Unpin,
@@ -366,15 +400,18 @@ mod tests {
         ProtocolVersion, Status, StatusMessage,
     };
     use alloy_chains::NamedChain;
-    use alloy_primitives::{bytes::Bytes, B256, U256};
+    use alloy_primitives::{
+        bytes::{Bytes, BytesMut},
+        B256, U256,
+    };
     use alloy_rlp::Decodable;
-    use futures::{SinkExt, StreamExt};
+    use futures::{future::poll_fn, SinkExt, StreamExt};
     use reth_ecies::stream::ECIESStream;
     use reth_eth_wire_types::{EthNetworkPrimitives, UnifiedStatus};
     use reth_ethereum_forks::{ForkFilter, Head};
     use reth_network_peers::pk2id;
     use secp256k1::{SecretKey, SECP256K1};
-    use std::time::Duration;
+    use std::{pin::Pin, time::Duration};
     use tokio::net::{TcpListener, TcpStream};
     use tokio_util::codec::Decoder;
 
@@ -663,7 +700,12 @@ mod tests {
                 .unwrap();
 
             // use the stream to get the next message
-            let message = eth_stream.next().await.unwrap().unwrap();
+            let mut decode_buf = BytesMut::new();
+            let message =
+                poll_fn(|cx| Pin::new(&mut eth_stream).poll_next_eth_message(cx, &mut decode_buf))
+                    .await
+                    .unwrap()
+                    .unwrap();
             assert_eq!(message, test_msg_clone);
         });
 

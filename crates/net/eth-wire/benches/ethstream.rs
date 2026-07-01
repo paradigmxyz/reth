@@ -5,7 +5,7 @@ use alloy_primitives::{
     B256,
 };
 use criterion::{criterion_group, criterion_main, Criterion};
-use futures::{future::poll_fn, Sink, SinkExt, Stream, StreamExt};
+use futures::{future::poll_fn, Sink, SinkExt, Stream};
 use reth_eth_wire::{
     capability::SharedCapabilities, Capability, EthMessage, EthNetworkPrimitives, EthStream,
     EthVersion, P2PStream,
@@ -129,8 +129,16 @@ fn bench_recv_messages(c: &mut Criterion) {
             rt.block_on(async {
                 let mut stream =
                     eth_stream(MockTransport::with_incoming(encoded.clone(), MESSAGE_COUNT));
+                let mut decode_buf = BytesMut::new();
                 for _ in 0..MESSAGE_COUNT {
-                    black_box(stream.next().await.unwrap().unwrap());
+                    black_box(
+                        poll_fn(|cx| {
+                            Pin::new(&mut stream).poll_next_eth_message(cx, &mut decode_buf)
+                        })
+                        .await
+                        .unwrap()
+                        .unwrap(),
+                    );
                 }
             });
         })

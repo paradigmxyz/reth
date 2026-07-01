@@ -1,5 +1,6 @@
 //! Connection types for a session
 
+use alloy_primitives::bytes::BytesMut;
 use futures::{Sink, Stream};
 use reth_ecies::stream::ECIESStream;
 use reth_eth_wire::{
@@ -100,6 +101,22 @@ impl<N: NetworkPrimitives> EthRlpxConnection<N> {
         match self {
             Self::EthOnly(conn) => conn.set_reject_block_announcements(reject),
             Self::Satellite(conn) => conn.primary_mut().set_reject_block_announcements(reject),
+        }
+    }
+
+    /// Polls the next eth message, using `decode_buf` as scratch space for eth-only p2p streams.
+    pub(crate) fn poll_next_eth_message(
+        &mut self,
+        cx: &mut Context<'_>,
+        decode_buf: &mut BytesMut,
+    ) -> Poll<Option<Result<EthMessage<N>, EthStreamError>>> {
+        unsafe {
+            match self {
+                Self::EthOnly(conn) => {
+                    Pin::new_unchecked(&mut **conn).poll_next_eth_message(cx, decode_buf)
+                }
+                Self::Satellite(conn) => Pin::new_unchecked(conn).poll_next(cx),
+            }
         }
     }
 }

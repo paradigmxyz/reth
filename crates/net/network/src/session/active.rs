@@ -23,7 +23,7 @@ use crate::{
     },
 };
 use alloy_eips::merge::EPOCH_SLOTS;
-use alloy_primitives::Sealable;
+use alloy_primitives::{bytes::BytesMut, Sealable};
 use futures::{stream::Fuse, SinkExt, StreamExt};
 use metrics::{Counter, Gauge};
 use reth_eth_wire::{
@@ -86,6 +86,9 @@ const MIN_RECEIVED_REQUESTS_CAPACITY: usize = 1;
 /// scheduler.
 const ACTIVE_SESSION_RECEIVE_BUDGET: usize = 32;
 
+/// Maximum direct-decode scratch capacity retained after polling an eth message.
+const MAX_RETAINED_DECODE_BUF_CAPACITY: usize = 64 * 1024;
+
 /// Shrink burst-grown buffers only after they are far above their retained steady-state capacity.
 const SHRINK_CAPACITY_MULTIPLIER: usize = 4;
 
@@ -147,6 +150,8 @@ pub(crate) struct ActiveSession<N: NetworkPrimitives> {
     pub(crate) next_id: u64,
     /// The underlying connection.
     pub(crate) conn: EthRlpxConnection<N>,
+    /// Scratch buffer for decoding eth-only p2p messages directly from the connection.
+    pub(crate) conn_decode_buf: BytesMut,
     /// Identifier of the node we're connected to.
     pub(crate) remote_peer_id: PeerId,
     /// The address we're connected to.
@@ -830,7 +835,12 @@ impl<N: NetworkPrimitives> Future for ActiveSession<N> {
                     break 'main
                 }
 
-                match this.conn.poll_next_unpin(cx) {
+                let msg = this.conn.poll_next_eth_message(cx, &mut this.conn_decode_buf);
+                if this.conn_decode_buf.capacity() > MAX_RETAINED_DECODE_BUF_CAPACITY {
+                    this.conn_decode_buf = BytesMut::new();
+                }
+
+                match msg {
                     Poll::Pending => break,
                     Poll::Ready(None) => {
                         if this.is_disconnecting() {
@@ -1310,6 +1320,7 @@ mod tests {
                         internal_request_rx: ReceiverStream::new(messages_rx).fuse(),
                         inflight_requests: Default::default(),
                         conn,
+                        conn_decode_buf: Default::default(),
                         queued_outgoing: QueuedOutgoingMessages::new(
                             Gauge::noop(),
                             BroadcastItemCounter::new(),

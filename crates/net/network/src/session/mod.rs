@@ -587,6 +587,7 @@ impl<N: NetworkPrimitives> SessionManager<N> {
                     internal_request_rx: ReceiverStream::new(messages_rx).fuse(),
                     inflight_requests: Default::default(),
                     conn,
+                    conn_decode_buf: Default::default(),
                     queued_outgoing: QueuedOutgoingMessages::new(
                         self.metrics.queued_outgoing_messages.clone(),
                         broadcast_items.clone(),

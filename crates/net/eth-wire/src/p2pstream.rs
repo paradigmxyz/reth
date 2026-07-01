@@ -317,6 +317,134 @@ impl<S> P2PStream<S> {
     }
 }
 
+impl<S> P2PStream<S>
+where
+    S: Stream<Item = io::Result<BytesMut>> + Sink<Bytes, Error = io::Error> + Unpin,
+{
+    /// Polls the stream for the next subprotocol message and decodes it before returning.
+    ///
+    /// Unlike the [`Stream`] implementation, this writes the decompressed message into a
+    /// caller-owned buffer, which avoids allocating a new [`BytesMut`] for callers that immediately
+    /// decode the message into an owned type.
+    pub(crate) fn poll_next_with<T, F>(
+        self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        decode_buf: &mut BytesMut,
+        mut decode: F,
+    ) -> Poll<Option<Result<T, P2PStreamError>>>
+    where
+        F: FnMut(&[u8]) -> T,
+    {
+        let this = self.get_mut();
+
+        if this.disconnecting {
+            // if disconnecting, stop reading messages
+            return Poll::Ready(None)
+        }
+
+        // We loop to avoid returning `Pending` when a subprotocol message is queued behind p2p
+        // ping/pong maintenance messages.
+        while let Poll::Ready(res) = this.inner.poll_next_unpin(cx) {
+            let bytes = match res {
+                Some(Ok(bytes)) => bytes,
+                Some(Err(err)) => return Poll::Ready(Some(Err(err.into()))),
+                None => return Poll::Ready(None),
+            };
+
+            if bytes.is_empty() {
+                return Poll::Ready(Some(Err(P2PStreamError::EmptyProtocolMessage)))
+            }
+
+            let id = bytes[0];
+            if id == P2PMessageID::Disconnect as u8 &&
+                let Ok(reason) = DisconnectReason::decode(&mut &bytes[1..])
+            {
+                return Poll::Ready(Some(Err(P2PStreamError::Disconnected(reason))))
+            }
+
+            if id > MAX_P2P_MESSAGE_ID && id <= MAX_RESERVED_MESSAGE_ID {
+                return Poll::Ready(Some(Err(P2PStreamError::UnknownReservedMessageId(id))))
+            }
+
+            let decompressed_len = snap::raw::decompress_len(&bytes[1..])?;
+            if decompressed_len > MAX_PAYLOAD_SIZE {
+                return Poll::Ready(Some(Err(P2PStreamError::MessageTooBig {
+                    message_size: decompressed_len,
+                    max_size: MAX_PAYLOAD_SIZE,
+                })))
+            }
+
+            decode_buf.clear();
+            decode_buf.reserve(decompressed_len + 1);
+
+            let first_byte =
+                if id > MAX_RESERVED_MESSAGE_ID { id - MAX_RESERVED_MESSAGE_ID - 1 } else { 0 };
+            let spare = decode_buf.spare_capacity_mut();
+            spare[0].write(first_byte);
+            // SAFETY: `reserve` above ensures the spare capacity has at least
+            // `decompressed_len + 1` bytes. Snappy writes only to the provided output slice and
+            // reports how many bytes were initialized.
+            let output = unsafe {
+                std::slice::from_raw_parts_mut(
+                    spare.as_mut_ptr().add(1).cast::<u8>(),
+                    decompressed_len,
+                )
+            };
+
+            let written = this.decoder.decompress(&bytes[1..], output).map_err(|err| {
+                debug!(
+                    %err,
+                    msg=%hex::encode(&bytes[1..]),
+                    "error decompressing p2p message"
+                );
+                err
+            })?;
+            debug_assert_eq!(written, decompressed_len);
+            // SAFETY: byte 0 was initialized above and `decompress` initialized `written` bytes
+            // after it.
+            unsafe {
+                decode_buf.advance_mut(written + 1);
+            }
+
+            if id > MAX_RESERVED_MESSAGE_ID {
+                return Poll::Ready(Some(Ok(decode(decode_buf))))
+            }
+
+            match id {
+                _ if id == P2PMessageID::Ping as u8 => {
+                    trace!("Received Ping, Sending Pong");
+                    this.send_pong();
+                    // This is required because the `Sink` may not be polled externally, and if
+                    // that happens, the pong will never be sent.
+                    cx.waker().wake_by_ref();
+                }
+                _ if id == P2PMessageID::Hello as u8 => {
+                    return Poll::Ready(Some(Err(P2PStreamError::HandshakeError(
+                        P2PHandshakeError::HelloNotInHandshake,
+                    ))))
+                }
+                _ if id == P2PMessageID::Pong as u8 => this.pinger.on_pong()?,
+                _ if id == P2PMessageID::Disconnect as u8 => {
+                    let reason =
+                        DisconnectReason::decode(&mut &decode_buf[1..]).inspect_err(|err| {
+                            debug!(
+                                %err,
+                                msg=%hex::encode(&decode_buf[1..]),
+                                "Failed to decode disconnect message from peer"
+                            );
+                        })?;
+                    return Poll::Ready(Some(Err(P2PStreamError::Disconnected(reason))))
+                }
+                _ => {
+                    unreachable!("unknown p2p message ids were handled before decompression")
+                }
+            }
+        }
+
+        Poll::Pending
+    }
+}
+
 /// Gracefully disconnects the connection by sending a disconnect message and stop reading new
 /// messages.
 pub trait DisconnectP2P {
@@ -597,11 +725,7 @@ where
         let mut compressed = BytesMut::zeroed(1 + snap::raw::max_compress_len(item.len() - 1));
         let compressed_size =
             this.encoder.compress(&item[1..], &mut compressed[1..]).map_err(|err| {
-                debug!(
-                    %err,
-                    msg=%hex::encode(&item[1..]),
-                    "error compressing p2p message"
-                );
+                debug!(%err, msg=%hex::encode(&item[1..]), "error compressing p2p message");
                 err
             })?;
 
