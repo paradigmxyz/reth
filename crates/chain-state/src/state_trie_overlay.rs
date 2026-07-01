@@ -637,28 +637,38 @@ fn extend_overlay(
     hashed_state: &HashedPostStateSorted,
     trie_updates: &TrieUpdatesSorted,
 ) {
+    let has_hashed_state = !hashed_state.is_empty();
+    let has_trie_updates = !trie_updates.is_empty();
+
     #[cfg(feature = "rayon")]
     {
-        rayon::join(
-            || {
-                if !hashed_state.is_empty() {
-                    Arc::make_mut(&mut overlay.state).extend_ref_and_sort(hashed_state);
-                }
-            },
-            || {
-                if !trie_updates.is_empty() {
-                    Arc::make_mut(&mut overlay.nodes).extend_ref_and_sort(trie_updates);
-                }
-            },
-        );
+        match (has_hashed_state, has_trie_updates) {
+            (true, true) => {
+                rayon::join(
+                    || {
+                        Arc::make_mut(&mut overlay.state).extend_ref_and_sort(hashed_state);
+                    },
+                    || {
+                        Arc::make_mut(&mut overlay.nodes).extend_ref_and_sort(trie_updates);
+                    },
+                );
+            }
+            (true, false) => {
+                Arc::make_mut(&mut overlay.state).extend_ref_and_sort(hashed_state);
+            }
+            (false, true) => {
+                Arc::make_mut(&mut overlay.nodes).extend_ref_and_sort(trie_updates);
+            }
+            (false, false) => {}
+        }
     }
 
     #[cfg(not(feature = "rayon"))]
     {
-        if !hashed_state.is_empty() {
+        if has_hashed_state {
             Arc::make_mut(&mut overlay.state).extend_ref_and_sort(hashed_state);
         }
-        if !trie_updates.is_empty() {
+        if has_trie_updates {
             Arc::make_mut(&mut overlay.nodes).extend_ref_and_sort(trie_updates);
         }
     }
