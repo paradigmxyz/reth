@@ -63,6 +63,7 @@ macro_rules! delegate_provider_impls {
             }
             HashedPostStateProvider $(where [$($generics)*])? {
                 fn hashed_post_state(&self, bundle_state: &revm_database::BundleState) -> reth_trie::HashedPostState;
+                fn hashed_post_state_for_accounts(&self, accounts: &[alloy_primitives::Address]) -> reth_storage_api::errors::provider::ProviderResult<reth_trie::HashedPostState>;
             }
         );
     }

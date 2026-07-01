@@ -12,7 +12,7 @@
 extern crate alloc;
 
 use alloy_consensus::BlockHeader;
-use alloy_primitives::B256;
+use alloy_primitives::{Address, B256};
 use reth_errors::ConsensusError;
 use reth_payload_primitives::{
     EngineApiMessageVersion, EngineObjectValidationError, InvalidPayloadAttributesError,
@@ -60,6 +60,11 @@ pub struct AuxiliaryStateRoot {
     pub expected_root: B256,
     /// Hashed state updates to stream into the auxiliary sparse trie task.
     pub state_updates: HashedPostState,
+    /// Accounts whose complete hashed state should be loaded before applying `state_updates`.
+    ///
+    /// If set, the engine tree computes the auxiliary root directly from the resulting full hashed
+    /// state without revealing trie nodes from a provider.
+    pub full_state_accounts: Option<Vec<Address>>,
     /// Whether the auxiliary hashed state and trie updates should become this block's retained trie
     /// data.
     ///

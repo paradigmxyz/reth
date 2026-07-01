@@ -255,12 +255,12 @@ struct CacheMetricSnapshot {
 
 impl CacheMetricSnapshot {
     const fn is_empty(&self) -> bool {
-        self.account_hits == 0 &&
-            self.account_misses == 0 &&
-            self.storage_hits == 0 &&
-            self.storage_misses == 0 &&
-            self.code_hits == 0 &&
-            self.code_misses == 0
+        self.account_hits == 0
+            && self.account_misses == 0
+            && self.storage_hits == 0
+            && self.storage_misses == 0
+            && self.code_hits == 0
+            && self.code_misses == 0
     }
 }
 
@@ -821,6 +821,13 @@ impl<S: HashedPostStateProvider> HashedPostStateProvider for CachedStateProvider
     fn hashed_post_state(&self, bundle_state: &reth_revm::db::BundleState) -> HashedPostState {
         self.state_provider.hashed_post_state(bundle_state)
     }
+
+    fn hashed_post_state_for_accounts(
+        &self,
+        accounts: &[alloy_primitives::Address],
+    ) -> ProviderResult<HashedPostState> {
+        self.state_provider.hashed_post_state_for_accounts(accounts)
+    }
 }
 
 /// Execution cache used during block processing.
@@ -1030,7 +1037,7 @@ impl ExecutionCache {
             // If the account was not modified, as in not changed and not destroyed, then we have
             // nothing to do w.r.t. this particular account and can move on
             if account.status.is_not_modified() {
-                continue
+                continue;
             }
 
             // If the original account had code (was a contract), we must clear the entire cache
@@ -1053,7 +1060,7 @@ impl ExecutionCache {
                         );
                     });
                     self.clear();
-                    return Ok(())
+                    return Ok(());
                 }
 
                 self.0.account_cache.remove(addr);
@@ -1065,7 +1072,7 @@ impl ExecutionCache {
             // `None` current info, should be destroyed.
             let Some(ref account_info) = account.info else {
                 trace!(target: "engine::caching", ?account, "Account with None account info found in state updates");
-                return Err(())
+                return Err(());
             };
 
             // Now we iterate over all storage and make updates to the cached storage values

@@ -316,7 +316,8 @@ where
                           + ChangeSetReader
                           + StorageChangeSetReader
                           + BlockNumReader
-                          + StorageSettingsCache,
+                          + StorageSettingsCache
+                          + HashedPostStateProvider,
         > + BlockReader<Header = N::BlockHeader>
         + ChangeSetReader
         + BlockNumReader
@@ -1083,12 +1084,8 @@ where
             let _ = valid_block_tx.send(());
         }
 
-        let mut executed_block = self.spawn_deferred_trie_task(
-            Arc::new(block),
-            output,
-            hashed_state,
-            trie_output,
-        );
+        let mut executed_block =
+            self.spawn_deferred_trie_task(Arc::new(block), output, hashed_state, trie_output);
         if let Some(auxiliary_trie_data) = retained_auxiliary_trie_data {
             executed_block = executed_block.with_auxiliary_trie_data(auxiliary_trie_data);
         }
@@ -1527,8 +1524,9 @@ where
         auxiliary_state_root: AuxiliaryStateRoot,
     ) -> Result<StateRootComputeOutcome, ParallelStateRootError>
     where
-        F: DatabaseProviderROFactory<Provider: TrieCursorFactory + HashedCursorFactory>
-            + Clone
+        F: DatabaseProviderROFactory<
+                Provider: TrieCursorFactory + HashedCursorFactory + HashedPostStateProvider,
+            > + Clone
             + Send
             + Sync
             + 'static,
@@ -1537,8 +1535,25 @@ where
             parent_root,
             expected_root: _,
             state_updates,
+            full_state_accounts,
             retain_trie_data: _,
         } = auxiliary_state_root;
+
+        if let Some(full_state_accounts) = full_state_accounts {
+            let mut full_state = multiproof_provider_factory
+                .database_provider_ro()
+                .map_err(ParallelStateRootError::Provider)?
+                .hashed_post_state_for_accounts(&full_state_accounts)
+                .map_err(ParallelStateRootError::Provider)?;
+            full_state.extend(state_updates);
+            return Ok(StateRootComputeOutcome {
+                state_root: reth_trie::root_from_full_hashed_state(full_state)
+                    .map_err(|err| ParallelStateRootError::Other(err.to_string()))?,
+                trie_updates: Arc::new(TrieUpdates::default()),
+                #[cfg(feature = "trie-debug")]
+                debug_recorders: Vec::new(),
+            });
+        }
 
         if state_updates.is_empty() {
             return Ok(StateRootComputeOutcome {
@@ -2380,7 +2395,8 @@ where
                           + ChangeSetReader
                           + StorageChangeSetReader
                           + BlockNumReader
-                          + StorageSettingsCache,
+                          + StorageSettingsCache
+                          + HashedPostStateProvider,
         > + BlockReader<Header = N::BlockHeader>
         + StateProviderFactory
         + StateReader

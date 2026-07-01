@@ -1,5 +1,5 @@
 use alloy_eips::BlockNumHash;
-use alloy_primitives::{BlockHash, BlockNumber, B256};
+use alloy_primitives::{Address, BlockHash, BlockNumber, B256};
 use metrics::{Counter, Histogram};
 use reth_chain_state::{EthPrimitives, StateTrieOverlayManager};
 use reth_db_api::{tables, transaction::DbTx, DatabaseError};
@@ -13,20 +13,20 @@ use reth_prune_types::PruneSegment;
 use reth_stages_types::StageId;
 use reth_storage_api::{
     BlockNumReader, ChangeSetReader, DBProvider, DatabaseProviderFactory,
-    DatabaseProviderROFactory, PruneCheckpointReader, StageCheckpointReader,
-    StorageChangeSetReader, StorageSettingsCache,
+    DatabaseProviderROFactory, HashedPostStateProvider, PruneCheckpointReader,
+    StageCheckpointReader, StorageChangeSetReader, StorageSettingsCache,
 };
 use reth_trie::{
     hashed_cursor::{HashedCursorFactory, HashedPostStateCursorFactory},
     trie_cursor::{InMemoryTrieCursor, TrieCursor, TrieCursorFactory, TrieStorageCursor},
     updates::TrieUpdatesSorted,
-    HashedPostStateSorted,
+    HashedPostState, HashedPostStateSorted,
 };
 use reth_trie_db::{
     ChangesetCache, DatabaseAccountTrieCursor, DatabaseHashedCursorFactory,
-    DatabaseProvableAccountTrieCursor, DatabaseProvableStorageTrieCursor, DatabaseStorageTrieCursor,
-    LegacyKeyAdapter, PackedAccountsTrie, PackedKeyAdapter, PackedProvableAccountsTrie,
-    PackedProvableStoragesTrie, PackedStoragesTrie,
+    DatabaseProvableAccountTrieCursor, DatabaseProvableStorageTrieCursor,
+    DatabaseStorageTrieCursor, LegacyKeyAdapter, PackedAccountsTrie, PackedKeyAdapter,
+    PackedProvableAccountsTrie, PackedProvableStoragesTrie, PackedStoragesTrie,
 };
 use std::{
     ops::RangeInclusive,
@@ -210,7 +210,7 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
                     return Err(ProviderError::other(std::io::Error::other(format!(
                         "anchor_hash {anchor_hash} doesn't match OverlayBuilder's configured parent ({})",
                         self.parent_hash
-                    ))))
+                    ))));
                 }
                 Ok((Arc::clone(trie), Arc::clone(state)))
             }
@@ -257,7 +257,7 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
     {
         // If the anchor is the DB tip then there won't be any reverts necessary.
         if db_tip_block.hash == anchor_hash {
-            return Ok(None)
+            return Ok(None);
         }
 
         let anchor_number = provider
@@ -619,26 +619,26 @@ where
         let tx = self.provider.tx_ref();
         let trie_updates = self.trie_updates.as_ref();
         let cursor: Box<dyn TrieCursor + Send> = match (self.trie_table_kind, self.is_v2) {
-            (TrieTableKind::Canonical, true) => Box::new(
-                DatabaseAccountTrieCursor::<_, PackedKeyAdapter>::new(
+            (TrieTableKind::Canonical, true) => {
+                Box::new(DatabaseAccountTrieCursor::<_, PackedKeyAdapter>::new(
                     tx.cursor_read::<PackedAccountsTrie>()?,
-                ),
-            ),
-            (TrieTableKind::Canonical, false) => Box::new(
-                DatabaseAccountTrieCursor::<_, LegacyKeyAdapter>::new(
+                ))
+            }
+            (TrieTableKind::Canonical, false) => {
+                Box::new(DatabaseAccountTrieCursor::<_, LegacyKeyAdapter>::new(
                     tx.cursor_read::<tables::AccountsTrie>()?,
-                ),
-            ),
-            (TrieTableKind::Provable, true) => Box::new(
-                DatabaseProvableAccountTrieCursor::<_, PackedKeyAdapter>::new(
+                ))
+            }
+            (TrieTableKind::Provable, true) => {
+                Box::new(DatabaseProvableAccountTrieCursor::<_, PackedKeyAdapter>::new(
                     tx.cursor_read::<PackedProvableAccountsTrie>()?,
-                ),
-            ),
-            (TrieTableKind::Provable, false) => Box::new(
-                DatabaseProvableAccountTrieCursor::<_, LegacyKeyAdapter>::new(
+                ))
+            }
+            (TrieTableKind::Provable, false) => {
+                Box::new(DatabaseProvableAccountTrieCursor::<_, LegacyKeyAdapter>::new(
                     tx.cursor_read::<tables::ProvableAccountsTrie>()?,
-                ),
-            ),
+                ))
+            }
         };
         Ok(InMemoryTrieCursor::new_account(cursor, trie_updates))
     }
@@ -650,30 +650,30 @@ where
         let tx = self.provider.tx_ref();
         let trie_updates = self.trie_updates.as_ref();
         let cursor: Box<dyn TrieStorageCursor + Send> = match (self.trie_table_kind, self.is_v2) {
-            (TrieTableKind::Canonical, true) => Box::new(
-                DatabaseStorageTrieCursor::<_, PackedKeyAdapter>::new(
+            (TrieTableKind::Canonical, true) => {
+                Box::new(DatabaseStorageTrieCursor::<_, PackedKeyAdapter>::new(
                     tx.cursor_dup_read::<PackedStoragesTrie>()?,
                     hashed_address,
-                ),
-            ),
-            (TrieTableKind::Canonical, false) => Box::new(
-                DatabaseStorageTrieCursor::<_, LegacyKeyAdapter>::new(
+                ))
+            }
+            (TrieTableKind::Canonical, false) => {
+                Box::new(DatabaseStorageTrieCursor::<_, LegacyKeyAdapter>::new(
                     tx.cursor_dup_read::<tables::StoragesTrie>()?,
                     hashed_address,
-                ),
-            ),
-            (TrieTableKind::Provable, true) => Box::new(
-                DatabaseProvableStorageTrieCursor::<_, PackedKeyAdapter>::new(
+                ))
+            }
+            (TrieTableKind::Provable, true) => {
+                Box::new(DatabaseProvableStorageTrieCursor::<_, PackedKeyAdapter>::new(
                     tx.cursor_dup_read::<PackedProvableStoragesTrie>()?,
                     hashed_address,
-                ),
-            ),
-            (TrieTableKind::Provable, false) => Box::new(
-                DatabaseProvableStorageTrieCursor::<_, LegacyKeyAdapter>::new(
+                ))
+            }
+            (TrieTableKind::Provable, false) => {
+                Box::new(DatabaseProvableStorageTrieCursor::<_, LegacyKeyAdapter>::new(
                     tx.cursor_dup_read::<tables::ProvableStoragesTrie>()?,
                     hashed_address,
-                ),
-            ),
+                ))
+            }
         };
         Ok(InMemoryTrieCursor::new_storage(cursor, trie_updates, hashed_address))
     }
@@ -714,6 +714,24 @@ where
         let hashed_cursor_factory =
             HashedPostStateCursorFactory::new(db_hashed_cursor_factory, &self.hashed_post_state);
         hashed_cursor_factory.hashed_storage_cursor(hashed_address)
+    }
+}
+
+impl<Provider> HashedPostStateProvider for OverlayStateProvider<Provider>
+where
+    Provider: DBProvider + HashedPostStateProvider,
+{
+    fn hashed_post_state(&self, bundle_state: &revm_database::BundleState) -> HashedPostState {
+        self.provider.hashed_post_state(bundle_state)
+    }
+
+    fn hashed_post_state_for_accounts(
+        &self,
+        accounts: &[Address],
+    ) -> ProviderResult<HashedPostState> {
+        let mut state = self.provider.hashed_post_state_for_accounts(accounts)?;
+        state.extend_from_sorted(&self.hashed_post_state);
+        Ok(state)
     }
 }
 

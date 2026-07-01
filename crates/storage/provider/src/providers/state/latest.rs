@@ -1,8 +1,12 @@
 use crate::{
     AccountReader, BlockHashReader, HashedPostStateProvider, StateProvider, StateRootProvider,
 };
-use alloy_primitives::{Address, BlockNumber, Bytes, StorageKey, StorageValue, B256};
-use reth_db_api::{cursor::DbDupCursorRO, tables, transaction::DbTx};
+use alloy_primitives::{keccak256, Address, BlockNumber, Bytes, StorageKey, StorageValue, B256};
+use reth_db_api::{
+    cursor::{DbCursorRO, DbDupCursorRO},
+    tables,
+    transaction::DbTx,
+};
 use reth_primitives_traits::{Account, Bytecode};
 use reth_storage_api::{
     BytecodeReader, DBProvider, StateProofProvider, StorageRootProvider, StorageSettingsCache,
@@ -251,9 +255,64 @@ impl<Provider: DBProvider + StorageSettingsCache> StateProofProvider
     }
 }
 
-impl<Provider: DBProvider> HashedPostStateProvider for LatestStateProviderRef<'_, Provider> {
+impl<Provider: DBProvider + StorageSettingsCache> HashedPostStateProvider
+    for LatestStateProviderRef<'_, Provider>
+{
     fn hashed_post_state(&self, bundle_state: &revm_database::BundleState) -> HashedPostState {
         HashedPostState::from_bundle_state::<KeccakKeyHasher>(bundle_state.state())
+    }
+
+    fn hashed_post_state_for_accounts(
+        &self,
+        accounts: &[Address],
+    ) -> ProviderResult<HashedPostState> {
+        let mut state = HashedPostState::with_capacity(accounts.len());
+
+        if self.0.cached_storage_settings().use_hashed_state() {
+            let mut account_cursor = self.tx().cursor_read::<tables::HashedAccounts>()?;
+            let mut storage_cursor = self.tx().cursor_dup_read::<tables::HashedStorages>()?;
+
+            for address in accounts {
+                let hashed_address = keccak256(address);
+                if let Some((_, account)) = account_cursor.seek_exact(hashed_address)? {
+                    state.accounts.insert(hashed_address, Some(account));
+                }
+
+                let mut storage = HashedStorage::new(false);
+                if let Some((_, entry)) = storage_cursor.seek_exact(hashed_address)? {
+                    storage.storage.insert(entry.key, entry.value);
+                    while let Some(entry) = storage_cursor.next_dup_val()? {
+                        storage.storage.insert(entry.key, entry.value);
+                    }
+                }
+                if !storage.is_empty() {
+                    state.storages.insert(hashed_address, storage);
+                }
+            }
+        } else {
+            let mut account_cursor = self.tx().cursor_read::<tables::PlainAccountState>()?;
+            let mut storage_cursor = self.tx().cursor_dup_read::<tables::PlainStorageState>()?;
+
+            for address in accounts {
+                let hashed_address = keccak256(address);
+                if let Some((_, account)) = account_cursor.seek_exact(*address)? {
+                    state.accounts.insert(hashed_address, Some(account));
+                }
+
+                let mut storage = HashedStorage::new(false);
+                if let Some((_, entry)) = storage_cursor.seek_exact(*address)? {
+                    storage.storage.insert(keccak256(entry.key), entry.value);
+                    while let Some(entry) = storage_cursor.next_dup_val()? {
+                        storage.storage.insert(keccak256(entry.key), entry.value);
+                    }
+                }
+                if !storage.is_empty() {
+                    state.storages.insert(hashed_address, storage);
+                }
+            }
+        }
+
+        Ok(state)
     }
 }
 
@@ -273,8 +332,8 @@ impl<Provider: DBProvider + BlockHashReader + StorageSettingsCache> StateProvide
             )
         } else {
             let mut cursor = self.tx().cursor_dup_read::<tables::PlainStorageState>()?;
-            if let Some(entry) = cursor.seek_by_key_subkey(account, storage_key)? &&
-                entry.key == storage_key
+            if let Some(entry) = cursor.seek_by_key_subkey(account, storage_key)?
+                && entry.key == storage_key
             {
                 return Ok(Some(entry.value));
             }

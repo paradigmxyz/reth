@@ -212,6 +212,15 @@ impl<N: NodePrimitives> HashedPostStateProvider for MemoryOverlayStateProviderRe
     fn hashed_post_state(&self, bundle_state: &BundleState) -> HashedPostState {
         self.historical.hashed_post_state(bundle_state)
     }
+
+    fn hashed_post_state_for_accounts(
+        &self,
+        accounts: &[Address],
+    ) -> ProviderResult<HashedPostState> {
+        let mut state = self.historical.hashed_post_state_for_accounts(accounts)?;
+        state.extend_ref(&self.trie_input().state);
+        Ok(state)
+    }
 }
 
 impl<N: NodePrimitives> StateProvider for MemoryOverlayStateProviderRef<'_, N> {

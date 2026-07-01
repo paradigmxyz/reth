@@ -9,7 +9,7 @@ use alloy_primitives::{Address, BlockHash, BlockNumber, StorageKey, StorageValue
 use auto_impl::auto_impl;
 use reth_execution_types::ExecutionOutcome;
 use reth_primitives_traits::Bytecode;
-use reth_storage_errors::provider::ProviderResult;
+use reth_storage_errors::provider::{ProviderError, ProviderResult};
 use reth_trie_common::HashedPostState;
 use revm_database::BundleState;
 
@@ -60,10 +60,10 @@ pub trait StateProvider:
 
         if let Some(code_hash) = acc.bytecode_hash {
             if code_hash == KECCAK_EMPTY {
-                return Ok(None)
+                return Ok(None);
             }
             // Get the code from the code hash
-            return self.bytecode_by_hash(&code_hash)
+            return self.bytecode_by_hash(&code_hash);
         }
 
         // Return `None` if no code hash is set
@@ -99,6 +99,14 @@ impl<T: AccountReader + BytecodeReader> AccountInfoReader for T {}
 pub trait HashedPostStateProvider {
     /// Returns the `HashedPostState` of the provided [`BundleState`].
     fn hashed_post_state(&self, bundle_state: &BundleState) -> HashedPostState;
+
+    /// Returns the complete hashed state for the provided account addresses.
+    fn hashed_post_state_for_accounts(
+        &self,
+        _accounts: &[Address],
+    ) -> ProviderResult<HashedPostState> {
+        Err(ProviderError::UnsupportedProvider)
+    }
 }
 
 /// Trait for reading bytecode associated with a given code hash.

@@ -530,6 +530,13 @@ impl<C: Send + Sync, N: NodePrimitives> HashedPostStateProvider for NoopProvider
     fn hashed_post_state(&self, _bundle_state: &revm_database::BundleState) -> HashedPostState {
         HashedPostState::default()
     }
+
+    fn hashed_post_state_for_accounts(
+        &self,
+        _accounts: &[alloy_primitives::Address],
+    ) -> ProviderResult<HashedPostState> {
+        Ok(HashedPostState::default())
+    }
 }
 
 impl<C: Send + Sync, N: NodePrimitives> StateReader for NoopProvider<C, N> {
