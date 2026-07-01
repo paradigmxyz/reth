@@ -938,8 +938,7 @@ mod tests {
     fn historical_account_range_factory() -> ProviderFactory<MockNodeTypesWithDB> {
         use reth_execution_types::ExecutionOutcome;
         use reth_stages_types::{StageCheckpoint, StageId};
-        use revm::database::BundleState;
-        use revm_state::AccountInfo;
+        use revm::{database::BundleState, state::AccountInfo};
 
         let factory = create_test_provider_factory();
         {
