@@ -369,10 +369,10 @@ fn parse_engine_path(path: &str) -> Option<EngineSszEndpoint> {
         (Some("engine"), Some("v1"), Some("blobs"), version, None) => {
             Some(EngineSszEndpoint::Blobs(parse_method_version(version?)?))
         }
-        (Some("engine"), Some("v1"), Some("bodies"), Some("hash"), None, None) => {
+        (Some("engine"), Some("v1"), Some("bodies"), Some("hash"), None) => {
             Some(EngineSszEndpoint::PayloadBodiesByHash)
         }
-        (Some("engine"), Some("v1"), Some("bodies"), None, None, None) => {
+        (Some("engine"), Some("v1"), Some("bodies"), None, None) => {
             Some(EngineSszEndpoint::PayloadBodiesByRange)
         }
         _ => None,
