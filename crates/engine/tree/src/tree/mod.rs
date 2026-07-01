@@ -2154,7 +2154,7 @@ where
         let mut retained_paths = SparseTrieRetainedPaths::default();
         for block in self.state.tree_state.blocks_by_hash.values() {
             let trie_data = block.trie_data();
-            retained_paths.extend_from_hashed_state(&trie_data.hashed_state);
+            retained_paths.extend_from_changed_paths(&trie_data.changed_paths);
         }
         retained_paths
     }
