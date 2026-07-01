@@ -288,6 +288,11 @@ impl<N: NodeTypesWithDB> ProviderFactory<N> {
     /// No-op for read-write factories.
     pub fn sync_providers_if_needed(&self) -> ProviderResult<()> {
         let Some(sync_state) = &self.read_only_sync else { return Ok(()) };
+
+        self.sync_providers_with_state(sync_state)
+    }
+
+    fn sync_providers_with_state(&self, sync_state: &ReadOnlySyncState) -> ProviderResult<()> {
         let current_txnid = self.db.last_txnid().unwrap_or(0);
 
         // Fast path: no contention when nothing changed.
@@ -383,7 +388,9 @@ impl<N: ProviderNodeTypes> ProviderFactory<N> {
         //
         // Reorg logic ensures that no data is pruned from rocksdb or static files while there is an
         // mdbx transaction open that might rely on this data.
-        self.sync_providers_if_needed()?;
+        if let Some(sync_state) = &self.read_only_sync {
+            self.sync_providers_with_state(sync_state)?;
+        }
 
         Ok(DatabaseProvider::new(
             db_tx,
