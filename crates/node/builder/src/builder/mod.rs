@@ -243,7 +243,7 @@ impl<DB, ChainSpec: EthChainSpec> NodeBuilder<DB, ChainSpec> {
     /// Preconfigure the builder with the context to launch the node.
     ///
     /// This provides the task executor and the data directory for the node.
-    pub const fn with_launch_context(self, task_executor: TaskExecutor) -> WithLaunchContext<Self> {
+    pub fn with_launch_context(self, task_executor: TaskExecutor) -> WithLaunchContext<Self> {
         WithLaunchContext { builder: self, task_executor }
     }
 
@@ -367,7 +367,10 @@ where
     where
         T: NodeTypesForProvider<ChainSpec = ChainSpec>,
     {
-        WithLaunchContext { builder: self.builder.with_types(), task_executor: self.task_executor }
+        WithLaunchContext {
+            builder: self.builder.with_types(),
+            task_executor: self.task_executor.clone(),
+        }
     }
 
     /// Configures the types of the node and the provider type that will be used by the node.
@@ -380,7 +383,7 @@ where
     {
         WithLaunchContext {
             builder: self.builder.with_types_and_provider(),
-            task_executor: self.task_executor,
+            task_executor: self.task_executor.clone(),
         }
     }
 
@@ -439,7 +442,7 @@ impl<T: FullNodeTypes> WithLaunchContext<NodeBuilderWithTypes<T>> {
     {
         WithLaunchContext {
             builder: self.builder.with_components(components_builder),
-            task_executor: self.task_executor,
+            task_executor: self.task_executor.clone(),
         }
     }
 }
@@ -460,7 +463,7 @@ where
     {
         WithLaunchContext {
             builder: self.builder.with_add_ons(add_ons),
-            task_executor: self.task_executor,
+            task_executor: self.task_executor.clone(),
         }
     }
 }
@@ -538,7 +541,7 @@ where
     {
         Self {
             builder: self.builder.on_component_initialized(hook),
-            task_executor: self.task_executor,
+            task_executor: self.task_executor.clone(),
         }
     }
 
@@ -549,7 +552,10 @@ where
             + Send
             + 'static,
     {
-        Self { builder: self.builder.on_node_started(hook), task_executor: self.task_executor }
+        Self {
+            builder: self.builder.on_node_started(hook),
+            task_executor: self.task_executor.clone(),
+        }
     }
 
     /// Modifies the addons with the given closure.
@@ -578,7 +584,7 @@ where
     where
         F: FnOnce(AO) -> AO,
     {
-        Self { builder: self.builder.map_add_ons(f), task_executor: self.task_executor }
+        Self { builder: self.builder.map_add_ons(f), task_executor: self.task_executor.clone() }
     }
 
     /// Sets the hook that is run once the rpc server is started.
@@ -591,7 +597,10 @@ where
             + Send
             + 'static,
     {
-        Self { builder: self.builder.on_rpc_started(hook), task_executor: self.task_executor }
+        Self {
+            builder: self.builder.on_rpc_started(hook),
+            task_executor: self.task_executor.clone(),
+        }
     }
 
     /// Sets the hook that is run to configure the rpc modules.
@@ -634,7 +643,10 @@ where
             + Send
             + 'static,
     {
-        Self { builder: self.builder.extend_rpc_modules(hook), task_executor: self.task_executor }
+        Self {
+            builder: self.builder.extend_rpc_modules(hook),
+            task_executor: self.task_executor.clone(),
+        }
     }
 
     /// Installs an `ExEx` (Execution Extension) in the node.
@@ -650,7 +662,7 @@ where
     {
         Self {
             builder: self.builder.install_exex(exex_id, exex),
-            task_executor: self.task_executor,
+            task_executor: self.task_executor.clone(),
         }
     }
 
@@ -789,11 +801,19 @@ impl<Node: FullNodeTypes> BuilderContext<Node> {
         &self.config_container.toml_config
     }
 
-    /// Returns the executor of the node.
+    /// Returns the main executor of the node.
     ///
     /// This can be used to execute async tasks or functions during the setup.
     pub const fn task_executor(&self) -> &TaskExecutor {
         &self.executor
+    }
+
+    /// Returns the RPC/latency executor of the node.
+    ///
+    /// When a latency runtime is configured, this is the dedicated tokio runtime for the
+    /// sendRaw path. Otherwise, this is the same as [`Self::task_executor`].
+    pub fn rpc_task_executor(&self) -> TaskExecutor {
+        self.config_container.latency_runtime.clone().unwrap_or_else(|| self.executor.clone())
     }
 
     /// Returns the chain spec of the node.

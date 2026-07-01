@@ -41,6 +41,7 @@ pub struct EthApiBuilder<N: RpcNodeCore, Rpc, NextEnv = ()> {
     gas_oracle: Option<GasPriceOracle<N::Provider>>,
     blocking_task_pool: Option<BlockingTaskPool>,
     task_spawner: Runtime,
+    rpc_task_spawner: Option<Runtime>,
     next_env: NextEnv,
     max_batch_size: usize,
     max_blocking_io_requests: usize,
@@ -95,6 +96,7 @@ impl<N: RpcNodeCore, Rpc, NextEnv> EthApiBuilder<N, Rpc, NextEnv> {
             gas_oracle,
             blocking_task_pool,
             task_spawner,
+            rpc_task_spawner,
             next_env,
             max_batch_size,
             max_blocking_io_requests,
@@ -119,6 +121,7 @@ impl<N: RpcNodeCore, Rpc, NextEnv> EthApiBuilder<N, Rpc, NextEnv> {
             gas_oracle,
             blocking_task_pool,
             task_spawner,
+            rpc_task_spawner,
             next_env,
             max_batch_size,
             max_blocking_io_requests,
@@ -152,6 +155,7 @@ where
             fee_history_cache_config: FeeHistoryCacheConfig::default(),
             proof_permits: DEFAULT_PROOF_PERMITS,
             task_spawner: Runtime::test(),
+            rpc_task_spawner: None,
             gas_oracle_config: Default::default(),
             eth_state_cache_config: Default::default(),
             next_env: Default::default(),
@@ -176,6 +180,12 @@ where
         self
     }
 
+    /// Configures the task spawner used for latency-sensitive RPC work (e.g. tx-batcher).
+    pub fn rpc_task_spawner(mut self, spawner: Runtime) -> Self {
+        self.rpc_task_spawner = Some(spawner);
+        self
+    }
+
     /// Changes the configured converter.
     pub fn with_rpc_converter<RpcNew>(
         self,
@@ -195,6 +205,7 @@ where
             gas_oracle,
             blocking_task_pool,
             task_spawner,
+            rpc_task_spawner,
             gas_oracle_config,
             next_env,
             max_batch_size,
@@ -219,6 +230,7 @@ where
             gas_oracle,
             blocking_task_pool,
             task_spawner,
+            rpc_task_spawner,
             gas_oracle_config,
             next_env,
             max_batch_size,
@@ -250,6 +262,7 @@ where
             gas_oracle,
             blocking_task_pool,
             task_spawner,
+            rpc_task_spawner,
             gas_oracle_config,
             next_env: _,
             max_batch_size,
@@ -274,6 +287,7 @@ where
             gas_oracle,
             blocking_task_pool,
             task_spawner,
+            rpc_task_spawner,
             gas_oracle_config,
             next_env,
             max_batch_size,
@@ -523,6 +537,7 @@ where
             fee_history_cache_config,
             proof_permits,
             task_spawner,
+            rpc_task_spawner,
             next_env,
             max_batch_size,
             max_blocking_io_requests,
@@ -532,6 +547,8 @@ where
             evm_memory_limit,
             force_blob_sidecar_upcasting,
         } = self;
+
+        let batcher_spawner = rpc_task_spawner.unwrap_or_else(|| task_spawner.clone());
 
         let provider = components.provider().clone();
 
@@ -574,6 +591,7 @@ where
             }),
             fee_history_cache,
             task_spawner,
+            batcher_spawner,
             proof_permits,
             rpc_converter,
             next_env,

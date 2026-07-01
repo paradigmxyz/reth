@@ -44,6 +44,7 @@ use reth_rpc_builder::{
 };
 use reth_rpc_engine_api::{capabilities::EngineCapabilities, EngineApi};
 use reth_rpc_eth_types::{cache::cache_new_blocks_task, EthConfig, EthStateCache};
+use reth_tasks::TaskExecutor;
 use reth_tokio_util::EventSender;
 use reth_tracing::tracing::{debug, info};
 use std::{
@@ -957,7 +958,8 @@ where
         F: FnOnce(RpcModuleContainer<'_, N, EthB::EthApi>) -> eyre::Result<()>,
     {
         let rpc_middleware = self.rpc_middleware.clone();
-        let tokio_runtime = self.tokio_runtime.clone();
+        let explicit_tokio_runtime = self.tokio_runtime.clone();
+        let rpc_task_executor = ctx.rpc_task_executor.clone();
         let setup_ctx = self.setup_rpc_components(ctx, ext).await?;
         let RpcSetupContext {
             node,
@@ -970,6 +972,9 @@ where
             engine_events,
             engine_handle,
         } = setup_ctx;
+
+        let tokio_runtime =
+            resolve_tokio_runtime(explicit_tokio_runtime, config, &rpc_task_executor);
 
         let server_config = config
             .rpc
@@ -1029,7 +1034,8 @@ where
     {
         let rpc_middleware = self.rpc_middleware.clone();
         let auth_http_middleware = self.auth_http_middleware.clone();
-        let tokio_runtime = self.tokio_runtime.clone();
+        let explicit_tokio_runtime = self.tokio_runtime.clone();
+        let rpc_task_executor = ctx.rpc_task_executor.clone();
         let setup_ctx = self.setup_rpc_components(ctx, ext).await?;
         let RpcSetupContext {
             node,
@@ -1042,6 +1048,9 @@ where
             engine_events,
             engine_handle,
         } = setup_ctx;
+
+        let tokio_runtime =
+            resolve_tokio_runtime(explicit_tokio_runtime, config, &rpc_task_executor);
 
         let server_config = config
             .rpc
@@ -1099,7 +1108,9 @@ where
         let Self { eth_api_builder, engine_api_builder, hooks, .. } = self;
 
         let engine_api = engine_api_builder.build_engine_api(&ctx).await?;
-        let AddOnsContext { node, config, beacon_engine_handle, jwt_secret, engine_events } = ctx;
+        let rpc_task_spawner = ctx.rpc_task_executor.clone();
+        let AddOnsContext { node, config, beacon_engine_handle, jwt_secret, engine_events, .. } =
+            ctx;
 
         info!(target: "reth::cli", "Engine API handler initialized");
 
@@ -1121,6 +1132,7 @@ where
             config: eth_config,
             cache,
             engine_handle: beacon_engine_handle.clone(),
+            rpc_task_spawner,
         };
         let eth_api = eth_api_builder.build_eth_api(ctx).await?;
 
@@ -1281,6 +1293,19 @@ where
     }
 }
 
+/// Resolves the tokio runtime handle for jsonrpsee.
+///
+/// An explicit handle from [`RpcAddOns::with_tokio_runtime`] takes precedence. Otherwise, when
+/// latency worker threads are configured, the RPC executor handle is used automatically.
+fn resolve_tokio_runtime<ChainSpec>(
+    explicit: Option<tokio::runtime::Handle>,
+    config: &NodeConfig<ChainSpec>,
+    rpc_executor: &TaskExecutor,
+) -> Option<tokio::runtime::Handle> {
+    explicit
+        .or_else(|| (config.rpc.latency_worker_threads > 0).then(|| rpc_executor.handle().clone()))
+}
+
 /// `EthApiCtx` struct
 /// This struct is used to pass the necessary context to the `EthApiBuilder` to build the `EthApi`.
 #[derive(Debug)]
@@ -1293,6 +1318,8 @@ pub struct EthApiCtx<'a, N: FullNodeTypes> {
     pub cache: EthStateCache<PrimitivesTy<N::Types>>,
     /// Handle to the beacon consensus engine
     pub engine_handle: ConsensusEngineHandle<<N::Types as NodeTypes>::Payload>,
+    /// RPC/latency task spawner for sendRaw-sensitive work.
+    pub rpc_task_spawner: TaskExecutor,
 }
 
 impl<'a, N: FullNodeComponents<Types: NodeTypes<ChainSpec: Hardforks + EthereumHardforks>>>
@@ -1303,6 +1330,7 @@ impl<'a, N: FullNodeComponents<Types: NodeTypes<ChainSpec: Hardforks + EthereumH
         reth_rpc::EthApiBuilder::new_with_components(self.components.clone())
             .eth_cache(self.cache)
             .task_spawner(self.components.task_executor().clone())
+            .rpc_task_spawner(self.rpc_task_spawner.clone())
             .gas_cap(self.config.rpc_gas_cap.into())
             .max_simulate_blocks(self.config.rpc_max_simulate_blocks)
             .compute_state_root_for_eth_simulate(self.config.compute_state_root_for_eth_simulate)

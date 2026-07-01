@@ -98,7 +98,7 @@ impl EngineNodeLauncher {
         let disabled_stages = N::disabled_stages();
 
         // setup the launch context
-        let ctx = ctx
+        let mut ctx = ctx
             .with_configured_globals(engine_tree_config.reserved_cpu_cores())
             // load the toml config
             .with_loaded_toml_config(config)?
@@ -135,8 +135,11 @@ impl EngineNodeLauncher {
             // later the components.
             .with_blockchain_db::<T, _>(move |provider_factory| {
                 Ok(BlockchainProvider::new(provider_factory)?)
-            })?
-            .with_components(components_builder, on_component_initialized).await?;
+            })?;
+
+        ctx.ensure_latency_runtime()?;
+
+        let ctx = ctx.with_components(components_builder, on_component_initialized).await?;
 
         // spawn exexs if any
         let maybe_exex_manager_handle = ctx.launch_exex(installed_exex).await?;
@@ -199,6 +202,7 @@ impl EngineNodeLauncher {
         let add_ons_ctx = AddOnsContext {
             node: ctx.node_adapter().clone(),
             config: ctx.node_config(),
+            rpc_task_executor: ctx.rpc_task_executor(),
             beacon_engine_handle: beacon_engine_handle.clone(),
             jwt_secret,
             engine_events: event_sender.clone(),
@@ -429,6 +433,7 @@ impl EngineNodeLauncher {
             task_executor: ctx.task_executor().clone(),
             config: ctx.node_config().clone(),
             data_dir: ctx.data_dir().clone(),
+            latency_runtime: ctx.configs().latency_runtime.clone(),
             add_ons_handle: RpcHandle {
                 rpc_server_handles,
                 rpc_registry,
