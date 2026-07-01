@@ -3,7 +3,6 @@ use crate::metrics::ParallelStateRootMetrics;
 use crate::{stats::ParallelTrieTracker, storage_root_targets::StorageRootTargets};
 use alloy_primitives::B256;
 use alloy_rlp::{BufMut, Encodable};
-use itertools::Itertools;
 use reth_execution_errors::{SparseTrieError, StateProofError, StorageRootError};
 use reth_provider::{DatabaseProviderROFactory, ProviderError};
 use reth_storage_errors::db::DatabaseError;
@@ -98,9 +97,9 @@ where
 
         let handle = self.runtime.handle().clone();
 
-        for (hashed_address, prefix_set) in
-            storage_root_targets.into_iter().sorted_unstable_by_key(|(address, _)| *address)
-        {
+        let mut storage_root_targets = storage_root_targets.into_iter().collect::<Vec<_>>();
+        storage_root_targets.sort_unstable_by_key(|(address, _)| *address);
+        for (hashed_address, prefix_set) in storage_root_targets {
             let factory = self.factory.clone();
             #[cfg(feature = "metrics")]
             let metrics = self.metrics.storage_trie.clone();
