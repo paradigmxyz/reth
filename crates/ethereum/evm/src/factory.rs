@@ -143,8 +143,8 @@ impl<C, EvmFactory> EthBlockExecutorFactory<C, EvmFactory> {
 impl<C, EvmFactory> reth_evm::execute::BlockExecutorFactory
     for EthBlockExecutorFactory<C, EvmFactory>
 where
-    C: EthChainSpec<Header = Header> + EthExecutorSpec + Debug + Send + Sync + 'static,
-    EvmFactory: Clone + Debug + Send + Sync + Unpin + 'static,
+    C: EthChainSpec<Header = Header> + EthExecutorSpec,
+    EvmFactory: 'static,
 {
     type Primitives = EthPrimitives;
     type Transaction = EthTxEnv;
