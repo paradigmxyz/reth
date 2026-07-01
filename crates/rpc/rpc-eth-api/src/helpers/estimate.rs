@@ -31,6 +31,9 @@ use revm::{
     context_interface::{result::ExecutionResult, Cfg, Transaction},
     primitives::KECCAK_EMPTY,
 };
+// Bring `revm::Database::basic` into scope (the estimation `State` implements revm's `Database`)
+// for the maxFee-based allowance below, without shadowing the named `reth_evm::Database`.
+use revm::Database as _;
 use tracing::trace;
 
 /// Gas execution estimates
@@ -76,6 +79,12 @@ pub trait EstimateCall: Call {
         // Keep a copy of gas related request values
         let tx_request_gas_limit = request.as_ref().gas_limit();
         let tx_request_gas_price = request.as_ref().gas_price();
+        // Capture the fee cap (maxFeePerGas, falling back to gasPrice) before `create_txn_env`
+        // consumes `request`. The caller allowance below is gated by this value — matching
+        // op-geth's `feeCap` (`eth/gasestimator`) — instead of the effective gas price that the
+        // RPC path collapses `tx_env.gas_price()` to via `CallFees::ensure_fees`.
+        let fee_cap =
+            request.as_ref().max_fee_per_gas().or(request.as_ref().gas_price()).unwrap_or(0);
 
         // Configure the evm env
         let mut db = State::builder().with_database(StateProviderDatabase::new(state)).build();
@@ -130,11 +139,33 @@ pub trait EstimateCall: Call {
             false
         };
 
-        // Check funds of the sender (only useful to check if transaction gas price is more than 0).
-        //
-        // The caller allowance is check by doing `(account.balance - tx.value) / tx.gas_price`
-        if tx_env.gas_price() > 0 {
-            // cap the highest gas limit by max gas caller can afford with given gas price
+        // Check funds of the sender. The caller allowance is `(account.balance - tx.value) / feeCap`
+        // where `feeCap` is the *maxFeePerGas* (or legacy gasPrice), matching op-geth's
+        // `eth/gasestimator` — NOT the effective gas price. `tx_env.gas_price()` is collapsed to
+        // `min(maxFee, base + tip)` on the RPC path (`CallFees::ensure_fees`), which over-estimates
+        // the affordable gas and can return an estimate the caller cannot actually submit at that
+        // maxFee (reth's own tx validation requires `balance >= gas_limit * maxFee`).
+        // `balance_allowance` is tracked separately so the basic-transfer short-circuit can gate on
+        // affordability. When no fee is set (`fee_cap == 0`) the allowance is unbounded.
+        let balance_allowance: u64 = if fee_cap > 0 {
+            // Read the balance through the `State` overlay (so `stateOverride` balances apply).
+            let balance = db
+                .basic(tx_env.caller())
+                .map_err(Self::Error::from_eth_err)?
+                .map(|acc| acc.balance)
+                .unwrap_or_default();
+            balance
+                .saturating_sub(tx_env.value())
+                .checked_div(U256::from(fee_cap))
+                .unwrap_or_default()
+                .saturating_to()
+        } else {
+            u64::MAX
+        };
+        if fee_cap > 0 {
+            highest_gas_limit = highest_gas_limit.min(balance_allowance);
+        } else if tx_env.gas_price() > 0 {
+            // No explicit fee: preserve the existing effective-price gating.
             highest_gas_limit =
                 highest_gas_limit.min(self.caller_gas_allowance(&mut db, &evm_env, &tx_env)?);
         }
@@ -145,8 +176,12 @@ pub trait EstimateCall: Call {
         // Create EVM instance once and reuse it throughout the entire estimation process
         let mut evm = self.evm_config().evm_with_env(&mut db, evm_env);
 
-        // For basic transfers, try using minimum gas before running full binary search
-        if is_basic_transfer {
+        // For basic transfers, try using minimum gas before running full binary search — but only
+        // when the caller can afford 21000 gas at maxFeePerGas. Estimation disables fee charging,
+        // so this short-circuit's execution never checks the maxFee balance; gating on
+        // `balance_allowance` (not `highest_gas_limit`, which a low user-supplied `gas` can also
+        // reduce — geth ignores such a low `gas`) mirrors op-geth's `execute(21000)` buyGas check.
+        if is_basic_transfer && balance_allowance >= MIN_TRANSACTION_GAS {
             // If the tx is a simple transfer (call to an account with no code) we can
             // shortcircuit. But simply returning
             // `MIN_TRANSACTION_GAS` is dangerous because there might be additional
