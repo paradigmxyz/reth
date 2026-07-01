@@ -2699,9 +2699,23 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
     fn write_hashed_state(&self, hashed_state: &HashedPostStateSorted) -> ProviderResult<()> {
         // Write hashed account updates.
         let mut hashed_accounts_cursor = self.tx_ref().cursor_write::<tables::HashedAccounts>()?;
+        let mut hashed_accounts_tail = if hashed_state.accounts().is_empty() {
+            None
+        } else {
+            hashed_accounts_cursor.last()?.map(|(key, _)| key)
+        };
         for (hashed_address, account) in hashed_state.accounts() {
+            let is_after_tail = hashed_accounts_tail.map_or(true, |tail| *hashed_address > tail);
+
             if let Some(account) = account {
-                hashed_accounts_cursor.upsert(*hashed_address, account)?;
+                if is_after_tail {
+                    hashed_accounts_cursor.append(*hashed_address, account)?;
+                    hashed_accounts_tail = Some(*hashed_address);
+                } else {
+                    hashed_accounts_cursor.upsert(*hashed_address, account)?;
+                }
+            } else if is_after_tail {
+                // A deleted account above the pre-existing table tail cannot already have a row.
             } else if hashed_accounts_cursor.seek_exact(*hashed_address)?.is_some() {
                 hashed_accounts_cursor.delete_current()?;
             }
@@ -4903,6 +4917,46 @@ mod tests {
             .expect("entry should exist");
         assert_eq!(entry.key, hashed_slot);
         assert_eq!(entry.value, old_value);
+    }
+
+    #[test]
+    fn test_write_hashed_state_uses_account_tail_for_new_rows() {
+        let factory = create_test_provider_factory();
+        let provider_rw = factory.provider_rw().unwrap();
+
+        let account = |nonce| Account { nonce, balance: U256::from(nonce), bytecode_hash: None };
+        let below_tail = B256::with_last_byte(5);
+        let tail = B256::with_last_byte(10);
+        let above_tail = B256::with_last_byte(20);
+        let deleted_above_tail = B256::with_last_byte(30);
+
+        provider_rw
+            .tx
+            .cursor_write::<tables::HashedAccounts>()
+            .unwrap()
+            .upsert(tail, &account(1))
+            .unwrap();
+
+        let hashed_state = HashedPostStateSorted::new(
+            vec![
+                (below_tail, Some(account(5))),
+                (tail, Some(account(10))),
+                (above_tail, Some(account(20))),
+                (deleted_above_tail, None),
+            ],
+            B256Map::default(),
+        );
+
+        provider_rw.write_hashed_state(&hashed_state).unwrap();
+
+        let mut cursor = provider_rw.tx.cursor_read::<tables::HashedAccounts>().unwrap();
+        assert_eq!(cursor.seek_exact(below_tail).unwrap().unwrap().1.nonce, 5);
+        assert_eq!(cursor.seek_exact(tail).unwrap().unwrap().1.nonce, 10);
+        assert_eq!(cursor.seek_exact(above_tail).unwrap().unwrap().1.nonce, 20);
+        assert!(cursor.seek_exact(deleted_above_tail).unwrap().is_none());
+        drop(cursor);
+
+        assert_eq!(provider_rw.tx.entries::<tables::HashedAccounts>().unwrap(), 3);
     }
 
     #[test]
