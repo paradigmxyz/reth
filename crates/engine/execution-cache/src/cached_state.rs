@@ -1009,14 +1009,22 @@ impl ExecutionCache {
     #[instrument(level = "debug", target = "engine::caching", skip_all)]
     #[expect(clippy::result_unit_err)]
     pub fn insert_state(&self, state_updates: &BundleState) -> Result<(), ()> {
-        let _enter =
-            debug_span!(target: "engine::tree", "contracts", len = state_updates.contracts.len())
-                .entered();
-        // Insert bytecodes
-        for (code_hash, bytecode) in &state_updates.contracts {
-            self.insert_code(*code_hash, Some(Bytecode(bytecode.clone())));
+        if !state_updates.contracts.is_empty() {
+            let _enter = debug_span!(
+                target: "engine::tree",
+                "contracts",
+                len = state_updates.contracts.len()
+            )
+            .entered();
+            // Insert bytecodes
+            for (code_hash, bytecode) in &state_updates.contracts {
+                self.insert_code(*code_hash, Some(Bytecode(bytecode.clone())));
+            }
         }
-        drop(_enter);
+
+        if state_updates.state.is_empty() {
+            return Ok(())
+        }
 
         let _enter = debug_span!(
             target: "engine::tree",
