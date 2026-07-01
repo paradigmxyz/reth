@@ -276,7 +276,7 @@ pub trait ConfigureEvm: Clone + Debug + Send + Sync + Unpin {
 
     /// Creates a block builder for a configured EVM and execution context.
     #[cfg(feature = "std")]
-    fn create_block_builder<'a, DB>(
+    fn create_block_builder<'a>(
         &'a self,
         evm: evm2::Evm<evm2::BaseEvmTypes>,
         evm_env: EvmEnvFor<Self>,
@@ -288,8 +288,6 @@ pub trait ConfigureEvm: Clone + Debug + Send + Sync + Unpin {
         Self: 'a,
         Self::BlockExecutorFactory:
             crate::execute::BlockExecutorFactory<ExecutionCtx<'a> = ExecutionCtxFor<'a, Self>>,
-        DB: evm2::evm::Database + Clone + 'static,
-        DB::Error: core::error::Error + Send + Sync + 'static,
     {
         BasicBlockBuilder {
             executor: self.create_executor(evm, ctx.clone(), hashed_state_mode),
@@ -324,7 +322,7 @@ pub trait ConfigureEvm: Clone + Debug + Send + Sync + Unpin {
         let evm_env = self.next_evm_env(parent, &attributes)?;
         let evm = self.evm_with_env(evm2::evm::Db::new(db), evm_env.clone());
         let ctx = self.context_for_next_block(parent, attributes)?;
-        Ok(self.create_block_builder::<DB>(evm, evm_env, parent, ctx, hashed_state_mode))
+        Ok(self.create_block_builder(evm, evm_env, parent, ctx, hashed_state_mode))
     }
 
     /// Creates an EVM instance for single-transaction execution with an inspector.
