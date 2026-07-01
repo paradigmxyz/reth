@@ -48,6 +48,17 @@ where
         return;
     }
 
+    if target.len() == other.len()
+        && target.first().map(|(k, _)| k) == other.first().map(|(k, _)| k)
+        && target.last().map(|(k, _)| k) == other.last().map(|(k, _)| k)
+        && target.iter().zip(other).all(|((left, _), (right, _))| left == right)
+    {
+        for ((_, target_value), (_, other_value)) in target.iter_mut().zip(other) {
+            *target_value = other_value.clone();
+        }
+        return;
+    }
+
     // Move ownership of target to avoid cloning owned elements
     let left = core::mem::take(target);
     let mut out = Vec::with_capacity(left.len() + other.len());
@@ -113,6 +124,18 @@ mod tests {
         extend_sorted_vec(&mut target, &other);
         // other takes precedence
         assert_eq!(target, vec![(1, "new1"), (2, "new2"), (3, "new3")]);
+    }
+
+    #[test]
+    fn test_extend_sorted_vec_identical_keys_keeps_allocation() {
+        let mut target = vec![(1, String::from("old1")), (2, String::from("old2"))];
+        let capacity = target.capacity();
+        let other = vec![(1, String::from("new1")), (2, String::from("new2"))];
+
+        extend_sorted_vec(&mut target, &other);
+
+        assert_eq!(target, vec![(1, String::from("new1")), (2, String::from("new2"))]);
+        assert_eq!(target.capacity(), capacity);
     }
 
     #[test]
