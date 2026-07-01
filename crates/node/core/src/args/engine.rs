@@ -385,6 +385,10 @@ pub struct EngineArgs {
     #[arg(long = "engine.accept-execution-requests-hash", default_value_t = DefaultEngineValues::get_global().accept_execution_requests_hash)]
     pub accept_execution_requests_hash: bool,
 
+    /// Enable the SSZ Engine API HTTP proxy.
+    #[arg(long = "engine.enable-ssz-proxy", default_value_t = false)]
+    pub enable_ssz_proxy: bool,
+
     /// Multiproof task chunk size for proof targets.
     #[arg(long = "engine.multiproof-chunk-size", default_value_t = DefaultEngineValues::get_global().multiproof_chunk_size, value_parser = RangedU64ValueParser::<usize>::new().range(1..))]
     pub multiproof_chunk_size: usize,
@@ -602,6 +606,7 @@ impl Default for EngineArgs {
             state_provider_metrics,
             cross_block_cache_size,
             accept_execution_requests_hash,
+            enable_ssz_proxy: false,
             multiproof_chunk_size,
             reserved_cpu_cores,
             precompile_cache_enabled: true,
@@ -790,6 +795,7 @@ mod tests {
             cross_block_cache_size: 256,
             state_root_task_compare_updates: true,
             accept_execution_requests_hash: true,
+            enable_ssz_proxy: true,
             multiproof_chunk_size: 512,
             reserved_cpu_cores: 4,
             precompile_cache_enabled: true,
@@ -834,6 +840,7 @@ mod tests {
             "256",
             "--engine.state-root-task-compare-updates",
             "--engine.accept-execution-requests-hash",
+            "--engine.enable-ssz-proxy",
             "--engine.multiproof-chunk-size",
             "512",
             "--engine.reserved-cpu-cores",

@@ -1,6 +1,9 @@
 //! Ethereum Node types config.
 
-use crate::{EthEngineTypes, EthEvmConfig};
+use crate::{
+    engine_ssz_proxy::{EngineSszApi, EngineSszProxyLayer},
+    EthEngineTypes, EthEvmConfig,
+};
 use alloy_eips::{eip7840::BlobParams, merge::EPOCH_SLOTS};
 use alloy_network::Ethereum;
 use alloy_rpc_types_engine::ExecutionData;
@@ -31,9 +34,9 @@ use reth_node_builder::{
         BasicEngineApiBuilder, BasicEngineValidatorBuilder, Either, EngineApiBuilder,
         EngineValidatorAddOn, EngineValidatorBuilder, EthApiBuilder, EthApiCtx, Identity,
         PayloadValidatorBuilder, RethAuthHttpMiddleware, RethRpcAddOns, RethRpcMiddleware,
-        RpcAddOns, RpcHandle, Stack,
+        RpcAddOns, RpcHandle, RpcModuleContainer, Stack,
     },
-    BuilderContext, DebugNode, Node, NodeAdapter, PayloadBuilderConfig,
+    BuilderContext, DebugNode, EngineApiExt, Node, NodeAdapter, PayloadBuilderConfig,
 };
 use reth_node_core::args::JitArgs;
 use reth_payload_primitives::PayloadTypes;
@@ -234,6 +237,15 @@ where
         EthereumAddOns::new(inner.with_engine_api(engine_api_builder))
     }
 
+    /// Maps the configured engine API builder.
+    pub fn map_engine_api<T>(
+        self,
+        f: impl FnOnce(EB) -> T,
+    ) -> EthereumAddOns<N, EthB, PVB, T, EVB, RpcMiddleware, AuthHttpMiddleware> {
+        let Self { inner } = self;
+        EthereumAddOns::new(inner.map_engine_api(f))
+    }
+
     /// Replace the payload validator builder.
     pub fn with_payload_validator<V, T>(
         self,
@@ -317,11 +329,13 @@ where
     EthB: EthApiBuilder<N>,
     PVB: Send,
     EB: EngineApiBuilder<N>,
+    EB::EngineApi: EngineSszApi,
     EVB: EngineValidatorBuilder<N>,
     EthApiError: FromEvmError<N::Evm>,
     EvmFactoryFor<N::Evm>: EvmFactory<Tx = TxEnv>,
     RpcMiddleware: RethRpcMiddleware,
     AuthHttpMiddleware: RethAuthHttpMiddleware<Identity>,
+    Stack<AuthHttpMiddleware, EngineSszProxyLayer<EB::EngineApi>>: RethAuthHttpMiddleware<Identity>,
 {
     type Handle = RpcHandle<N, EthB::EthApi>;
 
@@ -329,6 +343,8 @@ where
         self,
         ctx: reth_node_api::AddOnsContext<'_, N>,
     ) -> eyre::Result<Self::Handle> {
+        let ssz_proxy_enabled = ctx.config.engine.enable_ssz_proxy;
+
         let validation_api = ValidationApi::<_, _, <N::Types as NodeTypes>::Payload>::new(
             ctx.node.provider().clone(),
             Arc::new(ctx.node.consensus().clone()),
@@ -346,38 +362,50 @@ where
         let testing_desired_gas_limit = ctx.config.builder.gas_limit_for(ctx.config.chain.chain());
         let testing_engine_handle = ctx.beacon_engine_handle.clone();
 
-        self.inner
-            .launch_add_ons_with(ctx, move |container| {
-                container.modules.merge_if_module_configured(
-                    RethRpcModule::Flashbots,
-                    validation_api.into_rpc(),
-                )?;
+        let extend_rpc_modules = move |container: RpcModuleContainer<'_, N, EthB::EthApi>| {
+            container
+                .modules
+                .merge_if_module_configured(RethRpcModule::Flashbots, validation_api.into_rpc())?;
 
-                container
-                    .modules
-                    .merge_if_module_configured(RethRpcModule::Eth, eth_config.into_rpc())?;
+            container
+                .modules
+                .merge_if_module_configured(RethRpcModule::Eth, eth_config.into_rpc())?;
 
-                // testing_buildBlockV1: only wire when the hidden testing module is explicitly
-                // requested on any transport. Default stays disabled to honor security guidance.
-                let mut testing_api = TestingApi::new(
-                    container.registry.eth_api().clone(),
-                    container.registry.evm_config().clone(),
-                    testing_desired_gas_limit,
-                    testing_engine_handle,
-                );
-                if testing_skip_invalid_transactions {
-                    testing_api = testing_api.with_skip_invalid_transactions();
-                }
-                if let Some(gas_limit) = testing_gas_limit_override {
-                    testing_api = testing_api.with_gas_limit_override(gas_limit);
-                }
-                container
-                    .modules
-                    .merge_if_module_configured(RethRpcModule::Testing, testing_api.into_rpc())?;
+            // testing_buildBlockV1: only wire when the hidden testing module is explicitly
+            // requested on any transport. Default stays disabled to honor security guidance.
+            let mut testing_api = TestingApi::new(
+                container.registry.eth_api().clone(),
+                container.registry.evm_config().clone(),
+                testing_desired_gas_limit,
+                testing_engine_handle,
+            );
+            if testing_skip_invalid_transactions {
+                testing_api = testing_api.with_skip_invalid_transactions();
+            }
+            if let Some(gas_limit) = testing_gas_limit_override {
+                testing_api = testing_api.with_gas_limit_override(gas_limit);
+            }
+            container
+                .modules
+                .merge_if_module_configured(RethRpcModule::Testing, testing_api.into_rpc())?;
 
-                Ok(())
-            })
-            .await
+            Ok(())
+        };
+
+        if ssz_proxy_enabled {
+            let (ssz_proxy_layer, ssz_proxy_handle) = EngineSszProxyLayer::new();
+            self.inner
+                .map_engine_api(|engine_api_builder| {
+                    EngineApiExt::new(engine_api_builder, move |engine_api| {
+                        ssz_proxy_handle.set_engine_api_sync(engine_api);
+                    })
+                })
+                .layer_auth_http_middleware(ssz_proxy_layer)
+                .launch_add_ons_with(ctx, extend_rpc_modules)
+                .await
+        } else {
+            self.inner.launch_add_ons_with(ctx, extend_rpc_modules).await
+        }
     }
 }
 
@@ -395,11 +423,13 @@ where
     EthB: EthApiBuilder<N>,
     PVB: PayloadValidatorBuilder<N>,
     EB: EngineApiBuilder<N>,
+    EB::EngineApi: EngineSszApi,
     EVB: EngineValidatorBuilder<N>,
     EthApiError: FromEvmError<N::Evm>,
     EvmFactoryFor<N::Evm>: EvmFactory<Tx = TxEnv>,
     RpcMiddleware: RethRpcMiddleware,
     AuthHttpMiddleware: RethAuthHttpMiddleware<Identity>,
+    Stack<AuthHttpMiddleware, EngineSszProxyLayer<EB::EngineApi>>: RethAuthHttpMiddleware<Identity>,
 {
     type EthApi = EthB::EthApi;
 
