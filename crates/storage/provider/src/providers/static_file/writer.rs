@@ -1092,18 +1092,19 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
         tx_num: TxNumber,
         value: V,
     ) -> ProviderResult<()> {
-        if let Some(range) = self.writer.user_header().tx_range() {
+        let header = self.writer.user_header_mut();
+        if let Some(range) = header.tx_range() {
             let next_tx = range.end() + 1;
             if next_tx != tx_num {
                 return Err(ProviderError::UnexpectedStaticFileTxNumber(
-                    self.writer.user_header().segment(),
+                    header.segment(),
                     tx_num,
                     next_tx,
                 ))
             }
-            self.writer.user_header_mut().increment_tx();
+            header.increment_tx();
         } else {
-            self.writer.user_header_mut().set_tx_range(tx_num, tx_num);
+            header.set_tx_range(tx_num, tx_num);
         }
 
         self.append_column(value)?;
