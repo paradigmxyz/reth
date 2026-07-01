@@ -20,6 +20,9 @@ pub use deferred_trie::*;
 mod state_trie_overlay;
 pub use state_trie_overlay::*;
 
+mod preserved_sparse_trie;
+pub use preserved_sparse_trie::*;
+
 mod noop;
 
 mod chain_info;

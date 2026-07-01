@@ -116,12 +116,12 @@ where
         &mut self,
         item: EthBroadcastMessage<N>,
     ) -> Result<(), EthStreamError> {
-        self.conn.start_send_unpin(self.eth.encode_broadcast(item)).map_err(Into::into)
+        self.conn.start_send_unpin(item.encoded()).map_err(Into::into)
     }
 
     /// Sends a raw capability message over the connection.
     pub fn start_send_raw(&mut self, msg: RawCapabilityMessage) -> Result<(), EthStreamError> {
-        self.conn.start_send_unpin(self.eth.encode_raw(msg)).map_err(Into::into)
+        self.conn.start_send_unpin(msg.encoded()).map_err(Into::into)
     }
 }
 
@@ -209,8 +209,8 @@ where
 ///
 /// The stream forwards every combined id below the snap offset to the eth codec and treats every
 /// id at or above it as snap, so any other shared capability before `eth`, between `eth` and
-/// `snap/2`, or after `snap/2` would be mis-routed. Such layouts belong on the general-purpose
-/// satellite multiplexer and are rejected here.
+/// `snap/2`, or after `snap/2` would be routed incorrectly. Such layouts belong on the
+/// general-purpose satellite multiplexer and are rejected here.
 fn eth_snap_layout(caps: &SharedCapabilities) -> Result<u8, EthStreamError> {
     let snap = caps
         .ensure_matching_capability(&Capability::snap_2())
@@ -297,8 +297,9 @@ mod tests {
 
     #[test]
     fn eth_snap_layout_rejects_capability_after_snap() {
-        // "zzz" sorts after "snap"; eth+snap still line up, but its frames would be mis-routed as
-        // snap, so the layout must be rejected (it belongs on the satellite multiplexer).
+        // "zzz" sorts after "snap"; eth+snap still line up, but its frames would be routed
+        // incorrectly as snap, so the layout must be rejected (it belongs on the satellite
+        // multiplexer).
         let cap = Capability::new_static("zzz", 1);
         let caps = shared_caps(
             vec![EthVersion::Eth68.into(), Protocol::snap_2(), Protocol::new(cap.clone(), 5)],
