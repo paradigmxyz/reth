@@ -118,7 +118,7 @@ where
             let (header, body) = block.split_sealed_header_body();
             let block = P::Block::new_sealed(header, body).with_senders(senders);
 
-            let result = executor.execute_one(&block).map_err(evm_error)?;
+            let result = executor.execute_one(&block)?;
             execution_duration += execute_start.elapsed();
 
             results.push(result);
@@ -224,14 +224,10 @@ where
         // outlive the state provider borrowed here.
         let database = unsafe { SharedEvmStateProviderDatabase::new(&*state_provider) };
         let block_execution_output =
-            self.evm_config.executor(database).execute(&block_with_senders).map_err(evm_error)?;
+            self.evm_config.executor(database).execute(&block_with_senders)?;
 
         Ok((block_with_senders, block_execution_output))
     }
-}
-
-fn evm_error(error: impl core::error::Error) -> BlockExecutionError {
-    BlockExecutionError::other(std::io::Error::other(error.to_string()))
 }
 
 impl<E, P> From<BackfillJob<E, P>> for SingleBlockBackfillJob<E, P> {
