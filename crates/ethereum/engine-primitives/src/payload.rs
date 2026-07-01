@@ -15,7 +15,7 @@ use alloy_rpc_types_engine::{
     PraguePayloadFields,
 };
 use reth_ethereum_primitives::EthPrimitives;
-use reth_payload_primitives::{BuiltPayload, BuiltPayloadExecutedBlock};
+use reth_payload_primitives::BuiltPayload;
 use reth_primitives_traits::{NodePrimitives, RecoveredBlock, SealedBlock};
 
 use crate::BuiltPayloadConversionError;
@@ -40,8 +40,6 @@ pub struct EthBuiltPayload<N: NodePrimitives = EthPrimitives> {
     pub(crate) requests: Option<Requests>,
     /// The block access list of the payload
     pub(crate) block_access_list: Option<Bytes>,
-    /// Executed block data, if the payload builder tracked it.
-    pub(crate) executed_block: Option<BuiltPayloadExecutedBlock<N>>,
 }
 
 // === impl BuiltPayload ===
@@ -56,14 +54,7 @@ impl<N: NodePrimitives> EthBuiltPayload<N> {
         requests: Option<Requests>,
         block_access_list: Option<Bytes>,
     ) -> Self {
-        Self {
-            block,
-            fees,
-            requests,
-            sidecars: BlobSidecars::Empty,
-            block_access_list,
-            executed_block: None,
-        }
+        Self { block, fees, requests, sidecars: BlobSidecars::Empty, block_access_list }
     }
 
     /// Returns the built block(sealed)
@@ -99,12 +90,6 @@ impl<N: NodePrimitives> EthBuiltPayload<N> {
     /// Sets blob transactions sidecars on the payload.
     pub fn with_sidecars(mut self, sidecars: impl Into<BlobSidecars>) -> Self {
         self.sidecars = sidecars.into();
-        self
-    }
-
-    /// Sets the executed block data for this payload.
-    pub fn with_executed_block(mut self, executed_block: BuiltPayloadExecutedBlock<N>) -> Self {
-        self.executed_block = Some(executed_block);
         self
     }
 }
@@ -269,10 +254,6 @@ impl<N: NodePrimitives> BuiltPayload for EthBuiltPayload<N> {
 
     fn block_access_list(&self) -> Option<&Bytes> {
         self.block_access_list.as_ref()
-    }
-
-    fn executed_block(&self) -> Option<BuiltPayloadExecutedBlock<Self::Primitives>> {
-        self.executed_block.clone()
     }
 
     fn requests(&self) -> Option<Requests> {
@@ -441,9 +422,7 @@ impl From<alloc::vec::IntoIter<BlobTransactionSidecarEip7594>> for BlobSidecars 
 mod tests {
     use super::*;
     use alloy_primitives::B256;
-    use reth_execution_types::BlockExecutionOutput;
     use reth_primitives_traits::{Block as _, RecoveredBlock};
-    use reth_trie_common::{updates::TrieUpdates, HashedPostState, TrieChangedPaths};
 
     #[test]
     fn into_execution_data_preserves_requests() {
@@ -488,31 +467,6 @@ mod tests {
         let execution_data: ExecutionData = payload.into();
 
         assert_eq!(execution_data.payload.block_access_list(), Some(&block_access_list));
-    }
-
-    #[test]
-    fn eth_built_payload_preserves_executed_block_changed_paths() {
-        let block = Arc::new(RecoveredBlock::new_sealed(
-            reth_ethereum_primitives::Block::default().seal_slow(),
-            vec![],
-        ));
-        let changed_paths = Arc::new(TrieChangedPaths::default());
-        let executed_block: BuiltPayloadExecutedBlock<EthPrimitives> = BuiltPayloadExecutedBlock {
-            recovered_block: block.clone(),
-            execution_output: Arc::new(BlockExecutionOutput {
-                result: Default::default(),
-                state: Default::default(),
-            }),
-            hashed_state: Arc::new(HashedPostState::default()),
-            trie_updates: Arc::new(TrieUpdates::default()),
-            changed_paths: Some(changed_paths.clone()),
-        };
-
-        let payload =
-            EthBuiltPayload::new(block, U256::ZERO, None, None).with_executed_block(executed_block);
-
-        let executed_block = payload.executed_block().unwrap();
-        assert!(Arc::ptr_eq(executed_block.changed_paths.as_ref().unwrap(), &changed_paths));
     }
 
     #[test]

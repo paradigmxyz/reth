@@ -27,10 +27,9 @@ use reth_evm::{
 };
 use reth_evm_ethereum::EthEvmConfig;
 use reth_execution_cache::{CachedStateMetrics, CachedStateMetricsSource, CachedStateProvider};
-use reth_execution_types::BlockExecutionOutput;
 use reth_payload_builder::{BlobSidecars, EthBuiltPayload};
 use reth_payload_builder_primitives::PayloadBuilderError;
-use reth_payload_primitives::{BuiltPayloadExecutedBlock, PayloadAttributes};
+use reth_payload_primitives::PayloadAttributes;
 use reth_primitives_traits::transaction::error::InvalidTransactionError;
 use reth_revm::{database::StateProviderDatabase, db::State};
 use reth_storage_api::StateProviderFactory;
@@ -450,14 +449,8 @@ where
         return Ok(BuildOutcome::Aborted { fees: total_fees, cached_reads })
     }
 
-    let mut changed_paths = None;
-    let BlockBuilderOutcome {
-        execution_result,
-        hashed_state,
-        trie_updates,
-        block,
-        block_access_list,
-    } = if skip_state_root {
+    let BlockBuilderOutcome { execution_result, block, block_access_list, .. } = if skip_state_root
+    {
         debug!(
             target: "payload_builder",
             id = %payload_id,
@@ -478,11 +471,11 @@ where
         // Fall back to sync state root if the trie pipeline fails.
         match handle.state_root() {
             Ok(outcome) => {
-                let state_root = outcome.state_root;
-                let trie_updates = Arc::unwrap_or_clone(outcome.trie_updates);
-                changed_paths = outcome.changed_paths;
-                debug!(target: "payload_builder", id=%payload_id, state_root=?state_root, "received state root from sparse trie");
-                builder.finish(state_provider.as_ref(), Some((state_root, trie_updates)))?
+                debug!(target: "payload_builder", id=%payload_id, state_root=?outcome.state_root, "received state root from sparse trie");
+                builder.finish(
+                    state_provider.as_ref(),
+                    Some((outcome.state_root, Arc::unwrap_or_clone(outcome.trie_updates))),
+                )?
             }
             Err(err) => {
                 warn!(target: "payload_builder", id=%payload_id, %err, "sparse trie failed, falling back to sync state root");
@@ -495,7 +488,7 @@ where
 
     let requests = chain_spec
         .is_prague_active_at_timestamp(attributes.timestamp)
-        .then(|| execution_result.requests.clone());
+        .then_some(execution_result.requests);
 
     debug!(target: "payload_builder", id=%payload_id, sealed_block_header = ?block.sealed_header(), "sealed built block");
 
@@ -508,18 +501,7 @@ where
 
     let block_access_list: Option<Bytes> =
         block_access_list.map(|block_access_list| alloy_rlp::encode(&block_access_list).into());
-    let recovered_block = Arc::new(block);
-    let execution_output =
-        Arc::new(BlockExecutionOutput { state: db.take_bundle(), result: execution_result });
-    let executed_block = BuiltPayloadExecutedBlock {
-        recovered_block: recovered_block.clone(),
-        execution_output,
-        hashed_state: Arc::new(hashed_state),
-        trie_updates: Arc::new(trie_updates),
-        changed_paths,
-    };
-    let payload = EthBuiltPayload::new(recovered_block, total_fees, requests, block_access_list)
-        .with_executed_block(executed_block)
+    let payload = EthBuiltPayload::new(Arc::new(block), total_fees, requests, block_access_list)
         // add blob sidecars from the executed txs
         .with_sidecars(blob_sidecars);
 

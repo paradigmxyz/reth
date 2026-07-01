@@ -27,8 +27,6 @@ serde.workspace = true
 thiserror.workspace = true
 
 [dev-dependencies]
-reth-execution-types.workspace = true
-reth-trie-common.workspace = true
 serde_json.workspace = true
 
 [features]
@@ -43,6 +41,4 @@ std = [
     "thiserror/std",
     "reth-engine-primitives/std",
     "reth-primitives-traits/std",
-    "reth-execution-types/std",
-    "reth-trie-common/std",
 ]
