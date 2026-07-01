@@ -181,13 +181,15 @@ impl ProofWorkerHandle {
         let (storage_work_tx, storage_work_rx) = unbounded::<StorageWorkerJob>();
         let (account_work_tx, account_work_rx) = unbounded::<AccountWorkerJob>();
 
-        let cached_storage_roots = Arc::<DashMap<_, _>>::default();
-
         let divisor = if halve_workers { 2 } else { 1 };
         let storage_worker_count =
             runtime.proof_storage_worker_pool().current_num_threads() / divisor;
         let account_worker_count =
             runtime.proof_account_worker_pool().current_num_threads() / divisor;
+        let cached_storage_roots = Arc::<DashMap<B256, B256>>::new(DashMap::with_capacity_and_hasher(
+            proof_storage_root_cache_capacity(storage_worker_count, account_worker_count),
+            Default::default(),
+        ));
 
         let storage_availability = Arc::new(AvailabilitySheet::new(storage_worker_count));
         let account_availability = Arc::new(AvailabilitySheet::new(account_worker_count));
@@ -370,6 +372,13 @@ impl ProofWorkerHandle {
                 error
             })
     }
+}
+
+fn proof_storage_root_cache_capacity(
+    storage_worker_count: usize,
+    account_worker_count: usize,
+) -> usize {
+    storage_worker_count.saturating_add(account_worker_count).max(1)
 }
 
 /// Data used for initializing cursor factories that is shared across all proof worker instances.
@@ -1161,6 +1170,13 @@ mod tests {
 
     fn test_ctx<Factory>(factory: Factory) -> ProofTaskCtx<Factory> {
         ProofTaskCtx::new(factory)
+    }
+
+    #[test]
+    fn proof_storage_root_cache_capacity_tracks_workers() {
+        assert_eq!(proof_storage_root_cache_capacity(0, 0), 1);
+        assert_eq!(proof_storage_root_cache_capacity(4, 6), 10);
+        assert_eq!(proof_storage_root_cache_capacity(usize::MAX, 2), usize::MAX);
     }
 
     /// Ensures `ProofWorkerHandle::new` spawns workers correctly.
