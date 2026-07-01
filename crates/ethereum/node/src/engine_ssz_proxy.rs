@@ -43,6 +43,7 @@ const OCTET_STREAM: &str = "application/octet-stream";
 const APPLICATION_JSON: &str = "application/json";
 const TEXT_PLAIN: &str = "text/plain";
 const CONTENT_TYPE: &str = "content-type";
+const ETH_EXECUTION_VERSION: &str = "eth-execution-version";
 
 const STATUS_OK: u16 = 200;
 const STATUS_BAD_REQUEST: u16 = 400;
@@ -256,10 +257,13 @@ where
             };
             handle_get_blobs(engine_api, version, &body).await
         }
-        EngineSszEndpoint::PayloadBodiesByHash(fork) => {
+        EngineSszEndpoint::PayloadBodiesByHash => {
             if method != "POST" {
                 return text_response(STATUS_METHOD_NOT_ALLOWED, "method not allowed")
             }
+            let Some(fork) = request_fork(&request) else {
+                return text_response(STATUS_BAD_REQUEST, "unsupported fork")
+            };
             let request = match request.into_body().collect().await.map(|body| body.to_bytes()) {
                 Ok(body) => match BodiesByHashRequest::from_ssz_bytes(&body) {
                     Ok(request) => {
@@ -274,10 +278,13 @@ where
             };
             handle_get_payload_bodies(engine_api, fork, request).await
         }
-        EngineSszEndpoint::PayloadBodiesByRange(fork) => {
+        EngineSszEndpoint::PayloadBodiesByRange => {
             if method != "GET" {
                 return text_response(STATUS_METHOD_NOT_ALLOWED, "method not allowed")
             }
+            let Some(fork) = request_fork(&request) else {
+                return text_response(STATUS_BAD_REQUEST, "unsupported fork")
+            };
 
             let Some(query) = request.uri().query() else {
                 return text_response(STATUS_BAD_REQUEST, "missing payload bodies query")
@@ -334,6 +341,10 @@ where
     }
 }
 
+fn request_fork(request: &HttpRequest) -> Option<EngineSszFork> {
+    request.headers().get(ETH_EXECUTION_VERSION)?.to_str().ok()?.parse().ok()
+}
+
 fn parse_engine_path(path: &str) -> Option<EngineSszEndpoint> {
     let mut segments = path.trim_start_matches('/').split('/');
     match (
@@ -359,11 +370,11 @@ fn parse_engine_path(path: &str) -> Option<EngineSszEndpoint> {
         (Some("engine"), Some("v2"), Some("blobs"), version, None, None) => {
             Some(EngineSszEndpoint::Blobs(parse_method_version(version?)?))
         }
-        (Some("engine"), Some("v2"), Some(fork), Some("bodies"), Some("hash"), None) => {
-            Some(EngineSszEndpoint::PayloadBodiesByHash(fork.parse().ok()?))
+        (Some("engine"), Some("v1"), Some("bodies"), Some("hash"), None, None) => {
+            Some(EngineSszEndpoint::PayloadBodiesByHash)
         }
-        (Some("engine"), Some("v2"), Some(fork), Some("bodies"), None, None) => {
-            Some(EngineSszEndpoint::PayloadBodiesByRange(fork.parse().ok()?))
+        (Some("engine"), Some("v1"), Some("bodies"), None, None, None) => {
+            Some(EngineSszEndpoint::PayloadBodiesByRange)
         }
         _ => None,
     }
@@ -376,8 +387,8 @@ enum EngineSszEndpoint {
     Payloads(EngineSszFork),
     Forkchoice(EngineSszFork),
     Blobs(u8),
-    PayloadBodiesByHash(EngineSszFork),
-    PayloadBodiesByRange(EngineSszFork),
+    PayloadBodiesByHash,
+    PayloadBodiesByRange,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -536,9 +547,9 @@ where
     Validator: EngineApiValidator<EthEngineTypes>,
     ChainSpec: EthereumHardforks + Send + Sync + 'static,
 {
-    // TODO: Enforce PR-793 fork-era filtering for /{fork}/bodies responses.
-    // The URL fork selects both the SSZ body schema and the valid timestamp range.
-    // Blocks outside the URL fork era should be returned as available=false.
+    // TODO: Enforce PR-793 fork-era filtering for bodies responses.
+    // The request fork selects both the SSZ body schema and the valid timestamp range.
+    // Blocks outside the request fork era should be returned as available=false.
     match fork {
         EngineSszFork::Paris => {
             let response = fetch_payload_bodies_v1(engine_api, request).await;
@@ -960,15 +971,15 @@ mod tests {
     }
 
     #[test]
-    fn parses_fork_scoped_payload_bodies_by_hash_endpoint() {
-        let endpoint = parse_engine_path("/engine/v2/prague/bodies/hash").unwrap();
-        assert_eq!(endpoint, EngineSszEndpoint::PayloadBodiesByHash(EngineSszFork::Prague));
+    fn parses_payload_bodies_by_hash_endpoint() {
+        let endpoint = parse_engine_path("/engine/v1/bodies/hash").unwrap();
+        assert_eq!(endpoint, EngineSszEndpoint::PayloadBodiesByHash);
     }
 
     #[test]
-    fn parses_fork_scoped_payload_bodies_by_range_endpoint() {
-        let endpoint = parse_engine_path("/engine/v2/osaka/bodies").unwrap();
-        assert_eq!(endpoint, EngineSszEndpoint::PayloadBodiesByRange(EngineSszFork::Osaka));
+    fn parses_payload_bodies_by_range_endpoint() {
+        let endpoint = parse_engine_path("/engine/v1/bodies").unwrap();
+        assert_eq!(endpoint, EngineSszEndpoint::PayloadBodiesByRange);
     }
 
     #[test]
