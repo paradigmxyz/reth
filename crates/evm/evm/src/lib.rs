@@ -91,9 +91,6 @@ pub trait ConfigureEvm: Clone + Debug + Send + Sync + Unpin {
     /// Context required for configuring next block environment.
     type NextBlockEnvCtx: Debug + Clone;
 
-    /// Configured EVM environment type.
-    type EvmEnv: crate::EvmEnv;
-
     /// Configured transaction environment type.
     type TxEnv: From<Recovered<TxTy<Self::Primitives>>> + Clone + Send + Sync + 'static;
 
@@ -101,7 +98,6 @@ pub trait ConfigureEvm: Clone + Debug + Send + Sync + Unpin {
     type BlockExecutorFactory: crate::execute::BlockExecutorFactory<
         Primitives = Self::Primitives,
         Transaction = TxEnvFor<Self>,
-        EvmEnv = EvmEnvFor<Self>,
     >;
 
     /// Configured block assembler.

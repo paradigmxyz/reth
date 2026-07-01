@@ -3,7 +3,8 @@
 use crate::{execute::BlockExecutorFactory, ConfigureEvm};
 
 /// Type alias for the configured EVM environment.
-pub type EvmEnvFor<Evm> = <Evm as ConfigureEvm>::EvmEnv;
+pub type EvmEnvFor<Evm> =
+    <<Evm as ConfigureEvm>::BlockExecutorFactory as BlockExecutorFactory>::EvmEnv;
 
 /// Type alias for the configured transaction environment.
 pub type TxEnvFor<Evm> = <Evm as ConfigureEvm>::TxEnv;
