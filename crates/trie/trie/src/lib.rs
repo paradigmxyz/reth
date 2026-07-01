@@ -45,6 +45,27 @@ pub mod changesets;
 mod trie;
 pub use trie::{StateRoot, StorageRoot, TrieType};
 
+use crate::{
+    hashed_cursor::{noop::NoopHashedCursorFactory, HashedPostStateCursorFactory},
+    trie_cursor::noop::NoopTrieCursorFactory,
+};
+use reth_execution_errors::StateRootError;
+
+/// Computes a state root from a complete in-memory hashed state without reading trie or hashed
+/// state cursors.
+pub fn root_from_full_hashed_state(
+    state: reth_trie_common::HashedPostState,
+) -> Result<alloy_primitives::B256, StateRootError> {
+    let sorted = state.into_sorted();
+    let prefix_sets = sorted.construct_prefix_sets().freeze();
+    StateRoot::new(
+        NoopTrieCursorFactory,
+        HashedPostStateCursorFactory::new(NoopHashedCursorFactory, &sorted),
+    )
+    .with_prefix_sets(prefix_sets)
+    .root()
+}
+
 /// Utilities for state root checkpoint progress.
 mod progress;
 pub use progress::{

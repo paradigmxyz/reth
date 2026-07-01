@@ -144,6 +144,13 @@ impl HashedPostStateProvider for StateProviderTraitObjWrapper {
     fn hashed_post_state(&self, bundle_state: &BundleState) -> reth_trie::HashedPostState {
         self.0.hashed_post_state(bundle_state)
     }
+
+    fn hashed_post_state_for_accounts(
+        &self,
+        accounts: &[Address],
+    ) -> reth_errors::ProviderResult<reth_trie::HashedPostState> {
+        self.0.hashed_post_state_for_accounts(accounts)
+    }
 }
 
 impl StateProvider for StateProviderTraitObjWrapper {
