@@ -115,6 +115,38 @@ pub(super) fn test_changed_paths_record_inserted_branch_on_short_key_split<T: Sp
     assert!(!changed_paths.contains(&Nibbles::default()));
 }
 
+pub(super) fn test_changed_paths_record_inserted_branch_on_leaf_short_key_split<T: SparseTrie>(
+    new_trie: fn() -> T,
+) {
+    let mut trie = new_trie();
+    trie.set_changed_paths(true);
+
+    let key_a = key_with_prefix(&[0x12, 0x34]);
+    let sibling_key = key_with_prefix(&[0xe0]);
+
+    let mut updates = B256Map::default();
+    updates.insert(key_a, LeafUpdate::Changed(vec![0x01; 64]));
+    updates.insert(sibling_key, LeafUpdate::Changed(vec![0x02; 64]));
+    trie.update_leaves(&mut updates, |_, _| {}).expect("insertion should succeed");
+    assert!(updates.is_empty());
+
+    let _ = trie.root();
+    let _ = trie.take_changed_paths();
+
+    let split_key = key_with_prefix(&[0x12, 0x40]);
+    let mut updates = B256Map::from_iter([(split_key, LeafUpdate::Changed(vec![0x03; 64]))]);
+    trie.update_leaves(&mut updates, |_, _| {}).expect("split insertion should succeed");
+    assert!(updates.is_empty());
+
+    let _ = trie.root();
+
+    let changed_paths = trie.take_changed_paths();
+    assert!(changed_paths.contains(&Nibbles::from_nibbles([0x01])));
+    assert!(changed_paths.contains(&Nibbles::from_nibbles([0x01, 0x02, 0x03])));
+    assert!(changed_paths.contains(&Nibbles::from_nibbles([0x01, 0x02, 0x04])));
+    assert!(!changed_paths.contains(&Nibbles::default()));
+}
+
 pub(super) fn test_changed_paths_record_branch_after_leaf_removal<T: SparseTrie>(
     new_trie: fn() -> T,
 ) {

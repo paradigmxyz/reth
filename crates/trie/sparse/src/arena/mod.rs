@@ -1615,7 +1615,6 @@ impl ArenaParallelSparseTrie {
         let old_child_idx = old_child_entry.index;
         let old_child_short_key = arena[old_child_idx].short_key().expect("top of stack is a leaf");
         let diverge_len = new_leaf_path.common_prefix_length(old_child_short_key);
-        let splits_branch = matches!(&arena[old_child_idx], ArenaSparseNode::Branch(_));
 
         trace!(
             target: TRACE_TARGET,
@@ -1677,8 +1676,7 @@ impl ArenaParallelSparseTrie {
             branch_masks: BranchNodeMasks::default(),
         }));
 
-        if splits_branch &&
-            !old_child_entry.path.is_empty() &&
+        if !old_child_entry.path.is_empty() &&
             let Some(changed_paths) = changed_paths.as_mut()
         {
             // The inserted branch can be suppressed by dirty descendant emission during hashing.
