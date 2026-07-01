@@ -408,15 +408,14 @@ impl ArenaSparseSubtrie {
             "subtrie root must not be EmptyRoot at start of update_leaves"
         );
 
-        let mut cursor = mem::take(&mut self.buffers.cursor);
-        cursor.reset(&self.arena, self.root, self.path);
+        self.buffers.cursor.reset(&self.arena, self.root, self.path);
 
         for (idx, &(key, ref full_path, ref update)) in sorted_updates.iter().enumerate() {
-            let find_result = cursor.seek(&mut self.arena, full_path);
+            let find_result = self.buffers.cursor.seek(&mut self.arena, full_path);
 
             // If the path hits a blinded node, request a proof regardless of update type.
             if matches!(find_result, SeekResult::Blinded) {
-                let logical_len = cursor.head_logical_branch_path_len(&self.arena);
+                let logical_len = self.buffers.cursor.head_logical_branch_path_len(&self.arena);
                 self.required_proofs.push((
                     idx,
                     ArenaRequiredProof { key, min_len: (logical_len as u8 + 1).min(64) },
@@ -429,7 +428,7 @@ impl ArenaSparseSubtrie {
                     // Upsert: insert or update a leaf with the given value.
                     let (_result, deltas) = ArenaParallelSparseTrie::upsert_leaf(
                         &mut self.arena,
-                        &mut cursor,
+                        &mut self.buffers.cursor,
                         &mut self.root,
                         full_path,
                         value,
@@ -443,12 +442,12 @@ impl ArenaSparseSubtrie {
                 LeafUpdate::Changed(_) => {
                     let (result, deltas) = ArenaParallelSparseTrie::remove_leaf(
                         &mut self.arena,
-                        &mut cursor,
+                        &mut self.buffers.cursor,
                         &mut self.root,
                         key,
                         full_path,
                         find_result,
-                        &mut self.buffers,
+                        &mut self.buffers.updates,
                     );
                     self.num_leaves = (self.num_leaves as i64 + deltas.num_leaves_delta) as u64;
                     self.num_dirty_leaves =
@@ -465,8 +464,7 @@ impl ArenaSparseSubtrie {
         }
 
         // Drain remaining cursor entries, propagating dirty state.
-        cursor.drain(&mut self.arena);
-        self.buffers.cursor = cursor;
+        self.buffers.cursor.drain(&mut self.arena);
 
         #[cfg(debug_assertions)]
         self.debug_assert_counters();
@@ -1832,7 +1830,7 @@ impl ArenaParallelSparseTrie {
         key: B256,
         full_path: &Nibbles,
         find_result: SeekResult,
-        buffers: &mut ArenaTrieBuffers,
+        updates: &mut Option<SparseTrieUpdates>,
     ) -> (RemoveLeafResult, SubtrieCounterDeltas) {
         match find_result {
             SeekResult::Blinded | SeekResult::RevealedSubtrie => {
@@ -1918,7 +1916,7 @@ impl ArenaParallelSparseTrie {
                 // If the branch now has only one child, collapse it. The blinded sibling
                 // case was already handled above before any mutations.
                 let collapse_dirtied_leaf = if parent_branch.state_mask.count_bits() == 1 {
-                    Self::collapse_branch(arena, cursor, root, &mut buffers.updates)
+                    Self::collapse_branch(arena, cursor, root, updates)
                 } else {
                     false
                 };
@@ -3123,7 +3121,7 @@ impl SparseTrie for ArenaParallelSparseTrie {
                             key,
                             full_path,
                             find_result,
-                            &mut self.buffers,
+                            &mut self.buffers.updates,
                         );
                         match result {
                             RemoveLeafResult::NeedsProof { key, proof_key, min_len } => {
