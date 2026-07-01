@@ -47,6 +47,11 @@ pub trait StateProvider:
         storage_key: StorageKey,
     ) -> ProviderResult<Option<StorageValue>>;
 
+    /// Returns a cursor for repeated storage lookups.
+    fn storage_cursor(&self) -> ProviderResult<Box<dyn StateProviderStorageCursor + '_>> {
+        Ok(Box::new(FallbackStateProviderStorageCursor(self)))
+    }
+
     /// Get account code by its address.
     ///
     /// Returns `None` if the account doesn't exist or account is not a contract
@@ -87,6 +92,30 @@ pub trait StateProvider:
         // Get basic account information
         // Returns None if acc doesn't exist
         self.basic_account(addr)?.map_or_else(|| Ok(None), |acc| Ok(Some(acc.nonce)))
+    }
+}
+
+/// Cursor for repeated storage lookups against a [`StateProvider`].
+pub trait StateProviderStorageCursor {
+    /// Get storage of given account.
+    fn storage(
+        &mut self,
+        account: Address,
+        storage_key: StorageKey,
+    ) -> ProviderResult<Option<StorageValue>>;
+}
+
+struct FallbackStateProviderStorageCursor<'a, P: ?Sized>(&'a P);
+
+impl<P: StateProvider + ?Sized> StateProviderStorageCursor
+    for FallbackStateProviderStorageCursor<'_, P>
+{
+    fn storage(
+        &mut self,
+        account: Address,
+        storage_key: StorageKey,
+    ) -> ProviderResult<Option<StorageValue>> {
+        self.0.storage(account, storage_key)
     }
 }
 
