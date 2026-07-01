@@ -866,28 +866,26 @@ where
         }
 
         let mut num_unmatched = 0u32;
+        let cached_path_len = cached_path.len();
         let mut child_path = *cached_path;
-        for nibble in 0u8..16 {
-            if cached_branch.state_mask.is_bit_set(nibble) {
-                child_path.truncate(cached_path.len());
-                child_path.push_unchecked(nibble);
-                if !self.prefix_set.contains(&child_path) {
-                    num_unmatched += 1;
+        for nibble in cached_branch.state_mask.iter() {
+            child_path.truncate(cached_path_len);
+            child_path.push_unchecked(nibble);
+            if !self.prefix_set.contains(&child_path) {
+                num_unmatched += 1;
+                if num_unmatched > 1 {
+                    return false
                 }
             }
         }
 
-        if num_unmatched <= 1 {
-            trace!(
-                target: TRACE_TARGET,
-                ?cached_path,
-                ?num_unmatched,
-                "Skipping cached branch: all but <=1 children match prefix set, branch may collapse",
-            );
-            true
-        } else {
-            false
-        }
+        trace!(
+            target: TRACE_TARGET,
+            ?cached_path,
+            ?num_unmatched,
+            "Skipping cached branch: all but <=1 children match prefix set, branch may collapse",
+        );
+        true
     }
 
     /// Attempts to pop off the top branch of the `cached_branch_stack`, returning
@@ -1095,13 +1093,11 @@ where
             if self.prefix_set.contains(&self.branch_path) {
                 let branch_path_len = self.branch_path.len();
                 let mut child_path = self.branch_path;
-                for nibble in 0u8..16 {
-                    if !curr_state_mask.is_bit_set(nibble) {
-                        child_path.truncate(branch_path_len);
-                        child_path.push_unchecked(nibble);
-                        if self.prefix_set.contains(&child_path) {
-                            next_child_nibbles.set_bit(nibble);
-                        }
+                for nibble in (!curr_state_mask).iter() {
+                    child_path.truncate(branch_path_len);
+                    child_path.push_unchecked(nibble);
+                    if self.prefix_set.contains(&child_path) {
+                        next_child_nibbles.set_bit(nibble);
                     }
                 }
             }
