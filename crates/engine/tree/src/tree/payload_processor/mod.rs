@@ -752,15 +752,12 @@ where
                 let start = Instant::now();
                 let (mut trie, deferred) = task.into_trie_for_reuse();
                 if let Some(mut retained_paths) = pending_sparse_trie_prune {
-                    if let Some(changed_paths) = result.changed_paths.as_deref() {
-                        retained_paths.extend_from_changed_paths(changed_paths);
-                        trie.prune(max_hot_slots, max_hot_accounts, retained_paths);
-                    } else {
-                        warn!(
-                            target: "engine::tree::payload_processor",
-                            "Skipping sparse trie prune because changed paths for validated block are unknown"
-                        );
-                    }
+                    let changed_paths = result
+                        .changed_paths
+                        .as_deref()
+                        .expect("sparse trie task always returns changed paths");
+                    retained_paths.extend_from_changed_paths(changed_paths);
+                    trie.prune(max_hot_slots, max_hot_accounts, retained_paths);
                 }
                 trie_metrics
                     .into_trie_for_reuse_duration_histogram
