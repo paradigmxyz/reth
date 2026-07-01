@@ -36,7 +36,7 @@ use reth_ethereum::{
     storage::StateProofProvider,
     EthPrimitives,
 };
-use reth_provider::HeaderProvider;
+use reth_provider::{BlockIdReader, HeaderProvider};
 use reth_trie_common::TrieInput;
 use reth_evm::{ConfigureEvm, execute::Executor};
 use reth_revm::database::StateProviderDatabase;
@@ -520,10 +520,30 @@ async fn partial_stateless_exex<
                     target: "partial_stateless",
                     from_chain = ?old.range(),
                     to_chain = ?new.range(),
-                    "Chain reorg detected — cache may be stale, rebuilding from new chain"
+                    "Chain reorg detected — rolling back old blocks, then applying new chain"
                 );
 
-                // On reorg, re-process the new chain block-by-block
+                // 1. Roll back the reverted (old) blocks newest→oldest, returning the
+                //    cache to the fork point. On failure (history pruned/missing),
+                //    cold-reset and let the new-chain loop below rebuild from scratch.
+                let mut rollback_ok = true;
+                for block_number in old.blocks().keys().rev() {
+                    if let Err(e) = cache.rollback_block(*block_number) {
+                        warn!(
+                            target: "partial_stateless",
+                            block = *block_number,
+                            error = %e,
+                            "Cache rollback failed on reorg — cold-resetting before reapply"
+                        );
+                        rollback_ok = false;
+                        break;
+                    }
+                }
+                if !rollback_ok {
+                    cache.reset();
+                }
+
+                // 2. Apply the new canonical chain block-by-block (records undo).
                 for (block_number, block) in new.blocks() {
                     let parent_block_number = block_number.saturating_sub(1);
 
@@ -565,15 +585,59 @@ async fn partial_stateless_exex<
 
                     cache.on_block_executed(*block_number, &accessed);
                 }
+
+                // Persist the rebuilt cache: a restart before the next commit must
+                // not reload the stale pre-reorg (old-branch) cache from disk.
+                if let Err(e) = save_to_file(&cache, &cache_path) {
+                    warn!(target: "partial_stateless", error = %e, "Failed to persist cache after reorg");
+                }
             }
             ExExNotification::ChainReverted { old } => {
                 warn!(
                     target: "partial_stateless",
                     reverted_chain = ?old.range(),
-                    "Chain reverted — note: cache is not rolled back in this PoC"
+                    "Chain reverted — rolling back cache to the pre-revert state"
                 );
+
+                // Undo reverted blocks newest→oldest so each matches the top of the
+                // undo stack. If a block can't be rolled back (history pruned/missing),
+                // cold-reset: the cache rebuilds from subsequent canonical blocks.
+                for block_number in old.blocks().keys().rev() {
+                    if let Err(e) = cache.rollback_block(*block_number) {
+                        warn!(
+                            target: "partial_stateless",
+                            block = *block_number,
+                            error = %e,
+                            "Cache rollback failed — cold-resetting cache"
+                        );
+                        cache.reset();
+                        break;
+                    }
+                }
+
+                // Persist the rolled-back cache: a restart before the next commit
+                // must not reload the stale pre-revert cache from disk.
+                if let Err(e) = save_to_file(&cache, &cache_path) {
+                    warn!(target: "partial_stateless", error = %e, "Failed to persist cache after revert");
+                }
             }
         }
+
+        // Prune undo history below the finalized block: reorgs never cross
+        // finality, so once a block is finalized its undo record is unreachable.
+        // Keeping records down to finality means any legal reorg can be rolled
+        // back precisely (this cache has no re-execution fallback — a missing
+        // undo record forces a cold reset). When finality is unavailable (early
+        // sync / no-finality chains) fall back to a fixed depth floor so the log
+        // stays bounded. Mirrors reth's CHANGESET_CACHE_RETENTION_BLOCKS.
+        const UNDO_LOG_FALLBACK_DEPTH: u64 = 64;
+        let threshold = ctx
+            .provider()
+            .finalized_block_number()
+            .ok()
+            .flatten()
+            .unwrap_or_else(|| cache.current_block().saturating_sub(UNDO_LOG_FALLBACK_DEPTH));
+        cache.prune_undo_below(threshold);
 
         // Acknowledge processed height
         if let Some(committed_chain) = notification.committed_chain() {
