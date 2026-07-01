@@ -101,14 +101,6 @@ where
     }
 
     #[cfg(feature = "std")]
-    fn evm_with_env<DB>(&self, db: DB, evm_env: EvmEnvFor<Self>) -> evm2::Evm<evm2::BaseEvmTypes>
-    where
-        DB: evm2::evm::DynDatabase + 'static,
-    {
-        self.inner().evm_with_env(db, evm_env)
-    }
-
-    #[cfg(feature = "std")]
     fn pre_block_state_changes<'a, DB>(
         &self,
         db: DB,
