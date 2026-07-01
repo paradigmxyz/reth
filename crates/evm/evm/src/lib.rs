@@ -14,7 +14,7 @@ extern crate alloc;
 #[cfg(feature = "std")]
 use crate::execute::HashedStateMode;
 #[cfg(feature = "std")]
-use crate::execute::{BasicBlockBuilder, BlockBuilder};
+use crate::execute::{BasicBlockBuilder, BasicBlockExecutor, BlockBuilder};
 use crate::execute::{BlockExecutionError, Executor, IntoTxEnv};
 #[cfg(feature = "std")]
 use alloc::boxed::Box;
@@ -117,12 +117,6 @@ pub trait ConfigureEvm: Clone + Debug + Send + Sync + Unpin {
         Block = BlockTy<Self::Primitives>,
     >;
 
-    /// Executor returned for block execution over the provided database.
-    type Executor<DB>: Executor<Primitives = Self::Primitives, Error = BlockExecutionError>
-    where
-        DB: evm2::evm::Database + Clone + 'static,
-        DB::Error: core::error::Error + Send + Sync + 'static;
-
     /// Returns the configured block executor factory.
     #[cfg(feature = "std")]
     fn block_executor_factory(&self) -> &Self::BlockExecutorFactory;
@@ -187,14 +181,33 @@ pub trait ConfigureEvm: Clone + Debug + Send + Sync + Unpin {
     }
 
     /// Returns an executor for block execution over the provided database.
-    fn executor<DB>(&self, db: DB) -> Self::Executor<DB>
+    #[auto_impl(keep_default_for(&, Arc))]
+    fn executor<DB>(
+        &self,
+        db: DB,
+    ) -> impl Executor<Primitives = Self::Primitives, Error = BlockExecutionError>
     where
         DB: evm2::evm::Database + Clone + 'static,
-        DB::Error: core::error::Error + Send + Sync + 'static;
+        DB::Error: core::error::Error + Send + Sync + 'static,
+    {
+        #[cfg(feature = "std")]
+        {
+            BasicBlockExecutor::new(self.clone(), db)
+        }
+
+        #[cfg(not(feature = "std"))]
+        {
+            let _ = db;
+            crate::execute::UnsupportedExecutor::default()
+        }
+    }
 
     /// Returns an executor for batch block execution over the provided database.
     #[auto_impl(keep_default_for(&, Arc))]
-    fn batch_executor<DB>(&self, db: DB) -> Self::Executor<DB>
+    fn batch_executor<DB>(
+        &self,
+        db: DB,
+    ) -> impl Executor<Primitives = Self::Primitives, Error = BlockExecutionError>
     where
         DB: evm2::evm::Database + Clone + 'static,
         DB::Error: core::error::Error + Send + Sync + 'static,

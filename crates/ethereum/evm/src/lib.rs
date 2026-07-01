@@ -248,18 +248,7 @@ where
     type BlockExecutorFactory = EthBlockExecutorFactory<ChainSpec, EvmF>;
     #[cfg(feature = "std")]
     type BlockAssembler = EthBlockAssembler<ChainSpec>;
-    #[cfg(feature = "std")]
-    type Executor<DB>
-        = reth_evm::execute::BasicBlockExecutor<Self, DB>
-    where
-        DB: evm2::evm::Database + Clone + 'static,
-        DB::Error: core::error::Error + Send + Sync + 'static;
-    #[cfg(not(feature = "std"))]
-    type Executor<DB>
-        = reth_evm::execute::UnsupportedExecutor<EthPrimitives>
-    where
-        DB: evm2::evm::Database + Clone + 'static,
-        DB::Error: core::error::Error + Send + Sync + 'static;
+
     #[cfg(feature = "std")]
     fn block_executor_factory(&self) -> &Self::BlockExecutorFactory {
         &self.executor_factory
@@ -383,23 +372,6 @@ where
             extra_data: attributes.extra_data,
             slot_number: attributes.slot_number,
         })
-    }
-
-    fn executor<DB>(&self, db: DB) -> Self::Executor<DB>
-    where
-        DB: evm2::evm::Database + Clone + 'static,
-        DB::Error: core::error::Error + Send + Sync + 'static,
-    {
-        #[cfg(feature = "std")]
-        {
-            reth_evm::execute::BasicBlockExecutor::new(self.clone(), db)
-        }
-
-        #[cfg(not(feature = "std"))]
-        {
-            let _ = db;
-            reth_evm::execute::UnsupportedExecutor::default()
-        }
     }
 
     #[cfg(feature = "std")]

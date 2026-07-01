@@ -44,11 +44,6 @@ where
     type BlockExecutorFactory = Inner::BlockExecutorFactory;
     #[cfg(feature = "std")]
     type BlockAssembler = Inner::BlockAssembler;
-    type Executor<DB>
-        = Inner::Executor<DB>
-    where
-        DB: evm2::evm::Database + Clone + 'static,
-        DB::Error: core::error::Error + Send + Sync + 'static;
     #[cfg(feature = "std")]
     fn block_executor_factory(&self) -> &Self::BlockExecutorFactory {
         self.inner().block_executor_factory()
@@ -90,14 +85,6 @@ where
         Self: 'a,
     {
         self.inner().context_for_next_block(parent, attributes)
-    }
-
-    fn executor<DB>(&self, db: DB) -> Self::Executor<DB>
-    where
-        DB: evm2::evm::Database + Clone + 'static,
-        DB::Error: core::error::Error + Send + Sync + 'static,
-    {
-        self.inner().executor(db)
     }
 
     #[cfg(feature = "std")]
