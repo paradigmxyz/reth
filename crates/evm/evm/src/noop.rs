@@ -36,11 +36,6 @@ where
     type NextBlockEnvCtx = Inner::NextBlockEnvCtx;
     type EvmEnv = Inner::EvmEnv;
     type TxEnv = Inner::TxEnv;
-    type ExecutionCtx<'a>
-        = Inner::ExecutionCtx<'a>
-    where
-        Self: 'a;
-    #[cfg(feature = "std")]
     type BlockExecutorFactory = Inner::BlockExecutorFactory;
     #[cfg(feature = "std")]
     type BlockAssembler = Inner::BlockAssembler;
@@ -85,19 +80,6 @@ where
         Self: 'a,
     {
         self.inner().context_for_next_block(parent, attributes)
-    }
-
-    #[cfg(feature = "std")]
-    fn create_executor<'a>(
-        &'a self,
-        evm: evm2::Evm<evm2::BaseEvmTypes>,
-        ctx: crate::ExecutionCtxFor<'a, Self>,
-        hashed_state_mode: crate::execute::HashedStateMode,
-    ) -> crate::BlockExecutorFor<'a, Self>
-    where
-        Self: 'a,
-    {
-        self.inner().create_executor(evm, ctx, hashed_state_mode)
     }
 
     #[cfg(feature = "std")]

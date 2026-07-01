@@ -97,13 +97,7 @@ pub trait ConfigureEvm: Clone + Debug + Send + Sync + Unpin {
     /// Configured transaction environment type.
     type TxEnv: From<Recovered<TxTy<Self::Primitives>>> + Clone + Send + Sync + 'static;
 
-    /// Execution context for a block or payload.
-    type ExecutionCtx<'a>: Debug + Clone + Send
-    where
-        Self: 'a;
-
     /// Configured block executor factory.
-    #[cfg(feature = "std")]
     type BlockExecutorFactory: crate::execute::BlockExecutorFactory<
         Primitives = Self::Primitives,
         Transaction = TxEnvFor<Self>,
@@ -224,7 +218,15 @@ pub trait ConfigureEvm: Clone + Debug + Send + Sync + Unpin {
         hashed_state_mode: HashedStateMode,
     ) -> <Self::BlockExecutorFactory as crate::execute::BlockExecutorFactory>::Executor<'a>
     where
-        Self: 'a;
+        Self: 'a,
+    {
+        crate::execute::BlockExecutorFactory::create_executor(
+            self.block_executor_factory(),
+            evm,
+            ctx,
+            hashed_state_mode,
+        )
+    }
 
     /// Creates a block executor for the given block.
     #[cfg(feature = "std")]
@@ -236,8 +238,6 @@ pub trait ConfigureEvm: Clone + Debug + Send + Sync + Unpin {
     ) -> Result<crate::BlockExecutorFor<'a, Self>, Self::Error>
     where
         Self: 'a,
-        Self::BlockExecutorFactory:
-            crate::execute::BlockExecutorFactory<ExecutionCtx<'a> = ExecutionCtxFor<'a, Self>>,
         DB: evm2::evm::Database + Clone + 'static,
         DB::Error: core::error::Error + Send + Sync + 'static,
     {
@@ -286,8 +286,6 @@ pub trait ConfigureEvm: Clone + Debug + Send + Sync + Unpin {
     ) -> impl BlockBuilder<Primitives = Self::Primitives, Executor = crate::BlockExecutorFor<'a, Self>>
     where
         Self: 'a,
-        Self::BlockExecutorFactory:
-            crate::execute::BlockExecutorFactory<ExecutionCtx<'a> = ExecutionCtxFor<'a, Self>>,
     {
         BasicBlockBuilder {
             executor: self.create_executor(evm, ctx.clone(), hashed_state_mode),
@@ -314,8 +312,6 @@ pub trait ConfigureEvm: Clone + Debug + Send + Sync + Unpin {
     >
     where
         Self: 'a,
-        Self::BlockExecutorFactory:
-            crate::execute::BlockExecutorFactory<ExecutionCtx<'a> = ExecutionCtxFor<'a, Self>>,
         DB: evm2::evm::Database + Clone + 'static,
         DB::Error: core::error::Error + Send + Sync + 'static,
     {

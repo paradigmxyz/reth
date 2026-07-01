@@ -22,10 +22,10 @@ use reth_errors::ConsensusError;
 use reth_ethereum_primitives::{EthPrimitives, TransactionSigned};
 use reth_evm::{
     execute::{
-        BlockBuilder, BlockBuilderOutcome, BlockExecutionError, BlockExecutorFactory,
-        BlockValidationError, HashedStateMode,
+        BlockBuilder, BlockBuilderOutcome, BlockExecutionError, BlockValidationError,
+        HashedStateMode,
     },
-    ConfigureEvm, ExecutionCtxFor, NextBlockEnvAttributes,
+    ConfigureEvm, NextBlockEnvAttributes,
 };
 use reth_evm_ethereum::EthEvmConfig;
 use reth_execution_cache::{CachedStateMetrics, CachedStateMetricsSource, CachedStateProvider};
@@ -83,8 +83,6 @@ impl<Pool, Client, EvmConfig> PayloadBuilder for EthereumPayloadBuilder<Pool, Cl
 where
     EvmConfig: ConfigureEvm<Primitives = EthPrimitives, NextBlockEnvCtx = NextBlockEnvAttributes>
         + 'static,
-    for<'a> EvmConfig::BlockExecutorFactory:
-        'static + BlockExecutorFactory<ExecutionCtx<'a> = ExecutionCtxFor<'a, EvmConfig>>,
     Client: StateProviderFactory
         + ChainSpecProvider<ChainSpec: EthereumHardforks + EthChainSpec<Header = Header>>
         + Clone,
@@ -161,8 +159,6 @@ pub fn default_ethereum_payload<EvmConfig, Client, Pool, F>(
 where
     EvmConfig: ConfigureEvm<Primitives = EthPrimitives, NextBlockEnvCtx = NextBlockEnvAttributes>
         + 'static,
-    for<'a> EvmConfig::BlockExecutorFactory:
-        'static + BlockExecutorFactory<ExecutionCtx<'a> = ExecutionCtxFor<'a, EvmConfig>>,
     Client: StateProviderFactory
         + ChainSpecProvider<ChainSpec: EthereumHardforks + EthChainSpec<Header = Header>>,
     Pool: TransactionPool<Transaction: PoolTransaction<Consensus = TransactionSigned>>,

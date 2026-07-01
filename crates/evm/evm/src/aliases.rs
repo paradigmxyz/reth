@@ -1,6 +1,6 @@
 //! Helper aliases when working with [`ConfigureEvm`] and the traits in this crate.
 
-use crate::ConfigureEvm;
+use crate::{execute::BlockExecutorFactory, ConfigureEvm};
 
 /// Type alias for the configured EVM environment.
 pub type EvmEnvFor<Evm> = <Evm as ConfigureEvm>::EvmEnv;
@@ -9,7 +9,8 @@ pub type EvmEnvFor<Evm> = <Evm as ConfigureEvm>::EvmEnv;
 pub type TxEnvFor<Evm> = <Evm as ConfigureEvm>::TxEnv;
 
 /// Helper to access the configured execution context.
-pub type ExecutionCtxFor<'a, Evm> = <Evm as ConfigureEvm>::ExecutionCtx<'a>;
+pub type ExecutionCtxFor<'a, Evm> =
+    <<Evm as ConfigureEvm>::BlockExecutorFactory as BlockExecutorFactory>::ExecutionCtx<'a>;
 
 /// Helper to access the configured block executor.
 #[cfg(feature = "std")]

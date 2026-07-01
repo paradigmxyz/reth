@@ -240,11 +240,6 @@ where
     type NextBlockEnvCtx = NextBlockEnvAttributes;
     type EvmEnv = EthEvmEnv;
     type TxEnv = EthTxEnv;
-    type ExecutionCtx<'a>
-        = EthBlockExecutionCtx<'a>
-    where
-        Self: 'a;
-    #[cfg(feature = "std")]
     type BlockExecutorFactory = EthBlockExecutorFactory<ChainSpec, EvmF>;
     #[cfg(feature = "std")]
     type BlockAssembler = EthBlockAssembler<ChainSpec>;
@@ -372,19 +367,6 @@ where
             extra_data: attributes.extra_data,
             slot_number: attributes.slot_number,
         })
-    }
-
-    #[cfg(feature = "std")]
-    fn create_executor<'a>(
-        &'a self,
-        evm: evm2::Evm<evm2::BaseEvmTypes>,
-        ctx: EthBlockExecutionCtx<'a>,
-        hashed_state_mode: HashedStateMode,
-    ) -> reth_evm::BlockExecutorFor<'a, Self>
-    where
-        Self: 'a,
-    {
-        self.executor_factory.create_executor(evm, ctx, hashed_state_mode)
     }
 
     #[cfg(feature = "std")]
