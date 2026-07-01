@@ -588,6 +588,11 @@ impl<N: NetworkPrimitives> EthBroadcastMessage<N> {
             Self::Transactions(_) => EthMessageID::Transactions,
         }
     }
+
+    /// Encodes this broadcast to its id-prefixed `RLPx` message bytes.
+    pub fn encoded(self) -> alloy_primitives::bytes::Bytes {
+        alloy_rlp::encode(ProtocolBroadcastMessage::from(self)).into()
+    }
 }
 
 impl<N: NetworkPrimitives> Encodable for EthBroadcastMessage<N> {
