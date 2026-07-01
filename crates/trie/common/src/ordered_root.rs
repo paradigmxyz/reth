@@ -49,6 +49,7 @@ use alloy_primitives::B256;
 /// index 0 (`0x80`). Index `0x80` and larger use long-form RLP integer encoding and sort after
 /// index 0, so index 0 must be flushed before inserting this index.
 const ZERO_KEY_FLUSH_INDEX: usize = 0x80;
+const MAX_USIZE_RLP_LEN: usize = 1 + core::mem::size_of::<usize>();
 
 /// A builder for computing ordered trie roots from an append-only stream of pre-encoded items.
 ///
@@ -136,9 +137,32 @@ impl OrderedTrieRootEncodedBuilder {
     }
 
     fn add_leaf(&mut self, index: usize, bytes: &[u8]) {
-        let index_buffer = alloy_rlp::encode_fixed_size(&index);
-        self.hb.add_leaf(Nibbles::unpack(&index_buffer), bytes);
+        let mut index_buffer = [0u8; MAX_USIZE_RLP_LEN];
+        let index_key = encode_index_key(index, &mut index_buffer);
+        self.hb.add_leaf(Nibbles::unpack(index_key), bytes);
     }
+}
+
+#[inline]
+fn encode_index_key(index: usize, out: &mut [u8; MAX_USIZE_RLP_LEN]) -> &[u8] {
+    if index == 0 {
+        out[0] = 0x80;
+        return &out[..1]
+    }
+
+    if index <= 0x7f {
+        out[0] = index as u8;
+        return &out[..1]
+    }
+
+    let index_bytes = index.to_be_bytes();
+    let first_nonzero =
+        index_bytes.iter().position(|&byte| byte != 0).expect("non-zero index has a byte");
+    let len = index_bytes.len() - first_nonzero;
+
+    out[0] = 0x80 + len as u8;
+    out[1..len + 1].copy_from_slice(&index_bytes[first_nonzero..]);
+    &out[..len + 1]
 }
 
 #[cfg(test)]
@@ -213,6 +237,19 @@ mod tests {
             let expected = ordered_trie_root_encoded(&items);
 
             assert_eq!(root_with_push_next(&items), expected, "push_next mismatch for len={len}");
+        }
+    }
+
+    #[test]
+    fn index_key_encoding_matches_alloy_rlp() {
+        let values = [0, 1, 2, 0x7f, 0x80, 0x81, 0xff, 0x100, 0x101, 0xffff, 0x10000, usize::MAX];
+
+        for index in values {
+            let mut buffer = [0u8; MAX_USIZE_RLP_LEN];
+            assert_eq!(
+                encode_index_key(index, &mut buffer),
+                alloy_rlp::encode_fixed_size(&index).as_ref()
+            );
         }
     }
 
