@@ -4,7 +4,9 @@
 //! `BasicEngineValidator::with_state_root_strategy`, and consulted for every block that engine
 //! validation executes. For each block the strategy prepares a [`StateRootJob`] before execution
 //! starts, and validation finishes the job after execution to obtain the state root that is
-//! checked against the block header.
+//! checked against the block header. On every FCU that carries payload attributes, the strategy
+//! is also asked through [`StateRootStrategy::prepare_payload_builder`] for an optional
+//! [`PayloadStateRootHandle`] that the payload builder uses while building a block.
 //!
 //! # Job lifecycle
 //!
@@ -43,7 +45,9 @@
 //! Returning no changed paths opts the block out of sparse-trie cache pruning.
 
 use crate::tree::{
-    multiproof::{StateRootComputeOutcome, StateRootHandle, StateRootStreams},
+    multiproof::{
+        PayloadStateRootHandle, StateRootComputeOutcome, StateRootHandle, StateRootStreams,
+    },
     payload_processor::PayloadProcessor,
     payload_validator::LazyHashedPostState,
     ExecutionEnv, StateProviderBuilder, TreeConfig,
@@ -85,6 +89,106 @@ where
         &self,
         ctx: StateRootJobContext<'_, N, P, Evm>,
     ) -> ProviderResult<PreparedStateRootJob<N>>;
+
+    /// Prepares the optional payload-builder state-root handle used for FCU-triggered block
+    /// building.
+    ///
+    /// This is consulted on every FCU that carries payload attributes. Returning `None` means the
+    /// payload builder computes the state root itself; the stock builders fall back to a
+    /// synchronous MPT state root. The default implementation returns `None`.
+    fn prepare_payload_builder(
+        &self,
+        _ctx: PayloadStateRootJobContext<'_, N, P, Evm>,
+    ) -> ProviderResult<Option<PayloadStateRootHandle>> {
+        Ok(None)
+    }
+}
+
+/// Data available while preparing one payload-builder state-root handle.
+pub struct PayloadStateRootJobContext<'a, N, P, Evm>
+where
+    N: NodePrimitives,
+    Evm: ConfigureEvm<Primitives = N>,
+{
+    payload_processor: &'a PayloadProcessor<Evm>,
+    parent_hash: B256,
+    parent_state_root: B256,
+    timestamp: u64,
+    provider_builder: StateProviderBuilder<N, P>,
+    overlay_factory: OverlayStateProviderFactory<P, N>,
+    config: &'a TreeConfig,
+}
+
+impl<N, P, Evm> fmt::Debug for PayloadStateRootJobContext<'_, N, P, Evm>
+where
+    N: NodePrimitives,
+    Evm: ConfigureEvm<Primitives = N>,
+{
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("PayloadStateRootJobContext")
+            .field("parent_hash", &self.parent_hash)
+            .field("parent_state_root", &self.parent_state_root)
+            .field("timestamp", &self.timestamp)
+            .finish_non_exhaustive()
+    }
+}
+
+impl<'a, N, P, Evm> PayloadStateRootJobContext<'a, N, P, Evm>
+where
+    N: NodePrimitives,
+    Evm: ConfigureEvm<Primitives = N>,
+{
+    /// Creates a new payload-builder state-root job context.
+    #[expect(clippy::too_many_arguments)]
+    pub(crate) const fn new(
+        payload_processor: &'a PayloadProcessor<Evm>,
+        parent_hash: B256,
+        parent_state_root: B256,
+        timestamp: u64,
+        provider_builder: StateProviderBuilder<N, P>,
+        overlay_factory: OverlayStateProviderFactory<P, N>,
+        config: &'a TreeConfig,
+    ) -> Self {
+        Self {
+            payload_processor,
+            parent_hash,
+            parent_state_root,
+            timestamp,
+            provider_builder,
+            overlay_factory,
+            config,
+        }
+    }
+
+    /// Returns the parent block hash for the payload being built.
+    pub const fn parent_hash(&self) -> B256 {
+        self.parent_hash
+    }
+
+    /// Returns the parent state root for the payload being built.
+    pub const fn parent_state_root(&self) -> B256 {
+        self.parent_state_root
+    }
+
+    /// Returns the timestamp of the payload being built, taken from the payload attributes.
+    ///
+    /// Strategies that switch behavior at a fork activation can dispatch on this value.
+    pub const fn timestamp(&self) -> u64 {
+        self.timestamp
+    }
+
+    /// Returns the task runtime used by payload processing.
+    pub const fn executor(&self) -> &reth_tasks::Runtime {
+        self.payload_processor.executor()
+    }
+
+    /// Returns a clone of the state provider builder.
+    pub fn provider_builder(&self) -> StateProviderBuilder<N, P>
+    where
+        P: Clone,
+    {
+        self.provider_builder.clone()
+    }
 }
 
 /// Data available while preparing one state-root job.
@@ -343,6 +447,38 @@ where
             }),
             streams,
             hashed_state_rx,
+        ))
+    }
+
+    fn prepare_payload_builder(
+        &self,
+        ctx: PayloadStateRootJobContext<'_, N, P, Evm>,
+    ) -> ProviderResult<Option<PayloadStateRootHandle>> {
+        let PayloadStateRootJobContext {
+            payload_processor,
+            parent_state_root,
+            overlay_factory,
+            config,
+            ..
+        } = ctx;
+
+        // Sharing the engine state-root task with the payload builder is opt-in.
+        if !config.share_sparse_trie_with_payload_builder() || config.skip_state_root() {
+            return Ok(None)
+        }
+
+        Ok(Some(
+            payload_processor
+                .spawn_state_root(
+                    overlay_factory,
+                    parent_state_root,
+                    // Full proof workers — tx count unknown at FCU time because the
+                    // block is built incrementally.
+                    false,
+                    config,
+                    None,
+                )
+                .into_payload_state_root_handle(),
         ))
     }
 }

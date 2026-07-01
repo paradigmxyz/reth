@@ -387,6 +387,18 @@ impl fmt::Debug for PayloadStateRootHandle {
 }
 
 impl PayloadStateRootHandle {
+    /// Creates an opaque payload state-root handle.
+    pub const fn new(
+        name: &'static str,
+        streams: StateRootStreams,
+        state_root_rx: std::sync::mpsc::Receiver<
+            Result<StateRootComputeOutcome, ParallelStateRootError>,
+        >,
+        hashed_state_rx: Option<std::sync::mpsc::Receiver<HashedPostState>>,
+    ) -> Self {
+        Self { name, streams, state_root_rx: Some(state_root_rx), hashed_state_rx }
+    }
+
     /// Returns the task name used in logs.
     pub const fn name(&self) -> &'static str {
         self.name
@@ -425,6 +437,13 @@ impl PayloadStateRootHandle {
     /// If called more than once.
     pub fn take_hashed_state_rx(&mut self) -> std::sync::mpsc::Receiver<HashedPostState> {
         self.hashed_state_rx.take().expect("hashed_state already taken")
+    }
+
+    /// Takes the hashed state receiver, if the task produces one.
+    pub fn try_take_hashed_state_rx(
+        &mut self,
+    ) -> Option<std::sync::mpsc::Receiver<HashedPostState>> {
+        self.hashed_state_rx.take()
     }
 }
 

@@ -24,7 +24,7 @@ use reth_engine_primitives::{
 use reth_errors::{ConsensusError, ProviderResult};
 use reth_evm::ConfigureEvm;
 use reth_payload_builder::{BuildNewPayload, PayloadBuilderHandle};
-use reth_payload_primitives::{BuiltPayload, NewPayloadError, PayloadTypes};
+use reth_payload_primitives::{BuiltPayload, NewPayloadError, PayloadAttributes, PayloadTypes};
 use reth_primitives_traits::{
     FastInstant as Instant, NodePrimitives, RecoveredBlock, SealedBlock, SealedHeader,
 };
@@ -3302,17 +3302,12 @@ where
             None
         };
 
-        let skip_state_root = self.config.skip_state_root();
-        let state_root_handle =
-            if self.config.share_sparse_trie_with_payload_builder() && !skip_state_root {
-                self.payload_validator.payload_state_root_handle_for(
-                    state.head_block_hash,
-                    head.state_root(),
-                    &self.state,
-                )
-            } else {
-                None
-            };
+        let state_root_handle = self.payload_validator.payload_state_root_handle_for(
+            state.head_block_hash,
+            head.state_root(),
+            attributes.timestamp(),
+            &self.state,
+        );
 
         // send the payload to the builder and return the receiver for the pending payload
         // id, initiating payload job is handled asynchronously
