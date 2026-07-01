@@ -92,14 +92,6 @@ where
         self.inner().context_for_next_block(parent, attributes)
     }
 
-    fn chain_id(&self) -> u64 {
-        self.inner().chain_id()
-    }
-
-    fn deposit_contract_address(&self) -> Option<alloy_primitives::Address> {
-        self.inner().deposit_contract_address()
-    }
-
     fn executor<DB>(&self, db: DB) -> Self::Executor<DB>
     where
         DB: evm2::evm::Database + Clone + 'static,

@@ -158,14 +158,6 @@ pub trait ConfigureEvm: Clone + Debug + Send + Sync + Unpin {
     where
         Self: 'a;
 
-    /// Returns the chain id used for transaction validation and the `CHAINID` opcode.
-    fn chain_id(&self) -> u64;
-
-    /// Returns the deposit contract address used to derive EIP-6110 deposit requests.
-    fn deposit_contract_address(&self) -> Option<Address> {
-        None
-    }
-
     /// Returns a transaction environment from a transaction.
     fn tx_env(&self, transaction: impl IntoTxEnv<TxEnvFor<Self>>) -> TxEnvFor<Self> {
         transaction.into_tx_env()

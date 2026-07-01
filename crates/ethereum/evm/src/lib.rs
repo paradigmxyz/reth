@@ -385,14 +385,6 @@ where
         })
     }
 
-    fn chain_id(&self) -> u64 {
-        self.chain_spec().chain_id()
-    }
-
-    fn deposit_contract_address(&self) -> Option<Address> {
-        self.chain_spec().deposit_contract_address()
-    }
-
     fn executor<DB>(&self, db: DB) -> Self::Executor<DB>
     where
         DB: evm2::evm::Database + Clone + 'static,
