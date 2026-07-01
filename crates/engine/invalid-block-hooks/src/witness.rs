@@ -182,11 +182,7 @@ where
         // SAFETY: The shared database is consumed by this synchronous execution call and does not
         // outlive the state provider borrowed here.
         let database = unsafe { SharedEvmStateProviderDatabase::new(&*state_provider) };
-        let output = self
-            .evm_config
-            .executor(database)
-            .execute(block)
-            .map_err(|err| eyre::eyre!(err.to_string()))?;
+        let output = self.evm_config.executor(database).execute(block)?;
         let hashed_state = output.hash_state_slow::<reth_trie::KeccakKeyHasher>();
         let (codes, preimages, block_state) = collect_execution_data(output.state.into_inner())?;
         let witness = generate(codes, preimages, hashed_state.clone(), state_provider)?;
