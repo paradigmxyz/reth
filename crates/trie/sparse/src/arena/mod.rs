@@ -433,7 +433,6 @@ impl ArenaSparseSubtrie {
                         full_path,
                         value,
                         find_result,
-                        &mut self.buffers.changed_paths,
                     );
                     self.num_leaves = (self.num_leaves as i64 + deltas.num_leaves_delta) as u64;
                     self.num_dirty_leaves =
@@ -1609,7 +1608,6 @@ impl ArenaParallelSparseTrie {
         root: &mut Index,
         new_leaf_path: Nibbles,
         value: &[u8],
-        changed_paths: &mut Option<HashSet<Nibbles>>,
     ) -> bool {
         let old_child_entry = cursor.head().expect("cursor must have head");
         let old_child_idx = old_child_entry.index;
@@ -1676,13 +1674,6 @@ impl ArenaParallelSparseTrie {
             branch_masks: BranchNodeMasks::default(),
         }));
 
-        if !old_child_entry.path.is_empty() &&
-            let Some(changed_paths) = changed_paths.as_mut()
-        {
-            // The inserted branch can be suppressed by dirty descendant emission during hashing.
-            changed_paths.insert(old_child_entry.path);
-        }
-
         cursor.replace_head_index(arena, root, new_branch_idx);
         newly_dirtied_existing
     }
@@ -1709,7 +1700,6 @@ impl ArenaParallelSparseTrie {
         full_path: &Nibbles,
         value: &[u8],
         find_result: SeekResult,
-        changed_paths: &mut Option<HashSet<Nibbles>>,
     ) -> (UpsertLeafResult, SubtrieCounterDeltas) {
         trace!(target: TRACE_TARGET, ?find_result, "Upserting leaf");
         let head = cursor.head().expect("cursor is non-empty");
@@ -1756,14 +1746,8 @@ impl ArenaParallelSparseTrie {
                 let head_path = head.path;
                 let full_path_from_head = full_path.slice(head_path.len()..);
 
-                let split_dirtied_existing = Self::split_and_insert_leaf(
-                    arena,
-                    cursor,
-                    root,
-                    full_path_from_head,
-                    value,
-                    changed_paths,
-                );
+                let split_dirtied_existing =
+                    Self::split_and_insert_leaf(arena, cursor, root, full_path_from_head, value);
 
                 let result = if cursor.depth() >= 1 {
                     UpsertLeafResult::NewChild
@@ -3087,7 +3071,6 @@ impl SparseTrie for ArenaParallelSparseTrie {
                             full_path,
                             v,
                             find_result,
-                            &mut self.buffers.changed_paths,
                         );
                         match result {
                             UpsertLeafResult::NewChild => {
