@@ -38,7 +38,7 @@ use reth_trie_db::ChangesetCache;
 use revm::database::BundleState;
 use std::{
     ops::{RangeBounds, RangeInclusive},
-    path::Path,
+    path::{Path, PathBuf},
     sync::{
         atomic::{AtomicU64, Ordering},
         Arc, Mutex,
@@ -77,6 +77,8 @@ struct ReadOnlySyncState {
 pub struct ProviderFactory<N: NodeTypesWithDB> {
     /// Database instance
     db: N::DB,
+    /// Path to the database directory.
+    db_path: PathBuf,
     /// Chain spec
     chain_spec: Arc<N::ChainSpec>,
     /// Static File Provider
@@ -134,6 +136,7 @@ impl<N: ProviderNodeTypes> ProviderFactory<N> {
         // Both factory and all providers it creates should share these cached settings.
         let legacy_settings = StorageSettings::v1();
         let database_provider_metrics = Arc::new(DatabaseProviderMetrics::default());
+        let db_path = db.path();
         let storage_settings = DatabaseProvider::<_, N>::new(
             db.tx()?,
             chain_spec.clone(),
@@ -144,7 +147,7 @@ impl<N: ProviderNodeTypes> ProviderFactory<N> {
             rocksdb_provider.clone(),
             ChangesetCache::new(),
             runtime.clone(),
-            db.path(),
+            db_path.clone(),
             database_provider_metrics.clone(),
         )
         .storage_settings()?
@@ -152,6 +155,7 @@ impl<N: ProviderNodeTypes> ProviderFactory<N> {
 
         Ok(Self {
             db,
+            db_path,
             chain_spec,
             static_file_provider,
             prune_modes: PruneModes::default(),
@@ -244,7 +248,7 @@ impl<N: NodeTypesWithDB> ProviderFactory<N> {
         N::DB: Database,
     {
         let factory = self.clone();
-        let db_path = self.db.path();
+        let db_path = self.db_path.clone();
         reth_tasks::spawn_os_thread("ro-sync", move || {
             let (tx, rx) = std::sync::mpsc::channel();
             let mut watcher = RecommendedWatcher::new(
@@ -395,7 +399,7 @@ impl<N: ProviderNodeTypes> ProviderFactory<N> {
             self.rocksdb_provider.clone(),
             self.changeset_cache.clone(),
             self.runtime.clone(),
-            self.db.path(),
+            self.db_path.clone(),
             self.database_provider_metrics.clone(),
         )
         .with_minimum_pruning_distance(self.minimum_pruning_distance))
@@ -418,7 +422,7 @@ impl<N: ProviderNodeTypes> ProviderFactory<N> {
                 self.rocksdb_provider.clone(),
                 self.changeset_cache.clone(),
                 self.runtime.clone(),
-                self.db.path(),
+                self.db_path.clone(),
                 self.database_provider_metrics.clone(),
             )
             .with_reader_txn_tracker(self.db.clone())
@@ -446,7 +450,7 @@ impl<N: ProviderNodeTypes> ProviderFactory<N> {
             self.rocksdb_provider.clone(),
             self.changeset_cache.clone(),
             self.runtime.clone(),
-            self.db.path(),
+            self.db_path.clone(),
             self.database_provider_metrics.clone(),
         )
         .with_reader_txn_tracker(self.db.clone())
@@ -972,6 +976,7 @@ where
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let Self {
             db,
+            db_path,
             chain_spec,
             static_file_provider,
             prune_modes,
@@ -987,6 +992,7 @@ where
         } = self;
         f.debug_struct("ProviderFactory")
             .field("db", &db)
+            .field("db_path", &db_path)
             .field("chain_spec", &chain_spec)
             .field("static_file_provider", &static_file_provider)
             .field("prune_modes", &prune_modes)
@@ -1009,6 +1015,7 @@ impl<N: NodeTypesWithDB> Clone for ProviderFactory<N> {
     fn clone(&self) -> Self {
         Self {
             db: self.db.clone(),
+            db_path: self.db_path.clone(),
             chain_spec: self.chain_spec.clone(),
             static_file_provider: self.static_file_provider.clone(),
             prune_modes: self.prune_modes.clone(),
