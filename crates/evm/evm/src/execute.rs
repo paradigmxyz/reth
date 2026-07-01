@@ -292,7 +292,8 @@ impl<'a, 'b, F: BlockExecutorFactory + 'a, H> BlockAssemblerInput<'a, 'b, F, H> 
 }
 
 /// A type that assembles a block from execution output.
-pub trait BlockAssembler<F: BlockExecutorFactory>: Clone + Debug + Send + Sync + Unpin {
+#[auto_impl::auto_impl(&, Arc)]
+pub trait BlockAssembler<F: BlockExecutorFactory> {
     /// Block produced by the assembler.
     type Block: Block;
 
@@ -404,7 +405,7 @@ where
     /// Parent block header.
     pub parent: &'a SealedHeader<HeaderTy<N>>,
     /// Block assembler.
-    pub assembler: Assembler,
+    pub assembler: &'a Assembler,
 }
 
 /// Conversions for executable transactions consumed by a block executor.

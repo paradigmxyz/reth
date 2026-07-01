@@ -296,7 +296,7 @@ pub trait ConfigureEvm: Clone + Debug + Send + Sync + Unpin {
             senders: Vec::new(),
             ctx,
             parent,
-            assembler: self.block_assembler().clone(),
+            assembler: self.block_assembler(),
         }
     }
 
