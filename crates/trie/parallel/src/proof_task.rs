@@ -127,6 +127,10 @@ impl AvailabilitySheet {
     }
 }
 
+fn proof_worker_count(pool_threads: usize, halve_workers: bool) -> usize {
+    if halve_workers { pool_threads.div_ceil(2) } else { pool_threads }
+}
+
 /// A handle that provides type-safe access to proof worker pools.
 ///
 /// The handle stores direct senders to both storage and account worker pools,
@@ -183,11 +187,14 @@ impl ProofWorkerHandle {
 
         let cached_storage_roots = Arc::<DashMap<_, _>>::default();
 
-        let divisor = if halve_workers { 2 } else { 1 };
-        let storage_worker_count =
-            runtime.proof_storage_worker_pool().current_num_threads() / divisor;
-        let account_worker_count =
-            runtime.proof_account_worker_pool().current_num_threads() / divisor;
+        let storage_worker_count = proof_worker_count(
+            runtime.proof_storage_worker_pool().current_num_threads(),
+            halve_workers,
+        );
+        let account_worker_count = proof_worker_count(
+            runtime.proof_account_worker_pool().current_num_threads(),
+            halve_workers,
+        );
 
         let storage_availability = Arc::new(AvailabilitySheet::new(storage_worker_count));
         let account_availability = Arc::new(AvailabilitySheet::new(account_worker_count));
@@ -1161,6 +1168,16 @@ mod tests {
 
     fn test_ctx<Factory>(factory: Factory) -> ProofTaskCtx<Factory> {
         ProofTaskCtx::new(factory)
+    }
+
+    #[test]
+    fn proof_worker_count_halves_with_ceiling() {
+        assert_eq!(proof_worker_count(1, false), 1);
+        assert_eq!(proof_worker_count(2, false), 2);
+        assert_eq!(proof_worker_count(1, true), 1);
+        assert_eq!(proof_worker_count(2, true), 1);
+        assert_eq!(proof_worker_count(3, true), 2);
+        assert_eq!(proof_worker_count(7, true), 4);
     }
 
     /// Ensures `ProofWorkerHandle::new` spawns workers correctly.
