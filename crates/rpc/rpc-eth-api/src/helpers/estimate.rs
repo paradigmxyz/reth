@@ -83,8 +83,11 @@ pub trait EstimateCall: Call {
         // consumes `request`. The caller allowance below is gated by this value — matching
         // op-geth's `feeCap` (`eth/gasestimator`) — instead of the effective gas price that the
         // RPC path collapses `tx_env.gas_price()` to via `CallFees::ensure_fees`.
-        let fee_cap =
-            request.as_ref().max_fee_per_gas().or(request.as_ref().gas_price()).unwrap_or(0);
+        let fee_cap = request
+            .as_ref()
+            .max_fee_per_gas()
+            .or_else(|| request.as_ref().gas_price())
+            .unwrap_or(0);
 
         // Configure the evm env
         let mut db = State::builder().with_database(StateProviderDatabase::new(state)).build();
