@@ -957,6 +957,13 @@ impl<N: ProviderNodeTypes> HashedPostStateProvider for ProviderFactory<N> {
     fn hashed_post_state(&self, bundle_state: &BundleState) -> HashedPostState {
         HashedPostState::from_bundle_state::<KeccakKeyHasher>(bundle_state.state())
     }
+
+    fn hashed_post_state_for_accounts(
+        &self,
+        accounts: &[Address],
+    ) -> ProviderResult<HashedPostState> {
+        self.latest()?.hashed_post_state_for_accounts(accounts)
+    }
 }
 
 impl<N: ProviderNodeTypes> MetadataProvider for ProviderFactory<N> {

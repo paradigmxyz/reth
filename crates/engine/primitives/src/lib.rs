@@ -12,12 +12,14 @@
 extern crate alloc;
 
 use alloy_consensus::BlockHeader;
+use alloy_primitives::{Address, B256};
 use reth_errors::ConsensusError;
 use reth_payload_primitives::{
     EngineApiMessageVersion, EngineObjectValidationError, InvalidPayloadAttributesError,
     NewPayloadError, PayloadAttributes, PayloadOrAttributes, PayloadTypes,
 };
 use reth_primitives_traits::{Block, RecoveredBlock, SealedBlock};
+use reth_revm::db::states::BundleState;
 use reth_trie_common::HashedPostState;
 use serde::{de::DeserializeOwned, Serialize};
 
@@ -45,6 +47,31 @@ pub use invalid_block_hook::{InvalidBlockHook, InvalidBlockHooks, NoopInvalidBlo
 
 pub mod config;
 pub use config::*;
+
+/// Input for an auxiliary sparse state-root computation performed by the engine tree.
+///
+/// Chains can use this to validate an additional root derived from a filtered bundle state while
+/// reusing the same sparse trie pipeline as the canonical state root.
+#[derive(Debug, Clone)]
+pub struct AuxiliaryStateRoot {
+    /// Root that the auxiliary sparse trie is anchored at before this block's updates.
+    pub parent_root: B256,
+    /// Root expected in the validated block header after applying this block's updates.
+    pub expected_root: B256,
+    /// Hashed state updates to stream into the auxiliary sparse trie task.
+    pub state_updates: HashedPostState,
+    /// Accounts whose complete hashed state should be loaded before applying `state_updates`.
+    ///
+    /// If set, the engine tree computes the auxiliary root directly from the resulting full hashed
+    /// state without revealing trie nodes from a provider.
+    pub full_state_accounts: Option<Vec<Address>>,
+    /// Whether the auxiliary hashed state and trie updates should become this block's retained trie
+    /// data.
+    ///
+    /// Keep this disabled for chains that only need auxiliary root validation. Enable it when the
+    /// auxiliary trie is the trie data that should be cached and persisted for descendants.
+    pub retain_trie_data: bool,
+}
 
 /// This type defines the versioned types of the engine API based on the [ethereum engine API](https://github.com/ethereum/execution-apis/tree/main/src/engine).
 ///
@@ -220,6 +247,35 @@ pub trait PayloadValidator<Types: PayloadTypes>: Send + Sync + Unpin + 'static {
     ) -> Result<(), ConsensusError> {
         // method not used by l1
         Ok(())
+    }
+
+    /// Returns an auxiliary sparse state-root computation to run after block execution.
+    ///
+    /// The engine tree passes the post-execution bundle state so implementations can filter it
+    /// before hashing. Returning [`None`](Option::None) keeps the default L1 behavior.
+    fn auxiliary_state_root(
+        &self,
+        _parent_header: &<Self::Block as Block>::Header,
+        _block: &RecoveredBlock<Self::Block>,
+        _bundle_state: &BundleState,
+    ) -> Result<Option<AuxiliaryStateRoot>, ConsensusError> {
+        Ok(None)
+    }
+
+    /// Validates a computed auxiliary sparse state root against the expected value.
+    fn validate_auxiliary_state_root(
+        &self,
+        actual: B256,
+        expected: B256,
+        _block: &RecoveredBlock<Self::Block>,
+    ) -> Result<(), ConsensusError> {
+        if actual == expected {
+            Ok(())
+        } else {
+            Err(ConsensusError::msg(format!(
+                "auxiliary state root mismatch: expected {expected:?}, got {actual:?}"
+            )))
+        }
     }
 
     /// Validates the payload attributes with respect to the header.

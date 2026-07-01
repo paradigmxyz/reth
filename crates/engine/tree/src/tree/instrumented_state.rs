@@ -300,6 +300,13 @@ impl<S: HashedPostStateProvider> HashedPostStateProvider for InstrumentedStatePr
     fn hashed_post_state(&self, bundle_state: &reth_revm::db::BundleState) -> HashedPostState {
         self.state_provider.hashed_post_state(bundle_state)
     }
+
+    fn hashed_post_state_for_accounts(
+        &self,
+        accounts: &[alloy_primitives::Address],
+    ) -> ProviderResult<HashedPostState> {
+        self.state_provider.hashed_post_state_for_accounts(accounts)
+    }
 }
 
 /// Accumulated fetch statistics from an [`InstrumentedStateProvider`].

@@ -101,7 +101,7 @@
 use crate::tree::{
     error::{InsertBlockError, InsertBlockErrorKind, InsertPayloadError},
     instrumented_state::{InstrumentedStateProvider, StateProviderMetrics, StateProviderStats},
-    multiproof::{StateRootComputeOutcome, StateRootHandle},
+    multiproof::{StateRootComputeOutcome, StateRootHandle, StateRootMessage},
     payload_processor::{PayloadProcessor, PayloadProcessorSpawnOptions},
     precompile_cache::{CachedPrecompile, CachedPrecompileMetrics, PrecompileCacheMap},
     types::{InsertPayloadResult, ValidationOutput},
@@ -124,7 +124,8 @@ use reth_chain_state::{
 };
 use reth_consensus::{ConsensusError, FullConsensus, ReceiptRootBloom};
 use reth_engine_primitives::{
-    ConfigureEngineEvm, ExecutableTxIterator, ExecutionPayload, InvalidBlockHook, PayloadValidator,
+    AuxiliaryStateRoot, ConfigureEngineEvm, ExecutableTxIterator, ExecutionPayload,
+    InvalidBlockHook, PayloadValidator,
 };
 use reth_errors::{BlockExecutionError, ProviderResult};
 use reth_evm::{
@@ -148,12 +149,16 @@ use reth_provider::{
     StorageChangeSetReader, StorageSettingsCache,
 };
 use reth_revm::db::{states::bundle_state::BundleRetention, BundleAccount, State};
-use reth_trie::{updates::TrieUpdates, HashedPostState};
+use reth_trie::{
+    hashed_cursor::HashedCursorFactory, trie_cursor::TrieCursorFactory, updates::TrieUpdates,
+    HashedPostState,
+};
 use reth_trie_db::ChangesetCache;
 use reth_trie_parallel::root::{ParallelStateRoot, ParallelStateRootError};
 use revm_primitives::{Address, KECCAK_EMPTY};
 use std::{
     collections::HashMap,
+    panic::{self, AssertUnwindSafe},
     sync::{
         atomic::{AtomicUsize, Ordering},
         mpsc::RecvTimeoutError,
@@ -311,7 +316,8 @@ where
                           + ChangeSetReader
                           + StorageChangeSetReader
                           + BlockNumReader
-                          + StorageSettingsCache,
+                          + StorageSettingsCache
+                          + HashedPostStateProvider,
         > + BlockReader<Header = N::BlockHeader>
         + ChangeSetReader
         + BlockNumReader
@@ -491,7 +497,7 @@ where
                     Ok(val) => val,
                     Err(e) => {
                         let block = validated_block.try_into_inner().expect("sole handle")?;
-                        return Err(InsertBlockError::new(block, e.into()).into())
+                        return Err(InsertBlockError::new(block, e.into()).into());
                     }
                 }
             };
@@ -519,7 +525,7 @@ where
                 return Err(validated_block
                     .try_into_inner()
                     .expect("sole handle")
-                    .expect_err("Err result checked"))
+                    .expect_err("Err result checked"));
             }
         }
 
@@ -534,7 +540,7 @@ where
                 validated_block.try_into_inner().expect("sole handle")?,
                 ProviderError::HeaderNotFound(parent_hash.into()).into(),
             )
-            .into())
+            .into());
         };
         drop(_enter);
 
@@ -760,6 +766,21 @@ where
             block
         );
 
+        let auxiliary_state_root = ensure_ok_post_block!(
+            debug_span!(
+                target: "engine::tree::payload_validator",
+                "auxiliary_state_root_input"
+            )
+            .in_scope(|| {
+                self.validator.auxiliary_state_root(parent_block.header(), &block, &output.state)
+            }),
+            block
+        );
+        let auxiliary_provider_factory =
+            OverlayStateProviderFactory::new(provider_factory.clone(), overlay_builder.clone())
+                .with_provable_trie_tables();
+        let mut retained_auxiliary_trie_data: Option<DeferredTrieData> = None;
+
         // Run the hashed state validation hook but don't propagate the error yet. If the state root
         // task fails, we might need to re-run this check against a fallback state.
         let mut hashed_state_validate_result = debug_span!(
@@ -825,8 +846,8 @@ where
                         if self.config.always_compare_trie_updates() {
                             let _has_diff = self.compare_trie_updates_with_serial(
                                 provider_builder.clone(),
-                                provider_factory,
-                                overlay_builder,
+                                provider_factory.clone(),
+                                overlay_builder.clone(),
                                 &output,
                                 trie_updates.as_ref().clone(),
                             );
@@ -883,8 +904,8 @@ where
             StateRootStrategy::Parallel => {
                 debug!(target: "engine::tree::payload_validator", "Using parallel state root algorithm");
                 match self.compute_state_root_parallel(
-                    provider_factory,
-                    overlay_builder,
+                    provider_factory.clone(),
+                    overlay_builder.clone(),
                     &hashed_state,
                 ) {
                     Ok(result) => {
@@ -950,7 +971,7 @@ where
         if let Err(err) = hashed_state_validate_result {
             // call post-block hook
             self.on_invalid_block(&parent_block, &block, &output, None, ctx.state_mut());
-            return Err(InsertBlockError::new(block.into_sealed_block(), err.into()).into())
+            return Err(InsertBlockError::new(block.into_sealed_block(), err.into()).into());
         }
 
         self.metrics.block_validation.record_state_root(&trie_output, root_elapsed.as_secs_f64());
@@ -979,7 +1000,45 @@ where
                 )
                 .into(),
             )
-            .into())
+            .into());
+        }
+
+        if let Some(auxiliary_state_root) = auxiliary_state_root {
+            let expected_root = auxiliary_state_root.expected_root;
+            let retain_trie_data = auxiliary_state_root.retain_trie_data;
+            let retained_hashed_state =
+                retain_trie_data.then(|| Arc::new(auxiliary_state_root.state_updates.clone()));
+            let auxiliary_start = Instant::now();
+            let auxiliary_outcome = ensure_ok_post_block!(
+                self.compute_auxiliary_state_root(auxiliary_provider_factory, auxiliary_state_root)
+                    .map_err(|err| InsertBlockErrorKind::Other(Box::new(err))),
+                block
+            );
+            let auxiliary_elapsed = auxiliary_start.elapsed();
+            debug!(
+                target: "engine::tree::payload_validator",
+                auxiliary_state_root = ?auxiliary_outcome.state_root,
+                retained_trie_data = retain_trie_data,
+                ?auxiliary_elapsed,
+                "Auxiliary state root task finished"
+            );
+
+            if let Err(err) = self.validator.validate_auxiliary_state_root(
+                auxiliary_outcome.state_root,
+                expected_root,
+                &block,
+            ) {
+                self.on_invalid_block(&parent_block, &block, &output, None, ctx.state_mut());
+                return Err(InsertBlockError::new(block.into_sealed_block(), err.into()).into());
+            }
+
+            if let Some(retained_hashed_state) = retained_hashed_state {
+                retained_auxiliary_trie_data = Some(self.spawn_deferred_auxiliary_trie_task(
+                    block.number(),
+                    retained_hashed_state,
+                    auxiliary_outcome.trie_updates,
+                ));
+            }
         }
 
         let lthash_start = Instant::now();
@@ -1025,13 +1084,14 @@ where
             let _ = valid_block_tx.send(());
         }
 
-        let executed_block =
+        let mut executed_block =
             self.spawn_deferred_trie_task(Arc::new(block), output, hashed_state, trie_output);
-        let executed_block = if let Some(outcome) = lthash_outcome {
-            executed_block.with_lthash_accumulator(outcome.accumulator)
-        } else {
-            executed_block
-        };
+        if let Some(auxiliary_trie_data) = retained_auxiliary_trie_data {
+            executed_block = executed_block.with_auxiliary_trie_data(auxiliary_trie_data);
+        }
+        if let Some(outcome) = lthash_outcome {
+            executed_block = executed_block.with_lthash_accumulator(outcome.accumulator);
+        }
         let raw_bal = decoded_bal.map(|decoded_bal| decoded_bal.as_raw_bal().clone());
         Ok(ValidationOutput::new(executed_block, timing_stats).with_raw_bal(raw_bal))
     }
@@ -1457,6 +1517,76 @@ where
             .incremental_root_with_updates()
     }
 
+    /// Computes an auxiliary state root through the sparse trie task.
+    fn compute_auxiliary_state_root<F>(
+        &self,
+        multiproof_provider_factory: F,
+        auxiliary_state_root: AuxiliaryStateRoot,
+    ) -> Result<StateRootComputeOutcome, ParallelStateRootError>
+    where
+        F: DatabaseProviderROFactory<
+                Provider: TrieCursorFactory + HashedCursorFactory + HashedPostStateProvider,
+            > + Clone
+            + Send
+            + Sync
+            + 'static,
+    {
+        let AuxiliaryStateRoot {
+            parent_root,
+            expected_root: _,
+            state_updates,
+            full_state_accounts,
+            retain_trie_data: _,
+        } = auxiliary_state_root;
+
+        if let Some(full_state_accounts) = full_state_accounts {
+            let mut full_state = multiproof_provider_factory
+                .database_provider_ro()
+                .map_err(ParallelStateRootError::Provider)?
+                .hashed_post_state_for_accounts(&full_state_accounts)
+                .map_err(ParallelStateRootError::Provider)?;
+            full_state.extend(state_updates);
+            return Ok(StateRootComputeOutcome {
+                state_root: reth_trie::root_from_full_hashed_state(full_state)
+                    .map_err(|err| ParallelStateRootError::Other(err.to_string()))?,
+                trie_updates: Arc::new(TrieUpdates::default()),
+                #[cfg(feature = "trie-debug")]
+                debug_recorders: Vec::new(),
+            });
+        }
+
+        if state_updates.is_empty() {
+            return Ok(StateRootComputeOutcome {
+                state_root: parent_root,
+                trie_updates: Arc::new(TrieUpdates::default()),
+                #[cfg(feature = "trie-debug")]
+                debug_recorders: Vec::new(),
+            });
+        }
+
+        let mut handle = self.payload_processor.spawn_auxiliary_state_root(
+            multiproof_provider_factory,
+            parent_root,
+            false,
+            &self.config,
+        );
+
+        handle.updates_tx().send(StateRootMessage::HashedStateUpdate(state_updates)).map_err(
+            |_| {
+                ParallelStateRootError::Other(
+                    "auxiliary sparse trie task dropped update receiver".to_string(),
+                )
+            },
+        )?;
+        handle.updates_tx().send(StateRootMessage::FinishedStateUpdates).map_err(|_| {
+            ParallelStateRootError::Other(
+                "auxiliary sparse trie task dropped finish receiver".to_string(),
+            )
+        })?;
+
+        handle.state_root()
+    }
+
     /// Compute state root for the given hashed post state in serial.
     ///
     /// Uses the same provider construction path as main execution and computes the state root and
@@ -1736,7 +1866,7 @@ where
         ) {
             // call post-block hook
             self.on_invalid_block(parent_block, block, output, None, ctx.state_mut());
-            return Err(err.into())
+            return Err(err.into());
         }
         drop(_enter);
 
@@ -1813,10 +1943,10 @@ where
 
                 Ok(handle)
             }
-            StateRootStrategy::Skipped |
-            StateRootStrategy::Parallel |
-            StateRootStrategy::Synchronous |
-            StateRootStrategy::Custom(_) => {
+            StateRootStrategy::Skipped
+            | StateRootStrategy::Parallel
+            | StateRootStrategy::Synchronous
+            | StateRootStrategy::Custom(_) => {
                 let start = Instant::now();
                 let handle = self.payload_processor.spawn_cache_exclusive(
                     env,
@@ -1854,7 +1984,7 @@ where
                 self.provider.clone(),
                 historical,
                 Some(blocks),
-            )))
+            )));
         }
 
         // Check if the block is persisted
@@ -1862,7 +1992,7 @@ where
             debug!(target: "engine::tree::payload_validator", %hash, number = %header.number(), "found canonical state for block in database, creating provider builder");
             // For persisted blocks, we create a builder that will fetch state directly from the
             // database
-            return Ok(Some(StateProviderBuilder::new(self.provider.clone(), hash, None)))
+            return Ok(Some(StateProviderBuilder::new(self.provider.clone(), hash, None)));
         }
 
         debug!(target: "engine::tree::payload_validator", %hash, "no canonical state found for block");
@@ -1898,7 +2028,7 @@ where
     ) {
         if state.invalid_headers.get(&block.hash()).is_some() {
             // we already marked this block as invalid
-            return
+            return;
         }
         self.invalid_block_hook.on_invalid_block(parent_header, block, output, trie_updates);
     }
@@ -1978,6 +2108,55 @@ where
         ExecutedBlock::with_deferred_trie_data(block, execution_outcome, deferred_trie_data)
     }
 
+    /// Spawns a background task to sort auxiliary trie data retained for persistence.
+    fn spawn_deferred_auxiliary_trie_task(
+        &self,
+        block_number: u64,
+        hashed_state: Arc<HashedPostState>,
+        trie_output: Arc<TrieUpdates>,
+    ) -> DeferredTrieData {
+        let (deferred_trie_data, deferred_trie_task) =
+            DeferredTrieData::pending(hashed_state, trie_output);
+        let block_validation_metrics = self.metrics.block_validation.clone();
+
+        let compute_auxiliary_trie_input_task = move || {
+            let _span = debug_span!(
+                target: "engine::tree::payload_validator",
+                "compute_auxiliary_trie_input_task",
+                block_number
+            )
+            .entered();
+
+            let result = panic::catch_unwind(AssertUnwindSafe(|| {
+                let compute_start = Instant::now();
+                let computed = deferred_trie_task.compute_and_publish();
+                block_validation_metrics
+                    .deferred_trie_compute_duration
+                    .record(compute_start.elapsed().as_secs_f64());
+
+                block_validation_metrics
+                    .hashed_post_state_size
+                    .record(computed.hashed_state.total_len() as f64);
+                block_validation_metrics
+                    .trie_updates_sorted_size
+                    .record(computed.trie_updates.total_len() as f64);
+            }));
+
+            if result.is_err() {
+                error!(
+                    target: "engine::tree::payload_validator",
+                    "Deferred auxiliary trie task panicked"
+                );
+            }
+        };
+
+        self.payload_processor
+            .executor()
+            .spawn_blocking_named(DEFERRED_TRIE_WORKER_NAME, compute_auxiliary_trie_input_task);
+
+        deferred_trie_data
+    }
+
     fn calculate_timing_stats(
         &self,
         block: &RecoveredBlock<N::Block>,
@@ -2038,9 +2217,9 @@ where
             .sum();
 
         // Total time spent fetching state during execution
-        let state_read_duration = provider_stats.total_account_fetch_latency() +
-            provider_stats.total_storage_fetch_latency() +
-            provider_stats.total_code_fetch_latency();
+        let state_read_duration = provider_stats.total_account_fetch_latency()
+            + provider_stats.total_storage_fetch_latency()
+            + provider_stats.total_code_fetch_latency();
 
         // EIP-7702 delegation tracking from bytecode changes
         // Count new EIP-7702 bytecodes as delegations set
@@ -2216,7 +2395,8 @@ where
                           + ChangeSetReader
                           + StorageChangeSetReader
                           + BlockNumReader
-                          + StorageSettingsCache,
+                          + StorageSettingsCache
+                          + HashedPostStateProvider,
         > + BlockReader<Header = N::BlockHeader>
         + StateProviderFactory
         + StateReader

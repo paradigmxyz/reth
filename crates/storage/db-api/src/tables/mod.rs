@@ -493,6 +493,19 @@ tables! {
         type SubKey = StoredNibblesSubKey;
     }
 
+    /// Stores the current provable-account Merkle Patricia Tree.
+    table ProvableAccountsTrie {
+        type Key = StoredNibbles;
+        type Value = BranchNodeCompact;
+    }
+
+    /// From provable account `HashedAddress` => `NibblesSubKey` => Intermediate value.
+    table ProvableStoragesTrie {
+        type Key = B256;
+        type Value = StorageTrieEntry;
+        type SubKey = StoredNibblesSubKey;
+    }
+
     /// Stores the transaction sender for each canonical transaction.
     /// It is needed to speed up execution stage and allows fetching signer without doing
     /// transaction signed recovery
@@ -568,6 +581,36 @@ impl Table for PackedStoragesTrie {
 }
 
 impl DupSort for PackedStoragesTrie {
+    type SubKey = PackedStoredNibblesSubKey;
+}
+
+/// Packed-encoding view of the [`ProvableAccountsTrie`] table.
+///
+/// Uses [`PackedStoredNibbles`] keys and shares the same underlying MDBX table.
+#[derive(Debug)]
+pub struct PackedProvableAccountsTrie;
+
+impl Table for PackedProvableAccountsTrie {
+    const NAME: &'static str = <ProvableAccountsTrie as Table>::NAME;
+    const DUPSORT: bool = false;
+    type Key = PackedStoredNibbles;
+    type Value = BranchNodeCompact;
+}
+
+/// Packed-encoding view of the [`ProvableStoragesTrie`] table.
+///
+/// Uses [`PackedStoredNibblesSubKey`] subkeys and shares the same underlying MDBX table.
+#[derive(Debug)]
+pub struct PackedProvableStoragesTrie;
+
+impl Table for PackedProvableStoragesTrie {
+    const NAME: &'static str = <ProvableStoragesTrie as Table>::NAME;
+    const DUPSORT: bool = true;
+    type Key = B256;
+    type Value = PackedStorageTrieEntry;
+}
+
+impl DupSort for PackedProvableStoragesTrie {
     type SubKey = PackedStoredNibblesSubKey;
 }
 

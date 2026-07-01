@@ -762,6 +762,8 @@ pub struct ExecutedBlock<N: NodePrimitives = EthPrimitives> {
     ///
     /// Descendants need the full accumulator to compute the next checksum.
     pub lthash_accumulator: Option<Arc<LthashAccumulator>>,
+    /// Optional deferred auxiliary trie data produced by an auxiliary state-root computation.
+    pub auxiliary_trie_data: Option<DeferredTrieData>,
 }
 
 impl<N: NodePrimitives> Default for ExecutedBlock<N> {
@@ -779,6 +781,7 @@ impl<N: NodePrimitives> Default for ExecutedBlock<N> {
             }),
             trie_data: DeferredTrieData::ready(ComputedTrieData::default()),
             lthash_accumulator: None,
+            auxiliary_trie_data: None,
         }
     }
 }
@@ -806,6 +809,7 @@ impl<N: NodePrimitives> ExecutedBlock<N> {
             execution_output,
             trie_data: DeferredTrieData::ready(trie_data),
             lthash_accumulator: None,
+            auxiliary_trie_data: None,
         }
     }
 
@@ -827,7 +831,19 @@ impl<N: NodePrimitives> ExecutedBlock<N> {
         execution_output: Arc<BlockExecutionOutput<N::Receipt>>,
         trie_data: DeferredTrieData,
     ) -> Self {
-        Self { recovered_block, execution_output, trie_data, lthash_accumulator: None }
+        Self {
+            recovered_block,
+            execution_output,
+            trie_data,
+            lthash_accumulator: None,
+            auxiliary_trie_data: None,
+        }
+    }
+
+    /// Adds deferred auxiliary trie data to the executed block.
+    pub fn with_auxiliary_trie_data(mut self, auxiliary_trie_data: DeferredTrieData) -> Self {
+        self.auxiliary_trie_data = Some(auxiliary_trie_data);
+        self
     }
 
     /// Returns a reference to an inner [`SealedBlock`]
@@ -888,6 +904,18 @@ impl<N: NodePrimitives> ExecutedBlock<N> {
     ) -> Self {
         self.lthash_accumulator = Some(accumulator.into());
         self
+    }
+
+    /// Returns the auxiliary trie data, waiting for the background task if needed.
+    #[inline]
+    pub fn auxiliary_trie_data(&self) -> Option<ComputedTrieData> {
+        self.auxiliary_trie_data.as_ref().map(DeferredTrieData::wait_cloned)
+    }
+
+    /// Returns a clone of the deferred auxiliary trie data handle.
+    #[inline]
+    pub fn auxiliary_trie_data_handle(&self) -> Option<DeferredTrieData> {
+        self.auxiliary_trie_data.clone()
     }
 
     /// Returns the hashed state result of the execution outcome.

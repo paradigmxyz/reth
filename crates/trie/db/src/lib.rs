@@ -16,12 +16,16 @@ pub use hashed_cursor::{
 };
 pub use prefix_set::load_prefix_sets_with_provider;
 pub use proof::{DatabaseProof, DatabaseStorageProof};
-pub use reth_db_api::tables::{PackedAccountsTrie, PackedStoragesTrie};
+pub use reth_db_api::tables::{
+    PackedAccountsTrie, PackedProvableAccountsTrie, PackedProvableStoragesTrie, PackedStoragesTrie,
+};
 pub use state::{from_reverts_auto, DatabaseHashedPostState, DatabaseStateRoot};
 pub use storage::{hashed_storage_from_reverts_with_provider, DatabaseStorageRoot};
 pub use trie_cursor::{
-    DatabaseAccountTrieCursor, DatabaseStorageTrieCursor, DatabaseTrieCursorFactory,
-    LegacyKeyAdapter, PackedKeyAdapter, StorageTrieEntryLike, TrieKeyAdapter, TrieTableAdapter,
+    DatabaseAccountTrieCursor, DatabaseProvableAccountTrieCursor,
+    DatabaseProvableStorageTrieCursor, DatabaseProvableTrieCursorFactory,
+    DatabaseStorageTrieCursor, DatabaseTrieCursorFactory, LegacyKeyAdapter, PackedKeyAdapter,
+    ProvableTrieTableAdapter, StorageTrieEntryLike, TrieKeyAdapter, TrieTableAdapter,
 };
 
 /// Dispatches a trie operation using the correct [`TrieKeyAdapter`] based on storage settings.
