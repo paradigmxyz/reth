@@ -1887,10 +1887,6 @@ impl ArenaParallelSparseTrie {
                 let removed_was_dirty =
                     matches!(arena[head_idx].state_ref(), Some(ArenaSparseNodeState::Dirty));
 
-                if let Some(changed_paths) = buffers.changed_paths.as_mut() {
-                    changed_paths.insert(head_path);
-                }
-
                 if cursor.depth() == 0 {
                     // The leaf is the root — replace with EmptyRoot and reset the cursor
                     // so subsequent iterations can call seek normally.

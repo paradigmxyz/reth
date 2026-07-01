@@ -115,9 +115,45 @@ pub(super) fn test_changed_paths_record_inserted_branch_on_short_key_split<T: Sp
     assert!(!changed_paths.contains(&Nibbles::default()));
 }
 
-pub(super) fn test_changed_paths_record_removed_subtrie_leaf_and_collapsed_parent_branch<
-    T: SparseTrie,
->(
+pub(super) fn test_changed_paths_record_branch_after_leaf_removal<T: SparseTrie>(
+    new_trie: fn() -> T,
+) {
+    let mut trie = new_trie();
+    trie.set_changed_paths(true);
+
+    let removed_key = key_with_prefix(&[0x12]);
+    let retained_key = key_with_prefix(&[0x13]);
+    let retained_key_b = key_with_prefix(&[0x14]);
+    let sibling_key = key_with_prefix(&[0xe0]);
+
+    let mut updates = B256Map::default();
+    updates.insert(removed_key, LeafUpdate::Changed(vec![0x01]));
+    updates.insert(retained_key, LeafUpdate::Changed(vec![0x02]));
+    updates.insert(retained_key_b, LeafUpdate::Changed(vec![0x03]));
+    updates.insert(sibling_key, LeafUpdate::Changed(vec![0x04]));
+    trie.update_leaves(&mut updates, |_, _| {}).expect("insertion should succeed");
+    assert!(updates.is_empty());
+
+    let _ = trie.root();
+    let _ = trie.take_changed_paths();
+
+    let mut removals = B256Map::default();
+    removals.insert(removed_key, LeafUpdate::Changed(Vec::new()));
+    trie.update_leaves(&mut removals, |_, _| {}).expect("removal should succeed");
+    assert!(removals.is_empty());
+
+    let _ = trie.root();
+
+    let changed_paths = trie.take_changed_paths();
+    assert!(changed_paths.contains(&Nibbles::from_nibbles([0x01])));
+    assert!(!changed_paths.contains(&Nibbles::from_nibbles([0x01, 0x02])));
+    assert!(!changed_paths.contains(&Nibbles::default()));
+
+    let _ = trie.root();
+    assert!(trie.take_changed_paths().is_empty());
+}
+
+pub(super) fn test_changed_paths_record_collapsed_root_after_leaf_removal<T: SparseTrie>(
     new_trie: fn() -> T,
 ) {
     let mut trie = new_trie();
@@ -131,7 +167,9 @@ pub(super) fn test_changed_paths_record_removed_subtrie_leaf_and_collapsed_paren
     updates.insert(retained_key, LeafUpdate::Changed(vec![0x02]));
     trie.update_leaves(&mut updates, |_, _| {}).expect("insertion should succeed");
     assert!(updates.is_empty());
-    assert!(trie.take_changed_paths().is_empty());
+
+    let _ = trie.root();
+    let _ = trie.take_changed_paths();
 
     let mut removals = B256Map::default();
     removals.insert(removed_key, LeafUpdate::Changed(Vec::new()));
@@ -141,8 +179,8 @@ pub(super) fn test_changed_paths_record_removed_subtrie_leaf_and_collapsed_paren
     let _ = trie.root();
 
     let changed_paths = trie.take_changed_paths();
-    assert!(changed_paths.contains(&Nibbles::from_nibbles([0x01, 0x02])));
     assert!(changed_paths.contains(&Nibbles::default()));
+    assert!(!changed_paths.contains(&Nibbles::from_nibbles([0x01, 0x02])));
 
     let _ = trie.root();
     assert!(trie.take_changed_paths().is_empty());
