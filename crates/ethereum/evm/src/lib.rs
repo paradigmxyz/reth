@@ -22,7 +22,7 @@ use alloy_rpc_types_engine::ExecutionData;
 #[cfg(feature = "jit")]
 use core::any::Any;
 use core::{convert::Infallible, fmt::Debug, marker::PhantomData};
-use reth_chainspec::{ChainSpec, EthChainSpec, EthExecutorSpec, MAINNET};
+use reth_chainspec::{ChainSpec, EthChainSpec, EthereumHardforks, MAINNET};
 use reth_ethereum_forks::Hardforks;
 #[cfg(feature = "std")]
 use reth_ethereum_primitives::TransactionSigned;
@@ -232,7 +232,7 @@ impl<ChainSpec, EvmFactory> EthEvmConfig<ChainSpec, EvmFactory> {
 
 impl<ChainSpec, EvmF> ConfigureEvm for EthEvmConfig<ChainSpec, EvmF>
 where
-    ChainSpec: EthExecutorSpec + EthChainSpec<Header = Header> + Hardforks + 'static,
+    ChainSpec: EthChainSpec<Header = Header> + EthereumHardforks + Hardforks + 'static,
     EvmF: Clone + Debug + Send + Sync + Unpin + 'static,
 {
     type Primitives = EthPrimitives;
@@ -387,7 +387,7 @@ where
             block_number,
             ctx.block_execution_context(
                 self.chain_spec().chain_id(),
-                self.chain_spec().deposit_contract_address(),
+                self.chain_spec().deposit_contract().map(|contract| contract.address),
             ),
         )
         .map_err(Into::into)
@@ -397,7 +397,7 @@ where
 #[cfg(feature = "std")]
 impl<ChainSpec, EvmF> ConfigureEngineEvm<ExecutionData> for EthEvmConfig<ChainSpec, EvmF>
 where
-    ChainSpec: EthExecutorSpec + EthChainSpec<Header = Header> + Hardforks + 'static,
+    ChainSpec: EthChainSpec<Header = Header> + EthereumHardforks + Hardforks + 'static,
     EvmF: Clone + Debug + Send + Sync + Unpin + 'static,
 {
     fn evm_env_for_payload(&self, payload: &ExecutionData) -> Result<EvmEnvFor<Self>, Self::Error> {

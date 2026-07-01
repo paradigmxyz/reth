@@ -32,7 +32,7 @@ pub use spec::test_fork_ids;
 pub use spec::{
     blob_params_to_schedule, create_chain_config, mainnet_chain_config, make_genesis_header,
     BaseFeeParams, BaseFeeParamsKind, ChainSpec, ChainSpecBuilder, ChainSpecProvider,
-    DepositContract, EthExecutorSpec, ForkBaseFeeParams, DEV, HOLESKY, HOODI, MAINNET, SEPOLIA,
+    DepositContract, ForkBaseFeeParams, DEV, HOLESKY, HOODI, MAINNET, SEPOLIA,
 };
 
 #[cfg(test)]

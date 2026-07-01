@@ -5,7 +5,7 @@ use alloy_consensus::{
 };
 use alloy_eips::{eip4895::Withdrawals, merge::BEACON_NONCE};
 use alloy_primitives::{Bloom, B256};
-use reth_chainspec::{EthChainSpec, EthExecutorSpec, EthereumHardforks};
+use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_ethereum_primitives::TransactionSigned;
 #[cfg(feature = "std")]
 use reth_evm::execute::BlockAssembler;
@@ -142,7 +142,7 @@ impl<ChainSpec: EthChainSpec + EthereumHardforks> EthBlockAssembler<ChainSpec> {
 impl<ChainSpec, EvmFactory> BlockAssembler<EthBlockExecutorFactory<ChainSpec, EvmFactory>>
     for EthBlockAssembler<ChainSpec>
 where
-    ChainSpec: EthChainSpec<Header = Header> + EthExecutorSpec + EthereumHardforks + 'static,
+    ChainSpec: EthChainSpec<Header = Header> + EthereumHardforks + 'static,
     EvmFactory: 'static,
 {
     type Block = Block<TransactionSigned>;

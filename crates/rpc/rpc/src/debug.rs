@@ -17,7 +17,7 @@ use jsonrpsee::core::RpcResult;
 use parking_lot::RwLock;
 use reth_chainspec::{ChainSpecProvider, EthChainSpec, EthereumHardforks};
 use reth_engine_primitives::ConsensusEngineEvent;
-use reth_evm::{execute::BlockExecutorFactory, ConfigureEvm, EvmEnv, TxEnvFor};
+use reth_evm::{execute::BlockExecutorFactory, ConfigureEvm, EvmEnv, EvmEnvFor, TxEnvFor};
 use reth_primitives_traits::{
     Block as BlockTrait, BlockBody, BlockTy, ReceiptWithBloom, RecoveredBlock,
 };
@@ -801,7 +801,7 @@ where
     async fn trace_block_impl(
         &self,
         block: Arc<RecoveredBlock<ProviderBlock<Eth::Provider>>>,
-        evm_env: <Eth::Evm as ConfigureEvm>::EvmEnv,
+        evm_env: EvmEnvFor<Eth::Evm>,
         opts: GethDebugTracingOptions,
     ) -> Result<Vec<TraceResult>, Eth::Error> {
         self.eth_api()

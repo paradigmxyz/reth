@@ -1256,19 +1256,6 @@ impl From<&Arc<ChainSpec>> for ChainSpecBuilder {
     }
 }
 
-/// A configuration object for Ethereum block execution.
-#[auto_impl::auto_impl(&, Arc)]
-pub trait EthExecutorSpec: EthereumHardforks {
-    /// Address of deposit contract emitting deposit events.
-    fn deposit_contract_address(&self) -> Option<Address>;
-}
-
-impl<H: BlockHeader> EthExecutorSpec for ChainSpec<H> {
-    fn deposit_contract_address(&self) -> Option<Address> {
-        self.deposit_contract.map(|deposit_contract| deposit_contract.address)
-    }
-}
-
 /// `PoS` deposit contract details.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct DepositContract {

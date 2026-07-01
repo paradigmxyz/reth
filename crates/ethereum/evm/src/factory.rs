@@ -9,7 +9,7 @@ use core::sync::atomic::{AtomicBool, Ordering};
 use alloy_consensus::Header;
 use reth_chainspec::ChainSpec;
 #[cfg(feature = "std")]
-use reth_chainspec::{EthChainSpec, EthExecutorSpec};
+use reth_chainspec::EthChainSpec;
 #[cfg(feature = "std")]
 use reth_evm::precompile_cache::{CachedPrecompileProvider, PrecompileCacheMap};
 
@@ -92,13 +92,13 @@ impl<C, EvmFactory> EthBlockExecutorFactory<C, EvmFactory> {
         hashed_state_mode: HashedStateMode,
     ) -> EthBlockExecutor<'a>
     where
-        C: EthChainSpec<Header = Header> + EthExecutorSpec,
+        C: EthChainSpec<Header = Header>,
     {
         EthBlockExecutor::new(
             evm,
             ctx,
             self.chain_spec.chain_id(),
-            self.chain_spec.deposit_contract_address(),
+            self.chain_spec.deposit_contract().map(|contract| contract.address),
             hashed_state_mode,
         )
     }
@@ -143,7 +143,7 @@ impl<C, EvmFactory> EthBlockExecutorFactory<C, EvmFactory> {
 impl<C, EvmFactory> reth_evm::execute::BlockExecutorFactory
     for EthBlockExecutorFactory<C, EvmFactory>
 where
-    C: EthChainSpec<Header = Header> + EthExecutorSpec,
+    C: EthChainSpec<Header = Header>,
     EvmFactory: 'static,
 {
     type Primitives = EthPrimitives;

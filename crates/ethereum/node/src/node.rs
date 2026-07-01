@@ -4,7 +4,7 @@ use crate::{EthEngineTypes, EthEvmConfig};
 use alloy_eips::{eip7840::BlobParams, merge::EPOCH_SLOTS};
 use alloy_network::Ethereum;
 use alloy_rpc_types_engine::ExecutionData;
-use reth_chainspec::{ChainSpec, EthChainSpec, EthExecutorSpec, EthereumHardforks, Hardforks};
+use reth_chainspec::{ChainSpec, EthChainSpec, EthereumHardforks, Hardforks};
 use reth_engine_local::LocalPayloadAttributesBuilder;
 use reth_engine_primitives::EngineTypes;
 use reth_ethereum_consensus::EthBeaconConsensus;
@@ -92,10 +92,7 @@ impl EthereumNode {
     >
     where
         Node: FullNodeTypes<
-            Types: NodeTypes<
-                ChainSpec: Hardforks + EthereumHardforks + EthExecutorSpec,
-                Primitives = EthPrimitives,
-            >,
+            Types: NodeTypes<ChainSpec: Hardforks + EthereumHardforks, Primitives = EthPrimitives>,
         >,
         <Node::Types as NodeTypes>::Payload:
             PayloadTypes<BuiltPayload = EthBuiltPayload, PayloadAttributes = EthPayloadAttributes>,
@@ -578,10 +575,7 @@ pub struct EthereumExecutorBuilder;
 
 impl<Types, Node> ExecutorBuilder<Node> for EthereumExecutorBuilder
 where
-    Types: NodeTypes<
-        ChainSpec: Hardforks + EthExecutorSpec + EthereumHardforks,
-        Primitives = EthPrimitives,
-    >,
+    Types: NodeTypes<ChainSpec: Hardforks + EthereumHardforks, Primitives = EthPrimitives>,
     Node: FullNodeTypes<Types = Types>,
 {
     type EVM = EthEvmConfig<Types::ChainSpec, RethEvmFactory>;
