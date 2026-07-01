@@ -21,12 +21,11 @@ pub use reth_execution_errors::{
     BlockExecutionError, BlockValidationError, EvmError, InternalBlockExecutionError,
     InvalidTxError,
 };
-#[cfg(feature = "std")]
 use reth_execution_types::{
-    extend_state_and_collect_reverts, state_source_size_hint, BlockReverts, ExecutionState,
+    extend_state_and_collect_reverts, state_source_size_hint, BlockExecutionResult, BlockReverts,
+    ExecutionState, ExecutionStateAccumulator, HashedPostState,
 };
 pub use reth_execution_types::{BlockExecutionOutput, ExecutionOutcome};
-use reth_execution_types::{BlockExecutionResult, ExecutionStateAccumulator, HashedPostState};
 #[cfg(feature = "std")]
 use reth_primitives_traits::BlockTy;
 use reth_primitives_traits::{
