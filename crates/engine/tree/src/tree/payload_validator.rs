@@ -791,7 +791,7 @@ where
                 maybe_state_root = Some((
                     block.header().state_root(),
                     Arc::new(TrieUpdates::default()),
-                    Arc::new(TrieChangedPaths::default()),
+                    None,
                     root_time.elapsed(),
                 ));
             }
@@ -901,12 +901,7 @@ where
                             ?elapsed,
                             "Regular root task finished"
                         );
-                        maybe_state_root = Some((
-                            result.0,
-                            Arc::new(result.1),
-                            Arc::new(TrieChangedPaths::default()),
-                            elapsed,
-                        ));
+                        maybe_state_root = Some((result.0, Arc::new(result.1), None, elapsed));
                     }
                     Err(error) => {
                         debug!(target: "engine::tree::payload_validator", %error, "Parallel state root computation failed");
@@ -924,12 +919,8 @@ where
                     }),
                     block
                 );
-                maybe_state_root = Some((
-                    state_root,
-                    Arc::new(trie_updates),
-                    Arc::new(TrieChangedPaths::default()),
-                    root_time.elapsed(),
-                ));
+                maybe_state_root =
+                    Some((state_root, Arc::new(trie_updates), None, root_time.elapsed()));
             }
         }
 
@@ -960,7 +951,7 @@ where
                 self.metrics.block_validation.state_root_task_fallback_success_total.increment(1);
             }
 
-            (root, Arc::new(updates), Arc::new(TrieChangedPaths::default()), root_time.elapsed())
+            (root, Arc::new(updates), None, root_time.elapsed())
         };
 
         if let Err(err) = hashed_state_validate_result {
@@ -1544,7 +1535,7 @@ where
                                 StateRootComputeOutcome {
                                     state_root,
                                     trie_updates: Arc::new(trie_updates),
-                                    changed_paths: Arc::new(TrieChangedPaths::default()),
+                                    changed_paths: None,
                                     #[cfg(feature = "trie-debug")]
                                     debug_recorders: Vec::new(),
                                 },
@@ -1565,7 +1556,7 @@ where
                             StateRootComputeOutcome {
                                 state_root,
                                 trie_updates: Arc::new(trie_updates),
-                                changed_paths: Arc::new(TrieChangedPaths::default()),
+                                changed_paths: None,
                                 #[cfg(feature = "trie-debug")]
                                 debug_recorders: Vec::new(),
                             },
@@ -1919,7 +1910,7 @@ where
         execution_outcome: Arc<BlockExecutionOutput<N::Receipt>>,
         hashed_state: LazyHashedPostState,
         trie_output: Arc<TrieUpdates>,
-        changed_paths: Arc<TrieChangedPaths>,
+        changed_paths: Option<Arc<TrieChangedPaths>>,
     ) -> ExecutedBlock<N> {
         // Create deferred handle and task that owns the unsorted inputs.
         // Resolve the lazy handle into Arc<HashedPostState>. By this point the hashed state has
@@ -2258,7 +2249,7 @@ where
             block.execution_output,
             LazyHashedPostState::ready(block.hashed_state),
             block.trie_updates,
-            Arc::new(TrieChangedPaths::default()),
+            block.changed_paths,
         ))
     }
 

@@ -31,6 +31,7 @@ use reth_evm_ethereum::MockEvmConfig;
 use reth_primitives_traits::Block as _;
 use reth_provider::{test_utils::MockEthProvider, BalStoreHandle, InMemoryBalStore, RawBal};
 use reth_tasks::spawn_os_thread;
+use reth_trie::TrieChangedPaths;
 use std::{
     collections::BTreeMap,
     str::FromStr,
@@ -41,6 +42,12 @@ use std::{
     time::Duration,
 };
 use tokio::sync::oneshot;
+
+fn with_known_changed_paths(block: ExecutedBlock<EthPrimitives>) -> ExecutedBlock<EthPrimitives> {
+    let mut trie_data = block.trie_data();
+    trie_data.changed_paths = Some(Arc::new(TrieChangedPaths::default()));
+    ExecutedBlock::new(block.recovered_block, block.execution_output, trie_data)
+}
 
 /// Mock engine validator for tests
 #[derive(Debug, Clone)]
@@ -581,7 +588,8 @@ async fn test_tree_persist_blocks() {
 
 #[test]
 fn on_new_persisted_block_queues_sparse_trie_prune_request() {
-    let blocks: Vec<_> = TestBlockBuilder::eth().get_executed_blocks(1..4).collect();
+    let blocks: Vec<_> =
+        TestBlockBuilder::eth().get_executed_blocks(1..4).map(with_known_changed_paths).collect();
     let mut test_harness = TestHarness::new(MAINNET.clone()).with_blocks(blocks.clone());
     test_harness
         .tree
@@ -591,6 +599,20 @@ fn on_new_persisted_block_queues_sparse_trie_prune_request() {
     test_harness.tree.on_new_persisted_block().unwrap();
 
     assert!(test_harness.tree.pending_sparse_trie_prune.is_some());
+}
+
+#[test]
+fn on_new_persisted_block_skips_sparse_trie_prune_when_changed_paths_unknown() {
+    let blocks: Vec<_> = TestBlockBuilder::eth().get_executed_blocks(1..4).collect();
+    let mut test_harness = TestHarness::new(MAINNET.clone()).with_blocks(blocks.clone());
+    test_harness
+        .tree
+        .persistence_state
+        .finish(blocks[0].recovered_block().hash(), blocks[0].recovered_block().number);
+
+    test_harness.tree.on_new_persisted_block().unwrap();
+
+    assert!(test_harness.tree.pending_sparse_trie_prune.is_none());
 }
 
 #[test]

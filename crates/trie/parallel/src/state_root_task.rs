@@ -41,7 +41,7 @@ pub struct StateRootComputeOutcome {
     /// The trie updates.
     pub trie_updates: Arc<TrieUpdates>,
     /// Changed trie node base paths retained while computing the root.
-    pub changed_paths: Arc<TrieChangedPaths>,
+    pub changed_paths: Option<Arc<TrieChangedPaths>>,
     /// Debug recorders taken from the sparse tries, keyed by `None` for account trie
     /// and `Some(address)` for storage tries.
     #[cfg(feature = "trie-debug")]

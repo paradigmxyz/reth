@@ -60,7 +60,7 @@ pub struct ComputedTrieData {
     /// Sorted trie updates produced by state root computation.
     pub trie_updates: Arc<TrieUpdatesSorted>,
     /// Changed trie node base paths produced by state root computation.
-    pub changed_paths: Arc<TrieChangedPaths>,
+    pub changed_paths: Option<Arc<TrieChangedPaths>>,
 }
 
 /// Metrics for deferred trie computation.
@@ -84,7 +84,7 @@ struct PendingInputs {
     /// Unsorted trie updates from state root computation.
     trie_updates: Arc<TrieUpdates>,
     /// Changed trie node base paths from state root computation.
-    changed_paths: Arc<TrieChangedPaths>,
+    changed_paths: Option<Arc<TrieChangedPaths>>,
 }
 
 impl fmt::Debug for DeferredTrieData {
@@ -100,7 +100,7 @@ impl DeferredTrieData {
     pub fn pending(
         hashed_state: Arc<HashedPostState>,
         trie_updates: Arc<TrieUpdates>,
-        changed_paths: Arc<TrieChangedPaths>,
+        changed_paths: Option<Arc<TrieChangedPaths>>,
     ) -> (Self, DeferredTrieDataProducer) {
         let value = Arc::new(OnceLock::new());
         (
@@ -121,7 +121,7 @@ impl DeferredTrieData {
     pub fn sort(
         hashed_state: Arc<HashedPostState>,
         trie_updates: Arc<TrieUpdates>,
-        changed_paths: Arc<TrieChangedPaths>,
+        changed_paths: Option<Arc<TrieChangedPaths>>,
     ) -> ComputedTrieData {
         let _span = debug_span!(target: "engine::tree::deferred_trie", "sort_inputs").entered();
 
@@ -176,22 +176,18 @@ impl DeferredTrieData {
 
 impl ComputedTrieData {
     /// Construct sorted trie data for one block.
-    pub fn new(
+    pub const fn new(
         hashed_state: Arc<HashedPostStateSorted>,
         trie_updates: Arc<TrieUpdatesSorted>,
     ) -> Self {
-        Self::new_with_changed_paths(
-            hashed_state,
-            trie_updates,
-            Arc::new(TrieChangedPaths::default()),
-        )
+        Self::new_with_changed_paths(hashed_state, trie_updates, None)
     }
 
     /// Construct sorted trie data with changed trie node base paths for one block.
     pub const fn new_with_changed_paths(
         hashed_state: Arc<HashedPostStateSorted>,
         trie_updates: Arc<TrieUpdatesSorted>,
-        changed_paths: Arc<TrieChangedPaths>,
+        changed_paths: Option<Arc<TrieChangedPaths>>,
     ) -> Self {
         Self { hashed_state, trie_updates, changed_paths }
     }
@@ -212,8 +208,19 @@ mod tests {
         DeferredTrieData::pending(
             Arc::new(HashedPostState::default()),
             Arc::new(TrieUpdates::default()),
-            Arc::new(TrieChangedPaths::default()),
+            None,
         )
+    }
+
+    fn assert_changed_paths_ptr_eq(
+        left: &Option<Arc<TrieChangedPaths>>,
+        right: &Option<Arc<TrieChangedPaths>>,
+    ) {
+        match (left, right) {
+            (Some(left), Some(right)) => assert!(Arc::ptr_eq(left, right)),
+            (None, None) => {}
+            _ => panic!("changed paths presence mismatch"),
+        }
     }
 
     #[test]
@@ -237,10 +244,10 @@ mod tests {
 
         assert!(Arc::ptr_eq(&published.hashed_state, &first.hashed_state));
         assert!(Arc::ptr_eq(&published.trie_updates, &first.trie_updates));
-        assert!(Arc::ptr_eq(&published.changed_paths, &first.changed_paths));
+        assert_changed_paths_ptr_eq(&published.changed_paths, &first.changed_paths);
         assert!(Arc::ptr_eq(&first.hashed_state, &second.hashed_state));
         assert!(Arc::ptr_eq(&first.trie_updates, &second.trie_updates));
-        assert!(Arc::ptr_eq(&first.changed_paths, &second.changed_paths));
+        assert_changed_paths_ptr_eq(&first.changed_paths, &second.changed_paths);
     }
 
     #[test]
@@ -256,7 +263,7 @@ mod tests {
 
         assert!(Arc::ptr_eq(&published.hashed_state, &result.hashed_state));
         assert!(Arc::ptr_eq(&published.trie_updates, &result.trie_updates));
-        assert!(Arc::ptr_eq(&published.changed_paths, &result.changed_paths));
+        assert_changed_paths_ptr_eq(&published.changed_paths, &result.changed_paths);
     }
 
     #[test]
@@ -271,10 +278,10 @@ mod tests {
 
         assert!(Arc::ptr_eq(&published.hashed_state, &result1.hashed_state));
         assert!(Arc::ptr_eq(&published.trie_updates, &result1.trie_updates));
-        assert!(Arc::ptr_eq(&published.changed_paths, &result1.changed_paths));
+        assert_changed_paths_ptr_eq(&published.changed_paths, &result1.changed_paths);
         assert!(Arc::ptr_eq(&result1.hashed_state, &result2.hashed_state));
         assert!(Arc::ptr_eq(&result1.trie_updates, &result2.trie_updates));
-        assert!(Arc::ptr_eq(&result1.changed_paths, &result2.changed_paths));
+        assert_changed_paths_ptr_eq(&result1.changed_paths, &result2.changed_paths);
     }
 
     #[test]
@@ -291,7 +298,7 @@ mod tests {
         let (deferred, task) = DeferredTrieData::pending(
             Arc::new(hashed_state),
             Arc::new(TrieUpdates::default()),
-            Arc::new(TrieChangedPaths::default()),
+            None,
         );
         let _ = task.compute_and_publish();
         let result = deferred.wait_cloned();
@@ -309,7 +316,7 @@ mod tests {
         let (deferred, task) = DeferredTrieData::pending(
             Arc::new(HashedPostState { accounts, storages: Default::default() }),
             Arc::new(TrieUpdates::default()),
-            Arc::new(TrieChangedPaths::default()),
+            None,
         );
 
         let _ = task.compute_and_publish();
