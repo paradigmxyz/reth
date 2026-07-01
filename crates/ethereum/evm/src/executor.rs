@@ -2,8 +2,9 @@
 
 use crate::{
     execution::{
-        block_requests_from_receipts, execute_transaction, post_block_balance_state_changes,
-        post_execution_system_call_state_changes, pre_execution_system_call_state_changes,
+        block_requests_from_receipts, execute_transaction_with_commit_condition,
+        post_block_balance_state_changes, post_execution_system_call_state_changes,
+        pre_execution_system_call_state_changes,
     },
     BlockExecutionContext, BlockSystemCalls, EthBlockExecutionCtx, EthTxEnv, HashedStateMode,
     RethReceiptBuilder,
@@ -12,9 +13,11 @@ use alloc::{borrow::Cow, vec::Vec};
 use alloy_consensus::{Header, TxType};
 use alloy_eips::{eip2718::Typed2718, eip4895::Withdrawal};
 use alloy_primitives::{Address, B256};
-use evm2::{evm::BlockStateAccumulator, interpreter::Host, BaseEvmTypes, Evm};
+use evm2::{evm::BlockStateAccumulator, interpreter::Host, BaseEvmTypes, Evm, TxResult};
 use reth_ethereum_primitives::{EthPrimitives, Receipt};
-use reth_evm::execute::{BlockExecutionError, BlockExecutionOutput, BlockExecutor, GasOutput};
+use reth_evm::execute::{
+    BlockExecutionError, BlockExecutionOutput, BlockExecutor, CommitChanges, GasOutput,
+};
 use reth_execution_types::HashedPostStateSink;
 use reth_trie_common::{HashedPostState, KeccakKeyHasher};
 
@@ -94,6 +97,7 @@ impl<'a> EthBlockExecutor<'a> {
 impl BlockExecutor for EthBlockExecutor<'_> {
     type Primitives = EthPrimitives;
     type Transaction = EthTxEnv;
+    type TransactionResult = TxResult;
     type TransactionOutput = GasOutput;
 
     fn evm(&self) -> &Evm<BaseEvmTypes> {
@@ -132,11 +136,12 @@ impl BlockExecutor for EthBlockExecutor<'_> {
         .map_err(Into::into)
     }
 
-    fn execute_transaction<H>(
+    fn execute_transaction_with_commit_condition<H>(
         &mut self,
         transaction: Self::Transaction,
+        f: impl FnOnce(&Self::TransactionResult) -> CommitChanges,
         on_hashed_state_update: &mut H,
-    ) -> Result<Self::TransactionOutput, BlockExecutionError>
+    ) -> Result<Option<Self::TransactionOutput>, BlockExecutionError>
     where
         H: FnMut(HashedPostState),
     {
@@ -144,15 +149,19 @@ impl BlockExecutor for EthBlockExecutor<'_> {
         let transaction = transaction.into_envelope();
         let tx_type =
             TxType::try_from(transaction.ty()).expect("transaction envelope has valid type");
-        let outcome = execute_transaction(
+        let Some(outcome) = execute_transaction_with_commit_condition(
             &mut self.evm,
             &mut self.block_state,
             self.hashed_state.as_mut(),
             self.hashed_state_mode.stream(),
             on_hashed_state_update,
             &transaction,
+            f,
         )
-        .map_err(|err| BlockExecutionError::evm(err, tx_hash))?;
+        .map_err(|err| BlockExecutionError::evm(err, tx_hash))?
+        else {
+            return Ok(None)
+        };
         let gas_used = outcome.gas_used;
         self.cumulative_gas_used += gas_used;
         self.receipts.push(RethReceiptBuilder.build_receipt(
@@ -160,7 +169,7 @@ impl BlockExecutor for EthBlockExecutor<'_> {
             outcome,
             self.cumulative_gas_used,
         ));
-        Ok(GasOutput::from(gas_used))
+        Ok(Some(GasOutput::from(gas_used)))
     }
 
     fn receipts(&self) -> &[Receipt] {

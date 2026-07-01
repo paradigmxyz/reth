@@ -52,7 +52,9 @@ use reth_ethereum_primitives::Receipt;
 use reth_ethereum_primitives::TransactionSigned;
 #[cfg(test)]
 use reth_evm::execute::HashedStateMode;
-use reth_evm::execute::{BlockExecutionError, BlockValidationError, EvmError, InvalidTxError};
+use reth_evm::execute::{
+    BlockExecutionError, BlockValidationError, CommitChanges, EvmError, InvalidTxError,
+};
 #[cfg(test)]
 use reth_execution_types::BlockExecutionOutput;
 use reth_execution_types::HashedPostStateSink;
@@ -729,6 +731,7 @@ fn send_hashed_state_update(
     }
 }
 
+#[cfg(test)]
 pub(crate) fn execute_transaction(
     evm: &mut Evm<BaseEvmTypes>,
     block_state: &mut BlockStateAccumulator,
@@ -737,8 +740,29 @@ pub(crate) fn execute_transaction(
     on_hashed_state_update: &mut impl FnMut(HashedPostState),
     transaction: &RecoveredTxEnvelope,
 ) -> Result<TxResult, EthExecutionError> {
+    execute_transaction_with_commit_condition(
+        evm,
+        block_state,
+        hashed_state,
+        stream_hashed_state,
+        on_hashed_state_update,
+        transaction,
+        |_| CommitChanges::Yes,
+    )
+    .map(|outcome| outcome.expect("transaction is always committed"))
+}
+
+pub(crate) fn execute_transaction_with_commit_condition(
+    evm: &mut Evm<BaseEvmTypes>,
+    block_state: &mut BlockStateAccumulator,
+    hashed_state: Option<&mut HashedPostStateSink<KeccakKeyHasher>>,
+    stream_hashed_state: bool,
+    on_hashed_state_update: &mut impl FnMut(HashedPostState),
+    transaction: &RecoveredTxEnvelope,
+    should_commit: impl FnOnce(&TxResult) -> CommitChanges,
+) -> Result<Option<TxResult>, EthExecutionError> {
     enum TransactionResolution {
-        Outcome(TxResult),
+        Outcome(Option<TxResult>),
         DatabaseError(DbErrorCode),
         HandlerError(HandlerError),
     }
@@ -748,6 +772,9 @@ pub(crate) fn execute_transaction(
             if let Some(code) = executed.result().db_error_code {
                 let _ = executed.discard();
                 TransactionResolution::DatabaseError(code)
+            } else if !should_commit(executed.result()).should_commit() {
+                let _ = executed.discard();
+                TransactionResolution::Outcome(None)
             } else {
                 let outcome = {
                     let mut sink =
@@ -756,7 +783,7 @@ pub(crate) fn execute_transaction(
                     sink.flush_streamed_hashed_state(on_hashed_state_update);
                     outcome
                 };
-                TransactionResolution::Outcome(outcome)
+                TransactionResolution::Outcome(Some(outcome))
             }
         }
         Err(err) => TransactionResolution::HandlerError(err),

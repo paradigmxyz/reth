@@ -102,12 +102,31 @@ impl From<u64> for GasOutput {
     }
 }
 
+/// Marks whether transaction changes should be committed into block executor state.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[must_use]
+pub enum CommitChanges {
+    /// Transaction changes should be committed.
+    Yes,
+    /// Transaction changes should not be committed.
+    No,
+}
+
+impl CommitChanges {
+    /// Returns `true` if transaction changes should be committed.
+    pub const fn should_commit(self) -> bool {
+        matches!(self, Self::Yes)
+    }
+}
+
 /// A configured block executor.
 pub trait BlockExecutor: Sized {
     /// The primitive types used by the executor.
     type Primitives: NodePrimitives;
     /// Transaction environment consumed by this executor.
     type Transaction;
+    /// Raw transaction execution result produced before receipt conversion.
+    type TransactionResult;
     /// Output returned after a transaction is committed.
     type TransactionOutput: Default;
 
@@ -125,14 +144,49 @@ pub trait BlockExecutor: Sized {
     where
         H: FnMut(HashedPostState);
 
-    /// Executes a transaction.
+    /// Executes a transaction, invokes `f` with the transaction result, and commits changes when
+    /// `f` returns [`CommitChanges::Yes`].
+    fn execute_transaction_with_commit_condition<H>(
+        &mut self,
+        transaction: Self::Transaction,
+        f: impl FnOnce(&Self::TransactionResult) -> CommitChanges,
+        on_hashed_state_update: &mut H,
+    ) -> Result<Option<Self::TransactionOutput>, BlockExecutionError>
+    where
+        H: FnMut(HashedPostState);
+
+    /// Executes a transaction, invokes `f` with the transaction result, and commits changes.
+    fn execute_transaction_with_result_closure<H>(
+        &mut self,
+        transaction: Self::Transaction,
+        f: impl FnOnce(&Self::TransactionResult),
+        on_hashed_state_update: &mut H,
+    ) -> Result<Self::TransactionOutput, BlockExecutionError>
+    where
+        H: FnMut(HashedPostState),
+    {
+        self.execute_transaction_with_commit_condition(
+            transaction,
+            |result| {
+                f(result);
+                CommitChanges::Yes
+            },
+            on_hashed_state_update,
+        )
+        .map(Option::unwrap_or_default)
+    }
+
+    /// Executes a transaction and commits changes.
     fn execute_transaction<H>(
         &mut self,
         transaction: Self::Transaction,
         on_hashed_state_update: &mut H,
     ) -> Result<Self::TransactionOutput, BlockExecutionError>
     where
-        H: FnMut(HashedPostState);
+        H: FnMut(HashedPostState),
+    {
+        self.execute_transaction_with_result_closure(transaction, |_| {}, on_hashed_state_update)
+    }
 
     /// Returns receipts accumulated so far.
     fn receipts(&self) -> &[ReceiptTy<Self::Primitives>];
@@ -274,13 +328,26 @@ pub trait BlockBuilder {
     /// Applies pre-execution block changes.
     fn apply_pre_execution_changes(&mut self) -> Result<(), BlockExecutionError>;
 
-    /// Executes a transaction, invokes `f` with the transaction output, and saves it for block
+    /// Executes a transaction and saves it for block assembly only if committed.
+    fn execute_transaction_with_commit_condition(
+        &mut self,
+        tx: impl ExecutorTx<Self::Executor>,
+        f: impl FnOnce(&<Self::Executor as BlockExecutor>::TransactionResult) -> CommitChanges,
+    ) -> Result<Option<GasOutput>, BlockExecutionError>;
+
+    /// Executes a transaction, invokes `f` with the transaction result, and saves it for block
     /// assembly.
     fn execute_transaction_with_result_closure(
         &mut self,
         tx: impl ExecutorTx<Self::Executor>,
-        f: impl FnOnce(&GasOutput),
-    ) -> Result<GasOutput, BlockExecutionError>;
+        f: impl FnOnce(&<Self::Executor as BlockExecutor>::TransactionResult),
+    ) -> Result<GasOutput, BlockExecutionError> {
+        self.execute_transaction_with_commit_condition(tx, |result| {
+            f(result);
+            CommitChanges::Yes
+        })
+        .map(Option::unwrap_or_default)
+    }
 
     /// Executes a transaction and saves it for block assembly.
     fn execute_transaction(
@@ -378,19 +445,23 @@ where
         self.executor.apply_pre_execution_changes(&mut |_| {})
     }
 
-    fn execute_transaction_with_result_closure(
+    fn execute_transaction_with_commit_condition(
         &mut self,
         tx: impl ExecutorTx<Self::Executor>,
-        f: impl FnOnce(&GasOutput),
-    ) -> Result<GasOutput, BlockExecutionError> {
+        f: impl FnOnce(&<Self::Executor as BlockExecutor>::TransactionResult) -> CommitChanges,
+    ) -> Result<Option<GasOutput>, BlockExecutionError> {
         let (tx_env, tx) = tx.into_parts();
         let transaction = tx.tx().clone();
         let sender = *tx.signer();
-        let output = self.executor.execute_transaction(tx_env, &mut |_| {})?;
-        f(&output);
-        self.transactions.push(transaction);
-        self.senders.push(sender);
-        Ok(output)
+        if let Some(output) =
+            self.executor.execute_transaction_with_commit_condition(tx_env, f, &mut |_| {})?
+        {
+            self.transactions.push(transaction);
+            self.senders.push(sender);
+            Ok(Some(output))
+        } else {
+            Ok(None)
+        }
     }
 
     fn finish(
