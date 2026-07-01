@@ -2503,15 +2503,12 @@ impl SparseTrie for ArenaParallelSparseTrie {
             return;
         }
 
-        // Count total dirty leaves across all subtries to make one global parallelism decision.
-        let mut total_dirty_leaves: u64 = 0;
         let mut taken: Vec<(Index, Box<ArenaSparseSubtrie>)> = Vec::new();
         for (idx, node) in &mut self.upper_arena {
             let ArenaSparseNode::Subtrie(s) = node else { continue };
             if s.num_dirty_leaves == 0 {
                 continue;
             }
-            total_dirty_leaves += s.num_dirty_leaves;
             let ArenaSparseNode::Subtrie(subtrie) =
                 mem::replace(node, ArenaSparseNode::TakenSubtrie)
             else {
@@ -2520,23 +2517,44 @@ impl SparseTrie for ArenaParallelSparseTrie {
             taken.push((idx, subtrie));
         }
 
-        // Hash taken subtries in parallel if total dirty leaves meet the threshold.
+        // Hash only threshold-eligible subtries in parallel. Small dirty subtries are cheaper to
+        // hash inline than to submit as individual rayon jobs.
         if !taken.is_empty() {
-            if taken.len() == 1 || total_dirty_leaves < self.parallelism_thresholds.min_dirty_leaves
-            {
-                for (_, subtrie) in &mut taken {
+            if taken.len() == 1 {
+                taken[0].1.update_cached_rlp();
+            } else {
+                let min_dirty_leaves = self.parallelism_thresholds.min_dirty_leaves;
+                let mut inline = Vec::with_capacity(taken.len());
+                let mut parallel = Vec::with_capacity(taken.len());
+
+                for item in taken {
+                    if item.1.num_dirty_leaves >= min_dirty_leaves {
+                        parallel.push(item);
+                    } else {
+                        inline.push(item);
+                    }
+                }
+
+                for (_, subtrie) in &mut inline {
                     subtrie.update_cached_rlp();
                 }
-            } else {
-                use rayon::iter::{IntoParallelIterator, ParallelIterator};
 
-                taken = taken
-                    .into_par_iter()
-                    .map(|(idx, mut subtrie)| {
-                        subtrie.update_cached_rlp();
-                        (idx, subtrie)
-                    })
-                    .collect();
+                if parallel.len() == 1 {
+                    parallel[0].1.update_cached_rlp();
+                } else if !parallel.is_empty() {
+                    use rayon::iter::{IntoParallelIterator, ParallelIterator};
+
+                    parallel = parallel
+                        .into_par_iter()
+                        .map(|(idx, mut subtrie)| {
+                            subtrie.update_cached_rlp();
+                            (idx, subtrie)
+                        })
+                        .collect();
+                }
+
+                inline.extend(parallel);
+                taken = inline;
             }
         }
 
@@ -3276,6 +3294,59 @@ mod tests {
             changeset.entry(key).or_insert(value);
         }
         changeset
+    }
+
+    fn test_key(first_byte: u8, second_byte: u8) -> B256 {
+        let mut key = B256::ZERO;
+        key.0[0] = first_byte;
+        key.0[1] = second_byte;
+        key
+    }
+
+    #[test]
+    fn dirty_subtrie_hash_threshold_preserves_root() {
+        let initial = [0x10, 0x20, 0x30, 0x40]
+            .into_iter()
+            .flat_map(|prefix| {
+                (0u8..4).map(move |slot| {
+                    (test_key(prefix, slot), U256::from(prefix as u64 + slot as u64 + 1))
+                })
+            })
+            .collect::<BTreeMap<_, _>>();
+
+        let changes = [0x10, 0x20, 0x30, 0x40]
+            .into_iter()
+            .map(|prefix| (test_key(prefix, 0), U256::from(prefix as u64 + 1000)))
+            .collect::<BTreeMap<_, _>>();
+
+        let harness = ArenaTrieTestHarness::new(initial);
+        let root_node = harness.root_node();
+
+        let mut inline_hashing = ArenaParallelSparseTrie::default().with_parallelism_thresholds(
+            ArenaParallelismThresholds {
+                min_dirty_leaves: u64::MAX,
+                min_revealed_nodes: 1,
+                min_updates: 1,
+                min_leaves_for_prune: 1,
+            },
+        );
+        inline_hashing
+            .set_root(root_node.node.clone(), root_node.masks, true)
+            .expect("set_root should succeed");
+        harness.assert_changes(&mut inline_hashing, changes.clone());
+
+        let mut parallel_eligible = ArenaParallelSparseTrie::default().with_parallelism_thresholds(
+            ArenaParallelismThresholds {
+                min_dirty_leaves: 1,
+                min_revealed_nodes: 1,
+                min_updates: 1,
+                min_leaves_for_prune: 1,
+            },
+        );
+        parallel_eligible
+            .set_root(root_node.node, root_node.masks, true)
+            .expect("set_root should succeed");
+        harness.assert_changes(&mut parallel_eligible, changes);
     }
 
     proptest! {
