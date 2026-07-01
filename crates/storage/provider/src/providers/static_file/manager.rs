@@ -612,14 +612,6 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
         runtime.storage_pool().in_place_scope(|s| {
             s.spawn(|_| {
                 let _guard = span.enter();
-                r_headers =
-                    Some(self.write_segment(StaticFileSegment::Headers, first_block_number, |w| {
-                        Self::write_headers(w, blocks)
-                    }));
-            });
-
-            s.spawn(|_| {
-                let _guard = span.enter();
                 r_txs = Some(self.write_segment(
                     StaticFileSegment::Transactions,
                     first_block_number,
@@ -670,6 +662,11 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
                     ));
                 });
             }
+
+            r_headers =
+                Some(self.write_segment(StaticFileSegment::Headers, first_block_number, |w| {
+                    Self::write_headers(w, blocks)
+                }));
         });
 
         r_headers.ok_or(StaticFileWriterError::ThreadPanic("headers"))??;
