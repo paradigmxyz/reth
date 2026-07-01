@@ -120,25 +120,6 @@ pub struct EthBlockExecutionCtx<'a> {
     pub slot_number: Option<u64>,
 }
 
-impl EthBlockExecutionCtx<'_> {
-    fn block_execution_context(
-        &self,
-        chain_id: u64,
-        deposit_contract_address: Option<Address>,
-    ) -> crate::execution::BlockExecutionContext<'_> {
-        crate::execution::BlockExecutionContext {
-            chain_id,
-            system_calls: Some(crate::execution::BlockSystemCalls {
-                parent_hash: self.parent_hash,
-                parent_beacon_block_root: self.parent_beacon_block_root,
-            }),
-            ommers: Some(self.ommers),
-            withdrawals: self.withdrawals.as_deref(),
-            deposit_contract_address,
-        }
-    }
-}
-
 /// Helper type with backwards compatible methods to obtain Ethereum executor providers.
 #[doc(hidden)]
 pub mod execute {
@@ -421,31 +402,6 @@ where
         Self: 'a,
     {
         self.executor_factory.create_executor(evm, ctx, hashed_state_mode)
-    }
-
-    #[cfg(feature = "std")]
-    fn pre_block_state_changes<'a, DB>(
-        &self,
-        db: DB,
-        env: EthEvmEnv,
-        block_number: u64,
-        ctx: EthBlockExecutionCtx<'a>,
-    ) -> Result<evm2::BlockStateAccumulator, alloc::boxed::Box<dyn core::error::Error + Send + Sync>>
-    where
-        Self: 'a,
-        DB: evm2::evm::Database + 'static,
-        DB::Error: core::error::Error + Send + Sync + 'static,
-    {
-        let mut evm = self.evm_with_env(evm2::evm::Db::new(db), env);
-        crate::execution::apply_pre_execution_system_calls(
-            &mut evm,
-            block_number,
-            ctx.block_execution_context(
-                self.chain_spec().chain_id(),
-                self.chain_spec().deposit_contract_address(),
-            ),
-        )
-        .map_err(Into::into)
     }
 }
 
