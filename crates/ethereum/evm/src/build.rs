@@ -142,14 +142,8 @@ impl<ChainSpec: EthChainSpec + EthereumHardforks> EthBlockAssembler<ChainSpec> {
 impl<ChainSpec, EvmFactory> BlockAssembler<EthBlockExecutorFactory<ChainSpec, EvmFactory>>
     for EthBlockAssembler<ChainSpec>
 where
-    ChainSpec: EthChainSpec<Header = Header>
-        + EthExecutorSpec
-        + EthereumHardforks
-        + core::fmt::Debug
-        + Send
-        + Sync
-        + 'static,
-    EvmFactory: Clone + core::fmt::Debug + Send + Sync + Unpin + 'static,
+    ChainSpec: EthChainSpec<Header = Header> + EthExecutorSpec + EthereumHardforks + 'static,
+    EvmFactory: 'static,
 {
     type Block = Block<TransactionSigned>;
 
