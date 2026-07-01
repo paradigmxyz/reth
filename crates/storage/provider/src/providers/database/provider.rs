@@ -912,6 +912,12 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
         &self,
         bytecodes: impl IntoIterator<Item = (B256, Bytecode)>,
     ) -> ProviderResult<()> {
+        let mut bytecodes = bytecodes.into_iter().collect::<Vec<_>>();
+        if bytecodes.is_empty() {
+            return Ok(());
+        }
+        bytecodes.sort_unstable_by_key(|(hash, _)| *hash);
+
         let mut bytecodes_cursor = self.tx_ref().cursor_write::<tables::Bytecodes>()?;
         for (hash, bytecode) in bytecodes {
             bytecodes_cursor.upsert(hash, &bytecode)?;
