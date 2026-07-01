@@ -102,14 +102,14 @@ use crate::tree::{
     error::{InsertBlockError, InsertBlockErrorKind, InsertPayloadError},
     instrumented_state::{InstrumentedStateProvider, StateProviderMetrics, StateProviderStats},
     multiproof::{StateRootComputeOutcome, StateRootHandle},
-    payload_processor::{PayloadProcessor, PayloadProcessorSpawnOptions},
+    payload_processor::{bal::ReceivedBal, PayloadProcessor, PayloadProcessorSpawnOptions},
     precompile_cache::{CachedPrecompile, CachedPrecompileMetrics, PrecompileCacheMap},
     types::{InsertPayloadResult, ValidationOutput},
     CacheWaitDurations, CachedStateProvider, EngineApiMetrics, EngineApiTreeState, ExecutionEnv,
     PayloadHandle, StateProviderBuilder, StateProviderDatabase, TreeConfig, WaitForCaches,
 };
 use alloy_consensus::transaction::{Either, TxHashRef};
-use alloy_eip7928::{bal::DecodedBal, compute_block_access_list_hash, BlockAccessList};
+use alloy_eip7928::{compute_block_access_list_hash, BlockAccessList};
 use alloy_eips::{eip1898::BlockWithParent, eip4895::Withdrawal, NumHash};
 use alloy_evm::Evm;
 use alloy_primitives::{map::B256Set, B256};
@@ -546,18 +546,11 @@ where
             .in_scope(|| self.evm_env_for(&input))
             .map_err(NewPayloadError::other)?;
 
-        // Extract the decoded BAL, if valid and available.
-        let decoded_bal = ensure_ok!(input
-            .try_decoded_access_list()
-            .map_err(|err| ConsensusError::BlockAccessListInvalid(err.to_string())))
-        .map(Arc::new);
+        // Extract the received BAL, if valid and available.
+        let received_bal = ensure_ok!(input.try_received_access_list()).map(Arc::new);
 
-        if let Some(decoded_bal) = decoded_bal.as_deref() {
-            // Reject oversized BAL sidecars before executing the block.
-            ensure_ok!(decoded_bal
-                .as_bal()
-                .validate_gas_limit(input.gas_limit())
-                .map_err(ConsensusError::from));
+        if let Some(received_bal) = received_bal.as_deref() {
+            ensure_ok!(received_bal.validate_gas_limit(input.gas_limit()));
         }
 
         let env = ExecutionEnv {
@@ -568,7 +561,7 @@ where
             transaction_count: input.transaction_count(),
             gas_used: input.gas_used(),
             withdrawals: input.withdrawals().map(|w| w.to_vec()),
-            decoded_bal: decoded_bal.as_ref().map(Arc::clone),
+            received_bal: received_bal.as_ref().map(Arc::clone),
         };
 
         // Plan the strategy used for state root computation.
@@ -594,7 +587,8 @@ where
         let overlay_factory =
             OverlayStateProviderFactory::new(provider_factory.clone(), overlay_builder.clone());
 
-        let parallel_bal_execution = ensure_ok!(self.bal_path_eligible(env.decoded_bal.as_deref()));
+        let parallel_bal_execution =
+            ensure_ok!(self.bal_path_eligible(env.received_bal.as_deref()));
 
         // Spawn the appropriate processor based on strategy
         let pending_sparse_trie_prune = if matches!(strategy, StateRootStrategy::StateRootTask) {
@@ -1002,7 +996,7 @@ where
 
         let executed_block =
             self.spawn_deferred_trie_task(Arc::new(block), output, hashed_state, trie_output);
-        let raw_bal = decoded_bal.map(|decoded_bal| decoded_bal.as_raw_bal().clone());
+        let raw_bal = received_bal.map(|received_bal| received_bal.as_raw_bal().clone());
         Ok(ValidationOutput::new(executed_block, timing_stats).with_raw_bal(raw_bal))
     }
 
@@ -1110,7 +1104,7 @@ where
     {
         debug!(target: "engine::tree::payload_validator", "Executing block");
 
-        let has_bal = env.decoded_bal.is_some();
+        let has_bal = env.received_bal.is_some();
         let mut db = debug_span!(target: "engine::tree", "build_state_db").in_scope(|| {
             State::builder()
                 .with_database(StateProviderDatabase::new(state_provider))
@@ -1200,7 +1194,7 @@ where
     //   - Tx-count threshold (`bal_execute_path_min_tx_count`): below the parallelism break-even
     //     point, provider setup and worker scheduling overhead can exceed the gain. Tune
     //     empirically once workers are parallel; meaningless while the commit loop is sequential.
-    fn bal_path_eligible(&self, bal: Option<&DecodedBal>) -> Result<bool, InsertBlockErrorKind> {
+    fn bal_path_eligible(&self, bal: Option<&ReceivedBal>) -> Result<bool, InsertBlockErrorKind> {
         let has_bal = bal.is_some();
         let parallel_execution = has_bal && !self.config.disable_bal_parallel_execution();
         if parallel_execution && self.config.disable_bal_parallel_state_root() {
@@ -1250,8 +1244,8 @@ where
         debug!(target: "engine::tree::payload_validator", "Executing block via BAL path");
 
         let (receipt_tx, result_rx) = self.spawn_receipt_root_task(env.transaction_count);
-        let input_bal = env.decoded_bal.ok_or_else(|| {
-            InsertBlockErrorKind::Other("BAL execute path: no decoded BAL available".into())
+        let input_bal = env.received_bal.ok_or_else(|| {
+            InsertBlockErrorKind::Other("BAL execute path: no received BAL available".into())
         })?;
 
         let make_db = |fill_on_miss| {
@@ -2335,12 +2329,12 @@ impl<T: PayloadTypes> BlockOrPayload<T> {
         matches!(self, Self::Block(_))
     }
 
-    /// Returns the decoded block access list, if present and successfully decoded.
-    pub fn try_decoded_access_list(&self) -> Result<Option<DecodedBal>, alloy_rlp::Error> {
+    /// Returns the received block access list, if present and successfully decoded.
+    pub fn try_received_access_list(&self) -> Result<Option<ReceivedBal>, ConsensusError> {
         match self {
             Self::Payload(payload) => payload
                 .block_access_list()
-                .map(|block_access_list| DecodedBal::from_rlp_bytes(block_access_list.clone()))
+                .map(|block_access_list| ReceivedBal::from_rlp_bytes(block_access_list.clone()))
                 .transpose(),
             Self::Block(_) => Ok(None),
         }
