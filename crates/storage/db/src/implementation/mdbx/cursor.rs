@@ -322,6 +322,28 @@ impl<T: Table> DbCursorRW<T> for Cursor<RW, T> {
         )
     }
 
+    fn put_current(&mut self, key: T::Key, value: &T::Value) -> Result<(), DatabaseError> {
+        let key = key.encode();
+        let value = compress_to_buf_or_ref!(self, value);
+        self.execute_with_operation_metric(
+            Operation::CursorPutCurrent,
+            Some(value.unwrap_or(&self.buf).len()),
+            |this| {
+                this.inner
+                    .put(key.as_ref(), value.unwrap_or(&this.buf), WriteFlags::CURRENT)
+                    .map_err(|e| {
+                        DatabaseWriteError {
+                            info: e.into(),
+                            operation: DatabaseWriteOperation::CursorPutCurrent,
+                            table_name: T::NAME,
+                            key: key.into_vec(),
+                        }
+                        .into()
+                    })
+            },
+        )
+    }
+
     fn delete_current(&mut self) -> Result<(), DatabaseError> {
         self.execute_with_operation_metric(Operation::CursorDeleteCurrent, None, |this| {
             this.inner.del(WriteFlags::CURRENT).map_err(|e| DatabaseError::Delete(e.into()))
@@ -368,9 +390,10 @@ mod tests {
     };
     use alloy_primitives::{address, Address, B256, U256};
     use reth_db_api::{
-        cursor::{DbCursorRO, DbDupCursorRW},
+        cursor::{DbCursorRO, DbCursorRW, DbDupCursorRW},
         models::{BlockNumberAddress, ClientVersion},
         table::TableImporter,
+        tables,
         transaction::{DbTx, DbTxMut},
     };
     use reth_primitives_traits::StorageEntry;
@@ -462,5 +485,26 @@ mod tests {
             assert_eq!(copied_key, expected_key);
             assert_eq!(copied_value, expected_value);
         }
+    }
+
+    #[test]
+    fn put_current_replaces_positioned_table_value() {
+        let db = create_test_db();
+        let tx = db.tx_mut().unwrap();
+        {
+            let mut cursor = tx.cursor_write::<tables::CanonicalHeaders>().unwrap();
+            cursor.upsert(1, &B256::with_last_byte(1)).unwrap();
+            cursor.upsert(2, &B256::with_last_byte(2)).unwrap();
+
+            let positioned = cursor.seek_exact(1).unwrap();
+            assert!(positioned.is_some());
+            cursor.put_current(1, &B256::with_last_byte(9)).unwrap();
+        }
+        tx.commit().unwrap();
+
+        let tx = db.tx().unwrap();
+        let mut cursor = tx.cursor_read::<tables::CanonicalHeaders>().unwrap();
+        assert_eq!(cursor.seek_exact(1).unwrap().unwrap().1, B256::with_last_byte(9));
+        assert_eq!(cursor.seek_exact(2).unwrap().unwrap().1, B256::with_last_byte(2));
     }
 }

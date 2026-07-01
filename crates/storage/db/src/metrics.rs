@@ -213,6 +213,8 @@ pub(crate) enum Operation {
     Delete,
     /// Database cursor upsert operation.
     CursorUpsert,
+    /// Database cursor replace-current operation.
+    CursorPutCurrent,
     /// Database cursor insert operation.
     CursorInsert,
     /// Database cursor append operation.
@@ -234,11 +236,12 @@ impl Operation {
             Self::PutAppend => 2,
             Self::Delete => 3,
             Self::CursorUpsert => 4,
-            Self::CursorInsert => 5,
-            Self::CursorAppend => 6,
-            Self::CursorAppendDup => 7,
-            Self::CursorDeleteCurrent => 8,
-            Self::CursorDeleteCurrentDuplicates => 9,
+            Self::CursorPutCurrent => 5,
+            Self::CursorInsert => 6,
+            Self::CursorAppend => 7,
+            Self::CursorAppendDup => 8,
+            Self::CursorDeleteCurrent => 9,
+            Self::CursorDeleteCurrentDuplicates => 10,
         }
     }
 
@@ -250,11 +253,12 @@ impl Operation {
             2 => Self::PutAppend,
             3 => Self::Delete,
             4 => Self::CursorUpsert,
-            5 => Self::CursorInsert,
-            6 => Self::CursorAppend,
-            7 => Self::CursorAppendDup,
-            8 => Self::CursorDeleteCurrent,
-            9 => Self::CursorDeleteCurrentDuplicates,
+            5 => Self::CursorPutCurrent,
+            6 => Self::CursorInsert,
+            7 => Self::CursorAppend,
+            8 => Self::CursorAppendDup,
+            9 => Self::CursorDeleteCurrent,
+            10 => Self::CursorDeleteCurrentDuplicates,
             _ => panic!("invalid operation index"),
         }
     }
@@ -267,6 +271,7 @@ impl Operation {
             Self::PutAppend => "put-append",
             Self::Delete => "delete",
             Self::CursorUpsert => "cursor-upsert",
+            Self::CursorPutCurrent => "cursor-put-current",
             Self::CursorInsert => "cursor-insert",
             Self::CursorAppend => "cursor-append",
             Self::CursorAppendDup => "cursor-append-dup",

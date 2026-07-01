@@ -2701,7 +2701,11 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
         let mut hashed_accounts_cursor = self.tx_ref().cursor_write::<tables::HashedAccounts>()?;
         for (hashed_address, account) in hashed_state.accounts() {
             if let Some(account) = account {
-                hashed_accounts_cursor.upsert(*hashed_address, account)?;
+                match hashed_accounts_cursor.seek_exact(*hashed_address)? {
+                    Some((_, current)) if current == *account => {}
+                    Some(_) => hashed_accounts_cursor.put_current(*hashed_address, account)?,
+                    None => hashed_accounts_cursor.upsert(*hashed_address, account)?,
+                }
             } else if hashed_accounts_cursor.seek_exact(*hashed_address)?.is_some() {
                 hashed_accounts_cursor.delete_current()?;
             }
@@ -5441,6 +5445,47 @@ mod tests {
 
         let mdbx_account_cs = provider_rw.tx.entries::<tables::AccountChangeSets>().unwrap();
         assert_eq!(mdbx_account_cs, 0, "v2: MDBX AccountChangeSets should remain empty");
+    }
+
+    #[test]
+    fn test_write_hashed_state_replaces_existing_accounts() {
+        let factory = create_test_provider_factory();
+        factory.set_storage_settings_cache(StorageSettings::v2());
+
+        let unchanged_address = B256::with_last_byte(1);
+        let changed_address = B256::with_last_byte(2);
+        let deleted_address = B256::with_last_byte(3);
+        let inserted_address = B256::with_last_byte(4);
+
+        let old_account = Account { nonce: 1, balance: U256::from(10), bytecode_hash: None };
+        let changed_account = Account { nonce: 2, balance: U256::from(20), bytecode_hash: None };
+        let inserted_account = Account { nonce: 3, balance: U256::from(30), bytecode_hash: None };
+
+        let provider_rw = factory.provider_rw().unwrap();
+        {
+            let mut cursor = provider_rw.tx.cursor_write::<tables::HashedAccounts>().unwrap();
+            cursor.upsert(unchanged_address, &old_account).unwrap();
+            cursor.upsert(changed_address, &old_account).unwrap();
+            cursor.upsert(deleted_address, &old_account).unwrap();
+        }
+
+        let hashed_state = HashedPostStateSorted::new(
+            vec![
+                (unchanged_address, Some(old_account)),
+                (changed_address, Some(changed_account)),
+                (deleted_address, None),
+                (inserted_address, Some(inserted_account)),
+            ],
+            B256Map::default(),
+        );
+
+        provider_rw.write_hashed_state(&hashed_state).unwrap();
+
+        let mut cursor = provider_rw.tx.cursor_read::<tables::HashedAccounts>().unwrap();
+        assert_eq!(cursor.seek_exact(unchanged_address).unwrap().unwrap().1, old_account);
+        assert_eq!(cursor.seek_exact(changed_address).unwrap().unwrap().1, changed_account);
+        assert!(cursor.seek_exact(deleted_address).unwrap().is_none());
+        assert_eq!(cursor.seek_exact(inserted_address).unwrap().unwrap().1, inserted_account);
     }
 
     #[test]
