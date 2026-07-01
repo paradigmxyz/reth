@@ -201,7 +201,7 @@ pub trait BlockExecutor: Sized {
 }
 
 /// A type that creates configured block executors.
-pub trait BlockExecutorFactory: Clone + Debug + Send + Sync + Unpin {
+pub trait BlockExecutorFactory {
     /// The primitive types used by the factory.
     type Primitives: NodePrimitives;
     /// Transaction environment consumed by executors from this factory.
