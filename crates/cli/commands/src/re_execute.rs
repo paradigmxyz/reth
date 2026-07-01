@@ -195,11 +195,10 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
                                     _executor_state_provider = next_state_provider;
                                     executor_start_block = block.number() + 1;
                                     executor_created = Instant::now();
-                                    let _ =
-                                        info_tx.send((block, eyre::eyre!(err.to_string())));
+                                    let _ = info_tx.send((block, eyre::Report::new(err)));
                                     continue
                                 }
-                                return Err(eyre::eyre!(err.to_string()))
+                                return Err(eyre::Report::new(err))
                             }
                         };
                         if let Err(err) = consensus

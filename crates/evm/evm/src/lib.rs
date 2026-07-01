@@ -15,7 +15,7 @@ extern crate alloc;
 use crate::execute::HashedStateMode;
 #[cfg(feature = "std")]
 use crate::execute::{BasicBlockBuilder, BlockBuilder};
-use crate::execute::{Executor, IntoTxEnv};
+use crate::execute::{BlockExecutionError, Executor, IntoTxEnv};
 #[cfg(feature = "std")]
 use alloc::boxed::Box;
 use alloc::string::String;
@@ -118,7 +118,7 @@ pub trait ConfigureEvm: Clone + Debug + Send + Sync + Unpin {
     >;
 
     /// Executor returned for block execution over the provided database.
-    type Executor<DB>: Executor<Primitives = Self::Primitives>
+    type Executor<DB>: Executor<Primitives = Self::Primitives, Error = BlockExecutionError>
     where
         DB: evm2::evm::Database + Clone + 'static,
         DB::Error: core::error::Error + Send + Sync + 'static;

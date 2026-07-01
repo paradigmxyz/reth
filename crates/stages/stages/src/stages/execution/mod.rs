@@ -357,9 +357,7 @@ where
             let result = self.metrics.metered_one(&block, |input| {
                 executor.execute_one(input).map_err(|error| StageError::Block {
                     block: Box::new(block.block_with_parent()),
-                    error: BlockErrorKind::Execution(reth_evm::execute::BlockExecutionError::msg(
-                        error,
-                    )),
+                    error: BlockErrorKind::Execution(error),
                 })
             })?;
 
