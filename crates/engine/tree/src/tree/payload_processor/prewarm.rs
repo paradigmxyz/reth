@@ -173,7 +173,7 @@ where
                             i = index,
                         )
                         .entered();
-                        Self::transact_worker(ctx, index, tx, to_sparse_trie_task);
+                        Self::transact_worker(ctx, index, tx);
                     });
                 }
 
@@ -203,7 +203,6 @@ where
         ctx: &PrewarmContext<N, P, Evm>,
         index: usize,
         tx: Tx,
-        to_sparse_trie_task: Option<&CrossbeamSender<StateRootMessage>>,
     ) where
         Tx: ExecutableTxFor<Evm>,
     {
@@ -226,32 +225,21 @@ where
             let start = Instant::now();
 
             let (tx_env, tx) = tx.into_parts();
-            let res = match evm.transact(tx_env) {
-                Ok(res) => res,
-                Err(err) => {
-                    trace!(
-                        target: "engine::tree::payload_processor::prewarm",
-                        %err,
-                        tx_hash=%tx.tx().tx_hash(),
-                        sender=%tx.signer(),
-                        "Error when executing prewarm transaction",
-                    );
-                    ctx.metrics.transaction_errors.increment(1);
-                    return;
-                }
-            };
+            if let Err(err) = evm.transact(tx_env) {
+                trace!(
+                    target: "engine::tree::payload_processor::prewarm",
+                    %err,
+                    tx_hash=%tx.tx().tx_hash(),
+                    sender=%tx.signer(),
+                    "Error when executing prewarm transaction",
+                );
+                ctx.metrics.transaction_errors.increment(1);
+                return;
+            }
             ctx.metrics.execution_duration.record(start.elapsed());
 
             if ctx.should_stop() {
                 return;
-            }
-
-            if index > 0 {
-                let (targets, storage_targets) = MultiProofTargetsV2::from_state(res.state);
-                ctx.metrics.prefetch_storage_targets.record(storage_targets as f64);
-                if let Some(to_sparse_trie_task) = to_sparse_trie_task {
-                    let _ = to_sparse_trie_task.send(StateRootMessage::PrefetchProofs(targets));
-                }
             }
 
             ctx.metrics.total_runtime.record(start.elapsed());
