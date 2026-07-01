@@ -703,6 +703,7 @@ where
                         .with_default_storage_trie(default_trie)
                         .with_updates(true)
                 });
+            sparse_state_trie.set_changed_paths(true);
             sparse_state_trie.set_hot_cache_capacities(max_hot_slots, max_hot_accounts);
 
             let mut task = SparseTrieCacheTask::new_with_trie(
@@ -749,14 +750,13 @@ where
                 debug_span!(target: "engine::tree::payload_processor", "preserve").entered();
             let deferred = if let Some(result) = task_result {
                 let start = Instant::now();
-                let mut retained_paths = pending_sparse_trie_prune;
-                if let Some(retained_paths) = retained_paths.as_mut() {
-                    if let Some(hashed_state) = task.prune_hashed_state() {
-                        retained_paths.extend_from_unsorted_hashed_state(hashed_state);
-                    }
-                }
                 let (mut trie, deferred) = task.into_trie_for_reuse();
-                if let Some(retained_paths) = retained_paths {
+                if let Some(mut retained_paths) = pending_sparse_trie_prune {
+                    let changed_paths = result
+                        .changed_paths
+                        .as_deref()
+                        .expect("sparse trie task always returns changed paths");
+                    retained_paths.extend_from_changed_paths(changed_paths);
                     trie.prune(max_hot_slots, max_hot_accounts, retained_paths);
                 }
                 trie_metrics

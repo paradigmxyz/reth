@@ -113,9 +113,6 @@ pub(super) struct SparseTrieCacheTask<A = ArenaParallelSparseTrie, S = ArenaPara
     /// final [`HashedPostState`] and share it with main engine thread without requiring any extra
     /// hashing work.
     final_hashed_state: HashedPostState,
-    /// Final hashed state retained for pruning after state root validation completes.
-    prune_hashed_state: Option<HashedPostState>,
-
     /// Metrics for the sparse trie.
     metrics: MultiProofTaskMetrics,
 }
@@ -173,7 +170,6 @@ where
             pending_targets: Default::default(),
             pending_updates: Default::default(),
             final_hashed_state: Default::default(),
-            prune_hashed_state: Default::default(),
             metrics,
         }
     }
@@ -377,6 +373,7 @@ where
 
         #[cfg(feature = "trie-debug")]
         let debug_recorders = self.trie.take_debug_recorders();
+        let changed_paths = Some(Arc::new(self.trie.take_changed_paths().unwrap_or_default()));
 
         let end = Instant::now();
         self.metrics.sparse_trie_final_update_duration_histogram.record(end.duration_since(start));
@@ -394,6 +391,7 @@ where
         Ok(StateRootComputeOutcome {
             state_root,
             trie_updates: Arc::new(trie_updates),
+            changed_paths,
             #[cfg(feature = "trie-debug")]
             debug_recorders,
         })
@@ -407,17 +405,14 @@ where
                 self.on_hashed_state_update(hashed_state)
             }
             SparseTrieTaskMessage::FinishedStateUpdates => {
-                let final_hashed_state = core::mem::take(&mut self.final_hashed_state);
-                self.prune_hashed_state = Some(final_hashed_state.clone());
-                let _ = self.final_hashed_state_tx.take().unwrap().send(final_hashed_state);
+                let _ = self
+                    .final_hashed_state_tx
+                    .take()
+                    .unwrap()
+                    .send(core::mem::take(&mut self.final_hashed_state));
                 self.finished_state_updates = true
             }
         }
-    }
-
-    /// Returns the final hashed state observed by the sparse trie task for prune retention.
-    pub(super) fn prune_hashed_state(&self) -> Option<&HashedPostState> {
-        self.prune_hashed_state.as_ref()
     }
 
     #[instrument(

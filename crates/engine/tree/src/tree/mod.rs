@@ -316,10 +316,8 @@ where
     /// Set when an FCU with payload attributes is received, cleared on the next FCU without.
     /// Suppresses persistence cycles during payload building.
     building_payload: bool,
-    /// Marker for a sparse trie prune requested by the latest persistence cleanup.
-    ///
-    /// The retained paths are snapshotted when the next sparse trie task consumes this request so
-    /// blocks that finish execution concurrently with persistence are included.
+    /// Retained paths from the latest persistence cleanup to apply during the next sparse trie
+    /// cache preservation.
     pending_sparse_trie_prune: Option<SparseTrieRetainedPaths>,
     /// Task runtime for spawning blocking work on named, reusable threads.
     runtime: reth_tasks::Runtime,
@@ -2146,8 +2144,33 @@ where
             number: self.persistence_state.last_persisted_block.number,
             hash: self.persistence_state.last_persisted_block.hash,
         });
-        self.pending_sparse_trie_prune = Some(SparseTrieRetainedPaths::default());
+        self.pending_sparse_trie_prune = self.sparse_trie_retained_paths_for_in_memory_blocks();
         Ok(())
+    }
+
+    /// Builds sparse trie retained paths from all blocks still present in the in-memory tree.
+    fn sparse_trie_retained_paths_for_in_memory_blocks(&self) -> Option<SparseTrieRetainedPaths> {
+        if self.config.skip_state_root() ||
+            self.config.state_root_fallback() ||
+            !self.config.use_state_root_task()
+        {
+            return None
+        }
+
+        let mut retained_paths = SparseTrieRetainedPaths::default();
+        for block in self.state.tree_state.blocks_by_hash.values() {
+            let trie_data = block.trie_data();
+            let Some(changed_paths) = trie_data.changed_paths.as_deref() else {
+                warn!(
+                    target: "engine::tree",
+                    block = ?block.recovered_block().num_hash(),
+                    "Skipping sparse trie prune because changed paths for in-memory block are unknown"
+                );
+                return None
+            };
+            retained_paths.extend_from_changed_paths(changed_paths);
+        }
+        Some(retained_paths)
     }
 
     /// Return an [`ExecutedBlock`] from database or in-memory state by hash.
