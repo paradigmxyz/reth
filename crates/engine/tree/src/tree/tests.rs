@@ -616,6 +616,37 @@ fn on_new_persisted_block_skips_sparse_trie_prune_when_changed_paths_unknown() {
 }
 
 #[test]
+fn on_new_persisted_block_skips_sparse_trie_prune_when_state_root_task_disabled() {
+    let blocks: Vec<_> =
+        TestBlockBuilder::eth().get_executed_blocks(1..4).map(with_known_changed_paths).collect();
+    let configs = [
+        TreeConfig::default().with_legacy_state_root(true).with_has_enough_parallelism(true),
+        TreeConfig::default().with_legacy_state_root(false).with_has_enough_parallelism(false),
+        TreeConfig::default()
+            .with_legacy_state_root(false)
+            .with_has_enough_parallelism(true)
+            .with_state_root_fallback(true),
+        TreeConfig::default()
+            .with_legacy_state_root(false)
+            .with_has_enough_parallelism(true)
+            .with_skip_state_root(true),
+    ];
+
+    for config in configs {
+        let mut test_harness = TestHarness::new(MAINNET.clone()).with_blocks(blocks.clone());
+        test_harness.tree.config = config;
+        test_harness
+            .tree
+            .persistence_state
+            .finish(blocks[0].recovered_block().hash(), blocks[0].recovered_block().number);
+
+        test_harness.tree.on_new_persisted_block().unwrap();
+
+        assert!(test_harness.tree.pending_sparse_trie_prune.is_none());
+    }
+}
+
+#[test]
 fn remove_blocks_clears_pending_sparse_trie_prune_request() {
     let mut test_harness = TestHarness::new(MAINNET.clone());
     test_harness.tree.persistence_state.last_persisted_block =

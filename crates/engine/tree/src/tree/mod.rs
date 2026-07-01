@@ -2150,6 +2150,13 @@ where
 
     /// Builds sparse trie retained paths from all blocks still present in the in-memory tree.
     fn sparse_trie_retained_paths_for_in_memory_blocks(&self) -> Option<SparseTrieRetainedPaths> {
+        if self.config.skip_state_root() ||
+            self.config.state_root_fallback() ||
+            !self.config.use_state_root_task()
+        {
+            return None
+        }
+
         let mut retained_paths = SparseTrieRetainedPaths::default();
         for block in self.state.tree_state.blocks_by_hash.values() {
             let trie_data = block.trie_data();
