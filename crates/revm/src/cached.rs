@@ -64,6 +64,13 @@ impl CachedReads {
         self.accounts.insert(address, CachedAccount { info: Some(info), storage });
     }
 
+    /// Clears all cached reads while retaining map allocations.
+    pub fn clear(&mut self) {
+        self.accounts.clear();
+        self.contracts.clear();
+        self.block_hashes.clear();
+    }
+
     /// Extends current cache with entries from another [`CachedReads`] instance.
     ///
     /// Note: It is expected that both instances are based on the exact same state.

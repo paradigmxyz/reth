@@ -216,7 +216,9 @@ where
             return
         }
 
-        let mut cached = CachedReads::default();
+        let mut cached =
+            self.pre_cached.take().map(|pre_cached| pre_cached.cached).unwrap_or_default();
+        cached.clear();
 
         // extract the state from the notification and put it into the cache
         let committed = new_state.committed();
