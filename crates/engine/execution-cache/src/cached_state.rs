@@ -1,7 +1,7 @@
 //! Execution cache implementation for block processing.
 use alloy_primitives::{
     map::{DefaultHashBuilder, FbBuildHasher},
-    Address, StorageKey, StorageValue, B256,
+    Address, StorageKey, StorageValue, B256, KECCAK256_EMPTY,
 };
 use fixed_cache::{AnyRef, CacheConfig, Stats, StatsHandler};
 use metrics::{Counter, Gauge, Histogram};
@@ -700,6 +700,10 @@ impl<S: StateProvider> StateProvider for CachedStateProvider<S> {
 
 impl<S: BytecodeReader> BytecodeReader for CachedStateProvider<S> {
     fn bytecode_by_hash(&self, code_hash: &B256) -> ProviderResult<Option<Bytecode>> {
+        if *code_hash == KECCAK256_EMPTY {
+            return Ok(None)
+        }
+
         if self.should_fill_on_miss() {
             match self.caches.get_or_try_insert_code_with(*code_hash, || {
                 self.state_provider.bytecode_by_hash(code_hash)
@@ -1223,6 +1227,25 @@ mod tests {
         let res = state_provider.storage(address, storage_key);
         assert!(res.is_ok());
         assert_eq!(res.unwrap(), Some(storage_value));
+    }
+
+    #[test]
+    fn test_empty_code_hash_bypasses_cache_lookup() {
+        let provider = MockEthProvider::default();
+        let caches = ExecutionCache::new(1000);
+        let stats = Arc::new(CacheStats::default());
+        let state_provider = CachedStateProvider::new_with_mode(
+            provider,
+            caches.clone(),
+            CacheFillMode::FillOnMiss,
+            None,
+            Some(stats.clone()),
+        );
+
+        assert_eq!(state_provider.bytecode_by_hash(&KECCAK256_EMPTY).unwrap(), None);
+        assert_eq!(stats.code_hits(), 0);
+        assert_eq!(stats.code_misses(), 0);
+        assert!(caches.0.code_cache.get(&KECCAK256_EMPTY).is_none());
     }
 
     #[test]
