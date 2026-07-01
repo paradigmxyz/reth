@@ -729,16 +729,31 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
                 let merged_hashed_state = HashedPostStateSorted::merge_batch(
                     blocks.iter().rev().map(|b| b.trie_data().hashed_state),
                 );
-                if !merged_hashed_state.is_empty() {
-                    self.write_hashed_state(&merged_hashed_state)?;
-                }
                 timings.write_hashed_state += start.elapsed();
 
                 let start = Instant::now();
                 let merged_trie =
                     TrieUpdatesSorted::merge_batch(blocks.iter().rev().map(|b| b.trie_updates()));
+                timings.write_trie_updates += start.elapsed();
+
+                let start = Instant::now();
+                let storage_write_order =
+                    sorted_persistence_storage_keys(&merged_hashed_state, &merged_trie);
+                if !merged_hashed_state.is_empty() {
+                    self.write_hashed_state_with_storage_order(
+                        &merged_hashed_state,
+                        &storage_write_order,
+                    )?;
+                }
+                timings.write_hashed_state += start.elapsed();
+                drop(merged_hashed_state);
+
+                let start = Instant::now();
                 if !merged_trie.is_empty() {
-                    self.write_trie_updates_sorted(&merged_trie)?;
+                    self.write_trie_updates_sorted_with_storage_order(
+                        &merged_trie,
+                        &storage_write_order,
+                    )?;
                 }
                 timings.write_trie_updates += start.elapsed();
             }
@@ -2428,6 +2443,119 @@ impl<TX: DbTx + 'static, N: NodeTypes> StorageReader for DatabaseProvider<TX, N>
     }
 }
 
+fn sorted_hashed_storage_keys(hashed_state: &HashedPostStateSorted) -> Vec<B256> {
+    let mut keys = hashed_state.account_storages().keys().copied().collect::<Vec<_>>();
+    keys.sort_unstable();
+    keys
+}
+
+fn sorted_persistence_storage_keys(
+    hashed_state: &HashedPostStateSorted,
+    trie_updates: &TrieUpdatesSorted,
+) -> Vec<B256> {
+    let hashed_storages = hashed_state.account_storages();
+    let storage_tries = trie_updates.storage_tries_ref();
+    let mut keys = Vec::with_capacity(hashed_storages.len() + storage_tries.len());
+
+    keys.extend(hashed_storages.keys().copied());
+    keys.extend(
+        storage_tries
+            .keys()
+            .filter(|hashed_address| !hashed_storages.contains_key(*hashed_address))
+            .copied(),
+    );
+    keys.sort_unstable();
+    keys
+}
+
+impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> DatabaseProvider<TX, N> {
+    fn write_hashed_state_with_storage_order(
+        &self,
+        hashed_state: &HashedPostStateSorted,
+        storage_write_order: &[B256],
+    ) -> ProviderResult<()> {
+        debug_assert!(hashed_state
+            .account_storages()
+            .keys()
+            .all(|hashed_address| storage_write_order.binary_search(hashed_address).is_ok()));
+
+        // Write hashed account updates.
+        let mut hashed_accounts_cursor = self.tx_ref().cursor_write::<tables::HashedAccounts>()?;
+        for (hashed_address, account) in hashed_state.accounts() {
+            if let Some(account) = account {
+                hashed_accounts_cursor.upsert(*hashed_address, account)?;
+            } else if hashed_accounts_cursor.seek_exact(*hashed_address)?.is_some() {
+                hashed_accounts_cursor.delete_current()?;
+            }
+        }
+
+        // Write hashed storage changes.
+        let mut hashed_storage_cursor =
+            self.tx_ref().cursor_dup_write::<tables::HashedStorages>()?;
+        for hashed_address in storage_write_order {
+            let Some(storage) = hashed_state.account_storages().get(hashed_address) else {
+                continue;
+            };
+
+            if storage.is_wiped() && hashed_storage_cursor.seek_exact(*hashed_address)?.is_some() {
+                hashed_storage_cursor.delete_current_duplicates()?;
+            }
+
+            for (hashed_slot, value) in storage.storage_slots_ref() {
+                let entry = StorageEntry { key: *hashed_slot, value: *value };
+
+                if let Some(db_entry) =
+                    hashed_storage_cursor.seek_by_key_subkey(*hashed_address, entry.key)? &&
+                    db_entry.key == entry.key
+                {
+                    hashed_storage_cursor.delete_current()?;
+                }
+
+                if !entry.value.is_zero() {
+                    hashed_storage_cursor.upsert(*hashed_address, &entry)?;
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    fn write_trie_updates_sorted_with_storage_order(
+        &self,
+        trie_updates: &TrieUpdatesSorted,
+        storage_write_order: &[B256],
+    ) -> ProviderResult<usize> {
+        if trie_updates.is_empty() {
+            return Ok(0)
+        }
+
+        debug_assert!(trie_updates
+            .storage_tries_ref()
+            .keys()
+            .all(|hashed_address| storage_write_order.binary_search(hashed_address).is_ok()));
+
+        let mut num_entries = 0;
+        reth_trie_db::with_adapter!(self, |A| {
+            Self::write_account_trie_updates::<A>(self.tx_ref(), trie_updates, &mut num_entries)?;
+        });
+
+        let storage_tries = trie_updates.storage_tries_ref();
+        let mut ordered_storage_tries = Vec::with_capacity(storage_tries.len());
+        for hashed_address in storage_write_order {
+            if let Some(updates) = storage_tries.get(hashed_address) {
+                ordered_storage_tries.push((hashed_address, updates));
+            }
+        }
+        debug_assert_eq!(ordered_storage_tries.len(), storage_tries.len());
+
+        reth_trie_db::with_adapter!(self, |A| {
+            Self::write_storage_tries::<A>(self.tx_ref(), ordered_storage_tries, &mut num_entries)?;
+        });
+
+        Ok(num_entries)
+    }
+}
+
 impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
     for DatabaseProvider<TX, N>
 {
@@ -2697,42 +2825,8 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
 
     #[instrument(level = "debug", target = "providers::db", skip_all)]
     fn write_hashed_state(&self, hashed_state: &HashedPostStateSorted) -> ProviderResult<()> {
-        // Write hashed account updates.
-        let mut hashed_accounts_cursor = self.tx_ref().cursor_write::<tables::HashedAccounts>()?;
-        for (hashed_address, account) in hashed_state.accounts() {
-            if let Some(account) = account {
-                hashed_accounts_cursor.upsert(*hashed_address, account)?;
-            } else if hashed_accounts_cursor.seek_exact(*hashed_address)?.is_some() {
-                hashed_accounts_cursor.delete_current()?;
-            }
-        }
-
-        // Write hashed storage changes.
-        let sorted_storages = hashed_state.account_storages().iter().sorted_by_key(|(key, _)| *key);
-        let mut hashed_storage_cursor =
-            self.tx_ref().cursor_dup_write::<tables::HashedStorages>()?;
-        for (hashed_address, storage) in sorted_storages {
-            if storage.is_wiped() && hashed_storage_cursor.seek_exact(*hashed_address)?.is_some() {
-                hashed_storage_cursor.delete_current_duplicates()?;
-            }
-
-            for (hashed_slot, value) in storage.storage_slots_ref() {
-                let entry = StorageEntry { key: *hashed_slot, value: *value };
-
-                if let Some(db_entry) =
-                    hashed_storage_cursor.seek_by_key_subkey(*hashed_address, entry.key)? &&
-                    db_entry.key == entry.key
-                {
-                    hashed_storage_cursor.delete_current()?;
-                }
-
-                if !entry.value.is_zero() {
-                    hashed_storage_cursor.upsert(*hashed_address, &entry)?;
-                }
-            }
-        }
-
-        Ok(())
+        let storage_write_order = sorted_hashed_storage_keys(hashed_state);
+        self.write_hashed_state_with_storage_order(hashed_state, &storage_write_order)
     }
 
     /// Remove the last N blocks of state.
@@ -3955,7 +4049,7 @@ mod tests {
     use alloy_consensus::Header;
     use alloy_primitives::{
         map::{AddressMap, B256Map},
-        U256,
+        B256, U256,
     };
     use reth_chain_state::ExecutedBlock;
     use reth_db_api::models::StorageSettings;
@@ -3965,10 +4059,40 @@ mod tests {
     use reth_storage_api::MetadataWriter;
     use reth_testing_utils::generators::{self, random_block, BlockParams};
     use reth_trie::{
-        HashedPostState, KeccakKeyHasher, Nibbles, StoredNibbles, StoredNibblesSubKey,
+        updates::{StorageTrieUpdatesSorted, TrieUpdatesSorted},
+        HashedPostState, HashedPostStateSorted, HashedStorageSorted, KeccakKeyHasher, Nibbles,
+        StoredNibbles, StoredNibblesSubKey,
     };
     use revm::{database::BundleState, state::AccountInfo};
     use std::{sync::mpsc, time::Duration};
+
+    #[test]
+    fn sorted_persistence_storage_keys_deduplicates_shared_write_order() {
+        let first = B256::with_last_byte(1);
+        let second = B256::with_last_byte(2);
+        let third = B256::with_last_byte(3);
+
+        let hashed_state = HashedPostStateSorted::new(
+            vec![],
+            B256Map::from_iter([
+                (third, HashedStorageSorted { storage_slots: vec![], wiped: false }),
+                (first, HashedStorageSorted { storage_slots: vec![], wiped: false }),
+            ]),
+        );
+        let trie_updates = TrieUpdatesSorted::new(
+            vec![],
+            B256Map::from_iter([
+                (second, StorageTrieUpdatesSorted { is_deleted: false, storage_nodes: vec![] }),
+                (third, StorageTrieUpdatesSorted { is_deleted: false, storage_nodes: vec![] }),
+            ]),
+        );
+
+        assert_eq!(sorted_hashed_storage_keys(&hashed_state), vec![first, third]);
+        assert_eq!(
+            sorted_persistence_storage_keys(&hashed_state, &trie_updates),
+            vec![first, second, third]
+        );
+    }
 
     #[test]
     fn test_receipts_by_block_range_empty_range() {
