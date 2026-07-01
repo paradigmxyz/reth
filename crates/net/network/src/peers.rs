@@ -6,6 +6,7 @@ use crate::{
     swarm::NetworkConnectionState,
     trusted_peers_resolver::TrustedPeersResolver,
 };
+use alloy_primitives::map::{hash_map::Entry, FbBuildHasher, HashMap, HashSet};
 use futures::StreamExt;
 
 use rand::Rng;
@@ -24,7 +25,7 @@ use reth_network_types::{
     PersistedPeerInfo, ReputationChangeKind, ReputationChangeOutcome, ReputationChangeWeights,
 };
 use std::{
-    collections::{hash_map::Entry, HashMap, HashSet, VecDeque},
+    collections::VecDeque,
     fmt::Display,
     io::{self},
     net::{IpAddr, SocketAddr},
@@ -49,12 +50,12 @@ use tracing::{trace, warn};
 #[derive(Debug)]
 pub struct PeersManager {
     /// All peers known to the network
-    peers: HashMap<PeerId, Peer>,
+    peers: HashMap<PeerId, Peer, FbBuildHasher<64>>,
     /// The set of trusted peer ids.
     ///
     /// This tracks peer ids that are considered trusted, but for which we don't necessarily have
     /// an address: [`Self::add_trusted_peer_id`]
-    trusted_peer_ids: HashSet<PeerId>,
+    trusted_peer_ids: HashSet<PeerId, FbBuildHasher<64>>,
     /// A resolver used to periodically resolve DNS names for trusted peers. This updates the
     /// peer's address when the DNS records change.
     trusted_peers_resolver: TrustedPeersResolver,
@@ -73,7 +74,7 @@ pub struct PeersManager {
     /// Tracks unwanted ips/peer ids.
     ban_list: BanList,
     /// Tracks currently backed off peers.
-    backed_off_peers: HashMap<PeerId, std::time::Instant>,
+    backed_off_peers: HashMap<PeerId, std::time::Instant, FbBuildHasher<64>>,
     /// Interval at which to check for peers to unban and release from the backoff map.
     release_interval: Interval,
     /// How long to ban bad peers.
@@ -131,9 +132,12 @@ impl PeersManager {
         // We use half of the interval to decrease the max duration to `150%` in worst case
         let unban_interval = ban_duration.min(backoff_durations.low) / 2;
 
-        let mut peers =
-            HashMap::with_capacity(trusted_nodes.len() + basic_nodes.len() + persisted_peers.len());
-        let mut trusted_peer_ids = HashSet::with_capacity(trusted_nodes.len());
+        let mut peers: HashMap<PeerId, Peer, FbBuildHasher<64>> = HashMap::with_capacity_and_hasher(
+            trusted_nodes.len() + basic_nodes.len() + persisted_peers.len(),
+            Default::default(),
+        );
+        let mut trusted_peer_ids: HashSet<PeerId, FbBuildHasher<64>> =
+            HashSet::with_capacity_and_hasher(trusted_nodes.len(), Default::default());
 
         for trusted_peer in &trusted_nodes {
             match trusted_peer.resolve_blocking() {
