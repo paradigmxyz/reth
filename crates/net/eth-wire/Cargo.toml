@@ -49,6 +49,7 @@ reth-eth-wire-types = { workspace = true, features = ["arbitrary"] }
 reth-tracing.workspace = true
 
 alloy-consensus.workspace = true
+criterion.workspace = true
 test-fuzz.workspace = true
 tokio = { workspace = true, features = ["rt", "rt-multi-thread"] }
 rand.workspace = true
@@ -94,3 +95,7 @@ serde = [
 name = "fuzz_roundtrip"
 path = "tests/fuzz_roundtrip.rs"
 required-features = ["arbitrary", "serde"]
+
+[[bench]]
+name = "ethstream"
+harness = false

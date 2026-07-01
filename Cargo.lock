@@ -8510,6 +8510,7 @@ dependencies = [
  "arbitrary",
  "async-stream",
  "bytes",
+ "codspeed-criterion-compat",
  "derive_more",
  "futures",
  "pin-project",

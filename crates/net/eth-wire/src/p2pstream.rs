@@ -256,6 +256,9 @@ pub struct P2PStream<S> {
     /// Whether this stream is currently in the process of disconnecting by sending a disconnect
     /// message.
     disconnecting: bool,
+
+    /// Whether the underlying sink has accepted messages that still need to be flushed.
+    needs_flush: bool,
 }
 
 impl<S> P2PStream<S> {
@@ -272,6 +275,7 @@ impl<S> P2PStream<S> {
             outgoing_messages: VecDeque::new(),
             outgoing_message_buffer_capacity: MAX_P2P_CAPACITY,
             disconnecting: false,
+            needs_flush: false,
         }
     }
 
@@ -537,32 +541,29 @@ where
     type Error = P2PStreamError;
 
     fn poll_ready(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        let mut this = self.as_mut();
+        let mut should_flush = false;
 
-        // poll the pinger to determine if we should send a ping
-        match this.pinger.poll_ping(cx) {
-            Poll::Pending => {}
-            Poll::Ready(Ok(PingerEvent::Ping)) => {
-                this.send_ping();
-            }
-            _ => {
-                // encode the disconnect message
-                this.start_disconnect(DisconnectReason::PingTimeout)?;
+        {
+            let this = self.as_mut().get_mut();
 
-                // End the stream after ping related error
-                return Poll::Ready(Ok(()))
-            }
-        }
-
-        match this.inner.poll_ready_unpin(cx) {
-            Poll::Pending => {}
-            Poll::Ready(Err(err)) => return Poll::Ready(Err(P2PStreamError::Io(err))),
-            Poll::Ready(Ok(())) => {
-                let flushed = this.poll_flush(cx);
-                if flushed.is_ready() {
-                    return flushed
+            // Poll the pinger to determine if we should send a ping.
+            match this.pinger.poll_ping(cx) {
+                Poll::Pending => {}
+                Poll::Ready(Ok(PingerEvent::Ping)) => {
+                    this.send_ping();
+                    should_flush = true;
+                }
+                Poll::Ready(Ok(PingerEvent::Timeout) | Err(_)) => {
+                    this.start_disconnect(DisconnectReason::PingTimeout)?;
+                    should_flush = true;
                 }
             }
+
+            should_flush |= this.needs_flush || !this.has_outgoing_capacity();
+        }
+
+        if should_flush {
+            ready!(self.as_mut().poll_flush(cx))?;
         }
 
         if self.has_outgoing_capacity() {
@@ -619,24 +620,20 @@ where
     /// Returns `Poll::Ready(Ok(()))` when no buffered items remain.
     fn poll_flush(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         let mut this = self.project();
-        let poll_res = loop {
-            match this.inner.as_mut().poll_ready(cx) {
-                Poll::Pending => break Poll::Pending,
-                Poll::Ready(Err(err)) => break Poll::Ready(Err(err.into())),
-                Poll::Ready(Ok(())) => {
-                    let Some(message) = this.outgoing_messages.pop_front() else {
-                        break Poll::Ready(Ok(()))
-                    };
-                    if let Err(err) = this.inner.as_mut().start_send(message) {
-                        break Poll::Ready(Err(err.into()))
-                    }
-                }
-            }
-        };
 
-        ready!(this.inner.as_mut().poll_flush(cx))?;
+        while !this.outgoing_messages.is_empty() {
+            ready!(this.inner.as_mut().poll_ready(cx))?;
+            let message = this.outgoing_messages.pop_front().expect("checked non-empty");
+            this.inner.as_mut().start_send(message)?;
+            *this.needs_flush = true;
+        }
 
-        poll_res
+        if *this.needs_flush {
+            ready!(this.inner.as_mut().poll_flush(cx))?;
+            *this.needs_flush = false;
+        }
+
+        Poll::Ready(Ok(()))
     }
 
     fn poll_close(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {

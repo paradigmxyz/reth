@@ -82,6 +82,13 @@ const MAX_QUEUED_OUTGOING_RESPONSES: usize = 4;
 /// Minimum capacity to retain for buffered incoming requests from the remote peer.
 const MIN_RECEIVED_REQUESTS_CAPACITY: usize = 1;
 
+/// Maximum number of incoming wire messages to process in one poll before yielding back to the
+/// scheduler.
+const ACTIVE_SESSION_RECEIVE_BUDGET: usize = 32;
+
+/// Shrink burst-grown buffers only after they are far above their retained steady-state capacity.
+const SHRINK_CAPACITY_MULTIPLIER: usize = 4;
+
 /// Soft limit for the total number of buffered outgoing broadcast items (e.g. transaction hashes).
 ///
 /// Many small broadcast messages carrying a single tx hash each are equivalent in cost to one
@@ -207,7 +214,14 @@ impl<N: NetworkPrimitives> ActiveSession<N> {
 
     /// Shrinks the capacity of the internal buffers.
     pub fn shrink_to_fit(&mut self) {
-        self.received_requests_from_remote.shrink_to(MIN_RECEIVED_REQUESTS_CAPACITY);
+        if self.received_requests_from_remote.len() <= MIN_RECEIVED_REQUESTS_CAPACITY &&
+            self.received_requests_from_remote.capacity() >
+                MIN_RECEIVED_REQUESTS_CAPACITY
+                    .saturating_mul(SHRINK_CAPACITY_MULTIPLIER)
+                    .max(16)
+        {
+            self.received_requests_from_remote.shrink_to(MIN_RECEIVED_REQUESTS_CAPACITY);
+        }
         self.queued_outgoing.shrink_to(MAX_QUEUED_OUTGOING_RESPONSES);
     }
 
@@ -652,7 +666,7 @@ impl<N: NetworkPrimitives> Future for ActiveSession<N> {
         // If the budget is exhausted we manually yield back control to the (coop) scheduler. This
         // manual yield point should prevent situations where polling appears to be frozen. See also <https://tokio.rs/blog/2020-04-preemption>
         // And tokio's docs on cooperative scheduling <https://docs.rs/tokio/latest/tokio/task/#cooperative-scheduling>
-        let mut budget = 4;
+        let mut budget = ACTIVE_SESSION_RECEIVE_BUDGET;
 
         // The main poll loop that drives the session
         'main: loop {
@@ -705,10 +719,10 @@ impl<N: NetworkPrimitives> Future for ActiveSession<N> {
                 }
             }
 
-            let deadline = this.request_deadline();
-
+            let mut deadline = None;
             while let Poll::Ready(Some(req)) = this.internal_request_rx.poll_next_unpin(cx) {
                 progress = true;
+                let deadline = *deadline.get_or_insert_with(|| this.request_deadline());
                 this.on_internal_peer_request(req, deadline);
             }
 
@@ -727,36 +741,50 @@ impl<N: NetworkPrimitives> Future for ActiveSession<N> {
                 }
             }
 
-            // Send messages by advancing the sink and queuing in buffered messages
-            while this.conn.poll_ready_unpin(cx).is_ready() {
-                if let Some(msg) = this.queued_outgoing.pop_front() {
-                    progress = true;
-                    let res = match msg {
-                        OutgoingMessage::Eth(msg) => this.conn.start_send_unpin(msg),
-                        OutgoingMessage::Broadcast(msg) => this.conn.start_send_broadcast(msg),
-                        OutgoingMessage::Raw(msg) => this.conn.start_send_raw(msg),
-                    };
-                    if let Err(err) = res {
-                        debug!(target: "net::session", %err, remote_peer_id=?this.remote_peer_id, "failed to send message");
-                        // notify the manager
+            // Send messages by advancing the sink and queuing buffered messages. `poll_ready`
+            // also drives p2p maintenance such as ping/pong, so we still poll it once when no
+            // session messages are queued.
+            let mut sent_message = false;
+            loop {
+                match this.conn.poll_ready_unpin(cx) {
+                    Poll::Pending => break,
+                    Poll::Ready(Err(err)) => {
+                        debug!(target: "net::session", %err, remote_peer_id=?this.remote_peer_id, "connection not ready to send message");
                         return this.close_on_error(err, cx)
                     }
-                } else {
-                    // no more messages to send over the wire
-                    break
+                    Poll::Ready(Ok(())) => {
+                        let Some(msg) = this.queued_outgoing.pop_front() else {
+                            // no more messages to send over the wire
+                            break
+                        };
+                        progress = true;
+                        sent_message = true;
+                        let res = match msg {
+                            OutgoingMessage::Eth(msg) => this.conn.start_send_unpin(msg),
+                            OutgoingMessage::Broadcast(msg) => this.conn.start_send_broadcast(msg),
+                            OutgoingMessage::Raw(msg) => this.conn.start_send_raw(msg),
+                        };
+                        if let Err(err) = res {
+                            debug!(target: "net::session", %err, remote_peer_id=?this.remote_peer_id, "failed to send message");
+                            // notify the manager
+                            return this.close_on_error(err, cx)
+                        }
+                    }
+                }
+            }
+
+            if sent_message {
+                match this.conn.poll_flush_unpin(cx) {
+                    Poll::Pending | Poll::Ready(Ok(())) => {}
+                    Poll::Ready(Err(err)) => {
+                        debug!(target: "net::session", %err, remote_peer_id=?this.remote_peer_id, "failed to flush messages");
+                        return this.close_on_error(err, cx)
+                    }
                 }
             }
 
             // read incoming messages from the wire
             'receive: loop {
-                // ensure we still have enough budget for another iteration
-                budget -= 1;
-                if budget == 0 {
-                    // make sure we're woken up again
-                    cx.waker().wake_by_ref();
-                    break 'main
-                }
-
                 // try to resend the pending message that we could not send because the channel was
                 // full. [`PollSender`] will ensure that we're woken up again when the channel is
                 // ready to receive the message, and will only error if the channel is closed.
@@ -764,6 +792,7 @@ impl<N: NetworkPrimitives> Future for ActiveSession<N> {
                     match this.to_session_manager.poll_reserve(cx) {
                         Poll::Ready(Ok(_)) => {
                             let _ = this.to_session_manager.send_item(msg);
+                            progress = true;
                         }
                         Poll::Ready(Err(_)) => return Poll::Ready(()),
                         Poll::Pending => {
@@ -794,6 +823,13 @@ impl<N: NetworkPrimitives> Future for ActiveSession<N> {
                     break 'receive
                 }
 
+                // ensure we still have enough budget for another wire message
+                if budget == 0 {
+                    // make sure we're woken up again
+                    cx.waker().wake_by_ref();
+                    break 'main
+                }
+
                 match this.conn.poll_next_unpin(cx) {
                     Poll::Pending => break,
                     Poll::Ready(None) => {
@@ -804,6 +840,8 @@ impl<N: NetworkPrimitives> Future for ActiveSession<N> {
                         return this.emit_disconnect(cx)
                     }
                     Poll::Ready(Some(res)) => {
+                        budget -= 1;
+                        progress = true;
                         match res {
                             Ok(msg) => {
                                 trace!(target: "net::session", msg_id=?msg.message_id(), remote_peer_id=?this.remote_peer_id, "received eth message");
@@ -811,7 +849,6 @@ impl<N: NetworkPrimitives> Future for ActiveSession<N> {
                                 match this.on_incoming_message(msg) {
                                     OnIncomingMessageOutcome::Ok => {
                                         // handled successfully
-                                        progress = true;
                                     }
                                     OnIncomingMessageOutcome::BadMessage { error, message } => {
                                         debug!(target: "net::session", %error, msg=?message, remote_peer_id=?this.remote_peer_id, "received invalid protocol message");
@@ -1116,7 +1153,12 @@ impl<N: NetworkPrimitives> QueuedOutgoingMessages<N> {
     }
 
     pub(crate) fn shrink_to(&mut self, min_capacity: usize) {
-        self.messages.shrink_to(min_capacity);
+        if self.messages.len() <= min_capacity &&
+            self.messages.capacity() >
+                min_capacity.saturating_mul(SHRINK_CAPACITY_MULTIPLIER).max(16)
+        {
+            self.messages.shrink_to(min_capacity);
+        }
     }
 }
 
