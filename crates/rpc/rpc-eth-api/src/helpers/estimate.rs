@@ -139,14 +139,15 @@ pub trait EstimateCall: Call {
             false
         };
 
-        // Check funds of the sender. The caller allowance is `(account.balance - tx.value) / feeCap`
-        // where `feeCap` is the *maxFeePerGas* (or legacy gasPrice), matching op-geth's
-        // `eth/gasestimator` — NOT the effective gas price. `tx_env.gas_price()` is collapsed to
-        // `min(maxFee, base + tip)` on the RPC path (`CallFees::ensure_fees`), which over-estimates
-        // the affordable gas and can return an estimate the caller cannot actually submit at that
-        // maxFee (reth's own tx validation requires `balance >= gas_limit * maxFee`).
-        // `balance_allowance` is tracked separately so the basic-transfer short-circuit can gate on
-        // affordability. When no fee is set (`fee_cap == 0`) the allowance is unbounded.
+        // Check funds of the sender. The caller allowance is `(account.balance - tx.value) /
+        // feeCap` where `feeCap` is the *maxFeePerGas* (or legacy gasPrice), matching
+        // op-geth's `eth/gasestimator` — NOT the effective gas price. `tx_env.gas_price()`
+        // is collapsed to `min(maxFee, base + tip)` on the RPC path
+        // (`CallFees::ensure_fees`), which over-estimates the affordable gas and can return
+        // an estimate the caller cannot actually submit at that maxFee (reth's own tx
+        // validation requires `balance >= gas_limit * maxFee`). `balance_allowance` is
+        // tracked separately so the basic-transfer short-circuit can gate on affordability.
+        // When no fee is set (`fee_cap == 0`) the allowance is unbounded.
         let balance_allowance: u64 = if fee_cap > 0 {
             // Read the balance through the `State` overlay (so `stateOverride` balances apply).
             let balance = db
