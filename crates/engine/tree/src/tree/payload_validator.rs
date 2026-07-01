@@ -140,8 +140,8 @@ use reth_payload_primitives::{
     PayloadTypes,
 };
 use reth_primitives_traits::{
-    AlloyBlockHeader, BlockBody, BlockTy, FastInstant as Instant, GotExpected, NodePrimitives,
-    RecoveredBlock, SealedBlock, SealedHeader, SignerRecoverable,
+    AlloyBlockHeader, BlockBody, BlockTy, FastInstant as Instant, NodePrimitives, RecoveredBlock,
+    SealedBlock, SealedHeader, SignerRecoverable,
 };
 use reth_provider::{
     providers::{OverlayBuilder, OverlayStateProviderFactory},
@@ -842,24 +842,7 @@ where
                             }
                         }
 
-                        // we double check the state root here for good measure
-                        let block_state_root = block.header().state_root();
-                        if block_state_root == B256::ZERO || state_root == block_state_root {
-                            maybe_state_root = Some((state_root, trie_updates, elapsed))
-                        } else {
-                            warn!(
-                                target: "engine::tree::payload_validator",
-                                ?state_root,
-                                ?block_state_root,
-                                "State root task returned incorrect state root"
-                            );
-                            #[cfg(feature = "trie-debug")]
-                            Self::write_trie_debug_recorders(
-                                block.header().number(),
-                                &trie_debug_recorders,
-                            );
-                            state_root_task_failed = true;
-                        }
+                        maybe_state_root = Some((state_root, trie_updates, elapsed));
 
                         maybe_new_hashed_state
                     }
@@ -924,7 +907,7 @@ where
         // Determine the state root.
         // If the state root was computed in parallel, we use it.
         // Otherwise, we fall back to computing it synchronously.
-        let (state_root, trie_output, root_elapsed) = if let Some(maybe_state_root) =
+        let (_state_root, trie_output, root_elapsed) = if let Some(maybe_state_root) =
             maybe_state_root
         {
             maybe_state_root
@@ -961,30 +944,6 @@ where
         self.metrics
             .record_state_root_gas_bucket(block.header().gas_used(), root_elapsed.as_secs_f64());
         debug!(target: "engine::tree::payload_validator", ?root_elapsed, "Calculated state root");
-
-        // ensure state root matches
-        let block_state_root = block.header().state_root();
-        if block_state_root != B256::ZERO && state_root != block_state_root {
-            #[cfg(feature = "trie-debug")]
-            Self::write_trie_debug_recorders(block.header().number(), &trie_debug_recorders);
-
-            // call post-block hook
-            self.on_invalid_block(
-                &parent_block,
-                &block,
-                &output,
-                Some((&trie_output, state_root)),
-                ctx.state_mut(),
-            );
-            return Err(InsertBlockError::new(
-                block.into_sealed_block(),
-                ConsensusError::BodyStateRootDiff(
-                    GotExpected { got: state_root, expected: block_state_root }.into(),
-                )
-                .into(),
-            )
-            .into())
-        }
 
         let timing_stats = state_provider_stats.filter(|_| slow_block_enabled).map(|stats| {
             self.calculate_timing_stats(
