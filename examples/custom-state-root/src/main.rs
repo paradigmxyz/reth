@@ -1,10 +1,10 @@
 //! Example: Running a reth node with a custom state root strategy.
 //!
-//! This demonstrates how to use the [`CustomStateRoot`] hook to override state
-//! root computation. The example always returns `B256::ZERO` as the state root.
+//! This demonstrates how to install a custom state-root strategy. The example always returns
+//! `B256::ZERO` as the state root.
 //!
 //! The key integration point is wrapping [`BasicEngineValidatorBuilder`] to call
-//! [`BasicEngineValidator::with_custom_state_root`] on the resulting validator.
+//! [`BasicEngineValidator::with_state_root_strategy`] on the resulting validator.
 //!
 //! # Usage
 //!
@@ -19,7 +19,14 @@ use std::sync::Arc;
 use alloy_genesis::Genesis;
 use alloy_primitives::B256;
 use reth_chain_state::StateTrieOverlayManager;
-use reth_engine_tree::tree::{payload_validator::CustomStateRoot, BasicEngineValidator};
+use reth_engine_tree::tree::{
+    payload_processor::{ExecutionEnv, PayloadProcessor},
+    payload_validator::LazyHashedPostState,
+    state_root_strategy::{
+        SparseTrieRetainedPaths, StateRootJob, StateRootJobOutcome, StateRootStrategy,
+    },
+    BasicEngineValidator, StateProviderBuilder, TreeConfig,
+};
 use reth_ethereum::{
     chainspec::ChainSpec,
     node::{
@@ -28,7 +35,7 @@ use reth_ethereum::{
                 BasicEngineApiBuilder, BasicEngineValidatorBuilder, ChangesetCache,
                 EngineValidatorBuilder, Identity, RpcAddOns,
             },
-            FullNodeComponents, NodeBuilder, NodeHandle, TreeConfig,
+            FullNodeComponents, NodeBuilder, NodeHandle,
         },
         core::{args::RpcServerArgs, node_config::NodeConfig},
         EthereumAddOns, EthereumEngineValidatorBuilder, EthereumEthApiBuilder, EthereumNode,
@@ -36,18 +43,64 @@ use reth_ethereum::{
     tasks::Runtime,
     EthPrimitives,
 };
+use reth_evm::ConfigureEvm;
+use reth_primitives_traits::{NodePrimitives, RecoveredBlock};
+use reth_provider::{providers::OverlayStateProviderFactory, BlockExecutionOutput, ProviderResult};
 use reth_trie::updates::TrieUpdates;
 
-// ---------------------------------------------------------------------------
-// Custom Engine Validator Builder
-// ---------------------------------------------------------------------------
+#[derive(Debug)]
+struct ZeroStateRootStrategy;
+
+impl<N, P, Evm> StateRootStrategy<N, P, Evm> for ZeroStateRootStrategy
+where
+    N: NodePrimitives,
+    Evm: ConfigureEvm<Primitives = N>,
+{
+    fn needs_sparse_trie_prune(&self, _config: &TreeConfig) -> bool {
+        false
+    }
+
+    fn prepare(
+        &self,
+        _payload_processor: &PayloadProcessor<Evm>,
+        _env: &ExecutionEnv<Evm>,
+        _provider_builder: StateProviderBuilder<N, P>,
+        _overlay_factory: OverlayStateProviderFactory<P, N>,
+        _config: &TreeConfig,
+        _parallel_bal_execution: bool,
+        _pending_sparse_trie_prune: Option<SparseTrieRetainedPaths>,
+    ) -> ProviderResult<Box<dyn StateRootJob<N>>> {
+        Ok(Box::new(ZeroStateRootJob))
+    }
+}
+
+#[derive(Debug)]
+struct ZeroStateRootJob;
+
+impl<N> StateRootJob<N> for ZeroStateRootJob
+where
+    N: NodePrimitives,
+{
+    fn name(&self) -> &'static str {
+        "zero"
+    }
+
+    fn finish(
+        &mut self,
+        _block: &RecoveredBlock<N::Block>,
+        _output: Arc<BlockExecutionOutput<N::Receipt>>,
+        _hashed_state: &LazyHashedPostState,
+    ) -> ProviderResult<StateRootJobOutcome> {
+        Ok(StateRootJobOutcome::new(B256::ZERO, Arc::new(TrieUpdates::default())))
+    }
+}
 
 /// An [`EngineValidatorBuilder`] that wraps [`BasicEngineValidatorBuilder`] and
-/// installs a [`CustomStateRoot`] on the resulting [`BasicEngineValidator`].
+/// installs a custom state-root strategy on the resulting [`BasicEngineValidator`].
 #[derive(Clone)]
 struct ZeroStateRootValidatorBuilder {
     inner: BasicEngineValidatorBuilder<EthereumEngineValidatorBuilder>,
-    custom_state_root: CustomStateRoot<EthPrimitives>,
+    state_root_strategy: Arc<ZeroStateRootStrategy>,
 }
 
 impl std::fmt::Debug for ZeroStateRootValidatorBuilder {
@@ -84,7 +137,9 @@ where
             .inner
             .build_tree_validator(ctx, tree_config, changeset_cache, state_trie_overlays)
             .await?;
-        Ok(validator.with_custom_state_root(self.custom_state_root))
+        let state_root_strategy: Arc<dyn StateRootStrategy<EthPrimitives, N::Provider, N::Evm>> =
+            self.state_root_strategy;
+        Ok(validator.with_state_root_strategy(state_root_strategy))
     }
 }
 
@@ -95,10 +150,6 @@ where
 #[tokio::main]
 async fn main() -> eyre::Result<()> {
     let runtime = Runtime::test();
-
-    // A custom state root handler that always returns B256::ZERO.
-    let zero_state_root: CustomStateRoot<EthPrimitives> =
-        Arc::new(|_input| Ok((B256::ZERO, TrieUpdates::default())));
 
     let node_config = NodeConfig::test()
         .dev()
@@ -113,7 +164,7 @@ async fn main() -> eyre::Result<()> {
             BasicEngineApiBuilder::<EthereumEngineValidatorBuilder>::default(),
             ZeroStateRootValidatorBuilder {
                 inner: BasicEngineValidatorBuilder::default(),
-                custom_state_root: zero_state_root,
+                state_root_strategy: Arc::new(ZeroStateRootStrategy),
             },
             Default::default(),
             Identity::new(),

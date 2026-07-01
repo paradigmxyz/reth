@@ -370,6 +370,38 @@ where
         }
     }
 
+    /// Spawns transaction conversion and cache prewarming, optionally wiring prewarm output into
+    /// an externally-owned state-root task.
+    #[instrument(level = "debug", target = "engine::tree::payload_processor", skip_all)]
+    pub fn spawn_with_state_root_sink<P, I: ExecutableTxIterator<Evm>>(
+        &self,
+        env: ExecutionEnv<Evm>,
+        transactions: I,
+        provider_builder: StateProviderBuilder<Evm::Primitives, P>,
+        to_sparse_trie_task: Option<CrossbeamSender<StateRootMessage>>,
+        parallel_bal_execution: bool,
+    ) -> IteratorPayloadHandle<Evm, I>
+    where
+        P: BlockReader + StateProviderFactory + StateReader + Clone + 'static,
+    {
+        let (prewarm_rx, execution_rx) =
+            self.spawn_tx_iterator(transactions, env.transaction_count, parallel_bal_execution);
+        let prewarm_handle = self.spawn_caching_with(
+            env,
+            prewarm_rx,
+            provider_builder,
+            to_sparse_trie_task,
+            parallel_bal_execution,
+        );
+        PayloadHandle {
+            state_root_handle: None,
+            install_state_hook: false,
+            prewarm_handle,
+            transactions: execution_rx,
+            _span: Span::current(),
+        }
+    }
+
     /// Spawns state root computation pipeline (multiproof + sparse trie tasks).
     ///
     /// The returned [`StateRootHandle`] provides:
@@ -429,7 +461,7 @@ where
 
     /// Transaction count threshold below which proof workers are halved, since fewer transactions
     /// produce fewer state changes and most workers would be idle overhead.
-    const SMALL_BLOCK_PROOF_WORKER_TX_THRESHOLD: usize = 30;
+    pub const SMALL_BLOCK_PROOF_WORKER_TX_THRESHOLD: usize = 30;
 
     /// Transaction count threshold below which sequential conversion is used.
     ///
