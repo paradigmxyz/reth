@@ -82,6 +82,7 @@ impl<R: Receipt> ReceiptRootTaskHandle<R> {
         let mut encode_buf = Vec::with_capacity(RECEIPT_ENCODE_BUF_INITIAL_CAPACITY);
         let mut next = 0usize;
         let mut pending = HashMap::new();
+        let mut has_pending = false;
 
         let mut push = |receipt: R| {
             let receipt_with_bloom = receipt.with_bloom_ref();
@@ -98,12 +99,16 @@ impl<R: Receipt> ReceiptRootTaskHandle<R> {
                 push(indexed_receipt.receipt);
                 next += 1;
 
-                while let Some(receipt) = pending.remove(&next) {
-                    push(receipt);
-                    next += 1;
+                if has_pending {
+                    while let Some(receipt) = pending.remove(&next) {
+                        push(receipt);
+                        next += 1;
+                    }
+                    has_pending = !pending.is_empty();
                 }
             } else {
                 pending.insert(indexed_receipt.index, indexed_receipt.receipt);
+                has_pending = true;
             }
         }
 
