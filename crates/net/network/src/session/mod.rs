@@ -18,10 +18,10 @@ use counter::SessionCounter;
 use futures::{future::Either, io, FutureExt, StreamExt};
 use reth_ecies::{stream::ECIESStream, ECIESError};
 use reth_eth_wire::{
-    capability::SharedCapabilities, errors::EthStreamError, handshake::EthRlpxHandshake,
-    multiplex::RlpxProtocolMultiplexer, BlockRangeUpdate, Capabilities, Capability,
-    DisconnectReason, EthSnapStream, EthStream, EthVersion, HelloMessageWithProtocols,
-    NetworkPrimitives, UnauthedP2PStream, UnifiedStatus, HANDSHAKE_TIMEOUT,
+    errors::EthStreamError, handshake::EthRlpxHandshake, multiplex::RlpxProtocolMultiplexer,
+    BlockRangeUpdate, Capabilities, DisconnectReason, EthSnapStream, EthStream, EthVersion,
+    HelloMessageWithProtocols, NetworkPrimitives, UnauthedP2PStream, UnifiedStatus,
+    HANDSHAKE_TIMEOUT,
 };
 use reth_ethereum_forks::{ForkFilter, ForkId, ForkTransition, Head};
 use reth_metrics::common::mpsc::MeteredPollSender;
@@ -1075,14 +1075,6 @@ async fn get_ecies_stream<Io: AsyncRead + AsyncWrite + Unpin>(
 
 /// Authenticate the stream via handshake
 ///
-/// Returns `true` if the negotiated capabilities are exactly `eth` + `snap/2` and nothing else.
-///
-/// This is the layout the dedicated [`EthSnapStream`] handles; any other combination (extra
-/// satellite protocols alongside snap, or snap absent) is left to the general-purpose multiplexer.
-fn is_exact_eth_snap_v2(shared: &SharedCapabilities) -> bool {
-    shared.len() == 2 && shared.ensure_matching_capability(&Capability::snap_2()).is_ok()
-}
-
 /// On Success return the authenticated stream as [`PendingSessionEvent`].
 ///
 /// If additional [`RlpxSubProtocolHandlers`] are provided, the hello message will be updated to
@@ -1182,7 +1174,7 @@ async fn authenticate_stream<N: NetworkPrimitives>(
                 }
             }
         }
-    } else if is_exact_eth_snap_v2(p2p_stream.shared_capabilities()) {
+    } else if p2p_stream.shared_capabilities().is_exact_eth_snap_v2() {
         // Exactly `eth` + `snap/2` (no other extras): use the dedicated stream instead of the
         // general-purpose satellite multiplexer. If `snap/2` is negotiated alongside other extra
         // capabilities, fall through to the satellite path — the dedicated stream only composes
@@ -1254,53 +1246,5 @@ async fn authenticate_stream<N: NetworkPrimitives>(
         direction,
         client_id: their_hello.client_version,
         peer_listen_port,
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use reth_eth_wire::protocol::Protocol;
-
-    /// Builds shared capabilities from matching local protocols and peer capabilities.
-    fn shared(local: Vec<Protocol>, peer: Vec<Capability>) -> SharedCapabilities {
-        SharedCapabilities::try_new(local, peer).unwrap()
-    }
-
-    #[test]
-    fn classifies_exact_eth_snap_v2() {
-        let caps = shared(
-            vec![EthVersion::Eth68.into(), Protocol::snap_2()],
-            vec![EthVersion::Eth68.into(), Capability::snap_2()],
-        );
-        assert!(is_exact_eth_snap_v2(&caps));
-    }
-
-    #[test]
-    fn rejects_eth_only() {
-        let caps = shared(vec![EthVersion::Eth68.into()], vec![EthVersion::Eth68.into()]);
-        assert!(!is_exact_eth_snap_v2(&caps));
-    }
-
-    #[test]
-    fn rejects_eth_without_snap() {
-        // eth + a non-snap satellite is not the dedicated layout.
-        let cap = Capability::new_static("les", 1);
-        let caps = shared(
-            vec![EthVersion::Eth68.into(), Protocol::new(cap.clone(), 5)],
-            vec![EthVersion::Eth68.into(), cap],
-        );
-        assert!(!is_exact_eth_snap_v2(&caps));
-    }
-
-    #[test]
-    fn rejects_eth_snap_plus_extra() {
-        // eth + snap/2 + another capability falls through to the general satellite multiplexer.
-        let cap = Capability::new_static("les", 1);
-        let caps = shared(
-            vec![EthVersion::Eth68.into(), Protocol::snap_2(), Protocol::new(cap.clone(), 5)],
-            vec![EthVersion::Eth68.into(), Capability::snap_2(), cap],
-        );
-        assert!(!is_exact_eth_snap_v2(&caps));
     }
 }
