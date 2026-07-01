@@ -12,11 +12,7 @@ use alloc::{borrow::Cow, vec::Vec};
 use alloy_consensus::{Header, TxType};
 use alloy_eips::{eip2718::Typed2718, eip4895::Withdrawal};
 use alloy_primitives::{Address, B256};
-use evm2::{
-    evm::{BlockStateAccumulator, Database},
-    interpreter::Host,
-    BaseEvmTypes, Evm,
-};
+use evm2::{evm::BlockStateAccumulator, interpreter::Host, BaseEvmTypes, Evm};
 use reth_ethereum_primitives::{EthPrimitives, Receipt};
 use reth_evm::execute::{BlockExecutionError, BlockExecutionOutput, BlockExecutor, GasOutput};
 use reth_execution_types::HashedPostStateSink;
@@ -24,7 +20,7 @@ use reth_trie_common::{HashedPostState, KeccakKeyHasher};
 
 /// Configured Ethereum block executor backed by evm2.
 #[expect(missing_debug_implementations)]
-pub struct EthBlockExecutor<'a, DB> {
+pub struct EthBlockExecutor<'a> {
     evm: Evm<BaseEvmTypes>,
     spec_id: evm2::SpecId,
     block_number: u64,
@@ -40,13 +36,9 @@ pub struct EthBlockExecutor<'a, DB> {
     hashed_state_mode: HashedStateMode,
     receipts: Vec<Receipt>,
     cumulative_gas_used: u64,
-    _database: core::marker::PhantomData<DB>,
 }
 
-impl<'a, DB> EthBlockExecutor<'a, DB>
-where
-    DB: Database + 'static,
-{
+impl<'a> EthBlockExecutor<'a> {
     /// Creates a configured Ethereum block executor.
     pub(crate) fn new(
         mut evm: Evm<BaseEvmTypes>,
@@ -78,7 +70,6 @@ where
             hashed_state_mode,
             receipts: Vec::new(),
             cumulative_gas_used: 0,
-            _database: core::marker::PhantomData,
         }
     }
 
@@ -100,11 +91,7 @@ where
     }
 }
 
-impl<DB> BlockExecutor for EthBlockExecutor<'_, DB>
-where
-    DB: Database + 'static,
-    DB::Error: core::error::Error + Send + Sync + 'static,
-{
+impl BlockExecutor for EthBlockExecutor<'_> {
     type Primitives = EthPrimitives;
     type Transaction = EthTxEnv;
     type TransactionOutput = GasOutput;
@@ -132,7 +119,7 @@ where
             self.ommers,
             None,
         );
-        pre_execution_system_call_state_changes::<DB>(
+        pre_execution_system_call_state_changes(
             &mut self.evm,
             &mut self.block_state,
             self.hashed_state.as_mut(),
@@ -157,7 +144,7 @@ where
         let transaction = transaction.into_envelope();
         let tx_type =
             TxType::try_from(transaction.ty()).expect("transaction envelope has valid type");
-        let outcome = execute_transaction::<DB>(
+        let outcome = execute_transaction(
             &mut self.evm,
             &mut self.block_state,
             self.hashed_state.as_mut(),
@@ -195,8 +182,7 @@ where
             self.ommers,
             None,
         );
-        let mut requests =
-            block_requests_from_receipts::<DB>(self.spec_id, context, &self.receipts)?;
+        let mut requests = block_requests_from_receipts(self.spec_id, context, &self.receipts)?;
         let context = Self::block_context(
             self.chain_id,
             self.deposit_contract_address,
@@ -205,7 +191,7 @@ where
             self.ommers,
             None,
         );
-        post_execution_system_call_state_changes::<DB>(
+        post_execution_system_call_state_changes(
             &mut self.evm,
             &mut self.block_state,
             self.hashed_state.as_mut(),
@@ -226,7 +212,7 @@ where
             self.ommers,
             withdrawals.as_deref(),
         );
-        post_block_balance_state_changes::<DB>(
+        post_block_balance_state_changes(
             &mut self.evm,
             &mut self.block_state,
             self.hashed_state.as_mut(),

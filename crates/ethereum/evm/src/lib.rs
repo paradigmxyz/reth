@@ -411,26 +411,16 @@ where
     }
 
     #[cfg(feature = "std")]
-    fn create_executor<'a, DB>(
+    fn create_executor<'a>(
         &'a self,
         evm: evm2::Evm<evm2::BaseEvmTypes>,
         ctx: EthBlockExecutionCtx<'a>,
         hashed_state_mode: HashedStateMode,
-    ) -> reth_evm::BlockExecutorFor<'a, Self, DB>
+    ) -> reth_evm::BlockExecutorFor<'a, Self>
     where
         Self: 'a,
-        DB: evm2::evm::Database + Clone + 'static,
-        DB::Error: core::error::Error + Send + Sync + 'static,
     {
         self.executor_factory.create_executor(evm, ctx, hashed_state_mode)
-    }
-
-    #[cfg(feature = "std")]
-    fn evm_with_env<DB>(&self, db: DB, env: EthEvmEnv) -> evm2::Evm<evm2::BaseEvmTypes>
-    where
-        DB: evm2::evm::DynDatabase + 'static,
-    {
-        self.executor_factory.evm_with_env(db, env)
     }
 
     #[cfg(feature = "std")]
@@ -447,7 +437,7 @@ where
         DB::Error: core::error::Error + Send + Sync + 'static,
     {
         let mut evm = self.evm_with_env(evm2::evm::Db::new(db), env);
-        crate::execution::apply_pre_execution_system_calls::<DB>(
+        crate::execution::apply_pre_execution_system_calls(
             &mut evm,
             block_number,
             ctx.block_execution_context(

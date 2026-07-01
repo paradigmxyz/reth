@@ -13,8 +13,7 @@ pub type ExecutionCtxFor<'a, Evm> = <Evm as ConfigureEvm>::ExecutionCtx<'a>;
 
 /// Helper to access the configured block executor.
 #[cfg(feature = "std")]
-pub type BlockExecutorFor<'a, Evm, DB> =
+pub type BlockExecutorFor<'a, Evm> =
     <<Evm as ConfigureEvm>::BlockExecutorFactory as crate::execute::BlockExecutorFactory>::Executor<
         'a,
-        DB,
     >;

@@ -212,16 +212,14 @@ pub trait ConfigureEvm: Clone + Debug + Send + Sync + Unpin {
 
     /// Creates a configured block executor for active block execution.
     #[cfg(feature = "std")]
-    fn create_executor<'a, DB>(
+    fn create_executor<'a>(
         &'a self,
         evm: evm2::Evm<evm2::BaseEvmTypes>,
         ctx: ExecutionCtxFor<'a, Self>,
         hashed_state_mode: HashedStateMode,
-    ) -> <Self::BlockExecutorFactory as crate::execute::BlockExecutorFactory>::Executor<'a, DB>
+    ) -> <Self::BlockExecutorFactory as crate::execute::BlockExecutorFactory>::Executor<'a>
     where
-        Self: 'a,
-        DB: evm2::evm::Database + Clone + 'static,
-        DB::Error: core::error::Error + Send + Sync + 'static;
+        Self: 'a;
 
     /// Creates a block executor for the given block.
     #[cfg(feature = "std")]
@@ -230,7 +228,7 @@ pub trait ConfigureEvm: Clone + Debug + Send + Sync + Unpin {
         db: DB,
         block: &'a SealedBlock<BlockTy<Self::Primitives>>,
         hashed_state_mode: HashedStateMode,
-    ) -> Result<crate::BlockExecutorFor<'a, Self, DB>, Self::Error>
+    ) -> Result<crate::BlockExecutorFor<'a, Self>, Self::Error>
     where
         Self: 'a,
         Self::BlockExecutorFactory:
@@ -240,14 +238,22 @@ pub trait ConfigureEvm: Clone + Debug + Send + Sync + Unpin {
     {
         let evm = self.evm_for_block(evm2::evm::Db::new(db), block.header())?;
         let ctx = self.context_for_block(block)?;
-        Ok(self.create_executor::<DB>(evm, ctx, hashed_state_mode))
+        Ok(self.create_executor(evm, ctx, hashed_state_mode))
     }
 
     /// Creates an EVM instance for single-transaction execution with the configured environment.
     #[cfg(feature = "std")]
+    #[auto_impl(keep_default_for(&, Arc))]
     fn evm_with_env<DB>(&self, db: DB, evm_env: EvmEnvFor<Self>) -> evm2::Evm<evm2::BaseEvmTypes>
     where
-        DB: evm2::evm::DynDatabase + 'static;
+        DB: evm2::evm::DynDatabase + 'static,
+    {
+        crate::execute::BlockExecutorFactory::evm_with_env(
+            self.block_executor_factory(),
+            db,
+            evm_env,
+        )
+    }
 
     /// Creates an EVM instance for the given block.
     #[cfg(feature = "std")]
@@ -272,7 +278,7 @@ pub trait ConfigureEvm: Clone + Debug + Send + Sync + Unpin {
         parent: &'a SealedHeader<HeaderTy<Self::Primitives>>,
         ctx: ExecutionCtxFor<'a, Self>,
         hashed_state_mode: HashedStateMode,
-    ) -> impl BlockBuilder<Primitives = Self::Primitives, Executor = crate::BlockExecutorFor<'a, Self, DB>>
+    ) -> impl BlockBuilder<Primitives = Self::Primitives, Executor = crate::BlockExecutorFor<'a, Self>>
     where
         Self: 'a,
         Self::BlockExecutorFactory:
@@ -281,7 +287,7 @@ pub trait ConfigureEvm: Clone + Debug + Send + Sync + Unpin {
         DB::Error: core::error::Error + Send + Sync + 'static,
     {
         BasicBlockBuilder {
-            executor: self.create_executor::<DB>(evm, ctx.clone(), hashed_state_mode),
+            executor: self.create_executor(evm, ctx.clone(), hashed_state_mode),
             evm_env,
             transactions: Vec::new(),
             senders: Vec::new(),
@@ -300,10 +306,7 @@ pub trait ConfigureEvm: Clone + Debug + Send + Sync + Unpin {
         attributes: Self::NextBlockEnvCtx,
         hashed_state_mode: HashedStateMode,
     ) -> Result<
-        impl BlockBuilder<
-            Primitives = Self::Primitives,
-            Executor = crate::BlockExecutorFor<'a, Self, DB>,
-        >,
+        impl BlockBuilder<Primitives = Self::Primitives, Executor = crate::BlockExecutorFor<'a, Self>>,
         Self::Error,
     >
     where

@@ -85,16 +85,14 @@ impl<C, EvmFactory> EthBlockExecutorFactory<C, EvmFactory> {
 
     /// Creates a configured Ethereum block executor.
     #[cfg(feature = "std")]
-    pub fn create_executor<'a, DB>(
+    pub fn create_executor<'a>(
         &'a self,
         evm: evm2::Evm<evm2::BaseEvmTypes>,
         ctx: EthBlockExecutionCtx<'a>,
         hashed_state_mode: HashedStateMode,
-    ) -> EthBlockExecutor<'a, DB>
+    ) -> EthBlockExecutor<'a>
     where
         C: EthChainSpec<Header = Header> + EthExecutorSpec,
-        DB: evm2::evm::Database + Clone + 'static,
-        DB::Error: core::error::Error + Send + Sync + 'static,
     {
         EthBlockExecutor::new(
             evm,
@@ -155,25 +153,28 @@ where
         = EthBlockExecutionCtx<'a>
     where
         Self: 'a;
-    type Executor<'a, DB>
-        = EthBlockExecutor<'a, DB>
+    type Executor<'a>
+        = EthBlockExecutor<'a>
     where
-        Self: 'a,
-        DB: evm2::evm::Database + Clone + 'static,
-        DB::Error: core::error::Error + Send + Sync + 'static;
+        Self: 'a;
 
-    fn create_executor<'a, DB>(
+    fn create_executor<'a>(
         &'a self,
         evm: evm2::Evm<evm2::BaseEvmTypes>,
         ctx: Self::ExecutionCtx<'a>,
         hashed_state_mode: HashedStateMode,
-    ) -> Self::Executor<'a, DB>
+    ) -> Self::Executor<'a>
     where
         Self: 'a,
-        DB: evm2::evm::Database + Clone + 'static,
-        DB::Error: core::error::Error + Send + Sync + 'static,
     {
         Self::create_executor(self, evm, ctx, hashed_state_mode)
+    }
+
+    fn evm_with_env<DB>(&self, db: DB, evm_env: Self::EvmEnv) -> evm2::Evm<evm2::BaseEvmTypes>
+    where
+        DB: evm2::evm::DynDatabase + 'static,
+    {
+        Self::evm_with_env(self, db, evm_env)
     }
 
     fn evm_tx<'a>(

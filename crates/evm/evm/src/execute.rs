@@ -158,27 +158,28 @@ pub trait BlockExecutorFactory: Clone + Debug + Send + Sync + Unpin {
     where
         Self: 'a;
     /// Block executor returned by this factory.
-    type Executor<'a, DB>: BlockExecutor<
+    type Executor<'a>: BlockExecutor<
         Primitives = Self::Primitives,
         Transaction = Self::Transaction,
         TransactionOutput = GasOutput,
     >
     where
-        Self: 'a,
-        DB: evm2::evm::Database + Clone + 'static,
-        DB::Error: core::error::Error + Send + Sync + 'static;
+        Self: 'a;
 
     /// Creates a configured block executor.
-    fn create_executor<'a, DB>(
+    fn create_executor<'a>(
         &'a self,
         evm: evm2::Evm<evm2::BaseEvmTypes>,
         ctx: Self::ExecutionCtx<'a>,
         hashed_state_mode: HashedStateMode,
-    ) -> Self::Executor<'a, DB>
+    ) -> Self::Executor<'a>
     where
-        Self: 'a,
-        DB: evm2::evm::Database + Clone + 'static,
-        DB::Error: core::error::Error + Send + Sync + 'static;
+        Self: 'a;
+
+    /// Creates an EVM instance with the configured execution environment.
+    fn evm_with_env<DB>(&self, db: DB, evm_env: Self::EvmEnv) -> evm2::Evm<evm2::BaseEvmTypes>
+    where
+        DB: evm2::evm::DynDatabase + 'static;
 
     /// Returns the transaction shape consumed by the configured EVM.
     fn evm_tx<'a>(
@@ -533,8 +534,7 @@ where
             .evm_config
             .context_for_block(block.sealed_block())
             .map_err(BlockExecutionError::other)?;
-        let mut executor =
-            self.evm_config.create_executor::<DB>(evm, ctx, HashedStateMode::OutputOnly);
+        let mut executor = self.evm_config.create_executor(evm, ctx, HashedStateMode::OutputOnly);
 
         executor.apply_pre_execution_changes(&mut |_| {})?;
         for transaction in block.clone_transactions_recovered() {

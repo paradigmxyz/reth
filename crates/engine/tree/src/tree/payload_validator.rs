@@ -1162,11 +1162,7 @@ where
                 let db = unsafe { BorrowedEvmStateProviderDatabase::new(&state_provider) };
                 let evm = self.evm_config.evm_with_env(evm2::evm::Db::new(db), env.evm_env.clone());
                 let mut executor =
-                    self.evm_config.create_executor::<BorrowedEvmStateProviderDatabase>(
-                        evm,
-                        execution_ctx,
-                        hashed_state_mode,
-                    );
+                    self.evm_config.create_executor(evm, execution_ctx, hashed_state_mode);
                 let pre_exec_start = Instant::now();
                 executor
                     .apply_pre_execution_changes(&mut on_hashed_state_update)

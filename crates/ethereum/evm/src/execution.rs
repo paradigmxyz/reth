@@ -33,7 +33,7 @@ use evm2::{
     bytecode::Bytecode as ExecutableBytecode,
     ethereum::RecoveredTxEnvelope,
     evm::{
-        AccountChange, AccountChangeRef, AccountInfo, BlockStateAccumulator, Database, DbErrorCode,
+        AccountChange, AccountChangeRef, AccountInfo, BlockStateAccumulator, DbErrorCode,
         StateChangeSink, StateChangeSource, StateChanges, StorageChange, BEACON_ROOTS_ADDRESS,
         CONSOLIDATION_REQUEST_ADDRESS, HISTORY_STORAGE_ADDRESS, WITHDRAWAL_REQUEST_ADDRESS,
     },
@@ -44,7 +44,7 @@ use evm2::{
 use evm2::{
     env::BlockEnv,
     ethereum::ethereum_tx_registry,
-    evm::{precompile::PrecompileProvider, DynDatabase},
+    evm::{precompile::PrecompileProvider, Database, DynDatabase},
     ExecutionConfig, Version,
 };
 use reth_ethereum_primitives::Receipt;
@@ -73,7 +73,7 @@ sol! {
 
 /// Error returned by EVM-backed Ethereum execution.
 #[derive(Debug)]
-pub enum EthExecutionError<E> {
+pub enum EthExecutionError<E = DynamicDatabaseError> {
     /// EVM rejected the transaction during validation.
     InvalidTx(EthInvalidTxError),
     /// EVM rejected or halted transaction execution before producing a Reth output.
@@ -96,6 +96,24 @@ pub enum EthExecutionError<E> {
     /// Deposit request logs could not be decoded.
     DepositRequestDecode(String),
 }
+
+/// Database error returned through evm2's dynamic database interface.
+#[derive(Debug)]
+pub struct DynamicDatabaseError(String);
+
+impl DynamicDatabaseError {
+    fn new(error: Box<dyn core::error::Error>) -> Self {
+        Self(error.to_string())
+    }
+}
+
+impl core::fmt::Display for DynamicDatabaseError {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+impl core::error::Error for DynamicDatabaseError {}
 
 impl<E> core::fmt::Display for EthExecutionError<E>
 where
@@ -327,14 +345,11 @@ where
     DB: DynDatabase + 'static,
 {
     /// Executes recovered Ethereum transactions.
-    pub(crate) fn execute_recovered_transactions<ErrorDB>(
+    pub(crate) fn execute_recovered_transactions(
         self,
         transactions: impl IntoIterator<Item = Recovered<TransactionSigned>>,
-    ) -> Result<BlockExecutionOutput<Receipt>, EthExecutionError<ErrorDB::Error>>
-    where
-        ErrorDB: Database + 'static,
-    {
-        match self.execute_fallible_envelopes::<ErrorDB, Infallible, Infallible, _, _, _, _>(
+    ) -> Result<BlockExecutionOutput<Receipt>, EthExecutionError> {
+        match self.execute_fallible_envelopes::<Infallible, Infallible, _, _, _, _>(
             transactions.into_iter().map(recovered_tx_envelope).map(Ok::<_, Infallible>),
             ExecutionHooks::new(|_| {}, ignore_receipt, |_| {}, HashedStateMode::OutputOnly),
         ) {
@@ -351,16 +366,15 @@ where
     /// This consumes each transaction only when execution reaches it, so upstream transaction
     /// conversion can continue in parallel with earlier transaction execution.
     #[expect(clippy::type_complexity)]
-    pub(crate) fn execute_fallible_envelopes<ErrorDB, TxErr, ReceiptErr, I, F, R, H>(
+    pub(crate) fn execute_fallible_envelopes<TxErr, ReceiptErr, I, F, R, H>(
         self,
         transactions: I,
         hooks: ExecutionHooks<F, R, H>,
     ) -> Result<
         BlockExecutionOutput<Receipt>,
-        PayloadExecutionError<EthExecutionError<ErrorDB::Error>, TxErr, ReceiptErr>,
+        PayloadExecutionError<EthExecutionError, TxErr, ReceiptErr>,
     >
     where
-        ErrorDB: Database + 'static,
         I: IntoIterator<Item = Result<RecoveredTxEnvelope, TxErr>>,
         F: FnMut(usize),
         R: for<'receipt> FnMut(usize, &'receipt Receipt) -> Result<(), ReceiptErr>,
@@ -388,7 +402,7 @@ where
         let mut block_state = BlockStateAccumulator::new();
         let mut hashed_state =
             hashed_state_mode.output().then(HashedPostStateSink::<KeccakKeyHasher>::default);
-        pre_execution_system_call_state_changes::<ErrorDB>(
+        pre_execution_system_call_state_changes(
             &mut evm,
             &mut block_state,
             hashed_state.as_mut(),
@@ -405,7 +419,7 @@ where
             let transaction = transaction.map_err(PayloadExecutionError::Transaction)?;
             let tx_type =
                 TxType::try_from(transaction.ty()).expect("transaction envelope has valid type");
-            let outcome = execute_transaction::<ErrorDB>(
+            let outcome = execute_transaction(
                 &mut evm,
                 &mut block_state,
                 hashed_state.as_mut(),
@@ -420,8 +434,8 @@ where
             on_transaction_executed(index + 1);
         }
 
-        let mut requests = block_requests_from_receipts::<ErrorDB>(spec_id, context, &receipts)?;
-        post_execution_system_call_state_changes::<ErrorDB>(
+        let mut requests = block_requests_from_receipts(spec_id, context, &receipts)?;
+        post_execution_system_call_state_changes(
             &mut evm,
             &mut block_state,
             hashed_state.as_mut(),
@@ -432,7 +446,7 @@ where
             &mut requests,
         )?;
 
-        post_block_balance_state_changes::<ErrorDB>(
+        post_block_balance_state_changes(
             &mut evm,
             &mut block_state,
             hashed_state.as_mut(),
@@ -492,7 +506,7 @@ fn execute_block<DB>(
     database: DB,
     block_number: u64,
     transactions: impl IntoIterator<Item = Recovered<TransactionSigned>>,
-) -> Result<BlockExecutionOutput<Receipt>, EthExecutionError<DB::Error>>
+) -> Result<BlockExecutionOutput<Receipt>, EthExecutionError>
 where
     DB: Database + 'static,
 {
@@ -509,7 +523,7 @@ fn execute_block_with_withdrawals<DB>(
     block_number: u64,
     transactions: impl IntoIterator<Item = Recovered<TransactionSigned>>,
     withdrawals: Option<&[Withdrawal]>,
-) -> Result<BlockExecutionOutput<Receipt>, EthExecutionError<DB::Error>>
+) -> Result<BlockExecutionOutput<Receipt>, EthExecutionError>
 where
     DB: Database + 'static,
 {
@@ -538,7 +552,7 @@ fn execute_block_with_context<DB>(
     block_number: u64,
     transactions: impl IntoIterator<Item = Recovered<TransactionSigned>>,
     context: BlockExecutionContext<'_>,
-) -> Result<BlockExecutionOutput<Receipt>, EthExecutionError<DB::Error>>
+) -> Result<BlockExecutionOutput<Receipt>, EthExecutionError>
 where
     DB: Database + 'static,
 {
@@ -564,7 +578,7 @@ fn execute_block_with_context_and_precompiles<DB>(
     transactions: impl IntoIterator<Item = Recovered<TransactionSigned>>,
     context: BlockExecutionContext<'_>,
     precompiles: Box<dyn PrecompileProvider<BaseEvmTypes>>,
-) -> Result<BlockExecutionOutput<Receipt>, EthExecutionError<DB::Error>>
+) -> Result<BlockExecutionOutput<Receipt>, EthExecutionError>
 where
     DB: Database + 'static,
 {
@@ -576,20 +590,12 @@ where
         context,
         precompiles,
     )
-    .execute_recovered_transactions::<DB>(transactions)
+    .execute_recovered_transactions(transactions)
 }
 
-fn map_handler_error<DB>(
-    evm: &mut Evm<BaseEvmTypes>,
-    err: HandlerError,
-) -> EthExecutionError<DB::Error>
-where
-    DB: Database + 'static,
-{
+fn map_handler_error(evm: &mut Evm<BaseEvmTypes>, err: HandlerError) -> EthExecutionError {
     match err {
-        HandlerError::Database(code) => take_database_error::<DB>(evm, code)
-            .map(EthExecutionError::Database)
-            .unwrap_or(EthExecutionError::MissingDatabaseError(code)),
+        HandlerError::Database(code) => map_db_error_code(evm, code),
         err if handler_error_is_invalid_tx(&err) => {
             EthExecutionError::InvalidTx(EthInvalidTxError(err))
         }
@@ -597,17 +603,14 @@ where
     }
 }
 
-pub(crate) fn apply_pre_execution_system_calls<DB>(
+pub(crate) fn apply_pre_execution_system_calls(
     evm: &mut Evm<BaseEvmTypes>,
     block_number: u64,
     context: BlockExecutionContext<'_>,
-) -> Result<BlockStateAccumulator, EthExecutionError<DB::Error>>
-where
-    DB: Database + 'static,
-{
+) -> Result<BlockStateAccumulator, EthExecutionError> {
     let mut block_state = BlockStateAccumulator::new();
     let spec_id = evm.spec_id();
-    pre_execution_system_call_state_changes::<DB>(
+    pre_execution_system_call_state_changes(
         evm,
         &mut block_state,
         None,
@@ -620,11 +623,8 @@ where
     Ok(block_state)
 }
 
-fn take_database_error<DB>(evm: &mut Evm<BaseEvmTypes>, code: DbErrorCode) -> Option<DB::Error>
-where
-    DB: Database + 'static,
-{
-    evm.database_mut().error(code).downcast::<DB::Error>().map(|err| *err).ok()
+fn take_database_error(evm: &mut Evm<BaseEvmTypes>, code: DbErrorCode) -> DynamicDatabaseError {
+    DynamicDatabaseError::new(evm.database_mut().error(code))
 }
 
 struct RethStateSink<'a> {
@@ -729,17 +729,14 @@ fn send_hashed_state_update(
     }
 }
 
-pub(crate) fn execute_transaction<DB>(
+pub(crate) fn execute_transaction(
     evm: &mut Evm<BaseEvmTypes>,
     block_state: &mut BlockStateAccumulator,
     hashed_state: Option<&mut HashedPostStateSink<KeccakKeyHasher>>,
     stream_hashed_state: bool,
     on_hashed_state_update: &mut impl FnMut(HashedPostState),
     transaction: &RecoveredTxEnvelope,
-) -> Result<TxResult, EthExecutionError<DB::Error>>
-where
-    DB: Database + 'static,
-{
+) -> Result<TxResult, EthExecutionError> {
     enum TransactionResolution {
         Outcome(TxResult),
         DatabaseError(DbErrorCode),
@@ -767,25 +764,17 @@ where
 
     match resolution {
         TransactionResolution::Outcome(outcome) => Ok(outcome),
-        TransactionResolution::DatabaseError(code) => Err(map_db_error_code::<DB>(evm, code)),
-        TransactionResolution::HandlerError(err) => Err(map_handler_error::<DB>(evm, err)),
+        TransactionResolution::DatabaseError(code) => Err(map_db_error_code(evm, code)),
+        TransactionResolution::HandlerError(err) => Err(map_handler_error(evm, err)),
     }
 }
 
-fn map_db_error_code<DB>(
-    evm: &mut Evm<BaseEvmTypes>,
-    code: DbErrorCode,
-) -> EthExecutionError<DB::Error>
-where
-    DB: Database + 'static,
-{
-    take_database_error::<DB>(evm, code)
-        .map(EthExecutionError::Database)
-        .unwrap_or(EthExecutionError::MissingDatabaseError(code))
+fn map_db_error_code(evm: &mut Evm<BaseEvmTypes>, code: DbErrorCode) -> EthExecutionError {
+    EthExecutionError::Database(take_database_error(evm, code))
 }
 
 #[expect(clippy::needless_option_as_deref, clippy::too_many_arguments)]
-pub(crate) fn pre_execution_system_call_state_changes<DB>(
+pub(crate) fn pre_execution_system_call_state_changes(
     evm: &mut Evm<BaseEvmTypes>,
     block_state: &mut BlockStateAccumulator,
     hashed_state: Option<&mut HashedPostStateSink<KeccakKeyHasher>>,
@@ -794,17 +783,14 @@ pub(crate) fn pre_execution_system_call_state_changes<DB>(
     spec_id: SpecId,
     block_number: u64,
     context: BlockExecutionContext<'_>,
-) -> Result<(), EthExecutionError<DB::Error>>
-where
-    DB: Database + 'static,
-{
+) -> Result<(), EthExecutionError> {
     let Some(system_calls) = context.system_calls else {
         return Ok(());
     };
     let mut hashed_state = hashed_state;
 
     if spec_id.enables(SpecId::PRAGUE) && block_number != 0 {
-        let _ = execute_system_call::<DB>(
+        let _ = execute_system_call(
             evm,
             block_state,
             hashed_state.as_deref_mut(),
@@ -827,7 +813,7 @@ where
                 ));
             }
         } else {
-            let _ = execute_system_call::<DB>(
+            let _ = execute_system_call(
                 evm,
                 block_state,
                 hashed_state.as_deref_mut(),
@@ -842,20 +828,17 @@ where
     Ok(())
 }
 
-pub(crate) fn block_requests_from_receipts<DB>(
+pub(crate) fn block_requests_from_receipts(
     spec_id: SpecId,
     context: BlockExecutionContext<'_>,
     receipts: &[Receipt],
-) -> Result<Requests, EthExecutionError<DB::Error>>
-where
-    DB: Database + 'static,
-{
+) -> Result<Requests, EthExecutionError> {
     let mut requests = Requests::default();
     if context.system_calls.is_none() || !spec_id.enables(SpecId::PRAGUE) {
         return Ok(requests)
     }
 
-    let deposit_requests = parse_deposit_requests_from_receipts::<DB>(
+    let deposit_requests = parse_deposit_requests_from_receipts(
         context.deposit_contract_address.unwrap_or(MAINNET_DEPOSIT_CONTRACT_ADDRESS),
         receipts,
     )?;
@@ -864,13 +847,10 @@ where
     Ok(requests)
 }
 
-fn parse_deposit_requests_from_receipts<DB>(
+fn parse_deposit_requests_from_receipts(
     deposit_contract_address: Address,
     receipts: &[Receipt],
-) -> Result<Vec<u8>, EthExecutionError<DB::Error>>
-where
-    DB: Database + 'static,
-{
+) -> Result<Vec<u8>, EthExecutionError> {
     let mut out = Vec::new();
     for receipt in receipts {
         for log in &receipt.logs {
@@ -895,7 +875,7 @@ where
 }
 
 #[expect(clippy::needless_option_as_deref, clippy::too_many_arguments)]
-pub(crate) fn post_execution_system_call_state_changes<DB>(
+pub(crate) fn post_execution_system_call_state_changes(
     evm: &mut Evm<BaseEvmTypes>,
     block_state: &mut BlockStateAccumulator,
     hashed_state: Option<&mut HashedPostStateSink<KeccakKeyHasher>>,
@@ -904,16 +884,13 @@ pub(crate) fn post_execution_system_call_state_changes<DB>(
     spec_id: SpecId,
     context: BlockExecutionContext<'_>,
     requests: &mut Requests,
-) -> Result<(), EthExecutionError<DB::Error>>
-where
-    DB: Database + 'static,
-{
+) -> Result<(), EthExecutionError> {
     if context.system_calls.is_none() || !spec_id.enables(SpecId::PRAGUE) {
         return Ok(());
     }
     let mut hashed_state = hashed_state;
 
-    let withdrawal_requests = execute_system_call::<DB>(
+    let withdrawal_requests = execute_system_call(
         evm,
         block_state,
         hashed_state.as_deref_mut(),
@@ -927,7 +904,7 @@ where
         withdrawal_requests.output.iter().copied(),
     );
 
-    let consolidation_requests = execute_system_call::<DB>(
+    let consolidation_requests = execute_system_call(
         evm,
         block_state,
         hashed_state.as_deref_mut(),
@@ -944,7 +921,7 @@ where
     Ok(())
 }
 
-fn execute_system_call<DB>(
+fn execute_system_call(
     evm: &mut Evm<BaseEvmTypes>,
     block_state: &mut BlockStateAccumulator,
     hashed_state: Option<&mut HashedPostStateSink<KeccakKeyHasher>>,
@@ -952,15 +929,12 @@ fn execute_system_call<DB>(
     on_hashed_state_update: &mut impl FnMut(HashedPostState),
     address: Address,
     data: Bytes,
-) -> Result<TxResult, EthExecutionError<DB::Error>>
-where
-    DB: Database + 'static,
-{
+) -> Result<TxResult, EthExecutionError> {
     let executed = evm.system_call(address, data);
 
     if let Some(code) = executed.result().db_error_code {
         let _ = executed.discard();
-        return Err(map_db_error_code::<DB>(evm, code))
+        return Err(map_db_error_code(evm, code))
     }
 
     if !executed.result().status {
@@ -1006,7 +980,7 @@ fn commit_state_changes<S: StateChangeSource>(
 }
 
 #[expect(clippy::too_many_arguments)]
-pub(crate) fn post_block_balance_state_changes<DB>(
+pub(crate) fn post_block_balance_state_changes(
     evm: &mut Evm<BaseEvmTypes>,
     block_state: &mut BlockStateAccumulator,
     hashed_state: Option<&mut HashedPostStateSink<KeccakKeyHasher>>,
@@ -1017,10 +991,7 @@ pub(crate) fn post_block_balance_state_changes<DB>(
     block_beneficiary: Address,
     ommers: Option<&[Header]>,
     withdrawals: Option<&[Withdrawal]>,
-) -> Result<(), EthExecutionError<DB::Error>>
-where
-    DB: Database + 'static,
-{
+) -> Result<(), EthExecutionError> {
     let mut balance_increments = AddressMap::<U256>::default();
 
     if let Some(base_block_reward) = base_block_reward(spec_id) {
@@ -1045,7 +1016,7 @@ where
 
     for (address, increment) in balance_increments {
         let original =
-            evm.read_account_info(&address).map_err(|code| map_db_error_code::<DB>(evm, code))?;
+            evm.read_account_info(&address).map_err(|code| map_db_error_code(evm, code))?;
         let mut current = original.clone().unwrap_or_else(empty_account);
 
         current.balance = current.balance.saturating_add(increment);
@@ -1238,7 +1209,7 @@ mod tests {
             BlockExecutionContext::default(),
             Box::new(Precompiles::base(SpecId::FRONTIER)),
         )
-        .execute_fallible_envelopes::<TestDatabase, TestTxError, Infallible, _, _, _, _>(
+        .execute_fallible_envelopes::<TestTxError, Infallible, _, _, _, _>(
             [Ok(recovered_tx_envelope(transaction)), Err(TestTxError)],
             ExecutionHooks::new(
                 |count| executed = count,
@@ -1276,7 +1247,7 @@ mod tests {
             BlockExecutionContext::default(),
             Box::new(Precompiles::base(SpecId::FRONTIER)),
         )
-        .execute_fallible_envelopes::<TestDatabase, Infallible, Infallible, _, _, _, _>(
+        .execute_fallible_envelopes::<Infallible, Infallible, _, _, _, _>(
             [Ok(recovered_tx_envelope(first)), Ok(recovered_tx_envelope(second))],
             ExecutionHooks::new(
                 |_| {},
@@ -1320,7 +1291,7 @@ mod tests {
             BlockExecutionContext::default(),
             Box::new(Precompiles::base(SpecId::FRONTIER)),
         )
-        .execute_fallible_envelopes::<TestDatabase, Infallible, Infallible, _, _, _, _>(
+        .execute_fallible_envelopes::<Infallible, Infallible, _, _, _, _>(
             [Ok(recovered_tx_envelope(transaction))],
             ExecutionHooks::new(
                 |_| {},
@@ -1355,7 +1326,7 @@ mod tests {
             BlockExecutionContext::default(),
             Box::new(Precompiles::base(SpecId::FRONTIER)),
         )
-        .execute_fallible_envelopes::<TestDatabase, Infallible, Infallible, _, _, _, _>(
+        .execute_fallible_envelopes::<Infallible, Infallible, _, _, _, _>(
             [Ok(recovered_tx_envelope(transaction))],
             ExecutionHooks::new(
                 |_| {},
@@ -1701,7 +1672,7 @@ mod tests {
         });
         let receipt = Receipt { tx_type: TxType::Legacy, logs: vec![log], ..Default::default() };
 
-        let requests = block_requests_from_receipts::<TestDatabase>(
+        let requests = block_requests_from_receipts(
             SpecId::PRAGUE,
             BlockExecutionContext {
                 chain_id: 1,
