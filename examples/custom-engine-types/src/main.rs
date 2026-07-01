@@ -338,7 +338,7 @@ where
         let BuildArguments {
             cached_reads,
             execution_cache,
-            trie_handle,
+            state_root_task,
             config,
             cancel,
             best_payload,
@@ -350,7 +350,7 @@ where
         self.inner.try_build(BuildArguments {
             cached_reads,
             execution_cache,
-            trie_handle,
+            state_root_task,
             config: PayloadConfig {
                 parent_header,
                 parent_block_info,

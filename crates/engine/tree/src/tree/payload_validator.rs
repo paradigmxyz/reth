@@ -98,7 +98,7 @@
 use crate::tree::{
     error::{InsertBlockError, InsertBlockErrorKind, InsertPayloadError},
     instrumented_state::{InstrumentedStateProvider, StateProviderMetrics, StateProviderStats},
-    multiproof::{StateRootHandle, StateRootMessage},
+    multiproof::{PayloadStateRootHandle, StateRootStreams},
     payload_processor::{PayloadProcessor, PayloadProcessorSpawnOptions},
     precompile_cache::{CachedPrecompile, CachedPrecompileMetrics, PrecompileCacheMap},
     types::{InsertPayloadResult, ValidationOutput},
@@ -120,7 +120,7 @@ pub use reth_trie_sparse::SparseTrieRetainedPaths;
 
 use crate::tree::{
     payload_processor::receipt_root_task::{IndexedReceipt, ReceiptRootTaskHandle},
-    state_root_strategy::{DefaultStateRootStrategy, StateRootStrategy},
+    state_root_strategy::{DefaultStateRootStrategy, StateRootJobContext, StateRootStrategy},
 };
 use alloy_consensus::constants::KECCAK_EMPTY;
 use alloy_primitives::Address;
@@ -598,22 +598,21 @@ where
 
         let parallel_bal_execution = ensure_ok!(self.bal_path_eligible(env.decoded_bal.as_deref()));
 
-        // Prepare the state-root task before execution so it can provide streaming hooks.
-        let pending_sparse_trie_prune =
-            if self.state_root_strategy.needs_sparse_trie_prune(&self.config) {
-                ctx.take_sparse_trie_prune()
-            } else {
-                None
-            };
-        let mut state_root_job = ensure_ok!(self.state_root_strategy.prepare(
-            &self.payload_processor,
-            &env,
-            provider_builder.clone(),
-            overlay_factory.clone(),
-            &self.config,
-            parallel_bal_execution,
-            pending_sparse_trie_prune,
-        ));
+        // Prepare the state-root job before execution so it can provide streaming hooks.
+        let pending_sparse_trie_prune = (!self.config.skip_state_root() &&
+            !self.config.state_root_fallback())
+        .then(|| ctx.take_sparse_trie_prune())
+        .flatten();
+        let mut state_root_job =
+            ensure_ok!(self.state_root_strategy.prepare(StateRootJobContext::new(
+                &self.payload_processor,
+                &env,
+                provider_builder.clone(),
+                overlay_factory.clone(),
+                &self.config,
+                parallel_bal_execution,
+                pending_sparse_trie_prune,
+            )));
         let state_root_job_name = state_root_job.name();
 
         debug!(
@@ -622,8 +621,8 @@ where
             "Prepared state root job"
         );
 
-        let to_sparse_trie_task = state_root_job.sparse_trie_updates_tx();
-        let execution_state_hook = state_root_job.execution_hook();
+        let state_root_streams = state_root_job.streams();
+        let execution_state_hook = state_root_job.take_execution_hook();
 
         // Spawn transaction conversion and prewarming.
         let processor_options = PayloadProcessorSpawnOptions::new(parallel_bal_execution, None);
@@ -631,7 +630,7 @@ where
             env.clone(),
             txs,
             provider_builder.clone(),
-            to_sparse_trie_task,
+            state_root_streams,
             processor_options,
         ));
 
@@ -1089,7 +1088,7 @@ where
     ///
     /// Inside, this:
     /// 1. Creates a shared parent-state cache handle for provider-backed workers.
-    /// 2. Relies on BAL prewarm to stream sparse-trie updates and optional state prefetches.
+    /// 2. Relies on BAL prewarm to stream state-root updates and optional state prefetches.
     /// 3. Spawns the receipt-root task.
     /// 4. Calls [`crate::tree::payload_processor::bal::execute_block`].
     /// 5. Returns the rebuilt BAL for post-execution consensus validation.
@@ -1327,20 +1326,20 @@ where
 
     /// Spawns transaction conversion and cache prewarming for payload validation.
     ///
-    /// State-root tasks are prepared before this method and can provide a sparse-trie update sink
-    /// that prewarm uses for BAL-derived or transaction-derived updates.
+    /// State-root tasks are prepared before this method and can provide streams that prewarm uses
+    /// for BAL-derived authoritative updates or transaction-derived hints.
     #[instrument(
         level = "debug",
         target = "engine::tree::payload_validator",
         skip_all,
-        fields(has_sparse_trie_sink = to_sparse_trie_task.is_some(), parallel_bal_execution = options.parallel_bal_execution)
+        fields(has_state_root_streams = !state_root_streams.is_empty(), parallel_bal_execution = options.parallel_bal_execution)
     )]
     fn spawn_payload_processor<T: ExecutableTxIterator<Evm>>(
         &mut self,
         env: ExecutionEnv<Evm>,
         txs: T,
         provider_builder: StateProviderBuilder<N, P>,
-        to_sparse_trie_task: Option<crossbeam_channel::Sender<StateRootMessage>>,
+        state_root_streams: StateRootStreams,
         options: PayloadProcessorSpawnOptions,
     ) -> Result<
         PayloadHandle<
@@ -1352,11 +1351,11 @@ where
     > {
         let PayloadProcessorSpawnOptions { parallel_bal_execution, .. } = options;
         let start = Instant::now();
-        let handle = self.payload_processor.spawn_with_state_root_sink(
+        let handle = self.payload_processor.spawn_with_state_root_streams(
             env,
             txs,
             provider_builder,
-            to_sparse_trie_task,
+            state_root_streams,
             parallel_bal_execution,
         );
 
@@ -1686,13 +1685,13 @@ pub trait EngineValidator<
     /// Returns [`SavedCache`] for the given block hash.
     fn cache_for(&self, _block_hash: B256) -> Option<SavedCache>;
 
-    /// Spawns a sparse trie pipeline and returns a handle for the payload builder.
-    fn sparse_trie_handle_for(
+    /// Spawns a state-root task and returns an opaque handle for the payload builder.
+    fn payload_state_root_handle_for(
         &self,
         parent_hash: B256,
         parent_state_root: B256,
         state: &EngineApiTreeState<N>,
-    ) -> Option<StateRootHandle>;
+    ) -> Option<PayloadStateRootHandle>;
 }
 
 impl<N, Types, P, Evm, V> EngineValidator<Types> for BasicEngineValidator<P, Evm, V>
@@ -1777,25 +1776,30 @@ where
         Some(self.payload_processor.cache_for(block_hash))
     }
 
-    fn sparse_trie_handle_for(
+    fn payload_state_root_handle_for(
         &self,
         parent_hash: B256,
         parent_state_root: B256,
         state: &EngineApiTreeState<N>,
-    ) -> Option<StateRootHandle> {
+    ) -> Option<PayloadStateRootHandle> {
         let overlay_factory = OverlayStateProviderFactory::new(
             self.provider.clone(),
             Self::overlay_builder_for_parent(parent_hash, state, self.changeset_cache.clone()),
         );
 
-        Some(self.payload_processor.spawn_state_root(
-            overlay_factory,
-            parent_state_root,
-            // Full proof workers — tx count unknown at FCU time (block built incrementally)
-            false,
-            &self.config,
-            None,
-        ))
+        Some(
+            self.payload_processor
+                .spawn_state_root(
+                    overlay_factory,
+                    parent_state_root,
+                    // Full proof workers — tx count unknown at FCU time (block built
+                    // incrementally)
+                    false,
+                    &self.config,
+                    None,
+                )
+                .into_payload_state_root_handle(),
+        )
     }
 }
 

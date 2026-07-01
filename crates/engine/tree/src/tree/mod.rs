@@ -3303,9 +3303,9 @@ where
         };
 
         let skip_state_root = self.config.skip_state_root();
-        let trie_handle =
+        let state_root_handle =
             if self.config.share_sparse_trie_with_payload_builder() && !skip_state_root {
-                self.payload_validator.sparse_trie_handle_for(
+                self.payload_validator.payload_state_root_handle_for(
                     state.head_block_hash,
                     head.state_root(),
                     &self.state,
@@ -3320,7 +3320,7 @@ where
             parent_hash: state.head_block_hash,
             attributes,
             cache,
-            trie_handle,
+            state_root_handle,
         });
 
         // Client software MUST respond to this method call in the following way:

@@ -4,8 +4,9 @@ use metrics::{Gauge, Histogram};
 use reth_metrics::Metrics;
 
 pub use reth_trie_parallel::state_root_task::{
-    evm_state_to_hashed_post_state, StateHookSender, StateRootComputeOutcome, StateRootHandle,
-    StateRootMessage,
+    evm_state_to_hashed_post_state, PayloadStateRootHandle, StateAccessHint, StateHookSender,
+    StateRootComputeOutcome, StateRootHandle, StateRootHashedUpdateStream, StateRootHintStream,
+    StateRootMessage, StateRootSink, StateRootStreams, StateRootUpdateHook,
 };
 
 /// The default max targets, for limiting the number of account and storage proof targets to be

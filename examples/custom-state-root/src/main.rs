@@ -20,12 +20,13 @@ use alloy_genesis::Genesis;
 use alloy_primitives::B256;
 use reth_chain_state::StateTrieOverlayManager;
 use reth_engine_tree::tree::{
-    payload_processor::{ExecutionEnv, PayloadProcessor},
+    payload_processor::multiproof::StateRootStreams,
     payload_validator::LazyHashedPostState,
     state_root_strategy::{
-        SparseTrieRetainedPaths, StateRootJob, StateRootJobOutcome, StateRootStrategy,
+        PreparedStateRootJob, StateRootJob, StateRootJobContext, StateRootJobOutcome,
+        StateRootStrategy,
     },
-    BasicEngineValidator, StateProviderBuilder, TreeConfig,
+    BasicEngineValidator, TreeConfig,
 };
 use reth_ethereum::{
     chainspec::ChainSpec,
@@ -45,7 +46,7 @@ use reth_ethereum::{
 };
 use reth_evm::ConfigureEvm;
 use reth_primitives_traits::{NodePrimitives, RecoveredBlock};
-use reth_provider::{providers::OverlayStateProviderFactory, BlockExecutionOutput, ProviderResult};
+use reth_provider::{BlockExecutionOutput, ProviderResult};
 use reth_trie::updates::TrieUpdates;
 
 #[derive(Debug)]
@@ -56,21 +57,11 @@ where
     N: NodePrimitives,
     Evm: ConfigureEvm<Primitives = N>,
 {
-    fn needs_sparse_trie_prune(&self, _config: &TreeConfig) -> bool {
-        false
-    }
-
     fn prepare(
         &self,
-        _payload_processor: &PayloadProcessor<Evm>,
-        _env: &ExecutionEnv<Evm>,
-        _provider_builder: StateProviderBuilder<N, P>,
-        _overlay_factory: OverlayStateProviderFactory<P, N>,
-        _config: &TreeConfig,
-        _parallel_bal_execution: bool,
-        _pending_sparse_trie_prune: Option<SparseTrieRetainedPaths>,
-    ) -> ProviderResult<Box<dyn StateRootJob<N>>> {
-        Ok(Box::new(ZeroStateRootJob))
+        _ctx: StateRootJobContext<'_, N, P, Evm>,
+    ) -> ProviderResult<PreparedStateRootJob<N>> {
+        Ok(PreparedStateRootJob::new(Box::new(ZeroStateRootJob), StateRootStreams::empty(), None))
     }
 }
 

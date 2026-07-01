@@ -321,11 +321,12 @@ where
         // `saved_cache` is absent below, so prewarm skips cache-backed state prefetching.
         // `disable_bal_batch_io` controls the prefetch half when a cache exists.
         let install_state_hook = !parallel_bal_execution;
+        let state_root_streams = state_root_handle.streams(install_state_hook);
         let prewarm_handle = self.spawn_caching_with(
             env,
             prewarm_rx,
             provider_builder,
-            Some(state_root_handle.updates_tx().clone()),
+            state_root_streams,
             parallel_bal_execution,
         );
 
@@ -358,7 +359,7 @@ where
             env,
             prewarm_rx,
             provider_builder,
-            None,
+            StateRootStreams::empty(),
             parallel_bal_execution,
         );
         PayloadHandle {
@@ -373,12 +374,12 @@ where
     /// Spawns transaction conversion and cache prewarming, optionally wiring prewarm output into
     /// an externally-owned state-root task.
     #[instrument(level = "debug", target = "engine::tree::payload_processor", skip_all)]
-    pub fn spawn_with_state_root_sink<P, I: ExecutableTxIterator<Evm>>(
+    pub fn spawn_with_state_root_streams<P, I: ExecutableTxIterator<Evm>>(
         &self,
         env: ExecutionEnv<Evm>,
         transactions: I,
         provider_builder: StateProviderBuilder<Evm::Primitives, P>,
-        to_sparse_trie_task: Option<CrossbeamSender<StateRootMessage>>,
+        state_root_streams: StateRootStreams,
         parallel_bal_execution: bool,
     ) -> IteratorPayloadHandle<Evm, I>
     where
@@ -390,7 +391,7 @@ where
             env,
             prewarm_rx,
             provider_builder,
-            to_sparse_trie_task,
+            state_root_streams,
             parallel_bal_execution,
         );
         PayloadHandle {
@@ -607,7 +608,7 @@ where
         env: ExecutionEnv<Evm>,
         transactions: mpsc::Receiver<(usize, impl ExecutableTxFor<Evm> + Clone + Send + 'static)>,
         provider_builder: StateProviderBuilder<Evm::Primitives, P>,
-        to_sparse_trie_task: Option<CrossbeamSender<StateRootMessage>>,
+        state_root_streams: StateRootStreams,
         parallel_bal_execution: bool,
     ) -> CacheTaskHandle<<Evm::Primitives as NodePrimitives>::Receipt>
     where
@@ -649,7 +650,7 @@ where
             self.executor.clone(),
             self.execution_cache.clone(),
             prewarm_ctx,
-            to_sparse_trie_task,
+            state_root_streams,
         );
         {
             let to_prewarm_task = to_prewarm_task.clone();
@@ -946,13 +947,6 @@ impl<Tx, Err, R: Send + Sync + 'static> PayloadHandle<Tx, Err, R> {
         self.install_state_hook
             .then(|| self.state_root_handle.as_ref().map(|handle| handle.state_hook()))
             .flatten()
-    }
-
-    /// Returns a clone of the sender that streams updates into the sparse-trie task. The BAL
-    /// execute path uses this to spawn its own sparse-trie streaming task fed from the
-    /// snapshot.
-    pub fn sparse_trie_updates_tx(&self) -> Option<CrossbeamSender<StateRootMessage>> {
-        self.state_root_handle.as_ref().map(|handle| handle.updates_tx().clone())
     }
 
     /// Returns a clone of the caches used by prewarming

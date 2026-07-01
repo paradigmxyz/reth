@@ -18,6 +18,20 @@
 //! Dropping a prepared job without calling `finish` aborts it. Implementations must treat
 //! channel disconnects from dropped hooks as cancellation and must not leak background work.
 //!
+//! # Stream delivery contract
+//!
+//! A prepared job exposes [`StateRootStreams`] views over its sink. Exactly one authoritative
+//! source fires per block, and the job does not control which one:
+//!
+//! - On the parallel BAL execution path, prewarm converts the block access list and delivers
+//!   pre-hashed updates through the hashed-update stream, terminated by `on_updates_finished`.
+//! - On the serial execution path, per-transaction `EvmState` updates arrive through the execution
+//!   hook, terminated when the hook is dropped after execution.
+//!
+//! Which path runs depends on runtime conditions (BAL present, caching and prewarming enabled),
+//! so a sink must handle both. Access hints from prewarming are best-effort: they may be
+//! missing, duplicated, or stale, and must not be treated as state updates.
+//!
 //! # Custom strategies
 //!
 //! Custom implementations can hold a [`DefaultStateRootStrategy`] and forward calls to it for
@@ -29,7 +43,7 @@
 //! Returning no changed paths opts the block out of sparse-trie cache pruning.
 
 use crate::tree::{
-    multiproof::{StateRootComputeOutcome, StateRootHandle, StateRootMessage},
+    multiproof::{StateRootComputeOutcome, StateRootHandle, StateRootStreams},
     payload_processor::PayloadProcessor,
     payload_validator::LazyHashedPostState,
     ExecutionEnv, StateProviderBuilder, TreeConfig,
@@ -51,6 +65,7 @@ use reth_trie::{
 use reth_trie_sparse::debug_recorder::TrieDebugRecorder;
 pub use reth_trie_sparse::SparseTrieRetainedPaths;
 use std::{
+    fmt,
     sync::{
         mpsc::{self, RecvTimeoutError},
         Arc,
@@ -65,43 +80,156 @@ where
     N: NodePrimitives,
     Evm: ConfigureEvm<Primitives = N>,
 {
-    /// Returns `true` when the strategy wants access to the retained sparse-trie prune handle.
-    fn needs_sparse_trie_prune(&self, _config: &TreeConfig) -> bool {
-        false
-    }
-
     /// Prepares a per-block state-root job before execution starts.
     fn prepare(
         &self,
-        payload_processor: &PayloadProcessor<Evm>,
-        env: &ExecutionEnv<Evm>,
+        ctx: StateRootJobContext<'_, N, P, Evm>,
+    ) -> ProviderResult<PreparedStateRootJob<N>>;
+}
+
+/// Data available while preparing one state-root job.
+pub struct StateRootJobContext<'a, N, P, Evm>
+where
+    N: NodePrimitives,
+    Evm: ConfigureEvm<Primitives = N>,
+{
+    payload_processor: &'a PayloadProcessor<Evm>,
+    env: &'a ExecutionEnv<Evm>,
+    provider_builder: StateProviderBuilder<N, P>,
+    overlay_factory: OverlayStateProviderFactory<P, N>,
+    config: &'a TreeConfig,
+    parallel_bal_execution: bool,
+    pending_sparse_trie_prune: Option<SparseTrieRetainedPaths>,
+}
+
+impl<N, P, Evm> fmt::Debug for StateRootJobContext<'_, N, P, Evm>
+where
+    N: NodePrimitives,
+    Evm: ConfigureEvm<Primitives = N>,
+{
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("StateRootJobContext")
+            .field("parallel_bal_execution", &self.parallel_bal_execution)
+            .field("has_pending_sparse_trie_prune", &self.pending_sparse_trie_prune.is_some())
+            .finish_non_exhaustive()
+    }
+}
+
+impl<'a, N, P, Evm> StateRootJobContext<'a, N, P, Evm>
+where
+    N: NodePrimitives,
+    Evm: ConfigureEvm<Primitives = N>,
+{
+    /// Creates a new state-root job context.
+    #[expect(clippy::too_many_arguments)]
+    pub(crate) const fn new(
+        payload_processor: &'a PayloadProcessor<Evm>,
+        env: &'a ExecutionEnv<Evm>,
         provider_builder: StateProviderBuilder<N, P>,
         overlay_factory: OverlayStateProviderFactory<P, N>,
-        config: &TreeConfig,
+        config: &'a TreeConfig,
         parallel_bal_execution: bool,
         pending_sparse_trie_prune: Option<SparseTrieRetainedPaths>,
-    ) -> ProviderResult<Box<dyn StateRootJob<N>>>;
+    ) -> Self {
+        Self {
+            payload_processor,
+            env,
+            provider_builder,
+            overlay_factory,
+            config,
+            parallel_bal_execution,
+            pending_sparse_trie_prune,
+        }
+    }
+
+    /// Returns the execution environment for the block.
+    pub const fn env(&self) -> &ExecutionEnv<Evm> {
+        self.env
+    }
+
+    /// Returns the task runtime used by payload processing.
+    pub const fn executor(&self) -> &reth_tasks::Runtime {
+        self.payload_processor.executor()
+    }
+
+    /// Returns true when validation will use the parallel BAL execution path.
+    pub const fn parallel_bal_execution(&self) -> bool {
+        self.parallel_bal_execution
+    }
+
+    /// Returns a clone of the state provider builder.
+    pub fn provider_builder(&self) -> StateProviderBuilder<N, P>
+    where
+        P: Clone,
+    {
+        self.provider_builder.clone()
+    }
+}
+
+/// Prepared per-block state-root work and its stream wiring.
+pub struct PreparedStateRootJob<N: NodePrimitives> {
+    job: Box<dyn StateRootJob<N>>,
+    streams: StateRootStreams,
+    hashed_state_rx: Option<mpsc::Receiver<HashedPostState>>,
+}
+
+impl<N: NodePrimitives> fmt::Debug for PreparedStateRootJob<N> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("PreparedStateRootJob")
+            .field("name", &self.job.name())
+            .field("streams", &self.streams)
+            .field("has_hashed_state_rx", &self.hashed_state_rx.is_some())
+            .finish()
+    }
+}
+
+impl<N: NodePrimitives> PreparedStateRootJob<N> {
+    /// Creates a prepared state-root job.
+    pub const fn new(
+        job: Box<dyn StateRootJob<N>>,
+        streams: StateRootStreams,
+        hashed_state_rx: Option<mpsc::Receiver<HashedPostState>>,
+    ) -> Self {
+        Self { job, streams, hashed_state_rx }
+    }
+
+    /// Returns the job name used in logs.
+    pub fn name(&self) -> &'static str {
+        self.job.name()
+    }
+
+    /// Returns stream views used by prewarm.
+    pub fn streams(&self) -> StateRootStreams {
+        self.streams.clone()
+    }
+
+    /// Takes the execution hook, if the job wants normal execution updates.
+    pub fn take_execution_hook(&mut self) -> Option<Box<dyn OnStateHook + 'static>> {
+        self.streams
+            .take_execution_stream()
+            .map(|stream| Box::new(stream.state_hook()) as Box<dyn OnStateHook + 'static>)
+    }
+
+    /// Takes the optional hashed-state receiver produced by the job.
+    pub fn take_hashed_state_rx(&mut self) -> Option<mpsc::Receiver<HashedPostState>> {
+        self.hashed_state_rx.take()
+    }
+
+    /// Completes the job after execution.
+    pub fn finish(
+        &mut self,
+        block: &RecoveredBlock<N::Block>,
+        output: Arc<BlockExecutionOutput<N::Receipt>>,
+        hashed_state: &LazyHashedPostState,
+    ) -> ProviderResult<StateRootJobOutcome> {
+        self.job.finish(block, output, hashed_state)
+    }
 }
 
 /// Per-block state-root job prepared before execution and finished after execution.
 pub trait StateRootJob<N: NodePrimitives>: Send {
     /// Human-readable strategy name used in logs.
     fn name(&self) -> &'static str;
-
-    /// Sender used by prewarm/BAL paths to stream sparse-trie updates, if this job needs them.
-    fn sparse_trie_updates_tx(&self) -> Option<crossbeam_channel::Sender<StateRootMessage>> {
-        None
-    }
-
-    /// Hook installed on the EVM database before execution, if this job streams normal state.
-    fn execution_hook(&self) -> Option<Box<dyn OnStateHook + 'static>> {
-        None
-    }
-
-    /// Optional hashed-state receiver produced by a streaming state-root job.
-    fn take_hashed_state_rx(&mut self) -> Option<mpsc::Receiver<HashedPostState>> {
-        None
-    }
 
     /// Completes the job after execution.
     fn finish(
@@ -162,47 +290,60 @@ where
         + 'static,
     Evm: ConfigureEvm<Primitives = N> + 'static,
 {
-    fn needs_sparse_trie_prune(&self, config: &TreeConfig) -> bool {
-        !config.skip_state_root() && !config.state_root_fallback()
-    }
-
     fn prepare(
         &self,
-        payload_processor: &PayloadProcessor<Evm>,
-        env: &ExecutionEnv<Evm>,
-        provider_builder: StateProviderBuilder<N, P>,
-        overlay_factory: OverlayStateProviderFactory<P, N>,
-        config: &TreeConfig,
-        parallel_bal_execution: bool,
-        pending_sparse_trie_prune: Option<SparseTrieRetainedPaths>,
-    ) -> ProviderResult<Box<dyn StateRootJob<N>>> {
+        ctx: StateRootJobContext<'_, N, P, Evm>,
+    ) -> ProviderResult<PreparedStateRootJob<N>> {
+        let StateRootJobContext {
+            payload_processor,
+            env,
+            provider_builder,
+            overlay_factory,
+            config,
+            parallel_bal_execution,
+            pending_sparse_trie_prune,
+        } = ctx;
+
         if config.skip_state_root() {
-            return Ok(Box::new(SkippedStateRootJob {}))
+            return Ok(PreparedStateRootJob::new(
+                Box::new(SkippedStateRootJob {}),
+                StateRootStreams::empty(),
+                None,
+            ))
         }
 
         if config.state_root_fallback() {
-            return Ok(Box::new(SynchronousStateRootJob { provider_builder }))
+            return Ok(PreparedStateRootJob::new(
+                Box::new(SynchronousStateRootJob { provider_builder }),
+                StateRootStreams::empty(),
+                None,
+            ))
         }
 
         let halve_workers =
             env.transaction_count <= PayloadProcessor::<Evm>::SMALL_BLOCK_PROOF_WORKER_TX_THRESHOLD;
-        let handle = payload_processor.spawn_state_root(
+        let mut handle = payload_processor.spawn_state_root(
             overlay_factory.clone(),
             env.parent_state_root,
             halve_workers,
             config,
             pending_sparse_trie_prune,
         );
+        let streams = handle.streams(!parallel_bal_execution);
+        let hashed_state_rx = Some(handle.take_hashed_state_rx());
 
-        Ok(Box::new(SparseTrieStateRootJob {
-            handle,
-            provider_builder,
-            overlay_factory,
-            executor: payload_processor.executor().clone(),
-            timeout: config.state_root_task_timeout(),
-            compare_trie_updates: config.always_compare_trie_updates(),
-            install_execution_hook: !parallel_bal_execution,
-        }))
+        Ok(PreparedStateRootJob::new(
+            Box::new(SparseTrieStateRootJob {
+                handle,
+                provider_builder,
+                overlay_factory,
+                executor: payload_processor.executor().clone(),
+                timeout: config.state_root_task_timeout(),
+                compare_trie_updates: config.always_compare_trie_updates(),
+            }),
+            streams,
+            hashed_state_rx,
+        ))
     }
 }
 
@@ -259,7 +400,6 @@ struct SparseTrieStateRootJob<N: NodePrimitives, P> {
     executor: reth_tasks::Runtime,
     timeout: Option<Duration>,
     compare_trie_updates: bool,
-    install_execution_hook: bool,
 }
 
 impl<N, P> SparseTrieStateRootJob<N, P>
@@ -339,19 +479,6 @@ where
 {
     fn name(&self) -> &'static str {
         "sparse-trie"
-    }
-
-    fn sparse_trie_updates_tx(&self) -> Option<crossbeam_channel::Sender<StateRootMessage>> {
-        Some(self.handle.updates_tx().clone())
-    }
-
-    fn execution_hook(&self) -> Option<Box<dyn OnStateHook + 'static>> {
-        self.install_execution_hook
-            .then(|| Box::new(self.handle.state_hook()) as Box<dyn OnStateHook + 'static>)
-    }
-
-    fn take_hashed_state_rx(&mut self) -> Option<mpsc::Receiver<HashedPostState>> {
-        Some(self.handle.take_hashed_state_rx())
     }
 
     fn finish(
