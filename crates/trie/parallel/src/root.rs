@@ -92,44 +92,69 @@ where
         );
 
         // Pre-calculate storage roots in parallel for accounts which were changed.
-        tracker.set_precomputed_storage_roots(storage_root_targets.len() as u64);
-        debug!(target: "trie::parallel_state_root", len = storage_root_targets.len(), "pre-calculating storage roots");
-        let mut storage_roots = HashMap::with_capacity(storage_root_targets.len());
+        let storage_root_target_count = storage_root_targets.len();
+        tracker.set_precomputed_storage_roots(storage_root_target_count as u64);
+        debug!(target: "trie::parallel_state_root", len = storage_root_target_count, "pre-calculating storage roots");
+        let mut storage_roots = HashMap::with_capacity(storage_root_target_count);
+        let mut inline_storage_root = None;
 
-        let handle = self.runtime.handle().clone();
-
-        for (hashed_address, prefix_set) in
-            storage_root_targets.into_iter().sorted_unstable_by_key(|(address, _)| *address)
-        {
-            let factory = self.factory.clone();
-            #[cfg(feature = "metrics")]
-            let metrics = self.metrics.storage_trie.clone();
-
-            let (tx, rx) = mpsc::sync_channel(1);
-
-            // Spawn a blocking task to calculate account's storage root from database I/O
-            drop(handle.spawn_blocking(move || {
-                let result = (|| -> Result<_, ParallelStateRootError> {
-                    let provider = factory.database_provider_ro()?;
-                    Ok(StorageRoot::new_hashed(
+        let provider = match storage_root_target_count {
+            0 => self.factory.database_provider_ro()?,
+            1 => {
+                let (hashed_address, prefix_set) =
+                    storage_root_targets.into_iter().next().expect("single storage root target");
+                let provider = self.factory.database_provider_ro()?;
+                inline_storage_root = Some((
+                    hashed_address,
+                    StorageRoot::new_hashed(
                         &provider,
                         &provider,
                         hashed_address,
                         prefix_set,
                         #[cfg(feature = "metrics")]
-                        metrics,
+                        self.metrics.storage_trie.clone(),
                     )
-                    .calculate(retain_updates)?)
-                })();
-                let _ = tx.send(result);
-            }));
-            storage_roots.insert(hashed_address, rx);
-        }
+                    .calculate(retain_updates)?,
+                ));
+                provider
+            }
+            _ => {
+                let handle = self.runtime.handle().clone();
+
+                for (hashed_address, prefix_set) in
+                    storage_root_targets.into_iter().sorted_unstable_by_key(|(address, _)| *address)
+                {
+                    let factory = self.factory.clone();
+                    #[cfg(feature = "metrics")]
+                    let metrics = self.metrics.storage_trie.clone();
+
+                    let (tx, rx) = mpsc::sync_channel(1);
+
+                    // Spawn a blocking task to calculate account's storage root from database I/O
+                    drop(handle.spawn_blocking(move || {
+                        let result = (|| -> Result<_, ParallelStateRootError> {
+                            let provider = factory.database_provider_ro()?;
+                            Ok(StorageRoot::new_hashed(
+                                &provider,
+                                &provider,
+                                hashed_address,
+                                prefix_set,
+                                #[cfg(feature = "metrics")]
+                                metrics,
+                            )
+                            .calculate(retain_updates)?)
+                        })();
+                        let _ = tx.send(result);
+                    }));
+                    storage_roots.insert(hashed_address, rx);
+                }
+
+                self.factory.database_provider_ro()?
+            }
+        };
 
         trace!(target: "trie::parallel_state_root", "calculating state root");
         let mut trie_updates = TrieUpdates::default();
-
-        let provider = self.factory.database_provider_ro()?;
 
         let walker = TrieWalker::<_>::state_trie(
             provider.account_trie_cursor().map_err(ProviderError::Database)?,
@@ -149,27 +174,34 @@ where
                     hash_builder.add_branch(node.key, node.value, node.children_are_in_trie);
                 }
                 TrieElement::Leaf(hashed_address, account) => {
-                    let storage_root_result = match storage_roots.remove(&hashed_address) {
-                        Some(rx) => rx.recv().map_err(|_| {
-                            ParallelStateRootError::StorageRoot(StorageRootError::Database(
-                                DatabaseError::Other(format!(
-                                    "channel closed for {hashed_address}"
-                                )),
-                            ))
-                        })??,
-                        // Since we do not store all intermediate nodes in the database, there might
-                        // be a possibility of re-adding a non-modified leaf to the hash builder.
-                        None => {
-                            tracker.inc_missed_leaves();
-                            StorageRoot::new_hashed(
-                                &provider,
-                                &provider,
-                                hashed_address,
-                                Default::default(),
-                                #[cfg(feature = "metrics")]
-                                self.metrics.storage_trie.clone(),
-                            )
-                            .calculate(retain_updates)?
+                    let storage_root_result = if matches!(
+                        inline_storage_root.as_ref(),
+                        Some((inline_address, _)) if *inline_address == hashed_address
+                    ) {
+                        inline_storage_root.take().expect("checked inline storage root").1
+                    } else {
+                        match storage_roots.remove(&hashed_address) {
+                            Some(rx) => rx.recv().map_err(|_| {
+                                ParallelStateRootError::StorageRoot(StorageRootError::Database(
+                                    DatabaseError::Other(format!(
+                                        "channel closed for {hashed_address}"
+                                    )),
+                                ))
+                            })??,
+                            // Since we do not store all intermediate nodes in the database, there might
+                            // be a possibility of re-adding a non-modified leaf to the hash builder.
+                            None => {
+                                tracker.inc_missed_leaves();
+                                StorageRoot::new_hashed(
+                                    &provider,
+                                    &provider,
+                                    hashed_address,
+                                    Default::default(),
+                                    #[cfg(feature = "metrics")]
+                                    self.metrics.storage_trie.clone(),
+                                )
+                                .calculate(retain_updates)?
+                            }
                         }
                     };
 
