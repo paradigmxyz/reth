@@ -11,11 +11,26 @@
 
 extern crate alloc;
 
+pub use evm2::{
+    bytecode::Bytecode as ExecutableBytecode,
+    evm::{
+        AccountChangeRef as ExecutionAccountChangeRef, AccountInfo as ExecutionAccountInfo,
+        AccountInfoRef as ExecutionAccountInfoRef,
+        BlockStateAccumulator as ExecutionStateAccumulator,
+        BlockStateAccumulator as ExecutionState, StateChangeSink as ExecutionStateChangeSink,
+        StateChangeSource as ExecutionStateChangeSource, StorageChange as ExecutionStorageChange,
+    },
+};
+pub use reth_trie_common::HashedPostState;
+
 mod chain;
 pub use chain::*;
 
 mod execute;
 pub use execute::*;
+
+mod state;
+pub use state::*;
 
 mod execution_outcome;
 pub use execution_outcome::*;

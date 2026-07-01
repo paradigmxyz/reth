@@ -1,22 +1,25 @@
 //! Execution cache implementation for block processing.
 use alloy_primitives::{
-    map::{DefaultHashBuilder, FbBuildHasher},
-    Address, StorageKey, StorageValue, B256,
+    map::{AddressSet, DefaultHashBuilder, FbBuildHasher},
+    Address, StorageKey, StorageValue, B256, KECCAK256_EMPTY,
 };
 use fixed_cache::{AnyRef, CacheConfig, Stats, StatsHandler};
 use metrics::{Counter, Gauge, Histogram};
 use parking_lot::Once;
 use reth_errors::ProviderResult;
+use reth_execution_types::{
+    ExecutableBytecode, ExecutionAccountChangeRef, ExecutionStateChangeSink,
+    ExecutionStateChangeSource, ExecutionStorageChange,
+};
 use reth_metrics::Metrics;
 use reth_primitives_traits::{Account, Bytecode};
 use reth_provider::{
     AccountReader, BlockHashReader, BytecodeReader, HashedPostStateProvider, StateProofProvider,
     StateProvider, StateRootProvider, StorageRootProvider,
 };
-use reth_revm::db::BundleState;
 use reth_trie::{
-    updates::TrieUpdates, AccountProof, HashedPostState, HashedStorage, MultiProof,
-    MultiProofTargets, StorageMultiProof, StorageProof, TrieInput,
+    updates::TrieUpdates, AccountProof, HashedPostState, HashedPostStateSorted, HashedStorage,
+    MultiProof, MultiProofTargets, StorageMultiProof, StorageProof, TrieInput,
 };
 use std::{
     cell::Cell,
@@ -90,7 +93,7 @@ type FixedCache<K, V, H = DefaultHashBuilder> = fixed_cache::Cache<K, V, H, Epoc
 /// prewarmers and speculative execution workers that intentionally seed the cache for other
 /// readers. Canonical execution usually leaves this disabled because the EVM database `State`
 /// already caches reads during the block, and the shared cache is updated after the block from the
-/// final [`BundleState`]. See also [`ExecutionCache::insert_state`].
+/// final execution state. See also [`ExecutionCache::insert_state_source`].
 ///
 /// Normal cache hit/miss metrics are recorded when [`CachedStateMetrics`] is provided. Slow-block
 /// [`CacheStats`] are controlled separately by [`Self::new_with_mode`].
@@ -728,6 +731,10 @@ impl<S: StateRootProvider> StateRootProvider for CachedStateProvider<S> {
         self.state_provider.state_root(hashed_state)
     }
 
+    fn state_root_sorted(&self, hashed_state: HashedPostStateSorted) -> ProviderResult<B256> {
+        self.state_provider.state_root_sorted(hashed_state)
+    }
+
     fn state_root_from_nodes(&self, input: TrieInput) -> ProviderResult<B256> {
         self.state_provider.state_root_from_nodes(input)
     }
@@ -737,6 +744,13 @@ impl<S: StateRootProvider> StateRootProvider for CachedStateProvider<S> {
         hashed_state: HashedPostState,
     ) -> ProviderResult<(B256, TrieUpdates)> {
         self.state_provider.state_root_with_updates(hashed_state)
+    }
+
+    fn state_root_sorted_with_updates(
+        &self,
+        hashed_state: HashedPostStateSorted,
+    ) -> ProviderResult<(B256, TrieUpdates)> {
+        self.state_provider.state_root_sorted_with_updates(hashed_state)
     }
 
     fn state_root_from_nodes_with_updates(
@@ -817,11 +831,7 @@ impl<S: BlockHashReader> BlockHashReader for CachedStateProvider<S> {
     }
 }
 
-impl<S: HashedPostStateProvider> HashedPostStateProvider for CachedStateProvider<S> {
-    fn hashed_post_state(&self, bundle_state: &reth_revm::db::BundleState) -> HashedPostState {
-        self.state_provider.hashed_post_state(bundle_state)
-    }
-}
+impl<S: HashedPostStateProvider> HashedPostStateProvider for CachedStateProvider<S> {}
 
 /// Execution cache used during block processing.
 ///
@@ -988,97 +998,20 @@ impl ExecutionCache {
         self.0.account_cache.insert(address, account);
     }
 
-    /// Inserts the post-execution state changes into the cache.
-    ///
-    /// This method is called after transaction execution to update the cache with
-    /// the touched and modified state. The insertion order is critical:
-    ///
-    /// 1. Bytecodes: Insert contract code first
-    /// 2. Storage slots: Update storage values for each account
-    /// 3. Accounts: Update account info (nonce, balance, code hash)
-    ///
-    /// ## Why This Order Matters
-    ///
-    /// Account information references bytecode via code hash. If we update accounts
-    /// before bytecode, we might create cache entries pointing to non-existent code.
-    /// The current order ensures cache consistency.
-    ///
-    /// ## Error Handling
-    ///
-    /// Returns an error if the state updates are inconsistent and should be discarded.
+    /// Inserts post-execution state changes into the cache.
     #[instrument(level = "debug", target = "engine::caching", skip_all)]
     #[expect(clippy::result_unit_err)]
-    pub fn insert_state(&self, state_updates: &BundleState) -> Result<(), ()> {
-        let _enter =
-            debug_span!(target: "engine::tree", "contracts", len = state_updates.contracts.len())
-                .entered();
-        // Insert bytecodes
-        for (code_hash, bytecode) in &state_updates.contracts {
-            self.insert_code(*code_hash, Some(Bytecode(bytecode.clone())));
-        }
-        drop(_enter);
-
-        let _enter = debug_span!(
-            target: "engine::tree",
-            "accounts",
-            accounts = state_updates.state.len(),
-            storages =
-                state_updates.state.values().map(|account| account.storage.len()).sum::<usize>()
-        )
-        .entered();
-        for (addr, account) in &state_updates.state {
-            // If the account was not modified, as in not changed and not destroyed, then we have
-            // nothing to do w.r.t. this particular account and can move on
-            if account.status.is_not_modified() {
-                continue
-            }
-
-            // If the original account had code (was a contract), we must clear the entire cache
-            // because we can't efficiently invalidate all storage slots for a single address.
-            // This should only happen on pre-Dencun networks.
-            //
-            // If the original account had no code (was an EOA or a not yet deployed contract), we
-            // just remove the account from cache - no storage exists for it.
-            if account.was_destroyed() {
-                let had_code =
-                    account.original_info.as_ref().is_some_and(|info| !info.is_empty_code_hash());
-                if had_code {
-                    self.0.selfdestruct_encountered.call_once(|| {
-                        warn!(
-                            target: "engine::caching",
-                            address = ?addr,
-                            info = ?account.info,
-                            original_info = ?account.original_info,
-                            "Encountered an inter-transaction SELFDESTRUCT that reset the storage cache. Are you running a pre-Dencun network?"
-                        );
-                    });
-                    self.clear();
-                    return Ok(())
-                }
-
-                self.0.account_cache.remove(addr);
-                continue;
-            }
-
-            // If we have an account that was modified, but it has a `None` account info, some wild
-            // error has occurred because this state should be unrepresentable. An account with
-            // `None` current info, should be destroyed.
-            let Some(ref account_info) = account.info else {
-                trace!(target: "engine::caching", ?account, "Account with None account info found in state updates");
-                return Err(())
-            };
-
-            // Now we iterate over all storage and make updates to the cached storage values
-            for (key, slot) in &account.storage {
-                self.insert_storage(*addr, (*key).into(), Some(slot.present_value));
-            }
-
-            // Insert will update if present, so we just use the new account info as the new value
-            // for the account cache
-            self.insert_account(*addr, Some(Account::from(account_info)));
-        }
-
-        Ok(())
+    pub fn insert_state_source<S>(&self, state_updates: &S) -> Result<(), ()>
+    where
+        S: ExecutionStateChangeSource,
+    {
+        let _enter = debug_span!(target: "engine::tree", "state_source").entered();
+        let mut sink = ExecutionCacheInsertSink {
+            cache: self,
+            storage_wipes: AddressSet::default(),
+            cleared: false,
+        };
+        state_updates.visit(&mut sink)
     }
 
     /// Clears storage and account caches, resetting them to empty state.
@@ -1110,6 +1043,93 @@ impl ExecutionCache {
         metrics.account_cache_capacity.set(self.0.account_stats.capacity() as f64);
         metrics.account_cache_collisions.set(self.0.account_stats.collisions() as f64);
         self.0.account_stats.reset_stats();
+    }
+}
+
+struct ExecutionCacheInsertSink<'a> {
+    cache: &'a ExecutionCache,
+    storage_wipes: AddressSet,
+    cleared: bool,
+}
+
+impl ExecutionStateChangeSink for ExecutionCacheInsertSink<'_> {
+    type Error = ();
+
+    fn bytecode(
+        &mut self,
+        code_hash: B256,
+        bytecode: &ExecutableBytecode,
+    ) -> Result<(), Self::Error> {
+        if self.cleared {
+            return Ok(())
+        }
+
+        self.cache.insert_code(code_hash, Some(bytecode.clone().into()));
+        Ok(())
+    }
+
+    fn storage_wipe(&mut self, address: Address) -> Result<(), Self::Error> {
+        if self.cleared {
+            return Ok(())
+        }
+
+        self.storage_wipes.insert(address);
+        Ok(())
+    }
+
+    fn storage(&mut self, change: ExecutionStorageChange) -> Result<(), Self::Error> {
+        if self.cleared {
+            return Ok(())
+        }
+
+        self.cache.insert_storage(change.address, change.key.into(), Some(change.current));
+        Ok(())
+    }
+
+    fn account(&mut self, account: ExecutionAccountChangeRef<'_>) -> Result<(), Self::Error> {
+        if self.cleared {
+            return Ok(())
+        }
+
+        if self.storage_wipes.contains(&account.address) || account.current.is_none() {
+            let had_code = account
+                .original
+                .is_some_and(|info| !info.code_hash.is_zero() && info.code_hash != KECCAK256_EMPTY);
+            if had_code {
+                self.cache.0.selfdestruct_encountered.call_once(|| {
+                    warn!(
+                        target: "engine::caching",
+                        address = ?account.address,
+                        info = ?account.current,
+                        original_info = ?account.original,
+                        "Encountered an inter-transaction SELFDESTRUCT that reset the storage cache. Are you running a pre-Dencun network?"
+                    );
+                });
+                self.cache.clear();
+                self.cleared = true;
+                return Ok(())
+            }
+
+            self.cache.0.account_cache.remove(&account.address);
+            return Ok(())
+        }
+
+        let Some(account_info) = account.current else {
+            trace!(target: "engine::caching", ?account, "Account with None account info found in state updates");
+            return Err(())
+        };
+
+        self.cache.insert_account(
+            account.address,
+            Some(Account {
+                nonce: account_info.nonce,
+                balance: account_info.balance,
+                bytecode_hash: (!account_info.code_hash.is_zero() &&
+                    account_info.code_hash != KECCAK256_EMPTY)
+                    .then_some(account_info.code_hash),
+            }),
+        );
+        Ok(())
     }
 }
 
@@ -1176,10 +1196,32 @@ impl SavedCache {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy_primitives::{map::HashMap, U256};
+    use alloy_primitives::U256;
+    use evm2::evm::{AccountChangeRef, AccountInfo, AccountInfoRef, StateChangeSink};
+    use reth_execution_types::{ExecutionState, ExecutionStateAccumulator};
     use reth_provider::test_utils::{ExtendedAccount, MockEthProvider};
-    use reth_revm::db::{AccountStatus, BundleAccount};
-    use revm::state::AccountInfo;
+
+    fn destroyed_account_state(address: Address, original: Option<AccountInfo>) -> ExecutionState {
+        let mut accumulator = ExecutionStateAccumulator::new();
+        accumulator
+            .account(AccountChangeRef {
+                address,
+                original: original.as_ref().map(account_info_ref),
+                current: None,
+            })
+            .unwrap();
+        accumulator.storage_wipe(address).unwrap();
+        accumulator
+    }
+
+    fn account_info_ref(info: &AccountInfo) -> AccountInfoRef<'_> {
+        AccountInfoRef {
+            balance: info.balance,
+            nonce: info.nonce,
+            code_hash: info.code_hash,
+            code: info.code.as_ref(),
+        }
+    }
 
     #[test]
     fn test_empty_storage_cached_state_provider() {
@@ -1286,7 +1328,7 @@ mod tests {
     }
 
     #[test]
-    fn test_insert_state_destroyed_account_with_code_clears_cache() {
+    fn test_insert_state_source_destroyed_account_with_code_clears_cache() {
         let caches = ExecutionCache::new(1000);
 
         // Pre-populate caches with some data
@@ -1302,31 +1344,20 @@ mod tests {
         assert!(caches.0.account_cache.get(&addr2).is_some());
         assert!(caches.0.storage_cache.get(&(addr1, storage_key)).is_some());
 
-        let bundle = BundleState {
-            // BundleState with a destroyed contract (had code)
-            state: HashMap::from_iter([(
-                Address::random(),
-                BundleAccount::new(
-                    Some(AccountInfo {
-                        balance: U256::ZERO,
-                        nonce: 1,
-                        code_hash: B256::random(), // Non-empty code hash
-                        code: None,
-                        account_id: None,
-                    }),
-                    None, // Destroyed, so no current info
-                    Default::default(),
-                    AccountStatus::Destroyed,
-                ),
-            )]),
-            contracts: Default::default(),
-            reverts: Default::default(),
-            state_size: 0,
-            reverts_size: 0,
-        };
+        let destroyed_addr = Address::random();
+        let state = destroyed_account_state(
+            destroyed_addr,
+            Some(AccountInfo {
+                balance: U256::ZERO,
+                nonce: 1,
+                code_hash: B256::random(), // Non-empty code hash
+                code: None,
+                _non_exhaustive: (),
+            }),
+        );
 
         // Insert state should clear all caches because a contract was destroyed
-        let result = caches.insert_state(&bundle);
+        let result = caches.insert_state_source(&state);
         assert!(result.is_ok());
 
         // Verify all caches were cleared
@@ -1336,7 +1367,7 @@ mod tests {
     }
 
     #[test]
-    fn test_insert_state_destroyed_account_without_code_removes_only_account() {
+    fn test_insert_state_source_destroyed_account_without_code_removes_only_account() {
         let caches = ExecutionCache::new(1000);
 
         // Pre-populate caches with some data
@@ -1347,31 +1378,19 @@ mod tests {
         caches.insert_account(addr2, Some(Account::default()));
         caches.insert_storage(addr1, storage_key, Some(U256::from(42)));
 
-        let bundle = BundleState {
-            // BundleState with a destroyed EOA (no code)
-            state: HashMap::from_iter([(
-                addr1,
-                BundleAccount::new(
-                    Some(AccountInfo {
-                        balance: U256::from(100),
-                        nonce: 1,
-                        code_hash: alloy_primitives::KECCAK256_EMPTY, // Empty code hash = EOA
-                        code: None,
-                        account_id: None,
-                    }),
-                    None, // Destroyed
-                    Default::default(),
-                    AccountStatus::Destroyed,
-                ),
-            )]),
-            contracts: Default::default(),
-            reverts: Default::default(),
-            state_size: 0,
-            reverts_size: 0,
-        };
+        let state = destroyed_account_state(
+            addr1,
+            Some(AccountInfo {
+                balance: U256::from(100),
+                nonce: 1,
+                code_hash: alloy_primitives::KECCAK256_EMPTY, // Empty code hash = EOA
+                code: None,
+                _non_exhaustive: (),
+            }),
+        );
 
         // Insert state should only remove the destroyed account
-        assert!(caches.insert_state(&bundle).is_ok());
+        assert!(caches.insert_state_source(&state).is_ok());
 
         // Verify only addr1 was removed, other data is still present
         assert!(caches.0.account_cache.get(&addr1).is_none());
@@ -1380,63 +1399,14 @@ mod tests {
     }
 
     #[test]
-    fn test_insert_state_destroyed_account_no_original_info_removes_only_account() {
-        let caches = ExecutionCache::new(1000);
-
-        // Pre-populate caches
-        let addr1 = Address::random();
-        let addr2 = Address::random();
-        caches.insert_account(addr1, Some(Account::default()));
-        caches.insert_account(addr2, Some(Account::default()));
-
-        let bundle = BundleState {
-            // BundleState with a destroyed account (has no original info)
-            state: HashMap::from_iter([(
-                addr1,
-                BundleAccount::new(
-                    None, // No original info
-                    None, // Destroyed
-                    Default::default(),
-                    AccountStatus::Destroyed,
-                ),
-            )]),
-            contracts: Default::default(),
-            reverts: Default::default(),
-            state_size: 0,
-            reverts_size: 0,
-        };
-
-        // Insert state should only remove the destroyed account (no code = no full clear)
-        assert!(caches.insert_state(&bundle).is_ok());
-
-        // Verify only addr1 was removed
-        assert!(caches.0.account_cache.get(&addr1).is_none());
-        assert!(caches.0.account_cache.get(&addr2).is_some());
-    }
-
-    #[test]
-    fn test_insert_state_destroyed_uncached_account_keeps_size_zero() {
+    fn test_insert_state_source_destroyed_uncached_account_keeps_size_zero() {
         let caches = ExecutionCache::new(1000);
         assert_eq!(caches.0.account_stats.size(), 0);
 
         let addr = Address::random();
-        let bundle = BundleState {
-            state: HashMap::from_iter([(
-                addr,
-                BundleAccount::new(
-                    None, // No original info
-                    None, // Destroyed
-                    Default::default(),
-                    AccountStatus::Destroyed,
-                ),
-            )]),
-            contracts: Default::default(),
-            reverts: Default::default(),
-            state_size: 0,
-            reverts_size: 0,
-        };
+        let state = destroyed_account_state(addr, None);
 
-        assert!(caches.insert_state(&bundle).is_ok());
+        assert!(caches.insert_state_source(&state).is_ok());
         assert_eq!(caches.0.account_stats.size(), 0);
         assert!(caches.0.account_cache.get(&addr).is_none());
     }

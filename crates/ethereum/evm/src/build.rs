@@ -4,19 +4,28 @@ use alloy_consensus::{
     Block, BlockBody, BlockHeader, Header, TxReceipt, EMPTY_OMMER_ROOT_HASH,
 };
 use alloy_eips::{eip4895::Withdrawals, merge::BEACON_NONCE};
-use alloy_evm::{block::BlockExecutorFactory, eth::EthBlockExecutionCtx};
 use alloy_primitives::{Bloom, B256};
 use reth_chainspec::{EthChainSpec, EthereumHardforks};
-use reth_evm::execute::{BlockAssembler, BlockAssemblerInput, BlockExecutionError};
+use reth_ethereum_primitives::TransactionSigned;
+#[cfg(feature = "std")]
+use reth_evm::execute::BlockAssembler;
+use reth_evm::execute::{BlockAssemblerInput, BlockExecutionError, BlockExecutorFactory};
 use reth_execution_types::BlockExecutionResult;
-use reth_primitives_traits::{logs_bloom as calculate_logs_bloom, Receipt, SignedTransaction};
-use revm::context::Block as _;
+use reth_primitives_traits::logs_bloom as calculate_logs_bloom;
+
+use crate::{EthBlockExecutionCtx, EthBlockExecutorFactory, EthEvmEnv};
 
 /// Block builder for Ethereum.
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct EthBlockAssembler<ChainSpec = reth_chainspec::ChainSpec> {
     /// The chainspec.
     pub chain_spec: Arc<ChainSpec>,
+}
+
+impl<ChainSpec> Clone for EthBlockAssembler<ChainSpec> {
+    fn clone(&self) -> Self {
+        Self { chain_spec: self.chain_spec.clone() }
+    }
 }
 
 impl<ChainSpec> EthBlockAssembler<ChainSpec> {
@@ -35,13 +44,13 @@ impl<ChainSpec: EthChainSpec + EthereumHardforks> EthBlockAssembler<ChainSpec> {
         transactions_root: Option<B256>,
         receipts_root: Option<B256>,
         logs_bloom: Option<Bloom>,
-    ) -> Result<Block<F::Transaction>, BlockExecutionError>
+    ) -> Result<Block<TransactionSigned>, BlockExecutionError>
     where
         F: for<'a> BlockExecutorFactory<
-            ExecutionCtx<'a> = EthBlockExecutionCtx<'a>,
-            Transaction: SignedTransaction,
-            Receipt: Receipt,
-        >,
+                Primitives = crate::EthPrimitives,
+                EvmEnv = EthEvmEnv,
+                ExecutionCtx<'a> = EthBlockExecutionCtx<'a>,
+            > + 'static,
     {
         let BlockAssemblerInput {
             evm_env,
@@ -53,9 +62,9 @@ impl<ChainSpec: EthChainSpec + EthereumHardforks> EthBlockAssembler<ChainSpec> {
             block_access_list_hash,
             ..
         } = input;
+        let block = evm_env.block;
 
-        let timestamp = evm_env.block_env.timestamp().saturating_to();
-
+        let timestamp = block.timestamp.to::<u64>();
         let transactions_root =
             transactions_root.unwrap_or_else(|| proofs::calculate_transaction_root(&transactions));
         let receipts_root = receipts_root.unwrap_or_else(|| {
@@ -68,23 +77,20 @@ impl<ChainSpec: EthChainSpec + EthereumHardforks> EthBlockAssembler<ChainSpec> {
             .chain_spec
             .is_shanghai_active_at_timestamp(timestamp)
             .then(|| Withdrawals::new(ctx.withdrawals.map(|w| w.into_owned()).unwrap_or_default()));
-
         let withdrawals_root =
             withdrawals.as_deref().map(|w| proofs::calculate_withdrawals_root(w));
         let requests_hash = self
             .chain_spec
             .is_prague_active_at_timestamp(timestamp)
             .then(|| requests.requests_hash());
-        let block_number = evm_env.block_env.number().saturating_to();
+        let block_number = block.number.to::<u64>();
         let base_fee_per_gas = self
             .chain_spec
             .is_london_active_at_block(block_number)
-            .then(|| evm_env.block_env.basefee());
+            .then(|| block.basefee.to::<u64>());
 
         let mut excess_blob_gas = None;
         let mut block_blob_gas_used = None;
-
-        // only determine cancun fields when active
         if self.chain_spec.is_cancun_active_at_timestamp(timestamp) {
             block_blob_gas_used = Some(*blob_gas_used);
             excess_blob_gas = if self.chain_spec.is_cancun_active_at_timestamp(parent.timestamp) {
@@ -92,8 +98,6 @@ impl<ChainSpec: EthChainSpec + EthereumHardforks> EthBlockAssembler<ChainSpec> {
                     self.chain_spec.blob_params_at_timestamp(timestamp),
                 )
             } else {
-                // for the first post-fork block, both parent.blob_gas_used and
-                // parent.excess_blob_gas are evaluated as 0
                 Some(
                     alloy_eips::eip7840::BlobParams::cancun()
                         .next_block_excess_blob_gas_osaka(0, 0, 0),
@@ -104,19 +108,19 @@ impl<ChainSpec: EthChainSpec + EthereumHardforks> EthBlockAssembler<ChainSpec> {
         let header = Header {
             parent_hash: ctx.parent_hash,
             ommers_hash: EMPTY_OMMER_ROOT_HASH,
-            beneficiary: evm_env.block_env.beneficiary(),
+            beneficiary: block.beneficiary,
             state_root,
             transactions_root,
             receipts_root,
             withdrawals_root,
             logs_bloom,
             timestamp,
-            mix_hash: evm_env.block_env.prevrandao().unwrap_or_default(),
+            mix_hash: B256::from(block.prevrandao.to_be_bytes::<32>()),
             nonce: BEACON_NONCE.into(),
             base_fee_per_gas,
             number: block_number,
-            gas_limit: evm_env.block_env.gas_limit(),
-            difficulty: evm_env.block_env.difficulty(),
+            gas_limit: block.gas_limit.to::<u64>(),
+            difficulty: block.difficulty,
             gas_used: *gas_used,
             extra_data: ctx.extra_data,
             parent_beacon_block_root: ctx.parent_beacon_block_root,
@@ -134,20 +138,18 @@ impl<ChainSpec: EthChainSpec + EthereumHardforks> EthBlockAssembler<ChainSpec> {
     }
 }
 
-impl<F, ChainSpec> BlockAssembler<F> for EthBlockAssembler<ChainSpec>
+#[cfg(feature = "std")]
+impl<ChainSpec, EvmFactory> BlockAssembler<EthBlockExecutorFactory<ChainSpec, EvmFactory>>
+    for EthBlockAssembler<ChainSpec>
 where
-    F: for<'a> BlockExecutorFactory<
-        ExecutionCtx<'a> = EthBlockExecutionCtx<'a>,
-        Transaction: SignedTransaction,
-        Receipt: Receipt,
-    >,
-    ChainSpec: EthChainSpec + EthereumHardforks,
+    ChainSpec: EthChainSpec<Header = Header> + EthereumHardforks + 'static,
+    EvmFactory: 'static,
 {
-    type Block = Block<F::Transaction>;
+    type Block = Block<TransactionSigned>;
 
     fn assemble_block(
         &self,
-        input: BlockAssemblerInput<'_, '_, F>,
+        input: BlockAssemblerInput<'_, '_, EthBlockExecutorFactory<ChainSpec, EvmFactory>, Header>,
     ) -> Result<Self::Block, BlockExecutionError> {
         self.assemble_block(input, None, None, None)
     }

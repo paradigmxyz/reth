@@ -36,6 +36,7 @@ use reth_ethereum::{
     tasks::Runtime,
     EthPrimitives,
 };
+use reth_evm::{EvmEnv, EvmEnvFor};
 use reth_trie::updates::TrieUpdates;
 
 // ---------------------------------------------------------------------------
@@ -66,6 +67,7 @@ where
             alloy_rpc_types_engine::ExecutionData,
         >,
     >,
+    EvmEnvFor<N::Evm>: EvmEnv,
 {
     type EngineValidator = BasicEngineValidator<
         N::Provider,

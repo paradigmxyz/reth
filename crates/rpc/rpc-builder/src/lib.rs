@@ -342,7 +342,7 @@ where
         RpcRegistryInner<Provider, Pool, Network, EthApi, EvmConfig, Consensus>,
     )
     where
-        EthApi: FullEthApiServer<Provider = Provider, Pool = Pool>,
+        EthApi: FullEthApiServer<Provider = Provider, Pool = Pool> + TraceExt,
         Payload: PayloadTypes,
     {
         let config = module_config.config.clone().unwrap_or_default();
@@ -392,7 +392,7 @@ where
         engine_events: EventSender<ConsensusEngineEvent<N>>,
     ) -> TransportRpcModules<()>
     where
-        EthApi: FullEthApiServer<Provider = Provider, Pool = Pool>,
+        EthApi: FullEthApiServer<Provider = Provider, Pool = Pool> + TraceExt,
     {
         if module_config.is_empty() {
             TransportRpcModules::default()
@@ -866,7 +866,7 @@ where
         + ChangeSetReader,
     Pool: TransactionPool + Clone + 'static,
     Network: NetworkInfo + Peers + Clone + 'static,
-    EthApi: FullEthApiServer,
+    EthApi: FullEthApiServer + TraceExt,
     EvmConfig: ConfigureEvm<Primitives = N> + 'static,
     Consensus: FullConsensus<N> + Clone + 'static,
 {

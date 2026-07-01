@@ -9,8 +9,8 @@ use reth_provider::{
     StateProvider, StateRootProvider, StorageRootProvider,
 };
 use reth_trie::{
-    updates::TrieUpdates, AccountProof, HashedPostState, HashedStorage, MultiProof,
-    MultiProofTargets, StorageMultiProof, StorageProof, TrieInput,
+    updates::TrieUpdates, AccountProof, HashedPostState, HashedPostStateSorted, HashedStorage,
+    MultiProof, MultiProofTargets, StorageMultiProof, StorageProof, TrieInput,
 };
 use std::{
     sync::{
@@ -207,6 +207,10 @@ impl<S: StateRootProvider> StateRootProvider for InstrumentedStateProvider<S> {
         self.state_provider.state_root(hashed_state)
     }
 
+    fn state_root_sorted(&self, hashed_state: HashedPostStateSorted) -> ProviderResult<B256> {
+        self.state_provider.state_root_sorted(hashed_state)
+    }
+
     fn state_root_from_nodes(&self, input: TrieInput) -> ProviderResult<B256> {
         self.state_provider.state_root_from_nodes(input)
     }
@@ -216,6 +220,13 @@ impl<S: StateRootProvider> StateRootProvider for InstrumentedStateProvider<S> {
         hashed_state: HashedPostState,
     ) -> ProviderResult<(B256, TrieUpdates)> {
         self.state_provider.state_root_with_updates(hashed_state)
+    }
+
+    fn state_root_sorted_with_updates(
+        &self,
+        hashed_state: HashedPostStateSorted,
+    ) -> ProviderResult<(B256, TrieUpdates)> {
+        self.state_provider.state_root_sorted_with_updates(hashed_state)
     }
 
     fn state_root_from_nodes_with_updates(
@@ -296,11 +307,7 @@ impl<S: BlockHashReader> BlockHashReader for InstrumentedStateProvider<S> {
     }
 }
 
-impl<S: HashedPostStateProvider> HashedPostStateProvider for InstrumentedStateProvider<S> {
-    fn hashed_post_state(&self, bundle_state: &reth_revm::db::BundleState) -> HashedPostState {
-        self.state_provider.hashed_post_state(bundle_state)
-    }
-}
+impl<S: HashedPostStateProvider> HashedPostStateProvider for InstrumentedStateProvider<S> {}
 
 /// Accumulated fetch statistics from an [`InstrumentedStateProvider`].
 ///

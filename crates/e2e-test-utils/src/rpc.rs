@@ -17,6 +17,9 @@ pub struct RpcTestContext<Node: FullNodeComponents, EthApi: EthApiTypes> {
     pub inner: RpcRegistry<Node, EthApi>,
 }
 
+// TODO: Tighten these bounds once raw debug transaction lookup is split from trace/debug execution.
+// `envelope_by_hash` only needs raw transaction bytes, but `DebugApiServer` currently gates
+// `raw_transaction` behind the broader trace-capable EVM bounds.
 impl<Node, EthApi> RpcTestContext<Node, EthApi>
 where
     Node: FullNodeComponents<Types: NodeTypes<ChainSpec: EthereumHardforks>>,
@@ -29,7 +32,15 @@ where
         let eth_api = self.inner.eth_api();
         eth_api.send_raw_transaction(raw_tx).await
     }
+}
 
+impl<Node, EthApi> RpcTestContext<Node, EthApi>
+where
+    Node: FullNodeComponents<Types: NodeTypes<ChainSpec: EthereumHardforks>>,
+    EthApi: EthApiSpec<Provider: BlockReader<Block = BlockTy<Node::Types>>>
+        + EthTransactions
+        + TraceExt,
+{
     /// Retrieves a transaction envelope by its hash
     pub async fn envelope_by_hash(
         &self,

@@ -28,7 +28,6 @@ reth-trie.workspace = true
 alloy-eips.workspace = true
 alloy-primitives = { workspace = true, features = ["std"] }
 alloy-consensus.workspace = true
-revm.workspace = true
 
 # async
 tokio = { workspace = true, default-features = false, features = ["sync", "macros"] }
@@ -69,7 +68,6 @@ serde = [
     "reth-execution-types/serde",
     "reth-primitives-traits/serde",
     "reth-trie/serde",
-    "revm/serde",
     "reth-storage-api/serde",
 ]
 test-utils = [

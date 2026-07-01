@@ -7,7 +7,10 @@ use reth_exex::ExExContext;
 use reth_node_api::FullNodeComponents;
 
 /// A trait for launching an `ExEx`.
-pub trait LaunchExEx<Node: FullNodeComponents>: Send {
+pub trait LaunchExEx<Node>: Send
+where
+    Node: FullNodeComponents,
+{
     /// Launches the `ExEx`.
     ///
     /// The `ExEx` should be able to run independently and emit events on the channels provided in
@@ -22,7 +25,10 @@ pub trait LaunchExEx<Node: FullNodeComponents>: Send {
 pub type BoxExEx = BoxFuture<'static, eyre::Result<()>>;
 
 /// A version of [`LaunchExEx`] that returns a boxed future. Makes the trait object-safe.
-pub trait BoxedLaunchExEx<Node: FullNodeComponents>: Send {
+pub trait BoxedLaunchExEx<Node>: Send
+where
+    Node: FullNodeComponents,
+{
     /// Launches the `ExEx` and returns a boxed future.
     fn launch(self: Box<Self>, ctx: ExExContext<Node>)
         -> BoxFuture<'static, eyre::Result<BoxExEx>>;

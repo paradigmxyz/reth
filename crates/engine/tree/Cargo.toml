@@ -28,8 +28,8 @@ reth-primitives-traits = { workspace = true, features = ["rayon", "dashmap"] }
 reth-ethereum-primitives.workspace = true
 reth-provider.workspace = true
 reth-prune.workspace = true
-reth-revm = { workspace = true, features = ["optional-balance-check"] }
 reth-stages-api.workspace = true
+reth-storage-api.workspace = true
 reth-tasks = { workspace = true, features = ["rayon"] }
 reth-trie-parallel.workspace = true
 reth-trie-sparse = { workspace = true, features = ["std", "metrics"] }
@@ -38,21 +38,19 @@ reth-trie-common.workspace = true
 reth-trie-db.workspace = true
 
 # alloy
-alloy-evm.workspace = true
 alloy-consensus.workspace = true
+alloy-eip7928.workspace = true
 alloy-eips.workspace = true
-alloy-eip7928 = { workspace = true, features = ["rlp"] }
 alloy-primitives.workspace = true
 alloy-rlp.workspace = true
 alloy-rpc-types-engine.workspace = true
 
-revm.workspace = true
+evm2.workspace = true
 
 # common
 futures.workspace = true
 thiserror.workspace = true
 tokio = { workspace = true, features = ["rt", "rt-multi-thread", "sync", "macros"] }
-moka = { workspace = true, features = ["sync"] }
 
 # metrics
 metrics.workspace = true
@@ -101,6 +99,22 @@ rand.workspace = true
 rand_08.workspace = true
 
 [features]
+asm-keccak = [
+    "evm2/asm-keccak",
+    "reth-evm/asm-keccak",
+    "reth-execution-types/asm-keccak",
+    "alloy-primitives/asm-keccak",
+    "reth-node-ethereum/asm-keccak",
+    "reth-evm-ethereum/asm-keccak",
+    "reth-storage-api/asm-keccak",
+]
+portable = [
+    "evm2/portable",
+    "reth-evm/portable",
+    "reth-execution-types/portable",
+    "reth-node-ethereum/portable",
+    "reth-evm-ethereum/portable",
+]
 test-utils = [
     "reth-chain-state/test-utils",
     "reth-chainspec/test-utils",
@@ -113,7 +127,6 @@ test-utils = [
     "reth-provider/test-utils",
     "reth-prune-types",
     "reth-prune-types?/test-utils",
-    "reth-revm/test-utils",
     "reth-stages-api/test-utils",
     "reth-stages/test-utils",
     "reth-static-file",

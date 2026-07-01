@@ -11,14 +11,11 @@ use reth_chain_state::{
     PersistedBlockSubscriptions,
 };
 use reth_errors::{RethError, RethResult};
-use reth_evm::{execute::Executor, ConfigureEvm};
-use reth_execution_types::ExecutionOutcome;
+use reth_evm::ConfigureEvm;
 use reth_primitives_traits::{NodePrimitives, SealedHeader};
 use reth_rpc_api::{RethApiServer, RethJitAction};
 use reth_rpc_eth_types::{EthApiError, EthResult};
-use reth_storage_api::{
-    BlockReader, BlockReaderIdExt, ChangeSetReader, StateProviderFactory, TransactionVariant,
-};
+use reth_storage_api::{BlockReader, BlockReaderIdExt, ChangeSetReader, StateProviderFactory};
 use reth_tasks::{pool::BlockingTaskGuard, Runtime};
 use serde::Serialize;
 use tokio::sync::oneshot;
@@ -105,6 +102,7 @@ where
     }
 }
 
+#[cfg(any())]
 impl<N, Provider, EvmConfig> RethApi<Provider, EvmConfig>
 where
     N: NodePrimitives,
@@ -150,39 +148,18 @@ where
         block_id: BlockId,
         block_count: u64,
     ) -> EthResult<Option<ExecutionOutcome<N::Receipt>>> {
-        let Some(start_block) = self.provider().block_number_for_id(block_id)? else {
-            return Ok(None)
-        };
-
-        if start_block == 0 {
-            return Ok(Some(ExecutionOutcome::default()))
-        }
-
-        let state_provider = self.provider().history_by_block_number(start_block - 1)?;
-        let db = reth_revm::database::StateProviderDatabase::new(&state_provider);
-
-        let mut blocks = Vec::with_capacity(block_count as usize);
-        for block_number in start_block..start_block + block_count {
-            let Some(block) = self
-                .provider()
-                .recovered_block(block_number.into(), TransactionVariant::WithHash)?
-            else {
-                if block_number == start_block {
-                    return Ok(None)
-                }
-                break;
-            };
-            blocks.push(block);
-        }
-
-        let outcome = self.evm_config().executor(db).execute_batch(&blocks).map_err(
-            |e: reth_evm::execute::BlockExecutionError| {
-                EthApiError::Internal(reth_errors::RethError::Other(e.into()))
-            },
-        )?;
-
-        Ok(Some(outcome))
+        let _ = (block_id, block_count);
+        Err(EthApiError::Unsupported(
+            "reth_getBlockExecutionOutcome is unsupported by the active EVM execution path",
+        ))
     }
+}
+
+fn unsupported_block_execution_outcome<T>() -> RpcResult<T> {
+    Err(EthApiError::Unsupported(
+        "reth_getBlockExecutionOutcome is unsupported by the active EVM execution path",
+    )
+    .into())
 }
 
 #[async_trait]
@@ -196,7 +173,7 @@ where
         + ForkChoiceSubscriptions<Header = <Provider::Primitives as NodePrimitives>::BlockHeader>
         + PersistedBlockSubscriptions
         + 'static,
-    EvmConfig: ConfigureEvm<Primitives = Provider::Primitives> + 'static,
+    EvmConfig: ConfigureEvm<Primitives = Provider::Primitives> + Send + Sync + 'static,
 {
     /// Handler for `reth_getBalanceChangesInBlock`
     async fn reth_get_balance_changes_in_block(
@@ -212,16 +189,8 @@ where
         block_id: BlockId,
         count: Option<U64>,
     ) -> RpcResult<Option<serde_json::Value>> {
-        let outcome = Self::block_execution_outcome(self, block_id, count).await?;
-        match outcome {
-            Some(outcome) => {
-                let value = serde_json::to_value(&outcome).map_err(|e| {
-                    EthApiError::Internal(reth_errors::RethError::msg(e.to_string()))
-                })?;
-                Ok(Some(value))
-            }
-            None => Ok(None),
-        }
+        let _ = (block_id, count);
+        unsupported_block_execution_outcome()
     }
 
     /// Handler for `reth_jit`
@@ -400,6 +369,7 @@ struct RethApiInner<Provider, EvmConfig> {
     /// The EVM configuration used to create block executors.
     evm_config: EvmConfig,
     /// Guard to restrict the number of concurrent block re-execution requests.
+    #[expect(dead_code)]
     blocking_task_guard: BlockingTaskGuard,
     /// The type that can spawn tasks which would otherwise block.
     task_spawner: Runtime,

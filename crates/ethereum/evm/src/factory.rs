@@ -1,23 +1,20 @@
-//! revmc JIT compiler integration for EVM execution (requires the `jit` feature).
-//!
-//! Re-exports types from `revmc::alloy_evm` and provides [`RethEvmFactory`], a newtype that
-//! implements [`Debug`].
-
 #[cfg(feature = "jit")]
 use alloc::string::String;
-use alloy_evm::{Database, EvmEnv, EvmFactory};
-use revm::{
-    context::{BlockEnv, DBErrorMarker},
-    context_interface::result::{EVMError, HaltReason},
-    inspector::NoOpInspector,
-    primitives::hardfork::SpecId,
-    Inspector,
-};
+use alloc::sync::Arc;
+use core::fmt::Debug;
 #[cfg(feature = "jit")]
-use revmc::alloy_evm::JitEvmFactory;
+use core::sync::atomic::{AtomicBool, Ordering};
+
+#[cfg(feature = "std")]
+use alloy_consensus::Header;
+use reth_chainspec::ChainSpec;
+#[cfg(feature = "std")]
+use reth_chainspec::EthChainSpec;
+#[cfg(feature = "std")]
+use reth_evm::precompile_cache::{CachedPrecompileProvider, PrecompileCacheMap};
 
 #[cfg(feature = "jit")]
-pub use revmc::{
+pub use evm2_jit::{
     runtime::{
         maybe_run_jit_helper, CompilationEvent, CompilationKind, JitBackend, JitMode,
         RuntimeConfig, RuntimeStatsSnapshot, RuntimeTuning,
@@ -25,111 +22,245 @@ pub use revmc::{
     CompileTimings,
 };
 
-#[cfg(feature = "jit")]
-type Inner = JitEvmFactory;
-#[cfg(not(feature = "jit"))]
-type Inner = alloy_evm::EthEvmFactory;
+#[cfg(feature = "std")]
+use crate::{EthBlockExecutionCtx, EthBlockExecutor, EthEvmEnv, HashedStateMode};
+#[cfg(feature = "std")]
+use crate::{EthPrimitives, EthTxEnv};
 
-/// Reth EVM factory.
-///
-/// With the `jit` feature, this wraps [`JitEvmFactory`] and owns the shared revmc backend. The
-/// backend is constructed for every node so runtime RPC controls can enable it later.
-///
-/// An EVM can execute JIT-compiled code only when all three gates are enabled: the binary was built
-/// with the `jit` feature, runtime compilation was enabled with `--jit` or the `reth_jit` RPC
-/// method, and the local EVM config selected JIT support with
-/// [`ConfigureEvm::with_jit_support`](reth_evm::ConfigureEvm::with_jit_support).
-///
-/// Without the `jit` feature, this is a thin wrapper around [`alloy_evm::EthEvmFactory`].
+/// Ethereum block executor factory.
 #[derive(Debug)]
-pub struct RethEvmFactory {
-    inner: Inner,
-    #[cfg(feature = "jit")]
-    disabled: JitBackend,
-    #[cfg(feature = "jit")]
-    metrics: RevmcMetrics,
-    #[cfg(feature = "jit")]
-    jit_support: bool,
+pub struct EthBlockExecutorFactory<C = ChainSpec, EvmFactory = ()> {
+    /// Chain specification.
+    chain_spec: Arc<C>,
+    /// Shared precompile cache.
+    #[cfg(feature = "std")]
+    precompile_cache_map: PrecompileCacheMap<evm2::SpecId>,
+    /// EVM factory configuration.
+    evm_factory: EvmFactory,
 }
 
-impl Clone for RethEvmFactory {
+impl<C, EvmFactory: Clone> Clone for EthBlockExecutorFactory<C, EvmFactory> {
     fn clone(&self) -> Self {
         Self {
-            #[cfg(feature = "jit")]
-            inner: self.inner.clone(),
-            #[cfg(not(feature = "jit"))]
-            inner: self.inner,
-            #[cfg(feature = "jit")]
-            disabled: self.disabled.clone(),
-            #[cfg(feature = "jit")]
-            metrics: self.metrics.clone(),
-            #[cfg(feature = "jit")]
-            jit_support: self.jit_support,
+            chain_spec: self.chain_spec.clone(),
+            #[cfg(feature = "std")]
+            precompile_cache_map: self.precompile_cache_map.clone(),
+            evm_factory: self.evm_factory.clone(),
         }
     }
 }
 
-#[allow(clippy::derivable_impls)]
+impl<C> EthBlockExecutorFactory<C> {
+    /// Creates a new Ethereum block executor factory.
+    pub fn new(chain_spec: Arc<C>) -> Self {
+        Self::new_with_evm_factory(chain_spec, ())
+    }
+}
+
+impl<C, EvmFactory> EthBlockExecutorFactory<C, EvmFactory> {
+    /// Creates a new Ethereum block executor factory with the given EVM factory configuration.
+    pub fn new_with_evm_factory(chain_spec: Arc<C>, evm_factory: EvmFactory) -> Self {
+        Self {
+            chain_spec,
+            #[cfg(feature = "std")]
+            precompile_cache_map: PrecompileCacheMap::default(),
+            evm_factory,
+        }
+    }
+
+    /// Returns the chain spec associated with this factory.
+    pub const fn chain_spec(&self) -> &Arc<C> {
+        &self.chain_spec
+    }
+
+    /// Returns the configured EVM factory state.
+    pub const fn evm_factory(&self) -> &EvmFactory {
+        &self.evm_factory
+    }
+
+    /// Returns mutable access to the configured EVM factory state.
+    pub const fn evm_factory_mut(&mut self) -> &mut EvmFactory {
+        &mut self.evm_factory
+    }
+
+    /// Creates a configured Ethereum block executor.
+    #[cfg(feature = "std")]
+    pub fn create_executor<'a>(
+        &'a self,
+        evm: evm2::Evm<evm2::BaseEvmTypes>,
+        ctx: EthBlockExecutionCtx<'a>,
+        hashed_state_mode: HashedStateMode,
+    ) -> EthBlockExecutor<'a>
+    where
+        C: EthChainSpec<Header = Header>,
+    {
+        EthBlockExecutor::new(
+            evm,
+            ctx,
+            self.chain_spec.chain_id(),
+            self.chain_spec.deposit_contract().map(|contract| contract.address),
+            hashed_state_mode,
+        )
+    }
+
+    /// Creates an EVM instance with the configured Ethereum execution environment.
+    #[cfg(feature = "std")]
+    pub fn evm_with_env<DB>(&self, db: DB, env: EthEvmEnv) -> evm2::Evm<evm2::BaseEvmTypes>
+    where
+        C: EthChainSpec<Header = Header>,
+        DB: evm2::evm::DynDatabase + 'static,
+        EvmFactory: 'static,
+    {
+        let evm = evm2::Evm::<evm2::BaseEvmTypes>::new_with_execution_config(
+            evm2::ExecutionConfig::for_spec_and_version(env.spec, env.version),
+            env.spec,
+            env.block,
+            evm2::ethereum::ethereum_tx_registry(env.spec),
+            db,
+            alloc::boxed::Box::new(CachedPrecompileProvider::new(
+                evm2::Precompiles::base(env.spec),
+                self.precompile_cache_map.clone(),
+                env.spec,
+                None,
+            )),
+        );
+
+        #[cfg(feature = "jit")]
+        let mut evm = evm;
+
+        #[cfg(feature = "jit")]
+        if let Some(evm_factory) =
+            (&self.evm_factory as &dyn core::any::Any).downcast_ref::<RethEvmFactory>()
+        {
+            evm_factory.configure_evm(&mut evm);
+        }
+
+        evm
+    }
+}
+
+#[cfg(feature = "std")]
+impl<C, EvmFactory> reth_evm::execute::BlockExecutorFactory
+    for EthBlockExecutorFactory<C, EvmFactory>
+where
+    C: EthChainSpec<Header = Header>,
+    EvmFactory: 'static,
+{
+    type Primitives = EthPrimitives;
+    type Transaction = EthTxEnv;
+    type EvmEnv = EthEvmEnv;
+    type ExecutionCtx<'a>
+        = EthBlockExecutionCtx<'a>
+    where
+        Self: 'a;
+    type Executor<'a>
+        = EthBlockExecutor<'a>
+    where
+        Self: 'a;
+
+    fn create_executor<'a>(
+        &'a self,
+        evm: evm2::Evm<evm2::BaseEvmTypes>,
+        ctx: Self::ExecutionCtx<'a>,
+        hashed_state_mode: HashedStateMode,
+    ) -> Self::Executor<'a>
+    where
+        Self: 'a,
+    {
+        Self::create_executor(self, evm, ctx, hashed_state_mode)
+    }
+
+    fn evm_with_env<DB>(&self, db: DB, evm_env: Self::EvmEnv) -> evm2::Evm<evm2::BaseEvmTypes>
+    where
+        DB: evm2::evm::DynDatabase + 'static,
+    {
+        Self::evm_with_env(self, db, evm_env)
+    }
+
+    fn evm_tx<'a>(
+        &self,
+        tx: &'a Self::Transaction,
+    ) -> &'a <evm2::BaseEvmTypes as evm2::EvmTypes>::Tx {
+        tx.as_envelope()
+    }
+}
+
+/// Reth EVM factory configuration.
+///
+/// With the `jit` feature, this owns the shared evm2 JIT backend. EVMs only install the JIT
+/// interpreter runner when local JIT support was selected through
+/// [`ConfigureEvm::with_jit_support`](reth_evm::ConfigureEvm::with_jit_support).
+#[derive(Debug, Clone)]
+pub struct RethEvmFactory {
+    #[cfg(feature = "jit")]
+    backend: JitBackend,
+    #[cfg(feature = "jit")]
+    metrics: JitMetrics,
+    #[cfg(feature = "jit")]
+    jit_support: Arc<AtomicBool>,
+}
+
 impl Default for RethEvmFactory {
     fn default() -> Self {
+        Self::disabled()
+    }
+}
+
+impl RethEvmFactory {
+    /// Creates a factory configuration with JIT compilation disabled.
+    pub fn disabled() -> Self {
         #[cfg(feature = "jit")]
         {
             Self::new(JitBackend::disabled())
         }
         #[cfg(not(feature = "jit"))]
         {
-            Self { inner: Default::default() }
+            Self {}
         }
     }
 }
 
 #[cfg(feature = "jit")]
 impl RethEvmFactory {
-    /// Creates a new factory that owns the backend.
+    /// Creates a new factory configuration that owns the backend.
     pub fn new(backend: JitBackend) -> Self {
-        Self::new_with_metrics(backend, RevmcMetrics::default())
+        Self::new_with_metrics(backend, JitMetrics::default())
     }
 
-    /// Creates a new factory that owns the backend and records metrics into the given handles.
-    pub fn new_with_metrics(backend: JitBackend, metrics: RevmcMetrics) -> Self {
-        Self {
-            inner: JitEvmFactory::new(backend),
-            disabled: JitBackend::disabled(),
-            metrics,
-            jit_support: false,
-        }
-    }
-
-    /// Creates a [`RethEvmFactory`] with JIT support and compilation disabled.
-    pub fn disabled() -> Self {
-        Self::default()
+    /// Creates a new factory configuration that owns the backend and records metrics.
+    pub fn new_with_metrics(backend: JitBackend, metrics: JitMetrics) -> Self {
+        Self { backend, metrics, jit_support: Arc::new(AtomicBool::new(false)) }
     }
 
     /// Returns a reference to the JIT backend.
     pub const fn backend(&self) -> &JitBackend {
-        self.inner.backend()
+        &self.backend
     }
 
     /// Enables or disables local JIT support for subsequently created EVMs.
-    ///
-    /// Enabling support only selects the JIT-capable EVM factory path. An EVM still requires the
-    /// `jit` feature and runtime compilation enabled by `--jit` or `reth_jit` before it can execute
-    /// JIT-compiled code.
-    pub const fn set_jit_support(&mut self, enabled: bool) {
-        self.jit_support = enabled;
+    pub fn set_jit_support(&self, enabled: bool) {
+        self.jit_support.store(enabled, Ordering::Relaxed);
     }
 
-    /// Returns whether subsequently created EVMs use the JIT-capable factory path.
-    pub const fn jit_support_enabled(&self) -> bool {
-        self.jit_support
+    /// Returns whether subsequently created EVMs install the JIT interpreter runner.
+    pub fn jit_support_enabled(&self) -> bool {
+        self.jit_support.load(Ordering::Relaxed)
+    }
+
+    /// Installs the evm2 JIT interpreter runner on a configured EVM if locally enabled.
+    pub fn configure_evm(&self, evm: &mut evm2::Evm<evm2::BaseEvmTypes>) {
+        if self.jit_support_enabled() {
+            evm.set_interpreter_runner(evm2_jit::evm2_evm::JitInterpreterRunner::new(
+                self.backend.clone(),
+            ));
+        }
     }
 
     /// Pauses JIT helper execution while keeping queueing and resident lookups enabled.
     fn pause_jit(&self) {
-        let backend = self.inner.backend();
-        let was_paused = backend.is_paused();
-        backend.pause();
-        let is_paused = backend.is_paused();
+        let was_paused = self.backend.is_paused();
+        self.backend.pause();
+        let is_paused = self.backend.is_paused();
         if !was_paused && is_paused {
             self.metrics.pauses_total.increment(1);
         }
@@ -138,10 +269,9 @@ impl RethEvmFactory {
 
     /// Resumes background JIT promotion.
     fn resume_jit(&self) {
-        let backend = self.inner.backend();
-        let was_paused = backend.is_paused();
-        backend.resume();
-        let is_paused = backend.is_paused();
+        let was_paused = self.backend.is_paused();
+        self.backend.resume();
+        let is_paused = self.backend.is_paused();
         if was_paused && !is_paused {
             self.metrics.resumes_total.increment(1);
         }
@@ -152,7 +282,9 @@ impl RethEvmFactory {
 #[cfg(feature = "jit")]
 impl reth_evm::JitBackend for RethEvmFactory {
     fn set_enabled(&self, enabled: bool) -> Result<(), String> {
-        self.inner.backend().set_enabled(enabled).map_err(|err| err.to_string())
+        self.backend.set_enabled(enabled).map_err(|err| err.to_string())?;
+        self.set_jit_support(enabled);
+        Ok(())
     }
 
     fn pause(&self) {
@@ -164,88 +296,42 @@ impl reth_evm::JitBackend for RethEvmFactory {
     }
 
     fn clear(&self) {
-        self.inner.backend().clear_all();
+        self.backend.clear_all();
     }
 }
 
-impl EvmFactory for RethEvmFactory {
-    type Evm<DB: Database, I: Inspector<alloy_evm::eth::EthEvmContext<DB>>> =
-        <Inner as EvmFactory>::Evm<DB, I>;
-    type Context<DB: Database> = <Inner as EvmFactory>::Context<DB>;
-    type Tx = <Inner as EvmFactory>::Tx;
-    type Error<DBError: DBErrorMarker> = EVMError<DBError>;
-    type HaltReason = HaltReason;
-    type Spec = SpecId;
-    type BlockEnv = BlockEnv;
-    type Precompiles = <Inner as EvmFactory>::Precompiles;
-
-    fn create_evm<DB: Database>(&self, db: DB, input: EvmEnv) -> Self::Evm<DB, NoOpInspector> {
-        #[cfg(feature = "jit")]
-        {
-            if self.jit_support {
-                self.inner.create_evm(db, input)
-            } else {
-                JitEvmFactory::new(self.disabled.clone()).create_evm(db, input)
-            }
-        }
-        #[cfg(not(feature = "jit"))]
-        {
-            self.inner.create_evm(db, input)
-        }
-    }
-
-    fn create_evm_with_inspector<DB: Database, I: Inspector<Self::Context<DB>>>(
-        &self,
-        db: DB,
-        input: EvmEnv,
-        inspector: I,
-    ) -> Self::Evm<DB, I> {
-        #[cfg(feature = "jit")]
-        {
-            if self.jit_support {
-                self.inner.create_evm_with_inspector(db, input, inspector)
-            } else {
-                JitEvmFactory::new(self.disabled.clone())
-                    .create_evm_with_inspector(db, input, inspector)
-            }
-        }
-        #[cfg(not(feature = "jit"))]
-        {
-            self.inner.create_evm_with_inspector(db, input, inspector)
-        }
-    }
-}
-
-/// Prometheus metrics for revmc JIT runtime stats.
+/// Prometheus metrics for evm2 JIT runtime stats.
 #[cfg(feature = "jit")]
 #[derive(reth_metrics::Metrics, Clone)]
-#[metrics(scope = "revmc.jit")]
-pub struct RevmcMetrics {
+#[metrics(scope = "evm2.jit")]
+pub struct JitMetrics {
     /// Total lookups that returned a compiled function.
     pub lookup_hits: metrics::Gauge,
     /// Total lookups that returned interpret (not ready).
     pub lookup_misses: metrics::Gauge,
     /// Lookup-observed events currently queued.
     pub events_queued: metrics::Gauge,
-    /// Lookup-observed events dropped (channel full).
+    /// Lookup-observed events dropped due to event queue overflow.
     pub events_dropped: metrics::Gauge,
+    /// Control commands dropped because the command channel was full.
+    pub commands_dropped: metrics::Gauge,
     /// Number of entries in the resident compiled map.
     pub resident_entries: metrics::Gauge,
     /// Approximate total bytes of compiled machine code in the resident map.
     pub jit_code_bytes: metrics::Gauge,
-    /// Approximate total bytes of JIT-related data (relocations, metadata, etc.).
+    /// Approximate total bytes of JIT-related data.
     pub jit_data_bytes: metrics::Gauge,
     /// Number of pending control commands queued for the backend.
     pub command_queue_len: metrics::Gauge,
     /// Number of compilation jobs dispatched but not completed yet.
     pub pending_jobs: metrics::Gauge,
-    /// Total number of entries evicted (idle + budget).
+    /// Total number of entries evicted.
     pub evictions: metrics::Gauge,
-    /// Total number of compilations dispatched (JIT promotions + AOT requests).
+    /// Total number of compilations dispatched.
     pub compilations_dispatched: metrics::Gauge,
-    /// Total number of successful compilations (JIT + AOT).
+    /// Total number of successful compilations.
     pub compilations_succeeded: metrics::Gauge,
-    /// Total number of failed compilations (JIT + AOT).
+    /// Total number of failed compilations.
     pub compilations_failed: metrics::Gauge,
     /// Total number of JIT helper processes spawned.
     pub jit_helper_spawns: metrics::Gauge,
@@ -257,34 +343,47 @@ pub struct RevmcMetrics {
     pub jit_helper_timeouts: metrics::Gauge,
     /// Total number of JIT helper process disconnects.
     pub jit_helper_disconnects: metrics::Gauge,
+    /// Total number of JIT helper pause requests.
+    pub jit_helper_pause_requests: metrics::Gauge,
+    /// Total number of JIT helper pause acknowledgements.
+    pub jit_helper_pause_acknowledgements: metrics::Gauge,
+    /// Total number of JIT helper pause failures.
+    pub jit_helper_pause_failures: metrics::Gauge,
+    /// Total number of JIT helper pause acknowledgement timeouts.
+    pub jit_helper_pause_timeouts: metrics::Gauge,
+    /// Total number of JIT helper resume requests.
+    pub jit_helper_resume_requests: metrics::Gauge,
+    /// Total number of JIT helper resume failures.
+    pub jit_helper_resume_failures: metrics::Gauge,
     /// Total number of transitions into paused JIT helper execution.
     pub pauses_total: metrics::Counter,
     /// Total number of transitions out of paused JIT helper execution.
     pub resumes_total: metrics::Counter,
     /// Whether JIT helper execution is currently paused.
     pub paused: metrics::Gauge,
-    /// Histogram of total JIT compilation durations (seconds).
+    /// Histogram of total JIT compilation durations in seconds.
     pub jit_compilation_duration: metrics::Histogram,
-    /// Duration of the last JIT compilation (seconds).
+    /// Duration of the last JIT compilation in seconds.
     pub jit_compilation_duration_last: metrics::Gauge,
-    /// Histogram of parse phase durations (seconds).
+    /// Histogram of parse phase durations in seconds.
     pub jit_parse_duration: metrics::Histogram,
-    /// Histogram of translate phase durations (seconds).
+    /// Histogram of translate phase durations in seconds.
     pub jit_translate_duration: metrics::Histogram,
-    /// Histogram of optimize phase durations (seconds).
+    /// Histogram of optimize phase durations in seconds.
     pub jit_optimize_duration: metrics::Histogram,
-    /// Histogram of codegen phase durations (seconds).
+    /// Histogram of codegen phase durations in seconds.
     pub jit_codegen_duration: metrics::Histogram,
 }
 
 #[cfg(feature = "jit")]
-impl RevmcMetrics {
+impl JitMetrics {
     /// Records a [`RuntimeStatsSnapshot`] into the metrics.
     pub fn record(&self, stats: &RuntimeStatsSnapshot) {
         let RuntimeStatsSnapshot {
             lookup_hits,
             lookup_misses,
             events_dropped,
+            commands_dropped,
             resident_entries,
             events_queued,
             command_queue_len,
@@ -300,12 +399,18 @@ impl RevmcMetrics {
             jit_helper_restarts,
             jit_helper_timeouts,
             jit_helper_disconnects,
-            ..
+            jit_helper_pause_requests,
+            jit_helper_pause_acknowledgements,
+            jit_helper_pause_failures,
+            jit_helper_pause_timeouts,
+            jit_helper_resume_requests,
+            jit_helper_resume_failures,
         } = *stats;
         self.lookup_hits.set(lookup_hits as f64);
         self.lookup_misses.set(lookup_misses as f64);
         self.events_queued.set(events_queued as f64);
         self.events_dropped.set(events_dropped as f64);
+        self.commands_dropped.set(commands_dropped as f64);
         self.resident_entries.set(resident_entries as f64);
         self.jit_code_bytes.set(jit_code_bytes as f64);
         self.jit_data_bytes.set(jit_data_bytes as f64);
@@ -320,6 +425,12 @@ impl RevmcMetrics {
         self.jit_helper_restarts.set(jit_helper_restarts as f64);
         self.jit_helper_timeouts.set(jit_helper_timeouts as f64);
         self.jit_helper_disconnects.set(jit_helper_disconnects as f64);
+        self.jit_helper_pause_requests.set(jit_helper_pause_requests as f64);
+        self.jit_helper_pause_acknowledgements.set(jit_helper_pause_acknowledgements as f64);
+        self.jit_helper_pause_failures.set(jit_helper_pause_failures as f64);
+        self.jit_helper_pause_timeouts.set(jit_helper_pause_timeouts as f64);
+        self.jit_helper_resume_requests.set(jit_helper_resume_requests as f64);
+        self.jit_helper_resume_failures.set(jit_helper_resume_failures as f64);
     }
 
     /// Records a [`CompilationEvent`] into the histogram metrics.

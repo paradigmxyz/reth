@@ -33,9 +33,7 @@ use reth_storage_api::{
     NodePrimitivesProvider, StorageSettings, StorageSettingsCache, TryIntoHistoricalStateProvider,
 };
 use reth_storage_errors::provider::ProviderResult;
-use reth_trie::HashedPostState;
 use reth_trie_db::ChangesetCache;
-use revm::database::BundleState;
 use std::{
     ops::{RangeBounds, RangeInclusive},
     path::Path,
@@ -47,12 +45,12 @@ use std::{
 use tracing::{info, instrument, trace, warn};
 
 mod provider;
+pub(crate) use crate::writer::execution_state_to_plain_state_and_reverts;
 pub use provider::{
     CommitOrder, DatabaseProvider, DatabaseProviderRO, DatabaseProviderRW, SaveBlocksMode,
 };
 
 use super::ProviderNodeTypes;
-use reth_trie::KeccakKeyHasher;
 
 mod builder;
 pub use builder::{ProviderFactoryBuilder, ReadOnlyConfig};
@@ -953,11 +951,7 @@ impl<N: ProviderNodeTypes> PruneCheckpointReader for ProviderFactory<N> {
     }
 }
 
-impl<N: ProviderNodeTypes> HashedPostStateProvider for ProviderFactory<N> {
-    fn hashed_post_state(&self, bundle_state: &BundleState) -> HashedPostState {
-        HashedPostState::from_bundle_state::<KeccakKeyHasher>(bundle_state.state())
-    }
-}
+impl<N: ProviderNodeTypes> HashedPostStateProvider for ProviderFactory<N> {}
 
 impl<N: ProviderNodeTypes> MetadataProvider for ProviderFactory<N> {
     fn get_metadata(&self, key: &str) -> ProviderResult<Option<Vec<u8>>> {

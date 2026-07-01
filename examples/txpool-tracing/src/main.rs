@@ -10,8 +10,8 @@
 
 #![warn(unused_crate_dependencies)]
 
-use alloy_primitives::Address;
-use alloy_rpc_types_trace::{parity::TraceType, tracerequest::TraceCallRequest};
+use alloy_primitives::{map::HashSet, Address};
+use alloy_rpc_types_trace::parity::TraceType;
 use clap::Parser;
 use futures_util::StreamExt;
 use reth_ethereum::{
@@ -20,6 +20,7 @@ use reth_ethereum::{
     pool::TransactionPool,
     rpc::eth::primitives::TransactionRequest,
 };
+use reth_rpc_api::TraceApiServer;
 
 mod submit;
 
@@ -50,9 +51,10 @@ fn main() {
                         // trace the transaction with `trace_call`
                         let callrequest =
                             TransactionRequest::from_recovered_transaction(tx.to_consensus());
-                        let tracerequest =
-                            TraceCallRequest::new(callrequest).with_trace_type(TraceType::Trace);
-                        if let Ok(trace_result) = traceapi.trace_call(tracerequest).await {
+                        let trace_types = HashSet::from_iter([TraceType::Trace]);
+                        if let Ok(trace_result) =
+                            traceapi.trace_call(callrequest, trace_types, None, None, None).await
+                        {
                             let hash = tx.hash();
                             println!("trace result for transaction {hash}: {trace_result:?}");
                         }

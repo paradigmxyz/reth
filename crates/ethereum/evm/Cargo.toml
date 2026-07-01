@@ -17,20 +17,22 @@ reth-chainspec.workspace = true
 reth-ethereum-forks.workspace = true
 reth-primitives-traits.workspace = true
 reth-ethereum-primitives.workspace = true
-revm.workspace = true
 reth-evm.workspace = true
-reth-storage-errors.workspace = true
+reth-trie-common.workspace = true
+reth-storage-errors = { workspace = true, optional = true }
+evm2.workspace = true
+evm2-jit = { workspace = true, optional = true, features = ["llvm"] }
 
 # Alloy
 alloy-primitives.workspace = true
 alloy-eips.workspace = true
-alloy-evm.workspace = true
 alloy-consensus.workspace = true
 alloy-rpc-types-engine.workspace = true
+alloy-sol-types.workspace = true
 
+# misc
 metrics = { workspace = true, optional = true }
 reth-metrics = { workspace = true, optional = true }
-revmc = { workspace = true, features = ["alloy-evm"], optional = true }
 
 [dev-dependencies]
 reth-testing-utils.workspace = true
@@ -40,6 +42,39 @@ alloy-genesis.workspace = true
 
 [features]
 default = ["std"]
+asm-keccak = [
+    "evm2/asm-keccak",
+    "evm2-jit?/asm-keccak",
+    "reth-evm/asm-keccak",
+    "reth-execution-types/asm-keccak",
+    "alloy-primitives/asm-keccak",
+]
+c-kzg = [
+    "evm2/c-kzg",
+    "reth-evm/c-kzg",
+    "reth-execution-types/c-kzg",
+]
+blst = [
+    "evm2/blst",
+    "reth-evm/blst",
+    "reth-execution-types/blst",
+]
+portable = [
+    "evm2/portable",
+    "reth-evm/portable",
+    "reth-execution-types/portable",
+]
+jit = [
+    "std",
+    "dep:evm2-jit",
+    "dep:metrics",
+    "dep:reth-metrics",
+]
+p256-aws-lc-rs = [
+    "evm2/p256-aws-lc-rs",
+    "reth-evm/p256-aws-lc-rs",
+    "reth-execution-types/p256-aws-lc-rs",
+]
 std = [
     "alloy-consensus/std",
     "alloy-eips/std",
@@ -48,26 +83,22 @@ std = [
     "secp256k1/std",
     "reth-ethereum-forks/std",
     "reth-chainspec/std",
-    "alloy-evm/std",
+    "evm2/std",
     "reth-execution-types/std",
     "reth-evm/std",
     "reth-primitives-traits/std",
-    "revm/std",
     "reth-ethereum-primitives/std",
+    "reth-trie-common/std",
     "alloy-rpc-types-engine/std",
+    "dep:reth-storage-errors",
     "reth-storage-errors/std",
+    "alloy-sol-types/std",
 ]
-jit = [
-    "std",
-    "dep:revmc",
-    "dep:metrics",
-    "dep:reth-metrics",
-]
-gmp = ["revm/gmp"]
 test-utils = [
     "std",
     "reth-chainspec/test-utils",
     "reth-ethereum-primitives/test-utils",
     "reth-evm/test-utils",
     "reth-primitives-traits/test-utils",
+    "reth-trie-common/test-utils",
 ]

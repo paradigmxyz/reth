@@ -4,13 +4,13 @@ use crate::{
     added_removed_keys::MultiAddedRemovedKeys,
     prefix_set::{PrefixSetMut, TriePrefixSetsMut},
     utils::{extend_sorted_vec, kway_merge_sorted},
-    KeyHasher, MultiProofTargets, Nibbles,
+    MultiProofTargets, Nibbles,
 };
 use alloc::{borrow::Cow, vec::Vec};
 use alloy_primitives::{
     keccak256,
     map::{hash_map, B256Map, HashMap, HashSet},
-    Address, B256, U256,
+    B256, U256,
 };
 use itertools::Itertools;
 #[cfg(feature = "rayon")]
@@ -19,8 +19,6 @@ use reth_primitives_traits::Account;
 
 #[cfg(feature = "rayon")]
 use rayon::prelude::{FromParallelIterator, IntoParallelIterator, ParallelIterator};
-
-use revm::database::{AccountStatus, BundleAccount};
 
 /// In-memory hashed state that stores account and storage changes with keccak256-hashed keys in
 /// hash maps.
@@ -40,32 +38,6 @@ impl HashedPostState {
             accounts: B256Map::with_capacity_and_hasher(capacity, Default::default()),
             storages: B256Map::with_capacity_and_hasher(capacity, Default::default()),
         }
-    }
-
-    /// Initialize [`HashedPostState`] from bundle state.
-    /// Hashes all changed accounts and storage entries that are currently stored in the bundle
-    /// state.
-    #[inline]
-    pub fn from_bundle_state<'a, KH: KeyHasher>(
-        state: impl IntoIterator<Item = (&'a Address, &'a BundleAccount)>,
-    ) -> Self {
-        state
-            .into_iter()
-            .map(|(address, account)| {
-                let hashed_address = KH::hash_key(address);
-                let hashed_account = account.info.as_ref().map(Into::into);
-                let hashed_storage = HashedStorage::from_plain_storage(
-                    account.status,
-                    account.storage.iter().map(|(slot, value)| (slot, &value.present_value)),
-                );
-
-                (
-                    hashed_address,
-                    hashed_account,
-                    (!hashed_storage.is_empty()).then_some(hashed_storage),
-                )
-            })
-            .collect()
     }
 
     /// Construct [`HashedPostState`] from a single [`HashedStorage`].
@@ -443,13 +415,13 @@ impl HashedStorage {
         Self { wiped, storage: HashMap::from_iter(iter) }
     }
 
-    /// Create new hashed storage from account status and plain storage.
+    /// Create new hashed storage from plain storage.
     pub fn from_plain_storage<'a>(
-        status: AccountStatus,
+        wiped: bool,
         storage: impl IntoIterator<Item = (&'a U256, &'a U256)>,
     ) -> Self {
         Self::from_iter(
-            status.was_destroyed(),
+            wiped,
             storage.into_iter().map(|(key, value)| (keccak256(B256::from(*key)), *value)),
         )
     }
@@ -904,12 +876,7 @@ impl Iterator for ChunkedHashedPostState {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::KeccakKeyHasher;
-    use alloy_primitives::Bytes;
-    use revm::{
-        database::{states::StorageSlot, StorageWithOriginalValues},
-        state::{AccountInfo, Bytecode},
-    };
+    use alloy_primitives::Address;
 
     #[test]
     fn hashed_state_wiped_extension() {
@@ -986,66 +953,16 @@ mod tests {
     }
 
     #[test]
-    fn test_hashed_post_state_from_bundle_state() {
-        // Prepare a random Ethereum address as a key for the account.
-        let address = Address::random();
-
-        // Create a mock account info object.
-        let account_info = AccountInfo {
-            balance: U256::from(123),
-            nonce: 42,
-            code_hash: B256::random(),
-            code: Some(Bytecode::new_raw(Bytes::from(vec![1, 2]))),
-            account_id: None,
-        };
-
-        let mut storage = StorageWithOriginalValues::default();
-        storage.insert(
-            U256::from(1),
-            StorageSlot { present_value: U256::from(4), ..Default::default() },
-        );
-
-        // Create a `BundleAccount` struct to represent the account and its storage.
-        let account = BundleAccount {
-            status: AccountStatus::Changed,
-            info: Some(account_info.clone()),
-            storage,
-            original_info: None,
-        };
-
-        // Create a vector of tuples representing the bundle state.
-        let state = vec![(&address, &account)];
-
-        // Convert the bundle state into a hashed post state.
-        let hashed_state = HashedPostState::from_bundle_state::<KeccakKeyHasher>(state);
-
-        // Validate the hashed post state.
-        assert_eq!(hashed_state.accounts.len(), 1);
-        assert_eq!(hashed_state.storages.len(), 1);
-
-        // Validate the account info.
-        assert_eq!(
-            *hashed_state.accounts.get(&keccak256(address)).unwrap(),
-            Some(account_info.into())
-        );
-    }
-
-    #[test]
     fn test_hashed_post_state_with_accounts() {
         // Prepare random addresses and mock account info.
         let address_1 = Address::random();
         let address_2 = Address::random();
 
-        let account_info_1 = AccountInfo {
-            balance: U256::from(1000),
-            nonce: 1,
-            code_hash: B256::random(),
-            code: None,
-            account_id: None,
-        };
+        let account_info_1 =
+            Account { balance: U256::from(1000), nonce: 1, bytecode_hash: Some(B256::random()) };
 
         // Create hashed accounts with addresses.
-        let account_1 = (keccak256(address_1), Some(account_info_1.into()));
+        let account_1 = (keccak256(address_1), Some(account_info_1));
         let account_2 = (keccak256(address_2), None);
 
         // Add accounts to the hashed post state.

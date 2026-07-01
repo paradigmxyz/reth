@@ -31,8 +31,6 @@ use reth_stages_types::{StageCheckpoint, StageId};
 use reth_static_file_types::StaticFileSegment;
 use reth_storage_api::{BlockBodyIndicesProvider, NodePrimitivesProvider, StorageChangeSetReader};
 use reth_storage_errors::provider::ProviderResult;
-use reth_trie::{HashedPostState, KeccakKeyHasher};
-use revm::database::BundleState;
 use std::{
     ops::{RangeBounds, RangeInclusive},
     sync::Arc,
@@ -626,11 +624,7 @@ impl<N: ProviderNodeTypes> StateProviderFactory for BlockchainProvider<N> {
     }
 }
 
-impl<N: NodeTypesWithDB> HashedPostStateProvider for BlockchainProvider<N> {
-    fn hashed_post_state(&self, bundle_state: &BundleState) -> HashedPostState {
-        HashedPostState::from_bundle_state::<KeccakKeyHasher>(bundle_state.state())
-    }
-}
+impl<N: NodeTypesWithDB> HashedPostStateProvider for BlockchainProvider<N> {}
 
 impl<N: ProviderNodeTypes> CanonChainTracker for BlockchainProvider<N> {
     type Header = HeaderTy<N>;
@@ -805,7 +799,7 @@ mod tests {
         BlockWriter, CanonChainTracker, ProviderFactory, SaveBlocksMode,
     };
     use alloy_eips::{BlockHashOrNumber, BlockNumHash, BlockNumberOrTag};
-    use alloy_primitives::{BlockNumber, TxNumber, B256};
+    use alloy_primitives::{map::AddressMap, BlockNumber, TxNumber, B256, KECCAK256_EMPTY};
     use itertools::Itertools;
     use rand::Rng;
     use reth_chain_state::{
@@ -817,20 +811,21 @@ mod tests {
     use reth_errors::ProviderError;
     use reth_ethereum_primitives::{Block, Receipt};
     use reth_execution_types::{
-        BlockExecutionOutput, BlockExecutionResult, Chain, ExecutionOutcome,
+        execution_state_from_init, BlockExecutionOutput, BlockExecutionResult, BlockReverts, Chain,
+        ExecutionOutcome, RevertAccount,
     };
-    use reth_primitives_traits::{RecoveredBlock, SealedBlock, SignerRecoverable};
+    use reth_primitives_traits::{Account, RecoveredBlock, SealedBlock, SignerRecoverable};
     use reth_storage_api::{
         BlockBodyIndicesProvider, BlockHashReader, BlockIdReader, BlockNumReader, BlockReader,
         BlockReaderIdExt, BlockSource, ChangeSetReader, DBProvider, DatabaseProviderFactory,
-        HeaderProvider, ReceiptProvider, ReceiptProviderIdExt, StateProviderFactory,
-        StateWriteConfig, StateWriter, TransactionVariant, TransactionsProvider,
+        HeaderProvider, OriginalValuesKnown, ReceiptProvider, ReceiptProviderIdExt,
+        StateProviderFactory, StateWriteConfig, StateWriter, TransactionVariant,
+        TransactionsProvider,
     };
     use reth_testing_utils::generators::{
         self, random_block, random_block_range, random_changeset_range, random_eoa_accounts,
         random_receipt, BlockParams, BlockRangeParams,
     };
-    use revm::database::{BundleState, OriginalValuesKnown};
     use std::{
         collections::BTreeMap,
         ops::{Bound, Range, RangeBounds},
@@ -872,6 +867,15 @@ mod tests {
         );
         let (database_blocks, in_memory_blocks) = blocks.split_at(database_blocks);
         (database_blocks.to_vec(), in_memory_blocks.to_vec())
+    }
+
+    fn account_to_revert(account: Account) -> RevertAccount {
+        RevertAccount {
+            balance: account.balance,
+            nonce: account.nonce,
+            code_hash: account.bytecode_hash.unwrap_or(KECCAK256_EMPTY),
+            code: None,
+        }
     }
 
     #[expect(clippy::type_complexity)]
@@ -916,11 +920,8 @@ mod tests {
         // Insert receipts into the database
         if let Some(first_block) = database_blocks.first() {
             provider_rw.write_state(
-                &ExecutionOutcome {
-                    first_block: first_block.number,
-                    receipts: receipts.iter().take(database_blocks.len()).cloned().collect(),
-                    ..Default::default()
-                },
+                &ExecutionOutcome::new_empty(first_block.number)
+                    .with_receipts(receipts.iter().take(database_blocks.len()).cloned().collect()),
                 OriginalValuesKnown::No,
                 StateWriteConfig::default(),
             )?;
@@ -944,7 +945,8 @@ mod tests {
                             gas_used: 0,
                             blob_gas_used: 0,
                         },
-                        state: BundleState::default(),
+                        state: Default::default(),
+                        hashed_state: None,
                     };
 
                     ExecutedBlock {
@@ -1698,20 +1700,30 @@ mod tests {
                 .into_iter()
                 .map(|b| b.try_recover().expect("failed to seal block with senders"))
                 .collect(),
-            &ExecutionOutcome {
-                bundle: BundleState::new(
+            &{
+                let state = execution_state_from_init(
                     database_state.into_iter().map(|(address, (account, _))| {
-                        (address, None, Some(account.into()), Default::default())
+                        (address, (None, Some(account), BTreeMap::default()))
                     }),
-                    database_changesets.iter().map(|block_changesets| {
-                        block_changesets.iter().map(|(address, account, _)| {
-                            (*address, Some(Some((*account).into())), [])
-                        })
-                    }),
+                    [],
+                );
+                let block_reverts = database_changesets
+                    .iter()
+                    .map(|block_changesets| {
+                        let mut accounts = AddressMap::default();
+                        for (address, account, _) in block_changesets {
+                            accounts.insert(*address, Some(account_to_revert(*account)));
+                        }
+                        BlockReverts { accounts, storage: AddressMap::default() }
+                    })
+                    .collect();
+                ExecutionOutcome::from_state_and_reverts(
+                    state,
+                    block_reverts,
                     Vec::new(),
-                ),
-                first_block: first_database_block,
-                ..Default::default()
+                    first_database_block,
+                    Vec::new(),
+                )
             },
             Default::default(),
         )?;
@@ -1725,27 +1737,26 @@ mod tests {
                 .first()
                 .map(|block| {
                     let senders = block.senders().expect("failed to recover senders");
+                    let state = execution_state_from_init(
+                        in_memory_state.into_iter().map(|(address, (account, _))| {
+                            (address, (None, Some(account), BTreeMap::default()))
+                        }),
+                        [],
+                    );
                     ExecutedBlock {
                         recovered_block: Arc::new(RecoveredBlock::new_sealed(
                             block.clone(),
                             senders,
                         )),
                         execution_output: Arc::new(BlockExecutionOutput {
-                            state: BundleState::new(
-                                in_memory_state.into_iter().map(|(address, (account, _))| {
-                                    (address, None, Some(account.into()), Default::default())
-                                }),
-                                [in_memory_changesets.iter().map(|(address, account, _)| {
-                                    (*address, Some(Some((*account).into())), Vec::new())
-                                })],
-                                [],
-                            ),
+                            state: state.into(),
                             result: BlockExecutionResult {
                                 receipts: Default::default(),
                                 requests: Default::default(),
                                 gas_used: 0,
                                 blob_gas_used: 0,
                             },
+                            hashed_state: None,
                         }),
                         ..Default::default()
                     }

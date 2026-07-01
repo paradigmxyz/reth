@@ -35,7 +35,6 @@ reth-primitives-traits.workspace = true
 reth-ethereum-primitives.workspace = true
 reth-db = { workspace = true, features = ["mdbx"] }
 reth-provider.workspace = true
-reth-revm.workspace = true
 reth-transaction-pool.workspace = true
 reth-cli-runner.workspace = true
 reth-cli-util.workspace = true
@@ -82,28 +81,25 @@ tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
 toml.workspace = true
 zstd.workspace = true
 
+[build-dependencies]
+evm2-jit-build.workspace = true
+
 [features]
 default = [
     "jemalloc",
     "otlp",
     "otlp-logs",
-    "reth-revm/portable",
     "js-tracer",
     "jit",
     "keccak-cache-global",
     "asm-keccak",
-    "gmp",
     "min-trace-logs",
+    "portable",
 ]
 
 jit = [
     "reth-ethereum-cli/jit",
     "reth-node-ethereum/jit",
-]
-gmp = [
-    "reth-ethereum-cli/gmp",
-    "reth-node-ethereum/gmp",
-    "reth-revm/gmp",
 ]
 
 otlp = [
@@ -129,6 +125,7 @@ asm-keccak = [
     "reth-node-ethereum/asm-keccak",
     "alloy-primitives/asm-keccak",
 ]
+portable = ["reth-node-ethereum/portable"]
 keccak-cache-global = [
     "reth-node-core/keccak-cache-global",
     "reth-node-ethereum/keccak-cache-global",

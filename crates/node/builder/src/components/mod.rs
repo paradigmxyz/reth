@@ -21,8 +21,9 @@ pub use network::*;
 pub use payload::*;
 pub use pool::*;
 
-use crate::{ConfigureEvm, FullNodeTypes};
+use crate::FullNodeTypes;
 use reth_consensus::FullConsensus;
+use reth_evm::ConfigureEvm;
 use reth_network::types::NetPrimitivesFor;
 use reth_network_api::FullNetwork;
 use reth_node_api::{NodeTypes, PrimitivesTy, TxTy};
@@ -129,7 +130,7 @@ where
     N: Clone,
     Node: FullNodeTypes,
     Pool: TransactionPool,
-    EVM: ConfigureEvm,
+    EVM: Clone,
     Cons: Clone,
 {
     fn clone(&self) -> Self {

@@ -12,17 +12,17 @@ use reth_exex::{ExExManagerHandle, ExExNotification, ExExNotificationSource};
 use reth_primitives_traits::{format_gas_throughput, BlockBody, NodePrimitives};
 use reth_provider::{
     providers::{StaticFileProvider, StaticFileWriter},
-    BlockHashReader, BlockReader, DBProvider, EitherWriter, ExecutionOutcome, HeaderProvider,
-    LatestStateProviderRef, OriginalValuesKnown, ProviderError, StateWriteConfig, StateWriter,
-    StaticFileProviderFactory, StatsReader, StoragePath, StorageSettingsCache, TransactionVariant,
+    BlockHashReader, BlockReader, DBProvider, EitherWriter, HeaderProvider, LatestStateProviderRef,
+    OriginalValuesKnown, ProviderError, StateWriteConfig, StateWriter, StaticFileProviderFactory,
+    StatsReader, StoragePath, StorageSettingsCache, TransactionVariant,
 };
-use reth_revm::database::StateProviderDatabase;
 use reth_stages_api::{
     BlockErrorKind, CheckpointBlockRange, EntitiesCheckpoint, ExecInput, ExecOutput,
     ExecutionCheckpoint, ExecutionStageThresholds, Stage, StageCheckpoint, StageError, StageId,
     UnwindInput, UnwindOutput,
 };
 use reth_static_file_types::StaticFileSegment;
+use reth_storage_api::SharedEvmStateProviderDatabase;
 use reth_trie::KeccakKeyHasher;
 use std::{
     cmp::{max, Ordering},
@@ -45,7 +45,7 @@ pub mod slot_preimages;
 ///
 /// Input tables:
 /// - [`tables::CanonicalHeaders`] get next block to execute.
-/// - [`tables::Headers`] get for revm environment variables.
+/// - [`tables::Headers`] get for EVM environment variables.
 /// - [`tables::BlockBodyIndices`] to get tx number
 /// - [`tables::Transactions`] to execute
 ///
@@ -304,9 +304,6 @@ where
 
         self.ensure_consistency(provider, input.checkpoint().block_number, None)?;
 
-        let db = StateProviderDatabase(LatestStateProviderRef::new(provider));
-        let mut executor = self.evm_config.batch_executor(db);
-
         // Progress tracking
         let mut stage_progress = start_block;
         let mut stage_checkpoint = execution_checkpoint(
@@ -333,6 +330,11 @@ where
 
         let mut blocks = Vec::new();
         let mut results = Vec::new();
+        let state_provider = LatestStateProviderRef::new(provider);
+        // SAFETY: The shared database is scoped to this synchronous stage execution and is dropped
+        // before `state_provider`.
+        let batch_db = unsafe { SharedEvmStateProviderDatabase::new(&state_provider) };
+        let mut executor = self.evm_config.batch_executor(batch_db);
         for block_number in start_block..=max_block {
             // Fetch the block
             let fetch_block_start = Instant::now();
@@ -408,11 +410,7 @@ where
 
         // prepare execution output for writing
         let time = Instant::now();
-        let mut state = ExecutionOutcome::from_blocks(
-            start_block,
-            executor.into_state().take_bundle(),
-            results,
-        );
+        let mut state = executor.into_execution_outcome(start_block, results);
         let write_preparation_duration = time.elapsed();
 
         // log the gas per second for the range we just executed
@@ -452,7 +450,7 @@ where
             // Iterate over all reverts and clear them if pruning is configured.
             for block_number in start_block..=max_block {
                 let Some(reverts) =
-                    state.bundle.reverts.get_mut((block_number - start_block) as usize)
+                    state.block_reverts_mut().get_mut((block_number - start_block) as usize)
                 else {
                     break
                 };
@@ -497,8 +495,8 @@ where
         provider.write_state(&state, OriginalValuesKnown::Yes, StateWriteConfig::default())?;
 
         if provider.cached_storage_settings().use_hashed_state() {
-            let hashed_state = state.hash_state_slow::<KeccakKeyHasher>();
-            provider.write_hashed_state(&hashed_state.into_sorted())?;
+            let hashed_state = state.hash_state_slow::<KeccakKeyHasher>().into_sorted();
+            provider.write_hashed_state(&hashed_state)?;
         }
 
         let db_write_duration = time.elapsed();
@@ -553,7 +551,7 @@ where
         // Unwind account and storage changesets, as well as receipts.
         //
         // This also updates `PlainStorageState` and `PlainAccountState`.
-        let bundle_state_with_receipts = provider.take_state_above(unwind_to)?;
+        let block_state_with_receipts = provider.take_state_above(unwind_to)?;
 
         // Prepare the input for post unwind commit hook, where an `ExExNotification` will be sent.
         if self.exex_manager_handle.has_exexs() {
@@ -561,7 +559,7 @@ where
             let blocks = provider.recovered_block_range(range.clone())?;
             let previous_input = self.post_unwind_commit_input.replace(Chain::new(
                 blocks,
-                bundle_state_with_receipts,
+                block_state_with_receipts,
                 BTreeMap::new(),
             ));
 

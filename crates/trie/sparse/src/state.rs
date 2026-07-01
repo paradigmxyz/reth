@@ -4,7 +4,7 @@ use crate::{
     lfu::BucketedLfu, traits::SparseTrie as SparseTrieTrait, ArenaParallelSparseTrie,
     RevealableSparseTrie,
 };
-use alloc::vec::Vec;
+use alloc::{boxed::Box, vec::Vec};
 use alloy_primitives::{map::B256Map, B256};
 use either::Either;
 use reth_execution_errors::{SparseStateTrieResult, SparseTrieErrorKind};
@@ -373,8 +373,15 @@ where
 
     /// Wipe the storage trie at the provided address.
     pub fn wipe_storage(&mut self, address: B256) -> SparseStateTrieResult<()> {
-        if let Some(trie) = self.storage.tries.get_mut(&address) {
+        if let Some(trie) = self.storage.tries.get_mut(&address) &&
+            trie.is_revealed()
+        {
             trie.wipe()?;
+        } else {
+            let mut trie = S::default();
+            trie.set_updates(self.retain_updates);
+            trie.wipe();
+            self.storage.tries.insert(address, RevealableSparseTrie::Revealed(Box::new(trie)));
         }
         Ok(())
     }

@@ -1,6 +1,8 @@
 //! Helpers for testing.
 
 use crate::{ConfigureEvm, EvmEnvFor};
+#[cfg(feature = "std")]
+use alloc::boxed::Box;
 use reth_primitives_traits::{BlockTy, HeaderTy, SealedBlock, SealedHeader};
 
 /// A no-op EVM config that panics on any call. Used as a typesystem hack to satisfy
@@ -32,13 +34,16 @@ where
     type Primitives = Inner::Primitives;
     type Error = Inner::Error;
     type NextBlockEnvCtx = Inner::NextBlockEnvCtx;
+    type TxEnv = Inner::TxEnv;
     type BlockExecutorFactory = Inner::BlockExecutorFactory;
+    #[cfg(feature = "std")]
     type BlockAssembler = Inner::BlockAssembler;
-
+    #[cfg(feature = "std")]
     fn block_executor_factory(&self) -> &Self::BlockExecutorFactory {
         self.inner().block_executor_factory()
     }
 
+    #[cfg(feature = "std")]
     fn block_assembler(&self) -> &Self::BlockAssembler {
         self.inner().block_assembler()
     }
@@ -58,16 +63,38 @@ where
     fn context_for_block<'a>(
         &self,
         block: &'a SealedBlock<BlockTy<Self::Primitives>>,
-    ) -> Result<crate::ExecutionCtxFor<'a, Self>, Self::Error> {
+    ) -> Result<crate::ExecutionCtxFor<'a, Self>, Self::Error>
+    where
+        Self: 'a,
+    {
         self.inner().context_for_block(block)
     }
 
-    fn context_for_next_block(
-        &self,
-        parent: &SealedHeader<HeaderTy<Self::Primitives>>,
+    fn context_for_next_block<'a>(
+        &'a self,
+        parent: &'a SealedHeader<HeaderTy<Self::Primitives>>,
         attributes: Self::NextBlockEnvCtx,
-    ) -> Result<crate::ExecutionCtxFor<'_, Self>, Self::Error> {
+    ) -> Result<crate::ExecutionCtxFor<'a, Self>, Self::Error>
+    where
+        Self: 'a,
+    {
         self.inner().context_for_next_block(parent, attributes)
+    }
+
+    #[cfg(feature = "std")]
+    fn pre_block_state_changes<'a, DB>(
+        &self,
+        db: DB,
+        evm_env: EvmEnvFor<Self>,
+        block_number: u64,
+        ctx: crate::ExecutionCtxFor<'a, Self>,
+    ) -> Result<evm2::BlockStateAccumulator, Box<dyn core::error::Error + Send + Sync>>
+    where
+        Self: 'a,
+        DB: evm2::evm::Database + 'static,
+        DB::Error: core::error::Error + Send + Sync + 'static,
+    {
+        self.inner().pre_block_state_changes(db, evm_env, block_number, ctx)
     }
 }
 

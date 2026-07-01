@@ -1,45 +1,37 @@
-//! Example of how to use a custom inspector to trace new pending transactions
+//! Example of how to use a custom inspector to trace new pending transactions.
 //!
 //! Run with
 //!
 //! ```sh
-//! cargo run --release -p custom-inspector -- node --http --ws --recipients 0x....,0x....
+//! cargo run --release -p example-custom-inspector -- node --http --ws --recipients 0x....,0x....
 //! ```
 //!
 //! If no recipients are specified, all transactions will be inspected.
 
 #![warn(unused_crate_dependencies)]
 
-use alloy_eips::BlockNumberOrTag;
-use alloy_evm::Evm;
 use alloy_primitives::Address;
-use alloy_rpc_types_eth::{state::EvmOverrides, TransactionRequest};
 use clap::Parser;
+use evm2::{
+    interpreter::{opcode::OpCode, Interpreter},
+    BaseEvmTypes, Inspector,
+};
 use futures_util::StreamExt;
 use reth_ethereum::{
     cli::{chainspec::EthereumChainSpecParser, interface::Cli},
-    evm::{
-        primitives::ConfigureEvm,
-        revm::revm::{
-            bytecode::opcode::OpCode,
-            context_interface::ContextTr,
-            inspector::Inspector,
-            interpreter::{interpreter::EthInterpreter, interpreter_types::Jumps, Interpreter},
-        },
-    },
-    node::{builder::FullNodeFor, EthereumNode},
+    evm::{primitives::ConfigureEvm, EthTxEnv},
+    node::{builder::NodeHandle, EthereumNode},
     pool::TransactionPool,
-    rpc::api::eth::helpers::Call,
+    rpc::api::eth::helpers::Trace,
+    storage::{BlockReaderIdExt, SharedEvmStateProviderDatabase, StateProviderFactory},
 };
 
 fn main() {
     Cli::<EthereumChainSpecParser, RethCliTxpoolExt>::parse()
         .run(async move |builder, args| {
             // launch the node
-            let handle = builder.node(EthereumNode::default()).launch().await?;
-
-            let node: FullNodeFor<EthereumNode> = handle.node;
-            let node_exit_future = handle.node_exit_future;
+            let NodeHandle { node, node_exit_future } =
+                builder.node(EthereumNode::default()).launch().await?;
 
             // create a new subscription to pending transactions
             let mut pending_transactions = node.pool.new_pending_pool_transactions_listener();
@@ -47,7 +39,7 @@ fn main() {
             // get an instance of the `eth_` API handler
             let eth_api = node.rpc_registry.eth_api().clone();
 
-            println!("Spawning trace task!");
+            println!("Spawning inspect task!");
 
             // Spawn an async block to listen for transactions.
             node.task_executor.spawn_task(async move {
@@ -59,39 +51,47 @@ fn main() {
                     if let Some(recipient) = tx.to() &&
                         args.is_match(&recipient)
                     {
-                        // convert the pool transaction
-                        let call_request =
-                            TransactionRequest::from_recovered_transaction(tx.to_consensus());
+                        let Some(header) = (match node.provider.latest_header() {
+                            Ok(header) => header,
+                            Err(err) => {
+                                eprintln!("failed to load latest header: {err}");
+                                continue;
+                            }
+                        }) else {
+                            eprintln!("latest header is unavailable");
+                            continue;
+                        };
 
-                        let evm_config = node.evm_config.clone();
+                        let state = match node.provider.latest() {
+                            Ok(state) => state,
+                            Err(err) => {
+                                eprintln!("failed to load latest state: {err}");
+                                continue;
+                            }
+                        };
 
-                        let result = eth_api
-                            .spawn_with_call_at(
-                                call_request,
-                                BlockNumberOrTag::Latest.into(),
-                                EvmOverrides::default(),
-                                move |db, evm_env, tx_env| {
-                                    let mut dummy_inspector = DummyInspector::default();
-                                    let mut evm = evm_config.evm_with_env_and_inspector(
-                                        db,
-                                        evm_env,
-                                        &mut dummy_inspector,
-                                    );
-                                    // execute the transaction on a blocking task and await
-                                    // the
-                                    // inspector result
-                                    let _ = evm.transact(tx_env)?;
-                                    Ok(dummy_inspector)
-                                },
-                            )
-                            .await;
+                        let evm_env = match node.evm_config.evm_env(header.header()) {
+                            Ok(env) => env,
+                            Err(err) => match err {},
+                        };
+                        let tx_env = EthTxEnv::from(tx.to_consensus());
 
-                        if let Ok(ret_val) = result {
+                        // SAFETY: `db` is only used for the synchronous inspection call below and
+                        // is dropped before the boxed state provider.
+                        let db = unsafe { SharedEvmStateProviderDatabase::new(&*state) };
+                        let result = eth_api.inspect_with_inspector(
+                            db,
+                            evm_env,
+                            tx_env,
+                            DummyInspector::default(),
+                        );
+
+                        if let Ok((inspector, _)) = result {
                             let hash = tx.hash();
                             println!(
-                                "Inspector result for transaction {}: \n {}",
+                                "Inspector result for transaction {}:\n{}",
                                 hash,
-                                ret_val.ret_val.join("\n")
+                                inspector.ret_val.join("\n")
                             );
                         }
                     }
@@ -118,23 +118,15 @@ impl RethCliTxpoolExt {
     }
 }
 
-/// A dummy inspector that logs the opcodes and their corresponding program counter for a
-/// transaction
+/// A dummy inspector that logs the opcodes and their corresponding program counter.
 #[derive(Default, Debug, Clone)]
 struct DummyInspector {
     ret_val: Vec<String>,
 }
 
-impl<CTX> Inspector<CTX, EthInterpreter> for DummyInspector
-where
-    CTX: ContextTr,
-{
-    /// This method is called at each step of the EVM execution.
-    /// It checks if the current opcode is valid and if so, it stores the opcode and its
-    /// corresponding program counter in the `ret_val` vector.
-    fn step(&mut self, interp: &mut Interpreter<EthInterpreter>, _context: &mut CTX) {
-        if let Some(opcode) = OpCode::new(interp.bytecode.opcode()) {
-            self.ret_val.push(format!("{}: {}", interp.bytecode.pc(), opcode));
-        }
+impl Inspector<BaseEvmTypes> for DummyInspector {
+    fn step(&mut self, interp: &mut Interpreter<'_, BaseEvmTypes>) {
+        let opcode = OpCode::new_or_unknown(interp.opcode());
+        self.ret_val.push(format!("{}: {}", interp.pc(), opcode));
     }
 }

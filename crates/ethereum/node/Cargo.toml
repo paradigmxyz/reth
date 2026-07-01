@@ -23,8 +23,8 @@ reth-tracing.workspace = true
 reth-provider.workspace = true
 reth-transaction-pool.workspace = true
 reth-network.workspace = true
-reth-evm.workspace = true
-reth-evm-ethereum = { workspace = true, features = ["std"] }
+reth-evm = { workspace = true, features = ["blst", "c-kzg", "p256-aws-lc-rs"] }
+reth-evm-ethereum = { workspace = true, features = ["std", "blst", "c-kzg", "p256-aws-lc-rs"] }
 reth-rpc.workspace = true
 reth-rpc-api.workspace = true
 reth-rpc-eth-api.workspace = true
@@ -33,7 +33,6 @@ reth-rpc-server-types.workspace = true
 reth-node-api.workspace = true
 reth-node-core.workspace = true
 reth-chainspec.workspace = true
-reth-revm = { workspace = true, features = ["std"] }
 reth-rpc-eth-types.workspace = true
 reth-engine-local.workspace = true
 reth-engine-primitives = { workspace = true, features = ["std"] }
@@ -49,10 +48,6 @@ alloy-rpc-types-engine = { workspace = true, features = ["ssz"] }
 
 # async
 tokio = { workspace = true, features = ["sync"] }
-
-# revm with required ethereum features
-# Note: this must be kept to ensure all features are properly enabled/forwarded
-revm = { workspace = true, features = ["secp256k1", "blst", "c-kzg", "memory_limit", "p256-aws-lc-rs"] }
 
 # misc
 eyre.workspace = true
@@ -94,11 +89,15 @@ reth-rpc-layer.workspace = true
 [features]
 default = []
 jit = ["reth-evm-ethereum/jit"]
-gmp = ["reth-evm-ethereum/gmp"]
 asm-keccak = [
     "alloy-primitives/asm-keccak",
     "reth-node-core/asm-keccak",
-    "revm/asm-keccak",
+    "reth-evm/asm-keccak",
+    "reth-evm-ethereum/asm-keccak",
+]
+portable = [
+    "reth-evm/portable",
+    "reth-evm-ethereum/portable",
 ]
 keccak-cache-global = [
     "alloy-primitives/keccak-cache-global",
@@ -115,7 +114,6 @@ test-utils = [
     "reth-chainspec/test-utils",
     "reth-network/test-utils",
     "reth-ethereum-primitives/test-utils",
-    "reth-revm/test-utils",
     "reth-db/test-utils",
     "reth-provider/test-utils",
     "reth-transaction-pool/test-utils",

@@ -12,6 +12,7 @@ use alloy_rpc_types_engine::{
     ForkchoiceState, PayloadStatus, PayloadStatusEnum, PayloadValidationError,
 };
 use error::{InsertBlockError, InsertBlockFatalError, InsertBlockValidationError};
+use evm2::debug_unreachable;
 use reth_chain_state::{
     CanonicalInMemoryState, ComputedTrieData, ExecutedBlock, ExecutionTimingStats,
     MemoryOverlayStateProvider, NewCanonicalChain, StateTrieOverlayManager,
@@ -34,12 +35,10 @@ use reth_provider::{
     StateProviderBox, StateProviderFactory, StateReader, StorageChangeSetReader,
     StorageSettingsCache, TransactionVariant,
 };
-use reth_revm::database::StateProviderDatabase;
 use reth_stages_api::ControlFlow;
 use reth_tasks::{spawn_os_thread, utils::increase_thread_priority};
 use reth_trie_db::ChangesetCache;
 use reth_trie_sparse::SparseTrieRetainedPaths;
-use revm::interpreter::debug_unreachable;
 use state::TreeState;
 use std::{fmt::Debug, ops, sync::Arc, time::Duration};
 
@@ -1563,7 +1562,9 @@ where
                         debug!(target: "engine::tree", block=?block_num_hash, "inserting already executed block");
                         let now = Instant::now();
 
-                        let block = match self.payload_validator.on_inserted_executed_block(payload)
+                        let block = match self
+                            .payload_validator
+                            .on_inserted_executed_block(payload, &self.state)
                         {
                             Ok(block) => block,
                             Err(err) => {
@@ -2182,7 +2183,9 @@ where
             .provider
             .get_state(block.header().number())?
             .ok_or_else(|| ProviderError::StateForNumberNotFound(block.header().number()))?;
-        let hashed_state = self.provider.hashed_post_state(execution_output.state());
+        let block_state = execution_output.execution_state();
+        let hashed_state =
+            execution_output.hash_state_slow::<reth_trie::KeccakKeyHasher>().into_sorted();
 
         debug!(
             target: "engine::tree",
@@ -2196,18 +2199,19 @@ where
             block.number(),
         )?;
 
-        let sorted_hashed_state = Arc::new(hashed_state.into_sorted());
+        let sorted_hashed_state = Arc::new(hashed_state);
         let sorted_trie_updates = Arc::new(trie_updates);
         let trie_data = ComputedTrieData::new(sorted_hashed_state, sorted_trie_updates);
 
         let execution_output = Arc::new(BlockExecutionOutput {
-            state: execution_output.bundle,
+            state: block_state.into(),
             result: BlockExecutionResult {
                 receipts: execution_output.receipts.pop().unwrap_or_default(),
                 requests: execution_output.requests.pop().unwrap_or_default(),
                 gas_used: block.gas_used(),
                 blob_gas_used: block.blob_gas_used().unwrap_or_default(),
             },
+            hashed_state: None,
         });
 
         Ok(ExecutedBlock::new(

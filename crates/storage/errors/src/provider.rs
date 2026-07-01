@@ -7,10 +7,6 @@ use reth_codecs::DecompressError;
 use reth_primitives_traits::{transaction::signed::RecoveryError, GotExpected};
 use reth_prune_types::PruneSegmentError;
 use reth_static_file_types::StaticFileSegment;
-use revm::{
-    database_interface::{bal::EvmDatabaseError, DBErrorMarker},
-    state::bal::BalError,
-};
 
 /// Provider result type.
 pub type ProviderResult<Ok> = Result<Ok, ProviderError>;
@@ -21,9 +17,6 @@ pub enum ProviderError {
     /// Database error.
     #[error(transparent)]
     Database(#[from] DatabaseError),
-    /// BAL error.
-    #[error("BAL error:{_0}")]
-    Bal(BalError),
     /// Pruning error.
     #[error(transparent)]
     Pruning(#[from] PruneSegmentError),
@@ -228,8 +221,6 @@ impl ProviderError {
     }
 }
 
-impl DBErrorMarker for ProviderError {}
-
 impl From<alloy_rlp::Error> for ProviderError {
     fn from(error: alloy_rlp::Error) -> Self {
         Self::Rlp(error)
@@ -239,12 +230,6 @@ impl From<alloy_rlp::Error> for ProviderError {
 impl From<RecoveryError> for ProviderError {
     fn from(_: RecoveryError) -> Self {
         Self::SenderRecoveryError
-    }
-}
-
-impl From<ProviderError> for EvmDatabaseError<ProviderError> {
-    fn from(error: ProviderError) -> Self {
-        Self::Database(error)
     }
 }
 

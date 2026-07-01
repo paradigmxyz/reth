@@ -11,7 +11,6 @@ use reth_trie::{
     updates::TrieUpdates, AccountProof, HashedPostState, HashedStorage, MultiProof,
     MultiProofTargets, StorageMultiProof, TrieInput,
 };
-use revm::database::BundleState;
 use std::{borrow::Cow, sync::OnceLock};
 
 /// A state provider that stores references to in-memory blocks along with their state as well as a
@@ -208,11 +207,7 @@ impl<N: NodePrimitives> StateProofProvider for MemoryOverlayStateProviderRef<'_,
     }
 }
 
-impl<N: NodePrimitives> HashedPostStateProvider for MemoryOverlayStateProviderRef<'_, N> {
-    fn hashed_post_state(&self, bundle_state: &BundleState) -> HashedPostState {
-        self.historical.hashed_post_state(bundle_state)
-    }
-}
+impl<N: NodePrimitives> HashedPostStateProvider for MemoryOverlayStateProviderRef<'_, N> {}
 
 impl<N: NodePrimitives> StateProvider for MemoryOverlayStateProviderRef<'_, N> {
     fn storage(

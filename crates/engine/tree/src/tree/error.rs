@@ -1,6 +1,5 @@
 //! Internal errors for the tree module.
 
-use crate::tree::payload_processor::bal::BalExecutionError;
 use alloy_consensus::BlockHeader;
 use reth_consensus::ConsensusError;
 use reth_errors::{BlockExecutionError, BlockValidationError, ProviderError};
@@ -120,17 +119,6 @@ pub enum InsertBlockErrorKind {
     /// Other errors.
     #[error(transparent)]
     Other(#[from] Box<dyn core::error::Error + Send + Sync + 'static>),
-}
-
-impl From<BalExecutionError> for InsertBlockErrorKind {
-    fn from(e: BalExecutionError) -> Self {
-        match e {
-            BalExecutionError::Consensus(inner) => Self::Consensus(inner),
-            BalExecutionError::Execution(inner) => Self::Execution(inner),
-            BalExecutionError::Provider(inner) => Self::Provider(inner),
-            BalExecutionError::Other(inner) => Self::Other(inner),
-        }
-    }
 }
 
 impl InsertBlockErrorKind {

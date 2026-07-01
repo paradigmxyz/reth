@@ -10,13 +10,13 @@ use reth_evm::{
     ConfigureEvm,
 };
 use reth_evm_ethereum::EthEvmConfig;
+use reth_execution_types::hashed_post_state_sorted_from_execution_state;
 use reth_node_api::NodePrimitives;
 use reth_primitives_traits::{Block as _, RecoveredBlock};
 use reth_provider::{
     providers::ProviderNodeTypes, BlockWriter as _, ExecutionOutcome, LatestStateProvider,
-    ProviderFactory,
+    ProviderFactory, SharedEvmStateProviderDatabase,
 };
-use reth_revm::database::StateProviderDatabase;
 use reth_testing_utils::generators::sign_tx_with_key_pair;
 use reth_trie_common::KeccakKeyHasher;
 use secp256k1::Keypair;
@@ -25,12 +25,11 @@ pub(crate) fn to_execution_outcome(
     block_number: u64,
     block_execution_output: &BlockExecutionOutput<Receipt>,
 ) -> ExecutionOutcome {
-    ExecutionOutcome {
-        bundle: block_execution_output.state.clone(),
-        receipts: vec![block_execution_output.receipts.clone()],
-        first_block: block_number,
-        requests: vec![block_execution_output.requests.clone()],
-    }
+    ExecutionOutcome::from_block_states(
+        block_number,
+        [block_execution_output.state.inner().clone()],
+        vec![block_execution_output.result.clone()],
+    )
 }
 
 pub(crate) fn chain_spec(address: Address) -> Arc<ChainSpec> {
@@ -68,17 +67,23 @@ where
 {
     let provider = provider_factory.provider()?;
 
-    // Execute the block to produce a block execution output
-    let mut block_execution_output = EthEvmConfig::ethereum(chain_spec)
-        .batch_executor(StateProviderDatabase::new(LatestStateProvider::new(provider)))
-        .execute(block)?;
-    block_execution_output.state.reverts.sort();
+    // Execute the block to produce a block execution output.
+    let state_provider = LatestStateProvider::new(provider);
+    // SAFETY: The shared database is consumed by this synchronous execution call and does not
+    // outlive the state provider borrowed here.
+    let database = unsafe { SharedEvmStateProviderDatabase::new(&state_provider) };
+    let block_execution_output = EthEvmConfig::ethereum(chain_spec)
+        .executor(database)
+        .execute(block)
+        .map_err(|err| eyre::eyre!(err.to_string()))?;
 
     // Convert the block execution output to an execution outcome for committing to the database
     let execution_outcome = to_execution_outcome(block.number(), &block_execution_output);
 
     // Commit the block's execution outcome to the database
-    let hashed_state = execution_outcome.hash_state_slow::<KeccakKeyHasher>().into_sorted();
+    let hashed_state = hashed_post_state_sorted_from_execution_state::<KeccakKeyHasher>(
+        &block_execution_output.state,
+    );
     let provider_rw = provider_factory.provider_rw()?;
     provider_rw.append_blocks_with_state(vec![block.clone()], &execution_outcome, hashed_state)?;
     provider_rw.commit()?;
@@ -193,29 +198,24 @@ where
     N: ProviderNodeTypes,
     N::Primitives: NodePrimitives<
         Block = reth_ethereum_primitives::Block,
+        BlockBody = reth_ethereum_primitives::BlockBody,
         Receipt = reth_ethereum_primitives::Receipt,
     >,
 {
-    let (block1, block2) = blocks(chain_spec.clone(), key_pair)?;
+    let outputs = blocks_and_execution_outputs(provider_factory, chain_spec, key_pair)?;
+    let first_block = outputs.first().map(|(block, _)| block.number()).unwrap_or_default();
+    let mut blocks = Vec::with_capacity(outputs.len());
+    let mut states = Vec::with_capacity(outputs.len());
+    let mut results = Vec::with_capacity(outputs.len());
 
-    let provider = provider_factory.provider()?;
+    for (block, output) in outputs {
+        let BlockExecutionOutput { result, state, .. } = output;
+        blocks.push(block);
+        states.push(state.into_inner());
+        results.push(result);
+    }
 
-    let evm_config = EthEvmConfig::new(chain_spec);
-    let executor =
-        evm_config.batch_executor(StateProviderDatabase::new(LatestStateProvider::new(provider)));
+    let execution_outcome = ExecutionOutcome::from_block_states(first_block, states, results);
 
-    let mut execution_outcome = executor.execute_batch(vec![&block1, &block2])?;
-    execution_outcome.state_mut().reverts.sort();
-
-    // Commit the block's execution outcome to the database
-    let hashed_state = execution_outcome.hash_state_slow::<KeccakKeyHasher>().into_sorted();
-    let provider_rw = provider_factory.provider_rw()?;
-    provider_rw.append_blocks_with_state(
-        vec![block1.clone(), block2.clone()],
-        &execution_outcome,
-        hashed_state,
-    )?;
-    provider_rw.commit()?;
-
-    Ok((vec![block1, block2], execution_outcome))
+    Ok((blocks, execution_outcome))
 }

@@ -36,7 +36,10 @@ use reth_rpc::{
     eth::{core::EthRpcConverterFor, DevSigner, EthApiTypes, FullEthApiServer},
     AdminApi,
 };
-use reth_rpc_api::{eth::helpers::EthTransactions, IntoEngineApiRpcModule};
+use reth_rpc_api::{
+    eth::helpers::{EthTransactions, TraceExt},
+    IntoEngineApiRpcModule,
+};
 use reth_rpc_builder::{
     auth::{AuthRpcModule, AuthServerHandle},
     config::RethRpcServerConfig,
@@ -938,6 +941,7 @@ where
     N: FullNodeComponents,
     N::Provider: ChainSpecProvider<ChainSpec: EthereumHardforks>,
     EthB: EthApiBuilder<N>,
+    EthB::EthApi: TraceExt,
     EB: EngineApiBuilder<N>,
     EVB: EngineValidatorBuilder<N>,
     RpcMiddleware: RethRpcMiddleware,
@@ -1243,6 +1247,7 @@ where
     N: FullNodeComponents,
     <N as FullNodeTypes>::Provider: ChainSpecProvider<ChainSpec: EthereumHardforks>,
     EthB: EthApiBuilder<N>,
+    EthB::EthApi: TraceExt,
     PVB: PayloadValidatorBuilder<N>,
     EB: EngineApiBuilder<N>,
     EVB: EngineValidatorBuilder<N>,
@@ -1295,8 +1300,9 @@ pub struct EthApiCtx<'a, N: FullNodeTypes> {
     pub engine_handle: ConsensusEngineHandle<<N::Types as NodeTypes>::Payload>,
 }
 
-impl<'a, N: FullNodeComponents<Types: NodeTypes<ChainSpec: Hardforks + EthereumHardforks>>>
-    EthApiCtx<'a, N>
+impl<'a, N> EthApiCtx<'a, N>
+where
+    N: FullNodeComponents<Types: NodeTypes<ChainSpec: Hardforks + EthereumHardforks>>,
 {
     /// Provides a [`EthApiBuilder`] with preconfigured config and components.
     pub fn eth_api_builder(self) -> reth_rpc::EthApiBuilder<N, EthRpcConverterFor<N>> {

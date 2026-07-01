@@ -1,13 +1,11 @@
 //! Compatibility functions for rpc `Transaction` type.
-use crate::{
-    RpcHeader, RpcReceipt, RpcTransaction, RpcTxReq, RpcTypes, SignableTxRequest, TryIntoTxEnv,
-};
+use crate::{RpcHeader, RpcReceipt, RpcTransaction, RpcTxReq, RpcTypes, SignableTxRequest};
 use alloy_consensus::{error::ValueError, transaction::Recovered};
 use alloy_primitives::Address;
 use alloy_rpc_types_eth::TransactionInfo;
 use core::error;
 use dyn_clone::DynClone;
-use reth_evm::{BlockEnvFor, ConfigureEvm, EvmEnvFor, SpecFor, TxEnvFor};
+use reth_evm::{ConfigureEvm, EvmEnvFor, TxEnvFor};
 use reth_primitives_traits::{
     BlockTy, HeaderTy, NodePrimitives, SealedBlock, SealedHeader, SealedHeaderFor, TransactionMeta,
     TxTy,
@@ -297,19 +295,9 @@ where
 
 /// Converts `TxReq` into `TxEnv`.
 ///
-/// Where:
-/// * `TxReq` is a transaction request received from an RPC API
-/// * `TxEnv` is the corresponding transaction environment for execution
-///
-/// The `TxEnvConverter` has two blanket implementations:
-/// * `()` assuming `TxReq` implements [`TryIntoTxEnv`] and is used as default for [`RpcConverter`].
-/// * `Fn(TxReq, &CfgEnv<Spec>, &BlockEnv) -> Result<TxEnv, E>` and can be applied using
-///   [`RpcConverter::with_tx_env_converter`].
-///
-/// One should prefer to implement [`TryIntoTxEnv`] for `TxReq` to get the `TxEnvConverter`
-/// implementation for free, thanks to the blanket implementation, unless the conversion requires
-/// more context. For example, some configuration parameters or access handles to database, network,
-/// etc.
+/// The default `()` implementation is intentionally unsupported in the active EVM path because
+/// executable RPC calls are stubbed. Sync-critical transaction conversion uses
+/// [`SimTxConverter`] instead.
 pub trait TxEnvConverter<TxReq, Evm: ConfigureEvm>:
     Debug + Send + Sync + Unpin + Clone + 'static
 {
@@ -328,17 +316,17 @@ pub trait TxEnvConverter<TxReq, Evm: ConfigureEvm>:
 
 impl<TxReq, Evm> TxEnvConverter<TxReq, Evm> for ()
 where
-    TxReq: TryIntoTxEnv<TxEnvFor<Evm>, SpecFor<Evm>, BlockEnvFor<Evm>>,
     Evm: ConfigureEvm,
 {
-    type Error = TxReq::Err;
+    type Error = TransactionConversionError;
 
     fn convert_tx_env(
         &self,
         tx_req: TxReq,
         evm_env: &EvmEnvFor<Evm>,
     ) -> Result<TxEnvFor<Evm>, Self::Error> {
-        tx_req.try_into_tx_env(evm_env)
+        let _ = (tx_req, evm_env);
+        Err(TransactionConversionError::UnsupportedTxEnv)
     }
 }
 
@@ -377,6 +365,10 @@ pub enum TransactionConversionError {
     /// Other conversion errors.
     #[error("{0}")]
     Other(String),
+
+    /// Transaction environment conversion is unsupported in the active EVM RPC stub path.
+    #[error("transaction environment conversion is unsupported by the active EVM execution path")]
+    UnsupportedTxEnv,
 }
 /// Generic RPC response object converter for `Evm` and network `Network`.
 ///
@@ -387,8 +379,7 @@ pub enum TransactionConversionError {
 /// network and EVM associated primitives:
 /// * [`FromConsensusTx`]: from signed transaction into RPC response object.
 /// * [`TryIntoSimTx`]: from RPC transaction request into a simulated transaction.
-/// * [`TryIntoTxEnv`] or [`TxEnvConverter`]: from RPC transaction request into an executable
-///   transaction.
+/// * [`TxEnvConverter`]: from RPC transaction request into an executable transaction.
 /// * [`TxInfoMapper`]: from [`TransactionInfo`] into [`FromConsensusTx::TxInfo`]. Should be
 ///   implemented for a dedicated struct that is assigned to `Map`. If [`FromConsensusTx::TxInfo`]
 ///   is [`TransactionInfo`] then `()` can be used as `Map` which trivially passes over the input

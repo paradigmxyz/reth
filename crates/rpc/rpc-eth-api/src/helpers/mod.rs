@@ -39,7 +39,7 @@ pub use receipt::LoadReceipt;
 pub use signer::EthSigner;
 pub use spec::EthApiSpec;
 pub use state::{EthState, LoadState};
-pub use trace::Trace;
+pub use trace::{Trace, TracingCtx};
 pub use transaction::{EthTransactions, LoadTransaction};
 
 use crate::FullEthApiTypes;

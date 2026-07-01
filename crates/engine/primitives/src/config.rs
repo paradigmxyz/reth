@@ -135,8 +135,6 @@ pub struct TreeConfig {
     multiproof_chunk_size: usize,
     /// Number of reserved CPU cores for non-reth processes
     reserved_cpu_cores: usize,
-    /// Whether to disable the precompile cache
-    precompile_cache_disabled: bool,
     /// Whether to use state root fallback for testing
     state_root_fallback: bool,
     /// Whether to always process payload attributes and begin a payload build process
@@ -229,7 +227,6 @@ impl Default for TreeConfig {
             has_enough_parallelism: has_enough_parallelism(),
             multiproof_chunk_size: DEFAULT_MULTIPROOF_TASK_CHUNK_SIZE,
             reserved_cpu_cores: DEFAULT_RESERVED_CPU_CORES,
-            precompile_cache_disabled: false,
             state_root_fallback: false,
             always_process_payload_attributes_on_canonical_head: false,
             allow_unwind_canonical_header: false,
@@ -273,7 +270,6 @@ impl TreeConfig {
         has_enough_parallelism: bool,
         multiproof_chunk_size: usize,
         reserved_cpu_cores: usize,
-        precompile_cache_disabled: bool,
         state_root_fallback: bool,
         always_process_payload_attributes_on_canonical_head: bool,
         allow_unwind_canonical_header: bool,
@@ -307,7 +303,6 @@ impl TreeConfig {
             has_enough_parallelism,
             multiproof_chunk_size,
             reserved_cpu_cores,
-            precompile_cache_disabled,
             state_root_fallback,
             always_process_payload_attributes_on_canonical_head,
             allow_unwind_canonical_header,
@@ -413,11 +408,6 @@ impl TreeConfig {
     /// Returns the cross-block cache size.
     pub const fn cross_block_cache_size(&self) -> usize {
         self.cross_block_cache_size
-    }
-
-    /// Returns whether precompile cache is disabled.
-    pub const fn precompile_cache_disabled(&self) -> bool {
-        self.precompile_cache_disabled
     }
 
     /// Returns whether to use state root fallback.
@@ -566,12 +556,6 @@ impl TreeConfig {
     /// Setter for the number of reserved CPU cores for any non-reth processes
     pub const fn with_reserved_cpu_cores(mut self, reserved_cpu_cores: usize) -> Self {
         self.reserved_cpu_cores = reserved_cpu_cores;
-        self
-    }
-
-    /// Setter for whether to disable the precompile cache.
-    pub const fn without_precompile_cache(mut self, precompile_cache_disabled: bool) -> Self {
-        self.precompile_cache_disabled = precompile_cache_disabled;
         self
     }
 

@@ -1,336 +1,203 @@
-//! Big-block EVM configuration.
-//!
-//! Wraps [`EthEvmConfig`] to create executors that handle multi-segment
-//! big-block execution internally. At transaction boundaries defined by
-//! [`BigBlockData`], the executor swaps the EVM environment (block env,
-//! cfg env) and applies pre/post execution changes for each segment.
+// Stubbed big-block EVM configuration.
+//
+// Big-block execution is parked while it is ported to the active EVM. This wrapper keeps the node
+// type and payload shape available without retaining a direct legacy executor dependency in
+// `reth-bb`.
 
-use alloy_primitives::Bytes;
 pub(crate) use reth_engine_primitives::BigBlockData;
-use reth_engine_primitives::ExecutionPayload as _;
+
+use alloy_consensus::transaction::Recovered;
+use alloy_primitives::{Address, Bytes};
+use alloy_rpc_types::engine::ExecutionData;
+use core::{convert::Infallible, fmt};
+use reth_ethereum_primitives::EthPrimitives;
+use reth_evm::{
+    ConfigureEngineEvm, ConfigureEvm, EvmEnvFor, ExecutableTxIterator, ExecutionCtxFor,
+    NextBlockEnvAttributes,
+};
+use reth_evm_ethereum::{EthEvmConfig, EthEvmEnv, EthTxEnv};
+use reth_primitives_traits::{BlockTy, HeaderTy, SealedBlock, SealedHeader, TxTy};
 use reth_storage_errors::any::AnyError;
 
-use crate::evm::{BalIndexReader, BbBlockExecutorFactory, BbEvmPlan};
-use alloy_consensus::Header;
-use alloy_eips::Decodable2718;
-use alloy_evm::{
-    eth::{spec::EthExecutorSpec, EthBlockExecutionCtx},
-    EthEvmFactory,
-};
-use alloy_primitives::B256;
-use alloy_rpc_types::engine::ExecutionData;
-use core::convert::Infallible;
-use reth_chainspec::{ChainSpec, EthChainSpec};
-use reth_ethereum_forks::Hardforks;
-use reth_ethereum_primitives::{Block, EthPrimitives};
-use reth_evm::{
-    execute::BlockAssembler, ConfigureEngineEvm, ConfigureEvm, Database, EvmEnv, EvmEnvFor,
-    ExecutableTxIterator, ExecutionCtxFor, NextBlockEnvAttributes,
-};
-use reth_evm_ethereum::{EthEvmConfig, RethReceiptBuilder};
-use reth_primitives_traits::{SealedBlock, SealedHeader, SignedTransaction, TxTy};
-use revm::{primitives::hardfork::SpecId, state::bal::BlockAccessIndex};
-use std::sync::Arc;
-
-// ---------------------------------------------------------------------------
-// Execution plan types
-// ---------------------------------------------------------------------------
-
-/// A single execution segment within a big block.
-#[derive(Debug, Clone)]
-pub(crate) struct BigBlockSegment<'a> {
-    /// Transaction index at which this segment starts.
-    pub start_tx: usize,
-    /// The EVM environment for this segment.
-    pub evm_env: EvmEnv,
-    /// The execution context for this segment.
-    pub ctx: EthBlockExecutionCtx<'a>,
+/// EVM configuration for big-block execution.
+pub struct BbEvmConfig<C = reth_chainspec::ChainSpec> {
+    inner: EthEvmConfig<C>,
 }
 
-// ---------------------------------------------------------------------------
-// BbEvmConfig
-// ---------------------------------------------------------------------------
+impl<C> Clone for BbEvmConfig<C>
+where
+    EthEvmConfig<C>: Clone,
+{
+    fn clone(&self) -> Self {
+        Self { inner: self.inner.clone() }
+    }
+}
 
-/// EVM configuration for big-block execution.
-///
-/// Wraps [`EthEvmConfig`]. When a big-block payload is received, the plan is
-/// staged on the [`BbBlockExecutorFactory`]
-/// and consumed when the executor is created. Block hashes for inter-segment
-/// BLOCKHASH resolution are reseeded into `State::block_hashes` at each
-/// segment boundary via a [`BlockHashSeeder`](crate::evm::BlockHashSeeder)
-/// callback injected in [`ConfigureEvm::create_executor`].
-#[derive(Debug, Clone)]
-pub struct BbEvmConfig<C = ChainSpec> {
-    /// The inner Ethereum EVM configuration (used for env computation).
-    pub inner: EthEvmConfig<C>,
-    /// Block executor factory for big-block execution.
-    executor_factory: BbBlockExecutorFactory<Arc<C>>,
-    /// Block assembler.
-    block_assembler: BbBlockAssembler,
+impl<C> fmt::Debug for BbEvmConfig<C>
+where
+    EthEvmConfig<C>: fmt::Debug,
+{
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("BbEvmConfig").field("inner", &self.inner).finish()
+    }
 }
 
 impl<C> BbEvmConfig<C> {
-    /// Creates a new big-block EVM configuration.
-    pub fn new(inner: EthEvmConfig<C>) -> Self
-    where
-        C: Clone,
-    {
-        let chain_spec = inner.chain_spec().clone();
-        let executor_factory = BbBlockExecutorFactory::new(
-            RethReceiptBuilder::default(),
-            chain_spec,
-            EthEvmFactory::default(),
-        );
-
-        Self { inner, executor_factory, block_assembler: Default::default() }
+    /// Creates a new stubbed big-block EVM configuration.
+    pub const fn new(inner: EthEvmConfig<C>) -> Self {
+        Self { inner }
     }
 }
-
-// ---------------------------------------------------------------------------
-// Block hash seeder for State<DB>
-// ---------------------------------------------------------------------------
-
-/// Reseeds `State::block_hashes` with the given hashes.
-///
-/// This is used as a [`BlockHashSeeder`](crate::evm::BlockHashSeeder) callback,
-/// injected into [`BbBlockExecutor`](crate::evm::BbBlockExecutor) from
-/// `ConfigureEvm::create_executor` where the concrete `State<DB>` type is known.
-/// At each segment boundary the executor calls this to populate the ring buffer
-/// with the 256 block hashes relevant to the new segment's block number window.
-fn seed_state_block_hashes<DB>(state: &mut &mut revm::database::State<DB>, hashes: &[(u64, B256)]) {
-    for &(number, hash) in hashes {
-        state.block_hashes.insert(number, hash);
-    }
-}
-
-/// Reads the BAL index from a `&mut State<DB>`.
-///
-/// Used as a [`BalIndexReader`] callback so the
-/// generic [`BbBlockExecutor`](crate::evm::BbBlockExecutor) can pick its
-/// starting segment without a trait bound on `DB`.
-const fn read_bal_index<DB>(state: &&mut revm::database::State<DB>) -> u64 {
-    state.bal_state.bal_index().get()
-}
-
-/// Bumps the BAL index on a `&mut State<DB>`.
-///
-/// Used as a [`BalIndexBumper`](crate::evm::BalIndexBumper) callback so the
-/// generic [`BbBlockExecutor`](crate::evm::BbBlockExecutor) can advance
-/// `bal_index` between sub-events of a segment boundary (post-N's `finish()`
-/// and pre-N+1's `apply_pre_execution_changes()`) without a trait bound on
-/// `DB`.
-const fn bump_bal_index<DB: revm::Database>(state: &mut &mut revm::database::State<DB>) {
-    state.bump_bal_index();
-}
-
-/// Sets the BAL index on a `&mut State<DB>`.
-///
-/// Used as a [`BalIndexSetter`](crate::evm::BalIndexSetter) callback so
-/// [`BbBlockExecutor::initialize`](crate::evm::BbBlockExecutor) can renumber
-/// a worker's incoming `bal_index = i + 1` into the boundary-padded space
-/// `i + 1 + 2*k` (where `k` is the worker's segment index).
-const fn set_bal_index<DB: revm::Database>(state: &mut &mut revm::database::State<DB>, index: u64) {
-    state.set_bal_index(BlockAccessIndex::new(index));
-}
-
-// ---------------------------------------------------------------------------
-// ConfigureEvm
-// ---------------------------------------------------------------------------
 
 impl<C> ConfigureEvm for BbEvmConfig<C>
 where
-    C: EthExecutorSpec + EthChainSpec<Header = Header> + Hardforks + 'static,
+    EthEvmConfig<C>: ConfigureEvm<
+        Primitives = EthPrimitives,
+        Error = Infallible,
+        NextBlockEnvCtx = NextBlockEnvAttributes,
+        EvmEnv = EthEvmEnv,
+        TxEnv = EthTxEnv,
+    >,
 {
     type Primitives = EthPrimitives;
     type Error = Infallible;
     type NextBlockEnvCtx = NextBlockEnvAttributes;
-    type BlockExecutorFactory = BbBlockExecutorFactory<Arc<C>>;
-    type BlockAssembler = BbBlockAssembler;
-
+    type EvmEnv = EthEvmEnv;
+    type TxEnv = EthTxEnv;
+    type ExecutionCtx<'a>
+        = <EthEvmConfig<C> as ConfigureEvm>::ExecutionCtx<'a>
+    where
+        Self: 'a;
+    type BlockExecutorFactory = <EthEvmConfig<C> as ConfigureEvm>::BlockExecutorFactory;
+    type BlockAssembler = <EthEvmConfig<C> as ConfigureEvm>::BlockAssembler;
+    type Executor<DB>
+        = <EthEvmConfig<C> as ConfigureEvm>::Executor<DB>
+    where
+        DB: evm2::evm::Database + Clone + 'static,
+        DB::Error: core::error::Error + Send + Sync + 'static;
     fn block_executor_factory(&self) -> &Self::BlockExecutorFactory {
-        &self.executor_factory
+        self.inner.block_executor_factory()
     }
 
     fn block_assembler(&self) -> &Self::BlockAssembler {
-        &self.block_assembler
+        self.inner.block_assembler()
     }
 
-    fn evm_env(&self, header: &Header) -> Result<EvmEnv<SpecId>, Self::Error> {
+    fn evm_env(&self, header: &HeaderTy<Self::Primitives>) -> Result<EvmEnvFor<Self>, Self::Error> {
         self.inner.evm_env(header)
     }
 
     fn next_evm_env(
         &self,
-        parent: &Header,
-        attributes: &NextBlockEnvAttributes,
-    ) -> Result<EvmEnv, Self::Error> {
+        parent: &HeaderTy<Self::Primitives>,
+        attributes: &Self::NextBlockEnvCtx,
+    ) -> Result<EvmEnvFor<Self>, Self::Error> {
         self.inner.next_evm_env(parent, attributes)
     }
 
     fn context_for_block<'a>(
         &self,
-        _block: &'a SealedBlock<reth_ethereum_primitives::Block>,
-    ) -> Result<BbEvmPlan<'a>, Self::Error> {
-        unreachable!("big blocks EVM should only be used from within the engine pipeline")
+        block: &'a SealedBlock<BlockTy<Self::Primitives>>,
+    ) -> Result<ExecutionCtxFor<'a, Self>, Self::Error>
+    where
+        Self: 'a,
+    {
+        self.inner.context_for_block(block)
     }
 
-    fn context_for_next_block(
-        &self,
-        _parent: &SealedHeader,
-        _attributes: Self::NextBlockEnvCtx,
-    ) -> Result<BbEvmPlan<'_>, Self::Error> {
-        unreachable!("big blocks EVM should only be used from within the engine pipeline")
-    }
-
-    fn create_executor<'a, DB, I>(
+    fn context_for_next_block<'a>(
         &'a self,
-        evm: reth_evm::EvmFor<Self, &'a mut revm::database::State<DB>, I>,
-        ctx: BbEvmPlan<'a>,
-    ) -> alloy_evm::block::BlockExecutorFor<
-        'a,
-        Self::BlockExecutorFactory,
-        &'a mut revm::database::State<DB>,
-        I,
-    >
+        parent: &'a SealedHeader<HeaderTy<Self::Primitives>>,
+        attributes: Self::NextBlockEnvCtx,
+    ) -> Result<ExecutionCtxFor<'a, Self>, Self::Error>
     where
-        DB: Database,
-        I: reth_evm::InspectorFor<Self, &'a mut revm::database::State<DB>> + 'a,
+        Self: 'a,
     {
-        let bal_index_reader: Option<BalIndexReader<&'a mut revm::database::State<DB>>> =
-            Some(read_bal_index::<DB>);
-
-        // Inject concrete function pointers that know the `State<DB>` type so
-        // the generic executor can manipulate `bal_index` and reseed block
-        // hashes without a trait bound on `DB`.
-        self.executor_factory.create_executor_with_seeder(
-            evm,
-            ctx,
-            Some(seed_state_block_hashes::<DB>),
-            bal_index_reader,
-            Some(bump_bal_index::<DB>),
-            Some(set_bal_index::<DB>),
-        )
+        self.inner.context_for_next_block(parent, attributes)
     }
 
-    fn create_executor_with_state<'ctx, 'db, DB, I>(
-        &'ctx self,
-        evm: reth_evm::EvmFor<Self, &'db mut revm::database::State<DB>, I>,
-        ctx: BbEvmPlan<'ctx>,
-    ) -> alloy_evm::block::BlockExecutorFor<
-        'ctx,
-        Self::BlockExecutorFactory,
-        &'db mut revm::database::State<DB>,
-        I,
-    >
-    where
-        DB: Database,
-        I: reth_evm::InspectorFor<Self, &'db mut revm::database::State<DB>>,
-    {
-        let bal_index_reader: Option<BalIndexReader<&'db mut revm::database::State<DB>>> =
-            Some(read_bal_index::<DB>);
+    fn chain_id(&self) -> u64 {
+        self.inner.chain_id()
+    }
 
-        self.executor_factory.create_executor_with_seeder(
-            evm,
-            ctx,
-            Some(seed_state_block_hashes::<DB>),
-            bal_index_reader,
-            Some(bump_bal_index::<DB>),
-            Some(set_bal_index::<DB>),
-        )
+    fn deposit_contract_address(&self) -> Option<Address> {
+        self.inner.deposit_contract_address()
+    }
+
+    fn executor<DB>(&self, db: DB) -> Self::Executor<DB>
+    where
+        DB: evm2::evm::Database + Clone + 'static,
+        DB::Error: core::error::Error + Send + Sync + 'static,
+    {
+        self.inner.executor(db)
+    }
+
+    fn create_executor<'a, DB>(
+        &'a self,
+        evm: evm2::Evm<evm2::BaseEvmTypes>,
+        ctx: ExecutionCtxFor<'a, Self>,
+        hashed_state_mode: reth_evm::execute::HashedStateMode,
+    ) -> reth_evm::BlockExecutorFor<'a, Self, DB>
+    where
+        Self: 'a,
+        DB: evm2::evm::Database + Clone + 'static,
+        DB::Error: core::error::Error + Send + Sync + 'static,
+    {
+        self.inner.create_executor(evm, ctx, hashed_state_mode)
+    }
+
+    fn evm_with_env<DB>(&self, db: DB, evm_env: EvmEnvFor<Self>) -> evm2::Evm<evm2::BaseEvmTypes>
+    where
+        DB: evm2::evm::DynDatabase + 'static,
+    {
+        self.inner.evm_with_env(db, evm_env)
+    }
+
+    fn pre_block_state_changes<'a, DB>(
+        &self,
+        db: DB,
+        evm_env: EvmEnvFor<Self>,
+        block_number: u64,
+        ctx: ExecutionCtxFor<'a, Self>,
+    ) -> Result<evm2::BlockStateAccumulator, Box<dyn core::error::Error + Send + Sync>>
+    where
+        Self: 'a,
+        DB: evm2::evm::Database + 'static,
+        DB::Error: core::error::Error + Send + Sync + 'static,
+    {
+        self.inner.pre_block_state_changes(db, evm_env, block_number, ctx)
     }
 }
 
-// ---------------------------------------------------------------------------
-// ConfigureEngineEvm — intercepts payload methods for big blocks
-// ---------------------------------------------------------------------------
-
 impl<C> ConfigureEngineEvm<BigBlockData<ExecutionData>> for BbEvmConfig<C>
 where
-    C: EthExecutorSpec + EthChainSpec<Header = Header> + Hardforks + 'static,
+    Self: ConfigureEvm<Primitives = EthPrimitives, Error = Infallible>,
+    EthEvmConfig<C>: ConfigureEngineEvm<ExecutionData>
+        + ConfigureEvm<Primitives = EthPrimitives, Error = Infallible>,
 {
     fn evm_env_for_payload(
         &self,
-        payload: &BigBlockData<ExecutionData>,
+        _payload: &BigBlockData<ExecutionData>,
     ) -> Result<EvmEnvFor<Self>, Self::Error> {
-        // Compute the env from the first segment BEFORE removing the
-        // entry (stage_plan_for_payload removes it).
-        let first_exec_data = &payload.env_switches[0];
-        let mut env = self.inner.evm_env_for_payload(first_exec_data)?;
-
-        // Disable basefee validation: transactions from different
-        // original blocks may have gas prices below the big block's
-        // effective basefee.
-        env.cfg_env.disable_base_fee = true;
-        env.block_env.gas_limit = payload.gas_limit();
-
-        Ok(env)
+        unreachable!("big-block payload execution is unsupported by the active EVM path")
     }
 
     fn context_for_payload<'a>(
         &self,
-        payload: &'a BigBlockData<ExecutionData>,
+        _payload: &'a BigBlockData<ExecutionData>,
     ) -> Result<ExecutionCtxFor<'a, Self>, Self::Error> {
-        let mut current_tx = 0;
-        let segments: Vec<_> = payload
-            .env_switches
-            .iter()
-            .map(|exec_data| {
-                let start_tx = current_tx;
-                let mut evm_env = self.inner.evm_env_for_payload(exec_data)?;
-                evm_env.cfg_env.disable_base_fee = true;
-                let ctx = self.inner.context_for_payload(exec_data)?;
-                current_tx += exec_data.payload.transactions().len();
-                Ok(BigBlockSegment { start_tx, evm_env, ctx })
-            })
-            .collect::<Result<_, Self::Error>>()?;
-
-        let mut plan = BbEvmPlan::new(segments);
-
-        // Add prior block hashes to the seeding list.
-        plan.block_hashes_to_seed.extend(payload.prior_block_hashes.clone());
-        plan.block_hashes_to_seed.sort_unstable_by_key(|(n, _)| *n);
-
-        Ok(plan)
+        unreachable!("big-block payload execution is unsupported by the active EVM path")
     }
 
     fn tx_iterator_for_payload(
         &self,
-        payload: &BigBlockData<ExecutionData>,
+        _payload: &BigBlockData<ExecutionData>,
     ) -> Result<impl ExecutableTxIterator<Self>, Self::Error> {
-        let transactions = payload
-            .env_switches
-            .iter()
-            .flat_map(|exec_data| exec_data.payload.transactions().clone())
-            .collect::<Vec<_>>();
-
-        let convert = |tx: Bytes| {
-            let tx =
-                TxTy::<Self::Primitives>::decode_2718_exact(tx.as_ref()).map_err(AnyError::new)?;
-            let signer = tx.try_recover().map_err(AnyError::new)?;
-            Ok::<_, AnyError>(tx.with_signer(signer))
+        let transactions: Vec<Bytes> = Vec::new();
+        let convert = |_tx: Bytes| -> Result<Recovered<TxTy<Self::Primitives>>, AnyError> {
+            unreachable!("big-block payload execution is unsupported by the active EVM path")
         };
 
         Ok((transactions, convert))
-    }
-}
-
-#[derive(Debug, Default, Clone)]
-pub struct BbBlockAssembler;
-
-impl<Spec: EthExecutorSpec + 'static> BlockAssembler<BbBlockExecutorFactory<Spec>>
-    for BbBlockAssembler
-{
-    type Block = Block;
-
-    fn assemble_block(
-        &self,
-        _input: reth_evm::execute::BlockAssemblerInput<
-            '_,
-            '_,
-            BbBlockExecutorFactory<Spec>,
-            <Self::Block as reth_node_api::Block>::Header,
-        >,
-    ) -> Result<Self::Block, reth_errors::BlockExecutionError> {
-        unreachable!("block building is not supported for big blocks EVM")
     }
 }

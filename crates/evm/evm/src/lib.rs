@@ -1,10 +1,4 @@
-//! Traits for configuring an EVM specifics.
-//!
-//! # Revm features
-//!
-//! This crate does __not__ enforce specific revm features such as `blst` or `c-kzg`, which are
-//! critical for revm's evm internals, it is the responsibility of the implementer to ensure the
-//! proper features are selected.
+//! Traits for configuring EVM specifics.
 
 #![doc(
     html_logo_url = "https://raw.githubusercontent.com/paradigmxyz/reth/main/assets/reth-docs.png",
@@ -17,28 +11,59 @@
 
 extern crate alloc;
 
-use crate::execute::{BasicBlockBuilder, Executor};
-use alloc::{string::String, vec::Vec};
+#[cfg(feature = "std")]
+use crate::execute::HashedStateMode;
+#[cfg(feature = "std")]
+use crate::execute::{BasicBlockBuilder, BasicBlockExecutor, BlockBuilder};
+use crate::execute::{BlockExecutionError, Executor, IntoTxEnv};
+#[cfg(feature = "std")]
+use alloc::boxed::Box;
+use alloc::string::String;
+use alloy_consensus::transaction::Recovered;
 use alloy_eips::eip4895::Withdrawals;
-use alloy_evm::{
-    block::{BlockExecutorFactory, BlockExecutorFor},
-    precompiles::PrecompilesMap,
-};
 use alloy_primitives::{Address, Bytes, B256};
 use core::{error::Error, fmt::Debug};
-use execute::{BasicBlockExecutor, BlockAssembler, BlockBuilder};
-use reth_execution_errors::BlockExecutionError;
-use reth_primitives_traits::{
-    BlockTy, HeaderTy, NodePrimitives, ReceiptTy, SealedBlock, SealedHeader, TxTy,
-};
-use revm::{database::State, primitives::hardfork::SpecId};
+use reth_primitives_traits::{BlockTy, HeaderTy, NodePrimitives, SealedBlock, SealedHeader, TxTy};
 
+/// Cached database adapters for payload building.
+pub mod cached;
+/// Cancellation markers for EVM execution work.
+pub mod cancelled;
+/// Database adapters for EVM execution.
+pub mod database;
 pub mod either;
 /// EVM environment configuration.
 pub mod execute;
+/// precompile cache provider.
+#[cfg(feature = "std")]
+pub mod precompile_cache;
 
 mod aliases;
 pub use aliases::*;
+
+/// Transaction validation limits resolved for an EVM environment.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct EvmTransactionValidationLimits {
+    /// Maximum contract creation initcode size.
+    pub max_initcode_size: usize,
+    /// Transaction gas limit cap. `0` disables the txpool-level cap check.
+    pub tx_gas_limit_cap: u64,
+}
+
+/// Resolved EVM environment data needed by the EVM execution path.
+pub trait EvmEnv: Debug + Clone + Send + Sync + 'static {
+    /// Returns the EVM block environment.
+    fn block_env(&self) -> evm2::env::BlockEnv;
+
+    /// Returns transaction validation limits active in this environment.
+    fn transaction_validation_limits(&self) -> EvmTransactionValidationLimits;
+
+    /// Returns this environment with transaction nonce checks disabled.
+    fn with_nonce_check_disabled(self) -> Self;
+
+    /// Returns this environment with transaction balance checks disabled.
+    fn with_balance_check_disabled(self) -> Self;
+}
 
 #[cfg(feature = "std")]
 mod engine;
@@ -52,224 +77,77 @@ pub mod noop;
 /// test helpers for mocking executor
 pub mod test_utils;
 
-pub use alloy_evm::{
-    block::{state_changes, system_calls, OnStateHook},
-    *,
-};
-
 /// A complete configuration of EVM for Reth.
 ///
-/// This trait encapsulates complete configuration required for transaction execution and block
-/// execution/building, providing a unified interface for EVM operations.
-///
-/// # Architecture Overview
-///
-/// The EVM abstraction consists of the following layers:
-///
-/// 1. **[`Evm`] (produced by [`EvmFactory`])**: The core EVM implementation responsible for
-///    executing individual transactions and producing outputs including state changes, logs, gas
-///    usage, etc.
-///
-/// 2. **[`BlockExecutor`] (produced by [`BlockExecutorFactory`])**: A higher-level component that
-///    operates on top of [`Evm`] to execute entire blocks. This involves:
-///    - Executing all transactions in sequence
-///    - Building receipts from transaction outputs
-///    - Applying block rewards to the beneficiary
-///    - Executing system calls (e.g., EIP-4788 beacon root updates)
-///    - Managing state changes and bundle accumulation
-///
-/// 3. **[`BlockAssembler`]**: Responsible for assembling valid blocks from executed transactions.
-///    It takes the output from [`BlockExecutor`] along with execution context and produces a
-///    complete block ready for inclusion in the chain.
-///
-/// # Usage Patterns
-///
-/// The abstraction supports two primary use cases:
-///
-/// ## 1. Executing Externally Provided Blocks (e.g., during sync)
-///
-/// ```rust,ignore
-/// use reth_evm::ConfigureEvm;
-///
-/// // Execute a received block
-/// let mut executor = evm_config.executor(state_db);
-/// let output = executor.execute(&block)?;
-///
-/// // Access the execution results
-/// println!("Gas used: {}", output.result.gas_used);
-/// println!("Receipts: {:?}", output.result.receipts);
-/// ```
-///
-/// ## 2. Building New Blocks (e.g., payload building)
-///
-/// Payload building is slightly different as it doesn't have the block's header yet, but rather
-/// attributes for the block's environment, such as timestamp, fee recipient, and randomness value.
-/// The block's header will be the outcome of the block building process.
-///
-/// ```rust,ignore
-/// use reth_evm::{ConfigureEvm, NextBlockEnvAttributes};
-///
-/// // Create attributes for the next block
-/// let attributes = NextBlockEnvAttributes {
-///     timestamp: current_time + 12,
-///     suggested_fee_recipient: beneficiary_address,
-///     prev_randao: randomness_value,
-///     gas_limit: 30_000_000,
-///     withdrawals: Some(withdrawals),
-///     parent_beacon_block_root: Some(beacon_root),
-///     slot_number: None,
-/// };
-///
-/// // Build a new block on top of parent
-/// let mut builder = evm_config.builder_for_next_block(
-///     &mut state_db,
-///     &parent_header,
-///     attributes
-/// )?;
-///
-/// // Apply pre-execution changes (e.g., beacon root update)
-/// builder.apply_pre_execution_changes()?;
-///
-/// // Execute transactions
-/// for tx in pending_transactions {
-///     match builder.execute_transaction(tx) {
-///         Ok(gas_used) => {
-///             println!("Transaction executed, gas used: {}", gas_used);
-///         }
-///         Err(e) => {
-///             println!("Transaction failed: {:?}", e);
-///         }
-///     }
-/// }
-///
-/// // Finish block building and get the outcome (block)
-/// let outcome = builder.finish(state_provider, None)?;
-/// let block = outcome.block;
-/// ```
-///
-/// # Key Components
-///
-/// ## [`NextBlockEnvCtx`]
-///
-/// Contains attributes needed to configure the next block that cannot be derived from the
-/// parent block alone. This includes data typically provided by the consensus layer:
-/// - `timestamp`: Block timestamp
-/// - `suggested_fee_recipient`: Beneficiary address
-/// - `prev_randao`: Randomness value
-/// - `gas_limit`: Block gas limit
-/// - `withdrawals`: Consensus layer withdrawals
-/// - `parent_beacon_block_root`: EIP-4788 beacon root
-///
-/// ## [`BlockAssembler`]
-///
-/// Takes the execution output and produces a complete block. It receives:
-/// - Transaction execution results (receipts, gas used)
-/// - Final state root after all executions
-/// - Bundle state with all changes
-/// - Execution context and environment
-///
-/// The assembler is responsible for:
-/// - Setting the correct block header fields
-/// - Including executed transactions
-/// - Setting gas used and receipts root
-/// - Applying any chain-specific rules
-///
-/// [`ExecutionCtx`]: BlockExecutorFactory::ExecutionCtx
-/// [`NextBlockEnvCtx`]: ConfigureEvm::NextBlockEnvCtx
-/// [`BlockExecutor`]: alloy_evm::block::BlockExecutor
+/// This trait encapsulates configuration required for EVM, block execution, and block assembly.
 #[auto_impl::auto_impl(&, Arc)]
 pub trait ConfigureEvm: Clone + Debug + Send + Sync + Unpin {
     /// The primitives type used by the EVM.
     type Primitives: NodePrimitives;
 
-    /// The error type that is returned by [`Self::next_evm_env`].
+    /// The error type that is returned by environment builders.
     type Error: Error + Send + Sync + 'static;
 
     /// Context required for configuring next block environment.
-    ///
-    /// Contains values that can't be derived from the parent block.
     type NextBlockEnvCtx: Debug + Clone;
 
-    /// Configured [`BlockExecutorFactory`], contains [`EvmFactory`] internally.
-    type BlockExecutorFactory: for<'a> BlockExecutorFactory<
-        Transaction = TxTy<Self::Primitives>,
-        Receipt = ReceiptTy<Self::Primitives>,
-        ExecutionCtx<'a>: Debug + Send,
-        EvmFactory: EvmFactory<
-            Tx: TransactionEnvMut
-                    + FromRecoveredTx<TxTy<Self::Primitives>>
-                    + FromTxWithEncoded<TxTy<Self::Primitives>>,
-            Precompiles = PrecompilesMap,
-            Spec: Into<SpecId>,
-        >,
+    /// Configured transaction environment type.
+    type TxEnv: From<Recovered<TxTy<Self::Primitives>>> + Clone + Send + Sync + 'static;
+
+    /// Configured block executor factory.
+    type BlockExecutorFactory: crate::execute::BlockExecutorFactory<
+        Primitives = Self::Primitives,
+        Transaction = TxEnvFor<Self>,
     >;
 
-    /// A type that knows how to build a block.
-    type BlockAssembler: BlockAssembler<
+    /// Configured block assembler.
+    #[cfg(feature = "std")]
+    type BlockAssembler: crate::execute::BlockAssembler<
         Self::BlockExecutorFactory,
         Block = BlockTy<Self::Primitives>,
     >;
 
-    /// Returns reference to the configured [`BlockExecutorFactory`].
+    /// Returns the configured block executor factory.
+    #[cfg(feature = "std")]
     fn block_executor_factory(&self) -> &Self::BlockExecutorFactory;
 
-    /// Returns reference to the configured [`BlockAssembler`].
+    /// Returns the configured block assembler.
+    #[cfg(feature = "std")]
     fn block_assembler(&self) -> &Self::BlockAssembler;
 
-    /// Creates a new [`EvmEnv`] for the given header.
+    /// Creates a new EVM environment for the given header.
     fn evm_env(&self, header: &HeaderTy<Self::Primitives>) -> Result<EvmEnvFor<Self>, Self::Error>;
 
-    /// Returns the configured [`EvmEnv`] for `parent + 1` block.
-    ///
-    /// This is intended for usage in block building after the merge and requires additional
-    /// attributes that can't be derived from the parent block: attributes that are determined by
-    /// the CL, such as the timestamp, suggested fee recipient, and randomness value.
-    ///
-    /// # Example
-    ///
-    /// ```rust,ignore
-    /// let evm_env = evm_config.next_evm_env(&parent_header, &attributes)?;
-    /// // evm_env now contains:
-    /// // - Correct spec ID based on timestamp and block number
-    /// // - Block environment with next block's parameters
-    /// // - Configuration like chain ID and blob parameters
-    /// ```
+    /// Returns the configured EVM environment for `parent + 1` block.
     fn next_evm_env(
         &self,
         parent: &HeaderTy<Self::Primitives>,
         attributes: &Self::NextBlockEnvCtx,
     ) -> Result<EvmEnvFor<Self>, Self::Error>;
 
-    /// Returns the configured [`BlockExecutorFactory::ExecutionCtx`] for a given block.
+    /// Returns the configured execution context for a given block.
     fn context_for_block<'a>(
         &self,
         block: &'a SealedBlock<BlockTy<Self::Primitives>>,
-    ) -> Result<ExecutionCtxFor<'a, Self>, Self::Error>;
+    ) -> Result<ExecutionCtxFor<'a, Self>, Self::Error>
+    where
+        Self: 'a;
 
-    /// Returns the configured [`BlockExecutorFactory::ExecutionCtx`] for `parent + 1`
-    /// block.
-    fn context_for_next_block(
-        &self,
-        parent: &SealedHeader<HeaderTy<Self::Primitives>>,
+    /// Returns the configured execution context for `parent + 1` block.
+    fn context_for_next_block<'a>(
+        &'a self,
+        parent: &'a SealedHeader<HeaderTy<Self::Primitives>>,
         attributes: Self::NextBlockEnvCtx,
-    ) -> Result<ExecutionCtxFor<'_, Self>, Self::Error>;
+    ) -> Result<ExecutionCtxFor<'a, Self>, Self::Error>
+    where
+        Self: 'a;
 
-    /// Returns a [`EvmFactory::Tx`] from a transaction.
+    /// Returns a transaction environment from a transaction.
     fn tx_env(&self, transaction: impl IntoTxEnv<TxEnvFor<Self>>) -> TxEnvFor<Self> {
         transaction.into_tx_env()
     }
 
-    /// Provides a reference to [`EvmFactory`] implementation.
-    fn evm_factory(&self) -> &EvmFactoryFor<Self> {
-        self.block_executor_factory().evm_factory()
-    }
-
     /// Returns a config with JIT support enabled for subsequently created EVMs, if supported.
-    ///
-    /// This is one of three gates required before an EVM can execute JIT-compiled code: the binary
-    /// must be built with the `jit` feature, runtime compilation must be enabled by `--jit` or the
-    /// `reth_jit` RPC method, and this local support flag must be enabled for the config that
-    /// creates the EVM.
     #[auto_impl(keep_default_for(&, Arc))]
     fn with_jit_support_enabled(self, _enabled: bool) -> Self
     where
@@ -292,200 +170,183 @@ pub trait ConfigureEvm: Clone + Debug + Send + Sync + Unpin {
         None
     }
 
-    /// Returns a new EVM with the given database configured with the given environment settings,
-    /// including the spec id and transaction environment.
-    ///
-    /// This will preserve any handler modifications
-    fn evm_with_env<DB: Database>(&self, db: DB, evm_env: EvmEnvFor<Self>) -> EvmFor<Self, DB> {
-        self.evm_factory().create_evm(db, evm_env)
+    /// Returns an executor for block execution over the provided database.
+    #[auto_impl(keep_default_for(&, Arc))]
+    fn executor<DB>(
+        &self,
+        db: DB,
+    ) -> impl Executor<Primitives = Self::Primitives, Error = BlockExecutionError>
+    where
+        DB: evm2::evm::Database + Clone + 'static,
+        DB::Error: core::error::Error + Send + Sync + 'static,
+    {
+        #[cfg(feature = "std")]
+        {
+            BasicBlockExecutor::new(self.clone(), db)
+        }
+
+        #[cfg(not(feature = "std"))]
+        {
+            let _ = db;
+            crate::execute::UnsupportedExecutor::default()
+        }
     }
 
-    /// Returns a new EVM with the given database configured with `cfg` and `block_env`
-    /// configuration derived from the given header. Relies on
-    /// [`ConfigureEvm::evm_env`].
-    ///
-    /// # Caution
-    ///
-    /// This does not initialize the tx environment.
-    fn evm_for_block<DB: Database>(
+    /// Returns an executor for batch block execution over the provided database.
+    #[auto_impl(keep_default_for(&, Arc))]
+    fn batch_executor<DB>(
+        &self,
+        db: DB,
+    ) -> impl Executor<Primitives = Self::Primitives, Error = BlockExecutionError>
+    where
+        DB: evm2::evm::Database + Clone + 'static,
+        DB::Error: core::error::Error + Send + Sync + 'static,
+    {
+        self.executor(db)
+    }
+
+    /// Creates a configured block executor for active block execution.
+    #[cfg(feature = "std")]
+    fn create_executor<'a>(
+        &'a self,
+        evm: evm2::Evm<evm2::BaseEvmTypes>,
+        ctx: ExecutionCtxFor<'a, Self>,
+        hashed_state_mode: HashedStateMode,
+    ) -> <Self::BlockExecutorFactory as crate::execute::BlockExecutorFactory>::Executor<'a>
+    where
+        Self: 'a,
+    {
+        crate::execute::BlockExecutorFactory::create_executor(
+            self.block_executor_factory(),
+            evm,
+            ctx,
+            hashed_state_mode,
+        )
+    }
+
+    /// Creates a block executor for the given block.
+    #[cfg(feature = "std")]
+    fn executor_for_block<'a, DB>(
+        &'a self,
+        db: DB,
+        block: &'a SealedBlock<BlockTy<Self::Primitives>>,
+        hashed_state_mode: HashedStateMode,
+    ) -> Result<crate::BlockExecutorFor<'a, Self>, Self::Error>
+    where
+        Self: 'a,
+        DB: evm2::evm::Database + Clone + 'static,
+        DB::Error: core::error::Error + Send + Sync + 'static,
+    {
+        let evm = self.evm_for_block(evm2::evm::Db::new(db), block.header())?;
+        let ctx = self.context_for_block(block)?;
+        Ok(self.create_executor(evm, ctx, hashed_state_mode))
+    }
+
+    /// Creates an EVM instance for single-transaction execution with the configured environment.
+    #[cfg(feature = "std")]
+    #[auto_impl(keep_default_for(&, Arc))]
+    fn evm_with_env<DB>(&self, db: DB, evm_env: EvmEnvFor<Self>) -> evm2::Evm<evm2::BaseEvmTypes>
+    where
+        DB: evm2::evm::DynDatabase + 'static,
+    {
+        crate::execute::BlockExecutorFactory::evm_with_env(
+            self.block_executor_factory(),
+            db,
+            evm_env,
+        )
+    }
+
+    /// Creates an EVM instance for the given block.
+    #[cfg(feature = "std")]
+    fn evm_for_block<DB>(
         &self,
         db: DB,
         header: &HeaderTy<Self::Primitives>,
-    ) -> Result<EvmFor<Self, DB>, Self::Error> {
+    ) -> Result<evm2::Evm<evm2::BaseEvmTypes>, Self::Error>
+    where
+        DB: evm2::evm::DynDatabase + 'static,
+    {
         let evm_env = self.evm_env(header)?;
         Ok(self.evm_with_env(db, evm_env))
     }
 
-    /// Returns a new EVM with the given database configured with the given environment settings,
-    /// including the spec id.
-    ///
-    /// This will use the given external inspector as the EVM external context.
-    ///
-    /// This will preserve any handler modifications
+    /// Creates a block builder for a configured EVM and execution context.
+    #[cfg(feature = "std")]
+    fn create_block_builder<'a>(
+        &'a self,
+        evm: evm2::Evm<evm2::BaseEvmTypes>,
+        evm_env: EvmEnvFor<Self>,
+        parent: &'a SealedHeader<HeaderTy<Self::Primitives>>,
+        ctx: ExecutionCtxFor<'a, Self>,
+        hashed_state_mode: HashedStateMode,
+    ) -> impl BlockBuilder<Primitives = Self::Primitives, Executor = crate::BlockExecutorFor<'a, Self>>
+    where
+        Self: 'a,
+    {
+        BasicBlockBuilder {
+            executor: self.create_executor(evm, ctx.clone(), hashed_state_mode),
+            evm_env,
+            transactions: Vec::new(),
+            senders: Vec::new(),
+            ctx,
+            parent,
+            assembler: self.block_assembler(),
+        }
+    }
+
+    /// Creates a block builder for `parent + 1`.
+    #[cfg(feature = "std")]
+    fn builder_for_next_block<'a, DB>(
+        &'a self,
+        db: DB,
+        parent: &'a SealedHeader<HeaderTy<Self::Primitives>>,
+        attributes: Self::NextBlockEnvCtx,
+        hashed_state_mode: HashedStateMode,
+    ) -> Result<
+        impl BlockBuilder<Primitives = Self::Primitives, Executor = crate::BlockExecutorFor<'a, Self>>,
+        Self::Error,
+    >
+    where
+        Self: 'a,
+        DB: evm2::evm::Database + Clone + 'static,
+        DB::Error: core::error::Error + Send + Sync + 'static,
+    {
+        let evm_env = self.next_evm_env(parent, &attributes)?;
+        let evm = self.evm_with_env(evm2::evm::Db::new(db), evm_env.clone());
+        let ctx = self.context_for_next_block(parent, attributes)?;
+        Ok(self.create_block_builder(evm, evm_env, parent, ctx, hashed_state_mode))
+    }
+
+    /// Creates an EVM instance for single-transaction execution with an inspector.
+    #[cfg(feature = "std")]
     fn evm_with_env_and_inspector<DB, I>(
         &self,
         db: DB,
         evm_env: EvmEnvFor<Self>,
         inspector: I,
-    ) -> EvmFor<Self, DB, I>
+    ) -> evm2::Evm<evm2::BaseEvmTypes>
     where
-        DB: Database,
-        I: InspectorFor<Self, DB>,
+        DB: evm2::evm::DynDatabase + 'static,
+        I: evm2::Inspector<evm2::BaseEvmTypes> + 'static,
     {
-        self.evm_factory().create_evm_with_inspector(db, evm_env, inspector)
+        let mut evm = self.evm_with_env(db, evm_env);
+        evm.set_inspector(inspector);
+        evm
     }
 
-    /// Creates a strategy with given EVM and execution context.
-    fn create_executor<'a, DB, I>(
-        &'a self,
-        evm: EvmFor<Self, &'a mut State<DB>, I>,
-        ctx: <Self::BlockExecutorFactory as BlockExecutorFactory>::ExecutionCtx<'a>,
-    ) -> BlockExecutorForEvm<'a, Self, DB, I>
-    where
-        DB: Database,
-        I: InspectorFor<Self, &'a mut State<DB>> + 'a,
-    {
-        self.block_executor_factory().create_executor(evm, ctx)
-    }
-
-    /// Creates a strategy with a DB state borrow that can be shorter than the execution context.
-    fn create_executor_with_state<'a, 'db, DB, I>(
-        &'a self,
-        evm: EvmFor<Self, &'db mut State<DB>, I>,
-        ctx: <Self::BlockExecutorFactory as BlockExecutorFactory>::ExecutionCtx<'a>,
-    ) -> BlockExecutorFor<'a, Self::BlockExecutorFactory, &'db mut State<DB>, I>
-    where
-        DB: Database,
-        I: InspectorFor<Self, &'db mut State<DB>>,
-    {
-        self.block_executor_factory().create_executor(evm, ctx)
-    }
-
-    /// Creates a strategy for execution of a given block.
-    fn executor_for_block<'a, DB: Database>(
-        &'a self,
-        db: &'a mut State<DB>,
-        block: &'a SealedBlock<<Self::Primitives as NodePrimitives>::Block>,
-    ) -> Result<BlockExecutorForEvm<'a, Self, DB>, Self::Error> {
-        let evm = self.evm_for_block(db, block.header())?;
-        let ctx = self.context_for_block(block)?;
-        Ok(self.create_executor(evm, ctx))
-    }
-
-    /// Creates a [`BlockBuilder`]. Should be used when building a new block.
-    ///
-    /// Block builder wraps an inner [`alloy_evm::block::BlockExecutor`] and has a similar
-    /// interface. Builder collects all of the executed transactions, and once
-    /// [`BlockBuilder::finish`] is called, it invokes the configured [`BlockAssembler`] to
-    /// create a block.
-    ///
-    /// # Example
-    ///
-    /// ```rust,ignore
-    /// // Create a builder with specific EVM configuration
-    /// let evm = evm_config.evm_with_env(&mut state_db, evm_env);
-    /// let ctx = evm_config.context_for_next_block(&parent, attributes);
-    /// let builder = evm_config.create_block_builder(evm, &parent, ctx);
-    /// ```
-    fn create_block_builder<'a, DB, I>(
-        &'a self,
-        evm: EvmFor<Self, &'a mut State<DB>, I>,
-        parent: &'a SealedHeader<HeaderTy<Self::Primitives>>,
-        ctx: <Self::BlockExecutorFactory as BlockExecutorFactory>::ExecutionCtx<'a>,
-    ) -> impl BlockBuilder<Primitives = Self::Primitives, Executor = BlockExecutorForEvm<'a, Self, DB, I>>
-    where
-        DB: Database,
-        I: InspectorFor<Self, &'a mut State<DB>> + 'a,
-    {
-        BasicBlockBuilder {
-            executor: self.create_executor(evm, ctx.clone()),
-            ctx,
-            assembler: self.block_assembler(),
-            parent,
-            transactions: Vec::new(),
-        }
-    }
-
-    /// Creates a [`BlockBuilder`] for building of a new block. This is a helper to invoke
-    /// [`ConfigureEvm::create_block_builder`].
-    ///
-    /// This is the primary method for building new blocks. It combines:
-    /// 1. Creating the EVM environment for the next block
-    /// 2. Setting up the execution context from attributes
-    /// 3. Initializing the block builder with proper configuration
-    ///
-    /// # Example
-    ///
-    /// ```rust,ignore
-    /// // Build a block with specific attributes
-    /// let mut builder = evm_config.builder_for_next_block(
-    ///     &mut state_db,
-    ///     &parent_header,
-    ///     attributes
-    /// )?;
-    ///
-    /// // Execute system calls (e.g., beacon root update)
-    /// builder.apply_pre_execution_changes()?;
-    ///
-    /// // Execute transactions
-    /// for tx in transactions {
-    ///     builder.execute_transaction(tx)?;
-    /// }
-    ///
-    /// // Complete block building
-    /// let outcome = builder.finish(state_provider, None)?;
-    /// ```
-    fn builder_for_next_block<'a, DB: Database + 'a>(
-        &'a self,
-        db: &'a mut State<DB>,
-        parent: &'a SealedHeader<<Self::Primitives as NodePrimitives>::BlockHeader>,
-        attributes: Self::NextBlockEnvCtx,
-    ) -> Result<
-        impl BlockBuilder<Primitives = Self::Primitives, Executor = BlockExecutorForEvm<'a, Self, DB>>,
-        Self::Error,
-    > {
-        let evm_env = self.next_evm_env(parent, &attributes)?;
-        let evm = self.evm_with_env(db, evm_env);
-        let ctx = self.context_for_next_block(parent, attributes)?;
-        Ok(self.create_block_builder(evm, parent, ctx))
-    }
-
-    /// Returns a new [`Executor`] for executing blocks.
-    ///
-    /// The executor processes complete blocks including:
-    /// - All transactions in order
-    /// - Block rewards and fees
-    /// - Block level system calls
-    /// - State transitions
-    ///
-    /// # Example
-    ///
-    /// ```rust,ignore
-    /// // Create an executor
-    /// let mut executor = evm_config.executor(state_db);
-    ///
-    /// // Execute a single block
-    /// let output = executor.execute(&block)?;
-    ///
-    /// // Execute multiple blocks
-    /// let batch_output = executor.execute_batch(&blocks)?;
-    /// ```
-    #[auto_impl(keep_default_for(&, Arc))]
-    fn executor<DB: Database>(
+    /// Applies block-level state changes required before transaction execution.
+    #[cfg(feature = "std")]
+    fn pre_block_state_changes<'a, DB>(
         &self,
         db: DB,
-    ) -> impl Executor<DB, Primitives = Self::Primitives, Error = BlockExecutionError> {
-        BasicBlockExecutor::new(self, db)
-    }
-
-    /// Returns a new [`BasicBlockExecutor`].
-    #[auto_impl(keep_default_for(&, Arc))]
-    fn batch_executor<DB: Database>(
-        &self,
-        db: DB,
-    ) -> impl Executor<DB, Primitives = Self::Primitives, Error = BlockExecutionError> {
-        BasicBlockExecutor::new(self, db)
-    }
+        evm_env: EvmEnvFor<Self>,
+        block_number: u64,
+        ctx: ExecutionCtxFor<'a, Self>,
+    ) -> Result<evm2::BlockStateAccumulator, Box<dyn Error + Send + Sync>>
+    where
+        Self: 'a,
+        DB: evm2::evm::Database + 'static,
+        DB::Error: Error + Send + Sync + 'static;
 }
 
 /// JIT backend controls exposed by an EVM configuration.
@@ -504,37 +365,6 @@ pub trait JitBackend: Send + Sync {
 }
 
 /// Represents additional attributes required to configure the next block.
-///
-/// This struct contains all the information needed to build a new block that cannot be
-/// derived from the parent block header alone. These attributes are typically provided
-/// by the consensus layer (CL) through the Engine API during payload building.
-///
-/// # Relationship with [`ConfigureEvm`] and [`BlockAssembler`]
-///
-/// The flow for building a new block involves:
-///
-/// 1. **Receive attributes** from the consensus layer containing:
-///    - Timestamp for the new block
-///    - Fee recipient (coinbase/beneficiary)
-///    - Randomness value (prevRandao)
-///    - Withdrawals to process
-///    - Parent beacon block root for EIP-4788
-///
-/// 2. **Configure EVM environment** using these attributes: ```rust,ignore let evm_env =
-///    evm_config.next_evm_env(&parent, &attributes)?; ```
-///
-/// 3. **Build the block** with transactions: ```rust,ignore let mut builder =
-///    evm_config.builder_for_next_block( &mut state, &parent, attributes )?; ```
-///
-/// 4. **Assemble the final block** using [`BlockAssembler`] which takes:
-///    - Execution results from all transactions
-///    - The attributes used during execution
-///    - Final state root after all changes
-///
-/// This design cleanly separates:
-/// - **Configuration** (what parameters to use) - handled by `NextBlockEnvAttributes`
-/// - **Execution** (running transactions) - handled by `BlockExecutor`
-/// - **Assembly** (creating the final block) - handled by `BlockAssembler`
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NextBlockEnvAttributes {
     /// The timestamp of the next block.
@@ -547,7 +377,7 @@ pub struct NextBlockEnvAttributes {
     pub gas_limit: u64,
     /// The parent beacon block root.
     pub parent_beacon_block_root: Option<B256>,
-    /// Withdrawals
+    /// Withdrawals.
     pub withdrawals: Option<Withdrawals>,
     /// Optional extra data.
     pub extra_data: Bytes,

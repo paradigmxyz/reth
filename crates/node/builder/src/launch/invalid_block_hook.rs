@@ -6,6 +6,7 @@ use alloy_rpc_types::{Block, Header, Receipt, Transaction, TransactionRequest};
 use eyre::OptionExt;
 use reth_chainspec::EthChainSpec;
 use reth_engine_primitives::InvalidBlockHook;
+use reth_evm::ConfigureEvm;
 use reth_node_api::{FullNodeComponents, NodeTypes};
 use reth_node_core::{
     args::InvalidBlockHookType,
@@ -78,7 +79,7 @@ where
         + Send
         + Sync
         + 'static,
-    E: reth_evm::ConfigureEvm<Primitives = N> + Clone + 'static,
+    E: ConfigureEvm<Primitives = N> + Clone + 'static,
 {
     use reth_engine_primitives::{InvalidBlockHooks, NoopInvalidBlockHook};
     use reth_invalid_block_hooks::InvalidBlockWitnessHook;

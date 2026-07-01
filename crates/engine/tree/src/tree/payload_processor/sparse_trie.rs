@@ -4,8 +4,8 @@ use std::sync::Arc;
 
 use crate::tree::{
     multiproof::{
-        dispatch_with_chunking, evm_state_to_hashed_post_state, StateRootComputeOutcome,
-        StateRootMessage, DEFAULT_MAX_TARGETS_FOR_CHUNKING,
+        dispatch_with_chunking, StateRootComputeOutcome, StateRootMessage,
+        DEFAULT_MAX_TARGETS_FOR_CHUNKING,
     },
     payload_processor::multiproof::MultiProofTaskMetrics,
 };
@@ -192,11 +192,6 @@ where
                 StateRootMessage::PrefetchProofs(targets) => {
                     SparseTrieTaskMessage::PrefetchProofs(targets)
                 }
-                StateRootMessage::StateUpdate(state) => {
-                    let _span = trace_span!(target: "engine::tree::payload_processor::sparse_trie", "hashing_state_update", n = state.len()).entered();
-                    let hashed = evm_state_to_hashed_post_state(state);
-                    SparseTrieTaskMessage::HashedState(hashed)
-                }
                 StateRootMessage::FinishedStateUpdates => {
                     SparseTrieTaskMessage::FinishedStateUpdates
                 }
@@ -276,7 +271,7 @@ where
                         .sparse_trie_channel_wait_duration_histogram
                         .record(wake.duration_since(t));
 
-                    self.on_message(update);
+                    self.on_message(update)?;
                     self.pending_updates += 1;
                 }
                 recv(self.proof_result_rx) -> message => {
@@ -397,11 +392,11 @@ where
     }
 
     /// Processes a [`SparseTrieTaskMessage`] from the hashing task.
-    fn on_message(&mut self, message: SparseTrieTaskMessage) {
+    fn on_message(&mut self, message: SparseTrieTaskMessage) -> Result<(), ParallelStateRootError> {
         match message {
             SparseTrieTaskMessage::PrefetchProofs(targets) => self.on_prewarm_targets(targets),
             SparseTrieTaskMessage::HashedState(hashed_state) => {
-                self.on_hashed_state_update(hashed_state)
+                self.on_hashed_state_update(hashed_state)?;
             }
             SparseTrieTaskMessage::FinishedStateUpdates => {
                 let _ = self
@@ -412,6 +407,8 @@ where
                 self.finished_state_updates = true
             }
         }
+
+        Ok(())
     }
 
     #[instrument(
@@ -447,8 +444,19 @@ where
         target = "engine::tree::payload_processor::sparse_trie",
         skip_all
     )]
-    fn on_hashed_state_update(&mut self, hashed_state_update: HashedPostState) {
+    fn on_hashed_state_update(
+        &mut self,
+        hashed_state_update: HashedPostState,
+    ) -> Result<(), ParallelStateRootError> {
         for (&address, storage) in &hashed_state_update.storages {
+            if storage.wiped {
+                self.trie.wipe_storage(address).map_err(|err| {
+                    ParallelStateRootError::Other(format!(
+                        "could not wipe sparse storage trie: {err:?}"
+                    ))
+                })?;
+            }
+
             if !storage.storage.is_empty() {
                 // Look up outer maps once per address instead of once per slot.
                 let new_updates = self.new_storage_updates.entry(address).or_default();
@@ -495,6 +503,8 @@ where
         }
 
         self.final_hashed_state.extend(hashed_state_update);
+
+        Ok(())
     }
 
     fn on_proof_result(
@@ -976,6 +986,51 @@ mod tests {
         assert_eq!(decoded.balance, U256::from(42));
         assert_eq!(decoded.storage_root, storage_root);
         assert_eq!(account_rlp_buf, encoded);
+    }
+
+    #[test]
+    fn empty_storage_wipe_promotes_account_update() {
+        let runtime = reth_tasks::Runtime::test();
+        let provider_factory = create_test_provider_factory();
+        let anchor_hash = provider_factory.chain_spec().genesis_hash();
+        let overlay_factory = OverlayStateProviderFactory::new(
+            provider_factory,
+            OverlayBuilder::<reth_chain_state::EthPrimitives>::new(
+                anchor_hash,
+                ChangesetCache::new(),
+            ),
+        );
+        let proof_worker_handle =
+            ProofWorkerHandle::new(&runtime, ProofTaskCtx::new(overlay_factory), false);
+
+        let default_trie = RevealableSparseTrie::blind_from(ArenaParallelSparseTrie::default());
+        let trie = SparseStateTrie::<ArenaParallelSparseTrie, ArenaParallelSparseTrie>::default()
+            .with_accounts_trie(RevealableSparseTrie::revealed_empty())
+            .with_default_storage_trie(default_trie)
+            .with_updates(true);
+        let (updates_tx, updates_rx) = crossbeam_channel::unbounded();
+        let mut task = SparseTrieCacheTask::new_with_trie(
+            &runtime,
+            updates_rx,
+            std::sync::mpsc::channel().0,
+            proof_worker_handle,
+            MultiProofTaskMetrics::default(),
+            trie,
+            B256::ZERO,
+            1,
+        );
+        drop(updates_tx);
+
+        let address = B256::random();
+        let mut hashed_state = HashedPostState::default();
+        hashed_state.storages.insert(address, reth_trie::HashedStorage::new(true));
+
+        task.on_hashed_state_update(hashed_state).expect("storage wipe should be accepted");
+        task.process_new_updates().expect("new updates should process");
+        task.promote_pending_account_updates().expect("account update should promote");
+
+        assert!(task.pending_account_updates.is_empty());
+        assert_eq!(task.trie.storage_root(&address), Some(EMPTY_ROOT_HASH));
     }
 
     #[test]

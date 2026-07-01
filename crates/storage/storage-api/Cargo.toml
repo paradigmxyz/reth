@@ -22,8 +22,8 @@ reth-prune-types.workspace = true
 reth-stages-types.workspace = true
 reth-storage-errors.workspace = true
 reth-trie-common.workspace = true
-revm.workspace = true
 reth-ethereum-primitives.workspace = true
+evm2 = { workspace = true, optional = true }
 
 # ethereum
 alloy-eips.workspace = true
@@ -43,6 +43,11 @@ tokio-stream.workspace = true
 
 [features]
 default = ["std"]
+asm-keccak = [
+    "evm2?/asm-keccak",
+    "reth-execution-types/asm-keccak",
+    "alloy-primitives/asm-keccak",
+]
 std = [
     "reth-chainspec/std",
     "alloy-consensus/std",
@@ -51,9 +56,10 @@ std = [
     "alloy-rpc-types-engine/std",
     "reth-primitives-traits/std",
     "reth-stages-types/std",
-    "revm/std",
     "reth-ethereum-primitives/std",
     "reth-execution-types/std",
+    "dep:evm2",
+    "evm2/std",
     "reth-prune-types/std",
     "reth-storage-errors/std",
     "reth-db-models/std",
@@ -76,12 +82,12 @@ serde = [
     "reth-prune-types/serde",
     "reth-stages-types/serde",
     "reth-trie-common/serde",
-    "revm/serde",
     "alloy-eips/serde",
     "alloy-primitives/serde",
     "alloy-consensus/serde",
     "alloy-rpc-types-engine/serde",
     "alloy-eip7928/serde",
+    "evm2?/serde",
 ]
 
 serde-bincode-compat = [

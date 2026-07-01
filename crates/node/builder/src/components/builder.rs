@@ -5,10 +5,11 @@ use crate::{
         Components, ConsensusBuilder, ExecutorBuilder, NetworkBuilder, NodeComponents,
         PayloadServiceBuilder, PoolBuilder,
     },
-    BuilderContext, ConfigureEvm, FullNodeTypes,
+    BuilderContext, FullNodeTypes,
 };
 use reth_chainspec::EthChainSpec;
 use reth_consensus::{noop::NoopConsensus, FullConsensus};
+use reth_evm::ConfigureEvm;
 use reth_network::{types::NetPrimitivesFor, EthNetworkPrimitives, NetworkPrimitives};
 use reth_network_api::{noop::NoopNetwork, FullNetwork};
 use reth_node_api::{BlockTy, BodyTy, HeaderTy, NodeTypes, PrimitivesTy, ReceiptTy, TxTy};

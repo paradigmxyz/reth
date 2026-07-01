@@ -4,9 +4,11 @@ use super::{
 };
 use crate::{
     changeset_walker::{StaticFileAccountChangesetWalker, StaticFileStorageChangesetWalker},
+    providers::execution_state_to_plain_state_and_reverts,
     to_range, BlockHashReader, BlockNumReader, BlockReader, BlockSource, EitherWriter,
-    EitherWriterDestination, HeaderProvider, ReceiptProvider, StageCheckpointReader, StatsReader,
-    TransactionVariant, TransactionsProvider, TransactionsProviderExt,
+    EitherWriterDestination, HeaderProvider, OriginalValuesKnown, ReceiptProvider,
+    StageCheckpointReader, StatsReader, TransactionVariant, TransactionsProvider,
+    TransactionsProviderExt,
 };
 use alloy_consensus::{
     transaction::{TransactionMeta, TxHashRef},
@@ -520,13 +522,16 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
     ) -> ProviderResult<()> {
         for block in blocks {
             let block_number = block.recovered_block().number();
-            let reverts = block.execution_outcome().state.reverts.to_plain_state_reverts();
+            let (_, reverts) = execution_state_to_plain_state_and_reverts(
+                &block.execution_outcome().state,
+                OriginalValuesKnown::Yes,
+            );
 
             let changeset: Vec<_> = reverts
                 .accounts
                 .into_iter()
                 .flatten()
-                .map(|(address, info)| AccountBeforeTx { address, info: info.map(Into::into) })
+                .map(|(address, info)| AccountBeforeTx { address, info })
                 .collect();
             w.append_account_changeset(changeset, block_number)?;
         }
@@ -541,7 +546,10 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
     ) -> ProviderResult<()> {
         for block in blocks {
             let block_number = block.recovered_block().number();
-            let reverts = block.execution_outcome().state.reverts.to_plain_state_reverts();
+            let (_, reverts) = execution_state_to_plain_state_and_reverts(
+                &block.execution_outcome().state,
+                OriginalValuesKnown::Yes,
+            );
 
             let changeset: Vec<_> = reverts
                 .storage

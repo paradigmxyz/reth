@@ -22,15 +22,11 @@ reth-trie.workspace = true
 
 # alloy
 alloy-eip7928.workspace = true
-alloy-evm.workspace = true
 alloy-primitives.workspace = true
 alloy-rlp.workspace = true
 
 # tracing
 tracing.workspace = true
-
-# revm
-revm.workspace = true
 
 # misc
 thiserror.workspace = true

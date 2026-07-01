@@ -26,7 +26,6 @@ reth-primitives-traits.workspace = true
 reth-ethereum-primitives.workspace = true
 reth-provider.workspace = true
 reth-prune-types.workspace = true
-reth-revm.workspace = true
 reth-stages-api.workspace = true
 reth-tasks.workspace = true
 reth-tracing.workspace = true
@@ -53,7 +52,8 @@ tracing.workspace = true
 
 [dev-dependencies]
 reth-db-common.workspace = true
-reth-evm-ethereum.workspace = true
+reth-evm-ethereum = { workspace = true, features = ["test-utils"] }
+reth-execution-types.workspace = true
 reth-primitives-traits = { workspace = true, features = ["test-utils"] }
 reth-provider = { workspace = true, features = ["test-utils"] }
 reth-testing-utils.workspace = true
@@ -68,7 +68,6 @@ tempfile.workspace = true
 [features]
 serde = [
     "reth-exex-types/serde",
-    "reth-revm/serde",
     "alloy-consensus/serde",
     "alloy-eips/serde",
     "alloy-primitives/serde",
@@ -81,4 +80,5 @@ serde = [
     "reth-config/serde",
     "reth-ethereum-primitives/serde",
     "reth-chain-state/serde",
+    "reth-execution-types/serde",
 ]

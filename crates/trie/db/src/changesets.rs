@@ -24,10 +24,11 @@ use reth_trie::{
 use reth_trie_common::updates::{StorageTrieUpdatesSorted, TrieUpdatesSorted};
 use std::{
     collections::{BTreeMap, HashMap},
+    fmt,
     ops::RangeInclusive,
-    sync::Arc,
+    sync::{Arc, OnceLock},
 };
-use tracing::{debug, warn};
+use tracing::{debug, debug_span, warn};
 
 #[cfg(test)]
 use reth_trie::changesets::compute_trie_changesets;
@@ -314,6 +315,46 @@ where
     Ok(TrieUpdatesSorted::new(account_nodes, storage_tries))
 }
 
+/// A pending changeset computation that other threads can wait on.
+///
+/// Deferred trie tasks register a pending entry before computing changesets for a block. If a
+/// reader needs the same changesets before that task finishes, it waits on this entry instead of
+/// falling back to DB-based recomputation.
+struct PendingChangeset {
+    /// `None` when cancelled, `Some(..)` when resolved with data.
+    result: OnceLock<Option<Arc<TrieUpdatesSorted>>>,
+}
+
+impl PendingChangeset {
+    const fn new() -> Self {
+        Self { result: OnceLock::new() }
+    }
+
+    /// Blocks until the computation finishes. Returns `Some` if resolved with data, `None` if the
+    /// computation was cancelled.
+    fn wait(&self) -> Option<Arc<TrieUpdatesSorted>> {
+        let _span =
+            debug_span!(target: "trie::changeset_cache", "waiting_for_pending_changeset").entered();
+        self.result.wait().clone()
+    }
+
+    /// Resolves the pending computation with the given result, waking all waiters.
+    fn resolve(&self, changesets: Arc<TrieUpdatesSorted>) {
+        let _ = self.result.set(Some(changesets));
+    }
+
+    /// Cancels the pending computation, waking all waiters so they can fall through to DB.
+    fn cancel(&self) {
+        let _ = self.result.set(None);
+    }
+}
+
+impl fmt::Debug for PendingChangeset {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("PendingChangeset").field("resolved", &self.result.get().is_some()).finish()
+    }
+}
+
 /// Thread-safe changeset cache.
 ///
 /// This type wraps a shared, mutable reference to the cache inner.
@@ -348,6 +389,35 @@ impl ChangesetCache {
         block_number: BlockNumber,
     ) -> Option<Arc<TrieUpdatesSorted>> {
         self.inner.read().get(&ChangesetRangeKey::single(block_number, block_hash))
+    }
+
+    /// Inserts changesets into the cache and resolves any matching pending entry.
+    fn insert_key(&self, key: ChangesetRangeKey, changesets: Arc<TrieUpdatesSorted>) {
+        let pending = {
+            let mut cache = self.inner.write();
+            cache.insert(key, Arc::clone(&changesets));
+            cache.pending.remove(&key)
+        };
+
+        if let Some(pending) = pending {
+            pending.resolve(changesets);
+        }
+    }
+
+    /// Registers a pending single-block changeset computation.
+    ///
+    /// The returned guard must be resolved by the deferred producer. If it is dropped without
+    /// resolving, waiters are woken and will fall through to DB computation.
+    pub fn register_pending(
+        &self,
+        block_number: BlockNumber,
+        block_hash: B256,
+    ) -> PendingChangesetGuard {
+        let key = ChangesetRangeKey::single(block_number, block_hash);
+        let pending = Arc::new(PendingChangeset::new());
+        let prev = self.inner.write().pending.insert(key, Arc::clone(&pending));
+        debug_assert!(prev.is_none(), "duplicate pending changeset for {key:?}");
+        PendingChangesetGuard { cache: self.clone(), key, pending: Some(pending) }
     }
 
     /// Evicts changesets for blocks below the given block number.
@@ -511,8 +581,41 @@ impl ChangesetCache {
             );
 
             let block_key = ChangesetRangeKey::single(block_number, block_hash);
-            if let Some(changesets) = self.inner.read().get(&block_key) {
+            let (changesets, pending) = {
+                let cache = self.inner.read();
+                (cache.get(&block_key), cache.pending.get(&block_key).cloned())
+            };
+            if let Some(changesets) = changesets {
                 cached_reverts.push(changesets);
+            } else if let Some(pending) = pending {
+                debug!(
+                    target: "trie::changeset_cache",
+                    block_number,
+                    ?block_hash,
+                    "Changeset cache MISS but pending computation found, waiting"
+                );
+
+                let start = Instant::now();
+                if let Some(changesets) = pending.wait() {
+                    debug!(
+                        target: "trie::changeset_cache",
+                        block_number,
+                        ?block_hash,
+                        elapsed = ?start.elapsed(),
+                        "Pending changeset resolved"
+                    );
+                    cached_reverts.push(changesets);
+                } else {
+                    debug!(
+                        target: "trie::changeset_cache",
+                        block_number,
+                        ?block_hash,
+                        elapsed = ?start.elapsed(),
+                        "Pending changeset was cancelled, falling through to DB computation"
+                    );
+                    all_cached = false;
+                    break
+                }
             } else {
                 all_cached = false;
                 break
@@ -539,7 +642,7 @@ impl ChangesetCache {
                 "Finished accumulating cached trie reverts for block range"
             );
 
-            self.inner.write().insert(range_key, Arc::clone(&accumulated_reverts));
+            self.insert_key(range_key, Arc::clone(&accumulated_reverts));
             return Ok(accumulated_reverts)
         }
 
@@ -573,9 +676,38 @@ impl ChangesetCache {
             "Finished accumulating trie reverts for block range"
         );
 
-        self.inner.write().insert(range_key, Arc::clone(&accumulated_reverts));
+        self.insert_key(range_key, Arc::clone(&accumulated_reverts));
 
         Ok(accumulated_reverts)
+    }
+}
+
+/// Guard for a pending changeset cache entry.
+#[derive(Debug)]
+pub struct PendingChangesetGuard {
+    cache: ChangesetCache,
+    key: ChangesetRangeKey,
+    pending: Option<Arc<PendingChangeset>>,
+}
+
+impl PendingChangesetGuard {
+    /// Resolves the pending cache entry with computed changesets.
+    pub fn resolve(mut self, changesets: Arc<TrieUpdatesSorted>) {
+        self.cache.insert_key(self.key, changesets);
+        self.pending = None;
+    }
+}
+
+impl Drop for PendingChangesetGuard {
+    fn drop(&mut self) {
+        let Some(pending) = self.pending.take() else { return };
+        let mut cache = self.cache.inner.write();
+        let should_remove =
+            cache.pending.get(&self.key).is_some_and(|current| Arc::ptr_eq(current, &pending));
+        if should_remove {
+            cache.pending.remove(&self.key);
+            pending.cancel();
+        }
     }
 }
 
@@ -626,6 +758,9 @@ struct ChangesetCacheInner {
     /// Cache entries keyed by inclusive block range plus the range's canonical end hash.
     entries: HashMap<ChangesetRangeKey, Arc<TrieUpdatesSorted>>,
 
+    /// Pending single-block changeset computations keyed like `entries`.
+    pending: HashMap<ChangesetRangeKey, Arc<PendingChangeset>>,
+
     /// Range start block to cache keys mapping for eviction.
     range_starts: BTreeMap<BlockNumber, Vec<ChangesetRangeKey>>,
 
@@ -669,6 +804,7 @@ impl ChangesetCacheInner {
     fn new() -> Self {
         Self {
             entries: HashMap::new(),
+            pending: HashMap::new(),
             range_starts: BTreeMap::new(),
             #[cfg(feature = "metrics")]
             metrics: Default::default(),
@@ -747,6 +883,18 @@ impl ChangesetCacheInner {
                         evicted_count += 1;
                     }
                 }
+            }
+        }
+
+        let pending_to_evict = self
+            .pending
+            .keys()
+            .copied()
+            .filter(|key| key.start_block < up_to_block)
+            .collect::<Vec<_>>();
+        for key in pending_to_evict {
+            if let Some(pending) = self.pending.remove(&key) {
+                pending.cancel();
             }
         }
 

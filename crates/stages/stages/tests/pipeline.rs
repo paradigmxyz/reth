@@ -16,6 +16,7 @@ use reth_downloaders::{
 use reth_ethereum_primitives::{Block, BlockBody, Transaction};
 use reth_evm::{execute::Executor, ConfigureEvm};
 use reth_evm_ethereum::EthEvmConfig;
+use reth_execution_types::hashed_post_state_sorted_from_execution_state;
 use reth_network_p2p::{
     bodies::downloader::BodyDownloader,
     headers::downloader::{HeaderDownloader, SyncTarget},
@@ -31,15 +32,15 @@ use reth_provider::{
     StateWriter, StaticFileProviderFactory,
 };
 use reth_prune_types::PruneModes;
-use reth_revm::database::StateProviderDatabase;
 use reth_stages::sets::DefaultStages;
 use reth_stages_api::{Pipeline, StageId};
 use reth_static_file::StaticFileProducer;
 use reth_storage_api::{
-    ChangeSetReader, StateProvider, StorageChangeSetReader, StorageSettings, StorageSettingsCache,
+    ChangeSetReader, SharedEvmStateProviderDatabase, StateProvider, StateWriteConfig,
+    StorageChangeSetReader, StorageSettings, StorageSettingsCache,
 };
 use reth_testing_utils::generators::{self, generate_key, sign_tx_with_key_pair};
-use reth_trie::{HashedPostState, KeccakKeyHasher, StateRoot};
+use reth_trie::{KeccakKeyHasher, StateRoot};
 use reth_trie_db::DatabaseStateRoot;
 use std::sync::Arc;
 use tokio::sync::watch;
@@ -338,25 +339,26 @@ async fn run_pipeline_forward_and_unwind(
         // Execute in a scope so state_provider is dropped before we use provider for writes
         let output = {
             let state_provider = provider.latest();
-            let db = StateProviderDatabase::new(&*state_provider);
-            let executor = evm_config.batch_executor(db);
-            executor.execute(&block_with_senders)?
+            // SAFETY: The shared database is consumed by this synchronous execution call and does
+            // not outlive the state provider borrowed here.
+            let database = unsafe { SharedEvmStateProviderDatabase::new(&*state_provider) };
+            evm_config
+                .executor(database)
+                .execute(&block_with_senders)
+                .map_err(|err| eyre::eyre!(err.to_string()))?
         };
 
         let gas_used = output.gas_used;
 
-        // Convert bundle state to hashed post state and compute state root
+        // Convert block state to sorted hashed post state and compute state root.
         let hashed_state =
-            HashedPostState::from_bundle_state::<KeccakKeyHasher>(output.state.state());
+            hashed_post_state_sorted_from_execution_state::<KeccakKeyHasher>(&output.state);
         type TestStateRoot<'a, TX, A> = StateRoot<
             reth_trie_db::DatabaseTrieCursorFactory<&'a TX, A>,
             reth_trie_db::DatabaseHashedCursorFactory<&'a TX>,
         >;
         let (state_root, _trie_updates) = reth_trie_db::with_adapter!(provider, |A| {
-            TestStateRoot::<_, A>::overlay_root_with_updates(
-                provider.tx_ref(),
-                &hashed_state.clone().into_sorted(),
-            )
+            TestStateRoot::<_, A>::overlay_root_with_updates(provider.tx_ref(), &hashed_state)
         })?;
 
         // Create receipts for receipt root calculation (one per transaction)
@@ -382,9 +384,17 @@ async fn run_pipeline_forward_and_unwind(
         );
 
         // Write the plain state to database so subsequent blocks build on it
-        let plain_state = output.state.to_plain_state(OriginalValuesKnown::Yes);
-        provider.write_state_changes(plain_state)?;
-        provider.write_hashed_state(&hashed_state.into_sorted())?;
+        let execution_outcome = reth_execution_types::ExecutionOutcome::single(block_num, output);
+        provider.write_state(
+            &execution_outcome,
+            OriginalValuesKnown::Yes,
+            StateWriteConfig {
+                write_receipts: false,
+                write_account_changesets: false,
+                write_storage_changesets: false,
+            },
+        )?;
+        provider.write_hashed_state(&hashed_state)?;
         provider.commit()?;
 
         parent_hash = block.hash();

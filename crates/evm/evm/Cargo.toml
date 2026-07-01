@@ -15,48 +15,69 @@ workspace = true
 reth-execution-errors.workspace = true
 reth-execution-types.workspace = true
 reth-metrics = { workspace = true, optional = true }
-reth-primitives-traits.workspace = true
+reth-primitives-traits = { workspace = true, features = ["dashmap"] }
 reth-storage-api.workspace = true
 reth-storage-errors.workspace = true
 reth-trie-common.workspace = true
 
-revm.workspace = true
+evm2.workspace = true
 
 # alloy
 alloy-primitives.workspace = true
-alloy-eip7928.workspace = true
 alloy-eips.workspace = true
-alloy-evm.workspace = true
 alloy-consensus.workspace = true
 
 auto_impl.workspace = true
-derive_more.workspace = true
 futures-util.workspace = true
 metrics = { workspace = true, optional = true }
+moka = { workspace = true, features = ["sync"], optional = true }
 rayon = { workspace = true, optional = true }
+tracing = { workspace = true, optional = true }
 
 [dev-dependencies]
 reth-ethereum-primitives.workspace = true
 
 [features]
 default = ["std"]
+asm-keccak = [
+    "evm2/asm-keccak",
+    "reth-execution-types/asm-keccak",
+    "reth-storage-api/asm-keccak",
+    "alloy-primitives/asm-keccak",
+]
+c-kzg = [
+    "evm2/c-kzg",
+    "reth-execution-types/c-kzg",
+]
+blst = [
+    "evm2/blst",
+    "reth-execution-types/blst",
+]
+portable = [
+    "evm2/portable",
+    "reth-execution-types/portable",
+]
+p256-aws-lc-rs = [
+    "evm2/p256-aws-lc-rs",
+    "reth-execution-types/p256-aws-lc-rs",
+]
 std = [
+    "dep:moka",
     "dep:rayon",
+    "dep:tracing",
     "reth-primitives-traits/std",
     "alloy-eips/std",
     "alloy-primitives/std",
     "alloy-consensus/std",
-    "revm/std",
-    "alloy-evm/std",
+    "evm2/std",
     "reth-execution-errors/std",
     "reth-execution-types/std",
     "reth-storage-errors/std",
-    "futures-util/std",
-    "derive_more/std",
-    "reth-storage-api/std",
     "reth-trie-common/std",
+    "futures-util/std",
+    "reth-storage-api/std",
     "reth-ethereum-primitives/std",
-    "alloy-eip7928/std",
+    "tracing?/std",
 ]
 metrics = ["std", "dep:metrics", "dep:reth-metrics"]
 test-utils = [

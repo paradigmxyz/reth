@@ -25,7 +25,7 @@ use reth_trie::{
     trie_cursor::InMemoryTrieCursorFactory,
     updates::TrieUpdates,
     witness::TrieWitness,
-    AccountProof, ExecutionWitnessMode, HashedPostState, HashedStorage, KeccakKeyHasher,
+    AccountProof, ExecutionWitnessMode, HashedPostState, HashedPostStateSorted, HashedStorage,
     MultiProof, MultiProofTargets, StateRoot, StorageMultiProof, StorageRoot, TrieInput,
     TrieInputSorted,
 };
@@ -417,9 +417,16 @@ where
     N: NodePrimitives,
 {
     fn state_root(&self, hashed_state: HashedPostState) -> ProviderResult<B256> {
+        self.state_root_sorted(hashed_state.into_sorted())
+    }
+
+    fn state_root_sorted(&self, hashed_state: HashedPostStateSorted) -> ProviderResult<B256> {
         reth_trie_db::with_adapter!(self.provider, |A| {
-            let input = self.build_overlay(TrieInputSorted::from_unsorted(
-                TrieInput::from_state(hashed_state),
+            let prefix_sets = hashed_state.construct_prefix_sets();
+            let input = self.build_overlay(TrieInputSorted::new(
+                Default::default(),
+                Arc::new(hashed_state),
+                prefix_sets,
             ))?;
             Ok(<DbStateRoot<'_, _, A>>::overlay_root_from_nodes(self.tx(), input)?)
         })
@@ -436,9 +443,19 @@ where
         &self,
         hashed_state: HashedPostState,
     ) -> ProviderResult<(B256, TrieUpdates)> {
+        self.state_root_sorted_with_updates(hashed_state.into_sorted())
+    }
+
+    fn state_root_sorted_with_updates(
+        &self,
+        hashed_state: HashedPostStateSorted,
+    ) -> ProviderResult<(B256, TrieUpdates)> {
         reth_trie_db::with_adapter!(self.provider, |A| {
-            let input = self.build_overlay(TrieInputSorted::from_unsorted(
-                TrieInput::from_state(hashed_state),
+            let prefix_sets = hashed_state.construct_prefix_sets();
+            let input = self.build_overlay(TrieInputSorted::new(
+                Default::default(),
+                Arc::new(hashed_state),
+                prefix_sets,
             ))?;
             Ok(<DbStateRoot<'_, _, A>>::overlay_root_from_nodes_with_updates(self.tx(), input)?)
         })
@@ -643,9 +660,6 @@ where
     Provider: NodePrimitivesProvider<Primitives = N>,
     N: NodePrimitives,
 {
-    fn hashed_post_state(&self, bundle_state: &revm::database::BundleState) -> HashedPostState {
-        HashedPostState::from_bundle_state::<KeccakKeyHasher>(bundle_state.state())
-    }
 }
 
 impl<Provider, N> StateProvider for HistoricalStateProviderRef<'_, Provider, N>
@@ -877,12 +891,15 @@ mod tests {
         AccountReader, HistoricalStateProvider, HistoricalStateProviderRef, RocksDBProviderFactory,
         StateProvider,
     };
-    use alloy_primitives::{address, b256, Address, B256, U256};
+    use alloy_primitives::{address, b256, map::AddressMap, Address, B256, KECCAK256_EMPTY, U256};
     use reth_db_api::{
         models::{storage_sharded_key::StorageShardedKey, AccountBeforeTx, ShardedKey},
         tables,
         transaction::{DbTx, DbTxMut},
         BlockNumberList,
+    };
+    use reth_execution_types::{
+        execution_state_from_init, BlockReverts, RevertAccount, StorageReverts,
     };
     use reth_primitives_traits::{Account, StorageEntry};
     use reth_storage_api::{
@@ -892,11 +909,42 @@ mod tests {
     };
     use reth_storage_errors::provider::ProviderError;
     use reth_trie_db::ChangesetCache;
+    use std::collections::BTreeMap;
 
     const ADDRESS: Address = address!("0x0000000000000000000000000000000000000001");
     const HIGHER_ADDRESS: Address = address!("0x0000000000000000000000000000000000000005");
     const STORAGE: B256 =
         b256!("0x0000000000000000000000000000000000000000000000000000000000000001");
+
+    fn account_to_revert(account: Account) -> RevertAccount {
+        RevertAccount {
+            balance: account.balance,
+            nonce: account.nonce,
+            code_hash: account.bytecode_hash.unwrap_or(KECCAK256_EMPTY),
+            code: None,
+        }
+    }
+
+    fn block_revert(
+        changes: impl IntoIterator<Item = (Address, Option<Account>, Vec<(U256, U256)>)>,
+    ) -> BlockReverts {
+        let mut accounts = AddressMap::default();
+        let mut storage = AddressMap::default();
+        for (address, account, storage_revert) in changes {
+            accounts.insert(address, account.map(account_to_revert));
+            if !storage_revert.is_empty() {
+                storage.insert(
+                    address,
+                    StorageReverts {
+                        slots: storage_revert.into_iter().collect(),
+                        ..Default::default()
+                    },
+                );
+            }
+        }
+
+        BlockReverts { accounts, storage }
+    }
 
     const fn assert_state_provider<T: StateProvider>() {}
     #[expect(dead_code)]
@@ -1313,17 +1361,13 @@ mod tests {
         use reth_db_api::models::StorageSettings;
         use reth_execution_types::ExecutionOutcome;
         use reth_testing_utils::generators::{self, random_block_range, BlockRangeParams};
-        use revm::database::BundleState;
-        use std::collections::HashMap;
 
         let factory = create_test_provider_factory();
         factory.set_storage_settings_cache(StorageSettings::v2());
 
         let slot = U256::from_be_bytes(*STORAGE);
-        let account: revm::state::AccountInfo =
-            Account { nonce: 1, balance: U256::from(1000), bytecode_hash: None }.into();
-        let higher_account: revm::state::AccountInfo =
-            Account { nonce: 1, balance: U256::from(2000), bytecode_hash: None }.into();
+        let account = Account { nonce: 1, balance: U256::from(1000), bytecode_hash: None };
+        let higher_account = Account { nonce: 1, balance: U256::from(2000), bytecode_hash: None };
 
         let mut rng = generators::rng();
         let blocks = random_block_range(
@@ -1332,29 +1376,28 @@ mod tests {
             BlockRangeParams { parent: Some(B256::ZERO), tx_count: 0..1, ..Default::default() },
         );
 
-        let mut addr_storage = HashMap::default();
+        let mut addr_storage = BTreeMap::default();
         addr_storage.insert(slot, (U256::ZERO, U256::from(100)));
-        let mut higher_storage = HashMap::default();
+        let mut higher_storage = BTreeMap::default();
         higher_storage.insert(slot, (U256::ZERO, U256::from(1000)));
 
-        type Revert = Vec<(Address, Option<Option<revm::state::AccountInfo>>, Vec<(U256, U256)>)>;
+        type Revert = Vec<(Address, Option<Account>, Vec<(U256, U256)>)>;
         let mut reverts: Vec<Revert> = vec![Vec::new(); 16];
 
-        reverts[3] = vec![(ADDRESS, Some(Some(account.clone())), vec![(slot, U256::ZERO)])];
-        reverts[4] =
-            vec![(HIGHER_ADDRESS, Some(Some(higher_account.clone())), vec![(slot, U256::ZERO)])];
-        reverts[7] = vec![(ADDRESS, Some(Some(account.clone())), vec![(slot, U256::from(7))])];
-        reverts[10] = vec![(ADDRESS, Some(Some(account.clone())), vec![(slot, U256::from(10))])];
-        reverts[15] = vec![(ADDRESS, Some(Some(account.clone())), vec![(slot, U256::from(15))])];
+        reverts[3] = vec![(ADDRESS, Some(account), vec![(slot, U256::ZERO)])];
+        reverts[4] = vec![(HIGHER_ADDRESS, Some(higher_account), vec![(slot, U256::ZERO)])];
+        reverts[7] = vec![(ADDRESS, Some(account), vec![(slot, U256::from(7))])];
+        reverts[10] = vec![(ADDRESS, Some(account), vec![(slot, U256::from(10))])];
+        reverts[15] = vec![(ADDRESS, Some(account), vec![(slot, U256::from(15))])];
 
-        let bundle = BundleState::new(
+        let state = execution_state_from_init(
             [
-                (ADDRESS, None, Some(account), addr_storage),
-                (HIGHER_ADDRESS, None, Some(higher_account), higher_storage),
+                (ADDRESS, (None, Some(account), addr_storage)),
+                (HIGHER_ADDRESS, (None, Some(higher_account), higher_storage)),
             ],
-            reverts,
             [],
         );
+        let block_reverts = reverts.into_iter().map(block_revert).collect();
 
         let provider_rw = factory.provider_rw().unwrap();
         provider_rw
@@ -1363,7 +1406,13 @@ mod tests {
                     .into_iter()
                     .map(|b| b.try_recover().expect("failed to seal block with senders"))
                     .collect(),
-                &ExecutionOutcome { bundle, first_block: 0, ..Default::default() },
+                &ExecutionOutcome::from_state_and_reverts(
+                    state,
+                    block_reverts,
+                    Vec::new(),
+                    0,
+                    Vec::new(),
+                ),
                 Default::default(),
             )
             .unwrap();

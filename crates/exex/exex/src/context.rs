@@ -12,7 +12,10 @@ use tokio::sync::mpsc::{error::SendError, UnboundedSender};
 /// Captures the context that an `ExEx` has access to.
 ///
 /// This type wraps various node components that the `ExEx` has access to.
-pub struct ExExContext<Node: FullNodeComponents> {
+pub struct ExExContext<Node>
+where
+    Node: FullNodeComponents,
+{
     /// The current head of the blockchain at launch.
     pub head: BlockNumHash,
     /// The config of the node
@@ -142,7 +145,10 @@ mod tests {
     #[test]
     const fn issue_12054() {
         #[expect(dead_code)]
-        struct ExEx<Node: FullNodeComponents> {
+        struct ExEx<Node>
+        where
+            Node: FullNodeComponents,
+        {
             ctx: ExExContext<Node>,
         }
 

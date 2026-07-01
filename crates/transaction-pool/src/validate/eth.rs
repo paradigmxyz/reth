@@ -23,18 +23,17 @@ use alloy_consensus::{
 };
 use alloy_eips::{
     eip1559::ETHEREUM_BLOCK_GAS_LIMIT_30M, eip4844::env_settings::EnvKzgSettings,
-    eip7840::BlobParams, BlockId,
+    eip7702::constants::PER_EMPTY_ACCOUNT_COST, eip7840::BlobParams, BlockId,
 };
 use alloy_primitives::U256;
 use reth_chainspec::{ChainSpecProvider, EthChainSpec, EthereumHardforks};
-use reth_evm::ConfigureEvm;
+use reth_evm::{ConfigureEvm, EvmEnv};
 use reth_primitives_traits::{
     transaction::error::InvalidTransactionError, Account, BlockTy, GotExpected, HeaderTy,
     SealedBlock,
 };
 use reth_storage_api::{AccountInfoReader, BlockReaderIdExt, BytecodeReader, StateProviderFactory};
 use reth_tasks::Runtime;
-use revm::context_interface::Cfg;
 use std::{
     fmt,
     marker::PhantomData,
@@ -909,26 +908,17 @@ where
 
         self.block_gas_limit.store(new_tip_block.gas_limit(), std::sync::atomic::Ordering::Relaxed);
 
-        // Get EVM limits from evm_config.evm_env()
-        let evm_env = self
+        let limits = self
             .evm_config
             .evm_env(new_tip_block)
-            .expect("evm_env should not fail for executed block");
-
+            .expect("evm_env should not fail for executed block")
+            .transaction_validation_limits();
         self.fork_tracker
             .max_initcode_size
-            .store(evm_env.cfg_env.max_initcode_size(), std::sync::atomic::Ordering::Relaxed);
-        // EIP-8037: When state gas is enabled, `tx.gas` can exceed the per-tx gas limit cap
-        // because the cap only applies to regular gas (state gas uses a reservoir).
-        // Store 0 to disable the txpool-level check.
-        let tx_gas_limit_cap = if evm_env.cfg_env.is_amsterdam_eip8037_enabled() {
-            0
-        } else {
-            evm_env.cfg_env.tx_gas_limit_cap()
-        };
+            .store(limits.max_initcode_size, std::sync::atomic::Ordering::Relaxed);
         self.fork_tracker
             .tx_gas_limit_cap
-            .store(tx_gas_limit_cap, std::sync::atomic::Ordering::Relaxed);
+            .store(limits.tx_gas_limit_cap, std::sync::atomic::Ordering::Relaxed);
     }
 
     fn max_gas_limit(&self) -> u64 {
@@ -1072,8 +1062,10 @@ impl<Client, Evm> EthTransactionValidatorBuilder<Client, Evm> {
             .header_by_id(BlockId::latest())
             .expect("failed to fetch latest header")
             .expect("latest header is not found");
-        let evm_env =
-            evm_config.evm_env(&tip).expect("evm_env should not fail for existing blocks");
+        let limits = evm_config
+            .evm_env(&tip)
+            .expect("evm_env should not fail for latest block")
+            .transaction_validation_limits();
 
         Self {
             block_gas_limit: ETHEREUM_BLOCK_GAS_LIMIT_30M.into(),
@@ -1110,13 +1102,8 @@ impl<Client, Evm> EthTransactionValidatorBuilder<Client, Evm> {
             // no custom transaction types by default
             other_tx_types: U256::ZERO,
 
-            // EIP-8037: When state gas is enabled, tx.gas can exceed the per-tx cap
-            tx_gas_limit_cap: if evm_env.cfg_env.is_amsterdam_eip8037_enabled() {
-                0
-            } else {
-                evm_env.cfg_env.tx_gas_limit_cap()
-            },
-            max_initcode_size: evm_env.cfg_env.max_initcode_size(),
+            tx_gas_limit_cap: limits.tx_gas_limit_cap,
+            max_initcode_size: limits.max_initcode_size,
 
             // EIP-7594 sidecars are accepted by default (standard Ethereum behavior)
             eip7594: true,
@@ -1440,6 +1427,16 @@ impl ForkTracker {
     }
 }
 
+const TX_BASE_GAS: u64 = 21_000;
+const TX_CREATE_GAS: u64 = 32_000;
+const TX_DATA_ZERO_GAS: u64 = 4;
+const TX_DATA_NON_ZERO_GAS_ISTANBUL: u64 = 16;
+const ACCESS_LIST_ADDRESS_GAS: u64 = 2_400;
+const ACCESS_LIST_STORAGE_KEY_GAS: u64 = 1_900;
+const INITCODE_WORD_GAS: u64 = 2;
+const PRAGUE_FLOOR_GAS_PER_TOKEN: u64 = 10;
+const PRAGUE_FLOOR_GAS_NON_ZERO_TOKEN_MULTIPLIER: u64 = 4;
+
 /// Ensures that gas limit of the transaction exceeds the intrinsic gas of the transaction.
 ///
 /// Caution: This only checks past the Merge hardfork.
@@ -1447,33 +1444,72 @@ pub fn ensure_intrinsic_gas<T: EthPoolTransaction>(
     transaction: &T,
     fork_tracker: &ForkTracker,
 ) -> Result<(), InvalidPoolTransactionError> {
-    use revm::primitives::hardfork::SpecId;
-    let spec_id = if fork_tracker.is_prague_activated() {
-        SpecId::PRAGUE
-    } else if fork_tracker.is_shanghai_activated() {
-        SpecId::SHANGHAI
-    } else {
-        SpecId::MERGE
-    };
+    let access_list_accounts =
+        transaction.access_list().map(|l| l.len()).unwrap_or_default() as u64;
+    let access_list_storage_keys = transaction
+        .access_list()
+        .map(|l| l.iter().map(|i| i.storage_keys.len()).sum::<usize>())
+        .unwrap_or_default() as u64;
+    let authorization_list_len =
+        transaction.authorization_list().map(|l| l.len()).unwrap_or_default() as u64;
 
-    let gas = revm::interpreter::gas::calculate_initial_tx_gas(
-        spec_id,
+    let gas = intrinsic_gas(
         transaction.input(),
         transaction.is_create(),
-        transaction.access_list().map(|l| l.len()).unwrap_or_default() as u64,
-        transaction
-            .access_list()
-            .map(|l| l.iter().map(|i| i.storage_keys.len()).sum::<usize>())
-            .unwrap_or_default() as u64,
-        transaction.authorization_list().map(|l| l.len()).unwrap_or_default() as u64,
+        access_list_accounts,
+        access_list_storage_keys,
+        authorization_list_len,
+        fork_tracker,
     );
+    let floor_gas = prague_floor_gas(transaction.input(), fork_tracker);
 
     let gas_limit = transaction.gas_limit();
-    if gas_limit < gas.initial_total_gas() || gas_limit < gas.floor_gas {
+    if gas_limit < gas || gas_limit < floor_gas {
         Err(InvalidPoolTransactionError::IntrinsicGasTooLow)
     } else {
         Ok(())
     }
+}
+
+fn intrinsic_gas(
+    input: &[u8],
+    is_create: bool,
+    access_list_accounts: u64,
+    access_list_storage_keys: u64,
+    authorization_list_len: u64,
+    fork_tracker: &ForkTracker,
+) -> u64 {
+    let calldata_gas = input.iter().fold(0u64, |gas, byte| {
+        gas + if *byte == 0 { TX_DATA_ZERO_GAS } else { TX_DATA_NON_ZERO_GAS_ISTANBUL }
+    });
+
+    let mut gas = TX_BASE_GAS + calldata_gas;
+    gas += access_list_accounts * ACCESS_LIST_ADDRESS_GAS;
+    gas += access_list_storage_keys * ACCESS_LIST_STORAGE_KEY_GAS;
+
+    if is_create {
+        gas += TX_CREATE_GAS;
+        if fork_tracker.is_shanghai_activated() {
+            gas += INITCODE_WORD_GAS * input.len().div_ceil(32) as u64;
+        }
+    }
+
+    if fork_tracker.is_prague_activated() {
+        gas += authorization_list_len.saturating_mul(PER_EMPTY_ACCOUNT_COST);
+    }
+
+    gas
+}
+
+fn prague_floor_gas(input: &[u8], fork_tracker: &ForkTracker) -> u64 {
+    if !fork_tracker.is_prague_activated() {
+        return 0
+    }
+
+    let tokens = input.iter().fold(0u64, |tokens, byte| {
+        tokens + if *byte == 0 { 1 } else { PRAGUE_FLOOR_GAS_NON_ZERO_TOKEN_MULTIPLIER }
+    });
+    TX_BASE_GAS + tokens * PRAGUE_FLOOR_GAS_PER_TOKEN
 }
 
 #[cfg(test)]
@@ -1490,7 +1526,8 @@ mod tests {
     use reth_evm_ethereum::EthEvmConfig;
     use reth_primitives_traits::SignedTransaction;
     use reth_provider::test_utils::{ExtendedAccount, MockEthProvider};
-    use revm::primitives::eip3860::MAX_INITCODE_SIZE;
+
+    const MAX_INITCODE_SIZE: usize = 0xc000;
 
     fn test_evm_config() -> EthEvmConfig {
         EthEvmConfig::mainnet()

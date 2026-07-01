@@ -103,7 +103,6 @@ Different consensus mechanisms.
 
 Crates related to transaction execution.
 
-- [`revm`](../../crates/revm): Revm utils and implementations specific to reth.
 - [`evm`](../../crates/evm/evm): Traits for configuring an EVM specifics.
 - [`execution-types`](../../crates/evm/execution-types): Commonly used types for (EVM) block execution.
 - [`execution-errors`](../../crates/evm/execution-errors): Commonly used error types used when doing block execution.
@@ -174,7 +173,6 @@ Crates related to building and validating payloads (blocks).
 These crates define primitive types or algorithms.
 
 - [`primitives`](../../crates/primitives): Commonly used types in Reth.
-- [`primitives-traits`](../../crates/primitives-traits/): Common abstracted types in reth.
 - [`trie`](../../crates/trie): An implementation of a Merkle Patricia Trie used for various roots (e.g. the state root) in Ethereum.
 
 ### Ethereum-Specific Crates

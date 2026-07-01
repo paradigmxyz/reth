@@ -1,13 +1,10 @@
 use alloc::vec::Vec;
 use alloy_consensus::transaction::Either;
-use alloy_primitives::BlockNumber;
+use alloy_primitives::{Address, BlockNumber, B256, U256};
 use reth_execution_types::{BlockExecutionOutput, ExecutionOutcome};
+use reth_primitives_traits::{Account, Bytecode};
 use reth_storage_errors::provider::ProviderResult;
 use reth_trie_common::HashedPostStateSorted;
-use revm::database::{
-    states::{PlainStateReverts, StateChangeset},
-    BundleState, OriginalValuesKnown,
-};
 
 /// A helper type used as input to [`StateWriter`] for writing execution outcome for one or many
 /// blocks.
@@ -57,14 +54,6 @@ impl<'a, R> WriteStateInput<'a, R> {
         }
     }
 
-    /// Returns a reference to the [`BundleState`].
-    pub const fn state(&self) -> &BundleState {
-        match self {
-            Self::Single { outcome, .. } => &outcome.state,
-            Self::Multiple(outcome) => &outcome.bundle,
-        }
-    }
-
     /// Returns an iterator over receipt sets for each block.
     pub fn receipts(&self) -> impl Iterator<Item = &Vec<R>> {
         match self {
@@ -79,6 +68,96 @@ impl<'a, R> WriteStateInput<'a, R> {
 impl<'a, R> From<&'a ExecutionOutcome<R>> for WriteStateInput<'a, R> {
     fn from(outcome: &'a ExecutionOutcome<R>) -> Self {
         Self::Multiple(outcome)
+    }
+}
+
+/// Whether the original values in an execution state are known to match the database state.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum OriginalValuesKnown {
+    /// Original values are known.
+    Yes,
+    /// Original values are not known for sure.
+    No,
+}
+
+impl OriginalValuesKnown {
+    /// Returns true if the original value is not known for sure.
+    pub const fn is_not_known(&self) -> bool {
+        matches!(self, Self::No)
+    }
+}
+
+/// State changes for inclusion into the database.
+#[derive(Clone, Debug, Default)]
+pub struct StateChangeset {
+    /// Account changes.
+    pub accounts: Vec<(Address, Option<Account>)>,
+    /// Storage changes.
+    pub storage: Vec<PlainStorageChangeset>,
+    /// Changed contracts by bytecode hash.
+    pub contracts: Vec<(B256, Bytecode)>,
+}
+
+/// Plain storage changeset.
+#[derive(Clone, Debug, PartialEq, Eq, Default)]
+pub struct PlainStorageChangeset {
+    /// Address of the account.
+    pub address: Address,
+    /// Whether storage should be wiped before applying changed slots.
+    pub wipe_storage: bool,
+    /// Storage key value pairs.
+    pub storage: Vec<(U256, U256)>,
+}
+
+/// Storage revert value.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RevertToSlot {
+    /// Revert the slot to the previous value.
+    Some(U256),
+    /// Revert the slot to the value loaded from wiped storage.
+    Destroyed,
+}
+
+impl RevertToSlot {
+    /// Returns the previous value represented by this revert.
+    pub const fn to_previous_value(self) -> U256 {
+        match self {
+            Self::Some(value) => value,
+            Self::Destroyed => U256::ZERO,
+        }
+    }
+}
+
+impl Default for RevertToSlot {
+    fn default() -> Self {
+        Self::Some(U256::ZERO)
+    }
+}
+
+/// Plain storage revert.
+#[derive(Clone, Debug, PartialEq, Eq, Default)]
+pub struct PlainStorageRevert {
+    /// Address of the account.
+    pub address: Address,
+    /// Whether storage was wiped.
+    pub wiped: bool,
+    /// Storage keys and old values.
+    pub storage_revert: Vec<(U256, RevertToSlot)>,
+}
+
+/// Plain state reverts grouped by block.
+#[derive(Clone, Debug, Default)]
+pub struct PlainStateReverts {
+    /// Account reverts per block.
+    pub accounts: Vec<Vec<(Address, Option<Account>)>>,
+    /// Storage reverts per block.
+    pub storage: Vec<Vec<PlainStorageRevert>>,
+}
+
+impl PlainStateReverts {
+    /// Constructs state reverts with pre-allocated block capacity.
+    pub fn with_capacity(capacity: usize) -> Self {
+        Self { accounts: Vec::with_capacity(capacity), storage: Vec::with_capacity(capacity) }
     }
 }
 

@@ -14,6 +14,7 @@ workspace = true
 [dependencies]
 # reth
 reth-chainspec.workspace = true
+reth-consensus-common.workspace = true
 reth-primitives-traits.workspace = true
 reth-rpc-api.workspace = true
 reth-rpc-eth-api.workspace = true
@@ -21,31 +22,26 @@ reth-engine-primitives.workspace = true
 reth-errors.workspace = true
 reth-metrics.workspace = true
 reth-storage-api.workspace = true
-reth-execution-types = { workspace = true, features = ["serde"] }
 reth-chain-state.workspace = true
 reth-transaction-pool.workspace = true
 reth-network-api.workspace = true
 reth-rpc-engine-api.workspace = true
-reth-revm = { workspace = true, features = ["witness"] }
 reth-tasks = { workspace = true, features = ["rayon"] }
 reth-rpc-convert.workspace = true
-revm-inspectors.workspace = true
 reth-network-peers = { workspace = true, features = ["secp256k1"] }
 reth-evm.workspace = true
-reth-evm-ethereum.workspace = true
+reth-evm-ethereum = { workspace = true, features = ["std"] }
 reth-rpc-eth-types.workspace = true
 reth-rpc-server-types.workspace = true
 reth-network-types.workspace = true
 reth-consensus.workspace = true
-reth-consensus-common.workspace = true
-reth-ethereum-primitives.workspace = true
-reth-ethereum-engine-primitives.workspace = true
 reth-node-api.workspace = true
 reth-payload-primitives.workspace = true
 reth-trie-common.workspace = true
+evm2.workspace = true
+evm2-inspectors.workspace = true
 
 # ethereum
-alloy-evm = { workspace = true, features = ["overrides"] }
 alloy-consensus.workspace = true
 alloy-signer.workspace = true
 alloy-signer-local = { workspace = true, features = ["mnemonic"] }
@@ -67,7 +63,6 @@ alloy-rpc-types-txpool.workspace = true
 alloy-rpc-types-admin.workspace = true
 alloy-rpc-types-engine = { workspace = true, features = ["kzg"] }
 alloy-serde.workspace = true
-revm = { workspace = true, features = ["optional_block_gas_limit", "optional_eip3607", "optional_no_base_fee", "memory_limit"] }
 
 # rpc
 jsonrpsee.workspace = true
@@ -97,6 +92,7 @@ reth-testing-utils.workspace = true
 reth-transaction-pool = { workspace = true, features = ["test-utils"] }
 reth-provider = { workspace = true, features = ["test-utils"] }
 reth-db-api.workspace = true
+reth-ethereum-primitives.workspace = true
 
 rand.workspace = true
 
@@ -104,7 +100,7 @@ jsonrpsee = { workspace = true, features = ["client"] }
 
 [features]
 js-tracer = [
-    "revm-inspectors/js-tracer",
     "reth-rpc-eth-types/js-tracer",
     "reth-rpc-eth-api/js-tracer",
+    "evm2-inspectors/js-tracer",
 ]
