@@ -10612,7 +10612,6 @@ dependencies = [
  "alloy-rlp",
  "crossbeam-channel",
  "crossbeam-utils",
- "derive_more",
  "metrics",
  "rand 0.9.4",
  "reth-chainspec",

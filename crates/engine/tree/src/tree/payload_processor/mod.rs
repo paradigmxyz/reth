@@ -233,12 +233,12 @@ where
     /// Spawns transaction conversion and cache prewarming, optionally wiring prewarm output into
     /// an externally-owned state-root task.
     #[instrument(level = "debug", target = "engine::tree::payload_processor", skip_all)]
-    pub fn spawn_with_state_root_sink<P, I: ExecutableTxIterator<Evm>>(
+    pub fn spawn_with_state_root_streams<P, I: ExecutableTxIterator<Evm>>(
         &self,
         env: ExecutionEnv<Evm>,
         transactions: I,
         provider_builder: StateProviderBuilder<Evm::Primitives, P>,
-        to_sparse_trie_task: Option<CrossbeamSender<StateRootMessage>>,
+        state_root_streams: StateRootStreams,
         parallel_bal_execution: bool,
     ) -> IteratorPayloadHandle<Evm, I>
     where
@@ -250,7 +250,7 @@ where
             env,
             prewarm_rx,
             provider_builder,
-            to_sparse_trie_task,
+            state_root_streams,
             parallel_bal_execution,
         );
         PayloadHandle { prewarm_handle, transactions: execution_rx, _span: Span::current() }
@@ -259,12 +259,13 @@ where
     /// Spawns state root computation pipeline (multiproof + sparse trie tasks).
     ///
     /// The returned [`StateRootHandle`] provides:
-    /// - [`StateRootHandle::state_hook`] — an [`OnStateHook`](reth_evm::OnStateHook) to stream
-    ///   state updates during execution.
+    /// - [`StateRootHandle::streams`] — semantic stream views that feed updates into the pipeline,
+    ///   including an execution hook for per-transaction state updates.
     /// - [`StateRootHandle::state_root`] — blocks until the state root is computed and returns the
     ///   state root.
     ///
-    /// The state hook **must** be dropped after execution to signal the end of state updates.
+    /// The execution hook **must** be dropped after execution to signal the end of state
+    /// updates.
     ///
     /// `transaction_count` is the number of transactions in the block when it is known up
     /// front. Small blocks halve the proof worker pool, since fewer transactions produce fewer
@@ -465,7 +466,7 @@ where
         env: ExecutionEnv<Evm>,
         transactions: mpsc::Receiver<(usize, impl ExecutableTxFor<Evm> + Clone + Send + 'static)>,
         provider_builder: StateProviderBuilder<Evm::Primitives, P>,
-        to_sparse_trie_task: Option<CrossbeamSender<StateRootMessage>>,
+        state_root_streams: StateRootStreams,
         parallel_bal_execution: bool,
     ) -> CacheTaskHandle<<Evm::Primitives as NodePrimitives>::Receipt>
     where
@@ -507,7 +508,7 @@ where
             self.executor.clone(),
             self.execution_cache.clone(),
             prewarm_ctx,
-            to_sparse_trie_task,
+            state_root_streams,
         );
         {
             let to_prewarm_task = to_prewarm_task.clone();
@@ -1286,7 +1287,9 @@ mod tests {
             None,
         );
 
-        let mut state_hook = state_root_handle.state_hook();
+        let mut streams = state_root_handle.streams(true);
+        let mut state_hook =
+            streams.take_execution_stream().expect("execution stream installed").state_hook();
 
         for update in state_updates {
             state_hook.on_state(update);
