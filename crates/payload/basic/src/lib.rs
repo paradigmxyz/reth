@@ -221,6 +221,14 @@ where
         // extract the state from the notification and put it into the cache
         let committed = new_state.committed();
         let new_execution_outcome = committed.execution_outcome();
+        cached.contracts.reserve(new_execution_outcome.bundle.contracts.len());
+        cached.contracts.extend(
+            new_execution_outcome
+                .bundle
+                .contracts
+                .iter()
+                .map(|(hash, bytecode)| (*hash, bytecode.clone())),
+        );
         for (addr, acc) in new_execution_outcome.bundle_accounts_iter() {
             if let Some(info) = acc.info.clone() {
                 // we want pre cache existing accounts and their storage
