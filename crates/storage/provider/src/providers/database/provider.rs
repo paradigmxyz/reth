@@ -536,6 +536,9 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
         last_block: BlockNumber,
     ) -> ProviderResult<StaticFileWriteCtx> {
         let tip = self.last_block_number()?.max(last_block);
+        let receipts_within_prune_distance =
+            PruneMode::Distance(self.minimum_pruning_distance).should_prune(first_block, tip);
+
         Ok(StaticFileWriteCtx {
             write_senders: EitherWriterDestination::senders(self).is_static_file() &&
                 self.prune_modes.sender_recovery.is_none_or(|m| !m.is_full()),
@@ -548,12 +551,11 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
             tip,
             receipts_prune_mode: self.prune_modes.receipts,
             // Receipts are prunable if no receipts exist in SF yet and within pruning distance
-            receipts_prunable: self
-                .static_file_provider
-                .get_highest_static_file_tx(StaticFileSegment::Receipts)
-                .is_none() &&
-                PruneMode::Distance(self.minimum_pruning_distance)
-                    .should_prune(first_block, tip),
+            receipts_prunable: receipts_within_prune_distance &&
+                self
+                    .static_file_provider
+                    .get_highest_static_file_tx(StaticFileSegment::Receipts)
+                    .is_none(),
         })
     }
 
