@@ -84,7 +84,10 @@ pub struct NetworkConfig<C, N: NetworkPrimitives = EthNetworkPrimitives> {
     pub status: UnifiedStatus,
     /// Sets the hello message for the p2p handshake in `RLPx`
     pub hello_message: HelloMessageWithProtocols,
-    /// Additional protocols to announce and handle in `RLPx`
+    /// Additional `RLPx` sub-protocols to announce and handle alongside `eth`.
+    ///
+    /// Does not cover `snap/2`, which is supported natively (see
+    /// [`NetworkConfigBuilder::with_snap`]).
     pub extra_protocols: RlpxSubProtocols,
     /// Whether to disable transaction gossip
     pub tx_gossip_disabled: bool,
@@ -207,7 +210,8 @@ pub struct NetworkConfigBuilder<N: NetworkPrimitives = EthNetworkPrimitives> {
     executor: Runtime,
     /// Sets the hello message for the p2p handshake in `RLPx`
     hello_message: Option<HelloMessageWithProtocols>,
-    /// The executor to use for spawning tasks.
+    /// Additional `RLPx` sub-protocols to announce and handle alongside `eth`. Does not cover
+    /// `snap/2`, which is supported natively (see [`NetworkConfigBuilder::with_snap`]).
     extra_protocols: RlpxSubProtocols,
     /// Head used to start set for the fork filter and status.
     head: Option<Head>,
@@ -545,6 +549,8 @@ impl<N: NetworkPrimitives> NetworkConfigBuilder<N> {
     }
 
     /// Adds a new additional protocol to the `RLPx` sub-protocol list.
+    ///
+    /// Not for `snap/2`, which is supported natively (see [`Self::with_snap`]).
     pub fn add_rlpx_sub_protocol(mut self, protocol: impl IntoRlpxSubProtocol) -> Self {
         self.extra_protocols.push(protocol);
         self
