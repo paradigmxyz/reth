@@ -466,7 +466,10 @@ where
         transaction_count: usize,
         parallel_bal_execution: bool,
     ) -> (IteratorPrewarmTxReceiver<Evm, I>, IteratorExecuteTxReceiver<Evm, I>) {
-        let (prewarm_tx, prewarm_rx) = mpsc::sync_channel(transaction_count);
+        // BAL prewarming is driven by the block access list, not by the recovered transaction
+        // stream. Keep a receiver for the handle shape, but do not enqueue unused tx prewarm work.
+        let (prewarm_tx, prewarm_rx) =
+            mpsc::sync_channel(if parallel_bal_execution { 0 } else { transaction_count });
         let (execute_tx, execute_rx) = crossbeam_channel::bounded(transaction_count);
 
         if transaction_count == 0 {
@@ -481,7 +484,11 @@ where
             );
             self.executor.spawn_blocking_named("tx-iterator", move || {
                 let (transactions, convert) = transactions.into_parts();
-                convert_serial(transactions.into_iter(), &convert, &prewarm_tx, &execute_tx);
+                if parallel_bal_execution {
+                    convert_serial_execute_only(transactions.into_iter(), &convert, &execute_tx);
+                } else {
+                    convert_serial(transactions.into_iter(), &convert, &prewarm_tx, &execute_tx);
+                }
             });
         } else {
             // Parallel path — recover signatures in parallel on rayon, stream results
@@ -491,7 +498,8 @@ where
                 let (transactions, convert) = transactions.into_parts();
                 if parallel_bal_execution {
                     // With BALs, we don't care about the order of transactions in execution and
-                    // prewarming, so we don't have to use `for_each_ordered_in`.
+                    // BAL prewarming is driven by the BAL itself, so we don't have to use
+                    // `for_each_ordered_in` or fan recovered txs out to the prewarm channel.
                     executor.cpu_pool().install(|| {
                         transactions
                             .into_par_iter()
@@ -501,11 +509,7 @@ where
                                 (i, tx)
                             })
                             .for_each(|(idx, tx)| {
-                                let tx = tx.map(|tx| {
-                                    let tx = WithTxEnv::new(tx);
-                                    let _ = prewarm_tx.send((idx, tx.clone()));
-                                    tx
-                                });
+                                let tx = tx.map(WithTxEnv::new);
                                 let _ = execute_tx.send((idx, tx));
                                 trace!(target: "engine::tree::payload_processor", idx, "yielded transaction");
                             });
@@ -850,6 +854,22 @@ fn convert_serial<RawTx, Tx, TxEnv, InnerTx, Recovered, Err, C>(
         if let Ok(tx) = &tx {
             let _ = prewarm_tx.send((idx, tx.clone()));
         }
+        let _ = execute_tx.send((idx, tx));
+        trace!(target: "engine::tree::payload_processor", idx, "yielded transaction");
+    }
+}
+
+/// Converts transactions sequentially and sends them only to the execute channel.
+fn convert_serial_execute_only<RawTx, Tx, TxEnv, InnerTx, Recovered, Err, C>(
+    iter: impl Iterator<Item = RawTx>,
+    convert: &C,
+    execute_tx: &ExecuteTxSender<TxEnv, Recovered, Err>,
+) where
+    Tx: ExecutableTxParts<TxEnv, InnerTx, Recovered = Recovered>,
+    C: ConvertTx<RawTx, Tx = Tx, Error = Err>,
+{
+    for (idx, raw_tx) in iter.enumerate() {
+        let tx = convert.convert(raw_tx).map(WithTxEnv::new);
         let _ = execute_tx.send((idx, tx));
         trace!(target: "engine::tree::payload_processor", idx, "yielded transaction");
     }
