@@ -81,7 +81,7 @@ pub(super) fn test_changed_paths_skip_dirty_ancestor_branch_when_descendant_chan
     assert!(!changed_paths.contains(&Nibbles::default()));
 }
 
-pub(super) fn test_changed_paths_record_inserted_branch_on_branch_short_key_split<T: SparseTrie>(
+pub(super) fn test_changed_paths_skip_inserted_branch_on_branch_short_key_split<T: SparseTrie>(
     new_trie: fn() -> T,
 ) {
     let mut trie = new_trie();
@@ -109,13 +109,13 @@ pub(super) fn test_changed_paths_record_inserted_branch_on_branch_short_key_spli
     let _ = trie.root();
 
     let changed_paths = trie.take_changed_paths();
-    assert!(changed_paths.contains(&Nibbles::from_nibbles([0x01])));
+    assert!(!changed_paths.contains(&Nibbles::from_nibbles([0x01])));
     assert!(changed_paths.contains(&Nibbles::from_nibbles([0x01, 0x02, 0x03])));
     assert!(changed_paths.contains(&Nibbles::from_nibbles([0x01, 0x02, 0x04])));
     assert!(!changed_paths.contains(&Nibbles::default()));
 }
 
-pub(super) fn test_changed_paths_record_inserted_branch_on_leaf_short_key_split<T: SparseTrie>(
+pub(super) fn test_changed_paths_skip_inserted_branch_on_leaf_short_key_split<T: SparseTrie>(
     new_trie: fn() -> T,
 ) {
     let mut trie = new_trie();
@@ -141,7 +141,7 @@ pub(super) fn test_changed_paths_record_inserted_branch_on_leaf_short_key_split<
     let _ = trie.root();
 
     let changed_paths = trie.take_changed_paths();
-    assert!(changed_paths.contains(&Nibbles::from_nibbles([0x01])));
+    assert!(!changed_paths.contains(&Nibbles::from_nibbles([0x01])));
     assert!(changed_paths.contains(&Nibbles::from_nibbles([0x01, 0x02, 0x03])));
     assert!(changed_paths.contains(&Nibbles::from_nibbles([0x01, 0x02, 0x04])));
     assert!(!changed_paths.contains(&Nibbles::default()));
