@@ -1,7 +1,7 @@
 use crate::{
     changesets_utils::StorageRevertsIter,
     providers::{
-        database::{chain::ChainStorage, metrics},
+        database::{chain::ChainStorage, metrics, DatabaseProviderMetrics},
         rocksdb::{PendingRocksDBBatches, RocksDBProvider, RocksDBWriteCtx},
         static_file::{StaticFileWriteCtx, StaticFileWriter},
         NodeTypesForProvider, StaticFileProvider,
@@ -70,7 +70,7 @@ use reth_trie::{
     HashedPostStateSorted,
 };
 use reth_trie_db::{ChangesetCache, DatabaseStorageTrieCursor, TrieTableAdapter};
-use revm_database::states::{
+use revm::database::states::{
     PlainStateReverts, PlainStorageChangeset, PlainStorageRevert, StateChangeset,
 };
 use smallvec::SmallVec;
@@ -212,7 +212,7 @@ pub struct DatabaseProvider<TX, N: NodeTypes> {
     /// Minimum distance from tip required for pruning
     minimum_pruning_distance: u64,
     /// Database provider metrics
-    metrics: metrics::DatabaseProviderMetrics,
+    metrics: Arc<DatabaseProviderMetrics>,
     /// Database handle used to inspect active MDBX readers during unwind commits.
     reader_txn_tracker: Option<Arc<dyn ReaderTxnTracker>>,
 }
@@ -417,6 +417,7 @@ impl<TX: DbTxMut, N: NodeTypes> DatabaseProvider<TX, N> {
         runtime: reth_tasks::Runtime,
         db_path: PathBuf,
         commit_order: CommitOrder,
+        metrics: Arc<DatabaseProviderMetrics>,
     ) -> Self {
         Self {
             tx,
@@ -432,7 +433,7 @@ impl<TX: DbTxMut, N: NodeTypes> DatabaseProvider<TX, N> {
             pending_rocksdb_batches: Default::default(),
             commit_order,
             minimum_pruning_distance: MINIMUM_UNWIND_SAFE_DISTANCE,
-            metrics: metrics::DatabaseProviderMetrics::default(),
+            metrics,
             reader_txn_tracker: None,
         }
     }
@@ -450,6 +451,7 @@ impl<TX: DbTxMut, N: NodeTypes> DatabaseProvider<TX, N> {
         changeset_cache: ChangesetCache,
         runtime: reth_tasks::Runtime,
         db_path: PathBuf,
+        metrics: Arc<DatabaseProviderMetrics>,
     ) -> Self {
         Self::new_rw_inner(
             tx,
@@ -463,6 +465,7 @@ impl<TX: DbTxMut, N: NodeTypes> DatabaseProvider<TX, N> {
             runtime,
             db_path,
             CommitOrder::Normal,
+            metrics,
         )
     }
 
@@ -479,6 +482,7 @@ impl<TX: DbTxMut, N: NodeTypes> DatabaseProvider<TX, N> {
         changeset_cache: ChangesetCache,
         runtime: reth_tasks::Runtime,
         db_path: PathBuf,
+        metrics: Arc<DatabaseProviderMetrics>,
     ) -> Self {
         Self::new_rw_inner(
             tx,
@@ -492,6 +496,7 @@ impl<TX: DbTxMut, N: NodeTypes> DatabaseProvider<TX, N> {
             runtime,
             db_path,
             CommitOrder::Unwind,
+            metrics,
         )
     }
 }
@@ -1044,6 +1049,7 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> DatabaseProvider<TX, N> {
         changeset_cache: ChangesetCache,
         runtime: reth_tasks::Runtime,
         db_path: PathBuf,
+        metrics: Arc<DatabaseProviderMetrics>,
     ) -> Self {
         Self {
             tx,
@@ -1059,7 +1065,7 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> DatabaseProvider<TX, N> {
             pending_rocksdb_batches: Default::default(),
             commit_order: CommitOrder::Normal,
             minimum_pruning_distance: MINIMUM_UNWIND_SAFE_DISTANCE,
-            metrics: metrics::DatabaseProviderMetrics::default(),
+            metrics,
             reader_txn_tracker: None,
         }
     }
@@ -3961,8 +3967,7 @@ mod tests {
     use reth_trie::{
         HashedPostState, KeccakKeyHasher, Nibbles, StoredNibbles, StoredNibblesSubKey,
     };
-    use revm_database::BundleState;
-    use revm_state::AccountInfo;
+    use revm::{database::BundleState, state::AccountInfo};
     use std::{sync::mpsc, time::Duration};
 
     #[test]
@@ -4904,8 +4909,7 @@ mod tests {
     fn test_write_state_and_historical_read_hashed() {
         use reth_storage_api::StateProvider;
         use reth_trie::{HashedPostState, KeccakKeyHasher};
-        use revm_database::BundleState;
-        use revm_state::AccountInfo;
+        use revm::{database::BundleState, state::AccountInfo};
 
         let factory = create_test_provider_factory();
         factory.set_storage_settings_cache(StorageSettings::v2());

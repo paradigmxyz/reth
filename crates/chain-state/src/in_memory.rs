@@ -934,7 +934,7 @@ impl<N: NodePrimitives<SignedTx: SignedTransaction>> NewCanonicalChain<N> {
             [first, rest @ ..] => {
                 let trie_data_handle = first.trie_data_handle();
                 let mut chain = Chain::from_block(
-                    first.recovered_block().clone(),
+                    Arc::clone(&first.recovered_block),
                     ExecutionOutcome::from((
                         first.execution_outcome().clone(),
                         first.block_number(),
@@ -950,7 +950,7 @@ impl<N: NodePrimitives<SignedTx: SignedTransaction>> NewCanonicalChain<N> {
                 for exec in rest {
                     let trie_data_handle = exec.trie_data_handle();
                     chain.append_block(
-                        exec.recovered_block().clone(),
+                        Arc::clone(&exec.recovered_block),
                         ExecutionOutcome::from((
                             exec.execution_outcome().clone(),
                             exec.block_number(),
@@ -1095,7 +1095,10 @@ mod tests {
     }
 
     impl HashedPostStateProvider for MockStateProvider {
-        fn hashed_post_state(&self, _bundle_state: &revm_database::BundleState) -> HashedPostState {
+        fn hashed_post_state(
+            &self,
+            _bundle_state: &revm::database::BundleState,
+        ) -> HashedPostState {
             HashedPostState::default()
         }
     }

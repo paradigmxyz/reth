@@ -9,7 +9,7 @@ LABEL org.opencontainers.image.licenses="MIT OR Apache-2.0"
 # Install system dependencies
 COPY .github/scripts/install_llvm_ubuntu.sh /tmp/install_llvm.sh
 RUN /tmp/install_llvm.sh && rm /tmp/install_llvm.sh && \
-    apt-get install -y --no-install-recommends libclang-dev pkg-config
+    apt-get install -y --no-install-recommends libclang-dev m4 pkg-config
 
 # Builds a cargo-chef plan
 FROM chef AS planner
@@ -60,6 +60,8 @@ COPY --from=builder /app/reth /usr/local/bin
 
 # Copy licenses
 COPY LICENSE-* ./
+COPY LICENSES ./LICENSES
+COPY README.md ./README.md
 
 EXPOSE 30303 30303/udp 9001 8545 8546
 ENTRYPOINT ["/usr/local/bin/reth"]

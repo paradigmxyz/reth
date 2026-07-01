@@ -83,3 +83,9 @@ jobs:
             --locked \
             -p reth-e2e-test-utils \
             -E 'binary(rocksdb)'
+      - name: Free disk before post steps
+        if: always()
+        run: |
+          sccache --stop-server || true
+          rm -rf target ~/.cache/sccache
+          df -h
