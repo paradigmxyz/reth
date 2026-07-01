@@ -1290,8 +1290,7 @@ where
         &self,
         receipts_len: usize,
     ) -> (ReceiptRootSender<N>, ReceiptRootReceiver) {
-        // Unbounded channel is used since tx count bounds capacity anyway.
-        let (receipt_tx, receipt_rx) = crossbeam_channel::unbounded();
+        let (receipt_tx, receipt_rx) = crossbeam_channel::bounded(receipts_len.max(1));
         let (result_tx, result_rx) = tokio::sync::oneshot::channel();
         let task_handle = ReceiptRootTaskHandle::new(receipt_rx, result_tx);
         self.payload_processor
