@@ -1,6 +1,6 @@
 //! Collection of methods for block validation.
 
-use alloy_consensus::{BlockHeader as _, EMPTY_OMMER_ROOT_HASH};
+use alloy_consensus::{BlockHeader as _, EMPTY_OMMER_ROOT_HASH, EMPTY_ROOT_HASH};
 use alloy_eips::{eip4844::DATA_GAS_PER_BLOB, eip7840::BlobParams};
 use alloy_primitives::B256;
 use reth_chainspec::{EthChainSpec, EthereumHardfork, EthereumHardforks};
@@ -56,7 +56,11 @@ pub fn validate_shanghai_withdrawals<B: Block>(
     block: &SealedBlock<B>,
 ) -> Result<(), ConsensusError> {
     let withdrawals = block.body().withdrawals().ok_or(ConsensusError::BodyWithdrawalsMissing)?;
-    let withdrawals_root = alloy_consensus::proofs::calculate_withdrawals_root(withdrawals);
+    let withdrawals_root = if withdrawals.is_empty() {
+        EMPTY_ROOT_HASH
+    } else {
+        alloy_consensus::proofs::calculate_withdrawals_root(withdrawals)
+    };
     let header_withdrawals_root =
         block.withdrawals_root().ok_or(ConsensusError::WithdrawalsRootMissing)?;
     if withdrawals_root != *header_withdrawals_root {
@@ -517,6 +521,25 @@ mod tests {
             ConsensusError::BlobGasUsedDiff(diff)
                 if diff.got == 1 && diff.expected == expected_blob_gas_used
         ));
+    }
+
+    #[test]
+    fn shanghai_empty_withdrawals_root_passes() {
+        let chain_spec = ChainSpecBuilder::mainnet().shanghai_activated().build();
+        let transactions = Vec::<TransactionSigned>::new();
+        let header = Header {
+            withdrawals_root: Some(EMPTY_ROOT_HASH),
+            transactions_root: proofs::calculate_transaction_root(&transactions),
+            ..Default::default()
+        };
+        let body = BlockBody {
+            transactions,
+            ommers: vec![],
+            withdrawals: Some(Withdrawals::default()),
+        };
+        let block = SealedBlock::seal_slow(alloy_consensus::Block { header, body });
+
+        assert!(validate_block_pre_execution(&block, &chain_spec).is_ok());
     }
 
     #[test]
