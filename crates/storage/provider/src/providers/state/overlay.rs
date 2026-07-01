@@ -1,5 +1,5 @@
 use alloy_eips::BlockNumHash;
-use alloy_primitives::{keccak256, Address, BlockHash, BlockNumber, B256};
+use alloy_primitives::{map::hash_map, keccak256, Address, BlockHash, BlockNumber, B256};
 use metrics::{Counter, Histogram};
 use reth_chain_state::{EthPrimitives, StateTrieOverlayManager};
 use reth_db_api::{tables, transaction::DbTx, DatabaseError};
@@ -740,7 +740,14 @@ where
                 state.accounts.insert(hashed_address, account);
             }
             if let Some(storage) = self.hashed_post_state.storages.get(&hashed_address) {
-                state.storages.insert(hashed_address, storage.clone().into());
+                match state.storages.entry(hashed_address) {
+                    hash_map::Entry::Vacant(entry) => {
+                        entry.insert(storage.clone().into());
+                    }
+                    hash_map::Entry::Occupied(mut entry) => {
+                        entry.get_mut().extend_from_sorted(storage);
+                    }
+                }
             }
         }
         Ok(state)

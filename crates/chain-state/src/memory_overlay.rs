@@ -1,6 +1,8 @@
 use super::ExecutedBlock;
 use alloy_consensus::BlockHeader;
-use alloy_primitives::{keccak256, Address, BlockNumber, Bytes, StorageKey, StorageValue, B256};
+use alloy_primitives::{
+    map::hash_map, keccak256, Address, BlockNumber, Bytes, StorageKey, StorageValue, B256,
+};
 use reth_errors::ProviderResult;
 use reth_primitives_traits::{Account, Bytecode, NodePrimitives};
 use reth_storage_api::{
@@ -218,7 +220,23 @@ impl<N: NodePrimitives> HashedPostStateProvider for MemoryOverlayStateProviderRe
         accounts: &[Address],
     ) -> ProviderResult<HashedPostState> {
         let mut state = self.historical.hashed_post_state_for_accounts(accounts)?;
-        state.extend_ref(&self.trie_input().state);
+        let overlay = &self.trie_input().state;
+        for address in accounts {
+            let hashed_address = keccak256(address);
+            if let Some(account) = overlay.accounts.get(&hashed_address) {
+                state.accounts.insert(hashed_address, *account);
+            }
+            if let Some(storage) = overlay.storages.get(&hashed_address) {
+                match state.storages.entry(hashed_address) {
+                    hash_map::Entry::Vacant(entry) => {
+                        entry.insert(storage.clone());
+                    }
+                    hash_map::Entry::Occupied(mut entry) => {
+                        entry.get_mut().extend(storage);
+                    }
+                }
+            }
+        }
         Ok(state)
     }
 }
