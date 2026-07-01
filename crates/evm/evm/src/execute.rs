@@ -205,7 +205,7 @@ pub trait BlockExecutorFactory: Clone + Debug + Send + Sync + Unpin {
     /// The primitive types used by the factory.
     type Primitives: NodePrimitives;
     /// Transaction environment consumed by executors from this factory.
-    type Transaction: Clone + Send + Sync + 'static;
+    type Transaction;
     /// EVM environment consumed by this factory.
     type EvmEnv: EvmEnv;
     /// Execution context for a block or payload.
