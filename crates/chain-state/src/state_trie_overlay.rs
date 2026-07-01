@@ -605,27 +605,27 @@ fn compute_overlay<N: NodePrimitives>(
 }
 
 fn merge_blocks<N: NodePrimitives>(blocks: Vec<ExecutedBlock<N>>) -> TrieInputSorted {
-    let trie_data = blocks.iter().map(ExecutedBlock::trie_data).collect::<Vec<_>>();
-
     #[cfg(feature = "rayon")]
     let (nodes, state) = rayon::join(
         || {
             TrieUpdatesSorted::merge_batch(
-                trie_data.iter().map(|data| Arc::clone(&data.trie_updates)),
+                blocks.iter().map(|block| Arc::clone(&block.trie_data().trie_updates)),
             )
         },
         || {
             HashedPostStateSorted::merge_batch(
-                trie_data.iter().map(|data| Arc::clone(&data.hashed_state)),
+                blocks.iter().map(|block| Arc::clone(&block.trie_data().hashed_state)),
             )
         },
     );
 
     #[cfg(not(feature = "rayon"))]
     let (nodes, state) = (
-        TrieUpdatesSorted::merge_batch(trie_data.iter().map(|data| Arc::clone(&data.trie_updates))),
+        TrieUpdatesSorted::merge_batch(
+            blocks.iter().map(|block| Arc::clone(&block.trie_data().trie_updates)),
+        ),
         HashedPostStateSorted::merge_batch(
-            trie_data.iter().map(|data| Arc::clone(&data.hashed_state)),
+            blocks.iter().map(|block| Arc::clone(&block.trie_data().hashed_state)),
         ),
     );
 
