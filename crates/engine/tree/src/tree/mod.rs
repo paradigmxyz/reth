@@ -59,6 +59,7 @@ pub mod payload_processor;
 pub mod payload_validator;
 mod persistence_state;
 pub mod precompile_cache;
+pub mod state_root_strategy;
 #[cfg(test)]
 mod tests;
 mod trie_updates;
@@ -2161,7 +2162,9 @@ where
         for block in self.state.tree_state.blocks_by_hash.values() {
             let trie_data = block.trie_data();
             let Some(changed_paths) = trie_data.changed_paths.as_deref() else {
-                warn!(
+                // Custom state-root strategies may not track changed paths, so this is an
+                // expected way to opt out of pruning, not an anomaly.
+                debug!(
                     target: "engine::tree",
                     block = ?block.recovered_block().num_hash(),
                     "Skipping sparse trie prune because changed paths for in-memory block are unknown"
