@@ -1,10 +1,14 @@
 //! Example: Running a reth node with a custom state root strategy.
 //!
-//! This demonstrates how to install a custom state-root strategy. The example always returns
-//! `B256::ZERO` as the state root.
+//! This demonstrates how to install a custom state-root strategy that activates at a fork
+//! timestamp. Blocks with a timestamp below the activation delegate to
+//! [`DefaultStateRootStrategy`]; blocks at or above it return `B256::ZERO` as the state root.
 //!
-//! The key integration point is wrapping [`BasicEngineValidatorBuilder`] to call
-//! [`BasicEngineValidator::with_state_root_strategy`] on the resulting validator.
+//! The key integration points are:
+//! - wrapping [`BasicEngineValidatorBuilder`] to call
+//!   [`BasicEngineValidator::with_state_root_strategy`] on the resulting validator, and
+//! - holding a [`DefaultStateRootStrategy`] inside the custom strategy and forwarding the context
+//!   to it for blocks where the default behavior is wanted.
 //!
 //! # Usage
 //!
@@ -20,11 +24,11 @@ use alloy_genesis::Genesis;
 use alloy_primitives::B256;
 use reth_chain_state::StateTrieOverlayManager;
 use reth_engine_tree::tree::{
-    payload_processor::multiproof::StateRootStreams,
+    payload_processor::multiproof::{PayloadStateRootHandle, StateRootStreams},
     payload_validator::LazyHashedPostState,
     state_root_strategy::{
-        PreparedStateRootJob, StateRootJob, StateRootJobContext, StateRootJobOutcome,
-        StateRootStrategy,
+        DefaultStateRootStrategy, PayloadStateRootJobContext, PreparedStateRootJob, StateRootJob,
+        StateRootJobContext, StateRootJobOutcome, StateRootStrategy,
     },
     BasicEngineValidator, TreeConfig,
 };
@@ -44,24 +48,48 @@ use reth_ethereum::{
     tasks::Runtime,
     EthPrimitives,
 };
-use reth_evm::ConfigureEvm;
+use reth_evm::{revm::context::Block as _, ConfigureEvm};
 use reth_primitives_traits::{NodePrimitives, RecoveredBlock};
 use reth_provider::{BlockExecutionOutput, ProviderResult};
 use reth_trie::updates::TrieUpdates;
 
+/// Strategy that returns `B256::ZERO` as the state root from an activation timestamp on, and
+/// delegates to the default machinery before that.
 #[derive(Debug)]
-struct ZeroStateRootStrategy;
+struct ZeroStateRootStrategy {
+    /// Timestamp of the first block that uses the custom state root.
+    activation_timestamp: u64,
+    /// Default strategy used for blocks below the activation timestamp.
+    default: DefaultStateRootStrategy,
+}
 
 impl<N, P, Evm> StateRootStrategy<N, P, Evm> for ZeroStateRootStrategy
 where
     N: NodePrimitives,
     Evm: ConfigureEvm<Primitives = N>,
+    DefaultStateRootStrategy: StateRootStrategy<N, P, Evm>,
 {
     fn prepare(
         &self,
-        _ctx: StateRootJobContext<'_, N, P, Evm>,
+        ctx: StateRootJobContext<'_, N, P, Evm>,
     ) -> ProviderResult<PreparedStateRootJob<N>> {
+        let timestamp: u64 = ctx.env().evm_env.block_env.timestamp().saturating_to();
+        if timestamp < self.activation_timestamp {
+            return self.default.prepare(ctx)
+        }
         Ok(PreparedStateRootJob::new(Box::new(ZeroStateRootJob), StateRootStreams::empty(), None))
+    }
+
+    fn prepare_payload_builder(
+        &self,
+        ctx: PayloadStateRootJobContext<'_, N, P, Evm>,
+    ) -> ProviderResult<Option<PayloadStateRootHandle>> {
+        if ctx.timestamp() < self.activation_timestamp {
+            return self.default.prepare_payload_builder(ctx)
+        }
+        // Without a background task the payload builder computes the state root itself. A real
+        // strategy would return a custom handle here so built headers match validation.
+        Ok(None)
     }
 }
 
@@ -155,7 +183,12 @@ async fn main() -> eyre::Result<()> {
             BasicEngineApiBuilder::<EthereumEngineValidatorBuilder>::default(),
             ZeroStateRootValidatorBuilder {
                 inner: BasicEngineValidatorBuilder::default(),
-                state_root_strategy: Arc::new(ZeroStateRootStrategy),
+                state_root_strategy: Arc::new(ZeroStateRootStrategy {
+                    // Zero roots from genesis on. Set this to a fork timestamp to keep the
+                    // default state-root machinery for earlier blocks.
+                    activation_timestamp: 0,
+                    default: DefaultStateRootStrategy,
+                }),
             },
             Default::default(),
             Identity::new(),

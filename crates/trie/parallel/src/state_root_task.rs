@@ -167,6 +167,18 @@ impl fmt::Debug for PayloadStateRootHandle {
 }
 
 impl PayloadStateRootHandle {
+    /// Creates an opaque payload state-root handle.
+    pub const fn new(
+        name: &'static str,
+        streams: StateRootStreams,
+        state_root_rx: std::sync::mpsc::Receiver<
+            Result<StateRootComputeOutcome, StateRootTaskError>,
+        >,
+        hashed_state_rx: Option<std::sync::mpsc::Receiver<HashedPostState>>,
+    ) -> Self {
+        Self { name, streams, state_root_rx: Some(state_root_rx), hashed_state_rx }
+    }
+
     /// Returns the task name used in logs.
     pub const fn name(&self) -> &'static str {
         self.name
@@ -575,5 +587,46 @@ mod tests {
         assert_eq!(sink.state_updates.load(Ordering::Relaxed), 1);
         assert_eq!(sink.hashed_state_updates.load(Ordering::Relaxed), 1);
         assert_eq!(sink.finished_updates.load(Ordering::Relaxed), 2);
+    }
+
+    /// Lifecycle of the opaque handle a strategy hands to the payload builder: the execution
+    /// hook streams updates into the sink and signals completion on drop, the hashed-state
+    /// receiver can be taken exactly once, and the outcome arrives through the state-root
+    /// channel.
+    #[test]
+    fn payload_state_root_handle_lifecycle() {
+        let sink = Arc::new(CountingSink::default());
+        let streams = StateRootStreams::from_sink(sink.clone(), true);
+
+        let (state_root_tx, state_root_rx) = std::sync::mpsc::channel();
+        let (hashed_state_tx, hashed_state_rx) = std::sync::mpsc::channel();
+        let mut handle =
+            PayloadStateRootHandle::new("test", streams, state_root_rx, Some(hashed_state_rx));
+
+        assert_eq!(handle.name(), "test");
+
+        {
+            let mut hook = handle.state_hook();
+            hook.on_state(EvmState::default());
+        }
+        assert_eq!(sink.state_updates.load(Ordering::Relaxed), 1);
+        assert_eq!(sink.finished_updates.load(Ordering::Relaxed), 1);
+
+        hashed_state_tx.send(HashedPostState::default()).unwrap();
+        let rx = handle.try_take_hashed_state_rx().expect("first take returns the receiver");
+        assert!(rx.recv().is_ok());
+        assert!(handle.try_take_hashed_state_rx().is_none(), "second take returns None");
+
+        state_root_tx
+            .send(Ok(StateRootComputeOutcome {
+                state_root: B256::repeat_byte(0x42),
+                trie_updates: Arc::new(TrieUpdates::default()),
+                changed_paths: None,
+                #[cfg(feature = "trie-debug")]
+                debug_recorders: Vec::new(),
+            }))
+            .unwrap();
+        let outcome = handle.state_root().expect("outcome is delivered");
+        assert_eq!(outcome.state_root, B256::repeat_byte(0x42));
     }
 }
