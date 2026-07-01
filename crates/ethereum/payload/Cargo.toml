@@ -27,6 +27,7 @@ reth-basic-payload-builder.workspace = true
 reth-evm.workspace = true
 reth-evm-ethereum = { workspace = true, features = ["std"] }
 reth-errors.workspace = true
+reth-execution-types.workspace = true
 reth-chainspec.workspace = true
 reth-payload-validator.workspace = true
 
