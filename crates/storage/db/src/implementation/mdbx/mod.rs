@@ -48,6 +48,9 @@ pub const TERABYTE: usize = GIGABYTE * 1024;
 /// MDBX allows up to 32767 readers (`MDBX_READERS_LIMIT`), but we limit it to slightly below that
 const DEFAULT_MAX_READERS: u64 = 32_000;
 
+/// MDBX accepts a loose dirty-page cache limit in the range 0..=255.
+const MDBX_MAX_LOOSE_DIRTY_PAGE_CACHE: u64 = 255;
+
 /// Space that a read-only transaction can occupy until the warning is emitted.
 /// See [`reth_libmdbx::EnvironmentBuilder::set_handle_slow_readers`] for more information.
 const MAX_SAFE_READER_SPACE: usize = 10 * GIGABYTE;
@@ -409,6 +412,8 @@ impl DatabaseEnv {
             DatabaseEnvKind::RW => {
                 // enable writemap mode in RW mode
                 inner_env.write_map();
+                // Keep more dirty pages available for reuse inside large persistence transactions.
+                inner_env.set_loose_limit(MDBX_MAX_LOOSE_DIRTY_PAGE_CACHE);
                 Mode::ReadWrite { sync_mode: args.sync_mode }
             }
         };
@@ -727,6 +732,21 @@ mod tests {
     #[test]
     fn db_creation() {
         let _tempdir = create_test_db(DatabaseEnvKind::RW);
+    }
+
+    #[test]
+    fn rw_db_uses_max_loose_dirty_page_cache() {
+        let (_tempdir, env) = create_test_db(DatabaseEnvKind::RW);
+
+        let loose_limit = env.with_raw_env_ptr(|env| {
+            let mut value = 0;
+            let result =
+                unsafe { ffi::mdbx_env_get_option(env, ffi::MDBX_opt_loose_limit, &mut value) };
+            assert_eq!(result, ffi::MDBX_SUCCESS as i32);
+            value
+        });
+
+        assert_eq!(loose_limit, MDBX_MAX_LOOSE_DIRTY_PAGE_CACHE);
     }
 
     #[test]
