@@ -511,6 +511,7 @@ fn jit_runtime_config(jit: &JitArgs) -> RuntimeConfig {
         blocking: jit.blocking,
         no_dedup: default_config.no_dedup,
         no_dse: default_config.no_dse,
+        single_error: default_config.single_error,
         gas_params: default_config.gas_params,
         aot: default_config.aot,
         jit_mode: JitMode::OutOfProcess,
