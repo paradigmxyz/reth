@@ -232,9 +232,16 @@ impl<'a, N: NodePrimitives> TreeCtx<'a, N> {
         self.canonical_in_memory_state
     }
 
-    /// Takes the pending sparse trie prune request, if any.
-    pub const fn take_sparse_trie_prune(&mut self) -> Option<SparseTrieRetainedPaths> {
-        self.pending_sparse_trie_prune.take()
+    /// Takes the pending sparse trie prune request and snapshots the currently in-memory blocks.
+    pub fn take_sparse_trie_prune(&mut self) -> Option<SparseTrieRetainedPaths> {
+        self.pending_sparse_trie_prune.take()?;
+
+        let mut retained_paths = SparseTrieRetainedPaths::default();
+        for block in self.state.tree_state.blocks_by_hash.values() {
+            let trie_data = block.trie_data();
+            retained_paths.extend_from_hashed_state(&trie_data.hashed_state);
+        }
+        Some(retained_paths)
     }
 }
 
@@ -591,8 +598,9 @@ where
             ctx.state(),
             self.changeset_cache.clone(),
         );
-        let proof_worker_overlay_builder =
-            overlay_builder.clone().with_skip_overlay_when_sparse_trie_matches_parent(true);
+        let proof_worker_overlay_builder = overlay_builder
+            .clone()
+            .with_skip_overlay_when_sparse_trie_matches_parent(parent_block.state_root());
         let overlay_factory = OverlayStateProviderFactory::new(
             provider_factory.clone(),
             proof_worker_overlay_builder,
@@ -2257,7 +2265,7 @@ where
         let overlay_factory = OverlayStateProviderFactory::new(
             self.provider.clone(),
             Self::overlay_builder_for_parent(parent_hash, state, self.changeset_cache.clone())
-                .with_skip_overlay_when_sparse_trie_matches_parent(true),
+                .with_skip_overlay_when_sparse_trie_matches_parent(parent_state_root),
         );
 
         Some(self.payload_processor.spawn_state_root(

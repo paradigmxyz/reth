@@ -8,12 +8,12 @@ use alloc::vec::Vec;
 use alloy_primitives::{map::B256Map, B256};
 use either::Either;
 use reth_execution_errors::{SparseStateTrieResult, SparseTrieErrorKind};
-#[cfg(feature = "std")]
-use reth_trie_common::HashedPostStateSorted;
 use reth_trie_common::{
     updates::{StorageTrieUpdates, TrieUpdates},
     DecodedMultiProof, MultiProof, Nibbles, ProofTrieNodeV2,
 };
+#[cfg(feature = "std")]
+use reth_trie_common::{HashedPostState, HashedPostStateSorted};
 #[cfg(feature = "std")]
 use tracing::debug;
 use tracing::instrument;
@@ -615,6 +615,21 @@ impl SparseTrieRetainedPaths {
         }
     }
 
+    /// Extends the retained paths with every account and storage slot touched by the unsorted
+    /// hashed state.
+    pub fn extend_from_unsorted_hashed_state(&mut self, hashed_state: &HashedPostState) {
+        self.account_paths
+            .extend(hashed_state.accounts.keys().map(|address| Nibbles::unpack(*address)));
+
+        for (address, storage) in &hashed_state.storages {
+            self.retain_account(*address);
+            self.retain_storage_slots(
+                *address,
+                storage.storage.keys().map(|slot| Nibbles::unpack(*slot)),
+            );
+        }
+    }
+
     fn extend_from_lfus(
         &mut self,
         hot_accounts: &BucketedLfu<B256>,
@@ -734,8 +749,8 @@ mod tests {
     use reth_trie::{updates::StorageTrieUpdates, HashBuilder, MultiProof, EMPTY_ROOT_HASH};
     use reth_trie_common::{
         proof::{ProofNodes, ProofRetainer},
-        BranchNodeMasks, BranchNodeMasksMap, BranchNodeV2, HashedStorageSorted, LeafNode, RlpNode,
-        StorageMultiProof, TrieAccount, TrieMask, TrieNodeV2,
+        BranchNodeMasks, BranchNodeMasksMap, BranchNodeV2, HashedStorage, HashedStorageSorted,
+        LeafNode, RlpNode, StorageMultiProof, TrieAccount, TrieMask, TrieNodeV2,
     };
 
     /// Create a leaf key (suffix) with given nibbles padded with zeros to reach `total_len`.
@@ -916,6 +931,30 @@ mod tests {
 
         let mut retained_paths = SparseTrieRetainedPaths::default();
         retained_paths.extend_from_hashed_state(&hashed_state);
+        retained_paths.sort_and_dedup();
+
+        assert_eq!(
+            retained_paths.account_paths,
+            vec![Nibbles::unpack(account), Nibbles::unpack(storage_account)]
+        );
+        assert_eq!(retained_paths.storage_slots[&storage_account], vec![Nibbles::unpack(slot)]);
+    }
+
+    #[test]
+    fn retained_paths_extend_from_unsorted_hashed_state() {
+        let account = B256::with_last_byte(0x01);
+        let storage_account = B256::with_last_byte(0x02);
+        let slot = B256::with_last_byte(0x03);
+        let hashed_state = HashedPostState {
+            accounts: B256Map::from_iter([(account, Some(Account::default()))]),
+            storages: B256Map::from_iter([(
+                storage_account,
+                HashedStorage::from_iter(false, [(slot, U256::from(1))]),
+            )]),
+        };
+
+        let mut retained_paths = SparseTrieRetainedPaths::default();
+        retained_paths.extend_from_unsorted_hashed_state(&hashed_state);
         retained_paths.sort_and_dedup();
 
         assert_eq!(

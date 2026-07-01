@@ -316,8 +316,10 @@ where
     /// Set when an FCU with payload attributes is received, cleared on the next FCU without.
     /// Suppresses persistence cycles during payload building.
     building_payload: bool,
-    /// Retained paths from the latest persistence cleanup to apply during the next sparse trie
-    /// cache preservation.
+    /// Marker for a sparse trie prune requested by the latest persistence cleanup.
+    ///
+    /// The retained paths are snapshotted when the next sparse trie task consumes this request so
+    /// blocks that finish execution concurrently with persistence are included.
     pending_sparse_trie_prune: Option<SparseTrieRetainedPaths>,
     /// Task runtime for spawning blocking work on named, reusable threads.
     runtime: reth_tasks::Runtime,
@@ -2144,19 +2146,8 @@ where
             number: self.persistence_state.last_persisted_block.number,
             hash: self.persistence_state.last_persisted_block.hash,
         });
-        let retained_paths = self.sparse_trie_retained_paths_for_in_memory_blocks();
-        self.pending_sparse_trie_prune = Some(retained_paths);
+        self.pending_sparse_trie_prune = Some(SparseTrieRetainedPaths::default());
         Ok(())
-    }
-
-    /// Builds sparse trie retained paths from all blocks still present in the in-memory tree.
-    fn sparse_trie_retained_paths_for_in_memory_blocks(&self) -> SparseTrieRetainedPaths {
-        let mut retained_paths = SparseTrieRetainedPaths::default();
-        for block in self.state.tree_state.blocks_by_hash.values() {
-            let trie_data = block.trie_data();
-            retained_paths.extend_from_hashed_state(&trie_data.hashed_state);
-        }
-        retained_paths
     }
 
     /// Return an [`ExecutedBlock`] from database or in-memory state by hash.
