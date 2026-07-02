@@ -21,6 +21,7 @@ use crate::{
         handle::{ActiveSessionMessage, SessionCommand},
         BlockRangeInfo, EthVersion, SessionId,
     },
+    snap::SnapPeerRequest,
 };
 use alloy_eips::merge::EPOCH_SLOTS;
 use alloy_primitives::Sealable;
@@ -29,13 +30,21 @@ use metrics::{Counter, Gauge};
 use reth_eth_wire::{
     errors::{EthHandshakeError, EthStreamError},
     message::{EthBroadcastMessage, MessageError},
-    Capabilities, DisconnectP2P, DisconnectReason, EthMessage, NetworkPrimitives, NewBlockPayload,
+    Capabilities, DisconnectP2P, DisconnectReason, EthMessage, EthSnapMessage, NetworkPrimitives,
+    NewBlockPayload,
 };
-use reth_eth_wire_types::{message::RequestPair, NewPooledTransactionHashes, RawCapabilityMessage};
+use reth_eth_wire_types::{
+    message::RequestPair,
+    snap::{SnapMessageId, SnapProtocolMessage},
+    NewPooledTransactionHashes, RawCapabilityMessage,
+};
 use reth_metrics::common::mpsc::MeteredPollSender;
 use reth_network_api::PeerRequest;
-use reth_network_p2p::error::RequestError;
-use reth_network_peers::PeerId;
+use reth_network_p2p::{
+    error::{PeerRequestResult, RequestError},
+    snap::client::SnapResponse,
+};
+use reth_network_peers::{PeerId, WithPeerId};
 use reth_network_types::session::config::INITIAL_REQUEST_TIMEOUT;
 use reth_primitives_traits::Block;
 use rustc_hash::FxHashMap;
@@ -163,6 +172,9 @@ pub(crate) struct ActiveSession<N: NetworkPrimitives> {
     pub(crate) internal_request_rx: Fuse<ReceiverStream<PeerRequest<N>>>,
     /// All requests sent to the remote peer we're waiting on a response
     pub(crate) inflight_requests: FxHashMap<u64, InflightRequest<PeerRequest<N>>>,
+    /// Outstanding `snap/2` requests sent to the remote peer, keyed by a session-unique
+    /// `request_id`, awaiting the correlated response on the dedicated `eth`+`snap` stream.
+    pub(crate) inflight_snap_requests: FxHashMap<u64, InflightSnapRequest>,
     /// All requests that were sent by the remote peer and we're waiting on an internal response
     pub(crate) received_requests_from_remote: Vec<ReceivedRequest<N>>,
     /// Buffered messages that should be handled and sent to the peer.
@@ -377,6 +389,101 @@ impl<N: NetworkPrimitives> ActiveSession<N> {
             }
             EthMessage::Other(bytes) => self.try_emit_broadcast(PeerMessage::Other(bytes)).into(),
         }
+    }
+
+    /// Sends a `snap/2` request to the peer and tracks it for response correlation.
+    ///
+    /// The session assigns a connection-unique `request_id` (overwriting any id the client set), so
+    /// concurrent requests can never collide in [`Self::inflight_snap_requests`]. The caller's id
+    /// is restored on the response before it is delivered back.
+    fn on_snap_request(&mut self, mut req: SnapPeerRequest) {
+        let Some(expected_response) = req.request.message_id().response() else {
+            // Only request variants can be correlated with a response.
+            debug!(target: "net::session", msg_id=?req.request.message_id(), remote_peer_id=?self.remote_peer_id, "rejecting non-request snap message");
+            let _ = req.response.send(Err(RequestError::BadResponse));
+            return
+        };
+        let caller_request_id = req.request.request_id();
+        let request_id = self.next_id();
+        req.request.set_request_id(request_id);
+        let deadline = Instant::now() +
+            Duration::from_millis(self.internal_request_timeout.load(Ordering::Relaxed));
+        trace!(target: "net::session", ?request_id, remote_peer_id=?self.remote_peer_id, "sending snap request to peer");
+        self.inflight_snap_requests.insert(
+            request_id,
+            InflightSnapRequest {
+                response: req.response,
+                caller_request_id,
+                expected_response,
+                deadline,
+            },
+        );
+        self.queued_outgoing.push_back(OutgoingMessage::Snap(req.request));
+    }
+
+    /// Evicts `snap/2` requests whose deadline has passed, resolving their futures with a timeout
+    /// so callers don't hang forever and the inflight map stays bounded.
+    ///
+    /// Driven by the shared eth request-timeout interval (see the poll loop), so snap timeout
+    /// latency tracks the same cadence as eth requests rather than using a separate timer.
+    fn check_timed_out_snap_requests(&mut self, now: Instant) {
+        let expired: Vec<u64> = self
+            .inflight_snap_requests
+            .iter()
+            .filter(|(_, req)| now >= req.deadline)
+            .map(|(id, _)| *id)
+            .collect();
+        for id in expired {
+            if let Some(req) = self.inflight_snap_requests.remove(&id) {
+                debug!(target: "net::session", ?id, remote_peer_id=?self.remote_peer_id, "timed out snap request");
+                let _ = req.response.send(Err(RequestError::Timeout));
+            }
+        }
+    }
+
+    /// Handle an inbound `snap/2` message read from the dedicated `EthSnapStream`.
+    ///
+    /// Responses are correlated back to the outstanding [`SnapClient`](crate::snap::SnapClient)
+    /// request by `request_id`, with the caller's original id restored and the response type
+    /// checked against the request kind. Unsolicited or mismatched responses count as bad messages
+    /// for peer reputation. Inbound requests are not served yet (no snap server), so they are
+    /// ignored.
+    fn on_incoming_snap_message(
+        &mut self,
+        mut msg: SnapProtocolMessage,
+    ) -> OnIncomingMessageOutcome<N> {
+        let request_id = msg.request_id();
+        if !msg.is_response() {
+            // Inbound snap requests are not served yet; the snap server lands separately.
+            trace!(target: "net::session", ?request_id, remote_peer_id=?self.remote_peer_id, "ignoring inbound snap request");
+            return OnIncomingMessageOutcome::Ok
+        }
+
+        let Some(req) = self.inflight_snap_requests.remove(&request_id) else {
+            trace!(target: "net::session", ?request_id, remote_peer_id=?self.remote_peer_id, "received snap response to unknown request");
+            self.on_bad_message();
+            return OnIncomingMessageOutcome::Ok
+        };
+
+        if msg.message_id() != req.expected_response {
+            debug!(target: "net::session", ?request_id, msg_id=?msg.message_id(), expected=?req.expected_response, remote_peer_id=?self.remote_peer_id, "received snap response of wrong type");
+            self.on_bad_message();
+            let _ = req.response.send(Err(RequestError::BadResponse));
+            return OnIncomingMessageOutcome::Ok
+        }
+
+        // Restore the caller's request id before handing the response back.
+        msg.set_request_id(req.caller_request_id);
+        match SnapResponse::try_from(msg) {
+            Ok(response) => {
+                trace!(target: "net::session", ?request_id, remote_peer_id=?self.remote_peer_id, "received snap response from peer");
+                let _ = req.response.send(Ok(WithPeerId::new(self.remote_peer_id, response)));
+            }
+            Err(_) => {
+                let _ = req.response.send(Err(RequestError::BadResponse));
+            }
+        }
+        OnIncomingMessageOutcome::Ok
     }
 
     /// Handle an internal peer request that will be sent to the remote.
@@ -685,6 +792,9 @@ impl<N: NetworkPrimitives> Future for ActiveSession<N> {
                             SessionCommand::Message(msg) => {
                                 this.on_internal_peer_message(msg);
                             }
+                            SessionCommand::SnapRequest(req) => {
+                                this.on_snap_request(req);
+                            }
                         }
                     }
                 }
@@ -700,7 +810,12 @@ impl<N: NetworkPrimitives> Future for ActiveSession<N> {
                     }
                     SessionCommand::Disconnect { reason } => {
                         let reason = reason.unwrap_or(DisconnectReason::DisconnectRequested);
-                        return this.try_disconnect(reason, cx)
+                        return this.try_disconnect(reason, cx);
+                    }
+                    // Snap requests normally arrive on the bounded channel; handle them here too so
+                    // the match stays exhaustive and is robust if that changes.
+                    SessionCommand::SnapRequest(req) => {
+                        this.on_snap_request(req);
                     }
                 }
             }
@@ -732,6 +847,7 @@ impl<N: NetworkPrimitives> Future for ActiveSession<N> {
                 if let Some(msg) = this.queued_outgoing.pop_front() {
                     progress = true;
                     let res = match msg {
+                        OutgoingMessage::Snap(msg) => this.conn.start_send_snap(msg),
                         OutgoingMessage::Eth(msg) => this.conn.start_send_unpin(msg),
                         OutgoingMessage::Broadcast(msg) => this.conn.start_send_broadcast(msg),
                         OutgoingMessage::Raw(msg) => this.conn.start_send_raw(msg),
@@ -806,9 +922,15 @@ impl<N: NetworkPrimitives> Future for ActiveSession<N> {
                     Poll::Ready(Some(res)) => {
                         match res {
                             Ok(msg) => {
-                                trace!(target: "net::session", msg_id=?msg.message_id(), remote_peer_id=?this.remote_peer_id, "received eth message");
-                                // decode and handle message
-                                match this.on_incoming_message(msg) {
+                                let outcome = match msg {
+                                    EthSnapMessage::Eth(msg) => {
+                                        trace!(target: "net::session", msg_id=?msg.message_id(), remote_peer_id=?this.remote_peer_id, "received eth message");
+                                        // decode and handle message
+                                        this.on_incoming_message(msg)
+                                    }
+                                    EthSnapMessage::Snap(msg) => this.on_incoming_snap_message(msg),
+                                };
+                                match outcome {
                                     OnIncomingMessageOutcome::Ok => {
                                         // handled successfully
                                         progress = true;
@@ -865,7 +987,9 @@ impl<N: NetworkPrimitives> Future for ActiveSession<N> {
 
         while this.internal_request_timeout_interval.poll_tick(cx).is_ready() {
             // check for timed out requests
-            if this.check_timed_out_requests(Instant::now()) &&
+            let now = Instant::now();
+            this.check_timed_out_snap_requests(now);
+            if this.check_timed_out_requests(now) &&
                 let Poll::Ready(Ok(_)) = this.to_session_manager.poll_reserve(cx)
             {
                 let msg = ActiveSessionMessage::ProtocolBreach { peer_id: this.remote_peer_id };
@@ -900,8 +1024,6 @@ pub(crate) struct InflightRequest<R> {
     deadline: Instant,
 }
 
-// === impl InflightRequest ===
-
 impl<N: NetworkPrimitives> InflightRequest<PeerRequest<N>> {
     /// Returns true if the request is timedout
     #[inline]
@@ -924,6 +1046,19 @@ impl<N: NetworkPrimitives> InflightRequest<PeerRequest<N>> {
             req.send_err_response(RequestError::Timeout);
         }
     }
+}
+
+/// An outstanding `snap/2` request awaiting its correlated response.
+pub(crate) struct InflightSnapRequest {
+    /// Channel that resolves the [`SnapClient`](crate::snap::SnapClient)'s future with the
+    /// response.
+    response: oneshot::Sender<PeerRequestResult<SnapResponse>>,
+    /// The caller-supplied request id, restored on the response before it is delivered back.
+    caller_request_id: u64,
+    /// Message id of the response type expected for the sent request kind.
+    expected_response: SnapMessageId,
+    /// Instant after which the request is considered timed out and is evicted.
+    deadline: Instant,
 }
 
 /// All outcome variants when handling an incoming message
@@ -963,6 +1098,8 @@ pub(crate) enum OutgoingMessage<N: NetworkPrimitives> {
     Broadcast(EthBroadcastMessage<N>),
     /// A raw capability message
     Raw(RawCapabilityMessage),
+    /// A `snap/2` message to send over the dedicated `eth`+`snap` stream.
+    Snap(SnapProtocolMessage),
 }
 
 impl<N: NetworkPrimitives> OutgoingMessage<N> {
@@ -970,7 +1107,10 @@ impl<N: NetworkPrimitives> OutgoingMessage<N> {
     const fn is_response(&self) -> bool {
         match self {
             Self::Eth(msg) => msg.is_response(),
-            _ => false,
+            // Served snap responses count toward response backpressure; outbound snap requests do
+            // not. `SnapProtocolMessage::is_response` distinguishes the two.
+            Self::Snap(msg) => msg.is_response(),
+            Self::Broadcast(_) | Self::Raw(_) => false,
         }
     }
 
@@ -992,7 +1132,7 @@ impl<N: NetworkPrimitives> OutgoingMessage<N> {
                 EthBroadcastMessage::NewBlock(_) => 1,
                 EthBroadcastMessage::Transactions(txs) => txs.len(),
             },
-            Self::Raw(_) => 0,
+            Self::Raw(_) | Self::Snap(_) => 0,
         }
     }
 
@@ -1267,6 +1407,7 @@ mod tests {
                         pending_message_to_session: None,
                         internal_request_rx: ReceiverStream::new(messages_rx).fuse(),
                         inflight_requests: Default::default(),
+                        inflight_snap_requests: Default::default(),
                         conn,
                         queued_outgoing: QueuedOutgoingMessages::new(
                             Gauge::noop(),
@@ -1319,6 +1460,21 @@ mod tests {
                     .hardfork_fork_filter(EthereumHardfork::Frontier)
                     .expect("The Frontier fork filter should exist on mainnet"),
             }
+        }
+    }
+
+    /// Builds a snap request carrying a client-supplied `request_id` sentinel (`u64::MAX`) that the
+    /// session must overwrite with a connection-unique one.
+    fn snap_request(response: oneshot::Sender<PeerRequestResult<SnapResponse>>) -> SnapPeerRequest {
+        SnapPeerRequest {
+            request: SnapProtocolMessage::GetBlockAccessLists(
+                reth_eth_wire_types::snap::GetBlockAccessListsMessage {
+                    request_id: u64::MAX,
+                    block_hashes: Vec::new(),
+                    response_bytes: 0,
+                },
+            ),
+            response,
         }
     }
 
@@ -1482,6 +1638,130 @@ mod tests {
             ActiveSessionMessage::ProtocolBreach { .. } => {}
             ev => unreachable!("{ev:?}"),
         }
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn snap_request_is_assigned_unique_id_and_response_correlated() {
+        let mut builder = SessionBuilder::default();
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let local_addr = listener.local_addr().unwrap();
+        let fut = builder.with_client_stream(local_addr, async move |client_stream| {
+            let _client_stream = client_stream;
+            tokio::time::sleep(Duration::from_secs(60)).await;
+        });
+        tokio::task::spawn(fut);
+        let (incoming, _) = listener.accept().await.unwrap();
+        let mut session = builder.connect_incoming(incoming).await;
+
+        // The session assigns its own request id (not the client's `u64::MAX`) and tracks it.
+        let (tx, rx) = oneshot::channel();
+        session.on_snap_request(snap_request(tx));
+        let id = *session.inflight_snap_requests.keys().next().expect("snap request tracked");
+        assert_ne!(id, u64::MAX, "session must assign its own request id");
+
+        // A response carrying that id is correlated back to the client's future.
+        let outcome = session.on_incoming_snap_message(SnapProtocolMessage::BlockAccessLists(
+            reth_eth_wire_types::snap::BlockAccessListsMessage {
+                request_id: id,
+                block_access_lists: reth_eth_wire_types::BlockAccessLists(Vec::new()),
+            },
+        ));
+        assert!(matches!(outcome, OnIncomingMessageOutcome::Ok));
+        assert!(session.inflight_snap_requests.is_empty());
+
+        // The delivered response carries the caller's original id again, not the session's.
+        let response = rx.await.unwrap().unwrap();
+        assert!(matches!(
+            response.into_data(),
+            SnapResponse::BlockAccessLists(m) if m.request_id == u64::MAX
+        ));
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn wrong_type_snap_response_is_rejected() {
+        let mut builder = SessionBuilder::default();
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let local_addr = listener.local_addr().unwrap();
+        let fut = builder.with_client_stream(local_addr, async move |client_stream| {
+            let _client_stream = client_stream;
+            tokio::time::sleep(Duration::from_secs(60)).await;
+        });
+        tokio::task::spawn(fut);
+        let (incoming, _) = listener.accept().await.unwrap();
+        let mut session = builder.connect_incoming(incoming).await;
+
+        let (tx, rx) = oneshot::channel();
+        session.on_snap_request(snap_request(tx));
+        let id = *session.inflight_snap_requests.keys().next().expect("snap request tracked");
+
+        // Answering a GetBlockAccessLists with an AccountRange under the same id is a bad message.
+        let outcome = session.on_incoming_snap_message(SnapProtocolMessage::AccountRange(
+            reth_eth_wire_types::snap::AccountRangeMessage {
+                request_id: id,
+                accounts: Vec::new(),
+                proof: Vec::new(),
+            },
+        ));
+        assert!(matches!(outcome, OnIncomingMessageOutcome::Ok));
+        assert!(session.inflight_snap_requests.is_empty());
+        assert_eq!(rx.await.unwrap().unwrap_err(), RequestError::BadResponse);
+        assert!(matches!(
+            builder.active_session_rx.next().await,
+            Some(ActiveSessionMessage::BadMessage { .. })
+        ));
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn snap_request_times_out() {
+        let mut builder = SessionBuilder::default();
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let local_addr = listener.local_addr().unwrap();
+        let fut = builder.with_client_stream(local_addr, async move |client_stream| {
+            let _client_stream = client_stream;
+            tokio::time::sleep(Duration::from_secs(60)).await;
+        });
+        tokio::task::spawn(fut);
+        let (incoming, _) = listener.accept().await.unwrap();
+        let mut session = builder.connect_incoming(incoming).await;
+
+        // Tiny timeout so the deadline (computed at insert) is already in the past.
+        session.internal_request_timeout.store(1, Ordering::Relaxed);
+        let (tx, rx) = oneshot::channel();
+        session.on_snap_request(snap_request(tx));
+
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        session.check_timed_out_snap_requests(Instant::now());
+        assert!(session.inflight_snap_requests.is_empty());
+        assert_eq!(rx.await.unwrap().unwrap_err(), RequestError::Timeout);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn unknown_snap_response_is_penalized() {
+        let mut builder = SessionBuilder::default();
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let local_addr = listener.local_addr().unwrap();
+        let fut = builder.with_client_stream(local_addr, async move |client_stream| {
+            let _client_stream = client_stream;
+            tokio::time::sleep(Duration::from_secs(60)).await;
+        });
+        tokio::task::spawn(fut);
+        let (incoming, _) = listener.accept().await.unwrap();
+        let mut session = builder.connect_incoming(incoming).await;
+
+        // A response for a request we never sent is dropped and reported as a bad message.
+        let outcome = session.on_incoming_snap_message(SnapProtocolMessage::BlockAccessLists(
+            reth_eth_wire_types::snap::BlockAccessListsMessage {
+                request_id: 999,
+                block_access_lists: reth_eth_wire_types::BlockAccessLists(Vec::new()),
+            },
+        ));
+        assert!(matches!(outcome, OnIncomingMessageOutcome::Ok));
+        assert!(session.inflight_snap_requests.is_empty());
+        assert!(session.queued_outgoing.pop_front().is_none());
+        assert!(matches!(
+            builder.active_session_rx.next().await,
+            Some(ActiveSessionMessage::BadMessage { .. })
+        ));
     }
 
     #[test]

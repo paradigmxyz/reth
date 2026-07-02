@@ -12,6 +12,7 @@ use crate::{
     metrics::SessionManagerMetrics,
     protocol::{IntoRlpxSubProtocol, OnNotSupported, RlpxSubProtocolHandlers, RlpxSubProtocols},
     session::active::ActiveSession,
+    snap::{SnapClient, SnapPeerRequest, SnapRouting},
 };
 use active::QueuedOutgoingMessages;
 use alloy_primitives::map::{FbBuildHasher, HashMap};
@@ -20,13 +21,14 @@ use futures::{future::Either, io, FutureExt, StreamExt};
 use reth_ecies::{stream::ECIESStream, ECIESError};
 use reth_eth_wire::{
     errors::EthStreamError, handshake::EthRlpxHandshake, multiplex::RlpxProtocolMultiplexer,
-    BlockRangeUpdate, Capabilities, DisconnectReason, EthStream, EthVersion,
+    BlockRangeUpdate, Capabilities, DisconnectReason, EthSnapStream, EthStream, EthVersion,
     HelloMessageWithProtocols, NetworkPrimitives, UnauthedP2PStream, UnifiedStatus,
     HANDSHAKE_TIMEOUT,
 };
 use reth_ethereum_forks::{ForkFilter, ForkId, ForkTransition, Head};
 use reth_metrics::common::mpsc::MeteredPollSender;
 use reth_network_api::{PeerRequest, PeerRequestSender};
+use reth_network_p2p::error::RequestError;
 use reth_network_peers::PeerId;
 use reth_network_types::SessionsConfig;
 use reth_tasks::Runtime;
@@ -126,6 +128,9 @@ pub struct SessionManager<N: NetworkPrimitives> {
     /// When true, block announcement messages (`NewBlock`, `NewBlockHashes`) are rejected before
     /// RLP decoding on new sessions to avoid memory amplification.
     reject_block_announcements: bool,
+    /// `snap/2` client request routing: the channel [`SnapClient`]s send on and the shared
+    /// snap-capable peer count.
+    snap: SnapRouting,
 }
 
 // === impl SessionManager ===
@@ -181,6 +186,29 @@ impl<N: NetworkPrimitives> SessionManager<N> {
             eth_max_message_size,
             local_range_info,
             reject_block_announcements,
+            snap: SnapRouting::new(),
+        }
+    }
+
+    /// Returns a [`SnapClient`] that routes `snap/2` requests through this manager to a
+    /// snap-capable session.
+    pub fn snap_client(&self) -> SnapClient {
+        self.snap.client()
+    }
+
+    /// Routes a `snap/2` request to the first snap-capable session that accepts it.
+    ///
+    /// With no snap-capable session connected the capability is reported as unsupported; if
+    /// snap-capable sessions exist but none could accept (command channels full or closing), the
+    /// caller gets a retryable [`RequestError::ChannelClosed`] instead.
+    fn route_snap_request(&self, req: SnapPeerRequest) {
+        if let Err(req) = route_to_snap_session(self.active_sessions.values(), req) {
+            let err = if self.active_sessions.values().any(|h| h.supports_snap) {
+                RequestError::ChannelClosed
+            } else {
+                RequestError::UnsupportedCapability
+            };
+            let _ = req.response.send(Err(err));
         }
     }
 
@@ -411,6 +439,9 @@ impl<N: NetworkPrimitives> SessionManager<N> {
     fn remove_active_session(&mut self, id: &PeerId) -> Option<ActiveSessionHandle<N>> {
         let session = self.active_sessions.remove(id)?;
         self.counter.dec_active(&session.direction);
+        if session.supports_snap {
+            self.snap.on_session_removed();
+        }
         Some(session)
     }
 
@@ -447,6 +478,11 @@ impl<N: NetworkPrimitives> SessionManager<N> {
     ///
     /// Active sessions are prioritized.
     pub(crate) fn poll(&mut self, cx: &mut Context<'_>) -> Poll<SessionEvent<N>> {
+        // Route queued snap/2 client requests to snap-capable sessions.
+        while let Poll::Ready(Some(req)) = self.snap.poll_recv(cx) {
+            self.route_snap_request(req);
+        }
+
         // Poll events from active sessions
         match self.active_session_rx.poll_next_unpin(cx) {
             Poll::Pending => {}
@@ -588,6 +624,7 @@ impl<N: NetworkPrimitives> SessionManager<N> {
                     pending_message_to_session: None,
                     internal_request_rx: ReceiverStream::new(messages_rx).fuse(),
                     inflight_requests: Default::default(),
+                    inflight_snap_requests: Default::default(),
                     conn,
                     queued_outgoing: QueuedOutgoingMessages::new(
                         self.metrics.queued_outgoing_messages.clone(),
@@ -606,7 +643,11 @@ impl<N: NetworkPrimitives> SessionManager<N> {
                     last_sent_latest_block: None,
                 };
 
+                let supports_snap = session.conn.supports_snap();
                 self.spawn(session);
+                if supports_snap {
+                    self.snap.on_session_added();
+                }
 
                 let client_version = client_id.into();
                 let handle = ActiveSessionHandle {
@@ -617,6 +658,7 @@ impl<N: NetworkPrimitives> SessionManager<N> {
                     version,
                     established: Instant::now(),
                     capabilities: Arc::clone(&capabilities),
+                    supports_snap,
                     commands: SessionCommandSender::new(commands_tx, unbounded_tx, broadcast_items),
                     client_version: Arc::clone(&client_version),
                     remote_addr,
@@ -1176,6 +1218,30 @@ async fn authenticate_stream<N: NetworkPrimitives>(
                 }
             }
         }
+    } else if p2p_stream.shared_capabilities().is_exact_eth_snap_v2() {
+        // Exactly `eth` + `snap/2` (no other extras): use the dedicated stream instead of the
+        // general-purpose satellite multiplexer. If `snap/2` is negotiated alongside other extra
+        // capabilities, fall through to the satellite path — the dedicated stream only composes
+        // `eth` and `snap/2`.
+        match EthSnapStream::handshake(
+            p2p_stream,
+            status,
+            fork_filter,
+            handshake,
+            eth_max_message_size,
+        )
+        .await
+        {
+            Ok((stream, their_status)) => (stream.into(), their_status),
+            Err(err) => {
+                return PendingSessionEvent::Disconnected {
+                    remote_addr,
+                    session_id,
+                    direction,
+                    error: Some(PendingSessionHandshakeError::Eth(err)),
+                }
+            }
+        }
     } else {
         // Multiplex the stream with the extra protocols
         let mut multiplex_stream = RlpxProtocolMultiplexer::new(p2p_stream);
@@ -1224,5 +1290,122 @@ async fn authenticate_stream<N: NetworkPrimitives>(
         direction,
         client_id: their_hello.client_version,
         peer_listen_port,
+    }
+}
+
+/// Routes a `snap/2` request to the first snap-capable session that accepts it, skipping sessions
+/// that did not negotiate `snap/2`.
+///
+/// Returns the request back if none accepted it (every channel was full or closed), so the caller
+/// can report the capability as unsupported.
+fn route_to_snap_session<'a, N: NetworkPrimitives>(
+    sessions: impl Iterator<Item = &'a ActiveSessionHandle<N>>,
+    mut req: SnapPeerRequest,
+) -> Result<(), SnapPeerRequest> {
+    for handle in sessions.filter(|h| h.supports_snap) {
+        match handle.commands.send_snap_request(req) {
+            Ok(()) => return Ok(()),
+            // Channel full or closed; try the next snap-capable session.
+            Err(returned) => req = returned,
+        }
+    }
+    Err(req)
+}
+
+#[cfg(test)]
+mod snap_tests {
+    use super::*;
+    use crate::session::active::BroadcastItemCounter;
+    use reth_eth_wire::{Capability, EthNetworkPrimitives};
+    use reth_eth_wire_types::snap::{GetBlockAccessListsMessage, SnapProtocolMessage};
+    use reth_network_p2p::{error::PeerRequestResult, snap::client::SnapResponse};
+
+    /// Builds a snap request with its response receiver.
+    fn snap_request(
+        request_id: u64,
+    ) -> (SnapPeerRequest, oneshot::Receiver<PeerRequestResult<SnapResponse>>) {
+        let (response, rx) = oneshot::channel();
+        let request = SnapProtocolMessage::GetBlockAccessLists(GetBlockAccessListsMessage {
+            request_id,
+            block_hashes: Vec::new(),
+            response_bytes: 0,
+        });
+        (SnapPeerRequest { request, response }, rx)
+    }
+
+    /// Builds an active session handle with the given snap capability, returning the bounded
+    /// receiver a spawned session would drain.
+    fn handle(
+        supports_snap: bool,
+    ) -> (
+        ActiveSessionHandle<EthNetworkPrimitives>,
+        mpsc::Receiver<SessionCommand<EthNetworkPrimitives>>,
+    ) {
+        let (tx, rx) = mpsc::channel(4);
+        let (unbounded_tx, _unbounded_rx) = mpsc::unbounded_channel();
+        let commands = SessionCommandSender::new(tx, unbounded_tx, BroadcastItemCounter::new());
+        let handle = ActiveSessionHandle {
+            direction: Direction::Incoming,
+            session_id: SessionId(0),
+            version: EthVersion::Eth68,
+            remote_id: PeerId::random(),
+            established: Instant::now(),
+            capabilities: Arc::new(Capabilities::from(vec![Capability::eth(EthVersion::Eth68)])),
+            supports_snap,
+            commands,
+            client_version: Arc::from("test"),
+            remote_addr: "127.0.0.1:30303".parse().unwrap(),
+            local_addr: None,
+            peer_listen_port: None,
+            status: Arc::new(UnifiedStatus::default()),
+        };
+        (handle, rx)
+    }
+
+    #[test]
+    fn route_delivers_to_a_snap_capable_session() {
+        let (session, mut rx) = handle(true);
+        let (req, _resp) = snap_request(7);
+
+        assert!(route_to_snap_session(std::iter::once(&session), req).is_ok());
+
+        assert!(matches!(
+            rx.try_recv().expect("request delivered"),
+            SessionCommand::SnapRequest(SnapPeerRequest {
+                request: SnapProtocolMessage::GetBlockAccessLists(m),
+                ..
+            }) if m.request_id == 7
+        ));
+    }
+
+    #[test]
+    fn route_skips_non_snap_sessions() {
+        let (non_snap, mut non_snap_rx) = handle(false);
+        let (snap, mut snap_rx) = handle(true);
+        let (req, _resp) = snap_request(5);
+
+        assert!(route_to_snap_session([&non_snap, &snap].into_iter(), req).is_ok());
+
+        assert!(matches!(snap_rx.try_recv(), Ok(SessionCommand::SnapRequest(_))));
+        assert!(non_snap_rx.try_recv().is_err());
+    }
+
+    #[test]
+    fn route_falls_through_closed_session_to_the_next() {
+        let (closed, closed_rx) = handle(true);
+        drop(closed_rx); // first session's channel is closed
+        let (open, mut open_rx) = handle(true);
+        let (req, _resp) = snap_request(9);
+
+        assert!(route_to_snap_session([&closed, &open].into_iter(), req).is_ok());
+
+        assert!(matches!(open_rx.try_recv(), Ok(SessionCommand::SnapRequest(_))));
+    }
+
+    #[test]
+    fn route_with_only_non_snap_sessions_returns_request() {
+        let (non_snap, _rx) = handle(false);
+        let (req, _resp) = snap_request(1);
+        assert!(route_to_snap_session(std::iter::once(&non_snap), req).is_err());
     }
 }

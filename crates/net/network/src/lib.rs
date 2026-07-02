@@ -144,6 +144,7 @@ mod metrics;
 mod network;
 mod required_block_filter;
 mod session;
+mod snap;
 mod state;
 mod swarm;
 mod trusted_peers_resolver;
@@ -170,6 +171,7 @@ pub use flattened_response::FlattenedResponse;
 pub use manager::NetworkManager;
 pub use metrics::TxTypesCounter;
 pub use network::{NetworkHandle, NetworkProtocols};
+pub use snap::SnapClient;
 pub use swarm::NetworkConnectionState;
 
 /// re-export p2p interfaces
