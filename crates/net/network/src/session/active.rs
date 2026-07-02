@@ -760,7 +760,7 @@ impl<N: NetworkPrimitives> Future for ActiveSession<N> {
             // session messages are queued.
             let mut sent_message = false;
             if this.queued_outgoing.is_empty() {
-                match this.conn.poll_ready_unpin(cx) {
+                match this.conn.poll_ready_session(cx) {
                     Poll::Pending | Poll::Ready(Ok(())) => {}
                     Poll::Ready(Err(err)) => {
                         debug!(target: "net::session", %err, remote_peer_id=?this.remote_peer_id, "connection not ready to send message");
@@ -769,7 +769,7 @@ impl<N: NetworkPrimitives> Future for ActiveSession<N> {
                 }
             } else {
                 loop {
-                    match this.conn.poll_ready_unpin(cx) {
+                    match this.conn.poll_ready_session(cx) {
                         Poll::Pending => break,
                         Poll::Ready(Err(err)) => {
                             debug!(target: "net::session", %err, remote_peer_id=?this.remote_peer_id, "connection not ready to send message");

@@ -207,6 +207,22 @@ impl<N: NetworkPrimitives> EthRlpxConnection<N> {
         }
     }
 
+    /// Polls send readiness, bypassing the generic eth stream sink wrapper for eth-only sessions.
+    #[inline]
+    pub(crate) fn poll_ready_session(
+        &mut self,
+        cx: &mut Context<'_>,
+    ) -> Poll<Result<(), EthStreamError>> {
+        unsafe {
+            match self {
+                Self::EthOnly(conn) => {
+                    Pin::new_unchecked(conn.inner_mut()).poll_ready(cx).map_err(Into::into)
+                }
+                Self::Satellite(conn) => Pin::new_unchecked(conn).poll_ready(cx),
+            }
+        }
+    }
+
     /// Flushes the connection, using the ECIES-aware buffered drain path for eth-only sessions.
     pub(crate) fn poll_flush_buffered(
         &mut self,
