@@ -667,16 +667,6 @@ where
     }
 }
 
-fn payload_bodies_response_from_bodies<LegacyBody, ForkBody>(
-    bodies: Vec<Option<LegacyBody>>,
-    convert: impl Fn(LegacyBody) -> Option<ForkBody>,
-) -> Result<BodiesResponse<ForkBody>, String>
-where
-    ForkBody: Default,
-{
-    BodiesResponse::from_optional_bodies(bodies, convert).map_err(|err| err.to_string())
-}
-
 /// Handles SSZ `engine_getBlobsV*` requests with the node's blob store.
 async fn handle_get_blobs<ChainSpec, Provider, Pool, Validator>(
     engine_api: EthEngineApi<Provider, Pool, Validator, ChainSpec>,
@@ -944,6 +934,16 @@ mod tests {
         ExecutionPayloadBodyV1, ExecutionPayloadBodyV2,
     };
     use ssz::Encode;
+
+    fn payload_bodies_response_from_bodies<LegacyBody, ForkBody>(
+        bodies: Vec<Option<LegacyBody>>,
+        convert: impl Fn(LegacyBody) -> Option<ForkBody>,
+    ) -> Result<BodiesResponse<ForkBody>, String>
+    where
+        ForkBody: Default,
+    {
+        BodiesResponse::from_optional_bodies(bodies, convert).map_err(|err| err.to_string())
+    }
 
     #[test]
     fn parses_capabilities_endpoint() {
