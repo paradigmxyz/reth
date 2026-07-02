@@ -15,6 +15,30 @@ use tokio::sync::oneshot;
 use tracing::debug_span;
 
 const RECEIPT_ENCODE_BUF_INITIAL_CAPACITY: usize = 512;
+const BLOOM_WORD_BYTES: usize = core::mem::size_of::<u64>();
+const BLOOM_WORDS: usize = 256 / BLOOM_WORD_BYTES;
+
+#[inline]
+fn accrue_bloom_words(aggregated: &mut Bloom, bloom: &Bloom) {
+    let aggregated = aggregated.data_mut();
+    let bloom = bloom.data();
+
+    debug_assert_eq!(aggregated.len(), bloom.len());
+    debug_assert_eq!(aggregated.len() % BLOOM_WORD_BYTES, 0);
+
+    let aggregated = aggregated.as_mut_ptr().cast::<u64>();
+    let bloom = bloom.as_ptr().cast::<u64>();
+
+    // SAFETY: Bloom stores exactly 256 initialized bytes. The loop covers that backing storage in
+    // non-overlapping u64-sized chunks and uses unaligned accesses, so no stronger alignment is
+    // required for either byte array.
+    unsafe {
+        for index in 0..BLOOM_WORDS {
+            let word = aggregated.add(index).read_unaligned() | bloom.add(index).read_unaligned();
+            aggregated.add(index).write_unaligned(word);
+        }
+    }
+}
 
 /// Receipt with index, ready to be sent to the background task for encoding and trie building.
 #[derive(Debug, Clone)]
@@ -89,7 +113,7 @@ impl<R: Receipt> ReceiptRootTaskHandle<R> {
             encode_buf.clear();
             receipt_with_bloom.encode_2718(&mut encode_buf);
 
-            aggregated_bloom |= *receipt_with_bloom.bloom_ref();
+            accrue_bloom_words(&mut aggregated_bloom, receipt_with_bloom.bloom_ref());
             builder.push_next(&encode_buf);
         };
 
@@ -138,6 +162,26 @@ mod tests {
     use alloy_primitives::{b256, hex, Address, Bytes, Log};
     use crossbeam_channel::bounded;
     use reth_ethereum_primitives::{Receipt, TxType};
+
+    #[test]
+    fn test_accrue_bloom_words_matches_bit_or_assign() {
+        let mut aggregated = Bloom::ZERO;
+        for (index, byte) in [(0, 0x11), (7, 0x80), (63, 0x01), (127, 0x55), (255, 0x08)] {
+            aggregated.data_mut()[index] = byte;
+        }
+
+        let mut bloom = Bloom::ZERO;
+        for (index, byte) in [(0, 0x22), (8, 0x04), (64, 0x10), (128, 0xaa), (255, 0x40)] {
+            bloom.data_mut()[index] = byte;
+        }
+
+        let mut expected = aggregated;
+        expected |= &bloom;
+
+        accrue_bloom_words(&mut aggregated, &bloom);
+
+        assert_eq!(aggregated, expected);
+    }
 
     #[tokio::test]
     async fn test_receipt_root_task_empty() {
