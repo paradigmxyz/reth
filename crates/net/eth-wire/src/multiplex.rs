@@ -578,6 +578,63 @@ impl<St, Primary> RlpxSatelliteStream<St, Primary> {
     }
 }
 
+/// Distinguishes where [`RlpxSatelliteStream::poll_drain_out_buffer`] failed, so callers can
+/// reproduce the original per-impl error handling: the stream requests a disconnect on a readiness
+/// error, but not on a send error, and the sink never disconnects.
+enum OutBufferDrainError {
+    /// The connection errored while reporting write readiness.
+    Readiness(P2PStreamError),
+    /// Sending an already-buffered message failed.
+    Send(P2PStreamError),
+}
+
+impl OutBufferDrainError {
+    /// Returns the underlying connection error, discarding which step produced it.
+    fn into_inner(self) -> P2PStreamError {
+        match self {
+            Self::Readiness(err) | Self::Send(err) => err,
+        }
+    }
+}
+
+impl<St, Primary> RlpxSatelliteStream<St, Primary>
+where
+    St: Stream<Item = io::Result<BytesMut>> + Sink<Bytes, Error = io::Error> + Unpin,
+{
+    /// Drains buffered outgoing messages into the underlying p2p connection.
+    ///
+    /// Sends as many buffered messages as the connection currently accepts, in FIFO order. This is
+    /// shared by the [`Stream`] and [`Sink`] implementations so that buffered satellite and primary
+    /// messages are always flushed first-come-first-served, regardless of which side drives the
+    /// stream, instead of being bypassed by primary sends made through the [`Sink`].
+    ///
+    /// Returns `Poll::Ready(Ok(()))` once the buffer is fully drained and the connection is ready
+    /// for more, `Poll::Pending` on connection backpressure, or an [`OutBufferDrainError`] that
+    /// tells the caller whether the failure came from the readiness check or from sending.
+    fn poll_drain_out_buffer(
+        &mut self,
+        cx: &mut Context<'_>,
+    ) -> Poll<Result<(), OutBufferDrainError>> {
+        loop {
+            match self.inner.conn.poll_ready_unpin(cx) {
+                Poll::Ready(Ok(())) => {
+                    if let Some(msg) = self.inner.out_buffer.pop_front() {
+                        if let Err(err) = self.inner.conn.start_send_unpin(msg) {
+                            return Poll::Ready(Err(OutBufferDrainError::Send(err)));
+                        }
+                    } else {
+                        return Poll::Ready(Ok(()));
+                    }
+                }
+                Poll::Ready(Err(err)) => {
+                    return Poll::Ready(Err(OutBufferDrainError::Readiness(err)));
+                }
+                Poll::Pending => return Poll::Pending,
+            }
+        }
+    }
+}
+
 impl<St, Primary, PrimaryErr> Stream for RlpxSatelliteStream<St, Primary>
 where
     St: Stream<Item = io::Result<BytesMut>> + Sink<Bytes, Error = io::Error> + Unpin,
@@ -595,32 +652,26 @@ where
                 return Poll::Ready(Some(msg))
             }
 
-            let mut conn_ready = true;
-            loop {
-                match this.inner.conn.poll_ready_unpin(cx) {
-                    Poll::Ready(Ok(())) => {
-                        if let Some(msg) = this.inner.out_buffer.pop_front() {
-                            if let Err(err) = this.inner.conn.start_send_unpin(msg) {
-                                return Poll::Ready(Some(Err(err.into())))
-                            }
-                        } else {
-                            break
-                        }
+            // Flush buffered outgoing messages FCFS via the shared helper (also used by the
+            // `Sink` impl) instead of duplicating the send logic here.
+            let conn_ready = match this.poll_drain_out_buffer(cx) {
+                Poll::Ready(Ok(())) => true,
+                Poll::Ready(Err(OutBufferDrainError::Readiness(err))) => {
+                    // Preserve the original stream behavior: request a disconnect on a connection
+                    // readiness error before surfacing it.
+                    if let Err(disconnect_err) =
+                        this.inner.conn.start_disconnect(DisconnectReason::DisconnectRequested)
+                    {
+                        return Poll::Ready(Some(Err(disconnect_err.into())))
                     }
-                    Poll::Ready(Err(err)) => {
-                        if let Err(disconnect_err) =
-                            this.inner.conn.start_disconnect(DisconnectReason::DisconnectRequested)
-                        {
-                            return Poll::Ready(Some(Err(disconnect_err.into())))
-                        }
-                        return Poll::Ready(Some(Err(err.into())))
-                    }
-                    Poll::Pending => {
-                        conn_ready = false;
-                        break
-                    }
+                    return Poll::Ready(Some(Err(err.into())))
                 }
-            }
+                // As before, a send error is surfaced directly, without a disconnect.
+                Poll::Ready(Err(OutBufferDrainError::Send(err))) => {
+                    return Poll::Ready(Some(Err(err.into())))
+                }
+                Poll::Pending => false,
+            };
 
             match this.poll_outbound_producers(cx) {
                 Ok(ProducerPoll::Pending | ProducerPoll::Full) => {}
@@ -688,8 +739,10 @@ where
 
     fn poll_ready(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         let this = self.get_mut();
-        if let Err(err) = ready!(this.inner.conn.poll_ready_unpin(cx)) {
-            return Poll::Ready(Err(err.into()))
+        // Drain buffered outgoing (satellite/primary) messages first, so a primary send through
+        // this `Sink` cannot bypass already-buffered satellite messages (FCFS, fixes starvation).
+        if let Err(err) = ready!(this.poll_drain_out_buffer(cx)) {
+            return Poll::Ready(Err(err.into_inner().into()))
         }
         if let Err(err) = ready!(this.primary.st.poll_ready_unpin(cx)) {
             return Poll::Ready(Err(err))
@@ -702,11 +755,22 @@ where
     }
 
     fn poll_flush(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        self.get_mut().inner.conn.poll_flush_unpin(cx).map_err(Into::into)
+        let this = self.get_mut();
+        // Push buffered outgoing messages to the connection before flushing it, so a flush does
+        // not leave satellite/primary messages stranded in `out_buffer`.
+        if let Err(err) = ready!(this.poll_drain_out_buffer(cx)) {
+            return Poll::Ready(Err(err.into_inner().into()))
+        }
+        this.inner.conn.poll_flush_unpin(cx).map_err(Into::into)
     }
 
     fn poll_close(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        self.get_mut().inner.conn.poll_close_unpin(cx).map_err(Into::into)
+        let this = self.get_mut();
+        // Drain buffered messages out before closing so they are not silently dropped.
+        if let Err(err) = ready!(this.poll_drain_out_buffer(cx)) {
+            return Poll::Ready(Err(err.into_inner().into()))
+        }
+        this.inner.conn.poll_close_unpin(cx).map_err(Into::into)
     }
 }
 
@@ -876,7 +940,7 @@ mod tests {
         UnauthedEthStream, UnauthedP2PStream,
     };
     use futures::{stream, task::noop_waker_ref};
-    use reth_eth_wire_types::EthNetworkPrimitives;
+    use reth_eth_wire_types::{EthMessage, EthNetworkPrimitives};
     use std::task::Poll;
     use tokio::{net::TcpListener, sync::oneshot};
     use tokio_util::codec::Decoder;
@@ -1010,6 +1074,82 @@ mod tests {
         assert_ne!(message_ids[0], message_ids[1]);
         assert!(message_ids.contains(&cap_a_offset));
         assert!(message_ids.contains(&cap_b_offset));
+    }
+
+    /// Regression for #13856: the `Sink` impl must flush buffered outgoing (satellite) messages
+    /// first-come-first-served instead of letting a primary send bypass them. Polling the sink for
+    /// readiness drains the out buffer; on the buggy version it leaves it untouched.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn sink_poll_ready_drains_out_buffer() {
+        reth_tracing::init_test_tracing();
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let local_addr = listener.local_addr().unwrap();
+        let (status, fork_filter) = eth_handshake();
+        let other_status = status;
+        let other_fork_filter = fork_filter.clone();
+        let _handle = tokio::spawn(async move {
+            let (incoming, _) = listener.accept().await.unwrap();
+            let stream = crate::PassthroughCodec::default().framed(incoming);
+            let (server_hello, _) = test_hello();
+            let (conn, _) = UnauthedP2PStream::new(stream).handshake(server_hello).await.unwrap();
+            let (_st, _their_status) = RlpxProtocolMultiplexer::new(conn)
+                .into_eth_satellite_stream::<EthNetworkPrimitives>(
+                    other_status,
+                    other_fork_filter,
+                    Arc::new(EthHandshake::default()),
+                    MAX_MESSAGE_SIZE,
+                )
+                .await
+                .unwrap();
+            // keep the server side of the connection open
+            futures::future::pending::<()>().await;
+        });
+
+        let conn = connect_passthrough(local_addr, test_hello().0).await;
+        let (mut st, _their_status) = RlpxProtocolMultiplexer::new(conn)
+            .into_eth_satellite_stream::<EthNetworkPrimitives>(
+                status,
+                fork_filter,
+                Arc::new(EthHandshake::default()),
+                MAX_MESSAGE_SIZE,
+            )
+            .await
+            .unwrap();
+
+        // Seed several wire-ready messages into the outgoing buffer, exactly as installed
+        // satellites would when the connection was momentarily not writable.
+        for i in 0..3u8 {
+            st.inner.out_buffer.push_back(Bytes::copy_from_slice(&[0x42, i, i, i]));
+        }
+        assert_eq!(st.inner.out_buffer.messages.len(), 3);
+
+        // Drive only the sink (never the stream). `poll_ready` must drain the buffered messages
+        // into the connection first-come-first-served (FIFO, since it pops from the front),
+        // instead of leaving them stranded behind a primary send.
+        futures::future::poll_fn(|cx| {
+            let _ =
+                <RlpxSatelliteStream<_, _> as Sink<EthMessage<EthNetworkPrimitives>>>::poll_ready(
+                    Pin::new(&mut st),
+                    cx,
+                );
+            Poll::Ready(())
+        })
+        .await;
+        assert!(
+            st.inner.out_buffer.is_empty(),
+            "Sink::poll_ready left {} buffered message(s) undrained",
+            st.inner.out_buffer.messages.len()
+        );
+
+        // Flushing through the sink must push the drained messages out on the wire.
+        futures::future::poll_fn(|cx| {
+            <RlpxSatelliteStream<_, _> as Sink<EthMessage<EthNetworkPrimitives>>>::poll_flush(
+                Pin::new(&mut st),
+                cx,
+            )
+        })
+        .await
+        .unwrap();
     }
 
     #[tokio::test]
