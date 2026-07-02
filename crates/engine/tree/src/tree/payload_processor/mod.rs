@@ -37,7 +37,6 @@ use reth_trie_sparse::{
     ArenaParallelSparseTrie, RevealableSparseTrie, SparseStateTrie, SparseTrieRetainedPaths,
 };
 use std::{
-    marker::PhantomData,
     ops::Not,
     sync::{
         atomic::{AtomicBool, AtomicUsize},
@@ -120,8 +119,6 @@ where
     sparse_trie_max_hot_accounts: usize,
     /// Whether sparse trie cache pruning is fully disabled.
     disable_sparse_trie_cache_pruning: bool,
-    /// Keeps the payload processor typed by its configured EVM.
-    _evm: PhantomData<Evm>,
     /// Whether to disable BAL-driven parallel state root computation.
     /// Only valid when BAL parallel execution is also disabled.
     disable_bal_parallel_state_root: bool,
@@ -170,7 +167,7 @@ where
     /// Creates a new payload processor.
     pub fn new(
         executor: Runtime,
-        _evm_config: Evm,
+        evm_config: Evm,
         config: &TreeConfig,
         state_trie_overlays: StateTrieOverlayManager<N>,
     ) -> Self {
@@ -180,13 +177,12 @@ where
             trie_metrics: Default::default(),
             cross_block_cache_size: config.cross_block_cache_size(),
             disable_transaction_prewarming: config.disable_prewarming(),
-            evm_config: _evm_config,
+            evm_config,
             disable_state_cache: config.disable_state_cache(),
             state_trie_overlays,
             sparse_trie_max_hot_slots: config.sparse_trie_max_hot_slots(),
             sparse_trie_max_hot_accounts: config.sparse_trie_max_hot_accounts(),
             disable_sparse_trie_cache_pruning: config.disable_sparse_trie_cache_pruning(),
-            _evm: PhantomData,
             cache_metrics: (!config.disable_cache_metrics())
                 .then(|| CachedStateMetrics::zeroed(CachedStateMetricsSource::Engine)),
             cache_state_metrics: (!config.disable_cache_metrics())
