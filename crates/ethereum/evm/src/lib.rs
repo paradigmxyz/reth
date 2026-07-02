@@ -156,7 +156,8 @@ mod executor;
 #[cfg(feature = "std")]
 pub use executor::EthBlockExecutor;
 
-mod factory;
+/// Ethereum block executor and EVM factory implementations.
+pub mod factory;
 pub use factory::EthBlockExecutorFactory;
 #[cfg(not(feature = "jit"))]
 pub use factory::RethEvmFactory;
