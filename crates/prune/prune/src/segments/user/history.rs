@@ -12,6 +12,9 @@ use reth_provider::DBProvider;
 use reth_prune_types::{SegmentOutput, SegmentOutputCheckpoint};
 use rustc_hash::FxHashMap;
 
+/// Cap pre-reserved history-prune map capacity for effectively unbounded prune configurations.
+const MAX_HISTORY_PRUNE_MAP_RESERVE: usize = 16 * 1024;
+
 enum PruneShardOutcome {
     Deleted,
     Updated,
@@ -35,6 +38,16 @@ pub(crate) struct HistoryPruneResult<K> {
     pub(crate) pruned_count: usize,
     /// Whether pruning is complete.
     pub(crate) done: bool,
+}
+
+/// Returns a bounded capacity for history-prune maps from the remaining delete-entry budget.
+pub(crate) fn history_prune_map_capacity(limiter: &PruneLimiter) -> usize {
+    limiter.deleted_entries_limit_left().unwrap_or_default().min(MAX_HISTORY_PRUNE_MAP_RESERVE)
+}
+
+/// Returns a history-prune map pre-sized from the remaining delete-entry budget.
+pub(crate) fn history_prune_map<K>(limiter: &PruneLimiter) -> FxHashMap<K, BlockNumber> {
+    FxHashMap::with_capacity_and_hasher(history_prune_map_capacity(limiter), Default::default())
 }
 
 /// Finalizes history pruning by sorting sharded keys, pruning history indices, and building output.

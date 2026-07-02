@@ -1,7 +1,7 @@
 use crate::{
     db_ext::DbTxPruneExt,
     segments::{
-        user::history::{finalize_history_prune, HistoryPruneResult},
+        user::history::{finalize_history_prune, history_prune_map, HistoryPruneResult},
         PruneInput, Segment,
     },
     PrunerError,
@@ -18,7 +18,6 @@ use reth_prune_types::{
 };
 use reth_static_file_types::StaticFileSegment;
 use reth_storage_api::{StorageChangeSetReader, StorageSettingsCache};
-use rustc_hash::FxHashMap;
 use tracing::{instrument, trace};
 
 /// Number of storage history tables to prune in one step.
@@ -120,7 +119,7 @@ impl StorageHistory {
         // / 2`, so 8750 entries. Each entry is `160 bit + 256 bit + 64 bit`, so the total
         // size should be up to ~0.5MB + some hashmap overhead. `blocks_since_last_run` is
         // additionally limited by the `max_reorg_depth`, so no OOM is expected here.
-        let mut highest_deleted_storages = FxHashMap::default();
+        let mut highest_deleted_storages = history_prune_map(&limiter);
         let mut last_changeset_pruned_block = None;
         let mut pruned_changesets = 0;
         let mut done = true;
@@ -199,7 +198,7 @@ impl StorageHistory {
         // size should be up to ~0.5MB + some hashmap overhead. `blocks_since_last_run` is
         // additionally limited by the `max_reorg_depth`, so no OOM is expected here.
         let mut last_changeset_pruned_block = None;
-        let mut highest_deleted_storages = FxHashMap::default();
+        let mut highest_deleted_storages = history_prune_map(&limiter);
         let (pruned_changesets, done) =
             provider.tx_ref().prune_table_with_range::<tables::StorageChangeSets>(
                 BlockNumberAddress::range(range),
@@ -254,7 +253,7 @@ impl StorageHistory {
             ))
         }
 
-        let mut highest_deleted_storages: FxHashMap<_, _> = FxHashMap::default();
+        let mut highest_deleted_storages = history_prune_map(&limiter);
         let mut last_changeset_pruned_block = None;
         let mut changesets_processed = 0usize;
         let mut done = true;
