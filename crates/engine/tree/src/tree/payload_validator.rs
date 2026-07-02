@@ -1021,6 +1021,7 @@ where
         let input = input.clone();
         let validator = self.validator.clone();
         let consensus = self.consensus.clone();
+        let block_validation_metrics = self.metrics.block_validation.clone();
         let parent_span = Span::current();
         self.payload_processor.executor().spawn_blocking_named("payload-convert", move || {
             let _span = debug_span!(
@@ -1029,35 +1030,43 @@ where
                 "convert_and_validate",
             )
             .entered();
-            let block = match input {
-                BlockOrPayload::Block(block) => block,
-                BlockOrPayload::Payload(payload) => {
-                    validator.convert_payload_to_block(payload)?
+            let validation_start = Instant::now();
+
+            let result = (|| -> Result<SealedBlock<N::Block>, InsertPayloadError<N::Block>> {
+                let block = match input {
+                    BlockOrPayload::Block(block) => block,
+                    BlockOrPayload::Payload(payload) => {
+                        validator.convert_payload_to_block(payload)?
+                    }
+                };
+
+                if let Err(e) = consensus.validate_header(block.sealed_header()) {
+                    error!(target: "engine::tree::payload_validator", ?block, "Failed to validate header {}: {e}", block.hash());
+                    return Err(InsertBlockError::consensus_error(e, block).into())
                 }
-            };
 
-            if let Err(e) = consensus.validate_header(block.sealed_header()) {
-                error!(target: "engine::tree::payload_validator", ?block, "Failed to validate header {}: {e}", block.hash());
-                return Err(InsertBlockError::consensus_error(e, block).into())
-            }
+                // now validate against the parent
+                let _enter = debug_span!(target: "engine::tree::payload_validator", "validate_header_against_parent").entered();
+                if let Err(e) = consensus.validate_header_against_parent(block.sealed_header(), &parent)
+                {
+                    warn!(target: "engine::tree::payload_validator", ?block, "Failed to validate header {} against parent: {e}", block.hash());
+                    return Err(InsertBlockError::consensus_error(e, block).into())
+                }
+                drop(_enter);
 
-            // now validate against the parent
-            let _enter = debug_span!(target: "engine::tree::payload_validator", "validate_header_against_parent").entered();
-            if let Err(e) = consensus.validate_header_against_parent(block.sealed_header(), &parent)
-            {
-                warn!(target: "engine::tree::payload_validator", ?block, "Failed to validate header {} against parent: {e}", block.hash());
-                return Err(InsertBlockError::consensus_error(e, block).into())
-            }
-            drop(_enter);
+                if let Err(e) =
+                    consensus.validate_block_pre_execution_with_tx_root(&block, None)
+                {
+                    error!(target: "engine::tree::payload_validator", ?block, "Failed to validate block {}: {e}", block.hash());
+                    return Err(InsertBlockError::consensus_error(e, block).into())
+                }
 
-            if let Err(e) =
-                consensus.validate_block_pre_execution_with_tx_root(&block, None)
-            {
-                error!(target: "engine::tree::payload_validator", ?block, "Failed to validate block {}: {e}", block.hash());
-                return Err(InsertBlockError::consensus_error(e, block).into())
-            }
+                Ok(block)
+            })();
 
-            Ok(block)
+            block_validation_metrics
+                .record_payload_validation(validation_start.elapsed().as_secs_f64());
+            result
         })
     }
 
