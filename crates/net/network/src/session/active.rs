@@ -21,15 +21,18 @@ use crate::{
         handle::{ActiveSessionMessage, SessionCommand},
         BlockRangeInfo, EthVersion, SessionId,
     },
+    transactions::constants::DEFAULT_SOFT_LIMIT_BYTE_SIZE_TRANSACTIONS_BROADCAST_MESSAGE,
 };
 use alloy_eips::merge::EPOCH_SLOTS;
 use alloy_primitives::{bytes::BytesMut, Sealable};
+use alloy_rlp::Encodable;
 use futures::{stream::Fuse, SinkExt, StreamExt};
 use metrics::{Counter, Gauge};
 use reth_eth_wire::{
     errors::{EthHandshakeError, EthStreamError},
     message::{EthBroadcastMessage, MessageError},
     Capabilities, DisconnectP2P, DisconnectReason, EthMessage, NetworkPrimitives, NewBlockPayload,
+    SharedTransactions,
 };
 use reth_eth_wire_types::{message::RequestPair, NewPooledTransactionHashes, RawCapabilityMessage};
 use reth_metrics::common::mpsc::MeteredPollSender;
@@ -1079,6 +1082,27 @@ impl<N: NetworkPrimitives> OutgoingMessage<N> {
             (_, incoming) => Some(incoming),
         }
     }
+
+    /// Tries to merge a full transaction broadcast into this message, consuming the incoming
+    /// transactions. Returns `Some(incoming)` back if the variants don't match or the merged
+    /// message would exceed the transaction broadcast soft limit.
+    fn try_merge_transactions(
+        &mut self,
+        incoming: SharedTransactions<N::BroadcastedTransaction>,
+    ) -> Option<SharedTransactions<N::BroadcastedTransaction>> {
+        let Self::Broadcast(EthBroadcastMessage::Transactions(existing)) = self else {
+            return Some(incoming)
+        };
+
+        if existing.length().saturating_add(incoming.length()) >
+            DEFAULT_SOFT_LIMIT_BYTE_SIZE_TRANSACTIONS_BROADCAST_MESSAGE
+        {
+            return Some(incoming)
+        }
+
+        existing.0.extend(incoming.0);
+        None
+    }
 }
 
 impl<N: NetworkPrimitives> From<EthMessage<N>> for OutgoingMessage<N> {
@@ -1131,6 +1155,22 @@ impl<N: NetworkPrimitives> QueuedOutgoingMessages<N> {
     }
 
     pub(crate) fn push_back(&mut self, message: OutgoingMessage<N>) {
+        let message = if let Some(last) = self.messages.back_mut() {
+            match message {
+                OutgoingMessage::Broadcast(EthBroadcastMessage::Transactions(txs)) => {
+                    match last.try_merge_transactions(txs) {
+                        None => return,
+                        Some(txs) => {
+                            OutgoingMessage::Broadcast(EthBroadcastMessage::Transactions(txs))
+                        }
+                    }
+                }
+                message => message,
+            }
+        } else {
+            message
+        };
+
         self.queued_responses += message.is_response() as usize;
         self.messages.push_back(message);
         self.count.increment(1);
@@ -1186,7 +1226,9 @@ impl<N: NetworkPrimitives> Drop for QueuedOutgoingMessages<N> {
 mod tests {
     use super::*;
     use crate::session::{handle::PendingSessionEvent, start_pending_incoming_session};
+    use alloy_consensus::TxLegacy;
     use alloy_eips::eip2124::ForkFilter;
+    use alloy_primitives::{Signature, TxKind, U256};
     use reth_chainspec::MAINNET;
     use reth_ecies::stream::ECIESStream;
     use reth_eth_wire::{
@@ -1198,6 +1240,7 @@ mod tests {
         message::MAX_MESSAGE_SIZE, EthMessageID, NewPooledTransactionHashes72, RawCapabilityMessage,
     };
     use reth_ethereum_forks::EthereumHardfork;
+    use reth_ethereum_primitives::{Transaction, TransactionSigned};
     use reth_network_peers::pk2id;
     use reth_network_types::session::config::PROTOCOL_BREACH_REQUEST_TIMEOUT;
     use secp256k1::{SecretKey, SECP256K1};
@@ -1209,6 +1252,21 @@ mod tests {
     /// Returns a testing `HelloMessage` and new secretkey
     fn eth_hello(server_key: &SecretKey) -> HelloMessageWithProtocols {
         HelloMessageWithProtocols::builder(pk2id(&server_key.public_key(SECP256K1))).build()
+    }
+
+    fn signed_legacy_tx(nonce: u64, input_len: usize) -> Arc<TransactionSigned> {
+        Arc::new(TransactionSigned::new_unhashed(
+            Transaction::Legacy(TxLegacy {
+                chain_id: Some(1),
+                nonce,
+                gas_price: 1,
+                gas_limit: 21_000,
+                to: TxKind::Create,
+                value: U256::ZERO,
+                input: vec![0; input_len].into(),
+            }),
+            Signature::test_signature(),
+        ))
     }
 
     struct SessionBuilder<N: NetworkPrimitives = EthNetworkPrimitives> {
@@ -1551,6 +1609,53 @@ mod tests {
             .into();
 
         assert_eq!(2, msg.broadcast_item_count());
+    }
+
+    #[test]
+    fn queued_outgoing_merges_consecutive_transaction_broadcasts() {
+        let mut queued = QueuedOutgoingMessages::<EthNetworkPrimitives>::new(
+            Gauge::noop(),
+            BroadcastItemCounter::new(),
+        );
+
+        queued.push_back(
+            EthBroadcastMessage::Transactions(SharedTransactions(vec![signed_legacy_tx(1, 0)]))
+                .into(),
+        );
+        queued.push_back(
+            EthBroadcastMessage::Transactions(SharedTransactions(vec![signed_legacy_tx(2, 0)]))
+                .into(),
+        );
+
+        assert_eq!(queued.messages.len(), 1);
+        let Some(OutgoingMessage::Broadcast(EthBroadcastMessage::Transactions(txs))) =
+            queued.messages.front()
+        else {
+            panic!("expected queued transactions")
+        };
+        assert_eq!(txs.len(), 2);
+    }
+
+    #[test]
+    fn queued_outgoing_preserves_transaction_broadcast_soft_limit() {
+        let mut queued = QueuedOutgoingMessages::<EthNetworkPrimitives>::new(
+            Gauge::noop(),
+            BroadcastItemCounter::new(),
+        );
+
+        queued.push_back(
+            EthBroadcastMessage::Transactions(SharedTransactions(vec![signed_legacy_tx(
+                1,
+                DEFAULT_SOFT_LIMIT_BYTE_SIZE_TRANSACTIONS_BROADCAST_MESSAGE,
+            )]))
+            .into(),
+        );
+        queued.push_back(
+            EthBroadcastMessage::Transactions(SharedTransactions(vec![signed_legacy_tx(2, 0)]))
+                .into(),
+        );
+
+        assert_eq!(queued.messages.len(), 2);
     }
 
     #[test]
