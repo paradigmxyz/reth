@@ -5,11 +5,8 @@ use core::fmt::Debug;
 #[cfg(feature = "jit")]
 use core::sync::atomic::{AtomicBool, Ordering};
 
-#[cfg(feature = "std")]
 use alloy_consensus::Header;
-use reth_chainspec::ChainSpec;
-#[cfg(feature = "std")]
-use reth_chainspec::EthChainSpec;
+use reth_chainspec::{ChainSpec, EthChainSpec};
 #[cfg(feature = "std")]
 use reth_evm::precompile_cache::{CachedPrecompileProvider, PrecompileCacheMap};
 
@@ -22,10 +19,9 @@ pub use evm2_jit::{
     CompileTimings,
 };
 
-#[cfg(feature = "std")]
-use crate::{EthBlockExecutionCtx, EthBlockExecutor, EthEvmEnv, HashedStateMode};
-#[cfg(feature = "std")]
-use crate::{EthPrimitives, EthTxEnv};
+use crate::{
+    EthBlockExecutionCtx, EthBlockExecutor, EthEvmEnv, EthPrimitives, EthTxEnv, HashedStateMode,
+};
 
 /// Ethereum block executor factory.
 #[derive(Debug)]
@@ -84,7 +80,6 @@ impl<C, EvmFactory> EthBlockExecutorFactory<C, EvmFactory> {
     }
 
     /// Creates a configured Ethereum block executor.
-    #[cfg(feature = "std")]
     pub fn create_executor<'a>(
         &'a self,
         evm: evm2::Evm<evm2::BaseEvmTypes>,
@@ -104,25 +99,29 @@ impl<C, EvmFactory> EthBlockExecutorFactory<C, EvmFactory> {
     }
 
     /// Creates an EVM instance with the configured Ethereum execution environment.
-    #[cfg(feature = "std")]
     pub fn evm_with_env<DB>(&self, db: DB, env: EthEvmEnv) -> evm2::Evm<evm2::BaseEvmTypes>
     where
         C: EthChainSpec<Header = Header>,
         DB: evm2::evm::DynDatabase + 'static,
         EvmFactory: 'static,
     {
+        #[cfg(feature = "std")]
+        let precompiles = alloc::boxed::Box::new(CachedPrecompileProvider::new(
+            evm2::Precompiles::base(env.spec),
+            self.precompile_cache_map.clone(),
+            env.spec,
+            None,
+        ));
+        #[cfg(not(feature = "std"))]
+        let precompiles = alloc::boxed::Box::new(evm2::Precompiles::base(env.spec));
+
         let evm = evm2::Evm::<evm2::BaseEvmTypes>::new_with_execution_config(
             evm2::ExecutionConfig::for_spec_and_version(env.spec, env.version),
             env.spec,
             env.block,
             evm2::ethereum::ethereum_tx_registry(env.spec),
             db,
-            alloc::boxed::Box::new(CachedPrecompileProvider::new(
-                evm2::Precompiles::base(env.spec),
-                self.precompile_cache_map.clone(),
-                env.spec,
-                None,
-            )),
+            precompiles,
         );
 
         #[cfg(feature = "jit")]
@@ -139,7 +138,6 @@ impl<C, EvmFactory> EthBlockExecutorFactory<C, EvmFactory> {
     }
 }
 
-#[cfg(feature = "std")]
 impl<C, EvmFactory> reth_evm::execute::BlockExecutorFactory
     for EthBlockExecutorFactory<C, EvmFactory>
 where

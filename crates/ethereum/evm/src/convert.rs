@@ -97,6 +97,7 @@ pub(crate) fn block_env_with_blob_params<H: BlockHeader>(
 }
 
 /// Converts engine execution payload data into the block environment.
+#[cfg_attr(not(feature = "std"), allow(dead_code))]
 pub(crate) fn payload_block_env(
     payload: &ExecutionData,
     blob_params: Option<BlobParams>,

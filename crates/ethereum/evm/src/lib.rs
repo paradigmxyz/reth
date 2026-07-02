@@ -121,6 +121,7 @@ pub struct EthBlockExecutionCtx<'a> {
 }
 
 impl EthBlockExecutionCtx<'_> {
+    #[cfg_attr(not(feature = "std"), allow(dead_code))]
     fn block_execution_context(
         &self,
         chain_id: u64,
@@ -151,9 +152,7 @@ pub mod execute {
 mod build;
 pub use build::EthBlockAssembler;
 
-#[cfg(feature = "std")]
 mod executor;
-#[cfg(feature = "std")]
 pub use executor::EthBlockExecutor;
 
 /// Ethereum block executor and EVM factory implementations.

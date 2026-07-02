@@ -13,7 +13,9 @@ use reth_evm::execute::{BlockAssemblerInput, BlockExecutionError, BlockExecutorF
 use reth_execution_types::BlockExecutionResult;
 use reth_primitives_traits::logs_bloom as calculate_logs_bloom;
 
-use crate::{EthBlockExecutionCtx, EthBlockExecutorFactory, EthEvmEnv};
+#[cfg(feature = "std")]
+use crate::EthBlockExecutorFactory;
+use crate::{EthBlockExecutionCtx, EthEvmEnv};
 
 /// Block builder for Ethereum.
 #[derive(Debug)]

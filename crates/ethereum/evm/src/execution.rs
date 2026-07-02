@@ -605,6 +605,7 @@ fn map_handler_error(evm: &mut Evm<BaseEvmTypes>, err: HandlerError) -> EthExecu
     }
 }
 
+#[cfg_attr(not(feature = "std"), allow(dead_code))]
 pub(crate) fn apply_pre_execution_system_calls(
     evm: &mut Evm<BaseEvmTypes>,
     block_number: u64,
