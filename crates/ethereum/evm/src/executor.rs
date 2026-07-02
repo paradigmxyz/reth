@@ -24,7 +24,7 @@ use reth_trie_common::{HashedPostState, KeccakKeyHasher};
 /// Configured Ethereum block executor backed by evm2.
 #[expect(missing_debug_implementations)]
 pub struct EthBlockExecutor<'a> {
-    evm: Evm<BaseEvmTypes>,
+    evm: Evm<'a, BaseEvmTypes>,
     spec_id: evm2::SpecId,
     block_number: u64,
     block_beneficiary: Address,
@@ -44,7 +44,7 @@ pub struct EthBlockExecutor<'a> {
 impl<'a> EthBlockExecutor<'a> {
     /// Creates a configured Ethereum block executor.
     pub(crate) fn new(
-        mut evm: Evm<BaseEvmTypes>,
+        mut evm: Evm<'a, BaseEvmTypes>,
         context: EthBlockExecutionCtx<'a>,
         chain_id: u64,
         deposit_contract_address: Option<alloy_primitives::Address>,
@@ -94,18 +94,18 @@ impl<'a> EthBlockExecutor<'a> {
     }
 }
 
-impl BlockExecutor for EthBlockExecutor<'_> {
+impl<'a> BlockExecutor for EthBlockExecutor<'a> {
     type Primitives = EthPrimitives;
-    type Evm = Evm<BaseEvmTypes>;
+    type Evm = Evm<'a, BaseEvmTypes>;
     type Transaction = EthTxEnv;
     type TransactionResult = TxResult;
     type TransactionOutput = GasOutput;
 
-    fn evm(&self) -> &Evm<BaseEvmTypes> {
+    fn evm(&self) -> &Self::Evm {
         &self.evm
     }
 
-    fn evm_mut(&mut self) -> &mut Evm<BaseEvmTypes> {
+    fn evm_mut(&mut self) -> &mut Self::Evm {
         &mut self.evm
     }
 
@@ -163,7 +163,7 @@ impl BlockExecutor for EthBlockExecutor<'_> {
         else {
             return Ok(None)
         };
-        let gas_used = outcome.gas_used;
+        let gas_used = outcome.tx_gas_used();
         self.cumulative_gas_used += gas_used;
         self.receipts.push(RethReceiptBuilder.build_receipt(
             tx_type,

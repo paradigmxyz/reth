@@ -23,6 +23,7 @@ use reth_engine_primitives::PayloadValidator;
 use reth_errors::{BlockExecutionError, ConsensusError, ProviderError};
 use reth_evm::{
     cached::CachedReads,
+    database::StateProviderDatabase,
     execute::{BlockExecutionOutput, Executor},
     ConfigureEvm,
 };
@@ -38,7 +39,7 @@ use reth_primitives_traits::{
 };
 use reth_rpc_api::BlockSubmissionValidationApiServer;
 use reth_rpc_server_types::result::{internal_rpc_err, invalid_params_rpc_err};
-use reth_storage_api::{BlockReaderIdExt, BorrowedEvmStateProviderDatabase, StateProviderFactory};
+use reth_storage_api::{BlockReaderIdExt, StateProviderFactory};
 use reth_tasks::Runtime;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -191,9 +192,7 @@ where
         let mut request_cache = self.cached_reads(parent_header_hash).await;
 
         let (output, block_access_list_hash) = {
-            // SAFETY: The borrowed EVM database is consumed by this synchronous block execution
-            // call and cannot outlive `state_provider`.
-            let db = unsafe { BorrowedEvmStateProviderDatabase::new(state_provider.as_ref()) };
+            let db = StateProviderDatabase::new(state_provider.as_ref());
             let cached_db = request_cache.as_db_mut(db);
             let cached_db_handle = cached_db.clone();
             let output = self

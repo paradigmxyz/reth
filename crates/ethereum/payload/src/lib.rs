@@ -21,6 +21,7 @@ use reth_consensus_common::validation::MAX_RLP_BLOCK_SIZE;
 use reth_errors::ConsensusError;
 use reth_ethereum_primitives::{EthPrimitives, TransactionSigned};
 use reth_evm::{
+    database::StateProviderDatabase,
     execute::{
         BlockBuilder, BlockBuilderOutcome, BlockExecutionError, BlockValidationError,
         HashedStateMode,
@@ -33,7 +34,7 @@ use reth_payload_builder::{BlobSidecars, EthBuiltPayload};
 use reth_payload_builder_primitives::PayloadBuilderError;
 use reth_payload_primitives::PayloadAttributes as _;
 use reth_primitives_traits::transaction::error::InvalidTransactionError;
-use reth_storage_api::{BorrowedEvmStateProviderDatabase, StateProviderFactory};
+use reth_storage_api::StateProviderFactory;
 use reth_transaction_pool::{
     error::{Eip4844PoolTransactionError, InvalidPoolTransactionError},
     BestTransactions, BestTransactionsAttributes, PoolTransaction, TransactionPool,
@@ -213,9 +214,7 @@ where
         "building payload"
     );
 
-    // SAFETY: The borrowed EVM database is consumed by this synchronous payload build and cannot
-    // outlive `state_provider`.
-    let db = unsafe { BorrowedEvmStateProviderDatabase::new(state_provider.as_ref()) };
+    let db = StateProviderDatabase::new(state_provider.as_ref());
     let cached_db = cached_reads.as_db_mut(db);
     let cached_db_handle = cached_db.clone();
     let evm_config = evm_config.with_jit_support();

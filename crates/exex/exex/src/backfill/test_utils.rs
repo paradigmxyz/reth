@@ -69,9 +69,7 @@ where
 
     // Execute the block to produce a block execution output.
     let state_provider = LatestStateProvider::new(provider);
-    // SAFETY: The shared database is consumed by this synchronous execution call and does not
-    // outlive the state provider borrowed here.
-    let database = unsafe { SharedEvmStateProviderDatabase::new(&state_provider) };
+    let database = SharedEvmStateProviderDatabase::new(&state_provider);
     let block_execution_output = EthEvmConfig::ethereum(chain_spec)
         .executor(database)
         .execute(block)

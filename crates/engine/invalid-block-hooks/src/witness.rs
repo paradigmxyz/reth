@@ -179,9 +179,7 @@ where
         block: &RecoveredBlock<N::Block>,
     ) -> eyre::Result<(ExecutionWitness, ExecutionState, reth_trie::HashedPostState)> {
         let state_provider = self.provider.state_by_block_hash(parent_header.hash())?;
-        // SAFETY: The shared database is consumed by this synchronous execution call and does not
-        // outlive the state provider borrowed here.
-        let database = unsafe { SharedEvmStateProviderDatabase::new(&*state_provider) };
+        let database = SharedEvmStateProviderDatabase::new(&*state_provider);
         let output = self.evm_config.executor(database).execute(block)?;
         let hashed_state = output.hash_state_slow::<reth_trie::KeccakKeyHasher>();
         let (codes, preimages, block_state) = collect_execution_data(output.state.into_inner())?;

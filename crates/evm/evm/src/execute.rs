@@ -14,7 +14,10 @@ use alloy_primitives::{Address, Bytes, B256};
 use core::cell::RefCell;
 use core::fmt::Debug;
 #[cfg(feature = "std")]
-use evm2::evm::{CacheDB, Database, Db, DbErrorCode, DbResult, DynDatabase};
+use evm2::{
+    evm::{CacheDB, Database, Db, DbResult, DynDatabase},
+    AnyError, ErrorCode,
+};
 pub use reth_execution_errors::{
     BlockExecutionError, BlockValidationError, EvmError, InternalBlockExecutionError,
     InvalidTxError,
@@ -208,7 +211,7 @@ pub trait BlockExecutorFactory {
     /// Transaction environment consumed by executors from this factory.
     type Transaction;
     /// EVM instance consumed by executors from this factory.
-    type Evm;
+    type Evm<'a>;
     /// EVM environment consumed by this factory.
     type EvmEnv: EvmEnv;
     /// Execution context for a block or payload.
@@ -218,7 +221,7 @@ pub trait BlockExecutorFactory {
     /// Block executor returned by this factory.
     type Executor<'a>: BlockExecutor<
         Primitives = Self::Primitives,
-        Evm = Self::Evm,
+        Evm = Self::Evm<'a>,
         Transaction = Self::Transaction,
         TransactionOutput = GasOutput,
     >
@@ -228,7 +231,7 @@ pub trait BlockExecutorFactory {
     /// Creates a configured block executor.
     fn create_executor<'a>(
         &'a self,
-        evm: Self::Evm,
+        evm: Self::Evm<'a>,
         ctx: Self::ExecutionCtx<'a>,
         hashed_state_mode: HashedStateMode,
     ) -> Self::Executor<'a>
@@ -236,15 +239,15 @@ pub trait BlockExecutorFactory {
         Self: 'a;
 
     /// Creates an EVM instance with the configured execution environment.
-    fn evm_with_env<DB>(&self, db: DB, evm_env: Self::EvmEnv) -> Self::Evm
+    fn evm_with_env<'a, DB>(&self, db: DB, evm_env: Self::EvmEnv) -> Self::Evm<'a>
     where
-        DB: evm2::evm::DynDatabase + 'static;
+        DB: evm2::evm::DynDatabase + 'a;
 
     /// Returns the transaction shape consumed by the configured EVM.
     fn evm_tx<'a>(
         &self,
         tx: &'a Self::Transaction,
-    ) -> &'a <evm2::BaseEvmTypes as evm2::EvmTypes>::Tx;
+    ) -> &'a <evm2::BaseEvmTypes as evm2::EvmTypesHost>::Tx;
 }
 
 /// Input for block assembly.
@@ -646,7 +649,6 @@ pub trait Executor: Sized {
 #[expect(missing_debug_implementations)]
 pub struct BasicBlockExecutor<Evm, DB: Database> {
     evm_config: Evm,
-    database: DB,
     batch_database: SharedBatchDatabase<DB>,
     batch_state: ExecutionStateAccumulator,
     batch_block_states: Vec<ExecutionState>,
@@ -654,16 +656,12 @@ pub struct BasicBlockExecutor<Evm, DB: Database> {
 }
 
 #[cfg(feature = "std")]
-impl<Evm, DB> BasicBlockExecutor<Evm, DB>
-where
-    DB: Database + Clone,
-{
+impl<Evm, DB: Database> BasicBlockExecutor<Evm, DB> {
     /// Creates a new generic block executor.
     pub fn new(evm_config: Evm, database: DB) -> Self {
         Self {
             evm_config,
-            batch_database: SharedBatchDatabase::new(database.clone()),
-            database,
+            batch_database: SharedBatchDatabase::new(database),
             batch_state: ExecutionStateAccumulator::new(),
             batch_block_states: Vec::new(),
             batch_block_reverts: Vec::new(),
@@ -675,22 +673,20 @@ where
 impl<Evm, DB> BasicBlockExecutor<Evm, DB>
 where
     Evm: ConfigureEvm,
-    DB: Database + Clone + 'static,
+    DB: Database,
     DB::Error: core::error::Error + Send + Sync + 'static,
 {
     fn execute_block_with_database(
-        &self,
+        evm_config: &Evm,
         block: &RecoveredBlock<BlockTy<Evm::Primitives>>,
-        database: impl DynDatabase + 'static,
+        database: impl DynDatabase,
     ) -> Result<BlockExecutionOutput<ReceiptTy<Evm::Primitives>>, BlockExecutionError> {
-        let evm_env =
-            self.evm_config.evm_env(block.header()).map_err(BlockExecutionError::other)?;
-        let evm = self.evm_config.block_executor_factory().evm_with_env(database, evm_env);
-        let ctx = self
-            .evm_config
+        let evm_env = evm_config.evm_env(block.header()).map_err(BlockExecutionError::other)?;
+        let evm = evm_config.block_executor_factory().evm_with_env(database, evm_env);
+        let ctx = evm_config
             .context_for_block(block.sealed_block())
             .map_err(BlockExecutionError::other)?;
-        let mut executor = self.evm_config.create_executor(evm, ctx, HashedStateMode::OutputOnly);
+        let mut executor = evm_config.create_executor(evm, ctx, HashedStateMode::OutputOnly);
 
         executor.apply_pre_execution_changes(&mut |_| {})?;
         for transaction in block.clone_transactions_recovered() {
@@ -705,7 +701,7 @@ where
 impl<Evm, DB> Executor for BasicBlockExecutor<Evm, DB>
 where
     Evm: ConfigureEvm,
-    DB: Database + Clone + 'static,
+    DB: Database,
     DB::Error: core::error::Error + Send + Sync + 'static,
 {
     type Primitives = Evm::Primitives;
@@ -716,7 +712,11 @@ where
         block: &RecoveredBlock<<Self::Primitives as NodePrimitives>::Block>,
     ) -> Result<BlockExecutionResult<<Self::Primitives as NodePrimitives>::Receipt>, Self::Error>
     {
-        let output = self.execute_block_with_database(block, self.batch_database.clone())?;
+        let output = Self::execute_block_with_database(
+            &self.evm_config,
+            block,
+            self.batch_database.clone(),
+        )?;
         self.batch_database.commit_source(&output.state);
 
         let block_state = output.state.into_inner();
@@ -732,7 +732,7 @@ where
         block: &RecoveredBlock<<Self::Primitives as NodePrimitives>::Block>,
     ) -> Result<BlockExecutionOutput<<Self::Primitives as NodePrimitives>::Receipt>, Self::Error>
     {
-        self.execute_block_with_database(block, Db::new(self.database.clone()))
+        Self::execute_block_with_database(&self.evm_config, block, self.batch_database)
     }
 
     fn size_hint(&self) -> usize {
@@ -787,7 +787,7 @@ where
 #[cfg(feature = "std")]
 impl<DB> DynDatabase for SharedBatchDatabase<DB>
 where
-    DB: Database + 'static,
+    DB: Database,
 {
     fn get_account(
         &mut self,
@@ -818,7 +818,7 @@ where
         self.inner.borrow_mut().get_block_hash(number)
     }
 
-    fn error(&mut self, code: DbErrorCode) -> Box<dyn core::error::Error> {
+    fn error(&mut self, code: ErrorCode) -> AnyError {
         self.inner.borrow_mut().error(code)
     }
 }

@@ -341,7 +341,7 @@ async fn run_pipeline_forward_and_unwind(
             let state_provider = provider.latest();
             // SAFETY: The shared database is consumed by this synchronous execution call and does
             // not outlive the state provider borrowed here.
-            let database = unsafe { SharedEvmStateProviderDatabase::new(&*state_provider) };
+            let database = SharedEvmStateProviderDatabase::new(&*state_provider);
             evm_config
                 .executor(database)
                 .execute(&block_with_senders)

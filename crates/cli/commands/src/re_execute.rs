@@ -159,12 +159,9 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
                     }
                     let chunk_end = (chunk_start + blocks_per_chunk).min(max_block);
 
-                    let mut _executor_state_provider =
-                        provider.history_by_block_number(chunk_start.saturating_sub(1))?;
-                    // SAFETY: The shared database is scoped to this synchronous re-execute batch
-                    // and is dropped before `_executor_state_provider`.
-                    let database =
-                        unsafe { SharedEvmStateProviderDatabase::new(&*_executor_state_provider) };
+                    let database = SharedEvmStateProviderDatabase::new(
+                        provider.history_by_block_number(chunk_start.saturating_sub(1))?,
+                    );
                     let mut executor = evm_config.batch_executor(database);
                     let mut executor_start_block = chunk_start;
                     let mut results = Vec::new();
@@ -186,13 +183,10 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
                                 if skip_invalid_blocks {
                                     drop(executor);
                                     results.clear();
-                                    let next_state_provider =
-                                        provider.history_by_block_number(block.number())?;
-                                    let database = unsafe {
-                                        SharedEvmStateProviderDatabase::new(&*next_state_provider)
-                                    };
+                                    let database = SharedEvmStateProviderDatabase::new(
+                                        provider.history_by_block_number(block.number())?,
+                                    );
                                     executor = evm_config.batch_executor(database);
-                                    _executor_state_provider = next_state_provider;
                                     executor_start_block = block.number() + 1;
                                     executor_created = Instant::now();
                                     let _ = info_tx.send((block, eyre::Report::new(err)));
@@ -252,15 +246,10 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
                                         if skip_invalid_blocks {
                                             drop(executor);
                                             results.clear();
-                                            let next_state_provider =
-                                                provider.history_by_block_number(block.number())?;
-                                            let database = unsafe {
-                                                SharedEvmStateProviderDatabase::new(
-                                                    &*next_state_provider,
-                                                )
-                                            };
+                                            let database = SharedEvmStateProviderDatabase::new(
+                                                provider.history_by_block_number(block.number())?,
+                                            );
                                             executor = evm_config.batch_executor(database);
-                                            _executor_state_provider = next_state_provider;
                                             executor_start_block = block.number() + 1;
                                             executor_created = Instant::now();
                                             let _ = info_tx.send((block, err));
@@ -284,11 +273,9 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
                             executor_created.elapsed() > executor_lifetime
                         {
                             let last_block = block.number();
-                            let next_state_provider =
-                                provider.history_by_block_number(last_block)?;
-                            let database = unsafe {
-                                SharedEvmStateProviderDatabase::new(&*next_state_provider)
-                            };
+                            let database = SharedEvmStateProviderDatabase::new(
+                                provider.history_by_block_number(last_block)?,
+                            );
                             let next_executor = evm_config.batch_executor(database);
                             let old_executor = std::mem::replace(&mut executor, next_executor);
                             let outcome = old_executor.into_execution_outcome(
@@ -300,7 +287,6 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
                                 outcome.block_reverts(),
                                 last_block,
                             )?;
-                            _executor_state_provider = next_state_provider;
                             executor_start_block = last_block + 1;
                             executor_created = Instant::now();
                         }

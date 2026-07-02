@@ -8,7 +8,8 @@ pub type EvmEnvFor<Evm> =
 
 /// Type alias for the configured EVM instance.
 #[cfg(feature = "std")]
-pub type EvmFor<Evm> = <<Evm as ConfigureEvm>::BlockExecutorFactory as BlockExecutorFactory>::Evm;
+pub type EvmFor<'a, Evm> =
+    <<Evm as ConfigureEvm>::BlockExecutorFactory as BlockExecutorFactory>::Evm<'a>;
 
 /// Type alias for the configured transaction environment.
 pub type TxEnvFor<Evm> =

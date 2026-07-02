@@ -9,10 +9,10 @@ use alloy_consensus::{
 use alloy_eips::BlockId;
 use alloy_primitives::B256;
 use alloy_rpc_types_eth::TransactionInfo;
-use evm2::{evm::DbErrorCode, registry::HandlerError, BaseEvmTypes, TxResultWithState};
+use evm2::{registry::HandlerError, BaseEvmTypes, ErrorCode, TxResultWithState};
 use evm2_inspectors::tracing::{TracingInspector, TracingInspectorConfig};
 use futures::Future;
-use reth_errors::{ProviderError, RethError};
+use reth_errors::RethError;
 use reth_evm::{execute::BlockExecutorFactory, ConfigureEvm, EvmEnvFor, TxEnvFor};
 use reth_primitives_traits::{BlockBody, RecoveredBlock};
 use reth_rpc_eth_types::EthApiError;
@@ -61,14 +61,14 @@ pub trait Trace: LoadState<Error: FromEvmError<Self::Evm>> + Call {
 
         enum Resolution {
             Result(TxResultWithState),
-            DatabaseError(DbErrorCode),
+            DatabaseError(ErrorCode),
             HandlerError(HandlerError),
         }
 
         let resolution =
             match evm.transact(self.evm_config().block_executor_factory().evm_tx(&tx_env)) {
                 Ok(executed) => {
-                    if let Some(code) = executed.result().db_error_code {
+                    if let Some(code) = executed.result().error_code {
                         let _ = executed.discard();
                         Resolution::DatabaseError(code)
                     } else {
@@ -106,9 +106,7 @@ pub trait Trace: LoadState<Error: FromEvmError<Self::Evm>> + Call {
     {
         self.spawn_tracing(move |this| {
             let state = this.provider().state_by_block_id(at).map_err(Self::Error::from_eth_err)?;
-            // SAFETY: the shared database is used only within this synchronous closure, and the
-            // boxed state provider is held until the closure returns.
-            let db = unsafe { SharedEvmStateProviderDatabase::new(&*state) };
+            let db = SharedEvmStateProviderDatabase::new(state);
             f(this, db)
         })
     }
@@ -348,27 +346,25 @@ pub trait Trace: LoadState<Error: FromEvmError<Self::Evm>> + Call {
     }
 }
 
-fn trace_handler_error<Evm, Error>(evm: &mut evm2::Evm<BaseEvmTypes>, err: HandlerError) -> Error
+fn trace_handler_error<Evm, Error>(
+    evm: &mut evm2::Evm<'_, BaseEvmTypes>,
+    err: HandlerError,
+) -> Error
 where
     Error: FromEvmError<Evm>,
 {
     match err {
-        HandlerError::Database(code) => trace_database_error::<Evm, Error>(evm, code),
+        HandlerError::Fatal(code) => trace_database_error::<Evm, Error>(evm, code),
         err => Error::from_eth_err(EthApiError::EvmCustom(err.to_string())),
     }
 }
 
-fn trace_database_error<Evm, Error>(evm: &mut evm2::Evm<BaseEvmTypes>, code: DbErrorCode) -> Error
+fn trace_database_error<Evm, Error>(evm: &mut evm2::Evm<'_, BaseEvmTypes>, code: ErrorCode) -> Error
 where
     Error: FromEvmError<Evm>,
 {
     let err = evm.database_mut().error(code);
-    match err.downcast::<ProviderError>() {
-        Ok(err) => Error::from_eth_err(*err),
-        Err(err) => Error::from_eth_err(EthApiError::EvmCustom(format!(
-            "EVM database error {code:?}: {err}"
-        ))),
-    }
+    Error::from_eth_err(EthApiError::EvmCustom(format!("EVM database error {code:?}: {err}")))
 }
 
 #[cfg(any())]

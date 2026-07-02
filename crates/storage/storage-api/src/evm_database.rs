@@ -2,7 +2,7 @@
 
 use crate::{
     AccountReader, BlockHashReader, BytecodeReader, HashedPostStateProvider, StateProofProvider,
-    StateProvider, StateRootProvider, StorageRootProvider,
+    StateProvider, StateProviderBox, StateRootProvider, StorageRootProvider,
 };
 use alloc::vec::Vec;
 use alloy_consensus::constants::KECCAK_EMPTY;
@@ -10,15 +10,12 @@ use alloy_primitives::{
     map::{AddressMap, AddressSet, B256Map, U256Map},
     Address, BlockNumber, Bytes, B256, U256,
 };
-use core::{
-    mem,
-    ops::{Deref, DerefMut},
-    ptr::NonNull,
-};
+use core::ops::{Deref, DerefMut};
 use evm2::{
     bytecode::Bytecode,
-    evm::{AccountInfo, CacheDB, Database, Db, DbErrorCode, DynDatabase},
+    evm::{AccountInfo, CacheDB, Database, Db, DynDatabase},
     interpreter::Word,
+    ErrorCode,
 };
 use reth_execution_types::{ExecutionAccountInfo, ExecutionState, ExecutionStateChangeSource};
 use reth_primitives_traits::{Account, Bytecode as RethBytecode};
@@ -74,7 +71,7 @@ impl<DB> DerefMut for EvmStateProviderDatabase<DB> {
 
 impl<DB> Database for EvmStateProviderDatabase<DB>
 where
-    DB: StateProvider + Send + 'static,
+    DB: StateProvider,
 {
     type Error = ProviderError;
 
@@ -96,99 +93,31 @@ where
     }
 }
 
-/// An EVM [`Database`] implementation backed by a borrowed Reth [`StateProvider`].
-///
-/// EVM database objects must be `'static` for downcasting. This adapter is only valid while the
-/// borrowed provider passed to [`Self::new`] is alive and must not escape the synchronous execution
-/// call that created it.
-#[derive(Clone, Copy)]
-pub struct BorrowedEvmStateProviderDatabase {
-    provider: NonNull<dyn StateProvider>,
-}
-
-impl BorrowedEvmStateProviderDatabase {
-    /// Creates a new borrowed EVM database adapter.
-    ///
-    /// # Safety
-    ///
-    /// The returned adapter erases the lifetime of `provider` to satisfy EVM [`Database`]
-    /// downcasting requirements. It must not be used after `provider` is dropped and must not
-    /// escape the synchronous execution call that created it.
-    pub unsafe fn new(provider: &dyn StateProvider) -> Self {
-        let provider = NonNull::from(provider);
-        // SAFETY: The caller guarantees the erased lifetime remains valid for every use of the
-        // returned adapter.
-        let provider = unsafe {
-            mem::transmute::<NonNull<dyn StateProvider + '_>, NonNull<dyn StateProvider + 'static>>(
-                provider,
-            )
-        };
-        Self { provider }
-    }
-
-    fn provider(&self) -> &dyn StateProvider {
-        // SAFETY: `provider` is created from a valid shared reference in `new`. Callers must keep
-        // that provider alive for the duration of synchronous EVM execution.
-        unsafe { self.provider.as_ref() }
-    }
-}
-
-impl core::fmt::Debug for BorrowedEvmStateProviderDatabase {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        f.debug_struct("BorrowedEvmStateProviderDatabase").finish_non_exhaustive()
-    }
-}
-
-// SAFETY: The adapter only exposes shared `StateProvider` reads and is used for synchronous EVM
-// execution. Sending it is sound under the same assumptions as sending the underlying borrowed
-// provider reference for read-only access.
-unsafe impl Send for BorrowedEvmStateProviderDatabase {}
-
-impl Database for BorrowedEvmStateProviderDatabase {
-    type Error = ProviderError;
-
-    fn get_account(&mut self, address: &Address) -> Result<Option<AccountInfo>, Self::Error> {
-        Ok(AccountReader::basic_account(self.provider(), address)?.map(account_to_evm))
-    }
-
-    fn get_code_by_hash(&mut self, code_hash: &B256) -> Result<Bytecode, Self::Error> {
-        Ok(self.provider().bytecode_by_hash(code_hash)?.map(Into::into).unwrap_or_default())
-    }
-
-    fn get_storage(&mut self, address: &Address, key: &Word) -> Result<Word, Self::Error> {
-        Ok(self.provider().storage(*address, B256::new(key.to_be_bytes()))?.unwrap_or_default())
-    }
-
-    fn get_block_hash(&mut self, number: &Word) -> Result<Option<B256>, Self::Error> {
-        let number = u256_to_u64_saturating(*number);
-        BlockHashReader::block_hash(self.provider(), number)
-    }
-}
-
-/// A cloneable EVM database handle that shares one cache over a borrowed Reth state provider.
+/// A cloneable EVM database handle that shares one cache over a Reth state provider.
 ///
 /// This is intended for sequential execution of multiple short-lived EVM instances against the
 /// same underlying provider. Reads missed by one EVM remain cached for later EVMs, and callers can
 /// apply accepted block state with [`Self::commit_source`] to make prior writes visible.
-#[derive(Clone)]
-pub struct SharedEvmStateProviderDatabase {
-    inner: Arc<Mutex<CacheDB<Db<BorrowedEvmStateProviderDatabase>>>>,
+pub struct SharedEvmStateProviderDatabase<DB: StateProvider = StateProviderBox> {
+    inner: Arc<Mutex<CacheDB<Db<EvmStateProviderDatabase<DB>>>>>,
 }
 
-impl SharedEvmStateProviderDatabase {
-    /// Creates a new shared cache over a borrowed state provider.
-    ///
-    /// # Safety
-    ///
-    /// This has the same lifetime erasure requirements as
-    /// [`BorrowedEvmStateProviderDatabase::new`]. The returned handle and its clones must not
-    /// outlive `provider`.
-    pub unsafe fn new(provider: &dyn StateProvider) -> Self {
+impl<DB: StateProvider> Clone for SharedEvmStateProviderDatabase<DB> {
+    fn clone(&self) -> Self {
+        Self { inner: Arc::clone(&self.inner) }
+    }
+}
+
+impl<DB> SharedEvmStateProviderDatabase<DB>
+where
+    DB: StateProvider,
+{
+    /// Creates a new shared cache over a state provider.
+    pub fn new(provider: DB) -> Self {
         Self {
-            // SAFETY: The caller upholds the lifetime requirements for the borrowed provider.
-            inner: Arc::new(Mutex::new(CacheDB::new(Db::new(unsafe {
-                BorrowedEvmStateProviderDatabase::new(provider)
-            })))),
+            inner: Arc::new(Mutex::new(CacheDB::new(Db::new(EvmStateProviderDatabase::new(
+                provider,
+            ))))),
         }
     }
 
@@ -199,9 +128,7 @@ impl SharedEvmStateProviderDatabase {
         Ok(())
     }
 
-    fn lock(
-        &self,
-    ) -> ProviderResult<MutexGuard<'_, CacheDB<Db<BorrowedEvmStateProviderDatabase>>>> {
+    fn lock(&self) -> ProviderResult<MutexGuard<'_, CacheDB<Db<EvmStateProviderDatabase<DB>>>>> {
         self.inner.lock().map_err(|err| {
             ProviderError::other(std::io::Error::other(format!(
                 "shared EVM database lock poisoned: {err}"
@@ -210,24 +137,23 @@ impl SharedEvmStateProviderDatabase {
     }
 
     fn provider_error(
-        db: &mut CacheDB<Db<BorrowedEvmStateProviderDatabase>>,
-        code: DbErrorCode,
+        db: &mut CacheDB<Db<EvmStateProviderDatabase<DB>>>,
+        code: ErrorCode,
     ) -> ProviderError {
-        let err = db.error(code);
-        match err.downcast::<ProviderError>() {
-            Ok(err) => *err,
-            Err(err) => ProviderError::other(std::io::Error::other(err.to_string())),
-        }
+        ProviderError::other(std::io::Error::other(db.error(code).to_string()))
     }
 }
 
-impl core::fmt::Debug for SharedEvmStateProviderDatabase {
+impl<DB: StateProvider> core::fmt::Debug for SharedEvmStateProviderDatabase<DB> {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         f.debug_struct("SharedEvmStateProviderDatabase").finish_non_exhaustive()
     }
 }
 
-impl Database for SharedEvmStateProviderDatabase {
+impl<DB> Database for SharedEvmStateProviderDatabase<DB>
+where
+    DB: StateProvider,
+{
     type Error = ProviderError;
 
     fn get_account(&mut self, address: &Address) -> Result<Option<AccountInfo>, Self::Error> {

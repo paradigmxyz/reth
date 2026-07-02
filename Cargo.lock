@@ -1011,7 +1011,7 @@ version = "1.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "40c48f72fd53cd289104fc64099abca73db4166ad86ea0b4341abe65af83dadc"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -1022,7 +1022,7 @@ checksum = "291e6a250ff86cd4a820112fb8898808a366d8f9f58ce16d1f538353ad55747d"
 dependencies = [
  "anstyle",
  "once_cell_polyfill",
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -3401,7 +3401,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -3458,7 +3458,7 @@ dependencies = [
 [[package]]
 name = "evm2"
 version = "0.1.0"
-source = "git+https://github.com/alloy-rs/evm2?rev=f2fe13998cb73c23adcb7b6636635fce7a638ef5#f2fe13998cb73c23adcb7b6636635fce7a638ef5"
+source = "git+https://github.com/alloy-rs/evm2?rev=9a96d9d3bfa5a251ea661804fe9c3a0632720d28#9a96d9d3bfa5a251ea661804fe9c3a0632720d28"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -3487,12 +3487,13 @@ dependencies = [
  "serde",
  "sha2 0.11.0",
  "thiserror 2.0.18",
+ "typeid",
 ]
 
 [[package]]
 name = "evm2-inspectors"
 version = "0.1.0"
-source = "git+https://github.com/alloy-rs/evm2?rev=f2fe13998cb73c23adcb7b6636635fce7a638ef5#f2fe13998cb73c23adcb7b6636635fce7a638ef5"
+source = "git+https://github.com/alloy-rs/evm2?rev=9a96d9d3bfa5a251ea661804fe9c3a0632720d28#9a96d9d3bfa5a251ea661804fe9c3a0632720d28"
 dependencies = [
  "alloy-primitives",
  "alloy-rpc-types-eth",
@@ -3511,7 +3512,7 @@ dependencies = [
 [[package]]
 name = "evm2-jit"
 version = "0.1.0"
-source = "git+https://github.com/alloy-rs/evm2?rev=f2fe13998cb73c23adcb7b6636635fce7a638ef5#f2fe13998cb73c23adcb7b6636635fce7a638ef5"
+source = "git+https://github.com/alloy-rs/evm2?rev=9a96d9d3bfa5a251ea661804fe9c3a0632720d28#9a96d9d3bfa5a251ea661804fe9c3a0632720d28"
 dependencies = [
  "evm2",
  "evm2-jit-backend",
@@ -3526,7 +3527,7 @@ dependencies = [
 [[package]]
 name = "evm2-jit-backend"
 version = "0.1.0"
-source = "git+https://github.com/alloy-rs/evm2?rev=f2fe13998cb73c23adcb7b6636635fce7a638ef5#f2fe13998cb73c23adcb7b6636635fce7a638ef5"
+source = "git+https://github.com/alloy-rs/evm2?rev=9a96d9d3bfa5a251ea661804fe9c3a0632720d28#9a96d9d3bfa5a251ea661804fe9c3a0632720d28"
 dependencies = [
  "eyre",
  "ruint",
@@ -3535,12 +3536,12 @@ dependencies = [
 [[package]]
 name = "evm2-jit-build"
 version = "0.1.0"
-source = "git+https://github.com/alloy-rs/evm2?rev=f2fe13998cb73c23adcb7b6636635fce7a638ef5#f2fe13998cb73c23adcb7b6636635fce7a638ef5"
+source = "git+https://github.com/alloy-rs/evm2?rev=9a96d9d3bfa5a251ea661804fe9c3a0632720d28#9a96d9d3bfa5a251ea661804fe9c3a0632720d28"
 
 [[package]]
 name = "evm2-jit-builtins"
 version = "0.1.0"
-source = "git+https://github.com/alloy-rs/evm2?rev=f2fe13998cb73c23adcb7b6636635fce7a638ef5#f2fe13998cb73c23adcb7b6636635fce7a638ef5"
+source = "git+https://github.com/alloy-rs/evm2?rev=9a96d9d3bfa5a251ea661804fe9c3a0632720d28#9a96d9d3bfa5a251ea661804fe9c3a0632720d28"
 dependencies = [
  "alloy-primitives",
  "evm2",
@@ -3553,7 +3554,7 @@ dependencies = [
 [[package]]
 name = "evm2-jit-codegen"
 version = "0.1.0"
-source = "git+https://github.com/alloy-rs/evm2?rev=f2fe13998cb73c23adcb7b6636635fce7a638ef5#f2fe13998cb73c23adcb7b6636635fce7a638ef5"
+source = "git+https://github.com/alloy-rs/evm2?rev=9a96d9d3bfa5a251ea661804fe9c3a0632720d28#9a96d9d3bfa5a251ea661804fe9c3a0632720d28"
 dependencies = [
  "alloy-primitives",
  "bitflags",
@@ -3576,7 +3577,7 @@ dependencies = [
 [[package]]
 name = "evm2-jit-context"
 version = "0.1.0"
-source = "git+https://github.com/alloy-rs/evm2?rev=f2fe13998cb73c23adcb7b6636635fce7a638ef5#f2fe13998cb73c23adcb7b6636635fce7a638ef5"
+source = "git+https://github.com/alloy-rs/evm2?rev=9a96d9d3bfa5a251ea661804fe9c3a0632720d28#9a96d9d3bfa5a251ea661804fe9c3a0632720d28"
 dependencies = [
  "alloy-primitives",
  "evm2",
@@ -3586,7 +3587,7 @@ dependencies = [
 [[package]]
 name = "evm2-jit-llvm"
 version = "0.1.0"
-source = "git+https://github.com/alloy-rs/evm2?rev=f2fe13998cb73c23adcb7b6636635fce7a638ef5#f2fe13998cb73c23adcb7b6636635fce7a638ef5"
+source = "git+https://github.com/alloy-rs/evm2?rev=9a96d9d3bfa5a251ea661804fe9c3a0632720d28#9a96d9d3bfa5a251ea661804fe9c3a0632720d28"
 dependencies = [
  "alloy-primitives",
  "cc",
@@ -3599,7 +3600,7 @@ dependencies = [
 [[package]]
 name = "evm2-jit-runtime"
 version = "0.1.0"
-source = "git+https://github.com/alloy-rs/evm2?rev=f2fe13998cb73c23adcb7b6636635fce7a638ef5#f2fe13998cb73c23adcb7b6636635fce7a638ef5"
+source = "git+https://github.com/alloy-rs/evm2?rev=9a96d9d3bfa5a251ea661804fe9c3a0632720d28#9a96d9d3bfa5a251ea661804fe9c3a0632720d28"
 dependencies = [
  "alloy-primitives",
  "crossbeam-channel",
@@ -3626,7 +3627,7 @@ dependencies = [
 [[package]]
 name = "evm2-macros"
 version = "0.1.0"
-source = "git+https://github.com/alloy-rs/evm2?rev=f2fe13998cb73c23adcb7b6636635fce7a638ef5#f2fe13998cb73c23adcb7b6636635fce7a638ef5"
+source = "git+https://github.com/alloy-rs/evm2?rev=9a96d9d3bfa5a251ea661804fe9c3a0632720d28#9a96d9d3bfa5a251ea661804fe9c3a0632720d28"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -5304,7 +5305,7 @@ checksum = "3640c1c38b8e4e43584d8df18be5fc6b0aa314ce6ebf51b53313d4306cca8e46"
 dependencies = [
  "hermit-abi",
  "libc",
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -6360,7 +6361,7 @@ version = "0.50.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7957b9740744892f114936ab4a57b3f487491bbeafaf8083688b16841a4240e5"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -8036,7 +8037,7 @@ dependencies = [
 [[package]]
 name = "reth-codecs"
 version = "0.5.2"
-source = "git+https://github.com/paradigmxyz/reth-core?rev=542a4cf0ebaf1baefe72a0ceda92627179036d87#542a4cf0ebaf1baefe72a0ceda92627179036d87"
+source = "git+https://github.com/paradigmxyz/reth-core?rev=bc71acde2d08b7ff0ebecc35346b4497c8c85236#bc71acde2d08b7ff0ebecc35346b4497c8c85236"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -8056,7 +8057,7 @@ dependencies = [
 [[package]]
 name = "reth-codecs-derive"
 version = "0.5.2"
-source = "git+https://github.com/paradigmxyz/reth-core?rev=542a4cf0ebaf1baefe72a0ceda92627179036d87#542a4cf0ebaf1baefe72a0ceda92627179036d87"
+source = "git+https://github.com/paradigmxyz/reth-core?rev=bc71acde2d08b7ff0ebecc35346b4497c8c85236#bc71acde2d08b7ff0ebecc35346b4497c8c85236"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -9745,7 +9746,7 @@ dependencies = [
 [[package]]
 name = "reth-primitives-traits"
 version = "0.5.2"
-source = "git+https://github.com/paradigmxyz/reth-core?rev=542a4cf0ebaf1baefe72a0ceda92627179036d87#542a4cf0ebaf1baefe72a0ceda92627179036d87"
+source = "git+https://github.com/paradigmxyz/reth-core?rev=bc71acde2d08b7ff0ebecc35346b4497c8c85236#bc71acde2d08b7ff0ebecc35346b4497c8c85236"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -10263,7 +10264,7 @@ dependencies = [
 [[package]]
 name = "reth-rpc-traits"
 version = "0.5.2"
-source = "git+https://github.com/paradigmxyz/reth-core?rev=542a4cf0ebaf1baefe72a0ceda92627179036d87#542a4cf0ebaf1baefe72a0ceda92627179036d87"
+source = "git+https://github.com/paradigmxyz/reth-core?rev=bc71acde2d08b7ff0ebecc35346b4497c8c85236#bc71acde2d08b7ff0ebecc35346b4497c8c85236"
 dependencies = [
  "alloy-consensus",
  "alloy-network",
@@ -10785,7 +10786,7 @@ dependencies = [
 [[package]]
 name = "reth-zstd-compressors"
 version = "0.5.2"
-source = "git+https://github.com/paradigmxyz/reth-core?rev=542a4cf0ebaf1baefe72a0ceda92627179036d87#542a4cf0ebaf1baefe72a0ceda92627179036d87"
+source = "git+https://github.com/paradigmxyz/reth-core?rev=bc71acde2d08b7ff0ebecc35346b4497c8c85236#bc71acde2d08b7ff0ebecc35346b4497c8c85236"
 dependencies = [
  "zstd",
 ]
@@ -10995,7 +10996,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys",
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -11075,7 +11076,7 @@ dependencies = [
  "security-framework",
  "security-framework-sys",
  "webpki-root-certs 1.0.8",
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -11698,7 +11699,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "52d1cfed4120b4d927bf7c0f86d2087a4a7d6027c906d9f9d525a80573b9be51"
 dependencies = [
  "libc",
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -11946,7 +11947,7 @@ dependencies = [
  "getrandom 0.4.3",
  "once_cell",
  "rustix",
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -13173,7 +13174,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]

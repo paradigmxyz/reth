@@ -33,12 +33,12 @@ use evm2::{
     bytecode::Bytecode as ExecutableBytecode,
     ethereum::RecoveredTxEnvelope,
     evm::{
-        AccountChange, AccountChangeRef, AccountInfo, BlockStateAccumulator, DbErrorCode,
-        StateChangeSink, StateChangeSource, StateChanges, StorageChange, BEACON_ROOTS_ADDRESS,
+        AccountChange, AccountChangeRef, AccountInfo, BlockStateAccumulator, StateChangeSink,
+        StateChangeSource, StateChanges, StorageChange, SystemTx, BEACON_ROOTS_ADDRESS,
         CONSOLIDATION_REQUEST_ADDRESS, HISTORY_STORAGE_ADDRESS, WITHDRAWAL_REQUEST_ADDRESS,
     },
     registry::HandlerError,
-    BaseEvmTypes, Evm, SpecId, TxResult,
+    BaseEvmTypes, ErrorCode, Evm, SpecId, TxResult,
 };
 #[cfg(test)]
 use evm2::{
@@ -83,7 +83,7 @@ pub enum EthExecutionError<E = DynamicDatabaseError> {
     /// EVM reported a database error and the typed database error was available.
     Database(E),
     /// EVM reported a database error, but the typed database error was no longer available.
-    MissingDatabaseError(DbErrorCode),
+    MissingDatabaseError(ErrorCode),
     /// Cancun requires a parent beacon block root after genesis.
     MissingParentBeaconBlockRoot,
     /// Cancun genesis payloads must carry a zero parent beacon block root.
@@ -104,7 +104,7 @@ pub enum EthExecutionError<E = DynamicDatabaseError> {
 pub struct DynamicDatabaseError(String);
 
 impl DynamicDatabaseError {
-    fn new(error: Box<dyn core::error::Error>) -> Self {
+    fn new(error: impl core::fmt::Display) -> Self {
         Self(error.to_string())
     }
 }
@@ -146,13 +146,13 @@ where
 impl<E> core::error::Error for EthExecutionError<E> where E: core::error::Error + Send + 'static {}
 
 /// Ethereum transaction validation error returned by evm2 handlers.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct EthInvalidTxError(HandlerError);
 
 impl EthInvalidTxError {
     /// Returns the underlying evm2 handler error.
-    pub const fn handler_error(&self) -> HandlerError {
-        self.0
+    pub fn handler_error(&self) -> HandlerError {
+        self.0.clone()
     }
 }
 
@@ -236,7 +236,7 @@ where
 }
 
 const fn handler_error_is_invalid_tx(err: &HandlerError) -> bool {
-    !matches!(err, HandlerError::Database(_) | HandlerError::WrongTransactionType { .. })
+    !matches!(err, HandlerError::Fatal(_) | HandlerError::WrongTransactionType { .. })
 }
 
 /// Error returned by payload execution over a fallible transaction stream.
@@ -344,7 +344,7 @@ impl<'a, DB> BlockExecutionInput<'a, DB> {
 #[cfg(test)]
 impl<DB> BlockExecutionInput<'_, DB>
 where
-    DB: DynDatabase + 'static,
+    DB: DynDatabase,
 {
     /// Executes recovered Ethereum transactions.
     pub(crate) fn execute_recovered_transactions(
@@ -428,7 +428,7 @@ where
                 &mut on_hashed_state_update,
                 &transaction,
             )?;
-            cumulative_gas_used += outcome.gas_used;
+            cumulative_gas_used += outcome.tx_gas_used();
             let receipt = RethReceiptBuilder.build_receipt(tx_type, outcome, cumulative_gas_used);
             on_receipt(index, &receipt).map_err(PayloadExecutionError::Receipt)?;
             receipts.push(receipt);
@@ -509,7 +509,7 @@ fn execute_block<DB>(
     transactions: impl IntoIterator<Item = Recovered<TransactionSigned>>,
 ) -> Result<BlockExecutionOutput<Receipt>, EthExecutionError>
 where
-    DB: Database + 'static,
+    DB: Database,
 {
     execute_block_with_withdrawals(spec_id, block_env, database, block_number, transactions, None)
 }
@@ -526,7 +526,7 @@ fn execute_block_with_withdrawals<DB>(
     withdrawals: Option<&[Withdrawal]>,
 ) -> Result<BlockExecutionOutput<Receipt>, EthExecutionError>
 where
-    DB: Database + 'static,
+    DB: Database,
 {
     execute_block_with_context(
         spec_id,
@@ -555,7 +555,7 @@ fn execute_block_with_context<DB>(
     context: BlockExecutionContext<'_>,
 ) -> Result<BlockExecutionOutput<Receipt>, EthExecutionError>
 where
-    DB: Database + 'static,
+    DB: Database,
 {
     execute_block_with_context_and_precompiles(
         spec_id,
@@ -581,7 +581,7 @@ fn execute_block_with_context_and_precompiles<DB>(
     precompiles: Box<dyn PrecompileProvider<BaseEvmTypes>>,
 ) -> Result<BlockExecutionOutput<Receipt>, EthExecutionError>
 where
-    DB: Database + 'static,
+    DB: Database,
 {
     BlockExecutionInput::new(
         spec_id,
@@ -594,9 +594,9 @@ where
     .execute_recovered_transactions(transactions)
 }
 
-fn map_handler_error(evm: &mut Evm<BaseEvmTypes>, err: HandlerError) -> EthExecutionError {
+fn map_handler_error(evm: &mut Evm<'_, BaseEvmTypes>, err: HandlerError) -> EthExecutionError {
     match err {
-        HandlerError::Database(code) => map_db_error_code(evm, code),
+        HandlerError::Fatal(code) => map_db_error_code(evm, code),
         err if handler_error_is_invalid_tx(&err) => {
             EthExecutionError::InvalidTx(EthInvalidTxError(err))
         }
@@ -606,7 +606,7 @@ fn map_handler_error(evm: &mut Evm<BaseEvmTypes>, err: HandlerError) -> EthExecu
 
 #[cfg_attr(not(feature = "std"), allow(dead_code))]
 pub(crate) fn apply_pre_execution_system_calls(
-    evm: &mut Evm<BaseEvmTypes>,
+    evm: &mut Evm<'_, BaseEvmTypes>,
     block_number: u64,
     context: BlockExecutionContext<'_>,
 ) -> Result<BlockStateAccumulator, EthExecutionError> {
@@ -625,7 +625,7 @@ pub(crate) fn apply_pre_execution_system_calls(
     Ok(block_state)
 }
 
-fn take_database_error(evm: &mut Evm<BaseEvmTypes>, code: DbErrorCode) -> DynamicDatabaseError {
+fn take_database_error(evm: &mut Evm<'_, BaseEvmTypes>, code: ErrorCode) -> DynamicDatabaseError {
     DynamicDatabaseError::new(evm.database_mut().error(code))
 }
 
@@ -733,7 +733,7 @@ fn send_hashed_state_update(
 
 #[cfg(test)]
 pub(crate) fn execute_transaction(
-    evm: &mut Evm<BaseEvmTypes>,
+    evm: &mut Evm<'_, BaseEvmTypes>,
     block_state: &mut BlockStateAccumulator,
     hashed_state: Option<&mut HashedPostStateSink<KeccakKeyHasher>>,
     stream_hashed_state: bool,
@@ -753,7 +753,7 @@ pub(crate) fn execute_transaction(
 }
 
 pub(crate) fn execute_transaction_with_commit_condition(
-    evm: &mut Evm<BaseEvmTypes>,
+    evm: &mut Evm<'_, BaseEvmTypes>,
     block_state: &mut BlockStateAccumulator,
     hashed_state: Option<&mut HashedPostStateSink<KeccakKeyHasher>>,
     stream_hashed_state: bool,
@@ -763,13 +763,13 @@ pub(crate) fn execute_transaction_with_commit_condition(
 ) -> Result<Option<TxResult>, EthExecutionError> {
     enum TransactionResolution {
         Outcome(Option<TxResult>),
-        DatabaseError(DbErrorCode),
+        DatabaseError(ErrorCode),
         HandlerError(HandlerError),
     }
 
     let resolution = match evm.transact(transaction) {
         Ok(executed) => {
-            if let Some(code) = executed.result().db_error_code {
+            if let Some(code) = executed.result().error_code {
                 let _ = executed.discard();
                 TransactionResolution::DatabaseError(code)
             } else if !should_commit(executed.result()).should_commit() {
@@ -796,13 +796,13 @@ pub(crate) fn execute_transaction_with_commit_condition(
     }
 }
 
-fn map_db_error_code(evm: &mut Evm<BaseEvmTypes>, code: DbErrorCode) -> EthExecutionError {
+fn map_db_error_code(evm: &mut Evm<'_, BaseEvmTypes>, code: ErrorCode) -> EthExecutionError {
     EthExecutionError::Database(take_database_error(evm, code))
 }
 
 #[expect(clippy::needless_option_as_deref, clippy::too_many_arguments)]
 pub(crate) fn pre_execution_system_call_state_changes(
-    evm: &mut Evm<BaseEvmTypes>,
+    evm: &mut Evm<'_, BaseEvmTypes>,
     block_state: &mut BlockStateAccumulator,
     hashed_state: Option<&mut HashedPostStateSink<KeccakKeyHasher>>,
     stream_hashed_state: bool,
@@ -903,7 +903,7 @@ fn parse_deposit_requests_from_receipts(
 
 #[expect(clippy::needless_option_as_deref, clippy::too_many_arguments)]
 pub(crate) fn post_execution_system_call_state_changes(
-    evm: &mut Evm<BaseEvmTypes>,
+    evm: &mut Evm<'_, BaseEvmTypes>,
     block_state: &mut BlockStateAccumulator,
     hashed_state: Option<&mut HashedPostStateSink<KeccakKeyHasher>>,
     stream_hashed_state: bool,
@@ -949,7 +949,7 @@ pub(crate) fn post_execution_system_call_state_changes(
 }
 
 fn execute_system_call(
-    evm: &mut Evm<BaseEvmTypes>,
+    evm: &mut Evm<'_, BaseEvmTypes>,
     block_state: &mut BlockStateAccumulator,
     hashed_state: Option<&mut HashedPostStateSink<KeccakKeyHasher>>,
     stream_hashed_state: bool,
@@ -957,30 +957,48 @@ fn execute_system_call(
     address: Address,
     data: Bytes,
 ) -> Result<TxResult, EthExecutionError> {
-    let executed = evm.system_call(address, data);
-
-    if let Some(code) = executed.result().db_error_code {
-        let _ = executed.discard();
-        return Err(map_db_error_code(evm, code))
+    enum SystemCallResolution {
+        Outcome(TxResult),
+        DatabaseError(ErrorCode),
+        HandlerError(HandlerError),
+        Failed(String),
     }
 
-    if !executed.result().status {
-        let reason = format!("{:?}", executed.result().stop);
-        let _ = executed.discard();
-        return Err(EthExecutionError::SystemCallFailed { address, reason });
-    }
-
-    let outcome = {
-        let mut sink = RethStateSink::new(None, block_state, hashed_state, stream_hashed_state);
-        let Ok(outcome) = executed.commit_with(&mut sink);
-        sink.flush_streamed_hashed_state(on_hashed_state_update);
-        outcome
+    let resolution = match evm.system_call(SystemTx::new(address, data)) {
+        Ok(executed) => {
+            if let Some(code) = executed.result().error_code {
+                let _ = executed.discard();
+                SystemCallResolution::DatabaseError(code)
+            } else if !executed.result().status {
+                let reason = format!("{:?}", executed.result().stop);
+                let _ = executed.discard();
+                SystemCallResolution::Failed(reason)
+            } else {
+                let outcome = {
+                    let mut sink =
+                        RethStateSink::new(None, block_state, hashed_state, stream_hashed_state);
+                    let Ok(outcome) = executed.commit_with(&mut sink);
+                    sink.flush_streamed_hashed_state(on_hashed_state_update);
+                    outcome
+                };
+                SystemCallResolution::Outcome(outcome)
+            }
+        }
+        Err(err) => SystemCallResolution::HandlerError(err),
     };
-    Ok(outcome)
+
+    match resolution {
+        SystemCallResolution::Outcome(outcome) => Ok(outcome),
+        SystemCallResolution::DatabaseError(code) => Err(map_db_error_code(evm, code)),
+        SystemCallResolution::HandlerError(err) => Err(map_handler_error(evm, err)),
+        SystemCallResolution::Failed(reason) => {
+            Err(EthExecutionError::SystemCallFailed { address, reason })
+        }
+    }
 }
 
 fn commit_state_changes<S: StateChangeSource>(
-    evm: &mut Evm<BaseEvmTypes>,
+    evm: &mut Evm<'_, BaseEvmTypes>,
     block_state: &mut BlockStateAccumulator,
     hashed_state: Option<&mut HashedPostStateSink<KeccakKeyHasher>>,
     stream_hashed_state: bool,
@@ -1008,7 +1026,7 @@ fn commit_state_changes<S: StateChangeSource>(
 
 #[expect(clippy::too_many_arguments)]
 pub(crate) fn post_block_balance_state_changes(
-    evm: &mut Evm<BaseEvmTypes>,
+    evm: &mut Evm<'_, BaseEvmTypes>,
     block_state: &mut BlockStateAccumulator,
     hashed_state: Option<&mut HashedPostStateSink<KeccakKeyHasher>>,
     stream_hashed_state: bool,

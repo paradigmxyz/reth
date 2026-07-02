@@ -202,7 +202,7 @@ where
 
     fn execute(
         &mut self,
-        evm: &mut Evm<BaseEvmTypes>,
+        evm: &mut Evm<'_, BaseEvmTypes>,
         message: &Message<BaseEvmTypes>,
         gas: &mut GasTracker,
     ) -> Option<Result<PrecompileOutput, PrecompileError>> {
@@ -278,7 +278,7 @@ where
 struct GasSnapshot {
     spent: u64,
     reservoir: u64,
-    state_gas_spent: u64,
+    state_gas_spent: i64,
     refunded: i64,
 }
 

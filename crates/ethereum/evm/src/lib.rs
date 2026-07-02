@@ -439,7 +439,7 @@ where
     ) -> Result<ExecutionState, alloc::boxed::Box<dyn core::error::Error + Send + Sync>>
     where
         Self: 'a,
-        DB: evm2::evm::Database + 'static,
+        DB: evm2::evm::Database + 'a,
         DB::Error: core::error::Error + Send + Sync + 'static,
     {
         let mut evm = self.evm_with_env(db, env);

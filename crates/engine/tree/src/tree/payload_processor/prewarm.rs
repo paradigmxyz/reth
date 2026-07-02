@@ -246,13 +246,13 @@ where
 
             enum PrewarmResolution {
                 Outcome,
-                DatabaseError(evm2::evm::DbErrorCode),
+                DatabaseError(evm2::ErrorCode),
                 HandlerError(evm2::registry::HandlerError),
             }
 
             let resolution = match evm.transact(ctx.evm_config.evm_tx(&tx_env)) {
                 Ok(executed) => {
-                    if let Some(code) = executed.result().db_error_code {
+                    if let Some(code) = executed.result().error_code {
                         let _ = executed.discard();
                         PrewarmResolution::DatabaseError(code)
                     } else {
@@ -614,7 +614,7 @@ where
 
 /// Per-thread EVM state initialised by [`PrewarmContext::evm_for_ctx`] and stored in
 /// [`WorkerPool`] workers via [`Worker::get_or_init`](reth_tasks::pool::Worker::get_or_init).
-type PrewarmEvmState<Evm> = Option<EvmFor<Evm>>;
+type PrewarmEvmState<Evm> = Option<EvmFor<'static, Evm>>;
 
 impl<N, P, Evm> PrewarmContext<N, P, Evm>
 where

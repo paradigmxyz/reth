@@ -104,7 +104,7 @@ impl<C, EvmFactory> EthBlockExecutorFactory<C, EvmFactory> {
     /// Creates a configured Ethereum block executor.
     pub fn create_executor<'a>(
         &'a self,
-        evm: evm2::Evm<evm2::BaseEvmTypes>,
+        evm: evm2::Evm<'a, evm2::BaseEvmTypes>,
         ctx: EthBlockExecutionCtx<'a>,
         hashed_state_mode: HashedStateMode,
     ) -> EthBlockExecutor<'a>
@@ -121,10 +121,10 @@ impl<C, EvmFactory> EthBlockExecutorFactory<C, EvmFactory> {
     }
 
     /// Creates an EVM instance with the configured Ethereum execution environment.
-    pub fn evm_with_env<DB>(&self, db: DB, env: EthEvmEnv) -> evm2::Evm<evm2::BaseEvmTypes>
+    pub fn evm_with_env<'a, DB>(&self, db: DB, env: EthEvmEnv) -> evm2::Evm<'a, evm2::BaseEvmTypes>
     where
         C: EthChainSpec<Header = Header>,
-        DB: evm2::evm::DynDatabase + 'static,
+        DB: evm2::evm::DynDatabase + 'a,
         EvmFactory: 'static,
     {
         #[cfg(feature = "std")]
@@ -174,7 +174,7 @@ where
 {
     type Primitives = EthPrimitives;
     type Transaction = EthTxEnv;
-    type Evm = evm2::Evm<evm2::BaseEvmTypes>;
+    type Evm<'a> = evm2::Evm<'a, evm2::BaseEvmTypes>;
     type EvmEnv = EthEvmEnv;
     type ExecutionCtx<'a>
         = EthBlockExecutionCtx<'a>
@@ -187,7 +187,7 @@ where
 
     fn create_executor<'a>(
         &'a self,
-        evm: Self::Evm,
+        evm: Self::Evm<'a>,
         ctx: Self::ExecutionCtx<'a>,
         hashed_state_mode: HashedStateMode,
     ) -> Self::Executor<'a>
@@ -197,9 +197,9 @@ where
         Self::create_executor(self, evm, ctx, hashed_state_mode)
     }
 
-    fn evm_with_env<DB>(&self, db: DB, evm_env: Self::EvmEnv) -> Self::Evm
+    fn evm_with_env<'a, DB>(&self, db: DB, evm_env: Self::EvmEnv) -> Self::Evm<'a>
     where
-        DB: evm2::evm::DynDatabase + 'static,
+        DB: evm2::evm::DynDatabase + 'a,
     {
         Self::evm_with_env(self, db, evm_env)
     }
@@ -207,7 +207,7 @@ where
     fn evm_tx<'a>(
         &self,
         tx: &'a Self::Transaction,
-    ) -> &'a <evm2::BaseEvmTypes as evm2::EvmTypes>::Tx {
+    ) -> &'a <evm2::BaseEvmTypes as evm2::EvmTypesHost>::Tx {
         tx.as_envelope()
     }
 }

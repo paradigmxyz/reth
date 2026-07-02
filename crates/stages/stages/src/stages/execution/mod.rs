@@ -331,9 +331,7 @@ where
         let mut blocks = Vec::new();
         let mut results = Vec::new();
         let state_provider = LatestStateProviderRef::new(provider);
-        // SAFETY: The shared database is scoped to this synchronous stage execution and is dropped
-        // before `state_provider`.
-        let batch_db = unsafe { SharedEvmStateProviderDatabase::new(&state_provider) };
+        let batch_db = SharedEvmStateProviderDatabase::new(&state_provider);
         let mut executor = self.evm_config.batch_executor(batch_db);
         for block_number in start_block..=max_block {
             // Fetch the block

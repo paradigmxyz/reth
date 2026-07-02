@@ -84,9 +84,7 @@ where
             .provider
             .history_by_block_number(self.range.start().saturating_sub(1))
             .map_err(BlockExecutionError::other)?;
-        // SAFETY: The shared database is scoped to this synchronous backfill range execution and
-        // is dropped before `state_provider`.
-        let database = unsafe { SharedEvmStateProviderDatabase::new(&*state_provider) };
+        let database = SharedEvmStateProviderDatabase::new(&*state_provider);
         let mut executor = self.evm_config.batch_executor(database);
 
         let mut blocks = Vec::new();
@@ -220,9 +218,7 @@ where
 
         trace!(target: "exex::backfill", number = block_number, txs = block_with_senders.body().transaction_count(), "Executing block");
 
-        // SAFETY: The shared database is consumed by this synchronous execution call and does not
-        // outlive the state provider borrowed here.
-        let database = unsafe { SharedEvmStateProviderDatabase::new(&*state_provider) };
+        let database = SharedEvmStateProviderDatabase::new(&*state_provider);
         let block_execution_output =
             self.evm_config.executor(database).execute(&block_with_senders)?;
 

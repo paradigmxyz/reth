@@ -71,7 +71,7 @@ impl RethReceiptBuilder {
             append_to_block_state(&mut state, &changes);
         }
         for (tx_type, result) in txs {
-            cumulative_gas_used += result.result.gas_used;
+            cumulative_gas_used += result.result.tx_gas_used();
             let logs = result.result.logs;
             receipts.push(Receipt {
                 tx_type,
@@ -111,7 +111,7 @@ impl RethReceiptBuilder {
         let mut cumulative_gas_used = 0;
 
         for (tx_type, outcome) in txs {
-            cumulative_gas_used += outcome.gas_used;
+            cumulative_gas_used += outcome.tx_gas_used();
             receipts.push(Receipt {
                 tx_type,
                 success: outcome.status,
@@ -153,7 +153,7 @@ impl RethReceiptBuilder {
         let mut cumulative_gas_used = 0;
 
         for (tx_type, outcome) in txs {
-            cumulative_gas_used += outcome.gas_used;
+            cumulative_gas_used += outcome.tx_gas_used();
             receipts.push(Receipt {
                 tx_type,
                 success: outcome.status,
@@ -252,7 +252,7 @@ mod tests {
             Log { address, data: LogData::new_unchecked(vec![B256::ZERO], Default::default()) };
         let mut result = TxResultWithState::default();
         result.result.status = true;
-        result.result.gas_used = 21_000;
+        result.result.total_gas_spent = 21_000;
         result.result.logs.push(log.clone());
         result.state_changes.accounts.insert(
             address,
