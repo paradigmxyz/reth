@@ -7,8 +7,8 @@ use crate::{
 };
 use reth_ecies::ECIESError;
 use reth_eth_wire::{
-    errors::EthStreamError, Capabilities, DisconnectReason, EthVersion, NetworkPrimitives,
-    UnifiedStatus,
+    errors::EthStreamError, Capabilities, DisconnectReason, EncodedEthMessage, EthVersion,
+    NetworkPrimitives, UnifiedStatus,
 };
 use reth_network_api::PeerInfo;
 use reth_network_peers::{NodeRecord, PeerId};
@@ -273,6 +273,28 @@ impl<N: NetworkPrimitives> SessionCommandSender<N> {
         }
     }
 
+    /// Sends an already encoded broadcast message to the session.
+    pub(crate) fn send_encoded_broadcast(&self, msg: EncodedEthMessage, items: usize) -> bool {
+        if !self.broadcast_items.try_add(items) {
+            return false
+        }
+
+        let _ = msg.precompute_eth_only_compression();
+        let cmd = SessionCommand::EncodedBroadcast { msg, items };
+
+        match self.tx.try_send(cmd) {
+            Ok(()) => true,
+            Err(mpsc::error::TrySendError::Full(cmd)) => {
+                let _ = self.unbounded_tx.send(cmd);
+                true
+            }
+            Err(_) => {
+                self.broadcast_items.sub(items);
+                false
+            }
+        }
+    }
+
     /// Returns the current number of in-flight broadcast items.
     pub(crate) fn queued_broadcast_items(&self) -> usize {
         self.broadcast_items.get()
@@ -357,6 +379,13 @@ pub enum SessionCommand<N: NetworkPrimitives> {
     },
     /// Sends a message to the peer
     Message(PeerMessage<N>),
+    /// Sends an already encoded eth broadcast message to the peer.
+    EncodedBroadcast {
+        /// Encoded eth protocol message.
+        msg: EncodedEthMessage,
+        /// Number of broadcast items represented by the message.
+        items: usize,
+    },
 }
 
 /// Message variants an active session can produce and send back to the

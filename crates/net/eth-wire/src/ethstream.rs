@@ -11,7 +11,7 @@ use crate::{
         EthBroadcastMessage, MessageError, ProtocolBroadcastMessage, MAX_MESSAGE_SIZE,
         TX_MEMORY_BUDGET_MULTIPLIER,
     },
-    p2pstream::{P2PStream, HANDSHAKE_TIMEOUT},
+    p2pstream::{compress_eth_only_protocol_message, P2PStream, HANDSHAKE_TIMEOUT},
     CanDisconnect, DisconnectReason, EthMessage, EthNetworkPrimitives, EthVersion, ProtocolMessage,
     SharedTransactions, UnifiedStatus,
 };
@@ -19,12 +19,16 @@ use alloy_primitives::bytes::{Bytes, BytesMut};
 use alloy_rlp::{Encodable, Header};
 use futures::{ready, Sink, SinkExt};
 use pin_project::pin_project;
-use reth_eth_wire_types::{EthMessageID, NetworkPrimitives, RawCapabilityMessage};
+use reth_eth_wire_types::{
+    EthMessageID, NetworkPrimitives, NewBlockHashes, NewPooledTransactionHashes,
+    RawCapabilityMessage,
+};
 use reth_ethereum_forks::ForkFilter;
 use std::{
     future::Future,
     io,
     pin::Pin,
+    sync::{Arc, OnceLock},
     task::{Context, Poll},
     time::Duration,
 };
@@ -229,6 +233,94 @@ where
     }
 }
 
+/// An already encoded, id-prefixed eth protocol message.
+///
+/// The encoded bytes keep the eth-relative message id as the first byte. For eth-only p2p
+/// sessions the snappy-compressed wire frame can be cached and reused.
+#[derive(Clone, Debug)]
+pub struct EncodedEthMessage {
+    encoded: Bytes,
+    eth_only_compressed: Arc<OnceLock<Bytes>>,
+}
+
+impl EncodedEthMessage {
+    /// Creates a new encoded eth message.
+    pub fn new(encoded: Bytes) -> Self {
+        Self { encoded, eth_only_compressed: Arc::new(OnceLock::new()) }
+    }
+
+    /// Encodes a `NewBlockHashes` announcement.
+    pub fn new_block_hashes(hashes: NewBlockHashes) -> Self {
+        let mut out = BytesMut::new();
+        out.reserve(EthMessageID::NewBlockHashes.length() + hashes.length());
+        EthMessageID::NewBlockHashes.encode(&mut out);
+        hashes.encode(&mut out);
+        Self::new(out.freeze())
+    }
+
+    /// Encodes a `NewPooledTransactionHashes` announcement.
+    pub fn new_pooled_transaction_hashes(hashes: NewPooledTransactionHashes) -> Self {
+        let mut out = BytesMut::new();
+        EthMessageID::NewPooledTransactionHashes.encode(&mut out);
+        match hashes {
+            NewPooledTransactionHashes::Eth66(hashes) => hashes.encode(&mut out),
+            NewPooledTransactionHashes::Eth68(hashes) => hashes.encode(&mut out),
+            NewPooledTransactionHashes::Eth72(hashes) => hashes.encode(&mut out),
+        }
+        Self::new(out.freeze())
+    }
+
+    /// Encodes a `Transactions` broadcast with a precomputed RLP list payload length.
+    pub fn transactions_broadcast<T: Encodable>(
+        transactions: &SharedTransactions<T>,
+        payload_length: usize,
+    ) -> Self {
+        let header = Header { list: true, payload_length };
+        let mut out = BytesMut::with_capacity(
+            EthMessageID::Transactions.length() + header.length() + payload_length,
+        );
+        EthMessageID::Transactions.encode(&mut out);
+        header.encode(&mut out);
+        for tx in transactions.iter() {
+            tx.encode(&mut out);
+        }
+        Self::new(out.freeze())
+    }
+
+    /// Returns the encoded eth-relative protocol bytes.
+    pub const fn encoded(&self) -> &Bytes {
+        &self.encoded
+    }
+
+    /// Consumes the wrapper and returns the encoded eth-relative protocol bytes.
+    pub fn into_encoded(self) -> Bytes {
+        self.encoded
+    }
+
+    /// Precomputes the eth-only compressed frame if it is not already cached.
+    pub fn precompute_eth_only_compression(&self) -> Result<(), EthStreamError> {
+        self.eth_only_compressed()?;
+        Ok(())
+    }
+
+    fn eth_only_compressed(&self) -> Result<Bytes, EthStreamError> {
+        if let Some(compressed) = self.eth_only_compressed.get() {
+            return Ok(compressed.clone())
+        }
+
+        let compressed = compress_eth_only_protocol_message(&self.encoded)?;
+        if self.eth_only_compressed.set(compressed.clone()).is_err() {
+            return Ok(self
+                .eth_only_compressed
+                .get()
+                .expect("compressed frame set by another clone")
+                .clone())
+        }
+
+        Ok(compressed)
+    }
+}
+
 /// An `EthStream` wraps over any `Stream` that yields bytes and makes it
 /// compatible with eth-networking protocol messages, which get RLP encoded/decoded.
 #[pin_project]
@@ -324,6 +416,12 @@ where
         self.inner.start_send_unpin(msg.encoded())?;
         Ok(())
     }
+
+    /// Sends an already encoded eth protocol message.
+    pub fn start_send_encoded(&mut self, msg: EncodedEthMessage) -> Result<(), EthStreamError> {
+        self.inner.start_send_unpin(msg.into_encoded())?;
+        Ok(())
+    }
 }
 
 impl<S, E, N> Stream for EthStream<S, N>
@@ -399,6 +497,17 @@ where
     ) -> Result<(), EthStreamError> {
         encode_raw_capability_message(msg, encode_buf);
         self.inner.start_send_protocol_message(encode_buf)?;
+        Ok(())
+    }
+
+    /// Sends an already encoded eth protocol message by reusing its cached eth-only compressed
+    /// wire frame.
+    pub fn start_send_encoded_eth_only(
+        &mut self,
+        msg: EncodedEthMessage,
+    ) -> Result<(), EthStreamError> {
+        let compressed = msg.eth_only_compressed()?;
+        self.inner.start_send_precompressed_protocol_message(compressed)?;
         Ok(())
     }
 }

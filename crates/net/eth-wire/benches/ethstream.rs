@@ -10,9 +10,10 @@ use criterion::{criterion_group, criterion_main, Criterion};
 use futures::{future::poll_fn, Sink, SinkExt, Stream, StreamExt};
 use reth_ecies::stream::ECIESStream;
 use reth_eth_wire::{
-    capability::SharedCapabilities, message::EthBroadcastMessage, Capability, EthMessage,
-    EthNetworkPrimitives, EthStream, EthVersion, NewPooledTransactionHashes68,
-    NewPooledTransactionHashes72, P2PStream, SharedTransactions, Transactions,
+    capability::SharedCapabilities, message::EthBroadcastMessage, Capability, EncodedEthMessage,
+    EthMessage, EthNetworkPrimitives, EthStream, EthVersion, NewPooledTransactionHashes66,
+    NewPooledTransactionHashes68, NewPooledTransactionHashes72, P2PStream, SharedTransactions,
+    Transactions,
 };
 use reth_ethereum_primitives::{Transaction, TransactionSigned};
 use reth_network_peers::pk2id;
@@ -116,6 +117,14 @@ fn transaction_broadcast_payload_length(
     transactions.iter().map(Encodable::length).sum()
 }
 
+fn encoded_hash_announcement() -> EncodedEthMessage {
+    let msg = EncodedEthMessage::new_pooled_transaction_hashes(
+        NewPooledTransactionHashes66(hashes(1)).into(),
+    );
+    msg.precompute_eth_only_compression().unwrap();
+    msg
+}
+
 fn eth_stream(transport: MockTransport) -> EthStream<P2PStream<MockTransport>> {
     eth_stream_with_version(transport, EthVersion::Eth66)
 }
@@ -212,6 +221,24 @@ async fn send_hash_announcements_in_active_session_batches_with_encode_buf(
         assert_ne!(batch, 0, "poll_ready returned ready without outgoing capacity");
         for _ in 0..batch {
             stream.start_send_with_encode_buf(message(), &mut encode_buf).unwrap();
+        }
+        remaining -= batch;
+    }
+    stream.flush().await.unwrap();
+}
+
+async fn send_hash_announcements_in_active_session_batches_preencoded(
+    stream: &mut EthStream<P2PStream<MockTransport>>,
+    count: usize,
+) {
+    let msg = encoded_hash_announcement();
+    let mut remaining = count;
+    while remaining > 0 {
+        poll_fn(|cx| Pin::new(&mut *stream).poll_ready(cx)).await.unwrap();
+        let batch = stream.inner().available_outgoing_capacity().min(remaining);
+        assert_ne!(batch, 0, "poll_ready returned ready without outgoing capacity");
+        for _ in 0..batch {
+            stream.start_send_encoded_eth_only(msg.clone()).unwrap();
         }
         remaining -= batch;
     }
@@ -380,6 +407,20 @@ fn bench_send_messages(c: &mut Criterion) {
             rt.block_on(async {
                 let mut stream = active_session_eth_stream(MockTransport::default());
                 send_hash_announcements_in_active_session_batches_with_encode_buf(
+                    &mut stream,
+                    MESSAGE_COUNT,
+                )
+                .await;
+                black_box(stream.inner().inner().sent.len());
+            });
+        })
+    });
+
+    group.bench_function("send_hash_announcements_batched_preencoded", |b| {
+        b.iter(|| {
+            rt.block_on(async {
+                let mut stream = active_session_eth_stream(MockTransport::default());
+                send_hash_announcements_in_active_session_batches_preencoded(
                     &mut stream,
                     MESSAGE_COUNT,
                 )

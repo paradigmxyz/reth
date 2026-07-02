@@ -19,9 +19,9 @@ use futures::{future::Either, io, FutureExt, StreamExt};
 use reth_ecies::{stream::ECIESStream, ECIESError};
 use reth_eth_wire::{
     errors::EthStreamError, handshake::EthRlpxHandshake, multiplex::RlpxProtocolMultiplexer,
-    BlockRangeUpdate, Capabilities, DisconnectReason, EthStream, EthVersion,
-    HelloMessageWithProtocols, NetworkPrimitives, UnauthedP2PStream, UnifiedStatus,
-    HANDSHAKE_TIMEOUT,
+    BlockRangeUpdate, Capabilities, DisconnectReason, EncodedEthMessage, EthStream, EthVersion,
+    HelloMessageWithProtocols, NetworkPrimitives, NewPooledTransactionHashes, UnauthedP2PStream,
+    UnifiedStatus, HANDSHAKE_TIMEOUT,
 };
 use reth_ethereum_forks::{ForkFilter, ForkId, ForkTransition, Head};
 use reth_metrics::common::mpsc::MeteredPollSender;
@@ -401,6 +401,26 @@ impl<N: NetworkPrimitives> SessionManager<N> {
         if let Some(session) = self.active_sessions.get(peer_id) &&
             !session.commands.send_message(msg)
         {
+            self.metrics.total_outgoing_peer_messages_dropped.increment(1);
+        }
+    }
+
+    /// Sends a pooled transaction hash announcement to the peer's session through the pre-encoded
+    /// broadcast path when the negotiated eth version supports it.
+    pub fn send_pooled_transaction_hashes(
+        &self,
+        peer_id: &PeerId,
+        msg: NewPooledTransactionHashes,
+    ) {
+        let Some(session) = self.active_sessions.get(peer_id) else { return };
+
+        if !msg.is_valid_for_version(session.version) {
+            return
+        }
+
+        let items = msg.len();
+        let msg = EncodedEthMessage::new_pooled_transaction_hashes(msg);
+        if !session.commands.send_encoded_broadcast(msg, items) {
             self.metrics.total_outgoing_peer_messages_dropped.increment(1);
         }
     }

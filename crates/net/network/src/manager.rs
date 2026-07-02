@@ -707,10 +707,9 @@ impl<N: NetworkPrimitives> NetworkManager<N> {
             NetworkHandleMessage::SendTransaction { peer_id, msg } => {
                 self.swarm.sessions_mut().send_message(&peer_id, PeerMessage::SendTransactions(msg))
             }
-            NetworkHandleMessage::SendPooledTransactionHashes { peer_id, msg } => self
-                .swarm
-                .sessions_mut()
-                .send_message(&peer_id, PeerMessage::PooledTransactions(msg)),
+            NetworkHandleMessage::SendPooledTransactionHashes { peer_id, msg } => {
+                self.swarm.sessions_mut().send_pooled_transaction_hashes(&peer_id, msg)
+            }
             NetworkHandleMessage::AddTrustedPeerId(peer_id) => {
                 self.swarm.state_mut().add_trusted_peer_id(peer_id);
             }

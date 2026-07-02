@@ -31,8 +31,8 @@ use metrics::{Counter, Gauge};
 use reth_eth_wire::{
     errors::{EthHandshakeError, EthStreamError},
     message::{EthBroadcastMessage, MessageError},
-    Capabilities, DisconnectP2P, DisconnectReason, EthMessage, NetworkPrimitives, NewBlockPayload,
-    SharedTransactions,
+    Capabilities, DisconnectP2P, DisconnectReason, EncodedEthMessage, EthMessage,
+    NetworkPrimitives, NewBlockPayload, SharedTransactions,
 };
 use reth_eth_wire_types::{message::RequestPair, NewPooledTransactionHashes, RawCapabilityMessage};
 use reth_metrics::common::mpsc::MeteredPollSender;
@@ -716,6 +716,10 @@ impl<N: NetworkPrimitives> Future for ActiveSession<N> {
                             SessionCommand::Message(msg) => {
                                 this.on_internal_peer_message(msg);
                             }
+                            SessionCommand::EncodedBroadcast { msg, items } => {
+                                this.queued_outgoing
+                                    .push_back(OutgoingMessage::EncodedBroadcast { msg, items });
+                            }
                         }
                     }
                 }
@@ -728,6 +732,11 @@ impl<N: NetworkPrimitives> Future for ActiveSession<N> {
                     SessionCommand::Message(msg) => {
                         this.unbounded_broadcast_msgs.increment(1);
                         this.on_internal_peer_message(msg);
+                    }
+                    SessionCommand::EncodedBroadcast { msg, items } => {
+                        this.unbounded_broadcast_msgs.increment(1);
+                        this.queued_outgoing
+                            .push_back(OutgoingMessage::EncodedBroadcast { msg, items });
                     }
                     SessionCommand::Disconnect { reason } => {
                         let reason = reason.unwrap_or(DisconnectReason::DisconnectRequested);
@@ -813,6 +822,9 @@ impl<N: NetworkPrimitives> Future for ActiveSession<N> {
                                             payload_length,
                                             &mut this.conn_encode_buf,
                                         ),
+                                    OutgoingMessage::EncodedBroadcast { msg, .. } => {
+                                        this.conn.start_send_encoded(msg)
+                                    }
                                     OutgoingMessage::Raw(msg) => {
                                         this.conn.start_send_raw_with_encode_buf(
                                             msg,
@@ -1135,6 +1147,8 @@ pub(crate) enum OutgoingMessage<N: NetworkPrimitives> {
         transactions: SharedTransactions<N::BroadcastedTransaction>,
         payload_length: usize,
     },
+    /// An already encoded eth broadcast message.
+    EncodedBroadcast { msg: EncodedEthMessage, items: usize },
     /// A raw capability message
     Raw(RawCapabilityMessage),
 }
@@ -1169,6 +1183,7 @@ impl<N: NetworkPrimitives> OutgoingMessage<N> {
                 ),
             },
             Self::TransactionBroadcast { transactions, .. } => transactions.len(),
+            Self::EncodedBroadcast { items, .. } => *items,
             Self::Raw(_) => 0,
         }
     }

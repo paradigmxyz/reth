@@ -615,6 +615,32 @@ where
         Ok(())
     }
 
+    /// Starts sending an already-compressed p2p subprotocol frame.
+    ///
+    /// The frame must contain the wire message id as its first byte, including the p2p reserved
+    /// message-id offset. This is intended for eth-only sessions that can reuse a precompressed
+    /// broadcast frame across peers.
+    pub fn start_send_precompressed_protocol_message(
+        &mut self,
+        item: Bytes,
+    ) -> Result<(), P2PStreamError> {
+        if item.is_empty() {
+            return Err(P2PStreamError::EmptyProtocolMessage)
+        }
+
+        if item[0] <= MAX_RESERVED_MESSAGE_ID {
+            return Err(P2PStreamError::UnknownReservedMessageId(item[0]))
+        }
+
+        if !self.has_outgoing_capacity() {
+            return Err(P2PStreamError::SendBufferFull)
+        }
+
+        self.outgoing_messages.push_back(item);
+
+        Ok(())
+    }
+
     /// Drains queued p2p frames into the underlying sink without flushing the underlying sink.
     fn poll_drain_outgoing(
         mut self: Pin<&mut Self>,
@@ -630,6 +656,37 @@ where
 
         Poll::Ready(Ok(()))
     }
+}
+
+/// Compresses an id-prefixed eth protocol message for an eth-only p2p session.
+///
+/// The returned frame includes the p2p reserved message-id offset in the first byte, so it can be
+/// queued directly with [`P2PStream::start_send_precompressed_protocol_message`].
+pub(crate) fn compress_eth_only_protocol_message(item: &[u8]) -> Result<Bytes, P2PStreamError> {
+    if item.len() > MAX_PAYLOAD_SIZE {
+        return Err(P2PStreamError::MessageTooBig {
+            message_size: item.len(),
+            max_size: MAX_PAYLOAD_SIZE,
+        })
+    }
+
+    if item.is_empty() {
+        return Err(P2PStreamError::EmptyProtocolMessage)
+    }
+
+    let mut compressed = BytesMut::zeroed(1 + snap::raw::max_compress_len(item.len() - 1));
+    let compressed_size =
+        snap::raw::Encoder::new().compress(&item[1..], &mut compressed[1..]).map_err(|err| {
+            debug!(%err, msg=%hex::encode(&item[1..]), "error compressing p2p message");
+            err
+        })?;
+
+    compressed.truncate(compressed_size + 1);
+    compressed[0] = item[0]
+        .checked_add(MAX_RESERVED_MESSAGE_ID + 1)
+        .ok_or(P2PStreamError::UnknownReservedMessageId(item[0]))?;
+
+    Ok(compressed.freeze())
 }
 
 impl<Io> P2PStream<ECIESStream<Io>>
@@ -1347,6 +1404,21 @@ mod tests {
         let pong = P2PMessage::decode(&mut &snappy_pong[..]).unwrap();
         assert!(matches!(pong, P2PMessage::Pong));
         assert_eq!(alloy_rlp::encode(pong), &snappy_pong[..]);
+    }
+
+    #[tokio::test]
+    async fn precompressed_protocol_message_matches_regular_send() {
+        let msg = [0x08, EMPTY_LIST_CODE];
+        let mut regular = P2PStream::new(FlushCountingTransport::default(), shared_capabilities());
+        regular.start_send_protocol_message(&msg).unwrap();
+        let expected = regular.outgoing_messages.front().cloned().unwrap();
+
+        let precompressed = compress_eth_only_protocol_message(&msg).unwrap();
+        assert_eq!(precompressed, expected);
+
+        let mut stream = P2PStream::new(FlushCountingTransport::default(), shared_capabilities());
+        stream.start_send_precompressed_protocol_message(precompressed.clone()).unwrap();
+        assert_eq!(stream.outgoing_messages.front(), Some(&precompressed));
     }
 
     #[tokio::test]

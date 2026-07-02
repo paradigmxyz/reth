@@ -7,8 +7,8 @@ use reth_eth_wire::{
     errors::EthStreamError,
     message::EthBroadcastMessage,
     multiplex::{ProtocolProxy, RlpxSatelliteStream},
-    EthMessage, EthNetworkPrimitives, EthStream, EthVersion, NetworkPrimitives, P2PStream,
-    SharedTransactions,
+    EncodedEthMessage, EthMessage, EthNetworkPrimitives, EthStream, EthVersion, NetworkPrimitives,
+    P2PStream, SharedTransactions,
 };
 use reth_eth_wire_types::RawCapabilityMessage;
 use std::{
@@ -179,6 +179,15 @@ impl<N: NetworkPrimitives> EthRlpxConnection<N> {
         match self {
             Self::EthOnly(conn) => conn.start_send_raw_with_encode_buf(msg, encode_buf),
             Self::Satellite(conn) => conn.primary_mut().start_send_raw(msg),
+        }
+    }
+
+    /// Sends an already encoded eth protocol message.
+    #[inline]
+    pub fn start_send_encoded(&mut self, msg: EncodedEthMessage) -> Result<(), EthStreamError> {
+        match self {
+            Self::EthOnly(conn) => conn.start_send_encoded_eth_only(msg),
+            Self::Satellite(conn) => conn.primary_mut().start_send_encoded(msg),
         }
     }
 
