@@ -372,18 +372,17 @@ where
                 let parent_span = branch_span.clone();
                 let _span = branch_span.entered();
 
-                stream_bal.as_bal().par_iter().for_each(|account_changes| {
-                    WorkerPool::with_worker_mut(|worker| {
-                        let provider =
-                            worker.get_or_init::<Option<Box<dyn AccountReader>>>(|| None);
+                stream_bal.as_bal().par_iter().for_each_init(
+                    || None::<Box<dyn AccountReader>>,
+                    |provider, account_changes| {
                         ctx.send_bal_hashed_state(
                             &parent_span,
                             provider,
                             account_changes,
                             &to_sparse_trie_task,
                         );
-                    });
-                });
+                    },
+                );
 
                 let _ = to_sparse_trie_task.send(StateRootMessage::FinishedStateUpdates);
                 let _ = stream_tx.send(());
