@@ -456,7 +456,7 @@ fn encode_transactions_broadcast_message<T: Encodable>(
     out.reserve(EthMessageID::Transactions.length() + header.length() + payload_length);
     EthMessageID::Transactions.encode(out);
     header.encode(out);
-    for tx in transactions.0 {
+    for tx in transactions.iter() {
         tx.encode(out);
     }
 }
