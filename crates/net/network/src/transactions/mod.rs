@@ -33,7 +33,9 @@ use crate::{
         DEFAULT_BUDGET_TRY_DRAIN_PENDING_POOL_IMPORTS, DEFAULT_BUDGET_TRY_DRAIN_STREAM,
     },
     cache::LruCache,
-    duration_metered_exec, metered_poll_nested_stream_with_budget,
+    duration_metered_exec,
+    message::FullTransactionBroadcast,
+    metered_poll_nested_stream_with_budget,
     metrics::{AnnouncedTxTypesMetrics, TransactionsManagerMetrics},
     transactions::config::{StrictEthAnnouncementFilter, TransactionPropagationKind},
     NetworkHandle, TxTypesCounter,
@@ -48,7 +50,7 @@ use reth_eth_wire::{
     DedupPayload, EthNetworkPrimitives, EthVersion, GetPooledTransactions, HandleMempoolData,
     HandleVersionedMempoolData, NetworkPrimitives, NewPooledTransactionHashes,
     NewPooledTransactionHashes66, NewPooledTransactionHashes68, NewPooledTransactionHashes72,
-    PooledTransactions, RequestTxHashes, Transactions, ValidAnnouncementData,
+    PooledTransactions, RequestTxHashes, SharedTransactions, Transactions, ValidAnnouncementData,
 };
 use reth_ethereum_primitives::{TransactionSigned, TxType};
 use reth_metrics::common::mpsc::MemoryBoundedReceiver;
@@ -937,14 +939,14 @@ where
 
         // send full transactions, if any
         if let Some(new_full_transactions) = full {
-            for tx in &new_full_transactions {
+            for tx in new_full_transactions.transactions.iter() {
                 propagated.record(*tx.tx_hash(), PropagateKind::Full(peer_id));
                 // mark transaction as seen by peer
                 peer.seen_transactions.insert(*tx.tx_hash());
             }
 
             // send full transactions
-            self.network.send_transactions(peer_id, new_full_transactions);
+            self.network.send_transaction_broadcast(peer_id, new_full_transactions);
         }
 
         // Update propagated transactions metrics
@@ -1111,14 +1113,14 @@ where
 
             // send full transactions, if any
             if let Some(new_full_transactions) = full {
-                for tx in &new_full_transactions {
+                for tx in new_full_transactions.transactions.iter() {
                     propagated.record(*tx.tx_hash(), PropagateKind::Full(*peer_id));
                 }
 
                 trace!(target: "net::tx", ?peer_id, num_txs=?new_full_transactions.len(), "Propagating full transactions to peer");
 
                 // send full transactions
-                self.network.send_transactions(*peer_id, new_full_transactions);
+                self.network.send_transaction_broadcast(*peer_id, new_full_transactions);
             }
         }
 
@@ -1761,14 +1763,15 @@ impl PropagationMode {
 #[derive(Debug, Clone)]
 struct PropagateTransaction<T = TransactionSigned> {
     size: usize,
+    payload_length: usize,
     transaction: Arc<T>,
 }
 
 impl<T: SignedTransaction> PropagateTransaction<T> {
     /// Create a new instance from a transaction.
     pub fn new(transaction: T) -> Self {
-        let size = transaction.length();
-        Self { size, transaction: Arc::new(transaction) }
+        let payload_length = transaction.length();
+        Self { size: payload_length, payload_length, transaction: Arc::new(transaction) }
     }
 
     /// Create a new instance from a pooled transaction
@@ -1778,8 +1781,9 @@ impl<T: SignedTransaction> PropagateTransaction<T> {
     {
         let size = tx.encoded_length();
         let transaction = tx.transaction.clone_into_consensus();
+        let payload_length = transaction.length();
         let transaction = Arc::new(transaction.into_inner());
-        Self { size, transaction }
+        Self { size, payload_length, transaction }
     }
 
     fn tx_hash(&self) -> &TxHash {
@@ -1842,7 +1846,7 @@ struct PropagateTransactions<T> {
     /// The pooled transaction hashes to send.
     pooled: Option<NewPooledTransactionHashes>,
     /// The transactions to send in full.
-    full: Option<Vec<Arc<T>>>,
+    full: Option<FullTransactionBroadcast<T>>,
 }
 
 /// Helper type for constructing the full transaction message that enforces the
@@ -1853,6 +1857,8 @@ struct PropagateTransactions<T> {
 struct FullTransactionsBuilder<T> {
     /// The soft limit to enforce for a single broadcast message of full transactions.
     total_size: usize,
+    /// Sum of encoded transaction lengths for the final RLP list payload.
+    payload_length: usize,
     /// All transactions to be broadcasted.
     transactions: Vec<Arc<T>>,
     /// Transactions that didn't fit into the broadcast message
@@ -1864,6 +1870,7 @@ impl<T> FullTransactionsBuilder<T> {
     fn new(version: EthVersion) -> Self {
         Self {
             total_size: 0,
+            payload_length: 0,
             pooled: PooledTransactionsHashesBuilder::new(version),
             transactions: vec![],
         }
@@ -1876,6 +1883,7 @@ impl<T> FullTransactionsBuilder<T> {
     fn with_capacity(version: EthVersion, capacity: usize) -> Self {
         Self {
             total_size: 0,
+            payload_length: 0,
             pooled: PooledTransactionsHashesBuilder::new(version),
             transactions: Vec::with_capacity(capacity),
         }
@@ -1889,7 +1897,12 @@ impl<T> FullTransactionsBuilder<T> {
     /// Returns the messages that should be propagated to the peer.
     fn build(self) -> PropagateTransactions<T> {
         let pooled = Some(self.pooled.build()).filter(|pooled| !pooled.is_empty());
-        let full = Some(self.transactions).filter(|full| !full.is_empty());
+        let full = (!self.transactions.is_empty()).then(|| {
+            FullTransactionBroadcast::from_parts(
+                SharedTransactions(self.transactions),
+                self.payload_length,
+            )
+        });
         PropagateTransactions { pooled, full }
     }
 }
@@ -1935,6 +1948,7 @@ impl<T: SignedTransaction> FullTransactionsBuilder<T> {
         }
 
         self.total_size = new_size;
+        self.payload_length += transaction.payload_length;
         self.transactions.push(Arc::clone(&transaction.transaction));
     }
 }
@@ -2266,7 +2280,7 @@ mod tests {
     use alloy_consensus::{TxEip1559, TxLegacy};
     use alloy_eips::eip4844::BlobTransactionValidationError;
     use alloy_primitives::{hex, Signature, TxKind, B256, U256};
-    use alloy_rlp::Decodable;
+    use alloy_rlp::{Decodable, Encodable};
     use futures::FutureExt;
     use reth_chainspec::MIN_TRANSACTION_GAS;
     use reth_ethereum_primitives::{PooledTransactionVariant, Transaction, TransactionSigned};
@@ -3037,6 +3051,7 @@ mod tests {
         tx.transaction.set_size(DEFAULT_SOFT_LIMIT_BYTE_SIZE_TRANSACTIONS_BROADCAST_MESSAGE + 1);
         let tx = Arc::new(tx);
         let tx = PropagateTransaction::pool_tx(tx);
+        let tx_payload_length = tx.payload_length;
         builder.push(&tx);
         assert!(!builder.is_empty());
 
@@ -3044,6 +3059,11 @@ mod tests {
         assert!(txs.pooled.is_none());
         let txs = txs.full.unwrap();
         assert_eq!(txs.len(), 1);
+        assert_eq!(txs.payload_length, tx_payload_length);
+        assert_eq!(
+            txs.payload_length,
+            txs.transactions.iter().map(Encodable::length).sum::<usize>()
+        );
 
         builder.push(&tx);
 
@@ -3052,6 +3072,11 @@ mod tests {
         assert_eq!(pooled.len(), 1);
         let txs = txs.full.unwrap();
         assert_eq!(txs.len(), 1);
+        assert_eq!(txs.payload_length, tx_payload_length);
+        assert_eq!(
+            txs.payload_length,
+            txs.transactions.iter().map(Encodable::length).sum::<usize>()
+        );
     }
 
     #[test]
@@ -3078,6 +3103,11 @@ mod tests {
         assert_eq!(pooled.len(), 1);
         let txs = txs.full.unwrap();
         assert_eq!(txs.len(), 1);
+        assert_eq!(txs.payload_length, tx.payload_length);
+        assert_eq!(
+            txs.payload_length,
+            txs.transactions.iter().map(Encodable::length).sum::<usize>()
+        );
     }
 
     #[tokio::test]

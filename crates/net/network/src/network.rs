@@ -1,6 +1,10 @@
 use crate::{
-    config::NetworkMode, message::PeerMessage, protocol::RlpxSubProtocol,
-    swarm::NetworkConnectionState, transactions::TransactionsHandle, FetchClient,
+    config::NetworkMode,
+    message::{FullTransactionBroadcast, PeerMessage},
+    protocol::RlpxSubProtocol,
+    swarm::NetworkConnectionState,
+    transactions::TransactionsHandle,
+    FetchClient,
 };
 use alloy_primitives::B256;
 use enr::Enr;
@@ -133,10 +137,19 @@ impl<N: NetworkPrimitives> NetworkHandle<N> {
 
     /// Send full transactions to the peer
     pub fn send_transactions(&self, peer_id: PeerId, msg: Vec<Arc<N::BroadcastedTransaction>>) {
-        self.send_message(NetworkHandleMessage::SendTransaction {
+        self.send_transaction_broadcast(
             peer_id,
-            msg: SharedTransactions(msg),
-        })
+            FullTransactionBroadcast::new(SharedTransactions(msg)),
+        )
+    }
+
+    /// Send full transactions with a precomputed payload length to the peer.
+    pub(crate) fn send_transaction_broadcast(
+        &self,
+        peer_id: PeerId,
+        msg: FullTransactionBroadcast<N::BroadcastedTransaction>,
+    ) {
+        self.send_message(NetworkHandleMessage::SendTransaction { peer_id, msg })
     }
 
     /// Send eth message to the peer.
@@ -566,7 +579,7 @@ pub(crate) enum NetworkHandleMessage<N: NetworkPrimitives = EthNetworkPrimitives
         /// The ID of the peer to which the transactions are sent.
         peer_id: PeerId,
         /// The shared transactions to send.
-        msg: SharedTransactions<N::BroadcastedTransaction>,
+        msg: FullTransactionBroadcast<N::BroadcastedTransaction>,
     },
     /// Sends a list of transaction hashes to the given peer.
     SendPooledTransactionHashes {

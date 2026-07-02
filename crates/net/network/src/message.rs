@@ -6,6 +6,7 @@
 use crate::types::{BlockAccessLists, Receipts69, Receipts70};
 use alloy_consensus::{BlockHeader, ReceiptWithBloom};
 use alloy_primitives::{Bytes, B256};
+use alloy_rlp::Encodable;
 use futures::FutureExt;
 use reth_eth_wire::{
     message::RequestPair, BlockBodies, BlockHeaders, BlockRangeUpdate, Cells, EthMessage,
@@ -41,6 +42,46 @@ impl<P: NewBlockPayload> NewBlockMessage<P> {
     }
 }
 
+/// Full transaction broadcast with its cached RLP list payload length.
+#[derive(Debug)]
+pub struct FullTransactionBroadcast<T> {
+    /// Transactions to broadcast.
+    pub transactions: SharedTransactions<T>,
+    /// Sum of encoded transaction lengths, excluding the outer list header.
+    pub payload_length: usize,
+}
+
+impl<T> FullTransactionBroadcast<T> {
+    /// Creates a new broadcast from transactions and a precomputed payload length.
+    pub const fn from_parts(transactions: SharedTransactions<T>, payload_length: usize) -> Self {
+        Self { transactions, payload_length }
+    }
+
+    /// Returns the number of transactions in the broadcast.
+    pub fn len(&self) -> usize {
+        self.transactions.len()
+    }
+
+    /// Returns whether the broadcast has no transactions.
+    pub fn is_empty(&self) -> bool {
+        self.transactions.is_empty()
+    }
+}
+
+impl<T: Encodable> FullTransactionBroadcast<T> {
+    /// Creates a new broadcast and computes its RLP list payload length.
+    pub fn new(transactions: SharedTransactions<T>) -> Self {
+        let payload_length = transactions.iter().map(Encodable::length).sum();
+        Self { transactions, payload_length }
+    }
+}
+
+impl<T: Encodable> From<SharedTransactions<T>> for FullTransactionBroadcast<T> {
+    fn from(transactions: SharedTransactions<T>) -> Self {
+        Self::new(transactions)
+    }
+}
+
 /// All Bi-directional eth-message variants that can be sent to a session or received from a
 /// session.
 #[derive(Debug)]
@@ -52,7 +93,7 @@ pub enum PeerMessage<N: NetworkPrimitives = EthNetworkPrimitives> {
     /// Received transactions _from_ the peer
     ReceivedTransaction(Transactions<N::BroadcastedTransaction>),
     /// Broadcast transactions _from_ local _to_ a peer.
-    SendTransactions(SharedTransactions<N::BroadcastedTransaction>),
+    SendTransactions(FullTransactionBroadcast<N::BroadcastedTransaction>),
     /// Send new pooled transactions
     PooledTransactions(NewPooledTransactionHashes),
     /// All `eth` request variants.

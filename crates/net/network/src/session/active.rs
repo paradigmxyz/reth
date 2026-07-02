@@ -461,7 +461,10 @@ impl<N: NetworkPrimitives> ActiveSession<N> {
                 self.on_internal_peer_request(req, deadline);
             }
             PeerMessage::SendTransactions(msg) => {
-                self.queued_outgoing.push_back(EthBroadcastMessage::Transactions(msg).into());
+                self.queued_outgoing.push_back(OutgoingMessage::TransactionBroadcast {
+                    transactions: msg.transactions,
+                    payload_length: msg.payload_length,
+                });
             }
             PeerMessage::BlockRangeUpdated(_) => {}
             PeerMessage::ReceivedTransaction(_) => {
