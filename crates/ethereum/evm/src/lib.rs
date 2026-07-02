@@ -293,7 +293,6 @@ where
     type Primitives = EthPrimitives;
     type Error = Infallible;
     type NextBlockEnvCtx = NextBlockEnvAttributes;
-    type TxEnv = EthTxEnv;
     type BlockExecutorFactory = EthBlockExecutorFactory<ChainSpec, EvmF>;
     #[cfg(feature = "std")]
     type BlockAssembler = EthBlockAssembler<ChainSpec>;

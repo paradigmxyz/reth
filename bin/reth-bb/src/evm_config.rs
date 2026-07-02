@@ -15,7 +15,7 @@ use reth_evm::{
     ConfigureEngineEvm, ConfigureEvm, EvmEnvFor, ExecutableTxIterator, ExecutionCtxFor,
     NextBlockEnvAttributes,
 };
-use reth_evm_ethereum::{EthEvmConfig, EthTxEnv};
+use reth_evm_ethereum::EthEvmConfig;
 use reth_primitives_traits::{BlockTy, HeaderTy, SealedBlock, SealedHeader, TxTy};
 use reth_storage_errors::any::AnyError;
 
@@ -55,13 +55,11 @@ where
         Primitives = EthPrimitives,
         Error = Infallible,
         NextBlockEnvCtx = NextBlockEnvAttributes,
-        TxEnv = EthTxEnv,
     >,
 {
     type Primitives = EthPrimitives;
     type Error = Infallible;
     type NextBlockEnvCtx = NextBlockEnvAttributes;
-    type TxEnv = EthTxEnv;
     type BlockExecutorFactory = <EthEvmConfig<C> as ConfigureEvm>::BlockExecutorFactory;
     type BlockAssembler = <EthEvmConfig<C> as ConfigureEvm>::BlockAssembler;
 

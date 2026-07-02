@@ -34,7 +34,6 @@ where
     type Primitives = Inner::Primitives;
     type Error = Inner::Error;
     type NextBlockEnvCtx = Inner::NextBlockEnvCtx;
-    type TxEnv = Inner::TxEnv;
     type BlockExecutorFactory = Inner::BlockExecutorFactory;
     #[cfg(feature = "std")]
     type BlockAssembler = Inner::BlockAssembler;

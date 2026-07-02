@@ -7,7 +7,8 @@ pub type EvmEnvFor<Evm> =
     <<Evm as ConfigureEvm>::BlockExecutorFactory as BlockExecutorFactory>::EvmEnv;
 
 /// Type alias for the configured transaction environment.
-pub type TxEnvFor<Evm> = <Evm as ConfigureEvm>::TxEnv;
+pub type TxEnvFor<Evm> =
+    <<Evm as ConfigureEvm>::BlockExecutorFactory as BlockExecutorFactory>::Transaction;
 
 /// Helper to access the configured execution context.
 pub type ExecutionCtxFor<'a, Evm> =
