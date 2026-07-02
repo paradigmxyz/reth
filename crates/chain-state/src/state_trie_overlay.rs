@@ -157,7 +157,7 @@ impl<N: NodePrimitives> StateTrieOverlayManager<N> {
             .iter()
             .filter_map(|entry| {
                 let key = *entry.key();
-                (key.tip_hash == parent_hash && entry.value().is_ready()).then_some(key.anchor_hash)
+                (key.tip_hash == parent_hash).then_some((key.anchor_hash, entry.value().clone()))
             })
             .collect::<Vec<_>>();
 
@@ -182,7 +182,16 @@ impl<N: NodePrimitives> StateTrieOverlayManager<N> {
         #[cfg(feature = "rayon")]
         {
             let parent_span = span;
-            for anchor_hash in cached_parent_overlays {
+            let max_waiting_parent_overlays = worker_pool.current_num_threads().saturating_sub(1);
+            let mut waiting_parent_overlays = 0usize;
+            for (anchor_hash, parent_entry) in cached_parent_overlays {
+                if matches!(parent_entry, OverlayCacheEntry::Computing(_)) {
+                    if waiting_parent_overlays >= max_waiting_parent_overlays {
+                        continue
+                    }
+                    waiting_parent_overlays += 1;
+                }
+
                 let manager = <Self as Clone>::clone(self);
                 let parent_span = parent_span.clone();
                 worker_pool.spawn(move || {
@@ -194,7 +203,13 @@ impl<N: NodePrimitives> StateTrieOverlayManager<N> {
                         anchor_hash = %anchor_hash,
                     )
                     .entered();
-                    let _ = manager.precompute_overlay(hash, anchor_hash);
+                    let _ = match parent_entry {
+                        OverlayCacheEntry::Ready(_) => {
+                            manager.precompute_overlay(hash, anchor_hash)
+                        }
+                        OverlayCacheEntry::Computing(parent_waiter) => manager
+                            .precompute_overlay_after_parent(hash, anchor_hash, parent_waiter),
+                    };
                 });
             }
         }
@@ -275,6 +290,50 @@ impl<N: NodePrimitives> StateTrieOverlayManager<N> {
         anchor_hash: B256,
     ) -> Result<(), StateTrieOverlayError> {
         let _ = self.get_overlay_inner(tip_hash, anchor_hash, OverlayLookupMode::Precompute)?;
+        Ok(())
+    }
+
+    #[cfg(feature = "rayon")]
+    fn precompute_overlay_after_parent(
+        &self,
+        tip_hash: B256,
+        anchor_hash: B256,
+        parent_waiter: Arc<OverlayWaiter>,
+    ) -> Result<(), StateTrieOverlayError> {
+        let key = OverlayCacheKey { anchor_hash, tip_hash };
+
+        let child_waiter = match self.overlays.entry(key) {
+            Entry::Occupied(_) => return Ok(()),
+            Entry::Vacant(entry) => {
+                let waiter = Arc::new(OverlayWaiter::new());
+                entry.insert(OverlayCacheEntry::Computing(Arc::clone(&waiter)));
+                waiter
+            }
+        };
+
+        let block = self
+            .blocks
+            .get(&tip_hash)
+            .ok_or(StateTrieOverlayError { tip_hash, anchor_hash })?
+            .clone();
+        let parent_input = parent_waiter.wait();
+        let input = self.compute_overlay(
+            ComputeOverlayInput::ExtendCached { block, parent_input },
+            anchor_hash,
+            tracing::Span::current(),
+        );
+        child_waiter.finish(Arc::clone(&input));
+
+        if let Entry::Occupied(mut entry) = self.overlays.entry(key) {
+            let should_publish = match entry.get() {
+                OverlayCacheEntry::Computing(existing) => Arc::ptr_eq(existing, &child_waiter),
+                OverlayCacheEntry::Ready(_) => false,
+            };
+            if should_publish {
+                entry.insert(OverlayCacheEntry::Ready(input));
+            }
+        }
+
         Ok(())
     }
 
@@ -505,10 +564,6 @@ enum OverlayCacheEntry {
 }
 
 impl OverlayCacheEntry {
-    const fn is_ready(&self) -> bool {
-        matches!(self, Self::Ready(_))
-    }
-
     fn ready(&self) -> Option<Arc<TrieInputSorted>> {
         match self {
             Self::Ready(input) => Some(Arc::clone(input)),
@@ -852,6 +907,58 @@ mod tests {
                 Instant::now() < deadline,
                 "timed out waiting for optimistically prepared child overlay"
             );
+            thread::sleep(Duration::from_millis(10));
+        }
+
+        let (_, state) = manager.overlay_for_parent(child_hash, anchor_hash).unwrap();
+        assert_eq!(state.accounts.len(), 2);
+    }
+
+    #[cfg(feature = "rayon")]
+    #[test]
+    fn insert_block_prepares_child_overlay_after_computing_parent() {
+        let manager = StateTrieOverlayManager::new(Arc::new(WorkerPool::new(2, "test-ovly")));
+        let blocks = test_blocks();
+
+        manager.insert_block(blocks[0].clone());
+
+        let anchor_hash = blocks[0].recovered_block().parent_hash();
+        let parent_hash = blocks[0].recovered_block().hash();
+        let parent_key = OverlayCacheKey { anchor_hash, tip_hash: parent_hash };
+        let parent_waiter = Arc::new(OverlayWaiter::new());
+        manager
+            .overlays
+            .insert(parent_key, OverlayCacheEntry::Computing(Arc::clone(&parent_waiter)));
+
+        let child_hash = blocks[1].recovered_block().hash();
+        manager.insert_block(blocks[1].clone());
+
+        let child_key = OverlayCacheKey { anchor_hash, tip_hash: child_hash };
+        let deadline = Instant::now() + Duration::from_secs(5);
+        loop {
+            if let Some(entry) = manager.overlays.get(&child_key) {
+                assert!(
+                    matches!(entry.value(), OverlayCacheEntry::Computing(_)),
+                    "child overlay should wait for the in-flight parent before publishing"
+                );
+                break;
+            }
+            assert!(Instant::now() < deadline, "timed out waiting for child overlay continuation");
+            thread::sleep(Duration::from_millis(10));
+        }
+
+        parent_waiter.finish(Arc::new(merge_blocks(vec![blocks[0].clone()])));
+
+        let deadline = Instant::now() + Duration::from_secs(5);
+        loop {
+            if manager
+                .overlays
+                .get(&child_key)
+                .is_some_and(|entry| matches!(entry.value(), OverlayCacheEntry::Ready(_)))
+            {
+                break;
+            }
+            assert!(Instant::now() < deadline, "timed out waiting for child overlay to publish");
             thread::sleep(Duration::from_millis(10));
         }
 
