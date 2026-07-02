@@ -519,12 +519,28 @@ fn decode_canonical_b256_list(payload: &[u8]) -> Option<Vec<B256>> {
         return None
     }
 
+    if chunks.len() < 4 {
+        let mut hashes = Vec::with_capacity(chunks.len());
+        for chunk in chunks {
+            if chunk[0] != RLP_B256_STRING_PREFIX {
+                return None
+            }
+            hashes.push(B256::from_slice(&chunk[1..]));
+        }
+
+        return Some(hashes)
+    }
+
     let mut hashes = Vec::with_capacity(chunks.len());
-    for chunk in chunks {
+    for (slot, chunk) in hashes.spare_capacity_mut().iter_mut().zip(chunks) {
         if chunk[0] != RLP_B256_STRING_PREFIX {
             return None
         }
-        hashes.push(B256::from_slice(&chunk[1..]));
+        slot.write(B256::from_slice(&chunk[1..]));
+    }
+    // SAFETY: the loop above initialized exactly one slot for each chunk.
+    unsafe {
+        hashes.set_len(chunks.len());
     }
 
     Some(hashes)
@@ -1460,6 +1476,8 @@ mod tests {
         let expected = NewPooledTransactionHashes66(vec![
             b256!("0x0000000000000000000000000000000000000000000000000000000000000001"),
             b256!("0x0000000000000000000000000000000000000000000000000000000000000002"),
+            b256!("0x0000000000000000000000000000000000000000000000000000000000000003"),
+            b256!("0x0000000000000000000000000000000000000000000000000000000000000004"),
         ]);
         let mut encoded = Vec::new();
         expected.encode(&mut encoded);
