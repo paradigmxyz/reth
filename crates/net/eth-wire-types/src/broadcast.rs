@@ -252,7 +252,7 @@ impl<T: Encodable + ?Sized> Encodable for LazyEncoded<T> {
     }
 
     fn length(&self) -> usize {
-        self.encoded.get().map_or_else(|| self.value.length(), |encoded| encoded.len())
+        self.encoded.get_or_init(|| self.encode_uncached()).len()
     }
 }
 
@@ -292,21 +292,12 @@ pub type LazyEncodedTransaction = LazyEncoded<dyn BroadcastPoolTransaction>;
 /// This encodes to the same `Transactions` wire payload as [`SharedTransactions`], but is used by
 /// the transaction manager when the source is the pool. Unlike [`SharedTransactions`], it can wrap
 /// pool transaction references directly and cache each transaction's encoded bytes across per-peer
-/// messages.
-#[derive(Clone, Debug)]
+/// messages. Queued messages retain the pool-backed value and the shared cached bytes until they
+/// are sent.
+#[derive(Clone, Debug, Deref)]
 pub struct BroadcastPoolTransactions(pub Vec<LazyEncodedTransaction>);
 
 impl BroadcastPoolTransactions {
-    /// Returns the number of transactions in the list.
-    pub fn len(&self) -> usize {
-        self.0.len()
-    }
-
-    /// Returns `true` if there are no transactions in the list.
-    pub fn is_empty(&self) -> bool {
-        self.0.is_empty()
-    }
-
     /// Returns an iterator over the transaction hashes.
     pub fn iter_hashes(&self) -> impl Iterator<Item = &TxHash> + '_ {
         self.0.iter().map(TxHashRef::tx_hash)
@@ -315,18 +306,11 @@ impl BroadcastPoolTransactions {
 
 impl Encodable for BroadcastPoolTransactions {
     fn encode(&self, out: &mut dyn BufMut) {
-        let payload_length = self.0.iter().map(Encodable::length).sum();
-
-        Header { list: true, payload_length }.encode(out);
-        for tx in &self.0 {
-            tx.encode(out);
-        }
+        self.0.encode(out);
     }
 
     fn length(&self) -> usize {
-        let payload_length = self.0.iter().map(Encodable::length).sum::<usize>();
-
-        Header { list: true, payload_length }.length() + payload_length
+        self.0.length()
     }
 }
 
