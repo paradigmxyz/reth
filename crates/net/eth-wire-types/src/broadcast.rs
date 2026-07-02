@@ -528,6 +528,19 @@ fn decode_fixed_width_usize_list(
         return payload.is_empty().then(|| Ok(Vec::new()))
     }
 
+    if payload.len() == capacity {
+        let mut values = Vec::with_capacity(capacity);
+        for byte in payload {
+            match *byte {
+                value @ 0..=0x7f => values.push(value as usize),
+                EMPTY_STRING_CODE => values.push(0),
+                _ => return None,
+            }
+        }
+
+        return Some(Ok(values))
+    }
+
     let encoded_len = payload.len().checked_div(capacity)?;
     if !payload.len().is_multiple_of(capacity) {
         return None
@@ -1530,6 +1543,26 @@ mod tests {
 
         let result = NewPooledTransactionHashes68::decode(&mut leading_zero.as_ref());
         assert_eq!(result.unwrap_err(), alloy_rlp::Error::LeadingZero);
+    }
+
+    #[test]
+    fn eth_68_tx_hash_decode_single_byte_size_metadata() {
+        let expected = NewPooledTransactionHashes68 {
+            types: vec![0x02, 0x02],
+            sizes: vec![0, 0x7f],
+            hashes: vec![
+                b256!("0x0000000000000000000000000000000000000000000000000000000000000001"),
+                b256!("0x0000000000000000000000000000000000000000000000000000000000000002"),
+            ],
+        };
+        let mut encoded = Vec::new();
+        expected.encode(&mut encoded);
+
+        let mut input = encoded.as_ref();
+        let decoded = NewPooledTransactionHashes68::decode(&mut input).unwrap();
+
+        assert_eq!(decoded, expected);
+        assert!(input.is_empty());
     }
 
     #[test]

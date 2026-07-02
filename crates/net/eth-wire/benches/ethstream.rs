@@ -28,6 +28,7 @@ use std::{
 
 const MESSAGE_COUNT: usize = 1024;
 const HASHES_PER_ANNOUNCEMENT: usize = 64;
+const SMALL_TX_SIZE: usize = 64;
 const ACTIVE_SESSION_P2P_OUTGOING_BUFFER_CAPACITY: usize = 32;
 const ECIES_PAYLOAD_LEN: usize = 512;
 
@@ -51,12 +52,20 @@ fn message_for_version_with_hashes(
     version: EthVersion,
     hash_count: usize,
 ) -> EthMessage<EthNetworkPrimitives> {
+    message_for_version_with_hashes_and_size(version, hash_count, 128)
+}
+
+fn message_for_version_with_hashes_and_size(
+    version: EthVersion,
+    hash_count: usize,
+    size: usize,
+) -> EthMessage<EthNetworkPrimitives> {
     let hashes = hashes(hash_count);
 
     if version.is_eth72() {
         return EthMessage::NewPooledTransactionHashes72(NewPooledTransactionHashes72 {
             types: vec![0x02; hash_count],
-            sizes: vec![128; hash_count],
+            sizes: vec![size; hash_count],
             hashes,
             cell_mask: None,
         })
@@ -65,7 +74,7 @@ fn message_for_version_with_hashes(
     if version.has_eth68_metadata() {
         return EthMessage::NewPooledTransactionHashes68(NewPooledTransactionHashes68 {
             types: vec![0x02; hash_count],
-            sizes: vec![128; hash_count],
+            sizes: vec![size; hash_count],
             hashes,
         })
     }
@@ -142,9 +151,20 @@ fn encoded_wire_message_for_version_with_hashes(
     version: EthVersion,
     hash_count: usize,
 ) -> BytesMut {
+    encoded_wire_message_for_version_with_hashes_and_size(version, hash_count, 128)
+}
+
+fn encoded_wire_message_for_version_with_hashes_and_size(
+    version: EthVersion,
+    hash_count: usize,
+    size: usize,
+) -> BytesMut {
     runtime().block_on(async {
         let mut stream = eth_stream_with_version(MockTransport::default(), version);
-        stream.send(message_for_version_with_hashes(version, hash_count)).await.unwrap();
+        stream
+            .send(message_for_version_with_hashes_and_size(version, hash_count, size))
+            .await
+            .unwrap();
         stream.inner().inner().sent[0].clone().into()
     })
 }
@@ -547,6 +567,39 @@ fn bench_recv_messages(c: &mut Criterion) {
             |b| {
                 let encoded =
                     encoded_wire_message_for_version_with_hashes(version, HASHES_PER_ANNOUNCEMENT);
+                b.iter(|| {
+                    rt.block_on(async {
+                        let mut stream = eth_stream_with_version(
+                            MockTransport::with_incoming(encoded.clone(), MESSAGE_COUNT),
+                            version,
+                        );
+                        let mut decode_buf = BytesMut::new();
+                        for _ in 0..MESSAGE_COUNT {
+                            black_box(
+                                poll_fn(|cx| {
+                                    Pin::new(&mut stream).poll_next_eth_message(cx, &mut decode_buf)
+                                })
+                                .await
+                                .unwrap()
+                                .unwrap(),
+                            );
+                        }
+                    });
+                })
+            },
+        );
+
+        group.bench_function(
+            format!(
+                "recv_hash_announcements_eth{}_{}_hashes_small_sizes",
+                version as u8, HASHES_PER_ANNOUNCEMENT
+            ),
+            |b| {
+                let encoded = encoded_wire_message_for_version_with_hashes_and_size(
+                    version,
+                    HASHES_PER_ANNOUNCEMENT,
+                    SMALL_TX_SIZE,
+                );
                 b.iter(|| {
                     rt.block_on(async {
                         let mut stream = eth_stream_with_version(
