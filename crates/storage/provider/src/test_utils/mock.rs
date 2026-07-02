@@ -35,7 +35,8 @@ use reth_stages_types::{StageCheckpoint, StageId};
 use reth_storage_api::{
     BlockBodyIndicesProvider, BytecodeReader, DBProvider, DatabaseProviderFactory,
     HashedPostStateProvider, NodePrimitivesProvider, StageCheckpointReader, StateProofProvider,
-    StorageChangeSetReader, StorageRootProvider, StorageSettingsCache,
+    StorageChangeSetReader, StorageRangeProvider, StorageRangeResult, StorageRootProvider,
+    StorageSettingsCache,
 };
 use reth_storage_errors::provider::{ConsistentViewError, ProviderError, ProviderResult};
 use reth_trie::{
@@ -843,6 +844,22 @@ where
         _hashed_storage: HashedStorage,
     ) -> ProviderResult<StorageMultiProof> {
         Ok(StorageMultiProof::empty())
+    }
+}
+
+impl<T, ChainSpec> StorageRangeProvider for MockEthProvider<T, ChainSpec>
+where
+    T: NodePrimitives,
+    ChainSpec: Send + Sync,
+{
+    fn storage_range(
+        &self,
+        _address: Address,
+        _start: B256,
+        _limit: usize,
+        _hashed_storage: HashedStorage,
+    ) -> ProviderResult<StorageRangeResult> {
+        Ok(StorageRangeResult::default())
     }
 }
 

@@ -1131,6 +1131,18 @@ mod tests {
         }
     }
 
+    impl reth_storage_api::StorageRangeProvider for MockStateProvider {
+        fn storage_range(
+            &self,
+            _address: Address,
+            _start: B256,
+            _limit: usize,
+            _hashed_storage: HashedStorage,
+        ) -> ProviderResult<reth_storage_api::StorageRangeResult> {
+            Ok(reth_storage_api::StorageRangeResult::default())
+        }
+    }
+
     impl StateProofProvider for MockStateProvider {
         fn proof(
             &self,

@@ -2,3 +2,4 @@
 pub(crate) mod historical;
 pub(crate) mod latest;
 pub(crate) mod overlay;
+pub(super) mod storage_range;

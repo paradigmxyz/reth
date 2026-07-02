@@ -1,6 +1,6 @@
 use super::{
     AccountReader, BlockHashReader, BlockIdReader, StateProofProvider, StateRootProvider,
-    StorageRootProvider,
+    StorageRangeProvider, StorageRootProvider,
 };
 use alloc::boxed::Box;
 use alloy_consensus::constants::KECCAK_EMPTY;
@@ -37,6 +37,7 @@ pub trait StateProvider:
     + BytecodeReader
     + StateRootProvider
     + StorageRootProvider
+    + StorageRangeProvider
     + StateProofProvider
     + HashedPostStateProvider
 {

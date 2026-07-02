@@ -11,7 +11,8 @@ use reth_metrics::Metrics;
 use reth_primitives_traits::{Account, Bytecode};
 use reth_provider::{
     AccountReader, BlockHashReader, BytecodeReader, HashedPostStateProvider, StateProofProvider,
-    StateProvider, StateRootProvider, StorageRootProvider,
+    StateProvider, StateRootProvider, StorageRangeProvider, StorageRangeResult,
+    StorageRootProvider,
 };
 use reth_revm::db::BundleState;
 use reth_trie::{
@@ -800,6 +801,18 @@ impl<S: StorageRootProvider> StorageRootProvider for CachedStateProvider<S> {
         hashed_storage: HashedStorage,
     ) -> ProviderResult<StorageMultiProof> {
         self.state_provider.storage_multiproof(address, slots, hashed_storage)
+    }
+}
+
+impl<S: StorageRangeProvider> StorageRangeProvider for CachedStateProvider<S> {
+    fn storage_range(
+        &self,
+        address: Address,
+        start: B256,
+        limit: usize,
+        hashed_storage: HashedStorage,
+    ) -> ProviderResult<StorageRangeResult> {
+        self.state_provider.storage_range(address, start, limit, hashed_storage)
     }
 }
 

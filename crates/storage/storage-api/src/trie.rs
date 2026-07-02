@@ -1,5 +1,5 @@
 use alloc::vec::Vec;
-use alloy_primitives::{Address, Bytes, B256};
+use alloy_primitives::{Address, Bytes, B256, U256};
 use reth_storage_errors::provider::ProviderResult;
 use reth_trie_common::{
     updates::{StorageTrieUpdatesSorted, TrieUpdates, TrieUpdatesSorted},
@@ -122,4 +122,40 @@ pub trait StorageTrieWriter: Send {
         &self,
         storage_tries: impl Iterator<Item = (&'a B256, &'a StorageTrieUpdatesSorted)>,
     ) -> ProviderResult<usize>;
+}
+
+/// A single storage entry returned by [`StorageRangeProvider::storage_range`].
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct StorageRangeEntry {
+    /// The keccak256 hash of the storage slot key.
+    pub hash: B256,
+    /// The storage value.
+    pub value: U256,
+}
+
+/// Result of a paginated storage range query from [`StorageRangeProvider::storage_range`].
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct StorageRangeResult {
+    /// The storage entries in this page.
+    pub entries: Vec<StorageRangeEntry>,
+    /// The next hashed key to continue iteration, if more entries exist.
+    pub next_key: Option<B256>,
+}
+
+/// A type that can enumerate storage slots for a given account in hashed-key order.
+#[auto_impl::auto_impl(&, Box, Arc)]
+pub trait StorageRangeProvider {
+    /// Returns paginated storage entries for `address` starting at `start` (inclusive),
+    /// returning at most `limit` entries.
+    ///
+    /// The `hashed_storage` parameter carries an in-memory overlay of modified storage
+    /// (e.g. from EVM replay), following the same pattern as
+    /// [`StorageRootProvider::storage_root`].
+    fn storage_range(
+        &self,
+        address: Address,
+        start: B256,
+        limit: usize,
+        hashed_storage: HashedStorage,
+    ) -> ProviderResult<StorageRangeResult>;
 }

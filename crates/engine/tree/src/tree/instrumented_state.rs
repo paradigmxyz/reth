@@ -6,7 +6,8 @@ use reth_metrics::Metrics;
 use reth_primitives_traits::{Account, Bytecode, FastInstant as Instant};
 use reth_provider::{
     AccountReader, BlockHashReader, BytecodeReader, HashedPostStateProvider, StateProofProvider,
-    StateProvider, StateRootProvider, StorageRootProvider,
+    StateProvider, StateRootProvider, StorageRangeProvider, StorageRangeResult,
+    StorageRootProvider,
 };
 use reth_trie::{
     updates::TrieUpdates, AccountProof, HashedPostState, HashedStorage, MultiProof,
@@ -279,6 +280,18 @@ impl<S: StorageRootProvider> StorageRootProvider for InstrumentedStateProvider<S
         hashed_storage: HashedStorage,
     ) -> ProviderResult<StorageMultiProof> {
         self.state_provider.storage_multiproof(address, slots, hashed_storage)
+    }
+}
+
+impl<S: StorageRangeProvider> StorageRangeProvider for InstrumentedStateProvider<S> {
+    fn storage_range(
+        &self,
+        address: Address,
+        start: B256,
+        limit: usize,
+        hashed_storage: HashedStorage,
+    ) -> ProviderResult<StorageRangeResult> {
+        self.state_provider.storage_range(address, start, limit, hashed_storage)
     }
 }
 
