@@ -54,7 +54,7 @@ use reth_eth_wire::{
     NewPooledTransactionHashes66, NewPooledTransactionHashes68, NewPooledTransactionHashes72,
     PooledTransactions, RequestTxHashes, Transactions, ValidAnnouncementData,
 };
-use reth_ethereum_primitives::{TransactionSigned, TxType};
+use reth_ethereum_primitives::TxType;
 use reth_metrics::common::mpsc::MemoryBoundedReceiver;
 use reth_network_api::{
     events::{PeerEvent, SessionInfo},
@@ -74,7 +74,6 @@ use reth_transaction_pool::{
     PropagatedTransactions, TransactionPool, ValidPoolTransaction,
 };
 use std::{
-    marker::PhantomData,
     pin::Pin,
     sync::{
         atomic::{AtomicUsize, Ordering},
@@ -925,7 +924,7 @@ where
             return None
         }
 
-        let PeerPropagationMessages { pooled, full } = full_transactions.build();
+        let PropagateTransactions { pooled, full } = full_transactions.build();
 
         // send hashes if any
         if let Some(new_pooled_hashes) = pooled {
@@ -1030,7 +1029,7 @@ where
     /// Note: EIP-4844 are disallowed from being broadcast in full and are only ever sent as hashes, see also <https://eips.ethereum.org/EIPS/eip-4844#networking>.
     fn propagate_transactions(
         &mut self,
-        to_propagate: Vec<PropagateTransaction<N::BroadcastedTransaction>>,
+        to_propagate: Vec<PropagateTransaction>,
         propagation_mode: PropagationMode,
     ) -> PropagatedTransactions {
         let mut propagated = PropagatedTransactions::default();
@@ -1081,7 +1080,7 @@ where
                 continue
             }
 
-            let PeerPropagationMessages { pooled, full } = builder.build();
+            let PropagateTransactions { pooled, full } = builder.build();
 
             // send hashes if any
             if let Some(mut new_pooled_hashes) = pooled {
@@ -1764,7 +1763,7 @@ impl PropagationMode {
 
 /// A transaction that's about to be propagated to multiple peers.
 #[derive(Debug, Clone)]
-struct PropagateTransaction<T = TransactionSigned> {
+struct PropagateTransaction {
     is_broadcastable_in_full: bool,
     /// Size advertised in `NewPooledTransactionHashes` metadata and used for full broadcast
     /// soft-limit accounting.
@@ -1774,16 +1773,15 @@ struct PropagateTransaction<T = TransactionSigned> {
     /// `PooledTransactions`.
     propagation_size: usize,
     transaction: LazyEncodedTransaction,
-    _marker: PhantomData<fn() -> T>,
 }
 
-impl<T: SignedTransaction> PropagateTransaction<T> {
+impl PropagateTransaction {
     /// Create a new instance from a transaction supplied directly for propagation.
     ///
     /// Direct transactions use their EIP-2718 encoded length so eth/68+ hash announcements carry
     /// the same size metadata as [`NewPooledTransactionHashes68::push`] and
     /// [`NewPooledTransactionHashes72::push`].
-    fn new(transaction: T) -> Self {
+    fn new<T: SignedTransaction>(transaction: T) -> Self {
         let is_broadcastable_in_full = transaction.is_broadcastable_in_full();
         let propagation_size = transaction.encode_2718_len();
 
@@ -1791,7 +1789,6 @@ impl<T: SignedTransaction> PropagateTransaction<T> {
             is_broadcastable_in_full,
             propagation_size,
             transaction: LazyEncoded::new(transaction),
-            _marker: PhantomData,
         }
     }
 
@@ -1800,22 +1797,16 @@ impl<T: SignedTransaction> PropagateTransaction<T> {
     /// Pool transactions already cache the network encoded size used by txpool admission and
     /// pooled hash announcements. For blob transactions, this includes the sidecar size expected in
     /// a `PooledTransactions` response.
-    fn pool_tx<P>(tx: Arc<ValidPoolTransaction<P>>) -> Self
-    where
-        P: PoolTransaction<Consensus = T>,
-    {
+    fn pool_tx<P: PoolTransaction>(tx: Arc<ValidPoolTransaction<P>>) -> Self {
         let is_broadcastable_in_full = tx.transaction.consensus_ref().is_broadcastable_in_full();
         let propagation_size = tx.encoded_length();
         Self {
             is_broadcastable_in_full,
             propagation_size,
             transaction: LazyEncoded::new(PropagatePooledTransactionEncoder::new(tx)),
-            _marker: PhantomData,
         }
     }
-}
 
-impl<T> PropagateTransaction<T> {
     fn tx_hash(&self) -> &TxHash {
         self.transaction.tx_hash()
     }
@@ -1906,10 +1897,10 @@ impl PropagateTransactionsBuilder {
     }
 
     /// Consumes the type and returns the built messages that should be sent to the peer.
-    fn build(self) -> PeerPropagationMessages {
+    fn build(self) -> PropagateTransactions {
         match self {
             Self::Pooled(pooled) => {
-                PeerPropagationMessages { pooled: Some(pooled.build()), full: None }
+                PropagateTransactions { pooled: Some(pooled.build()), full: None }
             }
             Self::Full(full) => full.build(),
         }
@@ -1918,7 +1909,7 @@ impl PropagateTransactionsBuilder {
 
 impl PropagateTransactionsBuilder {
     /// Appends a transaction to the list.
-    fn push<T>(&mut self, transaction: &PropagateTransaction<T>) {
+    fn push(&mut self, transaction: &PropagateTransaction) {
         match self {
             Self::Pooled(builder) => builder.push(transaction),
             Self::Full(builder) => builder.push(transaction),
@@ -1927,7 +1918,7 @@ impl PropagateTransactionsBuilder {
 }
 
 /// Represents how the transactions should be sent to a peer if any.
-struct PeerPropagationMessages {
+struct PropagateTransactions {
     /// The pooled transaction hashes to send.
     pooled: Option<NewPooledTransactionHashes>,
     /// The transactions to send in full.
@@ -1976,15 +1967,15 @@ impl FullTransactionsBuilder {
     }
 
     /// Returns the messages that should be propagated to the peer.
-    fn build(self) -> PeerPropagationMessages {
+    fn build(self) -> PropagateTransactions {
         let pooled = Some(self.pooled.build()).filter(|pooled| !pooled.is_empty());
         let full =
             (!self.transactions.is_empty()).then_some(BroadcastPoolTransactions(self.transactions));
-        PeerPropagationMessages { pooled, full }
+        PropagateTransactions { pooled, full }
     }
 
     /// Appends all transactions.
-    fn extend<T>(&mut self, txs: impl IntoIterator<Item = PropagateTransaction<T>>) {
+    fn extend(&mut self, txs: impl IntoIterator<Item = PropagateTransaction>) {
         for tx in txs {
             self.push(&tx)
         }
@@ -1999,7 +1990,7 @@ impl FullTransactionsBuilder {
     /// If the transaction is unsuitable for broadcast or would exceed the softlimit, it is appended
     /// to list of pooled transactions, (e.g. 4844 transactions).
     /// See also [`SignedTransaction::is_broadcastable_in_full`].
-    fn push<T>(&mut self, transaction: &PropagateTransaction<T>) {
+    fn push(&mut self, transaction: &PropagateTransaction) {
         // Do not send full 4844 transaction hashes to peers.
         //
         //  Nodes MUST NOT automatically broadcast blob transactions to their peers.
@@ -2075,13 +2066,13 @@ impl PooledTransactionsHashesBuilder {
     }
 
     /// Appends all hashes
-    fn extend<T>(&mut self, txs: impl IntoIterator<Item = PropagateTransaction<T>>) {
+    fn extend(&mut self, txs: impl IntoIterator<Item = PropagateTransaction>) {
         for tx in txs {
             self.push(&tx);
         }
     }
 
-    fn push<T>(&mut self, tx: &PropagateTransaction<T>) {
+    fn push(&mut self, tx: &PropagateTransaction) {
         match self {
             Self::Eth66(msg) => msg.push(*tx.tx_hash()),
             Self::Eth68(msg) => {
@@ -2235,7 +2226,7 @@ enum TransactionsCommand<N: NetworkPrimitives = EthNetworkPrimitives> {
     /// Propagate a collection of hashes to all peers.
     PropagateTransactions(Vec<TxHash>),
     /// Propagate a collection of broadcastable transactions in full to all peers.
-    BroadcastTransactions(Vec<PropagateTransaction<N::BroadcastedTransaction>>),
+    BroadcastTransactions(Vec<PropagateTransaction>),
     /// Request transaction hashes known by specific peers from the [`TransactionsManager`].
     GetTransactionHashes { peers: Vec<PeerId>, tx: oneshot::Sender<HashMap<PeerId, B256Set>> },
     /// Requests a clone of the sender channel to the peer.
