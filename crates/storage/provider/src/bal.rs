@@ -3,15 +3,16 @@ use alloy_eips::NumHash;
 use alloy_primitives::{BlockHash, BlockNumber, Bytes};
 use parking_lot::RwLock;
 use reth_prune_types::PruneMode;
-use reth_storage_api::{
-    BalNotification, BalNotificationStream, BalStore, GetBlockAccessListLimit, RawBal,
-};
+use reth_storage_api::{BalNotification, BalNotificationStream, BalStore, RawBal};
 use reth_storage_errors::provider::ProviderResult;
 use reth_tokio_util::EventSender;
 use std::{
     collections::{BTreeMap, HashMap},
     sync::Arc,
 };
+
+mod rocksdb;
+pub use rocksdb::RocksDBBalStore;
 
 /// Basic in-memory BAL store keyed by block hash.
 #[derive(Debug, Clone)]
@@ -161,7 +162,7 @@ impl BalStore for InMemoryBalStore {
         Ok(())
     }
 
-    fn flush(&self) -> ProviderResult<()> {
+    fn flush(&self, _blocks: &[NumHash]) -> ProviderResult<()> {
         Ok(())
     }
 
@@ -180,26 +181,13 @@ impl BalStore for InMemoryBalStore {
         Ok(result)
     }
 
-    fn append_by_hashes_with_limit(
-        &self,
-        block_hashes: &[BlockHash],
-        limit: GetBlockAccessListLimit,
-        out: &mut Vec<Option<Bytes>>,
-    ) -> ProviderResult<()> {
+    fn get_by_block_num_hash(&self, block: NumHash) -> ProviderResult<Option<Bytes>> {
         let inner = self.inner.read();
-        let mut size = 0;
-
-        for hash in block_hashes {
-            let bal = inner.entries.get(hash).map(|entry| entry.bal.clone());
-            size += bal.as_ref().map_or(1, |bytes| bytes.len());
-            out.push(bal);
-
-            if limit.exceeds(size) {
-                break
-            }
-        }
-
-        Ok(())
+        Ok(inner
+            .entries
+            .get(&block.hash)
+            .filter(|entry| entry.block_number == block.number)
+            .map(|entry| entry.bal.clone()))
     }
 
     fn bal_stream(&self) -> BalNotificationStream {
@@ -223,6 +211,18 @@ mod tests {
         store.insert(NumHash::new(1, hash), RawBal::from(bal.clone())).unwrap();
 
         assert_eq!(store.get_by_hashes(&[hash, missing]).unwrap(), vec![Some(bal), None]);
+    }
+
+    #[test]
+    fn lookup_by_block_num_hash_requires_matching_number() {
+        let store = InMemoryBalStore::default();
+        let hash = B256::random();
+        let bal = Bytes::from_static(b"bal");
+
+        store.insert(NumHash::new(1, hash), RawBal::from(bal.clone())).unwrap();
+
+        assert_eq!(store.get_by_block_num_hash(NumHash::new(1, hash)).unwrap(), Some(bal));
+        assert_eq!(store.get_by_block_num_hash(NumHash::new(2, hash)).unwrap(), None);
     }
 
     #[test]
@@ -250,31 +250,7 @@ mod tests {
     fn flush_is_noop() {
         let store = InMemoryBalStore::default();
 
-        store.flush().unwrap();
-    }
-
-    #[test]
-    fn limited_lookup_returns_prefix() {
-        let store = InMemoryBalStore::default();
-        let hash0 = B256::random();
-        let hash1 = B256::random();
-        let hash2 = B256::random();
-        let bal0 = Bytes::from_static(&[0xc1, 0x01]);
-        let bal1 = Bytes::from_static(&[0xc1, 0x02]);
-        let bal2 = Bytes::from_static(&[0xc1, 0x03]);
-
-        store.insert(NumHash::new(1, hash0), RawBal::from(bal0.clone())).unwrap();
-        store.insert(NumHash::new(2, hash1), RawBal::from(bal1.clone())).unwrap();
-        store.insert(NumHash::new(3, hash2), RawBal::from(bal2)).unwrap();
-
-        let limited = store
-            .get_by_hashes_with_limit(
-                &[hash0, hash1, hash2],
-                GetBlockAccessListLimit::ResponseSizeSoftLimit(2),
-            )
-            .unwrap();
-
-        assert_eq!(limited, vec![Some(bal0), Some(bal1)]);
+        store.flush(&[]).unwrap();
     }
 
     #[test]

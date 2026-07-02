@@ -8,6 +8,7 @@ use strum::{EnumIter, IntoEnumIterator};
 
 pub(super) const ROCKSDB_TABLES: &[&str] = &[
     Tables::TransactionHashNumbers.name(),
+    Tables::BlockAccessLists.name(),
     Tables::StoragesHistory.name(),
     Tables::AccountsHistory.name(),
 ];
