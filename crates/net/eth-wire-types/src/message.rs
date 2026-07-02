@@ -108,7 +108,23 @@ impl<N: NetworkPrimitives> ProtocolMessage<N> {
         tx_memory_budget: usize,
     ) -> Result<Self, MessageError> {
         let message_type = EthMessageID::decode(buf)?;
+        let message = Self::decode_message_payload_with_tx_memory_budget(
+            version,
+            message_type,
+            buf,
+            tx_memory_budget,
+        )?;
 
+        Ok(Self { message_type, message })
+    }
+
+    /// Decodes a message payload after the message id has already been read.
+    pub fn decode_message_payload_with_tx_memory_budget(
+        version: EthVersion,
+        message_type: EthMessageID,
+        buf: &mut &[u8],
+        tx_memory_budget: usize,
+    ) -> Result<EthMessage<N>, MessageError> {
         // For EIP-7642 (https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7642.md):
         // pre-merge (legacy) status messages include total difficulty, whereas eth/69 omits it.
         let message = match message_type {
@@ -229,7 +245,7 @@ impl<N: NetworkPrimitives> ProtocolMessage<N> {
                 ))
             }
         };
-        Ok(Self { message_type, message })
+        Ok(message)
     }
 }
 
@@ -712,6 +728,33 @@ pub enum EthMessageID {
 }
 
 impl EthMessageID {
+    /// Returns the corresponding [`EthMessageID`] for a raw message id.
+    pub const fn from_u8(id: u8) -> Self {
+        match id {
+            0x00 => Self::Status,
+            0x01 => Self::NewBlockHashes,
+            0x02 => Self::Transactions,
+            0x03 => Self::GetBlockHeaders,
+            0x04 => Self::BlockHeaders,
+            0x05 => Self::GetBlockBodies,
+            0x06 => Self::BlockBodies,
+            0x07 => Self::NewBlock,
+            0x08 => Self::NewPooledTransactionHashes,
+            0x09 => Self::GetPooledTransactions,
+            0x0a => Self::PooledTransactions,
+            0x0d => Self::GetNodeData,
+            0x0e => Self::NodeData,
+            0x0f => Self::GetReceipts,
+            0x10 => Self::Receipts,
+            0x11 => Self::BlockRangeUpdate,
+            0x12 => Self::GetBlockAccessLists,
+            0x13 => Self::BlockAccessLists,
+            0x14 => Self::GetCells,
+            0x15 => Self::Cells,
+            _ => Self::Other(id),
+        }
+    }
+
     /// Returns the corresponding `u8` value for an `EthMessageID`.
     pub const fn to_u8(&self) -> u8 {
         match self {
@@ -773,31 +816,9 @@ impl Encodable for EthMessageID {
 
 impl Decodable for EthMessageID {
     fn decode(buf: &mut &[u8]) -> alloy_rlp::Result<Self> {
-        let id = match buf.first().ok_or(alloy_rlp::Error::InputTooShort)? {
-            0x00 => Self::Status,
-            0x01 => Self::NewBlockHashes,
-            0x02 => Self::Transactions,
-            0x03 => Self::GetBlockHeaders,
-            0x04 => Self::BlockHeaders,
-            0x05 => Self::GetBlockBodies,
-            0x06 => Self::BlockBodies,
-            0x07 => Self::NewBlock,
-            0x08 => Self::NewPooledTransactionHashes,
-            0x09 => Self::GetPooledTransactions,
-            0x0a => Self::PooledTransactions,
-            0x0d => Self::GetNodeData,
-            0x0e => Self::NodeData,
-            0x0f => Self::GetReceipts,
-            0x10 => Self::Receipts,
-            0x11 => Self::BlockRangeUpdate,
-            0x12 => Self::GetBlockAccessLists,
-            0x13 => Self::BlockAccessLists,
-            0x14 => Self::GetCells,
-            0x15 => Self::Cells,
-            unknown => Self::Other(*unknown),
-        };
+        let id = *buf.first().ok_or(alloy_rlp::Error::InputTooShort)?;
         buf.advance(1);
-        Ok(id)
+        Ok(Self::from_u8(id))
     }
 }
 

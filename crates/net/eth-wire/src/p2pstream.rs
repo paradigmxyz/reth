@@ -331,7 +331,8 @@ where
     ///
     /// Unlike the [`Stream`] implementation, this writes the decompressed message into a
     /// caller-owned buffer, which avoids allocating a new [`BytesMut`] for callers that immediately
-    /// decode the message into an owned type.
+    /// decode the message into an owned type. The callback receives the subprotocol message id
+    /// with the p2p reserved offset stripped, and the decompressed message payload.
     pub(crate) fn poll_next_with<T, F>(
         self: Pin<&mut Self>,
         cx: &mut Context<'_>,
@@ -339,7 +340,7 @@ where
         mut decode: F,
     ) -> Poll<Option<Result<T, P2PStreamError>>>
     where
-        F: FnMut(&[u8]) -> T,
+        F: FnMut(u8, &[u8]) -> T,
     {
         let this = self.get_mut();
 
@@ -381,20 +382,20 @@ where
             }
 
             decode_buf.clear();
-            decode_buf.reserve(decompressed_len + 1);
-
-            let first_byte =
-                if id > MAX_RESERVED_MESSAGE_ID { id - MAX_RESERVED_MESSAGE_ID - 1 } else { 0 };
+            decode_buf.reserve(decompressed_len);
             let spare = decode_buf.spare_capacity_mut();
-            spare[0].write(first_byte);
-            // SAFETY: `reserve` above ensures the spare capacity has at least
-            // `decompressed_len + 1` bytes. Snappy writes only to the provided output slice and
-            // reports how many bytes were initialized.
-            let output = unsafe {
-                std::slice::from_raw_parts_mut(
-                    spare.as_mut_ptr().add(1).cast::<u8>(),
-                    decompressed_len,
-                )
+            // SAFETY: `reserve` above ensures the spare capacity has at least `decompressed_len`
+            // bytes. Snappy writes only to the provided output slice and reports how many bytes
+            // were initialized.
+            let output = if decompressed_len == 0 {
+                &mut []
+            } else {
+                unsafe {
+                    std::slice::from_raw_parts_mut(
+                        spare.as_mut_ptr().cast::<u8>(),
+                        decompressed_len,
+                    )
+                }
             };
 
             let written = this.decoder.decompress(&bytes[1..], output).map_err(|err| {
@@ -406,14 +407,13 @@ where
                 err
             })?;
             debug_assert_eq!(written, decompressed_len);
-            // SAFETY: byte 0 was initialized above and `decompress` initialized `written` bytes
-            // after it.
+            // SAFETY: `decompress` initialized `written` bytes.
             unsafe {
-                decode_buf.advance_mut(written + 1);
+                decode_buf.advance_mut(written);
             }
 
             if id > MAX_RESERVED_MESSAGE_ID {
-                return Poll::Ready(Some(Ok(decode(decode_buf))))
+                return Poll::Ready(Some(Ok(decode(id - MAX_RESERVED_MESSAGE_ID - 1, decode_buf))))
             }
 
             match id {
@@ -432,10 +432,10 @@ where
                 _ if id == P2PMessageID::Pong as u8 => this.pinger.on_pong()?,
                 _ if id == P2PMessageID::Disconnect as u8 => {
                     let reason =
-                        DisconnectReason::decode(&mut &decode_buf[1..]).inspect_err(|err| {
+                        DisconnectReason::decode(&mut &decode_buf[..]).inspect_err(|err| {
                             debug!(
                                 %err,
-                                msg=%hex::encode(&decode_buf[1..]),
+                                msg=%hex::encode(&decode_buf[..]),
                                 "Failed to decode disconnect message from peer"
                             );
                         })?;

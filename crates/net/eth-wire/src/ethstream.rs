@@ -7,7 +7,7 @@
 use crate::{
     errors::{EthHandshakeError, EthStreamError},
     handshake::EthereumEthHandshake,
-    message::{EthBroadcastMessage, MAX_MESSAGE_SIZE, TX_MEMORY_BUDGET_MULTIPLIER},
+    message::{EthBroadcastMessage, MessageError, MAX_MESSAGE_SIZE, TX_MEMORY_BUDGET_MULTIPLIER},
     p2pstream::{P2PStream, HANDSHAKE_TIMEOUT},
     CanDisconnect, DisconnectReason, EthMessage, EthNetworkPrimitives, EthVersion, ProtocolMessage,
     UnifiedStatus,
@@ -152,28 +152,50 @@ where
 
     /// Decodes incoming bytes into an [`EthMessage`].
     pub fn decode_message_from_slice(&self, bytes: &[u8]) -> Result<EthMessage<N>, EthStreamError> {
-        if bytes.len() > self.max_message_size {
-            return Err(EthStreamError::MessageTooBig(bytes.len()));
+        let Some((&message_id, payload)) = bytes.split_first() else {
+            return Err(EthStreamError::InvalidMessage(MessageError::RlpError(
+                alloy_rlp::Error::InputTooShort,
+            )))
+        };
+
+        self.decode_message_payload(message_id, payload)
+    }
+
+    /// Decodes an incoming message after the p2p layer has already separated the eth message id
+    /// from the snappy-compressed payload.
+    pub fn decode_message_payload(
+        &self,
+        message_id: u8,
+        payload: &[u8],
+    ) -> Result<EthMessage<N>, EthStreamError> {
+        let message_size = payload.len() + 1;
+        if message_size > self.max_message_size {
+            return Err(EthStreamError::MessageTooBig(message_size));
         }
 
         if self.reject_block_announcements &&
-            let Some(&id) = bytes.first() &&
-            (id == EthMessageID::NewBlock.to_u8() || id == EthMessageID::NewBlockHashes.to_u8())
+            (message_id == EthMessageID::NewBlock.to_u8() ||
+                message_id == EthMessageID::NewBlockHashes.to_u8())
         {
-            return Err(EthStreamError::UnsupportedMessage { message_id: id });
+            return Err(EthStreamError::UnsupportedMessage { message_id });
         }
 
-        let msg = match ProtocolMessage::decode_message_with_tx_memory_budget(
+        let msg = match ProtocolMessage::decode_message_payload_with_tx_memory_budget(
             self.version,
-            &mut &bytes[..],
+            EthMessageID::from_u8(message_id),
+            &mut &payload[..],
             self.max_message_size * TX_MEMORY_BUDGET_MULTIPLIER,
         ) {
             Ok(m) => m,
             Err(err) => {
-                let msg = if bytes.len() > 50 {
-                    format!("{:02x?}...{:x?}", &bytes[..10], &bytes[bytes.len() - 10..])
+                let msg = if payload.len() > 50 {
+                    format!(
+                        "{message_id:02x}:{:02x?}...{:x?}",
+                        &payload[..10],
+                        &payload[payload.len() - 10..]
+                    )
                 } else {
-                    format!("{bytes:02x?}")
+                    format!("{message_id:02x}:{payload:02x?}")
                 };
                 debug!(
                     version=?self.version,
@@ -184,11 +206,11 @@ where
             }
         };
 
-        if matches!(msg.message, EthMessage::Status(_)) {
+        if matches!(msg, EthMessage::Status(_)) {
             return Err(EthStreamError::EthHandshakeError(EthHandshakeError::StatusNotInHandshake));
         }
 
-        Ok(msg.message)
+        Ok(msg)
     }
 
     /// Encodes an [`EthMessage`] to bytes.
@@ -320,9 +342,9 @@ where
         let this = self.project();
         let eth = this.eth;
 
-        let res = ready!(this
-            .inner
-            .poll_next_with(cx, decode_buf, |bytes| eth.decode_message_from_slice(bytes)));
+        let res = ready!(this.inner.poll_next_with(cx, decode_buf, |message_id, payload| {
+            eth.decode_message_payload(message_id, payload)
+        }));
 
         match res {
             Some(Ok(Ok(msg))) => Poll::Ready(Some(Ok(msg))),
