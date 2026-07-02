@@ -466,8 +466,8 @@ where
         transaction_count: usize,
         parallel_bal_execution: bool,
     ) -> (IteratorPrewarmTxReceiver<Evm, I>, IteratorExecuteTxReceiver<Evm, I>) {
-        let (prewarm_tx, prewarm_rx) = mpsc::sync_channel(transaction_count);
-        let (execute_tx, execute_rx) = crossbeam_channel::bounded(transaction_count);
+        let (prewarm_tx, prewarm_rx) = mpsc::channel();
+        let (execute_tx, execute_rx) = crossbeam_channel::unbounded();
 
         if transaction_count == 0 {
             // Empty block — nothing to do.
@@ -837,7 +837,7 @@ where
 fn convert_serial<RawTx, Tx, TxEnv, InnerTx, Recovered, Err, C>(
     iter: impl Iterator<Item = RawTx>,
     convert: &C,
-    prewarm_tx: &mpsc::SyncSender<(usize, WithTxEnv<TxEnv, Recovered>)>,
+    prewarm_tx: &mpsc::Sender<(usize, WithTxEnv<TxEnv, Recovered>)>,
     execute_tx: &ExecuteTxSender<TxEnv, Recovered, Err>,
 ) where
     Tx: ExecutableTxParts<TxEnv, InnerTx, Recovered = Recovered>,
