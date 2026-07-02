@@ -217,9 +217,8 @@ pub use factory::EthBlockExecutorFactory;
 pub use factory::RethEvmFactory;
 #[cfg(feature = "jit")]
 pub use factory::{
-    maybe_run_jit_helper, CompilationEvent, CompilationKind, CompileTimings,
-    JitBackend as Evm2JitBackend, JitMetrics, JitMode, RethEvmFactory, RuntimeConfig,
-    RuntimeStatsSnapshot, RuntimeTuning,
+    maybe_run_jit_helper, CompilationEvent, CompilationKind, CompileTimings, JitBackend,
+    JitMetrics, JitMode, RethEvmFactory, RuntimeConfig, RuntimeStatsSnapshot, RuntimeTuning,
 };
 
 mod convert;

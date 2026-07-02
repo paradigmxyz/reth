@@ -15,7 +15,7 @@ use reth_evm::{ConfigureEvm, NextBlockEnvAttributes};
 use reth_evm_ethereum::RethEvmFactory;
 #[cfg(feature = "jit")]
 use reth_evm_ethereum::{
-    Evm2JitBackend, JitMetrics, JitMode, RethEvmFactory, RuntimeConfig, RuntimeTuning,
+    JitBackend, JitMetrics, JitMode, RethEvmFactory, RuntimeConfig, RuntimeTuning,
 };
 use reth_network::{primitives::BasicNetworkPrimitives, NetworkHandle, PeersInfo};
 use reth_node_api::{
@@ -531,7 +531,7 @@ pub fn build_jit_evm_config<C: EthereumHardforks>(
 
     let tuning = config.tuning;
     let jit_mode = config.jit_mode;
-    let backend = Evm2JitBackend::new(config)?;
+    let backend = JitBackend::new(config)?;
 
     warn!(target: "reth::cli",
         hot_threshold = tuning.jit_hot_threshold,
