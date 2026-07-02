@@ -187,6 +187,14 @@ impl PrefixSetMut {
     }
 }
 
+impl<'a> IntoIterator for &'a PrefixSetMut {
+    type Item = &'a Nibbles;
+    type IntoIter = core::slice::Iter<'a, Nibbles>;
+    fn into_iter(self) -> Self::IntoIter {
+        self.iter()
+    }
+}
+
 /// A sorted prefix set that has an immutable _sorted_ list of unique keys.
 ///
 /// See also [`PrefixSetMut::freeze`].
