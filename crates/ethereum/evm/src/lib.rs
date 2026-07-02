@@ -90,6 +90,61 @@ impl EvmEnv for EthEvmEnv {
         }
     }
 
+    fn transaction_validation_gas_rules(&self) -> reth_evm::EvmTransactionValidationGasRules {
+        let params = &self.version.gas_params;
+        let floor_gas_enabled = self.version.feature(evm2::EvmFeatures::EIP7623);
+
+        reth_evm::EvmTransactionValidationGasRules {
+            tx_base_gas: 21_000,
+            tx_create_gas: if self.version.feature(evm2::EvmFeatures::EIP2) {
+                params.get(evm2::version::GasId::TxCreateCost) as u64
+            } else {
+                0
+            },
+            tx_data_zero_gas: 4,
+            tx_data_non_zero_gas: if self.version.feature(evm2::EvmFeatures::EIP2028) {
+                16
+            } else {
+                68
+            },
+            tx_access_list_address_gas: params.get(evm2::version::GasId::TxAccessListAddressCost)
+                as u64,
+            tx_access_list_storage_key_gas: params
+                .get(evm2::version::GasId::TxAccessListStorageKeyCost)
+                as u64,
+            tx_access_list_floor_byte_multiplier: if floor_gas_enabled {
+                params.get(evm2::version::GasId::TxAccessListFloorByteMultiplier) as u64
+            } else {
+                0
+            },
+            tx_initcode_word_gas: if self.version.feature(evm2::EvmFeatures::EIP3860) {
+                params.get(evm2::version::GasId::TxInitcodeCost) as u64
+            } else {
+                0
+            },
+            tx_floor_gas_base: if floor_gas_enabled {
+                params.get(evm2::version::GasId::TxFloorCostBase) as u64
+            } else {
+                0
+            },
+            tx_floor_gas_per_token: if floor_gas_enabled {
+                params.get(evm2::version::GasId::TxFloorCostPerToken) as u64
+            } else {
+                0
+            },
+            tx_floor_gas_non_zero_token_multiplier: if floor_gas_enabled {
+                params.get(evm2::version::GasId::TxTokenNonZeroByteMultiplier) as u64
+            } else {
+                0
+            },
+            tx_eip7702_per_empty_account_cost: if self.version.feature(evm2::EvmFeatures::EIP7702) {
+                params.get(evm2::version::GasId::TxEip7702PerEmptyAccountCost) as u64
+            } else {
+                0
+            },
+        }
+    }
+
     fn with_nonce_check_disabled(mut self) -> Self {
         self.version.features.remove(evm2::EvmFeatures::NONCE_CHECK);
         self

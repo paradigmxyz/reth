@@ -50,6 +50,104 @@ pub struct EvmTransactionValidationLimits {
     pub tx_gas_limit_cap: u64,
 }
 
+/// Transaction validation gas rules resolved for an EVM environment.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct EvmTransactionValidationGasRules {
+    /// Base transaction gas.
+    pub tx_base_gas: u64,
+    /// Gas charged for create transactions.
+    pub tx_create_gas: u64,
+    /// Gas charged per zero calldata byte.
+    pub tx_data_zero_gas: u64,
+    /// Gas charged per non-zero calldata byte.
+    pub tx_data_non_zero_gas: u64,
+    /// Gas charged per access list address.
+    pub tx_access_list_address_gas: u64,
+    /// Gas charged per access list storage key.
+    pub tx_access_list_storage_key_gas: u64,
+    /// Floor gas tokens charged per access-list byte.
+    pub tx_access_list_floor_byte_multiplier: u64,
+    /// Gas charged per initcode word.
+    pub tx_initcode_word_gas: u64,
+    /// Base gas used for calldata floor gas.
+    pub tx_floor_gas_base: u64,
+    /// Floor gas charged per token. Zero disables floor gas.
+    pub tx_floor_gas_per_token: u64,
+    /// Token multiplier for non-zero calldata bytes.
+    pub tx_floor_gas_non_zero_token_multiplier: u64,
+    /// EIP-7702 gas charged per authorization.
+    pub tx_eip7702_per_empty_account_cost: u64,
+}
+
+/// Transaction validation gas resolved for a transaction.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct EvmTransactionValidationGas {
+    /// Transaction intrinsic gas.
+    pub intrinsic_gas: u64,
+    /// Transaction floor gas.
+    pub floor_gas: u64,
+}
+
+impl EvmTransactionValidationGasRules {
+    /// Calculates transaction validation gas for the resolved rules.
+    pub fn calculate(
+        self,
+        input: &[u8],
+        is_create: bool,
+        access_list_accounts: u64,
+        access_list_storage_keys: u64,
+        authorization_list_len: u64,
+    ) -> EvmTransactionValidationGas {
+        let (zero_data_len, non_zero_data_len) =
+            input.iter().fold((0u64, 0u64), |(zero, non_zero), byte| {
+                if *byte == 0 {
+                    (zero + 1, non_zero)
+                } else {
+                    (zero, non_zero + 1)
+                }
+            });
+
+        let mut intrinsic_gas = self
+            .tx_base_gas
+            .saturating_add(zero_data_len.saturating_mul(self.tx_data_zero_gas))
+            .saturating_add(non_zero_data_len.saturating_mul(self.tx_data_non_zero_gas))
+            .saturating_add(access_list_accounts.saturating_mul(self.tx_access_list_address_gas))
+            .saturating_add(
+                access_list_storage_keys.saturating_mul(self.tx_access_list_storage_key_gas),
+            )
+            .saturating_add(
+                authorization_list_len.saturating_mul(self.tx_eip7702_per_empty_account_cost),
+            );
+
+        if is_create {
+            intrinsic_gas = intrinsic_gas.saturating_add(self.tx_create_gas).saturating_add(
+                self.tx_initcode_word_gas
+                    .saturating_mul(u64::try_from(input.len().div_ceil(32)).unwrap_or(u64::MAX)),
+            );
+        }
+
+        let floor_gas = if self.tx_floor_gas_per_token == 0 {
+            0
+        } else {
+            let access_list_tokens = access_list_accounts
+                .saturating_mul(20)
+                .saturating_add(access_list_storage_keys.saturating_mul(32))
+                .saturating_mul(self.tx_access_list_floor_byte_multiplier);
+            let calldata_tokens = zero_data_len.saturating_add(
+                non_zero_data_len.saturating_mul(self.tx_floor_gas_non_zero_token_multiplier),
+            );
+
+            self.tx_floor_gas_base.saturating_add(
+                access_list_tokens
+                    .saturating_add(calldata_tokens)
+                    .saturating_mul(self.tx_floor_gas_per_token),
+            )
+        };
+
+        EvmTransactionValidationGas { intrinsic_gas, floor_gas }
+    }
+}
+
 /// Resolved EVM environment data needed by the EVM execution path.
 pub trait EvmEnv: Debug + Clone + Send + Sync + 'static {
     /// Returns the EVM block environment.
@@ -57,6 +155,9 @@ pub trait EvmEnv: Debug + Clone + Send + Sync + 'static {
 
     /// Returns transaction validation limits active in this environment.
     fn transaction_validation_limits(&self) -> EvmTransactionValidationLimits;
+
+    /// Returns transaction validation gas rules active in this environment.
+    fn transaction_validation_gas_rules(&self) -> EvmTransactionValidationGasRules;
 
     /// Returns this environment with transaction nonce checks disabled.
     fn with_nonce_check_disabled(self) -> Self;

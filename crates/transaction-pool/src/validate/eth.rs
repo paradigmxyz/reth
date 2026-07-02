@@ -23,11 +23,11 @@ use alloy_consensus::{
 };
 use alloy_eips::{
     eip1559::ETHEREUM_BLOCK_GAS_LIMIT_30M, eip4844::env_settings::EnvKzgSettings,
-    eip7702::constants::PER_EMPTY_ACCOUNT_COST, eip7840::BlobParams, BlockId,
+    eip7840::BlobParams, BlockId,
 };
 use alloy_primitives::U256;
 use reth_chainspec::{ChainSpecProvider, EthChainSpec, EthereumHardforks};
-use reth_evm::{ConfigureEvm, EvmEnv};
+use reth_evm::{ConfigureEvm, EvmEnv, EvmTransactionValidationGasRules};
 use reth_primitives_traits::{
     transaction::error::InvalidTransactionError, Account, BlockTy, GotExpected, HeaderTy,
     SealedBlock,
@@ -588,7 +588,10 @@ where
             }
         }
 
-        ensure_intrinsic_gas(transaction, &self.fork_tracker)?;
+        ensure_intrinsic_gas(
+            transaction,
+            self.fork_tracker.transaction_validation_gas_rules.load(),
+        )?;
 
         // light blob tx pre-checks
         if transaction.is_eip4844() {
@@ -908,17 +911,20 @@ where
 
         self.block_gas_limit.store(new_tip_block.gas_limit(), std::sync::atomic::Ordering::Relaxed);
 
-        let limits = self
+        let evm_env = self
             .evm_config
             .evm_env(new_tip_block)
-            .expect("evm_env should not fail for executed block")
-            .transaction_validation_limits();
+            .expect("evm_env should not fail for executed block");
+        let limits = evm_env.transaction_validation_limits();
         self.fork_tracker
             .max_initcode_size
             .store(limits.max_initcode_size, std::sync::atomic::Ordering::Relaxed);
         self.fork_tracker
             .tx_gas_limit_cap
             .store(limits.tx_gas_limit_cap, std::sync::atomic::Ordering::Relaxed);
+        self.fork_tracker
+            .transaction_validation_gas_rules
+            .store(evm_env.transaction_validation_gas_rules());
     }
 
     fn max_gas_limit(&self) -> u64 {
@@ -1035,6 +1041,8 @@ pub struct EthTransactionValidatorBuilder<Client, Evm> {
     max_initcode_size: usize,
     /// Cached transaction gas limit cap from EVM config (0 = no cap)
     tx_gas_limit_cap: u64,
+    /// Cached transaction validation gas rules from EVM config
+    transaction_validation_gas_rules: EvmTransactionValidationGasRules,
     /// Whether EIP-7594 blob sidecars are accepted.
     /// When false, EIP-7594 (v1) sidecars are always rejected and EIP-4844 (v0) sidecars
     /// are always accepted, regardless of Osaka fork activation.
@@ -1062,10 +1070,9 @@ impl<Client, Evm> EthTransactionValidatorBuilder<Client, Evm> {
             .header_by_id(BlockId::latest())
             .expect("failed to fetch latest header")
             .expect("latest header is not found");
-        let limits = evm_config
-            .evm_env(&tip)
-            .expect("evm_env should not fail for latest block")
-            .transaction_validation_limits();
+        let evm_env = evm_config.evm_env(&tip).expect("evm_env should not fail for latest block");
+        let limits = evm_env.transaction_validation_limits();
+        let transaction_validation_gas_rules = evm_env.transaction_validation_gas_rules();
 
         Self {
             block_gas_limit: ETHEREUM_BLOCK_GAS_LIMIT_30M.into(),
@@ -1104,6 +1111,7 @@ impl<Client, Evm> EthTransactionValidatorBuilder<Client, Evm> {
 
             tx_gas_limit_cap: limits.tx_gas_limit_cap,
             max_initcode_size: limits.max_initcode_size,
+            transaction_validation_gas_rules,
 
             // EIP-7594 sidecars are accepted by default (standard Ethereum behavior)
             eip7594: true,
@@ -1314,6 +1322,7 @@ impl<Client, Evm> EthTransactionValidatorBuilder<Client, Evm> {
             other_tx_types,
             max_initcode_size,
             tx_gas_limit_cap,
+            transaction_validation_gas_rules,
             eip7594,
         } = self;
 
@@ -1326,6 +1335,9 @@ impl<Client, Evm> EthTransactionValidatorBuilder<Client, Evm> {
             max_blob_count: AtomicU64::new(max_blob_count),
             max_initcode_size: AtomicUsize::new(max_initcode_size),
             tx_gas_limit_cap: AtomicU64::new(tx_gas_limit_cap),
+            transaction_validation_gas_rules: AtomicTransactionValidationGasRules::new(
+                transaction_validation_gas_rules,
+            ),
         };
 
         EthTransactionValidator {
@@ -1393,6 +1405,113 @@ pub struct ForkTracker {
     pub max_initcode_size: AtomicUsize,
     /// Cached transaction gas limit cap from EVM config (0 = no cap)
     pub tx_gas_limit_cap: AtomicU64,
+    /// Cached transaction validation gas rules from EVM config.
+    pub transaction_validation_gas_rules: AtomicTransactionValidationGasRules,
+}
+
+/// Atomic transaction validation gas rules.
+#[derive(Debug)]
+pub struct AtomicTransactionValidationGasRules {
+    tx_base_gas: AtomicU64,
+    tx_create_gas: AtomicU64,
+    tx_data_zero_gas: AtomicU64,
+    tx_data_non_zero_gas: AtomicU64,
+    tx_access_list_address_gas: AtomicU64,
+    tx_access_list_storage_key_gas: AtomicU64,
+    tx_access_list_floor_byte_multiplier: AtomicU64,
+    tx_initcode_word_gas: AtomicU64,
+    tx_floor_gas_base: AtomicU64,
+    tx_floor_gas_per_token: AtomicU64,
+    tx_floor_gas_non_zero_token_multiplier: AtomicU64,
+    tx_eip7702_per_empty_account_cost: AtomicU64,
+}
+
+impl AtomicTransactionValidationGasRules {
+    /// Creates atomic gas rules from resolved gas rules.
+    pub const fn new(rules: EvmTransactionValidationGasRules) -> Self {
+        Self {
+            tx_base_gas: AtomicU64::new(rules.tx_base_gas),
+            tx_create_gas: AtomicU64::new(rules.tx_create_gas),
+            tx_data_zero_gas: AtomicU64::new(rules.tx_data_zero_gas),
+            tx_data_non_zero_gas: AtomicU64::new(rules.tx_data_non_zero_gas),
+            tx_access_list_address_gas: AtomicU64::new(rules.tx_access_list_address_gas),
+            tx_access_list_storage_key_gas: AtomicU64::new(rules.tx_access_list_storage_key_gas),
+            tx_access_list_floor_byte_multiplier: AtomicU64::new(
+                rules.tx_access_list_floor_byte_multiplier,
+            ),
+            tx_initcode_word_gas: AtomicU64::new(rules.tx_initcode_word_gas),
+            tx_floor_gas_base: AtomicU64::new(rules.tx_floor_gas_base),
+            tx_floor_gas_per_token: AtomicU64::new(rules.tx_floor_gas_per_token),
+            tx_floor_gas_non_zero_token_multiplier: AtomicU64::new(
+                rules.tx_floor_gas_non_zero_token_multiplier,
+            ),
+            tx_eip7702_per_empty_account_cost: AtomicU64::new(
+                rules.tx_eip7702_per_empty_account_cost,
+            ),
+        }
+    }
+
+    /// Loads resolved gas rules.
+    pub fn load(&self) -> EvmTransactionValidationGasRules {
+        EvmTransactionValidationGasRules {
+            tx_base_gas: self.tx_base_gas.load(std::sync::atomic::Ordering::Relaxed),
+            tx_create_gas: self.tx_create_gas.load(std::sync::atomic::Ordering::Relaxed),
+            tx_data_zero_gas: self.tx_data_zero_gas.load(std::sync::atomic::Ordering::Relaxed),
+            tx_data_non_zero_gas: self
+                .tx_data_non_zero_gas
+                .load(std::sync::atomic::Ordering::Relaxed),
+            tx_access_list_address_gas: self
+                .tx_access_list_address_gas
+                .load(std::sync::atomic::Ordering::Relaxed),
+            tx_access_list_storage_key_gas: self
+                .tx_access_list_storage_key_gas
+                .load(std::sync::atomic::Ordering::Relaxed),
+            tx_access_list_floor_byte_multiplier: self
+                .tx_access_list_floor_byte_multiplier
+                .load(std::sync::atomic::Ordering::Relaxed),
+            tx_initcode_word_gas: self
+                .tx_initcode_word_gas
+                .load(std::sync::atomic::Ordering::Relaxed),
+            tx_floor_gas_base: self.tx_floor_gas_base.load(std::sync::atomic::Ordering::Relaxed),
+            tx_floor_gas_per_token: self
+                .tx_floor_gas_per_token
+                .load(std::sync::atomic::Ordering::Relaxed),
+            tx_floor_gas_non_zero_token_multiplier: self
+                .tx_floor_gas_non_zero_token_multiplier
+                .load(std::sync::atomic::Ordering::Relaxed),
+            tx_eip7702_per_empty_account_cost: self
+                .tx_eip7702_per_empty_account_cost
+                .load(std::sync::atomic::Ordering::Relaxed),
+        }
+    }
+
+    /// Stores resolved gas rules.
+    pub fn store(&self, rules: EvmTransactionValidationGasRules) {
+        self.tx_base_gas.store(rules.tx_base_gas, std::sync::atomic::Ordering::Relaxed);
+        self.tx_create_gas.store(rules.tx_create_gas, std::sync::atomic::Ordering::Relaxed);
+        self.tx_data_zero_gas.store(rules.tx_data_zero_gas, std::sync::atomic::Ordering::Relaxed);
+        self.tx_data_non_zero_gas
+            .store(rules.tx_data_non_zero_gas, std::sync::atomic::Ordering::Relaxed);
+        self.tx_access_list_address_gas
+            .store(rules.tx_access_list_address_gas, std::sync::atomic::Ordering::Relaxed);
+        self.tx_access_list_storage_key_gas
+            .store(rules.tx_access_list_storage_key_gas, std::sync::atomic::Ordering::Relaxed);
+        self.tx_access_list_floor_byte_multiplier.store(
+            rules.tx_access_list_floor_byte_multiplier,
+            std::sync::atomic::Ordering::Relaxed,
+        );
+        self.tx_initcode_word_gas
+            .store(rules.tx_initcode_word_gas, std::sync::atomic::Ordering::Relaxed);
+        self.tx_floor_gas_base.store(rules.tx_floor_gas_base, std::sync::atomic::Ordering::Relaxed);
+        self.tx_floor_gas_per_token
+            .store(rules.tx_floor_gas_per_token, std::sync::atomic::Ordering::Relaxed);
+        self.tx_floor_gas_non_zero_token_multiplier.store(
+            rules.tx_floor_gas_non_zero_token_multiplier,
+            std::sync::atomic::Ordering::Relaxed,
+        );
+        self.tx_eip7702_per_empty_account_cost
+            .store(rules.tx_eip7702_per_empty_account_cost, std::sync::atomic::Ordering::Relaxed);
+    }
 }
 
 impl ForkTracker {
@@ -1427,22 +1546,10 @@ impl ForkTracker {
     }
 }
 
-const TX_BASE_GAS: u64 = 21_000;
-const TX_CREATE_GAS: u64 = 32_000;
-const TX_DATA_ZERO_GAS: u64 = 4;
-const TX_DATA_NON_ZERO_GAS_ISTANBUL: u64 = 16;
-const ACCESS_LIST_ADDRESS_GAS: u64 = 2_400;
-const ACCESS_LIST_STORAGE_KEY_GAS: u64 = 1_900;
-const INITCODE_WORD_GAS: u64 = 2;
-const PRAGUE_FLOOR_GAS_PER_TOKEN: u64 = 10;
-const PRAGUE_FLOOR_GAS_NON_ZERO_TOKEN_MULTIPLIER: u64 = 4;
-
 /// Ensures that gas limit of the transaction exceeds the intrinsic gas of the transaction.
-///
-/// Caution: This only checks past the Merge hardfork.
 pub fn ensure_intrinsic_gas<T: EthPoolTransaction>(
     transaction: &T,
-    fork_tracker: &ForkTracker,
+    gas_rules: EvmTransactionValidationGasRules,
 ) -> Result<(), InvalidPoolTransactionError> {
     let access_list_accounts =
         transaction.access_list().map(|l| l.len()).unwrap_or_default() as u64;
@@ -1453,63 +1560,20 @@ pub fn ensure_intrinsic_gas<T: EthPoolTransaction>(
     let authorization_list_len =
         transaction.authorization_list().map(|l| l.len()).unwrap_or_default() as u64;
 
-    let gas = intrinsic_gas(
+    let gas = gas_rules.calculate(
         transaction.input(),
         transaction.is_create(),
         access_list_accounts,
         access_list_storage_keys,
         authorization_list_len,
-        fork_tracker,
     );
-    let floor_gas = prague_floor_gas(transaction.input(), fork_tracker);
 
     let gas_limit = transaction.gas_limit();
-    if gas_limit < gas || gas_limit < floor_gas {
+    if gas_limit < gas.intrinsic_gas || gas_limit < gas.floor_gas {
         Err(InvalidPoolTransactionError::IntrinsicGasTooLow)
     } else {
         Ok(())
     }
-}
-
-fn intrinsic_gas(
-    input: &[u8],
-    is_create: bool,
-    access_list_accounts: u64,
-    access_list_storage_keys: u64,
-    authorization_list_len: u64,
-    fork_tracker: &ForkTracker,
-) -> u64 {
-    let calldata_gas = input.iter().fold(0u64, |gas, byte| {
-        gas + if *byte == 0 { TX_DATA_ZERO_GAS } else { TX_DATA_NON_ZERO_GAS_ISTANBUL }
-    });
-
-    let mut gas = TX_BASE_GAS + calldata_gas;
-    gas += access_list_accounts * ACCESS_LIST_ADDRESS_GAS;
-    gas += access_list_storage_keys * ACCESS_LIST_STORAGE_KEY_GAS;
-
-    if is_create {
-        gas += TX_CREATE_GAS;
-        if fork_tracker.is_shanghai_activated() {
-            gas += INITCODE_WORD_GAS * input.len().div_ceil(32) as u64;
-        }
-    }
-
-    if fork_tracker.is_prague_activated() {
-        gas += authorization_list_len.saturating_mul(PER_EMPTY_ACCOUNT_COST);
-    }
-
-    gas
-}
-
-fn prague_floor_gas(input: &[u8], fork_tracker: &ForkTracker) -> u64 {
-    if !fork_tracker.is_prague_activated() {
-        return 0
-    }
-
-    let tokens = input.iter().fold(0u64, |tokens, byte| {
-        tokens + if *byte == 0 { 1 } else { PRAGUE_FLOOR_GAS_NON_ZERO_TOKEN_MULTIPLIER }
-    });
-    TX_BASE_GAS + tokens * PRAGUE_FLOOR_GAS_PER_TOKEN
 }
 
 #[cfg(test)]
@@ -1519,7 +1583,7 @@ mod tests {
         blobstore::InMemoryBlobStore, error::PoolErrorKind, traits::PoolTransaction,
         CoinbaseTipOrdering, EthPooledTransaction, Pool, TransactionPool,
     };
-    use alloy_consensus::Transaction;
+    use alloy_consensus::{Header, Transaction};
     use alloy_eips::eip2718::Decodable2718;
     use alloy_primitives::{hex, U256};
     use reth_ethereum_primitives::PooledTransactionVariant;
@@ -1527,10 +1591,13 @@ mod tests {
     use reth_primitives_traits::SignedTransaction;
     use reth_provider::test_utils::{ExtendedAccount, MockEthProvider};
 
-    const MAX_INITCODE_SIZE: usize = 0xc000;
-
     fn test_evm_config() -> EthEvmConfig {
         EthEvmConfig::mainnet()
+    }
+
+    fn validation_gas_rules(timestamp: u64) -> EvmTransactionValidationGasRules {
+        let header = Header { number: 15_537_394, timestamp, ..Default::default() };
+        test_evm_config().evm_env(&header).unwrap().transaction_validation_gas_rules()
     }
 
     fn get_transaction() -> EthPooledTransaction {
@@ -1546,22 +1613,11 @@ mod tests {
     #[tokio::test]
     async fn validate_transaction() {
         let transaction = get_transaction();
-        let mut fork_tracker = ForkTracker {
-            shanghai: false.into(),
-            cancun: false.into(),
-            prague: false.into(),
-            osaka: false.into(),
-            tip_timestamp: 0.into(),
-            max_blob_count: 0.into(),
-            max_initcode_size: AtomicUsize::new(MAX_INITCODE_SIZE),
-            tx_gas_limit_cap: AtomicU64::new(0),
-        };
 
-        let res = ensure_intrinsic_gas(&transaction, &fork_tracker);
+        let res = ensure_intrinsic_gas(&transaction, validation_gas_rules(1681338454));
         assert!(res.is_ok());
 
-        fork_tracker.shanghai = true.into();
-        let res = ensure_intrinsic_gas(&transaction, &fork_tracker);
+        let res = ensure_intrinsic_gas(&transaction, validation_gas_rules(1681338455));
         assert!(res.is_ok());
 
         let provider = MockEthProvider::default().with_genesis_block();
