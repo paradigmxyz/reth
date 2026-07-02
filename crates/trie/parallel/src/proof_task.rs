@@ -979,6 +979,15 @@ where
 
         trace!(target: "trie::proof_task", "Processing V2 account multiproof");
 
+        if account_targets.is_empty() {
+            let storage_proofs = self.compute_v2_storage_only_multiproof::<Provider>(
+                v2_storage_calculator,
+                storage_targets,
+            )?;
+            let proof = DecodedMultiProofV2 { account_proofs: Default::default(), storage_proofs };
+            return Ok((proof, ValueEncoderStats::default()))
+        }
+
         let storage_proof_receivers =
             dispatch_v2_storage_proofs(&self.storage_work_tx, &account_targets, storage_targets)?;
 
@@ -996,6 +1005,49 @@ where
         let proof = DecodedMultiProofV2 { account_proofs, storage_proofs };
 
         Ok((proof, value_encoder_stats))
+    }
+
+    fn compute_v2_storage_only_multiproof<'a, Provider>(
+        &self,
+        v2_storage_calculator: Rc<RefCell<V2StorageProofCalculator<'a, Provider>>>,
+        storage_targets: B256Map<Vec<ProofV2Target>>,
+    ) -> Result<B256Map<Vec<ProofTrieNodeV2>>, ParallelStateRootError>
+    where
+        Provider: TrieCursorFactory + HashedCursorFactory + 'a,
+    {
+        if storage_targets.is_empty() {
+            return Ok(B256Map::default())
+        }
+
+        let mut sorted_storage_targets: Vec<_> = storage_targets.into_iter().collect();
+        sorted_storage_targets.sort_unstable_by_key(|(addr, _)| *addr);
+
+        let mut storage_proofs =
+            B256Map::with_capacity_and_hasher(sorted_storage_targets.len(), Default::default());
+        let mut calculator = v2_storage_calculator.borrow_mut();
+
+        for (hashed_address, mut targets) in sorted_storage_targets {
+            let span = debug_span!(
+                target: "trie::proof_task",
+                "V2 Storage proof calculation",
+                n = %targets.len(),
+            );
+            let _span_guard = span.enter();
+
+            let proof = if targets.is_empty() {
+                vec![calculator.storage_root_node(hashed_address)?]
+            } else {
+                calculator.storage_proof(hashed_address, &mut targets)?
+            };
+
+            if let Some(root) = calculator.compute_root_hash(&proof)? {
+                self.cached_storage_roots.insert(hashed_address, root);
+            }
+
+            storage_proofs.insert(hashed_address, proof);
+        }
+
+        Ok(storage_proofs)
     }
 
     /// Processes an account multiproof request.
