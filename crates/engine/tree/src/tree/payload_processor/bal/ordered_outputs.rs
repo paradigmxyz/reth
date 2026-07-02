@@ -60,7 +60,7 @@ impl<'a, R> OrderedWorkerOutputs<'a, R> {
     ) -> Self {
         Self {
             result_rx,
-            pending: (0..total).map(|_| None).collect(),
+            pending: Vec::new(),
             next: 0,
             total,
             failed: false,
@@ -77,7 +77,9 @@ impl<R> Iterator for OrderedWorkerOutputs<'_, R> {
         }
 
         loop {
-            if let Some(output) = self.pending[self.next].take() {
+            if self.next < self.pending.len()
+                && let Some(output) = self.pending[self.next].take()
+            {
                 self.next += 1;
                 return Some(Ok(output));
             }
@@ -100,11 +102,20 @@ impl<R> Iterator for OrderedWorkerOutputs<'_, R> {
                 "BAL worker returned out-of-bounds transaction index {index}; total={}",
                 self.total
             );
+            assert!(index >= self.next, "BAL worker returned duplicate transaction index {index}",);
+
+            if index == self.next {
+                self.next += 1;
+                return Some(Ok(output));
+            }
+
+            if index >= self.pending.len() {
+                self.pending.resize_with(index + 1, || None);
+            }
             assert!(
-                index >= self.next && self.pending[index].is_none(),
+                self.pending[index].is_none(),
                 "BAL worker returned duplicate transaction index {index}",
             );
-
             self.pending[index] = Some(output);
         }
     }
