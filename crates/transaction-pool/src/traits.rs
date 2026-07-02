@@ -1422,6 +1422,19 @@ pub trait PoolTransaction:
     /// max_blob_fee_per_gas * blob_gas_used`.
     fn cost(&self) -> &U256;
 
+    /// Extra balance, on top of [`PoolTransaction::cost`], that the sender must have to afford this
+    /// transaction. Defaults to zero.
+    ///
+    /// [`PoolTransaction::cost`] is the intrinsic Ethereum cost
+    /// (`max_fee_per_gas * gas_limit + value (+ blob)`). Some transaction types incur additional,
+    /// non-intrinsic amounts that are not reflected in `cost` — e.g. the OP Stack L1 data fee and
+    /// operator fee, or custom gas-token surcharges. Implementations return that amount here so the
+    /// pool's balance/affordability accounting (both the single-transaction checks and the
+    /// cumulative per-sender tracking) reserves it in addition to `cost`.
+    fn extra_balance_cost(&self) -> U256 {
+        U256::ZERO
+    }
+
     /// Returns the length of the rlp encoded transaction object
     ///
     /// Note: Implementations should cache this value.
