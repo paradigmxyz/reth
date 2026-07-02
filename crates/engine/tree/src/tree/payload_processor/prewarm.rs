@@ -28,11 +28,13 @@ use alloy_primitives::{keccak256, Address};
 use alloy_primitives::{B256, U256};
 use core::convert::Infallible;
 use crossbeam_channel::Sender as CrossbeamSender;
-use evm2::evm::{AccountChangeRef, StateChangeSink, StorageChange};
 use metrics::{Counter, Gauge, Histogram};
 #[cfg(any())]
 use rayon::prelude::*;
 use reth_evm::{execute::ExecutableTxFor, ConfigureEvm, EvmEnv, EvmFor};
+use reth_execution_types::{
+    ExecutionAccountChangeRef, ExecutionStateChangeSink, ExecutionStorageChange,
+};
 use reth_metrics::Metrics;
 #[cfg(any(test, any()))]
 use reth_primitives_traits::Account;
@@ -888,10 +890,10 @@ impl PrewarmProofTargetsSink {
     }
 }
 
-impl StateChangeSink for PrewarmProofTargetsSink {
+impl ExecutionStateChangeSink for PrewarmProofTargetsSink {
     type Error = Infallible;
 
-    fn account(&mut self, change: AccountChangeRef<'_>) -> Result<(), Self::Error> {
+    fn account(&mut self, change: ExecutionAccountChangeRef<'_>) -> Result<(), Self::Error> {
         self.targets.account_targets.push(ProofV2Target::new(keccak256(change.address)));
         Ok(())
     }
@@ -902,7 +904,7 @@ impl StateChangeSink for PrewarmProofTargetsSink {
         Ok(())
     }
 
-    fn storage(&mut self, change: StorageChange) -> Result<(), Self::Error> {
+    fn storage(&mut self, change: ExecutionStorageChange) -> Result<(), Self::Error> {
         self.storage_targets_for_address(change.address)
             .push(ProofV2Target::new(keccak256(change.key.to_be_bytes::<32>())));
         self.storage_targets += 1;
