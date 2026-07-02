@@ -1,6 +1,6 @@
 use alloy_eip7928::BAL_RETENTION_PERIOD_SLOTS;
 use alloy_eips::NumHash;
-use alloy_primitives::{BlockHash, BlockNumber, Bytes};
+use alloy_primitives::{map::B256Map, BlockHash, BlockNumber, Bytes};
 use parking_lot::RwLock;
 use reth_prune_types::PruneMode;
 use reth_storage_api::{
@@ -8,10 +8,7 @@ use reth_storage_api::{
 };
 use reth_storage_errors::provider::ProviderResult;
 use reth_tokio_util::EventSender;
-use std::{
-    collections::{BTreeMap, HashMap},
-    sync::Arc,
-};
+use std::{collections::BTreeMap, sync::Arc};
 
 /// Basic in-memory BAL store keyed by block hash.
 #[derive(Debug, Clone)]
@@ -78,7 +75,7 @@ impl Default for BalConfig {
 
 #[derive(Debug, Default)]
 struct InMemoryBalStoreInner {
-    entries: HashMap<BlockHash, BalEntry>,
+    entries: B256Map<BalEntry>,
     hashes_by_number: BTreeMap<BlockNumber, Vec<BlockHash>>,
     highest_block_number: Option<BlockNumber>,
 }
