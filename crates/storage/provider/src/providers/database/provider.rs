@@ -2698,36 +2698,44 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
     #[instrument(level = "debug", target = "providers::db", skip_all)]
     fn write_hashed_state(&self, hashed_state: &HashedPostStateSorted) -> ProviderResult<()> {
         // Write hashed account updates.
-        let mut hashed_accounts_cursor = self.tx_ref().cursor_write::<tables::HashedAccounts>()?;
-        for (hashed_address, account) in hashed_state.accounts() {
-            if let Some(account) = account {
-                hashed_accounts_cursor.upsert(*hashed_address, account)?;
-            } else if hashed_accounts_cursor.seek_exact(*hashed_address)?.is_some() {
-                hashed_accounts_cursor.delete_current()?;
+        if !hashed_state.accounts().is_empty() {
+            let mut hashed_accounts_cursor =
+                self.tx_ref().cursor_write::<tables::HashedAccounts>()?;
+            for (hashed_address, account) in hashed_state.accounts() {
+                if let Some(account) = account {
+                    hashed_accounts_cursor.upsert(*hashed_address, account)?;
+                } else if hashed_accounts_cursor.seek_exact(*hashed_address)?.is_some() {
+                    hashed_accounts_cursor.delete_current()?;
+                }
             }
         }
 
         // Write hashed storage changes.
-        let sorted_storages = hashed_state.account_storages().iter().sorted_by_key(|(key, _)| *key);
-        let mut hashed_storage_cursor =
-            self.tx_ref().cursor_dup_write::<tables::HashedStorages>()?;
-        for (hashed_address, storage) in sorted_storages {
-            if storage.is_wiped() && hashed_storage_cursor.seek_exact(*hashed_address)?.is_some() {
-                hashed_storage_cursor.delete_current_duplicates()?;
-            }
-
-            for (hashed_slot, value) in storage.storage_slots_ref() {
-                let entry = StorageEntry { key: *hashed_slot, value: *value };
-
-                if let Some(db_entry) =
-                    hashed_storage_cursor.seek_by_key_subkey(*hashed_address, entry.key)? &&
-                    db_entry.key == entry.key
+        if !hashed_state.account_storages().is_empty() {
+            let sorted_storages =
+                hashed_state.account_storages().iter().sorted_by_key(|(key, _)| *key);
+            let mut hashed_storage_cursor =
+                self.tx_ref().cursor_dup_write::<tables::HashedStorages>()?;
+            for (hashed_address, storage) in sorted_storages {
+                if storage.is_wiped() &&
+                    hashed_storage_cursor.seek_exact(*hashed_address)?.is_some()
                 {
-                    hashed_storage_cursor.delete_current()?;
+                    hashed_storage_cursor.delete_current_duplicates()?;
                 }
 
-                if !entry.value.is_zero() {
-                    hashed_storage_cursor.upsert(*hashed_address, &entry)?;
+                for (hashed_slot, value) in storage.storage_slots_ref() {
+                    let entry = StorageEntry { key: *hashed_slot, value: *value };
+
+                    if let Some(db_entry) =
+                        hashed_storage_cursor.seek_by_key_subkey(*hashed_address, entry.key)? &&
+                        db_entry.key == entry.key
+                    {
+                        hashed_storage_cursor.delete_current()?;
+                    }
+
+                    if !entry.value.is_zero() {
+                        hashed_storage_cursor.upsert(*hashed_address, &entry)?;
+                    }
                 }
             }
         }
