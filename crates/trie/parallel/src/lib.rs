@@ -8,8 +8,8 @@
 #![cfg_attr(docsrs, feature(doc_cfg))]
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 
-/// Parallel state root error types.
-pub mod root;
+/// Error types for the state-root task and proof computation.
+pub mod error;
 
 /// Implementation of parallel proof computation.
 pub mod proof_task;

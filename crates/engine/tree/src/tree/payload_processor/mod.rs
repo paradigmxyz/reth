@@ -33,8 +33,8 @@ use reth_trie::{
     trie_cursor::TrieCursorFactory, HashedPostState,
 };
 use reth_trie_parallel::{
+    error::StateRootTaskError,
     proof_task::{ProofTaskCtx, ProofWorkerHandle},
-    root::ParallelStateRootError,
 };
 use reth_trie_sparse::{ArenaParallelSparseTrie, RevealableSparseTrie, SparseStateTrie};
 use std::{
@@ -659,7 +659,7 @@ where
     fn spawn_sparse_trie_task(
         &self,
         proof_worker_handle: ProofWorkerHandle,
-        state_root_tx: mpsc::Sender<Result<StateRootComputeOutcome, ParallelStateRootError>>,
+        state_root_tx: mpsc::Sender<Result<StateRootComputeOutcome, StateRootTaskError>>,
         hashed_state_tx: mpsc::Sender<HashedPostState>,
         from_multi_proof: CrossbeamReceiver<StateRootMessage>,
         options: SparseTrieTaskOptions,
@@ -890,7 +890,7 @@ impl<Tx, Err, R: Send + Sync + 'static> PayloadHandle<Tx, Err, R> {
         name = "await_state_root",
         skip_all
     )]
-    pub fn state_root(&mut self) -> Result<StateRootComputeOutcome, ParallelStateRootError> {
+    pub fn state_root(&mut self) -> Result<StateRootComputeOutcome, StateRootTaskError> {
         self.state_root_handle.as_mut().expect("state_root_handle is None").state_root()
     }
 
@@ -902,7 +902,7 @@ impl<Tx, Err, R: Send + Sync + 'static> PayloadHandle<Tx, Err, R> {
     /// If payload processing was started without background tasks.
     pub const fn take_state_root_rx(
         &mut self,
-    ) -> mpsc::Receiver<Result<StateRootComputeOutcome, ParallelStateRootError>> {
+    ) -> mpsc::Receiver<Result<StateRootComputeOutcome, StateRootTaskError>> {
         self.state_root_handle.as_mut().expect("state_root_handle is None").take_state_root_rx()
     }
 
