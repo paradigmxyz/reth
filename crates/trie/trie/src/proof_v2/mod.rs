@@ -861,6 +861,10 @@ where
         cached_path: &Nibbles,
         cached_branch: &BranchNodeCompact,
     ) -> bool {
+        if self.prefix_set.all() {
+            return true;
+        }
+
         if !self.prefix_set.contains(cached_path) {
             return false
         }
