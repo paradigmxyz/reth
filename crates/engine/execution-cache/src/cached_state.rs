@@ -1197,14 +1197,19 @@ impl SavedCache {
 mod tests {
     use super::*;
     use alloy_primitives::U256;
-    use evm2::evm::{AccountChangeRef, AccountInfo, AccountInfoRef, StateChangeSink};
-    use reth_execution_types::{ExecutionState, ExecutionStateAccumulator};
+    use reth_execution_types::{
+        ExecutionAccountChangeRef, ExecutionAccountInfo, ExecutionAccountInfoRef, ExecutionState,
+        ExecutionStateAccumulator, ExecutionStateChangeSink,
+    };
     use reth_provider::test_utils::{ExtendedAccount, MockEthProvider};
 
-    fn destroyed_account_state(address: Address, original: Option<AccountInfo>) -> ExecutionState {
+    fn destroyed_account_state(
+        address: Address,
+        original: Option<ExecutionAccountInfo>,
+    ) -> ExecutionState {
         let mut accumulator = ExecutionStateAccumulator::new();
         accumulator
-            .account(AccountChangeRef {
+            .account(ExecutionAccountChangeRef {
                 address,
                 original: original.as_ref().map(account_info_ref),
                 current: None,
@@ -1214,8 +1219,8 @@ mod tests {
         accumulator
     }
 
-    fn account_info_ref(info: &AccountInfo) -> AccountInfoRef<'_> {
-        AccountInfoRef {
+    fn account_info_ref(info: &ExecutionAccountInfo) -> ExecutionAccountInfoRef<'_> {
+        ExecutionAccountInfoRef {
             balance: info.balance,
             nonce: info.nonce,
             code_hash: info.code_hash,
@@ -1347,7 +1352,7 @@ mod tests {
         let destroyed_addr = Address::random();
         let state = destroyed_account_state(
             destroyed_addr,
-            Some(AccountInfo {
+            Some(ExecutionAccountInfo {
                 balance: U256::ZERO,
                 nonce: 1,
                 code_hash: B256::random(), // Non-empty code hash
@@ -1380,7 +1385,7 @@ mod tests {
 
         let state = destroyed_account_state(
             addr1,
-            Some(AccountInfo {
+            Some(ExecutionAccountInfo {
                 balance: U256::from(100),
                 nonce: 1,
                 code_hash: alloy_primitives::KECCAK256_EMPTY, // Empty code hash = EOA
