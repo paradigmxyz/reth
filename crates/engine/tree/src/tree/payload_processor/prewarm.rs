@@ -362,6 +362,7 @@ where
 
         if let Some(to_sparse_trie_task) = to_sparse_trie_task {
             let ctx = ctx.clone();
+            let stream_executor = executor.clone();
             executor.bal_streaming_pool().spawn(move || {
                 let branch_span = debug_span!(
                     target: "engine::tree::payload_processor::prewarm",
@@ -372,16 +373,18 @@ where
                 let parent_span = branch_span.clone();
                 let _span = branch_span.entered();
 
-                stream_bal.as_bal().par_iter().for_each(|account_changes| {
-                    WorkerPool::with_worker_mut(|worker| {
-                        let provider =
-                            worker.get_or_init::<Option<Box<dyn AccountReader>>>(|| None);
-                        ctx.send_bal_hashed_state(
-                            &parent_span,
-                            provider,
-                            account_changes,
-                            &to_sparse_trie_task,
-                        );
+                stream_executor.bal_streaming_pool().install_fn(|| {
+                    stream_bal.as_bal().par_iter().for_each(|account_changes| {
+                        WorkerPool::with_worker_mut(|worker| {
+                            let provider =
+                                worker.get_or_init::<Option<Box<dyn AccountReader>>>(|| None);
+                            ctx.send_bal_hashed_state(
+                                &parent_span,
+                                provider,
+                                account_changes,
+                                &to_sparse_trie_task,
+                            );
+                        });
                     });
                 });
 
