@@ -17,10 +17,10 @@ use core::{
 };
 use evm2::{
     bytecode::Bytecode,
-    evm::{AccountInfo, CacheDB, Database, Db, DbErrorCode, DynDatabase, StateChangeSource},
+    evm::{AccountInfo, CacheDB, Database, Db, DbErrorCode, DynDatabase},
     interpreter::Word,
 };
-use reth_execution_types::{ExecutionAccountInfo, ExecutionState};
+use reth_execution_types::{ExecutionAccountInfo, ExecutionState, ExecutionStateChangeSource};
 use reth_primitives_traits::{Account, Bytecode as RethBytecode};
 use reth_storage_errors::provider::{ProviderError, ProviderResult};
 use reth_trie_common::{
@@ -193,7 +193,7 @@ impl SharedEvmStateProviderDatabase {
     }
 
     /// Applies accepted state changes into the shared cache.
-    pub fn commit_source<S: StateChangeSource>(&self, source: &S) -> ProviderResult<()> {
+    pub fn commit_source<S: ExecutionStateChangeSource>(&self, source: &S) -> ProviderResult<()> {
         let mut db = self.lock()?;
         db.commit_source(source);
         Ok(())

@@ -14,7 +14,7 @@ use alloy_primitives::{Address, Bytes, B256};
 use core::cell::RefCell;
 use core::fmt::Debug;
 #[cfg(feature = "std")]
-use evm2::evm::{CacheDB, Database, Db, DbErrorCode, DbResult, DynDatabase, StateChangeSource};
+use evm2::evm::{CacheDB, Database, Db, DbErrorCode, DbResult, DynDatabase};
 pub use reth_execution_errors::{
     BlockExecutionError, BlockValidationError, EvmError, InternalBlockExecutionError,
     InvalidTxError,
@@ -22,6 +22,7 @@ pub use reth_execution_errors::{
 #[cfg(feature = "std")]
 use reth_execution_types::{
     extend_state_and_collect_reverts, state_source_size_hint, BlockReverts, ExecutionState,
+    ExecutionStateChangeSource,
 };
 pub use reth_execution_types::{BlockExecutionOutput, ExecutionOutcome};
 use reth_execution_types::{BlockExecutionResult, ExecutionStateAccumulator, HashedPostState};
@@ -778,7 +779,7 @@ where
         Self { inner: Rc::new(RefCell::new(CacheDB::new(Db::new(database)))) }
     }
 
-    fn commit_source<S: StateChangeSource>(&self, source: &S) {
+    fn commit_source<S: ExecutionStateChangeSource>(&self, source: &S) {
         self.inner.borrow_mut().commit_source(source);
     }
 }

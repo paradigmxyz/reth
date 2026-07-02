@@ -131,6 +131,7 @@ use reth_engine_primitives::{
 };
 use reth_errors::{BlockExecutionError, ProviderResult};
 use reth_evm::{
+    database::StateProviderDatabase,
     execute::{BlockExecutor, ExecutableTxFor, HashedStateMode, RecoveredTx},
     ConfigureEvm, EvmEnvFor, ExecutionCtxFor,
 };
@@ -146,9 +147,9 @@ use reth_primitives_traits::{
 use reth_provider::{
     providers::{OverlayBuilder, OverlayStateProvider, OverlayStateProviderFactory},
     BlockExecutionOutput, BlockNumReader, BlockReader, ChangeSetReader, DatabaseProviderFactory,
-    DatabaseProviderROFactory, EvmStateProviderDatabase, HashedPostStateProvider, ProviderError,
-    PruneCheckpointReader, StageCheckpointReader, StateProvider, StateProviderBox,
-    StateProviderFactory, StateReader, StorageChangeSetReader, StorageSettingsCache,
+    DatabaseProviderROFactory, HashedPostStateProvider, ProviderError, PruneCheckpointReader,
+    StageCheckpointReader, StateProvider, StateProviderBox, StateProviderFactory, StateReader,
+    StorageChangeSetReader, StorageSettingsCache,
 };
 use reth_trie::{trie_cursor::TrieCursorFactory, updates::TrieUpdates, HashedPostState};
 use reth_trie_common::KeccakKeyHasher;
@@ -1159,7 +1160,7 @@ where
                         sender.send_hashed_state(hashed_state);
                     }
                 };
-                let db = EvmStateProviderDatabase::new(state_provider);
+                let db = StateProviderDatabase::new(state_provider);
                 let evm = self.evm_config.evm_with_env(db, env.evm_env.clone());
                 let mut executor =
                     self.evm_config.create_executor(evm, execution_ctx, hashed_state_mode);

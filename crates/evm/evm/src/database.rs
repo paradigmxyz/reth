@@ -1,10 +1,14 @@
 //! State provider database adapter used by EVM execution.
 
 use alloy_primitives::{Address, BlockNumber, B256, U256};
+#[cfg(not(feature = "std"))]
 use core::ops::{Deref, DerefMut};
 use reth_primitives_traits::Account;
 use reth_storage_api::{AccountReader, BlockHashReader, BytecodeReader, StateProvider};
 use reth_storage_errors::provider::ProviderResult;
+
+#[cfg(feature = "std")]
+pub use reth_storage_api::EvmStateProviderDatabase as StateProviderDatabase;
 
 /// A helper trait responsible for providing state necessary for EVM execution.
 pub trait EvmStateProvider {
@@ -48,10 +52,12 @@ impl<T: StateProvider> EvmStateProvider for T {
     }
 }
 
-/// A [`Database`] and [`DatabaseRef`] implementation backed by an [`EvmStateProvider`].
+/// A database wrapper backed by an [`EvmStateProvider`].
+#[cfg(not(feature = "std"))]
 #[derive(Clone)]
 pub struct StateProviderDatabase<DB>(pub DB);
 
+#[cfg(not(feature = "std"))]
 impl<DB> StateProviderDatabase<DB> {
     /// Creates a new database wrapper with the given state provider.
     pub const fn new(db: DB) -> Self {
@@ -64,18 +70,21 @@ impl<DB> StateProviderDatabase<DB> {
     }
 }
 
+#[cfg(not(feature = "std"))]
 impl<DB> core::fmt::Debug for StateProviderDatabase<DB> {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         f.debug_struct("StateProviderDatabase").finish_non_exhaustive()
     }
 }
 
+#[cfg(not(feature = "std"))]
 impl<DB> AsRef<DB> for StateProviderDatabase<DB> {
     fn as_ref(&self) -> &DB {
         self
     }
 }
 
+#[cfg(not(feature = "std"))]
 impl<DB> Deref for StateProviderDatabase<DB> {
     type Target = DB;
 
@@ -84,6 +93,7 @@ impl<DB> Deref for StateProviderDatabase<DB> {
     }
 }
 
+#[cfg(not(feature = "std"))]
 impl<DB> DerefMut for StateProviderDatabase<DB> {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.0

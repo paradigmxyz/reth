@@ -29,7 +29,6 @@ reth-ethereum-primitives.workspace = true
 reth-provider.workspace = true
 reth-prune.workspace = true
 reth-stages-api.workspace = true
-reth-storage-api.workspace = true
 reth-tasks = { workspace = true, features = ["rayon"] }
 reth-trie-parallel.workspace = true
 reth-trie-sparse = { workspace = true, features = ["std", "metrics"] }
@@ -106,7 +105,6 @@ asm-keccak = [
     "alloy-primitives/asm-keccak",
     "reth-node-ethereum/asm-keccak",
     "reth-evm-ethereum/asm-keccak",
-    "reth-storage-api/asm-keccak",
 ]
 portable = [
     "evm2/portable",
