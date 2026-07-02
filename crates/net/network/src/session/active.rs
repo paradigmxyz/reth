@@ -172,8 +172,8 @@ pub(crate) struct ActiveSession<N: NetworkPrimitives> {
     pub(crate) internal_request_rx: Fuse<ReceiverStream<PeerRequest<N>>>,
     /// All requests sent to the remote peer we're waiting on a response
     pub(crate) inflight_requests: FxHashMap<u64, InflightRequest<PeerRequest<N>>>,
-    /// Outstanding `snap/2` requests sent to the remote peer, keyed by a session-unique
-    /// `request_id`, awaiting the correlated response on the dedicated `eth`+`snap` stream.
+    /// All `snap/2` requests sent to the remote peer we're waiting on a response for, keyed by a
+    /// session-unique `request_id`.
     pub(crate) inflight_snap_requests: FxHashMap<u64, InflightSnapRequest>,
     /// All requests that were sent by the remote peer and we're waiting on an internal response
     pub(crate) received_requests_from_remote: Vec<ReceivedRequest<N>>,
@@ -422,10 +422,7 @@ impl<N: NetworkPrimitives> ActiveSession<N> {
     }
 
     /// Evicts `snap/2` requests whose deadline has passed, resolving their futures with a timeout
-    /// so callers don't hang forever and the inflight map stays bounded.
-    ///
-    /// Driven by the shared eth request-timeout interval (see the poll loop), so snap timeout
-    /// latency tracks the same cadence as eth requests rather than using a separate timer.
+    /// so callers don't hang and the inflight map stays bounded.
     fn check_timed_out_snap_requests(&mut self, now: Instant) {
         let expired: Vec<u64> = self
             .inflight_snap_requests
@@ -441,13 +438,11 @@ impl<N: NetworkPrimitives> ActiveSession<N> {
         }
     }
 
-    /// Handle an inbound `snap/2` message read from the dedicated `EthSnapStream`.
+    /// Handles an inbound `snap/2` message.
     ///
-    /// Responses are correlated back to the outstanding [`SnapClient`](crate::snap::SnapClient)
-    /// request by `request_id`, with the caller's original id restored and the response type
-    /// checked against the request kind. Unsolicited or mismatched responses count as bad messages
-    /// for peer reputation. Inbound requests are not served yet (no snap server), so they are
-    /// ignored.
+    /// Responses are correlated to the in-flight request by `request_id` and type-checked against
+    /// the request kind; unsolicited or mismatched ones count as bad messages. Inbound requests
+    /// are ignored until the snap server lands.
     fn on_incoming_snap_message(
         &mut self,
         mut msg: SnapProtocolMessage,
@@ -1048,7 +1043,7 @@ impl<N: NetworkPrimitives> InflightRequest<PeerRequest<N>> {
     }
 }
 
-/// An outstanding `snap/2` request awaiting its correlated response.
+/// An in-flight `snap/2` request awaiting its correlated response.
 pub(crate) struct InflightSnapRequest {
     /// Channel that resolves the [`SnapClient`](crate::snap::SnapClient)'s future with the
     /// response.
