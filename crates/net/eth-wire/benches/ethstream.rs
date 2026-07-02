@@ -29,6 +29,7 @@ use std::{
 const MESSAGE_COUNT: usize = 1024;
 const HASHES_PER_ANNOUNCEMENT: usize = 64;
 const SMALL_TX_SIZE: usize = 64;
+const MEDIUM_TX_SIZE: usize = 1024;
 const ACTIVE_SESSION_P2P_OUTGOING_BUFFER_CAPACITY: usize = 32;
 const ECIES_PAYLOAD_LEN: usize = 512;
 
@@ -599,6 +600,39 @@ fn bench_recv_messages(c: &mut Criterion) {
                     version,
                     HASHES_PER_ANNOUNCEMENT,
                     SMALL_TX_SIZE,
+                );
+                b.iter(|| {
+                    rt.block_on(async {
+                        let mut stream = eth_stream_with_version(
+                            MockTransport::with_incoming(encoded.clone(), MESSAGE_COUNT),
+                            version,
+                        );
+                        let mut decode_buf = BytesMut::new();
+                        for _ in 0..MESSAGE_COUNT {
+                            black_box(
+                                poll_fn(|cx| {
+                                    Pin::new(&mut stream).poll_next_eth_message(cx, &mut decode_buf)
+                                })
+                                .await
+                                .unwrap()
+                                .unwrap(),
+                            );
+                        }
+                    });
+                })
+            },
+        );
+
+        group.bench_function(
+            format!(
+                "recv_hash_announcements_eth{}_{}_hashes_medium_sizes",
+                version as u8, HASHES_PER_ANNOUNCEMENT
+            ),
+            |b| {
+                let encoded = encoded_wire_message_for_version_with_hashes_and_size(
+                    version,
+                    HASHES_PER_ANNOUNCEMENT,
+                    MEDIUM_TX_SIZE,
                 );
                 b.iter(|| {
                     rt.block_on(async {

@@ -568,6 +568,73 @@ fn decode_fixed_width_usize_list(
         return Some(Ok(values))
     }
 
+    match value_len {
+        2 => {
+            for chunk in payload.chunks_exact(encoded_len) {
+                if chunk[0] != prefix {
+                    return None
+                }
+                let bytes = [chunk[1], chunk[2]];
+                if bytes[0] == 0 {
+                    return Some(Err(alloy_rlp::Error::LeadingZero))
+                }
+                values.push(u16::from_be_bytes(bytes) as usize);
+            }
+
+            return Some(Ok(values))
+        }
+        3 => {
+            for chunk in payload.chunks_exact(encoded_len) {
+                if chunk[0] != prefix {
+                    return None
+                }
+                let bytes = &chunk[1..4];
+                if bytes[0] == 0 {
+                    return Some(Err(alloy_rlp::Error::LeadingZero))
+                }
+                values.push(
+                    ((bytes[0] as usize) << 16) | ((bytes[1] as usize) << 8) | bytes[2] as usize,
+                );
+            }
+
+            return Some(Ok(values))
+        }
+        4 => {
+            for chunk in payload.chunks_exact(encoded_len) {
+                if chunk[0] != prefix {
+                    return None
+                }
+                let bytes = [chunk[1], chunk[2], chunk[3], chunk[4]];
+                if bytes[0] == 0 {
+                    return Some(Err(alloy_rlp::Error::LeadingZero))
+                }
+                values.push(u32::from_be_bytes(bytes) as usize);
+            }
+
+            return Some(Ok(values))
+        }
+        8 => {
+            for chunk in payload.chunks_exact(encoded_len) {
+                if chunk[0] != prefix {
+                    return None
+                }
+                let bytes = [
+                    chunk[1], chunk[2], chunk[3], chunk[4], chunk[5], chunk[6], chunk[7], chunk[8],
+                ];
+                if bytes[0] == 0 {
+                    return Some(Err(alloy_rlp::Error::LeadingZero))
+                }
+                let Ok(value) = usize::try_from(u64::from_be_bytes(bytes)) else {
+                    return Some(Err(alloy_rlp::Error::Overflow))
+                };
+                values.push(value);
+            }
+
+            return Some(Ok(values))
+        }
+        _ => {}
+    }
+
     for chunk in payload.chunks_exact(encoded_len) {
         if chunk[0] != prefix {
             return None
