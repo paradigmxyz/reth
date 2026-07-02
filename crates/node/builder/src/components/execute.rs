@@ -1,6 +1,5 @@
 //! EVM component for the node builder.
-use crate::{BuilderContext, FullNodeTypes};
-use reth_evm::ConfigureEvm;
+use crate::{BuilderContext, ConfigureEvm, FullNodeTypes};
 use reth_node_api::PrimitivesTy;
 use std::future::Future;
 

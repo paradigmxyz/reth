@@ -6,8 +6,7 @@ use alloy_rpc_types::{Block, Header, Receipt, Transaction, TransactionRequest};
 use eyre::OptionExt;
 use reth_chainspec::EthChainSpec;
 use reth_engine_primitives::InvalidBlockHook;
-use reth_evm::ConfigureEvm;
-use reth_node_api::{FullNodeComponents, NodeTypes};
+use reth_node_api::{ConfigureEvm, FullNodeComponents, NodeTypes};
 use reth_node_core::{
     args::InvalidBlockHookType,
     dirs::{ChainPath, DataDirPath},

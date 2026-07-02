@@ -21,9 +21,8 @@ pub use network::*;
 pub use payload::*;
 pub use pool::*;
 
-use crate::FullNodeTypes;
+use crate::{ConfigureEvm, FullNodeTypes};
 use reth_consensus::FullConsensus;
-use reth_evm::ConfigureEvm;
 use reth_network::types::NetPrimitivesFor;
 use reth_network_api::FullNetwork;
 use reth_node_api::{NodeTypes, PrimitivesTy, TxTy};
