@@ -193,7 +193,7 @@ impl TestHarness {
         let payload_validator = MockEngineValidator;
 
         let (from_tree_tx, from_tree_rx) = unbounded_channel();
-        let tree_config = TreeConfig::default();
+        let tree_config = TreeConfig::default().with_has_enough_parallelism(true);
         let runtime = reth_tasks::Runtime::test();
         let state_trie_overlays =
             StateTrieOverlayManager::new(runtime.state_trie_overlay_worker_pool());
@@ -619,8 +619,9 @@ fn on_new_persisted_block_skips_sparse_trie_prune_when_state_root_task_disabled(
     let blocks: Vec<_> =
         TestBlockBuilder::eth().get_executed_blocks(1..4).map(with_known_changed_paths).collect();
     let configs = [
-        TreeConfig::default().with_state_root_fallback(true),
-        TreeConfig::default().with_skip_state_root(true),
+        TreeConfig::default().with_has_enough_parallelism(false),
+        TreeConfig::default().with_has_enough_parallelism(true).with_state_root_fallback(true),
+        TreeConfig::default().with_has_enough_parallelism(true).with_skip_state_root(true),
     ];
 
     for config in configs {
