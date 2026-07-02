@@ -246,6 +246,11 @@ pub trait ConfigureEvm: Clone + Debug + Send + Sync + Unpin {
         transaction.into_tx_env()
     }
 
+    /// Returns the transaction shape consumed by the configured EVM.
+    fn evm_tx<'a>(&self, tx: &'a TxEnvFor<Self>) -> &'a <evm2::BaseEvmTypes as evm2::EvmTypes>::Tx {
+        self.block_executor_factory().evm_tx(tx)
+    }
+
     /// Returns a config with JIT support enabled for subsequently created EVMs, if supported.
     #[auto_impl(keep_default_for(&, Arc))]
     fn with_jit_support_enabled(self, _enabled: bool) -> Self

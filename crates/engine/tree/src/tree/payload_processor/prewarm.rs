@@ -32,10 +32,7 @@ use evm2::evm::{AccountChangeRef, StateChangeSink, StorageChange};
 use metrics::{Counter, Gauge, Histogram};
 #[cfg(any())]
 use rayon::prelude::*;
-use reth_evm::{
-    execute::{BlockExecutorFactory, ExecutableTxFor},
-    ConfigureEvm, EvmEnv, EvmFor,
-};
+use reth_evm::{execute::ExecutableTxFor, ConfigureEvm, EvmEnv, EvmFor};
 use reth_metrics::Metrics;
 #[cfg(any(test, any()))]
 use reth_primitives_traits::Account;
@@ -248,19 +245,18 @@ where
                 HandlerError(evm2::registry::HandlerError),
             }
 
-            let resolution =
-                match evm.transact(ctx.evm_config.block_executor_factory().evm_tx(&tx_env)) {
-                    Ok(executed) => {
-                        if let Some(code) = executed.result().db_error_code {
-                            let _ = executed.discard();
-                            PrewarmResolution::DatabaseError(code)
-                        } else {
-                            let Ok(_result) = executed.discard_with(&mut proof_targets);
-                            PrewarmResolution::Outcome
-                        }
+            let resolution = match evm.transact(ctx.evm_config.evm_tx(&tx_env)) {
+                Ok(executed) => {
+                    if let Some(code) = executed.result().db_error_code {
+                        let _ = executed.discard();
+                        PrewarmResolution::DatabaseError(code)
+                    } else {
+                        let Ok(_result) = executed.discard_with(&mut proof_targets);
+                        PrewarmResolution::Outcome
                     }
-                    Err(err) => PrewarmResolution::HandlerError(err),
-                };
+                }
+                Err(err) => PrewarmResolution::HandlerError(err),
+            };
 
             match resolution {
                 PrewarmResolution::Outcome => {}
