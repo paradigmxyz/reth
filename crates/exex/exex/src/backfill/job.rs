@@ -446,7 +446,8 @@ mod tests {
 
             let chain_receipts = &chain.execution_outcome().receipts[i];
             assert_eq!(
-                chain_receipts, &pipeline_output.receipts,
+                chain_receipts.as_ref(),
+                &pipeline_output.receipts,
                 "block {i}: receipts differ in batch backfill — potential gas accounting \
                  divergence between LatestStateProvider and history_by_block_number"
             );

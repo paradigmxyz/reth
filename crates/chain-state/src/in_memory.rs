@@ -1551,7 +1551,7 @@ mod tests {
 
         // Build expected execution outcome (first_block matches first block number)
         let commit_execution_outcome = ExecutionOutcome {
-            receipts: vec![vec![], vec![]],
+            receipts: vec![Arc::new(vec![]), Arc::new(vec![])],
             requests: vec![Requests::default(), Requests::default()],
             first_block: 0,
             ..Default::default()
@@ -1589,7 +1589,7 @@ mod tests {
         // Build expected execution outcome for reorg chains (first_block matches first block
         // number)
         let reorg_execution_outcome = ExecutionOutcome {
-            receipts: vec![vec![], vec![]],
+            receipts: vec![Arc::new(vec![]), Arc::new(vec![])],
             requests: vec![Requests::default(), Requests::default()],
             first_block: 1,
             ..Default::default()
