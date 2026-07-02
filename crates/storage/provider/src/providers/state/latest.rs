@@ -19,6 +19,12 @@ use reth_trie::{
     TrieInputSorted,
 };
 use reth_trie_db::{DatabaseProof, DatabaseStateRoot, DatabaseStorageProof, DatabaseStorageRoot};
+use std::cell::Cell;
+
+std::thread_local! {
+    static LATEST_STORAGE_ACCOUNT_HASH: Cell<Option<(Address, B256)>> = const { Cell::new(None) };
+    static LATEST_STORAGE_SLOT_HASH: Cell<Option<(StorageKey, B256)>> = const { Cell::new(None) };
+}
 
 type DbStateRoot<'a, TX, A> = StateRoot<
     reth_trie_db::DatabaseTrieCursorFactory<&'a TX, A>,
@@ -64,6 +70,38 @@ impl<'b, Provider: DBProvider> LatestStateProviderRef<'b, Provider> {
             .filter(|e| e.key == hashed_slot)
             .map(|e| e.value))
     }
+
+    fn hashed_storage_key(&self, account: Address, storage_key: StorageKey) -> (B256, StorageKey) {
+        (cached_hashed_storage_account(account), cached_hashed_storage_slot(storage_key))
+    }
+}
+
+fn cached_hashed_storage_account(account: Address) -> B256 {
+    LATEST_STORAGE_ACCOUNT_HASH.with(|cache| {
+        if let Some((cached_account, hashed)) = cache.get() &&
+            cached_account == account
+        {
+            return hashed
+        }
+
+        let hashed = alloy_primitives::keccak256(account);
+        cache.set(Some((account, hashed)));
+        hashed
+    })
+}
+
+fn cached_hashed_storage_slot(storage_key: StorageKey) -> B256 {
+    LATEST_STORAGE_SLOT_HASH.with(|cache| {
+        if let Some((cached_key, hashed)) = cache.get() &&
+            cached_key == storage_key
+        {
+            return hashed
+        }
+
+        let hashed = alloy_primitives::keccak256(storage_key);
+        cache.set(Some((storage_key, hashed)));
+        hashed
+    })
 }
 
 impl<Provider: DBProvider + StorageSettingsCache> AccountReader
@@ -267,10 +305,8 @@ impl<Provider: DBProvider + BlockHashReader + StorageSettingsCache> StateProvide
         storage_key: StorageKey,
     ) -> ProviderResult<Option<StorageValue>> {
         if self.0.cached_storage_settings().use_hashed_state() {
-            self.hashed_storage_lookup(
-                alloy_primitives::keccak256(account),
-                alloy_primitives::keccak256(storage_key),
-            )
+            let (hashed_address, hashed_slot) = self.hashed_storage_key(account, storage_key);
+            self.hashed_storage_lookup(hashed_address, hashed_slot)
         } else {
             let mut cursor = self.tx().cursor_dup_read::<tables::PlainStorageState>()?;
             if let Some(entry) = cursor.seek_by_key_subkey(account, storage_key)? &&
