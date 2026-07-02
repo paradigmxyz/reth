@@ -891,7 +891,15 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
         // iterate over block body and remove receipts
         self.remove::<tables::Receipts<ReceiptTy<N>>>(from_tx..)?;
 
-        if EitherWriter::receipts_destination(self).is_static_file() {
+        // The static file segment is also truncated when it extends past the unwind target even
+        // if receipts are currently written to the database: rows above the target are stale
+        // regardless of the configured destination, e.g. left over from an unwind that was
+        // interrupted between the database and static-file commits.
+        if EitherWriter::receipts_destination(self).is_static_file() ||
+            self.static_file_provider
+                .get_highest_static_file_block(StaticFileSegment::Receipts)
+                .is_some_and(|highest| highest > last_block)
+        {
             let static_file_receipt_num =
                 self.static_file_provider.get_highest_static_file_tx(StaticFileSegment::Receipts);
 
@@ -905,6 +913,29 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
         }
 
         Ok(())
+    }
+
+    /// Truncates the receipts static file segment so it does not extend above the given block.
+    ///
+    /// The receipts segment can be ahead of the database if a previous unwind was interrupted
+    /// after the database commit but before the static-file commit. In that state the regular
+    /// unwind skips receipts entirely because the database has no state above the target, so the
+    /// stale rows are truncated here based on the segment's own height.
+    fn truncate_receipts_static_file_above(&self, block: BlockNumber) -> ProviderResult<()> {
+        if !self
+            .static_file_provider
+            .get_highest_static_file_block(StaticFileSegment::Receipts)
+            .is_some_and(|highest| highest > block)
+        {
+            return Ok(())
+        }
+
+        let next_tx_num = self
+            .block_body_indices(block)?
+            .map(|b| b.next_tx_num())
+            .ok_or(ProviderError::BlockBodyIndicesNotFound(block))?;
+
+        self.remove_receipts_from(next_tx_num, block)
     }
 
     /// Writes bytecodes to MDBX.
@@ -2760,6 +2791,9 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
         let range = block + 1..=self.last_block_number()?;
 
         if range.is_empty() {
+            // Even with no state above the target, the receipts static file may still extend
+            // past it, see [`Self::truncate_receipts_static_file_above`].
+            self.truncate_receipts_static_file_above(block)?;
             return Ok(());
         }
 
@@ -2905,6 +2939,9 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
         let range = block + 1..=self.last_block_number()?;
 
         if range.is_empty() {
+            // Even with no state above the target, the receipts static file may still extend
+            // past it, see [`Self::truncate_receipts_static_file_above`].
+            self.truncate_receipts_static_file_above(block)?;
             return Ok(ExecutionOutcome::default())
         }
         let start_block_number = *range.start();
@@ -4648,6 +4685,76 @@ mod tests {
             Err(e) => panic!("Expected BlockNotExecuted error, got: {e:?}"),
             Ok(_) => panic!("Expected error, got Ok"),
         }
+    }
+
+    #[test]
+    fn test_unwind_truncates_receipts_static_file_ahead_of_database() {
+        let factory = create_test_provider_factory();
+        factory.set_storage_settings_cache(StorageSettings::v2());
+
+        let receipt = |gas: u64| Receipt {
+            tx_type: Default::default(),
+            success: true,
+            cumulative_gas_used: gas,
+            logs: vec![],
+        };
+
+        // Insert an empty genesis block so the database tip is block 0.
+        let mut rng = generators::rng();
+        let block0 =
+            random_block(&mut rng, 0, BlockParams { tx_count: Some(0), ..Default::default() });
+        let provider_rw = factory.provider_rw().unwrap();
+        provider_rw.insert_block(&block0.clone().try_recover().unwrap()).unwrap();
+        provider_rw.commit().unwrap();
+
+        // Simulate an unwind that was interrupted between the database and static-file commits:
+        // the receipts segment still contains block 1 with one receipt while the database and
+        // all other segments are at block 0.
+        {
+            let sf_provider = factory.static_file_provider();
+            let mut writer = sf_provider.latest_writer(StaticFileSegment::Receipts).unwrap();
+            writer.increment_block(0).unwrap();
+            writer.increment_block(1).unwrap();
+            writer.append_receipt(0, &receipt(1)).unwrap();
+            writer.commit().unwrap();
+        }
+        let sf_provider = factory.static_file_provider();
+        assert_eq!(sf_provider.get_highest_static_file_tx(StaticFileSegment::Receipts), Some(0));
+        assert_eq!(sf_provider.get_highest_static_file_block(StaticFileSegment::Receipts), Some(1));
+
+        // Unwinding to block 0 has no database state to remove, but must still truncate the
+        // stale receipts.
+        let provider_rw = factory.provider_rw().unwrap();
+        provider_rw.remove_block_and_execution_above(0).unwrap();
+        provider_rw.commit().unwrap();
+
+        assert_eq!(sf_provider.get_highest_static_file_tx(StaticFileSegment::Receipts), None);
+        assert_eq!(sf_provider.get_highest_static_file_block(StaticFileSegment::Receipts), Some(0));
+
+        // Writing a new block 1 with a receipt must succeed again. Without the truncation this
+        // fails with `UnexpectedStaticFileTxNumber(Receipts, 0, 1)`.
+        let block1 = random_block(
+            &mut rng,
+            1,
+            BlockParams { parent: Some(block0.hash()), tx_count: Some(1), ..Default::default() },
+        );
+        let provider_rw = factory.provider_rw().unwrap();
+        provider_rw.insert_block(&block1.try_recover().unwrap()).unwrap();
+        provider_rw
+            .write_state(
+                &ExecutionOutcome {
+                    first_block: 1,
+                    receipts: vec![vec![receipt(2)]],
+                    ..Default::default()
+                },
+                crate::OriginalValuesKnown::No,
+                StateWriteConfig::default(),
+            )
+            .unwrap();
+        provider_rw.commit().unwrap();
+
+        assert_eq!(sf_provider.get_highest_static_file_tx(StaticFileSegment::Receipts), Some(0));
+        assert_eq!(sf_provider.get_highest_static_file_block(StaticFileSegment::Receipts), Some(1));
     }
 
     #[test]
