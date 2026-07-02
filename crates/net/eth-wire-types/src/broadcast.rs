@@ -588,12 +588,32 @@ fn decode_fixed_width_usize_list(
 
     if payload.len() == capacity {
         let mut values = Vec::with_capacity(capacity);
-        for byte in payload {
+        if capacity < 4 {
+            for byte in payload {
+                match *byte {
+                    value @ 0..=0x7f => values.push(value as usize),
+                    EMPTY_STRING_CODE => values.push(0),
+                    _ => return None,
+                }
+            }
+
+            return Some(Ok(values))
+        }
+
+        for (slot, byte) in values.spare_capacity_mut().iter_mut().zip(payload) {
             match *byte {
-                value @ 0..=0x7f => values.push(value as usize),
-                EMPTY_STRING_CODE => values.push(0),
+                value @ 0..=0x7f => {
+                    slot.write(value as usize);
+                }
+                EMPTY_STRING_CODE => {
+                    slot.write(0);
+                }
                 _ => return None,
             }
+        }
+        // SAFETY: the loop above initialized exactly one slot for each payload byte.
+        unsafe {
+            values.set_len(capacity);
         }
 
         return Some(Ok(values))
@@ -612,7 +632,24 @@ fn decode_fixed_width_usize_list(
     let prefix = EMPTY_STRING_CODE + value_len as u8;
     let mut values = Vec::with_capacity(capacity);
     if value_len == 1 {
-        for chunk in payload.chunks_exact(encoded_len) {
+        if capacity < 4 {
+            for chunk in payload.chunks_exact(encoded_len) {
+                if chunk[0] != prefix {
+                    return None
+                }
+                let value = chunk[1];
+                if value < EMPTY_STRING_CODE {
+                    return Some(Err(alloy_rlp::Error::NonCanonicalSingleByte))
+                }
+                values.push(value as usize);
+            }
+
+            return Some(Ok(values))
+        }
+
+        for (slot, chunk) in
+            values.spare_capacity_mut().iter_mut().zip(payload.chunks_exact(encoded_len))
+        {
             if chunk[0] != prefix {
                 return None
             }
@@ -620,7 +657,11 @@ fn decode_fixed_width_usize_list(
             if value < EMPTY_STRING_CODE {
                 return Some(Err(alloy_rlp::Error::NonCanonicalSingleByte))
             }
-            values.push(value as usize);
+            slot.write(value as usize);
+        }
+        // SAFETY: the loop above initialized exactly one slot for each encoded value.
+        unsafe {
+            values.set_len(capacity);
         }
 
         return Some(Ok(values))
@@ -628,7 +669,24 @@ fn decode_fixed_width_usize_list(
 
     match value_len {
         2 => {
-            for chunk in payload.chunks_exact(encoded_len) {
+            if capacity < 4 {
+                for chunk in payload.chunks_exact(encoded_len) {
+                    if chunk[0] != prefix {
+                        return None
+                    }
+                    let bytes = [chunk[1], chunk[2]];
+                    if bytes[0] == 0 {
+                        return Some(Err(alloy_rlp::Error::LeadingZero))
+                    }
+                    values.push(u16::from_be_bytes(bytes) as usize);
+                }
+
+                return Some(Ok(values))
+            }
+
+            for (slot, chunk) in
+                values.spare_capacity_mut().iter_mut().zip(payload.chunks_exact(encoded_len))
+            {
                 if chunk[0] != prefix {
                     return None
                 }
@@ -636,7 +694,11 @@ fn decode_fixed_width_usize_list(
                 if bytes[0] == 0 {
                     return Some(Err(alloy_rlp::Error::LeadingZero))
                 }
-                values.push(u16::from_be_bytes(bytes) as usize);
+                slot.write(u16::from_be_bytes(bytes) as usize);
+            }
+            // SAFETY: the loop above initialized exactly one slot for each encoded value.
+            unsafe {
+                values.set_len(capacity);
             }
 
             return Some(Ok(values))
@@ -1672,6 +1734,25 @@ mod tests {
 
         assert_eq!(decoded, expected);
         assert!(input.is_empty());
+    }
+
+    #[test]
+    fn eth_68_tx_hash_decode_fixed_width_size_metadata() {
+        for sizes in [vec![0x80; 4], vec![0x400; 4]] {
+            let expected = NewPooledTransactionHashes68 {
+                types: vec![0x02; sizes.len()],
+                hashes: (1..=sizes.len()).map(|idx| B256::repeat_byte(idx as u8)).collect(),
+                sizes,
+            };
+            let mut encoded = Vec::new();
+            expected.encode(&mut encoded);
+
+            let mut input = encoded.as_ref();
+            let decoded = NewPooledTransactionHashes68::decode(&mut input).unwrap();
+
+            assert_eq!(decoded, expected);
+            assert!(input.is_empty());
+        }
     }
 
     #[test]
