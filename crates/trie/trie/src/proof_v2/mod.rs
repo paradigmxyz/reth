@@ -1092,7 +1092,9 @@ where
             // indicate children that need recalculation from leaves (e.g. new keys inserted
             // under this branch). Skip nibbles already set in `curr_state_mask` since those
             // children have already been constructed.
-            if self.prefix_set.contains(&self.branch_path) {
+            if self.prefix_set.all() {
+                next_child_nibbles |= TrieMask::new(!curr_state_mask.get());
+            } else if self.prefix_set.contains(&self.branch_path) {
                 let branch_path_len = self.branch_path.len();
                 let mut child_path = self.branch_path;
                 for nibble in 0u8..16 {
