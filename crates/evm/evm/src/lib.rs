@@ -291,6 +291,7 @@ pub trait ConfigureEvm: Clone + Debug + Send + Sync + Unpin {
             ctx,
             parent,
             assembler: self.block_assembler(),
+            on_hashed_state_update: Default::default(),
         }
     }
 

@@ -167,7 +167,7 @@ where
     let BuildArguments {
         mut cached_reads,
         execution_cache,
-        trie_handle: _trie_handle,
+        trie_handle,
         config,
         cancel,
         best_payload,
@@ -219,6 +219,12 @@ where
     let cached_db = cached_reads.as_db_mut(db);
     let cached_db_handle = cached_db.clone();
     let evm_config = evm_config.with_jit_support();
+    let stream_state_updates = trie_handle.is_some() && !skip_state_root;
+    let hashed_state_mode = if stream_state_updates {
+        HashedStateMode::OutputAndStream
+    } else {
+        HashedStateMode::OutputOnly
+    };
     let mut builder = evm_config
         .builder_for_next_block(
             cached_db,
@@ -233,9 +239,17 @@ where
                 extra_data: builder_config.extra_data.clone(),
                 slot_number: attributes.slot_number(),
             },
-            HashedStateMode::OutputOnly,
+            hashed_state_mode,
         )
         .map_err(PayloadBuilderError::other)?;
+
+    let use_sparse_trie =
+        if let Some(handle) = trie_handle.as_ref().filter(|_| stream_state_updates) {
+            let sender = handle.state_hook_sender();
+            builder.set_state_hook(move |hashed_state| sender.send_hashed_state(hashed_state))
+        } else {
+            false
+        };
 
     builder.apply_pre_execution_changes().map_err(|err| {
         warn!(target: "payload_builder", %err, "failed to apply pre-execution changes");
@@ -409,17 +423,38 @@ where
         return Ok(BuildOutcome::Aborted { fees: total_fees, cached_reads })
     }
 
-    let state_root_precomputed = skip_state_root.then(|| {
+    let BlockBuilderOutcome { execution_result, block, block_access_list, .. } = if skip_state_root
+    {
         debug!(
             target: "payload_builder",
             id = %payload_id,
             state_root = ?parent_header.state_root,
             "skipping payload state-root computation"
         );
-        (parent_header.state_root, TrieUpdates::default())
-    });
-    let BlockBuilderOutcome { execution_result, block, block_access_list, .. } =
-        builder.finish(state_provider.as_ref(), state_root_precomputed)?;
+        builder.finish(
+            state_provider.as_ref(),
+            Some((parent_header.state_root, TrieUpdates::default())),
+        )?
+    } else if use_sparse_trie {
+        let mut handle = trie_handle.expect("sparse trie handle exists if hook was installed");
+        builder.finish_with_state_root(state_provider.as_ref(), |_| match handle.state_root() {
+            Ok(outcome) => {
+                debug!(
+                    target: "payload_builder",
+                    id = %payload_id,
+                    state_root = ?outcome.state_root,
+                    "received state root from sparse trie"
+                );
+                Ok(Some((outcome.state_root, Arc::unwrap_or_clone(outcome.trie_updates))))
+            }
+            Err(err) => {
+                warn!(target: "payload_builder", id = %payload_id, %err, "sparse trie failed, falling back to sync state root");
+                Ok(None)
+            }
+        })?
+    } else {
+        builder.finish(state_provider.as_ref(), None)?
+    };
     cached_db_handle.sync(&mut cached_reads);
 
     let requests = chain_spec

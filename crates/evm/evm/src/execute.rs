@@ -2,8 +2,8 @@
 
 use crate::{ConfigureEvm, EvmEnv, TxEnvFor};
 #[cfg(feature = "std")]
-use alloc::{boxed::Box, rc::Rc};
-use alloc::{sync::Arc, vec::Vec};
+use alloc::rc::Rc;
+use alloc::{boxed::Box, sync::Arc, vec::Vec};
 #[cfg(feature = "std")]
 use alloy_consensus::BlockHeader as _;
 use alloy_consensus::{
@@ -320,7 +320,7 @@ pub struct BlockBuilderOutcome<N: NodePrimitives> {
 }
 
 /// A type that knows how to execute transactions and assemble a block.
-pub trait BlockBuilder {
+pub trait BlockBuilder: Sized {
     /// The primitive types used by the inner [`BlockExecutor`].
     type Primitives: NodePrimitives;
     /// Inner block executor.
@@ -363,7 +363,25 @@ pub trait BlockBuilder {
         self,
         state_provider: impl StateProvider,
         state_root_precomputed: Option<(B256, TrieUpdates)>,
+    ) -> Result<BlockBuilderOutcome<Self::Primitives>, BlockExecutionError> {
+        self.finish_with_state_root(state_provider, move |_| Ok(state_root_precomputed))
+    }
+
+    /// Completes block building, resolving an optional state root after execution is finalized.
+    fn finish_with_state_root(
+        self,
+        state_provider: impl StateProvider,
+        state_root: impl FnOnce(
+            &BlockExecutionOutput<ReceiptTy<Self::Primitives>>,
+        ) -> Result<Option<(B256, TrieUpdates)>, BlockExecutionError>,
     ) -> Result<BlockBuilderOutcome<Self::Primitives>, BlockExecutionError>;
+
+    /// Sets a hook for streamed hashed state updates emitted while building a block.
+    ///
+    /// Returns `true` if the hook was installed.
+    fn set_state_hook(&mut self, _hook: impl FnMut(HashedPostState) + Send + 'static) -> bool {
+        false
+    }
 
     /// Provides mutable access to the inner [`BlockExecutor`].
     fn executor_mut(&mut self) -> &mut Self::Executor;
@@ -406,6 +424,30 @@ where
     pub parent: &'a SealedHeader<HeaderTy<N>>,
     /// Block assembler.
     pub assembler: &'a Assembler,
+    pub(crate) on_hashed_state_update: HashedStateUpdateHook,
+}
+
+#[derive(Default)]
+pub(crate) struct HashedStateUpdateHook {
+    hook: Option<Box<dyn FnMut(HashedPostState) + Send>>,
+}
+
+impl core::fmt::Debug for HashedStateUpdateHook {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("HashedStateUpdateHook").finish_non_exhaustive()
+    }
+}
+
+impl HashedStateUpdateHook {
+    fn set(&mut self, hook: impl FnMut(HashedPostState) + Send + 'static) {
+        self.hook = Some(Box::new(hook));
+    }
+
+    fn on_update(&mut self, state: HashedPostState) {
+        if let Some(hook) = self.hook.as_mut() {
+            hook(state);
+        }
+    }
 }
 
 /// Conversions for executable transactions consumed by a block executor.
@@ -443,7 +485,8 @@ where
     type Executor = Executor;
 
     fn apply_pre_execution_changes(&mut self) -> Result<(), BlockExecutionError> {
-        self.executor.apply_pre_execution_changes(&mut |_| {})
+        let hook = &mut self.on_hashed_state_update;
+        self.executor.apply_pre_execution_changes(&mut |state| hook.on_update(state))
     }
 
     fn execute_transaction_with_commit_condition(
@@ -454,8 +497,11 @@ where
         let (tx_env, tx) = tx.into_parts();
         let transaction = tx.tx().clone();
         let sender = *tx.signer();
+        let hook = &mut self.on_hashed_state_update;
         if let Some(output) =
-            self.executor.execute_transaction_with_commit_condition(tx_env, f, &mut |_| {})?
+            self.executor.execute_transaction_with_commit_condition(tx_env, f, &mut |state| {
+                hook.on_update(state)
+            })?
         {
             self.transactions.push(transaction);
             self.senders.push(sender);
@@ -465,34 +511,48 @@ where
         }
     }
 
-    fn finish(
+    fn finish_with_state_root(
         self,
         state_provider: impl StateProvider,
-        state_root_precomputed: Option<(B256, TrieUpdates)>,
+        state_root: impl FnOnce(
+            &BlockExecutionOutput<ReceiptTy<Self::Primitives>>,
+        ) -> Result<Option<(B256, TrieUpdates)>, BlockExecutionError>,
     ) -> Result<BlockBuilderOutcome<N>, BlockExecutionError> {
-        let output = self.executor.finish(&mut |_| {})?;
+        let Self {
+            executor,
+            evm_env,
+            transactions,
+            senders,
+            ctx,
+            parent,
+            assembler,
+            mut on_hashed_state_update,
+        } = self;
+
+        let output = executor.finish(&mut |state| on_hashed_state_update.on_update(state))?;
+        drop(on_hashed_state_update);
         let hashed_state = output
             .hashed_state
             .clone()
             .unwrap_or_else(|| state_provider.hashed_post_state(output.state.inner()));
-        let (state_root, trie_updates) = match state_root_precomputed {
+        let (state_root, trie_updates) = match state_root(&output)? {
             Some(precomputed) => precomputed,
             None => state_provider
                 .state_root_with_updates(hashed_state.clone())
                 .map_err(BlockExecutionError::other)?,
         };
 
-        let block = self.assembler.assemble_block(BlockAssemblerInput {
-            evm_env: self.evm_env,
-            execution_ctx: self.ctx,
-            parent: self.parent,
-            transactions: self.transactions,
+        let block = assembler.assemble_block(BlockAssemblerInput {
+            evm_env,
+            execution_ctx: ctx,
+            parent,
+            transactions,
             output: &output.result,
             state_provider: &state_provider,
             state_root,
             block_access_list_hash: None,
         })?;
-        let block = RecoveredBlock::new_unhashed(block, self.senders);
+        let block = RecoveredBlock::new_unhashed(block, senders);
 
         Ok(BlockBuilderOutcome {
             execution_result: output.result,
@@ -501,6 +561,11 @@ where
             block,
             block_access_list: None,
         })
+    }
+
+    fn set_state_hook(&mut self, hook: impl FnMut(HashedPostState) + Send + 'static) -> bool {
+        self.on_hashed_state_update.set(hook);
+        true
     }
 
     fn executor_mut(&mut self) -> &mut Self::Executor {
