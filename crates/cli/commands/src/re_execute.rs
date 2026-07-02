@@ -12,7 +12,7 @@ use reth_chainspec::{EthChainSpec, EthereumHardforks, Hardforks};
 use reth_cli::chainspec::ChainSpecParser;
 use reth_cli_util::cancellation::CancellationToken;
 use reth_consensus::FullConsensus;
-use reth_evm::{execute::Executor, ConfigureEvm};
+use reth_evm::{database::StateProviderDatabase, execute::Executor, ConfigureEvm};
 use reth_execution_types::{BlockReverts, RevertAccount};
 use reth_node_core::args::JitArgs;
 use reth_primitives_traits::{format_gas_throughput, Account, BlockBody, GotExpected};
@@ -21,9 +21,7 @@ use reth_provider::{
     StaticFileProviderFactory, TransactionVariant,
 };
 use reth_stages::stages::calculate_gas_used_from_headers;
-use reth_storage_api::{
-    ChangeSetReader, DBProvider, SharedEvmStateProviderDatabase, StorageChangeSetReader,
-};
+use reth_storage_api::{ChangeSetReader, DBProvider, StorageChangeSetReader};
 use std::{
     collections::HashMap,
     sync::{
@@ -159,7 +157,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
                     }
                     let chunk_end = (chunk_start + blocks_per_chunk).min(max_block);
 
-                    let database = SharedEvmStateProviderDatabase::new(
+                    let database = StateProviderDatabase::new(
                         provider.history_by_block_number(chunk_start.saturating_sub(1))?,
                     );
                     let mut executor = evm_config.batch_executor(database);
@@ -183,7 +181,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
                                 if skip_invalid_blocks {
                                     drop(executor);
                                     results.clear();
-                                    let database = SharedEvmStateProviderDatabase::new(
+                                    let database = StateProviderDatabase::new(
                                         provider.history_by_block_number(block.number())?,
                                     );
                                     executor = evm_config.batch_executor(database);
@@ -246,7 +244,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
                                         if skip_invalid_blocks {
                                             drop(executor);
                                             results.clear();
-                                            let database = SharedEvmStateProviderDatabase::new(
+                                            let database = StateProviderDatabase::new(
                                                 provider.history_by_block_number(block.number())?,
                                             );
                                             executor = evm_config.batch_executor(database);
@@ -273,7 +271,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
                             executor_created.elapsed() > executor_lifetime
                         {
                             let last_block = block.number();
-                            let database = SharedEvmStateProviderDatabase::new(
+                            let database = StateProviderDatabase::new(
                                 provider.history_by_block_number(last_block)?,
                             );
                             let next_executor = evm_config.batch_executor(database);

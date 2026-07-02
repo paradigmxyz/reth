@@ -1,5 +1,5 @@
 use crate::StreamBackfillJob;
-use reth_evm::{execute::Executor, ConfigureEvm};
+use reth_evm::{database::StateProviderDatabase, execute::Executor, ConfigureEvm};
 use std::{
     collections::BTreeMap,
     ops::RangeInclusive,
@@ -13,8 +13,7 @@ use reth_evm::execute::{BlockExecutionError, BlockExecutionOutput};
 use reth_node_api::{Block as _, BlockBody as _, NodePrimitives};
 use reth_primitives_traits::{format_gas_throughput, RecoveredBlock, SignedTransaction};
 use reth_provider::{
-    BlockReader, Chain, HeaderProvider, ProviderError, SharedEvmStateProviderDatabase,
-    StateProviderFactory, TransactionVariant,
+    BlockReader, Chain, HeaderProvider, ProviderError, StateProviderFactory, TransactionVariant,
 };
 use reth_prune_types::PruneModes;
 use reth_stages_api::ExecutionStageThresholds;
@@ -80,11 +79,11 @@ where
         let mut cumulative_gas = 0;
         let batch_start = Instant::now();
 
-        let state_provider = self
-            .provider
-            .history_by_block_number(self.range.start().saturating_sub(1))
-            .map_err(BlockExecutionError::other)?;
-        let database = SharedEvmStateProviderDatabase::new(&*state_provider);
+        let database = StateProviderDatabase::new(
+            self.provider
+                .history_by_block_number(self.range.start().saturating_sub(1))
+                .map_err(BlockExecutionError::other)?,
+        );
         let mut executor = self.evm_config.batch_executor(database);
 
         let mut blocks = Vec::new();
@@ -211,16 +210,16 @@ where
             .ok_or_else(|| ProviderError::HeaderNotFound(block_number.into()))
             .map_err(BlockExecutionError::other)?;
 
-        let state_provider = self
-            .provider
-            .history_by_block_number(block_number.saturating_sub(1))
-            .map_err(BlockExecutionError::other)?;
-
         trace!(target: "exex::backfill", number = block_number, txs = block_with_senders.body().transaction_count(), "Executing block");
 
-        let database = SharedEvmStateProviderDatabase::new(&*state_provider);
-        let block_execution_output =
-            self.evm_config.executor(database).execute(&block_with_senders)?;
+        let block_execution_output = self
+            .evm_config
+            .executor(StateProviderDatabase::new(
+                self.provider
+                    .history_by_block_number(block_number.saturating_sub(1))
+                    .map_err(BlockExecutionError::other)?,
+            ))
+            .execute(&block_with_senders)?;
 
         Ok((block_with_senders, block_execution_output))
     }

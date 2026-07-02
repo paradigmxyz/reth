@@ -6,7 +6,9 @@ use reth_chainspec::{ChainSpecProvider, EthereumHardforks};
 use reth_config::config::ExecutionConfig;
 use reth_consensus::FullConsensus;
 use reth_db::{static_file::HeaderMask, tables};
-use reth_evm::{execute::Executor, metrics::ExecutorMetrics, ConfigureEvm};
+use reth_evm::{
+    database::StateProviderDatabase, execute::Executor, metrics::ExecutorMetrics, ConfigureEvm,
+};
 use reth_execution_types::Chain;
 use reth_exex::{ExExManagerHandle, ExExNotification, ExExNotificationSource};
 use reth_primitives_traits::{format_gas_throughput, BlockBody, NodePrimitives};
@@ -22,7 +24,6 @@ use reth_stages_api::{
     UnwindInput, UnwindOutput,
 };
 use reth_static_file_types::StaticFileSegment;
-use reth_storage_api::SharedEvmStateProviderDatabase;
 use reth_trie::KeccakKeyHasher;
 use std::{
     cmp::{max, Ordering},
@@ -330,8 +331,7 @@ where
 
         let mut blocks = Vec::new();
         let mut results = Vec::new();
-        let state_provider = LatestStateProviderRef::new(provider);
-        let batch_db = SharedEvmStateProviderDatabase::new(&state_provider);
+        let batch_db = StateProviderDatabase::new(LatestStateProviderRef::new(provider));
         let mut executor = self.evm_config.batch_executor(batch_db);
         for block_number in start_block..=max_block {
             // Fetch the block

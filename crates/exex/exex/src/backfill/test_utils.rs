@@ -6,6 +6,7 @@ use alloy_primitives::{b256, Address, TxKind, U256};
 use reth_chainspec::{ChainSpec, ChainSpecBuilder, EthereumHardfork, MAINNET, MIN_TRANSACTION_GAS};
 use reth_ethereum_primitives::{Block, BlockBody, Receipt, Transaction};
 use reth_evm::{
+    database::StateProviderDatabase,
     execute::{BlockExecutionOutput, Executor},
     ConfigureEvm,
 };
@@ -15,7 +16,7 @@ use reth_node_api::NodePrimitives;
 use reth_primitives_traits::{Block as _, RecoveredBlock};
 use reth_provider::{
     providers::ProviderNodeTypes, BlockWriter as _, ExecutionOutcome, LatestStateProvider,
-    ProviderFactory, SharedEvmStateProviderDatabase,
+    ProviderFactory,
 };
 use reth_testing_utils::generators::sign_tx_with_key_pair;
 use reth_trie_common::KeccakKeyHasher;
@@ -69,7 +70,7 @@ where
 
     // Execute the block to produce a block execution output.
     let state_provider = LatestStateProvider::new(provider);
-    let database = SharedEvmStateProviderDatabase::new(&state_provider);
+    let database = StateProviderDatabase::new(state_provider);
     let block_execution_output = EthEvmConfig::ethereum(chain_spec)
         .executor(database)
         .execute(block)

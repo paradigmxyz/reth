@@ -3,12 +3,10 @@ use alloy_primitives::{keccak256, Address, Bytes, B256, U256};
 use alloy_rpc_types_debug::ExecutionWitness;
 use pretty_assertions::Comparison;
 use reth_engine_primitives::InvalidBlockHook;
-use reth_evm::{execute::Executor, ConfigureEvm};
+use reth_evm::{database::StateProviderDatabase, execute::Executor, ConfigureEvm};
 use reth_execution_types::{ExecutionAccountInfo, ExecutionState};
 use reth_primitives_traits::{NodePrimitives, RecoveredBlock, SealedHeader};
-use reth_provider::{
-    BlockExecutionOutput, SharedEvmStateProviderDatabase, StateProvider, StateProviderFactory,
-};
+use reth_provider::{BlockExecutionOutput, StateProvider, StateProviderFactory};
 use reth_rpc_api::DebugApiClient;
 use reth_tracing::tracing::warn;
 use reth_trie::updates::TrieUpdates;
@@ -179,7 +177,7 @@ where
         block: &RecoveredBlock<N::Block>,
     ) -> eyre::Result<(ExecutionWitness, ExecutionState, reth_trie::HashedPostState)> {
         let state_provider = self.provider.state_by_block_hash(parent_header.hash())?;
-        let database = SharedEvmStateProviderDatabase::new(&*state_provider);
+        let database = StateProviderDatabase::new(state_provider.as_ref());
         let output = self.evm_config.executor(database).execute(block)?;
         let hashed_state = output.hash_state_slow::<reth_trie::KeccakKeyHasher>();
         let (codes, preimages, block_state) = collect_execution_data(output.state.into_inner())?;
@@ -925,7 +923,7 @@ mod tests {
         let state_root_result = hook.validate_state_root_and_trie(
             &parent_header,
             &invalid_block,
-            &hashed_state_for_block_state(block_state.clone()),
+            &hashed_state_for_block_state(block_state),
             Some((&trie_updates, B256::random())),
             "integration_test",
         );
