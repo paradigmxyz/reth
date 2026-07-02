@@ -13,8 +13,6 @@ use reth_evm::execute::{BlockAssemblerInput, BlockExecutionError, BlockExecutorF
 use reth_execution_types::BlockExecutionResult;
 use reth_primitives_traits::logs_bloom as calculate_logs_bloom;
 
-#[cfg(feature = "std")]
-use crate::EthBlockExecutorFactory;
 use crate::{EthBlockExecutionCtx, EthEvmEnv};
 
 /// Block builder for Ethereum.
@@ -141,17 +139,20 @@ impl<ChainSpec: EthChainSpec + EthereumHardforks> EthBlockAssembler<ChainSpec> {
 }
 
 #[cfg(feature = "std")]
-impl<ChainSpec, EvmFactory> BlockAssembler<EthBlockExecutorFactory<ChainSpec, EvmFactory>>
-    for EthBlockAssembler<ChainSpec>
+impl<F, ChainSpec> BlockAssembler<F> for EthBlockAssembler<ChainSpec>
 where
+    F: for<'a> BlockExecutorFactory<
+            Primitives = crate::EthPrimitives,
+            EvmEnv = EthEvmEnv,
+            ExecutionCtx<'a> = EthBlockExecutionCtx<'a>,
+        > + 'static,
     ChainSpec: EthChainSpec<Header = Header> + EthereumHardforks + 'static,
-    EvmFactory: 'static,
 {
     type Block = Block<TransactionSigned>;
 
     fn assemble_block(
         &self,
-        input: BlockAssemblerInput<'_, '_, EthBlockExecutorFactory<ChainSpec, EvmFactory>, Header>,
+        input: BlockAssemblerInput<'_, '_, F, Header>,
     ) -> Result<Self::Block, BlockExecutionError> {
         self.assemble_block(input, None, None, None)
     }
