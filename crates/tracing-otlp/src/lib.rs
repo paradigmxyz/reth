@@ -110,11 +110,9 @@ pub fn log_layer(
         .with_batch_exporter(log_exporter)
         .build();
 
-    Ok(opentelemetry_appender_tracing::layer::OpenTelemetryTracingBridge::builder(
-        &logger_provider,
-    )
-    .with_tracing_span_attributes(TracingSpanAttributes::all())
-    .build())
+    Ok(opentelemetry_appender_tracing::layer::OpenTelemetryTracingBridge::builder(&logger_provider)
+        .with_tracing_span_attributes(TracingSpanAttributes::all())
+        .build())
 }
 
 /// Configuration for OTLP trace export.
