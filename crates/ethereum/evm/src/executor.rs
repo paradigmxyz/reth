@@ -96,6 +96,7 @@ impl<'a> EthBlockExecutor<'a> {
 
 impl BlockExecutor for EthBlockExecutor<'_> {
     type Primitives = EthPrimitives;
+    type Evm = Evm<BaseEvmTypes>;
     type Transaction = EthTxEnv;
     type TransactionResult = TxResult;
     type TransactionOutput = GasOutput;

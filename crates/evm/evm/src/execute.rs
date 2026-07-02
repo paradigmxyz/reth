@@ -121,6 +121,8 @@ impl CommitChanges {
 pub trait BlockExecutor: Sized {
     /// The primitive types used by the executor.
     type Primitives: NodePrimitives;
+    /// EVM instance used by this executor.
+    type Evm;
     /// Transaction environment consumed by this executor.
     type Transaction;
     /// Raw transaction execution result produced before receipt conversion.
@@ -129,10 +131,10 @@ pub trait BlockExecutor: Sized {
     type TransactionOutput: Default;
 
     /// Returns the underlying EVM.
-    fn evm(&self) -> &evm2::Evm<evm2::BaseEvmTypes>;
+    fn evm(&self) -> &Self::Evm;
 
     /// Returns the underlying EVM mutably.
-    fn evm_mut(&mut self) -> &mut evm2::Evm<evm2::BaseEvmTypes>;
+    fn evm_mut(&mut self) -> &mut Self::Evm;
 
     /// Applies pre-execution block changes.
     fn apply_pre_execution_changes<H>(
@@ -204,6 +206,8 @@ pub trait BlockExecutorFactory {
     type Primitives: NodePrimitives;
     /// Transaction environment consumed by executors from this factory.
     type Transaction;
+    /// EVM instance consumed by executors from this factory.
+    type Evm;
     /// EVM environment consumed by this factory.
     type EvmEnv: EvmEnv;
     /// Execution context for a block or payload.
@@ -213,6 +217,7 @@ pub trait BlockExecutorFactory {
     /// Block executor returned by this factory.
     type Executor<'a>: BlockExecutor<
         Primitives = Self::Primitives,
+        Evm = Self::Evm,
         Transaction = Self::Transaction,
         TransactionOutput = GasOutput,
     >
@@ -222,7 +227,7 @@ pub trait BlockExecutorFactory {
     /// Creates a configured block executor.
     fn create_executor<'a>(
         &'a self,
-        evm: evm2::Evm<evm2::BaseEvmTypes>,
+        evm: Self::Evm,
         ctx: Self::ExecutionCtx<'a>,
         hashed_state_mode: HashedStateMode,
     ) -> Self::Executor<'a>
@@ -230,7 +235,7 @@ pub trait BlockExecutorFactory {
         Self: 'a;
 
     /// Creates an EVM instance with the configured execution environment.
-    fn evm_with_env<DB>(&self, db: DB, evm_env: Self::EvmEnv) -> evm2::Evm<evm2::BaseEvmTypes>
+    fn evm_with_env<DB>(&self, db: DB, evm_env: Self::EvmEnv) -> Self::Evm
     where
         DB: evm2::evm::DynDatabase + 'static;
 
@@ -388,12 +393,12 @@ pub trait BlockBuilder: Sized {
     fn executor(&self) -> &Self::Executor;
 
     /// Provides mutable access to the underlying EVM.
-    fn evm_mut(&mut self) -> &mut evm2::Evm<evm2::BaseEvmTypes> {
+    fn evm_mut(&mut self) -> &mut <Self::Executor as BlockExecutor>::Evm {
         self.executor_mut().evm_mut()
     }
 
     /// Provides access to the underlying EVM.
-    fn evm(&self) -> &evm2::Evm<evm2::BaseEvmTypes> {
+    fn evm(&self) -> &<Self::Executor as BlockExecutor>::Evm {
         self.executor().evm()
     }
 

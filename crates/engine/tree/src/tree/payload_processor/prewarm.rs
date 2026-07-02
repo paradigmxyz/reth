@@ -34,7 +34,7 @@ use metrics::{Counter, Gauge, Histogram};
 use rayon::prelude::*;
 use reth_evm::{
     execute::{BlockExecutorFactory, ExecutableTxFor},
-    ConfigureEvm, EvmEnv,
+    ConfigureEvm, EvmEnv, EvmFor,
 };
 use reth_metrics::Metrics;
 #[cfg(any(test, any()))]
@@ -158,7 +158,7 @@ where
             let to_sparse_trie_task = to_sparse_trie_task.as_ref();
             pool.in_place_scope(|s| {
                 s.spawn(|_| {
-                    pool.init::<PrewarmEvmState>(|_| ctx.evm_for_ctx());
+                    pool.init::<PrewarmEvmState<Evm>>(|_| ctx.evm_for_ctx());
                 });
 
                 while let Ok((index, tx)) = pending.recv() {
@@ -220,7 +220,8 @@ where
         Tx: ExecutableTxFor<Evm>,
     {
         WorkerPool::with_worker_mut(|worker| {
-            let Some(evm) = worker.get_or_init::<PrewarmEvmState>(|| ctx.evm_for_ctx()).as_mut()
+            let Some(evm) =
+                worker.get_or_init::<PrewarmEvmState<Evm>>(|| ctx.evm_for_ctx()).as_mut()
             else {
                 return;
             };
@@ -612,7 +613,7 @@ where
 
 /// Per-thread EVM state initialised by [`PrewarmContext::evm_for_ctx`] and stored in
 /// [`WorkerPool`] workers via [`Worker::get_or_init`](reth_tasks::pool::Worker::get_or_init).
-type PrewarmEvmState = Option<evm2::Evm<evm2::BaseEvmTypes>>;
+type PrewarmEvmState<Evm> = Option<EvmFor<Evm>>;
 
 impl<N, P, Evm> PrewarmContext<N, P, Evm>
 where
@@ -622,7 +623,7 @@ where
 {
     /// Creates a per-thread EVM for prewarming.
     #[instrument(level = "debug", target = "engine::tree::payload_processor::prewarm", skip_all)]
-    fn evm_for_ctx(&self) -> PrewarmEvmState {
+    fn evm_for_ctx(&self) -> PrewarmEvmState<Evm> {
         let mut state_provider = match self.provider.build() {
             Ok(provider) => provider,
             Err(err) => {

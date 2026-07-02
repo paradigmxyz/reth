@@ -195,6 +195,7 @@ pub trait ConfigureEvm: Clone + Debug + Send + Sync + Unpin {
     /// Configured block executor factory.
     type BlockExecutorFactory: crate::execute::BlockExecutorFactory<
         Primitives = Self::Primitives,
+        Evm = evm2::Evm<evm2::BaseEvmTypes>,
         Transaction: From<Recovered<TxTy<Self::Primitives>>> + Clone + Send + Sync,
     >;
 
@@ -343,7 +344,7 @@ pub trait ConfigureEvm: Clone + Debug + Send + Sync + Unpin {
     /// Creates an EVM instance for single-transaction execution with the configured environment.
     #[cfg(feature = "std")]
     #[auto_impl(keep_default_for(&, Arc))]
-    fn evm_with_env<DB>(&self, db: DB, evm_env: EvmEnvFor<Self>) -> evm2::Evm<evm2::BaseEvmTypes>
+    fn evm_with_env<DB>(&self, db: DB, evm_env: EvmEnvFor<Self>) -> EvmFor<Self>
     where
         DB: evm2::evm::DynDatabase + 'static,
     {
@@ -360,7 +361,7 @@ pub trait ConfigureEvm: Clone + Debug + Send + Sync + Unpin {
         &self,
         db: DB,
         header: &HeaderTy<Self::Primitives>,
-    ) -> Result<evm2::Evm<evm2::BaseEvmTypes>, Self::Error>
+    ) -> Result<EvmFor<Self>, Self::Error>
     where
         DB: evm2::evm::DynDatabase + 'static,
     {
@@ -372,7 +373,7 @@ pub trait ConfigureEvm: Clone + Debug + Send + Sync + Unpin {
     #[cfg(feature = "std")]
     fn create_block_builder<'a>(
         &'a self,
-        evm: evm2::Evm<evm2::BaseEvmTypes>,
+        evm: EvmFor<Self>,
         evm_env: EvmEnvFor<Self>,
         parent: &'a SealedHeader<HeaderTy<Self::Primitives>>,
         ctx: ExecutionCtxFor<'a, Self>,
@@ -427,7 +428,7 @@ pub trait ConfigureEvm: Clone + Debug + Send + Sync + Unpin {
         db: DB,
         evm_env: EvmEnvFor<Self>,
         inspector: I,
-    ) -> evm2::Evm<evm2::BaseEvmTypes>
+    ) -> EvmFor<Self>
     where
         DB: evm2::evm::DynDatabase + 'static,
         I: evm2::Inspector<evm2::BaseEvmTypes> + 'static,

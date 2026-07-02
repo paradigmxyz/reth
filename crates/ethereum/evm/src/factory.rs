@@ -174,6 +174,7 @@ where
 {
     type Primitives = EthPrimitives;
     type Transaction = EthTxEnv;
+    type Evm = evm2::Evm<evm2::BaseEvmTypes>;
     type EvmEnv = EthEvmEnv;
     type ExecutionCtx<'a>
         = EthBlockExecutionCtx<'a>
@@ -186,7 +187,7 @@ where
 
     fn create_executor<'a>(
         &'a self,
-        evm: evm2::Evm<evm2::BaseEvmTypes>,
+        evm: Self::Evm,
         ctx: Self::ExecutionCtx<'a>,
         hashed_state_mode: HashedStateMode,
     ) -> Self::Executor<'a>
@@ -196,7 +197,7 @@ where
         Self::create_executor(self, evm, ctx, hashed_state_mode)
     }
 
-    fn evm_with_env<DB>(&self, db: DB, evm_env: Self::EvmEnv) -> evm2::Evm<evm2::BaseEvmTypes>
+    fn evm_with_env<DB>(&self, db: DB, evm_env: Self::EvmEnv) -> Self::Evm
     where
         DB: evm2::evm::DynDatabase + 'static,
     {
