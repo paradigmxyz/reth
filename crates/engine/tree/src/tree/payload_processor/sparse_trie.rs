@@ -44,6 +44,8 @@ pub(super) struct SparseTrieCacheTask<A = ArenaParallelSparseTrie, S = ArenaPara
     proof_result_rx: CrossbeamReceiver<ProofResultMessage>,
     /// Receives updates from execution and prewarming.
     updates: CrossbeamReceiver<SparseTrieTaskMessage>,
+    /// Runtime used for CPU-bound trie root work.
+    executor: Runtime,
     /// Sender half for the channel to send final hashed state to.
     final_hashed_state_tx: Option<std::sync::mpsc::Sender<HashedPostState>>,
     /// `SparseStateTrie` used for computing the state root.
@@ -149,6 +151,7 @@ where
             proof_result_tx,
             proof_result_rx,
             updates: hashed_state_rx,
+            executor: executor.clone(),
             proof_worker_handle,
             final_hashed_state_tx: Some(final_hashed_state_tx),
             trie,
@@ -681,29 +684,33 @@ where
 
         let parent_span =
             debug_span!("compute_drained_storage_roots", n = tries_to_compute_roots.len());
-        tries_to_compute_roots.into_par_iter().for_each(|(address, SendStorageTriePtr(trie))| {
-            let span = if tracing::enabled!(tracing::Level::TRACE) {
-                debug_span!(
-                    target: "engine::tree::payload_processor::sparse_trie",
-                    parent: &parent_span,
-                    "storage_root",
-                    ?address
-                )
-            } else {
-                debug_span!(
-                    target: "engine::tree::payload_processor::sparse_trie",
-                    parent: &parent_span,
-                    "storage_root",
-                )
-            };
-            let _enter = span.entered();
-            // SAFETY:
-            // - pointers are created from `storage_tries_mut().get_mut(address)` above;
-            // - `addresses_to_compute_roots` comes from map iteration, so addresses are unique;
-            // - we do not insert/remove entries between pointer collection and use, so pointers
-            //   stay valid and map reallocation cannot occur;
-            // - each pointer is consumed by at most one rayon task, so no aliasing mutable access.
-            unsafe { (*trie).root().expect("updates are drained, trie should be revealed by now") };
+        self.executor.cpu_pool().install(|| {
+            tries_to_compute_roots.into_par_iter().for_each(|(address, SendStorageTriePtr(trie))| {
+                let span = if tracing::enabled!(tracing::Level::TRACE) {
+                    debug_span!(
+                        target: "engine::tree::payload_processor::sparse_trie",
+                        parent: &parent_span,
+                        "storage_root",
+                        ?address
+                    )
+                } else {
+                    debug_span!(
+                        target: "engine::tree::payload_processor::sparse_trie",
+                        parent: &parent_span,
+                        "storage_root",
+                    )
+                };
+                let _enter = span.entered();
+                // SAFETY:
+                // - pointers are created from `storage_tries_mut().get_mut(address)` above;
+                // - `addresses_to_compute_roots` comes from map iteration, so addresses are unique;
+                // - we do not insert/remove entries between pointer collection and use, so pointers
+                //   stay valid and map reallocation cannot occur;
+                // - each pointer is consumed by at most one rayon task, so no aliasing mutable access.
+                unsafe {
+                    (*trie).root().expect("updates are drained, trie should be revealed by now")
+                };
+            });
         });
     }
 
