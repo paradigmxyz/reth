@@ -871,9 +871,6 @@ impl<N: NetworkPrimitives> Future for ActiveSession<N> {
                 }
 
                 let msg = this.conn.poll_next_eth_message(cx, &mut this.conn_decode_buf);
-                if this.conn_decode_buf.capacity() > MAX_RETAINED_DECODE_BUF_CAPACITY {
-                    this.conn_decode_buf = BytesMut::new();
-                }
 
                 match msg {
                     Poll::Pending => break,
@@ -885,6 +882,9 @@ impl<N: NetworkPrimitives> Future for ActiveSession<N> {
                         return this.emit_disconnect(cx)
                     }
                     Poll::Ready(Some(res)) => {
+                        if this.conn_decode_buf.capacity() > MAX_RETAINED_DECODE_BUF_CAPACITY {
+                            this.conn_decode_buf = BytesMut::new();
+                        }
                         budget -= 1;
                         progress = true;
                         match res {
