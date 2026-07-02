@@ -3,7 +3,10 @@
 use crate::root::ParallelStateRootError;
 use alloy_primitives::{keccak256, B256};
 use derive_more::derive::Deref;
-use reth_trie::{updates::TrieUpdates, HashedPostState, HashedStorage, MultiProofTargetsV2};
+use reth_trie::{
+    prefix_set::TriePrefixSetsMut, updates::TrieUpdates, HashedPostState, HashedStorage,
+    MultiProofTargetsV2,
+};
 use revm::state::EvmState;
 use std::sync::Arc;
 use tracing::trace;
@@ -32,6 +35,8 @@ pub struct StateRootComputeOutcome {
     pub state_root: B256,
     /// The trie updates.
     pub trie_updates: Arc<TrieUpdates>,
+    /// Changed trie node base paths retained while computing the root.
+    pub changed_paths: Option<Arc<TriePrefixSetsMut>>,
     /// Debug recorders taken from the sparse tries, keyed by `None` for account trie
     /// and `Some(address)` for storage tries.
     #[cfg(feature = "trie-debug")]

@@ -70,23 +70,6 @@ const fn default_cross_block_cache_size() -> usize {
     }
 }
 
-/// Determines if the host has enough parallelism to run the payload processor.
-///
-/// It requires at least 5 parallel threads:
-/// - Engine in main thread that spawns the state root task.
-/// - Multiproof task in payload processor
-/// - Sparse Trie task in payload processor
-/// - Multiproof computation spawned in payload processor
-/// - Storage root computation spawned in trie parallel proof
-pub fn has_enough_parallelism() -> bool {
-    #[cfg(feature = "std")]
-    {
-        std::thread::available_parallelism().is_ok_and(|num| num.get() >= 5)
-    }
-    #[cfg(not(feature = "std"))]
-    false
-}
-
 /// The configuration of the engine tree.
 #[derive(Debug, Clone)]
 pub struct TreeConfig {
@@ -115,9 +98,6 @@ pub struct TreeConfig {
     /// This is used as a cutoff to prevent long-running sequential block execution when we receive
     /// a batch of downloaded blocks.
     max_execute_block_batch_size: usize,
-    /// Whether to use the legacy state root calculation method instead of the
-    /// new state root task.
-    legacy_state_root: bool,
     /// Whether to always compare trie updates from the state root task to the trie updates from
     /// the regular state root calculation.
     always_compare_trie_updates: bool,
@@ -129,8 +109,6 @@ pub struct TreeConfig {
     state_provider_metrics: bool,
     /// Cross-block cache size in bytes.
     cross_block_cache_size: usize,
-    /// Whether the host has enough parallelism to run state root task.
-    has_enough_parallelism: bool,
     /// Multiproof task chunk size for proof targets.
     multiproof_chunk_size: usize,
     /// Number of reserved CPU cores for non-reth processes
@@ -220,13 +198,11 @@ impl Default for TreeConfig {
             max_invalid_header_cache_length: DEFAULT_MAX_INVALID_HEADER_CACHE_LENGTH,
             invalid_header_hit_eviction_threshold: DEFAULT_INVALID_HEADER_HIT_EVICTION_THRESHOLD,
             max_execute_block_batch_size: DEFAULT_MAX_EXECUTE_BLOCK_BATCH_SIZE,
-            legacy_state_root: false,
             always_compare_trie_updates: false,
             disable_state_cache: false,
             disable_prewarming: false,
             state_provider_metrics: false,
             cross_block_cache_size: DEFAULT_CROSS_BLOCK_CACHE_SIZE,
-            has_enough_parallelism: has_enough_parallelism(),
             multiproof_chunk_size: DEFAULT_MULTIPROOF_TASK_CHUNK_SIZE,
             reserved_cpu_cores: DEFAULT_RESERVED_CPU_CORES,
             precompile_cache_disabled: false,
@@ -264,13 +240,11 @@ impl TreeConfig {
         max_invalid_header_cache_length: u32,
         invalid_header_hit_eviction_threshold: u8,
         max_execute_block_batch_size: usize,
-        legacy_state_root: bool,
         always_compare_trie_updates: bool,
         disable_state_cache: bool,
         disable_prewarming: bool,
         state_provider_metrics: bool,
         cross_block_cache_size: usize,
-        has_enough_parallelism: bool,
         multiproof_chunk_size: usize,
         reserved_cpu_cores: usize,
         precompile_cache_disabled: bool,
@@ -298,13 +272,11 @@ impl TreeConfig {
             max_invalid_header_cache_length,
             invalid_header_hit_eviction_threshold,
             max_execute_block_batch_size,
-            legacy_state_root,
             always_compare_trie_updates,
             disable_state_cache,
             disable_prewarming,
             state_provider_metrics,
             cross_block_cache_size,
-            has_enough_parallelism,
             multiproof_chunk_size,
             reserved_cpu_cores,
             precompile_cache_disabled,
@@ -381,12 +353,6 @@ impl TreeConfig {
     /// Return the number of reserved CPU cores for non-reth processes
     pub const fn reserved_cpu_cores(&self) -> usize {
         self.reserved_cpu_cores
-    }
-
-    /// Returns whether to use the legacy state root calculation method instead
-    /// of the new state root task
-    pub const fn legacy_state_root(&self) -> bool {
-        self.legacy_state_root
     }
 
     /// Returns whether or not state provider metrics are enabled.
@@ -511,12 +477,6 @@ impl TreeConfig {
         self
     }
 
-    /// Setter for whether to use the legacy state root calculation method.
-    pub const fn with_legacy_state_root(mut self, legacy_state_root: bool) -> Self {
-        self.legacy_state_root = legacy_state_root;
-        self
-    }
-
     /// Setter for whether to disable state cache.
     pub const fn without_state_cache(mut self, disable_state_cache: bool) -> Self {
         self.disable_state_cache = disable_state_cache;
@@ -542,12 +502,6 @@ impl TreeConfig {
     /// Setter for cross block cache size.
     pub const fn with_cross_block_cache_size(mut self, cross_block_cache_size: usize) -> Self {
         self.cross_block_cache_size = cross_block_cache_size;
-        self
-    }
-
-    /// Setter for has enough parallelism.
-    pub const fn with_has_enough_parallelism(mut self, has_enough_parallelism: bool) -> Self {
-        self.has_enough_parallelism = has_enough_parallelism;
         self
     }
 
@@ -585,11 +539,6 @@ impl TreeConfig {
     pub const fn with_unwind_canonical_header(mut self, unwind_canonical_header: bool) -> Self {
         self.allow_unwind_canonical_header = unwind_canonical_header;
         self
-    }
-
-    /// Whether or not to use state root task
-    pub const fn use_state_root_task(&self) -> bool {
-        self.has_enough_parallelism && !self.legacy_state_root
     }
 
     /// Returns whether cache metrics recording is disabled.
