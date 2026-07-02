@@ -259,6 +259,10 @@ pub struct P2PStream<S> {
 
     /// Whether the underlying sink has accepted messages that still need to be flushed.
     needs_flush: bool,
+
+    /// Whether a queued p2p control message needs to be flushed even if no subprotocol messages
+    /// are sent by the caller.
+    needs_control_flush: bool,
 }
 
 impl<S> P2PStream<S> {
@@ -276,6 +280,7 @@ impl<S> P2PStream<S> {
             outgoing_message_buffer_capacity: MAX_P2P_CAPACITY,
             disconnecting: false,
             needs_flush: false,
+            needs_control_flush: false,
         }
     }
 
@@ -315,11 +320,13 @@ impl<S> P2PStream<S> {
     /// Queues in a _snappy_ encoded [`P2PMessage::Pong`] message.
     fn send_pong(&mut self) {
         self.outgoing_messages.push_back(Bytes::from(alloy_rlp::encode(P2PMessage::Pong)));
+        self.needs_control_flush = true;
     }
 
     /// Queues in a _snappy_ encoded [`P2PMessage::Ping`] message.
     pub fn send_ping(&mut self) {
         self.outgoing_messages.push_back(Bytes::from(alloy_rlp::encode(P2PMessage::Ping)));
+        self.needs_control_flush = true;
     }
 }
 
@@ -497,6 +504,7 @@ impl<S> DisconnectP2P for P2PStream<S> {
         compressed[0] = buf[0];
 
         self.outgoing_messages.push_back(compressed.into());
+        self.needs_control_flush = true;
         self.disconnecting = true;
         Ok(())
     }
@@ -517,6 +525,32 @@ where
     pub async fn disconnect(&mut self, reason: DisconnectReason) -> Result<(), P2PStreamError> {
         self.start_disconnect(reason)?;
         self.close().await
+    }
+}
+
+impl<S> P2PStream<S>
+where
+    S: Sink<Bytes, Error = io::Error> + Unpin,
+{
+    /// Drains queued p2p frames into the underlying sink without flushing the underlying sink.
+    fn poll_drain_outgoing(
+        mut self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+    ) -> Poll<Result<(), P2PStreamError>> {
+        loop {
+            let message = {
+                let mut this = self.as_mut().project();
+                if this.outgoing_messages.is_empty() {
+                    return Poll::Ready(Ok(()))
+                }
+                ready!(this.inner.as_mut().poll_ready(cx))?;
+                this.outgoing_messages.pop_front().expect("checked non-empty")
+            };
+
+            let mut this = self.as_mut().project();
+            this.inner.as_mut().start_send(message)?;
+            *this.needs_flush = true;
+        }
     }
 }
 
@@ -675,7 +709,7 @@ where
     type Error = P2PStreamError;
 
     fn poll_ready(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        let mut should_flush = false;
+        let mut should_flush_control = false;
 
         {
             let this = self.as_mut().get_mut();
@@ -685,19 +719,21 @@ where
                 Poll::Pending => {}
                 Poll::Ready(Ok(PingerEvent::Ping)) => {
                     this.send_ping();
-                    should_flush = true;
+                    should_flush_control = true;
                 }
                 Poll::Ready(Ok(PingerEvent::Timeout) | Err(_)) => {
                     this.start_disconnect(DisconnectReason::PingTimeout)?;
-                    should_flush = true;
+                    should_flush_control = true;
                 }
             }
 
-            should_flush |= this.needs_flush || !this.has_outgoing_capacity();
+            should_flush_control |= this.needs_control_flush;
         }
 
-        if should_flush {
+        if should_flush_control {
             ready!(self.as_mut().poll_flush(cx))?;
+        } else if !self.has_outgoing_capacity() {
+            ready!(self.as_mut().poll_drain_outgoing(cx))?;
         }
 
         if self.has_outgoing_capacity() {
@@ -748,20 +784,16 @@ where
     }
 
     /// Returns `Poll::Ready(Ok(()))` when no buffered items remain.
-    fn poll_flush(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        let mut this = self.project();
+    fn poll_flush(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        ready!(self.as_mut().poll_drain_outgoing(cx))?;
 
-        while !this.outgoing_messages.is_empty() {
-            ready!(this.inner.as_mut().poll_ready(cx))?;
-            let message = this.outgoing_messages.pop_front().expect("checked non-empty");
-            this.inner.as_mut().start_send(message)?;
-            *this.needs_flush = true;
-        }
+        let mut this = self.project();
 
         if *this.needs_flush {
             ready!(this.inner.as_mut().poll_flush(cx))?;
             *this.needs_flush = false;
         }
+        *this.needs_control_flush = false;
 
         Poll::Ready(Ok(()))
     }
@@ -925,9 +957,60 @@ impl TryFrom<u8> for P2PMessageID {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{capability::SharedCapability, test_utils::eth_hello, EthVersion, ProtocolVersion};
+    use crate::{
+        capability::SharedCapability, test_utils::eth_hello, Capability, EthVersion,
+        ProtocolVersion,
+    };
+    use futures::task::noop_waker_ref;
     use tokio::net::{TcpListener, TcpStream};
     use tokio_util::codec::Decoder;
+
+    #[derive(Default)]
+    struct FlushCountingTransport {
+        sent: Vec<Bytes>,
+        flushes: usize,
+    }
+
+    impl Stream for FlushCountingTransport {
+        type Item = io::Result<BytesMut>;
+
+        fn poll_next(self: Pin<&mut Self>, _: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+            Poll::Pending
+        }
+    }
+
+    impl Sink<Bytes> for FlushCountingTransport {
+        type Error = io::Error;
+
+        fn poll_ready(self: Pin<&mut Self>, _: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+            Poll::Ready(Ok(()))
+        }
+
+        fn start_send(mut self: Pin<&mut Self>, item: Bytes) -> Result<(), Self::Error> {
+            self.sent.push(item);
+            Ok(())
+        }
+
+        fn poll_flush(
+            mut self: Pin<&mut Self>,
+            _: &mut Context<'_>,
+        ) -> Poll<Result<(), Self::Error>> {
+            self.flushes += 1;
+            Poll::Ready(Ok(()))
+        }
+
+        fn poll_close(self: Pin<&mut Self>, _: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+            Poll::Ready(Ok(()))
+        }
+    }
+
+    fn shared_capabilities() -> SharedCapabilities {
+        SharedCapabilities::try_new(
+            vec![EthVersion::Eth66.into()],
+            vec![Capability::eth(EthVersion::Eth66)],
+        )
+        .unwrap()
+    }
 
     #[tokio::test]
     async fn test_can_disconnect() {
@@ -1129,5 +1212,35 @@ mod tests {
         let pong = P2PMessage::decode(&mut &snappy_pong[..]).unwrap();
         assert!(matches!(pong, P2PMessage::Pong));
         assert_eq!(alloy_rlp::encode(pong), &snappy_pong[..]);
+    }
+
+    #[tokio::test]
+    async fn poll_ready_drains_full_subprotocol_queue_without_flushing_inner() {
+        let mut stream = P2PStream::new(FlushCountingTransport::default(), shared_capabilities());
+        stream.set_outgoing_message_buffer_capacity(1);
+        Pin::new(&mut stream).start_send(Bytes::from_static(&[0x00, EMPTY_LIST_CODE])).unwrap();
+
+        let waker = noop_waker_ref();
+        let mut cx = Context::from_waker(waker);
+        assert!(Pin::new(&mut stream).poll_ready(&mut cx).is_ready());
+
+        assert_eq!(stream.inner().sent.len(), 1);
+        assert_eq!(stream.inner().flushes, 0);
+
+        assert!(Pin::new(&mut stream).poll_flush(&mut cx).is_ready());
+        assert_eq!(stream.inner().flushes, 1);
+    }
+
+    #[tokio::test]
+    async fn poll_ready_flushes_queued_control_messages() {
+        let mut stream = P2PStream::new(FlushCountingTransport::default(), shared_capabilities());
+        stream.send_ping();
+
+        let waker = noop_waker_ref();
+        let mut cx = Context::from_waker(waker);
+        assert!(Pin::new(&mut stream).poll_ready(&mut cx).is_ready());
+
+        assert_eq!(stream.inner().sent.len(), 1);
+        assert_eq!(stream.inner().flushes, 1);
     }
 }

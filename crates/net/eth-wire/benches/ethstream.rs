@@ -22,6 +22,7 @@ use std::{
 };
 
 const MESSAGE_COUNT: usize = 1024;
+const ACTIVE_SESSION_P2P_OUTGOING_BUFFER_CAPACITY: usize = 8;
 
 fn shared_capabilities() -> SharedCapabilities {
     SharedCapabilities::try_new(
@@ -56,6 +57,14 @@ fn transaction_broadcast() -> EthBroadcastMessage<EthNetworkPrimitives> {
 
 fn eth_stream(transport: MockTransport) -> EthStream<P2PStream<MockTransport>> {
     EthStream::new(EthVersion::Eth66, P2PStream::new(transport, shared_capabilities()))
+}
+
+fn active_session_eth_stream(transport: MockTransport) -> EthStream<P2PStream<MockTransport>> {
+    let mut stream = eth_stream(transport);
+    stream
+        .inner_mut()
+        .set_outgoing_message_buffer_capacity(ACTIVE_SESSION_P2P_OUTGOING_BUFFER_CAPACITY);
+    stream
 }
 
 fn runtime() -> tokio::runtime::Runtime {
@@ -136,6 +145,20 @@ fn bench_send_messages(c: &mut Criterion) {
                 for _ in 0..MESSAGE_COUNT {
                     stream.send(message()).await.unwrap();
                 }
+                black_box(stream.inner().inner().sent.len());
+            });
+        })
+    });
+
+    group.bench_function("send_hash_announcements_batched", |b| {
+        b.iter(|| {
+            rt.block_on(async {
+                let mut stream = active_session_eth_stream(MockTransport::default());
+                for _ in 0..MESSAGE_COUNT {
+                    poll_fn(|cx| Pin::new(&mut stream).poll_ready(cx)).await.unwrap();
+                    Pin::new(&mut stream).start_send(message()).unwrap();
+                }
+                stream.flush().await.unwrap();
                 black_box(stream.inner().inner().sent.len());
             });
         })
