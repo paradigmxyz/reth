@@ -493,15 +493,25 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
         tx_nums: &[TxNumber],
         ctx: &StaticFileWriteCtx,
     ) -> ProviderResult<()> {
+        let prune_mode = if ctx.receipts_prunable { ctx.receipts_prune_mode } else { None };
+        let Some(prune_mode) = prune_mode else {
+            for (block, &first_tx) in blocks.iter().zip(tx_nums) {
+                let block_number = block.recovered_block().number();
+                w.increment_block(block_number)?;
+
+                for (i, receipt) in block.execution_outcome().receipts.iter().enumerate() {
+                    w.append_receipt(first_tx + i as u64, receipt)?;
+                }
+            }
+            return Ok(());
+        };
+
         for (block, &first_tx) in blocks.iter().zip(tx_nums) {
             let block_number = block.recovered_block().number();
             w.increment_block(block_number)?;
 
             // skip writing receipts if pruning configuration requires us to.
-            if ctx.receipts_prunable &&
-                ctx.receipts_prune_mode
-                    .is_some_and(|mode| mode.should_prune(block_number, ctx.tip))
-            {
+            if prune_mode.should_prune(block_number, ctx.tip) {
                 continue
             }
 
