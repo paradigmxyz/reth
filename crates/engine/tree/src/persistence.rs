@@ -615,17 +615,14 @@ mod tests {
         let pruner =
             Pruner::new_with_factory(provider.clone(), vec![], 5, 0, None, finished_exex_height_rx);
         let (sync_metrics_tx, _sync_metrics_rx) = unbounded_channel();
-        let handle = PersistenceHandle::<EthPrimitives>::spawn_service(
-            provider.clone(),
-            pruner,
-            sync_metrics_tx,
-        );
+        let handle =
+            PersistenceHandle::<EthPrimitives>::spawn_service(provider, pruner, sync_metrics_tx);
 
         let mut builder = TestBlockBuilder::eth().with_state();
         let blocks = builder.get_executed_blocks(0..2).collect::<Vec<_>>();
         let genesis_hash = blocks[0].recovered_block().hash();
         assert!(
-            blocks[1].recovered_block().body().transactions.len() > 0,
+            !blocks[1].recovered_block().body().transactions.is_empty(),
             "block 1 must have transactions for this test"
         );
 
