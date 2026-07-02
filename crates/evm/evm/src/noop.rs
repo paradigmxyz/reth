@@ -87,7 +87,7 @@ where
         evm_env: EvmEnvFor<Self>,
         block_number: u64,
         ctx: crate::ExecutionCtxFor<'a, Self>,
-    ) -> Result<evm2::BlockStateAccumulator, Box<dyn core::error::Error + Send + Sync>>
+    ) -> Result<crate::ExecutionState, Box<dyn core::error::Error + Send + Sync>>
     where
         Self: 'a,
         DB: evm2::evm::Database + 'static,

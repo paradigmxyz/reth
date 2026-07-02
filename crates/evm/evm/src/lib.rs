@@ -40,6 +40,7 @@ pub mod precompile_cache;
 
 mod aliases;
 pub use aliases::*;
+pub use reth_execution_types::ExecutionState;
 
 /// Transaction validation limits resolved for an EVM environment.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -461,7 +462,7 @@ pub trait ConfigureEvm: Clone + Debug + Send + Sync + Unpin {
         evm_env: EvmEnvFor<Self>,
         block_number: u64,
         ctx: ExecutionCtxFor<'a, Self>,
-    ) -> Result<evm2::BlockStateAccumulator, Box<dyn Error + Send + Sync>>
+    ) -> Result<ExecutionState, Box<dyn Error + Send + Sync>>
     where
         Self: 'a,
         DB: evm2::evm::Database + 'static,

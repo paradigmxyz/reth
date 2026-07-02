@@ -13,7 +13,7 @@ use core::{convert::Infallible, fmt};
 use reth_ethereum_primitives::EthPrimitives;
 use reth_evm::{
     ConfigureEngineEvm, ConfigureEvm, EvmEnvFor, ExecutableTxIterator, ExecutionCtxFor,
-    NextBlockEnvAttributes,
+    ExecutionState, NextBlockEnvAttributes,
 };
 use reth_evm_ethereum::EthEvmConfig;
 use reth_primitives_traits::{BlockTy, HeaderTy, SealedBlock, SealedHeader, TxTy};
@@ -110,7 +110,7 @@ where
         evm_env: EvmEnvFor<Self>,
         block_number: u64,
         ctx: ExecutionCtxFor<'a, Self>,
-    ) -> Result<evm2::BlockStateAccumulator, Box<dyn core::error::Error + Send + Sync>>
+    ) -> Result<ExecutionState, Box<dyn core::error::Error + Send + Sync>>
     where
         Self: 'a,
         DB: evm2::evm::Database + 'static,

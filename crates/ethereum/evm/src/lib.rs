@@ -29,7 +29,7 @@ use reth_ethereum_primitives::TransactionSigned;
 use reth_ethereum_primitives::{Block, EthPrimitives};
 #[cfg(feature = "std")]
 use reth_evm::{ConfigureEngineEvm, ExecutableTxIterator};
-use reth_evm::{ConfigureEvm, EvmEnv, EvmEnvFor, NextBlockEnvAttributes};
+use reth_evm::{ConfigureEvm, EvmEnv, EvmEnvFor, ExecutionState, NextBlockEnvAttributes};
 #[cfg(feature = "std")]
 use reth_primitives_traits::SignedTransaction;
 use reth_primitives_traits::{SealedBlock, SealedHeader};
@@ -437,7 +437,7 @@ where
         env: EthEvmEnv,
         block_number: u64,
         ctx: EthBlockExecutionCtx<'a>,
-    ) -> Result<evm2::BlockStateAccumulator, alloc::boxed::Box<dyn core::error::Error + Send + Sync>>
+    ) -> Result<ExecutionState, alloc::boxed::Box<dyn core::error::Error + Send + Sync>>
     where
         Self: 'a,
         DB: evm2::evm::Database + 'static,
