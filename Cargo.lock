@@ -10667,8 +10667,6 @@ dependencies = [
 [[package]]
 name = "reth-zstd-compressors"
 version = "0.5.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bdd4e89ad5d14393bde9b2b152480d4fd7f2399d0f9efe80ea29ec7c0b76bcdc"
 dependencies = [
  "zstd",
 ]
