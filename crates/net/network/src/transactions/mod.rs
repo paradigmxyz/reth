@@ -1766,16 +1766,26 @@ impl PropagationMode {
 #[derive(Debug, Clone)]
 struct PropagateTransaction<T = TransactionSigned> {
     is_broadcastable_in_full: bool,
+    /// Size advertised in `NewPooledTransactionHashes` metadata and used for full broadcast
+    /// soft-limit accounting.
+    ///
+    /// This is the network encoded transaction size. For pool-backed blob transactions, this is
+    /// the pool's cached encoded length, which includes the sidecar returned by
+    /// `PooledTransactions`.
     propagation_size: usize,
     transaction: LazyEncodedTransaction,
     _marker: PhantomData<fn() -> T>,
 }
 
 impl<T: SignedTransaction> PropagateTransaction<T> {
-    /// Create a new instance from a transaction.
+    /// Create a new instance from a transaction supplied directly for propagation.
+    ///
+    /// Direct transactions use their EIP-2718 encoded length so eth/68+ hash announcements carry
+    /// the same size metadata as [`NewPooledTransactionHashes68::push`] and
+    /// [`NewPooledTransactionHashes72::push`].
     fn new(transaction: T) -> Self {
         let is_broadcastable_in_full = transaction.is_broadcastable_in_full();
-        let propagation_size = transaction.length();
+        let propagation_size = transaction.encode_2718_len();
 
         Self {
             is_broadcastable_in_full,
@@ -1786,6 +1796,10 @@ impl<T: SignedTransaction> PropagateTransaction<T> {
     }
 
     /// Create a new instance from a pooled transaction.
+    ///
+    /// Pool transactions already cache the network encoded size used by txpool admission and
+    /// pooled hash announcements. For blob transactions, this includes the sidecar size expected in
+    /// a `PooledTransactions` response.
     fn pool_tx<P>(tx: Arc<ValidPoolTransaction<P>>) -> Self
     where
         P: PoolTransaction<Consensus = T>,
@@ -1806,6 +1820,7 @@ impl<T> PropagateTransaction<T> {
         self.transaction.tx_hash()
     }
 
+    /// Returns the network encoded size used for propagation limits and hash metadata.
     const fn propagation_size(&self) -> usize {
         self.propagation_size
     }
@@ -2334,7 +2349,7 @@ mod tests {
         NetworkConfigBuilder, NetworkManager,
     };
     use alloy_consensus::{Transaction as _, TxEip1559, TxLegacy};
-    use alloy_eips::eip4844::BlobTransactionValidationError;
+    use alloy_eips::{eip2718::Encodable2718, eip4844::BlobTransactionValidationError};
     use alloy_primitives::{hex, Signature, TxKind, B256, U256};
     use alloy_rlp::Decodable;
     use futures::FutureExt;
@@ -3146,6 +3161,17 @@ mod tests {
         // for retry
         assert_eq!(tx_fetcher.num_pending_hashes(), 0);
         assert_eq!(tx_fetcher.active_peers.len(), 0);
+    }
+
+    #[test]
+    fn test_direct_propagation_transaction_uses_2718_size() {
+        let mut tx_gen = TransactionGenerator::new(rand::rng());
+        let tx = tx_gen.gen_eip1559();
+        let expected_size = tx.encode_2718_len();
+
+        let tx = PropagateTransaction::new(tx);
+
+        assert_eq!(tx.propagation_size(), expected_size);
     }
 
     #[test]
