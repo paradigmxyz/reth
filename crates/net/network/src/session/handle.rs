@@ -3,6 +3,7 @@
 use crate::{
     message::PeerMessage,
     session::{active::BroadcastItemCounter, conn::EthRlpxConnection, Direction, SessionId},
+    snap::SnapPeerRequest,
     PendingSessionHandshakeError,
 };
 use reth_ecies::ECIESError;
@@ -66,6 +67,8 @@ pub struct ActiveSessionHandle<N: NetworkPrimitives> {
     pub(crate) established: Instant,
     /// Announced capabilities of the peer.
     pub(crate) capabilities: Arc<Capabilities>,
+    /// Whether `snap/2` was negotiated, i.e. the session can serve [`SnapPeerRequest`]s.
+    pub(crate) supports_snap: bool,
     /// Sender for commands to the spawned session with broadcast-aware backpressure.
     pub(crate) commands: SessionCommandSender<N>,
     /// The client's name and version
@@ -277,6 +280,20 @@ impl<N: NetworkPrimitives> SessionCommandSender<N> {
     pub(crate) fn queued_broadcast_items(&self) -> usize {
         self.broadcast_items.get()
     }
+
+    /// Routes a `snap/2` request to the session via the bounded command channel.
+    ///
+    /// Returns the request back if the channel is full or closed, so the manager can try another
+    /// snap-capable session.
+    pub(crate) fn send_snap_request(&self, req: SnapPeerRequest) -> Result<(), SnapPeerRequest> {
+        match self.tx.try_send(SessionCommand::SnapRequest(req)) {
+            Ok(()) => Ok(()),
+            Err(err) => match err.into_inner() {
+                SessionCommand::SnapRequest(req) => Err(req),
+                _ => unreachable!("only a SnapRequest can be returned"),
+            },
+        }
+    }
 }
 
 /// Events a pending session can produce.
@@ -357,6 +374,10 @@ pub enum SessionCommand<N: NetworkPrimitives> {
     },
     /// Sends a message to the peer
     Message(PeerMessage<N>),
+    /// Sends a `snap/2` request to the peer and correlates the response.
+    ///
+    /// Only routed to sessions that negotiated `snap/2`.
+    SnapRequest(SnapPeerRequest),
 }
 
 /// Message variants an active session can produce and send back to the
