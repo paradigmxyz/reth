@@ -1341,7 +1341,7 @@ impl RocksDBProvider {
             if write_storage_history {
                 s.spawn(|_| {
                     let _guard = span.enter();
-                    r_storage_history = Some(self.write_storage_history(blocks, &ctx));
+                    r_storage_history = Some(self.write_storage_history(blocks, &ctx, runtime));
                 });
             }
         });
@@ -1431,6 +1431,7 @@ impl RocksDBProvider {
         &self,
         blocks: &[ExecutedBlock<N>],
         ctx: &RocksDBWriteCtx,
+        runtime: &reth_tasks::Runtime,
     ) -> ProviderResult<()> {
         let mut storage_history: BTreeMap<(Address, B256), Vec<u64>> = BTreeMap::new();
 
@@ -1453,12 +1454,14 @@ impl RocksDBProvider {
             }
         }
 
-        let shard_puts = storage_history
-            .into_par_iter()
-            .map(|((address, slot), indices)| {
-                self.storage_history_shards_to_put(address, slot, indices)
-            })
-            .collect::<ProviderResult<Vec<_>>>()?;
+        let shard_puts = runtime.storage_pool().install(|| {
+            storage_history
+                .into_par_iter()
+                .map(|((address, slot), indices)| {
+                    self.storage_history_shards_to_put(address, slot, indices)
+                })
+                .collect::<ProviderResult<Vec<_>>>()
+        })?;
 
         let mut batch = self.batch();
         for shards in shard_puts {
