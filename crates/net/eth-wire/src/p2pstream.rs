@@ -536,20 +536,15 @@ where
         mut self: Pin<&mut Self>,
         cx: &mut Context<'_>,
     ) -> Poll<Result<(), P2PStreamError>> {
-        loop {
-            let message = {
-                let mut this = self.as_mut().project();
-                if this.outgoing_messages.is_empty() {
-                    return Poll::Ready(Ok(()))
-                }
-                ready!(this.inner.as_mut().poll_ready(cx))?;
-                this.outgoing_messages.pop_front().expect("checked non-empty")
-            };
-
-            let mut this = self.as_mut().project();
+        let mut this = self.as_mut().project();
+        while !this.outgoing_messages.is_empty() {
+            ready!(this.inner.as_mut().poll_ready(cx))?;
+            let message = this.outgoing_messages.pop_front().expect("checked non-empty");
             this.inner.as_mut().start_send(message)?;
             *this.needs_flush = true;
         }
+
+        Poll::Ready(Ok(()))
     }
 }
 
