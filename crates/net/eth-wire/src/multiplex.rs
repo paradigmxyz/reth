@@ -596,6 +596,7 @@ where
             }
 
             let mut conn_ready = true;
+            let mut sent_to_conn = false;
             loop {
                 match this.inner.conn.poll_ready_unpin(cx) {
                     Poll::Ready(Ok(())) => {
@@ -603,6 +604,7 @@ where
                             if let Err(err) = this.inner.conn.start_send_unpin(msg) {
                                 return Poll::Ready(Some(Err(err.into())))
                             }
+                            sent_to_conn = true;
                         } else {
                             break
                         }
@@ -618,6 +620,15 @@ where
                     Poll::Pending => {
                         conn_ready = false;
                         break
+                    }
+                }
+            }
+            if sent_to_conn {
+                match this.inner.conn.poll_flush_unpin(cx) {
+                    Poll::Ready(Ok(())) => {}
+                    Poll::Ready(Err(err)) => return Poll::Ready(Some(Err(err.into()))),
+                    Poll::Pending => {
+                        conn_ready = false;
                     }
                 }
             }
