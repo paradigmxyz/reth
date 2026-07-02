@@ -539,7 +539,8 @@ mod tests {
         let addr1 = Address::with_last_byte(1);
         let addr2 = Address::with_last_byte(2);
 
-        let account = Account { nonce: 1, balance: U256::from(100), bytecode_hash: None };
+        let account =
+            Account { nonce: 1, balance: U256::from(100), bytecode_hash: None, storage_root: None };
 
         // Create storage entries
         let storage_entry = |key: u8| reth_primitives_traits::StorageEntry {

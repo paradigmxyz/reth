@@ -887,7 +887,12 @@ mod tests {
         type PreState = BTreeMap<Address, (Account, BTreeMap<B256, U256>)>;
         let mut prestate: PreState = (0..10)
             .map(|key| {
-                let account = Account { nonce: 1, balance: U256::from(key), bytecode_hash: None };
+                let account = Account {
+                    nonce: 1,
+                    balance: U256::from(key),
+                    bytecode_hash: None,
+                    storage_root: None,
+                };
                 let storage =
                     (1..11).map(|key| (B256::with_last_byte(key), U256::from(key))).collect();
                 (Address::with_last_byte(key), (account, storage))
@@ -1038,8 +1043,12 @@ mod tests {
         assert_state_root(&state, &prestate, "changed nonce");
 
         // recreate account 1
-        let account1_new =
-            Account { nonce: 56, balance: U256::from(123), bytecode_hash: Some(B256::random()) };
+        let account1_new = Account {
+            nonce: 56,
+            balance: U256::from(123),
+            bytecode_hash: Some(B256::random()),
+            storage_root: None,
+        };
         prestate.insert(address1, (account1_new, BTreeMap::default()));
         state.commit(HashMap::from_iter([(
             address1,

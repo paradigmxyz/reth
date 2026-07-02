@@ -13,7 +13,7 @@ where
     S: IntoIterator<Item = (B256, U256)>,
 {
     let encoded_accounts = accounts.into_iter().map(|(address, (account, storage))| {
-        let storage_root = storage_root(storage);
+        let storage_root = account.storage_root.unwrap_or_else(|| storage_root(storage));
         let account = account.into_trie_account(storage_root);
         (address, alloy_rlp::encode(account))
     });
@@ -34,7 +34,7 @@ where
     S: IntoIterator<Item = (B256, U256)>,
 {
     let encoded_accounts = accounts.into_iter().map(|(address, (account, storage))| {
-        let storage_root = storage_root_prehashed(storage);
+        let storage_root = account.storage_root.unwrap_or_else(|| storage_root_prehashed(storage));
         let account = account.into_trie_account(storage_root);
         (address, alloy_rlp::encode(account))
     });

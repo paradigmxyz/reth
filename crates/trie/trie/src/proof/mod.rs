@@ -227,32 +227,41 @@ where
                     let leaf_is_proof_target = proof_targets.is_some();
                     let collect_storage_masks =
                         self.collect_branch_node_masks && leaf_is_proof_target;
-                    let storage_prefix_set = self
-                        .prefix_sets
-                        .storage_prefix_sets
-                        .remove(&hashed_address)
-                        .unwrap_or_default();
-                    let storage_multiproof = StorageProof::new_hashed(
-                        self.trie_cursor_factory.clone(),
-                        self.hashed_cursor_factory.clone(),
-                        hashed_address,
-                    )
-                    .with_prefix_set_mut(storage_prefix_set)
-                    .with_branch_node_masks(collect_storage_masks)
-                    .storage_multiproof(proof_targets.unwrap_or_default())?;
+                    let storage_root =
+                        if !leaf_is_proof_target && let Some(storage_root) = account.storage_root {
+                            storage_root
+                        } else {
+                            let storage_prefix_set = self
+                                .prefix_sets
+                                .storage_prefix_sets
+                                .remove(&hashed_address)
+                                .unwrap_or_default();
+                            let storage_multiproof = StorageProof::new_hashed(
+                                self.trie_cursor_factory.clone(),
+                                self.hashed_cursor_factory.clone(),
+                                hashed_address,
+                            )
+                            .with_prefix_set_mut(storage_prefix_set)
+                            .with_branch_node_masks(collect_storage_masks)
+                            .storage_multiproof(proof_targets.unwrap_or_default())?;
+
+                            let storage_root = storage_multiproof.root;
+
+                            // We might be adding leaves that are not necessarily our proof targets.
+                            if leaf_is_proof_target {
+                                // Overwrite storage multiproof.
+                                storages.insert(hashed_address, storage_multiproof);
+                            }
+
+                            storage_root
+                        };
 
                     // Encode account
                     account_rlp.clear();
-                    let account = account.into_trie_account(storage_multiproof.root);
+                    let account = account.into_trie_account(storage_root);
                     account.encode(&mut account_rlp as &mut dyn BufMut);
 
                     hash_builder.add_leaf(Nibbles::unpack(hashed_address), &account_rlp);
-
-                    // We might be adding leaves that are not necessarily our proof targets.
-                    if leaf_is_proof_target {
-                        // Overwrite storage multiproof.
-                        storages.insert(hashed_address, storage_multiproof);
-                    }
                 }
             }
         }

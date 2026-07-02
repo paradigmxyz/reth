@@ -61,6 +61,7 @@ impl From<MerkleCheckpoint> for IntermediateStateRootState {
                         nonce: checkpoint.account_nonce,
                         balance: checkpoint.account_balance,
                         bytecode_hash: Some(checkpoint.account_bytecode_hash),
+                        storage_root: None,
                     },
                 }
             }),

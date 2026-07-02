@@ -733,7 +733,11 @@ where
                         // If account has pending storage updates, it is still pending.
                         return true;
                     } else if let Some(account) = account.take() {
-                        let storage_root = self.trie.storage_root(addr).expect("updates are drained, storage trie should be revealed by now");
+                        let storage_root = account.and_then(|account| account.storage_root).unwrap_or_else(|| {
+                            self.trie
+                                .storage_root(addr)
+                                .expect("updates are drained, storage trie should be revealed by now")
+                        });
                         let encoded = encode_account_leaf_value(account, storage_root, account_rlp_buf);
                         self.account_updates.insert(*addr, LeafUpdate::Changed(encoded));
                         num_promoted += 1;
@@ -825,6 +829,8 @@ fn encode_account_leaf_value(
     storage_root: B256,
     account_rlp_buf: &mut Vec<u8>,
 ) -> Vec<u8> {
+    let storage_root = account.and_then(|account| account.storage_root).unwrap_or(storage_root);
+
     if account.is_none_or(|account| account.is_empty()) && storage_root == EMPTY_ROOT_HASH {
         return Vec::new();
     }
@@ -907,7 +913,12 @@ mod tests {
         let mut hashed_state = HashedPostState::default();
         hashed_state.accounts.insert(
             address,
-            Some(Account { balance: U256::from(100), nonce: 1, bytecode_hash: None }),
+            Some(Account {
+                balance: U256::from(100),
+                nonce: 1,
+                bytecode_hash: None,
+                storage_root: None,
+            }),
         );
         let mut storage = reth_trie::HashedStorage::new(false);
         storage.storage.insert(slot, value);
@@ -962,6 +973,7 @@ mod tests {
             nonce: 7,
             balance: U256::from(42),
             bytecode_hash: Some(B256::from([0xAA; 32])),
+            storage_root: None,
         });
         let mut account_rlp_buf = vec![0x00, 0x01];
 

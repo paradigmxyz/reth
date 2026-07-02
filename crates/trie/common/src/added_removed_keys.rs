@@ -194,7 +194,12 @@ mod tests {
         let addr = B256::random();
 
         // Add account with non-empty state (has balance)
-        let account = Account { balance: U256::from(1000), nonce: 0, bytecode_hash: None };
+        let account = Account {
+            balance: U256::from(1000),
+            nonce: 0,
+            bytecode_hash: None,
+            storage_root: None,
+        };
         update.accounts.insert(addr, Some(account));
 
         // Add empty storage
