@@ -763,10 +763,10 @@ where
         transaction: &Tx,
         sender: &Account,
     ) -> Result<(), InvalidPoolTransactionError> {
-        let cost = transaction.cost();
+        let cost = *transaction.cost() + transaction.extra_balance_cost();
 
-        if !self.disable_balance_check && cost > &sender.balance {
-            let expected = *cost;
+        if !self.disable_balance_check && cost > sender.balance {
+            let expected = cost;
             return Err(InvalidTransactionError::InsufficientFunds(
                 GotExpected { got: sender.balance, expected }.into(),
             )
