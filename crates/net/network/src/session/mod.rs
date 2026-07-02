@@ -14,12 +14,13 @@ use crate::{
     session::active::ActiveSession,
 };
 use active::QueuedOutgoingMessages;
+use alloy_primitives::map::{FbBuildHasher, HashMap};
 use counter::SessionCounter;
 use futures::{future::Either, io, FutureExt, StreamExt};
 use reth_ecies::{stream::ECIESStream, ECIESError};
 use reth_eth_wire::{
     errors::EthStreamError, handshake::EthRlpxHandshake, multiplex::RlpxProtocolMultiplexer,
-    BlockRangeUpdate, Capabilities, DisconnectReason, EthStream, EthVersion,
+    BlockRangeUpdate, Capabilities, DisconnectReason, EthSnapStream, EthStream, EthVersion,
     HelloMessageWithProtocols, NetworkPrimitives, UnauthedP2PStream, UnifiedStatus,
     HANDSHAKE_TIMEOUT,
 };
@@ -32,7 +33,6 @@ use reth_tasks::Runtime;
 use rustc_hash::FxHashMap;
 use secp256k1::SecretKey;
 use std::{
-    collections::HashMap,
     future::Future,
     net::SocketAddr,
     sync::{atomic::AtomicU64, Arc},
@@ -95,7 +95,7 @@ pub struct SessionManager<N: NetworkPrimitives> {
     /// session is authenticated, it can be moved to the `active_session` set.
     pending_sessions: FxHashMap<SessionId, PendingSessionHandle>,
     /// All active sessions that are ready to exchange messages.
-    active_sessions: HashMap<PeerId, ActiveSessionHandle<N>>,
+    active_sessions: HashMap<PeerId, ActiveSessionHandle<N>, FbBuildHasher<64>>,
     /// The original Sender half of the [`PendingSessionEvent`] channel.
     ///
     /// When a new (pending) session is created, the corresponding [`PendingSessionHandle`] will
@@ -213,7 +213,9 @@ impl<N: NetworkPrimitives> SessionManager<N> {
     }
 
     /// Returns a borrowed reference to the active sessions.
-    pub const fn active_sessions(&self) -> &HashMap<PeerId, ActiveSessionHandle<N>> {
+    pub const fn active_sessions(
+        &self,
+    ) -> &HashMap<PeerId, ActiveSessionHandle<N>, FbBuildHasher<64>> {
         &self.active_sessions
     }
 
@@ -1165,6 +1167,30 @@ async fn authenticate_stream<N: NetworkPrimitives>(
                     EthStream::with_max_message_size(eth_version, p2p_stream, eth_max_message_size);
                 (eth_stream.into(), their_status)
             }
+            Err(err) => {
+                return PendingSessionEvent::Disconnected {
+                    remote_addr,
+                    session_id,
+                    direction,
+                    error: Some(PendingSessionHandshakeError::Eth(err)),
+                }
+            }
+        }
+    } else if p2p_stream.shared_capabilities().is_exact_eth_snap_v2() {
+        // Exactly `eth` + `snap/2` (no other extras): use the dedicated stream instead of the
+        // general-purpose satellite multiplexer. If `snap/2` is negotiated alongside other extra
+        // capabilities, fall through to the satellite path — the dedicated stream only composes
+        // `eth` and `snap/2`.
+        match EthSnapStream::handshake(
+            p2p_stream,
+            status,
+            fork_filter,
+            handshake,
+            eth_max_message_size,
+        )
+        .await
+        {
+            Ok((stream, their_status)) => (stream.into(), their_status),
             Err(err) => {
                 return PendingSessionEvent::Disconnected {
                     remote_addr,

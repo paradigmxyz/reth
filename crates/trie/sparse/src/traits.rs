@@ -9,7 +9,9 @@ use alloy_primitives::{
 };
 use alloy_trie::BranchNodeCompact;
 use reth_execution_errors::SparseTrieResult;
-use reth_trie_common::{BranchNodeMasks, Nibbles, ProofTrieNodeV2, TrieNodeV2};
+use reth_trie_common::{
+    prefix_set::PrefixSetMut, BranchNodeMasks, Nibbles, ProofTrieNodeV2, TrieNodeV2,
+};
 
 #[cfg(feature = "trie-debug")]
 use crate::debug_recorder::TrieDebugRecorder;
@@ -182,7 +184,7 @@ pub trait SparseTrie: Sized + Debug + Send + Sync {
     /// Ancestor paths may be excluded when a descendant path is already present.
     ///
     /// Returns an empty set if changed paths weren't being tracked.
-    fn take_changed_paths(&mut self) -> HashSet<Nibbles>;
+    fn take_changed_paths(&mut self) -> PrefixSetMut;
 
     /// Removes all nodes and values from the trie, resetting it to a blank state
     /// with only an empty root node. This is used when a storage root is deleted.

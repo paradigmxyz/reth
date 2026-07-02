@@ -1,7 +1,8 @@
 use reth_metrics::{metrics::Counter, Metrics};
 use reth_trie::{
+    prefix_set::TriePrefixSetsMut,
     updates::{TrieUpdates, TrieUpdatesSorted},
-    HashedPostState, HashedPostStateSorted, TrieChangedPaths,
+    HashedPostState, HashedPostStateSorted,
 };
 use std::{
     fmt,
@@ -60,7 +61,7 @@ pub struct ComputedTrieData {
     /// Sorted trie updates produced by state root computation.
     pub trie_updates: Arc<TrieUpdatesSorted>,
     /// Changed trie node base paths produced by state root computation.
-    pub changed_paths: Option<Arc<TrieChangedPaths>>,
+    pub changed_paths: Option<Arc<TriePrefixSetsMut>>,
 }
 
 /// Metrics for deferred trie computation.
@@ -84,7 +85,7 @@ struct PendingInputs {
     /// Unsorted trie updates from state root computation.
     trie_updates: Arc<TrieUpdates>,
     /// Changed trie node base paths from state root computation.
-    changed_paths: Option<Arc<TrieChangedPaths>>,
+    changed_paths: Option<Arc<TriePrefixSetsMut>>,
 }
 
 impl fmt::Debug for DeferredTrieData {
@@ -100,7 +101,7 @@ impl DeferredTrieData {
     pub fn pending(
         hashed_state: Arc<HashedPostState>,
         trie_updates: Arc<TrieUpdates>,
-        changed_paths: Option<Arc<TrieChangedPaths>>,
+        changed_paths: Option<Arc<TriePrefixSetsMut>>,
     ) -> (Self, DeferredTrieDataProducer) {
         let value = Arc::new(OnceLock::new());
         (
@@ -121,7 +122,7 @@ impl DeferredTrieData {
     pub fn sort(
         hashed_state: Arc<HashedPostState>,
         trie_updates: Arc<TrieUpdates>,
-        changed_paths: Option<Arc<TrieChangedPaths>>,
+        changed_paths: Option<Arc<TriePrefixSetsMut>>,
     ) -> ComputedTrieData {
         let _span = debug_span!(target: "engine::tree::deferred_trie", "sort_inputs").entered();
 
@@ -187,7 +188,7 @@ impl ComputedTrieData {
     pub const fn new_with_changed_paths(
         hashed_state: Arc<HashedPostStateSorted>,
         trie_updates: Arc<TrieUpdatesSorted>,
-        changed_paths: Option<Arc<TrieChangedPaths>>,
+        changed_paths: Option<Arc<TriePrefixSetsMut>>,
     ) -> Self {
         Self { hashed_state, trie_updates, changed_paths }
     }
@@ -213,8 +214,8 @@ mod tests {
     }
 
     fn assert_changed_paths_ptr_eq(
-        left: &Option<Arc<TrieChangedPaths>>,
-        right: &Option<Arc<TrieChangedPaths>>,
+        left: &Option<Arc<TriePrefixSetsMut>>,
+        right: &Option<Arc<TriePrefixSetsMut>>,
     ) {
         match (left, right) {
             (Some(left), Some(right)) => assert!(Arc::ptr_eq(left, right)),
