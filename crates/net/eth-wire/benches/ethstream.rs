@@ -193,6 +193,10 @@ impl MockTransport {
     fn with_incoming(message: BytesMut, count: usize) -> Self {
         Self { incoming: (0..count).map(|_| Ok(message.clone())).collect(), sent: Vec::new() }
     }
+
+    fn with_incoming_messages(messages: impl IntoIterator<Item = BytesMut>) -> Self {
+        Self { incoming: messages.into_iter().map(Ok).collect(), sent: Vec::new() }
+    }
 }
 
 impl Stream for MockTransport {
@@ -335,6 +339,29 @@ fn bench_recv_messages(c: &mut Criterion) {
                         .unwrap(),
                     );
                 }
+            });
+        })
+    });
+
+    group.bench_function("recv_hash_announcements_with_ping_controls", |b| {
+        let encoded = encoded_wire_message();
+        let ping = BytesMut::from(&b"\x02\x01\0\xc0"[..]);
+        b.iter(|| {
+            rt.block_on(async {
+                let incoming = (0..MESSAGE_COUNT).flat_map(|_| [ping.clone(), encoded.clone()]);
+                let mut stream = eth_stream(MockTransport::with_incoming_messages(incoming));
+                let mut decode_buf = BytesMut::new();
+                for _ in 0..MESSAGE_COUNT {
+                    black_box(
+                        poll_fn(|cx| {
+                            Pin::new(&mut stream).poll_next_eth_message(cx, &mut decode_buf)
+                        })
+                        .await
+                        .unwrap()
+                        .unwrap(),
+                    );
+                }
+                black_box(stream.inner().inner().sent.len());
             });
         })
     });
