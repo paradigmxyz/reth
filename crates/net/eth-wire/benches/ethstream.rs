@@ -355,6 +355,44 @@ fn bench_send_messages(c: &mut Criterion) {
         })
     });
 
+    for version in [EthVersion::Eth68, EthVersion::Eth72] {
+        group.bench_function(format!("send_hash_announcements_eth{}", version as u8), |b| {
+            b.iter(|| {
+                rt.block_on(async {
+                    let mut stream = eth_stream_with_version(MockTransport::default(), version);
+                    for _ in 0..MESSAGE_COUNT {
+                        stream.send(message_for_version(version)).await.unwrap();
+                    }
+                    black_box(stream.inner().inner().sent.len());
+                });
+            })
+        });
+
+        group.bench_function(
+            format!(
+                "send_hash_announcements_eth{}_{}_hashes",
+                version as u8, HASHES_PER_ANNOUNCEMENT
+            ),
+            |b| {
+                b.iter(|| {
+                    rt.block_on(async {
+                        let mut stream = eth_stream_with_version(MockTransport::default(), version);
+                        for _ in 0..MESSAGE_COUNT {
+                            stream
+                                .send(message_for_version_with_hashes(
+                                    version,
+                                    HASHES_PER_ANNOUNCEMENT,
+                                ))
+                                .await
+                                .unwrap();
+                        }
+                        black_box(stream.inner().inner().sent.len());
+                    });
+                })
+            },
+        );
+    }
+
     for capacity in [8, 16, 64] {
         group.bench_function(format!("send_hash_announcements_batched_capacity_{capacity}"), |b| {
             b.iter(|| {

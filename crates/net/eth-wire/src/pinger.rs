@@ -5,7 +5,7 @@ use std::{
     task::{Context, Poll},
     time::Duration,
 };
-use tokio::time::{Instant, Interval, Sleep};
+use tokio::time::{Instant, Sleep};
 use tokio_stream::Stream;
 
 /// The pinger is a simple state machine that sends a ping, waits for a pong,
@@ -13,7 +13,9 @@ use tokio_stream::Stream;
 #[derive(Debug)]
 pub(crate) struct Pinger {
     /// The timer used for the next ping.
-    ping_interval: Interval,
+    ping_timer: Pin<Box<Sleep>>,
+    /// The duration between pings.
+    ping_interval: Duration,
     /// The timer used to detect a ping timeout.
     timeout_timer: Pin<Box<Sleep>>,
     /// The timeout duration for each ping.
@@ -29,10 +31,12 @@ impl Pinger {
     /// and timeout duration.
     pub(crate) fn new(ping_interval: Duration, timeout_duration: Duration) -> Self {
         let now = Instant::now();
+        let ping_timer = tokio::time::sleep_until(now + ping_interval);
         let timeout_timer = tokio::time::sleep(timeout_duration);
         Self {
             state: PingState::Ready,
-            ping_interval: tokio::time::interval_at(now + ping_interval, ping_interval),
+            ping_timer: Box::pin(ping_timer),
+            ping_interval,
             timeout_timer: Box::pin(timeout_timer),
             timeout: timeout_duration,
         }
@@ -45,14 +49,14 @@ impl Pinger {
             PingState::Ready => Err(PingerError::UnexpectedPong),
             PingState::WaitingForPong => {
                 self.state = PingState::Ready;
-                self.ping_interval.reset();
+                self.ping_timer.as_mut().reset(Instant::now() + self.ping_interval);
                 Ok(())
             }
             PingState::TimedOut => {
                 // if we receive a pong after timeout then we also reset the state, since the
                 // connection was kept alive after timeout
                 self.state = PingState::Ready;
-                self.ping_interval.reset();
+                self.ping_timer.as_mut().reset(Instant::now() + self.ping_interval);
                 Ok(())
             }
         }
@@ -71,7 +75,7 @@ impl Pinger {
     ) -> Poll<Result<PingerEvent, PingerError>> {
         match self.state() {
             PingState::Ready => {
-                if self.ping_interval.poll_tick(cx).is_ready() {
+                if self.ping_timer.as_mut().poll(cx).is_ready() {
                     self.timeout_timer.as_mut().reset(Instant::now() + self.timeout);
                     self.state = PingState::WaitingForPong;
                     return Poll::Ready(Ok(PingerEvent::Ping))
