@@ -405,7 +405,6 @@ where
 
 fn encode_eth_message<N: NetworkPrimitives>(item: EthMessage<N>, out: &mut BytesMut) {
     out.clear();
-    out.reserve(EthMessageID::Status.length() + item.length());
     match item {
         EthMessage::NewBlockHashes(hashes) => {
             EthMessageID::NewBlockHashes.encode(out);
@@ -423,7 +422,10 @@ fn encode_eth_message<N: NetworkPrimitives>(item: EthMessage<N>, out: &mut Bytes
             EthMessageID::NewPooledTransactionHashes.encode(out);
             hashes.encode(out);
         }
-        this => ProtocolMessage::from(this).encode(out),
+        this => {
+            out.reserve(EthMessageID::Status.length() + this.length());
+            ProtocolMessage::from(this).encode(out);
+        }
     }
 }
 
@@ -432,13 +434,15 @@ fn encode_broadcast_message<N: NetworkPrimitives>(
     out: &mut BytesMut,
 ) {
     out.clear();
-    out.reserve(EthMessageID::Status.length() + item.length());
     match item {
         EthBroadcastMessage::Transactions(transactions) => {
             let payload_length = transactions.iter().map(Encodable::length).sum();
             encode_transactions_broadcast_message(transactions, payload_length, out);
         }
-        this @ EthBroadcastMessage::NewBlock(_) => ProtocolBroadcastMessage::from(this).encode(out),
+        this @ EthBroadcastMessage::NewBlock(_) => {
+            out.reserve(EthMessageID::Status.length() + this.length());
+            ProtocolBroadcastMessage::from(this).encode(out);
+        }
     }
 }
 

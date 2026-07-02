@@ -187,12 +187,13 @@ async fn send_and_receive_ethstream_hash_announcements(count: usize, capacity: u
     let mut stream = EthStream::<_, EthNetworkPrimitives>::new(EthVersion::Eth66, p2p);
 
     let mut remaining = count;
+    let mut encode_buf = BytesMut::new();
     while remaining > 0 {
         poll_fn(|cx| Pin::new(&mut stream).poll_ready(cx)).await.unwrap();
         let batch = stream.inner().available_outgoing_capacity().min(remaining);
         assert_ne!(batch, 0, "poll_ready returned ready without outgoing capacity");
         for _ in 0..batch {
-            Pin::new(&mut stream).start_send(message()).unwrap();
+            stream.start_send_with_encode_buf(message(), &mut encode_buf).unwrap();
         }
         remaining -= batch;
     }
