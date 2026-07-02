@@ -1371,12 +1371,13 @@ where
                 trace!(target: "engine::tree", "Executing transaction");
             }
 
+            // Claim this transaction for canonical execution before running it. Prewarm workers
+            // that have not started yet should skip work that can no longer warm the main path.
+            executed_tx_index.store(senders.len(), Ordering::Relaxed);
+
             let tx_start = Instant::now();
             executor.execute_transaction(tx)?;
             self.metrics.record_transaction_execution(tx_start.elapsed());
-
-            // advance the shared counter so prewarm workers skip already-executed txs
-            executed_tx_index.store(senders.len(), Ordering::Relaxed);
 
             let current_len = executor.receipts().len();
             if current_len > last_sent_len {

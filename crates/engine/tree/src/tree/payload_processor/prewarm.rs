@@ -158,7 +158,7 @@ where
                         break;
                     }
 
-                    // skip transactions already executed by the main loop
+                    // Skip transactions already claimed by the main loop.
                     if index < ctx.executed_tx_index.load(Ordering::Relaxed) {
                         continue;
                     }
@@ -218,7 +218,7 @@ where
                 return;
             }
 
-            // skip if main execution has already processed this transaction
+            // Skip if main execution has already claimed this transaction.
             if index < ctx.executed_tx_index.load(Ordering::Relaxed) {
                 return;
             }
@@ -243,6 +243,14 @@ where
             ctx.metrics.execution_duration.record(start.elapsed());
 
             if ctx.should_stop() {
+                return;
+            }
+
+            // Canonical execution can catch up while this speculative transaction is running. In
+            // that case, canonical state hooks will feed the sparse-trie task, so avoid converting
+            // stale prewarm output into proof-prefetch work.
+            if index < ctx.executed_tx_index.load(Ordering::Relaxed) {
+                ctx.metrics.total_runtime.record(start.elapsed());
                 return;
             }
 
@@ -535,9 +543,9 @@ where
     pub cache_state_metrics: Option<CachedStateCacheMetrics>,
     /// An atomic bool that tells prewarm tasks to not start any more execution.
     pub terminate_execution: Arc<AtomicBool>,
-    /// Shared counter tracking the next transaction index to be executed by the main execution
-    /// loop. Prewarm workers skip transactions with `index < counter` since those have already
-    /// been executed.
+    /// Shared counter tracking the next transaction index not yet claimed by the main execution
+    /// loop. Prewarm workers skip transactions with `index < counter` since those can no longer
+    /// warm canonical execution.
     pub executed_tx_index: Arc<AtomicUsize>,
     /// Whether the precompile cache is disabled.
     pub precompile_cache_disabled: bool,
