@@ -22,7 +22,7 @@ use std::{
 };
 
 const MESSAGE_COUNT: usize = 1024;
-const ACTIVE_SESSION_P2P_OUTGOING_BUFFER_CAPACITY: usize = 8;
+const ACTIVE_SESSION_P2P_OUTGOING_BUFFER_CAPACITY: usize = 32;
 
 fn shared_capabilities() -> SharedCapabilities {
     SharedCapabilities::try_new(
@@ -60,10 +60,15 @@ fn eth_stream(transport: MockTransport) -> EthStream<P2PStream<MockTransport>> {
 }
 
 fn active_session_eth_stream(transport: MockTransport) -> EthStream<P2PStream<MockTransport>> {
+    active_session_eth_stream_with_capacity(transport, ACTIVE_SESSION_P2P_OUTGOING_BUFFER_CAPACITY)
+}
+
+fn active_session_eth_stream_with_capacity(
+    transport: MockTransport,
+    capacity: usize,
+) -> EthStream<P2PStream<MockTransport>> {
     let mut stream = eth_stream(transport);
-    stream
-        .inner_mut()
-        .set_outgoing_message_buffer_capacity(ACTIVE_SESSION_P2P_OUTGOING_BUFFER_CAPACITY);
+    stream.inner_mut().set_outgoing_message_buffer_capacity(capacity);
     stream
 }
 
@@ -77,6 +82,23 @@ fn encoded_wire_message() -> BytesMut {
         stream.send(message()).await.unwrap();
         stream.inner().inner().sent[0].clone().into()
     })
+}
+
+async fn send_hash_announcements_in_active_session_batches(
+    stream: &mut EthStream<P2PStream<MockTransport>>,
+    count: usize,
+) {
+    let mut remaining = count;
+    while remaining > 0 {
+        poll_fn(|cx| Pin::new(&mut *stream).poll_ready(cx)).await.unwrap();
+        let batch = stream.inner().available_outgoing_capacity().min(remaining);
+        assert_ne!(batch, 0, "poll_ready returned ready without outgoing capacity");
+        for _ in 0..batch {
+            Pin::new(&mut *stream).start_send(message()).unwrap();
+        }
+        remaining -= batch;
+    }
+    stream.flush().await.unwrap();
 }
 
 #[derive(Default)]
@@ -154,15 +176,25 @@ fn bench_send_messages(c: &mut Criterion) {
         b.iter(|| {
             rt.block_on(async {
                 let mut stream = active_session_eth_stream(MockTransport::default());
-                for _ in 0..MESSAGE_COUNT {
-                    poll_fn(|cx| Pin::new(&mut stream).poll_ready(cx)).await.unwrap();
-                    Pin::new(&mut stream).start_send(message()).unwrap();
-                }
-                stream.flush().await.unwrap();
+                send_hash_announcements_in_active_session_batches(&mut stream, MESSAGE_COUNT).await;
                 black_box(stream.inner().inner().sent.len());
             });
         })
     });
+
+    for capacity in [8, 16, 64] {
+        group.bench_function(format!("send_hash_announcements_batched_capacity_{capacity}"), |b| {
+            b.iter(|| {
+                rt.block_on(async {
+                    let mut stream =
+                        active_session_eth_stream_with_capacity(MockTransport::default(), capacity);
+                    send_hash_announcements_in_active_session_batches(&mut stream, MESSAGE_COUNT)
+                        .await;
+                    black_box(stream.inner().inner().sent.len());
+                });
+            })
+        });
+    }
 
     group.bench_function("send_transaction_broadcasts", |b| {
         let broadcast = transaction_broadcast();

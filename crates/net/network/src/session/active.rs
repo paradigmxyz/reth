@@ -753,43 +753,55 @@ impl<N: NetworkPrimitives> Future for ActiveSession<N> {
             // also drives p2p maintenance such as ping/pong, so we still poll it once when no
             // session messages are queued.
             let mut sent_message = false;
-            loop {
+            if this.queued_outgoing.is_empty() {
                 match this.conn.poll_ready_unpin(cx) {
-                    Poll::Pending => break,
+                    Poll::Pending | Poll::Ready(Ok(())) => {}
                     Poll::Ready(Err(err)) => {
                         debug!(target: "net::session", %err, remote_peer_id=?this.remote_peer_id, "connection not ready to send message");
                         return this.close_on_error(err, cx)
                     }
-                    Poll::Ready(Ok(())) => {
-                        let capacity = this.conn.available_outgoing_capacity();
-                        if capacity == 0 {
-                            break
+                }
+            } else {
+                loop {
+                    match this.conn.poll_ready_unpin(cx) {
+                        Poll::Pending => break,
+                        Poll::Ready(Err(err)) => {
+                            debug!(target: "net::session", %err, remote_peer_id=?this.remote_peer_id, "connection not ready to send message");
+                            return this.close_on_error(err, cx)
                         }
-
-                        let mut drained_queue = false;
-                        for _ in 0..capacity {
-                            let Some(msg) = this.queued_outgoing.pop_front() else {
-                                drained_queue = true;
+                        Poll::Ready(Ok(())) => {
+                            let send_count = this
+                                .conn
+                                .available_outgoing_capacity()
+                                .min(this.queued_outgoing.len());
+                            if send_count == 0 {
                                 break
-                            };
-                            progress = true;
-                            sent_message = true;
-                            let res = match msg {
-                                OutgoingMessage::Eth(msg) => this.conn.start_send_unpin(msg),
-                                OutgoingMessage::Broadcast(msg) => {
-                                    this.conn.start_send_broadcast(msg)
-                                }
-                                OutgoingMessage::Raw(msg) => this.conn.start_send_raw(msg),
-                            };
-                            if let Err(err) = res {
-                                debug!(target: "net::session", %err, remote_peer_id=?this.remote_peer_id, "failed to send message");
-                                // notify the manager
-                                return this.close_on_error(err, cx)
                             }
-                        }
 
-                        if drained_queue {
-                            break
+                            for _ in 0..send_count {
+                                let msg = this
+                                    .queued_outgoing
+                                    .pop_front()
+                                    .expect("send count is bounded by queued messages");
+                                progress = true;
+                                sent_message = true;
+                                let res = match msg {
+                                    OutgoingMessage::Eth(msg) => this.conn.start_send_unpin(msg),
+                                    OutgoingMessage::Broadcast(msg) => {
+                                        this.conn.start_send_broadcast(msg)
+                                    }
+                                    OutgoingMessage::Raw(msg) => this.conn.start_send_raw(msg),
+                                };
+                                if let Err(err) = res {
+                                    debug!(target: "net::session", %err, remote_peer_id=?this.remote_peer_id, "failed to send message");
+                                    // notify the manager
+                                    return this.close_on_error(err, cx)
+                                }
+                            }
+
+                            if this.queued_outgoing.is_empty() {
+                                break
+                            }
                         }
                     }
                 }
@@ -1154,6 +1166,14 @@ impl<N: NetworkPrimitives> QueuedOutgoingMessages<N> {
     /// Returns the number of queued response messages.
     pub(crate) const fn response_count(&self) -> usize {
         self.queued_responses
+    }
+
+    pub(crate) fn len(&self) -> usize {
+        self.messages.len()
+    }
+
+    pub(crate) fn is_empty(&self) -> bool {
+        self.messages.is_empty()
     }
 
     pub(crate) fn push_back(&mut self, mut message: OutgoingMessage<N>) {

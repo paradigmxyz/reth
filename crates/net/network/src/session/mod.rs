@@ -60,7 +60,7 @@ pub use reth_network_api::{Direction, PeerInfo};
 /// Active sessions batch several outgoing wire messages before forcing the lower p2p stream to
 /// flush into ECIES. The session itself still enforces byte/item backpressure for large responses
 /// and broadcasts, so this stays a small message-count buffer.
-const ACTIVE_SESSION_P2P_OUTGOING_BUFFER_CAPACITY: usize = 8;
+const ACTIVE_SESSION_P2P_OUTGOING_BUFFER_CAPACITY: usize = 32;
 
 /// Internal identifier for active sessions.
 #[derive(Debug, Clone, Copy, PartialOrd, PartialEq, Eq, Hash)]
