@@ -415,7 +415,9 @@ where
                 return Poll::Ready(Some(Err(P2PStreamError::UnknownReservedMessageId(id))))
             }
 
-            if let Some(res) = this.handle_fixed_ping_pong(id, &bytes[1..], cx) {
+            if id <= MAX_P2P_MESSAGE_ID &&
+                let Some(res) = this.handle_fixed_ping_pong(id, &bytes[1..], cx)
+            {
                 if let Err(err) = res {
                     return Poll::Ready(Some(Err(err)))
                 }
@@ -717,7 +719,9 @@ where
                 }
             }
 
-            if let Some(res) = this.handle_fixed_ping_pong(id, &bytes[1..], cx) {
+            if id <= MAX_P2P_MESSAGE_ID &&
+                let Some(res) = this.handle_fixed_ping_pong(id, &bytes[1..], cx)
+            {
                 if let Err(err) = res {
                     return Poll::Ready(Some(Err(err)))
                 }
