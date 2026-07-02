@@ -1,10 +1,12 @@
 //! State root task interface types shared between the engine tree and the payload builder.
 
 use crate::root::ParallelStateRootError;
-use alloy_eip7928::BlockAccessList;
 use alloy_primitives::{keccak256, B256};
 use derive_more::derive::Deref;
-use reth_trie::{updates::TrieUpdates, HashedPostState, HashedStorage, MultiProofTargetsV2};
+use reth_trie::{
+    prefix_set::TriePrefixSetsMut, updates::TrieUpdates, HashedPostState, HashedStorage,
+    MultiProofTargetsV2,
+};
 use revm::state::EvmState;
 use std::sync::Arc;
 use tracing::trace;
@@ -18,11 +20,6 @@ pub enum StateRootMessage {
     StateUpdate(EvmState),
     /// Pre-hashed state update from BAL conversion that can be applied directly without proofs.
     HashedStateUpdate(HashedPostState),
-    /// Block Access List (EIP-7928; BAL) containing complete state changes for the block.
-    ///
-    /// When received, the task generates a single state update from the BAL and processes it.
-    /// No further messages are expected after receiving this variant.
-    BlockAccessList(Arc<BlockAccessList>),
     /// Signals state update stream end.
     ///
     /// This is triggered by block execution, indicating that no additional state updates are
@@ -38,6 +35,8 @@ pub struct StateRootComputeOutcome {
     pub state_root: B256,
     /// The trie updates.
     pub trie_updates: Arc<TrieUpdates>,
+    /// Changed trie node base paths retained while computing the root.
+    pub changed_paths: Option<Arc<TriePrefixSetsMut>>,
     /// Debug recorders taken from the sparse tries, keyed by `None` for account trie
     /// and `Some(address)` for storage tries.
     #[cfg(feature = "trie-debug")]
