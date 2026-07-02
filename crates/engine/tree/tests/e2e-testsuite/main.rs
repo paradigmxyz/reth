@@ -36,9 +36,7 @@ fn default_engine_tree_setup() -> Setup<EthEngineTypes> {
                 .build(),
         ))
         .with_network(NetworkSetup::single_node())
-        .with_tree_config(
-            TreeConfig::default().with_legacy_state_root(false).with_has_enough_parallelism(true),
-        )
+        .with_tree_config(TreeConfig::default().with_has_enough_parallelism(true))
 }
 
 /// Creates a v2 storage mode setup for engine tree e2e tests.
@@ -220,11 +218,7 @@ async fn test_engine_tree_buffered_blocks_are_eventually_connected_e2e() -> Resu
                         .build(),
                 ))
                 .with_network(NetworkSetup::multi_node_unconnected(2)) // Need 2 disconnected nodes
-                .with_tree_config(
-                    TreeConfig::default()
-                        .with_legacy_state_root(false)
-                        .with_has_enough_parallelism(true),
-                ),
+                .with_tree_config(TreeConfig::default().with_has_enough_parallelism(true)),
         )
         // node 0 produces blocks 1 and 2 locally without broadcasting
         .with_action(SelectActiveNode::new(0))
@@ -312,11 +306,7 @@ async fn test_engine_tree_live_sync_transition_eventually_canonical_e2e() -> Res
                         .build(),
                 ))
                 .with_network(NetworkSetup::multi_node(2)) // Two connected nodes
-                .with_tree_config(
-                    TreeConfig::default()
-                        .with_legacy_state_root(false)
-                        .with_has_enough_parallelism(true),
-                ),
+                .with_tree_config(TreeConfig::default().with_has_enough_parallelism(true)),
         )
         // Both nodes start with the same base chain (1 block)
         .with_action(SelectActiveNode::new(0))
@@ -425,9 +415,7 @@ fn disk_reorg_setup(storage_v2: bool) -> Setup<EthEngineTypes> {
                 .build(),
         ))
         .with_network(NetworkSetup::multi_node_unconnected(2))
-        .with_tree_config(
-            TreeConfig::default().with_legacy_state_root(false).with_has_enough_parallelism(true),
-        );
+        .with_tree_config(TreeConfig::default().with_has_enough_parallelism(true));
     if storage_v2 {
         setup = setup.with_storage_v2();
     }
