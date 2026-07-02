@@ -275,6 +275,14 @@ where
         }
     }
 
+    fn with_precompile_cache_disabled(mut self, disabled: bool) -> Self
+    where
+        Self: Sized,
+    {
+        self.executor_factory = self.executor_factory.with_precompile_cache_disabled(disabled);
+        self
+    }
+
     fn jit_backend(&self) -> Option<&dyn reth_evm::JitBackend> {
         #[cfg(feature = "jit")]
         if let Some(factory) = (self.executor_factory.evm_factory() as &dyn Any)

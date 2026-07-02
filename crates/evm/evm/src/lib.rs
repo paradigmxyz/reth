@@ -165,6 +165,16 @@ pub trait ConfigureEvm: Clone + Debug + Send + Sync + Unpin {
         self.with_jit_support_enabled(true)
     }
 
+    /// Returns a config with precompile cache disabled for subsequently created EVMs, if
+    /// supported.
+    #[auto_impl(keep_default_for(&, Arc))]
+    fn with_precompile_cache_disabled(self, _disabled: bool) -> Self
+    where
+        Self: Sized,
+    {
+        self
+    }
+
     /// Returns the JIT backend, if supported.
     fn jit_backend(&self) -> Option<&dyn JitBackend> {
         None

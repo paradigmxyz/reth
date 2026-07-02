@@ -39,6 +39,7 @@ pub struct DefaultEngineValues {
     accept_execution_requests_hash: bool,
     multiproof_chunk_size: usize,
     reserved_cpu_cores: usize,
+    precompile_cache_disabled: bool,
     state_root_fallback: bool,
     always_process_payload_attributes_on_canonical_head: bool,
     allow_unwind_canonical_header: bool,
@@ -144,6 +145,12 @@ impl DefaultEngineValues {
     /// Set the default number of reserved CPU cores
     pub const fn with_reserved_cpu_cores(mut self, v: usize) -> Self {
         self.reserved_cpu_cores = v;
+        self
+    }
+
+    /// Set whether to disable precompile cache by default.
+    pub const fn with_precompile_cache_disabled(mut self, v: bool) -> Self {
+        self.precompile_cache_disabled = v;
         self
     }
 
@@ -269,6 +276,7 @@ impl Default for DefaultEngineValues {
             accept_execution_requests_hash: false,
             multiproof_chunk_size: DEFAULT_MULTIPROOF_TASK_CHUNK_SIZE,
             reserved_cpu_cores: DEFAULT_RESERVED_CPU_CORES,
+            precompile_cache_disabled: false,
             state_root_fallback: false,
             always_process_payload_attributes_on_canonical_head: false,
             allow_unwind_canonical_header: false,
@@ -384,6 +392,16 @@ pub struct EngineArgs {
     /// Configure the number of reserved CPU cores for non-reth processes
     #[arg(long = "engine.reserved-cpu-cores", default_value_t = DefaultEngineValues::get_global().reserved_cpu_cores)]
     pub reserved_cpu_cores: usize,
+
+    /// CAUTION: This CLI flag has no effect anymore, use --engine.disable-precompile-cache if you
+    /// want to disable precompile cache
+    #[arg(long = "engine.precompile-cache", default_value = "true", hide = true)]
+    #[deprecated]
+    pub precompile_cache_enabled: bool,
+
+    /// Disable precompile cache
+    #[arg(long = "engine.disable-precompile-cache", default_value_t = DefaultEngineValues::get_global().precompile_cache_disabled)]
+    pub precompile_cache_disabled: bool,
 
     /// Enable state root fallback, useful for testing
     #[arg(long = "engine.state-root-fallback", default_value_t = DefaultEngineValues::get_global().state_root_fallback)]
@@ -550,6 +568,7 @@ impl Default for EngineArgs {
             accept_execution_requests_hash,
             multiproof_chunk_size,
             reserved_cpu_cores,
+            precompile_cache_disabled,
             state_root_fallback,
             always_process_payload_attributes_on_canonical_head,
             allow_unwind_canonical_header,
@@ -585,6 +604,8 @@ impl Default for EngineArgs {
             accept_execution_requests_hash,
             multiproof_chunk_size,
             reserved_cpu_cores,
+            precompile_cache_enabled: true,
+            precompile_cache_disabled,
             state_root_fallback,
             always_process_payload_attributes_on_canonical_head,
             allow_unwind_canonical_header,
@@ -650,6 +671,7 @@ impl EngineArgs {
             .with_cross_block_cache_size(self.cross_block_cache_size * 1024 * 1024)
             .with_multiproof_chunk_size(self.multiproof_chunk_size)
             .with_reserved_cpu_cores(self.reserved_cpu_cores)
+            .without_precompile_cache(self.precompile_cache_disabled)
             .with_state_root_fallback(self.state_root_fallback)
             .with_always_process_payload_attributes_on_canonical_head(
                 self.always_process_payload_attributes_on_canonical_head,
@@ -770,6 +792,8 @@ mod tests {
             accept_execution_requests_hash: true,
             multiproof_chunk_size: 512,
             reserved_cpu_cores: 4,
+            precompile_cache_enabled: true,
+            precompile_cache_disabled: true,
             state_root_fallback: true,
             always_process_payload_attributes_on_canonical_head: true,
             allow_unwind_canonical_header: true,
@@ -814,6 +838,7 @@ mod tests {
             "512",
             "--engine.reserved-cpu-cores",
             "4",
+            "--engine.disable-precompile-cache",
             "--engine.state-root-fallback",
             "--engine.always-process-payload-attributes-on-canonical-head",
             "--engine.allow-unwind-canonical-header",

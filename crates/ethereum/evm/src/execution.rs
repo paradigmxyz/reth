@@ -367,7 +367,6 @@ where
     ///
     /// This consumes each transaction only when execution reaches it, so upstream transaction
     /// conversion can continue in parallel with earlier transaction execution.
-    #[expect(clippy::type_complexity)]
     pub(crate) fn execute_fallible_envelopes<TxErr, ReceiptErr, I, F, R, H>(
         self,
         transactions: I,

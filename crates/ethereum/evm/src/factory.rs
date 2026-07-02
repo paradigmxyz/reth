@@ -1,6 +1,6 @@
 #[cfg(feature = "jit")]
 use alloc::string::String;
-use alloc::sync::Arc;
+use alloc::{boxed::Box, sync::Arc};
 use core::fmt::Debug;
 #[cfg(feature = "jit")]
 use core::sync::atomic::{AtomicBool, Ordering};
@@ -31,6 +31,9 @@ pub struct EthBlockExecutorFactory<C = ChainSpec, EvmFactory = ()> {
     /// Shared precompile cache.
     #[cfg(feature = "std")]
     precompile_cache_map: PrecompileCacheMap<evm2::SpecId>,
+    /// Whether to disable the shared precompile cache.
+    #[cfg(feature = "std")]
+    precompile_cache_disabled: bool,
     /// EVM factory configuration.
     evm_factory: EvmFactory,
 }
@@ -41,6 +44,8 @@ impl<C, EvmFactory: Clone> Clone for EthBlockExecutorFactory<C, EvmFactory> {
             chain_spec: self.chain_spec.clone(),
             #[cfg(feature = "std")]
             precompile_cache_map: self.precompile_cache_map.clone(),
+            #[cfg(feature = "std")]
+            precompile_cache_disabled: self.precompile_cache_disabled,
             evm_factory: self.evm_factory.clone(),
         }
     }
@@ -60,6 +65,8 @@ impl<C, EvmFactory> EthBlockExecutorFactory<C, EvmFactory> {
             chain_spec,
             #[cfg(feature = "std")]
             precompile_cache_map: PrecompileCacheMap::default(),
+            #[cfg(feature = "std")]
+            precompile_cache_disabled: false,
             evm_factory,
         }
     }
@@ -77,6 +84,21 @@ impl<C, EvmFactory> EthBlockExecutorFactory<C, EvmFactory> {
     /// Returns mutable access to the configured EVM factory state.
     pub const fn evm_factory_mut(&mut self) -> &mut EvmFactory {
         &mut self.evm_factory
+    }
+
+    /// Returns a factory with precompile cache disabled, if supported by the active build.
+    pub const fn with_precompile_cache_disabled(self, disabled: bool) -> Self {
+        #[cfg(feature = "std")]
+        {
+            let mut this = self;
+            this.precompile_cache_disabled = disabled;
+            this
+        }
+        #[cfg(not(feature = "std"))]
+        {
+            let _ = disabled;
+            self
+        }
     }
 
     /// Creates a configured Ethereum block executor.
@@ -106,14 +128,20 @@ impl<C, EvmFactory> EthBlockExecutorFactory<C, EvmFactory> {
         EvmFactory: 'static,
     {
         #[cfg(feature = "std")]
-        let precompiles = alloc::boxed::Box::new(CachedPrecompileProvider::new(
-            evm2::Precompiles::base(env.spec),
-            self.precompile_cache_map.clone(),
-            env.spec,
-            None,
-        ));
+        let precompiles: Box<
+            dyn evm2::evm::precompile::PrecompileProvider<evm2::BaseEvmTypes>,
+        > = if self.precompile_cache_disabled {
+            Box::new(evm2::Precompiles::base(env.spec))
+        } else {
+            Box::new(CachedPrecompileProvider::new(
+                evm2::Precompiles::base(env.spec),
+                self.precompile_cache_map.clone(),
+                env.spec,
+                None,
+            ))
+        };
         #[cfg(not(feature = "std"))]
-        let precompiles = alloc::boxed::Box::new(evm2::Precompiles::base(env.spec));
+        let precompiles = Box::new(evm2::Precompiles::base(env.spec));
 
         let evm = evm2::Evm::<evm2::BaseEvmTypes>::new_with_execution_config(
             evm2::ExecutionConfig::for_spec_and_version(env.spec, env.version),
