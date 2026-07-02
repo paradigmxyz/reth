@@ -572,6 +572,45 @@ impl<S> P2PStream<S>
 where
     S: Sink<Bytes, Error = io::Error> + Unpin,
 {
+    /// Starts sending an id-prefixed subprotocol message from borrowed bytes.
+    ///
+    /// The input is only read during this call. The queued outgoing frame owns its compressed
+    /// bytes.
+    pub fn start_send_protocol_message(&mut self, item: &[u8]) -> Result<(), P2PStreamError> {
+        if item.len() > MAX_PAYLOAD_SIZE {
+            return Err(P2PStreamError::MessageTooBig {
+                message_size: item.len(),
+                max_size: MAX_PAYLOAD_SIZE,
+            })
+        }
+
+        if item.is_empty() {
+            return Err(P2PStreamError::EmptyProtocolMessage)
+        }
+
+        if !self.has_outgoing_capacity() {
+            return Err(P2PStreamError::SendBufferFull)
+        }
+
+        let mut compressed = BytesMut::zeroed(1 + snap::raw::max_compress_len(item.len() - 1));
+        let compressed_size =
+            self.encoder.compress(&item[1..], &mut compressed[1..]).map_err(|err| {
+                debug!(%err, msg=%hex::encode(&item[1..]), "error compressing p2p message");
+                err
+            })?;
+
+        // truncate the compressed buffer to the actual compressed size (plus one for the message
+        // id)
+        compressed.truncate(compressed_size + 1);
+
+        // all messages sent in this stream are subprotocol messages, so we need to switch the
+        // message id based on the offset
+        compressed[0] = item[0] + MAX_RESERVED_MESSAGE_ID + 1;
+        self.outgoing_messages.push_back(compressed.freeze());
+
+        Ok(())
+    }
+
     /// Drains queued p2p frames into the underlying sink without flushing the underlying sink.
     fn poll_drain_outgoing(
         mut self: Pin<&mut Self>,
@@ -787,42 +826,7 @@ where
     }
 
     fn start_send(self: Pin<&mut Self>, item: Bytes) -> Result<(), Self::Error> {
-        if item.len() > MAX_PAYLOAD_SIZE {
-            return Err(P2PStreamError::MessageTooBig {
-                message_size: item.len(),
-                max_size: MAX_PAYLOAD_SIZE,
-            })
-        }
-
-        if item.is_empty() {
-            // empty messages are not allowed
-            return Err(P2PStreamError::EmptyProtocolMessage)
-        }
-
-        // ensure we have free capacity
-        if !self.has_outgoing_capacity() {
-            return Err(P2PStreamError::SendBufferFull)
-        }
-
-        let this = self.project();
-
-        let mut compressed = BytesMut::zeroed(1 + snap::raw::max_compress_len(item.len() - 1));
-        let compressed_size =
-            this.encoder.compress(&item[1..], &mut compressed[1..]).map_err(|err| {
-                debug!(%err, msg=%hex::encode(&item[1..]), "error compressing p2p message");
-                err
-            })?;
-
-        // truncate the compressed buffer to the actual compressed size (plus one for the message
-        // id)
-        compressed.truncate(compressed_size + 1);
-
-        // all messages sent in this stream are subprotocol messages, so we need to switch the
-        // message id based on the offset
-        compressed[0] = item[0] + MAX_RESERVED_MESSAGE_ID + 1;
-        this.outgoing_messages.push_back(compressed.freeze());
-
-        Ok(())
+        self.get_mut().start_send_protocol_message(&item)
     }
 
     /// Returns `Poll::Ready(Ok(()))` when no buffered items remain.

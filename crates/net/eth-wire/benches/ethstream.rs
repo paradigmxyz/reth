@@ -112,6 +112,24 @@ async fn send_hash_announcements_in_active_session_batches(
     stream.flush().await.unwrap();
 }
 
+async fn send_hash_announcements_in_active_session_batches_with_encode_buf(
+    stream: &mut EthStream<P2PStream<MockTransport>>,
+    count: usize,
+) {
+    let mut encode_buf = BytesMut::new();
+    let mut remaining = count;
+    while remaining > 0 {
+        poll_fn(|cx| Pin::new(&mut *stream).poll_ready(cx)).await.unwrap();
+        let batch = stream.inner().available_outgoing_capacity().min(remaining);
+        assert_ne!(batch, 0, "poll_ready returned ready without outgoing capacity");
+        for _ in 0..batch {
+            stream.start_send_with_encode_buf(message(), &mut encode_buf).unwrap();
+        }
+        remaining -= batch;
+    }
+    stream.flush().await.unwrap();
+}
+
 async fn send_and_receive_ecies_messages(count: usize) -> usize {
     let server_key = SecretKey::from_slice(&[1; 32]).unwrap();
     let server_id = pk2id(&server_key.public_key(SECP256K1));
@@ -268,6 +286,20 @@ fn bench_send_messages(c: &mut Criterion) {
         })
     });
 
+    group.bench_function("send_hash_announcements_batched_encode_buf", |b| {
+        b.iter(|| {
+            rt.block_on(async {
+                let mut stream = active_session_eth_stream(MockTransport::default());
+                send_hash_announcements_in_active_session_batches_with_encode_buf(
+                    &mut stream,
+                    MESSAGE_COUNT,
+                )
+                .await;
+                black_box(stream.inner().inner().sent.len());
+            });
+        })
+    });
+
     for capacity in [8, 16, 64] {
         group.bench_function(format!("send_hash_announcements_batched_capacity_{capacity}"), |b| {
             b.iter(|| {
@@ -309,6 +341,30 @@ fn bench_send_messages(c: &mut Criterion) {
                         .start_send_transactions_with_payload_length(
                             transactions.clone(),
                             payload_length,
+                        )
+                        .unwrap();
+                    stream.flush().await.unwrap();
+                }
+                black_box(stream.inner().inner().sent.len());
+            });
+        })
+    });
+
+    group.bench_function("send_transaction_broadcasts_cached_payload_length_encode_buf", |b| {
+        let EthBroadcastMessage::Transactions(transactions) = transaction_broadcast() else {
+            unreachable!()
+        };
+        let payload_length = transaction_broadcast_payload_length(&transactions);
+        b.iter(|| {
+            rt.block_on(async {
+                let mut stream = eth_stream(MockTransport::default());
+                let mut encode_buf = BytesMut::new();
+                for _ in 0..MESSAGE_COUNT {
+                    stream
+                        .start_send_transactions_with_payload_length_and_encode_buf(
+                            transactions.clone(),
+                            payload_length,
+                            &mut encode_buf,
                         )
                         .unwrap();
                     stream.flush().await.unwrap();

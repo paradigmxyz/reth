@@ -92,6 +92,9 @@ const ACTIVE_SESSION_RECEIVE_BUDGET: usize = 32;
 /// Maximum direct-decode scratch capacity retained after polling an eth message.
 const MAX_RETAINED_DECODE_BUF_CAPACITY: usize = 64 * 1024;
 
+/// Maximum direct-encode scratch capacity retained after sending eth messages.
+const MAX_RETAINED_ENCODE_BUF_CAPACITY: usize = 64 * 1024;
+
 /// Shrink burst-grown buffers only after they are far above their retained steady-state capacity.
 const SHRINK_CAPACITY_MULTIPLIER: usize = 4;
 
@@ -155,6 +158,8 @@ pub(crate) struct ActiveSession<N: NetworkPrimitives> {
     pub(crate) conn: EthRlpxConnection<N>,
     /// Scratch buffer for decoding eth-only p2p messages directly from the connection.
     pub(crate) conn_decode_buf: BytesMut,
+    /// Scratch buffer for encoding eth-only p2p messages before compression.
+    pub(crate) conn_encode_buf: BytesMut,
     /// Identifier of the node we're connected to.
     pub(crate) remote_peer_id: PeerId,
     /// The address we're connected to.
@@ -785,18 +790,31 @@ impl<N: NetworkPrimitives> Future for ActiveSession<N> {
                                     .expect("send count is bounded by queued messages");
                                 sent_message = true;
                                 let res = match msg {
-                                    OutgoingMessage::Eth(msg) => this.conn.start_send_unpin(msg),
+                                    OutgoingMessage::Eth(msg) => this
+                                        .conn
+                                        .start_send_with_encode_buf(msg, &mut this.conn_encode_buf),
                                     OutgoingMessage::Broadcast(msg) => {
-                                        this.conn.start_send_broadcast(msg)
+                                        this.conn.start_send_broadcast_with_encode_buf(
+                                            msg,
+                                            &mut this.conn_encode_buf,
+                                        )
                                     }
                                     OutgoingMessage::TransactionBroadcast {
                                         transactions,
                                         payload_length,
-                                    } => this.conn.start_send_transactions_with_payload_length(
-                                        transactions,
-                                        payload_length,
-                                    ),
-                                    OutgoingMessage::Raw(msg) => this.conn.start_send_raw(msg),
+                                    } => this
+                                        .conn
+                                        .start_send_transactions_with_payload_length_and_encode_buf(
+                                            transactions,
+                                            payload_length,
+                                            &mut this.conn_encode_buf,
+                                        ),
+                                    OutgoingMessage::Raw(msg) => {
+                                        this.conn.start_send_raw_with_encode_buf(
+                                            msg,
+                                            &mut this.conn_encode_buf,
+                                        )
+                                    }
                                 };
                                 if let Err(err) = res {
                                     debug!(target: "net::session", %err, remote_peer_id=?this.remote_peer_id, "failed to send message");
@@ -814,6 +832,10 @@ impl<N: NetworkPrimitives> Future for ActiveSession<N> {
             }
 
             if sent_message {
+                if this.conn_encode_buf.capacity() > MAX_RETAINED_ENCODE_BUF_CAPACITY {
+                    this.conn_encode_buf = BytesMut::new();
+                }
+
                 match this.conn.poll_flush_unpin(cx) {
                     Poll::Pending | Poll::Ready(Ok(())) => {}
                     Poll::Ready(Err(err)) => {
@@ -1427,6 +1449,7 @@ mod tests {
                         inflight_requests: Default::default(),
                         conn,
                         conn_decode_buf: Default::default(),
+                        conn_encode_buf: Default::default(),
                         queued_outgoing: QueuedOutgoingMessages::new(
                             Gauge::noop(),
                             BroadcastItemCounter::new(),

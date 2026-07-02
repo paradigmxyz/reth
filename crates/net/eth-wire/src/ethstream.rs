@@ -7,12 +7,16 @@
 use crate::{
     errors::{EthHandshakeError, EthStreamError},
     handshake::EthereumEthHandshake,
-    message::{EthBroadcastMessage, MessageError, MAX_MESSAGE_SIZE, TX_MEMORY_BUDGET_MULTIPLIER},
+    message::{
+        EthBroadcastMessage, MessageError, ProtocolBroadcastMessage, MAX_MESSAGE_SIZE,
+        TX_MEMORY_BUDGET_MULTIPLIER,
+    },
     p2pstream::{P2PStream, HANDSHAKE_TIMEOUT},
     CanDisconnect, DisconnectReason, EthMessage, EthNetworkPrimitives, EthVersion, ProtocolMessage,
     SharedTransactions, UnifiedStatus,
 };
 use alloy_primitives::bytes::{Bytes, BytesMut};
+use alloy_rlp::{Encodable, Header};
 use futures::{ready, Sink, SinkExt};
 use pin_project::pin_project;
 use reth_eth_wire_types::{EthMessageID, NetworkPrimitives, RawCapabilityMessage};
@@ -340,6 +344,123 @@ where
             None => Poll::Ready(None),
         }
     }
+}
+
+impl<S, N> EthStream<P2PStream<S>, N>
+where
+    S: Sink<Bytes, Error = io::Error> + Unpin + Send + Sync,
+    N: NetworkPrimitives,
+{
+    /// Same as [`Sink::start_send`] but encodes into caller-owned scratch space before compression.
+    pub fn start_send_with_encode_buf(
+        &mut self,
+        item: EthMessage<N>,
+        encode_buf: &mut BytesMut,
+    ) -> Result<(), EthStreamError> {
+        if matches!(item, EthMessage::Status(_)) {
+            let _disconnect_future = self.inner.disconnect(DisconnectReason::ProtocolBreach);
+            return Err(EthStreamError::EthHandshakeError(EthHandshakeError::StatusNotInHandshake))
+        }
+
+        encode_eth_message(item, encode_buf);
+        self.inner.start_send_protocol_message(encode_buf)?;
+        Ok(())
+    }
+
+    /// Same as [`Self::start_send_broadcast`] but encodes into caller-owned scratch space.
+    pub fn start_send_broadcast_with_encode_buf(
+        &mut self,
+        item: EthBroadcastMessage<N>,
+        encode_buf: &mut BytesMut,
+    ) -> Result<(), EthStreamError> {
+        encode_broadcast_message(item, encode_buf);
+        self.inner.start_send_protocol_message(encode_buf)?;
+        Ok(())
+    }
+
+    /// Sends a Transactions broadcast with a precomputed RLP payload length and caller-owned
+    /// scratch space.
+    pub fn start_send_transactions_with_payload_length_and_encode_buf(
+        &mut self,
+        transactions: SharedTransactions<N::BroadcastedTransaction>,
+        payload_length: usize,
+        encode_buf: &mut BytesMut,
+    ) -> Result<(), EthStreamError> {
+        encode_transactions_broadcast_message(transactions, payload_length, encode_buf);
+        self.inner.start_send_protocol_message(encode_buf)?;
+        Ok(())
+    }
+
+    /// Sends a raw capability message using caller-owned scratch space.
+    pub fn start_send_raw_with_encode_buf(
+        &mut self,
+        msg: RawCapabilityMessage,
+        encode_buf: &mut BytesMut,
+    ) -> Result<(), EthStreamError> {
+        encode_raw_capability_message(msg, encode_buf);
+        self.inner.start_send_protocol_message(encode_buf)?;
+        Ok(())
+    }
+}
+
+fn encode_eth_message<N: NetworkPrimitives>(item: EthMessage<N>, out: &mut BytesMut) {
+    out.clear();
+    out.reserve(EthMessageID::Status.length() + item.length());
+    match item {
+        EthMessage::NewBlockHashes(hashes) => {
+            EthMessageID::NewBlockHashes.encode(out);
+            hashes.encode(out);
+        }
+        EthMessage::NewPooledTransactionHashes66(hashes) => {
+            EthMessageID::NewPooledTransactionHashes.encode(out);
+            hashes.encode(out);
+        }
+        EthMessage::NewPooledTransactionHashes68(hashes) => {
+            EthMessageID::NewPooledTransactionHashes.encode(out);
+            hashes.encode(out);
+        }
+        EthMessage::NewPooledTransactionHashes72(hashes) => {
+            EthMessageID::NewPooledTransactionHashes.encode(out);
+            hashes.encode(out);
+        }
+        this => ProtocolMessage::from(this).encode(out),
+    }
+}
+
+fn encode_broadcast_message<N: NetworkPrimitives>(
+    item: EthBroadcastMessage<N>,
+    out: &mut BytesMut,
+) {
+    out.clear();
+    out.reserve(EthMessageID::Status.length() + item.length());
+    match item {
+        EthBroadcastMessage::Transactions(transactions) => {
+            let payload_length = transactions.iter().map(Encodable::length).sum();
+            encode_transactions_broadcast_message(transactions, payload_length, out);
+        }
+        this @ EthBroadcastMessage::NewBlock(_) => ProtocolBroadcastMessage::from(this).encode(out),
+    }
+}
+
+fn encode_transactions_broadcast_message<T: Encodable>(
+    transactions: SharedTransactions<T>,
+    payload_length: usize,
+    out: &mut BytesMut,
+) {
+    let header = Header { list: true, payload_length };
+    out.clear();
+    out.reserve(EthMessageID::Transactions.length() + header.length() + payload_length);
+    EthMessageID::Transactions.encode(out);
+    header.encode(out);
+    for tx in transactions.0 {
+        tx.encode(out);
+    }
+}
+
+fn encode_raw_capability_message(msg: RawCapabilityMessage, out: &mut BytesMut) {
+    out.clear();
+    out.reserve(msg.length());
+    msg.encode(out);
 }
 
 impl<S, N> EthStream<P2PStream<S>, N>
@@ -768,7 +889,9 @@ mod tests {
             .await
             .unwrap();
 
-        client_stream.send(test_msg).await.unwrap();
+        let mut encode_buf = BytesMut::new();
+        client_stream.start_send_with_encode_buf(test_msg, &mut encode_buf).unwrap();
+        client_stream.flush().await.unwrap();
 
         // make sure the server receives the message and asserts before ending the test
         handle.await.unwrap();

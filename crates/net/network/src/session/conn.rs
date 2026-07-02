@@ -1,7 +1,7 @@
 //! Connection types for a session
 
 use alloy_primitives::bytes::BytesMut;
-use futures::{Sink, Stream};
+use futures::{Sink, SinkExt, Stream};
 use reth_ecies::stream::ECIESStream;
 use reth_eth_wire::{
     errors::EthStreamError,
@@ -99,6 +99,32 @@ impl<N: NetworkPrimitives> EthRlpxConnection<N> {
         }
     }
 
+    /// Sends an eth message using caller-owned scratch space for eth-only connections.
+    #[inline]
+    pub fn start_send_with_encode_buf(
+        &mut self,
+        item: EthMessage<N>,
+        encode_buf: &mut BytesMut,
+    ) -> Result<(), EthStreamError> {
+        match self {
+            Self::EthOnly(conn) => conn.start_send_with_encode_buf(item, encode_buf),
+            Self::Satellite(conn) => conn.primary_mut().start_send_unpin(item),
+        }
+    }
+
+    /// Sends an eth broadcast using caller-owned scratch space for eth-only connections.
+    #[inline]
+    pub fn start_send_broadcast_with_encode_buf(
+        &mut self,
+        item: EthBroadcastMessage<N>,
+        encode_buf: &mut BytesMut,
+    ) -> Result<(), EthStreamError> {
+        match self {
+            Self::EthOnly(conn) => conn.start_send_broadcast_with_encode_buf(item, encode_buf),
+            Self::Satellite(conn) => conn.primary_mut().start_send_broadcast(item),
+        }
+    }
+
     /// Sends a transactions broadcast with a precomputed RLP payload length.
     #[inline]
     pub fn start_send_transactions_with_payload_length(
@@ -116,10 +142,42 @@ impl<N: NetworkPrimitives> EthRlpxConnection<N> {
         }
     }
 
+    /// Sends a transactions broadcast using caller-owned scratch space for eth-only connections.
+    #[inline]
+    pub fn start_send_transactions_with_payload_length_and_encode_buf(
+        &mut self,
+        transactions: SharedTransactions<N::BroadcastedTransaction>,
+        payload_length: usize,
+        encode_buf: &mut BytesMut,
+    ) -> Result<(), EthStreamError> {
+        match self {
+            Self::EthOnly(conn) => conn.start_send_transactions_with_payload_length_and_encode_buf(
+                transactions,
+                payload_length,
+                encode_buf,
+            ),
+            Self::Satellite(conn) => conn
+                .primary_mut()
+                .start_send_transactions_with_payload_length(transactions, payload_length),
+        }
+    }
+
     /// Sends a raw capability message over the connection
     pub fn start_send_raw(&mut self, msg: RawCapabilityMessage) -> Result<(), EthStreamError> {
         match self {
             Self::EthOnly(conn) => conn.start_send_raw(msg),
+            Self::Satellite(conn) => conn.primary_mut().start_send_raw(msg),
+        }
+    }
+
+    /// Sends a raw capability message using caller-owned scratch space for eth-only connections.
+    pub fn start_send_raw_with_encode_buf(
+        &mut self,
+        msg: RawCapabilityMessage,
+        encode_buf: &mut BytesMut,
+    ) -> Result<(), EthStreamError> {
+        match self {
+            Self::EthOnly(conn) => conn.start_send_raw_with_encode_buf(msg, encode_buf),
             Self::Satellite(conn) => conn.primary_mut().start_send_raw(msg),
         }
     }
