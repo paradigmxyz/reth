@@ -289,6 +289,7 @@ where
         // Add prior block hashes to the seeding list.
         plan.block_hashes_to_seed.extend(payload.prior_block_hashes.clone());
         plan.block_hashes_to_seed.sort_unstable_by_key(|(n, _)| *n);
+        plan.reserve_hash_seed_scratch();
 
         Ok(plan)
     }

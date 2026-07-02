@@ -47,6 +47,8 @@ pub struct BbEvmPlan<'a> {
     /// Block hashes to seed for inter-segment BLOCKHASH resolution.
     /// Includes both prior block hashes and inter-segment hashes.
     pub(crate) block_hashes_to_seed: Vec<(u64, B256)>,
+    /// Reused buffer for the block hash window passed to the DB seeder.
+    block_hash_seed_scratch: Vec<(u64, B256)>,
 }
 
 impl<'a> BbEvmPlan<'a> {
@@ -60,19 +62,33 @@ impl<'a> BbEvmPlan<'a> {
             block_hashes_to_seed.push((finished_block_number, finished_block_hash));
         }
 
-        Self { segments, next_segment: 1, tx_counter: 0, block_hashes_to_seed }
+        Self {
+            segments,
+            next_segment: 1,
+            tx_counter: 0,
+            block_hash_seed_scratch: Vec::with_capacity(block_hashes_to_seed.len().min(256)),
+            block_hashes_to_seed,
+        }
     }
 
     /// Returns the 256 block hashes relevant to a segment with the given block
     /// number. BLOCKHASH can look back 256 blocks, so we select entries in
     /// `[block_number - 256, block_number)`.
-    pub(crate) fn hashes_for_block(&self, block_number: u64) -> Vec<(u64, B256)> {
+    pub(crate) fn hashes_for_block(&mut self, block_number: u64) -> &[(u64, B256)] {
         let min = block_number.saturating_sub(256);
-        self.block_hashes_to_seed
-            .iter()
-            .copied()
-            .filter(|(n, _)| *n >= min && *n < block_number)
-            .collect()
+        self.block_hash_seed_scratch.clear();
+        self.block_hash_seed_scratch.extend(
+            self.block_hashes_to_seed
+                .iter()
+                .copied()
+                .filter(|(n, _)| *n >= min && *n < block_number),
+        );
+        &self.block_hash_seed_scratch
+    }
+
+    /// Reserves seed scratch capacity for the current block hash list.
+    pub(crate) fn reserve_hash_seed_scratch(&mut self) {
+        self.block_hash_seed_scratch.reserve(self.block_hashes_to_seed.len().min(256));
     }
 
     /// Returns the segment that contains the transaction at `tx_index`.
@@ -282,7 +298,8 @@ where
     fn reseed_block_hashes_for(&mut self, block_number: u64) {
         let Some(seeder) = self.block_hash_seeder else { return };
         let hashes = self.plan.hashes_for_block(block_number);
-        seeder(self.inner_mut().evm_mut().db_mut(), &hashes);
+        let inner = self.inner.as_mut().expect("inner executor must exist");
+        seeder(inner.evm_mut().db_mut(), hashes);
     }
 
     fn apply_segment_boundary(&mut self) -> Result<(), BlockExecutionError> {
@@ -432,16 +449,16 @@ where
         // the receipt root task (which reads receipts incrementally) sees
         // globally-correct values across all segments.
         let offset = self.gas_used_offset;
-        if offset > 0 &&
-            let Some(receipt) = self.inner_mut().receipts.last_mut()
+        if offset > 0
+            && let Some(receipt) = self.inner_mut().receipts.last_mut()
         {
             receipt.cumulative_gas_used += offset;
         }
 
         self.plan.tx_counter += 1;
 
-        while self.plan.next_segment < self.plan.segments.len() &&
-            self.plan.tx_counter == self.plan.segments[self.plan.next_segment].start_tx
+        while self.plan.next_segment < self.plan.segments.len()
+            && self.plan.tx_counter == self.plan.segments[self.plan.next_segment].start_tx
         {
             self.apply_segment_boundary().expect("must succeed");
         }
