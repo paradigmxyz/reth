@@ -684,6 +684,7 @@ impl<N: NetworkPrimitives> Future for ActiveSession<N> {
         // The main poll loop that drives the session
         'main: loop {
             let mut progress = false;
+            let mut receive_pending = false;
 
             // we prioritize incoming commands sent from the session manager
             loop {
@@ -895,7 +896,10 @@ impl<N: NetworkPrimitives> Future for ActiveSession<N> {
                 let msg = this.conn.poll_next_eth_message(cx, &mut this.conn_decode_buf);
 
                 match msg {
-                    Poll::Pending => break,
+                    Poll::Pending => {
+                        receive_pending = true;
+                        break
+                    }
                     Poll::Ready(None) => {
                         if this.is_disconnecting() {
                             break
@@ -940,6 +944,16 @@ impl<N: NetworkPrimitives> Future for ActiveSession<N> {
                         }
                     }
                 }
+            }
+
+            // Avoid one extra empty outer-loop pass after the wire is pending, unless the receive
+            // pass produced work that should be driven immediately.
+            if receive_pending &&
+                this.queued_outgoing.is_empty() &&
+                this.pending_message_to_session.is_none() &&
+                this.received_requests_from_remote.is_empty()
+            {
+                break 'main
             }
 
             if !progress {
