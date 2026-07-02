@@ -6,7 +6,7 @@ use reth_tracing::tracing::{info, warn};
 use std::path::Path;
 
 pub use crate::implementation::mdbx::*;
-#[doc(no_inline)]
+#[doc(no_inline)] // Work around rustdoc ICE: https://github.com/rust-lang/rust/issues/158686
 pub use reth_libmdbx::*;
 
 /// Tables that have been removed from the schema but may still exist on disk from previous
