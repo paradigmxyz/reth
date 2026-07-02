@@ -1,9 +1,7 @@
 use super::metrics::{RocksDBMetrics, RocksDBOperation, ROCKSDB_TABLES};
 use crate::{
-    providers::{
-        compute_history_rank, execution_state_to_plain_state_and_reverts, needs_prev_shard_check,
-        HistoryInfo,
-    },
+    providers::{compute_history_rank, needs_prev_shard_check, HistoryInfo},
+    writer::execution_state_to_plain_state_and_reverts,
     OriginalValuesKnown,
 };
 use alloy_consensus::transaction::TxHashRef;

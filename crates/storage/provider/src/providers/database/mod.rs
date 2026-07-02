@@ -45,7 +45,6 @@ use std::{
 use tracing::{info, instrument, trace, warn};
 
 mod provider;
-pub(crate) use crate::writer::execution_state_to_plain_state_and_reverts;
 pub use provider::{
     CommitOrder, DatabaseProvider, DatabaseProviderRO, DatabaseProviderRW, SaveBlocksMode,
 };

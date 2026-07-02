@@ -4,8 +4,9 @@ use super::{
 };
 use crate::{
     changeset_walker::{StaticFileAccountChangesetWalker, StaticFileStorageChangesetWalker},
-    providers::execution_state_to_plain_state_and_reverts,
-    to_range, BlockHashReader, BlockNumReader, BlockReader, BlockSource, EitherWriter,
+    to_range,
+    writer::execution_state_to_plain_state_and_reverts,
+    BlockHashReader, BlockNumReader, BlockReader, BlockSource, EitherWriter,
     EitherWriterDestination, HeaderProvider, OriginalValuesKnown, ReceiptProvider,
     StageCheckpointReader, StatsReader, TransactionVariant, TransactionsProvider,
     TransactionsProviderExt,

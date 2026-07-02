@@ -1,13 +1,12 @@
 use super::{DatabaseProviderRO, ProviderFactory, ProviderNodeTypes};
 use crate::{
-    providers::{
-        execution_state_to_plain_state_and_reverts, StaticFileProvider, StaticFileProviderRWRefMut,
-    },
-    to_range, AccountReader, BlockHashReader, BlockIdReader, BlockNumReader, BlockReader,
-    BlockReaderIdExt, BlockSource, ChainSpecProvider, ChangeSetReader, HeaderProvider,
-    ProviderError, PruneCheckpointReader, ReceiptProvider, ReceiptProviderIdExt,
-    StageCheckpointReader, StateReader, StaticFileProviderFactory, TransactionVariant,
-    TransactionsProvider,
+    providers::{StaticFileProvider, StaticFileProviderRWRefMut},
+    to_range,
+    writer::execution_state_to_plain_state_and_reverts,
+    AccountReader, BlockHashReader, BlockIdReader, BlockNumReader, BlockReader, BlockReaderIdExt,
+    BlockSource, ChainSpecProvider, ChangeSetReader, HeaderProvider, ProviderError,
+    PruneCheckpointReader, ReceiptProvider, ReceiptProviderIdExt, StageCheckpointReader,
+    StateReader, StaticFileProviderFactory, TransactionVariant, TransactionsProvider,
 };
 use alloy_consensus::{
     transaction::{TransactionMeta, TxHashRef},
