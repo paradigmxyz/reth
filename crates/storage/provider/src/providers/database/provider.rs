@@ -630,6 +630,33 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
         // and RocksDB write spans appear as children of save_blocks in traces.
         let span = tracing::Span::current();
         runtime.storage_pool().in_place_scope(|s| {
+            let mut merged_hashed_state_rx = None;
+            let mut merged_trie_rx = None;
+
+            if save_mode.with_state() {
+                let (tx, rx) = std::sync::mpsc::channel();
+                merged_hashed_state_rx = Some(rx);
+                let blocks_ref = &blocks;
+                s.spawn(move |_| {
+                    // Blocks are oldest-to-newest, merge_batch expects newest-to-oldest.
+                    let merged = HashedPostStateSorted::merge_batch(
+                        blocks_ref.iter().rev().map(|b| b.trie_data().hashed_state),
+                    );
+                    let _ = tx.send(merged);
+                });
+
+                let (tx, rx) = std::sync::mpsc::channel();
+                merged_trie_rx = Some(rx);
+                let blocks_ref = &blocks;
+                s.spawn(move |_| {
+                    // Blocks are oldest-to-newest, merge_batch expects newest-to-oldest.
+                    let merged = TrieUpdatesSorted::merge_batch(
+                        blocks_ref.iter().rev().map(|b| b.trie_updates()),
+                    );
+                    let _ = tx.send(merged);
+                });
+            }
+
             // SF writes
             s.spawn(|_| {
                 let _guard = span.enter();
@@ -724,19 +751,25 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
             // Write all hashed state and trie updates in single batches.
             // This reduces cursor open/close overhead from N calls to 1.
             if save_mode.with_state() {
-                // Blocks are oldest-to-newest, merge_batch expects newest-to-oldest.
                 let start = Instant::now();
-                let merged_hashed_state = HashedPostStateSorted::merge_batch(
-                    blocks.iter().rev().map(|b| b.trie_data().hashed_state),
-                );
+                let merged_hashed_state = merged_hashed_state_rx
+                    .expect("hashed state merge receiver initialized")
+                    .recv()
+                    .map_err(|_| ProviderError::Database(reth_db_api::DatabaseError::Other(
+                        "hashed state merge thread panicked".into(),
+                    )))?;
                 if !merged_hashed_state.is_empty() {
                     self.write_hashed_state(&merged_hashed_state)?;
                 }
                 timings.write_hashed_state += start.elapsed();
 
                 let start = Instant::now();
-                let merged_trie =
-                    TrieUpdatesSorted::merge_batch(blocks.iter().rev().map(|b| b.trie_updates()));
+                let merged_trie = merged_trie_rx
+                    .expect("trie merge receiver initialized")
+                    .recv()
+                    .map_err(|_| ProviderError::Database(reth_db_api::DatabaseError::Other(
+                        "trie update merge thread panicked".into(),
+                    )))?;
                 if !merged_trie.is_empty() {
                     self.write_trie_updates_sorted(&merged_trie)?;
                 }
