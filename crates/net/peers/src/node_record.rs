@@ -222,9 +222,9 @@ impl TryFrom<&Enr<secp256k1::SecretKey>> for NodeRecord {
             return Err(NodeRecordParseError::InvalidUrl("udp port missing".to_string()))
         };
 
-        let Some(tcp_port) = enr.tcp4().or_else(|| enr.tcp6()) else {
-            return Err(NodeRecordParseError::InvalidUrl("tcp port missing".to_string()))
-        };
+        // A discovery-only ENR (e.g. a devp2p bootnode) omits the tcp key; treat that as "no
+        // RLPx" (port 0, rendered as `:0?discport=<udp>`) rather than rejecting the record.
+        let tcp_port = enr.tcp4().or_else(|| enr.tcp6()).unwrap_or(0);
 
         let id = crate::pk2id(&enr.public_key());
 

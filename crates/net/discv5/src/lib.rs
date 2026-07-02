@@ -503,11 +503,16 @@ pub fn build_local_enr(
             }
             builder.udp6(addr.port());
         }
-        // Advertise tcp4 when v4 is configured, else tcp6.
-        if v4.is_some() {
-            builder.tcp4(tcp_socket.port());
-        } else if v6.is_some() {
-            builder.tcp6(tcp_socket.port());
+        // Advertise the RLPx TCP port on one family (v4 preferred), since a node has a single
+        // RLPx port. A port of 0 means no RLPx (e.g. a discovery-only bootnode): omit the tcp
+        // keys entirely, matching go-ethereum/devp2p so the signed ENR carries only the discovery
+        // keys instead of `tcp=0`. Real nodes always have a nonzero port.
+        if tcp_socket.port() != 0 {
+            if v4.is_some() {
+                builder.tcp4(tcp_socket.port());
+            } else if v6.is_some() {
+                builder.tcp6(tcp_socket.port());
+            }
         }
 
         // Prefer v6 when both are configured
@@ -1015,6 +1020,30 @@ mod test {
 
         assert_eq!(fork_id, decoded_fork_id);
         assert_eq!(TCP_PORT, enr.tcp4().unwrap()); // listen config is defaulting to ip mode ipv4
+    }
+
+    #[test]
+    fn build_enr_no_rlpx_omits_tcp_keys() {
+        // A zero RLPx port means "no RLPx" (e.g. a discovery-only bootnode): the ENR must omit the
+        // tcp/tcp6 keys entirely (matching go-ethereum/devp2p), not advertise `tcp=0`, so the
+        // signed record carries only the discovery keys.
+        let listen = ListenConfig::DualStack {
+            ipv4: Ipv4Addr::UNSPECIFIED,
+            ipv4_port: 30303,
+            ipv6: Ipv6Addr::UNSPECIFIED,
+            ipv6_port: 30303,
+        };
+        let config = Config::builder((Ipv4Addr::UNSPECIFIED, 0).into())
+            .discv5_config(discv5::ConfigBuilder::new(listen).build())
+            .build();
+
+        let sk = SecretKey::new(&mut thread_rng());
+        let (enr, _, _, _) = build_local_enr(&sk, &config);
+
+        assert_eq!(enr.tcp4(), None);
+        assert_eq!(enr.tcp6(), None);
+        assert_eq!(enr.udp4(), Some(30303));
+        assert_eq!(enr.udp6(), Some(30303));
     }
 
     #[test]
