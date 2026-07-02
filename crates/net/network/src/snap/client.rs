@@ -51,8 +51,8 @@ impl SnapClient {
         let (tx, rx) = oneshot::channel();
         match self.to_manager.send(SnapPeerRequest { request, response: tx }) {
             Ok(()) => SnapResponseFuture::pending(rx),
-            // The session manager is gone; no peer can serve the request.
-            Err(_) => SnapResponseFuture::ready_err(RequestError::UnsupportedCapability),
+            // The session manager (and with it the network) has shut down.
+            Err(_) => SnapResponseFuture::ready_err(RequestError::ChannelClosed),
         }
     }
 }
@@ -182,11 +182,11 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn request_without_manager_is_unsupported() {
+    async fn request_without_manager_is_channel_closed() {
         let (client, rx, _count) = client();
         drop(rx);
         let res = client.get_block_access_lists(block_access_lists_request(1)).await;
-        assert!(matches!(res, Err(RequestError::UnsupportedCapability)));
+        assert!(matches!(res, Err(RequestError::ChannelClosed)));
     }
 
     #[tokio::test]

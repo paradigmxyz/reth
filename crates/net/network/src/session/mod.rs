@@ -198,11 +198,17 @@ impl<N: NetworkPrimitives> SessionManager<N> {
 
     /// Routes a `snap/2` request to the first snap-capable session that accepts it.
     ///
-    /// If no snap-capable session accepts the request, the client is told the capability is
-    /// unsupported.
+    /// With no snap-capable session connected the capability is reported as unsupported; if
+    /// snap-capable sessions exist but none could accept (command channels full or closing), the
+    /// caller gets a retryable [`RequestError::ChannelClosed`] instead.
     fn route_snap_request(&self, req: SnapPeerRequest) {
         if let Err(req) = route_to_snap_session(self.active_sessions.values(), req) {
-            let _ = req.response.send(Err(RequestError::UnsupportedCapability));
+            let err = if self.active_sessions.values().any(|h| h.supports_snap) {
+                RequestError::ChannelClosed
+            } else {
+                RequestError::UnsupportedCapability
+            };
+            let _ = req.response.send(Err(err));
         }
     }
 
