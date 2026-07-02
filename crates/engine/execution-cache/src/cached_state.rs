@@ -884,6 +884,11 @@ impl ExecutionCache {
 
     /// Build an [`ExecutionCache`] struct, so that execution caches can be easily cloned.
     pub fn new(total_cache_size: usize) -> Self {
+        Self::new_with_cache_metrics(total_cache_size, true)
+    }
+
+    /// Build an [`ExecutionCache`] with optional per-entry cache metrics.
+    pub fn new_with_cache_metrics(total_cache_size: usize, cache_metrics: bool) -> Self {
         let code_cache_size = (total_cache_size * 556) / 10000; // 5.56% of total
         let storage_cache_size = (total_cache_size * 8888) / 10000; // 88.88% of total
         let account_cache_size = (total_cache_size * 556) / 10000; // 5.56% of total
@@ -898,11 +903,11 @@ impl ExecutionCache {
 
         Self(Arc::new(ExecutionCacheInner {
             code_cache: FixedCache::new(code_capacity, FbBuildHasher::<32>::default())
-                .with_stats(Some(Stats::new(code_stats.clone()))),
+                .with_stats(cache_metrics.then(|| Stats::new(code_stats.clone()))),
             storage_cache: FixedCache::new(storage_capacity, DefaultHashBuilder::default())
-                .with_stats(Some(Stats::new(storage_stats.clone()))),
+                .with_stats(cache_metrics.then(|| Stats::new(storage_stats.clone()))),
             account_cache: FixedCache::new(account_capacity, FbBuildHasher::<20>::default())
-                .with_stats(Some(Stats::new(account_stats.clone()))),
+                .with_stats(cache_metrics.then(|| Stats::new(account_stats.clone()))),
             code_stats,
             storage_stats,
             account_stats,

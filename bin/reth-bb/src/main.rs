@@ -220,7 +220,10 @@ fn main() {
         unsafe { std::env::set_var("RUST_BACKTRACE", "1") };
     }
 
-    let _ = DefaultEngineValues::default().with_bal_parallel_execution_disabled(false).try_init();
+    let _ = DefaultEngineValues::default()
+        .with_bal_parallel_execution_disabled(false)
+        .with_cache_metrics_disabled(true)
+        .try_init();
 
     if let Err(err) = Cli::<EthereumChainSpecParser>::parse().run(async move |builder, _| {
         info!(target: "reth::cli", "Launching big block node");

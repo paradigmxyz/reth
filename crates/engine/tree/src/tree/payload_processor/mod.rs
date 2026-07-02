@@ -646,7 +646,10 @@ where
         } else {
             debug!("creating new execution cache on cache miss");
             let start = Instant::now();
-            let cache = ExecutionCache::new(self.cross_block_cache_size);
+            let cache = ExecutionCache::new_with_cache_metrics(
+                self.cross_block_cache_size,
+                self.cache_state_metrics.is_some(),
+            );
             if let Some(metrics) = &self.cache_metrics {
                 metrics.record_cache_creation(start.elapsed());
             }
@@ -814,7 +817,10 @@ where
             // Take existing cache (if any) or create fresh caches
             let caches = match cached.take() {
                 Some(existing) => existing.cache().clone(),
-                None => ExecutionCache::new(self.cross_block_cache_size),
+                None => ExecutionCache::new_with_cache_metrics(
+                    self.cross_block_cache_size,
+                    cache_state_metrics.is_some(),
+                ),
             };
 
             // Insert the block's bundle state into cache
