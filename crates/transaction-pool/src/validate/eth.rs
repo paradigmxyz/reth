@@ -685,7 +685,7 @@ where
             return TransactionValidationOutcome::Invalid(transaction, err)
         }
 
-        let authorities = self.recover_authorities(&transaction);
+        let authorities = self.recover_authorities(&transaction, &state);
         // Return the valid transaction
         TransactionValidationOutcome::Valid {
             balance: account.balance,
@@ -845,11 +845,63 @@ where
         Ok(maybe_blob_sidecar)
     }
 
-    /// Returns the recovered authorities for the given transaction
-    fn recover_authorities(&self, transaction: &Tx) -> std::option::Option<Vec<Address>> {
-        transaction
-            .authorization_list()
-            .map(|auths| auths.iter().flat_map(|auth| auth.recover_authority()).collect::<Vec<_>>())
+    /// Returns the recovered authorities of the given transaction whose authorization could
+    /// plausibly take effect, i.e. actually delegate the authority's account.
+    ///
+    /// An EIP-7702 authorization only delegates an account when it is applied at execution, which
+    /// requires its `chain_id` to be `0` or this chain's id and its `nonce` to equal the
+    /// authority's account nonce. An authorization that can never apply is a guaranteed no-op and
+    /// must not cause its authority to be tracked as (pending-)delegated. Otherwise anyone could
+    /// harvest a public, now-stale authorization a victim once signed and replay it in a cheap
+    /// transaction to register the victim as delegated, throttling the victim's own ordinary
+    /// transactions to the in-flight delegation slot limit even though nothing about the victim
+    /// changed on chain (see `TxPool::check_delegation_limit`).
+    ///
+    /// Only authorizations that are not provably no-ops are kept:
+    /// * a `chain_id` that is neither `0` nor this chain's id can never be applied here, and
+    /// * a nonce the authority has already advanced past on chain (`auth.nonce < account.nonce`)
+    ///   can never match the authority's account nonce again.
+    ///
+    /// Current and future authorization nonces are retained so genuinely pending delegations stay
+    /// protected, including self-sponsored ones whose authorization nonce is the sender's account
+    /// nonce plus one. If the authority's account cannot be read, the authorization is kept, so a
+    /// transient state error never silently drops the throttle.
+    fn recover_authorities<P>(
+        &self,
+        transaction: &Tx,
+        state: &P,
+    ) -> std::option::Option<Vec<Address>>
+    where
+        P: AccountInfoReader,
+    {
+        let chain_id = U256::from(self.chain_id());
+        transaction.authorization_list().map(|auths| {
+            auths
+                .iter()
+                .filter_map(|auth| {
+                    let authority = auth.recover_authority().ok()?;
+
+                    // An authorization for another chain can never be applied on this chain.
+                    if auth.chain_id != U256::ZERO && auth.chain_id != chain_id {
+                        return None
+                    }
+
+                    // An authorization whose nonce the authority has already surpassed on chain
+                    // can never match the account nonce again, so it is a guaranteed no-op.
+                    let account_nonce = state
+                        .basic_account(&authority)
+                        .ok()
+                        .flatten()
+                        .map(|account| account.nonce)
+                        .unwrap_or_default();
+                    if auth.nonce < account_nonce {
+                        return None
+                    }
+
+                    Some(authority)
+                })
+                .collect::<Vec<_>>()
+        })
     }
 
     /// Validates all given transactions.
@@ -1943,5 +1995,91 @@ mod tests {
 
         let outcome = validator.validate_one(TransactionOrigin::External, transaction);
         assert!(outcome.is_valid()); // Should be valid because balance check is disabled
+    }
+
+    /// Regression test for the EIP-7702 mempool authority-throttle griefing vector
+    /// (<https://github.com/paradigmxyz/reth/issues/25909>).
+    ///
+    /// The pool throttles the in-flight transactions of any account it tracks as a
+    /// (pending-)delegated authority. Authorities used to be recovered from every authorization
+    /// regardless of whether it could ever be applied, so an attacker could replay a public,
+    /// now-stale authorization a victim once signed and register the victim as delegated,
+    /// throttling the victim's own ordinary transactions. Authorities whose authorization is a
+    /// guaranteed execution no-op (wrong chain id, or a nonce the authority has already advanced
+    /// past on chain) must therefore not be tracked.
+    #[test]
+    fn recover_authorities_skips_non_applicable_authorizations() {
+        use alloy_consensus::{EthereumTxEnvelope, SignableTransaction, TxEip4844, TxEip7702};
+        use alloy_eips::eip7702::Authorization;
+        use alloy_primitives::{Address, Signature};
+        use reth_primitives_traits::Recovered;
+        use reth_storage_api::StateProviderFactory;
+
+        let provider = MockEthProvider::default().with_genesis_block();
+        let validator = EthTransactionValidatorBuilder::new(provider.clone(), test_evm_config())
+            .build(InMemoryBlobStore::default());
+        let chain_id = validator.chain_id();
+
+        // A fixed signature makes each authorization recover to a deterministic authority whose
+        // value depends only on the signed fields (chain id, address, nonce), so distinct
+        // authorizations recover to distinct authorities.
+        let signed = |chain: u64, nonce: u64| {
+            Authorization { chain_id: U256::from(chain), address: Address::ZERO, nonce }
+                .into_signed(Signature::test_signature())
+        };
+
+        // Guaranteed no-op: the authority has advanced its account nonce past the replayed nonce.
+        let stale = signed(chain_id, 2);
+        // Applies now: the authorization nonce equals the authority's account nonce.
+        let current = signed(chain_id, 9);
+        // Applies later: a higher nonce, as produced by a self-sponsored delegation.
+        let future = signed(chain_id, 12);
+        // Guaranteed no-op: the authorization targets a different chain.
+        let wrong_chain = signed(chain_id + 1, 0);
+
+        let stale_authority = stale.recover_authority().unwrap();
+        let current_authority = current.recover_authority().unwrap();
+        let future_authority = future.recover_authority().unwrap();
+        let wrong_chain_authority = wrong_chain.recover_authority().unwrap();
+
+        // Sanity: the four authorities are distinct, so the assertions below are unambiguous.
+        let distinct =
+            [stale_authority, current_authority, future_authority, wrong_chain_authority]
+                .into_iter()
+                .collect::<std::collections::HashSet<_>>();
+        assert_eq!(distinct.len(), 4);
+
+        provider.add_account(stale_authority, ExtendedAccount::new(5, U256::MAX));
+        provider.add_account(current_authority, ExtendedAccount::new(9, U256::MAX));
+        provider.add_account(future_authority, ExtendedAccount::new(9, U256::MAX));
+
+        let tx = EthereumTxEnvelope::<TxEip4844>::Eip7702(
+            TxEip7702 {
+                chain_id,
+                gas_limit: 1000,
+                max_fee_per_gas: 10,
+                authorization_list: vec![
+                    stale.clone(),
+                    current.clone(),
+                    future.clone(),
+                    wrong_chain.clone(),
+                ],
+                ..Default::default()
+            }
+            .into_signed(Signature::test_signature()),
+        );
+        let tx = EthPooledTransaction::new(Recovered::new_unchecked(tx, Address::ZERO), 200);
+
+        let state = provider.latest().unwrap();
+        let authorities = validator.recover_authorities(&tx, &state).unwrap();
+
+        // Applicable authorizations are tracked ...
+        assert!(authorities.contains(&current_authority));
+        assert!(authorities.contains(&future_authority));
+        // ... while guaranteed no-ops are not, so a replayed authorization can no longer be used
+        // to register and throttle an arbitrary victim.
+        assert!(!authorities.contains(&stale_authority));
+        assert!(!authorities.contains(&wrong_chain_authority));
+        assert_eq!(authorities.len(), 2);
     }
 }
