@@ -222,7 +222,15 @@ fn main() {
 
     let _ = DefaultEngineValues::default().with_bal_parallel_execution_disabled(false).try_init();
 
-    if let Err(err) = Cli::<EthereumChainSpecParser>::parse().run(async move |builder, _| {
+    let mut cli = Cli::<EthereumChainSpecParser>::parse();
+    cli.apply_node_command(|command| {
+        command
+            .db
+            .sync_mode
+            .get_or_insert_with(|| "safe-no-sync".parse().expect("valid MDBX sync mode"));
+    });
+
+    if let Err(err) = cli.run(async move |builder, _| {
         info!(target: "reth::cli", "Launching big block node");
         let handle = builder.launch_node(BbNode::default()).await?;
 
