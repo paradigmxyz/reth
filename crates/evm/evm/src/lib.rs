@@ -17,7 +17,6 @@ use crate::execute::HashedStateMode;
 use crate::execute::{BasicBlockBuilder, BasicBlockExecutor, BlockBuilder, BlockExecutorFactory};
 use crate::execute::{BlockExecutionError, Executor, IntoTxEnv};
 #[cfg(feature = "std")]
-use alloc::boxed::Box;
 use alloc::string::String;
 use alloy_consensus::transaction::Recovered;
 use alloy_eips::eip4895::Withdrawals;
@@ -430,20 +429,6 @@ pub trait ConfigureEvm: Clone + Debug + Send + Sync + Unpin {
         evm.set_inspector(inspector);
         evm
     }
-
-    /// Applies block-level state changes required before transaction execution.
-    #[cfg(feature = "std")]
-    fn pre_block_state_changes<'a, DB>(
-        &self,
-        db: DB,
-        evm_env: EvmEnvFor<Self>,
-        block_number: u64,
-        ctx: ExecutionCtxFor<'a, Self>,
-    ) -> Result<evm2::BlockStateAccumulator, Box<dyn Error + Send + Sync>>
-    where
-        Self: 'a,
-        DB: evm2::evm::Database + 'static,
-        DB::Error: Error + Send + Sync + 'static;
 }
 
 /// JIT backend controls exposed by an EVM configuration.

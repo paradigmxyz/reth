@@ -16,7 +16,7 @@ use alloy_consensus::Header;
 use alloy_eips::eip4895::Withdrawal;
 #[cfg(feature = "std")]
 use alloy_eips::Decodable2718;
-use alloy_primitives::{Address, Bytes, B256};
+use alloy_primitives::{Bytes, B256};
 #[cfg(feature = "std")]
 use alloy_rpc_types_engine::ExecutionData;
 #[cfg(feature = "jit")]
@@ -173,26 +173,6 @@ pub struct EthBlockExecutionCtx<'a> {
     pub extra_data: Bytes,
     /// Optional slot number for post-Amsterdam payloads.
     pub slot_number: Option<u64>,
-}
-
-impl EthBlockExecutionCtx<'_> {
-    #[cfg_attr(not(feature = "std"), allow(dead_code))]
-    fn block_execution_context(
-        &self,
-        chain_id: u64,
-        deposit_contract_address: Option<Address>,
-    ) -> crate::execution::BlockExecutionContext<'_> {
-        crate::execution::BlockExecutionContext {
-            chain_id,
-            system_calls: Some(crate::execution::BlockSystemCalls {
-                parent_hash: self.parent_hash,
-                parent_beacon_block_root: self.parent_beacon_block_root,
-            }),
-            ommers: Some(self.ommers),
-            withdrawals: self.withdrawals.as_deref(),
-            deposit_contract_address,
-        }
-    }
 }
 
 /// Helper type with backwards compatible methods to obtain Ethereum executor providers.
@@ -429,31 +409,6 @@ where
             extra_data: attributes.extra_data,
             slot_number: attributes.slot_number,
         })
-    }
-
-    #[cfg(feature = "std")]
-    fn pre_block_state_changes<'a, DB>(
-        &self,
-        db: DB,
-        env: EthEvmEnv,
-        block_number: u64,
-        ctx: EthBlockExecutionCtx<'a>,
-    ) -> Result<evm2::BlockStateAccumulator, alloc::boxed::Box<dyn core::error::Error + Send + Sync>>
-    where
-        Self: 'a,
-        DB: evm2::evm::Database + 'static,
-        DB::Error: core::error::Error + Send + Sync + 'static,
-    {
-        let mut evm = self.evm_with_env(evm2::evm::Db::new(db), env);
-        crate::execution::apply_pre_execution_system_calls(
-            &mut evm,
-            block_number,
-            ctx.block_execution_context(
-                self.chain_spec().chain_id(),
-                self.chain_spec().deposit_contract().map(|contract| contract.address),
-            ),
-        )
-        .map_err(Into::into)
     }
 }
 
