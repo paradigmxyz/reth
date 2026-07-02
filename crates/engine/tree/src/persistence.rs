@@ -14,7 +14,7 @@ use reth_stages_api::{MetricEvent, MetricEventsSender};
 use reth_tasks::spawn_os_thread;
 use std::{
     sync::{
-        mpsc::{Receiver, SendError, Sender},
+        mpsc::{channel, Receiver, SendError, Sender},
         Arc,
     },
     thread::JoinHandle,
@@ -49,9 +49,11 @@ where
     /// Incoming requests
     incoming: Receiver<PersistenceAction<N::Primitives>>,
     /// The pruner
-    pruner: PrunerWithFactory<ProviderFactory<N>>,
+    pruner: Option<PrunerWithFactory<ProviderFactory<N>>>,
+    /// Whether pruning should run on a dedicated worker thread.
+    background_pruning: bool,
     /// metrics
-    metrics: PersistenceMetrics,
+    metrics: Arc<PersistenceMetrics>,
     /// Sender for sync metrics - we only submit sync metrics for persisted blocks
     sync_metrics_tx: MetricEventsSender,
     /// Pending finalized block number to be committed with the next block save.
@@ -76,12 +78,19 @@ where
         Self {
             provider,
             incoming,
-            pruner,
-            metrics: PersistenceMetrics::default(),
+            pruner: Some(pruner),
+            background_pruning: false,
+            metrics: Arc::new(PersistenceMetrics::default()),
             sync_metrics_tx,
             pending_finalized_block: None,
             pending_safe_block: None,
         }
+    }
+
+    /// Enables pruning on a dedicated serial worker.
+    pub fn with_background_pruning(mut self) -> Self {
+        self.background_pruning = true;
+        self
     }
 }
 
@@ -92,10 +101,16 @@ where
     /// This is the main loop, that will listen to database events and perform the requested
     /// database actions
     pub fn run(mut self) -> Result<(), PersistenceError> {
+        let mut prune_worker =
+            if self.background_pruning { Some(self.spawn_prune_worker()) } else { None };
+
         // If the receiver errors then senders have disconnected, so the loop should then end.
         while let Ok(action) = self.incoming.recv() {
             match action {
                 PersistenceAction::RemoveBlocksAbove(new_tip_num, sender) => {
+                    if let Some(worker) = &prune_worker {
+                        worker.wait_for_idle()?;
+                    }
                     let last_block = self.on_remove_blocks_above(new_tip_num)?;
                     // send new sync metrics based on removed blocks
                     let _ =
@@ -113,7 +128,11 @@ where
                         let _ = self
                             .sync_metrics_tx
                             .send(MetricEvent::SyncHeight { height: block_number });
-                        self.maybe_run_pruner(block_number)?;
+                        if let Some(worker) = &prune_worker {
+                            worker.prune(block_number)?;
+                        } else {
+                            self.maybe_run_pruner(block_number)?;
+                        }
                     }
                 }
                 PersistenceAction::SaveFinalizedBlock(finalized_block) => {
@@ -124,7 +143,25 @@ where
                 }
             }
         }
+
+        drop(prune_worker.take());
         Ok(())
+    }
+
+    fn spawn_prune_worker(&mut self) -> PruneWorker {
+        let (sender, incoming) = channel();
+        let provider = self.provider.clone();
+        let pruner = self.pruner.take().expect("background pruner can only be spawned once");
+        let metrics = Arc::clone(&self.metrics);
+
+        let join_handle = spawn_os_thread("pruner", move || {
+            let mut service = BackgroundPruneService::new(provider, pruner, metrics);
+            if let Err(err) = service.run(incoming) {
+                error!(target: "engine::persistence", ?err, "Background prune worker failed");
+            }
+        });
+
+        PruneWorker { sender, join_handle: Some(join_handle) }
     }
 
     #[instrument(level = "debug", target = "engine::persistence", skip_all, fields(%new_tip_num))]
@@ -193,28 +230,116 @@ where
     }
 
     fn maybe_run_pruner(&mut self, block_number: u64) -> Result<(), PersistenceError> {
-        // The durable save is already committed at this point, so pruning can happen after we
-        // acknowledge the save without extending the synchronous persistence wait.
-        if self.pruner.is_pruning_needed(block_number) {
-            debug!(target: "engine::persistence", block_num=?block_number, "Running pruner");
-            let prune_start = Instant::now();
-            let provider_rw = self.provider.database_provider_rw()?;
-            let _ = self.pruner.run_with_provider(&provider_rw, block_number)?;
-            provider_rw.commit()?;
-            let pruned_bals = self
-                .provider
-                .bal_store()
-                .prune(block_number)
-                .inspect_err(|err| {
-                    warn!(target: "engine::persistence", tip=?block_number, ?err, "Failed to prune BAL store");
-                })
-                .unwrap_or_default();
-            debug!(target: "engine::persistence", tip=?block_number, pruned_bals, "Finished pruning after saving blocks");
-            self.metrics.prune_before_duration_seconds.record(prune_start.elapsed());
+        let pruner = self.pruner.as_mut().expect("pruner is not available on persistence service");
+        run_pruner(&self.provider, pruner, &self.metrics, block_number)
+    }
+}
+
+fn run_pruner<N>(
+    provider: &ProviderFactory<N>,
+    pruner: &mut PrunerWithFactory<ProviderFactory<N>>,
+    metrics: &PersistenceMetrics,
+    block_number: u64,
+) -> Result<(), PersistenceError>
+where
+    N: ProviderNodeTypes,
+{
+    // The durable save is already committed at this point, so pruning can happen after we
+    // acknowledge the save without extending the synchronous persistence wait.
+    if pruner.is_pruning_needed(block_number) {
+        debug!(target: "engine::persistence", block_num=?block_number, "Running pruner");
+        let prune_start = Instant::now();
+        let provider_rw = provider.database_provider_rw()?;
+        let _ = pruner.run_with_provider(&provider_rw, block_number)?;
+        provider_rw.commit()?;
+        let pruned_bals = provider
+            .bal_store()
+            .prune(block_number)
+            .inspect_err(|err| {
+                warn!(target: "engine::persistence", tip=?block_number, ?err, "Failed to prune BAL store");
+            })
+            .unwrap_or_default();
+        debug!(target: "engine::persistence", tip=?block_number, pruned_bals, "Finished pruning after saving blocks");
+        metrics.prune_before_duration_seconds.record(prune_start.elapsed());
+    }
+
+    Ok(())
+}
+
+#[derive(Debug)]
+struct BackgroundPruneService<N>
+where
+    N: ProviderNodeTypes,
+{
+    provider: ProviderFactory<N>,
+    pruner: PrunerWithFactory<ProviderFactory<N>>,
+    metrics: Arc<PersistenceMetrics>,
+}
+
+impl<N> BackgroundPruneService<N>
+where
+    N: ProviderNodeTypes,
+{
+    fn new(
+        provider: ProviderFactory<N>,
+        pruner: PrunerWithFactory<ProviderFactory<N>>,
+        metrics: Arc<PersistenceMetrics>,
+    ) -> Self {
+        Self { provider, pruner, metrics }
+    }
+
+    fn run(&mut self, incoming: Receiver<PruneAction>) -> Result<(), PersistenceError> {
+        while let Ok(action) = incoming.recv() {
+            match action {
+                PruneAction::Run(block_number) => {
+                    run_pruner(&self.provider, &mut self.pruner, &self.metrics, block_number)?;
+                }
+                PruneAction::Barrier(sender) => {
+                    let _ = sender.send(());
+                }
+            }
         }
 
         Ok(())
     }
+}
+
+#[derive(Debug)]
+struct PruneWorker {
+    sender: Sender<PruneAction>,
+    join_handle: Option<JoinHandle<()>>,
+}
+
+impl PruneWorker {
+    fn prune(&self, block_number: u64) -> Result<(), PersistenceError> {
+        self.sender
+            .send(PruneAction::Run(block_number))
+            .map_err(|_| PersistenceError::PruneWorkerStopped)
+    }
+
+    fn wait_for_idle(&self) -> Result<(), PersistenceError> {
+        let (sender, receiver) = channel();
+        self.sender
+            .send(PruneAction::Barrier(sender))
+            .map_err(|_| PersistenceError::PruneWorkerStopped)?;
+        receiver.recv().map_err(|_| PersistenceError::PruneWorkerStopped)
+    }
+}
+
+impl Drop for PruneWorker {
+    fn drop(&mut self) {
+        let (sender, _) = channel();
+        let _ = std::mem::replace(&mut self.sender, sender);
+        if let Some(join_handle) = self.join_handle.take() {
+            let _ = join_handle.join();
+        }
+    }
+}
+
+#[derive(Debug)]
+enum PruneAction {
+    Run(u64),
+    Barrier(Sender<()>),
 }
 
 /// One of the errors that can happen when using the persistence service.
@@ -227,6 +352,10 @@ pub enum PersistenceError {
     /// A provider error
     #[error(transparent)]
     ProviderError(#[from] ProviderError),
+
+    /// The background prune worker stopped before processing all work.
+    #[error("background prune worker stopped")]
+    PruneWorkerStopped,
 }
 
 /// A signal to the persistence service that part of the tree state can be persisted.
@@ -289,7 +418,8 @@ impl<T: NodePrimitives> PersistenceHandle<T> {
 
         // spawn the persistence service
         let db_service =
-            PersistenceService::new(provider_factory, db_service_rx, pruner, sync_metrics_tx);
+            PersistenceService::new(provider_factory, db_service_rx, pruner, sync_metrics_tx)
+                .with_background_pruning();
         let join_handle = spawn_os_thread("persistence", || {
             if let Err(err) = db_service.run() {
                 error!(target: "engine::persistence", ?err, "Persistence service failed");
@@ -464,6 +594,49 @@ mod tests {
         let mut service = PersistenceService::new(provider, db_service_rx, pruner, sync_metrics_tx);
 
         service.maybe_run_pruner(2).unwrap();
+    }
+
+    #[test]
+    fn test_spawned_service_prunes_bal_store_in_background() {
+        reth_tracing::init_test_tracing();
+
+        let old_hash = B256::random();
+        let retained_hash = B256::random();
+        let old_bal = Bytes::from_static(b"old");
+        let retained_bal = Bytes::from_static(b"retained");
+        let bal_store = BalStoreHandle::new(InMemoryBalStore::new(
+            BalConfig::with_in_memory_retention(PruneMode::Before(2)),
+        ));
+
+        bal_store.insert(NumHash::new(1, old_hash), RawBal::new(old_bal)).unwrap();
+        bal_store
+            .insert(NumHash::new(2, retained_hash), RawBal::new(retained_bal.clone()))
+            .unwrap();
+
+        let provider = create_test_provider_factory().with_bal_store(bal_store.clone());
+        let (_finished_exex_height_tx, finished_exex_height_rx) =
+            tokio::sync::watch::channel(FinishedExExHeight::NoExExs);
+        let pruner =
+            Pruner::new_with_factory(provider.clone(), vec![], 0, 0, None, finished_exex_height_rx);
+        let (sync_metrics_tx, _sync_metrics_rx) = unbounded_channel();
+        let handle =
+            PersistenceHandle::<EthPrimitives>::spawn_service(provider, pruner, sync_metrics_tx);
+
+        let mut test_block_builder = TestBlockBuilder::eth();
+        let blocks = test_block_builder.get_executed_blocks(0..3).collect::<Vec<_>>();
+        let last_hash = blocks.last().unwrap().recovered_block().hash();
+        let (tx, rx) = crossbeam_channel::bounded(1);
+
+        handle.save_blocks(blocks, tx).unwrap();
+        let result = rx.recv_timeout(std::time::Duration::from_secs(10)).expect("test timed out");
+        assert_eq!(last_hash, result.last_block.unwrap().hash);
+
+        drop(handle);
+
+        assert_eq!(
+            bal_store.get_by_hashes(&[old_hash, retained_hash]).unwrap(),
+            vec![None, Some(retained_bal)]
+        );
     }
 
     #[derive(Debug)]
