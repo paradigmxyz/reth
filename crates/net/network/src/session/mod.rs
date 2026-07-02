@@ -57,6 +57,11 @@ pub use handle::{
 };
 pub use reth_network_api::{Direction, PeerInfo};
 
+/// Active sessions batch several outgoing wire messages before forcing the lower p2p stream to
+/// flush into ECIES. The session itself still enforces byte/item backpressure for large responses
+/// and broadcasts, so this stays a small message-count buffer.
+const ACTIVE_SESSION_P2P_OUTGOING_BUFFER_CAPACITY: usize = 8;
+
 /// Internal identifier for active sessions.
 #[derive(Debug, Clone, Copy, PartialOrd, PartialEq, Eq, Hash)]
 pub struct SessionId(usize);
@@ -572,6 +577,9 @@ impl<N: NetworkPrimitives> SessionManager<N> {
                 if self.reject_block_announcements {
                     conn.set_reject_block_announcements(true);
                 }
+                conn.inner_mut().set_outgoing_message_buffer_capacity(
+                    ACTIVE_SESSION_P2P_OUTGOING_BUFFER_CAPACITY,
+                );
 
                 let session = ActiveSession {
                     next_id: 0,
