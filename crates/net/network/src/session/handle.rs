@@ -1,7 +1,7 @@
 //! Session handles.
 
 use crate::{
-    message::PeerMessage,
+    message::{FullTransactionBroadcast, PeerMessage},
     session::{active::BroadcastItemCounter, conn::EthRlpxConnection, Direction, SessionId},
     PendingSessionHandshakeError,
 };
@@ -10,6 +10,7 @@ use reth_eth_wire::{
     errors::EthStreamError, Capabilities, DisconnectReason, EncodedEthMessage, EthVersion,
     NetworkPrimitives, UnifiedStatus,
 };
+use reth_eth_wire_types::NewPooledTransactionHashes;
 use reth_network_api::PeerInfo;
 use reth_network_peers::{NodeRecord, PeerId};
 use reth_network_types::PeerKind;
@@ -273,15 +274,39 @@ impl<N: NetworkPrimitives> SessionCommandSender<N> {
         }
     }
 
-    /// Sends an already encoded broadcast message to the session.
-    pub(crate) fn send_encoded_broadcast(&self, msg: EncodedEthMessage, items: usize) -> bool {
+    /// Sends pooled transaction hashes with a cached encoded frame to the session.
+    pub(crate) fn send_pooled_transaction_hashes(&self, msg: NewPooledTransactionHashes) -> bool {
+        let items = msg.len();
         if !self.broadcast_items.try_add(items) {
             return false
         }
 
-        let _ = msg.precompute_eth_only_compression();
-        let cmd = SessionCommand::EncodedBroadcast { msg, items };
+        let encoded = EncodedEthMessage::pooled_transaction_hashes(&msg);
+        let _ = encoded.precompute_eth_only_compression();
+        let cmd = SessionCommand::PooledTransactionHashes { msg, encoded };
 
+        self.try_send_accounted_broadcast(cmd, items)
+    }
+
+    /// Sends a full transaction broadcast with a cached encoded frame to the session.
+    pub(crate) fn send_transaction_broadcast(
+        &self,
+        msg: FullTransactionBroadcast<N::BroadcastedTransaction>,
+    ) -> bool {
+        let items = msg.len();
+        if !self.broadcast_items.try_add(items) {
+            return false
+        }
+
+        let encoded =
+            EncodedEthMessage::transactions_broadcast(&msg.transactions, msg.payload_length);
+        let _ = encoded.precompute_eth_only_compression();
+        let cmd = SessionCommand::TransactionBroadcast { msg, encoded };
+
+        self.try_send_accounted_broadcast(cmd, items)
+    }
+
+    fn try_send_accounted_broadcast(&self, cmd: SessionCommand<N>, items: usize) -> bool {
         match self.tx.try_send(cmd) {
             Ok(()) => true,
             Err(mpsc::error::TrySendError::Full(cmd)) => {
@@ -379,12 +404,19 @@ pub enum SessionCommand<N: NetworkPrimitives> {
     },
     /// Sends a message to the peer
     Message(PeerMessage<N>),
-    /// Sends an already encoded eth broadcast message to the peer.
-    EncodedBroadcast {
-        /// Encoded eth protocol message.
-        msg: EncodedEthMessage,
-        /// Number of broadcast items represented by the message.
-        items: usize,
+    /// Sends pooled transaction hashes with a cached encoded frame.
+    PooledTransactionHashes {
+        /// Pooled transaction hashes to send.
+        msg: NewPooledTransactionHashes,
+        /// Cached encoded eth protocol message.
+        encoded: EncodedEthMessage,
+    },
+    /// Sends a full transaction broadcast with a cached encoded frame.
+    TransactionBroadcast {
+        /// Full transactions to send.
+        msg: FullTransactionBroadcast<N::BroadcastedTransaction>,
+        /// Cached encoded eth protocol message.
+        encoded: EncodedEthMessage,
     },
 }
 

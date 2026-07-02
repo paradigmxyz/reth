@@ -117,6 +117,16 @@ fn transaction_broadcast_payload_length(
     transactions.iter().map(Encodable::length).sum()
 }
 
+fn encoded_transaction_broadcast() -> EncodedEthMessage {
+    let EthBroadcastMessage::Transactions(transactions) = transaction_broadcast() else {
+        unreachable!()
+    };
+    let payload_length = transaction_broadcast_payload_length(&transactions);
+    let msg = EncodedEthMessage::transactions_broadcast(&transactions, payload_length);
+    msg.precompute_eth_only_compression().unwrap();
+    msg
+}
+
 fn encoded_hash_announcement() -> EncodedEthMessage {
     let msg = EncodedEthMessage::new_pooled_transaction_hashes(
         NewPooledTransactionHashes66(hashes(1)).into(),
@@ -535,6 +545,20 @@ fn bench_send_messages(c: &mut Criterion) {
                             &mut encode_buf,
                         )
                         .unwrap();
+                    stream.flush().await.unwrap();
+                }
+                black_box(stream.inner().inner().sent.len());
+            });
+        })
+    });
+
+    group.bench_function("send_transaction_broadcasts_preencoded", |b| {
+        let msg = encoded_transaction_broadcast();
+        b.iter(|| {
+            rt.block_on(async {
+                let mut stream = eth_stream(MockTransport::default());
+                for _ in 0..MESSAGE_COUNT {
+                    stream.start_send_encoded_eth_only(msg.clone()).unwrap();
                     stream.flush().await.unwrap();
                 }
                 black_box(stream.inner().inner().sent.len());

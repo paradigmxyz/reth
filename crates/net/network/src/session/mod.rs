@@ -8,7 +8,7 @@ mod types;
 pub use types::BlockRangeInfo;
 
 use crate::{
-    message::PeerMessage,
+    message::{FullTransactionBroadcast, PeerMessage},
     metrics::SessionManagerMetrics,
     protocol::{IntoRlpxSubProtocol, OnNotSupported, RlpxSubProtocolHandlers, RlpxSubProtocols},
     session::active::ActiveSession,
@@ -19,7 +19,7 @@ use futures::{future::Either, io, FutureExt, StreamExt};
 use reth_ecies::{stream::ECIESStream, ECIESError};
 use reth_eth_wire::{
     errors::EthStreamError, handshake::EthRlpxHandshake, multiplex::RlpxProtocolMultiplexer,
-    BlockRangeUpdate, Capabilities, DisconnectReason, EncodedEthMessage, EthStream, EthVersion,
+    BlockRangeUpdate, Capabilities, DisconnectReason, EthStream, EthVersion,
     HelloMessageWithProtocols, NetworkPrimitives, NewPooledTransactionHashes, UnauthedP2PStream,
     UnifiedStatus, HANDSHAKE_TIMEOUT,
 };
@@ -418,9 +418,21 @@ impl<N: NetworkPrimitives> SessionManager<N> {
             return
         }
 
-        let items = msg.len();
-        let msg = EncodedEthMessage::new_pooled_transaction_hashes(msg);
-        if !session.commands.send_encoded_broadcast(msg, items) {
+        if !session.commands.send_pooled_transaction_hashes(msg) {
+            self.metrics.total_outgoing_peer_messages_dropped.increment(1);
+        }
+    }
+
+    /// Sends a full transaction broadcast to the peer's session through the pre-encoded broadcast
+    /// path.
+    pub fn send_transaction_broadcast(
+        &self,
+        peer_id: &PeerId,
+        msg: FullTransactionBroadcast<N::BroadcastedTransaction>,
+    ) {
+        let Some(session) = self.active_sessions.get(peer_id) else { return };
+
+        if !session.commands.send_transaction_broadcast(msg) {
             self.metrics.total_outgoing_peer_messages_dropped.increment(1);
         }
     }

@@ -705,7 +705,7 @@ impl<N: NetworkPrimitives> NetworkManager<N> {
                 self.swarm.sessions_mut().send_message(&peer_id, PeerMessage::EthRequest(request))
             }
             NetworkHandleMessage::SendTransaction { peer_id, msg } => {
-                self.swarm.sessions_mut().send_message(&peer_id, PeerMessage::SendTransactions(msg))
+                self.swarm.sessions_mut().send_transaction_broadcast(&peer_id, msg)
             }
             NetworkHandleMessage::SendPooledTransactionHashes { peer_id, msg } => {
                 self.swarm.sessions_mut().send_pooled_transaction_hashes(&peer_id, msg)

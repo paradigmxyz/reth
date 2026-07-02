@@ -464,6 +464,7 @@ impl<N: NetworkPrimitives> ActiveSession<N> {
                 self.queued_outgoing.push_back(OutgoingMessage::TransactionBroadcast {
                     transactions: msg.transactions,
                     payload_length: msg.payload_length,
+                    encoded: None,
                 });
             }
             PeerMessage::BlockRangeUpdated(_) => {}
@@ -716,9 +717,18 @@ impl<N: NetworkPrimitives> Future for ActiveSession<N> {
                             SessionCommand::Message(msg) => {
                                 this.on_internal_peer_message(msg);
                             }
-                            SessionCommand::EncodedBroadcast { msg, items } => {
+                            SessionCommand::PooledTransactionHashes { msg, encoded } => {
                                 this.queued_outgoing
-                                    .push_back(OutgoingMessage::EncodedBroadcast { msg, items });
+                                    .push_pooled_hashes_with_encoded(msg, Some(encoded));
+                            }
+                            SessionCommand::TransactionBroadcast { msg, encoded } => {
+                                this.queued_outgoing.push_back(
+                                    OutgoingMessage::TransactionBroadcast {
+                                        transactions: msg.transactions,
+                                        payload_length: msg.payload_length,
+                                        encoded: Some(encoded),
+                                    },
+                                );
                             }
                         }
                     }
@@ -733,10 +743,17 @@ impl<N: NetworkPrimitives> Future for ActiveSession<N> {
                         this.unbounded_broadcast_msgs.increment(1);
                         this.on_internal_peer_message(msg);
                     }
-                    SessionCommand::EncodedBroadcast { msg, items } => {
+                    SessionCommand::PooledTransactionHashes { msg, encoded } => {
                         this.unbounded_broadcast_msgs.increment(1);
-                        this.queued_outgoing
-                            .push_back(OutgoingMessage::EncodedBroadcast { msg, items });
+                        this.queued_outgoing.push_pooled_hashes_with_encoded(msg, Some(encoded));
+                    }
+                    SessionCommand::TransactionBroadcast { msg, encoded } => {
+                        this.unbounded_broadcast_msgs.increment(1);
+                        this.queued_outgoing.push_back(OutgoingMessage::TransactionBroadcast {
+                            transactions: msg.transactions,
+                            payload_length: msg.payload_length,
+                            encoded: Some(encoded),
+                        });
                     }
                     SessionCommand::Disconnect { reason } => {
                         let reason = reason.unwrap_or(DisconnectReason::DisconnectRequested);
@@ -815,15 +832,27 @@ impl<N: NetworkPrimitives> Future for ActiveSession<N> {
                                     OutgoingMessage::TransactionBroadcast {
                                         transactions,
                                         payload_length,
-                                    } => this
-                                        .conn
-                                        .start_send_transactions_with_payload_length_and_encode_buf(
-                                            transactions,
-                                            payload_length,
-                                            &mut this.conn_encode_buf,
-                                        ),
-                                    OutgoingMessage::EncodedBroadcast { msg, .. } => {
-                                        this.conn.start_send_encoded(msg)
+                                        encoded,
+                                    } => {
+                                        if let Some(encoded) = encoded {
+                                            this.conn.start_send_encoded(encoded)
+                                        } else {
+                                            this.conn.start_send_transactions_with_payload_length_and_encode_buf(
+                                                transactions,
+                                                payload_length,
+                                                &mut this.conn_encode_buf,
+                                            )
+                                        }
+                                    }
+                                    OutgoingMessage::PooledTransactionHashes { msg, encoded } => {
+                                        if let Some(encoded) = encoded {
+                                            this.conn.start_send_encoded(encoded)
+                                        } else {
+                                            this.conn.start_send_with_encode_buf(
+                                                EthMessage::from(msg),
+                                                &mut this.conn_encode_buf,
+                                            )
+                                        }
                                     }
                                     OutgoingMessage::Raw(msg) => {
                                         this.conn.start_send_raw_with_encode_buf(
@@ -1142,13 +1171,14 @@ pub(crate) enum OutgoingMessage<N: NetworkPrimitives> {
     Eth(EthMessage<N>),
     /// A message that may be shared by multiple sessions.
     Broadcast(EthBroadcastMessage<N>),
+    /// Pooled transaction hashes with an optional cached encoded frame.
+    PooledTransactionHashes { msg: NewPooledTransactionHashes, encoded: Option<EncodedEthMessage> },
     /// A transactions broadcast with its cached RLP payload length.
     TransactionBroadcast {
         transactions: SharedTransactions<N::BroadcastedTransaction>,
         payload_length: usize,
+        encoded: Option<EncodedEthMessage>,
     },
-    /// An already encoded eth broadcast message.
-    EncodedBroadcast { msg: EncodedEthMessage, items: usize },
     /// A raw capability message
     Raw(RawCapabilityMessage),
 }
@@ -1182,8 +1212,8 @@ impl<N: NetworkPrimitives> OutgoingMessage<N> {
                     "transaction broadcasts are stored as TransactionBroadcast messages"
                 ),
             },
+            Self::PooledTransactionHashes { msg, .. } => msg.len(),
             Self::TransactionBroadcast { transactions, .. } => transactions.len(),
-            Self::EncodedBroadcast { items, .. } => *items,
             Self::Raw(_) => 0,
         }
     }
@@ -1194,34 +1224,43 @@ impl<N: NetworkPrimitives> OutgoingMessage<N> {
         &mut self,
         incoming: NewPooledTransactionHashes,
     ) -> Option<NewPooledTransactionHashes> {
-        let Self::Eth(eth) = self else { return Some(incoming) };
-        match (eth, incoming) {
-            (
-                EthMessage::NewPooledTransactionHashes66(existing),
-                NewPooledTransactionHashes::Eth66(inc),
-            ) => {
-                existing.extend(inc);
-                None
+        match self {
+            Self::PooledTransactionHashes { msg, encoded } => {
+                let merged = merge_pooled_transaction_hashes(msg, incoming);
+                if merged.is_none() {
+                    *encoded = None;
+                }
+                merged
             }
-            (
-                EthMessage::NewPooledTransactionHashes68(existing),
-                NewPooledTransactionHashes::Eth68(inc),
-            ) => {
-                existing.hashes.extend(inc.hashes);
-                existing.sizes.extend(inc.sizes);
-                existing.types.extend(inc.types);
-                None
-            }
-            (
-                EthMessage::NewPooledTransactionHashes72(existing),
-                NewPooledTransactionHashes::Eth72(inc),
-            ) => {
-                existing.hashes.extend(inc.hashes);
-                existing.sizes.extend(inc.sizes);
-                existing.types.extend(inc.types);
-                None
-            }
-            (_, incoming) => Some(incoming),
+            Self::Eth(eth) => match (eth, incoming) {
+                (
+                    EthMessage::NewPooledTransactionHashes66(existing),
+                    NewPooledTransactionHashes::Eth66(inc),
+                ) => {
+                    existing.extend(inc);
+                    None
+                }
+                (
+                    EthMessage::NewPooledTransactionHashes68(existing),
+                    NewPooledTransactionHashes::Eth68(inc),
+                ) => {
+                    existing.hashes.extend(inc.hashes);
+                    existing.sizes.extend(inc.sizes);
+                    existing.types.extend(inc.types);
+                    None
+                }
+                (
+                    EthMessage::NewPooledTransactionHashes72(existing),
+                    NewPooledTransactionHashes::Eth72(inc),
+                ) => {
+                    existing.hashes.extend(inc.hashes);
+                    existing.sizes.extend(inc.sizes);
+                    existing.types.extend(inc.types);
+                    None
+                }
+                (_, incoming) => Some(incoming),
+            },
+            _ => Some(incoming),
         }
     }
 }
@@ -1240,7 +1279,7 @@ impl<N: NetworkPrimitives> From<EthBroadcastMessage<N>> for OutgoingMessage<N> {
             }
             EthBroadcastMessage::Transactions(transactions) => {
                 let payload_length = transactions_payload_length(&transactions);
-                Self::TransactionBroadcast { transactions, payload_length }
+                Self::TransactionBroadcast { transactions, payload_length, encoded: None }
             }
         }
     }
@@ -1292,26 +1331,31 @@ impl<N: NetworkPrimitives> QueuedOutgoingMessages<N> {
     }
 
     pub(crate) fn push_back(&mut self, message: OutgoingMessage<N>) {
-        let message =
-            if let OutgoingMessage::TransactionBroadcast { transactions, payload_length } = message
+        let message = if let OutgoingMessage::TransactionBroadcast {
+            transactions,
+            payload_length,
+            encoded,
+        } = message
+        {
+            if let Some(OutgoingMessage::TransactionBroadcast {
+                transactions: existing,
+                payload_length: existing_payload_length,
+                encoded: existing_encoded,
+            }) = self.messages.back_mut() &&
+                transaction_broadcast_message_length(*existing_payload_length)
+                    .saturating_add(transaction_broadcast_message_length(payload_length)) <=
+                    DEFAULT_SOFT_LIMIT_BYTE_SIZE_TRANSACTIONS_BROADCAST_MESSAGE
             {
-                if let Some(OutgoingMessage::TransactionBroadcast {
-                    transactions: existing,
-                    payload_length: existing_payload_length,
-                }) = self.messages.back_mut() &&
-                    transaction_broadcast_message_length(*existing_payload_length)
-                        .saturating_add(transaction_broadcast_message_length(payload_length)) <=
-                        DEFAULT_SOFT_LIMIT_BYTE_SIZE_TRANSACTIONS_BROADCAST_MESSAGE
-                {
-                    existing.0.extend(transactions.0);
-                    *existing_payload_length += payload_length;
-                    return
-                }
+                existing.0.extend(transactions.0);
+                *existing_payload_length += payload_length;
+                *existing_encoded = None;
+                return
+            }
 
-                OutgoingMessage::TransactionBroadcast { transactions, payload_length }
-            } else {
-                message
-            };
+            OutgoingMessage::TransactionBroadcast { transactions, payload_length, encoded }
+        } else {
+            message
+        };
 
         self.queued_responses += message.is_response() as usize;
         self.messages.push_back(message);
@@ -1332,6 +1376,15 @@ impl<N: NetworkPrimitives> QueuedOutgoingMessages<N> {
     /// Pushes a pooled transaction hash announcement, merging into the last queued message if
     /// it is the same variant (eth66, eth68, or eth72).
     pub(crate) fn push_pooled_hashes(&mut self, msg: NewPooledTransactionHashes) {
+        self.push_pooled_hashes_with_encoded(msg, None);
+    }
+
+    /// Pushes a pooled transaction hash announcement with an optional cached encoded frame.
+    pub(crate) fn push_pooled_hashes_with_encoded(
+        &mut self,
+        msg: NewPooledTransactionHashes,
+        encoded: Option<EncodedEthMessage>,
+    ) {
         let msg = if let Some(last) = self.messages.back_mut() {
             match last.try_merge_hashes(msg) {
                 None => return,
@@ -1340,7 +1393,7 @@ impl<N: NetworkPrimitives> QueuedOutgoingMessages<N> {
         } else {
             msg
         };
-        self.messages.push_back(EthMessage::from(msg).into());
+        self.messages.push_back(OutgoingMessage::PooledTransactionHashes { msg, encoded });
         self.count.increment(1);
     }
 
@@ -1356,6 +1409,31 @@ impl<N: NetworkPrimitives> QueuedOutgoingMessages<N> {
 
 fn transactions_payload_length<T: Encodable>(transactions: &SharedTransactions<T>) -> usize {
     transactions.iter().map(Encodable::length).sum()
+}
+
+fn merge_pooled_transaction_hashes(
+    existing: &mut NewPooledTransactionHashes,
+    incoming: NewPooledTransactionHashes,
+) -> Option<NewPooledTransactionHashes> {
+    match (existing, incoming) {
+        (NewPooledTransactionHashes::Eth66(existing), NewPooledTransactionHashes::Eth66(inc)) => {
+            existing.extend(inc);
+            None
+        }
+        (NewPooledTransactionHashes::Eth68(existing), NewPooledTransactionHashes::Eth68(inc)) => {
+            existing.hashes.extend(inc.hashes);
+            existing.sizes.extend(inc.sizes);
+            existing.types.extend(inc.types);
+            None
+        }
+        (NewPooledTransactionHashes::Eth72(existing), NewPooledTransactionHashes::Eth72(inc)) => {
+            existing.hashes.extend(inc.hashes);
+            existing.sizes.extend(inc.sizes);
+            existing.types.extend(inc.types);
+            None
+        }
+        (_, incoming) => Some(incoming),
+    }
 }
 
 pub(super) fn request_timeout_interval(timeout: Duration) -> Interval {
@@ -1384,7 +1462,7 @@ mod tests {
     use crate::session::{handle::PendingSessionEvent, start_pending_incoming_session};
     use alloy_consensus::TxLegacy;
     use alloy_eips::eip2124::ForkFilter;
-    use alloy_primitives::{Signature, TxKind, U256};
+    use alloy_primitives::{Signature, TxKind, B256, U256};
     use reth_chainspec::MAINNET;
     use reth_ecies::stream::ECIESStream;
     use reth_eth_wire::{
@@ -1788,8 +1866,9 @@ mod tests {
         );
 
         assert_eq!(queued.messages.len(), 1);
-        let Some(OutgoingMessage::TransactionBroadcast { transactions: txs, payload_length }) =
-            queued.messages.front()
+        let Some(OutgoingMessage::TransactionBroadcast {
+            transactions: txs, payload_length, ..
+        }) = queued.messages.front()
         else {
             panic!("expected queued transactions")
         };
@@ -1817,6 +1896,64 @@ mod tests {
         );
 
         assert_eq!(queued.messages.len(), 2);
+    }
+
+    #[test]
+    fn queued_outgoing_invalidates_encoded_transaction_broadcast_on_merge() {
+        let mut queued = QueuedOutgoingMessages::<EthNetworkPrimitives>::new(
+            Gauge::noop(),
+            BroadcastItemCounter::new(),
+        );
+
+        let tx = SharedTransactions(vec![signed_legacy_tx(1, 0)]);
+        let payload_length = transactions_payload_length(&tx);
+        let encoded = EncodedEthMessage::transactions_broadcast(&tx, payload_length);
+        queued.push_back(OutgoingMessage::TransactionBroadcast {
+            transactions: tx,
+            payload_length,
+            encoded: Some(encoded),
+        });
+
+        let tx = SharedTransactions(vec![signed_legacy_tx(2, 0)]);
+        let payload_length = transactions_payload_length(&tx);
+        let encoded = EncodedEthMessage::transactions_broadcast(&tx, payload_length);
+        queued.push_back(OutgoingMessage::TransactionBroadcast {
+            transactions: tx,
+            payload_length,
+            encoded: Some(encoded),
+        });
+
+        assert_eq!(queued.messages.len(), 1);
+        let Some(OutgoingMessage::TransactionBroadcast { encoded, .. }) = queued.messages.front()
+        else {
+            panic!("expected queued transactions")
+        };
+        assert!(encoded.is_none());
+    }
+
+    #[test]
+    fn queued_outgoing_invalidates_encoded_pooled_hashes_on_merge() {
+        let mut queued = QueuedOutgoingMessages::<EthNetworkPrimitives>::new(
+            Gauge::noop(),
+            BroadcastItemCounter::new(),
+        );
+
+        let hashes = NewPooledTransactionHashes::Eth66(vec![B256::repeat_byte(1)].into());
+        let encoded = EncodedEthMessage::pooled_transaction_hashes(&hashes);
+        queued.push_pooled_hashes_with_encoded(hashes, Some(encoded));
+
+        let hashes = NewPooledTransactionHashes::Eth66(vec![B256::repeat_byte(2)].into());
+        let encoded = EncodedEthMessage::pooled_transaction_hashes(&hashes);
+        queued.push_pooled_hashes_with_encoded(hashes, Some(encoded));
+
+        assert_eq!(queued.messages.len(), 1);
+        let Some(OutgoingMessage::PooledTransactionHashes { msg, encoded }) =
+            queued.messages.front()
+        else {
+            panic!("expected queued hashes")
+        };
+        assert_eq!(msg.len(), 2);
+        assert!(encoded.is_none());
     }
 
     #[test]

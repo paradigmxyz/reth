@@ -260,6 +260,11 @@ impl EncodedEthMessage {
 
     /// Encodes a `NewPooledTransactionHashes` announcement.
     pub fn new_pooled_transaction_hashes(hashes: NewPooledTransactionHashes) -> Self {
+        Self::pooled_transaction_hashes(&hashes)
+    }
+
+    /// Encodes a `NewPooledTransactionHashes` announcement by reference.
+    pub fn pooled_transaction_hashes(hashes: &NewPooledTransactionHashes) -> Self {
         let mut out = BytesMut::new();
         EthMessageID::NewPooledTransactionHashes.encode(&mut out);
         match hashes {
