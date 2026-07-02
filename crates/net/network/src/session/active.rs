@@ -783,7 +783,6 @@ impl<N: NetworkPrimitives> Future for ActiveSession<N> {
                                     .queued_outgoing
                                     .pop_front()
                                     .expect("send count is bounded by queued messages");
-                                progress = true;
                                 sent_message = true;
                                 let res = match msg {
                                     OutgoingMessage::Eth(msg) => this.conn.start_send_unpin(msg),
