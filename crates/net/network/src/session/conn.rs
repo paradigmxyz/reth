@@ -215,9 +215,9 @@ impl<N: NetworkPrimitives> EthRlpxConnection<N> {
     ) -> Poll<Result<(), EthStreamError>> {
         unsafe {
             match self {
-                Self::EthOnly(conn) => {
-                    Pin::new_unchecked(conn.inner_mut()).poll_ready(cx).map_err(Into::into)
-                }
+                Self::EthOnly(conn) => Pin::new_unchecked(conn.inner_mut())
+                    .poll_ready_ecies_buffered(cx)
+                    .map_err(Into::into),
                 Self::Satellite(conn) => Pin::new_unchecked(conn).poll_ready(cx),
             }
         }

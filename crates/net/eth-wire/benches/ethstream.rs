@@ -264,7 +264,7 @@ async fn send_and_receive_ethstream_hash_announcements(count: usize, capacity: u
     let mut remaining = count;
     let mut encode_buf = BytesMut::new();
     while remaining > 0 {
-        poll_fn(|cx| Pin::new(&mut stream).poll_ready(cx)).await.unwrap();
+        poll_fn(|cx| Pin::new(stream.inner_mut()).poll_ready_ecies_buffered(cx)).await.unwrap();
         let batch = stream.inner().available_outgoing_capacity().min(remaining);
         assert_ne!(batch, 0, "poll_ready returned ready without outgoing capacity");
         for _ in 0..batch {

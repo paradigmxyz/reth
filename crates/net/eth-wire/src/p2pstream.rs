@@ -638,22 +638,70 @@ where
 {
     /// Drains queued p2p frames into ECIES without polling ECIES readiness for every frame while
     /// its framed write buffer remains under the configured backpressure boundary.
+    fn poll_drain_ecies_buffered(
+        mut self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+    ) -> Poll<Result<(), P2PStreamError>> {
+        let mut this = self.as_mut().project();
+        while let Some(message) = this.outgoing_messages.front() {
+            if !this.inner.as_ref().get_ref().can_buffer_message(message.len()) {
+                ready!(this.inner.as_mut().poll_ready(cx))?;
+            }
+
+            let message = this.outgoing_messages.pop_front().expect("checked non-empty");
+            this.inner.as_mut().start_send(message)?;
+            *this.needs_flush = true;
+        }
+
+        Poll::Ready(Ok(()))
+    }
+
+    /// Polls readiness using the ECIES-aware buffered drain path for subprotocol messages.
+    pub fn poll_ready_ecies_buffered(
+        mut self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+    ) -> Poll<Result<(), P2PStreamError>> {
+        let mut should_flush_control = false;
+
+        {
+            let this = self.as_mut().get_mut();
+
+            // Poll the pinger to determine if we should send a ping.
+            match this.pinger.poll_ping(cx) {
+                Poll::Pending => {}
+                Poll::Ready(Ok(PingerEvent::Ping)) => {
+                    this.send_ping();
+                    should_flush_control = true;
+                }
+                Poll::Ready(Ok(PingerEvent::Timeout) | Err(_)) => {
+                    this.start_disconnect(DisconnectReason::PingTimeout)?;
+                    should_flush_control = true;
+                }
+            }
+
+            should_flush_control |= this.needs_control_flush;
+        }
+
+        if should_flush_control {
+            ready!(self.as_mut().poll_flush_ecies_buffered(cx))?;
+        } else if !self.has_outgoing_capacity() {
+            ready!(self.as_mut().poll_drain_ecies_buffered(cx))?;
+        }
+
+        if self.has_outgoing_capacity() {
+            Poll::Ready(Ok(()))
+        } else {
+            Poll::Pending
+        }
+    }
+
+    /// Drains queued p2p frames into ECIES without polling ECIES readiness for every frame while
+    /// its framed write buffer remains under the configured backpressure boundary.
     pub fn poll_flush_ecies_buffered(
         mut self: Pin<&mut Self>,
         cx: &mut Context<'_>,
     ) -> Poll<Result<(), P2PStreamError>> {
-        {
-            let mut this = self.as_mut().project();
-            while let Some(message) = this.outgoing_messages.front() {
-                if !this.inner.as_ref().get_ref().can_buffer_message(message.len()) {
-                    ready!(this.inner.as_mut().poll_ready(cx))?;
-                }
-
-                let message = this.outgoing_messages.pop_front().expect("checked non-empty");
-                this.inner.as_mut().start_send(message)?;
-                *this.needs_flush = true;
-            }
-        }
+        ready!(self.as_mut().poll_drain_ecies_buffered(cx))?;
 
         let mut this = self.project();
 
