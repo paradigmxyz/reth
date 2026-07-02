@@ -10,7 +10,7 @@ use std::{
         atomic::{AtomicU64, AtomicUsize},
         Arc,
     },
-    task::{ready, Context, Poll},
+    task::{ready, Context, Poll, Waker},
     time::{Duration, Instant},
 };
 
@@ -44,7 +44,7 @@ use reth_primitives_traits::Block;
 use rustc_hash::FxHashMap;
 use tokio::{
     sync::{mpsc, mpsc::error::TrySendError, oneshot},
-    time::Interval,
+    time::{Instant as TokioInstant, Interval, Sleep},
 };
 use tokio_stream::wrappers::ReceiverStream;
 use tokio_util::sync::PollSender;
@@ -206,7 +206,7 @@ pub(crate) struct ActiveSession<N: NetworkPrimitives> {
     /// Optional interval for sending periodic range updates to the remote peer (eth69+)
     /// The interval is set to one epoch duration (~6.4 minutes), but updates are only sent when
     /// the block height has advanced by at least one epoch (32 blocks) since the last update
-    pub(crate) range_update_interval: Option<Interval>,
+    pub(crate) range_update_interval: Option<RangeUpdateInterval>,
     /// The last latest block number we sent in a range update
     /// Used to avoid sending unnecessary updates when block height hasn't changed significantly
     pub(crate) last_sent_latest_block: Option<u64>,
@@ -1002,6 +1002,52 @@ impl<N: NetworkPrimitives> Future for ActiveSession<N> {
     }
 }
 
+/// Long-period ticker for eth/69 block range updates.
+///
+/// Active sessions can be polled frequently by unrelated socket or channel activity. Tokio's
+/// interval registers with the timer on every pending poll, so this caches the registered waker
+/// between ticks and only polls the underlying sleep again when the timer elapsed or the task waker
+/// changed.
+pub(crate) struct RangeUpdateInterval {
+    sleep: Pin<Box<Sleep>>,
+    period: Duration,
+    waker: Option<Waker>,
+}
+
+impl RangeUpdateInterval {
+    /// Creates a new range update interval with the given first tick and period.
+    pub(crate) fn new(start: TokioInstant, period: Duration) -> Self {
+        Self { sleep: Box::pin(tokio::time::sleep_until(start)), period, waker: None }
+    }
+
+    /// Polls for the next tick using delayed missed-tick behavior.
+    fn poll_tick(&mut self, cx: &mut Context<'_>) -> Poll<()> {
+        if self.waker.as_ref().is_some_and(|waker| waker.will_wake(cx.waker())) &&
+            !self.sleep.is_elapsed()
+        {
+            return Poll::Pending
+        }
+
+        if self.sleep.as_mut().poll(cx).is_pending() {
+            self.waker = Some(cx.waker().clone());
+            return Poll::Pending
+        }
+
+        let timeout = self.sleep.deadline();
+        let now = TokioInstant::now();
+        let next = if now > timeout + Duration::from_millis(5) {
+            now + self.period
+        } else {
+            timeout.checked_add(self.period).unwrap_or_else(|| now + self.period)
+        };
+
+        self.sleep.as_mut().reset(next);
+        self.waker = None;
+
+        Poll::Ready(())
+    }
+}
+
 /// Tracks a request received from the peer
 pub(crate) struct ReceivedRequest<N: NetworkPrimitives> {
     /// Protocol Identifier
@@ -1772,6 +1818,27 @@ mod tests {
             &request,
             EthVersion::Eth71
         ));
+    }
+
+    #[tokio::test]
+    async fn range_update_interval_ticks_repeatedly() {
+        let mut interval = RangeUpdateInterval::new(
+            TokioInstant::now() + Duration::from_millis(5),
+            Duration::from_millis(5),
+        );
+
+        tokio::time::timeout(
+            Duration::from_millis(100),
+            std::future::poll_fn(|cx| interval.poll_tick(cx)),
+        )
+        .await
+        .unwrap();
+        tokio::time::timeout(
+            Duration::from_millis(100),
+            std::future::poll_fn(|cx| interval.poll_tick(cx)),
+        )
+        .await
+        .unwrap();
     }
 
     #[tokio::test(flavor = "multi_thread")]
