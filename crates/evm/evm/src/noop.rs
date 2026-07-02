@@ -1,6 +1,8 @@
 //! Helpers for testing.
 
 use crate::{ConfigureEvm, EvmEnvFor};
+#[cfg(feature = "std")]
+use alloc::boxed::Box;
 use reth_primitives_traits::{BlockTy, HeaderTy, SealedBlock, SealedHeader};
 
 /// A no-op EVM config that panics on any call. Used as a typesystem hack to satisfy
@@ -77,6 +79,22 @@ where
         Self: 'a,
     {
         self.inner().context_for_next_block(parent, attributes)
+    }
+
+    #[cfg(feature = "std")]
+    fn pre_block_state_changes<'a, DB>(
+        &self,
+        db: DB,
+        evm_env: EvmEnvFor<Self>,
+        block_number: u64,
+        ctx: crate::ExecutionCtxFor<'a, Self>,
+    ) -> Result<evm2::BlockStateAccumulator, Box<dyn core::error::Error + Send + Sync>>
+    where
+        Self: 'a,
+        DB: evm2::evm::Database + 'static,
+        DB::Error: core::error::Error + Send + Sync + 'static,
+    {
+        self.inner().pre_block_state_changes(db, evm_env, block_number, ctx)
     }
 }
 
