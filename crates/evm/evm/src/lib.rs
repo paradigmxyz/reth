@@ -336,7 +336,7 @@ pub trait ConfigureEvm: Clone + Debug + Send + Sync + Unpin {
         DB: evm2::evm::Database + Clone + 'static,
         DB::Error: core::error::Error + Send + Sync + 'static,
     {
-        let evm = self.evm_for_block(evm2::evm::Db::new(db), block.header())?;
+        let evm = self.evm_for_block(db, block.header())?;
         let ctx = self.context_for_block(block)?;
         Ok(self.block_executor_factory().create_executor(evm, ctx, hashed_state_mode))
     }
@@ -346,11 +346,11 @@ pub trait ConfigureEvm: Clone + Debug + Send + Sync + Unpin {
     #[auto_impl(keep_default_for(&, Arc))]
     fn evm_with_env<DB>(&self, db: DB, evm_env: EvmEnvFor<Self>) -> EvmFor<Self>
     where
-        DB: evm2::evm::DynDatabase + 'static,
+        DB: evm2::evm::Database + 'static,
     {
         crate::execute::BlockExecutorFactory::evm_with_env(
             self.block_executor_factory(),
-            db,
+            evm2::evm::Db::new(db),
             evm_env,
         )
     }
@@ -363,7 +363,7 @@ pub trait ConfigureEvm: Clone + Debug + Send + Sync + Unpin {
         header: &HeaderTy<Self::Primitives>,
     ) -> Result<EvmFor<Self>, Self::Error>
     where
-        DB: evm2::evm::DynDatabase + 'static,
+        DB: evm2::evm::Database + 'static,
     {
         let evm_env = self.evm_env(header)?;
         Ok(self.evm_with_env(db, evm_env))
@@ -416,7 +416,7 @@ pub trait ConfigureEvm: Clone + Debug + Send + Sync + Unpin {
         DB::Error: core::error::Error + Send + Sync + 'static,
     {
         let evm_env = self.next_evm_env(parent, &attributes)?;
-        let evm = self.evm_with_env(evm2::evm::Db::new(db), evm_env.clone());
+        let evm = self.evm_with_env(db, evm_env.clone());
         let ctx = self.context_for_next_block(parent, attributes)?;
         Ok(self.create_block_builder(evm, evm_env, parent, ctx, hashed_state_mode))
     }
@@ -430,7 +430,7 @@ pub trait ConfigureEvm: Clone + Debug + Send + Sync + Unpin {
         inspector: I,
     ) -> EvmFor<Self>
     where
-        DB: evm2::evm::DynDatabase + 'static,
+        DB: evm2::evm::Database + 'static,
         I: evm2::Inspector<evm2::BaseEvmTypes> + 'static,
     {
         let mut evm = self.evm_with_env(db, evm_env);

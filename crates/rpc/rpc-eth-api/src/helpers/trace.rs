@@ -9,11 +9,7 @@ use alloy_consensus::{
 use alloy_eips::BlockId;
 use alloy_primitives::B256;
 use alloy_rpc_types_eth::TransactionInfo;
-use evm2::{
-    evm::{Db, DbErrorCode},
-    registry::HandlerError,
-    BaseEvmTypes, TxResultWithState,
-};
+use evm2::{evm::DbErrorCode, registry::HandlerError, BaseEvmTypes, TxResultWithState};
 use evm2_inspectors::tracing::{TracingInspector, TracingInspectorConfig};
 use futures::Future;
 use reth_errors::{ProviderError, RethError};
@@ -61,7 +57,7 @@ pub trait Trace: LoadState<Error: FromEvmError<Self::Evm>> + Call {
     where
         I: evm2::Inspector<BaseEvmTypes> + 'static,
     {
-        let mut evm = self.evm_config().evm_with_env_and_inspector(Db::new(db), evm_env, inspector);
+        let mut evm = self.evm_config().evm_with_env_and_inspector(db, evm_env, inspector);
 
         enum Resolution {
             Result(TxResultWithState),

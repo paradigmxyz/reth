@@ -684,7 +684,7 @@ where
     ) -> Result<BlockExecutionOutput<ReceiptTy<Evm::Primitives>>, BlockExecutionError> {
         let evm_env =
             self.evm_config.evm_env(block.header()).map_err(BlockExecutionError::other)?;
-        let evm = self.evm_config.evm_with_env(database, evm_env);
+        let evm = self.evm_config.block_executor_factory().evm_with_env(database, evm_env);
         let ctx = self
             .evm_config
             .context_for_block(block.sealed_block())

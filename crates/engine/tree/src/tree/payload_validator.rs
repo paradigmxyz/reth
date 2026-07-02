@@ -1160,7 +1160,7 @@ where
                     }
                 };
                 let db = EvmStateProviderDatabase::new(state_provider);
-                let evm = self.evm_config.evm_with_env(evm2::evm::Db::new(db), env.evm_env.clone());
+                let evm = self.evm_config.evm_with_env(db, env.evm_env.clone());
                 let mut executor = self.evm_config.block_executor_factory().create_executor(
                     evm,
                     execution_ctx,

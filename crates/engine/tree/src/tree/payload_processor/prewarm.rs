@@ -645,10 +645,12 @@ where
         let evm_env =
             self.env.evm_env.clone().with_nonce_check_disabled().with_balance_check_disabled();
 
-        Some(self.evm_config.evm_with_env(
-            evm2::evm::Db::new(reth_storage_api::EvmStateProviderDatabase::new(state_provider)),
-            evm_env,
-        ))
+        Some(
+            self.evm_config.evm_with_env(
+                reth_storage_api::EvmStateProviderDatabase::new(state_provider),
+                evm_env,
+            ),
+        )
     }
 
     /// Returns `true` if prewarming should stop.
