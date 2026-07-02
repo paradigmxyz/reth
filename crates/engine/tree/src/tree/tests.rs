@@ -31,7 +31,8 @@ use reth_evm_ethereum::MockEvmConfig;
 use reth_primitives_traits::Block as _;
 use reth_provider::{test_utils::MockEthProvider, BalStoreHandle, InMemoryBalStore, RawBal};
 use reth_tasks::spawn_os_thread;
-use reth_trie::prefix_set::TriePrefixSetsMut;
+use reth_trie::prefix_set::{PrefixSetMut, TriePrefixSetsMut};
+use reth_trie_common::Nibbles;
 use std::{
     collections::BTreeMap,
     str::FromStr,
@@ -45,8 +46,34 @@ use tokio::sync::oneshot;
 
 fn with_known_changed_paths(block: ExecutedBlock<EthPrimitives>) -> ExecutedBlock<EthPrimitives> {
     let mut trie_data = block.trie_data();
-    trie_data.changed_paths = Some(Arc::new(TriePrefixSetsMut::default()));
+    trie_data.changed_paths = Some(Arc::new(changed_paths_for_block(&block)));
     ExecutedBlock::new(block.recovered_block, block.execution_output, trie_data)
+}
+
+fn changed_paths_for_block(block: &ExecutedBlock<EthPrimitives>) -> TriePrefixSetsMut {
+    let account_path = changed_account_path_for_block(block);
+    let storage_account = changed_storage_account_for_block(block);
+    let storage_path = changed_storage_path_for_block(block);
+    TriePrefixSetsMut {
+        account_prefix_set: PrefixSetMut::from([account_path]),
+        storage_prefix_sets: B256Map::from_iter([(
+            storage_account,
+            PrefixSetMut::from([storage_path]),
+        )]),
+        destroyed_accounts: Default::default(),
+    }
+}
+
+fn changed_account_path_for_block(block: &ExecutedBlock<EthPrimitives>) -> Nibbles {
+    Nibbles::from_nibbles([(block.recovered_block().number & 0x0f) as u8])
+}
+
+fn changed_storage_account_for_block(block: &ExecutedBlock<EthPrimitives>) -> B256 {
+    B256::with_last_byte(block.recovered_block().number as u8)
+}
+
+fn changed_storage_path_for_block(block: &ExecutedBlock<EthPrimitives>) -> Nibbles {
+    Nibbles::from_nibbles([((block.recovered_block().number + 1) & 0x0f) as u8])
 }
 
 /// Mock engine validator for tests
@@ -598,7 +625,21 @@ fn on_new_persisted_block_queues_sparse_trie_prune_request() {
 
     test_harness.tree.on_new_persisted_block().unwrap();
 
-    assert!(test_harness.tree.pending_sparse_trie_prune.is_some());
+    let retained_paths =
+        test_harness.tree.pending_sparse_trie_prune.as_ref().unwrap().clone().freeze();
+    let mut expected_account_paths =
+        blocks[1..].iter().map(changed_account_path_for_block).collect::<Vec<_>>();
+    expected_account_paths.sort_unstable();
+    expected_account_paths.dedup();
+
+    assert_eq!(retained_paths.account_prefix_set.slice(), expected_account_paths.as_slice());
+    for block in &blocks[1..] {
+        let storage_account = changed_storage_account_for_block(block);
+        assert_eq!(
+            retained_paths.storage_prefix_sets[&storage_account].slice(),
+            &[changed_storage_path_for_block(block)]
+        );
+    }
 }
 
 #[test]
