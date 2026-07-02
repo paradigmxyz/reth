@@ -1,7 +1,8 @@
 //! The ECIES Stream implementation which wraps over [`AsyncRead`] and [`AsyncWrite`].
 
 use crate::{
-    codec::ECIESCodec, error::ECIESErrorImpl, ECIESError, EgressECIESValue, IngressECIESValue,
+    algorithm::ECIES, codec::ECIESCodec, error::ECIESErrorImpl, ECIESError, EgressECIESValue,
+    IngressECIESValue,
 };
 use alloy_primitives::{
     bytes::{Bytes, BytesMut},
@@ -40,6 +41,13 @@ impl<Io> ECIESStream<Io> {
     fn post_handshake(mut stream: Framed<Io, ECIESCodec>, remote_id: PeerId) -> Self {
         stream.set_backpressure_boundary(POST_HANDSHAKE_BACKPRESSURE_BOUNDARY);
         Self { stream, remote_id }
+    }
+
+    /// Returns true if the next message can be encoded without crossing the framed write buffer
+    /// backpressure boundary.
+    pub fn can_buffer_message(&self, payload_len: usize) -> bool {
+        self.stream.write_buffer().len().saturating_add(ECIES::message_frame_len(payload_len)) <
+            self.stream.backpressure_boundary()
     }
 }
 

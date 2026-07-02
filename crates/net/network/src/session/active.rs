@@ -836,7 +836,7 @@ impl<N: NetworkPrimitives> Future for ActiveSession<N> {
                     this.conn_encode_buf = BytesMut::new();
                 }
 
-                match this.conn.poll_flush_unpin(cx) {
+                match this.conn.poll_flush_buffered(cx) {
                     Poll::Pending | Poll::Ready(Ok(())) => {}
                     Poll::Ready(Err(err)) => {
                         debug!(target: "net::session", %err, remote_peer_id=?this.remote_peer_id, "failed to flush messages");

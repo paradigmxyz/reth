@@ -197,7 +197,7 @@ async fn send_and_receive_ethstream_hash_announcements(count: usize, capacity: u
         }
         remaining -= batch;
     }
-    stream.flush().await.unwrap();
+    poll_fn(|cx| Pin::new(stream.inner_mut()).poll_flush_ecies_buffered(cx)).await.unwrap();
 
     server.await.unwrap()
 }

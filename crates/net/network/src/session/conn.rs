@@ -206,6 +206,21 @@ impl<N: NetworkPrimitives> EthRlpxConnection<N> {
             }
         }
     }
+
+    /// Flushes the connection, using the ECIES-aware buffered drain path for eth-only sessions.
+    pub(crate) fn poll_flush_buffered(
+        &mut self,
+        cx: &mut Context<'_>,
+    ) -> Poll<Result<(), EthStreamError>> {
+        unsafe {
+            match self {
+                Self::EthOnly(conn) => Pin::new_unchecked(conn.inner_mut())
+                    .poll_flush_ecies_buffered(cx)
+                    .map_err(Into::into),
+                Self::Satellite(conn) => Pin::new_unchecked(conn).poll_flush(cx),
+            }
+        }
+    }
 }
 
 impl<N: NetworkPrimitives> From<EthPeerConnection<N>> for EthRlpxConnection<N> {

@@ -682,6 +682,10 @@ impl ECIES {
         32
     }
 
+    pub(crate) const fn message_frame_len(payload_len: usize) -> usize {
+        Self::header_len() + Self::align_16(payload_len) + 16
+    }
+
     pub const fn body_len(&self) -> usize {
         let len = self.body_size.unwrap();
         Self::align_16(len) + 16

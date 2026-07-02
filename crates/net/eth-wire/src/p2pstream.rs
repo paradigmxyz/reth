@@ -13,6 +13,7 @@ use alloy_rlp::{Decodable, Encodable, Error as RlpError, EMPTY_LIST_CODE};
 use futures::{Sink, SinkExt, StreamExt};
 use pin_project::pin_project;
 use reth_codecs::add_arbitrary_tests;
+use reth_ecies::stream::ECIESStream;
 use reth_metrics::metrics::counter;
 use reth_primitives_traits::GotExpected;
 use std::{
@@ -23,6 +24,7 @@ use std::{
     task::{ready, Context, Poll},
     time::Duration,
 };
+use tokio::io::AsyncWrite;
 use tokio_stream::Stream;
 use tracing::{debug, trace};
 
@@ -623,6 +625,41 @@ where
             this.inner.as_mut().start_send(message)?;
             *this.needs_flush = true;
         }
+
+        Poll::Ready(Ok(()))
+    }
+}
+
+impl<Io> P2PStream<ECIESStream<Io>>
+where
+    Io: AsyncWrite + Unpin,
+{
+    /// Drains queued p2p frames into ECIES without polling ECIES readiness for every frame while
+    /// its framed write buffer remains under the configured backpressure boundary.
+    pub fn poll_flush_ecies_buffered(
+        mut self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+    ) -> Poll<Result<(), P2PStreamError>> {
+        {
+            let mut this = self.as_mut().project();
+            while let Some(message) = this.outgoing_messages.front() {
+                if !this.inner.as_ref().get_ref().can_buffer_message(message.len()) {
+                    ready!(this.inner.as_mut().poll_ready(cx))?;
+                }
+
+                let message = this.outgoing_messages.pop_front().expect("checked non-empty");
+                this.inner.as_mut().start_send(message)?;
+                *this.needs_flush = true;
+            }
+        }
+
+        let mut this = self.project();
+
+        if *this.needs_flush {
+            ready!(this.inner.as_mut().poll_flush(cx))?;
+            *this.needs_flush = false;
+        }
+        *this.needs_control_flush = false;
 
         Poll::Ready(Ok(()))
     }
