@@ -193,8 +193,7 @@ impl TestHarness {
         let payload_validator = MockEngineValidator;
 
         let (from_tree_tx, from_tree_rx) = unbounded_channel();
-        let tree_config =
-            TreeConfig::default().with_legacy_state_root(false).with_has_enough_parallelism(true);
+        let tree_config = TreeConfig::default();
         let runtime = reth_tasks::Runtime::test();
         let state_trie_overlays =
             StateTrieOverlayManager::new(runtime.state_trie_overlay_worker_pool());
@@ -620,16 +619,8 @@ fn on_new_persisted_block_skips_sparse_trie_prune_when_state_root_task_disabled(
     let blocks: Vec<_> =
         TestBlockBuilder::eth().get_executed_blocks(1..4).map(with_known_changed_paths).collect();
     let configs = [
-        TreeConfig::default().with_legacy_state_root(true).with_has_enough_parallelism(true),
-        TreeConfig::default().with_legacy_state_root(false).with_has_enough_parallelism(false),
-        TreeConfig::default()
-            .with_legacy_state_root(false)
-            .with_has_enough_parallelism(true)
-            .with_state_root_fallback(true),
-        TreeConfig::default()
-            .with_legacy_state_root(false)
-            .with_has_enough_parallelism(true)
-            .with_skip_state_root(true),
+        TreeConfig::default().with_state_root_fallback(true),
+        TreeConfig::default().with_skip_state_root(true),
     ];
 
     for config in configs {
@@ -1514,8 +1505,7 @@ fn test_on_new_payload_malformed_payload() {
     }
 }
 
-/// Test different `StateRootStrategy` paths: `StateRootTask` with empty/non-empty prefix sets,
-/// `Parallel`, `Synchronous`
+/// Test different `StateRootStrategy` paths: `StateRootTask` and `Synchronous`.
 #[test]
 fn test_state_root_strategy_paths() {
     reth_tracing::init_test_tracing();
@@ -1523,11 +1513,8 @@ fn test_state_root_strategy_paths() {
     let mut test_harness = TestHarness::new(MAINNET.clone());
 
     // Test multiple scenarios to ensure different StateRootStrategy paths are taken:
-    // 1. `StateRootTask` with empty prefix_sets → uses payload_processor.spawn()
-    // 2. `StateRootTask` with non-empty prefix_sets → switches to `Parallel`, uses
-    //    spawn_cache_exclusive()
-    // 3. `Parallel` strategy → uses spawn_cache_exclusive()
-    // 4. `Synchronous` strategy → uses spawn_cache_exclusive()
+    // 1. `StateRootTask` strategy uses payload_processor.spawn()
+    // 2. `Synchronous` strategy uses spawn_cache_exclusive()
 
     let s1 = include_str!("../../test-data/holesky/1.rlp");
     let data1 = Bytes::from_str(s1).unwrap();
@@ -1572,9 +1559,8 @@ fn test_state_root_strategy_paths() {
 
     // This test passes if multiple StateRootStrategy scenarios work correctly,
     // confirming that passing arguments directly doesn't break:
-    // - `StateRootTask` strategy with empty/non-empty prefix_sets
-    // - Dynamic strategy switching (StateRootTask → Parallel)
-    // - Parallel and Synchronous strategy paths
+    // - `StateRootTask` strategy
+    // - `Synchronous` strategy
     // - All parameter passing through the args struct
 }
 
@@ -1584,7 +1570,7 @@ fn test_state_root_strategy_paths() {
 //
 // This test suite exercises `validate_block_with_state` across different scenarios including:
 // - Basic block validation with state root computation
-// - Strategy selection based on conditions (`StateRootTask`, `Parallel`, `Synchronous`)
+// - Strategy selection based on conditions (`StateRootTask`, `Synchronous`)
 // - Trie update retention and discard logic
 // - Error precedence handling (consensus vs execution errors)
 // - Different validation scenarios (valid, invalid consensus, invalid execution blocks)

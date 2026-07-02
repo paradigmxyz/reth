@@ -482,7 +482,6 @@ async fn test_share_sparse_trie_with_payload_builder() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
 
     let tree_config = TreeConfig::default()
-        .with_legacy_state_root(false)
         .with_share_execution_cache_with_payload_builder(true)
         .with_share_sparse_trie_with_payload_builder(true);
 
@@ -517,7 +516,7 @@ async fn test_share_sparse_trie_with_payload_builder() -> eyre::Result<()> {
 /// Tests that sparse trie allocation reuse works correctly across consecutive blocks.
 ///
 /// This test exercises the sparse trie allocation reuse path by:
-/// 1. Starting a node with parallel state root computation enabled
+/// 1. Starting a node with the state-root task enabled
 /// 2. Advancing multiple consecutive blocks with random transactions
 /// 3. Verifying that all blocks are successfully validated (state roots match)
 ///
@@ -528,11 +527,9 @@ async fn test_share_sparse_trie_with_payload_builder() -> eyre::Result<()> {
 async fn test_sparse_trie_reuse_across_blocks() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
 
-    // Use parallel state root (non-legacy) with pruning enabled
-    let tree_config = TreeConfig::default()
-        .with_legacy_state_root(false)
-        .with_sparse_trie_prune_depth(2)
-        .with_sparse_trie_max_hot_slots(100);
+    // Use the state-root task with pruning enabled.
+    let tree_config =
+        TreeConfig::default().with_sparse_trie_prune_depth(2).with_sparse_trie_max_hot_slots(100);
 
     let (mut nodes, _wallet) = setup_engine::<EthereumNode>(
         1,
