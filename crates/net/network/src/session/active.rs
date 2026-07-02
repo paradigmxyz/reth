@@ -21,15 +21,18 @@ use crate::{
         handle::{ActiveSessionMessage, SessionCommand},
         BlockRangeInfo, EthVersion, SessionId,
     },
+    transactions::constants::DEFAULT_SOFT_LIMIT_BYTE_SIZE_TRANSACTIONS_BROADCAST_MESSAGE,
 };
 use alloy_eips::merge::EPOCH_SLOTS;
-use alloy_primitives::Sealable;
+use alloy_primitives::{bytes::BytesMut, Sealable};
+use alloy_rlp::{Encodable, Header};
 use futures::{stream::Fuse, SinkExt, StreamExt};
 use metrics::{Counter, Gauge};
 use reth_eth_wire::{
     errors::{EthHandshakeError, EthStreamError},
     message::{EthBroadcastMessage, MessageError},
     Capabilities, DisconnectP2P, DisconnectReason, EthMessage, NetworkPrimitives, NewBlockPayload,
+    SharedTransactions,
 };
 use reth_eth_wire_types::{message::RequestPair, NewPooledTransactionHashes, RawCapabilityMessage};
 use reth_metrics::common::mpsc::MeteredPollSender;
@@ -81,6 +84,19 @@ const MAX_QUEUED_OUTGOING_RESPONSES: usize = 4;
 
 /// Minimum capacity to retain for buffered incoming requests from the remote peer.
 const MIN_RECEIVED_REQUESTS_CAPACITY: usize = 1;
+
+/// Maximum number of incoming wire messages to process in one poll before yielding back to the
+/// scheduler.
+const ACTIVE_SESSION_RECEIVE_BUDGET: usize = 32;
+
+/// Maximum direct-decode scratch capacity retained after polling an eth message.
+const MAX_RETAINED_DECODE_BUF_CAPACITY: usize = 64 * 1024;
+
+/// Maximum direct-encode scratch capacity retained after sending eth messages.
+const MAX_RETAINED_ENCODE_BUF_CAPACITY: usize = 64 * 1024;
+
+/// Shrink burst-grown buffers only after they are far above their retained steady-state capacity.
+const SHRINK_CAPACITY_MULTIPLIER: usize = 4;
 
 /// Soft limit for the total number of buffered outgoing broadcast items (e.g. transaction hashes).
 ///
@@ -140,6 +156,10 @@ pub(crate) struct ActiveSession<N: NetworkPrimitives> {
     pub(crate) next_id: u64,
     /// The underlying connection.
     pub(crate) conn: EthRlpxConnection<N>,
+    /// Scratch buffer for decoding eth-only p2p messages directly from the connection.
+    pub(crate) conn_decode_buf: BytesMut,
+    /// Scratch buffer for encoding eth-only p2p messages before compression.
+    pub(crate) conn_encode_buf: BytesMut,
     /// Identifier of the node we're connected to.
     pub(crate) remote_peer_id: PeerId,
     /// The address we're connected to.
@@ -207,7 +227,14 @@ impl<N: NetworkPrimitives> ActiveSession<N> {
 
     /// Shrinks the capacity of the internal buffers.
     pub fn shrink_to_fit(&mut self) {
-        self.received_requests_from_remote.shrink_to(MIN_RECEIVED_REQUESTS_CAPACITY);
+        if self.received_requests_from_remote.len() <= MIN_RECEIVED_REQUESTS_CAPACITY &&
+            self.received_requests_from_remote.capacity() >
+                MIN_RECEIVED_REQUESTS_CAPACITY
+                    .saturating_mul(SHRINK_CAPACITY_MULTIPLIER)
+                    .max(16)
+        {
+            self.received_requests_from_remote.shrink_to(MIN_RECEIVED_REQUESTS_CAPACITY);
+        }
         self.queued_outgoing.shrink_to(MAX_QUEUED_OUTGOING_RESPONSES);
     }
 
@@ -609,7 +636,7 @@ impl<N: NetworkPrimitives> ActiveSession<N> {
         let current = Duration::from_millis(self.internal_request_timeout.load(Ordering::Relaxed));
         let request_timeout = calculate_new_timeout(current, elapsed);
         self.internal_request_timeout.store(request_timeout.as_millis() as u64, Ordering::Relaxed);
-        self.internal_request_timeout_interval = tokio::time::interval(request_timeout);
+        self.internal_request_timeout_interval = request_timeout_interval(request_timeout);
     }
 
     /// If a termination message is queued this will try to send it
@@ -652,11 +679,12 @@ impl<N: NetworkPrimitives> Future for ActiveSession<N> {
         // If the budget is exhausted we manually yield back control to the (coop) scheduler. This
         // manual yield point should prevent situations where polling appears to be frozen. See also <https://tokio.rs/blog/2020-04-preemption>
         // And tokio's docs on cooperative scheduling <https://docs.rs/tokio/latest/tokio/task/#cooperative-scheduling>
-        let mut budget = 4;
+        let mut budget = ACTIVE_SESSION_RECEIVE_BUDGET;
 
         // The main poll loop that drives the session
         'main: loop {
             let mut progress = false;
+            let mut receive_pending = false;
 
             // we prioritize incoming commands sent from the session manager
             loop {
@@ -705,10 +733,10 @@ impl<N: NetworkPrimitives> Future for ActiveSession<N> {
                 }
             }
 
-            let deadline = this.request_deadline();
-
+            let mut deadline = None;
             while let Poll::Ready(Some(req)) = this.internal_request_rx.poll_next_unpin(cx) {
                 progress = true;
+                let deadline = *deadline.get_or_insert_with(|| this.request_deadline());
                 this.on_internal_peer_request(req, deadline);
             }
 
@@ -727,36 +755,99 @@ impl<N: NetworkPrimitives> Future for ActiveSession<N> {
                 }
             }
 
-            // Send messages by advancing the sink and queuing in buffered messages
-            while this.conn.poll_ready_unpin(cx).is_ready() {
-                if let Some(msg) = this.queued_outgoing.pop_front() {
-                    progress = true;
-                    let res = match msg {
-                        OutgoingMessage::Eth(msg) => this.conn.start_send_unpin(msg),
-                        OutgoingMessage::Broadcast(msg) => this.conn.start_send_broadcast(msg),
-                        OutgoingMessage::Raw(msg) => this.conn.start_send_raw(msg),
-                    };
-                    if let Err(err) = res {
-                        debug!(target: "net::session", %err, remote_peer_id=?this.remote_peer_id, "failed to send message");
-                        // notify the manager
+            // Send messages by advancing the sink and queuing buffered messages. `poll_ready`
+            // also drives p2p maintenance such as ping/pong, so we still poll it once when no
+            // session messages are queued.
+            let mut sent_message = false;
+            if this.queued_outgoing.is_empty() {
+                match this.conn.poll_ready_unpin(cx) {
+                    Poll::Pending | Poll::Ready(Ok(())) => {}
+                    Poll::Ready(Err(err)) => {
+                        debug!(target: "net::session", %err, remote_peer_id=?this.remote_peer_id, "connection not ready to send message");
                         return this.close_on_error(err, cx)
                     }
-                } else {
-                    // no more messages to send over the wire
-                    break
+                }
+            } else {
+                loop {
+                    match this.conn.poll_ready_unpin(cx) {
+                        Poll::Pending => break,
+                        Poll::Ready(Err(err)) => {
+                            debug!(target: "net::session", %err, remote_peer_id=?this.remote_peer_id, "connection not ready to send message");
+                            return this.close_on_error(err, cx)
+                        }
+                        Poll::Ready(Ok(())) => {
+                            let send_count = this
+                                .conn
+                                .available_outgoing_capacity()
+                                .min(this.queued_outgoing.len());
+                            if send_count == 0 {
+                                break
+                            }
+
+                            for _ in 0..send_count {
+                                let msg = this
+                                    .queued_outgoing
+                                    .pop_front()
+                                    .expect("send count is bounded by queued messages");
+                                sent_message = true;
+                                let res = match msg {
+                                    OutgoingMessage::Eth(msg) => this
+                                        .conn
+                                        .start_send_with_encode_buf(msg, &mut this.conn_encode_buf),
+                                    OutgoingMessage::Broadcast(msg) => {
+                                        this.conn.start_send_broadcast_with_encode_buf(
+                                            msg,
+                                            &mut this.conn_encode_buf,
+                                        )
+                                    }
+                                    OutgoingMessage::TransactionBroadcast {
+                                        transactions,
+                                        payload_length,
+                                    } => this
+                                        .conn
+                                        .start_send_transactions_with_payload_length_and_encode_buf(
+                                            transactions,
+                                            payload_length,
+                                            &mut this.conn_encode_buf,
+                                        ),
+                                    OutgoingMessage::Raw(msg) => {
+                                        this.conn.start_send_raw_with_encode_buf(
+                                            msg,
+                                            &mut this.conn_encode_buf,
+                                        )
+                                    }
+                                };
+                                if let Err(err) = res {
+                                    debug!(target: "net::session", %err, remote_peer_id=?this.remote_peer_id, "failed to send message");
+                                    // notify the manager
+                                    return this.close_on_error(err, cx)
+                                }
+                            }
+
+                            if this.queued_outgoing.is_empty() {
+                                break
+                            }
+                        }
+                    }
+                }
+            }
+
+            if sent_message {
+                if this.conn_encode_buf.capacity() > MAX_RETAINED_ENCODE_BUF_CAPACITY {
+                    this.conn_encode_buf = BytesMut::new();
+                }
+
+                match this.conn.poll_flush_buffered(cx) {
+                    Poll::Pending | Poll::Ready(Ok(())) => {}
+                    Poll::Ready(Err(err)) => {
+                        debug!(target: "net::session", %err, remote_peer_id=?this.remote_peer_id, "failed to flush messages");
+                        return this.close_on_error(err, cx)
+                    }
                 }
             }
 
             // read incoming messages from the wire
             'receive: loop {
-                // ensure we still have enough budget for another iteration
-                budget -= 1;
-                if budget == 0 {
-                    // make sure we're woken up again
-                    cx.waker().wake_by_ref();
-                    break 'main
-                }
-
                 // try to resend the pending message that we could not send because the channel was
                 // full. [`PollSender`] will ensure that we're woken up again when the channel is
                 // ready to receive the message, and will only error if the channel is closed.
@@ -764,6 +855,7 @@ impl<N: NetworkPrimitives> Future for ActiveSession<N> {
                     match this.to_session_manager.poll_reserve(cx) {
                         Poll::Ready(Ok(_)) => {
                             let _ = this.to_session_manager.send_item(msg);
+                            progress = true;
                         }
                         Poll::Ready(Err(_)) => return Poll::Ready(()),
                         Poll::Pending => {
@@ -794,8 +886,20 @@ impl<N: NetworkPrimitives> Future for ActiveSession<N> {
                     break 'receive
                 }
 
-                match this.conn.poll_next_unpin(cx) {
-                    Poll::Pending => break,
+                // ensure we still have enough budget for another wire message
+                if budget == 0 {
+                    // make sure we're woken up again
+                    cx.waker().wake_by_ref();
+                    break 'main
+                }
+
+                let msg = this.conn.poll_next_eth_message(cx, &mut this.conn_decode_buf);
+
+                match msg {
+                    Poll::Pending => {
+                        receive_pending = true;
+                        break
+                    }
                     Poll::Ready(None) => {
                         if this.is_disconnecting() {
                             break
@@ -804,6 +908,11 @@ impl<N: NetworkPrimitives> Future for ActiveSession<N> {
                         return this.emit_disconnect(cx)
                     }
                     Poll::Ready(Some(res)) => {
+                        if this.conn_decode_buf.capacity() > MAX_RETAINED_DECODE_BUF_CAPACITY {
+                            this.conn_decode_buf = BytesMut::new();
+                        }
+                        budget -= 1;
+                        progress = true;
                         match res {
                             Ok(msg) => {
                                 trace!(target: "net::session", msg_id=?msg.message_id(), remote_peer_id=?this.remote_peer_id, "received eth message");
@@ -811,7 +920,6 @@ impl<N: NetworkPrimitives> Future for ActiveSession<N> {
                                 match this.on_incoming_message(msg) {
                                     OnIncomingMessageOutcome::Ok => {
                                         // handled successfully
-                                        progress = true;
                                     }
                                     OnIncomingMessageOutcome::BadMessage { error, message } => {
                                         debug!(target: "net::session", %error, msg=?message, remote_peer_id=?this.remote_peer_id, "received invalid protocol message");
@@ -836,6 +944,16 @@ impl<N: NetworkPrimitives> Future for ActiveSession<N> {
                         }
                     }
                 }
+            }
+
+            // Avoid one extra empty outer-loop pass after the wire is pending, unless the receive
+            // pass produced work that should be driven immediately.
+            if receive_pending &&
+                this.queued_outgoing.is_empty() &&
+                this.pending_message_to_session.is_none() &&
+                this.received_requests_from_remote.is_empty()
+            {
+                break 'main
             }
 
             if !progress {
@@ -863,13 +981,15 @@ impl<N: NetworkPrimitives> Future for ActiveSession<N> {
             }
         }
 
-        while this.internal_request_timeout_interval.poll_tick(cx).is_ready() {
-            // check for timed out requests
-            if this.check_timed_out_requests(Instant::now()) &&
-                let Poll::Ready(Ok(_)) = this.to_session_manager.poll_reserve(cx)
-            {
-                let msg = ActiveSessionMessage::ProtocolBreach { peer_id: this.remote_peer_id };
-                this.pending_message_to_session = Some(msg);
+        if !this.inflight_requests.is_empty() {
+            while this.internal_request_timeout_interval.poll_tick(cx).is_ready() {
+                // check for timed out requests
+                if this.check_timed_out_requests(Instant::now()) &&
+                    let Poll::Ready(Ok(_)) = this.to_session_manager.poll_reserve(cx)
+                {
+                    let msg = ActiveSessionMessage::ProtocolBreach { peer_id: this.remote_peer_id };
+                    this.pending_message_to_session = Some(msg);
+                }
             }
         }
 
@@ -961,6 +1081,11 @@ pub(crate) enum OutgoingMessage<N: NetworkPrimitives> {
     Eth(EthMessage<N>),
     /// A message that may be shared by multiple sessions.
     Broadcast(EthBroadcastMessage<N>),
+    /// A transactions broadcast with its cached RLP payload length.
+    TransactionBroadcast {
+        transactions: SharedTransactions<N::BroadcastedTransaction>,
+        payload_length: usize,
+    },
     /// A raw capability message
     Raw(RawCapabilityMessage),
 }
@@ -990,8 +1115,11 @@ impl<N: NetworkPrimitives> OutgoingMessage<N> {
             },
             Self::Broadcast(msg) => match msg {
                 EthBroadcastMessage::NewBlock(_) => 1,
-                EthBroadcastMessage::Transactions(txs) => txs.len(),
+                EthBroadcastMessage::Transactions(_) => unreachable!(
+                    "transaction broadcasts are stored as TransactionBroadcast messages"
+                ),
             },
+            Self::TransactionBroadcast { transactions, .. } => transactions.len(),
             Self::Raw(_) => 0,
         }
     }
@@ -1042,7 +1170,15 @@ impl<N: NetworkPrimitives> From<EthMessage<N>> for OutgoingMessage<N> {
 
 impl<N: NetworkPrimitives> From<EthBroadcastMessage<N>> for OutgoingMessage<N> {
     fn from(value: EthBroadcastMessage<N>) -> Self {
-        Self::Broadcast(value)
+        match value {
+            EthBroadcastMessage::NewBlock(block) => {
+                Self::Broadcast(EthBroadcastMessage::NewBlock(block))
+            }
+            EthBroadcastMessage::Transactions(transactions) => {
+                let payload_length = transactions_payload_length(&transactions);
+                Self::TransactionBroadcast { transactions, payload_length }
+            }
+        }
     }
 }
 
@@ -1083,7 +1219,36 @@ impl<N: NetworkPrimitives> QueuedOutgoingMessages<N> {
         self.queued_responses
     }
 
+    pub(crate) fn len(&self) -> usize {
+        self.messages.len()
+    }
+
+    pub(crate) fn is_empty(&self) -> bool {
+        self.messages.is_empty()
+    }
+
     pub(crate) fn push_back(&mut self, message: OutgoingMessage<N>) {
+        let message =
+            if let OutgoingMessage::TransactionBroadcast { transactions, payload_length } = message
+            {
+                if let Some(OutgoingMessage::TransactionBroadcast {
+                    transactions: existing,
+                    payload_length: existing_payload_length,
+                }) = self.messages.back_mut() &&
+                    transaction_broadcast_message_length(*existing_payload_length)
+                        .saturating_add(transaction_broadcast_message_length(payload_length)) <=
+                        DEFAULT_SOFT_LIMIT_BYTE_SIZE_TRANSACTIONS_BROADCAST_MESSAGE
+                {
+                    existing.0.extend(transactions.0);
+                    *existing_payload_length += payload_length;
+                    return
+                }
+
+                OutgoingMessage::TransactionBroadcast { transactions, payload_length }
+            } else {
+                message
+            };
+
         self.queued_responses += message.is_response() as usize;
         self.messages.push_back(message);
         self.count.increment(1);
@@ -1116,8 +1281,27 @@ impl<N: NetworkPrimitives> QueuedOutgoingMessages<N> {
     }
 
     pub(crate) fn shrink_to(&mut self, min_capacity: usize) {
-        self.messages.shrink_to(min_capacity);
+        if self.messages.len() <= min_capacity &&
+            self.messages.capacity() >
+                min_capacity.saturating_mul(SHRINK_CAPACITY_MULTIPLIER).max(16)
+        {
+            self.messages.shrink_to(min_capacity);
+        }
     }
+}
+
+fn transactions_payload_length<T: Encodable>(transactions: &SharedTransactions<T>) -> usize {
+    transactions.iter().map(Encodable::length).sum()
+}
+
+pub(super) fn request_timeout_interval(timeout: Duration) -> Interval {
+    let mut interval = tokio::time::interval(timeout);
+    interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+    interval
+}
+
+const fn transaction_broadcast_message_length(payload_length: usize) -> usize {
+    Header { list: true, payload_length }.length_with_payload()
 }
 
 impl<N: NetworkPrimitives> Drop for QueuedOutgoingMessages<N> {
@@ -1134,7 +1318,9 @@ impl<N: NetworkPrimitives> Drop for QueuedOutgoingMessages<N> {
 mod tests {
     use super::*;
     use crate::session::{handle::PendingSessionEvent, start_pending_incoming_session};
+    use alloy_consensus::TxLegacy;
     use alloy_eips::eip2124::ForkFilter;
+    use alloy_primitives::{Signature, TxKind, U256};
     use reth_chainspec::MAINNET;
     use reth_ecies::stream::ECIESStream;
     use reth_eth_wire::{
@@ -1146,6 +1332,7 @@ mod tests {
         message::MAX_MESSAGE_SIZE, EthMessageID, NewPooledTransactionHashes72, RawCapabilityMessage,
     };
     use reth_ethereum_forks::EthereumHardfork;
+    use reth_ethereum_primitives::{Transaction, TransactionSigned};
     use reth_network_peers::pk2id;
     use reth_network_types::session::config::PROTOCOL_BREACH_REQUEST_TIMEOUT;
     use secp256k1::{SecretKey, SECP256K1};
@@ -1157,6 +1344,21 @@ mod tests {
     /// Returns a testing `HelloMessage` and new secretkey
     fn eth_hello(server_key: &SecretKey) -> HelloMessageWithProtocols {
         HelloMessageWithProtocols::builder(pk2id(&server_key.public_key(SECP256K1))).build()
+    }
+
+    fn signed_legacy_tx(nonce: u64, input_len: usize) -> Arc<TransactionSigned> {
+        Arc::new(TransactionSigned::new_unhashed(
+            Transaction::Legacy(TxLegacy {
+                chain_id: Some(1),
+                nonce,
+                gas_price: 1,
+                gas_limit: 21_000,
+                to: TxKind::Create,
+                value: U256::ZERO,
+                input: vec![0; input_len].into(),
+            }),
+            Signature::test_signature(),
+        ))
     }
 
     struct SessionBuilder<N: NetworkPrimitives = EthNetworkPrimitives> {
@@ -1268,12 +1470,14 @@ mod tests {
                         internal_request_rx: ReceiverStream::new(messages_rx).fuse(),
                         inflight_requests: Default::default(),
                         conn,
+                        conn_decode_buf: Default::default(),
+                        conn_encode_buf: Default::default(),
                         queued_outgoing: QueuedOutgoingMessages::new(
                             Gauge::noop(),
                             BroadcastItemCounter::new(),
                         ),
                         received_requests_from_remote: Default::default(),
-                        internal_request_timeout_interval: tokio::time::interval(
+                        internal_request_timeout_interval: request_timeout_interval(
                             INITIAL_REQUEST_TIMEOUT,
                         ),
                         internal_request_timeout: Arc::new(AtomicU64::new(
@@ -1468,6 +1672,9 @@ mod tests {
         session.protocol_breach_request_timeout = drop_timeout;
         session.internal_request_timeout_interval =
             tokio::time::interval_at(tokio::time::Instant::now(), request_timeout);
+        session
+            .internal_request_timeout_interval
+            .set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
         let (tx, rx) = oneshot::channel();
         let req = PeerRequest::GetBlockBodies { request: GetBlockBodies(vec![]), response: tx };
         session.on_internal_peer_request(req, Instant::now());
@@ -1498,6 +1705,54 @@ mod tests {
             .into();
 
         assert_eq!(2, msg.broadcast_item_count());
+    }
+
+    #[test]
+    fn queued_outgoing_merges_consecutive_transaction_broadcasts() {
+        let mut queued = QueuedOutgoingMessages::<EthNetworkPrimitives>::new(
+            Gauge::noop(),
+            BroadcastItemCounter::new(),
+        );
+
+        queued.push_back(
+            EthBroadcastMessage::Transactions(SharedTransactions(vec![signed_legacy_tx(1, 0)]))
+                .into(),
+        );
+        queued.push_back(
+            EthBroadcastMessage::Transactions(SharedTransactions(vec![signed_legacy_tx(2, 0)]))
+                .into(),
+        );
+
+        assert_eq!(queued.messages.len(), 1);
+        let Some(OutgoingMessage::TransactionBroadcast { transactions: txs, payload_length }) =
+            queued.messages.front()
+        else {
+            panic!("expected queued transactions")
+        };
+        assert_eq!(txs.len(), 2);
+        assert_eq!(*payload_length, transactions_payload_length(txs));
+    }
+
+    #[test]
+    fn queued_outgoing_preserves_transaction_broadcast_soft_limit() {
+        let mut queued = QueuedOutgoingMessages::<EthNetworkPrimitives>::new(
+            Gauge::noop(),
+            BroadcastItemCounter::new(),
+        );
+
+        queued.push_back(
+            EthBroadcastMessage::Transactions(SharedTransactions(vec![signed_legacy_tx(
+                1,
+                DEFAULT_SOFT_LIMIT_BYTE_SIZE_TRANSACTIONS_BROADCAST_MESSAGE,
+            )]))
+            .into(),
+        );
+        queued.push_back(
+            EthBroadcastMessage::Transactions(SharedTransactions(vec![signed_legacy_tx(2, 0)]))
+                .into(),
+        );
+
+        assert_eq!(queued.messages.len(), 2);
     }
 
     #[test]

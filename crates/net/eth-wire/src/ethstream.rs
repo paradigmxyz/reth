@@ -7,18 +7,23 @@
 use crate::{
     errors::{EthHandshakeError, EthStreamError},
     handshake::EthereumEthHandshake,
-    message::{EthBroadcastMessage, MAX_MESSAGE_SIZE, TX_MEMORY_BUDGET_MULTIPLIER},
-    p2pstream::HANDSHAKE_TIMEOUT,
+    message::{
+        EthBroadcastMessage, MessageError, ProtocolBroadcastMessage, MAX_MESSAGE_SIZE,
+        TX_MEMORY_BUDGET_MULTIPLIER,
+    },
+    p2pstream::{P2PStream, HANDSHAKE_TIMEOUT},
     CanDisconnect, DisconnectReason, EthMessage, EthNetworkPrimitives, EthVersion, ProtocolMessage,
-    UnifiedStatus,
+    SharedTransactions, UnifiedStatus,
 };
 use alloy_primitives::bytes::{Bytes, BytesMut};
+use alloy_rlp::{Encodable, Header};
 use futures::{ready, Sink, SinkExt};
 use pin_project::pin_project;
 use reth_eth_wire_types::{EthMessageID, NetworkPrimitives, RawCapabilityMessage};
 use reth_ethereum_forks::ForkFilter;
 use std::{
     future::Future,
+    io,
     pin::Pin,
     task::{Context, Poll},
     time::Duration,
@@ -146,28 +151,55 @@ where
 
     /// Decodes incoming bytes into an [`EthMessage`].
     pub fn decode_message(&self, bytes: BytesMut) -> Result<EthMessage<N>, EthStreamError> {
-        if bytes.len() > self.max_message_size {
-            return Err(EthStreamError::MessageTooBig(bytes.len()));
+        self.decode_message_from_slice(&bytes)
+    }
+
+    /// Decodes incoming bytes into an [`EthMessage`].
+    pub fn decode_message_from_slice(&self, bytes: &[u8]) -> Result<EthMessage<N>, EthStreamError> {
+        let Some((&message_id, payload)) = bytes.split_first() else {
+            return Err(EthStreamError::InvalidMessage(MessageError::RlpError(
+                alloy_rlp::Error::InputTooShort,
+            )))
+        };
+
+        self.decode_message_payload(message_id, payload)
+    }
+
+    /// Decodes an incoming message after the p2p layer has already separated the eth message id
+    /// from the snappy-compressed payload.
+    pub fn decode_message_payload(
+        &self,
+        message_id: u8,
+        payload: &[u8],
+    ) -> Result<EthMessage<N>, EthStreamError> {
+        let message_size = payload.len() + 1;
+        if message_size > self.max_message_size {
+            return Err(EthStreamError::MessageTooBig(message_size));
         }
 
         if self.reject_block_announcements &&
-            let Some(&id) = bytes.first() &&
-            (id == EthMessageID::NewBlock.to_u8() || id == EthMessageID::NewBlockHashes.to_u8())
+            (message_id == EthMessageID::NewBlock.to_u8() ||
+                message_id == EthMessageID::NewBlockHashes.to_u8())
         {
-            return Err(EthStreamError::UnsupportedMessage { message_id: id });
+            return Err(EthStreamError::UnsupportedMessage { message_id });
         }
 
-        let msg = match ProtocolMessage::decode_message_with_tx_memory_budget(
+        let msg = match ProtocolMessage::decode_message_payload_with_tx_memory_budget(
             self.version,
-            &mut bytes.as_ref(),
+            EthMessageID::from_u8(message_id),
+            &mut &payload[..],
             self.max_message_size * TX_MEMORY_BUDGET_MULTIPLIER,
         ) {
             Ok(m) => m,
             Err(err) => {
-                let msg = if bytes.len() > 50 {
-                    format!("{:02x?}...{:x?}", &bytes[..10], &bytes[bytes.len() - 10..])
+                let msg = if payload.len() > 50 {
+                    format!(
+                        "{message_id:02x}:{:02x?}...{:x?}",
+                        &payload[..10],
+                        &payload[payload.len() - 10..]
+                    )
                 } else {
-                    format!("{bytes:02x?}")
+                    format!("{message_id:02x}:{payload:02x?}")
                 };
                 debug!(
                     version=?self.version,
@@ -178,11 +210,11 @@ where
             }
         };
 
-        if matches!(msg.message, EthMessage::Status(_)) {
+        if matches!(msg, EthMessage::Status(_)) {
             return Err(EthStreamError::EthHandshakeError(EthHandshakeError::StatusNotInHandshake));
         }
 
-        Ok(msg.message)
+        Ok(msg)
     }
 
     /// Encodes an [`EthMessage`] to bytes.
@@ -193,7 +225,7 @@ where
             return Err(EthStreamError::EthHandshakeError(EthHandshakeError::StatusNotInHandshake));
         }
 
-        Ok(Bytes::from(alloy_rlp::encode(ProtocolMessage::from(item))))
+        Ok(item.encoded())
     }
 }
 
@@ -272,6 +304,21 @@ where
         Ok(())
     }
 
+    /// Sends a Transactions broadcast with a precomputed RLP payload length.
+    pub fn start_send_transactions_with_payload_length(
+        &mut self,
+        transactions: SharedTransactions<N::BroadcastedTransaction>,
+        payload_length: usize,
+    ) -> Result<(), EthStreamError> {
+        self.inner.start_send_unpin(
+            EthBroadcastMessage::<N>::encoded_transactions_with_payload_length(
+                transactions,
+                payload_length,
+            ),
+        )?;
+        Ok(())
+    }
+
     /// Sends a raw capability message directly over the stream
     pub fn start_send_raw(&mut self, msg: RawCapabilityMessage) -> Result<(), EthStreamError> {
         self.inner.start_send_unpin(msg.encoded())?;
@@ -293,6 +340,155 @@ where
 
         match res {
             Some(Ok(bytes)) => Poll::Ready(Some(this.eth.decode_message(bytes))),
+            Some(Err(err)) => Poll::Ready(Some(Err(err.into()))),
+            None => Poll::Ready(None),
+        }
+    }
+}
+
+impl<S, N> EthStream<P2PStream<S>, N>
+where
+    S: Sink<Bytes, Error = io::Error> + Unpin + Send + Sync,
+    N: NetworkPrimitives,
+{
+    /// Same as [`Sink::start_send`] but encodes into caller-owned scratch space before compression.
+    pub fn start_send_with_encode_buf(
+        &mut self,
+        item: EthMessage<N>,
+        encode_buf: &mut BytesMut,
+    ) -> Result<(), EthStreamError> {
+        if matches!(item, EthMessage::Status(_)) {
+            let _disconnect_future = self.inner.disconnect(DisconnectReason::ProtocolBreach);
+            return Err(EthStreamError::EthHandshakeError(EthHandshakeError::StatusNotInHandshake))
+        }
+
+        encode_eth_message(item, encode_buf);
+        self.inner.start_send_protocol_message(encode_buf)?;
+        Ok(())
+    }
+
+    /// Same as [`Self::start_send_broadcast`] but encodes into caller-owned scratch space.
+    pub fn start_send_broadcast_with_encode_buf(
+        &mut self,
+        item: EthBroadcastMessage<N>,
+        encode_buf: &mut BytesMut,
+    ) -> Result<(), EthStreamError> {
+        encode_broadcast_message(item, encode_buf);
+        self.inner.start_send_protocol_message(encode_buf)?;
+        Ok(())
+    }
+
+    /// Sends a Transactions broadcast with a precomputed RLP payload length and caller-owned
+    /// scratch space.
+    pub fn start_send_transactions_with_payload_length_and_encode_buf(
+        &mut self,
+        transactions: SharedTransactions<N::BroadcastedTransaction>,
+        payload_length: usize,
+        encode_buf: &mut BytesMut,
+    ) -> Result<(), EthStreamError> {
+        encode_transactions_broadcast_message(transactions, payload_length, encode_buf);
+        self.inner.start_send_protocol_message(encode_buf)?;
+        Ok(())
+    }
+
+    /// Sends a raw capability message using caller-owned scratch space.
+    pub fn start_send_raw_with_encode_buf(
+        &mut self,
+        msg: RawCapabilityMessage,
+        encode_buf: &mut BytesMut,
+    ) -> Result<(), EthStreamError> {
+        encode_raw_capability_message(msg, encode_buf);
+        self.inner.start_send_protocol_message(encode_buf)?;
+        Ok(())
+    }
+}
+
+fn encode_eth_message<N: NetworkPrimitives>(item: EthMessage<N>, out: &mut BytesMut) {
+    out.clear();
+    match item {
+        EthMessage::NewBlockHashes(hashes) => {
+            EthMessageID::NewBlockHashes.encode(out);
+            hashes.encode(out);
+        }
+        EthMessage::NewPooledTransactionHashes66(hashes) => {
+            EthMessageID::NewPooledTransactionHashes.encode(out);
+            hashes.encode(out);
+        }
+        EthMessage::NewPooledTransactionHashes68(hashes) => {
+            EthMessageID::NewPooledTransactionHashes.encode(out);
+            hashes.encode(out);
+        }
+        EthMessage::NewPooledTransactionHashes72(hashes) => {
+            EthMessageID::NewPooledTransactionHashes.encode(out);
+            hashes.encode(out);
+        }
+        this => {
+            out.reserve(EthMessageID::Status.length() + this.length());
+            ProtocolMessage::from(this).encode(out);
+        }
+    }
+}
+
+fn encode_broadcast_message<N: NetworkPrimitives>(
+    item: EthBroadcastMessage<N>,
+    out: &mut BytesMut,
+) {
+    out.clear();
+    match item {
+        EthBroadcastMessage::Transactions(transactions) => {
+            let payload_length = transactions.iter().map(Encodable::length).sum();
+            encode_transactions_broadcast_message(transactions, payload_length, out);
+        }
+        this @ EthBroadcastMessage::NewBlock(_) => {
+            out.reserve(EthMessageID::Status.length() + this.length());
+            ProtocolBroadcastMessage::from(this).encode(out);
+        }
+    }
+}
+
+fn encode_transactions_broadcast_message<T: Encodable>(
+    transactions: SharedTransactions<T>,
+    payload_length: usize,
+    out: &mut BytesMut,
+) {
+    let header = Header { list: true, payload_length };
+    out.clear();
+    out.reserve(EthMessageID::Transactions.length() + header.length() + payload_length);
+    EthMessageID::Transactions.encode(out);
+    header.encode(out);
+    for tx in transactions.0 {
+        tx.encode(out);
+    }
+}
+
+fn encode_raw_capability_message(msg: RawCapabilityMessage, out: &mut BytesMut) {
+    out.clear();
+    out.reserve(msg.length());
+    msg.encode(out);
+}
+
+impl<S, N> EthStream<P2PStream<S>, N>
+where
+    S: Stream<Item = io::Result<BytesMut>> + Sink<Bytes, Error = io::Error> + Unpin,
+    N: NetworkPrimitives,
+{
+    /// Polls the underlying p2p stream and decodes the next eth message without returning an
+    /// intermediate p2p [`BytesMut`] to the caller.
+    pub fn poll_next_eth_message(
+        self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        decode_buf: &mut BytesMut,
+    ) -> Poll<Option<Result<EthMessage<N>, EthStreamError>>> {
+        let this = self.project();
+        let eth = this.eth;
+
+        let res = ready!(this.inner.poll_next_with(cx, decode_buf, |message_id, payload| {
+            eth.decode_message_payload(message_id, payload)
+        }));
+
+        match res {
+            Some(Ok(Ok(msg))) => Poll::Ready(Some(Ok(msg))),
+            Some(Ok(Err(err))) => Poll::Ready(Some(Err(err))),
             Some(Err(err)) => Poll::Ready(Some(Err(err.into()))),
             None => Poll::Ready(None),
         }
@@ -323,9 +519,7 @@ where
             return Err(EthStreamError::EthHandshakeError(EthHandshakeError::StatusNotInHandshake))
         }
 
-        self.project()
-            .inner
-            .start_send(Bytes::from(alloy_rlp::encode(ProtocolMessage::from(item))))?;
+        self.project().inner.start_send(item.encoded())?;
 
         Ok(())
     }
@@ -366,15 +560,18 @@ mod tests {
         ProtocolVersion, Status, StatusMessage,
     };
     use alloy_chains::NamedChain;
-    use alloy_primitives::{bytes::Bytes, B256, U256};
+    use alloy_primitives::{
+        bytes::{Bytes, BytesMut},
+        B256, U256,
+    };
     use alloy_rlp::Decodable;
-    use futures::{SinkExt, StreamExt};
+    use futures::{future::poll_fn, SinkExt, StreamExt};
     use reth_ecies::stream::ECIESStream;
     use reth_eth_wire_types::{EthNetworkPrimitives, UnifiedStatus};
     use reth_ethereum_forks::{ForkFilter, Head};
     use reth_network_peers::pk2id;
     use secp256k1::{SecretKey, SECP256K1};
-    use std::time::Duration;
+    use std::{pin::Pin, time::Duration};
     use tokio::net::{TcpListener, TcpStream};
     use tokio_util::codec::Decoder;
 
@@ -663,7 +860,12 @@ mod tests {
                 .unwrap();
 
             // use the stream to get the next message
-            let message = eth_stream.next().await.unwrap().unwrap();
+            let mut decode_buf = BytesMut::new();
+            let message =
+                poll_fn(|cx| Pin::new(&mut eth_stream).poll_next_eth_message(cx, &mut decode_buf))
+                    .await
+                    .unwrap()
+                    .unwrap();
             assert_eq!(message, test_msg_clone);
         });
 
@@ -691,7 +893,9 @@ mod tests {
             .await
             .unwrap();
 
-        client_stream.send(test_msg).await.unwrap();
+        let mut encode_buf = BytesMut::new();
+        client_stream.start_send_with_encode_buf(test_msg, &mut encode_buf).unwrap();
+        client_stream.flush().await.unwrap();
 
         // make sure the server receives the message and asserts before ending the test
         handle.await.unwrap();

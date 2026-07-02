@@ -1,12 +1,14 @@
 //! Connection types for a session
 
-use futures::{Sink, Stream};
+use alloy_primitives::bytes::BytesMut;
+use futures::{Sink, SinkExt, Stream};
 use reth_ecies::stream::ECIESStream;
 use reth_eth_wire::{
     errors::EthStreamError,
     message::EthBroadcastMessage,
     multiplex::{ProtocolProxy, RlpxSatelliteStream},
     EthMessage, EthNetworkPrimitives, EthStream, EthVersion, NetworkPrimitives, P2PStream,
+    SharedTransactions,
 };
 use reth_eth_wire_types::RawCapabilityMessage;
 use std::{
@@ -74,6 +76,17 @@ impl<N: NetworkPrimitives> EthRlpxConnection<N> {
         }
     }
 
+    /// Returns how many messages can be started after one successful readiness poll.
+    #[inline]
+    pub(crate) fn available_outgoing_capacity(&self) -> usize {
+        match self {
+            Self::EthOnly(conn) => conn.inner().available_outgoing_capacity(),
+            // Satellite eth messages are first queued into the protocol proxy. Keep the generic
+            // sink contract for that path and only batch direct eth-only p2p streams.
+            Self::Satellite(_) => 1,
+        }
+    }
+
     /// Same as [`Sink::start_send`] but accepts a [`EthBroadcastMessage`] instead.
     #[inline]
     pub fn start_send_broadcast(
@@ -86,10 +99,85 @@ impl<N: NetworkPrimitives> EthRlpxConnection<N> {
         }
     }
 
+    /// Sends an eth message using caller-owned scratch space for eth-only connections.
+    #[inline]
+    pub fn start_send_with_encode_buf(
+        &mut self,
+        item: EthMessage<N>,
+        encode_buf: &mut BytesMut,
+    ) -> Result<(), EthStreamError> {
+        match self {
+            Self::EthOnly(conn) => conn.start_send_with_encode_buf(item, encode_buf),
+            Self::Satellite(conn) => conn.primary_mut().start_send_unpin(item),
+        }
+    }
+
+    /// Sends an eth broadcast using caller-owned scratch space for eth-only connections.
+    #[inline]
+    pub fn start_send_broadcast_with_encode_buf(
+        &mut self,
+        item: EthBroadcastMessage<N>,
+        encode_buf: &mut BytesMut,
+    ) -> Result<(), EthStreamError> {
+        match self {
+            Self::EthOnly(conn) => conn.start_send_broadcast_with_encode_buf(item, encode_buf),
+            Self::Satellite(conn) => conn.primary_mut().start_send_broadcast(item),
+        }
+    }
+
+    /// Sends a transactions broadcast with a precomputed RLP payload length.
+    #[inline]
+    pub fn start_send_transactions_with_payload_length(
+        &mut self,
+        transactions: SharedTransactions<N::BroadcastedTransaction>,
+        payload_length: usize,
+    ) -> Result<(), EthStreamError> {
+        match self {
+            Self::EthOnly(conn) => {
+                conn.start_send_transactions_with_payload_length(transactions, payload_length)
+            }
+            Self::Satellite(conn) => conn
+                .primary_mut()
+                .start_send_transactions_with_payload_length(transactions, payload_length),
+        }
+    }
+
+    /// Sends a transactions broadcast using caller-owned scratch space for eth-only connections.
+    #[inline]
+    pub fn start_send_transactions_with_payload_length_and_encode_buf(
+        &mut self,
+        transactions: SharedTransactions<N::BroadcastedTransaction>,
+        payload_length: usize,
+        encode_buf: &mut BytesMut,
+    ) -> Result<(), EthStreamError> {
+        match self {
+            Self::EthOnly(conn) => conn.start_send_transactions_with_payload_length_and_encode_buf(
+                transactions,
+                payload_length,
+                encode_buf,
+            ),
+            Self::Satellite(conn) => conn
+                .primary_mut()
+                .start_send_transactions_with_payload_length(transactions, payload_length),
+        }
+    }
+
     /// Sends a raw capability message over the connection
     pub fn start_send_raw(&mut self, msg: RawCapabilityMessage) -> Result<(), EthStreamError> {
         match self {
             Self::EthOnly(conn) => conn.start_send_raw(msg),
+            Self::Satellite(conn) => conn.primary_mut().start_send_raw(msg),
+        }
+    }
+
+    /// Sends a raw capability message using caller-owned scratch space for eth-only connections.
+    pub fn start_send_raw_with_encode_buf(
+        &mut self,
+        msg: RawCapabilityMessage,
+        encode_buf: &mut BytesMut,
+    ) -> Result<(), EthStreamError> {
+        match self {
+            Self::EthOnly(conn) => conn.start_send_raw_with_encode_buf(msg, encode_buf),
             Self::Satellite(conn) => conn.primary_mut().start_send_raw(msg),
         }
     }
@@ -100,6 +188,37 @@ impl<N: NetworkPrimitives> EthRlpxConnection<N> {
         match self {
             Self::EthOnly(conn) => conn.set_reject_block_announcements(reject),
             Self::Satellite(conn) => conn.primary_mut().set_reject_block_announcements(reject),
+        }
+    }
+
+    /// Polls the next eth message, using `decode_buf` as scratch space for eth-only p2p streams.
+    pub(crate) fn poll_next_eth_message(
+        &mut self,
+        cx: &mut Context<'_>,
+        decode_buf: &mut BytesMut,
+    ) -> Poll<Option<Result<EthMessage<N>, EthStreamError>>> {
+        unsafe {
+            match self {
+                Self::EthOnly(conn) => {
+                    Pin::new_unchecked(&mut **conn).poll_next_eth_message(cx, decode_buf)
+                }
+                Self::Satellite(conn) => Pin::new_unchecked(conn).poll_next(cx),
+            }
+        }
+    }
+
+    /// Flushes the connection, using the ECIES-aware buffered drain path for eth-only sessions.
+    pub(crate) fn poll_flush_buffered(
+        &mut self,
+        cx: &mut Context<'_>,
+    ) -> Poll<Result<(), EthStreamError>> {
+        unsafe {
+            match self {
+                Self::EthOnly(conn) => Pin::new_unchecked(conn.inner_mut())
+                    .poll_flush_ecies_buffered(cx)
+                    .map_err(Into::into),
+                Self::Satellite(conn) => Pin::new_unchecked(conn).poll_flush(cx),
+            }
         }
     }
 }

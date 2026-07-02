@@ -48,7 +48,9 @@ use tokio_stream::wrappers::ReceiverStream;
 use tokio_util::sync::PollSender;
 use tracing::{instrument, trace};
 
-use crate::session::active::{BroadcastItemCounter, RANGE_UPDATE_INTERVAL};
+use crate::session::active::{
+    request_timeout_interval, BroadcastItemCounter, RANGE_UPDATE_INTERVAL,
+};
 pub use conn::EthRlpxConnection;
 use handle::SessionCommandSender;
 pub use handle::{
@@ -56,6 +58,11 @@ pub use handle::{
     SessionCommand,
 };
 pub use reth_network_api::{Direction, PeerInfo};
+
+/// Active sessions batch several outgoing wire messages before forcing the lower p2p stream to
+/// flush into ECIES. The session itself still enforces byte/item backpressure for large responses
+/// and broadcasts, so this stays a small message-count buffer.
+const ACTIVE_SESSION_P2P_OUTGOING_BUFFER_CAPACITY: usize = 32;
 
 /// Internal identifier for active sessions.
 #[derive(Debug, Clone, Copy, PartialOrd, PartialEq, Eq, Hash)]
@@ -574,6 +581,9 @@ impl<N: NetworkPrimitives> SessionManager<N> {
                 if self.reject_block_announcements {
                     conn.set_reject_block_announcements(true);
                 }
+                conn.inner_mut().set_outgoing_message_buffer_capacity(
+                    ACTIVE_SESSION_P2P_OUTGOING_BUFFER_CAPACITY,
+                );
 
                 let session = ActiveSession {
                     next_id: 0,
@@ -589,12 +599,14 @@ impl<N: NetworkPrimitives> SessionManager<N> {
                     internal_request_rx: ReceiverStream::new(messages_rx).fuse(),
                     inflight_requests: Default::default(),
                     conn,
+                    conn_decode_buf: Default::default(),
+                    conn_encode_buf: Default::default(),
                     queued_outgoing: QueuedOutgoingMessages::new(
                         self.metrics.queued_outgoing_messages.clone(),
                         broadcast_items.clone(),
                     ),
                     received_requests_from_remote: Default::default(),
-                    internal_request_timeout_interval: tokio::time::interval(
+                    internal_request_timeout_interval: request_timeout_interval(
                         self.initial_internal_request_timeout,
                     ),
                     internal_request_timeout: Arc::clone(&timeout),

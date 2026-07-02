@@ -682,6 +682,10 @@ impl ECIES {
         32
     }
 
+    pub(crate) const fn message_frame_len(payload_len: usize) -> usize {
+        Self::header_len() + Self::align_16(payload_len) + 16
+    }
+
     pub const fn body_len(&self) -> usize {
         let len = self.body_size.unwrap();
         Self::align_16(len) + 16
@@ -697,11 +701,11 @@ impl ECIES {
     pub fn write_body(&mut self, out: &mut BytesMut, data: &[u8]) {
         let len = Self::align_16(data.len());
         let old_len = out.len();
+        out.reserve(len + 16);
+        out.extend_from_slice(data);
         out.resize(old_len + len, 0);
 
         let encrypted = &mut out[old_len..old_len + len];
-        encrypted[..data.len()].copy_from_slice(data);
-
         self.egress_aes.as_mut().unwrap().apply_keystream(encrypted);
         self.egress_mac.as_mut().unwrap().update_body(encrypted);
         let tag = self.egress_mac.as_mut().unwrap().digest();
