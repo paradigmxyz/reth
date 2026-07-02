@@ -31,6 +31,9 @@ use revm::{
     context_interface::{result::ExecutionResult, Cfg, Transaction},
     primitives::KECCAK_EMPTY,
 };
+// Bring `revm::Database::basic` into scope (the estimation `State` implements revm's `Database`)
+// for the maxFee-based allowance below, without shadowing the named `reth_evm::Database`.
+use revm::Database as _;
 use tracing::trace;
 
 /// Gas execution estimates
@@ -76,6 +79,14 @@ pub trait EstimateCall: Call {
         // Keep a copy of gas related request values
         let tx_request_gas_limit = request.as_ref().gas_limit();
         let tx_request_gas_price = request.as_ref().gas_price();
+        // Balance affordability is gated by the fee cap (maxFeePerGas, or legacy gasPrice), like
+        // geth's estimator, while the EVM still executes at the effective `tx_env.gas_price()`.
+        // Capture it before `create_txn_env` consumes `request`.
+        let fee_cap = request
+            .as_ref()
+            .max_fee_per_gas()
+            .or_else(|| request.as_ref().gas_price())
+            .unwrap_or(0);
 
         // Configure the evm env
         let mut db = State::builder().with_database(StateProviderDatabase::new(state)).build();
@@ -103,15 +114,11 @@ pub trait EstimateCall: Call {
         };
 
         // Determine the highest possible gas limit, considering both the request's specified limit
-        // and the block's limit.
+        // and the block's limit. Like geth, a user-supplied gas limit below the intrinsic minimum
+        // is ignored (the block limit is used) rather than taken as the search ceiling.
         let mut highest_gas_limit = tx_request_gas_limit
-            .map(|mut tx_gas_limit| {
-                if max_gas_limit < tx_gas_limit {
-                    // requested gas limit is higher than the allowed gas limit, capping
-                    tx_gas_limit = max_gas_limit;
-                }
-                tx_gas_limit
-            })
+            .filter(|&tx_gas_limit| tx_gas_limit >= MIN_TRANSACTION_GAS)
+            .map(|tx_gas_limit| tx_gas_limit.min(max_gas_limit))
             .unwrap_or(max_gas_limit);
 
         let mut tx_env = self.create_txn_env(&evm_env, request, &mut db)?;
@@ -130,23 +137,43 @@ pub trait EstimateCall: Call {
             false
         };
 
-        // Check funds of the sender (only useful to check if transaction gas price is more than 0).
-        //
-        // The caller allowance is check by doing `(account.balance - tx.value) / tx.gas_price`
-        if tx_env.gas_price() > 0 {
-            // cap the highest gas limit by max gas caller can afford with given gas price
+        // Cap the search by how much gas the caller can afford, gated by the fee cap (see
+        // `geth_style_gas_allowance`). Tracked separately from `highest_gas_limit` (which a request
+        // gas limit can also lower) so the basic-transfer short-circuit below can gate purely on
+        // affordability. With no fee set (`fee_cap == 0`) the allowance is unbounded, matching
+        // geth's skip-balance estimation mode.
+        let balance_allowance: u64 = if fee_cap > 0 {
+            // Read the balance through the `State` overlay so `stateOverride` balances apply.
+            let balance = db
+                .basic(tx_env.caller())
+                .map_err(Self::Error::from_eth_err)?
+                .map(|acc| acc.balance)
+                .unwrap_or_default();
+            geth_style_gas_allowance(balance, tx_env.value(), tx_env.calc_max_data_fee(), fee_cap)
+                .map_err(Self::Error::from_eth_err)?
+        } else {
+            u64::MAX
+        };
+        if fee_cap > 0 {
+            highest_gas_limit = highest_gas_limit.min(balance_allowance);
+        } else if tx_env.gas_price() > 0 {
+            // No explicit fee: preserve the existing effective-price gating.
             highest_gas_limit =
                 highest_gas_limit.min(self.caller_gas_allowance(&mut db, &evm_env, &tx_env)?);
         }
 
-        // If the provided gas limit is less than computed cap, use that
-        tx_env.set_gas_limit(tx_env.gas_limit().min(highest_gas_limit));
+        // Search from the affordable/block ceiling. A valid request gas limit is already folded
+        // into `highest_gas_limit`; a sub-intrinsic one was ignored above (like geth).
+        tx_env.set_gas_limit(highest_gas_limit);
 
         // Create EVM instance once and reuse it throughout the entire estimation process
         let mut evm = self.evm_config().evm_with_env(&mut db, evm_env);
 
-        // For basic transfers, try using minimum gas before running full binary search
-        if is_basic_transfer {
+        // Basic-transfer short-circuit: try 21000 before the full search, but only when the caller
+        // can afford it at the fee cap. Estimation disables fee charging, so this execution never
+        // checks the maxFee balance; gating on `balance_allowance` mirrors geth's `execute(21000)`
+        // buyGas check.
+        if is_basic_transfer && balance_allowance >= MIN_TRANSACTION_GAS {
             // If the tx is a simple transfer (call to an account with no code) we can
             // shortcircuit. But simply returning
             // `MIN_TRANSACTION_GAS` is dangerous because there might be additional
@@ -389,4 +416,105 @@ pub fn update_estimated_gas_range<Halt>(
     };
 
     Ok(())
+}
+
+/// Computes the caller's affordable gas limit the way geth's estimator does
+/// (`eth/gasestimator`): from `balance`, subtract the transfer `value` and — for EIP-4844 calls —
+/// the max blob-fee exposure `max_blob_fee`, then divide the remainder by the transaction
+/// `fee_cap` (`maxFeePerGas`, or legacy `gasPrice`).
+///
+/// Dividing by the fee cap rather than the effective execution price keeps the estimate
+/// submittable: reth's own transaction validation requires `balance >= gas_limit * maxFee + value`.
+/// Returns [`RpcInvalidTransactionError::InsufficientFunds`] when the value or blob exposure alone
+/// exceeds the balance. `fee_cap` is expected to be non-zero — callers use an unbounded allowance
+/// otherwise, matching geth's skip-balance estimation mode.
+fn geth_style_gas_allowance(
+    balance: U256,
+    value: U256,
+    max_blob_fee: U256,
+    fee_cap: u128,
+) -> Result<u64, RpcInvalidTransactionError> {
+    // Subtract the transfer value, then the max blob-fee exposure, erroring if either exceeds the
+    // remaining balance (checked subtraction, as the caller allowance did before this refactor).
+    let available = balance
+        .checked_sub(value)
+        .ok_or(RpcInvalidTransactionError::InsufficientFunds { cost: value, balance })?;
+    let available = available.checked_sub(max_blob_fee).ok_or(
+        RpcInvalidTransactionError::InsufficientFunds { cost: max_blob_fee, balance: available },
+    )?;
+    Ok(available.checked_div(U256::from(fee_cap)).unwrap_or_default().saturating_to())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::geth_style_gas_allowance;
+    use alloy_primitives::U256;
+    use reth_rpc_eth_types::RpcInvalidTransactionError;
+
+    #[test]
+    fn allowance_high_fee_cap_low_balance() {
+        // 1e14 balance, 1e12 fee cap -> allowance 100.
+        let allowance = geth_style_gas_allowance(
+            U256::from(100_000_000_000_000u128),
+            U256::ZERO,
+            U256::ZERO,
+            1_000_000_000_000u128,
+        )
+        .unwrap();
+        assert_eq!(allowance, 100);
+    }
+
+    #[test]
+    fn allowance_legacy_gas_price_divisor() {
+        // balance == 21_000 * gas_price -> allowance 21_000 (fee cap is the divisor).
+        let gas_price = 50_000_000_000u128;
+        let balance = U256::from(gas_price) * U256::from(21_000u64);
+        assert_eq!(
+            geth_style_gas_allowance(balance, U256::ZERO, U256::ZERO, gas_price).unwrap(),
+            21_000
+        );
+    }
+
+    #[test]
+    fn value_exceeding_balance_is_insufficient_funds() {
+        let err = geth_style_gas_allowance(U256::from(1u64), U256::from(2u64), U256::ZERO, 1)
+            .unwrap_err();
+        assert!(matches!(err, RpcInvalidTransactionError::InsufficientFunds { .. }));
+    }
+
+    #[test]
+    fn value_equal_balance_yields_zero_allowance() {
+        // checked subtraction succeeds at zero, so this is allowance 0, not an error.
+        assert_eq!(
+            geth_style_gas_allowance(U256::from(5u64), U256::from(5u64), U256::ZERO, 1).unwrap(),
+            0
+        );
+    }
+
+    #[test]
+    fn blob_fee_is_subtracted_from_allowance() {
+        let fee_cap = 1_000u128;
+        let blob_fee = U256::from(500_000u64);
+        // balance == blob_fee + 1000 * fee_cap -> allowance 1000 after subtracting the blob fee.
+        let balance = blob_fee + U256::from(1_000u64) * U256::from(fee_cap);
+        assert_eq!(
+            geth_style_gas_allowance(balance, U256::ZERO, blob_fee, fee_cap).unwrap(),
+            1_000
+        );
+    }
+
+    #[test]
+    fn blob_fee_exceeding_balance_is_insufficient_funds() {
+        let err = geth_style_gas_allowance(U256::from(10u64), U256::ZERO, U256::from(11u64), 1)
+            .unwrap_err();
+        assert!(matches!(err, RpcInvalidTransactionError::InsufficientFunds { .. }));
+    }
+
+    #[test]
+    fn allowance_saturates_to_u64_max() {
+        assert_eq!(
+            geth_style_gas_allowance(U256::MAX, U256::ZERO, U256::ZERO, 1).unwrap(),
+            u64::MAX
+        );
+    }
 }
