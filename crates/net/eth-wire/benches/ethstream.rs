@@ -11,7 +11,8 @@ use futures::{future::poll_fn, Sink, SinkExt, Stream, StreamExt};
 use reth_ecies::stream::ECIESStream;
 use reth_eth_wire::{
     capability::SharedCapabilities, message::EthBroadcastMessage, Capability, EthMessage,
-    EthNetworkPrimitives, EthStream, EthVersion, P2PStream, SharedTransactions,
+    EthNetworkPrimitives, EthStream, EthVersion, NewPooledTransactionHashes68,
+    NewPooledTransactionHashes72, P2PStream, SharedTransactions,
 };
 use reth_ethereum_primitives::{Transaction, TransactionSigned};
 use reth_network_peers::pk2id;
@@ -30,14 +31,35 @@ const ACTIVE_SESSION_P2P_OUTGOING_BUFFER_CAPACITY: usize = 32;
 const ECIES_PAYLOAD_LEN: usize = 512;
 
 fn shared_capabilities() -> SharedCapabilities {
-    SharedCapabilities::try_new(
-        vec![EthVersion::Eth66.into()],
-        vec![Capability::eth(EthVersion::Eth66)],
-    )
-    .unwrap()
+    shared_capabilities_for(EthVersion::Eth66)
+}
+
+fn shared_capabilities_for(version: EthVersion) -> SharedCapabilities {
+    SharedCapabilities::try_new(vec![version.into()], vec![Capability::eth(version)]).unwrap()
 }
 
 fn message() -> EthMessage<EthNetworkPrimitives> {
+    message_for_version(EthVersion::Eth66)
+}
+
+fn message_for_version(version: EthVersion) -> EthMessage<EthNetworkPrimitives> {
+    if version.is_eth72() {
+        return EthMessage::NewPooledTransactionHashes72(NewPooledTransactionHashes72 {
+            types: vec![0x02],
+            sizes: vec![128],
+            hashes: vec![B256::repeat_byte(0x42)],
+            cell_mask: None,
+        })
+    }
+
+    if version.has_eth68_metadata() {
+        return EthMessage::NewPooledTransactionHashes68(NewPooledTransactionHashes68 {
+            types: vec![0x02],
+            sizes: vec![128],
+            hashes: vec![B256::repeat_byte(0x42)],
+        })
+    }
+
     EthMessage::NewPooledTransactionHashes66(vec![B256::repeat_byte(0x42)].into())
 }
 
@@ -67,7 +89,14 @@ fn transaction_broadcast_payload_length(
 }
 
 fn eth_stream(transport: MockTransport) -> EthStream<P2PStream<MockTransport>> {
-    EthStream::new(EthVersion::Eth66, P2PStream::new(transport, shared_capabilities()))
+    eth_stream_with_version(transport, EthVersion::Eth66)
+}
+
+fn eth_stream_with_version(
+    transport: MockTransport,
+    version: EthVersion,
+) -> EthStream<P2PStream<MockTransport>> {
+    EthStream::new(version, P2PStream::new(transport, shared_capabilities_for(version)))
 }
 
 fn active_session_eth_stream(transport: MockTransport) -> EthStream<P2PStream<MockTransport>> {
@@ -88,9 +117,13 @@ fn runtime() -> tokio::runtime::Runtime {
 }
 
 fn encoded_wire_message() -> BytesMut {
+    encoded_wire_message_for_version(EthVersion::Eth66)
+}
+
+fn encoded_wire_message_for_version(version: EthVersion) -> BytesMut {
     runtime().block_on(async {
-        let mut stream = eth_stream(MockTransport::default());
-        stream.send(message()).await.unwrap();
+        let mut stream = eth_stream_with_version(MockTransport::default(), version);
+        stream.send(message_for_version(version)).await.unwrap();
         stream.inner().inner().sent[0].clone().into()
     })
 }
@@ -422,6 +455,31 @@ fn bench_recv_messages(c: &mut Criterion) {
             });
         })
     });
+
+    for version in [EthVersion::Eth68, EthVersion::Eth72] {
+        group.bench_function(format!("recv_hash_announcements_eth{}", version as u8), |b| {
+            let encoded = encoded_wire_message_for_version(version);
+            b.iter(|| {
+                rt.block_on(async {
+                    let mut stream = eth_stream_with_version(
+                        MockTransport::with_incoming(encoded.clone(), MESSAGE_COUNT),
+                        version,
+                    );
+                    let mut decode_buf = BytesMut::new();
+                    for _ in 0..MESSAGE_COUNT {
+                        black_box(
+                            poll_fn(|cx| {
+                                Pin::new(&mut stream).poll_next_eth_message(cx, &mut decode_buf)
+                            })
+                            .await
+                            .unwrap()
+                            .unwrap(),
+                        );
+                    }
+                });
+            })
+        });
+    }
 }
 
 fn bench_ecies_messages(c: &mut Criterion) {

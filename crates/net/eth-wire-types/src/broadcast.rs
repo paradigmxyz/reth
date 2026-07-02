@@ -8,7 +8,7 @@ use alloy_primitives::{
 };
 use alloy_rlp::{
     Decodable, Encodable, Header, RlpDecodable, RlpDecodableWrapper, RlpEncodable,
-    RlpEncodableWrapper,
+    RlpEncodableWrapper, EMPTY_STRING_CODE,
 };
 use core::{fmt::Debug, mem};
 use derive_more::{Constructor, Deref, DerefMut, From, IntoIterator};
@@ -423,16 +423,7 @@ impl From<NewPooledTransactionHashes72> for NewPooledTransactionHashes {
 /// This informs peers of transaction hashes for transactions that have appeared on the network,
 /// but have not been included in a block.
 #[derive(
-    Clone,
-    Debug,
-    PartialEq,
-    Eq,
-    RlpEncodableWrapper,
-    RlpDecodableWrapper,
-    Default,
-    Deref,
-    DerefMut,
-    IntoIterator,
+    Clone, Debug, PartialEq, Eq, RlpEncodableWrapper, Default, Deref, DerefMut, IntoIterator,
 )]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(any(test, feature = "arbitrary"), derive(arbitrary::Arbitrary))]
@@ -451,10 +442,77 @@ impl NewPooledTransactionHashes66 {
     }
 }
 
+impl Decodable for NewPooledTransactionHashes66 {
+    fn decode(buf: &mut &[u8]) -> alloy_rlp::Result<Self> {
+        decode_b256_rlp_list(buf).map(Self)
+    }
+}
+
 impl From<Vec<B256>> for NewPooledTransactionHashes66 {
     fn from(v: Vec<B256>) -> Self {
         Self(v)
     }
+}
+
+const RLP_B256_ENCODED_LEN: usize = 33;
+const RLP_B256_STRING_PREFIX: u8 = EMPTY_STRING_CODE + 32;
+
+fn decode_b256_rlp_list(buf: &mut &[u8]) -> alloy_rlp::Result<Vec<B256>> {
+    let Header { list, payload_length } = Header::decode(buf)?;
+    if !list {
+        return Err(alloy_rlp::Error::UnexpectedString)
+    }
+
+    let (payload, rest) = buf.split_at(payload_length);
+    let hashes =
+        decode_canonical_b256_list(payload).map_or_else(|| decode_b256_list(payload), Ok)?;
+    *buf = rest;
+
+    Ok(hashes)
+}
+
+fn decode_canonical_b256_list(payload: &[u8]) -> Option<Vec<B256>> {
+    let (chunks, remainder) = payload.as_chunks::<RLP_B256_ENCODED_LEN>();
+    if !remainder.is_empty() {
+        return None
+    }
+
+    let mut hashes = Vec::with_capacity(chunks.len());
+    for chunk in chunks {
+        if chunk[0] != RLP_B256_STRING_PREFIX {
+            return None
+        }
+        hashes.push(B256::from_slice(&chunk[1..]));
+    }
+
+    Some(hashes)
+}
+
+fn decode_b256_list(mut payload: &[u8]) -> alloy_rlp::Result<Vec<B256>> {
+    let mut hashes = Vec::new();
+    while !payload.is_empty() {
+        hashes.push(B256::decode(&mut payload)?);
+    }
+    Ok(hashes)
+}
+
+fn decode_usize_rlp_list_with_capacity(
+    buf: &mut &[u8],
+    capacity: usize,
+) -> alloy_rlp::Result<Vec<usize>> {
+    let Header { list, payload_length } = Header::decode(buf)?;
+    if !list {
+        return Err(alloy_rlp::Error::UnexpectedString)
+    }
+
+    let (mut payload, rest) = buf.split_at(payload_length);
+    let mut values = Vec::with_capacity(capacity);
+    while !payload.is_empty() {
+        values.push(usize::decode(&mut payload)?);
+    }
+    *buf = rest;
+
+    Ok(values)
 }
 
 /// Same as [`NewPooledTransactionHashes66`] but extends that beside the transaction hashes,
@@ -611,19 +669,24 @@ impl Encodable for NewPooledTransactionHashes68 {
 
 impl Decodable for NewPooledTransactionHashes68 {
     fn decode(buf: &mut &[u8]) -> alloy_rlp::Result<Self> {
-        #[derive(RlpDecodable)]
-        struct EncodableNewPooledTransactionHashes68 {
-            types: Bytes,
-            sizes: Vec<usize>,
-            hashes: Vec<B256>,
+        let Header { list, payload_length } = Header::decode(buf)?;
+        if !list {
+            return Err(alloy_rlp::Error::UnexpectedString)
         }
 
-        let encodable = EncodableNewPooledTransactionHashes68::decode(buf)?;
-        let msg = Self {
-            types: encodable.types.into(),
-            sizes: encodable.sizes,
-            hashes: encodable.hashes,
-        };
+        let (mut payload, rest) = buf.split_at(payload_length);
+        let types = Bytes::decode(&mut payload)?;
+        let sizes = decode_usize_rlp_list_with_capacity(&mut payload, types.len())?;
+        let hashes = decode_b256_rlp_list(&mut payload)?;
+        if !payload.is_empty() {
+            return Err(alloy_rlp::Error::ListLengthMismatch {
+                expected: payload_length,
+                got: payload_length - payload.len(),
+            })
+        }
+        *buf = rest;
+
+        let msg = Self { types: types.into(), sizes, hashes };
 
         if msg.hashes.len() != msg.types.len() {
             return Err(alloy_rlp::Error::ListLengthMismatch {
@@ -790,8 +853,8 @@ impl Decodable for NewPooledTransactionHashes72 {
 
         let (mut payload, rest) = buf.split_at(payload_length);
         let types = Bytes::decode(&mut payload)?;
-        let sizes = Vec::<usize>::decode(&mut payload)?;
-        let hashes = Vec::<B256>::decode(&mut payload)?;
+        let sizes = decode_usize_rlp_list_with_capacity(&mut payload, types.len())?;
+        let hashes = decode_b256_rlp_list(&mut payload)?;
         let Some(first_byte) = payload.first().copied() else {
             return Err(alloy_rlp::Error::InputTooShort)
         };
@@ -1226,6 +1289,33 @@ mod tests {
         blocks.push(BlockHashNumber { hash: B256::random(), number: 2 });
         let latest = blocks.latest().unwrap();
         assert_eq!(latest.number, 100);
+    }
+
+    #[test]
+    fn eth_66_tx_hash_decode_fast_path() {
+        let expected = NewPooledTransactionHashes66(vec![
+            b256!("0x0000000000000000000000000000000000000000000000000000000000000001"),
+            b256!("0x0000000000000000000000000000000000000000000000000000000000000002"),
+        ]);
+        let mut encoded = Vec::new();
+        expected.encode(&mut encoded);
+        encoded.push(alloy_rlp::EMPTY_STRING_CODE);
+
+        let mut input = encoded.as_ref();
+        let decoded = NewPooledTransactionHashes66::decode(&mut input).unwrap();
+
+        assert_eq!(decoded, expected);
+        assert_eq!(input, &[alloy_rlp::EMPTY_STRING_CODE]);
+    }
+
+    #[test]
+    fn eth_66_tx_hash_decode_rejects_non_canonical_hash() {
+        let mut encoded = vec![0xe2, 0xb8, 0x20];
+        encoded.extend_from_slice(&[0x42; 32]);
+
+        let result = NewPooledTransactionHashes66::decode(&mut encoded.as_ref());
+
+        assert!(matches!(result, Err(alloy_rlp::Error::NonCanonicalSize)));
     }
 
     #[test]
