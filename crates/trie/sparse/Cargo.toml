@@ -21,6 +21,7 @@ alloy-trie.workspace = true
 
 # alloy
 alloy-primitives.workspace = true
+alloy-rlp.workspace = true
 
 # misc
 either = { workspace = true, optional = true }

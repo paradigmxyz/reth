@@ -10,7 +10,8 @@ use nodes::{
 
 use crate::{LeafLookup, LeafLookupError, LeafUpdate, SparseTrie, SparseTrieUpdates};
 use alloc::{borrow::Cow, boxed::Box, collections::VecDeque, vec::Vec};
-use alloy_primitives::{keccak256, map::B256Map, B256};
+use alloy_primitives::{keccak256, map::B256Map, Keccak256, B256};
+use alloy_rlp::{length_of_length, Header, EMPTY_STRING_CODE};
 use alloy_trie::TrieMask;
 use core::{cmp::Reverse, mem};
 use reth_execution_errors::SparseTrieResult;
@@ -31,6 +32,9 @@ type Index = DefaultKey;
 type NodeArena = SlotMap<Index, ArenaSparseNode>;
 
 const TRACE_TARGET: &str = "trie::arena";
+/// Large branch encodings are too large for alloy's global Keccak cache; hash them directly
+/// without first materializing the full RLP node bytes.
+const LARGE_BRANCH_RLP_STREAM_THRESHOLD: usize = 128;
 
 /// The maximum path length (in nibbles) for nodes that live in the upper trie. Nodes at this
 /// depth or deeper belong to lower subtries.
@@ -1133,6 +1137,60 @@ impl ArenaParallelSparseTrie {
         B256::from(bytes)
     }
 
+    /// Returns the RLP payload length for a branch node backed by `children` and `state_mask`.
+    fn branch_rlp_payload_length(children: &[RlpNode], state_mask: TrieMask) -> usize {
+        let first_child_index = children
+            .len()
+            .checked_sub(state_mask.count_bits() as usize)
+            .expect("state mask cannot exceed branch RLP child stack");
+        let mut child_iter = children[first_child_index..].iter();
+        let mut payload_length = 1;
+
+        for nibble in 0..16 {
+            if state_mask.is_bit_set(nibble) {
+                payload_length += child_iter.next().expect("missing branch child RLP node").len();
+            } else {
+                payload_length += 1;
+            }
+        }
+
+        debug_assert!(child_iter.next().is_none());
+        payload_length
+    }
+
+    /// Encodes a branch node to an [`RlpNode`], streaming large branch RLP bytes into Keccak.
+    fn encode_branch_rlp_node(
+        children: &[RlpNode],
+        state_mask: TrieMask,
+        rlp_buf: &mut Vec<u8>,
+    ) -> RlpNode {
+        let payload_length = Self::branch_rlp_payload_length(children, state_mask);
+        let rlp_length = payload_length + length_of_length(payload_length);
+        if rlp_length <= LARGE_BRANCH_RLP_STREAM_THRESHOLD {
+            rlp_buf.clear();
+            return BranchNodeRef::new(children, state_mask).rlp(rlp_buf);
+        }
+
+        let mut hasher = Keccak256::new();
+        rlp_buf.clear();
+        Header { list: true, payload_length }.encode(rlp_buf);
+        hasher.update(&*rlp_buf);
+
+        let first_child_index = children.len() - state_mask.count_bits() as usize;
+        let mut child_iter = children[first_child_index..].iter();
+        for nibble in 0..16 {
+            if state_mask.is_bit_set(nibble) {
+                hasher.update(child_iter.next().expect("missing branch child RLP node"));
+            } else {
+                hasher.update([EMPTY_STRING_CODE]);
+            }
+        }
+        debug_assert!(child_iter.next().is_none());
+
+        hasher.update([EMPTY_STRING_CODE]);
+        RlpNode::word_rlp(&hasher.finalize())
+    }
+
     /// Returns the [`BranchNodeMasks`] for a branch based on the status of its children.
     fn get_branch_masks(arena: &NodeArena, branch: &ArenaSparseNodeBranch) -> BranchNodeMasks {
         let mut masks = BranchNodeMasks::default();
@@ -1286,8 +1344,7 @@ impl ArenaParallelSparseTrie {
             let new_branch_masks = Self::get_branch_masks(arena, b);
             let was_dirty = matches!(b.state, ArenaSparseNodeState::Dirty);
 
-            rlp_buf.clear();
-            let rlp_node = BranchNodeRef::new(rlp_node_buf, state_mask).rlp(rlp_buf);
+            let rlp_node = Self::encode_branch_rlp_node(rlp_node_buf, state_mask, rlp_buf);
 
             let rlp_node = if short_key.is_empty() {
                 rlp_node
@@ -3134,14 +3191,33 @@ impl SparseTrie for ArenaParallelSparseTrie {
 
 #[cfg(test)]
 mod tests {
-    use super::TRACE_TARGET;
+    use super::{LARGE_BRANCH_RLP_STREAM_THRESHOLD, TRACE_TARGET};
     use crate::{ArenaParallelSparseTrie, ArenaParallelismThresholds, LeafUpdate, SparseTrie};
     use alloy_primitives::{map::B256Map, B256, U256};
     use rand::{seq::SliceRandom, Rng, SeedableRng};
     use reth_trie::test_utils::TrieTestHarness;
-    use reth_trie_common::{Nibbles, ProofV2Target};
+    use reth_trie_common::{BranchNodeRef, Nibbles, ProofV2Target, RlpNode, TrieMask};
     use std::collections::BTreeMap;
     use tracing::{info, trace};
+
+    #[test]
+    fn streamed_large_branch_rlp_matches_reference_encoder() {
+        let mut state_mask = TrieMask::default();
+        let mut children = Vec::new();
+        for nibble in [0u8, 2, 4, 8, 15] {
+            state_mask.set_bit(nibble);
+            children.push(RlpNode::word_rlp(&B256::from([nibble + 1; 32])));
+        }
+
+        let mut reference_buf = Vec::new();
+        let expected = BranchNodeRef::new(&children, state_mask).rlp(&mut reference_buf);
+        assert!(reference_buf.len() > LARGE_BRANCH_RLP_STREAM_THRESHOLD);
+
+        let mut scratch = Vec::new();
+        let actual =
+            ArenaParallelSparseTrie::encode_branch_rlp_node(&children, state_mask, &mut scratch);
+        assert_eq!(actual, expected);
+    }
 
     /// Test harness for proptest-based arena sparse trie testing.
     ///
