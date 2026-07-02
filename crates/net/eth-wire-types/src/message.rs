@@ -18,10 +18,7 @@ use crate::{
     SharedTransactions,
 };
 use alloc::{boxed::Box, string::String, sync::Arc, vec::Vec};
-use alloy_primitives::{
-    bytes::{Buf, BufMut},
-    Bytes,
-};
+use alloy_primitives::bytes::{Buf, BufMut, Bytes};
 use alloy_rlp::{length_of_length, Decodable, Encodable, Header};
 use core::fmt::Debug;
 
@@ -228,7 +225,7 @@ impl<N: NetworkPrimitives> ProtocolMessage<N> {
                 buf.advance(raw_payload.len());
                 EthMessage::Other(RawCapabilityMessage::new(
                     message_type.to_u8() as usize,
-                    raw_payload.into(),
+                    raw_payload,
                 ))
             }
         };
@@ -498,6 +495,25 @@ impl<N: NetworkPrimitives> EthMessage<N> {
 
         self
     }
+
+    /// Encodes this message to its id-prefixed `RLPx` message bytes.
+    pub fn encoded(self) -> Bytes {
+        match self {
+            Self::NewBlockHashes(hashes) => {
+                encode_protocol_payload(EthMessageID::NewBlockHashes, &hashes)
+            }
+            Self::NewPooledTransactionHashes66(hashes) => {
+                encode_protocol_payload(EthMessageID::NewPooledTransactionHashes, &hashes)
+            }
+            Self::NewPooledTransactionHashes68(hashes) => {
+                encode_protocol_payload(EthMessageID::NewPooledTransactionHashes, &hashes)
+            }
+            Self::NewPooledTransactionHashes72(hashes) => {
+                encode_protocol_payload(EthMessageID::NewPooledTransactionHashes, &hashes)
+            }
+            this => alloy_rlp::encode(ProtocolMessage::from(this)).into(),
+        }
+    }
 }
 
 impl<N: NetworkPrimitives> Encodable for EthMessage<N> {
@@ -561,6 +577,13 @@ impl<N: NetworkPrimitives> Encodable for EthMessage<N> {
             Self::Other(unknown) => unknown.length(),
         }
     }
+}
+
+fn encode_protocol_payload<T: Encodable>(message_type: EthMessageID, payload: &T) -> Bytes {
+    let mut out = Vec::with_capacity(message_type.length() + payload.length());
+    message_type.encode(&mut out);
+    payload.encode(&mut out);
+    out.into()
 }
 
 /// Represents broadcast messages of [`EthMessage`] with the same object that can be sent to
@@ -903,12 +926,13 @@ mod tests {
     use super::MessageError;
     use crate::{
         message::{EthBroadcastMessage, ProtocolBroadcastMessage, RequestPair},
-        BlockAccessLists, EthMessage, EthMessageID, EthNetworkPrimitives, EthVersion,
-        GetBlockAccessLists, GetNodeData, NodeData, ProtocolMessage, RawCapabilityMessage,
-        SharedTransactions,
+        BlockAccessLists, BlockHashNumber, EthMessage, EthMessageID, EthNetworkPrimitives,
+        EthVersion, GetBlockAccessLists, GetNodeData, NewBlockHashes, NewPooledTransactionHashes66,
+        NewPooledTransactionHashes68, NewPooledTransactionHashes72, NodeData, ProtocolMessage,
+        RawCapabilityMessage, SharedTransactions,
     };
     use alloy_consensus::TxLegacy;
-    use alloy_primitives::{hex, Bytes as AlloyBytes, Signature, TxKind, U256};
+    use alloy_primitives::{hex, Bytes as AlloyBytes, Signature, TxKind, B128, B256, U256};
     use alloy_rlp::{Decodable, Encodable, Error};
     use reth_ethereum_primitives::{BlockBody, Transaction, TransactionSigned};
     use std::sync::Arc;
@@ -944,6 +968,43 @@ mod tests {
         let expected = alloy_rlp::encode(ProtocolBroadcastMessage::from(msg.clone()));
 
         assert_eq!(msg.encoded().as_ref(), expected.as_slice());
+    }
+
+    fn assert_eth_message_encoded_matches_protocol(msg: EthMessage<EthNetworkPrimitives>) {
+        let expected = alloy_rlp::encode(ProtocolMessage::from(msg.clone()));
+
+        assert_eq!(msg.encoded().as_ref(), expected.as_slice());
+    }
+
+    #[test]
+    fn hash_announcements_encoded_match_protocol_encoding() {
+        let hashes =
+            vec![B256::repeat_byte(0x01), B256::repeat_byte(0x02), B256::repeat_byte(0x03)];
+
+        assert_eth_message_encoded_matches_protocol(EthMessage::NewBlockHashes(NewBlockHashes(
+            vec![
+                BlockHashNumber { hash: hashes[0], number: 1 },
+                BlockHashNumber { hash: hashes[1], number: 2 },
+            ],
+        )));
+        assert_eth_message_encoded_matches_protocol(EthMessage::NewPooledTransactionHashes66(
+            NewPooledTransactionHashes66(hashes.clone()),
+        ));
+        assert_eth_message_encoded_matches_protocol(EthMessage::NewPooledTransactionHashes68(
+            NewPooledTransactionHashes68 {
+                types: vec![0, 1, 2],
+                sizes: vec![1, 128, 1024],
+                hashes: hashes.clone(),
+            },
+        ));
+        assert_eth_message_encoded_matches_protocol(EthMessage::NewPooledTransactionHashes72(
+            NewPooledTransactionHashes72 {
+                types: vec![0, 1, 2],
+                sizes: vec![1, 128, 1024],
+                hashes,
+                cell_mask: Some(B128::repeat_byte(0x11)),
+            },
+        ));
     }
 
     #[test]
