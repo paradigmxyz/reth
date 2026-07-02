@@ -7,7 +7,7 @@
 pub(crate) use reth_engine_primitives::BigBlockData;
 
 use alloy_consensus::transaction::Recovered;
-use alloy_primitives::{Address, Bytes};
+use alloy_primitives::Bytes;
 use alloy_rpc_types::engine::ExecutionData;
 use core::{convert::Infallible, fmt};
 use reth_ethereum_primitives::EthPrimitives;
@@ -15,7 +15,7 @@ use reth_evm::{
     ConfigureEngineEvm, ConfigureEvm, EvmEnvFor, ExecutableTxIterator, ExecutionCtxFor,
     NextBlockEnvAttributes,
 };
-use reth_evm_ethereum::{EthEvmConfig, EthEvmEnv, EthTxEnv};
+use reth_evm_ethereum::{EthEvmConfig, EthTxEnv};
 use reth_primitives_traits::{BlockTy, HeaderTy, SealedBlock, SealedHeader, TxTy};
 use reth_storage_errors::any::AnyError;
 
@@ -55,26 +55,16 @@ where
         Primitives = EthPrimitives,
         Error = Infallible,
         NextBlockEnvCtx = NextBlockEnvAttributes,
-        EvmEnv = EthEvmEnv,
         TxEnv = EthTxEnv,
     >,
 {
     type Primitives = EthPrimitives;
     type Error = Infallible;
     type NextBlockEnvCtx = NextBlockEnvAttributes;
-    type EvmEnv = EthEvmEnv;
     type TxEnv = EthTxEnv;
-    type ExecutionCtx<'a>
-        = <EthEvmConfig<C> as ConfigureEvm>::ExecutionCtx<'a>
-    where
-        Self: 'a;
     type BlockExecutorFactory = <EthEvmConfig<C> as ConfigureEvm>::BlockExecutorFactory;
     type BlockAssembler = <EthEvmConfig<C> as ConfigureEvm>::BlockAssembler;
-    type Executor<DB>
-        = <EthEvmConfig<C> as ConfigureEvm>::Executor<DB>
-    where
-        DB: evm2::evm::Database + Clone + 'static,
-        DB::Error: core::error::Error + Send + Sync + 'static;
+
     fn block_executor_factory(&self) -> &Self::BlockExecutorFactory {
         self.inner.block_executor_factory()
     }
@@ -114,43 +104,6 @@ where
         Self: 'a,
     {
         self.inner.context_for_next_block(parent, attributes)
-    }
-
-    fn chain_id(&self) -> u64 {
-        self.inner.chain_id()
-    }
-
-    fn deposit_contract_address(&self) -> Option<Address> {
-        self.inner.deposit_contract_address()
-    }
-
-    fn executor<DB>(&self, db: DB) -> Self::Executor<DB>
-    where
-        DB: evm2::evm::Database + Clone + 'static,
-        DB::Error: core::error::Error + Send + Sync + 'static,
-    {
-        self.inner.executor(db)
-    }
-
-    fn create_executor<'a, DB>(
-        &'a self,
-        evm: evm2::Evm<evm2::BaseEvmTypes>,
-        ctx: ExecutionCtxFor<'a, Self>,
-        hashed_state_mode: reth_evm::execute::HashedStateMode,
-    ) -> reth_evm::BlockExecutorFor<'a, Self, DB>
-    where
-        Self: 'a,
-        DB: evm2::evm::Database + Clone + 'static,
-        DB::Error: core::error::Error + Send + Sync + 'static,
-    {
-        self.inner.create_executor(evm, ctx, hashed_state_mode)
-    }
-
-    fn evm_with_env<DB>(&self, db: DB, evm_env: EvmEnvFor<Self>) -> evm2::Evm<evm2::BaseEvmTypes>
-    where
-        DB: evm2::evm::DynDatabase + 'static,
-    {
-        self.inner.evm_with_env(db, evm_env)
     }
 
     fn pre_block_state_changes<'a, DB>(

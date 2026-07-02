@@ -7,11 +7,12 @@ static ALLOC: reth_cli_util::allocator::Allocator = reth_cli_util::allocator::ne
 mod evm;
 mod evm_config;
 
+use alloy_consensus::Header;
 use alloy_primitives::Bytes;
 use alloy_rpc_types::engine::ExecutionData;
 use clap::Parser;
 use evm_config::{BbEvmConfig, BigBlockData};
-use reth_chainspec::{ChainSpec, EthExecutorSpec, EthereumHardforks};
+use reth_chainspec::{ChainSpec, EthChainSpec, EthereumHardforks};
 use reth_consensus::noop::NoopConsensus;
 use reth_ethereum_cli::{chainspec::EthereumChainSpecParser, interface::Cli};
 use reth_ethereum_primitives::{Block, EthPrimitives};
@@ -129,7 +130,9 @@ impl<Node> ExecutorBuilder<Node> for BbExecutorBuilder
 where
     Node: FullNodeTypes<
         Types: NodeTypes<
-            ChainSpec: reth_ethereum_forks::Hardforks + EthExecutorSpec + EthereumHardforks,
+            ChainSpec: reth_ethereum_forks::Hardforks
+                           + EthChainSpec<Header = Header>
+                           + EthereumHardforks,
             Primitives = EthPrimitives,
         >,
     >,
