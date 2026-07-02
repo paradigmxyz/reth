@@ -10,7 +10,7 @@ use core::fmt;
 use either::Either;
 use reth_execution_types::BlockExecutionOutput;
 use reth_primitives_traits::{NodePrimitives, RecoveredBlock, SealedBlock, SealedHeader};
-use reth_trie_common::{updates::TrieUpdates, HashedPostState, TrieChangedPaths};
+use reth_trie_common::{prefix_set::TriePrefixSetsMut, updates::TrieUpdates, HashedPostState};
 
 /// Represents an executed block for payload building purposes.
 ///
@@ -27,7 +27,7 @@ pub struct BuiltPayloadExecutedBlock<N: NodePrimitives> {
     /// Trie updates that result from calculating the state root for the block (unsorted).
     pub trie_updates: Arc<TrieUpdates>,
     /// Changed trie node base paths, if known.
-    pub changed_paths: Option<Arc<TrieChangedPaths>>,
+    pub changed_paths: Option<Arc<TriePrefixSetsMut>>,
 }
 
 /// Represents a successfully built execution payload (block).

@@ -5,7 +5,8 @@ use alloy_eip7928::BlockAccessList;
 use alloy_primitives::{keccak256, B256};
 use derive_more::derive::Deref;
 use reth_trie::{
-    updates::TrieUpdates, HashedPostState, HashedStorage, MultiProofTargetsV2, TrieChangedPaths,
+    prefix_set::TriePrefixSetsMut, updates::TrieUpdates, HashedPostState, HashedStorage,
+    MultiProofTargetsV2,
 };
 use revm::state::EvmState;
 use std::sync::Arc;
@@ -41,7 +42,7 @@ pub struct StateRootComputeOutcome {
     /// The trie updates.
     pub trie_updates: Arc<TrieUpdates>,
     /// Changed trie node base paths retained while computing the root.
-    pub changed_paths: Option<Arc<TrieChangedPaths>>,
+    pub changed_paths: Option<Arc<TriePrefixSetsMut>>,
     /// Debug recorders taken from the sparse tries, keyed by `None` for account trie
     /// and `Some(address)` for storage tries.
     #[cfg(feature = "trie-debug")]

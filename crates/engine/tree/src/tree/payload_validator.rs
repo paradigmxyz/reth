@@ -151,7 +151,7 @@ use reth_provider::{
     StorageChangeSetReader, StorageSettingsCache,
 };
 use reth_revm::db::{states::bundle_state::BundleRetention, BundleAccount, State};
-use reth_trie::{updates::TrieUpdates, HashedPostState, TrieChangedPaths};
+use reth_trie::{prefix_set::TriePrefixSetsMut, updates::TrieUpdates, HashedPostState};
 use reth_trie_db::ChangesetCache;
 use reth_trie_parallel::root::{ParallelStateRoot, ParallelStateRootError};
 use std::{
@@ -1910,7 +1910,7 @@ where
         execution_outcome: Arc<BlockExecutionOutput<N::Receipt>>,
         hashed_state: LazyHashedPostState,
         trie_output: Arc<TrieUpdates>,
-        changed_paths: Option<Arc<TrieChangedPaths>>,
+        changed_paths: Option<Arc<TriePrefixSetsMut>>,
     ) -> ExecutedBlock<N> {
         // Create deferred handle and task that owns the unsorted inputs.
         // Resolve the lazy handle into Arc<HashedPostState>. By this point the hashed state has

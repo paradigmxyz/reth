@@ -2,12 +2,12 @@ use crate::{
     ArenaParallelSparseTrie, LeafUpdate, SparseTrie as SparseTrieTrait, SparseTrieUpdates,
 };
 use alloc::{borrow::Cow, boxed::Box};
-use alloy_primitives::{
-    map::{B256Map, HashSet},
-    B256,
-};
+use alloy_primitives::{map::B256Map, B256};
 use reth_execution_errors::{SparseTrieErrorKind, SparseTrieResult};
-use reth_trie_common::{BranchNodeMasks, Nibbles, ProofTrieNodeV2, RlpNode, TrieMask, TrieNodeV2};
+use reth_trie_common::{
+    prefix_set::PrefixSetMut, BranchNodeMasks, Nibbles, ProofTrieNodeV2, RlpNode, TrieMask,
+    TrieNodeV2,
+};
 
 /// A sparse trie that is either in a "blind" state (no nodes are revealed, root node hash is
 /// unknown) or in a "revealed" state (root node has been revealed and the trie can be updated).
@@ -227,7 +227,7 @@ impl<T: SparseTrieTrait> RevealableSparseTrie<T> {
     /// Takes changed node base paths from the revealed trie.
     ///
     /// Returns `None` if the trie is still blind.
-    pub fn take_changed_paths(&mut self) -> Option<HashSet<Nibbles>> {
+    pub fn take_changed_paths(&mut self) -> Option<PrefixSetMut> {
         Some(self.as_revealed_mut()?.take_changed_paths())
     }
 

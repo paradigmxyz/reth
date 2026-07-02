@@ -31,7 +31,7 @@ use reth_evm_ethereum::MockEvmConfig;
 use reth_primitives_traits::Block as _;
 use reth_provider::{test_utils::MockEthProvider, BalStoreHandle, InMemoryBalStore, RawBal};
 use reth_tasks::spawn_os_thread;
-use reth_trie::TrieChangedPaths;
+use reth_trie::prefix_set::TriePrefixSetsMut;
 use std::{
     collections::BTreeMap,
     str::FromStr,
@@ -45,7 +45,7 @@ use tokio::sync::oneshot;
 
 fn with_known_changed_paths(block: ExecutedBlock<EthPrimitives>) -> ExecutedBlock<EthPrimitives> {
     let mut trie_data = block.trie_data();
-    trie_data.changed_paths = Some(Arc::new(TrieChangedPaths::default()));
+    trie_data.changed_paths = Some(Arc::new(TriePrefixSetsMut::default()));
     ExecutedBlock::new(block.recovered_block, block.execution_output, trie_data)
 }
 

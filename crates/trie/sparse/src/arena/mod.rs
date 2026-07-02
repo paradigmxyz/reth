@@ -10,17 +10,13 @@ use nodes::{
 
 use crate::{LeafLookup, LeafLookupError, LeafUpdate, SparseTrie, SparseTrieUpdates};
 use alloc::{borrow::Cow, boxed::Box, collections::VecDeque, vec::Vec};
-use alloy_primitives::{
-    keccak256,
-    map::{B256Map, HashSet},
-    B256,
-};
+use alloy_primitives::{keccak256, map::B256Map, B256};
 use alloy_trie::TrieMask;
 use core::{cmp::Reverse, mem};
 use reth_execution_errors::SparseTrieResult;
 use reth_trie_common::{
-    BranchNodeMasks, BranchNodeRef, ExtensionNodeRef, LeafNodeRef, Nibbles, ProofTrieNodeV2,
-    RlpNode, TrieNodeV2, EMPTY_ROOT_HASH,
+    prefix_set::PrefixSetMut, BranchNodeMasks, BranchNodeRef, ExtensionNodeRef, LeafNodeRef,
+    Nibbles, ProofTrieNodeV2, RlpNode, TrieNodeV2, EMPTY_ROOT_HASH,
 };
 use slotmap::{DefaultKey, SlotMap};
 use smallvec::SmallVec;
@@ -130,7 +126,7 @@ struct ArenaTrieBuffers {
     /// tracking updates, `None` otherwise. Initialized alongside `updates` in `set_updates`.
     updates: Option<SparseTrieUpdates>,
     /// Changed node base paths accumulated during hashing.
-    changed_paths: Option<HashSet<Nibbles>>,
+    changed_paths: Option<PrefixSetMut>,
     /// Reusable buffer for RLP encoding.
     rlp_buf: Vec<u8>,
     /// Reusable buffer for child `RlpNode`s during hashing.
@@ -185,7 +181,7 @@ impl ArenaSparseSubtrie {
         let root = arena.insert(ArenaSparseNode::EmptyRoot);
         let buffers = ArenaTrieBuffers {
             updates: record_updates.then(SparseTrieUpdates::default),
-            changed_paths: record_changed_paths.then(HashSet::default),
+            changed_paths: record_changed_paths.then(PrefixSetMut::default),
             ..Default::default()
         };
         Box::new(Self {
@@ -687,7 +683,7 @@ impl ArenaParallelSparseTrie {
     /// Set whether changed node base paths should be retained during hashing.
     pub fn set_changed_paths(&mut self, retain_changed_paths: bool) {
         if retain_changed_paths {
-            self.buffers.changed_paths.get_or_insert_with(HashSet::default).clear();
+            self.buffers.changed_paths.get_or_insert_with(PrefixSetMut::default).clear();
         } else {
             self.buffers.changed_paths = None;
         }
@@ -697,7 +693,7 @@ impl ArenaParallelSparseTrie {
                 continue;
             };
             if retain_changed_paths {
-                subtrie.buffers.changed_paths.get_or_insert_with(HashSet::default).clear();
+                subtrie.buffers.changed_paths.get_or_insert_with(PrefixSetMut::default).clear();
             } else {
                 subtrie.buffers.changed_paths = None;
             }
@@ -711,16 +707,13 @@ impl ArenaParallelSparseTrie {
     }
 
     /// Takes all retained changed node base paths, preserving allocation capacity for reuse.
-    pub fn take_changed_paths(&mut self) -> HashSet<Nibbles> {
+    pub fn take_changed_paths(&mut self) -> PrefixSetMut {
         match self.buffers.changed_paths.take() {
             Some(changed_paths) => {
-                self.buffers.changed_paths = Some(HashSet::with_capacity_and_hasher(
-                    changed_paths.len(),
-                    Default::default(),
-                ));
+                self.buffers.changed_paths = Some(PrefixSetMut::with_capacity(changed_paths.len()));
                 changed_paths
             }
-            None => HashSet::default(),
+            None => PrefixSetMut::default(),
         }
     }
 
@@ -1182,13 +1175,10 @@ impl ArenaParallelSparseTrie {
 
     /// Merges changed node base paths from a subtrie's buffer into the parent's buffer.
     /// Both `dst` and `src` must be `Some` when changed path tracking is enabled.
-    fn merge_subtrie_changed_paths(
-        dst: &mut Option<HashSet<Nibbles>>,
-        src: &mut Option<HashSet<Nibbles>>,
-    ) {
+    fn merge_subtrie_changed_paths(dst: &mut Option<PrefixSetMut>, src: &mut Option<PrefixSetMut>) {
         if let Some(dst_changed_paths) = dst.as_mut() {
             let src_changed_paths = src.as_mut().expect("changed path tracking is enabled");
-            dst_changed_paths.extend(src_changed_paths.drain());
+            dst_changed_paths.append(src_changed_paths);
         }
     }
 
@@ -2722,7 +2712,7 @@ impl SparseTrie for ArenaParallelSparseTrie {
         }
     }
 
-    fn take_changed_paths(&mut self) -> HashSet<Nibbles> {
+    fn take_changed_paths(&mut self) -> PrefixSetMut {
         Self::take_changed_paths(self)
     }
 

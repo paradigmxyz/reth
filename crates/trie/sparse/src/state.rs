@@ -5,16 +5,13 @@ use crate::{
     RevealableSparseTrie,
 };
 use alloc::vec::Vec;
-use alloy_primitives::{
-    map::{B256Map, HashSet},
-    B256,
-};
+use alloy_primitives::{map::B256Map, B256};
 use either::Either;
 use reth_execution_errors::{SparseStateTrieResult, SparseTrieErrorKind};
 #[cfg(feature = "std")]
 use reth_trie_common::HashedPostStateSorted;
 use reth_trie_common::{
-    changed_paths::TrieChangedPaths,
+    prefix_set::{PrefixSetMut, TriePrefixSetsMut},
     updates::{StorageTrieUpdates, TrieUpdates},
     DecodedMultiProof, MultiProof, Nibbles, ProofTrieNodeV2,
 };
@@ -177,7 +174,7 @@ impl<A: SparseTrieTrait, S: SparseTrieTrait> SparseStateTrie<A, S> {
     }
 
     /// Returns storage trie changed paths for tries that have been revealed.
-    fn storage_trie_changed_paths(&mut self) -> B256Map<HashSet<Nibbles>> {
+    fn storage_trie_changed_paths(&mut self) -> B256Map<PrefixSetMut> {
         self.storage
             .tries
             .iter_mut()
@@ -191,11 +188,13 @@ impl<A: SparseTrieTrait, S: SparseTrieTrait> SparseStateTrie<A, S> {
     /// Returns changed paths by taking them from the revealed sparse tries.
     ///
     /// Returns `None` if the accounts trie is not revealed.
-    pub fn take_changed_paths(&mut self) -> Option<TrieChangedPaths> {
-        let storage_paths = self.storage_trie_changed_paths();
-        self.state
-            .take_changed_paths()
-            .map(|account_paths| TrieChangedPaths { account_paths, storage_paths })
+    pub fn take_changed_paths(&mut self) -> Option<TriePrefixSetsMut> {
+        let storage_prefix_sets = self.storage_trie_changed_paths();
+        self.state.take_changed_paths().map(|account_prefix_set| TriePrefixSetsMut {
+            account_prefix_set,
+            storage_prefix_sets,
+            destroyed_accounts: Default::default(),
+        })
     }
 
     /// Takes all debug recorders from the account trie and all revealed storage tries.
@@ -673,10 +672,10 @@ impl SparseTrieRetainedPaths {
     }
 
     /// Extends the retained paths with changed trie node base paths.
-    pub fn extend_from_changed_paths(&mut self, changed_paths: &TrieChangedPaths) {
-        self.account_paths.extend(changed_paths.account_paths.iter().copied());
+    pub fn extend_from_changed_paths(&mut self, changed_paths: &TriePrefixSetsMut) {
+        self.account_paths.extend(changed_paths.account_prefix_set.iter().copied());
 
-        for (address, paths) in &changed_paths.storage_paths {
+        for (address, paths) in &changed_paths.storage_prefix_sets {
             self.retain_storage_slots(*address, paths.iter().copied());
         }
     }
@@ -973,12 +972,13 @@ mod tests {
         let storage_account = B256::with_last_byte(0x02);
         let account_path = Nibbles::from_nibbles([0x01, 0x02]);
         let storage_path = Nibbles::from_nibbles([0x03, 0x04]);
-        let changed_paths = TrieChangedPaths {
-            account_paths: HashSet::from_iter([account_path]),
-            storage_paths: B256Map::from_iter([(
+        let changed_paths = TriePrefixSetsMut {
+            account_prefix_set: PrefixSetMut::from([account_path]),
+            storage_prefix_sets: B256Map::from_iter([(
                 storage_account,
-                HashSet::from_iter([storage_path]),
+                PrefixSetMut::from([storage_path]),
             )]),
+            destroyed_accounts: Default::default(),
         };
 
         let mut retained_paths = SparseTrieRetainedPaths::default();
@@ -1015,8 +1015,10 @@ mod tests {
         let _ = sparse.storage_root(&account).unwrap();
 
         let changed_paths = sparse.take_changed_paths().unwrap();
-        assert!(changed_paths.account_paths.contains(&Nibbles::default()));
-        assert!(changed_paths.storage_paths[&account].contains(&Nibbles::default()));
+        assert!(changed_paths.account_prefix_set.iter().any(|path| *path == Nibbles::default()));
+        assert!(changed_paths.storage_prefix_sets[&account]
+            .iter()
+            .any(|path| *path == Nibbles::default()));
     }
 
     #[test]

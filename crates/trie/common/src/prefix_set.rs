@@ -4,7 +4,7 @@ use alloy_primitives::map::{B256Map, B256Set};
 use core::ops::Range;
 
 /// Collection of mutable prefix sets.
-#[derive(Clone, Default, Debug)]
+#[derive(Clone, Default, Debug, PartialEq, Eq)]
 pub struct TriePrefixSetsMut {
     /// A set of account prefixes that have changed.
     pub account_prefix_set: PrefixSetMut,
@@ -135,12 +135,24 @@ impl PrefixSetMut {
         self.keys.extend(other.keys);
     }
 
+    /// Appends prefix set keys from another mutable prefix set, leaving it empty.
+    pub fn append(&mut self, other: &mut Self) {
+        self.all |= other.all;
+        other.all = false;
+        self.keys.append(&mut other.keys);
+    }
+
     /// Extend prefix set keys with contents of provided iterator.
     pub fn extend_keys<I>(&mut self, keys: I)
     where
         I: IntoIterator<Item = Nibbles>,
     {
         self.keys.extend(keys);
+    }
+
+    /// Returns an iterator over all currently retained keys.
+    pub fn iter(&self) -> core::slice::Iter<'_, Nibbles> {
+        self.keys.iter()
     }
 
     /// Returns the number of elements in the set.

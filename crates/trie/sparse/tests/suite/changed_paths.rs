@@ -6,6 +6,13 @@ fn key_with_prefix(bytes: &[u8]) -> B256 {
     key
 }
 
+fn contains_changed_path(
+    changed_paths: &reth_trie_common::prefix_set::PrefixSetMut,
+    path: Nibbles,
+) -> bool {
+    changed_paths.iter().any(|changed_path| *changed_path == path)
+}
+
 pub(super) fn test_changed_paths_record_base_paths_for_branches_and_leaves<T: SparseTrie>(
     new_trie: fn() -> T,
 ) {
@@ -24,12 +31,12 @@ pub(super) fn test_changed_paths_record_base_paths_for_branches_and_leaves<T: Sp
     let _ = trie.root();
 
     let changed_paths = trie.take_changed_paths();
-    assert!(!changed_paths.contains(&Nibbles::default()));
-    assert!(changed_paths.contains(&Nibbles::from_nibbles([0x01, 0x02, 0x03, 0x04])));
-    assert!(changed_paths.contains(&Nibbles::from_nibbles([0x01, 0x02, 0x03, 0x05])));
-    assert!(!changed_paths.contains(&Nibbles::from_nibbles([0x01, 0x02, 0x03])));
-    assert!(!changed_paths.contains(&Nibbles::unpack(key_a)));
-    assert!(!changed_paths.contains(&Nibbles::unpack(key_b)));
+    assert!(!contains_changed_path(&changed_paths, Nibbles::default()));
+    assert!(contains_changed_path(&changed_paths, Nibbles::from_nibbles([0x01, 0x02, 0x03, 0x04])));
+    assert!(contains_changed_path(&changed_paths, Nibbles::from_nibbles([0x01, 0x02, 0x03, 0x05])));
+    assert!(!contains_changed_path(&changed_paths, Nibbles::from_nibbles([0x01, 0x02, 0x03])));
+    assert!(!contains_changed_path(&changed_paths, Nibbles::unpack(key_a)));
+    assert!(!contains_changed_path(&changed_paths, Nibbles::unpack(key_b)));
 
     let _ = trie.root();
     assert!(trie.take_changed_paths().is_empty());
@@ -64,9 +71,9 @@ pub(super) fn test_changed_paths_skip_dirty_ancestor_branch_when_descendant_chan
     let _ = trie.root();
 
     let changed_paths = trie.take_changed_paths();
-    assert!(changed_paths.contains(&Nibbles::from_nibbles([0x0f, 0x0f, 0x01])));
-    assert!(!changed_paths.contains(&Nibbles::from_nibbles([0x0f])));
-    assert!(!changed_paths.contains(&Nibbles::default()));
+    assert!(contains_changed_path(&changed_paths, Nibbles::from_nibbles([0x0f, 0x0f, 0x01])));
+    assert!(!contains_changed_path(&changed_paths, Nibbles::from_nibbles([0x0f])));
+    assert!(!contains_changed_path(&changed_paths, Nibbles::default()));
 
     let mut updates = B256Map::from_iter([(key_b, LeafUpdate::Changed(vec![0x05; 64]))]);
     trie.update_leaves(&mut updates, |_, _| {}).expect("update should succeed");
@@ -75,10 +82,10 @@ pub(super) fn test_changed_paths_skip_dirty_ancestor_branch_when_descendant_chan
     let _ = trie.root();
 
     let changed_paths = trie.take_changed_paths();
-    assert!(changed_paths.contains(&Nibbles::from_nibbles([0x0f, 0x0f, 0x02])));
-    assert!(!changed_paths.contains(&Nibbles::from_nibbles([0x0f, 0x0f, 0x01])));
-    assert!(!changed_paths.contains(&Nibbles::from_nibbles([0x0f])));
-    assert!(!changed_paths.contains(&Nibbles::default()));
+    assert!(contains_changed_path(&changed_paths, Nibbles::from_nibbles([0x0f, 0x0f, 0x02])));
+    assert!(!contains_changed_path(&changed_paths, Nibbles::from_nibbles([0x0f, 0x0f, 0x01])));
+    assert!(!contains_changed_path(&changed_paths, Nibbles::from_nibbles([0x0f])));
+    assert!(!contains_changed_path(&changed_paths, Nibbles::default()));
 }
 
 pub(super) fn test_changed_paths_record_branch_after_leaf_removal<T: SparseTrie>(
@@ -111,9 +118,9 @@ pub(super) fn test_changed_paths_record_branch_after_leaf_removal<T: SparseTrie>
     let _ = trie.root();
 
     let changed_paths = trie.take_changed_paths();
-    assert!(changed_paths.contains(&Nibbles::from_nibbles([0x01])));
-    assert!(!changed_paths.contains(&Nibbles::from_nibbles([0x01, 0x02])));
-    assert!(!changed_paths.contains(&Nibbles::default()));
+    assert!(contains_changed_path(&changed_paths, Nibbles::from_nibbles([0x01])));
+    assert!(!contains_changed_path(&changed_paths, Nibbles::from_nibbles([0x01, 0x02])));
+    assert!(!contains_changed_path(&changed_paths, Nibbles::default()));
 
     let _ = trie.root();
     assert!(trie.take_changed_paths().is_empty());
