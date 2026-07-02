@@ -6,12 +6,15 @@ use alloy_primitives::{
     Bytes as AlloyBytes, Signature, TxKind, B256, U256,
 };
 use criterion::{criterion_group, criterion_main, Criterion};
-use futures::{future::poll_fn, Sink, SinkExt, Stream};
+use futures::{future::poll_fn, Sink, SinkExt, Stream, StreamExt};
+use reth_ecies::stream::ECIESStream;
 use reth_eth_wire::{
     capability::SharedCapabilities, message::EthBroadcastMessage, Capability, EthMessage,
     EthNetworkPrimitives, EthStream, EthVersion, P2PStream, SharedTransactions,
 };
 use reth_ethereum_primitives::{Transaction, TransactionSigned};
+use reth_network_peers::pk2id;
+use secp256k1::{SecretKey, SECP256K1};
 use std::{
     collections::VecDeque,
     hint::black_box,
@@ -23,6 +26,7 @@ use std::{
 
 const MESSAGE_COUNT: usize = 1024;
 const ACTIVE_SESSION_P2P_OUTGOING_BUFFER_CAPACITY: usize = 32;
+const ECIES_PAYLOAD_LEN: usize = 512;
 
 fn shared_capabilities() -> SharedCapabilities {
     SharedCapabilities::try_new(
@@ -73,7 +77,7 @@ fn active_session_eth_stream_with_capacity(
 }
 
 fn runtime() -> tokio::runtime::Runtime {
-    tokio::runtime::Builder::new_current_thread().enable_time().build().unwrap()
+    tokio::runtime::Builder::new_current_thread().enable_io().enable_time().build().unwrap()
 }
 
 fn encoded_wire_message() -> BytesMut {
@@ -99,6 +103,33 @@ async fn send_hash_announcements_in_active_session_batches(
         remaining -= batch;
     }
     stream.flush().await.unwrap();
+}
+
+async fn send_and_receive_ecies_messages(count: usize) -> usize {
+    let server_key = SecretKey::from_slice(&[1; 32]).unwrap();
+    let server_id = pk2id(&server_key.public_key(SECP256K1));
+    let client_key = SecretKey::from_slice(&[2; 32]).unwrap();
+    let (client_io, server_io) = tokio::io::duplex(1024 * 1024);
+
+    let server = tokio::spawn(async move {
+        let mut stream = ECIESStream::incoming(server_io, server_key).await.unwrap();
+        let mut received = 0;
+        while received < count {
+            let msg = stream.next().await.unwrap().unwrap();
+            black_box(msg.len());
+            received += 1;
+        }
+        received
+    });
+
+    let mut client = ECIESStream::connect(client_io, client_key, server_id).await.unwrap();
+    let payload = Bytes::from(vec![0x42; ECIES_PAYLOAD_LEN]);
+    for _ in 0..count {
+        client.send(payload.clone()).await.unwrap();
+    }
+    client.flush().await.unwrap();
+
+    server.await.unwrap()
 }
 
 #[derive(Default)]
@@ -236,5 +267,23 @@ fn bench_recv_messages(c: &mut Criterion) {
     });
 }
 
-criterion_group!(benches, bench_poll_ready_idle, bench_send_messages, bench_recv_messages);
+fn bench_ecies_messages(c: &mut Criterion) {
+    let mut group = c.benchmark_group("eciesstream");
+    let rt = runtime();
+    group.bench_function("send_receive_messages", |b| {
+        b.iter(|| {
+            rt.block_on(async {
+                black_box(send_and_receive_ecies_messages(MESSAGE_COUNT).await);
+            });
+        })
+    });
+}
+
+criterion_group!(
+    benches,
+    bench_poll_ready_idle,
+    bench_send_messages,
+    bench_recv_messages,
+    bench_ecies_messages
+);
 criterion_main!(benches);
