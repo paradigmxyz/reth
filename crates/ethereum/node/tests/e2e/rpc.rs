@@ -2,7 +2,10 @@ use crate::utils::{eth_payload_attributes, eth_payload_attributes_amsterdam};
 use alloy_eips::{eip2718::Encodable2718, eip7910::EthConfig};
 use alloy_genesis::Genesis;
 use alloy_primitives::{Address, Bytes, B256, U256};
-use alloy_provider::{network::EthereumWallet, Provider, ProviderBuilder, SendableTx};
+use alloy_provider::{
+    network::{EthereumWallet, TransactionBuilder},
+    Provider, ProviderBuilder, SendableTx,
+};
 use alloy_rpc_types_beacon::relay::{
     BidTrace, BuilderBlockValidationRequestV3, BuilderBlockValidationRequestV4,
     BuilderBlockValidationRequestV6, SignedBidSubmissionV3, SignedBidSubmissionV4,
@@ -15,7 +18,7 @@ use alloy_rpc_types_engine::{
 use alloy_rpc_types_eth::TransactionRequest;
 use rand::{rngs::StdRng, Rng, SeedableRng};
 use reth_chainspec::{ChainSpecBuilder, EthChainSpec, MAINNET};
-use reth_e2e_test_utils::setup_engine;
+use reth_e2e_test_utils::{setup_engine, wallet::Wallet};
 use reth_network::{types::NatResolver, PeersInfo};
 use reth_node_builder::{NodeBuilder, NodeHandle};
 use reth_node_core::{
@@ -411,6 +414,55 @@ async fn test_flashbots_validate_v6() -> eyre::Result<()> {
         .raw_request::<_, ()>("flashbots_validateBuilderSubmissionV6".into(), (&request,))
         .await
         .is_err());
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_estimate_gas_basic_transfers_post_amsterdam() -> eyre::Result<()> {
+    reth_tracing::init_test_tracing();
+
+    let chain_spec = Arc::new(
+        ChainSpecBuilder::default()
+            .chain(MAINNET.chain)
+            .genesis(serde_json::from_str(include_str!("../assets/genesis.json")).unwrap())
+            .amsterdam_activated()
+            .build(),
+    );
+
+    let (mut nodes, _) = setup_engine::<EthereumNode>(
+        1,
+        chain_spec,
+        false,
+        Default::default(),
+        eth_payload_attributes_amsterdam,
+    )
+    .await?;
+    let node = nodes.pop().unwrap();
+    let mut signers = Wallet::new(2).wallet_gen();
+    let sender = signers.remove(0);
+    let existing_recipient = signers.remove(0);
+    let provider = ProviderBuilder::new()
+        .wallet(EthereumWallet::new(sender.clone()))
+        .connect_http(node.rpc_url());
+
+    let from = sender.address();
+    let self_call_gas =
+        provider.estimate_gas(TransactionRequest::default().with_from(from).with_to(from)).await?;
+    assert_eq!(self_call_gas, 12_000);
+
+    let existing_recipient_gas = provider
+        .estimate_gas(
+            TransactionRequest::default().with_from(from).with_to(existing_recipient.address()),
+        )
+        .await?;
+    assert_eq!(existing_recipient_gas, 15_000);
+
+    let empty_recipient = Address::repeat_byte(0xfe);
+    let empty_recipient_gas = provider
+        .estimate_gas(TransactionRequest::default().with_from(from).with_to(empty_recipient))
+        .await?;
+    assert_eq!(empty_recipient_gas, 15_000);
 
     Ok(())
 }

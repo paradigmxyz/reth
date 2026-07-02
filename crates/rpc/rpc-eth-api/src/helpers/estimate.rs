@@ -29,9 +29,13 @@ use reth_rpc_server_types::constants::gas_oracle::{CALL_STIPEND_GAS, ESTIMATE_GA
 use revm::{
     context::Block,
     context_interface::{result::ExecutionResult, Cfg, Transaction},
-    primitives::KECCAK_EMPTY,
+    primitives::{hardfork::SpecId, KECCAK_EMPTY},
 };
 use tracing::trace;
+
+// EIP-2780 constants are not exposed by revm yet.
+const EIP2780_TX_BASE_COST: u64 = 12_000;
+const EIP2780_COLD_ACCOUNT_ACCESS: u64 = 3_000;
 
 /// Gas execution estimates
 pub trait EstimateCall: Call {
@@ -124,7 +128,8 @@ pub trait EstimateCall: Call {
                 Ok(Some(account)) => {
                     account.bytecode_hash.is_none() || account.bytecode_hash == Some(KECCAK_EMPTY)
                 }
-                _ => true,
+                Ok(None) => true, // absent account has no code
+                Err(_) => false,  // unknown state, do not shortcut
             }
         } else {
             false
@@ -141,6 +146,14 @@ pub trait EstimateCall: Call {
 
         // If the provided gas limit is less than computed cap, use that
         tx_env.set_gas_limit(tx_env.gas_limit().min(highest_gas_limit));
+
+        let spec = Cfg::spec(&evm_env.cfg_env).into();
+        if is_basic_transfer &&
+            let Some(gas) = eip2780_zero_value_basic_transfer_gas(&tx_env, spec) &&
+            gas <= highest_gas_limit
+        {
+            return Ok(U256::from(gas))
+        }
 
         // Create EVM instance once and reuse it throughout the entire estimation process
         let mut evm = self.evm_config().evm_with_env(&mut db, evm_env);
@@ -356,6 +369,28 @@ pub trait EstimateCall: Call {
             }
         }
     }
+}
+
+fn eip2780_zero_value_basic_transfer_gas<T>(tx: &T, spec: SpecId) -> Option<u64>
+where
+    T: Transaction,
+{
+    if !spec.is_enabled_in(SpecId::AMSTERDAM) ||
+        !tx.input().is_empty() ||
+        !tx.value().is_zero() ||
+        tx.authorization_list_len() != 0 ||
+        tx.access_list().is_some_and(|mut access_list| access_list.next().is_some())
+    {
+        return None
+    }
+
+    let TxKind::Call(to) = tx.kind() else { return None };
+
+    let mut gas = EIP2780_TX_BASE_COST;
+    if tx.caller() != to {
+        gas += EIP2780_COLD_ACCOUNT_ACCESS;
+    }
+    Some(gas)
 }
 
 /// Updates the highest and lowest gas limits for binary search based on the execution result.
