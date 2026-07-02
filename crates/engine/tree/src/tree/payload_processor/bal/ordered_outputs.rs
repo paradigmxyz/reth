@@ -47,7 +47,7 @@ pub(super) fn ordered_worker_outputs<R>(
 
 struct OrderedWorkerOutputs<'a, R> {
     result_rx: &'a Receiver<Result<BalWorkerOutput<R>, BalWorkerError>>,
-    pending: Vec<Option<BalWorkerOutput<R>>>,
+    pending: Option<Vec<Option<BalWorkerOutput<R>>>>,
     next: usize,
     total: usize,
     failed: bool,
@@ -60,7 +60,7 @@ impl<'a, R> OrderedWorkerOutputs<'a, R> {
     ) -> Self {
         Self {
             result_rx,
-            pending: (0..total).map(|_| None).collect(),
+            pending: None,
             next: 0,
             total,
             failed: false,
@@ -77,9 +77,11 @@ impl<R> Iterator for OrderedWorkerOutputs<'_, R> {
         }
 
         loop {
-            if let Some(output) = self.pending[self.next].take() {
-                self.next += 1;
-                return Some(Ok(output));
+            if let Some(pending) = self.pending.as_mut() {
+                if let Some(output) = pending[self.next].take() {
+                    self.next += 1;
+                    return Some(Ok(output));
+                }
             }
 
             let output = match self.result_rx.recv() {
@@ -101,11 +103,23 @@ impl<R> Iterator for OrderedWorkerOutputs<'_, R> {
                 self.total
             );
             assert!(
-                index >= self.next && self.pending[index].is_none(),
+                index >= self.next,
                 "BAL worker returned duplicate transaction index {index}",
             );
 
-            self.pending[index] = Some(output);
+            if index == self.next {
+                self.next += 1;
+                return Some(Ok(output));
+            }
+
+            let pending =
+                self.pending.get_or_insert_with(|| (0..self.total).map(|_| None).collect());
+            assert!(
+                pending[index].is_none(),
+                "BAL worker returned duplicate transaction index {index}",
+            );
+
+            pending[index] = Some(output);
         }
     }
 }
