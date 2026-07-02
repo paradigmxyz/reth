@@ -439,7 +439,8 @@ where
         );
         let _span_guard = span.enter();
 
-        let proof_start = Instant::now();
+        let proof_start =
+            tracing::enabled!(target: "trie::proof_task", tracing::Level::TRACE).then(Instant::now);
 
         // If targets is empty it means the caller only wants the root node.
         let proof = if targets.is_empty() {
@@ -454,7 +455,7 @@ where
         trace!(
             target: "trie::proof_task",
             hashed_address = ?hashed_address,
-            proof_time_us = proof_start.elapsed().as_micros(),
+            proof_time_us = proof_start.map(|start| start.elapsed().as_micros()),
             ?root,
             worker_id = self.id,
             "Completed V2 storage proof calculation"
@@ -718,7 +719,8 @@ where
         HC: HashedStorageCursor<Value = U256>,
     {
         let hashed_address = input.hashed_address;
-        let proof_start = Instant::now();
+        let proof_start =
+            tracing::enabled!(target: "trie::proof_task", tracing::Level::TRACE).then(Instant::now);
 
         trace!(
             target: "trie::proof_task",
@@ -730,7 +732,7 @@ where
 
         let result = proof_tx.compute_v2_storage_proof(input, v2_calculator);
 
-        let proof_elapsed = proof_start.elapsed();
+        let proof_elapsed_us = proof_start.map(|start| start.elapsed().as_micros());
         *storage_proofs_processed += 1;
 
         let root = result.as_ref().ok().and_then(|result| result.root());
@@ -753,7 +755,7 @@ where
             target: "trie::proof_task",
             worker_id = self.worker_id,
             hashed_address = ?hashed_address,
-            proof_time_us = proof_elapsed.as_micros(),
+            proof_time_us = proof_elapsed_us,
             total_processed = storage_proofs_processed,
             ?root,
             "Storage proof completed"
