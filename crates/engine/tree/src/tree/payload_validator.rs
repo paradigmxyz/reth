@@ -145,9 +145,9 @@ use reth_primitives_traits::{
 };
 use reth_provider::{
     providers::{OverlayBuilder, OverlayStateProvider, OverlayStateProviderFactory},
-    BlockExecutionOutput, BlockNumReader, BlockReader, BorrowedEvmStateProviderDatabase,
-    ChangeSetReader, DatabaseProviderFactory, DatabaseProviderROFactory, HashedPostStateProvider,
-    ProviderError, PruneCheckpointReader, StageCheckpointReader, StateProvider, StateProviderBox,
+    BlockExecutionOutput, BlockNumReader, BlockReader, ChangeSetReader, DatabaseProviderFactory,
+    DatabaseProviderROFactory, EvmStateProviderDatabase, HashedPostStateProvider, ProviderError,
+    PruneCheckpointReader, StageCheckpointReader, StateProvider, StateProviderBox,
     StateProviderFactory, StateReader, StorageChangeSetReader, StorageSettingsCache,
 };
 use reth_trie::{trie_cursor::TrieCursorFactory, updates::TrieUpdates, HashedPostState};
@@ -1157,9 +1157,7 @@ where
                         sender.send_hashed_state(hashed_state);
                     }
                 };
-                // SAFETY: The borrowed EVM database is consumed by this synchronous block
-                // execution call and cannot outlive `state_provider`.
-                let db = unsafe { BorrowedEvmStateProviderDatabase::new(&state_provider) };
+                let db = EvmStateProviderDatabase::new(state_provider);
                 let evm = self.evm_config.evm_with_env(evm2::evm::Db::new(db), env.evm_env.clone());
                 let mut executor =
                     self.evm_config.create_executor(evm, execution_ctx, hashed_state_mode);
