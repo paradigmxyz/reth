@@ -4,11 +4,9 @@ use crate::{ConfigureEvm, EvmEnv, TxEnvFor};
 #[cfg(feature = "std")]
 use alloc::rc::Rc;
 use alloc::{boxed::Box, sync::Arc, vec::Vec};
-#[cfg(feature = "std")]
-use alloy_consensus::BlockHeader as _;
 use alloy_consensus::{
     transaction::{Either, Recovered},
-    Header,
+    BlockHeader as _, Header,
 };
 use alloy_eips::eip2718::WithEncoded;
 use alloy_primitives::{Address, Bytes, B256};
@@ -602,11 +600,25 @@ pub trait Executor: Sized {
 
     /// Executes multiple inputs in the batch and returns an aggregated [`ExecutionOutcome`].
     fn execute_batch<'a, I>(
-        self,
+        mut self,
         blocks: I,
     ) -> Result<ExecutionOutcome<<Self::Primitives as NodePrimitives>::Receipt>, Self::Error>
     where
-        I: IntoIterator<Item = &'a RecoveredBlock<<Self::Primitives as NodePrimitives>::Block>>;
+        I: IntoIterator<Item = &'a RecoveredBlock<<Self::Primitives as NodePrimitives>::Block>>,
+    {
+        let blocks_iter = blocks.into_iter();
+        let capacity = blocks_iter.size_hint().0;
+        let mut results = Vec::with_capacity(capacity);
+        let mut first_block = None;
+        for block in blocks_iter {
+            if first_block.is_none() {
+                first_block = Some(block.header().number());
+            }
+            results.push(self.execute_one(block)?);
+        }
+
+        Ok(self.into_execution_outcome(first_block.unwrap_or_default(), results))
+    }
 
     /// The size hint of the batch's tracked state size.
     fn size_hint(&self) -> usize;
@@ -672,7 +684,11 @@ where
             .evm_config
             .context_for_block(block.sealed_block())
             .map_err(BlockExecutionError::other)?;
-        let mut executor = self.evm_config.create_executor(evm, ctx, HashedStateMode::OutputOnly);
+        let mut executor = self.evm_config.block_executor_factory().create_executor(
+            evm,
+            ctx,
+            HashedStateMode::OutputOnly,
+        );
 
         executor.apply_pre_execution_changes(&mut |_| {})?;
         for transaction in block.clone_transactions_recovered() {
@@ -715,29 +731,6 @@ where
     ) -> Result<BlockExecutionOutput<<Self::Primitives as NodePrimitives>::Receipt>, Self::Error>
     {
         self.execute_block_with_database(block, Db::new(self.database.clone()))
-    }
-
-    fn execute_batch<'a, I>(
-        self,
-        blocks: I,
-    ) -> Result<ExecutionOutcome<<Self::Primitives as NodePrimitives>::Receipt>, Self::Error>
-    where
-        I: IntoIterator<Item = &'a RecoveredBlock<<Self::Primitives as NodePrimitives>::Block>>,
-    {
-        let mut blocks = blocks.into_iter();
-        let Some(block) = blocks.next() else { return Ok(ExecutionOutcome::default()) };
-
-        let first_block = block.header().number();
-        let mut executor = self;
-        let mut results = Vec::new();
-
-        results.push(executor.execute_one(block)?);
-
-        for block in blocks {
-            results.push(executor.execute_one(block)?);
-        }
-
-        Ok(executor.into_execution_outcome(first_block, results))
     }
 
     fn size_hint(&self) -> usize {

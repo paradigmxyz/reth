@@ -14,7 +14,7 @@ extern crate alloc;
 #[cfg(feature = "std")]
 use crate::execute::HashedStateMode;
 #[cfg(feature = "std")]
-use crate::execute::{BasicBlockBuilder, BasicBlockExecutor, BlockBuilder};
+use crate::execute::{BasicBlockBuilder, BasicBlockExecutor, BlockBuilder, BlockExecutorFactory};
 use crate::execute::{BlockExecutionError, Executor, IntoTxEnv};
 #[cfg(feature = "std")]
 use alloc::boxed::Box;
@@ -215,25 +215,6 @@ pub trait ConfigureEvm: Clone + Debug + Send + Sync + Unpin {
         self.executor(db)
     }
 
-    /// Creates a configured block executor for active block execution.
-    #[cfg(feature = "std")]
-    fn create_executor<'a>(
-        &'a self,
-        evm: evm2::Evm<evm2::BaseEvmTypes>,
-        ctx: ExecutionCtxFor<'a, Self>,
-        hashed_state_mode: HashedStateMode,
-    ) -> <Self::BlockExecutorFactory as crate::execute::BlockExecutorFactory>::Executor<'a>
-    where
-        Self: 'a,
-    {
-        crate::execute::BlockExecutorFactory::create_executor(
-            self.block_executor_factory(),
-            evm,
-            ctx,
-            hashed_state_mode,
-        )
-    }
-
     /// Creates a block executor for the given block.
     #[cfg(feature = "std")]
     fn executor_for_block<'a, DB>(
@@ -249,7 +230,7 @@ pub trait ConfigureEvm: Clone + Debug + Send + Sync + Unpin {
     {
         let evm = self.evm_for_block(evm2::evm::Db::new(db), block.header())?;
         let ctx = self.context_for_block(block)?;
-        Ok(self.create_executor(evm, ctx, hashed_state_mode))
+        Ok(self.block_executor_factory().create_executor(evm, ctx, hashed_state_mode))
     }
 
     /// Creates an EVM instance for single-transaction execution with the configured environment.
@@ -294,7 +275,11 @@ pub trait ConfigureEvm: Clone + Debug + Send + Sync + Unpin {
         Self: 'a,
     {
         BasicBlockBuilder {
-            executor: self.create_executor(evm, ctx.clone(), hashed_state_mode),
+            executor: self.block_executor_factory().create_executor(
+                evm,
+                ctx.clone(),
+                hashed_state_mode,
+            ),
             evm_env,
             transactions: Vec::new(),
             senders: Vec::new(),

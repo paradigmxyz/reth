@@ -38,19 +38,6 @@ where
         }
     }
 
-    fn execute_batch<'a, I>(
-        self,
-        blocks: I,
-    ) -> Result<ExecutionOutcome<<Self::Primitives as NodePrimitives>::Receipt>, Self::Error>
-    where
-        I: IntoIterator<Item = &'a RecoveredBlock<<Self::Primitives as NodePrimitives>::Block>>,
-    {
-        match self {
-            Self::Left(a) => a.execute_batch(blocks),
-            Self::Right(b) => b.execute_batch(blocks),
-        }
-    }
-
     fn size_hint(&self) -> usize {
         match self {
             Self::Left(a) => a.size_hint(),
