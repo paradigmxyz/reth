@@ -31,6 +31,7 @@ use reth_evm_ethereum::MockEvmConfig;
 use reth_primitives_traits::Block as _;
 use reth_provider::{test_utils::MockEthProvider, BalStoreHandle, InMemoryBalStore, RawBal};
 use reth_tasks::spawn_os_thread;
+use reth_trie::prefix_set::TriePrefixSetsMut;
 use std::{
     collections::BTreeMap,
     str::FromStr,
@@ -41,6 +42,12 @@ use std::{
     time::Duration,
 };
 use tokio::sync::oneshot;
+
+fn with_known_changed_paths(block: ExecutedBlock<EthPrimitives>) -> ExecutedBlock<EthPrimitives> {
+    let mut trie_data = block.trie_data();
+    trie_data.changed_paths = Some(Arc::new(TriePrefixSetsMut::default()));
+    ExecutedBlock::new(block.recovered_block, block.execution_output, trie_data)
+}
 
 /// Mock engine validator for tests
 #[derive(Debug, Clone)]
@@ -186,8 +193,7 @@ impl TestHarness {
         let payload_validator = MockEngineValidator;
 
         let (from_tree_tx, from_tree_rx) = unbounded_channel();
-        let tree_config =
-            TreeConfig::default().with_legacy_state_root(false).with_has_enough_parallelism(true);
+        let tree_config = TreeConfig::default();
         let runtime = reth_tasks::Runtime::test();
         let state_trie_overlays =
             StateTrieOverlayManager::new(runtime.state_trie_overlay_worker_pool());
@@ -581,7 +587,8 @@ async fn test_tree_persist_blocks() {
 
 #[test]
 fn on_new_persisted_block_queues_sparse_trie_prune_request() {
-    let blocks: Vec<_> = TestBlockBuilder::eth().get_executed_blocks(1..4).collect();
+    let blocks: Vec<_> =
+        TestBlockBuilder::eth().get_executed_blocks(1..4).map(with_known_changed_paths).collect();
     let mut test_harness = TestHarness::new(MAINNET.clone()).with_blocks(blocks.clone());
     test_harness
         .tree
@@ -591,6 +598,43 @@ fn on_new_persisted_block_queues_sparse_trie_prune_request() {
     test_harness.tree.on_new_persisted_block().unwrap();
 
     assert!(test_harness.tree.pending_sparse_trie_prune.is_some());
+}
+
+#[test]
+fn on_new_persisted_block_skips_sparse_trie_prune_when_changed_paths_unknown() {
+    let blocks: Vec<_> = TestBlockBuilder::eth().get_executed_blocks(1..4).collect();
+    let mut test_harness = TestHarness::new(MAINNET.clone()).with_blocks(blocks.clone());
+    test_harness
+        .tree
+        .persistence_state
+        .finish(blocks[0].recovered_block().hash(), blocks[0].recovered_block().number);
+
+    test_harness.tree.on_new_persisted_block().unwrap();
+
+    assert!(test_harness.tree.pending_sparse_trie_prune.is_none());
+}
+
+#[test]
+fn on_new_persisted_block_skips_sparse_trie_prune_when_state_root_task_disabled() {
+    let blocks: Vec<_> =
+        TestBlockBuilder::eth().get_executed_blocks(1..4).map(with_known_changed_paths).collect();
+    let configs = [
+        TreeConfig::default().with_state_root_fallback(true),
+        TreeConfig::default().with_skip_state_root(true),
+    ];
+
+    for config in configs {
+        let mut test_harness = TestHarness::new(MAINNET.clone()).with_blocks(blocks.clone());
+        test_harness.tree.config = config;
+        test_harness
+            .tree
+            .persistence_state
+            .finish(blocks[0].recovered_block().hash(), blocks[0].recovered_block().number);
+
+        test_harness.tree.on_new_persisted_block().unwrap();
+
+        assert!(test_harness.tree.pending_sparse_trie_prune.is_none());
+    }
 }
 
 #[test]
@@ -1461,8 +1505,7 @@ fn test_on_new_payload_malformed_payload() {
     }
 }
 
-/// Test different `StateRootStrategy` paths: `StateRootTask` with empty/non-empty prefix sets,
-/// `Parallel`, `Synchronous`
+/// Test different `StateRootStrategy` paths: `StateRootTask` and `Synchronous`.
 #[test]
 fn test_state_root_strategy_paths() {
     reth_tracing::init_test_tracing();
@@ -1470,11 +1513,8 @@ fn test_state_root_strategy_paths() {
     let mut test_harness = TestHarness::new(MAINNET.clone());
 
     // Test multiple scenarios to ensure different StateRootStrategy paths are taken:
-    // 1. `StateRootTask` with empty prefix_sets → uses payload_processor.spawn()
-    // 2. `StateRootTask` with non-empty prefix_sets → switches to `Parallel`, uses
-    //    spawn_cache_exclusive()
-    // 3. `Parallel` strategy → uses spawn_cache_exclusive()
-    // 4. `Synchronous` strategy → uses spawn_cache_exclusive()
+    // 1. `StateRootTask` strategy uses payload_processor.spawn()
+    // 2. `Synchronous` strategy uses spawn_cache_exclusive()
 
     let s1 = include_str!("../../test-data/holesky/1.rlp");
     let data1 = Bytes::from_str(s1).unwrap();
@@ -1519,9 +1559,8 @@ fn test_state_root_strategy_paths() {
 
     // This test passes if multiple StateRootStrategy scenarios work correctly,
     // confirming that passing arguments directly doesn't break:
-    // - `StateRootTask` strategy with empty/non-empty prefix_sets
-    // - Dynamic strategy switching (StateRootTask → Parallel)
-    // - Parallel and Synchronous strategy paths
+    // - `StateRootTask` strategy
+    // - `Synchronous` strategy
     // - All parameter passing through the args struct
 }
 
@@ -1531,7 +1570,7 @@ fn test_state_root_strategy_paths() {
 //
 // This test suite exercises `validate_block_with_state` across different scenarios including:
 // - Basic block validation with state root computation
-// - Strategy selection based on conditions (`StateRootTask`, `Parallel`, `Synchronous`)
+// - Strategy selection based on conditions (`StateRootTask`, `Synchronous`)
 // - Trie update retention and discard logic
 // - Error precedence handling (consensus vs execution errors)
 // - Different validation scenarios (valid, invalid consensus, invalid execution blocks)

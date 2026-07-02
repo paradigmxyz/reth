@@ -21,7 +21,6 @@ reth-tasks = { workspace = true, features = ["rayon"] }
 reth-trie.workspace = true
 
 # alloy
-alloy-eip7928.workspace = true
 alloy-evm.workspace = true
 alloy-primitives.workspace = true
 alloy-rlp.workspace = true
