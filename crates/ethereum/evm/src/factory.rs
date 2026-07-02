@@ -208,6 +208,7 @@ impl Default for RethEvmFactory {
 
 impl RethEvmFactory {
     /// Creates a factory configuration with JIT compilation disabled.
+    #[cfg_attr(not(feature = "jit"), allow(clippy::missing_const_for_fn))]
     pub fn disabled() -> Self {
         #[cfg(feature = "jit")]
         {

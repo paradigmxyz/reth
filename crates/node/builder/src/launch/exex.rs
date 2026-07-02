@@ -17,10 +17,7 @@ use tracing::Instrument;
 use crate::{common::WithConfigs, exex::BoxedLaunchExEx};
 
 /// Can launch execution extensions.
-pub struct ExExLauncher<Node>
-where
-    Node: FullNodeComponents,
-{
+pub struct ExExLauncher<Node: FullNodeComponents> {
     head: Head,
     extensions: Vec<(String, Box<dyn BoxedLaunchExEx<Node>>)>,
     components: Node,
@@ -31,10 +28,7 @@ where
     capacity: usize,
 }
 
-impl<Node> ExExLauncher<Node>
-where
-    Node: FullNodeComponents + Clone,
-{
+impl<Node: FullNodeComponents + Clone> ExExLauncher<Node> {
     /// Create a new `ExExLauncher` with the given extensions.
     pub const fn new(
         head: Head,
@@ -181,10 +175,7 @@ where
     }
 }
 
-impl<Node> Debug for ExExLauncher<Node>
-where
-    Node: FullNodeComponents,
-{
+impl<Node: FullNodeComponents> Debug for ExExLauncher<Node> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("ExExLauncher")
             .field("head", &self.head)
