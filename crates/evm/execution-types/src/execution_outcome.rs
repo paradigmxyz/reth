@@ -282,22 +282,6 @@ impl<T> ExecutionOutcome<T> {
         Self::from_parts_and_results(first_block, state, block_states, block_reverts, results)
     }
 
-    /// Creates a new `ExecutionOutcome` from pre-aggregated execution state, per-block states,
-    /// per-block reverts, and execution results.
-    pub fn from_aggregated_state(
-        first_block: u64,
-        state: ExecutionState,
-        block_states: Vec<ExecutionState>,
-        block_reverts: Vec<BlockReverts>,
-        results: Vec<BlockExecutionResult<T>>,
-    ) -> Self {
-        Self::from_blocks(
-            first_block,
-            ExecutionOutcomeState::new(state, block_states, block_reverts),
-            results,
-        )
-    }
-
     /// Creates a new `ExecutionOutcome` from execution states and execution results.
     pub fn from_block_states(
         first_block: u64,
@@ -1013,7 +997,7 @@ mod tests {
     }
 
     #[test]
-    fn from_aggregated_state_matches_from_block_states() {
+    fn from_blocks_matches_from_block_states() {
         let address = Address::repeat_byte(0x42);
         let mut block1 = BlockStateAccumulator::new();
         StateChangeSink::storage(
@@ -1064,11 +1048,9 @@ mod tests {
             block_reverts.push(extend_state_and_collect_reverts(&mut aggregate_state, block_state));
         }
 
-        let actual = ExecutionOutcome::from_aggregated_state(
+        let actual = ExecutionOutcome::from_blocks(
             10,
-            aggregate_state,
-            block_states,
-            block_reverts,
+            ExecutionOutcomeState::new(aggregate_state, block_states, block_reverts),
             results,
         );
 
