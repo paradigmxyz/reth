@@ -1,12 +1,11 @@
 //! Helper type that represents one of two possible executor types
 
 use crate::execute::Executor;
-use alloc::vec::Vec;
 
 // re-export Either
 pub use futures_util::future::Either;
-use reth_execution_types::{BlockExecutionOutput, BlockExecutionResult, ExecutionOutcome};
-use reth_primitives_traits::{NodePrimitives, ReceiptTy, RecoveredBlock};
+use reth_execution_types::{BlockExecutionOutput, BlockExecutionResult, ExecutionOutcomeState};
+use reth_primitives_traits::{NodePrimitives, RecoveredBlock};
 
 impl<A, B> Executor for Either<A, B>
 where
@@ -45,14 +44,10 @@ where
         }
     }
 
-    fn into_execution_outcome(
-        self,
-        first_block: u64,
-        results: Vec<BlockExecutionResult<ReceiptTy<Self::Primitives>>>,
-    ) -> ExecutionOutcome<ReceiptTy<Self::Primitives>> {
+    fn into_state(self) -> ExecutionOutcomeState {
         match self {
-            Self::Left(a) => a.into_execution_outcome(first_block, results),
-            Self::Right(b) => b.into_execution_outcome(first_block, results),
+            Self::Left(a) => a.into_state(),
+            Self::Right(b) => b.into_state(),
         }
     }
 

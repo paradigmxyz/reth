@@ -13,7 +13,7 @@ use reth_cli::chainspec::ChainSpecParser;
 use reth_cli_util::cancellation::CancellationToken;
 use reth_consensus::FullConsensus;
 use reth_evm::{database::StateProviderDatabase, execute::Executor, ConfigureEvm};
-use reth_execution_types::{BlockReverts, RevertAccount};
+use reth_execution_types::{BlockReverts, ExecutionOutcome, RevertAccount};
 use reth_node_core::args::JitArgs;
 use reth_primitives_traits::{format_gas_throughput, Account, BlockBody, GotExpected};
 use reth_provider::{
@@ -276,8 +276,9 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
                             );
                             let next_executor = evm_config.batch_executor(database);
                             let old_executor = std::mem::replace(&mut executor, next_executor);
-                            let outcome = old_executor.into_execution_outcome(
+                            let outcome = ExecutionOutcome::from_blocks(
                                 executor_start_block,
+                                old_executor.into_state(),
                                 std::mem::take(&mut results),
                             );
                             verify_reverts_against_changesets(
@@ -294,7 +295,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
                     if !results.is_empty() {
                         let last_block = last_executed_block.unwrap_or(chunk_end - 1);
                         let outcome =
-                            executor.into_execution_outcome(executor_start_block, results);
+                            ExecutionOutcome::from_blocks(executor_start_block, executor.into_state(), results);
                         verify_reverts_against_changesets(
                             &provider,
                             outcome.block_reverts(),

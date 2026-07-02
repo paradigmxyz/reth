@@ -26,6 +26,44 @@ pub type AccountRevertInit = (Option<Option<Account>>, Vec<StorageEntry>);
 /// Type used to initialize reverts.
 pub type RevertsInit = HashMap<BlockNumber, AddressMap<AccountRevertInit>>;
 
+/// Accumulated state produced by batch execution.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ExecutionOutcomeState {
+    /// Aggregated execution state changes.
+    state: ExecutionState,
+    /// Per-block execution state changes.
+    block_states: Vec<ExecutionState>,
+    /// Per-block reverts.
+    block_reverts: Vec<BlockReverts>,
+}
+
+impl ExecutionOutcomeState {
+    /// Creates a new accumulated execution state.
+    pub const fn new(
+        state: ExecutionState,
+        block_states: Vec<ExecutionState>,
+        block_reverts: Vec<BlockReverts>,
+    ) -> Self {
+        Self { state, block_states, block_reverts }
+    }
+
+    /// Creates accumulated execution state from per-block states.
+    pub fn from_block_states(states: impl IntoIterator<Item = ExecutionState>) -> Self {
+        let block_states = states.into_iter().collect::<Vec<_>>();
+        let mut state = BlockStateAccumulator::new();
+        let mut block_reverts = Vec::with_capacity(block_states.len());
+        for block_state in &block_states {
+            block_reverts.push(extend_state_and_collect_reverts(&mut state, block_state));
+        }
+        Self { state, block_states, block_reverts }
+    }
+
+    /// Returns the accumulated state parts.
+    pub fn into_parts(self) -> (ExecutionState, Vec<ExecutionState>, Vec<BlockReverts>) {
+        (self.state, self.block_states, self.block_reverts)
+    }
+}
+
 /// Represents a changed account
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ChangedAccount {
@@ -211,7 +249,7 @@ impl<T> ExecutionOutcome<T> {
     }
 
     /// Creates a new `ExecutionOutcome` from multiple [`BlockExecutionResult`]s.
-    fn from_blocks(
+    fn from_parts_and_results(
         first_block: u64,
         state: ExecutionState,
         block_states: Vec<ExecutionState>,
@@ -233,17 +271,31 @@ impl<T> ExecutionOutcome<T> {
         value
     }
 
+    /// Creates a new `ExecutionOutcome` from accumulated batch state and execution results.
+    pub fn from_blocks(
+        first_block: u64,
+        state: ExecutionOutcomeState,
+        results: Vec<BlockExecutionResult<T>>,
+    ) -> Self {
+        let (state, block_states, mut block_reverts) = state.into_parts();
+        Self::adjust_reverts_for_prior_wipes(&ExecutionState::default(), &mut block_reverts);
+        Self::from_parts_and_results(first_block, state, block_states, block_reverts, results)
+    }
+
     /// Creates a new `ExecutionOutcome` from pre-aggregated execution state, per-block states,
     /// per-block reverts, and execution results.
     pub fn from_aggregated_state(
         first_block: u64,
         state: ExecutionState,
         block_states: Vec<ExecutionState>,
-        mut block_reverts: Vec<BlockReverts>,
+        block_reverts: Vec<BlockReverts>,
         results: Vec<BlockExecutionResult<T>>,
     ) -> Self {
-        Self::adjust_reverts_for_prior_wipes(&ExecutionState::default(), &mut block_reverts);
-        Self::from_blocks(first_block, state, block_states, block_reverts, results)
+        Self::from_blocks(
+            first_block,
+            ExecutionOutcomeState::new(state, block_states, block_reverts),
+            results,
+        )
     }
 
     /// Creates a new `ExecutionOutcome` from execution states and execution results.
@@ -252,14 +304,7 @@ impl<T> ExecutionOutcome<T> {
         states: impl IntoIterator<Item = ExecutionState>,
         results: Vec<BlockExecutionResult<T>>,
     ) -> Self {
-        let block_states = states.into_iter().collect::<Vec<_>>();
-        let mut state = BlockStateAccumulator::new();
-        let mut block_reverts = Vec::with_capacity(block_states.len());
-        for block_state in &block_states {
-            block_reverts.push(extend_state_and_collect_reverts(&mut state, block_state));
-        }
-        Self::adjust_reverts_for_prior_wipes(&ExecutionState::default(), &mut block_reverts);
-        Self::from_blocks(first_block, state, block_states, block_reverts, results)
+        Self::from_blocks(first_block, ExecutionOutcomeState::from_block_states(states), results)
     }
 
     /// Returns mutable per-block reverts.

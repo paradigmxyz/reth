@@ -28,7 +28,9 @@ use reth_execution_types::{
     ExecutionStateChangeSource,
 };
 pub use reth_execution_types::{BlockExecutionOutput, ExecutionOutcome};
-use reth_execution_types::{BlockExecutionResult, ExecutionStateAccumulator, HashedPostState};
+use reth_execution_types::{
+    BlockExecutionResult, ExecutionOutcomeState, ExecutionStateAccumulator, HashedPostState,
+};
 #[cfg(feature = "std")]
 use reth_primitives_traits::BlockTy;
 use reth_primitives_traits::{
@@ -626,19 +628,18 @@ pub trait Executor: Sized {
             results.push(self.execute_one(block)?);
         }
 
-        Ok(self.into_execution_outcome(first_block.unwrap_or_default(), results))
+        Ok(ExecutionOutcome::from_blocks(
+            first_block.unwrap_or_default(),
+            self.into_state(),
+            results,
+        ))
     }
 
     /// The size hint of the batch's tracked state size.
     fn size_hint(&self) -> usize;
 
-    /// Converts the accumulated batch state and the provided execution results into an execution
-    /// outcome.
-    fn into_execution_outcome(
-        self,
-        first_block: u64,
-        results: Vec<BlockExecutionResult<ReceiptTy<Self::Primitives>>>,
-    ) -> ExecutionOutcome<ReceiptTy<Self::Primitives>>;
+    /// Converts the executor into its accumulated batch state.
+    fn into_state(self) -> ExecutionOutcomeState;
 
     /// Takes the encoded block access list from executor.
     fn take_bal(&mut self) -> Option<Bytes>;
@@ -739,17 +740,11 @@ where
         state_source_size_hint(&self.batch_state)
     }
 
-    fn into_execution_outcome(
-        self,
-        first_block: u64,
-        results: Vec<BlockExecutionResult<ReceiptTy<Self::Primitives>>>,
-    ) -> ExecutionOutcome<ReceiptTy<Self::Primitives>> {
-        ExecutionOutcome::from_aggregated_state(
-            first_block,
+    fn into_state(self) -> ExecutionOutcomeState {
+        ExecutionOutcomeState::new(
             self.batch_state,
             self.batch_block_states,
             self.batch_block_reverts,
-            results,
         )
     }
 
@@ -869,18 +864,8 @@ impl<N: NodePrimitives> Executor for UnsupportedExecutor<N> {
         0
     }
 
-    fn into_execution_outcome(
-        self,
-        first_block: u64,
-        results: Vec<BlockExecutionResult<ReceiptTy<Self::Primitives>>>,
-    ) -> ExecutionOutcome<ReceiptTy<Self::Primitives>> {
-        ExecutionOutcome::from_aggregated_state(
-            first_block,
-            ExecutionStateAccumulator::new(),
-            Vec::new(),
-            Vec::new(),
-            results,
-        )
+    fn into_state(self) -> ExecutionOutcomeState {
+        ExecutionOutcomeState::default()
     }
 
     fn take_bal(&mut self) -> Option<Bytes> {

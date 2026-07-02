@@ -13,7 +13,8 @@ use reth_evm::execute::{BlockExecutionError, BlockExecutionOutput};
 use reth_node_api::{Block as _, BlockBody as _, NodePrimitives};
 use reth_primitives_traits::{format_gas_throughput, RecoveredBlock, SignedTransaction};
 use reth_provider::{
-    BlockReader, Chain, HeaderProvider, ProviderError, StateProviderFactory, TransactionVariant,
+    BlockReader, Chain, ExecutionOutcome, HeaderProvider, ProviderError, StateProviderFactory,
+    TransactionVariant,
 };
 use reth_prune_types::PruneModes;
 use reth_stages_api::ExecutionStageThresholds;
@@ -145,7 +146,8 @@ where
         );
         self.range = last_block_number + 1..=*self.range.end();
 
-        let outcome = executor.into_execution_outcome(first_block_number, results);
+        let outcome =
+            ExecutionOutcome::from_blocks(first_block_number, executor.into_state(), results);
         let chain = Chain::new(blocks, outcome, BTreeMap::new());
         Ok(chain)
     }

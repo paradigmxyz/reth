@@ -9,7 +9,7 @@ use reth_db::{static_file::HeaderMask, tables};
 use reth_evm::{
     database::StateProviderDatabase, execute::Executor, metrics::ExecutorMetrics, ConfigureEvm,
 };
-use reth_execution_types::Chain;
+use reth_execution_types::{Chain, ExecutionOutcome};
 use reth_exex::{ExExManagerHandle, ExExNotification, ExExNotificationSource};
 use reth_primitives_traits::{format_gas_throughput, BlockBody, NodePrimitives};
 use reth_provider::{
@@ -408,7 +408,7 @@ where
 
         // prepare execution output for writing
         let time = Instant::now();
-        let mut state = executor.into_execution_outcome(start_block, results);
+        let mut state = ExecutionOutcome::from_blocks(start_block, executor.into_state(), results);
         let write_preparation_duration = time.elapsed();
 
         // log the gas per second for the range we just executed
