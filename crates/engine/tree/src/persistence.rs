@@ -604,6 +604,46 @@ mod tests {
     }
 
     #[test]
+    fn test_reorg_to_genesis_prunes_receipts_static_file() {
+        reth_tracing::init_test_tracing();
+
+        let provider = create_test_provider_factory();
+        provider.set_storage_settings_cache(reth_provider::StorageSettings::v2());
+
+        let (_finished_exex_height_tx, finished_exex_height_rx) =
+            tokio::sync::watch::channel(FinishedExExHeight::NoExExs);
+        let pruner =
+            Pruner::new_with_factory(provider.clone(), vec![], 5, 0, None, finished_exex_height_rx);
+        let (sync_metrics_tx, _sync_metrics_rx) = unbounded_channel();
+        let handle =
+            PersistenceHandle::<EthPrimitives>::spawn_service(provider, pruner, sync_metrics_tx);
+
+        let mut builder = TestBlockBuilder::eth().with_state();
+        let blocks = builder.get_executed_blocks(0..2).collect::<Vec<_>>();
+        let genesis_hash = blocks[0].recovered_block().hash();
+        assert!(
+            !blocks[1].recovered_block().body().transactions.is_empty(),
+            "block 1 must have transactions for this test"
+        );
+
+        // persist blocks 0 and 1 (receipts land in static files)
+        let (tx, rx) = crossbeam_channel::bounded(1);
+        handle.save_blocks(blocks, tx).unwrap();
+        rx.recv().expect("save 1 failed");
+
+        // reorg: unwind the canonical head back to genesis
+        let (tx, rx) = crossbeam_channel::bounded(1);
+        handle.remove_blocks_above(0, tx).unwrap();
+        rx.recv().expect("remove failed");
+
+        // persist a different block 1
+        let block1b = builder.get_executed_block_with_number(1, genesis_hash);
+        let (tx, rx) = crossbeam_channel::bounded(1);
+        handle.save_blocks(vec![block1b], tx).unwrap();
+        rx.recv().expect("save after reorg failed (persistence service died)");
+    }
+
+    #[test]
     fn test_read_only_consistency_across_reorg() {
         reth_tracing::init_test_tracing();
 
