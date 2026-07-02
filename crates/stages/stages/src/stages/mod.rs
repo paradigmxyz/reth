@@ -67,10 +67,10 @@ mod tests {
         providers::{StaticFileProvider, StaticFileWriter},
         test_utils::MockNodeTypesWithDB,
         AccountExtReader, BlockBodyIndicesProvider, BlockWriter, DatabaseProviderFactory,
-        ProviderFactory, ProviderResult, ReceiptProvider, StageCheckpointWriter,
-        StaticFileProviderFactory, StorageReader,
+        ProviderFactory, ProviderResult, PruneCheckpointWriter, ReceiptProvider,
+        StageCheckpointWriter, StaticFileProviderFactory, StorageReader,
     };
-    use reth_prune_types::{PruneMode, PruneModes};
+    use reth_prune_types::{PruneCheckpoint, PruneMode, PruneModes, PruneSegment};
     use reth_stages_api::{
         ExecInput, ExecutionStageThresholds, PipelineTarget, Stage, StageCheckpoint, StageId,
     };
@@ -533,5 +533,173 @@ mod tests {
 
         // Fill the gap, and ensure no unwind is necessary.
         update_db_and_check::<tables::Receipts>(&db, current + 1, None);
+    }
+
+    #[test]
+    fn test_consistency_senders_distance_prune_checkpoint() {
+        use reth_db_api::models::StorageSettings;
+        use reth_storage_api::StorageSettingsCache;
+
+        let db = seed_data(90).unwrap();
+        db.factory.set_storage_settings_cache(StorageSettings::v2());
+        let static_file_provider = db.factory.static_file_provider();
+
+        // No senders (or changesets) static files exist while the stage checkpoints are at
+        // the tip, like a node restarted after a distance-pruned snapshot import. Without
+        // prune checkpoints this is indistinguishable from data loss, so an unwind to 0 is
+        // requested.
+        assert!(matches!(
+            static_file_provider.check_consistency(&db.factory.database_provider_ro().unwrap()),
+            Ok(Some(PipelineTarget::Unwind(0)))
+        ));
+
+        // With `Distance` prune checkpoints at the tip the missing data is intentional and
+        // no unwind should be requested.
+        // See <https://github.com/paradigmxyz/reth/issues/23463>
+        let provider_rw = db.factory.provider_rw().unwrap();
+        for segment in [
+            PruneSegment::SenderRecovery,
+            PruneSegment::AccountHistory,
+            PruneSegment::StorageHistory,
+        ] {
+            provider_rw
+                .save_prune_checkpoint(
+                    segment,
+                    PruneCheckpoint {
+                        block_number: Some(89),
+                        tx_number: None,
+                        prune_mode: PruneMode::Distance(2_000_000),
+                    },
+                )
+                .unwrap();
+        }
+        provider_rw.commit().unwrap();
+
+        assert!(matches!(
+            static_file_provider.check_consistency(&db.factory.database_provider_ro().unwrap()),
+            Ok(None)
+        ));
+    }
+
+    #[test]
+    fn test_consistency_senders_before_prune_checkpoint() {
+        use reth_db_api::models::StorageSettings;
+        use reth_storage_api::StorageSettingsCache;
+
+        let db = seed_data(90).unwrap();
+        db.factory.set_storage_settings_cache(StorageSettings::v2());
+        let static_file_provider = db.factory.static_file_provider();
+
+        // Same scenario as the `Distance` case, but pruned with a `Before` mode. The check is
+        // bounded by the prune checkpoint block regardless of the prune mode, so a node that
+        // pruned senders with `Before` must not be told to unwind to 0 either.
+        assert!(matches!(
+            static_file_provider.check_consistency(&db.factory.database_provider_ro().unwrap()),
+            Ok(Some(PipelineTarget::Unwind(0)))
+        ));
+
+        let provider_rw = db.factory.provider_rw().unwrap();
+        for segment in [
+            PruneSegment::SenderRecovery,
+            PruneSegment::AccountHistory,
+            PruneSegment::StorageHistory,
+        ] {
+            provider_rw
+                .save_prune_checkpoint(
+                    segment,
+                    PruneCheckpoint {
+                        block_number: Some(89),
+                        tx_number: None,
+                        prune_mode: PruneMode::Before(90),
+                    },
+                )
+                .unwrap();
+        }
+        provider_rw.commit().unwrap();
+
+        assert!(matches!(
+            static_file_provider.check_consistency(&db.factory.database_provider_ro().unwrap()),
+            Ok(None)
+        ));
+    }
+
+    #[test]
+    fn test_consistency_unwind_bounded_by_prune_checkpoint() {
+        use reth_db_api::models::StorageSettings;
+        use reth_storage_api::StorageSettingsCache;
+
+        let db = seed_data(90).unwrap();
+        db.factory.set_storage_settings_cache(StorageSettings::v2());
+        let static_file_provider = db.factory.static_file_provider();
+
+        // Senders are only pruned up to block 50 while the stage checkpoint is at the tip:
+        // blocks 51..=89 did lose data, so an unwind is still required, but bounded by the
+        // prune checkpoint instead of going all the way to 0.
+        let provider_rw = db.factory.provider_rw().unwrap();
+        provider_rw
+            .save_prune_checkpoint(
+                PruneSegment::SenderRecovery,
+                PruneCheckpoint {
+                    block_number: Some(50),
+                    tx_number: None,
+                    prune_mode: PruneMode::Distance(39),
+                },
+            )
+            .unwrap();
+        for segment in [PruneSegment::AccountHistory, PruneSegment::StorageHistory] {
+            provider_rw
+                .save_prune_checkpoint(
+                    segment,
+                    PruneCheckpoint {
+                        block_number: Some(89),
+                        tx_number: None,
+                        prune_mode: PruneMode::Distance(2_000_000),
+                    },
+                )
+                .unwrap();
+        }
+        provider_rw.commit().unwrap();
+
+        assert!(matches!(
+            static_file_provider.check_consistency(&db.factory.database_provider_ro().unwrap()),
+            Ok(Some(PipelineTarget::Unwind(50)))
+        ));
+    }
+
+    #[test]
+    fn test_consistency_receipts_distance_prune_checkpoint() {
+        let db = seed_data(90).unwrap();
+        let static_file_provider = db.factory.static_file_provider();
+
+        // Remove all receipts static files, like a node whose receipts have been
+        // distance-pruned away.
+        while let Some(block) =
+            static_file_provider.get_highest_static_file_block(StaticFileSegment::Receipts)
+        {
+            static_file_provider.delete_jar(StaticFileSegment::Receipts, block).unwrap();
+        }
+
+        assert!(matches!(
+            static_file_provider.check_consistency(&db.factory.database_provider_ro().unwrap()),
+            Ok(Some(PipelineTarget::Unwind(0)))
+        ));
+
+        let provider_rw = db.factory.provider_rw().unwrap();
+        provider_rw
+            .save_prune_checkpoint(
+                PruneSegment::Receipts,
+                PruneCheckpoint {
+                    block_number: Some(89),
+                    tx_number: None,
+                    prune_mode: PruneMode::Distance(2_000_000),
+                },
+            )
+            .unwrap();
+        provider_rw.commit().unwrap();
+
+        assert!(matches!(
+            static_file_provider.check_consistency(&db.factory.database_provider_ro().unwrap()),
+            Ok(None)
+        ));
     }
 }
