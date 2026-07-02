@@ -506,6 +506,11 @@ fn decode_usize_rlp_list_with_capacity(
     }
 
     let (mut payload, rest) = buf.split_at(payload_length);
+    if let Some(values) = decode_fixed_width_usize_list(payload, capacity) {
+        *buf = rest;
+        return values
+    }
+
     let mut values = Vec::with_capacity(capacity);
     while !payload.is_empty() {
         values.push(usize::decode(&mut payload)?);
@@ -513,6 +518,61 @@ fn decode_usize_rlp_list_with_capacity(
     *buf = rest;
 
     Ok(values)
+}
+
+fn decode_fixed_width_usize_list(
+    payload: &[u8],
+    capacity: usize,
+) -> Option<alloy_rlp::Result<Vec<usize>>> {
+    if capacity == 0 {
+        return payload.is_empty().then(|| Ok(Vec::new()))
+    }
+
+    let encoded_len = payload.len().checked_div(capacity)?;
+    if !payload.len().is_multiple_of(capacity) {
+        return None
+    }
+
+    let value_len = encoded_len.checked_sub(1)?;
+    if value_len == 0 || value_len > core::mem::size_of::<usize>() {
+        return None
+    }
+
+    let prefix = EMPTY_STRING_CODE + value_len as u8;
+    let mut values = Vec::with_capacity(capacity);
+    if value_len == 1 {
+        for chunk in payload.chunks_exact(encoded_len) {
+            if chunk[0] != prefix {
+                return None
+            }
+            let value = chunk[1];
+            if value < EMPTY_STRING_CODE {
+                return Some(Err(alloy_rlp::Error::NonCanonicalSingleByte))
+            }
+            values.push(value as usize);
+        }
+
+        return Some(Ok(values))
+    }
+
+    for chunk in payload.chunks_exact(encoded_len) {
+        if chunk[0] != prefix {
+            return None
+        }
+
+        let value_bytes = &chunk[1..];
+        if value_len > 1 && value_bytes[0] == 0 {
+            return Some(Err(alloy_rlp::Error::LeadingZero))
+        }
+
+        let mut value = 0usize;
+        for byte in value_bytes {
+            value = (value << 8) | *byte as usize;
+        }
+        values.push(value);
+    }
+
+    Some(Ok(values))
 }
 
 /// Same as [`NewPooledTransactionHashes66`] but extends that beside the transaction hashes,
@@ -1455,6 +1515,21 @@ mod tests {
         for vector in vectors {
             test_encoding_vector(vector);
         }
+    }
+
+    #[test]
+    fn eth_68_tx_hash_decode_rejects_non_canonical_size_metadata() {
+        let mut single_byte = vec![0xe6, 0x02, 0xc2, 0x81, 0x7f, 0xe1, 0xa0];
+        single_byte.extend_from_slice(&[0x42; 32]);
+
+        let result = NewPooledTransactionHashes68::decode(&mut single_byte.as_ref());
+        assert_eq!(result.unwrap_err(), alloy_rlp::Error::NonCanonicalSingleByte);
+
+        let mut leading_zero = vec![0xe7, 0x02, 0xc3, 0x82, 0x00, 0x80, 0xe1, 0xa0];
+        leading_zero.extend_from_slice(&[0x42; 32]);
+
+        let result = NewPooledTransactionHashes68::decode(&mut leading_zero.as_ref());
+        assert_eq!(result.unwrap_err(), alloy_rlp::Error::LeadingZero);
     }
 
     #[test]

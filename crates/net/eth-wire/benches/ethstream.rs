@@ -27,6 +27,7 @@ use std::{
 };
 
 const MESSAGE_COUNT: usize = 1024;
+const HASHES_PER_ANNOUNCEMENT: usize = 64;
 const ACTIVE_SESSION_P2P_OUTGOING_BUFFER_CAPACITY: usize = 32;
 const ECIES_PAYLOAD_LEN: usize = 512;
 
@@ -43,24 +44,37 @@ fn message() -> EthMessage<EthNetworkPrimitives> {
 }
 
 fn message_for_version(version: EthVersion) -> EthMessage<EthNetworkPrimitives> {
+    message_for_version_with_hashes(version, 1)
+}
+
+fn message_for_version_with_hashes(
+    version: EthVersion,
+    hash_count: usize,
+) -> EthMessage<EthNetworkPrimitives> {
+    let hashes = hashes(hash_count);
+
     if version.is_eth72() {
         return EthMessage::NewPooledTransactionHashes72(NewPooledTransactionHashes72 {
-            types: vec![0x02],
-            sizes: vec![128],
-            hashes: vec![B256::repeat_byte(0x42)],
+            types: vec![0x02; hash_count],
+            sizes: vec![128; hash_count],
+            hashes,
             cell_mask: None,
         })
     }
 
     if version.has_eth68_metadata() {
         return EthMessage::NewPooledTransactionHashes68(NewPooledTransactionHashes68 {
-            types: vec![0x02],
-            sizes: vec![128],
-            hashes: vec![B256::repeat_byte(0x42)],
+            types: vec![0x02; hash_count],
+            sizes: vec![128; hash_count],
+            hashes,
         })
     }
 
-    EthMessage::NewPooledTransactionHashes66(vec![B256::repeat_byte(0x42)].into())
+    EthMessage::NewPooledTransactionHashes66(hashes.into())
+}
+
+fn hashes(count: usize) -> Vec<B256> {
+    (0..count).map(|idx| B256::repeat_byte(idx as u8)).collect()
 }
 
 fn transaction(nonce: u64) -> Arc<TransactionSigned> {
@@ -121,9 +135,16 @@ fn encoded_wire_message() -> BytesMut {
 }
 
 fn encoded_wire_message_for_version(version: EthVersion) -> BytesMut {
+    encoded_wire_message_for_version_with_hashes(version, 1)
+}
+
+fn encoded_wire_message_for_version_with_hashes(
+    version: EthVersion,
+    hash_count: usize,
+) -> BytesMut {
     runtime().block_on(async {
         let mut stream = eth_stream_with_version(MockTransport::default(), version);
-        stream.send(message_for_version(version)).await.unwrap();
+        stream.send(message_for_version_with_hashes(version, hash_count)).await.unwrap();
         stream.inner().inner().sent[0].clone().into()
     })
 }
@@ -479,6 +500,36 @@ fn bench_recv_messages(c: &mut Criterion) {
                 });
             })
         });
+
+        group.bench_function(
+            format!(
+                "recv_hash_announcements_eth{}_{}_hashes",
+                version as u8, HASHES_PER_ANNOUNCEMENT
+            ),
+            |b| {
+                let encoded =
+                    encoded_wire_message_for_version_with_hashes(version, HASHES_PER_ANNOUNCEMENT);
+                b.iter(|| {
+                    rt.block_on(async {
+                        let mut stream = eth_stream_with_version(
+                            MockTransport::with_incoming(encoded.clone(), MESSAGE_COUNT),
+                            version,
+                        );
+                        let mut decode_buf = BytesMut::new();
+                        for _ in 0..MESSAGE_COUNT {
+                            black_box(
+                                poll_fn(|cx| {
+                                    Pin::new(&mut stream).poll_next_eth_message(cx, &mut decode_buf)
+                                })
+                                .await
+                                .unwrap()
+                                .unwrap(),
+                            );
+                        }
+                    });
+                })
+            },
+        );
     }
 }
 
