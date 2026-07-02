@@ -6,10 +6,11 @@ use alloy_primitives::{
 };
 use reth_primitives_traits::{Account, Bytecode};
 use reth_storage_api::{
-    AccountReader, BlockHashReader, BytecodeReader, HashedPostStateProvider, StateProofProvider,
-    StateProvider, StateRootProvider, StorageRootProvider,
+    AccountRangeProvider, AccountRangeResult, AccountReader, BlockHashReader, BytecodeReader,
+    HashedPostStateProvider, StateProofProvider, StateProvider, StateRootProvider,
+    StorageRootProvider,
 };
-use reth_storage_errors::provider::ProviderResult;
+use reth_storage_errors::provider::{ProviderError, ProviderResult};
 use reth_trie::{
     updates::TrieUpdates, AccountProof, HashedPostState, HashedStorage, KeccakKeyHasher,
     MultiProof, MultiProofTargets, StorageMultiProof, StorageProof, TrieInput,
@@ -154,6 +155,17 @@ impl StateProofProvider for StateProviderTest {
 impl HashedPostStateProvider for StateProviderTest {
     fn hashed_post_state(&self, bundle_state: &revm::database::BundleState) -> HashedPostState {
         HashedPostState::from_bundle_state::<KeccakKeyHasher>(bundle_state.state())
+    }
+}
+
+impl AccountRangeProvider for StateProviderTest {
+    fn account_range_overlaid(
+        &self,
+        _input: TrieInput,
+        _start: B256,
+        _limit: usize,
+    ) -> ProviderResult<AccountRangeResult> {
+        Err(ProviderError::UnsupportedProvider)
     }
 }
 

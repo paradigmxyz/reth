@@ -2,15 +2,15 @@ use super::{
     AccountReader, BlockHashReader, BlockIdReader, StateProofProvider, StateRootProvider,
     StorageRootProvider,
 };
-use alloc::boxed::Box;
+use alloc::{boxed::Box, vec::Vec};
 use alloy_consensus::constants::KECCAK_EMPTY;
 use alloy_eips::{BlockId, BlockNumberOrTag};
 use alloy_primitives::{Address, BlockHash, BlockNumber, StorageKey, StorageValue, B256, U256};
 use auto_impl::auto_impl;
 use reth_execution_types::ExecutionOutcome;
-use reth_primitives_traits::Bytecode;
+use reth_primitives_traits::{Account, Bytecode};
 use reth_storage_errors::provider::ProviderResult;
-use reth_trie_common::HashedPostState;
+use reth_trie_common::{HashedPostState, TrieInput};
 use revm::database::BundleState;
 
 /// This just receives state, or [`ExecutionOutcome`], from the provider
@@ -29,6 +29,48 @@ pub trait StateReader: Send {
 /// Type alias of boxed [`StateProvider`].
 pub type StateProviderBox = Box<dyn StateProvider + Send + 'static>;
 
+/// A single account returned by [`AccountRangeProvider`].
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct AccountRangeEntry {
+    /// Hashed account key used for pagination.
+    pub hash: B256,
+    /// Account value stored at the hashed key.
+    pub account: Account,
+}
+
+/// Result of a paginated account-range query.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct AccountRangeResult {
+    /// Account entries ordered by hashed key.
+    pub accounts: Vec<AccountRangeEntry>,
+    /// First hashed key to use for the next page, if more accounts remain.
+    pub next_key: Option<B256>,
+}
+
+/// Capability for providers that can enumerate account leaves in hashed-key order.
+#[auto_impl(&, Arc, Box)]
+pub trait AccountRangeProvider {
+    /// Returns up to `limit` accounts whose hashed keys are greater than or equal to `start`.
+    ///
+    /// `next_key`, when present, is the first key to use for the next page.
+    fn account_range(&self, start: B256, limit: usize) -> ProviderResult<AccountRangeResult> {
+        self.account_range_overlaid(TrieInput::default(), start, limit)
+    }
+
+    /// Same as [`account_range`](Self::account_range), but layers `input` on top of the provider's
+    /// own state before enumerating.
+    ///
+    /// Used to push in-memory state (e.g. not-yet-persisted blocks) down to a database-backed
+    /// provider that owns the hashed account cursor, mirroring
+    /// [`StateRootProvider::state_root_from_nodes`](crate::StateRootProvider::state_root_from_nodes).
+    fn account_range_overlaid(
+        &self,
+        input: TrieInput,
+        start: B256,
+        limit: usize,
+    ) -> ProviderResult<AccountRangeResult>;
+}
+
 /// An abstraction for a type that provides state data.
 #[auto_impl(&, Arc, Box)]
 pub trait StateProvider:
@@ -39,6 +81,7 @@ pub trait StateProvider:
     + StorageRootProvider
     + StateProofProvider
     + HashedPostStateProvider
+    + AccountRangeProvider
 {
     /// Get storage of given account.
     fn storage(

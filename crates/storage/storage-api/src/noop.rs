@@ -3,12 +3,13 @@
 pub use crate::bal::NoopBalStore;
 
 use crate::{
-    AccountReader, BalProvider, BalStoreHandle, BlockBodyIndicesProvider, BlockHashReader,
-    BlockIdReader, BlockNumReader, BlockReader, BlockReaderIdExt, BlockSource, BytecodeReader,
-    ChangeSetReader, HashedPostStateProvider, HeaderProvider, NodePrimitivesProvider,
-    PruneCheckpointReader, ReceiptProvider, ReceiptProviderIdExt, StageCheckpointReader,
-    StateProofProvider, StateProvider, StateProviderBox, StateProviderFactory, StateReader,
-    StateRootProvider, StorageRootProvider, TransactionVariant, TransactionsProvider,
+    AccountRangeProvider, AccountRangeResult, AccountReader, BalProvider, BalStoreHandle,
+    BlockBodyIndicesProvider, BlockHashReader, BlockIdReader, BlockNumReader, BlockReader,
+    BlockReaderIdExt, BlockSource, BytecodeReader, ChangeSetReader, HashedPostStateProvider,
+    HeaderProvider, NodePrimitivesProvider, PruneCheckpointReader, ReceiptProvider,
+    ReceiptProviderIdExt, StageCheckpointReader, StateProofProvider, StateProvider,
+    StateProviderBox, StateProviderFactory, StateReader, StateRootProvider, StorageRootProvider,
+    TransactionVariant, TransactionsProvider,
 };
 
 #[cfg(feature = "db-api")]
@@ -529,6 +530,17 @@ impl<C: Send + Sync, N: NodePrimitives> StateProofProvider for NoopProvider<C, N
 impl<C: Send + Sync, N: NodePrimitives> HashedPostStateProvider for NoopProvider<C, N> {
     fn hashed_post_state(&self, _bundle_state: &revm::database::BundleState) -> HashedPostState {
         HashedPostState::default()
+    }
+}
+
+impl<C: Send + Sync, N: NodePrimitives> AccountRangeProvider for NoopProvider<C, N> {
+    fn account_range_overlaid(
+        &self,
+        _input: TrieInput,
+        _start: B256,
+        _limit: usize,
+    ) -> ProviderResult<AccountRangeResult> {
+        Ok(AccountRangeResult::default())
     }
 }
 

@@ -5,7 +5,8 @@ use alloy_primitives::{Address, BlockNumber, Bytes, StorageKey, StorageValue, B2
 use reth_db_api::{cursor::DbDupCursorRO, tables, transaction::DbTx};
 use reth_primitives_traits::{Account, Bytecode};
 use reth_storage_api::{
-    BytecodeReader, DBProvider, StateProofProvider, StorageRootProvider, StorageSettingsCache,
+    AccountRangeProvider, BytecodeReader, DBProvider, StateProofProvider, StorageRootProvider,
+    StorageSettingsCache,
 };
 use reth_storage_errors::provider::{ProviderError, ProviderResult};
 use reth_trie::{
@@ -257,6 +258,29 @@ impl<Provider: DBProvider> HashedPostStateProvider for LatestStateProviderRef<'_
     }
 }
 
+impl<Provider: DBProvider + StorageSettingsCache> AccountRangeProvider
+    for LatestStateProviderRef<'_, Provider>
+{
+    fn account_range_overlaid(
+        &self,
+        input: TrieInput,
+        start: B256,
+        limit: usize,
+    ) -> ProviderResult<reth_storage_api::AccountRangeResult> {
+        // Latest state has no historical overlay of its own, so the input's hashed state is the
+        // only overlay layered on top of the database hashed account cursor.
+        let overlay = input.state.into_sorted();
+        super::account_range::account_range(
+            &HashedPostStateCursorFactory::new(
+                reth_trie_db::DatabaseHashedCursorFactory::new(self.tx()),
+                &overlay,
+            ),
+            start,
+            limit,
+        )
+    }
+}
+
 impl<Provider: DBProvider + BlockHashReader + StorageSettingsCache> StateProvider
     for LatestStateProviderRef<'_, Provider>
 {
@@ -322,8 +346,8 @@ mod tests {
         tables,
         transaction::{DbTx, DbTxMut},
     };
-    use reth_primitives_traits::StorageEntry;
-    use reth_storage_api::StorageSettingsCache;
+    use reth_primitives_traits::{Account, StorageEntry};
+    use reth_storage_api::{AccountRangeProvider, StorageSettingsCache};
 
     const fn assert_state_provider<T: StateProvider>() {}
     #[expect(dead_code)]
@@ -438,5 +462,58 @@ mod tests {
         let db = factory.provider().unwrap();
         let provider_ref = LatestStateProviderRef::new(&db);
         assert_eq!(provider_ref.storage(address, slot).unwrap(), None);
+    }
+
+    #[test]
+    fn latest_account_range_pages_by_hashed_key() {
+        let factory = create_test_provider_factory();
+        let tx = factory.provider_rw().unwrap().into_tx();
+        let accounts = [
+            (
+                B256::with_last_byte(5),
+                Account { nonce: 5, balance: U256::from(5), bytecode_hash: None },
+            ),
+            (
+                B256::with_last_byte(1),
+                Account { nonce: 1, balance: U256::from(1), bytecode_hash: None },
+            ),
+            (
+                B256::with_last_byte(3),
+                Account { nonce: 3, balance: U256::from(3), bytecode_hash: None },
+            ),
+        ];
+        for (hash, account) in accounts {
+            tx.put::<tables::HashedAccounts>(hash, account).unwrap();
+        }
+        tx.commit().unwrap();
+
+        let db = factory.provider().unwrap();
+        let provider_ref = LatestStateProviderRef::new(&db);
+
+        let first_page = provider_ref.account_range(B256::ZERO, 2).unwrap();
+        assert_eq!(
+            first_page.accounts,
+            vec![
+                reth_storage_api::AccountRangeEntry {
+                    hash: B256::with_last_byte(1),
+                    account: Account { nonce: 1, balance: U256::from(1), bytecode_hash: None },
+                },
+                reth_storage_api::AccountRangeEntry {
+                    hash: B256::with_last_byte(3),
+                    account: Account { nonce: 3, balance: U256::from(3), bytecode_hash: None },
+                },
+            ]
+        );
+        assert_eq!(first_page.next_key, Some(B256::with_last_byte(5)));
+
+        let second_page = provider_ref.account_range(first_page.next_key.unwrap(), 2).unwrap();
+        assert_eq!(
+            second_page.accounts,
+            vec![reth_storage_api::AccountRangeEntry {
+                hash: B256::with_last_byte(5),
+                account: Account { nonce: 5, balance: U256::from(5), bytecode_hash: None },
+            }]
+        );
+        assert_eq!(second_page.next_key, None);
     }
 }
