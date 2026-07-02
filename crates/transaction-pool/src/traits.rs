@@ -886,6 +886,11 @@ impl<T: PoolTransaction> IntoIterator for AllPoolTransactions<T> {
 pub struct PropagatedTransactions(pub B256Map<Vec<PropagateKind>>);
 
 impl PropagatedTransactions {
+    /// Creates a new propagation tracker with capacity for `capacity` distinct transaction hashes.
+    pub fn with_capacity(capacity: usize) -> Self {
+        Self(B256Map::with_capacity_and_hasher(capacity, Default::default()))
+    }
+
     /// Records a propagation of a transaction to a peer.
     pub fn record(&mut self, hash: TxHash, kind: PropagateKind) {
         self.0.entry(hash).or_default().push(kind);
