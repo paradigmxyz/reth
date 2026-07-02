@@ -16,14 +16,18 @@ pub mod policy;
 pub mod witness;
 
 pub mod sidecar;
+pub mod witness_check;
 
 pub use accessed_state::BlockAccessedState;
 pub use fixture::{load_fixtures, save_fixture, AccessedStateFixture, LoadedFixtures};
 pub use network_cache::{CachedEntry, NetworkStateCache};
 pub use policy::{CachePolicy, LastNBlocksPolicy};
-pub use witness::{measure_multiproof_size, miss_to_proof_targets, WitnessResult};
 pub use sidecar::{
-    CacheFootprintStats, PartialExecutionWitness, PartialExecutionWitnessState,
-    PartialStatelessSidecar, PartitionCheck, SerializableMultiProof, SerializableStorageMultiProof,
-    SidecarBenchmarkManifest, StateTargetSet, WitnessReductionStats, WitnessTargets,
+    check_next_cache_anchor, check_sidecar_context, check_sidecar_miss_targets,
+    check_sidecar_self_consistency, last_n_blocks_cache_policy_id, partial_witness_commitment,
+    CacheAnchor, CacheFootprintStats, PartialExecutionWitness, PartialExecutionWitnessState,
+    PartialStatelessSidecar, RootWitnessCompletenessReport, RootWitnessCompletenessSummary,
+    SerializableMultiProof, SerializableStorageMultiProof, SidecarBenchmarkManifest,
+    SidecarCheckError, StateTargetSet, StateTargetStats, WitnessReductionStats, WitnessTargets,
 };
+pub use witness::{measure_multiproof_size, miss_to_proof_targets, WitnessResult};

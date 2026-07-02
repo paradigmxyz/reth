@@ -39,10 +39,9 @@ fn test_multi_block_simulation() {
 
         // One cold address per block
         let cold = cold_addrs[block as usize - 100];
-        accessed.accounts.insert(
-            cold,
-            AccountData { nonce: 0, balance: U256::from(100), code_hash: None },
-        );
+        accessed
+            .accounts
+            .insert(cold, AccountData { nonce: 0, balance: U256::from(100), code_hash: None });
 
         // Compute miss before updating cache
         let miss = cache.compute_miss(&accessed);
@@ -52,7 +51,7 @@ fn test_multi_block_simulation() {
         // Update cache with this block's data
         let stats = cache.on_block_executed(block, &accessed);
 
-        // Verify hot address is always cached after first block
+        // Check hot address is always cached after first block.
         if block > 100 {
             // Hot addr should hit cache (was inserted in previous block)
             assert!(
@@ -77,7 +76,11 @@ fn test_multi_block_simulation() {
     // Account window=10: hot addr + cold addrs within window
     // Window includes current block and 10 blocks back, so up to 12 accounts at steady state
     // (hot + 11 cold addrs that are within the 10-block window due to inclusive boundary)
-    assert!(snap.total_accounts <= 12, "should have at most 12 accounts, got {}", snap.total_accounts);
+    assert!(
+        snap.total_accounts <= 12,
+        "should have at most 12 accounts, got {}",
+        snap.total_accounts
+    );
 
     // Storage window=5: hot_slot was accessed every block, so it's always retained
     assert!(cache.contains_storage(&hot_addr, &hot_slot));
@@ -102,10 +105,9 @@ fn test_differentiated_policies() {
 
     // Block 10: access account + storage
     let mut accessed = BlockAccessedState::default();
-    accessed.accounts.insert(
-        addr,
-        AccountData { nonce: 1, balance: U256::from(500), code_hash: None },
-    );
+    accessed
+        .accounts
+        .insert(addr, AccountData { nonce: 1, balance: U256::from(500), code_hash: None });
     accessed.storage.insert((addr, slot), U256::from(99));
     cache.on_block_executed(10, &accessed);
 
@@ -117,21 +119,125 @@ fn test_differentiated_policies() {
     assert!(!cache.contains_storage(&addr, &slot), "storage should be evicted with window=3");
 }
 
+/// Test cache coherency anchors and miss-only sidecar checks against a real cache transition.
+#[test]
+fn test_cache_coherency_claim_over_cache_transition() {
+    use alloy_primitives::Bytes;
+    use partial_stateless::{
+        sidecar::{
+            check_next_cache_anchor, check_sidecar_context, check_sidecar_miss_targets,
+            last_n_blocks_cache_policy_id, partial_witness_commitment, PartialExecutionWitness,
+            PartialExecutionWitnessState, PartialStatelessSidecar, SidecarCheckError,
+        },
+        witness::{build_sidecar_targets, WitnessResult},
+    };
+
+    let mut cache = NetworkStateCache::new(
+        Box::new(LastNBlocksPolicy::new(10)),
+        Box::new(LastNBlocksPolicy::new(10)),
+    );
+
+    let parent_hash = B256::repeat_byte(0xaa);
+    let block_hash = B256::repeat_byte(0xbb);
+    let cache_policy_id = last_n_blocks_cache_policy_id(10, 10);
+    let hit_account = Address::repeat_byte(0x01);
+    let missed_account = Address::repeat_byte(0x02);
+
+    let mut prev_accessed = BlockAccessedState::default();
+    prev_accessed
+        .accounts
+        .insert(hit_account, AccountData { nonce: 1, balance: U256::from(100), code_hash: None });
+    cache.on_block_executed(99, &prev_accessed);
+    let prev_cache_anchor = cache.cache_anchor(99, parent_hash, cache_policy_id);
+
+    let mut block_accessed = BlockAccessedState::default();
+    block_accessed
+        .accounts
+        .insert(hit_account, AccountData { nonce: 2, balance: U256::from(110), code_hash: None });
+    block_accessed
+        .accounts
+        .insert(missed_account, AccountData { nonce: 0, balance: U256::from(1), code_hash: None });
+
+    let miss = cache.compute_miss(&block_accessed);
+    let expected_miss = cache.expected_miss_targets(&block_accessed);
+    let (miss_manifest, _) = build_sidecar_targets(&miss);
+
+    cache.on_block_executed(100, &block_accessed);
+    let next_cache_anchor = cache.cache_anchor(100, block_hash, cache_policy_id);
+
+    let stats = WitnessResult {
+        total_size_bytes: 0,
+        account_proof_bytes: 0,
+        storage_proof_bytes: 0,
+        bytecode_bytes: 0,
+        account_proof_nodes: 0,
+        storage_proof_nodes: 0,
+        target_accounts: 0,
+        target_storage_slots: 0,
+        computation_time_ms: None,
+    };
+
+    let parent_state_root = B256::repeat_byte(0xcc);
+    let witness = PartialExecutionWitness {
+        state: PartialExecutionWitnessState::MptMultiProof(vec![]),
+        codes: vec![Bytes::new()],
+        keys: vec![],
+        headers: vec![],
+    };
+    let witness_commitment =
+        partial_witness_commitment(parent_state_root, &expected_miss, &witness);
+
+    let mut sidecar = PartialStatelessSidecar {
+        parent_hash,
+        parent_state_root,
+        block_hash,
+        block_number: 100,
+        cache_block: 99,
+        cache_policy_id,
+        prev_cache_anchor,
+        next_cache_anchor,
+        cache_policy_metadata: "LastNBlocks(10, 10)".to_string(),
+        cache_miss_targets: expected_miss.clone(),
+        witness_commitment,
+        miss_manifest,
+        witness,
+        stats,
+    };
+
+    check_sidecar_context(&sidecar, &prev_cache_anchor).expect("matching previous cache context");
+    check_sidecar_miss_targets(&sidecar, &expected_miss)
+        .expect("sidecar should carry only cache misses");
+    check_next_cache_anchor(&sidecar, &next_cache_anchor).expect("matching next cache anchor");
+
+    sidecar.cache_miss_targets.accounts.push(hit_account);
+    sidecar.miss_manifest.missed_accounts.push(hit_account);
+    sidecar.witness_commitment = partial_witness_commitment(
+        parent_state_root,
+        &sidecar.cache_miss_targets,
+        &sidecar.witness,
+    );
+    let err = check_sidecar_miss_targets(&sidecar, &expected_miss)
+        .expect_err("cache hit must not be carried as a miss target");
+
+    assert!(matches!(err, SidecarCheckError::MissTargetsMismatch { .. }));
+}
+
 /// Test sidecar serialization and deserialization along with build_sidecar_targets logic.
 #[test]
 fn test_sidecar_serialization_and_targets() {
-    use alloy_primitives::Bytes;
-    use reth_trie_common::{MultiProof, StorageMultiProof, BranchNodeMasks, TrieMask};
-    use reth_trie_common::proof::ProofNodes;
     use alloy_primitives::map::{B256Map, HashMap};
+    use alloy_primitives::Bytes;
     use partial_stateless::{
-        witness::{build_sidecar_targets, WitnessResult},
-        sidecar::{
-            PartialExecutionWitness, PartialExecutionWitnessState, PartialStatelessSidecar,
-            SerializableMultiProof, WitnessTargets,
-        },
         network_cache::MissResult,
+        sidecar::{
+            last_n_blocks_cache_policy_id, partial_witness_commitment, CacheAnchor,
+            PartialExecutionWitness, PartialExecutionWitnessState, PartialStatelessSidecar,
+            SerializableMultiProof, StateTargetSet, WitnessTargets,
+        },
+        witness::{build_sidecar_targets, WitnessResult},
     };
+    use reth_trie_common::proof::ProofNodes;
+    use reth_trie_common::{BranchNodeMasks, MultiProof, StorageMultiProof, TrieMask};
 
     // 1. Create a dummy MultiProof
     let account = Address::repeat_byte(0x11);
@@ -140,29 +246,26 @@ fn test_sidecar_serialization_and_targets() {
     let hashed_slot = alloy_primitives::keccak256(slot);
 
     let mut account_subtree: HashMap<reth_trie_common::Nibbles, Bytes> = HashMap::default();
-    account_subtree.insert(reth_trie_common::Nibbles::unpack(hashed_account), Bytes::from(vec![1, 2, 3]));
+    account_subtree
+        .insert(reth_trie_common::Nibbles::unpack(hashed_account), Bytes::from(vec![1, 2, 3]));
     let account_subtree = ProofNodes::from_iter(account_subtree);
 
-    let mut branch_node_masks: HashMap<reth_trie_common::Nibbles, BranchNodeMasks> = HashMap::default();
+    let mut branch_node_masks: HashMap<reth_trie_common::Nibbles, BranchNodeMasks> =
+        HashMap::default();
     branch_node_masks.insert(
         reth_trie_common::Nibbles::unpack(hashed_account),
-        BranchNodeMasks {
-            hash_mask: TrieMask::new(0b101),
-            tree_mask: TrieMask::new(0b010),
-        },
+        BranchNodeMasks { hash_mask: TrieMask::new(0b101), tree_mask: TrieMask::new(0b010) },
     );
 
     let mut storage_subtree: HashMap<reth_trie_common::Nibbles, Bytes> = HashMap::default();
-    storage_subtree.insert(reth_trie_common::Nibbles::unpack(hashed_slot), Bytes::from(vec![4, 5, 6]));
+    storage_subtree
+        .insert(reth_trie_common::Nibbles::unpack(hashed_slot), Bytes::from(vec![4, 5, 6]));
     let storage_subtree = ProofNodes::from_iter(storage_subtree);
 
     let mut storage_masks: HashMap<reth_trie_common::Nibbles, BranchNodeMasks> = HashMap::default();
     storage_masks.insert(
         reth_trie_common::Nibbles::unpack(hashed_slot),
-        BranchNodeMasks {
-            hash_mask: TrieMask::new(0b011),
-            tree_mask: TrieMask::new(0b100),
-        },
+        BranchNodeMasks { hash_mask: TrieMask::new(0b011), tree_mask: TrieMask::new(0b100) },
     );
 
     let mut storages = B256Map::default();
@@ -175,11 +278,7 @@ fn test_sidecar_serialization_and_targets() {
         },
     );
 
-    let original_proof = MultiProof {
-        account_subtree,
-        branch_node_masks,
-        storages,
-    };
+    let original_proof = MultiProof { account_subtree, branch_node_masks, storages };
 
     // 2. Test SerializableMultiProof conversion
     let serializable = SerializableMultiProof::from_multiproof(&original_proof);
@@ -208,28 +307,57 @@ fn test_sidecar_serialization_and_targets() {
         computation_time_ms: Some(15),
     };
 
+    let block_hash = B256::repeat_byte(0x03);
+    let parent_hash = B256::repeat_byte(0x01);
+    let cache_policy_id = last_n_blocks_cache_policy_id(60, 30);
+    let prev_cache_anchor = CacheAnchor {
+        block_number: 99,
+        block_hash: parent_hash,
+        cache_policy_id,
+        cache_root: B256::repeat_byte(0xaa),
+    };
+    let next_cache_anchor = CacheAnchor {
+        block_number: 100,
+        block_hash,
+        cache_policy_id,
+        cache_root: B256::repeat_byte(0xbb),
+    };
+    let cache_miss_targets = StateTargetSet::from(&raw_targets);
+    let parent_state_root = B256::repeat_byte(0x02);
+    let witness = PartialExecutionWitness {
+        state: PartialExecutionWitnessState::MptMultiProof(serialized_multiproof),
+        codes: vec![Bytes::from(vec![9, 8, 7])],
+        keys: raw_targets.key_preimages(),
+        headers: vec![],
+    };
+    let witness_commitment =
+        partial_witness_commitment(parent_state_root, &cache_miss_targets, &witness);
     let sidecar = PartialStatelessSidecar {
-        parent_hash: B256::repeat_byte(0x01),
-        parent_state_root: B256::repeat_byte(0x02),
-        block_hash: B256::repeat_byte(0x03),
+        parent_hash,
+        parent_state_root,
+        block_hash,
         block_number: 100,
         cache_block: 99,
+        cache_policy_id,
+        prev_cache_anchor,
+        next_cache_anchor,
         cache_policy_metadata: "LastNBlocks(60, 30)".to_string(),
+        cache_miss_targets,
+        witness_commitment,
         miss_manifest: raw_targets.clone(),
-        witness: PartialExecutionWitness {
-            state: PartialExecutionWitnessState::MptMultiProof(serialized_multiproof),
-            codes: vec![Bytes::from(vec![9, 8, 7])],
-            keys: raw_targets.key_preimages(),
-            headers: vec![],
-        },
+        witness,
         stats,
     };
 
     let sidecar_bytes = bincode::serialize(&sidecar).expect("serialize sidecar");
-    let deserialized_sidecar: PartialStatelessSidecar = bincode::deserialize(&sidecar_bytes).expect("deserialize sidecar");
+    let deserialized_sidecar: PartialStatelessSidecar =
+        bincode::deserialize(&sidecar_bytes).expect("deserialize sidecar");
 
     assert_eq!(deserialized_sidecar.block_number, sidecar.block_number);
-    assert_eq!(deserialized_sidecar.miss_manifest.missed_accounts, sidecar.miss_manifest.missed_accounts);
+    assert_eq!(
+        deserialized_sidecar.miss_manifest.missed_accounts,
+        sidecar.miss_manifest.missed_accounts
+    );
     assert_eq!(deserialized_sidecar.witness.codes, sidecar.witness.codes);
     assert_eq!(deserialized_sidecar.stats.total_size_bytes, sidecar.stats.total_size_bytes);
 
@@ -252,14 +380,15 @@ fn test_sidecar_serialization_and_targets() {
 /// Test that the sidecar file can be successfully written to disk and read back.
 #[test]
 fn test_sidecar_disk_write() {
-    use std::fs;
     use partial_stateless::{
         sidecar::{
+            last_n_blocks_cache_policy_id, partial_witness_commitment, CacheAnchor,
             PartialExecutionWitness, PartialExecutionWitnessState, PartialStatelessSidecar,
-            WitnessTargets,
+            StateTargetSet, WitnessTargets,
         },
         witness::WitnessResult,
     };
+    use std::fs;
 
     let sidecar_dir = std::env::temp_dir().join("reth_sidecar_test");
     // Ensure clean state for test
@@ -285,35 +414,62 @@ fn test_sidecar_disk_write() {
         computation_time_ms: Some(5),
     };
 
+    let block_hash = B256::repeat_byte(0x03);
+    let parent_hash = B256::repeat_byte(0x01);
+    let cache_policy_id = last_n_blocks_cache_policy_id(60, 30);
+    let prev_cache_anchor = CacheAnchor {
+        block_number: 99,
+        block_hash: parent_hash,
+        cache_policy_id,
+        cache_root: B256::repeat_byte(0xaa),
+    };
+    let next_cache_anchor = CacheAnchor {
+        block_number: 100,
+        block_hash,
+        cache_policy_id,
+        cache_root: B256::repeat_byte(0xbb),
+    };
+    let cache_miss_targets = StateTargetSet::from(&raw_targets);
+    let parent_state_root = B256::repeat_byte(0x02);
+    let witness = PartialExecutionWitness {
+        state: PartialExecutionWitnessState::MptMultiProof(vec![1, 2, 3, 4]),
+        codes: vec![alloy_primitives::Bytes::from(vec![9, 8, 7])],
+        keys: raw_targets.key_preimages(),
+        headers: vec![],
+    };
+    let witness_commitment =
+        partial_witness_commitment(parent_state_root, &cache_miss_targets, &witness);
     let sidecar = PartialStatelessSidecar {
-        parent_hash: B256::repeat_byte(0x01),
-        parent_state_root: B256::repeat_byte(0x02),
-        block_hash: B256::repeat_byte(0x03),
+        parent_hash,
+        parent_state_root,
+        block_hash,
         block_number: 100,
         cache_block: 99,
+        cache_policy_id,
+        prev_cache_anchor,
+        next_cache_anchor,
         cache_policy_metadata: "LastNBlocks(60, 30)".to_string(),
+        cache_miss_targets,
+        witness_commitment,
         miss_manifest: raw_targets.clone(),
-        witness: PartialExecutionWitness {
-            state: PartialExecutionWitnessState::MptMultiProof(vec![1, 2, 3, 4]),
-            codes: vec![alloy_primitives::Bytes::from(vec![9, 8, 7])],
-            keys: raw_targets.key_preimages(),
-            headers: vec![],
-        },
+        witness,
         stats,
     };
 
     // Create dir
     fs::create_dir_all(&sidecar_dir).expect("create sidecar dir");
-    let file_path = sidecar_dir.join("block_100_0x0300000000000000000000000000000000000000000000000000000000000000.bin");
+    let file_path = sidecar_dir
+        .join("block_100_0x0300000000000000000000000000000000000000000000000000000000000000.bin");
     let sidecar_bytes = bincode::serialize(&sidecar).expect("serialize sidecar");
     fs::write(&file_path, sidecar_bytes).expect("write sidecar file");
 
     assert!(file_path.exists(), "Sidecar file should exist on disk");
     assert!(file_path.metadata().unwrap().len() > 0, "Sidecar file should not be empty");
 
-    // Read back and verify
+    // Read back and check.
     let read_bytes = fs::read(&file_path).expect("read sidecar file");
-    let deserialized: PartialStatelessSidecar = bincode::deserialize(&read_bytes).expect("deserialize sidecar");
+    let deserialized: PartialStatelessSidecar =
+        bincode::deserialize(&read_bytes).expect("deserialize sidecar");
     assert_eq!(deserialized.block_number, 100);
 
     // Clean up after test
