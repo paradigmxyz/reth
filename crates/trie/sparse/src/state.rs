@@ -673,10 +673,14 @@ impl SparseTrieRetainedPaths {
 
     /// Extends the retained paths with changed trie node base paths.
     pub fn extend_from_changed_paths(&mut self, changed_paths: &TriePrefixSetsMut) {
+        self.account_paths.reserve(changed_paths.account_prefix_set.len());
         self.account_paths.extend(changed_paths.account_prefix_set.iter().copied());
 
+        self.storage_slots.reserve(changed_paths.storage_prefix_sets.len());
         for (address, paths) in &changed_paths.storage_prefix_sets {
-            self.retain_storage_slots(*address, paths.iter().copied());
+            let slots = self.storage_slots.entry(*address).or_default();
+            slots.reserve(paths.len());
+            slots.extend(paths.iter().copied());
         }
     }
 
