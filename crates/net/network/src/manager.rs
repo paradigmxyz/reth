@@ -262,14 +262,26 @@ impl<N: NetworkPrimitives> NetworkManager<N> {
             handshake,
             eth_max_message_size,
             required_block_hashes,
+            tcp_listener,
         } = config;
 
         let peers_manager = PeersManager::new(peers_config);
         let peers_handle = peers_manager.handle();
 
-        let incoming = ConnectionListener::bind(listener_addr).await.map_err(|err| {
-            NetworkError::from_io_error(err, ServiceKind::Listener(listener_addr))
-        })?;
+        let incoming = if let Some(std_listener) = tcp_listener {
+            let local_addr = std_listener.local_addr().map_err(|err| {
+                NetworkError::from_io_error(err, ServiceKind::Listener(listener_addr))
+            })?;
+            let tokio_listener =
+                tokio::net::TcpListener::from_std(std_listener).map_err(|err| {
+                    NetworkError::from_io_error(err, ServiceKind::Listener(listener_addr))
+                })?;
+            ConnectionListener::new(tokio_listener, local_addr)
+        } else {
+            ConnectionListener::bind(listener_addr).await.map_err(|err| {
+                NetworkError::from_io_error(err, ServiceKind::Listener(listener_addr))
+            })?
+        };
 
         // retrieve the tcp address of the socket
         let listener_addr = incoming.local_address();

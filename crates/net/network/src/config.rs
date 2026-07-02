@@ -25,7 +25,12 @@ use reth_storage_api::{
 };
 use reth_tasks::Runtime;
 use secp256k1::SECP256K1;
-use std::{collections::HashSet, net::SocketAddr, sync::Arc};
+use std::{
+    collections::HashSet,
+    io,
+    net::{SocketAddr, TcpListener},
+    sync::Arc,
+};
 
 // re-export for convenience
 use crate::{
@@ -61,6 +66,10 @@ pub struct NetworkConfig<C, N: NetworkPrimitives = EthNetworkPrimitives> {
     pub discovery_v5_config: Option<reth_discv5::Config>,
     /// Address to listen for incoming connections
     pub listener_addr: SocketAddr,
+    /// A pre-bound TCP listener for [`NetworkManager::new`] to use directly instead of
+    /// binding [`Self::listener_addr`]. Set via [`NetworkConfigBuilder::with_tcp_listener`].
+    /// When present, the manager skips its internal bind and uses this socket as-is.
+    pub tcp_listener: Option<TcpListener>,
     /// How to instantiate peer manager.
     pub peers_config: PeersConfig,
     /// How to configure the [`SessionManager`](crate::session::SessionManager).
@@ -197,6 +206,8 @@ pub struct NetworkConfigBuilder<N: NetworkPrimitives = EthNetworkPrimitives> {
     discovery_addr: Option<SocketAddr>,
     /// Listener for incoming connections
     listener_addr: Option<SocketAddr>,
+    /// Optional pre-bound TCP listener. See [`NetworkConfig::tcp_listener`].
+    tcp_listener: Option<TcpListener>,
     /// How to instantiate peer manager.
     peers_config: Option<PeersConfig>,
     /// How to configure the sessions manager
@@ -256,6 +267,7 @@ impl<N: NetworkPrimitives> NetworkConfigBuilder<N> {
             boot_nodes: Default::default(),
             discovery_addr: None,
             listener_addr: None,
+            tcp_listener: None,
             peers_config: None,
             sessions_config: None,
             network_mode: Default::default(),
@@ -421,6 +433,26 @@ impl<N: NetworkPrimitives> NetworkConfigBuilder<N> {
     /// This is useful for testing.
     pub fn with_unused_listener_port(self) -> Self {
         self.listener_port(0)
+    }
+
+    /// Provides a pre-bound TCP listener for the RLPx connection server.
+    ///
+    /// Use this when you need to know the bound port before constructing the [`NetworkManager`]
+    /// — for example, after binding to port `0` to receive an OS-assigned port. Passing the
+    /// already-bound listener here keeps the port reserved until the manager takes ownership,
+    /// with no risk of another process claiming it between releasing and re-binding.
+    ///
+    /// The listener's local address is automatically stored as [`Self::listener_addr`].
+    ///
+    /// The listener must be in non-blocking mode (`set_nonblocking(true)`) before passing it here.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if [`TcpListener::local_addr`] fails.
+    pub fn with_tcp_listener(mut self, listener: TcpListener) -> Result<Self, io::Error> {
+        self.listener_addr = Some(listener.local_addr()?);
+        self.tcp_listener = Some(listener);
+        Ok(self)
     }
 
     /// Sets the external ip resolver to use for discovery v4.
@@ -647,6 +679,7 @@ impl<N: NetworkPrimitives> NetworkConfigBuilder<N> {
             eth_max_message_size,
             required_block_hashes,
             network_id,
+            tcp_listener,
         } = self;
 
         let head = head.unwrap_or_else(|| Head {
@@ -727,6 +760,7 @@ impl<N: NetworkPrimitives> NetworkConfigBuilder<N> {
             handshake,
             eth_max_message_size,
             required_block_hashes,
+            tcp_listener,
         }
     }
 }
@@ -869,5 +903,23 @@ mod tests {
             .expect("should be non-empty");
 
         assert_eq!(advertised_fork_id, fork_id);
+    }
+
+    #[test]
+    fn test_with_tcp_listener_records_addr() {
+        let std_listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        std_listener.set_nonblocking(true).unwrap();
+        let expected_addr = std_listener.local_addr().unwrap();
+
+        let config_builder = builder().with_tcp_listener(std_listener).unwrap();
+
+        // listener_addr should be set to the socket's bound address
+        assert_eq!(config_builder.listener_addr, Some(expected_addr));
+
+        let config = config_builder.build(NoopProvider::default());
+        // listener_addr propagates to NetworkConfig unchanged
+        assert_eq!(config.listener_addr, expected_addr);
+        // tcp_listener is carried through
+        assert!(config.tcp_listener.is_some());
     }
 }
