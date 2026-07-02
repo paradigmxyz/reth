@@ -575,27 +575,38 @@ where
 
             let trie = self.trie.get_or_create_storage_trie_mut(*address);
             let fetched = self.fetched_storage_targets.entry(*address).or_default();
-            let mut targets = Vec::new();
+            let had_pending_storage_targets =
+                self.pending_targets.targets.storage_targets.contains_key(address);
+            let pending_targets_len_before = self.pending_targets.len;
+            let PendingTargets { targets: pending_targets, len: pending_targets_len } =
+                &mut self.pending_targets;
+            let pending_storage_targets =
+                pending_targets.storage_targets.entry(*address).or_default();
 
             let updates_len_before = updates.len();
             trie.update_leaves(updates, |path, min_len| match fetched.entry(path) {
                 Entry::Occupied(mut entry) => {
                     if min_len < *entry.get() {
                         entry.insert(min_len);
-                        targets.push(ProofV2Target::new(path).with_min_len(min_len));
+                        pending_storage_targets
+                            .push(ProofV2Target::new(path).with_min_len(min_len));
+                        *pending_targets_len += 1;
                     }
                 }
                 Entry::Vacant(entry) => {
                     entry.insert(min_len);
-                    targets.push(ProofV2Target::new(path).with_min_len(min_len));
+                    pending_storage_targets.push(ProofV2Target::new(path).with_min_len(min_len));
+                    *pending_targets_len += 1;
                 }
             })?;
             let updates_len_after = updates.len();
             self.storage_cache_hits += (updates_len_before - updates_len_after) as u64;
             self.storage_cache_misses += updates_len_after as u64;
 
-            if !targets.is_empty() {
-                self.pending_targets.extend_storage_targets(address, targets);
+            if !had_pending_storage_targets
+                && self.pending_targets.len == pending_targets_len_before
+            {
+                self.pending_targets.targets.storage_targets.remove(address);
             }
         }
 
@@ -865,12 +876,6 @@ impl PendingTargets {
     fn push_account_target(&mut self, target: ProofV2Target) {
         self.targets.account_targets.push(target);
         self.len += 1;
-    }
-
-    /// Extends storage targets for the given address.
-    fn extend_storage_targets(&mut self, address: &B256, targets: Vec<ProofV2Target>) {
-        self.len += targets.len();
-        self.targets.storage_targets.entry(*address).or_default().extend(targets);
     }
 }
 
