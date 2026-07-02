@@ -1,7 +1,6 @@
 //! State root task interface types shared between the engine tree and the payload builder.
 
 use crate::root::ParallelStateRootError;
-use alloy_eip7928::BlockAccessList;
 use alloy_primitives::{keccak256, B256};
 use derive_more::derive::Deref;
 use reth_trie::{
@@ -21,11 +20,6 @@ pub enum StateRootMessage {
     StateUpdate(EvmState),
     /// Pre-hashed state update from BAL conversion that can be applied directly without proofs.
     HashedStateUpdate(HashedPostState),
-    /// Block Access List (EIP-7928; BAL) containing complete state changes for the block.
-    ///
-    /// When received, the task generates a single state update from the BAL and processes it.
-    /// No further messages are expected after receiving this variant.
-    BlockAccessList(Arc<BlockAccessList>),
     /// Signals state update stream end.
     ///
     /// This is triggered by block execution, indicating that no additional state updates are
