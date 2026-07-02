@@ -2,7 +2,7 @@ use crate::errors::PingerError;
 use std::{
     future::Future,
     pin::Pin,
-    task::{Context, Poll},
+    task::{Context, Poll, Waker},
     time::Duration,
 };
 use tokio::time::{Instant, Sleep};
@@ -14,10 +14,14 @@ use tokio_stream::Stream;
 pub(crate) struct Pinger {
     /// The timer used for the next ping.
     ping_timer: Pin<Box<Sleep>>,
+    /// The last task waker registered with the ping timer.
+    ping_waker: Option<Waker>,
     /// The duration between pings.
     ping_interval: Duration,
     /// The timer used to detect a ping timeout.
     timeout_timer: Pin<Box<Sleep>>,
+    /// The last task waker registered with the timeout timer.
+    timeout_waker: Option<Waker>,
     /// The timeout duration for each ping.
     timeout: Duration,
     /// Keeps track of the state
@@ -36,8 +40,10 @@ impl Pinger {
         Self {
             state: PingState::Ready,
             ping_timer: Box::pin(ping_timer),
+            ping_waker: None,
             ping_interval,
             timeout_timer: Box::pin(timeout_timer),
+            timeout_waker: None,
             timeout: timeout_duration,
         }
     }
@@ -50,6 +56,8 @@ impl Pinger {
             PingState::WaitingForPong => {
                 self.state = PingState::Ready;
                 self.ping_timer.as_mut().reset(Instant::now() + self.ping_interval);
+                self.ping_waker = None;
+                self.timeout_waker = None;
                 Ok(())
             }
             PingState::TimedOut => {
@@ -57,6 +65,8 @@ impl Pinger {
                 // connection was kept alive after timeout
                 self.state = PingState::Ready;
                 self.ping_timer.as_mut().reset(Instant::now() + self.ping_interval);
+                self.ping_waker = None;
+                self.timeout_waker = None;
                 Ok(())
             }
         }
@@ -75,17 +85,34 @@ impl Pinger {
     ) -> Poll<Result<PingerEvent, PingerError>> {
         match self.state() {
             PingState::Ready => {
+                if self.ping_waker.as_ref().is_some_and(|waker| waker.will_wake(cx.waker())) &&
+                    !self.ping_timer.is_elapsed()
+                {
+                    return Poll::Pending
+                }
+
                 if self.ping_timer.as_mut().poll(cx).is_ready() {
                     self.timeout_timer.as_mut().reset(Instant::now() + self.timeout);
+                    self.ping_waker = None;
+                    self.timeout_waker = None;
                     self.state = PingState::WaitingForPong;
                     return Poll::Ready(Ok(PingerEvent::Ping))
                 }
+                self.ping_waker = Some(cx.waker().clone());
             }
             PingState::WaitingForPong => {
+                if self.timeout_waker.as_ref().is_some_and(|waker| waker.will_wake(cx.waker())) &&
+                    !self.timeout_timer.is_elapsed()
+                {
+                    return Poll::Pending
+                }
+
                 if self.timeout_timer.as_mut().poll(cx).is_ready() {
+                    self.timeout_waker = None;
                     self.state = PingState::TimedOut;
                     return Poll::Ready(Ok(PingerEvent::Timeout))
                 }
+                self.timeout_waker = Some(cx.waker().clone());
             }
             PingState::TimedOut => {
                 // we treat continuous calls while in timeout as pending, since the connection is
