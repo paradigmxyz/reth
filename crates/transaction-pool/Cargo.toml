@@ -38,6 +38,7 @@ parking_lot.workspace = true
 pin-project.workspace = true
 tokio = { workspace = true, features = ["sync"] }
 tokio-stream.workspace = true
+tokio-util.workspace = true
 
 # metrics
 reth-metrics.workspace = true
