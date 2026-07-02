@@ -181,7 +181,7 @@ pub struct TransactionsManagerMetrics {
     pub(crate) occurrences_transactions_already_in_pool: Counter,
 
     /* ================ POOL IMPORTS ================ */
-    /// Number of transactions about to be imported into the pool.
+    /// Number of transactions queued for network recovery and pool import.
     pub(crate) pending_pool_imports: Gauge,
     /// Total number of bad imports, imports that fail because the transaction is badly formed
     /// (i.e. have no chance of passing validation, unlike imports that fail due to e.g. nonce
@@ -194,7 +194,7 @@ pub struct TransactionsManagerMetrics {
     pub(crate) capacity_pending_pool_imports: Counter,
     /// Total number of transactions ignored because pending pool imports are at capacity.
     pub(crate) skipped_transactions_pending_pool_imports_at_capacity: Counter,
-    /// The time it took to prepare transactions for import. This is mostly sender recovery.
+    /// The time it took to prepare transactions for queued recovery and import.
     pub(crate) pool_import_prepare_duration: Histogram,
 
     /* ================ POLL DURATION ================ */
