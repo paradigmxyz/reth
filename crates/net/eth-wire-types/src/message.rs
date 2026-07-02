@@ -17,7 +17,7 @@ use crate::{
     NetworkPrimitives, NewPooledTransactionHashes72, RawCapabilityMessage, Receipts69, Receipts70,
     SharedTransactions,
 };
-use alloc::{boxed::Box, string::String, sync::Arc};
+use alloc::{boxed::Box, string::String, sync::Arc, vec::Vec};
 use alloy_primitives::{
     bytes::{Buf, BufMut},
     Bytes,
@@ -591,7 +591,24 @@ impl<N: NetworkPrimitives> EthBroadcastMessage<N> {
 
     /// Encodes this broadcast to its id-prefixed `RLPx` message bytes.
     pub fn encoded(self) -> alloy_primitives::bytes::Bytes {
-        alloy_rlp::encode(ProtocolBroadcastMessage::from(self)).into()
+        match self {
+            Self::Transactions(transactions) => {
+                let payload_length = transactions.iter().map(Encodable::length).sum();
+                let header = Header { list: true, payload_length };
+                let mut out = Vec::with_capacity(
+                    EthMessageID::Transactions.length() + header.length() + payload_length,
+                );
+                EthMessageID::Transactions.encode(&mut out);
+                header.encode(&mut out);
+                for tx in transactions.0 {
+                    tx.encode(&mut out);
+                }
+                out.into()
+            }
+            this @ Self::NewBlock(_) => {
+                alloy_rlp::encode(ProtocolBroadcastMessage::from(this)).into()
+            }
+        }
     }
 }
 
@@ -885,18 +902,48 @@ where
 mod tests {
     use super::MessageError;
     use crate::{
-        message::RequestPair, BlockAccessLists, EthMessage, EthMessageID, EthNetworkPrimitives,
-        EthVersion, GetBlockAccessLists, GetNodeData, NodeData, ProtocolMessage,
-        RawCapabilityMessage,
+        message::{EthBroadcastMessage, ProtocolBroadcastMessage, RequestPair},
+        BlockAccessLists, EthMessage, EthMessageID, EthNetworkPrimitives, EthVersion,
+        GetBlockAccessLists, GetNodeData, NodeData, ProtocolMessage, RawCapabilityMessage,
+        SharedTransactions,
     };
-    use alloy_primitives::hex;
+    use alloy_consensus::TxLegacy;
+    use alloy_primitives::{hex, Bytes as AlloyBytes, Signature, TxKind, U256};
     use alloy_rlp::{Decodable, Encodable, Error};
-    use reth_ethereum_primitives::BlockBody;
+    use reth_ethereum_primitives::{BlockBody, Transaction, TransactionSigned};
+    use std::sync::Arc;
 
     fn encode<T: Encodable>(value: T) -> Vec<u8> {
         let mut buf = vec![];
         value.encode(&mut buf);
         buf
+    }
+
+    fn signed_legacy_tx(nonce: u64) -> Arc<TransactionSigned> {
+        Arc::new(TransactionSigned::new_unhashed(
+            Transaction::Legacy(TxLegacy {
+                chain_id: Some(1),
+                nonce,
+                gas_price: 1,
+                gas_limit: 21_000,
+                to: TxKind::Create,
+                value: U256::ZERO,
+                input: AlloyBytes::from(vec![0x42; 128]),
+            }),
+            Signature::test_signature(),
+        ))
+    }
+
+    #[test]
+    fn broadcast_transactions_encoded_matches_protocol_encoding() {
+        let msg =
+            EthBroadcastMessage::<EthNetworkPrimitives>::Transactions(SharedTransactions(vec![
+                signed_legacy_tx(0),
+                signed_legacy_tx(1),
+            ]));
+        let expected = alloy_rlp::encode(ProtocolBroadcastMessage::from(msg.clone()));
+
+        assert_eq!(msg.encoded().as_ref(), expected.as_slice());
     }
 
     #[test]

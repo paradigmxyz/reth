@@ -1,20 +1,23 @@
 #![allow(missing_docs)]
 
+use alloy_consensus::TxLegacy;
 use alloy_primitives::{
     bytes::{Bytes, BytesMut},
-    B256,
+    Bytes as AlloyBytes, Signature, TxKind, B256, U256,
 };
 use criterion::{criterion_group, criterion_main, Criterion};
 use futures::{future::poll_fn, Sink, SinkExt, Stream};
 use reth_eth_wire::{
-    capability::SharedCapabilities, Capability, EthMessage, EthNetworkPrimitives, EthStream,
-    EthVersion, P2PStream,
+    capability::SharedCapabilities, message::EthBroadcastMessage, Capability, EthMessage,
+    EthNetworkPrimitives, EthStream, EthVersion, P2PStream, SharedTransactions,
 };
+use reth_ethereum_primitives::{Transaction, TransactionSigned};
 use std::{
     collections::VecDeque,
     hint::black_box,
     io,
     pin::Pin,
+    sync::Arc,
     task::{Context, Poll},
 };
 
@@ -30,6 +33,25 @@ fn shared_capabilities() -> SharedCapabilities {
 
 fn message() -> EthMessage<EthNetworkPrimitives> {
     EthMessage::NewPooledTransactionHashes66(vec![B256::repeat_byte(0x42)].into())
+}
+
+fn transaction(nonce: u64) -> Arc<TransactionSigned> {
+    Arc::new(TransactionSigned::new_unhashed(
+        Transaction::Legacy(TxLegacy {
+            chain_id: Some(1),
+            nonce,
+            gas_price: 1,
+            gas_limit: 21_000,
+            to: TxKind::Create,
+            value: U256::ZERO,
+            input: AlloyBytes::from(vec![0x42; 128]),
+        }),
+        Signature::test_signature(),
+    ))
+}
+
+fn transaction_broadcast() -> EthBroadcastMessage<EthNetworkPrimitives> {
+    EthBroadcastMessage::Transactions(SharedTransactions(vec![transaction(0), transaction(1)]))
 }
 
 fn eth_stream(transport: MockTransport) -> EthStream<P2PStream<MockTransport>> {
@@ -113,6 +135,20 @@ fn bench_send_messages(c: &mut Criterion) {
                 let mut stream = eth_stream(MockTransport::default());
                 for _ in 0..MESSAGE_COUNT {
                     stream.send(message()).await.unwrap();
+                }
+                black_box(stream.inner().inner().sent.len());
+            });
+        })
+    });
+
+    group.bench_function("send_transaction_broadcasts", |b| {
+        let broadcast = transaction_broadcast();
+        b.iter(|| {
+            rt.block_on(async {
+                let mut stream = eth_stream(MockTransport::default());
+                for _ in 0..MESSAGE_COUNT {
+                    stream.start_send_broadcast(broadcast.clone()).unwrap();
+                    stream.flush().await.unwrap();
                 }
                 black_box(stream.inner().inner().sent.len());
             });

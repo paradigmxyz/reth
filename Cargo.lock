@@ -8522,6 +8522,7 @@ dependencies = [
  "reth-ecies",
  "reth-eth-wire-types",
  "reth-ethereum-forks",
+ "reth-ethereum-primitives",
  "reth-metrics",
  "reth-network-peers",
  "reth-primitives-traits",
