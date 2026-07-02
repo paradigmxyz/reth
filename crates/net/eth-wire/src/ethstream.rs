@@ -10,7 +10,7 @@ use crate::{
     message::{EthBroadcastMessage, MessageError, MAX_MESSAGE_SIZE, TX_MEMORY_BUDGET_MULTIPLIER},
     p2pstream::{P2PStream, HANDSHAKE_TIMEOUT},
     CanDisconnect, DisconnectReason, EthMessage, EthNetworkPrimitives, EthVersion, ProtocolMessage,
-    UnifiedStatus,
+    SharedTransactions, UnifiedStatus,
 };
 use alloy_primitives::bytes::{Bytes, BytesMut};
 use futures::{ready, Sink, SinkExt};
@@ -297,6 +297,21 @@ where
         item: EthBroadcastMessage<N>,
     ) -> Result<(), EthStreamError> {
         self.inner.start_send_unpin(item.encoded())?;
+        Ok(())
+    }
+
+    /// Sends a Transactions broadcast with a precomputed RLP payload length.
+    pub fn start_send_transactions_with_payload_length(
+        &mut self,
+        transactions: SharedTransactions<N::BroadcastedTransaction>,
+        payload_length: usize,
+    ) -> Result<(), EthStreamError> {
+        self.inner.start_send_unpin(
+            EthBroadcastMessage::<N>::encoded_transactions_with_payload_length(
+                transactions,
+                payload_length,
+            ),
+        )?;
         Ok(())
     }
 

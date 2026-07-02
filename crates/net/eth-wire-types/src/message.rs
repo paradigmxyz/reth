@@ -633,21 +633,29 @@ impl<N: NetworkPrimitives> EthBroadcastMessage<N> {
         match self {
             Self::Transactions(transactions) => {
                 let payload_length = transactions.iter().map(Encodable::length).sum();
-                let header = Header { list: true, payload_length };
-                let mut out = Vec::with_capacity(
-                    EthMessageID::Transactions.length() + header.length() + payload_length,
-                );
-                EthMessageID::Transactions.encode(&mut out);
-                header.encode(&mut out);
-                for tx in transactions.0 {
-                    tx.encode(&mut out);
-                }
-                out.into()
+                Self::encoded_transactions_with_payload_length(transactions, payload_length)
             }
             this @ Self::NewBlock(_) => {
                 alloy_rlp::encode(ProtocolBroadcastMessage::from(this)).into()
             }
         }
+    }
+
+    /// Encodes a Transactions broadcast with a caller-provided RLP payload length.
+    pub fn encoded_transactions_with_payload_length(
+        transactions: SharedTransactions<N::BroadcastedTransaction>,
+        payload_length: usize,
+    ) -> alloy_primitives::bytes::Bytes {
+        let header = Header { list: true, payload_length };
+        let mut out = Vec::with_capacity(
+            EthMessageID::Transactions.length() + header.length() + payload_length,
+        );
+        EthMessageID::Transactions.encode(&mut out);
+        header.encode(&mut out);
+        for tx in transactions.0 {
+            tx.encode(&mut out);
+        }
+        out.into()
     }
 }
 

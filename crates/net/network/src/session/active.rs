@@ -789,6 +789,13 @@ impl<N: NetworkPrimitives> Future for ActiveSession<N> {
                                     OutgoingMessage::Broadcast(msg) => {
                                         this.conn.start_send_broadcast(msg)
                                     }
+                                    OutgoingMessage::TransactionBroadcast {
+                                        transactions,
+                                        payload_length,
+                                    } => this.conn.start_send_transactions_with_payload_length(
+                                        transactions,
+                                        payload_length,
+                                    ),
                                     OutgoingMessage::Raw(msg) => this.conn.start_send_raw(msg),
                                 };
                                 if let Err(err) = res {
@@ -1036,6 +1043,11 @@ pub(crate) enum OutgoingMessage<N: NetworkPrimitives> {
     Eth(EthMessage<N>),
     /// A message that may be shared by multiple sessions.
     Broadcast(EthBroadcastMessage<N>),
+    /// A transactions broadcast with its cached RLP payload length.
+    TransactionBroadcast {
+        transactions: SharedTransactions<N::BroadcastedTransaction>,
+        payload_length: usize,
+    },
     /// A raw capability message
     Raw(RawCapabilityMessage),
 }
@@ -1065,8 +1077,11 @@ impl<N: NetworkPrimitives> OutgoingMessage<N> {
             },
             Self::Broadcast(msg) => match msg {
                 EthBroadcastMessage::NewBlock(_) => 1,
-                EthBroadcastMessage::Transactions(txs) => txs.len(),
+                EthBroadcastMessage::Transactions(_) => unreachable!(
+                    "transaction broadcasts are stored as TransactionBroadcast messages"
+                ),
             },
+            Self::TransactionBroadcast { transactions, .. } => transactions.len(),
             Self::Raw(_) => 0,
         }
     }
@@ -1117,7 +1132,15 @@ impl<N: NetworkPrimitives> From<EthMessage<N>> for OutgoingMessage<N> {
 
 impl<N: NetworkPrimitives> From<EthBroadcastMessage<N>> for OutgoingMessage<N> {
     fn from(value: EthBroadcastMessage<N>) -> Self {
-        Self::Broadcast(value)
+        match value {
+            EthBroadcastMessage::NewBlock(block) => {
+                Self::Broadcast(EthBroadcastMessage::NewBlock(block))
+            }
+            EthBroadcastMessage::Transactions(transactions) => {
+                let payload_length = transactions_payload_length(&transactions);
+                Self::TransactionBroadcast { transactions, payload_length }
+            }
+        }
     }
 }
 
@@ -1143,9 +1166,6 @@ pub(crate) struct QueuedOutgoingMessages<N: NetworkPrimitives> {
     /// Number of queued response messages, tracked separately so the session can apply
     /// backpressure on incoming requests without scanning the whole queue.
     queued_responses: usize,
-    /// RLP payload length of the last queued transaction broadcast, if the last queued message is
-    /// a transaction broadcast.
-    last_transaction_broadcast_payload_length: Option<usize>,
     count: Gauge,
     /// Shared counter of buffered broadcast items for size-based backpressure.
     broadcast_items: BroadcastItemCounter,
@@ -1153,13 +1173,7 @@ pub(crate) struct QueuedOutgoingMessages<N: NetworkPrimitives> {
 
 impl<N: NetworkPrimitives> QueuedOutgoingMessages<N> {
     pub(crate) const fn new(metric: Gauge, broadcast_items: BroadcastItemCounter) -> Self {
-        Self {
-            messages: VecDeque::new(),
-            queued_responses: 0,
-            last_transaction_broadcast_payload_length: None,
-            count: metric,
-            broadcast_items,
-        }
+        Self { messages: VecDeque::new(), queued_responses: 0, count: metric, broadcast_items }
     }
 
     /// Returns the number of queued response messages.
@@ -1175,33 +1189,27 @@ impl<N: NetworkPrimitives> QueuedOutgoingMessages<N> {
         self.messages.is_empty()
     }
 
-    pub(crate) fn push_back(&mut self, mut message: OutgoingMessage<N>) {
-        if let OutgoingMessage::Broadcast(EthBroadcastMessage::Transactions(txs)) = message {
-            let incoming_payload_length = transactions_payload_length(&txs);
-
-            if let Some(OutgoingMessage::Broadcast(EthBroadcastMessage::Transactions(existing))) =
-                self.messages.back_mut()
+    pub(crate) fn push_back(&mut self, message: OutgoingMessage<N>) {
+        let message =
+            if let OutgoingMessage::TransactionBroadcast { transactions, payload_length } = message
             {
-                let existing_payload_length = self
-                    .last_transaction_broadcast_payload_length
-                    .unwrap_or_else(|| transactions_payload_length(existing));
-
-                if transaction_broadcast_message_length(existing_payload_length)
-                    .saturating_add(transaction_broadcast_message_length(incoming_payload_length)) <=
-                    DEFAULT_SOFT_LIMIT_BYTE_SIZE_TRANSACTIONS_BROADCAST_MESSAGE
+                if let Some(OutgoingMessage::TransactionBroadcast {
+                    transactions: existing,
+                    payload_length: existing_payload_length,
+                }) = self.messages.back_mut() &&
+                    transaction_broadcast_message_length(*existing_payload_length)
+                        .saturating_add(transaction_broadcast_message_length(payload_length)) <=
+                        DEFAULT_SOFT_LIMIT_BYTE_SIZE_TRANSACTIONS_BROADCAST_MESSAGE
                 {
-                    existing.0.extend(txs.0);
-                    self.last_transaction_broadcast_payload_length =
-                        Some(existing_payload_length + incoming_payload_length);
+                    existing.0.extend(transactions.0);
+                    *existing_payload_length += payload_length;
                     return
                 }
-            }
 
-            self.last_transaction_broadcast_payload_length = Some(incoming_payload_length);
-            message = OutgoingMessage::Broadcast(EthBroadcastMessage::Transactions(txs));
-        } else {
-            self.last_transaction_broadcast_payload_length = None;
-        }
+                OutgoingMessage::TransactionBroadcast { transactions, payload_length }
+            } else {
+                message
+            };
 
         self.queued_responses += message.is_response() as usize;
         self.messages.push_back(message);
@@ -1215,9 +1223,6 @@ impl<N: NetworkPrimitives> QueuedOutgoingMessages<N> {
             let items = msg.broadcast_item_count();
             if items > 0 {
                 self.broadcast_items.sub(items);
-            }
-            if self.messages.is_empty() {
-                self.last_transaction_broadcast_payload_length = None;
             }
         })
     }
@@ -1233,7 +1238,6 @@ impl<N: NetworkPrimitives> QueuedOutgoingMessages<N> {
         } else {
             msg
         };
-        self.last_transaction_broadcast_payload_length = None;
         self.messages.push_back(EthMessage::from(msg).into());
         self.count.increment(1);
     }
@@ -1672,12 +1676,13 @@ mod tests {
         );
 
         assert_eq!(queued.messages.len(), 1);
-        let Some(OutgoingMessage::Broadcast(EthBroadcastMessage::Transactions(txs))) =
+        let Some(OutgoingMessage::TransactionBroadcast { transactions: txs, payload_length }) =
             queued.messages.front()
         else {
             panic!("expected queued transactions")
         };
         assert_eq!(txs.len(), 2);
+        assert_eq!(*payload_length, transactions_payload_length(txs));
     }
 
     #[test]

@@ -8,6 +8,7 @@ use reth_eth_wire::{
     message::EthBroadcastMessage,
     multiplex::{ProtocolProxy, RlpxSatelliteStream},
     EthMessage, EthNetworkPrimitives, EthStream, EthVersion, NetworkPrimitives, P2PStream,
+    SharedTransactions,
 };
 use reth_eth_wire_types::RawCapabilityMessage;
 use std::{
@@ -95,6 +96,23 @@ impl<N: NetworkPrimitives> EthRlpxConnection<N> {
         match self {
             Self::EthOnly(conn) => conn.start_send_broadcast(item),
             Self::Satellite(conn) => conn.primary_mut().start_send_broadcast(item),
+        }
+    }
+
+    /// Sends a transactions broadcast with a precomputed RLP payload length.
+    #[inline]
+    pub fn start_send_transactions_with_payload_length(
+        &mut self,
+        transactions: SharedTransactions<N::BroadcastedTransaction>,
+        payload_length: usize,
+    ) -> Result<(), EthStreamError> {
+        match self {
+            Self::EthOnly(conn) => {
+                conn.start_send_transactions_with_payload_length(transactions, payload_length)
+            }
+            Self::Satellite(conn) => conn
+                .primary_mut()
+                .start_send_transactions_with_payload_length(transactions, payload_length),
         }
     }
 
