@@ -517,6 +517,15 @@ impl RocksDBProviderInner {
         self.db_rw().delete_range_cf(cf, from, to)
     }
 
+    fn delete_file_in_range_cf<K: AsRef<[u8]>>(
+        &self,
+        cf: &rocksdb::ColumnFamily,
+        from: K,
+        to: K,
+    ) -> Result<(), rocksdb::Error> {
+        self.db_rw().delete_file_in_range_cf(cf, from, to)
+    }
+
     /// Returns an iterator over a column family.
     fn iterator_cf(
         &self,
@@ -936,6 +945,17 @@ impl RocksDBProvider {
         let cf = self.get_cf_handle::<T>()?;
 
         self.0.delete_range_cf(cf, &[] as &[u8], &[0xFF; 256]).map_err(|e| {
+            ProviderError::Database(DatabaseError::Delete(DatabaseErrorInfo {
+                message: e.to_string().into(),
+                code: -1,
+            }))
+        })?;
+
+        // A range tombstone spanning the whole column family barely moves the
+        // pending-compaction estimate, so auto-compaction is never scheduled and the shadowed
+        // SST files (and their disk space) stay around until an unrelated full compaction runs.
+        // Drop the files in the deleted range directly so `clear` reclaims the space right away.
+        self.0.delete_file_in_range_cf(cf, &[] as &[u8], &[0xFF; 256]).map_err(|e| {
             ProviderError::Database(DatabaseError::Delete(DatabaseErrorInfo {
                 message: e.to_string().into(),
                 code: -1,
