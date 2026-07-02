@@ -293,7 +293,7 @@ pub trait ConfigureEvm: Clone + Debug + Send + Sync + Unpin {
     {
         #[cfg(feature = "std")]
         {
-            BasicBlockExecutor::new(self.clone(), db)
+            BasicBlockExecutor::new(self, db)
         }
 
         #[cfg(not(feature = "std"))]
@@ -313,7 +313,16 @@ pub trait ConfigureEvm: Clone + Debug + Send + Sync + Unpin {
         DB: evm2::evm::Database + Clone + 'static,
         DB::Error: core::error::Error + Send + Sync + 'static,
     {
-        self.executor(db)
+        #[cfg(feature = "std")]
+        {
+            BasicBlockExecutor::new(self, db)
+        }
+
+        #[cfg(not(feature = "std"))]
+        {
+            let _ = db;
+            crate::execute::UnsupportedExecutor::default()
+        }
     }
 
     /// Creates a block executor for the given block.
