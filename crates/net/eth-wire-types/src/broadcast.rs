@@ -422,9 +422,7 @@ impl From<NewPooledTransactionHashes72> for NewPooledTransactionHashes {
 
 /// This informs peers of transaction hashes for transactions that have appeared on the network,
 /// but have not been included in a block.
-#[derive(
-    Clone, Debug, PartialEq, Eq, RlpEncodableWrapper, Default, Deref, DerefMut, IntoIterator,
-)]
+#[derive(Clone, Debug, PartialEq, Eq, Default, Deref, DerefMut, IntoIterator)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(any(test, feature = "arbitrary"), derive(arbitrary::Arbitrary))]
 #[add_arbitrary_tests(rlp)]
@@ -442,6 +440,16 @@ impl NewPooledTransactionHashes66 {
     }
 }
 
+impl Encodable for NewPooledTransactionHashes66 {
+    fn encode(&self, out: &mut dyn bytes::BufMut) {
+        encode_b256_rlp_list(&self.0, out);
+    }
+
+    fn length(&self) -> usize {
+        b256_rlp_list_length(&self.0)
+    }
+}
+
 impl Decodable for NewPooledTransactionHashes66 {
     fn decode(buf: &mut &[u8]) -> alloy_rlp::Result<Self> {
         decode_b256_rlp_list(buf).map(Self)
@@ -456,6 +464,23 @@ impl From<Vec<B256>> for NewPooledTransactionHashes66 {
 
 const RLP_B256_ENCODED_LEN: usize = 33;
 const RLP_B256_STRING_PREFIX: u8 = EMPTY_STRING_CODE + 32;
+
+const fn b256_rlp_list_payload_length(hashes: &[B256]) -> usize {
+    RLP_B256_ENCODED_LEN * hashes.len()
+}
+
+const fn b256_rlp_list_length(hashes: &[B256]) -> usize {
+    Header { list: true, payload_length: b256_rlp_list_payload_length(hashes) }
+        .length_with_payload()
+}
+
+fn encode_b256_rlp_list(hashes: &[B256], out: &mut dyn bytes::BufMut) {
+    Header { list: true, payload_length: b256_rlp_list_payload_length(hashes) }.encode(out);
+    for hash in hashes {
+        out.put_u8(RLP_B256_STRING_PREFIX);
+        out.put_slice(hash.as_slice());
+    }
+}
 
 fn decode_b256_rlp_list(buf: &mut &[u8]) -> alloy_rlp::Result<Vec<B256>> {
     let Header { list, payload_length } = Header::decode(buf)?;
@@ -770,40 +795,22 @@ impl NewPooledTransactionHashes68 {
         self.extend(txs);
         self
     }
+
+    fn payload_length(&self) -> usize {
+        self.types.as_slice().length() + self.sizes.length() + b256_rlp_list_length(&self.hashes)
+    }
 }
 
 impl Encodable for NewPooledTransactionHashes68 {
     fn encode(&self, out: &mut dyn bytes::BufMut) {
-        #[derive(RlpEncodable)]
-        struct EncodableNewPooledTransactionHashes68<'a> {
-            types: &'a [u8],
-            sizes: &'a Vec<usize>,
-            hashes: &'a Vec<B256>,
-        }
-
-        let encodable = EncodableNewPooledTransactionHashes68 {
-            types: &self.types[..],
-            sizes: &self.sizes,
-            hashes: &self.hashes,
-        };
-
-        encodable.encode(out);
+        Header { list: true, payload_length: self.payload_length() }.encode(out);
+        self.types.as_slice().encode(out);
+        self.sizes.encode(out);
+        encode_b256_rlp_list(&self.hashes, out);
     }
+
     fn length(&self) -> usize {
-        #[derive(RlpEncodable)]
-        struct EncodableNewPooledTransactionHashes68<'a> {
-            types: &'a [u8],
-            sizes: &'a Vec<usize>,
-            hashes: &'a Vec<B256>,
-        }
-
-        let encodable = EncodableNewPooledTransactionHashes68 {
-            types: &self.types[..],
-            sizes: &self.sizes,
-            hashes: &self.hashes,
-        };
-
-        encodable.length()
+        Header { list: true, payload_length: self.payload_length() }.length_with_payload()
     }
 }
 
@@ -958,7 +965,7 @@ impl NewPooledTransactionHashes72 {
     fn payload_length(&self) -> usize {
         self.types.as_slice().length() +
             self.sizes.length() +
-            self.hashes.length() +
+            b256_rlp_list_length(&self.hashes) +
             self.cell_mask.as_ref().map_or(1, Encodable::length)
     }
 }
@@ -968,7 +975,7 @@ impl Encodable for NewPooledTransactionHashes72 {
         Header { list: true, payload_length: self.payload_length() }.encode(out);
         self.types.as_slice().encode(out);
         self.sizes.encode(out);
-        self.hashes.encode(out);
+        encode_b256_rlp_list(&self.hashes, out);
         if let Some(cell_mask) = &self.cell_mask {
             cell_mask.encode(out);
         } else {
