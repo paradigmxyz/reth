@@ -200,10 +200,6 @@ where
                 StateRootMessage::FinishedStateUpdates => {
                     SparseTrieTaskMessage::FinishedStateUpdates
                 }
-                StateRootMessage::BlockAccessList(_) => {
-                    idle_start = Instant::now();
-                    continue;
-                }
                 StateRootMessage::HashedStateUpdate(state) => {
                     SparseTrieTaskMessage::HashedState(state)
                 }
