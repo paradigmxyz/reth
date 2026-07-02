@@ -49,7 +49,7 @@ use tokio_util::sync::PollSender;
 use tracing::{instrument, trace};
 
 use crate::session::active::{
-    request_timeout_interval, BroadcastItemCounter, RANGE_UPDATE_INTERVAL,
+    request_timeout_interval, BroadcastItemCounter, RangeUpdateInterval, RANGE_UPDATE_INTERVAL,
 };
 pub use conn::EthRlpxConnection;
 use handle::SessionCommandSender;
@@ -558,9 +558,7 @@ impl<N: NetworkPrimitives> SessionManager<N> {
                 // peers that don't properly handle the message).
                 let range_update_interval = (conn.version() >= EthVersion::Eth69).then(|| {
                     let start = tokio::time::Instant::now() + RANGE_UPDATE_INTERVAL;
-                    let mut interval = tokio::time::interval_at(start, RANGE_UPDATE_INTERVAL);
-                    interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
-                    interval
+                    RangeUpdateInterval::new(start, RANGE_UPDATE_INTERVAL)
                 });
 
                 // Shared counter of in-flight broadcast items. The session task must decrement
