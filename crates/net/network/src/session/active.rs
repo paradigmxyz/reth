@@ -761,21 +761,35 @@ impl<N: NetworkPrimitives> Future for ActiveSession<N> {
                         return this.close_on_error(err, cx)
                     }
                     Poll::Ready(Ok(())) => {
-                        let Some(msg) = this.queued_outgoing.pop_front() else {
-                            // no more messages to send over the wire
+                        let capacity = this.conn.available_outgoing_capacity();
+                        if capacity == 0 {
                             break
-                        };
-                        progress = true;
-                        sent_message = true;
-                        let res = match msg {
-                            OutgoingMessage::Eth(msg) => this.conn.start_send_unpin(msg),
-                            OutgoingMessage::Broadcast(msg) => this.conn.start_send_broadcast(msg),
-                            OutgoingMessage::Raw(msg) => this.conn.start_send_raw(msg),
-                        };
-                        if let Err(err) = res {
-                            debug!(target: "net::session", %err, remote_peer_id=?this.remote_peer_id, "failed to send message");
-                            // notify the manager
-                            return this.close_on_error(err, cx)
+                        }
+
+                        let mut drained_queue = false;
+                        for _ in 0..capacity {
+                            let Some(msg) = this.queued_outgoing.pop_front() else {
+                                drained_queue = true;
+                                break
+                            };
+                            progress = true;
+                            sent_message = true;
+                            let res = match msg {
+                                OutgoingMessage::Eth(msg) => this.conn.start_send_unpin(msg),
+                                OutgoingMessage::Broadcast(msg) => {
+                                    this.conn.start_send_broadcast(msg)
+                                }
+                                OutgoingMessage::Raw(msg) => this.conn.start_send_raw(msg),
+                            };
+                            if let Err(err) = res {
+                                debug!(target: "net::session", %err, remote_peer_id=?this.remote_peer_id, "failed to send message");
+                                // notify the manager
+                                return this.close_on_error(err, cx)
+                            }
+                        }
+
+                        if drained_queue {
+                            break
                         }
                     }
                 }

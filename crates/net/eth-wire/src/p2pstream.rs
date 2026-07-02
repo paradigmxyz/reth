@@ -306,6 +306,12 @@ impl<S> P2PStream<S> {
         self.outgoing_messages.len() < self.outgoing_message_buffer_capacity
     }
 
+    /// Returns how many additional outgoing messages can be queued before this stream needs to
+    /// flush.
+    pub fn available_outgoing_capacity(&self) -> usize {
+        self.outgoing_message_buffer_capacity.saturating_sub(self.outgoing_messages.len())
+    }
+
     /// Queues in a _snappy_ encoded [`P2PMessage::Pong`] message.
     fn send_pong(&mut self) {
         self.outgoing_messages.push_back(Bytes::from(alloy_rlp::encode(P2PMessage::Pong)));

@@ -75,6 +75,17 @@ impl<N: NetworkPrimitives> EthRlpxConnection<N> {
         }
     }
 
+    /// Returns how many messages can be started after one successful readiness poll.
+    #[inline]
+    pub(crate) fn available_outgoing_capacity(&self) -> usize {
+        match self {
+            Self::EthOnly(conn) => conn.inner().available_outgoing_capacity(),
+            // Satellite eth messages are first queued into the protocol proxy. Keep the generic
+            // sink contract for that path and only batch direct eth-only p2p streams.
+            Self::Satellite(_) => 1,
+        }
+    }
+
     /// Same as [`Sink::start_send`] but accepts a [`EthBroadcastMessage`] instead.
     #[inline]
     pub fn start_send_broadcast(
