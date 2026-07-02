@@ -100,7 +100,7 @@ where
 {
     /// Initializes the task with the given transactions pending execution
     pub fn new(
-        _executor: Runtime,
+        executor: Runtime,
         execution_cache: PayloadExecutionCache,
         ctx: PrewarmContext<N, P, Evm>,
         to_sparse_trie_task: Option<CrossbeamSender<StateRootMessage>>,
@@ -109,13 +109,14 @@ where
 
         trace!(
             target: "engine::tree::payload_processor::prewarm",
+            prewarming_threads = executor.prewarming_pool().current_num_threads(),
             transaction_count = ctx.env.transaction_count,
             "Initialized prewarm task"
         );
 
         (
             Self {
-                executor: _executor,
+                executor,
                 execution_cache,
                 ctx,
                 to_sparse_trie_task,
@@ -144,11 +145,11 @@ where
         let ctx = self.ctx.clone();
         let span = Span::current();
 
-        self.executor.spawn_blocking_named("prewarm-transactions", move || {
+        self.executor.spawn_blocking_named("prewarm-txs", move || {
             let _enter = debug_span!(
                 target: "engine::tree::payload_processor::prewarm",
                 parent: &span,
-                "prewarm_transactions"
+                "prewarm_txs"
             )
             .entered();
 
@@ -182,7 +183,7 @@ where
                         let _enter = trace_span!(
                             target: "engine::tree::payload_processor::prewarm",
                             parent: parent_span,
-                            "prewarm_transaction",
+                            "prewarm_tx",
                             i = index,
                         )
                         .entered();
