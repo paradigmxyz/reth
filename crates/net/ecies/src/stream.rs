@@ -25,6 +25,7 @@ use tokio_util::codec::{Decoder, Framed};
 use tracing::{instrument, trace};
 
 const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(10);
+const POST_HANDSHAKE_BACKPRESSURE_BOUNDARY: usize = 1024 * 1024;
 
 /// `ECIES` stream over TCP exchanging raw bytes
 #[derive(Debug)]
@@ -33,6 +34,13 @@ pub struct ECIESStream<Io> {
     #[pin]
     stream: Framed<Io, ECIESCodec>,
     remote_id: PeerId,
+}
+
+impl<Io> ECIESStream<Io> {
+    fn post_handshake(mut stream: Framed<Io, ECIESCodec>, remote_id: PeerId) -> Self {
+        stream.set_backpressure_boundary(POST_HANDSHAKE_BACKPRESSURE_BOUNDARY);
+        Self { stream, remote_id }
+    }
 }
 
 impl<Io> ECIESStream<Io>
@@ -85,7 +93,7 @@ where
 
         trace!("parsing ecies ack ...");
         if matches!(msg, IngressECIESValue::Ack) {
-            Ok(Self { stream: transport, remote_id })
+            Ok(Self::post_handshake(transport, remote_id))
         } else {
             Err(ECIESErrorImpl::InvalidHandshake {
                 expected: IngressECIESValue::Ack,
@@ -118,7 +126,7 @@ where
         trace!("sending ecies ack");
         transport.send(EgressECIESValue::Ack).await?;
 
-        Ok(Self { stream: transport, remote_id })
+        Ok(Self::post_handshake(transport, remote_id))
     }
 
     /// Get the remote id
@@ -185,6 +193,7 @@ mod tests {
             // roughly based off of the design of tokio::net::TcpListener
             let (incoming, _) = listener.accept().await.unwrap();
             let mut stream = ECIESStream::incoming(incoming, server_key).await.unwrap();
+            assert_eq!(stream.stream.backpressure_boundary(), POST_HANDSHAKE_BACKPRESSURE_BOUNDARY);
 
             // use the stream to get the next message
             let message = stream.next().await.unwrap().unwrap();
@@ -198,6 +207,10 @@ mod tests {
         let outgoing = TcpStream::connect(addr).await.unwrap();
         let mut client_stream =
             ECIESStream::connect(outgoing, client_key, server_id).await.unwrap();
+        assert_eq!(
+            client_stream.stream.backpressure_boundary(),
+            POST_HANDSHAKE_BACKPRESSURE_BOUNDARY
+        );
         client_stream.send(Bytes::from("hello")).await.unwrap();
 
         // make sure the server receives the message and asserts before ending the test
