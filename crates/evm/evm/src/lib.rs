@@ -279,6 +279,20 @@ pub trait ConfigureEvm: Clone + Debug + Send + Sync + Unpin {
         None
     }
 
+    /// Creates a block executor from a configured EVM and execution context.
+    #[cfg(feature = "std")]
+    fn create_executor<'a>(
+        &'a self,
+        evm: EvmFor<Self>,
+        ctx: ExecutionCtxFor<'a, Self>,
+        hashed_state_mode: HashedStateMode,
+    ) -> BlockExecutorFor<'a, Self>
+    where
+        Self: 'a,
+    {
+        self.block_executor_factory().create_executor(evm, ctx, hashed_state_mode)
+    }
+
     /// Returns an executor for block execution over the provided database.
     #[auto_impl(keep_default_for(&, Arc))]
     fn executor<DB>(
@@ -338,7 +352,7 @@ pub trait ConfigureEvm: Clone + Debug + Send + Sync + Unpin {
     {
         let evm = self.evm_for_block(db, block.header())?;
         let ctx = self.context_for_block(block)?;
-        Ok(self.block_executor_factory().create_executor(evm, ctx, hashed_state_mode))
+        Ok(self.create_executor(evm, ctx, hashed_state_mode))
     }
 
     /// Creates an EVM instance for single-transaction execution with the configured environment.
@@ -383,11 +397,7 @@ pub trait ConfigureEvm: Clone + Debug + Send + Sync + Unpin {
         Self: 'a,
     {
         BasicBlockBuilder {
-            executor: self.block_executor_factory().create_executor(
-                evm,
-                ctx.clone(),
-                hashed_state_mode,
-            ),
+            executor: self.create_executor(evm, ctx.clone(), hashed_state_mode),
             evm_env,
             transactions: Vec::new(),
             senders: Vec::new(),
