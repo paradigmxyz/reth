@@ -244,7 +244,7 @@ fn run_case(case: &BlockchainTest) -> Result<(), Error> {
 
         // Execute the block
         let state_provider = provider.latest();
-        let state_db = StateProviderDatabase(&state_provider);
+        let state_db = StateProviderDatabase::new(&state_provider);
         let executor = executor_provider.batch_executor(state_db);
 
         let output = executor
