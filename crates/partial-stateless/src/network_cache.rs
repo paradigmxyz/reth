@@ -8,7 +8,7 @@ use crate::{
     policy::{AccountData, CachePolicy},
 };
 use alloy_primitives::{Address, Bytes, B256, U256};
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use tracing::{debug, info};
 
 /// An entry in the network state cache, tracking access metadata.
@@ -79,6 +79,9 @@ pub struct NetworkStateCache {
     storage_policy: Box<dyn CachePolicy>,
     /// Current block number.
     current_block: u64,
+    /// Per-block undo records (oldest→newest) enabling rollback on reorg.
+    /// Retained only for the unfinalized window; pruned below the finalized block.
+    undo_log: VecDeque<BlockCacheUndo>,
 }
 
 impl NetworkStateCache {
@@ -94,6 +97,7 @@ impl NetworkStateCache {
             account_policy,
             storage_policy,
             current_block: 0,
+            undo_log: VecDeque::new(),
         }
     }
 
@@ -111,7 +115,19 @@ impl NetworkStateCache {
         account_policy: Box<dyn CachePolicy>,
         storage_policy: Box<dyn CachePolicy>,
     ) -> Self {
-        Self { accounts, storage, codes, account_policy, storage_policy, current_block }
+        // Undo history is not persisted: a freshly restored cache has no rollback
+        // history, so a reorg deeper than what arrives after restart triggers a
+        // cold reset (see `reset`). This is safe — only accuracy of the affected
+        // blocks degrades until the cache warms again.
+        Self {
+            accounts,
+            storage,
+            codes,
+            account_policy,
+            storage_policy,
+            current_block,
+            undo_log: VecDeque::new(),
+        }
     }
 
     /// Process a new block's execution results.
@@ -124,11 +140,18 @@ impl NetworkStateCache {
         block_number: u64,
         accessed: &BlockAccessedState,
     ) -> UpdateStats {
+        // Capture the cache's pre-block state so this block can be rolled back on
+        // reorg. For every key we touch or evict we record its prior value:
+        // `Some(entry)` = existed before, `None` = absent before.
+        let mut undo = BlockCacheUndo::new(block_number, self.current_block);
         self.current_block = block_number;
         let mut stats = UpdateStats::default();
 
         // --- Insert/refresh accounts ---
         for (address, account_data) in &accessed.accounts {
+            undo.accounts_before
+                .entry(*address)
+                .or_insert_with(|| self.accounts.get(address).cloned());
             match self.accounts.get_mut(address) {
                 Some(entry) => {
                     entry.value = account_data.clone();
@@ -145,6 +168,9 @@ impl NetworkStateCache {
 
         // --- Insert/refresh storage ---
         for ((address, slot), value) in &accessed.storage {
+            undo.storage_before
+                .entry((*address, *slot))
+                .or_insert_with(|| self.storage.get(&(*address, *slot)).cloned());
             match self.storage.get_mut(&(*address, *slot)) {
                 Some(entry) => {
                     entry.value = *value;
@@ -160,6 +186,9 @@ impl NetworkStateCache {
 
         // --- Insert/refresh codes ---
         for (code_hash, bytecode) in &accessed.codes {
+            undo.codes_before
+                .entry(*code_hash)
+                .or_insert_with(|| self.codes.get(code_hash).cloned());
             match self.codes.get_mut(code_hash) {
                 Some(entry) => {
                     entry.touch(block_number);
@@ -173,16 +202,37 @@ impl NetworkStateCache {
         }
 
         // --- Apply eviction policies ---
-        let accounts_before = self.accounts.len();
-        let storage_before = self.storage.len();
-        let codes_before = self.codes.len();
+        // Snapshot the maps before eviction so we can record exactly which entries
+        // the policy removes (their values are gone afterwards). The snapshot is
+        // transient — only the removed entries are kept, in the undo record.
+        let accounts_pre_evict = self.accounts.clone();
+        let storage_pre_evict = self.storage.clone();
+        let codes_pre_evict = self.codes.clone();
 
         self.account_policy.evict_accounts(&mut self.accounts, block_number);
         self.storage_policy.evict_storage(&mut self.storage, &mut self.codes, block_number);
 
-        stats.accounts_evicted = accounts_before.saturating_sub(self.accounts.len());
-        stats.storage_evicted = storage_before.saturating_sub(self.storage.len());
-        stats.codes_evicted = codes_before.saturating_sub(self.codes.len());
+        for (address, entry) in &accounts_pre_evict {
+            if !self.accounts.contains_key(address) {
+                undo.accounts_before.entry(*address).or_insert_with(|| Some(entry.clone()));
+            }
+        }
+        for (key, entry) in &storage_pre_evict {
+            if !self.storage.contains_key(key) {
+                undo.storage_before.entry(*key).or_insert_with(|| Some(entry.clone()));
+            }
+        }
+        for (code_hash, entry) in &codes_pre_evict {
+            if !self.codes.contains_key(code_hash) {
+                undo.codes_before.entry(*code_hash).or_insert_with(|| Some(entry.clone()));
+            }
+        }
+
+        stats.accounts_evicted = accounts_pre_evict.len().saturating_sub(self.accounts.len());
+        stats.storage_evicted = storage_pre_evict.len().saturating_sub(self.storage.len());
+        stats.codes_evicted = codes_pre_evict.len().saturating_sub(self.codes.len());
+
+        self.undo_log.push_back(undo);
 
         debug!(
             target: "partial_stateless::cache",
@@ -300,6 +350,84 @@ impl NetworkStateCache {
         let codes_size: usize = self.codes.values().map(|e| 52 + e.value.len()).sum();
         accounts_size + storage_size + codes_size
     }
+
+    /// Roll back the most recently applied block, restoring the cache to its exact
+    /// state before that block (including values overwritten by refresh and entries
+    /// removed by eviction).
+    ///
+    /// `block_number` must equal the newest undo record (the most recently applied
+    /// block); otherwise [`CacheError::RollbackMismatch`] is returned and the caller
+    /// should cold-reset via [`reset`](Self::reset). Reorgs revert blocks newest→oldest,
+    /// matching the undo stack order.
+    pub fn rollback_block(&mut self, block_number: u64) -> Result<(), CacheError> {
+        match self.undo_log.back() {
+            Some(undo) if undo.block_number == block_number => {}
+            other => {
+                return Err(CacheError::RollbackMismatch {
+                    requested: block_number,
+                    found: other.map(|u| u.block_number),
+                })
+            }
+        }
+
+        let undo = self.undo_log.pop_back().expect("checked non-empty above");
+        for (address, before) in undo.accounts_before {
+            match before {
+                Some(entry) => {
+                    self.accounts.insert(address, entry);
+                }
+                None => {
+                    self.accounts.remove(&address);
+                }
+            }
+        }
+        for (key, before) in undo.storage_before {
+            match before {
+                Some(entry) => {
+                    self.storage.insert(key, entry);
+                }
+                None => {
+                    self.storage.remove(&key);
+                }
+            }
+        }
+        for (code_hash, before) in undo.codes_before {
+            match before {
+                Some(entry) => {
+                    self.codes.insert(code_hash, entry);
+                }
+                None => {
+                    self.codes.remove(&code_hash);
+                }
+            }
+        }
+        self.current_block = undo.previous_block;
+        Ok(())
+    }
+
+    /// Drop undo records at or below `finalized_block`. Reorgs never cross a finalized
+    /// block, so these records can never be needed again — this bounds undo-log memory
+    /// to the unfinalized window.
+    pub fn prune_undo_below(&mut self, finalized_block: u64) {
+        while let Some(front) = self.undo_log.front() {
+            if front.block_number <= finalized_block {
+                self.undo_log.pop_front();
+            } else {
+                break;
+            }
+        }
+    }
+
+    /// Clear the entire cache and undo history (cold reset). Used to recover when a
+    /// reorg is deeper than the retained undo history and cannot be rolled back; the
+    /// cache is then rebuilt from the new canonical chain.
+    pub fn reset(&mut self) {
+        self.accounts.clear();
+        self.storage.clear();
+        self.codes.clear();
+        self.undo_log.clear();
+        self.current_block = 0;
+    }
 }
 
 /// Result of computing cache misses for a block.
@@ -335,6 +463,55 @@ impl MissResult {
         );
     }
 }
+
+/// Undo record for a single applied block, enabling rollback on reorg.
+///
+/// Each `*_before` map stores the value of a touched or evicted key *before* the
+/// block was applied: `Some(entry)` = the key existed (restore it on rollback),
+/// `None` = the key was absent (remove it on rollback).
+#[derive(Debug, Clone)]
+struct BlockCacheUndo {
+    /// The block this record can undo.
+    block_number: u64,
+    /// Cache `current_block` before this block was applied (restored on rollback).
+    previous_block: u64,
+    accounts_before: HashMap<Address, Option<CachedEntry<AccountData>>>,
+    storage_before: HashMap<(Address, B256), Option<CachedEntry<U256>>>,
+    codes_before: HashMap<B256, Option<CachedEntry<Bytes>>>,
+}
+
+impl BlockCacheUndo {
+    fn new(block_number: u64, previous_block: u64) -> Self {
+        Self {
+            block_number,
+            previous_block,
+            accounts_before: HashMap::new(),
+            storage_before: HashMap::new(),
+            codes_before: HashMap::new(),
+        }
+    }
+}
+
+/// Errors returned by reorg-related cache operations.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CacheError {
+    /// Rollback was requested for a block that is not the newest undo record.
+    /// `found` is the newest retained undo block (or `None` if no history remains).
+    RollbackMismatch { requested: u64, found: Option<u64> },
+}
+
+impl std::fmt::Display for CacheError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            CacheError::RollbackMismatch { requested, found } => write!(
+                f,
+                "cache rollback mismatch: requested block {requested}, newest undo record is {found:?}"
+            ),
+        }
+    }
+}
+
+impl std::error::Error for CacheError {}
 
 #[cfg(test)]
 mod tests {
@@ -467,5 +644,120 @@ mod tests {
         // Block 20: storage cutoff=15. Since last_accessed=14, now evicted.
         cache.on_block_executed(20, &BlockAccessedState::default());
         assert!(!cache.contains_storage(&addr, &slot));
+    }
+
+    fn account(nonce: u64, balance: u64) -> AccountData {
+        AccountData { nonce, balance: U256::from(balance), code_hash: None }
+    }
+
+    #[test]
+    fn test_rollback_removes_newly_inserted() {
+        let mut cache = make_cache(10, 10);
+        let addr = Address::repeat_byte(0x01);
+        let mut accessed = BlockAccessedState::default();
+        accessed.accounts.insert(addr, account(1, 1));
+        cache.on_block_executed(100, &accessed);
+        assert!(cache.contains_account(&addr));
+
+        cache.rollback_block(100).unwrap();
+        assert!(!cache.contains_account(&addr));
+        assert_eq!(cache.current_block(), 0);
+    }
+
+    #[test]
+    fn test_rollback_restores_refreshed_value() {
+        let mut cache = make_cache(10, 10);
+        let addr = Address::repeat_byte(0x01);
+
+        let mut b1 = BlockAccessedState::default();
+        b1.accounts.insert(addr, account(1, 100));
+        cache.on_block_executed(10, &b1);
+
+        let mut b2 = BlockAccessedState::default();
+        b2.accounts.insert(addr, account(2, 200));
+        cache.on_block_executed(11, &b2);
+
+        cache.rollback_block(11).unwrap();
+        let entry = cache.accounts().get(&addr).expect("account still cached");
+        assert_eq!(entry.value.nonce, 1);
+        assert_eq!(entry.value.balance, U256::from(100));
+        assert_eq!(entry.last_accessed_block, 10);
+        assert_eq!(cache.current_block(), 10);
+    }
+
+    #[test]
+    fn test_rollback_restores_evicted_entry() {
+        // account window = 3: entry inserted at block 10 is evicted by block 14 (cutoff 11).
+        let mut cache = make_cache(3, 3);
+        let addr = Address::repeat_byte(0x01);
+        let mut b = BlockAccessedState::default();
+        b.accounts.insert(addr, account(1, 1));
+        cache.on_block_executed(10, &b);
+
+        cache.on_block_executed(14, &BlockAccessedState::default());
+        assert!(!cache.contains_account(&addr), "should be evicted at block 14");
+
+        cache.rollback_block(14).unwrap();
+        assert!(cache.contains_account(&addr), "rollback must restore the evicted entry");
+    }
+
+    #[test]
+    fn test_rollback_matches_prior_state_invariant() {
+        let mut cache = make_cache(10, 10);
+        let a1 = Address::repeat_byte(0x01);
+        let a2 = Address::repeat_byte(0x02);
+
+        let mut b1 = BlockAccessedState::default();
+        b1.accounts.insert(a1, account(1, 1));
+        cache.on_block_executed(10, &b1);
+        let snap_after_10 = cache.snapshot();
+
+        let mut b2 = BlockAccessedState::default();
+        b2.accounts.insert(a2, account(1, 2));
+        cache.on_block_executed(11, &b2);
+
+        cache.rollback_block(11).unwrap();
+        let rolled_back = cache.snapshot();
+        assert_eq!(rolled_back.total_accounts, snap_after_10.total_accounts);
+        assert_eq!(rolled_back.current_block, snap_after_10.current_block);
+        assert!(cache.contains_account(&a1));
+        assert!(!cache.contains_account(&a2));
+    }
+
+    #[test]
+    fn test_rollback_mismatch_is_rejected() {
+        let mut cache = make_cache(10, 10);
+        let mut b = BlockAccessedState::default();
+        b.accounts.insert(Address::repeat_byte(0x01), account(1, 1));
+        cache.on_block_executed(10, &b);
+        // Newest undo is block 10; requesting any other block must fail.
+        assert!(cache.rollback_block(9).is_err());
+        assert!(cache.rollback_block(11).is_err());
+    }
+
+    #[test]
+    fn test_prune_below_finalized_then_rollback_rejected() {
+        let mut cache = make_cache(10, 10);
+        let mut b = BlockAccessedState::default();
+        b.accounts.insert(Address::repeat_byte(0x01), account(1, 1));
+        cache.on_block_executed(10, &b);
+
+        cache.prune_undo_below(10);
+        // Undo for block 10 was pruned (finalized) → it can no longer be rolled back.
+        assert!(cache.rollback_block(10).is_err());
+    }
+
+    #[test]
+    fn test_reset_clears_everything() {
+        let mut cache = make_cache(10, 10);
+        let mut b = BlockAccessedState::default();
+        b.accounts.insert(Address::repeat_byte(0x01), account(1, 1));
+        b.storage.insert((Address::repeat_byte(0x01), B256::repeat_byte(0x02)), U256::from(5));
+        cache.on_block_executed(10, &b);
+
+        cache.reset();
+        assert_eq!(cache.snapshot().total_accounts, 0);
+        assert_eq!(cache.snapshot().total_storage_slots, 0);
+        assert_eq!(cache.current_block(), 0);
     }
 }
