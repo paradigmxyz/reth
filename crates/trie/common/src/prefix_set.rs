@@ -223,6 +223,7 @@ impl PrefixSet {
             }
         }
 
+        self.index = self.keys.len().saturating_sub(1);
         false
     }
 
@@ -253,6 +254,7 @@ impl PrefixSet {
             }
         }
 
+        self.index = self.keys.len().saturating_sub(1);
         false
     }
 
@@ -348,5 +350,41 @@ mod tests {
         let mut prefix_set_mut = PrefixSetMut::default();
         prefix_set_mut.extend(PrefixSetMut::all());
         assert!(prefix_set_mut.all);
+    }
+
+    #[test]
+    fn test_contains_exhausted_miss_advances_cursor_to_tail() {
+        let mut prefix_set = PrefixSetMut::from([
+            Nibbles::from_nibbles([1, 0]),
+            Nibbles::from_nibbles([3, 0]),
+            Nibbles::from_nibbles([5, 0]),
+        ])
+        .freeze();
+
+        assert!(!prefix_set.contains(&Nibbles::from_nibbles_unchecked([9])));
+        assert_eq!(prefix_set.index, 2);
+
+        assert!(!prefix_set.contains(&Nibbles::from_nibbles_unchecked([0])));
+        assert_eq!(prefix_set.index, 0);
+    }
+
+    #[test]
+    fn test_contains_range_exhausted_miss_advances_cursor_to_tail() {
+        let mut prefix_set = PrefixSetMut::from([
+            Nibbles::from_nibbles([1, 0]),
+            Nibbles::from_nibbles([3, 0]),
+            Nibbles::from_nibbles([5, 0]),
+        ])
+        .freeze();
+
+        let start = Nibbles::from_nibbles_unchecked([8]);
+        let end = Nibbles::from_nibbles_unchecked([9]);
+        assert!(!prefix_set.contains_range(&start..&end));
+        assert_eq!(prefix_set.index, 2);
+
+        let start = Nibbles::from_nibbles_unchecked([0]);
+        let end = Nibbles::from_nibbles_unchecked([1]);
+        assert!(!prefix_set.contains_range(&start..&end));
+        assert_eq!(prefix_set.index, 0);
     }
 }
