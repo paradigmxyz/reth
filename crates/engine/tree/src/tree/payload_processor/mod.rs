@@ -682,8 +682,7 @@ where
 
             // Reuse a stored SparseStateTrie if available, applying continuation logic.
             // If this payload's parent state root matches the preserved trie's anchor,
-            // we can reuse the preserved trie structure. Otherwise, we clear the trie but
-            // keep allocations.
+            // we can reuse the preserved trie structure.
             let start = Instant::now();
             let preserved = state_trie_overlays.take_sparse_trie();
             trie_metrics
@@ -691,7 +690,7 @@ where
                 .record(start.elapsed().as_secs_f64());
 
             let mut sparse_state_trie = preserved
-                .map(|preserved| preserved.into_trie_for(parent_state_root))
+                .and_then(|preserved| preserved.into_trie_for(parent_state_root))
                 .unwrap_or_else(|| {
                     debug!(
                         target: "engine::tree::payload_processor",
@@ -704,6 +703,7 @@ where
                         .with_default_storage_trie(default_trie)
                         .with_updates(true)
                 });
+            sparse_state_trie.set_changed_paths(true);
             sparse_state_trie.set_hot_cache_capacities(max_hot_slots, max_hot_accounts);
 
             let mut task = SparseTrieCacheTask::new_with_trie(
@@ -721,7 +721,7 @@ where
 
             // Acquire the guard before sending the result to prevent a race condition:
             // Without this, the next block could start after send() but before store(),
-            // causing take_sparse_trie() to return None and forcing it to create a new empty trie
+            // causing take_sparse_trie() to observe the trie as still in use
             // instead of reusing the preserved one. Holding the guard ensures the next
             // block's take_sparse_trie() blocks until we've stored the trie for reuse.
             let mut guard = state_trie_overlays.lock_sparse_trie();
@@ -734,11 +734,12 @@ where
                 // Clear the trie instead of preserving potentially invalid state.
                 debug!(
                     target: "engine::tree::payload_processor",
-                    "State root receiver dropped, clearing trie"
+                    "State root receiver dropped, dropping trie"
                 );
                 let (trie, deferred) = task.into_cleared_trie();
-                guard.store(PreservedSparseTrie::cleared(trie));
+                guard.clear();
                 drop(guard);
+                drop(trie);
                 executor.spawn_drop(deferred);
                 return;
             }
@@ -750,7 +751,12 @@ where
             let deferred = if let Some(result) = task_result {
                 let start = Instant::now();
                 let (mut trie, deferred) = task.into_trie_for_reuse();
-                if let Some(retained_paths) = pending_sparse_trie_prune {
+                if let Some(mut retained_paths) = pending_sparse_trie_prune {
+                    let changed_paths = result
+                        .changed_paths
+                        .as_deref()
+                        .expect("sparse trie task always returns changed paths");
+                    retained_paths.extend_from_changed_paths(changed_paths);
                     trie.prune(max_hot_slots, max_hot_accounts, retained_paths);
                 }
                 trie_metrics
@@ -767,10 +773,11 @@ where
             } else {
                 debug!(
                     target: "engine::tree::payload_processor",
-                    "State root computation failed, clearing trie"
+                    "State root computation failed, dropping trie"
                 );
                 let (trie, deferred) = task.into_cleared_trie();
-                guard.store(PreservedSparseTrie::cleared(trie));
+                guard.clear();
+                drop(trie);
                 deferred
             };
             drop(guard);

@@ -2144,19 +2144,33 @@ where
             number: self.persistence_state.last_persisted_block.number,
             hash: self.persistence_state.last_persisted_block.hash,
         });
-        let retained_paths = self.sparse_trie_retained_paths_for_in_memory_blocks();
-        self.pending_sparse_trie_prune = Some(retained_paths);
+        self.pending_sparse_trie_prune = self.sparse_trie_retained_paths_for_in_memory_blocks();
         Ok(())
     }
 
     /// Builds sparse trie retained paths from all blocks still present in the in-memory tree.
-    fn sparse_trie_retained_paths_for_in_memory_blocks(&self) -> SparseTrieRetainedPaths {
+    fn sparse_trie_retained_paths_for_in_memory_blocks(&self) -> Option<SparseTrieRetainedPaths> {
+        if self.config.skip_state_root() ||
+            self.config.state_root_fallback() ||
+            !self.config.use_state_root_task()
+        {
+            return None
+        }
+
         let mut retained_paths = SparseTrieRetainedPaths::default();
         for block in self.state.tree_state.blocks_by_hash.values() {
             let trie_data = block.trie_data();
-            retained_paths.extend_from_hashed_state(&trie_data.hashed_state);
+            let Some(changed_paths) = trie_data.changed_paths.as_deref() else {
+                warn!(
+                    target: "engine::tree",
+                    block = ?block.recovered_block().num_hash(),
+                    "Skipping sparse trie prune because changed paths for in-memory block are unknown"
+                );
+                return None
+            };
+            retained_paths.extend_from_changed_paths(changed_paths);
         }
-        retained_paths
+        Some(retained_paths)
     }
 
     /// Return an [`ExecutedBlock`] from database or in-memory state by hash.
@@ -3291,11 +3305,26 @@ where
         let skip_state_root = self.config.skip_state_root();
         let trie_handle =
             if self.config.share_sparse_trie_with_payload_builder() && !skip_state_root {
-                self.payload_validator.sparse_trie_handle_for(
-                    state.head_block_hash,
-                    head.state_root(),
-                    &self.state,
-                )
+                if !self
+                    .state
+                    .tree_state
+                    .state_trie_overlays
+                    .sparse_trie_is_based_on_parent_state_root(head.state_root())
+                {
+                    debug!(
+                        target: "engine::tree",
+                        parent_hash = %state.head_block_hash,
+                        parent_state_root = %head.state_root(),
+                        "not sharing sparse trie with payload builder - trie is not based on parent"
+                    );
+                    None
+                } else {
+                    self.payload_validator.sparse_trie_handle_for(
+                        state.head_block_hash,
+                        head.state_root(),
+                        &self.state,
+                    )
+                }
             } else {
                 None
             };

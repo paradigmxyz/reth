@@ -75,6 +75,9 @@ pub trait SparseTrie: Sized + Debug + Send + Sync {
     /// * `retain_updates` - Whether to track updates
     fn set_updates(&mut self, retain_updates: bool);
 
+    /// Configures the trie to retain changed node base paths during hashing.
+    fn set_changed_paths(&mut self, retain_changed_paths: bool);
+
     /// Reveals one or more trie nodes if they have not been revealed before.
     ///
     /// This function decodes trie nodes and inserts them into the trie structure. It handles
@@ -173,6 +176,13 @@ pub trait SparseTrie: Sized + Debug + Send + Sync {
     ///
     /// The accumulated updates, or an empty set if updates weren't being tracked.
     fn take_updates(&mut self) -> SparseTrieUpdates;
+
+    /// Consumes and returns the currently accumulated changed node base paths.
+    ///
+    /// Ancestor paths may be excluded when a descendant path is already present.
+    ///
+    /// Returns an empty set if changed paths weren't being tracked.
+    fn take_changed_paths(&mut self) -> HashSet<Nibbles>;
 
     /// Removes all nodes and values from the trie, resetting it to a blank state
     /// with only an empty root node. This is used when a storage root is deleted.
