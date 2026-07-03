@@ -323,8 +323,8 @@ reth-cli = { path = "crates/cli/cli" }
 reth-cli-commands = { path = "crates/cli/commands" }
 reth-cli-runner = { path = "crates/cli/runner" }
 reth-cli-util = { path = "crates/cli/util" }
-reth-codecs = { git = "https://github.com/paradigmxyz/reth-core", rev = "1679dbbc9fdcf9aa5ef27738f4f7fb0dced1be32", default-features = false }
-reth-codecs-derive = { git = "https://github.com/paradigmxyz/reth-core", rev = "1679dbbc9fdcf9aa5ef27738f4f7fb0dced1be32" }
+reth-codecs = { git = "https://github.com/paradigmxyz/reth-core", rev = "88300533fbf224461b404a50d616f0b20f237b41", default-features = false }
+reth-codecs-derive = { git = "https://github.com/paradigmxyz/reth-core", rev = "88300533fbf224461b404a50d616f0b20f237b41" }
 reth-config = { path = "crates/config", default-features = false }
 reth-consensus = { path = "crates/consensus/consensus", default-features = false }
 reth-consensus-common = { path = "crates/consensus/common", default-features = false }
@@ -392,7 +392,7 @@ reth-payload-builder-primitives = { path = "crates/payload/builder-primitives" }
 reth-payload-primitives = { path = "crates/payload/primitives" }
 reth-payload-validator = { path = "crates/payload/validator" }
 reth-payload-util = { path = "crates/payload/util" }
-reth-primitives-traits = { git = "https://github.com/paradigmxyz/reth-core", rev = "1679dbbc9fdcf9aa5ef27738f4f7fb0dced1be32", default-features = false }
+reth-primitives-traits = { git = "https://github.com/paradigmxyz/reth-core", rev = "88300533fbf224461b404a50d616f0b20f237b41", default-features = false }
 reth-provider = { path = "crates/storage/provider" }
 reth-prune = { path = "crates/prune/prune" }
 reth-prune-types = { path = "crates/prune/types", default-features = false }
@@ -407,7 +407,7 @@ reth-rpc-eth-types = { path = "crates/rpc/rpc-eth-types", default-features = fal
 reth-rpc-layer = { path = "crates/rpc/rpc-layer" }
 reth-rpc-server-types = { path = "crates/rpc/rpc-server-types" }
 reth-rpc-convert = { path = "crates/rpc/rpc-convert" }
-reth-rpc-traits = { git = "https://github.com/paradigmxyz/reth-core", rev = "1679dbbc9fdcf9aa5ef27738f4f7fb0dced1be32", default-features = false }
+reth-rpc-traits = { git = "https://github.com/paradigmxyz/reth-core", rev = "88300533fbf224461b404a50d616f0b20f237b41", default-features = false }
 reth-stages = { path = "crates/stages/stages" }
 reth-stages-api = { path = "crates/stages/api" }
 reth-stages-types = { path = "crates/stages/types", default-features = false }
@@ -426,13 +426,13 @@ reth-trie-common = { path = "crates/trie/common", default-features = false }
 reth-trie-db = { path = "crates/trie/db" }
 reth-trie-parallel = { path = "crates/trie/parallel" }
 reth-trie-sparse = { path = "crates/trie/sparse", default-features = false }
-reth-zstd-compressors = { git = "https://github.com/paradigmxyz/reth-core", rev = "1679dbbc9fdcf9aa5ef27738f4f7fb0dced1be32", default-features = false }
+reth-zstd-compressors = { git = "https://github.com/paradigmxyz/reth-core", rev = "88300533fbf224461b404a50d616f0b20f237b41", default-features = false }
 
 # evm2
-evm2 = { git = "https://github.com/alloy-rs/evm2", rev = "9a96d9d3bfa5a251ea661804fe9c3a0632720d28", default-features = false, features = ["std", "secp256k1"] }
-evm2-inspectors = { git = "https://github.com/alloy-rs/evm2", rev = "9a96d9d3bfa5a251ea661804fe9c3a0632720d28", default-features = false, features = ["std"] }
-evm2-jit = { git = "https://github.com/alloy-rs/evm2", rev = "9a96d9d3bfa5a251ea661804fe9c3a0632720d28", default-features = false }
-evm2-jit-build = { git = "https://github.com/alloy-rs/evm2", rev = "9a96d9d3bfa5a251ea661804fe9c3a0632720d28", default-features = false }
+evm2 = { git = "https://github.com/alloy-rs/evm2", rev = "5332844958a3ba2a3ab561886d69220b8920c0ec", default-features = false, features = ["std", "secp256k1"] }
+evm2-inspectors = { git = "https://github.com/alloy-rs/evm2", rev = "5332844958a3ba2a3ab561886d69220b8920c0ec", default-features = false, features = ["std"] }
+evm2-jit = { git = "https://github.com/alloy-rs/evm2", rev = "5332844958a3ba2a3ab561886d69220b8920c0ec", default-features = false }
+evm2-jit-build = { git = "https://github.com/alloy-rs/evm2", rev = "5332844958a3ba2a3ab561886d69220b8920c0ec", default-features = false }
 
 # eth
 alloy-dyn-abi = "1.6.0"
