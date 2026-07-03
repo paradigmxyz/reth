@@ -621,9 +621,10 @@ where
                     }
                 }
             }
-            // `poll_ready` does not flush the p2p stream, so frames handed to the connection are
-            // flushed explicitly once per pass. This also resumes a flush that previously
-            // returned pending; a no-op if nothing needs flushing.
+            // The connection only buffers frames on `start_send`; `poll_flush` performs the
+            // actual writes and flushes the transport once for the batch handed to it above.
+            // This also resumes a flush that returned pending on an earlier pass; a no-op if
+            // nothing is buffered.
             match this.inner.conn.poll_flush_unpin(cx) {
                 Poll::Ready(Ok(())) => {}
                 Poll::Ready(Err(err)) => return Poll::Ready(Some(Err(err.into()))),

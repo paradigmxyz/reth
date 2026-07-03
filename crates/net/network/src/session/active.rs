@@ -752,9 +752,9 @@ impl<N: NetworkPrimitives> Future for ActiveSession<N> {
                 }
             }
 
-            // The sink does not flush in `poll_ready`, so the batch queued above is flushed
-            // explicitly once per pass. This also resumes a flush that previously returned
-            // pending; a no-op if nothing needs flushing.
+            // The sink only buffers sent messages; `poll_flush` performs the actual writes and
+            // flushes the transport once for the entire batch queued above. This also resumes a
+            // flush that returned pending on an earlier pass; a no-op if nothing is buffered.
             match this.conn.poll_flush_unpin(cx) {
                 Poll::Pending | Poll::Ready(Ok(())) => {}
                 Poll::Ready(Err(err)) => {
