@@ -831,7 +831,7 @@ impl<S: BlockHashReader> BlockHashReader for CachedStateProvider<S> {
     }
 }
 
-impl<S: HashedPostStateProvider> HashedPostStateProvider for CachedStateProvider<S> {}
+impl<S> HashedPostStateProvider for CachedStateProvider<S> {}
 
 /// Execution cache used during block processing.
 ///

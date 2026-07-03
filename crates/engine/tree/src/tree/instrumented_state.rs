@@ -307,7 +307,7 @@ impl<S: BlockHashReader> BlockHashReader for InstrumentedStateProvider<S> {
     }
 }
 
-impl<S: HashedPostStateProvider> HashedPostStateProvider for InstrumentedStateProvider<S> {}
+impl<S> HashedPostStateProvider for InstrumentedStateProvider<S> {}
 
 /// Accumulated fetch statistics from an [`InstrumentedStateProvider`].
 ///
