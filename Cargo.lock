@@ -6461,9 +6461,11 @@ dependencies = [
 name = "partial-stateless"
 version = "0.1.0"
 dependencies = [
+ "alloy-consensus",
  "alloy-primitives",
  "alloy-rlp",
  "bincode",
+ "reth-primitives-traits",
  "reth-trie-common",
  "revm-database",
  "revm-primitives",
@@ -6485,6 +6487,7 @@ dependencies = [
  "partial-stateless",
  "reth-ethereum",
  "reth-evm",
+ "reth-primitives-traits",
  "reth-provider",
  "reth-revm",
  "reth-trie-common",

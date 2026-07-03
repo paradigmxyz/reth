@@ -10,11 +10,17 @@
 //! 3. Computes and logs cache miss ratio (= witness requirement)
 //! 4. Computes actual Merkle proof (witness) size for cache-missed state
 
+mod sidecar_reexec;
+
+use alloy_primitives::Bytes;
+use alloy_rlp::Encodable;
 use futures::TryStreamExt;
 use partial_stateless::{
     accessed_state::BlockAccessedState,
     fixture::{save_fixture, AccessedStateFixture},
+    last_n_blocks_cache_policy_id,
     network_cache::NetworkStateCache,
+    partial_witness_commitment,
     persistence::{load_from_file, save_to_file},
     policy::LastNBlocksPolicy,
     witness::{
@@ -22,8 +28,8 @@ use partial_stateless::{
         measure_multiproof_size, state_targets_to_proof_targets, WitnessResult,
     },
     CacheFootprintStats, PartialExecutionWitness, PartialExecutionWitnessState,
-    PartialStatelessSidecar, PartitionCheck, SerializableMultiProof, SidecarBenchmarkManifest,
-    StateTargetSet, WitnessReductionStats,
+    PartialStatelessSidecar, RootWitnessCompletenessSummary, SerializableMultiProof,
+    SidecarBenchmarkManifest, StateTargetSet, StateTargetStats, WitnessReductionStats,
 };
 use reth_ethereum::{
     chainspec::EthChainSpec,
@@ -37,17 +43,15 @@ use reth_ethereum::{
     storage::StateProofProvider,
     EthPrimitives,
 };
+use reth_evm::{execute::Executor, ConfigureEvm};
 use reth_provider::{BlockIdReader, HeaderProvider};
-use reth_trie_common::TrieInput;
-use reth_evm::{ConfigureEvm, execute::Executor};
 use reth_revm::database::StateProviderDatabase;
+use reth_trie_common::TrieInput;
 use revm::database::State;
-use alloy_primitives::Bytes;
-use alloy_rlp::Encodable;
-use std::time::Instant;
+use sidecar_reexec::{check_provider_assisted_sidecar, SidecarReexecLimits};
 use std::fs;
+use std::time::Instant;
 use tracing::{info, warn};
-
 
 /// Configuration for the partial statelessness cache.
 struct CacheConfig {
@@ -60,6 +64,15 @@ struct CacheConfig {
 impl Default for CacheConfig {
     fn default() -> Self {
         Self { account_window: 60, storage_window: 30 }
+    }
+}
+
+impl CacheConfig {
+    fn new_cache(&self) -> NetworkStateCache {
+        NetworkStateCache::new(
+            Box::new(LastNBlocksPolicy::new(self.account_window)),
+            Box::new(LastNBlocksPolicy::new(self.storage_window)),
+        )
     }
 }
 
@@ -101,16 +114,13 @@ async fn partial_stateless_exex<
                     loaded_cache
                 } else {
                     warn!(
-                        target: "partial_stateless",
-                        cache_block = cache_block,
-                        head_block = head_block,
-                        max_allowed_gap = max_allowed_gap,
-                        "Cache file block state is too far from head block or in the future. Starting with cold cache."
+                            target: "partial_stateless",
+                            cache_block = cache_block,
+                            head_block = head_block,
+                            max_allowed_gap = max_allowed_gap,
+                            "Cache file block state is too far from head block or in the future. Starting with cold cache."
                     );
-                    NetworkStateCache::new(
-                        Box::new(LastNBlocksPolicy::new(config.account_window)),
-                        Box::new(LastNBlocksPolicy::new(config.storage_window)),
-                    )
+                    config.new_cache()
                 }
             }
             Err(e) => {
@@ -119,10 +129,7 @@ async fn partial_stateless_exex<
                     error = %e,
                     "Failed to load cache file from disk. Starting with cold cache."
                 );
-                NetworkStateCache::new(
-                    Box::new(LastNBlocksPolicy::new(config.account_window)),
-                    Box::new(LastNBlocksPolicy::new(config.storage_window)),
-                )
+                config.new_cache()
             }
         }
     } else {
@@ -131,10 +138,7 @@ async fn partial_stateless_exex<
             "No existing cache file found at {}. Starting with cold cache.",
             cache_path.display()
         );
-        NetworkStateCache::new(
-            Box::new(LastNBlocksPolicy::new(config.account_window)),
-            Box::new(LastNBlocksPolicy::new(config.storage_window)),
-        )
+        config.new_cache()
     };
 
     info!(
@@ -172,6 +176,21 @@ async fn partial_stateless_exex<
         );
     }
 
+    // Optional provider-assisted validator preflight. This re-executes each
+    // generated sidecar with a cache+witness-backed provider and checks the
+    // cache-state transition. It is useful for PoC acceptance checks, but it
+    // adds another block execution on the sidecar generation path.
+    let run_sidecar_preflight = std::env::var("PS_SIDECAR_PREFLIGHT")
+        .map(|v| matches!(v.as_str(), "1" | "true" | "TRUE" | "yes" | "on"))
+        .unwrap_or(false);
+    if run_sidecar_preflight {
+        info!(
+            target: "partial_stateless",
+            "Provider-assisted sidecar preflight ENABLED (PS_SIDECAR_PREFLIGHT) — extra re-execution per sidecar"
+        );
+    }
+    let reexec_limits = SidecarReexecLimits::default();
+
     while let Some(notification) = ctx.notifications.try_next().await? {
         match &notification {
             ExExNotification::ChainCommitted { new } => {
@@ -183,18 +202,19 @@ async fn partial_stateless_exex<
                     let parent_block_number = block_number.saturating_sub(1);
 
                     // Get state provider for the parent block to run execution simulation
-                    let state_provider = match ctx.provider().history_by_block_number(parent_block_number) {
-                        Ok(provider) => provider,
-                        Err(e) => {
-                            warn!(
-                                target: "partial_stateless",
-                                block = *block_number,
-                                error = %e,
-                                "Failed to get state provider for parent block. Skipping block."
-                            );
-                            continue;
-                        }
-                    };
+                    let state_provider =
+                        match ctx.provider().history_by_block_number(parent_block_number) {
+                            Ok(provider) => provider,
+                            Err(e) => {
+                                warn!(
+                                    target: "partial_stateless",
+                                    block = *block_number,
+                                    error = %e,
+                                    "Failed to get state provider for parent block. Skipping block."
+                                );
+                                continue;
+                            }
+                        };
 
                     let state_provider_db = StateProviderDatabase::new(&state_provider);
                     let mut db = State::builder()
@@ -207,17 +227,48 @@ async fn partial_stateless_exex<
                     let mut accessed = BlockAccessedState::default();
                     let mut lowest_block_number = None;
 
-                    let sim_result = block_executor.execute_with_state_closure(block, |statedb: &State<_>| {
-                        accessed = BlockAccessedState::from_simulated_state(statedb);
-                        lowest_block_number = statedb.block_hashes.lowest().map(|(num, _)| num);
-                    });
+                    let execution_output =
+                        block_executor.execute_with_state_closure(block, |statedb: &State<_>| {
+                            accessed = BlockAccessedState::from_simulated_state(statedb);
+                            lowest_block_number = statedb.block_hashes.lowest().map(|(num, _)| num);
+                        });
 
-                    if let Err(e) = sim_result {
+                    let execution_output = match execution_output {
+                        Ok(output) => output,
+                        Err(e) => {
+                            warn!(
+                                target: "partial_stateless",
+                                block = *block_number,
+                                error = %e,
+                                "Simulation failed for block. Skipping block."
+                            );
+                            continue;
+                        }
+                    };
+
+                    let hashed_post_state =
+                        state_provider.hashed_post_state(&execution_output.state);
+                    let computed_state_root = match state_provider
+                        .state_root_with_updates(hashed_post_state)
+                    {
+                        Ok((root, _)) => root,
+                        Err(e) => {
+                            warn!(
+                                target: "partial_stateless",
+                                block = *block_number,
+                                error = %e,
+                                "Failed to compute post-execution state root. Skipping partial sidecar generation."
+                            );
+                            continue;
+                        }
+                    };
+                    if computed_state_root != block.header().state_root {
                         warn!(
                             target: "partial_stateless",
                             block = *block_number,
-                            error = %e,
-                            "Simulation failed for block. Skipping block."
+                            expected_state_root = ?block.header().state_root,
+                            computed_state_root = ?computed_state_root,
+                            "Post-execution state root mismatch. Full witness fallback required."
                         );
                         continue;
                     }
@@ -258,6 +309,38 @@ async fn partial_stateless_exex<
                     }
 
                     // Compute miss BEFORE updating cache (simulates what a validator would see)
+                    let block_hash = block.hash();
+                    let parent_hash = block.parent_hash;
+                    let cache_policy_id =
+                        last_n_blocks_cache_policy_id(config.account_window, config.storage_window);
+                    let cache_policy_metadata = format!(
+                        "LastNBlocks(account: {}, storage/code: {})",
+                        config.account_window, config.storage_window
+                    );
+                    let cache_block_before = cache.current_block();
+                    let cache_parent_synced = cache_block_before == parent_block_number;
+                    if !cache_parent_synced {
+                        warn!(
+                            target: "partial_stateless",
+                            block = *block_number,
+                            cache_block = cache_block_before,
+                            expected_parent_block = parent_block_number,
+                            "Cache is not synced to the parent block. Metrics will update the local cache, but cache-coherent sidecar generation is disabled for this block."
+                        );
+                    }
+                    let prev_cache_anchor = cache_parent_synced.then(|| {
+                        cache.cache_anchor(parent_block_number, parent_hash, cache_policy_id)
+                    });
+                    let prev_cache_for_reexec = cache_parent_synced.then(|| {
+                        NetworkStateCache::restore(
+                            cache.accounts().clone(),
+                            cache.storage().clone(),
+                            cache.codes().clone(),
+                            cache.current_block(),
+                            Box::new(LastNBlocksPolicy::new(config.account_window)),
+                            Box::new(LastNBlocksPolicy::new(config.storage_window)),
+                        )
+                    });
                     let cache_snapshot_before = cache.snapshot();
                     let cache_memory_before = cache.estimated_memory_bytes();
                     let miss = cache.compute_miss(&accessed);
@@ -266,6 +349,8 @@ async fn partial_stateless_exex<
 
                     // Now update the cache
                     let stats = cache.on_block_executed(*block_number, &accessed);
+                    let next_cache_anchor = cache_parent_synced
+                        .then(|| cache.cache_anchor(*block_number, block_hash, cache_policy_id));
                     let snapshot = cache.snapshot();
                     let cache_memory_after = cache.estimated_memory_bytes();
 
@@ -303,13 +388,15 @@ async fn partial_stateless_exex<
                         let target_slots: usize = targets.values().map(|slots| slots.len()).sum();
 
                         // Calculate total bytes of missed bytecodes
-                        let missed_bytecode_bytes: usize = miss.missed_codes
+                        let missed_bytecode_bytes: usize = miss
+                            .missed_codes
                             .iter()
                             .filter_map(|code_hash| accessed.codes.get(code_hash))
                             .map(|bytes| bytes.len())
                             .sum();
 
-                        let missed_bytecodes: Vec<Bytes> = miss.missed_codes
+                        let missed_bytecodes: Vec<Bytes> = miss
+                            .missed_codes
                             .iter()
                             .filter_map(|code_hash| accessed.codes.get(code_hash).cloned())
                             .collect();
@@ -318,7 +405,8 @@ async fn partial_stateless_exex<
                         // cache). Gated behind PS_WITNESS_BASELINE since it is an extra,
                         // larger multiproof. A failure here is non-fatal — it only drops the
                         // comparison for this block and never skips the real partial sidecar.
-                        let full_sidecar_baseline_stats: Option<WitnessResult> = if compute_baseline {
+                        let full_sidecar_baseline_stats: Option<WitnessResult> = if compute_baseline
+                        {
                             let full_targets = state_targets_to_proof_targets(&accessed_targets);
                             let full_target_accounts = full_targets.len();
                             let full_target_slots: usize =
@@ -355,19 +443,43 @@ async fn partial_stateless_exex<
                         match state_provider.multiproof(TrieInput::default(), targets) {
                             Ok(proof) => {
                                 let elapsed_ms = start.elapsed().as_millis() as u64;
-                                let mut result = measure_multiproof_size(&proof, missed_bytecode_bytes);
+                                let mut result =
+                                    measure_multiproof_size(&proof, missed_bytecode_bytes);
                                 result.computation_time_ms = Some(elapsed_ms);
                                 result.target_accounts = target_accounts;
                                 result.target_storage_slots = target_slots;
 
                                 // --- Generate and Save Sidecar ---
                                 let sidecar_generation_result = 'sidecar: {
-                                    let parent_hash = block.parent_hash;
-                                    let parent_header = match ctx.provider().sealed_header_by_hash(parent_hash) {
-                                        Ok(Some(h)) => h,
-                                        Ok(None) => break 'sidecar Err(eyre::eyre!("Parent header not found for hash {:?}", parent_hash)),
-                                        Err(e) => break 'sidecar Err(eyre::eyre!("Failed to fetch parent header: {:?}", e)),
+                                    let (
+                                        Some(prev_cache_anchor),
+                                        Some(next_cache_anchor),
+                                        Some(prev_cache_for_reexec),
+                                    ) = (
+                                        prev_cache_anchor,
+                                        next_cache_anchor,
+                                        prev_cache_for_reexec.as_ref(),
+                                    )
+                                    else {
+                                        break 'sidecar Ok(());
                                     };
+
+                                    let parent_header =
+                                        match ctx.provider().sealed_header_by_hash(parent_hash) {
+                                            Ok(Some(h)) => h,
+                                            Ok(None) => {
+                                                break 'sidecar Err(eyre::eyre!(
+                                                    "Parent header not found for hash {:?}",
+                                                    parent_hash
+                                                ))
+                                            }
+                                            Err(e) => {
+                                                break 'sidecar Err(eyre::eyre!(
+                                                    "Failed to fetch parent header: {:?}",
+                                                    e
+                                                ))
+                                            }
+                                        };
                                     let parent_state_root = parent_header.state_root;
 
                                     // Check cache coherency
@@ -383,49 +495,129 @@ async fn partial_stateless_exex<
                                     }
 
                                     // Fetch ancestor headers based on BLOCKHASH usage
-                                    let smallest = lowest_block_number.unwrap_or(block_number.saturating_sub(1));
-                                    let ancestor_range = smallest..*block_number;
-                                    let ancestor_headers: Vec<Bytes> = match ctx.provider().headers_range(ancestor_range) {
-                                        Ok(headers) => headers
-                                            .into_iter()
-                                            .map(|header| {
-                                                let mut buf = Vec::new();
-                                                let _ = header.encode(&mut buf);
-                                                buf.into()
-                                            })
-                                            .collect(),
-                                        Err(e) => {
-                                            break 'sidecar Err(eyre::eyre!("Failed to fetch ancestor headers for range: {:?}", e));
-                                        }
-                                    };
+                                    let ancestor_headers: Vec<Bytes> =
+                                        if let Some(smallest) = lowest_block_number {
+                                            let ancestor_range = smallest..*block_number;
+                                            match ctx.provider().headers_range(ancestor_range) {
+                                                Ok(headers) => headers
+                                                    .into_iter()
+                                                    .map(|header| {
+                                                        let mut buf = Vec::new();
+                                                        let _ = header.encode(&mut buf);
+                                                        buf.into()
+                                                    })
+                                                    .collect(),
+                                                Err(e) => {
+                                                    break 'sidecar Err(eyre::eyre!(
+                                                "Failed to fetch ancestor headers for range: {:?}",
+                                                e
+                                            ));
+                                                }
+                                            }
+                                        } else {
+                                            Vec::new()
+                                        };
 
                                     // Convert proof to serializable format
-                                    let serializable_proof = SerializableMultiProof::from_multiproof(&proof);
-                                    let serialized_multiproof = match bincode::serialize(&serializable_proof) {
-                                        Ok(b) => b,
-                                        Err(e) => break 'sidecar Err(eyre::eyre!("Failed to serialize multiproof: {:?}", e)),
+                                    let serializable_proof =
+                                        SerializableMultiProof::from_multiproof(&proof);
+                                    let serialized_multiproof =
+                                        match bincode::serialize(&serializable_proof) {
+                                            Ok(b) => b,
+                                            Err(e) => {
+                                                break 'sidecar Err(eyre::eyre!(
+                                                    "Failed to serialize multiproof: {:?}",
+                                                    e
+                                                ))
+                                            }
+                                        };
+
+                                    let sidecar_miss = StateTargetSet::from(&raw_targets);
+                                    let witness = PartialExecutionWitness {
+                                        state: PartialExecutionWitnessState::MptMultiProof(
+                                            serialized_multiproof,
+                                        ),
+                                        codes: missed_bytecodes.clone(),
+                                        keys: raw_targets.key_preimages(),
+                                        headers: ancestor_headers,
                                     };
+                                    let witness_commitment = partial_witness_commitment(
+                                        parent_state_root,
+                                        &sidecar_miss,
+                                        &witness,
+                                    );
 
                                     let sidecar = PartialStatelessSidecar {
                                         parent_hash,
                                         parent_state_root,
-                                        block_hash: block.hash(),
+                                        block_hash,
                                         block_number: *block_number,
-                                        cache_block: block_number - 1,
-                                        cache_policy_metadata: format!(
-                                            "LastNBlocks(account: {}, storage/code: {})",
-                                            config.account_window, config.storage_window
-                                        ),
+                                        cache_block: parent_block_number,
+                                        cache_policy_id,
+                                        prev_cache_anchor,
+                                        next_cache_anchor,
+                                        cache_policy_metadata: cache_policy_metadata.clone(),
+                                        cache_miss_targets: sidecar_miss.clone(),
+                                        witness_commitment,
                                         miss_manifest: raw_targets.clone(),
-                                        witness: PartialExecutionWitness {
-                                            state: PartialExecutionWitnessState::MptMultiProof(
-                                                serialized_multiproof,
-                                            ),
-                                            codes: missed_bytecodes.clone(),
-                                            keys: raw_targets.key_preimages(),
-                                            headers: ancestor_headers,
-                                        },
+                                        witness,
                                         stats: result.clone(),
+                                    };
+
+                                    let root_witness_completeness = if run_sidecar_preflight {
+                                        let reexec_report = match check_provider_assisted_sidecar(
+                                            ctx.evm_config(),
+                                            state_provider.as_ref(),
+                                            block,
+                                            prev_cache_for_reexec,
+                                            &sidecar,
+                                            &config,
+                                            &reexec_limits,
+                                        ) {
+                                            Ok(report) => report,
+                                            Err(e) => {
+                                                break 'sidecar Err(eyre::eyre!(
+                                                    "Provider-assisted sidecar preflight failed: {e}"
+                                                ));
+                                            }
+                                        };
+
+                                        if !reexec_report
+                                            .root_witness_completeness
+                                            .trustless_root_ready
+                                        {
+                                            warn!(
+                                                target: "partial_stateless",
+                                                block = *block_number,
+                                                missing_account_paths = reexec_report
+                                                    .root_witness_completeness
+                                                    .missing_account_paths
+                                                    .len(),
+                                                missing_storage_paths = reexec_report
+                                                    .root_witness_completeness
+                                                    .missing_storage_paths
+                                                    .len(),
+                                                "TODO: root witness incomplete for trustless state_root"
+                                            );
+                                        }
+                                        info!(
+                                            target: "partial_stateless",
+                                            block = *block_number,
+                                            computed_state_root = ?reexec_report.computed_state_root,
+                                            reexec_accounts = reexec_report.actual_accessed.accounts.len(),
+                                            reexec_storage = reexec_report.actual_accessed.storage.len(),
+                                            reexec_codes = reexec_report.actual_accessed.codes.len(),
+                                            expected_miss_accounts = reexec_report.expected_miss.accounts.len(),
+                                            expected_miss_storage = reexec_report.expected_miss.storage.len(),
+                                            expected_miss_codes = reexec_report.expected_miss.code_hashes.len(),
+                                            next_cache_root = ?reexec_report.next_cache_anchor.cache_root,
+                                            "Provider-assisted sidecar preflight succeeded"
+                                        );
+                                        RootWitnessCompletenessSummary::from_report(
+                                            &reexec_report.root_witness_completeness,
+                                        )
+                                    } else {
+                                        RootWitnessCompletenessSummary::default()
                                     };
 
                                     // Ensure sidecar directory exists under workspace root
@@ -433,38 +625,48 @@ async fn partial_stateless_exex<
                                         .unwrap_or_else(|_| std::path::PathBuf::from("."))
                                         .join("sidecar");
                                     if let Err(e) = fs::create_dir_all(&sidecar_dir) {
-                                        break 'sidecar Err(eyre::eyre!("Failed to create sidecar directory: {:?}", e));
+                                        break 'sidecar Err(eyre::eyre!(
+                                            "Failed to create sidecar directory: {:?}",
+                                            e
+                                        ));
                                     }
 
-                                    let sidecar_filename = format!("block_{}_{:?}.bin", block_number, block.hash());
+                                    let sidecar_filename =
+                                        format!("block_{}_{:?}.bin", block_number, block.hash());
                                     let sidecar_path = sidecar_dir.join(sidecar_filename);
 
                                     let sidecar_bytes = match bincode::serialize(&sidecar) {
                                         Ok(b) => b,
-                                        Err(e) => break 'sidecar Err(eyre::eyre!("Failed to serialize sidecar: {:?}", e)),
+                                        Err(e) => {
+                                            break 'sidecar Err(eyre::eyre!(
+                                                "Failed to serialize sidecar: {:?}",
+                                                e
+                                            ))
+                                        }
                                     };
 
                                     if let Err(e) = fs::write(&sidecar_path, sidecar_bytes) {
-                                        break 'sidecar Err(eyre::eyre!("Failed to write sidecar file {:?}: {:?}", sidecar_path, e));
+                                        break 'sidecar Err(eyre::eyre!(
+                                            "Failed to write sidecar file {:?}: {:?}",
+                                            sidecar_path,
+                                            e
+                                        ));
                                     }
 
                                     let sidecar_bytes_len = fs::metadata(&sidecar_path)
                                         .map(|m| m.len() as usize)
                                         .unwrap_or(0);
-                                    let sidecar_miss = StateTargetSet::from(&raw_targets);
-                                    let partition =
-                                        PartitionCheck::new(&accessed_targets, &cache_hit_targets, &sidecar_miss);
                                     let manifest = SidecarBenchmarkManifest {
-                                        schema_version: 1,
+                                        schema_version: 6,
                                         block_number: *block_number,
-                                        block_hash: block.hash(),
+                                        block_hash,
                                         parent_hash,
                                         parent_state_root,
-                                        cache_block: block_number - 1,
-                                        cache_policy_metadata: format!(
-                                            "LastNBlocks(account: {}, storage/code: {})",
-                                            config.account_window, config.storage_window
-                                        ),
+                                        cache_block: parent_block_number,
+                                        cache_policy_id,
+                                        prev_cache_anchor,
+                                        next_cache_anchor,
+                                        cache_policy_metadata: cache_policy_metadata.clone(),
                                         sidecar_file: sidecar_path
                                             .file_name()
                                             .map(|name| name.to_string_lossy().into_owned())
@@ -482,23 +684,38 @@ async fn partial_stateless_exex<
                                             snapshot.total_codes,
                                             cache_memory_after,
                                         ),
-                                        accessed: accessed_targets.clone(),
-                                        cache_hit: cache_hit_targets.clone(),
-                                        sidecar_miss,
-                                        partition,
-                                        full_sidecar_baseline_stats: full_sidecar_baseline_stats.clone(),
+                                        accessed: StateTargetStats::from_targets(&accessed_targets),
+                                        cache_hit: StateTargetStats::from_targets(
+                                            &cache_hit_targets,
+                                        ),
+                                        sidecar_miss: StateTargetStats::from_targets(&sidecar_miss),
+                                        provider_assisted_preflight: run_sidecar_preflight,
+                                        root_witness_completeness,
+                                        full_sidecar_baseline_stats: full_sidecar_baseline_stats
+                                            .clone(),
                                         partial_sidecar_stats: result.clone(),
                                         reduction: full_sidecar_baseline_stats
                                             .as_ref()
                                             .map(|full| WitnessReductionStats::new(&result, full)),
                                     };
-                                    let manifest_path = sidecar_path.with_extension("manifest.json");
-                                    let manifest_bytes = match serde_json::to_vec_pretty(&manifest) {
+                                    let manifest_path =
+                                        sidecar_path.with_extension("manifest.json");
+                                    let manifest_bytes = match serde_json::to_vec_pretty(&manifest)
+                                    {
                                         Ok(bytes) => bytes,
-                                        Err(e) => break 'sidecar Err(eyre::eyre!("Failed to serialize sidecar manifest: {:?}", e)),
+                                        Err(e) => {
+                                            break 'sidecar Err(eyre::eyre!(
+                                                "Failed to serialize sidecar manifest: {:?}",
+                                                e
+                                            ))
+                                        }
                                     };
                                     if let Err(e) = fs::write(&manifest_path, manifest_bytes) {
-                                        break 'sidecar Err(eyre::eyre!("Failed to write sidecar manifest {:?}: {:?}", manifest_path, e));
+                                        break 'sidecar Err(eyre::eyre!(
+                                            "Failed to write sidecar manifest {:?}: {:?}",
+                                            manifest_path,
+                                            e
+                                        ));
                                     }
 
                                     info!(
@@ -585,6 +802,7 @@ async fn partial_stateless_exex<
                 }
             }
             ExExNotification::ChainReorged { old, new } => {
+                let tip_block = *new.range().end();
                 warn!(
                     target: "partial_stateless",
                     from_chain = ?old.range(),
@@ -616,7 +834,10 @@ async fn partial_stateless_exex<
                 for (block_number, block) in new.blocks() {
                     let parent_block_number = block_number.saturating_sub(1);
 
-                    let state_provider = match ctx.provider().history_by_block_number(parent_block_number) {
+                    let state_provider = match ctx
+                        .provider()
+                        .history_by_block_number(parent_block_number)
+                    {
                         Ok(provider) => provider,
                         Err(e) => {
                             warn!(
@@ -638,9 +859,10 @@ async fn partial_stateless_exex<
                     let block_executor = ctx.evm_config().executor(&mut db);
 
                     let mut accessed = BlockAccessedState::default();
-                    let sim_result = block_executor.execute_with_state_closure(block, |statedb: &State<_>| {
-                        accessed = BlockAccessedState::from_simulated_state(statedb);
-                    });
+                    let sim_result =
+                        block_executor.execute_with_state_closure(block, |statedb: &State<_>| {
+                            accessed = BlockAccessedState::from_simulated_state(statedb);
+                        });
 
                     if let Err(e) = sim_result {
                         warn!(
@@ -658,7 +880,12 @@ async fn partial_stateless_exex<
                 // Persist the rebuilt cache: a restart before the next commit must
                 // not reload the stale pre-reorg (old-branch) cache from disk.
                 if let Err(e) = save_to_file(&cache, &cache_path) {
-                    warn!(target: "partial_stateless", error = %e, "Failed to persist cache after reorg");
+                    warn!(
+                        target: "partial_stateless",
+                        block = tip_block,
+                        error = %e,
+                        "Failed to persist cache after reorg"
+                    );
                 }
             }
             ExExNotification::ChainReverted { old } => {
@@ -687,7 +914,11 @@ async fn partial_stateless_exex<
                 // Persist the rolled-back cache: a restart before the next commit
                 // must not reload the stale pre-revert cache from disk.
                 if let Err(e) = save_to_file(&cache, &cache_path) {
-                    warn!(target: "partial_stateless", error = %e, "Failed to persist cache after revert");
+                    warn!(
+                        target: "partial_stateless",
+                        error = %e,
+                        "Failed to persist cache after revert"
+                    );
                 }
             }
         }

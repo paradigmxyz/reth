@@ -1,6 +1,6 @@
 use crate::witness::WitnessResult;
 use alloy_primitives::map::{B256Map, HashMap};
-use alloy_primitives::{Address, B256, Bytes};
+use alloy_primitives::{keccak256, Address, Bytes, B256};
 use reth_trie_common::proof::ProofNodes;
 use reth_trie_common::{BranchNodeMasks, MultiProof, Nibbles, StorageMultiProof, TrieMask};
 use serde::{Deserialize, Serialize};
@@ -18,7 +18,8 @@ pub struct WitnessTargets {
 
 impl WitnessTargets {
     pub fn key_preimages(&self) -> Vec<Bytes> {
-        let mut addresses = Vec::with_capacity(self.missed_accounts.len() + self.missed_storage.len());
+        let mut addresses =
+            Vec::with_capacity(self.missed_accounts.len() + self.missed_storage.len());
         addresses.extend_from_slice(&self.missed_accounts);
         addresses.extend(self.missed_storage.iter().map(|(address, _)| *address));
         addresses.sort();
@@ -35,7 +36,7 @@ impl WitnessTargets {
     }
 }
 
-/// Generic target set used by the benchmark manifest.
+/// Generic state target set used by sidecar claims and diagnostics.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct StateTargetSet {
     pub accounts: Vec<Address>,
@@ -66,69 +67,199 @@ impl From<&WitnessTargets> for StateTargetSet {
     }
 }
 
-/// Exact partition check for `accessed == cache_hit disjoint_union sidecar_miss`.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct PartitionCheck {
-    pub accounts_ok: bool,
-    pub storage_ok: bool,
-    pub code_hashes_ok: bool,
-    pub accounts_disjoint: bool,
-    pub storage_disjoint: bool,
-    pub code_hashes_disjoint: bool,
-    pub partition_ok: bool,
+fn encode_state_targets(out: &mut Vec<u8>, label: &[u8], targets: &StateTargetSet) {
+    let mut targets = targets.clone();
+    targets.sort_dedup();
+
+    out.extend_from_slice(label);
+
+    out.extend_from_slice(b"accounts");
+    out.extend_from_slice(&(targets.accounts.len() as u64).to_be_bytes());
+    for address in targets.accounts {
+        out.extend_from_slice(address.as_slice());
+    }
+
+    out.extend_from_slice(b"storage");
+    out.extend_from_slice(&(targets.storage.len() as u64).to_be_bytes());
+    for (address, slot) in targets.storage {
+        out.extend_from_slice(address.as_slice());
+        out.extend_from_slice(slot.as_slice());
+    }
+
+    out.extend_from_slice(b"code_hashes");
+    out.extend_from_slice(&(targets.code_hashes.len() as u64).to_be_bytes());
+    for code_hash in targets.code_hashes {
+        out.extend_from_slice(code_hash.as_slice());
+    }
 }
 
-impl PartitionCheck {
-    pub fn new(
-        accessed: &StateTargetSet,
-        cache_hit: &StateTargetSet,
-        sidecar_miss: &StateTargetSet,
-    ) -> Self {
-        fn check<T: Ord + Clone>(accessed: &[T], hit: &[T], miss: &[T]) -> (bool, bool) {
-            let mut union = Vec::with_capacity(hit.len() + miss.len());
-            union.extend_from_slice(hit);
-            union.extend_from_slice(miss);
-            union.sort();
-            union.dedup();
+/// Fork- and policy-scoped commitment to a concrete cache state.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CacheAnchor {
+    pub block_number: u64,
+    pub block_hash: B256,
+    pub cache_policy_id: B256,
+    pub cache_root: B256,
+}
 
-            let mut expected = accessed.to_vec();
-            expected.sort();
-            expected.dedup();
+/// Failure reasons for the minimal sidecar fingerprint checks.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SidecarCheckError {
+    SidecarContextMismatch { field: &'static str, expected: String, actual: String },
+    PrevCacheAnchorMismatch { expected: CacheAnchor, actual: CacheAnchor },
+    NextCacheAnchorMismatch { expected: CacheAnchor, actual: CacheAnchor },
+    MissManifestMismatch { cache_miss_targets: StateTargetSet, miss_manifest: StateTargetSet },
+    WitnessCommitmentMismatch { expected: B256, actual: B256 },
+    MissTargetsMismatch { expected: StateTargetSet, actual: StateTargetSet },
+}
 
-            let mut h = hit.to_vec();
-            h.sort();
-            h.dedup();
-            let mut m = miss.to_vec();
-            m.sort();
-            m.dedup();
-
-            let disjoint = h.iter().all(|item| m.binary_search(item).is_err());
-            (union == expected, disjoint)
-        }
-
-        let (accounts_ok, accounts_disjoint) =
-            check(&accessed.accounts, &cache_hit.accounts, &sidecar_miss.accounts);
-        let (storage_ok, storage_disjoint) =
-            check(&accessed.storage, &cache_hit.storage, &sidecar_miss.storage);
-        let (code_hashes_ok, code_hashes_disjoint) =
-            check(&accessed.code_hashes, &cache_hit.code_hashes, &sidecar_miss.code_hashes);
-        let partition_ok = accounts_ok
-            && storage_ok
-            && code_hashes_ok
-            && accounts_disjoint
-            && storage_disjoint
-            && code_hashes_disjoint;
-
-        Self {
-            accounts_ok,
-            storage_ok,
-            code_hashes_ok,
-            accounts_disjoint,
-            storage_disjoint,
-            code_hashes_disjoint,
-            partition_ok,
-        }
+fn context_mismatch(
+    field: &'static str,
+    expected: impl ToString,
+    actual: impl ToString,
+) -> SidecarCheckError {
+    SidecarCheckError::SidecarContextMismatch {
+        field,
+        expected: expected.to_string(),
+        actual: actual.to_string(),
     }
+}
+
+fn check_anchor_context(sidecar: &PartialStatelessSidecar) -> Result<(), SidecarCheckError> {
+    if sidecar.prev_cache_anchor.block_hash != sidecar.parent_hash {
+        return Err(context_mismatch(
+            "prev_cache_anchor.block_hash",
+            sidecar.parent_hash,
+            sidecar.prev_cache_anchor.block_hash,
+        ));
+    }
+    if sidecar.prev_cache_anchor.block_number != sidecar.cache_block {
+        return Err(context_mismatch(
+            "prev_cache_anchor.block_number",
+            sidecar.cache_block,
+            sidecar.prev_cache_anchor.block_number,
+        ));
+    }
+    if sidecar.next_cache_anchor.block_hash != sidecar.block_hash {
+        return Err(context_mismatch(
+            "next_cache_anchor.block_hash",
+            sidecar.block_hash,
+            sidecar.next_cache_anchor.block_hash,
+        ));
+    }
+    if sidecar.next_cache_anchor.block_number != sidecar.block_number {
+        return Err(context_mismatch(
+            "next_cache_anchor.block_number",
+            sidecar.block_number,
+            sidecar.next_cache_anchor.block_number,
+        ));
+    }
+    if sidecar.prev_cache_anchor.cache_policy_id != sidecar.cache_policy_id {
+        return Err(context_mismatch(
+            "prev_cache_anchor.cache_policy_id",
+            sidecar.cache_policy_id,
+            sidecar.prev_cache_anchor.cache_policy_id,
+        ));
+    }
+    if sidecar.next_cache_anchor.cache_policy_id != sidecar.cache_policy_id {
+        return Err(context_mismatch(
+            "next_cache_anchor.cache_policy_id",
+            sidecar.cache_policy_id,
+            sidecar.next_cache_anchor.cache_policy_id,
+        ));
+    }
+
+    Ok(())
+}
+
+/// Check that the sidecar was built from the same previous cache context.
+pub fn check_sidecar_context(
+    sidecar: &PartialStatelessSidecar,
+    local_prev_anchor: &CacheAnchor,
+) -> Result<(), SidecarCheckError> {
+    check_anchor_context(sidecar)?;
+
+    if sidecar.prev_cache_anchor != *local_prev_anchor {
+        return Err(SidecarCheckError::PrevCacheAnchorMismatch {
+            expected: *local_prev_anchor,
+            actual: sidecar.prev_cache_anchor,
+        });
+    }
+
+    Ok(())
+}
+
+/// Check sidecar-internal miss-only and witness-payload fingerprints.
+pub fn check_sidecar_self_consistency(
+    sidecar: &PartialStatelessSidecar,
+) -> Result<StateTargetSet, SidecarCheckError> {
+    check_anchor_context(sidecar)?;
+
+    let mut declared_miss = sidecar.cache_miss_targets.clone();
+    declared_miss.sort_dedup();
+    let manifest_miss = StateTargetSet::from(&sidecar.miss_manifest);
+    if declared_miss != manifest_miss {
+        return Err(SidecarCheckError::MissManifestMismatch {
+            cache_miss_targets: declared_miss,
+            miss_manifest: manifest_miss,
+        });
+    }
+
+    let expected_witness_commitment =
+        partial_witness_commitment(sidecar.parent_state_root, &declared_miss, &sidecar.witness);
+    if sidecar.witness_commitment != expected_witness_commitment {
+        return Err(SidecarCheckError::WitnessCommitmentMismatch {
+            expected: expected_witness_commitment,
+            actual: sidecar.witness_commitment,
+        });
+    }
+
+    Ok(declared_miss)
+}
+
+/// Check that the sidecar only carries targets that were actually cache misses.
+pub fn check_sidecar_miss_targets(
+    sidecar: &PartialStatelessSidecar,
+    expected_miss: &StateTargetSet,
+) -> Result<(), SidecarCheckError> {
+    let declared_miss = check_sidecar_self_consistency(sidecar)?;
+    let mut expected_miss = expected_miss.clone();
+    expected_miss.sort_dedup();
+    if declared_miss != expected_miss {
+        return Err(SidecarCheckError::MissTargetsMismatch {
+            expected: expected_miss,
+            actual: declared_miss,
+        });
+    }
+
+    Ok(())
+}
+
+/// Check the cache state reached after a successful block execution.
+pub fn check_next_cache_anchor(
+    sidecar: &PartialStatelessSidecar,
+    local_next_anchor: &CacheAnchor,
+) -> Result<(), SidecarCheckError> {
+    check_anchor_context(sidecar)?;
+    if sidecar.next_cache_anchor != *local_next_anchor {
+        return Err(SidecarCheckError::NextCacheAnchorMismatch {
+            expected: *local_next_anchor,
+            actual: sidecar.next_cache_anchor,
+        });
+    }
+
+    Ok(())
+}
+
+/// Deterministic identifier for the prototype's split LastNBlocks cache policy.
+pub fn last_n_blocks_cache_policy_id(account_window: u64, storage_code_window: u64) -> B256 {
+    let mut preimage = Vec::new();
+    preimage.extend_from_slice(b"LastNBlocksPolicy/v1");
+    preimage.extend_from_slice(b"account_window");
+    preimage.extend_from_slice(&account_window.to_be_bytes());
+    preimage.extend_from_slice(b"storage_code_window");
+    preimage.extend_from_slice(&storage_code_window.to_be_bytes());
+    keccak256(preimage)
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -147,6 +278,23 @@ impl CacheFootprintStats {
         estimated_memory_bytes: usize,
     ) -> Self {
         Self { accounts, storage_slots, codes, estimated_memory_bytes }
+    }
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct StateTargetStats {
+    pub accounts: usize,
+    pub storage_slots: usize,
+    pub code_hashes: usize,
+}
+
+impl StateTargetStats {
+    pub fn from_targets(targets: &StateTargetSet) -> Self {
+        Self {
+            accounts: targets.accounts.len(),
+            storage_slots: targets.storage.len(),
+            code_hashes: targets.code_hashes.len(),
+        }
     }
 }
 
@@ -197,15 +345,21 @@ pub struct SidecarBenchmarkManifest {
     pub parent_hash: B256,
     pub parent_state_root: B256,
     pub cache_block: u64,
+    pub cache_policy_id: B256,
+    pub prev_cache_anchor: CacheAnchor,
+    pub next_cache_anchor: CacheAnchor,
     pub cache_policy_metadata: String,
     pub sidecar_file: String,
     pub sidecar_bytes: usize,
     pub cache_before: CacheFootprintStats,
     pub cache_after: CacheFootprintStats,
-    pub accessed: StateTargetSet,
-    pub cache_hit: StateTargetSet,
-    pub sidecar_miss: StateTargetSet,
-    pub partition: PartitionCheck,
+    pub accessed: StateTargetStats,
+    pub cache_hit: StateTargetStats,
+    pub sidecar_miss: StateTargetStats,
+    /// Whether the ExEx ran the provider-assisted validator preflight for this sidecar.
+    pub provider_assisted_preflight: bool,
+    /// Diagnostic-only readiness for a future fully trustless state-root proof.
+    pub root_witness_completeness: RootWitnessCompletenessSummary,
     /// Full-witness baseline (all accessed state, ignoring the cache). `None` when
     /// the comparison is disabled (`PS_WITNESS_BASELINE` unset).
     pub full_sidecar_baseline_stats: Option<WitnessResult>,
@@ -213,6 +367,38 @@ pub struct SidecarBenchmarkManifest {
     /// Reduction of the partial sidecar vs the full baseline. `None` when the
     /// baseline comparison is disabled.
     pub reduction: Option<WitnessReductionStats>,
+}
+
+/// Diagnostic report for whether the current sidecar/cache shape contains enough
+/// trie paths to compute the post-state root without provider assistance.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RootWitnessCompletenessReport {
+    pub trustless_root_ready: bool,
+    pub missing_account_paths: Vec<Address>,
+    pub missing_storage_paths: Vec<(Address, B256)>,
+    pub covered_account_paths: usize,
+    pub covered_storage_paths: usize,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RootWitnessCompletenessSummary {
+    pub trustless_root_ready: bool,
+    pub missing_account_paths: usize,
+    pub missing_storage_paths: usize,
+    pub covered_account_paths: usize,
+    pub covered_storage_paths: usize,
+}
+
+impl RootWitnessCompletenessSummary {
+    pub fn from_report(report: &RootWitnessCompletenessReport) -> Self {
+        Self {
+            trustless_root_ready: report.trustless_root_ready,
+            missing_account_paths: report.missing_account_paths.len(),
+            missing_storage_paths: report.missing_storage_paths.len(),
+            covered_account_paths: report.covered_account_paths,
+            covered_storage_paths: report.covered_storage_paths,
+        }
+    }
 }
 
 /// A serialized representation of a `StorageMultiProof` that can be easily serialized/deserialized with `serde`.
@@ -241,7 +427,11 @@ impl SerializableMultiProof {
 
         let mut branch_node_masks = Vec::new();
         for (nibbles, masks) in &proof.branch_node_masks {
-            branch_node_masks.push((nibbles.to_vec(), masks.hash_mask.get(), masks.tree_mask.get()));
+            branch_node_masks.push((
+                nibbles.to_vec(),
+                masks.hash_mask.get(),
+                masks.tree_mask.get(),
+            ));
         }
 
         let mut storages = Vec::new();
@@ -253,7 +443,11 @@ impl SerializableMultiProof {
 
             let mut storage_masks = Vec::new();
             for (nibbles, masks) in &storage_proof.branch_node_masks {
-                storage_masks.push((nibbles.to_vec(), masks.hash_mask.get(), masks.tree_mask.get()));
+                storage_masks.push((
+                    nibbles.to_vec(),
+                    masks.hash_mask.get(),
+                    masks.tree_mask.get(),
+                ));
             }
 
             storages.push((
@@ -273,7 +467,10 @@ impl SerializableMultiProof {
     pub fn to_multiproof(&self) -> MultiProof {
         let mut account_subtree_map: HashMap<Nibbles, Bytes> = HashMap::default();
         for (nibbles_bytes, node_bytes) in &self.account_subtree {
-            account_subtree_map.insert(Nibbles::from_nibbles(nibbles_bytes.clone()), Bytes::from(node_bytes.clone()));
+            account_subtree_map.insert(
+                Nibbles::from_nibbles(nibbles_bytes.clone()),
+                Bytes::from(node_bytes.clone()),
+            );
         }
         let account_subtree = ProofNodes::from_iter(account_subtree_map);
 
@@ -292,7 +489,10 @@ impl SerializableMultiProof {
         for (hashed_address, storage_proof) in &self.storages {
             let mut subtree_map: HashMap<Nibbles, Bytes> = HashMap::default();
             for (nibbles_bytes, node_bytes) in &storage_proof.subtree {
-                subtree_map.insert(Nibbles::from_nibbles(nibbles_bytes.clone()), Bytes::from(node_bytes.clone()));
+                subtree_map.insert(
+                    Nibbles::from_nibbles(nibbles_bytes.clone()),
+                    Bytes::from(node_bytes.clone()),
+                );
             }
             let subtree = ProofNodes::from_iter(subtree_map);
 
@@ -345,6 +545,57 @@ pub struct PartialExecutionWitness {
     pub headers: Vec<Bytes>,
 }
 
+/// Commit to the witness payload and the cache-miss target set it is supposed to cover.
+pub fn partial_witness_commitment(
+    parent_state_root: B256,
+    cache_miss_targets: &StateTargetSet,
+    witness: &PartialExecutionWitness,
+) -> B256 {
+    fn encode_bytes(out: &mut Vec<u8>, bytes: &[u8]) {
+        out.extend_from_slice(&(bytes.len() as u64).to_be_bytes());
+        out.extend_from_slice(bytes);
+    }
+
+    let mut preimage = Vec::new();
+    preimage.extend_from_slice(b"PartialWitnessCommitment/v1");
+    preimage.extend_from_slice(b"parent_state_root");
+    preimage.extend_from_slice(parent_state_root.as_slice());
+    encode_state_targets(&mut preimage, b"cache_miss_targets", cache_miss_targets);
+
+    preimage.extend_from_slice(b"state_mpt_multiproof");
+    encode_bytes(&mut preimage, witness.state.mpt_multiproof_bytes());
+
+    let mut codes: Vec<_> =
+        witness.codes.iter().map(|code| (keccak256(code.as_ref()), code)).collect();
+    codes.sort_by_key(|(code_hash, _)| *code_hash);
+    preimage.extend_from_slice(b"code_preimages");
+    preimage.extend_from_slice(&(codes.len() as u64).to_be_bytes());
+    for (code_hash, code) in codes {
+        preimage.extend_from_slice(code_hash.as_slice());
+        encode_bytes(&mut preimage, code.as_ref());
+    }
+
+    let mut keys = witness.keys.clone();
+    keys.sort_by(|a, b| a.as_ref().cmp(b.as_ref()));
+    preimage.extend_from_slice(b"key_preimages");
+    preimage.extend_from_slice(&(keys.len() as u64).to_be_bytes());
+    for key in keys {
+        encode_bytes(&mut preimage, key.as_ref());
+    }
+
+    let mut headers: Vec<_> =
+        witness.headers.iter().map(|header| (keccak256(header.as_ref()), header)).collect();
+    headers.sort_by_key(|(header_hash, _)| *header_hash);
+    preimage.extend_from_slice(b"ancestor_headers");
+    preimage.extend_from_slice(&(headers.len() as u64).to_be_bytes());
+    for (header_hash, header) in headers {
+        preimage.extend_from_slice(header_hash.as_slice());
+        encode_bytes(&mut preimage, header.as_ref());
+    }
+
+    keccak256(preimage)
+}
+
 /// The Builder-Side Witness Sidecar for a block in the Partial Stateless prototype.
 ///
 /// Contains all the necessary data (Merkle proofs, bytecodes) for a stateless validator
@@ -361,8 +612,18 @@ pub struct PartialStatelessSidecar {
     pub block_number: u64,
     /// Block number that the network cache is synchronized with (should be block_number - 1).
     pub cache_block: u64,
+    /// Deterministic identifier for the cache policy used to compute the target split.
+    pub cache_policy_id: B256,
+    /// Cache state the validator must already share before executing this block.
+    pub prev_cache_anchor: CacheAnchor,
+    /// Cache state the validator must reach after successful block execution.
+    pub next_cache_anchor: CacheAnchor,
     /// Metadata describing the cache eviction policy (e.g. "LastNBlocks(60, 30)").
     pub cache_policy_metadata: String,
+    /// Canonical cache-missed target set that the sidecar claims to cover.
+    pub cache_miss_targets: StateTargetSet,
+    /// Commitment binding miss targets to the carried proof/value/header witness payload.
+    pub witness_commitment: B256,
     /// Cache-missed targets covered by `witness`.
     pub miss_manifest: WitnessTargets,
     /// Execution material split like Reth `ExecutionWitness`: state, codes, keys, headers.
@@ -375,51 +636,188 @@ pub struct PartialStatelessSidecar {
 mod tests {
     use super::*;
 
-    #[test]
-    fn partition_check_accepts_exact_disjoint_cover() {
-        let account_a = Address::repeat_byte(0x01);
-        let account_b = Address::repeat_byte(0x02);
-        let slot_a = B256::repeat_byte(0x0a);
-        let slot_b = B256::repeat_byte(0x0b);
-        let code_a = B256::repeat_byte(0xca);
-        let code_b = B256::repeat_byte(0xcb);
+    fn empty_stats() -> WitnessResult {
+        WitnessResult {
+            total_size_bytes: 0,
+            account_proof_bytes: 0,
+            storage_proof_bytes: 0,
+            bytecode_bytes: 0,
+            account_proof_nodes: 0,
+            storage_proof_nodes: 0,
+            target_accounts: 0,
+            target_storage_slots: 0,
+            computation_time_ms: None,
+        }
+    }
 
-        let accessed = StateTargetSet {
-            accounts: vec![account_a, account_b],
-            storage: vec![(account_a, slot_a), (account_b, slot_b)],
-            code_hashes: vec![code_a, code_b],
-        };
-        let cache_hit = StateTargetSet {
-            accounts: vec![account_a],
-            storage: vec![(account_a, slot_a)],
-            code_hashes: vec![code_a],
-        };
-        let sidecar_miss = StateTargetSet {
-            accounts: vec![account_b],
-            storage: vec![(account_b, slot_b)],
-            code_hashes: vec![code_b],
-        };
+    fn test_anchor(block_number: u64, block_hash: B256, cache_policy_id: B256) -> CacheAnchor {
+        CacheAnchor { block_number, block_hash, cache_policy_id, cache_root: keccak256(block_hash) }
+    }
 
-        let check = PartitionCheck::new(&accessed, &cache_hit, &sidecar_miss);
-        assert!(check.partition_ok);
+    fn test_sidecar(
+        parent_hash: B256,
+        block_hash: B256,
+        cache_policy_id: B256,
+        miss_manifest: WitnessTargets,
+    ) -> PartialStatelessSidecar {
+        let cache_miss_targets = StateTargetSet::from(&miss_manifest);
+        let witness = PartialExecutionWitness {
+            state: PartialExecutionWitnessState::MptMultiProof(vec![]),
+            codes: vec![],
+            keys: vec![],
+            headers: vec![],
+        };
+        let witness_commitment =
+            partial_witness_commitment(B256::repeat_byte(0x22), &cache_miss_targets, &witness);
+        PartialStatelessSidecar {
+            parent_hash,
+            parent_state_root: B256::repeat_byte(0x22),
+            block_hash,
+            block_number: 100,
+            cache_block: 99,
+            cache_policy_id,
+            prev_cache_anchor: test_anchor(99, parent_hash, cache_policy_id),
+            next_cache_anchor: test_anchor(100, block_hash, cache_policy_id),
+            cache_policy_metadata: "LastNBlocks(60, 30)".to_string(),
+            cache_miss_targets,
+            witness_commitment,
+            miss_manifest,
+            witness,
+            stats: empty_stats(),
+        }
     }
 
     #[test]
-    fn partition_check_rejects_overlap() {
-        let account = Address::repeat_byte(0x01);
-        let code_hash = B256::repeat_byte(0xca);
-        let accessed = StateTargetSet {
-            accounts: vec![account],
-            storage: vec![],
-            code_hashes: vec![code_hash],
+    fn sidecar_fingerprint_checks_accept_matching_context_miss_and_next_anchor() {
+        let parent_hash = B256::repeat_byte(0xaa);
+        let block_hash = B256::repeat_byte(0xbb);
+        let cache_policy_id = last_n_blocks_cache_policy_id(60, 30);
+        let missed_account = Address::repeat_byte(0x01);
+        let miss_manifest = WitnessTargets {
+            missed_accounts: vec![missed_account],
+            missed_storage: vec![],
+            missed_code_hashes: vec![],
         };
-        let cache_hit = accessed.clone();
-        let sidecar_miss = accessed;
+        let sidecar = test_sidecar(parent_hash, block_hash, cache_policy_id, miss_manifest.clone());
+        let expected_miss = StateTargetSet::from(&miss_manifest);
 
-        let check = PartitionCheck::new(&cache_hit, &cache_hit, &sidecar_miss);
-        assert!(!check.accounts_disjoint);
-        assert!(!check.code_hashes_disjoint);
-        assert!(!check.partition_ok);
+        check_sidecar_context(&sidecar, &sidecar.prev_cache_anchor)
+            .expect("matching previous cache context");
+        check_sidecar_miss_targets(&sidecar, &expected_miss).expect("matching miss-only targets");
+        check_next_cache_anchor(&sidecar, &sidecar.next_cache_anchor)
+            .expect("matching next cache anchor");
+    }
+
+    #[test]
+    fn sidecar_miss_targets_reject_cache_hit_target() {
+        let parent_hash = B256::repeat_byte(0xaa);
+        let block_hash = B256::repeat_byte(0xbb);
+        let cache_policy_id = last_n_blocks_cache_policy_id(60, 30);
+        let sidecar = test_sidecar(
+            parent_hash,
+            block_hash,
+            cache_policy_id,
+            WitnessTargets {
+                missed_accounts: vec![Address::repeat_byte(0x01)],
+                missed_storage: vec![],
+                missed_code_hashes: vec![],
+            },
+        );
+
+        let err = check_sidecar_miss_targets(&sidecar, &StateTargetSet::default())
+            .expect_err("cache-hit target must not be included as a miss");
+
+        assert!(matches!(err, SidecarCheckError::MissTargetsMismatch { .. }));
+    }
+
+    #[test]
+    fn sidecar_self_consistency_rejects_miss_manifest_mismatch() {
+        let parent_hash = B256::repeat_byte(0xaa);
+        let block_hash = B256::repeat_byte(0xbb);
+        let cache_policy_id = last_n_blocks_cache_policy_id(60, 30);
+        let mut sidecar = test_sidecar(
+            parent_hash,
+            block_hash,
+            cache_policy_id,
+            WitnessTargets {
+                missed_accounts: vec![Address::repeat_byte(0x01)],
+                missed_storage: vec![],
+                missed_code_hashes: vec![],
+            },
+        );
+        sidecar.cache_miss_targets = StateTargetSet::default();
+
+        let err = check_sidecar_self_consistency(&sidecar)
+            .expect_err("declared miss targets must match witness manifest");
+
+        assert!(matches!(err, SidecarCheckError::MissManifestMismatch { .. }));
+    }
+
+    #[test]
+    fn sidecar_self_consistency_rejects_witness_commitment_mismatch() {
+        let parent_hash = B256::repeat_byte(0xaa);
+        let block_hash = B256::repeat_byte(0xbb);
+        let cache_policy_id = last_n_blocks_cache_policy_id(60, 30);
+        let miss_manifest = WitnessTargets {
+            missed_accounts: vec![Address::repeat_byte(0x01)],
+            missed_storage: vec![],
+            missed_code_hashes: vec![],
+        };
+        let mut sidecar =
+            test_sidecar(parent_hash, block_hash, cache_policy_id, miss_manifest.clone());
+        sidecar.witness_commitment = B256::repeat_byte(0xee);
+
+        let err = check_sidecar_self_consistency(&sidecar)
+            .expect_err("witness payload must match witness commitment");
+
+        assert!(matches!(err, SidecarCheckError::WitnessCommitmentMismatch { .. }));
+    }
+
+    #[test]
+    fn sidecar_context_rejects_prev_anchor_mismatch() {
+        let parent_hash = B256::repeat_byte(0xaa);
+        let block_hash = B256::repeat_byte(0xbb);
+        let cache_policy_id = last_n_blocks_cache_policy_id(60, 30);
+        let sidecar = test_sidecar(
+            parent_hash,
+            block_hash,
+            cache_policy_id,
+            WitnessTargets {
+                missed_accounts: vec![],
+                missed_storage: vec![],
+                missed_code_hashes: vec![],
+            },
+        );
+        let mut local_prev_anchor = sidecar.prev_cache_anchor;
+        local_prev_anchor.cache_root = B256::repeat_byte(0xcc);
+
+        let err = check_sidecar_context(&sidecar, &local_prev_anchor)
+            .expect_err("different previous cache root must fail");
+
+        assert!(matches!(err, SidecarCheckError::PrevCacheAnchorMismatch { .. }));
+    }
+
+    #[test]
+    fn sidecar_context_rejects_internal_anchor_mismatch() {
+        let parent_hash = B256::repeat_byte(0xaa);
+        let block_hash = B256::repeat_byte(0xbb);
+        let cache_policy_id = last_n_blocks_cache_policy_id(60, 30);
+        let mut sidecar = test_sidecar(
+            parent_hash,
+            block_hash,
+            cache_policy_id,
+            WitnessTargets {
+                missed_accounts: vec![],
+                missed_storage: vec![],
+                missed_code_hashes: vec![],
+            },
+        );
+        sidecar.prev_cache_anchor.block_hash = B256::repeat_byte(0xdd);
+
+        let err = check_sidecar_context(&sidecar, &sidecar.prev_cache_anchor)
+            .expect_err("prev anchor must bind to parent hash");
+
+        assert!(matches!(err, SidecarCheckError::SidecarContextMismatch { .. }));
     }
 
     #[test]

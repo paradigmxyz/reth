@@ -6,8 +6,9 @@
 use crate::{
     accessed_state::BlockAccessedState,
     policy::{AccountData, CachePolicy},
+    sidecar::{CacheAnchor, StateTargetSet},
 };
-use alloy_primitives::{Address, Bytes, B256, U256};
+use alloy_primitives::{keccak256, Address, Bytes, B256, U256};
 use std::collections::{HashMap, VecDeque};
 use tracing::{debug, info};
 
@@ -86,10 +87,7 @@ pub struct NetworkStateCache {
 
 impl NetworkStateCache {
     /// Create a new cache with separate policies for accounts and storage/codes.
-    pub fn new(
-        account_policy: Box<dyn CachePolicy>,
-        storage_policy: Box<dyn CachePolicy>,
-    ) -> Self {
+    pub fn new(account_policy: Box<dyn CachePolicy>, storage_policy: Box<dyn CachePolicy>) -> Self {
         Self {
             accounts: HashMap::new(),
             storage: HashMap::new(),
@@ -194,8 +192,7 @@ impl NetworkStateCache {
                     entry.touch(block_number);
                 }
                 None => {
-                    self.codes
-                        .insert(*code_hash, CachedEntry::new(bytecode.clone(), block_number));
+                    self.codes.insert(*code_hash, CachedEntry::new(bytecode.clone(), block_number));
                     stats.codes_added += 1;
                 }
             }
@@ -275,10 +272,7 @@ impl NetworkStateCache {
     /// Compute which state from `accessed` is NOT in the cache (= needs witness).
     ///
     /// This represents what a builder would need to include in the witness sidecar.
-    pub fn compute_miss(
-        &self,
-        accessed: &BlockAccessedState,
-    ) -> MissResult {
+    pub fn compute_miss(&self, accessed: &BlockAccessedState) -> MissResult {
         let mut missed_accounts: Vec<Address> = Vec::new();
         let mut missed_storage: Vec<(Address, B256)> = Vec::new();
         let mut missed_codes: Vec<B256> = Vec::new();
@@ -303,11 +297,8 @@ impl NetworkStateCache {
 
         let total_accessed = accessed.total_keys();
         let total_missed = missed_accounts.len() + missed_storage.len() + missed_codes.len();
-        let miss_ratio = if total_accessed > 0 {
-            total_missed as f64 / total_accessed as f64
-        } else {
-            0.0
-        };
+        let miss_ratio =
+            if total_accessed > 0 { total_missed as f64 / total_accessed as f64 } else { 0.0 };
 
         MissResult {
             missed_accounts,
@@ -317,6 +308,18 @@ impl NetworkStateCache {
             total_missed,
             miss_ratio,
         }
+    }
+
+    /// Compute the canonical miss target set for `accessed` against this cache.
+    pub fn expected_miss_targets(&self, accessed: &BlockAccessedState) -> StateTargetSet {
+        let miss = self.compute_miss(accessed);
+        let mut targets = StateTargetSet {
+            accounts: miss.missed_accounts,
+            storage: miss.missed_storage,
+            code_hashes: miss.missed_codes,
+        };
+        targets.sort_dedup();
+        targets
     }
 
     /// Get a reference to the accounts map (for persistence/inspection).
@@ -337,6 +340,119 @@ impl NetworkStateCache {
     /// Current block number.
     pub fn current_block(&self) -> u64 {
         self.current_block
+    }
+
+    /// Compute a deterministic key+value root over the current cache contents.
+    ///
+    /// The protocol root includes values that affect execution or eviction:
+    /// account/storage values and `last_accessed_block`. Code entries are rooted by
+    /// `code_hash` and `last_accessed_block`; `code_hash` is treated as the
+    /// bytecode commitment, so the root does not rescan raw bytecode. Bytecode
+    /// preimages must be checked against `code_hash` at cache/witness boundaries.
+    /// Local-only metadata such as `first_accessed_block` and `access_count` is
+    /// excluded.
+    pub fn cache_root(&self) -> B256 {
+        fn push_u256(out: &mut Vec<u8>, value: U256) {
+            out.extend_from_slice(&value.to_be_bytes::<32>());
+        }
+
+        fn namespace_root(label: &[u8], leaves: &[B256]) -> B256 {
+            let mut preimage = Vec::new();
+            preimage.extend_from_slice(b"NetworkStateCacheNamespaceRoot/v1");
+            preimage.extend_from_slice(label);
+            preimage.extend_from_slice(&(leaves.len() as u64).to_be_bytes());
+            for leaf in leaves {
+                preimage.extend_from_slice(leaf.as_slice());
+            }
+            keccak256(preimage)
+        }
+
+        fn hash_account(address: Address, entry: &CachedEntry<AccountData>) -> B256 {
+            let mut preimage = Vec::new();
+            preimage.extend_from_slice(b"NetworkStateCacheLeaf/v1/account");
+            preimage.extend_from_slice(address.as_slice());
+            preimage.extend_from_slice(&entry.value.nonce.to_be_bytes());
+            push_u256(&mut preimage, entry.value.balance);
+            match entry.value.code_hash {
+                Some(code_hash) => {
+                    preimage.extend_from_slice(b"code_hash");
+                    preimage.extend_from_slice(code_hash.as_slice());
+                }
+                None => preimage.extend_from_slice(b"no_code_hash"),
+            }
+            preimage.extend_from_slice(&entry.last_accessed_block.to_be_bytes());
+            keccak256(preimage)
+        }
+
+        fn hash_storage(address: Address, slot: B256, entry: &CachedEntry<U256>) -> B256 {
+            let mut preimage = Vec::new();
+            preimage.extend_from_slice(b"NetworkStateCacheLeaf/v1/storage");
+            preimage.extend_from_slice(address.as_slice());
+            preimage.extend_from_slice(slot.as_slice());
+            push_u256(&mut preimage, entry.value);
+            preimage.extend_from_slice(&entry.last_accessed_block.to_be_bytes());
+            keccak256(preimage)
+        }
+
+        fn hash_code(code_hash: B256, entry: &CachedEntry<Bytes>) -> B256 {
+            let mut preimage = Vec::new();
+            preimage.extend_from_slice(b"NetworkStateCacheLeaf/v1/code");
+            preimage.extend_from_slice(code_hash.as_slice());
+            preimage.extend_from_slice(&entry.last_accessed_block.to_be_bytes());
+            keccak256(preimage)
+        }
+
+        let mut account_entries: Vec<_> = self.accounts.iter().collect();
+        account_entries.sort_by_key(|(address, _)| **address);
+
+        let mut storage_entries: Vec<_> = self.storage.iter().collect();
+        storage_entries.sort_by_key(|((address, slot), _)| (*address, *slot));
+
+        let mut code_entries: Vec<_> = self.codes.iter().collect();
+        code_entries.sort_by_key(|(code_hash, _)| **code_hash);
+
+        let account_leaves: Vec<_> =
+            account_entries.iter().map(|(address, entry)| hash_account(**address, entry)).collect();
+        let storage_leaves: Vec<_> = storage_entries
+            .iter()
+            .map(|((address, slot), entry)| hash_storage(*address, *slot, entry))
+            .collect();
+        let code_leaves: Vec<_> =
+            code_entries.iter().map(|(code_hash, entry)| hash_code(**code_hash, entry)).collect();
+
+        let account_root = namespace_root(b"accounts", &account_leaves);
+        let storage_root = namespace_root(b"storage", &storage_leaves);
+        let code_root = namespace_root(b"codes", &code_leaves);
+
+        let mut preimage = Vec::new();
+        preimage.extend_from_slice(b"NetworkStateCacheRoot/v2");
+
+        preimage.extend_from_slice(b"account_root");
+        preimage.extend_from_slice(account_root.as_slice());
+        preimage.extend_from_slice(b"account_count");
+        preimage.extend_from_slice(&(account_entries.len() as u64).to_be_bytes());
+
+        preimage.extend_from_slice(b"storage_root");
+        preimage.extend_from_slice(storage_root.as_slice());
+        preimage.extend_from_slice(b"storage_count");
+        preimage.extend_from_slice(&(storage_entries.len() as u64).to_be_bytes());
+
+        preimage.extend_from_slice(b"code_root");
+        preimage.extend_from_slice(code_root.as_slice());
+        preimage.extend_from_slice(b"code_count");
+        preimage.extend_from_slice(&(code_entries.len() as u64).to_be_bytes());
+
+        keccak256(preimage)
+    }
+
+    /// Bind the current cache root to a specific canonical block and cache policy.
+    pub fn cache_anchor(
+        &self,
+        block_number: u64,
+        block_hash: B256,
+        cache_policy_id: B256,
+    ) -> CacheAnchor {
+        CacheAnchor { block_number, block_hash, cache_policy_id, cache_root: self.cache_root() }
     }
 
     /// Estimated memory usage in bytes.
@@ -516,7 +632,7 @@ impl std::error::Error for CacheError {}
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::policy::LastNBlocksPolicy;
+    use crate::{policy::LastNBlocksPolicy, sidecar::last_n_blocks_cache_policy_id};
 
     fn make_cache(account_window: u64, storage_window: u64) -> NetworkStateCache {
         NetworkStateCache::new(
@@ -532,10 +648,9 @@ mod tests {
         let slot = B256::repeat_byte(0x02);
 
         let mut accessed = BlockAccessedState::default();
-        accessed.accounts.insert(
-            addr,
-            AccountData { nonce: 1, balance: U256::from(1000), code_hash: None },
-        );
+        accessed
+            .accounts
+            .insert(addr, AccountData { nonce: 1, balance: U256::from(1000), code_hash: None });
         accessed.storage.insert((addr, slot), U256::from(42));
 
         cache.on_block_executed(100, &accessed);
@@ -553,10 +668,9 @@ mod tests {
 
         // Block 10: insert both
         let mut accessed = BlockAccessedState::default();
-        accessed.accounts.insert(
-            addr,
-            AccountData { nonce: 1, balance: U256::from(100), code_hash: None },
-        );
+        accessed
+            .accounts
+            .insert(addr, AccountData { nonce: 1, balance: U256::from(100), code_hash: None });
         accessed.storage.insert((addr, slot), U256::from(1));
         cache.on_block_executed(10, &accessed);
 
@@ -598,10 +712,9 @@ mod tests {
             addr_cached,
             AccountData { nonce: 1, balance: U256::from(100), code_hash: None },
         );
-        new_block.accounts.insert(
-            addr_missed,
-            AccountData { nonce: 0, balance: U256::ZERO, code_hash: None },
-        );
+        new_block
+            .accounts
+            .insert(addr_missed, AccountData { nonce: 0, balance: U256::ZERO, code_hash: None });
         new_block.storage.insert((addr_cached, slot_cached), U256::from(1));
         new_block.storage.insert((addr_cached, slot_missed), U256::from(2));
 
@@ -619,6 +732,185 @@ mod tests {
         assert_eq!(miss.total_accessed, 4);
         assert_eq!(miss.total_missed, 2);
         assert!((miss.miss_ratio - 0.5).abs() < 0.001);
+    }
+
+    #[test]
+    fn cache_root_is_deterministic_and_key_value_bound() {
+        let addr = Address::repeat_byte(0x01);
+        let slot = B256::repeat_byte(0x02);
+        let code_hash = B256::repeat_byte(0x03);
+
+        let mut accessed = BlockAccessedState::default();
+        accessed.accounts.insert(
+            addr,
+            AccountData { nonce: 1, balance: U256::from(100), code_hash: Some(code_hash) },
+        );
+        accessed.storage.insert((addr, slot), U256::from(42));
+        accessed.codes.insert(code_hash, Bytes::from(vec![1, 2, 3]));
+
+        let mut cache_a = make_cache(10, 10);
+        cache_a.on_block_executed(100, &accessed);
+
+        let mut cache_b = make_cache(10, 10);
+        cache_b.on_block_executed(100, &accessed);
+
+        assert_eq!(cache_a.cache_root(), cache_b.cache_root());
+
+        let mut changed = accessed.clone();
+        changed.accounts.get_mut(&addr).unwrap().balance = U256::from(101);
+        let mut cache_c = make_cache(10, 10);
+        cache_c.on_block_executed(100, &changed);
+
+        assert_ne!(cache_a.cache_root(), cache_c.cache_root());
+    }
+
+    #[test]
+    fn cache_root_treats_code_hash_as_bytecode_commitment() {
+        let code_hash = B256::repeat_byte(0x03);
+
+        // Deliberately use different bytes under the same key to pin root semantics:
+        // cache_root binds code_hash and access metadata, not raw bytecode bytes.
+        let mut codes_a = HashMap::new();
+        codes_a.insert(
+            code_hash,
+            CachedEntry {
+                value: Bytes::from(vec![1, 2, 3]),
+                first_accessed_block: 1,
+                last_accessed_block: 10,
+                access_count: 1,
+            },
+        );
+        let mut codes_b = HashMap::new();
+        codes_b.insert(
+            code_hash,
+            CachedEntry {
+                value: Bytes::from(vec![9, 9, 9]),
+                first_accessed_block: 1,
+                last_accessed_block: 10,
+                access_count: 1,
+            },
+        );
+
+        let cache_a = NetworkStateCache::restore(
+            HashMap::new(),
+            HashMap::new(),
+            codes_a,
+            10,
+            Box::new(LastNBlocksPolicy::new(10)),
+            Box::new(LastNBlocksPolicy::new(10)),
+        );
+        let cache_b = NetworkStateCache::restore(
+            HashMap::new(),
+            HashMap::new(),
+            codes_b,
+            10,
+            Box::new(LastNBlocksPolicy::new(10)),
+            Box::new(LastNBlocksPolicy::new(10)),
+        );
+
+        assert_eq!(cache_a.cache_root(), cache_b.cache_root());
+
+        let mut codes_c = HashMap::new();
+        codes_c.insert(
+            B256::repeat_byte(0x04),
+            CachedEntry {
+                value: Bytes::from(vec![1, 2, 3]),
+                first_accessed_block: 1,
+                last_accessed_block: 10,
+                access_count: 1,
+            },
+        );
+        let cache_c = NetworkStateCache::restore(
+            HashMap::new(),
+            HashMap::new(),
+            codes_c,
+            10,
+            Box::new(LastNBlocksPolicy::new(10)),
+            Box::new(LastNBlocksPolicy::new(10)),
+        );
+
+        assert_ne!(cache_a.cache_root(), cache_c.cache_root());
+    }
+
+    #[test]
+    fn cache_root_excludes_local_access_metadata() {
+        let addr = Address::repeat_byte(0x01);
+        let value = AccountData { nonce: 1, balance: U256::from(100), code_hash: None };
+
+        let mut accounts_a = HashMap::new();
+        accounts_a.insert(
+            addr,
+            CachedEntry {
+                value: value.clone(),
+                first_accessed_block: 1,
+                last_accessed_block: 10,
+                access_count: 1,
+            },
+        );
+        let mut accounts_b = HashMap::new();
+        accounts_b.insert(
+            addr,
+            CachedEntry {
+                value: value.clone(),
+                first_accessed_block: 9,
+                last_accessed_block: 10,
+                access_count: 99,
+            },
+        );
+
+        let cache_a = NetworkStateCache::restore(
+            accounts_a,
+            HashMap::new(),
+            HashMap::new(),
+            10,
+            Box::new(LastNBlocksPolicy::new(10)),
+            Box::new(LastNBlocksPolicy::new(10)),
+        );
+        let cache_b = NetworkStateCache::restore(
+            accounts_b,
+            HashMap::new(),
+            HashMap::new(),
+            10,
+            Box::new(LastNBlocksPolicy::new(10)),
+            Box::new(LastNBlocksPolicy::new(10)),
+        );
+
+        assert_eq!(cache_a.cache_root(), cache_b.cache_root());
+
+        let mut accounts_c = HashMap::new();
+        accounts_c.insert(
+            addr,
+            CachedEntry {
+                value,
+                first_accessed_block: 1,
+                last_accessed_block: 11,
+                access_count: 1,
+            },
+        );
+        let cache_c = NetworkStateCache::restore(
+            accounts_c,
+            HashMap::new(),
+            HashMap::new(),
+            11,
+            Box::new(LastNBlocksPolicy::new(10)),
+            Box::new(LastNBlocksPolicy::new(10)),
+        );
+
+        assert_ne!(cache_a.cache_root(), cache_c.cache_root());
+    }
+
+    #[test]
+    fn cache_anchor_binds_policy_and_fork_context() {
+        let mut cache = make_cache(10, 10);
+        cache.on_block_executed(100, &BlockAccessedState::default());
+
+        let policy_id = last_n_blocks_cache_policy_id(10, 10);
+        let anchor = cache.cache_anchor(100, B256::repeat_byte(0xaa), policy_id);
+
+        assert_eq!(anchor.block_number, 100);
+        assert_eq!(anchor.block_hash, B256::repeat_byte(0xaa));
+        assert_eq!(anchor.cache_policy_id, policy_id);
+        assert_eq!(anchor.cache_root, cache.cache_root());
     }
 
     #[test]

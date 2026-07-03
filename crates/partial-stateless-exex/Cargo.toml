@@ -16,6 +16,7 @@ reth-trie-common = { workspace = true }
 reth-provider = { workspace = true }
 reth-evm = { workspace = true }
 reth-revm = { workspace = true }
+reth-primitives-traits = { workspace = true }
 revm = { workspace = true }
 
 # our cache crate
