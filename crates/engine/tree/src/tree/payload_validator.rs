@@ -1162,11 +1162,10 @@ where
                 };
                 let db = StateProviderDatabase::new(state_provider);
                 let evm = self.evm_config.evm_with_env(db, env.evm_env.clone());
-                let mut executor = self.evm_config.block_executor_factory().create_executor(
-                    evm,
-                    execution_ctx,
-                    hashed_state_mode,
-                );
+                let mut executor = self
+                    .evm_config
+                    .block_executor_factory()
+                    .create_executor_with_hashed_state_mode(evm, execution_ctx, hashed_state_mode);
                 let pre_exec_start = Instant::now();
                 executor
                     .apply_pre_execution_changes(&mut on_hashed_state_update)

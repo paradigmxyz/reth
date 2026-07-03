@@ -296,7 +296,7 @@ pub trait ConfigureEvm: Clone + Debug + Send + Sync + Unpin {
     where
         Self: 'a,
     {
-        self.block_executor_factory().create_executor(evm, ctx, HashedStateMode::OutputOnly)
+        self.block_executor_factory().create_executor(evm, ctx)
     }
 
     /// Returns an executor for block execution over the provided database.

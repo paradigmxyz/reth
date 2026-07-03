@@ -106,6 +106,18 @@ impl<C, EvmFactory> EthBlockExecutorFactory<C, EvmFactory> {
         &'a self,
         evm: evm2::Evm<'a, evm2::BaseEvmTypes>,
         ctx: EthBlockExecutionCtx<'a>,
+    ) -> EthBlockExecutor<'a>
+    where
+        C: EthChainSpec<Header = Header>,
+    {
+        self.create_executor_with_hashed_state_mode(evm, ctx, HashedStateMode::OutputOnly)
+    }
+
+    /// Creates a configured Ethereum block executor with an explicit hashed-state output mode.
+    pub fn create_executor_with_hashed_state_mode<'a>(
+        &'a self,
+        evm: evm2::Evm<'a, evm2::BaseEvmTypes>,
+        ctx: EthBlockExecutionCtx<'a>,
         hashed_state_mode: HashedStateMode,
     ) -> EthBlockExecutor<'a>
     where
@@ -186,7 +198,7 @@ where
     where
         Self: 'a;
 
-    fn create_executor<'a>(
+    fn create_executor_with_hashed_state_mode<'a>(
         &'a self,
         evm: Self::Evm<'a>,
         ctx: Self::ExecutionCtx<'a>,
@@ -195,7 +207,7 @@ where
     where
         Self: 'a,
     {
-        Self::create_executor(self, evm, ctx, hashed_state_mode)
+        Self::create_executor_with_hashed_state_mode(self, evm, ctx, hashed_state_mode)
     }
 
     fn evm_with_env<'a, DB>(&self, db: DB, evm_env: Self::EvmEnv) -> Self::Evm<'a>

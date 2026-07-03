@@ -228,6 +228,18 @@ pub trait BlockExecutorFactory {
         &'a self,
         evm: Self::Evm<'a>,
         ctx: Self::ExecutionCtx<'a>,
+    ) -> Self::Executor<'a>
+    where
+        Self: 'a,
+    {
+        self.create_executor_with_hashed_state_mode(evm, ctx, HashedStateMode::OutputOnly)
+    }
+
+    /// Creates a configured block executor with an explicit hashed-state output mode.
+    fn create_executor_with_hashed_state_mode<'a>(
+        &'a self,
+        evm: Self::Evm<'a>,
+        ctx: Self::ExecutionCtx<'a>,
         hashed_state_mode: HashedStateMode,
     ) -> Self::Executor<'a>
     where
@@ -463,7 +475,11 @@ where
         hashed_state_mode: HashedStateMode,
     ) -> Self {
         Self {
-            executor: executor_factory.create_executor(evm, ctx.clone(), hashed_state_mode),
+            executor: executor_factory.create_executor_with_hashed_state_mode(
+                evm,
+                ctx.clone(),
+                hashed_state_mode,
+            ),
             evm_env,
             transactions: Vec::new(),
             senders: Vec::new(),
