@@ -124,7 +124,8 @@ use reth_chain_state::{
 };
 use reth_consensus::{ConsensusError, FullConsensus, ReceiptRootBloom};
 use reth_engine_primitives::{
-    ConfigureEngineEvm, ExecutableTxIterator, ExecutionPayload, InvalidBlockHook, PayloadValidator,
+    ConfigureEngineEvm, ExecutableTxIterator, ExecutionPayload, InvalidBlockHook,
+    LazyHashedPostState, PayloadValidator,
 };
 use reth_errors::{BlockExecutionError, ProviderResult};
 use reth_evm::{
@@ -148,7 +149,7 @@ use reth_provider::{
     StorageChangeSetReader, StorageSettingsCache,
 };
 use reth_revm::db::{states::bundle_state::BundleRetention, BundleAccount, State};
-use reth_trie::{updates::TrieUpdates, HashedPostState};
+use reth_trie::updates::TrieUpdates;
 use reth_trie_db::ChangesetCache;
 use reth_trie_parallel::root::{ParallelStateRoot, ParallelStateRootError};
 use revm_primitives::{Address, KECCAK_EMPTY};
@@ -164,9 +165,6 @@ use std::{
 use tracing::{debug, debug_span, error, info, instrument, trace, warn, Level, Span};
 
 pub use crate::tree::types::ValidationOutcome;
-
-/// Handle to a [`HashedPostState`] computed on a background thread.
-type LazyHashedPostState = reth_tasks::LazyHandle<Arc<HashedPostState>>;
 
 /// Multiplier over the parent's gas limit beyond which a block's claimed gas usage cannot be
 /// legitimate. Gas limit can change by at most 1/1024 per block, so anything over this is rejected
@@ -767,8 +765,7 @@ where
             "validate_block_post_execution_with_hashed_state"
         )
         .in_scope(|| {
-            self.validator
-                .validate_block_post_execution_with_hashed_state(&|| hashed_state.get(), &block)
+            self.validator.validate_block_post_execution_with_hashed_state(&hashed_state, &block)
         });
 
         let root_time = Instant::now();
@@ -873,11 +870,9 @@ where
                     hashed_state = maybe_new_hashed_state.unwrap_or_else(|| {
                         LazyHandle::ready(Arc::new(self.provider.hashed_post_state(&output.state)))
                     });
-                    hashed_state_validate_result =
-                        self.validator.validate_block_post_execution_with_hashed_state(
-                            &|| hashed_state.get(),
-                            &block,
-                        );
+                    hashed_state_validate_result = self
+                        .validator
+                        .validate_block_post_execution_with_hashed_state(&hashed_state, &block);
                 }
             }
             StateRootStrategy::Parallel => {
