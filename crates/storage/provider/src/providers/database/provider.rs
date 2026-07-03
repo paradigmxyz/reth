@@ -2698,17 +2698,26 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
     #[instrument(level = "debug", target = "providers::db", skip_all)]
     fn write_hashed_state(&self, hashed_state: &HashedPostStateSorted) -> ProviderResult<()> {
         // Write hashed account updates.
-        let mut hashed_accounts_cursor = self.tx_ref().cursor_write::<tables::HashedAccounts>()?;
-        for (hashed_address, account) in hashed_state.accounts() {
-            if let Some(account) = account {
-                hashed_accounts_cursor.upsert(*hashed_address, account)?;
-            } else if hashed_accounts_cursor.seek_exact(*hashed_address)?.is_some() {
-                hashed_accounts_cursor.delete_current()?;
+        let hashed_accounts = hashed_state.accounts();
+        if !hashed_accounts.is_empty() {
+            let mut hashed_accounts_cursor =
+                self.tx_ref().cursor_write::<tables::HashedAccounts>()?;
+            for (hashed_address, account) in hashed_accounts {
+                if let Some(account) = account {
+                    hashed_accounts_cursor.upsert(*hashed_address, account)?;
+                } else if hashed_accounts_cursor.seek_exact(*hashed_address)?.is_some() {
+                    hashed_accounts_cursor.delete_current()?;
+                }
             }
         }
 
         // Write hashed storage changes.
-        let sorted_storages = hashed_state.account_storages().iter().sorted_by_key(|(key, _)| *key);
+        let account_storages = hashed_state.account_storages();
+        if account_storages.is_empty() {
+            return Ok(());
+        }
+
+        let sorted_storages = account_storages.iter().sorted_by_key(|(key, _)| *key);
         let mut hashed_storage_cursor =
             self.tx_ref().cursor_dup_write::<tables::HashedStorages>()?;
         for (hashed_address, storage) in sorted_storages {
