@@ -432,7 +432,7 @@ pub trait ConfigureEvm: Clone + Debug + Send + Sync + Unpin {
 
     /// Creates an EVM instance for single-transaction execution with an inspector.
     #[cfg(feature = "std")]
-    fn evm_with_env_and_inspector<'a, DB, I>(
+    fn evm_with_env_and_inspector<'a, DB, I, T>(
         &self,
         db: DB,
         evm_env: EvmEnvFor<Self>,
@@ -440,9 +440,10 @@ pub trait ConfigureEvm: Clone + Debug + Send + Sync + Unpin {
     ) -> EvmFor<'a, Self>
     where
         DB: Database + 'a,
-        I: evm2::Inspector<evm2::BaseEvmTypes> + 'a,
+        I: evm2::Inspector<T> + 'a,
+        T: evm2::EvmTypes,
         Self::BlockExecutorFactory:
-            crate::execute::BlockExecutorFactory<Evm<'a> = evm2::Evm<'a, evm2::BaseEvmTypes>>,
+            crate::execute::BlockExecutorFactory<Evm<'a> = evm2::Evm<'a, T>>,
     {
         let mut evm = self.evm_with_env(db, evm_env);
         evm.set_inspector(inspector);
