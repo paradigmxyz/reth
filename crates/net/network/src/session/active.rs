@@ -752,6 +752,17 @@ impl<N: NetworkPrimitives> Future for ActiveSession<N> {
                 }
             }
 
+            // The sink no longer flushes in `poll_ready`, so the batch queued above is flushed
+            // explicitly once per pass. This also resumes a flush that previously returned
+            // pending; a no-op if nothing needs flushing.
+            match this.conn.poll_flush_unpin(cx) {
+                Poll::Pending | Poll::Ready(Ok(())) => {}
+                Poll::Ready(Err(err)) => {
+                    debug!(target: "net::session", %err, remote_peer_id=?this.remote_peer_id, "failed to flush connection");
+                    return this.close_on_error(err, cx)
+                }
+            }
+
             // read incoming messages from the wire
             'receive: loop {
                 // ensure we still have enough budget for another iteration
