@@ -133,8 +133,8 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
         self
     }
 
-    /// Set the parent state root that allows managed overlay construction and DB revert collection
-    /// to be skipped if the sparse trie is already based on that parent.
+    /// Set the parent state root that allows managed overlay construction to be skipped if the
+    /// sparse trie is already based on that parent and no DB reverts are required.
     pub const fn with_skip_overlay_when_sparse_trie_matches_parent(
         mut self,
         parent_state_root: B256,
@@ -336,23 +336,6 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
             + PruneCheckpointReader
             + StorageSettingsCache,
     {
-        if self.should_skip_overlay_for_matching_sparse_trie() {
-            debug!(
-                target: "providers::state::overlay",
-                parent_hash = %self.parent_hash,
-                "Skipping overlay construction because sparse trie is based on parent"
-            );
-
-            self.metrics.retrieve_trie_reverts_duration.record(Duration::ZERO.as_secs_f64());
-            self.metrics
-                .retrieve_hashed_state_reverts_duration
-                .record(Duration::ZERO.as_secs_f64());
-            self.metrics.trie_updates_size.record(0.0);
-            self.metrics.hashed_state_size.record(0.0);
-
-            return Ok(Overlay::empty())
-        }
-
         //
         // Set up variables we'll use for recording metrics. There's two different code-paths here,
         // and we want to make sure both record metrics, so we do metrics recording after.
@@ -449,6 +432,23 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
             (trie_updates, hashed_state_updates)
         } else {
             // If no reverts are needed then the db tip is the anchor hash. Use overlays directly.
+            if self.should_skip_overlay_for_matching_sparse_trie() {
+                debug!(
+                    target: "providers::state::overlay",
+                    parent_hash = %self.parent_hash,
+                    "Skipping overlay construction because sparse trie is based on parent"
+                );
+
+                self.metrics.retrieve_trie_reverts_duration.record(Duration::ZERO.as_secs_f64());
+                self.metrics
+                    .retrieve_hashed_state_reverts_duration
+                    .record(Duration::ZERO.as_secs_f64());
+                self.metrics.trie_updates_size.record(0.0);
+                self.metrics.hashed_state_size.record(0.0);
+
+                return Ok(Overlay::empty())
+            }
+
             let (trie_updates, hashed_post_state) = self.resolve_overlays(db_tip_block.hash)?;
 
             retrieve_trie_reverts_duration = Duration::ZERO;
