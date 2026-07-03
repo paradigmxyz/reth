@@ -182,6 +182,30 @@ impl SaveBlocksMode {
     }
 }
 
+fn merge_save_blocks_hashed_state(trie_data: &[ComputedTrieData]) -> Arc<HashedPostStateSorted> {
+    match trie_data {
+        [] => Arc::new(HashedPostStateSorted::default()),
+        [data] => Arc::clone(&data.hashed_state),
+        _ => {
+            let states: SmallVec<[Arc<HashedPostStateSorted>; 4]> =
+                trie_data.iter().map(|data| Arc::clone(&data.hashed_state)).collect();
+            Arc::new(HashedPostStateSorted::merge_slice(&states))
+        }
+    }
+}
+
+fn merge_save_blocks_trie_updates(trie_data: &[ComputedTrieData]) -> Arc<TrieUpdatesSorted> {
+    match trie_data {
+        [] => Arc::new(TrieUpdatesSorted::default()),
+        [data] => Arc::clone(&data.trie_updates),
+        _ => {
+            let updates: SmallVec<[Arc<TrieUpdatesSorted>; 4]> =
+                trie_data.iter().map(|data| Arc::clone(&data.trie_updates)).collect();
+            Arc::new(TrieUpdatesSorted::merge_slice(&updates))
+        }
+    }
+}
+
 /// A provider struct that fetches data from the database.
 /// Wrapper around [`DbTx`] and [`DbTxMut`]. Example: [`HeaderProvider`] [`BlockHashReader`]
 pub struct DatabaseProvider<TX, N: NodeTypes> {
@@ -725,18 +749,18 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
             // This reduces cursor open/close overhead from N calls to 1.
             if save_mode.with_state() {
                 // Blocks are oldest-to-newest, merge_batch expects newest-to-oldest.
+                let trie_data: SmallVec<[ComputedTrieData; 4]> =
+                    blocks.iter().rev().map(ExecutedBlock::trie_data).collect();
+
                 let start = Instant::now();
-                let merged_hashed_state = HashedPostStateSorted::merge_batch(
-                    blocks.iter().rev().map(|b| b.trie_data().hashed_state),
-                );
+                let merged_hashed_state = merge_save_blocks_hashed_state(&trie_data);
                 if !merged_hashed_state.is_empty() {
                     self.write_hashed_state(&merged_hashed_state)?;
                 }
                 timings.write_hashed_state += start.elapsed();
 
                 let start = Instant::now();
-                let merged_trie =
-                    TrieUpdatesSorted::merge_batch(blocks.iter().rev().map(|b| b.trie_updates()));
+                let merged_trie = merge_save_blocks_trie_updates(&trie_data);
                 if !merged_trie.is_empty() {
                     self.write_trie_updates_sorted(&merged_trie)?;
                 }
