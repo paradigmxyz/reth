@@ -12,8 +12,8 @@
 extern crate alloc;
 
 #[cfg(feature = "std")]
-use crate::execute::{BasicBlockBuilder, BasicBlockExecutor, BlockBuilder, BlockExecutorFactory};
-use crate::execute::{BlockExecutionError, Executor, IntoTxEnv};
+use crate::execute::{BasicBlockBuilder, BasicBlockExecutor};
+use crate::execute::{BlockExecutionError, IntoTxEnv};
 #[cfg(feature = "std")]
 use alloc::boxed::Box;
 use alloc::string::String;
@@ -43,6 +43,11 @@ pub mod precompile_cache;
 
 mod aliases;
 pub use aliases::*;
+pub use execute::{
+    BlockAssembler, BlockAssemblerInput, BlockBuilder, BlockBuilderOutcome, BlockExecutor,
+    BlockExecutorFactory, CommitChanges, ExecutableTxFor, ExecutableTxParts, Executor, ExecutorTx,
+    GasOutput, RecoveredTx, WithTxEnv,
+};
 pub use reth_execution_types::ExecutionState;
 
 /// Transaction validation limits resolved for an EVM environment.
