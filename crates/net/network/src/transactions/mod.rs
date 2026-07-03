@@ -1394,6 +1394,7 @@ where
 
         // Early return if we don't have capacity for any imports
         if !self.has_capacity_for_pending_pool_imports() {
+            self.instrumentation.record_pool_import_txs_dropped_at_capacity(transactions.0.len());
             return
         }
 
@@ -1406,6 +1407,7 @@ where
         if transactions.len() > capacity {
             let skipped = transactions.len() - capacity;
             transactions.truncate(capacity);
+            self.instrumentation.record_pool_import_txs_dropped_at_capacity(skipped);
             self.metrics
                 .skipped_transactions_pending_pool_imports_at_capacity
                 .increment(skipped as u64);
@@ -1505,6 +1507,9 @@ where
             self.pending_pool_imports_info
                 .pending_pool_imports
                 .fetch_add(new_txs.len(), Ordering::Relaxed);
+            let pending_pool_imports =
+                self.pending_pool_imports_info.pending_pool_imports.load(Ordering::Relaxed);
+            self.instrumentation.record_pool_import_started(new_txs.len(), pending_pool_imports);
             let tx_manager_info_pending_pool_imports =
                 self.pending_pool_imports_info.pending_pool_imports.clone();
 
@@ -1682,6 +1687,7 @@ where
         // We don't expect this buffer to be large, since only pending transactions are
         // emitted here.
         let mut new_txs = Vec::new();
+        let mut pending_tx_second_poll_ready = false;
         let maybe_more_pending_txns = match this.pending_transactions.poll_recv_many(
             cx,
             &mut new_txs,
@@ -1699,13 +1705,18 @@ where
                     let limit =
                         SOFT_LIMIT_COUNT_HASHES_IN_NEW_POOLED_TRANSACTIONS_BROADCAST_MESSAGE -
                             new_txs.len();
-                    this.pending_transactions.poll_recv_many(cx, &mut new_txs, limit).is_ready()
+                    pending_tx_second_poll_ready = this
+                        .pending_transactions
+                        .poll_recv_many(cx, &mut new_txs, limit)
+                        .is_ready();
+                    pending_tx_second_poll_ready
                 }
             }
             Poll::Pending => false,
         };
         if !new_txs.is_empty() {
-            this.instrumentation.record_new_pending_txs(new_txs.len());
+            this.instrumentation
+                .record_new_pending_txs(new_txs.len(), pending_tx_second_poll_ready);
             this.on_new_pending_transactions(new_txs);
         }
 
@@ -1735,7 +1746,10 @@ where
         );
 
         this.transaction_fetcher.update_metrics();
-        this.instrumentation.maybe_log();
+        this.instrumentation.maybe_log(
+            this.pending_pool_imports_info.pending_pool_imports.load(Ordering::Relaxed),
+            this.pending_pool_imports_info.max_pending_pool_imports,
+        );
 
         // all channels are fully drained and import futures pending
         if maybe_more_network_events ||
@@ -2361,13 +2375,21 @@ struct TxManagerPollDurations {
 struct TxManagerInstrumentation {
     last_log: Instant,
     new_pending_txs: usize,
+    new_pending_batches: usize,
+    new_pending_second_poll_hits: usize,
+    max_new_pending_batch: usize,
     sent_messages: usize,
     sent_txs: usize,
+    max_txs_per_sent_message: usize,
     incoming_full_messages: usize,
     incoming_full_txs: usize,
     incoming_hash_messages: usize,
     incoming_hash_txs: usize,
     max_txs_per_incoming_message: usize,
+    pool_import_batches: usize,
+    pool_import_txs: usize,
+    pool_import_txs_dropped_at_capacity: usize,
+    max_pending_pool_imports_observed: usize,
 }
 
 impl TxManagerInstrumentation {
@@ -2375,23 +2397,35 @@ impl TxManagerInstrumentation {
         Self {
             last_log: Instant::now(),
             new_pending_txs: 0,
+            new_pending_batches: 0,
+            new_pending_second_poll_hits: 0,
+            max_new_pending_batch: 0,
             sent_messages: 0,
             sent_txs: 0,
+            max_txs_per_sent_message: 0,
             incoming_full_messages: 0,
             incoming_full_txs: 0,
             incoming_hash_messages: 0,
             incoming_hash_txs: 0,
             max_txs_per_incoming_message: 0,
+            pool_import_batches: 0,
+            pool_import_txs: 0,
+            pool_import_txs_dropped_at_capacity: 0,
+            max_pending_pool_imports_observed: 0,
         }
     }
 
-    fn record_new_pending_txs(&mut self, count: usize) {
+    fn record_new_pending_txs(&mut self, count: usize, second_poll_ready: bool) {
         self.new_pending_txs += count;
+        self.new_pending_batches += 1;
+        self.max_new_pending_batch = self.max_new_pending_batch.max(count);
+        self.new_pending_second_poll_hits += second_poll_ready as usize;
     }
 
     fn record_sent_txs(&mut self, count: usize) {
         self.sent_messages += 1;
         self.sent_txs += count;
+        self.max_txs_per_sent_message = self.max_txs_per_sent_message.max(count);
     }
 
     fn record_incoming_full_txs(&mut self, count: usize) {
@@ -2406,12 +2440,26 @@ impl TxManagerInstrumentation {
         self.max_txs_per_incoming_message = self.max_txs_per_incoming_message.max(count);
     }
 
-    fn maybe_log(&mut self) {
+    fn record_pool_import_started(&mut self, count: usize, pending_pool_imports: usize) {
+        self.pool_import_batches += 1;
+        self.pool_import_txs += count;
+        self.max_pending_pool_imports_observed =
+            self.max_pending_pool_imports_observed.max(pending_pool_imports);
+    }
+
+    fn record_pool_import_txs_dropped_at_capacity(&mut self, count: usize) {
+        self.pool_import_txs_dropped_at_capacity += count;
+    }
+
+    fn maybe_log(&mut self, pending_pool_imports: usize, max_pending_pool_imports: usize) {
+        self.max_pending_pool_imports_observed =
+            self.max_pending_pool_imports_observed.max(pending_pool_imports);
         let elapsed = self.last_log.elapsed();
         if elapsed < Duration::from_secs(1) || !self.has_activity() {
             return;
         }
 
+        let elapsed_secs = elapsed.as_secs_f64();
         let incoming_messages = self.incoming_full_messages + self.incoming_hash_messages;
         let incoming_txs = self.incoming_full_txs + self.incoming_hash_txs;
         let incoming_txs_per_message = if incoming_messages == 0 {
@@ -2419,21 +2467,48 @@ impl TxManagerInstrumentation {
         } else {
             incoming_txs as f64 / incoming_messages as f64
         };
+        let sent_txs_per_message = if self.sent_messages == 0 {
+            0.0
+        } else {
+            self.sent_txs as f64 / self.sent_messages as f64
+        };
+        let new_pending_txs_per_batch = if self.new_pending_batches == 0 {
+            0.0
+        } else {
+            self.new_pending_txs as f64 / self.new_pending_batches as f64
+        };
 
         info!(
             target: TX_MANAGER_INSTRUMENTATION_TARGET,
             elapsed_ms = elapsed.as_millis(),
             new_pending_txs = self.new_pending_txs,
+            new_pending_txs_per_second = self.new_pending_txs as f64 / elapsed_secs,
+            new_pending_batches = self.new_pending_batches,
+            new_pending_txs_per_batch,
+            new_pending_second_poll_hits = self.new_pending_second_poll_hits,
+            max_new_pending_batch = self.max_new_pending_batch,
             sent_messages = self.sent_messages,
+            sent_messages_per_second = self.sent_messages as f64 / elapsed_secs,
             sent_txs = self.sent_txs,
+            sent_txs_per_second = self.sent_txs as f64 / elapsed_secs,
+            sent_txs_per_message,
+            max_txs_per_sent_message = self.max_txs_per_sent_message,
             incoming_messages,
+            incoming_messages_per_second = incoming_messages as f64 / elapsed_secs,
             incoming_txs,
+            incoming_txs_per_second = incoming_txs as f64 / elapsed_secs,
             incoming_txs_per_message,
             incoming_full_messages = self.incoming_full_messages,
             incoming_full_txs = self.incoming_full_txs,
             incoming_hash_messages = self.incoming_hash_messages,
             incoming_hash_txs = self.incoming_hash_txs,
             max_txs_per_incoming_message = self.max_txs_per_incoming_message,
+            pool_import_batches = self.pool_import_batches,
+            pool_import_txs = self.pool_import_txs,
+            pool_import_txs_dropped_at_capacity = self.pool_import_txs_dropped_at_capacity,
+            pending_pool_imports,
+            max_pending_pool_imports,
+            max_pending_pool_imports_observed = self.max_pending_pool_imports_observed,
             "transaction manager gossip instrumentation"
         );
 
@@ -2442,21 +2517,33 @@ impl TxManagerInstrumentation {
 
     fn has_activity(&self) -> bool {
         self.new_pending_txs > 0 ||
+            self.new_pending_batches > 0 ||
             self.sent_messages > 0 ||
             self.incoming_full_messages > 0 ||
-            self.incoming_hash_messages > 0
+            self.incoming_hash_messages > 0 ||
+            self.pool_import_batches > 0 ||
+            self.pool_import_txs_dropped_at_capacity > 0 ||
+            self.max_pending_pool_imports_observed > 0
     }
 
     fn reset(&mut self) {
         self.last_log = Instant::now();
         self.new_pending_txs = 0;
+        self.new_pending_batches = 0;
+        self.new_pending_second_poll_hits = 0;
+        self.max_new_pending_batch = 0;
         self.sent_messages = 0;
         self.sent_txs = 0;
+        self.max_txs_per_sent_message = 0;
         self.incoming_full_messages = 0;
         self.incoming_full_txs = 0;
         self.incoming_hash_messages = 0;
         self.incoming_hash_txs = 0;
         self.max_txs_per_incoming_message = 0;
+        self.pool_import_batches = 0;
+        self.pool_import_txs = 0;
+        self.pool_import_txs_dropped_at_capacity = 0;
+        self.max_pending_pool_imports_observed = 0;
     }
 }
 

@@ -606,6 +606,7 @@ impl<N: NetworkPrimitives> SessionManager<N> {
                     local_range_info: self.local_range_info.clone(),
                     range_update_interval,
                     last_sent_latest_block: None,
+                    instrumentation: Default::default(),
                 };
 
                 self.spawn(session);

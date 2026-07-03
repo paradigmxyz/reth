@@ -46,7 +46,9 @@ use tokio::{
 };
 use tokio_stream::wrappers::ReceiverStream;
 use tokio_util::sync::PollSender;
-use tracing::{debug, error, trace};
+use tracing::{debug, error, info, trace};
+
+const SESSION_INSTRUMENTATION_TARGET: &str = "net::session::instrumentation";
 
 /// The recommended interval at which to check if a new range update should be sent to the remote
 /// peer.
@@ -191,6 +193,8 @@ pub(crate) struct ActiveSession<N: NetworkPrimitives> {
     /// The last latest block number we sent in a range update
     /// Used to avoid sending unnecessary updates when block height hasn't changed significantly
     pub(crate) last_sent_latest_block: Option<u64>,
+    /// Aggregates high-volume session buffering counters.
+    pub(crate) instrumentation: ActiveSessionInstrumentation,
 }
 
 impl<N: NetworkPrimitives> ActiveSession<N> {
@@ -424,7 +428,9 @@ impl<N: NetworkPrimitives> ActiveSession<N> {
             }
             PeerMessage::PooledTransactions(msg) => {
                 if msg.is_valid_for_version(self.conn.version()) {
-                    self.queued_outgoing.push_pooled_hashes(msg);
+                    let items = msg.len();
+                    let merged = self.queued_outgoing.push_pooled_hashes(msg);
+                    self.instrumentation.record_pooled_hash_buffered(items, merged);
                 } else {
                     self.queued_outgoing.broadcast_items.sub(msg.len());
                     debug!(target: "net", ?msg,  version=?self.conn.version(), "Message is invalid for connection version, skipping");
@@ -777,9 +783,19 @@ impl<N: NetworkPrimitives> Future for ActiveSession<N> {
             }
 
             // Send messages by advancing the sink and queuing in buffered messages
+            let queued_outgoing = this.queued_outgoing.len();
+            if queued_outgoing > 0 {
+                this.instrumentation.record_outgoing_queue_depth(
+                    queued_outgoing,
+                    this.queued_outgoing.response_count(),
+                    this.queued_outgoing.broadcast_items_count(),
+                );
+            }
+            let mut sent_in_flush = 0;
             while this.conn.poll_ready_unpin(cx).is_ready() {
                 if let Some(msg) = this.queued_outgoing.pop_front() {
                     progress = true;
+                    let tx_items = msg.tx_item_count();
                     let res = match msg {
                         OutgoingMessage::Eth(msg) => this.conn.start_send_unpin(msg),
                         OutgoingMessage::Broadcast(msg) => this.conn.start_send_broadcast(msg),
@@ -790,11 +806,14 @@ impl<N: NetworkPrimitives> Future for ActiveSession<N> {
                         // notify the manager
                         return this.close_on_error(err, cx)
                     }
+                    sent_in_flush += 1;
+                    this.instrumentation.record_sent_message(tx_items);
                 } else {
                     // no more messages to send over the wire
                     break
                 }
             }
+            this.instrumentation.record_flush(sent_in_flush);
 
             // The sink only buffers sent messages; `poll_flush` performs the actual writes and
             // flushes the transport once for the entire batch queued above. This also resumes a
@@ -880,6 +899,9 @@ impl<N: NetworkPrimitives> Future for ActiveSession<N> {
                             Ok(msg) => {
                                 let outcome = match msg {
                                     EthSnapMessage::Eth(msg) => {
+                                        this.instrumentation.record_received_message(
+                                            eth_message_tx_item_count(&msg),
+                                        );
                                         trace!(target: "net::session", msg_id=?msg.message_id(), remote_peer_id=?this.remote_peer_id, "received eth message");
                                         // decode and handle message
                                         this.on_incoming_message(msg)
@@ -888,6 +910,7 @@ impl<N: NetworkPrimitives> Future for ActiveSession<N> {
                                     // request/response handling
                                     // lands with the snap client.
                                     EthSnapMessage::Snap(_msg) => {
+                                        this.instrumentation.record_received_message(0);
                                         trace!(target: "net::session", remote_peer_id=?this.remote_peer_id, "ignoring inbound snap/2 message");
                                         OnIncomingMessageOutcome::Ok
                                     }
@@ -989,9 +1012,230 @@ impl<N: NetworkPrimitives> Future for ActiveSession<N> {
             }
         }
 
+        this.instrumentation.maybe_log(this.remote_peer_id);
         this.shrink_to_fit();
 
         Poll::Pending
+    }
+}
+
+/// Aggregates high-volume active-session buffering counters and emits them at a fixed cadence.
+#[derive(Debug)]
+pub(crate) struct ActiveSessionInstrumentation {
+    last_log: Instant,
+    outgoing_queue_depth_samples: usize,
+    outgoing_queue_depth_sum: usize,
+    outgoing_queue_depth_max: usize,
+    outgoing_response_depth_sum: usize,
+    outgoing_response_depth_max: usize,
+    queued_broadcast_items_sum: usize,
+    queued_broadcast_items_max: usize,
+    flushes: usize,
+    sent_messages: usize,
+    sent_tx_messages: usize,
+    sent_tx_items: usize,
+    max_sent_messages_per_flush: usize,
+    received_messages: usize,
+    received_tx_messages: usize,
+    received_tx_items: usize,
+    pooled_hash_messages_queued: usize,
+    pooled_hash_items_queued: usize,
+    pooled_hash_messages_merged: usize,
+    pooled_hash_items_merged: usize,
+}
+
+impl ActiveSessionInstrumentation {
+    fn new() -> Self {
+        Self {
+            last_log: Instant::now(),
+            outgoing_queue_depth_samples: 0,
+            outgoing_queue_depth_sum: 0,
+            outgoing_queue_depth_max: 0,
+            outgoing_response_depth_sum: 0,
+            outgoing_response_depth_max: 0,
+            queued_broadcast_items_sum: 0,
+            queued_broadcast_items_max: 0,
+            flushes: 0,
+            sent_messages: 0,
+            sent_tx_messages: 0,
+            sent_tx_items: 0,
+            max_sent_messages_per_flush: 0,
+            received_messages: 0,
+            received_tx_messages: 0,
+            received_tx_items: 0,
+            pooled_hash_messages_queued: 0,
+            pooled_hash_items_queued: 0,
+            pooled_hash_messages_merged: 0,
+            pooled_hash_items_merged: 0,
+        }
+    }
+
+    fn record_outgoing_queue_depth(
+        &mut self,
+        queued_messages: usize,
+        queued_responses: usize,
+        queued_broadcast_items: usize,
+    ) {
+        self.outgoing_queue_depth_samples += 1;
+        self.outgoing_queue_depth_sum += queued_messages;
+        self.outgoing_queue_depth_max = self.outgoing_queue_depth_max.max(queued_messages);
+        self.outgoing_response_depth_sum += queued_responses;
+        self.outgoing_response_depth_max = self.outgoing_response_depth_max.max(queued_responses);
+        self.queued_broadcast_items_sum += queued_broadcast_items;
+        self.queued_broadcast_items_max =
+            self.queued_broadcast_items_max.max(queued_broadcast_items);
+    }
+
+    fn record_flush(&mut self, sent_messages: usize) {
+        if sent_messages == 0 {
+            return
+        }
+        self.flushes += 1;
+        self.max_sent_messages_per_flush = self.max_sent_messages_per_flush.max(sent_messages);
+    }
+
+    fn record_sent_message(&mut self, tx_items: usize) {
+        self.sent_messages += 1;
+        if tx_items > 0 {
+            self.sent_tx_messages += 1;
+            self.sent_tx_items += tx_items;
+        }
+    }
+
+    fn record_received_message(&mut self, tx_items: usize) {
+        self.received_messages += 1;
+        if tx_items > 0 {
+            self.received_tx_messages += 1;
+            self.received_tx_items += tx_items;
+        }
+    }
+
+    fn record_pooled_hash_buffered(&mut self, items: usize, merged: bool) {
+        if merged {
+            self.pooled_hash_messages_merged += 1;
+            self.pooled_hash_items_merged += items;
+        } else {
+            self.pooled_hash_messages_queued += 1;
+            self.pooled_hash_items_queued += items;
+        }
+    }
+
+    fn maybe_log(&mut self, peer_id: PeerId) {
+        let elapsed = self.last_log.elapsed();
+        if elapsed < Duration::from_secs(1) || !self.has_activity() {
+            return
+        }
+
+        let elapsed_secs = elapsed.as_secs_f64();
+        let avg_outgoing_queue_depth = if self.outgoing_queue_depth_samples == 0 {
+            0.0
+        } else {
+            self.outgoing_queue_depth_sum as f64 / self.outgoing_queue_depth_samples as f64
+        };
+        let avg_outgoing_response_depth = if self.outgoing_queue_depth_samples == 0 {
+            0.0
+        } else {
+            self.outgoing_response_depth_sum as f64 / self.outgoing_queue_depth_samples as f64
+        };
+        let avg_queued_broadcast_items = if self.outgoing_queue_depth_samples == 0 {
+            0.0
+        } else {
+            self.queued_broadcast_items_sum as f64 / self.outgoing_queue_depth_samples as f64
+        };
+        let sent_messages_per_flush =
+            if self.flushes == 0 { 0.0 } else { self.sent_messages as f64 / self.flushes as f64 };
+        let sent_tx_items_per_message = if self.sent_tx_messages == 0 {
+            0.0
+        } else {
+            self.sent_tx_items as f64 / self.sent_tx_messages as f64
+        };
+        let received_tx_items_per_message = if self.received_tx_messages == 0 {
+            0.0
+        } else {
+            self.received_tx_items as f64 / self.received_tx_messages as f64
+        };
+
+        info!(
+            target: SESSION_INSTRUMENTATION_TARGET,
+            ?peer_id,
+            elapsed_ms = elapsed.as_millis(),
+            sent_messages = self.sent_messages,
+            sent_messages_per_second = self.sent_messages as f64 / elapsed_secs,
+            sent_tx_messages = self.sent_tx_messages,
+            sent_tx_items = self.sent_tx_items,
+            sent_tx_items_per_message,
+            received_messages = self.received_messages,
+            received_messages_per_second = self.received_messages as f64 / elapsed_secs,
+            received_tx_messages = self.received_tx_messages,
+            received_tx_items = self.received_tx_items,
+            received_tx_items_per_message,
+            outgoing_queue_depth_samples = self.outgoing_queue_depth_samples,
+            avg_outgoing_queue_depth,
+            max_outgoing_queue_depth = self.outgoing_queue_depth_max,
+            avg_outgoing_response_depth,
+            max_outgoing_response_depth = self.outgoing_response_depth_max,
+            avg_queued_broadcast_items,
+            max_queued_broadcast_items = self.queued_broadcast_items_max,
+            flushes = self.flushes,
+            sent_messages_per_flush,
+            max_sent_messages_per_flush = self.max_sent_messages_per_flush,
+            pooled_hash_messages_queued = self.pooled_hash_messages_queued,
+            pooled_hash_items_queued = self.pooled_hash_items_queued,
+            pooled_hash_messages_merged = self.pooled_hash_messages_merged,
+            pooled_hash_items_merged = self.pooled_hash_items_merged,
+            "active session buffering instrumentation"
+        );
+
+        self.reset();
+    }
+
+    fn has_activity(&self) -> bool {
+        self.sent_messages > 0 ||
+            self.received_messages > 0 ||
+            self.outgoing_queue_depth_samples > 0 ||
+            self.pooled_hash_messages_queued > 0 ||
+            self.pooled_hash_messages_merged > 0
+    }
+
+    fn reset(&mut self) {
+        self.last_log = Instant::now();
+        self.outgoing_queue_depth_samples = 0;
+        self.outgoing_queue_depth_sum = 0;
+        self.outgoing_queue_depth_max = 0;
+        self.outgoing_response_depth_sum = 0;
+        self.outgoing_response_depth_max = 0;
+        self.queued_broadcast_items_sum = 0;
+        self.queued_broadcast_items_max = 0;
+        self.flushes = 0;
+        self.sent_messages = 0;
+        self.sent_tx_messages = 0;
+        self.sent_tx_items = 0;
+        self.max_sent_messages_per_flush = 0;
+        self.received_messages = 0;
+        self.received_tx_messages = 0;
+        self.received_tx_items = 0;
+        self.pooled_hash_messages_queued = 0;
+        self.pooled_hash_items_queued = 0;
+        self.pooled_hash_messages_merged = 0;
+        self.pooled_hash_items_merged = 0;
+    }
+}
+
+impl Default for ActiveSessionInstrumentation {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+fn eth_message_tx_item_count<N: NetworkPrimitives>(msg: &EthMessage<N>) -> usize {
+    match msg {
+        EthMessage::Transactions(txs) => txs.len(),
+        EthMessage::NewPooledTransactionHashes66(hashes) => hashes.len(),
+        EthMessage::NewPooledTransactionHashes68(hashes) => hashes.hashes.len(),
+        EthMessage::NewPooledTransactionHashes72(hashes) => hashes.hashes.len(),
+        EthMessage::GetPooledTransactions(req) => req.message.0.len(),
+        EthMessage::PooledTransactions(resp) => resp.message.0.len(),
+        _ => 0,
     }
 }
 
@@ -1113,6 +1357,19 @@ impl<N: NetworkPrimitives> OutgoingMessage<N> {
         }
     }
 
+    /// Returns the number of transaction-related items in this message.
+    fn tx_item_count(&self) -> usize {
+        match self {
+            Self::Eth(msg) => eth_message_tx_item_count(msg),
+            Self::Broadcast(msg) => match msg {
+                EthBroadcastMessage::Transactions(txs) => txs.len(),
+                EthBroadcastMessage::BroadcastPoolTransactions(txs) => txs.len(),
+                EthBroadcastMessage::NewBlock(_) => 0,
+            },
+            Self::Raw(_) => 0,
+        }
+    }
+
     /// Tries to merge pooled transaction hash announcements into this message, consuming the
     /// incoming hashes. Returns `Some(incoming)` back if the variants don't match.
     fn try_merge_hashes(
@@ -1214,6 +1471,16 @@ impl<N: NetworkPrimitives> QueuedOutgoingMessages<N> {
         self.messages.is_empty()
     }
 
+    /// Returns the number of queued outgoing messages.
+    pub(crate) fn len(&self) -> usize {
+        self.messages.len()
+    }
+
+    /// Returns the number of broadcast items currently buffered for this session.
+    pub(crate) fn broadcast_items_count(&self) -> usize {
+        self.broadcast_items.get()
+    }
+
     pub(crate) fn push_back(&mut self, message: OutgoingMessage<N>) {
         self.queued_responses += message.is_response() as usize;
         self.messages.push_back(message);
@@ -1233,10 +1500,12 @@ impl<N: NetworkPrimitives> QueuedOutgoingMessages<N> {
 
     /// Pushes a pooled transaction hash announcement, merging into the last queued message if
     /// it is the same variant (eth66, eth68, or eth72).
-    pub(crate) fn push_pooled_hashes(&mut self, msg: NewPooledTransactionHashes) {
+    ///
+    /// Returns `true` when the hashes were merged into the existing tail message.
+    pub(crate) fn push_pooled_hashes(&mut self, msg: NewPooledTransactionHashes) -> bool {
         let msg = if let Some(last) = self.messages.back_mut() {
             match last.try_merge_hashes(msg) {
-                None => return,
+                None => return true,
                 Some(msg) => msg,
             }
         } else {
@@ -1244,6 +1513,7 @@ impl<N: NetworkPrimitives> QueuedOutgoingMessages<N> {
         };
         self.messages.push_back(EthMessage::from(msg).into());
         self.count.increment(1);
+        false
     }
 
     pub(crate) fn shrink_to(&mut self, min_capacity: usize) {
@@ -1420,6 +1690,7 @@ mod tests {
                         ),
                         range_update_interval: None,
                         last_sent_latest_block: None,
+                        instrumentation: Default::default(),
                     }
                 }
                 ev => {
