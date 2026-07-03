@@ -228,6 +228,14 @@ where
 /// byte of each message starts from 0. If this stream only supports a single capability, for
 /// example `eth` then the first byte of each message will match
 /// [EthMessageID](reth_eth_wire_types::message::EthMessageID).
+///
+/// ### Sink behavior
+///
+/// The [`Sink`] impl batches writes: queued messages are drained into the underlying sink
+/// unflushed, and the caller is responsible for driving [`Sink::poll_flush`] to deliver them to
+/// the wire. Queued `p2p` control messages (ping/pong/disconnect) are the exception: they force a
+/// flush from [`Sink::poll_ready`]. Keepalive pings are generated in `poll_ready`, so the sink
+/// half must be polled regularly even if the caller has nothing to send.
 #[pin_project]
 #[derive(Debug)]
 pub struct P2PStream<S> {
@@ -295,6 +303,7 @@ impl<S> P2PStream<S> {
     ///
     /// If the provided capacity is `0`.
     pub const fn set_outgoing_message_buffer_capacity(&mut self, capacity: usize) {
+        assert!(capacity != 0);
         self.outgoing_message_buffer_capacity = capacity;
     }
 
@@ -570,43 +579,33 @@ where
     type Error = P2PStreamError;
 
     fn poll_ready(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        let mut should_flush_control = false;
+        let this = self.as_mut().get_mut();
 
-        {
-            let this = self.as_mut().get_mut();
-
-            // Poll the pinger to determine if we should send a ping.
-            match this.pinger.poll_ping(cx) {
-                Poll::Pending => {}
-                Poll::Ready(Ok(PingerEvent::Ping)) => {
-                    this.send_ping();
-                    should_flush_control = true;
-                }
-                Poll::Ready(Ok(PingerEvent::Timeout) | Err(_)) => {
-                    this.start_disconnect(DisconnectReason::PingTimeout)?;
-                    should_flush_control = true;
-                }
+        // Poll the pinger to determine if we should send a ping; `send_ping` and
+        // `start_disconnect` set `needs_control_flush`.
+        match this.pinger.poll_ping(cx) {
+            Poll::Pending => {}
+            Poll::Ready(Ok(PingerEvent::Ping)) => {
+                this.send_ping();
             }
-
-            should_flush_control |= this.needs_control_flush;
+            Poll::Ready(Ok(PingerEvent::Timeout) | Err(_)) => {
+                this.start_disconnect(DisconnectReason::PingTimeout)?;
+            }
         }
 
         // Control messages (ping/pong/disconnect) must reach the wire even if the caller never
         // sends a message, so they force a flush. Subprotocol messages are only drained into the
         // underlying sink (unflushed) once the buffer is full; the caller is responsible for
         // flushing the batch via `poll_flush`.
-        if should_flush_control {
+        if self.needs_control_flush {
             ready!(self.as_mut().poll_flush(cx))?;
         } else if !self.has_outgoing_capacity() {
             ready!(self.as_mut().poll_drain_outgoing(cx))?;
         }
 
-        if self.has_outgoing_capacity() {
-            // still has capacity
-            Poll::Ready(Ok(()))
-        } else {
-            Poll::Pending
-        }
+        // both branches above fully drain the queue, and an empty queue always has capacity
+        debug_assert!(self.has_outgoing_capacity());
+        Poll::Ready(Ok(()))
     }
 
     fn start_send(self: Pin<&mut Self>, item: Bytes) -> Result<(), Self::Error> {

@@ -752,7 +752,7 @@ impl<N: NetworkPrimitives> Future for ActiveSession<N> {
                 }
             }
 
-            // The sink no longer flushes in `poll_ready`, so the batch queued above is flushed
+            // The sink does not flush in `poll_ready`, so the batch queued above is flushed
             // explicitly once per pass. This also resumes a flush that previously returned
             // pending; a no-op if nothing needs flushing.
             match this.conn.poll_flush_unpin(cx) {

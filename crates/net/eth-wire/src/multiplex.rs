@@ -596,7 +596,6 @@ where
             }
 
             let mut conn_ready = true;
-            let mut sent_to_conn = false;
             loop {
                 match this.inner.conn.poll_ready_unpin(cx) {
                     Poll::Ready(Ok(())) => {
@@ -604,7 +603,6 @@ where
                             if let Err(err) = this.inner.conn.start_send_unpin(msg) {
                                 return Poll::Ready(Some(Err(err.into())))
                             }
-                            sent_to_conn = true;
                         } else {
                             break
                         }
@@ -623,15 +621,14 @@ where
                     }
                 }
             }
-            // `poll_ready` no longer flushes the p2p stream, so satellite frames handed to the
-            // connection must be flushed explicitly.
-            if sent_to_conn {
-                match this.inner.conn.poll_flush_unpin(cx) {
-                    Poll::Ready(Ok(())) => {}
-                    Poll::Ready(Err(err)) => return Poll::Ready(Some(Err(err.into()))),
-                    Poll::Pending => {
-                        conn_ready = false;
-                    }
+            // `poll_ready` does not flush the p2p stream, so frames handed to the connection are
+            // flushed explicitly once per pass. This also resumes a flush that previously
+            // returned pending; a no-op if nothing needs flushing.
+            match this.inner.conn.poll_flush_unpin(cx) {
+                Poll::Ready(Ok(())) => {}
+                Poll::Ready(Err(err)) => return Poll::Ready(Some(Err(err.into()))),
+                Poll::Pending => {
+                    conn_ready = false;
                 }
             }
 
