@@ -240,8 +240,9 @@ const fn handler_error_is_invalid_tx(err: &HandlerError) -> bool {
 }
 
 /// Error returned by payload execution over a fallible transaction stream.
+#[cfg(test)]
 #[derive(Debug)]
-pub enum PayloadExecutionError<E, TxErr, ReceiptErr = Infallible> {
+pub(crate) enum PayloadExecutionError<E, TxErr, ReceiptErr = Infallible> {
     /// The payload executor failed while executing the block.
     Execution(E),
     /// The transaction stream failed before yielding the next transaction.
@@ -250,12 +251,14 @@ pub enum PayloadExecutionError<E, TxErr, ReceiptErr = Infallible> {
     Receipt(ReceiptErr),
 }
 
+#[cfg(test)]
 impl<E, TxErr, ReceiptErr> From<E> for PayloadExecutionError<E, TxErr, ReceiptErr> {
     fn from(err: E) -> Self {
         Self::Execution(err)
     }
 }
 
+#[cfg(test)]
 impl<E, TxErr, ReceiptErr> core::fmt::Display for PayloadExecutionError<E, TxErr, ReceiptErr>
 where
     E: core::fmt::Display,
@@ -271,6 +274,7 @@ where
     }
 }
 
+#[cfg(test)]
 impl<E, TxErr, ReceiptErr> core::error::Error for PayloadExecutionError<E, TxErr, ReceiptErr>
 where
     E: core::error::Error + Send + Sync + 'static,
@@ -281,8 +285,9 @@ where
 
 /// Additional block-level execution context.
 #[derive(Debug, Clone, Copy)]
-pub struct BlockExecutionContext<'a> {
+pub(crate) struct BlockExecutionContext<'a> {
     /// Chain id used for transaction validation and the `CHAINID` opcode.
+    #[cfg_attr(not(test), allow(dead_code))]
     pub chain_id: u64,
     /// Pre-block system calls to run before transaction execution.
     pub system_calls: Option<BlockSystemCalls>,
@@ -308,7 +313,7 @@ impl Default for BlockExecutionContext<'_> {
 
 /// Inputs required by Ethereum pre-block system calls.
 #[derive(Debug, Clone, Copy)]
-pub struct BlockSystemCalls {
+pub(crate) struct BlockSystemCalls {
     /// Parent block hash for EIP-2935 history storage.
     pub parent_hash: B256,
     /// Parent beacon block root for EIP-4788 beacon roots.

@@ -233,9 +233,7 @@ mod convert;
 pub use convert::{EthTxEnv, ExecutableRecoveredTx};
 
 mod execution;
-pub use execution::{
-    BlockExecutionContext, BlockSystemCalls, EthExecutionError, PayloadExecutionError,
-};
+pub use execution::EthExecutionError;
 
 mod receipt;
 pub use receipt::RethReceiptBuilder;
