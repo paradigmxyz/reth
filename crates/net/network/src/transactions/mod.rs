@@ -1053,9 +1053,13 @@ where
 
         // Note: Assuming ~random~ order due to random state of the peers map hasher
         let mut num_full_peers = 0;
+        let mut peer_seen_skips = 0;
+        let mut policy_skipped_txs = 0;
+        let mut built_message_txs = 0;
         for (peer_id, peer) in &mut self.peers {
             if !self.policies.propagation_policy().can_propagate(peer) {
                 // skip peers we should not propagate to
+                policy_skipped_txs += to_propagate.len();
                 continue
             }
 
@@ -1082,6 +1086,8 @@ where
                     // Only include the transaction if the peer hasn't seen it yet
                     if peer.seen_transactions.insert(*tx.tx_hash()) {
                         builder.push(tx);
+                    } else {
+                        peer_seen_skips += 1;
                     }
                 }
             }
@@ -1114,6 +1120,7 @@ where
                     );
                 }
 
+                built_message_txs += new_pooled_hashes.len();
                 for hash in new_pooled_hashes.iter_hashes().copied() {
                     propagated.record(hash, PropagateKind::Hash(*peer_id));
                 }
@@ -1127,6 +1134,7 @@ where
 
             // send full transactions, if any
             if let Some(new_full_transactions) = full {
+                built_message_txs += new_full_transactions.len();
                 for hash in new_full_transactions.iter_hashes() {
                     propagated.record(*hash, PropagateKind::Full(*peer_id));
                 }
@@ -1138,6 +1146,11 @@ where
                 self.network.send_broadcast_pool_transactions(*peer_id, new_full_transactions);
             }
         }
+        self.instrumentation.record_propagation_outcome(
+            peer_seen_skips,
+            policy_skipped_txs,
+            built_message_txs,
+        );
 
         // Update propagated transactions metrics
         self.metrics.propagated_transactions.increment(propagated.len() as u64);
@@ -1150,12 +1163,16 @@ where
     /// This fetches all transaction from the pool, including the 4844 blob transactions but
     /// __without__ their sidecar, because 4844 transactions are only ever announced as hashes.
     fn propagate_all(&mut self, hashes: Vec<TxHash>) {
+        let pending_hashes = hashes.len();
         if self.peers.is_empty() {
             // nothing to propagate
+            self.instrumentation.record_propagation_no_peers(pending_hashes);
             return
         }
+        let pooled_txs = self.pool.get_all(hashes);
+        self.instrumentation.record_propagation_pool_lookup(pending_hashes, pooled_txs.len());
         let propagated = self.propagate_transactions(
-            self.pool.get_all(hashes).into_iter().map(PropagateTransaction::pool_tx).collect(),
+            pooled_txs.into_iter().map(PropagateTransaction::pool_tx).collect(),
             PropagationMode::Basic,
         );
 
@@ -2390,6 +2407,13 @@ struct TxManagerInstrumentation {
     pool_import_txs: usize,
     pool_import_txs_dropped_at_capacity: usize,
     max_pending_pool_imports_observed: usize,
+    propagation_pending_hashes: usize,
+    propagation_pool_found_txs: usize,
+    propagation_pool_missing_hashes: usize,
+    propagation_peer_seen_skips: usize,
+    propagation_policy_skipped_txs: usize,
+    propagation_no_peer_txs: usize,
+    propagation_built_message_txs: usize,
 }
 
 impl TxManagerInstrumentation {
@@ -2412,6 +2436,13 @@ impl TxManagerInstrumentation {
             pool_import_txs: 0,
             pool_import_txs_dropped_at_capacity: 0,
             max_pending_pool_imports_observed: 0,
+            propagation_pending_hashes: 0,
+            propagation_pool_found_txs: 0,
+            propagation_pool_missing_hashes: 0,
+            propagation_peer_seen_skips: 0,
+            propagation_policy_skipped_txs: 0,
+            propagation_no_peer_txs: 0,
+            propagation_built_message_txs: 0,
         }
     }
 
@@ -2449,6 +2480,28 @@ impl TxManagerInstrumentation {
 
     fn record_pool_import_txs_dropped_at_capacity(&mut self, count: usize) {
         self.pool_import_txs_dropped_at_capacity += count;
+    }
+
+    fn record_propagation_no_peers(&mut self, pending_hashes: usize) {
+        self.propagation_pending_hashes += pending_hashes;
+        self.propagation_no_peer_txs += pending_hashes;
+    }
+
+    fn record_propagation_pool_lookup(&mut self, pending_hashes: usize, found_txs: usize) {
+        self.propagation_pending_hashes += pending_hashes;
+        self.propagation_pool_found_txs += found_txs;
+        self.propagation_pool_missing_hashes += pending_hashes.saturating_sub(found_txs);
+    }
+
+    fn record_propagation_outcome(
+        &mut self,
+        peer_seen_skips: usize,
+        policy_skipped_txs: usize,
+        built_message_txs: usize,
+    ) {
+        self.propagation_peer_seen_skips += peer_seen_skips;
+        self.propagation_policy_skipped_txs += policy_skipped_txs;
+        self.propagation_built_message_txs += built_message_txs;
     }
 
     fn maybe_log(&mut self, pending_pool_imports: usize, max_pending_pool_imports: usize) {
@@ -2509,6 +2562,13 @@ impl TxManagerInstrumentation {
             pending_pool_imports,
             max_pending_pool_imports,
             max_pending_pool_imports_observed = self.max_pending_pool_imports_observed,
+            propagation_pending_hashes = self.propagation_pending_hashes,
+            propagation_pool_found_txs = self.propagation_pool_found_txs,
+            propagation_pool_missing_hashes = self.propagation_pool_missing_hashes,
+            propagation_peer_seen_skips = self.propagation_peer_seen_skips,
+            propagation_policy_skipped_txs = self.propagation_policy_skipped_txs,
+            propagation_no_peer_txs = self.propagation_no_peer_txs,
+            propagation_built_message_txs = self.propagation_built_message_txs,
             "transaction manager gossip instrumentation"
         );
 
@@ -2523,7 +2583,13 @@ impl TxManagerInstrumentation {
             self.incoming_hash_messages > 0 ||
             self.pool_import_batches > 0 ||
             self.pool_import_txs_dropped_at_capacity > 0 ||
-            self.max_pending_pool_imports_observed > 0
+            self.max_pending_pool_imports_observed > 0 ||
+            self.propagation_pending_hashes > 0 ||
+            self.propagation_pool_found_txs > 0 ||
+            self.propagation_peer_seen_skips > 0 ||
+            self.propagation_policy_skipped_txs > 0 ||
+            self.propagation_no_peer_txs > 0 ||
+            self.propagation_built_message_txs > 0
     }
 
     fn reset(&mut self) {
@@ -2544,6 +2610,13 @@ impl TxManagerInstrumentation {
         self.pool_import_txs = 0;
         self.pool_import_txs_dropped_at_capacity = 0;
         self.max_pending_pool_imports_observed = 0;
+        self.propagation_pending_hashes = 0;
+        self.propagation_pool_found_txs = 0;
+        self.propagation_pool_missing_hashes = 0;
+        self.propagation_peer_seen_skips = 0;
+        self.propagation_policy_skipped_txs = 0;
+        self.propagation_no_peer_txs = 0;
+        self.propagation_built_message_txs = 0;
     }
 }
 
