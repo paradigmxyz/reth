@@ -216,6 +216,19 @@ pub trait BlockExecutorFactory {
         self.create_executor_with_hashed_state_mode(evm, ctx, HashedStateMode::OutputOnly)
     }
 
+    /// Creates a configured block executor that streams hashed state updates to an installed state
+    /// hook without retaining hashed state in the returned execution output.
+    fn create_executor_streaming_hashed_state<'a>(
+        &'a self,
+        evm: Self::Evm<'a>,
+        ctx: Self::ExecutionCtx<'a>,
+    ) -> Self::Executor<'a>
+    where
+        Self: 'a,
+    {
+        self.create_executor_with_hashed_state_mode(evm, ctx, HashedStateMode::StreamOnly)
+    }
+
     /// Creates a configured block executor with an explicit hashed-state output mode.
     fn create_executor_with_hashed_state_mode<'a>(
         &'a self,
