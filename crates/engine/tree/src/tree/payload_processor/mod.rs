@@ -595,9 +595,14 @@ where
         let saved_cache = self.disable_state_cache.not().then(|| self.cache_for(env.parent_hash));
 
         let executed_tx_index = Arc::new(AtomicUsize::new(0));
+        let mut prewarm_evm_env = env.evm_env.clone();
+        prewarm_evm_env.cfg_env.disable_nonce_check = true;
+        prewarm_evm_env.cfg_env.disable_balance_check = true;
+
         // configure prewarming
         let prewarm_ctx = PrewarmContext {
             env,
+            prewarm_evm_env,
             evm_config: self.evm_config.clone(),
             saved_cache: saved_cache.clone(),
             provider: provider_builder,

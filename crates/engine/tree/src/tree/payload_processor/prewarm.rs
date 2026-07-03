@@ -25,7 +25,9 @@ use alloy_primitives::{keccak256, B256, U256};
 use crossbeam_channel::Sender as CrossbeamSender;
 use metrics::{Counter, Gauge, Histogram};
 use rayon::prelude::*;
-use reth_evm::{execute::ExecutableTxFor, ConfigureEvm, Evm, EvmFor, RecoveredTx, SpecFor};
+use reth_evm::{
+    execute::ExecutableTxFor, ConfigureEvm, Evm, EvmEnvFor, EvmFor, RecoveredTx, SpecFor,
+};
 use reth_metrics::Metrics;
 use reth_primitives_traits::{Account, FastInstant as Instant, NodePrimitives};
 use reth_provider::{
@@ -517,6 +519,8 @@ where
 {
     /// The execution environment.
     pub env: ExecutionEnv<Evm>,
+    /// EVM environment prepared for prewarm execution.
+    pub prewarm_evm_env: EvmEnvFor<Evm>,
     /// The EVM configuration.
     pub evm_config: Evm,
     /// The saved cache.
@@ -584,15 +588,7 @@ where
 
         let state_provider = StateProviderDatabase::new(state_provider);
 
-        let mut evm_env = self.env.evm_env.clone();
-
-        // we must disable the nonce check so that we can execute the transaction even if the nonce
-        // doesn't match what's on chain.
-        evm_env.cfg_env.disable_nonce_check = true;
-
-        // disable the balance check so that transactions from senders who were funded by earlier
-        // transactions in the block can still be prewarmed
-        evm_env.cfg_env.disable_balance_check = true;
+        let evm_env = self.prewarm_evm_env.clone();
 
         // create a new executor and disable nonce checks in the env
         let spec_id = *evm_env.spec_id();
