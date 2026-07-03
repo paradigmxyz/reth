@@ -2,6 +2,7 @@
 
 use crate::snap::{SnapClient, SnapPeerRequest};
 use futures::StreamExt;
+use reth_network_api::test_utils::PeersHandle;
 use std::{
     sync::{
         atomic::{AtomicUsize, Ordering},
@@ -38,9 +39,10 @@ impl SnapRouting {
         }
     }
 
-    /// Returns a [`SnapClient`] backed by this routing state.
-    pub(crate) fn client(&self) -> SnapClient {
-        SnapClient::new(self.requests_tx.clone(), Arc::clone(&self.peer_count))
+    /// Returns a [`SnapClient`] backed by this routing state, reporting bad peers to
+    /// `peers_handle`.
+    pub(crate) fn client(&self, peers_handle: PeersHandle) -> SnapClient {
+        SnapClient::new(self.requests_tx.clone(), peers_handle, Arc::clone(&self.peer_count))
     }
 
     /// Polls for the next queued client request.

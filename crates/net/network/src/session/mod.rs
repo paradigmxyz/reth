@@ -27,7 +27,7 @@ use reth_eth_wire::{
 };
 use reth_ethereum_forks::{ForkFilter, ForkId, ForkTransition, Head};
 use reth_metrics::common::mpsc::MeteredPollSender;
-use reth_network_api::{PeerRequest, PeerRequestSender};
+use reth_network_api::{test_utils::PeersHandle, PeerRequest, PeerRequestSender};
 use reth_network_p2p::error::RequestError;
 use reth_network_peers::PeerId;
 use reth_network_types::SessionsConfig;
@@ -191,9 +191,9 @@ impl<N: NetworkPrimitives> SessionManager<N> {
     }
 
     /// Returns a [`SnapClient`] that routes `snap/2` requests through this manager to a
-    /// snap-capable session.
-    pub fn snap_client(&self) -> SnapClient {
-        self.snap.client()
+    /// snap-capable session, reporting bad peers to `peers_handle`.
+    pub fn snap_client(&self, peers_handle: PeersHandle) -> SnapClient {
+        self.snap.client(peers_handle)
     }
 
     /// Routes a `snap/2` request to the first snap-capable session that accepts it.

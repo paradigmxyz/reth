@@ -4,13 +4,14 @@ use reth_eth_wire_types::snap::{
     GetAccountRangeMessage, GetBlockAccessListsMessage, GetByteCodesMessage,
     GetStorageRangesMessage, SnapProtocolMessage,
 };
-use reth_network_api::PeerId;
+use reth_network_api::{test_utils::PeersHandle, PeerId};
 use reth_network_p2p::{
     download::DownloadClient,
     error::{PeerRequestResult, RequestError},
     priority::Priority,
     snap::client::{SnapClient as SnapClientTrait, SnapResponse},
 };
+use reth_network_types::ReputationChangeKind;
 use std::{
     fmt,
     future::Future,
@@ -33,6 +34,8 @@ use tokio::sync::{mpsc, oneshot};
 pub struct SnapClient {
     /// Routes requests to the session manager, which forwards them to a snap-capable session.
     to_manager: mpsc::UnboundedSender<SnapPeerRequest>,
+    /// The handle to the peers manager, used to report peers that served bad responses.
+    peers_handle: PeersHandle,
     /// Number of connected snap-capable peers, maintained by the session manager.
     peer_count: Arc<AtomicUsize>,
 }
@@ -41,9 +44,10 @@ impl SnapClient {
     /// Creates a new client backed by the manager's routing channel and shared peer count.
     pub(crate) const fn new(
         to_manager: mpsc::UnboundedSender<SnapPeerRequest>,
+        peers_handle: PeersHandle,
         peer_count: Arc<AtomicUsize>,
     ) -> Self {
-        Self { to_manager, peer_count }
+        Self { to_manager, peers_handle, peer_count }
     }
 
     /// Routes a request to a snap-capable session via the manager.
@@ -58,8 +62,8 @@ impl SnapClient {
 }
 
 impl DownloadClient for SnapClient {
-    fn report_bad_message(&self, _peer_id: PeerId) {
-        // TODO(snap/2 client): wire peer reputation once the network handle is threaded in.
+    fn report_bad_message(&self, peer_id: PeerId) {
+        self.peers_handle.reputation_change(peer_id, ReputationChangeKind::BadMessage);
     }
 
     fn num_connected_peers(&self) -> usize {
@@ -169,12 +173,20 @@ impl Future for SnapResponseFuture {
 mod tests {
     use super::*;
     use reth_eth_wire_types::{snap::BlockAccessListsMessage, BlockAccessLists};
+    use reth_network_api::test_utils::PeerCommand;
     use reth_network_peers::WithPeerId;
 
     fn client() -> (SnapClient, mpsc::UnboundedReceiver<SnapPeerRequest>, Arc<AtomicUsize>) {
+        let (peers_tx, _) = mpsc::unbounded_channel();
+        client_with_peers_tx(peers_tx)
+    }
+
+    fn client_with_peers_tx(
+        peers_tx: mpsc::UnboundedSender<PeerCommand>,
+    ) -> (SnapClient, mpsc::UnboundedReceiver<SnapPeerRequest>, Arc<AtomicUsize>) {
         let (tx, rx) = mpsc::unbounded_channel();
         let count = Arc::new(AtomicUsize::new(0));
-        (SnapClient::new(tx, Arc::clone(&count)), rx, count)
+        (SnapClient::new(tx, PeersHandle::new(peers_tx), Arc::clone(&count)), rx, count)
     }
 
     fn block_access_lists_request(request_id: u64) -> GetBlockAccessListsMessage {
@@ -239,5 +251,19 @@ mod tests {
         assert_eq!(client.num_connected_peers(), 0);
         count.store(3, Ordering::Relaxed);
         assert_eq!(client.num_connected_peers(), 3);
+    }
+
+    #[tokio::test]
+    async fn bad_message_report_reaches_peers_manager() {
+        let (peers_tx, mut peers_rx) = mpsc::unbounded_channel();
+        let (client, _rx, _count) = client_with_peers_tx(peers_tx);
+
+        let peer = PeerId::random();
+        client.report_bad_message(peer);
+
+        assert!(matches!(
+            peers_rx.recv().await,
+            Some(PeerCommand::ReputationChange(id, ReputationChangeKind::BadMessage)) if id == peer
+        ));
     }
 }
