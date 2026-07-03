@@ -203,7 +203,7 @@ pub trait ConfigureEvm: Clone + Debug + Send + Sync + Unpin {
         Primitives = Self::Primitives,
         Evm<'a> = evm2::Evm<'a, evm2::BaseEvmTypes>,
         EvmTx = <evm2::BaseEvmTypes as evm2::EvmTypesHost>::Tx,
-        Transaction: From<Recovered<TxTy<Self::Primitives>>> + Clone + Send + Sync,
+        Transaction: From<Recovered<TxTy<Self::Primitives>>> + Clone + Send,
     >;
 
     /// Configured block assembler.
