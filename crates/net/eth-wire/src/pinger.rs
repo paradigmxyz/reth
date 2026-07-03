@@ -15,12 +15,20 @@ pub(crate) struct Pinger {
     /// The timer used for the next ping.
     ping_timer: Pin<Box<Sleep>>,
     /// The last task waker registered with the ping timer.
+    ///
+    /// The pinger is polled on every session poll while its timers only rarely fire, and every
+    /// poll of a tokio timer re-registers with the runtime's timer driver. Caching the registered
+    /// waker allows returning `Pending` with a cheap local check instead, as long as the same
+    /// waker is registered and the timer has not elapsed. Cleared whenever the timer is reset or
+    /// fires so the next poll registers with the new deadline.
     ping_waker: Option<Waker>,
     /// The duration between pings.
     ping_interval: Duration,
     /// The timer used to detect a ping timeout.
     timeout_timer: Pin<Box<Sleep>>,
     /// The last task waker registered with the timeout timer.
+    ///
+    /// See [`Self::ping_waker`] for why the waker is cached.
     timeout_waker: Option<Waker>,
     /// The timeout duration for each ping.
     timeout: Duration,
@@ -85,6 +93,8 @@ impl Pinger {
     ) -> Poll<Result<PingerEvent, PingerError>> {
         match self.state() {
             PingState::Ready => {
+                // Skip polling the timer while it already holds an equivalent waker for a live
+                // deadline; the pending registration is guaranteed to wake this task.
                 if self.ping_waker.as_ref().is_some_and(|waker| waker.will_wake(cx.waker())) &&
                     !self.ping_timer.is_elapsed()
                 {
@@ -101,6 +111,7 @@ impl Pinger {
                 self.ping_waker = Some(cx.waker().clone());
             }
             PingState::WaitingForPong => {
+                // Same skip as above: the timeout timer already holds an equivalent waker.
                 if self.timeout_waker.as_ref().is_some_and(|waker| waker.will_wake(cx.waker())) &&
                     !self.timeout_timer.is_elapsed()
                 {
