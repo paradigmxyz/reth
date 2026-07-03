@@ -1427,6 +1427,22 @@ pub trait PoolTransaction:
     /// Note: Implementations should cache this value.
     fn encoded_length(&self) -> usize;
 
+    /// Returns the length of the rlp encoded transaction object, excluding any blob sidecar.
+    ///
+    /// For every transaction except EIP-4844 blob transactions this equals
+    /// [`encoded_length`](Self::encoded_length). Blob transactions ingested from the network or
+    /// RPC cache the *pooled* encoding in [`encoded_length`](Self::encoded_length), which includes
+    /// the blob sidecar. The sidecar is not held in memory (it is cached separately), so pool size
+    /// limits must be measured against the sidecar-free (consensus) encoding, which still accounts
+    /// for the access list, blob versioned hashes, `to`, `value`, etc. that `input().len()` alone
+    /// would miss.
+    ///
+    /// The default returns [`encoded_length`](Self::encoded_length); sidecar-bearing
+    /// implementations override this to exclude the sidecar.
+    fn encoded_length_without_sidecar(&self) -> usize {
+        self.encoded_length()
+    }
+
     /// Ensures that the transaction's code size does not exceed the provided `max_init_code_size`.
     ///
     /// This is specifically relevant for contract creation transactions ([`TxKind::Create`]),
@@ -1620,6 +1636,20 @@ impl PoolTransaction for EthPooledTransaction {
     /// Returns the length of the rlp encoded object
     fn encoded_length(&self) -> usize {
         self.encoded_length
+    }
+
+    /// Returns the length of the rlp encoded object, excluding the blob sidecar.
+    fn encoded_length_without_sidecar(&self) -> usize {
+        // `self.transaction` always holds the consensus (sidecar-free) representation, even for
+        // blob transactions whose sidecar is split out into `blob_sidecar`. The cached
+        // `encoded_length` is the pooled encoding, so for a blob tx it includes the sidecar;
+        // recompute the consensus length in that case. Every other tx already caches a
+        // sidecar-free length.
+        if self.transaction.is_eip4844() {
+            self.transaction.encode_2718_len()
+        } else {
+            self.encoded_length
+        }
     }
 }
 

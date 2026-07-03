@@ -228,6 +228,10 @@ impl<Client, Tx, Evm> EthTransactionValidator<Client, Tx, Evm> {
 
     /// Returns the maximum size in bytes a single transaction can have in order to be accepted into
     /// the pool.
+    ///
+    /// Despite the `input_bytes` name this bounds the whole sidecar-free (consensus) encoded
+    /// length of a transaction, not just its `input` field. For blob transactions the blob sidecar
+    /// is excluded, since it is cached separately rather than kept in memory.
     pub const fn max_tx_input_bytes(&self) -> usize {
         self.max_tx_input_bytes
     }
@@ -482,28 +486,20 @@ where
             return Err(InvalidPoolTransactionError::Eip2681)
         }
 
-        // Reject transactions over defined size to prevent DOS attacks
-        if transaction.is_eip4844() {
-            // Since blob transactions are pulled instead of pushed, and only the consensus data is
-            // kept in memory while the sidecar is cached on disk, there is no critical limit that
-            // should be enforced. Still, enforcing some cap on the input bytes. blob txs also must
-            // be executable right away when they enter the pool.
-            let tx_input_len = transaction.input().len();
-            if tx_input_len > self.max_tx_input_bytes {
-                return Err(InvalidPoolTransactionError::OversizedData {
-                    size: tx_input_len,
-                    limit: self.max_tx_input_bytes,
-                })
-            }
-        } else {
-            // ensure the size of the non-blob transaction
-            let tx_size = transaction.encoded_length();
-            if tx_size > self.max_tx_input_bytes {
-                return Err(InvalidPoolTransactionError::OversizedData {
-                    size: tx_size,
-                    limit: self.max_tx_input_bytes,
-                })
-            }
+        // Reject transactions over the defined size to prevent DOS attacks.
+        //
+        // Blob transactions are pulled rather than pushed, and only their consensus data is kept
+        // in memory while the sidecar is cached separately, so the cap is enforced against the
+        // sidecar-free encoding via `encoded_length_without_sidecar`. Measuring the full consensus
+        // encoding (rather than just `input()`) counts the access list, blob versioned hashes,
+        // etc., closing a griefing vector where a tiny input paired with a large access list would
+        // otherwise slip past the cap. For non-blob transactions this equals `encoded_length`.
+        let tx_size = transaction.encoded_length_without_sidecar();
+        if tx_size > self.max_tx_input_bytes {
+            return Err(InvalidPoolTransactionError::OversizedData {
+                size: tx_size,
+                limit: self.max_tx_input_bytes,
+            })
         }
 
         // Check whether the init code size has been exceeded.
@@ -1257,7 +1253,10 @@ impl<Client, Evm> EthTransactionValidatorBuilder<Client, Evm> {
         self
     }
 
-    /// Sets a max size in bytes of a single transaction allowed into the pool
+    /// Sets a max size in bytes of a single transaction allowed into the pool.
+    ///
+    /// This bounds the sidecar-free (consensus) encoded length of a transaction, not just its
+    /// `input` field; for blob transactions the blob sidecar is excluded.
     pub const fn with_max_tx_input_bytes(mut self, max_tx_input_bytes: usize) -> Self {
         self.max_tx_input_bytes = max_tx_input_bytes;
         self
@@ -1480,12 +1479,15 @@ pub fn ensure_intrinsic_gas<T: EthPoolTransaction>(
 mod tests {
     use super::*;
     use crate::{
-        blobstore::InMemoryBlobStore, error::PoolErrorKind, traits::PoolTransaction,
-        CoinbaseTipOrdering, EthPooledTransaction, Pool, TransactionPool,
+        blobstore::InMemoryBlobStore, error::PoolErrorKind, test_utils::TransactionBuilder,
+        traits::PoolTransaction, CoinbaseTipOrdering, EthPooledTransaction, Pool, TransactionPool,
     };
     use alloy_consensus::Transaction;
-    use alloy_eips::eip2718::Decodable2718;
-    use alloy_primitives::{hex, U256};
+    use alloy_eips::{
+        eip2718::{Decodable2718, Encodable2718},
+        eip2930::{AccessList, AccessListItem},
+    };
+    use alloy_primitives::{hex, Address, B256, U256};
     use reth_ethereum_primitives::PooledTransactionVariant;
     use reth_evm_ethereum::EthEvmConfig;
     use reth_primitives_traits::SignedTransaction;
@@ -1906,6 +1908,46 @@ mod tests {
         let outcome = validator.validate_one(TransactionOrigin::External, transaction);
         let invalid = outcome.as_invalid().unwrap();
         assert!(invalid.is_oversized());
+    }
+
+    #[test]
+    fn blob_tx_size_limit_accounts_for_access_list() {
+        let max_tx_input_bytes = 512;
+        let provider = MockEthProvider::default().with_genesis_block();
+        let validator = EthTransactionValidatorBuilder::new(provider, test_evm_config())
+            .with_max_tx_input_bytes(max_tx_input_bytes)
+            .build(InMemoryBlobStore::default());
+
+        let blob_tx_with_access_list = |storage_keys: usize| {
+            let access_list = AccessList(vec![AccessListItem {
+                address: Address::random(),
+                storage_keys: (0..storage_keys).map(|_| B256::random()).collect(),
+            }]);
+            let tx = TransactionBuilder::default()
+                .access_list(access_list)
+                .into_eip4844()
+                .try_into_recovered()
+                .unwrap();
+            let encoded_length = tx.encode_2718_len();
+            EthPooledTransaction::new(tx, encoded_length)
+        };
+
+        let is_oversized = |tx: &EthPooledTransaction| {
+            matches!(
+                validator.validate_stateless(TransactionOrigin::External, tx),
+                Err(InvalidPoolTransactionError::OversizedData { .. })
+            )
+        };
+
+        // A small access list keeps the consensus encoding under the cap.
+        let small = blob_tx_with_access_list(1);
+        assert!(!is_oversized(&small));
+
+        // A large access list pushes the consensus encoding far over the cap even though the input
+        // is empty, so it must be rejected (the pre-fix check only measured `input().len()`).
+        let large = blob_tx_with_access_list(64);
+        assert!(large.input().is_empty());
+        assert!(is_oversized(&large));
     }
 
     #[tokio::test]
