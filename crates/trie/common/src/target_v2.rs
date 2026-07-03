@@ -69,6 +69,18 @@ impl MultiProofTargetsV2 {
             self.storage_targets.values().map(|slots| slots.len()).sum::<usize>()
     }
 
+    /// Removes duplicate account and storage proof targets.
+    ///
+    /// If the same target key is present with multiple minimum path lengths, the lowest
+    /// `min_len` is retained because it asks for a superset of proof nodes.
+    pub fn deduplicate(&mut self) {
+        deduplicate_proof_targets(&mut self.account_targets);
+
+        for storage_targets in self.storage_targets.values_mut() {
+            deduplicate_proof_targets(storage_targets);
+        }
+    }
+
     /// Returns an iterator that yields chunks of the specified size.
     pub fn chunks(self, chunk_size: usize) -> impl Iterator<Item = Self> {
         ChunkedMultiProofTargetsV2::new(self, chunk_size)
@@ -118,6 +130,30 @@ impl MultiProofTargetsV2 {
 
         (targets, storage_target_count)
     }
+}
+
+fn deduplicate_proof_targets(targets: &mut Vec<ProofV2Target>) {
+    if targets.len() < 2 {
+        return
+    }
+
+    let mut min_lens = B256Map::with_capacity_and_hasher(targets.len(), Default::default());
+    for target in targets.iter() {
+        let min_len = min_lens.entry(target.key()).or_insert(target.min_len);
+        *min_len = (*min_len).min(target.min_len);
+    }
+
+    if min_lens.len() == targets.len() {
+        return
+    }
+
+    targets.retain_mut(|target| match min_lens.remove(&target.key()) {
+        Some(min_len) => {
+            target.min_len = min_len;
+            true
+        }
+        None => false,
+    });
 }
 
 /// An iterator that yields chunks of V2 proof targets of at most `size` account and storage
@@ -244,5 +280,60 @@ impl Iterator for ChunkedMultiProofTargetsV2 {
         } else {
             Some(chunk)
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn deduplicate_account_targets_keeps_lowest_min_len() {
+        let account = B256::from([0x11; 32]);
+        let other = B256::from([0x22; 32]);
+        let mut targets = MultiProofTargetsV2 {
+            account_targets: vec![
+                ProofV2Target::new(account).with_min_len(18),
+                ProofV2Target::new(other).with_min_len(4),
+                ProofV2Target::new(account).with_min_len(7),
+            ],
+            storage_targets: Default::default(),
+        };
+
+        targets.deduplicate();
+
+        assert_eq!(targets.account_targets.len(), 2);
+        assert_eq!(targets.account_targets[0].key(), account);
+        assert_eq!(targets.account_targets[1].key(), other);
+        let account_target =
+            targets.account_targets.iter().find(|target| target.key() == account).unwrap();
+        assert_eq!(account_target.min_len, 7);
+        assert!(targets.account_targets.iter().any(|target| target.key() == other));
+    }
+
+    #[test]
+    fn deduplicate_storage_targets_keeps_lowest_min_len_per_slot() {
+        let address = B256::from([0xAA; 32]);
+        let slot = B256::from([0x33; 32]);
+        let other_slot = B256::from([0x44; 32]);
+        let mut targets = MultiProofTargetsV2::default();
+        targets.storage_targets.insert(
+            address,
+            vec![
+                ProofV2Target::new(slot).with_min_len(32),
+                ProofV2Target::new(other_slot).with_min_len(9),
+                ProofV2Target::new(slot).with_min_len(11),
+            ],
+        );
+
+        targets.deduplicate();
+
+        let storage_targets = targets.storage_targets.get(&address).unwrap();
+        assert_eq!(storage_targets.len(), 2);
+        assert_eq!(storage_targets[0].key(), slot);
+        assert_eq!(storage_targets[1].key(), other_slot);
+        let slot_target = storage_targets.iter().find(|target| target.key() == slot).unwrap();
+        assert_eq!(slot_target.min_len, 11);
+        assert!(storage_targets.iter().any(|target| target.key() == other_slot));
     }
 }
