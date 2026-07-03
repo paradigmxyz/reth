@@ -8951,7 +8951,6 @@ name = "reth-execution-cache"
 version = "2.3.0"
 dependencies = [
  "alloy-primitives",
- "evm2",
  "fixed-cache",
  "metrics",
  "parking_lot",
