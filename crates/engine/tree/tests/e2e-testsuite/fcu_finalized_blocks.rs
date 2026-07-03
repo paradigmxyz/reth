@@ -33,7 +33,7 @@ fn default_engine_tree_setup() -> Setup<EthEngineTypes> {
                 .build(),
         ))
         .with_network(NetworkSetup::single_node())
-        .with_tree_config(TreeConfig::default())
+        .with_tree_config(TreeConfig::default().with_has_enough_parallelism(true))
 }
 
 /// This test:

@@ -117,7 +117,6 @@ use alloy_primitives::{
 use reth_tasks::LazyHandle;
 #[cfg(feature = "trie-debug")]
 use reth_trie_sparse::debug_recorder::TrieDebugRecorder;
-use reth_trie_sparse::SparseTrieRetainedPaths;
 
 use crate::tree::payload_processor::receipt_root_task::{IndexedReceipt, ReceiptRootTaskHandle};
 use alloy_consensus::constants::KECCAK_EMPTY;
@@ -192,7 +191,7 @@ pub struct TreeCtx<'a, N: NodePrimitives> {
     /// Reference to the canonical in-memory state
     canonical_in_memory_state: &'a CanonicalInMemoryState<N>,
     /// Pending sparse trie prune request to consume when spawning a sparse trie task.
-    pending_sparse_trie_prune: &'a mut Option<SparseTrieRetainedPaths>,
+    pending_sparse_trie_prune: &'a mut Option<TriePrefixSetsMut>,
 }
 
 impl<'a, N: NodePrimitives> std::fmt::Debug for TreeCtx<'a, N> {
@@ -210,7 +209,7 @@ impl<'a, N: NodePrimitives> TreeCtx<'a, N> {
     pub const fn new(
         state: &'a mut EngineApiTreeState<N>,
         canonical_in_memory_state: &'a CanonicalInMemoryState<N>,
-        pending_sparse_trie_prune: &'a mut Option<SparseTrieRetainedPaths>,
+        pending_sparse_trie_prune: &'a mut Option<TriePrefixSetsMut>,
     ) -> Self {
         Self { state, canonical_in_memory_state, pending_sparse_trie_prune }
     }
@@ -233,7 +232,7 @@ impl<'a, N: NodePrimitives> TreeCtx<'a, N> {
     }
 
     /// Takes the pending sparse trie prune request, if any.
-    pub const fn take_sparse_trie_prune(&mut self) -> Option<SparseTrieRetainedPaths> {
+    pub const fn take_sparse_trie_prune(&mut self) -> Option<TriePrefixSetsMut> {
         self.pending_sparse_trie_prune.take()
     }
 }
@@ -1790,13 +1789,15 @@ where
     /// Determines the state root computation strategy based on configuration.
     ///
     /// The sparse trie state-root task is the default computed-root path. `state_root_fallback`
-    /// forces serial computation for tests and debugging.
+    /// forces serial computation for tests and debugging, and hosts without enough parallelism
+    /// for the state-root task pipeline also compute the root synchronously, see
+    /// [`TreeConfig::use_state_root_task`].
     fn plan_state_root_computation(&self) -> StateRootStrategy<N> {
         if self.config.skip_state_root() {
             StateRootStrategy::Skipped
         } else if let Some(custom_state_root) = &self.custom_state_root {
             StateRootStrategy::Custom(custom_state_root.clone())
-        } else if self.config.state_root_fallback() {
+        } else if self.config.state_root_fallback() || !self.config.use_state_root_task() {
             StateRootStrategy::Synchronous
         } else {
             StateRootStrategy::StateRootTask

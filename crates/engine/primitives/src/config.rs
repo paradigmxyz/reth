@@ -70,6 +70,23 @@ const fn default_cross_block_cache_size() -> usize {
     }
 }
 
+/// Determines if the host has enough parallelism to run the payload processor.
+///
+/// It requires at least 5 parallel threads:
+/// - Engine in main thread that spawns the state root task.
+/// - Multiproof task in payload processor
+/// - Sparse Trie task in payload processor
+/// - Multiproof computation spawned in payload processor
+/// - Storage root computation spawned in trie parallel proof
+pub fn has_enough_parallelism() -> bool {
+    #[cfg(feature = "std")]
+    {
+        std::thread::available_parallelism().is_ok_and(|num| num.get() >= 5)
+    }
+    #[cfg(not(feature = "std"))]
+    false
+}
+
 /// The configuration of the engine tree.
 #[derive(Debug, Clone)]
 pub struct TreeConfig {
@@ -109,6 +126,16 @@ pub struct TreeConfig {
     state_provider_metrics: bool,
     /// Cross-block cache size in bytes.
     cross_block_cache_size: usize,
+    /// Whether the host has enough parallelism to run the state root task, see
+    /// [`has_enough_parallelism`].
+    ///
+    /// The state root task pipeline occupies at least 5 threads that block on each other (engine
+    /// main thread, multiproof task, sparse trie task, multiproof computation, storage root
+    /// computation). On hosts with fewer parallel threads these components can starve each other
+    /// and stall payload validation entirely, so state-root strategy selection
+    /// ([`Self::use_state_root_task`]) must keep falling back to synchronous state root
+    /// computation when this is `false`.
+    has_enough_parallelism: bool,
     /// Multiproof task chunk size for proof targets.
     multiproof_chunk_size: usize,
     /// Number of reserved CPU cores for non-reth processes
@@ -203,6 +230,7 @@ impl Default for TreeConfig {
             disable_prewarming: false,
             state_provider_metrics: false,
             cross_block_cache_size: DEFAULT_CROSS_BLOCK_CACHE_SIZE,
+            has_enough_parallelism: has_enough_parallelism(),
             multiproof_chunk_size: DEFAULT_MULTIPROOF_TASK_CHUNK_SIZE,
             reserved_cpu_cores: DEFAULT_RESERVED_CPU_CORES,
             precompile_cache_disabled: false,
@@ -245,6 +273,7 @@ impl TreeConfig {
         disable_prewarming: bool,
         state_provider_metrics: bool,
         cross_block_cache_size: usize,
+        has_enough_parallelism: bool,
         multiproof_chunk_size: usize,
         reserved_cpu_cores: usize,
         precompile_cache_disabled: bool,
@@ -277,6 +306,7 @@ impl TreeConfig {
             disable_prewarming,
             state_provider_metrics,
             cross_block_cache_size,
+            has_enough_parallelism,
             multiproof_chunk_size,
             reserved_cpu_cores,
             precompile_cache_disabled,
@@ -503,6 +533,20 @@ impl TreeConfig {
     pub const fn with_cross_block_cache_size(mut self, cross_block_cache_size: usize) -> Self {
         self.cross_block_cache_size = cross_block_cache_size;
         self
+    }
+
+    /// Setter for has enough parallelism.
+    pub const fn with_has_enough_parallelism(mut self, has_enough_parallelism: bool) -> Self {
+        self.has_enough_parallelism = has_enough_parallelism;
+        self
+    }
+
+    /// Whether or not to use the state root task.
+    ///
+    /// The state root task requires at least 5 parallel threads, see
+    /// [`has_enough_parallelism`].
+    pub const fn use_state_root_task(&self) -> bool {
+        self.has_enough_parallelism
     }
 
     /// Setter for state provider metrics.
