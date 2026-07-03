@@ -1,5 +1,8 @@
 use crate::{backfill::stream::SingleBlockStreamItem, StreamBackfillJob};
-use reth_evm::{database::StateProviderDatabase, execute::Executor, ConfigureEvm};
+use reth_evm::{
+    database::StateProviderDatabase, BlockExecutionError, BlockExecutionOutput, ConfigureEvm,
+    Executor,
+};
 use std::{
     collections::BTreeMap,
     ops::RangeInclusive,
@@ -8,7 +11,6 @@ use std::{
 
 use alloy_consensus::BlockHeader;
 use alloy_primitives::BlockNumber;
-use reth_evm::execute::{BlockExecutionError, BlockExecutionOutput};
 use reth_node_api::{Block as _, BlockBody as _, NodePrimitives};
 use reth_primitives_traits::{format_gas_throughput, RecoveredBlock, SignedTransaction};
 use reth_provider::{

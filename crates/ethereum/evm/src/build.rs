@@ -8,8 +8,8 @@ use alloy_primitives::{Bloom, B256};
 use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_ethereum_primitives::TransactionSigned;
 #[cfg(feature = "std")]
-use reth_evm::execute::BlockAssembler;
-use reth_evm::execute::{BlockAssemblerInput, BlockExecutionError, BlockExecutorFactory};
+use reth_evm::BlockAssembler;
+use reth_evm::{BlockAssemblerInput, BlockExecutionError, BlockExecutorFactory};
 use reth_execution_types::BlockExecutionResult;
 use reth_primitives_traits::logs_bloom as calculate_logs_bloom;
 

@@ -52,7 +52,7 @@ use evm2::{
 use reth_ethereum_primitives::Receipt;
 #[cfg(test)]
 use reth_ethereum_primitives::TransactionSigned;
-use reth_evm::execute::{
+use reth_evm::{
     BlockExecutionError, BlockValidationError, CommitChanges, EvmError, InvalidTxError,
 };
 #[cfg(test)]

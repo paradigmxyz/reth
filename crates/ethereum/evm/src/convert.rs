@@ -14,7 +14,7 @@ use evm2::{
 };
 use reth_chainspec::EthereumHardforks;
 use reth_ethereum_primitives::TransactionSigned;
-use reth_evm::execute::{ExecutableTxParts, RecoveredTx};
+use reth_evm::{ExecutableTxParts, RecoveredTx};
 
 /// Map the latest active Ethereum hardfork at `timestamp` or `block_number` to a [`SpecId`].
 pub(crate) fn spec_id_by_timestamp_and_block_number<C>(

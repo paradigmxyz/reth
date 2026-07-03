@@ -32,9 +32,8 @@ use metrics::{Counter, Gauge, Histogram};
 #[cfg(any())]
 use rayon::prelude::*;
 use reth_evm::{
-    database::StateProviderDatabase,
-    execute::{BlockExecutorFactory, ExecutableTxFor},
-    ConfigureEvm, EvmEnv, EvmFor,
+    database::StateProviderDatabase, BlockExecutorFactory, ConfigureEvm, EvmEnv, EvmFor,
+    ExecutableTxFor,
 };
 use reth_execution_types::{
     ExecutionAccountChangeRef, ExecutionStateChangeSink, ExecutionStorageChange,

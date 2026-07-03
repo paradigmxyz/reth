@@ -12,8 +12,7 @@ use reth_engine_primitives::{
 use reth_engine_tree::tree::EngineValidator;
 use reth_errors::{BlockExecutionError, BlockValidationError, RethError, RethResult};
 use reth_evm::{
-    database::StateProviderDatabase,
-    execute::{BlockBuilder, BlockBuilderOutcome, BlockExecutorFactory},
+    database::StateProviderDatabase, BlockBuilder, BlockBuilderOutcome, BlockExecutorFactory,
     ConfigureEvm,
 };
 use reth_payload_primitives::{BuiltPayload, PayloadTypes};

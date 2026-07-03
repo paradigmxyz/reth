@@ -6,9 +6,7 @@ use reth_chainspec::{ChainSpecProvider, EthereumHardforks};
 use reth_config::config::ExecutionConfig;
 use reth_consensus::FullConsensus;
 use reth_db::{static_file::HeaderMask, tables};
-use reth_evm::{
-    database::StateProviderDatabase, execute::Executor, metrics::ExecutorMetrics, ConfigureEvm,
-};
+use reth_evm::{database::StateProviderDatabase, metrics::ExecutorMetrics, ConfigureEvm, Executor};
 use reth_execution_types::{Chain, ExecutionOutcome};
 use reth_exex::{ExExManagerHandle, ExExNotification, ExExNotificationSource};
 use reth_primitives_traits::{format_gas_throughput, BlockBody, NodePrimitives};

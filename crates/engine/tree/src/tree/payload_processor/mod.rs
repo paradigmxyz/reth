@@ -17,8 +17,8 @@ use prewarm::PrewarmMetrics;
 use rayon::prelude::*;
 use reth_chain_state::{PreservedSparseTrie, StateTrieOverlayManager};
 use reth_evm::{
-    execute::{ExecutableTxFor, ExecutableTxParts, WithTxEnv},
-    ConfigureEvm, ConvertTx, EvmEnvFor, ExecutableTxIterator, ExecutableTxTuple, TxEnvFor,
+    ConfigureEvm, ConvertTx, EvmEnvFor, ExecutableTxFor, ExecutableTxIterator, ExecutableTxParts,
+    ExecutableTxTuple, TxEnvFor, WithTxEnv,
 };
 use reth_execution_types::ExecutionState;
 use reth_primitives_traits::{FastInstant as Instant, NodePrimitives};

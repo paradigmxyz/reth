@@ -11,9 +11,9 @@
 
 extern crate alloc;
 
+use crate::execute::IntoTxEnv;
 #[cfg(feature = "std")]
 use crate::execute::{BasicBlockBuilder, BasicBlockExecutor};
-use crate::execute::{BlockExecutionError, IntoTxEnv};
 #[cfg(feature = "std")]
 use alloc::boxed::Box;
 use alloc::string::String;
@@ -44,9 +44,10 @@ pub mod precompile_cache;
 mod aliases;
 pub use aliases::*;
 pub use execute::{
-    BlockAssembler, BlockAssemblerInput, BlockBuilder, BlockBuilderOutcome, BlockExecutor,
-    BlockExecutorFactory, CommitChanges, ExecutableTxFor, ExecutableTxParts, Executor, ExecutorTx,
-    GasOutput, RecoveredTx, WithTxEnv,
+    BlockAssembler, BlockAssemblerInput, BlockBuilder, BlockBuilderOutcome, BlockExecutionError,
+    BlockExecutionOutput, BlockExecutor, BlockExecutorFactory, BlockValidationError, CommitChanges,
+    EvmError, ExecutableTxFor, ExecutableTxParts, Executor, ExecutorTx, GasOutput,
+    InternalBlockExecutionError, InvalidTxError, RecoveredTx, WithTxEnv,
 };
 pub use reth_execution_types::ExecutionState;
 

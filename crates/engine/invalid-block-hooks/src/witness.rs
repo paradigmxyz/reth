@@ -3,7 +3,7 @@ use alloy_primitives::{keccak256, Address, Bytes, B256, U256};
 use alloy_rpc_types_debug::ExecutionWitness;
 use pretty_assertions::Comparison;
 use reth_engine_primitives::InvalidBlockHook;
-use reth_evm::{database::StateProviderDatabase, execute::Executor, ConfigureEvm};
+use reth_evm::{database::StateProviderDatabase, ConfigureEvm, Executor};
 use reth_execution_types::{ExecutionAccountInfo, ExecutionState};
 use reth_primitives_traits::{NodePrimitives, RecoveredBlock, SealedHeader};
 use reth_provider::{BlockExecutionOutput, StateProvider, StateProviderFactory};

@@ -179,8 +179,7 @@ impl<C, EvmFactory> EthBlockExecutorFactory<C, EvmFactory> {
     }
 }
 
-impl<C, EvmFactory> reth_evm::execute::BlockExecutorFactory
-    for EthBlockExecutorFactory<C, EvmFactory>
+impl<C, EvmFactory> reth_evm::BlockExecutorFactory for EthBlockExecutorFactory<C, EvmFactory>
 where
     C: EthChainSpec<Header = Header>,
     EvmFactory: 'static,

@@ -14,7 +14,7 @@ use alloy_eips::{eip2718::Typed2718, eip4895::Withdrawal};
 use alloy_primitives::{Address, B256};
 use evm2::{evm::BlockStateAccumulator, interpreter::Host, BaseEvmTypes, Evm, TxResult};
 use reth_ethereum_primitives::{EthPrimitives, Receipt};
-use reth_evm::execute::{
+use reth_evm::{
     BlockExecutionError, BlockExecutionOutput, BlockExecutor, CommitChanges, GasOutput,
 };
 use reth_execution_types::HashedPostStateSink;

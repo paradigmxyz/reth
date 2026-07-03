@@ -3,7 +3,7 @@
 use alloy_consensus::BlockHeader;
 use reth_consensus::ConsensusError;
 use reth_errors::{BlockExecutionError, BlockValidationError, ProviderError};
-use reth_evm::execute::InternalBlockExecutionError;
+use reth_evm::InternalBlockExecutionError;
 use reth_payload_primitives::NewPayloadError;
 use reth_primitives_traits::{Block, BlockBody, SealedBlock};
 
