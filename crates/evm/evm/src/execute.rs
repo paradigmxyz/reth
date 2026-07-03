@@ -634,7 +634,7 @@ pub trait Executor: Sized {
     /// The primitive types used by the executor.
     type Primitives: NodePrimitives;
     /// The error type returned by the executor.
-    type Error: core::error::Error + Send + Sync + 'static;
+    type Error;
 
     /// Executes a single block and returns [`BlockExecutionResult`], without the state changes.
     fn execute_one(
