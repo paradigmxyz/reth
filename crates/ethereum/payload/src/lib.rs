@@ -22,10 +22,7 @@ use reth_errors::ConsensusError;
 use reth_ethereum_primitives::{EthPrimitives, TransactionSigned};
 use reth_evm::{
     database::StateProviderDatabase,
-    execute::{
-        BlockBuilder, BlockBuilderOutcome, BlockExecutionError, BlockValidationError,
-        HashedStateMode,
-    },
+    execute::{BlockBuilder, BlockBuilderOutcome, BlockExecutionError, BlockValidationError},
     ConfigureEvm, NextBlockEnvAttributes,
 };
 use reth_evm_ethereum::EthEvmConfig;
@@ -219,11 +216,6 @@ where
     let cached_db_handle = cached_db.clone();
     let evm_config = evm_config.with_jit_support();
     let stream_state_updates = trie_handle.is_some() && !skip_state_root;
-    let hashed_state_mode = if stream_state_updates {
-        HashedStateMode::OutputAndStream
-    } else {
-        HashedStateMode::OutputOnly
-    };
     let next_block_env_attributes = NextBlockEnvAttributes {
         timestamp: attributes.timestamp(),
         suggested_fee_recipient: attributes.suggested_fee_recipient,
@@ -235,12 +227,7 @@ where
         slot_number: attributes.slot_number(),
     };
     let mut builder = evm_config
-        .builder_for_next_block_with_hashed_state_mode(
-            cached_db,
-            &parent_header,
-            next_block_env_attributes,
-            hashed_state_mode,
-        )
+        .builder_for_next_block(cached_db, &parent_header, next_block_env_attributes)
         .map_err(PayloadBuilderError::other)?;
 
     let use_sparse_trie =

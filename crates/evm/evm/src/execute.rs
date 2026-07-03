@@ -436,33 +436,8 @@ where
         parent: &'a SealedHeader<HeaderTy<N>>,
         ctx: F::ExecutionCtx<'a>,
     ) -> Self {
-        Self::new_with_hashed_state_mode(
-            executor_factory,
-            assembler,
-            evm,
-            evm_env,
-            parent,
-            ctx,
-            HashedStateMode::OutputOnly,
-        )
-    }
-
-    /// Creates a block builder with an explicit hashed-state output mode.
-    pub fn new_with_hashed_state_mode(
-        executor_factory: &'a F,
-        assembler: &'a Assembler,
-        evm: F::Evm<'a>,
-        evm_env: F::EvmEnv,
-        parent: &'a SealedHeader<HeaderTy<N>>,
-        ctx: F::ExecutionCtx<'a>,
-        hashed_state_mode: HashedStateMode,
-    ) -> Self {
         Self {
-            executor: executor_factory.create_executor_with_hashed_state_mode(
-                evm,
-                ctx.clone(),
-                hashed_state_mode,
-            ),
+            executor: executor_factory.create_executor(evm, ctx.clone()),
             evm_env,
             transactions: Vec::new(),
             senders: Vec::new(),

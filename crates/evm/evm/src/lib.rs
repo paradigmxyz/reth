@@ -12,8 +12,6 @@
 extern crate alloc;
 
 #[cfg(feature = "std")]
-use crate::execute::HashedStateMode;
-#[cfg(feature = "std")]
 use crate::execute::{BasicBlockBuilder, BasicBlockExecutor, BlockBuilder, BlockExecutorFactory};
 use crate::execute::{BlockExecutionError, Executor, IntoTxEnv};
 #[cfg(feature = "std")]
@@ -397,37 +395,13 @@ pub trait ConfigureEvm: Clone + Debug + Send + Sync + Unpin {
     where
         Self: 'a,
     {
-        self.create_block_builder_with_hashed_state_mode(
-            evm,
-            evm_env,
-            parent,
-            ctx,
-            HashedStateMode::OutputOnly,
-        )
-    }
-
-    /// Creates a block builder for a configured EVM and execution context with an explicit
-    /// hashed-state output mode.
-    #[cfg(feature = "std")]
-    fn create_block_builder_with_hashed_state_mode<'a>(
-        &'a self,
-        evm: EvmFor<'a, Self>,
-        evm_env: EvmEnvFor<Self>,
-        parent: &'a SealedHeader<HeaderTy<Self::Primitives>>,
-        ctx: ExecutionCtxFor<'a, Self>,
-        hashed_state_mode: HashedStateMode,
-    ) -> impl BlockBuilder<Primitives = Self::Primitives, Executor = crate::BlockExecutorFor<'a, Self>>
-    where
-        Self: 'a,
-    {
-        BasicBlockBuilder::new_with_hashed_state_mode(
+        BasicBlockBuilder::new(
             self.block_executor_factory(),
             self.block_assembler(),
             evm,
             evm_env,
             parent,
             ctx,
-            hashed_state_mode,
         )
     }
 
@@ -450,34 +424,6 @@ pub trait ConfigureEvm: Clone + Debug + Send + Sync + Unpin {
         let evm = self.evm_with_env(db, evm_env.clone());
         let ctx = self.context_for_next_block(parent, attributes)?;
         Ok(self.create_block_builder(evm, evm_env, parent, ctx))
-    }
-
-    /// Creates a block builder for `parent + 1` with an explicit hashed-state output mode.
-    #[cfg(feature = "std")]
-    fn builder_for_next_block_with_hashed_state_mode<'a, DB>(
-        &'a self,
-        db: DB,
-        parent: &'a SealedHeader<HeaderTy<Self::Primitives>>,
-        attributes: Self::NextBlockEnvCtx,
-        hashed_state_mode: HashedStateMode,
-    ) -> Result<
-        impl BlockBuilder<Primitives = Self::Primitives, Executor = crate::BlockExecutorFor<'a, Self>>,
-        Self::Error,
-    >
-    where
-        Self: 'a,
-        DB: Database + 'a,
-    {
-        let evm_env = self.next_evm_env(parent, &attributes)?;
-        let evm = self.evm_with_env(db, evm_env.clone());
-        let ctx = self.context_for_next_block(parent, attributes)?;
-        Ok(self.create_block_builder_with_hashed_state_mode(
-            evm,
-            evm_env,
-            parent,
-            ctx,
-            hashed_state_mode,
-        ))
     }
 
     /// Creates an EVM instance for single-transaction execution with an inspector.

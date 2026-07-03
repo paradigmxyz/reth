@@ -114,8 +114,8 @@ impl<'a> BlockExecutor for EthBlockExecutor<'a> {
     }
 
     fn set_state_hook(&mut self, hook: impl FnMut(HashedPostState) + Send + 'static) -> bool {
-        if !self.hashed_state_mode.stream() {
-            return false
+        if self.hashed_state_mode == HashedStateMode::OutputOnly {
+            self.hashed_state_mode = HashedStateMode::OutputAndStream;
         }
 
         self.hashed_state_update_hook = Some(Box::new(hook));
