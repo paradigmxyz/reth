@@ -1941,20 +1941,25 @@ where
         let bytecodes_changed =
             output.state.state.values().filter(|acc| is_new_deployment(acc)).count();
 
-        // Unique new code hashes to count actual bytes persisted (deduplicated)
-        let unique_new_code_hashes: B256Set = output
-            .state
-            .state
-            .values()
-            .filter(|acc| is_new_deployment(acc))
-            .filter_map(|acc| acc.info.as_ref().map(|info| info.code_hash))
-            .collect();
-        let code_bytes_written: usize = unique_new_code_hashes
-            .iter()
-            .filter_map(|hash| {
-                output.state.contracts.get(hash).map(|bytecode| bytecode.original_bytes().len())
-            })
-            .sum();
+        // Unique new code hashes to count actual bytes persisted (deduplicated).
+        let code_bytes_written: usize = if output.state.contracts.is_empty() {
+            0
+        } else {
+            let unique_new_code_hashes: B256Set = output
+                .state
+                .state
+                .values()
+                .filter(|acc| is_new_deployment(acc))
+                .filter_map(|acc| acc.info.as_ref().map(|info| info.code_hash))
+                .collect();
+
+            unique_new_code_hashes
+                .iter()
+                .filter_map(|hash| {
+                    output.state.contracts.get(hash).map(|bytecode| bytecode.original_bytes().len())
+                })
+                .sum()
+        };
 
         // Total time spent fetching state during execution
         let state_read_duration = provider_stats.total_account_fetch_latency() +
@@ -1963,8 +1968,11 @@ where
 
         // EIP-7702 delegation tracking from bytecode changes
         // Count new EIP-7702 bytecodes as delegations set
-        let eip7702_delegations_set =
-            output.state.contracts.values().filter(|bytecode| bytecode.is_eip7702()).count();
+        let eip7702_delegations_set = if output.state.contracts.is_empty() {
+            0
+        } else {
+            output.state.contracts.values().filter(|bytecode| bytecode.is_eip7702()).count()
+        };
         // Delegations cleared: accounts where bytecode changed FROM EIP-7702 TO empty
         // This detects when an EIP-7702 delegation is removed by setting code to empty
         // Note: Clearing a delegation does NOT destroy the account - it just empties the
