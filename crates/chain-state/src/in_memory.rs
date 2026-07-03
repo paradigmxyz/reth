@@ -17,10 +17,7 @@ use reth_primitives_traits::{
     SignedTransaction,
 };
 use reth_storage_api::StateProviderBox;
-use reth_trie::{
-    updates::TrieUpdatesSorted, HashedPostStateSorted, LazyTrieData, SortedTrieData,
-    TrieInputSorted,
-};
+use reth_trie::{updates::TrieUpdatesSorted, HashedPostStateSorted, LazyTrieData, SortedTrieData};
 use std::{collections::BTreeMap, sync::Arc, time::Instant};
 use tokio::sync::{broadcast, watch};
 
@@ -887,20 +884,6 @@ impl<N: NodePrimitives> ExecutedBlock<N> {
     #[inline]
     pub fn trie_updates(&self) -> Arc<TrieUpdatesSorted> {
         self.trie_data().trie_updates
-    }
-
-    /// Returns the trie input anchored to the persisted ancestor.
-    ///
-    /// May compute trie data synchronously if the deferred task hasn't completed.
-    #[inline]
-    pub fn trie_input(&self) -> Option<Arc<TrieInputSorted>> {
-        self.trie_data().trie_input().cloned()
-    }
-
-    /// Returns the anchor hash of the trie input, if present.
-    #[inline]
-    pub fn anchor_hash(&self) -> Option<B256> {
-        self.trie_data().anchor_hash()
     }
 
     /// Returns a [`BlockNumber`] of the block.

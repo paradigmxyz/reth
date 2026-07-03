@@ -113,7 +113,6 @@ pub(super) struct SparseTrieCacheTask<A = ArenaParallelSparseTrie, S = ArenaPara
     /// final [`HashedPostState`] and share it with main engine thread without requiring any extra
     /// hashing work.
     final_hashed_state: HashedPostState,
-
     /// Metrics for the sparse trie.
     metrics: MultiProofTaskMetrics,
 }

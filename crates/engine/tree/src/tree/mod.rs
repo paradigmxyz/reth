@@ -1508,19 +1508,7 @@ where
         );
         self.changeset_cache.evict(eviction_threshold);
 
-        // Invalidate cached overlay since the anchor has changed.
-        self.state.tree_state.invalidate_cached_overlay();
-
         self.on_new_persisted_block(last_state_trie_persisted_block)?;
-
-        // Re-prepare overlay for the current canonical head with the new anchor.
-        // Spawn a background task to trigger computation so it's ready when the next payload
-        // arrives.
-        if let Some(prepared) = self.state.tree_state.prepare_canonical_overlay() {
-            self.runtime.spawn_blocking_named("prepare-overlay", move || {
-                let _ = prepared.overlay.get(prepared.anchor_hash);
-            });
-        }
 
         self.purge_timing_stats(last_block_number, commit_duration);
 
@@ -1596,9 +1584,7 @@ where
                         debug!(target: "engine::tree", block=?block_num_hash, "inserting already executed block");
                         let now = Instant::now();
 
-                        let block = match self
-                            .payload_validator
-                            .on_inserted_executed_block(payload, &self.state)
+                        let block = match self.payload_validator.on_inserted_executed_block(payload)
                         {
                             Ok(block) => block,
                             Err(err) => {
@@ -2283,9 +2269,7 @@ where
 
         let sorted_hashed_state = Arc::new(hashed_state.into_sorted());
         let sorted_trie_updates = Arc::new(trie_updates);
-        // Skip building trie input and anchor for DB-loaded blocks.
-        let trie_data =
-            ComputedTrieData::without_trie_input(sorted_hashed_state, sorted_trie_updates);
+        let trie_data = ComputedTrieData::new(sorted_hashed_state, sorted_trie_updates);
 
         let execution_output = Arc::new(BlockExecutionOutput {
             state: execution_output.bundle,
