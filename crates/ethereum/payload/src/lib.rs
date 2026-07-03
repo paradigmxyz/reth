@@ -23,8 +23,8 @@ use reth_ethereum_primitives::{EthPrimitives, TransactionSigned};
 use reth_evm::{
     database::StateProviderDatabase,
     execute::{
-        BlockBuilder, BlockBuilderOutcome, BlockExecutionError, BlockValidationError,
-        HashedStateMode,
+        BasicBlockBuilder, BlockBuilder, BlockBuilderOutcome, BlockExecutionError,
+        BlockValidationError, HashedStateMode,
     },
     ConfigureEvm, NextBlockEnvAttributes,
 };
@@ -241,8 +241,15 @@ where
     let ctx = evm_config
         .context_for_next_block(&parent_header, next_block_env_attributes)
         .map_err(PayloadBuilderError::other)?;
-    let mut builder =
-        evm_config.create_block_builder(evm, evm_env, &parent_header, ctx, hashed_state_mode);
+    let mut builder = BasicBlockBuilder::new_with_hashed_state_mode(
+        evm_config.block_executor_factory(),
+        evm_config.block_assembler(),
+        evm,
+        evm_env,
+        &parent_header,
+        ctx,
+        hashed_state_mode,
+    );
 
     let use_sparse_trie =
         if let Some(handle) = trie_handle.as_ref().filter(|_| stream_state_updates) {

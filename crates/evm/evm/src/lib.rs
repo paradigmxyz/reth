@@ -398,25 +398,18 @@ pub trait ConfigureEvm: Clone + Debug + Send + Sync + Unpin {
         evm_env: EvmEnvFor<Self>,
         parent: &'a SealedHeader<HeaderTy<Self::Primitives>>,
         ctx: ExecutionCtxFor<'a, Self>,
-        hashed_state_mode: HashedStateMode,
     ) -> impl BlockBuilder<Primitives = Self::Primitives, Executor = crate::BlockExecutorFor<'a, Self>>
     where
         Self: 'a,
     {
-        BasicBlockBuilder {
-            executor: self.block_executor_factory().create_executor(
-                evm,
-                ctx.clone(),
-                hashed_state_mode,
-            ),
+        BasicBlockBuilder::new(
+            self.block_executor_factory(),
+            self.block_assembler(),
+            evm,
             evm_env,
-            transactions: Vec::new(),
-            senders: Vec::new(),
-            ctx,
             parent,
-            assembler: self.block_assembler(),
-            on_hashed_state_update: Default::default(),
-        }
+            ctx,
+        )
     }
 
     /// Creates a block builder for `parent + 1`.
@@ -438,7 +431,7 @@ pub trait ConfigureEvm: Clone + Debug + Send + Sync + Unpin {
         let evm_env = self.next_evm_env(parent, &attributes)?;
         let evm = self.evm_with_env(db, evm_env.clone());
         let ctx = self.context_for_next_block(parent, attributes)?;
-        Ok(self.create_block_builder(evm, evm_env, parent, ctx, HashedStateMode::OutputOnly))
+        Ok(self.create_block_builder(evm, evm_env, parent, ctx))
     }
 
     /// Creates an EVM instance for single-transaction execution with an inspector.
