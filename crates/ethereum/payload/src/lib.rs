@@ -23,7 +23,7 @@ use reth_ethereum_primitives::{EthPrimitives, TransactionSigned};
 use reth_evm::{
     database::StateProviderDatabase,
     execute::{BlockBuilder, BlockBuilderOutcome, BlockExecutionError, BlockValidationError},
-    ConfigureEvm, NextBlockEnvAttributes,
+    ConfigureEvm, EvmEnv, NextBlockEnvAttributes,
 };
 use reth_evm_ethereum::EthEvmConfig;
 use reth_execution_cache::{CachedStateMetrics, CachedStateMetricsSource, CachedStateProvider};
@@ -79,8 +79,7 @@ impl<Pool, Client, EvmConfig> EthereumPayloadBuilder<Pool, Client, EvmConfig> {
 // Default implementation of [PayloadBuilder] for unit type
 impl<Pool, Client, EvmConfig> PayloadBuilder for EthereumPayloadBuilder<Pool, Client, EvmConfig>
 where
-    EvmConfig: ConfigureEvm<Primitives = EthPrimitives, NextBlockEnvCtx = NextBlockEnvAttributes>
-        + 'static,
+    EvmConfig: ConfigureEvm<Primitives = EthPrimitives, NextBlockEnvCtx = NextBlockEnvAttributes>,
     Client: StateProviderFactory
         + ChainSpecProvider<ChainSpec: EthereumHardforks + EthChainSpec<Header = Header>>
         + Clone,
@@ -155,8 +154,7 @@ pub fn default_ethereum_payload<EvmConfig, Client, Pool, F>(
     best_txs: F,
 ) -> Result<BuildOutcome<EthBuiltPayload>, PayloadBuilderError>
 where
-    EvmConfig: ConfigureEvm<Primitives = EthPrimitives, NextBlockEnvCtx = NextBlockEnvAttributes>
-        + 'static,
+    EvmConfig: ConfigureEvm<Primitives = EthPrimitives, NextBlockEnvCtx = NextBlockEnvAttributes>,
     Client: StateProviderFactory
         + ChainSpecProvider<ChainSpec: EthereumHardforks + EthChainSpec<Header = Header>>,
     Pool: TransactionPool<Transaction: PoolTransaction<Consensus = TransactionSigned>>,
@@ -191,17 +189,7 @@ where
     let chain_spec = client.chain_spec();
     let gas_limit = builder_config
         .gas_limit_with_target(parent_header.gas_limit, attributes.target_gas_limit());
-    let base_fee = chain_spec
-        .next_block_base_fee(parent_header.as_ref(), attributes.timestamp())
-        .unwrap_or_default();
     let blob_params = chain_spec.blob_params_at_timestamp(attributes.timestamp());
-    let excess_blob_gas = blob_params.map(|params| {
-        params.next_block_excess_blob_gas_osaka(
-            parent_header.excess_blob_gas.unwrap_or(0),
-            parent_header.blob_gas_used.unwrap_or(0),
-            parent_header.base_fee_per_gas.unwrap_or(0),
-        )
-    });
 
     debug!(
         target: "payload_builder",
@@ -226,9 +214,16 @@ where
         extra_data: builder_config.extra_data.clone(),
         slot_number: attributes.slot_number(),
     };
-    let mut builder = evm_config
-        .builder_for_next_block(cached_db, &parent_header, next_block_env_attributes)
+    let evm_env = evm_config
+        .next_evm_env(&parent_header, &next_block_env_attributes)
         .map_err(PayloadBuilderError::other)?;
+    let base_fee = evm_env.block_base_fee();
+    let blob_fee = blob_params.as_ref().map(|_| evm_env.block_blob_base_fee());
+    let evm = evm_config.evm_with_env(cached_db, evm_env.clone());
+    let execution_ctx = evm_config
+        .context_for_next_block(&parent_header, next_block_env_attributes)
+        .map_err(PayloadBuilderError::other)?;
+    let mut builder = evm_config.create_block_builder(evm, evm_env, &parent_header, execution_ctx);
 
     let use_sparse_trie =
         if let Some(handle) = trie_handle.as_ref().filter(|_| stream_state_updates) {
@@ -243,10 +238,7 @@ where
         PayloadBuilderError::Internal(err.into())
     })?;
 
-    let mut best_txs = best_txs(BestTransactionsAttributes::new(
-        base_fee,
-        blob_params.and_then(|params| excess_blob_gas.map(|gas| params.calc_blob_fee(gas) as u64)),
-    ));
+    let mut best_txs = best_txs(BestTransactionsAttributes::new(base_fee, blob_fee));
     let mut total_fees = U256::ZERO;
     let mut cumulative_tx_gas_used = 0u64;
     let mut blob_sidecars = BlobSidecars::Empty;
