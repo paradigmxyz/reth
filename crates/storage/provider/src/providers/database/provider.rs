@@ -2428,6 +2428,76 @@ impl<TX: DbTx + 'static, N: NodeTypes> StorageReader for DatabaseProvider<TX, N>
     }
 }
 
+impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> DatabaseProvider<TX, N> {
+    fn write_state_changes_with_settings(
+        &self,
+        mut changes: StateChangeset,
+        storage_settings: StorageSettings,
+    ) -> ProviderResult<()> {
+        // sort all entries so they can be written to database in more performant way.
+        // and take smaller memory footprint.
+        changes.accounts.par_sort_by_key(|a| a.0);
+        changes.storage.par_sort_by_key(|a| a.address);
+        changes.contracts.par_sort_by_key(|a| a.0);
+
+        if !storage_settings.use_hashed_state() {
+            // Write new account state
+            tracing::trace!(len = changes.accounts.len(), "Writing new account state");
+            let mut accounts_cursor = self.tx_ref().cursor_write::<tables::PlainAccountState>()?;
+            // write account to database.
+            for (address, account) in changes.accounts {
+                if let Some(account) = account {
+                    tracing::trace!(?address, "Updating plain state account");
+                    accounts_cursor.upsert(address, &account.into())?;
+                } else if accounts_cursor.seek_exact(address)?.is_some() {
+                    tracing::trace!(?address, "Deleting plain state account");
+                    accounts_cursor.delete_current()?;
+                }
+            }
+
+            // Write new storage state and wipe storage if needed.
+            tracing::trace!(len = changes.storage.len(), "Writing new storage state");
+            let mut storages_cursor =
+                self.tx_ref().cursor_dup_write::<tables::PlainStorageState>()?;
+            for PlainStorageChangeset { address, wipe_storage, storage } in changes.storage {
+                // Wiping of storage.
+                if wipe_storage && storages_cursor.seek_exact(address)?.is_some() {
+                    storages_cursor.delete_current_duplicates()?;
+                }
+                // cast storages to B256.
+                let mut storage = storage
+                    .into_iter()
+                    .map(|(k, value)| StorageEntry { key: k.into(), value })
+                    .collect::<Vec<_>>();
+                // sort storage slots by key.
+                storage.par_sort_unstable_by_key(|a| a.key);
+
+                for entry in storage {
+                    tracing::trace!(?address, ?entry.key, "Updating plain state storage");
+                    if let Some(db_entry) =
+                        storages_cursor.seek_by_key_subkey(address, entry.key)? &&
+                        db_entry.key == entry.key
+                    {
+                        storages_cursor.delete_current()?;
+                    }
+
+                    if !entry.value.is_zero() {
+                        storages_cursor.upsert(address, &entry)?;
+                    }
+                }
+            }
+        }
+
+        // Write bytecode
+        tracing::trace!(len = changes.contracts.len(), "Writing bytecodes");
+        self.write_bytecodes(
+            changes.contracts.into_iter().map(|(hash, bytecode)| (hash, Bytecode(bytecode))),
+        )?;
+
+        Ok(())
+    }
+}
+
 impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
     for DatabaseProvider<TX, N>
 {
@@ -2441,8 +2511,9 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
         config: StateWriteConfig,
     ) -> ProviderResult<()> {
         let execution_outcome = execution_outcome.into();
+        let storage_settings = self.cached_storage_settings();
 
-        if self.cached_storage_settings().use_hashed_state() &&
+        if storage_settings.use_hashed_state() &&
             !config.write_receipts &&
             !config.write_account_changesets &&
             !config.write_storage_changesets
@@ -2461,7 +2532,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
             execution_outcome.state().to_plain_state_and_reverts(is_value_known);
 
         self.write_state_reverts(reverts, first_block, config)?;
-        self.write_state_changes(plain_state)?;
+        self.write_state_changes_with_settings(plain_state, storage_settings)?;
 
         if !config.write_receipts {
             return Ok(());
@@ -2631,68 +2702,8 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
         Ok(())
     }
 
-    fn write_state_changes(&self, mut changes: StateChangeset) -> ProviderResult<()> {
-        // sort all entries so they can be written to database in more performant way.
-        // and take smaller memory footprint.
-        changes.accounts.par_sort_by_key(|a| a.0);
-        changes.storage.par_sort_by_key(|a| a.address);
-        changes.contracts.par_sort_by_key(|a| a.0);
-
-        if !self.cached_storage_settings().use_hashed_state() {
-            // Write new account state
-            tracing::trace!(len = changes.accounts.len(), "Writing new account state");
-            let mut accounts_cursor = self.tx_ref().cursor_write::<tables::PlainAccountState>()?;
-            // write account to database.
-            for (address, account) in changes.accounts {
-                if let Some(account) = account {
-                    tracing::trace!(?address, "Updating plain state account");
-                    accounts_cursor.upsert(address, &account.into())?;
-                } else if accounts_cursor.seek_exact(address)?.is_some() {
-                    tracing::trace!(?address, "Deleting plain state account");
-                    accounts_cursor.delete_current()?;
-                }
-            }
-
-            // Write new storage state and wipe storage if needed.
-            tracing::trace!(len = changes.storage.len(), "Writing new storage state");
-            let mut storages_cursor =
-                self.tx_ref().cursor_dup_write::<tables::PlainStorageState>()?;
-            for PlainStorageChangeset { address, wipe_storage, storage } in changes.storage {
-                // Wiping of storage.
-                if wipe_storage && storages_cursor.seek_exact(address)?.is_some() {
-                    storages_cursor.delete_current_duplicates()?;
-                }
-                // cast storages to B256.
-                let mut storage = storage
-                    .into_iter()
-                    .map(|(k, value)| StorageEntry { key: k.into(), value })
-                    .collect::<Vec<_>>();
-                // sort storage slots by key.
-                storage.par_sort_unstable_by_key(|a| a.key);
-
-                for entry in storage {
-                    tracing::trace!(?address, ?entry.key, "Updating plain state storage");
-                    if let Some(db_entry) =
-                        storages_cursor.seek_by_key_subkey(address, entry.key)? &&
-                        db_entry.key == entry.key
-                    {
-                        storages_cursor.delete_current()?;
-                    }
-
-                    if !entry.value.is_zero() {
-                        storages_cursor.upsert(address, &entry)?;
-                    }
-                }
-            }
-        }
-
-        // Write bytecode
-        tracing::trace!(len = changes.contracts.len(), "Writing bytecodes");
-        self.write_bytecodes(
-            changes.contracts.into_iter().map(|(hash, bytecode)| (hash, Bytecode(bytecode))),
-        )?;
-
-        Ok(())
+    fn write_state_changes(&self, changes: StateChangeset) -> ProviderResult<()> {
+        self.write_state_changes_with_settings(changes, self.cached_storage_settings())
     }
 
     #[instrument(level = "debug", target = "providers::db", skip_all)]
