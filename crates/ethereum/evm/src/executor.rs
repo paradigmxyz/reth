@@ -17,7 +17,7 @@ use reth_ethereum_primitives::{EthPrimitives, Receipt};
 use reth_evm::{
     BlockExecutionError, BlockExecutionOutput, BlockExecutor, CommitChanges, GasOutput,
 };
-use reth_execution_types::HashedPostStateSink;
+use reth_execution_types::hashed_post_state_from_execution_state;
 use reth_trie_common::{HashedPostState, KeccakKeyHasher};
 
 /// Configured Ethereum block executor backed by evm2.
@@ -34,7 +34,6 @@ pub struct EthBlockExecutor<'a> {
     chain_id: u64,
     deposit_contract_address: Option<Address>,
     block_state: BlockStateAccumulator,
-    hashed_state: Option<HashedPostStateSink<KeccakKeyHasher>>,
     hashed_state_mode: HashedStateMode,
     hashed_state_update_hook: HashedStateUpdateHook,
     receipts: Vec<Receipt>,
@@ -92,9 +91,6 @@ impl<'a> EthBlockExecutor<'a> {
             chain_id,
             deposit_contract_address,
             block_state: BlockStateAccumulator::new(),
-            hashed_state: hashed_state_mode
-                .output()
-                .then(HashedPostStateSink::<KeccakKeyHasher>::default),
             hashed_state_mode,
             hashed_state_update_hook: None,
             receipts: Vec::new(),
@@ -156,7 +152,6 @@ impl<'a> BlockExecutor for EthBlockExecutor<'a> {
         pre_execution_system_call_state_changes(
             &mut self.evm,
             &mut self.block_state,
-            self.hashed_state.as_mut(),
             self.hashed_state_mode.stream(),
             &mut |state| emit_hashed_state(&mut self.hashed_state_update_hook, state),
             self.spec_id,
@@ -178,7 +173,6 @@ impl<'a> BlockExecutor for EthBlockExecutor<'a> {
         let Some(outcome) = execute_transaction_with_commit_condition(
             &mut self.evm,
             &mut self.block_state,
-            self.hashed_state.as_mut(),
             self.hashed_state_mode.stream(),
             &mut |state| emit_hashed_state(&mut self.hashed_state_update_hook, state),
             &transaction,
@@ -223,7 +217,6 @@ impl<'a> BlockExecutor for EthBlockExecutor<'a> {
         post_execution_system_call_state_changes(
             &mut self.evm,
             &mut self.block_state,
-            self.hashed_state.as_mut(),
             self.hashed_state_mode.stream(),
             &mut |state| emit_hashed_state(&mut self.hashed_state_update_hook, state),
             self.spec_id,
@@ -244,7 +237,6 @@ impl<'a> BlockExecutor for EthBlockExecutor<'a> {
         post_block_balance_state_changes(
             &mut self.evm,
             &mut self.block_state,
-            self.hashed_state.as_mut(),
             self.hashed_state_mode.stream(),
             &mut |state| emit_hashed_state(&mut self.hashed_state_update_hook, state),
             self.spec_id,
@@ -255,11 +247,15 @@ impl<'a> BlockExecutor for EthBlockExecutor<'a> {
         )
         .map_err(BlockExecutionError::from)?;
 
+        let hashed_state = self
+            .hashed_state_mode
+            .output()
+            .then(|| hashed_post_state_from_execution_state::<KeccakKeyHasher>(&self.block_state));
         let mut output = RethReceiptBuilder
             .build_block_output_from_receipts_and_state_with_hashed_state(
                 self.receipts,
                 self.block_state,
-                self.hashed_state.map(HashedPostStateSink::into_hashed_post_state),
+                hashed_state,
             );
         output.result.requests = requests;
 

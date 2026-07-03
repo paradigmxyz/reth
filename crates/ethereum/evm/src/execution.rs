@@ -55,9 +55,9 @@ use reth_ethereum_primitives::TransactionSigned;
 use reth_evm::{
     BlockExecutionError, BlockValidationError, CommitChanges, EvmError, InvalidTxError,
 };
-#[cfg(test)]
-use reth_execution_types::BlockExecutionOutput;
 use reth_execution_types::HashedPostStateSink;
+#[cfg(test)]
+use reth_execution_types::{hashed_post_state_from_execution_state, BlockExecutionOutput};
 use reth_trie_common::{HashedPostState, KeccakKeyHasher};
 
 const DEPOSIT_BYTES_SIZE: usize = 48 + 32 + 8 + 96 + 8;
@@ -406,12 +406,9 @@ where
             precompiles,
         );
         let mut block_state = BlockStateAccumulator::new();
-        let mut hashed_state =
-            hashed_state_mode.output().then(HashedPostStateSink::<KeccakKeyHasher>::default);
         pre_execution_system_call_state_changes(
             &mut evm,
             &mut block_state,
-            hashed_state.as_mut(),
             hashed_state_mode.stream(),
             &mut on_hashed_state_update,
             spec_id,
@@ -428,7 +425,6 @@ where
             let outcome = execute_transaction(
                 &mut evm,
                 &mut block_state,
-                hashed_state.as_mut(),
                 hashed_state_mode.stream(),
                 &mut on_hashed_state_update,
                 &transaction,
@@ -444,7 +440,6 @@ where
         post_execution_system_call_state_changes(
             &mut evm,
             &mut block_state,
-            hashed_state.as_mut(),
             hashed_state_mode.stream(),
             &mut on_hashed_state_update,
             spec_id,
@@ -455,7 +450,6 @@ where
         post_block_balance_state_changes(
             &mut evm,
             &mut block_state,
-            hashed_state.as_mut(),
             hashed_state_mode.stream(),
             &mut on_hashed_state_update,
             spec_id,
@@ -465,11 +459,14 @@ where
             context.withdrawals,
         )?;
 
+        let hashed_state = hashed_state_mode
+            .output()
+            .then(|| hashed_post_state_from_execution_state::<KeccakKeyHasher>(&block_state));
         let mut output = RethReceiptBuilder
             .build_block_output_from_receipts_and_state_with_hashed_state(
                 receipts,
                 block_state,
-                hashed_state.map(HashedPostStateSink::into_hashed_post_state),
+                hashed_state,
             );
         output.result.requests = requests;
 
@@ -620,7 +617,6 @@ pub(crate) fn apply_pre_execution_system_calls(
     pre_execution_system_call_state_changes(
         evm,
         &mut block_state,
-        None,
         false,
         &mut |_| {},
         spec_id,
@@ -637,7 +633,6 @@ fn take_database_error(evm: &mut Evm<'_, BaseEvmTypes>, code: ErrorCode) -> Dyna
 struct RethStateSink<'a> {
     execution_sink: Option<&'a mut dyn StateChangeSink<Error = Infallible>>,
     block_state: &'a mut BlockStateAccumulator,
-    output_hashed_state: Option<&'a mut HashedPostStateSink<KeccakKeyHasher>>,
     streamed_hashed_state: Option<HashedPostStateSink<KeccakKeyHasher>>,
 }
 
@@ -645,13 +640,11 @@ impl<'a> RethStateSink<'a> {
     fn new(
         execution_sink: Option<&'a mut dyn StateChangeSink<Error = Infallible>>,
         block_state: &'a mut BlockStateAccumulator,
-        output_hashed_state: Option<&'a mut HashedPostStateSink<KeccakKeyHasher>>,
         stream_hashed_state: bool,
     ) -> Self {
         Self {
             execution_sink,
             block_state,
-            output_hashed_state,
             streamed_hashed_state: stream_hashed_state
                 .then(HashedPostStateSink::<KeccakKeyHasher>::default),
         }
@@ -675,9 +668,6 @@ impl StateChangeSink for RethStateSink<'_> {
             execution_sink.bytecode(code_hash, code)?;
         }
         self.block_state.bytecode(code_hash, code)?;
-        if let Some(output_hashed_state) = self.output_hashed_state.as_deref_mut() {
-            output_hashed_state.bytecode(code_hash, code)?;
-        }
         if let Some(streamed_hashed_state) = self.streamed_hashed_state.as_mut() {
             streamed_hashed_state.bytecode(code_hash, code)?;
         }
@@ -689,9 +679,6 @@ impl StateChangeSink for RethStateSink<'_> {
             execution_sink.account(change)?;
         }
         self.block_state.account(change)?;
-        if let Some(output_hashed_state) = self.output_hashed_state.as_deref_mut() {
-            output_hashed_state.account(change)?;
-        }
         if let Some(streamed_hashed_state) = self.streamed_hashed_state.as_mut() {
             streamed_hashed_state.account(change)?;
         }
@@ -703,9 +690,6 @@ impl StateChangeSink for RethStateSink<'_> {
             execution_sink.storage_wipe(address)?;
         }
         self.block_state.storage_wipe(address)?;
-        if let Some(output_hashed_state) = self.output_hashed_state.as_deref_mut() {
-            output_hashed_state.storage_wipe(address)?;
-        }
         if let Some(streamed_hashed_state) = self.streamed_hashed_state.as_mut() {
             streamed_hashed_state.storage_wipe(address)?;
         }
@@ -717,9 +701,6 @@ impl StateChangeSink for RethStateSink<'_> {
             execution_sink.storage(change)?;
         }
         self.block_state.storage(change)?;
-        if let Some(output_hashed_state) = self.output_hashed_state.as_deref_mut() {
-            output_hashed_state.storage(change)?;
-        }
         if let Some(streamed_hashed_state) = self.streamed_hashed_state.as_mut() {
             streamed_hashed_state.storage(change)?;
         }
@@ -740,7 +721,6 @@ fn send_hashed_state_update(
 pub(crate) fn execute_transaction(
     evm: &mut Evm<'_, BaseEvmTypes>,
     block_state: &mut BlockStateAccumulator,
-    hashed_state: Option<&mut HashedPostStateSink<KeccakKeyHasher>>,
     stream_hashed_state: bool,
     on_hashed_state_update: &mut impl FnMut(HashedPostState),
     transaction: &RecoveredTxEnvelope,
@@ -748,7 +728,6 @@ pub(crate) fn execute_transaction(
     execute_transaction_with_commit_condition(
         evm,
         block_state,
-        hashed_state,
         stream_hashed_state,
         on_hashed_state_update,
         transaction,
@@ -760,7 +739,6 @@ pub(crate) fn execute_transaction(
 pub(crate) fn execute_transaction_with_commit_condition(
     evm: &mut Evm<'_, BaseEvmTypes>,
     block_state: &mut BlockStateAccumulator,
-    hashed_state: Option<&mut HashedPostStateSink<KeccakKeyHasher>>,
     stream_hashed_state: bool,
     on_hashed_state_update: &mut impl FnMut(HashedPostState),
     transaction: &RecoveredTxEnvelope,
@@ -782,8 +760,7 @@ pub(crate) fn execute_transaction_with_commit_condition(
                 TransactionResolution::Outcome(None)
             } else {
                 let outcome = {
-                    let mut sink =
-                        RethStateSink::new(None, block_state, hashed_state, stream_hashed_state);
+                    let mut sink = RethStateSink::new(None, block_state, stream_hashed_state);
                     let Ok(outcome) = executed.commit_with(&mut sink);
                     sink.flush_streamed_hashed_state(on_hashed_state_update);
                     outcome
@@ -805,11 +782,9 @@ fn map_db_error_code(evm: &mut Evm<'_, BaseEvmTypes>, code: ErrorCode) -> EthExe
     EthExecutionError::Database(take_database_error(evm, code))
 }
 
-#[expect(clippy::needless_option_as_deref, clippy::too_many_arguments)]
 pub(crate) fn pre_execution_system_call_state_changes(
     evm: &mut Evm<'_, BaseEvmTypes>,
     block_state: &mut BlockStateAccumulator,
-    hashed_state: Option<&mut HashedPostStateSink<KeccakKeyHasher>>,
     stream_hashed_state: bool,
     on_hashed_state_update: &mut impl FnMut(HashedPostState),
     spec_id: SpecId,
@@ -819,13 +794,11 @@ pub(crate) fn pre_execution_system_call_state_changes(
     let Some(system_calls) = context.system_calls else {
         return Ok(());
     };
-    let mut hashed_state = hashed_state;
 
     if spec_id.enables(SpecId::PRAGUE) && block_number != 0 {
         let _ = execute_system_call(
             evm,
             block_state,
-            hashed_state.as_deref_mut(),
             stream_hashed_state,
             on_hashed_state_update,
             HISTORY_STORAGE_ADDRESS,
@@ -848,7 +821,6 @@ pub(crate) fn pre_execution_system_call_state_changes(
             let _ = execute_system_call(
                 evm,
                 block_state,
-                hashed_state.as_deref_mut(),
                 stream_hashed_state,
                 on_hashed_state_update,
                 BEACON_ROOTS_ADDRESS,
@@ -906,11 +878,9 @@ fn parse_deposit_requests_from_receipts(
     Ok(out)
 }
 
-#[expect(clippy::needless_option_as_deref, clippy::too_many_arguments)]
 pub(crate) fn post_execution_system_call_state_changes(
     evm: &mut Evm<'_, BaseEvmTypes>,
     block_state: &mut BlockStateAccumulator,
-    hashed_state: Option<&mut HashedPostStateSink<KeccakKeyHasher>>,
     stream_hashed_state: bool,
     on_hashed_state_update: &mut impl FnMut(HashedPostState),
     spec_id: SpecId,
@@ -920,12 +890,10 @@ pub(crate) fn post_execution_system_call_state_changes(
     if context.system_calls.is_none() || !spec_id.enables(SpecId::PRAGUE) {
         return Ok(());
     }
-    let mut hashed_state = hashed_state;
 
     let withdrawal_requests = execute_system_call(
         evm,
         block_state,
-        hashed_state.as_deref_mut(),
         stream_hashed_state,
         on_hashed_state_update,
         WITHDRAWAL_REQUEST_ADDRESS,
@@ -939,7 +907,6 @@ pub(crate) fn post_execution_system_call_state_changes(
     let consolidation_requests = execute_system_call(
         evm,
         block_state,
-        hashed_state.as_deref_mut(),
         stream_hashed_state,
         on_hashed_state_update,
         CONSOLIDATION_REQUEST_ADDRESS,
@@ -956,7 +923,6 @@ pub(crate) fn post_execution_system_call_state_changes(
 fn execute_system_call(
     evm: &mut Evm<'_, BaseEvmTypes>,
     block_state: &mut BlockStateAccumulator,
-    hashed_state: Option<&mut HashedPostStateSink<KeccakKeyHasher>>,
     stream_hashed_state: bool,
     on_hashed_state_update: &mut impl FnMut(HashedPostState),
     address: Address,
@@ -980,8 +946,7 @@ fn execute_system_call(
                 SystemCallResolution::Failed(reason)
             } else {
                 let outcome = {
-                    let mut sink =
-                        RethStateSink::new(None, block_state, hashed_state, stream_hashed_state);
+                    let mut sink = RethStateSink::new(None, block_state, stream_hashed_state);
                     let Ok(outcome) = executed.commit_with(&mut sink);
                     sink.flush_streamed_hashed_state(on_hashed_state_update);
                     outcome
@@ -1005,7 +970,6 @@ fn execute_system_call(
 fn commit_state_changes<S: StateChangeSource>(
     evm: &mut Evm<'_, BaseEvmTypes>,
     block_state: &mut BlockStateAccumulator,
-    hashed_state: Option<&mut HashedPostStateSink<KeccakKeyHasher>>,
     stream_hashed_state: bool,
     on_hashed_state_update: &mut impl FnMut(HashedPostState),
     changes: &S,
@@ -1014,7 +978,6 @@ fn commit_state_changes<S: StateChangeSource>(
         let mut sink = RethStateSink::new(
             Some(evm.overlay_db_mut() as &mut dyn StateChangeSink<Error = Infallible>),
             block_state,
-            hashed_state,
             stream_hashed_state,
         );
         let result = changes.visit(&mut sink);
@@ -1033,7 +996,6 @@ fn commit_state_changes<S: StateChangeSource>(
 pub(crate) fn post_block_balance_state_changes(
     evm: &mut Evm<'_, BaseEvmTypes>,
     block_state: &mut BlockStateAccumulator,
-    hashed_state: Option<&mut HashedPostStateSink<KeccakKeyHasher>>,
     stream_hashed_state: bool,
     on_hashed_state_update: &mut impl FnMut(HashedPostState),
     spec_id: SpecId,
@@ -1076,14 +1038,7 @@ pub(crate) fn post_block_balance_state_changes(
         changes.accounts.insert(address, change);
     }
 
-    commit_state_changes(
-        evm,
-        block_state,
-        hashed_state,
-        stream_hashed_state,
-        on_hashed_state_update,
-        &changes,
-    );
+    commit_state_changes(evm, block_state, stream_hashed_state, on_hashed_state_update, &changes);
 
     Ok(())
 }
