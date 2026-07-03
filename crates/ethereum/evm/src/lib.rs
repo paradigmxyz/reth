@@ -440,7 +440,6 @@ where
     where
         Self: 'a,
         DB: evm2::evm::Database + 'a,
-        DB::Error: core::error::Error + Send + Sync + 'static,
     {
         let mut evm = self.evm_with_env(db, env);
         crate::execution::apply_pre_execution_system_calls(

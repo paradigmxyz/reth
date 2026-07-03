@@ -710,7 +710,6 @@ impl<Evm, DB> BasicBlockExecutor<Evm, DB>
 where
     Evm: ConfigureEvm,
     DB: Database,
-    DB::Error: core::error::Error + Send + Sync + 'static,
 {
     fn execute_block_with_database(
         evm_config: &Evm,
@@ -738,7 +737,6 @@ impl<Evm, DB> Executor for BasicBlockExecutor<Evm, DB>
 where
     Evm: ConfigureEvm,
     DB: Database,
-    DB::Error: core::error::Error + Send + Sync + 'static,
 {
     type Primitives = Evm::Primitives;
     type Error = BlockExecutionError;

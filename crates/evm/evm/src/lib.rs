@@ -307,7 +307,6 @@ pub trait ConfigureEvm: Clone + Debug + Send + Sync + Unpin {
     ) -> impl Executor<Primitives = Self::Primitives, Error = BlockExecutionError>
     where
         DB: Database,
-        DB::Error: core::error::Error + Send + Sync + 'static,
     {
         #[cfg(feature = "std")]
         {
@@ -329,7 +328,6 @@ pub trait ConfigureEvm: Clone + Debug + Send + Sync + Unpin {
     ) -> impl Executor<Primitives = Self::Primitives, Error = BlockExecutionError>
     where
         DB: Database,
-        DB::Error: core::error::Error + Send + Sync + 'static,
     {
         #[cfg(feature = "std")]
         {
@@ -353,7 +351,6 @@ pub trait ConfigureEvm: Clone + Debug + Send + Sync + Unpin {
     where
         Self: 'a,
         DB: Database + 'a,
-        DB::Error: core::error::Error + Send + Sync + 'static,
     {
         let evm = self.evm_for_block(db, block.header())?;
         let ctx = self.context_for_block(block)?;
@@ -448,7 +445,6 @@ pub trait ConfigureEvm: Clone + Debug + Send + Sync + Unpin {
     where
         Self: 'a,
         DB: Database + 'a,
-        DB::Error: core::error::Error + Send + Sync + 'static,
     {
         let evm_env = self.next_evm_env(parent, &attributes)?;
         let evm = self.evm_with_env(db, evm_env.clone());
@@ -471,7 +467,6 @@ pub trait ConfigureEvm: Clone + Debug + Send + Sync + Unpin {
     where
         Self: 'a,
         DB: Database + 'a,
-        DB::Error: core::error::Error + Send + Sync + 'static,
     {
         let evm_env = self.next_evm_env(parent, &attributes)?;
         let evm = self.evm_with_env(db, evm_env.clone());
@@ -513,8 +508,7 @@ pub trait ConfigureEvm: Clone + Debug + Send + Sync + Unpin {
     ) -> Result<ExecutionState, Box<dyn Error + Send + Sync>>
     where
         Self: 'a,
-        DB: Database + 'a,
-        DB::Error: Error + Send + Sync + 'static;
+        DB: Database + 'a;
 }
 
 /// JIT backend controls exposed by an EVM configuration.

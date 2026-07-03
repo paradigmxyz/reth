@@ -93,7 +93,6 @@ where
     where
         Self: 'a,
         DB: Database + 'a,
-        DB::Error: core::error::Error + Send + Sync + 'static,
     {
         self.inner().pre_block_state_changes(db, evm_env, block_number, ctx)
     }
