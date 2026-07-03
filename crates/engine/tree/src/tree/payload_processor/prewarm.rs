@@ -31,7 +31,10 @@ use crossbeam_channel::Sender as CrossbeamSender;
 use metrics::{Counter, Gauge, Histogram};
 #[cfg(any())]
 use rayon::prelude::*;
-use reth_evm::{database::StateProviderDatabase, ConfigureEvm, EvmEnv, EvmFor, ExecutableTxFor};
+use reth_evm::{
+    database::StateProviderDatabase, ConfigureEvm, EvmEnv, EvmFor, EvmTransactionEnv,
+    ExecutableTxFor,
+};
 use reth_execution_types::{
     ExecutionAccountChangeRef, ExecutionStateChangeSink, ExecutionStorageChange,
 };
@@ -138,6 +141,7 @@ where
         to_sparse_trie_task: Option<CrossbeamSender<StateRootMessage>>,
     ) where
         Tx: ExecutableTxFor<Evm> + Send + 'static,
+        reth_evm::TxEnvFor<Evm>: AsRef<EvmTransactionEnv>,
     {
         let executor = self.executor.clone();
         let ctx = self.ctx.clone();
@@ -218,6 +222,7 @@ where
         to_sparse_trie_task: Option<&CrossbeamSender<StateRootMessage>>,
     ) where
         Tx: ExecutableTxFor<Evm>,
+        reth_evm::TxEnvFor<Evm>: AsRef<EvmTransactionEnv>,
     {
         WorkerPool::with_worker_mut(|worker| {
             let Some(evm) =
@@ -496,6 +501,7 @@ where
     pub fn run<Tx>(self, mode: PrewarmMode<Tx>, actions_tx: Sender<PrewarmTaskEvent<N::Receipt>>)
     where
         Tx: ExecutableTxFor<Evm> + Send + 'static,
+        reth_evm::TxEnvFor<Evm>: AsRef<EvmTransactionEnv>,
     {
         // Spawn execution tasks based on mode
         match mode {

@@ -28,6 +28,9 @@ pub use evm2::{
     evm::{Database, DynDatabase},
 };
 
+/// Transaction type consumed by the base EVM host.
+pub type EvmTransactionEnv = <evm2::BaseEvmTypes as evm2::EvmTypesHost>::Tx;
+
 /// Cached database adapters for payload building.
 pub mod cached;
 /// Cancellation markers for EVM execution work.
@@ -209,10 +212,7 @@ pub trait ConfigureEvm: Clone + Debug + Send + Sync + Unpin {
     type BlockExecutorFactory: for<'a> crate::execute::BlockExecutorFactory<
         Primitives = Self::Primitives,
         Evm<'a> = evm2::Evm<'a, evm2::BaseEvmTypes>,
-        Transaction: From<Recovered<TxTy<Self::Primitives>>>
-                         + AsRef<<evm2::BaseEvmTypes as evm2::EvmTypesHost>::Tx>
-                         + Clone
-                         + Send,
+        Transaction: From<Recovered<TxTy<Self::Primitives>>> + Clone + Send,
     >;
 
     /// Configured block assembler.
