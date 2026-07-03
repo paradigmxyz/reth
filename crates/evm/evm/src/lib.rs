@@ -424,6 +424,30 @@ pub trait ConfigureEvm: Clone + Debug + Send + Sync + Unpin {
         db: DB,
         parent: &'a SealedHeader<HeaderTy<Self::Primitives>>,
         attributes: Self::NextBlockEnvCtx,
+    ) -> Result<
+        impl BlockBuilder<Primitives = Self::Primitives, Executor = crate::BlockExecutorFor<'a, Self>>,
+        Self::Error,
+    >
+    where
+        Self: 'a,
+        DB: evm2::evm::Database + 'a,
+        DB::Error: core::error::Error + Send + Sync + 'static,
+    {
+        self.builder_for_next_block_with_hashed_state_mode(
+            db,
+            parent,
+            attributes,
+            HashedStateMode::OutputOnly,
+        )
+    }
+
+    /// Creates a block builder for `parent + 1` with an explicit hashed-state mode.
+    #[cfg(feature = "std")]
+    fn builder_for_next_block_with_hashed_state_mode<'a, DB>(
+        &'a self,
+        db: DB,
+        parent: &'a SealedHeader<HeaderTy<Self::Primitives>>,
+        attributes: Self::NextBlockEnvCtx,
         hashed_state_mode: HashedStateMode,
     ) -> Result<
         impl BlockBuilder<Primitives = Self::Primitives, Executor = crate::BlockExecutorFor<'a, Self>>,

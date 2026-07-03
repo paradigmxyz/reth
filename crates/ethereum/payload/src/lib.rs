@@ -225,7 +225,7 @@ where
         HashedStateMode::OutputOnly
     };
     let mut builder = evm_config
-        .builder_for_next_block(
+        .builder_for_next_block_with_hashed_state_mode(
             cached_db,
             &parent_header,
             NextBlockEnvAttributes {
