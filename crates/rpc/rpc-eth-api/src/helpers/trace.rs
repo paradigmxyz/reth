@@ -10,7 +10,7 @@ use alloy_eips::BlockId;
 use alloy_primitives::B256;
 use alloy_rpc_types_eth::TransactionInfo;
 use evm2::{
-    evm::{CacheDB, Database, Db, DynDatabase},
+    evm::{CacheDB, Db},
     registry::HandlerError,
     BaseEvmTypes, ErrorCode, TxResultWithState,
 };
@@ -18,15 +18,13 @@ use evm2_inspectors::tracing::{TracingInspector, TracingInspectorConfig};
 use futures::Future;
 use reth_errors::RethError;
 use reth_evm::{
-    database::StateProviderDatabase, execute::BlockExecutorFactory, ConfigureEvm, EvmEnvFor,
-    TxEnvFor,
+    database::{BorrowedDynDatabase, StateProviderDatabase},
+    execute::BlockExecutorFactory,
+    ConfigureEvm, EvmEnvFor, TxEnvFor,
 };
 use reth_primitives_traits::{BlockBody, RecoveredBlock};
 use reth_rpc_eth_types::EthApiError;
-use reth_storage_api::{
-    errors::provider::ProviderError, ProviderBlock, ProviderTx, StateProviderBox,
-    StateProviderFactory,
-};
+use reth_storage_api::{ProviderBlock, ProviderTx, StateProviderBox, StateProviderFactory};
 use std::sync::Arc;
 
 /// Cached state database used while tracing transactions sequentially.
@@ -78,7 +76,7 @@ pub trait Trace: LoadState<Error: FromEvmError<Self::Evm>> + Call {
 
         let result = {
             let mut evm = self.evm_config().evm_with_env_and_inspector(
-                BorrowedTraceStateProviderDatabase(db),
+                BorrowedDynDatabase::new(db),
                 evm_env,
                 BorrowedInspector(&mut inspector),
             );
@@ -351,56 +349,12 @@ pub trait Trace: LoadState<Error: FromEvmError<Self::Evm>> + Call {
             .map_err(Self::Error::from_eth_err)?;
         let changes = self
             .evm_config()
-            .pre_block_state_changes(
-                BorrowedTraceStateProviderDatabase(db),
-                evm_env,
-                block.number(),
-                ctx,
-            )
+            .pre_block_state_changes(BorrowedDynDatabase::new(db), evm_env, block.number(), ctx)
             .map_err(|err| EthApiError::EvmCustom(err.to_string()))
             .map_err(Self::Error::from_eth_err)?;
         db.commit_source(&changes);
         Ok(())
     }
-}
-
-struct BorrowedTraceStateProviderDatabase<'a>(&'a mut TraceStateProviderDatabase);
-
-impl Database for BorrowedTraceStateProviderDatabase<'_> {
-    type Error = ProviderError;
-
-    fn get_account(
-        &mut self,
-        address: &alloy_primitives::Address,
-    ) -> Result<Option<evm2::evm::AccountInfo>, Self::Error> {
-        self.0.get_account(address).map_err(|code| provider_error(self.0, code))
-    }
-
-    fn get_code_by_hash(
-        &mut self,
-        code_hash: &alloy_primitives::B256,
-    ) -> Result<evm2::bytecode::Bytecode, Self::Error> {
-        self.0.get_code_by_hash(code_hash).map_err(|code| provider_error(self.0, code))
-    }
-
-    fn get_storage(
-        &mut self,
-        address: &alloy_primitives::Address,
-        key: &evm2::interpreter::Word,
-    ) -> Result<evm2::interpreter::Word, Self::Error> {
-        self.0.get_storage(address, key).map_err(|code| provider_error(self.0, code))
-    }
-
-    fn get_block_hash(
-        &mut self,
-        number: &evm2::interpreter::Word,
-    ) -> Result<Option<alloy_primitives::B256>, Self::Error> {
-        self.0.get_block_hash(number).map_err(|code| provider_error(self.0, code))
-    }
-}
-
-fn provider_error(db: &mut TraceStateProviderDatabase, code: ErrorCode) -> ProviderError {
-    ProviderError::other(std::io::Error::other(db.error(code).to_string()))
 }
 
 struct BorrowedInspector<'a, I>(&'a mut I);

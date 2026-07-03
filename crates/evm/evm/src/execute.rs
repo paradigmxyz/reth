@@ -1,7 +1,7 @@
 //! Traits for execution.
 
 #[cfg(feature = "std")]
-use crate::Database;
+use crate::{database::BorrowedDynDatabase, Database};
 use crate::{ConfigureEvm, DynDatabase, EvmEnv, TxEnvFor};
 use alloc::{sync::Arc, vec::Vec};
 use alloy_consensus::{
@@ -12,10 +12,7 @@ use alloy_eips::eip2718::WithEncoded;
 use alloy_primitives::{Address, Bytes, B256};
 use core::fmt::Debug;
 #[cfg(feature = "std")]
-use evm2::{
-    evm::{CacheDB, Db, DbResult},
-    AnyError, ErrorCode,
-};
+use evm2::evm::{CacheDB, Db};
 pub use reth_execution_errors::{
     BlockExecutionError, BlockValidationError, EvmError, InternalBlockExecutionError,
     InvalidTxError,
@@ -682,7 +679,7 @@ where
         let output = Self::execute_block_with_database(
             &self.evm_config,
             block,
-            BorrowedDynDatabase(&mut self.batch_database),
+            BorrowedDynDatabase::new(&mut self.batch_database),
         )?;
         self.batch_database.commit_source(&output.state);
 
@@ -710,48 +707,6 @@ where
 
     fn take_bal(&mut self) -> Option<Bytes> {
         None
-    }
-}
-
-#[cfg(feature = "std")]
-struct BorrowedDynDatabase<'a, DB: DynDatabase + ?Sized>(&'a mut DB);
-
-#[cfg(feature = "std")]
-impl<DB> DynDatabase for BorrowedDynDatabase<'_, DB>
-where
-    DB: DynDatabase + ?Sized,
-{
-    fn get_account(
-        &mut self,
-        address: &alloy_primitives::Address,
-    ) -> DbResult<Option<evm2::evm::AccountInfo>> {
-        self.0.get_account(address)
-    }
-
-    fn get_code_by_hash(
-        &mut self,
-        code_hash: &alloy_primitives::B256,
-    ) -> DbResult<evm2::bytecode::Bytecode> {
-        self.0.get_code_by_hash(code_hash)
-    }
-
-    fn get_storage(
-        &mut self,
-        address: &alloy_primitives::Address,
-        key: &evm2::interpreter::Word,
-    ) -> DbResult<evm2::interpreter::Word> {
-        self.0.get_storage(address, key)
-    }
-
-    fn get_block_hash(
-        &mut self,
-        number: &evm2::interpreter::Word,
-    ) -> DbResult<Option<alloy_primitives::B256>> {
-        self.0.get_block_hash(number)
-    }
-
-    fn error(&mut self, code: ErrorCode) -> AnyError {
-        self.0.error(code)
     }
 }
 

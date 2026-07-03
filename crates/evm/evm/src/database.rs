@@ -5,8 +5,9 @@ use core::ops::{Deref, DerefMut};
 #[cfg(feature = "std")]
 use evm2::{
     bytecode::Bytecode,
-    evm::{AccountInfo, Database},
+    evm::{AccountInfo, Database, DbResult, DynDatabase},
     interpreter::Word,
+    AnyError, ErrorCode,
 };
 use reth_primitives_traits::Account;
 use reth_storage_api::{AccountReader, BlockHashReader, BytecodeReader, StateProvider};
@@ -95,6 +96,89 @@ impl<DB> Deref for StateProviderDatabase<DB> {
 impl<DB> DerefMut for StateProviderDatabase<DB> {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.0
+    }
+}
+
+/// Borrowed forwarding adapter for an existing [`DynDatabase`].
+#[cfg(feature = "std")]
+pub struct BorrowedDynDatabase<'a, DB: DynDatabase + ?Sized> {
+    db: &'a mut DB,
+}
+
+#[cfg(feature = "std")]
+impl<'a, DB: DynDatabase + ?Sized> BorrowedDynDatabase<'a, DB> {
+    /// Creates a borrowed database adapter.
+    pub const fn new(db: &'a mut DB) -> Self {
+        Self { db }
+    }
+}
+
+#[cfg(feature = "std")]
+impl<DB: DynDatabase + ?Sized> core::fmt::Debug for BorrowedDynDatabase<'_, DB> {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("BorrowedDynDatabase").finish_non_exhaustive()
+    }
+}
+
+#[cfg(feature = "std")]
+impl<DB> DynDatabase for BorrowedDynDatabase<'_, DB>
+where
+    DB: DynDatabase + ?Sized,
+{
+    fn get_account(&mut self, address: &Address) -> DbResult<Option<AccountInfo>> {
+        self.db.get_account(address)
+    }
+
+    fn get_code_by_hash(&mut self, code_hash: &B256) -> DbResult<Bytecode> {
+        self.db.get_code_by_hash(code_hash)
+    }
+
+    fn get_storage(&mut self, address: &Address, key: &Word) -> DbResult<Word> {
+        self.db.get_storage(address, key)
+    }
+
+    fn get_block_hash(&mut self, number: &Word) -> DbResult<Option<B256>> {
+        self.db.get_block_hash(number)
+    }
+
+    fn error(&mut self, code: ErrorCode) -> AnyError {
+        self.db.error(code)
+    }
+}
+
+#[cfg(feature = "std")]
+impl<DB> Database for BorrowedDynDatabase<'_, DB>
+where
+    DB: DynDatabase + ?Sized,
+{
+    type Error = AnyError;
+
+    fn get_account(&mut self, address: &Address) -> Result<Option<AccountInfo>, Self::Error> {
+        match self.db.get_account(address) {
+            Ok(account) => Ok(account),
+            Err(code) => Err(self.db.error(code)),
+        }
+    }
+
+    fn get_code_by_hash(&mut self, code_hash: &B256) -> Result<Bytecode, Self::Error> {
+        match self.db.get_code_by_hash(code_hash) {
+            Ok(bytecode) => Ok(bytecode),
+            Err(code) => Err(self.db.error(code)),
+        }
+    }
+
+    fn get_storage(&mut self, address: &Address, key: &Word) -> Result<Word, Self::Error> {
+        match self.db.get_storage(address, key) {
+            Ok(value) => Ok(value),
+            Err(code) => Err(self.db.error(code)),
+        }
+    }
+
+    fn get_block_hash(&mut self, number: &Word) -> Result<Option<B256>, Self::Error> {
+        match self.db.get_block_hash(number) {
+            Ok(hash) => Ok(hash),
+            Err(code) => Err(self.db.error(code)),
+        }
     }
 }
 
