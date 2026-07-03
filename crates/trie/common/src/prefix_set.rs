@@ -32,6 +32,15 @@ impl TriePrefixSetsMut {
         self.destroyed_accounts.extend(other.destroyed_accounts);
     }
 
+    /// Extends prefix sets with contents of another prefix set by reference.
+    pub fn extend_ref(&mut self, other: &Self) {
+        self.account_prefix_set.extend_ref(&other.account_prefix_set);
+        for (hashed_address, prefix_set) in &other.storage_prefix_sets {
+            self.storage_prefix_sets.entry(*hashed_address).or_default().extend_ref(prefix_set);
+        }
+        self.destroyed_accounts.extend(other.destroyed_accounts.iter().copied());
+    }
+
     /// Returns a `TriePrefixSets` with the same elements as these sets.
     ///
     /// If not yet sorted, the elements will be sorted and deduplicated.
@@ -133,6 +142,12 @@ impl PrefixSetMut {
     pub fn extend(&mut self, other: Self) {
         self.all |= other.all;
         self.keys.extend(other.keys);
+    }
+
+    /// Extend prefix set with contents of another prefix set by reference.
+    pub fn extend_ref(&mut self, other: &Self) {
+        self.all |= other.all;
+        self.keys.extend(other.keys.iter().copied());
     }
 
     /// Appends prefix set keys from another mutable prefix set, leaving it empty.
@@ -281,6 +296,11 @@ impl PrefixSet {
         self.keys.iter()
     }
 
+    /// Returns the underlying sorted prefix slice.
+    pub fn slice(&self) -> &[Nibbles] {
+        self.keys.as_slice()
+    }
+
     /// Returns true if every entry should be considered changed.
     pub const fn all(&self) -> bool {
         self.all
@@ -308,6 +328,7 @@ impl<'a> IntoIterator for &'a PrefixSet {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloy_primitives::B256;
 
     #[test]
     fn test_contains_with_multiple_inserts_and_duplicates() {
@@ -368,5 +389,43 @@ mod tests {
         let mut prefix_set_mut = PrefixSetMut::default();
         prefix_set_mut.extend(PrefixSetMut::all());
         assert!(prefix_set_mut.all);
+    }
+
+    #[test]
+    fn test_prefix_set_slice_returns_frozen_keys() {
+        let path_a = Nibbles::from_nibbles([1, 2, 3]);
+        let path_b = Nibbles::from_nibbles([4, 5, 6]);
+        let mut prefix_set_mut = PrefixSetMut::default();
+        prefix_set_mut.insert(path_b);
+        prefix_set_mut.insert(path_a);
+        prefix_set_mut.insert(path_b);
+
+        let prefix_set = prefix_set_mut.freeze();
+        assert_eq!(prefix_set.slice(), &[path_a, path_b]);
+    }
+
+    #[test]
+    fn test_trie_prefix_sets_mut_extend_ref() {
+        let account_path = Nibbles::from_nibbles([1, 2]);
+        let storage_path = Nibbles::from_nibbles([3, 4]);
+        let storage_account = B256::with_last_byte(1);
+        let destroyed_account = B256::with_last_byte(2);
+        let other = TriePrefixSetsMut {
+            account_prefix_set: PrefixSetMut::from([account_path]),
+            storage_prefix_sets: B256Map::from_iter([(
+                storage_account,
+                PrefixSetMut::from([storage_path]),
+            )]),
+            destroyed_accounts: B256Set::from_iter([destroyed_account]),
+        };
+
+        let mut prefix_sets = TriePrefixSetsMut::default();
+        prefix_sets.extend_ref(&other);
+
+        let frozen = prefix_sets.freeze();
+        assert_eq!(frozen.account_prefix_set.slice(), &[account_path]);
+        assert_eq!(frozen.storage_prefix_sets[&storage_account].slice(), &[storage_path]);
+        assert!(frozen.destroyed_accounts.contains(&destroyed_account));
+        assert_eq!(other.account_prefix_set.len(), 1);
     }
 }

@@ -29,15 +29,14 @@ use reth_provider::{
 use reth_revm::db::BundleState;
 use reth_tasks::{utils::increase_thread_priority, Runtime};
 use reth_trie::{
-    hashed_cursor::HashedCursorFactory, trie_cursor::TrieCursorFactory, HashedPostState,
+    hashed_cursor::HashedCursorFactory, prefix_set::TriePrefixSetsMut,
+    trie_cursor::TrieCursorFactory, HashedPostState,
 };
 use reth_trie_parallel::{
     proof_task::{ProofTaskCtx, ProofWorkerHandle},
     root::ParallelStateRootError,
 };
-use reth_trie_sparse::{
-    ArenaParallelSparseTrie, RevealableSparseTrie, SparseStateTrie, SparseTrieRetainedPaths,
-};
+use reth_trie_sparse::{ArenaParallelSparseTrie, RevealableSparseTrie, SparseStateTrie};
 use std::{
     ops::Not,
     sync::{
@@ -138,14 +137,14 @@ pub struct PayloadProcessorSpawnOptions {
     /// Whether to execute BAL blocks through the parallel BAL path.
     pub parallel_bal_execution: bool,
     /// Pending sparse trie prune request to run after successful state root computation.
-    pub pending_sparse_trie_prune: Option<SparseTrieRetainedPaths>,
+    pub pending_sparse_trie_prune: Option<TriePrefixSetsMut>,
 }
 
 impl PayloadProcessorSpawnOptions {
     /// Creates new payload processor spawn options.
     pub const fn new(
         parallel_bal_execution: bool,
-        pending_sparse_trie_prune: Option<SparseTrieRetainedPaths>,
+        pending_sparse_trie_prune: Option<TriePrefixSetsMut>,
     ) -> Self {
         Self { parallel_bal_execution, pending_sparse_trie_prune }
     }
@@ -154,7 +153,7 @@ impl PayloadProcessorSpawnOptions {
 struct SparseTrieTaskOptions {
     parent_state_root: B256,
     chunk_size: usize,
-    pending_sparse_trie_prune: Option<SparseTrieRetainedPaths>,
+    pending_sparse_trie_prune: Option<TriePrefixSetsMut>,
 }
 
 impl<Evm> PayloadProcessor<Evm>
@@ -389,7 +388,7 @@ where
         parent_state_root: B256,
         halve_workers: bool,
         config: &TreeConfig,
-        pending_sparse_trie_prune: Option<SparseTrieRetainedPaths>,
+        pending_sparse_trie_prune: Option<TriePrefixSetsMut>,
     ) -> StateRootHandle
     where
         F: DatabaseProviderROFactory<Provider: TrieCursorFactory + HashedCursorFactory>
@@ -757,7 +756,7 @@ where
                         .changed_paths
                         .as_deref()
                         .expect("sparse trie task always returns changed paths");
-                    retained_paths.extend_from_changed_paths(changed_paths);
+                    retained_paths.extend_ref(changed_paths);
                     trie.prune(max_hot_slots, max_hot_accounts, retained_paths);
                 }
                 trie_metrics
