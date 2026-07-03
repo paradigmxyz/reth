@@ -409,14 +409,11 @@ where
         })
     }
 
-    fn context_for_next_block<'a>(
-        &'a self,
-        parent: &'a SealedHeader,
+    fn context_for_next_block(
+        &self,
+        parent: &SealedHeader,
         attributes: Self::NextBlockEnvCtx,
-    ) -> Result<EthBlockExecutionCtx<'a>, Self::Error>
-    where
-        Self: 'a,
-    {
+    ) -> Result<EthBlockExecutionCtx<'_>, Self::Error> {
         Ok(EthBlockExecutionCtx {
             tx_count_hint: None,
             parent_hash: parent.hash(),

@@ -93,14 +93,11 @@ where
         self.inner.context_for_block(block)
     }
 
-    fn context_for_next_block<'a>(
-        &'a self,
-        parent: &'a SealedHeader<HeaderTy<Self::Primitives>>,
+    fn context_for_next_block(
+        &self,
+        parent: &SealedHeader<HeaderTy<Self::Primitives>>,
         attributes: Self::NextBlockEnvCtx,
-    ) -> Result<ExecutionCtxFor<'a, Self>, Self::Error>
-    where
-        Self: 'a,
-    {
+    ) -> Result<ExecutionCtxFor<'_, Self>, Self::Error> {
         self.inner.context_for_next_block(parent, attributes)
     }
 

@@ -240,13 +240,11 @@ pub trait ConfigureEvm: Clone + Debug + Send + Sync + Unpin {
         Self: 'a;
 
     /// Returns the configured execution context for `parent + 1` block.
-    fn context_for_next_block<'a>(
-        &'a self,
-        parent: &'a SealedHeader<HeaderTy<Self::Primitives>>,
+    fn context_for_next_block(
+        &self,
+        parent: &SealedHeader<HeaderTy<Self::Primitives>>,
         attributes: Self::NextBlockEnvCtx,
-    ) -> Result<ExecutionCtxFor<'a, Self>, Self::Error>
-    where
-        Self: 'a;
+    ) -> Result<ExecutionCtxFor<'_, Self>, Self::Error>;
 
     /// Returns a transaction environment from a transaction.
     fn tx_env(&self, transaction: impl IntoTxEnv<TxEnvFor<Self>>) -> TxEnvFor<Self> {
