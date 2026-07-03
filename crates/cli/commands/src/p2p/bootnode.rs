@@ -537,12 +537,11 @@ mod tests {
         assert_eq!(enr.ip6(), Some("2001:db8::1".parse().unwrap()));
         assert_eq!(enr.udp4(), Some(45678));
         assert_eq!(enr.udp6(), Some(45678));
-        // A discovery-only bootnode serves no RLPx, so the ENR omits the tcp keys entirely
-        // (matching go-ethereum/devp2p) rather than advertising `tcp=0`.
-        assert_eq!(enr.tcp4(), None);
+        // A discovery-only bootnode serves no RLPx, so the ENR advertises `tcp=0`.
+        assert_eq!(enr.tcp4(), Some(0));
         assert_eq!(enr.tcp6(), None);
 
-        // The derived enode still renders as `…@<ip>:0?discport=<udp>` (absent tcp => port 0).
+        // The derived enode renders as `…@<ip>:0?discport=<udp>`.
         let record = NodeRecord::try_from(&enr).unwrap();
         assert_eq!(record.tcp_port, 0);
         assert_eq!(record.udp_port, 45678);
