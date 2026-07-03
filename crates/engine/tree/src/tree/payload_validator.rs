@@ -151,7 +151,7 @@ use reth_provider::{
     StageCheckpointReader, StateProvider, StateProviderBox, StateProviderFactory, StateReader,
     StorageChangeSetReader, StorageSettingsCache,
 };
-use reth_revm::db::{states::bundle_state::BundleRetention, BundleAccount, State};
+use reth_revm::db::{states::bundle_state::BundleRetention, State};
 use reth_trie::{prefix_set::TriePrefixSetsMut, updates::TrieUpdates, HashedPostState};
 use reth_trie_db::ChangesetCache;
 use reth_trie_parallel::root::ParallelStateRootError;
@@ -1911,44 +1911,58 @@ where
         let code_read = provider_stats.total_code_fetches();
         let code_bytes_read = provider_stats.total_code_fetched_bytes();
 
-        // Write stats from BundleState (final state changes)
         let accounts_changed = output.state.state.len();
-        let accounts_deleted =
-            output.state.state.values().filter(|acc| acc.was_destroyed()).count();
-        let storage_slots_changed =
-            output.state.state.values().map(|account| account.storage.len()).sum::<usize>();
-        let storage_slots_deleted = output
-            .state
-            .state
-            .values()
-            .flat_map(|account| account.storage.values())
-            .filter(|slot| {
-                slot.present_value.is_zero() && !slot.previous_or_original_value.is_zero()
-            })
-            .count();
+        let mut accounts_deleted = 0usize;
+        let mut storage_slots_changed = 0usize;
+        let mut storage_slots_deleted = 0usize;
+        let mut bytecodes_changed = 0usize;
+        let mut unique_new_code_hashes = B256Set::default();
+        let mut eip7702_delegations_cleared = 0usize;
 
-        // Helper: check if account represents a new contract deployment
-        let is_new_deployment = |acc: &BundleAccount| -> bool {
-            let has_code_now = acc.info.as_ref().is_some_and(|info| info.code_hash != KECCAK_EMPTY);
+        // Derive slow-block state counters in one pass over the bundle accounts.
+        for acc in output.state.state.values() {
+            if acc.was_destroyed() {
+                accounts_deleted += 1;
+            }
+
+            storage_slots_changed += acc.storage.len();
+            storage_slots_deleted += acc
+                .storage
+                .values()
+                .filter(|slot| {
+                    slot.present_value.is_zero() && !slot.previous_or_original_value.is_zero()
+                })
+                .count();
+
+            let current_code_hash = acc.info.as_ref().map(|info| info.code_hash);
+            let has_code_now = current_code_hash.is_some_and(|hash| hash != KECCAK_EMPTY);
             let had_no_code_before = acc
                 .original_info
                 .as_ref()
                 .map(|info| info.code_hash == KECCAK_EMPTY)
                 .unwrap_or(true);
-            has_code_now && had_no_code_before
-        };
 
-        let bytecodes_changed =
-            output.state.state.values().filter(|acc| is_new_deployment(acc)).count();
+            if has_code_now && had_no_code_before {
+                bytecodes_changed += 1;
+                if let Some(code_hash) = current_code_hash {
+                    unique_new_code_hashes.insert(code_hash);
+                }
+            }
 
-        // Unique new code hashes to count actual bytes persisted (deduplicated)
-        let unique_new_code_hashes: B256Set = output
-            .state
-            .state
-            .values()
-            .filter(|acc| is_new_deployment(acc))
-            .filter_map(|acc| acc.info.as_ref().map(|info| info.code_hash))
-            .collect();
+            // EIP-7702 delegation tracking from bytecode changes. Clearing a delegation does not
+            // destroy the account; it just empties the bytecode.
+            let original_was_eip7702 = acc
+                .original_info
+                .as_ref()
+                .and_then(|info| info.code.as_ref())
+                .map(|bytecode| bytecode.is_eip7702())
+                .unwrap_or(false);
+            let code_now_empty = current_code_hash.is_some_and(|hash| hash == KECCAK_EMPTY);
+            if original_was_eip7702 && code_now_empty {
+                eip7702_delegations_cleared += 1;
+            }
+        }
+
         let code_bytes_written: usize = unique_new_code_hashes
             .iter()
             .filter_map(|hash| {
@@ -1957,38 +1971,13 @@ where
             .sum();
 
         // Total time spent fetching state during execution
-        let state_read_duration = provider_stats.total_account_fetch_latency() +
-            provider_stats.total_storage_fetch_latency() +
-            provider_stats.total_code_fetch_latency();
+        let state_read_duration = provider_stats.total_account_fetch_latency()
+            + provider_stats.total_storage_fetch_latency()
+            + provider_stats.total_code_fetch_latency();
 
-        // EIP-7702 delegation tracking from bytecode changes
         // Count new EIP-7702 bytecodes as delegations set
         let eip7702_delegations_set =
             output.state.contracts.values().filter(|bytecode| bytecode.is_eip7702()).count();
-        // Delegations cleared: accounts where bytecode changed FROM EIP-7702 TO empty
-        // This detects when an EIP-7702 delegation is removed by setting code to empty
-        // Note: Clearing a delegation does NOT destroy the account - it just empties the
-        // bytecode
-        let eip7702_delegations_cleared = output
-            .state
-            .state
-            .values()
-            .filter(|acc| {
-                // Check if original bytecode was EIP-7702
-                let original_was_eip7702 = acc
-                    .original_info
-                    .as_ref()
-                    .and_then(|info| info.code.as_ref())
-                    .map(|bytecode| bytecode.is_eip7702())
-                    .unwrap_or(false);
-
-                // Check if current code is empty (delegation cleared)
-                let code_now_empty =
-                    acc.info.as_ref().map(|info| info.code_hash == KECCAK_EMPTY).unwrap_or(false);
-
-                original_was_eip7702 && code_now_empty
-            })
-            .count();
 
         // Get cache statistics for detailed block logging
         let (account_cache_hits, account_cache_misses) = cache_stats
