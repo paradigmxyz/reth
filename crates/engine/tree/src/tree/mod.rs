@@ -37,8 +37,8 @@ use reth_provider::{
 use reth_revm::database::StateProviderDatabase;
 use reth_stages_api::ControlFlow;
 use reth_tasks::{spawn_os_thread, utils::increase_thread_priority};
+use reth_trie::prefix_set::TriePrefixSetsMut;
 use reth_trie_db::ChangesetCache;
-use reth_trie_sparse::SparseTrieRetainedPaths;
 use revm::interpreter::debug_unreachable;
 use state::TreeState;
 use std::{fmt::Debug, ops, sync::Arc, time::Duration};
@@ -318,7 +318,7 @@ where
     building_payload: bool,
     /// Retained paths from the latest persistence cleanup to apply during the next sparse trie
     /// cache preservation.
-    pending_sparse_trie_prune: Option<SparseTrieRetainedPaths>,
+    pending_sparse_trie_prune: Option<TriePrefixSetsMut>,
     /// Task runtime for spawning blocking work on named, reusable threads.
     runtime: reth_tasks::Runtime,
 }
@@ -2149,7 +2149,7 @@ where
     }
 
     /// Builds sparse trie retained paths from all blocks still present in the in-memory tree.
-    fn sparse_trie_retained_paths_for_in_memory_blocks(&self) -> Option<SparseTrieRetainedPaths> {
+    fn sparse_trie_retained_paths_for_in_memory_blocks(&self) -> Option<TriePrefixSetsMut> {
         if self.config.skip_state_root() ||
             self.config.state_root_fallback() ||
             !self.config.use_state_root_task()
@@ -2157,7 +2157,7 @@ where
             return None
         }
 
-        let mut retained_paths = SparseTrieRetainedPaths::default();
+        let mut retained_paths = TriePrefixSetsMut::default();
         for block in self.state.tree_state.blocks_by_hash.values() {
             let trie_data = block.trie_data();
             let Some(changed_paths) = trie_data.changed_paths.as_deref() else {
@@ -2168,7 +2168,7 @@ where
                 );
                 return None
             };
-            retained_paths.extend_from_changed_paths(changed_paths);
+            retained_paths.extend_ref(changed_paths);
         }
         Some(retained_paths)
     }
