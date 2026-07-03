@@ -30,12 +30,13 @@ impl<'a> PreservedTrieGuard<'a> {
 }
 
 /// Current state of the sparse trie owned by the overlay manager.
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub(crate) enum PreservedSparseTrieState {
     /// No sparse trie has been preserved yet.
+    #[default]
     Empty,
     /// A sparse trie is available for reuse.
-    Available(PreservedSparseTrie),
+    Available(Box<PreservedSparseTrie>),
     /// A sparse trie has been taken by a state-root task.
     InUse {
         /// The state root the sparse trie was anchored to when it was taken.
@@ -43,19 +44,14 @@ pub(crate) enum PreservedSparseTrieState {
     },
 }
 
-impl Default for PreservedSparseTrieState {
-    fn default() -> Self {
-        Self::Empty
-    }
-}
-
 impl PreservedSparseTrieState {
     /// Takes the available preserved sparse trie, leaving behind its previous anchor.
     pub(crate) fn take(&mut self) -> Option<PreservedSparseTrie> {
-        match core::mem::replace(self, Self::Empty) {
+        match core::mem::take(self) {
             Self::Available(trie) => {
-                *self = Self::InUse { state_root: trie.state_root() };
-                Some(trie)
+                let state_root = trie.state_root();
+                *self = Self::InUse { state_root };
+                Some(*trie)
             }
             state => {
                 *self = state;
@@ -66,7 +62,7 @@ impl PreservedSparseTrieState {
 
     /// Stores an available preserved trie.
     fn store(&mut self, trie: PreservedSparseTrie) {
-        *self = Self::Available(trie);
+        *self = Self::Available(Box::new(trie));
     }
 
     /// Clears the sparse trie state.

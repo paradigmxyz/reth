@@ -769,7 +769,7 @@ mod tests {
         }
 
         let builder = OverlayBuilder::<EthPrimitives>::new(parent_hash, ChangesetCache::default())
-            .with_state_trie_overlay_manager(manager.clone());
+            .with_state_trie_overlay_manager(manager);
         assert!(!builder.should_skip_overlay_for_matching_sparse_trie());
 
         let builder = builder.with_skip_overlay_when_sparse_trie_matches_parent(parent_state_root);
