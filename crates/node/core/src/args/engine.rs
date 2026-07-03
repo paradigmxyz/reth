@@ -32,7 +32,6 @@ pub struct DefaultEngineValues {
     num_state_masking_blocks: u64,
     memory_block_buffer_target: u64,
     invalid_header_hit_eviction_threshold: u8,
-    legacy_state_root_task_enabled: bool,
     state_cache_disabled: bool,
     prewarming_disabled: bool,
     state_provider_metrics: bool,
@@ -110,12 +109,6 @@ impl DefaultEngineValues {
     /// Set the invalid header cache hit eviction threshold
     pub const fn with_invalid_header_hit_eviction_threshold(mut self, v: u8) -> Self {
         self.invalid_header_hit_eviction_threshold = v;
-        self
-    }
-
-    /// Set whether to enable legacy state root task by default
-    pub const fn with_legacy_state_root_task_enabled(mut self, v: bool) -> Self {
-        self.legacy_state_root_task_enabled = v;
         self
     }
 
@@ -287,7 +280,6 @@ impl Default for DefaultEngineValues {
             num_state_masking_blocks: DEFAULT_NUM_STATE_MASKING_BLOCKS,
             memory_block_buffer_target: DEFAULT_MEMORY_BLOCK_BUFFER_TARGET,
             invalid_header_hit_eviction_threshold: DEFAULT_INVALID_HEADER_HIT_EVICTION_THRESHOLD,
-            legacy_state_root_task_enabled: false,
             state_cache_disabled: false,
             prewarming_disabled: false,
             state_provider_metrics: false,
@@ -358,8 +350,10 @@ pub struct EngineArgs {
     #[arg(long = "engine.invalid-header-cache-hit-eviction-threshold", default_value_t = DefaultEngineValues::get_global().invalid_header_hit_eviction_threshold)]
     pub invalid_header_hit_eviction_threshold: u8,
 
-    /// Enable legacy state root
-    #[arg(long = "engine.legacy-state-root", default_value_t = DefaultEngineValues::get_global().legacy_state_root_task_enabled)]
+    /// CAUTION: This CLI flag has no effect anymore, use --engine.state-root-fallback if you
+    /// want to force synchronous state root computation
+    #[arg(long = "engine.legacy-state-root", default_value_t = false, hide = true)]
+    #[deprecated]
     pub legacy_state_root_task_enabled: bool,
 
     /// CAUTION: This CLI flag has no effect anymore, use --engine.disable-caching-and-prewarming
@@ -580,7 +574,6 @@ impl Default for EngineArgs {
             persistence_backpressure_threshold: _,
             memory_block_buffer_target,
             invalid_header_hit_eviction_threshold,
-            legacy_state_root_task_enabled,
             state_cache_disabled,
             prewarming_disabled,
             state_provider_metrics,
@@ -614,8 +607,8 @@ impl Default for EngineArgs {
             num_state_masking_blocks,
             memory_block_buffer_target,
             invalid_header_hit_eviction_threshold,
-            legacy_state_root_task_enabled,
             state_root_task_compare_updates,
+            legacy_state_root_task_enabled: false,
             caching_and_prewarming_enabled: true,
             state_cache_disabled,
             prewarming_disabled,
@@ -692,13 +685,16 @@ impl EngineArgs {
 
     /// Creates a [`TreeConfig`] from the engine arguments.
     pub fn tree_config(&self) -> TreeConfig {
+        #[allow(deprecated)]
+        if self.legacy_state_root_task_enabled {
+            tracing::warn!(target: "reth::cli", "--engine.legacy-state-root has no effect anymore, use --engine.state-root-fallback to force synchronous state root computation");
+        }
         let config = TreeConfig::default()
             .with_persistence_backpressure_threshold(self.persistence_backpressure_threshold())
             .with_persistence_threshold(self.persistence_threshold)
             .with_num_state_masking_blocks(self.num_state_masking_blocks)
             .with_memory_block_buffer_target(self.memory_block_buffer_target)
             .with_invalid_header_hit_eviction_threshold(self.invalid_header_hit_eviction_threshold)
-            .with_legacy_state_root(self.legacy_state_root_task_enabled)
             .without_state_cache(self.state_cache_disabled)
             .without_prewarming(self.prewarming_disabled)
             .with_state_provider_metrics(self.state_provider_metrics)

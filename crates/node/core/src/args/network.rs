@@ -530,6 +530,7 @@ impl NetworkArgs {
                 self.max_capacity_cache_txns_pending_fetch,
             ),
             max_transactions_seen_by_peer_history: self.max_seen_tx_history,
+            max_pending_pool_imports: self.max_pending_pool_imports,
             propagation_mode: self.propagation_mode,
             ingress_policy: self.tx_ingress_policy,
             tx_channel_memory_limit_bytes: self.tx_channel_memory_limit_bytes,
@@ -1239,6 +1240,15 @@ mod tests {
 
             assert_eq!(args.dns_retries, retries);
         }
+    }
+
+    #[test]
+    fn transactions_manager_config_uses_max_pending_imports() {
+        let args = NetworkArgs { max_pending_pool_imports: 50_000, ..Default::default() };
+
+        let config = args.transactions_manager_config();
+
+        assert_eq!(config.max_pending_pool_imports, 50_000);
     }
 
     #[test]

@@ -288,7 +288,7 @@ pub use crate::{
         REPLACE_BLOB_PRICE_BUMP, TXPOOL_MAX_ACCOUNT_SLOTS_PER_SENDER,
         TXPOOL_SUBPOOL_MAX_SIZE_MB_DEFAULT, TXPOOL_SUBPOOL_MAX_TXS_DEFAULT,
     },
-    error::PoolResult,
+    error::{PoolResult, RawPoolTransactionError},
     ordering::{CoinbaseTipOrdering, Priority, TransactionOrdering},
     pool::{
         blob_tx_priority, fee_delta, state::SubPool, AddedTransactionOutcome,
@@ -297,8 +297,9 @@ pub use crate::{
     },
     traits::*,
     validate::{
-        EthTransactionValidator, TransactionValidationOutcome, TransactionValidationTaskExecutor,
-        TransactionValidator, ValidPoolTransaction,
+        EthTransactionValidator, StatefulValidationFn, StatelessValidationFn,
+        TransactionValidationOutcome, TransactionValidationTaskExecutor, TransactionValidator,
+        ValidPoolTransaction,
     },
 };
 use crate::{identifier::TransactionId, pool::PoolInner};
@@ -824,6 +825,13 @@ where
         self.pool.blob_store().get_by_versioned_hashes_v4(versioned_hashes, indices_bitarray)
     }
 
+    fn has_blobs_for_versioned_hashes(
+        &self,
+        versioned_hashes: &[B256],
+    ) -> Result<Vec<bool>, BlobStoreError> {
+        self.pool.blob_store().has_versioned_hashes(versioned_hashes)
+    }
+
     fn blob_store(&self) -> Box<dyn BlobStore> {
         Box::new(self.pool.blob_store().clone())
     }
@@ -862,6 +870,20 @@ where
 
     fn cleanup_blobs(&self) {
         self.pool.cleanup_blobs()
+    }
+}
+
+impl<V, T, S> ValidatingPool for Pool<V, T, S>
+where
+    V: TransactionValidator,
+    <V as TransactionValidator>::Transaction: EthPoolTransaction,
+    T: TransactionOrdering<Transaction = <V as TransactionValidator>::Transaction>,
+    S: BlobStore + Clone,
+{
+    type Validator = V;
+
+    fn validator(&self) -> &Self::Validator {
+        self.inner().validator()
     }
 }
 

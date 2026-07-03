@@ -2,9 +2,9 @@
 //!
 //! Read `execute_block` as two execution paths over the same parent state.
 //!
-//! Worker states run transactions speculatively. Each worker gets one fresh database from
-//! `make_db`, installs the received BAL, sets the transaction BAL index for each streamed
-//! transaction, and returns uncommitted transaction results.
+//! Worker states run transactions speculatively. Each worker gets one fresh cache-filling database
+//! from `make_db(true)`, installs the received BAL, sets the transaction BAL index for each
+//! streamed transaction, and returns uncommitted transaction results.
 //!
 //! The canonical state owns block effects. It runs the normal pre/post block hooks, commits
 //! worker results in transaction order, tracks block gas admission, and builds the BAL that this
@@ -30,11 +30,10 @@ use reth_primitives_traits::ReceiptTy;
 use reth_provider::BlockExecutionOutput;
 use reth_tasks::Runtime;
 use revm::{
-    bytecode::BytecodeDecodeError,
     context::{result::ResultAndState, Block},
     database::{states::bundle_state::BundleRetention, State},
+    state::bal::Bal as RevmBal,
 };
-use revm_state::bal::Bal as RevmBal;
 use std::sync::Arc;
 
 use crate::tree::payload_processor::receipt_root_task::IndexedReceipt;
@@ -60,7 +59,7 @@ where
     Tx: ExecutableTxFor<Evm> + Send + 'a,
     Err: core::error::Error + Send + Sync + 'static,
     DB: Database + Send + 'a,
-    MakeDb: Fn() -> Result<DB, BalExecutionError> + Sync + 'a,
+    MakeDb: Fn(bool) -> Result<DB, BalExecutionError> + Sync + 'a,
     ReceiptTy<Evm::Primitives>: Clone,
 {
     let worker_pool = runtime.bal_streaming_pool();
@@ -103,7 +102,7 @@ where
     Tx: ExecutableTxFor<Evm> + Send + 'scope,
     Err: core::error::Error + Send + Sync + 'static,
     DB: Database + Send + 'scope,
-    MakeDb: Fn() -> Result<DB, BalExecutionError> + Sync + 'scope,
+    MakeDb: Fn(bool) -> Result<DB, BalExecutionError> + Sync + 'scope,
     ReceiptTy<Evm::Primitives>: Clone,
 {
     let bal = input_bal.as_bal();
@@ -112,8 +111,11 @@ where
     let block_gas_limit = evm_env.block_env.gas_limit();
     let enable_amsterdam_eip8037 = evm_env.cfg_env.enable_amsterdam_eip8037;
     let tx_gas_limit_cap = evm_env.cfg_env.tx_gas_limit_cap;
-    let mut canonical_state =
-        State::builder().with_database(make_db()?).with_bundle_update().with_bal_builder().build();
+    let mut canonical_state = State::builder()
+        .with_database(make_db(false)?)
+        .with_bundle_update()
+        .with_bal_builder()
+        .build();
 
     let (block_result, senders) = {
         let (result_tx, result_rx) = crossbeam_channel::unbounded();
@@ -178,7 +180,7 @@ where
     ))
 }
 
-fn convert_alloy_to_revm_bal(bal: &AlloyBal) -> Result<Arc<RevmBal>, BalExecutionError> {
+fn convert_alloy_to_revm_bal(alloy_bal: &AlloyBal) -> Result<Arc<RevmBal>, BalExecutionError> {
     // Convert the BAL from alloy to a BAL that can be consumed by revm, that is more amenable
     // for state lookups.
     //
@@ -191,9 +193,7 @@ fn convert_alloy_to_revm_bal(bal: &AlloyBal) -> Result<Arc<RevmBal>, BalExecutio
     // is triggered then the execution is reverted, and as such no actual code change event takes
     // place. Therefore, if we do observe such a bytecode in a BAL then that means the BAL is
     // invalid as no legal execution should've led to this bytecode deployment.
-    let alloy_bal: Vec<_> = Vec::<_>::from(bal.clone());
-    let received_bal_revm = RevmBal::try_from(alloy_bal).map_err(|e| {
-        let e: BytecodeDecodeError = e;
+    let received_bal_revm = RevmBal::clone_from_alloy(alloy_bal.as_vec()).map_err(|e| {
         BalExecutionError::Consensus(reth_consensus::ConsensusError::BlockAccessListInvalid(
             format!("{e:?}"),
         ))
@@ -498,6 +498,7 @@ mod tests {
         let (receipt_tx, _receipt_rx) = crossbeam_channel::unbounded();
         let evm_env = evm_config.evm_env(block.header()).unwrap();
         let execution_ctx = evm_config.context_for_block(block).unwrap();
+        let make_db = |_: bool| make_db();
         execute_block(
             runtime,
             &evm_config,
@@ -922,12 +923,11 @@ mod tests {
         // Deploys `0x60006000fd` (PUSH1 0 PUSH1 0 REVERT) at `revert_contract`. Sender calls
         // it; the call reverts; fees + nonce still apply.
         use alloy_consensus::TxLegacy;
-        use alloy_primitives::{Bytes, TxKind};
+        use alloy_primitives::{keccak256, Bytes, TxKind};
         use reth_chainspec::MAINNET;
         use reth_ethereum_primitives::Transaction;
         use reth_primitives_traits::crypto::secp256k1::public_key_to_address;
         use reth_testing_utils::generators::{generate_key, rng, sign_tx_with_key_pair};
-        use revm::primitives::keccak256;
 
         let evm_config = EthEvmConfig::mainnet();
         let revert_contract: alloy_primitives::Address =
@@ -980,12 +980,11 @@ mod tests {
         //
         // Bytecode: PUSH1 0x42, PUSH1 0x00, SSTORE, STOP → `0x60 0x42 0x60 0x00 0x55 0x00`.
         use alloy_consensus::TxLegacy;
-        use alloy_primitives::{Bytes, TxKind};
+        use alloy_primitives::{keccak256, Bytes, TxKind};
         use reth_chainspec::MAINNET;
         use reth_ethereum_primitives::Transaction;
         use reth_primitives_traits::crypto::secp256k1::public_key_to_address;
         use reth_testing_utils::generators::{generate_key, rng, sign_tx_with_key_pair};
-        use revm::primitives::keccak256;
 
         let evm_config = EthEvmConfig::mainnet();
         let sstore_contract: alloy_primitives::Address =
@@ -1122,11 +1121,13 @@ mod tests {
         let (receipt_tx, _receipt_rx) = crossbeam_channel::unbounded();
         let evm_env = evm_config.evm_env(block.header()).unwrap();
         let execution_ctx = evm_config.context_for_block(&block).unwrap();
+        let make_db = db_factory(system_contracts_db());
+        let make_db = |_: bool| make_db();
 
         let result = execute_block(
             &Runtime::test(),
             &evm_config,
-            &db_factory(system_contracts_db()),
+            &make_db,
             to_arc_decoded(BlockAccessList::default()),
             evm_env,
             execution_ctx,
@@ -1146,10 +1147,12 @@ mod tests {
         // All-state-gas results keep block_regular_gas_used at 0, so a second tx that fits
         // within the block limit but not the remaining cumulative budget proves that
         // non-Amsterdam reads cumulative_tx_gas_used while Amsterdam does not.
-        use revm::context::result::{
-            ExecResultAndState, ExecutionResult, Output, ResultGas, SuccessReason,
+        use revm::{
+            context::result::{
+                ExecResultAndState, ExecutionResult, Output, ResultGas, SuccessReason,
+            },
+            state::EvmState,
         };
-        use revm_state::EvmState;
 
         let block_gas_limit = 1_000_000u64;
         let first_tx_gas = 600_000u64;
@@ -1193,8 +1196,8 @@ mod tests {
                 ExecResultAndState, ExecutionResult, Output, ResultGas, SuccessReason,
             },
             primitives::eip7825::TX_GAS_LIMIT_CAP,
+            state::EvmState,
         };
-        use revm_state::EvmState;
 
         let block_gas_limit = 30_000_000u64;
         let oversized = TX_GAS_LIMIT_CAP + 1_000_000; // 17_777_216 — above the cap

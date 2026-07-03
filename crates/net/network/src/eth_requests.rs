@@ -371,6 +371,7 @@ where
         mut request: GetBlockAccessLists,
         response: oneshot::Sender<RequestResult<BlockAccessLists>>,
     ) {
+        self.metrics.eth_block_access_lists_requests_received_total.increment(1);
         request.0.truncate(MAX_BLOCK_ACCESS_LISTS_SERVE);
 
         let limit = GetBlockAccessListLimit::ResponseSizeSoftLimit(SOFT_RESPONSE_LIMIT);
@@ -644,6 +645,13 @@ mod tests {
             _indices_bitarray: B128,
         ) -> Result<Vec<Option<BlobCellsAndProofsV1>>, BlobStoreError> {
             Ok(vec![None; versioned_hashes.len()])
+        }
+
+        fn has_versioned_hashes(
+            &self,
+            versioned_hashes: &[B256],
+        ) -> Result<Vec<bool>, BlobStoreError> {
+            Ok(vec![false; versioned_hashes.len()])
         }
 
         fn get_cells(

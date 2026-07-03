@@ -1,38 +1,15 @@
 //! State root task interface types shared between the engine tree and the payload builder.
 
 use crate::root::ParallelStateRootError;
-use alloy_eip7928::BlockAccessList;
-use alloy_evm::block::StateChangeSource;
 use alloy_primitives::{keccak256, B256};
 use derive_more::derive::Deref;
-use reth_trie::{updates::TrieUpdates, HashedPostState, HashedStorage, MultiProofTargetsV2};
-use revm_state::EvmState;
+use reth_trie::{
+    prefix_set::TriePrefixSetsMut, updates::TrieUpdates, HashedPostState, HashedStorage,
+    MultiProofTargetsV2,
+};
+use revm::state::EvmState;
 use std::sync::Arc;
 use tracing::trace;
-
-/// Source of state changes, either from EVM execution or from a Block Access List.
-#[derive(Clone, Copy)]
-pub enum Source {
-    /// State changes from EVM execution.
-    Evm(StateChangeSource),
-    /// State changes from Block Access List (EIP-7928).
-    BlockAccessList,
-}
-
-impl std::fmt::Debug for Source {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Evm(source) => source.fmt(f),
-            Self::BlockAccessList => f.write_str("BlockAccessList"),
-        }
-    }
-}
-
-impl From<StateChangeSource> for Source {
-    fn from(source: StateChangeSource) -> Self {
-        Self::Evm(source)
-    }
-}
 
 /// Messages used internally by the multi proof task.
 #[derive(Debug)]
@@ -40,14 +17,9 @@ pub enum StateRootMessage {
     /// Prefetch proof targets
     PrefetchProofs(MultiProofTargetsV2),
     /// New state update from transaction execution with its source
-    StateUpdate(Source, EvmState),
+    StateUpdate(EvmState),
     /// Pre-hashed state update from BAL conversion that can be applied directly without proofs.
     HashedStateUpdate(HashedPostState),
-    /// Block Access List (EIP-7928; BAL) containing complete state changes for the block.
-    ///
-    /// When received, the task generates a single state update from the BAL and processes it.
-    /// No further messages are expected after receiving this variant.
-    BlockAccessList(Arc<BlockAccessList>),
     /// Signals state update stream end.
     ///
     /// This is triggered by block execution, indicating that no additional state updates are
@@ -63,6 +35,8 @@ pub struct StateRootComputeOutcome {
     pub state_root: B256,
     /// The trie updates.
     pub trie_updates: Arc<TrieUpdates>,
+    /// Changed trie node base paths retained while computing the root.
+    pub changed_paths: Option<Arc<TriePrefixSetsMut>>,
     /// Debug recorders taken from the sparse tries, keyed by `None` for account trie
     /// and `Some(address)` for storage tries.
     #[cfg(feature = "trie-debug")]
@@ -123,8 +97,8 @@ impl StateRootHandle {
     pub fn state_hook(&self) -> impl alloy_evm::block::OnStateHook {
         let sender = StateHookSender::new(self.updates_tx.clone());
 
-        move |source: StateChangeSource, state: &EvmState| {
-            let _ = sender.send(StateRootMessage::StateUpdate(source.into(), state.clone()));
+        move |state: EvmState| {
+            let _ = sender.send(StateRootMessage::StateUpdate(state));
         }
     }
 

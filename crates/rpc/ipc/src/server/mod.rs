@@ -9,7 +9,10 @@ use interprocess::local_socket::{
     GenericFilePath, ListenerOptions, ToFsName,
 };
 use jsonrpsee::{
-    core::{middleware::layer::RpcLoggerLayer, JsonRawValue, TEN_MB_SIZE_BYTES},
+    core::{
+        middleware::layer::{Either as RpcEither, RpcLoggerLayer},
+        JsonRawValue, TEN_MB_SIZE_BYTES,
+    },
     server::{
         middleware::rpc::RpcServiceT, stop_channel, ConnectionGuard, ConnectionPermit, IdProvider,
         RandomIntegerIdProvider, ServerHandle, StopHandle,
@@ -65,7 +68,7 @@ impl<HttpMiddleware, RpcMiddleware> IpcServer<HttpMiddleware, RpcMiddleware> {
 
 impl<HttpMiddleware, RpcMiddleware> IpcServer<HttpMiddleware, RpcMiddleware>
 where
-    RpcMiddleware: for<'a> Layer<RpcService, Service: RpcServiceT> + Clone + Send + 'static,
+    RpcMiddleware: Layer<RpcService, Service: RpcServiceT> + Clone + Send + 'static,
     HttpMiddleware: Layer<
             TowerServiceNoHttp<RpcMiddleware>,
             Service: Service<
@@ -316,11 +319,11 @@ impl<L> RpcServiceBuilder<L> {
     pub fn option_layer<T>(
         self,
         layer: Option<T>,
-    ) -> RpcServiceBuilder<Stack<Either<T, Identity>, L>> {
+    ) -> RpcServiceBuilder<Stack<RpcEither<T, Identity>, L>> {
         let layer = if let Some(layer) = layer {
-            Either::Left(layer)
+            RpcEither::Left(layer)
         } else {
-            Either::Right(Identity::new())
+            RpcEither::Right(Identity::new())
         };
         self.layer(layer)
     }
@@ -368,8 +371,8 @@ pub struct TowerServiceNoHttp<L> {
 
 impl<RpcMiddleware> Service<String> for TowerServiceNoHttp<RpcMiddleware>
 where
-    RpcMiddleware: for<'a> Layer<RpcService>,
-    for<'a> <RpcMiddleware as Layer<RpcService>>::Service:
+    RpcMiddleware: Layer<RpcService>,
+    <RpcMiddleware as Layer<RpcService>>::Service:
         Send + Sync + 'static + RpcServiceT<MethodResponse = MethodResponse>,
 {
     /// The response of a handled RPC call

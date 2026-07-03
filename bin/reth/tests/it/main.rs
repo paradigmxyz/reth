@@ -186,19 +186,26 @@ fn download_help() {
 }
 
 #[test]
-fn download_force_overwrites_snapshot_data_but_preserves_identity_files() {
+fn download_force_removes_only_snapshot_paths() {
     let tempdir = tempfile::tempdir().expect("failed to create temp dir");
     let datadir = tempdir.path().join("datadir");
     let archive_path = tempdir.path().join("snapshot.tar.zst");
 
     fs::create_dir_all(datadir.join("db")).expect("failed to create old db dir");
+    fs::create_dir_all(datadir.join("rocksdb")).expect("failed to create old rocksdb dir");
     fs::create_dir_all(datadir.join("static_files")).expect("failed to create old static dir");
+    fs::create_dir_all(datadir.join("custom-dir")).expect("failed to create custom dir");
     fs::write(datadir.join("db/old.mdbx"), b"old db").expect("failed to write old db file");
+    fs::write(datadir.join("rocksdb/old"), b"old rocksdb").expect("failed to write old rocksdb");
     fs::write(datadir.join("static_files/old"), b"old static")
         .expect("failed to write old static file");
+    fs::write(datadir.join("reth.toml"), b"old config").expect("failed to write old config");
     fs::write(datadir.join("discovery-secret"), b"secret").expect("failed to write secret");
     fs::write(datadir.join("known-peers.json"), br#"["peer"]"#)
         .expect("failed to write known peers");
+    fs::write(datadir.join("custom-file"), b"custom").expect("failed to write custom file");
+    fs::write(datadir.join("custom-dir/file"), b"custom dir")
+        .expect("failed to write custom dir file");
     create_tar_zst_snapshot(&archive_path);
 
     let datadir_arg = datadir.to_str().expect("datadir should be utf8");
@@ -210,7 +217,9 @@ fn download_force_overwrites_snapshot_data_but_preserves_identity_files() {
         b"new snapshot data"
     );
     assert!(!datadir.join("db/old.mdbx").exists(), "old db file should be removed");
+    assert!(!datadir.join("rocksdb/old").exists(), "old rocksdb file should be removed");
     assert!(!datadir.join("static_files/old").exists(), "old static file should be removed");
+    assert!(!datadir.join("reth.toml").exists(), "old config file should be removed");
     assert_eq!(
         fs::read(datadir.join("discovery-secret")).expect("missing preserved discovery secret"),
         b"secret"
@@ -218,6 +227,11 @@ fn download_force_overwrites_snapshot_data_but_preserves_identity_files() {
     assert_eq!(
         fs::read(datadir.join("known-peers.json")).expect("missing preserved known peers"),
         br#"["peer"]"#
+    );
+    assert_eq!(fs::read(datadir.join("custom-file")).expect("missing custom file"), b"custom");
+    assert_eq!(
+        fs::read(datadir.join("custom-dir/file")).expect("missing custom dir file"),
+        b"custom dir"
     );
 }
 

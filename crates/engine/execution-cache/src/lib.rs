@@ -193,6 +193,28 @@ mod tests {
     }
 
     #[test]
+    fn raw_cache_handle_blocks_checkout_until_drop() {
+        let cache = PayloadExecutionCache::default();
+        let hash = B256::from([3u8; 32]);
+
+        cache.update_with_guard(|slot| {
+            *slot = Some(SavedCache::new(hash, ExecutionCache::new(1_000)))
+        });
+
+        let checked_out = cache.get_cache_for(hash).expect("checkout should succeed");
+        let cache_handle = checked_out.cache().clone();
+        drop(checked_out);
+
+        let blocked = cache.get_cache_for(hash);
+        assert!(blocked.is_none(), "raw ExecutionCache handle should keep slot in use");
+
+        drop(cache_handle);
+
+        let available = cache.get_cache_for(hash);
+        assert!(available.is_some(), "checkout should succeed after raw handle is dropped");
+    }
+
+    #[test]
     fn hash_mismatch_clears_and_retags() {
         let cache = PayloadExecutionCache::default();
         let hash_a = B256::from([0xAA; 32]);

@@ -17,6 +17,9 @@ function fmtChange(ch) {
   const details = [];
   if (ch.ci_pct) details.push(`±${ch.ci_pct.toFixed(2)}%`);
   if (ch.floor_pct) details.push(`floor ${ch.floor_pct.toFixed(2)}%`);
+  if (ch.materiality?.threshold_ms) {
+    details.push(`materiality ${ch.materiality.threshold_ms.toFixed(2)}ms`);
+  }
   if (ch.informational) details.push('informational');
   const detailStr = details.length ? ` (${details.join(', ')})` : '';
   const sig = ch.informational ? 'neutral' : ch.sig;
@@ -39,6 +42,14 @@ function isWin(changes) {
 }
 
 function loadSamplyUrls(workDir) {
+  return loadProfileUrls(workDir, 'samply-profile-url.txt');
+}
+
+function loadTracingChromeUrls(workDir) {
+  return loadProfileUrls(workDir, 'tracing-chrome-profile-url.txt');
+}
+
+function loadProfileUrls(workDir, fileName) {
   const urls = {};
   let runs = [];
   try {
@@ -50,7 +61,7 @@ function loadSamplyUrls(workDir) {
   }
   for (const run of runs) {
     try {
-      const url = fs.readFileSync(path.join(workDir, run, 'samply-profile-url.txt'), 'utf8').trim();
+      const url = fs.readFileSync(path.join(workDir, run, fileName), 'utf8').trim();
       if (url) urls[run] = url;
     } catch {}
   }
@@ -129,6 +140,7 @@ module.exports = {
   verdict,
   isWin,
   loadSamplyUrls,
+  loadTracingChromeUrls,
   blocksLabel,
   metricRows,
   waitTimeRows,

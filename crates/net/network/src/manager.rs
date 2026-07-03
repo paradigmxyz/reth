@@ -676,7 +676,7 @@ impl<N: NetworkPrimitives> NetworkManager<N> {
                     msg,
                 });
             }
-            PeerMessage::SendTransactions(_) => {
+            PeerMessage::SendTransactions(_) | PeerMessage::SendBroadcastPoolTransactions(_) => {
                 unreachable!("Not emitted by session")
             }
             PeerMessage::BlockRangeUpdated(_) => {}
@@ -707,6 +707,10 @@ impl<N: NetworkPrimitives> NetworkManager<N> {
             NetworkHandleMessage::SendTransaction { peer_id, msg } => {
                 self.swarm.sessions_mut().send_message(&peer_id, PeerMessage::SendTransactions(msg))
             }
+            NetworkHandleMessage::SendBroadcastPoolTransactions { peer_id, msg } => self
+                .swarm
+                .sessions_mut()
+                .send_message(&peer_id, PeerMessage::SendBroadcastPoolTransactions(msg)),
             NetworkHandleMessage::SendPooledTransactionHashes { peer_id, msg } => self
                 .swarm
                 .sessions_mut()
@@ -730,6 +734,12 @@ impl<N: NetworkPrimitives> NetworkManager<N> {
             }
             NetworkHandleMessage::DisconnectPeer(peer_id, reason) => {
                 self.swarm.sessions_mut().disconnect(peer_id, reason);
+            }
+            NetworkHandleMessage::BanPeer(peer_id) => {
+                self.swarm.peers_mut().ban_peer_by_admin(peer_id);
+            }
+            NetworkHandleMessage::UnbanPeer(peer_id) => {
+                self.swarm.peers_mut().unban_peer_by_admin(peer_id);
             }
             NetworkHandleMessage::ConnectPeer(peer_id, kind, addr) => {
                 self.swarm.state_mut().add_and_connect(peer_id, kind, addr);

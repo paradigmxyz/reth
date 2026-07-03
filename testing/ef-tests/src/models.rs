@@ -4,11 +4,10 @@ use crate::{assert::assert_equal, Error};
 use alloy_consensus::Header as RethHeader;
 use alloy_eips::eip4895::Withdrawals;
 use alloy_genesis::GenesisAccount;
-use alloy_primitives::{keccak256, Address, Bloom, Bytes, B256, B64, U256};
+use alloy_primitives::{keccak256, map::HashMap, Address, Bloom, Bytes, B256, B64, U256};
 use reth_chainspec::{ChainSpec, ChainSpecBuilder, EthereumHardfork, ForkCondition};
 use reth_db_api::{cursor::DbDupCursorRO, tables, transaction::DbTx};
 use reth_primitives_traits::SealedHeader;
-use revm::primitives::HashMap;
 use serde::Deserialize;
 use std::{
     collections::BTreeMap,

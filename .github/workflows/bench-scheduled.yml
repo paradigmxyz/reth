@@ -89,7 +89,7 @@ jobs:
       blocks: ${{ steps.bench-config.outputs.blocks }}
       warmup: ${{ steps.bench-config.outputs.warmup }}
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           persist-credentials: false
           sparse-checkout: .github/scripts
@@ -290,7 +290,7 @@ jobs:
       actions: read
     timeout-minutes: 120
     env:
-      BENCH_RPC_URL: https://ethereum.reth.rs/rpc
+      BENCH_RPC_URL: http://ethereum-mainnet-stable-reth-greedy-goose:8545
       SCHELK_MOUNT: /reth-bench
       RETH_SCOPE: reth-bench.scope
       BENCH_WORK_DIR: ${{ github.workspace }}/bench-work
@@ -308,9 +308,11 @@ jobs:
       BENCH_RUN_PAIRS: "2"
       BENCH_COMMENT_ID: ""
       BENCH_SLACK: ${{ github.event_name == 'workflow_dispatch' && inputs.slack || 'always' }}
+      BENCH_TARGET_METRICS_CONFIG: .github/config/bench-metrics-targets.json
       BENCH_NODE_BIN: reth
       BENCH_SNAPSHOT_MANIFEST_URL: ${{ secrets.BENCH_SNAPSHOT_MANIFEST_URL }}
       BENCH_METRICS_ADDR: "127.0.0.1:9001"
+      BENCH_TARGET_METRICS_SCRAPE_INTERVAL_MS: "200"
       BENCH_OTLP_DISABLED: ${{ needs.resolve-refs.outputs.mode == 'release' && 'true' || 'false' }}
       BENCH_OTLP_TRACES_ENDPOINT: ${{ needs.resolve-refs.outputs.mode != 'release' && secrets.BENCH_OTLP_TRACES_ENDPOINT || '' }}
       BENCH_OTLP_LOGS_ENDPOINT: ${{ needs.resolve-refs.outputs.mode != 'release' && secrets.BENCH_OTLP_LOGS_ENDPOINT || '' }}
@@ -324,7 +326,7 @@ jobs:
       - name: Clean up previous bench-work
         run: sudo rm -rf "$BENCH_WORK_DIR" 2>/dev/null || true
 
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           persist-credentials: false
           submodules: true
@@ -345,10 +347,11 @@ jobs:
             const jobUrl = job ? job.html_url : `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
             core.exportVariable('BENCH_JOB_URL', jobUrl);
 
+      - uses: rui314/setup-mold@9c9c13bf4c3f1adef0cc596abc155580bcb04444 # v1
       - uses: dtolnay/rust-toolchain@stable
-      - uses: mozilla-actions/sccache-action@7d986dd989559c6ecdb630a3fd2557667be217ad # v0.0.9
+      - uses: mozilla-actions/sccache-action@9e7fa8a12102821edf02ca5dbea1acd0f89a2696 # v0.0.10
         continue-on-error: true
-      - uses: astral-sh/setup-uv@bd01e18f51369d5a26f1651c3cb451d3417e3bba # v6.3.1
+      - uses: astral-sh/setup-uv@fac544c07dec837d0ccb6301d7b5580bf5edae39 # v8.2.0
 
       - name: Install dependencies
         env:
@@ -359,7 +362,7 @@ jobs:
           # apt packages
           sudo apt-get update -qq
           sudo apt-get install -y --no-install-recommends \
-            python3 make jq zstd curl dmsetup \
+            python3 make jq zstd curl dmsetup m4 \
             linux-tools-"$(uname -r)" || \
             sudo apt-get install -y --no-install-recommends linux-tools-generic
 
@@ -368,6 +371,9 @@ jobs:
             curl -sSfL https://dl.min.io/client/mc/release/linux-amd64/mc -o "$HOME/.local/bin/mc"
             chmod +x "$HOME/.local/bin/mc"
           fi
+
+          # llvm
+          .github/scripts/install_llvm.sh ubuntu
 
           # uv (Python package manager)
           if ! command -v uv &>/dev/null; then
@@ -396,7 +402,7 @@ jobs:
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
           echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
           missing=()
-          for cmd in mc schelk cpupower taskset stdbuf python3 curl make uv jq; do
+          for cmd in mc schelk cpupower taskset stdbuf python3 curl make uv jq m4; do
             command -v "$cmd" &>/dev/null || missing+=("$cmd")
           done
           if [ ${#missing[@]} -gt 0 ]; then
@@ -665,6 +671,9 @@ jobs:
           if [ -n "$GRAFANA_URL" ]; then
             SUMMARY_ARGS="$SUMMARY_ARGS --grafana-url $GRAFANA_URL"
           fi
+          if [ -n "${BENCH_TARGET_METRICS_CONFIG:-}" ]; then
+            SUMMARY_ARGS="$SUMMARY_ARGS --target-metrics-config $BENCH_TARGET_METRICS_CONFIG"
+          fi
           # shellcheck disable=SC2086
           python3 .github/scripts/bench-reth-summary.py $SUMMARY_ARGS
 
@@ -712,7 +721,7 @@ jobs:
 
       - name: Upload results
         if: "!cancelled()"
-        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: bench-scheduled-results
           path: ${{ env.BENCH_WORK_DIR }}
@@ -727,20 +736,39 @@ jobs:
           CHART_DIR="${BENCH_MODE}/${RUN_ID}"
           CHARTS_REPO="https://x-access-token:${DEREK_TOKEN}@github.com/decofe/reth-bench-charts.git"
 
-          TMP_DIR=$(mktemp -d)
-          if git clone --depth 1 "${CHARTS_REPO}" "${TMP_DIR}" 2>/dev/null; then
-            true
-          else
-            git init "${TMP_DIR}"
-            git -C "${TMP_DIR}" remote add origin "${CHARTS_REPO}"
-          fi
-          .github/scripts/configure-git-token-user.sh "${TMP_DIR}" "${DEREK_TOKEN}"
+          TMP_DIR=""
+          prepare_charts() {
+            if [ -n "${TMP_DIR}" ]; then
+              rm -rf "${TMP_DIR}"
+            fi
 
-          mkdir -p "${TMP_DIR}/${CHART_DIR}"
-          cp "$BENCH_WORK_DIR"/charts/*.png "${TMP_DIR}/${CHART_DIR}/"
-          git -C "${TMP_DIR}" add "${CHART_DIR}"
-          git -C "${TMP_DIR}" commit -m "nightly bench charts for run ${RUN_ID}"
-          git -C "${TMP_DIR}" push origin HEAD:main
+            TMP_DIR=$(mktemp -d)
+            if git clone --depth 1 "${CHARTS_REPO}" "${TMP_DIR}" 2>/dev/null; then
+              true
+            else
+              git init "${TMP_DIR}"
+              git -C "${TMP_DIR}" remote add origin "${CHARTS_REPO}"
+            fi
+            .github/scripts/configure-git-token-user.sh "${TMP_DIR}" "${DEREK_TOKEN}"
+
+            mkdir -p "${TMP_DIR}/${CHART_DIR}"
+            cp "$BENCH_WORK_DIR"/charts/*.png "${TMP_DIR}/${CHART_DIR}/"
+            git -C "${TMP_DIR}" add "${CHART_DIR}"
+          }
+
+          for attempt in 1 2 3 4 5; do
+            prepare_charts
+            git -C "${TMP_DIR}" commit -m "nightly bench charts for run ${RUN_ID}"
+            if git -C "${TMP_DIR}" push origin HEAD:main; then
+              break
+            fi
+            if [ "$attempt" -eq 5 ]; then
+              echo "::error::Failed to push charts after ${attempt} attempts"
+              rm -rf "${TMP_DIR}"
+              exit 1
+            fi
+            sleep "$attempt"
+          done
           echo "sha=$(git -C "${TMP_DIR}" rev-parse HEAD)" >> "$GITHUB_OUTPUT"
           rm -rf "${TMP_DIR}"
 
@@ -880,6 +908,7 @@ jobs:
             const { emoji, label } = verdict(changes);
             const headerEmoji = SLACK_VERDICT[emoji] || emoji;
             const commitUrl = `https://github.com/${repo}/commit`;
+            const repoLink = `<https://github.com/${repo}|Reth>`;
             const baselineLink = `<${commitUrl}/${summary.baseline.ref}|${summary.baseline.name}>`;
             const featureLink = `<${commitUrl}/${summary.feature.ref}|${summary.feature.name}>`;
             const diffUrl = `https://github.com/${repo}/compare/${summary.baseline.ref}...${summary.feature.ref}`;
@@ -890,6 +919,7 @@ jobs:
             const modeLabel = mode === 'release' ? 'Release Regression' : mode === 'hourly' ? 'Hourly Regression' : 'Nightly Regression';
             const sectionText = [
               `*${modeLabel}*`,
+              `*Repo:* ${repoLink}`,
               '',
               `*Baseline:* ${baselineLink}`,
               `*Feature:* ${featureLink}`,
@@ -1013,7 +1043,7 @@ jobs:
               },
               {
                 type: 'section',
-                text: { type: 'mrkdwn', text: `*${modeLabel} regression* failed while *${failedStep}*\ncc <@U09FARE0B9Q> <@U09FAL2UMLJ>\n<@U0AAA8F0JEM> investigate this` },
+                text: { type: 'mrkdwn', text: `*${modeLabel} regression* failed while *${failedStep}*\ncc <@U09FARE0B9Q> <@U09FAL2UMLJ>\n<@U0ANX3AM5RR> investigate this` },
               },
               {
                 type: 'actions',
@@ -1063,7 +1093,7 @@ jobs:
     name: save-state
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           persist-credentials: false
           sparse-checkout: .github/scripts

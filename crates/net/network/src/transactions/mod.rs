@@ -2,6 +2,7 @@
 
 use alloy_consensus::transaction::TxHashRef;
 use rayon::iter::{IntoParallelIterator, ParallelIterator};
+use smallvec::SmallVec;
 
 /// Aggregation on configurable parameters for [`TransactionsManager`].
 pub mod config;
@@ -37,19 +38,23 @@ use crate::{
     transactions::config::{StrictEthAnnouncementFilter, TransactionPropagationKind},
     NetworkHandle, TxTypesCounter,
 };
+use alloy_eips::eip2718::Typed2718;
 use alloy_primitives::{
-    map::{B256Map, B256Set, FbBuildHasher},
+    bytes::BufMut,
+    map::{hash_map::Entry, B256Map, B256Set, FbBuildHasher, HashMap, HashSet},
     TxHash, B256,
 };
+use alloy_rlp::Encodable;
 use constants::SOFT_LIMIT_COUNT_HASHES_IN_NEW_POOLED_TRANSACTIONS_BROADCAST_MESSAGE;
 use futures::{stream::FuturesUnordered, Future, StreamExt};
 use reth_eth_wire::{
-    DedupPayload, EthNetworkPrimitives, EthVersion, GetPooledTransactions, HandleMempoolData,
-    HandleVersionedMempoolData, NetworkPrimitives, NewPooledTransactionHashes,
+    BroadcastPoolTransactions, DedupPayload, EthNetworkPrimitives, EthVersion,
+    GetPooledTransactions, HandleMempoolData, HandleVersionedMempoolData, LazyEncoded,
+    LazyEncodedTransaction, NetworkPrimitives, NewPooledTransactionHashes,
     NewPooledTransactionHashes66, NewPooledTransactionHashes68, NewPooledTransactionHashes72,
     PooledTransactions, RequestTxHashes, Transactions, ValidAnnouncementData,
 };
-use reth_ethereum_primitives::{TransactionSigned, TxType};
+use reth_ethereum_primitives::TxType;
 use reth_metrics::common::mpsc::MemoryBoundedReceiver;
 use reth_network_api::{
     events::{PeerEvent, SessionInfo},
@@ -69,7 +74,6 @@ use reth_transaction_pool::{
     PropagatedTransactions, TransactionPool, ValidPoolTransaction,
 };
 use std::{
-    collections::{hash_map::Entry, HashMap, HashSet},
     pin::Pin,
     sync::{
         atomic::{AtomicUsize, Ordering},
@@ -293,7 +297,7 @@ pub struct TransactionsManager<Pool, N: NetworkPrimitives = EthNetworkPrimitives
     ///
     /// This way we can track incoming transactions and prevent multiple pool imports for the same
     /// transaction
-    transactions_by_peers: B256Map<HashSet<PeerId>>,
+    transactions_by_peers: B256Map<SmallVec<[PeerId; 1]>>,
     /// Transactions that are currently imported into the `Pool`.
     ///
     /// The import process includes:
@@ -311,7 +315,7 @@ pub struct TransactionsManager<Pool, N: NetworkPrimitives = EthNetworkPrimitives
     /// Bad imports.
     bad_imports: LruCache<TxHash, FbBuildHasher<32>>,
     /// All the connected peers.
-    peers: HashMap<PeerId, PeerMetadata<N>>,
+    peers: HashMap<PeerId, PeerMetadata<N>, FbBuildHasher<64>>,
     /// Send half for the command channel.
     ///
     /// This is kept so that a new [`TransactionsHandle`] can be created at any time.
@@ -388,7 +392,7 @@ impl<Pool: TransactionPool, N: NetworkPrimitives> TransactionsManager<Pool, N> {
         // over the network
         let pending = pool.pending_transactions_listener();
         let pending_pool_imports_info =
-            PendingPoolImportsInfo::new(DEFAULT_MAX_COUNT_PENDING_POOL_IMPORTS);
+            PendingPoolImportsInfo::new(transactions_manager_config.max_pending_pool_imports);
         let metrics = TransactionsManagerMetrics::default();
         metrics
             .capacity_pending_pool_imports
@@ -936,14 +940,14 @@ where
 
         // send full transactions, if any
         if let Some(new_full_transactions) = full {
-            for tx in &new_full_transactions {
-                propagated.record(*tx.tx_hash(), PropagateKind::Full(peer_id));
+            for hash in new_full_transactions.iter_hashes() {
+                propagated.record(*hash, PropagateKind::Full(peer_id));
                 // mark transaction as seen by peer
-                peer.seen_transactions.insert(*tx.tx_hash());
+                peer.seen_transactions.insert(*hash);
             }
 
             // send full transactions
-            self.network.send_transactions(peer_id, new_full_transactions);
+            self.network.send_broadcast_pool_transactions(peer_id, new_full_transactions);
         }
 
         // Update propagated transactions metrics
@@ -997,11 +1001,9 @@ where
                 return
             }
 
-            if let Some(peer) = self.peers.get_mut(&peer_id) {
-                for hash in new_pooled_hashes.iter_hashes().copied() {
-                    propagated.record(hash, PropagateKind::Hash(peer_id));
-                    peer.seen_transactions.insert(hash);
-                }
+            for hash in new_pooled_hashes.iter_hashes().copied() {
+                propagated.record(hash, PropagateKind::Hash(peer_id));
+                peer.seen_transactions.insert(hash);
             }
 
             trace!(target: "net::tx::propagation", ?peer_id, ?new_pooled_hashes, "Propagating transactions to peer");
@@ -1027,7 +1029,7 @@ where
     /// Note: EIP-4844 are disallowed from being broadcast in full and are only ever sent as hashes, see also <https://eips.ethereum.org/EIPS/eip-4844#networking>.
     fn propagate_transactions(
         &mut self,
-        to_propagate: Vec<PropagateTransaction<N::BroadcastedTransaction>>,
+        to_propagate: Vec<PropagateTransaction>,
         propagation_mode: PropagationMode,
     ) -> PropagatedTransactions {
         let mut propagated = PropagatedTransactions::default();
@@ -1039,28 +1041,35 @@ where
         let max_num_full = self.config.propagation_mode.full_peer_count(self.peers.len());
 
         // Note: Assuming ~random~ order due to random state of the peers map hasher
-        for (peer_idx, (peer_id, peer)) in self.peers.iter_mut().enumerate() {
+        let mut num_full_peers = 0;
+        for (peer_id, peer) in &mut self.peers {
             if !self.policies.propagation_policy().can_propagate(peer) {
                 // skip peers we should not propagate to
                 continue
             }
+
             // determine whether to send full tx objects or hashes.
-            let mut builder = if peer_idx > max_num_full {
-                PropagateTransactionsBuilder::pooled(peer.version)
+            let mut builder = if num_full_peers < max_num_full {
+                num_full_peers += 1;
+                PropagateTransactionsBuilder::full(peer.version, to_propagate.len())
             } else {
-                PropagateTransactionsBuilder::full(peer.version)
+                PropagateTransactionsBuilder::pooled(peer.version, to_propagate.len())
             };
 
+            // Transactions are optimistically marked as seen by the peer when included in the
+            // message, see `PeerMetadata::seen_transactions`.
             if propagation_mode.is_forced() {
-                builder.extend(to_propagate.iter());
+                for tx in &to_propagate {
+                    peer.seen_transactions.insert(*tx.tx_hash());
+                    builder.push(tx);
+                }
             } else {
                 // Iterate through the transactions to propagate and fill the hashes and full
                 // transaction lists, before deciding whether or not to send full transactions to
                 // the peer.
                 for tx in &to_propagate {
-                    // Only proceed if the transaction is not in the peer's list of seen
-                    // transactions
-                    if !peer.seen_transactions.contains(tx.tx_hash()) {
+                    // Only include the transaction if the peer hasn't seen it yet
+                    if peer.seen_transactions.insert(*tx.tx_hash()) {
                         builder.push(tx);
                     }
                 }
@@ -1075,15 +1084,27 @@ where
 
             // send hashes if any
             if let Some(mut new_pooled_hashes) = pooled {
-                // enforce tx soft limit per message for the (unlikely) event the number of
-                // hashes exceeds it
-                new_pooled_hashes
-                    .truncate(SOFT_LIMIT_COUNT_HASHES_IN_NEW_POOLED_TRANSACTIONS_BROADCAST_MESSAGE);
+                // Unhappy path: too many hashes for a single message. This should not happen
+                // during regular propagation, which is capped at the soft limit per batch, and
+                // is only reachable via manual propagation commands with oversized batches.
+                if new_pooled_hashes.len() >
+                    SOFT_LIMIT_COUNT_HASHES_IN_NEW_POOLED_TRANSACTIONS_BROADCAST_MESSAGE
+                {
+                    // hashes that exceed the limit are not sent, so they must not be tracked as
+                    // seen by the peer
+                    for hash in new_pooled_hashes
+                        .iter_hashes()
+                        .skip(SOFT_LIMIT_COUNT_HASHES_IN_NEW_POOLED_TRANSACTIONS_BROADCAST_MESSAGE)
+                    {
+                        peer.seen_transactions.remove(hash);
+                    }
+                    new_pooled_hashes.truncate(
+                        SOFT_LIMIT_COUNT_HASHES_IN_NEW_POOLED_TRANSACTIONS_BROADCAST_MESSAGE,
+                    );
+                }
 
                 for hash in new_pooled_hashes.iter_hashes().copied() {
                     propagated.record(hash, PropagateKind::Hash(*peer_id));
-                    // mark transaction as seen by peer
-                    peer.seen_transactions.insert(hash);
                 }
 
                 trace!(target: "net::tx", ?peer_id, num_txs=?new_pooled_hashes.len(), "Propagating tx hashes to peer");
@@ -1094,16 +1115,14 @@ where
 
             // send full transactions, if any
             if let Some(new_full_transactions) = full {
-                for tx in &new_full_transactions {
-                    propagated.record(*tx.tx_hash(), PropagateKind::Full(*peer_id));
-                    // mark transaction as seen by peer
-                    peer.seen_transactions.insert(*tx.tx_hash());
+                for hash in new_full_transactions.iter_hashes() {
+                    propagated.record(*hash, PropagateKind::Full(*peer_id));
                 }
 
                 trace!(target: "net::tx", ?peer_id, num_txs=?new_full_transactions.len(), "Propagating full transactions to peer");
 
                 // send full transactions
-                self.network.send_transactions(*peer_id, new_full_transactions);
+                self.network.send_broadcast_pool_transactions(*peer_id, new_full_transactions);
             }
         }
 
@@ -1187,7 +1206,7 @@ where
                 self.pool.on_propagated(propagated);
             }
             TransactionsCommand::GetTransactionHashes { peers, tx } => {
-                let mut res = HashMap::with_capacity(peers.len());
+                let mut res = HashMap::with_capacity_and_hasher(peers.len(), Default::default());
                 for peer_id in peers {
                     let hashes = self
                         .peers
@@ -1404,7 +1423,10 @@ where
         // cheap in-memory checks against local maps
         transactions.retain(|tx| {
             if let Entry::Occupied(mut entry) = self.transactions_by_peers.entry(*tx.tx_hash()) {
-                entry.get_mut().insert(peer_id);
+                let peers = entry.get_mut();
+                if !peers.contains(&peer_id) {
+                    peers.push(peer_id);
+                }
                 return false
             }
             if self.bad_imports.contains(tx.tx_hash()) {
@@ -1452,7 +1474,7 @@ where
 
         // Record the transactions as seen by the peer
         for tx in &new_txs {
-            self.transactions_by_peers.insert(*tx.hash(), HashSet::from([peer_id]));
+            self.transactions_by_peers.insert(*tx.hash(), smallvec::smallvec![peer_id]);
         }
 
         // 3. import new transactions as a batch to minimize lock contention on the underlying
@@ -1566,41 +1588,6 @@ where
             |event| this.on_network_event(event)
         );
 
-        // Advances new __pending__ transactions, transactions that were successfully inserted into
-        // pending set in pool (are valid), and propagates them (inform peers which
-        // transactions we have seen).
-        //
-        // We try to drain this to batch the transactions in a single message.
-        //
-        // We don't expect this buffer to be large, since only pending transactions are
-        // emitted here.
-        let mut new_txs = Vec::new();
-        let maybe_more_pending_txns = match this.pending_transactions.poll_recv_many(
-            cx,
-            &mut new_txs,
-            SOFT_LIMIT_COUNT_HASHES_IN_NEW_POOLED_TRANSACTIONS_BROADCAST_MESSAGE,
-        ) {
-            Poll::Ready(count) => {
-                if count == SOFT_LIMIT_COUNT_HASHES_IN_NEW_POOLED_TRANSACTIONS_BROADCAST_MESSAGE {
-                    // we filled the entire buffer capacity and need to try again on the next poll
-                    // immediately
-                    true
-                } else {
-                    // try once more, because mostlikely the channel is now empty and the waker is
-                    // registered if this is pending, if we filled additional hashes, we poll again
-                    // on the next iteration
-                    let limit =
-                        SOFT_LIMIT_COUNT_HASHES_IN_NEW_POOLED_TRANSACTIONS_BROADCAST_MESSAGE -
-                            new_txs.len();
-                    this.pending_transactions.poll_recv_many(cx, &mut new_txs, limit).is_ready()
-                }
-            }
-            Poll::Pending => false,
-        };
-        if !new_txs.is_empty() {
-            this.on_new_pending_transactions(new_txs);
-        }
-
         // Advance incoming transaction events (stream new txns/announcements from
         // network manager and queue for import to pool/fetch txns).
         //
@@ -1665,6 +1652,45 @@ where
             this.pool_imports.poll_next_unpin(cx),
             |batch_results| this.on_batch_import_result(batch_results)
         );
+
+        // Advances new __pending__ transactions, transactions that were successfully inserted into
+        // pending set in pool (are valid), and propagates them (inform peers which
+        // transactions we have seen).
+        //
+        // This is polled after pool imports so transactions that became pending in this poll
+        // iteration are propagated immediately, instead of waiting for the task to be woken
+        // again.
+        //
+        // We try to drain this to batch the transactions in a single message.
+        //
+        // We don't expect this buffer to be large, since only pending transactions are
+        // emitted here.
+        let mut new_txs = Vec::new();
+        let maybe_more_pending_txns = match this.pending_transactions.poll_recv_many(
+            cx,
+            &mut new_txs,
+            SOFT_LIMIT_COUNT_HASHES_IN_NEW_POOLED_TRANSACTIONS_BROADCAST_MESSAGE,
+        ) {
+            Poll::Ready(count) => {
+                if count == SOFT_LIMIT_COUNT_HASHES_IN_NEW_POOLED_TRANSACTIONS_BROADCAST_MESSAGE {
+                    // we filled the entire buffer capacity and need to try again on the next poll
+                    // immediately
+                    true
+                } else {
+                    // try once more, because mostlikely the channel is now empty and the waker is
+                    // registered if this is pending, if we filled additional hashes, we poll again
+                    // on the next iteration
+                    let limit =
+                        SOFT_LIMIT_COUNT_HASHES_IN_NEW_POOLED_TRANSACTIONS_BROADCAST_MESSAGE -
+                            new_txs.len();
+                    this.pending_transactions.poll_recv_many(cx, &mut new_txs, limit).is_ready()
+                }
+            }
+            Poll::Pending => false,
+        };
+        if !new_txs.is_empty() {
+            this.on_new_pending_transactions(new_txs);
+        }
 
         // Tries to drain hashes pending fetch cache if the tx manager currently has
         // capacity for this (fetch txns).
@@ -1737,51 +1763,129 @@ impl PropagationMode {
 
 /// A transaction that's about to be propagated to multiple peers.
 #[derive(Debug, Clone)]
-struct PropagateTransaction<T = TransactionSigned> {
-    size: usize,
-    transaction: Arc<T>,
+struct PropagateTransaction {
+    is_broadcastable_in_full: bool,
+    /// Size advertised in `NewPooledTransactionHashes` metadata and used for full broadcast
+    /// soft-limit accounting.
+    ///
+    /// This is the network encoded transaction size. For pool-backed blob transactions, this is
+    /// the pool's cached encoded length, which includes the sidecar returned by
+    /// `PooledTransactions`.
+    propagation_size: usize,
+    transaction: LazyEncodedTransaction,
 }
 
-impl<T: SignedTransaction> PropagateTransaction<T> {
-    /// Create a new instance from a transaction.
-    pub fn new(transaction: T) -> Self {
-        let size = transaction.length();
-        Self { size, transaction: Arc::new(transaction) }
+impl PropagateTransaction {
+    /// Create a new instance from a transaction supplied directly for propagation.
+    ///
+    /// Direct transactions use their EIP-2718 encoded length so eth/68+ hash announcements carry
+    /// the same size metadata as [`NewPooledTransactionHashes68::push`] and
+    /// [`NewPooledTransactionHashes72::push`].
+    fn new<T: SignedTransaction>(transaction: T) -> Self {
+        let is_broadcastable_in_full = transaction.is_broadcastable_in_full();
+        let propagation_size = transaction.encode_2718_len();
+
+        Self {
+            is_broadcastable_in_full,
+            propagation_size,
+            transaction: LazyEncoded::new(transaction),
+        }
     }
 
-    /// Create a new instance from a pooled transaction
-    fn pool_tx<P>(tx: Arc<ValidPoolTransaction<P>>) -> Self
-    where
-        P: PoolTransaction<Consensus = T>,
-    {
-        let size = tx.encoded_length();
-        let transaction = tx.transaction.clone_into_consensus();
-        let transaction = Arc::new(transaction.into_inner());
-        Self { size, transaction }
+    /// Create a new instance from a pooled transaction.
+    ///
+    /// Pool transactions already cache the network encoded size used by txpool admission and
+    /// pooled hash announcements. For blob transactions, this includes the sidecar size expected in
+    /// a `PooledTransactions` response.
+    fn pool_tx<P: PoolTransaction>(tx: Arc<ValidPoolTransaction<P>>) -> Self {
+        let is_broadcastable_in_full = tx.transaction.consensus_ref().is_broadcastable_in_full();
+        let propagation_size = tx.encoded_length();
+        Self {
+            is_broadcastable_in_full,
+            propagation_size,
+            transaction: LazyEncoded::new(PropagatePooledTransactionEncoder::new(tx)),
+        }
     }
 
     fn tx_hash(&self) -> &TxHash {
         self.transaction.tx_hash()
+    }
+
+    /// Returns the network encoded size used for propagation limits and hash metadata.
+    const fn propagation_size(&self) -> usize {
+        self.propagation_size
+    }
+
+    fn tx_type(&self) -> u8 {
+        self.transaction.ty()
+    }
+
+    const fn is_broadcastable_in_full(&self) -> bool {
+        self.is_broadcastable_in_full
+    }
+
+    fn shared(&self) -> LazyEncodedTransaction {
+        self.transaction.clone()
+    }
+}
+
+/// A pooled transaction encoder that avoids cloning into the consensus transaction for propagation.
+#[derive(Debug)]
+struct PropagatePooledTransactionEncoder<P: PoolTransaction> {
+    transaction: Arc<ValidPoolTransaction<P>>,
+}
+
+impl<P: PoolTransaction> PropagatePooledTransactionEncoder<P> {
+    const fn new(transaction: Arc<ValidPoolTransaction<P>>) -> Self {
+        Self { transaction }
+    }
+
+    fn encode_uncached(&self, out: &mut dyn BufMut) {
+        (*self.transaction.transaction.consensus_ref().inner()).encode(out);
+    }
+}
+
+impl<P: PoolTransaction> Encodable for PropagatePooledTransactionEncoder<P> {
+    fn encode(&self, out: &mut dyn BufMut) {
+        self.encode_uncached(out);
+    }
+
+    fn length(&self) -> usize {
+        (*self.transaction.transaction.consensus_ref().inner()).length()
+    }
+}
+
+impl<P: PoolTransaction> TxHashRef for PropagatePooledTransactionEncoder<P> {
+    fn tx_hash(&self) -> &TxHash {
+        self.transaction.hash()
+    }
+}
+
+impl<P: PoolTransaction> Typed2718 for PropagatePooledTransactionEncoder<P> {
+    fn ty(&self) -> u8 {
+        self.transaction.transaction.ty()
     }
 }
 
 /// Helper type to construct the appropriate message to send to the peer based on whether the peer
 /// should receive them in full or as pooled
 #[derive(Debug, Clone)]
-enum PropagateTransactionsBuilder<T> {
+enum PropagateTransactionsBuilder {
     Pooled(PooledTransactionsHashesBuilder),
-    Full(FullTransactionsBuilder<T>),
+    Full(FullTransactionsBuilder),
 }
 
-impl<T> PropagateTransactionsBuilder<T> {
-    /// Create a builder for pooled transactions
-    fn pooled(version: EthVersion) -> Self {
-        Self::Pooled(PooledTransactionsHashesBuilder::new(version))
+impl PropagateTransactionsBuilder {
+    /// Create a builder for pooled transactions with capacity for the expected number of
+    /// transactions.
+    fn pooled(version: EthVersion, capacity: usize) -> Self {
+        Self::Pooled(PooledTransactionsHashesBuilder::with_capacity(version, capacity))
     }
 
-    /// Create a builder that sends transactions in full and records transactions that don't fit.
-    fn full(version: EthVersion) -> Self {
-        Self::Full(FullTransactionsBuilder::new(version))
+    /// Create a builder that sends transactions in full and records transactions that don't fit,
+    /// with capacity for the expected number of transactions.
+    fn full(version: EthVersion, capacity: usize) -> Self {
+        Self::Full(FullTransactionsBuilder::with_capacity(version, capacity))
     }
 
     /// Returns true if no transactions are recorded.
@@ -1793,7 +1897,7 @@ impl<T> PropagateTransactionsBuilder<T> {
     }
 
     /// Consumes the type and returns the built messages that should be sent to the peer.
-    fn build(self) -> PropagateTransactions<T> {
+    fn build(self) -> PropagateTransactions {
         match self {
             Self::Pooled(pooled) => {
                 PropagateTransactions { pooled: Some(pooled.build()), full: None }
@@ -1803,16 +1907,9 @@ impl<T> PropagateTransactionsBuilder<T> {
     }
 }
 
-impl<T: SignedTransaction> PropagateTransactionsBuilder<T> {
-    /// Appends all transactions
-    fn extend<'a>(&mut self, txs: impl IntoIterator<Item = &'a PropagateTransaction<T>>) {
-        for tx in txs {
-            self.push(tx);
-        }
-    }
-
+impl PropagateTransactionsBuilder {
     /// Appends a transaction to the list.
-    fn push(&mut self, transaction: &PropagateTransaction<T>) {
+    fn push(&mut self, transaction: &PropagateTransaction) {
         match self {
             Self::Pooled(builder) => builder.push(transaction),
             Self::Full(builder) => builder.push(transaction),
@@ -1821,11 +1918,11 @@ impl<T: SignedTransaction> PropagateTransactionsBuilder<T> {
 }
 
 /// Represents how the transactions should be sent to a peer if any.
-struct PropagateTransactions<T> {
+struct PropagateTransactions {
     /// The pooled transaction hashes to send.
     pooled: Option<NewPooledTransactionHashes>,
     /// The transactions to send in full.
-    full: Option<Vec<Arc<T>>>,
+    full: Option<BroadcastPoolTransactions>,
 }
 
 /// Helper type for constructing the full transaction message that enforces the
@@ -1833,16 +1930,16 @@ struct PropagateTransactions<T> {
 /// and enforces other propagation rules for EIP-4844 and tracks those transactions that can't be
 /// broadcasted in full.
 #[derive(Debug, Clone)]
-struct FullTransactionsBuilder<T> {
+struct FullTransactionsBuilder {
     /// The soft limit to enforce for a single broadcast message of full transactions.
     total_size: usize,
     /// All transactions to be broadcasted.
-    transactions: Vec<Arc<T>>,
+    transactions: Vec<LazyEncodedTransaction>,
     /// Transactions that didn't fit into the broadcast message
     pooled: PooledTransactionsHashesBuilder,
 }
 
-impl<T> FullTransactionsBuilder<T> {
+impl FullTransactionsBuilder {
     /// Create a builder for the negotiated version of the peer's session
     fn new(version: EthVersion) -> Self {
         Self {
@@ -1852,22 +1949,33 @@ impl<T> FullTransactionsBuilder<T> {
         }
     }
 
+    /// Create a builder with capacity for the expected number of full transactions.
+    ///
+    /// The overflow hashes builder remains lazily allocated since most transactions are expected
+    /// to be broadcast in full.
+    fn with_capacity(version: EthVersion, capacity: usize) -> Self {
+        Self {
+            total_size: 0,
+            pooled: PooledTransactionsHashesBuilder::new(version),
+            transactions: Vec::with_capacity(capacity),
+        }
+    }
+
     /// Returns whether or not any transactions are in the [`FullTransactionsBuilder`].
     fn is_empty(&self) -> bool {
         self.transactions.is_empty() && self.pooled.is_empty()
     }
 
     /// Returns the messages that should be propagated to the peer.
-    fn build(self) -> PropagateTransactions<T> {
+    fn build(self) -> PropagateTransactions {
         let pooled = Some(self.pooled.build()).filter(|pooled| !pooled.is_empty());
-        let full = Some(self.transactions).filter(|full| !full.is_empty());
+        let full =
+            (!self.transactions.is_empty()).then_some(BroadcastPoolTransactions(self.transactions));
         PropagateTransactions { pooled, full }
     }
-}
 
-impl<T: SignedTransaction> FullTransactionsBuilder<T> {
     /// Appends all transactions.
-    fn extend(&mut self, txs: impl IntoIterator<Item = PropagateTransaction<T>>) {
+    fn extend(&mut self, txs: impl IntoIterator<Item = PropagateTransaction>) {
         for tx in txs {
             self.push(&tx)
         }
@@ -1882,7 +1990,7 @@ impl<T: SignedTransaction> FullTransactionsBuilder<T> {
     /// If the transaction is unsuitable for broadcast or would exceed the softlimit, it is appended
     /// to list of pooled transactions, (e.g. 4844 transactions).
     /// See also [`SignedTransaction::is_broadcastable_in_full`].
-    fn push(&mut self, transaction: &PropagateTransaction<T>) {
+    fn push(&mut self, transaction: &PropagateTransaction) {
         // Do not send full 4844 transaction hashes to peers.
         //
         //  Nodes MUST NOT automatically broadcast blob transactions to their peers.
@@ -1891,12 +1999,12 @@ impl<T: SignedTransaction> FullTransactionsBuilder<T> {
         //  via `GetPooledTransactions`.
         //
         // From: <https://eips.ethereum.org/EIPS/eip-4844#networking>
-        if !transaction.transaction.is_broadcastable_in_full() {
+        if !transaction.is_broadcastable_in_full() {
             self.pooled.push(transaction);
             return
         }
 
-        let new_size = self.total_size + transaction.size;
+        let new_size = self.total_size + transaction.propagation_size();
         if new_size > DEFAULT_SOFT_LIMIT_BYTE_SIZE_TRANSACTIONS_BROADCAST_MESSAGE &&
             self.total_size > 0
         {
@@ -1906,7 +2014,7 @@ impl<T: SignedTransaction> FullTransactionsBuilder<T> {
         }
 
         self.total_size = new_size;
-        self.transactions.push(Arc::clone(&transaction.transaction));
+        self.transactions.push(transaction.shared());
     }
 }
 
@@ -1958,27 +2066,24 @@ impl PooledTransactionsHashesBuilder {
     }
 
     /// Appends all hashes
-    fn extend<T: SignedTransaction>(
-        &mut self,
-        txs: impl IntoIterator<Item = PropagateTransaction<T>>,
-    ) {
+    fn extend(&mut self, txs: impl IntoIterator<Item = PropagateTransaction>) {
         for tx in txs {
             self.push(&tx);
         }
     }
 
-    fn push<T: SignedTransaction>(&mut self, tx: &PropagateTransaction<T>) {
+    fn push(&mut self, tx: &PropagateTransaction) {
         match self {
             Self::Eth66(msg) => msg.push(*tx.tx_hash()),
             Self::Eth68(msg) => {
                 msg.hashes.push(*tx.tx_hash());
-                msg.sizes.push(tx.size);
-                msg.types.push(tx.transaction.ty());
+                msg.sizes.push(tx.propagation_size());
+                msg.types.push(tx.tx_type());
             }
             Self::Eth72(msg) => {
                 msg.hashes.push(*tx.tx_hash());
-                msg.sizes.push(tx.size);
-                msg.types.push(tx.transaction.ty());
+                msg.sizes.push(tx.propagation_size());
+                msg.types.push(tx.tx_type());
             }
         }
     }
@@ -1991,6 +2096,20 @@ impl PooledTransactionsHashesBuilder {
                 Self::Eth68(Default::default())
             }
             EthVersion::Eth72 => Self::Eth72(Default::default()),
+        }
+    }
+
+    /// Create a builder for the negotiated version of the peer's session with capacity for the
+    /// expected number of hashes.
+    fn with_capacity(version: EthVersion, capacity: usize) -> Self {
+        match version {
+            EthVersion::Eth66 | EthVersion::Eth67 => {
+                Self::Eth66(NewPooledTransactionHashes66::with_capacity(capacity))
+            }
+            EthVersion::Eth68 | EthVersion::Eth69 | EthVersion::Eth70 | EthVersion::Eth71 => {
+                Self::Eth68(NewPooledTransactionHashes68::with_capacity(capacity))
+            }
+            EthVersion::Eth72 => Self::Eth72(NewPooledTransactionHashes72::with_capacity(capacity)),
         }
     }
 
@@ -2107,7 +2226,7 @@ enum TransactionsCommand<N: NetworkPrimitives = EthNetworkPrimitives> {
     /// Propagate a collection of hashes to all peers.
     PropagateTransactions(Vec<TxHash>),
     /// Propagate a collection of broadcastable transactions in full to all peers.
-    BroadcastTransactions(Vec<PropagateTransaction<N::BroadcastedTransaction>>),
+    BroadcastTransactions(Vec<PropagateTransaction>),
     /// Request transaction hashes known by specific peers from the [`TransactionsManager`].
     GetTransactionHashes { peers: Vec<PeerId>, tx: oneshot::Sender<HashMap<PeerId, B256Set>> },
     /// Requests a clone of the sender channel to the peer.
@@ -2220,8 +2339,8 @@ mod tests {
         transactions::config::RelaxedEthAnnouncementFilter,
         NetworkConfigBuilder, NetworkManager,
     };
-    use alloy_consensus::{TxEip1559, TxLegacy};
-    use alloy_eips::eip4844::BlobTransactionValidationError;
+    use alloy_consensus::{Transaction as _, TxEip1559, TxLegacy};
+    use alloy_eips::{eip2718::Encodable2718, eip4844::BlobTransactionValidationError};
     use alloy_primitives::{hex, Signature, TxKind, B256, U256};
     use alloy_rlp::Decodable;
     use futures::FutureExt;
@@ -2235,17 +2354,86 @@ mod tests {
     use reth_storage_api::noop::NoopProvider;
     use reth_tasks::Runtime;
     use reth_transaction_pool::{
+        blobstore::InMemoryBlobStore,
         error::{Eip4844PoolTransactionError, InvalidPoolTransactionError, PoolError},
-        test_utils::{testing_pool, MockTransaction, MockTransactionFactory, TestPool},
+        identifier::SenderIdentifiers,
+        test_utils::{
+            testing_pool, MockTransaction, MockTransactionFactory, OkValidator, TestPool,
+            TransactionGenerator,
+        },
+        CoinbaseTipOrdering, EthPooledTransaction, Pool, TransactionOrigin, ValidPoolTransaction,
     };
     use secp256k1::SecretKey;
     use std::{
-        collections::HashSet,
         future::poll_fn,
         net::{IpAddr, Ipv4Addr, SocketAddr},
         str::FromStr,
+        time::Instant,
     };
     use tracing::error;
+
+    type EthTestPool = Pool<
+        OkValidator<EthPooledTransaction>,
+        CoinbaseTipOrdering<EthPooledTransaction>,
+        InMemoryBlobStore,
+    >;
+
+    async fn new_eth_tx_manager() -> (
+        TransactionsManager<EthTestPool, EthNetworkPrimitives>,
+        NetworkManager<EthNetworkPrimitives>,
+    ) {
+        let secret_key = SecretKey::new(&mut rand_08::thread_rng());
+        let client = NoopProvider::default();
+
+        let config = NetworkConfigBuilder::new(secret_key, Runtime::test())
+            .listener_port(0)
+            .disable_discovery()
+            .build(client);
+
+        let pool = Pool::new(
+            OkValidator::default(),
+            CoinbaseTipOrdering::default(),
+            InMemoryBlobStore::default(),
+            Default::default(),
+        );
+
+        let transactions_manager_config = config.transactions_manager_config.clone();
+        let (_network_handle, network, transactions, _) = NetworkManager::new(config)
+            .await
+            .unwrap()
+            .into_builder()
+            .transactions(pool.clone(), transactions_manager_config)
+            .split_with_handle();
+
+        (transactions, network)
+    }
+
+    fn valid_eth_pool_transaction(
+        transaction: EthPooledTransaction,
+    ) -> Arc<ValidPoolTransaction<EthPooledTransaction>> {
+        let mut ids = SenderIdentifiers::default();
+        let transaction_id =
+            ids.sender_id_or_create(transaction.sender()).into_transaction_id(transaction.nonce());
+
+        Arc::new(ValidPoolTransaction {
+            propagate: false,
+            transaction_id,
+            transaction,
+            timestamp: Instant::now(),
+            origin: TransactionOrigin::External,
+            authority_ids: None,
+        })
+    }
+
+    fn gen_eip1559_pooled_with_nonce<R: rand::RngCore>(
+        tx_gen: &mut TransactionGenerator<R>,
+        nonce: u64,
+    ) -> EthPooledTransaction {
+        EthPooledTransaction::try_from_consensus(
+            tx_gen.transaction().nonce(nonce).into_eip1559().try_into_recovered().unwrap(),
+        )
+        .unwrap()
+    }
 
     #[tokio::test(flavor = "multi_thread")]
     async fn test_ignored_tx_broadcasts_while_initially_syncing() {
@@ -2615,7 +2803,7 @@ mod tests {
         let hash = B256::from_slice(&[1; 32]);
 
         tx_manager.network.update_sync_state(SyncState::Idle);
-        tx_manager.transactions_by_peers.insert(hash, HashSet::from([peer_id]));
+        tx_manager.transactions_by_peers.insert(hash, smallvec::smallvec![peer_id]);
 
         let err = PoolError::new(
             hash,
@@ -2636,7 +2824,7 @@ mod tests {
         let hash = B256::from_slice(&[3; 32]);
 
         tx_manager.network.update_sync_state(SyncState::Idle);
-        tx_manager.transactions_by_peers.insert(hash, HashSet::from([peer_id]));
+        tx_manager.transactions_by_peers.insert(hash, smallvec::smallvec![peer_id]);
 
         let err = PoolError::new(
             hash,
@@ -2657,7 +2845,7 @@ mod tests {
         let hash = B256::from_slice(&[2; 32]);
 
         tx_manager.network.update_sync_state(SyncState::Idle);
-        tx_manager.transactions_by_peers.insert(hash, HashSet::from([peer_id]));
+        tx_manager.transactions_by_peers.insert(hash, smallvec::smallvec![peer_id]);
 
         let err = PoolError::new(
             hash,
@@ -2967,13 +3155,24 @@ mod tests {
     }
 
     #[test]
+    fn test_direct_propagation_transaction_uses_2718_size() {
+        let mut tx_gen = TransactionGenerator::new(rand::rng());
+        let tx = tx_gen.gen_eip1559();
+        let expected_size = tx.encode_2718_len();
+
+        let tx = PropagateTransaction::new(tx);
+
+        assert_eq!(tx.propagation_size(), expected_size);
+    }
+
+    #[test]
     fn test_transaction_builder_empty() {
-        let mut builder =
-            PropagateTransactionsBuilder::<TransactionSigned>::pooled(EthVersion::Eth68);
+        let mut builder = PropagateTransactionsBuilder::pooled(EthVersion::Eth68, 0);
         assert!(builder.is_empty());
 
-        let mut factory = MockTransactionFactory::default();
-        let tx = PropagateTransaction::pool_tx(Arc::new(factory.create_eip1559()));
+        let mut tx_gen = TransactionGenerator::new(rand::rng());
+        let tx =
+            PropagateTransaction::pool_tx(valid_eth_pool_transaction(tx_gen.gen_eip1559_pooled()));
         builder.push(&tx);
         assert!(!builder.is_empty());
 
@@ -2984,17 +3183,38 @@ mod tests {
     }
 
     #[test]
+    fn test_pooled_propagation_transaction_encoder_length_matches_network_encoding() {
+        let mut tx_gen = TransactionGenerator::new(rand::rng());
+        let tx = valid_eth_pool_transaction(tx_gen.gen_eip1559_pooled());
+        let pooled = PropagatePooledTransactionEncoder::new(tx);
+
+        let mut pooled_encoded = Vec::new();
+        pooled.encode(&mut pooled_encoded);
+        assert_eq!(pooled.length(), pooled_encoded.len());
+
+        let broadcast = BroadcastPoolTransactions(vec![LazyEncoded::new(pooled)]);
+        let mut first_encoded = Vec::new();
+        broadcast.encode(&mut first_encoded);
+        let mut second_encoded = Vec::new();
+        broadcast.encode(&mut second_encoded);
+        assert_eq!(first_encoded, second_encoded);
+
+        let mut encoded = first_encoded.as_slice();
+        let decoded = Transactions::<TransactionSigned>::decode(&mut encoded).unwrap();
+        assert_eq!(decoded.len(), 1);
+        assert!(encoded.is_empty());
+    }
+
+    #[test]
     fn test_transaction_builder_large() {
-        let mut builder =
-            PropagateTransactionsBuilder::<TransactionSigned>::full(EthVersion::Eth68);
+        let mut builder = PropagateTransactionsBuilder::full(EthVersion::Eth68, 0);
         assert!(builder.is_empty());
 
-        let mut factory = MockTransactionFactory::default();
-        let mut tx = factory.create_eip1559();
+        let mut tx_gen = TransactionGenerator::new(rand::rng());
+        let mut tx = tx_gen.gen_eip1559_pooled();
         // create a transaction that still fits
-        tx.transaction.set_size(DEFAULT_SOFT_LIMIT_BYTE_SIZE_TRANSACTIONS_BROADCAST_MESSAGE + 1);
-        let tx = Arc::new(tx);
-        let tx = PropagateTransaction::pool_tx(tx);
+        tx.encoded_length = DEFAULT_SOFT_LIMIT_BYTE_SIZE_TRANSACTIONS_BROADCAST_MESSAGE + 1;
+        let tx = PropagateTransaction::pool_tx(valid_eth_pool_transaction(tx));
         builder.push(&tx);
         assert!(!builder.is_empty());
 
@@ -3014,12 +3234,12 @@ mod tests {
 
     #[test]
     fn test_transaction_builder_eip4844() {
-        let mut builder =
-            PropagateTransactionsBuilder::<TransactionSigned>::full(EthVersion::Eth68);
+        let mut builder = PropagateTransactionsBuilder::full(EthVersion::Eth68, 0);
         assert!(builder.is_empty());
 
-        let mut factory = MockTransactionFactory::default();
-        let tx = PropagateTransaction::pool_tx(Arc::new(factory.create_eip4844()));
+        let mut tx_gen = TransactionGenerator::new(rand::rng());
+        let tx =
+            PropagateTransaction::pool_tx(valid_eth_pool_transaction(tx_gen.gen_eip4844_pooled()));
         builder.push(&tx);
         assert!(!builder.is_empty());
 
@@ -3028,7 +3248,8 @@ mod tests {
         let txs = txs.pooled.unwrap();
         assert_eq!(txs.len(), 1);
 
-        let tx = PropagateTransaction::pool_tx(Arc::new(factory.create_eip1559()));
+        let tx =
+            PropagateTransaction::pool_tx(valid_eth_pool_transaction(tx_gen.gen_eip1559_pooled()));
         builder.push(&tx);
 
         let txs = builder.clone().build();
@@ -3042,7 +3263,7 @@ mod tests {
     async fn test_propagate_full() {
         reth_tracing::init_test_tracing();
 
-        let (mut tx_manager, network) = new_tx_manager().await;
+        let (mut tx_manager, network) = new_eth_tx_manager().await;
         let peer_id = PeerId::random();
 
         // ensure not syncing
@@ -3064,14 +3285,16 @@ mod tests {
         tx_manager
             .on_network_event(NetworkEvent::ActivePeerSession { info: session_info, messages });
         let mut propagate = vec![];
-        let mut factory = MockTransactionFactory::default();
-        let eip1559_tx = Arc::new(factory.create_eip1559());
-        propagate.push(PropagateTransaction::pool_tx(eip1559_tx.clone()));
-        let eip4844_tx = Arc::new(factory.create_eip4844());
-        propagate.push(PropagateTransaction::pool_tx(eip4844_tx.clone()));
+        let mut tx_gen = TransactionGenerator::new(rand::rng());
+        let eip1559_tx = valid_eth_pool_transaction(tx_gen.gen_eip1559_pooled());
+        propagate.push(eip1559_tx.clone());
+        let eip4844_tx = valid_eth_pool_transaction(tx_gen.gen_eip4844_pooled());
+        propagate.push(eip4844_tx.clone());
 
-        let propagated =
-            tx_manager.propagate_transactions(propagate.clone(), PropagationMode::Basic);
+        let propagated = tx_manager.propagate_transactions(
+            propagate.clone().into_iter().map(PropagateTransaction::pool_tx).collect(),
+            PropagationMode::Basic,
+        );
         assert_eq!(propagated.len(), 2);
         let prop_txs = propagated.get(eip1559_tx.transaction.hash()).unwrap();
         assert_eq!(prop_txs.len(), 1);
@@ -3087,15 +3310,55 @@ mod tests {
         peer.seen_transactions.contains(eip4844_tx.transaction.hash());
 
         // propagate again
-        let propagated = tx_manager.propagate_transactions(propagate, PropagationMode::Basic);
+        let propagated = tx_manager.propagate_transactions(
+            propagate.into_iter().map(PropagateTransaction::pool_tx).collect(),
+            PropagationMode::Basic,
+        );
         assert!(propagated.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_truncated_hash_announcement_not_marked_seen() {
+        reth_tracing::init_test_tracing();
+
+        let (mut tx_manager, network) = new_eth_tx_manager().await;
+        // all peers receive hash announcements only
+        tx_manager.config.propagation_mode = TransactionPropagationMode::Max(0);
+
+        // ensure not syncing
+        network.handle().update_sync_state(SyncState::Idle);
+
+        let peer_id = PeerId::random();
+        let (peer, _rx) = new_mock_session(peer_id, EthVersion::Eth68);
+        tx_manager.peers.insert(peer_id, peer);
+
+        // one more transaction than fits into a single hashes broadcast message
+        let mut tx_gen = TransactionGenerator::new(rand::rng());
+        let txs = (0..=SOFT_LIMIT_COUNT_HASHES_IN_NEW_POOLED_TRANSACTIONS_BROADCAST_MESSAGE)
+            .map(|nonce| {
+                valid_eth_pool_transaction(gen_eip1559_pooled_with_nonce(&mut tx_gen, nonce as u64))
+            })
+            .collect::<Vec<_>>();
+        let last_sent = *txs[txs.len() - 2].hash();
+        let truncated = *txs[txs.len() - 1].hash();
+
+        let propagated = tx_manager.propagate_transactions(
+            txs.into_iter().map(PropagateTransaction::pool_tx).collect(),
+            PropagationMode::Basic,
+        );
+
+        // the truncated hash was not sent, so it must not be tracked as seen by the peer
+        assert!(propagated.get(&truncated).is_none());
+        let peer = tx_manager.peers.get(&peer_id).unwrap();
+        assert!(!peer.seen_transactions.contains(&truncated));
+        assert!(peer.seen_transactions.contains(&last_sent));
     }
 
     #[tokio::test]
     async fn test_propagate_pending_txs_while_initially_syncing() {
         reth_tracing::init_test_tracing();
 
-        let (mut tx_manager, network) = new_tx_manager().await;
+        let (mut tx_manager, network) = new_eth_tx_manager().await;
         let peer_id = PeerId::random();
 
         // Keep the node in initial sync mode.
@@ -3106,17 +3369,19 @@ mod tests {
         let (peer, _rx) = new_mock_session(peer_id, EthVersion::Eth68);
         tx_manager.peers.insert(peer_id, peer);
 
-        let tx = MockTransaction::eip1559();
+        let mut tx_gen = TransactionGenerator::new(rand::rng());
+        let tx = gen_eip1559_pooled_with_nonce(&mut tx_gen, 0);
+        let tx_hash = *tx.hash();
         tx_manager
             .pool
             .add_transaction(reth_transaction_pool::TransactionOrigin::External, tx.clone())
             .await
             .expect("transaction should be accepted into the pool");
 
-        tx_manager.on_new_pending_transactions(vec![*tx.get_hash()]);
+        tx_manager.on_new_pending_transactions(vec![tx_hash]);
 
         let peer = tx_manager.peers.get(&peer_id).expect("peer should exist");
-        assert!(peer.seen_transactions.contains(tx.get_hash()));
+        assert!(peer.seen_transactions.contains(&tx_hash));
     }
 
     #[tokio::test]

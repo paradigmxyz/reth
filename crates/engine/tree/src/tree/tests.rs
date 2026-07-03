@@ -19,7 +19,10 @@ use alloy_rpc_types_engine::{
     ExecutionData, ExecutionPayloadSidecar, ExecutionPayloadV1, ForkchoiceState,
 };
 use assert_matches::assert_matches;
-use reth_chain_state::{test_utils::TestBlockBuilder, BlockState, ComputedTrieData};
+use reth_chain_state::{
+    test_utils::TestBlockBuilder, BlockState, ComputedTrieData, DeferredTrieData,
+    StateTrieOverlayManager,
+};
 use reth_chainspec::{ChainSpec, HOLESKY, MAINNET};
 use reth_engine_primitives::{EngineApiValidator, ForkchoiceStatus, NoopInvalidBlockHook};
 use reth_ethereum_consensus::EthBeaconConsensus;
@@ -27,8 +30,10 @@ use reth_ethereum_engine_primitives::EthEngineTypes;
 use reth_ethereum_primitives::{Block, EthPrimitives};
 use reth_evm_ethereum::MockEvmConfig;
 use reth_primitives_traits::Block as _;
-use reth_provider::test_utils::MockEthProvider;
+use reth_provider::{test_utils::MockEthProvider, BalStoreHandle, InMemoryBalStore, RawBal};
 use reth_tasks::spawn_os_thread;
+use reth_trie::prefix_set::{PrefixSetMut, TriePrefixSetsMut};
+use reth_trie_common::Nibbles;
 use std::{
     collections::BTreeMap,
     str::FromStr,
@@ -39,6 +44,48 @@ use std::{
     time::Duration,
 };
 use tokio::sync::oneshot;
+
+fn with_changed_paths(
+    block: ExecutedBlock<EthPrimitives>,
+    changed_paths: TriePrefixSetsMut,
+) -> ExecutedBlock<EthPrimitives> {
+    let mut trie_data = block.trie_data();
+    trie_data.changed_paths = Some(Arc::new(changed_paths));
+    ExecutedBlock::with_deferred_trie_data(
+        block.recovered_block,
+        block.execution_output,
+        DeferredTrieData::ready(trie_data),
+    )
+}
+
+fn with_empty_changed_paths(block: ExecutedBlock<EthPrimitives>) -> ExecutedBlock<EthPrimitives> {
+    with_changed_paths(block, TriePrefixSetsMut::default())
+}
+
+fn trie_changed_paths(
+    account_path: Nibbles,
+    storage_account: B256,
+    storage_path: Nibbles,
+) -> TriePrefixSetsMut {
+    TriePrefixSetsMut {
+        account_prefix_set: PrefixSetMut::from([account_path]),
+        storage_prefix_sets: B256Map::from_iter([(
+            storage_account,
+            PrefixSetMut::from([storage_path]),
+        )]),
+        destroyed_accounts: Default::default(),
+    }
+}
+
+fn merged_changed_paths(blocks: &[ExecutedBlock<EthPrimitives>]) -> TriePrefixSetsMut {
+    let mut merged = TriePrefixSetsMut::default();
+    for block in blocks {
+        let trie_data = block.trie_data();
+        let changed_paths = trie_data.changed_paths.as_deref().expect("changed paths are present");
+        merged.extend_ref(changed_paths);
+    }
+    merged
+}
 
 /// Mock engine validator for tests
 #[derive(Debug, Clone)]
@@ -184,8 +231,10 @@ impl TestHarness {
         let payload_validator = MockEngineValidator;
 
         let (from_tree_tx, from_tree_rx) = unbounded_channel();
-        let tree_config =
-            TreeConfig::default().with_legacy_state_root(false).with_has_enough_parallelism(true);
+        let tree_config = TreeConfig::default().with_has_enough_parallelism(true);
+        let runtime = reth_tasks::Runtime::test();
+        let state_trie_overlays =
+            StateTrieOverlayManager::new(runtime.state_trie_overlay_worker_pool());
 
         let header = chain_spec.genesis_header().clone();
         let header = SealedHeader::seal_slow(header);
@@ -195,6 +244,7 @@ impl TestHarness {
             tree_config.invalid_header_hit_eviction_threshold(),
             header.num_hash(),
             EngineApiKind::Ethereum,
+            state_trie_overlays.clone(),
         );
         let canonical_in_memory_state = CanonicalInMemoryState::with_head(header, None, None);
 
@@ -211,7 +261,8 @@ impl TestHarness {
             TreeConfig::default(),
             Box::new(NoopInvalidBlockHook::default()),
             changeset_cache.clone(),
-            reth_tasks::Runtime::test(),
+            state_trie_overlays,
+            runtime.clone(),
         );
 
         let tree = EngineApiTreeHandler::new(
@@ -267,6 +318,7 @@ impl TestHarness {
             parent_hash = hash;
         }
 
+        let state_trie_overlays = self.tree.state.tree_state.state_trie_overlays.clone();
         self.tree.state.tree_state = TreeState {
             blocks_by_hash,
             blocks_by_number,
@@ -274,6 +326,7 @@ impl TestHarness {
             parent_to_child,
             engine_kind: EngineApiKind::Ethereum,
             cached_canonical_overlay: None,
+            state_trie_overlays,
         };
 
         let last_executed_block = blocks.last().unwrap().clone();
@@ -427,6 +480,7 @@ impl ValidatorTestHarness {
             TreeConfig::default(),
             Box::new(NoopInvalidBlockHook::default()),
             changeset_cache,
+            StateTrieOverlayManager::default(),
             reth_tasks::Runtime::test(),
         );
 
@@ -460,6 +514,7 @@ impl ValidatorTestHarness {
         let ctx = TreeCtx::new(
             &mut self.harness.tree.state,
             &self.harness.tree.canonical_in_memory_state,
+            &mut self.harness.tree.pending_sparse_trie_prune,
         );
         let result = self.validator.validate_block(block, ctx);
         self.metrics.record_validation(result.is_ok());
@@ -570,9 +625,7 @@ async fn test_tree_persist_blocks() {
     let received_action =
         test_harness.action_rx.recv().expect("Failed to receive save blocks action");
     if let PersistenceAction::SaveBlocks(plan, _) = received_action {
-        // only blocks.len() - tree_config.memory_block_buffer_target() will be
-        // persisted
-        let expected_persist_len = blocks.len() - tree_config.memory_block_buffer_target() as usize;
+        let expected_persist_len = tree_config.persistence_threshold() as usize;
         assert_eq!(plan.blocks.len(), expected_persist_len);
         assert_eq!(plan.blocks, blocks[..expected_persist_len]);
         assert_plan_steps(
@@ -582,6 +635,102 @@ async fn test_tree_persist_blocks() {
     } else {
         panic!("unexpected action received {received_action:?}");
     }
+}
+
+#[test]
+fn on_new_persisted_block_queues_sparse_trie_prune_request() {
+    let changed_paths = [
+        trie_changed_paths(
+            Nibbles::from_nibbles([0x01]),
+            B256::with_last_byte(0x01),
+            Nibbles::from_nibbles([0x02]),
+        ),
+        trie_changed_paths(
+            Nibbles::from_nibbles([0x03]),
+            B256::with_last_byte(0x02),
+            Nibbles::from_nibbles([0x04]),
+        ),
+        trie_changed_paths(
+            Nibbles::from_nibbles([0x05]),
+            B256::with_last_byte(0x03),
+            Nibbles::from_nibbles([0x06]),
+        ),
+    ];
+    let blocks: Vec<_> = TestBlockBuilder::eth()
+        .get_executed_blocks(1..4)
+        .zip(changed_paths)
+        .map(|(block, changed_paths)| with_changed_paths(block, changed_paths))
+        .collect();
+    let mut test_harness = TestHarness::new(MAINNET.clone()).with_blocks(blocks.clone());
+    let persisted = blocks[0].recovered_block().num_hash();
+    test_harness.tree.persistence_state.finish(persisted, persisted);
+
+    test_harness.tree.on_new_persisted_block(persisted).unwrap();
+
+    let retained_paths =
+        test_harness.tree.pending_sparse_trie_prune.as_ref().unwrap().clone().freeze();
+    let expected_retained_paths = merged_changed_paths(&blocks[1..]).freeze();
+
+    assert_eq!(
+        retained_paths.account_prefix_set.slice(),
+        expected_retained_paths.account_prefix_set.slice()
+    );
+    assert_eq!(
+        retained_paths.storage_prefix_sets.len(),
+        expected_retained_paths.storage_prefix_sets.len()
+    );
+    for (storage_account, expected_slots) in expected_retained_paths.storage_prefix_sets {
+        assert_eq!(
+            retained_paths.storage_prefix_sets[&storage_account].slice(),
+            expected_slots.slice()
+        );
+    }
+}
+
+#[test]
+fn on_new_persisted_block_skips_sparse_trie_prune_when_changed_paths_unknown() {
+    let blocks: Vec<_> = TestBlockBuilder::eth().get_executed_blocks(1..4).collect();
+    let mut test_harness = TestHarness::new(MAINNET.clone()).with_blocks(blocks.clone());
+    let persisted = blocks[0].recovered_block().num_hash();
+    test_harness.tree.persistence_state.finish(persisted, persisted);
+
+    test_harness.tree.on_new_persisted_block(persisted).unwrap();
+
+    assert!(test_harness.tree.pending_sparse_trie_prune.is_none());
+}
+
+#[test]
+fn on_new_persisted_block_skips_sparse_trie_prune_when_state_root_task_disabled() {
+    let blocks: Vec<_> =
+        TestBlockBuilder::eth().get_executed_blocks(1..4).map(with_empty_changed_paths).collect();
+    let configs = [
+        TreeConfig::default().with_has_enough_parallelism(false),
+        TreeConfig::default().with_has_enough_parallelism(true).with_state_root_fallback(true),
+        TreeConfig::default().with_has_enough_parallelism(true).with_skip_state_root(true),
+    ];
+
+    for config in configs {
+        let mut test_harness = TestHarness::new(MAINNET.clone()).with_blocks(blocks.clone());
+        test_harness.tree.config = config;
+        let persisted = blocks[0].recovered_block().num_hash();
+        test_harness.tree.persistence_state.finish(persisted, persisted);
+
+        test_harness.tree.on_new_persisted_block(persisted).unwrap();
+
+        assert!(test_harness.tree.pending_sparse_trie_prune.is_none());
+    }
+}
+
+#[test]
+fn remove_blocks_clears_pending_sparse_trie_prune_request() {
+    let mut test_harness = TestHarness::new(MAINNET.clone());
+    test_harness.tree.persistence_state.last_persisted_block =
+        BlockNumHash { hash: B256::random(), number: 10 };
+    test_harness.tree.pending_sparse_trie_prune = Some(Default::default());
+
+    test_harness.tree.remove_blocks(9);
+
+    assert!(test_harness.tree.pending_sparse_trie_prune.is_none());
 }
 
 #[tokio::test]
@@ -682,6 +831,38 @@ fn test_disconnected_block() {
             missing_ancestor: sealed.parent_num_hash()
         })
     );
+}
+
+#[test]
+fn test_validated_payload_bal_is_inserted_into_store() {
+    let mut block_builder = TestBlockBuilder::eth();
+    let parent = block_builder.get_executed_block_with_number(1, B256::ZERO);
+    let child = block_builder.get_executed_block_with_number(2, parent.recovered_block().hash());
+    let child_block = child.recovered_block().clone_sealed_block();
+    let child_num_hash = child_block.num_hash();
+    let raw_bal = Bytes::from_static(&[0xc0]);
+
+    let mut test_harness = TestHarness::new(MAINNET.clone()).with_blocks(vec![parent]);
+    let bal_store = BalStoreHandle::new(InMemoryBalStore::default());
+    test_harness.tree.provider.bal_store = bal_store.clone();
+
+    let outcome = test_harness
+        .tree
+        .insert_block_or_payload(
+            child_block.block_with_parent(),
+            child,
+            |_, executed, _| {
+                Ok::<_, InsertPayloadError<Block>>(
+                    ValidationOutput::new(executed, None)
+                        .with_raw_bal(Some(RawBal::from(raw_bal.clone()))),
+                )
+            },
+            |_, executed| Ok(executed.recovered_block().clone_sealed_block()),
+        )
+        .unwrap();
+
+    assert_eq!(outcome, InsertPayloadOk::Inserted(BlockStatus::Valid));
+    assert_eq!(bal_store.get_by_hash(child_num_hash.hash).unwrap(), Some(raw_bal));
 }
 
 #[tokio::test]
@@ -1651,8 +1832,7 @@ fn test_on_new_payload_malformed_payload() {
     }
 }
 
-/// Test different `StateRootStrategy` paths: `StateRootTask` with empty/non-empty prefix sets,
-/// `Parallel`, `Synchronous`
+/// Test different `StateRootStrategy` paths: `StateRootTask` and `Synchronous`.
 #[test]
 fn test_state_root_strategy_paths() {
     reth_tracing::init_test_tracing();
@@ -1660,11 +1840,8 @@ fn test_state_root_strategy_paths() {
     let mut test_harness = TestHarness::new(MAINNET.clone());
 
     // Test multiple scenarios to ensure different StateRootStrategy paths are taken:
-    // 1. `StateRootTask` with empty prefix_sets → uses payload_processor.spawn()
-    // 2. `StateRootTask` with non-empty prefix_sets → switches to `Parallel`, uses
-    //    spawn_cache_exclusive()
-    // 3. `Parallel` strategy → uses spawn_cache_exclusive()
-    // 4. `Synchronous` strategy → uses spawn_cache_exclusive()
+    // 1. `StateRootTask` strategy uses payload_processor.spawn()
+    // 2. `Synchronous` strategy uses spawn_cache_exclusive()
 
     let s1 = include_str!("../../test-data/holesky/1.rlp");
     let data1 = Bytes::from_str(s1).unwrap();
@@ -1709,9 +1886,8 @@ fn test_state_root_strategy_paths() {
 
     // This test passes if multiple StateRootStrategy scenarios work correctly,
     // confirming that passing arguments directly doesn't break:
-    // - `StateRootTask` strategy with empty/non-empty prefix_sets
-    // - Dynamic strategy switching (StateRootTask → Parallel)
-    // - Parallel and Synchronous strategy paths
+    // - `StateRootTask` strategy
+    // - `Synchronous` strategy
     // - All parameter passing through the args struct
 }
 
@@ -1721,7 +1897,7 @@ fn test_state_root_strategy_paths() {
 //
 // This test suite exercises `validate_block_with_state` across different scenarios including:
 // - Basic block validation with state root computation
-// - Strategy selection based on conditions (`StateRootTask`, `Parallel`, `Synchronous`)
+// - Strategy selection based on conditions (`StateRootTask`, `Synchronous`)
 // - Trie update retention and discard logic
 // - Error precedence handling (consensus vs execution errors)
 // - Different validation scenarios (valid, invalid consensus, invalid execution blocks)

@@ -9,7 +9,10 @@ use crate::tree::{
     },
     payload_processor::multiproof::MultiProofTaskMetrics,
 };
-use alloy_primitives::B256;
+use alloy_primitives::{
+    map::{hash_map::Entry, B256Map},
+    B256,
+};
 use alloy_rlp::{Decodable, Encodable};
 use crossbeam_channel::{Receiver as CrossbeamReceiver, Sender as CrossbeamSender};
 use rayon::iter::{IntoParallelIterator, ParallelIterator};
@@ -28,17 +31,13 @@ use reth_trie_parallel::{
 };
 use reth_trie_sparse::{
     errors::{SparseStateTrieErrorKind, SparseTrieErrorKind, SparseTrieResult},
-    ConfigurableSparseTrie, DeferredDrops, LeafUpdate, RevealableSparseTrie, SparseStateTrie,
+    ArenaParallelSparseTrie, DeferredDrops, LeafUpdate, RevealableSparseTrie, SparseStateTrie,
     SparseTrie,
 };
-use revm_primitives::{hash_map::Entry, B256Map};
 use tracing::{debug, debug_span, error, instrument, trace_span};
 
-/// Maximum number of pending/prewarm updates that we accumulate in memory before actually applying.
-const MAX_PENDING_UPDATES: usize = 100;
-
 /// Sparse trie task implementation that uses in-memory sparse trie data to schedule proof fetching.
-pub(super) struct SparseTrieCacheTask<A = ConfigurableSparseTrie, S = ConfigurableSparseTrie> {
+pub(super) struct SparseTrieCacheTask<A = ArenaParallelSparseTrie, S = ArenaParallelSparseTrie> {
     /// Sender for proof results.
     proof_result_tx: CrossbeamSender<ProofResultMessage>,
     /// Receiver for proof results directly from workers.
@@ -193,17 +192,13 @@ where
                 StateRootMessage::PrefetchProofs(targets) => {
                     SparseTrieTaskMessage::PrefetchProofs(targets)
                 }
-                StateRootMessage::StateUpdate(_, state) => {
+                StateRootMessage::StateUpdate(state) => {
                     let _span = trace_span!(target: "engine::tree::payload_processor::sparse_trie", "hashing_state_update", n = state.len()).entered();
                     let hashed = evm_state_to_hashed_post_state(state);
                     SparseTrieTaskMessage::HashedState(hashed)
                 }
                 StateRootMessage::FinishedStateUpdates => {
                     SparseTrieTaskMessage::FinishedStateUpdates
-                }
-                StateRootMessage::BlockAccessList(_) => {
-                    idle_start = Instant::now();
-                    continue;
                 }
                 StateRootMessage::HashedStateUpdate(state) => {
                     SparseTrieTaskMessage::HashedState(state)
@@ -219,44 +214,22 @@ where
         metrics.hashing_task_idle_time_seconds.record(total_idle_time.as_secs_f64());
     }
 
-    /// Prunes and shrinks the trie for reuse in the next payload built on top of this one.
+    /// Returns the trie for reuse in the next payload built on top of this one.
     ///
     /// Should be called after the state root result has been sent.
-    ///
-    /// When `disable_pruning` is true, the trie is preserved without any node pruning,
-    /// storage trie eviction, or capacity shrinking, keeping the full cache intact for
-    /// benchmarking purposes.
-    pub(super) fn into_trie_for_reuse(
-        self,
-        max_hot_slots: usize,
-        max_hot_accounts: usize,
-        max_nodes_capacity: usize,
-        max_values_capacity: usize,
-        disable_pruning: bool,
-        updates: &TrieUpdates,
-    ) -> (SparseStateTrie<A, S>, DeferredDrops) {
+    pub(super) fn into_trie_for_reuse(self) -> (SparseStateTrie<A, S>, DeferredDrops) {
         let Self { mut trie, .. } = self;
-        trie.commit_updates(updates);
-        if !disable_pruning {
-            trie.prune(max_hot_slots, max_hot_accounts);
-            trie.shrink_to(max_nodes_capacity, max_values_capacity);
-        }
         let deferred = trie.take_deferred_drops();
         (trie, deferred)
     }
 
-    /// Clears and shrinks the trie, discarding all state.
+    /// Clears the trie, discarding all state.
     ///
     /// Use this when the payload was invalid or cancelled - we don't want to preserve
     /// potentially invalid trie state, but we keep the allocations for reuse.
-    pub(super) fn into_cleared_trie(
-        self,
-        max_nodes_capacity: usize,
-        max_values_capacity: usize,
-    ) -> (SparseStateTrie<A, S>, DeferredDrops) {
+    pub(super) fn into_cleared_trie(self) -> (SparseStateTrie<A, S>, DeferredDrops) {
         let Self { mut trie, .. } = self;
         trie.clear();
-        trie.shrink_to(max_nodes_capacity, max_values_capacity);
         let deferred = trie.take_deferred_drops();
         (trie, deferred)
     }
@@ -356,9 +329,8 @@ where
                 if self.proof_result_rx.is_empty() {
                     self.trie.calculate_subtries();
                 }
-            } else if self.updates.is_empty() || self.pending_updates > MAX_PENDING_UPDATES {
-                // If we don't have any pending updates OR we've accumulated a lot already, apply
-                // them to the trie,
+            } else if self.updates.is_empty() {
+                // If we don't have any pending updates, apply them to the trie,
                 t = Instant::now();
                 self.process_new_updates()?;
                 self.metrics.sparse_trie_process_updates_duration_histogram.record(t.elapsed());
@@ -398,6 +370,7 @@ where
 
         #[cfg(feature = "trie-debug")]
         let debug_recorders = self.trie.take_debug_recorders();
+        let changed_paths = Some(Arc::new(self.trie.take_changed_paths().unwrap_or_default()));
 
         let end = Instant::now();
         self.metrics.sparse_trie_final_update_duration_histogram.record(end.duration_since(start));
@@ -415,6 +388,7 @@ where
         Ok(StateRootComputeOutcome {
             state_root,
             trie_updates: Arc::new(trie_updates),
+            changed_paths,
             #[cfg(feature = "trie-debug")]
             debug_recorders,
         })
@@ -1017,9 +991,7 @@ mod tests {
         let proof_worker_handle =
             ProofWorkerHandle::new(&runtime, ProofTaskCtx::new(overlay_factory), false);
 
-        let default_trie = RevealableSparseTrie::blind_from(ConfigurableSparseTrie::Arena(
-            ArenaParallelSparseTrie::default(),
-        ));
+        let default_trie = RevealableSparseTrie::blind_from(ArenaParallelSparseTrie::default());
         let trie = SparseStateTrie::default()
             .with_accounts_trie(default_trie.clone())
             .with_default_storage_trie(default_trie)

@@ -11,7 +11,7 @@ use reth_trie::{
     updates::TrieUpdates, AccountProof, HashedPostState, HashedStorage, MultiProof,
     MultiProofTargets, StorageMultiProof, TrieInput,
 };
-use revm_database::BundleState;
+use revm::database::BundleState;
 use std::{borrow::Cow, sync::OnceLock};
 
 /// A state provider that stores references to in-memory blocks along with their state as well as a

@@ -7,12 +7,15 @@
 # Usage: bench-txgen-run.sh <label> <binary> <output-dir>
 #
 # Required env: SCHELK_MOUNT, BENCH_RPC_URL, BENCH_BLOCKS, BENCH_WARMUP_BLOCKS
-# Optional env: BENCH_BIG_BLOCKS, BENCH_BIG_BLOCKS_TARGET_GAS, BENCH_BAL,
+# Optional env: BENCH_BIG_BLOCKS, BENCH_BIG_BLOCKS_TARGET_GAS, BENCH_REORG, BENCH_BAL,
 #               BENCH_WORK_DIR, BENCH_WAIT_TIME, BENCH_BASELINE_ARGS,
 #               BENCH_FEATURE_ARGS, BENCH_OTLP_TRACES_ENDPOINT,
 #               BENCH_OTLP_LOGS_ENDPOINT, BENCH_OTLP_DISABLED,
-#               BENCH_TRACY, BENCH_TRACY_FILTER, BENCH_TRACY_SAMPLING_HZ,
-#               TXGEN_PAYLOADS_DIR (pre-extracted payloads; skips extraction)
+#               BENCH_TRACING_CHROME, BENCH_TRACY,
+#               BENCH_TRACY_FILTER, BENCH_TRACY_SAMPLING_HZ,
+#               BENCH_POST_WARMUP_SLEEP_SECONDS,
+#               TXGEN_PAYLOADS_DIR (pre-extracted payloads; skips extraction),
+#               BENCH_TARGET_METRICS_SCRAPE_INTERVAL_MS (optional txgen override)
 set -euxo pipefail
 
 LABEL="$1"
@@ -48,8 +51,92 @@ fi
 DATADIR="$SCHELK_MOUNT/$DATADIR_NAME"
 mkdir -p "$OUTPUT_DIR"
 LOG="${OUTPUT_DIR}/node.log"
+TARGET_METRICS_RANGE="$OUTPUT_DIR/target-metrics-range.json"
 
 RETH_SCOPE="${RETH_SCOPE:-reth-bench.scope}"
+BENCH_TARGET_METRICS_SCRAPE_INTERVAL_MS="${BENCH_TARGET_METRICS_SCRAPE_INTERVAL_MS:-}"
+
+capture_unix_time_ms() {
+  python3 -c 'import time; print(time.time_ns() // 1_000_000)'
+}
+
+record_target_metric_range() {
+  local start_ms="$1"
+  local end_ms="$2"
+  if [ -z "${BENCH_TARGET_METRICS_CONFIG:-}" ]; then
+    return 0
+  fi
+
+  python3 - "$TARGET_METRICS_RANGE" "$start_ms" "$end_ms" "${BENCH_ID:-}" "$(basename "$OUTPUT_DIR")" <<'PY'
+import json
+import sys
+
+output_path, start_ms, end_ms, benchmark_id, benchmark_run = sys.argv[1:6]
+start_ms = int(start_ms)
+end_ms = int(end_ms)
+
+with open(output_path, "w") as f:
+    json.dump(
+        {
+            "benchmark_id": benchmark_id,
+            "benchmark_run": benchmark_run,
+            "range_start_ms": start_ms,
+            "range_end_ms": end_ms,
+            "duration_ms": end_ms - start_ms,
+        },
+        f,
+        indent=2,
+    )
+    f.write("\n")
+PY
+}
+
+extract_target_metric_scrapes() {
+  local samples_path="$1"
+  local output_path="$2"
+  local filter_output
+  local -a filter_lines
+  local sample_grep
+  local sample_names_json
+  local prefiltered_path
+  local -a pipe_status
+
+  : > "$output_path"
+
+  if [ ! -f "$samples_path" ]; then
+    echo "::error::Target metrics enabled but samples archive is missing: $samples_path"
+    return 1
+  fi
+
+  filter_output="$(python3 .github/scripts/bench-target-metric-sample-filter.py "$BENCH_TARGET_METRICS_CONFIG")"
+  mapfile -t filter_lines <<< "$filter_output"
+  sample_grep="${filter_lines[0]}"
+  sample_names_json="${filter_lines[1]}"
+  prefiltered_path="${output_path}.prefiltered"
+
+  set +e
+  gzip -dc "$samples_path" | grep -E -- "$sample_grep" > "$prefiltered_path"
+  pipe_status=("${PIPESTATUS[@]}")
+  set -e
+
+  if [ "${pipe_status[0]}" -ne 0 ]; then
+    echo "::error::Failed to decompress samples archive: $samples_path"
+    rm -f "$prefiltered_path"
+    return "${pipe_status[0]}"
+  fi
+  if [ "${pipe_status[1]}" -ne 0 ] && [ "${pipe_status[1]}" -ne 1 ]; then
+    echo "::error::Failed to prefilter target metric samples from: $samples_path"
+    rm -f "$prefiltered_path"
+    return "${pipe_status[1]}"
+  fi
+
+  jq -c --argjson metric_names "$sample_names_json" \
+    '. as $sample | select(($metric_names | index($sample.name)) != null)' \
+    "$prefiltered_path" > "$output_path"
+  rm -f "$prefiltered_path"
+
+  echo "Filtered $(wc -l < "$output_path" | tr -d ' ') target metric samples from $samples_path"
+}
 
 bal_enabled_for_label() {
   case "${BENCH_BAL:-false}" in
@@ -74,6 +161,21 @@ bal_enabled_for_label() {
 
 USE_BAL="$(bal_enabled_for_label)"
 echo "BAL replay for ${LABEL}: ${USE_BAL} (mode=${BENCH_BAL:-false})"
+
+call_reth_jit() {
+  local action="$1"
+  local response
+  if ! response=$(curl -sf http://127.0.0.1:8545 -X POST \
+    -H 'Content-Type: application/json' \
+    -d "{\"jsonrpc\":\"2.0\",\"method\":\"reth_jit\",\"params\":[\"${action}\"],\"id\":1}"); then
+    echo "::error::reth_jit ${action} request failed"
+    exit 1
+  fi
+  if jq -e '.error? != null' <<< "$response" > /dev/null 2>&1; then
+    echo "::error::reth_jit ${action} failed: ${response}"
+    exit 1
+  fi
+}
 
 cleanup() {
   kill "${TAIL_PID:-}" 2>/dev/null || true
@@ -147,6 +249,8 @@ RETH_ARGS=(
   --log.file.directory "$OUTPUT_DIR/reth-logs"
   --engine.accept-execution-requests-hash
   --http
+  # txgen reorg mode builds synthetic side-fork blocks via testing_buildBlockV1.
+  --http.api eth,net,web3,debug,reth,testing
   --http.port 8545
   --ws
   --ws.api all
@@ -193,6 +297,22 @@ if [ "${BENCH_TRACY:-off}" != "off" ]; then
   fi
 fi
 
+JIT_ENABLED=false
+for arg in "${RETH_ARGS[@]}"; do
+  if [ "$arg" = "--jit" ]; then
+    JIT_ENABLED=true
+    break
+  fi
+done
+
+if [ -n "${BENCH_POST_WARMUP_SLEEP_SECONDS:-}" ]; then
+  POST_WARMUP_SLEEP_SECONDS="$BENCH_POST_WARMUP_SLEEP_SECONDS"
+elif [ "$JIT_ENABLED" = "true" ]; then
+  POST_WARMUP_SLEEP_SECONDS=120
+else
+  POST_WARMUP_SLEEP_SECONDS=0
+fi
+
 SUDO_ENV=()
 if [ -n "${OTEL_RESOURCE_ATTRIBUTES:-}" ]; then
   SUDO_ENV+=("OTEL_RESOURCE_ATTRIBUTES=${OTEL_RESOURCE_ATTRIBUTES}")
@@ -205,6 +325,20 @@ echo "Memory limit: $(( MEM_LIMIT / 1024 / 1024 ))MB (95% of $(( TOTAL_MEM_KB / 
 
 if [ "${BENCH_SAMPLY:-false}" = "true" ]; then
   RETH_ARGS+=(--log.samply)
+fi
+
+if [ "${BENCH_TRACING_CHROME:-false}" = "true" ]; then
+  if "$BINARY" node --log.tracing-chrome --log.tracing-chrome.file "$OUTPUT_DIR/tracing-chrome-profile.json" --help >/dev/null 2>&1; then
+    RETH_ARGS+=(
+      --log.tracing-chrome
+      --log.tracing-chrome.file "$OUTPUT_DIR/tracing-chrome-profile.json"
+    )
+  else
+    echo "Chrome trace recording requested, but ${LABEL} binary rejected --log.tracing-chrome; skipping"
+  fi
+fi
+
+if [ "${BENCH_SAMPLY:-false}" = "true" ]; then
   SAMPLY="$(which samply)"
   # shellcheck disable=SC2024
   sudo systemd-run --quiet --scope --collect --unit="$RETH_SCOPE" \
@@ -265,6 +399,9 @@ BENCH_NICE="sudo nice -n -20 sudo -u $(id -un)"
 TXGEN_SEND_ARGS=()
 if [ -n "${BENCH_WAIT_TIME:-}" ]; then
   TXGEN_SEND_ARGS+=(--wait-time "$BENCH_WAIT_TIME")
+fi
+if [ -n "${BENCH_REORG:-}" ]; then
+  TXGEN_SEND_ARGS+=(--reorg "$BENCH_REORG")
 fi
 
 WARMUP="${BENCH_WARMUP_BLOCKS:-0}"
@@ -364,6 +501,11 @@ else
   echo "Skipping warmup (0 blocks)..."
 fi
 
+if [ "$WARMUP" -gt 0 ] 2>/dev/null && [ "$POST_WARMUP_SLEEP_SECONDS" -gt 0 ] 2>/dev/null; then
+  echo "Sleeping ${POST_WARMUP_SLEEP_SECONDS}s after warmup to let background JIT finish..."
+  sleep "$POST_WARMUP_SLEEP_SECONDS"
+fi
+
 if [ "${BENCH_TRACY:-off}" != "off" ]; then
   echo "Starting tracy-capture..."
   tracy-capture -f -o "$OUTPUT_DIR/tracy-profile.tracy" &
@@ -372,6 +514,7 @@ if [ "${BENCH_TRACY:-off}" != "off" ]; then
 fi
 
 # TODO(txgen): expose microsecond client-side FCU latency to avoid ms rounding.
+TARGET_METRICS_START_MS=""
 CLICKHOUSE_REPORT=()
 if [ -n "${CLICKHOUSE_URL:-}" ]; then
   CLICKHOUSE_REPORT=(--report "clickhouse:$CLICKHOUSE_URL")
@@ -380,8 +523,26 @@ fi
 METRICS_ARGS=()
 PROMETHEUS_REPORT=()
 PROMETHEUS_METADATA=()
+METRICS_URL_ADDED=false
+if [ -n "${BENCH_TARGET_METRICS_CONFIG:-}" ] || [ -n "${BENCH_VICTORIAMETRICS_URL:-}" ]; then
+  if [ -z "${BENCH_METRICS_ADDR:-}" ]; then
+    echo "::error::BENCH_METRICS_ADDR is required when benchmark metrics are enabled"
+    exit 1
+  fi
+
+  METRICS_ARGS+=(--metrics-url "http://${BENCH_METRICS_ADDR}/metrics")
+  METRICS_URL_ADDED=true
+fi
+
+if [ -n "${BENCH_TARGET_METRICS_CONFIG:-}" ]; then
+  TARGET_METRICS_START_MS="$(capture_unix_time_ms)"
+  if [ "$METRICS_URL_ADDED" = true ] && [ -n "$BENCH_TARGET_METRICS_SCRAPE_INTERVAL_MS" ]; then
+    METRICS_ARGS+=(--scrape-interval-ms "$BENCH_TARGET_METRICS_SCRAPE_INTERVAL_MS")
+  fi
+fi
+
 if [ -n "${BENCH_VICTORIAMETRICS_URL:-}" ]; then
-  if [ -n "${BENCH_METRICS_ADDR:-}" ]; then
+  if [ "$METRICS_URL_ADDED" != true ] && [ -n "${BENCH_METRICS_ADDR:-}" ]; then
     METRICS_ARGS+=(--metrics-url "http://${BENCH_METRICS_ADDR}/metrics")
   fi
   PROMETHEUS_REPORT+=(--report "victoriametrics:$BENCH_VICTORIAMETRICS_URL")
@@ -399,6 +560,11 @@ if [ -n "${BENCH_VICTORIAMETRICS_URL:-}" ]; then
       fi
     done
   fi
+fi
+
+if [ "$JIT_ENABLED" = "true" ]; then
+  echo "Pausing JIT helper before measured benchmark..."
+  call_reth_jit pause
 fi
 
 echo "Running txgen measured benchmark (${BLOCKS} blocks)..."
@@ -420,5 +586,14 @@ $BENCH_NICE "$TXGEN_BENCH" send-blocks \
   -m "bal-mode=${BENCH_BAL:-false}" \
   -m "bal-enabled=$USE_BAL" \
   "${PROMETHEUS_METADATA[@]}" 2>&1 | sed -u "s/^/[bench] /"
+
+if [ -n "$TARGET_METRICS_START_MS" ]; then
+  TARGET_METRICS_END_MS="$(capture_unix_time_ms)"
+  record_target_metric_range "$TARGET_METRICS_START_MS" "$TARGET_METRICS_END_MS"
+  rm -f "$OUTPUT_DIR/target-metrics-scrapes.jsonl"
+  extract_target_metric_scrapes \
+    "$OUTPUT_DIR/report.samples.ndjson.gz" \
+    "$OUTPUT_DIR/target-metrics-scrapes.jsonl"
+fi
 
 python3 .github/scripts/bench-txgen-report-to-reth-csv.py "$OUTPUT_DIR/report.json" "$OUTPUT_DIR"

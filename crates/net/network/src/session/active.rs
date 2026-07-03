@@ -29,7 +29,8 @@ use metrics::{Counter, Gauge};
 use reth_eth_wire::{
     errors::{EthHandshakeError, EthStreamError},
     message::{EthBroadcastMessage, MessageError},
-    Capabilities, DisconnectP2P, DisconnectReason, EthMessage, NetworkPrimitives, NewBlockPayload,
+    Capabilities, DisconnectP2P, DisconnectReason, EthMessage, EthSnapMessage, NetworkPrimitives,
+    NewBlockPayload,
 };
 use reth_eth_wire_types::{message::RequestPair, NewPooledTransactionHashes, RawCapabilityMessage};
 use reth_metrics::common::mpsc::MeteredPollSender;
@@ -209,11 +210,6 @@ impl<N: NetworkPrimitives> ActiveSession<N> {
     pub fn shrink_to_fit(&mut self) {
         self.received_requests_from_remote.shrink_to(MIN_RECEIVED_REQUESTS_CAPACITY);
         self.queued_outgoing.shrink_to(MAX_QUEUED_OUTGOING_RESPONSES);
-    }
-
-    /// Returns how many responses we've currently queued up.
-    fn queued_response_count(&self) -> usize {
-        self.queued_outgoing.messages.iter().filter(|m| m.is_response()).count()
     }
 
     /// Handle a message read from the connection.
@@ -440,6 +436,10 @@ impl<N: NetworkPrimitives> ActiveSession<N> {
             }
             PeerMessage::SendTransactions(msg) => {
                 self.queued_outgoing.push_back(EthBroadcastMessage::Transactions(msg).into());
+            }
+            PeerMessage::SendBroadcastPoolTransactions(msg) => {
+                self.queued_outgoing
+                    .push_back(EthBroadcastMessage::BroadcastPoolTransactions(msg).into());
             }
             PeerMessage::BlockRangeUpdated(_) => {}
             PeerMessage::ReceivedTransaction(_) => {
@@ -789,9 +789,7 @@ impl<N: NetworkPrimitives> Future for ActiveSession<N> {
                 }
 
                 // we also need to check if we have multiple responses queued up
-                if this.queued_outgoing.messages.len() > MAX_QUEUED_OUTGOING_RESPONSES &&
-                    this.queued_response_count() > MAX_QUEUED_OUTGOING_RESPONSES
-                {
+                if this.queued_outgoing.response_count() > MAX_QUEUED_OUTGOING_RESPONSES {
                     // if we've queued up more responses than allowed, we don't poll for new
                     // messages and break the receive loop early
                     //
@@ -813,9 +811,21 @@ impl<N: NetworkPrimitives> Future for ActiveSession<N> {
                     Poll::Ready(Some(res)) => {
                         match res {
                             Ok(msg) => {
-                                trace!(target: "net::session", msg_id=?msg.message_id(), remote_peer_id=?this.remote_peer_id, "received eth message");
-                                // decode and handle message
-                                match this.on_incoming_message(msg) {
+                                let outcome = match msg {
+                                    EthSnapMessage::Eth(msg) => {
+                                        trace!(target: "net::session", msg_id=?msg.message_id(), remote_peer_id=?this.remote_peer_id, "received eth message");
+                                        // decode and handle message
+                                        this.on_incoming_message(msg)
+                                    }
+                                    // TODO: snap/2 is negotiated but not consumed yet;
+                                    // request/response handling
+                                    // lands with the snap client.
+                                    EthSnapMessage::Snap(_msg) => {
+                                        trace!(target: "net::session", remote_peer_id=?this.remote_peer_id, "ignoring inbound snap/2 message");
+                                        OnIncomingMessageOutcome::Ok
+                                    }
+                                };
+                                match outcome {
                                     OnIncomingMessageOutcome::Ok => {
                                         // handled successfully
                                         progress = true;
@@ -998,6 +1008,7 @@ impl<N: NetworkPrimitives> OutgoingMessage<N> {
             Self::Broadcast(msg) => match msg {
                 EthBroadcastMessage::NewBlock(_) => 1,
                 EthBroadcastMessage::Transactions(txs) => txs.len(),
+                EthBroadcastMessage::BroadcastPoolTransactions(txs) => txs.len(),
             },
             Self::Raw(_) => 0,
         }
@@ -1072,6 +1083,9 @@ fn calculate_new_timeout(current_timeout: Duration, estimated_rtt: Duration) -> 
 /// [`SessionManager`](super::SessionManager) can apply size-based backpressure.
 pub(crate) struct QueuedOutgoingMessages<N: NetworkPrimitives> {
     messages: VecDeque<OutgoingMessage<N>>,
+    /// Number of queued response messages, tracked separately so the session can apply
+    /// backpressure on incoming requests without scanning the whole queue.
+    queued_responses: usize,
     count: Gauge,
     /// Shared counter of buffered broadcast items for size-based backpressure.
     broadcast_items: BroadcastItemCounter,
@@ -1079,10 +1093,16 @@ pub(crate) struct QueuedOutgoingMessages<N: NetworkPrimitives> {
 
 impl<N: NetworkPrimitives> QueuedOutgoingMessages<N> {
     pub(crate) const fn new(metric: Gauge, broadcast_items: BroadcastItemCounter) -> Self {
-        Self { messages: VecDeque::new(), count: metric, broadcast_items }
+        Self { messages: VecDeque::new(), queued_responses: 0, count: metric, broadcast_items }
+    }
+
+    /// Returns the number of queued response messages.
+    pub(crate) const fn response_count(&self) -> usize {
+        self.queued_responses
     }
 
     pub(crate) fn push_back(&mut self, message: OutgoingMessage<N>) {
+        self.queued_responses += message.is_response() as usize;
         self.messages.push_back(message);
         self.count.increment(1);
     }
@@ -1090,6 +1110,7 @@ impl<N: NetworkPrimitives> QueuedOutgoingMessages<N> {
     pub(crate) fn pop_front(&mut self) -> Option<OutgoingMessage<N>> {
         self.messages.pop_front().inspect(|msg| {
             self.count.decrement(1);
+            self.queued_responses -= msg.is_response() as usize;
             let items = msg.broadcast_item_count();
             if items > 0 {
                 self.broadcast_items.sub(items);
