@@ -20,6 +20,7 @@ use reth_payload_primitives::{
 use reth_primitives_traits::{Block, RecoveredBlock, SealedBlock};
 use reth_trie_common::HashedPostState;
 use serde::{de::DeserializeOwned, Serialize};
+use std::sync::Arc;
 
 // Re-export [`ExecutionPayload`] moved to `reth_payload_primitives`
 #[cfg(feature = "std")]
@@ -45,6 +46,9 @@ pub use invalid_block_hook::{InvalidBlockHook, InvalidBlockHooks, NoopInvalidBlo
 
 pub mod config;
 pub use config::*;
+
+/// Handle to a [`HashedPostState`] computed on a background thread.
+pub type LazyHashedPostState = reth_tasks::LazyHandle<Arc<HashedPostState>>;
 
 /// This type defines the versioned types of the engine API based on the [ethereum engine API](https://github.com/ethereum/execution-apis/tree/main/src/engine).
 ///
@@ -215,7 +219,7 @@ pub trait PayloadValidator<Types: PayloadTypes>: Send + Sync + Unpin + 'static {
     /// Verifies payload post-execution w.r.t. hashed state updates.
     fn validate_block_post_execution_with_hashed_state<'a>(
         &self,
-        _state_updates: &dyn FnOnce() -> &'a HashedPostState,
+        _state_updates: &LazyHashedPostState,
         _block: &RecoveredBlock<Self::Block>,
     ) -> Result<(), ConsensusError> {
         // method not used by l1
