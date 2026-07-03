@@ -4,7 +4,9 @@
 //! parent has not been persisted yet. [`StateTrieOverlayManager`] tracks those in-memory blocks and
 //! builds reusable flattened state trie overlays on demand.
 
-use crate::{EthPrimitives, ExecutedBlock, PreservedSparseTrie, PreservedTrieGuard};
+use crate::{
+    ComputedTrieData, EthPrimitives, ExecutedBlock, PreservedSparseTrie, PreservedTrieGuard,
+};
 use alloy_primitives::B256;
 use parking_lot::Mutex;
 use reth_metrics::{
@@ -18,6 +20,7 @@ use reth_primitives_traits::{
 #[cfg(feature = "rayon")]
 use reth_tasks::WorkerPool;
 use reth_trie::{updates::TrieUpdatesSorted, HashedPostStateSorted, TrieInputSorted};
+use smallvec::SmallVec;
 use std::{
     fmt,
     sync::{Arc, OnceLock},
@@ -605,31 +608,41 @@ fn compute_overlay<N: NodePrimitives>(
 }
 
 fn merge_blocks<N: NodePrimitives>(blocks: Vec<ExecutedBlock<N>>) -> TrieInputSorted {
-    let trie_data = blocks.iter().map(ExecutedBlock::trie_data).collect::<Vec<_>>();
+    let trie_data: SmallVec<[ComputedTrieData; 8]> =
+        blocks.iter().map(ExecutedBlock::trie_data).collect();
 
     #[cfg(feature = "rayon")]
-    let (nodes, state) = rayon::join(
-        || {
-            TrieUpdatesSorted::merge_batch(
-                trie_data.iter().map(|data| Arc::clone(&data.trie_updates)),
-            )
-        },
-        || {
-            HashedPostStateSorted::merge_batch(
-                trie_data.iter().map(|data| Arc::clone(&data.hashed_state)),
-            )
-        },
-    );
+    let (nodes, state) =
+        rayon::join(|| merge_trie_updates(&trie_data), || merge_hashed_state(&trie_data));
 
     #[cfg(not(feature = "rayon"))]
-    let (nodes, state) = (
-        TrieUpdatesSorted::merge_batch(trie_data.iter().map(|data| Arc::clone(&data.trie_updates))),
-        HashedPostStateSorted::merge_batch(
-            trie_data.iter().map(|data| Arc::clone(&data.hashed_state)),
-        ),
-    );
+    let (nodes, state) = (merge_trie_updates(&trie_data), merge_hashed_state(&trie_data));
 
     TrieInputSorted::new(nodes, state, Default::default())
+}
+
+fn merge_trie_updates(trie_data: &[ComputedTrieData]) -> Arc<TrieUpdatesSorted> {
+    match trie_data {
+        [] => Arc::new(TrieUpdatesSorted::default()),
+        [data] => Arc::clone(&data.trie_updates),
+        _ => {
+            let updates: SmallVec<[Arc<TrieUpdatesSorted>; 8]> =
+                trie_data.iter().map(|data| Arc::clone(&data.trie_updates)).collect();
+            Arc::new(TrieUpdatesSorted::merge_slice(&updates))
+        }
+    }
+}
+
+fn merge_hashed_state(trie_data: &[ComputedTrieData]) -> Arc<HashedPostStateSorted> {
+    match trie_data {
+        [] => Arc::new(HashedPostStateSorted::default()),
+        [data] => Arc::clone(&data.hashed_state),
+        _ => {
+            let states: SmallVec<[Arc<HashedPostStateSorted>; 8]> =
+                trie_data.iter().map(|data| Arc::clone(&data.hashed_state)).collect();
+            Arc::new(HashedPostStateSorted::merge_slice(&states))
+        }
+    }
 }
 
 fn extend_overlay(

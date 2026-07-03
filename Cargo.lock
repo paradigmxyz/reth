@@ -7704,6 +7704,7 @@ dependencies = [
  "reth-trie-sparse",
  "revm",
  "serde",
+ "smallvec",
  "tokio",
  "tokio-stream",
  "tracing",
