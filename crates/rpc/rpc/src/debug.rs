@@ -10,7 +10,6 @@ use alloy_rpc_types_trace::geth::{
     BlockTraceResult, GethDebugTracingCallOptions, GethDebugTracingOptions, GethTrace, TraceResult,
 };
 use async_trait::async_trait;
-use evm2::evm::Db;
 use evm2_inspectors::tracing::{DebugInspector, DebugInspectorError, TransactionContext};
 use futures::Stream;
 use jsonrpsee::core::RpcResult;
@@ -805,9 +804,9 @@ where
         opts: GethDebugTracingOptions,
     ) -> Result<Vec<TraceResult>, Eth::Error> {
         self.eth_api()
-            .spawn_with_state_at_block(block.parent_hash().into(), move |eth_api, db| {
+            .spawn_with_state_at_block(block.parent_hash().into(), move |eth_api, mut db| {
                 let mut results = Vec::with_capacity(block.body().transactions().len());
-                eth_api.apply_pre_execution_changes(&block, evm_env.clone(), db.clone())?;
+                eth_api.apply_pre_execution_changes(&block, evm_env.clone(), &mut db)?;
 
                 let mut transactions = block.transactions_recovered().enumerate().peekable();
                 let mut inspector =
@@ -817,12 +816,11 @@ where
                     let tx_hash = *tx.tx_hash();
                     let tx_env = TxEnvFor::<Eth::Evm>::from(tx.cloned());
                     let (mut returned_inspector, result) = eth_api.inspect_with_inspector(
-                        db.clone(),
+                        &mut db,
                         evm_env.clone(),
                         tx_env.clone(),
                         inspector,
                     )?;
-                    let mut trace_db = Db::new(db.clone());
                     let trace = returned_inspector
                         .get_result(
                             Some(TransactionContext {
@@ -833,12 +831,12 @@ where
                             eth_api.evm_config().block_executor_factory().evm_tx(&tx_env),
                             &evm_env.block_env(),
                             &result,
-                            &mut trace_db,
+                            &mut db,
                         )
                         .map_err(debug_inspector_error::<Eth::Error>)?;
 
                     results.push(TraceResult::Success { result: trace, tx_hash: Some(tx_hash) });
-                    db.commit_source(&result.state_changes).map_err(Eth::Error::from_eth_err)?;
+                    db.commit_source(&result.state_changes);
 
                     if transactions.peek().is_some() {
                         returned_inspector.fuse().map_err(debug_inspector_error::<Eth::Error>)?;
@@ -908,10 +906,10 @@ where
         let block_hash = block.hash();
 
         self.eth_api()
-            .spawn_with_state_at_block(block.parent_hash().into(), move |eth_api, db| {
-                eth_api.apply_pre_execution_changes(&block, evm_env.clone(), db.clone())?;
+            .spawn_with_state_at_block(block.parent_hash().into(), move |eth_api, mut db| {
+                eth_api.apply_pre_execution_changes(&block, evm_env.clone(), &mut db)?;
                 let index = eth_api.replay_transactions_until(
-                    db.clone(),
+                    &mut db,
                     evm_env.clone(),
                     block.transactions_recovered(),
                     *tx.tx_hash(),
@@ -921,12 +919,11 @@ where
                 let inspector =
                     DebugInspector::new(opts).map_err(debug_inspector_error::<Eth::Error>)?;
                 let (mut inspector, result) = eth_api.inspect_with_inspector(
-                    db.clone(),
+                    &mut db,
                     evm_env.clone(),
                     tx_env.clone(),
                     inspector,
                 )?;
-                let mut trace_db = Db::new(db);
                 inspector
                     .get_result(
                         Some(TransactionContext {
@@ -937,7 +934,7 @@ where
                         eth_api.evm_config().block_executor_factory().evm_tx(&tx_env),
                         &evm_env.block_env(),
                         &result,
-                        &mut trace_db,
+                        &mut db,
                     )
                     .map_err(debug_inspector_error::<Eth::Error>)
             })

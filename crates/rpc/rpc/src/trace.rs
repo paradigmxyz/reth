@@ -10,7 +10,6 @@ use alloy_rpc_types_trace::{
     parity::*,
 };
 use async_trait::async_trait;
-use evm2::evm::Db;
 use evm2_inspectors::{opcode::OpcodeGasInspector, tracing::TracingInspectorConfig};
 use futures::StreamExt;
 use jsonrpsee::core::RpcResult;
@@ -711,10 +710,9 @@ where
                 TracingInspectorConfig::from_parity_config(&trace_types),
                 move |tx_info, ctx| {
                     let TracingCtx { result, db, inspector } = ctx;
-                    let mut db = Db::new(db.clone());
                     let full_trace = inspector
                         .into_parity_builder()
-                        .into_trace_results_with_state(&result, &trace_types, &mut db)
+                        .into_trace_results_with_state(&result, &trace_types, db)
                         .map_err(|err| {
                             Eth::Error::from_eth_err(EthApiError::EvmCustom(format!(
                                 "EVM database error: {err:?}"
@@ -739,17 +737,20 @@ where
     ) -> RpcResult<TraceResults> {
         let config = TracingInspectorConfig::from_parity_config(&trace_types);
         self.eth_api()
-            .spawn_trace_transaction_in_block(transaction, config, move |_, inspector, res, db| {
-                let mut db = Db::new(db);
-                inspector
-                    .into_parity_builder()
-                    .into_trace_results_with_state(&res, &trace_types, &mut db)
-                    .map_err(|err| {
-                        Eth::Error::from_eth_err(EthApiError::EvmCustom(format!(
-                            "EVM database error: {err:?}"
-                        )))
-                    })
-            })
+            .spawn_trace_transaction_in_block(
+                transaction,
+                config,
+                move |_, inspector, res, mut db| {
+                    inspector
+                        .into_parity_builder()
+                        .into_trace_results_with_state(&res, &trace_types, &mut db)
+                        .map_err(|err| {
+                            Eth::Error::from_eth_err(EthApiError::EvmCustom(format!(
+                                "EVM database error: {err:?}"
+                            )))
+                        })
+                },
+            )
             .await
             .transpose()
             .ok_or(EthApiError::TransactionNotFound)?

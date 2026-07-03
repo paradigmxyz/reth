@@ -9,7 +9,11 @@ use alloy_consensus::{
 use alloy_eips::BlockId;
 use alloy_primitives::B256;
 use alloy_rpc_types_eth::TransactionInfo;
-use evm2::{registry::HandlerError, BaseEvmTypes, ErrorCode, TxResultWithState};
+use evm2::{
+    evm::{CacheDB, Database, Db, DynDatabase},
+    registry::HandlerError,
+    BaseEvmTypes, ErrorCode, TxResultWithState,
+};
 use evm2_inspectors::tracing::{TracingInspector, TracingInspectorConfig};
 use futures::Future;
 use reth_errors::RethError;
@@ -17,16 +21,20 @@ use reth_evm::{execute::BlockExecutorFactory, ConfigureEvm, EvmEnvFor, TxEnvFor}
 use reth_primitives_traits::{BlockBody, RecoveredBlock};
 use reth_rpc_eth_types::EthApiError;
 use reth_storage_api::{
-    ProviderBlock, ProviderTx, SharedEvmStateProviderDatabase, StateProviderFactory,
+    errors::provider::ProviderError, EvmStateProviderDatabase, ProviderBlock, ProviderTx,
+    StateProviderBox, StateProviderFactory,
 };
 use std::sync::Arc;
+
+/// Cached state database used while tracing transactions sequentially.
+pub type TraceStateProviderDatabase = CacheDB<Db<EvmStateProviderDatabase<StateProviderBox>>>;
 
 /// Context passed to per-transaction trace callbacks.
 pub struct TracingCtx<'a, Insp> {
     /// Execution result and detached state changes for the transaction.
     pub result: TxResultWithState,
     /// Database pointing to the transaction pre-state.
-    pub db: &'a mut SharedEvmStateProviderDatabase,
+    pub db: &'a mut TraceStateProviderDatabase,
     /// Inspector used while executing the transaction.
     pub inspector: Insp,
 }
@@ -49,15 +57,15 @@ pub trait Trace: LoadState<Error: FromEvmError<Self::Evm>> + Call {
     /// Executes a transaction with the provided inspector without committing state changes.
     fn inspect_with_inspector<I>(
         &self,
-        db: SharedEvmStateProviderDatabase,
+        db: &mut TraceStateProviderDatabase,
         evm_env: EvmEnvFor<Self::Evm>,
         tx_env: TxEnvFor<Self::Evm>,
         inspector: I,
     ) -> Result<(I, TxResultWithState), Self::Error>
     where
-        I: evm2::Inspector<BaseEvmTypes> + 'static,
+        I: evm2::Inspector<BaseEvmTypes>,
     {
-        let mut evm = self.evm_config().evm_with_env_and_inspector(db, evm_env, inspector);
+        let mut inspector = inspector;
 
         enum Resolution {
             Result(TxResultWithState),
@@ -65,31 +73,32 @@ pub trait Trace: LoadState<Error: FromEvmError<Self::Evm>> + Call {
             HandlerError(HandlerError),
         }
 
-        let resolution =
-            match evm.transact(self.evm_config().block_executor_factory().evm_tx(&tx_env)) {
-                Ok(executed) => {
-                    if let Some(code) = executed.result().error_code {
-                        let _ = executed.discard();
-                        Resolution::DatabaseError(code)
-                    } else {
-                        Resolution::Result(executed.detach())
+        let result = {
+            let mut evm = self.evm_config().evm_with_env_and_inspector(
+                BorrowedTraceStateProviderDatabase(db),
+                evm_env,
+                BorrowedInspector(&mut inspector),
+            );
+
+            let resolution =
+                match evm.transact(self.evm_config().block_executor_factory().evm_tx(&tx_env)) {
+                    Ok(executed) => {
+                        if let Some(code) = executed.result().error_code {
+                            let _ = executed.discard();
+                            Resolution::DatabaseError(code)
+                        } else {
+                            Resolution::Result(executed.detach())
+                        }
                     }
-                }
-                Err(err) => Resolution::HandlerError(err),
-            };
+                    Err(err) => Resolution::HandlerError(err),
+                };
 
-        let result = match resolution {
-            Resolution::Result(result) => result,
-            Resolution::DatabaseError(code) => return Err(trace_database_error(&mut evm, code)),
-            Resolution::HandlerError(err) => return Err(trace_handler_error(&mut evm, err)),
+            match resolution {
+                Resolution::Result(result) => result,
+                Resolution::DatabaseError(code) => return Err(trace_database_error(&mut evm, code)),
+                Resolution::HandlerError(err) => return Err(trace_handler_error(&mut evm, err)),
+            }
         };
-
-        let inspector =
-            evm.clear_inspector_as::<I>().map(|inspector| *inspector).ok_or_else(|| {
-                Self::Error::from_eth_err(EthApiError::EvmCustom(
-                    "inspector missing after trace".to_string(),
-                ))
-            })?;
 
         Ok((inspector, result))
     }
@@ -101,12 +110,12 @@ pub trait Trace: LoadState<Error: FromEvmError<Self::Evm>> + Call {
         f: F,
     ) -> impl Future<Output = Result<R, Self::Error>> + Send
     where
-        F: FnOnce(Self, SharedEvmStateProviderDatabase) -> Result<R, Self::Error> + Send + 'static,
+        F: FnOnce(Self, TraceStateProviderDatabase) -> Result<R, Self::Error> + Send + 'static,
         R: Send + 'static,
     {
         self.spawn_tracing(move |this| {
             let state = this.provider().state_by_block_id(at).map_err(Self::Error::from_eth_err)?;
-            let db = SharedEvmStateProviderDatabase::new(state);
+            let db = CacheDB::new(Db::new(EvmStateProviderDatabase::new(state)));
             f(this, db)
         })
     }
@@ -124,7 +133,7 @@ pub trait Trace: LoadState<Error: FromEvmError<Self::Evm>> + Call {
                 TransactionInfo,
                 TracingInspector,
                 TxResultWithState,
-                SharedEvmStateProviderDatabase,
+                TraceStateProviderDatabase,
             ) -> Result<R, Self::Error>
             + Send
             + 'static,
@@ -147,7 +156,7 @@ pub trait Trace: LoadState<Error: FromEvmError<Self::Evm>> + Call {
                 TransactionInfo,
                 Insp,
                 TxResultWithState,
-                SharedEvmStateProviderDatabase,
+                TraceStateProviderDatabase,
             ) -> Result<R, Self::Error>
             + Send
             + 'static,
@@ -163,11 +172,11 @@ pub trait Trace: LoadState<Error: FromEvmError<Self::Evm>> + Call {
             let (target_tx, tx_info) = transaction.split();
             let evm_env = self.evm_env_for_header(block.sealed_block().sealed_header())?;
 
-            self.spawn_with_state_at_block(block.parent_hash().into(), move |this, db| {
-                this.apply_pre_execution_changes(&block, evm_env.clone(), db.clone())?;
+            self.spawn_with_state_at_block(block.parent_hash().into(), move |this, mut db| {
+                this.apply_pre_execution_changes(&block, evm_env.clone(), &mut db)?;
 
                 this.replay_transactions_until(
-                    db.clone(),
+                    &mut db,
                     evm_env.clone(),
                     block.transactions_recovered(),
                     *target_tx.tx_hash(),
@@ -175,7 +184,7 @@ pub trait Trace: LoadState<Error: FromEvmError<Self::Evm>> + Call {
 
                 let tx_env = TxEnvFor::<Self::Evm>::from(target_tx.clone());
                 let (inspector, result) =
-                    this.inspect_with_inspector(db.clone(), evm_env, tx_env, inspector)?;
+                    this.inspect_with_inspector(&mut db, evm_env, tx_env, inspector)?;
                 f(tx_info, inspector, result, db)
             })
             .await
@@ -186,7 +195,7 @@ pub trait Trace: LoadState<Error: FromEvmError<Self::Evm>> + Call {
     /// Executes transactions until the target transaction hash, excluding the target itself.
     fn replay_transactions_until<'a, I>(
         &self,
-        db: SharedEvmStateProviderDatabase,
+        db: &mut TraceStateProviderDatabase,
         evm_env: EvmEnvFor<Self::Evm>,
         transactions: I,
         target_tx_hash: B256,
@@ -202,12 +211,12 @@ pub trait Trace: LoadState<Error: FromEvmError<Self::Evm>> + Call {
 
             let tx_env = TxEnvFor::<Self::Evm>::from(tx.cloned());
             let (_, result) = self.inspect_with_inspector(
-                db.clone(),
+                db,
                 evm_env.clone(),
                 tx_env,
                 evm2::NoopInspector::default(),
             )?;
-            db.commit_source(&result.state_changes).map_err(Self::Error::from_eth_err)?;
+            db.commit_source(&result.state_changes);
         }
 
         Err(EthApiError::TransactionNotFound.into())
@@ -246,7 +255,7 @@ pub trait Trace: LoadState<Error: FromEvmError<Self::Evm>> + Call {
                 let block_timestamp = block.timestamp();
                 let base_fee = block.base_fee_per_gas();
 
-                this.apply_pre_execution_changes(&block, evm_env.clone(), db.clone())?;
+                this.apply_pre_execution_changes(&block, evm_env.clone(), &mut db)?;
 
                 let max_transactions = highest_index
                     .map(|highest| highest as usize + 1)
@@ -256,7 +265,7 @@ pub trait Trace: LoadState<Error: FromEvmError<Self::Evm>> + Call {
                 for (idx, tx) in block.transactions_recovered().take(max_transactions).enumerate() {
                     let tx_env = TxEnvFor::<Self::Evm>::from(tx.cloned());
                     let (inspector, result) = this.inspect_with_inspector(
-                        db.clone(),
+                        &mut db,
                         evm_env.clone(),
                         tx_env,
                         inspector_setup(),
@@ -271,7 +280,7 @@ pub trait Trace: LoadState<Error: FromEvmError<Self::Evm>> + Call {
                     };
                     let state_changes = result.state_changes.clone();
                     let item = f(tx_info, TracingCtx { result, db: &mut db, inspector })?;
-                    db.commit_source(&state_changes).map_err(Self::Error::from_eth_err)?;
+                    db.commit_source(&state_changes);
                     results.push(item);
                 }
 
@@ -330,7 +339,7 @@ pub trait Trace: LoadState<Error: FromEvmError<Self::Evm>> + Call {
         &self,
         block: &RecoveredBlock<ProviderBlock<Self::Provider>>,
         evm_env: EvmEnvFor<Self::Evm>,
-        db: SharedEvmStateProviderDatabase,
+        db: &mut TraceStateProviderDatabase,
     ) -> Result<(), Self::Error> {
         let ctx = self
             .evm_config()
@@ -339,10 +348,125 @@ pub trait Trace: LoadState<Error: FromEvmError<Self::Evm>> + Call {
             .map_err(Self::Error::from_eth_err)?;
         let changes = self
             .evm_config()
-            .pre_block_state_changes(db.clone(), evm_env, block.number(), ctx)
+            .pre_block_state_changes(
+                BorrowedTraceStateProviderDatabase(db),
+                evm_env,
+                block.number(),
+                ctx,
+            )
             .map_err(|err| EthApiError::EvmCustom(err.to_string()))
             .map_err(Self::Error::from_eth_err)?;
-        db.commit_source(&changes).map_err(Self::Error::from_eth_err)
+        db.commit_source(&changes);
+        Ok(())
+    }
+}
+
+struct BorrowedTraceStateProviderDatabase<'a>(&'a mut TraceStateProviderDatabase);
+
+impl Database for BorrowedTraceStateProviderDatabase<'_> {
+    type Error = ProviderError;
+
+    fn get_account(
+        &mut self,
+        address: &alloy_primitives::Address,
+    ) -> Result<Option<evm2::evm::AccountInfo>, Self::Error> {
+        self.0.get_account(address).map_err(|code| provider_error(self.0, code))
+    }
+
+    fn get_code_by_hash(
+        &mut self,
+        code_hash: &alloy_primitives::B256,
+    ) -> Result<evm2::bytecode::Bytecode, Self::Error> {
+        self.0.get_code_by_hash(code_hash).map_err(|code| provider_error(self.0, code))
+    }
+
+    fn get_storage(
+        &mut self,
+        address: &alloy_primitives::Address,
+        key: &evm2::interpreter::Word,
+    ) -> Result<evm2::interpreter::Word, Self::Error> {
+        self.0.get_storage(address, key).map_err(|code| provider_error(self.0, code))
+    }
+
+    fn get_block_hash(
+        &mut self,
+        number: &evm2::interpreter::Word,
+    ) -> Result<Option<alloy_primitives::B256>, Self::Error> {
+        self.0.get_block_hash(number).map_err(|code| provider_error(self.0, code))
+    }
+}
+
+fn provider_error(db: &mut TraceStateProviderDatabase, code: ErrorCode) -> ProviderError {
+    ProviderError::other(std::io::Error::other(db.error(code).to_string()))
+}
+
+struct BorrowedInspector<'a, I>(&'a mut I);
+
+impl<I> evm2::Inspector<BaseEvmTypes> for BorrowedInspector<'_, I>
+where
+    I: evm2::Inspector<BaseEvmTypes>,
+{
+    fn initialize_interp(
+        &mut self,
+        interp: &mut evm2::interpreter::Interpreter<'_, '_, BaseEvmTypes>,
+    ) {
+        self.0.initialize_interp(interp);
+    }
+
+    fn step(&mut self, interp: &mut evm2::interpreter::Interpreter<'_, '_, BaseEvmTypes>) {
+        self.0.step(interp);
+    }
+
+    fn step_end(&mut self, interp: &mut evm2::interpreter::Interpreter<'_, '_, BaseEvmTypes>) {
+        self.0.step_end(interp);
+    }
+
+    fn log(&mut self, log: &alloy_primitives::Log, host: &mut evm2::Evm<'_, BaseEvmTypes>) {
+        self.0.log(log, host);
+    }
+
+    fn call(
+        &mut self,
+        interp: &mut evm2::interpreter::Interpreter<'_, '_, BaseEvmTypes>,
+        message: &mut evm2::interpreter::Message<BaseEvmTypes>,
+    ) -> Option<evm2::interpreter::MessageResult<BaseEvmTypes>> {
+        self.0.call(interp, message)
+    }
+
+    fn call_end(
+        &mut self,
+        interp: &mut evm2::interpreter::Interpreter<'_, '_, BaseEvmTypes>,
+        message: &evm2::interpreter::Message<BaseEvmTypes>,
+        result: &mut evm2::interpreter::MessageResult<BaseEvmTypes>,
+    ) {
+        self.0.call_end(interp, message, result);
+    }
+
+    fn create(
+        &mut self,
+        interp: &mut evm2::interpreter::Interpreter<'_, '_, BaseEvmTypes>,
+        message: &mut evm2::interpreter::Message<BaseEvmTypes>,
+    ) -> Option<evm2::interpreter::MessageResult<BaseEvmTypes>> {
+        self.0.create(interp, message)
+    }
+
+    fn create_end(
+        &mut self,
+        interp: &mut evm2::interpreter::Interpreter<'_, '_, BaseEvmTypes>,
+        message: &evm2::interpreter::Message<BaseEvmTypes>,
+        result: &mut evm2::interpreter::MessageResult<BaseEvmTypes>,
+    ) {
+        self.0.create_end(interp, message, result);
+    }
+
+    fn selfdestruct(
+        &mut self,
+        contract: &alloy_primitives::Address,
+        target: &alloy_primitives::Address,
+        value: &alloy_primitives::U256,
+        host: &mut evm2::Evm<'_, BaseEvmTypes>,
+    ) {
+        self.0.selfdestruct(contract, target, value, host);
     }
 }
 

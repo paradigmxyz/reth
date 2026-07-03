@@ -113,7 +113,7 @@ where
     ) -> Result<ExecutionState, Box<dyn core::error::Error + Send + Sync>>
     where
         Self: 'a,
-        DB: evm2::evm::Database + 'static,
+        DB: evm2::evm::Database + 'a,
         DB::Error: core::error::Error + Send + Sync + 'static,
     {
         self.inner.pre_block_state_changes(db, evm_env, block_number, ctx)
