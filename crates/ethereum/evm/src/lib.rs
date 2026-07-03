@@ -228,7 +228,6 @@ mod execution;
 pub use execution::{
     BlockExecutionContext, BlockSystemCalls, EthExecutionError, PayloadExecutionError,
 };
-pub use reth_evm::execute::HashedStateMode;
 
 mod receipt;
 pub use receipt::RethReceiptBuilder;

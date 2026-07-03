@@ -39,29 +39,6 @@ impl<TxEnv> IntoTxEnv<TxEnv> for TxEnv {
     }
 }
 
-/// Controls how execution produces trie-ready hashed post-state.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum HashedStateMode {
-    /// Accumulate final hashed post-state in the returned block execution output.
-    OutputOnly,
-    /// Stream hashed state updates to the provided hook without accumulating output hashed state.
-    StreamOnly,
-    /// Accumulate final output hashed state and stream each committed update.
-    OutputAndStream,
-}
-
-impl HashedStateMode {
-    /// Returns true if execution should include hashed state in its output.
-    pub const fn output(self) -> bool {
-        matches!(self, Self::OutputOnly | Self::OutputAndStream)
-    }
-
-    /// Returns true if execution should stream hashed state updates.
-    pub const fn stream(self) -> bool {
-        matches!(self, Self::StreamOnly | Self::OutputAndStream)
-    }
-}
-
 /// Gas used by a successfully executed transaction.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub struct GasOutput {

@@ -20,7 +20,8 @@ pub use evm2_jit::{
 };
 
 use crate::{
-    EthBlockExecutionCtx, EthBlockExecutor, EthEvmEnv, EthPrimitives, EthTxEnv, HashedStateMode,
+    executor::HashedStateMode, EthBlockExecutionCtx, EthBlockExecutor, EthEvmEnv, EthPrimitives,
+    EthTxEnv,
 };
 
 /// Ethereum block executor factory.
@@ -114,7 +115,7 @@ impl<C, EvmFactory> EthBlockExecutorFactory<C, EvmFactory> {
     }
 
     /// Creates a configured Ethereum block executor with an explicit hashed-state output mode.
-    pub fn create_executor_with_hashed_state_mode<'a>(
+    pub(crate) fn create_executor_with_hashed_state_mode<'a>(
         &'a self,
         evm: evm2::Evm<'a, evm2::BaseEvmTypes>,
         ctx: EthBlockExecutionCtx<'a>,

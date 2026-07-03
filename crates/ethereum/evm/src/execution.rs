@@ -1,6 +1,8 @@
 //! EVM-backed Ethereum execution helpers.
 
 #[cfg(test)]
+use crate::executor::HashedStateMode;
+#[cfg(test)]
 use crate::{convert::recovered_tx_envelope, RethReceiptBuilder};
 use alloc::{
     boxed::Box,
@@ -50,8 +52,6 @@ use evm2::{
 use reth_ethereum_primitives::Receipt;
 #[cfg(test)]
 use reth_ethereum_primitives::TransactionSigned;
-#[cfg(test)]
-use reth_evm::execute::HashedStateMode;
 use reth_evm::execute::{
     BlockExecutionError, BlockValidationError, CommitChanges, EvmError, InvalidTxError,
 };

@@ -6,8 +6,7 @@ use crate::{
         post_block_balance_state_changes, post_execution_system_call_state_changes,
         pre_execution_system_call_state_changes,
     },
-    BlockExecutionContext, BlockSystemCalls, EthBlockExecutionCtx, EthTxEnv, HashedStateMode,
-    RethReceiptBuilder,
+    BlockExecutionContext, BlockSystemCalls, EthBlockExecutionCtx, EthTxEnv, RethReceiptBuilder,
 };
 use alloc::{borrow::Cow, vec::Vec};
 use alloy_consensus::{Header, TxType};
@@ -43,6 +42,29 @@ pub struct EthBlockExecutor<'a> {
 }
 
 type HashedStateUpdateHook = Option<Box<dyn FnMut(HashedPostState) + Send>>;
+
+/// Controls how Ethereum execution produces trie-ready hashed post-state.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum HashedStateMode {
+    /// Accumulate final hashed post-state in the returned block execution output.
+    OutputOnly,
+    /// Stream hashed state updates to the provided hook without accumulating output hashed state.
+    StreamOnly,
+    /// Accumulate final output hashed state and stream each committed update.
+    OutputAndStream,
+}
+
+impl HashedStateMode {
+    /// Returns true if execution should include hashed state in its output.
+    pub(crate) const fn output(self) -> bool {
+        matches!(self, Self::OutputOnly | Self::OutputAndStream)
+    }
+
+    /// Returns true if execution should stream hashed state updates.
+    pub(crate) const fn stream(self) -> bool {
+        matches!(self, Self::StreamOnly | Self::OutputAndStream)
+    }
+}
 
 impl<'a> EthBlockExecutor<'a> {
     /// Creates a configured Ethereum block executor.
