@@ -572,11 +572,30 @@ pub trait Executor: Sized {
         block: &RecoveredBlock<<Self::Primitives as NodePrimitives>::Block>,
     ) -> Result<BlockExecutionResult<<Self::Primitives as NodePrimitives>::Receipt>, Self::Error>;
 
+    /// Executes a single block and streams hashed state updates to the provided hook.
+    fn execute_one_with_state_hook<F>(
+        &mut self,
+        block: &RecoveredBlock<<Self::Primitives as NodePrimitives>::Block>,
+        state_hook: F,
+    ) -> Result<BlockExecutionResult<<Self::Primitives as NodePrimitives>::Receipt>, Self::Error>
+    where
+        F: FnMut(HashedPostState) + Send + 'static;
+
     /// Consumes the type and executes the block.
     fn execute(
         self,
         block: &RecoveredBlock<<Self::Primitives as NodePrimitives>::Block>,
     ) -> Result<BlockExecutionOutput<<Self::Primitives as NodePrimitives>::Receipt>, Self::Error>;
+
+    /// Consumes the type, executes the block, and streams hashed state updates to the provided
+    /// hook.
+    fn execute_with_state_hook<F>(
+        self,
+        block: &RecoveredBlock<<Self::Primitives as NodePrimitives>::Block>,
+        state_hook: F,
+    ) -> Result<BlockExecutionOutput<<Self::Primitives as NodePrimitives>::Receipt>, Self::Error>
+    where
+        F: FnMut(HashedPostState) + Send + 'static;
 
     /// Executes multiple inputs in the batch and returns an aggregated [`ExecutionOutcome`].
     fn execute_batch<'a, I>(
@@ -646,12 +665,33 @@ where
         block: &RecoveredBlock<BlockTy<Evm::Primitives>>,
         database: impl DynDatabase,
     ) -> Result<BlockExecutionOutput<ReceiptTy<Evm::Primitives>>, BlockExecutionError> {
+        Self::execute_block_with_database_and_state_hook(evm_config, block, database, None)
+    }
+
+    fn execute_block_with_database_and_state_hook(
+        evm_config: &Evm,
+        block: &RecoveredBlock<BlockTy<Evm::Primitives>>,
+        database: impl DynDatabase,
+        state_hook: Option<Box<dyn FnMut(HashedPostState) + Send>>,
+    ) -> Result<BlockExecutionOutput<ReceiptTy<Evm::Primitives>>, BlockExecutionError> {
         let evm_env = evm_config.evm_env(block.header()).map_err(BlockExecutionError::other)?;
         let evm = evm_config.block_executor_factory().evm_with_env(database, evm_env);
         let ctx = evm_config
             .context_for_block(block.sealed_block())
             .map_err(BlockExecutionError::other)?;
-        let mut executor = evm_config.create_executor(evm, ctx);
+        let hashed_state_mode = if state_hook.is_some() {
+            HashedStateMode::OutputAndStream
+        } else {
+            HashedStateMode::OutputOnly
+        };
+        let mut executor = evm_config
+            .block_executor_factory()
+            .create_executor_with_hashed_state_mode(evm, ctx, hashed_state_mode);
+        if let Some(hook) = state_hook &&
+            !executor.set_state_hook(hook)
+        {
+            return Err(BlockExecutionError::msg("block executor does not support state hooks"))
+        }
 
         executor.apply_pre_execution_changes()?;
         for transaction in block.clone_transactions_recovered() {
@@ -689,12 +729,50 @@ where
         Ok(output.result)
     }
 
+    fn execute_one_with_state_hook<F>(
+        &mut self,
+        block: &RecoveredBlock<<Self::Primitives as NodePrimitives>::Block>,
+        state_hook: F,
+    ) -> Result<BlockExecutionResult<<Self::Primitives as NodePrimitives>::Receipt>, Self::Error>
+    where
+        F: FnMut(HashedPostState) + Send + 'static,
+    {
+        let output = Self::execute_block_with_database_and_state_hook(
+            &self.evm_config,
+            block,
+            BorrowedDynDatabase::new(&mut self.batch_database),
+            Some(Box::new(state_hook)),
+        )?;
+        self.batch_database.commit_source(&output.state);
+
+        let block_state = output.state.into_inner();
+        self.batch_state.push_block_state(block_state);
+
+        Ok(output.result)
+    }
+
     fn execute(
         self,
         block: &RecoveredBlock<<Self::Primitives as NodePrimitives>::Block>,
     ) -> Result<BlockExecutionOutput<<Self::Primitives as NodePrimitives>::Receipt>, Self::Error>
     {
         Self::execute_block_with_database(&self.evm_config, block, self.batch_database)
+    }
+
+    fn execute_with_state_hook<F>(
+        self,
+        block: &RecoveredBlock<<Self::Primitives as NodePrimitives>::Block>,
+        state_hook: F,
+    ) -> Result<BlockExecutionOutput<<Self::Primitives as NodePrimitives>::Receipt>, Self::Error>
+    where
+        F: FnMut(HashedPostState) + Send + 'static,
+    {
+        Self::execute_block_with_database_and_state_hook(
+            &self.evm_config,
+            block,
+            self.batch_database,
+            Some(Box::new(state_hook)),
+        )
     }
 
     fn size_hint(&self) -> usize {
@@ -738,6 +816,28 @@ impl<N: NodePrimitives> Executor for UnsupportedExecutor<N> {
         self,
         _block: &RecoveredBlock<<Self::Primitives as NodePrimitives>::Block>,
     ) -> Result<BlockExecutionOutput<<Self::Primitives as NodePrimitives>::Receipt>, Self::Error>
+    {
+        Err(BlockExecutionError::msg("block execution is unsupported by this EVM configuration"))
+    }
+
+    fn execute_one_with_state_hook<F>(
+        &mut self,
+        _block: &RecoveredBlock<<Self::Primitives as NodePrimitives>::Block>,
+        _state_hook: F,
+    ) -> Result<BlockExecutionResult<<Self::Primitives as NodePrimitives>::Receipt>, Self::Error>
+    where
+        F: FnMut(HashedPostState) + Send + 'static,
+    {
+        Err(BlockExecutionError::msg("block execution is unsupported by this EVM configuration"))
+    }
+
+    fn execute_with_state_hook<F>(
+        self,
+        _block: &RecoveredBlock<<Self::Primitives as NodePrimitives>::Block>,
+        _state_hook: F,
+    ) -> Result<BlockExecutionOutput<<Self::Primitives as NodePrimitives>::Receipt>, Self::Error>
+    where
+        F: FnMut(HashedPostState) + Send + 'static,
     {
         Err(BlockExecutionError::msg("block execution is unsupported by this EVM configuration"))
     }
