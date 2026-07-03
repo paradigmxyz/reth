@@ -246,38 +246,22 @@ where
             // task scheduling would otherwise make later prewarm reads observe non-canonical state.
             let mut proof_targets = PrewarmProofTargetsSink::default();
 
-            enum PrewarmResolution {
-                Outcome,
-                DatabaseError(evm2::ErrorCode),
-                HandlerError(evm2::registry::HandlerError),
-            }
-
             let tx = ctx.evm_config.block_executor_factory().evm_tx(&tx_env);
-            let resolution = match evm.transact(tx) {
+            match evm.transact(tx) {
                 Ok(executed) => {
                     if let Some(code) = executed.result().error_code {
                         let _ = executed.discard();
-                        PrewarmResolution::DatabaseError(code)
-                    } else {
-                        let Ok(_result) = executed.discard_with(&mut proof_targets);
-                        PrewarmResolution::Outcome
+                        trace!(
+                            target: "engine::tree::payload_processor::prewarm",
+                            ?code,
+                            "Database error when executing prewarm transaction",
+                        );
+                        ctx.metrics.transaction_errors.increment(1);
+                        return;
                     }
+                    let Ok(_result) = executed.discard_with(&mut proof_targets);
                 }
-                Err(err) => PrewarmResolution::HandlerError(err),
-            };
-
-            match resolution {
-                PrewarmResolution::Outcome => {}
-                PrewarmResolution::DatabaseError(code) => {
-                    trace!(
-                        target: "engine::tree::payload_processor::prewarm",
-                        ?code,
-                        "Database error when executing prewarm transaction",
-                    );
-                    ctx.metrics.transaction_errors.increment(1);
-                    return;
-                }
-                PrewarmResolution::HandlerError(err) => {
+                Err(err) => {
                     trace!(
                         target: "engine::tree::payload_processor::prewarm",
                         %err,
@@ -286,7 +270,7 @@ where
                     ctx.metrics.transaction_errors.increment(1);
                     return;
                 }
-            }
+            };
             ctx.metrics.execution_duration.record(start.elapsed());
 
             if ctx.should_stop() {

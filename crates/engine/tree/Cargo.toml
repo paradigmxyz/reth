@@ -44,8 +44,6 @@ alloy-primitives.workspace = true
 alloy-rlp.workspace = true
 alloy-rpc-types-engine.workspace = true
 
-evm2.workspace = true
-
 # common
 futures.workspace = true
 thiserror.workspace = true
@@ -99,7 +97,6 @@ rand_08.workspace = true
 
 [features]
 asm-keccak = [
-    "evm2/asm-keccak",
     "reth-evm/asm-keccak",
     "reth-execution-types/asm-keccak",
     "alloy-primitives/asm-keccak",
@@ -107,7 +104,6 @@ asm-keccak = [
     "reth-evm-ethereum/asm-keccak",
 ]
 portable = [
-    "evm2/portable",
     "reth-evm/portable",
     "reth-execution-types/portable",
     "reth-node-ethereum/portable",

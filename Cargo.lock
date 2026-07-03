@@ -8505,7 +8505,6 @@ dependencies = [
  "assert_matches",
  "crossbeam-channel",
  "derive_more",
- "evm2",
  "eyre",
  "futures",
  "indexmap 2.14.0",
