@@ -40,6 +40,15 @@ pub const MAX_RESERVED_MESSAGE_ID: u8 = 0x0f;
 /// [`MAX_P2P_MESSAGE_ID`] is the maximum message ID in use for the `p2p` subprotocol.
 const MAX_P2P_MESSAGE_ID: u8 = P2PMessageID::Pong as u8;
 
+/// Snappy framed RLP empty list payload used by fixed `p2p` ping/pong control messages.
+const SNAPPY_EMPTY_LIST_PAYLOAD: &[u8] = &[0x01, 0x00, EMPTY_LIST_CODE];
+
+/// Wire-encoded `p2p` ping control message.
+const SNAPPY_PING_MESSAGE: &[u8] = &[0x02, 0x01, 0x00, EMPTY_LIST_CODE];
+
+/// Wire-encoded `p2p` pong control message.
+const SNAPPY_PONG_MESSAGE: &[u8] = &[0x03, 0x01, 0x00, EMPTY_LIST_CODE];
+
 /// [`HANDSHAKE_TIMEOUT`] determines the amount of time to wait before determining that a `p2p`
 /// handshake has timed out.
 pub const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(10);
@@ -304,12 +313,12 @@ impl<S> P2PStream<S> {
 
     /// Queues in a _snappy_ encoded [`P2PMessage::Pong`] message.
     fn send_pong(&mut self) {
-        self.outgoing_messages.push_back(Bytes::from(alloy_rlp::encode(P2PMessage::Pong)));
+        self.outgoing_messages.push_back(Bytes::from_static(SNAPPY_PONG_MESSAGE));
     }
 
     /// Queues in a _snappy_ encoded [`P2PMessage::Ping`] message.
     pub fn send_ping(&mut self) {
-        self.outgoing_messages.push_back(Bytes::from(alloy_rlp::encode(P2PMessage::Ping)));
+        self.outgoing_messages.push_back(Bytes::from_static(SNAPPY_PING_MESSAGE));
     }
 }
 
@@ -691,15 +700,11 @@ impl Encodable for P2PMessage {
             Self::Disconnect(msg) => msg.encode(out),
             Self::Ping => {
                 // Ping payload is _always_ snappy encoded
-                out.put_u8(0x01);
-                out.put_u8(0x00);
-                out.put_u8(EMPTY_LIST_CODE);
+                out.put_slice(SNAPPY_EMPTY_LIST_PAYLOAD);
             }
             Self::Pong => {
                 // Pong payload is _always_ snappy encoded
-                out.put_u8(0x01);
-                out.put_u8(0x00);
-                out.put_u8(EMPTY_LIST_CODE);
+                out.put_slice(SNAPPY_EMPTY_LIST_PAYLOAD);
             }
         }
     }
@@ -708,8 +713,8 @@ impl Encodable for P2PMessage {
         let payload_len = match self {
             Self::Hello(msg) => msg.length(),
             Self::Disconnect(msg) => msg.length(),
-            // id + snappy encoded payload
-            Self::Ping | Self::Pong => 3, // len([0x01, 0x00, 0xc0]) = 3
+            // snappy encoded empty RLP list payload
+            Self::Ping | Self::Pong => SNAPPY_EMPTY_LIST_PAYLOAD.len(),
         };
         payload_len + 1 // (1 for length of p2p message id)
     }
@@ -986,6 +991,12 @@ mod tests {
 
         // make sure the server receives the message and asserts before ending the test
         handle.await.unwrap();
+    }
+
+    #[test]
+    fn snappy_ping_pong_consts_match_rlp_encoding() {
+        assert_eq!(alloy_rlp::encode(P2PMessage::Ping).as_slice(), SNAPPY_PING_MESSAGE);
+        assert_eq!(alloy_rlp::encode(P2PMessage::Pong).as_slice(), SNAPPY_PONG_MESSAGE);
     }
 
     #[test]
