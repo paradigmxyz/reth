@@ -8,7 +8,10 @@ license.workspace = true
 [dependencies]
 reth-ethereum = { workspace = true, features = ["node", "test-utils"] }
 reth-engine-tree.workspace = true
+reth-evm.workspace = true
 reth-chain-state.workspace = true
+reth-primitives-traits.workspace = true
+reth-provider.workspace = true
 reth-trie.workspace = true
 
 eyre.workspace = true
