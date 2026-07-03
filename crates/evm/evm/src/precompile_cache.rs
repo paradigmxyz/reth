@@ -45,7 +45,7 @@ where
     S: Eq + Hash + std::fmt::Debug + Send + Sync + Clone + 'static,
 {
     /// Get the precompile cache for the given address.
-    pub fn cache_for_address(&self, address: Address) -> PrecompileCache<S> {
+    fn cache_for_address(&self, address: Address) -> PrecompileCache<S> {
         if let Some(cache) = self.0.get(&address) {
             return cache.clone()
         }
@@ -55,7 +55,7 @@ where
 }
 
 /// Cache for one precompile's inputs and outputs.
-pub struct PrecompileCache<S>(moka::sync::Cache<Bytes, CacheEntry<S>, DefaultHashBuilder>);
+struct PrecompileCache<S>(moka::sync::Cache<Bytes, CacheEntry<S>, DefaultHashBuilder>);
 
 impl<S> fmt::Debug for PrecompileCache<S> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
