@@ -153,7 +153,7 @@ use reth_provider::{
 use reth_revm::db::{states::bundle_state::BundleRetention, BundleAccount, State};
 use reth_trie::{prefix_set::TriePrefixSetsMut, updates::TrieUpdates, HashedPostState};
 use reth_trie_db::ChangesetCache;
-use reth_trie_parallel::root::ParallelStateRootError;
+use reth_trie_parallel::error::StateRootTaskError;
 use std::{
     sync::{
         atomic::{AtomicUsize, Ordering},
@@ -1414,7 +1414,7 @@ where
         state_provider_builder: StateProviderBuilder<N, P>,
         output: Arc<BlockExecutionOutput<R>>,
     ) -> ProviderResult<
-        Result<(StateRootComputeOutcome, Option<LazyHashedPostState>), ParallelStateRootError>,
+        Result<(StateRootComputeOutcome, Option<LazyHashedPostState>), StateRootTaskError>,
     > {
         let Some(timeout) = self.config.state_root_task_timeout() else {
             return Ok(handle.state_root().map(|outcome| (outcome, None)));
@@ -1425,7 +1425,7 @@ where
         match task_rx.recv_timeout(timeout) {
             Ok(result) => Ok(result.map(|outcome| (outcome, None))),
             Err(RecvTimeoutError::Disconnected) => {
-                Ok(Err(ParallelStateRootError::Other("sparse trie task dropped".to_string())))
+                Ok(Err(StateRootTaskError::Other("sparse trie task dropped".to_string())))
             }
             Err(RecvTimeoutError::Timeout) => {
                 warn!(

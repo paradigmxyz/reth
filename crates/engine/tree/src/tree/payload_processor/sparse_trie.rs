@@ -24,10 +24,10 @@ use reth_trie::{
 };
 use reth_trie_common::{MultiProofTargetsV2, ProofV2Target};
 use reth_trie_parallel::{
+    error::StateRootTaskError,
     proof_task::{
         AccountMultiproofInput, ProofResultContext, ProofResultMessage, ProofWorkerHandle,
     },
-    root::ParallelStateRootError,
 };
 use reth_trie_sparse::{
     errors::{SparseStateTrieErrorKind, SparseTrieErrorKind, SparseTrieResult},
@@ -246,7 +246,7 @@ where
         target = "engine::tree::payload_processor::sparse_trie",
         skip_all
     )]
-    pub(super) fn run(&mut self) -> Result<StateRootComputeOutcome, ParallelStateRootError> {
+    pub(super) fn run(&mut self) -> Result<StateRootComputeOutcome, StateRootTaskError> {
         let now = Instant::now();
 
         let mut total_idle_time = std::time::Duration::ZERO;
@@ -261,7 +261,7 @@ where
                     let update = match message {
                         Ok(m) => m,
                         Err(_) => {
-                            return Err(ParallelStateRootError::Other(
+                            return Err(StateRootTaskError::Other(
                                 "updates channel disconnected before state root calculation".to_string(),
                             ))
                         }
@@ -362,7 +362,7 @@ where
                 (self.parent_state_root, TrieUpdates::default())
             }
             Err(err) => {
-                return Err(ParallelStateRootError::Other(format!(
+                return Err(StateRootTaskError::Other(format!(
                     "could not calculate state root: {err:?}"
                 )))
             }
@@ -495,13 +495,10 @@ where
         self.final_hashed_state.extend(hashed_state_update);
     }
 
-    fn on_proof_result(
-        &mut self,
-        result: DecodedMultiProofV2,
-    ) -> Result<(), ParallelStateRootError> {
-        self.trie.reveal_decoded_multiproof_v2(result).map_err(|e| {
-            ParallelStateRootError::Other(format!("could not reveal multiproof: {e:?}"))
-        })
+    fn on_proof_result(&mut self, result: DecodedMultiProofV2) -> Result<(), StateRootTaskError> {
+        self.trie
+            .reveal_decoded_multiproof_v2(result)
+            .map_err(|e| StateRootTaskError::Other(format!("could not reveal multiproof: {e:?}")))
     }
 
     fn process_new_updates(&mut self) -> SparseTrieResult<()> {
