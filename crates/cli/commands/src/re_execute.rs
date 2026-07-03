@@ -13,7 +13,7 @@ use reth_cli::chainspec::ChainSpecParser;
 use reth_cli_util::cancellation::CancellationToken;
 use reth_consensus::FullConsensus;
 use reth_evm::{database::StateProviderDatabase, execute::Executor, ConfigureEvm};
-use reth_execution_types::{BlockReverts, ExecutionOutcome, RevertAccount};
+use reth_execution_types::{BlockReverts, RevertAccount};
 use reth_node_core::args::JitArgs;
 use reth_primitives_traits::{format_gas_throughput, Account, BlockBody, GotExpected};
 use reth_provider::{
@@ -161,8 +161,6 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
                         provider.history_by_block_number(chunk_start.saturating_sub(1))?,
                     );
                     let mut executor = evm_config.batch_executor(database);
-                    let mut executor_start_block = chunk_start;
-                    let mut results = Vec::new();
                     let mut last_executed_block = None;
                     let mut executor_created = Instant::now();
 
@@ -180,12 +178,10 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
                             Err(err) => {
                                 if skip_invalid_blocks {
                                     drop(executor);
-                                    results.clear();
                                     let database = StateProviderDatabase::new(
                                         provider.history_by_block_number(block.number())?,
                                     );
                                     executor = evm_config.batch_executor(database);
-                                    executor_start_block = block.number() + 1;
                                     executor_created = Instant::now();
                                     let _ = info_tx.send((block, eyre::Report::new(err)));
                                     continue
@@ -243,12 +239,10 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
                                         error!(number=?block.number(), ?mismatch, "Gas usage mismatch");
                                         if skip_invalid_blocks {
                                             drop(executor);
-                                            results.clear();
                                             let database = StateProviderDatabase::new(
                                                 provider.history_by_block_number(block.number())?,
                                             );
                                             executor = evm_config.batch_executor(database);
-                                            executor_start_block = block.number() + 1;
                                             executor_created = Instant::now();
                                             let _ = info_tx.send((block, err));
                                             continue 'blocks;
@@ -264,7 +258,6 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
                         }
                         let _ = stats_tx.send((block.number(), block.gas_used()));
                         last_executed_block = Some(block.number());
-                        results.push(result);
 
                         // Verify and drop accumulated state once in a while to avoid OOM.
                         if executor.size_hint() > 5_000_000 ||
@@ -276,29 +269,23 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
                             );
                             let next_executor = evm_config.batch_executor(database);
                             let old_executor = std::mem::replace(&mut executor, next_executor);
-                            let outcome = ExecutionOutcome::from_blocks(
-                                executor_start_block,
-                                old_executor.into_state(),
-                                std::mem::take(&mut results),
-                            );
+                            let state = old_executor.into_state();
                             verify_reverts_against_changesets(
                                 &provider,
-                                outcome.block_reverts(),
+                                state.block_reverts(),
                                 last_block,
                             )?;
-                            executor_start_block = last_block + 1;
                             executor_created = Instant::now();
                         }
                     }
 
                     // Full verification at chunk end for remaining unverified blocks
-                    if !results.is_empty() {
-                        let last_block = last_executed_block.unwrap_or(chunk_end - 1);
-                        let outcome =
-                            ExecutionOutcome::from_blocks(executor_start_block, executor.into_state(), results);
+                    let state = executor.into_state();
+                    if !state.block_reverts().is_empty() {
+                        let last_block = last_executed_block.unwrap_or(chunk_end.saturating_sub(1));
                         verify_reverts_against_changesets(
                             &provider,
-                            outcome.block_reverts(),
+                            state.block_reverts(),
                             last_block,
                         )?;
                     }
