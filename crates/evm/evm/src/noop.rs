@@ -1,5 +1,7 @@
 //! Helpers for testing.
 
+#[cfg(feature = "std")]
+use crate::Database;
 use crate::{ConfigureEvm, EvmEnvFor};
 #[cfg(feature = "std")]
 use alloc::boxed::Box;
@@ -90,7 +92,7 @@ where
     ) -> Result<crate::ExecutionState, Box<dyn core::error::Error + Send + Sync>>
     where
         Self: 'a,
-        DB: evm2::evm::Database + 'a,
+        DB: Database + 'a,
         DB::Error: core::error::Error + Send + Sync + 'static,
     {
         self.inner().pre_block_state_changes(db, evm_env, block_number, ctx)

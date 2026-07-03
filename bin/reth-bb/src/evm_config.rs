@@ -12,7 +12,7 @@ use alloy_rpc_types::engine::ExecutionData;
 use core::{convert::Infallible, fmt};
 use reth_ethereum_primitives::EthPrimitives;
 use reth_evm::{
-    ConfigureEngineEvm, ConfigureEvm, EvmEnvFor, ExecutableTxIterator, ExecutionCtxFor,
+    ConfigureEngineEvm, ConfigureEvm, Database, EvmEnvFor, ExecutableTxIterator, ExecutionCtxFor,
     ExecutionState, NextBlockEnvAttributes,
 };
 use reth_evm_ethereum::EthEvmConfig;
@@ -113,7 +113,7 @@ where
     ) -> Result<ExecutionState, Box<dyn core::error::Error + Send + Sync>>
     where
         Self: 'a,
-        DB: evm2::evm::Database + 'a,
+        DB: Database + 'a,
         DB::Error: core::error::Error + Send + Sync + 'static,
     {
         self.inner.pre_block_state_changes(db, evm_env, block_number, ctx)

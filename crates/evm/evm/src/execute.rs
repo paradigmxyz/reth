@@ -1,6 +1,8 @@
 //! Traits for execution.
 
-use crate::{ConfigureEvm, EvmEnv, TxEnvFor};
+#[cfg(feature = "std")]
+use crate::Database;
+use crate::{ConfigureEvm, DynDatabase, EvmEnv, TxEnvFor};
 use alloc::{boxed::Box, sync::Arc, vec::Vec};
 use alloy_consensus::{
     transaction::{Either, Recovered},
@@ -8,18 +10,16 @@ use alloy_consensus::{
 };
 use alloy_eips::eip2718::WithEncoded;
 use alloy_primitives::{Address, Bytes, B256};
-#[cfg(feature = "std")]
 use core::fmt::Debug;
 #[cfg(feature = "std")]
 use evm2::{
-    evm::{CacheDB, Database, Db, DbResult, DynDatabase},
+    evm::{CacheDB, Db, DbResult},
     AnyError, ErrorCode,
 };
 pub use reth_execution_errors::{
     BlockExecutionError, BlockValidationError, EvmError, InternalBlockExecutionError,
     InvalidTxError,
 };
-#[cfg(feature = "std")]
 pub use reth_execution_types::{BlockExecutionOutput, ExecutionOutcome};
 use reth_execution_types::{BlockExecutionResult, ExecutionOutcomeState, HashedPostState};
 #[cfg(feature = "std")]
@@ -234,7 +234,7 @@ pub trait BlockExecutorFactory {
     /// Creates an EVM instance with the configured execution environment.
     fn evm_with_env<'a, DB>(&self, db: DB, evm_env: Self::EvmEnv) -> Self::Evm<'a>
     where
-        DB: evm2::evm::DynDatabase + 'a;
+        DB: DynDatabase + 'a;
 
     /// Returns the transaction shape consumed by the configured EVM.
     fn evm_tx<'a>(

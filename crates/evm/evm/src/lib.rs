@@ -25,6 +25,8 @@ use alloy_primitives::{Address, Bytes, B256};
 use core::{error::Error, fmt::Debug};
 use reth_primitives_traits::{BlockTy, HeaderTy, NodePrimitives, SealedBlock, SealedHeader, TxTy};
 
+pub use evm2::evm::{Database, DynDatabase};
+
 /// Cached database adapters for payload building.
 pub mod cached;
 /// Cancellation markers for EVM execution work.
@@ -300,7 +302,7 @@ pub trait ConfigureEvm: Clone + Debug + Send + Sync + Unpin {
         db: DB,
     ) -> impl Executor<Primitives = Self::Primitives, Error = BlockExecutionError>
     where
-        DB: evm2::evm::Database,
+        DB: Database,
         DB::Error: core::error::Error + Send + Sync + 'static,
     {
         #[cfg(feature = "std")]
@@ -322,7 +324,7 @@ pub trait ConfigureEvm: Clone + Debug + Send + Sync + Unpin {
         db: DB,
     ) -> impl Executor<Primitives = Self::Primitives, Error = BlockExecutionError>
     where
-        DB: evm2::evm::Database,
+        DB: Database,
         DB::Error: core::error::Error + Send + Sync + 'static,
     {
         #[cfg(feature = "std")]
@@ -346,7 +348,7 @@ pub trait ConfigureEvm: Clone + Debug + Send + Sync + Unpin {
     ) -> Result<crate::BlockExecutorFor<'a, Self>, Self::Error>
     where
         Self: 'a,
-        DB: evm2::evm::Database + 'a,
+        DB: Database + 'a,
         DB::Error: core::error::Error + Send + Sync + 'static,
     {
         let evm = self.evm_for_block(db, block.header())?;
@@ -359,7 +361,7 @@ pub trait ConfigureEvm: Clone + Debug + Send + Sync + Unpin {
     #[auto_impl(keep_default_for(&, Arc))]
     fn evm_with_env<'a, DB>(&self, db: DB, evm_env: EvmEnvFor<Self>) -> EvmFor<'a, Self>
     where
-        DB: evm2::evm::Database + 'a,
+        DB: Database + 'a,
     {
         crate::execute::BlockExecutorFactory::evm_with_env(
             self.block_executor_factory(),
@@ -376,7 +378,7 @@ pub trait ConfigureEvm: Clone + Debug + Send + Sync + Unpin {
         header: &HeaderTy<Self::Primitives>,
     ) -> Result<EvmFor<'a, Self>, Self::Error>
     where
-        DB: evm2::evm::Database + 'a,
+        DB: Database + 'a,
     {
         let evm_env = self.evm_env(header)?;
         Ok(self.evm_with_env(db, evm_env))
@@ -417,7 +419,7 @@ pub trait ConfigureEvm: Clone + Debug + Send + Sync + Unpin {
     >
     where
         Self: 'a,
-        DB: evm2::evm::Database + 'a,
+        DB: Database + 'a,
         DB::Error: core::error::Error + Send + Sync + 'static,
     {
         let evm_env = self.next_evm_env(parent, &attributes)?;
@@ -435,7 +437,7 @@ pub trait ConfigureEvm: Clone + Debug + Send + Sync + Unpin {
         inspector: I,
     ) -> EvmFor<'a, Self>
     where
-        DB: evm2::evm::Database + 'a,
+        DB: Database + 'a,
         I: evm2::Inspector<evm2::BaseEvmTypes> + 'a,
     {
         let mut evm = self.evm_with_env(db, evm_env);
@@ -454,7 +456,7 @@ pub trait ConfigureEvm: Clone + Debug + Send + Sync + Unpin {
     ) -> Result<ExecutionState, Box<dyn Error + Send + Sync>>
     where
         Self: 'a,
-        DB: evm2::evm::Database + 'a,
+        DB: Database + 'a,
         DB::Error: Error + Send + Sync + 'static;
 }
 
