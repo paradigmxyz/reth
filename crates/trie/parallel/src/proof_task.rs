@@ -628,18 +628,7 @@ where
 
         let mut storage_proofs_processed = 0u64;
         let mut cursor_metrics_cache = ProofTaskCursorMetricsCache::default();
-        let trie_cursor = proof_tx.provider.storage_trie_cursor(B256::ZERO)?;
-        let hashed_cursor = proof_tx.provider.hashed_storage_cursor(B256::ZERO)?;
-        let instrumented_trie_cursor =
-            InstrumentedTrieCursor::new(trie_cursor, &mut cursor_metrics_cache.storage_trie_cursor);
-        let instrumented_hashed_cursor = InstrumentedHashedCursor::new(
-            hashed_cursor,
-            &mut cursor_metrics_cache.storage_hashed_cursor,
-        );
-        let mut v2_calculator = proof_v2::StorageProofCalculator::new_storage(
-            instrumented_trie_cursor,
-            instrumented_hashed_cursor,
-        );
+        let mut v2_calculator = None;
 
         // Initially mark this worker as available.
         self.availability.mark_idle(self.worker_id);
@@ -668,9 +657,27 @@ where
 
             match job {
                 StorageWorkerJob::StorageProof { input, proof_result_sender } => {
+                    if v2_calculator.is_none() {
+                        let trie_cursor = proof_tx.provider.storage_trie_cursor(B256::ZERO)?;
+                        let hashed_cursor = proof_tx.provider.hashed_storage_cursor(B256::ZERO)?;
+                        let instrumented_trie_cursor = InstrumentedTrieCursor::new(
+                            trie_cursor,
+                            &mut cursor_metrics_cache.storage_trie_cursor,
+                        );
+                        let instrumented_hashed_cursor = InstrumentedHashedCursor::new(
+                            hashed_cursor,
+                            &mut cursor_metrics_cache.storage_hashed_cursor,
+                        );
+                        v2_calculator = Some(proof_v2::StorageProofCalculator::new_storage(
+                            instrumented_trie_cursor,
+                            instrumented_hashed_cursor,
+                        ));
+                    }
+                    let v2_calculator =
+                        v2_calculator.as_mut().expect("storage proof calculator initialized");
                     self.process_storage_proof(
                         &proof_tx,
-                        &mut v2_calculator,
+                        v2_calculator,
                         input,
                         proof_result_sender,
                         &mut storage_proofs_processed,
