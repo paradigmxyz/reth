@@ -2,7 +2,10 @@
 
 use crate::{EthMessage, EthVersion, NetworkPrimitives};
 use alloc::{sync::Arc, vec::Vec};
+use alloy_consensus::transaction::TxHashRef;
+use alloy_eips::eip2718::Typed2718;
 use alloy_primitives::{
+    bytes::BufMut,
     map::{B256Map, B256Set},
     Bytes, TxHash, B128, B256, U128,
 };
@@ -14,7 +17,7 @@ use core::{fmt::Debug, mem};
 use derive_more::{Constructor, Deref, DerefMut, From, IntoIterator};
 use reth_codecs_derive::{add_arbitrary_tests, generate_tests};
 use reth_ethereum_primitives::TransactionSigned;
-use reth_primitives_traits::{Block, InMemorySize, SignedTransaction};
+use reth_primitives_traits::{sync::OnceLock, Block, InMemorySize, SignedTransaction};
 
 /// This informs peers of new blocks that have appeared on the network.
 #[derive(
@@ -204,6 +207,112 @@ pub struct SharedTransactions<T = TransactionSigned>(
     /// New transactions for the peer to include in its mempool.
     pub Vec<Arc<T>>,
 );
+
+/// A transaction that can be lazily encoded for pool-backed outbound propagation.
+pub trait BroadcastPoolTransaction:
+    Encodable + TxHashRef + Typed2718 + Send + Sync + 'static
+{
+}
+
+impl<T> BroadcastPoolTransaction for T where
+    T: Encodable + TxHashRef + Typed2718 + Send + Sync + 'static
+{
+}
+
+/// Shared cached encoding for an outbound transaction.
+///
+/// This keeps the transaction object and its encoded bytes behind shared references so cloned
+/// per-peer messages reuse the same EIP-2718 encoding.
+pub struct LazyEncoded<T: ?Sized> {
+    value: Arc<T>,
+    encoded: Arc<OnceLock<Bytes>>,
+}
+
+impl<T: ?Sized> Clone for LazyEncoded<T> {
+    fn clone(&self) -> Self {
+        Self { value: Arc::clone(&self.value), encoded: Arc::clone(&self.encoded) }
+    }
+}
+
+impl LazyEncoded<dyn BroadcastPoolTransaction> {
+    /// Wraps a transaction-like value and lazily caches its encoded bytes.
+    pub fn new<T>(value: T) -> Self
+    where
+        T: BroadcastPoolTransaction,
+    {
+        let value: Arc<dyn BroadcastPoolTransaction> = Arc::new(value);
+        Self { value, encoded: Arc::new(OnceLock::new()) }
+    }
+}
+
+impl<T: Encodable + ?Sized> Encodable for LazyEncoded<T> {
+    fn encode(&self, out: &mut dyn BufMut) {
+        let encoded = self.encoded.get_or_init(|| self.encode_uncached());
+        out.put_slice(encoded);
+    }
+
+    fn length(&self) -> usize {
+        self.encoded.get_or_init(|| self.encode_uncached()).len()
+    }
+}
+
+impl<T: Encodable + ?Sized> LazyEncoded<T> {
+    fn encode_uncached(&self) -> Bytes {
+        let mut out = Vec::with_capacity(self.value.length());
+        self.value.encode(&mut out);
+        out.into()
+    }
+}
+
+impl<T: TxHashRef + ?Sized> TxHashRef for LazyEncoded<T> {
+    fn tx_hash(&self) -> &TxHash {
+        self.value.tx_hash()
+    }
+}
+
+impl<T: Typed2718 + ?Sized> Typed2718 for LazyEncoded<T> {
+    fn ty(&self) -> u8 {
+        self.value.ty()
+    }
+}
+
+impl<T: ?Sized> Debug for LazyEncoded<T> {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("LazyEncoded")
+            .field("is_cached", &self.encoded.get().is_some())
+            .finish_non_exhaustive()
+    }
+}
+
+/// A lazily encoded transaction used for pool-backed full transaction propagation.
+pub type LazyEncodedTransaction = LazyEncoded<dyn BroadcastPoolTransaction>;
+
+/// Outbound-only full transaction propagation message backed by pool transactions.
+///
+/// This encodes to the same `Transactions` wire payload as [`SharedTransactions`], but is used by
+/// the transaction manager when the source is the pool. Unlike [`SharedTransactions`], it can wrap
+/// pool transaction references directly and cache each transaction's encoded bytes across per-peer
+/// messages. Queued messages retain the pool-backed value and the shared cached bytes until they
+/// are sent.
+#[derive(Clone, Debug, Deref)]
+pub struct BroadcastPoolTransactions(pub Vec<LazyEncodedTransaction>);
+
+impl BroadcastPoolTransactions {
+    /// Returns an iterator over the transaction hashes.
+    pub fn iter_hashes(&self) -> impl Iterator<Item = &TxHash> + '_ {
+        self.0.iter().map(TxHashRef::tx_hash)
+    }
+}
+
+impl Encodable for BroadcastPoolTransactions {
+    fn encode(&self, out: &mut dyn BufMut) {
+        self.0.encode(out);
+    }
+
+    fn length(&self) -> usize {
+        self.0.length()
+    }
+}
 
 /// A wrapper type for all different new pooled transaction types
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -1198,6 +1307,7 @@ mod tests {
     use alloy_consensus::{transaction::TxHashRef, Typed2718};
     use alloy_eips::eip2718::Encodable2718;
     use alloy_primitives::{b256, hex, Signature, U256};
+    use proptest::prelude::*;
     use reth_ethereum_primitives::{Transaction, TransactionSigned};
     use std::str::FromStr;
 
@@ -1214,6 +1324,51 @@ mod tests {
 
         let decoded = T::decode(&mut encoded.as_ref()).unwrap();
         assert_eq!(expected_decoded, decoded);
+    }
+
+    fn encoded<T: Encodable>(value: &T) -> Vec<u8> {
+        let mut out = Vec::new();
+        value.encode(&mut out);
+        out
+    }
+
+    proptest! {
+        #[test]
+        fn broadcast_pool_transactions_match_shared_transactions_encoding(
+            txs in proptest::collection::vec(
+                proptest_arbitrary_interop::arb::<TransactionSigned>(),
+                0..32,
+            )
+        ) {
+            let shared = SharedTransactions::<TransactionSigned>(
+                txs.iter().cloned().map(Arc::new).collect(),
+            );
+            let broadcast = BroadcastPoolTransactions(
+                txs.iter().cloned().map(LazyEncoded::new).collect(),
+            );
+
+            prop_assert_eq!(broadcast.length(), shared.length());
+
+            let shared_encoded = encoded(&shared);
+            let broadcast_encoded = encoded(&broadcast);
+            prop_assert_eq!(&broadcast_encoded, &shared_encoded);
+
+            let broadcast_encoded_cached = encoded(&broadcast);
+            prop_assert_eq!(&broadcast_encoded_cached, &shared_encoded);
+
+            let mut shared_bytes = shared_encoded.as_slice();
+            let decoded_shared = SharedTransactions::<TransactionSigned>::decode(&mut shared_bytes)
+                .expect("shared transactions decode");
+            prop_assert!(shared_bytes.is_empty());
+
+            let mut broadcast_bytes = broadcast_encoded.as_slice();
+            let decoded_broadcast =
+                SharedTransactions::<TransactionSigned>::decode(&mut broadcast_bytes)
+                    .expect("broadcast pool transactions decode as shared transactions");
+            prop_assert!(broadcast_bytes.is_empty());
+
+            prop_assert_eq!(decoded_broadcast, decoded_shared);
+        }
     }
 
     #[test]

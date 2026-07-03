@@ -546,12 +546,18 @@ impl PeersManager {
     pub(crate) fn apply_reputation_change(&mut self, peer_id: &PeerId, rep: ReputationChangeKind) {
         trace!(target: "net::peers", ?peer_id, reputation=?rep, "applying reputation change");
 
+        let reputation_change = if rep.is_reset() {
+            None
+        } else {
+            let reputation_change = self.reputation_weights.change(rep).as_i32();
+            if reputation_change == 0 {
+                return
+            }
+            Some(reputation_change)
+        };
+
         let outcome = if let Some(peer) = self.peers.get_mut(peer_id) {
-            // First check if we should reset the reputation
-            if rep.is_reset() {
-                peer.reset_reputation()
-            } else {
-                let mut reputation_change = self.reputation_weights.change(rep).as_i32();
+            if let Some(mut reputation_change) = reputation_change {
                 if peer.is_trusted() || peer.is_static() {
                     // exempt trusted and static peers from reputation slashing for
                     if matches!(
@@ -571,6 +577,8 @@ impl PeersManager {
                     }
                 }
                 peer.apply_reputation(reputation_change, rep)
+            } else {
+                peer.reset_reputation()
             }
         } else {
             return
