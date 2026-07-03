@@ -28,7 +28,7 @@ use reth_storage_errors::{
 use rocksdb::{
     BlockBasedOptions, Cache, ColumnFamilyDescriptor, CompactionPri, DBCompressionType,
     DBRawIteratorWithThreadMode, IteratorMode, OptimisticTransactionDB,
-    OptimisticTransactionOptions, Options, SnapshotWithThreadMode, Transaction,
+    OptimisticTransactionOptions, Options, ReadOptions, SnapshotWithThreadMode, Transaction,
     WriteBatchWithTransaction, WriteBufferManager, WriteOptions, DB,
 };
 use std::{
@@ -43,6 +43,31 @@ use tracing::instrument;
 fn synced_write_options() -> WriteOptions {
     let mut opts = WriteOptions::default();
     opts.set_sync(true);
+    opts
+}
+
+/// Returns the lexicographic successor of a fixed-width key prefix.
+fn prefix_upper_bound(prefix: &[u8]) -> Option<Vec<u8>> {
+    let mut upper = prefix.to_vec();
+    for byte in upper.iter_mut().rev() {
+        if *byte != u8::MAX {
+            *byte += 1;
+            return Some(upper);
+        }
+        *byte = 0;
+    }
+    None
+}
+
+/// Read options for sorted history-prune scans.
+fn history_prune_read_options(first_prefix: &[u8], last_prefix: &[u8]) -> ReadOptions {
+    let mut opts = ReadOptions::default();
+    opts.set_iterate_lower_bound(first_prefix.to_vec());
+    if let Some(upper_bound) = prefix_upper_bound(last_prefix) {
+        opts.set_iterate_upper_bound(upper_bound);
+        opts.set_auto_readahead_size(true);
+    }
+    opts.set_pin_data(true);
     opts
 }
 
@@ -529,14 +554,19 @@ impl RocksDBProviderInner {
         }
     }
 
-    /// Returns a raw iterator over a column family.
-    ///
-    /// Unlike [`Self::iterator_cf`], raw iterators support `seek()` for efficient
-    /// repositioning without creating a new iterator.
-    fn raw_iterator_cf(&self, cf: &rocksdb::ColumnFamily) -> RocksDBRawIterEnum<'_> {
+    /// Returns a raw iterator over a column family using explicit read options.
+    fn raw_iterator_cf_opt(
+        &self,
+        cf: &rocksdb::ColumnFamily,
+        read_options: ReadOptions,
+    ) -> RocksDBRawIterEnum<'_> {
         match self {
-            Self::ReadWrite { db, .. } => RocksDBRawIterEnum::ReadWrite(db.raw_iterator_cf(cf)),
-            Self::Secondary { db, .. } => RocksDBRawIterEnum::ReadOnly(db.raw_iterator_cf(cf)),
+            Self::ReadWrite { db, .. } => {
+                RocksDBRawIterEnum::ReadWrite(db.raw_iterator_cf_opt(cf, read_options))
+            }
+            Self::Secondary { db, .. } => {
+                RocksDBRawIterEnum::ReadOnly(db.raw_iterator_cf_opt(cf, read_options))
+            }
         }
     }
 
@@ -2160,8 +2190,16 @@ impl<'a> RocksDBBatch<'a> {
         // The first 20 bytes are the "prefix" that identifies the address
         const PREFIX_LEN: usize = 20;
 
+        let first_start_key = ShardedKey::new(targets[0].0, 0u64).encode();
+        let last_start_key =
+            ShardedKey::new(targets.last().expect("targets is not empty").0, 0u64).encode();
+        let read_options = history_prune_read_options(
+            &first_start_key[..PREFIX_LEN],
+            &last_start_key[..PREFIX_LEN],
+        );
+
         let cf = self.provider.get_cf_handle::<tables::AccountsHistory>()?;
-        let mut iter = self.provider.0.raw_iterator_cf(cf);
+        let mut iter = self.provider.0.raw_iterator_cf_opt(cf, read_options);
         let mut outcomes = PrunedIndices::default();
 
         for (address, to_block) in targets {
@@ -2287,8 +2325,18 @@ impl<'a> RocksDBBatch<'a> {
         // The first 52 bytes are the "prefix" that identifies (address, storage_key)
         const PREFIX_LEN: usize = 52;
 
+        let (first_address, first_storage_key) = targets[0].0;
+        let first_start_key =
+            StorageShardedKey::new(first_address, first_storage_key, 0u64).encode();
+        let last_target = targets.last().expect("targets is not empty").0;
+        let last_start_key = StorageShardedKey::new(last_target.0, last_target.1, 0u64).encode();
+        let read_options = history_prune_read_options(
+            &first_start_key[..PREFIX_LEN],
+            &last_start_key[..PREFIX_LEN],
+        );
+
         let cf = self.provider.get_cf_handle::<tables::StoragesHistory>()?;
-        let mut iter = self.provider.0.raw_iterator_cf(cf);
+        let mut iter = self.provider.0.raw_iterator_cf_opt(cf, read_options);
         let mut outcomes = PrunedIndices::default();
 
         for ((address, storage_key), to_block) in targets {
@@ -2799,6 +2847,13 @@ mod tests {
         tables,
     };
     use tempfile::TempDir;
+
+    #[test]
+    fn test_prefix_upper_bound_carries_fixed_width_prefixes() {
+        assert_eq!(prefix_upper_bound(&[0x12, 0x34]), Some(vec![0x12, 0x35]));
+        assert_eq!(prefix_upper_bound(&[0x12, 0xff]), Some(vec![0x13, 0x00]));
+        assert_eq!(prefix_upper_bound(&[0xff, 0xff]), None);
+    }
 
     #[test]
     fn test_with_default_tables_registers_required_column_families() {
