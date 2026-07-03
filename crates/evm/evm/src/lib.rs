@@ -25,7 +25,10 @@ use alloy_primitives::{Address, Bytes, B256};
 use core::{error::Error, fmt::Debug};
 use reth_primitives_traits::{BlockTy, HeaderTy, NodePrimitives, SealedBlock, SealedHeader, TxTy};
 
-pub use evm2::evm::{Database, DynDatabase};
+pub use evm2::{
+    debug_unreachable,
+    evm::{Database, DynDatabase},
+};
 
 /// Cached database adapters for payload building.
 pub mod cached;
