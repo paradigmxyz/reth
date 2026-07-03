@@ -50,6 +50,8 @@ impl Environment {
             txn_dp_limit: None,
             spill_max_denominator: None,
             spill_min_denominator: None,
+            subpage_reserve_prereq: None,
+            subpage_reserve_limit: None,
             geometry: None,
             log_level: None,
             kind: Default::default(),
@@ -618,6 +620,8 @@ pub struct EnvironmentBuilder {
     txn_dp_limit: Option<u64>,
     spill_max_denominator: Option<u64>,
     spill_min_denominator: Option<u64>,
+    subpage_reserve_prereq: Option<u64>,
+    subpage_reserve_limit: Option<u64>,
     geometry: Option<Geometry<(Option<usize>, Option<usize>)>>,
     log_level: Option<ffi::MDBX_log_level_t>,
     kind: EnvironmentKind,
@@ -691,6 +695,8 @@ impl EnvironmentBuilder {
                     (ffi::MDBX_opt_txn_dp_limit, self.txn_dp_limit),
                     (ffi::MDBX_opt_spill_max_denominator, self.spill_max_denominator),
                     (ffi::MDBX_opt_spill_min_denominator, self.spill_min_denominator),
+                    (ffi::MDBX_opt_subpage_reserve_prereq, self.subpage_reserve_prereq),
+                    (ffi::MDBX_opt_subpage_reserve_limit, self.subpage_reserve_limit),
                 ] {
                     if let Some(v) = v {
                         mdbx_result(ffi::mdbx_env_set_option(env, opt, v))?;
@@ -870,6 +876,16 @@ impl EnvironmentBuilder {
 
     pub fn set_spill_min_denominator(&mut self, v: u8) -> &mut Self {
         self.spill_min_denominator = Some(v.into());
+        self
+    }
+
+    pub const fn set_subpage_reserve_prereq(&mut self, v: u64) -> &mut Self {
+        self.subpage_reserve_prereq = Some(v);
+        self
+    }
+
+    pub const fn set_subpage_reserve_limit(&mut self, v: u64) -> &mut Self {
+        self.subpage_reserve_limit = Some(v);
         self
     }
 

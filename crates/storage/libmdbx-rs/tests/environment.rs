@@ -167,3 +167,36 @@ fn test_freelist() {
     freelist = env.freelist().unwrap();
     assert!(freelist > 0);
 }
+
+#[test]
+fn test_subpage_reserve_options() {
+    const RESERVE_25_PERCENT: u64 = 16_384;
+
+    let dir = tempdir().unwrap();
+    let env = Environment::builder()
+        .set_subpage_reserve_prereq(RESERVE_25_PERCENT)
+        .set_subpage_reserve_limit(RESERVE_25_PERCENT)
+        .open(dir.path())
+        .unwrap();
+
+    let (prereq, limit) = env.with_raw_env_ptr(|env| {
+        let mut prereq = 0;
+        let mut limit = 0;
+
+        unsafe {
+            assert_eq!(
+                ffi::mdbx_env_get_option(env, ffi::MDBX_opt_subpage_reserve_prereq, &mut prereq),
+                0
+            );
+            assert_eq!(
+                ffi::mdbx_env_get_option(env, ffi::MDBX_opt_subpage_reserve_limit, &mut limit),
+                0
+            );
+        }
+
+        (prereq, limit)
+    });
+
+    assert_eq!(prereq, RESERVE_25_PERCENT);
+    assert_eq!(limit, RESERVE_25_PERCENT);
+}
