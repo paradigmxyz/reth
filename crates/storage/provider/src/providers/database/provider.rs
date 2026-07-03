@@ -2709,7 +2709,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
 
         // Write hashed storage changes.
         let mut sorted_storages = hashed_state.account_storages().iter().collect::<Vec<_>>();
-        sorted_storages.sort_unstable_by(|(a, _), (b, _)| a.cmp(b));
+        sorted_storages.sort_unstable_by_key(|(hashed_address, _)| *hashed_address);
         let mut hashed_storage_cursor =
             self.tx_ref().cursor_dup_write::<tables::HashedStorages>()?;
         for (hashed_address, storage) in sorted_storages {
