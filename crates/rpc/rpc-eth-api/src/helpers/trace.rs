@@ -19,7 +19,6 @@ use futures::Future;
 use reth_errors::RethError;
 use reth_evm::{
     database::{BorrowedDynDatabase, StateProviderDatabase},
-    execute::BlockExecutorFactory,
     ConfigureEvm, EvmEnvFor, TxEnvFor,
 };
 use reth_primitives_traits::{BlockBody, RecoveredBlock};
@@ -81,18 +80,17 @@ pub trait Trace: LoadState<Error: FromEvmError<Self::Evm>> + Call {
                 BorrowedInspector(&mut inspector),
             );
 
-            let resolution =
-                match evm.transact(self.evm_config().block_executor_factory().evm_tx(&tx_env)) {
-                    Ok(executed) => {
-                        if let Some(code) = executed.result().error_code {
-                            let _ = executed.discard();
-                            Resolution::DatabaseError(code)
-                        } else {
-                            Resolution::Result(executed.detach())
-                        }
+            let resolution = match evm.transact(tx_env.as_ref()) {
+                Ok(executed) => {
+                    if let Some(code) = executed.result().error_code {
+                        let _ = executed.discard();
+                        Resolution::DatabaseError(code)
+                    } else {
+                        Resolution::Result(executed.detach())
                     }
-                    Err(err) => Resolution::HandlerError(err),
-                };
+                }
+                Err(err) => Resolution::HandlerError(err),
+            };
 
             match resolution {
                 Resolution::Result(result) => result,

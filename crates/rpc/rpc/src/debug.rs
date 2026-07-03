@@ -16,7 +16,7 @@ use jsonrpsee::core::RpcResult;
 use parking_lot::RwLock;
 use reth_chainspec::{ChainSpecProvider, EthChainSpec, EthereumHardforks};
 use reth_engine_primitives::ConsensusEngineEvent;
-use reth_evm::{execute::BlockExecutorFactory, ConfigureEvm, EvmEnv, EvmEnvFor, TxEnvFor};
+use reth_evm::{ConfigureEvm, EvmEnv, EvmEnvFor, TxEnvFor};
 use reth_primitives_traits::{
     Block as BlockTrait, BlockBody, BlockTy, ReceiptWithBloom, RecoveredBlock,
 };
@@ -828,7 +828,7 @@ where
                                 tx_index: Some(index),
                                 tx_hash: Some(tx_hash),
                             }),
-                            eth_api.evm_config().block_executor_factory().evm_tx(&tx_env),
+                            tx_env.as_ref(),
                             &evm_env.block_env(),
                             &result,
                             &mut db,
@@ -931,7 +931,7 @@ where
                             tx_index: Some(index as usize),
                             tx_hash: Some(*tx.tx_hash()),
                         }),
-                        eth_api.evm_config().block_executor_factory().evm_tx(&tx_env),
+                        tx_env.as_ref(),
                         &evm_env.block_env(),
                         &result,
                         &mut db,

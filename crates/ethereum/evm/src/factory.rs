@@ -187,7 +187,6 @@ where
 {
     type Primitives = EthPrimitives;
     type Transaction = EthTxEnv;
-    type EvmTx = <evm2::BaseEvmTypes as evm2::EvmTypesHost>::Tx;
     type Evm<'a> = evm2::Evm<'a, evm2::BaseEvmTypes>;
     type EvmEnv = EthEvmEnv;
     type ExecutionCtx<'a>
@@ -226,10 +225,6 @@ where
         DB: evm2::evm::DynDatabase + 'a,
     {
         Self::evm_with_env(self, db, evm_env)
-    }
-
-    fn evm_tx<'a>(&self, tx: &'a Self::Transaction) -> &'a Self::EvmTx {
-        tx.as_envelope()
     }
 }
 
