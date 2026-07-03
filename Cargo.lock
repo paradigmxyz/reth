@@ -8792,6 +8792,7 @@ dependencies = [
  "fixed-cache",
  "metrics",
  "parking_lot",
+ "rayon",
  "reth-errors",
  "reth-metrics",
  "reth-primitives-traits",

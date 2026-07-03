@@ -6,6 +6,7 @@ use alloy_primitives::{
 use fixed_cache::{AnyRef, CacheConfig, Stats, StatsHandler};
 use metrics::{Counter, Gauge, Histogram};
 use parking_lot::Once;
+use rayon::prelude::*;
 use reth_errors::ProviderResult;
 use reth_metrics::Metrics;
 use reth_primitives_traits::{Account, Bytecode};
@@ -13,7 +14,7 @@ use reth_provider::{
     AccountReader, BlockHashReader, BytecodeReader, HashedPostStateProvider, StateProofProvider,
     StateProvider, StateRootProvider, StorageRootProvider,
 };
-use reth_revm::db::BundleState;
+use reth_revm::db::{BundleAccount, BundleState};
 use reth_trie::{
     updates::TrieUpdates, AccountProof, HashedPostState, HashedStorage, MultiProof,
     MultiProofTargets, StorageMultiProof, StorageProof, TrieInput,
@@ -74,6 +75,13 @@ const STORAGE_CACHE_ENTRY_SIZE: usize =
 
 /// Size in bytes of a single account cache entry.
 const ACCOUNT_CACHE_ENTRY_SIZE: usize = fixed_cache_entry_size::<Address, Option<Account>>();
+
+/// Minimum number of account entries before cache save uses parallel insertion.
+///
+/// Normal blocks are usually far below this and stay on the cheaper serial path. Big-block BAL
+/// replay can carry thousands of touched accounts and storage slots, where splitting fixed-cache
+/// inserts across worker threads reduces the traced `save_cache` tail.
+const PARALLEL_INSERT_STATE_ACCOUNTS_THRESHOLD: usize = 2048;
 
 /// Cache configuration with epoch tracking enabled for O(1) cache invalidation.
 struct EpochCacheConfig;
@@ -231,6 +239,15 @@ pub enum CacheFillMode {
     LookupOnly,
     /// Insert values loaded from the underlying provider.
     FillOnMiss,
+}
+
+fn destroyed_contract(account: &BundleAccount) -> bool {
+    account.was_destroyed() &&
+        account.original_info.as_ref().is_some_and(|info| !info.is_empty_code_hash())
+}
+
+fn modified_account_missing_info(account: &BundleAccount) -> bool {
+    !account.status.is_not_modified() && !account.was_destroyed() && account.info.is_none()
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1018,6 +1035,10 @@ impl ExecutionCache {
         }
         drop(_enter);
 
+        if state_updates.state.len() >= PARALLEL_INSERT_STATE_ACCOUNTS_THRESHOLD {
+            return self.insert_state_accounts_parallel(state_updates)
+        }
+
         let _enter = debug_span!(
             target: "engine::tree",
             "accounts",
@@ -1077,6 +1098,63 @@ impl ExecutionCache {
             // for the account cache
             self.insert_account(*addr, Some(Account::from(account_info)));
         }
+
+        Ok(())
+    }
+
+    #[expect(clippy::result_unit_err)]
+    fn insert_state_accounts_parallel(&self, state_updates: &BundleState) -> Result<(), ()> {
+        let _enter = debug_span!(
+            target: "engine::tree",
+            "accounts_parallel",
+            accounts = state_updates.state.len(),
+            storages =
+                state_updates.state.values().map(|account| account.storage.len()).sum::<usize>()
+        )
+        .entered();
+
+        if let Some((addr, account)) =
+            state_updates.state.iter().find(|(_, account)| destroyed_contract(account))
+        {
+            self.0.selfdestruct_encountered.call_once(|| {
+                warn!(
+                    target: "engine::caching",
+                    address = ?addr,
+                    info = ?account.info,
+                    original_info = ?account.original_info,
+                    "Encountered an inter-transaction SELFDESTRUCT that reset the storage cache. Are you running a pre-Dencun network?"
+                );
+            });
+            self.clear();
+            return Ok(())
+        }
+
+        if let Some((_, account)) =
+            state_updates.state.iter().find(|(_, account)| modified_account_missing_info(account))
+        {
+            trace!(target: "engine::caching", ?account, "Account with None account info found in state updates");
+            return Err(())
+        }
+
+        state_updates.state.par_iter().for_each(|(addr, account)| {
+            if account.status.is_not_modified() {
+                return;
+            }
+
+            if account.was_destroyed() {
+                self.0.account_cache.remove(addr);
+                return;
+            }
+
+            // Prevalidated above: modified, non-destroyed accounts always have current info.
+            let account_info = account.info.as_ref().expect("checked account info");
+
+            for (key, slot) in &account.storage {
+                self.insert_storage(*addr, (*key).into(), Some(slot.present_value));
+            }
+
+            self.insert_account(*addr, Some(Account::from(account_info)));
+        });
 
         Ok(())
     }
@@ -1178,7 +1256,9 @@ mod tests {
     use super::*;
     use alloy_primitives::{map::HashMap, U256};
     use reth_provider::test_utils::{ExtendedAccount, MockEthProvider};
-    use reth_revm::db::{AccountStatus, BundleAccount};
+    use reth_revm::db::{
+        states::StorageSlot, AccountStatus, BundleAccount, StorageWithOriginalValues,
+    };
     use revm::state::AccountInfo;
 
     #[test]
@@ -1439,6 +1519,77 @@ mod tests {
         assert!(caches.insert_state(&bundle).is_ok());
         assert_eq!(caches.0.account_stats.size(), 0);
         assert!(caches.0.account_cache.get(&addr).is_none());
+    }
+
+    #[test]
+    fn test_insert_state_parallel_large_bundle_updates_accounts_and_storage() {
+        let caches = ExecutionCache::new(10_000_000);
+
+        let mut state = HashMap::default();
+        let mut expected = Vec::new();
+        for idx in 0..PARALLEL_INSERT_STATE_ACCOUNTS_THRESHOLD {
+            let addr = Address::random();
+            let nonce = idx as u64 + 1;
+            let account_info = AccountInfo {
+                balance: U256::from(nonce),
+                nonce,
+                code_hash: alloy_primitives::KECCAK256_EMPTY,
+                code: None,
+                account_id: None,
+            };
+            let storage_key = U256::from(idx as u64 + 10_000);
+            let storage_value = U256::from(idx as u64 + 20_000);
+            let mut storage = StorageWithOriginalValues::default();
+            storage.insert(storage_key, StorageSlot::new_changed(U256::ZERO, storage_value));
+
+            state.insert(
+                addr,
+                BundleAccount::new(
+                    Some(AccountInfo::default()),
+                    Some(account_info.clone()),
+                    storage,
+                    AccountStatus::Changed,
+                ),
+            );
+            expected.push((addr, account_info, storage_key, storage_value));
+        }
+
+        let bundle = BundleState {
+            state,
+            contracts: Default::default(),
+            reverts: Default::default(),
+            state_size: 0,
+            reverts_size: 0,
+        };
+
+        assert!(caches.insert_state(&bundle).is_ok());
+
+        let cached_accounts = expected
+            .iter()
+            .filter(|(addr, account_info, _, _)| {
+                matches!(
+                    caches.0.account_cache.get(addr),
+                    Some(Some(account)) if account == Account::from(account_info)
+                )
+            })
+            .count();
+        let cached_storage = expected
+            .iter()
+            .filter(|(addr, _, storage_key, storage_value)| {
+                caches.0.storage_cache.get(&(*addr, (*storage_key).into())) == Some(*storage_value)
+            })
+            .count();
+
+        assert!(
+            cached_accounts > expected.len() / 2,
+            "expected most inserted accounts to survive direct-mapped cache collisions, got {cached_accounts}/{}",
+            expected.len()
+        );
+        assert!(
+            cached_storage > expected.len() / 2,
+            "expected most inserted storage slots to survive direct-mapped cache collisions, got {cached_storage}/{}",
+            expected.len()
+        );
     }
 
     #[test]
