@@ -231,6 +231,11 @@ impl<'a, N: NodePrimitives> TreeCtx<'a, N> {
         self.canonical_in_memory_state
     }
 
+    /// Snapshots the in-memory parent chain for a pending sparse trie prune request, if any.
+    pub fn sparse_trie_prune_blocks(&self, parent_hash: B256) -> Option<Vec<ExecutedBlock<N>>> {
+        self.state.sparse_trie_prune_blocks(parent_hash)
+    }
+
     /// Takes the pending sparse trie prune request as in-memory parent-chain blocks, if any.
     pub fn take_sparse_trie_prune_blocks(
         &mut self,
@@ -600,8 +605,9 @@ where
         let pending_sparse_trie_prune_blocks = self
             .config
             .use_state_root_task()
-            .then(|| ctx.take_sparse_trie_prune_blocks(env.parent_hash))
+            .then(|| ctx.sparse_trie_prune_blocks(env.parent_hash))
             .flatten();
+        let should_consume_sparse_trie_prune = pending_sparse_trie_prune_blocks.is_some();
         let mut state_root_job =
             ensure_ok!(self.state_root_strategy.prepare(StateRootJobContext::new(
                 &self.payload_processor,
@@ -883,6 +889,10 @@ where
 
         if let Some(valid_block_tx) = valid_block_tx {
             let _ = valid_block_tx.send(());
+        }
+
+        if should_consume_sparse_trie_prune {
+            ctx.state_mut().set_pending_sparse_trie_prune(false);
         }
 
         let executed_block = self.spawn_deferred_trie_task(
