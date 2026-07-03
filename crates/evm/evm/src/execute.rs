@@ -1,8 +1,6 @@
 //! Traits for execution.
 
 use crate::{ConfigureEvm, EvmEnv, TxEnvFor};
-#[cfg(feature = "std")]
-use alloc::rc::Rc;
 use alloc::{boxed::Box, sync::Arc, vec::Vec};
 use alloy_consensus::{
     transaction::{Either, Recovered},
@@ -11,7 +9,6 @@ use alloy_consensus::{
 use alloy_eips::eip2718::WithEncoded;
 use alloy_primitives::{Address, Bytes, B256};
 #[cfg(feature = "std")]
-use core::cell::RefCell;
 use core::fmt::Debug;
 #[cfg(feature = "std")]
 use evm2::{
@@ -23,7 +20,6 @@ pub use reth_execution_errors::{
     InvalidTxError,
 };
 #[cfg(feature = "std")]
-use reth_execution_types::ExecutionStateChangeSource;
 pub use reth_execution_types::{BlockExecutionOutput, ExecutionOutcome};
 use reth_execution_types::{BlockExecutionResult, ExecutionOutcomeState, HashedPostState};
 #[cfg(feature = "std")]
@@ -694,7 +690,7 @@ pub trait Executor: Sized {
 #[expect(missing_debug_implementations)]
 pub struct BasicBlockExecutor<Evm, DB: Database> {
     evm_config: Evm,
-    batch_database: SharedBatchDatabase<DB>,
+    batch_database: CacheDB<Db<DB>>,
     batch_state: ExecutionOutcomeState,
 }
 
@@ -704,7 +700,7 @@ impl<Evm, DB: Database> BasicBlockExecutor<Evm, DB> {
     pub fn new(evm_config: Evm, database: DB) -> Self {
         Self {
             evm_config,
-            batch_database: SharedBatchDatabase::new(database),
+            batch_database: CacheDB::new(Db::new(database)),
             batch_state: ExecutionOutcomeState::default(),
         }
     }
@@ -756,7 +752,7 @@ where
         let output = Self::execute_block_with_database(
             &self.evm_config,
             block,
-            self.batch_database.clone(),
+            BorrowedDynDatabase(&mut self.batch_database),
         )?;
         self.batch_database.commit_source(&output.state);
 
@@ -788,48 +784,25 @@ where
 }
 
 #[cfg(feature = "std")]
-struct SharedBatchDatabase<DB: Database> {
-    inner: Rc<RefCell<CacheDB<Db<DB>>>>,
-}
+struct BorrowedDynDatabase<'a, DB: DynDatabase + ?Sized>(&'a mut DB);
 
 #[cfg(feature = "std")]
-impl<DB: Database> Clone for SharedBatchDatabase<DB> {
-    fn clone(&self) -> Self {
-        Self { inner: Rc::clone(&self.inner) }
-    }
-}
-
-#[cfg(feature = "std")]
-impl<DB> SharedBatchDatabase<DB>
+impl<DB> DynDatabase for BorrowedDynDatabase<'_, DB>
 where
-    DB: Database,
-{
-    fn new(database: DB) -> Self {
-        Self { inner: Rc::new(RefCell::new(CacheDB::new(Db::new(database)))) }
-    }
-
-    fn commit_source<S: ExecutionStateChangeSource>(&self, source: &S) {
-        self.inner.borrow_mut().commit_source(source);
-    }
-}
-
-#[cfg(feature = "std")]
-impl<DB> DynDatabase for SharedBatchDatabase<DB>
-where
-    DB: Database,
+    DB: DynDatabase + ?Sized,
 {
     fn get_account(
         &mut self,
         address: &alloy_primitives::Address,
     ) -> DbResult<Option<evm2::evm::AccountInfo>> {
-        self.inner.borrow_mut().get_account(address)
+        self.0.get_account(address)
     }
 
     fn get_code_by_hash(
         &mut self,
         code_hash: &alloy_primitives::B256,
     ) -> DbResult<evm2::bytecode::Bytecode> {
-        self.inner.borrow_mut().get_code_by_hash(code_hash)
+        self.0.get_code_by_hash(code_hash)
     }
 
     fn get_storage(
@@ -837,18 +810,18 @@ where
         address: &alloy_primitives::Address,
         key: &evm2::interpreter::Word,
     ) -> DbResult<evm2::interpreter::Word> {
-        self.inner.borrow_mut().get_storage(address, key)
+        self.0.get_storage(address, key)
     }
 
     fn get_block_hash(
         &mut self,
         number: &evm2::interpreter::Word,
     ) -> DbResult<Option<alloy_primitives::B256>> {
-        self.inner.borrow_mut().get_block_hash(number)
+        self.0.get_block_hash(number)
     }
 
     fn error(&mut self, code: ErrorCode) -> AnyError {
-        self.inner.borrow_mut().error(code)
+        self.0.error(code)
     }
 }
 
