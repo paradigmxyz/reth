@@ -18,7 +18,7 @@ use tokio::sync::{
     mpsc::{self, error::SendError},
     oneshot,
 };
-use tracing::trace;
+use tracing::error;
 
 /// A handler attached to a peer session that's not authenticated yet, pending Handshake and hello
 /// message which exchanges the `capabilities` of the peer.
@@ -211,7 +211,17 @@ impl<N: NetworkPrimitives> SessionCommandSender<N> {
     /// Sends a disconnect command via the unbounded channel so it is never dropped due to
     /// backpressure.
     pub(crate) fn disconnect(&self, reason: Option<DisconnectReason>) {
-        let _ = self.unbounded_tx.send(SessionCommand::Disconnect { reason });
+        if let Err(err) = self.unbounded_tx.send(SessionCommand::Disconnect { reason }) {
+            if let SessionCommand::Disconnect { reason } = err.0 {
+                error!(
+                    target: "net::session::instrumentation",
+                    channel = "session_manager_to_active_session",
+                    command = "disconnect",
+                    ?reason,
+                    "dropping session command because channel is closed"
+                );
+            }
+        }
     }
 
     /// Sends a disconnect command via the unbounded channel.
@@ -222,7 +232,22 @@ impl<N: NetworkPrimitives> SessionCommandSender<N> {
         &self,
         reason: Option<DisconnectReason>,
     ) -> Result<(), SendError<SessionCommand<N>>> {
-        self.unbounded_tx.send(SessionCommand::Disconnect { reason }).map_err(|e| SendError(e.0))
+        match self.unbounded_tx.send(SessionCommand::Disconnect { reason }) {
+            Ok(()) => Ok(()),
+            Err(err) => {
+                let cmd = err.0;
+                if let SessionCommand::Disconnect { reason } = &cmd {
+                    error!(
+                        target: "net::session::instrumentation",
+                        channel = "session_manager_to_active_session",
+                        command = "disconnect",
+                        ?reason,
+                        "dropping session command because channel is closed"
+                    );
+                }
+                Err(SendError(cmd))
+            }
+        }
     }
 
     /// Sends a message to the session with broadcast-aware backpressure.
@@ -239,6 +264,14 @@ impl<N: NetworkPrimitives> SessionCommandSender<N> {
 
             // Check + increment atomically (optimistic)
             if !self.broadcast_items.try_add(items) {
+                error!(
+                    target: "net::session::instrumentation",
+                    channel = "session_manager_to_active_session",
+                    msg_kind = msg.message_kind(),
+                    item_count = items,
+                    queued_broadcast_items = self.broadcast_items.get(),
+                    "dropping broadcast message because broadcast item limit is reached"
+                );
                 return false;
             }
 
@@ -247,24 +280,56 @@ impl<N: NetworkPrimitives> SessionCommandSender<N> {
                 Ok(()) => true,
                 Err(mpsc::error::TrySendError::Full(cmd)) => {
                     // Overflow to unbounded channel (counter already incremented)
-                    let _ = self.unbounded_tx.send(cmd);
-                    true
+                    match self.unbounded_tx.send(cmd) {
+                        Ok(()) => true,
+                        Err(err) => {
+                            if let SessionCommand::Message(msg) = err.0 {
+                                error!(
+                                    target: "net::session::instrumentation",
+                                    channel = "session_manager_to_active_session",
+                                    msg_kind = msg.message_kind(),
+                                    item_count = items,
+                                    "dropping broadcast message because overflow channel is closed"
+                                );
+                            }
+                            self.broadcast_items.sub(items);
+                            false
+                        }
+                    }
                 }
-                Err(_) => {
+                Err(mpsc::error::TrySendError::Closed(SessionCommand::Message(msg))) => {
                     // Channel closed, undo increment
+                    error!(
+                        target: "net::session::instrumentation",
+                        channel = "session_manager_to_active_session",
+                        msg_kind = msg.message_kind(),
+                        item_count = items,
+                        "dropping broadcast message because channel is closed"
+                    );
                     self.broadcast_items.sub(items);
                     false
                 }
+                Err(mpsc::error::TrySendError::Closed(_)) => false,
             }
         } else {
             // Non-broadcast: bounded channel only
             match self.tx.try_send(SessionCommand::Message(msg)) {
                 Ok(()) => true,
                 Err(mpsc::error::TrySendError::Full(SessionCommand::Message(msg))) => {
-                    trace!(
-                        target: "net::session",
+                    error!(
+                        target: "net::session::instrumentation",
+                        channel = "session_manager_to_active_session",
                         msg_kind = msg.message_kind(),
                         "session command buffer full, dropping non-broadcast message"
+                    );
+                    false
+                }
+                Err(mpsc::error::TrySendError::Closed(SessionCommand::Message(msg))) => {
+                    error!(
+                        target: "net::session::instrumentation",
+                        channel = "session_manager_to_active_session",
+                        msg_kind = msg.message_kind(),
+                        "dropping non-broadcast message because channel is closed"
                     );
                     false
                 }
@@ -396,4 +461,28 @@ pub enum ActiveSessionMessage<N: NetworkPrimitives> {
         /// Identifier of the remote peer.
         peer_id: PeerId,
     },
+}
+
+impl<N: NetworkPrimitives> ActiveSessionMessage<N> {
+    /// Returns a stable, low-cardinality message name for instrumentation logs.
+    pub(crate) fn kind(&self) -> &'static str {
+        match self {
+            Self::Disconnected { .. } => "disconnected",
+            Self::ClosedOnConnectionError { .. } => "closed_on_connection_error",
+            Self::ValidMessage { .. } => "valid_message",
+            Self::BadMessage { .. } => "bad_message",
+            Self::ProtocolBreach { .. } => "protocol_breach",
+        }
+    }
+
+    /// Returns the remote peer associated with this session message.
+    pub(crate) fn peer_id(&self) -> PeerId {
+        match self {
+            Self::Disconnected { peer_id, .. } |
+            Self::ClosedOnConnectionError { peer_id, .. } |
+            Self::ValidMessage { peer_id, .. } |
+            Self::BadMessage { peer_id } |
+            Self::ProtocolBreach { peer_id } => *peer_id,
+        }
+    }
 }

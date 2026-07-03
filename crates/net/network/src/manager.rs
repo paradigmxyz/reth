@@ -499,11 +499,27 @@ impl<N: NetworkPrimitives> NetworkManager<N> {
             let Err(e) = tx.try_send(event)
         {
             match e {
-                TrySendError::Full(_) => {
-                    trace!(target: "net", "Transaction events channel at capacity, dropping event");
+                TrySendError::Full(event) => {
+                    error!(
+                        target: "net::tx::instrumentation",
+                        channel = "network_manager_to_transactions_manager",
+                        event = event.kind(),
+                        peer_id = ?event.peer_id(),
+                        item_count = event.item_count(),
+                        "dropping transaction event because channel is at capacity"
+                    );
                     self.metrics.total_dropped_tx_events_at_full_capacity.increment(1);
                 }
-                TrySendError::Closed(_) => {}
+                TrySendError::Closed(event) => {
+                    error!(
+                        target: "net::tx::instrumentation",
+                        channel = "network_manager_to_transactions_manager",
+                        event = event.kind(),
+                        peer_id = ?event.peer_id(),
+                        item_count = event.item_count(),
+                        "dropping transaction event because channel is closed"
+                    );
+                }
             }
         }
     }

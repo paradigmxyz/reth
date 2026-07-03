@@ -84,7 +84,9 @@ use std::{
 };
 use tokio::sync::{mpsc, oneshot, oneshot::error::RecvError};
 use tokio_stream::wrappers::UnboundedReceiverStream;
-use tracing::{debug, trace};
+use tracing::{debug, info, trace};
+
+const TX_MANAGER_INSTRUMENTATION_TARGET: &str = "net::tx::instrumentation";
 
 /// The future for importing transactions into the pool.
 ///
@@ -344,6 +346,8 @@ pub struct TransactionsManager<Pool, N: NetworkPrimitives = EthNetworkPrimitives
     metrics: TransactionsManagerMetrics,
     /// `AnnouncedTxTypes` metrics
     announced_tx_types_metrics: AnnouncedTxTypesMetrics,
+    /// Aggregated instrumentation emitted periodically for transaction gossip debugging.
+    instrumentation: TxManagerInstrumentation,
 }
 
 impl<Pool: TransactionPool, N: NetworkPrimitives> TransactionsManager<Pool, N> {
@@ -416,6 +420,7 @@ impl<Pool: TransactionPool, N: NetworkPrimitives> TransactionsManager<Pool, N> {
             policies,
             metrics,
             announced_tx_types_metrics: AnnouncedTxTypesMetrics::default(),
+            instrumentation: TxManagerInstrumentation::new(),
         }
     }
 
@@ -928,6 +933,7 @@ where
 
         // send hashes if any
         if let Some(new_pooled_hashes) = pooled {
+            let sent_txs = new_pooled_hashes.len();
             for hash in new_pooled_hashes.iter_hashes().copied() {
                 propagated.record(hash, PropagateKind::Hash(peer_id));
                 // mark transaction as seen by peer
@@ -935,11 +941,13 @@ where
             }
 
             // send hashes of transactions
+            self.instrumentation.record_sent_txs(sent_txs);
             self.network.send_transactions_hashes(peer_id, new_pooled_hashes);
         }
 
         // send full transactions, if any
         if let Some(new_full_transactions) = full {
+            let sent_txs = new_full_transactions.len();
             for hash in new_full_transactions.iter_hashes() {
                 propagated.record(*hash, PropagateKind::Full(peer_id));
                 // mark transaction as seen by peer
@@ -947,6 +955,7 @@ where
             }
 
             // send full transactions
+            self.instrumentation.record_sent_txs(sent_txs);
             self.network.send_broadcast_pool_transactions(peer_id, new_full_transactions);
         }
 
@@ -1001,6 +1010,7 @@ where
                 return
             }
 
+            let sent_txs = new_pooled_hashes.len();
             for hash in new_pooled_hashes.iter_hashes().copied() {
                 propagated.record(hash, PropagateKind::Hash(peer_id));
                 peer.seen_transactions.insert(hash);
@@ -1009,6 +1019,7 @@ where
             trace!(target: "net::tx::propagation", ?peer_id, ?new_pooled_hashes, "Propagating transactions to peer");
 
             // send hashes of transactions
+            self.instrumentation.record_sent_txs(sent_txs);
             self.network.send_transactions_hashes(peer_id, new_pooled_hashes);
 
             // Update propagated transactions metrics
@@ -1110,6 +1121,7 @@ where
                 trace!(target: "net::tx", ?peer_id, num_txs=?new_pooled_hashes.len(), "Propagating tx hashes to peer");
 
                 // send hashes of transactions
+                self.instrumentation.record_sent_txs(new_pooled_hashes.len());
                 self.network.send_transactions_hashes(*peer_id, new_pooled_hashes);
             }
 
@@ -1122,6 +1134,7 @@ where
                 trace!(target: "net::tx", ?peer_id, num_txs=?new_full_transactions.len(), "Propagating full transactions to peer");
 
                 // send full transactions
+                self.instrumentation.record_sent_txs(new_full_transactions.len());
                 self.network.send_broadcast_pool_transactions(*peer_id, new_full_transactions);
             }
         }
@@ -1278,6 +1291,7 @@ where
 
         debug!(target: "net::tx", ?peer_id, tx_count = msg_builder.len(), "Broadcasting transaction hashes");
         let msg = msg_builder.build();
+        self.instrumentation.record_sent_txs(msg.len());
         self.network.send_transactions_hashes(peer_id, msg);
     }
 
@@ -1322,6 +1336,7 @@ where
     fn on_network_tx_event(&mut self, event: NetworkTransactionEvent<N>) {
         match event {
             NetworkTransactionEvent::IncomingTransactions { peer_id, msg } => {
+                self.instrumentation.record_incoming_full_txs(msg.len());
                 if !self.accepts_incoming_from(&peer_id) {
                     trace!(target: "net::tx", peer_id=format!("{peer_id:#}"), policy=?self.config.ingress_policy, "Ignoring full transactions from peer blocked by ingress policy");
                     return;
@@ -1346,6 +1361,7 @@ where
                 }
             }
             NetworkTransactionEvent::IncomingPooledTransactionHashes { peer_id, msg } => {
+                self.instrumentation.record_incoming_hashes(msg.len());
                 if !self.accepts_incoming_from(&peer_id) {
                     trace!(target: "net::tx", peer_id=format!("{peer_id:#}"), policy=?self.config.ingress_policy, "Ignoring transaction hashes from peer blocked by ingress policy");
                     return;
@@ -1689,6 +1705,7 @@ where
             Poll::Pending => false,
         };
         if !new_txs.is_empty() {
+            this.instrumentation.record_new_pending_txs(new_txs.len());
             this.on_new_pending_transactions(new_txs);
         }
 
@@ -1718,6 +1735,7 @@ where
         );
 
         this.transaction_fetcher.update_metrics();
+        this.instrumentation.maybe_log();
 
         // all channels are fully drained and import futures pending
         if maybe_more_network_events ||
@@ -2268,6 +2286,38 @@ pub enum NetworkTransactionEvent<N: NetworkPrimitives = EthNetworkPrimitives> {
     GetTransactionsHandle(oneshot::Sender<Option<TransactionsHandle<N>>>),
 }
 
+impl<N: NetworkPrimitives> NetworkTransactionEvent<N> {
+    /// Returns a stable, low-cardinality name for logging dropped transaction events.
+    pub(crate) fn kind(&self) -> &'static str {
+        match self {
+            Self::IncomingTransactions { .. } => "incoming_transactions",
+            Self::IncomingPooledTransactionHashes { .. } => "incoming_pooled_transaction_hashes",
+            Self::GetPooledTransactions { .. } => "get_pooled_transactions",
+            Self::GetTransactionsHandle(_) => "get_transactions_handle",
+        }
+    }
+
+    /// Returns the remote peer associated with the event, if any.
+    pub(crate) fn peer_id(&self) -> Option<PeerId> {
+        match self {
+            Self::IncomingTransactions { peer_id, .. } |
+            Self::IncomingPooledTransactionHashes { peer_id, .. } |
+            Self::GetPooledTransactions { peer_id, .. } => Some(*peer_id),
+            Self::GetTransactionsHandle(_) => None,
+        }
+    }
+
+    /// Returns the number of transaction items carried by the event.
+    pub(crate) fn item_count(&self) -> usize {
+        match self {
+            Self::IncomingTransactions { msg, .. } => msg.len(),
+            Self::IncomingPooledTransactionHashes { msg, .. } => msg.len(),
+            Self::GetPooledTransactions { request, .. } => request.0.len(),
+            Self::GetTransactionsHandle(_) => 0,
+        }
+    }
+}
+
 /// Tracks stats about the [`TransactionsManager`].
 #[derive(Debug)]
 pub struct PendingPoolImportsInfo {
@@ -2304,6 +2354,110 @@ struct TxManagerPollDurations {
     acc_fetch_events: Duration,
     acc_pending_fetch: Duration,
     acc_cmds: Duration,
+}
+
+/// Aggregates high-volume transaction gossip counters and emits them at a fixed cadence.
+#[derive(Debug)]
+struct TxManagerInstrumentation {
+    last_log: Instant,
+    new_pending_txs: usize,
+    sent_messages: usize,
+    sent_txs: usize,
+    incoming_full_messages: usize,
+    incoming_full_txs: usize,
+    incoming_hash_messages: usize,
+    incoming_hash_txs: usize,
+    max_txs_per_incoming_message: usize,
+}
+
+impl TxManagerInstrumentation {
+    fn new() -> Self {
+        Self {
+            last_log: Instant::now(),
+            new_pending_txs: 0,
+            sent_messages: 0,
+            sent_txs: 0,
+            incoming_full_messages: 0,
+            incoming_full_txs: 0,
+            incoming_hash_messages: 0,
+            incoming_hash_txs: 0,
+            max_txs_per_incoming_message: 0,
+        }
+    }
+
+    fn record_new_pending_txs(&mut self, count: usize) {
+        self.new_pending_txs += count;
+    }
+
+    fn record_sent_txs(&mut self, count: usize) {
+        self.sent_messages += 1;
+        self.sent_txs += count;
+    }
+
+    fn record_incoming_full_txs(&mut self, count: usize) {
+        self.incoming_full_messages += 1;
+        self.incoming_full_txs += count;
+        self.max_txs_per_incoming_message = self.max_txs_per_incoming_message.max(count);
+    }
+
+    fn record_incoming_hashes(&mut self, count: usize) {
+        self.incoming_hash_messages += 1;
+        self.incoming_hash_txs += count;
+        self.max_txs_per_incoming_message = self.max_txs_per_incoming_message.max(count);
+    }
+
+    fn maybe_log(&mut self) {
+        let elapsed = self.last_log.elapsed();
+        if elapsed < Duration::from_secs(1) || !self.has_activity() {
+            return;
+        }
+
+        let incoming_messages = self.incoming_full_messages + self.incoming_hash_messages;
+        let incoming_txs = self.incoming_full_txs + self.incoming_hash_txs;
+        let incoming_txs_per_message = if incoming_messages == 0 {
+            0.0
+        } else {
+            incoming_txs as f64 / incoming_messages as f64
+        };
+
+        info!(
+            target: TX_MANAGER_INSTRUMENTATION_TARGET,
+            elapsed_ms = elapsed.as_millis(),
+            new_pending_txs = self.new_pending_txs,
+            sent_messages = self.sent_messages,
+            sent_txs = self.sent_txs,
+            incoming_messages,
+            incoming_txs,
+            incoming_txs_per_message,
+            incoming_full_messages = self.incoming_full_messages,
+            incoming_full_txs = self.incoming_full_txs,
+            incoming_hash_messages = self.incoming_hash_messages,
+            incoming_hash_txs = self.incoming_hash_txs,
+            max_txs_per_incoming_message = self.max_txs_per_incoming_message,
+            "transaction manager gossip instrumentation"
+        );
+
+        self.reset();
+    }
+
+    fn has_activity(&self) -> bool {
+        self.new_pending_txs > 0 ||
+            self.sent_messages > 0 ||
+            self.incoming_full_messages > 0 ||
+            self.incoming_hash_messages > 0
+    }
+
+    fn reset(&mut self) {
+        self.last_log = Instant::now();
+        self.new_pending_txs = 0;
+        self.sent_messages = 0;
+        self.sent_txs = 0;
+        self.incoming_full_messages = 0;
+        self.incoming_full_txs = 0;
+        self.incoming_hash_messages = 0;
+        self.incoming_hash_txs = 0;
+        self.max_txs_per_incoming_message = 0;
+    }
 }
 
 impl<N: NetworkPrimitives> InMemorySize for NetworkTransactionEvent<N> {

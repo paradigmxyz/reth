@@ -46,7 +46,7 @@ use tokio::{
 };
 use tokio_stream::wrappers::ReceiverStream;
 use tokio_util::sync::PollSender;
-use tracing::{debug, trace};
+use tracing::{debug, error, trace};
 
 /// The recommended interval at which to check if a new range update should be sent to the remote
 /// peer.
@@ -490,7 +490,16 @@ impl<N: NetworkPrimitives> ActiveSession<N> {
                 );
                 match err {
                     TrySendError::Full(msg) => Err(msg),
-                    TrySendError::Closed(_) => Ok(()),
+                    TrySendError::Closed(msg) => {
+                        error!(
+                            target: "net::session::instrumentation",
+                            channel = "active_session_to_session_manager",
+                            message = msg.kind(),
+                            peer_id = ?msg.peer_id(),
+                            "dropping active session message because channel is closed"
+                        );
+                        Ok(())
+                    }
                 }
             }
         }
@@ -516,9 +525,16 @@ impl<N: NetworkPrimitives> ActiveSession<N> {
                 );
                 match err {
                     TrySendError::Full(msg) => Err(msg),
-                    TrySendError::Closed(_) => {
+                    TrySendError::Closed(msg) => {
                         // Note: this would mean the `SessionManager` was dropped, which is already
                         // handled by checking if the command receiver channel has been closed.
+                        error!(
+                            target: "net::session::instrumentation",
+                            channel = "active_session_to_session_manager",
+                            message = msg.kind(),
+                            peer_id = ?msg.peer_id(),
+                            "dropping active session request because channel is closed"
+                        );
                         Ok(())
                     }
                 }
@@ -529,7 +545,28 @@ impl<N: NetworkPrimitives> ActiveSession<N> {
     /// Notify the manager that the peer sent a bad message
     fn on_bad_message(&self) {
         let Some(sender) = self.to_session_manager.inner().get_ref() else { return };
-        let _ = sender.try_send(ActiveSessionMessage::BadMessage { peer_id: self.remote_peer_id });
+        let msg = ActiveSessionMessage::BadMessage { peer_id: self.remote_peer_id };
+        match sender.try_send(msg) {
+            Ok(()) => {}
+            Err(TrySendError::Full(msg)) => {
+                error!(
+                    target: "net::session::instrumentation",
+                    channel = "active_session_to_session_manager",
+                    message = msg.kind(),
+                    peer_id = ?msg.peer_id(),
+                    "dropping active session message because channel is at capacity"
+                );
+            }
+            Err(TrySendError::Closed(msg)) => {
+                error!(
+                    target: "net::session::instrumentation",
+                    channel = "active_session_to_session_manager",
+                    message = msg.kind(),
+                    peer_id = ?msg.peer_id(),
+                    "dropping active session message because channel is closed"
+                );
+            }
+        }
     }
 
     /// Report back that this session has been closed.
@@ -629,7 +666,13 @@ impl<N: NetworkPrimitives> ActiveSession<N> {
                 let _ = tx.send_item(msg);
             }
             Poll::Ready(Err(_)) => {
-                // channel closed
+                error!(
+                    target: "net::session::instrumentation",
+                    channel = "active_session_to_session_manager",
+                    message = msg.kind(),
+                    peer_id = ?msg.peer_id(),
+                    "dropping active session termination message because channel is closed"
+                );
             }
         }
         // terminate the task
@@ -782,7 +825,16 @@ impl<N: NetworkPrimitives> Future for ActiveSession<N> {
                         Poll::Ready(Ok(_)) => {
                             let _ = this.to_session_manager.send_item(msg);
                         }
-                        Poll::Ready(Err(_)) => return Poll::Ready(()),
+                        Poll::Ready(Err(_)) => {
+                            error!(
+                                target: "net::session::instrumentation",
+                                channel = "active_session_to_session_manager",
+                                message = msg.kind(),
+                                peer_id = ?msg.peer_id(),
+                                "dropping pending active session message because channel is closed"
+                            );
+                            return Poll::Ready(())
+                        }
                         Poll::Pending => {
                             this.pending_message_to_session = Some(msg);
                             break 'receive
@@ -908,11 +960,31 @@ impl<N: NetworkPrimitives> Future for ActiveSession<N> {
         if !this.inflight_requests.is_empty() {
             while this.internal_request_timeout_interval.poll_tick(cx).is_ready() {
                 // check for timed out requests
-                if this.check_timed_out_requests(Instant::now()) &&
-                    let Poll::Ready(Ok(_)) = this.to_session_manager.poll_reserve(cx)
-                {
+                if this.check_timed_out_requests(Instant::now()) {
                     let msg = ActiveSessionMessage::ProtocolBreach { peer_id: this.remote_peer_id };
-                    this.pending_message_to_session = Some(msg);
+                    match this.to_session_manager.poll_reserve(cx) {
+                        Poll::Ready(Ok(_)) => {
+                            this.pending_message_to_session = Some(msg);
+                        }
+                        Poll::Ready(Err(_)) => {
+                            error!(
+                                target: "net::session::instrumentation",
+                                channel = "active_session_to_session_manager",
+                                message = msg.kind(),
+                                peer_id = ?msg.peer_id(),
+                                "dropping active session protocol breach message because channel is closed"
+                            );
+                        }
+                        Poll::Pending => {
+                            error!(
+                                target: "net::session::instrumentation",
+                                channel = "active_session_to_session_manager",
+                                message = msg.kind(),
+                                peer_id = ?msg.peer_id(),
+                                "dropping active session protocol breach message because channel is at capacity"
+                            );
+                        }
+                    }
                 }
             }
         }
