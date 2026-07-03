@@ -1635,7 +1635,6 @@ where
                             BeaconEngineMessage::NewPayload { payload, tx } => {
                                 let start = Instant::now();
                                 let gas_used = payload.gas_used();
-                                let num_hash = payload.num_hash();
                                 let mut output = self.on_new_payload(payload);
                                 self.metrics.engine.new_payload.update_response_metrics(
                                     start,
@@ -1653,7 +1652,7 @@ where
                                         BeaconOnNewPayloadError::Internal(Box::new(e))
                                     }))
                                 {
-                                    warn!(target: "engine::tree", payload=?num_hash, elapsed=?start.elapsed(), "Failed to deliver newPayload response, receiver dropped (request cancelled): {err:?}");
+                                    warn!(target: "engine::tree", elapsed=?start.elapsed(), "Failed to deliver newPayload response, receiver dropped (request cancelled): {err:?}");
                                     self.metrics
                                         .engine
                                         .failed_new_payload_response_deliveries
@@ -1715,7 +1714,6 @@ where
 
                                 let start = Instant::now();
                                 let gas_used = payload.gas_used();
-                                let num_hash = payload.num_hash();
                                 let mut output = self.on_new_payload(payload);
                                 let latency = start.elapsed();
                                 self.metrics.engine.new_payload.update_response_metrics(
@@ -1740,7 +1738,7 @@ where
                                         BeaconOnNewPayloadError::Internal(Box::new(e))
                                     }))
                                 {
-                                    error!(target: "engine::tree", payload=?num_hash, elapsed=?start.elapsed(), "Failed to send event: {err:?}");
+                                    error!(target: "engine::tree", elapsed=?start.elapsed(), "Failed to send event: {err:?}");
                                     self.metrics
                                         .engine
                                         .failed_new_payload_response_deliveries
