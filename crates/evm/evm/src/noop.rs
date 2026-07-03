@@ -1,6 +1,8 @@
 //! Helpers for testing.
 
-use crate::{ConfigureEvm, DynDatabase, EvmEnvFor};
+#[cfg(feature = "std")]
+use crate::DynDatabase;
+use crate::{ConfigureEvm, EvmEnvFor};
 #[cfg(feature = "std")]
 use alloc::boxed::Box;
 use reth_primitives_traits::{BlockTy, HeaderTy, SealedBlock, SealedHeader};
