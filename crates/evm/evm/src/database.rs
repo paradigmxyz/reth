@@ -5,9 +5,8 @@ use core::ops::{Deref, DerefMut};
 #[cfg(feature = "std")]
 use evm2::{
     bytecode::Bytecode,
-    evm::{AccountInfo, Database, DbResult, DynDatabase},
+    evm::{AccountInfo, Database},
     interpreter::Word,
-    AnyError, ErrorCode,
 };
 use reth_primitives_traits::Account;
 use reth_storage_api::{AccountReader, BlockHashReader, BytecodeReader, StateProvider};
@@ -96,56 +95,6 @@ impl<DB> Deref for StateProviderDatabase<DB> {
 impl<DB> DerefMut for StateProviderDatabase<DB> {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.0
-    }
-}
-
-/// Borrowed forwarding adapter for lending an existing [`DynDatabase`] to a short-lived EVM.
-///
-/// This keeps ownership of reusable overlays, such as batch execution caches, with the caller after
-/// the EVM is dropped.
-#[cfg(feature = "std")]
-pub struct BorrowedDynDatabase<'a, DB: DynDatabase + ?Sized> {
-    db: &'a mut DB,
-}
-
-#[cfg(feature = "std")]
-impl<'a, DB: DynDatabase + ?Sized> BorrowedDynDatabase<'a, DB> {
-    /// Creates a borrowed database adapter.
-    pub const fn new(db: &'a mut DB) -> Self {
-        Self { db }
-    }
-}
-
-#[cfg(feature = "std")]
-impl<DB: DynDatabase + ?Sized> core::fmt::Debug for BorrowedDynDatabase<'_, DB> {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        f.debug_struct("BorrowedDynDatabase").finish_non_exhaustive()
-    }
-}
-
-#[cfg(feature = "std")]
-impl<DB> DynDatabase for BorrowedDynDatabase<'_, DB>
-where
-    DB: DynDatabase + ?Sized,
-{
-    fn get_account(&mut self, address: &Address) -> DbResult<Option<AccountInfo>> {
-        self.db.get_account(address)
-    }
-
-    fn get_code_by_hash(&mut self, code_hash: &B256) -> DbResult<Bytecode> {
-        self.db.get_code_by_hash(code_hash)
-    }
-
-    fn get_storage(&mut self, address: &Address, key: &Word) -> DbResult<Word> {
-        self.db.get_storage(address, key)
-    }
-
-    fn get_block_hash(&mut self, number: &Word) -> DbResult<Option<B256>> {
-        self.db.get_block_hash(number)
-    }
-
-    fn error(&mut self, code: ErrorCode) -> AnyError {
-        self.db.error(code)
     }
 }
 
