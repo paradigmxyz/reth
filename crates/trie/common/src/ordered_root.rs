@@ -49,6 +49,7 @@ use alloy_primitives::B256;
 /// index 0 (`0x80`). Index `0x80` and larger use long-form RLP integer encoding and sort after
 /// index 0, so index 0 must be flushed before inserting this index.
 const ZERO_KEY_FLUSH_INDEX: usize = 0x80;
+const HASH_BUILDER_STACK_HINT: usize = 64;
 
 /// A builder for computing ordered trie roots from an append-only stream of pre-encoded items.
 ///
@@ -73,6 +74,18 @@ impl OrderedTrieRootEncodedBuilder {
     /// Creates an empty builder.
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Creates an empty builder with internal buffers reserved for an ordered stream.
+    pub fn with_item_hint(items: usize) -> Self {
+        let mut this = Self::default();
+        let stack_hint = items.min(HASH_BUILDER_STACK_HINT);
+        this.hb.stack.reserve(stack_hint);
+        this.hb.state_masks.reserve(stack_hint);
+        this.hb.tree_masks.reserve(stack_hint);
+        this.hb.hash_masks.reserve(stack_hint);
+        this.hb.rlp_buf.reserve(32);
+        this
     }
 
     /// Pushes the next pre-encoded item.
