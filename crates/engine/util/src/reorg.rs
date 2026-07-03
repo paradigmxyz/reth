@@ -13,7 +13,7 @@ use reth_engine_tree::tree::EngineValidator;
 use reth_errors::{BlockExecutionError, BlockValidationError, RethError, RethResult};
 use reth_evm::{
     database::StateProviderDatabase,
-    execute::{BlockBuilder, BlockBuilderOutcome},
+    execute::{BlockBuilder, BlockBuilderOutcome, BlockExecutorFactory},
     ConfigureEvm,
 };
 use reth_payload_primitives::{BuiltPayload, PayloadTypes};
@@ -283,7 +283,8 @@ where
     let state_provider = provider.state_by_block_hash(reorg_target.header().parent_hash())?;
     let evm_env = evm_config.evm_env(reorg_target.header()).map_err(RethError::other)?;
     let evm = evm_config
-        .evm_with_env(StateProviderDatabase::new(state_provider.as_ref()), evm_env.clone());
+        .block_executor_factory()
+        .evm_with_database(StateProviderDatabase::new(state_provider.as_ref()), evm_env.clone());
     let ctx = evm_config.context_for_block(&reorg_target).map_err(RethError::other)?;
     let mut builder = evm_config.create_block_builder(evm, evm_env, &reorg_target_parent, ctx);
 

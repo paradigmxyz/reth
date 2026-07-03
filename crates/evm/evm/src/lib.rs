@@ -367,11 +367,7 @@ pub trait ConfigureEvm: Clone + Debug + Send + Sync + Unpin {
     where
         DB: Database + 'a,
     {
-        crate::execute::BlockExecutorFactory::evm_with_env(
-            self.block_executor_factory(),
-            evm2::evm::Db::new(db),
-            evm_env,
-        )
+        self.block_executor_factory().evm_with_database(db, evm_env)
     }
 
     /// Creates an EVM instance for the given block.

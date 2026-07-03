@@ -1151,8 +1151,8 @@ where
         let (output, senders) =
             debug_span!(target: "engine::tree", "execute_block").in_scope(|| {
                 let db = StateProviderDatabase::new(state_provider);
-                let evm = self.evm_config.evm_with_env(db, env.evm_env.clone());
                 let executor_factory = self.evm_config.block_executor_factory();
+                let evm = executor_factory.evm_with_database(db, env.evm_env.clone());
                 let mut executor = if streamed_state_updates {
                     executor_factory.create_executor_streaming_hashed_state(evm, execution_ctx)
                 } else {

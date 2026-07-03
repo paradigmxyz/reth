@@ -205,6 +205,15 @@ pub trait BlockExecutorFactory {
     fn evm_with_env<'a, DB>(&self, db: DB, evm_env: Self::EvmEnv) -> Self::Evm<'a>
     where
         DB: DynDatabase + 'a;
+
+    /// Creates an EVM instance with the configured execution environment over a typed database.
+    #[cfg(feature = "std")]
+    fn evm_with_database<'a, DB>(&self, db: DB, evm_env: Self::EvmEnv) -> Self::Evm<'a>
+    where
+        DB: Database + 'a,
+    {
+        self.evm_with_env(Db::new(db), evm_env)
+    }
 }
 
 /// Input for block assembly.
