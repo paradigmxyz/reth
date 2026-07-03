@@ -1795,13 +1795,15 @@ where
     /// Determines the state root computation strategy based on configuration.
     ///
     /// The sparse trie state-root task is the default computed-root path. `state_root_fallback`
-    /// forces serial computation for tests and debugging.
+    /// forces serial computation for tests and debugging, and hosts without enough parallelism
+    /// for the state-root task pipeline also compute the root synchronously, see
+    /// [`TreeConfig::use_state_root_task`].
     fn plan_state_root_computation(&self) -> StateRootStrategy<N> {
         if self.config.skip_state_root() {
             StateRootStrategy::Skipped
         } else if let Some(custom_state_root) = &self.custom_state_root {
             StateRootStrategy::Custom(custom_state_root.clone())
-        } else if self.config.state_root_fallback() {
+        } else if self.config.state_root_fallback() || !self.config.use_state_root_task() {
             StateRootStrategy::Synchronous
         } else {
             StateRootStrategy::StateRootTask
