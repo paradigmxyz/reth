@@ -129,7 +129,7 @@ where
     N: Clone,
     Node: FullNodeTypes,
     Pool: TransactionPool,
-    EVM: Clone,
+    EVM: ConfigureEvm,
     Cons: Clone,
 {
     fn clone(&self) -> Self {
