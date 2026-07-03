@@ -211,10 +211,7 @@ pub trait BlockExecutorFactory {
         ctx: Self::ExecutionCtx<'a>,
     ) -> Self::Executor<'a>
     where
-        Self: 'a,
-    {
-        self.create_executor_with_hashed_state_mode(evm, ctx, HashedStateMode::OutputOnly)
-    }
+        Self: 'a;
 
     /// Creates a configured block executor that streams hashed state updates to an installed state
     /// hook without retaining hashed state in the returned execution output.
@@ -226,18 +223,8 @@ pub trait BlockExecutorFactory {
     where
         Self: 'a,
     {
-        self.create_executor_with_hashed_state_mode(evm, ctx, HashedStateMode::StreamOnly)
+        self.create_executor(evm, ctx)
     }
-
-    /// Creates a configured block executor with an explicit hashed-state output mode.
-    fn create_executor_with_hashed_state_mode<'a>(
-        &'a self,
-        evm: Self::Evm<'a>,
-        ctx: Self::ExecutionCtx<'a>,
-        hashed_state_mode: HashedStateMode,
-    ) -> Self::Executor<'a>
-    where
-        Self: 'a;
 
     /// Creates an EVM instance with the configured execution environment.
     fn evm_with_env<'a, DB>(&self, db: DB, evm_env: Self::EvmEnv) -> Self::Evm<'a>
@@ -692,14 +679,7 @@ where
         let ctx = evm_config
             .context_for_block(block.sealed_block())
             .map_err(BlockExecutionError::other)?;
-        let hashed_state_mode = if state_hook.is_some() {
-            HashedStateMode::OutputAndStream
-        } else {
-            HashedStateMode::OutputOnly
-        };
-        let mut executor = evm_config
-            .block_executor_factory()
-            .create_executor_with_hashed_state_mode(evm, ctx, hashed_state_mode);
+        let mut executor = evm_config.block_executor_factory().create_executor(evm, ctx);
         if let Some(hook) = state_hook &&
             !executor.set_state_hook(hook)
         {
