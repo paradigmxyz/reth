@@ -356,6 +356,8 @@ pub struct SidecarBenchmarkManifest {
     pub accessed: StateTargetStats,
     pub cache_hit: StateTargetStats,
     pub sidecar_miss: StateTargetStats,
+    /// Whether the ExEx ran the provider-assisted validator preflight for this sidecar.
+    pub provider_assisted_preflight: bool,
     /// Diagnostic-only readiness for a future fully trustless state-root proof.
     pub root_witness_completeness: RootWitnessCompletenessSummary,
     /// Full-witness baseline (all accessed state, ignoring the cache). `None` when

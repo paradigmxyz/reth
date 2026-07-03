@@ -175,6 +175,20 @@ async fn partial_stateless_exex<
             "Full-witness baseline comparison ENABLED (PS_WITNESS_BASELINE) — extra multiproof per block"
         );
     }
+
+    // Optional provider-assisted validator preflight. This re-executes each
+    // generated sidecar with a cache+witness-backed provider and checks the
+    // cache-state transition. It is useful for PoC acceptance checks, but it
+    // adds another block execution on the sidecar generation path.
+    let run_sidecar_preflight = std::env::var("PS_SIDECAR_PREFLIGHT")
+        .map(|v| matches!(v.as_str(), "1" | "true" | "TRUE" | "yes" | "on"))
+        .unwrap_or(false);
+    if run_sidecar_preflight {
+        info!(
+            target: "partial_stateless",
+            "Provider-assisted sidecar preflight ENABLED (PS_SIDECAR_PREFLIGHT) — extra re-execution per sidecar"
+        );
+    }
     let reexec_limits = SidecarReexecLimits::default();
 
     while let Some(notification) = ctx.notifications.try_next().await? {
@@ -550,52 +564,61 @@ async fn partial_stateless_exex<
                                         stats: result.clone(),
                                     };
 
-                                    let reexec_report = match check_provider_assisted_sidecar(
-                                        ctx.evm_config(),
-                                        state_provider.as_ref(),
-                                        block,
-                                        prev_cache_for_reexec,
-                                        &sidecar,
-                                        &config,
-                                        &reexec_limits,
-                                    ) {
-                                        Ok(report) => report,
-                                        Err(e) => {
-                                            break 'sidecar Err(eyre::eyre!(
-                                                "Provider-assisted sidecar reexec check failed: {e}"
-                                            ));
-                                        }
-                                    };
+                                    let root_witness_completeness = if run_sidecar_preflight {
+                                        let reexec_report = match check_provider_assisted_sidecar(
+                                            ctx.evm_config(),
+                                            state_provider.as_ref(),
+                                            block,
+                                            prev_cache_for_reexec,
+                                            &sidecar,
+                                            &config,
+                                            &reexec_limits,
+                                        ) {
+                                            Ok(report) => report,
+                                            Err(e) => {
+                                                break 'sidecar Err(eyre::eyre!(
+                                                    "Provider-assisted sidecar preflight failed: {e}"
+                                                ));
+                                            }
+                                        };
 
-                                    if !reexec_report.root_witness_completeness.trustless_root_ready
-                                    {
-                                        warn!(
+                                        if !reexec_report
+                                            .root_witness_completeness
+                                            .trustless_root_ready
+                                        {
+                                            warn!(
+                                                target: "partial_stateless",
+                                                block = *block_number,
+                                                missing_account_paths = reexec_report
+                                                    .root_witness_completeness
+                                                    .missing_account_paths
+                                                    .len(),
+                                                missing_storage_paths = reexec_report
+                                                    .root_witness_completeness
+                                                    .missing_storage_paths
+                                                    .len(),
+                                                "TODO: root witness incomplete for trustless state_root"
+                                            );
+                                        }
+                                        info!(
                                             target: "partial_stateless",
                                             block = *block_number,
-                                            missing_account_paths = reexec_report
-                                                .root_witness_completeness
-                                                .missing_account_paths
-                                                .len(),
-                                            missing_storage_paths = reexec_report
-                                                .root_witness_completeness
-                                                .missing_storage_paths
-                                                .len(),
-                                            "TODO: root witness incomplete for trustless state_root"
+                                            computed_state_root = ?reexec_report.computed_state_root,
+                                            reexec_accounts = reexec_report.actual_accessed.accounts.len(),
+                                            reexec_storage = reexec_report.actual_accessed.storage.len(),
+                                            reexec_codes = reexec_report.actual_accessed.codes.len(),
+                                            expected_miss_accounts = reexec_report.expected_miss.accounts.len(),
+                                            expected_miss_storage = reexec_report.expected_miss.storage.len(),
+                                            expected_miss_codes = reexec_report.expected_miss.code_hashes.len(),
+                                            next_cache_root = ?reexec_report.next_cache_anchor.cache_root,
+                                            "Provider-assisted sidecar preflight succeeded"
                                         );
-                                    }
-                                    info!(
-                                        target: "partial_stateless",
-                                        block = *block_number,
-                                        computed_state_root = ?reexec_report.computed_state_root,
-                                        reexec_accounts = reexec_report.actual_accessed.accounts.len(),
-                                        reexec_storage = reexec_report.actual_accessed.storage.len(),
-                                        reexec_codes = reexec_report.actual_accessed.codes.len(),
-                                        expected_miss_accounts = reexec_report.expected_miss.accounts.len(),
-                                        expected_miss_storage = reexec_report.expected_miss.storage.len(),
-                                        expected_miss_codes = reexec_report.expected_miss.code_hashes.len(),
-                                        next_cache_root = ?reexec_report.next_cache_anchor.cache_root,
-                                        "Provider-assisted sidecar reexec check succeeded"
-                                    );
+                                        RootWitnessCompletenessSummary::from_report(
+                                            &reexec_report.root_witness_completeness,
+                                        )
+                                    } else {
+                                        RootWitnessCompletenessSummary::default()
+                                    };
 
                                     // Ensure sidecar directory exists under workspace root
                                     let sidecar_dir = std::env::current_dir()
@@ -634,7 +657,7 @@ async fn partial_stateless_exex<
                                         .map(|m| m.len() as usize)
                                         .unwrap_or(0);
                                     let manifest = SidecarBenchmarkManifest {
-                                        schema_version: 5,
+                                        schema_version: 6,
                                         block_number: *block_number,
                                         block_hash,
                                         parent_hash,
@@ -666,10 +689,8 @@ async fn partial_stateless_exex<
                                             &cache_hit_targets,
                                         ),
                                         sidecar_miss: StateTargetStats::from_targets(&sidecar_miss),
-                                        root_witness_completeness:
-                                            RootWitnessCompletenessSummary::from_report(
-                                                &reexec_report.root_witness_completeness,
-                                            ),
+                                        provider_assisted_preflight: run_sidecar_preflight,
+                                        root_witness_completeness,
                                         full_sidecar_baseline_stats: full_sidecar_baseline_stats
                                             .clone(),
                                         partial_sidecar_stats: result.clone(),
