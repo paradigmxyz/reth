@@ -174,6 +174,7 @@ where
 {
     type Primitives = EthPrimitives;
     type Transaction = EthTxEnv;
+    type EvmTx = <evm2::BaseEvmTypes as evm2::EvmTypesHost>::Tx;
     type Evm<'a> = evm2::Evm<'a, evm2::BaseEvmTypes>;
     type EvmEnv = EthEvmEnv;
     type ExecutionCtx<'a>
@@ -204,10 +205,7 @@ where
         Self::evm_with_env(self, db, evm_env)
     }
 
-    fn evm_tx<'a>(
-        &self,
-        tx: &'a Self::Transaction,
-    ) -> &'a <evm2::BaseEvmTypes as evm2::EvmTypesHost>::Tx {
+    fn evm_tx<'a>(&self, tx: &'a Self::Transaction) -> &'a Self::EvmTx {
         tx.as_envelope()
     }
 }
@@ -276,7 +274,7 @@ impl RethEvmFactory {
     }
 
     /// Installs the evm2 JIT interpreter runner on a configured EVM if locally enabled.
-    pub fn configure_evm(&self, evm: &mut evm2::Evm<evm2::BaseEvmTypes>) {
+    pub fn configure_evm(&self, evm: &mut evm2::Evm<'_, evm2::BaseEvmTypes>) {
         if self.jit_support_enabled() {
             evm.set_interpreter_runner(evm2_jit::evm2_evm::JitInterpreterRunner::new(
                 self.backend.clone(),

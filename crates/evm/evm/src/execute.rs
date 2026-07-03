@@ -203,6 +203,8 @@ pub trait BlockExecutorFactory {
     type Primitives: NodePrimitives;
     /// Transaction environment consumed by executors from this factory.
     type Transaction;
+    /// Transaction shape consumed by the configured EVM.
+    type EvmTx;
     /// EVM instance consumed by executors from this factory.
     type Evm<'a>;
     /// EVM environment consumed by this factory.
@@ -237,10 +239,7 @@ pub trait BlockExecutorFactory {
         DB: DynDatabase + 'a;
 
     /// Returns the transaction shape consumed by the configured EVM.
-    fn evm_tx<'a>(
-        &self,
-        tx: &'a Self::Transaction,
-    ) -> &'a <evm2::BaseEvmTypes as evm2::EvmTypesHost>::Tx;
+    fn evm_tx<'a>(&self, tx: &'a Self::Transaction) -> &'a Self::EvmTx;
 }
 
 /// Input for block assembly.
