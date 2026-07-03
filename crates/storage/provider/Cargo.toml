@@ -41,8 +41,7 @@ alloy-genesis.workspace = true
 alloy-primitives.workspace = true
 alloy-rpc-types-engine.workspace = true
 alloy-consensus.workspace = true
-revm-database.workspace = true
-revm-state = { workspace = true, optional = true }
+revm.workspace = true
 
 # tracing
 tracing.workspace = true
@@ -79,9 +78,6 @@ reth-ethereum-engine-primitives.workspace = true
 reth-ethereum-primitives.workspace = true
 reth-tracing.workspace = true
 
-revm-database-interface.workspace = true
-revm-state.workspace = true
-
 tempfile.workspace = true
 assert_matches.workspace = true
 rand.workspace = true
@@ -105,7 +101,6 @@ test-utils = [
     "reth-trie-db/test-utils",
     "reth-prune-types/test-utils",
     "reth-stages-types/test-utils",
-    "revm-state",
     "reth-tasks/test-utils",
     "dep:tokio",
 ]

@@ -8,10 +8,11 @@ use alloy_consensus::{BlockHeader, ReceiptWithBloom};
 use alloy_primitives::{Bytes, B256};
 use futures::FutureExt;
 use reth_eth_wire::{
-    message::RequestPair, BlockBodies, BlockHeaders, BlockRangeUpdate, Cells, EthMessage,
-    EthNetworkPrimitives, GetBlockAccessLists, GetBlockBodies, GetBlockHeaders, GetReceipts,
-    NetworkPrimitives, NewBlock, NewBlockHashes, NewBlockPayload, NewPooledTransactionHashes,
-    NodeData, PooledTransactions, Receipts, SharedTransactions, Transactions,
+    message::RequestPair, BlockBodies, BlockHeaders, BlockRangeUpdate, BroadcastPoolTransactions,
+    Cells, EthMessage, EthNetworkPrimitives, GetBlockAccessLists, GetBlockBodies, GetBlockHeaders,
+    GetReceipts, NetworkPrimitives, NewBlock, NewBlockHashes, NewBlockPayload,
+    NewPooledTransactionHashes, NodeData, PooledTransactions, Receipts, SharedTransactions,
+    Transactions,
 };
 use reth_eth_wire_types::RawCapabilityMessage;
 use reth_network_api::PeerRequest;
@@ -53,6 +54,8 @@ pub enum PeerMessage<N: NetworkPrimitives = EthNetworkPrimitives> {
     ReceivedTransaction(Transactions<N::BroadcastedTransaction>),
     /// Broadcast transactions _from_ local _to_ a peer.
     SendTransactions(SharedTransactions<N::BroadcastedTransaction>),
+    /// Broadcast cached pool transactions _from_ local _to_ a peer.
+    SendBroadcastPoolTransactions(BroadcastPoolTransactions),
     /// Send new pooled transactions
     PooledTransactions(NewPooledTransactionHashes),
     /// All `eth` request variants.
@@ -73,6 +76,7 @@ impl<N: NetworkPrimitives> PeerMessage<N> {
             Self::NewBlock(_) => "NewBlock",
             Self::ReceivedTransaction(_) => "ReceivedTransaction",
             Self::SendTransactions(_) => "SendTransactions",
+            Self::SendBroadcastPoolTransactions(_) => "SendBroadcastPoolTransactions",
             Self::PooledTransactions(_) => "PooledTransactions",
             Self::EthRequest(_) => "EthRequest",
             Self::BlockRangeUpdated(_) => "BlockRangeUpdated",
@@ -88,6 +92,7 @@ impl<N: NetworkPrimitives> PeerMessage<N> {
             Self::NewBlockHashes(_) |
                 Self::NewBlock(_) |
                 Self::SendTransactions(_) |
+                Self::SendBroadcastPoolTransactions(_) |
                 Self::PooledTransactions(_)
         )
     }
@@ -98,6 +103,7 @@ impl<N: NetworkPrimitives> PeerMessage<N> {
             Self::NewBlockHashes(msg) => msg.len(),
             Self::ReceivedTransaction(msg) => msg.len(),
             Self::SendTransactions(msg) => msg.len(),
+            Self::SendBroadcastPoolTransactions(msg) => msg.len(),
             Self::PooledTransactions(msg) => msg.len(),
             Self::NewBlock(_) |
             Self::EthRequest(_) |

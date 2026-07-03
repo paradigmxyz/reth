@@ -21,8 +21,7 @@ use reth_primitives_traits::{
 };
 use reth_storage_api::NodePrimitivesProvider;
 use reth_trie::root::state_root_unhashed;
-use revm_database::BundleState;
-use revm_state::AccountInfo;
+use revm::{database::BundleState, state::AccountInfo};
 use std::{
     ops::Range,
     sync::{Arc, Mutex},
