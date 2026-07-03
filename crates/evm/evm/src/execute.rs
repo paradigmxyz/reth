@@ -298,6 +298,11 @@ pub trait BlockBuilder: Sized {
     type Primitives: NodePrimitives;
     /// Inner block executor.
     type Executor: BlockExecutor<Primitives = Self::Primitives, TransactionOutput = GasOutput>;
+    /// EVM environment used for block execution.
+    type EvmEnv: EvmEnv;
+
+    /// Returns the EVM environment used for block execution.
+    fn evm_env(&self) -> &Self::EvmEnv;
 
     /// Applies pre-execution block changes.
     fn apply_pre_execution_changes(&mut self) -> Result<(), BlockExecutionError>;
@@ -459,6 +464,11 @@ where
 {
     type Primitives = N;
     type Executor = Executor;
+    type EvmEnv = F::EvmEnv;
+
+    fn evm_env(&self) -> &Self::EvmEnv {
+        &self.evm_env
+    }
 
     fn apply_pre_execution_changes(&mut self) -> Result<(), BlockExecutionError> {
         self.executor.apply_pre_execution_changes()

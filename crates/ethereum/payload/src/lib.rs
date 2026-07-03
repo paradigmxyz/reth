@@ -211,16 +211,11 @@ where
         extra_data: builder_config.extra_data.clone(),
         slot_number: attributes.slot_number(),
     };
-    let evm_env = evm_config
-        .next_evm_env(&parent_header, &next_block_env_attributes)
+    let mut builder = evm_config
+        .builder_for_next_block(cached_db, &parent_header, next_block_env_attributes)
         .map_err(PayloadBuilderError::other)?;
-    let base_fee = evm_env.block_base_fee();
-    let blob_fee = blob_params.as_ref().map(|_| evm_env.block_blob_base_fee());
-    let evm = evm_config.evm_with_env(cached_db, evm_env.clone());
-    let execution_ctx = evm_config
-        .context_for_next_block(&parent_header, next_block_env_attributes)
-        .map_err(PayloadBuilderError::other)?;
-    let mut builder = evm_config.create_block_builder(evm, evm_env, &parent_header, execution_ctx);
+    let base_fee = builder.evm_env().block_base_fee();
+    let blob_fee = blob_params.as_ref().map(|_| builder.evm_env().block_blob_base_fee());
 
     let use_sparse_trie =
         if let Some(handle) = trie_handle.as_ref().filter(|_| stream_state_updates) {
