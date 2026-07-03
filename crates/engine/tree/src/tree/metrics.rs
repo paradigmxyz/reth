@@ -437,7 +437,24 @@ impl NewPayloadStatusMetrics {
         result: &Result<TreeOutcome<PayloadStatus>, InsertBlockFatalError>,
         gas_used: u64,
     ) {
-        let finish = Instant::now();
+        self.update_response_metrics_at(
+            start,
+            Instant::now(),
+            latest_forkchoice_updated_at,
+            result,
+            gas_used,
+        );
+    }
+
+    /// Increment the newPayload counter using a caller-provided finish time.
+    pub(crate) fn update_response_metrics_at(
+        &mut self,
+        start: Instant,
+        finish: Instant,
+        latest_forkchoice_updated_at: &mut Option<Instant>,
+        result: &Result<TreeOutcome<PayloadStatus>, InsertBlockFatalError>,
+        gas_used: u64,
+    ) {
         let elapsed = finish - start;
 
         if let Some(prev_finish) = self.latest_finish_at {

@@ -1717,9 +1717,11 @@ where
                                 let gas_used = payload.gas_used();
                                 let num_hash = payload.num_hash();
                                 let mut output = self.on_new_payload(payload);
-                                let latency = start.elapsed();
-                                self.metrics.engine.new_payload.update_response_metrics(
+                                let finish = Instant::now();
+                                let latency = finish - start;
+                                self.metrics.engine.new_payload.update_response_metrics_at(
                                     start,
+                                    finish,
                                     &mut self.metrics.engine.forkchoice_updated.latest_finish_at,
                                     &output,
                                     gas_used,
