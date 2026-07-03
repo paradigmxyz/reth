@@ -3895,16 +3895,50 @@ impl<TX: DbTx + 'static, N: NodeTypes + 'static> DBProvider for DatabaseProvider
             // Normal path: finalize() will call sync_all() if not already synced
             let mut timings = metrics::CommitTimings::default();
 
-            let start = Instant::now();
-            self.static_file_provider.finalize()?;
-            timings.sf = start.elapsed();
-
-            let start = Instant::now();
             let batches = std::mem::take(&mut *self.pending_rocksdb_batches.lock());
-            for batch in batches {
-                self.rocksdb_provider.commit_batch(batch)?;
+
+            if batches.is_empty() {
+                let start = Instant::now();
+                self.static_file_provider.finalize()?;
+                timings.sf = start.elapsed();
+            } else {
+                let static_file_provider = self.static_file_provider.clone();
+                let rocksdb_provider = self.rocksdb_provider.clone();
+                let mut sf_result = None;
+                let mut rocksdb_results = (0..batches.len()).map(|_| None).collect::<Vec<_>>();
+                let span = tracing::Span::current();
+                let sf_span = span.clone();
+
+                self.runtime.storage_pool().in_place_scope(|s| {
+                    s.spawn(|_| {
+                        let _guard = sf_span.enter();
+                        let start = Instant::now();
+                        sf_result =
+                            Some(static_file_provider.finalize().map(|()| start.elapsed()));
+                    });
+
+                    for (batch, result) in batches.into_iter().zip(rocksdb_results.iter_mut()) {
+                        let rocksdb_provider = rocksdb_provider.clone();
+                        let rocksdb_span = span.clone();
+                        s.spawn(move |_| {
+                            let _guard = rocksdb_span.enter();
+                            let start = Instant::now();
+                            *result =
+                                Some(rocksdb_provider.commit_batch(batch).map(|()| start.elapsed()));
+                        });
+                    }
+                });
+
+                timings.sf =
+                    sf_result.ok_or(StaticFileWriterError::ThreadPanic("static file"))??;
+                for result in rocksdb_results {
+                    timings.rocksdb = timings.rocksdb.max(result.ok_or_else(|| {
+                        ProviderError::Database(reth_db_api::DatabaseError::Other(
+                            "RocksDB thread panicked".into(),
+                        ))
+                    })??);
+                }
             }
-            timings.rocksdb = start.elapsed();
 
             let start = Instant::now();
             self.tx.commit()?;
