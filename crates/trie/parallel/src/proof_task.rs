@@ -464,6 +464,15 @@ where
     }
 }
 
+fn provider_error_to_state_proof_error(error: ProviderError) -> StateProofError {
+    match error {
+        ProviderError::Database(error) => StateProofError::Database(error),
+        ProviderError::Rlp(error) => StateProofError::Rlp(error),
+        ProviderError::TrieWitnessError(message) => StateProofError::TrieInconsistency(message),
+        error => StateProofError::Database(DatabaseError::Other(error.to_string())),
+    }
+}
+
 /// Channel used by worker threads to deliver `ProofResultMessage` items back to
 /// `SparseTrieCacheTask`.
 ///
@@ -616,10 +625,6 @@ where
     /// If this function panics, the worker thread terminates but other workers
     /// continue operating and the system degrades gracefully.
     fn run(mut self) -> ProviderResult<()> {
-        // Create provider from factory
-        let provider = self.task_ctx.factory.database_provider_ro()?;
-        let proof_tx = ProofTaskTx::new(provider, self.worker_id);
-
         trace!(
             target: "trie::proof_task",
             worker_id = self.worker_id,
@@ -628,8 +633,84 @@ where
 
         let mut storage_proofs_processed = 0u64;
         let mut cursor_metrics_cache = ProofTaskCursorMetricsCache::default();
-        let trie_cursor = proof_tx.provider.storage_trie_cursor(B256::ZERO)?;
-        let hashed_cursor = proof_tx.provider.hashed_storage_cursor(B256::ZERO)?;
+
+        // Mark this worker available after the thread starts. The read-only provider and proof
+        // cursors are opened only if real work arrives.
+        self.availability.mark_idle(self.worker_id);
+
+        let mut total_idle_time = Duration::ZERO;
+        let mut idle_start = Instant::now();
+
+        let first_job = match self.work_rx.recv() {
+            Ok(job) => job,
+            Err(_) => {
+                trace!(
+                    target: "trie::proof_task",
+                    worker_id = self.worker_id,
+                    storage_proofs_processed,
+                    total_idle_time_us = total_idle_time.as_micros(),
+                    "Storage worker shutting down"
+                );
+
+                #[cfg(feature = "metrics")]
+                {
+                    self.metrics.record_storage_worker_idle_time(total_idle_time);
+                    self.cursor_metrics.record(&mut cursor_metrics_cache);
+                }
+
+                return Ok(());
+            }
+        };
+
+        total_idle_time += idle_start.elapsed();
+        self.availability.mark_busy(self.worker_id);
+
+        #[cfg(feature = "trie-debug")]
+        if let Some(max_jitter) = self.task_ctx.proof_jitter {
+            let jitter = Duration::from_nanos(rand::random_range(0..=max_jitter.as_nanos() as u64));
+            trace!(
+                target: "trie::proof_task",
+                worker_id = self.worker_id,
+                jitter_us = jitter.as_micros(),
+                "Storage worker applying proof jitter"
+            );
+            std::thread::sleep(jitter);
+        }
+
+        let provider = match self.task_ctx.factory.database_provider_ro() {
+            Ok(provider) => provider,
+            Err(error) => {
+                self.send_storage_setup_error(
+                    first_job,
+                    provider_error_to_state_proof_error(error.clone()),
+                    &mut storage_proofs_processed,
+                );
+                return Err(error)
+            }
+        };
+        let proof_tx = ProofTaskTx::new(provider, self.worker_id);
+        let trie_cursor = match proof_tx.provider.storage_trie_cursor(B256::ZERO) {
+            Ok(cursor) => cursor,
+            Err(error) => {
+                self.send_storage_setup_error(
+                    first_job,
+                    StateProofError::Database(error.clone()),
+                    &mut storage_proofs_processed,
+                );
+                return Err(ProviderError::Database(error))
+            }
+        };
+        let hashed_cursor = match proof_tx.provider.hashed_storage_cursor(B256::ZERO) {
+            Ok(cursor) => cursor,
+            Err(error) => {
+                self.send_storage_setup_error(
+                    first_job,
+                    StateProofError::Database(error.clone()),
+                    &mut storage_proofs_processed,
+                );
+                return Err(ProviderError::Database(error))
+            }
+        };
         let instrumented_trie_cursor =
             InstrumentedTrieCursor::new(trie_cursor, &mut cursor_metrics_cache.storage_trie_cursor);
         let instrumented_hashed_cursor = InstrumentedHashedCursor::new(
@@ -641,11 +722,22 @@ where
             instrumented_hashed_cursor,
         );
 
-        // Initially mark this worker as available.
+        match first_job {
+            StorageWorkerJob::StorageProof { input, proof_result_sender } => {
+                self.process_storage_proof(
+                    &proof_tx,
+                    &mut v2_calculator,
+                    input,
+                    proof_result_sender,
+                    &mut storage_proofs_processed,
+                );
+            }
+        }
+
+        // Mark worker as available again.
         self.availability.mark_idle(self.worker_id);
 
-        let mut total_idle_time = Duration::ZERO;
-        let mut idle_start = Instant::now();
+        idle_start = Instant::now();
 
         while let Ok(job) = self.work_rx.recv() {
             total_idle_time += idle_start.elapsed();
@@ -702,6 +794,30 @@ where
         }
 
         Ok(())
+    }
+
+    fn send_storage_setup_error(
+        &self,
+        job: StorageWorkerJob,
+        error: StateProofError,
+        storage_proofs_processed: &mut u64,
+    ) {
+        let StorageWorkerJob::StorageProof { input, proof_result_sender } = job;
+        let hashed_address = input.hashed_address;
+        *storage_proofs_processed += 1;
+
+        if proof_result_sender
+            .send(StorageProofResultMessage { hashed_address, result: Err(error) })
+            .is_err()
+        {
+            trace!(
+                target: "trie::proof_task",
+                worker_id = self.worker_id,
+                hashed_address = ?hashed_address,
+                storage_proofs_processed,
+                "Storage proof receiver dropped after setup failure"
+            );
+        }
     }
 
     /// Processes a storage proof request.
@@ -834,8 +950,6 @@ where
     /// If this function panics, the worker thread terminates but other workers
     /// continue operating and the system degrades gracefully.
     fn run(mut self) -> ProviderResult<()> {
-        let provider = self.task_ctx.factory.database_provider_ro()?;
-
         trace!(
             target: "trie::proof_task",
             worker_id=self.worker_id,
@@ -845,13 +959,107 @@ where
         let mut account_proofs_processed = 0u64;
         let mut cursor_metrics_cache = ProofTaskCursorMetricsCache::default();
 
-        // Create both account and storage calculators for V2 proofs.
-        // The storage calculator is wrapped in Rc<RefCell<...>> for sharing with value encoders.
-        let account_trie_cursor = provider.account_trie_cursor()?;
-        let account_hashed_cursor = provider.hashed_account_cursor()?;
+        // Count this worker as available after the thread starts. Provider and cursor setup is
+        // deferred until the first account proof job arrives.
+        self.availability.mark_idle(self.worker_id);
 
-        let storage_trie_cursor = provider.storage_trie_cursor(B256::ZERO)?;
-        let storage_hashed_cursor = provider.hashed_storage_cursor(B256::ZERO)?;
+        let mut total_idle_time = Duration::ZERO;
+        let mut idle_start = Instant::now();
+        let mut value_encoder_stats_cache = ValueEncoderStats::default();
+
+        let first_job = match self.work_rx.recv() {
+            Ok(job) => job,
+            Err(_) => {
+                trace!(
+                    target: "trie::proof_task",
+                    worker_id=self.worker_id,
+                    account_proofs_processed,
+                    total_idle_time_us = total_idle_time.as_micros(),
+                    "Account worker shutting down"
+                );
+
+                #[cfg(feature = "metrics")]
+                {
+                    self.metrics.record_account_worker_idle_time(total_idle_time);
+                    self.cursor_metrics.record(&mut cursor_metrics_cache);
+                    self.metrics.record_value_encoder_stats(&value_encoder_stats_cache);
+                }
+
+                return Ok(());
+            }
+        };
+
+        total_idle_time += idle_start.elapsed();
+        self.availability.mark_busy(self.worker_id);
+
+        #[cfg(feature = "trie-debug")]
+        if let Some(max_jitter) = self.task_ctx.proof_jitter {
+            let jitter = Duration::from_nanos(rand::random_range(0..=max_jitter.as_nanos() as u64));
+            trace!(
+                target: "trie::proof_task",
+                worker_id = self.worker_id,
+                jitter_us = jitter.as_micros(),
+                "Account worker applying proof jitter"
+            );
+            std::thread::sleep(jitter);
+        }
+
+        let provider = match self.task_ctx.factory.database_provider_ro() {
+            Ok(provider) => provider,
+            Err(error) => {
+                self.send_account_setup_error(
+                    first_job,
+                    error.clone(),
+                    &mut account_proofs_processed,
+                );
+                return Err(error)
+            }
+        };
+        let account_trie_cursor = match provider.account_trie_cursor() {
+            Ok(cursor) => cursor,
+            Err(error) => {
+                self.send_account_setup_error(
+                    first_job,
+                    ProviderError::Database(error.clone()),
+                    &mut account_proofs_processed,
+                );
+                return Err(ProviderError::Database(error))
+            }
+        };
+        let account_hashed_cursor = match provider.hashed_account_cursor() {
+            Ok(cursor) => cursor,
+            Err(error) => {
+                self.send_account_setup_error(
+                    first_job,
+                    ProviderError::Database(error.clone()),
+                    &mut account_proofs_processed,
+                );
+                return Err(ProviderError::Database(error))
+            }
+        };
+
+        let storage_trie_cursor = match provider.storage_trie_cursor(B256::ZERO) {
+            Ok(cursor) => cursor,
+            Err(error) => {
+                self.send_account_setup_error(
+                    first_job,
+                    ProviderError::Database(error.clone()),
+                    &mut account_proofs_processed,
+                );
+                return Err(ProviderError::Database(error))
+            }
+        };
+        let storage_hashed_cursor = match provider.hashed_storage_cursor(B256::ZERO) {
+            Ok(cursor) => cursor,
+            Err(error) => {
+                self.send_account_setup_error(
+                    first_job,
+                    ProviderError::Database(error.clone()),
+                    &mut account_proofs_processed,
+                );
+                return Err(ProviderError::Database(error))
+            }
+        };
 
         let instrumented_account_trie_cursor = InstrumentedTrieCursor::new(
             account_trie_cursor,
@@ -891,12 +1099,23 @@ where
                 instrumented_storage_hashed_cursor,
             )));
 
-        // Count this worker as available only after successful initialization.
+        match first_job {
+            AccountWorkerJob::AccountMultiproof { input } => {
+                let value_encoder_stats = self.process_account_multiproof::<Factory::Provider>(
+                    &mut v2_account_calculator,
+                    v2_storage_calculator.clone(),
+                    *input,
+                    &mut account_proofs_processed,
+                );
+                total_idle_time += value_encoder_stats.storage_wait_time;
+                value_encoder_stats_cache.extend(&value_encoder_stats);
+            }
+        }
+
+        // Mark worker as available again.
         self.availability.mark_idle(self.worker_id);
 
-        let mut total_idle_time = Duration::ZERO;
-        let mut idle_start = Instant::now();
-        let mut value_encoder_stats_cache = ValueEncoderStats::default();
+        idle_start = Instant::now();
 
         while let Ok(job) = self.work_rx.recv() {
             total_idle_time += idle_start.elapsed();
@@ -956,6 +1175,34 @@ where
         }
 
         Ok(())
+    }
+
+    fn send_account_setup_error(
+        &self,
+        job: AccountWorkerJob,
+        error: ProviderError,
+        account_proofs_processed: &mut u64,
+    ) {
+        let AccountWorkerJob::AccountMultiproof { input } = job;
+        let ProofResultContext { sender: result_tx, state, start_time: start } =
+            input.into_proof_result_sender();
+        *account_proofs_processed += 1;
+
+        if result_tx
+            .send(ProofResultMessage {
+                result: Err(StateRootTaskError::Provider(error)),
+                elapsed: start.elapsed(),
+                state,
+            })
+            .is_err()
+        {
+            trace!(
+                target: "trie::proof_task",
+                worker_id=self.worker_id,
+                account_proofs_processed,
+                "Account multiproof receiver dropped after setup failure"
+            );
+        }
     }
 
     fn compute_v2_account_multiproof<'a, Provider>(
