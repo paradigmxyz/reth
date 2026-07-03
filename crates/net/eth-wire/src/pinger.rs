@@ -171,6 +171,61 @@ pub(crate) enum PingerEvent {
 mod tests {
     use super::*;
     use futures::StreamExt;
+    use std::{
+        sync::{
+            atomic::{AtomicUsize, Ordering},
+            Arc,
+        },
+        task::Wake,
+    };
+
+    #[tokio::test]
+    async fn test_poll_ping_with_cached_waker() {
+        struct CountingWaker(AtomicUsize);
+        impl Wake for CountingWaker {
+            fn wake(self: Arc<Self>) {
+                self.0.fetch_add(1, Ordering::Relaxed);
+            }
+        }
+
+        let ping_interval = Duration::from_millis(100);
+        let timeout = Duration::from_millis(100);
+        let slack = Duration::from_millis(50);
+        let mut pinger = Pinger::new(ping_interval, timeout);
+
+        let first = Arc::new(CountingWaker(AtomicUsize::new(0)));
+        let first_waker = Waker::from(Arc::clone(&first));
+        let mut cx = Context::from_waker(&first_waker);
+
+        // repeated polls with the same waker stay pending via the cached-waker fast path
+        for _ in 0..10 {
+            assert!(pinger.poll_ping(&mut cx).is_pending());
+        }
+
+        // the timer still fires and wakes the task exactly once
+        tokio::time::sleep(ping_interval + slack).await;
+        assert_eq!(first.0.load(Ordering::Relaxed), 1);
+        assert!(matches!(pinger.poll_ping(&mut cx), Poll::Ready(Ok(PingerEvent::Ping))));
+        pinger.on_pong().unwrap();
+
+        // a different task waker bypasses the cache and is re-registered with the timer
+        let second = Arc::new(CountingWaker(AtomicUsize::new(0)));
+        let second_waker = Waker::from(Arc::clone(&second));
+        let mut second_cx = Context::from_waker(&second_waker);
+        assert!(pinger.poll_ping(&mut cx).is_pending());
+        assert!(pinger.poll_ping(&mut second_cx).is_pending());
+
+        tokio::time::sleep(ping_interval + slack).await;
+        assert_eq!(first.0.load(Ordering::Relaxed), 1);
+        assert_eq!(second.0.load(Ordering::Relaxed), 1);
+        assert!(matches!(pinger.poll_ping(&mut second_cx), Poll::Ready(Ok(PingerEvent::Ping))));
+
+        // without a pong the timeout timer fires and the pinger reports the timeout
+        assert!(pinger.poll_ping(&mut second_cx).is_pending());
+        tokio::time::sleep(timeout + slack).await;
+        assert_eq!(second.0.load(Ordering::Relaxed), 2);
+        assert!(matches!(pinger.poll_ping(&mut second_cx), Poll::Ready(Ok(PingerEvent::Timeout))));
+    }
 
     #[tokio::test]
     async fn test_ping_timeout() {
