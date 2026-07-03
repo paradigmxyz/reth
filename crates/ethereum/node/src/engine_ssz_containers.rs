@@ -230,6 +230,13 @@ impl From<BuiltPayloadAmsterdam> for LegacyBuiltPayloadAmsterdam {
     }
 }
 
+/// REST-SSZ payload-submission request containers.
+///
+/// These are distinct from the legacy Engine JSON-RPC get-payload envelopes: submission requests
+/// are fork-specific request bodies, while the legacy envelope types mostly model get-payload
+/// responses and sometimes carry response-only fields such as block value, blob bundles, builder
+/// override hints, or a different field order.
+///
 /// Paris payload-submission request.
 #[derive(Clone, Debug, PartialEq, Eq, ssz_derive::Encode, ssz_derive::Decode)]
 pub struct ExecutionPayloadEnvelopeParis {
@@ -275,10 +282,7 @@ pub struct ExecutionPayloadEnvelopeOsaka {
     pub execution_requests: Requests,
 }
 
-/// This structure maps to the Engine API v2 REST-SSZ payload-submission request for Amsterdam.
-///
-/// This is distinct from the legacy [`alloy_rpc_types_engine::ExecutionPayloadEnvelopeV6`], which
-/// is the `engine_getPayloadV6` response.
+/// Amsterdam payload-submission request.
 #[derive(Clone, Debug, PartialEq, Eq, ssz_derive::Encode, ssz_derive::Decode)]
 pub struct ExecutionPayloadEnvelopeAmsterdam {
     /// Submitted execution payload.
