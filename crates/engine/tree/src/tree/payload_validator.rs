@@ -122,7 +122,7 @@ use crate::tree::payload_processor::receipt_root_task::{IndexedReceipt, ReceiptR
 use alloy_consensus::constants::KECCAK_EMPTY;
 use alloy_primitives::Address;
 use reth_chain_state::{
-    CanonicalInMemoryState, ExecutedBlock, ExecutionTimingStats, DeferredStateCommitment,
+    CanonicalInMemoryState, DeferredStateCommitment, ExecutedBlock, ExecutionTimingStats,
     StateTrieOverlayManager,
 };
 use reth_consensus::{ConsensusError, FullConsensus, ReceiptRootBloom};
@@ -1858,7 +1858,11 @@ where
             Err(handle) => handle.get().clone(),
         };
         let (deferred_trie_data, deferred_trie_task) =
-            DeferredStateCommitment::pending(hashed_state, trie_output, changed_paths);
+            DeferredStateCommitment::pending(reth_chain_state::PendingTrieInputs {
+                hashed_state,
+                trie_updates: trie_output,
+                changed_paths,
+            });
         let block_validation_metrics = self.metrics.block_validation.clone();
 
         // Capture block info for tracing.

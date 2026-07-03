@@ -13,68 +13,12 @@ use tracing::{debug_span, instrument};
 /// data when the background task completes. Callers wait for that result instead of computing it
 /// synchronously.
 #[derive(Clone)]
-pub struct DeferredStateCommitment {
+pub struct DeferredStateCommitment<T = ComputedTrieData> {
     /// Shared deferred result populated by the corresponding [`DeferredTrieDataProducer`].
-    value: Arc<OnceLock<ComputedTrieData>>,
+    value: Arc<OnceLock<T>>,
 }
 
-/// Producer consumed by a spawned task to compute sorted state comittment data for a
-/// [`DeferredStateCommitment`] handle.
-#[must_use = "DeferredTrieDataProducer must be consumed with compute_and_publish to wake state comittment data waiters"]
-pub struct DeferredTrieDataProducer {
-    /// Shared result initialized exactly once by this producer.
-    value: Arc<OnceLock<ComputedTrieData>>,
-    /// Unsorted inputs consumed when the producer computes state comittment data.
-    inputs: PendingInputs,
-}
-
-impl fmt::Debug for DeferredTrieDataProducer {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("DeferredTrieDataProducer")
-            .field("inputs", &self.inputs)
-            .finish_non_exhaustive()
-    }
-}
-
-impl DeferredTrieDataProducer {
-    /// Computes sorted trie data, publishes it to waiters, and returns it to the task owner.
-    pub fn compute_and_publish(self) -> ComputedTrieData {
-        let Self { value, inputs } = self;
-        let computed = DeferredStateCommitment::sort(
-            inputs.hashed_state,
-            inputs.trie_updates,
-            inputs.changed_paths,
-        );
-        let _ = value.set(computed.clone());
-        computed
-    }
-}
-
-/// Metrics for deferred trie computation.
-#[derive(Metrics)]
-#[metrics(scope = "sync.block_validation")]
-struct DeferredTrieMetrics {
-    /// Number of times deferred trie data was ready (async task completed first).
-    deferred_trie_async_ready: Counter,
-    /// Number of times deferred trie data required waiting for the publishing task.
-    deferred_trie_task_wait: Counter,
-}
-
-static DEFERRED_TRIE_METRICS: LazyLock<DeferredTrieMetrics> =
-    LazyLock::new(DeferredTrieMetrics::default);
-
-/// Inputs kept while a deferred trie computation is pending.
-#[derive(Clone, Debug)]
-struct PendingInputs {
-    /// Unsorted hashed post-state from execution.
-    hashed_state: Arc<HashedPostState>,
-    /// Unsorted trie updates from state root computation.
-    trie_updates: Arc<TrieUpdates>,
-    /// Changed trie node base paths from state root computation.
-    changed_paths: Option<Arc<TriePrefixSetsMut>>,
-}
-
-impl fmt::Debug for DeferredStateCommitment {
+impl<T> fmt::Debug for DeferredStateCommitment<T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("DeferredStateCommitment")
             .field("state", &if self.value.get().is_some() { "ready" } else { "pending" })
@@ -82,26 +26,62 @@ impl fmt::Debug for DeferredStateCommitment {
     }
 }
 
-impl DeferredStateCommitment {
-    /// Create a new pending handle and task that will publish the computed trie data.
-    pub fn pending(
-        hashed_state: Arc<HashedPostState>,
-        trie_updates: Arc<TrieUpdates>,
-        changed_paths: Option<Arc<TriePrefixSetsMut>>,
-    ) -> (Self, DeferredTrieDataProducer) {
-        let value = Arc::new(OnceLock::new());
-        (
-            Self { value: Arc::clone(&value) },
-            DeferredTrieDataProducer {
-                value,
-                inputs: PendingInputs { hashed_state, trie_updates, changed_paths },
-            },
-        )
+impl<T: Clone> DeferredStateCommitment<T> {
+    /// Create a handle that is already populated with the given state commitment data.
+    pub fn ready(value: T) -> Self {
+        Self { value: Arc::new(OnceLock::from(value)) }
     }
 
-    /// Create a handle that is already populated with the given [`ComputedTrieData`].
-    pub fn ready(bundle: ComputedTrieData) -> Self {
-        Self { value: Arc::new(OnceLock::from(bundle)) }
+    /// Create a new pending handle and task that will publish the computed trie data.
+    pub fn pending<Input>(inputs: Input) -> (Self, DeferredStateCommitmentProducer<T, Input>) {
+        let value = Arc::new(OnceLock::new());
+        (Self { value: Arc::clone(&value) }, DeferredStateCommitmentProducer { value, inputs })
+    }
+
+    /// Returns state commitment data, waiting for the async publishing task if it has not
+    /// completed.
+    #[instrument(level = "debug", target = "engine::tree::deferred_trie", skip_all)]
+    pub fn wait_cloned(&self) -> T {
+        let value = match self.value.get() {
+            Some(value) => {
+                DEFERRED_TRIE_METRICS.deferred_trie_async_ready.increment(1);
+                value
+            }
+            None => {
+                DEFERRED_TRIE_METRICS.deferred_trie_task_wait.increment(1);
+                self.value.wait()
+            }
+        };
+
+        value.clone()
+    }
+}
+
+/// Producer consumed by a spawned task to compute sorted state comittment data for a
+/// [`DeferredStateCommitment`] handle.
+#[must_use = "DeferredStateCommitmentProducer must be consumed with compute_and_publish to wake state comittment data waiters"]
+pub struct DeferredStateCommitmentProducer<T, Input> {
+    /// Shared result initialized exactly once by this producer.
+    value: Arc<OnceLock<T>>,
+    /// Unsorted inputs consumed when the producer computes state comittment data.
+    inputs: Input,
+}
+
+impl<T, Input: fmt::Debug> fmt::Debug for DeferredStateCommitmentProducer<T, Input> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("DeferredStateCommitmentProducer")
+            .field("inputs", &self.inputs)
+            .finish_non_exhaustive()
+    }
+}
+
+impl DeferredStateCommitmentProducer<ComputedTrieData, PendingTrieInputs> {
+    /// Computes sorted trie data, publishes it to waiters, and returns it to the task owner.
+    pub fn compute_and_publish(self) -> ComputedTrieData {
+        let Self { value, inputs } = self;
+        let computed = Self::sort(inputs.hashed_state, inputs.trie_updates, inputs.changed_paths);
+        let _ = value.set(computed.clone());
+        computed
     }
 
     /// Sorts block execution outputs.
@@ -142,23 +122,30 @@ impl DeferredStateCommitment {
             changed_paths,
         )
     }
+}
 
-    /// Returns trie data, waiting for the async publishing task if it has not completed.
-    #[instrument(level = "debug", target = "engine::tree::deferred_trie", skip_all)]
-    pub fn wait_cloned(&self) -> ComputedTrieData {
-        let bundle = match self.value.get() {
-            Some(bundle) => {
-                DEFERRED_TRIE_METRICS.deferred_trie_async_ready.increment(1);
-                bundle
-            }
-            None => {
-                DEFERRED_TRIE_METRICS.deferred_trie_task_wait.increment(1);
-                self.value.wait()
-            }
-        };
+/// Metrics for deferred trie computation.
+#[derive(Metrics)]
+#[metrics(scope = "sync.block_validation")]
+struct DeferredTrieMetrics {
+    /// Number of times deferred trie data was ready (async task completed first).
+    deferred_trie_async_ready: Counter,
+    /// Number of times deferred trie data required waiting for the publishing task.
+    deferred_trie_task_wait: Counter,
+}
 
-        bundle.clone()
-    }
+static DEFERRED_TRIE_METRICS: LazyLock<DeferredTrieMetrics> =
+    LazyLock::new(DeferredTrieMetrics::default);
+
+/// Inputs kept while a deferred trie computation is pending.
+#[derive(Clone, Default, Debug)]
+pub struct PendingTrieInputs {
+    /// Unsorted hashed post-state from execution.
+    pub hashed_state: Arc<HashedPostState>,
+    /// Unsorted trie updates from state root computation.
+    pub trie_updates: Arc<TrieUpdates>,
+    /// Changed trie node base paths from state root computation.
+    pub changed_paths: Option<Arc<TriePrefixSetsMut>>,
 }
 
 #[cfg(test)]
@@ -166,18 +153,17 @@ mod tests {
     use super::*;
     use alloy_primitives::{map::B256Map, B256, U256};
     use reth_primitives_traits::Account;
-    use reth_trie::{updates::TrieUpdates, HashedStorage};
+    use reth_trie::HashedStorage;
     use std::{
         thread,
         time::{Duration, Instant},
     };
 
-    fn empty_pending() -> (DeferredStateCommitment, DeferredTrieDataProducer) {
-        DeferredStateCommitment::pending(
-            Arc::new(HashedPostState::default()),
-            Arc::new(TrieUpdates::default()),
-            None,
-        )
+    fn empty_pending() -> (
+        DeferredStateCommitment,
+        DeferredStateCommitmentProducer<ComputedTrieData, PendingTrieInputs>,
+    ) {
+        DeferredStateCommitment::pending(PendingTrieInputs::default())
     }
 
     fn assert_changed_paths_ptr_eq(
@@ -263,11 +249,10 @@ mod tests {
                 HashedStorage::from_iter(false, [(hashed_slot, U256::from(1))]),
             )]);
 
-        let (deferred, task) = DeferredStateCommitment::pending(
-            Arc::new(hashed_state),
-            Arc::new(TrieUpdates::default()),
-            None,
-        );
+        let (deferred, task) = DeferredStateCommitment::pending(PendingTrieInputs {
+            hashed_state: Arc::new(hashed_state),
+            ..Default::default()
+        });
         let _ = task.compute_and_publish();
         let result = deferred.wait_cloned();
 
@@ -281,11 +266,10 @@ mod tests {
         for i in 0..100 {
             accounts.insert(B256::with_last_byte(i), Some(Account::default()));
         }
-        let (deferred, task) = DeferredStateCommitment::pending(
-            Arc::new(HashedPostState { accounts, storages: Default::default() }),
-            Arc::new(TrieUpdates::default()),
-            None,
-        );
+        let (deferred, task) = DeferredStateCommitment::pending(PendingTrieInputs {
+            hashed_state: Arc::new(HashedPostState { accounts, storages: Default::default() }),
+            ..Default::default()
+        });
 
         let _ = task.compute_and_publish();
         let _ = deferred.wait_cloned();
