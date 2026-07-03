@@ -1,7 +1,6 @@
 use crate::{
-    extend_state_and_collect_reverts, hashed_post_state_from_state_source, state,
-    BlockExecutionOutput, BlockExecutionResult, BlockReverts, ExecutionState, IndexedBlockState,
-    RevertAccount, StorageReverts,
+    hashed_post_state_from_state_source, state, BlockExecutionOutput, BlockExecutionResult,
+    BlockReverts, ExecutionState, IndexedBlockState, RevertAccount, StorageReverts,
 };
 use alloc::{collections::BTreeMap, vec, vec::Vec};
 use alloy_consensus::constants::KECCAK_EMPTY;
@@ -49,13 +48,23 @@ impl ExecutionOutcomeState {
 
     /// Creates accumulated execution state from per-block states.
     pub fn from_block_states(states: impl IntoIterator<Item = ExecutionState>) -> Self {
-        let block_states = states.into_iter().collect::<Vec<_>>();
-        let mut state = BlockStateAccumulator::new();
-        let mut block_reverts = Vec::with_capacity(block_states.len());
-        for block_state in &block_states {
-            block_reverts.push(extend_state_and_collect_reverts(&mut state, block_state));
+        let mut value = Self::default();
+        for state in states {
+            value.push_block_state(state);
         }
-        Self { state, block_states, block_reverts }
+        value
+    }
+
+    /// Appends one block's execution state and derives its reverts.
+    pub fn push_block_state(&mut self, block_state: ExecutionState) {
+        self.block_reverts
+            .push(state::extend_state_and_collect_reverts(&mut self.state, &block_state));
+        self.block_states.push(block_state);
+    }
+
+    /// Returns an approximate size hint for the accumulated execution state.
+    pub fn size_hint(&self) -> usize {
+        state::state_source_size_hint(&self.state)
     }
 
     /// Returns the accumulated state parts.
@@ -1045,7 +1054,8 @@ mod tests {
         let mut aggregate_state = BlockStateAccumulator::new();
         let mut block_reverts = Vec::with_capacity(block_states.len());
         for block_state in &block_states {
-            block_reverts.push(extend_state_and_collect_reverts(&mut aggregate_state, block_state));
+            block_reverts
+                .push(state::extend_state_and_collect_reverts(&mut aggregate_state, block_state));
         }
 
         let actual = ExecutionOutcome::from_blocks(

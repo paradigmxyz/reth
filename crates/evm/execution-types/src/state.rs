@@ -162,7 +162,7 @@ where
 }
 
 /// Returns an approximate state-change size for thresholding and metrics.
-pub fn state_source_size_hint<S>(source: &S) -> usize
+pub(crate) fn state_source_size_hint<S>(source: &S) -> usize
 where
     S: StateChangeSource,
 {
@@ -188,7 +188,7 @@ where
 }
 
 /// Extends an execution state accumulator and returns the per-block reverts in one source visit.
-pub fn extend_state_and_collect_reverts<S>(
+pub(crate) fn extend_state_and_collect_reverts<S>(
     accumulator: &mut BlockStateAccumulator,
     source: &S,
 ) -> BlockReverts

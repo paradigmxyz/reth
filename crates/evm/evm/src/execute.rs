@@ -23,14 +23,9 @@ pub use reth_execution_errors::{
     InvalidTxError,
 };
 #[cfg(feature = "std")]
-use reth_execution_types::{
-    extend_state_and_collect_reverts, state_source_size_hint, BlockReverts, ExecutionState,
-    ExecutionStateChangeSource,
-};
+use reth_execution_types::ExecutionStateChangeSource;
 pub use reth_execution_types::{BlockExecutionOutput, ExecutionOutcome};
-use reth_execution_types::{
-    BlockExecutionResult, ExecutionOutcomeState, ExecutionStateAccumulator, HashedPostState,
-};
+use reth_execution_types::{BlockExecutionResult, ExecutionOutcomeState, HashedPostState};
 #[cfg(feature = "std")]
 use reth_primitives_traits::BlockTy;
 use reth_primitives_traits::{
@@ -651,9 +646,7 @@ pub trait Executor: Sized {
 pub struct BasicBlockExecutor<Evm, DB: Database> {
     evm_config: Evm,
     batch_database: SharedBatchDatabase<DB>,
-    batch_state: ExecutionStateAccumulator,
-    batch_block_states: Vec<ExecutionState>,
-    batch_block_reverts: Vec<BlockReverts>,
+    batch_state: ExecutionOutcomeState,
 }
 
 #[cfg(feature = "std")]
@@ -663,9 +656,7 @@ impl<Evm, DB: Database> BasicBlockExecutor<Evm, DB> {
         Self {
             evm_config,
             batch_database: SharedBatchDatabase::new(database),
-            batch_state: ExecutionStateAccumulator::new(),
-            batch_block_states: Vec::new(),
-            batch_block_reverts: Vec::new(),
+            batch_state: ExecutionOutcomeState::default(),
         }
     }
 }
@@ -721,9 +712,7 @@ where
         self.batch_database.commit_source(&output.state);
 
         let block_state = output.state.into_inner();
-        self.batch_block_reverts
-            .push(extend_state_and_collect_reverts(&mut self.batch_state, &block_state));
-        self.batch_block_states.push(block_state);
+        self.batch_state.push_block_state(block_state);
 
         Ok(output.result)
     }
@@ -737,15 +726,11 @@ where
     }
 
     fn size_hint(&self) -> usize {
-        state_source_size_hint(&self.batch_state)
+        self.batch_state.size_hint()
     }
 
     fn into_state(self) -> ExecutionOutcomeState {
-        ExecutionOutcomeState::new(
-            self.batch_state,
-            self.batch_block_states,
-            self.batch_block_reverts,
-        )
+        self.batch_state
     }
 
     fn take_bal(&mut self) -> Option<Bytes> {
