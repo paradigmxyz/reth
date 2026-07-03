@@ -677,6 +677,16 @@ impl<S: SparseTrieTrait> StorageTries<S> {
     /// Tries without retained slots are evicted entirely. Tries with retained slots are pruned to
     /// those slots.
     fn prune_by_retained_slots(&mut self, retained_slots: B256Map<PrefixSet>) -> usize {
+        if retained_slots.is_empty() {
+            let evicted = self.tries.len();
+            self.cleared_tries.reserve(evicted);
+            for (_, mut trie) in self.tries.drain() {
+                trie.clear();
+                self.cleared_tries.push(trie);
+            }
+            return evicted;
+        }
+
         // Parallel pass: prune retained tries and clear evicted ones in place.
         {
             use rayon::iter::{IntoParallelRefMutIterator, ParallelIterator};
