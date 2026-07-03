@@ -206,6 +206,9 @@ fn test_sidecar_serialization_and_targets() {
         target_accounts: 1,
         target_storage_slots: 1,
         computation_time_ms: Some(15),
+        cpu_time_ms: None,
+        major_page_faults: None,
+        minor_page_faults: None,
     };
 
     let sidecar = PartialStatelessSidecar {
@@ -283,6 +286,9 @@ fn test_sidecar_disk_write() {
         target_accounts: 1,
         target_storage_slots: 1,
         computation_time_ms: Some(5),
+        cpu_time_ms: None,
+        major_page_faults: None,
+        minor_page_faults: None,
     };
 
     let sidecar = PartialStatelessSidecar {

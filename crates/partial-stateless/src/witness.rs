@@ -29,6 +29,22 @@ pub struct WitnessResult {
     pub target_storage_slots: usize,
     /// Time taken to compute the multiproof (if measured).
     pub computation_time_ms: Option<u64>,
+    /// CPU time (user+sys) consumed by the calling thread while computing the
+    /// multiproof, in milliseconds. Compared against `computation_time_ms`
+    /// (wall clock) this separates compute-bound blocks (cpu ≈ wall) from
+    /// I/O/wait-bound blocks (cpu ≪ wall). `None` when not instrumented.
+    #[serde(default)]
+    pub cpu_time_ms: Option<u64>,
+    /// Major page faults taken by the calling thread during multiproof
+    /// computation (faults served from disk/swap, not the page cache). A
+    /// nonzero value means the cold trie read actually hit disk — the
+    /// signature of the environmental I/O tail. `None` when not instrumented.
+    #[serde(default)]
+    pub major_page_faults: Option<u64>,
+    /// Minor page faults during multiproof (served without disk I/O).
+    /// `None` when not instrumented.
+    #[serde(default)]
+    pub minor_page_faults: Option<u64>,
 }
 
 /// Convert a `MissResult` into `MultiProofTargets` suitable for `StateProofProvider::multiproof()`.
@@ -164,6 +180,9 @@ pub fn measure_multiproof_size(proof: &MultiProof, missed_bytecode_bytes: usize)
         target_accounts,
         target_storage_slots,
         computation_time_ms: None,
+        cpu_time_ms: None,
+        major_page_faults: None,
+        minor_page_faults: None,
     }
 }
 
