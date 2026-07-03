@@ -53,8 +53,8 @@ impl Command {
         info!("Bootnode started with config: {self:?}");
 
         let sk = self.network_secret()?;
-        // A discovery-only bootnode serves no RLPx, so advertise TCP port 0. Peers then see
-        // `enode://…@<ip>:0?discport=<udp>` and won't attempt a doomed RLPx dial.
+        // A discovery-only bootnode serves no RLPx, so advertise TCP port 0
+        // (`enode://…@<ip>:0?discport=<udp>`).
         let local_enr = NodeRecord::from_secret_key(self.addr, &sk).with_tcp_port(0);
         let nat = self.resolved_nat()?;
 
@@ -65,21 +65,19 @@ impl Command {
         let mut _discv5 = None;
         let mut _discv5_forwarder = None;
 
-        // In v5 mode discv4 and discv5 share a single UDP socket (one port), matching how geth
-        // and reth's networking stack co-locate the two protocols. discv5 owns the socket's read
-        // loop; discv4 packets surface as `UnrecognizedFrame`s and are forwarded to its ingress.
+        // In v5 mode discv4 and discv5 share a single UDP socket: discv5 owns the read loop and
+        // discv4 packets surface as `UnrecognizedFrame`s forwarded to its ingress.
         let (_discv4, mut discv4_service) = if self.v5 {
             let shared_socket = bind_socket(self.addr).await?;
-            // Bind the opposite family on the same port; read the socket's actual port so an
-            // ephemeral `--addr` port (`:0`) still yields one shared port across both families.
+            // Actual port, so an ephemeral `--addr` port (`:0`) still yields one shared port.
             let shared_port = shared_socket.local_addr()?.port();
 
             let (discv4, discv4_service, mut ingress) =
                 Discv4::bind_shared(shared_socket.clone(), local_enr, sk, discv4_config)?;
             info!("Started discv4 (shared port) at address: {local_enr:?}");
 
-            // Hand discv5 the shared socket for the `--addr` family and bind the opposite family
-            // (if advertised) on the same port so both families answer on one port.
+            // Hand discv5 the shared socket and bind the opposite family (if advertised) on the
+            // same port.
             let mut discv5_config = self.discv5_config(&nat);
             let discv5_cfg = discv5_config.discv5_config_mut();
             let (mut ipv4, mut ipv6) = (None, None);
@@ -102,20 +100,22 @@ impl Command {
             let (discv5, mut updates) = Discv5::start(&sk, discv5_config).await?;
             log_discv5_enr(&discv5);
 
-            // A dedicated task drains discv5 events so discv4 frame forwarding runs independently
-            // of the logging loop. The passthrough to that loop drops under load rather than
-            // blocking: unlike the network stack's forwarder (whose downstream feeds peer
-            // management and needs backpressure), losing a logged event is harmless, and blocking
-            // here would let a burst stall `UnrecognizedFrame` forwarding.
+            // A dedicated task drains discv5 events so discv4 frame forwarding is independent of
+            // the logging loop; dropping log events under load beats stalling frame forwarding.
             let (tx, rx) = mpsc::channel(updates.max_capacity());
             let forwarder = tokio::spawn(async move {
                 while let Some(event) = updates.recv().await {
-                    if let Event::UnrecognizedFrame(frame) = &event {
-                        ingress.handle_packet(&frame.packet, frame.src_address).await;
-                        continue;
-                    }
-                    if let Err(mpsc::error::TrySendError::Closed(_)) = tx.try_send(event) {
-                        break;
+                    match event {
+                        Event::UnrecognizedFrame(frame) => {
+                            ingress.handle_packet(&frame.packet, frame.src_address).await;
+                        }
+                        // Only sessions are logged; don't let other events fill the channel.
+                        event @ Event::SessionEstablished(..) => {
+                            if let Err(mpsc::error::TrySendError::Closed(_)) = tx.try_send(event) {
+                                break;
+                            }
+                        }
+                        _ => {}
                     }
                 }
             });
@@ -195,22 +195,20 @@ impl Command {
         match self.nat.as_slice() {
             [] => Ok(BootnodeNat::single(NatResolver::Any, self.addr.port())),
             [nat] => {
-                // A single fixed extip of the opposite family to `--addr` can't drive discv4 (it
-                // binds only the `--addr` family). Advertise it via discv5, and give discv4 `None`
-                // — deliberately NOT `Any`. The operator passed a static `extip`, so we must not
-                // silently auto-resolve and advertise a same-family address they never provided:
-                // `Any` does a network lookup (surprising, and a no-op when firewalled). `None`
-                // leaves discv4 with no external IP, which is the honest result. For a working
-                // dual-stack bootnode, pass one `extip` per family (the two-`--nat` form above).
-                if let NatResolver::ExternalIp(ip) = nat &&
+                let single = BootnodeNat::single(nat.clone(), self.addr.port());
+                // A static IP (`extip`/`extaddr`) of the opposite family to `--addr` can't drive
+                // discv4 (it binds only the `--addr` family): advertise it via discv5 only, and
+                // use `None` rather than `Any` so discv4 doesn't silently auto-resolve an address
+                // the operator never provided.
+                if let [ip] = single.advertised_ips[..] &&
                     ip.is_ipv4() != self.addr.is_ipv4()
                 {
                     return Ok(BootnodeNat {
                         resolver: NatResolver::None,
-                        advertised_ips: vec![*ip],
+                        advertised_ips: vec![ip],
                     });
                 }
-                Ok(BootnodeNat::single(nat.clone(), self.addr.port()))
+                Ok(single)
             }
             [first, second] => {
                 let first_ip = fixed_external_ip(first)?;
@@ -238,12 +236,11 @@ impl Command {
     }
 
     fn discv5_config(&self, nat: &BootnodeNat) -> Config {
-        // Advertise the rlpx/TCP port as 0: a discovery-only bootnode serves no RLPx, so its ENR
-        // carries `tcp=0` (enode `:0?discport=<udp>`) instead of a port nothing listens on. Only
-        // the IP is used from this socket; the discovery listen port is set from `--addr` below.
+        // A discovery-only bootnode serves no RLPx, so the ENR advertises `tcp=0` (enode
+        // `:0?discport=<udp>`); the discovery listen port is set from `--addr` below.
         let mut builder = Config::builder(SocketAddr::new(self.addr.ip(), 0));
 
-        // discv5 shares discv4's UDP port so both protocols answer on a single port.
+        // discv5 shares discv4's UDP port.
         let port = self.addr.port();
 
         // Bind every family we advertise (plus the `--addr` family). Without a listen socket of a
@@ -292,8 +289,7 @@ impl BootnodeNat {
 /// Binds a UDP socket for shared discv4/discv5 use.
 ///
 /// IPv6 sockets are bound with `IPV6_V6ONLY=true` so an IPv4 sibling socket on the same port
-/// doesn't clash (Linux defaults to `V6ONLY=0`, which lets an IPv6 socket also claim the IPv4
-/// port via mapped addresses), matching how discv5 binds its `DualStack` sockets.
+/// doesn't clash, matching how discv5 binds its `DualStack` sockets.
 async fn bind_socket(addr: SocketAddr) -> eyre::Result<Arc<UdpSocket>> {
     let socket = match addr {
         SocketAddr::V4(_) => UdpSocket::bind(addr).await?,
@@ -387,8 +383,6 @@ mod tests {
     #[test]
     fn discv5_advertises_single_extip_of_other_family_than_addr() {
         // A v6 extip under a v4 `--addr` must still be bound and advertised, not silently dropped.
-        // Port 45678 is distinct from the `--addr` default so it proves the port comes from
-        // `--addr`.
         let command = Command::parse_from([
             "reth",
             "--addr",
@@ -472,12 +466,8 @@ mod tests {
 
     #[tokio::test]
     async fn shared_socket_binds_both_families_on_one_port() {
-        // The core of the feature: a v4 socket and a v6 socket must both bind on the SAME port
-        // (V6ONLY on the v6 socket prevents the clash), so discv4 and discv5 can co-locate.
-        //
-        // Probe each family first so a single-stack host (v4-only or v6-only, e.g. minimal CI
-        // containers) skips. Once both are known available, the same-port bind must fail loudly on
-        // a regressed V6ONLY rather than being silently skipped.
+        // A v4 and a v6 socket must bind the SAME port (V6ONLY prevents the clash). The probes
+        // skip single-stack hosts; past them, a regressed V6ONLY must fail loudly.
         let (Ok(probe4), Ok(probe6)) = (
             bind_socket("0.0.0.0:0".parse().unwrap()).await,
             bind_socket("[::]:0".parse().unwrap()).await,
@@ -514,8 +504,6 @@ mod tests {
 
     #[test]
     fn discv5_config_advertises_dual_stack_nat_endpoints() {
-        // Port 45678 is distinct from the `--addr` default so it proves the port comes from
-        // `--addr`.
         let command = Command::parse_from([
             "reth",
             "--addr",
