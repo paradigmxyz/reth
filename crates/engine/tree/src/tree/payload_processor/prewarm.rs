@@ -32,7 +32,9 @@ use metrics::{Counter, Gauge, Histogram};
 #[cfg(any())]
 use rayon::prelude::*;
 use reth_evm::{
-    database::StateProviderDatabase, execute::ExecutableTxFor, ConfigureEvm, EvmEnv, EvmFor,
+    database::StateProviderDatabase,
+    execute::{BlockExecutorFactory, ExecutableTxFor},
+    ConfigureEvm, EvmEnv, EvmFor,
 };
 use reth_execution_types::{
     ExecutionAccountChangeRef, ExecutionStateChangeSink, ExecutionStorageChange,
@@ -250,7 +252,8 @@ where
                 HandlerError(evm2::registry::HandlerError),
             }
 
-            let resolution = match evm.transact(ctx.evm_config.evm_tx(&tx_env)) {
+            let tx = ctx.evm_config.block_executor_factory().evm_tx(&tx_env);
+            let resolution = match evm.transact(tx) {
                 Ok(executed) => {
                     if let Some(code) = executed.result().error_code {
                         let _ = executed.discard();
