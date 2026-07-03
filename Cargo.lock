@@ -3272,6 +3272,7 @@ dependencies = [
  "reth-evm-ethereum",
  "reth-primitives-traits",
  "reth-provider",
+ "reth-storage-api",
  "reth-tracing",
  "reth-trie",
  "reth-trie-db",

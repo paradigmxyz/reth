@@ -13,6 +13,7 @@
 use alloy_primitives::Address;
 use clap::Parser;
 use evm2::{
+    evm::{CacheDB, Db},
     interpreter::{opcode::OpCode, Interpreter},
     BaseEvmTypes, Inspector,
 };
@@ -23,7 +24,7 @@ use reth_ethereum::{
     node::{builder::NodeHandle, EthereumNode},
     pool::TransactionPool,
     rpc::api::eth::helpers::Trace,
-    storage::{BlockReaderIdExt, SharedEvmStateProviderDatabase, StateProviderFactory},
+    storage::{BlockReaderIdExt, EvmStateProviderDatabase, StateProviderFactory},
 };
 
 fn main() {
@@ -76,11 +77,9 @@ fn main() {
                         };
                         let tx_env = EthTxEnv::from(tx.to_consensus());
 
-                        // SAFETY: `db` is only used for the synchronous inspection call below and
-                        // is dropped before the boxed state provider.
-                        let db = unsafe { SharedEvmStateProviderDatabase::new(&*state) };
+                        let mut db = CacheDB::new(Db::new(EvmStateProviderDatabase::new(state)));
                         let result = eth_api.inspect_with_inspector(
-                            db,
+                            &mut db,
                             evm_env,
                             tx_env,
                             DummyInspector::default(),
@@ -125,7 +124,7 @@ struct DummyInspector {
 }
 
 impl Inspector<BaseEvmTypes> for DummyInspector {
-    fn step(&mut self, interp: &mut Interpreter<'_, BaseEvmTypes>) {
+    fn step(&mut self, interp: &mut Interpreter<'_, '_, BaseEvmTypes>) {
         let opcode = OpCode::new_or_unknown(interp.opcode());
         self.ret_val.push(format!("{}: {}", interp.pc(), opcode));
     }

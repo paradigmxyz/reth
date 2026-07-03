@@ -3871,7 +3871,7 @@ mod tests {
     use reth_db_api::models::StorageSettings;
     use reth_ethereum_primitives::Receipt;
     use reth_execution_types::{
-        execution_state_from_init, hashed_post_state_from_state_source, AccountRevertInit,
+        execution_state_from_init, hashed_post_state_from_execution_state, AccountRevertInit,
         BlockExecutionOutput, BlockExecutionResult, BlockReverts, ExecutionState, StorageReverts,
     };
     use reth_primitives_traits::SealedBlock;
@@ -5053,7 +5053,7 @@ mod tests {
             .unwrap();
 
         let hashed_state =
-            hashed_post_state_from_state_source::<KeccakKeyHasher, _>(&state).into_sorted();
+            hashed_post_state_from_execution_state::<KeccakKeyHasher>(&state).into_sorted();
         provider_rw.write_hashed_state(&hashed_state).unwrap();
 
         let plain_storage_entries = provider_rw
@@ -5166,7 +5166,7 @@ mod tests {
 
             let state = execution_state_from_init(accounts, []);
             let hashed_state =
-                hashed_post_state_from_state_source::<KeccakKeyHasher, _>(&state).into_sorted();
+                hashed_post_state_from_execution_state::<KeccakKeyHasher>(&state).into_sorted();
 
             let header = Header {
                 number: block_num,
@@ -5448,7 +5448,7 @@ mod tests {
             .unwrap();
 
         let hashed_state =
-            hashed_post_state_from_state_source::<KeccakKeyHasher, _>(&state).into_sorted();
+            hashed_post_state_from_execution_state::<KeccakKeyHasher>(&state).into_sorted();
         provider_rw.write_hashed_state(&hashed_state).unwrap();
 
         let hashed_account = provider_rw

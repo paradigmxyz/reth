@@ -10,7 +10,7 @@ use reth_db_api::{cursor::DbDupCursorRO, tables, transaction::DbTx};
 use reth_primitives_traits::SealedHeader;
 use serde::Deserialize;
 use std::{
-    collections::{BTreeMap, HashMap},
+    collections::BTreeMap,
     ops::Deref,
     sync::{Arc, OnceLock, RwLock},
 };

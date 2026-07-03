@@ -357,7 +357,7 @@ mod tests {
         transaction::DbTxMut,
     };
     use reth_execution_errors::StateRootError;
-    use reth_execution_types::{execution_state_from_init, hashed_post_state_from_state_source};
+    use reth_execution_types::{execution_state_from_init, hashed_post_state_from_execution_state};
     use reth_primitives_traits::{Account, StorageEntry};
     use reth_provider::test_utils::create_test_provider_factory;
     use reth_storage_api::StorageSettingsCache;
@@ -438,7 +438,7 @@ mod tests {
             [],
         );
 
-        let post_state = hashed_post_state_from_state_source::<KeccakKeyHasher, _>(&block_state);
+        let post_state = hashed_post_state_from_execution_state::<KeccakKeyHasher>(&block_state);
         assert_eq!(post_state.accounts.len(), 2);
         assert_eq!(post_state.storages.len(), 2);
 

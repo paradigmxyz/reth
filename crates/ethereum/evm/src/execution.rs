@@ -1132,11 +1132,12 @@ mod tests {
         evm::AccountInfo,
         interpreter::{opcode::op, Word},
     };
-    use reth_execution_types::hashed_post_state_from_state_source;
+    use reth_execution_types::hashed_post_state_from_execution_state;
 
     fn assert_hashed_state_matches_output(output: &BlockExecutionOutput<Receipt>) {
         let hashed_state = output.hashed_state.clone().expect("EVM execution hashes post-state");
-        let recomputed = hashed_post_state_from_state_source::<KeccakKeyHasher, _>(&output.state);
+        let recomputed =
+            hashed_post_state_from_execution_state::<KeccakKeyHasher>(output.state.inner());
 
         assert_eq!(hashed_state.into_sorted(), recomputed.into_sorted());
     }
@@ -1149,7 +1150,8 @@ mod tests {
         for update in updates {
             streamed.extend(update);
         }
-        let recomputed = hashed_post_state_from_state_source::<KeccakKeyHasher, _>(&output.state);
+        let recomputed =
+            hashed_post_state_from_execution_state::<KeccakKeyHasher>(output.state.inner());
 
         assert_eq!(streamed.into_sorted(), recomputed.into_sorted());
     }

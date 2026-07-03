@@ -106,8 +106,16 @@ pub struct StorageReverts {
     pub slots: alloc::collections::BTreeMap<U256, U256>,
 }
 
+/// Returns the hashed post-state represented by an execution state.
+pub fn hashed_post_state_from_execution_state<KH>(state: &BlockStateAccumulator) -> HashedPostState
+where
+    KH: KeyHasher,
+{
+    hashed_post_state_from_state_source::<KH, _>(state)
+}
+
 /// Returns the hashed post-state represented by an execution state-change source.
-pub fn hashed_post_state_from_state_source<KH, S>(source: &S) -> HashedPostState
+pub(crate) fn hashed_post_state_from_state_source<KH, S>(source: &S) -> HashedPostState
 where
     KH: KeyHasher,
     S: StateChangeSource,

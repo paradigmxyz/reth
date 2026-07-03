@@ -17,6 +17,7 @@ asm-keccak = [
     "alloy-primitives/asm-keccak",
     "reth-evm/asm-keccak",
     "reth-evm-ethereum/asm-keccak",
+    "reth-storage-api/asm-keccak",
 ]
 
 [dependencies]
@@ -28,6 +29,7 @@ reth-db = { workspace = true, features = ["mdbx", "test-utils", "disable-lock"] 
 reth-db-api.workspace = true
 reth-db-common.workspace = true
 reth-provider = { workspace = true, features = ["test-utils"] }
+reth-storage-api.workspace = true
 reth-evm = { workspace = true, features = ["blst", "c-kzg", "p256-aws-lc-rs"] }
 reth-evm-ethereum = { workspace = true, features = ["std", "blst", "c-kzg", "p256-aws-lc-rs"] }
 reth-ethereum-consensus.workspace = true
