@@ -3,7 +3,7 @@ use crate::{
     providers::{DatabaseProvider, NodeTypesForProvider},
     EitherWriter,
 };
-use alloy_consensus::constants::KECCAK_EMPTY;
+use alloy_consensus::{constants::KECCAK_EMPTY, transaction::Either};
 use alloy_primitives::{Address, BlockNumber, B256, U256};
 use rayon::slice::ParallelSliceMut;
 use reth_db_api::{
@@ -20,7 +20,7 @@ use reth_execution_types::{
 use reth_primitives_traits::{Account, Bytecode, StorageEntry};
 use reth_storage_api::{
     OriginalValuesKnown, PlainStateReverts, PlainStorageChangeset, PlainStorageRevert,
-    RevertToSlot, StateChangeset, StateWriteConfig, StorageSettingsCache,
+    RevertToSlot, StateChangeset, StateWriteConfig, StorageSettingsCache, WriteStateInput,
 };
 use reth_storage_errors::provider::ProviderResult;
 use std::{collections::BTreeMap, convert::Infallible};
@@ -100,6 +100,42 @@ where
         Err(err) => match err {},
     }
     sink.finish()
+}
+
+pub(crate) fn write_state_input_to_plain_state_and_reverts<R>(
+    input: &WriteStateInput<'_, R>,
+    is_value_known: OriginalValuesKnown,
+) -> (StateChangeset, PlainStateReverts, PlainStateInputOrder, PlainStateInputOrder) {
+    match input {
+        WriteStateInput::Single { outcome, .. } => {
+            let (plain_state, reverts) =
+                execution_state_to_plain_state_and_reverts(&outcome.state, is_value_known);
+            (plain_state, reverts, PlainStateInputOrder::Sorted, PlainStateInputOrder::Sorted)
+        }
+        WriteStateInput::Multiple(outcome) => {
+            let (plain_state, reverts) = execution_state_and_reverts_to_plain_state_and_reverts(
+                outcome.execution_state_ref(),
+                outcome.block_reverts(),
+                is_value_known,
+            );
+            (plain_state, reverts, PlainStateInputOrder::Unsorted, PlainStateInputOrder::Unsorted)
+        }
+    }
+}
+
+pub(crate) fn write_state_input_bytecodes<'a, R>(
+    input: &'a WriteStateInput<'_, R>,
+) -> impl Iterator<Item = (B256, Bytecode)> + 'a {
+    match input {
+        WriteStateInput::Single { outcome, .. } => Either::Left(
+            outcome
+                .state
+                .code()
+                .filter(|(hash, _)| **hash != KECCAK_EMPTY)
+                .map(|(hash, bytecode)| (*hash, bytecode.clone().into())),
+        ),
+        WriteStateInput::Multiple(outcome) => Either::Right(outcome.bytecodes()),
+    }
 }
 
 fn execution_account_info_to_reth(info: &ExecutionAccountInfo) -> Account {

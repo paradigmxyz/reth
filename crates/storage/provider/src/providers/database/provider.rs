@@ -10,9 +10,9 @@ use crate::{
         AccountExtReader, BlockSource, ChangeSetReader, ReceiptProvider, StageCheckpointWriter,
     },
     writer::{
-        execution_state_and_reverts_to_plain_state_and_reverts,
-        execution_state_to_plain_state_and_reverts, write_state_changes_with_order,
-        write_state_reverts_with_order, PlainStateInputOrder,
+        write_state_changes_with_order, write_state_input_bytecodes,
+        write_state_input_to_plain_state_and_reverts, write_state_reverts_with_order,
+        PlainStateInputOrder,
     },
     AccountReader, BlockBodyWriter, BlockExecutionWriter, BlockHashReader, BlockNumReader,
     BlockReader, BlockWriter, ChainStateBlockReader, ChainStateBlockWriter, DBProvider,
@@ -2452,40 +2452,13 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
             // In storage v2 with all outputs directed to static files, plain state and changesets
             // are written elsewhere. Only bytecodes need MDBX writes, so skip the expensive
             // to_plain_state_and_reverts conversion that iterates all accounts and storage.
-            match &execution_outcome {
-                WriteStateInput::Single { outcome, .. } => {
-                    self.write_bytecodes(
-                        outcome.state.code().map(|(h, b)| (*h, b.clone().into())),
-                    )?;
-                }
-                WriteStateInput::Multiple(outcome) => {
-                    self.write_bytecodes(outcome.bytecodes())?;
-                }
-            }
+            self.write_bytecodes(write_state_input_bytecodes(&execution_outcome))?;
             return Ok(());
         }
 
         let first_block = execution_outcome.first_block();
-        let (plain_state, reverts, plain_state_order, reverts_order) = match &execution_outcome {
-            WriteStateInput::Single { outcome, .. } => {
-                let (plain_state, reverts) =
-                    execution_state_to_plain_state_and_reverts(&outcome.state, is_value_known);
-                (plain_state, reverts, PlainStateInputOrder::Sorted, PlainStateInputOrder::Sorted)
-            }
-            WriteStateInput::Multiple(outcome) => {
-                let (plain_state, reverts) = execution_state_and_reverts_to_plain_state_and_reverts(
-                    outcome.execution_state_ref(),
-                    outcome.block_reverts(),
-                    is_value_known,
-                );
-                (
-                    plain_state,
-                    reverts,
-                    PlainStateInputOrder::Unsorted,
-                    PlainStateInputOrder::Unsorted,
-                )
-            }
-        };
+        let (plain_state, reverts, plain_state_order, reverts_order) =
+            write_state_input_to_plain_state_and_reverts(&execution_outcome, is_value_known);
 
         write_state_reverts_with_order(self, reverts, first_block, config, reverts_order)?;
         write_state_changes_with_order(self, plain_state, plain_state_order)?;
@@ -3859,7 +3832,10 @@ mod tests {
     use super::*;
     use crate::{
         test_utils::{blocks::BlockchainTestData, create_test_provider_factory},
-        writer::execution_state_to_plain_state,
+        writer::{
+            execution_state_and_reverts_to_plain_state_and_reverts, execution_state_to_plain_state,
+            execution_state_to_plain_state_and_reverts,
+        },
         BlockWriter,
     };
     use alloy_consensus::Header;
