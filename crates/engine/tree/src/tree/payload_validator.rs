@@ -149,7 +149,7 @@ use reth_provider::{
     StorageChangeSetReader, StorageSettingsCache,
 };
 use reth_revm::db::{states::bundle_state::BundleRetention, BundleAccount, State};
-use reth_trie::{updates::TrieUpdates, HashedPostState};
+use reth_trie::updates::TrieUpdates;
 use reth_trie_db::ChangesetCache;
 use reth_trie_parallel::root::{ParallelStateRoot, ParallelStateRootError};
 use revm_primitives::{Address, KECCAK_EMPTY};
@@ -870,11 +870,9 @@ where
                     hashed_state = maybe_new_hashed_state.unwrap_or_else(|| {
                         LazyHandle::ready(Arc::new(self.provider.hashed_post_state(&output.state)))
                     });
-                    hashed_state_validate_result =
-                        self.validator.validate_block_post_execution_with_hashed_state(
-                            &|| hashed_state.get(),
-                            &block,
-                        );
+                    hashed_state_validate_result = self
+                        .validator
+                        .validate_block_post_execution_with_hashed_state(&hashed_state, &block);
                 }
             }
             StateRootStrategy::Parallel => {
