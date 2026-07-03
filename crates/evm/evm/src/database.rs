@@ -99,7 +99,10 @@ impl<DB> DerefMut for StateProviderDatabase<DB> {
     }
 }
 
-/// Borrowed forwarding adapter for an existing [`DynDatabase`].
+/// Borrowed forwarding adapter for lending an existing [`DynDatabase`] to a short-lived EVM.
+///
+/// This keeps ownership of reusable overlays, such as batch execution caches, with the caller after
+/// the EVM is dropped.
 #[cfg(feature = "std")]
 pub struct BorrowedDynDatabase<'a, DB: DynDatabase + ?Sized> {
     db: &'a mut DB,
@@ -143,42 +146,6 @@ where
 
     fn error(&mut self, code: ErrorCode) -> AnyError {
         self.db.error(code)
-    }
-}
-
-#[cfg(feature = "std")]
-impl<DB> Database for BorrowedDynDatabase<'_, DB>
-where
-    DB: DynDatabase + ?Sized,
-{
-    type Error = AnyError;
-
-    fn get_account(&mut self, address: &Address) -> Result<Option<AccountInfo>, Self::Error> {
-        match self.db.get_account(address) {
-            Ok(account) => Ok(account),
-            Err(code) => Err(self.db.error(code)),
-        }
-    }
-
-    fn get_code_by_hash(&mut self, code_hash: &B256) -> Result<Bytecode, Self::Error> {
-        match self.db.get_code_by_hash(code_hash) {
-            Ok(bytecode) => Ok(bytecode),
-            Err(code) => Err(self.db.error(code)),
-        }
-    }
-
-    fn get_storage(&mut self, address: &Address, key: &Word) -> Result<Word, Self::Error> {
-        match self.db.get_storage(address, key) {
-            Ok(value) => Ok(value),
-            Err(code) => Err(self.db.error(code)),
-        }
-    }
-
-    fn get_block_hash(&mut self, number: &Word) -> Result<Option<B256>, Self::Error> {
-        match self.db.get_block_hash(number) {
-            Ok(hash) => Ok(hash),
-            Err(code) => Err(self.db.error(code)),
-        }
     }
 }
 
