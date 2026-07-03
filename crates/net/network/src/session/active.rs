@@ -553,6 +553,10 @@ impl<N: NetworkPrimitives> ActiveSession<N> {
             PeerMessage::SendTransactions(msg) => {
                 self.queued_outgoing.push_back(EthBroadcastMessage::Transactions(msg).into());
             }
+            PeerMessage::SendBroadcastPoolTransactions(msg) => {
+                self.queued_outgoing
+                    .push_back(EthBroadcastMessage::BroadcastPoolTransactions(msg).into());
+            }
             PeerMessage::BlockRangeUpdated(_) => {}
             PeerMessage::ReceivedTransaction(_) => {
                 unreachable!("Not emitted by network")
@@ -1169,6 +1173,7 @@ impl<N: NetworkPrimitives> OutgoingMessage<N> {
             Self::Broadcast(msg) => match msg {
                 EthBroadcastMessage::NewBlock(_) => 1,
                 EthBroadcastMessage::Transactions(txs) => txs.len(),
+                EthBroadcastMessage::BroadcastPoolTransactions(txs) => txs.len(),
             },
             Self::Raw(_) | Self::Snap(_) => 0,
         }
