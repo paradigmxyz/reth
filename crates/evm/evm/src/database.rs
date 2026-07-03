@@ -5,8 +5,9 @@ use core::ops::{Deref, DerefMut};
 #[cfg(feature = "std")]
 use evm2::{
     bytecode::Bytecode,
-    evm::{AccountInfo, Database},
+    evm::{AccountInfo, Database, DbResult, DynDatabase},
     interpreter::Word,
+    ErrorCode,
 };
 use reth_primitives_traits::Account;
 use reth_storage_api::{AccountReader, BlockHashReader, BytecodeReader, StateProvider};
@@ -95,6 +96,51 @@ impl<DB> Deref for StateProviderDatabase<DB> {
 impl<DB> DerefMut for StateProviderDatabase<DB> {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.0
+    }
+}
+
+/// Borrowed adapter for reusing a dynamic database without moving it into an EVM.
+pub struct BorrowedDatabase<'a, DB: ?Sized>(&'a mut DB);
+
+impl<'a, DB: ?Sized> BorrowedDatabase<'a, DB> {
+    /// Creates a new borrowed database adapter.
+    pub const fn new(db: &'a mut DB) -> Self {
+        Self(db)
+    }
+}
+
+impl<DB> core::fmt::Debug for BorrowedDatabase<'_, DB>
+where
+    DB: ?Sized,
+{
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("BorrowedDatabase").finish_non_exhaustive()
+    }
+}
+
+#[cfg(feature = "std")]
+impl<DB> DynDatabase for BorrowedDatabase<'_, DB>
+where
+    DB: DynDatabase + ?Sized,
+{
+    fn get_account(&mut self, address: &Address) -> DbResult<Option<AccountInfo>> {
+        self.0.get_account(address)
+    }
+
+    fn get_code_by_hash(&mut self, code_hash: &B256) -> DbResult<Bytecode> {
+        self.0.get_code_by_hash(code_hash)
+    }
+
+    fn get_storage(&mut self, address: &Address, key: &Word) -> DbResult<Word> {
+        self.0.get_storage(address, key)
+    }
+
+    fn get_block_hash(&mut self, number: &Word) -> DbResult<Option<B256>> {
+        self.0.get_block_hash(number)
+    }
+
+    fn error(&mut self, code: ErrorCode) -> evm2::AnyError {
+        self.0.error(code)
     }
 }
 

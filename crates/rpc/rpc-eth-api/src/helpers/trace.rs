@@ -19,8 +19,9 @@ use evm2_inspectors::tracing::{TracingInspector, TracingInspectorConfig};
 use futures::Future;
 use reth_errors::RethError;
 use reth_evm::{
-    database::StateProviderDatabase, execute::BlockExecutorFactory, ConfigureEvm, EvmEnvFor,
-    TxEnvFor,
+    database::{BorrowedDatabase, StateProviderDatabase},
+    execute::BlockExecutorFactory,
+    ConfigureEvm, EvmEnvFor, TxEnvFor,
 };
 use reth_primitives_traits::{BlockBody, RecoveredBlock};
 use reth_rpc_eth_types::EthApiError;
@@ -84,8 +85,10 @@ pub trait Trace: LoadState<Error: FromEvmError<Self::Evm>> + Call {
         }
 
         let result = {
-            let mut evm =
-                self.evm_config().block_executor_factory().evm_with_env(&mut *db, evm_env);
+            let mut evm = self
+                .evm_config()
+                .block_executor_factory()
+                .evm_with_env(BorrowedDatabase::new(&mut *db), evm_env);
             evm.set_inspector(BorrowedInspector(&mut inspector));
 
             let resolution = match evm.transact(tx_env.as_ref()) {
@@ -373,7 +376,7 @@ pub trait Trace: LoadState<Error: FromEvmError<Self::Evm>> + Call {
             .map_err(Self::Error::from_eth_err)?;
         let changes = self
             .evm_config()
-            .pre_block_state_changes(&mut *db, evm_env, block.number(), ctx)
+            .pre_block_state_changes(BorrowedDatabase::new(&mut *db), evm_env, block.number(), ctx)
             .map_err(|err| EthApiError::EvmCustom(err.to_string()))
             .map_err(Self::Error::from_eth_err)?;
         db.commit_source(&changes);

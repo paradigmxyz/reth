@@ -1,7 +1,7 @@
 //! Traits for execution.
 
 #[cfg(feature = "std")]
-use crate::Database;
+use crate::{database::BorrowedDatabase, Database};
 use crate::{ConfigureEvm, DynDatabase, EvmEnv, TxEnvFor};
 use alloc::{sync::Arc, vec::Vec};
 use alloy_consensus::{
@@ -729,8 +729,11 @@ where
         block: &RecoveredBlock<<Self::Primitives as NodePrimitives>::Block>,
     ) -> Result<BlockExecutionResult<<Self::Primitives as NodePrimitives>::Receipt>, Self::Error>
     {
-        let output =
-            Self::execute_block_with_database(&self.evm_config, block, &mut self.batch_database)?;
+        let output = Self::execute_block_with_database(
+            &self.evm_config,
+            block,
+            BorrowedDatabase::new(&mut self.batch_database),
+        )?;
         self.batch_database.commit_source(&output.state);
 
         let block_state = output.state.into_inner();
@@ -750,7 +753,7 @@ where
         let output = Self::execute_block_with_database_and_state_hook(
             &self.evm_config,
             block,
-            &mut self.batch_database,
+            BorrowedDatabase::new(&mut self.batch_database),
             Some(Box::new(state_hook)),
         )?;
         self.batch_database.commit_source(&output.state);
