@@ -1,33 +1,30 @@
+use reth_ethereum_primitives::ComputedTrieData;
 use reth_metrics::{metrics::Counter, Metrics};
-use reth_trie::{
-    prefix_set::TriePrefixSetsMut,
-    updates::{TrieUpdates, TrieUpdatesSorted},
-    HashedPostState, HashedPostStateSorted,
-};
+use reth_trie::{prefix_set::TriePrefixSetsMut, updates::TrieUpdates, HashedPostState};
 use std::{
     fmt,
     sync::{Arc, LazyLock, OnceLock},
 };
 use tracing::{debug_span, instrument};
 
-/// Shared handle to asynchronously populated sorted per-block trie data.
+/// Shared handle to asynchronously populated sorted per-block state commitment data.
 ///
 /// The corresponding [`DeferredTrieDataProducer`] owns the unsorted inputs and publishes the sorted
 /// data when the background task completes. Callers wait for that result instead of computing it
 /// synchronously.
 #[derive(Clone)]
-pub struct DeferredTrieData {
+pub struct DeferredStateCommitment {
     /// Shared deferred result populated by the corresponding [`DeferredTrieDataProducer`].
     value: Arc<OnceLock<ComputedTrieData>>,
 }
 
-/// Producer consumed by a spawned task to compute sorted trie data for a [`DeferredTrieData`]
-/// handle.
-#[must_use = "DeferredTrieDataProducer must be consumed with compute_and_publish to wake trie data waiters"]
+/// Producer consumed by a spawned task to compute sorted state comittment data for a
+/// [`DeferredStateCommitment`] handle.
+#[must_use = "DeferredTrieDataProducer must be consumed with compute_and_publish to wake state comittment data waiters"]
 pub struct DeferredTrieDataProducer {
     /// Shared result initialized exactly once by this producer.
     value: Arc<OnceLock<ComputedTrieData>>,
-    /// Unsorted inputs consumed when the producer computes trie data.
+    /// Unsorted inputs consumed when the producer computes state comittment data.
     inputs: PendingInputs,
 }
 
@@ -43,25 +40,14 @@ impl DeferredTrieDataProducer {
     /// Computes sorted trie data, publishes it to waiters, and returns it to the task owner.
     pub fn compute_and_publish(self) -> ComputedTrieData {
         let Self { value, inputs } = self;
-        let computed =
-            DeferredTrieData::sort(inputs.hashed_state, inputs.trie_updates, inputs.changed_paths);
+        let computed = DeferredStateCommitment::sort(
+            inputs.hashed_state,
+            inputs.trie_updates,
+            inputs.changed_paths,
+        );
         let _ = value.set(computed.clone());
         computed
     }
-}
-
-/// Sorted trie data computed for one executed block.
-///
-/// Cumulative overlays are intentionally managed by
-/// [`StateTrieOverlayManager`](crate::StateTrieOverlayManager), not by each block.
-#[derive(Clone, Debug, Default)]
-pub struct ComputedTrieData {
-    /// Sorted hashed post-state produced by execution.
-    pub hashed_state: Arc<HashedPostStateSorted>,
-    /// Sorted trie updates produced by state root computation.
-    pub trie_updates: Arc<TrieUpdatesSorted>,
-    /// Changed trie node base paths produced by state root computation.
-    pub changed_paths: Option<Arc<TriePrefixSetsMut>>,
 }
 
 /// Metrics for deferred trie computation.
@@ -88,15 +74,15 @@ struct PendingInputs {
     changed_paths: Option<Arc<TriePrefixSetsMut>>,
 }
 
-impl fmt::Debug for DeferredTrieData {
+impl fmt::Debug for DeferredStateCommitment {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("DeferredTrieData")
+        f.debug_struct("DeferredStateCommitment")
             .field("state", &if self.value.get().is_some() { "ready" } else { "pending" })
             .finish()
     }
 }
 
-impl DeferredTrieData {
+impl DeferredStateCommitment {
     /// Create a new pending handle and task that will publish the computed trie data.
     pub fn pending(
         hashed_state: Arc<HashedPostState>,
@@ -175,25 +161,6 @@ impl DeferredTrieData {
     }
 }
 
-impl ComputedTrieData {
-    /// Construct sorted trie data for one block.
-    pub const fn new(
-        hashed_state: Arc<HashedPostStateSorted>,
-        trie_updates: Arc<TrieUpdatesSorted>,
-    ) -> Self {
-        Self::new_with_changed_paths(hashed_state, trie_updates, None)
-    }
-
-    /// Construct sorted trie data with changed trie node base paths for one block.
-    pub const fn new_with_changed_paths(
-        hashed_state: Arc<HashedPostStateSorted>,
-        trie_updates: Arc<TrieUpdatesSorted>,
-        changed_paths: Option<Arc<TriePrefixSetsMut>>,
-    ) -> Self {
-        Self { hashed_state, trie_updates, changed_paths }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -205,8 +172,8 @@ mod tests {
         time::{Duration, Instant},
     };
 
-    fn empty_pending() -> (DeferredTrieData, DeferredTrieDataProducer) {
-        DeferredTrieData::pending(
+    fn empty_pending() -> (DeferredStateCommitment, DeferredTrieDataProducer) {
+        DeferredStateCommitment::pending(
             Arc::new(HashedPostState::default()),
             Arc::new(TrieUpdates::default()),
             None,
@@ -227,7 +194,7 @@ mod tests {
     #[test]
     fn ready_returns_immediately() {
         let bundle = ComputedTrieData::default();
-        let deferred = DeferredTrieData::ready(bundle.clone());
+        let deferred = DeferredStateCommitment::ready(bundle.clone());
 
         let result = deferred.wait_cloned();
 
@@ -296,7 +263,7 @@ mod tests {
                 HashedStorage::from_iter(false, [(hashed_slot, U256::from(1))]),
             )]);
 
-        let (deferred, task) = DeferredTrieData::pending(
+        let (deferred, task) = DeferredStateCommitment::pending(
             Arc::new(hashed_state),
             Arc::new(TrieUpdates::default()),
             None,
@@ -314,7 +281,7 @@ mod tests {
         for i in 0..100 {
             accounts.insert(B256::with_last_byte(i), Some(Account::default()));
         }
-        let (deferred, task) = DeferredTrieData::pending(
+        let (deferred, task) = DeferredStateCommitment::pending(
             Arc::new(HashedPostState { accounts, storages: Default::default() }),
             Arc::new(TrieUpdates::default()),
             None,

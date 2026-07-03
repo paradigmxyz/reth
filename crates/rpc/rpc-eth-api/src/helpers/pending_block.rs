@@ -8,9 +8,10 @@ use alloy_eips::eip7840::BlobParams;
 use alloy_primitives::{B256, U256};
 use alloy_rpc_types_eth::{BlockNumberOrTag, BlockOverrides};
 use futures::Future;
-use reth_chain_state::{BlockState, ComputedTrieData, ExecutedBlock};
+use reth_chain_state::{BlockState, ExecutedBlock};
 use reth_chainspec::{ChainSpecProvider, EthChainSpec, EthereumHardforks};
 use reth_errors::{BlockExecutionError, BlockValidationError, ProviderError, RethError};
+use reth_ethereum_primitives::ComputedTrieData;
 use reth_evm::{
     block::TxResult,
     execute::{BlockBuilder, BlockBuilderOutcome, BlockExecutionOutput},

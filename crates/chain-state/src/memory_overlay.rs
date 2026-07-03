@@ -52,7 +52,7 @@ impl<'a, N: NodePrimitives> MemoryOverlayStateProviderRef<'a, N> {
             let mut input = TrieInput::default();
             // Iterate from oldest to newest
             for block in self.in_memory.iter().rev() {
-                let data = block.trie_data();
+                let data = block.state_commitment();
                 input.nodes.extend_from_sorted(&data.trie_updates);
                 input.state.extend_from_sorted(&data.hashed_state);
             }

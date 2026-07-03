@@ -1,6 +1,6 @@
 use crate::{
     in_memory::ExecutedBlock, CanonStateNotification, CanonStateNotifications,
-    CanonStateSubscriptions, ComputedTrieData,
+    CanonStateSubscriptions,
 };
 use alloy_consensus::{Header, SignableTransaction, TxEip1559, TxReceipt, EMPTY_ROOT_HASH};
 use alloy_eips::eip1559::{ETHEREUM_BLOCK_GAS_LIMIT_30M, INITIAL_BASE_FEE};
@@ -11,7 +11,7 @@ use core::marker::PhantomData;
 use rand::Rng;
 use reth_chainspec::{ChainSpec, EthereumHardfork, MIN_TRANSACTION_GAS};
 use reth_ethereum_primitives::{
-    Block, BlockBody, EthPrimitives, Receipt, Transaction, TransactionSigned,
+    Block, BlockBody, ComputedTrieData, EthPrimitives, Receipt, Transaction, TransactionSigned,
 };
 use reth_execution_types::{BlockExecutionOutput, BlockExecutionResult, Chain, ExecutionOutcome};
 use reth_primitives_traits::{

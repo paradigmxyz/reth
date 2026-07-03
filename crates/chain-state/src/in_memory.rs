@@ -2,14 +2,14 @@
 
 use crate::{
     CanonStateNotification, CanonStateNotificationSender, CanonStateNotifications,
-    ChainInfoTracker, ComputedTrieData, DeferredTrieData, MemoryOverlayStateProvider,
+    ChainInfoTracker, DeferredStateCommitment, MemoryOverlayStateProvider,
 };
 use alloy_consensus::{transaction::TransactionMeta, BlockHeader};
 use alloy_eips::{BlockHashOrNumber, BlockNumHash};
 use alloy_primitives::{map::B256Map, BlockNumber, TxHash, B256};
 use parking_lot::RwLock;
 use reth_chainspec::ChainInfo;
-use reth_ethereum_primitives::EthPrimitives;
+use reth_ethereum_primitives::{ComputedTrieData, EthPrimitives};
 use reth_execution_types::{BlockExecutionOutput, BlockExecutionResult, Chain, ExecutionOutcome};
 use reth_metrics::{metrics::Gauge, Metrics};
 use reth_primitives_traits::{
@@ -752,11 +752,11 @@ pub struct ExecutedBlock<N: NodePrimitives = EthPrimitives> {
     pub recovered_block: Arc<RecoveredBlock<N::Block>>,
     /// Block's execution outcome.
     pub execution_output: Arc<BlockExecutionOutput<N::Receipt>>,
-    /// Deferred trie data produced by execution.
+    /// Deferred state commitment data produced by execution.
     ///
-    /// This allows deferring the computation of the trie data which can be expensive.
+    /// This allows deferring the computation of the state commitment data which can be expensive.
     /// The data can be populated asynchronously after the block was validated.
-    pub trie_data: DeferredTrieData,
+    pub state_commitment: DeferredStateCommitment,
 }
 
 impl<N: NodePrimitives> Default for ExecutedBlock<N> {
@@ -772,51 +772,56 @@ impl<N: NodePrimitives> Default for ExecutedBlock<N> {
                 },
                 state: Default::default(),
             }),
-            trie_data: DeferredTrieData::ready(ComputedTrieData::default()),
+            state_commitment: DeferredStateCommitment::ready(Default::default()),
         }
     }
 }
 
 impl<N: NodePrimitives> PartialEq for ExecutedBlock<N> {
     fn eq(&self, other: &Self) -> bool {
-        // Trie data is computed asynchronously and doesn't define block identity.
+        // State commitment data is computed asynchronously and doesn't define block identity.
         self.recovered_block == other.recovered_block &&
             self.execution_output == other.execution_output
     }
 }
 
 impl<N: NodePrimitives> ExecutedBlock<N> {
-    /// Create a new [`ExecutedBlock`] with already-computed trie data.
+    /// Create a new [`ExecutedBlock`] with already-computed state commitment data.
     ///
-    /// Use this constructor when trie data is available immediately (e.g., sequencers,
+    /// Use this constructor when state commitment data is available immediately (e.g., sequencers,
     /// payload builders). This is the safe default path.
     pub fn new(
         recovered_block: Arc<RecoveredBlock<N::Block>>,
         execution_output: Arc<BlockExecutionOutput<N::Receipt>>,
-        trie_data: ComputedTrieData,
+        state_commitment: ComputedTrieData,
     ) -> Self {
-        Self { recovered_block, execution_output, trie_data: DeferredTrieData::ready(trie_data) }
+        Self {
+            recovered_block,
+            execution_output,
+            state_commitment: DeferredStateCommitment::ready(state_commitment),
+        }
     }
 
-    /// Create a new [`ExecutedBlock`] with deferred trie data.
+    /// Create a new [`ExecutedBlock`] with deferred state commitment data.
     ///
-    /// This is useful if the trie data is populated somewhere else, e.g. asynchronously
+    /// This is useful if the state commitment data is populated somewhere else, e.g. asynchronously
     /// after the block was validated.
     ///
     /// The [`DeferredTrieData`] handle allows expensive trie operations (sorting hashed state and
     /// trie updates) to be performed outside the critical validation path by a background task.
     /// This can improve latency for time-sensitive operations like block validation.
     ///
-    /// If the data hasn't been populated when [`Self::trie_data()`] is called, the caller waits
-    /// for the background task to publish it.
+    /// If the data hasn't been populated when [`Self::state_commitment()`] is called, the caller
+    /// waits for the background task to publish it.
     ///
-    /// Use [`Self::new()`] instead when trie data is already computed and available immediately.
-    pub const fn with_deferred_trie_data(
+    /// Use [`Self::new()`] instead when state commitment data is already computed and available
+    /// immediately.
+    pub const fn with_deferred_state_commitment(
         recovered_block: Arc<RecoveredBlock<N::Block>>,
         execution_output: Arc<BlockExecutionOutput<N::Receipt>>,
-        trie_data: DeferredTrieData,
+        state_commitment: DeferredStateCommitment,
     ) -> Self {
-        Self { recovered_block, execution_output, trie_data }
+        Self { recovered_block, execution_output, state_commitment }
     }
 
     /// Returns a reference to an inner [`SealedBlock`]
@@ -837,40 +842,46 @@ impl<N: NodePrimitives> ExecutedBlock<N> {
         &self.execution_output
     }
 
-    /// Returns the trie data, waiting for the background task if not already cached.
+    /// Returns the state commitment data, waiting for the background task if not already cached.
     ///
     /// Uses `OnceLock::get_or_init` internally:
     /// - If already computed: returns cached result immediately
     /// - If not computed: first caller waits for the publishing task, others wait for that result
     #[inline]
-    #[tracing::instrument(level = "debug", target = "engine::tree", name = "trie_data", skip_all)]
-    pub fn trie_data(&self) -> ComputedTrieData {
-        self.trie_data.wait_cloned()
+    #[tracing::instrument(
+        level = "debug",
+        target = "engine::tree",
+        name = "state_commitment",
+        skip_all
+    )]
+    pub fn state_commitment(&self) -> ComputedTrieData {
+        self.state_commitment.wait_cloned()
     }
 
-    /// Returns a clone of the deferred trie data handle.
+    /// Returns a clone of the deferred state commitment handle.
     ///
     /// A handle is a lightweight reference that can be passed to descendants without
-    /// forcing trie data to be observed immediately. The actual work runs in the background task.
+    /// forcing state commitment data to be observed immediately. The actual work runs in the
+    /// background task.
     #[inline]
-    pub fn trie_data_handle(&self) -> DeferredTrieData {
-        self.trie_data.clone()
+    pub fn state_commitment_handle(&self) -> DeferredStateCommitment {
+        self.state_commitment.clone()
     }
 
     /// Returns the hashed state result of the execution outcome.
     ///
-    /// May wait for trie data if the deferred task hasn't completed.
+    /// May wait for state commitment data if the deferred task hasn't completed.
     #[inline]
     pub fn hashed_state(&self) -> Arc<HashedPostStateSorted> {
-        self.trie_data().hashed_state
+        self.state_commitment().hashed_state
     }
 
     /// Returns the trie updates resulting from the execution outcome.
     ///
-    /// May wait for trie data if the deferred task hasn't completed.
+    /// May wait for state commitment data if the deferred task hasn't completed.
     #[inline]
     pub fn trie_updates(&self) -> Arc<TrieUpdatesSorted> {
-        self.trie_data().trie_updates
+        self.state_commitment().trie_updates
     }
 
     /// Returns a [`BlockNumber`] of the block.
@@ -932,7 +943,7 @@ impl<N: NodePrimitives<SignedTx: SignedTransaction>> NewCanonicalChain<N> {
         match blocks {
             [] => Chain::default(),
             [first, rest @ ..] => {
-                let trie_data_handle = first.trie_data_handle();
+                let trie_data_handle = first.state_commitment_handle();
                 let mut chain = Chain::from_block(
                     Arc::clone(&first.recovered_block),
                     ExecutionOutcome::from((
@@ -948,7 +959,7 @@ impl<N: NodePrimitives<SignedTx: SignedTransaction>> NewCanonicalChain<N> {
                     }),
                 );
                 for exec in rest {
-                    let trie_data_handle = exec.trie_data_handle();
+                    let trie_data_handle = exec.state_commitment_handle();
                     chain.append_block(
                         Arc::clone(&exec.recovered_block),
                         ExecutionOutcome::from((
@@ -1542,7 +1553,7 @@ mod tests {
         // Test commit notification
         let chain_commit = NewCanonicalChain::Commit { new: vec![block0.clone(), block1.clone()] };
 
-        // Build expected trie data map
+        // Build expected state commitment data map
         let mut expected_trie_data = BTreeMap::new();
         expected_trie_data
             .insert(0, LazyTrieData::ready(block0.hashed_state(), block0.trie_updates()));
@@ -1574,12 +1585,12 @@ mod tests {
             old: vec![block1.clone(), block2.clone()],
         };
 
-        // Build expected trie data for old chain
+        // Build expected state commitment data for old chain
         let mut old_trie_data = BTreeMap::new();
         old_trie_data.insert(1, LazyTrieData::ready(block1.hashed_state(), block1.trie_updates()));
         old_trie_data.insert(2, LazyTrieData::ready(block2.hashed_state(), block2.trie_updates()));
 
-        // Build expected trie data for new chain
+        // Build expected state commitment data for new chain
         let mut new_trie_data = BTreeMap::new();
         new_trie_data
             .insert(1, LazyTrieData::ready(block1a.hashed_state(), block1a.trie_updates()));

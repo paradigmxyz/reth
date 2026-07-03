@@ -20,7 +20,7 @@ use alloy_rpc_types_engine::{
 };
 use assert_matches::assert_matches;
 use reth_chain_state::{
-    test_utils::TestBlockBuilder, BlockState, ComputedTrieData, DeferredTrieData,
+    test_utils::TestBlockBuilder, BlockState, ComputedTrieData, DeferredStateCommitment,
     StateTrieOverlayManager,
 };
 use reth_chainspec::{ChainSpec, HOLESKY, MAINNET};
@@ -49,12 +49,12 @@ fn with_changed_paths(
     block: ExecutedBlock<EthPrimitives>,
     changed_paths: TriePrefixSetsMut,
 ) -> ExecutedBlock<EthPrimitives> {
-    let mut trie_data = block.trie_data();
+    let mut trie_data = block.state_commitment();
     trie_data.changed_paths = Some(Arc::new(changed_paths));
-    ExecutedBlock::with_deferred_trie_data(
+    ExecutedBlock::with_deferred_state_commitment(
         block.recovered_block,
         block.execution_output,
-        DeferredTrieData::ready(trie_data),
+        DeferredStateCommitment::ready(trie_data),
     )
 }
 
@@ -80,7 +80,7 @@ fn trie_changed_paths(
 fn merged_changed_paths(blocks: &[ExecutedBlock<EthPrimitives>]) -> TriePrefixSetsMut {
     let mut merged = TriePrefixSetsMut::default();
     for block in blocks {
-        let trie_data = block.trie_data();
+        let trie_data = block.state_commitment();
         let changed_paths = trie_data.changed_paths.as_deref().expect("changed paths are present");
         merged.extend_ref(changed_paths);
     }

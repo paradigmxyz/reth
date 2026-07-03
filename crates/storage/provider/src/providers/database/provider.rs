@@ -33,7 +33,7 @@ use alloy_primitives::{
 use itertools::Itertools;
 use parking_lot::RwLock;
 use rayon::slice::ParallelSliceMut;
-use reth_chain_state::{ComputedTrieData, ExecutedBlock};
+use reth_chain_state::ExecutedBlock;
 use reth_chainspec::{ChainInfo, ChainSpecProvider, EthChainSpec};
 use reth_db_api::{
     cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO, DbDupCursorRW},
@@ -727,7 +727,7 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
                 // Blocks are oldest-to-newest, merge_batch expects newest-to-oldest.
                 let start = Instant::now();
                 let merged_hashed_state = HashedPostStateSorted::merge_batch(
-                    blocks.iter().rev().map(|b| b.trie_data().hashed_state),
+                    blocks.iter().rev().map(|b| b.state_commitment().hashed_state),
                 );
                 if !merged_hashed_state.is_empty() {
                     self.write_hashed_state(&merged_hashed_state)?;
@@ -3531,7 +3531,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> BlockWriter
                 },
                 state: Default::default(),
             }),
-            ComputedTrieData::default(),
+            Default::default(),
         );
 
         // Delegate to save_blocks with BlocksOnly mode (skips receipts/state/trie)

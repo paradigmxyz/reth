@@ -573,7 +573,7 @@ fn compute_overlay<N: NodePrimitives>(
 
     let overlay = match input {
         ComputeOverlayInput::ExtendCached { block, parent_input } => {
-            let trie_data = block.trie_data();
+            let trie_data = block.state_commitment();
 
             trace!(
                 target: "chain_state::state_trie_overlay",
@@ -605,7 +605,7 @@ fn compute_overlay<N: NodePrimitives>(
 }
 
 fn merge_blocks<N: NodePrimitives>(blocks: Vec<ExecutedBlock<N>>) -> TrieInputSorted {
-    let trie_data = blocks.iter().map(ExecutedBlock::trie_data).collect::<Vec<_>>();
+    let trie_data = blocks.iter().map(ExecutedBlock::state_commitment).collect::<Vec<_>>();
 
     #[cfg(feature = "rayon")]
     let (nodes, state) = rayon::join(

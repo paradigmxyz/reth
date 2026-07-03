@@ -13,8 +13,8 @@ use alloy_rpc_types_engine::{
 };
 use error::{InsertBlockError, InsertBlockFatalError, InsertBlockValidationError};
 use reth_chain_state::{
-    CanonicalInMemoryState, ComputedTrieData, ExecutedBlock, ExecutionTimingStats,
-    MemoryOverlayStateProvider, NewCanonicalChain, StateTrieOverlayManager,
+    CanonicalInMemoryState, ExecutedBlock, ExecutionTimingStats, MemoryOverlayStateProvider,
+    NewCanonicalChain, StateTrieOverlayManager,
 };
 use reth_consensus::{Consensus, FullConsensus};
 use reth_engine_primitives::{
@@ -22,6 +22,7 @@ use reth_engine_primitives::{
     ForkchoiceStateTracker, NewPayloadTimings, OnForkChoiceUpdated, SlowBlockInfo,
 };
 use reth_errors::{ConsensusError, ProviderResult};
+use reth_ethereum_primitives::ComputedTrieData;
 use reth_evm::ConfigureEvm;
 use reth_payload_builder::{BuildNewPayload, PayloadBuilderHandle};
 use reth_payload_primitives::{BuiltPayload, NewPayloadError, PayloadTypes};
@@ -2159,7 +2160,7 @@ where
 
         let mut retained_paths = TriePrefixSetsMut::default();
         for block in self.state.tree_state.blocks_by_hash.values() {
-            let trie_data = block.trie_data();
+            let trie_data = block.state_commitment();
             let Some(changed_paths) = trie_data.changed_paths.as_deref() else {
                 warn!(
                     target: "engine::tree",
