@@ -12,8 +12,8 @@ use alloy_rpc_types::engine::ExecutionData;
 use core::{convert::Infallible, fmt};
 use reth_ethereum_primitives::EthPrimitives;
 use reth_evm::{
-    ConfigureEngineEvm, ConfigureEvm, Database, EvmEnvFor, ExecutableTxIterator, ExecutionCtxFor,
-    ExecutionState, NextBlockEnvAttributes,
+    ConfigureEngineEvm, ConfigureEvm, DynDatabase, EvmEnvFor, ExecutableTxIterator,
+    ExecutionCtxFor, ExecutionState, NextBlockEnvAttributes,
 };
 use reth_evm_ethereum::EthEvmConfig;
 use reth_primitives_traits::{BlockTy, HeaderTy, SealedBlock, SealedHeader, TxTy};
@@ -110,8 +110,7 @@ where
     ) -> Result<ExecutionState, Box<dyn core::error::Error + Send + Sync>>
     where
         Self: 'a,
-        DB: Database + 'a,
-        DB::Error: core::error::Error + Send + Sync + 'static,
+        DB: DynDatabase + 'a,
     {
         self.inner.pre_block_state_changes(db, evm_env, block_number, ctx)
     }

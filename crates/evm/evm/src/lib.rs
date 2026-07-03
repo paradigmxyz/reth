@@ -454,7 +454,7 @@ pub trait ConfigureEvm: Clone + Debug + Send + Sync + Unpin {
     ) -> Result<ExecutionState, Box<dyn Error + Send + Sync>>
     where
         Self: 'a,
-        DB: Database + 'a;
+        DB: DynDatabase + 'a;
 }
 
 /// JIT backend controls exposed by an EVM configuration.

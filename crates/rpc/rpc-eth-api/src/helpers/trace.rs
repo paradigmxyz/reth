@@ -19,6 +19,7 @@ use futures::Future;
 use reth_errors::RethError;
 use reth_evm::{
     database::{BorrowedDynDatabase, StateProviderDatabase},
+    execute::BlockExecutorFactory,
     ConfigureEvm, EvmEnvFor, TxEnvFor,
 };
 use reth_primitives_traits::{BlockBody, RecoveredBlock};
@@ -74,11 +75,11 @@ pub trait Trace: LoadState<Error: FromEvmError<Self::Evm>> + Call {
         }
 
         let result = {
-            let mut evm = self.evm_config().evm_with_env_and_inspector(
-                BorrowedDynDatabase::new(db),
-                evm_env,
-                BorrowedInspector(&mut inspector),
-            );
+            let mut evm = self
+                .evm_config()
+                .block_executor_factory()
+                .evm_with_env(BorrowedDynDatabase::new(db), evm_env);
+            evm.set_inspector(BorrowedInspector(&mut inspector));
 
             let resolution = match evm.transact(tx_env.as_ref()) {
                 Ok(executed) => {

@@ -1,8 +1,6 @@
 //! Helpers for testing.
 
-#[cfg(feature = "std")]
-use crate::Database;
-use crate::{ConfigureEvm, EvmEnvFor};
+use crate::{ConfigureEvm, DynDatabase, EvmEnvFor};
 #[cfg(feature = "std")]
 use alloc::boxed::Box;
 use reth_primitives_traits::{BlockTy, HeaderTy, SealedBlock, SealedHeader};
@@ -89,7 +87,7 @@ where
     ) -> Result<crate::ExecutionState, Box<dyn core::error::Error + Send + Sync>>
     where
         Self: 'a,
-        DB: Database + 'a,
+        DB: DynDatabase + 'a,
     {
         self.inner().pre_block_state_changes(db, evm_env, block_number, ctx)
     }

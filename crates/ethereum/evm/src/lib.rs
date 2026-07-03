@@ -435,9 +435,9 @@ where
     ) -> Result<ExecutionState, alloc::boxed::Box<dyn core::error::Error + Send + Sync>>
     where
         Self: 'a,
-        DB: evm2::evm::Database + 'a,
+        DB: evm2::evm::DynDatabase + 'a,
     {
-        let mut evm = self.evm_with_env(db, env);
+        let mut evm = self.block_executor_factory().evm_with_env(db, env);
         crate::execution::apply_pre_execution_system_calls(
             &mut evm,
             block_number,
