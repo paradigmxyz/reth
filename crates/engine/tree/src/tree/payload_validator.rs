@@ -36,7 +36,7 @@
 //! | proof workers | `StateRootTask` setup | fetch trie proofs for sparse trie updates | consumed by the sparse trie task |
 //! | `sparse-trie` | `StateRootTask` setup | apply execution or BAL updates and compute the state root | awaited by `await_state_root_with_timeout` |
 //! | `receipt-root` | execution start | compute receipt root and logs bloom incrementally | awaited before post-execution consensus |
-//! | `hash-post-state` | after execution | hash changed accounts and storage from `BundleState` | awaited by post-execution validation and root computation |
+//! | `hash-post-state` | after execution | hash changed accounts and storage from execution output | awaited by post-execution validation and root computation |
 //! | `serial-root` | sparse trie timeout fallback | race serial state-root computation against the sparse trie task | polled by `await_state_root_with_timeout` |
 //! | deferred trie task | after root verification | sort trie data | not awaited by the validation hot path |
 //!

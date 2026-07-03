@@ -1012,8 +1012,8 @@ where
     }
 }
 
-/// A helper trait marking a 'static type that can be converted into an [`ExecutableTxParts`] for
-/// block executor.
+/// A helper trait marking a type that can be converted into an [`ExecutableTxParts`] for block
+/// executor.
 pub trait ExecutableTxFor<Evm: ConfigureEvm>:
     ExecutableTxParts<TxEnvFor<Evm>, TxTy<Evm::Primitives>> + RecoveredTx<TxTy<Evm::Primitives>>
 {
