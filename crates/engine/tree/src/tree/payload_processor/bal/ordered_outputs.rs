@@ -5,6 +5,7 @@ use super::{
     BalExecutionError,
 };
 use crossbeam_channel::Receiver;
+use std::collections::VecDeque;
 
 #[derive(Debug, thiserror::Error)]
 pub(super) enum OrderedWorkerOutputError {
@@ -47,7 +48,8 @@ pub(super) fn ordered_worker_outputs<R>(
 
 struct OrderedWorkerOutputs<'a, R> {
     result_rx: &'a Receiver<Result<BalWorkerOutput<R>, BalWorkerError>>,
-    pending: Vec<Option<BalWorkerOutput<R>>>,
+    pending: VecDeque<Option<BalWorkerOutput<R>>>,
+    pending_base: usize,
     next: usize,
     total: usize,
     failed: bool,
@@ -58,13 +60,46 @@ impl<'a, R> OrderedWorkerOutputs<'a, R> {
         result_rx: &'a Receiver<Result<BalWorkerOutput<R>, BalWorkerError>>,
         total: usize,
     ) -> Self {
-        Self {
-            result_rx,
-            pending: (0..total).map(|_| None).collect(),
-            next: 0,
-            total,
-            failed: false,
+        Self { result_rx, pending: VecDeque::new(), pending_base: 0, next: 0, total, failed: false }
+    }
+
+    fn pop_ready(&mut self) -> Option<BalWorkerOutput<R>> {
+        if self.pending.is_empty() || self.next < self.pending_base {
+            return None;
         }
+
+        let offset = self.next - self.pending_base;
+        if offset >= self.pending.len() {
+            return None;
+        }
+
+        for _ in 0..offset {
+            debug_assert!(self.pending.pop_front().is_some_and(|output| output.is_none()));
+            self.pending_base += 1;
+        }
+
+        let output = self.pending.front_mut()?.take()?;
+        self.pending.pop_front();
+        self.pending_base += 1;
+        Some(output)
+    }
+
+    fn push_pending(&mut self, output: BalWorkerOutput<R>) {
+        let index = output.index;
+        if self.pending.is_empty() {
+            self.pending_base = self.next;
+        }
+
+        let offset = index - self.pending_base;
+        if offset >= self.pending.len() {
+            self.pending.resize_with(offset + 1, || None);
+        }
+
+        assert!(
+            self.pending[offset].is_none(),
+            "BAL worker returned duplicate transaction index {index}"
+        );
+        self.pending[offset] = Some(output);
     }
 }
 
@@ -77,7 +112,7 @@ impl<R> Iterator for OrderedWorkerOutputs<'_, R> {
         }
 
         loop {
-            if let Some(output) = self.pending[self.next].take() {
+            if let Some(output) = self.pop_ready() {
                 self.next += 1;
                 return Some(Ok(output));
             }
@@ -100,12 +135,14 @@ impl<R> Iterator for OrderedWorkerOutputs<'_, R> {
                 "BAL worker returned out-of-bounds transaction index {index}; total={}",
                 self.total
             );
-            assert!(
-                index >= self.next && self.pending[index].is_none(),
-                "BAL worker returned duplicate transaction index {index}",
-            );
+            assert!(index >= self.next, "BAL worker returned duplicate transaction index {index}",);
 
-            self.pending[index] = Some(output);
+            if index == self.next {
+                self.next += 1;
+                return Some(Ok(output));
+            }
+
+            self.push_pending(output);
         }
     }
 }
