@@ -18,7 +18,9 @@ pub use reth_execution_errors::{
     InvalidTxError,
 };
 pub use reth_execution_types::{BlockExecutionOutput, ExecutionOutcome};
-use reth_execution_types::{BlockExecutionResult, ExecutionOutcomeState, HashedPostState};
+use reth_execution_types::{
+    BlockExecutionResult, ExecutionOutcomeState, ExecutionStateChangeSink, HashedPostState,
+};
 #[cfg(feature = "std")]
 use reth_primitives_traits::BlockTy;
 use reth_primitives_traits::{
@@ -213,6 +215,23 @@ pub trait BlockExecutorFactory {
         DB: Database + 'a,
     {
         self.evm_with_env(Db::new(db), evm_env)
+    }
+
+    /// Executes a transaction and discards its writes while streaming the observed state changes
+    /// into `sink`.
+    fn execute_transaction_and_discard<S>(
+        &self,
+        _evm: &mut Self::Evm<'_>,
+        _transaction: &Self::Transaction,
+        _sink: &mut S,
+    ) -> Result<(), BlockExecutionError>
+    where
+        S: ExecutionStateChangeSink,
+        S::Error: Debug,
+    {
+        Err(BlockExecutionError::msg(
+            "block executor factory does not support discarded transaction execution",
+        ))
     }
 }
 

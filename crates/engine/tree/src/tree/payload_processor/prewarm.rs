@@ -32,7 +32,7 @@ use metrics::{Counter, Gauge, Histogram};
 #[cfg(any())]
 use rayon::prelude::*;
 use reth_evm::{
-    database::StateProviderDatabase, ConfigureEvm, EvmEnv, EvmFor, EvmTransactionEnv,
+    database::StateProviderDatabase, BlockExecutorFactory, ConfigureEvm, EvmEnv, EvmFor,
     ExecutableTxFor,
 };
 use reth_execution_types::{
@@ -141,7 +141,6 @@ where
         to_sparse_trie_task: Option<CrossbeamSender<StateRootMessage>>,
     ) where
         Tx: ExecutableTxFor<Evm> + Send + 'static,
-        reth_evm::TxEnvFor<Evm>: AsRef<EvmTransactionEnv>,
     {
         let executor = self.executor.clone();
         let ctx = self.ctx.clone();
@@ -222,7 +221,6 @@ where
         to_sparse_trie_task: Option<&CrossbeamSender<StateRootMessage>>,
     ) where
         Tx: ExecutableTxFor<Evm>,
-        reth_evm::TxEnvFor<Evm>: AsRef<EvmTransactionEnv>,
     {
         WorkerPool::with_worker_mut(|worker| {
             let Some(evm) =
@@ -247,20 +245,12 @@ where
             // task scheduling would otherwise make later prewarm reads observe non-canonical state.
             let mut proof_targets = PrewarmProofTargetsSink::default();
 
-            match evm.transact(tx_env.as_ref()) {
-                Ok(executed) => {
-                    if let Some(code) = executed.result().error_code {
-                        let _ = executed.discard();
-                        trace!(
-                            target: "engine::tree::payload_processor::prewarm",
-                            ?code,
-                            "Database error when executing prewarm transaction",
-                        );
-                        ctx.metrics.transaction_errors.increment(1);
-                        return;
-                    }
-                    let Ok(_result) = executed.discard_with(&mut proof_targets);
-                }
+            match ctx.evm_config.block_executor_factory().execute_transaction_and_discard(
+                evm,
+                &tx_env,
+                &mut proof_targets,
+            ) {
+                Ok(()) => {}
                 Err(err) => {
                     trace!(
                         target: "engine::tree::payload_processor::prewarm",
@@ -501,7 +491,6 @@ where
     pub fn run<Tx>(self, mode: PrewarmMode<Tx>, actions_tx: Sender<PrewarmTaskEvent<N::Receipt>>)
     where
         Tx: ExecutableTxFor<Evm> + Send + 'static,
-        reth_evm::TxEnvFor<Evm>: AsRef<EvmTransactionEnv>,
     {
         // Spawn execution tasks based on mode
         match mode {

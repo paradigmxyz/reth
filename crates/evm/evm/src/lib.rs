@@ -28,9 +28,6 @@ pub use evm2::{
     evm::{Database, DynDatabase},
 };
 
-/// Transaction type consumed by the base EVM host.
-pub type EvmTransactionEnv = <evm2::BaseEvmTypes as evm2::EvmTypesHost>::Tx;
-
 /// Cached database adapters for payload building.
 pub mod cached;
 /// Cancellation markers for EVM execution work.
