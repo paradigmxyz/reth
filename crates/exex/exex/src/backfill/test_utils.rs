@@ -201,20 +201,23 @@ where
         Receipt = reth_ethereum_primitives::Receipt,
     >,
 {
-    let outputs = blocks_and_execution_outputs(provider_factory, chain_spec, key_pair)?;
-    let first_block = outputs.first().map(|(block, _)| block.number()).unwrap_or_default();
-    let mut blocks = Vec::with_capacity(outputs.len());
-    let mut states = Vec::with_capacity(outputs.len());
-    let mut results = Vec::with_capacity(outputs.len());
+    let (block1, block2) = blocks(chain_spec.clone(), key_pair)?;
 
-    for (block, output) in outputs {
-        let BlockExecutionOutput { result, state, .. } = output;
-        blocks.push(block);
-        states.push(state.into_inner());
-        results.push(result);
-    }
+    let provider = provider_factory.provider()?;
+    let evm_config = EthEvmConfig::new(chain_spec);
+    let executor =
+        evm_config.batch_executor(StateProviderDatabase::new(LatestStateProvider::new(provider)));
 
-    let execution_outcome = ExecutionOutcome::from_block_states(first_block, states, results);
+    let execution_outcome = executor.execute_batch([&block1, &block2])?;
 
-    Ok((blocks, execution_outcome))
+    let hashed_state = execution_outcome.hash_state_slow::<KeccakKeyHasher>().into_sorted();
+    let provider_rw = provider_factory.provider_rw()?;
+    provider_rw.append_blocks_with_state(
+        vec![block1.clone(), block2.clone()],
+        &execution_outcome,
+        hashed_state,
+    )?;
+    provider_rw.commit()?;
+
+    Ok((vec![block1, block2], execution_outcome))
 }
