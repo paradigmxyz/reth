@@ -1009,6 +1009,7 @@ where
                 "convert_and_validate",
             )
             .entered();
+            let payload_derived_transaction_root = matches!(input, BlockOrPayload::Payload(_));
             let block = match input {
                 BlockOrPayload::Block(block) => block,
                 BlockOrPayload::Payload(payload) => {
@@ -1030,8 +1031,12 @@ where
             }
             drop(_enter);
 
-            if let Err(e) =
-                consensus.validate_block_pre_execution_with_tx_root(&block, None)
+            // Payload conversion builds the header transaction root from the payload transactions
+            // before checking the resulting block hash. Direct block inputs still recompute it.
+            let transaction_root = payload_derived_transaction_root
+                .then(|| block.header().transactions_root());
+            if let Err(e) = consensus
+                .validate_block_pre_execution_with_tx_root(&block, transaction_root)
             {
                 error!(target: "engine::tree::payload_validator", ?block, "Failed to validate block {}: {e}", block.hash());
                 return Err(InsertBlockError::consensus_error(e, block).into())
