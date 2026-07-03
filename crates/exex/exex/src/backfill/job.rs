@@ -1,4 +1,4 @@
-use crate::StreamBackfillJob;
+use crate::{backfill::stream::SingleBlockStreamItem, StreamBackfillJob};
 use reth_evm::{database::StateProviderDatabase, execute::Executor, ConfigureEvm};
 use std::{
     collections::BTreeMap,
@@ -8,7 +8,6 @@ use std::{
 
 use alloy_consensus::BlockHeader;
 use alloy_primitives::BlockNumber;
-use reth_ethereum_primitives::Receipt;
 use reth_evm::execute::{BlockExecutionError, BlockExecutionOutput};
 use reth_node_api::{Block as _, BlockBody as _, NodePrimitives};
 use reth_primitives_traits::{format_gas_throughput, RecoveredBlock, SignedTransaction};
@@ -186,13 +185,7 @@ where
     P: HeaderProvider + BlockReader + StateProviderFactory,
 {
     /// Converts the single block backfill job into a stream.
-    pub fn into_stream(
-        self,
-    ) -> StreamBackfillJob<
-        E,
-        P,
-        (RecoveredBlock<reth_ethereum_primitives::Block>, BlockExecutionOutput<Receipt>),
-    > {
+    pub fn into_stream(self) -> StreamBackfillJob<E, P, SingleBlockStreamItem<E::Primitives>> {
         self.into()
     }
 

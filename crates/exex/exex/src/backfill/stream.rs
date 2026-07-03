@@ -5,7 +5,6 @@ use futures::{
     stream::{FuturesOrdered, Stream},
     StreamExt,
 };
-use reth_ethereum_primitives::EthPrimitives;
 use reth_evm::{
     execute::{BlockExecutionError, BlockExecutionOutput},
     ConfigureEvm,
@@ -41,11 +40,11 @@ struct BackfillTaskOutput<T> {
 /// Ordered queue of [`JoinHandle`]s that yield [`BackfillTaskOutput`]s.
 type BackfillTasks<T> = FuturesOrdered<JoinHandle<BackfillTaskOutput<T>>>;
 
-type SingleBlockStreamItem<N = EthPrimitives> = (
+pub(super) type SingleBlockStreamItem<N> = (
     RecoveredBlock<<N as NodePrimitives>::Block>,
     BlockExecutionOutput<<N as NodePrimitives>::Receipt>,
 );
-type BatchBlockStreamItem<N = EthPrimitives> = Chain<N>;
+type BatchBlockStreamItem<N> = Chain<N>;
 
 /// Stream for processing backfill jobs asynchronously.
 ///
@@ -200,7 +199,11 @@ where
     }
 }
 
-impl<E, P> From<SingleBlockBackfillJob<E, P>> for StreamBackfillJob<E, P, SingleBlockStreamItem> {
+impl<E, P> From<SingleBlockBackfillJob<E, P>>
+    for StreamBackfillJob<E, P, SingleBlockStreamItem<E::Primitives>>
+where
+    E: ConfigureEvm,
+{
     fn from(job: SingleBlockBackfillJob<E, P>) -> Self {
         Self {
             evm_config: job.evm_config,
