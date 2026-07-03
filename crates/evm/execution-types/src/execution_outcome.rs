@@ -59,7 +59,7 @@ impl ExecutionOutcomeState {
     }
 
     /// Returns the accumulated state parts.
-    pub fn into_parts(self) -> (ExecutionState, Vec<ExecutionState>, Vec<BlockReverts>) {
+    pub(crate) fn into_parts(self) -> (ExecutionState, Vec<ExecutionState>, Vec<BlockReverts>) {
         (self.state, self.block_states, self.block_reverts)
     }
 }
