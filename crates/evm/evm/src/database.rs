@@ -124,6 +124,30 @@ impl<DB: DynDatabase + ?Sized> core::fmt::Debug for BorrowedDynDatabase<'_, DB> 
 }
 
 #[cfg(feature = "std")]
+impl<DB> Database for BorrowedDynDatabase<'_, DB>
+where
+    DB: DynDatabase + ?Sized,
+{
+    type Error = AnyError;
+
+    fn get_account(&mut self, address: &Address) -> Result<Option<AccountInfo>, Self::Error> {
+        self.db.get_account(address).map_err(|code| self.db.error(code))
+    }
+
+    fn get_code_by_hash(&mut self, code_hash: &B256) -> Result<Bytecode, Self::Error> {
+        self.db.get_code_by_hash(code_hash).map_err(|code| self.db.error(code))
+    }
+
+    fn get_storage(&mut self, address: &Address, key: &Word) -> Result<Word, Self::Error> {
+        self.db.get_storage(address, key).map_err(|code| self.db.error(code))
+    }
+
+    fn get_block_hash(&mut self, number: &Word) -> Result<Option<B256>, Self::Error> {
+        self.db.get_block_hash(number).map_err(|code| self.db.error(code))
+    }
+}
+
+#[cfg(feature = "std")]
 impl<DB> DynDatabase for BorrowedDynDatabase<'_, DB>
 where
     DB: DynDatabase + ?Sized,
