@@ -1,7 +1,7 @@
 use crate::{
-    block_reverts_from_state_source, extend_execution_state, extend_state_and_collect_reverts,
-    hashed_post_state_from_state_source, BlockExecutionOutput, BlockExecutionResult, BlockReverts,
-    ExecutionState, IndexedBlockState, RevertAccount, StorageReverts,
+    extend_state_and_collect_reverts, hashed_post_state_from_state_source, state,
+    BlockExecutionOutput, BlockExecutionResult, BlockReverts, ExecutionState, IndexedBlockState,
+    RevertAccount, StorageReverts,
 };
 use alloc::{collections::BTreeMap, vec, vec::Vec};
 use alloy_consensus::constants::KECCAK_EMPTY;
@@ -126,7 +126,7 @@ impl<T> ExecutionOutcome<T> {
     fn aggregate_block_states(states: &[ExecutionState]) -> ExecutionState {
         let mut accumulator = BlockStateAccumulator::new();
         for state in states {
-            extend_execution_state(&mut accumulator, state);
+            state::extend_execution_state(&mut accumulator, state);
         }
         accumulator
     }
@@ -231,7 +231,7 @@ impl<T> ExecutionOutcome<T> {
 
     /// Creates a new `ExecutionOutcome` from a single block execution result.
     pub fn single(block_number: u64, output: BlockExecutionOutput<T>) -> Self {
-        let block_reverts = block_reverts_from_state_source(&output.state);
+        let block_reverts = state::block_reverts_from_state_source(&output.state);
         let block_state = output.state.inner().clone();
         Self {
             state: output.state,
@@ -521,8 +521,8 @@ impl<T> ExecutionOutcome<T> {
         let other_receipts_len = receipts.len();
         Self::adjust_reverts_for_prior_wipes(&self.state, &mut block_reverts);
         let mut accumulator = BlockStateAccumulator::new();
-        extend_execution_state(&mut accumulator, &self.state);
-        extend_execution_state(&mut accumulator, &other_state);
+        state::extend_execution_state(&mut accumulator, &self.state);
+        state::extend_execution_state(&mut accumulator, &other_state);
         self.state = accumulator.into();
         self.extend_block_states(other_block_states, other_receipts_len);
         self.block_reverts.extend(block_reverts);

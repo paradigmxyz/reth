@@ -120,16 +120,6 @@ where
     sink.into_hashed_post_state()
 }
 
-/// Freezes any execution state-change source into an owned block state.
-pub fn execution_state_from_state_source<S>(source: &S) -> BlockStateAccumulator
-where
-    S: StateChangeSource,
-{
-    let mut state = BlockStateAccumulator::new();
-    extend_execution_state(&mut state, source);
-    state
-}
-
 /// Creates an execution state from Reth account, storage, and bytecode initialization data.
 pub fn execution_state_from_init(
     accounts: impl IntoIterator<
@@ -161,7 +151,7 @@ pub fn execution_state_from_init(
 }
 
 /// Extends an execution state accumulator with any execution state-change source.
-pub fn extend_execution_state<S>(accumulator: &mut BlockStateAccumulator, source: &S)
+pub(crate) fn extend_execution_state<S>(accumulator: &mut BlockStateAccumulator, source: &S)
 where
     S: StateChangeSource,
 {
@@ -185,7 +175,7 @@ where
 }
 
 /// Returns the per-block reverts represented by an execution state-change source.
-pub fn block_reverts_from_state_source<S>(source: &S) -> BlockReverts
+pub(crate) fn block_reverts_from_state_source<S>(source: &S) -> BlockReverts
 where
     S: StateChangeSource,
 {
