@@ -17,17 +17,20 @@ use evm2::{
 use evm2_inspectors::tracing::{TracingInspector, TracingInspectorConfig};
 use futures::Future;
 use reth_errors::RethError;
-use reth_evm::{execute::BlockExecutorFactory, ConfigureEvm, EvmEnvFor, TxEnvFor};
+use reth_evm::{
+    database::StateProviderDatabase, execute::BlockExecutorFactory, ConfigureEvm, EvmEnvFor,
+    TxEnvFor,
+};
 use reth_primitives_traits::{BlockBody, RecoveredBlock};
 use reth_rpc_eth_types::EthApiError;
 use reth_storage_api::{
-    errors::provider::ProviderError, EvmStateProviderDatabase, ProviderBlock, ProviderTx,
-    StateProviderBox, StateProviderFactory,
+    errors::provider::ProviderError, ProviderBlock, ProviderTx, StateProviderBox,
+    StateProviderFactory,
 };
 use std::sync::Arc;
 
 /// Cached state database used while tracing transactions sequentially.
-pub type TraceStateProviderDatabase = CacheDB<Db<EvmStateProviderDatabase<StateProviderBox>>>;
+pub type TraceStateProviderDatabase = CacheDB<Db<StateProviderDatabase<StateProviderBox>>>;
 
 /// Context passed to per-transaction trace callbacks.
 pub struct TracingCtx<'a, Insp> {
@@ -115,7 +118,7 @@ pub trait Trace: LoadState<Error: FromEvmError<Self::Evm>> + Call {
     {
         self.spawn_tracing(move |this| {
             let state = this.provider().state_by_block_id(at).map_err(Self::Error::from_eth_err)?;
-            let db = CacheDB::new(Db::new(EvmStateProviderDatabase::new(state)));
+            let db = CacheDB::new(Db::new(StateProviderDatabase::new(state)));
             f(this, db)
         })
     }

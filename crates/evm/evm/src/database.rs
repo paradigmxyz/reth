@@ -1,14 +1,18 @@
 //! State provider database adapter used by EVM execution.
 
 use alloy_primitives::{Address, BlockNumber, B256, U256};
-#[cfg(not(feature = "std"))]
 use core::ops::{Deref, DerefMut};
+#[cfg(feature = "std")]
+use evm2::{
+    bytecode::Bytecode,
+    evm::{AccountInfo, Database},
+    interpreter::Word,
+};
 use reth_primitives_traits::Account;
 use reth_storage_api::{AccountReader, BlockHashReader, BytecodeReader, StateProvider};
-use reth_storage_errors::provider::ProviderResult;
-
 #[cfg(feature = "std")]
-pub use reth_storage_api::EvmStateProviderDatabase as StateProviderDatabase;
+use reth_storage_errors::provider::ProviderError;
+use reth_storage_errors::provider::ProviderResult;
 
 /// A helper trait responsible for providing state necessary for EVM execution.
 pub trait EvmStateProvider {
@@ -53,11 +57,9 @@ impl<T: StateProvider> EvmStateProvider for T {
 }
 
 /// A database wrapper backed by an [`EvmStateProvider`].
-#[cfg(not(feature = "std"))]
 #[derive(Clone)]
 pub struct StateProviderDatabase<DB>(pub DB);
 
-#[cfg(not(feature = "std"))]
 impl<DB> StateProviderDatabase<DB> {
     /// Creates a new database wrapper with the given state provider.
     pub const fn new(db: DB) -> Self {
@@ -70,21 +72,18 @@ impl<DB> StateProviderDatabase<DB> {
     }
 }
 
-#[cfg(not(feature = "std"))]
 impl<DB> core::fmt::Debug for StateProviderDatabase<DB> {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         f.debug_struct("StateProviderDatabase").finish_non_exhaustive()
     }
 }
 
-#[cfg(not(feature = "std"))]
 impl<DB> AsRef<DB> for StateProviderDatabase<DB> {
     fn as_ref(&self) -> &DB {
-        self
+        &self.0
     }
 }
 
-#[cfg(not(feature = "std"))]
 impl<DB> Deref for StateProviderDatabase<DB> {
     type Target = DB;
 
@@ -93,9 +92,52 @@ impl<DB> Deref for StateProviderDatabase<DB> {
     }
 }
 
-#[cfg(not(feature = "std"))]
 impl<DB> DerefMut for StateProviderDatabase<DB> {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.0
+    }
+}
+
+#[cfg(feature = "std")]
+impl<DB> Database for StateProviderDatabase<DB>
+where
+    DB: EvmStateProvider,
+{
+    type Error = ProviderError;
+
+    fn get_account(&mut self, address: &Address) -> Result<Option<AccountInfo>, Self::Error> {
+        Ok(self.0.basic_account(address)?.map(account_to_evm))
+    }
+
+    fn get_code_by_hash(&mut self, code_hash: &B256) -> Result<Bytecode, Self::Error> {
+        Ok(self.0.bytecode_by_hash(code_hash)?.map(Into::into).unwrap_or_default())
+    }
+
+    fn get_storage(&mut self, address: &Address, key: &Word) -> Result<Word, Self::Error> {
+        Ok(self.0.storage(*address, B256::new(key.to_be_bytes()))?.unwrap_or_default())
+    }
+
+    fn get_block_hash(&mut self, number: &Word) -> Result<Option<B256>, Self::Error> {
+        self.0.block_hash(u256_to_u64_saturating(*number))
+    }
+}
+
+#[cfg(feature = "std")]
+fn account_to_evm(account: Account) -> AccountInfo {
+    AccountInfo {
+        balance: account.balance,
+        nonce: account.nonce,
+        code_hash: account.get_bytecode_hash(),
+        code: None,
+        _non_exhaustive: (),
+    }
+}
+
+#[cfg(feature = "std")]
+fn u256_to_u64_saturating(value: U256) -> BlockNumber {
+    if value > U256::from(u64::MAX) {
+        u64::MAX
+    } else {
+        value.to()
     }
 }

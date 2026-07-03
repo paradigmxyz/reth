@@ -20,11 +20,14 @@ use evm2::{
 use futures_util::StreamExt;
 use reth_ethereum::{
     cli::{chainspec::EthereumChainSpecParser, interface::Cli},
-    evm::{primitives::ConfigureEvm, EthTxEnv},
+    evm::{
+        primitives::{database::StateProviderDatabase, ConfigureEvm},
+        EthTxEnv,
+    },
     node::{builder::NodeHandle, EthereumNode},
     pool::TransactionPool,
     rpc::api::eth::helpers::Trace,
-    storage::{BlockReaderIdExt, EvmStateProviderDatabase, StateProviderFactory},
+    storage::{BlockReaderIdExt, StateProviderFactory},
 };
 
 fn main() {
@@ -77,7 +80,7 @@ fn main() {
                         };
                         let tx_env = EthTxEnv::from(tx.to_consensus());
 
-                        let mut db = CacheDB::new(Db::new(EvmStateProviderDatabase::new(state)));
+                        let mut db = CacheDB::new(Db::new(StateProviderDatabase::new(state)));
                         let result = eth_api.inspect_with_inspector(
                             &mut db,
                             evm_env,
