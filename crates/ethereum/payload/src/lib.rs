@@ -23,8 +23,8 @@ use reth_ethereum_primitives::{EthPrimitives, TransactionSigned};
 use reth_evm::{
     database::StateProviderDatabase,
     execute::{
-        BasicBlockBuilder, BlockBuilder, BlockBuilderOutcome, BlockExecutionError,
-        BlockValidationError, HashedStateMode,
+        BlockBuilder, BlockBuilderOutcome, BlockExecutionError, BlockValidationError,
+        HashedStateMode,
     },
     ConfigureEvm, NextBlockEnvAttributes,
 };
@@ -234,22 +234,14 @@ where
         extra_data: builder_config.extra_data.clone(),
         slot_number: attributes.slot_number(),
     };
-    let evm_env = evm_config
-        .next_evm_env(&parent_header, &next_block_env_attributes)
+    let mut builder = evm_config
+        .builder_for_next_block_with_hashed_state_mode(
+            cached_db,
+            &parent_header,
+            next_block_env_attributes,
+            hashed_state_mode,
+        )
         .map_err(PayloadBuilderError::other)?;
-    let evm = evm_config.evm_with_env(cached_db, evm_env.clone());
-    let ctx = evm_config
-        .context_for_next_block(&parent_header, next_block_env_attributes)
-        .map_err(PayloadBuilderError::other)?;
-    let mut builder = BasicBlockBuilder::new_with_hashed_state_mode(
-        evm_config.block_executor_factory(),
-        evm_config.block_assembler(),
-        evm,
-        evm_env,
-        &parent_header,
-        ctx,
-        hashed_state_mode,
-    );
 
     let use_sparse_trie =
         if let Some(handle) = trie_handle.as_ref().filter(|_| stream_state_updates) {
