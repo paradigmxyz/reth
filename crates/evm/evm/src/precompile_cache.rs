@@ -7,7 +7,7 @@ use alloy_primitives::{
 use evm2::{
     evm::precompile::{PrecompileOutput, PrecompileProvider},
     interpreter::{GasTracker, Message},
-    BaseEvmTypes, Evm, PrecompileError,
+    Evm, EvmTypesHost, PrecompileError,
 };
 use moka::policy::EvictionPolicy;
 #[cfg(feature = "metrics")]
@@ -118,19 +118,21 @@ impl<S> CacheEntry<S> {
 }
 
 /// A caching EVM precompile provider.
-pub struct CachedPrecompileProvider<S>
+pub struct CachedPrecompileProvider<T, S>
 where
+    T: EvmTypesHost,
     S: Eq + Hash + std::fmt::Debug + Send + Sync + Clone + 'static,
 {
-    inner: evm2::Precompiles,
+    inner: evm2::Precompiles<T>,
     cache_map: PrecompileCacheMap<S>,
     spec_id: S,
     #[cfg_attr(not(feature = "metrics"), allow(dead_code))]
     metrics: Option<CachedPrecompileMetrics>,
 }
 
-impl<S> fmt::Debug for CachedPrecompileProvider<S>
+impl<T, S> fmt::Debug for CachedPrecompileProvider<T, S>
 where
+    T: EvmTypesHost,
     S: Eq + Hash + std::fmt::Debug + Send + Sync + Clone + 'static,
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -138,13 +140,14 @@ where
     }
 }
 
-impl<S> CachedPrecompileProvider<S>
+impl<T, S> CachedPrecompileProvider<T, S>
 where
+    T: EvmTypesHost,
     S: Eq + Hash + std::fmt::Debug + Send + Sync + Clone + 'static,
 {
     /// Creates a new cached precompile provider.
     pub const fn new(
-        inner: evm2::Precompiles,
+        inner: evm2::Precompiles<T>,
         cache_map: PrecompileCacheMap<S>,
         spec_id: S,
         metrics: Option<CachedPrecompileMetrics>,
@@ -188,8 +191,9 @@ where
     }
 }
 
-impl<S> PrecompileProvider<BaseEvmTypes> for CachedPrecompileProvider<S>
+impl<T, S> PrecompileProvider<T> for CachedPrecompileProvider<T, S>
 where
+    T: EvmTypesHost,
     S: Eq + Hash + std::fmt::Debug + Send + Sync + Clone + 'static,
 {
     fn addresses(&self) -> Vec<Address> {
@@ -202,8 +206,8 @@ where
 
     fn execute(
         &mut self,
-        evm: &mut Evm<'_, BaseEvmTypes>,
-        message: &Message<BaseEvmTypes>,
+        evm: &mut Evm<'_, T>,
+        message: &Message<T>,
         gas: &mut GasTracker,
     ) -> Option<Result<PrecompileOutput, PrecompileError>> {
         let address = message.code_address;
@@ -325,7 +329,7 @@ mod tests {
         evm::{precompile::NoPrecompiles, InMemoryDB},
         interpreter::{Message, MessageKind},
         registry::TxRegistry,
-        SpecId,
+        BaseEvmTypes, SpecId,
     };
 
     #[test]
