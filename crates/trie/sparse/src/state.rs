@@ -187,8 +187,9 @@ impl<A: SparseTrieTrait, S: SparseTrieTrait> SparseStateTrie<A, S> {
     ///
     /// Returns `None` if the accounts trie is not revealed.
     pub fn take_changed_paths(&mut self) -> Option<TriePrefixSetsMut> {
+        let account_prefix_set = self.state.take_changed_paths()?;
         let storage_prefix_sets = self.storage_trie_changed_paths();
-        self.state.take_changed_paths().map(|account_prefix_set| TriePrefixSetsMut {
+        Some(TriePrefixSetsMut {
             account_prefix_set,
             storage_prefix_sets,
             destroyed_accounts: Default::default(),
