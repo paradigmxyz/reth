@@ -18,11 +18,12 @@ use evm2_inspectors::{
 };
 use jsonrpsee::core::RpcResult;
 use jsonrpsee_types::ErrorObjectOwned;
+use reth_evm::{BlockExecutorFactory, ConfigureEvm, TxEnvFor};
 use reth_primitives_traits::TxTy;
 use reth_rpc_api::{EthApiServer, OtterscanServer};
 use reth_rpc_convert::RpcTxReq;
 use reth_rpc_eth_api::{
-    helpers::{EthTransactions, TraceExt},
+    helpers::{EthTransactions, TraceEvmInstance, TraceExt, TraceTxEnvelope},
     FullEthApiTypes, RpcBlock, RpcHeader, RpcReceipt, RpcTransaction,
 };
 use reth_rpc_eth_types::{utils::binary_search, EthApiError};
@@ -79,6 +80,10 @@ where
         > + EthTransactions
         + TraceExt
         + 'static,
+    Eth::Evm: ConfigureEvm,
+    <Eth::Evm as ConfigureEvm>::BlockExecutorFactory:
+        for<'a> BlockExecutorFactory<Evm<'a> = TraceEvmInstance<'a>>,
+    TxEnvFor<Eth::Evm>: AsRef<TraceTxEnvelope>,
 {
     /// Handler for `ots_getHeaderByNumber` and `erigon_getHeaderByNumber`
     async fn get_header_by_number(

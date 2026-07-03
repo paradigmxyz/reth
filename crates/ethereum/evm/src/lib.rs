@@ -71,6 +71,10 @@ impl Default for EthEvmEnv {
 }
 
 impl EvmEnv for EthEvmEnv {
+    fn block_env(&self) -> &evm2::env::BlockEnv {
+        &self.block
+    }
+
     fn block_base_fee(&self) -> u64 {
         self.block.basefee.to()
     }

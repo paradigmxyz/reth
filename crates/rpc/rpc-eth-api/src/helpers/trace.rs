@@ -10,6 +10,7 @@ use alloy_eips::BlockId;
 use alloy_primitives::B256;
 use alloy_rpc_types_eth::TransactionInfo;
 use evm2::{
+    ethereum::RecoveredTxEnvelope,
     evm::{CacheDB, Db},
     registry::HandlerError,
     BaseEvmTypes, ErrorCode, TxResultWithState,
@@ -28,6 +29,12 @@ use std::sync::Arc;
 
 /// Cached state database used while tracing transactions sequentially.
 pub type TraceStateProviderDatabase = CacheDB<Db<StateProviderDatabase<StateProviderBox>>>;
+
+/// EVM instance type supported by the current inspector trace path.
+pub type TraceEvmInstance<'a> = evm2::Evm<'a, BaseEvmTypes>;
+
+/// Transaction envelope type supported by the current inspector trace path.
+pub type TraceTxEnvelope = RecoveredTxEnvelope;
 
 /// Context passed to per-transaction trace callbacks.
 pub struct TracingCtx<'a, Insp> {
@@ -64,6 +71,9 @@ pub trait Trace: LoadState<Error: FromEvmError<Self::Evm>> + Call {
     ) -> Result<(I, TxResultWithState), Self::Error>
     where
         I: evm2::Inspector<BaseEvmTypes>,
+        <Self::Evm as ConfigureEvm>::BlockExecutorFactory:
+            for<'a> BlockExecutorFactory<Evm<'a> = TraceEvmInstance<'a>>,
+        TxEnvFor<Self::Evm>: AsRef<TraceTxEnvelope>,
     {
         let mut inspector = inspector;
 
@@ -136,6 +146,9 @@ pub trait Trace: LoadState<Error: FromEvmError<Self::Evm>> + Call {
             + 'static,
         R: Send + 'static,
         ProviderTx<Self::Provider>: Clone,
+        <Self::Evm as ConfigureEvm>::BlockExecutorFactory:
+            for<'a> BlockExecutorFactory<Evm<'a> = TraceEvmInstance<'a>>,
+        TxEnvFor<Self::Evm>: AsRef<TraceTxEnvelope>,
     {
         self.spawn_trace_transaction_in_block_with_inspector(hash, TracingInspector::new(config), f)
     }
@@ -160,6 +173,9 @@ pub trait Trace: LoadState<Error: FromEvmError<Self::Evm>> + Call {
         Insp: evm2::Inspector<BaseEvmTypes> + Send + 'static,
         R: Send + 'static,
         ProviderTx<Self::Provider>: Clone,
+        <Self::Evm as ConfigureEvm>::BlockExecutorFactory:
+            for<'a> BlockExecutorFactory<Evm<'a> = TraceEvmInstance<'a>>,
+        TxEnvFor<Self::Evm>: AsRef<TraceTxEnvelope>,
     {
         async move {
             let (transaction, block) = match self.transaction_and_block(hash).await? {
@@ -200,6 +216,9 @@ pub trait Trace: LoadState<Error: FromEvmError<Self::Evm>> + Call {
     where
         I: IntoIterator<Item = Recovered<&'a ProviderTx<Self::Provider>>>,
         ProviderTx<Self::Provider>: Clone + 'a,
+        <Self::Evm as ConfigureEvm>::BlockExecutorFactory:
+            for<'evm> BlockExecutorFactory<Evm<'evm> = TraceEvmInstance<'evm>>,
+        TxEnvFor<Self::Evm>: AsRef<TraceTxEnvelope>,
     {
         for (idx, tx) in transactions.into_iter().enumerate() {
             if *tx.tx_hash() == target_tx_hash {
@@ -235,6 +254,9 @@ pub trait Trace: LoadState<Error: FromEvmError<Self::Evm>> + Call {
         Insp: evm2::Inspector<BaseEvmTypes> + Send + 'static,
         R: Send + 'static,
         ProviderTx<Self::Provider>: Clone,
+        <Self::Evm as ConfigureEvm>::BlockExecutorFactory:
+            for<'a> BlockExecutorFactory<Evm<'a> = TraceEvmInstance<'a>>,
+        TxEnvFor<Self::Evm>: AsRef<TraceTxEnvelope>,
     {
         async move {
             let block =
@@ -302,6 +324,9 @@ pub trait Trace: LoadState<Error: FromEvmError<Self::Evm>> + Call {
             + 'static,
         R: Send + 'static,
         ProviderTx<Self::Provider>: Clone,
+        <Self::Evm as ConfigureEvm>::BlockExecutorFactory:
+            for<'a> BlockExecutorFactory<Evm<'a> = TraceEvmInstance<'a>>,
+        TxEnvFor<Self::Evm>: AsRef<TraceTxEnvelope>,
     {
         self.trace_block_until_with_inspector(
             block_id,
@@ -327,6 +352,9 @@ pub trait Trace: LoadState<Error: FromEvmError<Self::Evm>> + Call {
         Insp: evm2::Inspector<BaseEvmTypes> + Send + 'static,
         R: Send + 'static,
         ProviderTx<Self::Provider>: Clone,
+        <Self::Evm as ConfigureEvm>::BlockExecutorFactory:
+            for<'a> BlockExecutorFactory<Evm<'a> = TraceEvmInstance<'a>>,
+        TxEnvFor<Self::Evm>: AsRef<TraceTxEnvelope>,
     {
         self.trace_block_until_with_inspector(block_id, block, None, insp_setup, f)
     }

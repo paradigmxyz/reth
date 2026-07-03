@@ -33,7 +33,7 @@ use jsonrpsee::{
 use reth_chainspec::{ChainSpecProvider, EthereumHardforks};
 use reth_consensus::FullConsensus;
 use reth_engine_primitives::{ConsensusEngineEvent, ConsensusEngineHandle};
-use reth_evm::ConfigureEvm;
+use reth_evm::{BlockExecutorFactory, ConfigureEvm, TxEnvFor};
 use reth_network_api::{noop::NoopNetwork, NetworkInfo, Peers};
 use reth_payload_primitives::PayloadTypes;
 use reth_primitives_traits::{NodePrimitives, TxTy};
@@ -43,6 +43,7 @@ use reth_rpc::{
 };
 use reth_rpc_api::servers::*;
 use reth_rpc_engine_api::RethEngineApi;
+pub use reth_rpc_eth_api::helpers::{TraceEvmInstance, TraceTxEnvelope};
 use reth_rpc_eth_api::{
     helpers::{
         pending_block::PendingEnvBuilder, Call, EthApiSpec, EthTransactions, LoadPendingBlock,
@@ -343,6 +344,10 @@ where
     )
     where
         EthApi: FullEthApiServer<Provider = Provider, Pool = Pool> + TraceExt,
+        EthApi::Evm: ConfigureEvm,
+        <EthApi::Evm as ConfigureEvm>::BlockExecutorFactory:
+            for<'a> BlockExecutorFactory<Evm<'a> = TraceEvmInstance<'a>>,
+        TxEnvFor<EthApi::Evm>: AsRef<TraceTxEnvelope>,
         Payload: PayloadTypes,
     {
         let config = module_config.config.clone().unwrap_or_default();
@@ -393,6 +398,10 @@ where
     ) -> TransportRpcModules<()>
     where
         EthApi: FullEthApiServer<Provider = Provider, Pool = Pool> + TraceExt,
+        EthApi::Evm: ConfigureEvm,
+        <EthApi::Evm as ConfigureEvm>::BlockExecutorFactory:
+            for<'a> BlockExecutorFactory<Evm<'a> = TraceEvmInstance<'a>>,
+        TxEnvFor<EthApi::Evm>: AsRef<TraceTxEnvelope>,
     {
         if module_config.is_empty() {
             TransportRpcModules::default()
@@ -698,6 +707,10 @@ where
     pub fn register_ots(&mut self) -> &mut Self
     where
         EthApi: TraceExt + EthTransactions<Primitives = N>,
+        EthApi::Evm: ConfigureEvm,
+        <EthApi::Evm as ConfigureEvm>::BlockExecutorFactory:
+            for<'a> BlockExecutorFactory<Evm<'a> = TraceEvmInstance<'a>>,
+        TxEnvFor<EthApi::Evm>: AsRef<TraceTxEnvelope>,
     {
         let otterscan_api = self.otterscan_api();
         self.modules.insert(RethRpcModule::Ots, otterscan_api.into_rpc().into());
@@ -712,6 +725,10 @@ where
     pub fn register_debug(&mut self) -> &mut Self
     where
         EthApi: EthTransactions + TraceExt,
+        EthApi::Evm: ConfigureEvm,
+        <EthApi::Evm as ConfigureEvm>::BlockExecutorFactory:
+            for<'a> BlockExecutorFactory<Evm<'a> = TraceEvmInstance<'a>>,
+        TxEnvFor<EthApi::Evm>: AsRef<TraceTxEnvelope>,
     {
         let debug_api = self.debug_api();
         self.modules.insert(RethRpcModule::Debug, debug_api.into_rpc().into());
@@ -726,6 +743,10 @@ where
     pub fn register_trace(&mut self) -> &mut Self
     where
         EthApi: TraceExt,
+        EthApi::Evm: ConfigureEvm,
+        <EthApi::Evm as ConfigureEvm>::BlockExecutorFactory:
+            for<'a> BlockExecutorFactory<Evm<'a> = TraceEvmInstance<'a>>,
+        TxEnvFor<EthApi::Evm>: AsRef<TraceTxEnvelope>,
     {
         let trace_api = self.trace_api();
         self.modules.insert(RethRpcModule::Trace, trace_api.into_rpc().into());
@@ -867,6 +888,10 @@ where
     Pool: TransactionPool + Clone + 'static,
     Network: NetworkInfo + Peers + Clone + 'static,
     EthApi: FullEthApiServer + TraceExt,
+    EthApi::Evm: ConfigureEvm,
+    <EthApi::Evm as ConfigureEvm>::BlockExecutorFactory:
+        for<'a> BlockExecutorFactory<Evm<'a> = TraceEvmInstance<'a>>,
+    TxEnvFor<EthApi::Evm>: AsRef<TraceTxEnvelope>,
     EvmConfig: ConfigureEvm<Primitives = N> + 'static,
     Consensus: FullConsensus<N> + Clone + 'static,
 {

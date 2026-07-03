@@ -14,13 +14,14 @@ use evm2_inspectors::{opcode::OpcodeGasInspector, tracing::TracingInspectorConfi
 use futures::StreamExt;
 use jsonrpsee::core::RpcResult;
 use reth_chainspec::{ChainSpecProvider, EthereumHardforks};
+use reth_evm::{BlockExecutorFactory, ConfigureEvm, TxEnvFor};
 use reth_primitives_traits::BlockBody;
 #[cfg(any())]
 use reth_primitives_traits::BlockHeader;
 use reth_rpc_api::TraceApiServer;
 use reth_rpc_convert::RpcTxReq;
 use reth_rpc_eth_api::{
-    helpers::{TraceExt, TracingCtx},
+    helpers::{TraceEvmInstance, TraceExt, TraceTxEnvelope, TracingCtx},
     FromEthApiError,
 };
 use reth_rpc_eth_types::{EthApiError, EthConfig};
@@ -660,6 +661,10 @@ fn apply_trace_filter_pagination(
 impl<Eth> TraceApiServer<RpcTxReq<Eth::NetworkTypes>> for TraceApi<Eth>
 where
     Eth: TraceExt + 'static,
+    Eth::Evm: ConfigureEvm,
+    <Eth::Evm as ConfigureEvm>::BlockExecutorFactory:
+        for<'a> BlockExecutorFactory<Evm<'a> = TraceEvmInstance<'a>>,
+    TxEnvFor<Eth::Evm>: AsRef<TraceTxEnvelope>,
 {
     /// Executes the given call and returns a number of possible traces for it.
     ///

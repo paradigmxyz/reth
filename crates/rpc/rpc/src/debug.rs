@@ -16,14 +16,14 @@ use jsonrpsee::core::RpcResult;
 use parking_lot::RwLock;
 use reth_chainspec::{ChainSpecProvider, EthChainSpec, EthereumHardforks};
 use reth_engine_primitives::ConsensusEngineEvent;
-use reth_evm::{ConfigureEvm, EvmEnv, EvmEnvFor, TxEnvFor};
+use reth_evm::{BlockExecutorFactory, ConfigureEvm, EvmEnv, EvmEnvFor, TxEnvFor};
 use reth_primitives_traits::{
     Block as BlockTrait, BlockBody, BlockTy, ReceiptWithBloom, RecoveredBlock,
 };
 use reth_rpc_api::DebugApiServer;
 use reth_rpc_convert::RpcTxReq;
 use reth_rpc_eth_api::{
-    helpers::{EthTransactions, TraceExt},
+    helpers::{EthTransactions, TraceEvmInstance, TraceExt, TraceTxEnvelope},
     FromEthApiError, RpcConvert, RpcNodeCore,
 };
 use reth_rpc_eth_types::EthApiError;
@@ -796,6 +796,9 @@ impl<Eth> DebugApi<Eth>
 where
     Eth: TraceExt,
     Eth::Evm: ConfigureEvm,
+    <Eth::Evm as ConfigureEvm>::BlockExecutorFactory:
+        for<'a> BlockExecutorFactory<Evm<'a> = TraceEvmInstance<'a>>,
+    TxEnvFor<Eth::Evm>: AsRef<TraceTxEnvelope>,
 {
     async fn trace_block_impl(
         &self,
@@ -829,7 +832,7 @@ where
                                 tx_hash: Some(tx_hash),
                             }),
                             tx_env.as_ref(),
-                            &evm_env.block_env(),
+                            evm_env.block_env(),
                             &result,
                             &mut db,
                         )
@@ -932,7 +935,7 @@ where
                             tx_hash: Some(*tx.tx_hash()),
                         }),
                         tx_env.as_ref(),
-                        &evm_env.block_env(),
+                        evm_env.block_env(),
                         &result,
                         &mut db,
                     )
@@ -972,6 +975,9 @@ impl<Eth> DebugApiServer<RpcTxReq<Eth::NetworkTypes>> for DebugApi<Eth>
 where
     Eth: EthTransactions + TraceExt,
     Eth::Evm: ConfigureEvm,
+    <Eth::Evm as ConfigureEvm>::BlockExecutorFactory:
+        for<'a> BlockExecutorFactory<Evm<'a> = TraceEvmInstance<'a>>,
+    TxEnvFor<Eth::Evm>: AsRef<TraceTxEnvelope>,
 {
     /// Handler for `debug_getRawHeader`
     async fn raw_header(&self, block_id: BlockId) -> RpcResult<Bytes> {
