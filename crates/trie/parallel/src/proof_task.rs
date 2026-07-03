@@ -845,8 +845,53 @@ where
         let mut account_proofs_processed = 0u64;
         let mut cursor_metrics_cache = ProofTaskCursorMetricsCache::default();
 
-        // Create both account and storage calculators for V2 proofs.
-        // The storage calculator is wrapped in Rc<RefCell<...>> for sharing with value encoders.
+        // Count this worker as available after the provider is ready. Cursors are opened only
+        // once real account work arrives.
+        self.availability.mark_idle(self.worker_id);
+
+        let mut total_idle_time = Duration::ZERO;
+        let mut idle_start = Instant::now();
+        let mut value_encoder_stats_cache = ValueEncoderStats::default();
+
+        let first_job = match self.work_rx.recv() {
+            Ok(job) => job,
+            Err(_) => {
+                trace!(
+                    target: "trie::proof_task",
+                    worker_id=self.worker_id,
+                    account_proofs_processed,
+                    total_idle_time_us = total_idle_time.as_micros(),
+                    "Account worker shutting down"
+                );
+
+                #[cfg(feature = "metrics")]
+                {
+                    self.metrics.record_account_worker_idle_time(total_idle_time);
+                    self.cursor_metrics.record(&mut cursor_metrics_cache);
+                    self.metrics.record_value_encoder_stats(&value_encoder_stats_cache);
+                }
+
+                return Ok(());
+            }
+        };
+
+        total_idle_time += idle_start.elapsed();
+
+        // Mark worker as busy.
+        self.availability.mark_busy(self.worker_id);
+
+        #[cfg(feature = "trie-debug")]
+        if let Some(max_jitter) = self.task_ctx.proof_jitter {
+            let jitter = Duration::from_nanos(rand::random_range(0..=max_jitter.as_nanos() as u64));
+            trace!(
+                target: "trie::proof_task",
+                worker_id = self.worker_id,
+                jitter_us = jitter.as_micros(),
+                "Account worker applying proof jitter"
+            );
+            std::thread::sleep(jitter);
+        }
+
         let account_trie_cursor = provider.account_trie_cursor()?;
         let account_hashed_cursor = provider.hashed_account_cursor()?;
 
@@ -891,12 +936,23 @@ where
                 instrumented_storage_hashed_cursor,
             )));
 
-        // Count this worker as available only after successful initialization.
+        match first_job {
+            AccountWorkerJob::AccountMultiproof { input } => {
+                let value_encoder_stats = self.process_account_multiproof::<Factory::Provider>(
+                    &mut v2_account_calculator,
+                    v2_storage_calculator.clone(),
+                    *input,
+                    &mut account_proofs_processed,
+                );
+                total_idle_time += value_encoder_stats.storage_wait_time;
+                value_encoder_stats_cache.extend(&value_encoder_stats);
+            }
+        }
+
+        // Mark worker as available again.
         self.availability.mark_idle(self.worker_id);
 
-        let mut total_idle_time = Duration::ZERO;
-        let mut idle_start = Instant::now();
-        let mut value_encoder_stats_cache = ValueEncoderStats::default();
+        idle_start = Instant::now();
 
         while let Ok(job) = self.work_rx.recv() {
             total_idle_time += idle_start.elapsed();
