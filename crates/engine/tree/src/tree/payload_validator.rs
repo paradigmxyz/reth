@@ -1155,21 +1155,19 @@ where
 
         let (output, senders) =
             debug_span!(target: "engine::tree", "execute_block").in_scope(|| {
-                let mut on_hashed_state_update = |hashed_state| {
-                    if let Some(sender) = state_hook_sender.as_ref() {
-                        sender.send_hashed_state(hashed_state);
-                    }
-                };
                 let db = StateProviderDatabase::new(state_provider);
                 let evm = self.evm_config.evm_with_env(db, env.evm_env.clone());
                 let mut executor = self
                     .evm_config
                     .block_executor_factory()
                     .create_executor_with_hashed_state_mode(evm, execution_ctx, hashed_state_mode);
+                if let Some(sender) = state_hook_sender {
+                    executor.set_state_hook(move |hashed_state| {
+                        sender.send_hashed_state(hashed_state);
+                    });
+                }
                 let pre_exec_start = Instant::now();
-                executor
-                    .apply_pre_execution_changes(&mut on_hashed_state_update)
-                    .map_err(BlockExecutionError::other)?;
+                executor.apply_pre_execution_changes().map_err(BlockExecutionError::other)?;
                 self.metrics.record_pre_execution(pre_exec_start.elapsed());
 
                 let mut senders = Vec::with_capacity(transaction_count);
@@ -1184,9 +1182,7 @@ where
                     senders.push(*tx.signer());
 
                     let tx_start = Instant::now();
-                    executor
-                        .execute_transaction(tx_env, &mut on_hashed_state_update)
-                        .map_err(BlockExecutionError::other)?;
+                    executor.execute_transaction(tx_env).map_err(BlockExecutionError::other)?;
                     self.metrics.record_transaction_execution(tx_start.elapsed());
                     executed_tx_index.store(senders.len(), Ordering::Relaxed);
 
@@ -1205,13 +1201,10 @@ where
                 }
 
                 let post_exec_start = Instant::now();
-                let output = executor
-                    .finish(&mut on_hashed_state_update)
-                    .map_err(BlockExecutionError::other)?;
+                let output = executor.finish().map_err(BlockExecutionError::other)?;
                 self.metrics.record_post_execution(post_exec_start.elapsed());
                 Ok::<_, BlockExecutionError>((output, senders))
             })?;
-        drop(state_hook_sender);
         drop(receipt_tx);
 
         if !streamed_state_updates && let Some(updates_tx) = handle.sparse_trie_updates_tx() {

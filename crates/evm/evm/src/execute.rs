@@ -3,7 +3,7 @@
 #[cfg(feature = "std")]
 use crate::Database;
 use crate::{ConfigureEvm, DynDatabase, EvmEnv, TxEnvFor};
-use alloc::{boxed::Box, sync::Arc, vec::Vec};
+use alloc::{sync::Arc, vec::Vec};
 use alloy_consensus::{
     transaction::{Either, Recovered},
     BlockHeader as _, Header,
@@ -133,68 +133,52 @@ pub trait BlockExecutor: Sized {
     /// Returns the underlying EVM mutably.
     fn evm_mut(&mut self) -> &mut Self::Evm;
 
+    /// Sets a hook for streamed hashed state updates emitted during block execution.
+    ///
+    /// Returns `true` if the hook was installed.
+    fn set_state_hook(&mut self, _hook: impl FnMut(HashedPostState) + Send + 'static) -> bool {
+        false
+    }
+
     /// Applies pre-execution block changes.
-    fn apply_pre_execution_changes<H>(
-        &mut self,
-        on_hashed_state_update: &mut H,
-    ) -> Result<(), BlockExecutionError>
-    where
-        H: FnMut(HashedPostState);
+    fn apply_pre_execution_changes(&mut self) -> Result<(), BlockExecutionError>;
 
     /// Executes a transaction, invokes `f` with the transaction result, and commits changes when
     /// `f` returns [`CommitChanges::Yes`].
-    fn execute_transaction_with_commit_condition<H>(
+    fn execute_transaction_with_commit_condition(
         &mut self,
         transaction: Self::Transaction,
         f: impl FnOnce(&Self::TransactionResult) -> CommitChanges,
-        on_hashed_state_update: &mut H,
-    ) -> Result<Option<Self::TransactionOutput>, BlockExecutionError>
-    where
-        H: FnMut(HashedPostState);
+    ) -> Result<Option<Self::TransactionOutput>, BlockExecutionError>;
 
     /// Executes a transaction, invokes `f` with the transaction result, and commits changes.
-    fn execute_transaction_with_result_closure<H>(
+    fn execute_transaction_with_result_closure(
         &mut self,
         transaction: Self::Transaction,
         f: impl FnOnce(&Self::TransactionResult),
-        on_hashed_state_update: &mut H,
-    ) -> Result<Self::TransactionOutput, BlockExecutionError>
-    where
-        H: FnMut(HashedPostState),
-    {
-        self.execute_transaction_with_commit_condition(
-            transaction,
-            |result| {
-                f(result);
-                CommitChanges::Yes
-            },
-            on_hashed_state_update,
-        )
+    ) -> Result<Self::TransactionOutput, BlockExecutionError> {
+        self.execute_transaction_with_commit_condition(transaction, |result| {
+            f(result);
+            CommitChanges::Yes
+        })
         .map(Option::unwrap_or_default)
     }
 
     /// Executes a transaction and commits changes.
-    fn execute_transaction<H>(
+    fn execute_transaction(
         &mut self,
         transaction: Self::Transaction,
-        on_hashed_state_update: &mut H,
-    ) -> Result<Self::TransactionOutput, BlockExecutionError>
-    where
-        H: FnMut(HashedPostState),
-    {
-        self.execute_transaction_with_result_closure(transaction, |_| {}, on_hashed_state_update)
+    ) -> Result<Self::TransactionOutput, BlockExecutionError> {
+        self.execute_transaction_with_result_closure(transaction, |_| {})
     }
 
     /// Returns receipts accumulated so far.
     fn receipts(&self) -> &[ReceiptTy<Self::Primitives>];
 
     /// Finishes block execution and returns the output.
-    fn finish<H>(
+    fn finish(
         self,
-        on_hashed_state_update: &mut H,
-    ) -> Result<BlockExecutionOutput<ReceiptTy<Self::Primitives>>, BlockExecutionError>
-    where
-        H: FnMut(HashedPostState);
+    ) -> Result<BlockExecutionOutput<ReceiptTy<Self::Primitives>>, BlockExecutionError>;
 }
 
 /// A type that creates configured block executors.
@@ -435,7 +419,6 @@ where
     pub parent: &'a SealedHeader<HeaderTy<N>>,
     /// Block assembler.
     pub assembler: &'a Assembler,
-    pub(crate) on_hashed_state_update: HashedStateUpdateHook,
 }
 
 impl<'a, F, Assembler, N> BasicBlockBuilder<'a, F, F::Executor<'a>, Assembler, N>
@@ -486,30 +469,6 @@ where
             ctx,
             parent,
             assembler,
-            on_hashed_state_update: Default::default(),
-        }
-    }
-}
-
-#[derive(Default)]
-pub(crate) struct HashedStateUpdateHook {
-    hook: Option<Box<dyn FnMut(HashedPostState) + Send>>,
-}
-
-impl core::fmt::Debug for HashedStateUpdateHook {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        f.debug_struct("HashedStateUpdateHook").finish_non_exhaustive()
-    }
-}
-
-impl HashedStateUpdateHook {
-    fn set(&mut self, hook: impl FnMut(HashedPostState) + Send + 'static) {
-        self.hook = Some(Box::new(hook));
-    }
-
-    fn on_update(&mut self, state: HashedPostState) {
-        if let Some(hook) = self.hook.as_mut() {
-            hook(state);
         }
     }
 }
@@ -549,8 +508,7 @@ where
     type Executor = Executor;
 
     fn apply_pre_execution_changes(&mut self) -> Result<(), BlockExecutionError> {
-        let hook = &mut self.on_hashed_state_update;
-        self.executor.apply_pre_execution_changes(&mut |state| hook.on_update(state))
+        self.executor.apply_pre_execution_changes()
     }
 
     fn execute_transaction_with_commit_condition(
@@ -561,12 +519,7 @@ where
         let (tx_env, tx) = tx.into_parts();
         let transaction = tx.tx().clone();
         let sender = *tx.signer();
-        let hook = &mut self.on_hashed_state_update;
-        if let Some(output) =
-            self.executor.execute_transaction_with_commit_condition(tx_env, f, &mut |state| {
-                hook.on_update(state)
-            })?
-        {
+        if let Some(output) = self.executor.execute_transaction_with_commit_condition(tx_env, f)? {
             self.transactions.push(transaction);
             self.senders.push(sender);
             Ok(Some(output))
@@ -582,19 +535,9 @@ where
             &BlockExecutionOutput<ReceiptTy<Self::Primitives>>,
         ) -> Result<Option<(B256, TrieUpdates)>, BlockExecutionError>,
     ) -> Result<BlockBuilderOutcome<N>, BlockExecutionError> {
-        let Self {
-            executor,
-            evm_env,
-            transactions,
-            senders,
-            ctx,
-            parent,
-            assembler,
-            mut on_hashed_state_update,
-        } = self;
+        let Self { executor, evm_env, transactions, senders, ctx, parent, assembler } = self;
 
-        let output = executor.finish(&mut |state| on_hashed_state_update.on_update(state))?;
-        drop(on_hashed_state_update);
+        let output = executor.finish()?;
         let hashed_state = output
             .hashed_state
             .clone()
@@ -628,8 +571,7 @@ where
     }
 
     fn set_state_hook(&mut self, hook: impl FnMut(HashedPostState) + Send + 'static) -> bool {
-        self.on_hashed_state_update.set(hook);
-        true
+        self.executor.set_state_hook(hook)
     }
 
     fn executor_mut(&mut self) -> &mut Self::Executor {
@@ -739,12 +681,12 @@ where
             .map_err(BlockExecutionError::other)?;
         let mut executor = evm_config.create_executor(evm, ctx);
 
-        executor.apply_pre_execution_changes(&mut |_| {})?;
+        executor.apply_pre_execution_changes()?;
         for transaction in block.clone_transactions_recovered() {
             let tx_env = TxEnvFor::<Evm>::from(transaction);
-            executor.execute_transaction(tx_env, &mut |_| {})?;
+            executor.execute_transaction(tx_env)?;
         }
-        executor.finish(&mut |_| {})
+        executor.finish()
     }
 }
 

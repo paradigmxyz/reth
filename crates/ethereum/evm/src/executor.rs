@@ -37,9 +37,12 @@ pub struct EthBlockExecutor<'a> {
     block_state: BlockStateAccumulator,
     hashed_state: Option<HashedPostStateSink<KeccakKeyHasher>>,
     hashed_state_mode: HashedStateMode,
+    hashed_state_update_hook: HashedStateUpdateHook,
     receipts: Vec<Receipt>,
     cumulative_gas_used: u64,
 }
+
+type HashedStateUpdateHook = Option<Box<dyn FnMut(HashedPostState) + Send>>;
 
 impl<'a> EthBlockExecutor<'a> {
     /// Creates a configured Ethereum block executor.
@@ -71,6 +74,7 @@ impl<'a> EthBlockExecutor<'a> {
                 .output()
                 .then(HashedPostStateSink::<KeccakKeyHasher>::default),
             hashed_state_mode,
+            hashed_state_update_hook: None,
             receipts: Vec::new(),
             cumulative_gas_used: 0,
         }
@@ -109,13 +113,16 @@ impl<'a> BlockExecutor for EthBlockExecutor<'a> {
         &mut self.evm
     }
 
-    fn apply_pre_execution_changes<H>(
-        &mut self,
-        on_hashed_state_update: &mut H,
-    ) -> Result<(), BlockExecutionError>
-    where
-        H: FnMut(HashedPostState),
-    {
+    fn set_state_hook(&mut self, hook: impl FnMut(HashedPostState) + Send + 'static) -> bool {
+        if !self.hashed_state_mode.stream() {
+            return false
+        }
+
+        self.hashed_state_update_hook = Some(Box::new(hook));
+        true
+    }
+
+    fn apply_pre_execution_changes(&mut self) -> Result<(), BlockExecutionError> {
         let context = Self::block_context(
             self.chain_id,
             self.deposit_contract_address,
@@ -129,7 +136,7 @@ impl<'a> BlockExecutor for EthBlockExecutor<'a> {
             &mut self.block_state,
             self.hashed_state.as_mut(),
             self.hashed_state_mode.stream(),
-            on_hashed_state_update,
+            &mut |state| emit_hashed_state(&mut self.hashed_state_update_hook, state),
             self.spec_id,
             self.block_number,
             context,
@@ -137,15 +144,11 @@ impl<'a> BlockExecutor for EthBlockExecutor<'a> {
         .map_err(Into::into)
     }
 
-    fn execute_transaction_with_commit_condition<H>(
+    fn execute_transaction_with_commit_condition(
         &mut self,
         transaction: Self::Transaction,
         f: impl FnOnce(&Self::TransactionResult) -> CommitChanges,
-        on_hashed_state_update: &mut H,
-    ) -> Result<Option<Self::TransactionOutput>, BlockExecutionError>
-    where
-        H: FnMut(HashedPostState),
-    {
+    ) -> Result<Option<Self::TransactionOutput>, BlockExecutionError> {
         let tx_hash = transaction.tx_hash();
         let transaction = transaction.into_envelope();
         let tx_type =
@@ -155,7 +158,7 @@ impl<'a> BlockExecutor for EthBlockExecutor<'a> {
             &mut self.block_state,
             self.hashed_state.as_mut(),
             self.hashed_state_mode.stream(),
-            on_hashed_state_update,
+            &mut |state| emit_hashed_state(&mut self.hashed_state_update_hook, state),
             &transaction,
             f,
         )
@@ -177,13 +180,7 @@ impl<'a> BlockExecutor for EthBlockExecutor<'a> {
         &self.receipts
     }
 
-    fn finish<H>(
-        mut self,
-        on_hashed_state_update: &mut H,
-    ) -> Result<BlockExecutionOutput<Receipt>, BlockExecutionError>
-    where
-        H: FnMut(HashedPostState),
-    {
+    fn finish(mut self) -> Result<BlockExecutionOutput<Receipt>, BlockExecutionError> {
         let context = Self::block_context(
             self.chain_id,
             self.deposit_contract_address,
@@ -206,7 +203,7 @@ impl<'a> BlockExecutor for EthBlockExecutor<'a> {
             &mut self.block_state,
             self.hashed_state.as_mut(),
             self.hashed_state_mode.stream(),
-            on_hashed_state_update,
+            &mut |state| emit_hashed_state(&mut self.hashed_state_update_hook, state),
             self.spec_id,
             context,
             &mut requests,
@@ -227,7 +224,7 @@ impl<'a> BlockExecutor for EthBlockExecutor<'a> {
             &mut self.block_state,
             self.hashed_state.as_mut(),
             self.hashed_state_mode.stream(),
-            on_hashed_state_update,
+            &mut |state| emit_hashed_state(&mut self.hashed_state_update_hook, state),
             self.spec_id,
             self.block_number,
             self.block_beneficiary,
@@ -245,5 +242,11 @@ impl<'a> BlockExecutor for EthBlockExecutor<'a> {
         output.result.requests = requests;
 
         Ok(output)
+    }
+}
+
+fn emit_hashed_state(hook: &mut HashedStateUpdateHook, state: HashedPostState) {
+    if let Some(hook) = hook.as_mut() {
+        hook(state);
     }
 }
