@@ -1,15 +1,28 @@
+use crate::{
+    changesets_utils::StorageRevertsIter,
+    providers::{DatabaseProvider, NodeTypesForProvider},
+    EitherWriter,
+};
 use alloy_consensus::constants::KECCAK_EMPTY;
-use alloy_primitives::{Address, B256, U256};
+use alloy_primitives::{Address, BlockNumber, B256, U256};
+use rayon::slice::ParallelSliceMut;
+use reth_db_api::{
+    cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO, DbDupCursorRW},
+    models::{AccountBeforeTx, StorageBeforeTx},
+    tables,
+    transaction::{DbTx, DbTxMut},
+};
 use reth_execution_types::{
     BlockReverts, ExecutableBytecode, ExecutionAccountChangeRef, ExecutionAccountInfo,
     ExecutionAccountInfoRef, ExecutionStateChangeSink, ExecutionStateChangeSource,
     ExecutionStorageChange,
 };
-use reth_primitives_traits::{Account, Bytecode};
+use reth_primitives_traits::{Account, Bytecode, StorageEntry};
 use reth_storage_api::{
     OriginalValuesKnown, PlainStateReverts, PlainStorageChangeset, PlainStorageRevert,
-    RevertToSlot, StateChangeset,
+    RevertToSlot, StateChangeset, StateWriteConfig, StorageSettingsCache,
 };
+use reth_storage_errors::provider::ProviderResult;
 use std::{collections::BTreeMap, convert::Infallible};
 
 pub(crate) fn execution_state_and_reverts_to_plain_state_and_reverts<S>(
@@ -121,6 +134,176 @@ impl PlainStateInputOrder {
 
 pub(crate) fn is_sorted_by_key<T, K: Ord>(items: &[T], mut key: impl FnMut(&T) -> K) -> bool {
     items.windows(2).all(|window| key(&window[0]) <= key(&window[1]))
+}
+
+pub(crate) fn write_state_reverts_with_order<TX, N>(
+    provider: &DatabaseProvider<TX, N>,
+    reverts: PlainStateReverts,
+    first_block: BlockNumber,
+    config: StateWriteConfig,
+    input_order: PlainStateInputOrder,
+) -> ProviderResult<()>
+where
+    TX: DbTxMut + DbTx + 'static,
+    N: NodeTypesForProvider,
+{
+    if config.write_storage_changesets {
+        tracing::trace!("Writing storage changes");
+        let mut storages_cursor =
+            provider.tx_ref().cursor_dup_write::<tables::PlainStorageState>()?;
+        for (block_index, mut storage_changes) in reverts.storage.into_iter().enumerate() {
+            let block_number = first_block + block_index as BlockNumber;
+
+            tracing::trace!(block_number, "Writing block change");
+            if input_order.is_unsorted() {
+                storage_changes.par_sort_unstable_by_key(|a| a.address);
+            } else {
+                debug_assert!(is_sorted_by_key(&storage_changes, |change| change.address));
+            }
+
+            let total_changes =
+                storage_changes.iter().map(|change| change.storage_revert.len()).sum();
+            let mut changeset = Vec::with_capacity(total_changes);
+            for PlainStorageRevert { address, wiped, storage_revert } in storage_changes {
+                let mut storage = storage_revert
+                    .into_iter()
+                    .map(|(k, v)| (B256::from(k.to_be_bytes()), v))
+                    .collect::<Vec<_>>();
+                if input_order.is_unsorted() {
+                    storage.par_sort_unstable_by_key(|a| a.0);
+                } else {
+                    debug_assert!(is_sorted_by_key(&storage, |(key, _)| *key));
+                }
+
+                // If we are writing the primary storage wipe transition, the pre-existing
+                // storage state has to be taken from the database and written to storage
+                // history. See [StorageWipe::Primary] for more details.
+                //
+                // TODO(mediocregopher): This could be rewritten in a way which doesn't
+                // require collecting wiped entries into a Vec like this, see
+                // `write_storage_trie_changesets`.
+                let mut wiped_storage = Vec::new();
+                if wiped {
+                    tracing::trace!(?address, "Wiping storage");
+                    if let Some((_, entry)) = storages_cursor.seek_exact(address)? {
+                        wiped_storage.push((entry.key, entry.value));
+                        while let Some(entry) = storages_cursor.next_dup_val()? {
+                            wiped_storage.push((entry.key, entry.value))
+                        }
+                    }
+                }
+
+                tracing::trace!(?address, ?storage, "Writing storage reverts");
+                for (key, value) in StorageRevertsIter::new(storage, wiped_storage) {
+                    changeset.push(StorageBeforeTx { address, key, value });
+                }
+            }
+
+            let mut storage_changesets_writer =
+                EitherWriter::new_storage_changesets(provider, block_number)?;
+            storage_changesets_writer.append_storage_changeset_sorted(block_number, changeset)?;
+        }
+    }
+
+    if !config.write_account_changesets {
+        return Ok(())
+    }
+
+    tracing::trace!(?first_block, "Writing account changes");
+    for (block_index, mut account_block_reverts) in reverts.accounts.into_iter().enumerate() {
+        let block_number = first_block + block_index as BlockNumber;
+        if input_order.is_unsorted() {
+            account_block_reverts.par_sort_by_key(|(address, _)| *address);
+        } else {
+            debug_assert!(is_sorted_by_key(&account_block_reverts, |(address, _)| *address));
+        }
+
+        let changeset = account_block_reverts
+            .into_iter()
+            .map(|(address, info)| AccountBeforeTx { address, info })
+            .collect::<Vec<_>>();
+        let mut account_changesets_writer =
+            EitherWriter::new_account_changesets(provider, block_number)?;
+
+        account_changesets_writer.append_account_changeset_sorted(block_number, changeset)?;
+    }
+
+    Ok(())
+}
+
+pub(crate) fn write_state_changes_with_order<TX, N>(
+    provider: &DatabaseProvider<TX, N>,
+    mut changes: StateChangeset,
+    input_order: PlainStateInputOrder,
+) -> ProviderResult<()>
+where
+    TX: DbTxMut + DbTx + 'static,
+    N: NodeTypesForProvider,
+{
+    if !provider.cached_storage_settings().use_hashed_state() {
+        if input_order.is_unsorted() {
+            changes.accounts.par_sort_by_key(|a| a.0);
+            changes.storage.par_sort_by_key(|a| a.address);
+        } else {
+            debug_assert!(is_sorted_by_key(&changes.accounts, |(address, _)| *address));
+            debug_assert!(is_sorted_by_key(&changes.storage, |change| change.address));
+        }
+
+        tracing::trace!(len = changes.accounts.len(), "Writing new account state");
+        let mut accounts_cursor = provider.tx_ref().cursor_write::<tables::PlainAccountState>()?;
+        for (address, account) in changes.accounts {
+            if let Some(account) = account {
+                tracing::trace!(?address, "Updating plain state account");
+                accounts_cursor.upsert(address, &account)?;
+            } else if accounts_cursor.seek_exact(address)?.is_some() {
+                tracing::trace!(?address, "Deleting plain state account");
+                accounts_cursor.delete_current()?;
+            }
+        }
+
+        tracing::trace!(len = changes.storage.len(), "Writing new storage state");
+        let mut storages_cursor =
+            provider.tx_ref().cursor_dup_write::<tables::PlainStorageState>()?;
+        for PlainStorageChangeset { address, wipe_storage, storage } in changes.storage {
+            if wipe_storage && storages_cursor.seek_exact(address)?.is_some() {
+                storages_cursor.delete_current_duplicates()?;
+            }
+
+            let mut storage: Vec<StorageEntry> = storage
+                .into_iter()
+                .map(|(k, value)| StorageEntry { key: k.into(), value })
+                .collect::<Vec<_>>();
+            if input_order.is_unsorted() {
+                storage.par_sort_unstable_by_key(|a| a.key);
+            } else {
+                debug_assert!(is_sorted_by_key(&storage, |entry| entry.key));
+            }
+
+            for entry in storage {
+                tracing::trace!(?address, ?entry.key, "Updating plain state storage");
+                if let Some(db_entry) = storages_cursor.seek_by_key_subkey(address, entry.key)? &&
+                    db_entry.key == entry.key
+                {
+                    storages_cursor.delete_current()?;
+                }
+
+                if !entry.value.is_zero() {
+                    storages_cursor.upsert(address, &entry)?;
+                }
+            }
+        }
+    }
+
+    if input_order.is_unsorted() {
+        changes.contracts.par_sort_by_key(|a| a.0);
+    } else {
+        debug_assert!(is_sorted_by_key(&changes.contracts, |(code_hash, _)| *code_hash));
+    }
+
+    tracing::trace!(len = changes.contracts.len(), "Writing bytecodes");
+    provider.write_bytecodes(changes.contracts)?;
+
+    Ok(())
 }
 
 struct PlainStateSink {

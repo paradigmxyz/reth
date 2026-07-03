@@ -1,5 +1,4 @@
 use crate::{
-    changesets_utils::StorageRevertsIter,
     providers::{
         database::{chain::ChainStorage, metrics, DatabaseProviderMetrics},
         rocksdb::{PendingRocksDBBatches, RocksDBProvider, RocksDBWriteCtx},
@@ -12,7 +11,8 @@ use crate::{
     },
     writer::{
         execution_state_and_reverts_to_plain_state_and_reverts,
-        execution_state_to_plain_state_and_reverts, is_sorted_by_key, PlainStateInputOrder,
+        execution_state_to_plain_state_and_reverts, write_state_changes_with_order,
+        write_state_reverts_with_order, PlainStateInputOrder,
     },
     AccountReader, BlockBodyWriter, BlockExecutionWriter, BlockHashReader, BlockNumReader,
     BlockReader, BlockWriter, ChainStateBlockReader, ChainStateBlockWriter, DBProvider,
@@ -36,7 +36,6 @@ use alloy_primitives::{
 };
 use itertools::Itertools;
 use parking_lot::RwLock;
-use rayon::slice::ParallelSliceMut;
 use reth_chain_state::{ComputedTrieData, ExecutedBlock};
 use reth_chainspec::{ChainInfo, ChainSpecProvider, EthChainSpec};
 use reth_db_api::{
@@ -44,8 +43,7 @@ use reth_db_api::{
     database::{Database, ReaderTxnTracker},
     models::{
         sharded_key, storage_sharded_key::StorageShardedKey, AccountBeforeTx, BlockNumberAddress,
-        BlockNumberAddressRange, ShardedKey, StorageBeforeTx, StorageSettings,
-        StoredBlockBodyIndices,
+        BlockNumberAddressRange, ShardedKey, StorageSettings, StoredBlockBodyIndices,
     },
     table::Table,
     tables,
@@ -65,10 +63,12 @@ use reth_stages_types::{StageCheckpoint, StageId};
 use reth_static_file_types::StaticFileSegment;
 use reth_storage_api::{
     BlockBodyIndicesProvider, BlockBodyReader, MetadataProvider, MetadataWriter,
-    NodePrimitivesProvider, PlainStateReverts, PlainStorageChangeset, PlainStorageRevert,
-    StateChangeset, StateProvider, StateReader, StateWriteConfig, StorageChangeSetReader,
-    StoragePath, StorageSettingsCache, TryIntoHistoricalStateProvider, WriteStateInput,
+    NodePrimitivesProvider, PlainStateReverts, StateChangeset, StateProvider, StateReader,
+    StateWriteConfig, StorageChangeSetReader, StoragePath, StorageSettingsCache,
+    TryIntoHistoricalStateProvider, WriteStateInput,
 };
+#[cfg(test)]
+use reth_storage_api::{PlainStorageChangeset, PlainStorageRevert};
 use reth_storage_errors::provider::{ProviderResult, StaticFileWriterError};
 use reth_trie::{
     updates::{StorageTrieUpdatesSorted, TrieUpdatesSorted},
@@ -910,7 +910,7 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
     }
 
     /// Writes bytecodes to MDBX.
-    fn write_bytecodes(
+    pub(crate) fn write_bytecodes(
         &self,
         bytecodes: impl IntoIterator<Item = (B256, Bytecode)>,
     ) -> ProviderResult<()> {
@@ -2430,172 +2430,6 @@ impl<TX: DbTx + 'static, N: NodeTypes> StorageReader for DatabaseProvider<TX, N>
     }
 }
 
-impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> DatabaseProvider<TX, N> {
-    fn write_state_reverts_with_order(
-        &self,
-        reverts: PlainStateReverts,
-        first_block: BlockNumber,
-        config: StateWriteConfig,
-        input_order: PlainStateInputOrder,
-    ) -> ProviderResult<()> {
-        if config.write_storage_changesets {
-            tracing::trace!("Writing storage changes");
-            let mut storages_cursor =
-                self.tx_ref().cursor_dup_write::<tables::PlainStorageState>()?;
-            for (block_index, mut storage_changes) in reverts.storage.into_iter().enumerate() {
-                let block_number = first_block + block_index as BlockNumber;
-
-                tracing::trace!(block_number, "Writing block change");
-                if input_order.is_unsorted() {
-                    storage_changes.par_sort_unstable_by_key(|a| a.address);
-                } else {
-                    debug_assert!(is_sorted_by_key(&storage_changes, |change| change.address));
-                }
-
-                let total_changes =
-                    storage_changes.iter().map(|change| change.storage_revert.len()).sum();
-                let mut changeset = Vec::with_capacity(total_changes);
-                for PlainStorageRevert { address, wiped, storage_revert } in storage_changes {
-                    let mut storage = storage_revert
-                        .into_iter()
-                        .map(|(k, v)| (B256::from(k.to_be_bytes()), v))
-                        .collect::<Vec<_>>();
-                    if input_order.is_unsorted() {
-                        storage.par_sort_unstable_by_key(|a| a.0);
-                    } else {
-                        debug_assert!(is_sorted_by_key(&storage, |(key, _)| *key));
-                    }
-
-                    // If we are writing the primary storage wipe transition, the pre-existing
-                    // storage state has to be taken from the database and written to storage
-                    // history. See [StorageWipe::Primary] for more details.
-                    //
-                    // TODO(mediocregopher): This could be rewritten in a way which doesn't
-                    // require collecting wiped entries into a Vec like this, see
-                    // `write_storage_trie_changesets`.
-                    let mut wiped_storage = Vec::new();
-                    if wiped {
-                        tracing::trace!(?address, "Wiping storage");
-                        if let Some((_, entry)) = storages_cursor.seek_exact(address)? {
-                            wiped_storage.push((entry.key, entry.value));
-                            while let Some(entry) = storages_cursor.next_dup_val()? {
-                                wiped_storage.push((entry.key, entry.value))
-                            }
-                        }
-                    }
-
-                    tracing::trace!(?address, ?storage, "Writing storage reverts");
-                    for (key, value) in StorageRevertsIter::new(storage, wiped_storage) {
-                        changeset.push(StorageBeforeTx { address, key, value });
-                    }
-                }
-
-                let mut storage_changesets_writer =
-                    EitherWriter::new_storage_changesets(self, block_number)?;
-                storage_changesets_writer
-                    .append_storage_changeset_sorted(block_number, changeset)?;
-            }
-        }
-
-        if !config.write_account_changesets {
-            return Ok(())
-        }
-
-        tracing::trace!(?first_block, "Writing account changes");
-        for (block_index, mut account_block_reverts) in reverts.accounts.into_iter().enumerate() {
-            let block_number = first_block + block_index as BlockNumber;
-            if input_order.is_unsorted() {
-                account_block_reverts.par_sort_by_key(|(address, _)| *address);
-            } else {
-                debug_assert!(is_sorted_by_key(&account_block_reverts, |(address, _)| *address));
-            }
-
-            let changeset = account_block_reverts
-                .into_iter()
-                .map(|(address, info)| AccountBeforeTx { address, info })
-                .collect::<Vec<_>>();
-            let mut account_changesets_writer =
-                EitherWriter::new_account_changesets(self, block_number)?;
-
-            account_changesets_writer.append_account_changeset_sorted(block_number, changeset)?;
-        }
-
-        Ok(())
-    }
-
-    fn write_state_changes_with_order(
-        &self,
-        mut changes: StateChangeset,
-        input_order: PlainStateInputOrder,
-    ) -> ProviderResult<()> {
-        if !self.cached_storage_settings().use_hashed_state() {
-            if input_order.is_unsorted() {
-                changes.accounts.par_sort_by_key(|a| a.0);
-                changes.storage.par_sort_by_key(|a| a.address);
-            } else {
-                debug_assert!(is_sorted_by_key(&changes.accounts, |(address, _)| *address));
-                debug_assert!(is_sorted_by_key(&changes.storage, |change| change.address));
-            }
-
-            tracing::trace!(len = changes.accounts.len(), "Writing new account state");
-            let mut accounts_cursor = self.tx_ref().cursor_write::<tables::PlainAccountState>()?;
-            for (address, account) in changes.accounts {
-                if let Some(account) = account {
-                    tracing::trace!(?address, "Updating plain state account");
-                    accounts_cursor.upsert(address, &account)?;
-                } else if accounts_cursor.seek_exact(address)?.is_some() {
-                    tracing::trace!(?address, "Deleting plain state account");
-                    accounts_cursor.delete_current()?;
-                }
-            }
-
-            tracing::trace!(len = changes.storage.len(), "Writing new storage state");
-            let mut storages_cursor =
-                self.tx_ref().cursor_dup_write::<tables::PlainStorageState>()?;
-            for PlainStorageChangeset { address, wipe_storage, storage } in changes.storage {
-                if wipe_storage && storages_cursor.seek_exact(address)?.is_some() {
-                    storages_cursor.delete_current_duplicates()?;
-                }
-
-                let mut storage = storage
-                    .into_iter()
-                    .map(|(k, value)| StorageEntry { key: k.into(), value })
-                    .collect::<Vec<_>>();
-                if input_order.is_unsorted() {
-                    storage.par_sort_unstable_by_key(|a| a.key);
-                } else {
-                    debug_assert!(is_sorted_by_key(&storage, |entry| entry.key));
-                }
-
-                for entry in storage {
-                    tracing::trace!(?address, ?entry.key, "Updating plain state storage");
-                    if let Some(db_entry) =
-                        storages_cursor.seek_by_key_subkey(address, entry.key)? &&
-                        db_entry.key == entry.key
-                    {
-                        storages_cursor.delete_current()?;
-                    }
-
-                    if !entry.value.is_zero() {
-                        storages_cursor.upsert(address, &entry)?;
-                    }
-                }
-            }
-        }
-
-        if input_order.is_unsorted() {
-            changes.contracts.par_sort_by_key(|a| a.0);
-        } else {
-            debug_assert!(is_sorted_by_key(&changes.contracts, |(code_hash, _)| *code_hash));
-        }
-
-        tracing::trace!(len = changes.contracts.len(), "Writing bytecodes");
-        self.write_bytecodes(changes.contracts)?;
-
-        Ok(())
-    }
-}
-
 impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
     for DatabaseProvider<TX, N>
 {
@@ -2653,8 +2487,8 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
             }
         };
 
-        self.write_state_reverts_with_order(reverts, first_block, config, reverts_order)?;
-        self.write_state_changes_with_order(plain_state, plain_state_order)?;
+        write_state_reverts_with_order(self, reverts, first_block, config, reverts_order)?;
+        write_state_changes_with_order(self, plain_state, plain_state_order)?;
 
         if !config.write_receipts {
             return Ok(());
@@ -2751,7 +2585,8 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
         first_block: BlockNumber,
         config: StateWriteConfig,
     ) -> ProviderResult<()> {
-        self.write_state_reverts_with_order(
+        write_state_reverts_with_order(
+            self,
             reverts,
             first_block,
             config,
@@ -2760,7 +2595,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
     }
 
     fn write_state_changes(&self, changes: StateChangeset) -> ProviderResult<()> {
-        self.write_state_changes_with_order(changes, PlainStateInputOrder::Unsorted)
+        write_state_changes_with_order(self, changes, PlainStateInputOrder::Unsorted)
     }
 
     #[instrument(level = "debug", target = "providers::db", skip_all)]
