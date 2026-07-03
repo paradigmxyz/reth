@@ -543,11 +543,12 @@ mod tests {
         assert!(evm_config.jit_backend().is_some());
         assert!(!evm_config.executor_factory.evm_factory().jit_support_enabled());
 
-        let evm_config = evm_config.with_jit_support();
-        assert!(evm_config.executor_factory.evm_factory().jit_support_enabled());
-
-        let evm_config = evm_config.with_jit_support_enabled(false);
+        let jit_evm_config = evm_config.clone().with_jit_support();
+        assert!(jit_evm_config.executor_factory.evm_factory().jit_support_enabled());
         assert!(!evm_config.executor_factory.evm_factory().jit_support_enabled());
+
+        let jit_evm_config = jit_evm_config.with_jit_support_enabled(false);
+        assert!(!jit_evm_config.executor_factory.evm_factory().jit_support_enabled());
     }
 
     #[cfg(feature = "jit")]

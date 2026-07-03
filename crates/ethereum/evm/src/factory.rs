@@ -1,11 +1,8 @@
 #[cfg(feature = "jit")]
 use alloc::string::String;
 use alloc::{boxed::Box, sync::Arc};
-use core::fmt::Debug;
-#[cfg(feature = "jit")]
-use core::sync::atomic::{AtomicBool, Ordering};
-
 use alloy_consensus::Header;
+use core::fmt::Debug;
 use reth_chainspec::{ChainSpec, EthChainSpec};
 #[cfg(feature = "std")]
 use reth_evm::precompile_cache::{CachedPrecompileProvider, PrecompileCacheMap};
@@ -266,7 +263,7 @@ pub struct RethEvmFactory {
     #[cfg(feature = "jit")]
     metrics: JitMetrics,
     #[cfg(feature = "jit")]
-    jit_support: Arc<AtomicBool>,
+    jit_support: bool,
 }
 
 impl Default for RethEvmFactory {
@@ -299,7 +296,7 @@ impl RethEvmFactory {
 
     /// Creates a new factory configuration that owns the backend and records metrics.
     pub fn new_with_metrics(backend: JitBackend, metrics: JitMetrics) -> Self {
-        Self { backend, metrics, jit_support: Arc::new(AtomicBool::new(false)) }
+        Self { backend, metrics, jit_support: false }
     }
 
     /// Returns a reference to the JIT backend.
@@ -308,13 +305,13 @@ impl RethEvmFactory {
     }
 
     /// Enables or disables local JIT support for subsequently created EVMs.
-    pub fn set_jit_support(&self, enabled: bool) {
-        self.jit_support.store(enabled, Ordering::Relaxed);
+    pub const fn set_jit_support(&mut self, enabled: bool) {
+        self.jit_support = enabled;
     }
 
     /// Returns whether subsequently created EVMs install the JIT interpreter runner.
-    pub fn jit_support_enabled(&self) -> bool {
-        self.jit_support.load(Ordering::Relaxed)
+    pub const fn jit_support_enabled(&self) -> bool {
+        self.jit_support
     }
 
     /// Installs the evm2 JIT interpreter runner on a configured EVM if locally enabled.
@@ -352,9 +349,7 @@ impl RethEvmFactory {
 #[cfg(feature = "jit")]
 impl reth_evm::JitBackend for RethEvmFactory {
     fn set_enabled(&self, enabled: bool) -> Result<(), String> {
-        self.backend.set_enabled(enabled).map_err(|err| err.to_string())?;
-        self.set_jit_support(enabled);
-        Ok(())
+        self.backend.set_enabled(enabled).map_err(|err| err.to_string())
     }
 
     fn pause(&self) {
