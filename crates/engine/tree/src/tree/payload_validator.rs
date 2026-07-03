@@ -132,7 +132,7 @@ use reth_engine_primitives::{
 use reth_errors::{BlockExecutionError, ProviderResult};
 use reth_evm::{
     database::StateProviderDatabase,
-    execute::{BlockExecutor, ExecutableTxFor, HashedStateMode, RecoveredTx},
+    execute::{BlockExecutor, BlockExecutorFactory, ExecutableTxFor, HashedStateMode, RecoveredTx},
     ConfigureEvm, EvmEnvFor, ExecutionCtxFor,
 };
 use reth_execution_cache::{CacheFillMode, CacheStats, SavedCache};
@@ -1162,7 +1162,7 @@ where
                 };
                 let db = StateProviderDatabase::new(state_provider);
                 let evm = self.evm_config.evm_with_env(db, env.evm_env.clone());
-                let mut executor = self.evm_config.create_executor_with_hashed_state_mode(
+                let mut executor = self.evm_config.block_executor_factory().create_executor(
                     evm,
                     execution_ctx,
                     hashed_state_mode,

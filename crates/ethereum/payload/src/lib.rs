@@ -224,23 +224,25 @@ where
     } else {
         HashedStateMode::OutputOnly
     };
-    let mut builder = evm_config
-        .builder_for_next_block_with_hashed_state_mode(
-            cached_db,
-            &parent_header,
-            NextBlockEnvAttributes {
-                timestamp: attributes.timestamp(),
-                suggested_fee_recipient: attributes.suggested_fee_recipient,
-                prev_randao: attributes.prev_randao,
-                gas_limit,
-                parent_beacon_block_root: attributes.parent_beacon_block_root(),
-                withdrawals: attributes.withdrawals.clone().map(Into::into),
-                extra_data: builder_config.extra_data.clone(),
-                slot_number: attributes.slot_number(),
-            },
-            hashed_state_mode,
-        )
+    let next_block_env_attributes = NextBlockEnvAttributes {
+        timestamp: attributes.timestamp(),
+        suggested_fee_recipient: attributes.suggested_fee_recipient,
+        prev_randao: attributes.prev_randao,
+        gas_limit,
+        parent_beacon_block_root: attributes.parent_beacon_block_root(),
+        withdrawals: attributes.withdrawals.clone().map(Into::into),
+        extra_data: builder_config.extra_data.clone(),
+        slot_number: attributes.slot_number(),
+    };
+    let evm_env = evm_config
+        .next_evm_env(&parent_header, &next_block_env_attributes)
         .map_err(PayloadBuilderError::other)?;
+    let evm = evm_config.evm_with_env(cached_db, evm_env.clone());
+    let ctx = evm_config
+        .context_for_next_block(&parent_header, next_block_env_attributes)
+        .map_err(PayloadBuilderError::other)?;
+    let mut builder =
+        evm_config.create_block_builder(evm, evm_env, &parent_header, ctx, hashed_state_mode);
 
     let use_sparse_trie =
         if let Some(handle) = trie_handle.as_ref().filter(|_| stream_state_updates) {
