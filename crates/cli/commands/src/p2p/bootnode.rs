@@ -15,7 +15,7 @@ use std::{
     path::PathBuf,
     sync::Arc,
 };
-use tokio::{net::UdpSocket, select, sync::mpsc};
+use tokio::{net::UdpSocket, select};
 use tokio_stream::StreamExt;
 use tracing::info;
 
@@ -42,7 +42,7 @@ pub struct Command {
     #[arg(long, default_value = "any")]
     pub nat: Vec<NatResolver>,
 
-    /// Run a discv5 bootnode alongside discv4 on the same UDP port (`--addr`).
+    /// Also run discv5, sharing the discv4 UDP port (`--addr`).
     #[arg(long)]
     pub v5: bool,
 }
@@ -60,14 +60,10 @@ impl Command {
 
         let discv4_config = self.discv4_config(&nat);
 
-        // Keep the discv5 service and its forwarder task alive for the event loop lifetime.
-        let mut discv5_updates = None;
-        let mut _discv5 = None;
-        let mut _discv5_forwarder = None;
-
         // In v5 mode discv4 and discv5 share a single UDP socket: discv5 owns the read loop and
-        // discv4 packets surface as `UnrecognizedFrame`s forwarded to its ingress.
-        let (_discv4, mut discv4_service) = if self.v5 {
+        // discv4 packets surface as `UnrecognizedFrame`s forwarded to its ingress. The discv5
+        // service must be kept alive for the event loop lifetime.
+        let (_discv4, mut discv4_service, _discv5, mut discv5_forwarder) = if self.v5 {
             let shared_socket = bind_socket(self.addr).await?;
             // Actual port, so an ephemeral `--addr` port (`:0`) still yields one shared port.
             let shared_port = shared_socket.local_addr()?.port();
@@ -100,36 +96,28 @@ impl Command {
             let (discv5, mut updates) = Discv5::start(&sk, discv5_config).await?;
             log_discv5_enr(&discv5);
 
-            // A dedicated task drains discv5 events so discv4 frame forwarding is independent of
-            // the logging loop; dropping log events under load beats stalling frame forwarding.
-            let (tx, rx) = mpsc::channel(updates.max_capacity());
+            // A dedicated task forwards discv4 frames to their ingress and logs discv5 sessions.
             let forwarder = tokio::spawn(async move {
                 while let Some(event) = updates.recv().await {
                     match event {
                         Event::UnrecognizedFrame(frame) => {
-                            ingress.handle_packet(&frame.packet, frame.src_address).await;
+                            ingress.handle_packet(&frame.packet, frame.src_address).await
                         }
-                        // Only sessions are logged; don't let other events fill the channel.
-                        event @ Event::SessionEstablished(..) => {
-                            if let Err(mpsc::error::TrySendError::Closed(_)) = tx.try_send(event) {
-                                break;
-                            }
+                        Event::SessionEstablished(enr, _) => {
+                            info!("(Discv5) new peer added, peer_id={:?}", enr.id())
                         }
                         _ => {}
                     }
                 }
+                info!("(Discv5) update stream ended.");
             });
 
-            _discv5 = Some(discv5);
-            discv5_updates = Some(rx);
-            _discv5_forwarder = Some(forwarder);
-
-            (discv4, discv4_service)
+            (discv4, discv4_service, Some(discv5), Some(forwarder))
         } else {
             let (discv4, discv4_service) =
                 Discv4::bind(self.addr, local_enr, sk, discv4_config).await?;
             info!("Started discv4 at address: {local_enr:?}");
-            (discv4, discv4_service)
+            (discv4, discv4_service, None, None)
         };
 
         let mut discv4_updates = discv4_service.update_stream();
@@ -154,24 +142,14 @@ impl Command {
                         break;
                     }
                 }
-                update = async {
-                    if let Some(updates) = &mut discv5_updates {
-                        updates.recv().await
+                // discv5 logging lives in the forwarder task; end the loop when it exits.
+                _ = async {
+                    if let Some(forwarder) = &mut discv5_forwarder {
+                        let _ = forwarder.await;
                     } else {
-                        futures::future::pending().await
+                        futures::future::pending::<()>().await
                     }
-                } => {
-                    match update {
-                        Some(Event::SessionEstablished(enr, _)) => {
-                            info!("(Discv5) new peer added, peer_id={:?}", enr.id());
-                        }
-                        Some(_) => {}
-                        None => {
-                            info!("(Discv5) update stream ended.");
-                            break;
-                        }
-                    }
-                }
+                } => break,
             }
         }
 
@@ -195,7 +173,7 @@ impl Command {
         match self.nat.as_slice() {
             [] => Ok(BootnodeNat::single(NatResolver::Any, self.addr.port())),
             [nat] => {
-                let single = BootnodeNat::single(nat.clone(), self.addr.port());
+                let mut single = BootnodeNat::single(nat.clone(), self.addr.port());
                 // A static IP (`extip`/`extaddr`) of the opposite family to `--addr` can't drive
                 // discv4 (it binds only the `--addr` family): advertise it via discv5 only, and
                 // use `None` rather than `Any` so discv4 doesn't silently auto-resolve an address
@@ -203,10 +181,7 @@ impl Command {
                 if let [ip] = single.advertised_ips[..] &&
                     ip.is_ipv4() != self.addr.is_ipv4()
                 {
-                    return Ok(BootnodeNat {
-                        resolver: NatResolver::None,
-                        advertised_ips: vec![ip],
-                    });
+                    single.resolver = NatResolver::None;
                 }
                 Ok(single)
             }
@@ -236,8 +211,8 @@ impl Command {
     }
 
     fn discv5_config(&self, nat: &BootnodeNat) -> Config {
-        // A discovery-only bootnode serves no RLPx, so the ENR advertises `tcp=0` (enode
-        // `:0?discport=<udp>`); the discovery listen port is set from `--addr` below.
+        // Discovery-only bootnode: no RLPx, so the ENR carries `tcp=0`; the discovery listen
+        // port is set from `--addr` below.
         let mut builder = Config::builder(SocketAddr::new(self.addr.ip(), 0));
 
         // discv5 shares discv4's UDP port.
@@ -525,7 +500,7 @@ mod tests {
         assert_eq!(enr.ip6(), Some("2001:db8::1".parse().unwrap()));
         assert_eq!(enr.udp4(), Some(45678));
         assert_eq!(enr.udp6(), Some(45678));
-        // A discovery-only bootnode serves no RLPx, so the ENR advertises `tcp=0`.
+        // No RLPx: tcp=0.
         assert_eq!(enr.tcp4(), Some(0));
         assert_eq!(enr.tcp6(), None);
 
