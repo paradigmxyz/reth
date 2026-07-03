@@ -170,16 +170,32 @@ async fn partial_stateless_exex<
             target: "partial_stateless",
             "Full-witness baseline comparison ENABLED (PS_WITNESS_BASELINE) — extra multiproof per block"
         );
+    }
+
+    // Optional per-thread resource metrics (CPU time + page faults) captured
+    // around the cold multiproof, to attribute its cost between compute and
+    // disk I/O. Off by default and gated behind `PS_RESOURCE_METRICS`; when
+    // disabled the getrusage syscalls are skipped and the metric fields stay None.
+    let resource_metrics = std::env::var("PS_RESOURCE_METRICS")
+        .map(|v| matches!(v.as_str(), "1" | "true" | "TRUE" | "yes" | "on"))
+        .unwrap_or(false);
+    if resource_metrics {
+        info!(
+            target: "partial_stateless",
+            "Per-thread resource metrics ENABLED (PS_RESOURCE_METRICS) — cpu_time_ms + major/minor_page_faults per block"
+        );
+        #[cfg(not(target_os = "linux"))]
         warn!(
             target: "partial_stateless",
-            "PS_WITNESS_BASELINE runs before the partial multiproof; resource/page-fault metrics for the partial proof may be lower because the full baseline can warm the OS page cache"
+            "Per-thread CPU/page-fault metrics require Linux RUSAGE_THREAD; this platform will log default zeros for cpu_time_ms, major_page_faults, and minor_page_faults"
         );
+        if compute_baseline {
+            warn!(
+                target: "partial_stateless",
+                "PS_WITNESS_BASELINE runs before the partial multiproof; resource/page-fault metrics for the partial proof may be lower because the full baseline can warm the OS page cache"
+            );
+        }
     }
-    #[cfg(not(target_os = "linux"))]
-    warn!(
-        target: "partial_stateless",
-        "Per-thread CPU/page-fault metrics require Linux RUSAGE_THREAD; this platform will log default zeros for cpu_time_ms, major_page_faults, and minor_page_faults"
-    );
 
     while let Some(notification) = ctx.notifications.try_next().await? {
         match &notification {
@@ -361,19 +377,23 @@ async fn partial_stateless_exex<
 
                         // Snapshot per-thread CPU + page faults so we can attribute the
                         // cold multiproof cost (compute-bound vs I/O/swap-bound) per block.
-                        let (cpu_us_before, majflt_before, minflt_before) = thread_rusage();
+                        // Gated behind PS_RESOURCE_METRICS; when disabled the getrusage
+                        // syscalls are skipped and the metric fields stay None.
+                        let rusage_before = resource_metrics.then(thread_rusage);
                         let start = Instant::now();
                         // Compute multiproof with empty TrieInput (proof against DB state)
                         match state_provider.multiproof(TrieInput::default(), targets) {
                             Ok(proof) => {
                                 let elapsed_ms = start.elapsed().as_millis() as u64;
-                                let (cpu_us_after, majflt_after, minflt_after) = thread_rusage();
 
                                 let mut result = measure_multiproof_size(&proof, missed_bytecode_bytes);
                                 result.computation_time_ms = Some(elapsed_ms);
-                                result.cpu_time_ms = Some(cpu_us_after.saturating_sub(cpu_us_before) / 1000);
-                                result.major_page_faults = Some(majflt_after.saturating_sub(majflt_before));
-                                result.minor_page_faults = Some(minflt_after.saturating_sub(minflt_before));
+                                if let Some((cpu_us_before, majflt_before, minflt_before)) = rusage_before {
+                                    let (cpu_us_after, majflt_after, minflt_after) = thread_rusage();
+                                    result.cpu_time_ms = Some(cpu_us_after.saturating_sub(cpu_us_before) / 1000);
+                                    result.major_page_faults = Some(majflt_after.saturating_sub(majflt_before));
+                                    result.minor_page_faults = Some(minflt_after.saturating_sub(minflt_before));
+                                }
                                 result.target_accounts = target_accounts;
                                 result.target_storage_slots = target_slots;
 
