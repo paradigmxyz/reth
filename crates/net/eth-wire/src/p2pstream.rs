@@ -994,6 +994,12 @@ mod tests {
     }
 
     #[test]
+    fn snappy_ping_pong_consts_match_rlp_encoding() {
+        assert_eq!(alloy_rlp::encode(P2PMessage::Ping).as_slice(), SNAPPY_PING_MESSAGE);
+        assert_eq!(alloy_rlp::encode(P2PMessage::Pong).as_slice(), SNAPPY_PONG_MESSAGE);
+    }
+
+    #[test]
     fn snappy_decode_encode_ping() {
         let snappy_ping = b"\x02\x01\0\xc0";
         let ping = P2PMessage::decode(&mut &snappy_ping[..]).unwrap();
