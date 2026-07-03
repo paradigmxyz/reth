@@ -739,7 +739,7 @@ where
                 let (trie, deferred) = task.into_cleared_trie();
                 guard.clear();
                 drop(guard);
-                drop(trie);
+                executor.spawn_drop(trie);
                 executor.spawn_drop(deferred);
                 return;
             }
@@ -748,6 +748,7 @@ where
             // A failed computation may have left the trie in a partially updated state.
             let _enter =
                 debug_span!(target: "engine::tree::payload_processor", "preserve").entered();
+            let mut trie_to_drop = None;
             let deferred = if let Some(result) = task_result {
                 let start = Instant::now();
                 let (mut trie, deferred) = task.into_trie_for_reuse();
@@ -777,10 +778,13 @@ where
                 );
                 let (trie, deferred) = task.into_cleared_trie();
                 guard.clear();
-                drop(trie);
+                trie_to_drop = Some(trie);
                 deferred
             };
             drop(guard);
+            if let Some(trie) = trie_to_drop {
+                executor.spawn_drop(trie);
+            }
             executor.spawn_drop(deferred);
         });
     }

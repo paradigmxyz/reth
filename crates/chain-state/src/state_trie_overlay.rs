@@ -93,21 +93,9 @@ impl<N: NodePrimitives> StateTrieOverlayManager<N> {
         self.preserved_sparse_trie.lock().take()
     }
 
-    /// Returns true if the sparse trie is or was anchored to the given parent block.
-    pub fn sparse_trie_is_based_on_parent<H: AlloyBlockHeader>(&self, parent: &H) -> bool {
-        self.sparse_trie_is_based_on_parent_state_root(parent.state_root())
-    }
-
-    /// Returns true if the sparse trie is or was anchored to the given in-memory parent block.
-    pub fn sparse_trie_is_based_on_parent_hash(&self, parent_hash: B256) -> bool {
-        self.blocks.get(&parent_hash).is_some_and(|parent| {
-            self.sparse_trie_is_based_on_parent_state_root(parent.recovered_block().state_root())
-        })
-    }
-
-    /// Returns true if the sparse trie is or was anchored to the given parent state root.
-    pub fn sparse_trie_is_based_on_parent_state_root(&self, parent_state_root: B256) -> bool {
-        self.preserved_sparse_trie.lock().is_based_on_parent_state_root(parent_state_root)
+    /// Returns the state root that the sparse trie is or was anchored to.
+    pub fn parent_sparse_trie_state_root(&self) -> Option<B256> {
+        self.preserved_sparse_trie.lock().state_root()
     }
 
     /// Acquires a guard that blocks taking the trie until dropped.
@@ -737,12 +725,12 @@ mod tests {
             guard.store(PreservedSparseTrie::anchored(SparseTrie::default(), state_root));
         }
 
-        assert!(manager.sparse_trie_is_based_on_parent_state_root(state_root));
-        assert!(!manager.sparse_trie_is_based_on_parent_state_root(other_state_root));
+        assert_eq!(manager.parent_sparse_trie_state_root(), Some(state_root));
+        assert_ne!(manager.parent_sparse_trie_state_root(), Some(other_state_root));
 
         let preserved = manager.take_sparse_trie().expect("preserved trie should be available");
         assert_eq!(preserved.state_root(), state_root);
-        assert!(manager.sparse_trie_is_based_on_parent_state_root(state_root));
+        assert_eq!(manager.parent_sparse_trie_state_root(), Some(state_root));
         assert!(preserved.into_trie_for(other_state_root).is_none());
         assert!(manager.take_sparse_trie().is_none());
 
@@ -751,7 +739,7 @@ mod tests {
             guard.clear();
         }
 
-        assert!(!manager.sparse_trie_is_based_on_parent_state_root(state_root));
+        assert_eq!(manager.parent_sparse_trie_state_root(), None);
     }
 
     #[test]

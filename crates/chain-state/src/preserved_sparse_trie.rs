@@ -82,11 +82,6 @@ impl PreservedSparseTrieState {
             Self::InUse { state_root } => Some(*state_root),
         }
     }
-
-    /// Returns true if the sparse trie is or was anchored to the given parent state root.
-    pub(crate) fn is_based_on_parent_state_root(&self, parent_state_root: B256) -> bool {
-        self.state_root().is_some_and(|state_root| state_root == parent_state_root)
-    }
 }
 
 /// A preserved sparse trie that can be reused across payload validations.
@@ -113,11 +108,6 @@ impl PreservedSparseTrie {
     /// Returns the state root this trie is anchored to.
     pub const fn state_root(&self) -> B256 {
         self.state_root
-    }
-
-    /// Returns true if this trie is anchored to the given parent state root.
-    pub fn is_based_on_parent_state_root(&self, parent_state_root: B256) -> bool {
-        self.state_root == parent_state_root
     }
 
     /// Consumes self and returns the trie if it can be reused for the parent state root.

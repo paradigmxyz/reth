@@ -244,7 +244,7 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
 
         match &self.overlay_source {
             Some(OverlaySource::Managed { manager, state }) if state.is_empty() => {
-                manager.sparse_trie_is_based_on_parent_state_root(parent_state_root)
+                manager.parent_sparse_trie_state_root() == Some(parent_state_root)
             }
             _ => false,
         }
