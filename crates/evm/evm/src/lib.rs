@@ -160,9 +160,6 @@ impl EvmTransactionValidationGasRules {
 
 /// Resolved EVM environment data needed by the EVM execution path.
 pub trait EvmEnv: Debug + Clone + Send + Sync + 'static {
-    /// Returns the EVM block environment.
-    fn block_env(&self) -> evm2::env::BlockEnv;
-
     /// Returns transaction validation limits active in this environment.
     fn transaction_validation_limits(&self) -> EvmTransactionValidationLimits;
 

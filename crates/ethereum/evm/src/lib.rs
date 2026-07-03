@@ -71,10 +71,6 @@ impl Default for EthEvmEnv {
 }
 
 impl EvmEnv for EthEvmEnv {
-    fn block_env(&self) -> evm2::env::BlockEnv {
-        self.block
-    }
-
     fn transaction_validation_limits(&self) -> reth_evm::EvmTransactionValidationLimits {
         let tx_gas_limit_cap = if self.version.feature(evm2::EvmFeatures::EIP8037) ||
             self.version.tx_gas_limit_cap == u64::MAX
