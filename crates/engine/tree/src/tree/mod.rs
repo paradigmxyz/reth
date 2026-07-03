@@ -2140,10 +2140,15 @@ where
 
         let finalized = self.state.forkchoice_state_tracker.last_valid_finalized();
         self.remove_before(self.persistence_state.last_persisted_block, finalized)?;
-        self.canonical_in_memory_state.remove_persisted_blocks(BlockNumHash {
-            number: self.persistence_state.last_persisted_block.number,
-            hash: self.persistence_state.last_persisted_block.hash,
-        });
+        let deferred_drop = self
+            .canonical_in_memory_state
+            .remove_persisted_blocks_with_deferred_drop(BlockNumHash {
+                number: self.persistence_state.last_persisted_block.number,
+                hash: self.persistence_state.last_persisted_block.hash,
+            });
+        if !deferred_drop.is_empty() {
+            self.runtime.spawn_drop(deferred_drop);
+        }
         self.pending_sparse_trie_prune = self.sparse_trie_retained_paths_for_in_memory_blocks();
         Ok(())
     }

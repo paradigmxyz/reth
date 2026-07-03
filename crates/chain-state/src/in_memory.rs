@@ -317,6 +317,17 @@ impl<N: NodePrimitives> CanonicalInMemoryState<N> {
     /// This will update the links between blocks and remove all blocks that are [..
     /// `persisted_height`].
     pub fn remove_persisted_blocks(&self, persisted_num_hash: BlockNumHash) {
+        drop(self.remove_persisted_blocks_with_deferred_drop(persisted_num_hash));
+    }
+
+    /// Removes persisted blocks and returns the drained old block-state graph for deferred drop.
+    ///
+    /// The in-memory state is updated before this returns. Callers on latency-sensitive threads can
+    /// move the returned states elsewhere for deallocation.
+    pub fn remove_persisted_blocks_with_deferred_drop(
+        &self,
+        persisted_num_hash: BlockNumHash,
+    ) -> Vec<Arc<BlockState<N>>> {
         self.set_persisted(persisted_num_hash);
         // if the persisted hash is not in the canonical in memory state, do nothing, because it
         // means canonical blocks were not actually persisted.
@@ -325,11 +336,11 @@ impl<N: NodePrimitives> CanonicalInMemoryState<N> {
         {
             if self.inner.in_memory_state.blocks.read().get(&persisted_num_hash.hash).is_none() {
                 // do nothing
-                return
+                return Vec::new()
             }
         }
 
-        {
+        let drained_block_states = {
             // acquire locks, starting with the numbers lock
             let mut numbers = self.inner.in_memory_state.numbers.write();
             let mut blocks = self.inner.in_memory_state.blocks.write();
@@ -339,12 +350,13 @@ impl<N: NodePrimitives> CanonicalInMemoryState<N> {
             // clear all numbers
             numbers.clear();
 
-            // drain all blocks and only keep the ones that are not persisted (below the persisted
-            // height)
-            let mut old_blocks = blocks
-                .drain()
-                .filter(|(_, b)| b.block_ref().recovered_block().number() > persisted_height)
-                .map(|(_, b)| b.block.clone())
+            let drained_block_states = blocks.drain().map(|(_, block)| block).collect::<Vec<_>>();
+
+            // Rebuild the remaining blocks above the persisted height from the drained graph.
+            let mut old_blocks = drained_block_states
+                .iter()
+                .filter(|block| block.block_ref().recovered_block().number() > persisted_height)
+                .map(|block| block.block.clone())
                 .collect::<Vec<_>>();
 
             // sort the blocks by number so we can insert them back in natural order (low -> high)
@@ -368,8 +380,10 @@ impl<N: NodePrimitives> CanonicalInMemoryState<N> {
                     p.parent = blocks.get(&p.block_ref().recovered_block().parent_hash()).cloned();
                 }
             });
-        }
+            drained_block_states
+        };
         self.inner.in_memory_state.update_metrics();
+        drained_block_states
     }
 
     /// Returns in memory state corresponding the given hash.
@@ -1444,6 +1458,33 @@ mod tests {
         assert_eq!(chain[0].number(), 3);
         assert_eq!(chain[1].number(), 2);
         assert_eq!(chain[2].number(), 1);
+    }
+
+    #[test]
+    fn test_remove_persisted_blocks_returns_deferred_drop_graph() {
+        let mut parent_hash = B256::random();
+        let mut block_builder = TestBlockBuilder::eth();
+        let state: CanonicalInMemoryState = CanonicalInMemoryState::empty();
+        let mut num_hashes = Vec::new();
+
+        for number in 1..=3 {
+            let block = block_builder.get_executed_block_with_number(number, parent_hash);
+            let num_hash = block.recovered_block().num_hash();
+            state.update_blocks(Some(block), None);
+            parent_hash = num_hash.hash;
+            num_hashes.push(num_hash);
+        }
+
+        let old_head = state.head_state().unwrap();
+        let deferred_drop = state.remove_persisted_blocks_with_deferred_drop(num_hashes[1]);
+
+        assert_eq!(deferred_drop.len(), 3);
+        assert!(deferred_drop.iter().any(|block| Arc::ptr_eq(block, &old_head)));
+        assert!(state.state_by_number(1).is_none());
+        assert!(state.state_by_number(2).is_none());
+        let new_head = state.state_by_number(3).unwrap();
+        assert_eq!(new_head.hash(), num_hashes[2].hash);
+        assert!(!Arc::ptr_eq(&new_head, &old_head));
     }
 
     // ensures the pending block is not part of the canonical chain
