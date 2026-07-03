@@ -125,8 +125,7 @@ use crate::tree::{
 use alloy_consensus::constants::KECCAK_EMPTY;
 use alloy_primitives::Address;
 use reth_chain_state::{
-    CanonicalInMemoryState, DeferredTrieData, ExecutedBlock, ExecutionTimingStats,
-    StateTrieOverlayManager,
+    CanonicalInMemoryState, ExecutedBlock, ExecutionTimingStats, StateTrieOverlayManager,
 };
 use reth_consensus::{ConsensusError, FullConsensus, ReceiptRootBloom};
 use reth_engine_primitives::{
@@ -156,7 +155,7 @@ use reth_provider::{
 use reth_revm::db::{states::bundle_state::BundleRetention, BundleAccount, State};
 use reth_trie::{
     hashed_cursor::HashedCursorFactory, prefix_set::TriePrefixSetsMut,
-    trie_cursor::TrieCursorFactory, updates::TrieUpdates, HashedPostState,
+    trie_cursor::TrieCursorFactory, updates::TrieUpdates, HashedPostState, LazyTrieData,
 };
 use reth_trie_db::ChangesetCache;
 use std::{
@@ -1465,7 +1464,7 @@ where
             Err(handle) => handle.get().clone(),
         };
         let (deferred_trie_data, deferred_trie_task) =
-            DeferredTrieData::pending(hashed_state, trie_output, changed_paths);
+            LazyTrieData::pending(hashed_state, trie_output, changed_paths);
         let block_validation_metrics = self.metrics.block_validation.clone();
 
         // Capture block info for tracing.
@@ -1489,10 +1488,10 @@ where
             // Record sizes of the computed trie data
             block_validation_metrics
                 .hashed_post_state_size
-                .record(computed.hashed_state.total_len() as f64);
+                .record(computed.sorted.hashed_state.total_len() as f64);
             block_validation_metrics
                 .trie_updates_sorted_size
-                .record(computed.trie_updates.total_len() as f64);
+                .record(computed.sorted.trie_updates.total_len() as f64);
         };
 
         // Spawn task that computes trie data asynchronously.
