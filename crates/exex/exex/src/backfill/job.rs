@@ -211,7 +211,7 @@ where
 
         let block_execution_output = self
             .evm_config
-            .executor(StateProviderDatabase::new(
+            .batch_executor(StateProviderDatabase::new(
                 self.provider
                     .history_by_block_number(block_number.saturating_sub(1))
                     .map_err(BlockExecutionError::other)?,
