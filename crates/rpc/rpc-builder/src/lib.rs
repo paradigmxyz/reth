@@ -347,7 +347,7 @@ where
         EthApi::Evm: ConfigureEvm,
         <EthApi::Evm as ConfigureEvm>::BlockExecutorFactory:
             for<'a> BlockExecutorFactory<Evm<'a> = TraceEvmInstance<'a>>,
-        TxEnvFor<EthApi::Evm>: AsRef<TraceTxEnvelope>,
+        TxEnvFor<EthApi::Evm>: AsRef<TraceTxEnvelope> + Clone,
         Payload: PayloadTypes,
     {
         let config = module_config.config.clone().unwrap_or_default();
@@ -401,7 +401,7 @@ where
         EthApi::Evm: ConfigureEvm,
         <EthApi::Evm as ConfigureEvm>::BlockExecutorFactory:
             for<'a> BlockExecutorFactory<Evm<'a> = TraceEvmInstance<'a>>,
-        TxEnvFor<EthApi::Evm>: AsRef<TraceTxEnvelope>,
+        TxEnvFor<EthApi::Evm>: AsRef<TraceTxEnvelope> + Clone,
     {
         if module_config.is_empty() {
             TransportRpcModules::default()
@@ -728,7 +728,7 @@ where
         EthApi::Evm: ConfigureEvm,
         <EthApi::Evm as ConfigureEvm>::BlockExecutorFactory:
             for<'a> BlockExecutorFactory<Evm<'a> = TraceEvmInstance<'a>>,
-        TxEnvFor<EthApi::Evm>: AsRef<TraceTxEnvelope>,
+        TxEnvFor<EthApi::Evm>: AsRef<TraceTxEnvelope> + Clone,
     {
         let debug_api = self.debug_api();
         self.modules.insert(RethRpcModule::Debug, debug_api.into_rpc().into());
@@ -891,7 +891,7 @@ where
     EthApi::Evm: ConfigureEvm,
     <EthApi::Evm as ConfigureEvm>::BlockExecutorFactory:
         for<'a> BlockExecutorFactory<Evm<'a> = TraceEvmInstance<'a>>,
-    TxEnvFor<EthApi::Evm>: AsRef<TraceTxEnvelope>,
+    TxEnvFor<EthApi::Evm>: AsRef<TraceTxEnvelope> + Clone,
     EvmConfig: ConfigureEvm<Primitives = N> + 'static,
     Consensus: FullConsensus<N> + Clone + 'static,
 {

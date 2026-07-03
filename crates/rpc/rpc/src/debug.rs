@@ -798,7 +798,7 @@ where
     Eth::Evm: ConfigureEvm,
     <Eth::Evm as ConfigureEvm>::BlockExecutorFactory:
         for<'a> BlockExecutorFactory<Evm<'a> = TraceEvmInstance<'a>>,
-    TxEnvFor<Eth::Evm>: AsRef<TraceTxEnvelope>,
+    TxEnvFor<Eth::Evm>: AsRef<TraceTxEnvelope> + Clone,
 {
     async fn trace_block_impl(
         &self,
@@ -977,7 +977,7 @@ where
     Eth::Evm: ConfigureEvm,
     <Eth::Evm as ConfigureEvm>::BlockExecutorFactory:
         for<'a> BlockExecutorFactory<Evm<'a> = TraceEvmInstance<'a>>,
-    TxEnvFor<Eth::Evm>: AsRef<TraceTxEnvelope>,
+    TxEnvFor<Eth::Evm>: AsRef<TraceTxEnvelope> + Clone,
 {
     /// Handler for `debug_getRawHeader`
     async fn raw_header(&self, block_id: BlockId) -> RpcResult<Bytes> {

@@ -10,7 +10,7 @@ use reth_engine_primitives::EngineTypes;
 use reth_ethereum_consensus::EthBeaconConsensus;
 use reth_ethereum_engine_primitives::{EthBuiltPayload, EthPayloadAttributes};
 use reth_ethereum_primitives::{EthPrimitives, TransactionSigned};
-use reth_evm::{ConfigureEvm, NextBlockEnvAttributes};
+use reth_evm::{BlockExecutorFactory, ConfigureEvm, NextBlockEnvAttributes, TxEnvFor};
 #[cfg(not(feature = "jit"))]
 use reth_evm_ethereum::RethEvmFactory;
 #[cfg(feature = "jit")]
@@ -49,8 +49,9 @@ use reth_rpc_eth_api::{
     helpers::{
         config::{EthConfigApiServer, EthConfigHandler},
         pending_block::BuildPendingEnv,
+        TraceEvmInstance, TraceTxEnvelope,
     },
-    RpcConvert, RpcTypes, SignableTxRequest,
+    RpcConvert, RpcNodeCore, RpcTypes, SignableTxRequest,
 };
 use reth_rpc_eth_types::{error::FromEvmError, EthApiError};
 use reth_rpc_server_types::RethRpcModule;
@@ -322,6 +323,10 @@ where
         Evm: ConfigureEvm<NextBlockEnvCtx = NextBlockEnvAttributes>,
     >,
     EthB: EthApiBuilder<N>,
+    <EthB::EthApi as RpcNodeCore>::Evm: ConfigureEvm,
+    <<EthB::EthApi as RpcNodeCore>::Evm as ConfigureEvm>::BlockExecutorFactory:
+        for<'evm> BlockExecutorFactory<Evm<'evm> = TraceEvmInstance<'evm>>,
+    TxEnvFor<<EthB::EthApi as RpcNodeCore>::Evm>: AsRef<TraceTxEnvelope> + Clone,
     PVB: Send,
     EB: EngineApiBuilder<N>,
     EVB: EngineValidatorBuilder<N>,
@@ -399,6 +404,10 @@ where
         Evm: ConfigureEvm<NextBlockEnvCtx = NextBlockEnvAttributes>,
     >,
     EthB: EthApiBuilder<N>,
+    <EthB::EthApi as RpcNodeCore>::Evm: ConfigureEvm,
+    <<EthB::EthApi as RpcNodeCore>::Evm as ConfigureEvm>::BlockExecutorFactory:
+        for<'evm> BlockExecutorFactory<Evm<'evm> = TraceEvmInstance<'evm>>,
+    TxEnvFor<<EthB::EthApi as RpcNodeCore>::Evm>: AsRef<TraceTxEnvelope> + Clone,
     PVB: PayloadValidatorBuilder<N>,
     EB: EngineApiBuilder<N>,
     EVB: EngineValidatorBuilder<N>,

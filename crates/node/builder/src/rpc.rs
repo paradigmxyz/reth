@@ -943,7 +943,7 @@ where
     <EthB::EthApi as RpcNodeCore>::Evm: ConfigureEvm,
     <<EthB::EthApi as RpcNodeCore>::Evm as ConfigureEvm>::BlockExecutorFactory:
         for<'evm> BlockExecutorFactory<Evm<'evm> = TraceEvmInstance<'evm>>,
-    TxEnvFor<<EthB::EthApi as RpcNodeCore>::Evm>: AsRef<TraceTxEnvelope>,
+    TxEnvFor<<EthB::EthApi as RpcNodeCore>::Evm>: AsRef<TraceTxEnvelope> + Clone,
     EB: EngineApiBuilder<N>,
     EVB: EngineValidatorBuilder<N>,
     RpcMiddleware: RethRpcMiddleware,
@@ -1252,7 +1252,7 @@ where
     <EthB::EthApi as RpcNodeCore>::Evm: ConfigureEvm,
     <<EthB::EthApi as RpcNodeCore>::Evm as ConfigureEvm>::BlockExecutorFactory:
         for<'evm> BlockExecutorFactory<Evm<'evm> = TraceEvmInstance<'evm>>,
-    TxEnvFor<<EthB::EthApi as RpcNodeCore>::Evm>: AsRef<TraceTxEnvelope>,
+    TxEnvFor<<EthB::EthApi as RpcNodeCore>::Evm>: AsRef<TraceTxEnvelope> + Clone,
     PVB: PayloadValidatorBuilder<N>,
     EB: EngineApiBuilder<N>,
     EVB: EngineValidatorBuilder<N>,
@@ -1464,6 +1464,7 @@ where
             <Node::Types as NodeTypes>::Payload,
             Block = BlockTy<Node::Types>,
         > + Clone,
+    TxEnvFor<Node::Evm>: Clone + Send + 'static,
 {
     type EngineValidator = BasicEngineValidator<Node::Provider, Node::Evm, EV::Validator>;
 

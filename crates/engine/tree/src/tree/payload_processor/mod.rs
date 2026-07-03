@@ -289,6 +289,7 @@ where
             + Send
             + Sync
             + 'static,
+        TxEnvFor<Evm>: Clone + Send + 'static,
     {
         let PayloadProcessorSpawnOptions { parallel_bal_execution, pending_sparse_trie_prune } =
             options;
@@ -336,6 +337,7 @@ where
     ) -> IteratorPayloadHandle<Evm, I>
     where
         P: BlockReader + StateProviderFactory + StateReader + Clone + 'static,
+        TxEnvFor<Evm>: Clone + Send + 'static,
     {
         let (prewarm_rx, execution_rx) =
             self.spawn_tx_iterator(transactions, env.transaction_count, parallel_bal_execution);
@@ -445,7 +447,10 @@ where
         transactions: I,
         transaction_count: usize,
         parallel_bal_execution: bool,
-    ) -> (IteratorPrewarmTxReceiver<Evm, I>, IteratorExecuteTxReceiver<Evm, I>) {
+    ) -> (IteratorPrewarmTxReceiver<Evm, I>, IteratorExecuteTxReceiver<Evm, I>)
+    where
+        TxEnvFor<Evm>: Clone + Send + 'static,
+    {
         let (prewarm_tx, prewarm_rx) = mpsc::sync_channel(transaction_count);
         let (execute_tx, execute_rx) = crossbeam_channel::bounded(transaction_count);
 
@@ -556,6 +561,7 @@ where
     ) -> CacheTaskHandle<<Evm::Primitives as NodePrimitives>::Receipt>
     where
         P: BlockReader + StateProviderFactory + StateReader + Clone + 'static,
+        TxEnvFor<Evm>: Clone + Send + 'static,
     {
         let mode = if parallel_bal_execution {
             #[cfg(any())]
