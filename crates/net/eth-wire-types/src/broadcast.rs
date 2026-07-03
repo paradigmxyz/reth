@@ -728,15 +728,8 @@ impl Encodable for NewPooledTransactionHashes68 {
 
 impl Decodable for NewPooledTransactionHashes68 {
     fn decode(buf: &mut &[u8]) -> alloy_rlp::Result<Self> {
-        let Header { list, payload_length } = Header::decode(buf)?;
-        if !list {
-            return Err(alloy_rlp::Error::UnexpectedString)
-        }
-        if buf.len() < payload_length {
-            return Err(alloy_rlp::Error::InputTooShort)
-        }
-
-        let (mut payload, rest) = buf.split_at(payload_length);
+        let mut payload = Header::decode_bytes(buf, true)?;
+        let payload_length = payload.len();
         let (types, sizes, hashes) = decode_pooled_transaction_hashes_payload(&mut payload)?;
 
         if !payload.is_empty() {
@@ -750,7 +743,6 @@ impl Decodable for NewPooledTransactionHashes68 {
 
         let msg = Self { types, sizes, hashes };
 
-        *buf = rest;
         Ok(msg)
     }
 }
@@ -939,7 +931,7 @@ const NEW_POOLED_TRANSACTION_HASHES_DECODE_CAP: usize =
 fn decode_pooled_transaction_hashes_payload(
     payload: &mut &[u8],
 ) -> alloy_rlp::Result<(Vec<u8>, Vec<usize>, Vec<B256>)> {
-    let types = Bytes::decode(payload)?;
+    let types = Header::decode_bytes(payload, false)?.to_vec();
     let capacity = types.len().min(NEW_POOLED_TRANSACTION_HASHES_DECODE_CAP);
 
     let mut sizes = Vec::with_capacity(capacity);
@@ -948,7 +940,7 @@ fn decode_pooled_transaction_hashes_payload(
     let mut hashes = Vec::with_capacity(capacity);
     decode_append(payload, &mut hashes)?;
 
-    Ok((types.into(), sizes, hashes))
+    Ok((types, sizes, hashes))
 }
 
 #[inline]
@@ -1390,7 +1382,14 @@ mod tests {
     }
 
     fn eth68_hash_fields_strategy() -> impl Strategy<Value = NewPooledTransactionHashes68Fields> {
-        (0usize..128, 0usize..128, 0usize..128).prop_flat_map(
+        let equal_lengths = (0usize..128).prop_flat_map(|len| {
+            (
+                proptest::collection::vec(any::<u8>(), len),
+                proptest::collection::vec(0usize..131_072, len),
+                proptest::collection::vec(any::<B256>(), len),
+            )
+        });
+        let independent_lengths = (0usize..128, 0usize..128, 0usize..128).prop_flat_map(
             |(types_len, sizes_len, hashes_len)| {
                 (
                     proptest::collection::vec(any::<u8>(), types_len),
@@ -1398,7 +1397,9 @@ mod tests {
                     proptest::collection::vec(any::<B256>(), hashes_len),
                 )
             },
-        )
+        );
+
+        prop_oneof![equal_lengths, independent_lengths]
     }
 
     proptest! {
