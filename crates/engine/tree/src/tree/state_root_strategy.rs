@@ -455,8 +455,11 @@ where
             ))
         }
 
+        let compare_trie_updates = config.always_compare_trie_updates();
+        let compare_overlay_factory = compare_trie_updates.then(|| overlay_factory.clone());
+
         let mut handle = payload_processor.spawn_state_root(
-            overlay_factory.clone(),
+            overlay_factory,
             env.parent_state_root,
             Some(env.transaction_count),
             config,
@@ -469,10 +472,9 @@ where
             Box::new(SparseTrieStateRootJob {
                 handle,
                 provider_builder,
-                overlay_factory,
+                compare_overlay_factory,
                 executor: payload_processor.executor().clone(),
                 timeout: config.state_root_task_timeout(),
-                compare_trie_updates: config.always_compare_trie_updates(),
                 metrics: BlockValidationMetrics::default(),
             }),
             streams,
@@ -561,10 +563,9 @@ where
 struct SparseTrieStateRootJob<N: NodePrimitives, P> {
     handle: StateRootHandle,
     provider_builder: StateProviderBuilder<N, P>,
-    overlay_factory: OverlayStateProviderFactory<P, N>,
+    compare_overlay_factory: Option<OverlayStateProviderFactory<P, N>>,
     executor: reth_tasks::Runtime,
     timeout: Option<Duration>,
-    compare_trie_updates: bool,
     metrics: BlockValidationMetrics,
 }
 
@@ -653,10 +654,10 @@ where
             debug_recorders,
         } = outcome;
 
-        if self.compare_trie_updates {
+        if let Some(compare_overlay_factory) = self.compare_overlay_factory.as_ref() {
             let _has_diff = compare_trie_updates_with_serial(
                 self.provider_builder.clone(),
-                self.overlay_factory.clone(),
+                compare_overlay_factory.clone(),
                 output,
                 trie_updates.as_ref().clone(),
             );
