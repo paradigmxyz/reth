@@ -40,6 +40,7 @@ use reth_tasks::{spawn_os_thread, utils::increase_thread_priority};
 use reth_trie_db::ChangesetCache;
 use reth_trie_sparse::SparseTrieRetainedPaths;
 use revm::interpreter::debug_unreachable;
+use smallvec::SmallVec;
 use state::TreeState;
 use std::{fmt::Debug, ops, sync::Arc, time::Duration};
 
@@ -2003,7 +2004,7 @@ where
         let check_slow = commit_duration.is_some() && threshold.is_some();
 
         // Two-pass: collect keys first because emit_event borrows &mut self.
-        let keys_to_remove: Vec<B256> = self
+        let keys_to_remove: SmallVec<[B256; 16]> = self
             .execution_timing_stats
             .iter()
             .filter(|(_, stats)| stats.block_number <= below_number)
