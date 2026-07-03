@@ -30,13 +30,14 @@ impl<'a> PreservedTrieGuard<'a> {
 }
 
 /// Current state of the sparse trie owned by the overlay manager.
+#[allow(clippy::large_enum_variant)]
 #[derive(Debug, Default)]
 pub(crate) enum PreservedSparseTrieState {
     /// No sparse trie has been preserved yet.
     #[default]
     Empty,
     /// A sparse trie is available for reuse.
-    Available(Box<PreservedSparseTrie>),
+    Available(PreservedSparseTrie),
     /// A sparse trie has been taken by a state-root task.
     InUse {
         /// The state root the sparse trie was anchored to when it was taken.
@@ -51,7 +52,7 @@ impl PreservedSparseTrieState {
             Self::Available(trie) => {
                 let state_root = trie.state_root();
                 *self = Self::InUse { state_root };
-                Some(*trie)
+                Some(trie)
             }
             state => {
                 *self = state;
@@ -62,7 +63,7 @@ impl PreservedSparseTrieState {
 
     /// Stores an available preserved trie.
     fn store(&mut self, trie: PreservedSparseTrie) {
-        *self = Self::Available(Box::new(trie));
+        *self = Self::Available(trie);
     }
 
     /// Clears the sparse trie state.
