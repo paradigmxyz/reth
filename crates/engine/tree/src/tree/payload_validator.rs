@@ -133,7 +133,7 @@ use reth_errors::{BlockExecutionError, ProviderResult};
 use reth_evm::{
     database::StateProviderDatabase,
     execute::{BlockExecutor, BlockExecutorFactory, ExecutableTxFor, RecoveredTx},
-    ConfigureEvm, EvmEnvFor, ExecutionCtxFor,
+    ConfigureEvm, EvmEnvFor, ExecutionCtxFor, TxEnvFor,
 };
 use reth_execution_cache::{CacheFillMode, CacheStats, SavedCache};
 use reth_payload_primitives::{
@@ -157,10 +157,14 @@ use reth_trie_db::ChangesetCache;
 use reth_trie_parallel::root::{ParallelStateRoot, ParallelStateRootError};
 use std::{
     panic::{self, AssertUnwindSafe},
-    sync::{atomic::Ordering, mpsc::RecvTimeoutError, Arc},
+    sync::{
+        atomic::{AtomicUsize, Ordering},
+        mpsc::RecvTimeoutError,
+        Arc,
+    },
     time::Duration,
 };
-use tracing::{debug, debug_span, error, info, instrument, trace, warn, Span};
+use tracing::{debug, debug_span, error, info, instrument, trace, warn, Level, Span};
 
 pub use crate::tree::types::ValidationOutcome;
 
@@ -1163,39 +1167,13 @@ where
                         sender.send_hashed_state(hashed_state);
                     });
                 }
-                let pre_exec_start = Instant::now();
-                executor.apply_pre_execution_changes().map_err(BlockExecutionError::other)?;
-                self.metrics.record_pre_execution(pre_exec_start.elapsed());
-
-                let mut senders = Vec::with_capacity(transaction_count);
-                let mut transactions = handle.iter_transactions();
-                let mut last_sent_len = 0usize;
-                loop {
-                    let wait_start = Instant::now();
-                    let Some(tx_result) = transactions.next() else { break };
-                    self.metrics.record_transaction_wait(wait_start.elapsed());
-                    let tx = tx_result.map_err(BlockExecutionError::other)?;
-                    let (tx_env, tx) = tx.into_parts();
-                    senders.push(*tx.signer());
-
-                    let tx_start = Instant::now();
-                    executor.execute_transaction(tx_env).map_err(BlockExecutionError::other)?;
-                    self.metrics.record_transaction_execution(tx_start.elapsed());
-                    executed_tx_index.store(senders.len(), Ordering::Relaxed);
-
-                    let current_len = executor.receipts().len();
-                    if current_len > last_sent_len {
-                        last_sent_len = current_len;
-                        if let Some(receipt) = executor.receipts().last() {
-                            let tx_index = current_len - 1;
-                            receipt_tx
-                                .send(IndexedReceipt::new(tx_index, receipt.clone()))
-                                .map_err(|_| {
-                                    BlockExecutionError::msg("receipt root task closed")
-                                })?;
-                        }
-                    }
-                }
+                let senders = self.execute_transactions(
+                    &mut executor,
+                    transaction_count,
+                    handle.iter_transactions(),
+                    &receipt_tx,
+                    &executed_tx_index,
+                )?;
 
                 let post_exec_start = Instant::now();
                 let output = executor.finish().map_err(BlockExecutionError::other)?;
@@ -1216,6 +1194,71 @@ where
         debug!(target: "engine::tree::payload_validator", elapsed = ?execution_duration, "Executed block");
 
         Ok((output, senders, result_rx))
+    }
+
+    /// Executes transactions and collects senders, streaming receipts to a background task.
+    fn execute_transactions<Tx, Err, Executor>(
+        &self,
+        executor: &mut Executor,
+        transaction_count: usize,
+        transactions: impl Iterator<Item = Result<Tx, Err>>,
+        receipt_tx: &ReceiptRootSender<N>,
+        executed_tx_index: &AtomicUsize,
+    ) -> Result<Vec<Address>, BlockExecutionError>
+    where
+        Tx: ExecutableTxFor<Evm>,
+        Err: core::error::Error + Send + Sync + 'static,
+        Executor: BlockExecutor<Primitives = N, Transaction = TxEnvFor<Evm>>,
+    {
+        let pre_exec_start = Instant::now();
+        debug_span!(target: "engine::tree", "pre_execution").in_scope(|| {
+            executor.apply_pre_execution_changes().map_err(BlockExecutionError::other)
+        })?;
+        self.metrics.record_pre_execution(pre_exec_start.elapsed());
+
+        let exec_span = debug_span!(target: "engine::tree", "execution").entered();
+        let mut senders = Vec::with_capacity(transaction_count);
+        let mut transactions = transactions.into_iter();
+        let mut last_sent_len = 0usize;
+        loop {
+            let wait_start = Instant::now();
+            let Some(tx_result) = transactions.next() else { break };
+            self.metrics.record_transaction_wait(wait_start.elapsed());
+            let tx = tx_result.map_err(BlockExecutionError::other)?;
+            let (tx_env, tx) = tx.into_parts();
+            senders.push(*tx.signer());
+
+            let _enter = tracing::enabled!(target: "engine::tree", Level::TRACE).then(|| {
+                tracing::trace_span!(
+                    target: "engine::tree",
+                    "execute tx",
+                    tx_index = senders.len() - 1,
+                )
+                .entered()
+            });
+            if tracing::enabled!(target: "engine::tree", Level::TRACE) {
+                trace!(target: "engine::tree", "Executing transaction");
+            }
+
+            let tx_start = Instant::now();
+            executor.execute_transaction(tx_env).map_err(BlockExecutionError::other)?;
+            self.metrics.record_transaction_execution(tx_start.elapsed());
+            executed_tx_index.store(senders.len(), Ordering::Relaxed);
+
+            let current_len = executor.receipts().len();
+            if current_len > last_sent_len {
+                last_sent_len = current_len;
+                if let Some(receipt) = executor.receipts().last() {
+                    let tx_index = current_len - 1;
+                    receipt_tx
+                        .send(IndexedReceipt::new(tx_index, receipt.clone()))
+                        .map_err(|_| BlockExecutionError::msg("receipt root task closed"))?;
+                }
+            }
+        }
+        drop(exec_span);
+
+        Ok(senders)
     }
 
     fn spawn_receipt_root_task(
