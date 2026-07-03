@@ -294,6 +294,19 @@ pub trait ConfigureEvm: Clone + Debug + Send + Sync + Unpin {
         &'a self,
         evm: EvmFor<'a, Self>,
         ctx: ExecutionCtxFor<'a, Self>,
+    ) -> BlockExecutorFor<'a, Self>
+    where
+        Self: 'a,
+    {
+        self.create_executor_with_hashed_state_mode(evm, ctx, HashedStateMode::OutputOnly)
+    }
+
+    /// Creates a block executor from a configured EVM, execution context, and hashed-state mode.
+    #[cfg(feature = "std")]
+    fn create_executor_with_hashed_state_mode<'a>(
+        &'a self,
+        evm: EvmFor<'a, Self>,
+        ctx: ExecutionCtxFor<'a, Self>,
         hashed_state_mode: HashedStateMode,
     ) -> BlockExecutorFor<'a, Self>
     where
@@ -352,6 +365,21 @@ pub trait ConfigureEvm: Clone + Debug + Send + Sync + Unpin {
         &'a self,
         db: DB,
         block: &'a SealedBlock<BlockTy<Self::Primitives>>,
+    ) -> Result<crate::BlockExecutorFor<'a, Self>, Self::Error>
+    where
+        Self: 'a,
+        DB: evm2::evm::Database + 'a,
+        DB::Error: core::error::Error + Send + Sync + 'static,
+    {
+        self.executor_for_block_with_hashed_state_mode(db, block, HashedStateMode::OutputOnly)
+    }
+
+    /// Creates a block executor for the given block with an explicit hashed-state mode.
+    #[cfg(feature = "std")]
+    fn executor_for_block_with_hashed_state_mode<'a, DB>(
+        &'a self,
+        db: DB,
+        block: &'a SealedBlock<BlockTy<Self::Primitives>>,
         hashed_state_mode: HashedStateMode,
     ) -> Result<crate::BlockExecutorFor<'a, Self>, Self::Error>
     where
@@ -361,7 +389,7 @@ pub trait ConfigureEvm: Clone + Debug + Send + Sync + Unpin {
     {
         let evm = self.evm_for_block(db, block.header())?;
         let ctx = self.context_for_block(block)?;
-        Ok(self.create_executor(evm, ctx, hashed_state_mode))
+        Ok(self.create_executor_with_hashed_state_mode(evm, ctx, hashed_state_mode))
     }
 
     /// Creates an EVM instance for single-transaction execution with the configured environment.
@@ -406,7 +434,11 @@ pub trait ConfigureEvm: Clone + Debug + Send + Sync + Unpin {
         Self: 'a,
     {
         BasicBlockBuilder {
-            executor: self.create_executor(evm, ctx.clone(), hashed_state_mode),
+            executor: self.create_executor_with_hashed_state_mode(
+                evm,
+                ctx.clone(),
+                hashed_state_mode,
+            ),
             evm_env,
             transactions: Vec::new(),
             senders: Vec::new(),

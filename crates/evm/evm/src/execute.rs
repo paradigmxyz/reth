@@ -687,7 +687,7 @@ where
         let ctx = evm_config
             .context_for_block(block.sealed_block())
             .map_err(BlockExecutionError::other)?;
-        let mut executor = evm_config.create_executor(evm, ctx, HashedStateMode::OutputOnly);
+        let mut executor = evm_config.create_executor(evm, ctx);
 
         executor.apply_pre_execution_changes(&mut |_| {})?;
         for transaction in block.clone_transactions_recovered() {
