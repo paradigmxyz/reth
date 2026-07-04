@@ -72,12 +72,12 @@ pub(crate) fn dispatch_with_chunking<T, I>(
 ) where
     I: IntoIterator<Item = T>,
 {
-    let has_full_chunks = chunking_len >= chunk_size.saturating_mul(2);
+    let has_spill_chunk = chunking_len > chunk_size;
     let should_chunk = chunking_len > max_targets_for_chunking ||
-        (has_full_chunks &&
+        (has_spill_chunk &&
             (has_multiple_idle_account_workers || has_multiple_idle_storage_workers));
 
-    if should_chunk && chunking_len > chunk_size {
+    if should_chunk && has_spill_chunk {
         for chunk in chunker(items, chunk_size) {
             dispatch(chunk);
         }
@@ -85,4 +85,67 @@ pub(crate) fn dispatch_with_chunking<T, I>(
     }
 
     dispatch(items);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::dispatch_with_chunking;
+
+    fn chunks(items: Vec<usize>, size: usize) -> Vec<Vec<usize>> {
+        items.chunks(size).map(<[usize]>::to_vec).collect()
+    }
+
+    #[test]
+    fn chunks_medium_batches_when_workers_are_idle() {
+        let mut dispatched = Vec::new();
+
+        dispatch_with_chunking(
+            vec![1, 2, 3, 4, 5, 6],
+            6,
+            5,
+            300,
+            true,
+            false,
+            chunks,
+            |chunk| dispatched.push(chunk),
+        );
+
+        assert_eq!(dispatched, [vec![1, 2, 3, 4, 5], vec![6]]);
+    }
+
+    #[test]
+    fn keeps_medium_batches_together_without_idle_workers() {
+        let mut dispatched = Vec::new();
+
+        dispatch_with_chunking(
+            vec![1, 2, 3, 4, 5, 6],
+            6,
+            5,
+            300,
+            false,
+            false,
+            chunks,
+            |chunk| dispatched.push(chunk),
+        );
+
+        assert_eq!(dispatched, [vec![1, 2, 3, 4, 5, 6]]);
+    }
+
+    #[test]
+    fn chunks_oversized_batches_even_without_idle_workers() {
+        let mut dispatched = Vec::new();
+
+        dispatch_with_chunking(
+            vec![1, 2, 3, 4, 5, 6],
+            6,
+            5,
+            5,
+            false,
+            false,
+            chunks,
+            |chunk| dispatched.push(chunk),
+        );
+
+        assert_eq!(dispatched, [vec![1, 2, 3, 4, 5], vec![6]]);
+    }
 }
