@@ -2,7 +2,7 @@
 
 use alloy_primitives::B256;
 use reth_trie_sparse::SparseStateTrie;
-use tracing::debug;
+use tracing::{debug, trace};
 
 /// Type alias for the sparse trie type used in preservation.
 pub type SparseTrie = SparseStateTrie;
@@ -71,7 +71,7 @@ impl PreservedSparseTrie {
     pub fn into_trie_for(self, parent_state_root: B256) -> SparseTrie {
         match self {
             Self::Anchored { trie, state_root } if state_root == parent_state_root => {
-                debug!(
+                trace!(
                     target: "engine::tree::payload_processor",
                     %state_root,
                     "Reusing anchored sparse trie for continuation payload"
@@ -89,7 +89,7 @@ impl PreservedSparseTrie {
                 trie
             }
             Self::Cleared { trie } => {
-                debug!(
+                trace!(
                     target: "engine::tree::payload_processor",
                     %parent_state_root,
                     "Using cleared sparse trie with preserved allocations"
