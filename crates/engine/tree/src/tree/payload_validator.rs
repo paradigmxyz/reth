@@ -132,7 +132,7 @@ use reth_engine_primitives::{
 use reth_errors::{BlockExecutionError, ProviderResult};
 use reth_evm::{
     database::StateProviderDatabase,
-    execute::{BlockExecutor, BlockExecutorFactory, ExecutableTxFor, RecoveredTx},
+    execute::{BlockExecutor, ExecutableTxFor, RecoveredTx},
     ConfigureEvm, EvmEnvFor, ExecutionCtxFor, TxEnvFor,
 };
 use reth_execution_cache::{CacheFillMode, CacheStats, SavedCache};
@@ -1161,8 +1161,7 @@ where
                     .clone()
                     .with_jit_support()
                     .evm_with_env(db, env.evm_env.clone());
-                let executor_factory = self.evm_config.block_executor_factory();
-                let mut executor = executor_factory.create_executor(evm, execution_ctx);
+                let mut executor = self.evm_config.create_executor(evm, execution_ctx);
                 if let Some(sender) = state_hook_sender {
                     executor.set_state_hook(move |hashed_state| {
                         sender.send_hashed_state(hashed_state);
