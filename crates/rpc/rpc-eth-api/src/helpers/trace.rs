@@ -490,7 +490,8 @@ pub trait Trace: LoadState<Error: FromEvmError<Self::Evm>> + Call {
         DB: Database<Error = EvmDatabaseError<ProviderError>>,
         I: InspectorFor<Self::Evm, DB>,
     {
-        let mut evm = self.evm_config().evm_with_env_and_inspector(db, evm_env, inspector);
+        let mut evm = self.evm_config().evm_with_env(db, evm_env);
+        evm.set_inspector(inspector);
         evm.transact(tx_env).map_err(Self::Error::from_evm_err)
     }
 

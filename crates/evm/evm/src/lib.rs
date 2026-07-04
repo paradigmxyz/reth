@@ -430,26 +430,6 @@ pub trait ConfigureEvm: Clone + Debug + Send + Sync + Unpin {
         Ok(self.create_block_builder(evm, evm_env, parent, ctx))
     }
 
-    /// Creates an EVM instance for single-transaction execution with an inspector.
-    #[cfg(feature = "std")]
-    fn evm_with_env_and_inspector<'a, DB, I, T>(
-        &self,
-        db: DB,
-        evm_env: EvmEnvFor<Self>,
-        inspector: I,
-    ) -> EvmFor<'a, Self>
-    where
-        DB: Database + 'a,
-        I: evm2::Inspector<T> + 'a,
-        T: evm2::EvmTypes,
-        Self::BlockExecutorFactory:
-            crate::execute::BlockExecutorFactory<Evm<'a> = evm2::Evm<'a, T>>,
-    {
-        let mut evm = self.evm_with_env(db, evm_env);
-        evm.set_inspector(inspector);
-        evm
-    }
-
     /// Applies block-level state changes required before transaction execution.
     #[cfg(feature = "std")]
     fn pre_block_state_changes<'a, DB>(
