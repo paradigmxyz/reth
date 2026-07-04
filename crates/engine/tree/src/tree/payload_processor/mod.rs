@@ -291,7 +291,7 @@ where
             + Sync
             + 'static,
         TxEnvFor<Evm>: Clone + Send + 'static,
-        EvmFor<'static, Evm>: ExecuteAndDiscard<TxEnvFor<Evm>>,
+        for<'evm> EvmFor<'evm, Evm>: ExecuteAndDiscard<TxEnvFor<Evm>>,
     {
         let PayloadProcessorSpawnOptions { parallel_bal_execution, pending_sparse_trie_prune } =
             options;
@@ -340,7 +340,7 @@ where
     where
         P: BlockReader + StateProviderFactory + StateReader + Clone + 'static,
         TxEnvFor<Evm>: Clone + Send + 'static,
-        EvmFor<'static, Evm>: ExecuteAndDiscard<TxEnvFor<Evm>>,
+        for<'evm> EvmFor<'evm, Evm>: ExecuteAndDiscard<TxEnvFor<Evm>>,
     {
         let (prewarm_rx, execution_rx) =
             self.spawn_tx_iterator(transactions, env.transaction_count, parallel_bal_execution);
@@ -565,7 +565,7 @@ where
     where
         P: BlockReader + StateProviderFactory + StateReader + Clone + 'static,
         TxEnvFor<Evm>: Clone + Send + 'static,
-        EvmFor<'static, Evm>: ExecuteAndDiscard<TxEnvFor<Evm>>,
+        for<'evm> EvmFor<'evm, Evm>: ExecuteAndDiscard<TxEnvFor<Evm>>,
     {
         let mode = if parallel_bal_execution {
             #[cfg(any())]

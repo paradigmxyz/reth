@@ -817,7 +817,7 @@ where
 
                 while let Some((index, tx)) = transactions.next() {
                     let tx_hash = *tx.tx_hash();
-                    let tx_env = TxEnvFor::<Eth::Evm>::from(tx.cloned());
+                    let tx_env = eth_api.evm_config().tx_env(tx.cloned());
                     let (mut returned_inspector, result) = eth_api.inspect_with_inspector(
                         &mut db,
                         evm_env.clone(),
@@ -918,7 +918,7 @@ where
                     *tx.tx_hash(),
                 )?;
 
-                let tx_env = TxEnvFor::<Eth::Evm>::from(tx.clone());
+                let tx_env = eth_api.evm_config().tx_env(tx.clone());
                 let inspector =
                     DebugInspector::new(opts).map_err(debug_inspector_error::<Eth::Error>)?;
                 let (mut inspector, result) = eth_api.inspect_with_inspector(

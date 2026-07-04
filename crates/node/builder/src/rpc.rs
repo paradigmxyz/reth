@@ -1465,7 +1465,7 @@ where
             Block = BlockTy<Node::Types>,
         > + Clone,
     TxEnvFor<Node::Evm>: Clone + Send + 'static,
-    EvmFor<'static, Node::Evm>: ExecuteAndDiscard<TxEnvFor<Node::Evm>>,
+    for<'evm> EvmFor<'evm, Node::Evm>: ExecuteAndDiscard<TxEnvFor<Node::Evm>>,
 {
     type EngineValidator = BasicEngineValidator<Node::Provider, Node::Evm, EV::Validator>;
 

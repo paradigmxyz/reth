@@ -198,7 +198,7 @@ pub trait Trace: LoadState<Error: FromEvmError<Self::Evm>> + Call {
                     *target_tx.tx_hash(),
                 )?;
 
-                let tx_env = TxEnvFor::<Self::Evm>::from(target_tx.clone());
+                let tx_env = this.evm_config().tx_env(target_tx.clone());
                 let (inspector, result) =
                     this.inspect_with_inspector(&mut db, evm_env, tx_env, inspector)?;
                 f(tx_info, inspector, result, db)
@@ -228,7 +228,7 @@ pub trait Trace: LoadState<Error: FromEvmError<Self::Evm>> + Call {
                 return Ok(idx as u64)
             }
 
-            let tx_env = TxEnvFor::<Self::Evm>::from(tx.cloned());
+            let tx_env = self.evm_config().tx_env(tx.cloned());
             let (_, result) = self.inspect_with_inspector(
                 db,
                 evm_env.clone(),
@@ -285,7 +285,7 @@ pub trait Trace: LoadState<Error: FromEvmError<Self::Evm>> + Call {
                 let mut results = Vec::new();
 
                 for (idx, tx) in block.transactions_recovered().take(max_transactions).enumerate() {
-                    let tx_env = TxEnvFor::<Self::Evm>::from(tx.cloned());
+                    let tx_env = this.evm_config().tx_env(tx.cloned());
                     let (inspector, result) = this.inspect_with_inspector(
                         &mut db,
                         evm_env.clone(),

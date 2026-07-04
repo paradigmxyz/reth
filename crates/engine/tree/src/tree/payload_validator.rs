@@ -458,7 +458,7 @@ where
         V: PayloadValidator<T, Block = N::Block> + Clone,
         Evm: ConfigureEngineEvm<T::ExecutionData, Primitives = N>,
         TxEnvFor<Evm>: Clone + Send + 'static,
-        EvmFor<'static, Evm>: ExecuteAndDiscard<TxEnvFor<Evm>>,
+        for<'evm> EvmFor<'evm, Evm>: ExecuteAndDiscard<TxEnvFor<Evm>>,
     {
         let parent_hash = input.parent_hash();
         let _jit_pause = JitPauseGuard::new(&self.evm_config);
@@ -1633,7 +1633,7 @@ where
     where
         T: ExecutableTxIterator<Evm>,
         TxEnvFor<Evm>: Clone + Send + 'static,
-        EvmFor<'static, Evm>: ExecuteAndDiscard<TxEnvFor<Evm>>,
+        for<'evm> EvmFor<'evm, Evm>: ExecuteAndDiscard<TxEnvFor<Evm>>,
     {
         let PayloadProcessorSpawnOptions { parallel_bal_execution, pending_sparse_trie_prune } =
             options;
@@ -2121,7 +2121,7 @@ where
     V: PayloadValidator<Types, Block = N::Block> + Clone,
     Evm: ConfigureEngineEvm<Types::ExecutionData, Primitives = N> + 'static,
     TxEnvFor<Evm>: Clone + Send + 'static,
-    EvmFor<'static, Evm>: ExecuteAndDiscard<TxEnvFor<Evm>>,
+    for<'evm> EvmFor<'evm, Evm>: ExecuteAndDiscard<TxEnvFor<Evm>>,
     Types: PayloadTypes<BuiltPayload: BuiltPayload<Primitives = N>>,
 {
     fn validate_payload_attributes_against_header(
