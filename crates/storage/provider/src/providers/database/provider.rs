@@ -620,6 +620,11 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
         let rocksdb_provider = self.rocksdb_provider.clone();
         let rocksdb_ctx = self.rocksdb_write_ctx(first_number);
         let rocksdb_enabled = rocksdb_ctx.storage_settings.storage_v2;
+        let state_outputs_in_static_files = save_mode.with_state() &&
+            rocksdb_ctx.storage_settings.use_hashed_state() &&
+            sf_ctx.write_receipts &&
+            sf_ctx.write_account_changesets &&
+            sf_ctx.write_storage_changesets;
 
         let mut sf_result = None;
         let mut rocksdb_result = None;
@@ -698,7 +703,7 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
                 self.insert_block_mdbx_only(recovered_block, tx_nums[i])?;
                 timings.insert_block += start.elapsed();
 
-                if save_mode.with_state() {
+                if save_mode.with_state() && !state_outputs_in_static_files {
                     let execution_output = block.execution_outcome();
 
                     // Write state and changesets to the database.
@@ -719,6 +724,19 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
                     )?;
                     timings.write_state += start.elapsed();
                 }
+            }
+
+            if state_outputs_in_static_files {
+                let start = Instant::now();
+                self.write_bytecodes(blocks.iter().flat_map(|block| {
+                    block
+                        .execution_outcome()
+                        .state
+                        .contracts
+                        .iter()
+                        .map(|(hash, bytecode)| (*hash, Bytecode(bytecode.clone())))
+                }))?;
+                timings.write_state += start.elapsed();
             }
 
             // Write all hashed state and trie updates in single batches.
@@ -912,7 +930,13 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
         &self,
         bytecodes: impl IntoIterator<Item = (B256, Bytecode)>,
     ) -> ProviderResult<()> {
+        let mut bytecodes = bytecodes.into_iter();
+        let Some((hash, bytecode)) = bytecodes.next() else {
+            return Ok(());
+        };
+
         let mut bytecodes_cursor = self.tx_ref().cursor_write::<tables::Bytecodes>()?;
+        bytecodes_cursor.upsert(hash, &bytecode)?;
         for (hash, bytecode) in bytecodes {
             bytecodes_cursor.upsert(hash, &bytecode)?;
         }
