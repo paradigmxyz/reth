@@ -515,8 +515,7 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
     where
         F: FnOnce(RocksBatchArg<'_>) -> ProviderResult<(R, Option<RawRocksDBBatch>)>,
     {
-        let rocksdb = self.rocksdb_provider();
-        let rocksdb_batch = rocksdb.batch();
+        let rocksdb_batch = self.rocksdb_provider.batch();
 
         let (result, raw_batch) = f(rocksdb_batch)?;
 
@@ -617,7 +616,7 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
         // avoid capturing &self.tx in scope below.
         let sf_provider = &self.static_file_provider;
         let sf_ctx = self.static_file_write_ctx(save_mode, first_number, last_block_number)?;
-        let rocksdb_provider = self.rocksdb_provider.clone();
+        let rocksdb_provider = &self.rocksdb_provider;
         let rocksdb_ctx = self.rocksdb_write_ctx(first_number);
         let rocksdb_enabled = rocksdb_ctx.storage_settings.storage_v2;
 
