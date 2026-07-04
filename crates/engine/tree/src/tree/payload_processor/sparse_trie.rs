@@ -324,9 +324,10 @@ where
 
                 self.dispatch_pending_targets();
 
-                // If there's still no pending updates spend some time pre-computing the account
-                // trie upper hashes
-                if self.proof_result_rx.is_empty() {
+                // If all state updates are known and we're still waiting on proofs, spend time
+                // pre-computing the account trie upper hashes. Before the final update, new state
+                // can dirty the same subtries again and turn this work into repeated hashing.
+                if self.finished_state_updates && self.proof_result_rx.is_empty() {
                     self.trie.calculate_subtries();
                 }
             } else if self.updates.is_empty() {
