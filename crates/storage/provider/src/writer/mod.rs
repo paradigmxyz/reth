@@ -102,6 +102,18 @@ where
     sink.finish()
 }
 
+pub(crate) fn execution_state_to_plain_reverts<S>(state: &S) -> PlainStateReverts
+where
+    S: ExecutionStateChangeSource,
+{
+    let mut sink = PlainRevertsSink::new();
+    match state.visit(&mut sink) {
+        Ok(()) => {}
+        Err(err) => match err {},
+    }
+    sink.finish()
+}
+
 pub(crate) fn write_state_input_to_plain_state_and_reverts<R>(
     input: &WriteStateInput<'_, R>,
     is_value_known: OriginalValuesKnown,
@@ -507,6 +519,58 @@ impl ExecutionStateChangeSink for PlainStateAndRevertsSink {
             entry.1.push((change.key, change.current));
         }
 
+        let revert_entry = self.storage_reverts.entry(change.address).or_default();
+        if !revert_entry.0 || !change.original.is_zero() {
+            revert_entry.1.push((change.key, RevertToSlot::Some(change.original)));
+        }
+        Ok(())
+    }
+}
+
+struct PlainRevertsSink {
+    account_reverts: Vec<(Address, Option<Account>)>,
+    storage_reverts: BTreeMap<Address, (bool, Vec<(U256, RevertToSlot)>)>,
+}
+
+impl PlainRevertsSink {
+    const fn new() -> Self {
+        Self { account_reverts: Vec::new(), storage_reverts: BTreeMap::new() }
+    }
+
+    fn finish(self) -> PlainStateReverts {
+        let Self { account_reverts, storage_reverts } = self;
+
+        let mut reverts = PlainStateReverts::with_capacity(1);
+        reverts.accounts.push(account_reverts);
+        reverts.storage.push(
+            storage_reverts
+                .into_iter()
+                .map(|(address, (wiped, storage_revert))| PlainStorageRevert {
+                    address,
+                    wiped,
+                    storage_revert,
+                })
+                .collect(),
+        );
+        reverts
+    }
+}
+
+impl ExecutionStateChangeSink for PlainRevertsSink {
+    type Error = Infallible;
+
+    fn account(&mut self, change: ExecutionAccountChangeRef<'_>) -> Result<(), Self::Error> {
+        self.account_reverts
+            .push((change.address, change.original.map(execution_account_info_ref_to_reth)));
+        Ok(())
+    }
+
+    fn storage_wipe(&mut self, address: Address) -> Result<(), Self::Error> {
+        self.storage_reverts.entry(address).or_default().0 = true;
+        Ok(())
+    }
+
+    fn storage(&mut self, change: ExecutionStorageChange) -> Result<(), Self::Error> {
         let revert_entry = self.storage_reverts.entry(change.address).or_default();
         if !revert_entry.0 || !change.original.is_zero() {
             revert_entry.1.push((change.key, RevertToSlot::Some(change.original)));

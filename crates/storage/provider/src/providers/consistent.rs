@@ -2,7 +2,7 @@ use super::{DatabaseProviderRO, ProviderFactory, ProviderNodeTypes};
 use crate::{
     providers::{StaticFileProvider, StaticFileProviderRWRefMut},
     to_range,
-    writer::execution_state_to_plain_state_and_reverts,
+    writer::execution_state_to_plain_reverts,
     AccountReader, BlockHashReader, BlockIdReader, BlockNumReader, BlockReader, BlockReaderIdExt,
     BlockSource, ChainSpecProvider, ChangeSetReader, HeaderProvider, ProviderError,
     PruneCheckpointReader, ReceiptProvider, ReceiptProviderIdExt, StageCheckpointReader,
@@ -26,9 +26,8 @@ use reth_prune_types::{PruneCheckpoint, PruneSegment};
 use reth_stages_types::{StageCheckpoint, StageId};
 use reth_static_file_types::StaticFileSegment;
 use reth_storage_api::{
-    BlockBodyIndicesProvider, DatabaseProviderFactory, NodePrimitivesProvider, OriginalValuesKnown,
-    PlainStorageRevert, StateProvider, StateProviderBox, StorageChangeSetReader,
-    TryIntoHistoricalStateProvider,
+    BlockBodyIndicesProvider, DatabaseProviderFactory, NodePrimitivesProvider, PlainStorageRevert,
+    StateProvider, StateProviderBox, StorageChangeSetReader, TryIntoHistoricalStateProvider,
 };
 use reth_storage_errors::provider::ProviderResult;
 use std::{
@@ -1191,10 +1190,7 @@ impl<N: ProviderNodeTypes> StorageChangeSetReader for ConsistentProvider<N> {
         if let Some(state) =
             self.head_block.as_ref().and_then(|b| b.block_on_chain(block_number.into()))
         {
-            let (_, reverts) = execution_state_to_plain_state_and_reverts(
-                &state.block().execution_output.state,
-                OriginalValuesKnown::Yes,
-            );
+            let reverts = execution_state_to_plain_reverts(&state.block().execution_output.state);
             let changesets = reverts
                 .storage
                 .into_iter()
@@ -1243,10 +1239,8 @@ impl<N: ProviderNodeTypes> StorageChangeSetReader for ConsistentProvider<N> {
         if let Some(state) =
             self.head_block.as_ref().and_then(|b| b.block_on_chain(block_number.into()))
         {
-            let (_, reverts) = execution_state_to_plain_state_and_reverts(
-                &state.block_ref().execution_output.state,
-                OriginalValuesKnown::Yes,
-            );
+            let reverts =
+                execution_state_to_plain_reverts(&state.block_ref().execution_output.state);
             let changeset =
                 reverts.storage.into_iter().flatten().find_map(|revert: PlainStorageRevert| {
                     if revert.address != address {
@@ -1291,10 +1285,8 @@ impl<N: ProviderNodeTypes> StorageChangeSetReader for ConsistentProvider<N> {
             database_end = head_block.anchor().number;
 
             for state in head_block.chain() {
-                let (_, reverts) = execution_state_to_plain_state_and_reverts(
-                    &state.block_ref().execution_output.state,
-                    OriginalValuesKnown::Yes,
-                );
+                let reverts =
+                    execution_state_to_plain_reverts(&state.block_ref().execution_output.state);
                 let block_changesets =
                     reverts.storage.into_iter().flatten().flat_map(|revert: PlainStorageRevert| {
                         revert.storage_revert.into_iter().map(move |(key, value)| {
@@ -1343,10 +1335,8 @@ impl<N: ProviderNodeTypes> ChangeSetReader for ConsistentProvider<N> {
         if let Some(state) =
             self.head_block.as_ref().and_then(|b| b.block_on_chain(block_number.into()))
         {
-            let (_, reverts) = execution_state_to_plain_state_and_reverts(
-                &state.block_ref().execution_output.state,
-                OriginalValuesKnown::Yes,
-            );
+            let reverts =
+                execution_state_to_plain_reverts(&state.block_ref().execution_output.state);
             let changesets = reverts
                 .accounts
                 .into_iter()
@@ -1387,10 +1377,8 @@ impl<N: ProviderNodeTypes> ChangeSetReader for ConsistentProvider<N> {
             self.head_block.as_ref().and_then(|b| b.block_on_chain(block_number.into()))
         {
             // Search in-memory state for the account changeset
-            let (_, reverts) = execution_state_to_plain_state_and_reverts(
-                &state.block_ref().execution_output.state,
-                OriginalValuesKnown::Yes,
-            );
+            let reverts =
+                execution_state_to_plain_reverts(&state.block_ref().execution_output.state);
             let changeset = reverts
                 .accounts
                 .into_iter()
@@ -1438,10 +1426,8 @@ impl<N: ProviderNodeTypes> ChangeSetReader for ConsistentProvider<N> {
 
             for state in head_block.chain() {
                 // found block in memory, collect its changesets
-                let (_, reverts) = execution_state_to_plain_state_and_reverts(
-                    &state.block_ref().execution_output.state,
-                    OriginalValuesKnown::Yes,
-                );
+                let reverts =
+                    execution_state_to_plain_reverts(&state.block_ref().execution_output.state);
                 let block_changesets = reverts
                     .accounts
                     .into_iter()

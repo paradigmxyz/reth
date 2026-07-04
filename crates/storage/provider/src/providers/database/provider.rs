@@ -3833,7 +3833,8 @@ mod tests {
     use crate::{
         test_utils::{blocks::BlockchainTestData, create_test_provider_factory},
         writer::{
-            execution_state_and_reverts_to_plain_state_and_reverts, execution_state_to_plain_state,
+            execution_state_and_reverts_to_plain_state_and_reverts,
+            execution_state_to_plain_reverts, execution_state_to_plain_state,
             execution_state_to_plain_state_and_reverts,
         },
         BlockWriter,
@@ -3937,11 +3938,14 @@ mod tests {
 
         let (plain_state, reverts) =
             execution_state_to_plain_state_and_reverts(&state, OriginalValuesKnown::Yes);
+        let reverts_only = execution_state_to_plain_reverts(&state);
         let plain_state_only = execution_state_to_plain_state(&state, OriginalValuesKnown::Yes);
 
         assert_eq!(plain_state_only.accounts, plain_state.accounts);
         assert_eq!(plain_state_only.storage, plain_state.storage);
         assert_eq!(plain_state_only.contracts, plain_state.contracts);
+        assert_eq!(reverts_only.accounts, reverts.accounts);
+        assert_eq!(reverts_only.storage, reverts.storage);
         assert_eq!(plain_state.accounts, vec![(address, Some(current_account))]);
         assert_eq!(
             plain_state.storage,

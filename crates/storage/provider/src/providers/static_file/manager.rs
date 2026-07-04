@@ -5,11 +5,10 @@ use super::{
 use crate::{
     changeset_walker::{StaticFileAccountChangesetWalker, StaticFileStorageChangesetWalker},
     to_range,
-    writer::execution_state_to_plain_state_and_reverts,
+    writer::execution_state_to_plain_reverts,
     BlockHashReader, BlockNumReader, BlockReader, BlockSource, EitherWriter,
-    EitherWriterDestination, HeaderProvider, OriginalValuesKnown, ReceiptProvider,
-    StageCheckpointReader, StatsReader, TransactionVariant, TransactionsProvider,
-    TransactionsProviderExt,
+    EitherWriterDestination, HeaderProvider, ReceiptProvider, StageCheckpointReader, StatsReader,
+    TransactionVariant, TransactionsProvider, TransactionsProviderExt,
 };
 use alloy_consensus::{
     transaction::{TransactionMeta, TxHashRef},
@@ -523,10 +522,7 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
     ) -> ProviderResult<()> {
         for block in blocks {
             let block_number = block.recovered_block().number();
-            let (_, reverts) = execution_state_to_plain_state_and_reverts(
-                &block.execution_outcome().state,
-                OriginalValuesKnown::Yes,
-            );
+            let reverts = execution_state_to_plain_reverts(&block.execution_outcome().state);
 
             let changeset: Vec<_> = reverts
                 .accounts
@@ -547,10 +543,7 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
     ) -> ProviderResult<()> {
         for block in blocks {
             let block_number = block.recovered_block().number();
-            let (_, reverts) = execution_state_to_plain_state_and_reverts(
-                &block.execution_outcome().state,
-                OriginalValuesKnown::Yes,
-            );
+            let reverts = execution_state_to_plain_reverts(&block.execution_outcome().state);
 
             let changeset: Vec<_> = reverts
                 .storage
