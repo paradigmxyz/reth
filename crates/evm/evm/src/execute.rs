@@ -646,6 +646,23 @@ where
     Evm: ConfigureEvm,
     DB: Database,
 {
+    fn merge_batch_output(
+        mut batch_state: ExecutionOutcomeState,
+        output: BlockExecutionOutput<ReceiptTy<Evm::Primitives>>,
+    ) -> BlockExecutionOutput<ReceiptTy<Evm::Primitives>> {
+        if batch_state.block_reverts().is_empty() {
+            return output
+        }
+
+        let BlockExecutionOutput { result, state, .. } = output;
+        batch_state.push_block_state(state.into_inner());
+        BlockExecutionOutput {
+            result,
+            state: batch_state.into_execution_state().into(),
+            hashed_state: None,
+        }
+    }
+
     fn execute_block_with_database(
         evm_config: &Evm,
         block: &RecoveredBlock<BlockTy<Evm::Primitives>>,
@@ -735,7 +752,9 @@ where
         block: &RecoveredBlock<<Self::Primitives as NodePrimitives>::Block>,
     ) -> Result<BlockExecutionOutput<<Self::Primitives as NodePrimitives>::Receipt>, Self::Error>
     {
-        Self::execute_block_with_database(&self.evm_config, block, self.batch_database)
+        let Self { evm_config, batch_database, batch_state } = self;
+        let output = Self::execute_block_with_database(&evm_config, block, batch_database)?;
+        Ok(Self::merge_batch_output(batch_state, output))
     }
 
     fn execute_with_state_hook<F>(
@@ -746,12 +765,14 @@ where
     where
         F: FnMut(HashedPostState) + Send + 'static,
     {
-        Self::execute_block_with_database_and_state_hook(
-            &self.evm_config,
+        let Self { evm_config, batch_database, batch_state } = self;
+        let output = Self::execute_block_with_database_and_state_hook(
+            &evm_config,
             block,
-            self.batch_database,
+            batch_database,
             Some(Box::new(state_hook)),
-        )
+        )?;
+        Ok(Self::merge_batch_output(batch_state, output))
     }
 
     fn size_hint(&self) -> usize {

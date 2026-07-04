@@ -72,6 +72,11 @@ impl ExecutionOutcomeState {
         &self.block_reverts
     }
 
+    /// Consumes the accumulator and returns the aggregate execution state.
+    pub fn into_execution_state(self) -> ExecutionState {
+        self.state
+    }
+
     /// Returns the accumulated state parts.
     pub(crate) fn into_parts(self) -> (ExecutionState, Vec<ExecutionState>, Vec<BlockReverts>) {
         (self.state, self.block_states, self.block_reverts)
