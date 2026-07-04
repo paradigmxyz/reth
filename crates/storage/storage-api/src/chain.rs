@@ -104,24 +104,34 @@ where
         provider: &Provider,
         bodies: Vec<(u64, Option<&alloy_consensus::BlockBody<T, H>>)>,
     ) -> ProviderResult<()> {
-        let mut ommers_cursor = provider.tx_ref().cursor_write::<tables::BlockOmmers<H>>()?;
-        let mut withdrawals_cursor =
-            provider.tx_ref().cursor_write::<tables::BlockWithdrawals>()?;
+        let mut ommers_cursor = None;
+        let mut withdrawals_cursor = None;
 
         for (block_number, body) in bodies {
             let Some(body) = body else { continue };
 
             // Write ommers if any
             if !body.ommers.is_empty() {
+                if ommers_cursor.is_none() {
+                    ommers_cursor =
+                        Some(provider.tx_ref().cursor_write::<tables::BlockOmmers<H>>()?);
+                }
                 ommers_cursor
+                    .as_mut()
+                    .expect("ommers cursor initialized")
                     .append(block_number, &StoredBlockOmmers { ommers: body.ommers.clone() })?;
             }
 
             // Write withdrawals if any
-            if let Some(withdrawals) = body.withdrawals.clone() &&
-                !withdrawals.is_empty()
-            {
-                withdrawals_cursor.append(block_number, &StoredBlockWithdrawals { withdrawals })?;
+            if let Some(withdrawals) = body.withdrawals.as_ref().filter(|w| !w.is_empty()) {
+                if withdrawals_cursor.is_none() {
+                    withdrawals_cursor =
+                        Some(provider.tx_ref().cursor_write::<tables::BlockWithdrawals>()?);
+                }
+                withdrawals_cursor.as_mut().expect("withdrawals cursor initialized").append(
+                    block_number,
+                    &StoredBlockWithdrawals { withdrawals: withdrawals.clone() },
+                )?;
             }
         }
 
