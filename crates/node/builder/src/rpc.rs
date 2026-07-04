@@ -22,7 +22,7 @@ use jsonrpsee::RpcModule;
 use parking_lot::Mutex;
 use reth_chain_state::{CanonStateSubscriptions, StateTrieOverlayManager};
 use reth_chainspec::{ChainSpecProvider, EthChainSpec, EthereumHardforks, Hardforks};
-use reth_evm::{BlockExecutorFactory, ConfigureEvm, TxEnvFor};
+use reth_evm::{BlockExecutorFactory, ConfigureEvm, EvmFor, ExecuteAndDiscard, TxEnvFor};
 use reth_node_api::{
     AddOnsContext, BlockTy, EngineApiValidator, EngineTypes, FullNodeComponents, FullNodeTypes,
     NodeAddOns, NodeTypes, PayloadTypes, PayloadValidator, PrimitivesTy, TreeConfig,
@@ -1465,6 +1465,7 @@ where
             Block = BlockTy<Node::Types>,
         > + Clone,
     TxEnvFor<Node::Evm>: Clone + Send + 'static,
+    EvmFor<'static, Node::Evm>: ExecuteAndDiscard<TxEnvFor<Node::Evm>>,
 {
     type EngineValidator = BasicEngineValidator<Node::Provider, Node::Evm, EV::Validator>;
 

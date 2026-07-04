@@ -154,7 +154,7 @@ pub trait BlockExecutorFactory {
     /// Transaction environment consumed by executors from this factory.
     type Transaction;
     /// EVM instance consumed by executors from this factory.
-    type Evm<'a>: ExecuteAndDiscard<Self::Transaction>;
+    type Evm<'a>;
     /// EVM environment consumed by this factory.
     type EvmEnv: EvmEnv;
     /// Execution context for a block or payload.

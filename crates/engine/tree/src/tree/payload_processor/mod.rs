@@ -17,8 +17,8 @@ use prewarm::PrewarmMetrics;
 use rayon::prelude::*;
 use reth_chain_state::{PreservedSparseTrie, StateTrieOverlayManager};
 use reth_evm::{
-    ConfigureEvm, ConvertTx, EvmEnvFor, ExecutableTxFor, ExecutableTxIterator, ExecutableTxParts,
-    ExecutableTxTuple, TxEnvFor, WithTxEnv,
+    ConfigureEvm, ConvertTx, EvmEnvFor, EvmFor, ExecutableTxFor, ExecutableTxIterator,
+    ExecutableTxParts, ExecutableTxTuple, ExecuteAndDiscard, TxEnvFor, WithTxEnv,
 };
 use reth_execution_types::ExecutionState;
 use reth_primitives_traits::{FastInstant as Instant, NodePrimitives};
@@ -291,6 +291,7 @@ where
             + Sync
             + 'static,
         TxEnvFor<Evm>: Clone + Send + 'static,
+        EvmFor<'static, Evm>: ExecuteAndDiscard<TxEnvFor<Evm>>,
     {
         let PayloadProcessorSpawnOptions { parallel_bal_execution, pending_sparse_trie_prune } =
             options;
@@ -339,6 +340,7 @@ where
     where
         P: BlockReader + StateProviderFactory + StateReader + Clone + 'static,
         TxEnvFor<Evm>: Clone + Send + 'static,
+        EvmFor<'static, Evm>: ExecuteAndDiscard<TxEnvFor<Evm>>,
     {
         let (prewarm_rx, execution_rx) =
             self.spawn_tx_iterator(transactions, env.transaction_count, parallel_bal_execution);
@@ -563,6 +565,7 @@ where
     where
         P: BlockReader + StateProviderFactory + StateReader + Clone + 'static,
         TxEnvFor<Evm>: Clone + Send + 'static,
+        EvmFor<'static, Evm>: ExecuteAndDiscard<TxEnvFor<Evm>>,
     {
         let mode = if parallel_bal_execution {
             #[cfg(any())]
