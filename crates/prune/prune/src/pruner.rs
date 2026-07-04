@@ -11,7 +11,7 @@ use reth_provider::{
     DBProvider, DatabaseProviderFactory, PruneCheckpointReader, PruneCheckpointWriter,
     StageCheckpointReader,
 };
-use reth_prune_types::{PruneProgress, PrunedSegmentInfo, PrunerOutput};
+use reth_prune_types::{PruneProgress, PrunedSegmentInfo, PrunerOutput, SegmentOutput};
 use reth_stages_types::StageId;
 use reth_tokio_util::{EventSender, EventStream};
 use std::time::Duration;
@@ -240,10 +240,21 @@ where
 
                 let segment_start = Instant::now();
                 let previous_checkpoint = provider.get_prune_checkpoint(segment.segment())?;
-                let segment_output = segment.prune(
-                    provider,
-                    PruneInput { previous_checkpoint, to_block, limiter: limiter.clone() },
-                )?;
+                let input = PruneInput { previous_checkpoint, to_block, limiter: limiter.clone() };
+                if input.get_next_block_range().is_none() {
+                    output.segments.push((segment.segment(), SegmentOutput::done()));
+                    debug!(
+                        target: "pruner",
+                        segment = ?segment.segment(),
+                        purpose = ?segment.purpose(),
+                        %to_block,
+                        ?prune_mode,
+                        "Segment checkpoint is already past prune target"
+                    );
+                    continue
+                }
+
+                let segment_output = segment.prune(provider, input)?;
                 if let Some(checkpoint) = segment_output.checkpoint {
                     segment
                         .save_checkpoint(provider, checkpoint.as_prune_checkpoint(prune_mode))?;
