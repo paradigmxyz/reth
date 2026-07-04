@@ -219,46 +219,56 @@ impl PayloadStateRootHandle {
     }
 }
 
-/// Hashed account and storage keys that a state-root task may want to prefetch.
+/// Proof targets that a state-root task may want to prefetch.
 ///
 /// Hints are not authoritative. They may be missing, duplicated, stale, or ignored by a task.
-/// The conversions from and to proof-target types allocate; that cost is accepted because
-/// hints are produced on prewarm workers, off the block-execution thread.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Default)]
 pub struct StateAccessHint {
-    /// Hashed account keys that may be touched later in the block.
-    pub accounts: Vec<B256>,
-    /// Hashed storage keys keyed by hashed account.
-    pub storages: B256Map<Vec<B256>>,
+    /// Account and storage proof targets that may be touched later in the block.
+    targets: MultiProofTargetsV2,
+}
+
+impl StateAccessHint {
+    /// Creates a new hint from precomputed proof targets.
+    pub const fn new(targets: MultiProofTargetsV2) -> Self {
+        Self { targets }
+    }
+
+    /// Creates a hint from hashed account and storage keys.
+    pub fn from_hashed_keys(accounts: Vec<B256>, storages: B256Map<Vec<B256>>) -> Self {
+        Self {
+            targets: MultiProofTargetsV2 {
+                account_targets: accounts.into_iter().map(ProofV2Target::from).collect(),
+                storage_targets: storages
+                    .into_iter()
+                    .map(|(account, slots)| {
+                        (account, slots.into_iter().map(ProofV2Target::from).collect())
+                    })
+                    .collect(),
+            },
+        }
+    }
+
+    /// Returns the proof targets in this hint.
+    pub const fn targets(&self) -> &MultiProofTargetsV2 {
+        &self.targets
+    }
+
+    /// Consumes the hint and returns its proof targets.
+    pub fn into_targets(self) -> MultiProofTargetsV2 {
+        self.targets
+    }
 }
 
 impl From<MultiProofTargetsV2> for StateAccessHint {
     fn from(targets: MultiProofTargetsV2) -> Self {
-        Self {
-            accounts: targets.account_targets.into_iter().map(|target| target.key()).collect(),
-            storages: targets
-                .storage_targets
-                .into_iter()
-                .map(|(account, slots)| {
-                    (account, slots.into_iter().map(|target| target.key()).collect())
-                })
-                .collect(),
-        }
+        Self::new(targets)
     }
 }
 
 impl From<StateAccessHint> for MultiProofTargetsV2 {
     fn from(hint: StateAccessHint) -> Self {
-        Self {
-            account_targets: hint.accounts.into_iter().map(ProofV2Target::from).collect(),
-            storage_targets: hint
-                .storages
-                .into_iter()
-                .map(|(account, slots)| {
-                    (account, slots.into_iter().map(ProofV2Target::from).collect())
-                })
-                .collect(),
-        }
+        hint.into_targets()
     }
 }
 
@@ -447,7 +457,7 @@ impl SparseTrieStateRootSink {
 
 impl StateRootSink for SparseTrieStateRootSink {
     fn on_access_hint(&self, hint: StateAccessHint) {
-        let _ = self.sender.send(StateRootMessage::PrefetchProofs(hint.into()));
+        let _ = self.sender.send(StateRootMessage::PrefetchProofs(hint.into_targets()));
     }
 
     fn on_state_update(&self, state: EvmState) {
@@ -513,10 +523,15 @@ mod tests {
 
     impl StateRootSink for CountingSink {
         fn on_access_hint(&self, hint: StateAccessHint) {
-            assert_eq!(hint.accounts, vec![B256::repeat_byte(0x01)]);
+            assert_eq!(hint.targets().account_targets.len(), 1);
+            assert_eq!(hint.targets().account_targets[0].key(), B256::repeat_byte(0x01));
             assert_eq!(
-                hint.storages.get(&B256::repeat_byte(0x02)),
-                Some(&vec![B256::repeat_byte(0x03)])
+                hint.targets()
+                    .storage_targets
+                    .get(&B256::repeat_byte(0x02))
+                    .and_then(|slots| slots.first())
+                    .map(ProofV2Target::key),
+                Some(B256::repeat_byte(0x03))
             );
             self.access_hints.fetch_add(1, Ordering::Relaxed);
         }
@@ -545,7 +560,7 @@ mod tests {
 
         let mut storages = B256Map::default();
         storages.insert(storage_account, vec![storage_slot]);
-        let hint = StateAccessHint { accounts: vec![account], storages };
+        let hint = StateAccessHint::from_hashed_keys(vec![account], storages);
 
         let targets = MultiProofTargetsV2::from(hint);
         assert_eq!(targets.account_targets.len(), 1);
@@ -555,9 +570,10 @@ mod tests {
         assert_eq!(targets.storage_targets[&storage_account][0].key(), storage_slot);
 
         let hint = StateAccessHint::from(targets);
-        assert_eq!(hint.accounts, vec![account]);
-        assert_eq!(hint.storages.len(), 1);
-        assert_eq!(hint.storages[&storage_account], vec![storage_slot]);
+        assert_eq!(hint.targets().account_targets.len(), 1);
+        assert_eq!(hint.targets().account_targets[0].key(), account);
+        assert_eq!(hint.targets().storage_targets.len(), 1);
+        assert_eq!(hint.targets().storage_targets[&storage_account][0].key(), storage_slot);
     }
 
     #[test]
@@ -567,10 +583,9 @@ mod tests {
 
         let mut storages = B256Map::default();
         storages.insert(B256::repeat_byte(0x02), vec![B256::repeat_byte(0x03)]);
-        streams
-            .hint_stream()
-            .expect("hint stream")
-            .on_access_hint(StateAccessHint { accounts: vec![B256::repeat_byte(0x01)], storages });
+        streams.hint_stream().expect("hint stream").on_access_hint(
+            StateAccessHint::from_hashed_keys(vec![B256::repeat_byte(0x01)], storages),
+        );
 
         let hashed_updates = streams.hashed_update_stream().expect("hashed update stream");
         hashed_updates.on_hashed_state_update(HashedPostState::default());
