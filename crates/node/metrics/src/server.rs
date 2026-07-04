@@ -145,6 +145,7 @@ impl MetricServer {
 
         tracing::info!(target: "reth::cli", "Starting metrics endpoint at {}", listener.local_addr().unwrap());
 
+        let handle = install_prometheus_recorder();
         task_executor.spawn_with_graceful_shutdown_signal(async move |mut signal| loop {
             let io = tokio::select! {
                 _ = &mut signal => break,
@@ -159,7 +160,6 @@ impl MetricServer {
                 }
             };
 
-            let handle = install_prometheus_recorder();
             let hook = hook.clone();
             let pprof_dump_dir = pprof_dump_dir.clone();
             let service = tower::service_fn(move |req: Request<_>| {
