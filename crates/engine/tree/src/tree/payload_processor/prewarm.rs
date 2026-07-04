@@ -32,8 +32,8 @@ use metrics::{Counter, Gauge, Histogram};
 #[cfg(any())]
 use rayon::prelude::*;
 use reth_evm::{
-    database::StateProviderDatabase, BlockExecutorFactory, ConfigureEvm, EvmEnv, EvmFor,
-    ExecutableTxFor,
+    database::StateProviderDatabase, ConfigureEvm, EvmEnv, EvmFor, ExecutableTxFor,
+    ExecuteAndDiscard,
 };
 use reth_execution_types::{
     ExecutionAccountChangeRef, ExecutionStateChangeSink, ExecutionStorageChange,
@@ -245,11 +245,7 @@ where
             // task scheduling would otherwise make later prewarm reads observe non-canonical state.
             let mut proof_targets = PrewarmProofTargetsSink::default();
 
-            match ctx.evm_config.block_executor_factory().execute_transaction_and_discard(
-                evm,
-                &tx_env,
-                &mut proof_targets,
-            ) {
+            match evm.execute_and_discard(&tx_env, &mut proof_targets) {
                 Ok(()) => {}
                 Err(err) => {
                     trace!(

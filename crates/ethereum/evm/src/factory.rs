@@ -2,11 +2,9 @@
 use alloc::string::String;
 use alloc::{boxed::Box, sync::Arc};
 use alloy_consensus::Header;
-use core::fmt::Debug;
 use reth_chainspec::{ChainSpec, EthChainSpec};
 #[cfg(feature = "std")]
 use reth_evm::precompile_cache::{CachedPrecompileProvider, PrecompileCacheMap};
-use reth_execution_types::ExecutionStateChangeSink;
 
 #[cfg(feature = "jit")]
 pub use evm2_jit::{
@@ -223,32 +221,6 @@ where
     {
         Self::evm_with_env(self, db, evm_env)
     }
-
-    fn execute_transaction_and_discard<S>(
-        &self,
-        evm: &mut Self::Evm<'_>,
-        transaction: &Self::Transaction,
-        sink: &mut S,
-    ) -> Result<(), reth_evm::BlockExecutionError>
-    where
-        S: ExecutionStateChangeSink,
-        S::Error: Debug,
-    {
-        let executed = evm.transact(transaction.as_envelope()).map_err(|err| {
-            reth_evm::BlockExecutionError::msg(format!("prewarm transaction failed: {err:?}"))
-        })?;
-
-        if let Some(code) = executed.result().error_code {
-            let _ = executed.discard();
-            return Err(reth_evm::BlockExecutionError::msg(format!(
-                "prewarm transaction database error: {code:?}"
-            )));
-        }
-
-        executed.discard_with(sink).map(|_| ()).map_err(|err| {
-            reth_evm::BlockExecutionError::msg(format!("prewarm state sink failed: {err:?}"))
-        })
-    }
 }
 
 /// Reth EVM factory configuration.
@@ -295,7 +267,7 @@ impl RethEvmFactory {
     }
 
     /// Creates a new factory configuration that owns the backend and records metrics.
-    pub fn new_with_metrics(backend: JitBackend, metrics: JitMetrics) -> Self {
+    pub const fn new_with_metrics(backend: JitBackend, metrics: JitMetrics) -> Self {
         Self { backend, metrics, jit_support: false }
     }
 
