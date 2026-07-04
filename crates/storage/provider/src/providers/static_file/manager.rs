@@ -505,9 +505,9 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
                 continue
             }
 
-            for (i, receipt) in block.execution_outcome().receipts.iter().enumerate() {
-                w.append_receipt(first_tx + i as u64, receipt)?;
-            }
+            w.append_receipts(block.execution_outcome().receipts.iter().enumerate().map(
+                |(i, receipt)| Ok((first_tx + i as u64, receipt)),
+            ))?;
         }
         Ok(())
     }
