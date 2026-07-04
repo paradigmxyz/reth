@@ -7,9 +7,9 @@ use crate::{
     traits::{BlockSource, ReceiptProvider},
     BalProvider, BalStoreHandle, BlockHashReader, BlockNumReader, BlockReader, ChainSpecProvider,
     DatabaseProviderFactory, EitherWriterDestination, HashedPostStateProvider, HeaderProvider,
-    HeaderSyncGapProvider, InMemoryBalStore, MetadataProvider, ProviderError,
-    PruneCheckpointReader, RocksDBProviderFactory, StageCheckpointReader, StateProviderBox,
-    StaticFileProviderFactory, StaticFileWriter, TransactionVariant, TransactionsProvider,
+    HeaderSyncGapProvider, MetadataProvider, ProviderError, PruneCheckpointReader, RocksDBBalStore,
+    RocksDBProviderFactory, StageCheckpointReader, StateProviderBox, StaticFileProviderFactory,
+    StaticFileWriter, TransactionVariant, TransactionsProvider,
 };
 use alloy_consensus::transaction::TransactionMeta;
 use alloy_eips::BlockHashOrNumber;
@@ -157,9 +157,9 @@ impl<N: ProviderNodeTypes> ProviderFactory<N> {
             prune_modes: PruneModes::default(),
             storage: Default::default(),
             storage_settings: Arc::new(RwLock::new(storage_settings)),
-            rocksdb_provider,
+            rocksdb_provider: rocksdb_provider.clone(),
             changeset_cache: ChangesetCache::new(),
-            bal_store: BalStoreHandle::new(InMemoryBalStore::default()),
+            bal_store: BalStoreHandle::new(RocksDBBalStore::new(rocksdb_provider)),
             runtime,
             minimum_pruning_distance: MINIMUM_UNWIND_SAFE_DISTANCE,
             database_provider_metrics,

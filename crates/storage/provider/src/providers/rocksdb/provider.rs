@@ -153,6 +153,14 @@ const DEFAULT_COMPRESS_BUF_CAPACITY: usize = 4096;
 /// The consistency check on startup heals any crash that occurs between auto-commits.
 const DEFAULT_AUTO_COMMIT_THRESHOLD: usize = 512 * 1024 * 1024;
 
+/// Minimum BAL value size stored in `BlobDB` files.
+///
+/// Smaller BALs stay inline. Larger payloads avoid regular LSM value compaction.
+const DEFAULT_BAL_MIN_BLOB_SIZE: u64 = 4 * 1024;
+
+/// Target BAL blob file size.
+const DEFAULT_BAL_BLOB_FILE_SIZE: u64 = 256 * 1024 * 1024;
+
 /// Builder for [`RocksDBProvider`].
 pub struct RocksDBBuilder {
     path: PathBuf,
@@ -259,6 +267,16 @@ impl RocksDBBuilder {
         cf_options
     }
 
+    /// Creates column family options for block access list payloads.
+    fn block_access_lists_column_family_options(cache: &Cache) -> Options {
+        let mut cf_options = Self::default_column_family_options(cache);
+        cf_options.set_enable_blob_files(true);
+        cf_options.set_min_blob_size(DEFAULT_BAL_MIN_BLOB_SIZE);
+        cf_options.set_blob_file_size(DEFAULT_BAL_BLOB_FILE_SIZE);
+        cf_options.set_blob_compression_type(DBCompressionType::Lz4);
+        cf_options
+    }
+
     /// Creates optimized column family options for `TransactionHashNumbers`.
     ///
     /// This table stores `B256 -> TxNumber` mappings where:
@@ -297,10 +315,12 @@ impl RocksDBBuilder {
     /// - [`tables::TransactionHashNumbers`] - Transaction hash to number mapping
     /// - [`tables::AccountsHistory`] - Account history index
     /// - [`tables::StoragesHistory`] - Storage history index
+    /// - [`tables::BlockAccessLists`] - Block access list payloads
     pub fn with_default_tables(self) -> Self {
         self.with_table::<tables::TransactionHashNumbers>()
             .with_table::<tables::AccountsHistory>()
             .with_table::<tables::StoragesHistory>()
+            .with_table::<tables::BlockAccessLists>()
     }
 
     /// Enables metrics.
@@ -352,6 +372,8 @@ impl RocksDBBuilder {
             .map(|name| {
                 let cf_options = if name == tables::TransactionHashNumbers::NAME {
                     Self::tx_hash_numbers_column_family_options(&self.block_cache)
+                } else if name == tables::BlockAccessLists::NAME {
+                    Self::block_access_lists_column_family_options(&self.block_cache)
                 } else {
                     Self::default_column_family_options(&self.block_cache)
                 };
@@ -1101,6 +1123,18 @@ impl RocksDBProvider {
         let cf = self.get_cf_handle::<T>()?;
         let iter = self.0.iterator_cf(cf, IteratorMode::Start);
         Ok(RocksDBRawIter { inner: iter })
+    }
+
+    /// Creates a raw key iterator positioned at `key`.
+    pub(crate) fn raw_key_iter_from<T: Table>(
+        &self,
+        key: T::Key,
+    ) -> ProviderResult<RocksDBRawKeyIter<'_>> {
+        let cf = self.get_cf_handle::<T>()?;
+        let encoded_key = key.encode();
+        let mut iter = self.0.raw_iterator_cf(cf);
+        iter.seek(encoded_key.as_ref());
+        Ok(RocksDBRawKeyIter { inner: iter })
     }
 
     /// Returns all account history shards for the given address in ascending key order.
@@ -2730,6 +2764,39 @@ impl Iterator for RocksDBRawIter<'_> {
     }
 }
 
+/// Raw key iterator over a `RocksDB` table (non-transactional).
+pub(crate) struct RocksDBRawKeyIter<'db> {
+    inner: RocksDBRawIterEnum<'db>,
+}
+
+impl fmt::Debug for RocksDBRawKeyIter<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("RocksDBRawKeyIter").finish_non_exhaustive()
+    }
+}
+
+impl Iterator for RocksDBRawKeyIter<'_> {
+    type Item = ProviderResult<Box<[u8]>>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if !self.inner.valid() {
+            return self.inner.status().err().map(|e| {
+                Err(ProviderError::Database(DatabaseError::Read(DatabaseErrorInfo {
+                    message: e.to_string().into(),
+                    code: -1,
+                })))
+            })
+        }
+
+        let Some(key) = self.inner.key() else {
+            return Some(Err(ProviderError::Database(DatabaseError::Decode)))
+        };
+        let key = Box::from(key);
+        self.inner.next();
+        Some(Ok(key))
+    }
+}
+
 /// Iterator over a `RocksDB` table within a transaction.
 ///
 /// Yields decoded `(Key, Value)` pairs. Sees uncommitted writes.
@@ -2788,7 +2855,9 @@ const fn convert_log_level(level: LogLevel) -> rocksdb::LogLevel {
 mod tests {
     use super::*;
     use crate::providers::HistoryInfo;
-    use alloy_primitives::{Address, TxHash, B256};
+    use alloy_eip7928::bal::RawBal;
+    use alloy_eips::NumHash;
+    use alloy_primitives::{Address, Bytes, TxHash, B256};
     use reth_db_api::{
         models::{
             sharded_key::{ShardedKey, NUM_OF_INDICES_IN_SHARD},
@@ -2822,6 +2891,41 @@ mod tests {
         let key = StorageShardedKey::new(Address::ZERO, B256::ZERO, 100);
         provider.put::<tables::StoragesHistory>(key.clone(), &value).unwrap();
         assert!(provider.get::<tables::StoragesHistory>(key).unwrap().is_some());
+
+        let bal_key = reth_db_api::models::StoredBlockAccessListKey::new(NumHash::new(
+            1,
+            B256::with_last_byte(1),
+        ));
+        let bal_value =
+            reth_db_api::models::StoredBlockAccessList::new(RawBal::from(Bytes::from_static(&[
+                0xc0,
+            ])));
+        provider.put::<tables::BlockAccessLists>(bal_key, &bal_value).unwrap();
+        assert_eq!(provider.get::<tables::BlockAccessLists>(bal_key).unwrap(), Some(bal_value));
+    }
+
+    #[test]
+    fn block_access_lists_store_large_payloads_in_blob_files() {
+        let temp_dir = TempDir::new().unwrap();
+        let provider = RocksDBBuilder::new(temp_dir.path()).with_default_tables().build().unwrap();
+        let bal_key = reth_db_api::models::StoredBlockAccessListKey::new(NumHash::new(
+            1,
+            B256::with_last_byte(1),
+        ));
+        let bal_value =
+            reth_db_api::models::StoredBlockAccessList::new(RawBal::from(Bytes::from(vec![
+                0;
+                DEFAULT_BAL_MIN_BLOB_SIZE as usize +
+                    1
+            ])));
+
+        provider.put::<tables::BlockAccessLists>(bal_key, &bal_value).unwrap();
+        provider.flush(&[tables::BlockAccessLists::NAME]).unwrap();
+
+        let has_blob_file = std::fs::read_dir(temp_dir.path()).unwrap().any(|entry| {
+            entry.unwrap().path().extension().is_some_and(|extension| extension == "blob")
+        });
+        assert!(has_blob_file);
     }
 
     #[derive(Debug)]
