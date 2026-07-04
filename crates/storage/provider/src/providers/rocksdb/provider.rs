@@ -1380,10 +1380,17 @@ impl RocksDBProvider {
         ctx: &RocksDBWriteCtx,
     ) -> ProviderResult<()> {
         let mut batch = self.batch();
+        let tx_hash_numbers_cf = self.get_cf_handle::<tables::TransactionHashNumbers>()?;
         for (block, &first_tx_num) in blocks.iter().zip(tx_nums) {
             let body = block.recovered_block().body();
-            for (tx_num, transaction) in (first_tx_num..).zip(body.transactions_iter()) {
-                batch.put::<tables::TransactionHashNumbers>(*transaction.tx_hash(), &tx_num)?;
+            let mut tx_num = first_tx_num;
+            for transaction in body.transactions_iter() {
+                batch.put_encoded_cf::<tables::TransactionHashNumbers>(
+                    tx_hash_numbers_cf,
+                    transaction.tx_hash(),
+                    &tx_num,
+                )?;
+                tx_num += 1;
             }
         }
         ctx.pending_batches.lock().push(batch.into_inner());
@@ -1794,8 +1801,21 @@ impl<'a> RocksDBBatch<'a> {
         key: &<T::Key as Encode>::Encoded,
         value: &T::Value,
     ) -> ProviderResult<()> {
+        let cf = self.provider.get_cf_handle::<T>()?;
+        self.put_encoded_cf::<T>(cf, key, value)
+    }
+
+    /// Puts a value into the batch using a pre-resolved column family.
+    ///
+    /// If auto-commit is enabled and the batch exceeds the threshold, commits and resets.
+    fn put_encoded_cf<T: Table>(
+        &mut self,
+        cf: &rocksdb::ColumnFamily,
+        key: &<T::Key as Encode>::Encoded,
+        value: &T::Value,
+    ) -> ProviderResult<()> {
         let value_bytes = compress_to_buf_or_ref!(self.buf, value).unwrap_or(&self.buf);
-        self.inner.put_cf(self.provider.get_cf_handle::<T>()?, key, value_bytes);
+        self.inner.put_cf(cf, key, value_bytes);
         self.maybe_auto_commit()?;
         Ok(())
     }
