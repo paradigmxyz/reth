@@ -383,12 +383,11 @@ impl TreeConfig {
 
     /// Return the effective multiproof task chunk size for a known transaction count.
     pub const fn effective_multiproof_chunk_size(&self, transaction_count: Option<usize>) -> usize {
-        if let Some(transaction_count) = transaction_count {
-            if transaction_count >= LARGE_BLOCK_MULTIPROOF_TX_THRESHOLD
-                && self.multiproof_chunk_size == DEFAULT_MULTIPROOF_TASK_CHUNK_SIZE
-            {
-                return LARGE_BLOCK_MULTIPROOF_TASK_CHUNK_SIZE;
-            }
+        if let Some(transaction_count) = transaction_count &&
+            transaction_count >= LARGE_BLOCK_MULTIPROOF_TX_THRESHOLD &&
+            self.multiproof_chunk_size == DEFAULT_MULTIPROOF_TASK_CHUNK_SIZE
+        {
+            return LARGE_BLOCK_MULTIPROOF_TASK_CHUNK_SIZE;
         }
 
         self.multiproof_chunk_size
