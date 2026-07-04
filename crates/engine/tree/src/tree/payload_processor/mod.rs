@@ -63,10 +63,10 @@ pub const SMALL_BLOCK_TX_THRESHOLD: usize = 5;
 /// Type alias for [`PayloadHandle`] returned by payload processor spawn methods.
 type IteratorTx<Evm, I> = RecoveredTx<TxEnvFor<Evm>, <I as ExecutableTxIterator<Evm>>::Recovered>;
 
-type IteratorPayloadHandle<Evm, I> = PayloadHandle<
+type IteratorPayloadHandle<Evm, I, N> = PayloadHandle<
     IteratorTx<Evm, I>,
     <I as ExecutableTxTuple>::Error,
-    <<Evm as ConfigureEvm>::Primitives as NodePrimitives>::Receipt,
+    <N as NodePrimitives>::Receipt,
 >;
 
 type IteratorPrewarmTxReceiver<Evm, I> =
@@ -241,9 +241,10 @@ where
     }
 }
 
-impl<Evm> PayloadProcessor<Evm>
+impl<N, Evm> PayloadProcessor<Evm>
 where
-    Evm: ConfigureEvm + 'static,
+    N: NodePrimitives,
+    Evm: ConfigureEvm<Primitives = N> + 'static,
 {
     /// Spawns all background tasks and returns a handle connected to the tasks.
     ///
@@ -277,11 +278,11 @@ where
         &mut self,
         env: ExecutionEnv<Evm>,
         transactions: I,
-        provider_builder: StateProviderBuilder<Evm::Primitives, P>,
+        provider_builder: StateProviderBuilder<N, P>,
         multiproof_provider_factory: F,
         config: &TreeConfig,
         options: PayloadProcessorSpawnOptions,
-    ) -> IteratorPayloadHandle<Evm, I>
+    ) -> IteratorPayloadHandle<Evm, I, N>
     where
         P: BlockReader + StateProviderFactory + StateReader + Clone + 'static,
         F: DatabaseProviderROFactory<Provider: TrieCursorFactory + HashedCursorFactory>
@@ -332,9 +333,9 @@ where
         &self,
         env: ExecutionEnv<Evm>,
         transactions: I,
-        provider_builder: StateProviderBuilder<Evm::Primitives, P>,
+        provider_builder: StateProviderBuilder<N, P>,
         parallel_bal_execution: bool,
-    ) -> IteratorPayloadHandle<Evm, I>
+    ) -> IteratorPayloadHandle<Evm, I, N>
     where
         P: BlockReader + StateProviderFactory + StateReader + Clone + 'static,
         TxEnvFor<Evm>: Clone + Send + 'static,
@@ -555,10 +556,10 @@ where
         &self,
         env: ExecutionEnv<Evm>,
         transactions: mpsc::Receiver<(usize, impl ExecutableTxFor<Evm> + Clone + Send + 'static)>,
-        provider_builder: StateProviderBuilder<Evm::Primitives, P>,
+        provider_builder: StateProviderBuilder<N, P>,
         to_sparse_trie_task: Option<CrossbeamSender<StateRootMessage>>,
         parallel_bal_execution: bool,
-    ) -> CacheTaskHandle<<Evm::Primitives as NodePrimitives>::Receipt>
+    ) -> CacheTaskHandle<N::Receipt>
     where
         P: BlockReader + StateProviderFactory + StateReader + Clone + 'static,
         TxEnvFor<Evm>: Clone + Send + 'static,
