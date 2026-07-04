@@ -303,6 +303,9 @@ where
 
         self.ensure_consistency(provider, input.checkpoint().block_number, None)?;
 
+        let db = StateProviderDatabase::new(LatestStateProviderRef::new(provider));
+        let mut executor = self.evm_config.batch_executor(db);
+
         // Progress tracking
         let mut stage_progress = start_block;
         let mut stage_checkpoint = execution_checkpoint(
@@ -329,8 +332,6 @@ where
 
         let mut blocks = Vec::new();
         let mut results = Vec::new();
-        let batch_db = StateProviderDatabase::new(LatestStateProviderRef::new(provider));
-        let mut executor = self.evm_config.batch_executor(batch_db);
         for block_number in start_block..=max_block {
             // Fetch the block
             let fetch_block_start = Instant::now();
