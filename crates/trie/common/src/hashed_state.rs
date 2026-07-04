@@ -21,6 +21,7 @@ use reth_primitives_traits::Account;
 use rayon::prelude::{FromParallelIterator, IntoParallelIterator, ParallelIterator};
 
 use revm::database::{AccountStatus, BundleAccount};
+use smallvec::SmallVec;
 
 /// In-memory hashed state that stores account and storage changes with keccak256-hashed keys in
 /// hash maps.
@@ -614,7 +615,7 @@ impl HashedPostStateSorted {
     /// For small batches, uses `extend_ref_and_sort` loop.
     /// For large batches, uses k-way merge for O(n log k) complexity.
     pub fn merge_batch<T: AsRef<Self> + From<Self>>(iter: impl IntoIterator<Item = T>) -> T {
-        let items: alloc::vec::Vec<_> = iter.into_iter().collect();
+        let items: SmallVec<[_; 4]> = iter.into_iter().collect();
         match items.len() {
             0 => Self::default().into(),
             1 => items.into_iter().next().expect("len == 1"),
@@ -755,7 +756,7 @@ impl HashedStorageSorted {
     /// Batch-merge sorted hashed storage. Iterator yields **newest to oldest**.
     /// If any update is wiped, prior data is discarded.
     pub fn merge_batch<'a>(updates: impl IntoIterator<Item = &'a Self>) -> Self {
-        let updates: Vec<_> = updates.into_iter().collect();
+        let updates: SmallVec<[_; 4]> = updates.into_iter().collect();
         if updates.is_empty() {
             return Self::default();
         }
