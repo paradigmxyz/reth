@@ -969,25 +969,53 @@ pub trait ExecutableTxParts<TxEnv, T> {
     fn into_parts(self) -> (TxEnv, Self::Recovered);
 }
 
+/// Converts a recovered transaction into the configured transaction environment.
+pub trait FromRecoveredTx<T> {
+    /// Converts a recovered transaction into the configured transaction environment.
+    fn from_recovered_tx(tx: Recovered<T>) -> Self;
+}
+
+impl<T, TxEnv> FromRecoveredTx<T> for TxEnv
+where
+    TxEnv: From<Recovered<T>>,
+{
+    fn from_recovered_tx(tx: Recovered<T>) -> Self {
+        tx.into()
+    }
+}
+
+/// Converts a recovered transaction with its encoded bytes into the configured transaction
+/// environment.
+pub trait FromTxWithEncoded<T>: FromRecoveredTx<T> {
+    /// Converts a recovered transaction with its encoded bytes into the configured transaction
+    /// environment.
+    fn from_tx_with_encoded(tx: WithEncoded<Recovered<T>>) -> Self
+    where
+        Self: Sized,
+    {
+        Self::from_recovered_tx(tx.1)
+    }
+}
+
 impl<T: Clone, TxEnv> ExecutableTxParts<TxEnv, T> for Recovered<T>
 where
-    TxEnv: From<Self>,
+    TxEnv: FromRecoveredTx<T>,
 {
     type Recovered = Self;
 
     fn into_parts(self) -> (TxEnv, Self) {
-        (self.clone().into(), self)
+        (TxEnv::from_recovered_tx(self.clone()), self)
     }
 }
 
 impl<T: Clone, TxEnv> ExecutableTxParts<TxEnv, T> for WithEncoded<Recovered<T>>
 where
-    TxEnv: From<Recovered<T>>,
+    TxEnv: FromTxWithEncoded<T>,
 {
     type Recovered = Self;
 
     fn into_parts(self) -> (TxEnv, Self) {
-        (self.1.clone().into(), self)
+        (TxEnv::from_tx_with_encoded(self.clone()), self)
     }
 }
 

@@ -14,7 +14,7 @@ use evm2::{
 };
 use reth_chainspec::EthereumHardforks;
 use reth_ethereum_primitives::TransactionSigned;
-use reth_evm::{ExecutableTxParts, RecoveredTx};
+use reth_evm::{ExecutableTxParts, FromTxWithEncoded, RecoveredTx};
 
 /// Map the latest active Ethereum hardfork at `timestamp` or `block_number` to a [`SpecId`].
 pub(crate) fn spec_id_by_timestamp_and_block_number<C>(
@@ -161,6 +161,8 @@ impl From<Recovered<TransactionSigned>> for EthTxEnv {
         Self { envelope: recovered_tx_envelope(value), tx_hash }
     }
 }
+
+impl FromTxWithEncoded<TransactionSigned> for EthTxEnv {}
 
 /// Recovered Ethereum transaction paired with its cached transaction environment.
 #[derive(Clone, Debug, Eq, PartialEq)]

@@ -46,7 +46,8 @@ pub use execute::{
     BlockAssembler, BlockAssemblerInput, BlockBuilder, BlockBuilderOutcome, BlockExecutionError,
     BlockExecutionOutput, BlockExecutor, BlockExecutorFactory, BlockValidationError, CommitChanges,
     EvmError, ExecutableTxFor, ExecutableTxParts, ExecuteAndDiscard, Executor, ExecutorTx,
-    GasOutput, InternalBlockExecutionError, InvalidTxError, RecoveredTx, WithTxEnv,
+    FromRecoveredTx, FromTxWithEncoded, GasOutput, InternalBlockExecutionError, InvalidTxError,
+    RecoveredTx, WithTxEnv,
 };
 pub use reth_execution_types::ExecutionState;
 
@@ -210,7 +211,8 @@ pub trait ConfigureEvm: Clone + Debug + Send + Sync + Unpin {
     /// Configured block executor factory.
     type BlockExecutorFactory: for<'a> crate::execute::BlockExecutorFactory<
         Primitives = Self::Primitives,
-        Transaction: From<Recovered<TxTy<Self::Primitives>>>,
+        Transaction: From<Recovered<TxTy<Self::Primitives>>>
+                         + FromTxWithEncoded<TxTy<Self::Primitives>>,
     >;
 
     /// Configured block assembler.
