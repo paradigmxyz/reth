@@ -290,16 +290,12 @@ impl StorageHistory {
         // Sort by (address, storage_key) for better RocksDB cache locality
         let mut sorted_storages: Vec<_> = highest_deleted_storages.into_iter().collect();
         sorted_storages.sort_unstable_by_key(|((addr, key), _)| (*addr, *key));
+        for (_, highest) in &mut sorted_storages {
+            *highest = (*highest).min(last_changeset_pruned_block);
+        }
 
         provider.with_rocksdb_batch(|mut batch| {
-            let targets: Vec<_> = sorted_storages
-                .iter()
-                .map(|((addr, key), highest)| {
-                    ((*addr, *key), (*highest).min(last_changeset_pruned_block))
-                })
-                .collect();
-
-            let outcomes = batch.prune_storage_history_batch(&targets)?;
+            let outcomes = batch.prune_storage_history_batch(&sorted_storages)?;
             deleted_shards = outcomes.deleted;
             updated_shards = outcomes.updated;
 
