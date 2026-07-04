@@ -34,7 +34,7 @@ use crate::{
     value_encoder::{AsyncAccountValueEncoder, ValueEncoderStats},
 };
 use alloy_primitives::{
-    map::{B256Map, B256Set},
+    map::{B256Map, HashSet},
     B256, U256,
 };
 use crossbeam_channel::{unbounded, Receiver as CrossbeamReceiver, Sender as CrossbeamSender};
@@ -47,7 +47,8 @@ use reth_trie::{
     hashed_cursor::{HashedCursorFactory, HashedStorageCursor, InstrumentedHashedCursor},
     proof_v2,
     trie_cursor::{InstrumentedTrieCursor, TrieCursorFactory, TrieStorageCursor},
-    DecodedMultiProofV2, HashedPostState, MultiProofTargetsV2, ProofTrieNodeV2, ProofV2Target,
+    DecodedMultiProofV2, HashedPostState, MultiProofTargetsV2, Nibbles, ProofTrieNodeV2,
+    ProofV2Target,
 };
 use std::{
     cell::RefCell,
@@ -1071,13 +1072,17 @@ fn dispatch_v2_storage_proofs(
     let mut storage_proof_receivers =
         B256Map::with_capacity_and_hasher(storage_targets.len(), Default::default());
 
-    // Collect hashed addresses from account targets that need their storage roots computed
-    let account_target_addresses: B256Set = account_targets.iter().map(|t| t.key()).collect();
+    // Collect account targets in their native nibble form. `ProofV2Target::key()` repacks the
+    // path into bytes, but dispatch only needs membership against storage addresses.
+    let account_target_paths: HashSet<Nibbles> =
+        account_targets.iter().map(|target| target.key_nibbles).collect();
 
     // For storage targets with associated account proofs, ensure the first target has
     // min_len(0) so the root node is returned for storage root computation
     for (hashed_address, targets) in &mut storage_targets {
-        if account_target_addresses.contains(hashed_address) &&
+        // SAFETY: `hashed_address` is exactly 32 bytes.
+        let hashed_path = unsafe { Nibbles::unpack_unchecked(hashed_address.as_slice()) };
+        if account_target_paths.contains(&hashed_path) &&
             let Some(first) = targets.first_mut()
         {
             *first = first.with_min_len(0);
