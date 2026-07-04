@@ -32,8 +32,8 @@ use metrics::{Counter, Gauge, Histogram};
 #[cfg(any())]
 use rayon::prelude::*;
 use reth_evm::{
-    database::StateProviderDatabase, ConfigureEvm, EvmEnv, EvmFor, ExecutableTxFor,
-    ExecuteAndDiscard, TxEnvFor,
+    database::StateProviderDatabase, BlockExecutorFactory, ConfigureEvm, EvmEnv, EvmFor,
+    ExecutableTxFor,
 };
 use reth_execution_types::{
     ExecutionAccountChangeRef, ExecutionStateChangeSink, ExecutionStorageChange,
@@ -141,7 +141,6 @@ where
         to_sparse_trie_task: Option<CrossbeamSender<StateRootMessage>>,
     ) where
         Tx: ExecutableTxFor<Evm> + Send + 'static,
-        for<'evm> EvmFor<'evm, Evm>: ExecuteAndDiscard<TxEnvFor<Evm>>,
     {
         let executor = self.executor.clone();
         let ctx = self.ctx.clone();
@@ -222,7 +221,6 @@ where
         to_sparse_trie_task: Option<&CrossbeamSender<StateRootMessage>>,
     ) where
         Tx: ExecutableTxFor<Evm>,
-        for<'evm> EvmFor<'evm, Evm>: ExecuteAndDiscard<TxEnvFor<Evm>>,
     {
         WorkerPool::with_worker_mut(|worker| {
             let Some(evm) =
@@ -247,7 +245,11 @@ where
             // task scheduling would otherwise make later prewarm reads observe non-canonical state.
             let mut proof_targets = PrewarmProofTargetsSink::default();
 
-            match evm.execute_and_discard(&tx_env, &mut proof_targets) {
+            match ctx.evm_config.block_executor_factory().execute_and_discard(
+                evm,
+                &tx_env,
+                &mut proof_targets,
+            ) {
                 Ok(()) => {}
                 Err(err) => {
                     trace!(
@@ -489,7 +491,6 @@ where
     pub fn run<Tx>(self, mode: PrewarmMode<Tx>, actions_tx: Sender<PrewarmTaskEvent<N::Receipt>>)
     where
         Tx: ExecutableTxFor<Evm> + Send + 'static,
-        for<'evm> EvmFor<'evm, Evm>: ExecuteAndDiscard<TxEnvFor<Evm>>,
     {
         // Spawn execution tasks based on mode
         match mode {

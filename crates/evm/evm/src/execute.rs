@@ -8,12 +8,11 @@ use alloy_consensus::{
     transaction::{Either, Recovered},
     BlockHeader as _, Header,
 };
-use alloy_eips::eip2718::{Typed2718, WithEncoded};
+use alloy_eips::eip2718::WithEncoded;
 use alloy_primitives::{Address, Bytes, B256};
 use core::fmt::Debug;
 #[cfg(feature = "std")]
 use evm2::evm::{CacheDB, Db};
-use evm2::{Evm, EvmTypes};
 pub use reth_execution_errors::{
     BlockExecutionError, BlockValidationError, EvmError, InternalBlockExecutionError,
     InvalidTxError,
@@ -193,51 +192,18 @@ pub trait BlockExecutorFactory {
     {
         self.evm_with_env(Db::new(db), evm_env)
     }
-}
 
-/// An EVM instance that can execute a transaction and discard its writes.
-pub trait ExecuteAndDiscard<Tx> {
     /// Executes a transaction and discards its writes while streaming observed state changes into
     /// `sink`.
     fn execute_and_discard<S>(
-        &mut self,
-        transaction: &Tx,
+        &self,
+        evm: &mut Self::Evm<'_>,
+        transaction: &Self::Transaction,
         sink: &mut S,
     ) -> Result<(), BlockExecutionError>
     where
         S: ExecutionStateChangeSink,
         S::Error: Debug;
-}
-
-impl<T, Tx> ExecuteAndDiscard<Tx> for Evm<'_, T>
-where
-    T: EvmTypes<Tx: Typed2718>,
-    Tx: AsRef<T::Tx>,
-{
-    fn execute_and_discard<S>(
-        &mut self,
-        transaction: &Tx,
-        sink: &mut S,
-    ) -> Result<(), BlockExecutionError>
-    where
-        S: ExecutionStateChangeSink,
-        S::Error: Debug,
-    {
-        let executed = self.transact(transaction.as_ref()).map_err(|err| {
-            BlockExecutionError::msg(format!("discarded transaction execution failed: {err:?}"))
-        })?;
-
-        if let Some(code) = executed.result().error_code {
-            let _ = executed.discard();
-            return Err(BlockExecutionError::msg(format!(
-                "discarded transaction database error: {code:?}"
-            )))
-        }
-
-        executed.discard_with(sink).map(|_| ()).map_err(|err| {
-            BlockExecutionError::msg(format!("discarded state sink failed: {err:?}"))
-        })
-    }
 }
 
 /// Input for block assembly.

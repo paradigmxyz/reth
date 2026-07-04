@@ -44,9 +44,9 @@ pub use aliases::*;
 pub use execute::{
     BlockAssembler, BlockAssemblerInput, BlockBuilder, BlockBuilderOutcome, BlockExecutionError,
     BlockExecutionOutput, BlockExecutor, BlockExecutorFactory, BlockValidationError, CommitChanges,
-    EvmError, ExecutableTxFor, ExecutableTxParts, ExecuteAndDiscard, Executor, ExecutorTx,
-    FromRecoveredTx, FromTxWithEncoded, GasOutput, InternalBlockExecutionError, IntoTxEnv,
-    InvalidTxError, RecoveredTx, WithTxEnv,
+    EvmError, ExecutableTxFor, ExecutableTxParts, Executor, ExecutorTx, FromRecoveredTx,
+    FromTxWithEncoded, GasOutput, InternalBlockExecutionError, IntoTxEnv, InvalidTxError,
+    RecoveredTx, WithTxEnv,
 };
 pub use reth_execution_types::ExecutionState;
 
