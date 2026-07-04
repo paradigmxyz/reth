@@ -244,7 +244,7 @@ impl AbortGuard {
 struct BlockGasTracker {
     block_gas_limit: u64,
     enable_amsterdam_eip8037: bool,
-    tx_gas_limit_cap: Option<u64>,
+    tx_gas_limit_cap: u64,
     cumulative_tx_gas_used: u64,
     block_regular_gas_used: u64,
 }
@@ -258,7 +258,10 @@ impl BlockGasTracker {
         Self {
             block_gas_limit,
             enable_amsterdam_eip8037,
-            tx_gas_limit_cap,
+            tx_gas_limit_cap: match tx_gas_limit_cap {
+                Some(cap) => cap,
+                None => u64::MAX,
+            },
             cumulative_tx_gas_used: 0,
             block_regular_gas_used: 0,
         }
@@ -271,8 +274,7 @@ impl BlockGasTracker {
             self.cumulative_tx_gas_used
         };
         let block_available_gas = self.block_gas_limit.saturating_sub(block_gas_used);
-        let tx_min_gas_limit =
-            self.tx_gas_limit_cap.map_or(tx_gas_limit, |cap| tx_gas_limit.min(cap));
+        let tx_min_gas_limit = tx_gas_limit.min(self.tx_gas_limit_cap);
 
         if tx_min_gas_limit > block_available_gas {
             return Err(BlockValidationError::TransactionGasLimitMoreThanAvailableBlockGas {
