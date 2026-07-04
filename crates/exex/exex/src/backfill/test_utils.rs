@@ -72,7 +72,7 @@ where
     let state_provider = LatestStateProvider::new(provider);
     let database = StateProviderDatabase::new(state_provider);
     let block_execution_output = EthEvmConfig::ethereum(chain_spec)
-        .executor(database)
+        .batch_executor(database)
         .execute(block)
         .map_err(|err| eyre::eyre!(err.to_string()))?;
 
