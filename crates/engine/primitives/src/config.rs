@@ -15,6 +15,12 @@ pub const DEFAULT_MEMORY_BLOCK_BUFFER_TARGET: u64 = 0;
 /// The size of proof targets chunk to spawn in one multiproof calculation.
 pub const DEFAULT_MULTIPROOF_TASK_CHUNK_SIZE: usize = 5;
 
+/// Transaction count at which the default multiproof chunk size is widened.
+pub const LARGE_BLOCK_MULTIPROOF_TX_THRESHOLD: usize = 2_000;
+
+/// Multiproof chunk size used for very large blocks when the default is configured.
+pub const LARGE_BLOCK_MULTIPROOF_TASK_CHUNK_SIZE: usize = 16;
+
 /// Default number of cache hits before an invalid header entry is evicted and reprocessed.
 pub const DEFAULT_INVALID_HEADER_HIT_EVICTION_THRESHOLD: u8 = 128;
 
@@ -375,8 +381,16 @@ impl TreeConfig {
         self.multiproof_chunk_size
     }
 
-    /// Return the effective multiproof task chunk size.
-    pub const fn effective_multiproof_chunk_size(&self) -> usize {
+    /// Return the effective multiproof task chunk size for a known transaction count.
+    pub const fn effective_multiproof_chunk_size(&self, transaction_count: Option<usize>) -> usize {
+        if let Some(transaction_count) = transaction_count {
+            if transaction_count >= LARGE_BLOCK_MULTIPROOF_TX_THRESHOLD
+                && self.multiproof_chunk_size == DEFAULT_MULTIPROOF_TASK_CHUNK_SIZE
+            {
+                return LARGE_BLOCK_MULTIPROOF_TASK_CHUNK_SIZE;
+            }
+        }
+
         self.multiproof_chunk_size
     }
 
@@ -775,7 +789,10 @@ impl TreeConfig {
 
 #[cfg(test)]
 mod tests {
-    use super::TreeConfig;
+    use super::{
+        TreeConfig, DEFAULT_MULTIPROOF_TASK_CHUNK_SIZE, LARGE_BLOCK_MULTIPROOF_TASK_CHUNK_SIZE,
+        LARGE_BLOCK_MULTIPROOF_TX_THRESHOLD,
+    };
 
     #[test]
     #[should_panic(
@@ -785,5 +802,33 @@ mod tests {
         let _ = TreeConfig::default()
             .with_persistence_threshold(4)
             .with_persistence_backpressure_threshold(4);
+    }
+
+    #[test]
+    fn keeps_default_multiproof_chunks_for_normal_blocks() {
+        assert_eq!(
+            TreeConfig::default()
+                .effective_multiproof_chunk_size(Some(LARGE_BLOCK_MULTIPROOF_TX_THRESHOLD - 1)),
+            DEFAULT_MULTIPROOF_TASK_CHUNK_SIZE
+        );
+    }
+
+    #[test]
+    fn widens_default_multiproof_chunks_for_large_blocks() {
+        assert_eq!(
+            TreeConfig::default()
+                .effective_multiproof_chunk_size(Some(LARGE_BLOCK_MULTIPROOF_TX_THRESHOLD)),
+            LARGE_BLOCK_MULTIPROOF_TASK_CHUNK_SIZE
+        );
+    }
+
+    #[test]
+    fn preserves_custom_multiproof_chunk_size_for_large_blocks() {
+        assert_eq!(
+            TreeConfig::default()
+                .with_multiproof_chunk_size(7)
+                .effective_multiproof_chunk_size(Some(LARGE_BLOCK_MULTIPROOF_TX_THRESHOLD)),
+            7
+        );
     }
 }

@@ -306,7 +306,7 @@ where
             from_multi_proof,
             SparseTrieTaskOptions {
                 parent_state_root,
-                chunk_size: config.multiproof_chunk_size(),
+                chunk_size: config.effective_multiproof_chunk_size(transaction_count),
                 pending_sparse_trie_prune: if self.disable_sparse_trie_cache_pruning {
                     None
                 } else {
