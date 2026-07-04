@@ -31,6 +31,7 @@ use rocksdb::{
     OptimisticTransactionOptions, Options, SnapshotWithThreadMode, Transaction,
     WriteBatchWithTransaction, WriteBufferManager, WriteOptions, DB,
 };
+use smallvec::SmallVec;
 use std::{
     collections::BTreeMap,
     fmt,
@@ -48,6 +49,8 @@ fn synced_write_options() -> WriteOptions {
 
 /// Pending `RocksDB` batches type alias.
 pub(crate) type PendingRocksDBBatches = Arc<Mutex<Vec<WriteBatchWithTransaction<true>>>>;
+
+type HistoryBlockList = SmallVec<[u64; 8]>;
 
 /// Raw key-value result from a `RocksDB` iterator.
 type RawKVResult = Result<(Box<[u8]>, Box<[u8]>), rocksdb::Error>;
@@ -1400,7 +1403,7 @@ impl RocksDBProvider {
         ctx: &RocksDBWriteCtx,
     ) -> ProviderResult<()> {
         let mut batch = self.batch();
-        let mut account_history: BTreeMap<Address, Vec<u64>> = BTreeMap::new();
+        let mut account_history: BTreeMap<Address, HistoryBlockList> = BTreeMap::new();
 
         for (block_idx, block) in blocks.iter().enumerate() {
             let block_number = ctx.first_block_number + block_idx as u64;
@@ -1432,7 +1435,7 @@ impl RocksDBProvider {
         blocks: &[ExecutedBlock<N>],
         ctx: &RocksDBWriteCtx,
     ) -> ProviderResult<()> {
-        let mut storage_history: BTreeMap<(Address, B256), Vec<u64>> = BTreeMap::new();
+        let mut storage_history: BTreeMap<(Address, B256), HistoryBlockList> = BTreeMap::new();
 
         for (block_idx, block) in blocks.iter().enumerate() {
             let block_number = ctx.first_block_number + block_idx as u64;
@@ -1476,8 +1479,9 @@ impl RocksDBProvider {
         &self,
         address: Address,
         storage_key: B256,
-        indices: Vec<u64>,
+        indices: impl IntoIterator<Item = u64>,
     ) -> ProviderResult<Vec<(StorageShardedKey, BlockNumberList)>> {
+        let indices = indices.into_iter().collect::<HistoryBlockList>();
         if indices.is_empty() {
             return Ok(Vec::new());
         }
@@ -1492,7 +1496,7 @@ impl RocksDBProvider {
         let last_shard_opt = self.get::<tables::StoragesHistory>(last_key.clone())?;
         let mut last_shard = last_shard_opt.unwrap_or_else(BlockNumberList::empty);
 
-        last_shard.append(indices).map_err(ProviderError::other)?;
+        last_shard.append(indices.iter().copied()).map_err(ProviderError::other)?;
 
         if last_shard.len() <= NUM_OF_INDICES_IN_SHARD as u64 {
             return Ok(vec![(last_key, last_shard)]);
@@ -1901,7 +1905,7 @@ impl<'a> RocksDBBatch<'a> {
         address: Address,
         indices: impl IntoIterator<Item = u64>,
     ) -> ProviderResult<()> {
-        let indices: Vec<u64> = indices.into_iter().collect();
+        let indices = indices.into_iter().collect::<HistoryBlockList>();
 
         if indices.is_empty() {
             return Ok(());
@@ -1917,7 +1921,7 @@ impl<'a> RocksDBBatch<'a> {
         let last_shard_opt = self.provider.get::<tables::AccountsHistory>(last_key.clone())?;
         let mut last_shard = last_shard_opt.unwrap_or_else(BlockNumberList::empty);
 
-        last_shard.append(indices).map_err(ProviderError::other)?;
+        last_shard.append(indices.iter().copied()).map_err(ProviderError::other)?;
 
         // Fast path: all indices fit in one shard
         if last_shard.len() <= NUM_OF_INDICES_IN_SHARD as u64 {
@@ -1963,8 +1967,6 @@ impl<'a> RocksDBBatch<'a> {
         storage_key: B256,
         indices: impl IntoIterator<Item = u64>,
     ) -> ProviderResult<()> {
-        let indices: Vec<u64> = indices.into_iter().collect();
-
         for (key, shard) in
             self.provider.storage_history_shards_to_put(address, storage_key, indices)?
         {
