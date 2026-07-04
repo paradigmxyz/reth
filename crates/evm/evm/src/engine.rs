@@ -184,9 +184,6 @@ where
     }
 }
 
-// SAFETY: `EitherIter` is just a newtype over `Either<L, R>`.
-unsafe impl<L: Send, R: Send> Send for EitherIter<L, R> {}
-
 impl<A: ExecutableTxTuple, B: ExecutableTxTuple> ExecutableTxTuple for Either<A, B> {
     type RawTx = Either<A::RawTx, B::RawTx>;
     type Tx = Either<A::Tx, B::Tx>;
