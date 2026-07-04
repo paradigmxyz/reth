@@ -154,7 +154,11 @@ fn test_merge_threshold_option_can_be_configured() {
     env.with_raw_env_ptr(|env| {
         let mut value = 0u64;
         let result = unsafe {
-            ffi::mdbx_env_get_option(env, ffi::MDBX_opt_merge_threshold_16dot16_percent, &mut value)
+            ffi::mdbx_env_get_option(
+                env,
+                ffi::MDBX_opt_merge_threshold_16dot16_percent,
+                &raw mut value,
+            )
         };
         assert_eq!(result, ffi::MDBX_SUCCESS);
         assert_eq!(value, threshold as u64);
