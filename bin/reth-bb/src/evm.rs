@@ -290,7 +290,7 @@ where
         let seg_idx = plan.next_segment;
         let prev_seg_idx = seg_idx - 1;
 
-        debug!(
+        trace!(
             target: "engine::bb::evm",
             seg_idx,
             tx_counter = plan.tx_counter,
@@ -343,7 +343,7 @@ where
         let last_receipt_cumulative =
             result.receipts.last().map(|r| r.cumulative_gas_used).unwrap_or(0);
         let seg_block_number = prev_segment.evm_env.block_env.number.saturating_to::<u64>();
-        debug!(
+        trace!(
             target: "engine::bb::evm",
             prev_seg_idx,
             seg_block_number,
