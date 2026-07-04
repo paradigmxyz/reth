@@ -669,6 +669,12 @@ where
             hashed_update_stream.on_hashed_state_update(hashed_state);
         }
 
+        // Storage-only updates already touch the account in the sparse trie; once the storage root
+        // is computed, promotion can reuse the revealed parent account without a BAL account read.
+        if account_fields.is_empty() {
+            return;
+        }
+
         let existing_account = if account_fields.needs_parent_account() {
             if provider.is_none() {
                 let _span = debug_span!(
