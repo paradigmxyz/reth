@@ -180,19 +180,6 @@ pub trait BlockExecutorFactory {
     where
         Self: 'a;
 
-    /// Creates a configured block executor that streams hashed state updates to an installed state
-    /// hook without retaining hashed state in the returned execution output.
-    fn create_executor_streaming_hashed_state<'a>(
-        &'a self,
-        evm: Self::Evm<'a>,
-        ctx: Self::ExecutionCtx<'a>,
-    ) -> Self::Executor<'a>
-    where
-        Self: 'a,
-    {
-        self.create_executor(evm, ctx)
-    }
-
     /// Creates an EVM instance with the configured execution environment.
     fn evm_with_env<'a, DB>(&self, db: DB, evm_env: Self::EvmEnv) -> Self::Evm<'a>
     where
@@ -712,11 +699,7 @@ where
         let ctx = evm_config
             .context_for_block(block.sealed_block())
             .map_err(BlockExecutionError::other)?;
-        let mut executor = if state_hook.is_some() {
-            evm_config.block_executor_factory().create_executor_streaming_hashed_state(evm, ctx)
-        } else {
-            evm_config.block_executor_factory().create_executor(evm, ctx)
-        };
+        let mut executor = evm_config.block_executor_factory().create_executor(evm, ctx);
         if let Some(hook) = state_hook &&
             !executor.set_state_hook(hook)
         {

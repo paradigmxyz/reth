@@ -204,17 +204,6 @@ where
         Self::create_executor(self, evm, ctx)
     }
 
-    fn create_executor_streaming_hashed_state<'a>(
-        &'a self,
-        evm: Self::Evm<'a>,
-        ctx: Self::ExecutionCtx<'a>,
-    ) -> Self::Executor<'a>
-    where
-        Self: 'a,
-    {
-        Self::create_executor_with_hashed_state_mode(self, evm, ctx, HashedStateMode::StreamOnly)
-    }
-
     fn evm_with_env<'a, DB>(&self, db: DB, evm_env: Self::EvmEnv) -> Self::Evm<'a>
     where
         DB: evm2::evm::DynDatabase + 'a,

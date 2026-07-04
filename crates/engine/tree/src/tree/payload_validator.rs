@@ -1162,11 +1162,7 @@ where
                     .with_jit_support()
                     .evm_with_env(db, env.evm_env.clone());
                 let executor_factory = self.evm_config.block_executor_factory();
-                let mut executor = if streamed_state_updates {
-                    executor_factory.create_executor_streaming_hashed_state(evm, execution_ctx)
-                } else {
-                    executor_factory.create_executor(evm, execution_ctx)
-                };
+                let mut executor = executor_factory.create_executor(evm, execution_ctx);
                 if let Some(sender) = state_hook_sender {
                     executor.set_state_hook(move |hashed_state| {
                         sender.send_hashed_state(hashed_state);

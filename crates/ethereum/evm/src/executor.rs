@@ -49,19 +49,17 @@ pub(crate) enum HashedStateMode {
     OutputOnly,
     /// Stream hashed state updates to the provided hook without accumulating output hashed state.
     StreamOnly,
-    /// Accumulate final output hashed state and stream each committed update.
-    OutputAndStream,
 }
 
 impl HashedStateMode {
     /// Returns true if execution should include hashed state in its output.
     pub(crate) const fn output(self) -> bool {
-        matches!(self, Self::OutputOnly | Self::OutputAndStream)
+        matches!(self, Self::OutputOnly)
     }
 
     /// Returns true if execution should stream hashed state updates.
     pub(crate) const fn stream(self) -> bool {
-        matches!(self, Self::StreamOnly | Self::OutputAndStream)
+        matches!(self, Self::StreamOnly)
     }
 }
 
@@ -133,7 +131,7 @@ impl<'a> BlockExecutor for EthBlockExecutor<'a> {
 
     fn set_state_hook(&mut self, hook: impl FnMut(HashedPostState) + Send + 'static) -> bool {
         if self.hashed_state_mode == HashedStateMode::OutputOnly {
-            self.hashed_state_mode = HashedStateMode::OutputAndStream;
+            self.hashed_state_mode = HashedStateMode::StreamOnly;
         }
 
         self.hashed_state_update_hook = Some(Box::new(hook));
