@@ -31,18 +31,6 @@ use reth_primitives_traits::{
 use reth_storage_api::StateProvider;
 use reth_trie_common::updates::TrieUpdates;
 
-/// Converts a value into the transaction environment expected by an EVM configuration.
-pub trait IntoTxEnv<TxEnv> {
-    /// Converts this value into the configured transaction environment.
-    fn into_tx_env(self) -> TxEnv;
-}
-
-impl<TxEnv> IntoTxEnv<TxEnv> for TxEnv {
-    fn into_tx_env(self) -> TxEnv {
-        self
-    }
-}
-
 /// Gas used by a successfully executed transaction.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub struct GasOutput {
@@ -737,7 +725,7 @@ where
 
         executor.apply_pre_execution_changes()?;
         for transaction in block.clone_transactions_recovered() {
-            let tx_env = TxEnvFor::<Evm>::from(transaction);
+            let tx_env = evm_config.tx_env(transaction);
             executor.execute_transaction(tx_env)?;
         }
         executor.finish()

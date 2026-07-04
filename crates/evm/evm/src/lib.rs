@@ -11,7 +11,6 @@
 
 extern crate alloc;
 
-use crate::execute::IntoTxEnv;
 #[cfg(feature = "std")]
 use crate::execute::{BasicBlockBuilder, BasicBlockExecutor};
 #[cfg(feature = "std")]
@@ -255,8 +254,8 @@ pub trait ConfigureEvm: Clone + Debug + Send + Sync + Unpin {
     ) -> Result<ExecutionCtxFor<'_, Self>, Self::Error>;
 
     /// Returns a transaction environment from a transaction.
-    fn tx_env(&self, transaction: impl IntoTxEnv<TxEnvFor<Self>>) -> TxEnvFor<Self> {
-        transaction.into_tx_env()
+    fn tx_env(&self, transaction: impl Into<TxEnvFor<Self>>) -> TxEnvFor<Self> {
+        transaction.into()
     }
 
     /// Returns a config with JIT support enabled for subsequently created EVMs, if supported.
