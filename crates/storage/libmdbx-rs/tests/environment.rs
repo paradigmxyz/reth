@@ -1,6 +1,6 @@
 #![allow(missing_docs)]
 use byteorder::{ByteOrder, LittleEndian};
-use reth_libmdbx::*;
+use reth_libmdbx::{ffi, *};
 use tempfile::tempdir;
 
 #[test]
@@ -140,6 +140,35 @@ fn test_info() {
     let info = env.info().unwrap();
     assert!(matches!(info.mode(), Mode::ReadOnly));
     assert!(env.is_read_only().unwrap());
+}
+
+#[test]
+fn test_subpage_layout_options() {
+    const SUBPAGE_LIMIT: u64 = 32_768;
+    const SUBPAGE_ROOM_THRESHOLD: u64 = 16_384;
+
+    fn get_option(env: &Environment, option: ffi::MDBX_option_t) -> u64 {
+        env.with_raw_env_ptr(|ptr| {
+            let mut value = 0;
+            unsafe {
+                assert_eq!(ffi::mdbx_env_get_option(ptr, option, &mut value), ffi::MDBX_SUCCESS);
+            }
+            value
+        })
+    }
+
+    let dir = tempdir().unwrap();
+    let env = Environment::builder()
+        .set_subpage_limit(SUBPAGE_LIMIT)
+        .set_subpage_room_threshold(SUBPAGE_ROOM_THRESHOLD)
+        .open(dir.path())
+        .unwrap();
+
+    assert_eq!(get_option(&env, ffi::MDBX_opt_subpage_limit), SUBPAGE_LIMIT);
+    assert_eq!(
+        get_option(&env, ffi::MDBX_opt_subpage_room_threshold),
+        SUBPAGE_ROOM_THRESHOLD
+    );
 }
 
 #[test]

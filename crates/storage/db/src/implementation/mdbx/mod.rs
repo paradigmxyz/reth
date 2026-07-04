@@ -51,6 +51,9 @@ const DEFAULT_MAX_READERS: u64 = 32_000;
 /// Space that a read-only transaction can occupy until the warning is emitted.
 /// See [`reth_libmdbx::EnvironmentBuilder::set_handle_slow_readers`] for more information.
 const MAX_SAFE_READER_SPACE: usize = 10 * GIGABYTE;
+/// MDBX percentages use 16.16 fixed-point values where 65535 is 100%.
+const MDBX_PERCENT_25: u64 = 16_384;
+const MDBX_PERCENT_50: u64 = 32_768;
 
 /// Environment used when opening a MDBX environment. RO/RW.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -501,6 +504,13 @@ impl DatabaseEnv {
         // because we want to prioritize freelist lookup speed over database growth.
         // https://github.com/paradigmxyz/reth/blob/fa2b9b685ed9787636d962f4366caf34a9186e66/crates/storage/libmdbx-rs/mdbx-sys/libmdbx/mdbx.c#L16017.
         inner_env.set_rp_augment_limit(256 * 1024);
+        if kind.is_rw() {
+            // Large DupSort groups dominate replay writes in hashed storage and storage-trie tables.
+            // Keep small groups embedded, but move crowded groups to duplicate trees earlier so
+            // repeated updates copy and reshape less main-page payload.
+            inner_env.set_subpage_limit(MDBX_PERCENT_50);
+            inner_env.set_subpage_room_threshold(MDBX_PERCENT_25);
+        }
 
         if let Some(log_level) = args.log_level {
             // Levels higher than [LogLevel::Notice] require libmdbx built with `MDBX_DEBUG` option.
