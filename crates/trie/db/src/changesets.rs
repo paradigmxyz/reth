@@ -490,32 +490,35 @@ impl ChangesetCache {
             Vec::with_capacity(end_block.saturating_sub(start_block).saturating_add(1) as usize);
         let mut all_cached = true;
 
-        for block_number in range.rev() {
-            // Get the block hash for this block number
-            let block_hash = if block_number == end_block {
-                end_block_hash
-            } else {
-                provider.block_hash(block_number)?.ok_or_else(|| {
-                    ProviderError::other(std::io::Error::new(
-                        std::io::ErrorKind::NotFound,
-                        format!("block hash not found for block number {}", block_number),
-                    ))
-                })?
-            };
+        {
+            let cache = self.inner.read();
+            for block_number in range.rev() {
+                // Get the block hash for this block number
+                let block_hash = if block_number == end_block {
+                    end_block_hash
+                } else {
+                    provider.block_hash(block_number)?.ok_or_else(|| {
+                        ProviderError::other(std::io::Error::new(
+                            std::io::ErrorKind::NotFound,
+                            format!("block hash not found for block number {}", block_number),
+                        ))
+                    })?
+                };
 
-            debug!(
-                target: "trie::changeset_cache",
-                block_number,
-                ?block_hash,
-                "Looked up block hash for block number in range"
-            );
+                debug!(
+                    target: "trie::changeset_cache",
+                    block_number,
+                    ?block_hash,
+                    "Looked up block hash for block number in range"
+                );
 
-            let block_key = ChangesetRangeKey::single(block_number, block_hash);
-            if let Some(changesets) = self.inner.read().get(&block_key) {
-                cached_reverts.push(changesets);
-            } else {
-                all_cached = false;
-                break
+                let block_key = ChangesetRangeKey::single(block_number, block_hash);
+                if let Some(changesets) = cache.get(&block_key) {
+                    cached_reverts.push(changesets);
+                } else {
+                    all_cached = false;
+                    break
+                }
             }
         }
 
