@@ -997,6 +997,30 @@ pub trait FromTxWithEncoded<T>: FromRecoveredTx<T> {
     }
 }
 
+/// Converts transaction wrappers into the configured transaction environment.
+pub trait IntoTxEnv<TxEnv> {
+    /// Converts this transaction wrapper into the configured transaction environment.
+    fn into_tx_env(self) -> TxEnv;
+}
+
+impl<T, TxEnv> IntoTxEnv<TxEnv> for Recovered<T>
+where
+    TxEnv: FromRecoveredTx<T>,
+{
+    fn into_tx_env(self) -> TxEnv {
+        TxEnv::from_recovered_tx(self)
+    }
+}
+
+impl<T, TxEnv> IntoTxEnv<TxEnv> for WithEncoded<Recovered<T>>
+where
+    TxEnv: FromTxWithEncoded<T>,
+{
+    fn into_tx_env(self) -> TxEnv {
+        TxEnv::from_tx_with_encoded(self)
+    }
+}
+
 impl<T: Clone, TxEnv> ExecutableTxParts<TxEnv, T> for Recovered<T>
 where
     TxEnv: FromRecoveredTx<T>,

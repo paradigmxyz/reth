@@ -16,7 +16,6 @@ use crate::execute::{BasicBlockBuilder, BasicBlockExecutor};
 #[cfg(feature = "std")]
 use alloc::boxed::Box;
 use alloc::string::String;
-use alloy_consensus::transaction::Recovered;
 use alloy_eips::eip4895::Withdrawals;
 use alloy_primitives::{Address, Bytes, B256};
 use core::{error::Error, fmt::Debug};
@@ -46,8 +45,8 @@ pub use execute::{
     BlockAssembler, BlockAssemblerInput, BlockBuilder, BlockBuilderOutcome, BlockExecutionError,
     BlockExecutionOutput, BlockExecutor, BlockExecutorFactory, BlockValidationError, CommitChanges,
     EvmError, ExecutableTxFor, ExecutableTxParts, ExecuteAndDiscard, Executor, ExecutorTx,
-    FromRecoveredTx, FromTxWithEncoded, GasOutput, InternalBlockExecutionError, InvalidTxError,
-    RecoveredTx, WithTxEnv,
+    FromRecoveredTx, FromTxWithEncoded, GasOutput, InternalBlockExecutionError, IntoTxEnv,
+    InvalidTxError, RecoveredTx, WithTxEnv,
 };
 pub use reth_execution_types::ExecutionState;
 
@@ -211,8 +210,7 @@ pub trait ConfigureEvm: Clone + Debug + Send + Sync + Unpin {
     /// Configured block executor factory.
     type BlockExecutorFactory: for<'a> crate::execute::BlockExecutorFactory<
         Primitives = Self::Primitives,
-        Transaction: From<Recovered<TxTy<Self::Primitives>>>
-                         + FromTxWithEncoded<TxTy<Self::Primitives>>,
+        Transaction: FromTxWithEncoded<TxTy<Self::Primitives>>,
     >;
 
     /// Configured block assembler.
@@ -256,8 +254,8 @@ pub trait ConfigureEvm: Clone + Debug + Send + Sync + Unpin {
     ) -> Result<ExecutionCtxFor<'_, Self>, Self::Error>;
 
     /// Returns a transaction environment from a transaction.
-    fn tx_env(&self, transaction: impl Into<TxEnvFor<Self>>) -> TxEnvFor<Self> {
-        transaction.into()
+    fn tx_env(&self, transaction: impl IntoTxEnv<TxEnvFor<Self>>) -> TxEnvFor<Self> {
+        transaction.into_tx_env()
     }
 
     /// Returns a config with JIT support enabled for subsequently created EVMs, if supported.
