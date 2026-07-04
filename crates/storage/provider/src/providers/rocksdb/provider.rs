@@ -83,8 +83,7 @@ pub struct RocksDBStats {
 }
 
 /// Context for `RocksDB` block writes.
-#[derive(Clone)]
-pub(crate) struct RocksDBWriteCtx {
+pub(crate) struct RocksDBWriteCtx<'a> {
     /// The first block number being written.
     pub first_block_number: BlockNumber,
     /// The prune mode for transaction lookup, if any.
@@ -92,10 +91,10 @@ pub(crate) struct RocksDBWriteCtx {
     /// Storage settings determining what goes to `RocksDB`.
     pub storage_settings: StorageSettings,
     /// Pending batches to push to after writing.
-    pub pending_batches: PendingRocksDBBatches,
+    pub pending_batches: &'a PendingRocksDBBatches,
 }
 
-impl fmt::Debug for RocksDBWriteCtx {
+impl fmt::Debug for RocksDBWriteCtx<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("RocksDBWriteCtx")
             .field("first_block_number", &self.first_block_number)
@@ -1304,7 +1303,7 @@ impl RocksDBProvider {
         &self,
         blocks: &[ExecutedBlock<N>],
         tx_nums: &[TxNumber],
-        ctx: RocksDBWriteCtx,
+        ctx: RocksDBWriteCtx<'_>,
         runtime: &reth_tasks::Runtime,
     ) -> ProviderResult<()> {
         if !ctx.storage_settings.storage_v2 {
@@ -1377,7 +1376,7 @@ impl RocksDBProvider {
         &self,
         blocks: &[ExecutedBlock<N>],
         tx_nums: &[TxNumber],
-        ctx: &RocksDBWriteCtx,
+        ctx: &RocksDBWriteCtx<'_>,
     ) -> ProviderResult<()> {
         let mut batch = self.batch();
         for (block, &first_tx_num) in blocks.iter().zip(tx_nums) {
@@ -1397,7 +1396,7 @@ impl RocksDBProvider {
     fn write_account_history<N: reth_node_types::NodePrimitives>(
         &self,
         blocks: &[ExecutedBlock<N>],
-        ctx: &RocksDBWriteCtx,
+        ctx: &RocksDBWriteCtx<'_>,
     ) -> ProviderResult<()> {
         let mut batch = self.batch();
         let mut account_history: BTreeMap<Address, Vec<u64>> = BTreeMap::new();
@@ -1430,7 +1429,7 @@ impl RocksDBProvider {
     fn write_storage_history<N: reth_node_types::NodePrimitives>(
         &self,
         blocks: &[ExecutedBlock<N>],
-        ctx: &RocksDBWriteCtx,
+        ctx: &RocksDBWriteCtx<'_>,
     ) -> ProviderResult<()> {
         let mut storage_history: BTreeMap<(Address, B256), Vec<u64>> = BTreeMap::new();
 

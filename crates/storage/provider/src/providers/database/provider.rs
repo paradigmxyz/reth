@@ -558,12 +558,12 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
     }
 
     /// Creates the context for `RocksDB` writes.
-    fn rocksdb_write_ctx(&self, first_block: BlockNumber) -> RocksDBWriteCtx {
+    fn rocksdb_write_ctx(&self, first_block: BlockNumber) -> RocksDBWriteCtx<'_> {
         RocksDBWriteCtx {
             first_block_number: first_block,
             prune_tx_lookup: self.prune_modes.transaction_lookup,
             storage_settings: self.cached_storage_settings(),
-            pending_batches: self.pending_rocksdb_batches.clone(),
+            pending_batches: &self.pending_rocksdb_batches,
         }
     }
 
