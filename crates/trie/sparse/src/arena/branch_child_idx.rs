@@ -63,6 +63,20 @@ impl<T> IndexMut<BranchChildIdx> for SmallVec<[T; 4]> {
     }
 }
 
+impl<T> Index<BranchChildIdx> for SmallVec<[T; 8]> {
+    type Output = T;
+
+    fn index(&self, idx: BranchChildIdx) -> &Self::Output {
+        &self.as_slice()[idx.get()]
+    }
+}
+
+impl<T> IndexMut<BranchChildIdx> for SmallVec<[T; 8]> {
+    fn index_mut(&mut self, idx: BranchChildIdx) -> &mut Self::Output {
+        &mut self.as_mut_slice()[idx.get()]
+    }
+}
+
 /// An iterator over a branch's children that yields `(BranchChildIdx, nibble)` pairs.
 ///
 /// Wraps `TrieMask::iter().enumerate()` to produce [`BranchChildIdx`] values instead of raw

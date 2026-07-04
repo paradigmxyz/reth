@@ -927,7 +927,7 @@ impl ArenaParallelSparseTrie {
 
         let ArenaSparseNode::Branch(b) = &self.upper_arena[head_idx] else { return };
         let short_key = b.short_key;
-        let children: SmallVec<[_; 4]> = b
+        let children: SmallVec<[_; 8]> = b
             .child_iter()
             .filter_map(|(nibble, child)| match child {
                 ArenaSparseNodeBranchChild::Revealed(idx) => Some((nibble, *idx)),

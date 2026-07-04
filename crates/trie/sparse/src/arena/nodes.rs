@@ -72,7 +72,7 @@ pub(super) struct ArenaSparseNodeBranch {
     pub(super) state: ArenaSparseNodeState,
     /// Revealed or blinded children, packed densely. The `state_mask` tracks which
     /// nibble positions have entries in this `SmallVec`.
-    pub(super) children: SmallVec<[ArenaSparseNodeBranchChild; 4]>,
+    pub(super) children: SmallVec<[ArenaSparseNodeBranchChild; 8]>,
     /// Bitmask indicating which of the 16 child slots are occupied (have an entry
     /// in `children`).
     pub(super) state_mask: TrieMask,
