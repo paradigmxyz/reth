@@ -255,7 +255,6 @@ impl<N: NodePrimitives> CanonicalInMemoryState<N> {
         self.inner.in_memory_state.pending.send_modify(|p| {
             p.replace(pending);
         });
-        self.inner.in_memory_state.update_metrics();
     }
 
     /// Append new blocks to the in memory state.
