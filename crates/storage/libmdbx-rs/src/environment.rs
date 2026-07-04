@@ -48,6 +48,7 @@ impl Environment {
             loose_limit: None,
             dp_reserve_limit: None,
             txn_dp_limit: None,
+            txn_dp_initial: None,
             spill_max_denominator: None,
             spill_min_denominator: None,
             geometry: None,
@@ -616,6 +617,7 @@ pub struct EnvironmentBuilder {
     loose_limit: Option<u64>,
     dp_reserve_limit: Option<u64>,
     txn_dp_limit: Option<u64>,
+    txn_dp_initial: Option<u64>,
     spill_max_denominator: Option<u64>,
     spill_min_denominator: Option<u64>,
     geometry: Option<Geometry<(Option<usize>, Option<usize>)>>,
@@ -689,6 +691,7 @@ impl EnvironmentBuilder {
                     (ffi::MDBX_opt_loose_limit, self.loose_limit),
                     (ffi::MDBX_opt_dp_reserve_limit, self.dp_reserve_limit),
                     (ffi::MDBX_opt_txn_dp_limit, self.txn_dp_limit),
+                    (ffi::MDBX_opt_txn_dp_initial, self.txn_dp_initial),
                     (ffi::MDBX_opt_spill_max_denominator, self.spill_max_denominator),
                     (ffi::MDBX_opt_spill_min_denominator, self.spill_min_denominator),
                 ] {
@@ -860,6 +863,11 @@ impl EnvironmentBuilder {
 
     pub const fn set_txn_dp_limit(&mut self, v: u64) -> &mut Self {
         self.txn_dp_limit = Some(v);
+        self
+    }
+
+    pub const fn set_txn_dp_initial(&mut self, v: u64) -> &mut Self {
+        self.txn_dp_initial = Some(v);
         self
     }
 
