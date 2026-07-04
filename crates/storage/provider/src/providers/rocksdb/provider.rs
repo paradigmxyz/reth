@@ -43,6 +43,7 @@ use tracing::instrument;
 fn synced_write_options() -> WriteOptions {
     let mut opts = WriteOptions::default();
     opts.set_sync(true);
+    opts.set_memtable_insert_hint_per_batch(true);
     opts
 }
 
