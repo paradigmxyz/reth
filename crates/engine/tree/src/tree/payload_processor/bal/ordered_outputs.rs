@@ -105,6 +105,11 @@ impl<R> Iterator for OrderedWorkerOutputs<'_, R> {
                 "BAL worker returned duplicate transaction index {index}",
             );
 
+            if index == self.next {
+                self.next += 1;
+                return Some(Ok(output));
+            }
+
             self.pending[index] = Some(output);
         }
     }
