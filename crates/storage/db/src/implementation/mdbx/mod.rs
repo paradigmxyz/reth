@@ -47,6 +47,13 @@ pub const TERABYTE: usize = GIGABYTE * 1024;
 
 /// MDBX allows up to 32767 readers (`MDBX_READERS_LIMIT`), but we limit it to slightly below that
 const DEFAULT_MAX_READERS: u64 = 32_000;
+/// Keep write-transaction dirty-page spills small once MDBX reaches its dirty-page limit.
+///
+/// The defaults allow spilling between 1/8 and 7/8 of the dirty-page list in one pass. Replay
+/// persistence writes large trie/hash batches and then commits immediately, so large intermediate
+/// spills add page walk/writeback work that the final commit boundary will already handle.
+const WRITE_TXN_SPILL_MIN_DENOMINATOR: u8 = 32;
+const WRITE_TXN_SPILL_MAX_DENOMINATOR: u8 = 2;
 
 /// Space that a read-only transaction can occupy until the warning is emitted.
 /// See [`reth_libmdbx::EnvironmentBuilder::set_handle_slow_readers`] for more information.
@@ -501,6 +508,9 @@ impl DatabaseEnv {
         // because we want to prioritize freelist lookup speed over database growth.
         // https://github.com/paradigmxyz/reth/blob/fa2b9b685ed9787636d962f4366caf34a9186e66/crates/storage/libmdbx-rs/mdbx-sys/libmdbx/mdbx.c#L16017.
         inner_env.set_rp_augment_limit(256 * 1024);
+        inner_env
+            .set_spill_min_denominator(WRITE_TXN_SPILL_MIN_DENOMINATOR)
+            .set_spill_max_denominator(WRITE_TXN_SPILL_MAX_DENOMINATOR);
 
         if let Some(log_level) = args.log_level {
             // Levels higher than [LogLevel::Notice] require libmdbx built with `MDBX_DEBUG` option.
