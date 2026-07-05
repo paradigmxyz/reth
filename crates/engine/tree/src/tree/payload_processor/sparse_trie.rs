@@ -651,11 +651,12 @@ where
     ///
     /// we trigger state root computation on a rayon pool.
     fn compute_drained_storage_roots(&mut self) {
-        let addresses_to_compute_roots: Vec<_> = self
-            .storage_updates
-            .iter()
-            .filter_map(|(address, updates)| updates.is_empty().then_some(*address))
-            .collect();
+        let mut addresses_to_compute_roots = Vec::with_capacity(self.storage_updates.len());
+        for (address, updates) in &self.storage_updates {
+            if updates.is_empty() {
+                addresses_to_compute_roots.push(*address);
+            }
+        }
 
         struct SendStorageTriePtr<S>(*mut RevealableSparseTrie<S>);
         // SAFETY: this wrapper only forwards the pointer across rayon; deref invariants are
