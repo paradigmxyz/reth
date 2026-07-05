@@ -1,8 +1,8 @@
 //! Traits for execution.
 
 #[cfg(feature = "std")]
-use crate::{database::BorrowedDatabase, Database};
-use crate::{ConfigureEvm, DynDatabase, EvmEnv, TxEnvFor};
+use crate::database::BorrowedDatabase;
+use crate::{ConfigureEvm, Database, DynDatabase, EvmEnv, TxEnvFor};
 use alloc::{format, sync::Arc, vec::Vec};
 use alloy_consensus::{
     transaction::{Either, Recovered},
