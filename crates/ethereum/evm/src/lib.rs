@@ -70,11 +70,13 @@ impl Default for EthEvmEnv {
     }
 }
 
-impl EvmEnv for EthEvmEnv {
-    fn block_env(&self) -> &evm2::env::BlockEnv {
+impl AsRef<evm2::env::BlockEnv> for EthEvmEnv {
+    fn as_ref(&self) -> &evm2::env::BlockEnv {
         &self.block
     }
+}
 
+impl EvmEnv for EthEvmEnv {
     fn block_base_fee(&self) -> u64 {
         self.block.basefee.to()
     }

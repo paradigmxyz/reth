@@ -34,6 +34,9 @@ pub type TraceStateProviderDatabase = CacheDB<Db<StateProviderDatabase<StateProv
 /// EVM instance type supported by the current inspector trace path.
 pub type TraceEvmInstance<'a> = evm2::Evm<'a, BaseEvmTypes>;
 
+/// Block environment type supported by the current inspector trace path.
+pub type TraceBlockEnv = evm2::env::BlockEnv;
+
 /// Transaction envelope type supported by the current inspector trace path.
 pub type TraceTxEnvelope = RecoveredTxEnvelope;
 

@@ -22,7 +22,7 @@ use jsonrpsee::RpcModule;
 use parking_lot::Mutex;
 use reth_chain_state::{CanonStateSubscriptions, StateTrieOverlayManager};
 use reth_chainspec::{ChainSpecProvider, EthChainSpec, EthereumHardforks, Hardforks};
-use reth_evm::{BlockExecutorFactory, ConfigureEvm, TxEnvFor};
+use reth_evm::{BlockExecutorFactory, ConfigureEvm, EvmEnvFor, TxEnvFor};
 use reth_node_api::{
     AddOnsContext, BlockTy, EngineApiValidator, EngineTypes, FullNodeComponents, FullNodeTypes,
     NodeAddOns, NodeTypes, PayloadTypes, PayloadValidator, PrimitivesTy, TreeConfig,
@@ -41,8 +41,8 @@ use reth_rpc_api::{eth::helpers::EthTransactions, IntoEngineApiRpcModule};
 use reth_rpc_builder::{
     auth::{AuthRpcModule, AuthServerHandle},
     config::RethRpcServerConfig,
-    RpcModuleBuilder, RpcRegistryInner, RpcServerConfig, RpcServerHandle, TraceEvmInstance,
-    TraceTxEnvelope, TransportRpcModules,
+    RpcModuleBuilder, RpcRegistryInner, RpcServerConfig, RpcServerHandle, TraceBlockEnv,
+    TraceEvmInstance, TraceTxEnvelope, TransportRpcModules,
 };
 use reth_rpc_engine_api::{capabilities::EngineCapabilities, EngineApi};
 use reth_rpc_eth_types::{cache::cache_new_blocks_task, EthConfig, EthStateCache};
@@ -941,6 +941,7 @@ where
     N::Provider: ChainSpecProvider<ChainSpec: EthereumHardforks>,
     EthB: EthApiBuilder<N>,
     <EthB::EthApi as RpcNodeCore>::Evm: ConfigureEvm,
+    EvmEnvFor<<EthB::EthApi as RpcNodeCore>::Evm>: AsRef<TraceBlockEnv>,
     <<EthB::EthApi as RpcNodeCore>::Evm as ConfigureEvm>::BlockExecutorFactory:
         for<'evm> BlockExecutorFactory<Evm<'evm> = TraceEvmInstance<'evm>>,
     TxEnvFor<<EthB::EthApi as RpcNodeCore>::Evm>: AsRef<TraceTxEnvelope> + Clone,
@@ -1250,6 +1251,7 @@ where
     <N as FullNodeTypes>::Provider: ChainSpecProvider<ChainSpec: EthereumHardforks>,
     EthB: EthApiBuilder<N>,
     <EthB::EthApi as RpcNodeCore>::Evm: ConfigureEvm,
+    EvmEnvFor<<EthB::EthApi as RpcNodeCore>::Evm>: AsRef<TraceBlockEnv>,
     <<EthB::EthApi as RpcNodeCore>::Evm as ConfigureEvm>::BlockExecutorFactory:
         for<'evm> BlockExecutorFactory<Evm<'evm> = TraceEvmInstance<'evm>>,
     TxEnvFor<<EthB::EthApi as RpcNodeCore>::Evm>: AsRef<TraceTxEnvelope> + Clone,

@@ -16,14 +16,14 @@ use jsonrpsee::core::RpcResult;
 use parking_lot::RwLock;
 use reth_chainspec::{ChainSpecProvider, EthChainSpec, EthereumHardforks};
 use reth_engine_primitives::ConsensusEngineEvent;
-use reth_evm::{BlockExecutorFactory, ConfigureEvm, EvmEnv, EvmEnvFor, TxEnvFor};
+use reth_evm::{BlockExecutorFactory, ConfigureEvm, EvmEnvFor, TxEnvFor};
 use reth_primitives_traits::{
     Block as BlockTrait, BlockBody, BlockTy, ReceiptWithBloom, RecoveredBlock,
 };
 use reth_rpc_api::DebugApiServer;
 use reth_rpc_convert::RpcTxReq;
 use reth_rpc_eth_api::{
-    helpers::{EthTransactions, TraceEvmInstance, TraceExt, TraceTxEnvelope},
+    helpers::{EthTransactions, TraceBlockEnv, TraceEvmInstance, TraceExt, TraceTxEnvelope},
     FromEthApiError, RpcConvert, RpcNodeCore,
 };
 use reth_rpc_eth_types::EthApiError;
@@ -796,6 +796,7 @@ impl<Eth> DebugApi<Eth>
 where
     Eth: TraceExt,
     Eth::Evm: ConfigureEvm,
+    EvmEnvFor<Eth::Evm>: AsRef<TraceBlockEnv>,
     <Eth::Evm as ConfigureEvm>::BlockExecutorFactory:
         for<'a> BlockExecutorFactory<Evm<'a> = TraceEvmInstance<'a>>,
     TxEnvFor<Eth::Evm>: AsRef<TraceTxEnvelope> + Clone,
@@ -832,7 +833,7 @@ where
                                 tx_hash: Some(tx_hash),
                             }),
                             tx_env.as_ref(),
-                            evm_env.block_env(),
+                            evm_env.as_ref(),
                             &result,
                             &mut db,
                         )
@@ -935,7 +936,7 @@ where
                             tx_hash: Some(*tx.tx_hash()),
                         }),
                         tx_env.as_ref(),
-                        evm_env.block_env(),
+                        evm_env.as_ref(),
                         &result,
                         &mut db,
                     )
@@ -975,6 +976,7 @@ impl<Eth> DebugApiServer<RpcTxReq<Eth::NetworkTypes>> for DebugApi<Eth>
 where
     Eth: EthTransactions + TraceExt,
     Eth::Evm: ConfigureEvm,
+    EvmEnvFor<Eth::Evm>: AsRef<TraceBlockEnv>,
     <Eth::Evm as ConfigureEvm>::BlockExecutorFactory:
         for<'a> BlockExecutorFactory<Evm<'a> = TraceEvmInstance<'a>>,
     TxEnvFor<Eth::Evm>: AsRef<TraceTxEnvelope> + Clone,

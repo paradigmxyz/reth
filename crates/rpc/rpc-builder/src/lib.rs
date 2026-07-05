@@ -33,7 +33,7 @@ use jsonrpsee::{
 use reth_chainspec::{ChainSpecProvider, EthereumHardforks};
 use reth_consensus::FullConsensus;
 use reth_engine_primitives::{ConsensusEngineEvent, ConsensusEngineHandle};
-use reth_evm::{BlockExecutorFactory, ConfigureEvm, TxEnvFor};
+use reth_evm::{BlockExecutorFactory, ConfigureEvm, EvmEnvFor, TxEnvFor};
 use reth_network_api::{noop::NoopNetwork, NetworkInfo, Peers};
 use reth_payload_primitives::PayloadTypes;
 use reth_primitives_traits::{NodePrimitives, TxTy};
@@ -43,7 +43,7 @@ use reth_rpc::{
 };
 use reth_rpc_api::servers::*;
 use reth_rpc_engine_api::RethEngineApi;
-pub use reth_rpc_eth_api::helpers::{TraceEvmInstance, TraceTxEnvelope};
+pub use reth_rpc_eth_api::helpers::{TraceBlockEnv, TraceEvmInstance, TraceTxEnvelope};
 use reth_rpc_eth_api::{
     helpers::{
         pending_block::PendingEnvBuilder, Call, EthApiSpec, EthTransactions, LoadPendingBlock,
@@ -345,6 +345,7 @@ where
     where
         EthApi: FullEthApiServer<Provider = Provider, Pool = Pool> + TraceExt,
         EthApi::Evm: ConfigureEvm,
+        EvmEnvFor<EthApi::Evm>: AsRef<TraceBlockEnv>,
         <EthApi::Evm as ConfigureEvm>::BlockExecutorFactory:
             for<'a> BlockExecutorFactory<Evm<'a> = TraceEvmInstance<'a>>,
         TxEnvFor<EthApi::Evm>: AsRef<TraceTxEnvelope> + Clone,
@@ -399,6 +400,7 @@ where
     where
         EthApi: FullEthApiServer<Provider = Provider, Pool = Pool> + TraceExt,
         EthApi::Evm: ConfigureEvm,
+        EvmEnvFor<EthApi::Evm>: AsRef<TraceBlockEnv>,
         <EthApi::Evm as ConfigureEvm>::BlockExecutorFactory:
             for<'a> BlockExecutorFactory<Evm<'a> = TraceEvmInstance<'a>>,
         TxEnvFor<EthApi::Evm>: AsRef<TraceTxEnvelope> + Clone,
@@ -726,6 +728,7 @@ where
     where
         EthApi: EthTransactions + TraceExt,
         EthApi::Evm: ConfigureEvm,
+        EvmEnvFor<EthApi::Evm>: AsRef<TraceBlockEnv>,
         <EthApi::Evm as ConfigureEvm>::BlockExecutorFactory:
             for<'a> BlockExecutorFactory<Evm<'a> = TraceEvmInstance<'a>>,
         TxEnvFor<EthApi::Evm>: AsRef<TraceTxEnvelope> + Clone,
@@ -889,6 +892,7 @@ where
     Network: NetworkInfo + Peers + Clone + 'static,
     EthApi: FullEthApiServer + TraceExt,
     EthApi::Evm: ConfigureEvm,
+    EvmEnvFor<EthApi::Evm>: AsRef<TraceBlockEnv>,
     <EthApi::Evm as ConfigureEvm>::BlockExecutorFactory:
         for<'a> BlockExecutorFactory<Evm<'a> = TraceEvmInstance<'a>>,
     TxEnvFor<EthApi::Evm>: AsRef<TraceTxEnvelope> + Clone,
