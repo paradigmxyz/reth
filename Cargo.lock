@@ -539,9 +539,9 @@ dependencies = [
 
 [[package]]
 name = "alloy-rlp"
-version = "0.3.15"
+version = "0.3.16"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "dc90b1e703d3c03f4ff7f48e82dd0bc1c8211ab7d079cd836a06fcfeb06651cb"
+checksum = "24671b1f62edcf0f9b62994c7bf72cd621a04a4b99f5020ece1a647b40e2f103"
 dependencies = [
  "alloy-rlp-derive",
  "arrayvec",
@@ -550,9 +550,9 @@ dependencies = [
 
 [[package]]
 name = "alloy-rlp-derive"
-version = "0.3.15"
+version = "0.3.16"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f36834a5c0a2fa56e171bf256c34d70fca07d0c0031583edea1c4946b7889c9e"
+checksum = "9d4311c03125e8a18296504560b9de3d75ecbd0dcda7f71e6cf2a196d57e6fba"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -3641,6 +3641,9 @@ dependencies = [
  "reth-chain-state",
  "reth-engine-tree",
  "reth-ethereum",
+ "reth-evm",
+ "reth-primitives-traits",
+ "reth-provider",
  "reth-trie",
  "serde_json",
  "tokio",
@@ -10604,19 +10607,13 @@ dependencies = [
 name = "reth-trie-parallel"
 version = "2.3.0"
 dependencies = [
- "alloy-eip7928",
  "alloy-evm",
  "alloy-primitives",
  "alloy-rlp",
  "crossbeam-channel",
  "crossbeam-utils",
- "derive_more",
- "itertools 0.14.0",
  "metrics",
- "proptest",
- "proptest-arbitrary-interop",
  "rand 0.9.4",
- "rayon",
  "reth-chainspec",
  "reth-ethereum-primitives",
  "reth-execution-errors",

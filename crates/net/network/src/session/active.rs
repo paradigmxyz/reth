@@ -29,7 +29,8 @@ use metrics::{Counter, Gauge};
 use reth_eth_wire::{
     errors::{EthHandshakeError, EthStreamError},
     message::{EthBroadcastMessage, MessageError},
-    Capabilities, DisconnectP2P, DisconnectReason, EthMessage, NetworkPrimitives, NewBlockPayload,
+    Capabilities, DisconnectP2P, DisconnectReason, EthMessage, EthSnapMessage, NetworkPrimitives,
+    NewBlockPayload,
 };
 use reth_eth_wire_types::{message::RequestPair, NewPooledTransactionHashes, RawCapabilityMessage};
 use reth_metrics::common::mpsc::MeteredPollSender;
@@ -436,6 +437,10 @@ impl<N: NetworkPrimitives> ActiveSession<N> {
             PeerMessage::SendTransactions(msg) => {
                 self.queued_outgoing.push_back(EthBroadcastMessage::Transactions(msg).into());
             }
+            PeerMessage::SendBroadcastPoolTransactions(msg) => {
+                self.queued_outgoing
+                    .push_back(EthBroadcastMessage::BroadcastPoolTransactions(msg).into());
+            }
             PeerMessage::BlockRangeUpdated(_) => {}
             PeerMessage::ReceivedTransaction(_) => {
                 unreachable!("Not emitted by network")
@@ -609,7 +614,7 @@ impl<N: NetworkPrimitives> ActiveSession<N> {
         let current = Duration::from_millis(self.internal_request_timeout.load(Ordering::Relaxed));
         let request_timeout = calculate_new_timeout(current, elapsed);
         self.internal_request_timeout.store(request_timeout.as_millis() as u64, Ordering::Relaxed);
-        self.internal_request_timeout_interval = tokio::time::interval(request_timeout);
+        self.internal_request_timeout_interval = request_timeout_interval(request_timeout);
     }
 
     /// If a termination message is queued this will try to send it
@@ -657,6 +662,7 @@ impl<N: NetworkPrimitives> Future for ActiveSession<N> {
         // The main poll loop that drives the session
         'main: loop {
             let mut progress = false;
+            let mut receive_pending = false;
 
             // we prioritize incoming commands sent from the session manager
             loop {
@@ -747,6 +753,17 @@ impl<N: NetworkPrimitives> Future for ActiveSession<N> {
                 }
             }
 
+            // The sink only buffers sent messages; `poll_flush` performs the actual writes and
+            // flushes the transport once for the entire batch queued above. This also resumes a
+            // flush that returned pending on an earlier pass; a no-op if nothing is buffered.
+            match this.conn.poll_flush_unpin(cx) {
+                Poll::Pending | Poll::Ready(Ok(())) => {}
+                Poll::Ready(Err(err)) => {
+                    debug!(target: "net::session", %err, remote_peer_id=?this.remote_peer_id, "failed to flush connection");
+                    return this.close_on_error(err, cx)
+                }
+            }
+
             // read incoming messages from the wire
             'receive: loop {
                 // ensure we still have enough budget for another iteration
@@ -795,7 +812,10 @@ impl<N: NetworkPrimitives> Future for ActiveSession<N> {
                 }
 
                 match this.conn.poll_next_unpin(cx) {
-                    Poll::Pending => break,
+                    Poll::Pending => {
+                        receive_pending = true;
+                        break
+                    }
                     Poll::Ready(None) => {
                         if this.is_disconnecting() {
                             break
@@ -806,9 +826,21 @@ impl<N: NetworkPrimitives> Future for ActiveSession<N> {
                     Poll::Ready(Some(res)) => {
                         match res {
                             Ok(msg) => {
-                                trace!(target: "net::session", msg_id=?msg.message_id(), remote_peer_id=?this.remote_peer_id, "received eth message");
-                                // decode and handle message
-                                match this.on_incoming_message(msg) {
+                                let outcome = match msg {
+                                    EthSnapMessage::Eth(msg) => {
+                                        trace!(target: "net::session", msg_id=?msg.message_id(), remote_peer_id=?this.remote_peer_id, "received eth message");
+                                        // decode and handle message
+                                        this.on_incoming_message(msg)
+                                    }
+                                    // TODO: snap/2 is negotiated but not consumed yet;
+                                    // request/response handling
+                                    // lands with the snap client.
+                                    EthSnapMessage::Snap(_msg) => {
+                                        trace!(target: "net::session", remote_peer_id=?this.remote_peer_id, "ignoring inbound snap/2 message");
+                                        OnIncomingMessageOutcome::Ok
+                                    }
+                                };
+                                match outcome {
                                     OnIncomingMessageOutcome::Ok => {
                                         // handled successfully
                                         progress = true;
@@ -838,6 +870,16 @@ impl<N: NetworkPrimitives> Future for ActiveSession<N> {
                 }
             }
 
+            // Avoid one extra empty outer-loop pass after the wire is pending, unless the receive
+            // pass produced work that should be driven immediately.
+            if receive_pending &&
+                this.queued_outgoing.is_empty() &&
+                this.pending_message_to_session.is_none() &&
+                this.received_requests_from_remote.is_empty()
+            {
+                break 'main
+            }
+
             if !progress {
                 break 'main
             }
@@ -863,13 +905,15 @@ impl<N: NetworkPrimitives> Future for ActiveSession<N> {
             }
         }
 
-        while this.internal_request_timeout_interval.poll_tick(cx).is_ready() {
-            // check for timed out requests
-            if this.check_timed_out_requests(Instant::now()) &&
-                let Poll::Ready(Ok(_)) = this.to_session_manager.poll_reserve(cx)
-            {
-                let msg = ActiveSessionMessage::ProtocolBreach { peer_id: this.remote_peer_id };
-                this.pending_message_to_session = Some(msg);
+        if !this.inflight_requests.is_empty() {
+            while this.internal_request_timeout_interval.poll_tick(cx).is_ready() {
+                // check for timed out requests
+                if this.check_timed_out_requests(Instant::now()) &&
+                    let Poll::Ready(Ok(_)) = this.to_session_manager.poll_reserve(cx)
+                {
+                    let msg = ActiveSessionMessage::ProtocolBreach { peer_id: this.remote_peer_id };
+                    this.pending_message_to_session = Some(msg);
+                }
             }
         }
 
@@ -991,6 +1035,7 @@ impl<N: NetworkPrimitives> OutgoingMessage<N> {
             Self::Broadcast(msg) => match msg {
                 EthBroadcastMessage::NewBlock(_) => 1,
                 EthBroadcastMessage::Transactions(txs) => txs.len(),
+                EthBroadcastMessage::BroadcastPoolTransactions(txs) => txs.len(),
             },
             Self::Raw(_) => 0,
         }
@@ -1046,6 +1091,16 @@ impl<N: NetworkPrimitives> From<EthBroadcastMessage<N>> for OutgoingMessage<N> {
     }
 }
 
+/// Returns the interval used to check for timed out requests.
+///
+/// Uses delayed missed-tick behavior because the interval is only polled while requests are in
+/// flight, so ticks that elapsed while the session was idle must not fire in a burst.
+pub(super) fn request_timeout_interval(timeout: Duration) -> Interval {
+    let mut interval = tokio::time::interval(timeout);
+    interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+    interval
+}
+
 /// Calculates a new timeout using an updated estimation of the RTT
 #[inline]
 fn calculate_new_timeout(current_timeout: Duration, estimated_rtt: Duration) -> Duration {
@@ -1081,6 +1136,10 @@ impl<N: NetworkPrimitives> QueuedOutgoingMessages<N> {
     /// Returns the number of queued response messages.
     pub(crate) const fn response_count(&self) -> usize {
         self.queued_responses
+    }
+
+    pub(crate) fn is_empty(&self) -> bool {
+        self.messages.is_empty()
     }
 
     pub(crate) fn push_back(&mut self, message: OutgoingMessage<N>) {
@@ -1273,7 +1332,7 @@ mod tests {
                             BroadcastItemCounter::new(),
                         ),
                         received_requests_from_remote: Default::default(),
-                        internal_request_timeout_interval: tokio::time::interval(
+                        internal_request_timeout_interval: request_timeout_interval(
                             INITIAL_REQUEST_TIMEOUT,
                         ),
                         internal_request_timeout: Arc::new(AtomicU64::new(
@@ -1468,6 +1527,9 @@ mod tests {
         session.protocol_breach_request_timeout = drop_timeout;
         session.internal_request_timeout_interval =
             tokio::time::interval_at(tokio::time::Instant::now(), request_timeout);
+        session
+            .internal_request_timeout_interval
+            .set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
         let (tx, rx) = oneshot::channel();
         let req = PeerRequest::GetBlockBodies { request: GetBlockBodies(vec![]), response: tx };
         session.on_internal_peer_request(req, Instant::now());
