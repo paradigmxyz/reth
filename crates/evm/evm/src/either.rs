@@ -67,6 +67,34 @@ where
         }
     }
 
+    fn execute_with_state_closure<F>(
+        self,
+        block: &RecoveredBlock<<Self::Primitives as NodePrimitives>::Block>,
+        state: F,
+    ) -> Result<BlockExecutionOutput<<Self::Primitives as NodePrimitives>::Receipt>, Self::Error>
+    where
+        F: FnMut(&ExecutionOutcomeState),
+    {
+        match self {
+            Self::Left(a) => a.execute_with_state_closure(block, state),
+            Self::Right(b) => b.execute_with_state_closure(block, state),
+        }
+    }
+
+    fn execute_with_state_closure_always<F>(
+        self,
+        block: &RecoveredBlock<<Self::Primitives as NodePrimitives>::Block>,
+        state: F,
+    ) -> Result<BlockExecutionOutput<<Self::Primitives as NodePrimitives>::Receipt>, Self::Error>
+    where
+        F: FnMut(&ExecutionOutcomeState),
+    {
+        match self {
+            Self::Left(a) => a.execute_with_state_closure_always(block, state),
+            Self::Right(b) => b.execute_with_state_closure_always(block, state),
+        }
+    }
+
     fn size_hint(&self) -> usize {
         match self {
             Self::Left(a) => a.size_hint(),
