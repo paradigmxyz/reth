@@ -387,9 +387,7 @@ where
     /// EVM environment used for execution.
     pub evm_env: F::EvmEnv,
     /// Transactions executed in this block.
-    pub transactions: Vec<TxTy<N>>,
-    /// Senders for executed transactions.
-    pub senders: Vec<Address>,
+    pub transactions: Vec<Recovered<TxTy<N>>>,
     /// Block execution context.
     pub ctx: F::ExecutionCtx<'a>,
     /// Parent block header.
@@ -417,7 +415,6 @@ where
             executor: executor_factory.create_executor(evm, ctx.clone()),
             evm_env,
             transactions: Vec::new(),
-            senders: Vec::new(),
             ctx,
             parent,
             assembler,
@@ -474,11 +471,8 @@ where
         f: impl FnOnce(&<Self::Executor as BlockExecutor>::TransactionResult) -> CommitChanges,
     ) -> Result<Option<GasOutput>, BlockExecutionError> {
         let (tx_env, tx) = tx.into_parts();
-        let transaction = tx.tx().clone();
-        let sender = *tx.signer();
         if let Some(output) = self.executor.execute_transaction_with_commit_condition(tx_env, f)? {
-            self.transactions.push(transaction);
-            self.senders.push(sender);
+            self.transactions.push(tx.to_recovered());
             Ok(Some(output))
         } else {
             Ok(None)
@@ -492,7 +486,7 @@ where
             &BlockExecutionOutput<ReceiptTy<Self::Primitives>>,
         ) -> Result<Option<(B256, TrieUpdates)>, BlockExecutionError>,
     ) -> Result<BlockBuilderOutcome<N>, BlockExecutionError> {
-        let Self { executor, evm_env, transactions, senders, ctx, parent, assembler } = self;
+        let Self { executor, evm_env, transactions, ctx, parent, assembler } = self;
 
         let output = executor.finish()?;
         let hashed_state = output
@@ -505,6 +499,7 @@ where
                 .state_root_with_updates(hashed_state.clone())
                 .map_err(BlockExecutionError::other)?,
         };
+        let (transactions, senders) = transactions.into_iter().map(|tx| tx.into_parts()).unzip();
 
         let block = assembler.assemble_block(BlockAssemblerInput {
             evm_env,
@@ -877,6 +872,14 @@ pub trait RecoveredTx<T> {
 
     /// Returns the signer of the transaction.
     fn signer(&self) -> &Address;
+
+    /// Clones this accessor into an owned recovered transaction.
+    fn to_recovered(&self) -> Recovered<T>
+    where
+        T: Clone,
+    {
+        Recovered::new_unchecked(self.tx().clone(), *self.signer())
+    }
 }
 
 impl<T> RecoveredTx<T> for Recovered<&T> {
