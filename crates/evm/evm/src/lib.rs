@@ -292,19 +292,6 @@ pub trait ConfigureEvm: Clone + Debug + Send + Sync + Unpin {
         None
     }
 
-    /// Creates a block executor from a configured EVM and execution context.
-    #[cfg(feature = "std")]
-    fn create_executor<'a>(
-        &'a self,
-        evm: EvmFor<'a, Self>,
-        ctx: ExecutionCtxFor<'a, Self>,
-    ) -> BlockExecutorFor<'a, Self>
-    where
-        Self: 'a,
-    {
-        self.block_executor_factory().create_executor(evm, ctx)
-    }
-
     /// Returns an executor for block execution over the provided database.
     #[auto_impl(keep_default_for(&, Arc))]
     fn executor<DB>(
@@ -360,7 +347,7 @@ pub trait ConfigureEvm: Clone + Debug + Send + Sync + Unpin {
     {
         let evm = self.evm_for_block(db, block.header())?;
         let ctx = self.context_for_block(block)?;
-        Ok(self.create_executor(evm, ctx))
+        Ok(self.block_executor_factory().create_executor(evm, ctx))
     }
 
     /// Creates an EVM instance for single-transaction execution with the configured environment.
