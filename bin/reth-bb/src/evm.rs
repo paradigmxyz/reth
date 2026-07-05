@@ -255,8 +255,7 @@ where
         let segment = &self.plan.segments[segment_idx];
         let block_env = segment.evm_env.block_env.clone();
         let block_number = block_env.number.saturating_to::<u64>();
-        let mut cfg_env = segment.evm_env.cfg_env.clone();
-        cfg_env.disable_base_fee = true;
+        let cfg_env = segment.evm_env.cfg_env.clone();
 
         let inner = self.inner.as_mut().expect("inner executor must exist");
         let evm_ctx = inner.evm.ctx_mut();
@@ -305,8 +304,7 @@ where
         // Clone the next segment's data before we consume inner.
         let new_segment = &plan.segments[seg_idx];
         let new_block_env = new_segment.evm_env.block_env.clone();
-        let mut new_cfg_env = new_segment.evm_env.cfg_env.clone();
-        new_cfg_env.disable_base_fee = true;
+        let new_cfg_env = new_segment.evm_env.cfg_env.clone();
 
         plan.next_segment += 1;
 
