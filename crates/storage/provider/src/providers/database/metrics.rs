@@ -172,6 +172,8 @@ impl DatabaseProviderMetrics {
 
     /// Records all `save_blocks` timings.
     pub(crate) fn record_save_blocks(&self, timings: &SaveBlocksTimings) {
+        let batch_size = timings.batch_size as f64;
+
         self.save_blocks_total.record(timings.total);
         self.save_blocks_mdbx.record(timings.mdbx);
         self.save_blocks_sf.record(timings.sf);
@@ -182,7 +184,7 @@ impl DatabaseProviderMetrics {
         self.save_blocks_write_trie_updates.record(timings.write_trie_updates);
         self.save_blocks_update_history_indices.record(timings.update_history_indices);
         self.save_blocks_update_pipeline_stages.record(timings.update_pipeline_stages);
-        self.save_blocks_batch_size.record(timings.batch_size as f64);
+        self.save_blocks_batch_size.record(batch_size);
 
         self.save_blocks_total_last.set(timings.total.as_secs_f64());
         self.save_blocks_mdbx_last.set(timings.mdbx.as_secs_f64());
@@ -196,7 +198,7 @@ impl DatabaseProviderMetrics {
             .set(timings.update_history_indices.as_secs_f64());
         self.save_blocks_update_pipeline_stages_last
             .set(timings.update_pipeline_stages.as_secs_f64());
-        self.save_blocks_batch_size_last.set(timings.batch_size as f64);
+        self.save_blocks_batch_size_last.set(batch_size);
     }
 
     /// Records all commit timings.
