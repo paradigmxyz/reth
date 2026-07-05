@@ -67,8 +67,6 @@ use reth_storage_api::{
     StateWriteConfig, StorageChangeSetReader, StoragePath, StorageSettingsCache,
     TryIntoHistoricalStateProvider, WriteStateInput,
 };
-#[cfg(test)]
-use reth_storage_api::{PlainStorageChangeset, PlainStorageRevert};
 use reth_storage_errors::provider::{ProviderResult, StaticFileWriterError};
 use reth_trie::{
     updates::{StorageTrieUpdatesSorted, TrieUpdatesSorted},
@@ -3832,17 +3830,12 @@ mod tests {
     use super::*;
     use crate::{
         test_utils::{blocks::BlockchainTestData, create_test_provider_factory},
-        writer::{
-            execution_state_and_reverts_to_plain_state_and_reverts,
-            execution_state_to_plain_reverts, execution_state_to_plain_state,
-            execution_state_to_plain_state_and_reverts,
-        },
         BlockWriter,
     };
     use alloy_consensus::Header;
     use alloy_primitives::{
         map::{AddressMap, B256Map},
-        Bytes, U256,
+        U256,
     };
     use reth_chain_state::ExecutedBlock;
     use reth_db_api::models::StorageSettings;
@@ -3852,7 +3845,7 @@ mod tests {
         BlockExecutionOutput, BlockExecutionResult, BlockReverts, ExecutionState, StorageReverts,
     };
     use reth_primitives_traits::SealedBlock;
-    use reth_storage_api::{MetadataWriter, RevertToSlot};
+    use reth_storage_api::MetadataWriter;
     use reth_testing_utils::generators::{self, random_block, BlockParams};
     use reth_trie::{KeccakKeyHasher, Nibbles, StoredNibbles, StoredNibblesSubKey};
     use std::{sync::mpsc, time::Duration};
@@ -3878,160 +3871,6 @@ mod tests {
                 )]),
             }],
         )
-    }
-
-    #[test]
-    fn plain_reverts_skip_secondary_storage_wipes() {
-        let address = Address::random();
-        let slot = U256::from(1);
-        let value = U256::from(2);
-        let state = ExecutionState::default();
-        let block_reverts = vec![BlockReverts {
-            storage: AddressMap::from_iter([(
-                address,
-                StorageReverts {
-                    wiped: true,
-                    previous_wipe: true,
-                    slots: BTreeMap::from([(slot, value)]),
-                },
-            )]),
-            ..Default::default()
-        }];
-
-        let (_, reverts) = execution_state_and_reverts_to_plain_state_and_reverts(
-            &state,
-            &block_reverts,
-            OriginalValuesKnown::Yes,
-        );
-
-        assert_eq!(
-            reverts.storage,
-            [vec![PlainStorageRevert {
-                address,
-                wiped: false,
-                storage_revert: vec![(slot, RevertToSlot::Some(value))],
-            }]]
-        );
-    }
-
-    #[test]
-    fn plain_state_conversion_streams_accounts_and_storage() {
-        let address = Address::random();
-        let slot = U256::from(1);
-        let original_slot = U256::from(2);
-        let current_slot = U256::from(3);
-        let code_hash = B256::repeat_byte(0x42);
-        let bytecode = Bytecode::new_raw(Bytes::from_static(&[0x60, 0x00]));
-        let original_account = Account { balance: U256::from(4), nonce: 1, bytecode_hash: None };
-        let current_account = Account { balance: U256::from(5), nonce: 2, bytecode_hash: None };
-        let state = execution_state_from_init(
-            [(
-                address,
-                (
-                    Some(original_account),
-                    Some(current_account),
-                    BTreeMap::from([(slot, (original_slot, current_slot))]),
-                ),
-            )],
-            [(code_hash, bytecode.clone())],
-        );
-
-        let (plain_state, reverts) =
-            execution_state_to_plain_state_and_reverts(&state, OriginalValuesKnown::Yes);
-        let reverts_only = execution_state_to_plain_reverts(&state);
-        let plain_state_only = execution_state_to_plain_state(&state, OriginalValuesKnown::Yes);
-
-        assert_eq!(plain_state_only.accounts, plain_state.accounts);
-        assert_eq!(plain_state_only.storage, plain_state.storage);
-        assert_eq!(plain_state_only.contracts, plain_state.contracts);
-        assert_eq!(reverts_only.accounts, reverts.accounts);
-        assert_eq!(reverts_only.storage, reverts.storage);
-        assert_eq!(plain_state.accounts, vec![(address, Some(current_account))]);
-        assert_eq!(
-            plain_state.storage,
-            vec![PlainStorageChangeset {
-                address,
-                wipe_storage: false,
-                storage: vec![(slot, current_slot)],
-            }]
-        );
-        assert_eq!(plain_state.contracts, vec![(code_hash, bytecode)]);
-        assert_eq!(reverts.accounts, vec![vec![(address, Some(original_account))]]);
-        assert_eq!(
-            reverts.storage,
-            vec![vec![PlainStorageRevert {
-                address,
-                wiped: false,
-                storage_revert: vec![(slot, RevertToSlot::Some(original_slot))],
-            }]]
-        );
-    }
-
-    #[test]
-    fn plain_state_conversion_returns_sorted_changes() {
-        let low_address = Address::with_last_byte(1);
-        let high_address = Address::with_last_byte(2);
-        let low_code_hash = B256::with_last_byte(1);
-        let high_code_hash = B256::with_last_byte(2);
-        let bytecode = Bytecode::new_raw(Bytes::from_static(&[0x60, 0x00]));
-        let account = Account::default();
-
-        let state = execution_state_from_init(
-            [
-                (
-                    high_address,
-                    (
-                        None,
-                        Some(account),
-                        BTreeMap::from([
-                            (U256::from(3), (U256::from(30), U256::from(300))),
-                            (U256::from(1), (U256::from(10), U256::from(100))),
-                        ]),
-                    ),
-                ),
-                (
-                    low_address,
-                    (
-                        None,
-                        Some(account),
-                        BTreeMap::from([(U256::from(2), (U256::from(20), U256::from(200)))]),
-                    ),
-                ),
-            ],
-            [(high_code_hash, bytecode.clone()), (low_code_hash, bytecode)],
-        );
-
-        let (plain_state, reverts) =
-            execution_state_to_plain_state_and_reverts(&state, OriginalValuesKnown::Yes);
-
-        assert_eq!(
-            plain_state.accounts.iter().map(|(address, _)| *address).collect::<Vec<_>>(),
-            vec![low_address, high_address]
-        );
-        assert_eq!(
-            plain_state.storage.iter().map(|changes| changes.address).collect::<Vec<_>>(),
-            vec![low_address, high_address]
-        );
-        assert_eq!(
-            plain_state.storage[1].storage.iter().map(|(slot, _)| *slot).collect::<Vec<_>>(),
-            vec![U256::from(1), U256::from(3)]
-        );
-        assert_eq!(
-            plain_state.contracts.iter().map(|(code_hash, _)| *code_hash).collect::<Vec<_>>(),
-            vec![low_code_hash, high_code_hash]
-        );
-        assert_eq!(
-            reverts.accounts[0].iter().map(|(address, _)| *address).collect::<Vec<_>>(),
-            vec![low_address, high_address]
-        );
-        assert_eq!(
-            reverts.storage[0].iter().map(|changes| changes.address).collect::<Vec<_>>(),
-            vec![low_address, high_address]
-        );
-        assert_eq!(
-            reverts.storage[0][1].storage_revert.iter().map(|(slot, _)| *slot).collect::<Vec<_>>(),
-            vec![U256::from(1), U256::from(3)]
-        );
     }
 
     #[test]
