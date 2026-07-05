@@ -48,6 +48,7 @@ pub(super) fn ordered_worker_outputs<R>(
 struct OrderedWorkerOutputs<'a, R> {
     result_rx: &'a Receiver<Result<BalWorkerOutput<R>, BalWorkerError>>,
     pending: Vec<Option<BalWorkerOutput<R>>>,
+    pending_count: usize,
     next: usize,
     total: usize,
     failed: bool,
@@ -61,6 +62,7 @@ impl<'a, R> OrderedWorkerOutputs<'a, R> {
         Self {
             result_rx,
             pending: (0..total).map(|_| None).collect(),
+            pending_count: 0,
             next: 0,
             total,
             failed: false,
@@ -77,7 +79,8 @@ impl<R> Iterator for OrderedWorkerOutputs<'_, R> {
         }
 
         loop {
-            if let Some(output) = self.pending[self.next].take() {
+            if self.pending_count != 0 && let Some(output) = self.pending[self.next].take() {
+                self.pending_count -= 1;
                 self.next += 1;
                 return Some(Ok(output));
             }
@@ -95,6 +98,11 @@ impl<R> Iterator for OrderedWorkerOutputs<'_, R> {
             };
 
             let index = output.index;
+            if index == self.next {
+                self.next += 1;
+                return Some(Ok(output));
+            }
+
             assert!(
                 index < self.total,
                 "BAL worker returned out-of-bounds transaction index {index}; total={}",
@@ -106,6 +114,7 @@ impl<R> Iterator for OrderedWorkerOutputs<'_, R> {
             );
 
             self.pending[index] = Some(output);
+            self.pending_count += 1;
         }
     }
 }
