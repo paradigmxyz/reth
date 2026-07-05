@@ -677,7 +677,7 @@ where
         let ctx = evm_config
             .context_for_block(block.sealed_block())
             .map_err(BlockExecutionError::other)?;
-        let mut executor = evm_config.block_executor_factory().create_executor(evm, ctx);
+        let mut executor = evm_config.create_executor(evm, ctx);
         if let Some(hook) = state_hook &&
             !executor.set_state_hook(hook)
         {
