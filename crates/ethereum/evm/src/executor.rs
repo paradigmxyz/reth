@@ -8,7 +8,7 @@ use crate::{
     },
     EthBlockExecutionCtx, EthTxEnv, RethReceiptBuilder,
 };
-use alloc::{borrow::Cow, vec::Vec};
+use alloc::{borrow::Cow, boxed::Box, vec::Vec};
 use alloy_consensus::{Header, TxType};
 use alloy_eips::{eip2718::Typed2718, eip4895::Withdrawal};
 use alloy_primitives::{Address, B256};

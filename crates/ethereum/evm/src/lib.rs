@@ -28,8 +28,10 @@ use reth_ethereum_forks::Hardforks;
 use reth_ethereum_primitives::TransactionSigned;
 use reth_ethereum_primitives::{Block, EthPrimitives};
 #[cfg(feature = "std")]
+use reth_evm::ExecutionState;
+#[cfg(feature = "std")]
 use reth_evm::{ConfigureEngineEvm, ExecutableTxIterator};
-use reth_evm::{ConfigureEvm, EvmEnv, EvmEnvFor, ExecutionState, NextBlockEnvAttributes};
+use reth_evm::{ConfigureEvm, EvmEnv, EvmEnvFor, NextBlockEnvAttributes};
 #[cfg(feature = "std")]
 use reth_primitives_traits::SignedTransaction;
 use reth_primitives_traits::{SealedBlock, SealedHeader};
