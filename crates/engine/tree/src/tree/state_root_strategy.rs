@@ -72,7 +72,7 @@ use std::{
     fmt,
     sync::{
         mpsc::{self, RecvTimeoutError},
-        Arc,
+        Arc, OnceLock,
     },
     time::Duration,
 };
@@ -405,6 +405,11 @@ type SerialFallbackRx = mpsc::Receiver<ProviderResult<(B256, TrieUpdates, Arc<Ha
 #[derive(Debug, Default)]
 pub struct DefaultStateRootStrategy;
 
+fn state_root_metrics() -> &'static BlockValidationMetrics {
+    static METRICS: OnceLock<BlockValidationMetrics> = OnceLock::new();
+    METRICS.get_or_init(BlockValidationMetrics::default)
+}
+
 impl<N, P, Evm> StateRootStrategy<N, P, Evm> for DefaultStateRootStrategy
 where
     N: NodePrimitives,
@@ -473,7 +478,7 @@ where
                 executor: payload_processor.executor().clone(),
                 timeout: config.state_root_task_timeout(),
                 compare_trie_updates: config.always_compare_trie_updates(),
-                metrics: BlockValidationMetrics::default(),
+                metrics: state_root_metrics(),
             }),
             streams,
             hashed_state_rx,
@@ -565,7 +570,7 @@ struct SparseTrieStateRootJob<N: NodePrimitives, P> {
     executor: reth_tasks::Runtime,
     timeout: Option<Duration>,
     compare_trie_updates: bool,
-    metrics: BlockValidationMetrics,
+    metrics: &'static BlockValidationMetrics,
 }
 
 impl<N, P> SparseTrieStateRootJob<N, P>

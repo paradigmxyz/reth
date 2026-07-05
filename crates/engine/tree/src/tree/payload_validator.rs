@@ -621,11 +621,11 @@ where
             "Prepared state root job"
         );
 
-        let state_root_streams = state_root_job.streams();
         // Only take the hook on the serial path: on the parallel BAL path it would be dropped
         // unused, and the drop would fire a spurious end-of-updates signal into the job.
         let execution_state_hook =
             (!parallel_bal_execution).then(|| state_root_job.take_execution_hook()).flatten();
+        let state_root_streams = state_root_job.streams();
 
         // Spawn transaction conversion and prewarming.
         let mut handle = ensure_ok!(self.spawn_payload_processor(
