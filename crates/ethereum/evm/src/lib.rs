@@ -40,7 +40,9 @@ use convert::{block_env_with_blob_params, spec_id};
 #[cfg(feature = "std")]
 use convert::{payload_block_env, spec_id_by_timestamp_and_block_number};
 
-/// Legacy Ethereum EVM type placeholder.
+/// Compatibility marker for the legacy exported Ethereum EVM type.
+///
+/// Ethereum EVM instances are created through [`EthBlockExecutorFactory`] as `evm2::Evm`.
 pub type EthEvm<DB = (), I = (), P = ()> = PhantomData<(DB, I, P)>;
 
 /// Configured Ethereum EVM environment.
@@ -250,7 +252,7 @@ pub use test_utils::*;
 pub struct EthEvmConfig<C = ChainSpec, EvmFactory = ()> {
     /// Inner Ethereum block executor factory.
     pub executor_factory: EthBlockExecutorFactory<C, EvmFactory>,
-    /// Ethereum block assembler placeholder.
+    /// Ethereum block assembler.
     pub block_assembler: EthBlockAssembler<C>,
 }
 
