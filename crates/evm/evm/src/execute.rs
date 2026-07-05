@@ -617,6 +617,39 @@ pub trait Executor<DB: Database>: Sized {
     where
         F: FnMut(HashedPostState) + Send + 'static;
 
+    /// Executes the block and invokes `f` with the accumulated execution state after execution.
+    fn execute_with_state_closure<F>(
+        mut self,
+        block: &RecoveredBlock<<Self::Primitives as NodePrimitives>::Block>,
+        mut f: F,
+    ) -> Result<BlockExecutionOutput<<Self::Primitives as NodePrimitives>::Receipt>, Self::Error>
+    where
+        F: FnMut(&ExecutionOutcomeState),
+    {
+        let result = self.execute_one(block)?;
+        let state = self.into_state();
+        f(&state);
+
+        Ok(BlockExecutionOutput::new(result, state.into_execution_state()))
+    }
+
+    /// Executes the block and always invokes `f` with the accumulated execution state, even when
+    /// execution fails.
+    fn execute_with_state_closure_always<F>(
+        mut self,
+        block: &RecoveredBlock<<Self::Primitives as NodePrimitives>::Block>,
+        mut f: F,
+    ) -> Result<BlockExecutionOutput<<Self::Primitives as NodePrimitives>::Receipt>, Self::Error>
+    where
+        F: FnMut(&ExecutionOutcomeState),
+    {
+        let result = self.execute_one(block);
+        let state = self.into_state();
+        f(&state);
+
+        Ok(BlockExecutionOutput::new(result?, state.into_execution_state()))
+    }
+
     /// Executes multiple inputs in the batch and returns an aggregated [`ExecutionOutcome`].
     fn execute_batch<'a, I>(
         mut self,
