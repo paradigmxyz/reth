@@ -2927,8 +2927,9 @@ impl SparseTrie for ArenaParallelSparseTrie {
         #[cfg(feature = "trie-debug")]
         let mut recorded_proof_targets: Vec<(B256, u8)> = Vec::new();
 
-        // Drain and sort updates lexicographically by nibbles path.
-        let mut sorted: Vec<_> =
+        // Drain and sort updates lexicographically by nibbles path. Most calls from the sparse
+        // state-root task carry only a handful of updates, so keep the staging buffer inline.
+        let mut sorted: SmallVec<[(B256, Nibbles, LeafUpdate); 8]> =
             updates.drain().map(|(key, update)| (key, Nibbles::unpack(key), update)).collect();
         sorted.sort_unstable_by_key(|entry| entry.1);
 
