@@ -522,8 +522,14 @@ where
                 .map_err(BlockExecutionError::other)?,
         };
 
-        let (transactions, senders) =
-            self.transactions.into_iter().map(|tx| tx.into_parts()).unzip();
+        let tx_count = self.transactions.len();
+        let mut transactions = Vec::with_capacity(tx_count);
+        let mut senders = Vec::with_capacity(tx_count);
+        for tx in self.transactions {
+            let (transaction, sender) = tx.into_parts();
+            transactions.push(transaction);
+            senders.push(sender);
+        }
 
         let block = self.assembler.assemble_block(BlockAssemblerInput {
             evm_env,
