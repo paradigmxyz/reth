@@ -52,7 +52,7 @@
 
 use crate::{
     blobstore::{BlobStore, BlobStoreError},
-    error::{InvalidPoolTransactionError, PoolError, PoolResult},
+    error::{InvalidPoolTransactionError, PoolError, PoolResult, RawPoolTransactionError},
     pool::{
         state::SubPool, BestTransactionFilter, NewTransactionEvent, TransactionEvents,
         TransactionListenerKind,
@@ -62,7 +62,7 @@ use crate::{
 };
 use alloy_consensus::{error::ValueError, transaction::TxHashRef, BlockHeader, Signed, Typed2718};
 use alloy_eips::{
-    eip2718::{Encodable2718, WithEncoded},
+    eip2718::{Decodable2718, Encodable2718, WithEncoded},
     eip2930::AccessList,
     eip4844::{
         env_settings::KzgSettings, BlobAndProofV1, BlobAndProofV2, BlobCellsAndProofsV1,
@@ -748,6 +748,14 @@ pub trait TransactionPool: Clone + Debug + Send + Sync {
         indices_bitarray: B128,
     ) -> Result<Vec<Option<BlobCellsAndProofsV1>>, BlobStoreError>;
 
+    /// Return whether each requested blob versioned hash is available.
+    ///
+    /// The response is always the same length and order as the request.
+    fn has_blobs_for_versioned_hashes(
+        &self,
+        versioned_hashes: &[B256],
+    ) -> Result<Vec<bool>, BlobStoreError>;
+
     /// Returns the blob store used by the pool.
     fn blob_store(&self) -> Box<dyn BlobStore>;
 }
@@ -1358,6 +1366,24 @@ pub trait PoolTransaction:
 
     /// Define a method to convert from the `Pooled` type to `Self`
     fn from_pooled(pooled: Recovered<Self::Pooled>) -> Self;
+
+    /// Decodes and recovers a raw transaction into this pool transaction type.
+    ///
+    /// Implementations can override this to avoid constructing the pooled transaction as an
+    /// intermediate value when the raw representation can be converted directly into `Self`.
+    fn recover_raw_transaction(data: &[u8]) -> Result<Self, RawPoolTransactionError> {
+        if data.is_empty() {
+            return Err(RawPoolTransactionError::EmptyRawTransactionData)
+        }
+
+        let transaction = Self::Pooled::decode_2718_exact(data)
+            .map_err(|_| RawPoolTransactionError::FailedToDecodeSignedTransaction)?;
+
+        transaction
+            .try_into_recovered()
+            .map(Self::from_pooled)
+            .map_err(|_| RawPoolTransactionError::InvalidTransactionSignature)
+    }
 
     /// Tries to convert the `Consensus` type into the `Pooled` type.
     fn try_into_pooled(self) -> Result<Recovered<Self::Pooled>, Self::TryFromConsensusError> {

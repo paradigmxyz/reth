@@ -24,7 +24,7 @@ use reth_primitives_traits::{
 use reth_rpc_convert::{transaction::RpcConvert, RpcTxReq, TransactionConversionError};
 use reth_rpc_eth_types::{
     block::convert_transaction_receipt,
-    utils::{binary_search, recover_raw_transaction},
+    utils::binary_search,
     EthApiError::{self, TransactionConfirmationTimeout},
     FillTransaction, SignError, TransactionSource,
 };
@@ -33,7 +33,8 @@ use reth_storage_api::{
     TransactionsProvider,
 };
 use reth_transaction_pool::{
-    AddedTransactionOutcome, PoolPooledTx, PoolTransaction, TransactionOrigin, TransactionPool,
+    AddedTransactionOutcome, PoolPooledTx, PoolTransaction, PoolTx, TransactionOrigin,
+    TransactionPool,
 };
 use std::{sync::Arc, time::Duration};
 
@@ -81,9 +82,14 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
         tx: Bytes,
     ) -> impl Future<Output = Result<B256, Self::Error>> + Send {
         async move {
-            let recovered = recover_raw_transaction::<PoolPooledTx<Self::Pool>>(&tx)?;
-            self.send_transaction(TransactionOrigin::External, WithEncoded::new(tx, recovered))
-                .await
+            let pool_transaction =
+                <PoolTx<Self::Pool> as PoolTransaction>::recover_raw_transaction(&tx)
+                    .map_err(Self::Error::from_eth_err)?;
+            self.send_pool_transaction(
+                TransactionOrigin::Local,
+                WithEncoded::new(tx, pool_transaction),
+            )
+            .await
         }
     }
 
@@ -92,6 +98,21 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
         &self,
         origin: TransactionOrigin,
         tx: WithEncoded<Recovered<PoolPooledTx<Self::Pool>>>,
+    ) -> impl Future<Output = Result<B256, Self::Error>> + Send {
+        async move {
+            let (encoded, recovered) = tx.split();
+            let pool_transaction =
+                <Self::Pool as TransactionPool>::Transaction::from_pooled(recovered);
+
+            self.send_pool_transaction(origin, WithEncoded::new(encoded, pool_transaction)).await
+        }
+    }
+
+    /// Submits the pool transaction to the pool with the given [`TransactionOrigin`].
+    fn send_pool_transaction(
+        &self,
+        origin: TransactionOrigin,
+        tx: WithEncoded<PoolTx<Self::Pool>>,
     ) -> impl Future<Output = Result<B256, Self::Error>> + Send;
 
     /// Decodes and recovers the transaction and submits it to the pool.
@@ -100,12 +121,18 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
     fn send_raw_transaction_sync(
         &self,
         tx: Bytes,
+        timeout_ms: Option<u64>,
     ) -> impl Future<Output = Result<RpcReceipt<Self::NetworkTypes>, Self::Error>> + Send
     where
         Self: LoadReceipt + 'static,
     {
         let this = self.clone();
-        let timeout_duration = self.send_raw_transaction_sync_timeout();
+        let configured_timeout = self.send_raw_transaction_sync_timeout();
+        let timeout_duration = timeout_ms
+            .filter(|timeout_ms| *timeout_ms > 0)
+            .map(Duration::from_millis)
+            .map(|timeout| timeout.min(configured_timeout))
+            .unwrap_or(configured_timeout);
         async move {
             let mut stream = this.provider().canonical_state_stream();
             let hash = EthTransactions::send_raw_transaction(&this, tx).await?;
@@ -562,7 +589,13 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
                     let header =
                         self.provider().latest_header().map_err(Self::Error::from_eth_err)?;
                     let base_fee = header.and_then(|h| h.base_fee_per_gas()).unwrap_or_default();
-                    request.as_mut().set_max_fee_per_gas(base_fee as u128 + tip);
+                    // Use `2 * base_fee` as headroom, matching go-ethereum's
+                    // `setLondonFeeDefaults`, so the transaction does not
+                    // become invalid if the base fee rises before it is
+                    // included. This does not increase the effective price the sender pays:
+                    // `max_fee_per_gas` is only an upper bound and the sender still pays
+                    // `base_fee + min(tip, max_fee_per_gas - base_fee)`.
+                    request.as_mut().set_max_fee_per_gas(base_fee as u128 * 2 + tip);
                 }
             }
 

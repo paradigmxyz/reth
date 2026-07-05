@@ -2,19 +2,30 @@
 
 use crate::{EthMessage, EthVersion, NetworkPrimitives};
 use alloc::{sync::Arc, vec::Vec};
+use alloy_consensus::transaction::TxHashRef;
+use alloy_eips::eip2718::Typed2718;
 use alloy_primitives::{
+    bytes::BufMut,
     map::{B256Map, B256Set},
     Bytes, TxHash, B128, B256, U128,
 };
 use alloy_rlp::{
-    Decodable, Encodable, Header, RlpDecodable, RlpDecodableWrapper, RlpEncodable,
+    decode_append, Decodable, Encodable, Header, RlpDecodable, RlpDecodableWrapper, RlpEncodable,
     RlpEncodableWrapper,
 };
 use core::{fmt::Debug, mem};
 use derive_more::{Constructor, Deref, DerefMut, From, IntoIterator};
 use reth_codecs_derive::{add_arbitrary_tests, generate_tests};
 use reth_ethereum_primitives::TransactionSigned;
-use reth_primitives_traits::{Block, InMemorySize, SignedTransaction};
+use reth_primitives_traits::{sync::OnceLock, Block, InMemorySize, SignedTransaction};
+
+/// Soft limit for the number of hashes in a
+/// [`NewPooledTransactionHashes`] broadcast message.
+///
+/// Spec'd at 4096 hashes.
+///
+/// <https://github.com/ethereum/devp2p/blob/master/caps/eth.md#newpooledtransactionhashes-0x08>
+pub const SOFT_LIMIT_COUNT_HASHES_IN_NEW_POOLED_TRANSACTIONS_BROADCAST_MESSAGE: usize = 4096;
 
 /// This informs peers of new blocks that have appeared on the network.
 #[derive(
@@ -204,6 +215,112 @@ pub struct SharedTransactions<T = TransactionSigned>(
     /// New transactions for the peer to include in its mempool.
     pub Vec<Arc<T>>,
 );
+
+/// A transaction that can be lazily encoded for pool-backed outbound propagation.
+pub trait BroadcastPoolTransaction:
+    Encodable + TxHashRef + Typed2718 + Send + Sync + 'static
+{
+}
+
+impl<T> BroadcastPoolTransaction for T where
+    T: Encodable + TxHashRef + Typed2718 + Send + Sync + 'static
+{
+}
+
+/// Shared cached encoding for an outbound transaction.
+///
+/// This keeps the transaction object and its encoded bytes behind shared references so cloned
+/// per-peer messages reuse the same EIP-2718 encoding.
+pub struct LazyEncoded<T: ?Sized> {
+    value: Arc<T>,
+    encoded: Arc<OnceLock<Bytes>>,
+}
+
+impl<T: ?Sized> Clone for LazyEncoded<T> {
+    fn clone(&self) -> Self {
+        Self { value: Arc::clone(&self.value), encoded: Arc::clone(&self.encoded) }
+    }
+}
+
+impl LazyEncoded<dyn BroadcastPoolTransaction> {
+    /// Wraps a transaction-like value and lazily caches its encoded bytes.
+    pub fn new<T>(value: T) -> Self
+    where
+        T: BroadcastPoolTransaction,
+    {
+        let value: Arc<dyn BroadcastPoolTransaction> = Arc::new(value);
+        Self { value, encoded: Arc::new(OnceLock::new()) }
+    }
+}
+
+impl<T: Encodable + ?Sized> Encodable for LazyEncoded<T> {
+    fn encode(&self, out: &mut dyn BufMut) {
+        let encoded = self.encoded.get_or_init(|| self.encode_uncached());
+        out.put_slice(encoded);
+    }
+
+    fn length(&self) -> usize {
+        self.encoded.get_or_init(|| self.encode_uncached()).len()
+    }
+}
+
+impl<T: Encodable + ?Sized> LazyEncoded<T> {
+    fn encode_uncached(&self) -> Bytes {
+        let mut out = Vec::with_capacity(self.value.length());
+        self.value.encode(&mut out);
+        out.into()
+    }
+}
+
+impl<T: TxHashRef + ?Sized> TxHashRef for LazyEncoded<T> {
+    fn tx_hash(&self) -> &TxHash {
+        self.value.tx_hash()
+    }
+}
+
+impl<T: Typed2718 + ?Sized> Typed2718 for LazyEncoded<T> {
+    fn ty(&self) -> u8 {
+        self.value.ty()
+    }
+}
+
+impl<T: ?Sized> Debug for LazyEncoded<T> {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("LazyEncoded")
+            .field("is_cached", &self.encoded.get().is_some())
+            .finish_non_exhaustive()
+    }
+}
+
+/// A lazily encoded transaction used for pool-backed full transaction propagation.
+pub type LazyEncodedTransaction = LazyEncoded<dyn BroadcastPoolTransaction>;
+
+/// Outbound-only full transaction propagation message backed by pool transactions.
+///
+/// This encodes to the same `Transactions` wire payload as [`SharedTransactions`], but is used by
+/// the transaction manager when the source is the pool. Unlike [`SharedTransactions`], it can wrap
+/// pool transaction references directly and cache each transaction's encoded bytes across per-peer
+/// messages. Queued messages retain the pool-backed value and the shared cached bytes until they
+/// are sent.
+#[derive(Clone, Debug, Deref)]
+pub struct BroadcastPoolTransactions(pub Vec<LazyEncodedTransaction>);
+
+impl BroadcastPoolTransactions {
+    /// Returns an iterator over the transaction hashes.
+    pub fn iter_hashes(&self) -> impl Iterator<Item = &TxHash> + '_ {
+        self.0.iter().map(TxHashRef::tx_hash)
+    }
+}
+
+impl Encodable for BroadcastPoolTransactions {
+    fn encode(&self, out: &mut dyn BufMut) {
+        self.0.encode(out);
+    }
+
+    fn length(&self) -> usize {
+        self.0.length()
+    }
+}
 
 /// A wrapper type for all different new pooled transaction types
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -611,33 +728,29 @@ impl Encodable for NewPooledTransactionHashes68 {
 
 impl Decodable for NewPooledTransactionHashes68 {
     fn decode(buf: &mut &[u8]) -> alloy_rlp::Result<Self> {
-        #[derive(RlpDecodable)]
-        struct EncodableNewPooledTransactionHashes68 {
-            types: Bytes,
-            sizes: Vec<usize>,
-            hashes: Vec<B256>,
+        let Header { list, payload_length } = Header::decode(buf)?;
+        if !list {
+            return Err(alloy_rlp::Error::UnexpectedString)
+        }
+        if buf.len() < payload_length {
+            return Err(alloy_rlp::Error::InputTooShort)
         }
 
-        let encodable = EncodableNewPooledTransactionHashes68::decode(buf)?;
-        let msg = Self {
-            types: encodable.types.into(),
-            sizes: encodable.sizes,
-            hashes: encodable.hashes,
-        };
+        let (mut payload, rest) = buf.split_at(payload_length);
+        let (types, sizes, hashes) = decode_pooled_transaction_hashes_payload(&mut payload)?;
 
-        if msg.hashes.len() != msg.types.len() {
+        if !payload.is_empty() {
             return Err(alloy_rlp::Error::ListLengthMismatch {
-                expected: msg.hashes.len(),
-                got: msg.types.len(),
-            })
-        }
-        if msg.hashes.len() != msg.sizes.len() {
-            return Err(alloy_rlp::Error::ListLengthMismatch {
-                expected: msg.hashes.len(),
-                got: msg.sizes.len(),
+                expected: payload_length,
+                got: payload_length - payload.len(),
             })
         }
 
+        ensure_pooled_transaction_hashes_lengths(hashes.len(), types.len(), sizes.len())?;
+
+        let msg = Self { types, sizes, hashes };
+
+        *buf = rest;
         Ok(msg)
     }
 }
@@ -789,9 +902,7 @@ impl Decodable for NewPooledTransactionHashes72 {
         }
 
         let (mut payload, rest) = buf.split_at(payload_length);
-        let types = Bytes::decode(&mut payload)?;
-        let sizes = Vec::<usize>::decode(&mut payload)?;
-        let hashes = Vec::<B256>::decode(&mut payload)?;
+        let (types, sizes, hashes) = decode_pooled_transaction_hashes_payload(&mut payload)?;
         let Some(first_byte) = payload.first().copied() else {
             return Err(alloy_rlp::Error::InputTooShort)
         };
@@ -809,25 +920,51 @@ impl Decodable for NewPooledTransactionHashes72 {
             })
         }
 
-        let msg = Self { types: types.into(), sizes, hashes, cell_mask };
-
-        if msg.hashes.len() != msg.types.len() {
-            return Err(alloy_rlp::Error::ListLengthMismatch {
-                expected: msg.hashes.len(),
-                got: msg.types.len(),
-            })
-        }
-        if msg.hashes.len() != msg.sizes.len() {
-            return Err(alloy_rlp::Error::ListLengthMismatch {
-                expected: msg.hashes.len(),
-                got: msg.sizes.len(),
-            })
-        }
+        ensure_pooled_transaction_hashes_lengths(hashes.len(), types.len(), sizes.len())?;
 
         *buf = rest;
 
-        Ok(msg)
+        Ok(Self { types, sizes, hashes, cell_mask })
     }
+}
+
+/// Twice the spec'd soft limit for `NewPooledTransactionHashes` announcements.
+///
+/// This keeps capacity hints bounded when a malformed packet spends most of its bytes on the
+/// one-byte `types` string before the size and hash lists are validated.
+const NEW_POOLED_TRANSACTION_HASHES_DECODE_CAP: usize =
+    2 * SOFT_LIMIT_COUNT_HASHES_IN_NEW_POOLED_TRANSACTIONS_BROADCAST_MESSAGE;
+
+#[inline]
+fn decode_pooled_transaction_hashes_payload(
+    payload: &mut &[u8],
+) -> alloy_rlp::Result<(Vec<u8>, Vec<usize>, Vec<B256>)> {
+    let types = Bytes::decode(payload)?;
+    let capacity = types.len().min(NEW_POOLED_TRANSACTION_HASHES_DECODE_CAP);
+
+    let mut sizes = Vec::with_capacity(capacity);
+    decode_append(payload, &mut sizes)?;
+
+    let mut hashes = Vec::with_capacity(capacity);
+    decode_append(payload, &mut hashes)?;
+
+    Ok((types.into(), sizes, hashes))
+}
+
+#[inline]
+const fn ensure_pooled_transaction_hashes_lengths(
+    hashes_len: usize,
+    types_len: usize,
+    sizes_len: usize,
+) -> alloy_rlp::Result<()> {
+    if hashes_len != types_len {
+        return Err(alloy_rlp::Error::ListLengthMismatch { expected: hashes_len, got: types_len })
+    }
+    if hashes_len != sizes_len {
+        return Err(alloy_rlp::Error::ListLengthMismatch { expected: hashes_len, got: sizes_len })
+    }
+
+    Ok(())
 }
 
 /// Validation pass that checks for unique transaction hashes.
@@ -1197,7 +1334,9 @@ mod tests {
     use super::*;
     use alloy_consensus::{transaction::TxHashRef, Typed2718};
     use alloy_eips::eip2718::Encodable2718;
-    use alloy_primitives::{b256, hex, Signature, U256};
+    use alloy_primitives::{b256, hex, Bytes, Signature, U256};
+    use alloy_rlp::{RlpDecodable, RlpEncodable};
+    use proptest::prelude::*;
     use reth_ethereum_primitives::{Transaction, TransactionSigned};
     use std::str::FromStr;
 
@@ -1214,6 +1353,116 @@ mod tests {
 
         let decoded = T::decode(&mut encoded.as_ref()).unwrap();
         assert_eq!(expected_decoded, decoded);
+    }
+
+    fn encoded<T: Encodable>(value: &T) -> Vec<u8> {
+        let mut out = Vec::new();
+        value.encode(&mut out);
+        out
+    }
+
+    #[derive(RlpEncodable, RlpDecodable)]
+    struct EncodableNewPooledTransactionHashes68 {
+        types: Bytes,
+        sizes: Vec<usize>,
+        hashes: Vec<B256>,
+    }
+
+    type NewPooledTransactionHashes68Fields = (Vec<u8>, Vec<usize>, Vec<B256>);
+
+    fn decode_eth68_hashes_derived(
+        buf: &mut &[u8],
+    ) -> alloy_rlp::Result<NewPooledTransactionHashes68> {
+        let encodable = EncodableNewPooledTransactionHashes68::decode(buf)?;
+        let msg = NewPooledTransactionHashes68 {
+            types: encodable.types.into(),
+            sizes: encodable.sizes,
+            hashes: encodable.hashes,
+        };
+
+        ensure_pooled_transaction_hashes_lengths(
+            msg.hashes.len(),
+            msg.types.len(),
+            msg.sizes.len(),
+        )?;
+
+        Ok(msg)
+    }
+
+    fn eth68_hash_fields_strategy() -> impl Strategy<Value = NewPooledTransactionHashes68Fields> {
+        (0usize..128, 0usize..128, 0usize..128).prop_flat_map(
+            |(types_len, sizes_len, hashes_len)| {
+                (
+                    proptest::collection::vec(any::<u8>(), types_len),
+                    proptest::collection::vec(0usize..131_072, sizes_len),
+                    proptest::collection::vec(any::<B256>(), hashes_len),
+                )
+            },
+        )
+    }
+
+    proptest! {
+        #[test]
+        fn broadcast_pool_transactions_match_shared_transactions_encoding(
+            txs in proptest::collection::vec(
+                proptest_arbitrary_interop::arb::<TransactionSigned>(),
+                0..32,
+            )
+        ) {
+            let shared = SharedTransactions::<TransactionSigned>(
+                txs.iter().cloned().map(Arc::new).collect(),
+            );
+            let broadcast = BroadcastPoolTransactions(
+                txs.iter().cloned().map(LazyEncoded::new).collect(),
+            );
+
+            prop_assert_eq!(broadcast.length(), shared.length());
+
+            let shared_encoded = encoded(&shared);
+            let broadcast_encoded = encoded(&broadcast);
+            prop_assert_eq!(&broadcast_encoded, &shared_encoded);
+
+            let broadcast_encoded_cached = encoded(&broadcast);
+            prop_assert_eq!(&broadcast_encoded_cached, &shared_encoded);
+
+            let mut shared_bytes = shared_encoded.as_slice();
+            let decoded_shared = SharedTransactions::<TransactionSigned>::decode(&mut shared_bytes)
+                .expect("shared transactions decode");
+            prop_assert!(shared_bytes.is_empty());
+
+            let mut broadcast_bytes = broadcast_encoded.as_slice();
+            let decoded_broadcast =
+                SharedTransactions::<TransactionSigned>::decode(&mut broadcast_bytes)
+                    .expect("broadcast pool transactions decode as shared transactions");
+            prop_assert!(broadcast_bytes.is_empty());
+
+            prop_assert_eq!(decoded_broadcast, decoded_shared);
+        }
+
+        #[test]
+        fn eth_68_handrolled_decode_matches_derived_implementation(
+            (types, sizes, hashes) in eth68_hash_fields_strategy()
+        ) {
+            let encodable = EncodableNewPooledTransactionHashes68 {
+                types: Bytes::from(types),
+                sizes,
+                hashes,
+            };
+            let encoded = encoded(&encodable);
+
+            let mut derived_buf = encoded.as_slice();
+            let derived = decode_eth68_hashes_derived(&mut derived_buf);
+
+            let mut handrolled_buf = encoded.as_slice();
+            let handrolled = NewPooledTransactionHashes68::decode(&mut handrolled_buf);
+
+            let handrolled_is_ok = handrolled.is_ok();
+            prop_assert_eq!(&handrolled, &derived);
+            if handrolled_is_ok {
+                prop_assert!(derived_buf.is_empty());
+                prop_assert!(handrolled_buf.is_empty());
+            }
+        }
     }
 
     #[test]

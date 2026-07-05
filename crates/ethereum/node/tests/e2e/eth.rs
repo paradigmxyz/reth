@@ -12,13 +12,16 @@ use reth_e2e_test_utils::{
     node::NodeTestContext, setup, setup_engine, transaction::TransactionTestContext, wallet::Wallet,
 };
 use reth_node_api::TreeConfig;
-use reth_node_builder::{NodeBuilder, NodeHandle};
+use reth_node_builder::{rpc::BasicEngineApiBuilder, EngineApiExt, NodeBuilder, NodeHandle};
 use reth_node_core::{
     args::RpcServerArgs,
     node_config::NodeConfig,
     version::{version_metadata, CLIENT_CODE},
 };
-use reth_node_ethereum::{engine_ssz_proxy::EngineSszProxyLayer, EthereumAddOns, EthereumNode};
+use reth_node_ethereum::{
+    engine_ssz_proxy::EngineSszProxyLayer, EthereumAddOns, EthereumEngineValidatorBuilder,
+    EthereumNode,
+};
 use reth_provider::BlockNumReader;
 use reth_rpc_api::TestingBuildBlockRequestV1;
 use reth_rpc_layer::secret_to_bearer_header;
@@ -26,11 +29,13 @@ use reth_tasks::Runtime;
 use ssz::{Decode, Encode};
 use std::sync::Arc;
 
-const ENGINE_PRAGUE_PAYLOADS_ROUTE: &str = "/engine/v2/prague/payloads";
-const ENGINE_PRAGUE_FORKCHOICE_ROUTE: &str = "/engine/v2/prague/forkchoice";
-const ENGINE_V1_BLOBS_ROUTE: &str = "/engine/v2/blobs/v1";
-const ENGINE_CAPABILITIES_ROUTE: &str = "/engine/v2/capabilities";
-const ENGINE_IDENTITY_ROUTE: &str = "/engine/v2/identity";
+const ENGINE_EXECUTION_VERSION_HEADER: &str = "Eth-Execution-Version";
+const ENGINE_PRAGUE_FORK_HEADER: &str = "prague";
+const ENGINE_PAYLOADS_ROUTE: &str = "/engine/v1/payloads";
+const ENGINE_FORKCHOICE_ROUTE: &str = "/engine/v1/forkchoice";
+const ENGINE_V1_BLOBS_ROUTE: &str = "/engine/v1/blobs/v1";
+const ENGINE_CAPABILITIES_ROUTE: &str = "/engine/v1/capabilities";
+const ENGINE_IDENTITY_ROUTE: &str = "/engine/v1/identity";
 
 #[tokio::test]
 async fn can_run_eth_node() -> eyre::Result<()> {
@@ -237,6 +242,7 @@ async fn test_testing_build_block_v1_osaka() -> eyre::Result<()> {
         withdrawals: Some(vec![]),
         parent_beacon_block_root: Some(B256::ZERO),
         slot_number: None,
+        target_gas_limit: None,
     };
 
     let request = TestingBuildBlockRequestV1 {
@@ -293,17 +299,26 @@ async fn test_engine_ssz_proxy_can_mine_block() -> eyre::Result<()> {
                 .with_http_api(reth_rpc_server_types::RpcModuleSelection::All),
         );
 
-    let (ssz_layer, ssz_handle) = EngineSszProxyLayer::new(chain_spec.clone());
+    let (ssz_layer, ssz_handle) = EngineSszProxyLayer::new();
+    let engine_api_handle = ssz_handle.clone();
+    let engine_api_builder = EngineApiExt::new(
+        BasicEngineApiBuilder::<EthereumEngineValidatorBuilder>::default(),
+        move |engine_api| {
+            engine_api_handle.set_engine_api_sync(engine_api);
+        },
+    );
     let NodeHandle { node, node_exit_future: _ } = NodeBuilder::new(node_config)
         .testing_node(runtime)
         .with_types::<EthereumNode>()
         .with_components(EthereumNode::components())
-        .with_add_ons(EthereumAddOns::default().with_auth_http_middleware(ssz_layer))
+        .with_add_ons(
+            EthereumAddOns::default()
+                .with_engine_api(engine_api_builder)
+                .with_auth_http_middleware(ssz_layer),
+        )
         .launch()
         .await?;
 
-    ssz_handle.set_engine(node.add_ons_handle.beacon_engine_handle.clone()).await;
-    ssz_handle.set_blob_store(node.pool.blob_store().clone()).await;
     let node = NodeTestContext::new(node, eth_payload_attributes).await?;
 
     let wallets = Wallet::new(2).wallet_gen();
@@ -316,6 +331,7 @@ async fn test_engine_ssz_proxy_can_mine_block() -> eyre::Result<()> {
         withdrawals: Some(vec![]),
         parent_beacon_block_root: Some(B256::ZERO),
         slot_number: None,
+        target_gas_limit: None,
     };
 
     let envelope = node
@@ -394,8 +410,9 @@ async fn test_engine_ssz_proxy_can_mine_block() -> eyre::Result<()> {
     );
 
     let new_payload_response = client
-        .post(format!("{auth_url}{ENGINE_PRAGUE_PAYLOADS_ROUTE}"))
+        .post(format!("{auth_url}{ENGINE_PAYLOADS_ROUTE}"))
         .header(reqwest::header::AUTHORIZATION, auth_header.to_str()?)
+        .header(ENGINE_EXECUTION_VERSION_HEADER, ENGINE_PRAGUE_FORK_HEADER)
         .header(reqwest::header::CONTENT_TYPE, "application/octet-stream")
         .header(reqwest::header::ACCEPT, "application/octet-stream")
         .body((payload, B256::ZERO, envelope.execution_requests.take()).as_ssz_bytes())
@@ -407,8 +424,9 @@ async fn test_engine_ssz_proxy_can_mine_block() -> eyre::Result<()> {
     assert_eq!(status.status, PayloadStatusEnum::Valid);
 
     let fcu_response = client
-        .post(format!("{auth_url}{ENGINE_PRAGUE_FORKCHOICE_ROUTE}"))
+        .post(format!("{auth_url}{ENGINE_FORKCHOICE_ROUTE}"))
         .header(reqwest::header::AUTHORIZATION, auth_header.to_str()?)
+        .header(ENGINE_EXECUTION_VERSION_HEADER, ENGINE_PRAGUE_FORK_HEADER)
         .header(reqwest::header::CONTENT_TYPE, "application/octet-stream")
         .header(reqwest::header::ACCEPT, "application/octet-stream")
         .body(
@@ -468,7 +486,6 @@ async fn test_share_sparse_trie_with_payload_builder() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
 
     let tree_config = TreeConfig::default()
-        .with_legacy_state_root(false)
         .with_share_execution_cache_with_payload_builder(true)
         .with_share_sparse_trie_with_payload_builder(true);
 
@@ -503,7 +520,7 @@ async fn test_share_sparse_trie_with_payload_builder() -> eyre::Result<()> {
 /// Tests that sparse trie allocation reuse works correctly across consecutive blocks.
 ///
 /// This test exercises the sparse trie allocation reuse path by:
-/// 1. Starting a node with parallel state root computation enabled
+/// 1. Starting a node with the state-root task enabled
 /// 2. Advancing multiple consecutive blocks with random transactions
 /// 3. Verifying that all blocks are successfully validated (state roots match)
 ///
@@ -514,11 +531,9 @@ async fn test_share_sparse_trie_with_payload_builder() -> eyre::Result<()> {
 async fn test_sparse_trie_reuse_across_blocks() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
 
-    // Use parallel state root (non-legacy) with pruning enabled
-    let tree_config = TreeConfig::default()
-        .with_legacy_state_root(false)
-        .with_sparse_trie_prune_depth(2)
-        .with_sparse_trie_max_hot_slots(100);
+    // Use the state-root task with pruning enabled.
+    let tree_config =
+        TreeConfig::default().with_sparse_trie_prune_depth(2).with_sparse_trie_max_hot_slots(100);
 
     let (mut nodes, _wallet) = setup_engine::<EthereumNode>(
         1,
