@@ -10,7 +10,7 @@ use alloy_consensus::{
 };
 use alloy_eips::eip2718::{Typed2718, WithEncoded};
 use alloy_primitives::{Address, Bytes, B256};
-use core::fmt::Debug;
+use core::{borrow::Borrow, fmt::Debug};
 #[cfg(feature = "std")]
 use evm2::evm::{CacheDB, Db};
 pub use reth_execution_errors::{
@@ -202,7 +202,7 @@ pub trait BlockExecutorFactory {
     /// Transaction environment consumed by the configured EVM instance.
     type EvmTransaction;
     /// Transaction environment consumed by executors from this factory.
-    type Transaction: AsRef<Self::EvmTransaction>;
+    type Transaction: Borrow<Self::EvmTransaction>;
     /// EVM instance consumed by executors from this factory.
     type Evm<'a>: Evm<Transaction = Self::EvmTransaction>;
     /// EVM environment consumed by this factory.

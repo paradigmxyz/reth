@@ -155,6 +155,12 @@ impl AsRef<RecoveredTxEnvelope> for EthTxEnv {
     }
 }
 
+impl core::borrow::Borrow<RecoveredTxEnvelope> for EthTxEnv {
+    fn borrow(&self) -> &RecoveredTxEnvelope {
+        self.as_envelope()
+    }
+}
+
 impl From<Recovered<TransactionSigned>> for EthTxEnv {
     fn from(value: Recovered<TransactionSigned>) -> Self {
         let tx_hash = *value.tx_hash();

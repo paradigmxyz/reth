@@ -26,7 +26,7 @@ use alloy_primitives::StorageKey;
 use alloy_primitives::{keccak256, Address};
 #[cfg(any(test, any()))]
 use alloy_primitives::{B256, U256};
-use core::convert::Infallible;
+use core::{borrow::Borrow, convert::Infallible};
 use crossbeam_channel::Sender as CrossbeamSender;
 use metrics::{Counter, Gauge, Histogram};
 #[cfg(any())]
@@ -245,7 +245,7 @@ where
             // task scheduling would otherwise make later prewarm reads observe non-canonical state.
             let mut proof_targets = PrewarmProofTargetsSink::default();
 
-            match evm.transact_and_discard(tx_env.as_ref(), &mut proof_targets) {
+            match evm.transact_and_discard(tx_env.borrow(), &mut proof_targets) {
                 Ok(()) => {}
                 Err(err) => {
                     trace!(
