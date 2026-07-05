@@ -108,6 +108,9 @@ pub struct CachedStateProvider<S> {
     /// Provider-local hit/miss counters flushed when the provider is dropped.
     metric_counts: CacheMetricCounts,
 
+    /// Provider-local slow-block cache stat counters flushed when the provider is dropped.
+    cache_stat_counts: CacheMetricCounts,
+
     /// Whether cache misses should populate the shared execution cache.
     fill_mode: CacheFillMode,
 
@@ -148,6 +151,7 @@ impl<S> CachedStateProvider<S> {
             caches,
             metrics,
             metric_counts: CacheMetricCounts::new(),
+            cache_stat_counts: CacheMetricCounts::new(),
             fill_mode,
             cache_stats,
         }
@@ -155,50 +159,45 @@ impl<S> CachedStateProvider<S> {
 
     fn record_account_hit(&self) {
         self.record_metric(CacheMetricKind::AccountHit);
-        if let Some(stats) = &self.cache_stats {
-            stats.record_account_hit();
-        }
+        self.record_cache_stat(CacheMetricKind::AccountHit);
     }
 
     fn record_account_miss(&self) {
         self.record_metric(CacheMetricKind::AccountMiss);
-        if let Some(stats) = &self.cache_stats {
-            stats.record_account_miss();
-        }
+        self.record_cache_stat(CacheMetricKind::AccountMiss);
     }
 
     fn record_storage_hit(&self) {
         self.record_metric(CacheMetricKind::StorageHit);
-        if let Some(stats) = &self.cache_stats {
-            stats.record_storage_hit();
-        }
+        self.record_cache_stat(CacheMetricKind::StorageHit);
     }
 
     fn record_storage_miss(&self) {
         self.record_metric(CacheMetricKind::StorageMiss);
-        if let Some(stats) = &self.cache_stats {
-            stats.record_storage_miss();
-        }
+        self.record_cache_stat(CacheMetricKind::StorageMiss);
     }
 
     fn record_code_hit(&self) {
         self.record_metric(CacheMetricKind::CodeHit);
-        if let Some(stats) = &self.cache_stats {
-            stats.record_code_hit();
-        }
+        self.record_cache_stat(CacheMetricKind::CodeHit);
     }
 
     fn record_code_miss(&self) {
         self.record_metric(CacheMetricKind::CodeMiss);
-        if let Some(stats) = &self.cache_stats {
-            stats.record_code_miss();
-        }
+        self.record_cache_stat(CacheMetricKind::CodeMiss);
     }
 
     #[inline]
     fn record_metric(&self, kind: CacheMetricKind) {
         if self.metrics.is_some() {
             self.metric_counts.record(kind);
+        }
+    }
+
+    #[inline]
+    fn record_cache_stat(&self, kind: CacheMetricKind) {
+        if self.cache_stats.is_some() {
+            self.cache_stat_counts.record(kind);
         }
     }
 
@@ -213,6 +212,17 @@ impl<S> CachedStateProvider<S> {
         }
     }
 
+    fn flush_buffered_cache_stats(&self) {
+        let counts = self.cache_stat_counts.take();
+        if counts.is_empty() {
+            return;
+        }
+
+        if let Some(stats) = &self.cache_stats {
+            stats.record_counts(counts);
+        }
+    }
+
     const fn should_fill_on_miss(&self) -> bool {
         matches!(self.fill_mode, CacheFillMode::FillOnMiss)
     }
@@ -221,6 +231,7 @@ impl<S> CachedStateProvider<S> {
 impl<S> Drop for CachedStateProvider<S> {
     fn drop(&mut self) {
         self.flush_buffered_metrics();
+        self.flush_buffered_cache_stats();
     }
 }
 
@@ -485,6 +496,27 @@ pub struct CacheStats {
 }
 
 impl CacheStats {
+    fn record_counts(&self, counts: CacheMetricSnapshot) {
+        if counts.account_hits != 0 {
+            self.account_hits.fetch_add(counts.account_hits as usize, Ordering::Relaxed);
+        }
+        if counts.account_misses != 0 {
+            self.account_misses.fetch_add(counts.account_misses as usize, Ordering::Relaxed);
+        }
+        if counts.storage_hits != 0 {
+            self.storage_hits.fetch_add(counts.storage_hits as usize, Ordering::Relaxed);
+        }
+        if counts.storage_misses != 0 {
+            self.storage_misses.fetch_add(counts.storage_misses as usize, Ordering::Relaxed);
+        }
+        if counts.code_hits != 0 {
+            self.code_hits.fetch_add(counts.code_hits as usize, Ordering::Relaxed);
+        }
+        if counts.code_misses != 0 {
+            self.code_misses.fetch_add(counts.code_misses as usize, Ordering::Relaxed);
+        }
+    }
+
     /// Records an account cache hit.
     pub fn record_account_hit(&self) {
         self.account_hits.fetch_add(1, Ordering::Relaxed);
@@ -1223,6 +1255,37 @@ mod tests {
         let res = state_provider.storage(address, storage_key);
         assert!(res.is_ok());
         assert_eq!(res.unwrap(), Some(storage_value));
+    }
+
+    #[test]
+    fn cache_stats_flush_on_drop() {
+        let hit_address = Address::random();
+        let miss_address = Address::random();
+        let storage_key = StorageKey::random();
+        let storage_value = U256::from(1);
+
+        let provider = MockEthProvider::default();
+        provider.extend_accounts(vec![(miss_address, ExtendedAccount::new(0, U256::ZERO))]);
+
+        let caches = ExecutionCache::new(1000);
+        caches.insert_storage(hit_address, storage_key, Some(storage_value));
+        let cache_stats = Arc::new(CacheStats::default());
+
+        {
+            let state_provider = CachedStateProvider::new_with_mode(
+                provider,
+                caches,
+                CacheFillMode::LookupOnly,
+                None,
+                Some(Arc::clone(&cache_stats)),
+            );
+
+            assert_eq!(state_provider.storage(hit_address, storage_key).unwrap(), Some(storage_value));
+            assert_eq!(state_provider.storage(miss_address, storage_key).unwrap(), None);
+        }
+
+        assert_eq!(cache_stats.storage_hits(), 1);
+        assert_eq!(cache_stats.storage_misses(), 1);
     }
 
     #[test]
