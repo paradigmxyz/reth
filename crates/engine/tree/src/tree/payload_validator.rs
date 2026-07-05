@@ -1136,7 +1136,7 @@ where
         InsertBlockErrorKind,
     >
     where
-        S: StateProvider + Send + 'static,
+        S: StateProvider + Send,
         Err: core::error::Error + Send + Sync + 'static,
         V: PayloadValidator<T, Block = N::Block>,
         T: PayloadTypes<BuiltPayload: BuiltPayload<Primitives = N>>,
