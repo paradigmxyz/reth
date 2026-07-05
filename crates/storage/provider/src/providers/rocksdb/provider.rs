@@ -49,6 +49,15 @@ fn synced_write_options() -> WriteOptions {
 /// Pending `RocksDB` batches type alias.
 pub(crate) type PendingRocksDBBatches = Arc<Mutex<Vec<WriteBatchWithTransaction<true>>>>;
 
+/// Minimum number of storage-history keys per Rayon split.
+///
+/// Storage history shard preparation performs one committed last-shard read per touched slot.
+/// Tiny Rayon splits turn large blocks into thousands of small RocksDB read tasks that contend on
+/// the same database and page-cache state. Keep each split coarse enough to amortize scheduling and
+/// read-side synchronization while still preserving parallelism for big storage batches.
+const STORAGE_HISTORY_PAR_MIN_LEN: usize = 256;
+const STORAGE_HISTORY_PAR_THRESHOLD: usize = STORAGE_HISTORY_PAR_MIN_LEN * 2;
+
 /// Raw key-value result from a `RocksDB` iterator.
 type RawKVResult = Result<(Box<[u8]>, Box<[u8]>), rocksdb::Error>;
 
@@ -1453,12 +1462,23 @@ impl RocksDBProvider {
             }
         }
 
-        let shard_puts = storage_history
-            .into_par_iter()
-            .map(|((address, slot), indices)| {
-                self.storage_history_shards_to_put(address, slot, indices)
-            })
-            .collect::<ProviderResult<Vec<_>>>()?;
+        let storage_history = storage_history.into_iter().collect::<Vec<_>>();
+        let shard_puts = if storage_history.len() < STORAGE_HISTORY_PAR_THRESHOLD {
+            storage_history
+                .into_iter()
+                .map(|((address, slot), indices)| {
+                    self.storage_history_shards_to_put(address, slot, indices)
+                })
+                .collect::<ProviderResult<Vec<_>>>()?
+        } else {
+            storage_history
+                .into_par_iter()
+                .with_min_len(STORAGE_HISTORY_PAR_MIN_LEN)
+                .map(|((address, slot), indices)| {
+                    self.storage_history_shards_to_put(address, slot, indices)
+                })
+                .collect::<ProviderResult<Vec<_>>>()?
+        };
 
         let mut batch = self.batch();
         for shards in shard_puts {
