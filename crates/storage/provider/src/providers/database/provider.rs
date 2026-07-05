@@ -102,6 +102,34 @@ impl CommitOrder {
     }
 }
 
+const STATE_WRITE_PAR_SORT_MIN_LEN: usize = 2_048;
+
+fn state_write_sort_by_key<T, K, F>(values: &mut [T], f: F)
+where
+    T: Send,
+    K: Ord + Send,
+    F: Fn(&T) -> K + Sync,
+{
+    if values.len() >= STATE_WRITE_PAR_SORT_MIN_LEN {
+        values.par_sort_by_key(f);
+    } else {
+        values.sort_by_key(f);
+    }
+}
+
+fn state_write_sort_unstable_by_key<T, K, F>(values: &mut [T], f: F)
+where
+    T: Send,
+    K: Ord + Send,
+    F: Fn(&T) -> K + Sync,
+{
+    if values.len() >= STATE_WRITE_PAR_SORT_MIN_LEN {
+        values.par_sort_unstable_by_key(f);
+    } else {
+        values.sort_unstable_by_key(f);
+    }
+}
+
 /// A [`DatabaseProvider`] that holds a read-only database transaction.
 pub type DatabaseProviderRO<DB, N> = DatabaseProvider<<DB as Database>::TX, N>;
 
@@ -2568,7 +2596,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
 
                 tracing::trace!(block_number, "Writing block change");
                 // sort changes by address.
-                storage_changes.par_sort_unstable_by_key(|a| a.address);
+                state_write_sort_unstable_by_key(&mut storage_changes, |a| a.address);
                 let total_changes =
                     storage_changes.iter().map(|change| change.storage_revert.len()).sum();
                 let mut changeset = Vec::with_capacity(total_changes);
@@ -2578,7 +2606,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
                         .map(|(k, v)| (B256::from(k.to_be_bytes()), v))
                         .collect::<Vec<_>>();
                     // sort storage slots by key.
-                    storage.par_sort_unstable_by_key(|a| a.0);
+                    state_write_sort_unstable_by_key(&mut storage, |a| a.0);
 
                     // If we are writing the primary storage wipe transition, the pre-existing
                     // storage state has to be taken from the database and written to storage
@@ -2634,9 +2662,9 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
     fn write_state_changes(&self, mut changes: StateChangeset) -> ProviderResult<()> {
         // sort all entries so they can be written to database in more performant way.
         // and take smaller memory footprint.
-        changes.accounts.par_sort_by_key(|a| a.0);
-        changes.storage.par_sort_by_key(|a| a.address);
-        changes.contracts.par_sort_by_key(|a| a.0);
+        state_write_sort_by_key(&mut changes.accounts, |a| a.0);
+        state_write_sort_by_key(&mut changes.storage, |a| a.address);
+        state_write_sort_by_key(&mut changes.contracts, |a| a.0);
 
         if !self.cached_storage_settings().use_hashed_state() {
             // Write new account state
@@ -2668,7 +2696,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
                     .map(|(k, value)| StorageEntry { key: k.into(), value })
                     .collect::<Vec<_>>();
                 // sort storage slots by key.
-                storage.par_sort_unstable_by_key(|a| a.key);
+                state_write_sort_unstable_by_key(&mut storage, |a| a.key);
 
                 for entry in storage {
                     tracing::trace!(?address, ?entry.key, "Updating plain state storage");
