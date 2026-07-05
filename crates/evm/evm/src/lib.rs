@@ -46,6 +46,7 @@ pub use execute::{
     FromTxWithEncoded, GasOutput, InternalBlockExecutionError, IntoTxEnv, InvalidTxError,
     RecoveredTx, WithTxEnv,
 };
+pub use reth_execution_types::ExecutionState;
 
 /// Transaction validation limits resolved for an EVM environment.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -421,6 +422,22 @@ pub trait ConfigureEvm: Clone + Debug + Send + Sync + Unpin {
         let evm = self.evm_with_env(db, evm_env.clone());
         let ctx = self.context_for_next_block(parent, attributes)?;
         Ok(self.create_block_builder(evm, evm_env, parent, ctx))
+    }
+
+    /// Applies block-level state changes required before transaction execution.
+    #[cfg(feature = "std")]
+    fn pre_block_state_changes<'a, DB>(
+        &self,
+        _db: DB,
+        _evm_env: EvmEnvFor<Self>,
+        _block_number: u64,
+        _ctx: ExecutionCtxFor<'a, Self>,
+    ) -> Result<ExecutionState, Box<dyn Error + Send + Sync>>
+    where
+        Self: 'a,
+        DB: DynDatabase + 'a,
+    {
+        Ok(ExecutionState::default())
     }
 }
 
