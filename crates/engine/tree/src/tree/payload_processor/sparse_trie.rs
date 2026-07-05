@@ -250,13 +250,13 @@ where
         let now = Instant::now();
 
         let mut total_idle_time = std::time::Duration::ZERO;
-        let mut idle_start = Instant::now();
 
         loop {
             let mut t = Instant::now();
             crossbeam_channel::select_biased! {
                 recv(self.updates) -> message => {
                     let wake = Instant::now();
+                    let wait_duration = wake.duration_since(t);
 
                     let update = match message {
                         Ok(m) => m,
@@ -267,20 +267,21 @@ where
                         }
                     };
 
-                    total_idle_time += wake.duration_since(idle_start);
+                    total_idle_time += wait_duration;
                     self.metrics
                         .sparse_trie_channel_wait_duration_histogram
-                        .record(wake.duration_since(t));
+                        .record(wait_duration);
 
                     self.on_message(update);
                     self.pending_updates += 1;
                 }
                 recv(self.proof_result_rx) -> message => {
                     let phase_end = Instant::now();
-                    total_idle_time += phase_end.duration_since(idle_start);
+                    let wait_duration = phase_end.duration_since(t);
+                    total_idle_time += wait_duration;
                     self.metrics
                         .sparse_trie_channel_wait_duration_histogram
-                        .record(phase_end.duration_since(t));
+                        .record(wait_duration);
                     t = phase_end;
 
                     let Ok(result) = message else {
@@ -340,7 +341,6 @@ where
                 self.dispatch_pending_targets();
             }
 
-            idle_start = Instant::now();
         }
 
         self.metrics.sparse_trie_idle_time_seconds.record(total_idle_time.as_secs_f64());
