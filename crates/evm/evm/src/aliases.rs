@@ -2,6 +2,10 @@
 
 use crate::{execute::BlockExecutorFactory, ConfigureEvm};
 
+/// Helper to access the configured EVM factory state.
+pub type EvmFactoryFor<Evm> =
+    <<Evm as ConfigureEvm>::BlockExecutorFactory as BlockExecutorFactory>::EvmFactory;
+
 /// Type alias for the configured EVM environment.
 pub type EvmEnvFor<Evm> =
     <<Evm as ConfigureEvm>::BlockExecutorFactory as BlockExecutorFactory>::EvmEnv;

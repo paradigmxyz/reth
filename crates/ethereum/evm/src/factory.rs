@@ -181,6 +181,7 @@ where
     EvmFactory: 'static,
 {
     type Primitives = EthPrimitives;
+    type EvmFactory = EvmFactory;
     type EvmTransaction = evm2::ethereum::RecoveredTxEnvelope;
     type Transaction = EthTxEnv;
     type Evm<'a> = evm2::Evm<'a, evm2::BaseEvmTypes>;
@@ -203,6 +204,10 @@ where
         Self: 'a,
     {
         Self::create_executor(self, evm, ctx)
+    }
+
+    fn evm_factory(&self) -> &Self::EvmFactory {
+        Self::evm_factory(self)
     }
 
     fn evm_with_env<'a, DB>(&self, db: DB, evm_env: Self::EvmEnv) -> Self::Evm<'a>

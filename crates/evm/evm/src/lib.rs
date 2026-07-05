@@ -253,6 +253,12 @@ pub trait ConfigureEvm: Clone + Debug + Send + Sync + Unpin {
         transaction.into_tx_env()
     }
 
+    /// Provides a reference to the configured EVM factory state.
+    #[cfg(feature = "std")]
+    fn evm_factory(&self) -> &EvmFactoryFor<Self> {
+        self.block_executor_factory().evm_factory()
+    }
+
     /// Returns a config with JIT support enabled for subsequently created EVMs, if supported.
     #[auto_impl(keep_default_for(&, Arc))]
     fn with_jit_support_enabled(self, _enabled: bool) -> Self

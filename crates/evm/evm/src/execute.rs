@@ -199,6 +199,8 @@ pub trait BlockExecutor: Sized {
 pub trait BlockExecutorFactory {
     /// The primitive types used by the factory.
     type Primitives: NodePrimitives;
+    /// Additional EVM factory configuration owned by this executor factory.
+    type EvmFactory;
     /// Transaction environment consumed by the configured EVM instance.
     type EvmTransaction;
     /// Transaction environment consumed by executors from this factory.
@@ -229,6 +231,9 @@ pub trait BlockExecutorFactory {
     ) -> Self::Executor<'a>
     where
         Self: 'a;
+
+    /// Returns the configured EVM factory state.
+    fn evm_factory(&self) -> &Self::EvmFactory;
 
     /// Creates an EVM instance with the configured execution environment.
     fn evm_with_env<'a, DB>(&self, db: DB, evm_env: Self::EvmEnv) -> Self::Evm<'a>
