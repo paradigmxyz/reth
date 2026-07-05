@@ -655,7 +655,10 @@ where
 
         if !account_changes.storage_changes.is_empty() {
             let hashed_address = *hashed_address.get_or_insert_with(|| keccak256(address));
-            let mut storage_map = reth_trie::HashedStorage::new(false);
+            let mut storage_map = reth_trie::HashedStorage::with_capacity(
+                false,
+                account_changes.storage_changes.len(),
+            );
 
             for slot_changes in &account_changes.storage_changes {
                 let hashed_slot = keccak256(slot_changes.slot.to_be_bytes::<32>());
