@@ -15,7 +15,15 @@ use metrics_process::Collector;
 use reqwest::Client;
 use reth_metrics::metrics::Unit;
 use reth_tasks::TaskExecutor;
-use std::{convert::Infallible, net::SocketAddr, path::PathBuf, sync::Arc, time::Duration};
+use std::{
+    convert::Infallible,
+    net::SocketAddr,
+    path::PathBuf,
+    sync::{Arc, Mutex, PoisonError},
+    time::{Duration, Instant},
+};
+
+const METRICS_RESPONSE_CACHE_TTL: Duration = Duration::from_secs(1);
 
 /// Configuration for the [`MetricServer`]
 #[derive(Debug)]
@@ -145,6 +153,7 @@ impl MetricServer {
 
         tracing::info!(target: "reth::cli", "Starting metrics endpoint at {}", listener.local_addr().unwrap());
 
+        let metrics_cache = Arc::new(MetricsResponseCache::new(METRICS_RESPONSE_CACHE_TTL));
         task_executor.spawn_with_graceful_shutdown_signal(async move |mut signal| loop {
             let io = tokio::select! {
                 _ = &mut signal => break,
@@ -162,12 +171,20 @@ impl MetricServer {
             let handle = install_prometheus_recorder();
             let hook = hook.clone();
             let pprof_dump_dir = pprof_dump_dir.clone();
+            let metrics_cache = metrics_cache.clone();
             let service = tower::service_fn(move |req: Request<_>| {
                 let hook = hook.clone();
                 let pprof_dump_dir = pprof_dump_dir.clone();
+                let metrics_cache = metrics_cache.clone();
                 async move {
-                    let response =
-                        handle_request(req.uri().path(), &*hook, handle, &pprof_dump_dir).await;
+                    let response = handle_request(
+                        req.uri().path(),
+                        &*hook,
+                        handle,
+                        &pprof_dump_dir,
+                        &metrics_cache,
+                    )
+                    .await;
                     Ok::<_, Infallible>(response)
                 }
             });
@@ -225,6 +242,39 @@ impl MetricServer {
         });
         Ok(())
     }
+}
+
+#[derive(Debug)]
+struct MetricsResponseCache {
+    ttl: Duration,
+    cached: Mutex<Option<CachedMetricsResponse>>,
+}
+
+impl MetricsResponseCache {
+    const fn new(ttl: Duration) -> Self {
+        Self { ttl, cached: Mutex::new(None) }
+    }
+
+    fn get_or_update(&self, render: impl FnOnce() -> Bytes) -> Bytes {
+        let now = Instant::now();
+        let mut cached = self.cached.lock().unwrap_or_else(PoisonError::into_inner);
+
+        if let Some(cached) = cached.as_ref() &&
+            now.duration_since(cached.updated_at) < self.ttl
+        {
+            return cached.body.clone();
+        }
+
+        let body = render();
+        *cached = Some(CachedMetricsResponse { updated_at: Instant::now(), body: body.clone() });
+        body
+    }
+}
+
+#[derive(Debug)]
+struct CachedMetricsResponse {
+    updated_at: Instant,
+    body: Bytes,
 }
 
 fn describe_db_metrics() {
@@ -332,14 +382,17 @@ async fn handle_request(
     hook: impl Fn(),
     handle: &crate::recorder::PrometheusRecorder,
     pprof_dump_dir: &PathBuf,
+    metrics_cache: &MetricsResponseCache,
 ) -> Response<Full<Bytes>> {
     match path {
         "/debug/pprof/heap" => handle_pprof_heap(pprof_dump_dir),
         "/debug/tokio/dump" => handle_tokio_dump().await,
         _ => {
-            hook();
-            let metrics = handle.handle().render();
-            let mut response = Response::new(Full::new(Bytes::from(metrics)));
+            let metrics = metrics_cache.get_or_update(|| {
+                hook();
+                Bytes::from(handle.handle().render())
+            });
+            let mut response = Response::new(Full::new(metrics));
             response.headers_mut().insert(CONTENT_TYPE, HeaderValue::from_static("text/plain"));
             response
         }
@@ -456,7 +509,10 @@ mod tests {
     use reqwest::Client;
     use reth_tasks::Runtime;
     use socket2::{Domain, Socket, Type};
-    use std::net::{SocketAddr, TcpListener};
+    use std::{
+        net::{SocketAddr, TcpListener},
+        sync::atomic::{AtomicUsize, Ordering},
+    };
 
     fn get_random_available_addr() -> SocketAddr {
         let addr = &"127.0.0.1:0".parse::<SocketAddr>().unwrap().into();
@@ -523,5 +579,41 @@ mod tests {
 
         // Make sure the runtime is dropped after the test runs.
         drop(runtime);
+    }
+
+    #[test]
+    fn metrics_response_cache_reuses_recent_body() {
+        let cache = MetricsResponseCache::new(Duration::from_secs(60));
+        let calls = AtomicUsize::new(0);
+
+        let first = cache.get_or_update(|| {
+            calls.fetch_add(1, Ordering::Relaxed);
+            Bytes::from_static(b"first")
+        });
+        let second = cache.get_or_update(|| {
+            calls.fetch_add(1, Ordering::Relaxed);
+            Bytes::from_static(b"second")
+        });
+
+        assert_eq!(first, second);
+        assert_eq!(calls.load(Ordering::Relaxed), 1);
+    }
+
+    #[test]
+    fn metrics_response_cache_refreshes_after_ttl() {
+        let cache = MetricsResponseCache::new(Duration::ZERO);
+        let calls = AtomicUsize::new(0);
+
+        let first = cache.get_or_update(|| {
+            calls.fetch_add(1, Ordering::Relaxed);
+            Bytes::from_static(b"first")
+        });
+        let second = cache.get_or_update(|| {
+            calls.fetch_add(1, Ordering::Relaxed);
+            Bytes::from_static(b"second")
+        });
+
+        assert_ne!(first, second);
+        assert_eq!(calls.load(Ordering::Relaxed), 2);
     }
 }
