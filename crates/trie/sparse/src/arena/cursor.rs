@@ -240,7 +240,7 @@ impl ArenaCursor {
     pub(super) fn next(
         &mut self,
         arena: &mut NodeArena,
-        should_descend: impl Fn(usize, &ArenaSparseNode) -> bool,
+        should_descend: impl Fn(usize, &Nibbles, &ArenaSparseNode) -> bool,
     ) -> NextResult {
         if self.needs_pop {
             self.pop(arena);
@@ -273,11 +273,11 @@ impl ArenaCursor {
                     ArenaSparseNodeBranchChild::Blinded(_) => continue,
                 };
 
-                if should_descend(child_depth, &arena[child_idx]) {
+                let path = self.child_path(arena, nibble);
+                if should_descend(child_depth, &path, &arena[child_idx]) {
                     // Record where to resume iteration when we return to this entry.
                     self.stack.last_mut().expect("head exists").next_dense_idx =
                         branch_child_idx.get() + 1;
-                    let path = self.child_path(arena, nibble);
                     self.push(arena, child_idx, path);
                     descended = true;
                     break;
