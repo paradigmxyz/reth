@@ -309,7 +309,7 @@ pub trait ConfigureEvm: Clone + Debug + Send + Sync + Unpin {
     fn executor<DB>(
         &self,
         db: DB,
-    ) -> impl Executor<Primitives = Self::Primitives, Error = BlockExecutionError>
+    ) -> impl Executor<DB, Primitives = Self::Primitives, Error = BlockExecutionError>
     where
         DB: Database,
     {
@@ -330,7 +330,7 @@ pub trait ConfigureEvm: Clone + Debug + Send + Sync + Unpin {
     fn batch_executor<DB>(
         &self,
         db: DB,
-    ) -> impl Executor<Primitives = Self::Primitives, Error = BlockExecutionError>
+    ) -> impl Executor<DB, Primitives = Self::Primitives, Error = BlockExecutionError>
     where
         DB: Database,
     {

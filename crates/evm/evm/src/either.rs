@@ -1,6 +1,6 @@
 //! Helper type that represents one of two possible executor types
 
-use crate::execute::Executor;
+use crate::{execute::Executor, Database};
 
 // re-export Either
 pub use futures_util::future::Either;
@@ -8,10 +8,11 @@ use reth_execution_types::{BlockExecutionOutput, BlockExecutionResult, Execution
 use reth_primitives_traits::{NodePrimitives, RecoveredBlock};
 use reth_trie_common::HashedPostState;
 
-impl<A, B> Executor for Either<A, B>
+impl<A, B, DB> Executor<DB> for Either<A, B>
 where
-    A: Executor,
-    B: Executor<Primitives = A::Primitives, Error = A::Error>,
+    A: Executor<DB>,
+    B: Executor<DB, Primitives = A::Primitives, Error = A::Error>,
+    DB: Database,
 {
     type Primitives = A::Primitives;
     type Error = A::Error;

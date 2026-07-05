@@ -545,8 +545,8 @@ where
     }
 }
 
-/// A type that knows how to execute blocks.
-pub trait Executor: Sized {
+/// A type that knows how to execute blocks over a database.
+pub trait Executor<DB: Database>: Sized {
     /// The primitive types used by the executor.
     type Primitives: NodePrimitives;
     /// The error type returned by the executor.
@@ -699,7 +699,7 @@ where
 }
 
 #[cfg(feature = "std")]
-impl<Evm, DB> Executor for BasicBlockExecutor<Evm, DB>
+impl<Evm, DB> Executor<DB> for BasicBlockExecutor<Evm, DB>
 where
     Evm: ConfigureEvm,
     DB: Database,
@@ -800,7 +800,11 @@ impl<N> Default for UnsupportedExecutor<N> {
     }
 }
 
-impl<N: NodePrimitives> Executor for UnsupportedExecutor<N> {
+impl<N, DB> Executor<DB> for UnsupportedExecutor<N>
+where
+    N: NodePrimitives,
+    DB: Database,
+{
     type Primitives = N;
     type Error = BlockExecutionError;
 
