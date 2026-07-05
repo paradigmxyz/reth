@@ -10,7 +10,7 @@ use reth_engine_primitives::EngineTypes;
 use reth_ethereum_consensus::EthBeaconConsensus;
 use reth_ethereum_engine_primitives::{EthBuiltPayload, EthPayloadAttributes};
 use reth_ethereum_primitives::{EthPrimitives, TransactionSigned};
-use reth_evm::{BlockExecutorFactory, ConfigureEvm, NextBlockEnvAttributes, TxEnvFor};
+use reth_evm::{BlockExecutorFactory, ConfigureEvm, EvmEnvFor, NextBlockEnvAttributes, TxEnvFor};
 #[cfg(not(feature = "jit"))]
 use reth_evm_ethereum::RethEvmFactory;
 #[cfg(feature = "jit")]
@@ -49,7 +49,7 @@ use reth_rpc_eth_api::{
     helpers::{
         config::{EthConfigApiServer, EthConfigHandler},
         pending_block::BuildPendingEnv,
-        TraceEvmInstance, TraceTxEnvelope,
+        TraceBlockEnv, TraceEvmInstance, TraceTxEnvelope,
     },
     RpcConvert, RpcNodeCore, RpcTypes, SignableTxRequest,
 };
@@ -324,6 +324,7 @@ where
     >,
     EthB: EthApiBuilder<N>,
     <EthB::EthApi as RpcNodeCore>::Evm: ConfigureEvm,
+    EvmEnvFor<<EthB::EthApi as RpcNodeCore>::Evm>: AsRef<TraceBlockEnv>,
     <<EthB::EthApi as RpcNodeCore>::Evm as ConfigureEvm>::BlockExecutorFactory:
         for<'evm> BlockExecutorFactory<Evm<'evm> = TraceEvmInstance<'evm>>,
     TxEnvFor<<EthB::EthApi as RpcNodeCore>::Evm>: AsRef<TraceTxEnvelope> + Clone,
@@ -405,6 +406,7 @@ where
     >,
     EthB: EthApiBuilder<N>,
     <EthB::EthApi as RpcNodeCore>::Evm: ConfigureEvm,
+    EvmEnvFor<<EthB::EthApi as RpcNodeCore>::Evm>: AsRef<TraceBlockEnv>,
     <<EthB::EthApi as RpcNodeCore>::Evm as ConfigureEvm>::BlockExecutorFactory:
         for<'evm> BlockExecutorFactory<Evm<'evm> = TraceEvmInstance<'evm>>,
     TxEnvFor<<EthB::EthApi as RpcNodeCore>::Evm>: AsRef<TraceTxEnvelope> + Clone,
@@ -519,7 +521,7 @@ fn jit_runtime_config(jit: &JitArgs) -> RuntimeConfig {
 /// Returns the EVM config and metrics recorder if JIT starts enabled.
 #[cfg(feature = "jit")]
 #[allow(clippy::type_complexity)]
-pub fn build_jit_evm_config<C: EthereumHardforks>(
+pub fn build_evm_config<C: EthereumHardforks>(
     chain_spec: Arc<C>,
     jit: &JitArgs,
     dump_dir: Option<std::path::PathBuf>,
@@ -550,7 +552,7 @@ pub fn build_jit_evm_config<C: EthereumHardforks>(
         "Started experimental evm2 JIT backend; this may cause instability",
     );
 
-    let factory = RethEvmFactory::new_with_metrics(backend, jit_metrics.as_ref().clone());
+    let mut factory = RethEvmFactory::new_with_metrics(backend, jit_metrics.as_ref().clone());
     factory.set_jit_support(true);
     let evm_config = EthEvmConfig::new_with_evm_factory(chain_spec, factory);
 
@@ -563,7 +565,7 @@ pub fn build_jit_evm_config<C: EthereumHardforks>(
 /// returns a plain interpreter-backed config.
 #[cfg(not(feature = "jit"))]
 #[allow(clippy::type_complexity)]
-pub fn build_jit_evm_config<C: EthereumHardforks>(
+pub fn build_evm_config<C: EthereumHardforks>(
     chain_spec: Arc<C>,
     jit: &JitArgs,
     _dump_dir: Option<std::path::PathBuf>,
@@ -593,7 +595,7 @@ where
         let jit = &ctx.config().jit;
         let dump_dir = jit.debug.then(|| ctx.config().datadir().data_dir().join("jit"));
 
-        let (evm_config, jit_metrics) = build_jit_evm_config(ctx.chain_spec(), jit, dump_dir)?;
+        let (evm_config, jit_metrics) = build_evm_config(ctx.chain_spec(), jit, dump_dir)?;
 
         #[cfg(not(feature = "jit"))]
         let _ = jit_metrics;
