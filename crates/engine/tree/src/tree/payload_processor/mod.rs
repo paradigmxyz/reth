@@ -318,9 +318,9 @@ where
         StateRootHandle::new(parent_state_root, updates_tx, state_root_rx, hashed_state_rx)
     }
 
-    /// Transaction count threshold below which proof workers are halved, since fewer transactions
-    /// produce fewer state changes and most workers would be idle overhead.
-    const SMALL_BLOCK_PROOF_WORKER_TX_THRESHOLD: usize = 30;
+    /// Transaction count threshold below which proof workers are halved, since medium-sized
+    /// blocks still do not produce enough proof targets to keep the full worker set busy.
+    const SMALL_BLOCK_PROOF_WORKER_TX_THRESHOLD: usize = 256;
 
     /// Transaction count threshold below which sequential conversion is used.
     ///
