@@ -1088,7 +1088,9 @@ fn dispatch_v2_storage_proofs(
     // Since trie walk processes accounts in lexicographical order, dispatching in the same order
     // reduces head-of-line blocking when consuming results.
     let mut sorted_storage_targets: Vec<_> = storage_targets.into_iter().collect();
-    sorted_storage_targets.sort_unstable_by_key(|(addr, _)| *addr);
+    if sorted_storage_targets.len() > 1 {
+        sorted_storage_targets.sort_unstable_by_key(|(addr, _)| *addr);
+    }
 
     // Dispatch all proofs for targeted storage slots
     for (hashed_address, targets) in sorted_storage_targets {
