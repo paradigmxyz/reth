@@ -18,6 +18,8 @@
 extern crate alloc;
 
 use alloc::{borrow::Cow, sync::Arc};
+#[cfg(feature = "std")]
+use alloy_consensus::transaction::SignerRecoverable;
 use alloy_consensus::Header;
 use alloy_evm::{
     eth::{EthBlockExecutionCtx, EthBlockExecutorFactory},
@@ -37,6 +39,8 @@ use revm::{context::BlockEnv, primitives::hardfork::SpecId};
 
 #[cfg(feature = "std")]
 use reth_evm::{ConfigureEngineEvm, ExecutableTxIterator};
+#[cfg(feature = "std")]
+use std::cell::RefCell;
 #[allow(unused_imports)]
 use {
     alloy_eips::Decodable2718,
@@ -51,6 +55,11 @@ use {
 };
 
 pub use alloy_evm::EthEvm;
+
+#[cfg(feature = "std")]
+thread_local! {
+    static TX_RECOVERY_BUF: RefCell<Vec<u8>> = RefCell::new(Vec::new());
+}
 
 mod config;
 use alloy_evm::eth::spec::EthExecutorSpec;
@@ -348,7 +357,9 @@ where
         let convert = |tx: Bytes| {
             let tx =
                 TxTy::<Self::Primitives>::decode_2718_exact(tx.as_ref()).map_err(AnyError::new)?;
-            let signer = tx.try_recover().map_err(AnyError::new)?;
+            let signer = TX_RECOVERY_BUF
+                .with(|buf| tx.recover_with_buf(&mut buf.borrow_mut()))
+                .map_err(AnyError::new)?;
             Ok::<_, AnyError>(tx.with_signer(signer))
         };
 
