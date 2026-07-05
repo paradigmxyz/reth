@@ -543,8 +543,9 @@ mod tests {
 
     #[test]
     fn archive_flag_conflicts_with_full_and_minimal() {
-        assert!(CommandParser::<PruningArgs>::try_parse_from(["reth", "--archive", "--full"])
-            .is_err());
+        assert!(
+            CommandParser::<PruningArgs>::try_parse_from(["reth", "--archive", "--full"]).is_err()
+        );
         assert!(CommandParser::<PruningArgs>::try_parse_from(["reth", "--archive", "--minimal"])
             .is_err());
         assert!(CommandParser::<PruningArgs>::try_parse_from(["reth", "--archive"]).is_ok());
