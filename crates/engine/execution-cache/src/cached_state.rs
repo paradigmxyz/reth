@@ -216,6 +216,11 @@ impl<S> CachedStateProvider<S> {
     const fn should_fill_on_miss(&self) -> bool {
         matches!(self.fill_mode, CacheFillMode::FillOnMiss)
     }
+
+    #[inline]
+    fn records_cache_accesses(&self) -> bool {
+        self.metrics.is_some() || self.cache_stats.is_some()
+    }
 }
 
 impl<S> Drop for CachedStateProvider<S> {
@@ -318,6 +323,16 @@ pub enum CachedStatus<T> {
     NotCached(T),
     /// The key exists in cache and has a specific value.
     Cached(T),
+}
+
+impl<T> CachedStatus<T> {
+    /// Consumes the cache status and returns the contained value.
+    #[inline]
+    pub fn into_value(self) -> T {
+        match self {
+            Self::NotCached(value) | Self::Cached(value) => value,
+        }
+    }
 }
 
 /// The source that is using the execution cache.
@@ -638,9 +653,13 @@ impl<K: PartialEq, V> StatsHandler<K, V> for CacheStatsHandler {
 impl<S: AccountReader> AccountReader for CachedStateProvider<S> {
     fn basic_account(&self, address: &Address) -> ProviderResult<Option<Account>> {
         if self.should_fill_on_miss() {
-            match self.caches.get_or_try_insert_account_with(*address, || {
+            let status = self.caches.get_or_try_insert_account_with(*address, || {
                 self.state_provider.basic_account(address)
-            })? {
+            })?;
+            if !self.records_cache_accesses() {
+                return Ok(status.into_value());
+            }
+            match status {
                 CachedStatus::NotCached(value) => {
                     self.record_account_miss();
                     Ok(value)
@@ -676,9 +695,13 @@ impl<S: StateProvider> StateProvider for CachedStateProvider<S> {
         storage_key: StorageKey,
     ) -> ProviderResult<Option<StorageValue>> {
         if self.should_fill_on_miss() {
-            match self.caches.get_or_try_insert_storage_with(account, storage_key, || {
+            let status = self.caches.get_or_try_insert_storage_with(account, storage_key, || {
                 self.state_provider.storage(account, storage_key).map(Option::unwrap_or_default)
-            })? {
+            })?;
+            if !self.records_cache_accesses() {
+                return Ok(nonzero_storage_value(status.into_value()));
+            }
+            match status {
                 CachedStatus::NotCached(value) => {
                     self.record_storage_miss();
                     Ok(nonzero_storage_value(value))
@@ -701,9 +724,13 @@ impl<S: StateProvider> StateProvider for CachedStateProvider<S> {
 impl<S: BytecodeReader> BytecodeReader for CachedStateProvider<S> {
     fn bytecode_by_hash(&self, code_hash: &B256) -> ProviderResult<Option<Bytecode>> {
         if self.should_fill_on_miss() {
-            match self.caches.get_or_try_insert_code_with(*code_hash, || {
+            let status = self.caches.get_or_try_insert_code_with(*code_hash, || {
                 self.state_provider.bytecode_by_hash(code_hash)
-            })? {
+            })?;
+            if !self.records_cache_accesses() {
+                return Ok(status.into_value());
+            }
+            match status {
                 CachedStatus::NotCached(code) => {
                     self.record_code_miss();
                     Ok(code)
