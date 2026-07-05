@@ -36,13 +36,22 @@ pub(crate) struct AtomicDuration {
 }
 
 impl AtomicDuration {
-    /// Returns the duration as a [`Duration`]
-    pub(crate) fn duration(&self) -> Duration {
-        let nanos = self.nanos.load(Ordering::Relaxed);
+    /// Returns the total duration in nanoseconds.
+    pub(crate) fn nanos(&self) -> u64 {
+        self.nanos.load(Ordering::Relaxed)
+    }
+
+    /// Builds a [`Duration`] from a nanosecond count.
+    fn duration_from_nanos(nanos: u64) -> Duration {
         let seconds = nanos / NANOS_PER_SEC as u64;
         let nanos = nanos % NANOS_PER_SEC as u64;
         // `as u32` is ok because we did a mod by u32 const
         Duration::new(seconds, nanos as u32)
+    }
+
+    /// Returns the duration as a [`Duration`]
+    pub(crate) fn duration(&self) -> Duration {
+        Self::duration_from_nanos(self.nanos())
     }
 
     /// Adds a [`Duration`] to the atomic duration.
@@ -352,5 +361,14 @@ impl StateProviderStats {
     /// Returns total time spent on account fetches.
     pub fn total_account_fetch_latency(&self) -> Duration {
         self.total_account_fetch_latency.duration()
+    }
+
+    /// Returns total time spent on state fetches.
+    pub fn total_state_fetch_latency(&self) -> Duration {
+        AtomicDuration::duration_from_nanos(
+            self.total_account_fetch_latency.nanos() +
+                self.total_storage_fetch_latency.nanos() +
+                self.total_code_fetch_latency.nanos(),
+        )
     }
 }
