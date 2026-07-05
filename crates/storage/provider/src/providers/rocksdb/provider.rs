@@ -488,6 +488,18 @@ impl RocksDBProviderInner {
         }
     }
 
+    /// Gets multiple values from a column family.
+    fn multi_get_cf<K: AsRef<[u8]>>(
+        &self,
+        cf: &rocksdb::ColumnFamily,
+        keys: impl IntoIterator<Item = K>,
+    ) -> Vec<Result<Option<Vec<u8>>, rocksdb::Error>> {
+        match self {
+            Self::ReadWrite { db, .. } => db.multi_get_cf(keys.into_iter().map(|key| (cf, key))),
+            Self::Secondary { db, .. } => db.multi_get_cf(keys.into_iter().map(|key| (cf, key))),
+        }
+    }
+
     /// Puts a value into a column family.
     fn put_cf(
         &self,
@@ -873,6 +885,30 @@ impl RocksDBProvider {
                     code: -1,
                 }))
             })
+        })
+    }
+
+    /// Gets multiple values from the specified table using pre-encoded keys.
+    pub fn multi_get_encoded<T: Table>(
+        &self,
+        keys: &[<T::Key as Encode>::Encoded],
+    ) -> ProviderResult<Vec<Option<T::Value>>> {
+        self.execute_with_operation_metric(RocksDBOperation::Get, T::NAME, |this| {
+            let cf = this.get_cf_handle::<T>()?;
+            this.0
+                .multi_get_cf(cf, keys.iter().map(|key| key.as_ref()))
+                .into_iter()
+                .map(|result| {
+                    result
+                        .map_err(|e| {
+                            ProviderError::Database(DatabaseError::Read(DatabaseErrorInfo {
+                                message: e.to_string().into(),
+                                code: -1,
+                            }))
+                        })
+                        .map(|value| value.and_then(|value| T::Value::decompress(&value).ok()))
+                })
+                .collect()
         })
     }
 
@@ -1453,10 +1489,26 @@ impl RocksDBProvider {
             }
         }
 
+        let storage_history: Vec<_> = storage_history
+            .into_iter()
+            .map(|((address, slot), indices)| {
+                let last_key = StorageShardedKey::last(address, slot);
+                (address, slot, indices, last_key)
+            })
+            .collect();
+        let last_keys: Vec<_> = storage_history
+            .iter()
+            .map(|(_, _, _, last_key)| last_key.clone().encode())
+            .collect();
+        let last_shards = self.multi_get_encoded::<tables::StoragesHistory>(&last_keys)?;
+
         let shard_puts = storage_history
             .into_par_iter()
-            .map(|((address, slot), indices)| {
-                self.storage_history_shards_to_put(address, slot, indices)
+            .zip(last_shards.into_par_iter())
+            .map(|((address, slot, indices, last_key), last_shard)| {
+                Self::storage_history_shards_to_put_from_last(
+                    address, slot, indices, last_key, last_shard,
+                )
             })
             .collect::<ProviderResult<Vec<_>>>()?;
 
@@ -1478,6 +1530,25 @@ impl RocksDBProvider {
         storage_key: B256,
         indices: Vec<u64>,
     ) -> ProviderResult<Vec<(StorageShardedKey, BlockNumberList)>> {
+        let last_key = StorageShardedKey::last(address, storage_key);
+        let last_shard_opt = self.get::<tables::StoragesHistory>(last_key.clone())?;
+        Self::storage_history_shards_to_put_from_last(
+            address,
+            storage_key,
+            indices,
+            last_key,
+            last_shard_opt,
+        )
+    }
+
+    /// Prepares storage history shard writes from an already-loaded sentinel shard.
+    fn storage_history_shards_to_put_from_last(
+        address: Address,
+        storage_key: B256,
+        indices: Vec<u64>,
+        last_key: StorageShardedKey,
+        last_shard_opt: Option<BlockNumberList>,
+    ) -> ProviderResult<Vec<(StorageShardedKey, BlockNumberList)>> {
         if indices.is_empty() {
             return Ok(Vec::new());
         }
@@ -1488,8 +1559,6 @@ impl RocksDBProvider {
             indices
         );
 
-        let last_key = StorageShardedKey::last(address, storage_key);
-        let last_shard_opt = self.get::<tables::StoragesHistory>(last_key.clone())?;
         let mut last_shard = last_shard_opt.unwrap_or_else(BlockNumberList::empty);
 
         last_shard.append(indices).map_err(ProviderError::other)?;
