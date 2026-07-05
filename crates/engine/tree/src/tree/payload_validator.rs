@@ -639,9 +639,9 @@ where
         // Create optional cache stats for detailed block logging
         let slow_block_enabled = self.config.slow_block_threshold().is_some();
         let cache_stats = slow_block_enabled.then(|| Arc::new(CacheStats::default()));
-        let instrument_state_provider = slow_block_enabled || self.config.state_provider_metrics();
         let state_provider_metrics =
-            instrument_state_provider.then(|| StateProviderMetrics::with_source("engine"));
+            self.config.state_provider_metrics().then(|| StateProviderMetrics::with_source("engine"));
+        let instrument_state_provider = slow_block_enabled || state_provider_metrics.is_some();
         let state_provider_stats =
             instrument_state_provider.then(|| Arc::new(StateProviderStats::default()));
         let execution_cache = handle.caches().map(|caches| (caches, handle.cache_metrics()));
@@ -688,12 +688,9 @@ where
                 let stats = state_provider_stats
                     .as_ref()
                     .expect("instrumented state provider requires shared stats");
-                let metrics = state_provider_metrics
-                    .as_ref()
-                    .expect("instrumented state provider requires metrics");
                 provider = Box::new(InstrumentedStateProvider::with_stats(
                     provider,
-                    metrics.clone(),
+                    state_provider_metrics.clone(),
                     Arc::clone(stats),
                 ));
             }

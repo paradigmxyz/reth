@@ -62,7 +62,7 @@ pub struct InstrumentedStateProvider<S> {
     /// The state provider
     state_provider: S,
     /// Prometheus metrics for the instrumented state provider
-    metrics: StateProviderMetrics,
+    metrics: Option<StateProviderMetrics>,
     /// Shared fetch statistics, readable after the provider is consumed.
     stats: Arc<StateProviderStats>,
 }
@@ -76,7 +76,7 @@ where
     pub fn new(state_provider: S, source: &'static str) -> Self {
         Self::with_stats(
             state_provider,
-            StateProviderMetrics::with_source(source),
+            Some(StateProviderMetrics::with_source(source)),
             Arc::new(StateProviderStats::default()),
         )
     }
@@ -84,7 +84,7 @@ where
     /// Creates a new [`InstrumentedStateProvider`] that writes into shared statistics.
     pub(crate) const fn with_stats(
         state_provider: S,
-        metrics: StateProviderMetrics,
+        metrics: Option<StateProviderMetrics>,
         stats: Arc<StateProviderStats>,
     ) -> Self {
         Self { state_provider, metrics, stats }
@@ -160,7 +160,9 @@ impl<S: AccountReader> AccountReader for InstrumentedStateProvider<S> {
         let start = Instant::now();
         let res = self.state_provider.basic_account(address);
         let elapsed = start.elapsed();
-        self.metrics.account_fetch_latency.record(elapsed);
+        if let Some(metrics) = &self.metrics {
+            metrics.account_fetch_latency.record(elapsed);
+        }
         self.stats.total_account_fetches.fetch_add(1, Ordering::Relaxed);
         self.stats.total_account_fetch_latency.add_duration(elapsed);
         res
@@ -176,7 +178,9 @@ impl<S: StateProvider> StateProvider for InstrumentedStateProvider<S> {
         let start = Instant::now();
         let res = self.state_provider.storage(account, storage_key);
         let elapsed = start.elapsed();
-        self.metrics.storage_fetch_latency.record(elapsed);
+        if let Some(metrics) = &self.metrics {
+            metrics.storage_fetch_latency.record(elapsed);
+        }
         self.stats.total_storage_fetches.fetch_add(1, Ordering::Relaxed);
         self.stats.total_storage_fetch_latency.add_duration(elapsed);
         res
@@ -188,7 +192,9 @@ impl<S: BytecodeReader> BytecodeReader for InstrumentedStateProvider<S> {
         let start = Instant::now();
         let res = self.state_provider.bytecode_by_hash(code_hash);
         let elapsed = start.elapsed();
-        self.metrics.code_fetch_latency.record(elapsed);
+        if let Some(metrics) = &self.metrics {
+            metrics.code_fetch_latency.record(elapsed);
+        }
         self.stats.total_code_fetches.fetch_add(1, Ordering::Relaxed);
         self.stats.total_code_fetch_latency.add_duration(elapsed);
         self.stats.total_code_fetched_bytes.fetch_add(
