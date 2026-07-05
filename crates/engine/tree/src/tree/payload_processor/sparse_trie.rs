@@ -65,6 +65,8 @@ pub(super) struct SparseTrieCacheTask<A = ArenaParallelSparseTrie, S = ArenaPara
     account_updates: B256Map<LeafUpdate>,
     /// Storage trie updates. hashed address -> slot -> update.
     storage_updates: B256Map<B256Map<LeafUpdate>>,
+    /// Storage tries whose pending update map just drained and may need root recomputation.
+    drained_storage_roots: Vec<B256>,
 
     /// Account updates that are buffered but were not yet applied to the trie.
     new_account_updates: B256Map<LeafUpdate>,
@@ -157,6 +159,7 @@ where
             max_targets_for_chunking: DEFAULT_MAX_TARGETS_FOR_CHUNKING,
             account_updates: Default::default(),
             storage_updates: Default::default(),
+            drained_storage_roots: Default::default(),
             new_account_updates: Default::default(),
             new_storage_updates: Default::default(),
             pending_account_updates: Default::default(),
@@ -594,6 +597,9 @@ where
             if !targets.is_empty() {
                 self.pending_targets.extend_storage_targets(address, targets);
             }
+            if updates_len_before != 0 && updates_len_after == 0 {
+                self.drained_storage_roots.push(*address);
+            }
         }
 
         drop(span);
@@ -651,11 +657,9 @@ where
     ///
     /// we trigger state root computation on a rayon pool.
     fn compute_drained_storage_roots(&mut self) {
-        let addresses_to_compute_roots: Vec<_> = self
-            .storage_updates
-            .iter()
-            .filter_map(|(address, updates)| updates.is_empty().then_some(*address))
-            .collect();
+        if self.drained_storage_roots.is_empty() {
+            return;
+        }
 
         struct SendStorageTriePtr<S>(*mut RevealableSparseTrie<S>);
         // SAFETY: this wrapper only forwards the pointer across rayon; deref invariants are
@@ -663,8 +667,15 @@ where
         unsafe impl<S: Send> Send for SendStorageTriePtr<S> {}
 
         let mut tries_to_compute_roots: Vec<(B256, SendStorageTriePtr<S>)> =
-            Vec::with_capacity(addresses_to_compute_roots.len());
-        for address in addresses_to_compute_roots {
+            Vec::with_capacity(self.drained_storage_roots.len());
+        for address in self.drained_storage_roots.drain(..) {
+            if self
+                .storage_updates
+                .get(&address)
+                .is_some_and(|updates| !updates.is_empty())
+            {
+                continue;
+            }
             if let Some(trie) = self.trie.storage_tries_mut().get_mut(&address) &&
                 !trie.is_root_cached()
             {
