@@ -313,6 +313,11 @@ impl<N: NodePrimitives> PreparedStateRootJob<N> {
         self.streams.clone()
     }
 
+    /// Takes stream views used by prewarm.
+    pub fn take_streams(&mut self) -> StateRootStreams {
+        core::mem::take(&mut self.streams)
+    }
+
     /// Takes the execution hook, if the job wants normal execution updates.
     pub fn take_execution_hook(&mut self) -> Option<Box<dyn OnStateHook + 'static>> {
         self.streams
