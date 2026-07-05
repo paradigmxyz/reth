@@ -55,6 +55,9 @@ pub enum PrewarmMode<Tx> {
     Skipped,
 }
 
+/// BAL account count below which hashing account updates serially is cheaper than entering Rayon.
+const SMALL_BAL_HASH_STREAM_ACCOUNT_THRESHOLD: usize = 64;
+
 /// A task that is responsible for caching and prewarming the cache by executing transactions
 /// individually in parallel.
 ///
@@ -373,7 +376,8 @@ where
                 let parent_span = branch_span.clone();
                 let _span = branch_span.entered();
 
-                stream_bal.as_bal().par_iter().for_each(|account_changes| {
+                let stream_accounts = stream_bal.as_bal();
+                let stream_account = |account_changes| {
                     WorkerPool::with_worker_mut(|worker| {
                         let provider =
                             worker.get_or_init::<Option<Box<dyn AccountReader>>>(|| None);
@@ -384,7 +388,15 @@ where
                             &hashed_update_stream,
                         );
                     });
-                });
+                };
+
+                if stream_accounts.len() < SMALL_BAL_HASH_STREAM_ACCOUNT_THRESHOLD {
+                    for account_changes in stream_accounts {
+                        stream_account(account_changes);
+                    }
+                } else {
+                    stream_accounts.par_iter().for_each(stream_account);
+                }
 
                 hashed_update_stream.on_updates_finished();
                 let _ = stream_tx.send(());
