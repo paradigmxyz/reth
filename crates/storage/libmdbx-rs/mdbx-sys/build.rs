@@ -34,7 +34,10 @@ fn main() {
 
     // Disables debug logging on optimized builds
     #[cfg(not(debug_assertions))]
-    cc.define("MDBX_DEBUG", "0").define("NDEBUG", None);
+    cc.define("MDBX_DEBUG", "0")
+        .define("NDEBUG", None)
+        // Write-heavy replay favors lower commit latency over online file-tail compaction.
+        .define("MDBX_ENABLE_REFUND", "0");
 
     // Propagate `-C target-cpu=native`
     let rustflags = env::var("CARGO_ENCODED_RUSTFLAGS").unwrap();
