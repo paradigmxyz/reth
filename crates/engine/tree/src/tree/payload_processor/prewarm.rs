@@ -655,18 +655,16 @@ where
 
         if !account_changes.storage_changes.is_empty() {
             let hashed_address = *hashed_address.get_or_insert_with(|| keccak256(address));
-            let mut storage_map = reth_trie::HashedStorage::new(false);
+            let mut slots = Vec::with_capacity(account_changes.storage_changes.len());
 
             for slot_changes in &account_changes.storage_changes {
                 let hashed_slot = keccak256(slot_changes.slot.to_be_bytes::<32>());
                 if let Some(last_change) = slot_changes.changes.last() {
-                    storage_map.storage.insert(hashed_slot, last_change.new_value);
+                    slots.push((hashed_slot, last_change.new_value));
                 }
             }
 
-            let mut hashed_state = reth_trie::HashedPostState::default();
-            hashed_state.storages.insert(hashed_address, storage_map);
-            hashed_update_stream.on_hashed_state_update(hashed_state);
+            hashed_update_stream.on_hashed_storage_update(hashed_address, slots);
         }
 
         let existing_account = if account_fields.needs_parent_account() {
@@ -709,10 +707,7 @@ where
         let account = account_fields.into_account(existing_account);
 
         let hashed_address = hashed_address.unwrap_or_else(|| keccak256(address));
-        let mut hashed_state = reth_trie::HashedPostState::default();
-        hashed_state.accounts.insert(hashed_address, Some(account));
-
-        hashed_update_stream.on_hashed_state_update(hashed_state);
+        hashed_update_stream.on_hashed_account_update(hashed_address, Some(account));
     }
 }
 

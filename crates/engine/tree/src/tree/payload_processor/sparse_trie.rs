@@ -11,7 +11,7 @@ use crate::tree::{
 };
 use alloy_primitives::{
     map::{hash_map::Entry, B256Map},
-    B256,
+    B256, U256,
 };
 use alloy_rlp::{Decodable, Encodable};
 use crossbeam_channel::{Receiver as CrossbeamReceiver, Sender as CrossbeamSender};
@@ -19,8 +19,8 @@ use rayon::iter::{IntoParallelIterator, ParallelIterator};
 use reth_primitives_traits::{Account, FastInstant as Instant};
 use reth_tasks::Runtime;
 use reth_trie::{
-    updates::TrieUpdates, DecodedMultiProofV2, HashedPostState, TrieAccount, EMPTY_ROOT_HASH,
-    TRIE_ACCOUNT_RLP_MAX_SIZE,
+    updates::TrieUpdates, DecodedMultiProofV2, HashedPostState, HashedStorage, TrieAccount,
+    EMPTY_ROOT_HASH, TRIE_ACCOUNT_RLP_MAX_SIZE,
 };
 use reth_trie_common::{MultiProofTargetsV2, ProofV2Target};
 use reth_trie_parallel::{
@@ -202,6 +202,12 @@ where
                 }
                 StateRootMessage::HashedStateUpdate(state) => {
                     SparseTrieTaskMessage::HashedState(state)
+                }
+                StateRootMessage::HashedAccountUpdate { address, account } => {
+                    SparseTrieTaskMessage::HashedAccount { address, account }
+                }
+                StateRootMessage::HashedStorageUpdate { address, slots } => {
+                    SparseTrieTaskMessage::HashedStorage { address, slots }
                 }
             };
             if hashed_state_tx.send(msg).is_err() {
@@ -401,6 +407,12 @@ where
             SparseTrieTaskMessage::HashedState(hashed_state) => {
                 self.on_hashed_state_update(hashed_state)
             }
+            SparseTrieTaskMessage::HashedAccount { address, account } => {
+                self.on_hashed_account_update(address, account)
+            }
+            SparseTrieTaskMessage::HashedStorage { address, slots } => {
+                self.on_hashed_storage_update(address, slots)
+            }
             SparseTrieTaskMessage::FinishedStateUpdates => {
                 let _ = self
                     .final_hashed_state_tx
@@ -493,6 +505,45 @@ where
         }
 
         self.final_hashed_state.extend(hashed_state_update);
+    }
+
+    fn on_hashed_storage_update(&mut self, address: B256, slots: Vec<(B256, U256)>) {
+        if !slots.is_empty() {
+            let new_updates = self.new_storage_updates.entry(address).or_default();
+            let mut existing_updates = self.storage_updates.get_mut(&address);
+            let final_storage = self
+                .final_hashed_state
+                .storages
+                .entry(address)
+                .or_insert_with(|| HashedStorage::new(false));
+
+            for (slot, value) in slots {
+                self.trie.record_slot_touch(address, slot);
+
+                let encoded = if value.is_zero() {
+                    Vec::new()
+                } else {
+                    alloy_rlp::encode_fixed_size(&value).to_vec()
+                };
+                new_updates.insert(slot, LeafUpdate::Changed(encoded));
+
+                if let Some(ref mut existing) = existing_updates {
+                    existing.remove(&slot);
+                }
+
+                final_storage.storage.insert(slot, value);
+            }
+        }
+
+        self.new_account_updates.entry(address).or_insert(LeafUpdate::Touched);
+        self.pending_account_updates.entry(address).or_insert(None);
+    }
+
+    fn on_hashed_account_update(&mut self, address: B256, account: Option<Account>) {
+        self.trie.record_account_touch(address);
+        self.new_account_updates.insert(address, LeafUpdate::Touched);
+        self.pending_account_updates.insert(address, Some(account));
+        self.final_hashed_state.accounts.insert(address, account);
     }
 
     fn on_proof_result(&mut self, result: DecodedMultiProofV2) -> Result<(), StateRootTaskError> {
@@ -875,6 +926,10 @@ impl PendingTargets {
 enum SparseTrieTaskMessage {
     /// A hashed state update ready to be processed.
     HashedState(HashedPostState),
+    /// A single hashed account update ready to be processed.
+    HashedAccount { address: B256, account: Option<Account> },
+    /// A single hashed storage update ready to be processed.
+    HashedStorage { address: B256, slots: Vec<(B256, U256)> },
     /// Prefetch proof targets (passed through directly).
     PrefetchProofs(MultiProofTargetsV2),
     /// Signals that all state updates have been received.
@@ -940,6 +995,59 @@ mod tests {
         let second = hashed_state_rx.recv().unwrap();
         assert!(matches!(second, SparseTrieTaskMessage::FinishedStateUpdates));
 
+        assert!(hashed_state_rx.recv().is_err());
+        handle.join().unwrap();
+    }
+
+    #[test]
+    fn test_run_hashing_task_single_hashed_updates_forward() {
+        let (updates_tx, updates_rx) = crossbeam_channel::unbounded();
+        let (hashed_state_tx, hashed_state_rx) = crossbeam_channel::unbounded();
+
+        let address = B256::repeat_byte(0x11);
+        let slot = B256::repeat_byte(0x22);
+        let value = U256::from(123);
+        let account = Some(Account { balance: U256::from(100), nonce: 2, bytecode_hash: None });
+
+        let handle = std::thread::spawn(move || {
+            SparseTrieCacheTask::<ArenaParallelSparseTrie, ArenaParallelSparseTrie>::run_hashing_task(
+                updates_rx,
+                hashed_state_tx,
+                MultiProofTaskMetrics::default(),
+            );
+        });
+
+        updates_tx
+            .send(StateRootMessage::HashedStorageUpdate { address, slots: vec![(slot, value)] })
+            .unwrap();
+        updates_tx.send(StateRootMessage::HashedAccountUpdate { address, account }).unwrap();
+        updates_tx.send(StateRootMessage::FinishedStateUpdates).unwrap();
+        drop(updates_tx);
+
+        let SparseTrieTaskMessage::HashedStorage {
+            address: received_address,
+            slots: received_slots,
+        } = hashed_state_rx.recv().unwrap()
+        else {
+            panic!("expected HashedStorage message");
+        };
+        assert_eq!(received_address, address);
+        assert_eq!(received_slots, vec![(slot, value)]);
+
+        let SparseTrieTaskMessage::HashedAccount {
+            address: received_address,
+            account: received_account,
+        } = hashed_state_rx.recv().unwrap()
+        else {
+            panic!("expected HashedAccount message");
+        };
+        assert_eq!(received_address, address);
+        assert_eq!(received_account, account);
+
+        assert!(matches!(
+            hashed_state_rx.recv().unwrap(),
+            SparseTrieTaskMessage::FinishedStateUpdates
+        ));
         assert!(hashed_state_rx.recv().is_err());
         handle.join().unwrap();
     }

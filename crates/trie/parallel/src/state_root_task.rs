@@ -9,7 +9,8 @@
 
 use crate::error::StateRootTaskError;
 use alloy_evm::block::OnStateHook;
-use alloy_primitives::{keccak256, map::B256Map, B256};
+use alloy_primitives::{keccak256, map::B256Map, B256, U256};
+use reth_primitives_traits::Account;
 use reth_trie::{
     prefix_set::TriePrefixSetsMut, updates::TrieUpdates, HashedPostState, HashedStorage,
     MultiProofTargetsV2, ProofV2Target,
@@ -27,6 +28,20 @@ pub enum StateRootMessage {
     StateUpdate(EvmState),
     /// Pre-hashed state update from BAL conversion that can be applied directly without proofs.
     HashedStateUpdate(HashedPostState),
+    /// Single pre-hashed account update from BAL conversion.
+    HashedAccountUpdate {
+        /// Hashed account address.
+        address: B256,
+        /// New account value, or `None` for a destroyed account.
+        account: Option<Account>,
+    },
+    /// Single pre-hashed storage update from BAL conversion.
+    HashedStorageUpdate {
+        /// Hashed account address for the storage trie.
+        address: B256,
+        /// Hashed storage slots paired with their new values.
+        slots: Vec<(B256, U256)>,
+    },
     /// Signals state update stream end.
     ///
     /// This is triggered by block execution, indicating that no additional state updates are
@@ -273,6 +288,20 @@ pub trait StateRootSink: Send + Sync + 'static {
     /// Authoritative pre-hashed state update, currently used by BAL streaming.
     fn on_hashed_state_update(&self, state: HashedPostState);
 
+    /// Authoritative pre-hashed account update, currently used by BAL streaming.
+    fn on_hashed_account_update(&self, address: B256, account: Option<Account>) {
+        let mut state = HashedPostState::default();
+        state.accounts.insert(address, account);
+        self.on_hashed_state_update(state);
+    }
+
+    /// Authoritative pre-hashed storage update, currently used by BAL streaming.
+    fn on_hashed_storage_update(&self, address: B256, slots: Vec<(B256, U256)>) {
+        let mut state = HashedPostState::default();
+        state.storages.insert(address, HashedStorage::from_iter(false, slots));
+        self.on_hashed_state_update(state);
+    }
+
     /// Signals that no more authoritative state updates are expected.
     fn on_updates_finished(&self);
 }
@@ -322,6 +351,16 @@ impl StateRootHashedUpdateStream {
     /// Emits an authoritative pre-hashed state update.
     pub fn on_hashed_state_update(&self, state: HashedPostState) {
         self.inner.on_hashed_state_update(state);
+    }
+
+    /// Emits an authoritative pre-hashed account update.
+    pub fn on_hashed_account_update(&self, address: B256, account: Option<Account>) {
+        self.inner.on_hashed_account_update(address, account);
+    }
+
+    /// Emits an authoritative pre-hashed storage update.
+    pub fn on_hashed_storage_update(&self, address: B256, slots: Vec<(B256, U256)>) {
+        self.inner.on_hashed_storage_update(address, slots);
     }
 
     /// Finishes the authoritative update stream.
@@ -458,6 +497,14 @@ impl StateRootSink for SparseTrieStateRootSink {
         let _ = self.sender.send(StateRootMessage::HashedStateUpdate(state));
     }
 
+    fn on_hashed_account_update(&self, address: B256, account: Option<Account>) {
+        let _ = self.sender.send(StateRootMessage::HashedAccountUpdate { address, account });
+    }
+
+    fn on_hashed_storage_update(&self, address: B256, slots: Vec<(B256, U256)>) {
+        let _ = self.sender.send(StateRootMessage::HashedStorageUpdate { address, slots });
+    }
+
     fn on_updates_finished(&self) {
         let _ = self.sender.send(StateRootMessage::FinishedStateUpdates);
     }
@@ -508,6 +555,8 @@ mod tests {
         access_hints: AtomicUsize,
         state_updates: AtomicUsize,
         hashed_state_updates: AtomicUsize,
+        hashed_account_updates: AtomicUsize,
+        hashed_storage_updates: AtomicUsize,
         finished_updates: AtomicUsize,
     }
 
@@ -530,6 +579,18 @@ mod tests {
             assert!(state.accounts.is_empty());
             assert!(state.storages.is_empty());
             self.hashed_state_updates.fetch_add(1, Ordering::Relaxed);
+        }
+
+        fn on_hashed_account_update(&self, address: B256, account: Option<Account>) {
+            assert_eq!(address, B256::repeat_byte(0x04));
+            assert!(account.is_none());
+            self.hashed_account_updates.fetch_add(1, Ordering::Relaxed);
+        }
+
+        fn on_hashed_storage_update(&self, address: B256, slots: Vec<(B256, U256)>) {
+            assert_eq!(address, B256::repeat_byte(0x05));
+            assert_eq!(slots, vec![(B256::repeat_byte(0x06), U256::from(7))]);
+            self.hashed_storage_updates.fetch_add(1, Ordering::Relaxed);
         }
 
         fn on_updates_finished(&self) {
@@ -574,6 +635,11 @@ mod tests {
 
         let hashed_updates = streams.hashed_update_stream().expect("hashed update stream");
         hashed_updates.on_hashed_state_update(HashedPostState::default());
+        hashed_updates.on_hashed_account_update(B256::repeat_byte(0x04), None);
+        hashed_updates.on_hashed_storage_update(
+            B256::repeat_byte(0x05),
+            vec![(B256::repeat_byte(0x06), U256::from(7))],
+        );
         hashed_updates.on_updates_finished();
 
         let execution_stream = streams.take_execution_stream().expect("execution stream");
@@ -586,6 +652,8 @@ mod tests {
         assert_eq!(sink.access_hints.load(Ordering::Relaxed), 1);
         assert_eq!(sink.state_updates.load(Ordering::Relaxed), 1);
         assert_eq!(sink.hashed_state_updates.load(Ordering::Relaxed), 1);
+        assert_eq!(sink.hashed_account_updates.load(Ordering::Relaxed), 1);
+        assert_eq!(sink.hashed_storage_updates.load(Ordering::Relaxed), 1);
         assert_eq!(sink.finished_updates.load(Ordering::Relaxed), 2);
     }
 
