@@ -1154,7 +1154,7 @@ async fn test_get_canonical_blocks_to_persist() {
     let mut test_harness = TestHarness::new(chain_spec);
     let mut test_block_builder = TestBlockBuilder::eth();
 
-    let canonical_head_number = 9;
+    let canonical_head_number = 13;
     let blocks: Vec<_> =
         test_block_builder.get_executed_blocks(0..canonical_head_number + 1).collect();
     test_harness = test_harness.with_blocks(blocks.clone());
@@ -1172,10 +1172,12 @@ async fn test_get_canonical_blocks_to_persist() {
     let blocks_to_persist =
         test_harness.tree.get_canonical_blocks_to_persist(PersistTarget::Threshold).unwrap();
 
-    let expected_blocks_to_persist_length: usize =
+    let expected_uncapped_blocks_to_persist_length: usize =
         (canonical_head_number - memory_block_buffer_target - last_persisted_block_number)
             .try_into()
             .unwrap();
+    let expected_blocks_to_persist_length = expected_uncapped_blocks_to_persist_length
+        .min(test_harness.tree.config.max_execute_block_batch_size());
 
     assert_eq!(blocks_to_persist.len(), expected_blocks_to_persist_length);
     for (i, item) in blocks_to_persist.iter().enumerate().take(expected_blocks_to_persist_length) {

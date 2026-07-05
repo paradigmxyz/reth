@@ -2094,7 +2094,10 @@ where
         let target_number = match target {
             PersistTarget::Head => canonical_head_number,
             PersistTarget::Threshold => {
-                canonical_head_number.saturating_sub(self.config.memory_block_buffer_target())
+                let buffered_target =
+                    canonical_head_number.saturating_sub(self.config.memory_block_buffer_target());
+                let batch_limit = self.config.max_execute_block_batch_size().max(1) as u64;
+                buffered_target.min(last_persisted_number.saturating_add(batch_limit))
             }
         };
 
