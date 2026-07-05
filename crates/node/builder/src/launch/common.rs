@@ -423,6 +423,13 @@ impl<R, ChainSpec: EthChainSpec> LaunchContextWith<Attached<WithConfigs<ChainSpe
     where
         ChainSpec: reth_chainspec::EthereumHardforks,
     {
+        // `--archive` must win over any `[prune]` config in reth.toml. `PruneConfig::merge`
+        // can't express "explicitly disabled" (a `None` segment also means "unset"), so
+        // merging a default config would let toml segments leak back in via `Option::or`.
+        if self.node_config().pruning.archive {
+            return PruneConfig::default();
+        }
+
         let Some(mut node_prune_config) = self.node_config().prune_config() else {
             // No CLI config is set, use the toml config.
             return self.toml_config().prune.clone();
@@ -1359,6 +1366,7 @@ mod tests {
                 pruning: PruningArgs {
                     full: true,
                     minimal: false,
+                    archive: false,
                     block_interval: None,
                     sender_recovery_full: false,
                     sender_recovery_distance: None,

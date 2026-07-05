@@ -145,7 +145,7 @@ impl PruneConfigKind {
 pub struct PruningArgs {
     /// Run full node. Only the most recent [`MINIMUM_UNWIND_SAFE_DISTANCE`] block states are
     /// stored.
-    #[arg(long, default_value_t = false, conflicts_with = "minimal")]
+    #[arg(long, default_value_t = false, conflicts_with_all = &["minimal", "archive"])]
     pub full: bool,
 
     /// Run minimal storage mode with maximum pruning and smaller static files.
@@ -154,8 +154,13 @@ pub struct PruningArgs {
     /// - Fully pruning sender recovery, transaction lookup, receipts
     /// - Leaving 10,064 blocks for account, storage history and block bodies
     /// - Using 10,000 blocks per static file segment
-    #[arg(long, default_value_t = false, conflicts_with = "full")]
+    #[arg(long, default_value_t = false, conflicts_with_all = &["full", "archive"])]
     pub minimal: bool,
+
+    /// Run archive node. Disables all pruning, overriding any `--full`/`--minimal`/
+    /// `--prune.*` flags as well as any `[prune]` configuration in reth.toml.
+    #[arg(long, default_value_t = false, conflicts_with_all = &["full", "minimal"])]
+    pub archive: bool,
 
     /// Minimum pruning interval measured in blocks.
     #[arg(long = "prune.block-interval", alias = "block-interval", value_parser = RangedU64ValueParser::<u64>::new().range(1..))]
@@ -255,11 +260,20 @@ impl PruningArgs {
     /// Returns pruning configuration.
     ///
     /// Returns [`None`] if no parameters are specified and default pruning configuration should be
-    /// used.
+    /// used. Returns `Some(`[`PruneConfig::default`]`)` if `--archive` is set, which unlike
+    /// `None` is not overridden by config loaded from reth.toml.
     pub fn prune_config<ChainSpec>(&self, chain_spec: &ChainSpec) -> Option<PruneConfig>
     where
         ChainSpec: EthereumHardforks,
     {
+        // `--archive` takes precedence over every other pruning flag and disables pruning
+        // entirely. Returning `Some` here (rather than `None`) signals that pruning was
+        // explicitly configured, which callers rely on to override stale `[prune]` settings
+        // in reth.toml instead of falling back to them.
+        if self.archive {
+            return Some(PruneConfig::default());
+        }
+
         // Initialize with a default prune configuration.
         let mut config = PruneConfig::default();
 
@@ -508,6 +522,32 @@ mod tests {
             PruneConfigKind::from_config(&custom_config, chain_spec),
             PruneConfigKind::Custom
         );
+    }
+
+    #[test]
+    fn archive_flag_disables_pruning() {
+        let chain_spec = MAINNET.as_ref();
+
+        let args = PruningArgs { archive: true, ..Default::default() };
+        assert_eq!(args.prune_config(chain_spec), Some(PruneConfig::default()));
+
+        // Even if other `--prune.*` flags are also set, `--archive` takes precedence.
+        let args = PruningArgs {
+            archive: true,
+            receipts_full: true,
+            account_history_distance: Some(1_000),
+            ..Default::default()
+        };
+        assert_eq!(args.prune_config(chain_spec), Some(PruneConfig::default()));
+    }
+
+    #[test]
+    fn archive_flag_conflicts_with_full_and_minimal() {
+        assert!(CommandParser::<PruningArgs>::try_parse_from(["reth", "--archive", "--full"])
+            .is_err());
+        assert!(CommandParser::<PruningArgs>::try_parse_from(["reth", "--archive", "--minimal"])
+            .is_err());
+        assert!(CommandParser::<PruningArgs>::try_parse_from(["reth", "--archive"]).is_ok());
     }
 
     #[test]
