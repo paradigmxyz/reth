@@ -597,7 +597,8 @@ where
 
         // create a new executor and disable nonce checks in the env
         let spec_id = *evm_env.spec_id();
-        let mut evm = self.evm_config.evm_with_env(state_provider, evm_env);
+        let evm_config = self.evm_config.clone().with_jit_support();
+        let mut evm = evm_config.evm_with_env(state_provider, evm_env);
 
         if !self.precompile_cache_disabled {
             // Only cache pure precompiles to avoid issues with stateful precompiles
