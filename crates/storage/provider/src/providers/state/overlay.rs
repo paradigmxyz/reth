@@ -38,8 +38,6 @@ use tracing::{debug, debug_span, instrument};
 #[derive(Clone, Metrics)]
 #[metrics(scope = "storage.providers.overlay")]
 pub(crate) struct OverlayStateProviderMetrics {
-    /// Duration of creating the database provider transaction
-    create_provider_duration: Histogram,
     /// Duration of retrieving trie updates from the database
     retrieve_trie_reverts_duration: Histogram,
     /// Duration of retrieving hashed state from the database
@@ -521,13 +519,8 @@ where
     fn database_provider_ro(&self) -> ProviderResult<OverlayStateProvider<F::Provider>> {
         let overall_start = Instant::now();
 
-        // Get a read-only provider
-        let provider = {
-            let start = Instant::now();
-            let res = self.factory.database_provider_ro()?;
-            self.overlay_builder.metrics.create_provider_duration.record(start.elapsed());
-            res
-        };
+        // Get a read-only provider.
+        let provider = self.factory.database_provider_ro()?;
 
         let Overlay { trie_updates, hashed_post_state } = self.get_overlay(&provider)?;
 
