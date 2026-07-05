@@ -844,6 +844,10 @@ where
         &mut self,
         key: Nibbles,
     ) -> Result<Option<(Nibbles, BranchNodeCompact)>, StateProofError> {
+        if self.prefix_set.is_empty() {
+            return Ok(self.trie_cursor.seek(key)?)
+        }
+
         let mut entry = self.trie_cursor.seek(key)?;
         while let Some((ref path, ref branch)) = entry {
             if !self.should_skip_cached_branch(path, branch) {
@@ -861,6 +865,10 @@ where
         cached_path: &Nibbles,
         cached_branch: &BranchNodeCompact,
     ) -> bool {
+        if self.prefix_set.is_empty() {
+            return false
+        }
+
         if !self.prefix_set.contains(cached_path) {
             return false
         }
@@ -1016,6 +1024,8 @@ where
         sub_trie_upper_bound: Option<&Nibbles>,
         mut uncalculated_lower_bound: Option<Nibbles>,
     ) -> Result<Option<(Nibbles, Option<Nibbles>)>, StateProofError> {
+        let prefix_set_is_empty = self.prefix_set.is_empty();
+
         loop {
             // Pop the currently cached branch node.
             //
@@ -1092,7 +1102,7 @@ where
             // indicate children that need recalculation from leaves (e.g. new keys inserted
             // under this branch). Skip nibbles already set in `curr_state_mask` since those
             // children have already been constructed.
-            if self.prefix_set.contains(&self.branch_path) {
+            if !prefix_set_is_empty && self.prefix_set.contains(&self.branch_path) {
                 let branch_path_len = self.branch_path.len();
                 let mut child_path = self.branch_path;
                 for nibble in 0u8..16 {
@@ -1176,7 +1186,8 @@ where
             // any dirty leaves between that path and this child, it indicates there may be leaves
             // which would split that extension node. In that case we return the range to process
             // the leaves.
-            if uncalculated_lower_bound_ref < &child_path &&
+            if !prefix_set_is_empty &&
+                uncalculated_lower_bound_ref < &child_path &&
                 self.prefix_set.contains_range(uncalculated_lower_bound_ref..&child_path)
             {
                 self.cached_branch_stack.push((cached_path, cached_branch));
@@ -1193,7 +1204,7 @@ where
             // If the child's path is in the prefix set then the cached hash is stale and must
             // not be used.
             if cached_branch.hash_mask.is_bit_set(child_nibble) &&
-                !self.prefix_set.contains(&child_path)
+                (prefix_set_is_empty || !self.prefix_set.contains(&child_path))
             {
                 // Commit the last child. We do this here for two reasons:
                 // - `commit_last_child` will check if the last child needs to be retained. We need
@@ -1261,7 +1272,7 @@ where
                 // there are dirty leaves which would split the cached branch's extension node (if
                 // there is one). In that case we return the range those leaves would potentially be
                 // in to calculate them.
-                if self.prefix_set.contains(&child_path) {
+                if !prefix_set_is_empty && self.prefix_set.contains(&child_path) {
                     let gap_upper = Some(*next_cached_path);
                     self.cached_branch_stack.push(trie_cursor_state.take());
                     return Ok(Some((*uncalculated_lower_bound_ref, gap_upper)));
