@@ -3,12 +3,12 @@
 #[cfg(feature = "std")]
 use crate::{database::BorrowedDatabase, Database};
 use crate::{ConfigureEvm, DynDatabase, EvmEnv, TxEnvFor};
-use alloc::{sync::Arc, vec::Vec};
+use alloc::{format, sync::Arc, vec::Vec};
 use alloy_consensus::{
     transaction::{Either, Recovered},
     BlockHeader as _, Header,
 };
-use alloy_eips::eip2718::WithEncoded;
+use alloy_eips::eip2718::{Typed2718, WithEncoded};
 use alloy_primitives::{Address, Bytes, B256};
 use core::fmt::Debug;
 #[cfg(feature = "std")]
@@ -76,6 +76,55 @@ impl CommitChanges {
     /// Returns `true` if transaction changes should be committed.
     pub const fn should_commit(self) -> bool {
         matches!(self, Self::Yes)
+    }
+}
+
+/// A configured EVM instance.
+pub trait Evm {
+    /// Transaction environment consumed by this EVM.
+    type Transaction;
+
+    /// Executes a transaction and discards its writes while streaming observed state changes into
+    /// `sink`.
+    fn transact_and_discard<S>(
+        &mut self,
+        transaction: &Self::Transaction,
+        sink: &mut S,
+    ) -> Result<(), BlockExecutionError>
+    where
+        S: ExecutionStateChangeSink,
+        S::Error: Debug;
+}
+
+impl<'a, T> Evm for evm2::Evm<'a, T>
+where
+    T: evm2::EvmTypes<Tx: Typed2718>,
+{
+    type Transaction = T::Tx;
+
+    fn transact_and_discard<S>(
+        &mut self,
+        transaction: &Self::Transaction,
+        sink: &mut S,
+    ) -> Result<(), BlockExecutionError>
+    where
+        S: ExecutionStateChangeSink,
+        S::Error: Debug,
+    {
+        let executed = self.transact(transaction).map_err(|err| {
+            BlockExecutionError::msg(format!("discarded transaction execution failed: {err:?}"))
+        })?;
+
+        if let Some(code) = executed.result().error_code {
+            let _ = executed.discard();
+            return Err(BlockExecutionError::msg(format!(
+                "discarded transaction database error: {code:?}"
+            )))
+        }
+
+        executed.discard_with(sink).map(|_| ()).map_err(|err| {
+            BlockExecutionError::msg(format!("discarded state sink failed: {err:?}"))
+        })
     }
 }
 
@@ -150,10 +199,12 @@ pub trait BlockExecutor: Sized {
 pub trait BlockExecutorFactory {
     /// The primitive types used by the factory.
     type Primitives: NodePrimitives;
+    /// Transaction environment consumed by the configured EVM instance.
+    type EvmTransaction;
     /// Transaction environment consumed by executors from this factory.
-    type Transaction;
+    type Transaction: AsRef<Self::EvmTransaction>;
     /// EVM instance consumed by executors from this factory.
-    type Evm<'a>;
+    type Evm<'a>: Evm<Transaction = Self::EvmTransaction>;
     /// EVM environment consumed by this factory.
     type EvmEnv: EvmEnv;
     /// Execution context for a block or payload.
@@ -192,18 +243,6 @@ pub trait BlockExecutorFactory {
     {
         self.evm_with_env(Db::new(db), evm_env)
     }
-
-    /// Executes a transaction and discards its writes while streaming observed state changes into
-    /// `sink`.
-    fn execute_and_discard<S>(
-        &self,
-        evm: &mut Self::Evm<'_>,
-        transaction: &Self::Transaction,
-        sink: &mut S,
-    ) -> Result<(), BlockExecutionError>
-    where
-        S: ExecutionStateChangeSink,
-        S::Error: Debug;
 }
 
 /// Input for block assembly.

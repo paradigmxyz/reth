@@ -181,6 +181,7 @@ where
     EvmFactory: 'static,
 {
     type Primitives = EthPrimitives;
+    type EvmTransaction = evm2::ethereum::RecoveredTxEnvelope;
     type Transaction = EthTxEnv;
     type Evm<'a> = evm2::Evm<'a, evm2::BaseEvmTypes>;
     type EvmEnv = EthEvmEnv;
@@ -209,34 +210,6 @@ where
         DB: evm2::evm::DynDatabase + 'a,
     {
         Self::evm_with_env(self, db, evm_env)
-    }
-
-    fn execute_and_discard<S>(
-        &self,
-        evm: &mut Self::Evm<'_>,
-        transaction: &Self::Transaction,
-        sink: &mut S,
-    ) -> Result<(), reth_evm::BlockExecutionError>
-    where
-        S: reth_execution_types::ExecutionStateChangeSink,
-        S::Error: core::fmt::Debug,
-    {
-        let executed = evm.transact(transaction.as_ref()).map_err(|err| {
-            reth_evm::BlockExecutionError::msg(format!(
-                "discarded transaction execution failed: {err:?}"
-            ))
-        })?;
-
-        if let Some(code) = executed.result().error_code {
-            let _ = executed.discard();
-            return Err(reth_evm::BlockExecutionError::msg(format!(
-                "discarded transaction database error: {code:?}"
-            )))
-        }
-
-        executed.discard_with(sink).map(|_| ()).map_err(|err| {
-            reth_evm::BlockExecutionError::msg(format!("discarded state sink failed: {err:?}"))
-        })
     }
 }
 
