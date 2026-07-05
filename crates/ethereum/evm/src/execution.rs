@@ -606,26 +606,6 @@ fn map_handler_error(evm: &mut Evm<'_, BaseEvmTypes>, err: HandlerError) -> EthE
     }
 }
 
-#[cfg_attr(not(feature = "std"), allow(dead_code))]
-pub(crate) fn apply_pre_execution_system_calls(
-    evm: &mut Evm<'_, BaseEvmTypes>,
-    block_number: u64,
-    context: BlockExecutionContext<'_>,
-) -> Result<BlockStateAccumulator, EthExecutionError> {
-    let mut block_state = BlockStateAccumulator::new();
-    let spec_id = evm.spec_id();
-    pre_execution_system_call_state_changes(
-        evm,
-        &mut block_state,
-        false,
-        &mut |_| {},
-        spec_id,
-        block_number,
-        context,
-    )?;
-    Ok(block_state)
-}
-
 fn take_database_error(evm: &mut Evm<'_, BaseEvmTypes>, code: ErrorCode) -> DynamicDatabaseError {
     DynamicDatabaseError::new(evm.database_mut().error(code))
 }

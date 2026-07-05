@@ -13,8 +13,6 @@ extern crate alloc;
 
 #[cfg(feature = "std")]
 use crate::execute::{BasicBlockBuilder, BasicBlockExecutor};
-#[cfg(feature = "std")]
-use alloc::boxed::Box;
 use alloc::string::String;
 use alloy_eips::eip4895::Withdrawals;
 use alloy_primitives::{Address, Bytes, B256};
@@ -48,7 +46,6 @@ pub use execute::{
     FromTxWithEncoded, GasOutput, InternalBlockExecutionError, IntoTxEnv, InvalidTxError,
     RecoveredTx, WithTxEnv,
 };
-pub use reth_execution_types::ExecutionState;
 
 /// Transaction validation limits resolved for an EVM environment.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -425,19 +422,6 @@ pub trait ConfigureEvm: Clone + Debug + Send + Sync + Unpin {
         let ctx = self.context_for_next_block(parent, attributes)?;
         Ok(self.create_block_builder(evm, evm_env, parent, ctx))
     }
-
-    /// Applies block-level state changes required before transaction execution.
-    #[cfg(feature = "std")]
-    fn pre_block_state_changes<'a, DB>(
-        &self,
-        db: DB,
-        evm_env: EvmEnvFor<Self>,
-        block_number: u64,
-        ctx: ExecutionCtxFor<'a, Self>,
-    ) -> Result<ExecutionState, Box<dyn Error + Send + Sync>>
-    where
-        Self: 'a,
-        DB: DynDatabase + 'a;
 }
 
 /// JIT backend controls exposed by an EVM configuration.
