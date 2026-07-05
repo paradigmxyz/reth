@@ -3775,7 +3775,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> BlockWriter
         self.update_pipeline_stages(last_block_number, false)?;
         durations_recorder.record_relative(metrics::Action::UpdatePipelineStages);
 
-        debug!(target: "providers::db", range = ?first_number..=last_block_number, actions = ?durations_recorder.actions, "Appended blocks");
+        debug!(target: "providers::db", range = ?first_number..=last_block_number, actions = ?durations_recorder.actions(), "Appended blocks");
 
         Ok(())
     }

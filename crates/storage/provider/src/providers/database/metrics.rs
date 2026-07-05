@@ -7,14 +7,21 @@ use std::time::Duration;
 pub(crate) struct DurationsRecorder<'a> {
     start: Instant,
     current_metrics: &'a DatabaseProviderMetrics,
-    pub(crate) actions: Vec<(Action, Duration)>,
+    actions: Option<Vec<(Action, Duration)>>,
     latest: Option<Duration>,
 }
 
 impl<'a> DurationsRecorder<'a> {
     /// Creates a new durations recorder with the given metrics instance.
     pub(crate) fn new(metrics: &'a DatabaseProviderMetrics) -> Self {
-        Self { start: Instant::now(), actions: Vec::new(), latest: None, current_metrics: metrics }
+        let actions =
+            tracing::enabled!(target: "providers::db", tracing::Level::DEBUG).then(Vec::new);
+        Self { start: Instant::now(), actions, latest: None, current_metrics: metrics }
+    }
+
+    /// Returns the recorded action durations for debug logging.
+    pub(crate) fn actions(&self) -> &[(Action, Duration)] {
+        self.actions.as_deref().unwrap_or(&[])
     }
 }
 
@@ -25,7 +32,9 @@ impl<'a> DurationsRecorder<'a> {
         let elapsed = self.start.elapsed();
         let duration = elapsed - self.latest.unwrap_or_default();
 
-        self.actions.push((action, duration));
+        if let Some(actions) = &mut self.actions {
+            actions.push((action, duration));
+        }
         self.current_metrics.record_duration(action, duration);
         self.latest = Some(elapsed);
     }
