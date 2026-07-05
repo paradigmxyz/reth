@@ -87,6 +87,10 @@ impl<R: Receipt> ReceiptRootTaskHandle<R> {
             let receipt_with_bloom = receipt.with_bloom_ref();
 
             encode_buf.clear();
+            let encoded_len = receipt_with_bloom.encode_2718_len();
+            if encode_buf.capacity() < encoded_len {
+                encode_buf.reserve(encoded_len - encode_buf.capacity());
+            }
             receipt_with_bloom.encode_2718(&mut encode_buf);
 
             aggregated_bloom |= *receipt_with_bloom.bloom_ref();
