@@ -425,7 +425,7 @@ impl Runtime {
                 proof_storage_worker_threads: Some(2),
                 proof_account_worker_threads: Some(2),
                 prewarming_threads: Some(2),
-                bal_streaming_threads: Some(2),
+                bal_streaming_threads: Some(4),
                 state_trie_overlay_worker_threads: Some(2),
             },
         }
@@ -1096,7 +1096,7 @@ mod tests {
         assert!(!runtime.0.state_trie_overlay_worker_pool.is_initialized());
 
         // Accessing them triggers initialization and returns the configured thread count.
-        assert_eq!(runtime.bal_streaming_pool().current_num_threads(), 2);
+        assert_eq!(runtime.bal_streaming_pool().current_num_threads(), 4);
         assert!(runtime.0.bal_streaming_pool.is_initialized());
 
         assert_eq!(runtime.proof_storage_worker_pool().current_num_threads(), 2);
