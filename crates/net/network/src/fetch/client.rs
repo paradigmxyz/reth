@@ -187,10 +187,12 @@ pub struct SnapFetchClient<N: NetworkPrimitives = EthNetworkPrimitives> {
 }
 
 impl<N: NetworkPrimitives> DownloadClient for SnapFetchClient<N> {
+    /// Reports a bad message from the given peer.
     fn report_bad_message(&self, peer_id: PeerId) {
         self.inner.report_bad_message(peer_id);
     }
 
+    /// Returns the number of connected peers that negotiated `snap/2`.
     fn num_connected_peers(&self) -> usize {
         self.num_snap_peers.load(Ordering::Relaxed)
     }

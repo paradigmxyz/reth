@@ -227,10 +227,6 @@ impl<N: NetworkPrimitives> StateFetcher<N> {
             return PollAction::NoRequests
         }
 
-        if self.peers.is_empty() {
-            return PollAction::NoPeersAvailable
-        }
-
         let request = self.queued_requests.pop_front().expect("not empty");
         let Some(peer_id) = self.next_best_peer(request.best_peer_requirements()) else {
             // Optional BAL/snap requests can lose their capable peer while queued; complete them
@@ -873,6 +869,7 @@ mod tests {
     use alloy_consensus::Header;
     use alloy_primitives::B512;
     use reth_eth_wire::Capability;
+    use reth_eth_wire_types::snap::{AccountRangeMessage, GetAccountRangeMessage};
     use std::future::poll_fn;
 
     #[tokio::test(flavor = "multi_thread")]
@@ -2022,6 +2019,224 @@ mod tests {
         assert_eq!(fetcher.queued_requests.len(), 1);
 
         fetcher.on_session_closed(&peer_71);
+
+        assert!(matches!(fetcher.poll(&mut cx), Poll::Pending));
+        assert!(fetcher.queued_requests.is_empty());
+        assert_eq!(rx.await.unwrap().unwrap_err(), RequestError::UnsupportedCapability);
+    }
+
+    #[tokio::test]
+    async fn test_next_best_peer_snap_no_support() {
+        let manager = PeersManager::new(PeersConfig::default());
+        let mut fetcher =
+            StateFetcher::<EthNetworkPrimitives>::new(manager.handle(), Default::default());
+
+        let peer = B512::random();
+        fetcher.new_active_peer(NewPeerInfo {
+            peer_id: peer,
+            best_hash: B256::random(),
+            best_number: 100,
+            capabilities: Arc::new(Capabilities::new(vec![])),
+            timeout: Arc::new(AtomicU64::new(10)),
+            range_info: None,
+            supports_snap: false,
+        });
+
+        assert_eq!(fetcher.next_best_peer(BestPeerRequirements::SupportsSnap), None);
+    }
+
+    #[tokio::test]
+    async fn test_next_best_peer_snap_supported() {
+        let manager = PeersManager::new(PeersConfig::default());
+        let mut fetcher =
+            StateFetcher::<EthNetworkPrimitives>::new(manager.handle(), Default::default());
+
+        let peer = B512::random();
+        fetcher.new_active_peer(NewPeerInfo {
+            peer_id: peer,
+            best_hash: B256::random(),
+            best_number: 100,
+            capabilities: Arc::new(Capabilities::new(vec![])),
+            timeout: Arc::new(AtomicU64::new(10)),
+            range_info: None,
+            supports_snap: true,
+        });
+
+        assert_eq!(fetcher.next_best_peer(BestPeerRequirements::SupportsSnap), Some(peer));
+    }
+
+    #[tokio::test]
+    async fn test_next_best_peer_snap_filters_correctly() {
+        let manager = PeersManager::new(PeersConfig::default());
+        let mut fetcher =
+            StateFetcher::<EthNetworkPrimitives>::new(manager.handle(), Default::default());
+
+        let peer_no_snap = B512::random();
+        let peer_with_snap = B512::random();
+
+        fetcher.new_active_peer(NewPeerInfo {
+            peer_id: peer_no_snap,
+            best_hash: B256::random(),
+            best_number: 100,
+            capabilities: Arc::new(Capabilities::new(vec![])),
+            timeout: Arc::new(AtomicU64::new(5)),
+            range_info: None,
+            supports_snap: false,
+        });
+        fetcher.new_active_peer(NewPeerInfo {
+            peer_id: peer_with_snap,
+            best_hash: B256::random(),
+            best_number: 100,
+            capabilities: Arc::new(Capabilities::new(vec![])),
+            timeout: Arc::new(AtomicU64::new(50)),
+            range_info: None,
+            supports_snap: true,
+        });
+
+        // Even though peer_no_snap has a lower timeout, it must NOT be selected.
+        assert_eq!(
+            fetcher.next_best_peer(BestPeerRequirements::SupportsSnap),
+            Some(peer_with_snap)
+        );
+    }
+
+    #[tokio::test]
+    async fn test_snap_request_rejected_without_snap_peer() {
+        use futures::task::noop_waker;
+        use std::task::{Context, Poll};
+
+        let manager = PeersManager::new(PeersConfig::default());
+        let mut fetcher =
+            StateFetcher::<EthNetworkPrimitives>::new(manager.handle(), Default::default());
+
+        // Only an eth-only peer is connected.
+        fetcher.new_active_peer(NewPeerInfo {
+            peer_id: B512::random(),
+            best_hash: B256::random(),
+            best_number: 100,
+            capabilities: Arc::new(Capabilities::new(vec![])),
+            timeout: Arc::new(AtomicU64::new(10)),
+            range_info: None,
+            supports_snap: false,
+        });
+
+        let (tx, rx) = oneshot::channel();
+        fetcher
+            .download_requests_tx
+            .send(DownloadRequest::GetSnap {
+                request: SnapProtocolMessage::GetAccountRange(GetAccountRangeMessage {
+                    request_id: 0,
+                    root_hash: B256::ZERO,
+                    starting_hash: B256::ZERO,
+                    limit_hash: B256::ZERO,
+                    response_bytes: 0,
+                }),
+                response: tx,
+                priority: Priority::Normal,
+            })
+            .unwrap();
+
+        let waker = noop_waker();
+        let mut cx = Context::from_waker(&waker);
+
+        assert!(matches!(fetcher.poll(&mut cx), Poll::Pending));
+        assert!(fetcher.queued_requests.is_empty());
+        assert_eq!(rx.await.unwrap().unwrap_err(), RequestError::UnsupportedCapability);
+    }
+
+    #[tokio::test]
+    async fn test_snap_response_triggers_followup() {
+        let manager = PeersManager::new(PeersConfig::default());
+        let mut fetcher =
+            StateFetcher::<EthNetworkPrimitives>::new(manager.handle(), Default::default());
+
+        let peer_id = B512::random();
+        fetcher.new_active_peer(NewPeerInfo {
+            peer_id,
+            best_hash: B256::random(),
+            best_number: 100,
+            capabilities: Arc::new(Capabilities::new(vec![])),
+            timeout: Arc::new(AtomicU64::new(10)),
+            range_info: None,
+            supports_snap: true,
+        });
+
+        // Queue a followup snap request for the same peer.
+        let (followup_tx, _followup_rx) = oneshot::channel();
+        fetcher.queued_requests.push_back(DownloadRequest::GetSnap {
+            request: SnapProtocolMessage::GetAccountRange(GetAccountRangeMessage {
+                request_id: 0,
+                root_hash: B256::ZERO,
+                starting_hash: B256::ZERO,
+                limit_hash: B256::ZERO,
+                response_bytes: 0,
+            }),
+            response: followup_tx,
+            priority: Priority::Normal,
+        });
+
+        let (tx, mut rx) = oneshot::channel();
+        fetcher.inflight_snap_requests.insert(peer_id, Request { request: (), response: tx });
+        fetcher.peers.get_mut(&peer_id).unwrap().state = PeerState::GetSnap;
+
+        let resp = SnapResponse::AccountRange(AccountRangeMessage {
+            request_id: 1,
+            accounts: vec![],
+            proof: vec![],
+        });
+        let outcome = fetcher.on_snap_response(peer_id, Ok(resp));
+
+        assert!(matches!(outcome, Some(BlockResponseOutcome::Request(pid, _)) if pid == peer_id));
+        assert!(rx.try_recv().is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_queued_snap_request_rejected_after_last_peer_disconnects() {
+        use futures::task::noop_waker;
+        use std::task::{Context, Poll};
+
+        let manager = PeersManager::new(PeersConfig::default());
+        let mut fetcher =
+            StateFetcher::<EthNetworkPrimitives>::new(manager.handle(), Default::default());
+
+        // The only connected peer supports snap but is busy, so the request gets queued.
+        let peer = B512::random();
+        fetcher.new_active_peer(NewPeerInfo {
+            peer_id: peer,
+            best_hash: B256::random(),
+            best_number: 100,
+            capabilities: Arc::new(Capabilities::new(vec![])),
+            timeout: Arc::new(AtomicU64::new(10)),
+            range_info: None,
+            supports_snap: true,
+        });
+        fetcher.peers.get_mut(&peer).expect("peer exists").state = PeerState::GetBlockHeaders;
+
+        let (tx, rx) = oneshot::channel();
+        fetcher
+            .download_requests_tx
+            .send(DownloadRequest::GetSnap {
+                request: SnapProtocolMessage::GetAccountRange(GetAccountRangeMessage {
+                    request_id: 0,
+                    root_hash: B256::ZERO,
+                    starting_hash: B256::ZERO,
+                    limit_hash: B256::ZERO,
+                    response_bytes: 0,
+                }),
+                response: tx,
+                priority: Priority::Normal,
+            })
+            .unwrap();
+
+        let waker = noop_waker();
+        let mut cx = Context::from_waker(&waker);
+
+        assert!(matches!(fetcher.poll(&mut cx), Poll::Pending));
+        assert_eq!(fetcher.queued_requests.len(), 1);
+
+        // The only peer disconnects, leaving `self.peers` empty. The still-queued request must
+        // resolve immediately instead of waiting for a peer that can never come back.
+        fetcher.on_session_closed(&peer);
 
         assert!(matches!(fetcher.poll(&mut cx), Poll::Pending));
         assert!(fetcher.queued_requests.is_empty());
