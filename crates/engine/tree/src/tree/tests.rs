@@ -19,10 +19,7 @@ use alloy_rpc_types_engine::{
     ExecutionData, ExecutionPayloadSidecar, ExecutionPayloadV1, ForkchoiceState,
 };
 use assert_matches::assert_matches;
-use reth_chain_state::{
-    test_utils::TestBlockBuilder, BlockState, ComputedTrieData, DeferredTrieData,
-    StateTrieOverlayManager,
-};
+use reth_chain_state::{test_utils::TestBlockBuilder, BlockState, StateTrieOverlayManager};
 use reth_chainspec::{ChainSpec, HOLESKY, MAINNET};
 use reth_engine_primitives::{EngineApiValidator, ForkchoiceStatus, NoopInvalidBlockHook};
 use reth_ethereum_consensus::EthBeaconConsensus;
@@ -32,8 +29,11 @@ use reth_evm_ethereum::MockEvmConfig;
 use reth_primitives_traits::Block as _;
 use reth_provider::{test_utils::MockEthProvider, BalStoreHandle, InMemoryBalStore, RawBal};
 use reth_tasks::spawn_os_thread;
-use reth_trie::prefix_set::{PrefixSetMut, TriePrefixSetsMut};
-use reth_trie_common::Nibbles;
+use reth_trie::{
+    prefix_set::{PrefixSetMut, TriePrefixSetsMut},
+    LazyTrieData,
+};
+use reth_trie_common::{ComputedTrieData, Nibbles};
 use std::{
     collections::BTreeMap,
     str::FromStr,
@@ -54,7 +54,7 @@ fn with_changed_paths(
     ExecutedBlock::with_deferred_trie_data(
         block.recovered_block,
         block.execution_output,
-        DeferredTrieData::ready(trie_data),
+        LazyTrieData::ready(trie_data),
     )
 }
 
