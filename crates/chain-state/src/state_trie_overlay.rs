@@ -584,8 +584,6 @@ mod tests {
     use alloy_primitives::U256;
     use reth_primitives_traits::Account;
     use reth_trie::{updates::TrieUpdatesSorted, ComputedTrieData, HashedPostState, HashedStorage};
-    #[cfg(feature = "rayon")]
-    use std::time::Instant;
     use std::{
         sync::{mpsc, Arc},
         thread,
