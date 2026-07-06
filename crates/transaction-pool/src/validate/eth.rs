@@ -1386,7 +1386,7 @@ pub struct ForkTracker {
     /// Cached transaction gas limit cap from EVM config (0 = no cap)
     pub tx_gas_limit_cap: AtomicU64,
     /// Cached transaction validation gas rules from EVM config.
-    pub transaction_validation_gas_rules: AtomicTransactionValidationGasRules,
+    transaction_validation_gas_rules: AtomicTransactionValidationGasRules,
 }
 
 /// Transaction validation rules resolved by the configured EVM for a specific block.
@@ -1416,7 +1416,7 @@ where
 
 /// Atomic transaction validation gas rules.
 #[derive(Debug)]
-pub struct AtomicTransactionValidationGasRules {
+struct AtomicTransactionValidationGasRules {
     tx_base_gas: AtomicU64,
     tx_create_gas: AtomicU64,
     tx_data_zero_gas: AtomicU64,
@@ -1433,7 +1433,7 @@ pub struct AtomicTransactionValidationGasRules {
 
 impl AtomicTransactionValidationGasRules {
     /// Creates atomic gas rules from resolved gas rules.
-    pub const fn new(rules: EvmTransactionValidationGasRules) -> Self {
+    const fn new(rules: EvmTransactionValidationGasRules) -> Self {
         Self {
             tx_base_gas: AtomicU64::new(rules.tx_base_gas),
             tx_create_gas: AtomicU64::new(rules.tx_create_gas),
@@ -1457,7 +1457,7 @@ impl AtomicTransactionValidationGasRules {
     }
 
     /// Loads resolved gas rules.
-    pub fn load(&self) -> EvmTransactionValidationGasRules {
+    fn load(&self) -> EvmTransactionValidationGasRules {
         EvmTransactionValidationGasRules {
             tx_base_gas: self.tx_base_gas.load(std::sync::atomic::Ordering::Relaxed),
             tx_create_gas: self.tx_create_gas.load(std::sync::atomic::Ordering::Relaxed),
@@ -1491,7 +1491,7 @@ impl AtomicTransactionValidationGasRules {
     }
 
     /// Stores resolved gas rules.
-    pub fn store(&self, rules: EvmTransactionValidationGasRules) {
+    fn store(&self, rules: EvmTransactionValidationGasRules) {
         self.tx_base_gas.store(rules.tx_base_gas, std::sync::atomic::Ordering::Relaxed);
         self.tx_create_gas.store(rules.tx_create_gas, std::sync::atomic::Ordering::Relaxed);
         self.tx_data_zero_gas.store(rules.tx_data_zero_gas, std::sync::atomic::Ordering::Relaxed);
