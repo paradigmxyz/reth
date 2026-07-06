@@ -857,17 +857,19 @@ where
 }
 
 /// Executor returned by configurations that do not support block execution in the active build.
-#[expect(missing_debug_implementations)]
-pub struct UnsupportedExecutor<N> {
+#[cfg(any(not(feature = "std"), test))]
+pub(crate) struct UnsupportedExecutor<N> {
     _marker: core::marker::PhantomData<N>,
 }
 
+#[cfg(any(not(feature = "std"), test))]
 impl<N> Default for UnsupportedExecutor<N> {
     fn default() -> Self {
         Self { _marker: core::marker::PhantomData }
     }
 }
 
+#[cfg(any(not(feature = "std"), test))]
 impl<N, DB> Executor<DB> for UnsupportedExecutor<N>
 where
     N: NodePrimitives,
