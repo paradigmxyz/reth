@@ -161,6 +161,9 @@ impl Discovery {
 
         // Start discv5, wiring in the shared socket if in shared-port mode.
         let (discv5, discv5_updates) = if let Some(mut config) = discv5_config {
+            // the config's rlpx port predates the listener bind and is 0 with `--port 0`
+            config.set_rlpx_port(tcp_addr.port());
+
             if let Some(socket) = shared_socket {
                 let discv5_cfg = config.discv5_config_mut();
 
@@ -511,6 +514,28 @@ mod tests {
         )
         .await
         .expect("should build discv5 with discv4 downgrade")
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn discv5_enr_advertises_bound_rlpx_port() {
+        reth_tracing::init_test_tracing();
+
+        let secret_key = SecretKey::new(&mut rand_08::thread_rng());
+
+        // rlpx port 0 in the config, like `--port 0` pre-bind; only `tcp_addr` has the bound port
+        let tcp_addr: SocketAddr = "127.0.0.1:30307".parse().unwrap();
+        let discv5_addr: SocketAddr = "127.0.0.1:0".parse().unwrap();
+        let discv5_config = reth_discv5::Config::builder((Ipv4Addr::LOCALHOST, 0).into())
+            .discv5_config(discv5::ConfigBuilder::new(discv5_addr.into()).build())
+            .build();
+
+        let discovery =
+            Discovery::new(tcp_addr, discv5_addr, secret_key, None, Some(discv5_config), None)
+                .await
+                .unwrap();
+
+        let enr = discovery.discv5.as_ref().unwrap().with_discv5(|discv5| discv5.local_enr());
+        assert_eq!(enr.tcp4(), Some(tcp_addr.port()));
     }
 
     #[tokio::test(flavor = "multi_thread")]
