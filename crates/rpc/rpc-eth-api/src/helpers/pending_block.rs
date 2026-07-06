@@ -351,11 +351,10 @@ pub trait LoadPendingBlock:
             builder.finish(NoopProvider::default(), None).map_err(Self::Error::from_eth_err)?;
 
         let block_number = block.number();
-        let execution_outcome = BlockExecutionOutput {
-            state: legacy_bundle_to_execution_state(db.take_bundle(), block_number),
-            result: execution_result,
-            hashed_state: None,
-        };
+        let execution_outcome = BlockExecutionOutput::new(
+            execution_result,
+            legacy_bundle_to_execution_state(db.take_bundle(), block_number),
+        );
 
         Ok(ExecutedBlock::new(
             block.into(),

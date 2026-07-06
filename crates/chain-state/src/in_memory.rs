@@ -763,16 +763,15 @@ impl<N: NodePrimitives> Default for ExecutedBlock<N> {
     fn default() -> Self {
         Self {
             recovered_block: Default::default(),
-            execution_output: Arc::new(BlockExecutionOutput {
-                result: BlockExecutionResult {
+            execution_output: Arc::new(BlockExecutionOutput::new(
+                BlockExecutionResult {
                     receipts: Default::default(),
                     requests: Default::default(),
                     gas_used: 0,
                     blob_gas_used: 0,
                 },
-                state: Default::default(),
-                hashed_state: None,
-            }),
+                Default::default(),
+            )),
             trie_data: DeferredTrieData::ready(ComputedTrieData::default()),
         }
     }

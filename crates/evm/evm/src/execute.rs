@@ -723,13 +723,9 @@ where
             return output
         }
 
-        let BlockExecutionOutput { result, state, .. } = output;
+        let (result, state) = output.into_result_and_state();
         batch_state.push_block_state(state.into_inner());
-        BlockExecutionOutput {
-            result,
-            state: batch_state.into_execution_state().into(),
-            hashed_state: None,
-        }
+        BlockExecutionOutput::new(result, batch_state.into_execution_state())
     }
 
     fn execute_block_with_database(

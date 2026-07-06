@@ -3396,16 +3396,15 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> BlockWriter
         // Wrap block in ExecutedBlock with empty execution output (no receipts/state/trie)
         let executed_block = ExecutedBlock::new(
             Arc::new(block.clone()),
-            Arc::new(BlockExecutionOutput {
-                result: BlockExecutionResult {
+            Arc::new(BlockExecutionOutput::new(
+                BlockExecutionResult {
                     receipts: Default::default(),
                     requests: Default::default(),
                     gas_used: 0,
                     blob_gas_used: 0,
                 },
-                state: Default::default(),
-                hashed_state: None,
-            }),
+                Default::default(),
+            )),
             ComputedTrieData::default(),
         );
 
@@ -4941,16 +4940,15 @@ mod tests {
 
         let genesis_executed = ExecutedBlock::new(
             Arc::new(genesis.try_recover().unwrap()),
-            Arc::new(BlockExecutionOutput {
-                result: BlockExecutionResult {
+            Arc::new(BlockExecutionOutput::new(
+                BlockExecutionResult {
                     receipts: vec![],
                     requests: Default::default(),
                     gas_used: 0,
                     blob_gas_used: 0,
                 },
-                state: Default::default(),
-                hashed_state: None,
-            }),
+                Default::default(),
+            )),
             ComputedTrieData::default(),
         );
         let provider_rw = factory.provider_rw().unwrap();
@@ -5001,16 +4999,15 @@ mod tests {
 
             let executed = ExecutedBlock::new(
                 Arc::new(block.try_recover().unwrap()),
-                Arc::new(BlockExecutionOutput {
-                    result: BlockExecutionResult {
+                Arc::new(BlockExecutionOutput::new(
+                    BlockExecutionResult {
                         receipts: vec![],
                         requests: Default::default(),
                         gas_used: 0,
                         blob_gas_used: 0,
                     },
-                    state: state.into(),
-                    hashed_state: None,
-                }),
+                    state,
+                )),
                 ComputedTrieData { hashed_state: Arc::new(hashed_state), ..Default::default() },
             );
             blocks.push(executed);

@@ -938,16 +938,15 @@ mod tests {
                 .map(|block| {
                     let senders = block.senders().expect("failed to recover senders");
                     let block_receipts = receipts.get(block.number as usize).unwrap().clone();
-                    let execution_outcome = BlockExecutionOutput {
-                        result: BlockExecutionResult {
+                    let execution_outcome = BlockExecutionOutput::new(
+                        BlockExecutionResult {
                             receipts: block_receipts,
                             requests: Default::default(),
                             gas_used: 0,
                             blob_gas_used: 0,
                         },
-                        state: Default::default(),
-                        hashed_state: None,
-                    };
+                        Default::default(),
+                    );
 
                     ExecutedBlock {
                         recovered_block: Arc::new(RecoveredBlock::new_sealed(
@@ -1748,16 +1747,15 @@ mod tests {
                             block.clone(),
                             senders,
                         )),
-                        execution_output: Arc::new(BlockExecutionOutput {
-                            state: state.into(),
-                            result: BlockExecutionResult {
+                        execution_output: Arc::new(BlockExecutionOutput::new(
+                            BlockExecutionResult {
                                 receipts: Default::default(),
                                 requests: Default::default(),
                                 gas_used: 0,
                                 blob_gas_used: 0,
                             },
-                            hashed_state: None,
-                        }),
+                            state,
+                        )),
                         ..Default::default()
                     }
                 })

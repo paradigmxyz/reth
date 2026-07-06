@@ -731,16 +731,15 @@ mod tests {
         .unwrap();
 
         // Create mock BlockExecutionOutput
-        let output = BlockExecutionOutput {
-            state: block_state.into(),
-            result: reth_provider::BlockExecutionResult {
+        let output = BlockExecutionOutput::new(
+            reth_provider::BlockExecutionResult {
                 receipts: vec![],
                 requests: Requests::default(),
                 gas_used: 0,
                 blob_gas_used: 0,
             },
-            hashed_state: None,
-        };
+            block_state,
+        );
 
         // Create test trie updates
         let trie_updates = create_test_trie_updates();

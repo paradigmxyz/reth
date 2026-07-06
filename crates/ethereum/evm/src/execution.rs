@@ -1070,7 +1070,8 @@ mod tests {
     use reth_execution_types::hashed_post_state_from_execution_state;
 
     fn assert_hashed_state_matches_output(output: &BlockExecutionOutput<Receipt>) {
-        let hashed_state = output.hashed_state.clone().expect("EVM execution hashes post-state");
+        let hashed_state =
+            output.precomputed_hashed_state().cloned().expect("EVM execution hashes post-state");
         let recomputed =
             hashed_post_state_from_execution_state::<KeccakKeyHasher>(output.state.inner());
 
@@ -1284,7 +1285,7 @@ mod tests {
         )
         .expect("EVM execution succeeds");
 
-        assert!(output.hashed_state.is_none());
+        assert!(output.precomputed_hashed_state().is_none());
         assert!(!streamed_updates.is_empty());
         assert_hashed_state_matches_streamed_updates(&output, streamed_updates);
     }

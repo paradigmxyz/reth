@@ -238,16 +238,15 @@ impl<N: NodePrimitives> TestBlockBuilder<N> {
         if !self.with_state {
             let executed = ExecutedBlock::new(
                 Arc::new(recovered),
-                Arc::new(BlockExecutionOutput {
-                    result: BlockExecutionResult {
+                Arc::new(BlockExecutionOutput::new(
+                    BlockExecutionResult {
                         receipts: receipts.pop().unwrap_or_default(),
                         requests: Default::default(),
                         gas_used: 0,
                         blob_gas_used: 0,
                     },
-                    state: Default::default(),
-                    hashed_state: None,
-                }),
+                    Default::default(),
+                )),
                 ComputedTrieData::default(),
             );
             return executed;
@@ -331,16 +330,15 @@ impl<N: NodePrimitives> TestBlockBuilder<N> {
         let block_hash = recovered.hash();
         let executed = ExecutedBlock::new(
             Arc::new(recovered),
-            Arc::new(BlockExecutionOutput {
-                result: BlockExecutionResult {
+            Arc::new(BlockExecutionOutput::new(
+                BlockExecutionResult {
                     receipts: block_receipts,
                     requests: Default::default(),
                     gas_used: num_txs * MIN_TRANSACTION_GAS,
                     blob_gas_used: 0,
                 },
-                state: block_state.into(),
-                hashed_state: None,
-            }),
+                block_state,
+            )),
             trie_data,
         );
 

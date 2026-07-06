@@ -2202,16 +2202,15 @@ where
         let sorted_trie_updates = Arc::new(trie_updates);
         let trie_data = ComputedTrieData::new(sorted_hashed_state, sorted_trie_updates);
 
-        let execution_output = Arc::new(BlockExecutionOutput {
-            state: block_state.into(),
-            result: BlockExecutionResult {
+        let execution_output = Arc::new(BlockExecutionOutput::new(
+            BlockExecutionResult {
                 receipts: execution_output.receipts.pop().unwrap_or_default(),
                 requests: execution_output.requests.pop().unwrap_or_default(),
                 gas_used: block.gas_used(),
                 blob_gas_used: block.blob_gas_used().unwrap_or_default(),
             },
-            hashed_state: None,
-        });
+            block_state,
+        ));
 
         Ok(ExecutedBlock::new(
             Arc::new(RecoveredBlock::new_sealed(block, senders)),

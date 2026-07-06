@@ -224,8 +224,8 @@ where
         self.ensure_payment(&block, &output, &message)?;
 
         let hashed_state = output
-            .hashed_state
-            .clone()
+            .precomputed_hashed_state()
+            .cloned()
             .unwrap_or_else(|| state_provider.hashed_post_state(output.state.inner()));
         let state_root = state_provider.state_root(hashed_state)?;
 

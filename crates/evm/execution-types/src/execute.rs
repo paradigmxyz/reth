@@ -61,7 +61,7 @@ pub struct BlockExecutionOutput<T> {
     /// The changed state of the block after execution.
     pub state: IndexedBlockState,
     /// Trie-ready hashed post-state for this block, if produced during execution.
-    pub hashed_state: Option<HashedPostState>,
+    hashed_state: Option<HashedPostState>,
 }
 
 impl<T> BlockExecutionOutput<T> {
@@ -74,6 +74,16 @@ impl<T> BlockExecutionOutput<T> {
     pub fn with_hashed_state(mut self, hashed_state: Option<HashedPostState>) -> Self {
         self.hashed_state = hashed_state;
         self
+    }
+
+    /// Returns precomputed hashed post-state for this block, if execution produced it.
+    pub const fn precomputed_hashed_state(&self) -> Option<&HashedPostState> {
+        self.hashed_state.as_ref()
+    }
+
+    /// Decomposes this output into its execution result and changed state.
+    pub fn into_result_and_state(self) -> (BlockExecutionResult<T>, IndexedBlockState) {
+        (self.result, self.state)
     }
 
     /// Returns the hashed post-state for this block output.

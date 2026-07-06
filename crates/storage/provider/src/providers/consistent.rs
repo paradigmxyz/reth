@@ -1927,16 +1927,15 @@ mod tests {
                             block.clone(),
                             senders,
                         )),
-                        execution_output: Arc::new(BlockExecutionOutput {
-                            state: state.into(),
-                            result: BlockExecutionResult {
+                        execution_output: Arc::new(BlockExecutionOutput::new(
+                            BlockExecutionResult {
                                 receipts: Default::default(),
                                 requests: Default::default(),
                                 gas_used: 0,
                                 blob_gas_used: 0,
                             },
-                            hashed_state: None,
-                        }),
+                            state,
+                        )),
                         ..Default::default()
                     }
                 })
@@ -2097,16 +2096,15 @@ mod tests {
                     in_mem_block.clone(),
                     senders,
                 )),
-                execution_output: Arc::new(BlockExecutionOutput {
-                    state: state.into(),
-                    result: BlockExecutionResult {
+                execution_output: Arc::new(BlockExecutionOutput::new(
+                    BlockExecutionResult {
                         receipts: Default::default(),
                         requests: Default::default(),
                         gas_used: 0,
                         blob_gas_used: 0,
                     },
-                    hashed_state: None,
-                }),
+                    state,
+                )),
                 ..Default::default()
             }],
         };
@@ -2193,16 +2191,15 @@ mod tests {
                     in_mem_block.clone(),
                     senders,
                 )),
-                execution_output: Arc::new(BlockExecutionOutput {
-                    state: state.into(),
-                    result: BlockExecutionResult {
+                execution_output: Arc::new(BlockExecutionOutput::new(
+                    BlockExecutionResult {
                         receipts: Default::default(),
                         requests: Default::default(),
                         gas_used: 0,
                         blob_gas_used: 0,
                     },
-                    hashed_state: None,
-                }),
+                    state,
+                )),
                 ..Default::default()
             }],
         };

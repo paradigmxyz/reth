@@ -710,7 +710,7 @@ where
         // (keccak256 hashing of all changed addresses and storage slots).
         let mut hashed_state_rx = handle.take_hashed_state_rx();
         let mut hashed_state: LazyHashedPostState = if let Some(hashed_state) =
-            output.hashed_state.clone()
+            output.precomputed_hashed_state().cloned()
         {
             LazyHandle::ready(Arc::new(hashed_state))
         } else {
