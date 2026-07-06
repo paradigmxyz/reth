@@ -89,12 +89,12 @@ impl<S> CacheEntry<S> {
         self.output.gas_used
     }
 
-    /// Converts the cache entry to a precompile result. Accepts state gas reservoir as input.
+    /// Converts the cache entry into a precompile result. Accepts state gas reservoir as input.
     ///
     /// All cached precompiles are not expected to access/created state and thus reservoir is always
     /// kept as is.
-    fn to_precompile_result(&self, reservoir: u64) -> PrecompileResult {
-        let mut output = self.output.clone();
+    fn into_precompile_result(self, reservoir: u64) -> PrecompileResult {
+        let mut output = self.output;
         output.reservoir = reservoir;
         Ok(output)
     }
@@ -179,11 +179,11 @@ where
     }
 
     fn call(&self, input: PrecompileInput<'_>) -> PrecompileResult {
-        if let Some(entry) = &self.cache.get(input.data, self.spec_id.clone()) &&
-            input.gas >= entry.gas_used()
-        {
-            self.increment_by_one_precompile_cache_hits();
-            return entry.to_precompile_result(input.reservoir);
+        if let Some(entry) = self.cache.get(input.data, self.spec_id.clone()) {
+            if input.gas >= entry.gas_used() {
+                self.increment_by_one_precompile_cache_hits();
+                return entry.into_precompile_result(input.reservoir);
+            }
         }
 
         let calldata = input.data;
