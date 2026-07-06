@@ -48,7 +48,9 @@ use tokio_stream::wrappers::ReceiverStream;
 use tokio_util::sync::PollSender;
 use tracing::{instrument, trace};
 
-use crate::session::active::{BroadcastItemCounter, RANGE_UPDATE_INTERVAL};
+use crate::session::active::{
+    request_timeout_interval, BroadcastItemCounter, RANGE_UPDATE_INTERVAL,
+};
 pub use conn::EthRlpxConnection;
 use handle::SessionCommandSender;
 pub use handle::{
@@ -594,7 +596,7 @@ impl<N: NetworkPrimitives> SessionManager<N> {
                         broadcast_items.clone(),
                     ),
                     received_requests_from_remote: Default::default(),
-                    internal_request_timeout_interval: tokio::time::interval(
+                    internal_request_timeout_interval: request_timeout_interval(
                         self.initial_internal_request_timeout,
                     ),
                     internal_request_timeout: Arc::clone(&timeout),
