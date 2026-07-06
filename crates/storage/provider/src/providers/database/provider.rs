@@ -2450,9 +2450,15 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
             // In storage v2 with all outputs directed to static files, plain state and changesets
             // are written elsewhere. Only bytecodes need MDBX writes, so skip the expensive
             // to_plain_state_and_reverts conversion that iterates all accounts and storage.
-            self.write_bytecodes(
-                execution_outcome.state().contracts.iter().map(|(h, b)| (*h, Bytecode(b.clone()))),
-            )?;
+            let contracts = &execution_outcome.state().contracts;
+            if !contracts.is_empty() {
+                let mut bytecodes = contracts
+                    .iter()
+                    .map(|(hash, bytecode)| (*hash, Bytecode(bytecode.clone())))
+                    .collect::<Vec<_>>();
+                bytecodes.sort_unstable_by_key(|(hash, _)| *hash);
+                self.write_bytecodes(bytecodes)?;
+            }
             return Ok(());
         }
 
