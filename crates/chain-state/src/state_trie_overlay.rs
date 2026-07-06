@@ -490,7 +490,11 @@ fn compute_overlay<N: NodePrimitives>(
             );
 
             let mut overlay = parent_input.as_ref().clone();
-            extend_overlay(&mut overlay, &trie_data.hashed_state, &trie_data.trie_updates);
+            extend_overlay(
+                &mut overlay,
+                &trie_data.sorted.hashed_state,
+                &trie_data.sorted.trie_updates,
+            );
             overlay
         }
         ComputeOverlayInput::MergeBlocks(blocks) => merge_blocks(blocks),
@@ -518,21 +522,23 @@ fn merge_blocks<N: NodePrimitives>(blocks: Vec<ExecutedBlock<N>>) -> TrieInputSo
     let (nodes, state) = rayon::join(
         || {
             TrieUpdatesSorted::merge_batch(
-                trie_data.iter().map(|data| Arc::clone(&data.trie_updates)),
+                trie_data.iter().map(|data| Arc::clone(&data.sorted.trie_updates)),
             )
         },
         || {
             HashedPostStateSorted::merge_batch(
-                trie_data.iter().map(|data| Arc::clone(&data.hashed_state)),
+                trie_data.iter().map(|data| Arc::clone(&data.sorted.hashed_state)),
             )
         },
     );
 
     #[cfg(not(feature = "rayon"))]
     let (nodes, state) = (
-        TrieUpdatesSorted::merge_batch(trie_data.iter().map(|data| Arc::clone(&data.trie_updates))),
+        TrieUpdatesSorted::merge_batch(
+            trie_data.iter().map(|data| Arc::clone(&data.sorted.trie_updates)),
+        ),
         HashedPostStateSorted::merge_batch(
-            trie_data.iter().map(|data| Arc::clone(&data.hashed_state)),
+            trie_data.iter().map(|data| Arc::clone(&data.sorted.hashed_state)),
         ),
     );
 
@@ -574,12 +580,12 @@ fn extend_overlay(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{
-        test_utils::TestBlockBuilder, ComputedTrieData, EthPrimitives, ExecutedBlock, SparseTrie,
-    };
+    use crate::{test_utils::TestBlockBuilder, EthPrimitives, ExecutedBlock, SparseTrie};
     use alloy_primitives::U256;
     use reth_primitives_traits::Account;
-    use reth_trie::{updates::TrieUpdatesSorted, HashedPostState, HashedStorage};
+    use reth_trie::{updates::TrieUpdatesSorted, ComputedTrieData, HashedPostState, HashedStorage};
+    #[cfg(feature = "rayon")]
+    use std::time::Instant;
     use std::{
         sync::{mpsc, Arc},
         thread,
