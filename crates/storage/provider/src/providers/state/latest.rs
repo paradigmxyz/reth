@@ -49,20 +49,24 @@ impl<'b, Provider: DBProvider> LatestStateProviderRef<'b, Provider> {
         Self(provider)
     }
 
+    #[inline]
     fn tx(&self) -> &Provider::Tx {
         self.0.tx_ref()
     }
 
+    #[inline]
     fn hashed_storage_lookup(
         &self,
         hashed_address: B256,
         hashed_slot: StorageKey,
     ) -> ProviderResult<Option<StorageValue>> {
         let mut cursor = self.tx().cursor_dup_read::<tables::HashedStorages>()?;
-        Ok(cursor
-            .seek_by_key_subkey(hashed_address, hashed_slot)?
-            .filter(|e| e.key == hashed_slot)
-            .map(|e| e.value))
+        if let Some(entry) = cursor.seek_by_key_subkey(hashed_address, hashed_slot)? &&
+            entry.key == hashed_slot
+        {
+            return Ok(Some(entry.value));
+        }
+        Ok(None)
     }
 }
 
@@ -70,6 +74,7 @@ impl<Provider: DBProvider + StorageSettingsCache> AccountReader
     for LatestStateProviderRef<'_, Provider>
 {
     /// Get basic account information.
+    #[inline]
     fn basic_account(&self, address: &Address) -> ProviderResult<Option<Account>> {
         if self.0.cached_storage_settings().use_hashed_state() {
             let hashed_address = alloy_primitives::keccak256(address);
@@ -261,6 +266,7 @@ impl<Provider: DBProvider + BlockHashReader + StorageSettingsCache> StateProvide
     for LatestStateProviderRef<'_, Provider>
 {
     /// Get storage by plain (unhashed) storage key slot.
+    #[inline]
     fn storage(
         &self,
         account: Address,
@@ -287,6 +293,7 @@ impl<Provider: DBProvider + BlockHashReader> BytecodeReader
     for LatestStateProviderRef<'_, Provider>
 {
     /// Get account code by its hash
+    #[inline]
     fn bytecode_by_hash(&self, code_hash: &B256) -> ProviderResult<Option<Bytecode>> {
         self.tx().get_by_encoded_key::<tables::Bytecodes>(code_hash).map_err(Into::into)
     }
