@@ -47,6 +47,18 @@ pub trait StateProvider:
         storage_key: StorageKey,
     ) -> ProviderResult<Option<StorageValue>>;
 
+    /// Get storage of given account, returning zero for missing slots.
+    ///
+    /// EVM execution consumes storage through a zero-defaulting interface. Providers that already
+    /// cache zero values can override this to avoid converting zero cache hits through `None`.
+    fn storage_value(
+        &self,
+        account: Address,
+        storage_key: StorageKey,
+    ) -> ProviderResult<StorageValue> {
+        Ok(self.storage(account, storage_key)?.unwrap_or_default())
+    }
+
     /// Get account code by its address.
     ///
     /// Returns `None` if the account doesn't exist or account is not a contract

@@ -31,6 +31,13 @@ pub trait EvmStateProvider {
         account: Address,
         storage_key: StorageKey,
     ) -> ProviderResult<Option<StorageValue>>;
+
+    /// Get storage of the given account, returning zero if the slot is absent.
+    fn storage_value(
+        &self,
+        account: Address,
+        storage_key: StorageKey,
+    ) -> ProviderResult<StorageValue>;
 }
 
 // Blanket implementation of EvmStateProvider for any type that implements StateProvider.
@@ -56,6 +63,14 @@ impl<T: StateProvider> EvmStateProvider for T {
         storage_key: StorageKey,
     ) -> ProviderResult<Option<StorageValue>> {
         <T as StateProvider>::storage(self, account, storage_key)
+    }
+
+    fn storage_value(
+        &self,
+        account: Address,
+        storage_key: StorageKey,
+    ) -> ProviderResult<StorageValue> {
+        <T as StateProvider>::storage_value(self, account, storage_key)
     }
 }
 
@@ -158,7 +173,7 @@ impl<DB: EvmStateProvider> DatabaseRef for StateProviderDatabase<DB> {
     ///
     /// Returns `Ok` with the storage value, or the default value if not found.
     fn storage_ref(&self, address: Address, index: U256) -> Result<U256, Self::Error> {
-        Ok(self.0.storage(address, B256::new(index.to_be_bytes()))?.unwrap_or_default())
+        Ok(self.0.storage_value(address, B256::new(index.to_be_bytes()))?)
     }
 
     /// Retrieves the block hash for a given block number.

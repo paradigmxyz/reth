@@ -675,25 +675,33 @@ impl<S: StateProvider> StateProvider for CachedStateProvider<S> {
         account: Address,
         storage_key: StorageKey,
     ) -> ProviderResult<Option<StorageValue>> {
+        Ok(nonzero_storage_value(self.storage_value(account, storage_key)?))
+    }
+
+    fn storage_value(
+        &self,
+        account: Address,
+        storage_key: StorageKey,
+    ) -> ProviderResult<StorageValue> {
         if self.should_fill_on_miss() {
             match self.caches.get_or_try_insert_storage_with(account, storage_key, || {
-                self.state_provider.storage(account, storage_key).map(Option::unwrap_or_default)
+                self.state_provider.storage_value(account, storage_key)
             })? {
                 CachedStatus::NotCached(value) => {
                     self.record_storage_miss();
-                    Ok(nonzero_storage_value(value))
+                    Ok(value)
                 }
                 CachedStatus::Cached(value) => {
                     self.record_storage_hit();
-                    Ok(nonzero_storage_value(value))
+                    Ok(value)
                 }
             }
         } else if let Some(value) = self.caches.0.storage_cache.get(&(account, storage_key)) {
             self.record_storage_hit();
-            Ok(nonzero_storage_value(value))
+            Ok(value)
         } else {
             self.record_storage_miss();
-            self.state_provider.storage(account, storage_key)
+            self.state_provider.storage_value(account, storage_key)
         }
     }
 }
