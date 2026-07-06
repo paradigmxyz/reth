@@ -19,10 +19,7 @@ use alloy_rpc_types_engine::{
     ExecutionData, ExecutionPayloadSidecar, ExecutionPayloadV1, ForkchoiceState,
 };
 use assert_matches::assert_matches;
-use reth_chain_state::{
-    test_utils::TestBlockBuilder, BlockState, ComputedTrieData, DeferredTrieData,
-    StateTrieOverlayManager,
-};
+use reth_chain_state::{test_utils::TestBlockBuilder, BlockState, StateTrieOverlayManager};
 use reth_chainspec::{ChainSpec, HOLESKY, MAINNET};
 use reth_engine_primitives::{EngineApiValidator, ForkchoiceStatus, NoopInvalidBlockHook};
 use reth_ethereum_consensus::EthBeaconConsensus;
@@ -32,8 +29,11 @@ use reth_evm_ethereum::MockEvmConfig;
 use reth_primitives_traits::Block as _;
 use reth_provider::{test_utils::MockEthProvider, BalStoreHandle, InMemoryBalStore, RawBal};
 use reth_tasks::spawn_os_thread;
-use reth_trie::prefix_set::{PrefixSetMut, TriePrefixSetsMut};
-use reth_trie_common::Nibbles;
+use reth_trie::{
+    prefix_set::{PrefixSetMut, TriePrefixSetsMut},
+    LazyTrieData,
+};
+use reth_trie_common::{ComputedTrieData, Nibbles};
 use std::{
     collections::BTreeMap,
     str::FromStr,
@@ -54,7 +54,7 @@ fn with_changed_paths(
     ExecutedBlock::with_deferred_trie_data(
         block.recovered_block,
         block.execution_output,
-        DeferredTrieData::ready(trie_data),
+        LazyTrieData::ready(trie_data),
     )
 }
 
@@ -1831,16 +1831,16 @@ fn test_on_new_payload_malformed_payload() {
     }
 }
 
-/// Test different `StateRootStrategy` paths: `StateRootTask` and `Synchronous`.
+/// Test different state-root job paths: the sparse-trie job and the synchronous fallback.
 #[test]
 fn test_state_root_strategy_paths() {
     reth_tracing::init_test_tracing();
 
     let mut test_harness = TestHarness::new(MAINNET.clone());
 
-    // Test multiple scenarios to ensure different StateRootStrategy paths are taken:
-    // 1. `StateRootTask` strategy uses payload_processor.spawn()
-    // 2. `Synchronous` strategy uses spawn_cache_exclusive()
+    // Test multiple scenarios to ensure different state-root job paths are taken:
+    // 1. The default strategy spawns the sparse-trie state-root task.
+    // 2. With state-root fallback enabled, the synchronous job computes the root directly.
 
     let s1 = include_str!("../../test-data/holesky/1.rlp");
     let data1 = Bytes::from_str(s1).unwrap();
@@ -1883,11 +1883,9 @@ fn test_state_root_strategy_paths() {
 
     assert!(outcome2.outcome.is_syncing(), "Second strategy path should work");
 
-    // This test passes if multiple StateRootStrategy scenarios work correctly,
-    // confirming that passing arguments directly doesn't break:
-    // - `StateRootTask` strategy
-    // - `Synchronous` strategy
-    // - All parameter passing through the args struct
+    // This test passes if multiple state-root job scenarios work correctly:
+    // - the sparse-trie job
+    // - the synchronous job
 }
 
 // ================================================================================================

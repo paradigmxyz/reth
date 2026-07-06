@@ -34,7 +34,7 @@ use alloy_primitives::{
 use itertools::Itertools;
 use parking_lot::RwLock;
 use rayon::slice::ParallelSliceMut;
-use reth_chain_state::{ComputedTrieData, ExecutedBlock};
+use reth_chain_state::ExecutedBlock;
 use reth_chainspec::{ChainInfo, ChainSpecProvider, EthChainSpec};
 use reth_db_api::{
     cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO, DbDupCursorRW},
@@ -68,7 +68,7 @@ use reth_storage_api::{
 use reth_storage_errors::provider::{ProviderResult, StaticFileWriterError};
 use reth_trie::{
     updates::{StorageTrieUpdatesSorted, TrieUpdatesSorted},
-    HashedPostStateSorted,
+    ComputedTrieData, HashedPostStateSorted,
 };
 use reth_trie_db::{ChangesetCache, DatabaseStorageTrieCursor, TrieTableAdapter};
 use revm::database::states::{
@@ -808,8 +808,14 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
                     .collect::<Vec<_>>();
                 let start = Instant::now();
                 let merged_hashed_state = HashedPostStateSorted::disjointed_merge_batch(
-                    step_trie_data.iter().map(|data| data.hashed_state.as_ref()).collect(),
-                    masking_trie_data.iter().map(|data| data.hashed_state.as_ref()).collect(),
+                    step_trie_data
+                        .iter()
+                        .map(|data| data.sorted.hashed_state.as_ref())
+                        .collect(),
+                    masking_trie_data
+                        .iter()
+                        .map(|data| data.sorted.hashed_state.as_ref())
+                        .collect(),
                 );
                 if !merged_hashed_state.is_empty() {
                     self.write_hashed_state(&merged_hashed_state)?;
@@ -818,8 +824,14 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
 
                 let start = Instant::now();
                 let merged_trie = TrieUpdatesSorted::disjointed_merge_batch(
-                    step_trie_data.iter().map(|data| data.trie_updates.as_ref()).collect(),
-                    masking_trie_data.iter().map(|data| data.trie_updates.as_ref()).collect(),
+                    step_trie_data
+                        .iter()
+                        .map(|data| data.sorted.trie_updates.as_ref())
+                        .collect(),
+                    masking_trie_data
+                        .iter()
+                        .map(|data| data.sorted.trie_updates.as_ref())
+                        .collect(),
                 );
                 if !merged_trie.is_empty() {
                     self.write_trie_updates_sorted(&merged_trie)?;
@@ -4105,7 +4117,7 @@ mod tests {
         map::{AddressMap, B256Map},
         U256,
     };
-    use reth_chain_state::{test_utils::TestBlockBuilder, ComputedTrieData, ExecutedBlock};
+    use reth_chain_state::{test_utils::TestBlockBuilder, ExecutedBlock};
     use reth_db_api::models::StorageSettings;
     use reth_ethereum_primitives::{EthPrimitives, Receipt};
     use reth_execution_types::{AccountRevertInit, BlockExecutionOutput, BlockExecutionResult};
@@ -4113,7 +4125,8 @@ mod tests {
     use reth_storage_api::MetadataWriter;
     use reth_testing_utils::generators::{self, random_block, BlockParams};
     use reth_trie::{
-        HashedPostState, KeccakKeyHasher, Nibbles, StoredNibbles, StoredNibblesSubKey,
+        ComputedTrieData, HashedPostState, KeccakKeyHasher, Nibbles, SortedTrieData, StoredNibbles,
+        StoredNibblesSubKey,
     };
     use revm::{database::BundleState, state::AccountInfo};
     use std::{
@@ -4782,11 +4795,10 @@ mod tests {
         let full_persist_block = ExecutedBlock::new(
             Arc::clone(&full_persist_base.recovered_block),
             Arc::clone(&full_persist_base.execution_output),
-            ComputedTrieData {
-                hashed_state: Arc::new(full_persist_hashed_state),
-                trie_updates: Arc::new(full_persist_trie_updates),
-                ..Default::default()
-            },
+            ComputedTrieData::new(
+                Arc::new(full_persist_hashed_state),
+                Arc::new(full_persist_trie_updates),
+            ),
         );
 
         let deferred_trie_hashed_state = HashedPostStateSorted::new(
@@ -4812,11 +4824,10 @@ mod tests {
         let deferred_trie_block = ExecutedBlock::new(
             Arc::clone(&deferred_trie_base.recovered_block),
             Arc::clone(&deferred_trie_base.execution_output),
-            ComputedTrieData {
-                hashed_state: Arc::new(deferred_trie_hashed_state),
-                trie_updates: Arc::new(deferred_trie_updates),
-                ..Default::default()
-            },
+            ComputedTrieData::new(
+                Arc::new(deferred_trie_hashed_state),
+                Arc::new(deferred_trie_updates),
+            ),
         );
 
         let in_memory_only_hashed_state = HashedPostStateSorted::new(
@@ -4866,11 +4877,10 @@ mod tests {
         let in_memory_only_block = ExecutedBlock::new(
             Arc::clone(&in_memory_only_base.recovered_block),
             Arc::clone(&in_memory_only_base.execution_output),
-            ComputedTrieData {
-                hashed_state: Arc::new(in_memory_only_hashed_state),
-                trie_updates: Arc::new(in_memory_only_trie_updates),
-                ..Default::default()
-            },
+            ComputedTrieData::new(
+                Arc::new(in_memory_only_hashed_state),
+                Arc::new(in_memory_only_trie_updates),
+            ),
         );
 
         let provider_rw = factory.provider_rw().unwrap();
@@ -5688,7 +5698,10 @@ mod tests {
                     },
                     state: bundle,
                 }),
-                ComputedTrieData { hashed_state: Arc::new(hashed_state), ..Default::default() },
+                ComputedTrieData {
+                    sorted: SortedTrieData::new(Arc::new(hashed_state), Default::default()),
+                    ..Default::default()
+                },
             );
             blocks.push(executed);
         }

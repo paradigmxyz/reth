@@ -3236,9 +3236,20 @@ impl SparseTrie for ArenaParallelSparseTrie {
                     mode = "deferred_parallel",
                     "Pruning taken lower tries in parallel"
                 );
+                let parent_span = tracing::Span::current();
                 pruned += taken
                     .par_iter_mut()
-                    .map(|(_, subtrie, range)| subtrie.prune(&retained_leaves[range.clone()]))
+                    .map(|(_, subtrie, range)| {
+                        let _span = tracing::trace_span!(
+                            target: TRACE_TARGET,
+                            parent: &parent_span,
+                            "subtrie_prune",
+                            subtrie = ?subtrie.path,
+                        )
+                        .entered();
+
+                        subtrie.prune(&retained_leaves[range.clone()])
+                    })
                     .sum::<usize>();
             }
 
