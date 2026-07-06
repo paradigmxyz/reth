@@ -291,11 +291,13 @@ impl fmt::Debug for StateRootHintStream {
 
 impl StateRootHintStream {
     /// Creates a new hint stream view.
+    #[inline]
     pub fn new(inner: Arc<dyn StateRootSink>) -> Self {
         Self { inner }
     }
 
     /// Emits a best-effort access hint.
+    #[inline]
     pub fn on_access_hint(&self, hint: StateAccessHint) {
         self.inner.on_access_hint(hint);
     }
@@ -315,16 +317,19 @@ impl fmt::Debug for StateRootHashedUpdateStream {
 
 impl StateRootHashedUpdateStream {
     /// Creates a new hashed update stream view.
+    #[inline]
     pub fn new(inner: Arc<dyn StateRootSink>) -> Self {
         Self { inner }
     }
 
     /// Emits an authoritative pre-hashed state update.
+    #[inline]
     pub fn on_hashed_state_update(&self, state: HashedPostState) {
         self.inner.on_hashed_state_update(state);
     }
 
     /// Finishes the authoritative update stream.
+    #[inline]
     pub fn on_updates_finished(&self) {
         self.inner.on_updates_finished();
     }
@@ -344,11 +349,13 @@ impl fmt::Debug for StateRootExecutionStream {
 
 impl StateRootExecutionStream {
     /// Creates a new execution stream view.
+    #[inline]
     pub fn new(inner: Arc<dyn StateRootSink>) -> Self {
         Self { inner }
     }
 
     /// Returns an EVM state hook that finishes the stream when dropped.
+    #[inline]
     pub fn state_hook(&self) -> StateRootUpdateHook {
         StateRootUpdateHook { inner: Arc::clone(&self.inner) }
     }
@@ -374,6 +381,7 @@ impl fmt::Debug for StateRootStreams {
 
 impl StateRootStreams {
     /// Creates stream views backed by one sink.
+    #[inline]
     pub fn from_sink(inner: Arc<dyn StateRootSink>, install_execution_hook: bool) -> Self {
         Self {
             hint: Some(StateRootHintStream::new(Arc::clone(&inner))),
@@ -388,11 +396,13 @@ impl StateRootStreams {
     }
 
     /// Returns the hint-only stream.
+    #[inline]
     pub fn hint_stream(&self) -> Option<StateRootHintStream> {
         self.hint.clone()
     }
 
     /// Returns the pre-hashed update stream.
+    #[inline]
     pub fn hashed_update_stream(&self) -> Option<StateRootHashedUpdateStream> {
         self.hashed_updates.clone()
     }
@@ -403,6 +413,7 @@ impl StateRootStreams {
     }
 
     /// Takes the execution stream.
+    #[inline]
     pub const fn take_execution_stream(&mut self) -> Option<StateRootExecutionStream> {
         self.execution.take()
     }
@@ -423,12 +434,14 @@ impl fmt::Debug for StateRootUpdateHook {
 }
 
 impl OnStateHook for StateRootUpdateHook {
+    #[inline]
     fn on_state(&mut self, state: EvmState) {
         self.inner.on_state_update(state);
     }
 }
 
 impl Drop for StateRootUpdateHook {
+    #[inline]
     fn drop(&mut self) {
         self.inner.on_updates_finished();
     }
@@ -440,24 +453,29 @@ struct SparseTrieStateRootSink {
 }
 
 impl SparseTrieStateRootSink {
+    #[inline]
     const fn new(sender: crossbeam_channel::Sender<StateRootMessage>) -> Self {
         Self { sender }
     }
 }
 
 impl StateRootSink for SparseTrieStateRootSink {
+    #[inline]
     fn on_access_hint(&self, hint: StateAccessHint) {
         let _ = self.sender.send(StateRootMessage::PrefetchProofs(hint.into()));
     }
 
+    #[inline]
     fn on_state_update(&self, state: EvmState) {
         let _ = self.sender.send(StateRootMessage::StateUpdate(state));
     }
 
+    #[inline]
     fn on_hashed_state_update(&self, state: HashedPostState) {
         let _ = self.sender.send(StateRootMessage::HashedStateUpdate(state));
     }
 
+    #[inline]
     fn on_updates_finished(&self) {
         let _ = self.sender.send(StateRootMessage::FinishedStateUpdates);
     }
