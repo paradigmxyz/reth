@@ -350,7 +350,7 @@ async fn run_pipeline_forward_and_unwind(
 
         // Convert block state to sorted hashed post state and compute state root.
         let hashed_state =
-            hashed_post_state_sorted_from_execution_state::<KeccakKeyHasher>(&output.state);
+            hashed_post_state_sorted_from_execution_state::<KeccakKeyHasher>(output.state.inner());
         type TestStateRoot<'a, TX, A> = StateRoot<
             reth_trie_db::DatabaseTrieCursorFactory<&'a TX, A>,
             reth_trie_db::DatabaseHashedCursorFactory<&'a TX>,

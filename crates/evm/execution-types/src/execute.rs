@@ -6,10 +6,10 @@ use alloy_primitives::{
 };
 #[cfg(not(feature = "std"))]
 use core::cell::OnceCell;
-use core::ops::Deref;
 use evm2::{
     bytecode::Bytecode as ExecutableBytecode,
     evm::{AccountInfo, BlockStateAccumulator, StateChangeSink, StateChangeSource, Tracked},
+    StorageKey,
 };
 use reth_primitives_traits::{Account, Bytecode};
 use reth_trie_common::{HashedPostState, KeyHasher};
@@ -162,6 +162,26 @@ impl IndexedBlockState {
         self.index.get_or_init(|| BlockStateIndex::from_state(&self.inner))
     }
 
+    /// Returns account deltas with addresses in arbitrary map order.
+    pub fn accounts(&self) -> impl Iterator<Item = (Address, &Tracked<Option<AccountInfo>>)> + '_ {
+        self.inner.accounts()
+    }
+
+    /// Returns storage-wipe addresses in arbitrary set order.
+    pub fn storage_wipes(&self) -> impl Iterator<Item = Address> + '_ {
+        self.inner.storage_wipes()
+    }
+
+    /// Returns storage deltas with storage keys in arbitrary map order.
+    pub fn storage(&self) -> impl Iterator<Item = (StorageKey, &Tracked<U256>)> + '_ {
+        self.inner.storage()
+    }
+
+    /// Returns bytecode entries in arbitrary map order.
+    pub fn code(&self) -> impl Iterator<Item = (&B256, &ExecutableBytecode)> + '_ {
+        self.inner.code()
+    }
+
     /// Return bytecode if known.
     pub fn bytecode(&self, code_hash: &B256) -> Option<Bytecode> {
         self.index().bytecode.get(code_hash).cloned().map(Into::into)
@@ -223,14 +243,6 @@ impl BlockStateIndex {
 impl Default for IndexedBlockState {
     fn default() -> Self {
         BlockStateAccumulator::default().into()
-    }
-}
-
-impl Deref for IndexedBlockState {
-    type Target = BlockStateAccumulator;
-
-    fn deref(&self) -> &Self::Target {
-        &self.inner
     }
 }
 

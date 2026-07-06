@@ -311,7 +311,11 @@ where
 
                 // Insert state into cache while holding the lock.
                 // Access the execution state through the shared execution output.
-                if new_cache.cache().insert_execution_state(&execution_outcome.state).is_err() {
+                if new_cache
+                    .cache()
+                    .insert_execution_state(execution_outcome.state.inner())
+                    .is_err()
+                {
                     // Clear the cache on error to prevent having a polluted cache
                     *cached = None;
                     debug!(target: "engine::caching", "cleared execution cache on update error");

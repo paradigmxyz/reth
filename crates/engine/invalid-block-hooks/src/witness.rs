@@ -312,7 +312,7 @@ where
         let block_prefix = format!("{}_{}", block.number(), block.hash());
         self.handle_witness_operations(&witness, &block_prefix, block.number())?;
 
-        self.validate_block_state(&block_state, &output.state, &block_prefix)?;
+        self.validate_block_state(&block_state, output.state.inner(), &block_prefix)?;
 
         self.validate_state_root_and_trie(
             parent_header,

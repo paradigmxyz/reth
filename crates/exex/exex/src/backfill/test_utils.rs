@@ -81,7 +81,7 @@ where
 
     // Commit the block's execution outcome to the database
     let hashed_state = hashed_post_state_sorted_from_execution_state::<KeccakKeyHasher>(
-        &block_execution_output.state,
+        block_execution_output.state.inner(),
     );
     let provider_rw = provider_factory.provider_rw()?;
     provider_rw.append_blocks_with_state(vec![block.clone()], &execution_outcome, hashed_state)?;
