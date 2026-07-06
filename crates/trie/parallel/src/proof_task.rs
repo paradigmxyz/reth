@@ -743,6 +743,7 @@ where
                 storage_proofs_processed,
                 "Proof result receiver dropped, discarding result"
             );
+            return
         }
 
         if let Some(root) = root {
