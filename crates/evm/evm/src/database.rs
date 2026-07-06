@@ -16,7 +16,7 @@ use reth_storage_errors::provider::ProviderError;
 use reth_storage_errors::provider::ProviderResult;
 
 /// A helper trait responsible for providing state necessary for EVM execution.
-pub trait EvmStateProvider {
+pub(crate) trait EvmStateProvider {
     /// Get basic account information.
     ///
     /// Returns [`None`] if the account doesn't exist.
@@ -57,7 +57,7 @@ impl<T: StateProvider> EvmStateProvider for T {
     }
 }
 
-/// A database wrapper backed by an [`EvmStateProvider`].
+/// A database wrapper backed by a [`StateProvider`].
 #[derive(Clone)]
 pub struct StateProviderDatabase<DB>(pub DB);
 
