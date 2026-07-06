@@ -627,9 +627,11 @@ fn merge_blocks<N: NodePrimitives>(blocks: Vec<ExecutedBlock<N>>) -> TrieInputSo
 
     #[cfg(not(feature = "rayon"))]
     let (nodes, state) = (
-        TrieUpdatesSorted::merge_batch(trie_data.iter().map(|data| Arc::clone(&data.trie_updates))),
+        TrieUpdatesSorted::merge_batch(
+            trie_data.iter().map(|data| Arc::clone(&data.sorted.trie_updates)),
+        ),
         HashedPostStateSorted::merge_batch(
-            trie_data.iter().map(|data| Arc::clone(&data.hashed_state)),
+            trie_data.iter().map(|data| Arc::clone(&data.sorted.hashed_state)),
         ),
     );
 
