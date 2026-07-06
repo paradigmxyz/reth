@@ -338,6 +338,7 @@ enum EngineSszEndpoint {
     Blobs(u8),
 }
 
+/// Fork selector used by SSZ Engine API request handling.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum EngineSszFork {
     /// Paris fork.
