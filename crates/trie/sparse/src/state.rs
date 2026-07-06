@@ -8,9 +8,8 @@ use alloc::vec::Vec;
 use alloy_primitives::{map::B256Map, B256};
 use either::Either;
 use reth_execution_errors::{SparseStateTrieResult, SparseTrieErrorKind};
-#[cfg(feature = "std")]
-use reth_trie_common::HashedPostStateSorted;
 use reth_trie_common::{
+    prefix_set::{PrefixSet, PrefixSetMut, TriePrefixSets, TriePrefixSetsMut},
     updates::{StorageTrieUpdates, TrieUpdates},
     DecodedMultiProof, MultiProof, Nibbles, ProofTrieNodeV2,
 };
@@ -40,6 +39,8 @@ pub struct SparseStateTrie<
     storage: StorageTries<S>,
     /// Flag indicating whether trie updates should be retained.
     retain_updates: bool,
+    /// Flag indicating whether changed node base paths should be retained.
+    retain_changed_paths: bool,
     /// Holds data that should be dropped after final state root is calculated.
     deferred_drops: DeferredDrops,
     /// Global LFU tracker for hot `(address, slot)` storage entries.
@@ -61,6 +62,7 @@ where
             state: Default::default(),
             storage: Default::default(),
             retain_updates: false,
+            retain_changed_paths: false,
             deferred_drops: DeferredDrops::default(),
             hot_slots_lfu: BucketedLfu::default(),
             hot_accounts_lfu: BucketedLfu::default(),
@@ -150,6 +152,49 @@ impl SparseStateTrie {
 }
 
 impl<A: SparseTrieTrait, S: SparseTrieTrait> SparseStateTrie<A, S> {
+    /// Set the retention of changed node base paths.
+    pub fn set_changed_paths(&mut self, retain_changed_paths: bool) {
+        self.retain_changed_paths = retain_changed_paths;
+        self.state.set_changed_paths(retain_changed_paths);
+        for trie in self.storage.tries.values_mut() {
+            trie.set_changed_paths(retain_changed_paths);
+        }
+        for trie in &mut self.storage.cleared_tries {
+            trie.set_changed_paths(retain_changed_paths);
+        }
+        self.storage.default_trie.set_changed_paths(retain_changed_paths);
+    }
+
+    /// Set the retention of changed node base paths.
+    pub fn with_changed_paths(mut self, retain_changed_paths: bool) -> Self {
+        self.set_changed_paths(retain_changed_paths);
+        self
+    }
+
+    /// Returns storage trie changed paths for tries that have been revealed.
+    fn storage_trie_changed_paths(&mut self) -> B256Map<PrefixSetMut> {
+        self.storage
+            .tries
+            .iter_mut()
+            .filter_map(|(address, trie)| {
+                let changed_paths = trie.take_changed_paths()?;
+                (!changed_paths.is_empty()).then_some((*address, changed_paths))
+            })
+            .collect()
+    }
+
+    /// Returns changed paths by taking them from the revealed sparse tries.
+    ///
+    /// Returns `None` if the accounts trie is not revealed.
+    pub fn take_changed_paths(&mut self) -> Option<TriePrefixSetsMut> {
+        let storage_prefix_sets = self.storage_trie_changed_paths();
+        self.state.take_changed_paths().map(|account_prefix_set| TriePrefixSetsMut {
+            account_prefix_set,
+            storage_prefix_sets,
+            destroyed_accounts: Default::default(),
+        })
+    }
+
     /// Takes all debug recorders from the account trie and all revealed storage tries.
     ///
     /// Returns a vec of `(Option<B256>, TrieDebugRecorder)` where `None` is the account trie
@@ -324,14 +369,19 @@ where
         }
 
         let retain_updates = self.retain_updates;
+        let retain_changed_paths = self.retain_changed_paths;
 
         #[cfg(not(feature = "std"))]
         let results: Vec<_> = targets
             .into_iter()
             .map(|(target, mut nodes)| {
                 let result = match target {
-                    Either::Left(trie) => trie.reveal_v2_proof_nodes(&mut nodes, retain_updates),
-                    Either::Right(trie) => trie.reveal_v2_proof_nodes(&mut nodes, retain_updates),
+                    Either::Left(trie) => {
+                        trie.reveal_v2_proof_nodes(&mut nodes, retain_updates, retain_changed_paths)
+                    }
+                    Either::Right(trie) => {
+                        trie.reveal_v2_proof_nodes(&mut nodes, retain_updates, retain_changed_paths)
+                    }
                 };
                 (result, nodes)
             })
@@ -347,12 +397,16 @@ where
                 .par_bridge_buffered()
                 .map(|(target, mut nodes)| {
                     let result = match target {
-                        Either::Left(trie) => {
-                            trie.reveal_v2_proof_nodes(&mut nodes, retain_updates)
-                        }
-                        Either::Right(trie) => {
-                            trie.reveal_v2_proof_nodes(&mut nodes, retain_updates)
-                        }
+                        Either::Left(trie) => trie.reveal_v2_proof_nodes(
+                            &mut nodes,
+                            retain_updates,
+                            retain_changed_paths,
+                        ),
+                        Either::Right(trie) => trie.reveal_v2_proof_nodes(
+                            &mut nodes,
+                            retain_updates,
+                            retain_changed_paths,
+                        ),
                     };
                     (result, nodes)
                 })
@@ -546,23 +600,32 @@ where
         &mut self,
         max_hot_slots: usize,
         max_hot_accounts: usize,
-        mut retained_paths: SparseTrieRetainedPaths,
+        mut retained_paths: TriePrefixSetsMut,
     ) {
         self.hot_slots_lfu.decay_and_evict(max_hot_slots);
         self.hot_accounts_lfu.decay_and_evict(max_hot_accounts);
-        retained_paths.extend_from_lfus(&self.hot_accounts_lfu, &self.hot_slots_lfu);
-        retained_paths.sort_and_dedup();
+        extend_retained_paths_from_lfus(
+            &mut retained_paths,
+            &self.hot_accounts_lfu,
+            &self.hot_slots_lfu,
+        );
+        let retained_paths = retained_paths.freeze();
 
-        let retained_accounts = retained_paths.account_paths.len();
-        let retained_storage_tries = retained_paths.storage_slots.len();
+        let retained_accounts = retained_paths.account_prefix_set.len();
+        let retained_storage_tries = retained_paths.storage_prefix_sets.len();
         let total_storage_tries_before = self.storage.tries.len();
 
-        let SparseTrieRetainedPaths { account_paths, storage_slots } = retained_paths;
+        let TriePrefixSets { account_prefix_set, storage_prefix_sets, .. } = retained_paths;
 
         // Prune account and storage tries in parallel using the same retained set.
         let (account_nodes_pruned, storage_tries_evicted) = rayon::join(
-            || self.state.as_revealed_mut().map(|trie| trie.prune(&account_paths)).unwrap_or(0),
-            || self.storage.prune_by_retained_slots(storage_slots),
+            || {
+                self.state
+                    .as_revealed_mut()
+                    .map(|trie| trie.prune(account_prefix_set.slice()))
+                    .unwrap_or(0)
+            },
+            || self.storage.prune_by_retained_slots(storage_prefix_sets),
         );
 
         debug!(
@@ -577,64 +640,21 @@ where
     }
 }
 
-/// Account and storage paths that should survive sparse trie pruning.
-#[derive(Debug, Default)]
 #[cfg(feature = "std")]
-pub struct SparseTrieRetainedPaths {
-    account_paths: Vec<Nibbles>,
-    storage_slots: B256Map<Vec<Nibbles>>,
-}
-
-#[cfg(feature = "std")]
-impl SparseTrieRetainedPaths {
-    /// Retains the account path for the given hashed address.
-    pub fn retain_account(&mut self, hashed_address: B256) {
-        self.account_paths.push(Nibbles::unpack(hashed_address));
-    }
-
-    /// Retains the storage slot paths for the given hashed address.
-    pub fn retain_storage_slots(
-        &mut self,
-        hashed_address: B256,
-        slots: impl IntoIterator<Item = Nibbles>,
-    ) {
-        self.storage_slots.entry(hashed_address).or_default().extend(slots);
-    }
-
-    /// Extends the retained paths with every account and storage slot touched by the hashed state.
-    pub fn extend_from_hashed_state(&mut self, hashed_state: &HashedPostStateSorted) {
-        self.account_paths
-            .extend(hashed_state.accounts().iter().map(|(address, _)| Nibbles::unpack(*address)));
-
-        for (address, storage) in hashed_state.account_storages() {
-            self.retain_account(*address);
-            self.retain_storage_slots(
-                *address,
-                storage.storage_slots_ref().iter().map(|(slot, _)| Nibbles::unpack(*slot)),
-            );
-        }
-    }
-
-    fn extend_from_lfus(
-        &mut self,
-        hot_accounts: &BucketedLfu<B256>,
-        hot_slots: &BucketedLfu<HotSlotKey>,
-    ) {
-        self.account_paths.extend(hot_accounts.keys().map(|key| Nibbles::unpack(*key)));
-        for key in hot_slots.keys() {
-            self.storage_slots.entry(key.address).or_default().push(Nibbles::unpack(key.slot));
-        }
-    }
-
-    fn sort_and_dedup(&mut self) {
-        self.account_paths.sort_unstable();
-        self.account_paths.dedup();
-
-        self.storage_slots.retain(|_, slots| {
-            slots.sort_unstable();
-            slots.dedup();
-            !slots.is_empty()
-        });
+fn extend_retained_paths_from_lfus(
+    retained_paths: &mut TriePrefixSetsMut,
+    hot_accounts: &BucketedLfu<B256>,
+    hot_slots: &BucketedLfu<HotSlotKey>,
+) {
+    retained_paths
+        .account_prefix_set
+        .extend_keys(hot_accounts.keys().map(|key| Nibbles::unpack(*key)));
+    for key in hot_slots.keys() {
+        retained_paths
+            .storage_prefix_sets
+            .entry(key.address)
+            .or_default()
+            .insert(Nibbles::unpack(key.slot));
     }
 }
 
@@ -656,14 +676,14 @@ impl<S: SparseTrieTrait> StorageTries<S> {
     ///
     /// Tries without retained slots are evicted entirely. Tries with retained slots are pruned to
     /// those slots.
-    fn prune_by_retained_slots(&mut self, retained_slots: B256Map<Vec<Nibbles>>) -> usize {
+    fn prune_by_retained_slots(&mut self, retained_slots: B256Map<PrefixSet>) -> usize {
         // Parallel pass: prune retained tries and clear evicted ones in place.
         {
             use rayon::iter::{IntoParallelRefMutIterator, ParallelIterator};
             self.tries.par_iter_mut().for_each(|(address, trie)| {
                 if let Some(slots) = retained_slots.get(address) {
                     if let Some(t) = trie.as_revealed_mut() {
-                        t.prune(slots);
+                        t.prune(slots.slice());
                     }
                 } else {
                     trie.clear();
@@ -734,8 +754,8 @@ mod tests {
     use reth_trie::{updates::StorageTrieUpdates, HashBuilder, MultiProof, EMPTY_ROOT_HASH};
     use reth_trie_common::{
         proof::{ProofNodes, ProofRetainer},
-        BranchNodeMasks, BranchNodeMasksMap, BranchNodeV2, HashedStorageSorted, LeafNode, RlpNode,
-        StorageMultiProof, TrieAccount, TrieMask, TrieNodeV2,
+        BranchNodeMasks, BranchNodeMasksMap, BranchNodeV2, LeafNode, RlpNode, StorageMultiProof,
+        TrieAccount, TrieMask, TrieNodeV2,
     };
 
     /// Create a leaf key (suffix) with given nibbles padded with zeros to reach `total_len`.
@@ -892,7 +912,7 @@ mod tests {
         sparse.set_hot_cache_capacities(1, 1);
         sparse.record_account_touch(account);
         sparse.record_slot_touch(account, slot);
-        sparse.prune(1, 1, SparseTrieRetainedPaths::default());
+        sparse.prune(1, 1, TriePrefixSetsMut::default());
 
         assert_eq!(sparse.hot_accounts_lfu.keys().copied().collect::<Vec<_>>(), vec![account]);
         assert_eq!(
@@ -902,27 +922,34 @@ mod tests {
     }
 
     #[test]
-    fn retained_paths_extend_from_hashed_state() {
+    fn take_changed_paths_from_sparse_state_trie() {
         let account = B256::with_last_byte(0x01);
-        let storage_account = B256::with_last_byte(0x02);
-        let slot = B256::with_last_byte(0x03);
-        let hashed_state = HashedPostStateSorted::new(
-            vec![(account, Some(Account::default()))],
-            B256Map::from_iter([(
-                storage_account,
-                HashedStorageSorted { storage_slots: vec![(slot, U256::from(1))], wiped: false },
-            )]),
-        );
+        let slot = B256::with_last_byte(0x02);
+        let mut sparse = SparseStateTrie::<ArenaParallelSparseTrie>::default();
+        sparse.set_accounts_trie(RevealableSparseTrie::revealed_empty());
+        sparse.insert_storage_trie(account, RevealableSparseTrie::revealed_empty());
+        sparse.set_changed_paths(true);
 
-        let mut retained_paths = SparseTrieRetainedPaths::default();
-        retained_paths.extend_from_hashed_state(&hashed_state);
-        retained_paths.sort_and_dedup();
+        let mut account_updates =
+            B256Map::from_iter([(account, LeafUpdate::Changed(vec![0x01; 32]))]);
+        sparse.trie_mut().update_leaves(&mut account_updates, |_, _| {}).unwrap();
+        assert!(account_updates.is_empty());
+        let _ = sparse.root().unwrap();
 
-        assert_eq!(
-            retained_paths.account_paths,
-            vec![Nibbles::unpack(account), Nibbles::unpack(storage_account)]
-        );
-        assert_eq!(retained_paths.storage_slots[&storage_account], vec![Nibbles::unpack(slot)]);
+        let mut storage_updates = B256Map::from_iter([(slot, LeafUpdate::Changed(vec![0x02; 32]))]);
+        sparse
+            .storage_trie_mut(&account)
+            .unwrap()
+            .update_leaves(&mut storage_updates, |_, _| {})
+            .unwrap();
+        assert!(storage_updates.is_empty());
+        let _ = sparse.storage_root(&account).unwrap();
+
+        let changed_paths = sparse.take_changed_paths().unwrap();
+        assert!(changed_paths.account_prefix_set.iter().any(|path| *path == Nibbles::default()));
+        assert!(changed_paths.storage_prefix_sets[&account]
+            .iter()
+            .any(|path| *path == Nibbles::default()));
     }
 
     #[test]
@@ -984,9 +1011,13 @@ mod tests {
         );
         sparse.root().unwrap();
 
-        let mut retained_paths = SparseTrieRetainedPaths::default();
-        retained_paths.retain_account(account);
-        retained_paths.retain_storage_slots(account, [Nibbles::unpack(slot)]);
+        let mut retained_paths = TriePrefixSetsMut::default();
+        retained_paths.account_prefix_set.insert(Nibbles::unpack(account));
+        retained_paths
+            .storage_prefix_sets
+            .entry(account)
+            .or_default()
+            .insert(Nibbles::unpack(slot));
         sparse.prune(0, 0, retained_paths);
 
         assert!(matches!(

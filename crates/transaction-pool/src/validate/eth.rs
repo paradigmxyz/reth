@@ -26,6 +26,7 @@ use alloy_eips::{
     eip7840::BlobParams, BlockId,
 };
 use alloy_primitives::U256;
+use alloy_rlp::Encodable;
 use reth_chainspec::{ChainSpecProvider, EthChainSpec, EthereumHardforks};
 use reth_evm::ConfigureEvm;
 use reth_primitives_traits::{
@@ -486,12 +487,17 @@ where
         if transaction.is_eip4844() {
             // Since blob transactions are pulled instead of pushed, and only the consensus data is
             // kept in memory while the sidecar is cached on disk, there is no critical limit that
-            // should be enforced. Still, enforcing some cap on the input bytes. blob txs also must
-            // be executable right away when they enter the pool.
-            let tx_input_len = transaction.input().len();
-            if tx_input_len > self.max_tx_input_bytes {
+            // should be enforced. Still, enforcing some cap on the dynamic transaction data. blob
+            // txs also must be executable right away when they enter the pool.
+            let tx_size = transaction.input().len().saturating_add(
+                transaction
+                    .access_list()
+                    .map(|access_list| access_list.length())
+                    .unwrap_or_default(),
+            );
+            if tx_size > self.max_tx_input_bytes {
                 return Err(InvalidPoolTransactionError::OversizedData {
-                    size: tx_input_len,
+                    size: tx_size,
                     limit: self.max_tx_input_bytes,
                 })
             }
@@ -1480,12 +1486,15 @@ pub fn ensure_intrinsic_gas<T: EthPoolTransaction>(
 mod tests {
     use super::*;
     use crate::{
-        blobstore::InMemoryBlobStore, error::PoolErrorKind, traits::PoolTransaction,
-        CoinbaseTipOrdering, EthPooledTransaction, Pool, TransactionPool,
+        blobstore::InMemoryBlobStore, error::PoolErrorKind, test_utils::TransactionBuilder,
+        traits::PoolTransaction, CoinbaseTipOrdering, EthPooledTransaction, Pool, TransactionPool,
     };
     use alloy_consensus::Transaction;
-    use alloy_eips::eip2718::Decodable2718;
-    use alloy_primitives::{hex, U256};
+    use alloy_eips::{
+        eip2718::{Decodable2718, Encodable2718},
+        eip2930::{AccessList, AccessListItem},
+    };
+    use alloy_primitives::{hex, Address, B256, U256};
     use reth_ethereum_primitives::PooledTransactionVariant;
     use reth_evm_ethereum::EthEvmConfig;
     use reth_primitives_traits::SignedTransaction;
@@ -1906,6 +1915,43 @@ mod tests {
         let outcome = validator.validate_one(TransactionOrigin::External, transaction);
         let invalid = outcome.as_invalid().unwrap();
         assert!(invalid.is_oversized());
+    }
+
+    #[test]
+    fn reject_blob_tx_with_oversized_access_list() {
+        let max_tx_input_bytes = 512;
+        let provider = MockEthProvider::default().with_genesis_block();
+        let validator = EthTransactionValidatorBuilder::new(provider, test_evm_config())
+            .with_max_tx_input_bytes(max_tx_input_bytes)
+            .build(InMemoryBlobStore::default());
+
+        let blob_tx_with_access_list = |storage_keys: usize| {
+            let access_list = AccessList(vec![AccessListItem {
+                address: Address::random(),
+                storage_keys: (0..storage_keys).map(|_| B256::random()).collect(),
+            }]);
+            let tx = TransactionBuilder::default()
+                .access_list(access_list)
+                .into_eip4844()
+                .try_into_recovered()
+                .unwrap();
+            let encoded_length = tx.encode_2718_len();
+            EthPooledTransaction::new(tx, encoded_length)
+        };
+
+        let is_oversized = |tx: &EthPooledTransaction| {
+            matches!(
+                validator.validate_stateless(TransactionOrigin::External, tx),
+                Err(InvalidPoolTransactionError::OversizedData { .. })
+            )
+        };
+
+        let small = blob_tx_with_access_list(1);
+        assert!(!is_oversized(&small));
+
+        let large = blob_tx_with_access_list(64);
+        assert!(large.input().is_empty());
+        assert!(is_oversized(&large));
     }
 
     #[tokio::test]
