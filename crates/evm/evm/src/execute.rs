@@ -605,19 +605,29 @@ pub trait Executor<DB: Database>: Sized {
 
     /// Consumes the type and executes the block.
     fn execute(
-        self,
+        mut self,
         block: &RecoveredBlock<<Self::Primitives as NodePrimitives>::Block>,
-    ) -> Result<BlockExecutionOutput<<Self::Primitives as NodePrimitives>::Receipt>, Self::Error>;
+    ) -> Result<BlockExecutionOutput<<Self::Primitives as NodePrimitives>::Receipt>, Self::Error>
+    {
+        let result = self.execute_one(block)?;
+        let state = self.into_state();
+        Ok(BlockExecutionOutput::new(result, state.into_execution_state()))
+    }
 
     /// Consumes the type, executes the block, and streams hashed state updates to the provided
     /// hook.
     fn execute_with_state_hook<F>(
-        self,
+        mut self,
         block: &RecoveredBlock<<Self::Primitives as NodePrimitives>::Block>,
         state_hook: F,
     ) -> Result<BlockExecutionOutput<<Self::Primitives as NodePrimitives>::Receipt>, Self::Error>
     where
-        F: FnMut(HashedPostState) + Send + 'static;
+        F: FnMut(HashedPostState) + Send + 'static,
+    {
+        let result = self.execute_one_with_state_hook(block, state_hook)?;
+        let state = self.into_state();
+        Ok(BlockExecutionOutput::new(result, state.into_execution_state()))
+    }
 
     /// Executes the block and invokes `f` with the accumulated execution state after execution.
     fn execute_with_state_closure<F>(
