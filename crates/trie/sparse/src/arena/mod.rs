@@ -2997,19 +2997,25 @@ impl SparseTrie for ArenaParallelSparseTrie {
                     // If all updates are removals and could empty the subtrie,
                     // force inline processing so the upper-arena collapse logic
                     // can detect blinded siblings and request proofs.
+                    let mut has_changed_update = false;
                     let all_removals = subtrie_updates
                         .iter()
                         // Filter out Touched, as they don't affect the structure of the trie. So an
                         // update set with 2 removals and one Touched could still result in an empty
-                        // sub trie.
-                        .filter(|(_, _, u)| matches!(u, LeafUpdate::Changed(_)))
+                        // sub trie. A touched-only range must not count as all removals.
+                        .filter(|(_, _, u)| {
+                            let is_changed = matches!(u, LeafUpdate::Changed(_));
+                            has_changed_update |= is_changed;
+                            is_changed
+                        })
                         .all(|(_, _, u)| matches!(u, LeafUpdate::Changed(v) if v.is_empty()));
                     let subtrie_num_leaves = match &self.upper_arena[child_idx] {
                         ArenaSparseNode::Subtrie(s) => s.num_leaves,
                         _ => 0,
                     };
-                    let might_empty_subtrie =
-                        all_removals && num_subtrie_updates as u64 >= subtrie_num_leaves;
+                    let might_empty_subtrie = has_changed_update &&
+                        all_removals &&
+                        num_subtrie_updates as u64 >= subtrie_num_leaves;
 
                     if (num_subtrie_updates >= threshold || parallelize_distributed_updates) &&
                         !might_empty_subtrie
