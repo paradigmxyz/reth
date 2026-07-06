@@ -148,13 +148,7 @@ where
 
     /// Takes the preserved sparse trie handle, if present.
     pub(crate) fn take_preserved_sparse_trie(&self) -> Option<PreservedSparseTrie> {
-        let start = Instant::now();
-        let preserved = self.state_trie_overlays.take_sparse_trie();
-        self.trie_metrics
-            .sparse_trie_cache_wait_duration_histogram
-            .record(start.elapsed().as_secs_f64());
-
-        preserved
+        self.state_trie_overlays.take_sparse_trie()
     }
 
     /// Creates a new payload processor.
@@ -603,14 +597,23 @@ where
             };
 
             let mut sparse_state_trie = match preserved_sparse_trie {
-                Some(preserved) => match preserved.into_trie_for(parent_state_root) {
-                    Ok(Some(trie)) => trie,
-                    Ok(None) => new_sparse_state_trie(),
-                    Err(err) => {
-                        let _ = state_root_tx.send(Err(StateRootTaskError::Other(err.to_string())));
-                        return;
+                Some(preserved) => {
+                    let start = Instant::now();
+                    let preserved = preserved.into_trie_for(parent_state_root);
+                    trie_metrics
+                        .sparse_trie_cache_wait_duration_histogram
+                        .record(start.elapsed().as_secs_f64());
+
+                    match preserved {
+                        Ok(Some(trie)) => trie,
+                        Ok(None) => new_sparse_state_trie(),
+                        Err(err) => {
+                            let _ = state_root_tx
+                                .send(Err(StateRootTaskError::Other(err.to_string())));
+                            return;
+                        }
                     }
-                },
+                }
                 None => new_sparse_state_trie(),
             };
             sparse_state_trie.set_changed_paths(true);
