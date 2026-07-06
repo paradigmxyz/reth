@@ -456,7 +456,7 @@ where
         }
 
         let sparse_state_trie =
-            payload_processor.try_take_sparse_trie_for_parent(env.parent_state_root);
+            payload_processor.take_sparse_trie_for_parent(env.parent_state_root);
         let overlay_factory = if sparse_state_trie.is_some() {
             overlay_factory.with_skip_overlay_for_reused_sparse_trie()
         } else {
@@ -505,8 +505,7 @@ where
             return Ok(None)
         }
 
-        let sparse_state_trie =
-            payload_processor.try_take_sparse_trie_for_parent(parent_state_root);
+        let sparse_state_trie = payload_processor.take_sparse_trie_for_parent(parent_state_root);
         let overlay_factory = if sparse_state_trie.is_some() {
             overlay_factory.with_skip_overlay_for_reused_sparse_trie()
         } else {

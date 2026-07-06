@@ -146,14 +146,14 @@ where
         &self.executor
     }
 
-    /// Attempts to take the preserved sparse trie for the given parent state root, if it is
-    /// immediately available and reusable.
-    pub(crate) fn try_take_sparse_trie_for_parent(
+    /// Takes the preserved sparse trie for the given parent state root, if it is available and
+    /// reusable.
+    pub(crate) fn take_sparse_trie_for_parent(
         &self,
         parent_state_root: B256,
     ) -> Option<SparseStateTrie> {
         let start = Instant::now();
-        let preserved = self.state_trie_overlays.try_take_sparse_trie();
+        let preserved = self.state_trie_overlays.take_sparse_trie();
         self.trie_metrics
             .sparse_trie_cache_wait_duration_histogram
             .record(start.elapsed().as_secs_f64());
@@ -623,13 +623,14 @@ where
 
             // Acquire the guard before sending the result to prevent a race condition:
             // Without this, the next block could start after send() but before store(),
-            // causing the next trie take to observe the trie as still in use
-            // instead of reusing the preserved one. Holding the guard keeps blocking takes
-            // waiting and makes non-blocking takes fall back until we've stored the trie.
+            // causing take_sparse_trie() to observe the trie as still in use
+            // instead of reusing the preserved one. Holding the guard ensures the next
+            // block's take_sparse_trie() blocks until we've stored the trie for reuse.
             let mut guard = state_trie_overlays.lock_sparse_trie();
 
             let task_result = result.as_ref().ok().cloned();
-            // Send state root computation result while keeping the preserve guard held.
+            // Send state root computation result - next block may start but will block on
+            // take_sparse_trie().
             if state_root_tx.send(result).is_err() {
                 // Receiver dropped - payload was likely invalid or cancelled.
                 // Clear the trie instead of preserving potentially invalid state.
