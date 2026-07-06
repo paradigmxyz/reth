@@ -333,12 +333,11 @@ where
         return Ok(());
     }
 
-    // Split: flush the first N shards, keep the remainder buffered.
+    // Flush the completed prefix, then drain it in place so the tail buffer stays allocated.
     let flush_len = shards_to_flush * NUM_OF_INDICES_IN_SHARD;
-    let remainder = list.split_off(flush_len);
 
     // Write each complete shard with its highest block number as the key.
-    for chunk in list.chunks(NUM_OF_INDICES_IN_SHARD) {
+    for chunk in list[..flush_len].chunks(NUM_OF_INDICES_IN_SHARD) {
         let highest = *chunk.last().expect("chunk is non-empty");
         let key = ShardedKey::new(address, highest);
         let value = BlockNumberList::new_pre_sorted(chunk.iter().copied());
@@ -350,8 +349,8 @@ where
         }
     }
 
-    // Keep the remaining indices for the next iteration.
-    *list = remainder;
+    // Keep the remaining indices for the next iteration without allocating a new Vec.
+    list.drain(..flush_len);
     Ok(())
 }
 
@@ -555,12 +554,11 @@ where
         return Ok(());
     }
 
-    // Split: flush the first N shards, keep the remainder buffered.
+    // Flush the completed prefix, then drain it in place so the tail buffer stays allocated.
     let flush_len = shards_to_flush * NUM_OF_INDICES_IN_SHARD;
-    let remainder = list.split_off(flush_len);
 
     // Write each complete shard with its highest block number as the key.
-    for chunk in list.chunks(NUM_OF_INDICES_IN_SHARD) {
+    for chunk in list[..flush_len].chunks(NUM_OF_INDICES_IN_SHARD) {
         let highest = *chunk.last().expect("chunk is non-empty");
         let key = StorageShardedKey::new(address, storage_key, highest);
         let value = BlockNumberList::new_pre_sorted(chunk.iter().copied());
@@ -572,8 +570,8 @@ where
         }
     }
 
-    // Keep the remaining indices for the next iteration.
-    *list = remainder;
+    // Keep the remaining indices for the next iteration without allocating a new Vec.
+    list.drain(..flush_len);
     Ok(())
 }
 
