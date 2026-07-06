@@ -759,8 +759,11 @@ where
         }
 
         executor.apply_pre_execution_changes()?;
-        for transaction in block.clone_transactions_recovered() {
-            let tx_env = evm_config.tx_env(transaction);
+        for transaction in block.transactions_recovered() {
+            let (tx_env, _) =
+                <_ as ExecutableTxParts<TxEnvFor<Evm>, TxTy<Evm::Primitives>>>::into_parts(
+                    transaction,
+                );
             executor.execute_transaction(tx_env)?;
         }
         executor.finish()
@@ -1100,6 +1103,17 @@ where
     }
 }
 
+impl<T: Clone, TxEnv> ExecutableTxParts<TxEnv, T> for Recovered<&T>
+where
+    TxEnv: FromRecoveredTx<T>,
+{
+    type Recovered = Self;
+
+    fn into_parts(self) -> (TxEnv, Self) {
+        (TxEnv::from_recovered_tx(self.to_recovered()), self)
+    }
+}
+
 impl<T: Clone, TxEnv> ExecutableTxParts<TxEnv, T> for WithEncoded<Recovered<T>>
 where
     TxEnv: FromTxWithEncoded<T>,
@@ -1200,7 +1214,11 @@ mod tests {
     #[test]
     fn unsupported_executor_returns_error() {
         let executor = UnsupportedExecutor::<EthPrimitives>::default();
-        let err = executor.execute(&Default::default()).unwrap_err();
+        let err = <UnsupportedExecutor<EthPrimitives> as Executor<evm2::evm::EmptyDB>>::execute(
+            executor,
+            &Default::default(),
+        )
+        .unwrap_err();
         assert!(err.to_string().contains("unsupported"));
     }
 }
