@@ -1567,8 +1567,12 @@ where
         let mut hashed_cursor_current: Option<(Nibbles, VE::DeferredEncoder)> = None;
 
         static EMPTY_TARGETS: [ProofV2Target; 0] = [];
-        let sub_trie_targets =
-            SubTrieTargets { prefix: Nibbles::new(), targets: &EMPTY_TARGETS, retain_root: true };
+        let sub_trie_targets = SubTrieTargets {
+            prefix: Nibbles::new(),
+            upper_bound: None,
+            targets: &EMPTY_TARGETS,
+            retain_root: true,
+        };
 
         if let Err(err) = self.proof_subtrie(
             value_encoder,

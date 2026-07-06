@@ -37,6 +37,8 @@ pub(crate) struct SubTrieTargets<'a> {
     /// The prefix which all nodes in the sub-trie share. This is also the first node in the trie
     /// in lexicographic order.
     pub(crate) prefix: Nibbles,
+    /// First path after the sub-trie in lexicographic order.
+    pub(crate) upper_bound: Option<Nibbles>,
     /// The targets belonging to this sub-trie. These will be sorted by their `key` field,
     /// lexicographically.
     pub(crate) targets: &'a [ProofV2Target],
@@ -50,7 +52,7 @@ impl<'a> SubTrieTargets<'a> {
     // A helper function which returns the first path following a sub-trie in lexicographical order.
     #[inline]
     pub(crate) fn upper_bound(&self) -> Option<Nibbles> {
-        sub_trie_upper_bound(&self.prefix)
+        self.upper_bound
     }
 }
 
@@ -102,9 +104,10 @@ pub(crate) fn iter_sub_trie_targets(
     // key, as that will be the order they are checked by the `ProofCalculator`.
     target_chunks.map(move |targets| {
         let prefix = sub_trie_prefix(&targets[0]);
+        let upper_bound = sub_trie_upper_bound(&prefix);
         let retain_root = targets[0].min_len == 0;
         targets.sort_unstable_by_key(|target| target.key_nibbles);
-        SubTrieTargets { prefix, targets, retain_root }
+        SubTrieTargets { prefix, upper_bound, targets, retain_root }
     })
 }
 
