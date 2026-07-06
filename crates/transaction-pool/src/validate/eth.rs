@@ -911,20 +911,9 @@ where
 
         self.block_gas_limit.store(new_tip_block.gas_limit(), std::sync::atomic::Ordering::Relaxed);
 
-        let evm_env = self
-            .evm_config
-            .evm_env(new_tip_block)
+        let validation_rules = transaction_validation_rules(&self.evm_config, new_tip_block)
             .expect("evm_env should not fail for executed block");
-        let limits = evm_env.transaction_validation_limits();
-        self.fork_tracker
-            .max_initcode_size
-            .store(limits.max_initcode_size, std::sync::atomic::Ordering::Relaxed);
-        self.fork_tracker
-            .tx_gas_limit_cap
-            .store(limits.tx_gas_limit_cap, std::sync::atomic::Ordering::Relaxed);
-        self.fork_tracker
-            .transaction_validation_gas_rules
-            .store(evm_env.transaction_validation_gas_rules());
+        self.fork_tracker.store_validation_rules(validation_rules);
     }
 
     fn max_gas_limit(&self) -> u64 {
@@ -1037,12 +1026,8 @@ pub struct EthTransactionValidatorBuilder<Client, Evm> {
     disable_balance_check: bool,
     /// Bitmap of custom transaction types that are allowed.
     other_tx_types: U256,
-    /// Cached max initcode size from EVM config
-    max_initcode_size: usize,
-    /// Cached transaction gas limit cap from EVM config (0 = no cap)
-    tx_gas_limit_cap: u64,
-    /// Cached transaction validation gas rules from EVM config
-    transaction_validation_gas_rules: EvmTransactionValidationGasRules,
+    /// Cached transaction validation rules from EVM config.
+    validation_rules: TransactionValidationRules,
     /// Whether EIP-7594 blob sidecars are accepted.
     /// When false, EIP-7594 (v1) sidecars are always rejected and EIP-4844 (v0) sidecars
     /// are always accepted, regardless of Osaka fork activation.
@@ -1070,9 +1055,8 @@ impl<Client, Evm> EthTransactionValidatorBuilder<Client, Evm> {
             .header_by_id(BlockId::latest())
             .expect("failed to fetch latest header")
             .expect("latest header is not found");
-        let evm_env = evm_config.evm_env(&tip).expect("evm_env should not fail for latest block");
-        let limits = evm_env.transaction_validation_limits();
-        let transaction_validation_gas_rules = evm_env.transaction_validation_gas_rules();
+        let validation_rules = transaction_validation_rules(&evm_config, &tip)
+            .expect("evm_env should not fail for latest block");
 
         Self {
             block_gas_limit: ETHEREUM_BLOCK_GAS_LIMIT_30M.into(),
@@ -1109,9 +1093,7 @@ impl<Client, Evm> EthTransactionValidatorBuilder<Client, Evm> {
             // no custom transaction types by default
             other_tx_types: U256::ZERO,
 
-            tx_gas_limit_cap: limits.tx_gas_limit_cap,
-            max_initcode_size: limits.max_initcode_size,
-            transaction_validation_gas_rules,
+            validation_rules,
 
             // EIP-7594 sidecars are accepted by default (standard Ethereum behavior)
             eip7594: true,
@@ -1320,9 +1302,7 @@ impl<Client, Evm> EthTransactionValidatorBuilder<Client, Evm> {
             max_blob_count,
             additional_tasks: _,
             other_tx_types,
-            max_initcode_size,
-            tx_gas_limit_cap,
-            transaction_validation_gas_rules,
+            validation_rules,
             eip7594,
         } = self;
 
@@ -1333,10 +1313,10 @@ impl<Client, Evm> EthTransactionValidatorBuilder<Client, Evm> {
             osaka: AtomicBool::new(osaka),
             tip_timestamp: AtomicU64::new(tip_timestamp),
             max_blob_count: AtomicU64::new(max_blob_count),
-            max_initcode_size: AtomicUsize::new(max_initcode_size),
-            tx_gas_limit_cap: AtomicU64::new(tx_gas_limit_cap),
+            max_initcode_size: AtomicUsize::new(validation_rules.max_initcode_size),
+            tx_gas_limit_cap: AtomicU64::new(validation_rules.tx_gas_limit_cap),
             transaction_validation_gas_rules: AtomicTransactionValidationGasRules::new(
-                transaction_validation_gas_rules,
+                validation_rules.gas_rules,
             ),
         };
 
@@ -1407,6 +1387,31 @@ pub struct ForkTracker {
     pub tx_gas_limit_cap: AtomicU64,
     /// Cached transaction validation gas rules from EVM config.
     pub transaction_validation_gas_rules: AtomicTransactionValidationGasRules,
+}
+
+/// Transaction validation rules resolved by the configured EVM for a specific block.
+#[derive(Debug, Clone, Copy)]
+struct TransactionValidationRules {
+    max_initcode_size: usize,
+    tx_gas_limit_cap: u64,
+    gas_rules: EvmTransactionValidationGasRules,
+}
+
+fn transaction_validation_rules<Evm>(
+    evm_config: &Evm,
+    header: &HeaderTy<Evm::Primitives>,
+) -> Result<TransactionValidationRules, Evm::Error>
+where
+    Evm: ConfigureEvm,
+{
+    let evm_env = evm_config.evm_env(header)?;
+    let limits = evm_env.transaction_validation_limits();
+
+    Ok(TransactionValidationRules {
+        max_initcode_size: limits.max_initcode_size,
+        tx_gas_limit_cap: limits.tx_gas_limit_cap,
+        gas_rules: evm_env.transaction_validation_gas_rules(),
+    })
 }
 
 /// Atomic transaction validation gas rules.
@@ -1515,6 +1520,12 @@ impl AtomicTransactionValidationGasRules {
 }
 
 impl ForkTracker {
+    fn store_validation_rules(&self, rules: TransactionValidationRules) {
+        self.max_initcode_size.store(rules.max_initcode_size, std::sync::atomic::Ordering::Relaxed);
+        self.tx_gas_limit_cap.store(rules.tx_gas_limit_cap, std::sync::atomic::Ordering::Relaxed);
+        self.transaction_validation_gas_rules.store(rules.gas_rules);
+    }
+
     /// Returns `true` if Shanghai fork is activated.
     pub fn is_shanghai_activated(&self) -> bool {
         self.shanghai.load(std::sync::atomic::Ordering::Relaxed)
