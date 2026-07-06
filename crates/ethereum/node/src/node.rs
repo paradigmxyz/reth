@@ -408,11 +408,13 @@ where
     EthB: EthApiBuilder<N>,
     PVB: PayloadValidatorBuilder<N>,
     EB: EngineApiBuilder<N>,
+    EB::EngineApi: EngineSszApi,
     EVB: EngineValidatorBuilder<N>,
     EthApiError: FromEvmError<N::Evm>,
     EvmFactoryFor<N::Evm>: EvmFactory<Tx = TxEnv>,
     RpcMiddleware: RethRpcMiddleware,
     AuthHttpMiddleware: RethAuthHttpMiddleware<Identity>,
+    Stack<AuthHttpMiddleware, EngineSszProxyLayer<EB::EngineApi>>: RethAuthHttpMiddleware<Identity>,
 {
     type EthApi = EthB::EthApi;
 
