@@ -462,12 +462,7 @@ where
         let hashed_state = hashed_state_mode
             .output()
             .then(|| hashed_post_state_from_execution_state::<KeccakKeyHasher>(&block_state));
-        let mut output = RethReceiptBuilder
-            .build_block_output_from_receipts_and_state_with_hashed_state(
-                receipts,
-                block_state,
-                hashed_state,
-            );
+        let mut output = RethReceiptBuilder.build_block_output(receipts, block_state, hashed_state);
         output.result.requests = requests;
 
         Ok(output)

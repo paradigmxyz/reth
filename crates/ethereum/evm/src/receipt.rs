@@ -22,9 +22,8 @@ impl RethReceiptBuilder {
         Receipt { tx_type, success: result.status, cumulative_gas_used, logs: result.logs }
     }
 
-    /// Builds a block execution output from already-built receipts and an owned accumulated
-    /// execution state.
-    pub fn build_block_output_from_receipts_and_state_with_hashed_state(
+    /// Builds a block execution output from already-built receipts and execution state.
+    pub(crate) fn build_block_output(
         &self,
         receipts: Vec<Receipt>,
         state: BlockStateAccumulator,

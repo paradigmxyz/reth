@@ -241,12 +241,8 @@ impl<'a> BlockExecutor for EthBlockExecutor<'a> {
             .hashed_state_mode
             .output()
             .then(|| hashed_post_state_from_execution_state::<KeccakKeyHasher>(&self.block_state));
-        let mut output = RethReceiptBuilder
-            .build_block_output_from_receipts_and_state_with_hashed_state(
-                self.receipts,
-                self.block_state,
-                hashed_state,
-            );
+        let mut output =
+            RethReceiptBuilder.build_block_output(self.receipts, self.block_state, hashed_state);
         output.result.requests = requests;
 
         Ok(output)
