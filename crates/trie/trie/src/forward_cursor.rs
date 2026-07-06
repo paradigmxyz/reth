@@ -50,6 +50,9 @@ impl<'a, K, V> ForwardInMemoryCursor<'a, K, V> {
 /// For small slices, linear scan has better cache locality and lower overhead.
 const BINARY_SEARCH_THRESHOLD: usize = 128;
 
+/// Number of entries to scan linearly before falling back to binary search on large slices.
+const LINEAR_PROBE_LIMIT: usize = 32;
+
 impl<K: Ord, V> ForwardInMemoryCursor<'_, K, V> {
     /// Returns the first entry from the current cursor position that's greater or equal to the
     /// provided key. This method advances the cursor forward.
@@ -75,12 +78,23 @@ impl<K: Ord, V> ForwardInMemoryCursor<'_, K, V> {
     /// exhausted.
     ///
     /// Uses binary search for large remaining slices (>= 128 entries), linear scan for small ones.
+    /// Large slices probe a short linear window first because forward trie cursors often seek to
+    /// nearby keys, where avoiding binary-search key comparisons is cheaper.
     ///
     /// Returns the first entry for which `predicate` returns `false` or `None`. The cursor will
     /// point to the returned entry.
     fn advance_while(&mut self, predicate: impl Fn(&K) -> bool) -> Option<&(K, V)> {
         let remaining = self.entries.len().saturating_sub(self.idx);
         if remaining >= BINARY_SEARCH_THRESHOLD {
+            let probe_end = self.idx + LINEAR_PROBE_LIMIT.min(remaining);
+            while self.idx < probe_end && predicate(&self.entries[self.idx].0) {
+                self.idx += 1;
+            }
+
+            if self.idx < probe_end || self.idx == self.entries.len() {
+                return self.current()
+            }
+
             let slice = &self.entries[self.idx..];
             let pos = slice.partition_point(|(k, _)| predicate(k));
             self.idx += pos;
