@@ -44,16 +44,19 @@ pub(super) fn test_prune_retains_specified_leaves<T: SparseTrie>(new_trie: fn() 
 
 /// Pruning should reduce the node count.
 ///
-/// Build a trie with 10+ leaves spread across multiple subtries, fully reveal
+/// Build a trie with several root children that each contain grandchildren, fully reveal
 /// and compute root. Then prune retaining only 1 leaf. `size_hint()` must
 /// decrease and `prune` must return > 0.
 pub(super) fn test_prune_reduces_node_count<T: SparseTrie>(new_trie: fn() -> T) {
-    // Create 16 keys with different first nibbles to spread across subtries.
+    // Create 16 pairs with different first nibbles. Pruning keeps direct
+    // children of the retained root branch, so each child needs grandchildren that can be pruned.
     let keys: Vec<B256> = (0u8..16)
-        .map(|i| {
-            let mut k = B256::ZERO;
-            k.0[0] = (i + 1) << 4; // 0x10, 0x20, ..., 0x00 (wraps, but all distinct)
-            k
+        .flat_map(|i| {
+            [0u8, 1].map(move |child| {
+                let mut k = B256::ZERO;
+                k.0[0] = (i << 4) | child;
+                k
+            })
         })
         .collect();
 
