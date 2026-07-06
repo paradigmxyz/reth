@@ -242,8 +242,6 @@ impl LazyTrieDataProducer {
         trie_updates: Arc<TrieUpdates>,
         changed_paths: Option<Arc<TriePrefixSetsMut>>,
     ) -> ComputedTrieData {
-        // let _span = debug_span!(target: "engine::tree::deferred_trie", "sort_inputs").entered();
-
         #[cfg(feature = "rayon")]
         let (sorted_hashed_state, sorted_trie_updates) = rayon::join(
             || match Arc::try_unwrap(hashed_state) {
