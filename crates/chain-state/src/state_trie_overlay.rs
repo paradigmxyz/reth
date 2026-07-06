@@ -93,6 +93,12 @@ impl<N: NodePrimitives> StateTrieOverlayManager<N> {
         self.preserved_sparse_trie.lock().take()
     }
 
+    /// Attempts to take the preserved sparse trie if present, returning immediately if it is
+    /// currently locked.
+    pub fn try_take_sparse_trie(&self) -> Option<PreservedSparseTrie> {
+        self.preserved_sparse_trie.try_lock().and_then(|mut state| state.take())
+    }
+
     /// Acquires a guard that blocks taking the trie until dropped.
     ///
     /// Use this before sending the state root result to ensure the next block waits for the trie
@@ -720,6 +726,24 @@ mod tests {
             guard.clear();
         }
         assert!(manager.take_sparse_trie().is_none());
+    }
+
+    #[test]
+    fn try_taking_sparse_trie_does_not_wait_for_lock() {
+        let manager = StateTrieOverlayManager::<EthPrimitives>::default();
+        let state_root = B256::with_last_byte(1);
+
+        {
+            let mut guard = manager.lock_sparse_trie();
+            guard.store(PreservedSparseTrie::anchored(SparseTrie::default(), state_root));
+        }
+
+        let guard = manager.lock_sparse_trie();
+        assert!(manager.try_take_sparse_trie().is_none());
+        drop(guard);
+
+        let preserved = manager.try_take_sparse_trie().expect("preserved trie should be available");
+        assert_eq!(preserved.state_root(), state_root);
     }
 
     #[test]
