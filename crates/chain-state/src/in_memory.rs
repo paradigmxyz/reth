@@ -18,7 +18,8 @@ use reth_primitives_traits::{
 };
 use reth_storage_api::StateProviderBox;
 use reth_trie::{
-    updates::TrieUpdatesSorted, ComputedTrieData, HashedPostStateSorted, LazyTrieData,
+    prefix_set::TriePrefixSetsMut, updates::TrieUpdatesSorted, ComputedTrieData,
+    HashedPostStateSorted, LazyTrieData,
 };
 use std::{collections::BTreeMap, sync::Arc, time::Instant};
 use tokio::sync::{broadcast, watch};
@@ -873,6 +874,14 @@ impl<N: NodePrimitives> ExecutedBlock<N> {
     #[inline]
     pub fn trie_updates(&self) -> Arc<TrieUpdatesSorted> {
         self.trie_data().sorted.trie_updates
+    }
+
+    /// Returns changed trie node base paths, if they were recorded.
+    ///
+    /// May wait for trie data if the deferred task hasn't completed.
+    #[inline]
+    pub fn changed_paths(&self) -> Option<&TriePrefixSetsMut> {
+        self.trie_data.changed_paths()
     }
 
     /// Returns a [`BlockNumber`] of the block.

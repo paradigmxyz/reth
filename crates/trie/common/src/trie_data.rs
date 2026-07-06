@@ -174,6 +174,13 @@ impl LazyTrieData {
     pub fn sorted_trie_data(&self) -> SortedTrieData {
         self.get().sorted.clone()
     }
+
+    /// Returns changed trie node base paths, if they were recorded.
+    ///
+    /// If not initialized, computes from the deferred source or waits for the pending producer.
+    pub fn changed_paths(&self) -> Option<&TriePrefixSetsMut> {
+        self.get().changed_paths.as_deref()
+    }
 }
 
 #[cfg(feature = "serde")]

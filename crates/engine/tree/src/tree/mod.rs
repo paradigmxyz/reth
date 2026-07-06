@@ -2160,8 +2160,7 @@ where
 
         let mut retained_paths = TriePrefixSetsMut::default();
         for block in self.state.tree_state.blocks_by_hash.values() {
-            let trie_data = block.trie_data();
-            let Some(changed_paths) = trie_data.changed_paths.as_deref() else {
+            let Some(changed_paths) = block.changed_paths() else {
                 // Custom state-root strategies may not track changed paths, so this is an
                 // expected way to opt out of pruning, not an anomaly.
                 debug!(
