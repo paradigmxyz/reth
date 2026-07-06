@@ -2547,11 +2547,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
                     let receipt_idx = first_tx_index + idx as u64;
                     // Skip writing receipt if log filter is active and it does not have any logs
                     // to retain
-                    if !receipt
-                        .logs()
-                        .iter()
-                        .any(|log| allowed_addresses.contains(&log.address))
-                    {
+                    if !receipt.logs().iter().any(|log| allowed_addresses.contains(&log.address)) {
                         continue
                     }
 
