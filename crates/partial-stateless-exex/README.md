@@ -17,9 +17,12 @@ installed.
 3. Updates the `NetworkStateCache` (applies the `LastNBlocksPolicy` eviction).
 4. Computes the actual Merkle multiproof for the missed state and writes a
    **witness sidecar** + a JSON benchmark **manifest** to `./sidecar/`.
-5. *(optional)* Computes the **full-witness baseline** — a second multiproof over
+5. *(optional)* Runs the **provider-assisted sidecar preflight** — re-executes
+   the block through a cache+witness-backed provider and checks the miss set plus
+   cache-anchor transition.
+6. *(optional)* Computes the **full-witness baseline** — a second multiproof over
    *all* accessed state, ignoring the cache — to report the reduction ratio.
-6. Logs accessed/missed counts, miss ratio, witness size, and cache footprint.
+7. Logs accessed/missed counts, miss ratio, witness size, and cache footprint.
 
 On `ChainReorged` the new chain is replayed into the cache; `ChainReverted` is
 logged but not rolled back (PoC limitation).
@@ -41,14 +44,17 @@ The cache windows are set in `CacheConfig` ([main.rs](./src/main.rs)) — defaul
 (Use [`cache_window_bench`](../partial-stateless/src/bin/README.md) to pick good
 values offline before committing to them.)
 
-Two benchmark-only features are off by default and enabled per run via environment
-variables, so the core path stays lean:
+Optional diagnostic/benchmark features are off by default and enabled per run via environment
+variables, so the core sidecar generation path stays lean:
 
 | Env var | Effect |
 | --- | --- |
 | `PS_CAPTURE_DIR=<dir>` | dump each block's `BlockAccessedState` fixture to `<dir>` (see below) |
 | `PS_WITNESS_BASELINE=1` | also compute the full-witness baseline + reduction ratio (an extra, larger multiproof per block) |
 | `PS_RESOURCE_METRICS=1` | capture per-thread CPU time + page faults around the partial multiproof (`cpu_time_ms`, `major_page_faults`, `minor_page_faults`) to separate compute-bound from disk-I/O-bound blocks |
+| `PS_SIDECAR_PREFLIGHT=1` | run provider-assisted validator preflight for each sidecar (an extra re-execution per block) |
+
+`PS_SIDECAR_PREFLIGHT` gates the validator-like self-check. When enabled, sidecar generation fails fast if the cache+witness-backed re-execution, expected miss set, or next cache anchor check fails. When unset, the sidecar still carries `prev_cache_anchor`, `next_cache_anchor`, and `witness_commitment`, but this ExEx does not spend the extra execution work to preflight them. The manifest records this as `provider_assisted_preflight: false`.
 
 When `PS_WITNESS_BASELINE` is unset, the manifest's `full_sidecar_baseline_stats`
 and `reduction` are `null` and no baseline multiproof is computed. A baseline

@@ -1,13 +1,16 @@
-//! Standalone verifier + coverage diagnostic for partial-stateless witness sidecars.
+//! Standalone witness checker + coverage diagnostic for partial-stateless sidecars.
 //!
 //! Two independent checks, neither of which trusts the producer or the transport:
 //!
-//! 1. CRYPTO INTEGRITY (default) — every missed account proof verifies against
-//!    `parent_state_root`, every missed storage proof verifies against its account
-//!    `storageRoot` (`AccountProof::verify` covers both), and every supplied
-//!    bytecode preimage hashes to a declared missed code hash. This proves the
-//!    witness material that IS present is cryptographically anchored to the parent
-//!    state root. It does NOT prove the witness is COMPLETE.
+//! 1. CRYPTO INTEGRITY (default) — the sidecar's declared miss targets match its
+//!    witness manifest, its witness commitment matches the carried payload, every
+//!    missed account proof verifies against `parent_state_root`, every missed
+//!    storage proof verifies against its account `storageRoot`
+//!    (`AccountProof::verify` covers both), and every declared missed bytecode has
+//!    a matching preimage. If ancestor header witnesses are present, they must
+//!    decode to the declared parent/ancestor hash chain. This proves the witness
+//!    material that IS present is cryptographically anchored to the parent state
+//!    root. It does NOT prove the witness is COMPLETE.
 //!
 //! 2. COVERAGE (`--coverage`) — compares the sidecar against a reference
 //!    `debug_executionWitness` (ground truth from a full node) for the same block,
@@ -20,6 +23,9 @@
 //! Neither mode re-executes the block; full re-execution (`ACCEPT_BLOCK`) is a
 //! follow-up. Coverage uses the full node's canonical witness as an oracle, so it
 //! is a measurement, not a trustless claim.
+//! Cache anchors in the sidecar are not enough by themselves for this standalone
+//! checker to prove cache coherency; that check also needs the validator's local
+//! previous cache, the actual execution access set, and the computed next cache.
 //!
 //! Caveat (carried from the 2026-06-18 study): a `debug_executionWitness` `keys`
 //! list is a flat set of preimages — the account/slot pairing is lost — so the
@@ -35,14 +41,14 @@
 //! `debug_executionWitnessByBlockHash` response: `{state,codes,keys,headers}`).
 
 use std::{
-    collections::{BTreeMap, HashSet},
+    collections::HashSet,
     error::Error,
     path::{Path, PathBuf},
     process,
 };
 
-use alloy_primitives::{hex, keccak256, Address, B256};
-use partial_stateless::{PartialStatelessSidecar, SerializableMultiProof};
+use alloy_primitives::{hex, keccak256};
+use partial_stateless::{witness_check::materialize_sidecar_witness, PartialStatelessSidecar};
 
 type Res<T> = Result<T, Box<dyn Error>>;
 
@@ -62,7 +68,7 @@ struct ReferenceWitness {
     headers: Vec<String>,
 }
 
-/// Outcome of crypto-verifying a single sidecar file.
+/// Outcome of checking cryptographic integrity for a single sidecar file.
 struct CryptoVerdict {
     accounts_checked: usize,
     storage_checked: usize,
@@ -91,81 +97,14 @@ fn norm_hex(s: &str) -> String {
     s.trim().trim_start_matches("0x").to_ascii_lowercase()
 }
 
-fn clean_inline_nodes(proof: &mut Vec<alloy_primitives::Bytes>) {
-    let mut to_remove = std::collections::HashSet::new();
-    for i in 0..proof.len() {
-        for j in 0..proof.len() {
-            if i != j && proof[i].len() < proof[j].len() {
-                // Check if proof[i] is a substring of proof[j]
-                if proof[j].windows(proof[i].len()).any(|w| w == proof[i].as_ref()) {
-                    to_remove.insert(i);
-                }
-            }
-        }
-    }
-    let mut new_proof = Vec::new();
-    for (i, node) in proof.iter().enumerate() {
-        if !to_remove.contains(&i) {
-            new_proof.push(node.clone());
-        }
-    }
-    *proof = new_proof;
-}
-
-/// Crypto-verify the sidecar's proofs and code preimages against `parent_state_root`.
-fn crypto_verify(sidecar: &PartialStatelessSidecar) -> Res<CryptoVerdict> {
-    let serializable: SerializableMultiProof =
-        bincode::deserialize(sidecar.witness.state.mpt_multiproof_bytes())?;
-    let multiproof = serializable.to_multiproof();
-    let root = sidecar.parent_state_root;
-
-    // Group missed storage slots by account; missed accounts without storage still
-    // get an (empty-slots) entry so their account proof is checked.
-    let mut slots_by_account: BTreeMap<Address, Vec<B256>> = BTreeMap::new();
-    for addr in &sidecar.miss_manifest.missed_accounts {
-        slots_by_account.entry(*addr).or_default();
-    }
-    for (addr, slot) in &sidecar.miss_manifest.missed_storage {
-        slots_by_account.entry(*addr).or_default().push(*slot);
-    }
-
-    let mut storage_checked = 0usize;
-    for (addr, slots) in &slots_by_account {
-        let mut account_proof = multiproof
-            .account_proof(*addr, slots)
-            .map_err(|e| format!("account {addr:?}: could not build proof: {e}"))?;
-
-        // Clean up inline nodes
-        clean_inline_nodes(&mut account_proof.proof);
-        for sp in &mut account_proof.storage_proofs {
-            clean_inline_nodes(&mut sp.proof);
-        }
-
-        account_proof
-            .verify(root)
-            .map_err(|e| format!("account {addr:?}: proof failed against parent_state_root: {e}"))?;
-        storage_checked += slots.len();
-    }
-
-    let declared: HashSet<B256> =
-        sidecar.miss_manifest.missed_code_hashes.iter().copied().collect();
-    let mut codes_checked = 0usize;
-    for code in &sidecar.witness.codes {
-        let h = keccak256(code);
-        if !declared.contains(&h) {
-            return Err(format!(
-                "bytecode preimage keccak {h:?} ({} bytes) not in declared missed_code_hashes",
-                code.len()
-            )
-            .into());
-        }
-        codes_checked += 1;
-    }
+/// Check the sidecar's proofs and code preimages against `parent_state_root`.
+fn check_crypto_integrity(sidecar: &PartialStatelessSidecar) -> Res<CryptoVerdict> {
+    let witness = materialize_sidecar_witness(sidecar)?;
 
     Ok(CryptoVerdict {
-        accounts_checked: slots_by_account.len(),
-        storage_checked,
-        codes_checked,
+        accounts_checked: witness.accounts.len(),
+        storage_checked: witness.storage.len(),
+        codes_checked: witness.codes.len(),
     })
 }
 
@@ -178,12 +117,8 @@ fn coverage(sidecar: &PartialStatelessSidecar, witness: &ReferenceWitness) -> Co
         .filter_map(|c| hex::decode(c.trim_start_matches("0x")).ok())
         .map(|bytes| norm_hex(&keccak256(&bytes).to_string()))
         .collect();
-    let sidecar_code_hashes: HashSet<String> = sidecar
-        .miss_manifest
-        .missed_code_hashes
-        .iter()
-        .map(|h| norm_hex(&h.to_string()))
-        .collect();
+    let sidecar_code_hashes: HashSet<String> =
+        sidecar.miss_manifest.missed_code_hashes.iter().map(|h| norm_hex(&h.to_string())).collect();
     let covered_codes = ref_code_hashes.intersection(&sidecar_code_hashes).count();
 
     // Keys: proxy (flat preimage list; account/slot pairing lost upstream).
@@ -199,12 +134,8 @@ fn coverage(sidecar: &PartialStatelessSidecar, witness: &ReferenceWitness) -> Co
 
     // Headers: compare RLP encoded bytes by hex (exact match).
     let ref_headers_set: HashSet<String> = witness.headers.iter().map(|h| norm_hex(h)).collect();
-    let sidecar_headers_set: HashSet<String> = sidecar
-        .witness
-        .headers
-        .iter()
-        .map(|bytes| norm_hex(&hex::encode(bytes)))
-        .collect();
+    let sidecar_headers_set: HashSet<String> =
+        sidecar.witness.headers.iter().map(|bytes| norm_hex(&hex::encode(bytes))).collect();
     let covered_headers = ref_headers_set.intersection(&sidecar_headers_set).count();
 
     CoverageReport {
@@ -231,7 +162,7 @@ fn process_sidecar(path: &Path, witness_dir: Option<&Path>) -> Res<bool> {
     let block = sidecar.block_number;
 
     // 1. Crypto integrity.
-    let v = crypto_verify(&sidecar)?;
+    let v = check_crypto_integrity(&sidecar)?;
     println!(
         "PROOF_OK   block={block} accounts={} storage={} codes={} root={:?}",
         v.accounts_checked, v.storage_checked, v.codes_checked, sidecar.parent_state_root,
@@ -334,7 +265,7 @@ fn main() {
     }
 
     println!("---");
-    println!("verified {} sidecar(s): {passed} PROOF_OK, {failed} PROOF_FAIL", files.len());
+    println!("checked {} sidecar(s): {passed} PROOF_OK, {failed} PROOF_FAIL", files.len());
     if failed > 0 {
         process::exit(1);
     }
