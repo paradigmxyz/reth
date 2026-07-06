@@ -1149,6 +1149,7 @@ where
         let (receipt_tx, result_rx) = self.spawn_receipt_root_task(transaction_count);
         let executed_tx_index = Arc::clone(handle.executed_tx_index());
         let execution_start = Instant::now();
+        let evm_config = self.evm_config.clone().with_jit_support();
         let execution_ctx = self.execution_ctx_for(input).map_err(BlockExecutionError::other)?;
         let state_hook_sender = handle.state_hook_sender();
         let streamed_state_updates = state_hook_sender.is_some();
@@ -1156,11 +1157,10 @@ where
         let (output, senders) =
             debug_span!(target: "engine::tree", "execute_block").in_scope(|| {
                 let db = StateProviderDatabase::new(state_provider);
-                let evm_config = self.evm_config.clone().with_jit_support();
                 let evm =
                     evm_config.block_executor_factory().evm_with_database(db, env.evm_env.clone());
                 let mut executor =
-                    self.evm_config.block_executor_factory().create_executor(evm, execution_ctx);
+                    evm_config.block_executor_factory().create_executor(evm, execution_ctx);
                 if let Some(sender) = state_hook_sender {
                     executor.set_state_hook(move |hashed_state| {
                         sender.send_hashed_state(hashed_state);
