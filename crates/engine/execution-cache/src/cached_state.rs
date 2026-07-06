@@ -72,6 +72,13 @@ const CODE_CACHE_ENTRY_SIZE: usize =
 const STORAGE_CACHE_ENTRY_SIZE: usize =
     fixed_cache_entry_size::<(Address, StorageKey), StorageValue>();
 
+/// Maximum storage slots to seed into the cross-block cache from one post-execution state save.
+///
+/// Large BAL payloads can carry far more storage entries than are worth synchronously materializing
+/// before the next payload. When this limit is exceeded, the storage cache is invalidated first so
+/// skipped updated slots miss through to the provider instead of returning stale values.
+const MAX_STORAGE_CACHE_INSERTS_PER_SAVE: usize = 16 * 1024;
+
 /// Size in bytes of a single account cache entry.
 const ACCOUNT_CACHE_ENTRY_SIZE: usize = fixed_cache_entry_size::<Address, Option<Account>>();
 
@@ -1009,6 +1016,18 @@ impl ExecutionCache {
     #[instrument(level = "debug", target = "engine::caching", skip_all)]
     #[expect(clippy::result_unit_err)]
     pub fn insert_state(&self, state_updates: &BundleState) -> Result<(), ()> {
+        self.insert_state_with_storage_insert_limit(
+            state_updates,
+            MAX_STORAGE_CACHE_INSERTS_PER_SAVE,
+        )
+    }
+
+    #[expect(clippy::result_unit_err)]
+    fn insert_state_with_storage_insert_limit(
+        &self,
+        state_updates: &BundleState,
+        max_storage_inserts: usize,
+    ) -> Result<(), ()> {
         let _enter =
             debug_span!(target: "engine::tree", "contracts", len = state_updates.contracts.len())
                 .entered();
@@ -1018,19 +1037,34 @@ impl ExecutionCache {
         }
         drop(_enter);
 
+        let storage_inserts = state_updates
+            .state
+            .values()
+            .filter(|account| !account.status.is_not_modified() && !account.was_destroyed())
+            .map(|account| account.storage.len())
+            .sum::<usize>();
+        let limit_storage_inserts = storage_inserts > max_storage_inserts;
+        let mut remaining_storage_inserts =
+            if limit_storage_inserts { max_storage_inserts } else { usize::MAX };
+
+        if limit_storage_inserts {
+            self.clear_storage();
+        }
+
         let _enter = debug_span!(
             target: "engine::tree",
             "accounts",
             accounts = state_updates.state.len(),
-            storages =
-                state_updates.state.values().map(|account| account.storage.len()).sum::<usize>()
+            storages = storage_inserts,
+            storage_cache_limited = limit_storage_inserts,
+            max_storage_inserts
         )
         .entered();
         for (addr, account) in &state_updates.state {
             // If the account was not modified, as in not changed and not destroyed, then we have
             // nothing to do w.r.t. this particular account and can move on
             if account.status.is_not_modified() {
-                continue
+                continue;
             }
 
             // If the original account had code (was a contract), we must clear the entire cache
@@ -1053,7 +1087,7 @@ impl ExecutionCache {
                         );
                     });
                     self.clear();
-                    return Ok(())
+                    return Ok(());
                 }
 
                 self.0.account_cache.remove(addr);
@@ -1065,12 +1099,17 @@ impl ExecutionCache {
             // `None` current info, should be destroyed.
             let Some(ref account_info) = account.info else {
                 trace!(target: "engine::caching", ?account, "Account with None account info found in state updates");
-                return Err(())
+                return Err(());
             };
 
             // Now we iterate over all storage and make updates to the cached storage values
             for (key, slot) in &account.storage {
+                if remaining_storage_inserts == 0 {
+                    continue;
+                }
+
                 self.insert_storage(*addr, (*key).into(), Some(slot.present_value));
+                remaining_storage_inserts -= 1;
             }
 
             // Insert will update if present, so we just use the new account info as the new value
@@ -1081,15 +1120,20 @@ impl ExecutionCache {
         Ok(())
     }
 
+    /// Clears only storage cache entries, resetting them to empty state.
+    fn clear_storage(&self) {
+        self.0.storage_cache.clear();
+        self.0.storage_stats.reset_size();
+    }
+
     /// Clears storage and account caches, resetting them to empty state.
     ///
     /// We do not clear the bytecodes cache, because its mapping can never change, as it's
     /// `keccak256(bytecode) => bytecode`.
     pub fn clear(&self) {
-        self.0.storage_cache.clear();
+        self.clear_storage();
         self.0.account_cache.clear();
 
-        self.0.storage_stats.reset_size();
         self.0.account_stats.reset_size();
     }
 
@@ -1178,7 +1222,7 @@ mod tests {
     use super::*;
     use alloy_primitives::{map::HashMap, U256};
     use reth_provider::test_utils::{ExtendedAccount, MockEthProvider};
-    use reth_revm::db::{AccountStatus, BundleAccount};
+    use reth_revm::db::{states::StorageSlot, AccountStatus, BundleAccount};
     use revm::state::AccountInfo;
 
     #[test]
@@ -1439,6 +1483,71 @@ mod tests {
         assert!(caches.insert_state(&bundle).is_ok());
         assert_eq!(caches.0.account_stats.size(), 0);
         assert!(caches.0.account_cache.get(&addr).is_none());
+    }
+
+    #[test]
+    fn test_insert_state_bounds_oversized_storage_cache_save() {
+        let caches = ExecutionCache::new(1000);
+
+        let addr = Address::with_last_byte(1);
+        let unrelated_addr = Address::with_last_byte(2);
+        let unrelated_key = StorageKey::random();
+        caches.insert_storage(unrelated_addr, unrelated_key, Some(U256::from(55)));
+
+        let keys = [U256::from(1), U256::from(2), U256::from(3)];
+        for key in keys {
+            caches.insert_storage(addr, key.into(), Some(U256::from(999)));
+        }
+
+        let account_info = AccountInfo {
+            balance: U256::ZERO,
+            nonce: 1,
+            code_hash: alloy_primitives::KECCAK256_EMPTY,
+            code: None,
+            account_id: None,
+        };
+        let bundle = BundleState {
+            state: HashMap::from_iter([(
+                addr,
+                BundleAccount::new(
+                    Some(account_info.clone()),
+                    Some(account_info),
+                    HashMap::from_iter(keys.into_iter().enumerate().map(|(idx, key)| {
+                        (key, StorageSlot::new_changed(U256::ZERO, U256::from((idx + 1) as u64)))
+                    })),
+                    AccountStatus::Changed,
+                ),
+            )]),
+            contracts: Default::default(),
+            reverts: Default::default(),
+            state_size: 0,
+            reverts_size: 0,
+        };
+
+        assert!(caches.insert_state_with_storage_insert_limit(&bundle, 2).is_ok());
+
+        assert!(caches.0.storage_cache.get(&(unrelated_addr, unrelated_key)).is_none());
+        assert!(caches.0.account_cache.get(&addr).is_some());
+
+        let mut cached_storage_entries = 0;
+        let mut skipped_key = None;
+        for key in keys {
+            let storage_key = key.into();
+            match caches.0.storage_cache.get(&(addr, storage_key)) {
+                Some(value) => {
+                    cached_storage_entries += 1;
+                    assert_ne!(value, U256::from(999));
+                }
+                None => skipped_key = Some(storage_key),
+            }
+        }
+
+        assert_eq!(cached_storage_entries, 2);
+        let skipped_key = skipped_key.expect("one updated storage slot should be skipped");
+        let result = caches
+            .get_or_try_insert_storage_with(addr, skipped_key, || Ok::<_, ()>(U256::from(777)))
+            .unwrap();
+        assert_eq!(result, CachedStatus::NotCached(U256::from(777)));
     }
 
     #[test]
