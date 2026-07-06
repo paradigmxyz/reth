@@ -203,7 +203,7 @@ enum LazyTrieDataMode {
 }
 
 impl fmt::Debug for LazyTrieDataMode {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Ready => write!(f, "Ready"),
             Self::Deferred(_) => write!(f, "Deferred(..)"),
