@@ -25,7 +25,7 @@ use reth_storage_api::{
 use reth_storage_errors::provider::ProviderResult;
 use std::{collections::BTreeMap, convert::Infallible};
 
-pub(crate) fn execution_state_and_reverts_to_plain_state_and_reverts<S>(
+fn execution_state_and_reverts_to_plain_state_and_reverts<S>(
     state: &S,
     block_reverts: &[BlockReverts],
     is_value_known: OriginalValuesKnown,
@@ -72,7 +72,7 @@ where
     (plain_state, reverts)
 }
 
-pub(crate) fn execution_state_to_plain_state<S>(
+fn execution_state_to_plain_state<S>(
     state: &S,
     is_value_known: OriginalValuesKnown,
 ) -> StateChangeset
@@ -87,7 +87,7 @@ where
     sink.finish()
 }
 
-pub(crate) fn execution_state_to_plain_state_and_reverts<S>(
+fn execution_state_to_plain_state_and_reverts<S>(
     state: &S,
     is_value_known: OriginalValuesKnown,
 ) -> (StateChangeset, PlainStateReverts)
