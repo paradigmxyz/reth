@@ -2,6 +2,10 @@
 
 use alloy_primitives::B256;
 use reth_trie_sparse::SparseStateTrie;
+use std::{
+    fmt,
+    sync::mpsc::{self, Receiver, Sender},
+};
 use tracing::debug;
 
 /// Type alias for the sparse trie type used in preservation.
@@ -69,15 +73,22 @@ impl PreservedSparseTrieState {
 }
 
 /// A preserved sparse trie that can be reused across payload validations.
-#[derive(Debug)]
 pub struct PreservedSparseTrie {
-    /// The preserved sparse state trie.
-    trie: SparseTrie,
+    /// The preserved sparse state trie, or a handle to wait for it.
+    trie: PreservedSparseTrieInner,
     /// The state root this trie represents.
     ///
     /// Used to verify continuity: a new payload's `parent_state_root` must match this before the
     /// existing sparse trie nodes can be reused.
     state_root: B256,
+}
+
+impl fmt::Debug for PreservedSparseTrie {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("PreservedSparseTrie")
+            .field("state_root", &self.state_root)
+            .finish_non_exhaustive()
+    }
 }
 
 impl PreservedSparseTrie {
@@ -86,7 +97,16 @@ impl PreservedSparseTrie {
     /// The `state_root` is the computed state root from the trie, which becomes the
     /// anchor for determining if subsequent payloads can reuse this trie.
     pub const fn anchored(trie: SparseTrie, state_root: B256) -> Self {
-        Self { trie, state_root }
+        Self { trie: PreservedSparseTrieInner::Ready(trie), state_root }
+    }
+
+    /// Creates a pending preserved trie and a completer that will publish the trie later.
+    pub fn pending(state_root: B256) -> (Self, PreservedSparseTrieCompleter) {
+        let (tx, rx) = mpsc::channel();
+        (
+            Self { trie: PreservedSparseTrieInner::Pending(rx), state_root },
+            PreservedSparseTrieCompleter { tx },
+        )
     }
 
     /// Returns the state root this trie is anchored to.
@@ -98,14 +118,28 @@ impl PreservedSparseTrie {
     ///
     /// If the parent state root does not match the preserved trie's anchor, this drops the trie and
     /// returns `None` so the caller can create a fresh sparse trie.
-    pub fn into_trie_for(self, parent_state_root: B256) -> Option<SparseTrie> {
+    pub fn into_trie_for(
+        self,
+        parent_state_root: B256,
+    ) -> Result<Option<SparseTrie>, PreservedSparseTrieError> {
         if self.state_root == parent_state_root {
+            let trie = match self.trie {
+                PreservedSparseTrieInner::Ready(trie) => trie,
+                PreservedSparseTrieInner::Pending(rx) => match rx.recv() {
+                    Ok(trie) => trie,
+                    Err(_) => {
+                        return Err(PreservedSparseTrieError::ProducerDropped {
+                            state_root: self.state_root,
+                        })
+                    }
+                },
+            };
             debug!(
                 target: "engine::tree::payload_processor",
                 state_root = %self.state_root,
                 "Reusing anchored sparse trie for continuation payload"
             );
-            Some(self.trie)
+            Ok(Some(trie))
         } else {
             debug!(
                 target: "engine::tree::payload_processor",
@@ -113,7 +147,73 @@ impl PreservedSparseTrie {
                 %parent_state_root,
                 "Dropping anchored sparse trie - parent state root mismatch"
             );
-            None
+            Ok(None)
         }
+    }
+}
+
+/// Error returned when consuming a preserved sparse trie.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PreservedSparseTrieError {
+    /// The producer of a pending preserved sparse trie dropped before publishing it.
+    ProducerDropped {
+        /// The state root the pending trie was expected to represent.
+        state_root: B256,
+    },
+}
+
+impl fmt::Display for PreservedSparseTrieError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::ProducerDropped { state_root } => {
+                write!(f, "pending preserved sparse trie producer dropped for {state_root}")
+            }
+        }
+    }
+}
+
+impl std::error::Error for PreservedSparseTrieError {}
+
+#[allow(clippy::large_enum_variant)]
+enum PreservedSparseTrieInner {
+    Ready(SparseTrie),
+    Pending(Receiver<SparseTrie>),
+}
+
+/// Completes a pending preserved sparse trie.
+#[derive(Debug)]
+pub struct PreservedSparseTrieCompleter {
+    tx: Sender<SparseTrie>,
+}
+
+impl PreservedSparseTrieCompleter {
+    /// Publishes the trie for a pending preserved sparse trie.
+    pub fn complete(self, trie: SparseTrie) -> Result<(), SparseTrie> {
+        self.tx.send(trie).map_err(|err| err.0)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn pending_trie_exposes_state_root_before_completion() {
+        let state_root = B256::with_last_byte(1);
+        let (preserved, completer) = PreservedSparseTrie::pending(state_root);
+
+        assert_eq!(preserved.state_root(), state_root);
+        completer.complete(SparseTrie::default()).unwrap();
+        assert!(preserved.into_trie_for(state_root).unwrap().is_some());
+    }
+
+    #[test]
+    fn pending_trie_with_mismatched_root_does_not_wait() {
+        let state_root = B256::with_last_byte(1);
+        let other_state_root = B256::with_last_byte(2);
+        let (preserved, completer) = PreservedSparseTrie::pending(state_root);
+
+        assert!(preserved.into_trie_for(other_state_root).unwrap().is_none());
+        assert!(completer.complete(SparseTrie::default()).is_err());
     }
 }

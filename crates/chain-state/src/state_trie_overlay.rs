@@ -712,7 +712,7 @@ mod tests {
 
         let preserved = manager.take_sparse_trie().expect("preserved trie should be available");
         assert_eq!(preserved.state_root(), state_root);
-        assert!(preserved.into_trie_for(other_state_root).is_none());
+        assert!(preserved.into_trie_for(other_state_root).unwrap().is_none());
         assert!(manager.take_sparse_trie().is_none());
 
         {

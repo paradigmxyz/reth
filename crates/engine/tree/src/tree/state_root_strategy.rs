@@ -455,9 +455,11 @@ where
             ))
         }
 
-        let sparse_state_trie =
-            payload_processor.take_sparse_trie_for_parent(env.parent_state_root);
-        let overlay_factory = if sparse_state_trie.is_some() {
+        let preserved_sparse_trie = payload_processor.take_preserved_sparse_trie();
+        let overlay_factory = if preserved_sparse_trie
+            .as_ref()
+            .is_some_and(|trie| trie.state_root() == env.parent_state_root)
+        {
             overlay_factory.with_skip_overlay_for_reused_sparse_trie()
         } else {
             overlay_factory
@@ -466,7 +468,7 @@ where
         let mut handle = payload_processor.spawn_state_root(
             overlay_factory.clone(),
             env.parent_state_root,
-            sparse_state_trie,
+            preserved_sparse_trie,
             Some(env.transaction_count),
             config,
             pending_sparse_trie_prune,
@@ -505,8 +507,11 @@ where
             return Ok(None)
         }
 
-        let sparse_state_trie = payload_processor.take_sparse_trie_for_parent(parent_state_root);
-        let overlay_factory = if sparse_state_trie.is_some() {
+        let preserved_sparse_trie = payload_processor.take_preserved_sparse_trie();
+        let overlay_factory = if preserved_sparse_trie
+            .as_ref()
+            .is_some_and(|trie| trie.state_root() == parent_state_root)
+        {
             overlay_factory.with_skip_overlay_for_reused_sparse_trie()
         } else {
             overlay_factory
@@ -517,7 +522,7 @@ where
                 .spawn_state_root(
                     overlay_factory,
                     parent_state_root,
-                    sparse_state_trie,
+                    preserved_sparse_trie,
                     // Tx count unknown at FCU time (block built incrementally): full proof
                     // workers.
                     None,
