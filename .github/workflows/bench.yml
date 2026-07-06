@@ -217,7 +217,7 @@ jobs:
               content: 'eyes',
             });
 
-            const shouldHideComment = (comment) => {
+            const shouldDeleteComment = (comment) => {
               const body = comment.body.trim();
               return comment.user.login === 'decofe' || body.startsWith('derek') || body.startsWith('@decofe');
             };
@@ -227,25 +227,19 @@ jobs:
               issue_number: context.issue.number,
               per_page: 100,
             });
-            let hidden = 0;
+            let deleted = 0;
             for (const comment of comments) {
-              if (!shouldHideComment(comment)) continue;
+              if (!shouldDeleteComment(comment)) continue;
 
-              await github.graphql(`
-                mutation($subjectId: ID!) {
-                  minimizeComment(input: {subjectId: $subjectId, classifier: OUTDATED}) {
-                    minimizedComment {
-                      isMinimized
-                    }
-                  }
-                }
-              `, {
-                subjectId: comment.node_id,
+              await github.rest.issues.deleteComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: comment.id,
               });
-              hidden += 1;
+              deleted += 1;
             }
 
-            core.notice(`Hid ${hidden} Derek comment(s).`);
+            core.notice(`Deleted ${deleted} Derek comment(s).`);
 
       - name: Parse arguments
         id: args
