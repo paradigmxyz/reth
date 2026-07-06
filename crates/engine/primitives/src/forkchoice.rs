@@ -19,6 +19,7 @@ impl ForkchoiceStateTracker {
     ///
     /// If the status is `VALID`, we also update the last valid forkchoice state and set the
     /// `sync_target` to `None`, since we're now fully synced.
+    #[inline]
     pub const fn set_latest(&mut self, state: ForkchoiceState, status: ForkchoiceStatus) {
         if status.is_valid() {
             self.last_syncing = None;
@@ -39,6 +40,7 @@ impl ForkchoiceStateTracker {
     /// [`Self::set_latest`], this preserves a newer `latest` (e.g. an `Invalid` FCU received
     /// after the syncing one) and only flips `latest` to `Valid` when it still refers to the same
     /// syncing FCU being promoted.
+    #[inline]
     pub fn promote_sync_target_to_valid(&mut self, state: ForkchoiceState) {
         self.last_syncing = None;
         self.last_valid = Some(state);
@@ -54,34 +56,40 @@ impl ForkchoiceStateTracker {
     /// Returns the [`ForkchoiceStatus`] of the latest received FCU.
     ///
     /// Caution: this can be invalid.
+    #[inline]
     pub(crate) fn latest_status(&self) -> Option<ForkchoiceStatus> {
         self.latest.as_ref().map(|s| s.status)
     }
 
     /// Returns whether the latest received FCU is valid: [`ForkchoiceStatus::Valid`]
     #[expect(dead_code)]
+    #[inline]
     pub(crate) fn is_latest_valid(&self) -> bool {
         self.latest_status().is_some_and(|s| s.is_valid())
     }
 
     /// Returns whether the latest received FCU is syncing: [`ForkchoiceStatus::Syncing`]
     #[expect(dead_code)]
+    #[inline]
     pub(crate) fn is_latest_syncing(&self) -> bool {
         self.latest_status().is_some_and(|s| s.is_syncing())
     }
 
     /// Returns whether the latest received FCU is invalid: [`ForkchoiceStatus::Invalid`]
+    #[inline]
     pub fn is_latest_invalid(&self) -> bool {
         self.latest_status().is_some_and(|s| s.is_invalid())
     }
 
     /// Returns the last valid head hash.
+    #[inline]
     pub fn last_valid_head(&self) -> Option<B256> {
         self.last_valid.as_ref().map(|s| s.head_block_hash)
     }
 
     /// Returns the head hash of the latest received FCU to which we need to sync.
     #[cfg_attr(not(test), expect(dead_code))]
+    #[inline]
     pub(crate) fn sync_target(&self) -> Option<B256> {
         self.last_syncing.as_ref().map(|s| s.head_block_hash)
     }
@@ -89,11 +97,13 @@ impl ForkchoiceStateTracker {
     /// Returns the latest received [`ForkchoiceState`].
     ///
     /// Caution: this can be invalid.
+    #[inline]
     pub fn latest_state(&self) -> Option<ForkchoiceState> {
         self.latest.as_ref().map(|s| s.state)
     }
 
     /// Returns the last valid [`ForkchoiceState`].
+    #[inline]
     pub const fn last_valid_state(&self) -> Option<ForkchoiceState> {
         self.last_valid
     }
@@ -111,6 +121,7 @@ impl ForkchoiceStateTracker {
     }
 
     /// Returns the last received `ForkchoiceState` to which we need to sync.
+    #[inline]
     pub const fn sync_target_state(&self) -> Option<ForkchoiceState> {
         self.last_syncing
     }
@@ -128,6 +139,7 @@ impl ForkchoiceStateTracker {
     }
 
     /// Returns true if no forkchoice state has been received yet.
+    #[inline]
     pub const fn is_empty(&self) -> bool {
         self.latest.is_none()
     }
@@ -153,21 +165,25 @@ pub enum ForkchoiceStatus {
 
 impl ForkchoiceStatus {
     /// Returns `true` if the forkchoice state is [`ForkchoiceStatus::Valid`].
+    #[inline]
     pub const fn is_valid(&self) -> bool {
         matches!(self, Self::Valid)
     }
 
     /// Returns `true` if the forkchoice state is [`ForkchoiceStatus::Invalid`].
+    #[inline]
     pub const fn is_invalid(&self) -> bool {
         matches!(self, Self::Invalid)
     }
 
     /// Returns `true` if the forkchoice state is [`ForkchoiceStatus::Syncing`].
+    #[inline]
     pub const fn is_syncing(&self) -> bool {
         matches!(self, Self::Syncing)
     }
 
     /// Converts the general purpose [`PayloadStatusEnum`] into a [`ForkchoiceStatus`].
+    #[inline]
     pub(crate) const fn from_payload_status(status: &PayloadStatusEnum) -> Self {
         match status {
             PayloadStatusEnum::Valid | PayloadStatusEnum::Accepted => {
@@ -181,6 +197,7 @@ impl ForkchoiceStatus {
 }
 
 impl From<PayloadStatusEnum> for ForkchoiceStatus {
+    #[inline]
     fn from(status: PayloadStatusEnum) -> Self {
         Self::from_payload_status(&status)
     }
@@ -199,6 +216,7 @@ pub enum ForkchoiceStateHash {
 
 impl ForkchoiceStateHash {
     /// Tries to find a matching hash in the given [`ForkchoiceState`].
+    #[inline]
     pub fn find(state: &ForkchoiceState, hash: B256) -> Option<Self> {
         if state.head_block_hash == hash {
             Some(Self::Head(hash))
@@ -212,12 +230,14 @@ impl ForkchoiceStateHash {
     }
 
     /// Returns true if this is the head hash of the [`ForkchoiceState`]
+    #[inline]
     pub const fn is_head(&self) -> bool {
         matches!(self, Self::Head(_))
     }
 }
 
 impl AsRef<B256> for ForkchoiceStateHash {
+    #[inline]
     fn as_ref(&self) -> &B256 {
         match self {
             Self::Head(h) | Self::Safe(h) | Self::Finalized(h) => h,
@@ -416,10 +436,10 @@ mod tests {
     #[test]
     fn test_forkchoice_state_hash_find() {
         // Define example hashes
-        let head_hash = B256::random();
-        let safe_hash = B256::random();
-        let finalized_hash = B256::random();
-        let non_matching_hash = B256::random();
+        let head_hash = B256::repeat_byte(0x01);
+        let safe_hash = B256::repeat_byte(0x02);
+        let finalized_hash = B256::repeat_byte(0x03);
+        let non_matching_hash = B256::repeat_byte(0x04);
 
         // Create a ForkchoiceState with specific hashes
         let state = ForkchoiceState {
