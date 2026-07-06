@@ -864,7 +864,7 @@ impl<N: NodePrimitives> ExecutedBlock<N> {
     /// May wait for trie data if the deferred task hasn't completed.
     #[inline]
     pub fn hashed_state(&self) -> Arc<HashedPostStateSorted> {
-        self.trie_data().sorted.hashed_state
+        self.trie_data.hashed_state()
     }
 
     /// Returns the trie updates resulting from the execution outcome.
@@ -872,7 +872,7 @@ impl<N: NodePrimitives> ExecutedBlock<N> {
     /// May wait for trie data if the deferred task hasn't completed.
     #[inline]
     pub fn trie_updates(&self) -> Arc<TrieUpdatesSorted> {
-        self.trie_data().sorted.trie_updates
+        self.trie_data.trie_updates()
     }
 
     /// Returns a [`BlockNumber`] of the block.
