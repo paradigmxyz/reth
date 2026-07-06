@@ -316,8 +316,8 @@ impl<T> ExecutionOutcome<T> {
     }
 
     /// Returns per-block reverts.
-    pub const fn block_reverts(&self) -> &Vec<BlockReverts> {
-        &self.block_reverts
+    pub const fn block_reverts(&self) -> &[BlockReverts] {
+        self.block_reverts.as_slice()
     }
 
     /// Returns changed storage slot indices for all changed accounts.
