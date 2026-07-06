@@ -1157,8 +1157,7 @@ where
         let (output, senders) =
             debug_span!(target: "engine::tree", "execute_block").in_scope(|| {
                 let db = StateProviderDatabase::new(state_provider);
-                let evm =
-                    evm_config.block_executor_factory().evm_with_database(db, env.evm_env.clone());
+                let evm = evm_config.evm_with_env(db, env.evm_env.clone());
                 let mut executor =
                     evm_config.block_executor_factory().create_executor(evm, execution_ctx);
                 if let Some(sender) = state_hook_sender {
