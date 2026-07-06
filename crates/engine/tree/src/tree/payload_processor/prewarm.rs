@@ -32,8 +32,8 @@ use metrics::{Counter, Gauge, Histogram};
 #[cfg(any())]
 use rayon::prelude::*;
 use reth_evm::{
-    database::StateProviderDatabase, BlockExecutorFactory, ConfigureEvm, Evm as EvmInstance,
-    EvmEnv, EvmFor, ExecutableTxFor,
+    database::StateProviderDatabase, ConfigureEvm, Evm as EvmInstance, EvmEnv, EvmFor,
+    ExecutableTxFor,
 };
 use reth_execution_types::{
     ExecutionAccountChangeRef, ExecutionStateChangeSink, ExecutionStorageChange,
@@ -623,11 +623,7 @@ where
         let evm_env =
             self.env.evm_env.clone().with_nonce_check_disabled().with_balance_check_disabled();
 
-        Some(
-            self.evm_config
-                .block_executor_factory()
-                .evm_with_database(StateProviderDatabase::new(state_provider), evm_env),
-        )
+        Some(self.evm_config.evm_with_env(StateProviderDatabase::new(state_provider), evm_env))
     }
 
     /// Returns `true` if prewarming should stop.
