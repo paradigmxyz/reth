@@ -2568,7 +2568,9 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
 
                 tracing::trace!(block_number, "Writing block change");
                 // sort changes by address.
-                storage_changes.par_sort_unstable_by_key(|a| a.address);
+                if storage_changes.len() > 1 {
+                    storage_changes.par_sort_unstable_by_key(|a| a.address);
+                }
                 let total_changes =
                     storage_changes.iter().map(|change| change.storage_revert.len()).sum();
                 let mut changeset = Vec::with_capacity(total_changes);
@@ -2578,7 +2580,9 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
                         .map(|(k, v)| (B256::from(k.to_be_bytes()), v))
                         .collect::<Vec<_>>();
                     // sort storage slots by key.
-                    storage.par_sort_unstable_by_key(|a| a.0);
+                    if storage.len() > 1 {
+                        storage.par_sort_unstable_by_key(|a| a.0);
+                    }
 
                     // If we are writing the primary storage wipe transition, the pre-existing
                     // storage state has to be taken from the database and written to storage
@@ -2634,9 +2638,15 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
     fn write_state_changes(&self, mut changes: StateChangeset) -> ProviderResult<()> {
         // sort all entries so they can be written to database in more performant way.
         // and take smaller memory footprint.
-        changes.accounts.par_sort_by_key(|a| a.0);
-        changes.storage.par_sort_by_key(|a| a.address);
-        changes.contracts.par_sort_by_key(|a| a.0);
+        if changes.accounts.len() > 1 {
+            changes.accounts.par_sort_by_key(|a| a.0);
+        }
+        if changes.storage.len() > 1 {
+            changes.storage.par_sort_by_key(|a| a.address);
+        }
+        if changes.contracts.len() > 1 {
+            changes.contracts.par_sort_by_key(|a| a.0);
+        }
 
         if !self.cached_storage_settings().use_hashed_state() {
             // Write new account state
@@ -2668,7 +2678,9 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
                     .map(|(k, value)| StorageEntry { key: k.into(), value })
                     .collect::<Vec<_>>();
                 // sort storage slots by key.
-                storage.par_sort_unstable_by_key(|a| a.key);
+                if storage.len() > 1 {
+                    storage.par_sort_unstable_by_key(|a| a.key);
+                }
 
                 for entry in storage {
                     tracing::trace!(?address, ?entry.key, "Updating plain state storage");
