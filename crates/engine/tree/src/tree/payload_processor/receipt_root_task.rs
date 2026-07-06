@@ -93,17 +93,26 @@ impl<R: Receipt> ReceiptRootTaskHandle<R> {
             builder.push_next(&encode_buf);
         };
 
-        for indexed_receipt in self.receipt_rx {
-            if indexed_receipt.index == next {
-                push(indexed_receipt.receipt);
-                next += 1;
-
-                while let Some(receipt) = pending.remove(&next) {
-                    push(receipt);
+        {
+            let mut handle_receipt = |indexed_receipt: IndexedReceipt<R>| {
+                if indexed_receipt.index == next {
+                    push(indexed_receipt.receipt);
                     next += 1;
+
+                    while let Some(receipt) = pending.remove(&next) {
+                        push(receipt);
+                        next += 1;
+                    }
+                } else {
+                    pending.insert(indexed_receipt.index, indexed_receipt.receipt);
                 }
-            } else {
-                pending.insert(indexed_receipt.index, indexed_receipt.receipt);
+            };
+
+            while let Ok(indexed_receipt) = self.receipt_rx.recv() {
+                handle_receipt(indexed_receipt);
+                while let Ok(indexed_receipt) = self.receipt_rx.try_recv() {
+                    handle_receipt(indexed_receipt);
+                }
             }
         }
 
