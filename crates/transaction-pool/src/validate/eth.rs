@@ -1547,7 +1547,7 @@ impl ForkTracker {
 }
 
 /// Ensures that gas limit of the transaction exceeds the intrinsic gas of the transaction.
-pub fn ensure_intrinsic_gas<T: EthPoolTransaction>(
+fn ensure_intrinsic_gas<T: EthPoolTransaction>(
     transaction: &T,
     gas_rules: EvmTransactionValidationGasRules,
 ) -> Result<(), InvalidPoolTransactionError> {
