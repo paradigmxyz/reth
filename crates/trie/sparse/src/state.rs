@@ -352,7 +352,7 @@ where
         if !account_proofs.is_empty() {
             #[cfg(feature = "metrics")]
             self.metrics.increment_total_account_nodes(account_proofs.len() as u64);
-            targets.push((Either::Left(&mut self.state), account_proofs));
+            targets.push((None, Either::Left(&mut self.state), account_proofs));
         }
 
         // Ensure a storage trie exists for every address whose proofs we're about to reveal
@@ -364,7 +364,7 @@ where
             if let Some(nodes) = storage_proofs.remove(account) {
                 #[cfg(feature = "metrics")]
                 self.metrics.increment_total_storage_nodes(nodes.len() as u64);
-                targets.push((Either::Right(trie), nodes));
+                targets.push((Some(*account), Either::Right(trie), nodes));
             }
         }
 
@@ -374,7 +374,7 @@ where
         #[cfg(not(feature = "std"))]
         let results: Vec<_> = targets
             .into_iter()
-            .map(|(target, mut nodes)| {
+            .map(|(_, target, mut nodes)| {
                 let result = match target {
                     Either::Left(trie) => {
                         trie.reveal_v2_proof_nodes(&mut nodes, retain_updates, retain_changed_paths)
@@ -392,10 +392,19 @@ where
             use rayon::iter::ParallelIterator;
             use reth_primitives_traits::ParallelBridgeBuffered;
 
+            let parent_span = tracing::Span::current();
             targets
                 .into_iter()
                 .par_bridge_buffered()
-                .map(|(target, mut nodes)| {
+                .map(|(hashed_address, target, mut nodes)| {
+                    let _span = tracing::trace_span!(
+                        target: "trie::sparse",
+                        parent: &parent_span,
+                        "reveal_v2_proof_nodes",
+                        ?hashed_address,
+                    )
+                    .entered();
+
                     let result = match target {
                         Either::Left(trie) => trie.reveal_v2_proof_nodes(
                             &mut nodes,
