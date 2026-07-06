@@ -81,11 +81,6 @@ impl<T> BlockExecutionOutput<T> {
         self.hashed_state.as_ref()
     }
 
-    /// Decomposes this output into its execution result and changed state.
-    pub fn into_result_and_state(self) -> (BlockExecutionResult<T>, IndexedBlockState) {
-        (self.result, self.state)
-    }
-
     /// Returns the hashed post-state for this block output.
     pub fn hash_state_slow<KH: KeyHasher>(&self) -> HashedPostState {
         self.hashed_state
