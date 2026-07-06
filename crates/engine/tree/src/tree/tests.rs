@@ -62,6 +62,17 @@ fn with_empty_changed_paths(block: ExecutedBlock<EthPrimitives>) -> ExecutedBloc
     with_changed_paths(block, TriePrefixSetsMut::default())
 }
 
+fn with_execution_gas(
+    block: ExecutedBlock<EthPrimitives>,
+    gas_used: u64,
+) -> ExecutedBlock<EthPrimitives> {
+    let trie_data = block.trie_data();
+    let mut execution_output = BlockExecutionOutput::default();
+    execution_output.result.gas_used = gas_used;
+
+    ExecutedBlock::new(block.recovered_block, Arc::new(execution_output), trie_data)
+}
+
 fn trie_changed_paths(
     account_path: Nibbles,
     storage_account: B256,
@@ -1208,6 +1219,38 @@ async fn test_get_canonical_blocks_to_persist() {
             highest: blocks_to_persist.last().unwrap().recovered_block().num_hash()
         })
     );
+}
+
+#[tokio::test]
+async fn test_get_canonical_blocks_to_persist_caps_background_batches_by_gas() {
+    let chain_spec = MAINNET.clone();
+    let mut test_harness = TestHarness::new(chain_spec);
+    let mut test_block_builder = TestBlockBuilder::eth();
+
+    let canonical_head_number = 5;
+    let high_gas = MAX_BACKGROUND_PERSISTENCE_BATCH_GAS / 2 + 1;
+    let blocks: Vec<_> = test_block_builder
+        .get_executed_blocks(0..canonical_head_number + 1)
+        .map(|block| with_execution_gas(block, high_gas))
+        .collect();
+    test_harness = test_harness.with_blocks(blocks.clone());
+
+    test_harness.tree.persistence_state.last_persisted_block = blocks[0].recovered_block.num_hash();
+    test_harness.tree.config =
+        TreeConfig::default().with_persistence_threshold(1).with_memory_block_buffer_target(0);
+
+    let background_blocks =
+        test_harness.tree.get_canonical_blocks_to_persist(PersistTarget::Threshold).unwrap();
+
+    assert_eq!(background_blocks.len(), 1);
+    assert_eq!(background_blocks[0].recovered_block().number, 1);
+
+    let head_blocks =
+        test_harness.tree.get_canonical_blocks_to_persist(PersistTarget::Head).unwrap();
+
+    assert_eq!(head_blocks.len(), canonical_head_number as usize);
+    assert_eq!(head_blocks[0].recovered_block().number, 1);
+    assert_eq!(head_blocks.last().unwrap().recovered_block().number, canonical_head_number);
 }
 
 #[tokio::test]

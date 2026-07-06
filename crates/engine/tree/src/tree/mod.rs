@@ -98,6 +98,13 @@ pub(crate) const MIN_BLOCKS_FOR_PIPELINE_RUN: u64 = EPOCH_SLOTS;
 /// even when the finalized block is not set (e.g., on L2s like Optimism).
 const CHANGESET_CACHE_RETENTION_BLOCKS: u64 = 64;
 
+/// Maximum cumulative gas for one background persistence batch.
+///
+/// Threshold-triggered persistence runs concurrently with payload validation. Capping by gas keeps
+/// big-block save bursts from producing multi-second persistence waits while leaving normal blocks
+/// batched by the existing block threshold.
+const MAX_BACKGROUND_PERSISTENCE_BATCH_GAS: u64 = 2_000_000_000;
+
 /// A builder for creating state providers that can be used across threads.
 #[derive(Clone, Debug)]
 pub struct StateProviderBuilder<N: NodePrimitives, P> {
@@ -2120,8 +2127,29 @@ where
 
         // Reverse the order so that the oldest block comes first
         blocks_to_persist.reverse();
+        if matches!(target, PersistTarget::Threshold) {
+            Self::truncate_background_persistence_batch_by_gas(&mut blocks_to_persist);
+        }
 
         Ok(blocks_to_persist)
+    }
+
+    fn truncate_background_persistence_batch_by_gas(
+        blocks_to_persist: &mut Vec<ExecutedBlock<N>>,
+    ) {
+        let mut cumulative_gas = 0u64;
+
+        for (idx, block) in blocks_to_persist.iter().enumerate() {
+            let block_gas = block.execution_outcome().result.gas_used;
+            if idx > 0 &&
+                cumulative_gas.saturating_add(block_gas) > MAX_BACKGROUND_PERSISTENCE_BATCH_GAS
+            {
+                blocks_to_persist.truncate(idx);
+                return
+            }
+
+            cumulative_gas = cumulative_gas.saturating_add(block_gas);
+        }
     }
 
     /// This clears the blocks from the in-memory tree state that have been persisted to the
