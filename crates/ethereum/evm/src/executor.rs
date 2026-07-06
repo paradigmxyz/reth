@@ -204,14 +204,6 @@ impl<'a> BlockExecutor for EthBlockExecutor<'a> {
             None,
         );
         let mut requests = block_requests_from_receipts(self.spec_id, context, &self.receipts)?;
-        let context = Self::block_context(
-            self.chain_id,
-            self.deposit_contract_address,
-            self.parent_hash,
-            self.parent_beacon_block_root,
-            self.ommers,
-            None,
-        );
         post_execution_system_call_state_changes(
             &mut self.evm,
             &mut self.block_state,
