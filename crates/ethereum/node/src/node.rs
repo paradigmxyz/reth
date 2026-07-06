@@ -1,6 +1,9 @@
 //! Ethereum Node types config.
 
-use crate::{EthEngineTypes, EthEvmConfig};
+use crate::{
+    engine_ssz_proxy::{EngineSszApi, EngineSszProxyLayer},
+    EthEngineTypes, EthEvmConfig,
+};
 use alloy_eips::{eip7840::BlobParams, merge::EPOCH_SLOTS};
 use alloy_network::Ethereum;
 use alloy_rpc_types_engine::ExecutionData;
@@ -33,7 +36,7 @@ use reth_node_builder::{
         PayloadValidatorBuilder, RethAuthHttpMiddleware, RethRpcAddOns, RethRpcMiddleware,
         RpcAddOns, RpcHandle, Stack,
     },
-    BuilderContext, DebugNode, Node, NodeAdapter, PayloadBuilderConfig,
+    BuilderContext, DebugNode, EngineApiExt, Node, NodeAdapter, PayloadBuilderConfig,
 };
 use reth_node_core::args::JitArgs;
 use reth_payload_primitives::PayloadTypes;
@@ -317,11 +320,13 @@ where
     EthB: EthApiBuilder<N>,
     PVB: Send,
     EB: EngineApiBuilder<N>,
+    EB::EngineApi: EngineSszApi,
     EVB: EngineValidatorBuilder<N>,
     EthApiError: FromEvmError<N::Evm>,
     EvmFactoryFor<N::Evm>: EvmFactory<Tx = TxEnv>,
     RpcMiddleware: RethRpcMiddleware,
     AuthHttpMiddleware: RethAuthHttpMiddleware<Identity>,
+    Stack<AuthHttpMiddleware, EngineSszProxyLayer<EB::EngineApi>>: RethAuthHttpMiddleware<Identity>,
 {
     type Handle = RpcHandle<N, EthB::EthApi>;
 
@@ -346,7 +351,15 @@ where
         let testing_desired_gas_limit = ctx.config.builder.gas_limit_for(ctx.config.chain.chain());
         let testing_engine_handle = ctx.beacon_engine_handle.clone();
 
+        let (ssz_proxy_layer, ssz_proxy_handle) = EngineSszProxyLayer::new();
+
         self.inner
+            .map_engine_api(|engine_api_builder| {
+                EngineApiExt::new(engine_api_builder, move |engine_api| {
+                    ssz_proxy_handle.set_engine_api_sync(engine_api);
+                })
+            })
+            .layer_auth_http_middleware(ssz_proxy_layer)
             .launch_add_ons_with(ctx, move |container| {
                 container.modules.merge_if_module_configured(
                     RethRpcModule::Flashbots,
