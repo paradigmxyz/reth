@@ -97,11 +97,6 @@ impl<T> BlockExecutionOutput<T> {
         self.state.bytecode(code_hash)
     }
 
-    /// Return analyzed executable bytecode if known.
-    pub fn executable_bytecode(&self, code_hash: &B256) -> Option<ExecutableBytecode> {
-        self.state.executable_bytecode(code_hash)
-    }
-
     /// Return original bytecode length if known.
     pub fn bytecode_len(&self, code_hash: &B256) -> Option<usize> {
         self.state.bytecode_len(code_hash)
@@ -179,11 +174,6 @@ impl IndexedBlockState {
     /// Return bytecode if known.
     pub fn bytecode(&self, code_hash: &B256) -> Option<Bytecode> {
         self.index().bytecode.get(code_hash).cloned().map(Into::into)
-    }
-
-    /// Return analyzed executable bytecode if known.
-    pub fn executable_bytecode(&self, code_hash: &B256) -> Option<ExecutableBytecode> {
-        self.index().bytecode.get(code_hash).cloned()
     }
 
     /// Return original bytecode length if known.
@@ -314,7 +304,7 @@ mod tests {
         assert_eq!(indexed.storage_value(&address, U256::from(9)), Some(U256::from(10)));
         assert_eq!(indexed.bytecode_len(&code_hash), Some(2));
         assert_eq!(
-            indexed.executable_bytecode(&code_hash).unwrap().original_bytes(),
+            indexed.bytecode(&code_hash).unwrap().original_bytes(),
             bytecode.original_bytes()
         );
     }
