@@ -52,28 +52,39 @@ where
     let left = core::mem::take(target);
     let mut out = Vec::with_capacity(left.len() + other.len());
 
-    let mut a = left.into_iter().peekable();
-    let mut b = other.iter().peekable();
+    let mut a = left.into_iter();
+    let mut current_a = a.next();
+    let mut b = 0;
 
-    while let (Some(aa), Some(bb)) = (a.peek(), b.peek()) {
-        match aa.0.cmp(&bb.0) {
+    while let Some((ak, av)) = current_a {
+        if b == other.len() {
+            out.push((ak, av));
+            out.extend(a);
+            *target = out;
+            return;
+        }
+
+        match ak.cmp(&other[b].0) {
             Ordering::Less => {
-                out.push(a.next().unwrap());
+                out.push((ak, av));
+                current_a = a.next();
             }
             Ordering::Greater => {
-                out.push(b.next().unwrap().clone());
+                out.push(other[b].clone());
+                b += 1;
+                current_a = Some((ak, av));
             }
             Ordering::Equal => {
                 // `other` takes precedence for duplicate keys - reuse key from `a`
-                let (k, _) = a.next().unwrap();
-                out.push((k, b.next().unwrap().1.clone()));
+                out.push((ak, other[b].1.clone()));
+                b += 1;
+                current_a = a.next();
             }
         }
     }
 
-    // Drain remaining: `a` moves, `b` clones
-    out.extend(a);
-    out.extend(b.cloned());
+    // Drain remaining entries from `other`.
+    out.extend_from_slice(&other[b..]);
 
     *target = out;
 }
