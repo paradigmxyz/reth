@@ -446,53 +446,83 @@ where
         skip_all
     )]
     fn on_hashed_state_update(&mut self, hashed_state_update: HashedPostState) {
-        for (&address, storage) in &hashed_state_update.storages {
-            if !storage.storage.is_empty() {
-                // Look up outer maps once per address instead of once per slot.
-                let new_updates = self.new_storage_updates.entry(address).or_default();
-                let mut existing_updates = self.storage_updates.get_mut(&address);
+        let HashedPostState { accounts, storages } = hashed_state_update;
 
-                for (&slot, &value) in &storage.storage {
-                    self.trie.record_slot_touch(address, slot);
+        {
+            let trie = &mut self.trie;
+            let new_storage_updates = &mut self.new_storage_updates;
+            let storage_updates = &mut self.storage_updates;
+            let new_account_updates = &mut self.new_account_updates;
+            let pending_account_updates = &mut self.pending_account_updates;
+            let final_storages = &mut self.final_hashed_state.storages;
 
-                    let encoded = if value.is_zero() {
-                        Vec::new()
-                    } else {
-                        alloy_rlp::encode_fixed_size(&value).to_vec()
-                    };
-                    new_updates.insert(slot, LeafUpdate::Changed(encoded));
+            for (address, storage) in storages {
+                if !storage.storage.is_empty() {
+                    // Look up outer maps once per address instead of once per slot.
+                    let new_updates = new_storage_updates.entry(address).or_default();
+                    let mut existing_updates = storage_updates.get_mut(&address);
+                    let final_storage = final_storages.entry(address).or_default();
 
-                    // Remove an existing storage update if it exists.
-                    if let Some(ref mut existing) = existing_updates {
-                        existing.remove(&slot);
+                    if storage.wiped {
+                        final_storage.wiped = true;
+                        final_storage.storage.clear();
                     }
+
+                    for (slot, value) in storage.storage {
+                        trie.record_slot_touch(address, slot);
+
+                        let encoded = if value.is_zero() {
+                            Vec::new()
+                        } else {
+                            alloy_rlp::encode_fixed_size(&value).to_vec()
+                        };
+                        new_updates.insert(slot, LeafUpdate::Changed(encoded));
+                        final_storage.storage.insert(slot, value);
+
+                        // Remove an existing storage update if it exists.
+                        if let Some(ref mut existing) = existing_updates {
+                            existing.remove(&slot);
+                        }
+                    }
+                } else if storage.wiped {
+                    let final_storage = final_storages.entry(address).or_default();
+                    final_storage.wiped = true;
+                    final_storage.storage.clear();
+                } else {
+                    final_storages.entry(address).or_default();
                 }
+
+                // Make sure account is tracked in `account_updates` so that it is revealed in
+                // accounts trie for storage root update.
+                new_account_updates.entry(address).or_insert(LeafUpdate::Touched);
+
+                // Make sure account is tracked in `pending_account_updates` so that once storage
+                // root is computed, it will be updated in the accounts trie.
+                pending_account_updates.entry(address).or_insert(None);
             }
-
-            // Make sure account is tracked in `account_updates` so that it is revealed in accounts
-            // trie for storage root update.
-            self.new_account_updates.entry(address).or_insert(LeafUpdate::Touched);
-
-            // Make sure account is tracked in `pending_account_updates` so that once storage root
-            // is computed, it will be updated in the accounts trie.
-            self.pending_account_updates.entry(address).or_insert(None);
         }
 
-        for (&address, &account) in &hashed_state_update.accounts {
-            self.trie.record_account_touch(address);
+        {
+            let trie = &mut self.trie;
+            let new_account_updates = &mut self.new_account_updates;
+            let pending_account_updates = &mut self.pending_account_updates;
+            let final_accounts = &mut self.final_hashed_state.accounts;
 
-            // Track account as touched.
-            //
-            // This might overwrite an existing update, which is fine, because storage root from it
-            // is already tracked in the trie and can be easily fetched again.
-            self.new_account_updates.insert(address, LeafUpdate::Touched);
+            for (address, account) in accounts {
+                trie.record_account_touch(address);
 
-            // Track account in `pending_account_updates` so that once storage root is computed,
-            // it will be updated in the accounts trie.
-            self.pending_account_updates.insert(address, Some(account));
+                // Track account as touched.
+                //
+                // This might overwrite an existing update, which is fine, because storage root
+                // from it is already tracked in the trie and can be easily fetched again.
+                new_account_updates.insert(address, LeafUpdate::Touched);
+
+                // Track account in `pending_account_updates` so that once storage root is
+                // computed, it will be updated in the accounts trie.
+                pending_account_updates.insert(address, Some(account));
+                final_accounts.insert(address, account);
+            }
         }
-
-        self.final_hashed_state.extend(hashed_state_update);
     }
 
     fn on_proof_result(&mut self, result: DecodedMultiProofV2) -> Result<(), StateRootTaskError> {
@@ -971,6 +1001,67 @@ mod tests {
         assert_eq!(decoded.balance, U256::from(42));
         assert_eq!(decoded.storage_root, storage_root);
         assert_eq!(account_rlp_buf, encoded);
+    }
+
+    #[test]
+    fn hashed_state_update_accumulates_final_state_like_extend() {
+        let runtime = reth_tasks::Runtime::test();
+        let provider_factory = create_test_provider_factory();
+        let anchor_hash = provider_factory.chain_spec().genesis_hash();
+        let overlay_factory = OverlayStateProviderFactory::new(
+            provider_factory,
+            OverlayBuilder::<reth_chain_state::EthPrimitives>::new(
+                anchor_hash,
+                ChangesetCache::new(),
+            ),
+        );
+        let proof_worker_handle =
+            ProofWorkerHandle::new(&runtime, ProofTaskCtx::new(overlay_factory), false);
+        let (_updates_tx, updates_rx) = crossbeam_channel::unbounded();
+        let mut task: SparseTrieCacheTask<ArenaParallelSparseTrie, ArenaParallelSparseTrie> =
+            SparseTrieCacheTask::new_with_trie(
+                &runtime,
+                updates_rx,
+                std::sync::mpsc::channel().0,
+                proof_worker_handle,
+                MultiProofTaskMetrics::default(),
+                SparseStateTrie::default(),
+                B256::ZERO,
+                1,
+            );
+
+        let address = keccak256(Address::random());
+        let slot_a = keccak256(U256::from(1).to_be_bytes::<32>());
+        let slot_b = keccak256(U256::from(2).to_be_bytes::<32>());
+
+        let mut first = HashedPostState::default();
+        first.accounts.insert(
+            address,
+            Some(Account { balance: U256::from(100), nonce: 1, bytecode_hash: None }),
+        );
+        let mut first_storage = reth_trie::HashedStorage::new(false);
+        first_storage.storage.insert(slot_a, U256::from(10));
+        first_storage.storage.insert(slot_b, U256::from(20));
+        first.storages.insert(address, first_storage);
+
+        let mut second = HashedPostState::default();
+        second.accounts.insert(address, None);
+        let mut wiped_storage = reth_trie::HashedStorage::new(true);
+        wiped_storage.storage.insert(slot_b, U256::from(30));
+        second.storages.insert(address, wiped_storage);
+
+        let mut expected = HashedPostState::default();
+        expected.extend(first.clone());
+        expected.extend(second.clone());
+
+        task.on_hashed_state_update(first);
+        task.on_hashed_state_update(second);
+
+        assert_eq!(task.final_hashed_state, expected);
+        let storage = task.final_hashed_state.storages.get(&address).unwrap();
+        assert!(storage.wiped);
+        assert_eq!(storage.storage.len(), 1);
+        assert_eq!(storage.storage.get(&slot_b), Some(&U256::from(30)));
     }
 
     #[test]
