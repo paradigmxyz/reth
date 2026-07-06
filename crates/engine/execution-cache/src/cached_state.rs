@@ -1073,9 +1073,12 @@ impl ExecutionCache {
                 self.insert_storage(*addr, (*key).into(), Some(slot.present_value));
             }
 
-            // Insert will update if present, so we just use the new account info as the new value
-            // for the account cache
-            self.insert_account(*addr, Some(Account::from(account_info)));
+            // Storage-only changes leave the account leaf fields unchanged. In that case, any
+            // existing parent cache entry is still valid, and a missing entry can fall back to the
+            // provider.
+            if account.is_info_changed() {
+                self.insert_account(*addr, Some(Account::from(account_info)));
+            }
         }
 
         Ok(())
@@ -1179,7 +1182,7 @@ mod tests {
     use alloy_primitives::{map::HashMap, U256};
     use reth_provider::test_utils::{ExtendedAccount, MockEthProvider};
     use reth_revm::db::{AccountStatus, BundleAccount};
-    use revm::state::AccountInfo;
+    use revm::{database::states::StorageSlot, state::AccountInfo};
 
     #[test]
     fn test_empty_storage_cached_state_provider() {
@@ -1439,6 +1442,53 @@ mod tests {
         assert!(caches.insert_state(&bundle).is_ok());
         assert_eq!(caches.0.account_stats.size(), 0);
         assert!(caches.0.account_cache.get(&addr).is_none());
+    }
+
+    #[test]
+    fn test_insert_state_storage_only_account_keeps_parent_account_cache() {
+        let caches = ExecutionCache::new(1000);
+        let addr = Address::random();
+        let storage_key = StorageKey::random();
+        let storage_value = U256::from(42);
+        let parent_account = Account {
+            balance: U256::from(100),
+            nonce: 7,
+            bytecode_hash: Some(alloy_primitives::KECCAK256_EMPTY),
+        };
+        let account_info = AccountInfo {
+            balance: parent_account.balance,
+            nonce: parent_account.nonce,
+            code_hash: parent_account.bytecode_hash.unwrap(),
+            code: None,
+            account_id: None,
+        };
+
+        caches.insert_account(addr, Some(parent_account));
+        assert_eq!(caches.0.account_stats.size(), 1);
+
+        let bundle = BundleState {
+            state: HashMap::from_iter([(
+                addr,
+                BundleAccount::new(
+                    Some(account_info.clone()),
+                    Some(account_info),
+                    HashMap::from_iter([(
+                        storage_key.into(),
+                        StorageSlot::new_changed(U256::ZERO, storage_value),
+                    )]),
+                    AccountStatus::Changed,
+                ),
+            )]),
+            contracts: Default::default(),
+            reverts: Default::default(),
+            state_size: 0,
+            reverts_size: 0,
+        };
+
+        assert!(caches.insert_state(&bundle).is_ok());
+        assert_eq!(caches.0.account_stats.size(), 1);
+        assert_eq!(caches.0.account_cache.get(&addr), Some(Some(parent_account)));
+        assert_eq!(caches.0.storage_cache.get(&(addr, storage_key)), Some(storage_value));
     }
 
     #[test]
