@@ -145,6 +145,7 @@ impl MetricServer {
 
         tracing::info!(target: "reth::cli", "Starting metrics endpoint at {}", listener.local_addr().unwrap());
 
+        let executor = task_executor.clone();
         task_executor.spawn_with_graceful_shutdown_signal(async move |mut signal| loop {
             let io = tokio::select! {
                 _ = &mut signal => break,
@@ -162,12 +163,15 @@ impl MetricServer {
             let handle = install_prometheus_recorder();
             let hook = hook.clone();
             let pprof_dump_dir = pprof_dump_dir.clone();
+            let executor = executor.clone();
             let service = tower::service_fn(move |req: Request<_>| {
                 let hook = hook.clone();
                 let pprof_dump_dir = pprof_dump_dir.clone();
+                let executor = executor.clone();
                 async move {
                     let response =
-                        handle_request(req.uri().path(), &*hook, handle, &pprof_dump_dir).await;
+                        handle_request(req.uri().path(), hook, executor, handle, &pprof_dump_dir)
+                            .await;
                     Ok::<_, Infallible>(response)
                 }
             });
@@ -194,6 +198,7 @@ impl MetricServer {
         let client = Client::builder()
             .build()
             .wrap_err("Could not create HTTP client to push metrics to gateway")?;
+        let executor = task_executor.clone();
         task_executor.spawn_with_graceful_shutdown_signal(async move |mut signal| {
             tracing::info!(url = %url, interval = ?interval, "Starting task to push metrics to gateway");
             let handle = install_prometheus_recorder();
@@ -204,8 +209,18 @@ impl MetricServer {
                         break;
                     }
                     _ = tokio::time::sleep(interval) => {
-                        hooks.iter().for_each(|hook| hook());
-                        let metrics = handle.handle().render();
+                        let hooks = hooks.clone();
+                        let metrics_handle = handle.handle().clone();
+                        let metrics = match executor.spawn_blocking(move || {
+                            hooks.iter().for_each(|hook| hook());
+                            metrics_handle.render()
+                        }).await {
+                            Ok(metrics) => metrics,
+                            Err(err) => {
+                                tracing::warn!(%err, "Failed to collect metrics for gateway");
+                                continue;
+                            }
+                        };
                         match client.put(&url).header("Content-Type", "text/plain").body(metrics).send().await {
                             Ok(response) => {
                                 if !response.status().is_success() {
@@ -327,9 +342,10 @@ fn describe_io_stats() {
 #[cfg(not(target_os = "linux"))]
 const fn describe_io_stats() {}
 
-async fn handle_request(
+async fn handle_request<F: Hook>(
     path: &str,
-    hook: impl Fn(),
+    hook: Arc<F>,
+    executor: TaskExecutor,
     handle: &crate::recorder::PrometheusRecorder,
     pprof_dump_dir: &PathBuf,
 ) -> Response<Full<Bytes>> {
@@ -337,8 +353,23 @@ async fn handle_request(
         "/debug/pprof/heap" => handle_pprof_heap(pprof_dump_dir),
         "/debug/tokio/dump" => handle_tokio_dump().await,
         _ => {
-            hook();
-            let metrics = handle.handle().render();
+            let metrics_handle = handle.handle().clone();
+            let metrics = match executor
+                .spawn_blocking(move || {
+                    hook();
+                    metrics_handle.render()
+                })
+                .await
+            {
+                Ok(metrics) => metrics,
+                Err(err) => {
+                    let mut response = Response::new(Full::new(Bytes::from(format!(
+                        "Failed to collect metrics: {err}"
+                    ))));
+                    *response.status_mut() = StatusCode::INTERNAL_SERVER_ERROR;
+                    return response;
+                }
+            };
             let mut response = Response::new(Full::new(Bytes::from(metrics)));
             response.headers_mut().insert(CONTENT_TYPE, HeaderValue::from_static("text/plain"));
             response
