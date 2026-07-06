@@ -472,13 +472,14 @@ where
     where
         P: BlockReader + StateProviderFactory + StateReader + Clone + 'static,
     {
+        let skip_transaction_prewarm = !parallel_bal_execution &&
+            (self.disable_transaction_prewarming ||
+                env.transaction_count < SMALL_BLOCK_TX_THRESHOLD);
         let mode = if parallel_bal_execution {
             PrewarmMode::BlockAccessList(
                 env.decoded_bal.clone().expect("BAL dispatch implies decoded BAL"),
             )
-        } else if self.disable_transaction_prewarming ||
-            env.transaction_count < SMALL_BLOCK_TX_THRESHOLD
-        {
+        } else if skip_transaction_prewarm {
             PrewarmMode::Skipped
         } else {
             PrewarmMode::Transactions(transactions)
@@ -486,6 +487,34 @@ where
         let saved_cache = self.disable_state_cache.not().then(|| self.cache_for(env.parent_hash));
 
         let executed_tx_index = Arc::new(AtomicUsize::new(0));
+
+        if skip_transaction_prewarm {
+            let (to_prewarm_task, from_prewarm_handle) = channel();
+            let execution_cache = self.execution_cache.clone();
+            let saved_cache_for_task = saved_cache.clone();
+            let cache_state_metrics = self.cache_state_metrics.clone();
+            let metrics = PrewarmMetrics::default();
+            let hash = env.hash;
+
+            self.executor.spawn_blocking_named("prewarm", move || {
+                run_skipped_prewarm_cache_task(
+                    execution_cache,
+                    saved_cache_for_task,
+                    hash,
+                    cache_state_metrics,
+                    metrics,
+                    from_prewarm_handle,
+                );
+            });
+
+            return CacheTaskHandle {
+                saved_cache,
+                to_prewarm_task: Some(to_prewarm_task),
+                executed_tx_index,
+                cache_metrics: self.cache_metrics.clone(),
+            }
+        }
+
         // configure prewarming
         let prewarm_ctx = PrewarmContext {
             env,
@@ -874,6 +903,84 @@ impl<R> Drop for CacheTaskHandle<R> {
             });
         }
     }
+}
+
+/// Waits for the cache termination event when transaction prewarming is skipped.
+///
+/// This keeps the same cache publication handshake as [`PrewarmCacheTask`] without constructing
+/// the full prewarm EVM/provider context for blocks that will not execute prewarm work.
+fn run_skipped_prewarm_cache_task<R>(
+    execution_cache: PayloadExecutionCache,
+    saved_cache: Option<SavedCache>,
+    hash: B256,
+    cache_state_metrics: Option<CachedStateCacheMetrics>,
+    metrics: PrewarmMetrics,
+    events: mpsc::Receiver<PrewarmTaskEvent<R>>,
+) where
+    R: Send + Sync + 'static,
+{
+    while let Ok(event) = events.recv() {
+        match event {
+            PrewarmTaskEvent::Terminate { execution_outcome, valid_block_rx } => {
+                if let Some(execution_outcome) = execution_outcome &&
+                    let Some(saved_cache) = saved_cache
+                {
+                    save_skipped_prewarm_cache(
+                        execution_cache,
+                        saved_cache,
+                        hash,
+                        cache_state_metrics,
+                        metrics,
+                        execution_outcome,
+                        valid_block_rx,
+                    );
+                }
+                break
+            }
+            PrewarmTaskEvent::TerminateTransactionExecution |
+            PrewarmTaskEvent::FinishedTxExecution { .. } => {}
+        }
+    }
+}
+
+fn save_skipped_prewarm_cache<R>(
+    execution_cache: PayloadExecutionCache,
+    saved_cache: SavedCache,
+    hash: B256,
+    cache_state_metrics: Option<CachedStateCacheMetrics>,
+    metrics: PrewarmMetrics,
+    execution_outcome: Arc<BlockExecutionOutput<R>>,
+    valid_block_rx: mpsc::Receiver<()>,
+) where
+    R: Send + Sync + 'static,
+{
+    let start = Instant::now();
+
+    debug!(target: "engine::caching", parent_hash=?hash, "Updating execution cache");
+    execution_cache.update_with_guard(|cached| {
+        let caches = saved_cache.cache().clone();
+        let new_cache = SavedCache::new(hash, caches);
+
+        if new_cache.cache().insert_state(&execution_outcome.state).is_err() {
+            *cached = None;
+            debug!(target: "engine::caching", "cleared execution cache on update error");
+            return
+        }
+
+        new_cache.update_metrics(cache_state_metrics.as_ref());
+
+        if valid_block_rx.recv().is_ok() {
+            *cached = Some(new_cache);
+        } else {
+            *cached = None;
+            debug!(target: "engine::caching", "cleared execution cache on invalid block");
+        }
+    });
+
+    let elapsed = start.elapsed();
+    debug!(target: "engine::caching", parent_hash=?hash, elapsed=?elapsed, "Updated execution cache");
+
+    metrics.cache_saving_duration.set(elapsed.as_secs_f64());
 }
 
 /// EVM context required to execute a block.
