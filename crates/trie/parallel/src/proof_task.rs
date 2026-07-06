@@ -81,6 +81,60 @@ type V2StorageProofCalculator<'a, Provider> = proof_v2::StorageProofCalculator<
     InstrumentedHashedCursor<'a, <Provider as HashedCursorFactory>::StorageCursor<'a>>,
 >;
 
+const SMALL_ACCOUNT_TARGET_LOOKUP_LEN: usize = 8;
+
+enum AccountTargetLookup {
+    Empty,
+    Small(SmallAccountTargetLookup),
+    Large(B256Set),
+}
+
+impl AccountTargetLookup {
+    fn new(account_targets: &[ProofV2Target]) -> Self {
+        match account_targets.len() {
+            0 => Self::Empty,
+            1..=SMALL_ACCOUNT_TARGET_LOOKUP_LEN => {
+                Self::Small(SmallAccountTargetLookup::new(account_targets))
+            }
+            _ => Self::Large(account_targets.iter().map(ProofV2Target::key).collect()),
+        }
+    }
+
+    const fn is_empty(&self) -> bool {
+        matches!(self, Self::Empty)
+    }
+
+    fn contains(&self, hashed_address: &B256) -> bool {
+        match self {
+            Self::Empty => false,
+            Self::Small(targets) => targets.contains(hashed_address),
+            Self::Large(targets) => targets.contains(hashed_address),
+        }
+    }
+}
+
+struct SmallAccountTargetLookup {
+    targets: [B256; SMALL_ACCOUNT_TARGET_LOOKUP_LEN],
+    len: usize,
+}
+
+impl SmallAccountTargetLookup {
+    fn new(account_targets: &[ProofV2Target]) -> Self {
+        debug_assert!(account_targets.len() <= SMALL_ACCOUNT_TARGET_LOOKUP_LEN);
+
+        let mut targets = [B256::ZERO; SMALL_ACCOUNT_TARGET_LOOKUP_LEN];
+        for (target, account_target) in targets.iter_mut().zip(account_targets) {
+            *target = account_target.key();
+        }
+
+        Self { targets, len: account_targets.len() }
+    }
+
+    fn contains(&self, hashed_address: &B256) -> bool {
+        self.targets[..self.len].contains(hashed_address)
+    }
+}
+
 /// Tracks worker availability counts.
 ///
 /// It uses cacheline-aligned flags to avoid core-to-core chatter.
@@ -1065,22 +1119,23 @@ fn dispatch_v2_storage_proofs(
     mut storage_targets: B256Map<Vec<ProofV2Target>>,
 ) -> Result<B256Map<CrossbeamReceiver<StorageProofResultMessage>>, StateRootTaskError> {
     if storage_targets.is_empty() {
-        return Ok(B256Map::default())
+        return Ok(B256Map::default());
     }
 
     let mut storage_proof_receivers =
         B256Map::with_capacity_and_hasher(storage_targets.len(), Default::default());
 
-    // Collect hashed addresses from account targets that need their storage roots computed
-    let account_target_addresses: B256Set = account_targets.iter().map(|t| t.key()).collect();
+    let account_target_lookup = AccountTargetLookup::new(account_targets);
 
     // For storage targets with associated account proofs, ensure the first target has
     // min_len(0) so the root node is returned for storage root computation
-    for (hashed_address, targets) in &mut storage_targets {
-        if account_target_addresses.contains(hashed_address) &&
-            let Some(first) = targets.first_mut()
-        {
-            *first = first.with_min_len(0);
+    if !account_target_lookup.is_empty() {
+        for (hashed_address, targets) in &mut storage_targets {
+            if account_target_lookup.contains(hashed_address)
+                && let Some(first) = targets.first_mut()
+            {
+                *first = first.with_min_len(0);
+            }
         }
     }
 
