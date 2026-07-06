@@ -52,6 +52,9 @@ pub(crate) struct OverlayStateProviderMetrics {
     database_provider_ro_duration: Histogram,
     /// Number of cache misses when fetching [`Overlay`]s from the overlay cache.
     overlay_cache_misses: Counter,
+    /// Number of managed overlay creations skipped because the sparse trie already matches the
+    /// requested parent state root.
+    sparse_trie_overlay_skips: Counter,
 }
 
 /// Contains all fields required to initialize an [`OverlayStateProvider`].
@@ -106,9 +109,8 @@ pub struct OverlayBuilder<N: NodePrimitives = EthPrimitives> {
     overlay_source: Option<OverlaySource<N>>,
     /// Changeset cache handle for retrieving trie changesets
     changeset_cache: ChangesetCache,
-    /// Parent state root that allows empty managed overlays when the sparse trie is already
-    /// anchored to it.
-    skip_overlay_when_sparse_trie_matches_parent: Option<B256>,
+    /// Parent state root used to detect when managed overlay construction can be skipped.
+    parent_state_root: Option<B256>,
     /// Metrics for tracking provider operations
     metrics: OverlayStateProviderMetrics,
 }
@@ -120,7 +122,7 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
             parent_hash,
             overlay_source: None,
             changeset_cache,
-            skip_overlay_when_sparse_trie_matches_parent: None,
+            parent_state_root: None,
             metrics: OverlayStateProviderMetrics::default(),
         }
     }
@@ -135,11 +137,8 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
 
     /// Set the parent state root that allows managed overlay construction to be skipped if the
     /// sparse trie is already based on that parent and no DB reverts are required.
-    pub const fn with_skip_overlay_when_sparse_trie_matches_parent(
-        mut self,
-        parent_state_root: B256,
-    ) -> Self {
-        self.skip_overlay_when_sparse_trie_matches_parent = Some(parent_state_root);
+    pub const fn with_parent_state_root(mut self, parent_state_root: B256) -> Self {
+        self.parent_state_root = Some(parent_state_root);
         self
     }
 
@@ -238,7 +237,7 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
 
     /// Returns true if managed overlay resolution can be skipped for this builder.
     fn should_skip_overlay_for_matching_sparse_trie(&self) -> bool {
-        let Some(parent_state_root) = self.skip_overlay_when_sparse_trie_matches_parent else {
+        let Some(parent_state_root) = self.parent_state_root else {
             return false;
         };
 
@@ -439,12 +438,7 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
                     "Skipping overlay construction because sparse trie is based on parent"
                 );
 
-                self.metrics.retrieve_trie_reverts_duration.record(Duration::ZERO.as_secs_f64());
-                self.metrics
-                    .retrieve_hashed_state_reverts_duration
-                    .record(Duration::ZERO.as_secs_f64());
-                self.metrics.trie_updates_size.record(0.0);
-                self.metrics.hashed_state_size.record(0.0);
+                self.metrics.sparse_trie_overlay_skips.increment(1);
 
                 return Ok(Overlay::empty())
             }
@@ -772,7 +766,7 @@ mod tests {
             .with_state_trie_overlay_manager(manager);
         assert!(!builder.should_skip_overlay_for_matching_sparse_trie());
 
-        let builder = builder.with_skip_overlay_when_sparse_trie_matches_parent(parent_state_root);
+        let builder = builder.with_parent_state_root(parent_state_root);
         assert!(builder.should_skip_overlay_for_matching_sparse_trie());
 
         let hashed_state = HashedPostState::default()
