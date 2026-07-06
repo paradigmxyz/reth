@@ -29,7 +29,7 @@ use reth_ethereum_primitives::TransactionSigned;
 use reth_ethereum_primitives::{Block, EthPrimitives};
 #[cfg(feature = "std")]
 use reth_evm::{ConfigureEngineEvm, ExecutableTxIterator};
-use reth_evm::{ConfigureEvm, EvmEnv, EvmEnvFor, NextBlockEnvAttributes};
+use reth_evm::{ConfigureEvm, EvmEnv, EvmEnvFor, ExecutionCtxFor, NextBlockEnvAttributes};
 #[cfg(feature = "std")]
 use reth_primitives_traits::SignedTransaction;
 use reth_primitives_traits::{SealedBlock, SealedHeader};
@@ -492,7 +492,7 @@ where
     fn context_for_payload<'a>(
         &self,
         payload: &'a ExecutionData,
-    ) -> Result<reth_evm::ExecutionCtxFor<'a, Self>, Self::Error> {
+    ) -> Result<ExecutionCtxFor<'a, Self>, Self::Error> {
         Ok(EthBlockExecutionCtx {
             tx_count_hint: Some(payload.payload.transactions().len()),
             parent_hash: payload.parent_hash(),
