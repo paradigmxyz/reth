@@ -175,12 +175,12 @@ pub(crate) enum PlainStateInputOrder {
 }
 
 impl PlainStateInputOrder {
-    pub(crate) const fn is_unsorted(self) -> bool {
+    const fn is_unsorted(self) -> bool {
         matches!(self, Self::Unsorted)
     }
 }
 
-pub(crate) fn is_sorted_by_key<T, K: Ord>(items: &[T], mut key: impl FnMut(&T) -> K) -> bool {
+fn is_sorted_by_key<T, K: Ord>(items: &[T], mut key: impl FnMut(&T) -> K) -> bool {
     items.windows(2).all(|window| key(&window[0]) <= key(&window[1]))
 }
 
