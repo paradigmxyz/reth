@@ -810,7 +810,7 @@ mod serde_impl {
     #[derive(Serialize)]
     struct ExecutionOutcomeSerde<'a, T> {
         state: serde_state::BlockStateSerde,
-        block_reverts: &'a Vec<BlockReverts>,
+        block_reverts: &'a [BlockReverts],
         receipts: &'a Vec<Vec<T>>,
         first_block: BlockNumber,
         requests: &'a Vec<Requests>,
@@ -835,7 +835,7 @@ mod serde_impl {
         {
             ExecutionOutcomeSerde {
                 state: serde_state::BlockStateSerde::from(self.state.inner()),
-                block_reverts: &self.block_reverts,
+                block_reverts: self.block_reverts(),
                 receipts: &self.receipts,
                 first_block: self.first_block,
                 requests: &self.requests,
