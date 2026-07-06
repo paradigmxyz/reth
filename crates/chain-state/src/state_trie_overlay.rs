@@ -250,29 +250,14 @@ impl<N: NodePrimitives> StateTrieOverlayManager<N> {
         tip_hash: B256,
         anchor_hash: B256,
     ) -> Result<Arc<TrieInputSorted>, StateTrieOverlayError> {
-        self.get_overlay_inner(tip_hash, anchor_hash)
-    }
-
-    fn get_overlay_inner(
-        &self,
-        tip_hash: B256,
-        anchor_hash: B256,
-    ) -> Result<Arc<TrieInputSorted>, StateTrieOverlayError> {
         let key = OverlayCacheKey { anchor_hash, tip_hash };
         let span = tracing::Span::current();
 
         if let Some(entry) = self.overlays.get(&key).map(|entry| entry.value().clone()) {
+            self.record_overlay_cache_reuse(&span);
             return Ok(match entry {
-                OverlayCacheEntry::Ready(input) => {
-                    self.metrics.overlay_cache_reuses.increment(1);
-                    span.record("cache_reused", true);
-                    input
-                }
-                OverlayCacheEntry::Computing(waiter) => {
-                    span.record("cache_reused", true);
-                    self.metrics.overlay_cache_reuses.increment(1);
-                    waiter.wait()
-                }
+                OverlayCacheEntry::Ready(input) => input,
+                OverlayCacheEntry::Computing(waiter) => waiter.wait(),
             })
         }
         span.record("cache_reused", false);
@@ -317,18 +302,14 @@ impl<N: NodePrimitives> StateTrieOverlayManager<N> {
         }
 
         let action = match self.overlays.entry(key) {
-            Entry::Occupied(entry) => match entry.get().clone() {
-                OverlayCacheEntry::Ready(input) => {
-                    self.metrics.overlay_cache_reuses.increment(1);
-                    span.record("cache_reused", true);
-                    CacheAction::Ready(input)
+            Entry::Occupied(entry) => {
+                let entry = entry.get().clone();
+                self.record_overlay_cache_reuse(&span);
+                match entry {
+                    OverlayCacheEntry::Ready(input) => CacheAction::Ready(input),
+                    OverlayCacheEntry::Computing(waiter) => CacheAction::Wait(waiter),
                 }
-                OverlayCacheEntry::Computing(waiter) => {
-                    span.record("cache_reused", true);
-                    self.metrics.overlay_cache_reuses.increment(1);
-                    CacheAction::Wait(waiter)
-                }
-            },
+            }
             Entry::Vacant(entry) => {
                 self.metrics.overlay_cache_fills.increment(1);
                 let waiter = Arc::new(OverlayWaiter::new());
@@ -359,6 +340,11 @@ impl<N: NodePrimitives> StateTrieOverlayManager<N> {
                 Ok(input)
             }
         }
+    }
+
+    fn record_overlay_cache_reuse(&self, span: &tracing::Span) {
+        self.metrics.overlay_cache_reuses.increment(1);
+        span.record("cache_reused", true);
     }
 
     /// Returns `preferred_anchor` if it is on the parent chain, otherwise the first missing parent.
