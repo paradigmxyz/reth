@@ -70,15 +70,6 @@ impl<T> BlockExecutionOutput<T> {
         Self { result, state: state.into(), hashed_state: None }
     }
 
-    /// Creates a new block execution output with a precomputed hashed post-state.
-    pub fn new_with_hashed_state(
-        result: BlockExecutionResult<T>,
-        state: BlockStateAccumulator,
-        hashed_state: HashedPostState,
-    ) -> Self {
-        Self { result, state: state.into(), hashed_state: Some(hashed_state) }
-    }
-
     /// Attaches an optional precomputed hashed post-state to the output.
     pub fn with_hashed_state(mut self, hashed_state: Option<HashedPostState>) -> Self {
         self.hashed_state = hashed_state;
