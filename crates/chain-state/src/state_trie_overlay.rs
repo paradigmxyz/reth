@@ -250,30 +250,12 @@ impl<N: NodePrimitives> StateTrieOverlayManager<N> {
         tip_hash: B256,
         anchor_hash: B256,
     ) -> Result<Arc<TrieInputSorted>, StateTrieOverlayError> {
-        self.get_overlay_inner(tip_hash, anchor_hash)
-    }
-
-    fn get_overlay_inner(
-        &self,
-        tip_hash: B256,
-        anchor_hash: B256,
-    ) -> Result<Arc<TrieInputSorted>, StateTrieOverlayError> {
         let key = OverlayCacheKey { anchor_hash, tip_hash };
         let span = tracing::Span::current();
 
         if let Some(entry) = self.overlays.get(&key).map(|entry| entry.value().clone()) {
-            return Ok(match entry {
-                OverlayCacheEntry::Ready(input) => {
-                    self.metrics.overlay_cache_reuses.increment(1);
-                    span.record("cache_reused", true);
-                    input
-                }
-                OverlayCacheEntry::Computing(waiter) => {
-                    span.record("cache_reused", true);
-                    self.metrics.overlay_cache_reuses.increment(1);
-                    waiter.wait()
-                }
-            })
+            self.record_overlay_cache_reuse(&span);
+            return Ok(entry.wait_or_ready())
         }
         span.record("cache_reused", false);
 
@@ -310,55 +292,40 @@ impl<N: NodePrimitives> StateTrieOverlayManager<N> {
             None => ComputeOverlayInput::MergeBlocks(blocks),
         };
 
-        enum CacheAction {
-            Ready(Arc<TrieInputSorted>),
-            Wait(Arc<OverlayWaiter>),
-            Compute(Arc<OverlayWaiter>),
-        }
-
-        let action = match self.overlays.entry(key) {
-            Entry::Occupied(entry) => match entry.get().clone() {
-                OverlayCacheEntry::Ready(input) => {
-                    self.metrics.overlay_cache_reuses.increment(1);
-                    span.record("cache_reused", true);
-                    CacheAction::Ready(input)
-                }
-                OverlayCacheEntry::Computing(waiter) => {
-                    span.record("cache_reused", true);
-                    self.metrics.overlay_cache_reuses.increment(1);
-                    CacheAction::Wait(waiter)
-                }
-            },
+        let waiter = match self.overlays.entry(key) {
+            Entry::Occupied(entry) => {
+                self.record_overlay_cache_reuse(&span);
+                return Ok(entry.get().clone().wait_or_ready())
+            }
             Entry::Vacant(entry) => {
                 self.metrics.overlay_cache_fills.increment(1);
                 let waiter = Arc::new(OverlayWaiter::new());
                 entry.insert(OverlayCacheEntry::Computing(Arc::clone(&waiter)));
-                CacheAction::Compute(waiter)
+                waiter
             }
         };
 
-        match action {
-            CacheAction::Ready(input) => Ok(input),
-            CacheAction::Wait(waiter) => Ok(waiter.wait()),
-            CacheAction::Compute(waiter) => {
-                let input = self.compute_overlay(compute_input, anchor_hash, span);
-                waiter.finish(Arc::clone(&input));
+        let input = self.compute_overlay(compute_input, anchor_hash, span);
+        waiter.finish(Arc::clone(&input));
 
-                if let Entry::Occupied(mut entry) = self.overlays.entry(key) {
-                    // The entry may have been pruned while the overlay was computing. Only cache
-                    // the result if the map still points at the waiter installed by this task.
-                    let should_publish = match entry.get() {
-                        OverlayCacheEntry::Computing(existing) => Arc::ptr_eq(existing, &waiter),
-                        OverlayCacheEntry::Ready(_) => false,
-                    };
-                    if should_publish {
-                        entry.insert(OverlayCacheEntry::Ready(Arc::clone(&input)));
-                    }
-                }
-
-                Ok(input)
+        if let Entry::Occupied(mut entry) = self.overlays.entry(key) {
+            // The entry may have been pruned while the overlay was computing. Only cache
+            // the result if the map still points at the waiter installed by this task.
+            let should_publish = match entry.get() {
+                OverlayCacheEntry::Computing(existing) => Arc::ptr_eq(existing, &waiter),
+                OverlayCacheEntry::Ready(_) => false,
+            };
+            if should_publish {
+                entry.insert(OverlayCacheEntry::Ready(Arc::clone(&input)));
             }
         }
+
+        Ok(input)
+    }
+
+    fn record_overlay_cache_reuse(&self, span: &tracing::Span) {
+        self.metrics.overlay_cache_reuses.increment(1);
+        span.record("cache_reused", true);
     }
 
     /// Returns `preferred_anchor` if it is on the parent chain, otherwise the first missing parent.
@@ -452,6 +419,13 @@ impl OverlayCacheEntry {
         match self {
             Self::Ready(input) => Some(Arc::clone(input)),
             Self::Computing(_) => None,
+        }
+    }
+
+    fn wait_or_ready(self) -> Arc<TrieInputSorted> {
+        match self {
+            Self::Ready(input) => input,
+            Self::Computing(waiter) => waiter.wait(),
         }
     }
 }
