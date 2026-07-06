@@ -32,7 +32,7 @@ impl CachedReads {
     }
 
     /// Gets a database wrapper that will cache reads from the given database.
-    pub fn as_db<DB>(&mut self, db: DB) -> CachedReadsDb<DB> {
+    pub fn as_db<DB>(&mut self, db: DB) -> CachedReadsDbMut<DB> {
         self.as_db_mut(db).into_db()
     }
 
@@ -56,16 +56,13 @@ impl CachedReads {
     }
 }
 
-/// A database wrapper that caches reads inside [`CachedReads`].
-pub type CachedReadsDb<DB> = CachedReadsDbMut<DB>;
-
 /// Mutable cache wrapper for cache-aware call sites.
 #[derive(Debug, Clone)]
 pub struct CachedReadsDbMut<DB> {
     /// The cache of reads.
-    pub cached: Rc<RefCell<CachedReads>>,
+    cached: Rc<RefCell<CachedReads>>,
     /// The underlying database.
-    pub db: DB,
+    db: DB,
 }
 
 impl<DB> CachedReadsDbMut<DB> {
