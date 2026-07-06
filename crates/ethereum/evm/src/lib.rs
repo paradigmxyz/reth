@@ -448,7 +448,7 @@ where
         DB: evm2::evm::DynDatabase + 'a,
     {
         let spec_id = env.spec;
-        let mut evm = self.block_executor_factory().evm_with_env(db, env);
+        let mut evm = self.block_executor_factory().build_evm_with_env(db, env);
         let mut block_state = evm2::evm::BlockStateAccumulator::new();
         crate::execution::pre_execution_system_call_state_changes(
             &mut evm,

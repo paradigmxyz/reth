@@ -99,7 +99,7 @@ impl<C, EvmFactory> EthBlockExecutorFactory<C, EvmFactory> {
     }
 
     /// Creates a configured Ethereum block executor.
-    pub fn create_executor<'a>(
+    pub(crate) fn create_eth_executor<'a>(
         &'a self,
         evm: evm2::Evm<'a, evm2::BaseEvmTypes>,
         ctx: EthBlockExecutionCtx<'a>,
@@ -130,7 +130,11 @@ impl<C, EvmFactory> EthBlockExecutorFactory<C, EvmFactory> {
     }
 
     /// Creates an EVM instance with the configured Ethereum execution environment.
-    pub fn evm_with_env<'a, DB>(&self, db: DB, env: EthEvmEnv) -> evm2::Evm<'a, evm2::BaseEvmTypes>
+    pub(crate) fn build_evm_with_env<'a, DB>(
+        &self,
+        db: DB,
+        env: EthEvmEnv,
+    ) -> evm2::Evm<'a, evm2::BaseEvmTypes>
     where
         C: EthChainSpec<Header = Header>,
         DB: evm2::evm::DynDatabase + 'a,
@@ -203,7 +207,7 @@ where
     where
         Self: 'a,
     {
-        Self::create_executor(self, evm, ctx)
+        self.create_eth_executor(evm, ctx)
     }
 
     fn evm_factory(&self) -> &Self::EvmFactory {
@@ -214,7 +218,7 @@ where
     where
         DB: evm2::evm::DynDatabase + 'a,
     {
-        Self::evm_with_env(self, db, evm_env)
+        self.build_evm_with_env(db, evm_env)
     }
 }
 
@@ -282,7 +286,7 @@ impl RethEvmFactory {
     }
 
     /// Installs the evm2 JIT interpreter runner on a configured EVM if locally enabled.
-    pub fn configure_evm(&self, evm: &mut evm2::Evm<'_, evm2::BaseEvmTypes>) {
+    fn configure_evm(&self, evm: &mut evm2::Evm<'_, evm2::BaseEvmTypes>) {
         if self.jit_support_enabled() {
             evm.set_interpreter_runner(evm2_jit::evm2_evm::JitInterpreterRunner::new(
                 self.backend.clone(),
