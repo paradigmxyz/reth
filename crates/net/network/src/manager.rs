@@ -37,7 +37,7 @@ use crate::{
     state::NetworkState,
     swarm::{Swarm, SwarmEvent},
     transactions::NetworkTransactionEvent,
-    FetchClient, NetworkBuilder,
+    FetchClient, NetworkBuilder, SnapFetchClient,
 };
 use futures::{Future, StreamExt};
 use parking_lot::Mutex;
@@ -50,6 +50,7 @@ use reth_network_api::{
     test_utils::PeersHandle,
     EthProtocolInfo, NetworkEvent, NetworkStatus, PeerInfo, PeerRequest,
 };
+use reth_network_p2p::error::RequestError;
 use reth_network_peers::{NodeRecord, PeerId};
 use reth_network_types::ReputationChangeKind;
 use reth_storage_api::BlockNumReader;
@@ -467,6 +468,13 @@ impl<N: NetworkPrimitives> NetworkManager<N> {
         self.swarm.state().fetch_client()
     }
 
+    /// Returns a new [`SnapFetchClient`] that can be cloned and shared.
+    ///
+    /// The [`SnapFetchClient`] is the entrypoint for sending `snap/2` requests to the network.
+    pub fn snap_client(&self) -> SnapFetchClient<N> {
+        self.swarm.state().snap_client()
+    }
+
     /// Returns the current [`NetworkStatus`] for the local node.
     pub fn status(&self) -> NetworkStatus {
         let sessions = self.swarm.sessions();
@@ -581,6 +589,10 @@ impl<N: NetworkPrimitives> NetworkManager<N> {
                     request,
                     response,
                 });
+            }
+            PeerRequest::GetSnap { response, .. } => {
+                // No snap/2 server yet, inbound snap/2 requests are not served.
+                let _ = response.send(Err(RequestError::UnsupportedCapability));
             }
         }
     }
