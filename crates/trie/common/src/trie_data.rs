@@ -124,6 +124,7 @@ impl LazyTrieData {
     }
 
     /// Creates a new [`LazyTrieData`] with a spawned task to compute sorted trie data.
+    #[cfg(feature = "std")]
     pub fn pending(
         hashed_state: Arc<HashedPostState>,
         trie_updates: Arc<TrieUpdates>,
@@ -148,6 +149,7 @@ impl LazyTrieData {
         match &self.mode {
             LazyTrieDataMode::Ready => self.data.get().expect("LazyTrieData must be initialized"),
             LazyTrieDataMode::Deferred(compute) => self.data.get_or_init(|| compute.as_ref()()),
+            #[cfg(feature = "std")]
             LazyTrieDataMode::Pending => self.data.wait(),
         }
     }
@@ -199,6 +201,7 @@ impl<'de> serde::Deserialize<'de> for LazyTrieData {
 enum LazyTrieDataMode {
     Ready,
     Deferred(Arc<dyn Fn() -> ComputedTrieData + Send + Sync>),
+    #[cfg(feature = "std")]
     Pending,
 }
 
@@ -207,6 +210,7 @@ impl fmt::Debug for LazyTrieDataMode {
         match self {
             Self::Ready => write!(f, "Ready"),
             Self::Deferred(_) => write!(f, "Deferred(..)"),
+            #[cfg(feature = "std")]
             Self::Pending => write!(f, "Pending"),
         }
     }

@@ -1438,7 +1438,7 @@ where
 
     /// Spawns a background task to compute and sort trie data for the executed block.
     ///
-    /// This function creates a [`DeferredTrieData`] handle and spawns a blocking task that:
+    /// This function creates a [`LazyTrieData`] handle and spawns a blocking task that:
     /// 1. Sort the block's hashed state and trie updates
     /// 2. Publishes the result so subsequent calls return immediately
     ///
