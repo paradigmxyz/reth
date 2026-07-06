@@ -109,8 +109,9 @@ pub struct OverlayBuilder<N: NodePrimitives = EthPrimitives> {
     overlay_source: Option<OverlaySource<N>>,
     /// Changeset cache handle for retrieving trie changesets
     changeset_cache: ChangesetCache,
-    /// Parent state root used to detect when managed overlay construction can be skipped.
-    parent_state_root: Option<B256>,
+    /// Whether managed overlay construction can be skipped because this task reused the sparse
+    /// trie for the requested parent.
+    skip_overlay_for_reused_sparse_trie: bool,
     /// Metrics for tracking provider operations
     metrics: OverlayStateProviderMetrics,
 }
@@ -122,7 +123,7 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
             parent_hash,
             overlay_source: None,
             changeset_cache,
-            parent_state_root: None,
+            skip_overlay_for_reused_sparse_trie: false,
             metrics: OverlayStateProviderMetrics::default(),
         }
     }
@@ -135,10 +136,10 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
         self
     }
 
-    /// Set the parent state root that allows managed overlay construction to be skipped if the
-    /// sparse trie is already based on that parent and no DB reverts are required.
-    pub const fn with_parent_state_root(mut self, parent_state_root: B256) -> Self {
-        self.parent_state_root = Some(parent_state_root);
+    /// Skips managed overlay construction when the sparse trie was reused for the requested parent
+    /// and no DB reverts are required.
+    pub const fn with_skip_overlay_for_reused_sparse_trie(mut self) -> Self {
+        self.skip_overlay_for_reused_sparse_trie = true;
         self
     }
 
@@ -236,17 +237,15 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
     }
 
     /// Returns true if managed overlay resolution can be skipped for this builder.
-    fn should_skip_overlay_for_matching_sparse_trie(&self) -> bool {
-        let Some(parent_state_root) = self.parent_state_root else {
+    fn should_skip_overlay_for_reused_sparse_trie(&self) -> bool {
+        if !self.skip_overlay_for_reused_sparse_trie {
             return false;
-        };
-
-        match &self.overlay_source {
-            Some(OverlaySource::Managed { manager, state }) if state.is_empty() => {
-                manager.parent_sparse_trie_state_root() == Some(parent_state_root)
-            }
-            _ => false,
         }
+
+        matches!(
+            &self.overlay_source,
+            Some(OverlaySource::Managed { state, .. }) if state.is_empty()
+        )
     }
 
     /// Returns the block which is at the tip of the DB, i.e. the block which the state tables of
@@ -431,7 +430,7 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
             (trie_updates, hashed_state_updates)
         } else {
             // If no reverts are needed then the db tip is the anchor hash. Use overlays directly.
-            if self.should_skip_overlay_for_matching_sparse_trie() {
+            if self.should_skip_overlay_for_reused_sparse_trie() {
                 debug!(
                     target: "providers::state::overlay",
                     parent_hash = %self.parent_hash,
@@ -510,6 +509,14 @@ impl<F, N: NodePrimitives> OverlayStateProviderFactory<F, N> {
         hashed_state_overlay: Option<Arc<HashedPostStateSorted>>,
     ) -> Self {
         self.overlay_builder = self.overlay_builder.with_hashed_state_overlay(hashed_state_overlay);
+        self.overlay_cache = Default::default();
+        self
+    }
+
+    /// Skips managed overlay construction when this factory is used by a task that reused the
+    /// sparse trie for the requested parent.
+    pub fn with_skip_overlay_for_reused_sparse_trie(mut self) -> Self {
+        self.overlay_builder = self.overlay_builder.with_skip_overlay_for_reused_sparse_trie();
         self.overlay_cache = Default::default();
         self
     }
@@ -706,8 +713,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use reth_chain_state::{test_utils::TestBlockBuilder, PreservedSparseTrie, SparseTrie};
-    use reth_primitives_traits::{Account, AlloyBlockHeader};
+    use reth_primitives_traits::Account;
     use reth_trie::HashedPostState;
 
     #[test]
@@ -750,29 +756,19 @@ mod tests {
     }
 
     #[test]
-    fn managed_overlay_skip_requires_matching_sparse_trie_and_no_immediate_state() {
-        let manager = StateTrieOverlayManager::default();
-        let mut block_builder = TestBlockBuilder::eth();
-        let parent = block_builder.get_executed_blocks(1..2).next().unwrap();
-        let parent_hash = parent.recovered_block().hash();
-        let parent_state_root = parent.recovered_block().state_root();
-        manager.insert_block(parent);
-        {
-            let mut guard = manager.lock_sparse_trie();
-            guard.store(PreservedSparseTrie::anchored(SparseTrie::default(), parent_state_root));
-        }
-
+    fn managed_overlay_skip_requires_reused_sparse_trie_and_no_immediate_state() {
+        let parent_hash = B256::with_last_byte(1);
         let builder = OverlayBuilder::<EthPrimitives>::new(parent_hash, ChangesetCache::default())
-            .with_state_trie_overlay_manager(manager);
-        assert!(!builder.should_skip_overlay_for_matching_sparse_trie());
+            .with_state_trie_overlay_manager(StateTrieOverlayManager::default());
+        assert!(!builder.should_skip_overlay_for_reused_sparse_trie());
 
-        let builder = builder.with_parent_state_root(parent_state_root);
-        assert!(builder.should_skip_overlay_for_matching_sparse_trie());
+        let builder = builder.with_skip_overlay_for_reused_sparse_trie();
+        assert!(builder.should_skip_overlay_for_reused_sparse_trie());
 
         let hashed_state = HashedPostState::default()
             .with_accounts([(B256::with_last_byte(2), Some(Account::default()))])
             .into_sorted();
         let builder = builder.with_extended_hashed_state_overlay(hashed_state);
-        assert!(!builder.should_skip_overlay_for_matching_sparse_trie());
+        assert!(!builder.should_skip_overlay_for_reused_sparse_trie());
     }
 }

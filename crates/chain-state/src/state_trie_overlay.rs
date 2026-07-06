@@ -88,14 +88,9 @@ impl<N: NodePrimitives> StateTrieOverlayManager<N> {
         }
     }
 
-    /// Takes the preserved sparse trie if present, leaving its previous state root in its place.
+    /// Takes the preserved sparse trie if present, marking it as in use.
     pub fn take_sparse_trie(&self) -> Option<PreservedSparseTrie> {
         self.preserved_sparse_trie.lock().take()
-    }
-
-    /// Returns the state root that the sparse trie is or was anchored to.
-    pub fn parent_sparse_trie_state_root(&self) -> Option<B256> {
-        self.preserved_sparse_trie.lock().state_root()
     }
 
     /// Acquires a guard that blocks taking the trie until dropped.
@@ -705,7 +700,7 @@ mod tests {
     }
 
     #[test]
-    fn taking_sparse_trie_leaves_anchor_state_root() {
+    fn taking_sparse_trie_marks_it_in_use_until_stored_or_cleared() {
         let manager = StateTrieOverlayManager::<EthPrimitives>::default();
         let state_root = B256::with_last_byte(1);
         let other_state_root = B256::with_last_byte(2);
@@ -715,12 +710,8 @@ mod tests {
             guard.store(PreservedSparseTrie::anchored(SparseTrie::default(), state_root));
         }
 
-        assert_eq!(manager.parent_sparse_trie_state_root(), Some(state_root));
-        assert_ne!(manager.parent_sparse_trie_state_root(), Some(other_state_root));
-
         let preserved = manager.take_sparse_trie().expect("preserved trie should be available");
         assert_eq!(preserved.state_root(), state_root);
-        assert_eq!(manager.parent_sparse_trie_state_root(), Some(state_root));
         assert!(preserved.into_trie_for(other_state_root).is_none());
         assert!(manager.take_sparse_trie().is_none());
 
@@ -728,8 +719,7 @@ mod tests {
             let mut guard = manager.lock_sparse_trie();
             guard.clear();
         }
-
-        assert_eq!(manager.parent_sparse_trie_state_root(), None);
+        assert!(manager.take_sparse_trie().is_none());
     }
 
     #[test]

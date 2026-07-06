@@ -132,6 +132,7 @@ where
 
 struct SparseTrieTaskOptions {
     parent_state_root: B256,
+    sparse_state_trie: Option<SparseStateTrie>,
     chunk_size: usize,
     pending_sparse_trie_prune: Option<TriePrefixSetsMut>,
 }
@@ -143,6 +144,21 @@ where
     /// Returns a reference to the workload executor driving payload tasks.
     pub const fn executor(&self) -> &Runtime {
         &self.executor
+    }
+
+    /// Takes the preserved sparse trie for the given parent state root, if it is available and
+    /// reusable.
+    pub(crate) fn take_sparse_trie_for_parent(
+        &self,
+        parent_state_root: B256,
+    ) -> Option<SparseStateTrie> {
+        let start = Instant::now();
+        let preserved = self.state_trie_overlays.take_sparse_trie();
+        self.trie_metrics
+            .sparse_trie_cache_wait_duration_histogram
+            .record(start.elapsed().as_secs_f64());
+
+        preserved.and_then(|preserved| preserved.into_trie_for(parent_state_root))
     }
 
     /// Creates a new payload processor.
@@ -276,6 +292,7 @@ where
         &self,
         multiproof_provider_factory: F,
         parent_state_root: B256,
+        sparse_state_trie: Option<SparseStateTrie>,
         transaction_count: Option<usize>,
         config: &TreeConfig,
         pending_sparse_trie_prune: Option<TriePrefixSetsMut>,
@@ -306,6 +323,7 @@ where
             from_multi_proof,
             SparseTrieTaskOptions {
                 parent_state_root,
+                sparse_state_trie,
                 chunk_size: config.multiproof_chunk_size(),
                 pending_sparse_trie_prune: if self.disable_sparse_trie_cache_pruning {
                     None
@@ -556,8 +574,12 @@ where
         from_multi_proof: CrossbeamReceiver<StateRootMessage>,
         options: SparseTrieTaskOptions,
     ) {
-        let SparseTrieTaskOptions { parent_state_root, chunk_size, pending_sparse_trie_prune } =
-            options;
+        let SparseTrieTaskOptions {
+            parent_state_root,
+            sparse_state_trie,
+            chunk_size,
+            pending_sparse_trie_prune,
+        } = options;
         let state_trie_overlays = self.state_trie_overlays.clone();
         let trie_metrics = self.trie_metrics.clone();
         let max_hot_slots = self.sparse_trie_max_hot_slots;
@@ -571,29 +593,18 @@ where
             let _enter = debug_span!(target: "engine::tree::payload_processor", parent: parent_span, "sparse_trie_task")
                 .entered();
 
-            // Reuse a stored SparseStateTrie if available, applying continuation logic.
-            // If this payload's parent state root matches the preserved trie's anchor,
-            // we can reuse the preserved trie structure.
-            let start = Instant::now();
-            let preserved = state_trie_overlays.take_sparse_trie();
-            trie_metrics
-                .sparse_trie_cache_wait_duration_histogram
-                .record(start.elapsed().as_secs_f64());
-
-            let mut sparse_state_trie = preserved
-                .and_then(|preserved| preserved.into_trie_for(parent_state_root))
-                .unwrap_or_else(|| {
-                    debug!(
-                        target: "engine::tree::payload_processor",
-                        "Creating new sparse trie - no preserved trie available"
-                    );
-                    let default_trie =
-                        RevealableSparseTrie::blind_from(ArenaParallelSparseTrie::default());
-                    SparseStateTrie::default()
-                        .with_accounts_trie(default_trie.clone())
-                        .with_default_storage_trie(default_trie)
-                        .with_updates(true)
-                });
+            let mut sparse_state_trie = sparse_state_trie.unwrap_or_else(|| {
+                debug!(
+                    target: "engine::tree::payload_processor",
+                    "Creating new sparse trie - no preserved trie available"
+                );
+                let default_trie =
+                    RevealableSparseTrie::blind_from(ArenaParallelSparseTrie::default());
+                SparseStateTrie::default()
+                    .with_accounts_trie(default_trie.clone())
+                    .with_default_storage_trie(default_trie)
+                    .with_updates(true)
+            });
             sparse_state_trie.set_changed_paths(true);
             sparse_state_trie.set_hot_cache_capacities(max_hot_slots, max_hot_accounts);
 
@@ -1287,6 +1298,7 @@ mod tests {
                 OverlayBuilder::<EthPrimitives>::new(genesis_hash, ChangesetCache::new()),
             ),
             env.parent_state_root,
+            None,
             Some(env.transaction_count),
             &TreeConfig::default(),
             None,

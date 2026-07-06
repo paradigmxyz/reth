@@ -39,19 +39,15 @@ pub(crate) enum PreservedSparseTrieState {
     /// A sparse trie is available for reuse.
     Available(PreservedSparseTrie),
     /// A sparse trie has been taken by a state-root task.
-    InUse {
-        /// The state root the sparse trie was anchored to when it was taken.
-        state_root: B256,
-    },
+    InUse,
 }
 
 impl PreservedSparseTrieState {
-    /// Takes the available preserved sparse trie, leaving behind its previous anchor.
+    /// Takes the available preserved sparse trie, marking it as in use.
     pub(crate) fn take(&mut self) -> Option<PreservedSparseTrie> {
         match core::mem::take(self) {
             Self::Available(trie) => {
-                let state_root = trie.state_root();
-                *self = Self::InUse { state_root };
+                *self = Self::InUse;
                 Some(trie)
             }
             state => {
@@ -69,15 +65,6 @@ impl PreservedSparseTrieState {
     /// Clears the sparse trie state.
     fn clear(&mut self) {
         *self = Self::Empty;
-    }
-
-    /// Returns the state root the sparse trie is or was anchored to.
-    pub(crate) const fn state_root(&self) -> Option<B256> {
-        match self {
-            Self::Empty => None,
-            Self::Available(trie) => Some(trie.state_root()),
-            Self::InUse { state_root } => Some(*state_root),
-        }
     }
 }
 

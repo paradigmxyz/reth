@@ -592,10 +592,7 @@ where
             ctx.state(),
             self.changeset_cache.clone(),
         );
-        let proof_worker_overlay_builder =
-            overlay_builder.with_parent_state_root(parent_block.state_root());
-        let overlay_factory =
-            OverlayStateProviderFactory::new(provider_factory, proof_worker_overlay_builder);
+        let overlay_factory = OverlayStateProviderFactory::new(provider_factory, overlay_builder);
 
         let parallel_bal_execution = ensure_ok!(self.bal_path_eligible(env.decoded_bal.as_deref()));
 
@@ -1824,8 +1821,7 @@ where
         };
         let overlay_factory = OverlayStateProviderFactory::new(
             self.provider.clone(),
-            Self::overlay_builder_for_parent(parent_hash, state, self.changeset_cache.clone())
-                .with_parent_state_root(parent_header.state_root()),
+            Self::overlay_builder_for_parent(parent_hash, state, self.changeset_cache.clone()),
         );
 
         match self.state_root_strategy.prepare_payload_builder(PayloadStateRootJobContext::new(
