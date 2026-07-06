@@ -82,6 +82,8 @@ pub struct EthTransactionValidator<Client, T, Evm> {
     blob_store: Box<dyn BlobStore>,
     /// tracks activated forks relevant for transaction validation
     fork_tracker: ForkTracker,
+    /// Cached transaction validation gas rules from EVM config.
+    transaction_validation_gas_rules: AtomicTransactionValidationGasRules,
     /// Fork indicator whether we are using EIP-2718 type transactions.
     eip2718: bool,
     /// Fork indicator whether we are using EIP-1559 type transactions.
@@ -588,10 +590,7 @@ where
             }
         }
 
-        ensure_intrinsic_gas(
-            transaction,
-            self.fork_tracker.transaction_validation_gas_rules.load(),
-        )?;
+        ensure_intrinsic_gas(transaction, self.transaction_validation_gas_rules.load())?;
 
         // light blob tx pre-checks
         if transaction.is_eip4844() {
@@ -913,7 +912,7 @@ where
 
         let validation_rules = transaction_validation_rules(&self.evm_config, new_tip_block)
             .expect("evm_env should not fail for executed block");
-        self.fork_tracker.store_validation_rules(validation_rules);
+        self.store_validation_rules(validation_rules);
     }
 
     fn max_gas_limit(&self) -> u64 {
@@ -1315,16 +1314,16 @@ impl<Client, Evm> EthTransactionValidatorBuilder<Client, Evm> {
             max_blob_count: AtomicU64::new(max_blob_count),
             max_initcode_size: AtomicUsize::new(validation_rules.max_initcode_size),
             tx_gas_limit_cap: AtomicU64::new(validation_rules.tx_gas_limit_cap),
-            transaction_validation_gas_rules: AtomicTransactionValidationGasRules::new(
-                validation_rules.gas_rules,
-            ),
         };
+        let transaction_validation_gas_rules =
+            AtomicTransactionValidationGasRules::new(validation_rules.gas_rules);
 
         EthTransactionValidator {
             client,
             eip2718,
             eip1559,
             fork_tracker,
+            transaction_validation_gas_rules,
             eip4844,
             eip7702,
             block_gas_limit,
@@ -1385,8 +1384,6 @@ pub struct ForkTracker {
     pub max_initcode_size: AtomicUsize,
     /// Cached transaction gas limit cap from EVM config (0 = no cap)
     pub tx_gas_limit_cap: AtomicU64,
-    /// Cached transaction validation gas rules from EVM config.
-    transaction_validation_gas_rules: AtomicTransactionValidationGasRules,
 }
 
 /// Transaction validation rules resolved by the configured EVM for a specific block.
@@ -1519,13 +1516,19 @@ impl AtomicTransactionValidationGasRules {
     }
 }
 
-impl ForkTracker {
+impl<Client, Tx, Evm> EthTransactionValidator<Client, Tx, Evm> {
     fn store_validation_rules(&self, rules: TransactionValidationRules) {
-        self.max_initcode_size.store(rules.max_initcode_size, std::sync::atomic::Ordering::Relaxed);
-        self.tx_gas_limit_cap.store(rules.tx_gas_limit_cap, std::sync::atomic::Ordering::Relaxed);
+        self.fork_tracker
+            .max_initcode_size
+            .store(rules.max_initcode_size, std::sync::atomic::Ordering::Relaxed);
+        self.fork_tracker
+            .tx_gas_limit_cap
+            .store(rules.tx_gas_limit_cap, std::sync::atomic::Ordering::Relaxed);
         self.transaction_validation_gas_rules.store(rules.gas_rules);
     }
+}
 
+impl ForkTracker {
     /// Returns `true` if Shanghai fork is activated.
     pub fn is_shanghai_activated(&self) -> bool {
         self.shanghai.load(std::sync::atomic::Ordering::Relaxed)
