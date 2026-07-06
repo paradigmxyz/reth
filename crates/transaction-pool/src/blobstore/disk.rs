@@ -101,6 +101,7 @@ impl DiskFileBlobStore {
 
         // not all versioned hashes were found, try to look up a matching tx
         let mut missing_tx_hashes = Vec::new();
+        let mut seen_missing_tx_hashes = B256Set::default();
 
         {
             let mut versioned_to_txhashes = self.inner.versioned_hashes_to_txhash.lock();
@@ -109,7 +110,9 @@ impl DiskFileBlobStore {
             {
                 // this is safe because the result vec has the same len
                 let versioned_hash = versioned_hashes[idx];
-                if let Some(tx_hash) = versioned_to_txhashes.get(&versioned_hash).copied() {
+                if let Some(tx_hash) = versioned_to_txhashes.get(&versioned_hash).copied() &&
+                    seen_missing_tx_hashes.insert(tx_hash)
+                {
                     missing_tx_hashes.push(tx_hash);
                 }
             }
@@ -171,13 +174,16 @@ impl DiskFileBlobStore {
         }
 
         let mut missing_tx_hashes = Vec::new();
+        let mut seen_missing_tx_hashes = B256Set::default();
         {
             let mut versioned_to_txhashes = self.inner.versioned_hashes_to_txhash.lock();
             for (idx, _) in
                 result.iter().enumerate().filter(|(_, cells_and_proofs)| cells_and_proofs.is_none())
             {
                 let versioned_hash = versioned_hashes[idx];
-                if let Some(tx_hash) = versioned_to_txhashes.get(&versioned_hash).copied() {
+                if let Some(tx_hash) = versioned_to_txhashes.get(&versioned_hash).copied() &&
+                    seen_missing_tx_hashes.insert(tx_hash)
+                {
                     missing_tx_hashes.push(tx_hash);
                 }
             }
@@ -317,6 +323,7 @@ impl BlobStore for DiskFileBlobStore {
         // not all versioned hashes were be found, try to look up a matching tx
 
         let mut missing_tx_hashes = Vec::new();
+        let mut seen_missing_tx_hashes = B256Set::default();
 
         {
             let mut versioned_to_txhashes = self.inner.versioned_hashes_to_txhash.lock();
@@ -325,7 +332,9 @@ impl BlobStore for DiskFileBlobStore {
             {
                 // this is safe because the result vec has the same len
                 let versioned_hash = versioned_hashes[idx];
-                if let Some(tx_hash) = versioned_to_txhashes.get(&versioned_hash).copied() {
+                if let Some(tx_hash) = versioned_to_txhashes.get(&versioned_hash).copied() &&
+                    seen_missing_tx_hashes.insert(tx_hash)
+                {
                     missing_tx_hashes.push(tx_hash);
                 }
             }

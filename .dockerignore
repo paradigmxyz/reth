@@ -23,6 +23,8 @@
 
 # include licenses
 !LICENSE-*
+!/LICENSES
+!/LICENSES/**
 
 # include example files
 !/examples

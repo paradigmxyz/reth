@@ -17,7 +17,10 @@
 use alloy_consensus::{Header, Transaction};
 use alloy_eips::{eip1559::calculate_block_gas_limit, eip2718::Decodable2718};
 use alloy_evm::{Evm, RecoveredTx};
-use alloy_primitives::{map::HashSet, Address, Bytes, B256, U256};
+use alloy_primitives::{
+    map::{DefaultHashBuilder, HashSet},
+    Address, Bytes, B256, U256,
+};
 use alloy_rlp::Encodable;
 use alloy_rpc_types_engine::{ExecutionPayloadEnvelopeV5, ForkchoiceState, PayloadAttributes};
 use async_trait::async_trait;
@@ -41,7 +44,6 @@ use reth_rpc_eth_types::EthApiError;
 use reth_storage_api::{BlockReader, BlockReaderIdExt, HeaderProvider};
 use reth_transaction_pool::{BestTransactionsAttributes, PoolTransaction, TransactionPool};
 use revm::context::Block;
-use revm_primitives::map::DefaultHashBuilder;
 use std::sync::Arc;
 use tracing::debug;
 

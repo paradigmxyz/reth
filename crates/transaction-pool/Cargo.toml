@@ -25,8 +25,6 @@ reth-fs-util.workspace = true
 reth-storage-api.workspace = true
 reth-tasks.workspace = true
 revm.workspace = true
-revm-interpreter.workspace = true
-revm-primitives.workspace = true
 
 # ethereum
 alloy-eips = { workspace = true, features = ["kzg"] }
@@ -91,8 +89,6 @@ serde = [
     "parking_lot/serde",
     "rand?/serde",
     "smallvec/serde",
-    "revm-interpreter/serde",
-    "revm-primitives/serde",
     "reth-primitives-traits/serde",
     "reth-ethereum-primitives/serde",
     "reth-chain-state/serde",
@@ -127,9 +123,7 @@ arbitrary = [
     "bitflags/arbitrary",
     "reth-primitives-traits/arbitrary",
     "smallvec/arbitrary",
-    "revm-interpreter/arbitrary",
     "reth-ethereum-primitives/arbitrary",
-    "revm-primitives/arbitrary",
     "revm/arbitrary",
     "imbl/arbitrary",
     "reth-transaction-pool/arbitrary",

@@ -13,8 +13,8 @@ use alloy_rpc_types_engine::{
 };
 use error::{InsertBlockError, InsertBlockFatalError, InsertBlockValidationError};
 use reth_chain_state::{
-    CanonicalInMemoryState, ComputedTrieData, ExecutedBlock, ExecutionTimingStats,
-    MemoryOverlayStateProvider, NewCanonicalChain, StateTrieOverlayManager,
+    CanonicalInMemoryState, ExecutedBlock, ExecutionTimingStats, MemoryOverlayStateProvider,
+    NewCanonicalChain, StateTrieOverlayManager,
 };
 use reth_consensus::{Consensus, FullConsensus};
 use reth_engine_primitives::{
@@ -24,7 +24,7 @@ use reth_engine_primitives::{
 use reth_errors::{ConsensusError, ProviderResult};
 use reth_evm::ConfigureEvm;
 use reth_payload_builder::{BuildNewPayload, PayloadBuilderHandle};
-use reth_payload_primitives::{BuiltPayload, NewPayloadError, PayloadTypes};
+use reth_payload_primitives::{BuiltPayload, NewPayloadError, PayloadAttributes, PayloadTypes};
 use reth_primitives_traits::{
     FastInstant as Instant, NodePrimitives, RecoveredBlock, SealedBlock, SealedHeader,
 };
@@ -36,9 +36,9 @@ use reth_provider::{
 };
 use reth_revm::database::StateProviderDatabase;
 use reth_stages_api::ControlFlow;
-use reth_tasks::{spawn_os_thread, utils::increase_thread_priority, WorkerPool};
+use reth_tasks::{spawn_os_thread, utils::increase_thread_priority};
+use reth_trie::{prefix_set::TriePrefixSetsMut, ComputedTrieData};
 use reth_trie_db::ChangesetCache;
-use reth_trie_sparse::SparseTrieRetainedPaths;
 use revm::interpreter::debug_unreachable;
 use state::TreeState;
 use std::{fmt::Debug, ops, sync::Arc, time::Duration};
@@ -59,6 +59,7 @@ pub mod payload_processor;
 pub mod payload_validator;
 mod persistence_state;
 pub mod precompile_cache;
+pub mod state_root_strategy;
 #[cfg(test)]
 mod tests;
 mod trie_updates;
@@ -157,7 +158,7 @@ impl<N: NodePrimitives> EngineApiTreeState<N> {
         invalid_header_hit_eviction_threshold: u8,
         canonical_block: BlockNumHash,
         engine_kind: EngineApiKind,
-        state_trie_overlay_worker_pool: Arc<WorkerPool>,
+        state_trie_overlays: StateTrieOverlayManager<N>,
     ) -> Self {
         Self {
             invalid_headers: InvalidHeaderCache::new(
@@ -165,11 +166,7 @@ impl<N: NodePrimitives> EngineApiTreeState<N> {
                 invalid_header_hit_eviction_threshold,
             ),
             buffer: BlockBuffer::new(block_buffer_limit),
-            tree_state: TreeState::new(
-                canonical_block,
-                engine_kind,
-                StateTrieOverlayManager::new(state_trie_overlay_worker_pool),
-            ),
+            tree_state: TreeState::new(canonical_block, engine_kind, state_trie_overlays),
             forkchoice_state_tracker: ForkchoiceStateTracker::default(),
         }
     }
@@ -322,7 +319,7 @@ where
     building_payload: bool,
     /// Retained paths from the latest persistence cleanup to apply during the next sparse trie
     /// cache preservation.
-    pending_sparse_trie_prune: Option<SparseTrieRetainedPaths>,
+    pending_sparse_trie_prune: Option<TriePrefixSetsMut>,
     /// Task runtime for spawning blocking work on named, reusable threads.
     runtime: reth_tasks::Runtime,
 }
@@ -434,6 +431,7 @@ where
         persistence: PersistenceHandle<N>,
         payload_builder: PayloadBuilderHandle<T>,
         canonical_in_memory_state: CanonicalInMemoryState<N>,
+        state_trie_overlays: StateTrieOverlayManager<N>,
         config: TreeConfig,
         kind: EngineApiKind,
         evm_config: C,
@@ -456,7 +454,7 @@ where
             config.invalid_header_hit_eviction_threshold(),
             header.num_hash(),
             kind,
-            runtime.state_trie_overlay_worker_pool(),
+            state_trie_overlays,
         );
 
         let task = Self::new(
@@ -1566,9 +1564,7 @@ where
                         debug!(target: "engine::tree", block=?block_num_hash, "inserting already executed block");
                         let now = Instant::now();
 
-                        let block = match self
-                            .payload_validator
-                            .on_inserted_executed_block(payload, &self.state)
+                        let block = match self.payload_validator.on_inserted_executed_block(payload)
                         {
                             Ok(block) => block,
                             Err(err) => {
@@ -2149,19 +2145,35 @@ where
             number: self.persistence_state.last_persisted_block.number,
             hash: self.persistence_state.last_persisted_block.hash,
         });
-        let retained_paths = self.sparse_trie_retained_paths_for_in_memory_blocks();
-        self.pending_sparse_trie_prune = Some(retained_paths);
+        self.pending_sparse_trie_prune = self.sparse_trie_retained_paths_for_in_memory_blocks();
         Ok(())
     }
 
     /// Builds sparse trie retained paths from all blocks still present in the in-memory tree.
-    fn sparse_trie_retained_paths_for_in_memory_blocks(&self) -> SparseTrieRetainedPaths {
-        let mut retained_paths = SparseTrieRetainedPaths::default();
+    fn sparse_trie_retained_paths_for_in_memory_blocks(&self) -> Option<TriePrefixSetsMut> {
+        if self.config.skip_state_root() ||
+            self.config.state_root_fallback() ||
+            !self.config.use_state_root_task()
+        {
+            return None
+        }
+
+        let mut retained_paths = TriePrefixSetsMut::default();
         for block in self.state.tree_state.blocks_by_hash.values() {
             let trie_data = block.trie_data();
-            retained_paths.extend_from_hashed_state(&trie_data.hashed_state);
+            let Some(changed_paths) = trie_data.changed_paths.as_deref() else {
+                // Custom state-root strategies may not track changed paths, so this is an
+                // expected way to opt out of pruning, not an anomaly.
+                debug!(
+                    target: "engine::tree",
+                    block = ?block.recovered_block().num_hash(),
+                    "Skipping sparse trie prune because changed paths for in-memory block are unknown"
+                );
+                return None
+            };
+            retained_paths.extend_ref(changed_paths);
         }
-        retained_paths
+        Some(retained_paths)
     }
 
     /// Return an [`ExecutedBlock`] from database or in-memory state by hash.
@@ -3293,17 +3305,12 @@ where
             None
         };
 
-        let skip_state_root = self.config.skip_state_root();
-        let trie_handle =
-            if self.config.share_sparse_trie_with_payload_builder() && !skip_state_root {
-                self.payload_validator.sparse_trie_handle_for(
-                    state.head_block_hash,
-                    head.state_root(),
-                    &self.state,
-                )
-            } else {
-                None
-            };
+        let state_root_handle = self.payload_validator.payload_state_root_handle_for(
+            state.head_block_hash,
+            head,
+            attributes.timestamp(),
+            &self.state,
+        );
 
         // send the payload to the builder and return the receiver for the pending payload
         // id, initiating payload job is handled asynchronously
@@ -3311,7 +3318,7 @@ where
             parent_hash: state.head_block_hash,
             attributes,
             cache,
-            trie_handle,
+            state_root_handle,
         });
 
         // Client software MUST respond to this method call in the following way:
