@@ -184,7 +184,7 @@ pub fn decode_list_with_memory_budget<T: Decodable + InMemorySize>(
     let (payload, rest) = buf.split_at(header.payload_length);
     let mut payload = payload;
 
-    let mut txs = Vec::new();
+    let mut txs = Vec::with_capacity(estimated_transaction_list_capacity(header.payload_length));
     let mut total_size = 0usize;
 
     while !payload.is_empty() {
@@ -200,6 +200,23 @@ pub fn decode_list_with_memory_budget<T: Decodable + InMemorySize>(
 
     *buf = rest;
     Ok(txs)
+}
+
+// Keep this as a conservative hint: small lists stay allocation-free until the first push, while
+// large untrusted payloads cannot force an outsized preallocation.
+const MIN_TRANSACTION_RLP_SIZE_ESTIMATE: usize = 128;
+const MIN_PREALLOCATED_TRANSACTIONS: usize = 4;
+const MAX_PREALLOCATED_TRANSACTIONS: usize = 1024;
+
+const fn estimated_transaction_list_capacity(payload_length: usize) -> usize {
+    let estimate = payload_length / MIN_TRANSACTION_RLP_SIZE_ESTIMATE;
+    if estimate < MIN_PREALLOCATED_TRANSACTIONS {
+        0
+    } else if estimate > MAX_PREALLOCATED_TRANSACTIONS {
+        MAX_PREALLOCATED_TRANSACTIONS
+    } else {
+        estimate
+    }
 }
 
 /// Same as [`Transactions`] but this is intended as egress message send from local to _many_ peers.
