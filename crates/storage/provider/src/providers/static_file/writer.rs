@@ -1120,6 +1120,26 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
         Ok(())
     }
 
+    /// Appends multiple changes to a changeset static file.
+    fn append_changes<V: Compact>(
+        &mut self,
+        changes: impl IntoIterator<Item = V>,
+    ) -> ProviderResult<u64> {
+        let mut count = 0;
+        for change in changes {
+            self.append_column(&change)?;
+            count += 1;
+        }
+
+        if count > 0 &&
+            let Some(ref mut offset) = self.current_changeset_offset
+        {
+            *offset = ChangesetOffset::new(offset.offset(), offset.num_changes() + count);
+        }
+
+        Ok(count)
+    }
+
     /// Appends header to static file.
     ///
     /// It **CALLS** `increment_block()` since the number of headers is equal to the number of
@@ -1366,12 +1386,7 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
         // first sort the changeset by address
         changeset.sort_by_key(|change| change.address);
 
-        let mut count: u64 = 0;
-
-        for change in changeset {
-            self.append_change(&change)?;
-            count += 1;
-        }
+        let count = self.append_changes(changeset)?;
 
         if let Some(metrics) = &self.metrics {
             metrics.record_segment_operations(
@@ -1430,11 +1445,7 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
         // sort by address + storage key
         changeset.sort_by_key(|change| (change.address, change.key));
 
-        let mut count: u64 = 0;
-        for change in changeset {
-            self.append_change(&change)?;
-            count += 1;
-        }
+        let count = self.append_changes(changeset)?;
 
         if let Some(metrics) = &self.metrics {
             metrics.record_segment_operations(
