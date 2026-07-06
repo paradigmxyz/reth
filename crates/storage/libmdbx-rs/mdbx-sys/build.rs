@@ -15,7 +15,8 @@ fn main() {
     let mut cc = cc::Build::new();
     cc.flag_if_supported("-Wno-unused-parameter").flag_if_supported("-Wuninitialized");
 
-    if env::var("CARGO_CFG_TARGET_OS").unwrap() != "linux" {
+    let target_os = env::var("CARGO_CFG_TARGET_OS").unwrap();
+    if target_os != "linux" {
         cc.flag_if_supported("-Wbad-function-cast");
     }
 
@@ -27,6 +28,11 @@ fn main() {
         // ENOSPC even when sufficient disk space is available. The fallback path uses ftruncate()
         // which works correctly on all filesystems.
         .define("MDBX_USE_FALLOCATE", "0");
+
+    if target_os == "linux" {
+        // Track WRITEMAP dirty pages and flush them with writes instead of whole-map msync.
+        cc.define("MDBX_AVOID_MSYNC", "1");
+    }
 
     // Enable debugging on debug builds
     #[cfg(debug_assertions)]
