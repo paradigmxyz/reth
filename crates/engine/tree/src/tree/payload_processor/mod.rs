@@ -133,9 +133,9 @@ where
 #[derive(Debug, Default)]
 pub struct PayloadProcessorSpawnOptions {
     /// Whether to execute BAL blocks through the parallel BAL path.
-    pub parallel_bal_execution: bool,
+    pub(crate) parallel_bal_execution: bool,
     /// Pending sparse trie prune request to run after successful state root computation.
-    pub pending_sparse_trie_prune: Option<SparseTrieRetainedPaths>,
+    pub(crate) pending_sparse_trie_prune: Option<SparseTrieRetainedPaths>,
 }
 
 impl PayloadProcessorSpawnOptions {
