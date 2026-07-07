@@ -317,10 +317,10 @@ where
     ///
     /// The witness maps `keccak256(rlp_node)` to the full RLP-encoded trie node. Blind account or
     /// storage tries are skipped.
-    pub fn witness(&self) -> B256Map<Bytes> {
+    pub fn witness(&mut self) -> B256Map<Bytes> {
         let mut witness = B256Map::default();
         self.state.witness(&mut witness);
-        for trie in self.storage.tries.values() {
+        for trie in self.storage.tries.values_mut() {
             trie.witness(&mut witness);
         }
         witness

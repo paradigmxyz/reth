@@ -198,7 +198,7 @@ impl<T: SparseTrieTrait> RevealableSparseTrie<T> {
     }
 
     /// Adds all revealed trie nodes to the provided witness.
-    pub fn witness(&self, witness: &mut B256Map<Bytes>) {
+    pub fn witness(&mut self, witness: &mut B256Map<Bytes>) {
         if let Self::Revealed(trie) = self {
             trie.witness(witness);
         }

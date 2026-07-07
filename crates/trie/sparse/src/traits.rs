@@ -145,7 +145,7 @@ pub trait SparseTrie: Sized + Debug + Send + Sync {
     /// The witness maps `keccak256(rlp_node)` to the full RLP-encoded trie node. Blinded children
     /// are included as references inside their revealed parents, but are not added as separate
     /// witness entries.
-    fn witness(&self, witness: &mut B256Map<Bytes>);
+    fn witness(&mut self, witness: &mut B256Map<Bytes>);
 
     /// Attempts to find a leaf node at the specified path.
     ///
