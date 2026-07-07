@@ -258,6 +258,13 @@ pub(crate) fn streaming_download_and_extract(
     target_dir: &Path,
     session: &DownloadSession,
 ) -> Result<()> {
+    if let Some(path) = archive_file_url_path(url)? {
+        let size = path.metadata()?.len();
+        extract_from_file(&path, format, target_dir)?;
+        session.record_archive_output_complete(size);
+        return Ok(())
+    }
+
     let shared = session.progress();
     let quiet = session.progress().is_some();
     let mut last_error: Option<eyre::Error> = None;
@@ -344,6 +351,19 @@ pub(crate) fn streaming_download_and_extract(
     Err(last_error.unwrap_or_else(|| {
         eyre::eyre!("Streaming download failed after {MAX_DOWNLOAD_RETRIES} attempts")
     }))
+}
+
+/// Resolves a `file://` archive URL to its local path.
+fn archive_file_url_path(url: &str) -> Result<Option<PathBuf>> {
+    let Ok(parsed) = Url::parse(url) else { return Ok(None) };
+    if parsed.scheme() != "file" {
+        return Ok(None)
+    }
+
+    parsed
+        .to_file_path()
+        .map(Some)
+        .map_err(|_| eyre::eyre!("Invalid file:// archive URL path: {url}"))
 }
 
 /// Fetches the snapshot from a remote URL with resume support, then extracts it.
