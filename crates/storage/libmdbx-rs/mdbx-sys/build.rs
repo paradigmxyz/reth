@@ -34,7 +34,9 @@ fn main() {
 
     // Disables debug logging on optimized builds
     #[cfg(not(debug_assertions))]
-    cc.define("MDBX_DEBUG", "0").define("NDEBUG", None);
+    cc.define("MDBX_DEBUG", "0")
+        .define("NDEBUG", None)
+        .define("MDBX_RETH_DISABLE_GC_COALESCE", "1");
 
     // Propagate `-C target-cpu=native`
     let rustflags = env::var("CARGO_ENCODED_RUSTFLAGS").unwrap();

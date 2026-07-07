@@ -1713,6 +1713,12 @@ MDBX_MAYBE_UNUSED MDBX_NOTHROW_PURE_FUNCTION static inline uint32_t osal_bswap32
 #error MDBX_ENABLE_BIGFOOT must be defined as 0 or 1
 #endif /* MDBX_ENABLE_BIGFOOT */
 
+#ifndef MDBX_RETH_DISABLE_GC_COALESCE
+#define MDBX_RETH_DISABLE_GC_COALESCE 0
+#elif !(MDBX_RETH_DISABLE_GC_COALESCE == 0 || MDBX_RETH_DISABLE_GC_COALESCE == 1)
+#error MDBX_RETH_DISABLE_GC_COALESCE must be defined as 0 or 1
+#endif /* MDBX_RETH_DISABLE_GC_COALESCE */
+
 /** Disable some checks to reduce an overhead and detection probability of
  * database corruption to a values closer to the LMDB. */
 #ifndef MDBX_DISABLE_VALIDATION
@@ -22526,6 +22532,7 @@ pgr_t gc_alloc_ex(const MDBX_cursor *const mc, const size_t num, uint8_t flags) 
   eASSERT(env, (flags & (ALLOC_COALESCE | ALLOC_LIFO | ALLOC_SHOULD_SCAN)) == 0);
   flags += (env->flags & MDBX_LIFORECLAIM) ? ALLOC_LIFO : 0;
 
+#if !MDBX_RETH_DISABLE_GC_COALESCE
   if (/* Не коагулируем записи при подготовке резерва для обновления GC.
        * Иначе попытка увеличить резерв может приводить к необходимости ещё
        * большего резерва из-за увеличения списка переработанных страниц. */
@@ -22533,6 +22540,7 @@ pgr_t gc_alloc_ex(const MDBX_cursor *const mc, const size_t num, uint8_t flags) 
     if (txn->dbs[FREE_DBI].branch_pages && MDBX_PNL_GETSIZE(txn->tw.repnl) < env->maxgc_large1page / 2)
       flags += ALLOC_COALESCE;
   }
+#endif /* !MDBX_RETH_DISABLE_GC_COALESCE */
 
   MDBX_cursor *const gc = ptr_disp(env->basal_txn, sizeof(MDBX_txn));
   eASSERT(env, mc != gc && gc->next == gc);
