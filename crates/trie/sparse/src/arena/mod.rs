@@ -1496,15 +1496,14 @@ impl ArenaParallelSparseTrie {
         }
     }
 
-    /// Records all revealed nodes in one arena using cursor post-order traversal, returning the
-    /// `RlpNode` reference for the root node.
+    /// Records all revealed nodes in one arena using cursor post-order traversal.
     fn record_arena_witness_nodes(
         arena: &NodeArena,
         root: Index,
         cursor: &mut ArenaCursor,
+        rlp_nodes: &mut HashMap<Index, RlpNode>,
         witness: &mut B256Map<Bytes>,
-    ) -> RlpNode {
-        let mut rlp_nodes = HashMap::default();
+    ) {
         cursor.reset(arena, root, Nibbles::default());
 
         loop {
@@ -1514,13 +1513,11 @@ impl ArenaParallelSparseTrie {
                 NextResult::Done => break,
                 NextResult::Branch | NextResult::NonBranch => {
                     let idx = cursor.head().expect("cursor is non-empty").index;
-                    let rlp_node = Self::record_arena_witness_node(arena, idx, &rlp_nodes, witness);
+                    let rlp_node = Self::record_arena_witness_node(arena, idx, rlp_nodes, witness);
                     rlp_nodes.insert(idx, rlp_node);
                 }
             }
         }
-
-        rlp_nodes.remove(&root).expect("cursor traversal must record the root node")
     }
 
     /// Records all revealed nodes in the upper arena and any revealed subtries.
@@ -1544,12 +1541,18 @@ impl ArenaParallelSparseTrie {
                     let rlp_node = match &self.upper_arena[idx] {
                         ArenaSparseNode::Subtrie(subtrie) => {
                             let mut subtrie_cursor = ArenaCursor::default();
+                            let mut subtrie_rlp_nodes = HashMap::default();
                             Self::record_arena_witness_nodes(
                                 &subtrie.arena,
                                 subtrie.root,
                                 &mut subtrie_cursor,
+                                &mut subtrie_rlp_nodes,
                                 witness,
-                            )
+                            );
+                            subtrie_rlp_nodes
+                                .get(&subtrie.root)
+                                .cloned()
+                                .expect("cursor traversal must record the subtrie root node")
                         }
                         _ => Self::record_arena_witness_node(
                             &self.upper_arena,
