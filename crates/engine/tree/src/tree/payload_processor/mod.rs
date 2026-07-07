@@ -710,7 +710,7 @@ where
 
             // Take existing cache (if any) or create fresh caches
             let caches = match cached.take() {
-                Some(existing) => existing.cache().clone(),
+                Some(existing) => existing.into_cache(),
                 None => ExecutionCache::new(self.cross_block_cache_size),
             };
 
