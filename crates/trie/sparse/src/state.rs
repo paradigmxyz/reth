@@ -352,7 +352,7 @@ where
         if !account_proofs.is_empty() {
             #[cfg(feature = "metrics")]
             self.metrics.increment_total_account_nodes(account_proofs.len() as u64);
-            targets.push((Either::Left(&mut self.state), account_proofs));
+            targets.push((None, Either::Left(&mut self.state), account_proofs));
         }
 
         // Ensure a storage trie exists for every address whose proofs we're about to reveal
@@ -364,7 +364,7 @@ where
             if let Some(nodes) = storage_proofs.remove(account) {
                 #[cfg(feature = "metrics")]
                 self.metrics.increment_total_storage_nodes(nodes.len() as u64);
-                targets.push((Either::Right(trie), nodes));
+                targets.push((Some(*account), Either::Right(trie), nodes));
             }
         }
 
@@ -374,7 +374,7 @@ where
         #[cfg(not(feature = "std"))]
         let results: Vec<_> = targets
             .into_iter()
-            .map(|(target, mut nodes)| {
+            .map(|(_, target, mut nodes)| {
                 let result = match target {
                     Either::Left(trie) => {
                         trie.reveal_v2_proof_nodes(&mut nodes, retain_updates, retain_changed_paths)
@@ -392,10 +392,19 @@ where
             use rayon::iter::ParallelIterator;
             use reth_primitives_traits::ParallelBridgeBuffered;
 
+            let parent_span = tracing::Span::current();
             targets
                 .into_iter()
                 .par_bridge_buffered()
-                .map(|(target, mut nodes)| {
+                .map(|(hashed_address, target, mut nodes)| {
+                    let _span = tracing::trace_span!(
+                        target: "trie::sparse",
+                        parent: &parent_span,
+                        "reveal_v2_proof_nodes",
+                        ?hashed_address,
+                    )
+                    .entered();
+
                     let result = match target {
                         Either::Left(trie) => trie.reveal_v2_proof_nodes(
                             &mut nodes,
@@ -617,15 +626,27 @@ where
 
         let TriePrefixSets { account_prefix_set, storage_prefix_sets, .. } = retained_paths;
 
+        let parent_span = tracing::Span::current();
+        let account_parent_span = parent_span.clone();
+
         // Prune account and storage tries in parallel using the same retained set.
         let (account_nodes_pruned, storage_tries_evicted) = rayon::join(
             || {
+                let hashed_address = Option::<B256>::None;
+                let _span = tracing::trace_span!(
+                    target: "trie::sparse",
+                    parent: &account_parent_span,
+                    "prune_trie",
+                    ?hashed_address,
+                )
+                .entered();
+
                 self.state
                     .as_revealed_mut()
                     .map(|trie| trie.prune(account_prefix_set.slice()))
                     .unwrap_or(0)
             },
-            || self.storage.prune_by_retained_slots(storage_prefix_sets),
+            || self.storage.prune_by_retained_slots(storage_prefix_sets, &parent_span),
         );
 
         debug!(
@@ -676,11 +697,24 @@ impl<S: SparseTrieTrait> StorageTries<S> {
     ///
     /// Tries without retained slots are evicted entirely. Tries with retained slots are pruned to
     /// those slots.
-    fn prune_by_retained_slots(&mut self, retained_slots: B256Map<PrefixSet>) -> usize {
+    fn prune_by_retained_slots(
+        &mut self,
+        retained_slots: B256Map<PrefixSet>,
+        parent_span: &tracing::Span,
+    ) -> usize {
         // Parallel pass: prune retained tries and clear evicted ones in place.
         {
             use rayon::iter::{IntoParallelRefMutIterator, ParallelIterator};
             self.tries.par_iter_mut().for_each(|(address, trie)| {
+                let hashed_address = Some(*address);
+                let _span = tracing::trace_span!(
+                    target: "trie::sparse",
+                    parent: parent_span,
+                    "prune_trie",
+                    ?hashed_address,
+                )
+                .entered();
+
                 if let Some(slots) = retained_slots.get(address) {
                     if let Some(t) = trie.as_revealed_mut() {
                         t.prune(slots.slice());
