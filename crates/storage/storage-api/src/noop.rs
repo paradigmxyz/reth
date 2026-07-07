@@ -39,7 +39,7 @@ use reth_stages_types::{StageCheckpoint, StageId};
 use reth_storage_errors::provider::{ProviderError, ProviderResult};
 use reth_trie_common::{
     updates::TrieUpdates, AccountProof, ExecutionWitnessMode, HashedPostState, HashedStorage,
-    MultiProof, MultiProofTargets, StorageMultiProof, StorageProof, TrieInput,
+    MultiProof, MultiProofTargets, StorageMultiProof, StorageProof, TrieInput, TrieInputSorted,
 };
 
 /// Supports various api interfaces for testing purposes.
@@ -534,9 +534,9 @@ impl<C: Send + Sync, N: NodePrimitives> HashedPostStateProvider for NoopProvider
 }
 
 impl<C: Send + Sync, N: NodePrimitives> AccountRangeProvider for NoopProvider<C, N> {
-    fn account_range_overlaid(
+    fn account_range_with_nodes(
         &self,
-        _input: TrieInput,
+        _input: TrieInputSorted,
         _start: B256,
         _limit: usize,
     ) -> ProviderResult<AccountRangeResult> {

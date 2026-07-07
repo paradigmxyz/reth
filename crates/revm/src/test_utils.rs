@@ -13,7 +13,7 @@ use reth_storage_api::{
 use reth_storage_errors::provider::{ProviderError, ProviderResult};
 use reth_trie::{
     updates::TrieUpdates, AccountProof, HashedPostState, HashedStorage, KeccakKeyHasher,
-    MultiProof, MultiProofTargets, StorageMultiProof, StorageProof, TrieInput,
+    MultiProof, MultiProofTargets, StorageMultiProof, StorageProof, TrieInput, TrieInputSorted,
 };
 
 /// Mock state for testing
@@ -159,9 +159,9 @@ impl HashedPostStateProvider for StateProviderTest {
 }
 
 impl AccountRangeProvider for StateProviderTest {
-    fn account_range_overlaid(
+    fn account_range_with_nodes(
         &self,
-        _input: TrieInput,
+        _input: TrieInputSorted,
         _start: B256,
         _limit: usize,
     ) -> ProviderResult<AccountRangeResult> {

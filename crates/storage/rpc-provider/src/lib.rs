@@ -59,6 +59,7 @@ use reth_storage_api::{
 };
 use reth_trie::{
     updates::TrieUpdates, AccountProof, HashedPostState, KeccakKeyHasher, MultiProof, TrieInput,
+    TrieInputSorted,
 };
 pub use rpc_response::{EthRpcConverter, RpcResponseConverter};
 use std::{
@@ -1077,9 +1078,9 @@ where
     N: Network,
     Node: NodeTypes,
 {
-    fn account_range_overlaid(
+    fn account_range_with_nodes(
         &self,
-        _input: TrieInput,
+        _input: TrieInputSorted,
         _start: B256,
         _limit: usize,
     ) -> ProviderResult<AccountRangeResult> {

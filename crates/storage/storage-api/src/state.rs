@@ -10,7 +10,7 @@ use auto_impl::auto_impl;
 use reth_execution_types::ExecutionOutcome;
 use reth_primitives_traits::{Account, Bytecode};
 use reth_storage_errors::provider::ProviderResult;
-use reth_trie_common::{HashedPostState, TrieInput};
+use reth_trie_common::{HashedPostState, TrieInputSorted};
 use revm::database::BundleState;
 
 /// This just receives state, or [`ExecutionOutcome`], from the provider
@@ -54,7 +54,7 @@ pub trait AccountRangeProvider {
     ///
     /// `next_key`, when present, is the first key to use for the next page.
     fn account_range(&self, start: B256, limit: usize) -> ProviderResult<AccountRangeResult> {
-        self.account_range_overlaid(TrieInput::default(), start, limit)
+        self.account_range_with_nodes(TrieInputSorted::default(), start, limit)
     }
 
     /// Same as [`account_range`](Self::account_range), but layers `input` on top of the provider's
@@ -63,9 +63,13 @@ pub trait AccountRangeProvider {
     /// Used to push in-memory state (e.g. not-yet-persisted blocks) down to a database-backed
     /// provider that owns the hashed account cursor, mirroring
     /// [`StateRootProvider::state_root_from_nodes`](crate::StateRootProvider::state_root_from_nodes).
-    fn account_range_overlaid(
+    ///
+    /// `input` is taken already sorted since it is layered onto the sorted hashed account cursor
+    /// directly; callers that already hold sorted overlay data can pass it without a round-trip
+    /// through [`TrieInput`](reth_trie_common::TrieInput).
+    fn account_range_with_nodes(
         &self,
-        input: TrieInput,
+        input: TrieInputSorted,
         start: B256,
         limit: usize,
     ) -> ProviderResult<AccountRangeResult>;

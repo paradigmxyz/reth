@@ -987,7 +987,7 @@ mod tests {
     };
     use reth_trie::{
         updates::TrieUpdates, AccountProof, HashedPostState, HashedStorage, MultiProof,
-        MultiProofTargets, StorageMultiProof, StorageProof, TrieInput,
+        MultiProofTargets, StorageMultiProof, StorageProof, TrieInput, TrieInputSorted,
     };
 
     fn create_mock_state(
@@ -1024,9 +1024,9 @@ mod tests {
     struct MockStateProvider;
 
     impl AccountRangeProvider for MockStateProvider {
-        fn account_range_overlaid(
+        fn account_range_with_nodes(
             &self,
-            _input: TrieInput,
+            _input: TrieInputSorted,
             _start: B256,
             _limit: usize,
         ) -> ProviderResult<AccountRangeResult> {

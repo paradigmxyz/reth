@@ -11,7 +11,7 @@ use reth_provider::{
 };
 use reth_trie::{
     updates::TrieUpdates, AccountProof, HashedPostState, HashedStorage, MultiProof,
-    MultiProofTargets, StorageMultiProof, StorageProof, TrieInput,
+    MultiProofTargets, StorageMultiProof, StorageProof, TrieInput, TrieInputSorted,
 };
 use std::{
     sync::{
@@ -304,13 +304,13 @@ impl<S: HashedPostStateProvider> HashedPostStateProvider for InstrumentedStatePr
 }
 
 impl<S: StateProvider> AccountRangeProvider for InstrumentedStateProvider<S> {
-    fn account_range_overlaid(
+    fn account_range_with_nodes(
         &self,
-        input: TrieInput,
+        input: TrieInputSorted,
         start: B256,
         limit: usize,
     ) -> ProviderResult<AccountRangeResult> {
-        self.state_provider.account_range_overlaid(input, start, limit)
+        self.state_provider.account_range_with_nodes(input, start, limit)
     }
 }
 

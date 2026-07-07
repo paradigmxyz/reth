@@ -10,7 +10,7 @@ use reth_storage_api::{
 };
 use reth_trie::{
     updates::TrieUpdates, AccountProof, HashedPostState, HashedStorage, MultiProof,
-    MultiProofTargets, StorageMultiProof, TrieInput,
+    MultiProofTargets, StorageMultiProof, TrieInput, TrieInputSorted,
 };
 use revm::database::BundleState;
 use std::{borrow::Cow, sync::OnceLock};
@@ -216,16 +216,25 @@ impl<N: NodePrimitives> HashedPostStateProvider for MemoryOverlayStateProviderRe
 }
 
 impl<N: NodePrimitives> AccountRangeProvider for MemoryOverlayStateProviderRef<'_, N> {
-    fn account_range_overlaid(
+    fn account_range_with_nodes(
         &self,
-        mut input: TrieInput,
+        input: TrieInputSorted,
         start: B256,
         limit: usize,
     ) -> ProviderResult<AccountRangeResult> {
         // This overlay owns no cursor, so it pushes its in-memory state down to `historical` (which
-        // does), mirroring how `state_root_from_nodes` delegates here.
-        input.prepend_self(self.trie_input().clone());
-        self.historical.account_range_overlaid(input, start, limit)
+        // does), mirroring how `state_root_from_nodes` delegates here. Its own trie input is kept
+        // unsorted (shared with the other trie methods), so layer the caller's already-sorted
+        // `input` on top of it and sort once before delegating.
+        let mut merged = self.trie_input().clone();
+        merged.nodes.extend_from_sorted(&input.nodes);
+        merged.state.extend_from_sorted(&input.state);
+        merged.prefix_sets.extend(input.prefix_sets);
+        self.historical.account_range_with_nodes(
+            TrieInputSorted::from_unsorted(merged),
+            start,
+            limit,
+        )
     }
 }
 

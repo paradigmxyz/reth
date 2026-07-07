@@ -41,7 +41,7 @@ use reth_storage_api::{
 use reth_storage_errors::provider::{ConsistentViewError, ProviderError, ProviderResult};
 use reth_trie::{
     updates::TrieUpdates, AccountProof, HashedPostState, HashedStorage, MultiProof,
-    MultiProofTargets, StorageMultiProof, StorageProof, TrieInput,
+    MultiProofTargets, StorageMultiProof, StorageProof, TrieInput, TrieInputSorted,
 };
 use std::{
     collections::BTreeMap,
@@ -892,9 +892,9 @@ where
     T: NodePrimitives,
     ChainSpec: EthChainSpec + Send + Sync + 'static,
 {
-    fn account_range_overlaid(
+    fn account_range_with_nodes(
         &self,
-        _input: TrieInput,
+        _input: TrieInputSorted,
         _start: B256,
         _limit: usize,
     ) -> ProviderResult<AccountRangeResult> {

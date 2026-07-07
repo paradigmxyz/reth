@@ -2012,14 +2012,14 @@ mod tests {
     fn memory_overlay_account_range_overlays_in_memory_state() {
         use crate::providers::state::latest::LatestStateProviderRef;
         use alloy_primitives::{map::B256Map, U256};
-        use reth_chain_state::{ComputedTrieData, DeferredTrieData, MemoryOverlayStateProviderRef};
+        use reth_chain_state::MemoryOverlayStateProviderRef;
         use reth_db_api::{
             tables,
             transaction::{DbTx, DbTxMut},
         };
         use reth_primitives_traits::Account;
         use reth_storage_api::AccountRangeProvider;
-        use reth_trie::HashedPostState;
+        use reth_trie::{ComputedTrieData, HashedPostState, LazyTrieData};
 
         let modified = B256::with_last_byte(1); // present in the database, changed in memory
         let deleted = B256::with_last_byte(2); // present in the database, destroyed in memory
@@ -2054,7 +2054,7 @@ mod tests {
             Arc::new(Default::default()),
         );
         let block = ExecutedBlock::<reth_ethereum_primitives::EthPrimitives> {
-            trie_data: DeferredTrieData::ready(trie_data),
+            trie_data: LazyTrieData::ready(trie_data),
             ..Default::default()
         };
 

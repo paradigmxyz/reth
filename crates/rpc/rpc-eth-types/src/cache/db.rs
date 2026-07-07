@@ -9,7 +9,7 @@ use reth_storage_api::{
     AccountRangeProvider, AccountRangeResult, BytecodeReader, HashedPostStateProvider,
     StateProvider, StateProviderBox,
 };
-use reth_trie::{HashedStorage, MultiProofTargets, TrieInput};
+use reth_trie::{HashedStorage, MultiProofTargets, TrieInputSorted};
 use revm::database::{BundleState, State};
 
 /// Helper alias type for the state's [`State`]
@@ -175,13 +175,13 @@ impl StateProvider for StateProviderTraitObjWrapper {
 }
 
 impl AccountRangeProvider for StateProviderTraitObjWrapper {
-    fn account_range_overlaid(
+    fn account_range_with_nodes(
         &self,
-        input: TrieInput,
+        input: TrieInputSorted,
         start: B256,
         limit: usize,
     ) -> ProviderResult<AccountRangeResult> {
-        self.0.account_range_overlaid(input, start, limit)
+        self.0.account_range_with_nodes(input, start, limit)
     }
 }
 
