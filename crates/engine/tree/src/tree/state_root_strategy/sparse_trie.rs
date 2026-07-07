@@ -1241,7 +1241,6 @@ mod tests {
         let proof_worker_handle = ProofWorkerHandle::new(
             &runtime,
             ProofTaskCtx::new(overlay_factory),
-            false,
             proof_result_tx.clone(),
         );
 
@@ -1296,7 +1295,6 @@ mod tests {
         let proof_worker_handle = ProofWorkerHandle::new(
             &runtime,
             ProofTaskCtx::new(overlay_factory),
-            false,
             proof_result_tx.clone(),
         );
 
@@ -1384,7 +1382,6 @@ mod tests {
         let proof_worker_handle = ProofWorkerHandle::new(
             &runtime,
             ProofTaskCtx::new(overlay_factory),
-            false,
             proof_result_tx.clone(),
         );
 
@@ -1437,7 +1434,6 @@ mod tests {
         let proof_worker_handle = ProofWorkerHandle::new(
             &runtime,
             ProofTaskCtx::new(overlay_factory),
-            false,
             proof_result_tx.clone(),
         );
 
