@@ -1454,21 +1454,20 @@ where
 
         let txs_len = transactions.len();
 
-        let new_txs = transactions
-            .into_par_iter()
-            .filter_map(|tx| match tx.try_into_recovered() {
-                Ok(tx) => Some(Pool::Transaction::from_pooled(tx)),
-                Err(badtx) => {
-                    trace!(target: "net::tx",
-                        peer_id=format!("{peer_id:#}"),
-                        hash=%badtx.tx_hash(),
-                        client_version=%client_version,
-                        "failed ecrecovery for transaction"
-                    );
-                    None
-                }
-            })
-            .collect::<Vec<_>>();
+        let recover = |tx| match Pool::Transaction::try_recover(tx) {
+            Ok(tx) => Some(tx),
+            Err(badtx) => {
+                trace!(target: "net::tx",
+                    peer_id=format!("{peer_id:#}"),
+                    hash=%badtx.tx_hash(),
+                    client_version=%client_version,
+                    "failed ecrecovery for transaction"
+                );
+                None
+            }
+        };
+
+        let new_txs = transactions.into_par_iter().filter_map(recover).collect::<Vec<_>>();
 
         has_bad_transactions |= new_txs.len() != txs_len;
 
