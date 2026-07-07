@@ -5,7 +5,10 @@ pub use jsonrpsee::{
     server::middleware::rpc::{RpcService, RpcServiceBuilder},
 };
 use reth_engine_tree::tree::WaitForCaches;
-pub use reth_engine_tree::tree::{BasicEngineValidator, EngineValidator};
+pub use reth_engine_tree::{
+    persistence::{BoxedPersistenceHook, NoopPersistenceHook, PersistenceHook},
+    tree::{BasicEngineValidator, EngineValidator},
+};
 pub use reth_rpc_builder::{
     middleware::{RethAuthHttpMiddleware, RethRpcMiddleware},
     Identity, Stack,
@@ -24,7 +27,8 @@ use reth_chain_state::{CanonStateSubscriptions, StateTrieOverlayManager};
 use reth_chainspec::{ChainSpecProvider, EthChainSpec, EthereumHardforks, Hardforks};
 use reth_node_api::{
     AddOnsContext, BlockTy, EngineApiValidator, EngineTypes, FullNodeComponents, FullNodeTypes,
-    NodeAddOns, NodeTypes, PayloadTypes, PayloadValidator, PrimitivesTy, TreeConfig,
+    NodeAddOns, NodeTypes, NodeTypesWithDBAdapter, PayloadTypes, PayloadValidator, PrimitivesTy,
+    TreeConfig,
 };
 use reth_node_core::{
     cli::config::RethTransactionPoolConfig,
@@ -32,6 +36,7 @@ use reth_node_core::{
     version::{version_metadata, CLIENT_CODE},
 };
 use reth_payload_builder::{PayloadBuilderHandle, PayloadStore};
+use reth_provider::providers::ProviderNodeTypes;
 use reth_rpc::{
     eth::{core::EthRpcConverterFor, DevSigner, EthApiTypes, FullEthApiServer},
     AdminApi,
@@ -1415,6 +1420,22 @@ pub trait EngineValidatorBuilder<Node: FullNodeComponents>: Send + Sync + Clone 
         changeset_cache: ChangesetCache,
         state_trie_overlays: StateTrieOverlayManager<PrimitivesTy<Node::Types>>,
     ) -> impl Future<Output = eyre::Result<Self::EngineValidator>> + Send;
+
+    /// Returns the hook installed into the engine persistence service.
+    ///
+    /// The hook runs inside the database transaction that saves block batches, so
+    /// implementations can persist auxiliary per-block data atomically with the blocks.
+    /// The default installs a hook that does nothing.
+    fn persistence_hook(
+        &self,
+        ctx: &AddOnsContext<'_, Node>,
+    ) -> eyre::Result<BoxedPersistenceHook<NodeTypesWithDBAdapter<Node::Types, Node::DB>>>
+    where
+        NodeTypesWithDBAdapter<Node::Types, Node::DB>: ProviderNodeTypes,
+    {
+        let _ = ctx;
+        Ok(Box::new(NoopPersistenceHook::default()))
+    }
 }
 
 /// Basic implementation of [`EngineValidatorBuilder`].

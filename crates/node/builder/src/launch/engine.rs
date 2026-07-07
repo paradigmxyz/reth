@@ -18,7 +18,6 @@ use reth_engine_tree::{
     chain::{ChainEvent, FromOrchestrator},
     engine::{EngineApiKind, EngineApiRequest, EngineRequestHandler},
     launch::build_engine_orchestrator,
-    persistence::NoopPersistenceHook,
     tree::TreeConfig,
 };
 use reth_engine_util::EngineMessageStreamExt;
@@ -205,6 +204,7 @@ impl EngineNodeLauncher {
             engine_events: event_sender.clone(),
         };
         let validator_builder = add_ons.engine_validator_builder();
+        let persistence_hook = validator_builder.persistence_hook(&add_ons_ctx)?;
         let state_trie_overlays =
             StateTrieOverlayManager::new(ctx.task_executor().state_trie_overlay_worker_pool());
 
@@ -270,7 +270,7 @@ impl EngineNodeLauncher {
             ctx.components().evm_config().clone(),
             changeset_cache,
             ctx.task_executor().clone(),
-            Box::new(NoopPersistenceHook::default()),
+            persistence_hook,
         );
 
         info!(target: "reth::cli", "Consensus engine initialized");
