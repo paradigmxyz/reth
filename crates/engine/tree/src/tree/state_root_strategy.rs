@@ -64,6 +64,8 @@ use reth_provider::{
     DatabaseProviderFactory, DatabaseProviderROFactory, HashedPostStateProvider, ProviderError,
     StateProviderFactory, StateReader, StateRootProvider,
 };
+#[cfg(feature = "trie-debug")]
+use reth_trie::witness::TrieWitness;
 use reth_trie::{
     hashed_cursor::HashedCursorFactory, prefix_set::TriePrefixSetsMut,
     trie_cursor::TrieCursorFactory, updates::TrieUpdates, HashedPostState,
@@ -666,8 +668,9 @@ where
             );
             #[cfg(feature = "trie-debug")]
             if _has_diff {
-                write_sparse_trie_debug_artifacts(
+                self.write_sparse_trie_debug_artifacts(
                     _block.header().number(),
+                    output,
                     &debug_recorders,
                     &trie_witness,
                 );
@@ -676,14 +679,76 @@ where
 
         #[cfg(feature = "trie-debug")]
         if state_root != _block.header().state_root() {
-            write_sparse_trie_debug_artifacts(
+            self.write_sparse_trie_debug_artifacts(
                 _block.header().number(),
+                output,
                 &debug_recorders,
                 &trie_witness,
             );
         }
 
         StateRootJobOutcome::new(state_root, trie_updates).with_changed_paths(changed_paths)
+    }
+
+    #[cfg(feature = "trie-debug")]
+    fn write_sparse_trie_debug_artifacts(
+        &self,
+        block_number: u64,
+        output: &BlockExecutionOutput<N::Receipt>,
+        recorders: &[(Option<B256>, TrieDebugRecorder)],
+        trie_witness: &B256Map<Bytes>,
+    ) {
+        let fallback_trie_witness = self.fallback_sparse_trie_witness(output);
+        write_sparse_trie_debug_artifacts(
+            block_number,
+            recorders,
+            trie_witness,
+            fallback_trie_witness.as_ref(),
+        );
+    }
+
+    #[cfg(feature = "trie-debug")]
+    fn fallback_sparse_trie_witness(
+        &self,
+        output: &BlockExecutionOutput<N::Receipt>,
+    ) -> Option<B256Map<Bytes>> {
+        let provider = match self.provider_builder.clone().build() {
+            Ok(provider) => provider,
+            Err(err) => {
+                warn!(
+                    target: "engine::tree::state_root_strategy",
+                    %err,
+                    "Failed to build provider for fallback trie witness"
+                );
+                return None
+            }
+        };
+        let hashed_state = provider.hashed_post_state(&output.state);
+        let overlay_provider = match self.overlay_factory.database_provider_ro() {
+            Ok(provider) => provider,
+            Err(err) => {
+                warn!(
+                    target: "engine::tree::state_root_strategy",
+                    %err,
+                    "Failed to build overlay provider for fallback trie witness"
+                );
+                return None
+            }
+        };
+
+        match TrieWitness::new(&overlay_provider, &overlay_provider)
+            .compute_post_state_witness(hashed_state)
+        {
+            Ok(witness) => Some(witness),
+            Err(err) => {
+                warn!(
+                    target: "engine::tree::state_root_strategy",
+                    %err,
+                    "Failed to compute fallback trie witness"
+                );
+                None
+            }
+        }
     }
 }
 
@@ -847,12 +912,14 @@ where
 /// Writes sparse trie debug artifacts to JSON files for the given block number.
 ///
 /// Files are written to the current working directory as `trie_debug_block_{block_number}.json`
-/// and `sparse_trie_witness_block_{block_number}.json`.
+/// and `sparse_trie_witness_block_{block_number}.json`. When available, the serial fallback
+/// witness is also written as `fallback_sparse_trie_witness_block_{block_number}.json`.
 #[cfg(feature = "trie-debug")]
 fn write_sparse_trie_debug_artifacts(
     block_number: u64,
     recorders: &[(Option<B256>, TrieDebugRecorder)],
     trie_witness: &B256Map<Bytes>,
+    fallback_trie_witness: Option<&B256Map<Bytes>>,
 ) {
     let path = format!("trie_debug_block_{block_number}.json");
     match serde_json::to_string_pretty(recorders) {
@@ -906,6 +973,36 @@ fn write_sparse_trie_debug_artifacts(
                 target: "engine::tree::state_root_strategy",
                 %err,
                 "Failed to serialize trie witness"
+            );
+        }
+    }
+
+    let Some(fallback_trie_witness) = fallback_trie_witness else { return };
+
+    let path = format!("fallback_sparse_trie_witness_block_{block_number}.json");
+    match serde_json::to_string_pretty(fallback_trie_witness) {
+        Ok(json) => match std::fs::write(&path, json) {
+            Ok(()) => {
+                warn!(
+                    target: "engine::tree::state_root_strategy",
+                    %path,
+                    "Wrote fallback trie witness to file"
+                );
+            }
+            Err(err) => {
+                warn!(
+                    target: "engine::tree::state_root_strategy",
+                    %err,
+                    %path,
+                    "Failed to write fallback trie witness"
+                );
+            }
+        },
+        Err(err) => {
+            warn!(
+                target: "engine::tree::state_root_strategy",
+                %err,
+                "Failed to serialize fallback trie witness"
             );
         }
     }
