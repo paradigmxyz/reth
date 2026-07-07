@@ -1495,8 +1495,8 @@ impl ArenaParallelSparseTrie {
         }
     }
 
-    /// Records all revealed nodes in one arena using cursor post-order traversal.
-    fn record_arena_witness_nodes(
+    /// Records all revealed nodes in an arena using cursor post-order traversal.
+    fn record_witness_nodes(
         arena: &NodeArena,
         root: Index,
         cursor: &mut ArenaCursor,
@@ -1507,26 +1507,6 @@ impl ArenaParallelSparseTrie {
 
         loop {
             match cursor.next_ref(arena, |_, node| {
-                matches!(node, ArenaSparseNode::Branch(_) | ArenaSparseNode::Leaf { .. })
-            }) {
-                NextResult::Done => break,
-                NextResult::Branch | NextResult::NonBranch => {
-                    let idx = cursor.head().expect("cursor is non-empty").index;
-                    let rlp_node = Self::record_arena_witness_node(arena, idx, rlp_nodes, witness);
-                    rlp_nodes.insert(idx, rlp_node);
-                }
-            }
-        }
-    }
-
-    /// Records all revealed nodes in the upper arena and any revealed subtries.
-    fn record_witness_nodes(&self, witness: &mut B256Map<Bytes>) {
-        let mut cursor = ArenaCursor::default();
-        let mut rlp_nodes = HashMap::default();
-        cursor.reset(&self.upper_arena, self.root, Nibbles::default());
-
-        loop {
-            match cursor.next_ref(&self.upper_arena, |_, node| {
                 matches!(
                     node,
                     ArenaSparseNode::Branch(_) |
@@ -1537,11 +1517,11 @@ impl ArenaParallelSparseTrie {
                 NextResult::Done => break,
                 NextResult::Branch | NextResult::NonBranch => {
                     let idx = cursor.head().expect("cursor is non-empty").index;
-                    let rlp_node = match &self.upper_arena[idx] {
+                    let rlp_node = match &arena[idx] {
                         ArenaSparseNode::Subtrie(subtrie) => {
                             let mut subtrie_cursor = ArenaCursor::default();
                             let mut subtrie_rlp_nodes = HashMap::default();
-                            Self::record_arena_witness_nodes(
+                            Self::record_witness_nodes(
                                 &subtrie.arena,
                                 subtrie.root,
                                 &mut subtrie_cursor,
@@ -1557,12 +1537,7 @@ impl ArenaParallelSparseTrie {
                             );
                             root_rlp_node
                         }
-                        _ => Self::record_arena_witness_node(
-                            &self.upper_arena,
-                            idx,
-                            &mut rlp_nodes,
-                            witness,
-                        ),
+                        _ => Self::record_arena_witness_node(arena, idx, rlp_nodes, witness),
                     };
                     rlp_nodes.insert(idx, rlp_node);
                 }
@@ -2827,7 +2802,17 @@ impl SparseTrie for ArenaParallelSparseTrie {
     }
 
     fn witness(&self, witness: &mut B256Map<Bytes>) {
-        self.record_witness_nodes(witness);
+        let mut cursor = ArenaCursor::default();
+        let mut rlp_nodes = HashMap::default();
+        Self::record_witness_nodes(
+            &self.upper_arena,
+            self.root,
+            &mut cursor,
+            &mut rlp_nodes,
+            witness,
+        );
+        rlp_nodes.remove(&self.root);
+        debug_assert!(rlp_nodes.is_empty(), "all witness RLP nodes must be consumed");
     }
 
     fn find_leaf(
