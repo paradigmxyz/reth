@@ -50,8 +50,9 @@ pub fn execute_block<'a, Evm, Tx, Err, DB, MakeDb>(
     transaction_count: usize,
     txs: Receiver<(usize, Result<Tx, Err>)>,
     receipt_tx: Sender<IndexedReceipt<ReceiptTy<Evm::Primitives>>>,
+    build_bal: bool,
 ) -> Result<
-    (BlockExecutionOutput<ReceiptTy<Evm::Primitives>>, Vec<Address>, BlockAccessList),
+    (BlockExecutionOutput<ReceiptTy<Evm::Primitives>>, Vec<Address>, Option<BlockAccessList>),
     BalExecutionError,
 >
 where
@@ -77,6 +78,7 @@ where
             txs,
             receipt_tx,
             worker_count,
+            build_bal,
         )
     })
 }
@@ -93,8 +95,9 @@ fn execute_block_inner<'scope, Evm, Tx, Err, DB, MakeDb>(
     txs: Receiver<(usize, Result<Tx, Err>)>,
     receipt_tx: Sender<IndexedReceipt<ReceiptTy<Evm::Primitives>>>,
     worker_count: usize,
+    build_bal: bool,
 ) -> Result<
-    (BlockExecutionOutput<ReceiptTy<Evm::Primitives>>, Vec<Address>, BlockAccessList),
+    (BlockExecutionOutput<ReceiptTy<Evm::Primitives>>, Vec<Address>, Option<BlockAccessList>),
     BalExecutionError,
 >
 where
@@ -114,7 +117,7 @@ where
     let mut canonical_state = State::builder()
         .with_database(make_db(false)?)
         .with_bundle_update()
-        .with_bal_builder()
+        .with_bal_builder_if(build_bal)
         .build();
 
     let (block_result, senders) = {
@@ -170,7 +173,7 @@ where
         (block_result, senders)
     };
 
-    let built_bal = take_built_bal_and_log_divergence(&mut canonical_state, bal);
+    let built_bal = build_bal.then(|| take_built_bal_and_log_divergence(&mut canonical_state, bal));
 
     canonical_state.merge_transitions(BundleRetention::Reverts);
     Ok((
@@ -509,6 +512,40 @@ mod tests {
             transaction_count,
             tx_stream(txs),
             receipt_tx,
+            true,
+        )
+        .map(|(output, _, built_bal)| (output, built_bal.expect("BAL builder requested")))
+    }
+
+    fn run_execute_block_without_built_bal<Tx, DB, MakeDb>(
+        runtime: &Runtime,
+        evm_config: EthEvmConfig,
+        make_db: MakeDb,
+        input_bal: Arc<DecodedBal>,
+        block: &SealedBlock<Block>,
+        txs: Vec<Tx>,
+    ) -> Result<(BlockExecutionOutput<Receipt>, Option<BlockAccessList>), BalExecutionError>
+    where
+        Tx: ExecutableTxFor<EthEvmConfig> + Send,
+        DB: Database + Send,
+        MakeDb: Fn() -> Result<DB, BalExecutionError> + Sync,
+    {
+        let transaction_count = txs.len();
+        let (receipt_tx, _receipt_rx) = crossbeam_channel::unbounded();
+        let evm_env = evm_config.evm_env(block.header()).unwrap();
+        let execution_ctx = evm_config.context_for_block(block).unwrap();
+        let make_db = |_: bool| make_db();
+        execute_block(
+            runtime,
+            &evm_config,
+            &make_db,
+            input_bal,
+            evm_env,
+            execution_ctx,
+            transaction_count,
+            tx_stream(txs),
+            receipt_tx,
+            false,
         )
         .map(|(output, _, built_bal)| (output, built_bal))
     }
@@ -670,6 +707,41 @@ mod tests {
             }
             Err(e) => panic!("expected success, got {e:?}"),
         }
+    }
+
+    #[test]
+    fn can_skip_built_bal_when_commitment_is_not_needed() {
+        let evm_config = EthEvmConfig::mainnet();
+        let input_bal = reference_bal_for_empty_block(&evm_config);
+        let bal_hash = alloy_eip7928::compute_block_access_list_hash(&input_bal);
+        let block = empty_amsterdam_block(bal_hash);
+
+        let (with_builder, rebuilt_bal) = run_execute_block_full(
+            &Runtime::test(),
+            evm_config.clone(),
+            db_factory(system_contracts_db()),
+            to_arc_decoded(input_bal.clone()),
+            &block,
+            Vec::<Recovered<TransactionSigned>>::new(),
+        )
+        .expect("BAL execution with builder succeeds");
+        assert!(!rebuilt_bal.is_empty(), "builder path should return the rebuilt BAL");
+
+        let (without_builder, skipped_bal) = run_execute_block_without_built_bal(
+            &Runtime::test(),
+            evm_config,
+            db_factory(system_contracts_db()),
+            to_arc_decoded(input_bal),
+            &block,
+            Vec::<Recovered<TransactionSigned>>::new(),
+        )
+        .expect("BAL execution without builder succeeds");
+
+        assert!(skipped_bal.is_none(), "BAL builder should be skipped");
+        assert_eq!(with_builder.receipts, without_builder.receipts);
+        assert_eq!(with_builder.gas_used, without_builder.gas_used);
+        assert_eq!(with_builder.requests, without_builder.requests);
+        assert_eq!(with_builder.state, without_builder.state);
     }
 
     // ============================================================================
@@ -1134,6 +1206,7 @@ mod tests {
             1, // transaction_count = 1 → exactly one worker spawned
             tx_rx,
             receipt_tx,
+            true,
         );
 
         assert!(

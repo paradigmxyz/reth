@@ -999,11 +999,12 @@ where
         debug!(target: "engine::tree::payload_validator", "Executing block");
 
         let has_bal = env.decoded_bal.is_some();
+        let build_bal = has_bal && self.consensus.requires_block_access_list_hash();
         let mut db = debug_span!(target: "engine::tree", "build_state_db").in_scope(|| {
             State::builder()
                 .with_database(StateProviderDatabase::new(state_provider))
                 .with_bundle_update()
-                .with_bal_builder_if(has_bal)
+                .with_bal_builder_if(build_bal)
                 .build()
         });
 
@@ -1067,7 +1068,7 @@ where
         debug_span!(target: "engine::tree", "merge_transitions")
             .in_scope(|| db.merge_transitions(BundleRetention::Reverts));
 
-        let built_bal = if has_bal { db.take_built_alloy_bal() } else { None };
+        let built_bal = if build_bal { db.take_built_alloy_bal() } else { None };
         let output = BlockExecutionOutput { result, state: db.take_bundle() };
 
         let execution_duration = execution_start.elapsed();
@@ -1158,6 +1159,7 @@ where
             env.transaction_count,
             handle.clone_transaction_receiver(),
             receipt_tx,
+            self.consensus.requires_block_access_list_hash(),
         )?;
         let execution_duration = execution_start.elapsed();
 
@@ -1169,7 +1171,7 @@ where
             "Executed block via BAL path",
         );
 
-        Ok((output, senders, result_rx, Some(built_bal)))
+        Ok((output, senders, result_rx, built_bal))
     }
 
     fn spawn_receipt_root_task(
@@ -1316,8 +1318,11 @@ where
         let _enter =
             debug_span!(target: "engine::tree::payload_validator", "validate_block_post_execution")
                 .entered();
-        let block_access_list_hash =
-            built_bal.as_ref().map(|bal| compute_block_access_list_hash(bal));
+        let block_access_list_hash = self
+            .consensus
+            .requires_block_access_list_hash()
+            .then(|| built_bal.as_ref().map(|bal| compute_block_access_list_hash(bal)))
+            .flatten();
 
         if let Err(err) = self.consensus.validate_block_post_execution(
             block,

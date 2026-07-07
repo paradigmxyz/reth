@@ -72,6 +72,15 @@ pub mod test_utils;
 /// execution outcome.
 #[auto_impl::auto_impl(&, Arc)]
 pub trait FullConsensus<N: NodePrimitives>: Consensus<N::Block> {
+    /// Returns whether post-execution validation needs the rebuilt block access list commitment.
+    ///
+    /// Full consensus implementations use this commitment to validate Amsterdam blocks. Test or
+    /// benchmark consensus implementations that ignore it can return `false` so execution does
+    /// not rebuild a BAL only to discard its hash.
+    fn requires_block_access_list_hash(&self) -> bool {
+        true
+    }
+
     /// Validate a block considering world state, i.e. things that can not be checked before
     /// execution.
     ///
