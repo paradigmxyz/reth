@@ -3,12 +3,10 @@
 use crate::{EthEngineTypes, EthEvmConfig};
 use alloy_eips::{eip7840::BlobParams, merge::EPOCH_SLOTS};
 use alloy_network::Ethereum;
-use alloy_primitives::U64;
 use alloy_rpc_types_engine::ExecutionData;
-use jsonrpsee::RpcModule;
 use reth_chainspec::{ChainSpec, EthChainSpec, EthereumHardforks, Hardforks};
 use reth_engine_local::LocalPayloadAttributesBuilder;
-use reth_engine_primitives::{ConsensusEngineHandle, EngineTypes};
+use reth_engine_primitives::EngineTypes;
 use reth_ethereum_consensus::EthBeaconConsensus;
 use reth_ethereum_engine_primitives::{EthBuiltPayload, EthPayloadAttributes};
 use reth_ethereum_primitives::{EthPrimitives, TransactionSigned};
@@ -39,8 +37,9 @@ use reth_node_builder::{
 };
 use reth_node_core::args::JitArgs;
 use reth_payload_primitives::PayloadTypes;
-use reth_provider::{providers::ProviderFactoryBuilder, BlockHashReader, EthStorage};
+use reth_provider::{providers::ProviderFactoryBuilder, EthStorage};
 use reth_rpc::{
+    debug_set_head_rpc_module,
     eth::core::{EthApiFor, EthRpcConverterFor},
     TestingApi, ValidationApi,
 };
@@ -54,10 +53,7 @@ use reth_rpc_eth_api::{
     RpcConvert, RpcTypes, SignableTxRequest,
 };
 use reth_rpc_eth_types::{error::FromEvmError, EthApiError};
-use reth_rpc_server_types::{
-    result::{internal_rpc_err, invalid_params_rpc_err, ToRpcResult},
-    RethRpcModule,
-};
+use reth_rpc_server_types::RethRpcModule;
 use reth_tracing::tracing::{debug, info};
 use reth_transaction_pool::{
     blobstore::DiskFileBlobStore, EthTransactionPool, PoolPooledTx, PoolTransaction,
@@ -797,34 +793,4 @@ where
     async fn build(self, ctx: &AddOnsContext<'_, Node>) -> eyre::Result<Self::Validator> {
         Ok(EthereumEngineValidator::new(ctx.config.chain.clone()))
     }
-}
-
-fn debug_set_head_rpc_module<Provider, Payload>(
-    provider: Provider,
-    engine_handle: ConsensusEngineHandle<Payload>,
-) -> RpcModule<()>
-where
-    Provider: BlockHashReader + Clone + Send + Sync + 'static,
-    Payload: PayloadTypes,
-{
-    let mut module = RpcModule::new(());
-    module
-        .register_async_method("debug_setHead", move |params, _, _| {
-            let provider = provider.clone();
-            let engine_handle = engine_handle.clone();
-            async move {
-                let number = params.one::<U64>()?.to::<u64>();
-                let block_hash = provider
-                    .block_hash(number)
-                    .to_rpc_result()?
-                    .ok_or_else(|| invalid_params_rpc_err(format!("block {number} not found")))?;
-
-                engine_handle
-                    .set_canonical_head(block_hash)
-                    .await
-                    .map_err(|err| internal_rpc_err(err.to_string()))
-            }
-        })
-        .expect("valid method name");
-    module
 }
