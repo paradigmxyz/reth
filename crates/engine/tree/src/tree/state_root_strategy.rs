@@ -54,6 +54,8 @@ use crate::tree::{
     ExecutionEnv, StateProviderBuilder, TreeConfig,
 };
 use alloy_primitives::B256;
+#[cfg(feature = "trie-debug")]
+use alloy_primitives::{map::B256Map, Bytes};
 use reth_errors::ProviderResult;
 use reth_evm::{ConfigureEvm, OnStateHook};
 use reth_primitives_traits::{AlloyBlockHeader, NodePrimitives, RecoveredBlock};
@@ -651,6 +653,8 @@ where
             changed_paths,
             #[cfg(feature = "trie-debug")]
             debug_recorders,
+            #[cfg(feature = "trie-debug")]
+            trie_witness,
         } = outcome;
 
         if self.compare_trie_updates {
@@ -662,13 +666,17 @@ where
             );
             #[cfg(feature = "trie-debug")]
             if _has_diff {
-                write_trie_debug_recorders(_block.header().number(), &debug_recorders);
+                write_trie_debug_recorders(
+                    _block.header().number(),
+                    &debug_recorders,
+                    &trie_witness,
+                );
             }
         }
 
         #[cfg(feature = "trie-debug")]
         if state_root != _block.header().state_root() {
-            write_trie_debug_recorders(_block.header().number(), &debug_recorders);
+            write_trie_debug_recorders(_block.header().number(), &debug_recorders, &trie_witness);
         }
 
         StateRootJobOutcome::new(state_root, trie_updates).with_changed_paths(changed_paths)
@@ -836,7 +844,11 @@ where
 ///
 /// The file is written to the current working directory as `trie_debug_block_{block_number}.json`.
 #[cfg(feature = "trie-debug")]
-fn write_trie_debug_recorders(block_number: u64, recorders: &[(Option<B256>, TrieDebugRecorder)]) {
+fn write_trie_debug_recorders(
+    block_number: u64,
+    recorders: &[(Option<B256>, TrieDebugRecorder)],
+    trie_witness: &B256Map<Bytes>,
+) {
     let path = format!("trie_debug_block_{block_number}.json");
     match serde_json::to_string_pretty(recorders) {
         Ok(json) => match std::fs::write(&path, json) {
@@ -861,6 +873,34 @@ fn write_trie_debug_recorders(block_number: u64, recorders: &[(Option<B256>, Tri
                 target: "engine::tree::state_root_strategy",
                 %err,
                 "Failed to serialize trie debug recorders"
+            );
+        }
+    }
+
+    let path = format!("trie_witness_block_{block_number}.json");
+    match serde_json::to_string_pretty(trie_witness) {
+        Ok(json) => match std::fs::write(&path, json) {
+            Ok(()) => {
+                warn!(
+                    target: "engine::tree::state_root_strategy",
+                    %path,
+                    "Wrote trie witness to file"
+                );
+            }
+            Err(err) => {
+                warn!(
+                    target: "engine::tree::state_root_strategy",
+                    %err,
+                    %path,
+                    "Failed to write trie witness"
+                );
+            }
+        },
+        Err(err) => {
+            warn!(
+                target: "engine::tree::state_root_strategy",
+                %err,
+                "Failed to serialize trie witness"
             );
         }
     }

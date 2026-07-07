@@ -369,6 +369,8 @@ where
         };
 
         #[cfg(feature = "trie-debug")]
+        let trie_witness = self.trie.witness();
+        #[cfg(feature = "trie-debug")]
         let debug_recorders = self.trie.take_debug_recorders();
         let changed_paths = Some(Arc::new(self.trie.take_changed_paths().unwrap_or_default()));
 
@@ -391,6 +393,8 @@ where
             changed_paths,
             #[cfg(feature = "trie-debug")]
             debug_recorders,
+            #[cfg(feature = "trie-debug")]
+            trie_witness,
         })
     }
 
