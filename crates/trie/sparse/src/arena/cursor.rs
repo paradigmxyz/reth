@@ -247,31 +247,6 @@ impl ArenaCursor {
             self.needs_pop = false;
         }
 
-        self.next_after_pending_pop(arena, should_descend)
-    }
-
-    /// Read-only variant of [`Self::next`] for traversals that do not need dirty-state
-    /// propagation when popping cursor entries.
-    #[instrument(level = "trace", target = TRACE_TARGET, skip_all, ret)]
-    pub(super) fn next_ref(
-        &mut self,
-        arena: &NodeArena,
-        should_descend: impl Fn(usize, &ArenaSparseNode) -> bool,
-    ) -> NextResult {
-        if self.needs_pop {
-            self.stack.pop().expect("pop can't be called on empty stack");
-            self.needs_pop = false;
-        }
-
-        self.next_after_pending_pop(arena, should_descend)
-    }
-
-    /// Advances the cursor after any pending pop has already been handled by the caller.
-    fn next_after_pending_pop(
-        &mut self,
-        arena: &NodeArena,
-        should_descend: impl Fn(usize, &ArenaSparseNode) -> bool,
-    ) -> NextResult {
         loop {
             let Some(head) = self.stack.last_mut() else {
                 return NextResult::Done;

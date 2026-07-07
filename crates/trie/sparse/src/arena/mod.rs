@@ -1448,7 +1448,7 @@ impl ArenaParallelSparseTrie {
         cursor.reset(arena, root, Nibbles::default());
 
         loop {
-            match cursor.next_ref(arena, |_, node| {
+            match cursor.next(arena, |_, node| {
                 matches!(
                     node,
                     ArenaSparseNode::Branch(_) |
