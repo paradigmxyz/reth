@@ -222,9 +222,9 @@ impl TryFrom<&Enr<secp256k1::SecretKey>> for NodeRecord {
             return Err(NodeRecordParseError::InvalidUrl("udp port missing".to_string()))
         };
 
-        let Some(tcp_port) = enr.tcp4().or_else(|| enr.tcp6()) else {
-            return Err(NodeRecordParseError::InvalidUrl("tcp port missing".to_string()))
-        };
+        // A discovery-only ENR (e.g. a devp2p bootnode) omits the tcp key; treat that as no RLPx
+        // (port 0) rather than rejecting the record.
+        let tcp_port = enr.tcp4().or_else(|| enr.tcp6()).unwrap_or(0);
 
         let id = crate::pk2id(&enr.public_key());
 
@@ -407,5 +407,18 @@ mod tests {
             let node: NodeRecord = serde_json::from_str(url).expect("couldn't deserialize");
             assert_eq!(node, expected);
         }
+    }
+
+    #[test]
+    #[cfg(feature = "secp256k1")]
+    fn tcp_less_enr_converts_with_port_zero() {
+        // A discovery-only ENR (no tcp key, e.g. a devp2p bootnode) must convert with tcp port 0.
+        let sk = secp256k1::SecretKey::from_byte_array(&[1u8; 32]).unwrap();
+        let enr = Enr::builder().ip4("1.2.3.4".parse().unwrap()).udp4(30301).build(&sk).unwrap();
+
+        let record = NodeRecord::try_from(&enr).unwrap();
+
+        assert_eq!(record.tcp_port, 0);
+        assert_eq!(record.udp_port, 30301);
     }
 }

@@ -280,8 +280,8 @@ where
     async fn build_block_v1(
         &self,
         request: TestingBuildBlockRequestV1,
+        use_pool_transactions: bool,
     ) -> Result<ExecutionPayloadEnvelopeV5, Eth::Error> {
-        let use_pool_transactions = request.transactions.is_empty();
         self.build_payload_v1(request, self.skip_invalid_transactions, use_pool_transactions)
             .await?
             .try_into_v5()
@@ -387,9 +387,19 @@ where
     /// work to the blocking pool to avoid stalling the async runtime.
     async fn build_block_v1(
         &self,
-        request: TestingBuildBlockRequestV1,
+        parent_block_hash: B256,
+        payload_attributes: PayloadAttributes,
+        transactions: Option<Vec<Bytes>>,
+        extra_data: Option<Bytes>,
     ) -> RpcResult<ExecutionPayloadEnvelopeV5> {
-        self.build_block_v1(request).await.map_err(Into::into)
+        let use_pool_transactions = transactions.is_none();
+        let request = TestingBuildBlockRequestV1 {
+            parent_block_hash,
+            payload_attributes,
+            transactions: transactions.unwrap_or_default(),
+            extra_data,
+        };
+        self.build_block_v1(request, use_pool_transactions).await.map_err(Into::into)
     }
 
     /// Handles `testing_commitBlockV1` by building on the current canonical head, then submitting
