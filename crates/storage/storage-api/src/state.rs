@@ -2,7 +2,7 @@ use super::{
     AccountReader, BlockHashReader, BlockIdReader, StateProofProvider, StateRootProvider,
     StorageRootProvider,
 };
-use alloc::boxed::Box;
+use alloc::{boxed::Box, vec::Vec};
 use alloy_consensus::constants::KECCAK_EMPTY;
 use alloy_eips::{BlockId, BlockNumberOrTag};
 use alloy_primitives::{Address, BlockHash, BlockNumber, StorageKey, StorageValue, B256, U256};
@@ -46,6 +46,15 @@ pub trait StateProvider:
         account: Address,
         storage_key: StorageKey,
     ) -> ProviderResult<Option<StorageValue>>;
+
+    /// Get storage for multiple slots of the same account.
+    fn storage_many(
+        &self,
+        account: Address,
+        storage_keys: &[StorageKey],
+    ) -> ProviderResult<Vec<Option<StorageValue>>> {
+        storage_keys.iter().map(|&storage_key| self.storage(account, storage_key)).collect()
+    }
 
     /// Get account code by its address.
     ///

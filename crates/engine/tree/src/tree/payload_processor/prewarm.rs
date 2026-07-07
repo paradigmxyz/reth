@@ -416,12 +416,21 @@ where
             pool.begin_block(build, caches);
             for account in prefetch_bal.as_bal() {
                 pool.warm_account(account.address);
+
+                let storage_slot_count =
+                    account.storage_changes.len() + account.storage_reads.len();
+                if storage_slot_count == 0 {
+                    continue;
+                }
+
+                let mut storage_slots = Vec::with_capacity(storage_slot_count);
                 for change in &account.storage_changes {
-                    pool.warm_storage(account.address, change.slot.into());
+                    storage_slots.push(change.slot.into());
                 }
                 for &slot in &account.storage_reads {
-                    pool.warm_storage(account.address, slot.into());
+                    storage_slots.push(slot.into());
                 }
+                pool.warm_storage_slots(account.address, storage_slots);
             }
             pool.end_block();
         }

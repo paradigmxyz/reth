@@ -64,6 +64,60 @@ impl<'b, Provider: DBProvider> LatestStateProviderRef<'b, Provider> {
             .filter(|e| e.key == hashed_slot)
             .map(|e| e.value))
     }
+
+    fn hashed_storage_lookup_many(
+        &self,
+        account: Address,
+        storage_keys: &[StorageKey],
+    ) -> ProviderResult<Vec<Option<StorageValue>>> {
+        if storage_keys.is_empty() {
+            return Ok(Vec::new())
+        }
+
+        let hashed_address = alloy_primitives::keccak256(account);
+        let mut hashed_slots = storage_keys
+            .iter()
+            .enumerate()
+            .map(|(idx, &storage_key)| (idx, alloy_primitives::keccak256(storage_key)))
+            .collect::<Vec<_>>();
+        hashed_slots.sort_unstable_by_key(|(_, hashed_slot)| *hashed_slot);
+
+        let mut values = vec![None; storage_keys.len()];
+        let mut cursor = self.tx().cursor_dup_read::<tables::HashedStorages>()?;
+        for (idx, hashed_slot) in hashed_slots {
+            values[idx] = cursor
+                .seek_by_key_subkey(hashed_address, hashed_slot)?
+                .filter(|e| e.key == hashed_slot)
+                .map(|e| e.value);
+        }
+
+        Ok(values)
+    }
+
+    fn plain_storage_lookup_many(
+        &self,
+        account: Address,
+        storage_keys: &[StorageKey],
+    ) -> ProviderResult<Vec<Option<StorageValue>>> {
+        if storage_keys.is_empty() {
+            return Ok(Vec::new())
+        }
+
+        let mut indexed_slots =
+            storage_keys.iter().enumerate().map(|(idx, &slot)| (idx, slot)).collect::<Vec<_>>();
+        indexed_slots.sort_unstable_by_key(|(_, slot)| *slot);
+
+        let mut values = vec![None; storage_keys.len()];
+        let mut cursor = self.tx().cursor_dup_read::<tables::PlainStorageState>()?;
+        for (idx, storage_key) in indexed_slots {
+            values[idx] = cursor
+                .seek_by_key_subkey(account, storage_key)?
+                .filter(|e| e.key == storage_key)
+                .map(|e| e.value);
+        }
+
+        Ok(values)
+    }
 }
 
 impl<Provider: DBProvider + StorageSettingsCache> AccountReader
@@ -281,6 +335,18 @@ impl<Provider: DBProvider + BlockHashReader + StorageSettingsCache> StateProvide
             Ok(None)
         }
     }
+
+    fn storage_many(
+        &self,
+        account: Address,
+        storage_keys: &[StorageKey],
+    ) -> ProviderResult<Vec<Option<StorageValue>>> {
+        if self.0.cached_storage_settings().use_hashed_state() {
+            self.hashed_storage_lookup_many(account, storage_keys)
+        } else {
+            self.plain_storage_lookup_many(account, storage_keys)
+        }
+    }
 }
 
 impl<Provider: DBProvider + BlockHashReader> BytecodeReader
@@ -389,6 +455,40 @@ mod tests {
         let db = factory.provider().unwrap();
         let provider_ref = LatestStateProviderRef::new(&db);
         assert_eq!(provider_ref.storage(address, slot).unwrap(), None);
+    }
+
+    #[test]
+    fn test_latest_storage_many_hashed_state_preserves_order() {
+        let factory = create_test_provider_factory();
+        factory.set_storage_settings_cache(StorageSettings::v2());
+
+        let address = address!("0x0000000000000000000000000000000000000001");
+        let slot_one =
+            b256!("0x0000000000000000000000000000000000000000000000000000000000000001");
+        let slot_two =
+            b256!("0x0000000000000000000000000000000000000000000000000000000000000002");
+        let missing =
+            b256!("0x0000000000000000000000000000000000000000000000000000000000000003");
+
+        let tx = factory.provider_rw().unwrap().into_tx();
+        tx.put::<tables::HashedStorages>(
+            keccak256(address),
+            StorageEntry { key: keccak256(slot_one), value: U256::from(11) },
+        )
+        .unwrap();
+        tx.put::<tables::HashedStorages>(
+            keccak256(address),
+            StorageEntry { key: keccak256(slot_two), value: U256::from(22) },
+        )
+        .unwrap();
+        tx.commit().unwrap();
+
+        let db = factory.provider().unwrap();
+        let provider_ref = LatestStateProviderRef::new(&db);
+        assert_eq!(
+            provider_ref.storage_many(address, &[slot_two, missing, slot_one]).unwrap(),
+            vec![Some(U256::from(22)), None, Some(U256::from(11))]
+        );
     }
 
     #[test]

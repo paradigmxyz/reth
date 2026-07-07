@@ -21,6 +21,7 @@ type BuildProviderFn = dyn Fn() -> ProviderResult<StateProviderBox> + Send + Syn
 enum PrewarmTarget {
     Account(Address),
     Storage(Address, StorageKey),
+    StorageBatch(Address, Vec<StorageKey>),
 }
 
 /// A message in a worker's queue. The per-block lifecycle is explicit and ordered (the queue is
@@ -83,6 +84,25 @@ impl BalPrewarmPool {
         self.send_warm(PrewarmTarget::Storage(addr, slot));
     }
 
+    /// Fire-and-forget: warm account-local storage slots in bounded batches.
+    pub(crate) fn warm_storage_slots(&self, addr: Address, slots: Vec<StorageKey>) {
+        if slots.len() <= 1 {
+            if let Some(slot) = slots.into_iter().next() {
+                self.warm_storage(addr, slot);
+            }
+            return
+        }
+
+        if slots.len() <= BAL_STORAGE_BATCH_SIZE {
+            self.send_warm(PrewarmTarget::StorageBatch(addr, slots));
+            return
+        }
+
+        for chunk in slots.chunks(BAL_STORAGE_BATCH_SIZE) {
+            self.send_warm(PrewarmTarget::StorageBatch(addr, chunk.to_vec()));
+        }
+    }
+
     /// Ends the block: every worker drops its provider (and read txn) once it has drained the warm
     /// requests queued ahead of this message.
     ///
@@ -127,6 +147,8 @@ impl BalPrewarmPool {
 /// This should explain why this particular value is picked.
 pub(crate) const DEFAULT_BAL_PREWARM_THREADS: usize = 128;
 
+const BAL_STORAGE_BATCH_SIZE: usize = 256;
+
 fn prewarm_loop(rx: crossbeam_channel::Receiver<PrewarmMsg>) {
     // The provider (and its MDBX read txn) held for the current block, between `BeginBlock` and
     // `EndBlock`. `None` while idle, so no read txn is pinned across the inter-block gap.
@@ -157,6 +179,9 @@ fn prewarm_loop(rx: crossbeam_channel::Receiver<PrewarmMsg>) {
                     }
                     PrewarmTarget::Storage(addr, slot) => {
                         let _ = provider.storage(addr, slot);
+                    }
+                    PrewarmTarget::StorageBatch(addr, slots) => {
+                        let _ = provider.storage_many(addr, &slots);
                     }
                 }
             }

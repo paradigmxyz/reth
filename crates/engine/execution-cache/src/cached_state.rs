@@ -696,6 +696,47 @@ impl<S: StateProvider> StateProvider for CachedStateProvider<S> {
             self.state_provider.storage(account, storage_key)
         }
     }
+
+    fn storage_many(
+        &self,
+        account: Address,
+        storage_keys: &[StorageKey],
+    ) -> ProviderResult<Vec<Option<StorageValue>>> {
+        if !self.should_fill_on_miss() {
+            return storage_keys
+                .iter()
+                .map(|&storage_key| self.storage(account, storage_key))
+                .collect()
+        }
+
+        let mut values = vec![None; storage_keys.len()];
+        let mut missing = Vec::new();
+
+        for (idx, &storage_key) in storage_keys.iter().enumerate() {
+            if let Some(value) = self.caches.0.storage_cache.get(&(account, storage_key)) {
+                self.record_storage_hit();
+                values[idx] = nonzero_storage_value(value);
+            } else {
+                missing.push((idx, storage_key));
+            }
+        }
+
+        if missing.is_empty() {
+            return Ok(values)
+        }
+
+        let missing_keys = missing.iter().map(|(_, storage_key)| *storage_key).collect::<Vec<_>>();
+        let fetched = self.state_provider.storage_many(account, &missing_keys)?;
+        debug_assert_eq!(fetched.len(), missing.len());
+
+        for ((idx, storage_key), value) in missing.into_iter().zip(fetched) {
+            self.record_storage_miss();
+            self.caches.insert_storage(account, storage_key, value);
+            values[idx] = value;
+        }
+
+        Ok(values)
+    }
 }
 
 impl<S: BytecodeReader> BytecodeReader for CachedStateProvider<S> {
