@@ -808,10 +808,7 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
                     .collect::<Vec<_>>();
                 let start = Instant::now();
                 let merged_hashed_state = HashedPostStateSorted::disjointed_merge_batch(
-                    step_trie_data
-                        .iter()
-                        .map(|data| data.sorted.hashed_state.as_ref())
-                        .collect(),
+                    step_trie_data.iter().map(|data| data.sorted.hashed_state.as_ref()).collect(),
                     masking_trie_data
                         .iter()
                         .map(|data| data.sorted.hashed_state.as_ref())
@@ -824,10 +821,7 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
 
                 let start = Instant::now();
                 let merged_trie = TrieUpdatesSorted::disjointed_merge_batch(
-                    step_trie_data
-                        .iter()
-                        .map(|data| data.sorted.trie_updates.as_ref())
-                        .collect(),
+                    step_trie_data.iter().map(|data| data.sorted.trie_updates.as_ref()).collect(),
                     masking_trie_data
                         .iter()
                         .map(|data| data.sorted.trie_updates.as_ref())

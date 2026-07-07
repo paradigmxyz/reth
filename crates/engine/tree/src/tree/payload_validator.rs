@@ -595,10 +595,8 @@ where
         let proof_worker_overlay_builder = overlay_builder
             .clone()
             .with_skip_overlay_when_sparse_trie_matches_parent(parent_block.state_root());
-        let overlay_factory = OverlayStateProviderFactory::new(
-            provider_factory,
-            proof_worker_overlay_builder,
-        );
+        let overlay_factory =
+            OverlayStateProviderFactory::new(provider_factory, proof_worker_overlay_builder);
 
         let parallel_bal_execution = ensure_ok!(self.bal_path_eligible(env.decoded_bal.as_deref()));
 

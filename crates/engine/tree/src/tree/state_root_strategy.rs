@@ -54,6 +54,8 @@ use crate::tree::{
     ExecutionEnv, StateProviderBuilder, TreeConfig,
 };
 use alloy_primitives::B256;
+#[cfg(feature = "trie-debug")]
+use alloy_primitives::{map::B256Map, Bytes};
 use reth_errors::ProviderResult;
 use reth_evm::{ConfigureEvm, OnStateHook};
 use reth_primitives_traits::{AlloyBlockHeader, NodePrimitives, RecoveredBlock};
@@ -62,6 +64,8 @@ use reth_provider::{
     DatabaseProviderFactory, DatabaseProviderROFactory, HashedPostStateProvider, ProviderError,
     StateProviderFactory, StateReader, StateRootProvider,
 };
+#[cfg(feature = "trie-debug")]
+use reth_trie::witness::TrieWitness;
 use reth_trie::{
     hashed_cursor::HashedCursorFactory, prefix_set::TriePrefixSetsMut,
     trie_cursor::TrieCursorFactory, updates::TrieUpdates, HashedPostState,
@@ -624,9 +628,10 @@ where
         &self,
         block: &RecoveredBlock<N::Block>,
         output: &BlockExecutionOutput<N::Receipt>,
+        hashed_state: &LazyHashedPostState,
         outcome: StateRootComputeOutcome,
     ) -> ProviderResult<StateRootJobOutcome> {
-        let outcome = self.sparse_outcome(block, output, outcome);
+        let outcome = self.sparse_outcome(block, output, hashed_state, outcome);
         if outcome.state_root == block.header().state_root() {
             return Ok(outcome)
         }
@@ -643,6 +648,7 @@ where
         &self,
         _block: &RecoveredBlock<N::Block>,
         output: &BlockExecutionOutput<N::Receipt>,
+        hashed_state: &LazyHashedPostState,
         outcome: StateRootComputeOutcome,
     ) -> StateRootJobOutcome {
         let StateRootComputeOutcome {
@@ -651,6 +657,8 @@ where
             changed_paths,
             #[cfg(feature = "trie-debug")]
             debug_recorders,
+            #[cfg(feature = "trie-debug")]
+            trie_witness,
         } = outcome;
 
         if self.compare_trie_updates {
@@ -662,16 +670,76 @@ where
             );
             #[cfg(feature = "trie-debug")]
             if _has_diff {
-                write_trie_debug_recorders(_block.header().number(), &debug_recorders);
+                self.write_sparse_trie_debug_artifacts(
+                    _block.header().number(),
+                    hashed_state,
+                    &debug_recorders,
+                    &trie_witness,
+                );
             }
         }
 
         #[cfg(feature = "trie-debug")]
         if state_root != _block.header().state_root() {
-            write_trie_debug_recorders(_block.header().number(), &debug_recorders);
+            self.write_sparse_trie_debug_artifacts(
+                _block.header().number(),
+                hashed_state,
+                &debug_recorders,
+                &trie_witness,
+            );
         }
 
         StateRootJobOutcome::new(state_root, trie_updates).with_changed_paths(changed_paths)
+    }
+
+    #[cfg(feature = "trie-debug")]
+    fn write_sparse_trie_debug_artifacts(
+        &self,
+        block_number: u64,
+        hashed_state: &LazyHashedPostState,
+        recorders: &[(Option<B256>, TrieDebugRecorder)],
+        trie_witness: &B256Map<Bytes>,
+    ) {
+        let fallback_trie_witness = self.fallback_sparse_trie_witness(hashed_state);
+        write_sparse_trie_debug_artifacts(
+            block_number,
+            recorders,
+            trie_witness,
+            fallback_trie_witness.as_ref(),
+        );
+    }
+
+    #[cfg(feature = "trie-debug")]
+    fn fallback_sparse_trie_witness(
+        &self,
+        hashed_state: &LazyHashedPostState,
+    ) -> Option<B256Map<Bytes>> {
+        let hashed_state = hashed_state.get().as_ref().clone();
+        let overlay_provider = match self.overlay_factory.database_provider_ro() {
+            Ok(provider) => provider,
+            Err(err) => {
+                warn!(
+                    target: "engine::tree::state_root_strategy",
+                    %err,
+                    "Failed to build overlay provider for fallback trie witness"
+                );
+                return None
+            }
+        };
+
+        match TrieWitness::new(&overlay_provider, &overlay_provider)
+            .compute_post_state_witness(hashed_state)
+        {
+            Ok(witness) => Some(witness),
+            Err(err) => {
+                warn!(
+                    target: "engine::tree::state_root_strategy",
+                    %err,
+                    "Failed to compute fallback trie witness"
+                );
+                None
+            }
+        }
     }
 }
 
@@ -693,11 +761,11 @@ where
         &mut self,
         block: &RecoveredBlock<N::Block>,
         output: Arc<BlockExecutionOutput<N::Receipt>>,
-        _hashed_state: &LazyHashedPostState,
+        hashed_state: &LazyHashedPostState,
     ) -> ProviderResult<StateRootJobOutcome> {
         if self.timeout.is_none() {
             return match self.handle.state_root() {
-                Ok(outcome) => self.verified_sparse_outcome(block, &output, outcome),
+                Ok(outcome) => self.verified_sparse_outcome(block, &output, hashed_state, outcome),
                 Err(err) => {
                     debug!(target: "engine::tree::state_root_strategy", %err, "State root task failed, falling back to serial root");
                     self.compute_serial(&output)
@@ -708,7 +776,9 @@ where
         let timeout = self.timeout.expect("checked above");
         let task_rx = self.handle.take_state_root_rx();
         let fallback_rx = match task_rx.recv_timeout(timeout) {
-            Ok(Ok(outcome)) => return self.verified_sparse_outcome(block, &output, outcome),
+            Ok(Ok(outcome)) => {
+                return self.verified_sparse_outcome(block, &output, hashed_state, outcome)
+            }
             Ok(Err(err)) => {
                 debug!(target: "engine::tree::state_root_strategy", %err, "State root task failed, falling back to serial root");
                 Self::serial_fallback(
@@ -738,7 +808,7 @@ where
 
         loop {
             if let Ok(Ok(outcome)) = task_rx.try_recv() {
-                let outcome = self.sparse_outcome(block, &output, outcome);
+                let outcome = self.sparse_outcome(block, &output, hashed_state, outcome);
                 if outcome.state_root == block.header().state_root() {
                     return Ok(outcome)
                 }
@@ -832,11 +902,18 @@ where
     false
 }
 
-/// Writes trie debug recorders to a JSON file for the given block number.
+/// Writes sparse trie debug artifacts to JSON files for the given block number.
 ///
-/// The file is written to the current working directory as `trie_debug_block_{block_number}.json`.
+/// Files are written to the current working directory as `trie_debug_block_{block_number}.json`
+/// and `sparse_trie_witness_block_{block_number}.json`. When available, the serial fallback
+/// witness is also written as `fallback_sparse_trie_witness_block_{block_number}.json`.
 #[cfg(feature = "trie-debug")]
-fn write_trie_debug_recorders(block_number: u64, recorders: &[(Option<B256>, TrieDebugRecorder)]) {
+fn write_sparse_trie_debug_artifacts(
+    block_number: u64,
+    recorders: &[(Option<B256>, TrieDebugRecorder)],
+    trie_witness: &B256Map<Bytes>,
+    fallback_trie_witness: Option<&B256Map<Bytes>>,
+) {
     let path = format!("trie_debug_block_{block_number}.json");
     match serde_json::to_string_pretty(recorders) {
         Ok(json) => match std::fs::write(&path, json) {
@@ -861,6 +938,64 @@ fn write_trie_debug_recorders(block_number: u64, recorders: &[(Option<B256>, Tri
                 target: "engine::tree::state_root_strategy",
                 %err,
                 "Failed to serialize trie debug recorders"
+            );
+        }
+    }
+
+    let path = format!("sparse_trie_witness_block_{block_number}.json");
+    match serde_json::to_string_pretty(trie_witness) {
+        Ok(json) => match std::fs::write(&path, json) {
+            Ok(()) => {
+                warn!(
+                    target: "engine::tree::state_root_strategy",
+                    %path,
+                    "Wrote trie witness to file"
+                );
+            }
+            Err(err) => {
+                warn!(
+                    target: "engine::tree::state_root_strategy",
+                    %err,
+                    %path,
+                    "Failed to write trie witness"
+                );
+            }
+        },
+        Err(err) => {
+            warn!(
+                target: "engine::tree::state_root_strategy",
+                %err,
+                "Failed to serialize trie witness"
+            );
+        }
+    }
+
+    let Some(fallback_trie_witness) = fallback_trie_witness else { return };
+
+    let path = format!("fallback_sparse_trie_witness_block_{block_number}.json");
+    match serde_json::to_string_pretty(fallback_trie_witness) {
+        Ok(json) => match std::fs::write(&path, json) {
+            Ok(()) => {
+                warn!(
+                    target: "engine::tree::state_root_strategy",
+                    %path,
+                    "Wrote fallback trie witness to file"
+                );
+            }
+            Err(err) => {
+                warn!(
+                    target: "engine::tree::state_root_strategy",
+                    %err,
+                    %path,
+                    "Failed to write fallback trie witness"
+                );
+            }
+        },
+        Err(err) => {
+            warn!(
+                target: "engine::tree::state_root_strategy",
+                %err,
+                "Failed to serialize fallback trie witness"
             );
         }
     }

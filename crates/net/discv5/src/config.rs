@@ -399,6 +399,12 @@ impl Config {
     pub const fn rlpx_socket(&self) -> &SocketAddr {
         &self.tcp_socket
     }
+
+    /// Sets the port of the `RLPx` TCP socket to advertise. This allows advertising the actually
+    /// bound listener port when the configured port was 0 (OS-assigned).
+    pub const fn set_rlpx_port(&mut self, port: u16) {
+        self.tcp_socket.set_port(port);
+    }
 }
 
 /// Returns the IPv4 discovery socket if one is configured.

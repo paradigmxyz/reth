@@ -9,6 +9,8 @@
 
 use crate::error::StateRootTaskError;
 use alloy_evm::block::OnStateHook;
+#[cfg(feature = "trie-debug")]
+use alloy_primitives::Bytes;
 use alloy_primitives::{keccak256, map::B256Map, B256};
 use reth_trie::{
     prefix_set::TriePrefixSetsMut, updates::TrieUpdates, HashedPostState, HashedStorage,
@@ -48,6 +50,9 @@ pub struct StateRootComputeOutcome {
     /// and `Some(address)` for storage tries.
     #[cfg(feature = "trie-debug")]
     pub debug_recorders: Vec<(Option<B256>, reth_trie_sparse::debug_recorder::TrieDebugRecorder)>,
+    /// Trie witness collected from all revealed sparse tries.
+    #[cfg(feature = "trie-debug")]
+    pub trie_witness: B256Map<Bytes>,
 }
 
 /// Handle to a background sparse trie state root computation.
@@ -624,6 +629,8 @@ mod tests {
                 changed_paths: None,
                 #[cfg(feature = "trie-debug")]
                 debug_recorders: Vec::new(),
+                #[cfg(feature = "trie-debug")]
+                trie_witness: B256Map::default(),
             }))
             .unwrap();
         let outcome = handle.state_root().expect("outcome is delivered");

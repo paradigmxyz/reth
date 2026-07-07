@@ -2,7 +2,7 @@ use crate::{
     ArenaParallelSparseTrie, LeafUpdate, SparseTrie as SparseTrieTrait, SparseTrieUpdates,
 };
 use alloc::{borrow::Cow, boxed::Box};
-use alloy_primitives::{map::B256Map, B256};
+use alloy_primitives::{map::B256Map, Bytes, B256};
 use reth_execution_errors::{SparseTrieErrorKind, SparseTrieResult};
 use reth_trie_common::{
     prefix_set::PrefixSetMut, BranchNodeMasks, Nibbles, ProofTrieNodeV2, RlpNode, TrieMask,
@@ -195,6 +195,13 @@ impl<T: SparseTrieTrait> RevealableSparseTrie<T> {
     /// Returns true if the root node is cached and does not need any recomputation.
     pub fn is_root_cached(&self) -> bool {
         self.as_revealed_ref().is_some_and(|trie| trie.is_root_cached())
+    }
+
+    /// Adds all revealed trie nodes to the provided witness.
+    pub fn witness(&mut self, witness: &mut B256Map<Bytes>) {
+        if let Self::Revealed(trie) = self {
+            trie.witness(witness);
+        }
     }
 
     /// Returns the root hash along with any accumulated update information.

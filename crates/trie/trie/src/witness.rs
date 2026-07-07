@@ -109,7 +109,22 @@ where
     /// # Arguments
     ///
     /// `state` - state transition containing both modified and touched accounts and storage slots.
-    pub fn compute(
+    pub fn compute(self, state: HashedPostState) -> Result<B256Map<Bytes>, TrieWitnessError> {
+        self.compute_inner::<false>(state)
+    }
+
+    /// Compute the post-state sparse trie witness for the trie.
+    ///
+    /// Applies `state` on top of the current trie state and returns all nodes revealed in the
+    /// resulting sparse trie.
+    pub fn compute_post_state_witness(
+        self,
+        state: HashedPostState,
+    ) -> Result<B256Map<Bytes>, TrieWitnessError> {
+        self.compute_inner::<true>(state)
+    }
+
+    fn compute_inner<const POST_STATE: bool>(
         mut self,
         mut state: HashedPostState,
     ) -> Result<B256Map<Bytes>, TrieWitnessError> {
@@ -152,7 +167,9 @@ where
         }
 
         // Record all nodes from multiproof in the witness.
-        self.record_multiproof_nodes(&multiproof);
+        if !POST_STATE {
+            self.record_multiproof_nodes(&multiproof);
+        }
 
         let mut sparse_trie = SparseStateTrie::new();
         sparse_trie.reveal_decoded_multiproof_v2(multiproof)?;
@@ -225,7 +242,9 @@ where
                 )
                 .with_prefix_sets_mut(self.prefix_sets.clone())
                 .multiproof_v2(targets)?;
-                self.record_multiproof_nodes(&multiproof);
+                if !POST_STATE {
+                    self.record_multiproof_nodes(&multiproof);
+                }
                 sparse_trie.reveal_decoded_multiproof_v2(multiproof)?;
             }
         }
@@ -253,11 +272,12 @@ where
                 if let Some(storage_trie) = sparse_trie.storage_trie_mut(&hashed_address) {
                     storage_trie.root()
                 } else {
-                    let record_root_node = !self.mode.is_canonical() ||
-                        state
-                            .storages
-                            .get(&hashed_address)
-                            .is_some_and(|storage| !storage.storage.is_empty());
+                    let record_root_node = !POST_STATE &&
+                        (!self.mode.is_canonical() ||
+                            state
+                                .storages
+                                .get(&hashed_address)
+                                .is_some_and(|storage| !storage.storage.is_empty()));
                     self.account_storage_root(hashed_address, record_root_node)?
                 };
 
@@ -298,9 +318,16 @@ where
                 )
                 .with_prefix_sets_mut(self.prefix_sets.clone())
                 .multiproof_v2(targets)?;
-                self.record_multiproof_nodes(&multiproof);
+                if !POST_STATE {
+                    self.record_multiproof_nodes(&multiproof);
+                }
                 sparse_trie.reveal_decoded_multiproof_v2(multiproof)?;
             }
+        }
+
+        if POST_STATE {
+            sparse_trie.root()?;
+            return Ok(sparse_trie.witness())
         }
 
         if self.mode.is_canonical() {
