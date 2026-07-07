@@ -1,5 +1,6 @@
 use crate::NodePrimitivesProvider;
 use alloc::vec::Vec;
+use alloy_eips::BlockNumHash;
 use alloy_primitives::BlockNumber;
 use reth_db_models::StoredBlockBodyIndices;
 use reth_execution_types::{Chain, ExecutionOutcome};
@@ -22,7 +23,12 @@ pub trait BlockExecutionWriter:
     /// Remove all of the blocks above the provided number and their execution result
     ///
     /// The passed block number will stay in the database.
-    fn remove_block_and_execution_above(&self, block: BlockNumber) -> ProviderResult<()>;
+    ///
+    /// Returns removed block number/hash pairs ordered by ascending block number.
+    fn remove_block_and_execution_above(
+        &self,
+        block: BlockNumber,
+    ) -> ProviderResult<Vec<BlockNumHash>>;
 }
 
 impl<T: BlockExecutionWriter> BlockExecutionWriter for &T {
@@ -33,7 +39,10 @@ impl<T: BlockExecutionWriter> BlockExecutionWriter for &T {
         (*self).take_block_and_execution_above(block)
     }
 
-    fn remove_block_and_execution_above(&self, block: BlockNumber) -> ProviderResult<()> {
+    fn remove_block_and_execution_above(
+        &self,
+        block: BlockNumber,
+    ) -> ProviderResult<Vec<BlockNumHash>> {
         (*self).remove_block_and_execution_above(block)
     }
 }
@@ -69,7 +78,9 @@ pub trait BlockWriter {
     /// Removes all blocks above the given block number from the database.
     ///
     /// Note: This does not remove state or execution data.
-    fn remove_blocks_above(&self, block: BlockNumber) -> ProviderResult<()>;
+    ///
+    /// Returns removed block number/hash pairs ordered by ascending block number.
+    fn remove_blocks_above(&self, block: BlockNumber) -> ProviderResult<Vec<BlockNumHash>>;
 
     /// Removes all block bodies above the given block number from the database.
     fn remove_bodies_above(&self, block: BlockNumber) -> ProviderResult<()>;

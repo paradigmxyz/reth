@@ -161,8 +161,8 @@ where
         let provider_rw = self.provider.database_provider_rw()?;
 
         let new_tip_hash = provider_rw.block_hash(new_tip_num)?;
-        self.persistence_hook.remove_blocks(&provider_rw, new_tip_num)?;
-        provider_rw.remove_block_and_execution_above(new_tip_num)?;
+        let removed_blocks = provider_rw.remove_block_and_execution_above(new_tip_num)?;
+        self.persistence_hook.remove_blocks(&provider_rw, &removed_blocks)?;
         provider_rw.commit()?;
 
         debug!(target: "engine::persistence", ?new_tip_num, ?new_tip_hash, "Removed blocks from disk");
@@ -463,7 +463,7 @@ mod tests {
     #[derive(Clone, Default, Debug)]
     struct TestPersistenceHook {
         saved_blocks: Arc<std::sync::Mutex<HashSet<u64>>>,
-        removed_tip: Arc<std::sync::Mutex<Option<u64>>>,
+        removed_blocks: Arc<std::sync::Mutex<Vec<BlockNumHash>>>,
     }
 
     impl PersistenceHook<MockNodeTypesWithDB> for TestPersistenceHook {
@@ -472,7 +472,7 @@ mod tests {
             provider: &TestProviderRW,
             blocks: &[ExecutedBlock<EthPrimitives>],
         ) -> ProviderResult<()> {
-            provider.save_safe_block_number(1).unwrap();
+            provider.save_safe_block_number(1)?;
             let mut saved = self.saved_blocks.lock().unwrap();
             for block in blocks {
                 saved.insert(block.recovered_block().num_hash().number);
@@ -480,9 +480,15 @@ mod tests {
             Ok(())
         }
 
-        fn remove_blocks(&self, provider: &TestProviderRW, new_tip_num: u64) -> ProviderResult<()> {
-            provider.save_safe_block_number(new_tip_num).unwrap();
-            *self.removed_tip.lock().unwrap() = Some(new_tip_num);
+        fn remove_blocks(
+            &self,
+            provider: &TestProviderRW,
+            blocks: &[BlockNumHash],
+        ) -> ProviderResult<()> {
+            if let Some(block) = blocks.last() {
+                provider.save_safe_block_number(block.number)?;
+            }
+            *self.removed_blocks.lock().unwrap() = blocks.to_vec();
             Ok(())
         }
     }
@@ -689,6 +695,7 @@ mod tests {
         let mut test_block_builder = TestBlockBuilder::eth();
         let blocks = test_block_builder.get_executed_blocks(0..3).collect::<Vec<_>>();
         let tip_hash = blocks[1].recovered_block().hash();
+        let removed_block = blocks[2].recovered_block().num_hash();
         let (save_tx, save_rx) = crossbeam_channel::bounded(1);
         handle.save_blocks(blocks, save_tx).unwrap();
         save_rx.recv().unwrap();
@@ -698,10 +705,10 @@ mod tests {
 
         let result = remove_rx.recv().unwrap();
         assert_eq!(result.last_block.unwrap(), BlockNumHash { number: 1, hash: tip_hash });
-        assert_eq!(*persistence_hook.removed_tip.lock().unwrap(), Some(1));
+        assert_eq!(*persistence_hook.removed_blocks.lock().unwrap(), vec![removed_block]);
         assert_eq!(
             provider.database_provider_ro().unwrap().last_safe_block_number().unwrap(),
-            Some(1)
+            Some(removed_block.number)
         );
     }
 

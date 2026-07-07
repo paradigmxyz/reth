@@ -24,7 +24,7 @@ use alloy_consensus::{
     transaction::{SignerRecoverable, TransactionMeta, TxHashRef},
     BlockHeader, TxReceipt,
 };
-use alloy_eips::BlockHashOrNumber;
+use alloy_eips::{BlockHashOrNumber, BlockNumHash};
 use alloy_primitives::{
     keccak256,
     map::{hash_map, AddressSet, B256Map, HashMap},
@@ -3486,7 +3486,10 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> BlockExecutionWriter
         Ok(Chain::new(blocks, execution_state, BTreeMap::new()))
     }
 
-    fn remove_block_and_execution_above(&self, block: BlockNumber) -> ProviderResult<()> {
+    fn remove_block_and_execution_above(
+        &self,
+        block: BlockNumber,
+    ) -> ProviderResult<Vec<BlockNumHash>> {
         self.unwind_trie_state_from(block + 1)?;
 
         // remove execution res
@@ -3494,12 +3497,12 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> BlockExecutionWriter
 
         // remove block bodies it is needed for both get block range and get block execution results
         // that is why it is deleted afterwards.
-        self.remove_blocks_above(block)?;
+        let removed_blocks = self.remove_blocks_above(block)?;
 
         // Update pipeline progress
         self.update_pipeline_stages(block, true)?;
 
-        Ok(())
+        Ok(removed_blocks)
     }
 }
 
@@ -3594,11 +3597,13 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> BlockWriter
         Ok(())
     }
 
-    fn remove_blocks_above(&self, block: BlockNumber) -> ProviderResult<()> {
+    fn remove_blocks_above(&self, block: BlockNumber) -> ProviderResult<Vec<BlockNumHash>> {
         let last_block_number = self.last_block_number()?;
+
         // Clean up HeaderNumbers for blocks being removed, we must clear all indexes from MDBX.
-        for hash in self.canonical_hashes_range(block + 1, last_block_number + 1)? {
-            self.tx.delete::<tables::HeaderNumbers>(hash, None)?;
+        let canonical_hashes = self.canonical_hashes_range(block + 1, last_block_number + 1)?;
+        for hash in &canonical_hashes {
+            self.tx.delete::<tables::HeaderNumbers>(*hash, None)?;
         }
 
         // Get highest static file block for the total block range
@@ -3653,7 +3658,12 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> BlockWriter
 
         self.remove_bodies_above(block)?;
 
-        Ok(())
+        let removed_num_hashes = canonical_hashes
+            .into_iter()
+            .zip(block + 1..=last_block_number)
+            .map(|(hash, number)| BlockNumHash { number, hash })
+            .collect::<Vec<_>>();
+        Ok(removed_num_hashes)
     }
 
     fn remove_bodies_above(&self, block: BlockNumber) -> ProviderResult<()> {

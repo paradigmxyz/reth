@@ -1,22 +1,31 @@
+use alloy_eips::BlockNumHash;
 use reth_chain_state::ExecutedBlock;
 use reth_errors::ProviderResult;
 use reth_provider::{providers::ProviderNodeTypes, DatabaseProviderFactory, ProviderFactory};
 use std::fmt;
 
 /// A hook invoked by the engine persistence task when blocks are saved or removed.
+///
+/// [`Self::save_blocks`] is invoked before the engine persists a non-empty block batch to the
+/// database. [`Self::remove_blocks`] is invoked after a non-empty block range has been removed from
+/// the database, before the removal is committed.
+///
+/// Hooks receive the same writable provider used by the persistence operation, so auxiliary writes
+/// performed by the hook are committed with the corresponding save or removal.
 pub trait PersistenceHook<N: ProviderNodeTypes>: Send + Sync {
-    /// Invoked before a non-empty `save_blocks` batch is written to storage.
+    /// Invoked before a non-empty block batch is persisted to the database.
     fn save_blocks(
         &self,
         provider: &<ProviderFactory<N> as DatabaseProviderFactory>::ProviderRW,
         blocks: &[ExecutedBlock<N::Primitives>],
     ) -> ProviderResult<()>;
 
-    /// Invoked before blocks above `new_tip_num` are removed from storage.
+    /// Invoked after a non-empty block range is removed from the database, before the removal is
+    /// committed.
     fn remove_blocks(
         &self,
         _provider: &<ProviderFactory<N> as DatabaseProviderFactory>::ProviderRW,
-        _new_tip_num: u64,
+        _blocks: &[BlockNumHash],
     ) -> ProviderResult<()>;
 }
 
@@ -37,7 +46,7 @@ impl<N: ProviderNodeTypes> PersistenceHook<N> for NoopPersistenceHook {
     fn remove_blocks(
         &self,
         _provider: &<ProviderFactory<N> as DatabaseProviderFactory>::ProviderRW,
-        _new_tip_num: u64,
+        _blocks: &[BlockNumHash],
     ) -> ProviderResult<()> {
         Ok(())
     }
@@ -64,9 +73,9 @@ impl<N: ProviderNodeTypes> PersistenceHook<N> for PersistenceHooks<N> {
     fn remove_blocks(
         &self,
         provider: &<ProviderFactory<N> as DatabaseProviderFactory>::ProviderRW,
-        new_tip_num: u64,
+        blocks: &[BlockNumHash],
     ) -> ProviderResult<()> {
-        self.0.iter().try_for_each(|hook| hook.remove_blocks(provider, new_tip_num))
+        self.0.iter().try_for_each(|hook| hook.remove_blocks(provider, blocks))
     }
 }
 
