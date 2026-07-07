@@ -6,6 +6,7 @@
 //! before the node can be launched.
 
 use crate::{
+    builder::add_ons::PrunerProviderRW,
     components::{NodeComponents, NodeComponentsBuilder},
     hooks::NodeHooks,
     launch::LaunchNode,
@@ -17,6 +18,7 @@ use reth_exex::ExExContext;
 use reth_node_api::{FullNodeComponents, FullNodeTypes, NodeAddOns, NodeTypes};
 use reth_node_core::node_config::NodeConfig;
 use reth_provider::providers::RocksDBProvider;
+use reth_prune::segments::Segment;
 use reth_tasks::TaskExecutor;
 use std::{fmt, fmt::Debug, future::Future};
 
@@ -52,7 +54,12 @@ impl<T: FullNodeTypes> NodeBuilderWithTypes<T> {
             adapter,
             rocksdb_provider,
             components_builder,
-            add_ons: AddOns { hooks: NodeHooks::default(), exexs: Vec::new(), add_ons: () },
+            add_ons: AddOns {
+                hooks: NodeHooks::default(),
+                exexs: Vec::new(),
+                prune_segments: Vec::new(),
+                add_ons: (),
+            },
         }
     }
 }
@@ -181,7 +188,12 @@ where
             adapter,
             rocksdb_provider,
             components_builder,
-            add_ons: AddOns { hooks: NodeHooks::default(), exexs: Vec::new(), add_ons },
+            add_ons: AddOns {
+                hooks: NodeHooks::default(),
+                exexs: Vec::new(),
+                prune_segments: Vec::new(),
+                add_ons,
+            },
         }
     }
 }
@@ -224,6 +236,41 @@ where
         E: Future<Output = eyre::Result<()>> + Send,
     {
         self.add_ons.exexs.push((exex_id.into(), Box::new(exex)));
+        self
+    }
+
+    /// Installs an additional prune segment in the node's pruner.
+    ///
+    /// This allows downstream consumers to prune custom data alongside the built-in segments,
+    /// without modifying reth's [`PruneSegment`](reth_prune::PruneSegment) for every downstream
+    /// feature. Custom segments should use
+    /// [`PruneSegment::Custom`](reth_prune::PruneSegment::Custom) so their checkpoints can be
+    /// persisted, and are pruned after the built-in segments, sharing the pruner's delete limit
+    /// and timeout per run.
+    ///
+    /// # Note
+    ///
+    /// Custom segments only run in the pruner that is driven by the consensus engine. They are
+    /// not part of the pipeline's prune stage that is used during initial sync, so they catch up
+    /// once the node is live.
+    pub fn install_prune_segment<S>(mut self, segment: S) -> Self
+    where
+        S: Segment<PrunerProviderRW<NodeAdapter<T, CB::Components>>> + 'static,
+    {
+        self.add_ons.prune_segments.push(Box::new(segment));
+        self
+    }
+
+    /// Installs an additional prune segment in the node's pruner if the condition is true.
+    ///
+    /// See [`Self::install_prune_segment`].
+    pub fn install_prune_segment_if<S>(self, cond: bool, segment: S) -> Self
+    where
+        S: Segment<PrunerProviderRW<NodeAdapter<T, CB::Components>>> + 'static,
+    {
+        if cond {
+            return self.install_prune_segment(segment)
+        }
         self
     }
 

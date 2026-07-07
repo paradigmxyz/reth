@@ -4,6 +4,7 @@
 #![allow(missing_debug_implementations)]
 
 use crate::{
+    builder::add_ons::PrunerProviderRW,
     common::WithConfigs,
     components::NodeComponentsBuilder,
     node::FullNode,
@@ -36,6 +37,7 @@ use reth_provider::{
     providers::{BlockchainProvider, NodeTypesForProvider, RocksDBProvider},
     ChainSpecProvider, FullProvider,
 };
+use reth_prune::segments::Segment;
 use reth_tasks::TaskExecutor;
 use reth_transaction_pool::{PoolConfig, PoolTransaction, TransactionPool};
 use secp256k1::SecretKey;
@@ -670,6 +672,32 @@ where
         } else {
             self
         }
+    }
+
+    /// Installs an additional prune segment in the node's pruner.
+    ///
+    /// See [`NodeBuilderWithComponents::install_prune_segment`].
+    pub fn install_prune_segment<S>(self, segment: S) -> Self
+    where
+        S: Segment<PrunerProviderRW<NodeAdapter<T, CB::Components>>> + 'static,
+    {
+        Self {
+            builder: self.builder.install_prune_segment(segment),
+            task_executor: self.task_executor,
+        }
+    }
+
+    /// Installs an additional prune segment in the node's pruner if the condition is true.
+    ///
+    /// See [`NodeBuilderWithComponents::install_prune_segment`].
+    pub fn install_prune_segment_if<S>(self, cond: bool, segment: S) -> Self
+    where
+        S: Segment<PrunerProviderRW<NodeAdapter<T, CB::Components>>> + 'static,
+    {
+        if cond {
+            return self.install_prune_segment(segment)
+        }
+        self
     }
 
     /// Launches the node with the given launcher.

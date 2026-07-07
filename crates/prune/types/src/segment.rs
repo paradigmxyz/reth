@@ -10,6 +10,8 @@ use thiserror::Error;
 /// VERY IMPORTANT NOTE: new variants must be added to the end of this enum, and old variants which
 /// are no longer used must not be removed from this enum. The variant index is encoded directly
 /// when writing to the `PruneCheckpoint` table, so changing the order here will corrupt the table.
+/// This also applies to [`Self::Custom`]: its position must not change, and the wrapped id is
+/// encoded into the table key as well.
 #[derive(Debug, Display, Clone, Copy, Eq, PartialEq, Ord, PartialOrd, Hash, EnumIter)]
 #[cfg_attr(test, derive(arbitrary::Arbitrary))]
 #[cfg_attr(any(test, feature = "reth-codec"), derive(reth_codecs::Compact))]
@@ -43,6 +45,17 @@ pub enum PruneSegment {
     MerkleChangeSets,
     /// Prune segment responsible for bodies (transactions in static files).
     Bodies,
+    /// Prune segment defined by a downstream consumer of reth, e.g. a custom node built on the
+    /// SDK.
+    ///
+    /// The wrapped id identifies the custom segment and is encoded into the
+    /// `PruneCheckpoints` table key, so it must remain stable for the lifetime of the
+    /// database. Downstream projects are responsible for keeping their ids unique.
+    ///
+    /// Built-in reth segments never use this variant.
+    #[strum(disabled)]
+    #[display("Custom({_0})")]
+    Custom(u8),
 }
 
 #[cfg(test)]
@@ -54,20 +67,25 @@ impl Default for PruneSegment {
 }
 
 impl PruneSegment {
-    /// Returns an iterator over all variants of [`PruneSegment`].
+    /// Returns an iterator over all built-in variants of [`PruneSegment`].
     ///
     /// Excludes deprecated variants that are no longer used, but can still be found in the
-    /// database.
+    /// database, as well as [`Self::Custom`] segments, which are defined by downstream consumers
+    /// and cannot be enumerated.
     pub fn variants() -> impl Iterator<Item = Self> {
         Self::iter()
     }
 
     /// Returns minimum number of blocks to keep in the database for this segment.
+    ///
+    /// For [`Self::Custom`] segments this returns the conservative
+    /// [`MINIMUM_UNWIND_SAFE_DISTANCE`]. Custom segments can override this via
+    /// `Segment::min_blocks` in `reth-prune`.
     pub const fn min_blocks(&self) -> u64 {
         match self {
             Self::SenderRecovery | Self::TransactionLookup => 0,
             Self::Receipts | Self::Bodies => MINIMUM_DISTANCE,
-            Self::ContractLogs | Self::AccountHistory | Self::StorageHistory => {
+            Self::ContractLogs | Self::AccountHistory | Self::StorageHistory | Self::Custom(_) => {
                 MINIMUM_UNWIND_SAFE_DISTANCE
             }
             #[expect(deprecated)]
@@ -131,5 +149,52 @@ mod tests {
             assert!(!segments.contains(&PruneSegment::Transactions));
             assert!(!segments.contains(&PruneSegment::MerkleChangeSets));
         }
+
+        // Custom segments cannot be enumerated
+        assert!(!segments.iter().any(|segment| matches!(segment, PruneSegment::Custom(_))));
+    }
+
+    // Guards the on-disk format of the `PruneCheckpoints` table key: the variant index (and the
+    // custom segment id) are encoded directly, so these bytes must never change.
+    #[test]
+    fn test_prune_segment_compact_backwards_compat() {
+        use reth_codecs::Compact;
+
+        let cases = [
+            (PruneSegment::SenderRecovery, vec![0]),
+            (PruneSegment::TransactionLookup, vec![1]),
+            (PruneSegment::Receipts, vec![2]),
+            (PruneSegment::ContractLogs, vec![3]),
+            (PruneSegment::AccountHistory, vec![4]),
+            (PruneSegment::StorageHistory, vec![5]),
+            #[expect(deprecated)]
+            (PruneSegment::Headers, vec![6]),
+            #[expect(deprecated)]
+            (PruneSegment::Transactions, vec![7]),
+            #[expect(deprecated)]
+            (PruneSegment::MerkleChangeSets, vec![8]),
+            (PruneSegment::Bodies, vec![9]),
+            // `Custom(0)` has an empty id payload because integers are compact-encoded without
+            // leading zero bytes
+            (PruneSegment::Custom(0), vec![10]),
+            (PruneSegment::Custom(42), vec![10, 42]),
+            (PruneSegment::Custom(u8::MAX), vec![10, u8::MAX]),
+        ];
+
+        for (segment, expected) in cases {
+            let mut buf = Vec::new();
+            segment.to_compact(&mut buf);
+            assert_eq!(buf, expected, "encoding changed for {segment:?}");
+
+            // Note: the returned remainder is not checked because the derived enum
+            // `from_compact` does not advance the buffer past a variant's field payload.
+            let (decoded, _) = PruneSegment::from_compact(&buf, buf.len());
+            assert_eq!(decoded, segment);
+        }
+    }
+
+    #[test]
+    fn test_custom_segment_display() {
+        assert_eq!(PruneSegment::Custom(3).to_string(), "Custom(3)");
     }
 }

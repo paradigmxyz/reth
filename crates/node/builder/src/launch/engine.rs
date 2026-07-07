@@ -88,7 +88,7 @@ impl EngineNodeLauncher {
             adapter: NodeTypesAdapter { database },
             rocksdb_provider,
             components_builder,
-            add_ons: AddOns { hooks, exexs: installed_exex, add_ons },
+            add_ons: AddOns { hooks, exexs: installed_exex, prune_segments, add_ons },
             config,
         } = target;
         let NodeHooks { on_component_initialized, on_node_started, .. } = hooks;
@@ -185,7 +185,11 @@ impl EngineNodeLauncher {
             pruner_builder =
                 pruner_builder.finished_exex_height(exex_manager_handle.finished_height());
         }
-        let pruner = pruner_builder.build_with_provider_factory(ctx.provider_factory().clone());
+        let mut pruner = pruner_builder.build_with_provider_factory(ctx.provider_factory().clone());
+        if !prune_segments.is_empty() {
+            info!(target: "reth::cli", segments = prune_segments.len(), "Installing custom prune segments");
+            pruner.extend_segments(prune_segments);
+        }
         let pruner_events = pruner.events();
         info!(target: "reth::cli", prune_config=?ctx.prune_config(), "Pruner initialized");
 

@@ -112,6 +112,18 @@ impl<Provider, S> Pruner<Provider, S> {
         self.minimum_pruning_distance = Some(distance);
         self
     }
+
+    /// Appends additional segments to the pruner, e.g. custom segments defined by a downstream
+    /// node, see [`PruneSegment::Custom`](reth_prune_types::PruneSegment::Custom).
+    ///
+    /// The appended segments are pruned after the built-in ones and share the pruner's delete
+    /// limit and timeout per run.
+    pub fn extend_segments(
+        &mut self,
+        segments: impl IntoIterator<Item = Box<dyn Segment<Provider>>>,
+    ) {
+        self.segments.extend(segments);
+    }
 }
 
 impl<Provider, S> Pruner<Provider, S>
@@ -210,7 +222,9 @@ where
                         tip_block_number,
                         segment.segment(),
                         segment.purpose(),
-                        self.minimum_pruning_distance,
+                        // A minimum declared by the segment itself takes precedence over the
+                        // pruner-wide override, see `Segment::min_blocks`.
+                        segment.min_blocks().or(self.minimum_pruning_distance),
                     )
                 })
                 .transpose()?
@@ -380,9 +394,56 @@ fn is_stage_finished<Provider: StageCheckpointReader>(
 
 #[cfg(test)]
 mod tests {
-    use crate::Pruner;
+    use crate::{
+        segments::{PruneInput, Segment},
+        Pruner, PrunerError,
+    };
     use reth_exex_types::FinishedExExHeight;
-    use reth_provider::test_utils::create_test_provider_factory;
+    use reth_provider::{test_utils::create_test_provider_factory, PruneCheckpointReader};
+    use reth_prune_types::{
+        PruneCheckpoint, PruneMode, PruneProgress, PrunePurpose, PruneSegment, SegmentOutput,
+        SegmentOutputCheckpoint,
+    };
+
+    /// A segment as a downstream node would define it: prunes nothing from the database, but
+    /// reports progress and saves checkpoints under a custom [`PruneSegment`].
+    #[derive(Debug)]
+    struct CustomSegment {
+        min_blocks: Option<u64>,
+    }
+
+    impl<Provider> Segment<Provider> for CustomSegment {
+        fn segment(&self) -> PruneSegment {
+            PruneSegment::Custom(42)
+        }
+
+        fn mode(&self) -> Option<PruneMode> {
+            Some(PruneMode::Distance(5))
+        }
+
+        fn purpose(&self) -> PrunePurpose {
+            PrunePurpose::User
+        }
+
+        fn min_blocks(&self) -> Option<u64> {
+            self.min_blocks
+        }
+
+        fn prune(
+            &self,
+            _provider: &Provider,
+            input: PruneInput,
+        ) -> Result<SegmentOutput, PrunerError> {
+            Ok(SegmentOutput {
+                progress: PruneProgress::Finished,
+                pruned: 1,
+                checkpoint: Some(SegmentOutputCheckpoint {
+                    block_number: Some(input.to_block),
+                    tx_number: None,
+                }),
+            })
+        }
+    }
 
     #[test]
     fn is_pruning_needed() {
@@ -422,5 +483,98 @@ mod tests {
         // Adjust tip block number to the finished ExEx height that reaches the threshold
         finished_exex_height_tx.send(FinishedExExHeight::Height(third_block_number)).unwrap();
         assert!(pruner.is_pruning_needed(third_block_number));
+    }
+
+    #[test]
+    fn prunes_custom_segment_and_persists_checkpoint() {
+        let provider_factory = create_test_provider_factory();
+
+        let (_tx, finished_exex_height_rx) =
+            tokio::sync::watch::channel(FinishedExExHeight::NoExExs);
+
+        let mut pruner = Pruner::new_with_factory(
+            provider_factory.clone(),
+            vec![],
+            1,
+            usize::MAX,
+            None,
+            finished_exex_height_rx,
+        );
+        pruner.extend_segments([
+            Box::new(CustomSegment { min_blocks: Some(0) }) as Box<dyn Segment<_>>
+        ]);
+
+        let output = pruner.run(10).expect("pruner run");
+        assert!(output.progress.is_finished());
+        assert_eq!(output.segments.len(), 1);
+        assert_eq!(output.segments[0].0, PruneSegment::Custom(42));
+
+        // The checkpoint is persisted in the database under the custom segment key
+        let provider = provider_factory.provider().unwrap();
+        assert_eq!(
+            provider.get_prune_checkpoint(PruneSegment::Custom(42)).unwrap(),
+            Some(PruneCheckpoint {
+                block_number: Some(5),
+                tx_number: None,
+                prune_mode: PruneMode::Distance(5)
+            })
+        );
+        // Other segments, including other custom ids, are unaffected
+        assert_eq!(provider.get_prune_checkpoint(PruneSegment::Custom(41)).unwrap(), None);
+        assert_eq!(provider.get_prune_checkpoint(PruneSegment::SenderRecovery).unwrap(), None);
+        drop(provider);
+
+        // A subsequent run passes the previous checkpoint back to the segment and advances it
+        pruner.run(11).expect("pruner run");
+        assert_eq!(
+            provider_factory
+                .provider()
+                .unwrap()
+                .get_prune_checkpoint(PruneSegment::Custom(42))
+                .unwrap()
+                .and_then(|checkpoint| checkpoint.block_number),
+            Some(6)
+        );
+    }
+
+    #[test]
+    fn custom_segment_min_blocks_precedence() {
+        let provider_factory = create_test_provider_factory();
+
+        // Without a segment-declared minimum, custom segments fall back to the conservative
+        // `PruneSegment::min_blocks`, which is incompatible with `Distance(5)`
+        let (_tx, finished_exex_height_rx) =
+            tokio::sync::watch::channel(FinishedExExHeight::NoExExs);
+        let mut pruner = Pruner::new_with_factory(
+            provider_factory.clone(),
+            vec![Box::new(CustomSegment { min_blocks: None }) as Box<dyn Segment<_>>],
+            1,
+            usize::MAX,
+            None,
+            finished_exex_height_rx.clone(),
+        );
+        assert!(pruner.run(10).is_err());
+
+        // A segment-declared minimum takes precedence over the pruner-wide override
+        let mut pruner = Pruner::new_with_factory(
+            provider_factory.clone(),
+            vec![Box::new(CustomSegment { min_blocks: Some(0) }) as Box<dyn Segment<_>>],
+            1,
+            usize::MAX,
+            None,
+            finished_exex_height_rx,
+        )
+        .with_minimum_pruning_distance(100);
+        let output = pruner.run(10).expect("pruner run");
+        assert!(output.progress.is_finished());
+        assert_eq!(
+            provider_factory
+                .provider()
+                .unwrap()
+                .get_prune_checkpoint(PruneSegment::Custom(42))
+                .unwrap()
+                .and_then(|checkpoint| checkpoint.block_number),
+            Some(5)
+        );
     }
 }
