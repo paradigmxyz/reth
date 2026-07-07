@@ -1288,10 +1288,11 @@ mod tests {
     fn witness_collects_extension_and_branch_nodes() {
         let mut sparse = SparseStateTrie::<ArenaParallelSparseTrie>::default();
         let state_mask = TrieMask::new(0b11);
-        let stack = vec![
-            RlpNode::word_rlp(&B256::repeat_byte(0x01)),
-            RlpNode::word_rlp(&B256::repeat_byte(0x02)),
-        ];
+        let leaf_0_node = TrieNodeV2::Leaf(LeafNode::new(leaf_key([], 62), vec![0x01]));
+        let leaf_1_node = TrieNodeV2::Leaf(LeafNode::new(leaf_key([], 62), vec![0x02]));
+        let leaf_0 = alloy_rlp::encode(&leaf_0_node);
+        let leaf_1 = alloy_rlp::encode(&leaf_1_node);
+        let stack = vec![RlpNode::from_rlp(&leaf_0), RlpNode::from_rlp(&leaf_1)];
         let branch_node = TrieNodeV2::Branch(BranchNodeV2 {
             key: Nibbles::default(),
             stack: stack.clone(),
@@ -1309,11 +1310,19 @@ mod tests {
 
         sparse
             .reveal_decoded_multiproof_v2(reth_trie_common::DecodedMultiProofV2 {
-                account_proofs: vec![ProofTrieNodeV2 {
-                    path: Nibbles::default(),
-                    node: extension_node,
-                    masks: None,
-                }],
+                account_proofs: vec![
+                    ProofTrieNodeV2 { path: Nibbles::default(), node: extension_node, masks: None },
+                    ProofTrieNodeV2 {
+                        path: Nibbles::from_nibbles([0xa, 0x0]),
+                        node: leaf_0_node,
+                        masks: None,
+                    },
+                    ProofTrieNodeV2 {
+                        path: Nibbles::from_nibbles([0xa, 0x1]),
+                        node: leaf_1_node,
+                        masks: None,
+                    },
+                ],
                 ..Default::default()
             })
             .unwrap();
@@ -1321,7 +1330,9 @@ mod tests {
         let witness = sparse.witness();
         assert_witness_contains_node(&witness, &branch);
         assert_witness_contains_node(&witness, &extension);
-        assert_eq!(witness.len(), 2);
+        assert_witness_contains_node(&witness, &leaf_0);
+        assert_witness_contains_node(&witness, &leaf_1);
+        assert_eq!(witness.len(), 4);
     }
 
     #[test]

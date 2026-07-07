@@ -291,6 +291,62 @@ impl ArenaCursor {
         }
     }
 
+    /// Read-only variant of [`Self::next`] for traversals that do not need dirty-state
+    /// propagation when popping cursor entries.
+    #[instrument(level = "trace", target = TRACE_TARGET, skip_all, ret)]
+    pub(super) fn next_ref(
+        &mut self,
+        arena: &NodeArena,
+        should_descend: impl Fn(usize, &ArenaSparseNode) -> bool,
+    ) -> NextResult {
+        if self.needs_pop {
+            self.stack.pop().expect("pop can't be called on empty stack");
+            self.needs_pop = false;
+        }
+
+        loop {
+            let Some(head) = self.stack.last_mut() else {
+                return NextResult::Done;
+            };
+            let head_idx = head.index;
+
+            let ArenaSparseNode::Branch(branch) = &arena[head_idx] else {
+                self.needs_pop = true;
+                return NextResult::NonBranch;
+            };
+
+            let state_mask = branch.state_mask;
+            let start = head.next_dense_idx;
+            let child_depth = self.stack.len();
+
+            let mut descended = false;
+            for (branch_child_idx, nibble) in BranchChildIter::new(state_mask) {
+                if branch_child_idx.get() < start {
+                    continue;
+                }
+
+                let child_idx = match &arena[head_idx].branch_ref().children[branch_child_idx] {
+                    ArenaSparseNodeBranchChild::Revealed(child_idx) => *child_idx,
+                    ArenaSparseNodeBranchChild::Blinded(_) => continue,
+                };
+
+                if should_descend(child_depth, &arena[child_idx]) {
+                    self.stack.last_mut().expect("head exists").next_dense_idx =
+                        branch_child_idx.get() + 1;
+                    let path = self.child_path(arena, nibble);
+                    self.push(arena, child_idx, path);
+                    descended = true;
+                    break;
+                }
+            }
+
+            if !descended {
+                self.needs_pop = true;
+                return NextResult::Branch;
+            }
+        }
+    }
+
     /// Pops the stack until the head is an ancestor of `full_path`, then descends from that head
     /// toward `full_path`, pushing revealed branch (and leaf) children onto the stack until the
     /// deepest ancestor is reached.
