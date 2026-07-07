@@ -236,7 +236,7 @@ impl ArenaCursor {
     /// can read it via [`Self::head`].
     ///
     /// Returns [`NextResult::Done`] when the stack is empty (traversal complete).
-    #[instrument(level = "trace", target = TRACE_TARGET, skip_all, ret)]
+    #[instrument(level = "trace", target = TRACE_TARGET, skip_all)]
     pub(super) fn next(
         &mut self,
         arena: &mut NodeArena,
@@ -296,7 +296,7 @@ impl ArenaCursor {
     /// deepest ancestor is reached.
     ///
     /// Returns a [`SeekResult`] describing the state at the stack head.
-    #[instrument(level = "trace", target = TRACE_TARGET, skip(self, arena), ret)]
+    #[instrument(level = "trace", target = TRACE_TARGET, skip(self, arena))]
     pub(super) fn seek(&mut self, arena: &mut NodeArena, full_path: &Nibbles) -> SeekResult {
         // Pop stack until head is ancestor of full_path.
         while self.stack.len() > 1 &&
