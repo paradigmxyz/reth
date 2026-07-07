@@ -18,6 +18,7 @@ use reth_engine_tree::{
     chain::{ChainEvent, FromOrchestrator},
     engine::{EngineApiKind, EngineApiRequest, EngineRequestHandler},
     launch::build_engine_orchestrator,
+    persistence::NoopPersistenceHook,
     tree::TreeConfig,
 };
 use reth_engine_util::EngineMessageStreamExt;
@@ -269,6 +270,7 @@ impl EngineNodeLauncher {
             ctx.components().evm_config().clone(),
             changeset_cache,
             ctx.task_executor().clone(),
+            Box::new(NoopPersistenceHook::default()),
         );
 
         info!(target: "reth::cli", "Consensus engine initialized");

@@ -23,6 +23,9 @@ use std::{
 use thiserror::Error;
 use tracing::{debug, error, instrument, warn};
 
+mod hook;
+pub use hook::{BoxedPersistenceHook, NoopPersistenceHook, PersistenceHook, PersistenceHooks};
+
 /// Unified result of any persistence operation.
 #[derive(Debug)]
 pub struct PersistenceResult {
@@ -39,7 +42,7 @@ pub struct PersistenceResult {
 ///
 /// This should be spawned in its own thread with [`std::thread::spawn`], since this performs
 /// blocking I/O operations in an endless loop.
-#[derive(Debug)]
+#[derive(derive_more::Debug)]
 pub struct PersistenceService<N>
 where
     N: ProviderNodeTypes,
@@ -60,6 +63,9 @@ where
     /// Pending safe block number to be committed with the next block save.
     /// This avoids triggering a separate fsync for each safe block update.
     pending_safe_block: Option<u64>,
+    /// Hook invoked before non-empty block batches are saved.
+    #[debug(skip)]
+    save_blocks_hook: BoxedPersistenceHook<N>,
 }
 
 impl<N> PersistenceService<N>
@@ -73,9 +79,27 @@ where
         pruner: PrunerWithFactory<ProviderFactory<N>>,
         sync_metrics_tx: MetricEventsSender,
     ) -> Self {
+        Self::new_with_hook(
+            provider,
+            incoming,
+            pruner,
+            sync_metrics_tx,
+            Box::new(NoopPersistenceHook::default()),
+        )
+    }
+
+    /// Create a new persistence service with a custom persistence hook.
+    pub fn new_with_hook(
+        provider: ProviderFactory<N>,
+        incoming: Receiver<PersistenceAction<N::Primitives>>,
+        pruner: PrunerWithFactory<ProviderFactory<N>>,
+        sync_metrics_tx: MetricEventsSender,
+        save_blocks_hook: BoxedPersistenceHook<N>,
+    ) -> Self {
         Self {
             provider,
             incoming,
+            save_blocks_hook,
             pruner,
             metrics: PersistenceMetrics::default(),
             sync_metrics_tx,
@@ -163,6 +187,7 @@ where
 
         if let Some(last) = last_block {
             let provider_rw = self.provider.database_provider_rw()?;
+            self.save_blocks_hook.on_save_blocks(&provider_rw, &blocks);
             provider_rw.save_blocks(blocks, SaveBlocksMode::Full)?;
 
             if let Some(finalized) = pending_finalized {
@@ -284,12 +309,40 @@ impl<T: NodePrimitives> PersistenceHandle<T> {
     where
         N: ProviderNodeTypes,
     {
+        Self::spawn_service_with_hook(
+            provider_factory,
+            pruner,
+            sync_metrics_tx,
+            Box::new(NoopPersistenceHook::default()),
+        )
+    }
+
+    /// Create a new [`PersistenceHandle`], and spawn the persistence service with a custom
+    /// persistence hook.
+    ///
+    /// The returned handle can be cloned and shared. When all clones are dropped, the service
+    /// thread will be joined, ensuring graceful shutdown before resources (like `RocksDB`) are
+    /// released.
+    pub fn spawn_service_with_hook<N>(
+        provider_factory: ProviderFactory<N>,
+        pruner: PrunerWithFactory<ProviderFactory<N>>,
+        sync_metrics_tx: MetricEventsSender,
+        save_blocks_hook: BoxedPersistenceHook<N>,
+    ) -> PersistenceHandle<N::Primitives>
+    where
+        N: ProviderNodeTypes,
+    {
         // create the initial channels
         let (db_service_tx, db_service_rx) = std::sync::mpsc::channel();
 
         // spawn the persistence service
-        let db_service =
-            PersistenceService::new(provider_factory, db_service_rx, pruner, sync_metrics_tx);
+        let db_service = PersistenceService::new_with_hook(
+            provider_factory,
+            db_service_rx,
+            pruner,
+            sync_metrics_tx,
+            save_blocks_hook,
+        );
         let join_handle = spawn_os_thread("persistence", || {
             if let Err(err) = db_service.run() {
                 error!(target: "engine::persistence", ?err, "Persistence service failed");
@@ -388,21 +441,27 @@ impl Drop for ServiceGuard {
 mod tests {
     use super::*;
     use alloy_eips::NumHash;
-    use alloy_primitives::{BlockHash, BlockNumber, Bytes, B256, U256};
+    use alloy_primitives::{map::HashSet, BlockHash, BlockNumber, Bytes, B256, U256};
     use reth_chain_state::test_utils::TestBlockBuilder;
     use reth_exex_types::FinishedExExHeight;
     use reth_provider::{
         providers::{ProviderFactoryBuilder, ReadOnlyConfig},
-        test_utils::{create_test_provider_factory, MockNodeTypes},
+        test_utils::{create_test_provider_factory, MockNodeTypes, MockNodeTypesWithDB},
         AccountReader, BalConfig, BalNotificationStream, BalStore, BalStoreHandle,
-        ChainSpecProvider, HeaderProvider, InMemoryBalStore, ProviderError, ProviderResult, RawBal,
-        StorageSettingsCache, TryIntoHistoricalStateProvider,
+        ChainSpecProvider, ChainStateBlockReader, DatabaseProviderFactory, HeaderProvider,
+        InMemoryBalStore, ProviderError, ProviderResult, RawBal, StorageSettingsCache,
+        TryIntoHistoricalStateProvider,
     };
     use reth_prune::Pruner;
     use reth_prune_types::PruneMode;
     use tokio::sync::mpsc::unbounded_channel;
 
-    fn default_persistence_handle() -> PersistenceHandle<EthPrimitives> {
+    type TestProviderRW =
+        <ProviderFactory<MockNodeTypesWithDB> as DatabaseProviderFactory>::ProviderRW;
+
+    fn persistence_handle_with_hook(
+        save_blocks_hook: Box<dyn PersistenceHook<MockNodeTypesWithDB>>,
+    ) -> PersistenceHandle<EthPrimitives> {
         let provider = create_test_provider_factory();
 
         let (_finished_exex_height_tx, finished_exex_height_rx) =
@@ -412,7 +471,16 @@ mod tests {
             Pruner::new_with_factory(provider.clone(), vec![], 5, 0, None, finished_exex_height_rx);
 
         let (sync_metrics_tx, _sync_metrics_rx) = unbounded_channel();
-        PersistenceHandle::<EthPrimitives>::spawn_service(provider, pruner, sync_metrics_tx)
+        PersistenceHandle::<EthPrimitives>::spawn_service_with_hook(
+            provider,
+            pruner,
+            sync_metrics_tx,
+            save_blocks_hook,
+        )
+    }
+
+    fn default_persistence_handle() -> PersistenceHandle<EthPrimitives> {
+        persistence_handle_with_hook(Box::new(NoopPersistenceHook::default()))
     }
 
     #[test]
@@ -534,6 +602,50 @@ mod tests {
         handle.save_blocks(blocks, tx).unwrap();
         let result = rx.recv().unwrap();
         assert_eq!(last_hash, result.last_block.unwrap().hash);
+    }
+
+    #[test]
+    fn test_save_blocks_invokes_hook() {
+        reth_tracing::init_test_tracing();
+        let provider = create_test_provider_factory();
+        let (_finished_exex_height_tx, finished_exex_height_rx) =
+            tokio::sync::watch::channel(FinishedExExHeight::NoExExs);
+        let pruner =
+            Pruner::new_with_factory(provider.clone(), vec![], 5, 0, None, finished_exex_height_rx);
+        let (sync_metrics_tx, _sync_metrics_rx) = unbounded_channel();
+        let persisted_blocks = Arc::new(std::sync::Mutex::new(HashSet::default()));
+        let persistence_hook = {
+            let persisted_blocks = persisted_blocks.clone();
+            Box::new(move |provider: &TestProviderRW, blocks: &[ExecutedBlock<EthPrimitives>]| {
+                provider.save_safe_block_number(1).unwrap();
+                let mut persisted = persisted_blocks.lock().unwrap();
+                for block in blocks {
+                    persisted.insert(block.recovered_block().num_hash().number);
+                }
+            })
+        };
+        let handle = PersistenceHandle::<EthPrimitives>::spawn_service_with_hook(
+            provider.clone(),
+            pruner,
+            sync_metrics_tx,
+            persistence_hook,
+        );
+
+        let mut test_block_builder = TestBlockBuilder::eth();
+        let blocks = test_block_builder.get_executed_blocks(0..3).collect::<Vec<_>>();
+        let last_hash = blocks.last().unwrap().recovered_block().hash();
+        let (tx, rx) = crossbeam_channel::bounded(1);
+
+        handle.save_blocks(blocks, tx).unwrap();
+
+        let result = rx.recv().unwrap();
+        assert_eq!(last_hash, result.last_block.unwrap().hash);
+        assert_eq!(
+            provider.database_provider_ro().unwrap().last_safe_block_number().unwrap(),
+            Some(1)
+        );
+
+        assert_eq!(persisted_blocks.lock().unwrap().clone(), HashSet::from([0, 1, 2]));
     }
 
     #[test]

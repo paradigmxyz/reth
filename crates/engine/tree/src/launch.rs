@@ -9,7 +9,7 @@ use crate::{
     chain::ChainOrchestrator,
     download::BasicBlockDownloader,
     engine::{EngineApiKind, EngineApiRequest, EngineApiRequestHandler, EngineHandler},
-    persistence::PersistenceHandle,
+    persistence::{PersistenceHandle, PersistenceHook},
     tree::{EngineApiTreeHandler, EngineValidator, TreeConfig, WaitForCaches},
 };
 use futures::Stream;
@@ -67,6 +67,7 @@ pub fn build_engine_orchestrator<N, Client, S, V, C>(
     evm_config: C,
     changeset_cache: ChangesetCache,
     runtime: Runtime,
+    persistence_hook: Box<dyn PersistenceHook<N>>,
 ) -> ChainOrchestrator<
     EngineHandler<
         EngineApiRequestHandler<EngineApiRequest<N::Payload, N::Primitives>, N::Primitives>,
@@ -84,8 +85,12 @@ where
 {
     let downloader = BasicBlockDownloader::new(client, consensus.clone());
 
-    let persistence_handle =
-        PersistenceHandle::<N::Primitives>::spawn_service(provider, pruner, sync_metrics_tx);
+    let persistence_handle = PersistenceHandle::<N::Primitives>::spawn_service_with_hook(
+        provider,
+        pruner,
+        sync_metrics_tx,
+        persistence_hook,
+    );
 
     let canonical_in_memory_state = blockchain_db.canonical_in_memory_state();
 
