@@ -666,7 +666,7 @@ where
             );
             #[cfg(feature = "trie-debug")]
             if _has_diff {
-                write_trie_debug_recorders(
+                write_sparse_trie_debug_artifacts(
                     _block.header().number(),
                     &debug_recorders,
                     &trie_witness,
@@ -676,7 +676,11 @@ where
 
         #[cfg(feature = "trie-debug")]
         if state_root != _block.header().state_root() {
-            write_trie_debug_recorders(_block.header().number(), &debug_recorders, &trie_witness);
+            write_sparse_trie_debug_artifacts(
+                _block.header().number(),
+                &debug_recorders,
+                &trie_witness,
+            );
         }
 
         StateRootJobOutcome::new(state_root, trie_updates).with_changed_paths(changed_paths)
@@ -840,11 +844,12 @@ where
     false
 }
 
-/// Writes trie debug recorders to a JSON file for the given block number.
+/// Writes sparse trie debug artifacts to JSON files for the given block number.
 ///
-/// The file is written to the current working directory as `trie_debug_block_{block_number}.json`.
+/// Files are written to the current working directory as `trie_debug_block_{block_number}.json`
+/// and `sparse_trie_witness_block_{block_number}.json`.
 #[cfg(feature = "trie-debug")]
-fn write_trie_debug_recorders(
+fn write_sparse_trie_debug_artifacts(
     block_number: u64,
     recorders: &[(Option<B256>, TrieDebugRecorder)],
     trie_witness: &B256Map<Bytes>,
@@ -877,7 +882,7 @@ fn write_trie_debug_recorders(
         }
     }
 
-    let path = format!("trie_witness_block_{block_number}.json");
+    let path = format!("sparse_trie_witness_block_{block_number}.json");
     match serde_json::to_string_pretty(trie_witness) {
         Ok(json) => match std::fs::write(&path, json) {
             Ok(()) => {
