@@ -268,9 +268,6 @@ pub enum BeaconEngineMessage<Payload: PayloadTypes> {
         state: ForkchoiceState,
         /// The payload attributes for block building.
         payload_attrs: Option<Payload::PayloadAttributes>,
-        /// Whether to allow this update to move the local canonical head back to a canonical
-        /// ancestor.
-        force_canonical_head_unwind: bool,
         /// The sender for returning forkchoice updated result.
         tx: oneshot::Sender<RethResult<OnForkChoiceUpdated>>,
     },
@@ -373,27 +370,8 @@ where
         state: ForkchoiceState,
         payload_attrs: Option<Payload::PayloadAttributes>,
     ) -> Result<ForkchoiceUpdated, BeaconForkChoiceUpdateError> {
-        self.send_fork_choice_updated(state, payload_attrs, false).await
-    }
-
-    /// Sends a forkchoice update message that can rewind the local canonical head to a canonical
-    /// ancestor and waits for a response.
-    pub async fn fork_choice_updated_with_canonical_head_unwind(
-        &self,
-        state: ForkchoiceState,
-        payload_attrs: Option<Payload::PayloadAttributes>,
-    ) -> Result<ForkchoiceUpdated, BeaconForkChoiceUpdateError> {
-        self.send_fork_choice_updated(state, payload_attrs, true).await
-    }
-
-    async fn send_fork_choice_updated(
-        &self,
-        state: ForkchoiceState,
-        payload_attrs: Option<Payload::PayloadAttributes>,
-        force_canonical_head_unwind: bool,
-    ) -> Result<ForkchoiceUpdated, BeaconForkChoiceUpdateError> {
         Ok(self
-            .send_fork_choice_updated_request(state, payload_attrs, force_canonical_head_unwind)
+            .send_fork_choice_updated(state, payload_attrs)
             .map_err(|_| BeaconForkChoiceUpdateError::EngineUnavailable)
             .await?
             .map_err(BeaconForkChoiceUpdateError::internal)?
@@ -402,17 +380,15 @@ where
 
     /// Sends a forkchoice update message to the beacon consensus engine and returns the receiver to
     /// wait for a response.
-    fn send_fork_choice_updated_request(
+    fn send_fork_choice_updated(
         &self,
         state: ForkchoiceState,
         payload_attrs: Option<Payload::PayloadAttributes>,
-        force_canonical_head_unwind: bool,
     ) -> oneshot::Receiver<RethResult<OnForkChoiceUpdated>> {
         let (tx, rx) = oneshot::channel();
         let _ = self.to_engine.send(BeaconEngineMessage::ForkchoiceUpdated {
             state,
             payload_attrs,
-            force_canonical_head_unwind,
             tx,
         });
         rx

@@ -1,51 +1,47 @@
-//! Debug RPC helpers backed by the engine.
+//! Debug RPC helpers backed by the canonical chain tracker.
 
 use alloy_primitives::U64;
 use alloy_rpc_types_engine::ForkchoiceState;
-use jsonrpsee::RpcModule;
-use reth_engine_primitives::ConsensusEngineHandle;
-use reth_payload_primitives::PayloadTypes;
-use reth_rpc_server_types::result::{internal_rpc_err, invalid_params_rpc_err, ToRpcResult};
-use reth_storage_api::BlockHashReader;
+use jsonrpsee::{core::RpcResult, RpcModule};
+use reth_rpc_server_types::result::{invalid_params_rpc_err, ToRpcResult};
+use reth_storage_api::{CanonChainTracker, HeaderProvider, ProviderHeader};
 
-/// Returns a `debug_setHead` RPC module backed by forkchoice updates.
-pub fn debug_set_head_rpc_module<Provider, Payload>(
-    provider: Provider,
-    engine_handle: ConsensusEngineHandle<Payload>,
-) -> RpcModule<()>
+/// Returns a `debug_setHead` RPC module backed by the canonical chain tracker.
+pub fn debug_set_head_rpc_module<Provider>(provider: Provider) -> RpcModule<()>
 where
-    Provider: BlockHashReader + Clone + Send + Sync + 'static,
-    Payload: PayloadTypes,
+    Provider: HeaderProvider
+        + CanonChainTracker<Header = ProviderHeader<Provider>>
+        + Clone
+        + Send
+        + Sync
+        + 'static,
 {
     let mut module = RpcModule::new(());
     module
         .register_async_method("debug_setHead", move |params, _, _| {
             let provider = provider.clone();
-            let engine_handle = engine_handle.clone();
             async move {
-                let number = params.one::<U64>()?.to::<u64>();
-                let block_hash = provider
-                    .block_hash(number)
-                    .to_rpc_result()?
-                    .ok_or_else(|| invalid_params_rpc_err(format!("block {number} not found")))?;
+                let res: RpcResult<()> = async {
+                    let number = params.one::<U64>()?.to::<u64>();
+                    let header =
+                        provider.sealed_header(number).to_rpc_result()?.ok_or_else(|| {
+                            invalid_params_rpc_err(format!("block {number} not found"))
+                        })?;
 
-                let state = ForkchoiceState {
-                    head_block_hash: block_hash,
-                    safe_block_hash: block_hash,
-                    finalized_block_hash: block_hash,
-                };
-                let response = engine_handle
-                    .fork_choice_updated_with_canonical_head_unwind(state, None)
-                    .await
-                    .map_err(|err| internal_rpc_err(err.to_string()))?;
-                if response.is_valid() {
+                    let state = ForkchoiceState {
+                        head_block_hash: header.hash(),
+                        safe_block_hash: header.hash(),
+                        finalized_block_hash: header.hash(),
+                    };
+                    provider.on_forkchoice_update_received(&state);
+                    provider.set_canonical_head(header.clone());
+                    provider.set_safe(header.clone());
+                    provider.set_finalized(header);
+
                     Ok(())
-                } else {
-                    Err(internal_rpc_err(format!(
-                        "forkchoice update returned non-valid status: {:?}",
-                        response.payload_status.status
-                    )))
                 }
+                .await;
+                res
             }
         })
         .expect("valid method name");
