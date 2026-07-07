@@ -1472,6 +1472,8 @@ impl ArenaParallelSparseTrie {
                 let mut branch_rlp = Vec::new();
                 let branch_rlp_node =
                     BranchNodeRef::new(&stack, branch.state_mask).rlp(&mut branch_rlp);
+                // A branch with a short key is encoded as an extension node pointing to the
+                // branch. Witness consumers need both the extension and the branch node.
                 Self::record_witness_node(witness, &branch_rlp);
 
                 if branch.short_key.is_empty() {
