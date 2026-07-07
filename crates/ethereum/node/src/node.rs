@@ -449,36 +449,6 @@ where
     }
 }
 
-fn debug_set_head_rpc_module<Provider, Payload>(
-    provider: Provider,
-    engine_handle: ConsensusEngineHandle<Payload>,
-) -> RpcModule<()>
-where
-    Provider: BlockHashReader + Clone + Send + Sync + 'static,
-    Payload: PayloadTypes,
-{
-    let mut module = RpcModule::new(());
-    module
-        .register_async_method("debug_setHead", move |params, _, _| {
-            let provider = provider.clone();
-            let engine_handle = engine_handle.clone();
-            async move {
-                let number = params.one::<U64>()?.to::<u64>();
-                let block_hash = provider
-                    .block_hash(number)
-                    .to_rpc_result()?
-                    .ok_or_else(|| invalid_params_rpc_err(format!("block {number} not found")))?;
-
-                engine_handle
-                    .set_canonical_head(block_hash)
-                    .await
-                    .map_err(|err| internal_rpc_err(err.to_string()))
-            }
-        })
-        .expect("valid method name");
-    module
-}
-
 impl<N> Node<N> for EthereumNode
 where
     N: FullNodeTypes<Types = Self>,
@@ -827,4 +797,34 @@ where
     async fn build(self, ctx: &AddOnsContext<'_, Node>) -> eyre::Result<Self::Validator> {
         Ok(EthereumEngineValidator::new(ctx.config.chain.clone()))
     }
+}
+
+fn debug_set_head_rpc_module<Provider, Payload>(
+    provider: Provider,
+    engine_handle: ConsensusEngineHandle<Payload>,
+) -> RpcModule<()>
+where
+    Provider: BlockHashReader + Clone + Send + Sync + 'static,
+    Payload: PayloadTypes,
+{
+    let mut module = RpcModule::new(());
+    module
+        .register_async_method("debug_setHead", move |params, _, _| {
+            let provider = provider.clone();
+            let engine_handle = engine_handle.clone();
+            async move {
+                let number = params.one::<U64>()?.to::<u64>();
+                let block_hash = provider
+                    .block_hash(number)
+                    .to_rpc_result()?
+                    .ok_or_else(|| invalid_params_rpc_err(format!("block {number} not found")))?;
+
+                engine_handle
+                    .set_canonical_head(block_hash)
+                    .await
+                    .map_err(|err| internal_rpc_err(err.to_string()))
+            }
+        })
+        .expect("valid method name");
+    module
 }
