@@ -3,10 +3,12 @@
 use crate::{EthEngineTypes, EthEvmConfig};
 use alloy_eips::{eip7840::BlobParams, merge::EPOCH_SLOTS};
 use alloy_network::Ethereum;
+use alloy_primitives::U64;
 use alloy_rpc_types_engine::ExecutionData;
+use jsonrpsee::RpcModule;
 use reth_chainspec::{ChainSpec, EthChainSpec, EthereumHardforks, Hardforks};
 use reth_engine_local::LocalPayloadAttributesBuilder;
-use reth_engine_primitives::EngineTypes;
+use reth_engine_primitives::{ConsensusEngineHandle, EngineTypes};
 use reth_ethereum_consensus::EthBeaconConsensus;
 use reth_ethereum_engine_primitives::{EthBuiltPayload, EthPayloadAttributes};
 use reth_ethereum_primitives::{EthPrimitives, TransactionSigned};
@@ -37,7 +39,7 @@ use reth_node_builder::{
 };
 use reth_node_core::args::JitArgs;
 use reth_payload_primitives::PayloadTypes;
-use reth_provider::{providers::ProviderFactoryBuilder, EthStorage};
+use reth_provider::{providers::ProviderFactoryBuilder, BlockHashReader, EthStorage};
 use reth_rpc::{
     eth::core::{EthApiFor, EthRpcConverterFor},
     TestingApi, ValidationApi,
@@ -52,7 +54,10 @@ use reth_rpc_eth_api::{
     RpcConvert, RpcTypes, SignableTxRequest,
 };
 use reth_rpc_eth_types::{error::FromEvmError, EthApiError};
-use reth_rpc_server_types::RethRpcModule;
+use reth_rpc_server_types::{
+    result::{internal_rpc_err, invalid_params_rpc_err, ToRpcResult},
+    RethRpcModule,
+};
 use reth_tracing::tracing::{debug, info};
 use reth_transaction_pool::{
     blobstore::DiskFileBlobStore, EthTransactionPool, PoolPooledTx, PoolTransaction,
@@ -345,6 +350,7 @@ where
         let testing_gas_limit_override = ctx.config.rpc.testing_gas_limit;
         let testing_desired_gas_limit = ctx.config.builder.gas_limit_for(ctx.config.chain.chain());
         let testing_engine_handle = ctx.beacon_engine_handle.clone();
+        let debug_set_head_engine_handle = ctx.beacon_engine_handle.clone();
 
         self.inner
             .launch_add_ons_with(ctx, move |container| {
@@ -356,6 +362,14 @@ where
                 container
                     .modules
                     .merge_if_module_configured(RethRpcModule::Eth, eth_config.into_rpc())?;
+
+                container.modules.add_or_replace_if_module_configured(
+                    RethRpcModule::Debug,
+                    debug_set_head_rpc_module(
+                        container.registry.provider().clone(),
+                        debug_set_head_engine_handle,
+                    ),
+                )?;
 
                 // testing_buildBlockV1: only wire when the hidden testing module is explicitly
                 // requested on any transport. Default stays disabled to honor security guidance.
@@ -433,6 +447,36 @@ where
     fn engine_validator_builder(&self) -> Self::ValidatorBuilder {
         self.inner.engine_validator_builder()
     }
+}
+
+fn debug_set_head_rpc_module<Provider, Payload>(
+    provider: Provider,
+    engine_handle: ConsensusEngineHandle<Payload>,
+) -> RpcModule<()>
+where
+    Provider: BlockHashReader + Clone + Send + Sync + 'static,
+    Payload: PayloadTypes,
+{
+    let mut module = RpcModule::new(());
+    module
+        .register_async_method("debug_setHead", move |params, _, _| {
+            let provider = provider.clone();
+            let engine_handle = engine_handle.clone();
+            async move {
+                let number = params.one::<U64>()?.to::<u64>();
+                let block_hash = provider
+                    .block_hash(number)
+                    .to_rpc_result()?
+                    .ok_or_else(|| invalid_params_rpc_err(format!("block {number} not found")))?;
+
+                engine_handle
+                    .set_canonical_head(block_hash)
+                    .await
+                    .map_err(|err| internal_rpc_err(err.to_string()))
+            }
+        })
+        .expect("valid method name");
+    module
 }
 
 impl<N> Node<N> for EthereumNode

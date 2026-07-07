@@ -14,7 +14,7 @@ use core::{
     task::{ready, Context, Poll},
 };
 use futures::{future::Either, FutureExt, TryFutureExt};
-use reth_errors::RethResult;
+use reth_errors::{RethError, RethResult};
 use reth_payload_builder_primitives::PayloadBuilderError;
 use reth_payload_primitives::PayloadTypes;
 use std::time::{Duration, Instant};
@@ -271,6 +271,13 @@ pub enum BeaconEngineMessage<Payload: PayloadTypes> {
         /// The sender for returning forkchoice updated result.
         tx: oneshot::Sender<RethResult<OnForkChoiceUpdated>>,
     },
+    /// Message to set the local canonical head to an already canonical block.
+    SetCanonicalHead {
+        /// The canonical block hash to set as the local head.
+        block_hash: B256,
+        /// The sender for returning the update result.
+        tx: oneshot::Sender<RethResult<()>>,
+    },
 }
 
 impl<Payload: PayloadTypes> Display for BeaconEngineMessage<Payload> {
@@ -302,6 +309,9 @@ impl<Payload: PayloadTypes> Display for BeaconEngineMessage<Payload> {
                     "ForkchoiceUpdated {{ state: {state:?}, has_payload_attributes: {} }}",
                     payload_attrs.is_some()
                 )
+            }
+            Self::SetCanonicalHead { block_hash, .. } => {
+                write!(f, "SetCanonicalHead {{ block_hash: {block_hash} }}")
             }
         }
     }
@@ -376,6 +386,13 @@ where
             .await?
             .map_err(BeaconForkChoiceUpdateError::internal)?
             .await?)
+    }
+
+    /// Sets the local canonical head to an already canonical block.
+    pub async fn set_canonical_head(&self, block_hash: B256) -> RethResult<()> {
+        let (tx, rx) = oneshot::channel();
+        let _ = self.to_engine.send(BeaconEngineMessage::SetCanonicalHead { block_hash, tx });
+        rx.await.map_err(|_| RethError::msg("consensus engine unavailable"))?
     }
 
     /// Sends a forkchoice update message to the beacon consensus engine and returns the receiver to

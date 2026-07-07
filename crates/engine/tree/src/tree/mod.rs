@@ -998,6 +998,14 @@ where
         }
     }
 
+    /// Sets the local canonical head to an existing canonical block.
+    fn set_canonical_head(&mut self, block_hash: B256) -> ProviderResult<()> {
+        let canonical_header = self
+            .find_canonical_header(block_hash)?
+            .ok_or_else(|| ProviderError::HeaderNotFound(block_hash.into()))?;
+        self.update_latest_block_to_canonical_ancestor(&canonical_header)
+    }
+
     /// Handles chain unwind scenarios by collecting blocks to remove and performing an unwind back
     /// to the canonical header
     fn handle_canonical_chain_unwind(
@@ -1631,6 +1639,15 @@ where
                                         .failed_forkchoice_updated_response_deliveries
                                         .increment(1);
                                     warn!(target: "engine::tree", ?state, elapsed=?start.elapsed(), "Failed to deliver forkchoiceUpdated response, receiver dropped (request cancelled): {err:?}");
+                                }
+                            }
+                            BeaconEngineMessage::SetCanonicalHead { block_hash, tx } => {
+                                let output = self.set_canonical_head(block_hash);
+                                if let Err(err) = &output {
+                                    error!(target: "engine::tree", %err, ?block_hash, "Error setting canonical head");
+                                }
+                                if let Err(err) = tx.send(output.map_err(Into::into)) {
+                                    warn!(target: "engine::tree", ?block_hash, "Failed to deliver set canonical head response, receiver dropped (request cancelled): {err:?}");
                                 }
                             }
                             BeaconEngineMessage::NewPayload { payload, tx } => {

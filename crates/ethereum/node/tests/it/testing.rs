@@ -1,6 +1,6 @@
 //! E2E tests for the testing RPC namespace.
 
-use alloy_primitives::{Address, Bytes, B256};
+use alloy_primitives::{Address, Bytes, B256, U64};
 use alloy_rpc_types_engine::ExecutionPayloadEnvelopeV4;
 use alloy_rpc_types_eth::BlockNumberOrTag;
 use jsonrpsee_core::client::ClientT;
@@ -34,7 +34,10 @@ async fn testing_rpc_build_block_works() -> eyre::Result<()> {
         rocksdb_path: Some(tempdir.path().join("rocksdb")),
         pprof_dumps_path: Some(tempdir.path().join("pprof")),
     };
-    let config = NodeConfig::test().with_datadir_args(datadir_args).with_rpc(rpc_args);
+    let config = NodeConfig::test()
+        .with_disabled_discovery()
+        .with_datadir_args(datadir_args)
+        .with_rpc(rpc_args);
     let db = create_test_rw_db();
 
     let (tx, rx): (
@@ -96,8 +99,11 @@ async fn testing_rpc_build_block_works() -> eyre::Result<()> {
 async fn testing_rpc_commit_block_works() -> eyre::Result<()> {
     let runtime = Runtime::test();
     let mut rpc_args = reth_node_core::args::RpcServerArgs::default().with_http();
-    rpc_args.http_api =
-        Some(RpcModuleSelection::from_iter([RethRpcModule::Eth, RethRpcModule::Testing]));
+    rpc_args.http_api = Some(RpcModuleSelection::from_iter([
+        RethRpcModule::Debug,
+        RethRpcModule::Eth,
+        RethRpcModule::Testing,
+    ]));
     let tempdir = tempdir().expect("temp datadir");
     let datadir_args = DatadirArgs {
         datadir: MaybePlatformPath::<DataDirPath>::from_str(tempdir.path().to_str().unwrap())
@@ -114,6 +120,7 @@ async fn testing_rpc_commit_block_works() -> eyre::Result<()> {
             .build(),
     );
     let config = NodeConfig::test()
+        .with_disabled_discovery()
         .with_chain(chain_spec)
         .with_datadir_args(datadir_args)
         .with_rpc(rpc_args);
@@ -193,6 +200,15 @@ async fn testing_rpc_commit_block_works() -> eyre::Result<()> {
                     );
                     assert_eq!(
                         next_latest.get("parentHash").and_then(Value::as_str),
+                        Some(block_hash.as_str())
+                    );
+
+                    let _: () = client.request("debug_setHead", (U64::from(1),)).await?;
+                    let rewound_latest: Value = client
+                        .request("eth_getBlockByNumber", (BlockNumberOrTag::Latest, false))
+                        .await?;
+                    assert_eq!(
+                        rewound_latest.get("hash").and_then(Value::as_str),
                         Some(block_hash.as_str())
                     );
                     Ok(())
