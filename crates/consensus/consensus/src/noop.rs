@@ -72,6 +72,10 @@ impl<B: Block> Consensus<B> for NoopConsensus {
 }
 
 impl<N: NodePrimitives> FullConsensus<N> for NoopConsensus {
+    fn requires_receipt_root_bloom(&self) -> bool {
+        false
+    }
+
     /// Validates block after execution (no-op implementation).
     fn validate_block_post_execution(
         &self,

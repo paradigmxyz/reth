@@ -761,8 +761,8 @@ where
         let block = validated_block.try_into_inner().expect("sole handle")?;
         let block = block.with_senders(senders);
 
-        // Wait for the receipt root computation to complete.
-        let receipt_root_bloom = {
+        // Wait for the receipt root computation to complete when consensus will consume it.
+        let receipt_root_bloom = if let Some(receipt_root_rx) = receipt_root_rx {
             let _enter = debug_span!(
                 target: "engine::tree::payload_validator",
                 "wait_receipt_root",
@@ -778,6 +778,8 @@ where
                     );
                 })
                 .ok()
+        } else {
+            None
         };
 
         ensure_ok_post_block!(
@@ -968,7 +970,7 @@ where
     ///
     /// This method orchestrates block execution:
     /// 1. Sets up the EVM with state database and precompile caching
-    /// 2. Spawns a background task for incremental receipt root computation
+    /// 2. Spawns a background task for incremental receipt root computation when consensus needs it
     /// 3. Executes transactions with metrics collection via state hooks
     /// 4. Merges state transitions and records execution metrics
     #[instrument(level = "debug", target = "engine::tree::payload_validator", skip_all)]
@@ -984,7 +986,7 @@ where
         (
             BlockExecutionOutput<N::Receipt>,
             Vec<Address>,
-            ReceiptRootReceiver,
+            Option<ReceiptRootReceiver>,
             Option<BlockAccessList>,
         ),
         InsertBlockErrorKind,
@@ -1050,11 +1052,10 @@ where
             executor,
             transaction_count,
             handle.iter_transactions(),
-            &receipt_tx,
+            receipt_tx.as_ref(),
             &executed_tx_index,
             has_bal,
         )?;
-        drop(receipt_tx);
 
         // Finish execution and get the result
         let post_exec_start = Instant::now();
@@ -1120,7 +1121,7 @@ where
         (
             BlockExecutionOutput<N::Receipt>,
             Vec<Address>,
-            ReceiptRootReceiver,
+            Option<ReceiptRootReceiver>,
             Option<BlockAccessList>,
         ),
         InsertBlockErrorKind,
@@ -1175,7 +1176,11 @@ where
     fn spawn_receipt_root_task(
         &self,
         receipts_len: usize,
-    ) -> (ReceiptRootSender<N>, ReceiptRootReceiver) {
+    ) -> (Option<ReceiptRootSender<N>>, Option<ReceiptRootReceiver>) {
+        if !self.consensus.requires_receipt_root_bloom() {
+            return (None, None);
+        }
+
         // Unbounded channel is used since tx count bounds capacity anyway.
         let (receipt_tx, receipt_rx) = crossbeam_channel::unbounded();
         let (result_tx, result_rx) = tokio::sync::oneshot::channel();
@@ -1184,7 +1189,7 @@ where
             .executor()
             .spawn_blocking_named("receipt-root", move || task_handle.run(receipts_len));
 
-        (receipt_tx, result_rx)
+        (Some(receipt_tx), Some(result_rx))
     }
 
     /// Executes transactions and collects senders, streaming receipts to a background task.
@@ -1201,7 +1206,7 @@ where
         mut executor: E,
         transaction_count: usize,
         transactions: impl Iterator<Item = Result<Tx, Err>>,
-        receipt_tx: &crossbeam_channel::Sender<IndexedReceipt<N::Receipt>>,
+        receipt_tx: Option<&crossbeam_channel::Sender<IndexedReceipt<N::Receipt>>>,
         executed_tx_index: &AtomicUsize,
         has_bal: bool,
     ) -> Result<(E, Vec<Address>), BlockExecutionError>
@@ -1265,7 +1270,9 @@ where
             executed_tx_index.store(senders.len(), Ordering::Relaxed);
 
             let current_len = executor.receipts().len();
-            if current_len > last_sent_len {
+            if let Some(receipt_tx) = receipt_tx &&
+                current_len > last_sent_len
+            {
                 last_sent_len = current_len;
                 // Send the latest receipt to the background task for incremental root computation.
                 if let Some(receipt) = executor.receipts().last() {

@@ -49,7 +49,7 @@ pub fn execute_block<'a, Evm, Tx, Err, DB, MakeDb>(
     ctx: ExecutionCtxFor<'a, Evm>,
     transaction_count: usize,
     txs: Receiver<(usize, Result<Tx, Err>)>,
-    receipt_tx: Sender<IndexedReceipt<ReceiptTy<Evm::Primitives>>>,
+    receipt_tx: Option<Sender<IndexedReceipt<ReceiptTy<Evm::Primitives>>>>,
 ) -> Result<
     (BlockExecutionOutput<ReceiptTy<Evm::Primitives>>, Vec<Address>, BlockAccessList),
     BalExecutionError,
@@ -91,7 +91,7 @@ fn execute_block_inner<'scope, Evm, Tx, Err, DB, MakeDb>(
     ctx: ExecutionCtxFor<'scope, Evm>,
     transaction_count: usize,
     txs: Receiver<(usize, Result<Tx, Err>)>,
-    receipt_tx: Sender<IndexedReceipt<ReceiptTy<Evm::Primitives>>>,
+    receipt_tx: Option<Sender<IndexedReceipt<ReceiptTy<Evm::Primitives>>>>,
     worker_count: usize,
 ) -> Result<
     (BlockExecutionOutput<ReceiptTy<Evm::Primitives>>, Vec<Address>, BlockAccessList),
@@ -155,7 +155,9 @@ where
             senders.push(output.signer);
 
             let current_len = canonical_executor.receipts().len();
-            if current_len > last_sent_len {
+            if let Some(receipt_tx) = &receipt_tx &&
+                current_len > last_sent_len
+            {
                 last_sent_len = current_len;
                 if let Some(receipt) = canonical_executor.receipts().last() {
                     let tx_index = current_len - 1;
@@ -508,7 +510,7 @@ mod tests {
             execution_ctx,
             transaction_count,
             tx_stream(txs),
-            receipt_tx,
+            Some(receipt_tx),
         )
         .map(|(output, _, built_bal)| (output, built_bal))
     }
@@ -1133,7 +1135,7 @@ mod tests {
             execution_ctx,
             1, // transaction_count = 1 → exactly one worker spawned
             tx_rx,
-            receipt_tx,
+            Some(receipt_tx),
         );
 
         assert!(

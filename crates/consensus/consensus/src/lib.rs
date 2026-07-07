@@ -72,6 +72,14 @@ pub mod test_utils;
 /// execution outcome.
 #[auto_impl::auto_impl(&, Arc)]
 pub trait FullConsensus<N: NodePrimitives>: Consensus<N::Block> {
+    /// Returns whether post-execution validation needs the receipt root and logs bloom.
+    ///
+    /// Consensus implementations that ignore receipt and bloom validation can return `false` so
+    /// callers avoid precomputing values that will not be used.
+    fn requires_receipt_root_bloom(&self) -> bool {
+        true
+    }
+
     /// Validate a block considering world state, i.e. things that can not be checked before
     /// execution.
     ///
