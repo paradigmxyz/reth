@@ -656,6 +656,11 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
 
             // MDBX writes
             let mdbx_start = Instant::now();
+            let state_write_config = StateWriteConfig {
+                write_receipts: !sf_ctx.write_receipts,
+                write_account_changesets: !sf_ctx.write_account_changesets,
+                write_storage_changesets: !sf_ctx.write_storage_changesets,
+            };
 
             // Collect all transaction hashes across all blocks, sort them, and write in batch
             if !self.cached_storage_settings().storage_v2 &&
@@ -711,11 +716,7 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
                             block: recovered_block.number(),
                         },
                         OriginalValuesKnown::No,
-                        StateWriteConfig {
-                            write_receipts: !sf_ctx.write_receipts,
-                            write_account_changesets: !sf_ctx.write_account_changesets,
-                            write_storage_changesets: !sf_ctx.write_storage_changesets,
-                        },
+                        state_write_config,
                     )?;
                     timings.write_state += start.elapsed();
                 }
