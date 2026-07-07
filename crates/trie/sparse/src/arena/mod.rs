@@ -1442,7 +1442,7 @@ impl ArenaParallelSparseTrie {
     fn record_arena_witness_node(
         arena: &NodeArena,
         idx: Index,
-        child_rlp_nodes: &HashMap<Index, RlpNode>,
+        child_rlp_nodes: &mut HashMap<Index, RlpNode>,
         witness: &mut B256Map<Bytes>,
     ) -> RlpNode {
         match &arena[idx] {
@@ -1462,8 +1462,7 @@ impl ArenaParallelSparseTrie {
                     let rlp_node = match child {
                         ArenaSparseNodeBranchChild::Blinded(rlp_node) => rlp_node.clone(),
                         ArenaSparseNodeBranchChild::Revealed(child_idx) => child_rlp_nodes
-                            .get(child_idx)
-                            .cloned()
+                            .remove(child_idx)
                             .expect("revealed child must be recorded before parent branch"),
                     };
                     stack.push(rlp_node);
@@ -1549,15 +1548,19 @@ impl ArenaParallelSparseTrie {
                                 &mut subtrie_rlp_nodes,
                                 witness,
                             );
-                            subtrie_rlp_nodes
-                                .get(&subtrie.root)
-                                .cloned()
-                                .expect("cursor traversal must record the subtrie root node")
+                            let root_rlp_node = subtrie_rlp_nodes
+                                .remove(&subtrie.root)
+                                .expect("cursor traversal must record the subtrie root node");
+                            debug_assert!(
+                                subtrie_rlp_nodes.is_empty(),
+                                "all subtrie child RLP nodes must be consumed"
+                            );
+                            root_rlp_node
                         }
                         _ => Self::record_arena_witness_node(
                             &self.upper_arena,
                             idx,
-                            &rlp_nodes,
+                            &mut rlp_nodes,
                             witness,
                         ),
                     };
