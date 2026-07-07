@@ -17,7 +17,8 @@ pub use set::SegmentSet;
 use std::{fmt::Debug, ops::RangeInclusive};
 use tracing::error;
 pub use user::{
-    AccountHistory, Bodies, Receipts as UserReceipts, ReceiptsByLogs, SenderRecovery,
+    AccountHistory, AccountStorage, AccountStoragePruneBatch, AccountStoragePruneSource,
+    AccountStoragePruneTarget, Bodies, Receipts as UserReceipts, ReceiptsByLogs, SenderRecovery,
     StorageHistory, TransactionLookup,
 };
 

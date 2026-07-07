@@ -1,5 +1,6 @@
 use crate::{
-    AccountReader, BlockHashReader, HashedPostStateProvider, StateProvider, StateRootProvider,
+    providers::storage_root_marker, AccountReader, BlockHashReader, HashedPostStateProvider,
+    StateProvider, StateRootProvider,
 };
 use alloy_primitives::{Address, BlockNumber, Bytes, StorageKey, StorageValue, B256};
 use reth_db_api::{cursor::DbDupCursorRO, tables, transaction::DbTx};
@@ -63,6 +64,16 @@ impl<'b, Provider: DBProvider> LatestStateProviderRef<'b, Provider> {
             .seek_by_key_subkey(hashed_address, hashed_slot)?
             .filter(|e| e.key == hashed_slot)
             .map(|e| e.value))
+    }
+
+    fn retained_storage_root_auto(&self, account: Address) -> ProviderResult<Option<B256>>
+    where
+        Provider: StorageSettingsCache,
+    {
+        let hashed_address = alloy_primitives::keccak256(account);
+        reth_trie_db::with_adapter!(self.0, |A| {
+            storage_root_marker::read::<_, A>(self.tx(), hashed_address)
+        })
     }
 }
 
@@ -152,6 +163,16 @@ impl<Provider: DBProvider + StorageSettingsCache> StorageRootProvider
         address: Address,
         hashed_storage: HashedStorage,
     ) -> ProviderResult<B256> {
+        if let Some(retained_root) = self.retained_storage_root_auto(address)? {
+            if hashed_storage.is_empty() {
+                return Ok(retained_root)
+            }
+
+            if !hashed_storage.wiped {
+                return Err(ProviderError::StoragePruned(address))
+            }
+        }
+
         reth_trie_db::with_adapter!(self.0, |A| {
             <DbStorageRoot<'_, _, A>>::overlay_root(self.tx(), address, hashed_storage)
                 .map_err(|err| ProviderError::Database(err.into()))
@@ -164,6 +185,10 @@ impl<Provider: DBProvider + StorageSettingsCache> StorageRootProvider
         slot: B256,
         hashed_storage: HashedStorage,
     ) -> ProviderResult<reth_trie::StorageProof> {
+        if self.retained_storage_root_auto(address)?.is_some() {
+            return Err(ProviderError::StoragePruned(address))
+        }
+
         reth_trie_db::with_adapter!(self.0, |A| {
             <DbStorageProof<'_, _, A>>::overlay_storage_proof(
                 self.tx(),
@@ -181,6 +206,10 @@ impl<Provider: DBProvider + StorageSettingsCache> StorageRootProvider
         slots: &[B256],
         hashed_storage: HashedStorage,
     ) -> ProviderResult<StorageMultiProof> {
+        if self.retained_storage_root_auto(address)?.is_some() {
+            return Err(ProviderError::StoragePruned(address))
+        }
+
         reth_trie_db::with_adapter!(self.0, |A| {
             <DbStorageProof<'_, _, A>>::overlay_storage_multiproof(
                 self.tx(),

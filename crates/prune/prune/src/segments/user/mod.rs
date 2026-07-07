@@ -1,4 +1,5 @@
 mod account_history;
+mod account_storage;
 mod bodies;
 mod history;
 mod receipts;
@@ -8,6 +9,9 @@ mod storage_history;
 mod transaction_lookup;
 
 pub use account_history::AccountHistory;
+pub use account_storage::{
+    AccountStorage, AccountStoragePruneBatch, AccountStoragePruneSource, AccountStoragePruneTarget,
+};
 pub use bodies::Bodies;
 pub use receipts::Receipts;
 pub use receipts_by_logs::ReceiptsByLogs;

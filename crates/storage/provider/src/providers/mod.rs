@@ -23,6 +23,8 @@ pub use state::{
     overlay::{OverlayBuilder, OverlayStateProvider, OverlayStateProviderFactory},
 };
 
+pub(crate) mod storage_root_marker;
+
 mod consistent_view;
 pub use consistent_view::{ConsistentDbView, ConsistentViewError};
 

@@ -4,7 +4,7 @@ use crate::{
         database::{chain::ChainStorage, metrics, DatabaseProviderMetrics},
         rocksdb::{PendingRocksDBBatches, RocksDBProvider, RocksDBWriteCtx},
         static_file::{StaticFileWriteCtx, StaticFileWriter},
-        NodeTypesForProvider, StaticFileProvider,
+        storage_root_marker, NodeTypesForProvider, StaticFileProvider,
     },
     to_range,
     traits::{
@@ -28,7 +28,7 @@ use alloy_eips::BlockHashOrNumber;
 use alloy_primitives::{
     keccak256,
     map::{hash_map, AddressSet, B256Map, HashMap},
-    Address, BlockHash, BlockNumber, StorageKey, StorageValue, TxHash, TxNumber, B256,
+    Address, BlockHash, BlockNumber, StorageKey, StorageValue, TxHash, TxNumber, B256, U256,
 };
 use itertools::Itertools;
 use parking_lot::RwLock;
@@ -60,16 +60,23 @@ use reth_prune_types::{
 use reth_stages_types::{StageCheckpoint, StageId};
 use reth_static_file_types::StaticFileSegment;
 use reth_storage_api::{
-    BlockBodyIndicesProvider, BlockBodyReader, MetadataProvider, MetadataWriter,
-    NodePrimitivesProvider, StateProvider, StateReader, StateWriteConfig, StorageChangeSetReader,
-    StoragePath, StorageSettingsCache, TryIntoHistoricalStateProvider, WriteStateInput,
+    AccountStoragePruner, BlockBodyIndicesProvider, BlockBodyReader, MetadataProvider,
+    MetadataWriter, NodePrimitivesProvider, PrunedAccountStorage, StateProvider, StateReader,
+    StateWriteConfig, StorageChangeSetReader, StoragePath, StorageSettingsCache,
+    TryIntoHistoricalStateProvider, WriteStateInput,
 };
 use reth_storage_errors::provider::{ProviderResult, StaticFileWriterError};
 use reth_trie::{
+    hashed_cursor::{HashedCursorFactory, HashedStorageCursor},
+    proof_v2::StorageProofCalculator,
+    trie_cursor::{noop::NoopStorageTrieCursor, TrieCursorFactory, TrieStorageCursor},
     updates::{StorageTrieUpdatesSorted, TrieUpdatesSorted},
     ComputedTrieData, HashedPostStateSorted,
 };
-use reth_trie_db::{ChangesetCache, DatabaseStorageTrieCursor, TrieTableAdapter};
+use reth_trie_db::{
+    ChangesetCache, DatabaseHashedCursorFactory, DatabaseStorageTrieCursor,
+    DatabaseTrieCursorFactory, StorageTrieEntryLike, TrieTableAdapter,
+};
 use revm::database::states::{
     PlainStateReverts, PlainStorageChangeset, PlainStorageRevert, StateChangeset,
 };
@@ -3088,6 +3095,139 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
 }
 
 impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> DatabaseProvider<TX, N> {
+    fn has_hashed_storage_entries(&self, hashed_address: B256) -> ProviderResult<bool> {
+        Ok(self
+            .tx_ref()
+            .cursor_dup_read::<tables::HashedStorages>()?
+            .seek_exact(hashed_address)?
+            .is_some())
+    }
+
+    fn storage_root_for_pruning<A: TrieTableAdapter>(
+        &self,
+        hashed_address: B256,
+        has_hashed_storage_entries: bool,
+    ) -> ProviderResult<B256> {
+        let retained_storage_root =
+            storage_root_marker::read::<_, A>(self.tx_ref(), hashed_address)?;
+        if let Some(storage_root) = retained_storage_root &&
+            !has_hashed_storage_entries
+        {
+            return Ok(storage_root)
+        }
+
+        let hashed_cursor_factory = DatabaseHashedCursorFactory::new(self.tx_ref());
+        let hashed_cursor = hashed_cursor_factory.hashed_storage_cursor(hashed_address)?;
+
+        if retained_storage_root.is_some() {
+            return Self::storage_root_from_cursors(
+                hashed_address,
+                StorageProofCalculator::new_storage(
+                    NoopStorageTrieCursor::default(),
+                    hashed_cursor,
+                ),
+            )
+        }
+
+        let trie_cursor_factory = DatabaseTrieCursorFactory::<_, A>::new(self.tx_ref());
+        let trie_cursor = trie_cursor_factory.storage_trie_cursor(hashed_address)?;
+
+        Self::storage_root_from_cursors(
+            hashed_address,
+            StorageProofCalculator::new_storage(trie_cursor, hashed_cursor),
+        )
+    }
+
+    fn storage_root_from_cursors<TC, HC>(
+        hashed_address: B256,
+        mut calculator: StorageProofCalculator<TC, HC>,
+    ) -> ProviderResult<B256>
+    where
+        TC: TrieStorageCursor,
+        HC: HashedStorageCursor<Value = U256>,
+    {
+        let root_node = calculator.storage_root_node(hashed_address)?;
+
+        Ok(calculator
+            .compute_root_hash(core::slice::from_ref(&root_node))?
+            .ok_or(ProviderError::InvalidStorageOutput)?)
+    }
+
+    fn delete_plain_storage_entries(&self, address: Address) -> ProviderResult<usize> {
+        let mut cursor = self.tx_ref().cursor_dup_write::<tables::PlainStorageState>()?;
+        let mut deleted_entries = 0;
+
+        if cursor.seek_exact(address)?.is_some() {
+            deleted_entries += 1;
+            while cursor.next_dup_val()?.is_some() {
+                deleted_entries += 1;
+            }
+        }
+
+        if cursor.seek_exact(address)?.is_some() {
+            cursor.delete_current_duplicates()?;
+        }
+
+        Ok(deleted_entries)
+    }
+
+    fn delete_hashed_storage_entries(&self, hashed_address: B256) -> ProviderResult<usize> {
+        let mut cursor = self.tx_ref().cursor_dup_write::<tables::HashedStorages>()?;
+        let mut deleted_entries = 0;
+
+        if cursor.seek_exact(hashed_address)?.is_some() {
+            deleted_entries += 1;
+            while cursor.next_dup_val()?.is_some() {
+                deleted_entries += 1;
+            }
+        }
+
+        if cursor.seek_exact(hashed_address)?.is_some() {
+            cursor.delete_current_duplicates()?;
+        }
+
+        Ok(deleted_entries)
+    }
+
+    fn replace_storage_trie_with_retained_root<A: TrieTableAdapter>(
+        &self,
+        hashed_address: B256,
+        storage_root: B256,
+    ) -> ProviderResult<usize> {
+        let empty_path = A::StorageSubKey::from(reth_trie::Nibbles::default());
+        let mut cursor = self.tx_ref().cursor_dup_write::<A::StorageTrieTable>()?;
+        let mut deleted_nodes = 0;
+        let mut existing_marker_root = None;
+
+        if let Some((_, entry)) = cursor.seek_exact(hashed_address)? {
+            let mut entry = Some(entry);
+            while let Some(storage_entry) = entry {
+                let is_marker = storage_entry.nibbles() == &empty_path &&
+                    storage_root_marker::is_node(storage_entry.node());
+                if is_marker {
+                    existing_marker_root = storage_entry.node().root_hash;
+                } else {
+                    deleted_nodes += 1;
+                }
+
+                entry = cursor.next_dup_val()?;
+            }
+        }
+
+        if existing_marker_root == Some(storage_root) && deleted_nodes == 0 {
+            return Ok(0)
+        }
+
+        if cursor.seek_exact(hashed_address)?.is_some() {
+            cursor.delete_current_duplicates()?;
+        }
+
+        let retained_root = storage_root_marker::node(storage_root);
+        cursor.upsert(hashed_address, &A::StorageValue::new(empty_path, retained_root))?;
+
+        Ok(deleted_nodes)
+    }
+
     fn write_account_trie_updates<A: TrieTableAdapter>(
         tx: &TX,
         trie_updates: &TrieUpdatesSorted,
@@ -3135,6 +3275,33 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> DatabaseProvider<TX, N> {
             cursor = db_storage_trie_cursor.cursor;
         }
         Ok(())
+    }
+}
+
+impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> AccountStoragePruner for DatabaseProvider<TX, N> {
+    #[instrument(level = "debug", target = "providers::db", skip_all, fields(%address))]
+    fn prune_account_storage(&self, address: Address) -> ProviderResult<PrunedAccountStorage> {
+        let hashed_address = keccak256(address);
+        let has_hashed_storage_entries = self.has_hashed_storage_entries(hashed_address)?;
+
+        let (storage_root, deleted_trie_nodes) = reth_trie_db::with_adapter!(self, |A| {
+            let root =
+                self.storage_root_for_pruning::<A>(hashed_address, has_hashed_storage_entries)?;
+            let deleted_trie_nodes =
+                self.replace_storage_trie_with_retained_root::<A>(hashed_address, root)?;
+            Ok::<_, ProviderError>((root, deleted_trie_nodes))
+        })?;
+
+        let deleted_storage_entries = self.delete_hashed_storage_entries(hashed_address)? +
+            self.delete_plain_storage_entries(address)?;
+
+        Ok(PrunedAccountStorage {
+            address,
+            hashed_address,
+            storage_root,
+            deleted_storage_entries,
+            deleted_trie_nodes,
+        })
     }
 }
 
@@ -3952,8 +4119,9 @@ mod tests {
         test_utils::{blocks::BlockchainTestData, create_test_provider_factory},
         BlockWriter,
     };
-    use alloy_consensus::Header;
+    use alloy_consensus::{Header, EMPTY_ROOT_HASH};
     use alloy_primitives::{
+        hex_literal::hex,
         map::{AddressMap, B256Map},
         U256,
     };
@@ -3962,12 +4130,14 @@ mod tests {
     use reth_ethereum_primitives::Receipt;
     use reth_execution_types::{AccountRevertInit, BlockExecutionOutput, BlockExecutionResult};
     use reth_primitives_traits::SealedBlock;
-    use reth_storage_api::MetadataWriter;
+    use reth_storage_api::{MetadataWriter, StorageRootProvider};
     use reth_testing_utils::generators::{self, random_block, BlockParams};
     use reth_trie::{
-        HashedPostState, KeccakKeyHasher, Nibbles, SortedTrieData, StoredNibbles,
+        prefix_set::PrefixSetMut, updates::StorageTrieUpdatesSorted, HashedPostState,
+        HashedStorage, KeccakKeyHasher, Nibbles, SortedTrieData, StorageRoot, StoredNibbles,
         StoredNibblesSubKey,
     };
+    use reth_trie_db::{DatabaseStorageRoot, StorageTrieEntryLike};
     use revm::{database::BundleState, state::AccountInfo};
     use std::{sync::mpsc, time::Duration};
 
@@ -4250,6 +4420,257 @@ mod tests {
 
         let provider = factory.provider().unwrap();
         assert!(provider.receipts_by_block(1.into()).unwrap().is_none());
+    }
+
+    fn storage_root_with_updates<'a, TX, A>(
+        tx: &'a TX,
+        hashed_address: B256,
+    ) -> (B256, StorageTrieUpdatesSorted)
+    where
+        TX: DbTx,
+        A: TrieTableAdapter,
+    {
+        let (root, _, updates) = StorageRoot::<
+            DatabaseTrieCursorFactory<&'a TX, A>,
+            DatabaseHashedCursorFactory<&'a TX>,
+        >::from_tx_hashed(tx, hashed_address)
+        .root_with_updates()
+        .unwrap();
+        (root, updates.into_sorted())
+    }
+
+    fn storage_root_with_all_prefixes<'a, TX, A>(tx: &'a TX, hashed_address: B256) -> B256
+    where
+        TX: DbTx,
+        A: TrieTableAdapter,
+    {
+        StorageRoot::<DatabaseTrieCursorFactory<&'a TX, A>, DatabaseHashedCursorFactory<&'a TX>>::from_tx_hashed(
+            tx,
+            hashed_address,
+        )
+        .with_prefix_set(PrefixSetMut::all().freeze())
+        .root()
+        .unwrap()
+    }
+
+    fn storage_root_from_hashed_storage<TX>(tx: &TX, hashed_address: B256) -> B256
+    where
+        TX: DbTx,
+    {
+        let hashed_cursor =
+            DatabaseHashedCursorFactory::new(tx).hashed_storage_cursor(hashed_address).unwrap();
+        let mut calculator =
+            StorageProofCalculator::new_storage(NoopStorageTrieCursor::default(), hashed_cursor);
+        let root_node = calculator.storage_root_node(hashed_address).unwrap();
+
+        calculator.compute_root_hash(core::slice::from_ref(&root_node)).unwrap().unwrap()
+    }
+
+    fn assert_retained_storage_root_marker<TX, A>(tx: &TX, hashed_address: B256, storage_root: B256)
+    where
+        TX: DbTx,
+        A: TrieTableAdapter,
+    {
+        let empty_path =
+            <A as reth_trie_db::TrieKeyAdapter>::StorageSubKey::from(Nibbles::default());
+        let mut cursor = tx.cursor_dup_read::<A::StorageTrieTable>().unwrap();
+        let entries = cursor
+            .walk_dup(Some(hashed_address), None)
+            .unwrap()
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].1.nibbles(), &empty_path);
+        assert_eq!(entries[0].1.node().root_hash, Some(storage_root));
+    }
+
+    fn assert_prune_account_storage_retains_root_commitment(storage_settings: StorageSettings) {
+        let factory = create_test_provider_factory();
+        factory.set_storage_settings_cache(storage_settings);
+
+        let address = Address::with_last_byte(1);
+        let hashed_address = keccak256(address);
+        let account = Account {
+            nonce: 1,
+            balance: U256::from(42),
+            bytecode_hash: Some(B256::with_last_byte(9)),
+        };
+        let slots = [
+            (
+                B256::with_last_byte(1),
+                B256::new(hex!("30af561000000000000000000000000000000000000000000000000000000000")),
+                U256::from(10),
+            ),
+            (
+                B256::with_last_byte(2),
+                B256::new(hex!("30af569000000000000000000000000000000000000000000000000000000000")),
+                U256::from(20),
+            ),
+            (
+                B256::with_last_byte(3),
+                B256::new(hex!("30af650000000000000000000000000000000000000000000000000000000000")),
+                U256::from(30),
+            ),
+            (
+                B256::with_last_byte(4),
+                B256::new(hex!("30af6f0000000000000000000000000000000000000000000000000000000000")),
+                U256::from(40),
+            ),
+            (
+                B256::with_last_byte(5),
+                B256::new(hex!("30af8f0000000000000000000000000000000000000000000000000000000000")),
+                U256::from(50),
+            ),
+            (
+                B256::with_last_byte(6),
+                B256::new(hex!("3100000000000000000000000000000000000000000000000000000000000000")),
+                U256::from(60),
+            ),
+        ];
+
+        let provider_rw = factory.provider_rw().unwrap();
+        provider_rw.tx_ref().put::<tables::PlainAccountState>(address, account).unwrap();
+        provider_rw.tx_ref().put::<tables::HashedAccounts>(hashed_address, account).unwrap();
+
+        for (slot, hashed_slot, value) in slots {
+            provider_rw
+                .tx_ref()
+                .put::<tables::PlainStorageState>(address, StorageEntry { key: slot, value })
+                .unwrap();
+            provider_rw
+                .tx_ref()
+                .put::<tables::HashedStorages>(
+                    hashed_address,
+                    StorageEntry { key: hashed_slot, value },
+                )
+                .unwrap();
+        }
+
+        let (expected_root, storage_updates) = reth_trie_db::with_adapter!(provider_rw, |A| {
+            storage_root_with_updates::<_, A>(provider_rw.tx_ref(), hashed_address)
+        });
+        provider_rw
+            .write_storage_trie_updates_sorted(core::iter::once((
+                &hashed_address,
+                &storage_updates,
+            )))
+            .unwrap();
+
+        let trie_entries_before = reth_trie_db::with_adapter!(provider_rw, |A| {
+            let mut cursor = provider_rw
+                .tx_ref()
+                .cursor_dup_read::<<A as TrieTableAdapter>::StorageTrieTable>()
+                .unwrap();
+            cursor
+                .walk_dup(Some(hashed_address), None)
+                .unwrap()
+                .collect::<Result<Vec<_>, _>>()
+                .unwrap()
+                .len()
+        });
+        assert!(trie_entries_before > 0);
+
+        let pruned = provider_rw.prune_account_storage(address).unwrap();
+
+        assert_eq!(pruned.address, address);
+        assert_eq!(pruned.hashed_address, hashed_address);
+        assert_eq!(pruned.storage_root, expected_root);
+        assert_eq!(pruned.deleted_storage_entries, slots.len() * 2);
+        assert_eq!(pruned.deleted_trie_nodes, trie_entries_before);
+
+        assert_eq!(
+            provider_rw.tx_ref().get::<tables::PlainAccountState>(address).unwrap(),
+            Some(account)
+        );
+        assert_eq!(
+            provider_rw.tx_ref().get::<tables::HashedAccounts>(hashed_address).unwrap(),
+            Some(account)
+        );
+
+        let mut plain_storage =
+            provider_rw.tx_ref().cursor_dup_read::<tables::PlainStorageState>().unwrap();
+        assert!(plain_storage.seek_exact(address).unwrap().is_none());
+
+        let mut hashed_storage =
+            provider_rw.tx_ref().cursor_dup_read::<tables::HashedStorages>().unwrap();
+        assert!(hashed_storage.seek_exact(hashed_address).unwrap().is_none());
+
+        reth_trie_db::with_adapter!(provider_rw, |A| {
+            assert_retained_storage_root_marker::<_, A>(
+                provider_rw.tx_ref(),
+                hashed_address,
+                expected_root,
+            );
+        });
+
+        {
+            let latest = provider_rw.latest();
+            assert_eq!(latest.storage(address, slots[0].0).unwrap(), None);
+            assert_eq!(
+                latest.storage_root(address, HashedStorage::default()).unwrap(),
+                expected_root
+            );
+            assert_eq!(
+                latest.storage_root(address, HashedStorage::new(true)).unwrap(),
+                EMPTY_ROOT_HASH
+            );
+        }
+
+        let wiped_root = reth_trie_db::with_adapter!(provider_rw, |A| {
+            storage_root_with_all_prefixes::<_, A>(provider_rw.tx_ref(), hashed_address)
+        });
+        assert_eq!(wiped_root, EMPTY_ROOT_HASH);
+
+        let idempotent = provider_rw.prune_account_storage(address).unwrap();
+        assert_eq!(idempotent.storage_root, expected_root);
+        assert_eq!(idempotent.deleted_storage_entries, 0);
+        assert_eq!(idempotent.deleted_trie_nodes, 0);
+
+        let new_slot = B256::with_last_byte(7);
+        let new_hashed_slot = keccak256(new_slot);
+        provider_rw
+            .tx_ref()
+            .put::<tables::PlainStorageState>(
+                address,
+                StorageEntry { key: new_slot, value: U256::from(70) },
+            )
+            .unwrap();
+        provider_rw
+            .tx_ref()
+            .put::<tables::HashedStorages>(
+                hashed_address,
+                StorageEntry { key: new_hashed_slot, value: U256::from(70) },
+            )
+            .unwrap();
+
+        assert_eq!(provider_rw.latest().storage(address, new_slot).unwrap(), Some(U256::from(70)));
+
+        let expected_refreshed_root =
+            storage_root_from_hashed_storage(provider_rw.tx_ref(), hashed_address);
+        assert_ne!(expected_refreshed_root, expected_root);
+
+        let refreshed = provider_rw.prune_account_storage(address).unwrap();
+        assert_eq!(refreshed.storage_root, expected_refreshed_root);
+        assert_eq!(refreshed.deleted_storage_entries, 2);
+        assert_eq!(refreshed.deleted_trie_nodes, 0);
+
+        reth_trie_db::with_adapter!(provider_rw, |A| {
+            assert_retained_storage_root_marker::<_, A>(
+                provider_rw.tx_ref(),
+                hashed_address,
+                expected_refreshed_root,
+            );
+        });
+    }
+
+    #[test]
+    fn prune_account_storage_retains_root_commitment_legacy() {
+        assert_prune_account_storage_retains_root_commitment(StorageSettings::v1());
+    }
+
+    #[test]
+    fn prune_account_storage_retains_root_commitment_packed() {
+        assert_prune_account_storage_retains_root_commitment(StorageSettings::v2());
     }
 
     #[test]

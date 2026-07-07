@@ -112,6 +112,15 @@ impl<Provider, S> Pruner<Provider, S> {
         self.minimum_pruning_distance = Some(distance);
         self
     }
+
+    /// Adds a pruning segment to this pruner.
+    pub fn segment<Seg>(mut self, segment: Seg) -> Self
+    where
+        Seg: Segment<Provider> + 'static,
+    {
+        self.segments.push(Box::new(segment));
+        self
+    }
 }
 
 impl<Provider, S> Pruner<Provider, S>

@@ -7,6 +7,28 @@ use core::ops::RangeInclusive;
 use reth_primitives_traits::StorageEntry;
 use reth_storage_errors::provider::ProviderResult;
 
+/// Result of pruning one account's storage body while retaining its storage root commitment.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PrunedAccountStorage {
+    /// Plain account address whose storage was pruned.
+    pub address: Address,
+    /// Hashed account address used by trie and hashed storage tables.
+    pub hashed_address: B256,
+    /// Retained storage root for the pruned storage trie.
+    pub storage_root: B256,
+    /// Number of storage table entries deleted.
+    pub deleted_storage_entries: usize,
+    /// Number of storage trie nodes deleted, excluding the retained root marker.
+    pub deleted_trie_nodes: usize,
+}
+
+/// Prunes account storage bodies while preserving trie commitments.
+#[auto_impl::auto_impl(&, Arc, Box)]
+pub trait AccountStoragePruner: Send {
+    /// Prune all storage for `address`, retaining the account's storage root commitment.
+    fn prune_account_storage(&self, address: Address) -> ProviderResult<PrunedAccountStorage>;
+}
+
 /// Storage reader
 #[auto_impl::auto_impl(&, Arc, Box)]
 pub trait StorageReader: Send {

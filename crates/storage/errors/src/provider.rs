@@ -107,6 +107,9 @@ pub enum ProviderError {
     /// State is not available for the given block number because it is pruned.
     #[error("state at block #{_0} is pruned")]
     StateAtBlockPruned(BlockNumber),
+    /// Storage for the given account was pruned and individual slot values are unavailable.
+    #[error("storage for account {_0} is pruned")]
+    StoragePruned(Address),
     /// State is not available because the block has not been executed yet.
     #[error("state at block #{requested} is not available, block has not been executed yet (latest executed: #{executed})")]
     BlockNotExecuted {

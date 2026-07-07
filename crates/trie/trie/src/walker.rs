@@ -290,7 +290,7 @@ impl<C: TrieCursor, K: AsRef<AddedRemovedKeys>> TrieWalker<C, K> {
         self.metrics.inc_branch_nodes_seeked();
 
         if let Some((_, node)) = &entry {
-            assert!(!node.state_mask.is_empty());
+            assert!(!node.state_mask.is_empty() || node.root_hash.is_some());
         }
 
         Ok(entry)

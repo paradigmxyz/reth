@@ -738,6 +738,20 @@ where
 
         // short circuit on empty storage
         if hashed_storage_cursor.is_storage_empty()? {
+            trie_cursor.set_hashed_address(hashed_address);
+            if !prefix_set.all() &&
+                let Some((path, node)) = trie_cursor.seek_exact(Nibbles::default())? &&
+                path.is_empty() &&
+                let Some(storage_root) = node.root_hash
+            {
+                Span::current().record("storage_root", format!("{storage_root:?}"));
+                return Ok(StorageRootProgress::Complete(
+                    storage_root,
+                    0,
+                    StorageTrieUpdates::default(),
+                ))
+            }
+
             Span::current().record("storage_root", format!("{EMPTY_ROOT_HASH:?}"));
             return Ok(StorageRootProgress::Complete(
                 EMPTY_ROOT_HASH,
