@@ -1437,64 +1437,6 @@ impl ArenaParallelSparseTrie {
         witness.entry(keccak256(encoded)).or_insert_with(|| Bytes::from(encoded.to_vec()));
     }
 
-    /// Records the node at `idx` using already-recorded child `RlpNode`s, returning the `RlpNode`
-    /// reference for this node.
-    fn record_arena_witness_node(
-        arena: &NodeArena,
-        idx: Index,
-        child_rlp_nodes: &mut HashMap<Index, RlpNode>,
-        witness: &mut B256Map<Bytes>,
-    ) -> RlpNode {
-        match &arena[idx] {
-            ArenaSparseNode::EmptyRoot => {
-                Self::record_witness_node(witness, &[0x80]);
-                RlpNode::word_rlp(&EMPTY_ROOT_HASH)
-            }
-            ArenaSparseNode::Leaf { key, value, .. } => {
-                let mut encoded = Vec::new();
-                let rlp_node = LeafNodeRef::new(key, value).rlp(&mut encoded);
-                Self::record_witness_node(witness, &encoded);
-                rlp_node
-            }
-            ArenaSparseNode::Branch(branch) => {
-                let mut stack = Vec::with_capacity(branch.children.len());
-                for (_, child) in branch.child_iter() {
-                    let rlp_node = match child {
-                        ArenaSparseNodeBranchChild::Blinded(rlp_node) => rlp_node.clone(),
-                        ArenaSparseNodeBranchChild::Revealed(child_idx) => child_rlp_nodes
-                            .remove(child_idx)
-                            .expect("revealed child must be recorded before parent branch"),
-                    };
-                    stack.push(rlp_node);
-                }
-
-                let mut branch_rlp = Vec::new();
-                let branch_rlp_node =
-                    BranchNodeRef::new(&stack, branch.state_mask).rlp(&mut branch_rlp);
-                // A branch with a short key is encoded as an extension node pointing to the
-                // branch. Witness consumers need both the extension and the branch node.
-                Self::record_witness_node(witness, &branch_rlp);
-
-                if branch.short_key.is_empty() {
-                    branch_rlp_node
-                } else {
-                    let mut extension_rlp = Vec::new();
-                    let extension_rlp_node =
-                        ExtensionNodeRef::new(&branch.short_key, branch_rlp_node.as_slice())
-                            .rlp(&mut extension_rlp);
-                    Self::record_witness_node(witness, &extension_rlp);
-                    extension_rlp_node
-                }
-            }
-            ArenaSparseNode::Subtrie(_) => {
-                unreachable!("subtries are recorded separately before their upper parent branch")
-            }
-            ArenaSparseNode::TakenSubtrie => {
-                unreachable!("TakenSubtrie should not be present outside of active operations")
-            }
-        }
-    }
-
     /// Records all revealed nodes in an arena using cursor post-order traversal.
     fn record_witness_nodes(
         arena: &NodeArena,
@@ -1518,6 +1460,53 @@ impl ArenaParallelSparseTrie {
                 NextResult::Branch | NextResult::NonBranch => {
                     let idx = cursor.head().expect("cursor is non-empty").index;
                     let rlp_node = match &arena[idx] {
+                        ArenaSparseNode::EmptyRoot => {
+                            Self::record_witness_node(witness, &[0x80]);
+                            RlpNode::word_rlp(&EMPTY_ROOT_HASH)
+                        }
+                        ArenaSparseNode::Leaf { key, value, .. } => {
+                            let mut encoded = Vec::new();
+                            let rlp_node = LeafNodeRef::new(key, value).rlp(&mut encoded);
+                            Self::record_witness_node(witness, &encoded);
+                            rlp_node
+                        }
+                        ArenaSparseNode::Branch(branch) => {
+                            let mut stack = Vec::with_capacity(branch.children.len());
+                            for (_, child) in branch.child_iter() {
+                                let rlp_node = match child {
+                                    ArenaSparseNodeBranchChild::Blinded(rlp_node) => {
+                                        rlp_node.clone()
+                                    }
+                                    ArenaSparseNodeBranchChild::Revealed(child_idx) => {
+                                        rlp_nodes.remove(child_idx).expect(
+                                            "revealed child must be recorded before parent branch",
+                                        )
+                                    }
+                                };
+                                stack.push(rlp_node);
+                            }
+
+                            let mut branch_rlp = Vec::new();
+                            let branch_rlp_node =
+                                BranchNodeRef::new(&stack, branch.state_mask).rlp(&mut branch_rlp);
+                            // A branch with a short key is encoded as an extension node pointing to
+                            // the branch. Witness consumers need both the extension and the branch
+                            // node.
+                            Self::record_witness_node(witness, &branch_rlp);
+
+                            if branch.short_key.is_empty() {
+                                branch_rlp_node
+                            } else {
+                                let mut extension_rlp = Vec::new();
+                                let extension_rlp_node = ExtensionNodeRef::new(
+                                    &branch.short_key,
+                                    branch_rlp_node.as_slice(),
+                                )
+                                .rlp(&mut extension_rlp);
+                                Self::record_witness_node(witness, &extension_rlp);
+                                extension_rlp_node
+                            }
+                        }
                         ArenaSparseNode::Subtrie(subtrie) => {
                             let mut subtrie_cursor = ArenaCursor::default();
                             let mut subtrie_rlp_nodes = HashMap::default();
@@ -1537,7 +1526,11 @@ impl ArenaParallelSparseTrie {
                             );
                             root_rlp_node
                         }
-                        _ => Self::record_arena_witness_node(arena, idx, rlp_nodes, witness),
+                        ArenaSparseNode::TakenSubtrie => {
+                            unreachable!(
+                                "TakenSubtrie should not be present outside of active operations"
+                            )
+                        }
                     };
                     rlp_nodes.insert(idx, rlp_node);
                 }
