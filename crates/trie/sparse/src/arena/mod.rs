@@ -1319,7 +1319,7 @@ impl ArenaParallelSparseTrie {
 
     /// Records all revealed nodes in an arena using cursor post-order traversal.
     fn record_witness_nodes(
-        arena: &NodeArena,
+        arena: &mut NodeArena,
         root: Index,
         cursor: &mut ArenaCursor,
         rlp_nodes: &mut HashMap<Index, RlpNode>,
@@ -1339,7 +1339,7 @@ impl ArenaParallelSparseTrie {
                 NextResult::Done => break,
                 NextResult::Branch | NextResult::NonBranch => {
                     let idx = cursor.head().expect("cursor is non-empty").index;
-                    let rlp_node = match &arena[idx] {
+                    let rlp_node = match &mut arena[idx] {
                         ArenaSparseNode::EmptyRoot => {
                             Self::record_witness_node(witness, &[0x80]);
                             RlpNode::word_rlp(&EMPTY_ROOT_HASH)
@@ -1388,12 +1388,11 @@ impl ArenaParallelSparseTrie {
                             }
                         }
                         ArenaSparseNode::Subtrie(subtrie) => {
-                            let mut subtrie_cursor = ArenaCursor::default();
                             let mut subtrie_rlp_nodes = HashMap::default();
                             Self::record_witness_nodes(
-                                &subtrie.arena,
+                                &mut subtrie.arena,
                                 subtrie.root,
-                                &mut subtrie_cursor,
+                                &mut subtrie.buffers.cursor,
                                 &mut subtrie_rlp_nodes,
                                 witness,
                             );
@@ -2704,13 +2703,12 @@ impl SparseTrie for ArenaParallelSparseTrie {
         Self::get_leaf_value_in_arena(&self.upper_arena, self.root, full_path, 0)
     }
 
-    fn witness(&self, witness: &mut B256Map<Bytes>) {
-        let mut cursor = ArenaCursor::default();
+    fn witness(&mut self, witness: &mut B256Map<Bytes>) {
         let mut rlp_nodes = HashMap::default();
         Self::record_witness_nodes(
-            &self.upper_arena,
+            &mut self.upper_arena,
             self.root,
-            &mut cursor,
+            &mut self.buffers.cursor,
             &mut rlp_nodes,
             witness,
         );
