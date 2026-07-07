@@ -389,18 +389,20 @@ impl OperationMetrics {
     ///
     /// The duration it took to execute the closure is recorded only if the provided `value_size` is
     /// larger than [`LARGE_VALUE_THRESHOLD_BYTES`].
+    #[inline(always)]
     pub(crate) fn record<R>(&self, value_size: Option<usize>, f: impl FnOnce() -> R) -> R {
         self.calls_total.increment(1);
 
         // Record duration only for large values to prevent the performance hit of clock syscall
         // on small operations
-        if value_size.is_some_and(|size| size > LARGE_VALUE_THRESHOLD_BYTES) {
-            let start = Instant::now();
-            let result = f();
-            self.large_value_duration_seconds.record(start.elapsed());
-            result
-        } else {
-            f()
+        match value_size {
+            Some(size) if size > LARGE_VALUE_THRESHOLD_BYTES => {
+                let start = Instant::now();
+                let result = f();
+                self.large_value_duration_seconds.record(start.elapsed());
+                result
+            }
+            _ => f(),
         }
     }
 }
