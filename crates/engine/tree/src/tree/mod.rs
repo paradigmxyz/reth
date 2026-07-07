@@ -119,6 +119,11 @@ impl<N: NodePrimitives, P> StateProviderBuilder<N, P> {
     ) -> Self {
         Self { provider_factory, historical, overlay }
     }
+
+    /// Returns a reference to the underlying provider factory.
+    pub const fn provider_factory(&self) -> &P {
+        &self.provider_factory
+    }
 }
 
 impl<N: NodePrimitives, P> StateProviderBuilder<N, P>
