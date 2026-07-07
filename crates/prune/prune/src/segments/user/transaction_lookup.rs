@@ -4,7 +4,6 @@ use crate::{
     PrunerError,
 };
 use alloy_consensus::transaction::TxHashRef;
-use rayon::prelude::*;
 use reth_db_api::{tables, transaction::DbTxMut};
 use reth_primitives_traits::SignedTransaction;
 use reth_provider::{
@@ -132,10 +131,10 @@ where
                 .unwrap();
         let tx_range_end = *tx_range.end();
 
-        // Retrieve transactions in the range and collect their hashes in parallel.
+        // Retrieve transactions in the range and collect their hashes.
         let mut hashes = provider
             .transactions_by_tx_range(tx_range.clone())?
-            .into_par_iter()
+            .into_iter()
             .map(|transaction| *transaction.tx_hash())
             .collect::<Vec<_>>();
 
@@ -236,10 +235,10 @@ impl TransactionLookup {
             .map_or(end, |limited| limited.min(end));
         let tx_range = start..=tx_range_end;
 
-        // Retrieve transactions in the range and collect their hashes in parallel.
+        // Retrieve transactions in the range and collect their hashes.
         let hashes: Vec<_> = provider
             .transactions_by_tx_range(tx_range.clone())?
-            .into_par_iter()
+            .into_iter()
             .map(|transaction| *transaction.tx_hash())
             .collect();
 

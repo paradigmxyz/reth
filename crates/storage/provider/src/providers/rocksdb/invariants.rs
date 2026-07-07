@@ -8,7 +8,6 @@ use super::RocksDBProvider;
 use crate::StaticFileProviderFactory;
 use alloy_consensus::transaction::TxHashRef;
 use alloy_primitives::BlockNumber;
-use rayon::prelude::*;
 use reth_chainspec::{ChainSpecProvider, EthChainSpec};
 use reth_db::models::{storage_sharded_key::StorageShardedKey, ShardedKey};
 use reth_db_api::tables;
@@ -227,10 +226,10 @@ impl RocksDBProvider {
             return Ok(());
         }
 
-        // Fetch transactions in the range and read their hashes in parallel.
+        // Fetch transactions in the range and read their hashes.
         let hashes: Vec<_> = provider
             .transactions_by_tx_range(tx_range.clone())?
-            .into_par_iter()
+            .into_iter()
             .map(|tx| *tx.tx_hash())
             .collect();
 
