@@ -6,16 +6,16 @@
 
 use super::RocksDBProvider;
 use crate::StaticFileProviderFactory;
-use alloy_consensus::transaction::TxHashRef;
 use alloy_primitives::BlockNumber;
 use reth_chainspec::{ChainSpecProvider, EthChainSpec};
 use reth_db::models::{storage_sharded_key::StorageShardedKey, ShardedKey};
-use reth_db_api::tables;
+use reth_db_api::{table::Value, tables};
+use reth_primitives_traits::NodePrimitives;
 use reth_stages_types::StageId;
 use reth_static_file_types::StaticFileSegment;
 use reth_storage_api::{
     BlockBodyIndicesProvider, ChangeSetReader, DBProvider, StageCheckpointReader,
-    StorageChangeSetReader, StorageSettingsCache, TransactionsProvider,
+    StorageChangeSetReader, StorageSettingsCache, TransactionsProviderExt,
 };
 use reth_storage_errors::provider::ProviderResult;
 use std::collections::HashSet;
@@ -54,12 +54,13 @@ impl RocksDBProvider {
         Provider: DBProvider
             + StageCheckpointReader
             + StorageSettingsCache
-            + StaticFileProviderFactory
             + BlockBodyIndicesProvider
             + StorageChangeSetReader
             + ChangeSetReader
-            + TransactionsProvider
-            + ChainSpecProvider,
+            + ChainSpecProvider
+            + StaticFileProviderFactory<
+                Primitives: NodePrimitives<SignedTx: Value, Receipt: Value, BlockHeader: Value>,
+            >,
     {
         let mut unwind_target: Option<BlockNumber> = None;
 
@@ -100,9 +101,10 @@ impl RocksDBProvider {
     where
         Provider: DBProvider
             + StageCheckpointReader
-            + StaticFileProviderFactory
             + BlockBodyIndicesProvider
-            + TransactionsProvider,
+            + StaticFileProviderFactory<
+                Primitives: NodePrimitives<SignedTx: Value, Receipt: Value, BlockHeader: Value>,
+            >,
     {
         let checkpoint = provider
             .get_stage_checkpoint(StageId::TransactionLookup)?
@@ -204,8 +206,8 @@ impl RocksDBProvider {
 
     /// Prunes `TransactionHashNumbers` entries for transactions in the given range.
     ///
-    /// This fetches transactions from the provider, reads their hashes in parallel,
-    /// and deletes the corresponding entries from `RocksDB` by key. This approach is more
+    /// This fetches transaction hashes from the provider and deletes the corresponding
+    /// entries from `RocksDB` by key. This approach is more
     /// scalable than iterating all rows because it only processes the transactions that
     /// need to be pruned.
     ///
@@ -220,18 +222,17 @@ impl RocksDBProvider {
         tx_range: std::ops::RangeInclusive<u64>,
     ) -> ProviderResult<()>
     where
-        Provider: TransactionsProvider,
+        Provider: StaticFileProviderFactory<
+            Primitives: NodePrimitives<SignedTx: Value, Receipt: Value, BlockHeader: Value>,
+        >,
     {
         if tx_range.is_empty() {
             return Ok(());
         }
 
-        // Fetch transactions in the range and read their hashes.
-        let hashes: Vec<_> = provider
-            .transactions_by_tx_range(tx_range.clone())?
-            .into_iter()
-            .map(|tx| *tx.tx_hash())
-            .collect();
+        let hashes = provider
+            .static_file_provider()
+            .transaction_hashes_by_range(*tx_range.start()..tx_range.end().saturating_add(1))?;
 
         if !hashes.is_empty() {
             tracing::info!(
@@ -243,7 +244,7 @@ impl RocksDBProvider {
             );
 
             let mut batch = self.batch();
-            for hash in hashes {
+            for (hash, _) in hashes {
                 batch.delete::<tables::TransactionHashNumbers>(hash)?;
             }
             batch.commit()?;

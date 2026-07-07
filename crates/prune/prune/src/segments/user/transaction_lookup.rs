@@ -3,12 +3,12 @@ use crate::{
     segments::{PruneInput, Segment, SegmentOutput},
     PrunerError,
 };
-use alloy_consensus::transaction::TxHashRef;
-use reth_db_api::{tables, transaction::DbTxMut};
-use reth_primitives_traits::SignedTransaction;
+use alloy_primitives::TxNumber;
+use reth_db_api::{table::Value, tables, transaction::DbTxMut};
+use reth_primitives_traits::{NodePrimitives, SignedTransaction};
 use reth_provider::{
     BlockReader, DBProvider, PruneCheckpointReader, RocksDBProviderFactory,
-    StaticFileProviderFactory,
+    StaticFileProviderFactory, TransactionsProviderExt,
 };
 use reth_prune_types::{
     PruneCheckpoint, PruneMode, PruneProgress, PrunePurpose, PruneSegment, SegmentOutputCheckpoint,
@@ -33,9 +33,11 @@ where
     Provider: DBProvider<Tx: DbTxMut>
         + BlockReader<Transaction: SignedTransaction>
         + PruneCheckpointReader
-        + StaticFileProviderFactory
         + StorageSettingsCache
-        + RocksDBProviderFactory,
+        + RocksDBProviderFactory
+        + StaticFileProviderFactory<
+            Primitives: NodePrimitives<SignedTx: Value, Receipt: Value, BlockHeader: Value>,
+        >,
 {
     fn segment(&self) -> PruneSegment {
         PruneSegment::TransactionLookup
@@ -131,11 +133,16 @@ where
                 .unwrap();
         let tx_range_end = *tx_range.end();
 
-        // Retrieve transactions in the range and collect their hashes.
         let mut hashes = provider
-            .transactions_by_tx_range(tx_range.clone())?
+            .static_file_provider()
+            .transaction_hashes_by_range(
+                *tx_range.start()..
+                    tx_range_end
+                        .checked_add(1)
+                        .ok_or(PrunerError::InconsistentData("Transaction range end overflow"))?,
+            )?
             .into_iter()
-            .map(|transaction| *transaction.tx_hash())
+            .map(|(hash, _)| hash)
             .collect::<Vec<_>>();
 
         // Sort hashes to enable efficient cursor traversal through the TransactionHashNumbers
@@ -199,14 +206,16 @@ impl TransactionLookup {
         &self,
         provider: &Provider,
         input: PruneInput,
-        start: alloy_primitives::TxNumber,
-        end: alloy_primitives::TxNumber,
+        start: TxNumber,
+        end: TxNumber,
     ) -> Result<SegmentOutput, PrunerError>
     where
         Provider: DBProvider
             + BlockReader<Transaction: SignedTransaction>
-            + StaticFileProviderFactory
-            + RocksDBProviderFactory,
+            + RocksDBProviderFactory
+            + StaticFileProviderFactory<
+                Primitives: NodePrimitives<SignedTx: Value, Receipt: Value, BlockHeader: Value>,
+            >,
     {
         // For PruneMode::Full, clear the entire RocksDB table in one operation
         if self.mode.is_full() {
@@ -235,12 +244,12 @@ impl TransactionLookup {
             .map_or(end, |limited| limited.min(end));
         let tx_range = start..=tx_range_end;
 
-        // Retrieve transactions in the range and collect their hashes.
-        let hashes: Vec<_> = provider
-            .transactions_by_tx_range(tx_range.clone())?
-            .into_iter()
-            .map(|transaction| *transaction.tx_hash())
-            .collect();
+        let hashes = provider.static_file_provider().transaction_hashes_by_range(
+            *tx_range.start()..
+                tx_range_end
+                    .checked_add(1)
+                    .ok_or(PrunerError::InconsistentData("Transaction range end overflow"))?,
+        )?;
 
         // Number of transactions retrieved from the database should match the tx range count
         let tx_count = tx_range.count();
@@ -255,7 +264,7 @@ impl TransactionLookup {
         // Delete transaction hash -> number mappings from RocksDB
         let mut deleted = 0usize;
         provider.with_rocksdb_batch(|mut batch| {
-            for hash in &hashes {
+            for (hash, _) in &hashes {
                 if limiter.is_limit_reached() {
                     break;
                 }
