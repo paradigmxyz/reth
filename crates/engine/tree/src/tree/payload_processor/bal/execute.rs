@@ -243,10 +243,33 @@ impl AbortGuard {
 #[derive(Debug)]
 struct BlockGasTracker {
     block_gas_limit: u64,
-    enable_amsterdam_eip8037: bool,
-    tx_gas_limit_cap: Option<u64>,
+    gas_mode: BlockGasMode,
+    tx_gas_limit_cap: u64,
     cumulative_tx_gas_used: u64,
     block_regular_gas_used: u64,
+}
+
+#[derive(Debug, Clone, Copy)]
+enum BlockGasMode {
+    Amsterdam,
+    Cumulative,
+}
+
+impl BlockGasMode {
+    const fn new(enable_amsterdam_eip8037: bool) -> Self {
+        if enable_amsterdam_eip8037 {
+            Self::Amsterdam
+        } else {
+            Self::Cumulative
+        }
+    }
+
+    const fn block_gas_used(self, cumulative: u64, regular: u64) -> u64 {
+        match self {
+            Self::Amsterdam => regular,
+            Self::Cumulative => cumulative,
+        }
+    }
 }
 
 impl BlockGasTracker {
@@ -257,22 +280,21 @@ impl BlockGasTracker {
     ) -> Self {
         Self {
             block_gas_limit,
-            enable_amsterdam_eip8037,
-            tx_gas_limit_cap,
+            gas_mode: BlockGasMode::new(enable_amsterdam_eip8037),
+            tx_gas_limit_cap: match tx_gas_limit_cap {
+                Some(cap) => cap,
+                None => u64::MAX,
+            },
             cumulative_tx_gas_used: 0,
             block_regular_gas_used: 0,
         }
     }
 
     fn validate_tx_limit(&self, tx_gas_limit: u64) -> Result<(), BlockExecutionError> {
-        let block_gas_used = if self.enable_amsterdam_eip8037 {
-            self.block_regular_gas_used
-        } else {
-            self.cumulative_tx_gas_used
-        };
+        let block_gas_used =
+            self.gas_mode.block_gas_used(self.cumulative_tx_gas_used, self.block_regular_gas_used);
         let block_available_gas = self.block_gas_limit.saturating_sub(block_gas_used);
-        let tx_min_gas_limit =
-            self.tx_gas_limit_cap.map_or(tx_gas_limit, |cap| tx_gas_limit.min(cap));
+        let tx_min_gas_limit = tx_gas_limit.min(self.tx_gas_limit_cap);
 
         if tx_min_gas_limit > block_available_gas {
             return Err(BlockValidationError::TransactionGasLimitMoreThanAvailableBlockGas {
