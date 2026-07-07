@@ -390,6 +390,16 @@ impl<C: TrieStorageCursor> TrieStorageCursor for InMemoryTrieCursor<'_, C> {
         self.in_memory_cursor = in_memory_cursor;
         self.db_cursor_state = DbCursorState::new(cursor_wiped);
     }
+
+    fn root_hash_if_unchanged(&mut self) -> Result<Option<B256>, DatabaseError> {
+        if self.in_memory_cursor.is_empty()
+            && !matches!(self.db_cursor_state, DbCursorState::Wiped)
+        {
+            return self.cursor.root_hash_if_unchanged()
+        }
+
+        Ok(None)
+    }
 }
 
 #[cfg(test)]
