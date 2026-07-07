@@ -36,7 +36,6 @@ async fn testing_rpc_build_block_works() -> eyre::Result<()> {
         pprof_dumps_path: Some(tempdir.path().join("pprof")),
     };
     let config = NodeConfig::test()
-        .with_unused_ports()
         .with_disabled_discovery()
         .with_datadir_args(datadir_args)
         .with_rpc(rpc_args);
@@ -123,7 +122,6 @@ async fn testing_rpc_commit_block_works() -> eyre::Result<()> {
             .build(),
     );
     let config = NodeConfig::test()
-        .with_unused_ports()
         .with_disabled_discovery()
         .with_chain(chain_spec)
         .with_datadir_args(datadir_args)
