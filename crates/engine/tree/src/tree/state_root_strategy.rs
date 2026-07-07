@@ -628,9 +628,10 @@ where
         &self,
         block: &RecoveredBlock<N::Block>,
         output: &BlockExecutionOutput<N::Receipt>,
+        hashed_state: &LazyHashedPostState,
         outcome: StateRootComputeOutcome,
     ) -> ProviderResult<StateRootJobOutcome> {
-        let outcome = self.sparse_outcome(block, output, outcome);
+        let outcome = self.sparse_outcome(block, output, hashed_state, outcome);
         if outcome.state_root == block.header().state_root() {
             return Ok(outcome)
         }
@@ -647,6 +648,7 @@ where
         &self,
         _block: &RecoveredBlock<N::Block>,
         output: &BlockExecutionOutput<N::Receipt>,
+        hashed_state: &LazyHashedPostState,
         outcome: StateRootComputeOutcome,
     ) -> StateRootJobOutcome {
         let StateRootComputeOutcome {
@@ -670,7 +672,7 @@ where
             if _has_diff {
                 self.write_sparse_trie_debug_artifacts(
                     _block.header().number(),
-                    output,
+                    hashed_state,
                     &debug_recorders,
                     &trie_witness,
                 );
@@ -681,7 +683,7 @@ where
         if state_root != _block.header().state_root() {
             self.write_sparse_trie_debug_artifacts(
                 _block.header().number(),
-                output,
+                hashed_state,
                 &debug_recorders,
                 &trie_witness,
             );
@@ -694,11 +696,11 @@ where
     fn write_sparse_trie_debug_artifacts(
         &self,
         block_number: u64,
-        output: &BlockExecutionOutput<N::Receipt>,
+        hashed_state: &LazyHashedPostState,
         recorders: &[(Option<B256>, TrieDebugRecorder)],
         trie_witness: &B256Map<Bytes>,
     ) {
-        let fallback_trie_witness = self.fallback_sparse_trie_witness(output);
+        let fallback_trie_witness = self.fallback_sparse_trie_witness(hashed_state);
         write_sparse_trie_debug_artifacts(
             block_number,
             recorders,
@@ -710,20 +712,9 @@ where
     #[cfg(feature = "trie-debug")]
     fn fallback_sparse_trie_witness(
         &self,
-        output: &BlockExecutionOutput<N::Receipt>,
+        hashed_state: &LazyHashedPostState,
     ) -> Option<B256Map<Bytes>> {
-        let provider = match self.provider_builder.clone().build() {
-            Ok(provider) => provider,
-            Err(err) => {
-                warn!(
-                    target: "engine::tree::state_root_strategy",
-                    %err,
-                    "Failed to build provider for fallback trie witness"
-                );
-                return None
-            }
-        };
-        let hashed_state = provider.hashed_post_state(&output.state);
+        let hashed_state = hashed_state.get().as_ref().clone();
         let overlay_provider = match self.overlay_factory.database_provider_ro() {
             Ok(provider) => provider,
             Err(err) => {
@@ -770,11 +761,11 @@ where
         &mut self,
         block: &RecoveredBlock<N::Block>,
         output: Arc<BlockExecutionOutput<N::Receipt>>,
-        _hashed_state: &LazyHashedPostState,
+        hashed_state: &LazyHashedPostState,
     ) -> ProviderResult<StateRootJobOutcome> {
         if self.timeout.is_none() {
             return match self.handle.state_root() {
-                Ok(outcome) => self.verified_sparse_outcome(block, &output, outcome),
+                Ok(outcome) => self.verified_sparse_outcome(block, &output, hashed_state, outcome),
                 Err(err) => {
                     debug!(target: "engine::tree::state_root_strategy", %err, "State root task failed, falling back to serial root");
                     self.compute_serial(&output)
@@ -785,7 +776,9 @@ where
         let timeout = self.timeout.expect("checked above");
         let task_rx = self.handle.take_state_root_rx();
         let fallback_rx = match task_rx.recv_timeout(timeout) {
-            Ok(Ok(outcome)) => return self.verified_sparse_outcome(block, &output, outcome),
+            Ok(Ok(outcome)) => {
+                return self.verified_sparse_outcome(block, &output, hashed_state, outcome)
+            }
             Ok(Err(err)) => {
                 debug!(target: "engine::tree::state_root_strategy", %err, "State root task failed, falling back to serial root");
                 Self::serial_fallback(
@@ -815,7 +808,7 @@ where
 
         loop {
             if let Ok(Ok(outcome)) = task_rx.try_recv() {
-                let outcome = self.sparse_outcome(block, &output, outcome);
+                let outcome = self.sparse_outcome(block, &output, hashed_state, outcome);
                 if outcome.state_root == block.header().state_root() {
                     return Ok(outcome)
                 }
