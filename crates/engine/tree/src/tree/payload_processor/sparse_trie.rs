@@ -411,7 +411,11 @@ where
                     .take()
                     .unwrap()
                     .send(core::mem::take(&mut self.final_hashed_state));
-                self.finished_state_updates = true
+                self.finished_state_updates = true;
+                // The hashing task exits after it sends this marker, so nothing more
+                // will arrive on the updates channel. Swap in a channel that never
+                // receives so the run loop does not observe the disconnect.
+                self.updates = crossbeam_channel::never();
             }
         }
     }
