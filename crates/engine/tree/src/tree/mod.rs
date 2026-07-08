@@ -2183,8 +2183,7 @@ where
             .get_state(block.header().number())?
             .ok_or_else(|| ProviderError::StateForNumberNotFound(block.header().number()))?;
         let block_state = execution_output.execution_state();
-        let hashed_state =
-            execution_output.hash_state_slow::<reth_trie::KeccakKeyHasher>().into_sorted();
+        let hashed_state = self.provider.hashed_post_state(&block_state);
 
         debug!(
             target: "engine::tree",
@@ -2198,7 +2197,7 @@ where
             block.number(),
         )?;
 
-        let sorted_hashed_state = Arc::new(hashed_state);
+        let sorted_hashed_state = Arc::new(hashed_state.into_sorted());
         let sorted_trie_updates = Arc::new(trie_updates);
         let trie_data = ComputedTrieData::new(sorted_hashed_state, sorted_trie_updates);
 
