@@ -271,7 +271,7 @@ impl Default for DefaultEngineValues {
             precompile_cache_disabled: false,
             state_root_fallback: false,
             always_process_payload_attributes_on_canonical_head: false,
-            allow_unwind_canonical_header: false,
+            allow_unwind_canonical_header: true,
             storage_worker_count: None,
             account_worker_count: None,
             prewarming_threads: None,
