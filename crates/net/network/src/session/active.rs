@@ -1273,6 +1273,8 @@ mod tests {
     use super::*;
     use crate::session::{handle::PendingSessionEvent, start_pending_incoming_session};
     use alloy_eips::eip2124::ForkFilter;
+    use alloy_primitives::B256;
+    use futures::task::noop_waker;
     use reth_chainspec::MAINNET;
     use reth_ecies::stream::ECIESStream;
     use reth_eth_wire::{
@@ -1282,7 +1284,10 @@ mod tests {
     };
     use reth_eth_wire_types::{
         message::MAX_MESSAGE_SIZE,
-        snap::{AccountRangeMessage, BlockAccessListsMessage, GetBlockAccessListsMessage},
+        snap::{
+            AccountRangeMessage, BlockAccessListsMessage, GetAccountRangeMessage,
+            GetBlockAccessListsMessage,
+        },
         BlockAccessLists, EthMessageID, NewPooledTransactionHashes72,
     };
     use reth_ethereum_forks::EthereumHardfork;
@@ -1836,6 +1841,68 @@ mod tests {
         assert!(session.inflight_requests.is_empty());
         assert!(session.queued_outgoing.pop_front().is_none());
         assert_eq!(rx.await.unwrap().unwrap_err(), RequestError::UnsupportedCapability);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn inbound_snap_request_round_trips_to_a_response() {
+        let mut builder = snap_session_builder();
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let local_addr = listener.local_addr().unwrap();
+        let fut = builder.with_client_stream(local_addr, async move |client_stream| {
+            let _client_stream = client_stream;
+            tokio::time::sleep(Duration::from_secs(60)).await;
+        });
+        tokio::task::spawn(fut);
+        let (incoming, _) = listener.accept().await.unwrap();
+        let mut session = builder.connect_incoming(incoming).await;
+
+        // The peer sends an inbound GetAccountRange request.
+        let outcome = session.on_incoming_snap_message(SnapProtocolMessage::GetAccountRange(
+            GetAccountRangeMessage {
+                request_id: 7,
+                root_hash: B256::ZERO,
+                starting_hash: B256::ZERO,
+                limit_hash: B256::ZERO,
+                response_bytes: 1024,
+            },
+        ));
+        assert!(matches!(outcome, OnIncomingMessageOutcome::Ok));
+        assert_eq!(session.received_requests_from_remote.len(), 1);
+
+        // It's routed upward instead of being served inline.
+        let Some(ActiveSessionMessage::ValidMessage {
+            message: PeerMessage::EthRequest(PeerRequest::GetSnap { request, response }),
+            ..
+        }) = builder.active_session_rx.next().await
+        else {
+            panic!("expected an outbound GetSnap request")
+        };
+        assert!(matches!(request, SnapProtocolMessage::GetAccountRange(_)));
+
+        // The handler answers with an empty-but-valid range.
+        let _ = response.send(Ok(SnapResponse::AccountRange(AccountRangeMessage {
+            request_id: 7,
+            accounts: Vec::new(),
+            proof: Vec::new(),
+        })));
+
+        // Drive the same conversion the session's main poll loop would.
+        let mut req = session.received_requests_from_remote.pop().unwrap();
+        let waker = noop_waker();
+        let mut cx = Context::from_waker(&waker);
+        let Poll::Ready(resp) = req.rx.poll(&mut cx) else { panic!("response should be ready") };
+        session.handle_outgoing_response(req.request_id, resp);
+
+        // The reply goes out as a snap/2 message carrying the original request id, not an eth
+        // message.
+        let msg = session.queued_outgoing.pop_front().expect("response queued for send");
+        assert!(matches!(
+            msg,
+            OutgoingMessage::Snap(SnapProtocolMessage::AccountRange(AccountRangeMessage {
+                request_id: 7,
+                ..
+            }))
+        ));
     }
 
     #[test]
