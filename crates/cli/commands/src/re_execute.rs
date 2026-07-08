@@ -144,6 +144,13 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
                 let executor_lifetime = Duration::from_secs(600);
                 let provider = provider_factory.database_provider_ro()?.disable_long_read_transaction_safety();
 
+                let db_at = |block_number: u64| {
+                    provider
+                        .history_by_block_number(block_number)
+                        .map(StateProviderDatabase)
+                        .map_err(eyre::Report::new)
+                };
+
                 loop {
                     if cancellation.is_cancelled() {
                         break;
@@ -157,10 +164,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
                     }
                     let chunk_end = (chunk_start + blocks_per_chunk).min(max_block);
 
-                    let database = StateProviderDatabase(
-                        provider.history_by_block_number(chunk_start.saturating_sub(1))?,
-                    );
-                    let mut executor = evm_config.batch_executor(database);
+                    let mut executor = evm_config.batch_executor(db_at(chunk_start.saturating_sub(1))?);
                     let mut last_executed_block = None;
                     let mut executor_created = Instant::now();
 
@@ -177,11 +181,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
                             Ok(result) => result,
                             Err(err) => {
                                 if skip_invalid_blocks {
-                                    drop(executor);
-                                    let database = StateProviderDatabase(
-                                        provider.history_by_block_number(block.number())?,
-                                    );
-                                    executor = evm_config.batch_executor(database);
+                                    executor = evm_config.batch_executor(db_at(block.number())?);
                                     executor_created = Instant::now();
                                     let _ = info_tx.send((block, eyre::Report::new(err)));
                                     continue
@@ -238,11 +238,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
 
                                         error!(number=?block.number(), ?mismatch, "Gas usage mismatch");
                                         if skip_invalid_blocks {
-                                            drop(executor);
-                                            let database = StateProviderDatabase(
-                                                provider.history_by_block_number(block.number())?,
-                                            );
-                                            executor = evm_config.batch_executor(database);
+                                            executor = evm_config.batch_executor(db_at(block.number())?);
                                             executor_created = Instant::now();
                                             let _ = info_tx.send((block, err));
                                             continue 'blocks;
@@ -264,11 +260,10 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
                             executor_created.elapsed() > executor_lifetime
                         {
                             let last_block = block.number();
-                            let database = StateProviderDatabase(
-                                provider.history_by_block_number(last_block)?,
+                            let old_executor = std::mem::replace(
+                                &mut executor,
+                                evm_config.batch_executor(db_at(last_block)?),
                             );
-                            let next_executor = evm_config.batch_executor(database);
-                            let old_executor = std::mem::replace(&mut executor, next_executor);
                             let state = old_executor.into_state();
                             verify_reverts_against_changesets(
                                 &provider,
