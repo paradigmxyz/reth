@@ -860,12 +860,17 @@ where
             self.updates.is_empty() &&
             self.has_pending_sparse_trie_updates()
         {
+            const MAX_STALLED_PROOF_TARGETS_TO_LOG: usize = 5;
+
             let mut account_targets = self
                 .fetched_account_targets
                 .iter()
                 .map(|(target, min_len)| (*target, *min_len))
                 .collect::<Vec<_>>();
             account_targets.sort_unstable();
+            let account_targets_truncated =
+                account_targets.len().saturating_sub(MAX_STALLED_PROOF_TARGETS_TO_LOG);
+            account_targets.truncate(MAX_STALLED_PROOF_TARGETS_TO_LOG);
 
             let mut storage_targets = self
                 .fetched_storage_targets
@@ -875,10 +880,15 @@ where
                 })
                 .collect::<Vec<_>>();
             storage_targets.sort_unstable();
+            let storage_targets_truncated =
+                storage_targets.len().saturating_sub(MAX_STALLED_PROOF_TARGETS_TO_LOG);
+            storage_targets.truncate(MAX_STALLED_PROOF_TARGETS_TO_LOG);
 
             error!(
                 ?account_targets,
+                account_targets_truncated,
                 ?storage_targets,
+                storage_targets_truncated,
                 "sparse trie task stalled: pending updates remain but no proof targets are queued or in flight"
             );
 
