@@ -51,7 +51,7 @@ use crate::tree::{
     },
     payload_processor::PayloadProcessor,
     payload_validator::LazyHashedPostState,
-    ExecutionEnv, StateProviderBuilder, TreeConfig,
+    ExecutionEnv, PendingSparseTriePrune, StateProviderBuilder, TreeConfig,
 };
 use alloy_primitives::B256;
 use reth_errors::ProviderResult;
@@ -210,7 +210,7 @@ where
     overlay_factory: OverlayStateProviderFactory<P, N>,
     config: &'a TreeConfig,
     parallel_bal_execution: bool,
-    pending_sparse_trie_prune: Option<TriePrefixSetsMut>,
+    pending_sparse_trie_prune: Option<PendingSparseTriePrune>,
 }
 
 impl<N, P, Evm> fmt::Debug for StateRootJobContext<'_, N, P, Evm>
@@ -239,7 +239,7 @@ where
         overlay_factory: OverlayStateProviderFactory<P, N>,
         config: &'a TreeConfig,
         parallel_bal_execution: bool,
-        pending_sparse_trie_prune: Option<TriePrefixSetsMut>,
+        pending_sparse_trie_prune: Option<PendingSparseTriePrune>,
     ) -> Self {
         Self {
             payload_processor,
@@ -467,6 +467,7 @@ where
 
         let mut handle = payload_processor.spawn_state_root(
             overlay_factory.clone(),
+            env.parent_hash,
             env.parent_state_root,
             preserved_sparse_trie,
             Some(env.transaction_count),
@@ -496,6 +497,7 @@ where
         ctx: PayloadStateRootJobContext<'_, N, P, Evm>,
     ) -> ProviderResult<Option<PayloadStateRootHandle>> {
         let parent_state_root = ctx.parent_state_root();
+        let parent_hash = ctx.parent_hash();
         let PayloadStateRootJobContext { payload_processor, overlay_factory, config, .. } = ctx;
 
         // Sharing the engine state-root task with the payload builder is opt-in, and needs a
@@ -521,6 +523,7 @@ where
             payload_processor
                 .spawn_state_root(
                     overlay_factory,
+                    parent_hash,
                     parent_state_root,
                     preserved_sparse_trie,
                     // Tx count unknown at FCU time (block built incrementally): full proof

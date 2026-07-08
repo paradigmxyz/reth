@@ -79,6 +79,15 @@ pub use reth_execution_cache::{
 };
 pub use types::{ValidationOutcome, ValidationOutput};
 
+/// Sparse trie pruning request queued after persistence advances the DB tip.
+#[derive(Clone, Debug)]
+pub struct PendingSparseTriePrune {
+    /// Block hash the pruned sparse trie should be anchored to.
+    pub(crate) anchor_hash: B256,
+    /// Retained paths required by blocks still held in memory.
+    pub(crate) retained_paths: TriePrefixSetsMut,
+}
+
 pub mod state;
 
 /// The largest gap for which the tree will be used to sync individual blocks by downloading them.
@@ -317,9 +326,9 @@ where
     /// Set when an FCU with payload attributes is received, cleared on the next FCU without.
     /// Suppresses persistence cycles during payload building.
     building_payload: bool,
-    /// Retained paths from the latest persistence cleanup to apply during the next sparse trie
-    /// cache preservation.
-    pending_sparse_trie_prune: Option<TriePrefixSetsMut>,
+    /// Sparse trie pruning request from the latest persistence cleanup to apply during the next
+    /// sparse trie cache preservation.
+    pending_sparse_trie_prune: Option<PendingSparseTriePrune>,
     /// Task runtime for spawning blocking work on named, reusable threads.
     runtime: reth_tasks::Runtime,
 }
@@ -2145,12 +2154,12 @@ where
             number: self.persistence_state.last_persisted_block.number,
             hash: self.persistence_state.last_persisted_block.hash,
         });
-        self.pending_sparse_trie_prune = self.sparse_trie_retained_paths_for_in_memory_blocks();
+        self.pending_sparse_trie_prune = self.sparse_trie_prune_for_in_memory_blocks();
         Ok(())
     }
 
-    /// Builds sparse trie retained paths from all blocks still present in the in-memory tree.
-    fn sparse_trie_retained_paths_for_in_memory_blocks(&self) -> Option<TriePrefixSetsMut> {
+    /// Builds a sparse trie prune request from all blocks still present in the in-memory tree.
+    fn sparse_trie_prune_for_in_memory_blocks(&self) -> Option<PendingSparseTriePrune> {
         if self.config.skip_state_root() ||
             self.config.state_root_fallback() ||
             !self.config.use_state_root_task()
@@ -2173,7 +2182,10 @@ where
             };
             retained_paths.extend_ref(changed_paths);
         }
-        Some(retained_paths)
+        Some(PendingSparseTriePrune {
+            anchor_hash: self.persistence_state.last_persisted_block.hash,
+            retained_paths,
+        })
     }
 
     /// Return an [`ExecutedBlock`] from database or in-memory state by hash.

@@ -81,12 +81,15 @@ pub struct PreservedSparseTrie {
     /// Used to verify continuity: a new payload's `parent_state_root` must match this before the
     /// existing sparse trie nodes can be reused.
     state_root: B256,
+    /// Earliest block hash whose overlay state is covered by this trie.
+    anchor_hash: B256,
 }
 
 impl fmt::Debug for PreservedSparseTrie {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("PreservedSparseTrie")
             .field("state_root", &self.state_root)
+            .field("anchor_hash", &self.anchor_hash)
             .finish_non_exhaustive()
     }
 }
@@ -96,15 +99,15 @@ impl PreservedSparseTrie {
     ///
     /// The `state_root` is the computed state root from the trie, which becomes the
     /// anchor for determining if subsequent payloads can reuse this trie.
-    pub const fn anchored(trie: SparseTrie, state_root: B256) -> Self {
-        Self { trie: PreservedSparseTrieInner::Ready(trie), state_root }
+    pub const fn anchored(trie: SparseTrie, state_root: B256, anchor_hash: B256) -> Self {
+        Self { trie: PreservedSparseTrieInner::Ready(trie), state_root, anchor_hash }
     }
 
     /// Creates a pending preserved trie and a completer that will publish the trie later.
-    pub fn pending(state_root: B256) -> (Self, PreservedSparseTrieCompleter) {
+    pub fn pending(state_root: B256, anchor_hash: B256) -> (Self, PreservedSparseTrieCompleter) {
         let (tx, rx) = mpsc::channel();
         (
-            Self { trie: PreservedSparseTrieInner::Pending(rx), state_root },
+            Self { trie: PreservedSparseTrieInner::Pending(rx), state_root, anchor_hash },
             PreservedSparseTrieCompleter { tx },
         )
     }
@@ -112,6 +115,11 @@ impl PreservedSparseTrie {
     /// Returns the state root this trie is anchored to.
     pub const fn state_root(&self) -> B256 {
         self.state_root
+    }
+
+    /// Returns the block hash this trie is anchored to for overlay coverage.
+    pub const fn anchor_hash(&self) -> B256 {
+        self.anchor_hash
     }
 
     /// Consumes self and returns the trie if it can be reused for the parent state root.
@@ -137,6 +145,7 @@ impl PreservedSparseTrie {
             debug!(
                 target: "engine::tree::payload_processor",
                 state_root = %self.state_root,
+                anchor_hash = %self.anchor_hash,
                 "Reusing anchored sparse trie for continuation payload"
             );
             Ok(Some(trie))
@@ -144,6 +153,7 @@ impl PreservedSparseTrie {
             debug!(
                 target: "engine::tree::payload_processor",
                 anchor_root = %self.state_root,
+                anchor_hash = %self.anchor_hash,
                 %parent_state_root,
                 "Dropping anchored sparse trie - parent state root mismatch"
             );
@@ -200,9 +210,11 @@ mod tests {
     #[test]
     fn pending_trie_exposes_state_root_before_completion() {
         let state_root = B256::with_last_byte(1);
-        let (preserved, completer) = PreservedSparseTrie::pending(state_root);
+        let anchor_hash = B256::with_last_byte(2);
+        let (preserved, completer) = PreservedSparseTrie::pending(state_root, anchor_hash);
 
         assert_eq!(preserved.state_root(), state_root);
+        assert_eq!(preserved.anchor_hash(), anchor_hash);
         completer.complete(SparseTrie::default()).unwrap();
         assert!(preserved.into_trie_for(state_root).unwrap().is_some());
     }
@@ -211,7 +223,8 @@ mod tests {
     fn pending_trie_with_mismatched_root_does_not_wait() {
         let state_root = B256::with_last_byte(1);
         let other_state_root = B256::with_last_byte(2);
-        let (preserved, completer) = PreservedSparseTrie::pending(state_root);
+        let anchor_hash = B256::with_last_byte(3);
+        let (preserved, completer) = PreservedSparseTrie::pending(state_root, anchor_hash);
 
         assert!(preserved.into_trie_for(other_state_root).unwrap().is_none());
         assert!(completer.complete(SparseTrie::default()).is_err());

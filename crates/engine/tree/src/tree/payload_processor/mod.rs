@@ -5,8 +5,8 @@ use crate::tree::{
     payload_processor::prewarm::{PrewarmCacheTask, PrewarmContext, PrewarmMode, PrewarmTaskEvent},
     sparse_trie::SparseTrieCacheTask,
     CacheWaitDurations, CachedStateCacheMetrics, CachedStateMetrics, CachedStateMetricsSource,
-    ExecutionCache, PayloadExecutionCache, SavedCache, StateProviderBuilder, TreeConfig,
-    WaitForCaches,
+    ExecutionCache, PayloadExecutionCache, PendingSparseTriePrune, SavedCache,
+    StateProviderBuilder, TreeConfig, WaitForCaches,
 };
 use alloy_eip7928::bal::DecodedBal;
 use alloy_eips::{eip1898::BlockWithParent, eip4895::Withdrawal};
@@ -28,8 +28,7 @@ use reth_provider::{
 use reth_revm::db::BundleState;
 use reth_tasks::{utils::increase_thread_priority, Runtime};
 use reth_trie::{
-    hashed_cursor::HashedCursorFactory, prefix_set::TriePrefixSetsMut,
-    trie_cursor::TrieCursorFactory, HashedPostState,
+    hashed_cursor::HashedCursorFactory, trie_cursor::TrieCursorFactory, HashedPostState,
 };
 use reth_trie_parallel::{
     error::StateRootTaskError,
@@ -131,10 +130,11 @@ where
 }
 
 struct SparseTrieTaskOptions {
+    parent_hash: B256,
     parent_state_root: B256,
     preserved_sparse_trie: Option<PreservedSparseTrie>,
     chunk_size: usize,
-    pending_sparse_trie_prune: Option<TriePrefixSetsMut>,
+    pending_sparse_trie_prune: Option<PendingSparseTriePrune>,
 }
 
 impl<Evm> PayloadProcessor<Evm>
@@ -281,11 +281,12 @@ where
     pub fn spawn_state_root<F>(
         &self,
         multiproof_provider_factory: F,
+        parent_hash: B256,
         parent_state_root: B256,
         preserved_sparse_trie: Option<PreservedSparseTrie>,
         transaction_count: Option<usize>,
         config: &TreeConfig,
-        pending_sparse_trie_prune: Option<TriePrefixSetsMut>,
+        pending_sparse_trie_prune: Option<PendingSparseTriePrune>,
     ) -> StateRootHandle
     where
         F: DatabaseProviderROFactory<Provider: TrieCursorFactory + HashedCursorFactory>
@@ -312,6 +313,7 @@ where
             hashed_state_tx,
             from_multi_proof,
             SparseTrieTaskOptions {
+                parent_hash,
                 parent_state_root,
                 preserved_sparse_trie,
                 chunk_size: config.multiproof_chunk_size(),
@@ -565,6 +567,7 @@ where
         options: SparseTrieTaskOptions,
     ) {
         let SparseTrieTaskOptions {
+            parent_hash,
             parent_state_root,
             preserved_sparse_trie,
             chunk_size,
@@ -596,16 +599,21 @@ where
                     .with_updates(true)
             };
 
+            let mut sparse_trie_anchor_hash = parent_hash;
             let mut sparse_state_trie = match preserved_sparse_trie {
                 Some(preserved) => {
                     let start = Instant::now();
+                    let preserved_anchor_hash = preserved.anchor_hash();
                     let preserved = preserved.into_trie_for(parent_state_root);
                     trie_metrics
                         .sparse_trie_cache_wait_duration_histogram
                         .record(start.elapsed().as_secs_f64());
 
                     match preserved {
-                        Ok(Some(trie)) => trie,
+                        Ok(Some(trie)) => {
+                            sparse_trie_anchor_hash = preserved_anchor_hash;
+                            trie
+                        }
                         Ok(None) => new_sparse_state_trie(),
                         Err(err) => {
                             let _ = state_root_tx
@@ -637,7 +645,11 @@ where
             // take the handle and inspect its state root without waiting for trie pruning below.
             let mut guard = state_trie_overlays.lock_sparse_trie();
             let pending_trie = if let Some(result) = &task_result {
-                let (preserved, completer) = PreservedSparseTrie::pending(result.state_root);
+                let preserved_anchor_hash = pending_sparse_trie_prune
+                    .as_ref()
+                    .map_or(sparse_trie_anchor_hash, |prune| prune.anchor_hash);
+                let (preserved, completer) =
+                    PreservedSparseTrie::pending(result.state_root, preserved_anchor_hash);
                 guard.store(preserved);
                 Some(completer)
             } else {
@@ -671,7 +683,9 @@ where
                     pending_trie.expect("pending trie is created for successful task result");
                 let start = Instant::now();
                 let (mut trie, deferred) = task.into_trie_for_reuse();
-                if let Some(mut retained_paths) = pending_sparse_trie_prune {
+                if let Some(PendingSparseTriePrune { mut retained_paths, .. }) =
+                    pending_sparse_trie_prune
+                {
                     let changed_paths = result
                         .changed_paths
                         .as_deref()
@@ -1314,6 +1328,7 @@ mod tests {
                 provider_factory,
                 OverlayBuilder::<EthPrimitives>::new(genesis_hash, ChangesetCache::new()),
             ),
+            genesis_hash,
             env.parent_state_root,
             None,
             Some(env.transaction_count),

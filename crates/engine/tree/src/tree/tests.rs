@@ -655,8 +655,9 @@ fn on_new_persisted_block_queues_sparse_trie_prune_request() {
 
     test_harness.tree.on_new_persisted_block().unwrap();
 
-    let retained_paths =
-        test_harness.tree.pending_sparse_trie_prune.as_ref().unwrap().clone().freeze();
+    let prune = test_harness.tree.pending_sparse_trie_prune.as_ref().unwrap();
+    assert_eq!(prune.anchor_hash, blocks[0].recovered_block().hash());
+    let retained_paths = prune.retained_paths.clone().freeze();
     let expected_retained_paths = merged_changed_paths(&blocks[1..]).freeze();
 
     assert_eq!(
@@ -718,7 +719,10 @@ fn remove_blocks_clears_pending_sparse_trie_prune_request() {
     let mut test_harness = TestHarness::new(MAINNET.clone());
     test_harness.tree.persistence_state.last_persisted_block =
         BlockNumHash { hash: B256::random(), number: 10 };
-    test_harness.tree.pending_sparse_trie_prune = Some(Default::default());
+    test_harness.tree.pending_sparse_trie_prune = Some(PendingSparseTriePrune {
+        anchor_hash: B256::random(),
+        retained_paths: Default::default(),
+    });
 
     test_harness.tree.remove_blocks(9);
 

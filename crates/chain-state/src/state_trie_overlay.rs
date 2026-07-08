@@ -704,14 +704,20 @@ mod tests {
         let manager = StateTrieOverlayManager::<EthPrimitives>::default();
         let state_root = B256::with_last_byte(1);
         let other_state_root = B256::with_last_byte(2);
+        let anchor_hash = B256::with_last_byte(3);
 
         {
             let mut guard = manager.lock_sparse_trie();
-            guard.store(PreservedSparseTrie::anchored(SparseTrie::default(), state_root));
+            guard.store(PreservedSparseTrie::anchored(
+                SparseTrie::default(),
+                state_root,
+                anchor_hash,
+            ));
         }
 
         let preserved = manager.take_sparse_trie().expect("preserved trie should be available");
         assert_eq!(preserved.state_root(), state_root);
+        assert_eq!(preserved.anchor_hash(), anchor_hash);
         assert!(preserved.into_trie_for(other_state_root).unwrap().is_none());
         assert!(manager.take_sparse_trie().is_none());
 
