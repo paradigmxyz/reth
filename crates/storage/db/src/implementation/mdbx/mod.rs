@@ -713,6 +713,38 @@ mod tests {
         env
     }
 
+    #[test]
+    fn db_cursor_on_custom_table_with_metrics() {
+        use reth_db_api::{table::TableInfo, tables, TableSet, TableType, TableViewer};
+        use std::fmt;
+
+        tables! {
+            /// A node-specific table outside the static [`crate::Tables`] set.
+            table CustomTable {
+                type Key = u64;
+                type Value = Vec<u8>;
+            }
+        }
+
+        let tempdir = tempfile::TempDir::new().expect(ERROR_TEMPDIR);
+        let mut env = DatabaseEnv::open(
+            tempdir.path(),
+            DatabaseEnvKind::RW,
+            DatabaseArguments::new(ClientVersion::default()),
+        )
+        .expect(ERROR_DB_CREATION);
+        env.create_and_track_tables_for::<Tables>().expect(ERROR_TABLE_CREATION);
+        let env = env.with_metrics();
+
+        let tx = env.tx_mut().expect(ERROR_INIT_TX);
+        tx.put::<CustomTable>(1, vec![0xff]).expect(ERROR_PUT);
+        // Regression: cursors on tables without pre-bound metric handles used to panic with
+        // "table operation metric handles not found"; they must simply go unmetered.
+        let mut cursor = tx.cursor_write::<CustomTable>().expect("could not create cursor");
+        assert_eq!(cursor.first().expect(ERROR_GET), Some((1, vec![0xff])));
+        tx.commit().expect(ERROR_COMMIT);
+    }
+
     const ERROR_DB_CREATION: &str = "Not able to create the mdbx file.";
     const ERROR_PUT: &str = "Not able to insert value into table.";
     const ERROR_APPEND: &str = "Not able to append the value to the table.";

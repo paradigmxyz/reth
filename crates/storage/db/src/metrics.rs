@@ -115,8 +115,16 @@ impl DatabaseEnvMetrics {
     }
 
     /// Returns pre-bound operation metric handles for a single table.
-    pub(crate) fn table_operation_metrics(&self, table: &'static str) -> TableOperationMetrics {
-        self.operations.get(table).expect("table operation metric handles not found").clone()
+    ///
+    /// Returns `None` for tables outside the static [`Tables`] set — e.g. node-specific custom
+    /// tables created through
+    /// [`create_and_track_tables_for`](crate::DatabaseEnv::create_and_track_tables_for) — whose
+    /// operations then simply go unmetered, matching [`Self::record_operation`].
+    pub(crate) fn table_operation_metrics(
+        &self,
+        table: &'static str,
+    ) -> Option<TableOperationMetrics> {
+        self.operations.get(table).cloned()
     }
 
     /// Record metrics for opening a database transaction.
