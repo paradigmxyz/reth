@@ -24,8 +24,10 @@ installed.
    *all* accessed state, ignoring the cache — to report the reduction ratio.
 7. Logs accessed/missed counts, miss ratio, witness size, and cache footprint.
 
-On `ChainReorged` the new chain is replayed into the cache; `ChainReverted` is
-logged but not rolled back (PoC limitation).
+On `ChainReorged` the old branch is rolled back newest-to-oldest before the new
+canonical branch is applied. On `ChainReverted` the reverted blocks are rolled
+back newest-to-oldest. If the required undo history is missing or pruned, the
+cache is cold-reset before it advances again.
 
 ## Run
 
@@ -49,12 +51,47 @@ variables, so the core sidecar generation path stays lean:
 
 | Env var | Effect |
 | --- | --- |
+| `PS_SIDECAR_ROLE=builder\|builder-verifier\|verifier` | choose whether this ExEx writes sidecars, writes and preflights them, or consumes existing sidecars as a live verifier (default: `builder`) |
+| `PS_SIDECAR_DIR=<dir>` | write sidecars in `<dir>` (default: `./sidecar`) |
+| `PS_SIDECAR_VERIFIER_WAIT_MS=<ms>` | in `verifier` mode, wait up to this long for the block sidecar file to appear (default: `2000`) |
 | `PS_CAPTURE_DIR=<dir>` | dump each block's `BlockAccessedState` fixture to `<dir>` (see below) |
 | `PS_WITNESS_BASELINE=1` | also compute the full-witness baseline + reduction ratio (an extra, larger multiproof per block) |
 | `PS_RESOURCE_METRICS=1` | capture per-thread CPU time + page faults around the partial multiproof (`cpu_time_ms`, `major_page_faults`, `minor_page_faults`) to separate compute-bound from disk-I/O-bound blocks |
 | `PS_SIDECAR_PREFLIGHT=1` | run provider-assisted validator preflight for each sidecar (an extra re-execution per block) |
 
+`PS_SIDECAR_ROLE=builder-verifier` is a single-process test mode: it keeps the
+normal builder output path, but forces the same provider-assisted client preflight
+before publishing each sidecar. Use this mode to observe cache-miss-only,
+witness-integrity, state-root, and next-cache-anchor failures while the builder is
+running.
+
+`PS_SIDECAR_ROLE=verifier` is the live verifier mode. It does not build or publish
+sidecars. For each canonical block it reads
+`$PS_SIDECAR_DIR/block_<N>_<hash>.bin`, verifies it against the local previous
+cache, re-executes with cache hits plus sidecar miss witnesses, and advances the
+local cache only after verification succeeds. The verifier must start with a
+cache synchronized to the parent block; the sidecar file alone is not enough to
+reconstruct that previous cache.
+
 `PS_SIDECAR_PREFLIGHT` gates the validator-like self-check. When enabled, sidecar generation fails fast if the cache+witness-backed re-execution, expected miss set, or next cache anchor check fails. When unset, the sidecar still carries `prev_cache_anchor`, `next_cache_anchor`, and `witness_commitment`, but this ExEx does not spend the extra execution work to preflight them. The manifest records this as `provider_assisted_preflight: false`.
+
+The preflight state-root check is provider-assisted: it re-executes from local
+cache plus sidecar misses, then asks the full provider to compute the post-state
+root from the resulting changes. `root_witness_completeness` is diagnostic-only
+and records whether the current cache/sidecar shape would have enough trie paths
+for a future trustless state-root calculation.
+
+The manifest and verifier logs also expose
+`partial_state_trustless_verification_ready`. This is the partial-state-node
+readiness flag: `false` means the sidecar can still pass the current
+provider-assisted verifier, but a partial-state node cannot yet verify the
+post-state root without full-provider help. With the current cache policy this is
+expected when written cache-hit paths are not carried by the cache or sidecar.
+
+This PR intentionally does not implement cold-EOA mempool admission, new-node
+cache bootstrap, or trie/root-update witnesses. Those follow-on flows should
+reuse the fork- and policy-scoped `CacheAnchor` contract, but this ExEx only
+claims provider-assisted cache transition verification today.
 
 When `PS_WITNESS_BASELINE` is unset, the manifest's `full_sidecar_baseline_stats`
 and `reduction` are `null` and no baseline multiproof is computed. A baseline
@@ -88,6 +125,6 @@ snapshot is the portable, self-contained artifact.
 | Path | Contents |
 | --- | --- |
 | `<datadir>/partial_stateless_cache.bin` | persisted warm cache |
-| `./sidecar/block_<N>_<hash>.bin` | witness sidecar (verify with `sidecar_verifier`) |
+| `./sidecar/block_<N>_<hash>.bin` | witness sidecar (or `$PS_SIDECAR_DIR/block_<N>_<hash>.bin`) |
 | `./sidecar/block_<N>_<hash>.manifest.json` | per-block benchmark manifest |
 | `$PS_CAPTURE_DIR/accessed_<N>.bin` | captured fixture (when capture is enabled) |
