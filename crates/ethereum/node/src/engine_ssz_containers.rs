@@ -106,6 +106,8 @@ pub struct PayloadStatus {
     pub status: PayloadStatusEnum,
     /// Most recent valid block hash.
     pub latest_valid_hash: Optional<B256>,
+    /// Optional payload validation error bytes.
+    pub validation_error: Optional<ErrorBytes>,
 }
 
 const MAX_ERROR_BYTES: usize = 1024;
@@ -129,7 +131,9 @@ fn status_from_code(code: u8) -> Result<PayloadStatusEnum, ssz::DecodeError> {
     }
 }
 
-fn validation_error(status: &PayloadStatusEnum) -> Result<Optional<ErrorBytes>, ConversionError> {
+fn legacy_validation_error(
+    status: &PayloadStatusEnum,
+) -> Result<Optional<ErrorBytes>, ConversionError> {
     match status {
         PayloadStatusEnum::Invalid { validation_error } => {
             let bytes = validation_error.as_bytes().to_vec();
@@ -148,20 +152,16 @@ impl ssz::Encode for PayloadStatus {
     }
 
     fn ssz_bytes_len(&self) -> usize {
-        let validation_error =
-            validation_error(&self.status).expect("PayloadStatus validation error must be bounded");
         1 + ssz::BYTES_PER_LENGTH_OFFSET * 2 +
             self.latest_valid_hash.ssz_bytes_len() +
-            validation_error.ssz_bytes_len()
+            self.validation_error.ssz_bytes_len()
     }
 
     fn ssz_append(&self, buf: &mut Vec<u8>) {
-        let validation_error =
-            validation_error(&self.status).expect("PayloadStatus validation error must be bounded");
         let mut encoder = ssz::SszEncoder::container(buf, 1 + ssz::BYTES_PER_LENGTH_OFFSET * 2);
         encoder.append(&status_code(&self.status));
         encoder.append(&self.latest_valid_hash);
-        encoder.append(&validation_error);
+        encoder.append(&self.validation_error);
         encoder.finalize();
     }
 }
@@ -186,12 +186,17 @@ impl ssz::Decode for PayloadStatus {
                     .map_err(|err| ssz::DecodeError::BytesInvalid(err.to_string()))?,
                 None => String::new(),
             };
+            if validation_error.as_ref().is_some_and(|error| error.len() > MAX_ERROR_BYTES) {
+                return Err(ssz::DecodeError::BytesInvalid(
+                    "payload validation error is too long".into(),
+                ))
+            }
         } else if validation_error.is_some() {
             return Err(ssz::DecodeError::BytesInvalid(
                 "validation error is only valid for INVALID status".into(),
             ));
         }
-        Ok(Self { status, latest_valid_hash })
+        Ok(Self { status, latest_valid_hash, validation_error })
     }
 }
 
@@ -221,14 +226,28 @@ impl TryFrom<LegacyPayloadStatus> for PayloadStatus {
     type Error = ConversionError;
 
     fn try_from(value: LegacyPayloadStatus) -> Result<Self, Self::Error> {
-        validation_error(&value.status)?;
-        Ok(Self { status: value.status, latest_valid_hash: value.latest_valid_hash.into() })
+        let validation_error = legacy_validation_error(&value.status)?;
+        Ok(Self {
+            status: value.status,
+            latest_valid_hash: value.latest_valid_hash.into(),
+            validation_error,
+        })
     }
 }
 
 impl From<PayloadStatus> for LegacyPayloadStatus {
     fn from(value: PayloadStatus) -> Self {
-        Self { status: value.status, latest_valid_hash: value.latest_valid_hash.into() }
+        let status = match value.status {
+            PayloadStatusEnum::Invalid { .. } => PayloadStatusEnum::Invalid {
+                validation_error: value
+                    .validation_error
+                    .as_ref()
+                    .and_then(|error| String::from_utf8(error.clone()).ok())
+                    .unwrap_or_default(),
+            },
+            status => status,
+        };
+        Self { status, latest_valid_hash: value.latest_valid_hash.into() }
     }
 }
 
@@ -1222,9 +1241,28 @@ mod tests {
             PayloadStatusEnum::Syncing,
             PayloadStatusEnum::Accepted,
         ] {
-            let value = PayloadStatus { status, latest_valid_hash: Optional::some(B256::ZERO) };
+            let validation_error = legacy_validation_error(&status).unwrap();
+            let value = PayloadStatus {
+                status,
+                latest_valid_hash: Optional::some(B256::ZERO),
+                validation_error,
+            };
             assert_eq!(PayloadStatus::from_ssz_bytes(&value.as_ssz_bytes()).unwrap(), value);
         }
+    }
+
+    #[test]
+    fn payload_status_preserves_absent_invalid_validation_error() {
+        let mut bytes = Vec::new();
+        let mut encoder = ssz::SszEncoder::container(&mut bytes, 9);
+        encoder.append(&1u8);
+        encoder.append(&Optional::<B256>::none());
+        encoder.append(&Optional::<ErrorBytes>::none());
+        encoder.finalize();
+
+        let decoded = PayloadStatus::from_ssz_bytes(&bytes).unwrap();
+        assert!(decoded.validation_error.is_none());
+        assert_eq!(decoded.as_ssz_bytes(), bytes);
     }
 
     #[test]
@@ -1249,8 +1287,11 @@ mod tests {
 
     #[test]
     fn forkchoice_response_distinguishes_absent_and_zero_payload_id() {
-        let status =
-            PayloadStatus { status: PayloadStatusEnum::Valid, latest_valid_hash: Optional::none() };
+        let status = PayloadStatus {
+            status: PayloadStatusEnum::Valid,
+            latest_valid_hash: Optional::none(),
+            validation_error: Optional::none(),
+        };
         let none = ForkchoiceUpdateResponse {
             payload_status: status.clone(),
             payload_id: Optional::none(),
