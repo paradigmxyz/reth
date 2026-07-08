@@ -297,6 +297,11 @@ impl ArenaSparseSubtrie {
                 }
             } else {
                 // Not retained — blind the child slot in the new arena.
+                ArenaParallelSparseTrie::trace_pruned_subtree(
+                    &self.arena,
+                    old_child_idx,
+                    child_path,
+                );
                 let rlp_node = self.arena[old_child_idx]
                     .state_ref()
                     .expect("child must have state")
@@ -2183,6 +2188,86 @@ impl ArenaParallelSparseTrie {
         }
     }
 
+    /// Emits trace logs for every revealed node reachable from `idx`.
+    fn trace_pruned_subtree(arena: &NodeArena, idx: Index, path: Nibbles) {
+        if !tracing::enabled!(target: TRACE_TARGET, tracing::Level::TRACE) {
+            return;
+        }
+
+        Self::trace_pruned_subtree_inner(arena, idx, path);
+    }
+
+    fn trace_pruned_subtree_inner(arena: &NodeArena, idx: Index, path: Nibbles) {
+        Self::trace_pruned_node(arena, idx, path);
+
+        match &arena[idx] {
+            ArenaSparseNode::Branch(branch) => {
+                let mut branch_path = path;
+                branch_path.extend(&branch.short_key);
+
+                for (nibble, child) in branch.child_iter() {
+                    let ArenaSparseNodeBranchChild::Revealed(child_idx) = child else {
+                        continue;
+                    };
+                    let mut child_path = branch_path;
+                    child_path.push_unchecked(nibble);
+                    Self::trace_pruned_subtree_inner(arena, *child_idx, child_path);
+                }
+            }
+            ArenaSparseNode::Subtrie(subtrie) => {
+                Self::trace_pruned_subtree_inner(&subtrie.arena, subtrie.root, subtrie.path);
+            }
+            ArenaSparseNode::EmptyRoot |
+            ArenaSparseNode::Leaf { .. } |
+            ArenaSparseNode::TakenSubtrie => {}
+        }
+    }
+
+    fn trace_pruned_node(arena: &NodeArena, idx: Index, path: Nibbles) {
+        match &arena[idx] {
+            ArenaSparseNode::EmptyRoot => {
+                trace!(target: TRACE_TARGET, kind = "empty_root", ?path, "pruning node");
+            }
+            ArenaSparseNode::Branch(branch) => {
+                trace!(
+                    target: TRACE_TARGET,
+                    kind = "branch",
+                    ?path,
+                    short_key = ?branch.short_key,
+                    state_mask = ?branch.state_mask,
+                    num_children = branch.state_mask.count_bits(),
+                    "pruning node",
+                );
+            }
+            ArenaSparseNode::Leaf { key, value, .. } => {
+                let mut full_path = path;
+                full_path.extend(key);
+                trace!(
+                    target: TRACE_TARGET,
+                    kind = "leaf",
+                    ?path,
+                    ?full_path,
+                    value_len = value.len(),
+                    "pruning node",
+                );
+            }
+            ArenaSparseNode::Subtrie(subtrie) => {
+                trace!(
+                    target: TRACE_TARGET,
+                    kind = "subtrie",
+                    ?path,
+                    subtrie = ?subtrie.path,
+                    num_leaves = subtrie.num_leaves,
+                    num_dirty_leaves = subtrie.num_dirty_leaves,
+                    "pruning node",
+                );
+            }
+            ArenaSparseNode::TakenSubtrie => {
+                trace!(target: TRACE_TARGET, kind = "taken_subtrie", ?path, "pruning node");
+            }
+        }
+    }
+
     /// Removes a pruned node from the arena and blinds the parent's child slot with the node's
     /// cached RLP. If the node has no cached RLP (e.g. it was never hashed), the parent slot
     /// is left dangling — this is safe because the parent will also be removed during pruning.
@@ -2192,7 +2277,7 @@ impl ArenaParallelSparseTrie {
         idx: Index,
         nibble: Option<u8>,
     ) -> ArenaSparseNode {
-        trace!(target: TRACE_TARGET, path = ?cursor.head().unwrap().path, "pruning node");
+        Self::trace_pruned_subtree(arena, idx, cursor.head().expect("cursor is non-empty").path);
         let node = arena.remove(idx).expect("node must exist to be pruned");
         let rlp_node = node.state_ref().and_then(|s| s.cached_rlp_node()).cloned();
 
