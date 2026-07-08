@@ -297,13 +297,27 @@ impl ArenaSparseSubtrie {
                 }
             } else {
                 // Not retained — blind the child slot in the new arena.
-                ArenaParallelSparseTrie::trace_pruned_node(&self.arena[old_child_idx], child_path);
-                let rlp_node = self.arena[old_child_idx]
+                let node = &self.arena[old_child_idx];
+                let variant = match node {
+                    ArenaSparseNode::EmptyRoot => "EmptyRoot",
+                    ArenaSparseNode::Branch(_) => "Branch",
+                    ArenaSparseNode::Leaf { .. } => "Leaf",
+                    ArenaSparseNode::Subtrie(_) => "Subtrie",
+                    ArenaSparseNode::TakenSubtrie => "TakenSubtrie",
+                };
+                let rlp_node = node
                     .state_ref()
                     .expect("child must have state")
                     .cached_rlp_node()
                     .cloned()
                     .expect("pruned child must have cached RLP (prune runs after hashing)");
+                trace!(
+                    target: TRACE_TARGET,
+                    path = ?child_path,
+                    variant = %variant,
+                    cached_rlp_node = ?rlp_node,
+                    "pruning node",
+                );
                 let ArenaSparseNode::Branch(b) = &mut new_arena[parent_new_idx] else {
                     unreachable!()
                 };
@@ -2184,51 +2198,6 @@ impl ArenaParallelSparseTrie {
         }
     }
 
-    fn trace_pruned_node(node: &ArenaSparseNode, path: Nibbles) {
-        match node {
-            ArenaSparseNode::EmptyRoot => {
-                trace!(target: TRACE_TARGET, kind = "empty_root", ?path, "pruning node");
-            }
-            ArenaSparseNode::Branch(branch) => {
-                trace!(
-                    target: TRACE_TARGET,
-                    kind = "branch",
-                    ?path,
-                    short_key = ?branch.short_key,
-                    state_mask = ?branch.state_mask,
-                    num_children = branch.state_mask.count_bits(),
-                    "pruning node",
-                );
-            }
-            ArenaSparseNode::Leaf { key, value, .. } => {
-                let mut full_path = path;
-                full_path.extend(key);
-                trace!(
-                    target: TRACE_TARGET,
-                    kind = "leaf",
-                    ?path,
-                    ?full_path,
-                    value_len = value.len(),
-                    "pruning node",
-                );
-            }
-            ArenaSparseNode::Subtrie(subtrie) => {
-                trace!(
-                    target: TRACE_TARGET,
-                    kind = "subtrie",
-                    ?path,
-                    subtrie = ?subtrie.path,
-                    num_leaves = subtrie.num_leaves,
-                    num_dirty_leaves = subtrie.num_dirty_leaves,
-                    "pruning node",
-                );
-            }
-            ArenaSparseNode::TakenSubtrie => {
-                trace!(target: TRACE_TARGET, kind = "taken_subtrie", ?path, "pruning node");
-            }
-        }
-    }
-
     /// Removes a pruned node from the arena and blinds the parent's child slot with the node's
     /// cached RLP. If the node has no cached RLP (e.g. it was never hashed), the parent slot
     /// is left dangling — this is safe because the parent will also be removed during pruning.
@@ -2240,8 +2209,21 @@ impl ArenaParallelSparseTrie {
     ) -> ArenaSparseNode {
         let path = cursor.head().expect("cursor is non-empty").path;
         let node = arena.remove(idx).expect("node must exist to be pruned");
-        Self::trace_pruned_node(&node, path);
+        let variant = match &node {
+            ArenaSparseNode::EmptyRoot => "EmptyRoot",
+            ArenaSparseNode::Branch(_) => "Branch",
+            ArenaSparseNode::Leaf { .. } => "Leaf",
+            ArenaSparseNode::Subtrie(_) => "Subtrie",
+            ArenaSparseNode::TakenSubtrie => "TakenSubtrie",
+        };
         let rlp_node = node.state_ref().and_then(|s| s.cached_rlp_node()).cloned();
+        trace!(
+            target: TRACE_TARGET,
+            ?path,
+            variant = %variant,
+            cached_rlp_node = ?rlp_node,
+            "pruning node",
+        );
 
         if let Some(rlp_node) = rlp_node {
             let parent_idx = cursor.parent().expect("pruned child has parent").index;
