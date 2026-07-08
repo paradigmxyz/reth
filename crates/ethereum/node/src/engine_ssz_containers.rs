@@ -1198,7 +1198,7 @@ impl<T: ssz::Decode> ssz::Decode for BodyEntry<T> {
 }
 
 /// Bounded REST-SSZ historical bodies response.
-#[derive(Clone, Debug, PartialEq, Eq, ssz_derive::Encode)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct BodiesResponse<T> {
     /// Body entries in request or range order.
     pub entries: Vec<BodyEntry<T>>,
@@ -1243,6 +1243,22 @@ impl<T: Default> BodiesResponse<T> {
             .collect();
 
         Ok(Self { entries })
+    }
+}
+
+impl<T: ssz::Encode> ssz::Encode for BodiesResponse<T> {
+    fn is_ssz_fixed_len() -> bool {
+        false
+    }
+
+    fn ssz_bytes_len(&self) -> usize {
+        ssz::BYTES_PER_LENGTH_OFFSET + self.entries.ssz_bytes_len()
+    }
+
+    fn ssz_append(&self, buf: &mut Vec<u8>) {
+        let mut encoder = ssz::SszEncoder::container(buf, ssz::BYTES_PER_LENGTH_OFFSET);
+        encoder.append(&self.entries);
+        encoder.finalize();
     }
 }
 
@@ -1419,7 +1435,7 @@ impl<T: ssz::Decode> ssz::Decode for BlobEntry<T> {
 }
 
 /// Bounded blob response container.
-#[derive(Clone, Debug, PartialEq, Eq, ssz_derive::Encode)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct BlobsResponse<T> {
     /// One response entry per requested hash.
     pub entries: Vec<BlobEntry<T>>,
@@ -1491,6 +1507,22 @@ impl ssz::Decode for BlobCellsAndProofs {
         }
 
         Ok(Self { blob_cells: raw.blob_cells, proofs: raw.proofs })
+    }
+}
+
+impl<T: ssz::Encode> ssz::Encode for BlobsResponse<T> {
+    fn is_ssz_fixed_len() -> bool {
+        false
+    }
+
+    fn ssz_bytes_len(&self) -> usize {
+        ssz::BYTES_PER_LENGTH_OFFSET + self.entries.ssz_bytes_len()
+    }
+
+    fn ssz_append(&self, buf: &mut Vec<u8>) {
+        let mut encoder = ssz::SszEncoder::container(buf, ssz::BYTES_PER_LENGTH_OFFSET);
+        encoder.append(&self.entries);
+        encoder.finalize();
     }
 }
 
