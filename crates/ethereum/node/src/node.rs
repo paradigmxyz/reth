@@ -37,9 +37,7 @@ use reth_node_builder::{
 };
 use reth_node_core::args::JitArgs;
 use reth_payload_primitives::PayloadTypes;
-use reth_provider::{
-    providers::ProviderFactoryBuilder, CanonChainTracker, EthStorage, ProviderHeader,
-};
+use reth_provider::{providers::ProviderFactoryBuilder, EthStorage};
 use reth_rpc::{
     debug_set_head_rpc_module,
     eth::core::{EthApiFor, EthRpcConverterFor},
@@ -325,7 +323,6 @@ where
     EvmFactoryFor<N::Evm>: EvmFactory<Tx = TxEnv>,
     RpcMiddleware: RethRpcMiddleware,
     AuthHttpMiddleware: RethAuthHttpMiddleware<Identity>,
-    N::Provider: CanonChainTracker<Header = ProviderHeader<N::Provider>>,
 {
     type Handle = RpcHandle<N, EthB::EthApi>;
 
@@ -348,6 +345,7 @@ where
         let testing_skip_invalid_transactions = ctx.config.rpc.testing_skip_invalid_transactions;
         let testing_gas_limit_override = ctx.config.rpc.testing_gas_limit;
         let testing_desired_gas_limit = ctx.config.builder.gas_limit_for(ctx.config.chain.chain());
+        let debug_engine_handle = ctx.beacon_engine_handle.clone();
         let testing_engine_handle = ctx.beacon_engine_handle.clone();
 
         self.inner
@@ -363,7 +361,10 @@ where
 
                 container.modules.add_or_replace_if_module_configured(
                     RethRpcModule::Debug,
-                    debug_set_head_rpc_module(container.registry.provider().clone()),
+                    debug_set_head_rpc_module(
+                        container.registry.provider().clone(),
+                        debug_engine_handle.clone(),
+                    ),
                 )?;
 
                 // testing_buildBlockV1: only wire when the hidden testing module is explicitly
@@ -409,7 +410,6 @@ where
     EvmFactoryFor<N::Evm>: EvmFactory<Tx = TxEnv>,
     RpcMiddleware: RethRpcMiddleware,
     AuthHttpMiddleware: RethAuthHttpMiddleware<Identity>,
-    N::Provider: CanonChainTracker<Header = ProviderHeader<N::Provider>>,
 {
     type EthApi = EthB::EthApi;
 
@@ -448,7 +448,6 @@ where
 impl<N> Node<N> for EthereumNode
 where
     N: FullNodeTypes<Types = Self>,
-    N::Provider: CanonChainTracker<Header = ProviderHeader<N::Provider>>,
 {
     type ComponentsBuilder = ComponentsBuilder<
         N,
@@ -474,7 +473,6 @@ where
 impl<N> DebugNode<N> for EthereumNode
 where
     N: FullNodeComponents<Types = Self>,
-    N::Provider: CanonChainTracker<Header = ProviderHeader<N::Provider>>,
 {
     type RpcBlock = alloy_rpc_types_eth::Block;
 
