@@ -19,7 +19,7 @@ use reth_basic_payload_builder::{
 };
 use reth_chainspec::{ChainSpecProvider, EthChainSpec, EthereumHardforks};
 use reth_consensus_common::validation::MAX_RLP_BLOCK_SIZE;
-use reth_errors::{BlockExecutionError, BlockValidationError, ConsensusError};
+use reth_errors::{BlockExecutionError, BlockValidationError, ConsensusError, ProviderError};
 use reth_ethereum_primitives::{EthPrimitives, TransactionSigned};
 use reth_evm::{
     block::TxResult,
@@ -33,7 +33,7 @@ use reth_payload_builder_primitives::PayloadBuilderError;
 use reth_payload_primitives::PayloadAttributes;
 use reth_primitives_traits::transaction::error::InvalidTransactionError;
 use reth_revm::{database::StateProviderDatabase, db::State};
-use reth_storage_api::{BalProvider, BlockReader, ProviderError, StateProviderFactory};
+use reth_storage_api::{BalProvider, BlockReader, StateProviderFactory};
 use reth_transaction_pool::{
     error::{Eip4844PoolTransactionError, InvalidPoolTransactionError},
     BestTransactions, BestTransactionsAttributes, PoolTransaction, TransactionPool,
@@ -530,29 +530,57 @@ where
     Client: BalProvider + BlockReader,
 {
     let mut warm_accesses = WarmAccessMultiset::default();
-    let start = tip.number.saturating_sub(WARMING_WINDOW.saturating_sub(1));
 
-    for number in start..=tip.number {
-        let hash = if number == tip.number {
-            tip.hash
-        } else {
-            client
-                .block_hash(number)?
-                .ok_or_else(|| ProviderError::HeaderNotFound(number.into()))?
-        };
-
-        let Some(bal) = client.bal_store().get_decoded_by_hash(hash)? else {
-            if block_has_bal_hash(client, hash)? {
-                return Err(PayloadBuilderError::other(missing_expected_bal_error(number, hash)))
+    if tip.number <= WARMING_WINDOW {
+        for number in 1..=tip.number {
+            if let Some(items) = wam_items_for_block(client, number, tip)? {
+                warm_accesses.apply_item_transition(&items, None);
             }
-            continue
-        };
+        }
+    } else {
+        let leaving_number = tip.number - WARMING_WINDOW;
 
-        let items = WamItems::from_accounts(bal.as_bal().as_slice());
-        warm_accesses.apply_item_transition(&items, None);
+        for number in leaving_number..tip.number {
+            if let Some(items) = wam_items_for_block(client, number, tip)? {
+                warm_accesses.apply_item_transition(&items, None);
+            }
+        }
+
+        let add = wam_items_for_block(client, tip.number, tip)?;
+        let remove = wam_items_for_block(client, leaving_number, tip)?;
+
+        if let Some(add) = add {
+            warm_accesses.apply_item_transition(&add, remove.as_ref());
+        } else if let Some(remove) = remove {
+            warm_accesses.apply_item_transition(&WamItems::default(), Some(&remove));
+        }
     }
 
     Ok(CommittedWarmAccessMultiset::from_wam(warm_accesses).root())
+}
+
+fn wam_items_for_block<Client>(
+    client: &Client,
+    number: u64,
+    tip: alloy_eips::BlockNumHash,
+) -> Result<Option<WamItems>, PayloadBuilderError>
+where
+    Client: BalProvider + BlockReader,
+{
+    let hash = if number == tip.number {
+        tip.hash
+    } else {
+        client.block_hash(number)?.ok_or_else(|| ProviderError::HeaderNotFound(number.into()))?
+    };
+
+    let Some(bal) = client.bal_store().get_decoded_by_hash(hash)? else {
+        if block_has_bal_hash(client, hash)? {
+            return Err(PayloadBuilderError::other(missing_expected_bal_error(number, hash)))
+        }
+        return Ok(None)
+    };
+
+    Ok(Some(WamItems::from_accounts(bal.as_bal().as_slice())))
 }
 
 fn block_has_bal_hash<Client>(client: &Client, hash: B256) -> Result<bool, ProviderError>
