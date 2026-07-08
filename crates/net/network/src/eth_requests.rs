@@ -9,10 +9,7 @@ use alloy_eips::BlockHashOrNumber;
 use alloy_rlp::Encodable;
 use futures::StreamExt;
 use reth_eth_wire::{
-    snap::{
-        AccountRangeMessage, BlockAccessListsMessage, ByteCodesMessage, SnapProtocolMessage,
-        StorageRangesMessage,
-    },
+    snap::{BlockAccessListsMessage, SnapProtocolMessage},
     BlockAccessLists, BlockBodies, BlockHeaders, Cells, EthNetworkPrimitives, GetBlockAccessLists,
     GetBlockBodies, GetBlockHeaders, GetCells, GetNodeData, GetReceipts, GetReceipts70,
     HeadersDirection, NetworkPrimitives, NodeData, Receipts, Receipts69, Receipts70,
@@ -389,10 +386,11 @@ where
 
     /// Handles `snap/2` (EIP-8189) requests.
     ///
-    /// There's no state-trie-backed store yet, so `GetAccountRange`/`GetStorageRanges`/
-    /// `GetByteCodes` always answer with an empty (but valid) range. `GetBlockAccessLists` is
-    /// answered from the same [`BalProvider`] store eth71's `GetBlockAccessLists` uses, since both
-    /// serve the same underlying data.
+    /// `GetAccountRange`/`GetStorageRanges`/`GetByteCodes` stay unsupported until a real
+    /// state-trie-backed store exists; an empty response would falsely claim served data.
+    /// `GetBlockAccessLists` is answered from the same [`BalProvider`] store eth71's
+    /// `GetBlockAccessLists` uses, since both serve the same
+    /// underlying data.
     fn on_snap_request(
         &self,
         _peer_id: PeerId,
@@ -402,28 +400,14 @@ where
         self.metrics.snap_requests_received_total.increment(1);
 
         let result = match request {
-            SnapProtocolMessage::GetAccountRange(req) => {
-                Ok(SnapResponse::AccountRange(AccountRangeMessage {
-                    request_id: req.request_id,
-                    accounts: Vec::new(),
-                    proof: Vec::new(),
-                }))
-            }
-            SnapProtocolMessage::GetStorageRanges(req) => {
-                Ok(SnapResponse::StorageRanges(StorageRangesMessage {
-                    request_id: req.request_id,
-                    slots: req.account_hashes.iter().map(|_| Vec::new()).collect(),
-                    proof: Vec::new(),
-                }))
-            }
-            SnapProtocolMessage::GetByteCodes(req) => {
-                Ok(SnapResponse::ByteCodes(ByteCodesMessage {
-                    request_id: req.request_id,
-                    codes: Vec::new(),
-                }))
-            }
-            SnapProtocolMessage::GetBlockAccessLists(req) => {
-                let limit = GetBlockAccessListLimit::ResponseSizeSoftLimit(SOFT_RESPONSE_LIMIT);
+            SnapProtocolMessage::GetAccountRange(_) |
+            SnapProtocolMessage::GetStorageRanges(_) |
+            SnapProtocolMessage::GetByteCodes(_) => Err(RequestError::UnsupportedCapability),
+            SnapProtocolMessage::GetBlockAccessLists(mut req) => {
+                req.block_hashes.truncate(MAX_BLOCK_ACCESS_LISTS_SERVE);
+                let limit = GetBlockAccessListLimit::ResponseSizeSoftLimit(
+                    (req.response_bytes as usize).min(SOFT_RESPONSE_LIMIT),
+                );
                 let block_access_lists = self
                     .client
                     .bal_store()
