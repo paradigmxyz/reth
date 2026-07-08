@@ -50,6 +50,7 @@ use reth_network_api::{
     test_utils::PeersHandle,
     EthProtocolInfo, NetworkEvent, NetworkStatus, PeerInfo, PeerRequest,
 };
+use reth_network_p2p::error::RequestError;
 use reth_network_peers::{NodeRecord, PeerId};
 use reth_network_types::ReputationChangeKind;
 use reth_storage_api::BlockNumReader;
@@ -462,7 +463,8 @@ impl<N: NetworkPrimitives> NetworkManager<N> {
 
     /// Returns a new [`FetchClient`] that can be cloned and shared.
     ///
-    /// The [`FetchClient`] is the entrypoint for sending requests to the network.
+    /// The [`FetchClient`] is the entrypoint for sending requests to the network, including
+    /// `snap/2` requests via its [`SnapClient`](reth_network_p2p::snap::client::SnapClient) impl.
     pub fn fetch_client(&self) -> FetchClient<N> {
         self.swarm.state().fetch_client()
     }
@@ -581,6 +583,10 @@ impl<N: NetworkPrimitives> NetworkManager<N> {
                     request,
                     response,
                 });
+            }
+            PeerRequest::GetSnap { response, .. } => {
+                // No snap/2 server yet, inbound snap/2 requests are not served.
+                let _ = response.send(Err(RequestError::UnsupportedCapability));
             }
         }
     }

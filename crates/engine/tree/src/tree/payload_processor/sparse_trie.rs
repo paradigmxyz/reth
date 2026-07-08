@@ -104,6 +104,8 @@ pub(super) struct SparseTrieCacheTask<A = ArenaParallelSparseTrie, S = ArenaPara
     storage_cache_misses: u64,
     /// Pending proof targets queued for dispatch to proof workers.
     pending_targets: PendingTargets,
+    /// Proof batches dispatched to workers and not yet received.
+    in_flight_proof_batches: usize,
     /// Number of pending execution/prewarming updates received but not yet passed to
     /// `update_leaves`.
     pending_updates: usize,
@@ -168,6 +170,7 @@ where
             storage_cache_hits: 0,
             storage_cache_misses: 0,
             pending_targets: Default::default(),
+            in_flight_proof_batches: Default::default(),
             pending_updates: Default::default(),
             final_hashed_state: Default::default(),
             metrics,
@@ -286,9 +289,9 @@ where
                         unreachable!("we own the sender half")
                     };
 
-                    let mut result = result.result?;
+                    let mut result = self.on_proof_result_message(result)?;
                     while let Ok(next) = self.proof_result_rx.try_recv() {
-                        let res = next.result?;
+                        let res = self.on_proof_result_message(next)?;
                         result.extend(res);
                     }
 
@@ -308,20 +311,18 @@ where
             if self.updates.is_empty() && self.proof_result_rx.is_empty() {
                 // If we don't have any pending messages, we can spend some time on computing
                 // storage roots and promoting account updates.
-                self.dispatch_pending_targets();
+                self.dispatch_pending_targets()?;
                 t = Instant::now();
                 self.process_new_updates()?;
                 self.promote_pending_account_updates()?;
                 self.metrics.sparse_trie_process_updates_duration_histogram.record(t.elapsed());
 
-                if self.finished_state_updates &&
-                    self.account_updates.is_empty() &&
-                    self.storage_updates.iter().all(|(_, updates)| updates.is_empty())
-                {
+                if self.finished_state_updates && !self.has_pending_sparse_trie_updates() {
                     break;
                 }
 
-                self.dispatch_pending_targets();
+                self.dispatch_pending_targets()?;
+                self.ensure_not_stalled()?;
 
                 // If there's still no pending updates spend some time pre-computing the account
                 // trie upper hashes
@@ -333,10 +334,10 @@ where
                 t = Instant::now();
                 self.process_new_updates()?;
                 self.metrics.sparse_trie_process_updates_duration_histogram.record(t.elapsed());
-                self.dispatch_pending_targets();
+                self.dispatch_pending_targets()?;
             } else if self.pending_targets.len() > self.chunk_size {
                 // Make sure to dispatch targets if we've accumulated a lot of them.
-                self.dispatch_pending_targets();
+                self.dispatch_pending_targets()?;
             }
 
             idle_start = Instant::now();
@@ -502,6 +503,18 @@ where
         self.trie
             .reveal_decoded_multiproof_v2(result)
             .map_err(|e| StateRootTaskError::Other(format!("could not reveal multiproof: {e:?}")))
+    }
+
+    fn on_proof_result_message(
+        &mut self,
+        message: ProofResultMessage,
+    ) -> Result<DecodedMultiProofV2, StateRootTaskError> {
+        debug_assert!(
+            self.in_flight_proof_batches > 0,
+            "received proof result without an in-flight proof batch"
+        );
+        self.in_flight_proof_batches = self.in_flight_proof_batches.saturating_sub(1);
+        message.result
     }
 
     fn process_new_updates(&mut self) -> SparseTrieResult<()> {
@@ -788,13 +801,14 @@ where
         Ok(())
     }
 
-    fn dispatch_pending_targets(&mut self) {
+    fn dispatch_pending_targets(&mut self) -> Result<(), StateRootTaskError> {
         if self.pending_targets.is_empty() {
-            return;
+            return Ok(())
         }
 
         let _span = trace_span!("dispatch_pending_targets").entered();
         let (targets, chunking_length) = self.pending_targets.take();
+        let mut dispatch_error = None;
         dispatch_with_chunking(
             targets,
             chunking_length,
@@ -804,20 +818,77 @@ where
             self.proof_worker_handle.has_multiple_idle_storage_workers(),
             MultiProofTargetsV2::chunks,
             |proof_targets| {
-                if let Err(e) =
-                    self.proof_worker_handle.dispatch_account_multiproof(AccountMultiproofInput {
-                        targets: proof_targets,
-                        proof_result_sender: ProofResultContext::new(
-                            self.proof_result_tx.clone(),
-                            HashedPostState::default(),
-                            Instant::now(),
-                        ),
-                    })
-                {
-                    error!("failed to dispatch account multiproof: {e:?}");
+                if dispatch_error.is_some() {
+                    return;
+                }
+
+                match self.proof_worker_handle.dispatch_account_multiproof(AccountMultiproofInput {
+                    targets: proof_targets,
+                    proof_result_sender: ProofResultContext::new(
+                        self.proof_result_tx.clone(),
+                        HashedPostState::default(),
+                        Instant::now(),
+                    ),
+                }) {
+                    Ok(()) => {
+                        self.in_flight_proof_batches += 1;
+                    }
+                    Err(e) => {
+                        error!("failed to dispatch account multiproof: {e:?}");
+                        dispatch_error = Some(StateRootTaskError::Provider(e));
+                    }
                 }
             },
         );
+
+        if let Some(error) = dispatch_error {
+            return Err(error)
+        }
+
+        Ok(())
+    }
+
+    fn has_pending_sparse_trie_updates(&self) -> bool {
+        !self.account_updates.is_empty() ||
+            self.storage_updates.values().any(|updates| !updates.is_empty()) ||
+            !self.pending_account_updates.is_empty()
+    }
+
+    fn ensure_not_stalled(&self) -> Result<(), StateRootTaskError> {
+        if self.finished_state_updates &&
+            self.pending_updates == 0 &&
+            self.pending_targets.is_empty() &&
+            self.in_flight_proof_batches == 0 &&
+            self.proof_result_rx.is_empty() &&
+            self.updates.is_empty() &&
+            self.has_pending_sparse_trie_updates()
+        {
+            let mut account_targets = self
+                .fetched_account_targets
+                .iter()
+                .map(|(target, min_len)| (*target, *min_len))
+                .collect::<Vec<_>>();
+            account_targets.sort_unstable();
+
+            let mut storage_targets = self
+                .fetched_storage_targets
+                .iter()
+                .flat_map(|(address, targets)| {
+                    targets.iter().map(|(target, min_len)| (*address, *target, *min_len))
+                })
+                .collect::<Vec<_>>();
+            storage_targets.sort_unstable();
+
+            error!(
+                ?account_targets,
+                ?storage_targets,
+                "sparse trie task stalled: pending updates remain but no proof targets are queued or in flight"
+            );
+
+            return Err(StateRootTaskError::Stalled)
+        }
+
+        Ok(())
     }
 }
 
@@ -1018,5 +1089,79 @@ mod tests {
         assert_eq!(outcome.state_root, parent_state_root);
         assert!(outcome.trie_updates.is_empty());
         assert!(task.trie.state_trie_ref().is_none(), "blind trie should not be revealed");
+    }
+
+    #[test]
+    fn stall_check_waits_for_in_flight_proofs_then_reports_pending_updates() {
+        let runtime = reth_tasks::Runtime::test();
+        let provider_factory = create_test_provider_factory();
+        let anchor_hash = provider_factory.chain_spec().genesis_hash();
+        let overlay_factory = OverlayStateProviderFactory::new(
+            provider_factory,
+            OverlayBuilder::<reth_chain_state::EthPrimitives>::new(
+                anchor_hash,
+                ChangesetCache::new(),
+            ),
+        );
+        let proof_worker_handle =
+            ProofWorkerHandle::new(&runtime, ProofTaskCtx::new(overlay_factory), false);
+
+        let default_trie = RevealableSparseTrie::blind_from(ArenaParallelSparseTrie::default());
+        let trie = SparseStateTrie::default()
+            .with_accounts_trie(default_trie.clone())
+            .with_default_storage_trie(default_trie)
+            .with_updates(true);
+
+        let (updates_tx, updates_rx) = crossbeam_channel::unbounded();
+        let mut task = SparseTrieCacheTask::new_with_trie(
+            &runtime,
+            updates_rx,
+            std::sync::mpsc::channel().0,
+            proof_worker_handle,
+            MultiProofTaskMetrics::default(),
+            trie,
+            B256::from([0x55; 32]),
+            1,
+        );
+
+        drop(updates_tx);
+
+        let account = B256::from([0x11; 32]);
+        let slot = B256::from([0x22; 32]);
+        let account_target = B256::from([0x33; 32]);
+        let storage_target = B256::from([0x44; 32]);
+
+        task.finished_state_updates = true;
+        task.account_updates.insert(account, LeafUpdate::Touched);
+        task.storage_updates.entry(account).or_default().insert(slot, LeafUpdate::Touched);
+        task.pending_account_updates.insert(account, None);
+        task.fetched_account_targets.insert(account_target, 0);
+        task.fetched_storage_targets.entry(account).or_default().insert(storage_target, 12);
+        task.in_flight_proof_batches = 1;
+
+        assert!(task.ensure_not_stalled().is_ok());
+
+        let result = ProofResultMessage {
+            result: Ok(DecodedMultiProofV2::default()),
+            elapsed: std::time::Duration::ZERO,
+            state: HashedPostState::default(),
+        };
+        task.on_proof_result_message(result).expect("proof result should be ok");
+
+        assert_eq!(task.in_flight_proof_batches, 0);
+        let error = task.ensure_not_stalled().expect_err("task should be stalled");
+        assert!(matches!(error, StateRootTaskError::Stalled));
+        let error = error.to_string();
+
+        assert!(error.contains("sparse trie task stalled"));
+        assert!(!error.contains("account_targets"));
+        assert!(!error.contains("storage_targets"));
+        assert!(!error.contains(&format!("{account:?}")));
+        assert!(!error.contains(&format!("{account_target:?}")));
+        assert!(!error.contains(&format!("{storage_target:?}")));
+        assert!(!error.contains("pending_account_leaves"));
+        assert!(!error.contains("pending_storage_leaves"));
+        assert!(!error.contains("pending_account_updates"));
+        assert!(!error.contains(&format!("{slot:?}")));
     }
 }

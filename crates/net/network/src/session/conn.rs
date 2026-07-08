@@ -3,9 +3,10 @@
 use futures::{Sink, SinkExt, Stream, StreamExt};
 use reth_ecies::stream::ECIESStream;
 use reth_eth_wire::{
-    errors::EthStreamError,
+    errors::{EthStreamError, P2PStreamError},
     message::EthBroadcastMessage,
     multiplex::{ProtocolProxy, RlpxSatelliteStream},
+    snap::SnapProtocolMessage,
     EthMessage, EthNetworkPrimitives, EthSnapMessage, EthSnapStream, EthStream, EthVersion,
     NetworkPrimitives, P2PStream,
 };
@@ -53,6 +54,12 @@ impl<N: NetworkPrimitives> EthRlpxConnection<N> {
             Self::EthSnap(conn) => conn.version(),
             Self::Satellite(conn) => conn.primary().version(),
         }
+    }
+
+    /// Returns `true` if `snap/2` was negotiated on this connection.
+    #[inline]
+    pub(crate) const fn supports_snap(&self) -> bool {
+        matches!(self, Self::EthSnap(_))
     }
 
     /// Consumes this type and returns the wrapped [`P2PStream`].
@@ -104,6 +111,19 @@ impl<N: NetworkPrimitives> EthRlpxConnection<N> {
             Self::EthOnly(conn) => conn.start_send_raw(msg),
             Self::EthSnap(conn) => conn.start_send_raw(msg),
             Self::Satellite(conn) => conn.primary_mut().start_send_raw(msg),
+        }
+    }
+
+    /// Queues a `snap/2` message to be sent on the wire.
+    ///
+    /// Returns an error on connections that did not negotiate `snap/2`, so a caller never believes
+    /// a request was sent when it was discarded.
+    pub fn start_send_snap(&mut self, msg: SnapProtocolMessage) -> Result<(), EthStreamError> {
+        match self {
+            Self::EthSnap(conn) => conn.start_send_unpin(EthSnapMessage::Snap(msg)),
+            Self::EthOnly(_) | Self::Satellite(_) => {
+                Err(P2PStreamError::CapabilityNotShared.into())
+            }
         }
     }
 
