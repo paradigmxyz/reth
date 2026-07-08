@@ -362,7 +362,7 @@ impl ProofWorkerHandle {
                     input.into_proof_result_sender();
 
                 let _ = result_tx.send(ProofResultMessage {
-                    result: Err(StateRootTaskError::Provider(error.clone())),
+                    result: Err(StateRootTaskError::ProofDispatch(error.clone())),
                     elapsed: start.elapsed(),
                     state,
                 });
