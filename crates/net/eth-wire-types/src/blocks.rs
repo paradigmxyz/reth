@@ -298,6 +298,7 @@ mod tests {
                     requests_hash: None,
                     block_access_list_hash: None,
                     slot_number: None,
+                    wam_root: None,
                 },
             ]),
         }.encode(&mut data);
@@ -337,6 +338,7 @@ mod tests {
                     requests_hash: None,
                     block_access_list_hash: None,
                     slot_number: None,
+                    wam_root: None,
                 },
             ]),
         };
@@ -445,6 +447,7 @@ mod tests {
                             requests_hash: None,
                             block_access_list_hash: None,
                             slot_number: None,
+                            wam_root: None,
                         },
                     ],
                     withdrawals: None,
@@ -524,6 +527,7 @@ mod tests {
                             requests_hash: None,
                             block_access_list_hash: None,
                             slot_number: None,
+                            wam_root: None,
                         },
                     ],
                     withdrawals: None,
