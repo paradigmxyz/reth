@@ -11,6 +11,9 @@ pub enum StateRootTaskError {
     /// Sparse trie error.
     #[error(transparent)]
     SparseTrie(#[from] SparseTrieError),
+    /// Sparse trie task stalled.
+    #[error("sparse trie task stalled")]
+    Stalled,
     /// Other unspecified error.
     #[error("{_0}")]
     Other(String),

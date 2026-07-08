@@ -860,29 +860,36 @@ where
             self.updates.is_empty() &&
             self.has_pending_sparse_trie_updates()
         {
-            let mut account_targets = self
-                .fetched_account_targets
-                .iter()
-                .map(|(target, min_len)| (*target, *min_len))
-                .collect::<Vec<_>>();
-            account_targets.sort_unstable();
-
-            let mut storage_targets = self
-                .fetched_storage_targets
-                .iter()
-                .flat_map(|(address, targets)| {
-                    targets.iter().map(|(target, min_len)| (*address, *target, *min_len))
-                })
-                .collect::<Vec<_>>();
-            storage_targets.sort_unstable();
-
-            return Err(StateRootTaskError::Other(format!(
-                "sparse trie task stalled: pending updates remain but no proof targets are queued or in flight; \
-                 account_targets={account_targets:?}, storage_targets={storage_targets:?}",
-            )))
+            return Err(self.stalled_error())
         }
 
         Ok(())
+    }
+
+    fn stalled_error(&self) -> StateRootTaskError {
+        let mut account_targets = self
+            .fetched_account_targets
+            .iter()
+            .map(|(target, min_len)| (*target, *min_len))
+            .collect::<Vec<_>>();
+        account_targets.sort_unstable();
+
+        let mut storage_targets = self
+            .fetched_storage_targets
+            .iter()
+            .flat_map(|(address, targets)| {
+                targets.iter().map(|(target, min_len)| (*address, *target, *min_len))
+            })
+            .collect::<Vec<_>>();
+        storage_targets.sort_unstable();
+
+        error!(
+            ?account_targets,
+            ?storage_targets,
+            "sparse trie task stalled: pending updates remain but no proof targets are queued or in flight"
+        );
+
+        StateRootTaskError::Stalled
     }
 }
 
@@ -1143,14 +1150,16 @@ mod tests {
         task.on_proof_result_message(result).expect("proof result should be ok");
 
         assert_eq!(task.in_flight_proof_batches, 0);
-        let error = task.ensure_not_stalled().expect_err("task should be stalled").to_string();
+        let error = task.ensure_not_stalled().expect_err("task should be stalled");
+        assert!(matches!(error, StateRootTaskError::Stalled));
+        let error = error.to_string();
 
         assert!(error.contains("sparse trie task stalled"));
-        assert!(error.contains("account_targets"));
-        assert!(error.contains("storage_targets"));
-        assert!(error.contains(&format!("{account:?}")));
-        assert!(error.contains(&format!("{account_target:?}")));
-        assert!(error.contains(&format!("{storage_target:?}")));
+        assert!(!error.contains("account_targets"));
+        assert!(!error.contains("storage_targets"));
+        assert!(!error.contains(&format!("{account:?}")));
+        assert!(!error.contains(&format!("{account_target:?}")));
+        assert!(!error.contains(&format!("{storage_target:?}")));
         assert!(!error.contains("pending_account_leaves"));
         assert!(!error.contains("pending_storage_leaves"));
         assert!(!error.contains("pending_account_updates"));
