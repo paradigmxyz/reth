@@ -1,4 +1,4 @@
-use crate::EthVersion;
+use crate::{BlockRangeUpdate, EthVersion};
 use alloy_chains::{Chain, NamedChain};
 use alloy_hardforks::{EthereumHardfork, ForkId, Head};
 use alloy_primitives::{hex, B256, U256};
@@ -76,6 +76,19 @@ impl UnifiedStatus {
     pub const fn set_history_range(&mut self, earliest: u64, latest: u64) {
         self.earliest_block = Some(earliest);
         self.latest_block = Some(latest);
+    }
+
+    /// Returns the peer's advertised `BlockRangeUpdate` if this status came from an `eth/69+`
+    /// handshake.
+    pub fn block_range_update(&self) -> Option<BlockRangeUpdate> {
+        (self.version >= EthVersion::Eth69)
+            .then_some(())
+            .and_then(|_| self.earliest_block.zip(self.latest_block))
+            .map(|(earliest, latest)| BlockRangeUpdate {
+                earliest,
+                latest,
+                latest_hash: self.blockhash,
+            })
     }
 
     /// Sets the [`EthVersion`] for the status.
@@ -457,7 +470,7 @@ impl Display for StatusMessage {
 }
 #[cfg(test)]
 mod tests {
-    use crate::{EthVersion, Status, StatusEth69, StatusMessage, UnifiedStatus};
+    use crate::{BlockRangeUpdate, EthVersion, Status, StatusEth69, StatusMessage, UnifiedStatus};
     use alloy_consensus::constants::MAINNET_GENESIS_HASH;
     use alloy_genesis::Genesis;
     use alloy_hardforks::{EthereumHardfork, ForkHash, ForkId, Head};
@@ -562,6 +575,30 @@ mod tests {
         let status_message = unified_status.into_message();
         let roundtripped_unified_status = UnifiedStatus::from_message(status_message);
         assert_eq!(unified_status, roundtripped_unified_status);
+    }
+
+    #[test]
+    fn block_range_update_for_eth69_status() {
+        let latest_hash =
+            b256!("0xfeb27336ca7923f8fab3bd617fcb6e75841538f71c1bcfc267d7838489d9e13d");
+        let status = UnifiedStatus::builder()
+            .version(EthVersion::Eth69)
+            .earliest_block(Some(10))
+            .latest_block(Some(20))
+            .blockhash(latest_hash)
+            .build();
+
+        assert_eq!(
+            status.block_range_update(),
+            Some(BlockRangeUpdate { earliest: 10, latest: 20, latest_hash })
+        );
+    }
+
+    #[test]
+    fn block_range_update_is_none_for_legacy_status() {
+        let status = UnifiedStatus::builder().version(EthVersion::Eth68).build();
+
+        assert!(status.block_range_update().is_none());
     }
 
     #[test]

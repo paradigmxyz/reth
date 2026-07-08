@@ -581,21 +581,31 @@ mod tests {
         assert_eq!(pool.len(), 2);
         // two dependent tx in the pool with decreasing fee
 
-        {
-            // TODO: test change might not be intended, re review
-            let mut pool2 = pool.clone();
-            let removed = pool2.enforce_basefee(root_tx.max_fee_per_gas() as u64);
-            assert_eq!(removed.len(), 1);
-            assert_eq!(pool2.len(), 1);
-            // root got popped - descendant should be skipped
-            assert!(!pool2.contains(root_tx.id()));
-            assert!(pool2.contains(descendant_tx.id()));
-        }
-
         // remove root transaction via descendant tx fee
         let removed = pool.enforce_basefee(descendant_tx.max_fee_per_gas() as u64);
         assert_eq!(removed.len(), 2);
         assert!(pool.is_empty());
+    }
+
+    #[test]
+    fn test_enforce_parked_basefee_removes_only_eligible_ancestor() {
+        let mut f = MockTransactionFactory::default();
+        let mut pool = ParkedPool::<BasefeeOrd<_>>::default();
+        let t = MockTransaction::eip1559().inc_price_by(10);
+
+        let root_tx = f.validated_arc(t.clone());
+        pool.add_transaction(root_tx.clone());
+
+        let descendant_tx = f.validated_arc(t.inc_nonce().decr_price());
+        pool.add_transaction(descendant_tx.clone());
+
+        let removed = pool.enforce_basefee(root_tx.max_fee_per_gas() as u64);
+
+        assert_eq!(removed.len(), 1);
+        assert_eq!(removed[0].id(), root_tx.id());
+        assert_eq!(pool.len(), 1);
+        assert!(!pool.contains(root_tx.id()));
+        assert!(pool.contains(descendant_tx.id()));
     }
 
     #[test]

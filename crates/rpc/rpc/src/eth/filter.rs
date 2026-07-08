@@ -564,7 +564,10 @@ where
                 if let Some(t) = to &&
                     t > info.best_number
                 {
-                    return Err(EthFilterError::BlockRangeExceedsHead);
+                    return Err(EthFilterError::BlockRangeExceedsHead {
+                        requested: t,
+                        head: info.best_number,
+                    });
                 }
 
                 if let Some(f) = from &&
@@ -734,18 +737,21 @@ where
                 is_multi_block_range &&
                 all_logs.len() > max_logs_per_response
             {
+                let retry_to_block =
+                    if num_hash.number == from_block { from_block } else { num_hash.number - 1 };
+
                 debug!(
                     target: "rpc::eth::filter",
                     logs_found = all_logs.len(),
                     max_logs_per_response,
                     from_block,
-                    to_block = num_hash.number,
+                    to_block = retry_to_block,
                     "Query exceeded max logs per response limit"
                 );
                 return Err(EthFilterError::QueryExceedsMaxResults {
                     max_logs: max_logs_per_response,
                     from_block,
-                    to_block: num_hash.number,
+                    to_block: retry_to_block,
                 });
             }
         }
@@ -942,8 +948,13 @@ pub enum EthFilterError {
     #[error("invalid block range params")]
     InvalidBlockRangeParams,
     /// Block range extends beyond current head.
-    #[error("block range extends beyond current head block")]
-    BlockRangeExceedsHead,
+    #[error("block range extends beyond current head block: requested {requested}, head {head}")]
+    BlockRangeExceedsHead {
+        /// The requested `toBlock` number
+        requested: u64,
+        /// The current head block number
+        head: u64,
+    },
     /// Query scope is too broad.
     #[error("query exceeds max block range {0}")]
     QueryExceedsMaxBlocks(u64),
@@ -979,7 +990,7 @@ impl From<EthFilterError> for jsonrpsee::types::error::ErrorObject<'static> {
             err @ (EthFilterError::InvalidBlockRangeParams |
             EthFilterError::QueryExceedsMaxBlocks(_) |
             EthFilterError::QueryExceedsMaxResults { .. } |
-            EthFilterError::BlockRangeExceedsHead) => {
+            EthFilterError::BlockRangeExceedsHead { .. }) => {
                 rpc_error_with_code(jsonrpsee::types::error::INVALID_PARAMS_CODE, err.to_string())
             }
         }
@@ -996,7 +1007,9 @@ impl From<logs_utils::FilterBlockRangeError> for EthFilterError {
     fn from(err: logs_utils::FilterBlockRangeError) -> Self {
         match err {
             logs_utils::FilterBlockRangeError::InvalidBlockRange => Self::InvalidBlockRangeParams,
-            logs_utils::FilterBlockRangeError::BlockRangeExceedsHead => Self::BlockRangeExceedsHead,
+            logs_utils::FilterBlockRangeError::BlockRangeExceedsHead { requested, head } => {
+                Self::BlockRangeExceedsHead { requested, head }
+            }
         }
     }
 }
@@ -1804,6 +1817,87 @@ mod tests {
         // should immediately return None for empty headers
         let result = cached_mode.next().await.expect("next should succeed");
         assert!(result.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_log_limit_retry_range_excludes_overflow_block() {
+        let provider = MockEthProvider::default();
+
+        use alloy_consensus::TxLegacy;
+        use reth_db_api::models::StoredBlockBodyIndices;
+        use reth_ethereum_primitives::{TransactionSigned, TxType};
+
+        let tx_inner = TxLegacy {
+            chain_id: Some(1),
+            nonce: 0,
+            gas_price: 21_000,
+            gas_limit: 21_000,
+            to: alloy_primitives::TxKind::Call(alloy_primitives::Address::ZERO),
+            value: alloy_primitives::U256::ZERO,
+            input: alloy_primitives::Bytes::new(),
+        };
+        let signature = alloy_primitives::Signature::test_signature();
+        let tx = TransactionSigned::new_unhashed(tx_inner.into(), signature);
+
+        let mock_log = alloy_primitives::Log {
+            address: alloy_primitives::Address::ZERO,
+            data: alloy_primitives::LogData::new_unchecked(vec![], alloy_primitives::Bytes::new()),
+        };
+
+        let receipt = reth_ethereum_primitives::Receipt {
+            tx_type: TxType::Legacy,
+            cumulative_gas_used: 21_000,
+            logs: vec![mock_log],
+            success: true,
+        };
+
+        let mut prev_hash = alloy_primitives::B256::default();
+        for (idx, block_number) in (100u64..=102).enumerate() {
+            let header = alloy_consensus::Header {
+                number: block_number,
+                parent_hash: prev_hash,
+                logs_bloom: alloy_primitives::Bloom::from([1u8; 256]),
+                ..Default::default()
+            };
+            let hash = header.hash_slow();
+            prev_hash = hash;
+
+            let block = reth_ethereum_primitives::Block {
+                header,
+                body: reth_ethereum_primitives::BlockBody {
+                    transactions: vec![tx.clone()],
+                    ..Default::default()
+                },
+            };
+            provider.add_block(hash, block);
+            provider.add_receipts(block_number, vec![receipt.clone()]);
+            provider.add_block_body_indices(
+                block_number,
+                StoredBlockBodyIndices { first_tx_num: idx as u64, tx_count: 1 },
+            );
+        }
+
+        let eth_api = build_test_eth_api(provider);
+        let eth_filter = EthFilter::new(eth_api, EthFilterConfig::default(), Runtime::test());
+        let err = eth_filter
+            .inner
+            .clone()
+            .get_logs_in_block_range(
+                Filter::default(),
+                100,
+                102,
+                QueryLimits { max_blocks_per_filter: None, max_logs_per_response: Some(2) },
+            )
+            .await
+            .expect_err("range should exceed max logs");
+
+        let EthFilterError::QueryExceedsMaxResults { max_logs, from_block, to_block } = err else {
+            panic!("unexpected error: {err:?}");
+        };
+
+        assert_eq!(max_logs, 2);
+        assert_eq!(from_block, 100);
+        assert_eq!(to_block, 101);
     }
 
     #[tokio::test]

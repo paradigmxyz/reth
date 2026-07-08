@@ -71,6 +71,7 @@ pub struct DefaultRpcServerArgs {
     auth_ipc_path: String,
     disable_auth_server: bool,
     rpc_jwtsecret: Option<JwtSecret>,
+    rpc_disable_metrics: bool,
     rpc_max_request_size: MaxU32,
     rpc_max_response_size: MaxU32,
     rpc_max_subscriptions_per_connection: MaxU32,
@@ -84,6 +85,7 @@ pub struct DefaultRpcServerArgs {
     rpc_evm_memory_limit: u64,
     rpc_tx_fee_cap: u128,
     rpc_max_simulate_blocks: u64,
+    rpc_compute_state_root_for_eth_simulate: bool,
     rpc_eth_proof_window: u64,
     rpc_proof_permits: usize,
     rpc_pending_block: PendingBlockKind,
@@ -231,6 +233,12 @@ impl DefaultRpcServerArgs {
         self
     }
 
+    /// Set whether to disable RPC request metrics by default
+    pub const fn with_rpc_disable_metrics(mut self, v: bool) -> Self {
+        self.rpc_disable_metrics = v;
+        self
+    }
+
     /// Set the default max request size
     pub const fn with_rpc_max_request_size(mut self, v: MaxU32) -> Self {
         self.rpc_max_request_size = v;
@@ -309,6 +317,12 @@ impl DefaultRpcServerArgs {
         self
     }
 
+    /// Set whether to compute state roots for `eth_simulateV1` responses by default.
+    pub const fn with_rpc_compute_state_root_for_eth_simulate(mut self, v: bool) -> Self {
+        self.rpc_compute_state_root_for_eth_simulate = v;
+        self
+    }
+
     /// Set the default eth proof window
     pub const fn with_rpc_eth_proof_window(mut self, v: u64) -> Self {
         self.rpc_eth_proof_window = v;
@@ -382,6 +396,7 @@ impl Default for DefaultRpcServerArgs {
             auth_ipc_path: constants::DEFAULT_ENGINE_API_IPC_ENDPOINT.to_string(),
             disable_auth_server: false,
             rpc_jwtsecret: None,
+            rpc_disable_metrics: false,
             rpc_max_request_size: RPC_DEFAULT_MAX_REQUEST_SIZE_MB.into(),
             rpc_max_response_size: RPC_DEFAULT_MAX_RESPONSE_SIZE_MB.into(),
             rpc_max_subscriptions_per_connection: RPC_DEFAULT_MAX_SUBS_PER_CONN.into(),
@@ -395,6 +410,7 @@ impl Default for DefaultRpcServerArgs {
             rpc_evm_memory_limit: (1 << 32) - 1,
             rpc_tx_fee_cap: constants::DEFAULT_TX_FEE_CAP_WEI,
             rpc_max_simulate_blocks: constants::DEFAULT_MAX_SIMULATE_BLOCKS,
+            rpc_compute_state_root_for_eth_simulate: false,
             rpc_eth_proof_window: constants::DEFAULT_ETH_PROOF_WINDOW,
             rpc_proof_permits: constants::DEFAULT_PROOF_PERMITS,
             rpc_pending_block: PendingBlockKind::Full,
@@ -511,6 +527,10 @@ pub struct RpcServerArgs {
     #[arg(long = "rpc.jwtsecret", value_name = "HEX", global = true, required = false, default_value = Resettable::from(DefaultRpcServerArgs::get_global().rpc_jwtsecret.as_ref().map(|v| format!("{:?}", v).into())))]
     pub rpc_jwtsecret: Option<JwtSecret>,
 
+    /// Disable built-in RPC request metrics.
+    #[arg(long = "rpc.disable-metrics", default_value_t = DefaultRpcServerArgs::get_global().rpc_disable_metrics)]
+    pub rpc_disable_metrics: bool,
+
     /// Set the maximum RPC request payload size for both HTTP and WS in megabytes.
     #[arg(long = "rpc.max-request-size", alias = "rpc-max-request-size", default_value_t = DefaultRpcServerArgs::get_global().rpc_max_request_size)]
     pub rpc_max_request_size: MaxU32,
@@ -594,6 +614,14 @@ pub struct RpcServerArgs {
     )]
     pub rpc_max_simulate_blocks: u64,
 
+    /// Compute state roots for `eth_simulateV1` responses.
+    #[arg(
+        long = "rpc.compute-state-root-for-eth-simulate",
+        env = "RETH_RPC_COMPUTE_STATE_ROOT_FOR_ETH_SIMULATE",
+        default_value_t = DefaultRpcServerArgs::get_global().rpc_compute_state_root_for_eth_simulate
+    )]
+    pub rpc_compute_state_root_for_eth_simulate: bool,
+
     /// The maximum proof window for historical proof generation.
     /// This value allows for generating historical proofs up to
     /// configured number of blocks from current tip (up to `tip - window`).
@@ -648,18 +676,10 @@ pub struct RpcServerArgs {
     #[arg(long = "testing.skip-invalid-transactions", default_value_t = true)]
     pub testing_skip_invalid_transactions: bool,
 
-    /// Skip the 1/1024 gas limit change restriction between parent and child blocks.
-    ///
-    /// When enabled, consensus will not enforce the gas limit bound divisor check,
-    /// allowing blocks to jump to an arbitrary gas limit without ramping up over
-    /// thousands of empty blocks.
-    #[arg(long = "testing.skip-gas-limit-ramp-check", default_value_t = false, hide = true)]
-    pub testing_skip_gas_limit_ramp_check: bool,
-
     /// Override the gas limit used by `testing_buildBlockV1`.
     ///
-    /// When set, `testing_buildBlockV1` will use this value instead of inheriting
-    /// the parent block's gas limit. Accepts short notation: K for thousand, M for
+    /// When set, `testing_buildBlockV1` will use this exact value instead of moving toward the
+    /// payload builder's configured gas limit. Accepts short notation: K for thousand, M for
     /// million, G for billion (e.g., 1G = 1 billion).
     #[arg(long = "testing.gas-limit", value_name = "GAS_LIMIT", hide = true)]
     pub testing_gas_limit: Option<u64>,
@@ -836,6 +856,7 @@ impl Default for RpcServerArgs {
             auth_ipc_path,
             disable_auth_server,
             rpc_jwtsecret,
+            rpc_disable_metrics,
             rpc_max_request_size,
             rpc_max_response_size,
             rpc_max_subscriptions_per_connection,
@@ -849,6 +870,7 @@ impl Default for RpcServerArgs {
             rpc_evm_memory_limit,
             rpc_tx_fee_cap,
             rpc_max_simulate_blocks,
+            rpc_compute_state_root_for_eth_simulate,
             rpc_eth_proof_window,
             rpc_proof_permits,
             rpc_pending_block,
@@ -880,6 +902,7 @@ impl Default for RpcServerArgs {
             auth_ipc_path,
             disable_auth_server,
             rpc_jwtsecret,
+            rpc_disable_metrics,
             rpc_max_request_size,
             rpc_max_response_size,
             rpc_max_subscriptions_per_connection,
@@ -893,6 +916,7 @@ impl Default for RpcServerArgs {
             rpc_evm_memory_limit,
             rpc_tx_fee_cap,
             rpc_max_simulate_blocks,
+            rpc_compute_state_root_for_eth_simulate,
             rpc_eth_proof_window,
             rpc_proof_permits,
             rpc_pending_block,
@@ -902,7 +926,6 @@ impl Default for RpcServerArgs {
             gas_price_oracle,
             rpc_send_raw_transaction_sync_timeout,
             testing_skip_invalid_transactions: true,
-            testing_skip_gas_limit_ramp_check: false,
             testing_gas_limit: None,
             rpc_force_blob_sidecar_upcasting: false,
         }
@@ -991,6 +1014,16 @@ mod tests {
     }
 
     #[test]
+    fn test_rpc_disable_metrics_arg() {
+        let args = CommandParser::<RpcServerArgs>::parse_from(["reth"]).args;
+        assert!(!args.rpc_disable_metrics);
+
+        let args =
+            CommandParser::<RpcServerArgs>::parse_from(["reth", "--rpc.disable-metrics"]).args;
+        assert!(args.rpc_disable_metrics);
+    }
+
+    #[test]
     fn test_rpc_tx_fee_cap_parse_integer() {
         let args = CommandParser::<RpcServerArgs>::parse_from(["reth", "--rpc.txfeecap", "2"]).args;
         let expected = 2_000_000_000_000_000_000u128; // 2 ETH in wei
@@ -1047,6 +1080,7 @@ mod tests {
                 )
                 .unwrap(),
             ),
+            rpc_disable_metrics: false,
             rpc_max_request_size: 15u32.into(),
             rpc_max_response_size: 160u32.into(),
             rpc_max_subscriptions_per_connection: 1024u32.into(),
@@ -1060,6 +1094,7 @@ mod tests {
             rpc_evm_memory_limit: 256,
             rpc_tx_fee_cap: 2_000_000_000_000_000_000u128,
             rpc_max_simulate_blocks: 256,
+            rpc_compute_state_root_for_eth_simulate: false,
             rpc_eth_proof_window: 100_000,
             rpc_proof_permits: 16,
             rpc_pending_block: PendingBlockKind::Full,
@@ -1069,6 +1104,7 @@ mod tests {
                 max_blocks: 5000,
                 max_receipts: 2000,
                 max_headers: 1000,
+                max_bals: 1000,
                 max_concurrent_db_requests: 512,
                 max_cached_tx_hashes: 30_000,
             },
@@ -1081,7 +1117,6 @@ mod tests {
             },
             rpc_send_raw_transaction_sync_timeout: std::time::Duration::from_secs(30),
             testing_skip_invalid_transactions: true,
-            testing_skip_gas_limit_ramp_check: false,
             testing_gas_limit: None,
             rpc_force_blob_sidecar_upcasting: false,
         };
@@ -1159,6 +1194,8 @@ mod tests {
             "--rpc-cache.max-receipts",
             "2000",
             "--rpc-cache.max-headers",
+            "1000",
+            "--rpc-cache.max-bals",
             "1000",
             "--rpc-cache.max-concurrent-db-requests",
             "512",

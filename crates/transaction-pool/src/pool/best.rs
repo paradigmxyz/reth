@@ -7,9 +7,11 @@ use crate::{
 use alloy_consensus::Transaction;
 use alloy_primitives::map::AddressSet;
 use core::fmt;
+use imbl::OrdMap;
 use reth_primitives_traits::transaction::error::InvalidTransactionError;
+use rustc_hash::FxHashSet;
 use std::{
-    collections::{BTreeMap, BTreeSet, HashSet, VecDeque},
+    collections::{BTreeSet, VecDeque},
     sync::Arc,
 };
 use tokio::sync::broadcast::{error::TryRecvError, Receiver};
@@ -31,7 +33,7 @@ pub(crate) struct BestTransactionsWithFees<T: TransactionOrdering> {
 }
 
 impl<T: TransactionOrdering> crate::traits::BestTransactions for BestTransactionsWithFees<T> {
-    fn mark_invalid(&mut self, tx: &Self::Item, kind: &InvalidPoolTransactionError) {
+    fn mark_invalid(&mut self, tx: &Self::Item, kind: InvalidPoolTransactionError) {
         BestTransactions::mark_invalid(&mut self.best, tx, kind)
     }
 
@@ -67,9 +69,14 @@ impl<T: TransactionOrdering> Iterator for BestTransactionsWithFees<T> {
             crate::traits::BestTransactions::mark_invalid(
                 self,
                 &best,
-                &InvalidPoolTransactionError::Underpriced,
+                InvalidPoolTransactionError::Underpriced,
             );
         }
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        let (_, upper) = self.best.size_hint();
+        (0, upper)
     }
 }
 
@@ -84,14 +91,14 @@ impl<T: TransactionOrdering> Iterator for BestTransactionsWithFees<T> {
 pub struct BestTransactions<T: TransactionOrdering> {
     /// Contains a copy of _all_ transactions of the pending pool at the point in time this
     /// iterator was created.
-    pub(crate) all: BTreeMap<TransactionId, PendingTransaction<T>>,
+    pub(crate) all: OrdMap<TransactionId, PendingTransaction<T>>,
     /// Transactions that can be executed right away: these have the expected nonce.
     ///
     /// Once an `independent` transaction with the nonce `N` is returned, it unlocks `N+1`, which
     /// then can be moved from the `all` set to the `independent` set.
     pub(crate) independent: BTreeSet<PendingTransaction<T>>,
     /// There might be the case where a yielded transactions is invalid, this will track it.
-    pub(crate) invalid: HashSet<SenderId>,
+    pub(crate) invalid: FxHashSet<SenderId>,
     /// Used to receive any new pending transactions that have been added to the pool after this
     /// iterator was static filtered
     ///
@@ -111,7 +118,7 @@ impl<T: TransactionOrdering> BestTransactions<T> {
     pub(crate) fn mark_invalid(
         &mut self,
         tx: &Arc<ValidPoolTransaction<T::Transaction>>,
-        _kind: &InvalidPoolTransactionError,
+        _kind: InvalidPoolTransactionError,
     ) {
         self.invalid.insert(tx.sender_id());
     }
@@ -190,7 +197,7 @@ impl<T: TransactionOrdering> BestTransactions<T> {
     }
 
     /// Returns the next best transaction and its priority value.
-    #[allow(clippy::type_complexity)]
+    #[expect(clippy::type_complexity)]
     pub fn next_tx_and_priority(
         &mut self,
     ) -> Option<(Arc<ValidPoolTransaction<T::Transaction>>, Priority<T::PriorityValue>)> {
@@ -220,7 +227,7 @@ impl<T: TransactionOrdering> BestTransactions<T> {
                 // transactions are returned
                 self.mark_invalid(
                     &best.transaction,
-                    &InvalidPoolTransactionError::Eip4844(
+                    InvalidPoolTransactionError::Eip4844(
                         Eip4844PoolTransactionError::NoEip4844Blobs,
                     ),
                 )
@@ -262,7 +269,7 @@ enum IncomingTransaction<T: TransactionOrdering> {
 }
 
 impl<T: TransactionOrdering> crate::traits::BestTransactions for BestTransactions<T> {
-    fn mark_invalid(&mut self, tx: &Self::Item, kind: &InvalidPoolTransactionError) {
+    fn mark_invalid(&mut self, tx: &Self::Item, kind: InvalidPoolTransactionError) {
         Self::mark_invalid(self, tx, kind)
     }
 
@@ -285,6 +292,10 @@ impl<T: TransactionOrdering> Iterator for BestTransactions<T> {
 
     fn next(&mut self) -> Option<Self::Item> {
         self.next_tx_and_priority().map(|(tx, _)| tx)
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        (0, self.new_transaction_receiver.is_none().then_some(self.all.len()))
     }
 }
 
@@ -320,11 +331,14 @@ where
             }
             self.best.mark_invalid(
                 &best,
-                &InvalidPoolTransactionError::Consensus(
-                    InvalidTransactionError::TxTypeNotSupported,
-                ),
+                InvalidPoolTransactionError::Consensus(InvalidTransactionError::TxTypeNotSupported),
             );
         }
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        let (_, upper) = self.best.size_hint();
+        (0, upper)
     }
 }
 
@@ -333,7 +347,7 @@ where
     I: crate::traits::BestTransactions,
     P: FnMut(&<I as Iterator>::Item) -> bool + Send,
 {
-    fn mark_invalid(&mut self, tx: &Self::Item, kind: &InvalidPoolTransactionError) {
+    fn mark_invalid(&mut self, tx: &Self::Item, kind: InvalidPoolTransactionError) {
         crate::traits::BestTransactions::mark_invalid(&mut self.best, tx, kind)
     }
 
@@ -415,6 +429,16 @@ where
             self.inner.next()
         }
     }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        let buffered = self.buffer.len();
+        let (inner_lower, inner_upper) = self.inner.size_hint();
+
+        (
+            buffered.saturating_add(inner_lower),
+            inner_upper.and_then(|upper| upper.checked_add(buffered)),
+        )
+    }
 }
 
 impl<I, T> crate::traits::BestTransactions for BestTransactionsWithPrioritizedSenders<I>
@@ -422,7 +446,7 @@ where
     I: crate::traits::BestTransactions<Item = Arc<ValidPoolTransaction<T>>>,
     T: PoolTransaction,
 {
-    fn mark_invalid(&mut self, tx: &Self::Item, kind: &InvalidPoolTransactionError) {
+    fn mark_invalid(&mut self, tx: &Self::Item, kind: InvalidPoolTransactionError) {
         self.inner.mark_invalid(tx, kind)
     }
 
@@ -474,6 +498,90 @@ mod tests {
     }
 
     #[test]
+    fn test_best_transactions_size_hint() {
+        let mut pool = PendingPool::new(MockOrdering::default());
+        let mut f = MockTransactionFactory::default();
+
+        for nonce in 0..3 {
+            let tx = MockTransaction::eip1559().rng_hash().with_nonce(nonce);
+            pool.add_transaction(Arc::new(f.validated(tx)), 0);
+        }
+
+        let mut best = pool.best();
+        assert_eq!(best.size_hint(), (0, None));
+
+        best.no_updates();
+        assert_eq!(best.size_hint(), (0, Some(3)));
+
+        assert_eq!(best.next().unwrap().nonce(), 0);
+        assert_eq!(best.size_hint(), (0, Some(2)));
+    }
+
+    #[test]
+    fn test_best_transactions_with_fees_size_hint() {
+        let mut pool = PendingPool::new(MockOrdering::default());
+        let mut f = MockTransactionFactory::default();
+
+        for nonce in 0..3 {
+            let tx = MockTransaction::eip1559().rng_hash().with_nonce(nonce).with_max_fee(100);
+            pool.add_transaction(Arc::new(f.validated(tx)), 0);
+        }
+
+        let mut best = pool.best_with_basefee_and_blobfee(10, 0);
+        best.no_updates();
+
+        assert_eq!(best.size_hint(), (0, Some(3)));
+        assert_eq!(best.next().unwrap().nonce(), 0);
+        assert_eq!(best.size_hint(), (0, Some(2)));
+    }
+
+    #[test]
+    fn test_best_transaction_filter_size_hint() {
+        let mut pool = PendingPool::new(MockOrdering::default());
+        let mut f = MockTransactionFactory::default();
+
+        for nonce in 0..3 {
+            let tx = MockTransaction::eip1559().rng_hash().with_nonce(nonce);
+            pool.add_transaction(Arc::new(f.validated(tx)), 0);
+        }
+
+        let best = pool.best().without_updates();
+        let mut filter =
+            BestTransactionFilter::new(best, |_: &Arc<ValidPoolTransaction<MockTransaction>>| {
+                false
+            });
+
+        assert_eq!(filter.size_hint(), (0, Some(3)));
+        assert!(filter.next().is_none());
+        assert_eq!(filter.size_hint(), (0, Some(0)));
+    }
+
+    #[test]
+    fn test_best_transactions_with_prioritized_senders_size_hint() {
+        let mut pool = PendingPool::new(MockOrdering::default());
+        let mut f = MockTransactionFactory::default();
+
+        for gas_price in 0..5 {
+            let tx = MockTransaction::eip1559().with_gas_price((gas_price + 1) * 10);
+            pool.add_transaction(Arc::new(f.validated(tx)), 0);
+        }
+
+        let prioritized_tx = MockTransaction::eip1559().with_gas_price(5).with_gas_limit(200);
+        let prioritized_sender = prioritized_tx.sender();
+        pool.add_transaction(Arc::new(f.validated(prioritized_tx)), 0);
+
+        let mut best = BestTransactionsWithPrioritizedSenders::new(
+            AddressSet::from_iter([prioritized_sender]),
+            200,
+            pool.best().without_updates(),
+        );
+
+        assert_eq!(best.size_hint(), (0, Some(6)));
+        assert_eq!(best.next().unwrap().sender(), prioritized_sender);
+        assert_eq!(best.size_hint(), (5, Some(5)));
+    }
+
+    #[test]
     fn test_best_iter_invalid() {
         let mut pool = PendingPool::new(MockOrdering::default());
         let mut f = MockTransactionFactory::default();
@@ -493,7 +601,7 @@ mod tests {
         let invalid = best.independent.iter().next().unwrap();
         best.mark_invalid(
             &invalid.transaction.clone(),
-            &InvalidPoolTransactionError::Consensus(InvalidTransactionError::TxTypeNotSupported),
+            InvalidPoolTransactionError::Consensus(InvalidTransactionError::TxTypeNotSupported),
         );
 
         // iterator is empty
@@ -522,7 +630,7 @@ mod tests {
         crate::traits::BestTransactions::mark_invalid(
             &mut *best,
             &tx,
-            &InvalidPoolTransactionError::Consensus(InvalidTransactionError::TxTypeNotSupported),
+            InvalidPoolTransactionError::Consensus(InvalidTransactionError::TxTypeNotSupported),
         );
         assert!(Iterator::next(&mut best).is_none());
     }
@@ -1088,7 +1196,7 @@ mod tests {
                     crate::traits::BestTransactions::mark_invalid(
                         &mut best,
                         &tx,
-                        &InvalidPoolTransactionError::Eip4844(
+                        InvalidPoolTransactionError::Eip4844(
                             Eip4844PoolTransactionError::TooManyEip4844Blobs {
                                 have: block_blob_count + tx_blob_count,
                                 permitted: max_blob_count,

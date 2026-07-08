@@ -60,6 +60,19 @@ pub struct DatabaseArgs {
         value_parser = value_parser!(SyncMode),
     )]
     pub sync_mode: Option<SyncMode>,
+    /// `RocksDB` block cache size (e.g., 512MB, 4GB).
+    ///
+    /// Controls the size of the in-memory LRU cache for decompressed `RocksDB` blocks.
+    /// A larger cache reduces repeated decompression of hot blocks, improving read
+    /// performance for history lookups.
+    #[arg(long = "db.rocksdb-block-cache-size", value_parser = parse_byte_size)]
+    pub rocksdb_block_cache_size: Option<usize>,
+    /// Number of recent blocks to keep in the in-memory BAL store cache.
+    #[arg(long = "db.balstore-cache-size")]
+    pub balstore_cache_size: Option<u64>,
+    /// Disable built-in database metrics.
+    #[arg(long = "db.disable-metrics")]
+    pub disable_metrics: bool,
 }
 
 impl DatabaseArgs {
@@ -89,6 +102,11 @@ impl DatabaseArgs {
             .with_growth_step(self.growth_step)
             .with_max_readers(self.max_readers)
             .with_sync_mode(self.sync_mode)
+    }
+
+    /// Returns whether built-in database metrics are enabled.
+    pub const fn metrics_enabled(&self) -> bool {
+        !self.disable_metrics
     }
 }
 
@@ -221,6 +239,16 @@ mod tests {
         let default_args = DatabaseArgs::default();
         let args = CommandParser::<DatabaseArgs>::parse_from(["reth"]).args;
         assert_eq!(args, default_args);
+    }
+
+    #[test]
+    fn test_command_parser_disable_metrics() {
+        let args = CommandParser::<DatabaseArgs>::parse_from(["reth"]).args;
+        assert!(args.metrics_enabled());
+
+        let args = CommandParser::<DatabaseArgs>::parse_from(["reth", "--db.disable-metrics"]).args;
+        assert!(args.disable_metrics);
+        assert!(!args.metrics_enabled());
     }
 
     #[test]
@@ -434,5 +462,16 @@ mod tests {
         let result =
             CommandParser::<DatabaseArgs>::try_parse_from(["reth", "--db.sync-mode", "ultra-fast"]);
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_command_parser_with_valid_balstore_cache_size() {
+        let cmd = CommandParser::<DatabaseArgs>::try_parse_from([
+            "reth",
+            "--db.balstore-cache-size",
+            "1234",
+        ])
+        .unwrap();
+        assert_eq!(cmd.args.balstore_cache_size, Some(1234));
     }
 }

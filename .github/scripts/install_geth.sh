@@ -2,7 +2,7 @@
 
 # Installs Geth (https://geth.ethereum.org) in $HOME/bin for x86_64 Linux.
 
-set -eo pipefail
+set -exo pipefail
 
 GETH_BUILD=${GETH_BUILD:-"1.13.4-3f907d6a"}
 

@@ -132,7 +132,7 @@ impl RpcServiceT for RpcService {
         }
     }
 
-    #[allow(clippy::manual_async_fn)]
+    #[expect(clippy::manual_async_fn)]
     fn notification<'a>(
         &self,
         _n: jsonrpsee::core::middleware::Notification<'a>,

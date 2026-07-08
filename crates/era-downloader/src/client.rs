@@ -52,9 +52,18 @@ impl<Http: HttpClient + Clone> EraClient<Http> {
     const CHECKSUMS: &'static str = "checksums.txt";
 
     /// Constructs [`EraClient`] using `client` to download from `url` into `folder`.
+    ///
+    /// The file type is auto-detected from the URL. Use
+    /// [`with_era_type`](Self::with_era_type) to override.
     pub fn new(client: Http, url: Url, folder: impl Into<Box<Path>>) -> Self {
         let era_type = EraFileType::from_url(url.as_str());
         Self { client, url, folder: folder.into(), era_type }
+    }
+
+    /// Override the auto-detected [`EraFileType`].
+    pub const fn with_era_type(mut self, era_type: EraFileType) -> Self {
+        self.era_type = era_type;
+        self
     }
 
     /// Performs a GET request on `url` and stores the response body into a file located within
@@ -76,11 +85,15 @@ impl<Http: HttpClient + Clone> EraClient<Http> {
                 .file_name_to_number(file_name)
                 .ok_or_eyre("Cannot parse number from file name")?;
 
+            // Download to a temp path and rename in only on success, so an interrupted download
+            // never leaves a partial file that later looks complete.
+            let tmp_path = path.with_extension("tmp");
+
             let mut tries = 1..3;
             let mut actual_checksum: eyre::Result<_>;
             loop {
                 actual_checksum = async {
-                    let mut file = File::create(&path).await?;
+                    let mut file = File::create(&tmp_path).await?;
                     let mut stream = client.get(url.clone()).await?;
                     let mut hasher = Sha256::new();
 
@@ -98,11 +111,16 @@ impl<Http: HttpClient + Clone> EraClient<Http> {
                 }
             }
 
-            if self.era_type == EraFileType::Era1 {
+            if self.era_type.has_checksums() {
                 self.assert_checksum(number, actual_checksum?)
                     .await
                     .map_err(|e| eyre!("{e} for {file_name} at {}", path.display()))?;
+            } else {
+                // No checksum to validate against; surface a failed download before renaming.
+                actual_checksum?;
             }
+
+            fs::rename(&tmp_path, &path).await?;
         }
 
         Ok(path.into_boxed_path())
@@ -115,6 +133,7 @@ impl<Http: HttpClient + Clone> EraClient<Http> {
         if let Ok(mut dir) = fs::read_dir(&self.folder).await {
             while let Ok(Some(entry)) = dir.next_entry().await {
                 if let Some(name) = entry.file_name().to_str() &&
+                    self.is_matching_era_file(name) &&
                     let Some(number) = self.file_name_to_number(name) &&
                     (max.is_none() || matches!(max, Some(max) if number > max))
                 {
@@ -133,6 +152,7 @@ impl<Http: HttpClient + Clone> EraClient<Http> {
         if let Ok(mut dir) = fs::read_dir(&self.folder).await {
             while let Ok(Some(entry)) = dir.next_entry().await {
                 if let Some(name) = entry.file_name().to_str() &&
+                    self.is_matching_era_file(name) &&
                     let Some(number) = self.file_name_to_number(name) &&
                     (number < index || number >= last)
                 {
@@ -153,11 +173,14 @@ impl<Http: HttpClient + Clone> EraClient<Http> {
     pub async fn files_count(&self) -> usize {
         let mut count = 0usize;
 
-        let file_extension = self.era_type.extension().trim_start_matches('.');
-
         if let Ok(mut dir) = fs::read_dir(&self.folder).await {
             while let Ok(Some(entry)) = dir.next_entry().await {
-                if entry.path().extension() == Some(file_extension.as_ref()) {
+                if let Some(ext) = entry.path().extension().and_then(|ext| ext.to_str()) &&
+                    self.era_type
+                        .extensions()
+                        .iter()
+                        .any(|valid| valid.trim_start_matches('.') == ext)
+                {
                     count += 1;
                 }
             }
@@ -174,8 +197,8 @@ impl<Http: HttpClient + Clone> EraClient<Http> {
         let index_path = self.folder.to_path_buf().join(INDEX_HTML_FILE);
         let checksums_path = self.folder.to_path_buf().join(Self::CHECKSUMS);
 
-        // Only for era1, we download also checksums file
-        if self.era_type == EraFileType::Era1 {
+        // Only for files that ship checksums (era1, ere) we also download the checksums file.
+        if self.era_type.has_checksums() {
             let checksums_url = self.url.join(Self::CHECKSUMS)?;
             try_join!(
                 self.download_file_to_path(self.url.clone(), &index_path),
@@ -202,14 +225,8 @@ impl<Http: HttpClient + Clone> EraClient<Http> {
         let file = File::create(&path).await?;
         let mut writer = io::BufWriter::new(file);
 
-        let ext = self.era_type.extension();
-        let ext_len = ext.len();
-
         while let Some(line) = lines.next_line().await? {
-            if let Some(j) = line.find(ext) &&
-                let Some(i) = line[..j].rfind(|c: char| !c.is_alphanumeric() && c != '-')
-            {
-                let era = &line[i + 1..j + ext_len];
+            if let Some(era) = extract_era_filename(&line, self.era_type.extensions()) {
                 writer.write_all(era.as_bytes()).await?;
                 writer.write_all(b"\n").await?;
             }
@@ -249,7 +266,7 @@ impl<Http: HttpClient + Clone> EraClient<Http> {
 
         match File::open(path).await {
             Ok(file) => {
-                if self.era_type == EraFileType::Era1 {
+                if self.era_type.has_checksums() {
                     let number = self
                         .file_name_to_number(name)
                         .ok_or_else(|| eyre!("Cannot parse ERA number from {name}"))?;
@@ -263,7 +280,7 @@ impl<Http: HttpClient + Clone> EraClient<Http> {
 
                     Ok(is_verified)
                 } else {
-                    // For era files, we skip checksum verification, as checksum.txt does not exist
+                    // For era files there is no checksums.txt, so verification is skipped.
                     Ok(true)
                 }
             }
@@ -319,6 +336,28 @@ impl<Http: HttpClient + Clone> EraClient<Http> {
     fn file_name_to_number(&self, file_name: &str) -> Option<usize> {
         file_name.split('-').nth(1).and_then(|v| usize::from_str(v).ok())
     }
+
+    /// Whether `file_name` is a downloaded ERA file of this client's configured type.
+    ///
+    /// Excludes partial (`*.tmp`) and sidecar files that share the `<network>-<number>-...` stem,
+    /// so they don't influence resume or cleanup.
+    fn is_matching_era_file(&self, file_name: &str) -> bool {
+        EraFileType::from_filename(file_name) == Some(self.era_type)
+    }
+}
+
+/// Extracts an era filename ending in one of `extensions` from a single index line.
+///
+/// `extensions` are tried in order; pass them longest-first so `.ere` never matches inside `.erae`.
+fn extract_era_filename<'a>(line: &'a str, extensions: &[&str]) -> Option<&'a str> {
+    for ext in extensions {
+        if let Some(j) = line.find(ext) &&
+            let Some(i) = line[..j].rfind(|c: char| !c.is_alphanumeric() && c != '-')
+        {
+            return Some(&line[i + 1..j + ext.len()]);
+        }
+    }
+    None
 }
 
 async fn checksum(mut reader: impl AsyncRead + Unpin) -> eyre::Result<Vec<u8>> {
@@ -366,5 +405,38 @@ mod tests {
         let actual_number = client.file_name_to_number(file_name);
 
         assert_eq!(actual_number, expected_number);
+    }
+
+    // `.erae` lines must yield the full `.erae` name, never the `.ere` prefix inside it.
+    #[test_case(
+        "<a href=\"mainnet-00000-a6860fef.erae\">", &[".erae", ".ere"],
+        Some("mainnet-00000-a6860fef.erae"); "erae anchor not clipped to ere"
+    )]
+    #[test_case(
+        "    \"name\": \"mainnet-00001-05c64fc4.erae\",", &[".erae", ".ere"],
+        Some("mainnet-00001-05c64fc4.erae"); "erae json entry"
+    )]
+    #[test_case(
+        "<a href=\"mainnet-00600-a81ae85f.era1\">", &[".era1"],
+        Some("mainnet-00600-a81ae85f.era1"); "era1 anchor"
+    )]
+    #[test_case("<a href=\"checksums.txt\">", &[".erae", ".ere"], None; "no era file on line")]
+    fn test_extract_era_filename(line: &str, exts: &[&str], expected: Option<&str>) {
+        assert_eq!(extract_era_filename(line, exts), expected);
+    }
+
+    #[test]
+    fn test_with_era_type_overrides_auto_detection() {
+        // URL without "era1" auto-detects as Era
+        let client = EraClient::new(
+            Client::new(),
+            Url::from_str("https://example.com/").unwrap(),
+            PathBuf::new(),
+        );
+        assert_eq!(client.era_type, EraFileType::Era);
+
+        // with_era_type overrides to Era1
+        let client = client.with_era_type(EraFileType::Era1);
+        assert_eq!(client.era_type, EraFileType::Era1);
     }
 }

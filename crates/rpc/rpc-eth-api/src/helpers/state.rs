@@ -1,7 +1,7 @@
 //! Loads a pending block from database. Helper trait for `eth_` block, transaction, call and trace
 //! RPC methods.
 
-use super::{EthApiSpec, LoadPendingBlock, SpawnBlocking};
+use super::{EthApiSpec, LoadBlock, LoadPendingBlock, SpawnBlocking};
 use crate::{EthApiTypes, FromEthApiError, RpcNodeCore, RpcNodeCoreExt};
 use alloy_consensus::constants::KECCAK_EMPTY;
 use alloy_eips::BlockId;
@@ -11,17 +11,18 @@ use alloy_serde::JsonStorageKey;
 use futures::Future;
 use reth_errors::RethError;
 use reth_evm::{ConfigureEvm, EvmEnvFor};
-use reth_primitives_traits::SealedHeaderFor;
-use reth_rpc_convert::RpcConvert;
+use reth_primitives_traits::{BlockTy, RecoveredBlock, SealedHeaderFor};
+use reth_rpc_convert::{RpcConvert, RpcTxReq};
 use reth_rpc_eth_types::{
-    error::FromEvmError, EthApiError, PendingBlockEnv, RpcInvalidTransactionError,
+    error::{FromEvmError, IntoEthApiError},
+    EthApiError, PendingBlockEnv, RpcInvalidTransactionError, SignError,
 };
 use reth_rpc_server_types::constants::DEFAULT_MAX_STORAGE_VALUES_SLOTS;
 use reth_storage_api::{
     BlockIdReader, BlockReaderIdExt, StateProvider, StateProviderBox, StateProviderFactory,
 };
 use reth_transaction_pool::TransactionPool;
-use std::collections::HashMap;
+use std::{collections::HashMap, sync::Arc};
 
 /// Helper methods for `eth_` methods relating to state (accounts).
 pub trait EthState: LoadState + SpawnBlocking {
@@ -114,6 +115,11 @@ pub trait EthState: LoadState + SpawnBlocking {
         block_id: Option<BlockId>,
     ) -> impl Future<Output = Result<HashMap<Address, Vec<B256>>, Self::Error>> + Send {
         async move {
+            if requests.is_empty() {
+                return Err(Self::Error::from_eth_err(EthApiError::InvalidParams(
+                    "empty request".to_string(),
+                )));
+            }
             let total_slots: usize = requests.values().map(|slots| slots.len()).sum();
             if total_slots > DEFAULT_MAX_STORAGE_VALUES_SLOTS {
                 return Err(Self::Error::from_eth_err(EthApiError::InvalidParams(
@@ -347,17 +353,65 @@ pub trait LoadState:
         }
     }
 
+    /// Returns the recovered block, revm evm env, and state block id for the requested [`BlockId`].
+    ///
+    /// For pending blocks, this preserves the state id returned by [`Self::evm_env_at`], which can
+    /// be the pending tag for an actual pending block or the latest block hash when the pending env
+    /// is derived from latest.
+    #[expect(clippy::type_complexity)]
+    fn evm_env_and_recovered_block_at(
+        &self,
+        at: BlockId,
+    ) -> impl Future<
+        Output = Result<
+            (Arc<RecoveredBlock<BlockTy<Self::Primitives>>>, EvmEnvFor<Self::Evm>, BlockId),
+            Self::Error,
+        >,
+    > + Send
+    where
+        Self: SpawnBlocking + LoadBlock,
+    {
+        async move {
+            if at.is_pending() {
+                let (evm_env, block_id) = self.evm_env_at(at).await?;
+                let block = self
+                    .recovered_block(block_id)
+                    .await?
+                    .ok_or_else(|| EthApiError::HeaderNotFound(at))?;
+
+                Ok((block, evm_env, block_id))
+            } else {
+                let block = self
+                    .recovered_block(at)
+                    .await?
+                    .ok_or_else(|| EthApiError::HeaderNotFound(at))?;
+                let evm_env = self.evm_env_for_header(block.sealed_block().sealed_header())?;
+                let block_id = block.hash().into();
+
+                Ok((block, evm_env, block_id))
+            }
+        }
+    }
+
     /// Returns the next available nonce without gaps for the given address
     /// Next available nonce is either the on chain nonce of the account or the highest consecutive
     /// nonce in the pool + 1
-    fn next_available_nonce(
+    ///
+    /// The provided request must have a from address set.
+    fn next_available_nonce_for(
         &self,
-        address: Address,
+        request: &RpcTxReq<Self::NetworkTypes>,
     ) -> impl Future<Output = Result<u64, Self::Error>> + Send
     where
         Self: SpawnBlocking,
     {
+        let address = request.as_ref().from;
         self.spawn_blocking_io(move |this| {
+            let address = match address {
+                Some(address) => address,
+                None => return Err(SignError::NoAccount.into_eth_err()),
+            };
+
             // first fetch the on chain nonce of the account
             let mut next_nonce = this
                 .latest_state()?

@@ -27,7 +27,8 @@ use reth_provider::{
         BlockchainProvider, NodeTypesForProvider, RocksDBProvider, StaticFileProvider,
         StaticFileProviderBuilder,
     },
-    ProviderFactory, StaticFileProviderFactory, StorageSettings,
+    BalConfig, BalStoreHandle, InMemoryBalStore, ProviderFactory, StaticFileProviderFactory,
+    StorageSettings,
 };
 use reth_stages::{sets::DefaultStages, Pipeline, PipelineTarget};
 use reth_static_file::StaticFileProducer;
@@ -135,16 +136,13 @@ impl<C: ChainSpecParser> EnvironmentArgs<C> {
                     .with_genesis_block_number(genesis_block_number)
                     .build()?,
             ),
-            AccessRights::RO | AccessRights::RoInconsistent => {
-                (open_db_read_only(&db_path, self.db.database_args())?, {
-                    let provider = StaticFileProviderBuilder::read_only(sf_path)
-                        .with_metrics()
-                        .with_genesis_block_number(genesis_block_number)
-                        .build()?;
-                    provider.watch_directory();
-                    provider
-                })
-            }
+            AccessRights::RO | AccessRights::RoInconsistent => (
+                open_db_read_only(&db_path, self.db.database_args())?,
+                StaticFileProviderBuilder::read_only(sf_path)
+                    .with_metrics()
+                    .with_genesis_block_number(genesis_block_number)
+                    .build()?,
+            ),
         };
         let rocksdb_provider = if !access.is_read_write() && !RocksDBProvider::exists(&rocksdb_path)
         {
@@ -153,16 +151,22 @@ impl<C: ChainSpecParser> EnvironmentArgs<C> {
             // commands can proceed.
             debug!(target: "reth::cli", ?rocksdb_path, "RocksDB not found, initializing empty database");
             reth_fs_util::create_dir_all(&rocksdb_path)?;
-            RocksDBProvider::builder(data_dir.rocksdb())
+            let mut builder = RocksDBProvider::builder(data_dir.rocksdb())
                 .with_default_tables()
-                .with_database_log_level(self.db.log_level)
-                .build()?
+                .with_database_log_level(self.db.log_level);
+            if let Some(cache_size) = self.db.rocksdb_block_cache_size {
+                builder = builder.with_block_cache_size(cache_size);
+            }
+            builder.build()?
         } else {
-            RocksDBProvider::builder(data_dir.rocksdb())
+            let mut builder = RocksDBProvider::builder(data_dir.rocksdb())
                 .with_default_tables()
                 .with_database_log_level(self.db.log_level)
-                .with_read_only(!access.is_read_write())
-                .build()?
+                .with_read_only(!access.is_read_write());
+            if let Some(cache_size) = self.db.rocksdb_block_cache_size {
+                builder = builder.with_block_cache_size(cache_size);
+            }
+            builder.build()?
         };
 
         let provider_factory =
@@ -192,6 +196,11 @@ impl<C: ChainSpecParser> EnvironmentArgs<C> {
     where
         C: ChainSpecParser<ChainSpec = N::ChainSpec>,
     {
+        let balstore_cache_size =
+            self.db.balstore_cache_size.unwrap_or(BalConfig::DEFAULT_IN_MEMORY_RETENTION_DISTANCE);
+        let bal_store = BalStoreHandle::new(InMemoryBalStore::new(
+            BalConfig::with_in_memory_retention_distance(balstore_cache_size),
+        ));
         let factory = ProviderFactory::<NodeTypesWithDBAdapter<N, DatabaseEnv>>::new(
             db,
             self.chain.clone(),
@@ -200,7 +209,8 @@ impl<C: ChainSpecParser> EnvironmentArgs<C> {
             runtime,
         )?
         .with_prune_modes(config.prune.segments.clone())
-        .with_minimum_pruning_distance(config.prune.minimum_pruning_distance);
+        .with_minimum_pruning_distance(config.prune.minimum_pruning_distance)
+        .with_bal_store(bal_store);
 
         // Check for consistency between database and static files.
         if !access.is_read_only_inconsistent() &&

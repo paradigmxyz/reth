@@ -18,7 +18,7 @@ use reth_rpc_server_types::result::{
 };
 use reth_transaction_pool::error::{
     Eip4844PoolTransactionError, Eip7702PoolTransactionError, InvalidPoolTransactionError,
-    PoolError, PoolErrorKind, PoolTransactionError,
+    PoolError, PoolErrorKind, PoolTransactionError, RawPoolTransactionError,
 };
 use revm::{
     context_interface::result::{
@@ -207,6 +207,9 @@ pub enum EthApiError {
         /// The underlying error object
         error: jsonrpsee_types::ErrorObject<'static>,
     },
+    /// Error thrown when trying to access block access list for blocks before Amsterdam
+    #[error("Block access list not available for pre-Amsterdam blocks")]
+    BlockAccessListNotAvailablePreAmsterdam,
     /// Any other error
     #[error("{0}")]
     Other(Box<dyn ToRpcError>),
@@ -344,6 +347,9 @@ impl From<EthApiError> for jsonrpsee_types::error::ErrorObject<'static> {
                     ),
                     error.data(),
                 )
+            }
+            EthApiError::BlockAccessListNotAvailablePreAmsterdam => {
+                rpc_error_with_code(4445, error.to_string())
             }
         }
     }
@@ -553,6 +559,7 @@ where
             EVMError::Header(err) => err.into(),
             EVMError::Database(err) => err.into(),
             EVMError::Custom(err) => Self::EvmCustom(err),
+            EVMError::CustomAny(err) => Self::EvmCustom(err.to_string()),
         }
     }
 }
@@ -560,6 +567,21 @@ where
 impl From<RecoveryError> for EthApiError {
     fn from(_: RecoveryError) -> Self {
         Self::InvalidTransactionSignature
+    }
+}
+
+impl From<RawPoolTransactionError> for EthApiError {
+    fn from(err: RawPoolTransactionError) -> Self {
+        match err {
+            RawPoolTransactionError::EmptyRawTransactionData => Self::EmptyRawTransactionData,
+            RawPoolTransactionError::FailedToDecodeSignedTransaction => {
+                Self::FailedToDecodeSignedTransaction
+            }
+            RawPoolTransactionError::InvalidTransactionSignature => {
+                Self::InvalidTransactionSignature
+            }
+            RawPoolTransactionError::Other(err) => Self::PoolError(RpcPoolError::Other(err)),
+        }
     }
 }
 
@@ -1123,8 +1145,8 @@ pub enum SignError {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloy_primitives::b256;
     use alloy_sol_types::{Revert, SolError};
-    use revm::primitives::b256;
 
     #[test]
     fn timed_out_error() {

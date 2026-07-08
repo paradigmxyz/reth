@@ -8,25 +8,28 @@ use schnellru::{ByLength, LruMap};
 use std::fmt::Debug;
 use tracing::warn;
 
-/// The max hit counter for invalid headers in the cache before it is forcefully evicted.
-///
-/// In other words, if a header is referenced more than this number of times, it will be evicted to
-/// allow for reprocessing.
-const INVALID_HEADER_HIT_EVICTION_THRESHOLD: u8 = 128;
-
 /// Keeps track of invalid headers.
 #[derive(Debug)]
 pub struct InvalidHeaderCache {
     /// This maps a header hash to a reference to its invalid ancestor.
     headers: LruMap<B256, HeaderEntry>,
+    /// Number of cache hits before an invalid header entry is evicted and reprocessed.
+    hit_eviction_threshold: u8,
     /// Metrics for the cache.
     metrics: InvalidHeaderCacheMetrics,
 }
 
 impl InvalidHeaderCache {
     /// Invalid header cache constructor.
-    pub fn new(max_length: u32) -> Self {
-        Self { headers: LruMap::new(ByLength::new(max_length)), metrics: Default::default() }
+    ///
+    /// Setting `hit_eviction_threshold` to `0` effectively disables the cache because entries are
+    /// evicted on the first lookup.
+    pub fn new(max_length: u32, hit_eviction_threshold: u8) -> Self {
+        Self {
+            headers: LruMap::new(ByLength::new(max_length)),
+            hit_eviction_threshold,
+            metrics: Default::default(),
+        }
     }
 
     fn insert_entry(&mut self, hash: B256, header: BlockWithParent) {
@@ -41,7 +44,7 @@ impl InvalidHeaderCache {
         {
             let entry = self.headers.get(hash)?;
             entry.hit_count += 1;
-            if entry.hit_count < INVALID_HEADER_HIT_EVICTION_THRESHOLD {
+            if entry.hit_count < self.hit_eviction_threshold {
                 return Some(entry.header)
             }
         }
@@ -110,17 +113,28 @@ mod tests {
 
     #[test]
     fn test_hit_eviction() {
-        let mut cache = InvalidHeaderCache::new(10);
+        let hit_eviction_threshold = 3;
+        let mut cache = InvalidHeaderCache::new(10, hit_eviction_threshold);
         let header = Header::default();
         let header = SealedHeader::seal_slow(header);
         cache.insert(header.block_with_parent());
         assert_eq!(cache.headers.get(&header.hash()).unwrap().hit_count, 0);
 
-        for hit in 1..INVALID_HEADER_HIT_EVICTION_THRESHOLD {
+        for hit in 1..hit_eviction_threshold {
             assert!(cache.get(&header.hash()).is_some());
             assert_eq!(cache.headers.get(&header.hash()).unwrap().hit_count, hit);
         }
 
         assert!(cache.get(&header.hash()).is_none());
+    }
+
+    #[test]
+    fn test_zero_hit_eviction_threshold_effectively_disables_cache() {
+        let mut cache = InvalidHeaderCache::new(10, 0);
+        let header = SealedHeader::seal_slow(Header::default());
+        cache.insert(header.block_with_parent());
+
+        assert!(cache.get(&header.hash()).is_none());
+        assert_eq!(cache.headers.len(), 0);
     }
 }

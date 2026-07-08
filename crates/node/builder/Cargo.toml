@@ -51,7 +51,7 @@ reth-stages.workspace = true
 reth-static-file.workspace = true
 reth-tasks = { workspace = true, features = ["rayon"] }
 reth-tokio-util.workspace = true
-reth-tracing.workspace = true
+reth-tracing = { workspace = true, features = ["std"] }
 reth-transaction-pool.workspace = true
 reth-trie-db = { workspace = true, features = ["metrics"] }
 reth-basic-payload-builder.workspace = true
@@ -121,7 +121,8 @@ test-utils = [
     "reth-primitives-traits/test-utils",
     "reth-tasks/test-utils",
 ]
-trie-debug = ["reth-engine-tree/trie-debug"]
-op = [
-    "reth-evm/op",
+trie-debug = [
+    "reth-engine-tree/trie-debug",
+    "reth-engine-primitives/trie-debug",
+    "reth-node-core/trie-debug",
 ]

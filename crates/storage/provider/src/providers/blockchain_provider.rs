@@ -3,13 +3,13 @@ use crate::{
         ConsistentProvider, ProviderNodeTypes, RocksDBProvider, StaticFileProvider,
         StaticFileProviderRWRefMut,
     },
-    AccountReader, BlockHashReader, BlockIdReader, BlockNumReader, BlockReader, BlockReaderIdExt,
-    BlockSource, CanonChainTracker, CanonStateNotifications, CanonStateSubscriptions,
-    ChainSpecProvider, ChainStateBlockReader, ChangeSetReader, DatabaseProviderFactory,
-    HashedPostStateProvider, HeaderProvider, ProviderError, ProviderFactory, PruneCheckpointReader,
-    ReceiptProvider, ReceiptProviderIdExt, RocksDBProviderFactory, StageCheckpointReader,
-    StateProviderBox, StateProviderFactory, StateReader, StaticFileProviderFactory,
-    TransactionVariant, TransactionsProvider,
+    AccountReader, BalProvider, BalStoreHandle, BlockHashReader, BlockIdReader, BlockNumReader,
+    BlockReader, BlockReaderIdExt, BlockSource, CanonChainTracker, CanonStateNotifications,
+    CanonStateSubscriptions, ChainSpecProvider, ChainStateBlockReader, ChangeSetReader,
+    DatabaseProviderFactory, HashedPostStateProvider, HeaderProvider, ProviderError,
+    ProviderFactory, PruneCheckpointReader, ReceiptProvider, ReceiptProviderIdExt,
+    RocksDBProviderFactory, StageCheckpointReader, StateProviderBox, StateProviderFactory,
+    StateReader, StaticFileProviderFactory, TransactionVariant, TransactionsProvider,
 };
 use alloy_consensus::transaction::TransactionMeta;
 use alloy_eips::{BlockHashOrNumber, BlockId, BlockNumHash, BlockNumberOrTag};
@@ -23,14 +23,16 @@ use reth_chainspec::ChainInfo;
 use reth_db_api::models::{AccountBeforeTx, BlockNumberAddress, StoredBlockBodyIndices};
 use reth_execution_types::ExecutionOutcome;
 use reth_node_types::{BlockTy, HeaderTy, NodeTypesWithDB, ReceiptTy, TxTy};
-use reth_primitives_traits::{Account, RecoveredBlock, SealedHeader, StorageEntry};
+use reth_primitives_traits::{
+    Account, RecoveredBlock, SealedHeader, SealedOrRecoveredBlock, StorageEntry,
+};
 use reth_prune_types::{PruneCheckpoint, PruneSegment};
 use reth_stages_types::{StageCheckpoint, StageId};
 use reth_static_file_types::StaticFileSegment;
 use reth_storage_api::{BlockBodyIndicesProvider, NodePrimitivesProvider, StorageChangeSetReader};
 use reth_storage_errors::provider::ProviderResult;
 use reth_trie::{HashedPostState, KeccakKeyHasher};
-use revm_database::BundleState;
+use revm::database::BundleState;
 use std::{
     ops::{RangeBounds, RangeInclusive},
     sync::Arc,
@@ -50,6 +52,8 @@ pub struct BlockchainProvider<N: NodeTypesWithDB> {
     /// Tracks the chain info wrt forkchoice updates and in memory canonical
     /// state.
     pub(crate) canonical_in_memory_state: CanonicalInMemoryState<N::Primitives>,
+    /// Store for BALs associated with this provider view.
+    pub(crate) bal_store: BalStoreHandle,
 }
 
 impl<N: NodeTypesWithDB> Clone for BlockchainProvider<N> {
@@ -57,6 +61,7 @@ impl<N: NodeTypesWithDB> Clone for BlockchainProvider<N> {
         Self {
             database: self.database.clone(),
             canonical_in_memory_state: self.canonical_in_memory_state.clone(),
+            bal_store: self.bal_store.clone(),
         }
     }
 }
@@ -101,6 +106,8 @@ impl<N: ProviderNodeTypes> BlockchainProvider<N> {
             .map(|num| provider.sealed_header(num))
             .transpose()?
             .flatten();
+        let bal_store = storage.bal_store().clone();
+
         Ok(Self {
             database: storage,
             canonical_in_memory_state: CanonicalInMemoryState::with_head(
@@ -108,6 +115,7 @@ impl<N: ProviderNodeTypes> BlockchainProvider<N> {
                 finalized_header,
                 safe_header,
             ),
+            bal_store,
         })
     }
 
@@ -133,20 +141,16 @@ impl<N: ProviderNodeTypes> BlockchainProvider<N> {
         let latest_historical = self.database.history_by_block_hash(anchor_hash)?;
         Ok(state.state_provider(latest_historical))
     }
-
-    /// Return the last N blocks of state, recreating the [`ExecutionOutcome`].
-    ///
-    /// If the range is empty, or there are no blocks for the given range, then this returns `None`.
-    pub fn get_state(
-        &self,
-        range: RangeInclusive<BlockNumber>,
-    ) -> ProviderResult<Option<ExecutionOutcome<ReceiptTy<N>>>> {
-        self.consistent_provider()?.get_state(range)
-    }
 }
 
 impl<N: NodeTypesWithDB> NodePrimitivesProvider for BlockchainProvider<N> {
     type Primitives = N::Primitives;
+}
+
+impl<N: NodeTypesWithDB> BalProvider for BlockchainProvider<N> {
+    fn bal_store(&self) -> &BalStoreHandle {
+        &self.bal_store
+    }
 }
 
 impl<N: ProviderNodeTypes> DatabaseProviderFactory for BlockchainProvider<N> {
@@ -291,6 +295,14 @@ impl<N: ProviderNodeTypes> BlockReader for BlockchainProvider<N> {
         source: BlockSource,
     ) -> ProviderResult<Option<Self::Block>> {
         self.consistent_provider()?.find_block_by_hash(hash, source)
+    }
+
+    fn find_sealed_or_recovered_block(
+        &self,
+        hash: B256,
+        source: BlockSource,
+    ) -> ProviderResult<Option<SealedOrRecoveredBlock<Self::Block>>> {
+        self.consistent_provider()?.find_sealed_or_recovered_block(hash, source)
     }
 
     fn block(&self, id: BlockHashOrNumber) -> ProviderResult<Option<Self::Block>> {
@@ -729,10 +741,6 @@ impl<N: ProviderNodeTypes> StorageChangeSetReader for BlockchainProvider<N> {
     ) -> ProviderResult<Vec<(BlockNumberAddress, StorageEntry)>> {
         self.consistent_provider()?.storage_changesets_range(range)
     }
-
-    fn storage_changeset_count(&self) -> ProviderResult<usize> {
-        self.consistent_provider()?.storage_changeset_count()
-    }
 }
 
 impl<N: ProviderNodeTypes> ChangeSetReader for BlockchainProvider<N> {
@@ -756,10 +764,6 @@ impl<N: ProviderNodeTypes> ChangeSetReader for BlockchainProvider<N> {
         range: impl core::ops::RangeBounds<BlockNumber>,
     ) -> ProviderResult<Vec<(BlockNumber, AccountBeforeTx)>> {
         self.consistent_provider()?.account_changesets_range(range)
-    }
-
-    fn account_changeset_count(&self) -> ProviderResult<usize> {
-        self.consistent_provider()?.account_changeset_count()
     }
 }
 
@@ -786,7 +790,7 @@ impl<N: ProviderNodeTypes> StateReader for BlockchainProvider<N> {
         &self,
         block: BlockNumber,
     ) -> ProviderResult<Option<ExecutionOutcome<Self::Receipt>>> {
-        StateReader::get_state(&self.consistent_provider()?, block)
+        self.consistent_provider()?.get_state(block)
     }
 }
 
@@ -826,7 +830,7 @@ mod tests {
         self, random_block, random_block_range, random_changeset_range, random_eoa_accounts,
         random_receipt, BlockParams, BlockRangeParams,
     };
-    use revm_database::{BundleState, OriginalValuesKnown};
+    use revm::database::{BundleState, OriginalValuesKnown};
     use std::{
         collections::BTreeMap,
         ops::{Bound, Range, RangeBounds},

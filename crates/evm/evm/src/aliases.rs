@@ -1,8 +1,11 @@
 //! Helper aliases when working with [`ConfigureEvm`] and the traits in this crate.
 
 use crate::ConfigureEvm;
-use alloy_evm::{block::BlockExecutorFactory, Database, EvmEnv, EvmFactory};
-use revm::{inspector::NoOpInspector, Inspector};
+use alloy_evm::{
+    block::{BlockExecutorFactory, BlockExecutorFor},
+    Database, EvmEnv, EvmFactory,
+};
+use revm::{database::State, inspector::NoOpInspector, Inspector};
 
 /// Helper to access [`EvmFactory`] for a given [`ConfigureEvm`].
 pub type EvmFactoryFor<Evm> =
@@ -32,6 +35,10 @@ pub type TxEnvFor<Evm> = <EvmFactoryFor<Evm> as EvmFactory>::Tx;
 /// Helper to access [`BlockExecutorFactory::ExecutionCtx`] for a given [`ConfigureEvm`].
 pub type ExecutionCtxFor<'a, Evm> =
     <<Evm as ConfigureEvm>::BlockExecutorFactory as BlockExecutorFactory>::ExecutionCtx<'a>;
+
+/// Helper to access [`alloy_evm::block::BlockExecutor`] for a given [`ConfigureEvm`].
+pub type BlockExecutorForEvm<'a, Evm, DB, I = NoOpInspector> =
+    BlockExecutorFor<'a, <Evm as ConfigureEvm>::BlockExecutorFactory, &'a mut State<DB>, I>;
 
 /// Type alias for [`EvmEnv`] for a given [`ConfigureEvm`].
 pub type EvmEnvFor<Evm> = EvmEnv<SpecFor<Evm>, BlockEnvFor<Evm>>;

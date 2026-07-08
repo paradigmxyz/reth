@@ -35,13 +35,13 @@ reth-static-file-types = { workspace = true, features = ["std"] }
 reth-fs-util.workspace = true
 
 # ethereum
+alloy-eip7928.workspace = true
 alloy-eips.workspace = true
 alloy-genesis.workspace = true
 alloy-primitives.workspace = true
 alloy-rpc-types-engine.workspace = true
 alloy-consensus.workspace = true
-revm-database.workspace = true
-revm-state = { workspace = true, optional = true }
+revm.workspace = true
 
 # tracing
 tracing.workspace = true
@@ -54,12 +54,14 @@ metrics.workspace = true
 itertools.workspace = true
 notify = { workspace = true, default-features = false, features = ["macos_fsevent"] }
 parking_lot.workspace = true
+smallvec.workspace = true
 strum.workspace = true
 eyre.workspace = true
+reth-tokio-util.workspace = true
+tokio = { workspace = true, features = ["sync"], optional = true }
 
 # test-utils
 reth-ethereum-engine-primitives = { workspace = true, optional = true }
-tokio = { workspace = true, features = ["sync"], optional = true }
 
 # parallel utils
 rayon.workspace = true
@@ -76,14 +78,12 @@ reth-ethereum-engine-primitives.workspace = true
 reth-ethereum-primitives.workspace = true
 reth-tracing.workspace = true
 
-revm-database-interface.workspace = true
-revm-state.workspace = true
-
 tempfile.workspace = true
 assert_matches.workspace = true
 rand.workspace = true
 
 tokio = { workspace = true, features = ["sync", "macros", "rt-multi-thread"] }
+tokio-stream = { workspace = true, features = ["sync"] }
 
 [features]
 jemalloc = ["rocksdb/jemalloc"]
@@ -101,7 +101,6 @@ test-utils = [
     "reth-trie-db/test-utils",
     "reth-prune-types/test-utils",
     "reth-stages-types/test-utils",
-    "revm-state",
-    "tokio",
     "reth-tasks/test-utils",
+    "dep:tokio",
 ]

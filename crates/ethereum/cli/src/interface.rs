@@ -22,7 +22,7 @@ use reth_node_core::{
     version::version_metadata,
 };
 use reth_rpc_server_types::{DefaultRpcModuleValidator, RethRpcModule, RpcModuleValidator};
-use reth_tracing::{FileWorkerGuard, Layers};
+use reth_tracing::{Layers, TracingGuards};
 use std::{ffi::OsString, fmt, future::Future, marker::PhantomData, sync::Arc};
 use tracing::{info, warn};
 
@@ -67,6 +67,34 @@ impl Cli {
         T: Into<OsString> + Clone,
     {
         Self::try_parse_from(itr)
+    }
+}
+
+impl<C, Ext, Rpc, SubCmd> Cli<C, Ext, Rpc, SubCmd>
+where
+    C: ChainSpecParser,
+    Ext: clap::Args + fmt::Debug,
+    Rpc: RpcModuleValidator,
+    SubCmd: Subcommand + fmt::Debug,
+{
+    /// Returns the node command, if this CLI was invoked with `node`.
+    pub fn as_node_command_mut(&mut self) -> Option<&mut node::NodeCommand<C, Ext>> {
+        match &mut self.command {
+            Commands::Node(command) => Some(command.as_mut()),
+            _ => None,
+        }
+    }
+
+    /// Applies a closure to the node command, if this CLI was invoked with `node`.
+    pub fn apply_node_command(
+        &mut self,
+        f: impl FnOnce(&mut node::NodeCommand<C, Ext>),
+    ) -> &mut Self {
+        if let Some(command) = self.as_node_command_mut() {
+            f(command);
+        }
+
+        self
     }
 }
 
@@ -210,8 +238,7 @@ impl<
 
     /// Initializes tracing with the configured options.
     ///
-    /// If file logging is enabled, this function returns a guard that must be kept alive to ensure
-    /// that all logs are flushed to disk.
+    /// Returns tracing guards that must be kept alive to ensure outputs are flushed to disk.
     ///
     /// If an OTLP endpoint is specified, it will export traces and logs to the configured
     /// collector.
@@ -219,13 +246,13 @@ impl<
         &mut self,
         runner: &CliRunner,
         mut layers: Layers,
-    ) -> eyre::Result<Option<FileWorkerGuard>> {
+    ) -> eyre::Result<TracingGuards> {
         let otlp_status = runner.block_on(self.traces.init_otlp_tracing(&mut layers))?;
         let otlp_logs_status = runner.block_on(self.traces.init_otlp_logs(&mut layers))?;
 
         // Enable reload support if debug RPC namespace is available
         let enable_reload = self.command.debug_namespace_enabled();
-        let file_guard = self.logs.init_tracing_with_layers(layers, enable_reload)?;
+        let guards = self.logs.init_tracing_with_layers(layers, enable_reload)?;
         info!(target: "reth::cli", "Initialized tracing, debug log directory: {}", self.logs.log_file_directory);
 
         match otlp_status {
@@ -248,7 +275,7 @@ impl<
             OtlpLogsStatus::Disabled => {}
         }
 
-        Ok(file_guard)
+        Ok(guards)
     }
 }
 
@@ -377,6 +404,30 @@ mod tests {
         assert_eq!(reth.logs.color, ColorMode::Always);
     }
 
+    #[test]
+    fn node_command_mut_accessor_returns_node_command() {
+        let mut reth = Cli::try_parse_args_from(["reth", "node"]).unwrap();
+
+        let node_command = reth.as_node_command_mut().expect("expected node command");
+        node_command.with_unused_ports = true;
+
+        assert!(reth.as_node_command_mut().unwrap().with_unused_ports);
+    }
+
+    #[test]
+    fn apply_node_command_only_runs_for_node_command() {
+        let mut reth = Cli::try_parse_args_from(["reth", "node"]).unwrap();
+        reth.apply_node_command(|node_command| node_command.with_unused_ports = true);
+        assert!(reth.as_node_command_mut().unwrap().with_unused_ports);
+
+        let mut reth = Cli::try_parse_args_from(["reth", "config"]).unwrap();
+        let mut applied = false;
+        reth.apply_node_command(|_| applied = true);
+
+        assert!(reth.as_node_command_mut().is_none());
+        assert!(!applied);
+    }
+
     /// Tests that the help message is parsed correctly. This ensures that clap args are configured
     /// correctly and no conflicts are introduced via attributes that would result in a panic at
     /// runtime
@@ -491,7 +542,6 @@ mod tests {
     fn parse_env_filter_directives() {
         let temp_dir = tempfile::tempdir().unwrap();
 
-        unsafe { std::env::set_var("RUST_LOG", "info,evm=debug") };
         let reth = Cli::try_parse_args_from([
             "reth",
             "init",

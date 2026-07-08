@@ -1,9 +1,11 @@
 use crate::{
     error::BeaconForkChoiceUpdateError, BeaconOnNewPayloadError, ExecutionPayload, ForkchoiceStatus,
 };
+use alloy_eips::eip4895::Withdrawal;
+use alloy_primitives::{Bytes, B256};
 use alloy_rpc_types_engine::{
-    ForkChoiceUpdateResult, ForkchoiceState, ForkchoiceUpdateError, ForkchoiceUpdated, PayloadId,
-    PayloadStatus, PayloadStatusEnum,
+    ExecutionData, ForkChoiceUpdateResult, ForkchoiceState, ForkchoiceUpdateError,
+    ForkchoiceUpdated, PayloadId, PayloadStatus, PayloadStatusEnum,
 };
 use core::{
     fmt::{self, Display},
@@ -15,7 +17,7 @@ use futures::{future::Either, FutureExt, TryFutureExt};
 use reth_errors::RethResult;
 use reth_payload_builder_primitives::PayloadBuilderError;
 use reth_payload_primitives::PayloadTypes;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tokio::sync::{mpsc::UnboundedSender, oneshot};
 
 /// Type alias for backwards compat
@@ -148,10 +150,10 @@ impl Future for PendingPayloadId {
 pub struct NewPayloadTimings {
     /// Server-side execution latency.
     pub latency: Duration,
-    /// Time spent waiting for persistence to complete.
-    ///
-    /// `None` when wasn't asked to wait for persistence.
-    pub persistence_wait: Option<Duration>,
+    /// Time spent waiting on persistence, including both time this message spent queued
+    /// due to persistence backpressure and, when `wait_for_persistence` was requested,
+    /// the explicit wait for in-flight persistence to complete.
+    pub persistence_wait: Duration,
     /// Time spent waiting for the execution cache lock.
     ///
     /// `None` when wasn't asked to wait for execution cache.
@@ -160,6 +162,75 @@ pub struct NewPayloadTimings {
     ///
     /// `None` when wasn't asked to wait for sparse trie cache.
     pub sparse_trie_wait: Option<Duration>,
+}
+
+/// Additional data for big block payloads that merge multiple real blocks.
+///
+/// This is used by the `reth_newPayload` endpoint to pass environment switches
+/// and prior block hashes needed for correct multi-segment execution.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct BigBlockData<ExecutionData> {
+    /// Environment switches at block boundaries.
+    /// Each entry is `(cumulative_tx_count, execution_data_of_next_block)`.
+    ///
+    /// The first entry at index 0 represents the **original unmutated** base block's
+    /// `ExecutionData`, which must be used to derive the initial EVM environment.
+    pub env_switches: Vec<ExecutionData>,
+    /// Block number → real block hash for blocks covered by previous big blocks in a sequence.
+    /// When replaying chained big blocks, the BLOCKHASH opcode needs real hashes for blocks
+    /// that were merged into earlier big blocks (and thus not individually persisted).
+    pub prior_block_hashes: Vec<(u64, alloy_primitives::B256)>,
+    /// Block number for this big block.
+    pub block_number: u64,
+    /// Merged block access list for this big block.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub merged_block_access_list: Option<Bytes>,
+}
+
+impl ExecutionPayload for BigBlockData<ExecutionData> {
+    fn parent_hash(&self) -> B256 {
+        self.env_switches[0].parent_hash()
+    }
+
+    fn block_hash(&self) -> B256 {
+        self.env_switches.last().unwrap().block_hash()
+    }
+
+    fn block_number(&self) -> u64 {
+        self.block_number
+    }
+
+    fn withdrawals(&self) -> Option<&Vec<Withdrawal>> {
+        self.env_switches[0].withdrawals()
+    }
+
+    fn block_access_list(&self) -> Option<&Bytes> {
+        self.merged_block_access_list.as_ref()
+    }
+
+    fn parent_beacon_block_root(&self) -> Option<B256> {
+        self.env_switches[0].parent_beacon_block_root()
+    }
+
+    fn timestamp(&self) -> u64 {
+        self.env_switches[0].timestamp()
+    }
+
+    fn gas_used(&self) -> u64 {
+        self.env_switches.iter().map(|data| data.gas_used()).sum()
+    }
+
+    fn gas_limit(&self) -> u64 {
+        self.env_switches.iter().map(|data| data.gas_limit()).sum()
+    }
+
+    fn transaction_count(&self) -> usize {
+        self.env_switches.iter().map(|data| data.transaction_count()).sum()
+    }
+
+    fn slot_number(&self) -> Option<u64> {
+        self.env_switches[0].payload.slot_number()
+    }
 }
 
 /// A message for the beacon engine from other components of the node (engine RPC API invoked by the
@@ -188,6 +259,8 @@ pub enum BeaconEngineMessage<Payload: PayloadTypes> {
         wait_for_caches: bool,
         /// The sender for returning payload status result and timing breakdown.
         tx: oneshot::Sender<Result<(PayloadStatus, NewPayloadTimings), BeaconOnNewPayloadError>>,
+        /// When this message was enqueued, used to measure backpressure wait time.
+        enqueued_at: Instant,
     },
     /// Message with updated forkchoice state.
     ForkchoiceUpdated {
@@ -284,6 +357,7 @@ where
             wait_for_persistence,
             wait_for_caches,
             tx,
+            enqueued_at: Instant::now(),
         });
         rx.await.map_err(|_| BeaconOnNewPayloadError::EngineUnavailable)?
     }

@@ -4,7 +4,7 @@ use crate::{
 };
 use alloy_primitives::B256;
 use reth_chainspec::{ChainSpec, MAINNET};
-use reth_db::{test_utils::TempDatabase, DatabaseEnv};
+use reth_db::{mdbx::DatabaseArguments, test_utils::TempDatabase, DatabaseEnv};
 use reth_errors::ProviderResult;
 use reth_ethereum_engine_primitives::EthEngineTypes;
 use reth_node_types::NodeTypesWithDBAdapter;
@@ -68,6 +68,38 @@ pub fn create_test_provider_factory_with_node_types<N: NodeTypesForProvider>(
 
     // Create database with the datadir path so TempDatabase cleans up everything on drop
     let db = reth_db::test_utils::create_test_rw_db_with_datadir(&datadir_path);
+
+    ProviderFactory::new(
+        db,
+        chain_spec,
+        StaticFileProvider::read_write(static_files_path).expect("static file provider"),
+        RocksDBBuilder::new(&rocksdb_path)
+            .with_default_tables()
+            .build()
+            .expect("failed to create test RocksDB provider"),
+        reth_tasks::Runtime::test(),
+    )
+    .expect("failed to create test provider factory")
+}
+
+/// Creates test provider factory with provided chain spec and custom database arguments.
+///
+/// Same as [`create_test_provider_factory_with_chain_spec`] but allows overriding the default
+/// test database arguments (e.g. to increase the MDBX geometry for heavy benchmarks).
+pub fn create_test_provider_factory_with_chain_spec_and_db_args(
+    chain_spec: Arc<ChainSpec>,
+    db_args: DatabaseArguments,
+) -> ProviderFactory<MockNodeTypesWithDB> {
+    let datadir_path = reth_db::test_utils::tempdir_path();
+
+    let db_path = datadir_path.join("db");
+    let static_files_path = datadir_path.join("static_files");
+    let rocksdb_path = datadir_path.join("rocksdb");
+
+    std::fs::create_dir_all(&static_files_path).expect("failed to create static_files dir");
+
+    let db = reth_db::init_db(&db_path, db_args).expect("failed to init db");
+    let db = Arc::new(TempDatabase::new(db, datadir_path));
 
     ProviderFactory::new(
         db,

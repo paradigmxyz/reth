@@ -1,5 +1,6 @@
-import { SidebarItem } from "vocs";
 import { rethCliSidebar } from "./sidebar-cli-reth";
+import type { SidebarItem } from "./types";
+
 export const sidebar: SidebarItem[] = [
     {
         text: "Introduction",
@@ -73,16 +74,31 @@ export const sidebar: SidebarItem[] = [
                             {
                                 text: "Ethereum",
                                 link: "/run/ethereum",
-                                // items: [
-                                //     {
-                                //         text: "Snapshots",
-                                //         link: "/run/ethereum/snapshots"
-                                //     }
-                                // ]
                             },
                             {
                                 text: "Private testnets",
                                 link: "/run/private-testnets"
+                            }
+                        ]
+                    },
+                    {
+                        text: "Storage",
+                        items: [
+                            {
+                                text: "Storage V2",
+                                link: "/run/storage"
+                            },
+                            {
+                                text: "Snapshots",
+                                link: "/run/storage/snapshots"
+                            },
+                            {
+                                text: "Minimal Storage Mode",
+                                link: "/run/storage/minimal"
+                            },
+                            {
+                                text: "Pruning & Node Modes",
+                                link: "/run/storage/pruning"
                             }
                         ]
                     },
@@ -104,14 +120,6 @@ export const sidebar: SidebarItem[] = [
                     {
                         text: "Transaction Types",
                         link: "/run/faq/transactions"
-                    },
-                    {
-                        text: "Pruning & Full Node",
-                        link: "/run/faq/pruning"
-                    },
-                    {
-                        text: "Storage V2 (Experimental)",
-                        link: "/run/faq/storage-v2"
                     },
                     {
                         text: "Ports",

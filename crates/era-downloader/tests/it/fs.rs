@@ -1,6 +1,6 @@
 use alloy_primitives::hex::ToHexExt;
 use futures_util::StreamExt;
-use reth_era_downloader::read_dir;
+use reth_era_downloader::{read_dir, read_era_dir};
 use sha2::Digest;
 use tokio::fs;
 
@@ -101,4 +101,81 @@ async fn test_streaming_from_local_directory(
             Err(actual_err) => assert_eq!(actual_err.to_string(), expected_err),
         },
     }
+}
+
+#[test_case::test_case(
+    "mainnet-00000-a6860fef-noproofs.erae";
+    "ERE profile postfix"
+)]
+#[test_case::test_case(
+    "mainnet-00000-00001-5ec1ffb8.era1";
+    "era count segment"
+)]
+#[test_case::test_case(
+    "mainnet-00000-00001-5ec1ffb8-noproofs.ere";
+    "ERE era count with profile postfix"
+)]
+#[tokio::test]
+async fn test_streaming_from_local_directory_accepts_supported_filename_variants(file_name: &str) {
+    let folder = tempfile::tempdir().unwrap();
+    let folder = folder.path().to_owned();
+
+    let checksums = sha2::Sha256::digest(CONTENTS_0).encode_hex();
+    fs::write(folder.join("checksums.txt"), checksums).await.unwrap();
+    fs::write(folder.join(file_name), CONTENTS_0).await.unwrap();
+
+    let folder = folder.into_boxed_path();
+    let mut stream = read_dir(folder.clone(), 0).unwrap();
+
+    let actual = stream.next().await.unwrap().expect("should be ok");
+    assert_eq!(actual, folder.join(file_name).into_boxed_path());
+    assert!(stream.next().await.is_none(), "no extra files should be streamed");
+}
+
+/// Consensus `.era` files are streamed in ascending era order without requiring a `checksums.txt`,
+/// and non-`.era` files in the directory are ignored.
+#[test_case::test_case(
+    // Written out of order to confirm the stream sorts by era number.
+    &["mainnet-00001-40cf2f3c.era", "mainnet-00000-4b363db9.era"],
+    &["mainnet-00000-4b363db9.era", "mainnet-00001-40cf2f3c.era"];
+    "sorts by era number"
+)]
+#[test_case::test_case(
+    // No `checksums.txt` required; execution-layer `.era1`/`.ere` and unrelated files are ignored.
+    &[
+        "mainnet-00000-4b363db9.era",
+        "mainnet-00000-5ec1ffb8.era1",
+        "mainnet-00000-a6860fef.ere",
+        "unrelated.txt",
+    ],
+    &["mainnet-00000-4b363db9.era"];
+    "ignores non-era files and needs no checksums"
+)]
+#[test_case::test_case(
+    &["mainnet-00000-5ec1ffb8.era1"],
+    &[];
+    "no era files yields an empty stream"
+)]
+#[test_case::test_case(
+    &["mainnet-00000-00001-4b363db9.era"],
+    &["mainnet-00000-00001-4b363db9.era"];
+    "accepts era count segment"
+)]
+#[tokio::test]
+async fn test_streaming_era_from_local_directory(input: &[&str], expected: &[&str]) {
+    let folder = tempfile::tempdir().unwrap();
+    let folder = folder.path().to_owned();
+
+    for name in input {
+        fs::write(folder.join(name), CONTENTS_0).await.unwrap();
+    }
+
+    let folder = folder.into_boxed_path();
+    let mut stream = read_era_dir(folder.clone()).unwrap();
+
+    for name in expected {
+        let actual = stream.next().await.unwrap().expect("should be ok");
+        assert_eq!(actual, folder.join(name).into_boxed_path());
+    }
+    assert!(stream.next().await.is_none(), "no extra files should be streamed");
 }

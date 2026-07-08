@@ -8,13 +8,9 @@ use crate::{
     },
     Priority, SubPoolLimit, TransactionOrdering, ValidPoolTransaction,
 };
+use imbl::OrdMap;
 use rustc_hash::{FxHashMap, FxHashSet};
-use std::{
-    cmp::Ordering,
-    collections::{hash_map::Entry, BTreeMap},
-    ops::Bound::Unbounded,
-    sync::Arc,
-};
+use std::{cmp::Ordering, collections::hash_map::Entry, ops::Bound::Unbounded, sync::Arc};
 use tokio::sync::broadcast;
 
 /// A pool of validated and gapless transactions that are ready to be executed on the current state
@@ -36,7 +32,7 @@ pub struct PendingPool<T: TransactionOrdering> {
     /// This way we can determine when transactions were submitted to the pool.
     submission_id: u64,
     /// _All_ Transactions that are currently inside the pool grouped by their identifier.
-    by_id: BTreeMap<TransactionId, PendingTransaction<T>>,
+    by_id: OrdMap<TransactionId, PendingTransaction<T>>,
     /// The highest nonce transactions for each sender - like the `independent` set, but the
     /// highest instead of lowest nonce.
     highest_nonces: FxHashMap<SenderId, PendingTransaction<T>>,
@@ -80,7 +76,7 @@ impl<T: TransactionOrdering> PendingPool<T> {
     /// # Returns
     ///
     /// Returns all transactions by id.
-    fn clear_transactions(&mut self) -> BTreeMap<TransactionId, PendingTransaction<T>> {
+    fn clear_transactions(&mut self) -> OrdMap<TransactionId, PendingTransaction<T>> {
         self.independent_transactions.clear();
         self.highest_nonces.clear();
         self.size_of.reset();
@@ -429,6 +425,26 @@ impl<T: TransactionOrdering> PendingPool<T> {
 
             // we prefer removing transactions with lower ordering
             let mut worst_transactions = self.highest_nonces.values().collect::<Vec<_>>();
+
+            // Each pass removes at most one transaction per sender (its highest nonce), so only
+            // the worst few senders can be relevant in this pass. Selecting them is O(n)
+            // instead of sorting all senders. The estimate may fall short for size-based limits
+            // or skipped local senders, in which case the outer loop runs another pass.
+            let current_len = original_length - total_removed;
+            let current_size = original_size - total_size;
+            let excess_txs = current_len.saturating_sub(limit.max_txs);
+            let avg_tx_size = (current_size / current_len.max(1)).max(1);
+            let excess_size_txs = current_size.saturating_sub(limit.max_size).div_ceil(avg_tx_size);
+            // Number of worst senders to consider for removal in this pass: enough to cover the
+            // count and (estimated) size excess, widened by known local senders since those are
+            // skipped below.
+            let removal_candidates = excess_txs.max(excess_size_txs).max(1) + local_senders.len();
+
+            if removal_candidates < worst_transactions.len() {
+                // keep only the `removal_candidates` worst senders, in O(n) without a full sort
+                worst_transactions.select_nth_unstable(removal_candidates);
+                worst_transactions.truncate(removal_candidates);
+            }
             worst_transactions.sort_unstable();
 
             // loop through the highest nonces set, removing transactions until we reach the limit
@@ -525,7 +541,7 @@ impl<T: TransactionOrdering> PendingPool<T> {
     }
 
     /// All transactions grouped by id
-    pub const fn by_id(&self) -> &BTreeMap<TransactionId, PendingTransaction<T>> {
+    pub const fn by_id(&self) -> &OrdMap<TransactionId, PendingTransaction<T>> {
         &self.by_id
     }
 

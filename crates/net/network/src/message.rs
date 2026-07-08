@@ -8,14 +8,18 @@ use alloy_consensus::{BlockHeader, ReceiptWithBloom};
 use alloy_primitives::{Bytes, B256};
 use futures::FutureExt;
 use reth_eth_wire::{
-    message::RequestPair, BlockBodies, BlockHeaders, BlockRangeUpdate, EthMessage,
-    EthNetworkPrimitives, GetBlockBodies, GetBlockHeaders, GetReceipts, NetworkPrimitives,
-    NewBlock, NewBlockHashes, NewBlockPayload, NewPooledTransactionHashes, NodeData,
-    PooledTransactions, Receipts, SharedTransactions, Transactions,
+    message::RequestPair, BlockBodies, BlockHeaders, BlockRangeUpdate, BroadcastPoolTransactions,
+    Cells, EthMessage, EthNetworkPrimitives, GetBlockAccessLists, GetBlockBodies, GetBlockHeaders,
+    GetReceipts, NetworkPrimitives, NewBlock, NewBlockHashes, NewBlockPayload,
+    NewPooledTransactionHashes, NodeData, PooledTransactions, Receipts, SharedTransactions,
+    Transactions,
 };
-use reth_eth_wire_types::RawCapabilityMessage;
+use reth_eth_wire_types::{snap::SnapProtocolMessage, RawCapabilityMessage};
 use reth_network_api::PeerRequest;
-use reth_network_p2p::error::{RequestError, RequestResult};
+use reth_network_p2p::{
+    error::{RequestError, RequestResult},
+    snap::client::SnapResponse,
+};
 use reth_primitives_traits::Block;
 use std::{
     sync::Arc,
@@ -53,6 +57,8 @@ pub enum PeerMessage<N: NetworkPrimitives = EthNetworkPrimitives> {
     ReceivedTransaction(Transactions<N::BroadcastedTransaction>),
     /// Broadcast transactions _from_ local _to_ a peer.
     SendTransactions(SharedTransactions<N::BroadcastedTransaction>),
+    /// Broadcast cached pool transactions _from_ local _to_ a peer.
+    SendBroadcastPoolTransactions(BroadcastPoolTransactions),
     /// Send new pooled transactions
     PooledTransactions(NewPooledTransactionHashes),
     /// All `eth` request variants.
@@ -73,6 +79,7 @@ impl<N: NetworkPrimitives> PeerMessage<N> {
             Self::NewBlock(_) => "NewBlock",
             Self::ReceivedTransaction(_) => "ReceivedTransaction",
             Self::SendTransactions(_) => "SendTransactions",
+            Self::SendBroadcastPoolTransactions(_) => "SendBroadcastPoolTransactions",
             Self::PooledTransactions(_) => "PooledTransactions",
             Self::EthRequest(_) => "EthRequest",
             Self::BlockRangeUpdated(_) => "BlockRangeUpdated",
@@ -88,6 +95,7 @@ impl<N: NetworkPrimitives> PeerMessage<N> {
             Self::NewBlockHashes(_) |
                 Self::NewBlock(_) |
                 Self::SendTransactions(_) |
+                Self::SendBroadcastPoolTransactions(_) |
                 Self::PooledTransactions(_)
         )
     }
@@ -98,6 +106,7 @@ impl<N: NetworkPrimitives> PeerMessage<N> {
             Self::NewBlockHashes(msg) => msg.len(),
             Self::ReceivedTransaction(msg) => msg.len(),
             Self::SendTransactions(msg) => msg.len(),
+            Self::SendBroadcastPoolTransactions(msg) => msg.len(),
             Self::PooledTransactions(msg) => msg.len(),
             Self::NewBlock(_) |
             Self::EthRequest(_) |
@@ -119,11 +128,19 @@ pub enum BlockRequest {
     ///
     /// The response should be sent through the channel.
     GetBlockBodies(GetBlockBodies),
+    /// Requests block access lists from the peer.
+    ///
+    /// The response should be sent through the channel.
+    GetBlockAccessLists(GetBlockAccessLists),
 
     /// Requests receipts from the peer.
     ///
     /// The response should be sent through the channel.
     GetReceipts(GetReceipts),
+    /// Requests a `snap/2` (EIP-8189) message from the peer.
+    ///
+    /// The response should be sent through the channel.
+    GetSnap(SnapProtocolMessage),
 }
 
 /// Corresponding variant for [`PeerRequest`].
@@ -173,6 +190,17 @@ pub enum PeerResponse<N: NetworkPrimitives = EthNetworkPrimitives> {
         /// The receiver channel for the response to a block access lists request.
         response: oneshot::Receiver<RequestResult<BlockAccessLists>>,
     },
+    ///
+    /// Represents a response to a request for cells.
+    Cells {
+        /// The receiver channel for the response to a cells request.
+        response: oneshot::Receiver<RequestResult<Cells>>,
+    },
+    /// Represents a response to a `snap/2` (EIP-8189) request.
+    Snap {
+        /// The receiver channel for the response to a `snap/2` request.
+        response: oneshot::Receiver<RequestResult<SnapResponse>>,
+    },
 }
 
 // === impl PeerResponse ===
@@ -216,6 +244,14 @@ impl<N: NetworkPrimitives> PeerResponse<N> {
                 Ok(res) => PeerResponseResult::BlockAccessLists(res),
                 Err(err) => PeerResponseResult::BlockAccessLists(Err(err.into())),
             },
+            Self::Cells { response } => match ready!(response.poll_unpin(cx)) {
+                Ok(res) => PeerResponseResult::Cells(res),
+                Err(err) => PeerResponseResult::Cells(Err(err.into())),
+            },
+            Self::Snap { response } => match ready!(response.poll_unpin(cx)) {
+                Ok(res) => PeerResponseResult::Snap(res),
+                Err(err) => PeerResponseResult::Snap(Err(err.into())),
+            },
         };
         Poll::Ready(res)
     }
@@ -240,6 +276,10 @@ pub enum PeerResponseResult<N: NetworkPrimitives = EthNetworkPrimitives> {
     Receipts70(RequestResult<Receipts70<N::Receipt>>),
     /// Represents a result containing block access lists or an error.
     BlockAccessLists(RequestResult<BlockAccessLists>),
+    /// Represents a result containing cells or an error.
+    Cells(RequestResult<Cells>),
+    /// Represents a result containing a `snap/2` response or an error.
+    Snap(RequestResult<SnapResponse>),
 }
 
 // === impl PeerResponseResult ===
@@ -291,6 +331,16 @@ impl<N: NetworkPrimitives> PeerResponseResult<N> {
                 }
                 Err(err) => Err(err),
             },
+            Self::Cells(resp) => match resp {
+                Ok(res) => {
+                    let request = RequestPair { request_id: id, message: res };
+                    Ok(EthMessage::Cells(request))
+                }
+                Err(err) => Err(err),
+            },
+            // `snap/2` responses aren't `eth` wire messages and never reach this conversion: it's
+            // only used to answer inbound eth requests, and there's no snap/2 server yet.
+            Self::Snap(_) => Err(RequestError::UnsupportedCapability),
         }
     }
 
@@ -305,6 +355,8 @@ impl<N: NetworkPrimitives> PeerResponseResult<N> {
             Self::Receipts69(res) => res.as_ref().err(),
             Self::Receipts70(res) => res.as_ref().err(),
             Self::BlockAccessLists(res) => res.as_ref().err(),
+            Self::Cells(res) => res.as_ref().err(),
+            Self::Snap(res) => res.as_ref().err(),
         }
     }
 

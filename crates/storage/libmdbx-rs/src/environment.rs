@@ -282,7 +282,7 @@ pub enum EnvironmentKind {
     #[default]
     Default,
     /// Open the environment as mdbx-WRITEMAP.
-    /// Use a writeable memory map unless the environment is opened as `MDBX_RDONLY`
+    /// Use a writable memory map unless the environment is opened as `MDBX_RDONLY`
     /// ([`crate::Mode::ReadOnly`]).
     ///
     /// All data will be mapped into memory in the read-write mode [`crate::Mode::ReadWrite`]. This
@@ -422,6 +422,12 @@ impl Info {
     #[inline]
     pub const fn num_readers(&self) -> usize {
         self.0.mi_numreaders as usize
+    }
+
+    /// Transaction ID of the oldest active reader.
+    #[inline]
+    pub const fn latter_reader_txnid(&self) -> u64 {
+        self.0.mi_latter_reader_txnid
     }
 
     /// Return the internal page ops metrics

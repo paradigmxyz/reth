@@ -14,6 +14,7 @@ extern crate alloc;
 use alloc::{fmt::Debug, sync::Arc};
 use alloy_consensus::{constants::MAXIMUM_EXTRA_DATA_SIZE, EMPTY_OMMER_ROOT_HASH};
 use alloy_eips::eip7840::BlobParams;
+use alloy_primitives::B256;
 use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_consensus::{
     Consensus, ConsensusError, FullConsensus, HeaderValidator, ReceiptRootBloom, TransactionRoot,
@@ -45,6 +46,12 @@ pub struct EthBeaconConsensus<ChainSpec> {
     max_extra_data_size: usize,
     /// When true, skips the gas limit change validation between parent and child blocks.
     skip_gas_limit_ramp_check: bool,
+    /// When true, skips the blob gas used check in header validation.
+    skip_blob_gas_used_check: bool,
+    /// When true, skips the requests hash check in post-execution validation.
+    skip_requests_hash_check: bool,
+    /// When true, allows BAL hashes before Amsterdam activation.
+    allow_bal_hashes: bool,
 }
 
 impl<ChainSpec: EthChainSpec + EthereumHardforks> EthBeaconConsensus<ChainSpec> {
@@ -54,6 +61,9 @@ impl<ChainSpec: EthChainSpec + EthereumHardforks> EthBeaconConsensus<ChainSpec> 
             chain_spec,
             max_extra_data_size: MAXIMUM_EXTRA_DATA_SIZE,
             skip_gas_limit_ramp_check: false,
+            skip_blob_gas_used_check: false,
+            skip_requests_hash_check: false,
+            allow_bal_hashes: false,
         }
     }
 
@@ -74,6 +84,24 @@ impl<ChainSpec: EthChainSpec + EthereumHardforks> EthBeaconConsensus<ChainSpec> 
         self
     }
 
+    /// Disables the blob gas used check in header validation.
+    pub const fn with_skip_blob_gas_used_check(mut self, skip: bool) -> Self {
+        self.skip_blob_gas_used_check = skip;
+        self
+    }
+
+    /// Disables the requests hash check in post-execution validation.
+    pub const fn with_skip_requests_hash_check(mut self, skip: bool) -> Self {
+        self.skip_requests_hash_check = skip;
+        self
+    }
+
+    /// Allows BAL hashes before Amsterdam activation.
+    pub const fn with_allow_bal_hashes(mut self, allow: bool) -> Self {
+        self.allow_bal_hashes = allow;
+        self
+    }
+
     /// Returns the chain spec associated with this consensus engine.
     pub const fn chain_spec(&self) -> &Arc<ChainSpec> {
         &self.chain_spec
@@ -90,14 +118,24 @@ where
         block: &RecoveredBlock<N::Block>,
         result: &BlockExecutionResult<N::Receipt>,
         receipt_root_bloom: Option<ReceiptRootBloom>,
+        block_access_list_hash: Option<B256>,
     ) -> Result<(), ConsensusError> {
-        validate_block_post_execution(
+        let res = validation::validate_block_post_execution_with_bal_hashes(
             block,
             &self.chain_spec,
-            &result.receipts,
-            &result.requests,
+            result,
             receipt_root_bloom,
-        )
+            block_access_list_hash,
+            self.allow_bal_hashes,
+        );
+
+        if self.skip_requests_hash_check &&
+            let Err(ConsensusError::BodyRequestsHashDiff(_)) = &res
+        {
+            return Ok(());
+        }
+
+        res
     }
 }
 
@@ -183,12 +221,14 @@ where
 
         // Ensures that EIP-4844 fields are valid once cancun is active.
         if self.chain_spec.is_cancun_active_at_timestamp(header.timestamp()) {
-            validate_4844_header_standalone(
-                header,
-                self.chain_spec
-                    .blob_params_at_timestamp(header.timestamp())
-                    .unwrap_or_else(BlobParams::cancun),
-            )?;
+            if !self.skip_blob_gas_used_check {
+                validate_4844_header_standalone(
+                    header,
+                    self.chain_spec
+                        .blob_params_at_timestamp(header.timestamp())
+                        .unwrap_or_else(BlobParams::cancun),
+                )?;
+            }
         } else if header.blob_gas_used().is_some() {
             return Err(ConsensusError::BlobGasUsedUnexpected)
         } else if header.excess_blob_gas().is_some() {
@@ -203,6 +243,22 @@ where
             }
         } else if header.requests_hash().is_some() {
             return Err(ConsensusError::RequestsHashUnexpected)
+        }
+
+        if self.chain_spec.is_amsterdam_active_at_timestamp(header.timestamp()) {
+            if header.block_access_list_hash().is_none() {
+                return Err(ConsensusError::BlockAccessListHashMissing)
+            }
+            if header.slot_number().is_none() {
+                return Err(ConsensusError::SlotNumberMissing)
+            }
+        } else {
+            if header.block_access_list_hash().is_some() && !self.allow_bal_hashes {
+                return Err(ConsensusError::BlockAccessListHashUnexpected)
+            }
+            if header.slot_number().is_some() {
+                return Err(ConsensusError::SlotNumberUnexpected)
+            }
         }
 
         Ok(())
@@ -240,9 +296,11 @@ where
 mod tests {
     use super::*;
     use alloy_consensus::Header;
+    use alloy_eips::eip7685::EMPTY_REQUESTS_HASH;
     use alloy_primitives::B256;
     use reth_chainspec::{ChainSpec, ChainSpecBuilder};
     use reth_consensus_common::validation::validate_against_parent_gas_limit;
+    use reth_ethereum_primitives::{Block as EthBlock, EthPrimitives, Receipt};
     use reth_primitives_traits::{
         constants::{GAS_LIMIT_BOUND_DIVISOR, MINIMUM_GAS_LIMIT},
         proofs,
@@ -251,6 +309,24 @@ mod tests {
     fn header_with_gas_limit(gas_limit: u64) -> SealedHeader {
         let header = reth_primitives_traits::Header { gas_limit, ..Default::default() };
         SealedHeader::new(header, B256::ZERO)
+    }
+
+    fn valid_prague_header() -> reth_primitives_traits::Header {
+        reth_primitives_traits::Header {
+            base_fee_per_gas: Some(1337),
+            withdrawals_root: Some(proofs::calculate_withdrawals_root(&[])),
+            blob_gas_used: Some(0),
+            excess_blob_gas: Some(0),
+            parent_beacon_block_root: Some(B256::ZERO),
+            requests_hash: Some(EMPTY_REQUESTS_HASH),
+            ..Default::default()
+        }
+    }
+
+    fn prague_recovered_block_with_bal_hash(hash: B256) -> RecoveredBlock<EthBlock> {
+        let mut header = valid_prague_header();
+        header.block_access_list_hash = Some(hash);
+        RecoveredBlock::new_unhashed(EthBlock { header, body: Default::default() }, Vec::new())
     }
 
     #[test]
@@ -330,6 +406,137 @@ mod tests {
             withdrawals_root: Some(proofs::calculate_withdrawals_root(&[])),
             ..Default::default()
         };
+
+        assert!(EthBeaconConsensus::new(chain_spec)
+            .validate_header(&SealedHeader::seal_slow(header,))
+            .is_ok());
+    }
+
+    #[test]
+    fn prague_header_rejects_block_access_list_hash_before_amsterdam() {
+        let chain_spec = Arc::new(ChainSpecBuilder::mainnet().prague_activated().build());
+        let mut header = valid_prague_header();
+        header.block_access_list_hash = Some(B256::ZERO);
+
+        assert!(matches!(
+            EthBeaconConsensus::new(chain_spec)
+                .validate_header(&SealedHeader::seal_slow(header,))
+                .unwrap_err(),
+            ConsensusError::BlockAccessListHashUnexpected
+        ));
+    }
+
+    #[test]
+    fn prague_header_allows_block_access_list_hash_before_amsterdam() {
+        let chain_spec = Arc::new(ChainSpecBuilder::mainnet().prague_activated().build());
+        let mut header = valid_prague_header();
+        header.block_access_list_hash = Some(B256::ZERO);
+
+        assert!(EthBeaconConsensus::new(chain_spec)
+            .with_allow_bal_hashes(true)
+            .validate_header(&SealedHeader::seal_slow(header,))
+            .is_ok());
+    }
+
+    #[test]
+    fn prague_header_rejects_slot_number_before_amsterdam() {
+        let chain_spec = Arc::new(ChainSpecBuilder::mainnet().prague_activated().build());
+        let mut header = valid_prague_header();
+        header.slot_number = Some(0);
+
+        assert!(matches!(
+            EthBeaconConsensus::new(chain_spec)
+                .validate_header(&SealedHeader::seal_slow(header,))
+                .unwrap_err(),
+            ConsensusError::SlotNumberUnexpected
+        ));
+    }
+
+    #[test]
+    fn prague_header_rejects_slot_number_with_allowed_bal_hashes_before_amsterdam() {
+        let chain_spec = Arc::new(ChainSpecBuilder::mainnet().prague_activated().build());
+        let mut header = valid_prague_header();
+        header.block_access_list_hash = Some(B256::ZERO);
+        header.slot_number = Some(0);
+
+        assert!(matches!(
+            EthBeaconConsensus::new(chain_spec)
+                .with_allow_bal_hashes(true)
+                .validate_header(&SealedHeader::seal_slow(header,))
+                .unwrap_err(),
+            ConsensusError::SlotNumberUnexpected
+        ));
+    }
+
+    #[test]
+    fn prague_post_execution_allows_block_access_list_hash_before_amsterdam() {
+        let chain_spec = Arc::new(ChainSpecBuilder::mainnet().prague_activated().build());
+        let expected_hash = B256::repeat_byte(0x42);
+        let block = prague_recovered_block_with_bal_hash(expected_hash);
+        let result = BlockExecutionResult::<Receipt>::default();
+        let consensus = EthBeaconConsensus::new(chain_spec).with_allow_bal_hashes(true);
+
+        assert!(FullConsensus::<EthPrimitives>::validate_block_post_execution(
+            &consensus,
+            &block,
+            &result,
+            None,
+            Some(expected_hash),
+        )
+        .is_ok());
+
+        assert!(FullConsensus::<EthPrimitives>::validate_block_post_execution(
+            &consensus, &block, &result, None, None,
+        )
+        .is_ok());
+
+        assert!(matches!(
+            FullConsensus::<EthPrimitives>::validate_block_post_execution(
+                &consensus,
+                &block,
+                &result,
+                None,
+                Some(B256::repeat_byte(0x24)),
+            )
+            .unwrap_err(),
+            ConsensusError::BlockAccessListHashMismatch(_)
+        ));
+    }
+
+    #[test]
+    fn amsterdam_header_requires_block_access_list_hash() {
+        let chain_spec = Arc::new(ChainSpecBuilder::mainnet().amsterdam_activated().build());
+        let mut header = valid_prague_header();
+        header.slot_number = Some(0);
+
+        assert!(matches!(
+            EthBeaconConsensus::new(chain_spec)
+                .validate_header(&SealedHeader::seal_slow(header,))
+                .unwrap_err(),
+            ConsensusError::BlockAccessListHashMissing
+        ));
+    }
+
+    #[test]
+    fn amsterdam_header_requires_slot_number() {
+        let chain_spec = Arc::new(ChainSpecBuilder::mainnet().amsterdam_activated().build());
+        let mut header = valid_prague_header();
+        header.block_access_list_hash = Some(B256::ZERO);
+
+        assert!(matches!(
+            EthBeaconConsensus::new(chain_spec)
+                .validate_header(&SealedHeader::seal_slow(header,))
+                .unwrap_err(),
+            ConsensusError::SlotNumberMissing
+        ));
+    }
+
+    #[test]
+    fn amsterdam_header_accepts_block_access_list_hash_and_slot_number() {
+        let chain_spec = Arc::new(ChainSpecBuilder::mainnet().amsterdam_activated().build());
+        let mut header = valid_prague_header();
+        header.block_access_list_hash = Some(B256::ZERO);
+        header.slot_number = Some(0);
 
         assert!(EthBeaconConsensus::new(chain_spec)
             .validate_header(&SealedHeader::seal_slow(header,))

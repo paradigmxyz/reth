@@ -16,10 +16,13 @@ use reth_eth_wire::{
     EthNetworkPrimitives, HelloMessage, HelloMessageWithProtocols, NetworkPrimitives,
     UnifiedStatus,
 };
+use reth_eth_wire_types::message::MAX_MESSAGE_SIZE;
 use reth_ethereum_forks::{ForkFilter, Head};
 use reth_network_peers::{mainnet_nodes, pk2id, sepolia_nodes, PeerId, TrustedPeer};
 use reth_network_types::{PeersConfig, SessionsConfig};
-use reth_storage_api::{noop::NoopProvider, BlockNumReader, BlockReader, HeaderProvider};
+use reth_storage_api::{
+    noop::NoopProvider, BalProvider, BlockNumReader, BlockReader, HeaderProvider,
+};
 use reth_tasks::Runtime;
 use secp256k1::SECP256K1;
 use std::{collections::HashSet, net::SocketAddr, sync::Arc};
@@ -81,7 +84,10 @@ pub struct NetworkConfig<C, N: NetworkPrimitives = EthNetworkPrimitives> {
     pub status: UnifiedStatus,
     /// Sets the hello message for the p2p handshake in `RLPx`
     pub hello_message: HelloMessageWithProtocols,
-    /// Additional protocols to announce and handle in `RLPx`
+    /// Additional `RLPx` sub-protocols to announce and handle alongside `eth`.
+    ///
+    /// Does not cover `snap/2`, which is supported natively (see
+    /// [`NetworkConfigBuilder::with_snap`]).
     pub extra_protocols: RlpxSubProtocols,
     /// Whether to disable transaction gossip
     pub tx_gossip_disabled: bool,
@@ -94,6 +100,8 @@ pub struct NetworkConfig<C, N: NetworkPrimitives = EthNetworkPrimitives> {
     /// This can be overridden to support custom handshake logic via the
     /// [`NetworkConfigBuilder`].
     pub handshake: Arc<dyn EthRlpxHandshake>,
+    /// Maximum allowed ETH message size for post-handshake ETH/Snap streams.
+    pub eth_max_message_size: usize,
     /// List of block number-hash pairs to check for required blocks.
     /// If non-empty, peers that don't have these blocks will be filtered out.
     pub required_block_hashes: Vec<BlockNumHash>,
@@ -154,7 +162,8 @@ where
 impl<C, N> NetworkConfig<C, N>
 where
     N: NetworkPrimitives,
-    C: BlockReader<Block = N::Block, Receipt = N::Receipt, Header = N::BlockHeader>
+    C: BalProvider
+        + BlockReader<Block = N::Block, Receipt = N::Receipt, Header = N::BlockHeader>
         + HeaderProvider
         + Clone
         + Unpin
@@ -201,7 +210,8 @@ pub struct NetworkConfigBuilder<N: NetworkPrimitives = EthNetworkPrimitives> {
     executor: Runtime,
     /// Sets the hello message for the p2p handshake in `RLPx`
     hello_message: Option<HelloMessageWithProtocols>,
-    /// The executor to use for spawning tasks.
+    /// Additional `RLPx` sub-protocols to announce and handle alongside `eth`. Does not cover
+    /// `snap/2`, which is supported natively (see [`NetworkConfigBuilder::with_snap`]).
     extra_protocols: RlpxSubProtocols,
     /// Head used to start set for the fork filter and status.
     head: Option<Head>,
@@ -216,10 +226,14 @@ pub struct NetworkConfigBuilder<N: NetworkPrimitives = EthNetworkPrimitives> {
     /// The Ethereum P2P handshake, see also:
     /// <https://github.com/ethereum/devp2p/blob/master/rlpx.md#initial-handshake>.
     handshake: Arc<dyn EthRlpxHandshake>,
+    /// Maximum allowed ETH message size for post-handshake ETH/Snap streams.
+    eth_max_message_size: usize,
     /// List of block hashes to check for required blocks.
     required_block_hashes: Vec<BlockNumHash>,
     /// Optional network id
     network_id: Option<u64>,
+    /// Whether to advertise the `snap/2` satellite protocol (EIP-8189) in the handshake.
+    snap_enabled: bool,
 }
 
 impl NetworkConfigBuilder<EthNetworkPrimitives> {
@@ -260,8 +274,10 @@ impl<N: NetworkPrimitives> NetworkConfigBuilder<N> {
             transactions_manager_config: Default::default(),
             nat: None,
             handshake: Arc::new(EthHandshake::default()),
+            eth_max_message_size: MAX_MESSAGE_SIZE,
             required_block_hashes: Vec::new(),
             network_id: None,
+            snap_enabled: false,
         }
     }
 
@@ -533,8 +549,18 @@ impl<N: NetworkPrimitives> NetworkConfigBuilder<N> {
     }
 
     /// Adds a new additional protocol to the `RLPx` sub-protocol list.
+    ///
+    /// Not for `snap/2`, which is supported natively (see [`Self::with_snap`]).
     pub fn add_rlpx_sub_protocol(mut self, protocol: impl IntoRlpxSubProtocol) -> Self {
         self.extra_protocols.push(protocol);
+        self
+    }
+
+    /// Toggles advertisement of the `snap/2` satellite protocol (EIP-8189).
+    ///
+    /// Default off: snap/2 is only negotiated with peers when explicitly enabled.
+    pub const fn with_snap(mut self, snap_enabled: bool) -> Self {
+        self.snap_enabled = snap_enabled;
         self
     }
 
@@ -580,6 +606,23 @@ impl<N: NetworkPrimitives> NetworkConfigBuilder<N> {
         self
     }
 
+    /// Sets the maximum allowed ETH message size for post-handshake ETH/Snap streams.
+    ///
+    /// This does not affect the initial status handshake, which continues to use
+    /// [`MAX_MESSAGE_SIZE`].
+    pub const fn eth_max_message_size(mut self, max_message_size: usize) -> Self {
+        self.eth_max_message_size = max_message_size;
+        self
+    }
+
+    /// Sets the maximum allowed ETH message size for post-handshake ETH/Snap streams if present.
+    pub const fn eth_max_message_size_opt(mut self, max_message_size: Option<usize>) -> Self {
+        if let Some(max_message_size) = max_message_size {
+            self.eth_max_message_size = max_message_size;
+        }
+        self
+    }
+
     /// Set the optional network id.
     pub const fn network_id(mut self, network_id: Option<u64>) -> Self {
         self.network_id = network_id;
@@ -618,8 +661,10 @@ impl<N: NetworkPrimitives> NetworkConfigBuilder<N> {
             transactions_manager_config,
             nat,
             handshake,
+            eth_max_message_size,
             required_block_hashes,
             network_id,
+            snap_enabled,
         } = self;
 
         let head = head.unwrap_or_else(|| Head {
@@ -630,20 +675,29 @@ impl<N: NetworkPrimitives> NetworkConfigBuilder<N> {
             total_difficulty: chain_spec.genesis().difficulty,
         });
 
+        let listener_addr = listener_addr.unwrap_or(DEFAULT_DISCOVERY_ADDRESS);
+        // Static NAT addresses (`extip`/`extaddr`) tell peers which IP to dial, but that IP may
+        // not exist on a local interface. Keep binding to `listener_addr` and use the NAT IP only
+        // as the ENR address.
+        let advertised_ip = nat.clone().and_then(|nat| nat.as_external_ip(listener_addr.port()));
+
         discovery_v5_builder = discovery_v5_builder.map(|mut builder| {
             if let Some(network_stack_id) = NetworkStackId::id(&chain_spec) {
                 let fork_id = chain_spec.fork_id(&head);
                 builder = builder.fork(network_stack_id, fork_id)
             }
 
+            if let Some(ip) = advertised_ip {
+                builder = builder.advertised_ip(ip);
+            }
+
             builder
         });
-
-        let listener_addr = listener_addr.unwrap_or(DEFAULT_DISCOVERY_ADDRESS);
 
         let mut hello_message =
             hello_message.unwrap_or_else(|| HelloMessage::builder(peer_id).build());
         hello_message.port = listener_addr.port();
+        hello_message = hello_message.with_snap(snap_enabled);
 
         // set the status
         let mut status = UnifiedStatus::spec_builder(&chain_spec, &head);
@@ -690,6 +744,7 @@ impl<N: NetworkPrimitives> NetworkConfigBuilder<N> {
             transactions_manager_config,
             nat,
             handshake,
+            eth_max_message_size,
             required_block_hashes,
         }
     }
@@ -736,6 +791,34 @@ mod tests {
     fn builder() -> NetworkConfigBuilder {
         let secret_key = SecretKey::new(&mut rand_08::thread_rng());
         NetworkConfigBuilder::new(secret_key, Runtime::test())
+    }
+
+    #[test]
+    fn test_snap_advertisement_default_off() {
+        // snap/2 must not be advertised unless explicitly enabled.
+        let config = builder().build(NoopProvider::default());
+        assert!(config.hello_message.protocols.iter().all(|p| p.cap.name != "snap"));
+    }
+
+    #[test]
+    fn test_snap_advertisement_when_enabled() {
+        let config = builder().with_snap(true).build(NoopProvider::default());
+        let snap_caps =
+            config.hello_message.protocols.iter().filter(|p| p.cap.name == "snap").count();
+        assert_eq!(snap_caps, 1);
+        assert_eq!(
+            config
+                .hello_message
+                .protocols
+                .iter()
+                .find(|p| p.cap.name == "snap")
+                .unwrap()
+                .cap
+                .version,
+            2
+        );
+        // eth is still advertised alongside snap.
+        assert!(config.hello_message.protocols.iter().any(|p| p.cap.name == "eth"));
     }
 
     #[test]

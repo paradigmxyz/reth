@@ -3,14 +3,17 @@
 use crate::{
     cache::LruCache,
     discovery::Discovery,
-    fetch::{BlockResponseOutcome, FetchAction, StateFetcher},
+    fetch::{BlockResponseOutcome, FetchAction, NewPeerInfo, StateFetcher},
     message::{BlockRequest, NewBlockMessage, PeerResponse, PeerResponseResult},
     peers::{PeerAction, PeersManager},
     session::BlockRangeInfo,
     FetchClient,
 };
 use alloy_consensus::BlockHeader;
-use alloy_primitives::B256;
+use alloy_primitives::{
+    map::{FbBuildHasher, HashMap},
+    B256,
+};
 use rand::seq::SliceRandom;
 use reth_eth_wire::{
     BlockHashNumber, Capabilities, DisconnectReason, EthNetworkPrimitives, GetReceipts70,
@@ -23,7 +26,7 @@ use reth_network_peers::PeerId;
 use reth_network_types::{PeerAddr, PeerKind};
 use reth_primitives_traits::Block;
 use std::{
-    collections::{HashMap, VecDeque},
+    collections::VecDeque,
     fmt,
     net::{IpAddr, SocketAddr},
     ops::Deref,
@@ -76,7 +79,7 @@ impl Deref for BlockNumReader {
 #[derive(Debug)]
 pub struct NetworkState<N: NetworkPrimitives = EthNetworkPrimitives> {
     /// All active peers and their state.
-    active_peers: HashMap<PeerId, ActivePeer<N>>,
+    active_peers: HashMap<PeerId, ActivePeer<N>, FbBuildHasher<64>>,
     /// Manages connections to peers.
     peers_manager: PeersManager,
     /// Buffered messages until polled.
@@ -144,28 +147,33 @@ impl<N: NetworkPrimitives> NetworkState<N> {
     ///
     /// Returns `Ok` if the session is valid, returns an `Err` if the session is not accepted and
     /// should be rejected.
-    pub(crate) fn on_session_activated(
-        &mut self,
-        peer: PeerId,
-        capabilities: Arc<Capabilities>,
-        status: Arc<UnifiedStatus>,
-        request_tx: PeerRequestSender<PeerRequest<N>>,
-        timeout: Arc<AtomicU64>,
-        range_info: Option<BlockRangeInfo>,
-    ) {
-        debug_assert!(!self.active_peers.contains_key(&peer), "Already connected; not possible");
-
-        // find the corresponding block number
-        let block_number =
-            self.client.block_number(status.blockhash).ok().flatten().unwrap_or_default();
-        self.state_fetcher.new_active_peer(
+    pub(crate) fn on_session_activated(&mut self, activation: SessionActivation<N>) {
+        let SessionActivation {
             peer,
-            status.blockhash,
-            block_number,
-            Arc::clone(&capabilities),
+            capabilities,
+            status,
+            request_tx,
             timeout,
             range_info,
-        );
+            supports_snap,
+        } = activation;
+
+        debug_assert!(!self.active_peers.contains_key(&peer), "Already connected; not possible");
+
+        // Use the block number from the peer's status (eth/69+) if available,
+        // otherwise fall back to a local lookup by hash.
+        let block_number = status.latest_block.unwrap_or_else(|| {
+            self.client.block_number(status.blockhash).ok().flatten().unwrap_or_default()
+        });
+        self.state_fetcher.new_active_peer(NewPeerInfo {
+            peer_id: peer,
+            best_hash: status.blockhash,
+            best_number: block_number,
+            capabilities: Arc::clone(&capabilities),
+            timeout,
+            range_info,
+            supports_snap,
+        });
 
         self.active_peers.insert(
             peer,
@@ -305,9 +313,19 @@ impl<N: NetworkPrimitives> NetworkState<N> {
         self.peers_manager.add_trusted_peer_id(peer_id)
     }
 
+    /// Adds a trusted peer that may use a hostname, with periodic DNS re-resolution.
+    pub(crate) fn add_trusted_peer_node(&mut self, trusted: reth_network_peers::TrustedPeer) {
+        self.peers_manager.add_trusted_peer_node(trusted)
+    }
+
     /// Adds a peer and its address with the given kind to the peerset.
-    pub(crate) fn add_peer_kind(&mut self, peer_id: PeerId, kind: PeerKind, addr: PeerAddr) {
-        self.peers_manager.add_peer_kind(peer_id, Some(kind), addr, None)
+    pub(crate) fn add_peer_kind(
+        &mut self,
+        peer_id: PeerId,
+        kind: Option<PeerKind>,
+        addr: PeerAddr,
+    ) {
+        self.peers_manager.add_peer_kind(peer_id, kind, addr, None)
     }
 
     /// Connects a peer and its address with the given kind
@@ -398,6 +416,12 @@ impl<N: NetworkPrimitives> NetworkState<N> {
                     let response = PeerResponse::BlockBodies { response: rx };
                     (request, response)
                 }
+                BlockRequest::GetBlockAccessLists(request) => {
+                    let (response, rx) = oneshot::channel();
+                    let request = PeerRequest::GetBlockAccessLists { request, response };
+                    let response = PeerResponse::BlockAccessLists { response: rx };
+                    (request, response)
+                }
                 BlockRequest::GetReceipts(request) => {
                     if peer.capabilities.supports_eth_v70() {
                         let (response, rx) = oneshot::channel();
@@ -421,6 +445,12 @@ impl<N: NetworkPrimitives> NetworkState<N> {
                         let response = PeerResponse::Receipts { response: rx };
                         (request, response)
                     }
+                }
+                BlockRequest::GetSnap(request) => {
+                    let (response, rx) = oneshot::channel();
+                    let request = PeerRequest::GetSnap { request, response };
+                    let response = PeerResponse::Snap { response: rx };
+                    (request, response)
                 }
             };
             let _ = peer.request_tx.to_session_tx.try_send(request);
@@ -474,6 +504,10 @@ impl<N: NetworkPrimitives> NetworkState<N> {
                 let normalized = res.map(ReceiptsResponse::from);
                 self.state_fetcher.on_receipts_response(peer, normalized)
             }
+            PeerResponseResult::BlockAccessLists(res) => {
+                self.state_fetcher.on_block_access_lists_response(peer, res)
+            }
+            PeerResponseResult::Snap(res) => self.state_fetcher.on_snap_response(peer, res),
             _ => None,
         };
 
@@ -580,6 +614,25 @@ pub(crate) struct ActivePeer<N: NetworkPrimitives> {
     pub(crate) blocks: LruCache<B256>,
 }
 
+/// Everything [`NetworkState::on_session_activated`] needs to register a newly established
+/// session.
+pub(crate) struct SessionActivation<N: NetworkPrimitives> {
+    /// The remote peer's identifier.
+    pub(crate) peer: PeerId,
+    /// The capabilities the peer announced.
+    pub(crate) capabilities: Arc<Capabilities>,
+    /// The `Status` message the peer sent during the `eth` handshake.
+    pub(crate) status: Arc<UnifiedStatus>,
+    /// A communication channel directly to the session task.
+    pub(crate) request_tx: PeerRequestSender<PeerRequest<N>>,
+    /// The maximum time the session waits for a response from the peer.
+    pub(crate) timeout: Arc<AtomicU64>,
+    /// The range info for the peer.
+    pub(crate) range_info: Option<BlockRangeInfo>,
+    /// Whether the connection negotiated `snap/2` and can serve [`PeerRequest::GetSnap`].
+    pub(crate) supports_snap: bool,
+}
+
 /// Message variants triggered by the [`NetworkState`]
 #[derive(Debug)]
 pub(crate) enum StateAction<N: NetworkPrimitives> {
@@ -626,7 +679,7 @@ mod tests {
         discovery::Discovery,
         fetch::StateFetcher,
         peers::PeersManager,
-        state::{BlockNumReader, NetworkState},
+        state::{BlockNumReader, NetworkState, SessionActivation},
         PeerRequest,
     };
     use alloy_consensus::Header;
@@ -673,14 +726,15 @@ mod tests {
         let (tx, session_rx) = mpsc::channel(1);
         let peer_tx = PeerRequestSender::new(peer_id, tx);
 
-        state.on_session_activated(
-            peer_id,
-            capabilities(),
-            Arc::default(),
-            peer_tx,
-            Arc::new(AtomicU64::new(1)),
-            None,
-        );
+        state.on_session_activated(SessionActivation {
+            peer: peer_id,
+            capabilities: capabilities(),
+            status: Arc::default(),
+            request_tx: peer_tx,
+            timeout: Arc::new(AtomicU64::new(1)),
+            range_info: None,
+            supports_snap: false,
+        });
 
         assert!(state.active_peers.contains_key(&peer_id));
 

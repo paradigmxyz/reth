@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use alloy_genesis::ChainConfig;
+use alloy_primitives::keccak256;
 use alloy_rpc_types_admin::{
     EthInfo, EthPeerInfo, EthProtocolInfo, NodeInfo, PeerInfo, PeerNetworkInfo, PeerProtocolInfo,
     Ports, ProtocolInfo,
@@ -9,12 +10,11 @@ use async_trait::async_trait;
 use jsonrpsee::core::RpcResult;
 use reth_chainspec::{EthChainSpec, EthereumHardfork, EthereumHardforks, ForkCondition};
 use reth_network_api::{NetworkInfo, Peers};
-use reth_network_peers::{id2pk, AnyNode, NodeRecord};
+use reth_network_peers::{AnyNode, NodeRecord};
 use reth_network_types::PeerKind;
 use reth_rpc_api::AdminApiServer;
 use reth_rpc_server_types::ToRpcResult;
 use reth_transaction_pool::TransactionPool;
-use revm_primitives::keccak256;
 
 /// `admin` API implementation.
 ///
@@ -56,16 +56,36 @@ where
 
     /// Handler for `admin_addTrustedPeer`
     fn add_trusted_peer(&self, record: AnyNode) -> RpcResult<bool> {
-        if let Some(record) = record.node_record() {
-            self.network.add_trusted_peer_with_udp(record.id, record.tcp_addr(), record.udp_addr())
+        if let Some(trusted) = record.trusted_peer().cloned() {
+            self.network.add_trusted_peer_node(trusted);
+        } else {
+            if let Some(record) = record.node_record() {
+                self.network.add_trusted_peer_with_udp(
+                    record.id,
+                    record.tcp_addr(),
+                    record.udp_addr(),
+                )
+            }
+            self.network.add_trusted_peer_id(record.peer_id());
         }
-        self.network.add_trusted_peer_id(record.peer_id());
         Ok(true)
     }
 
     /// Handler for `admin_removeTrustedPeer`
     fn remove_trusted_peer(&self, record: AnyNode) -> RpcResult<bool> {
         self.network.remove_peer(record.peer_id(), PeerKind::Trusted);
+        Ok(true)
+    }
+
+    /// Handler for `admin_banPeer`
+    fn ban_peer(&self, record: AnyNode) -> RpcResult<bool> {
+        self.network.ban_peer(record.peer_id());
+        Ok(true)
+    }
+
+    /// Handler for `admin_unbanPeer`
+    fn unban_peer(&self, record: AnyNode) -> RpcResult<bool> {
+        self.network.unban_peer(record.peer_id());
         Ok(true)
     }
 
@@ -76,7 +96,7 @@ where
 
         for peer in peers {
             infos.push(PeerInfo {
-                id: keccak256(peer.remote_id.as_slice()).to_string(),
+                id: alloy_primitives::hex::encode(keccak256(peer.remote_id.as_slice())),
                 name: peer.client_version.to_string(),
                 enode: peer.enode,
                 enr: peer.enr,
@@ -155,9 +175,7 @@ where
         ]);
 
         Ok(NodeInfo {
-            id: id2pk(enode.id)
-                .map(|pk| pk.to_string())
-                .unwrap_or_else(|_| alloy_primitives::hex::encode(enode.id.as_slice())),
+            id: alloy_primitives::hex::encode(keccak256(enode.id.as_slice())),
             name: status.client_version,
             enode: enode.to_string(),
             enr: self.network.local_enr().to_string(),

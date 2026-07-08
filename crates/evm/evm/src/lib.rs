@@ -18,12 +18,8 @@
 extern crate alloc;
 
 use crate::execute::{BasicBlockBuilder, Executor};
-use alloc::vec::Vec;
-use alloy_eips::{
-    eip2718::{EIP2930_TX_TYPE_ID, LEGACY_TX_TYPE_ID},
-    eip2930::AccessList,
-    eip4895::Withdrawals,
-};
+use alloc::{string::String, vec::Vec};
+use alloy_eips::eip4895::Withdrawals;
 use alloy_evm::{
     block::{BlockExecutorFactory, BlockExecutorFor},
     precompiles::PrecompilesMap,
@@ -35,7 +31,7 @@ use reth_execution_errors::BlockExecutionError;
 use reth_primitives_traits::{
     BlockTy, HeaderTy, NodePrimitives, ReceiptTy, SealedBlock, SealedHeader, TxTy,
 };
-use revm::{context::TxEnv, database::State, primitives::hardfork::SpecId};
+use revm::{database::State, primitives::hardfork::SpecId};
 
 pub mod either;
 /// EVM environment configuration.
@@ -121,6 +117,7 @@ pub use alloy_evm::{
 ///     gas_limit: 30_000_000,
 ///     withdrawals: Some(withdrawals),
 ///     parent_beacon_block_root: Some(beacon_root),
+///     slot_number: None,
 /// };
 ///
 /// // Build a new block on top of parent
@@ -199,7 +196,7 @@ pub trait ConfigureEvm: Clone + Debug + Send + Sync + Unpin {
         Receipt = ReceiptTy<Self::Primitives>,
         ExecutionCtx<'a>: Debug + Send,
         EvmFactory: EvmFactory<
-            Tx: TransactionEnv
+            Tx: TransactionEnvMut
                     + FromRecoveredTx<TxTy<Self::Primitives>>
                     + FromTxWithEncoded<TxTy<Self::Primitives>>,
             Precompiles = PrecompilesMap,
@@ -257,7 +254,7 @@ pub trait ConfigureEvm: Clone + Debug + Send + Sync + Unpin {
         attributes: Self::NextBlockEnvCtx,
     ) -> Result<ExecutionCtxFor<'_, Self>, Self::Error>;
 
-    /// Returns a [`TxEnv`] from a transaction.
+    /// Returns a [`EvmFactory::Tx`] from a transaction.
     fn tx_env(&self, transaction: impl IntoTxEnv<TxEnvFor<Self>>) -> TxEnvFor<Self> {
         transaction.into_tx_env()
     }
@@ -265,6 +262,34 @@ pub trait ConfigureEvm: Clone + Debug + Send + Sync + Unpin {
     /// Provides a reference to [`EvmFactory`] implementation.
     fn evm_factory(&self) -> &EvmFactoryFor<Self> {
         self.block_executor_factory().evm_factory()
+    }
+
+    /// Returns a config with JIT support enabled for subsequently created EVMs, if supported.
+    ///
+    /// This is one of three gates required before an EVM can execute JIT-compiled code: the binary
+    /// must be built with the `jit` feature, runtime compilation must be enabled by `--jit` or the
+    /// `reth_jit` RPC method, and this local support flag must be enabled for the config that
+    /// creates the EVM.
+    #[auto_impl(keep_default_for(&, Arc))]
+    fn with_jit_support_enabled(self, _enabled: bool) -> Self
+    where
+        Self: Sized,
+    {
+        self
+    }
+
+    /// Returns a config with local JIT support enabled for subsequently created EVMs, if supported.
+    #[auto_impl(keep_default_for(&, Arc))]
+    fn with_jit_support(self) -> Self
+    where
+        Self: Sized,
+    {
+        self.with_jit_support_enabled(true)
+    }
+
+    /// Returns the JIT backend, if supported.
+    fn jit_backend(&self) -> Option<&dyn JitBackend> {
+        None
     }
 
     /// Returns a new EVM with the given database configured with the given environment settings,
@@ -315,10 +340,23 @@ pub trait ConfigureEvm: Clone + Debug + Send + Sync + Unpin {
         &'a self,
         evm: EvmFor<Self, &'a mut State<DB>, I>,
         ctx: <Self::BlockExecutorFactory as BlockExecutorFactory>::ExecutionCtx<'a>,
-    ) -> impl BlockExecutorFor<'a, Self::BlockExecutorFactory, &'a mut State<DB>, I>
+    ) -> BlockExecutorForEvm<'a, Self, DB, I>
     where
         DB: Database,
         I: InspectorFor<Self, &'a mut State<DB>> + 'a,
+    {
+        self.block_executor_factory().create_executor(evm, ctx)
+    }
+
+    /// Creates a strategy with a DB state borrow that can be shorter than the execution context.
+    fn create_executor_with_state<'a, 'db, DB, I>(
+        &'a self,
+        evm: EvmFor<Self, &'db mut State<DB>, I>,
+        ctx: <Self::BlockExecutorFactory as BlockExecutorFactory>::ExecutionCtx<'a>,
+    ) -> BlockExecutorFor<'a, Self::BlockExecutorFactory, &'db mut State<DB>, I>
+    where
+        DB: Database,
+        I: InspectorFor<Self, &'db mut State<DB>>,
     {
         self.block_executor_factory().create_executor(evm, ctx)
     }
@@ -328,8 +366,7 @@ pub trait ConfigureEvm: Clone + Debug + Send + Sync + Unpin {
         &'a self,
         db: &'a mut State<DB>,
         block: &'a SealedBlock<<Self::Primitives as NodePrimitives>::Block>,
-    ) -> Result<impl BlockExecutorFor<'a, Self::BlockExecutorFactory, &'a mut State<DB>>, Self::Error>
-    {
+    ) -> Result<BlockExecutorForEvm<'a, Self, DB>, Self::Error> {
         let evm = self.evm_for_block(db, block.header())?;
         let ctx = self.context_for_block(block)?;
         Ok(self.create_executor(evm, ctx))
@@ -355,10 +392,7 @@ pub trait ConfigureEvm: Clone + Debug + Send + Sync + Unpin {
         evm: EvmFor<Self, &'a mut State<DB>, I>,
         parent: &'a SealedHeader<HeaderTy<Self::Primitives>>,
         ctx: <Self::BlockExecutorFactory as BlockExecutorFactory>::ExecutionCtx<'a>,
-    ) -> impl BlockBuilder<
-        Primitives = Self::Primitives,
-        Executor: BlockExecutorFor<'a, Self::BlockExecutorFactory, &'a mut State<DB>, I>,
-    >
+    ) -> impl BlockBuilder<Primitives = Self::Primitives, Executor = BlockExecutorForEvm<'a, Self, DB, I>>
     where
         DB: Database,
         I: InspectorFor<Self, &'a mut State<DB>> + 'a,
@@ -407,10 +441,7 @@ pub trait ConfigureEvm: Clone + Debug + Send + Sync + Unpin {
         parent: &'a SealedHeader<<Self::Primitives as NodePrimitives>::BlockHeader>,
         attributes: Self::NextBlockEnvCtx,
     ) -> Result<
-        impl BlockBuilder<
-            Primitives = Self::Primitives,
-            Executor: BlockExecutorFor<'a, Self::BlockExecutorFactory, &'a mut State<DB>>,
-        >,
+        impl BlockBuilder<Primitives = Self::Primitives, Executor = BlockExecutorForEvm<'a, Self, DB>>,
         Self::Error,
     > {
         let evm_env = self.next_evm_env(parent, &attributes)?;
@@ -455,6 +486,21 @@ pub trait ConfigureEvm: Clone + Debug + Send + Sync + Unpin {
     ) -> impl Executor<DB, Primitives = Self::Primitives, Error = BlockExecutionError> {
         BasicBlockExecutor::new(self, db)
     }
+}
+
+/// JIT backend controls exposed by an EVM configuration.
+pub trait JitBackend: Send + Sync {
+    /// Enables or disables JIT compilation.
+    fn set_enabled(&self, enabled: bool) -> Result<(), String>;
+
+    /// Pauses JIT helper execution while keeping queueing and resident compiled code available.
+    fn pause(&self);
+
+    /// Resumes background JIT work.
+    fn resume(&self);
+
+    /// Clears JIT runtime state.
+    fn clear(&self);
 }
 
 /// Represents additional attributes required to configure the next block.
@@ -505,82 +551,6 @@ pub struct NextBlockEnvAttributes {
     pub withdrawals: Option<Withdrawals>,
     /// Optional extra data.
     pub extra_data: Bytes,
-}
-
-/// Abstraction over transaction environment.
-pub trait TransactionEnv:
-    revm::context_interface::Transaction + Debug + Clone + Send + Sync + 'static
-{
-    /// Set the gas limit.
-    fn set_gas_limit(&mut self, gas_limit: u64);
-
-    /// Set the gas limit.
-    fn with_gas_limit(mut self, gas_limit: u64) -> Self {
-        self.set_gas_limit(gas_limit);
-        self
-    }
-
-    /// Returns the configured nonce.
-    fn nonce(&self) -> u64;
-
-    /// Sets the nonce.
-    fn set_nonce(&mut self, nonce: u64);
-
-    /// Sets the nonce.
-    fn with_nonce(mut self, nonce: u64) -> Self {
-        self.set_nonce(nonce);
-        self
-    }
-
-    /// Set access list.
-    fn set_access_list(&mut self, access_list: AccessList);
-
-    /// Set access list.
-    fn with_access_list(mut self, access_list: AccessList) -> Self {
-        self.set_access_list(access_list);
-        self
-    }
-}
-
-impl TransactionEnv for TxEnv {
-    fn set_gas_limit(&mut self, gas_limit: u64) {
-        self.gas_limit = gas_limit;
-    }
-
-    fn nonce(&self) -> u64 {
-        self.nonce
-    }
-
-    fn set_nonce(&mut self, nonce: u64) {
-        self.nonce = nonce;
-    }
-
-    fn set_access_list(&mut self, access_list: AccessList) {
-        self.access_list = access_list;
-
-        if self.tx_type == LEGACY_TX_TYPE_ID {
-            // if this was previously marked as legacy tx, this must be upgraded to eip2930 with an
-            // accesslist
-            self.tx_type = EIP2930_TX_TYPE_ID;
-        }
-    }
-}
-
-#[cfg(feature = "op")]
-impl<T: TransactionEnv> TransactionEnv for op_revm::OpTransaction<T> {
-    fn set_gas_limit(&mut self, gas_limit: u64) {
-        self.base.set_gas_limit(gas_limit);
-    }
-
-    fn nonce(&self) -> u64 {
-        TransactionEnv::nonce(&self.base)
-    }
-
-    fn set_nonce(&mut self, nonce: u64) {
-        self.base.set_nonce(nonce);
-    }
-
-    fn set_access_list(&mut self, access_list: AccessList) {
-        self.base.set_access_list(access_list);
-    }
+    /// Optional slot number for post-Amsterdam payloads.
+    pub slot_number: Option<u64>,
 }

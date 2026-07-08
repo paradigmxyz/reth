@@ -16,6 +16,7 @@ use alloy_rpc_types_trace::{
     tracerequest::TraceCallRequest,
 };
 use async_trait::async_trait;
+use futures::StreamExt;
 use jsonrpsee::core::RpcResult;
 use reth_chainspec::{ChainSpecProvider, EthereumHardforks};
 use reth_evm::ConfigureEvm;
@@ -39,6 +40,11 @@ use revm_inspectors::{
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use tokio::sync::{AcquireError, OwnedSemaphorePermit};
+
+/// Maximum number of `trace_filter` blocks replayed concurrently.
+const TRACE_FILTER_BLOCK_BUFFER_SIZE: usize = 4;
+/// Number of blocks fetched per provider range read in `trace_filter`.
+const TRACE_FILTER_FETCH_CHUNK_SIZE: usize = 16;
 
 /// `trace` API implementation.
 ///
@@ -360,6 +366,13 @@ where
             return Err(EthApiError::HeaderNotFound(end.into()).into());
         }
 
+        // Check if the requested range overlaps with pruned history (EIP-4444)
+        let earliest_block =
+            self.provider().earliest_block_number().map_err(Eth::Error::from_eth_err)?;
+        if start < earliest_block {
+            return Err(EthApiError::PrunedHistoryUnavailable.into());
+        }
+
         if start > end {
             return Err(EthApiError::InvalidParams(
                 "invalid parameters: fromBlock cannot be greater than toBlock".to_string(),
@@ -367,7 +380,7 @@ where
             .into())
         }
 
-        // ensure that the range is not too large, since we need to fetch all blocks in the range
+        // ensure that the range is not too large, since every block in the range may be replayed
         let distance = end.saturating_sub(start);
         if distance > self.inner.eth_config.max_trace_filter_blocks {
             return Err(EthApiError::InvalidParams(format!(
@@ -378,57 +391,65 @@ where
         }
 
         let mut all_traces = Vec::new();
-        let mut block_traces = Vec::with_capacity(self.inner.eth_config.max_tracing_requests);
-        for chunk_start in (start..=end).step_by(self.inner.eth_config.max_tracing_requests) {
-            let chunk_end = std::cmp::min(
-                chunk_start + self.inner.eth_config.max_tracing_requests as u64 - 1,
-                end,
-            );
+        let block_buffer_size =
+            self.inner.eth_config.max_tracing_requests.clamp(1, TRACE_FILTER_BLOCK_BUFFER_SIZE);
+        let mut include_reward_traces = true;
 
-            // fetch all blocks in that chunk
+        for chunk_start in (start..=end).step_by(TRACE_FILTER_FETCH_CHUNK_SIZE) {
+            let chunk_end = (chunk_start + TRACE_FILTER_FETCH_CHUNK_SIZE as u64 - 1).min(end);
+
             let blocks = self
                 .eth_api()
                 .spawn_blocking_io(move |this| {
-                    Ok(this
+                    let blocks = this
                         .provider()
                         .recovered_block_range(chunk_start..=chunk_end)
-                        .map_err(Eth::Error::from_eth_err)?
-                        .into_iter()
-                        .map(Arc::new)
-                        .collect::<Vec<_>>())
+                        .map_err(Eth::Error::from_eth_err)?;
+
+                    Ok(blocks.into_iter().map(Arc::new).collect::<Vec<_>>())
                 })
                 .await?;
 
-            // trace all blocks
-            for block in &blocks {
-                let matcher = matcher.clone();
-                let traces = self.eth_api().trace_block_until(
-                    block.hash().into(),
-                    Some(block.clone()),
-                    None,
-                    TracingInspectorConfig::default_parity(),
-                    move |tx_info, mut ctx| {
-                        let mut traces = ctx
-                            .take_inspector()
-                            .into_parity_builder()
-                            .into_localized_transaction_traces(tx_info);
-                        traces.retain(|trace| matcher.matches(&trace.trace));
-                        Ok(Some(traces))
-                    },
-                );
-                block_traces.push(traces);
-            }
+            let mut block_replays = futures::stream::iter(blocks)
+                .map(|block| {
+                    let this = self.clone();
+                    let matcher = matcher.clone();
 
-            #[allow(clippy::iter_with_drain)]
-            let block_traces = futures::future::try_join_all(block_traces.drain(..)).await?;
-            all_traces.extend(block_traces.into_iter().flatten().flat_map(|traces| {
-                traces.into_iter().flatten().flat_map(|traces| traces.into_iter())
-            }));
+                    let block_hash = block.hash();
 
-            // add reward traces for all blocks
-            for block in &blocks {
-                if let Some(base_block_reward) = self.calculate_base_block_reward(block.header())? {
-                    all_traces.extend(
+                    async move {
+                        let permit = this.acquire_trace_permit().await;
+                        let traces = this
+                            .eth_api()
+                            .trace_block_until(
+                                block_hash.into(),
+                                Some(block.clone()),
+                                None,
+                                TracingInspectorConfig::default_parity(),
+                                move |tx_info, mut ctx| {
+                                    // Keep the block replay permit inside the spawned replay task.
+                                    let _block_replay_permit = &permit;
+                                    let mut traces = ctx
+                                        .take_inspector()
+                                        .into_parity_builder()
+                                        .into_localized_transaction_traces(tx_info);
+                                    traces.retain(|trace| matcher.matches(&trace.trace));
+                                    Ok(Some(traces))
+                                },
+                            )
+                            .await?;
+
+                        Ok::<_, Eth::Error>((block, traces))
+                    }
+                })
+                .buffered(block_buffer_size);
+
+            while let Some(block_replay) = block_replays.next().await {
+                let (block, traces) = block_replay?;
+                let reward_traces = if include_reward_traces {
+                    if let Some(base_block_reward) =
+                        self.calculate_base_block_reward(block.header())?
+                    {
                         self.extract_reward_traces(
                             block.header(),
                             block.hash(),
@@ -436,32 +457,29 @@ where
                             base_block_reward,
                         )
                         .into_iter()
-                        .filter(|trace| matcher.matches(&trace.trace)),
-                    );
+                        .filter(|trace| matcher.matches(&trace.trace))
+                        .collect::<Vec<_>>()
+                    } else {
+                        // Blocks are processed in ascending order, so once a historical range
+                        // reaches post-Paris blocks, later blocks in the range have no rewards.
+                        include_reward_traces = false;
+                        Vec::new()
+                    }
                 } else {
-                    // no block reward, means we're past the Paris hardfork and don't expect any
-                    // rewards because the blocks in ascending order
-                    break
+                    Vec::new()
+                };
+
+                if let Some(traces) = traces {
+                    all_traces.extend(traces.into_iter().flatten().flatten());
+                }
+                all_traces.extend(reward_traces);
+
+                if let Some(traces) =
+                    apply_trace_filter_pagination(&mut all_traces, &mut after, count)
+                {
+                    return Ok(traces)
                 }
             }
-
-            // Skips the first `after` number of matching traces.
-            if let Some(cutoff) = after.map(|a| a as usize) &&
-                cutoff < all_traces.len()
-            {
-                all_traces.drain(..cutoff);
-                // we removed the first `after` traces
-                after = None;
-            }
-
-            // Return at most `count` of traces
-            if let Some(count) = count {
-                let count = count as usize;
-                if count < all_traces.len() {
-                    all_traces.truncate(count);
-                    return Ok(all_traces)
-                }
-            };
         }
 
         // If `after` is greater than or equal to the number of matched traces, it returns an
@@ -628,6 +646,34 @@ where
     }
 }
 
+fn apply_trace_filter_pagination(
+    all_traces: &mut Vec<LocalizedTransactionTrace>,
+    after: &mut Option<u64>,
+    count: Option<u64>,
+) -> Option<Vec<LocalizedTransactionTrace>> {
+    // Skips the first `after` number of matching traces.
+    if let Some(cutoff) = after.map(|a| a as usize) &&
+        cutoff < all_traces.len()
+    {
+        all_traces.drain(..cutoff);
+        // we removed the first `after` traces
+        *after = None;
+    }
+
+    // Return at most `count` traces after `after` has been consumed.
+    if after.is_none() &&
+        let Some(count) = count
+    {
+        let count = count as usize;
+        if count < all_traces.len() {
+            all_traces.truncate(count);
+            return Some(std::mem::take(all_traces))
+        }
+    }
+
+    None
+}
+
 #[async_trait]
 impl<Eth> TraceApiServer<RpcTxReq<Eth::NetworkTypes>> for TraceApi<Eth>
 where
@@ -711,7 +757,6 @@ where
     /// # Limitations
     /// This currently requires block filter fields, since reth does not have address indices yet.
     async fn trace_filter(&self, filter: TraceFilter) -> RpcResult<Vec<LocalizedTransactionTrace>> {
-        let _permit = self.inner.blocking_task_guard.clone().acquire_many_owned(2).await;
         Ok(Self::trace_filter(self, filter).await.map_err(Into::into)?)
     }
 
@@ -819,5 +864,72 @@ fn reward_trace<H: BlockHeader>(
             error: None,
             result: None,
         },
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn localized_transaction_trace(
+        block_number: u64,
+        transaction_position: u64,
+    ) -> LocalizedTransactionTrace {
+        LocalizedTransactionTrace {
+            block_hash: Some(B256::ZERO),
+            block_number: Some(block_number),
+            transaction_hash: Some(B256::ZERO),
+            transaction_position: Some(transaction_position),
+            trace: TransactionTrace::default(),
+        }
+    }
+
+    fn localized_reward_trace(block_number: u64) -> LocalizedTransactionTrace {
+        LocalizedTransactionTrace {
+            block_hash: Some(B256::ZERO),
+            block_number: Some(block_number),
+            transaction_hash: None,
+            transaction_position: None,
+            trace: TransactionTrace {
+                trace_address: vec![],
+                subtraces: 0,
+                action: Action::Reward(RewardAction {
+                    author: Address::ZERO,
+                    reward_type: RewardType::Block,
+                    value: U256::ZERO,
+                }),
+                error: None,
+                result: None,
+            },
+        }
+    }
+
+    fn trace_order(traces: &[LocalizedTransactionTrace]) -> Vec<(u64, Option<u64>, bool)> {
+        traces
+            .iter()
+            .map(|trace| {
+                (
+                    trace.block_number.unwrap(),
+                    trace.transaction_position,
+                    trace.trace.action.is_reward(),
+                )
+            })
+            .collect()
+    }
+
+    #[test]
+    fn trace_filter_paginates_after_per_block_reward_order() {
+        let mut all_traces = vec![
+            localized_transaction_trace(1, 0),
+            localized_reward_trace(1),
+            localized_transaction_trace(2, 0),
+            localized_reward_trace(2),
+        ];
+
+        let mut after = Some(1);
+        let paginated =
+            apply_trace_filter_pagination(&mut all_traces, &mut after, Some(1)).unwrap();
+
+        assert_eq!(trace_order(&paginated), vec![(1, None, true)]);
     }
 }

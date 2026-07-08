@@ -16,32 +16,43 @@ env:
   RUSTC_WRAPPER: "sccache"
 
 name: compact-codec
+permissions: {}
+
 jobs:
   compact-codec:
     runs-on: ${{ github.repository == 'paradigmxyz/reth' && 'depot-ubuntu-latest' || 'ubuntu-latest' }}
+    permissions:
+      contents: read
     strategy:
       matrix:
         bin:
           - cargo run --bin reth --features "dev"
     steps:
-      - uses: rui314/setup-mold@v1
+      - name: Checkout PR
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+      - uses: rui314/setup-mold@9c9c13bf4c3f1adef0cc596abc155580bcb04444 # v1
+      - run: .github/scripts/install_llvm.sh ubuntu
       - uses: dtolnay/rust-toolchain@stable
-      - uses: mozilla-actions/sccache-action@v0.0.9
-      - uses: Swatinem/rust-cache@v2
+      - uses: mozilla-actions/sccache-action@9e7fa8a12102821edf02ca5dbea1acd0f89a2696 # v0.0.10
+      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
         with:
           cache-on-failure: true
       - name: Checkout base
-        uses: actions/checkout@v6
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           ref: ${{ github.base_ref || 'main' }}
+          persist-credentials: false
       # On `main` branch, generates test vectors and serializes them to disk using `Compact`.
       - name: Generate compact vectors
         run: |
           ${{ matrix.bin }} -- test-vectors compact --write
       - name: Checkout PR
-        uses: actions/checkout@v6
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           clean: false
+          persist-credentials: false
       # On incoming merge try to read and decode previously generated vectors with `Compact`
       - name: Read vectors
         run: ${{ matrix.bin }} -- test-vectors compact --read

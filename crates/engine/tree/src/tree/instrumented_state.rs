@@ -74,36 +74,25 @@ where
     /// Creates a new [`InstrumentedStateProvider`] from a state provider with the provided label
     /// for metrics.
     pub fn new(state_provider: S, source: &'static str) -> Self {
-        Self {
+        Self::with_stats(
             state_provider,
-            metrics: StateProviderMetrics::new_with_labels(&[("source", source)]),
-            stats: Arc::new(StateProviderStats::default()),
-        }
+            StateProviderMetrics::with_source(source),
+            Arc::new(StateProviderStats::default()),
+        )
+    }
+
+    /// Creates a new [`InstrumentedStateProvider`] that writes into shared statistics.
+    pub(crate) const fn with_stats(
+        state_provider: S,
+        metrics: StateProviderMetrics,
+        stats: Arc<StateProviderStats>,
+    ) -> Self {
+        Self { state_provider, metrics, stats }
     }
 
     /// Returns a shared reference to the accumulated fetch statistics.
     pub fn stats(&self) -> Arc<StateProviderStats> {
         Arc::clone(&self.stats)
-    }
-}
-
-impl<S> Drop for InstrumentedStateProvider<S> {
-    fn drop(&mut self) {
-        let total_storage_fetch_latency = self.stats.total_storage_fetch_latency.duration();
-        self.metrics.total_storage_fetch_latency.record(total_storage_fetch_latency);
-        self.metrics
-            .total_storage_fetch_latency_gauge
-            .set(total_storage_fetch_latency.as_secs_f64());
-
-        let total_code_fetch_latency = self.stats.total_code_fetch_latency.duration();
-        self.metrics.total_code_fetch_latency.record(total_code_fetch_latency);
-        self.metrics.total_code_fetch_latency_gauge.set(total_code_fetch_latency.as_secs_f64());
-
-        let total_account_fetch_latency = self.stats.total_account_fetch_latency.duration();
-        self.metrics.total_account_fetch_latency.record(total_account_fetch_latency);
-        self.metrics
-            .total_account_fetch_latency_gauge
-            .set(total_account_fetch_latency.as_secs_f64());
     }
 }
 
@@ -142,6 +131,28 @@ pub(crate) struct StateProviderMetrics {
     /// A gauge of the total time we spend fetching accounts over the lifetime of this state
     /// provider
     total_account_fetch_latency_gauge: Gauge,
+}
+
+impl StateProviderMetrics {
+    /// Creates state-provider metrics with the given source label.
+    pub(crate) fn with_source(source: &'static str) -> Self {
+        Self::new_with_labels(&[("source", source)])
+    }
+
+    /// Records accumulated fetch latency totals.
+    pub(crate) fn record_totals(&self, stats: &StateProviderStats) {
+        let total_storage_fetch_latency = stats.total_storage_fetch_latency.duration();
+        self.total_storage_fetch_latency.record(total_storage_fetch_latency);
+        self.total_storage_fetch_latency_gauge.set(total_storage_fetch_latency.as_secs_f64());
+
+        let total_code_fetch_latency = stats.total_code_fetch_latency.duration();
+        self.total_code_fetch_latency.record(total_code_fetch_latency);
+        self.total_code_fetch_latency_gauge.set(total_code_fetch_latency.as_secs_f64());
+
+        let total_account_fetch_latency = stats.total_account_fetch_latency.duration();
+        self.total_account_fetch_latency.record(total_account_fetch_latency);
+        self.total_account_fetch_latency_gauge.set(total_account_fetch_latency.as_secs_f64());
+    }
 }
 
 impl<S: AccountReader> AccountReader for InstrumentedStateProvider<S> {
@@ -237,8 +248,9 @@ impl<S: StateProofProvider> StateProofProvider for InstrumentedStateProvider<S> 
         &self,
         input: TrieInput,
         target: HashedPostState,
+        mode: reth_trie::ExecutionWitnessMode,
     ) -> ProviderResult<Vec<alloy_primitives::Bytes>> {
-        self.state_provider.witness(input, target)
+        self.state_provider.witness(input, target, mode)
     }
 }
 

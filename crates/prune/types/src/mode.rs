@@ -18,7 +18,7 @@ pub enum PruneMode {
 }
 
 #[cfg(any(test, feature = "test-utils"))]
-#[allow(clippy::derivable_impls)]
+#[expect(clippy::derivable_impls)]
 impl Default for PruneMode {
     fn default() -> Self {
         Self::Full
