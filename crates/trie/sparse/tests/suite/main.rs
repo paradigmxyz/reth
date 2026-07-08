@@ -11,6 +11,7 @@
 //! - [`update_leaves`]: Tests for `update_leaves`, including insert, modify, and remove
 //! - [`root`]: Tests for `root()` hash computation
 //! - [`take_updates`]: Tests for `take_updates`
+//! - [`changed_paths`]: Tests for retained changed node base paths
 //! - [`prune`]: Tests for `prune`
 //! - [`wipe_clear`]: Tests for `wipe` and `clear`
 //! - [`get_leaf_value`]: Tests for `get_leaf_value`
@@ -26,6 +27,7 @@ use reth_trie_common::{Nibbles, ProofV2Target, TrieNodeV2};
 use reth_trie_sparse::{LeafLookup, LeafLookupError, LeafUpdate, SparseTrie};
 use std::{collections::BTreeMap, iter::once};
 
+mod changed_paths;
 mod find_leaf;
 mod get_leaf_value;
 mod lifecycle;
@@ -189,6 +191,7 @@ macro_rules! sparse_trie_tests {
 // Re-export test functions from submodules for the macro
 // ---------------------------------------------------------------------------
 
+use changed_paths::*;
 use find_leaf::*;
 use get_leaf_value::*;
 use lifecycle::*;
@@ -271,6 +274,11 @@ sparse_trie_tests! {
     test_take_updates_contains_updated_and_removed_nodes,
     test_take_updates_no_duplicate_updated_and_removed_nodes,
     test_take_updates_cross_cancellation_across_root_calls,
+
+    // changed_paths
+    test_changed_paths_record_base_paths_for_branches_and_leaves,
+    test_changed_paths_skip_dirty_ancestor_branch_when_descendant_changed,
+    test_changed_paths_record_branch_after_leaf_removal,
 
     // prune
     test_prune_retains_specified_leaves,

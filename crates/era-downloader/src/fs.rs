@@ -74,7 +74,7 @@ pub fn read_era_dir(
 }
 
 /// Scans `dir` for ERA files whose type satisfies `accept`, returning them sorted by the number
-/// parsed from the `<network>-<number>-<hash>.<ext>` filename.
+/// parsed from the `<network>-<number>-...<ext>` filename.
 ///
 /// Files that don't match `accept` are passed to `on_other`, letting callers pick up sidecar files
 /// such as `checksums.txt`.
@@ -107,7 +107,7 @@ fn parse_era_entry(
     {
         let parts = name.split('-').collect::<Vec<_>>();
 
-        if parts.len() == 3 {
+        if parts.len() >= 3 {
             let number = usize::from_str(parts[1])?;
 
             return Ok(Some((number, path.into_boxed_path())));

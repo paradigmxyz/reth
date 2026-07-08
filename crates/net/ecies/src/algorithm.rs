@@ -697,11 +697,11 @@ impl ECIES {
     pub fn write_body(&mut self, out: &mut BytesMut, data: &[u8]) {
         let len = Self::align_16(data.len());
         let old_len = out.len();
+        out.reserve(len + 16);
+        out.extend_from_slice(data);
         out.resize(old_len + len, 0);
 
         let encrypted = &mut out[old_len..old_len + len];
-        encrypted[..data.len()].copy_from_slice(data);
-
         self.egress_aes.as_mut().unwrap().apply_keystream(encrypted);
         self.egress_mac.as_mut().unwrap().update_body(encrypted);
         let tag = self.egress_mac.as_mut().unwrap().digest();

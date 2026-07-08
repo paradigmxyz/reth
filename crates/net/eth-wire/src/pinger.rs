@@ -2,10 +2,10 @@ use crate::errors::PingerError;
 use std::{
     future::Future,
     pin::Pin,
-    task::{Context, Poll},
+    task::{Context, Poll, Waker},
     time::Duration,
 };
-use tokio::time::{Instant, Interval, Sleep};
+use tokio::time::{Instant, Sleep};
 use tokio_stream::Stream;
 
 /// The pinger is a simple state machine that sends a ping, waits for a pong,
@@ -13,9 +13,23 @@ use tokio_stream::Stream;
 #[derive(Debug)]
 pub(crate) struct Pinger {
     /// The timer used for the next ping.
-    ping_interval: Interval,
+    ping_timer: Pin<Box<Sleep>>,
+    /// The last task waker registered with the ping timer.
+    ///
+    /// The pinger is polled on every session poll while its timers only rarely fire, and every
+    /// poll of a tokio timer re-registers with the runtime's timer driver. Caching the registered
+    /// waker allows returning `Pending` with a cheap local check instead, as long as the same
+    /// waker is registered and the timer has not elapsed. Cleared whenever the timer is reset or
+    /// fires so the next poll registers with the new deadline.
+    ping_waker: Option<Waker>,
+    /// The duration between pings.
+    ping_interval: Duration,
     /// The timer used to detect a ping timeout.
     timeout_timer: Pin<Box<Sleep>>,
+    /// The last task waker registered with the timeout timer.
+    ///
+    /// See [`Self::ping_waker`] for why the waker is cached.
+    timeout_waker: Option<Waker>,
     /// The timeout duration for each ping.
     timeout: Duration,
     /// Keeps track of the state
@@ -29,11 +43,15 @@ impl Pinger {
     /// and timeout duration.
     pub(crate) fn new(ping_interval: Duration, timeout_duration: Duration) -> Self {
         let now = Instant::now();
+        let ping_timer = tokio::time::sleep_until(now + ping_interval);
         let timeout_timer = tokio::time::sleep(timeout_duration);
         Self {
             state: PingState::Ready,
-            ping_interval: tokio::time::interval_at(now + ping_interval, ping_interval),
+            ping_timer: Box::pin(ping_timer),
+            ping_waker: None,
+            ping_interval,
             timeout_timer: Box::pin(timeout_timer),
+            timeout_waker: None,
             timeout: timeout_duration,
         }
     }
@@ -45,14 +63,18 @@ impl Pinger {
             PingState::Ready => Err(PingerError::UnexpectedPong),
             PingState::WaitingForPong => {
                 self.state = PingState::Ready;
-                self.ping_interval.reset();
+                self.ping_timer.as_mut().reset(Instant::now() + self.ping_interval);
+                self.ping_waker = None;
+                self.timeout_waker = None;
                 Ok(())
             }
             PingState::TimedOut => {
                 // if we receive a pong after timeout then we also reset the state, since the
                 // connection was kept alive after timeout
                 self.state = PingState::Ready;
-                self.ping_interval.reset();
+                self.ping_timer.as_mut().reset(Instant::now() + self.ping_interval);
+                self.ping_waker = None;
+                self.timeout_waker = None;
                 Ok(())
             }
         }
@@ -71,17 +93,37 @@ impl Pinger {
     ) -> Poll<Result<PingerEvent, PingerError>> {
         match self.state() {
             PingState::Ready => {
-                if self.ping_interval.poll_tick(cx).is_ready() {
+                // Skip polling the timer while it already holds an equivalent waker for a live
+                // deadline; the pending registration is guaranteed to wake this task.
+                if self.ping_waker.as_ref().is_some_and(|waker| waker.will_wake(cx.waker())) &&
+                    !self.ping_timer.is_elapsed()
+                {
+                    return Poll::Pending
+                }
+
+                if self.ping_timer.as_mut().poll(cx).is_ready() {
                     self.timeout_timer.as_mut().reset(Instant::now() + self.timeout);
+                    self.ping_waker = None;
+                    self.timeout_waker = None;
                     self.state = PingState::WaitingForPong;
                     return Poll::Ready(Ok(PingerEvent::Ping))
                 }
+                self.ping_waker = Some(cx.waker().clone());
             }
             PingState::WaitingForPong => {
+                // Same skip as above: the timeout timer already holds an equivalent waker.
+                if self.timeout_waker.as_ref().is_some_and(|waker| waker.will_wake(cx.waker())) &&
+                    !self.timeout_timer.is_elapsed()
+                {
+                    return Poll::Pending
+                }
+
                 if self.timeout_timer.as_mut().poll(cx).is_ready() {
+                    self.timeout_waker = None;
                     self.state = PingState::TimedOut;
                     return Poll::Ready(Ok(PingerEvent::Timeout))
                 }
+                self.timeout_waker = Some(cx.waker().clone());
             }
             PingState::TimedOut => {
                 // we treat continuous calls while in timeout as pending, since the connection is
@@ -129,6 +171,61 @@ pub(crate) enum PingerEvent {
 mod tests {
     use super::*;
     use futures::StreamExt;
+    use std::{
+        sync::{
+            atomic::{AtomicUsize, Ordering},
+            Arc,
+        },
+        task::Wake,
+    };
+
+    #[tokio::test]
+    async fn test_poll_ping_with_cached_waker() {
+        struct CountingWaker(AtomicUsize);
+        impl Wake for CountingWaker {
+            fn wake(self: Arc<Self>) {
+                self.0.fetch_add(1, Ordering::Relaxed);
+            }
+        }
+
+        let ping_interval = Duration::from_millis(100);
+        let timeout = Duration::from_millis(100);
+        let slack = Duration::from_millis(50);
+        let mut pinger = Pinger::new(ping_interval, timeout);
+
+        let first = Arc::new(CountingWaker(AtomicUsize::new(0)));
+        let first_waker = Waker::from(Arc::clone(&first));
+        let mut cx = Context::from_waker(&first_waker);
+
+        // repeated polls with the same waker stay pending via the cached-waker fast path
+        for _ in 0..10 {
+            assert!(pinger.poll_ping(&mut cx).is_pending());
+        }
+
+        // the timer still fires and wakes the task exactly once
+        tokio::time::sleep(ping_interval + slack).await;
+        assert_eq!(first.0.load(Ordering::Relaxed), 1);
+        assert!(matches!(pinger.poll_ping(&mut cx), Poll::Ready(Ok(PingerEvent::Ping))));
+        pinger.on_pong().unwrap();
+
+        // a different task waker bypasses the cache and is re-registered with the timer
+        let second = Arc::new(CountingWaker(AtomicUsize::new(0)));
+        let second_waker = Waker::from(Arc::clone(&second));
+        let mut second_cx = Context::from_waker(&second_waker);
+        assert!(pinger.poll_ping(&mut cx).is_pending());
+        assert!(pinger.poll_ping(&mut second_cx).is_pending());
+
+        tokio::time::sleep(ping_interval + slack).await;
+        assert_eq!(first.0.load(Ordering::Relaxed), 1);
+        assert_eq!(second.0.load(Ordering::Relaxed), 1);
+        assert!(matches!(pinger.poll_ping(&mut second_cx), Poll::Ready(Ok(PingerEvent::Ping))));
+
+        // without a pong the timeout timer fires and the pinger reports the timeout
+        assert!(pinger.poll_ping(&mut second_cx).is_pending());
+        tokio::time::sleep(timeout + slack).await;
+        assert_eq!(second.0.load(Ordering::Relaxed), 2);
+        assert!(matches!(pinger.poll_ping(&mut second_cx), Poll::Ready(Ok(PingerEvent::Timeout))));
+    }
 
     #[tokio::test]
     async fn test_ping_timeout() {

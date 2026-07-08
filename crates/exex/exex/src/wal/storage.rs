@@ -189,7 +189,7 @@ mod tests {
     use reth_testing_utils::generators::{self, random_block};
     use reth_trie_common::{
         updates::{StorageTrieUpdates, TrieUpdates},
-        BranchNodeCompact, HashedPostState, HashedStorage, LazyTrieData, Nibbles,
+        BranchNodeCompact, ComputedTrieData, HashedPostState, HashedStorage, LazyTrieData, Nibbles,
     };
     use std::{collections::BTreeMap, fs::File, sync::Arc};
 
@@ -299,10 +299,10 @@ mod tests {
             )]),
         };
 
-        let trie_data = LazyTrieData::ready(
+        let trie_data = LazyTrieData::ready(ComputedTrieData::new(
             Arc::new(hashed_state.into_sorted()),
             Arc::new(trie_updates.into_sorted()),
-        );
+        ));
 
         let notification: ExExNotification<reth_ethereum_primitives::EthPrimitives> =
             ExExNotification::ChainCommitted {

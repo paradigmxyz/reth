@@ -68,6 +68,22 @@ pub enum SnapMessageId {
     BlockAccessLists = 0x09,
 }
 
+impl SnapMessageId {
+    /// Returns the message id of the response paired with this request, or `None` if this id is
+    /// itself a response.
+    pub const fn response(self) -> Option<Self> {
+        match self {
+            Self::GetAccountRange => Some(Self::AccountRange),
+            Self::GetStorageRanges => Some(Self::StorageRanges),
+            Self::GetByteCodes => Some(Self::ByteCodes),
+            Self::GetBlockAccessLists => Some(Self::BlockAccessLists),
+            Self::AccountRange | Self::StorageRanges | Self::ByteCodes | Self::BlockAccessLists => {
+                None
+            }
+        }
+    }
+}
+
 /// Request for a range of accounts from the state trie.
 // https://github.com/ethereum/devp2p/blob/master/caps/snap.md#getaccountrange-0x00
 #[derive(Debug, Clone, PartialEq, Eq, RlpEncodable, RlpDecodable)]

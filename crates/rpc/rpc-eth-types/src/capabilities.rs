@@ -81,6 +81,7 @@ pub struct EthCapabilitiesDeleteStrategy {
     #[serde(rename = "type")]
     pub strategy_type: EthCapabilitiesDeleteStrategyKind,
     /// Number of blocks retained by the sliding window.
+    #[serde(with = "alloy_serde::quantity")]
     pub retention_blocks: u64,
 }
 
@@ -125,7 +126,7 @@ mod tests {
                     "oldestBlock": "0xa",
                     "deleteStrategy": {
                         "type": "window",
-                        "retentionBlocks": 90,
+                        "retentionBlocks": "0x5a",
                     },
                 },
                 "tx": {

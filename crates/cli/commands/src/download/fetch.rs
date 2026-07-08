@@ -125,6 +125,18 @@ impl ArchiveFetcher {
         &self,
         download_progress: Option<&mut ArchiveDownloadProgress<'_>>,
     ) -> Result<DownloadedArchive> {
+        if let Some(path) = archive_file_url_path(&self.url)? {
+            let size = fs::metadata(&path)?.len();
+            if !self.quiet() {
+                info!(target: "reth::cli",
+                    file = %path.display(),
+                    size = %DownloadProgress::format_size(size),
+                    "Using local archive"
+                );
+            }
+            return Ok(DownloadedArchive { path, size })
+        }
+
         let Some(request_limiter) = self.session.request_limiter() else {
             return self.download_sequential(super::MAX_DOWNLOAD_RETRIES, download_progress)
         };
@@ -393,6 +405,19 @@ impl ArchiveFetcher {
     fn quiet(&self) -> bool {
         self.session.progress().is_some()
     }
+}
+
+/// Resolves a `file://` archive URL to its local path.
+fn archive_file_url_path(url: &str) -> Result<Option<PathBuf>> {
+    let Ok(parsed) = Url::parse(url) else { return Ok(None) };
+    if parsed.scheme() != "file" {
+        return Ok(None)
+    }
+
+    parsed
+        .to_file_path()
+        .map(Some)
+        .map_err(|_| eyre::eyre!("Invalid file:// archive URL path: {url}"))
 }
 
 /// The final path and size of one archive fetched to disk.
@@ -956,6 +981,8 @@ fn panic_payload_message(payload: Box<dyn Any + Send + 'static>) -> String {
 mod tests {
     use super::*;
     use reqwest::StatusCode;
+    use reth_cli_util::cancellation::CancellationToken;
+    use std::io::Write;
 
     #[test]
     fn segmented_plan_skips_small_files() {
@@ -1014,5 +1041,28 @@ mod tests {
             strategy,
             FetchStrategy::Sequential(SequentialDownloadFallback::NoRangeSupport)
         ));
+    }
+
+    #[test]
+    fn archive_fetcher_uses_file_url_archive_directly() {
+        let dir = tempfile::tempdir().unwrap();
+        let archive_path = dir.path().join("state.tar.zst");
+        {
+            let mut archive = std::fs::File::create(&archive_path).unwrap();
+            archive.write_all(b"local archive bytes").unwrap();
+        }
+
+        let cache_dir = dir.path().join("cache");
+        std::fs::create_dir(&cache_dir).unwrap();
+        let url = Url::from_file_path(&archive_path).unwrap().to_string();
+        let session = DownloadSession::new(None, None, CancellationToken::new());
+        let fetcher = ArchiveFetcher::new(url, &cache_dir, session);
+
+        let downloaded = fetcher.download(None).unwrap();
+
+        assert_eq!(downloaded.path, archive_path);
+        assert_eq!(downloaded.size, b"local archive bytes".len() as u64);
+        assert!(!cache_dir.join("state.tar.zst").exists());
+        assert!(!cache_dir.join("state.tar.zst.part").exists());
     }
 }

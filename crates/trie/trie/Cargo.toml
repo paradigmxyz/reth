@@ -20,8 +20,6 @@ reth-storage-errors.workspace = true
 reth-trie-sparse = { workspace = true, features = ["std"] }
 reth-trie-common = { workspace = true, features = ["rayon"] }
 
-revm-database.workspace = true
-
 # alloy
 alloy-eips.workspace = true
 alloy-rlp.workspace = true
@@ -50,9 +48,6 @@ reth-primitives-traits = { workspace = true, features = ["test-utils"] }
 reth-tracing.workspace = true
 reth-trie-common = { workspace = true, features = ["test-utils", "arbitrary"] }
 
-# revm
-revm-state.workspace = true
-
 # trie
 triehash.workspace = true
 
@@ -79,9 +74,7 @@ serde = [
     "alloy-trie/serde",
     "alloy-eips/serde",
     "reth-trie-common/serde",
-    "revm-database/serde",
     "reth-stages-types/serde",
-    "revm-state/serde",
     "parking_lot/serde",
     "rand/serde",
 ]

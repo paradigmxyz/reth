@@ -643,7 +643,7 @@ where
     Provider: NodePrimitivesProvider<Primitives = N>,
     N: NodePrimitives,
 {
-    fn hashed_post_state(&self, bundle_state: &revm_database::BundleState) -> HashedPostState {
+    fn hashed_post_state(&self, bundle_state: &revm::database::BundleState) -> HashedPostState {
         HashedPostState::from_bundle_state::<KeccakKeyHasher>(bundle_state.state())
     }
 }
@@ -1313,16 +1313,16 @@ mod tests {
         use reth_db_api::models::StorageSettings;
         use reth_execution_types::ExecutionOutcome;
         use reth_testing_utils::generators::{self, random_block_range, BlockRangeParams};
-        use revm_database::BundleState;
+        use revm::database::BundleState;
         use std::collections::HashMap;
 
         let factory = create_test_provider_factory();
         factory.set_storage_settings_cache(StorageSettings::v2());
 
         let slot = U256::from_be_bytes(*STORAGE);
-        let account: revm_state::AccountInfo =
+        let account: revm::state::AccountInfo =
             Account { nonce: 1, balance: U256::from(1000), bytecode_hash: None }.into();
-        let higher_account: revm_state::AccountInfo =
+        let higher_account: revm::state::AccountInfo =
             Account { nonce: 1, balance: U256::from(2000), bytecode_hash: None }.into();
 
         let mut rng = generators::rng();
@@ -1337,7 +1337,7 @@ mod tests {
         let mut higher_storage = HashMap::default();
         higher_storage.insert(slot, (U256::ZERO, U256::from(1000)));
 
-        type Revert = Vec<(Address, Option<Option<revm_state::AccountInfo>>, Vec<(U256, U256)>)>;
+        type Revert = Vec<(Address, Option<Option<revm::state::AccountInfo>>, Vec<(U256, U256)>)>;
         let mut reverts: Vec<Revert> = vec![Vec::new(); 16];
 
         reverts[3] = vec![(ADDRESS, Some(Some(account.clone())), vec![(slot, U256::ZERO)])];

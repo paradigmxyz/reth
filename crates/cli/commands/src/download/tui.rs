@@ -200,9 +200,7 @@ impl SelectorApp {
     }
 
     fn select_all(&mut self) {
-        for sel in &mut self.selections {
-            *sel = ComponentSelection::All;
-        }
+        self.selections.fill(ComponentSelection::All);
         self.preset = Some(SelectionPreset::Archive);
     }
 

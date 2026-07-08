@@ -117,8 +117,9 @@ fn test_memory_size_vs_allocator() {
     let _root = trie.root();
 
     let retain_count = num_leaves / 2;
-    let retained: Vec<Nibbles> =
+    let mut retained: Vec<Nibbles> =
         all_keys[..retain_count].iter().map(|k| Nibbles::unpack(*k)).collect();
+    retained.sort_unstable();
 
     trie.prune(&retained);
 

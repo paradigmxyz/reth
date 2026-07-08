@@ -1179,7 +1179,7 @@ mod tests {
     use alloy_primitives::{map::HashMap, U256};
     use reth_provider::test_utils::{ExtendedAccount, MockEthProvider};
     use reth_revm::db::{AccountStatus, BundleAccount};
-    use revm_state::AccountInfo;
+    use revm::state::AccountInfo;
 
     #[test]
     fn test_empty_storage_cached_state_provider() {

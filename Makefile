@@ -132,9 +132,11 @@ build-deb-%:
 # Create a `.tar.gz` containing a binary for a specific target.
 define tarball_release_binary
 	cp $(CARGO_TARGET_DIR)/$(1)/$(PROFILE)/$(2) $(BIN_DIR)/$(2)
+	cp -R LICENSES $(BIN_DIR)/LICENSES
+	cp README.md $(BIN_DIR)/README.md
 	cd $(BIN_DIR) && \
-		tar -czf reth-$(GIT_TAG)-$(1)$(3).tar.gz $(2) && \
-		rm $(2)
+		tar -czf reth-$(GIT_TAG)-$(1)$(3).tar.gz $(2) LICENSES README.md && \
+		rm -r $(2) LICENSES README.md
 endef
 
 # The current git tag will be used as the version in the output file names. You
@@ -233,7 +235,7 @@ maxperf: ## Builds `reth` with the most aggressive optimisations.
 
 .PHONY: maxperf-no-asm
 maxperf-no-asm: ## Builds `reth` with the most aggressive optimisations, minus the "asm-keccak" feature.
-	RUSTFLAGS="-C target-cpu=native" cargo build --profile maxperf --no-default-features --features jemalloc,min-trace-logs,otlp,otlp-logs,reth-revm/portable,js-tracer,keccak-cache-global,rocksdb
+	RUSTFLAGS="-C target-cpu=native" cargo build --profile maxperf --no-default-features --features jemalloc,min-trace-logs,otlp,otlp-logs,reth-revm/portable,js-tracer,keccak-cache-global,gmp,rocksdb
 
 fmt:
 	cargo +nightly fmt

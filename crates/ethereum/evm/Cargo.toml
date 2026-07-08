@@ -63,6 +63,7 @@ jit = [
     "dep:metrics",
     "dep:reth-metrics",
 ]
+gmp = ["revm/gmp"]
 test-utils = [
     "std",
     "reth-chainspec/test-utils",

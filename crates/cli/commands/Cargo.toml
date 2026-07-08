@@ -67,7 +67,8 @@ alloy-chains.workspace = true
 
 itertools.workspace = true
 futures.workspace = true
-tokio.workspace = true
+tokio = { workspace = true, features = ["net"] }
+socket2 = { workspace = true, features = ["all"] }
 
 # misc
 humantime.workspace = true
@@ -108,6 +109,7 @@ proptest-arbitrary-interop = { workspace = true, optional = true }
 reth-ethereum-cli.workspace = true
 reth-provider = { workspace = true, features = ["test-utils"] }
 tempfile.workspace = true
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
 
 [features]
 arbitrary = [

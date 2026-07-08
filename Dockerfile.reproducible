@@ -7,7 +7,7 @@ ARG VERSION
 RUN sed -i '/^# http/{N;s|^# \(http[^ ]*\)\nURIs: .*|# \1\nURIs: \1|}' /etc/apt/sources.list.d/debian.sources
 COPY .github/scripts/install_llvm_ubuntu.sh /tmp/install_llvm.sh
 RUN apt-get -o Acquire::Check-Valid-Until=false update && \
-    apt-get install -y libjemalloc-dev libclang-dev mold pkg-config && \
+    apt-get install -y libjemalloc-dev libclang-dev m4 mold pkg-config && \
     /tmp/install_llvm.sh && rm /tmp/install_llvm.sh
 WORKDIR /app
 COPY . .
@@ -17,8 +17,12 @@ RUN RUSTFLAGS_REPRODUCIBLE_EXTRA="-Clink-arg=-fuse-ld=mold" make build-reth-repr
 FROM scratch AS artifacts
 COPY --from=builder /app/target/x86_64-unknown-linux-gnu/reproducible/reth /reth
 COPY --from=builder /app/target/x86_64-unknown-linux-gnu/reproducible/*.deb /
+COPY --from=builder /app/LICENSES /LICENSES
+COPY --from=builder /app/README.md /README.md
 
 FROM gcr.io/distroless/cc-debian13:nonroot-239cdd2c8a6b275b6a6f6ed1428c57de2fff3e50
 COPY --from=artifacts /reth /reth
+COPY --from=artifacts /LICENSES /LICENSES
+COPY --from=artifacts /README.md /README.md
 EXPOSE 30303 30303/udp 9001 8545 8546
 ENTRYPOINT [ "/reth" ]

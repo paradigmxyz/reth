@@ -35,7 +35,7 @@ use reth_storage_api::{
 use reth_storage_errors::provider::ProviderResult;
 use reth_trie::HashedPostState;
 use reth_trie_db::ChangesetCache;
-use revm_database::BundleState;
+use revm::database::BundleState;
 use std::{
     ops::{RangeBounds, RangeInclusive},
     path::Path,

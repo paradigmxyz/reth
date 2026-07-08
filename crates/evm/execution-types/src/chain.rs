@@ -44,7 +44,7 @@ pub struct Chain<N: NodePrimitives = reth_ethereum_primitives::EthPrimitives> {
 }
 
 type ChainTxReceiptMeta<'a, N> = (
-    &'a RecoveredBlock<<N as NodePrimitives>::Block>,
+    &'a Arc<RecoveredBlock<<N as NodePrimitives>::Block>>,
     IndexedTx<'a, <N as NodePrimitives>::Block>,
     &'a <N as NodePrimitives>::Receipt,
     &'a [<N as NodePrimitives>::Receipt],
@@ -209,8 +209,8 @@ impl<N: NodePrimitives> Chain<N> {
     }
 
     /// Returns an iterator over all blocks in the chain with increasing block number.
-    pub fn blocks_iter(&self) -> impl Iterator<Item = &RecoveredBlock<N::Block>> + '_ {
-        self.blocks().iter().map(|block| block.1.as_ref())
+    pub fn blocks_iter(&self) -> impl Iterator<Item = &Arc<RecoveredBlock<N::Block>>> + '_ {
+        self.blocks().values()
     }
 
     /// Returns an iterator over all transactions in the chain.
@@ -233,7 +233,7 @@ impl<N: NodePrimitives> Chain<N> {
     /// Returns an iterator over all blocks and their receipts in the chain.
     pub fn blocks_and_receipts(
         &self,
-    ) -> impl Iterator<Item = (&RecoveredBlock<N::Block>, &Vec<N::Receipt>)> + '_ {
+    ) -> impl Iterator<Item = (&Arc<RecoveredBlock<N::Block>>, &Vec<N::Receipt>)> + '_ {
         self.blocks_iter().zip(self.block_receipts_iter())
     }
 
@@ -513,6 +513,7 @@ pub(super) mod serde_bincode_compat {
     use core::marker::PhantomData;
     use reth_ethereum_primitives::EthPrimitives;
     use reth_primitives_traits::{NodePrimitives, SealedBlock};
+    use reth_trie_common::ComputedTrieData;
     use serde::{Deserialize, Deserializer, Serialize, Serializer};
     use serde_with::{DeserializeAs, SerializeAs};
 
@@ -579,12 +580,12 @@ pub(super) mod serde_bincode_compat {
                 trie_updates: value
                     .trie_data
                     .iter()
-                    .map(|(k, v)| (*k, v.get().trie_updates.as_ref().into()))
+                    .map(|(k, v)| (*k, v.get().sorted.trie_updates.as_ref().into()))
                     .collect(),
                 hashed_state: value
                     .trie_data
                     .iter()
-                    .map(|(k, v)| (*k, v.get().hashed_state.as_ref().into()))
+                    .map(|(k, v)| (*k, v.get().sorted.hashed_state.as_ref().into()))
                     .collect(),
             }
         }
@@ -606,7 +607,13 @@ pub(super) mod serde_bincode_compat {
                 .into_iter()
                 .map(|(k, v)| {
                     let hashed_state = hashed_state_map.get(&k).cloned().unwrap_or_default();
-                    (k, LazyTrieData::ready(hashed_state, Arc::new(v.into())))
+                    (
+                        k,
+                        LazyTrieData::ready(ComputedTrieData::new(
+                            hashed_state,
+                            Arc::new(v.into()),
+                        )),
+                    )
                 })
                 .collect();
 
@@ -691,9 +698,9 @@ pub(super) mod serde_bincode_compat {
 mod tests {
     use super::*;
     use alloy_consensus::TxType;
-    use alloy_primitives::{Address, B256};
+    use alloy_primitives::{map::HashMap, Address, B256};
     use reth_ethereum_primitives::Receipt;
-    use revm::{database::BundleState, primitives::HashMap, state::AccountInfo};
+    use revm::{database::BundleState, state::AccountInfo};
 
     #[test]
     fn chain_append() {

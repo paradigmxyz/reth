@@ -333,7 +333,7 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
             );
 
             // Collect trie reverts using changeset cache
-            let mut trie_reverts = {
+            let trie_reverts = {
                 let _guard =
                     debug_span!(target: "providers::state::overlay", "retrieving_trie_reverts")
                         .entered();
@@ -366,10 +366,11 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
             let trie_updates = if trie_reverts.is_empty() {
                 overlay_trie
             } else if !overlay_trie.is_empty() {
+                let mut trie_reverts = (*trie_reverts).clone();
                 trie_reverts.extend_ref_and_sort(&overlay_trie);
                 Arc::new(trie_reverts)
             } else {
-                Arc::new(trie_reverts)
+                trie_reverts
             };
 
             let hashed_state_updates = if hashed_state_reverts.is_empty() {

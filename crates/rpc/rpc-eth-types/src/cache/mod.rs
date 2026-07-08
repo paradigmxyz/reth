@@ -810,7 +810,7 @@ impl<B: Block, R: Clone> ChainChange<B, R> {
                     block_hash: block.hash(),
                     receipts: Arc::new(receipts.clone()),
                 };
-                (Arc::new(block.clone()), block_receipts)
+                (Arc::clone(block), block_receipts)
             })
             .unzip();
         Self { blocks, receipts }

@@ -34,7 +34,7 @@ pub use downloaders::BlockDownloaderProvider;
 pub use error::NetworkError;
 pub use events::{
     DiscoveredEvent, DiscoveryEvent, NetworkEvent, NetworkEventListenerProvider, PeerRequest,
-    PeerRequestSender,
+    PeerRequestSender, RequestMessage,
 };
 
 use reth_eth_wire_types::{

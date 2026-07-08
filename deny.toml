@@ -4,26 +4,13 @@
 [advisories]
 yanked = "warn"
 ignore = [
-    # https://rustsec.org/advisories/RUSTSEC-2024-0384 used by sse example
-    "RUSTSEC-2024-0384",
     # https://rustsec.org/advisories/RUSTSEC-2024-0436 paste! is unmaintained
     "RUSTSEC-2024-0436",
     # https://rustsec.org/advisories/RUSTSEC-2025-0141 bincode is unmaintained, need to transition all deps to wincode first
     "RUSTSEC-2025-0141",
     # https://rustsec.org/advisories/RUSTSEC-2023-0089 atomic-polyfill is unmaintained, transitive dep via test-fuzz
     "RUSTSEC-2023-0089",
-    # https://rustsec.org/advisories/RUSTSEC-2026-0002 lru upgrade requires a discv5 bump first
-    "RUSTSEC-2026-0002",
-    # https://rustsec.org/advisories/RUSTSEC-2026-0097 rand is unsound with a custom logger
-    "RUSTSEC-2026-0097",
     # https://rustsec.org/advisories/RUSTSEC-2026-0173 proc-macro-error2 is unmaintained
-    "RUSTSEC-2026-0173",
-    # https://rustsec.org/advisories/RUSTSEC-2026-0118 vulnerable DnssecDnsHandle code was
-    # moved from hickory-proto to hickory-net in 0.26.0; we use hickory-net 0.26.1 which has
-    # the fix, and no patched hickory-proto release exists
-    "RUSTSEC-2026-0118",
-    # https://rustsec.org/advisories/RUSTSEC-2026-0173 proc-macro-error2 is unmaintained
-    # and is pulled in transitively by upstream crates with no safe upgrade available.
     "RUSTSEC-2026-0173",
 ]
 
@@ -78,7 +65,10 @@ allow = [
 
 # Allow 1 or more licenses on a per-crate basis, so that particular licenses
 # aren't accepted for every possible crate as with the normal allow list
-exceptions = []
+exceptions = [
+    # GMP bindings for the optional faster modexp precompile.
+    { allow = ["LGPL-3.0-or-later"], name = "gmp-mpfr-sys" },
+]
 
 [[licenses.clarify]]
 name = "rustls-webpki"

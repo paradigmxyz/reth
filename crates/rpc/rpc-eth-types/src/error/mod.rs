@@ -1145,8 +1145,8 @@ pub enum SignError {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloy_primitives::b256;
     use alloy_sol_types::{Revert, SolError};
-    use revm::primitives::b256;
 
     #[test]
     fn timed_out_error() {
