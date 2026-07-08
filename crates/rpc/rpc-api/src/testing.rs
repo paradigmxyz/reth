@@ -36,7 +36,10 @@ pub trait TestingApi {
     #[method(name = "buildBlockV1")]
     async fn build_block_v1(
         &self,
-        request: TestingBuildBlockRequestV1,
+        parent_block_hash: B256,
+        payload_attributes: PayloadAttributes,
+        transactions: Option<Vec<Bytes>>,
+        extra_data: Option<Bytes>,
     ) -> jsonrpsee::core::RpcResult<ExecutionPayloadEnvelopeV5>;
 
     /// Builds a block on top of the current canonical head, inserts it, and makes it canonical.
