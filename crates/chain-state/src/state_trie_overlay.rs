@@ -350,8 +350,8 @@ impl<N: NodePrimitives> StateTrieOverlayManager<N> {
         Self::anchor_for_parent_in(self.blocks.as_ref(), parent_hash, preferred_anchor)
     }
 
-    /// Returns true if `hash` is in the inclusive parent chain segment from `anchor_hash` to
-    /// `parent_hash`.
+    /// Returns true if `hash` is in the parent chain segment from `anchor_hash` exclusive to
+    /// `parent_hash` inclusive.
     pub fn hash_between_anchor_and_parent(
         &self,
         parent_hash: B256,
@@ -359,12 +359,13 @@ impl<N: NodePrimitives> StateTrieOverlayManager<N> {
         hash: B256,
     ) -> bool {
         let mut current_hash = parent_hash;
-        let mut found_hash = false;
 
         loop {
-            found_hash |= current_hash == hash;
             if current_hash == anchor_hash {
-                return found_hash
+                return false
+            }
+            if current_hash == hash {
+                return true
             }
 
             let Some(block) = self.blocks.get(&current_hash) else { return false };
@@ -732,7 +733,7 @@ mod tests {
         let anchor_hash = blocks[0].recovered_block().parent_hash();
         let parent_hash = blocks[2].recovered_block().hash();
 
-        assert!(manager.hash_between_anchor_and_parent(parent_hash, anchor_hash, anchor_hash));
+        assert!(!manager.hash_between_anchor_and_parent(parent_hash, anchor_hash, anchor_hash));
         for block in &blocks {
             assert!(manager.hash_between_anchor_and_parent(
                 parent_hash,
@@ -756,7 +757,7 @@ mod tests {
         let before_anchor_hash = blocks[0].recovered_block().hash();
 
         assert!(manager.hash_between_anchor_and_parent(parent_hash, anchor_hash, parent_hash));
-        assert!(manager.hash_between_anchor_and_parent(parent_hash, anchor_hash, anchor_hash));
+        assert!(!manager.hash_between_anchor_and_parent(parent_hash, anchor_hash, anchor_hash));
         assert!(!manager.hash_between_anchor_and_parent(
             parent_hash,
             anchor_hash,
