@@ -263,7 +263,13 @@ impl<Provider: DBProvider + StorageSettingsCache> StateProofProvider
     }
 }
 
-impl<Provider: DBProvider> HashedPostStateProvider for LatestStateProviderRef<'_, Provider> {}
+impl<Provider: DBProvider> HashedPostStateProvider for LatestStateProviderRef<'_, Provider> {
+    fn hashed_post_state(&self, state: &reth_execution_types::EvmState) -> HashedPostState {
+        reth_execution_types::hashed_post_state_from_execution_state::<reth_trie::KeccakKeyHasher>(
+            state,
+        )
+    }
+}
 
 impl<Provider: DBProvider + BlockHashReader + StorageSettingsCache> StateProvider
     for LatestStateProviderRef<'_, Provider>

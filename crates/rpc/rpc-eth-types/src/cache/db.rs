@@ -5,7 +5,7 @@
 use alloy_primitives::{Address, B256, U256};
 use reth_errors::ProviderResult;
 use reth_storage_api::{BytecodeReader, HashedPostStateProvider, StateProvider, StateProviderBox};
-use reth_trie::{HashedStorage, MultiProofTargets};
+use reth_trie::{HashedPostState, HashedStorage, MultiProofTargets};
 
 /// Helper alias type for cached state access.
 pub type StateCacheDb = StateProviderTraitObjWrapper;
@@ -152,7 +152,11 @@ impl reth_storage_api::BlockHashReader for StateProviderTraitObjWrapper {
     }
 }
 
-impl HashedPostStateProvider for StateProviderTraitObjWrapper {}
+impl HashedPostStateProvider for StateProviderTraitObjWrapper {
+    fn hashed_post_state(&self, state: &reth_execution_types::EvmState) -> HashedPostState {
+        self.0.hashed_post_state(state)
+    }
+}
 
 impl StateProvider for StateProviderTraitObjWrapper {
     fn storage(

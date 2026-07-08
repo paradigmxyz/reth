@@ -660,6 +660,11 @@ where
     Provider: NodePrimitivesProvider<Primitives = N>,
     N: NodePrimitives,
 {
+    fn hashed_post_state(&self, state: &reth_execution_types::EvmState) -> HashedPostState {
+        reth_execution_types::hashed_post_state_from_execution_state::<reth_trie::KeccakKeyHasher>(
+            state,
+        )
+    }
 }
 
 impl<Provider, N> StateProvider for HistoricalStateProviderRef<'_, Provider, N>

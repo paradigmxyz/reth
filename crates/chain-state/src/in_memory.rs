@@ -1094,7 +1094,13 @@ mod tests {
         }
     }
 
-    impl HashedPostStateProvider for MockStateProvider {}
+    impl HashedPostStateProvider for MockStateProvider {
+        fn hashed_post_state(&self, state: &reth_execution_types::EvmState) -> HashedPostState {
+            reth_execution_types::hashed_post_state_from_execution_state::<reth_trie::KeccakKeyHasher>(
+                state,
+            )
+        }
+    }
 
     impl StorageRootProvider for MockStateProvider {
         fn storage_root(

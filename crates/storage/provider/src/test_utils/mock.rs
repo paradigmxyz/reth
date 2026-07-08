@@ -881,6 +881,11 @@ where
 impl<T: NodePrimitives, ChainSpec: EthChainSpec + 'static> HashedPostStateProvider
     for MockEthProvider<T, ChainSpec>
 {
+    fn hashed_post_state(&self, state: &reth_execution_types::EvmState) -> HashedPostState {
+        reth_execution_types::hashed_post_state_from_execution_state::<reth_trie::KeccakKeyHasher>(
+            state,
+        )
+    }
 }
 
 impl<T, ChainSpec> StateProvider for MockEthProvider<T, ChainSpec>

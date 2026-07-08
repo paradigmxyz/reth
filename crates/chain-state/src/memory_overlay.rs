@@ -207,7 +207,11 @@ impl<N: NodePrimitives> StateProofProvider for MemoryOverlayStateProviderRef<'_,
     }
 }
 
-impl<N: NodePrimitives> HashedPostStateProvider for MemoryOverlayStateProviderRef<'_, N> {}
+impl<N: NodePrimitives> HashedPostStateProvider for MemoryOverlayStateProviderRef<'_, N> {
+    fn hashed_post_state(&self, state: &reth_execution_types::EvmState) -> HashedPostState {
+        self.historical.hashed_post_state(state)
+    }
+}
 
 impl<N: NodePrimitives> StateProvider for MemoryOverlayStateProviderRef<'_, N> {
     fn storage(

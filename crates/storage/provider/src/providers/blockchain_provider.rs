@@ -624,7 +624,16 @@ impl<N: ProviderNodeTypes> StateProviderFactory for BlockchainProvider<N> {
     }
 }
 
-impl<N: NodeTypesWithDB> HashedPostStateProvider for BlockchainProvider<N> {}
+impl<N: NodeTypesWithDB> HashedPostStateProvider for BlockchainProvider<N> {
+    fn hashed_post_state(
+        &self,
+        state: &reth_execution_types::EvmState,
+    ) -> reth_trie::HashedPostState {
+        reth_execution_types::hashed_post_state_from_execution_state::<reth_trie::KeccakKeyHasher>(
+            state,
+        )
+    }
+}
 
 impl<N: ProviderNodeTypes> CanonChainTracker for BlockchainProvider<N> {
     type Header = HeaderTy<N>;
