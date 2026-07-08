@@ -2,7 +2,7 @@ use alloy_consensus::{constants::KECCAK_EMPTY, transaction::TxHashRef, BlockHead
 use alloy_eips::{eip2718::Encodable2718, BlockId, BlockNumberOrTag};
 use alloy_evm::{env::BlockEnvironment, Evm};
 use alloy_genesis::ChainConfig;
-use alloy_primitives::{hex::decode, uint, Address, Bytes, B256, U64};
+use alloy_primitives::{hex::decode, keccak256, uint, Address, Bytes, B256, U64};
 use alloy_rlp::{Decodable, Encodable};
 use alloy_rpc_types::BlockTransactionsKind;
 use alloy_rpc_types_debug::ExecutionWitness;
@@ -552,9 +552,25 @@ where
                     })
                     .map_err(|err| EthApiError::Internal(err.into()))?;
 
-                Ok(witness_record
+                let witness = witness_record
                     .into_execution_witness(&db.database.0, eth_api.provider(), block_number, mode)
-                    .map_err(EthApiError::from)?)
+                    .map_err(EthApiError::from)?;
+
+                // A witness that lacks the parent state root node cannot anchor a stateless
+                // validation walk; surface incompleteness instead of returning it silently.
+                if let Ok(Some(parent)) = eth_api.provider().header(block.header().parent_hash()) {
+                    let parent_state_root = parent.state_root();
+                    if !witness.state.iter().any(|node| keccak256(node) == parent_state_root) {
+                        tracing::warn!(
+                            target: "rpc::debug",
+                            block_number,
+                            %parent_state_root,
+                            "Execution witness does not contain the parent state root node"
+                        );
+                    }
+                }
+
+                Ok(witness)
             })
             .await
     }
