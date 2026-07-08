@@ -456,11 +456,12 @@ where
         }
 
         let preserved_sparse_trie = payload_processor.take_preserved_sparse_trie();
-        let overlay_factory = if preserved_sparse_trie
+        let overlay_factory = if let Some(anchor_hash) = preserved_sparse_trie
             .as_ref()
-            .is_some_and(|trie| trie.state_root() == env.parent_state_root)
+            .filter(|trie| trie.state_root() == env.parent_state_root)
+            .map(|trie| trie.anchor_hash())
         {
-            overlay_factory.with_skip_overlay_for_reused_sparse_trie()
+            overlay_factory.with_skip_overlay_for_reused_sparse_trie(anchor_hash)
         } else {
             overlay_factory
         };
@@ -510,11 +511,12 @@ where
         }
 
         let preserved_sparse_trie = payload_processor.take_preserved_sparse_trie();
-        let overlay_factory = if preserved_sparse_trie
+        let overlay_factory = if let Some(anchor_hash) = preserved_sparse_trie
             .as_ref()
-            .is_some_and(|trie| trie.state_root() == parent_state_root)
+            .filter(|trie| trie.state_root() == parent_state_root)
+            .map(|trie| trie.anchor_hash())
         {
-            overlay_factory.with_skip_overlay_for_reused_sparse_trie()
+            overlay_factory.with_skip_overlay_for_reused_sparse_trie(anchor_hash)
         } else {
             overlay_factory
         };

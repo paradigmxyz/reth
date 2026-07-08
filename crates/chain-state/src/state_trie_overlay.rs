@@ -350,6 +350,22 @@ impl<N: NodePrimitives> StateTrieOverlayManager<N> {
         Self::anchor_for_parent_in(self.blocks.as_ref(), parent_hash, preferred_anchor)
     }
 
+    /// Returns true if `hash` is in the inclusive parent chain segment from `anchor_hash` to
+    /// `parent_hash`.
+    pub fn hash_between_anchor_and_parent(
+        &self,
+        parent_hash: B256,
+        anchor_hash: B256,
+        hash: B256,
+    ) -> bool {
+        Self::hash_between_anchor_and_parent_in(
+            self.blocks.as_ref(),
+            parent_hash,
+            anchor_hash,
+            hash,
+        )
+    }
+
     fn anchor_for_parent_in(
         blocks: &DashMap<B256, ExecutedBlock<N>>,
         parent_hash: B256,
@@ -370,6 +386,26 @@ impl<N: NodePrimitives> StateTrieOverlayManager<N> {
                 return Some(block_parent_hash)
             }
             hash = block_parent_hash;
+        }
+    }
+
+    fn hash_between_anchor_and_parent_in(
+        blocks: &DashMap<B256, ExecutedBlock<N>>,
+        parent_hash: B256,
+        anchor_hash: B256,
+        hash: B256,
+    ) -> bool {
+        let mut current_hash = parent_hash;
+        let mut found_hash = false;
+
+        loop {
+            found_hash |= current_hash == hash;
+            if current_hash == anchor_hash {
+                return found_hash
+            }
+
+            let Some(block) = blocks.get(&current_hash) else { return false };
+            current_hash = block.recovered_block().parent_hash();
         }
     }
 
@@ -697,6 +733,63 @@ mod tests {
             manager.anchor_for_parent(blocks[2].recovered_block().hash(), db_tip_hash),
             Some(db_tip_hash)
         );
+    }
+
+    #[test]
+    fn detects_hashes_between_anchor_and_parent() {
+        let manager = StateTrieOverlayManager::default();
+        let blocks = test_blocks();
+        for block in &blocks {
+            manager.insert_block(block.clone());
+        }
+
+        let anchor_hash = blocks[0].recovered_block().parent_hash();
+        let parent_hash = blocks[2].recovered_block().hash();
+
+        assert!(manager.hash_between_anchor_and_parent(parent_hash, anchor_hash, anchor_hash));
+        for block in &blocks {
+            assert!(manager.hash_between_anchor_and_parent(
+                parent_hash,
+                anchor_hash,
+                block.recovered_block().hash()
+            ));
+        }
+        assert!(!manager.hash_between_anchor_and_parent(parent_hash, anchor_hash, B256::random()));
+    }
+
+    #[test]
+    fn hash_between_anchor_and_parent_rejects_hash_before_anchor() {
+        let manager = StateTrieOverlayManager::default();
+        let blocks = test_blocks();
+        for block in &blocks {
+            manager.insert_block(block.clone());
+        }
+
+        let parent_hash = blocks[2].recovered_block().hash();
+        let anchor_hash = blocks[1].recovered_block().hash();
+        let before_anchor_hash = blocks[0].recovered_block().hash();
+
+        assert!(manager.hash_between_anchor_and_parent(parent_hash, anchor_hash, parent_hash));
+        assert!(manager.hash_between_anchor_and_parent(parent_hash, anchor_hash, anchor_hash));
+        assert!(!manager.hash_between_anchor_and_parent(
+            parent_hash,
+            anchor_hash,
+            before_anchor_hash
+        ));
+    }
+
+    #[test]
+    fn hash_between_anchor_and_parent_rejects_unknown_anchor() {
+        let manager = StateTrieOverlayManager::default();
+        let blocks = test_blocks();
+        for block in &blocks {
+            manager.insert_block(block.clone());
+        }
+
+        let parent_hash = blocks[2].recovered_block().hash();
+        let anchor_hash = B256::random();
+
+        assert!(!manager.hash_between_anchor_and_parent(parent_hash, anchor_hash, anchor_hash));
     }
 
     #[test]
