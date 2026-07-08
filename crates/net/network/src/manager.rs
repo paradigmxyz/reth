@@ -37,7 +37,7 @@ use crate::{
     state::NetworkState,
     swarm::{Swarm, SwarmEvent},
     transactions::NetworkTransactionEvent,
-    FetchClient, NetworkBuilder, SnapFetchClient,
+    FetchClient, NetworkBuilder,
 };
 use futures::{Future, StreamExt};
 use parking_lot::Mutex;
@@ -463,16 +463,10 @@ impl<N: NetworkPrimitives> NetworkManager<N> {
 
     /// Returns a new [`FetchClient`] that can be cloned and shared.
     ///
-    /// The [`FetchClient`] is the entrypoint for sending requests to the network.
+    /// The [`FetchClient`] is the entrypoint for sending requests to the network, including
+    /// `snap/2` requests via its [`SnapClient`](reth_network_p2p::snap::client::SnapClient) impl.
     pub fn fetch_client(&self) -> FetchClient<N> {
         self.swarm.state().fetch_client()
-    }
-
-    /// Returns a new [`SnapFetchClient`] that can be cloned and shared.
-    ///
-    /// The [`SnapFetchClient`] is the entrypoint for sending `snap/2` requests to the network.
-    pub fn snap_client(&self) -> SnapFetchClient<N> {
-        self.swarm.state().snap_client()
     }
 
     /// Returns the current [`NetworkStatus`] for the local node.

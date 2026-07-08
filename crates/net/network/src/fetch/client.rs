@@ -176,29 +176,7 @@ impl<N: NetworkPrimitives> BlockAccessListsClient for FetchClient<N> {
     }
 }
 
-/// A [`SnapClient`] backed by a [`FetchClient`], reporting the number of *snap-capable* connected
-/// peers rather than [`FetchClient`]'s shared, capability-agnostic peer count.
-#[derive(Debug, Clone)]
-pub struct SnapFetchClient<N: NetworkPrimitives = EthNetworkPrimitives> {
-    /// Sends the request and reports bad peers the same way [`FetchClient`] does.
-    pub(crate) inner: FetchClient<N>,
-    /// Number of connected peers that negotiated `snap/2`.
-    pub(crate) num_snap_peers: Arc<AtomicUsize>,
-}
-
-impl<N: NetworkPrimitives> DownloadClient for SnapFetchClient<N> {
-    /// Reports a bad message from the given peer.
-    fn report_bad_message(&self, peer_id: PeerId) {
-        self.inner.report_bad_message(peer_id);
-    }
-
-    /// Returns the number of connected peers that negotiated `snap/2`.
-    fn num_connected_peers(&self) -> usize {
-        self.num_snap_peers.load(Ordering::Relaxed)
-    }
-}
-
-impl<N: NetworkPrimitives> SnapClient for SnapFetchClient<N> {
+impl<N: NetworkPrimitives> SnapClient for FetchClient<N> {
     type Output =
         std::pin::Pin<Box<dyn Future<Output = PeerRequestResult<SnapResponse>> + Send + Sync>>;
 
@@ -208,7 +186,7 @@ impl<N: NetworkPrimitives> SnapClient for SnapFetchClient<N> {
         request: GetAccountRangeMessage,
         priority: Priority,
     ) -> Self::Output {
-        self.inner.send_snap_request(SnapProtocolMessage::GetAccountRange(request), priority)
+        self.send_snap_request(SnapProtocolMessage::GetAccountRange(request), priority)
     }
 
     /// Sends a `GetStorageRanges` (`snap/2`) request to an available peer.
@@ -222,7 +200,7 @@ impl<N: NetworkPrimitives> SnapClient for SnapFetchClient<N> {
         request: GetStorageRangesMessage,
         priority: Priority,
     ) -> Self::Output {
-        self.inner.send_snap_request(SnapProtocolMessage::GetStorageRanges(request), priority)
+        self.send_snap_request(SnapProtocolMessage::GetStorageRanges(request), priority)
     }
 
     /// Sends a `GetByteCodes` (`snap/2`) request to an available peer.
@@ -236,7 +214,7 @@ impl<N: NetworkPrimitives> SnapClient for SnapFetchClient<N> {
         request: GetByteCodesMessage,
         priority: Priority,
     ) -> Self::Output {
-        self.inner.send_snap_request(SnapProtocolMessage::GetByteCodes(request), priority)
+        self.send_snap_request(SnapProtocolMessage::GetByteCodes(request), priority)
     }
 
     /// Sends a `GetBlockAccessLists` (`snap/2`) request to an available peer.
@@ -245,6 +223,6 @@ impl<N: NetworkPrimitives> SnapClient for SnapFetchClient<N> {
         request: GetBlockAccessListsMessage,
         priority: Priority,
     ) -> Self::Output {
-        self.inner.send_snap_request(SnapProtocolMessage::GetBlockAccessLists(request), priority)
+        self.send_snap_request(SnapProtocolMessage::GetBlockAccessLists(request), priority)
     }
 }

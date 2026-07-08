@@ -7,7 +7,7 @@ use crate::{
     message::{BlockRequest, NewBlockMessage, PeerResponse, PeerResponseResult},
     peers::{PeerAction, PeersManager},
     session::BlockRangeInfo,
-    FetchClient, SnapFetchClient,
+    FetchClient,
 };
 use alloy_consensus::BlockHeader;
 use alloy_primitives::{
@@ -136,11 +136,6 @@ impl<N: NetworkPrimitives> NetworkState<N> {
     /// Returns a new [`FetchClient`]
     pub(crate) fn fetch_client(&self) -> FetchClient<N> {
         self.state_fetcher.client()
-    }
-
-    /// Returns a new [`SnapFetchClient`] for sending `snap/2` requests.
-    pub(crate) fn snap_client(&self) -> SnapFetchClient<N> {
-        self.state_fetcher.snap_client()
     }
 
     /// How many peers we're currently connected to.

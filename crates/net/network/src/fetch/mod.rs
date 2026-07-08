@@ -2,7 +2,7 @@
 
 mod client;
 
-pub use client::{FetchClient, SnapFetchClient};
+pub use client::FetchClient;
 
 use crate::{message::BlockRequest, session::BlockRangeInfo};
 use alloy_primitives::B256;
@@ -64,9 +64,6 @@ pub struct StateFetcher<N: NetworkPrimitives = EthNetworkPrimitives> {
     peers_handle: PeersHandle,
     /// Number of active peer sessions the node's currently handling.
     num_active_peers: Arc<AtomicUsize>,
-    /// Number of active peers that negotiated `snap/2`, exposed to a [`SnapFetchClient`] so it
-    /// reports snap-capable availability rather than [`Self::num_active_peers`]' total count.
-    num_snap_peers: Arc<AtomicUsize>,
     /// Requests queued for processing
     queued_requests: VecDeque<DownloadRequest<N>>,
     /// Receiver for new incoming download requests
@@ -89,7 +86,6 @@ impl<N: NetworkPrimitives> StateFetcher<N> {
             peers: Default::default(),
             peers_handle,
             num_active_peers,
-            num_snap_peers: Default::default(),
             queued_requests: Default::default(),
             download_requests_rx: UnboundedReceiverStream::new(download_requests_rx),
             download_requests_tx,
@@ -120,9 +116,6 @@ impl<N: NetworkPrimitives> StateFetcher<N> {
                 supports_snap,
             },
         );
-        if supports_snap {
-            self.num_snap_peers.fetch_add(1, Ordering::Relaxed);
-        }
     }
 
     /// Removes the peer from the peer list, after which it is no longer available for future
@@ -132,11 +125,7 @@ impl<N: NetworkPrimitives> StateFetcher<N> {
     ///
     /// This cancels also inflight request and sends an error to the receiver.
     pub(crate) fn on_session_closed(&mut self, peer: &PeerId) {
-        if let Some(removed) = self.peers.remove(peer) &&
-            removed.supports_snap
-        {
-            self.num_snap_peers.fetch_sub(1, Ordering::Relaxed);
-        }
+        self.peers.remove(peer);
         if let Some(req) = self.inflight_headers_requests.remove(peer) {
             let _ = req.response.send(Err(RequestError::ConnectionDropped));
         }
@@ -518,13 +507,6 @@ impl<N: NetworkPrimitives> StateFetcher<N> {
             peers_handle: self.peers_handle.clone(),
             num_active_peers: Arc::clone(&self.num_active_peers),
         }
-    }
-
-    /// Returns a new [`SnapFetchClient`] that can send `snap/2` requests to this type.
-    ///
-    /// Unlike [`Self::client`], its `num_connected_peers` reports only snap-capable peers.
-    pub(crate) fn snap_client(&self) -> SnapFetchClient<N> {
-        SnapFetchClient { inner: self.client(), num_snap_peers: Arc::clone(&self.num_snap_peers) }
     }
 }
 

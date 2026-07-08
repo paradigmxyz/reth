@@ -165,7 +165,7 @@ pub use session::{
 pub use builder::NetworkBuilder;
 pub use config::{NetworkConfig, NetworkConfigBuilder};
 pub use discovery::Discovery;
-pub use fetch::{FetchClient, SnapFetchClient};
+pub use fetch::FetchClient;
 pub use flattened_response::FlattenedResponse;
 pub use manager::NetworkManager;
 pub use metrics::TxTypesCounter;
