@@ -12,6 +12,7 @@ use reth_db_api::{
     transaction::DbTx,
     BlockNumberList,
 };
+use reth_execution_types::{hashed_post_state_from_execution_state, EvmState};
 use reth_primitives_traits::{Account, Bytecode, NodePrimitives};
 use reth_storage_api::{
     BlockNumReader, BytecodeReader, DBProvider, NodePrimitivesProvider, PruneCheckpointReader,
@@ -26,8 +27,8 @@ use reth_trie::{
     updates::TrieUpdates,
     witness::TrieWitness,
     AccountProof, ExecutionWitnessMode, HashedPostState, HashedPostStateSorted, HashedStorage,
-    MultiProof, MultiProofTargets, StateRoot, StorageMultiProof, StorageRoot, TrieInput,
-    TrieInputSorted,
+    KeccakKeyHasher, MultiProof, MultiProofTargets, StateRoot, StorageMultiProof, StorageRoot,
+    TrieInput, TrieInputSorted,
 };
 use reth_trie_db::{
     ChangesetCache, DatabaseProof, DatabaseStateRoot, DatabaseStorageProof, DatabaseStorageRoot,
@@ -660,10 +661,8 @@ where
     Provider: NodePrimitivesProvider<Primitives = N>,
     N: NodePrimitives,
 {
-    fn hashed_post_state(&self, state: &reth_execution_types::EvmState) -> HashedPostState {
-        reth_execution_types::hashed_post_state_from_execution_state::<reth_trie::KeccakKeyHasher>(
-            state,
-        )
+    fn hashed_post_state(&self, state: &EvmState) -> HashedPostState {
+        hashed_post_state_from_execution_state::<KeccakKeyHasher>(state)
     }
 }
 

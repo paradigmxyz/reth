@@ -38,6 +38,7 @@ use reth_db_api::{
     models::StoredBlockBodyIndices,
 };
 use reth_errors::{ProviderError, ProviderResult};
+use reth_execution_types::{hashed_post_state_from_execution_state, EvmState};
 use reth_node_types::{
     Block, BlockBody, BlockTy, HeaderTy, NodeTypes, PrimitivesTy, ReceiptTy, TxTy,
 };
@@ -57,7 +58,9 @@ use reth_storage_api::{
     BlockBodyIndicesProvider, BlockReaderIdExt, BlockSource, DBProvider, NodePrimitivesProvider,
     ReceiptProviderIdExt, StatsReader,
 };
-use reth_trie::{updates::TrieUpdates, AccountProof, HashedPostState, MultiProof, TrieInput};
+use reth_trie::{
+    updates::TrieUpdates, AccountProof, HashedPostState, KeccakKeyHasher, MultiProof, TrieInput,
+};
 pub use rpc_response::{EthRpcConverter, RpcResponseConverter};
 use std::{
     collections::BTreeMap,
@@ -1314,10 +1317,8 @@ where
     N: Network,
     Node: NodeTypes,
 {
-    fn hashed_post_state(&self, state: &reth_execution_types::EvmState) -> HashedPostState {
-        reth_execution_types::hashed_post_state_from_execution_state::<reth_trie::KeccakKeyHasher>(
-            state,
-        )
+    fn hashed_post_state(&self, state: &EvmState) -> HashedPostState {
+        hashed_post_state_from_execution_state::<KeccakKeyHasher>(state)
     }
 }
 

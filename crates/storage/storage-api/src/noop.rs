@@ -29,7 +29,7 @@ use reth_chainspec::{ChainInfo, ChainSpecProvider, EthChainSpec, MAINNET};
 use reth_db_api::mock::{DatabaseMock, TxMock};
 use reth_db_models::{AccountBeforeTx, StoredBlockBodyIndices};
 use reth_ethereum_primitives::EthPrimitives;
-use reth_execution_types::ExecutionOutcome;
+use reth_execution_types::{EvmState, ExecutionOutcome};
 use reth_primitives_traits::{Account, Bytecode, NodePrimitives, RecoveredBlock, SealedHeader};
 #[cfg(feature = "db-api")]
 use reth_prune_types::PruneModes;
@@ -38,7 +38,7 @@ use reth_stages_types::{StageCheckpoint, StageId};
 use reth_storage_errors::provider::{ProviderError, ProviderResult};
 use reth_trie_common::{
     updates::TrieUpdates, AccountProof, ExecutionWitnessMode, HashedPostState, HashedStorage,
-    KeccakKeyHasher, MultiProof, MultiProofTargets, StorageMultiProof, StorageProof, TrieInput,
+    MultiProof, MultiProofTargets, StorageMultiProof, StorageProof, TrieInput,
 };
 
 /// Supports various api interfaces for testing purposes.
@@ -527,8 +527,8 @@ impl<C: Send + Sync, N: NodePrimitives> StateProofProvider for NoopProvider<C, N
 }
 
 impl<C: Send + Sync, N: NodePrimitives> HashedPostStateProvider for NoopProvider<C, N> {
-    fn hashed_post_state(&self, state: &reth_execution_types::EvmState) -> HashedPostState {
-        reth_execution_types::hashed_post_state_from_execution_state::<KeccakKeyHasher>(state)
+    fn hashed_post_state(&self, _state: &EvmState) -> HashedPostState {
+        HashedPostState::default()
     }
 }
 

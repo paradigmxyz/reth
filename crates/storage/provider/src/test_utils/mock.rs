@@ -25,7 +25,7 @@ use reth_db_api::{
     models::{AccountBeforeTx, StorageSettings, StoredBlockBodyIndices},
 };
 use reth_ethereum_primitives::EthPrimitives;
-use reth_execution_types::ExecutionOutcome;
+use reth_execution_types::{EvmState, ExecutionOutcome};
 use reth_primitives_traits::{
     Account, Block, BlockBody, Bytecode, GotExpected, NodePrimitives, RecoveredBlock, SealedHeader,
     SignerRecoverable, StorageEntry,
@@ -881,10 +881,8 @@ where
 impl<T: NodePrimitives, ChainSpec: EthChainSpec + 'static> HashedPostStateProvider
     for MockEthProvider<T, ChainSpec>
 {
-    fn hashed_post_state(&self, state: &reth_execution_types::EvmState) -> HashedPostState {
-        reth_execution_types::hashed_post_state_from_execution_state::<reth_trie::KeccakKeyHasher>(
-            state,
-        )
+    fn hashed_post_state(&self, _state: &EvmState) -> HashedPostState {
+        HashedPostState::default()
     }
 }
 

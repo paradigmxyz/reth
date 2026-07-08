@@ -3,6 +3,7 @@ use crate::{
 };
 use alloy_primitives::{Address, BlockNumber, Bytes, StorageKey, StorageValue, B256};
 use reth_db_api::{cursor::DbDupCursorRO, tables, transaction::DbTx};
+use reth_execution_types::{hashed_post_state_from_execution_state, EvmState};
 use reth_primitives_traits::{Account, Bytecode};
 use reth_storage_api::{
     BytecodeReader, DBProvider, StateProofProvider, StorageRootProvider, StorageSettingsCache,
@@ -15,8 +16,8 @@ use reth_trie::{
     updates::TrieUpdates,
     witness::TrieWitness,
     AccountProof, ExecutionWitnessMode, HashedPostState, HashedPostStateSorted, HashedStorage,
-    MultiProof, MultiProofTargets, StateRoot, StorageMultiProof, StorageRoot, TrieInput,
-    TrieInputSorted,
+    KeccakKeyHasher, MultiProof, MultiProofTargets, StateRoot, StorageMultiProof, StorageRoot,
+    TrieInput, TrieInputSorted,
 };
 use reth_trie_db::{DatabaseProof, DatabaseStateRoot, DatabaseStorageProof, DatabaseStorageRoot};
 
@@ -264,10 +265,8 @@ impl<Provider: DBProvider + StorageSettingsCache> StateProofProvider
 }
 
 impl<Provider: DBProvider> HashedPostStateProvider for LatestStateProviderRef<'_, Provider> {
-    fn hashed_post_state(&self, state: &reth_execution_types::EvmState) -> HashedPostState {
-        reth_execution_types::hashed_post_state_from_execution_state::<reth_trie::KeccakKeyHasher>(
-            state,
-        )
+    fn hashed_post_state(&self, state: &EvmState) -> HashedPostState {
+        hashed_post_state_from_execution_state::<KeccakKeyHasher>(state)
     }
 }
 
