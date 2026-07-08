@@ -2,7 +2,6 @@
 
 use std::sync::Arc;
 
-use alloy_consensus::{transaction::TxHashRef, BlockHeader, TxReceipt};
 use alloy_primitives::TxHash;
 use alloy_rpc_types_eth::{
     pubsub::{
@@ -16,8 +15,7 @@ use jsonrpsee::{
 };
 use reth_chain_state::CanonStateSubscriptions;
 use reth_network_api::NetworkInfo;
-use reth_primitives_traits::TransactionMeta;
-use reth_rpc_convert::{transaction::ConvertReceiptInput, RpcHeader};
+use reth_rpc_convert::RpcHeader;
 use reth_rpc_eth_api::{
     helpers::EthSubscriptions, pubsub::EthPubSubApiServer, RpcConvert, RpcNodeCore, RpcTransaction,
 };
@@ -197,86 +195,11 @@ where
                     }
                 };
 
-                let converter = self.inner.eth_api.converter();
-                let stream = self.inner.eth_api.provider().canonical_state_stream().flat_map(
-                    move |new_chain| {
-                        // for each block in the new chain, build RPC receipts
-                        let results: Vec<_> = new_chain
-                            .committed()
-                            .blocks_and_receipts()
-                            .filter_map(|(block, receipts)| {
-                                let block_hash = block.hash();
-                                let block_number = block.number();
-                                let base_fee = block.base_fee_per_gas();
-                                let excess_blob_gas = block.excess_blob_gas();
-                                let timestamp = block.timestamp();
-
-                                let mut gas_used: u64 = 0;
-                                let mut next_log_index: usize = 0;
-
-                                // build ConvertReceiptInput for each tx+receipt pair
-                                // (same logic as eth_getBlockReceipts HTTP endpoint)
-                                let inputs: Vec<_> = block
-                                    .transactions_recovered()
-                                    .zip(receipts.iter())
-                                    .enumerate()
-                                    .filter_map(|(idx, (tx, receipt))| {
-                                        let gas_used_before = gas_used;
-                                        let next_log_index_before = next_log_index;
-                                        let cumulative_gas_used = receipt.cumulative_gas_used();
-
-                                        gas_used = cumulative_gas_used;
-                                        next_log_index += receipt.logs().len();
-
-                                        // apply transaction hash filter if provided
-                                        let matches = match &filter.transaction_hashes {
-                                            Some(hashes) if !hashes.is_empty() => {
-                                                hashes.contains(tx.tx_hash())
-                                            }
-                                            _ => true,
-                                        };
-
-                                        matches.then(|| ConvertReceiptInput {
-                                            tx,
-                                            gas_used: cumulative_gas_used - gas_used_before,
-                                            next_log_index: next_log_index_before,
-                                            meta: TransactionMeta {
-                                                tx_hash: *tx.tx_hash(),
-                                                index: idx as u64,
-                                                block_hash,
-                                                block_number,
-                                                base_fee,
-                                                excess_blob_gas,
-                                                timestamp,
-                                            },
-                                            receipt: receipt.clone(),
-                                        })
-                                    })
-                                    .collect();
-
-                                if inputs.is_empty() {
-                                    return None;
-                                }
-
-                                match converter.convert_receipts(inputs) {
-                                    Ok(rpc_receipts) => Some(rpc_receipts),
-                                    Err(err) => {
-                                        error!(
-                                            target = "rpc",
-                                            %err,
-                                            "Failed to convert receipts"
-                                        );
-                                        None
-                                    }
-                                }
-                            })
-                            .collect();
-
-                        futures::stream::iter(results)
-                    },
-                );
-
-                pipe_from_stream(accepted_sink, stream).await
+                pipe_from_stream(
+                    accepted_sink,
+                    self.inner.eth_api.transaction_receipts_stream(filter),
+                )
+                .await
             }
             _ => Err(invalid_params_rpc_err("Unsupported subscription kind")),
         }

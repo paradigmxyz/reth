@@ -1,10 +1,12 @@
 //! Streams subscriptions providers for `eth_subscribe`.
 
-use crate::{EthApiTypes, RpcConvert, RpcNodeCore};
-use alloy_rpc_types_eth::{Filter, Log};
+use crate::{EthApiTypes, RpcConvert, RpcNodeCore, RpcReceipt};
+use alloy_consensus::{transaction::TxHashRef, BlockHeader, TxReceipt};
+use alloy_rpc_types_eth::{pubsub::TransactionReceiptsParams, Filter, Log};
 use futures::StreamExt;
 use reth_chain_state::CanonStateSubscriptions;
-use reth_rpc_convert::RpcHeader;
+use reth_primitives_traits::TransactionMeta;
+use reth_rpc_convert::{transaction::ConvertReceiptInput, RpcHeader};
 use reth_rpc_eth_types::logs_utils;
 use tracing::error;
 
@@ -53,6 +55,79 @@ pub trait EthSubscriptions:
                 })
                 .collect::<Vec<_>>();
             futures::stream::iter(headers)
+        })
+    }
+
+    /// Returns a stream that yields matching transaction receipts from canonical chain updates.
+    fn transaction_receipts_stream(
+        &self,
+        filter: TransactionReceiptsParams,
+    ) -> impl futures::Stream<Item = Vec<RpcReceipt<Self::NetworkTypes>>> + Send + Unpin {
+        let converter = self.converter();
+        self.provider().canonical_state_stream().flat_map(move |new_chain| {
+            let results: Vec<_> = new_chain
+                .committed()
+                .blocks_and_receipts()
+                .filter_map(|(block, receipts)| {
+                    let block_hash = block.hash();
+                    let block_number = block.number();
+                    let base_fee = block.base_fee_per_gas();
+                    let excess_blob_gas = block.excess_blob_gas();
+                    let timestamp = block.timestamp();
+
+                    let mut gas_used: u64 = 0;
+                    let mut next_log_index: usize = 0;
+
+                    let inputs: Vec<_> = block
+                        .transactions_recovered()
+                        .zip(receipts.iter())
+                        .enumerate()
+                        .filter_map(|(idx, (tx, receipt))| {
+                            let gas_used_before = gas_used;
+                            let next_log_index_before = next_log_index;
+                            let cumulative_gas_used = receipt.cumulative_gas_used();
+
+                            gas_used = cumulative_gas_used;
+                            next_log_index += receipt.logs().len();
+
+                            let matches = match &filter.transaction_hashes {
+                                Some(hashes) if !hashes.is_empty() => hashes.contains(tx.tx_hash()),
+                                _ => true,
+                            };
+
+                            matches.then(|| ConvertReceiptInput {
+                                tx,
+                                gas_used: cumulative_gas_used - gas_used_before,
+                                next_log_index: next_log_index_before,
+                                meta: TransactionMeta {
+                                    tx_hash: *tx.tx_hash(),
+                                    index: idx as u64,
+                                    block_hash,
+                                    block_number,
+                                    base_fee,
+                                    excess_blob_gas,
+                                    timestamp,
+                                },
+                                receipt: receipt.clone(),
+                            })
+                        })
+                        .collect();
+
+                    if inputs.is_empty() {
+                        return None;
+                    }
+
+                    match converter.convert_receipts_with_block(inputs, block.sealed_block()) {
+                        Ok(rpc_receipts) => Some(rpc_receipts),
+                        Err(err) => {
+                            error!(target = "rpc", %err, "Failed to convert receipts");
+                            None
+                        }
+                    }
+                })
+                .collect();
+
+            futures::stream::iter(results)
         })
     }
 }
