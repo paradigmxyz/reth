@@ -244,7 +244,7 @@ fn run_case(case: &BlockchainTest) -> Result<(), Error> {
 
         // Execute the block
         let state_provider = provider.latest();
-        let database = StateProviderDatabase::new(&state_provider);
+        let database = StateProviderDatabase(&state_provider);
         let output = executor_provider.executor(database).execute(block).map_err(|err| {
             Error::block_failed(block_number, std::io::Error::other(err.to_string()))
         })?;

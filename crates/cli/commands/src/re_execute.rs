@@ -157,7 +157,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
                     }
                     let chunk_end = (chunk_start + blocks_per_chunk).min(max_block);
 
-                    let database = StateProviderDatabase::new(
+                    let database = StateProviderDatabase(
                         provider.history_by_block_number(chunk_start.saturating_sub(1))?,
                     );
                     let mut executor = evm_config.batch_executor(database);
@@ -178,7 +178,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
                             Err(err) => {
                                 if skip_invalid_blocks {
                                     drop(executor);
-                                    let database = StateProviderDatabase::new(
+                                    let database = StateProviderDatabase(
                                         provider.history_by_block_number(block.number())?,
                                     );
                                     executor = evm_config.batch_executor(database);
@@ -239,7 +239,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
                                         error!(number=?block.number(), ?mismatch, "Gas usage mismatch");
                                         if skip_invalid_blocks {
                                             drop(executor);
-                                            let database = StateProviderDatabase::new(
+                                            let database = StateProviderDatabase(
                                                 provider.history_by_block_number(block.number())?,
                                             );
                                             executor = evm_config.batch_executor(database);
@@ -264,7 +264,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
                             executor_created.elapsed() > executor_lifetime
                         {
                             let last_block = block.number();
-                            let database = StateProviderDatabase::new(
+                            let database = StateProviderDatabase(
                                 provider.history_by_block_number(last_block)?,
                             );
                             let next_executor = evm_config.batch_executor(database);
