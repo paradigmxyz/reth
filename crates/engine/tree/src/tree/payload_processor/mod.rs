@@ -673,7 +673,7 @@ where
             }
             drop(guard);
 
-            // Only preserve the trie as anchored if computation succeeded.
+            // Only preserve the trie for reuse if computation succeeded.
             // A failed computation may have left the trie in a partially updated state.
             let _enter =
                 debug_span!(target: "engine::tree::payload_processor", "preserve").entered();
@@ -933,8 +933,8 @@ pub struct ExecutionEnv<Evm: ConfigureEvm> {
     /// Hash of the parent block.
     pub parent_hash: B256,
     /// State root of the parent block.
-    /// Used for sparse trie continuation: if the preserved trie's anchor matches this,
-    /// the trie can be reused directly.
+    /// Used for sparse trie continuation: if the preserved trie's state root matches this, the
+    /// trie can be reused directly.
     pub parent_state_root: B256,
     /// Number of transactions in the block.
     /// Used to determine parallel worker count for prewarming.

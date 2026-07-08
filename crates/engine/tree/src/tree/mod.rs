@@ -82,7 +82,7 @@ pub use types::{ValidationOutcome, ValidationOutput};
 /// Sparse trie pruning request queued after persistence advances the DB tip.
 #[derive(Clone, Debug)]
 pub struct PendingSparseTriePrune {
-    /// Block hash the pruned sparse trie should be anchored to.
+    /// Parent block hash of the earliest retained in-memory overlay state.
     pub(crate) anchor_hash: B256,
     /// Retained paths required by blocks still held in memory.
     pub(crate) retained_paths: TriePrefixSetsMut,

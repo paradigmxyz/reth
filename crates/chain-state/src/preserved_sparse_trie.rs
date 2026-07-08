@@ -81,7 +81,7 @@ pub struct PreservedSparseTrie {
     /// Used to verify continuity: a new payload's `parent_state_root` must match this before the
     /// existing sparse trie nodes can be reused.
     state_root: B256,
-    /// Earliest block hash whose overlay state is covered by this trie.
+    /// Parent block hash of the earliest overlay state covered by this trie.
     anchor_hash: B256,
 }
 
@@ -97,8 +97,8 @@ impl fmt::Debug for PreservedSparseTrie {
 impl PreservedSparseTrie {
     /// Creates a new anchored preserved trie.
     ///
-    /// The `state_root` is the computed state root from the trie, which becomes the
-    /// anchor for determining if subsequent payloads can reuse this trie.
+    /// The `state_root` is the computed state root from the trie. The `anchor_hash` is the parent
+    /// block hash of the earliest overlay state covered by the trie.
     pub const fn anchored(trie: SparseTrie, state_root: B256, anchor_hash: B256) -> Self {
         Self { trie: PreservedSparseTrieInner::Ready(trie), state_root, anchor_hash }
     }
@@ -117,15 +117,15 @@ impl PreservedSparseTrie {
         self.state_root
     }
 
-    /// Returns the block hash this trie is anchored to for overlay coverage.
+    /// Returns the parent block hash of the earliest overlay state covered by this trie.
     pub const fn anchor_hash(&self) -> B256 {
         self.anchor_hash
     }
 
     /// Consumes self and returns the trie if it can be reused for the parent state root.
     ///
-    /// If the parent state root does not match the preserved trie's anchor, this drops the trie and
-    /// returns `None` so the caller can create a fresh sparse trie.
+    /// If the parent state root does not match the preserved trie's state root, this drops the trie
+    /// and returns `None` so the caller can create a fresh sparse trie.
     pub fn into_trie_for(
         self,
         parent_state_root: B256,
