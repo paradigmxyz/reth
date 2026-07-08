@@ -704,8 +704,8 @@ vergen-git2 = "9.1.0"
 ipnet = "2.11"
 
 [patch.crates-io]
-alloy-eip7928 = { git = "https://github.com/Rimeeeeee/eips", branch = "eip-8289" }
-alloy-eip8289 = { git = "https://github.com/Rimeeeeee/eips", branch = "eip-8289" }
+alloy-eip7928 = { git = "https://github.com/Rimeeeeee/eips", branch = "eip8289-smt" }
+alloy-eip8289 = { git = "https://github.com/Rimeeeeee/eips", branch = "eip8289-smt" }
 alloy-hardforks = { git = "https://github.com/Rimeeeeee/hardforks", branch = "eip-8268" }
 alloy-consensus = { git = "https://github.com/Rimeeeeee/alloy", branch = "eip-8289" }
 alloy-contract = { git = "https://github.com/Rimeeeeee/alloy", branch = "eip-8289" }

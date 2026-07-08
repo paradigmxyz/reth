@@ -111,7 +111,7 @@ use crate::tree::{
 };
 use alloy_consensus::transaction::{Either, TxHashRef};
 use alloy_eip7928::{bal::DecodedBal, compute_block_access_list_hash, BlockAccessList};
-use alloy_eip8289::{WamItems, WarmAccessMultiset, WARMING_WINDOW};
+use alloy_eip8289::{CommittedWarmAccessMultiset, WamItems, WarmAccessMultiset, WARMING_WINDOW};
 use alloy_eips::{eip1898::BlockWithParent, eip4895::Withdrawal, NumHash};
 use alloy_evm::Evm;
 use alloy_primitives::{map::B256Set, B256};
@@ -565,11 +565,15 @@ where
 
         let is_bogota_active =
             Into::<SpecId>::into(*evm_env.spec_id()).is_enabled_in(SpecId::BOGOTA);
-        let warm_accesses = if is_bogota_active {
+        let (warm_accesses, wam_root) = if is_bogota_active {
             let parent_wam = ensure_ok!(self.warm_accesses_for_parent(input.parent_hash(), &ctx));
-            WarmAccessSnapshot::from_wam_and_bal(&parent_wam, decoded_bal.as_deref())
+            let wam_root = CommittedWarmAccessMultiset::from_wam(parent_wam.clone()).root();
+            (
+                WarmAccessSnapshot::from_wam_and_bal(&parent_wam, decoded_bal.as_deref()),
+                Some(wam_root),
+            )
         } else {
-            WarmAccessSnapshot::default()
+            (WarmAccessSnapshot::default(), None)
         };
 
         let env = ExecutionEnv {
@@ -775,7 +779,8 @@ where
                 &output,
                 &mut ctx,
                 receipt_root_bloom,
-                built_bal
+                built_bal,
+                wam_root,
             ),
             block
         );
@@ -1830,6 +1835,7 @@ where
         ctx: &mut TreeCtx<'_, N>,
         receipt_root_bloom: Option<ReceiptRootBloom>,
         built_bal: Option<BlockAccessList>,
+        wam_root: Option<B256>,
     ) -> Result<(), InsertBlockErrorKind>
     where
         V: PayloadValidator<T, Block = N::Block>,
@@ -1850,6 +1856,7 @@ where
             output,
             receipt_root_bloom,
             block_access_list_hash,
+            wam_root,
         ) {
             // call post-block hook
             self.on_invalid_block(parent_block, block, output, None, ctx.state_mut());

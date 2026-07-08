@@ -26,6 +26,7 @@ use alloy_consensus::{
     },
     Header,
 };
+use alloy_eip8289::CommittedWarmAccessMultiset;
 use alloy_eips::{
     eip1559::INITIAL_BASE_FEE, eip7685::EMPTY_REQUESTS_HASH, eip7840::BlobParams,
     eip7892::BlobScheduleBlobParams, eip7928::EMPTY_BLOCK_ACCESS_LIST_HASH,
@@ -88,6 +89,12 @@ pub fn make_genesis_header(genesis: &Genesis, hardforks: &ChainHardforks) -> Hea
         .active_at_timestamp(genesis.timestamp)
         .then_some(0);
 
+    // Bogota starts with an empty WAM before any BAL enters the warming window.
+    let wam_root = hardforks
+        .fork(EthereumHardfork::Bogota)
+        .active_at_timestamp(genesis.timestamp)
+        .then(|| CommittedWarmAccessMultiset::new().root());
+
     Header {
         number: genesis.number.unwrap_or_default(),
         parent_hash: genesis.parent_hash.unwrap_or_default(),
@@ -107,6 +114,7 @@ pub fn make_genesis_header(genesis: &Genesis, hardforks: &ChainHardforks) -> Hea
         requests_hash,
         block_access_list_hash,
         slot_number,
+        wam_root,
         ..Default::default()
     }
 }

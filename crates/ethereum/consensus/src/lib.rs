@@ -119,6 +119,7 @@ where
         result: &BlockExecutionResult<N::Receipt>,
         receipt_root_bloom: Option<ReceiptRootBloom>,
         block_access_list_hash: Option<B256>,
+        wam_root: Option<B256>,
     ) -> Result<(), ConsensusError> {
         let res = validation::validate_block_post_execution_with_bal_hashes(
             block,
@@ -126,6 +127,7 @@ where
             result,
             receipt_root_bloom,
             block_access_list_hash,
+            wam_root,
             self.allow_bal_hashes,
         );
 
@@ -259,6 +261,14 @@ where
             if header.slot_number().is_some() {
                 return Err(ConsensusError::SlotNumberUnexpected)
             }
+        }
+
+        if self.chain_spec.is_bogota_active_at_timestamp(header.timestamp()) {
+            if header.wam_root().is_none() {
+                return Err(ConsensusError::WamRootMissing)
+            }
+        } else if header.wam_root().is_some() {
+            return Err(ConsensusError::WamRootUnexpected)
         }
 
         Ok(())
@@ -482,11 +492,12 @@ mod tests {
             &result,
             None,
             Some(expected_hash),
+            None,
         )
         .is_ok());
 
         assert!(FullConsensus::<EthPrimitives>::validate_block_post_execution(
-            &consensus, &block, &result, None, None,
+            &consensus, &block, &result, None, None, None,
         )
         .is_ok());
 
@@ -497,6 +508,7 @@ mod tests {
                 &result,
                 None,
                 Some(B256::repeat_byte(0x24)),
+                None,
             )
             .unwrap_err(),
             ConsensusError::BlockAccessListHashMismatch(_)
