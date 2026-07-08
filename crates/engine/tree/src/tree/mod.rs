@@ -98,6 +98,13 @@ pub(crate) const MIN_BLOCKS_FOR_PIPELINE_RUN: u64 = EPOCH_SLOTS;
 /// even when the finalized block is not set (e.g., on L2s like Optimism).
 const CHANGESET_CACHE_RETENTION_BLOCKS: u64 = 64;
 
+fn changeset_cache_eviction_threshold(
+    last_persisted_block_number: u64,
+    _finalized_block_number: Option<u64>,
+) -> u64 {
+    last_persisted_block_number.saturating_sub(CHANGESET_CACHE_RETENTION_BLOCKS)
+}
+
 /// A builder for creating state providers that can be used across threads.
 #[derive(Clone, Debug)]
 pub struct StateProviderBuilder<N: NodePrimitives, P> {
@@ -1494,23 +1501,16 @@ where
         debug!(target: "engine::tree", ?last_persisted_block_hash, ?last_persisted_block_number, elapsed=?start_time.elapsed(), "Finished persisting, calling finish");
         self.persistence_state.finish(last_persisted_block_hash, last_persisted_block_number);
 
-        // Evict trie changesets for blocks below the eviction threshold.
-        // Keep at least CHANGESET_CACHE_RETENTION_BLOCKS from the persisted tip, and also respect
-        // the finalized block if set.
-        let min_threshold =
-            last_persisted_block_number.saturating_sub(CHANGESET_CACHE_RETENTION_BLOCKS);
+        // Evict trie changesets for blocks below the eviction threshold, retaining a bounded
+        // window behind the persisted tip.
+        let finalized_number =
+            self.canonical_in_memory_state.get_finalized_num_hash().map(|f| f.number);
         let eviction_threshold =
-            if let Some(finalized) = self.canonical_in_memory_state.get_finalized_num_hash() {
-                // Use the minimum of finalized block and retention threshold to be conservative
-                finalized.number.min(min_threshold)
-            } else {
-                // When finalized is not set (e.g., on L2s), use the retention threshold
-                min_threshold
-            };
+            changeset_cache_eviction_threshold(last_persisted_block_number, finalized_number);
         debug!(
             target: "engine::tree",
             last_persisted = last_persisted_block_number,
-            finalized_number = ?self.canonical_in_memory_state.get_finalized_num_hash().map(|f| f.number),
+            finalized_number,
             eviction_threshold,
             "Evicting changesets below threshold"
         );
