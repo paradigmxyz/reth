@@ -33,6 +33,7 @@ revm.workspace = true
 
 # misc
 thiserror.workspace = true
+derive_more.workspace = true
 crossbeam-channel.workspace = true
 crossbeam-utils.workspace = true
 

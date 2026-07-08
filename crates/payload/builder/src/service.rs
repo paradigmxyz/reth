@@ -16,7 +16,7 @@ use reth_execution_cache::SavedCache;
 use reth_payload_builder_primitives::{Events, PayloadBuilderError, PayloadEvents};
 use reth_payload_primitives::{BuiltPayload, PayloadAttributes, PayloadKind, PayloadTypes};
 use reth_primitives_traits::{FastInstant as Instant, NodePrimitives};
-use reth_trie_parallel::state_root_task::PayloadStateRootHandle;
+use reth_trie_parallel::state_root_task::StateRootHandle;
 use std::{
     future::Future,
     pin::Pin,
@@ -554,8 +554,8 @@ pub struct BuildNewPayload<T> {
     ///
     /// Only provided if `--engine.share-execution-cache-with-payload-builder` is enabled.
     pub cache: Option<SavedCache>,
-    /// Optional handle to a background state-root task.
-    pub state_root_handle: Option<PayloadStateRootHandle>,
+    /// Optional handle to a background sparse trie task.
+    pub trie_handle: Option<StateRootHandle>,
 }
 
 impl<T: PayloadAttributes> BuildNewPayload<T> {

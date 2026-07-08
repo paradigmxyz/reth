@@ -1581,16 +1581,16 @@ fn test_on_new_payload_malformed_payload() {
     }
 }
 
-/// Test different state-root job paths: the sparse-trie job and the synchronous fallback.
+/// Test different `StateRootStrategy` paths: `StateRootTask` and `Synchronous`.
 #[test]
 fn test_state_root_strategy_paths() {
     reth_tracing::init_test_tracing();
 
     let mut test_harness = TestHarness::new(MAINNET.clone());
 
-    // Test multiple scenarios to ensure different state-root job paths are taken:
-    // 1. The default strategy spawns the sparse-trie state-root task.
-    // 2. With state-root fallback enabled, the synchronous job computes the root directly.
+    // Test multiple scenarios to ensure different StateRootStrategy paths are taken:
+    // 1. `StateRootTask` strategy uses payload_processor.spawn()
+    // 2. `Synchronous` strategy uses spawn_cache_exclusive()
 
     let s1 = include_str!("../../test-data/holesky/1.rlp");
     let data1 = Bytes::from_str(s1).unwrap();
@@ -1633,9 +1633,11 @@ fn test_state_root_strategy_paths() {
 
     assert!(outcome2.outcome.is_syncing(), "Second strategy path should work");
 
-    // This test passes if multiple state-root job scenarios work correctly:
-    // - the sparse-trie job
-    // - the synchronous job
+    // This test passes if multiple StateRootStrategy scenarios work correctly,
+    // confirming that passing arguments directly doesn't break:
+    // - `StateRootTask` strategy
+    // - `Synchronous` strategy
+    // - All parameter passing through the args struct
 }
 
 // ================================================================================================

@@ -161,7 +161,7 @@ where
     let BuildArguments {
         mut cached_reads,
         execution_cache,
-        state_root_handle,
+        trie_handle,
         config,
         cancel,
         best_payload,
@@ -221,9 +221,10 @@ where
     ));
     let mut total_fees = U256::ZERO;
 
-    // If we have a state-root task, wire a state hook that streams per-tx state diffs.
-    if let Some(ref task) = state_root_handle {
-        builder.evm_mut().db_mut().set_state_hook(Some(Box::new(task.state_hook())));
+    // If we have a sparse trie handle, wire a state hook that streams per-tx state diffs
+    // to the background trie pipeline for incremental state root computation.
+    if let Some(ref handle) = trie_handle {
+        builder.evm_mut().db_mut().set_state_hook(Some(Box::new(handle.state_hook())));
     }
 
     builder.apply_pre_execution_changes().map_err(|err| {
@@ -460,23 +461,24 @@ where
             state_provider.as_ref(),
             Some((parent_header.state_root(), Default::default())),
         )?
-    } else if let Some(mut task) = state_root_handle {
-        // Drop the state hook, which signals the state-root task to finalize.
+    } else if let Some(mut handle) = trie_handle {
+        // Drop the state hook, which drops the StateHookSender and triggers
+        // FinishedStateUpdates via its Drop impl, signaling the trie task to finalize.
         builder.evm_mut().db_mut().set_state_hook(None);
 
-        // The state-root task has been computing incrementally alongside tx execution.
+        // The sparse trie has been computing incrementally alongside tx execution.
         // This recv() waits for the final root hash — most work is already done.
         // Fall back to sync state root if the trie pipeline fails.
-        match task.state_root() {
+        match handle.state_root() {
             Ok(outcome) => {
-                debug!(target: "payload_builder", id=%payload_id, state_root=?outcome.state_root, job = task.name(), "received state root from state-root job");
+                debug!(target: "payload_builder", id=%payload_id, state_root=?outcome.state_root, "received state root from sparse trie");
                 builder.finish(
                     state_provider.as_ref(),
                     Some((outcome.state_root, Arc::unwrap_or_clone(outcome.trie_updates))),
                 )?
             }
             Err(err) => {
-                warn!(target: "payload_builder", id=%payload_id, %err, "state-root job failed, falling back to sync state root");
+                warn!(target: "payload_builder", id=%payload_id, %err, "sparse trie failed, falling back to sync state root");
                 builder.finish(state_provider.as_ref(), None)?
             }
         }
