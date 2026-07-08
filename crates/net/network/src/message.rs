@@ -14,9 +14,12 @@ use reth_eth_wire::{
     NewPooledTransactionHashes, NodeData, PooledTransactions, Receipts, SharedTransactions,
     Transactions,
 };
-use reth_eth_wire_types::RawCapabilityMessage;
+use reth_eth_wire_types::{snap::SnapProtocolMessage, RawCapabilityMessage};
 use reth_network_api::PeerRequest;
-use reth_network_p2p::error::{RequestError, RequestResult};
+use reth_network_p2p::{
+    error::{RequestError, RequestResult},
+    snap::client::SnapResponse,
+};
 use reth_primitives_traits::Block;
 use std::{
     sync::Arc,
@@ -134,6 +137,10 @@ pub enum BlockRequest {
     ///
     /// The response should be sent through the channel.
     GetReceipts(GetReceipts),
+    /// Requests a `snap/2` (EIP-8189) message from the peer.
+    ///
+    /// The response should be sent through the channel.
+    GetSnap(SnapProtocolMessage),
 }
 
 /// Corresponding variant for [`PeerRequest`].
@@ -189,6 +196,11 @@ pub enum PeerResponse<N: NetworkPrimitives = EthNetworkPrimitives> {
         /// The receiver channel for the response to a cells request.
         response: oneshot::Receiver<RequestResult<Cells>>,
     },
+    /// Represents a response to a `snap/2` (EIP-8189) request.
+    Snap {
+        /// The receiver channel for the response to a `snap/2` request.
+        response: oneshot::Receiver<RequestResult<SnapResponse>>,
+    },
 }
 
 // === impl PeerResponse ===
@@ -236,6 +248,10 @@ impl<N: NetworkPrimitives> PeerResponse<N> {
                 Ok(res) => PeerResponseResult::Cells(res),
                 Err(err) => PeerResponseResult::Cells(Err(err.into())),
             },
+            Self::Snap { response } => match ready!(response.poll_unpin(cx)) {
+                Ok(res) => PeerResponseResult::Snap(res),
+                Err(err) => PeerResponseResult::Snap(Err(err.into())),
+            },
         };
         Poll::Ready(res)
     }
@@ -262,6 +278,8 @@ pub enum PeerResponseResult<N: NetworkPrimitives = EthNetworkPrimitives> {
     BlockAccessLists(RequestResult<BlockAccessLists>),
     /// Represents a result containing cells or an error.
     Cells(RequestResult<Cells>),
+    /// Represents a result containing a `snap/2` response or an error.
+    Snap(RequestResult<SnapResponse>),
 }
 
 // === impl PeerResponseResult ===
@@ -320,6 +338,9 @@ impl<N: NetworkPrimitives> PeerResponseResult<N> {
                 }
                 Err(err) => Err(err),
             },
+            // `snap/2` responses aren't `eth` wire messages and never reach this conversion: it's
+            // only used to answer inbound eth requests, and there's no snap/2 server yet.
+            Self::Snap(_) => Err(RequestError::UnsupportedCapability),
         }
     }
 
@@ -335,6 +356,7 @@ impl<N: NetworkPrimitives> PeerResponseResult<N> {
             Self::Receipts70(res) => res.as_ref().err(),
             Self::BlockAccessLists(res) => res.as_ref().err(),
             Self::Cells(res) => res.as_ref().err(),
+            Self::Snap(res) => res.as_ref().err(),
         }
     }
 
