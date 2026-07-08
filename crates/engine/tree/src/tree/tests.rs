@@ -30,11 +30,8 @@ use reth_payload_builder::PayloadServiceCommand;
 use reth_primitives_traits::Block as _;
 use reth_provider::{test_utils::MockEthProvider, BalStoreHandle, InMemoryBalStore, RawBal};
 use reth_tasks::spawn_os_thread;
-use reth_trie::{
-    prefix_set::{PrefixSetMut, TriePrefixSetsMut},
-    LazyTrieData,
-};
-use reth_trie_common::{ComputedTrieData, Nibbles};
+use reth_trie::{prefix_set::TriePrefixSetsMut, LazyTrieData};
+use reth_trie_common::ComputedTrieData;
 use std::{
     collections::BTreeMap,
     str::FromStr,
@@ -61,31 +58,6 @@ fn with_changed_paths(
 
 fn with_empty_changed_paths(block: ExecutedBlock<EthPrimitives>) -> ExecutedBlock<EthPrimitives> {
     with_changed_paths(block, TriePrefixSetsMut::default())
-}
-
-fn trie_changed_paths(
-    account_path: Nibbles,
-    storage_account: B256,
-    storage_path: Nibbles,
-) -> TriePrefixSetsMut {
-    TriePrefixSetsMut {
-        account_prefix_set: PrefixSetMut::from([account_path]),
-        storage_prefix_sets: B256Map::from_iter([(
-            storage_account,
-            PrefixSetMut::from([storage_path]),
-        )]),
-        destroyed_accounts: Default::default(),
-    }
-}
-
-fn merged_changed_paths(blocks: &[ExecutedBlock<EthPrimitives>]) -> TriePrefixSetsMut {
-    let mut merged = TriePrefixSetsMut::default();
-    for block in blocks {
-        let trie_data = block.trie_data();
-        let changed_paths = trie_data.changed_paths.as_deref().expect("changed paths are present");
-        merged.extend_ref(changed_paths);
-    }
-    merged
 }
 
 /// Mock engine validator for tests
@@ -645,58 +617,6 @@ async fn test_tree_persist_blocks() {
 
 #[test]
 fn on_new_persisted_block_queues_sparse_trie_prune_request() {
-    let changed_paths = [
-        trie_changed_paths(
-            Nibbles::from_nibbles([0x01]),
-            B256::with_last_byte(0x01),
-            Nibbles::from_nibbles([0x02]),
-        ),
-        trie_changed_paths(
-            Nibbles::from_nibbles([0x03]),
-            B256::with_last_byte(0x02),
-            Nibbles::from_nibbles([0x04]),
-        ),
-        trie_changed_paths(
-            Nibbles::from_nibbles([0x05]),
-            B256::with_last_byte(0x03),
-            Nibbles::from_nibbles([0x06]),
-        ),
-    ];
-    let blocks: Vec<_> = TestBlockBuilder::eth()
-        .get_executed_blocks(1..4)
-        .zip(changed_paths)
-        .map(|(block, changed_paths)| with_changed_paths(block, changed_paths))
-        .collect();
-    let mut test_harness = TestHarness::new(MAINNET.clone()).with_blocks(blocks.clone());
-    test_harness
-        .tree
-        .persistence_state
-        .finish(blocks[0].recovered_block().hash(), blocks[0].recovered_block().number);
-
-    test_harness.tree.on_new_persisted_block().unwrap();
-
-    let retained_paths =
-        test_harness.tree.pending_sparse_trie_prune.as_ref().unwrap().clone().freeze();
-    let expected_retained_paths = merged_changed_paths(&blocks[1..]).freeze();
-
-    assert_eq!(
-        retained_paths.account_prefix_set.slice(),
-        expected_retained_paths.account_prefix_set.slice()
-    );
-    assert_eq!(
-        retained_paths.storage_prefix_sets.len(),
-        expected_retained_paths.storage_prefix_sets.len()
-    );
-    for (storage_account, expected_slots) in expected_retained_paths.storage_prefix_sets {
-        assert_eq!(
-            retained_paths.storage_prefix_sets[&storage_account].slice(),
-            expected_slots.slice()
-        );
-    }
-}
-
-#[test]
-fn on_new_persisted_block_skips_sparse_trie_prune_when_changed_paths_unknown() {
     let blocks: Vec<_> = TestBlockBuilder::eth().get_executed_blocks(1..4).collect();
     let mut test_harness = TestHarness::new(MAINNET.clone()).with_blocks(blocks.clone());
     test_harness
@@ -706,7 +626,21 @@ fn on_new_persisted_block_skips_sparse_trie_prune_when_changed_paths_unknown() {
 
     test_harness.tree.on_new_persisted_block().unwrap();
 
-    assert!(test_harness.tree.pending_sparse_trie_prune.is_none());
+    assert!(test_harness.tree.pending_sparse_trie_prune);
+}
+
+#[test]
+fn on_new_persisted_block_queues_sparse_trie_prune_when_changed_paths_unknown() {
+    let blocks: Vec<_> = TestBlockBuilder::eth().get_executed_blocks(1..4).collect();
+    let mut test_harness = TestHarness::new(MAINNET.clone()).with_blocks(blocks.clone());
+    test_harness
+        .tree
+        .persistence_state
+        .finish(blocks[0].recovered_block().hash(), blocks[0].recovered_block().number);
+
+    test_harness.tree.on_new_persisted_block().unwrap();
+
+    assert!(test_harness.tree.pending_sparse_trie_prune);
 }
 
 #[test]
@@ -729,7 +663,7 @@ fn on_new_persisted_block_skips_sparse_trie_prune_when_state_root_task_disabled(
 
         test_harness.tree.on_new_persisted_block().unwrap();
 
-        assert!(test_harness.tree.pending_sparse_trie_prune.is_none());
+        assert!(!test_harness.tree.pending_sparse_trie_prune);
     }
 }
 
@@ -738,11 +672,11 @@ fn remove_blocks_clears_pending_sparse_trie_prune_request() {
     let mut test_harness = TestHarness::new(MAINNET.clone());
     test_harness.tree.persistence_state.last_persisted_block =
         BlockNumHash { hash: B256::random(), number: 10 };
-    test_harness.tree.pending_sparse_trie_prune = Some(Default::default());
+    test_harness.tree.pending_sparse_trie_prune = true;
 
     test_harness.tree.remove_blocks(9);
 
-    assert!(test_harness.tree.pending_sparse_trie_prune.is_none());
+    assert!(!test_harness.tree.pending_sparse_trie_prune);
 }
 
 #[test]
@@ -756,11 +690,7 @@ fn process_payload_attributes_threads_sparse_trie_prune_into_payload_builder_tas
         test_harness.blocks.last().unwrap().recovered_block().clone_sealed_header().clone_header();
     let head_hash = test_harness.blocks.last().unwrap().recovered_block().hash();
     let state = test_harness.fcu_state(head_hash);
-    test_harness.tree.pending_sparse_trie_prune = Some(trie_changed_paths(
-        Nibbles::from_nibbles([0x01]),
-        B256::with_last_byte(0x01),
-        Nibbles::from_nibbles([0x02]),
-    ));
+    test_harness.tree.pending_sparse_trie_prune = true;
 
     let updated = test_harness.tree.process_payload_attributes(
         EthPayloadAttributes {
@@ -777,7 +707,7 @@ fn process_payload_attributes_threads_sparse_trie_prune_into_payload_builder_tas
     );
 
     assert_eq!(updated.forkchoice_status(), ForkchoiceStatus::Valid);
-    assert!(test_harness.tree.pending_sparse_trie_prune.is_none());
+    assert!(!test_harness.tree.pending_sparse_trie_prune);
 
     let command = test_harness.payload_command_rx.try_recv().unwrap();
     let PayloadServiceCommand::BuildNewPayload(input, _, _) = command else {

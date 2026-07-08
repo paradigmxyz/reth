@@ -194,7 +194,7 @@ pub struct TreeCtx<'a, N: NodePrimitives> {
     /// Reference to the canonical in-memory state
     canonical_in_memory_state: &'a CanonicalInMemoryState<N>,
     /// Pending sparse trie prune request to consume when spawning a sparse trie task.
-    pending_sparse_trie_prune: &'a mut Option<TriePrefixSetsMut>,
+    pending_sparse_trie_prune: &'a mut bool,
 }
 
 impl<'a, N: NodePrimitives> std::fmt::Debug for TreeCtx<'a, N> {
@@ -202,7 +202,7 @@ impl<'a, N: NodePrimitives> std::fmt::Debug for TreeCtx<'a, N> {
         f.debug_struct("TreeCtx")
             .field("state", &"EngineApiTreeState")
             .field("canonical_in_memory_state", &self.canonical_in_memory_state)
-            .field("pending_sparse_trie_prune", &self.pending_sparse_trie_prune.is_some())
+            .field("pending_sparse_trie_prune", &self.pending_sparse_trie_prune)
             .finish()
     }
 }
@@ -212,7 +212,7 @@ impl<'a, N: NodePrimitives> TreeCtx<'a, N> {
     pub const fn new(
         state: &'a mut EngineApiTreeState<N>,
         canonical_in_memory_state: &'a CanonicalInMemoryState<N>,
-        pending_sparse_trie_prune: &'a mut Option<TriePrefixSetsMut>,
+        pending_sparse_trie_prune: &'a mut bool,
     ) -> Self {
         Self { state, canonical_in_memory_state, pending_sparse_trie_prune }
     }
@@ -234,9 +234,23 @@ impl<'a, N: NodePrimitives> TreeCtx<'a, N> {
         self.canonical_in_memory_state
     }
 
-    /// Takes the pending sparse trie prune request, if any.
-    pub const fn take_sparse_trie_prune(&mut self) -> Option<TriePrefixSetsMut> {
-        self.pending_sparse_trie_prune.take()
+    /// Takes the pending sparse trie prune request as in-memory ancestor blocks, if any.
+    pub fn take_sparse_trie_prune_blocks(
+        &mut self,
+        parent_hash: B256,
+    ) -> Option<Vec<ExecutedBlock<N>>> {
+        if !*self.pending_sparse_trie_prune {
+            return None
+        }
+
+        *self.pending_sparse_trie_prune = false;
+        Some(
+            self.state
+                .tree_state()
+                .blocks_by_hash(parent_hash)
+                .map(|(_, blocks)| blocks)
+                .unwrap_or_default(),
+        )
     }
 }
 
@@ -597,10 +611,10 @@ where
         let parallel_bal_execution = ensure_ok!(self.bal_path_eligible(env.decoded_bal.as_deref()));
 
         // Prepare the state-root job before execution so it can provide streaming hooks.
-        let pending_sparse_trie_prune = (!self.config.skip_state_root() &&
+        let pending_sparse_trie_prune_blocks = (!self.config.skip_state_root() &&
             !self.config.state_root_fallback() &&
             self.config.use_state_root_task())
-        .then(|| ctx.take_sparse_trie_prune())
+        .then(|| ctx.take_sparse_trie_prune_blocks(env.parent_hash))
         .flatten();
         let mut state_root_job =
             ensure_ok!(self.state_root_strategy.prepare(StateRootJobContext::new(
@@ -610,7 +624,7 @@ where
                 overlay_factory,
                 &self.config,
                 parallel_bal_execution,
-                pending_sparse_trie_prune,
+                pending_sparse_trie_prune_blocks,
             )));
         let state_root_job_name = state_root_job.name();
 
@@ -1717,7 +1731,7 @@ pub trait EngineValidator<
         parent_header: &N::BlockHeader,
         timestamp: u64,
         state: &EngineApiTreeState<N>,
-        pending_sparse_trie_prune: &mut Option<TriePrefixSetsMut>,
+        pending_sparse_trie_prune: &mut bool,
     ) -> Option<PayloadStateRootHandle>;
 }
 
@@ -1809,7 +1823,7 @@ where
         parent_header: &N::BlockHeader,
         timestamp: u64,
         state: &EngineApiTreeState<N>,
-        pending_sparse_trie_prune: &mut Option<TriePrefixSetsMut>,
+        pending_sparse_trie_prune: &mut bool,
     ) -> Option<PayloadStateRootHandle> {
         let provider_builder = match self.state_provider_builder(parent_hash, state) {
             Ok(Some(provider_builder)) => provider_builder,
@@ -1834,6 +1848,7 @@ where
             parent_hash,
             parent_header,
             timestamp,
+            state,
             provider_builder,
             overlay_factory,
             &self.config,

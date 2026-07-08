@@ -51,9 +51,10 @@ use crate::tree::{
     },
     payload_processor::PayloadProcessor,
     payload_validator::LazyHashedPostState,
-    ExecutionEnv, StateProviderBuilder, TreeConfig,
+    EngineApiTreeState, ExecutionEnv, StateProviderBuilder, TreeConfig,
 };
 use alloy_primitives::B256;
+use reth_chain_state::ExecutedBlock;
 use reth_errors::ProviderResult;
 use reth_evm::{ConfigureEvm, OnStateHook};
 use reth_primitives_traits::{AlloyBlockHeader, NodePrimitives, RecoveredBlock};
@@ -114,10 +115,11 @@ where
     parent_hash: B256,
     parent_header: &'a N::BlockHeader,
     timestamp: u64,
+    state: &'a EngineApiTreeState<N>,
     provider_builder: StateProviderBuilder<N, P>,
     overlay_factory: OverlayStateProviderFactory<P, N>,
     config: &'a TreeConfig,
-    pending_sparse_trie_prune: &'a mut Option<TriePrefixSetsMut>,
+    pending_sparse_trie_prune: &'a mut bool,
 }
 
 impl<N, P, Evm> fmt::Debug for PayloadStateRootJobContext<'_, N, P, Evm>
@@ -130,7 +132,7 @@ where
             .field("parent_hash", &self.parent_hash)
             .field("parent_state_root", &self.parent_state_root())
             .field("timestamp", &self.timestamp)
-            .field("has_pending_sparse_trie_prune", &self.pending_sparse_trie_prune.is_some())
+            .field("pending_sparse_trie_prune", &self.pending_sparse_trie_prune)
             .finish_non_exhaustive()
     }
 }
@@ -146,16 +148,18 @@ where
         parent_hash: B256,
         parent_header: &'a N::BlockHeader,
         timestamp: u64,
+        state: &'a EngineApiTreeState<N>,
         provider_builder: StateProviderBuilder<N, P>,
         overlay_factory: OverlayStateProviderFactory<P, N>,
         config: &'a TreeConfig,
-        pending_sparse_trie_prune: &'a mut Option<TriePrefixSetsMut>,
+        pending_sparse_trie_prune: &'a mut bool,
     ) -> Self {
         Self {
             payload_processor,
             parent_hash,
             parent_header,
             timestamp,
+            state,
             provider_builder,
             overlay_factory,
             config,
@@ -201,9 +205,20 @@ where
         self.provider_builder.clone()
     }
 
-    /// Takes the pending sparse trie prune request, if any.
-    pub fn take_sparse_trie_prune(&mut self) -> Option<TriePrefixSetsMut> {
-        self.pending_sparse_trie_prune.take()
+    /// Takes the pending sparse trie prune request as in-memory ancestor blocks, if any.
+    pub fn take_sparse_trie_prune_blocks(&mut self) -> Option<Vec<ExecutedBlock<N>>> {
+        if !*self.pending_sparse_trie_prune {
+            return None
+        }
+
+        *self.pending_sparse_trie_prune = false;
+        Some(
+            self.state
+                .tree_state()
+                .blocks_by_hash(self.parent_hash)
+                .map(|(_, blocks)| blocks)
+                .unwrap_or_default(),
+        )
     }
 }
 
@@ -219,7 +234,7 @@ where
     overlay_factory: OverlayStateProviderFactory<P, N>,
     config: &'a TreeConfig,
     parallel_bal_execution: bool,
-    pending_sparse_trie_prune: Option<TriePrefixSetsMut>,
+    pending_sparse_trie_prune_blocks: Option<Vec<ExecutedBlock<N>>>,
 }
 
 impl<N, P, Evm> fmt::Debug for StateRootJobContext<'_, N, P, Evm>
@@ -230,7 +245,10 @@ where
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("StateRootJobContext")
             .field("parallel_bal_execution", &self.parallel_bal_execution)
-            .field("has_pending_sparse_trie_prune", &self.pending_sparse_trie_prune.is_some())
+            .field(
+                "has_pending_sparse_trie_prune",
+                &self.pending_sparse_trie_prune_blocks.is_some(),
+            )
             .finish_non_exhaustive()
     }
 }
@@ -248,7 +266,7 @@ where
         overlay_factory: OverlayStateProviderFactory<P, N>,
         config: &'a TreeConfig,
         parallel_bal_execution: bool,
-        pending_sparse_trie_prune: Option<TriePrefixSetsMut>,
+        pending_sparse_trie_prune_blocks: Option<Vec<ExecutedBlock<N>>>,
     ) -> Self {
         Self {
             payload_processor,
@@ -257,7 +275,7 @@ where
             overlay_factory,
             config,
             parallel_bal_execution,
-            pending_sparse_trie_prune,
+            pending_sparse_trie_prune_blocks,
         }
     }
 
@@ -441,7 +459,7 @@ where
             overlay_factory,
             config,
             parallel_bal_execution,
-            pending_sparse_trie_prune,
+            pending_sparse_trie_prune_blocks,
         } = ctx;
 
         if config.skip_state_root() {
@@ -469,7 +487,7 @@ where
             env.parent_state_root,
             Some(env.transaction_count),
             config,
-            pending_sparse_trie_prune,
+            pending_sparse_trie_prune_blocks,
         );
         let streams = handle.streams(!parallel_bal_execution);
         let hashed_state_rx = Some(handle.take_hashed_state_rx());
@@ -516,7 +534,7 @@ where
                     // workers.
                     None,
                     config,
-                    ctx.take_sparse_trie_prune(),
+                    ctx.take_sparse_trie_prune_blocks(),
                 )
                 .into_payload_state_root_handle(),
         ))
