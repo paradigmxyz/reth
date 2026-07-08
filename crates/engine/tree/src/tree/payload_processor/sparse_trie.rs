@@ -104,8 +104,6 @@ pub(super) struct SparseTrieCacheTask<A = ArenaParallelSparseTrie, S = ArenaPara
     storage_cache_misses: u64,
     /// Pending proof targets queued for dispatch to proof workers.
     pending_targets: PendingTargets,
-    /// Proof targets required by the last update attempt, before fetched-target deduplication.
-    required_targets: PendingTargets,
     /// Proof batches dispatched to workers and not yet received.
     in_flight_proof_batches: usize,
     /// Number of pending execution/prewarming updates received but not yet passed to
@@ -173,7 +171,6 @@ where
             storage_cache_hits: 0,
             storage_cache_misses: 0,
             pending_targets: Default::default(),
-            required_targets: Default::default(),
             in_flight_proof_batches: Default::default(),
             pending_updates: Default::default(),
             final_hashed_state: Default::default(),
@@ -316,7 +313,6 @@ where
                 // If we don't have any pending messages, we can spend some time on computing
                 // storage roots and promoting account updates.
                 self.dispatch_pending_targets()?;
-                self.required_targets.clear();
                 t = Instant::now();
                 self.process_new_updates()?;
                 self.promote_pending_account_updates()?;
@@ -336,7 +332,6 @@ where
                 }
             } else if self.updates.is_empty() {
                 // If we don't have any pending updates, apply them to the trie,
-                self.required_targets.clear();
                 t = Instant::now();
                 self.process_new_updates()?;
                 self.metrics.sparse_trie_process_updates_duration_histogram.record(t.elapsed());
@@ -591,12 +586,10 @@ where
             let trie = self.trie.get_or_create_storage_trie_mut(*address);
             let fetched = self.fetched_storage_targets.entry(*address).or_default();
             let mut targets = Vec::new();
-            let mut required_targets = Vec::new();
 
             let updates_len_before = updates.len();
             trie.update_leaves(updates, |path, min_len| {
                 let target = ProofV2Target::new(path).with_min_len(min_len);
-                required_targets.push(target);
 
                 match fetched.entry(path) {
                     Entry::Occupied(mut entry) => {
@@ -614,10 +607,6 @@ where
             let updates_len_after = updates.len();
             self.storage_cache_hits += (updates_len_before - updates_len_after) as u64;
             self.storage_cache_misses += updates_len_after as u64;
-
-            if !required_targets.is_empty() {
-                self.required_targets.extend_storage_targets(address, required_targets);
-            }
 
             if !targets.is_empty() {
                 self.pending_targets.extend_storage_targets(address, targets);
@@ -648,7 +637,6 @@ where
 
         self.trie.trie_mut().update_leaves(account_updates, |target, min_len| {
             let proof_target = ProofV2Target::new(target).with_min_len(min_len);
-            self.required_targets.push_account_target(proof_target);
 
             match self.fetched_account_targets.entry(target) {
                 Entry::Occupied(mut entry) => {
@@ -913,33 +901,11 @@ where
             .collect::<Vec<_>>();
         requested_storage_targets.sort_unstable();
 
-        let mut required_account_targets = self
-            .required_targets
-            .targets
-            .account_targets
-            .iter()
-            .map(|target| (target.key(), target.min_len))
-            .collect::<Vec<_>>();
-        required_account_targets.sort_unstable();
-
-        let mut required_storage_targets = self
-            .required_targets
-            .targets
-            .storage_targets
-            .iter()
-            .flat_map(|(address, targets)| {
-                targets.iter().map(|target| (*address, target.key(), target.min_len))
-            })
-            .collect::<Vec<_>>();
-        required_storage_targets.sort_unstable();
-
         StateRootTaskError::Other(format!(
             "sparse trie task stalled: pending updates remain but no proof targets are queued or in flight; \
              pending_account_leaves={pending_account_leaves:?}, \
              pending_storage_leaves={pending_storage_leaves:?}, \
              pending_account_updates={pending_account_updates:?}, \
-             required_account_targets={required_account_targets:?}, \
-             required_storage_targets={required_storage_targets:?}, \
              requested_account_targets={requested_account_targets:?}, \
              requested_storage_targets={requested_storage_targets:?}",
         ))
@@ -984,13 +950,6 @@ impl PendingTargets {
     /// Takes the pending targets, replacing with empty defaults.
     fn take(&mut self) -> (MultiProofTargetsV2, usize) {
         (std::mem::take(&mut self.targets), std::mem::take(&mut self.len))
-    }
-
-    /// Clears the pending targets while retaining allocations.
-    fn clear(&mut self) {
-        self.targets.account_targets.clear();
-        self.targets.storage_targets.clear();
-        self.len = 0;
     }
 
     /// Adds a target to the account targets.
@@ -1178,12 +1137,6 @@ mod tests {
         task.pending_account_updates.insert(account, None);
         task.fetched_account_targets.insert(account_target, 0);
         task.fetched_storage_targets.entry(account).or_default().insert(storage_target, 12);
-        task.required_targets
-            .push_account_target(ProofV2Target::new(account_target).with_min_len(0));
-        task.required_targets.extend_storage_targets(
-            &account,
-            vec![ProofV2Target::new(storage_target).with_min_len(12)],
-        );
 
         let error = task.ensure_not_stalled().expect_err("task should be stalled").to_string();
 
@@ -1191,8 +1144,6 @@ mod tests {
         assert!(error.contains("pending_account_leaves"));
         assert!(error.contains("pending_storage_leaves"));
         assert!(error.contains("pending_account_updates"));
-        assert!(error.contains("required_account_targets"));
-        assert!(error.contains("required_storage_targets"));
         assert!(error.contains("requested_account_targets"));
         assert!(error.contains("requested_storage_targets"));
         assert!(error.contains(&format!("{account:?}")));
