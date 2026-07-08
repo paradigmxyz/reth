@@ -860,36 +860,32 @@ where
             self.updates.is_empty() &&
             self.has_pending_sparse_trie_updates()
         {
-            return Err(self.stalled_error())
+            let mut account_targets = self
+                .fetched_account_targets
+                .iter()
+                .map(|(target, min_len)| (*target, *min_len))
+                .collect::<Vec<_>>();
+            account_targets.sort_unstable();
+
+            let mut storage_targets = self
+                .fetched_storage_targets
+                .iter()
+                .flat_map(|(address, targets)| {
+                    targets.iter().map(|(target, min_len)| (*address, *target, *min_len))
+                })
+                .collect::<Vec<_>>();
+            storage_targets.sort_unstable();
+
+            error!(
+                ?account_targets,
+                ?storage_targets,
+                "sparse trie task stalled: pending updates remain but no proof targets are queued or in flight"
+            );
+
+            return Err(StateRootTaskError::Stalled)
         }
 
         Ok(())
-    }
-
-    fn stalled_error(&self) -> StateRootTaskError {
-        let mut account_targets = self
-            .fetched_account_targets
-            .iter()
-            .map(|(target, min_len)| (*target, *min_len))
-            .collect::<Vec<_>>();
-        account_targets.sort_unstable();
-
-        let mut storage_targets = self
-            .fetched_storage_targets
-            .iter()
-            .flat_map(|(address, targets)| {
-                targets.iter().map(|(target, min_len)| (*address, *target, *min_len))
-            })
-            .collect::<Vec<_>>();
-        storage_targets.sort_unstable();
-
-        error!(
-            ?account_targets,
-            ?storage_targets,
-            "sparse trie task stalled: pending updates remain but no proof targets are queued or in flight"
-        );
-
-        StateRootTaskError::Stalled
     }
 }
 
