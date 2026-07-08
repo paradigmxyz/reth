@@ -176,6 +176,31 @@ async fn partial_stateless_exex<
         );
     }
 
+    // Optional per-thread resource metrics (CPU time + page faults) captured
+    // around the cold multiproof, to attribute its cost between compute and
+    // disk I/O. Off by default and gated behind `PS_RESOURCE_METRICS`; when
+    // disabled the getrusage syscalls are skipped and the metric fields stay None.
+    let resource_metrics = std::env::var("PS_RESOURCE_METRICS")
+        .map(|v| matches!(v.as_str(), "1" | "true" | "TRUE" | "yes" | "on"))
+        .unwrap_or(false);
+    if resource_metrics {
+        info!(
+            target: "partial_stateless",
+            "Per-thread resource metrics ENABLED (PS_RESOURCE_METRICS) — cpu_time_ms + major/minor_page_faults per block"
+        );
+        #[cfg(not(target_os = "linux"))]
+        warn!(
+            target: "partial_stateless",
+            "Per-thread CPU/page-fault metrics require Linux RUSAGE_THREAD; this platform will log default zeros for cpu_time_ms, major_page_faults, and minor_page_faults"
+        );
+        if compute_baseline {
+            warn!(
+                target: "partial_stateless",
+                "PS_WITNESS_BASELINE runs before the partial multiproof; resource/page-fault metrics for the partial proof may be lower because the full baseline can warm the OS page cache"
+            );
+        }
+    }
+
     // Optional provider-assisted validator preflight. This re-executes each
     // generated sidecar with a cache+witness-backed provider and checks the
     // cache-state transition. It is useful for PoC acceptance checks, but it
@@ -438,14 +463,24 @@ async fn partial_stateless_exex<
                             None
                         };
 
+                        // Snapshot per-thread CPU + page faults so we can attribute the
+                        // cold multiproof cost (compute-bound vs I/O/swap-bound) per block.
+                        // Gated behind PS_RESOURCE_METRICS; when disabled the getrusage
+                        // syscalls are skipped and the metric fields stay None.
+                        let rusage_before = resource_metrics.then(thread_rusage);
                         let start = Instant::now();
                         // Compute multiproof with empty TrieInput (proof against DB state)
                         match state_provider.multiproof(TrieInput::default(), targets) {
                             Ok(proof) => {
                                 let elapsed_ms = start.elapsed().as_millis() as u64;
-                                let mut result =
-                                    measure_multiproof_size(&proof, missed_bytecode_bytes);
+                                let mut result = measure_multiproof_size(&proof, missed_bytecode_bytes);
                                 result.computation_time_ms = Some(elapsed_ms);
+                                if let Some((cpu_us_before, majflt_before, minflt_before)) = rusage_before {
+                                    let (cpu_us_after, majflt_after, minflt_after) = thread_rusage();
+                                    result.cpu_time_ms = Some(cpu_us_after.saturating_sub(cpu_us_before) / 1000);
+                                    result.major_page_faults = Some(majflt_after.saturating_sub(majflt_before));
+                                    result.minor_page_faults = Some(minflt_after.saturating_sub(minflt_before));
+                                }
                                 result.target_accounts = target_accounts;
                                 result.target_storage_slots = target_slots;
 
@@ -657,7 +692,7 @@ async fn partial_stateless_exex<
                                         .map(|m| m.len() as usize)
                                         .unwrap_or(0);
                                     let manifest = SidecarBenchmarkManifest {
-                                        schema_version: 6,
+                                        schema_version: 1,
                                         block_number: *block_number,
                                         block_hash,
                                         parent_hash,
@@ -770,6 +805,9 @@ async fn partial_stateless_exex<
                             target_accounts = witness.target_accounts,
                             target_storage_slots = witness.target_storage_slots,
                             computation_time_ms = witness.computation_time_ms.unwrap_or(0),
+                            cpu_time_ms = witness.cpu_time_ms.unwrap_or(0),
+                            major_page_faults = witness.major_page_faults.unwrap_or(0),
+                            minor_page_faults = witness.minor_page_faults.unwrap_or(0),
                             "Witness size (Merkle proof)"
                         );
                     }
@@ -957,6 +995,40 @@ fn format_bytes(bytes: usize) -> String {
     } else {
         format!("{:.1} MB", bytes as f64 / (1024.0 * 1024.0))
     }
+}
+
+/// Per-thread resource snapshot used to attribute multiproof cost.
+///
+/// Returns `(cpu_micros, major_faults, minor_faults)` for the CALLING thread
+/// only. We use `RUSAGE_THREAD` (not `RUSAGE_SELF`) so the numbers isolate the
+/// synchronous `multiproof` call from the rest of the node's threads (execution,
+/// networking, DB writes) running concurrently while the node follows tip.
+///
+/// Diagnostic use: comparing the CPU delta against the wall-clock elapsed
+/// separates compute-bound blocks (cpu ≈ wall) from I/O/wait-bound blocks
+/// (cpu ≪ wall); a nonzero major-fault delta proves the cold trie read hit
+/// disk/swap rather than the page cache — the signature of the environmental
+/// tail. Linux-only; returns zeros elsewhere or if the syscall fails.
+#[cfg(target_os = "linux")]
+fn thread_rusage() -> (u64, u64, u64) {
+    // SAFETY: `getrusage` only writes into the `rusage` we hand it; the struct
+    // is fully zero-initialized before the call.
+    unsafe {
+        let mut ru: libc::rusage = std::mem::zeroed();
+        if libc::getrusage(libc::RUSAGE_THREAD, &mut ru) != 0 {
+            return (0, 0, 0);
+        }
+        let cpu_us = (ru.ru_utime.tv_sec as u64) * 1_000_000
+            + (ru.ru_utime.tv_usec as u64)
+            + (ru.ru_stime.tv_sec as u64) * 1_000_000
+            + (ru.ru_stime.tv_usec as u64);
+        (cpu_us, ru.ru_majflt as u64, ru.ru_minflt as u64)
+    }
+}
+
+#[cfg(not(target_os = "linux"))]
+fn thread_rusage() -> (u64, u64, u64) {
+    (0, 0, 0)
 }
 
 fn main() -> eyre::Result<()> {

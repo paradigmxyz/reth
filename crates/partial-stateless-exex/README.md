@@ -51,6 +51,7 @@ variables, so the core sidecar generation path stays lean:
 | --- | --- |
 | `PS_CAPTURE_DIR=<dir>` | dump each block's `BlockAccessedState` fixture to `<dir>` (see below) |
 | `PS_WITNESS_BASELINE=1` | also compute the full-witness baseline + reduction ratio (an extra, larger multiproof per block) |
+| `PS_RESOURCE_METRICS=1` | capture per-thread CPU time + page faults around the partial multiproof (`cpu_time_ms`, `major_page_faults`, `minor_page_faults`) to separate compute-bound from disk-I/O-bound blocks |
 | `PS_SIDECAR_PREFLIGHT=1` | run provider-assisted validator preflight for each sidecar (an extra re-execution per block) |
 
 `PS_SIDECAR_PREFLIGHT` gates the validator-like self-check. When enabled, sidecar generation fails fast if the cache+witness-backed re-execution, expected miss set, or next cache anchor check fails. When unset, the sidecar still carries `prev_cache_anchor`, `next_cache_anchor`, and `witness_commitment`, but this ExEx does not spend the extra execution work to preflight them. The manifest records this as `provider_assisted_preflight: false`.
@@ -58,6 +59,13 @@ variables, so the core sidecar generation path stays lean:
 When `PS_WITNESS_BASELINE` is unset, the manifest's `full_sidecar_baseline_stats`
 and `reduction` are `null` and no baseline multiproof is computed. A baseline
 failure is non-fatal — it never blocks the real (partial) sidecar.
+
+When `PS_RESOURCE_METRICS` is unset, the partial stats' `cpu_time_ms`,
+`major_page_faults`, and `minor_page_faults` are `null` and no `getrusage`
+syscalls are made. The metrics are Linux-only (`RUSAGE_THREAD`); on other
+platforms they log zeros. If comparing against the baseline, note that
+`PS_WITNESS_BASELINE` runs first and can warm the OS page cache, deflating the
+partial proof's page-fault counts.
 
 ### Capturing a benchmark dataset
 

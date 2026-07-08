@@ -832,6 +832,9 @@ mod tests {
             target_accounts: 1,
             target_storage_slots: 2,
             computation_time_ms: None,
+            cpu_time_ms: None,
+            major_page_faults: None,
+            minor_page_faults: None,
         };
         let full = WitnessResult {
             total_size_bytes: 100,
@@ -843,6 +846,9 @@ mod tests {
             target_accounts: 2,
             target_storage_slots: 4,
             computation_time_ms: None,
+            cpu_time_ms: None,
+            major_page_faults: None,
+            minor_page_faults: None,
         };
 
         let reduction = WitnessReductionStats::new(&partial, &full);

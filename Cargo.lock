@@ -6484,6 +6484,7 @@ dependencies = [
  "bincode",
  "eyre",
  "futures",
+ "libc",
  "partial-stateless",
  "reth-ethereum",
  "reth-evm",
