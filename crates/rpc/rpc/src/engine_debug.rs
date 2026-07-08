@@ -36,7 +36,7 @@ where
                         finalized_block_hash: header.hash(),
                     };
                     let fcu = engine_handle
-                        .fork_choice_updated(state, None)
+                        .fork_choice_updated_with_canonical_head_unwind(state, None)
                         .await
                         .map_err(|err| internal_rpc_err(err.to_string()))?;
                     if !fcu.is_valid() {

@@ -1130,6 +1130,7 @@ where
         &mut self,
         state: ForkchoiceState,
         attrs: Option<T::PayloadAttributes>,
+        force_canonical_head_unwind: bool,
     ) -> ProviderResult<TreeOutcome<OnForkChoiceUpdated>> {
         trace!(target: "engine::tree", ?attrs, "invoked forkchoice update");
 
@@ -1150,7 +1151,7 @@ where
 
         // Attempt to apply a chain update when the head differs from our canonical chain.
         // This handles reorgs and chain extensions by making the specified head canonical.
-        if let Some(result) = self.apply_chain_update(state, &attrs)? {
+        if let Some(result) = self.apply_chain_update(state, &attrs, force_canonical_head_unwind)? {
             return Ok(result);
         }
 
@@ -1261,6 +1262,7 @@ where
         &mut self,
         state: ForkchoiceState,
         attrs: &Option<T::PayloadAttributes>,
+        force_canonical_head_unwind: bool,
     ) -> ProviderResult<Option<TreeOutcome<OnForkChoiceUpdated>>> {
         // Check if the head is already part of the canonical chain
         if let Ok(Some(canonical_header)) = self.find_canonical_header(state.head_block_hash) {
@@ -1268,8 +1270,14 @@ where
 
             // Keep the in-memory latest block aligned with the FCU head when rewinding to a
             // canonical ancestor.
-            if self.config.unwind_canonical_header() {
+            if self.config.unwind_canonical_header() || force_canonical_head_unwind {
                 self.update_latest_block_to_canonical_ancestor(&canonical_header)?;
+
+                if force_canonical_head_unwind &&
+                    let Err(outcome) = self.ensure_consistent_forkchoice_state(state)
+                {
+                    return Ok(Some(TreeOutcome::new(outcome)))
+                }
             }
 
             // For OpStack, or if explicitly configured, the proposers are allowed to reorg their
@@ -1587,11 +1595,20 @@ where
                     }
                     EngineApiRequest::Beacon(request) => {
                         match request {
-                            BeaconEngineMessage::ForkchoiceUpdated { state, payload_attrs, tx } => {
+                            BeaconEngineMessage::ForkchoiceUpdated {
+                                state,
+                                payload_attrs,
+                                force_canonical_head_unwind,
+                                tx,
+                            } => {
                                 let has_attrs = payload_attrs.is_some();
 
                                 let start = Instant::now();
-                                let mut output = self.on_forkchoice_updated(state, payload_attrs);
+                                let mut output = self.on_forkchoice_updated(
+                                    state,
+                                    payload_attrs,
+                                    force_canonical_head_unwind,
+                                );
 
                                 if let Ok(res) = &mut output {
                                     // track last received forkchoice state
