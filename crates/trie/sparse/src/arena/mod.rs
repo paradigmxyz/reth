@@ -298,13 +298,7 @@ impl ArenaSparseSubtrie {
             } else {
                 // Not retained — blind the child slot in the new arena.
                 let node = &self.arena[old_child_idx];
-                let variant = match node {
-                    ArenaSparseNode::EmptyRoot => "EmptyRoot",
-                    ArenaSparseNode::Branch(_) => "Branch",
-                    ArenaSparseNode::Leaf { .. } => "Leaf",
-                    ArenaSparseNode::Subtrie(_) => "Subtrie",
-                    ArenaSparseNode::TakenSubtrie => "TakenSubtrie",
-                };
+                let variant: &str = node.as_ref();
                 let rlp_node = node
                     .state_ref()
                     .expect("child must have state")
@@ -2209,13 +2203,7 @@ impl ArenaParallelSparseTrie {
     ) -> ArenaSparseNode {
         let path = cursor.head().expect("cursor is non-empty").path;
         let node = arena.remove(idx).expect("node must exist to be pruned");
-        let variant = match &node {
-            ArenaSparseNode::EmptyRoot => "EmptyRoot",
-            ArenaSparseNode::Branch(_) => "Branch",
-            ArenaSparseNode::Leaf { .. } => "Leaf",
-            ArenaSparseNode::Subtrie(_) => "Subtrie",
-            ArenaSparseNode::TakenSubtrie => "TakenSubtrie",
-        };
+        let variant: &str = node.as_ref();
         let rlp_node = node.state_ref().and_then(|s| s.cached_rlp_node()).cloned();
         trace!(
             target: TRACE_TARGET,
