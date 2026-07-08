@@ -2884,9 +2884,20 @@ impl SparseTrie for ArenaParallelSparseTrie {
             } else {
                 use rayon::iter::{IntoParallelRefMutIterator, ParallelIterator};
 
+                let parent_span = tracing::Span::current();
                 pruned += taken
                     .par_iter_mut()
-                    .map(|(_, subtrie, range)| subtrie.prune(retained_leaves[range.clone()].iter()))
+                    .map(|(_, subtrie, range)| {
+                        let _span = tracing::trace_span!(
+                            target: TRACE_TARGET,
+                            parent: &parent_span,
+                            "subtrie_prune",
+                            subtrie = ?subtrie.path,
+                        )
+                        .entered();
+
+                        subtrie.prune(retained_leaves[range.clone()].iter())
+                    })
                     .sum::<usize>();
             }
 

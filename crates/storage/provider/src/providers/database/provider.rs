@@ -33,7 +33,7 @@ use alloy_primitives::{
 use itertools::Itertools;
 use parking_lot::RwLock;
 use rayon::slice::ParallelSliceMut;
-use reth_chain_state::{ComputedTrieData, ExecutedBlock};
+use reth_chain_state::ExecutedBlock;
 use reth_chainspec::{ChainInfo, ChainSpecProvider, EthChainSpec};
 use reth_db_api::{
     cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO, DbDupCursorRW},
@@ -67,7 +67,7 @@ use reth_storage_api::{
 use reth_storage_errors::provider::{ProviderResult, StaticFileWriterError};
 use reth_trie::{
     updates::{StorageTrieUpdatesSorted, TrieUpdatesSorted},
-    HashedPostStateSorted,
+    ComputedTrieData, HashedPostStateSorted,
 };
 use reth_trie_db::{ChangesetCache, DatabaseStorageTrieCursor, TrieTableAdapter};
 use revm::database::states::{
@@ -727,7 +727,7 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
                 // Blocks are oldest-to-newest, merge_batch expects newest-to-oldest.
                 let start = Instant::now();
                 let merged_hashed_state = HashedPostStateSorted::merge_batch(
-                    blocks.iter().rev().map(|b| b.trie_data().hashed_state),
+                    blocks.iter().rev().map(|b| b.trie_data().sorted.hashed_state),
                 );
                 if !merged_hashed_state.is_empty() {
                     self.write_hashed_state(&merged_hashed_state)?;
@@ -3965,7 +3965,8 @@ mod tests {
     use reth_storage_api::MetadataWriter;
     use reth_testing_utils::generators::{self, random_block, BlockParams};
     use reth_trie::{
-        HashedPostState, KeccakKeyHasher, Nibbles, StoredNibbles, StoredNibblesSubKey,
+        HashedPostState, KeccakKeyHasher, Nibbles, SortedTrieData, StoredNibbles,
+        StoredNibblesSubKey,
     };
     use revm::{database::BundleState, state::AccountInfo};
     use std::{sync::mpsc, time::Duration};
@@ -5122,7 +5123,10 @@ mod tests {
                     },
                     state: bundle,
                 }),
-                ComputedTrieData { hashed_state: Arc::new(hashed_state), ..Default::default() },
+                ComputedTrieData {
+                    sorted: SortedTrieData::new(Arc::new(hashed_state), Default::default()),
+                    ..Default::default()
+                },
             );
             blocks.push(executed);
         }
