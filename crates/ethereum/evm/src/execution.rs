@@ -1,9 +1,11 @@
 //! EVM-backed Ethereum execution helpers.
 
 #[cfg(test)]
+use crate::convert::recovered_tx_envelope;
+#[cfg(test)]
 use crate::executor::HashedStateMode;
 #[cfg(test)]
-use crate::{convert::recovered_tx_envelope, RethReceiptBuilder};
+use crate::RethReceiptBuilder;
 use alloc::{
     boxed::Box,
     format,
@@ -55,6 +57,8 @@ use reth_ethereum_primitives::TransactionSigned;
 use reth_evm::{
     BlockExecutionError, BlockValidationError, CommitChanges, EvmError, InvalidTxError,
 };
+#[cfg(test)]
+use reth_evm::{ReceiptBuilder, ReceiptBuilderCtx};
 use reth_execution_types::HashedPostStateSink;
 #[cfg(test)]
 use reth_execution_types::{hashed_post_state_from_execution_state, BlockExecutionOutput};
@@ -430,7 +434,11 @@ where
                 &transaction,
             )?;
             cumulative_gas_used += outcome.tx_gas_used();
-            let receipt = RethReceiptBuilder.build_receipt(tx_type, outcome, cumulative_gas_used);
+            let receipt = RethReceiptBuilder.build_receipt(ReceiptBuilderCtx {
+                tx_type,
+                result: outcome,
+                cumulative_gas_used,
+            });
             on_receipt(index, &receipt).map_err(PayloadExecutionError::Receipt)?;
             receipts.push(receipt);
             on_transaction_executed(index + 1);

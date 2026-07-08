@@ -44,7 +44,7 @@ pub use execute::{
     BlockExecutionOutput, BlockExecutor, BlockExecutorFactory, BlockValidationError, CommitChanges,
     Evm, EvmError, ExecutableTxFor, ExecutableTxParts, Executor, ExecutorTx, FromRecoveredTx,
     FromTxWithEncoded, GasOutput, InternalBlockExecutionError, IntoTxEnv, InvalidTxError,
-    RecoveredTx, WithTxEnv,
+    ReceiptBuilder, ReceiptBuilderCtx, RecoveredTx, WithTxEnv,
 };
 pub use reth_execution_types::EvmState;
 

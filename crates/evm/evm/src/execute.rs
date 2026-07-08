@@ -6,11 +6,12 @@ use crate::{ConfigureEvm, Database, DynDatabase, EvmEnv, TxEnvFor};
 use alloc::{format, sync::Arc, vec::Vec};
 use alloy_consensus::{
     transaction::{Either, Recovered},
-    BlockHeader as _, Header,
+    BlockHeader as _, Header, TxReceipt,
 };
 use alloy_eips::eip2718::{Typed2718, WithEncoded};
 use alloy_primitives::{Address, Bytes, B256};
 use core::{borrow::Borrow, fmt::Debug};
+use evm2::evm::BlockStateAccumulator;
 #[cfg(feature = "std")]
 use evm2::evm::{CacheDB, Db};
 pub use reth_execution_errors::{
@@ -58,6 +59,47 @@ impl GasOutput {
 impl From<u64> for GasOutput {
     fn from(gas_used: u64) -> Self {
         Self::new(gas_used, gas_used)
+    }
+}
+
+/// Context for building a transaction receipt from an execution result.
+#[derive(Debug, Clone)]
+pub struct ReceiptBuilderCtx<TxType, TransactionResult> {
+    /// Transaction type used by the receipt.
+    pub tx_type: TxType,
+    /// Raw transaction execution result.
+    pub result: TransactionResult,
+    /// Cumulative gas used by this transaction and all prior transactions in the block.
+    pub cumulative_gas_used: u64,
+}
+
+/// Builds chain-specific receipts from raw transaction execution results.
+pub trait ReceiptBuilder<TxType, TransactionResult> {
+    /// Receipt produced by this builder.
+    type Receipt: TxReceipt;
+
+    /// Builds a receipt for the transaction execution result.
+    fn build_receipt(&self, ctx: ReceiptBuilderCtx<TxType, TransactionResult>) -> Self::Receipt;
+
+    /// Builds a block execution output from already-built receipts and execution state.
+    fn build_block_output(
+        &self,
+        receipts: Vec<Self::Receipt>,
+        state: BlockStateAccumulator,
+        hashed_state: Option<HashedPostState>,
+    ) -> BlockExecutionOutput<Self::Receipt> {
+        let gas_used = receipts.last().map_or(0, TxReceipt::cumulative_gas_used);
+
+        BlockExecutionOutput::new(
+            BlockExecutionResult {
+                receipts,
+                requests: Default::default(),
+                gas_used,
+                blob_gas_used: 0,
+            },
+            state,
+        )
+        .with_hashed_state(hashed_state)
     }
 }
 

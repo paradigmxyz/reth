@@ -1,9 +1,7 @@
-use alloc::vec::Vec;
 use alloy_consensus::TxType;
-use evm2::{evm::BlockStateAccumulator, TxResult};
+use evm2::TxResult;
 use reth_ethereum_primitives::Receipt;
-use reth_execution_types::{BlockExecutionOutput, BlockExecutionResult};
-use reth_trie_common::HashedPostState;
+use reth_evm::{ReceiptBuilder, ReceiptBuilderCtx};
 
 /// A builder that operates on Reth primitive types, specifically [`TransactionSigned`] and
 /// [`Receipt`].
@@ -11,36 +9,12 @@ use reth_trie_common::HashedPostState;
 #[non_exhaustive]
 pub struct RethReceiptBuilder;
 
-impl RethReceiptBuilder {
-    /// Builds a Reth receipt from an transaction result.
-    pub fn build_receipt(
-        &self,
-        tx_type: TxType,
-        result: TxResult,
-        cumulative_gas_used: u64,
-    ) -> Receipt {
+impl ReceiptBuilder<TxType, TxResult> for RethReceiptBuilder {
+    type Receipt = Receipt;
+
+    fn build_receipt(&self, ctx: ReceiptBuilderCtx<TxType, TxResult>) -> Receipt {
+        let ReceiptBuilderCtx { tx_type, result, cumulative_gas_used } = ctx;
         Receipt { tx_type, success: result.status, cumulative_gas_used, logs: result.logs }
-    }
-
-    /// Builds a block execution output from already-built receipts and execution state.
-    pub(crate) fn build_block_output(
-        &self,
-        receipts: Vec<Receipt>,
-        state: BlockStateAccumulator,
-        hashed_state: Option<HashedPostState>,
-    ) -> BlockExecutionOutput<Receipt> {
-        let gas_used = receipts.last().map_or(0, |receipt| receipt.cumulative_gas_used);
-
-        BlockExecutionOutput::new(
-            BlockExecutionResult {
-                receipts,
-                requests: Default::default(),
-                gas_used,
-                blob_gas_used: 0,
-            },
-            state,
-        )
-        .with_hashed_state(hashed_state)
     }
 }
 
@@ -58,7 +32,11 @@ mod tests {
         let mut result = TxResult { status: true, ..Default::default() };
         result.logs.push(log.clone());
 
-        let receipt = RethReceiptBuilder.build_receipt(TxType::Eip1559, result, 42);
+        let receipt = RethReceiptBuilder.build_receipt(ReceiptBuilderCtx {
+            tx_type: TxType::Eip1559,
+            result,
+            cumulative_gas_used: 42,
+        });
 
         assert_eq!(receipt.tx_type, TxType::Eip1559);
         assert!(receipt.success);

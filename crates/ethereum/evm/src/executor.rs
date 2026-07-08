@@ -16,6 +16,7 @@ use evm2::{evm::BlockStateAccumulator, interpreter::Host, BaseEvmTypes, Evm, TxR
 use reth_ethereum_primitives::{EthPrimitives, Receipt};
 use reth_evm::{
     BlockExecutionError, BlockExecutionOutput, BlockExecutor, CommitChanges, GasOutput,
+    ReceiptBuilder, ReceiptBuilderCtx,
 };
 use reth_execution_types::hashed_post_state_from_execution_state;
 use reth_trie_common::{HashedPostState, KeccakKeyHasher};
@@ -182,11 +183,11 @@ impl<'a> BlockExecutor for EthBlockExecutor<'a> {
         };
         let gas_used = outcome.tx_gas_used();
         self.cumulative_gas_used += gas_used;
-        self.receipts.push(RethReceiptBuilder.build_receipt(
+        self.receipts.push(RethReceiptBuilder.build_receipt(ReceiptBuilderCtx {
             tx_type,
-            outcome,
-            self.cumulative_gas_used,
-        ));
+            result: outcome,
+            cumulative_gas_used: self.cumulative_gas_used,
+        }));
         Ok(Some(GasOutput::from(gas_used)))
     }
 
