@@ -171,7 +171,7 @@ where
             storage_cache_hits: 0,
             storage_cache_misses: 0,
             pending_targets: Default::default(),
-            in_flight_proof_batches: Default::default(),
+            in_flight_proof_batches: 0,
             pending_updates: Default::default(),
             final_hashed_state: Default::default(),
             metrics,
