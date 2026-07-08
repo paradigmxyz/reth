@@ -832,7 +832,7 @@ where
                     }
                     Err(e) => {
                         error!("failed to dispatch account multiproof: {e:?}");
-                        dispatch_error = Some(StateRootTaskError::Provider(e));
+                        dispatch_error = Some(StateRootTaskError::ProofDispatch(e));
                     }
                 }
             },
