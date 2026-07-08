@@ -20,7 +20,7 @@ use reth_evm::{
     ConfigureEvm, ConvertTx, EvmEnvFor, ExecutableTxFor, ExecutableTxIterator, ExecutableTxParts,
     ExecutableTxTuple, TxEnvFor, WithTxEnv,
 };
-use reth_execution_types::ExecutionState;
+use reth_execution_types::EvmState;
 use reth_primitives_traits::{FastInstant as Instant, NodePrimitives};
 use reth_provider::{
     BlockExecutionOutput, BlockReader, DatabaseProviderROFactory, StateProviderFactory, StateReader,
@@ -787,7 +787,7 @@ where
     pub fn on_inserted_executed_block(
         &self,
         block_with_parent: BlockWithParent,
-        block_state: &ExecutionState,
+        block_state: &EvmState,
     ) {
         let cache_state_metrics = self.cache_state_metrics.clone();
         self.execution_cache.update_with_guard(|cached| {
@@ -1105,7 +1105,7 @@ mod tests {
     use reth_db_common::init::init_genesis;
     use reth_evm_ethereum::EthEvmConfig;
     use reth_execution_cache::CachedStatus;
-    use reth_execution_types::{execution_state_from_init, ExecutionState};
+    use reth_execution_types::{execution_state_from_init, EvmState};
     use reth_primitives_traits::Account;
     #[cfg(any())]
     use reth_primitives_traits::{Recovered, StorageEntry};
@@ -1219,7 +1219,7 @@ mod tests {
             block: BlockNumHash { hash: block_hash, number: 1 },
             parent: parent_hash,
         };
-        let block_state = ExecutionState::default();
+        let block_state = EvmState::default();
 
         // Cache should be empty initially
         assert!(payload_processor.execution_cache.get_cache_for(block_hash).is_none());
@@ -1255,7 +1255,7 @@ mod tests {
             block: BlockNumHash { hash: block3_hash, number: 3 },
             parent: wrong_parent,
         };
-        let block_state = ExecutionState::default();
+        let block_state = EvmState::default();
 
         payload_processor.on_inserted_executed_block(block_with_parent, &block_state);
 

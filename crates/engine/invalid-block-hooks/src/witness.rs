@@ -4,7 +4,7 @@ use alloy_rpc_types_debug::ExecutionWitness;
 use pretty_assertions::Comparison;
 use reth_engine_primitives::InvalidBlockHook;
 use reth_evm::{database::StateProviderDatabase, ConfigureEvm, Executor};
-use reth_execution_types::{ExecutionAccountInfo, ExecutionState};
+use reth_execution_types::{EvmState, ExecutionAccountInfo};
 use reth_primitives_traits::{NodePrimitives, RecoveredBlock, SealedHeader};
 use reth_provider::{BlockExecutionOutput, StateProvider, StateProviderFactory};
 use reth_rpc_api::DebugApiClient;
@@ -13,7 +13,7 @@ use reth_trie::updates::TrieUpdates;
 use serde::Serialize;
 use std::{collections::BTreeMap, fmt::Debug, fs::File, io::Write, path::PathBuf};
 
-type CollectionResult = (BTreeMap<B256, Bytes>, BTreeMap<B256, Bytes>, ExecutionState);
+type CollectionResult = (BTreeMap<B256, Bytes>, BTreeMap<B256, Bytes>, EvmState);
 
 #[derive(Debug, PartialEq, Eq, Serialize)]
 struct BlockStateSorted {
@@ -46,7 +46,7 @@ struct AccountInfoSorted {
 }
 
 /// Converts block state to sorted format for deterministic comparison.
-fn sort_block_state_for_comparison(block_state: &ExecutionState) -> BlockStateSorted {
+fn sort_block_state_for_comparison(block_state: &EvmState) -> BlockStateSorted {
     let mut storage = BTreeMap::<_, BTreeMap<_, _>>::new();
     for (key, delta) in block_state.storage_sorted() {
         storage.entry(key.address()).or_default().insert(
@@ -85,7 +85,7 @@ fn account_info_sorted(info: &ExecutionAccountInfo) -> AccountInfoSorted {
 }
 
 /// Extracts codes and preimages from execution state changes.
-fn collect_execution_data(block_state: ExecutionState) -> eyre::Result<CollectionResult> {
+fn collect_execution_data(block_state: EvmState) -> eyre::Result<CollectionResult> {
     let mut codes = BTreeMap::new();
     let mut preimages = BTreeMap::new();
 
@@ -175,7 +175,7 @@ where
         &self,
         parent_header: &SealedHeader<N::BlockHeader>,
         block: &RecoveredBlock<N::Block>,
-    ) -> eyre::Result<(ExecutionWitness, ExecutionState, reth_trie::HashedPostState)> {
+    ) -> eyre::Result<(ExecutionWitness, EvmState, reth_trie::HashedPostState)> {
         let state_provider = self.provider.state_by_block_hash(parent_header.hash())?;
         let database = StateProviderDatabase::new(state_provider.as_ref());
         let output = self.evm_config.executor(database).execute(block)?;
@@ -227,8 +227,8 @@ where
     /// Validates that the block state after re-execution matches the original.
     fn validate_block_state(
         &self,
-        re_executed_state: &ExecutionState,
-        original_state: &ExecutionState,
+        re_executed_state: &EvmState,
+        original_state: &EvmState,
         block_prefix: &str,
     ) -> eyre::Result<()> {
         if re_executed_state != original_state {
@@ -382,7 +382,7 @@ mod tests {
     use reth_testing_utils::generators::{self, random_block, random_eoa_accounts, BlockParams};
 
     /// Creates a test block state with realistic accounts and contracts.
-    fn create_block_state() -> ExecutionState {
+    fn create_block_state() -> EvmState {
         let mut rng = generators::rng();
         let mut state_accounts = Vec::new();
 
@@ -417,7 +417,7 @@ mod tests {
         execution_state_from_init(state_accounts, contracts)
     }
 
-    fn hashed_state_for_block_state(block_state: ExecutionState) -> reth_trie::HashedPostState {
+    fn hashed_state_for_block_state(block_state: EvmState) -> reth_trie::HashedPostState {
         BlockExecutionOutput::<()>::new(Default::default(), block_state)
             .hash_state_slow::<reth_trie::KeccakKeyHasher>()
     }
@@ -632,7 +632,7 @@ mod tests {
     fn test_validate_block_state_mismatch() {
         let (hook, output_dir, _temp_dir) = create_test_hook();
         let original_state = create_block_state();
-        let modified_state = ExecutionState::default();
+        let modified_state = EvmState::default();
 
         let block_prefix = "test_block_mismatch";
 
@@ -814,7 +814,7 @@ mod tests {
     #[test]
     fn test_validate_block_state_with_empty_states() {
         let (hook, _output_dir, _temp_dir) = create_test_hook();
-        let empty_state = ExecutionState::default();
+        let empty_state = EvmState::default();
         let block_prefix = "empty_states_test";
 
         let result = hook.validate_block_state(&empty_state, &empty_state, block_prefix);

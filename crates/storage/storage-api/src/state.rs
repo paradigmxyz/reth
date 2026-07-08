@@ -7,9 +7,7 @@ use alloy_consensus::constants::KECCAK_EMPTY;
 use alloy_eips::{BlockId, BlockNumberOrTag};
 use alloy_primitives::{Address, BlockHash, BlockNumber, StorageKey, StorageValue, B256, U256};
 use auto_impl::auto_impl;
-use reth_execution_types::{
-    hashed_post_state_from_execution_state, ExecutionOutcome, ExecutionState,
-};
+use reth_execution_types::{hashed_post_state_from_execution_state, EvmState, ExecutionOutcome};
 use reth_primitives_traits::Bytecode;
 use reth_storage_errors::provider::ProviderResult;
 use reth_trie_common::{HashedPostState, KeccakKeyHasher};
@@ -99,7 +97,7 @@ impl<T: AccountReader + BytecodeReader> AccountInfoReader for T {}
 #[auto_impl(&, Arc, Box)]
 pub trait HashedPostStateProvider {
     /// Returns the `HashedPostState` of the provided execution state.
-    fn hashed_post_state(&self, state: &ExecutionState) -> HashedPostState {
+    fn hashed_post_state(&self, state: &EvmState) -> HashedPostState {
         hashed_post_state_from_execution_state::<KeccakKeyHasher>(state)
     }
 }

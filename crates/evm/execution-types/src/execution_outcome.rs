@@ -1,6 +1,6 @@
 use crate::{
     hashed_post_state_from_state_source, state, BlockExecutionOutput, BlockExecutionResult,
-    BlockReverts, ExecutionState, IndexedBlockState, RevertAccount, StorageReverts,
+    BlockReverts, EvmState, IndexedBlockState, RevertAccount, StorageReverts,
 };
 use alloc::{collections::BTreeMap, vec, vec::Vec};
 use alloy_consensus::constants::KECCAK_EMPTY;
@@ -17,7 +17,7 @@ use evm2::evm::{
 use reth_primitives_traits::{Account, Bytecode, Receipt, StorageEntry};
 
 /// Type used to initialize execution state.
-pub type ExecutionStateInit = AddressMap<(Option<Account>, Option<Account>, B256Map<(U256, U256)>)>;
+pub type EvmStateInit = AddressMap<(Option<Account>, Option<Account>, B256Map<(U256, U256)>)>;
 
 /// Types used inside `RevertsInit` to initialize reverts.
 pub type AccountRevertInit = (Option<Option<Account>>, Vec<StorageEntry>);
@@ -29,9 +29,9 @@ pub type RevertsInit = HashMap<BlockNumber, AddressMap<AccountRevertInit>>;
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ExecutionOutcomeState {
     /// Aggregated execution state changes.
-    state: ExecutionState,
+    state: EvmState,
     /// Per-block execution state changes.
-    block_states: Vec<ExecutionState>,
+    block_states: Vec<EvmState>,
     /// Per-block reverts.
     block_reverts: Vec<BlockReverts>,
 }
@@ -39,15 +39,15 @@ pub struct ExecutionOutcomeState {
 impl ExecutionOutcomeState {
     /// Creates a new accumulated execution state.
     pub const fn new(
-        state: ExecutionState,
-        block_states: Vec<ExecutionState>,
+        state: EvmState,
+        block_states: Vec<EvmState>,
         block_reverts: Vec<BlockReverts>,
     ) -> Self {
         Self { state, block_states, block_reverts }
     }
 
     /// Creates accumulated execution state from per-block states.
-    pub fn from_block_states(states: impl IntoIterator<Item = ExecutionState>) -> Self {
+    pub fn from_block_states(states: impl IntoIterator<Item = EvmState>) -> Self {
         let mut value = Self::default();
         for state in states {
             value.push_block_state(state);
@@ -56,7 +56,7 @@ impl ExecutionOutcomeState {
     }
 
     /// Appends one block's execution state and derives its reverts.
-    pub fn push_block_state(&mut self, block_state: ExecutionState) {
+    pub fn push_block_state(&mut self, block_state: EvmState) {
         self.block_reverts
             .push(state::extend_state_and_collect_reverts(&mut self.state, &block_state));
         self.block_states.push(block_state);
@@ -73,12 +73,12 @@ impl ExecutionOutcomeState {
     }
 
     /// Consumes the accumulator and returns the aggregate execution state.
-    pub fn into_execution_state(self) -> ExecutionState {
+    pub fn into_execution_state(self) -> EvmState {
         self.state
     }
 
     /// Returns the accumulated state parts.
-    pub(crate) fn into_parts(self) -> (ExecutionState, Vec<ExecutionState>, Vec<BlockReverts>) {
+    pub(crate) fn into_parts(self) -> (EvmState, Vec<EvmState>, Vec<BlockReverts>) {
         (self.state, self.block_states, self.block_reverts)
     }
 }
@@ -110,7 +110,7 @@ pub struct ExecutionOutcome<T = reth_ethereum_primitives::Receipt> {
     /// Aggregated execution state changes.
     state: IndexedBlockState,
     /// Per-block execution state changes when available.
-    block_states: Vec<ExecutionState>,
+    block_states: Vec<EvmState>,
     /// Per-block reverts.
     block_reverts: Vec<BlockReverts>,
     /// The collection of receipts.
@@ -142,7 +142,7 @@ impl<T> Default for ExecutionOutcome<T> {
 }
 
 impl<T> ExecutionOutcome<T> {
-    fn aggregate_block_states(states: &[ExecutionState]) -> ExecutionState {
+    fn aggregate_block_states(states: &[EvmState]) -> EvmState {
         let mut accumulator = BlockStateAccumulator::new();
         for state in states {
             state::extend_execution_state(&mut accumulator, state);
@@ -151,8 +151,8 @@ impl<T> ExecutionOutcome<T> {
     }
 
     fn from_parts(
-        state: ExecutionState,
-        block_states: Vec<ExecutionState>,
+        state: EvmState,
+        block_states: Vec<EvmState>,
         block_reverts: Vec<BlockReverts>,
         receipts: Vec<Vec<T>>,
         first_block: BlockNumber,
@@ -163,7 +163,7 @@ impl<T> ExecutionOutcome<T> {
 
     /// Creates a new `ExecutionOutcome` from aggregate execution state and per-block reverts.
     pub fn from_state_and_reverts(
-        state: ExecutionState,
+        state: EvmState,
         block_reverts: Vec<BlockReverts>,
         receipts: Vec<Vec<T>>,
         first_block: BlockNumber,
@@ -190,7 +190,7 @@ impl<T> ExecutionOutcome<T> {
     /// This constructor initializes a new `ExecutionOutcome` instance using detailed
     /// initialization parameters.
     pub fn new_init(
-        state_init: ExecutionStateInit,
+        state_init: EvmStateInit,
         revert_init: RevertsInit,
         contracts_init: impl IntoIterator<Item = (B256, Bytecode)>,
         receipts: Vec<Vec<T>>,
@@ -270,8 +270,8 @@ impl<T> ExecutionOutcome<T> {
     /// Creates a new `ExecutionOutcome` from multiple [`BlockExecutionResult`]s.
     fn from_parts_and_results(
         first_block: u64,
-        state: ExecutionState,
-        block_states: Vec<ExecutionState>,
+        state: EvmState,
+        block_states: Vec<EvmState>,
         block_reverts: Vec<BlockReverts>,
         results: Vec<BlockExecutionResult<T>>,
     ) -> Self {
@@ -297,14 +297,14 @@ impl<T> ExecutionOutcome<T> {
         results: Vec<BlockExecutionResult<T>>,
     ) -> Self {
         let (state, block_states, mut block_reverts) = state.into_parts();
-        Self::adjust_reverts_for_prior_wipes(&ExecutionState::default(), &mut block_reverts);
+        Self::adjust_reverts_for_prior_wipes(&EvmState::default(), &mut block_reverts);
         Self::from_parts_and_results(first_block, state, block_states, block_reverts, results)
     }
 
     /// Creates a new `ExecutionOutcome` from execution states and execution results.
     pub fn from_block_states(
         first_block: u64,
-        states: impl IntoIterator<Item = ExecutionState>,
+        states: impl IntoIterator<Item = EvmState>,
         results: Vec<BlockExecutionResult<T>>,
     ) -> Self {
         Self::from_blocks(first_block, ExecutionOutcomeState::from_block_states(states), results)
@@ -347,12 +347,12 @@ impl<T> ExecutionOutcome<T> {
     }
 
     /// Returns the current state changes as a frozen execution state.
-    pub fn execution_state(&self) -> ExecutionState {
+    pub fn execution_state(&self) -> EvmState {
         self.state.inner().clone()
     }
 
     /// Returns the aggregate execution state.
-    pub const fn execution_state_ref(&self) -> &ExecutionState {
+    pub const fn execution_state_ref(&self) -> &EvmState {
         self.state.inner()
     }
 
@@ -563,7 +563,7 @@ impl<T> ExecutionOutcome<T> {
         }
     }
 
-    fn extend_block_states(&mut self, other: Vec<ExecutionState>, other_receipts_len: usize) {
+    fn extend_block_states(&mut self, other: Vec<EvmState>, other_receipts_len: usize) {
         if self.block_states.len() == self.receipts.len() && other.len() == other_receipts_len {
             self.block_states.extend(other);
         } else {
@@ -571,10 +571,7 @@ impl<T> ExecutionOutcome<T> {
         }
     }
 
-    fn adjust_reverts_for_prior_wipes(
-        prior_state: &ExecutionState,
-        block_reverts: &mut [BlockReverts],
-    ) {
+    fn adjust_reverts_for_prior_wipes(prior_state: &EvmState, block_reverts: &mut [BlockReverts]) {
         for address in prior_state.storage_wipes() {
             for reverts in block_reverts.iter_mut() {
                 if let Some(storage_reverts) = reverts.storage.get_mut(&address) &&
@@ -696,8 +693,8 @@ mod serde_state {
         current: T,
     }
 
-    impl From<&ExecutionState> for BlockStateSerde {
-        fn from(state: &ExecutionState) -> Self {
+    impl From<&EvmState> for BlockStateSerde {
+        fn from(state: &EvmState) -> Self {
             let mut sink = BlockStateSerdeSink::default();
             match state.visit(&mut sink) {
                 Ok(()) => {}
@@ -707,7 +704,7 @@ mod serde_state {
         }
     }
 
-    impl From<BlockStateSerde> for ExecutionState {
+    impl From<BlockStateSerde> for EvmState {
         fn from(value: BlockStateSerde) -> Self {
             let mut accumulator = Self::new();
             for (code_hash, bytecode) in value.contracts {
@@ -1093,8 +1090,8 @@ mod tests {
         // Define the first block number
         let first_block = 123;
 
-        // Create a ExecutionStateInit object and insert initial data
-        let mut state_init: ExecutionStateInit = AddressMap::default();
+        // Create a EvmStateInit object and insert initial data
+        let mut state_init: EvmStateInit = AddressMap::default();
         state_init
             .insert(Address::new([2; 20]), (None, Some(Account::default()), B256Map::default()));
 

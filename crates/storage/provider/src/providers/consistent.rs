@@ -1515,7 +1515,7 @@ mod tests {
     use reth_ethereum_primitives::Block;
     use reth_execution_types::{
         execution_state_from_init, BlockExecutionOutput, BlockExecutionResult, BlockReverts,
-        ExecutionOutcome, ExecutionState, RevertAccount, StorageReverts,
+        EvmState, ExecutionOutcome, RevertAccount, StorageReverts,
     };
     use reth_primitives_traits::{Account, RecoveredBlock, SealedBlock};
     use reth_storage_api::{BlockReader, BlockSource, ChangeSetReader, StateReader};
@@ -1598,7 +1598,7 @@ mod tests {
         account: Account,
         storage: impl IntoIterator<Item = (U256, (U256, U256))>,
         reverts: impl IntoIterator<Item = BlockReverts>,
-    ) -> (ExecutionState, Vec<BlockReverts>) {
+    ) -> (EvmState, Vec<BlockReverts>) {
         (
             execution_state_from_init(
                 [(address, (None, Some(account), BTreeMap::from_iter(storage)))],
@@ -1609,7 +1609,7 @@ mod tests {
     }
 
     fn execution_outcome_from_state_and_reverts(
-        state: ExecutionState,
+        state: EvmState,
         block_reverts: Vec<BlockReverts>,
         first_block: u64,
     ) -> ExecutionOutcome {

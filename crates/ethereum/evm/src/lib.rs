@@ -442,7 +442,7 @@ where
         env: EthEvmEnv,
         block_number: u64,
         ctx: EthBlockExecutionCtx<'a>,
-    ) -> Result<reth_evm::ExecutionState, Box<dyn core::error::Error + Send + Sync>>
+    ) -> Result<reth_evm::EvmState, Box<dyn core::error::Error + Send + Sync>>
     where
         Self: 'a,
         DB: evm2::evm::DynDatabase + 'a,

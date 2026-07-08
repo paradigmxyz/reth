@@ -18,7 +18,7 @@ use reth_ethereum_primitives::{
 };
 use reth_execution_types::{
     hashed_post_state_sorted_from_execution_state, BlockExecutionOutput, BlockExecutionResult,
-    Chain, ExecutionOutcome, ExecutionStateInit, RevertsInit,
+    Chain, EvmStateInit, ExecutionOutcome, RevertsInit,
 };
 use reth_primitives_traits::{
     proofs::{calculate_receipt_root, calculate_transaction_root, calculate_withdrawals_root},
@@ -278,7 +278,7 @@ impl<N: NodePrimitives> TestBlockBuilder<N> {
         let new_slot_value = U256::from(block_number).wrapping_add(U256::from(1));
 
         let storage_key = B256::new(TEST_STORAGE_SLOT.to_be_bytes());
-        let mut state_init = ExecutionStateInit::default();
+        let mut state_init = EvmStateInit::default();
         state_init.insert(self.signer, (Some(pre_info), Some(post_info), Default::default()));
         state_init.insert(
             TEST_STORAGE_ADDRESS,
@@ -410,7 +410,7 @@ impl<N: NodePrimitives> TestBlockBuilder<N> {
             })
             .collect::<Vec<_>>();
 
-        let mut state_init = ExecutionStateInit::default();
+        let mut state_init = EvmStateInit::default();
         state_init.insert(
             self.signer,
             (

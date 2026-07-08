@@ -16,7 +16,7 @@ use crate::{
     },
     AccountReader, BlockBodyWriter, BlockExecutionWriter, BlockHashReader, BlockNumReader,
     BlockReader, BlockWriter, ChainStateBlockReader, ChainStateBlockWriter, DBProvider,
-    EitherReader, EitherWriter, EitherWriterDestination, ExecutionStateInit, HashingWriter,
+    EitherReader, EitherWriter, EitherWriterDestination, EvmStateInit, HashingWriter,
     HeaderProvider, HeaderSyncGapProvider, HistoricalStateProvider, HistoricalStateProviderRef,
     HistoryWriter, LatestStateProvider, LatestStateProviderRef, OriginalValuesKnown, ProviderError,
     PruneCheckpointReader, PruneCheckpointWriter, RawRocksDBBatch, RevertsInit, RocksBatchArg,
@@ -1264,7 +1264,7 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> DatabaseProvider<TX, N> {
         })
     }
 
-    /// Populate a [`ExecutionStateInit`] and [`RevertsInit`] using cursors over the
+    /// Populate a [`EvmStateInit`] and [`RevertsInit`] using cursors over the
     /// [`tables::PlainAccountState`] and [`tables::PlainStorageState`] tables, based on the given
     /// storage and account changesets.
     fn populate_execution_state(
@@ -1273,11 +1273,11 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> DatabaseProvider<TX, N> {
         storage_changeset: Vec<(BlockNumberAddress, StorageEntry)>,
         mut get_account: impl FnMut(Address) -> ProviderResult<Option<Account>>,
         mut get_storage: impl FnMut(Address, StorageKey) -> ProviderResult<Option<StorageValue>>,
-    ) -> ProviderResult<(ExecutionStateInit, RevertsInit)> {
+    ) -> ProviderResult<(EvmStateInit, RevertsInit)> {
         // iterate previous value and get plain state value to create changeset
         // Double option around Account represent if Account state is know (first option) and
         // account is removed (Second Option)
-        let mut state: ExecutionStateInit = HashMap::default();
+        let mut state: EvmStateInit = HashMap::default();
 
         // This is not working for blocks that are not at tip. as plain state is not the last
         // state of end range. We should rename the functions or add support to access
@@ -1346,7 +1346,7 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> DatabaseProvider<TX, N> {
         storage_changeset: Vec<(BlockNumberAddress, StorageEntry)>,
         plain_accounts_cursor: &mut impl DbCursorRO<tables::PlainAccountState>,
         plain_storage_cursor: &mut impl DbDupCursorRO<tables::PlainStorageState>,
-    ) -> ProviderResult<(ExecutionStateInit, RevertsInit)> {
+    ) -> ProviderResult<(EvmStateInit, RevertsInit)> {
         self.populate_execution_state(
             account_changeset,
             storage_changeset,
@@ -1362,7 +1362,7 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> DatabaseProvider<TX, N> {
 
     /// Like [`populate_execution_state`](Self::populate_execution_state), but reads current values
     /// from `HashedAccounts`/`HashedStorages`. Addresses and storage keys are hashed via
-    /// `keccak256` for DB lookups. The output `ExecutionStateInit`/`RevertsInit` structures
+    /// `keccak256` for DB lookups. The output `EvmStateInit`/`RevertsInit` structures
     /// remain keyed by plain address and plain storage key.
     fn populate_execution_state_hashed(
         &self,
@@ -1370,7 +1370,7 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> DatabaseProvider<TX, N> {
         storage_changeset: Vec<(BlockNumberAddress, StorageEntry)>,
         hashed_accounts_cursor: &mut impl DbCursorRO<tables::HashedAccounts>,
         hashed_storage_cursor: &mut impl DbDupCursorRO<tables::HashedStorages>,
-    ) -> ProviderResult<(ExecutionStateInit, RevertsInit)> {
+    ) -> ProviderResult<(EvmStateInit, RevertsInit)> {
         self.populate_execution_state(
             account_changeset,
             storage_changeset,
@@ -1390,7 +1390,7 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> DatabaseProvider<TX, N> {
         account_changeset: Vec<(u64, AccountBeforeTx)>,
         storage_changeset: Vec<(BlockNumberAddress, StorageEntry)>,
         state_provider: impl StateProvider,
-    ) -> ProviderResult<(ExecutionStateInit, RevertsInit)> {
+    ) -> ProviderResult<(EvmStateInit, RevertsInit)> {
         self.populate_execution_state(
             account_changeset,
             storage_changeset,
@@ -3841,7 +3841,7 @@ mod tests {
     use reth_ethereum_primitives::Receipt;
     use reth_execution_types::{
         execution_state_from_init, hashed_post_state_from_execution_state, AccountRevertInit,
-        BlockExecutionOutput, BlockExecutionResult, BlockReverts, ExecutionState, StorageReverts,
+        BlockExecutionOutput, BlockExecutionResult, BlockReverts, EvmState, StorageReverts,
     };
     use reth_primitives_traits::SealedBlock;
     use reth_storage_api::MetadataWriter;
@@ -3853,7 +3853,7 @@ mod tests {
         address: Address,
         account: Account,
         storage: BTreeMap<U256, (U256, U256)>,
-    ) -> (ExecutionState, Vec<BlockReverts>) {
+    ) -> (EvmState, Vec<BlockReverts>) {
         (
             execution_state_from_init([(address, (None, Some(account), storage.clone()))], []),
             vec![BlockReverts {
@@ -4625,7 +4625,7 @@ mod tests {
 
         let provider_rw = factory.provider_rw().unwrap();
 
-        let mut state_init: ExecutionStateInit = AddressMap::default();
+        let mut state_init: EvmStateInit = AddressMap::default();
         let mut storage_map: B256Map<(U256, U256)> = B256Map::default();
         storage_map.insert(slot_key, (U256::ZERO, U256::from(10)));
         state_init.insert(

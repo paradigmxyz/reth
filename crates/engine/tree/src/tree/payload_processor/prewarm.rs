@@ -35,9 +35,7 @@ use reth_evm::{
     database::StateProviderDatabase, ConfigureEvm, Evm as EvmInstance, EvmEnv, EvmFor,
     ExecutableTxFor,
 };
-use reth_execution_types::{
-    ExecutionAccountChangeRef, ExecutionStateChangeSink, ExecutionStorageChange,
-};
+use reth_execution_types::{EvmStateChangeSink, ExecutionAccountChangeRef, ExecutionStorageChange};
 use reth_metrics::Metrics;
 #[cfg(any(test, any()))]
 use reth_primitives_traits::Account;
@@ -865,7 +863,7 @@ impl PrewarmProofTargetsSink {
     }
 }
 
-impl ExecutionStateChangeSink for PrewarmProofTargetsSink {
+impl EvmStateChangeSink for PrewarmProofTargetsSink {
     type Error = Infallible;
 
     fn account(&mut self, change: ExecutionAccountChangeRef<'_>) -> Result<(), Self::Error> {

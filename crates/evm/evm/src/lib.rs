@@ -46,7 +46,7 @@ pub use execute::{
     FromTxWithEncoded, GasOutput, InternalBlockExecutionError, IntoTxEnv, InvalidTxError,
     RecoveredTx, WithTxEnv,
 };
-pub use reth_execution_types::ExecutionState;
+pub use reth_execution_types::EvmState;
 
 /// Transaction validation limits resolved for an EVM environment.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -425,12 +425,12 @@ pub trait ConfigureEvm: Clone + Debug + Send + Sync + Unpin {
         _evm_env: EvmEnvFor<Self>,
         _block_number: u64,
         _ctx: ExecutionCtxFor<'a, Self>,
-    ) -> Result<ExecutionState, Box<dyn Error + Send + Sync>>
+    ) -> Result<EvmState, Box<dyn Error + Send + Sync>>
     where
         Self: 'a,
         DB: DynDatabase + 'a,
     {
-        Ok(ExecutionState::default())
+        Ok(EvmState::default())
     }
 }
 

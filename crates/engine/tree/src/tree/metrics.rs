@@ -568,7 +568,7 @@ mod tests {
     use super::*;
     use alloy_eips::eip7685::Requests;
     use metrics_util::debugging::{DebuggingRecorder, Snapshotter};
-    use reth_execution_types::{BlockExecutionResult, ExecutionState};
+    use reth_execution_types::{BlockExecutionResult, EvmState};
 
     fn setup_test_recorder() -> Snapshotter {
         let recorder = DebuggingRecorder::new();
@@ -588,7 +588,7 @@ mod tests {
         metrics.executor.gas_used_histogram.record(0.0);
 
         let output = BlockExecutionOutput::<()> {
-            state: ExecutionState::default().into(),
+            state: EvmState::default().into(),
             hashed_state: None,
             result: BlockExecutionResult {
                 receipts: vec![],

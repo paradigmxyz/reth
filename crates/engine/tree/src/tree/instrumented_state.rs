@@ -2,7 +2,7 @@
 use alloy_primitives::{Address, StorageKey, StorageValue, B256};
 use metrics::{Gauge, Histogram};
 use reth_errors::ProviderResult;
-use reth_execution_types::ExecutionState;
+use reth_execution_types::EvmState;
 use reth_metrics::Metrics;
 use reth_primitives_traits::{Account, Bytecode, FastInstant as Instant};
 use reth_provider::{
@@ -309,7 +309,7 @@ impl<S: BlockHashReader> BlockHashReader for InstrumentedStateProvider<S> {
 }
 
 impl<S: HashedPostStateProvider> HashedPostStateProvider for InstrumentedStateProvider<S> {
-    fn hashed_post_state(&self, state: &ExecutionState) -> HashedPostState {
+    fn hashed_post_state(&self, state: &EvmState) -> HashedPostState {
         self.state_provider.hashed_post_state(state)
     }
 }

@@ -13,8 +13,8 @@ use reth_db_api::{
     transaction::{DbTx, DbTxMut},
 };
 use reth_execution_types::{
-    BlockReverts, ExecutableBytecode, ExecutionAccountChangeRef, ExecutionAccountInfo,
-    ExecutionAccountInfoRef, ExecutionStateChangeSink, ExecutionStateChangeSource,
+    BlockReverts, EvmStateChangeSink, EvmStateChangeSource, ExecutableBytecode,
+    ExecutionAccountChangeRef, ExecutionAccountInfo, ExecutionAccountInfoRef,
     ExecutionStorageChange,
 };
 use reth_primitives_traits::{Account, Bytecode, StorageEntry};
@@ -31,7 +31,7 @@ fn execution_state_and_reverts_to_plain_state_and_reverts<S>(
     is_value_known: OriginalValuesKnown,
 ) -> (StateChangeset, PlainStateReverts)
 where
-    S: ExecutionStateChangeSource,
+    S: EvmStateChangeSource,
 {
     let plain_state = execution_state_to_plain_state(state, is_value_known);
 
@@ -77,7 +77,7 @@ fn execution_state_to_plain_state<S>(
     is_value_known: OriginalValuesKnown,
 ) -> StateChangeset
 where
-    S: ExecutionStateChangeSource,
+    S: EvmStateChangeSource,
 {
     let mut sink = PlainStateSink::new(is_value_known);
     match state.visit(&mut sink) {
@@ -92,7 +92,7 @@ fn execution_state_to_plain_state_and_reverts<S>(
     is_value_known: OriginalValuesKnown,
 ) -> (StateChangeset, PlainStateReverts)
 where
-    S: ExecutionStateChangeSource,
+    S: EvmStateChangeSource,
 {
     let mut sink = PlainStateAndRevertsSink::new(is_value_known);
     match state.visit(&mut sink) {
@@ -104,7 +104,7 @@ where
 
 pub(crate) fn execution_state_to_plain_reverts<S>(state: &S) -> PlainStateReverts
 where
-    S: ExecutionStateChangeSource,
+    S: EvmStateChangeSource,
 {
     let mut sink = PlainRevertsSink::new();
     match state.visit(&mut sink) {
@@ -389,7 +389,7 @@ impl PlainStateSink {
     }
 }
 
-impl ExecutionStateChangeSink for PlainStateSink {
+impl EvmStateChangeSink for PlainStateSink {
     type Error = Infallible;
 
     fn bytecode(
@@ -481,7 +481,7 @@ impl PlainStateAndRevertsSink {
     }
 }
 
-impl ExecutionStateChangeSink for PlainStateAndRevertsSink {
+impl EvmStateChangeSink for PlainStateAndRevertsSink {
     type Error = Infallible;
 
     fn bytecode(
@@ -556,7 +556,7 @@ impl PlainRevertsSink {
     }
 }
 
-impl ExecutionStateChangeSink for PlainRevertsSink {
+impl EvmStateChangeSink for PlainRevertsSink {
     type Error = Infallible;
 
     fn account(&mut self, change: ExecutionAccountChangeRef<'_>) -> Result<(), Self::Error> {
@@ -583,9 +583,7 @@ impl ExecutionStateChangeSink for PlainRevertsSink {
 mod tests {
     use super::*;
     use alloy_primitives::{map::AddressMap, Bytes, B256, U256};
-    use reth_execution_types::{
-        execution_state_from_init, BlockReverts, ExecutionState, StorageReverts,
-    };
+    use reth_execution_types::{execution_state_from_init, BlockReverts, EvmState, StorageReverts};
     use reth_primitives_traits::{Account, Bytecode};
 
     #[test]
@@ -593,7 +591,7 @@ mod tests {
         let address = Address::random();
         let slot = U256::from(1);
         let value = U256::from(2);
-        let state = ExecutionState::default();
+        let state = EvmState::default();
         let block_reverts = vec![BlockReverts {
             storage: AddressMap::from_iter([(
                 address,

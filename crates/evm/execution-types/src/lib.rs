@@ -15,10 +15,9 @@ pub use evm2::{
     bytecode::Bytecode as ExecutableBytecode,
     evm::{
         AccountChangeRef as ExecutionAccountChangeRef, AccountInfo as ExecutionAccountInfo,
-        AccountInfoRef as ExecutionAccountInfoRef,
-        BlockStateAccumulator as ExecutionStateAccumulator,
-        BlockStateAccumulator as ExecutionState, StateChangeSink as ExecutionStateChangeSink,
-        StateChangeSource as ExecutionStateChangeSource, StorageChange as ExecutionStorageChange,
+        AccountInfoRef as ExecutionAccountInfoRef, BlockStateAccumulator as EvmStateAccumulator,
+        BlockStateAccumulator as EvmState, StateChangeSink as EvmStateChangeSink,
+        StateChangeSource as EvmStateChangeSource, StorageChange as ExecutionStorageChange,
     },
 };
 pub use reth_trie_common::HashedPostState;

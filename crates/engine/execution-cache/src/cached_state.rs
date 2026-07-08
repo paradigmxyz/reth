@@ -8,8 +8,8 @@ use metrics::{Counter, Gauge, Histogram};
 use parking_lot::Once;
 use reth_errors::ProviderResult;
 use reth_execution_types::{
-    ExecutableBytecode, ExecutionAccountChangeRef, ExecutionState, ExecutionStateChangeSink,
-    ExecutionStateChangeSource, ExecutionStorageChange,
+    EvmState, EvmStateChangeSink, EvmStateChangeSource, ExecutableBytecode,
+    ExecutionAccountChangeRef, ExecutionStorageChange,
 };
 use reth_metrics::Metrics;
 use reth_primitives_traits::{Account, Bytecode};
@@ -1001,13 +1001,13 @@ impl ExecutionCache {
     /// Inserts post-execution state changes into the cache.
     #[instrument(level = "debug", target = "engine::caching", skip_all)]
     #[expect(clippy::result_unit_err)]
-    pub fn insert_execution_state(&self, state_updates: &ExecutionState) -> Result<(), ()> {
+    pub fn insert_execution_state(&self, state_updates: &EvmState) -> Result<(), ()> {
         self.insert_state_source(state_updates)
     }
 
     fn insert_state_source<S>(&self, state_updates: &S) -> Result<(), ()>
     where
-        S: ExecutionStateChangeSource,
+        S: EvmStateChangeSource,
     {
         let _enter = debug_span!(target: "engine::tree", "state_source").entered();
         let mut sink = ExecutionCacheInsertSink {
@@ -1056,7 +1056,7 @@ struct ExecutionCacheInsertSink<'a> {
     cleared: bool,
 }
 
-impl ExecutionStateChangeSink for ExecutionCacheInsertSink<'_> {
+impl EvmStateChangeSink for ExecutionCacheInsertSink<'_> {
     type Error = ();
 
     fn bytecode(
@@ -1202,16 +1202,16 @@ mod tests {
     use super::*;
     use alloy_primitives::U256;
     use reth_execution_types::{
-        ExecutionAccountChangeRef, ExecutionAccountInfo, ExecutionAccountInfoRef, ExecutionState,
-        ExecutionStateAccumulator, ExecutionStateChangeSink,
+        EvmState, EvmStateAccumulator, EvmStateChangeSink, ExecutionAccountChangeRef,
+        ExecutionAccountInfo, ExecutionAccountInfoRef,
     };
     use reth_provider::test_utils::{ExtendedAccount, MockEthProvider};
 
     fn destroyed_account_state(
         address: Address,
         original: Option<ExecutionAccountInfo>,
-    ) -> ExecutionState {
-        let mut accumulator = ExecutionStateAccumulator::new();
+    ) -> EvmState {
+        let mut accumulator = EvmStateAccumulator::new();
         accumulator
             .account(ExecutionAccountChangeRef {
                 address,

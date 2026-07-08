@@ -19,8 +19,7 @@ pub use reth_execution_errors::{
 };
 pub use reth_execution_types::{BlockExecutionOutput, ExecutionOutcome};
 use reth_execution_types::{
-    BlockExecutionResult, ExecutionOutcomeState, ExecutionState, ExecutionStateChangeSink,
-    HashedPostState,
+    BlockExecutionResult, EvmState, EvmStateChangeSink, ExecutionOutcomeState, HashedPostState,
 };
 #[cfg(feature = "std")]
 use reth_primitives_traits::BlockTy;
@@ -92,7 +91,7 @@ pub trait Evm {
         sink: &mut S,
     ) -> Result<(), BlockExecutionError>
     where
-        S: ExecutionStateChangeSink,
+        S: EvmStateChangeSink,
         S::Error: Debug;
 }
 
@@ -108,7 +107,7 @@ where
         sink: &mut S,
     ) -> Result<(), BlockExecutionError>
     where
-        S: ExecutionStateChangeSink,
+        S: EvmStateChangeSink,
         S::Error: Debug,
     {
         let executed = self.transact(transaction).map_err(|err| {
@@ -265,7 +264,7 @@ pub struct BlockAssemblerInput<'a, 'b, F: BlockExecutorFactory + 'a, H = Header>
     /// Output of block execution.
     pub output: &'b BlockExecutionResult<ReceiptTy<F::Primitives>>,
     /// Execution state after block execution.
-    pub execution_state: &'b ExecutionState,
+    pub execution_state: &'b EvmState,
     /// Provider with access to state.
     pub state_provider: &'b dyn StateProvider,
     /// State root for the assembled block.
@@ -283,7 +282,7 @@ impl<'a, 'b, F: BlockExecutorFactory + 'a, H> BlockAssemblerInput<'a, 'b, F, H> 
         parent: &'a SealedHeader<H>,
         transactions: Vec<TxTy<F::Primitives>>,
         output: &'b BlockExecutionResult<ReceiptTy<F::Primitives>>,
-        execution_state: &'b ExecutionState,
+        execution_state: &'b EvmState,
         state_provider: &'b dyn StateProvider,
         state_root: B256,
         block_access_list_hash: Option<B256>,
