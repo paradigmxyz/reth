@@ -13,7 +13,7 @@ use reth_cli::chainspec::ChainSpecParser;
 use reth_cli_util::cancellation::CancellationToken;
 use reth_consensus::FullConsensus;
 use reth_evm::{database::StateProviderDatabase, execute::Executor, ConfigureEvm};
-use reth_execution_types::{BlockReverts, RevertAccount};
+use reth_execution_types::BlockReverts;
 use reth_node_core::args::JitArgs;
 use reth_primitives_traits::{format_gas_throughput, Account, BlockBody, GotExpected};
 use reth_provider::{
@@ -403,7 +403,7 @@ where
             let cs_info = cs_accounts.remove(addr).ok_or_else(|| {
                 eyre::eyre!("Block {block_number}: account {addr} in reverts but not in changeset")
             })?;
-            let revert_acct = original.as_ref().map(account_from_revert);
+            let revert_acct = original.as_ref().map(Account::from);
             eyre::ensure!(
                 revert_acct == cs_info,
                 "Block {block_number}: account {addr} info mismatch: revert={revert_acct:?} cs={cs_info:?}",
@@ -446,12 +446,4 @@ where
     }
 
     Ok(())
-}
-
-fn account_from_revert(info: &RevertAccount) -> Account {
-    Account {
-        nonce: info.nonce,
-        balance: info.balance,
-        bytecode_hash: (!info.code_hash.is_zero()).then_some(info.code_hash),
-    }
 }

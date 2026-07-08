@@ -94,6 +94,16 @@ impl From<RevertAccount> for AccountInfo {
     }
 }
 
+impl From<&RevertAccount> for Account {
+    fn from(value: &RevertAccount) -> Self {
+        Self {
+            nonce: value.nonce,
+            balance: value.balance,
+            bytecode_hash: (!value.code_hash.is_zero()).then_some(value.code_hash),
+        }
+    }
+}
+
 /// Storage reverts for one account in one block.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
