@@ -865,9 +865,7 @@ where
             let mut account_targets = self
                 .account_updates
                 .keys()
-                .filter_map(|target| {
-                    self.fetched_account_targets.get(target).map(|min_len| (*target, *min_len))
-                })
+                .map(|target| (*target, self.fetched_account_targets.get(target).copied()))
                 .collect::<Vec<_>>();
             account_targets.sort_unstable();
             let account_targets_truncated =
@@ -879,10 +877,12 @@ where
                 .iter()
                 .flat_map(|(address, updates)| {
                     let fetched_targets = self.fetched_storage_targets.get(address);
-                    updates.keys().filter_map(move |target| {
-                        fetched_targets
-                            .and_then(|targets| targets.get(target))
-                            .map(|min_len| (*address, *target, *min_len))
+                    updates.keys().map(move |target| {
+                        (
+                            *address,
+                            *target,
+                            fetched_targets.and_then(|targets| targets.get(target)).copied(),
+                        )
                     })
                 })
                 .collect::<Vec<_>>();
