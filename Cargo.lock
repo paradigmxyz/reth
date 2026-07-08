@@ -10593,6 +10593,7 @@ dependencies = [
  "reth-metrics",
  "reth-primitives-traits",
  "reth-provider",
+ "reth-prune-types",
  "reth-stages-types",
  "reth-storage-api",
  "reth-storage-errors",

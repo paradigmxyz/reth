@@ -157,11 +157,14 @@ where
         (Arc::default(), Arc::new(range_state_revert))
     } else {
         // Step 2: collect the state revert from the database tip to just after the range.
-        let tail_state_revert = end_block
-            .checked_add(1)
-            .map(|next_block| crate::state::from_reverts_auto(provider, next_block..))
-            .transpose()?
-            .unwrap_or_default();
+        //
+        // The read must be bounded by `db_tip_block`: an unbounded range is capped by the
+        // static-file index instead, which can be ahead of the database tip while a
+        // concurrent unwind commit is truncating static files (the database is committed
+        // first), in which case the rows above the tip belong to the unwound chain and are
+        // being deleted as they are read.
+        let tail_state_revert =
+            crate::state::from_reverts_auto(provider, end_block + 1..=db_tip_block)?;
 
         // Step 3: compute trie reverts from the database tip to just after the range.
         let tail_input = TrieInputSorted::new(
@@ -776,6 +779,8 @@ mod tests {
         map::{B256Map, HashMap},
         Address, U256,
     };
+    use core::ops::{Bound, RangeBounds};
+    use reth_chainspec::ChainInfo;
     use reth_db::tables;
     use reth_db_api::{
         models::{AccountBeforeTx, BlockNumberAddress},
@@ -786,9 +791,11 @@ mod tests {
         test_utils::create_test_provider_factory, StaticFileProviderFactory, StaticFileSegment,
         StaticFileWriter,
     };
+    use reth_prune_types::PruneModes;
     use reth_stages_types::{StageCheckpoint, StageId};
-    use reth_storage_api::{StageCheckpointWriter, TrieWriter};
+    use reth_storage_api::{BlockHashReader, StageCheckpointWriter, StorageSettings, TrieWriter};
     use reth_trie::{BranchNodeCompact, Nibbles, StateRoot};
+    use std::cell::RefCell;
 
     // Helper function to create empty TrieUpdatesSorted for testing
     fn create_test_changesets() -> Arc<TrieUpdatesSorted> {
@@ -1128,6 +1135,211 @@ mod tests {
         let expected = legacy_compute_range_trie_changesets(&*provider, 2..=3);
         let actual = compute_range_trie_changesets(&*provider, 2..=3, 3).unwrap();
         assert_eq!(actual, expected);
+    }
+
+    /// Wraps a provider and records the inclusive upper bound of every requested
+    /// changeset range.
+    struct RecordingChangesetProvider<'a, P> {
+        inner: &'a P,
+        upper_bounds: RefCell<Vec<BlockNumber>>,
+    }
+
+    impl<P> RecordingChangesetProvider<'_, P> {
+        fn record(&self, range: &impl RangeBounds<BlockNumber>) {
+            self.upper_bounds.borrow_mut().push(match range.end_bound() {
+                Bound::Included(block_number) => *block_number,
+                Bound::Excluded(block_number) => block_number.saturating_sub(1),
+                Bound::Unbounded => BlockNumber::MAX,
+            });
+        }
+    }
+
+    impl<P: DBProvider> DBProvider for RecordingChangesetProvider<'_, P> {
+        type Tx = P::Tx;
+
+        fn tx_ref(&self) -> &Self::Tx {
+            self.inner.tx_ref()
+        }
+
+        fn tx_mut(&mut self) -> &mut Self::Tx {
+            unimplemented!("read-only test provider")
+        }
+
+        fn into_tx(self) -> Self::Tx {
+            unimplemented!("read-only test provider")
+        }
+
+        fn commit(self) -> ProviderResult<()> {
+            unimplemented!("read-only test provider")
+        }
+
+        fn prune_modes_ref(&self) -> &PruneModes {
+            self.inner.prune_modes_ref()
+        }
+    }
+
+    impl<P: BlockHashReader + Sync> BlockHashReader for RecordingChangesetProvider<'_, P> {
+        fn block_hash(&self, number: BlockNumber) -> ProviderResult<Option<B256>> {
+            self.inner.block_hash(number)
+        }
+
+        fn canonical_hashes_range(
+            &self,
+            start: BlockNumber,
+            end: BlockNumber,
+        ) -> ProviderResult<Vec<B256>> {
+            self.inner.canonical_hashes_range(start, end)
+        }
+    }
+
+    impl<P: BlockNumReader + Sync> BlockNumReader for RecordingChangesetProvider<'_, P> {
+        fn chain_info(&self) -> ProviderResult<ChainInfo> {
+            self.inner.chain_info()
+        }
+
+        fn best_block_number(&self) -> ProviderResult<BlockNumber> {
+            self.inner.best_block_number()
+        }
+
+        fn last_block_number(&self) -> ProviderResult<BlockNumber> {
+            self.inner.last_block_number()
+        }
+
+        fn block_number(&self, hash: B256) -> ProviderResult<Option<BlockNumber>> {
+            self.inner.block_number(hash)
+        }
+    }
+
+    impl<P: ChangeSetReader> ChangeSetReader for RecordingChangesetProvider<'_, P> {
+        fn account_block_changeset(
+            &self,
+            block_number: BlockNumber,
+        ) -> ProviderResult<Vec<AccountBeforeTx>> {
+            self.inner.account_block_changeset(block_number)
+        }
+
+        fn get_account_before_block(
+            &self,
+            block_number: BlockNumber,
+            address: Address,
+        ) -> ProviderResult<Option<AccountBeforeTx>> {
+            self.inner.get_account_before_block(block_number, address)
+        }
+
+        fn account_changesets_range(
+            &self,
+            range: impl RangeBounds<BlockNumber>,
+        ) -> ProviderResult<Vec<(BlockNumber, AccountBeforeTx)>> {
+            self.record(&range);
+            self.inner.account_changesets_range(range)
+        }
+    }
+
+    impl<P: StorageChangeSetReader + Sync> StorageChangeSetReader
+        for RecordingChangesetProvider<'_, P>
+    {
+        fn storage_changeset(
+            &self,
+            block_number: BlockNumber,
+        ) -> ProviderResult<Vec<(BlockNumberAddress, StorageEntry)>> {
+            self.inner.storage_changeset(block_number)
+        }
+
+        fn get_storage_before_block(
+            &self,
+            block_number: BlockNumber,
+            address: Address,
+            storage_key: B256,
+        ) -> ProviderResult<Option<StorageEntry>> {
+            self.inner.get_storage_before_block(block_number, address, storage_key)
+        }
+
+        fn storage_changesets_range(
+            &self,
+            range: impl RangeBounds<BlockNumber>,
+        ) -> ProviderResult<Vec<(BlockNumberAddress, StorageEntry)>> {
+            self.record(&range);
+            self.inner.storage_changesets_range(range)
+        }
+    }
+
+    impl<P: StorageSettingsCache + Sync> StorageSettingsCache for RecordingChangesetProvider<'_, P> {
+        fn cached_storage_settings(&self) -> StorageSettings {
+            self.inner.cached_storage_settings()
+        }
+
+        fn set_storage_settings_cache(&self, settings: StorageSettings) {
+            self.inner.set_storage_settings_cache(settings)
+        }
+    }
+
+    #[test]
+    fn tail_state_revert_is_bounded_by_db_tip() {
+        // Changeset rows above the database tip can be visible to a reader: a concurrent
+        // unwind commits the database before truncating static files, so the rows above
+        // the tip belong to the unwound chain and are being deleted while they are read.
+        // Computing changesets must therefore never read past the database tip.
+        let factory = create_test_provider_factory();
+        seed_headers(&factory, 3);
+
+        let provider = factory.provider_rw().unwrap();
+        let address = Address::with_last_byte(1);
+
+        provider
+            .tx_ref()
+            .put::<tables::HashedAccounts>(keccak256(address), test_account(30))
+            .unwrap();
+        provider
+            .tx_ref()
+            .put::<tables::AccountChangeSets>(1, AccountBeforeTx { address, info: None })
+            .unwrap();
+        provider
+            .tx_ref()
+            .put::<tables::AccountChangeSets>(
+                2,
+                AccountBeforeTx { address, info: Some(test_account(10)) },
+            )
+            .unwrap();
+        provider
+            .tx_ref()
+            .put::<tables::AccountChangeSets>(
+                3,
+                AccountBeforeTx { address, info: Some(test_account(20)) },
+            )
+            .unwrap();
+
+        // Stale rows above the tip, as left mid-deletion by a concurrent unwind.
+        let stale_address = Address::with_last_byte(200);
+        provider
+            .tx_ref()
+            .put::<tables::AccountChangeSets>(
+                4,
+                AccountBeforeTx { address: stale_address, info: Some(test_account(999)) },
+            )
+            .unwrap();
+        provider
+            .tx_ref()
+            .put::<tables::StorageChangeSets>(
+                BlockNumberAddress((4, stale_address)),
+                test_storage(1, 7),
+            )
+            .unwrap();
+
+        provider.save_stage_checkpoint(StageId::Finish, StageCheckpoint::new(3)).unwrap();
+        crate::with_adapter!(provider, |A| seed_tip_trie_tables::<_, A>(&*provider));
+
+        let recording = RecordingChangesetProvider {
+            inner: &*provider,
+            upper_bounds: RefCell::new(Vec::new()),
+        };
+        compute_block_trie_changesets(&recording, 2).unwrap();
+
+        let upper_bounds = recording.upper_bounds.into_inner();
+        assert!(!upper_bounds.is_empty());
+        assert!(
+            upper_bounds.iter().all(|upper_bound| *upper_bound <= 3),
+            "changeset reads must not extend past the database tip: {upper_bounds:?}"
+        );
     }
 
     #[test]
