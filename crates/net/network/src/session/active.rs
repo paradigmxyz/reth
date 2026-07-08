@@ -396,9 +396,18 @@ impl<N: NetworkPrimitives> ActiveSession<N> {
     ) -> OnIncomingMessageOutcome<N> {
         let request_id = msg.request_id();
         if !msg.is_response() {
-            // Inbound snap requests are not served yet; the snap server lands separately.
-            trace!(target: "net::session", ?request_id, remote_peer_id=?self.remote_peer_id, "ignoring inbound snap request");
-            return OnIncomingMessageOutcome::Ok
+            let (tx, response) = oneshot::channel();
+            self.received_requests_from_remote.push(ReceivedRequest {
+                request_id,
+                rx: PeerResponse::Snap { response },
+                received: Instant::now(),
+            });
+            return self
+                .try_emit_request(PeerMessage::EthRequest(PeerRequest::GetSnap {
+                    request: msg,
+                    response: tx,
+                }))
+                .into()
         }
 
         let Some(req) = self.inflight_requests.remove(&request_id) else {
@@ -531,8 +540,11 @@ impl<N: NetworkPrimitives> ActiveSession<N> {
     /// This will queue the response to be sent to the peer
     fn handle_outgoing_response(&mut self, id: u64, resp: PeerResponseResult<N>) {
         match resp.try_into_message(id) {
-            Ok(msg) => {
+            Ok(RequestMessage::Eth(msg)) => {
                 self.queued_outgoing.push_back(msg.into());
+            }
+            Ok(RequestMessage::Snap(msg)) => {
+                self.queued_outgoing.push_back(OutgoingMessage::Snap(msg));
             }
             Err(err) => {
                 debug!(target: "net", %err, "Failed to respond to received request");
