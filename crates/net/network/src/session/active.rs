@@ -389,7 +389,7 @@ impl<N: NetworkPrimitives> ActiveSession<N> {
     /// Responses are correlated to the in-flight [`PeerRequest::GetSnap`] by `request_id` (shared
     /// with eth requests in [`Self::inflight_requests`]) and type-checked against the originally
     /// sent request kind; unsolicited or mismatched ones count as bad messages. Inbound requests
-    /// are ignored until the snap server lands.
+    /// are routed upward as [`PeerRequest::GetSnap`], same as any other eth request.
     fn on_incoming_snap_message(
         &mut self,
         mut msg: SnapProtocolMessage,
