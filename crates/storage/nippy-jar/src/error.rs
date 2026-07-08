@@ -65,6 +65,17 @@ pub enum NippyJarError {
         index: usize,
     },
 
+    /// A pair of offsets describes an invalid data range.
+    #[error("invalid offset range: {start}..{end} (data size: {size})")]
+    InvalidOffsetRange {
+        /// Start of the value's data range.
+        start: usize,
+        /// End of the value's data range.
+        end: usize,
+        /// Total size of the data file.
+        size: usize,
+    },
+
     /// The output buffer is too small for the compression or decompression operation.
     #[error("compression or decompression requires a bigger destination output")]
     OutputTooSmall,
