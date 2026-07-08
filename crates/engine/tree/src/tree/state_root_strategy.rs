@@ -117,6 +117,7 @@ where
     provider_builder: StateProviderBuilder<N, P>,
     overlay_factory: OverlayStateProviderFactory<P, N>,
     config: &'a TreeConfig,
+    pending_sparse_trie_prune: &'a mut Option<TriePrefixSetsMut>,
 }
 
 impl<N, P, Evm> fmt::Debug for PayloadStateRootJobContext<'_, N, P, Evm>
@@ -129,6 +130,7 @@ where
             .field("parent_hash", &self.parent_hash)
             .field("parent_state_root", &self.parent_state_root())
             .field("timestamp", &self.timestamp)
+            .field("has_pending_sparse_trie_prune", &self.pending_sparse_trie_prune.is_some())
             .finish_non_exhaustive()
     }
 }
@@ -147,6 +149,7 @@ where
         provider_builder: StateProviderBuilder<N, P>,
         overlay_factory: OverlayStateProviderFactory<P, N>,
         config: &'a TreeConfig,
+        pending_sparse_trie_prune: &'a mut Option<TriePrefixSetsMut>,
     ) -> Self {
         Self {
             payload_processor,
@@ -156,6 +159,7 @@ where
             provider_builder,
             overlay_factory,
             config,
+            pending_sparse_trie_prune,
         }
     }
 
@@ -195,6 +199,11 @@ where
         P: Clone,
     {
         self.provider_builder.clone()
+    }
+
+    /// Takes the pending sparse trie prune request, if any.
+    pub fn take_sparse_trie_prune(&mut self) -> Option<TriePrefixSetsMut> {
+        self.pending_sparse_trie_prune.take()
     }
 }
 
@@ -482,10 +491,12 @@ where
 
     fn prepare_payload_builder(
         &self,
-        ctx: PayloadStateRootJobContext<'_, N, P, Evm>,
+        mut ctx: PayloadStateRootJobContext<'_, N, P, Evm>,
     ) -> ProviderResult<Option<PayloadStateRootHandle>> {
         let parent_state_root = ctx.parent_state_root();
-        let PayloadStateRootJobContext { payload_processor, overlay_factory, config, .. } = ctx;
+        let payload_processor = ctx.payload_processor;
+        let overlay_factory = ctx.overlay_factory.clone();
+        let config = ctx.config;
 
         // Sharing the engine state-root task with the payload builder is opt-in, and needs a
         // host that can run the task pipeline at all.
@@ -505,7 +516,7 @@ where
                     // workers.
                     None,
                     config,
-                    None,
+                    ctx.take_sparse_trie_prune(),
                 )
                 .into_payload_state_root_handle(),
         ))

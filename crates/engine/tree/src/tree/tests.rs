@@ -23,9 +23,10 @@ use reth_chain_state::{test_utils::TestBlockBuilder, BlockState, StateTrieOverla
 use reth_chainspec::{ChainSpec, HOLESKY, MAINNET};
 use reth_engine_primitives::{EngineApiValidator, ForkchoiceStatus, NoopInvalidBlockHook};
 use reth_ethereum_consensus::EthBeaconConsensus;
-use reth_ethereum_engine_primitives::EthEngineTypes;
+use reth_ethereum_engine_primitives::{EthEngineTypes, EthPayloadAttributes};
 use reth_ethereum_primitives::{Block, EthPrimitives};
 use reth_evm_ethereum::MockEvmConfig;
+use reth_payload_builder::PayloadServiceCommand;
 use reth_primitives_traits::Block as _;
 use reth_provider::{test_utils::MockEthProvider, BalStoreHandle, InMemoryBalStore, RawBal};
 use reth_tasks::spawn_os_thread;
@@ -198,6 +199,7 @@ struct TestHarness {
         FromEngine<EngineApiRequest<EthEngineTypes, EthPrimitives>, Block>,
     >,
     from_tree_rx: UnboundedReceiver<EngineApiEvent>,
+    payload_command_rx: UnboundedReceiver<PayloadServiceCommand<EthEngineTypes>>,
     blocks: Vec<ExecutedBlock>,
     action_rx: Receiver<PersistenceAction>,
     block_builder: TestBlockBuilder,
@@ -206,9 +208,13 @@ struct TestHarness {
 
 impl TestHarness {
     fn new(chain_spec: Arc<ChainSpec>) -> Self {
+        Self::with_config(chain_spec, TreeConfig::default().with_has_enough_parallelism(true))
+    }
+
+    fn with_config(chain_spec: Arc<ChainSpec>, tree_config: TreeConfig) -> Self {
         use std::sync::mpsc::channel;
         let (action_tx, action_rx) = channel();
-        Self::with_persistence_channel(chain_spec, action_tx, action_rx)
+        Self::with_persistence_channel_and_config(chain_spec, action_tx, action_rx, tree_config)
     }
 
     #[expect(dead_code)]
@@ -222,6 +228,20 @@ impl TestHarness {
         action_tx: Sender<PersistenceAction>,
         action_rx: Receiver<PersistenceAction>,
     ) -> Self {
+        Self::with_persistence_channel_and_config(
+            chain_spec,
+            action_tx,
+            action_rx,
+            TreeConfig::default().with_has_enough_parallelism(true),
+        )
+    }
+
+    fn with_persistence_channel_and_config(
+        chain_spec: Arc<ChainSpec>,
+        action_tx: Sender<PersistenceAction>,
+        action_rx: Receiver<PersistenceAction>,
+        tree_config: TreeConfig,
+    ) -> Self {
         let persistence_handle = PersistenceHandle::new(action_tx);
 
         let consensus = Arc::new(EthBeaconConsensus::new(chain_spec.clone()));
@@ -231,7 +251,6 @@ impl TestHarness {
         let payload_validator = MockEngineValidator;
 
         let (from_tree_tx, from_tree_rx) = unbounded_channel();
-        let tree_config = TreeConfig::default().with_has_enough_parallelism(true);
         let runtime = reth_tasks::Runtime::test();
         let state_trie_overlays =
             StateTrieOverlayManager::new(runtime.state_trie_overlay_worker_pool());
@@ -248,7 +267,7 @@ impl TestHarness {
         );
         let canonical_in_memory_state = CanonicalInMemoryState::with_head(header, None, None);
 
-        let (to_payload_service, _payload_command_rx) = unbounded_channel();
+        let (to_payload_service, payload_command_rx) = unbounded_channel();
         let payload_builder = PayloadBuilderHandle::new(to_payload_service);
 
         let evm_config = MockEvmConfig::default();
@@ -258,7 +277,7 @@ impl TestHarness {
             consensus.clone(),
             evm_config.clone(),
             payload_validator,
-            TreeConfig::default(),
+            tree_config.clone(),
             Box::new(NoopInvalidBlockHook::default()),
             changeset_cache.clone(),
             state_trie_overlays,
@@ -287,6 +306,7 @@ impl TestHarness {
             to_tree_tx: tree.incoming_tx.clone(),
             tree,
             from_tree_rx,
+            payload_command_rx,
             blocks: vec![],
             action_rx,
             block_builder,
@@ -723,6 +743,47 @@ fn remove_blocks_clears_pending_sparse_trie_prune_request() {
     test_harness.tree.remove_blocks(9);
 
     assert!(test_harness.tree.pending_sparse_trie_prune.is_none());
+}
+
+#[test]
+fn process_payload_attributes_threads_sparse_trie_prune_into_payload_builder_task() {
+    let config = TreeConfig::default()
+        .with_has_enough_parallelism(true)
+        .with_share_sparse_trie_with_payload_builder(true);
+    let blocks: Vec<_> = TestBlockBuilder::eth().get_executed_blocks(1..2).collect();
+    let mut test_harness = TestHarness::with_config(MAINNET.clone(), config).with_blocks(blocks);
+    let head =
+        test_harness.blocks.last().unwrap().recovered_block().clone_sealed_header().clone_header();
+    let head_hash = test_harness.blocks.last().unwrap().recovered_block().hash();
+    let state = test_harness.fcu_state(head_hash);
+    test_harness.tree.pending_sparse_trie_prune = Some(trie_changed_paths(
+        Nibbles::from_nibbles([0x01]),
+        B256::with_last_byte(0x01),
+        Nibbles::from_nibbles([0x02]),
+    ));
+
+    let updated = test_harness.tree.process_payload_attributes(
+        EthPayloadAttributes {
+            timestamp: head.timestamp() + 1,
+            prev_randao: B256::ZERO,
+            suggested_fee_recipient: Default::default(),
+            withdrawals: None,
+            parent_beacon_block_root: None,
+            slot_number: None,
+            target_gas_limit: None,
+        },
+        &head,
+        state,
+    );
+
+    assert_eq!(updated.forkchoice_status(), ForkchoiceStatus::Valid);
+    assert!(test_harness.tree.pending_sparse_trie_prune.is_none());
+
+    let command = test_harness.payload_command_rx.try_recv().unwrap();
+    let PayloadServiceCommand::BuildNewPayload(input, _, _) = command else {
+        panic!("expected build new payload command")
+    };
+    assert!(input.state_root_handle.is_some());
 }
 
 #[tokio::test]

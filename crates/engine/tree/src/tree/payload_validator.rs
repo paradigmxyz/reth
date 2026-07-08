@@ -1708,12 +1708,16 @@ pub trait EngineValidator<
     ///
     /// `timestamp` is the timestamp of the payload being built, taken from the payload
     /// attributes.
+    ///
+    /// `pending_sparse_trie_prune` should be consumed only when the returned handle owns a sparse
+    /// trie task that can apply it.
     fn payload_state_root_handle_for(
         &self,
         parent_hash: B256,
         parent_header: &N::BlockHeader,
         timestamp: u64,
         state: &EngineApiTreeState<N>,
+        pending_sparse_trie_prune: &mut Option<TriePrefixSetsMut>,
     ) -> Option<PayloadStateRootHandle>;
 }
 
@@ -1805,6 +1809,7 @@ where
         parent_header: &N::BlockHeader,
         timestamp: u64,
         state: &EngineApiTreeState<N>,
+        pending_sparse_trie_prune: &mut Option<TriePrefixSetsMut>,
     ) -> Option<PayloadStateRootHandle> {
         let provider_builder = match self.state_provider_builder(parent_hash, state) {
             Ok(Some(provider_builder)) => provider_builder,
@@ -1832,6 +1837,7 @@ where
             provider_builder,
             overlay_factory,
             &self.config,
+            pending_sparse_trie_prune,
         )) {
             Ok(handle) => handle,
             Err(err) => {
