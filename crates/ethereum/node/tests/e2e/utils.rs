@@ -14,7 +14,7 @@ use reth_e2e_test_utils::{wallet::Wallet, NodeHelperType, TmpDB};
 use reth_ethereum_primitives::TxType;
 use reth_node_api::NodeTypesWithDBAdapter;
 use reth_node_ethereum::EthereumNode;
-use reth_provider::{CanonChainTracker, FullProvider, ProviderHeader};
+use reth_provider::FullProvider;
 
 /// Helper function to create a new eth payload attributes
 pub(crate) const fn eth_payload_attributes(timestamp: u64) -> PayloadAttributes {
@@ -69,8 +69,7 @@ pub(crate) async fn advance_with_random_transactions<Provider>(
     finalize: bool,
 ) -> eyre::Result<()>
 where
-    Provider: FullProvider<NodeTypesWithDBAdapter<EthereumNode, TmpDB>>
-        + CanonChainTracker<Header = ProviderHeader<Provider>>,
+    Provider: FullProvider<NodeTypesWithDBAdapter<EthereumNode, TmpDB>>,
 {
     let provider = ProviderBuilder::new().connect_http(node.rpc_url());
     let signers = Wallet::new(1).with_chain_id(provider.get_chain_id().await?).wallet_gen();
