@@ -19,7 +19,7 @@ use reth_node_api::{HeaderTy, ReceiptTy, TxTy};
 use reth_node_core::args::StageEnum;
 use reth_provider::{
     DBProvider, RocksDBProviderFactory, StaticFileProviderFactory, StaticFileWriter,
-    StorageSettingsCache,
+    StorageSettingsCache, TrieWriter,
 };
 use reth_prune::PruneSegment;
 use reth_stages::StageId;
@@ -172,8 +172,9 @@ impl<C: ChainSpecParser> Command<C> {
                 reset_stage_checkpoint(tx, StageId::StorageHashing)?;
             }
             StageEnum::Merkle => {
-                tx.clear::<tables::AccountsTrie>()?;
-                tx.clear::<tables::StoragesTrie>()?;
+                // Retain storage root markers left by account storage pruning so the rebuild can
+                // restore the pruned accounts' leaves.
+                provider_rw.clear_tries_retaining_pruned_storage_roots()?;
 
                 reset_stage_checkpoint(tx, StageId::MerkleExecute)?;
                 reset_stage_checkpoint(tx, StageId::MerkleUnwind)?;

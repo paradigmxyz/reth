@@ -71,7 +71,7 @@ use reth_trie::{
     proof_v2::StorageProofCalculator,
     trie_cursor::{noop::NoopStorageTrieCursor, TrieCursorFactory, TrieStorageCursor},
     updates::{StorageTrieUpdatesSorted, TrieUpdatesSorted},
-    ComputedTrieData, HashedPostStateSorted,
+    ComputedTrieData, HashedPostStateSorted, EMPTY_ROOT_HASH,
 };
 use reth_trie_db::{
     ChangesetCache, DatabaseHashedCursorFactory, DatabaseStorageTrieCursor,
@@ -3148,9 +3148,9 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> DatabaseProvider<TX, N> {
     {
         let root_node = calculator.storage_root_node(hashed_address)?;
 
-        Ok(calculator
+        calculator
             .compute_root_hash(core::slice::from_ref(&root_node))?
-            .ok_or(ProviderError::InvalidStorageOutput)?)
+            .ok_or(ProviderError::InvalidStorageOutput)
     }
 
     fn delete_plain_storage_entries(&self, address: Address) -> ProviderResult<usize> {
@@ -3214,7 +3214,15 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> DatabaseProvider<TX, N> {
             }
         }
 
-        if existing_marker_root == Some(storage_root) && deleted_nodes == 0 {
+        // Empty storage needs no retained commitment: the storage root is derivable without any
+        // rows, and skipping the marker keeps proofs and reads for the account fully functional.
+        let retain_marker = storage_root != EMPTY_ROOT_HASH;
+        let marker_up_to_date = if retain_marker {
+            existing_marker_root == Some(storage_root)
+        } else {
+            existing_marker_root.is_none()
+        };
+        if marker_up_to_date && deleted_nodes == 0 {
             return Ok(0)
         }
 
@@ -3222,10 +3230,43 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> DatabaseProvider<TX, N> {
             cursor.delete_current_duplicates()?;
         }
 
-        let retained_root = storage_root_marker::node(storage_root);
-        cursor.upsert(hashed_address, &A::StorageValue::new(empty_path, retained_root))?;
+        if retain_marker {
+            let retained_root = storage_root_marker::node(storage_root);
+            cursor.upsert(hashed_address, &A::StorageValue::new(empty_path, retained_root))?;
+        }
 
         Ok(deleted_nodes)
+    }
+
+    fn clear_tries_retaining_pruned_storage_roots_inner<A: TrieTableAdapter>(
+        &self,
+    ) -> ProviderResult<usize> {
+        let tx = self.tx_ref();
+        let empty_path = A::StorageSubKey::from(reth_trie::Nibbles::default());
+
+        // Markers sit at the empty path, which sorts first within each account's entries, so
+        // visiting only the first entry per account finds all of them.
+        let mut markers = Vec::new();
+        {
+            let mut cursor = tx.cursor_dup_read::<A::StorageTrieTable>()?;
+            let mut entry = cursor.first()?;
+            while let Some((hashed_address, node)) = entry {
+                if node.nibbles() == &empty_path && storage_root_marker::is_node(node.node()) {
+                    markers.push((hashed_address, node));
+                }
+                entry = cursor.next_no_dup()?;
+            }
+        }
+
+        tx.clear::<A::AccountTrieTable>()?;
+        tx.clear::<A::StorageTrieTable>()?;
+
+        let mut cursor = tx.cursor_dup_write::<A::StorageTrieTable>()?;
+        for (hashed_address, marker) in &markers {
+            cursor.upsert(*hashed_address, marker)?;
+        }
+
+        Ok(markers.len())
     }
 
     fn write_account_trie_updates<A: TrieTableAdapter>(
@@ -3326,6 +3367,12 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> TrieWriter for DatabaseProvider
             self.write_storage_trie_updates_sorted(trie_updates.storage_tries_ref().iter())?;
 
         Ok(num_entries)
+    }
+
+    fn clear_tries_retaining_pruned_storage_roots(&self) -> ProviderResult<usize> {
+        reth_trie_db::with_adapter!(self, |A| {
+            self.clear_tries_retaining_pruned_storage_roots_inner::<A>()
+        })
     }
 }
 
@@ -4133,11 +4180,12 @@ mod tests {
     use reth_storage_api::{MetadataWriter, StorageRootProvider};
     use reth_testing_utils::generators::{self, random_block, BlockParams};
     use reth_trie::{
-        prefix_set::PrefixSetMut, updates::StorageTrieUpdatesSorted, HashedPostState,
-        HashedStorage, KeccakKeyHasher, Nibbles, SortedTrieData, StorageRoot, StoredNibbles,
-        StoredNibblesSubKey,
+        prefix_set::PrefixSetMut,
+        updates::{StorageTrieUpdates, StorageTrieUpdatesSorted},
+        HashedPostState, HashedStorage, KeccakKeyHasher, Nibbles, SortedTrieData, StateRoot,
+        StorageRoot, StoredNibbles, StoredNibblesSubKey,
     };
-    use reth_trie_db::{DatabaseStorageRoot, StorageTrieEntryLike};
+    use reth_trie_db::{DatabaseStateRoot, DatabaseStorageRoot, StorageTrieEntryLike};
     use revm::{database::BundleState, state::AccountInfo};
     use std::{sync::mpsc, time::Duration};
 
@@ -4671,6 +4719,319 @@ mod tests {
     #[test]
     fn prune_account_storage_retains_root_commitment_packed() {
         assert_prune_account_storage_retains_root_commitment(StorageSettings::v2());
+    }
+
+    #[test]
+    fn storage_root_shortcut_only_honors_prune_marker() {
+        let factory = create_test_provider_factory();
+        let address = Address::with_last_byte(1);
+        let hashed_address = keccak256(address);
+        // slots that fork at the first nibble so the trie has branch nodes up to the root
+        let hashed_slots = [
+            B256::new(hex!("30af561000000000000000000000000000000000000000000000000000000000")),
+            B256::new(hex!("30af569000000000000000000000000000000000000000000000000000000000")),
+            B256::new(hex!("30af650000000000000000000000000000000000000000000000000000000000")),
+            B256::new(hex!("30af6f0000000000000000000000000000000000000000000000000000000000")),
+            B256::new(hex!("30af8f0000000000000000000000000000000000000000000000000000000000")),
+            B256::new(hex!("3100000000000000000000000000000000000000000000000000000000000000")),
+            B256::new(hex!("b000000000000000000000000000000000000000000000000000000000000000")),
+        ];
+
+        let provider_rw = factory.provider_rw().unwrap();
+        for hashed_slot in hashed_slots {
+            provider_rw
+                .tx_ref()
+                .put::<tables::HashedStorages>(
+                    hashed_address,
+                    StorageEntry { key: hashed_slot, value: U256::from(1) },
+                )
+                .unwrap();
+        }
+
+        let (root_before, storage_updates) = reth_trie_db::with_adapter!(provider_rw, |A| {
+            storage_root_with_updates::<_, A>(provider_rw.tx_ref(), hashed_address)
+        });
+        assert_ne!(root_before, EMPTY_ROOT_HASH);
+        provider_rw
+            .write_storage_trie_updates_sorted(core::iter::once((
+                &hashed_address,
+                &storage_updates,
+            )))
+            .unwrap();
+
+        // The trie update writer never persists nodes at the empty path, so the only possible
+        // empty-path entry is the prune marker. This invariant is what keeps the marker
+        // unambiguous for the empty-storage shortcut in storage root calculation.
+        reth_trie_db::with_adapter!(provider_rw, |A| {
+            let empty_path =
+                <A as reth_trie_db::TrieKeyAdapter>::StorageSubKey::from(Nibbles::default());
+            let mut cursor = provider_rw
+                .tx_ref()
+                .cursor_dup_read::<<A as TrieTableAdapter>::StorageTrieTable>()
+                .unwrap();
+            let first_entry = cursor
+                .seek_by_key_subkey(hashed_address, empty_path.clone())
+                .unwrap()
+                .expect("stored trie nodes");
+            assert_ne!(first_entry.nibbles(), &empty_path);
+        });
+
+        // a block clears every remaining slot
+        let mut hashed_storage_cursor =
+            provider_rw.tx_ref().cursor_dup_write::<tables::HashedStorages>().unwrap();
+        assert!(hashed_storage_cursor.seek_exact(hashed_address).unwrap().is_some());
+        hashed_storage_cursor.delete_current_duplicates().unwrap();
+        drop(hashed_storage_cursor);
+
+        // the incremental storage root over just the cleared slots must fall back to the empty
+        // root and delete the stale trie nodes instead of returning the stale root node's hash
+        let mut prefix_set = PrefixSetMut::default();
+        for hashed_slot in hashed_slots {
+            prefix_set.insert(Nibbles::unpack(hashed_slot));
+        }
+        let (root_after, updates_after) = reth_trie_db::with_adapter!(provider_rw, |A| {
+            let (root, _, updates) = StorageRoot::<
+                DatabaseTrieCursorFactory<_, A>,
+                DatabaseHashedCursorFactory<_>,
+            >::from_tx_hashed(
+                provider_rw.tx_ref(), hashed_address
+            )
+            .with_prefix_set(prefix_set.clone().freeze())
+            .root_with_updates()
+            .unwrap();
+            (root, updates)
+        });
+        assert_eq!(root_after, EMPTY_ROOT_HASH);
+        assert!(updates_after.is_deleted());
+
+        // re-populate the account and prune it, leaving only the retained root marker
+        for hashed_slot in hashed_slots {
+            provider_rw
+                .tx_ref()
+                .put::<tables::HashedStorages>(
+                    hashed_address,
+                    StorageEntry { key: hashed_slot, value: U256::from(1) },
+                )
+                .unwrap();
+        }
+        let pruned = provider_rw.prune_account_storage(address).unwrap();
+        assert_eq!(pruned.storage_root, root_before);
+
+        // the empty-storage shortcut must return the retained marker root, keeping account leaf
+        // encoding correct when the account trie is recomputed
+        let marker_root = reth_trie_db::with_adapter!(provider_rw, |A| {
+            StorageRoot::<DatabaseTrieCursorFactory<_, A>, DatabaseHashedCursorFactory<_>>::from_tx_hashed(
+                provider_rw.tx_ref(),
+                hashed_address,
+            )
+            .root()
+            .unwrap()
+        });
+        assert_eq!(marker_root, root_before);
+    }
+
+    #[test]
+    fn prune_account_storage_marker_removed_on_wipe() {
+        let factory = create_test_provider_factory();
+        let address = Address::with_last_byte(2);
+        let hashed_address = keccak256(address);
+        let slot = B256::with_last_byte(1);
+        let hashed_slot = keccak256(slot);
+
+        let provider_rw = factory.provider_rw().unwrap();
+        provider_rw
+            .tx_ref()
+            .put::<tables::PlainStorageState>(
+                address,
+                StorageEntry { key: slot, value: U256::from(10) },
+            )
+            .unwrap();
+        provider_rw
+            .tx_ref()
+            .put::<tables::HashedStorages>(
+                hashed_address,
+                StorageEntry { key: hashed_slot, value: U256::from(10) },
+            )
+            .unwrap();
+
+        let pruned = provider_rw.prune_account_storage(address).unwrap();
+        assert_ne!(pruned.storage_root, EMPTY_ROOT_HASH);
+        reth_trie_db::with_adapter!(provider_rw, |A| {
+            assert_retained_storage_root_marker::<_, A>(
+                provider_rw.tx_ref(),
+                hashed_address,
+                pruned.storage_root,
+            );
+        });
+        assert!(matches!(
+            provider_rw.latest().storage_proof(address, slot, HashedStorage::default()),
+            Err(ProviderError::StoragePruned(pruned_address)) if pruned_address == address
+        ));
+
+        // wiping the storage trie (account re-creation) removes the marker
+        let wiped = StorageTrieUpdates::deleted().into_sorted();
+        provider_rw
+            .write_storage_trie_updates_sorted(core::iter::once((&hashed_address, &wiped)))
+            .unwrap();
+        reth_trie_db::with_adapter!(provider_rw, |A| {
+            let mut cursor = provider_rw
+                .tx_ref()
+                .cursor_dup_read::<<A as TrieTableAdapter>::StorageTrieTable>()
+                .unwrap();
+            assert!(cursor.seek_exact(hashed_address).unwrap().is_none());
+        });
+
+        // fresh writes after the wipe behave like a regular account again
+        let new_slot = B256::with_last_byte(7);
+        let new_hashed_slot = keccak256(new_slot);
+        provider_rw
+            .tx_ref()
+            .put::<tables::PlainStorageState>(
+                address,
+                StorageEntry { key: new_slot, value: U256::from(70) },
+            )
+            .unwrap();
+        provider_rw
+            .tx_ref()
+            .put::<tables::HashedStorages>(
+                hashed_address,
+                StorageEntry { key: new_hashed_slot, value: U256::from(70) },
+            )
+            .unwrap();
+
+        let expected_root = storage_root_from_hashed_storage(provider_rw.tx_ref(), hashed_address);
+        let latest = provider_rw.latest();
+        assert_eq!(latest.storage(address, new_slot).unwrap(), Some(U256::from(70)));
+        assert_eq!(latest.storage_root(address, HashedStorage::default()).unwrap(), expected_root);
+        assert!(latest.storage_proof(address, new_slot, HashedStorage::default()).is_ok());
+    }
+
+    fn assert_clear_tries_retains_pruned_storage_roots(storage_settings: StorageSettings) {
+        let factory = create_test_provider_factory();
+        factory.set_storage_settings_cache(storage_settings);
+
+        let pruned_address = Address::with_last_byte(1);
+        let pruned_hashed_address = keccak256(pruned_address);
+        let retained_address = Address::with_last_byte(2);
+        let retained_hashed_address = keccak256(retained_address);
+        let account = Account { nonce: 1, balance: U256::from(1), bytecode_hash: None };
+
+        let provider_rw = factory.provider_rw().unwrap();
+        for (address, hashed_address) in
+            [(pruned_address, pruned_hashed_address), (retained_address, retained_hashed_address)]
+        {
+            provider_rw.tx_ref().put::<tables::PlainAccountState>(address, account).unwrap();
+            provider_rw.tx_ref().put::<tables::HashedAccounts>(hashed_address, account).unwrap();
+            for byte in 1..=3u8 {
+                let slot = B256::with_last_byte(byte);
+                provider_rw
+                    .tx_ref()
+                    .put::<tables::PlainStorageState>(
+                        address,
+                        StorageEntry { key: slot, value: U256::from(byte) },
+                    )
+                    .unwrap();
+                provider_rw
+                    .tx_ref()
+                    .put::<tables::HashedStorages>(
+                        hashed_address,
+                        StorageEntry { key: keccak256(slot), value: U256::from(byte) },
+                    )
+                    .unwrap();
+            }
+        }
+
+        // build the full tries and remember the state root with all storage present
+        let (state_root_before, updates) = reth_trie_db::with_adapter!(provider_rw, |A| {
+            StateRoot::<DatabaseTrieCursorFactory<_, A>, DatabaseHashedCursorFactory<_>>::from_tx(
+                provider_rw.tx_ref(),
+            )
+            .root_with_updates()
+            .unwrap()
+        });
+        provider_rw.write_trie_updates(updates).unwrap();
+
+        let pruned = provider_rw.prune_account_storage(pruned_address).unwrap();
+
+        let retained_markers = provider_rw.clear_tries_retaining_pruned_storage_roots().unwrap();
+        assert_eq!(retained_markers, 1);
+
+        // only the pruned account's marker survives the clear
+        reth_trie_db::with_adapter!(provider_rw, |A| {
+            assert_eq!(
+                provider_rw
+                    .tx_ref()
+                    .entries::<<A as TrieTableAdapter>::AccountTrieTable>()
+                    .unwrap(),
+                0
+            );
+            assert_eq!(
+                provider_rw
+                    .tx_ref()
+                    .entries::<<A as TrieTableAdapter>::StorageTrieTable>()
+                    .unwrap(),
+                1
+            );
+            assert_retained_storage_root_marker::<_, A>(
+                provider_rw.tx_ref(),
+                pruned_hashed_address,
+                pruned.storage_root,
+            );
+        });
+
+        // a from-scratch rebuild reproduces the state root the chain committed to
+        let rebuilt_root = reth_trie_db::with_adapter!(provider_rw, |A| {
+            StateRoot::<DatabaseTrieCursorFactory<_, A>, DatabaseHashedCursorFactory<_>>::from_tx(
+                provider_rw.tx_ref(),
+            )
+            .root()
+            .unwrap()
+        });
+        assert_eq!(rebuilt_root, state_root_before);
+    }
+
+    #[test]
+    fn clear_tries_retains_pruned_storage_roots_legacy() {
+        assert_clear_tries_retains_pruned_storage_roots(StorageSettings::v1());
+    }
+
+    #[test]
+    fn clear_tries_retains_pruned_storage_roots_packed() {
+        assert_clear_tries_retains_pruned_storage_roots(StorageSettings::v2());
+    }
+
+    #[test]
+    fn prune_account_storage_without_storage_writes_no_marker() {
+        let factory = create_test_provider_factory();
+        let address = Address::with_last_byte(3);
+        let hashed_address = keccak256(address);
+        let account = Account { nonce: 1, balance: U256::from(1), bytecode_hash: Some(B256::ZERO) };
+
+        let provider_rw = factory.provider_rw().unwrap();
+        provider_rw.tx_ref().put::<tables::PlainAccountState>(address, account).unwrap();
+        provider_rw.tx_ref().put::<tables::HashedAccounts>(hashed_address, account).unwrap();
+
+        for _ in 0..2 {
+            let pruned = provider_rw.prune_account_storage(address).unwrap();
+            assert_eq!(pruned.storage_root, EMPTY_ROOT_HASH);
+            assert_eq!(pruned.deleted_storage_entries, 0);
+            assert_eq!(pruned.deleted_trie_nodes, 0);
+
+            reth_trie_db::with_adapter!(provider_rw, |A| {
+                let mut cursor = provider_rw
+                    .tx_ref()
+                    .cursor_dup_read::<<A as TrieTableAdapter>::StorageTrieTable>()
+                    .unwrap();
+                assert!(cursor.seek_exact(hashed_address).unwrap().is_none());
+            });
+        }
+
+        let latest = provider_rw.latest();
+        assert_eq!(
+            latest.storage_root(address, HashedStorage::default()).unwrap(),
+            EMPTY_ROOT_HASH
+        );
+        assert!(latest.storage_proof(address, B256::ZERO, HashedStorage::default()).is_ok());
     }
 
     #[test]

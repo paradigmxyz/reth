@@ -108,6 +108,16 @@ pub trait TrieWriter: Send {
     ///
     /// Returns the number of entries modified.
     fn write_trie_updates_sorted(&self, trie_updates: &TrieUpdatesSorted) -> ProviderResult<usize>;
+
+    /// Clears the account and storage trie tables, retaining the storage root markers left by
+    /// account storage pruning.
+    ///
+    /// The markers must survive a from-scratch state root rebuild: the pruned accounts' slot
+    /// rows are gone, so their account leaves can only be restored from the retained storage
+    /// root commitments.
+    ///
+    /// Returns the number of retained markers.
+    fn clear_tries_retaining_pruned_storage_roots(&self) -> ProviderResult<usize>;
 }
 
 /// Storage Trie Writer

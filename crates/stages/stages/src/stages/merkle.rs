@@ -231,11 +231,12 @@ where
                     previous_checkpoint = ?checkpoint,
                     "Rebuilding trie"
                 );
-                // Reset the checkpoint and clear trie tables
+                // Reset the checkpoint and clear trie tables. Storage root markers left by
+                // account storage pruning are retained: the pruned accounts' slot rows are gone,
+                // so the rebuild can only restore their account leaves from those markers.
                 checkpoint = None;
                 self.save_execution_checkpoint(provider, None)?;
-                provider.tx_ref().clear::<tables::AccountsTrie>()?;
-                provider.tx_ref().clear::<tables::StoragesTrie>()?;
+                provider.clear_tries_retaining_pruned_storage_roots()?;
 
                 None
             }
@@ -386,6 +387,9 @@ where
             });
 
         if input.unwind_to == 0 {
+            // Unwinding to genesis means execution will re-derive all storage from transactions,
+            // so storage root markers left by account storage pruning must NOT be retained here:
+            // they would shadow the re-executed storage with stale commitments.
             tx.clear::<tables::AccountsTrie>()?;
             tx.clear::<tables::StoragesTrie>()?;
 
@@ -459,11 +463,15 @@ mod tests {
         stage_test_suite_ext, ExecuteStageTestRunner, StageTestRunner, StorageKind,
         TestRunnerError, TestStageDB, UnwindStageTestRunner,
     };
-    use alloy_primitives::{keccak256, U256};
+    use alloy_consensus::Header;
+    use alloy_primitives::{keccak256, Address, U256};
     use assert_matches::assert_matches;
     use reth_db_api::cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO};
-    use reth_primitives_traits::{SealedBlock, StorageEntry};
-    use reth_provider::{providers::StaticFileWriter, StaticFileProviderFactory};
+    use reth_primitives_traits::{Account, SealedBlock, StorageEntry};
+    use reth_provider::{
+        providers::StaticFileWriter, AccountStoragePruner, DatabaseProviderFactory,
+        StaticFileProviderFactory,
+    };
     use reth_stages_api::StageUnitCheckpoint;
     use reth_static_file_types::StaticFileSegment;
     use reth_testing_utils::generators::{
@@ -474,6 +482,94 @@ mod tests {
     use std::collections::BTreeMap;
 
     stage_test_suite_ext!(MerkleTestRunner, merkle);
+
+    /// A from-scratch trie rebuild must retain the storage root markers left by account storage
+    /// pruning, otherwise the pruned accounts' leaves cannot be restored and the recomputed state
+    /// root can never match the header.
+    #[test]
+    fn rebuild_restores_pruned_account_storage_roots() {
+        let db = TestStageDB::default();
+
+        let pruned_address = Address::with_last_byte(1);
+        let retained_address = Address::with_last_byte(2);
+        let account = Account { nonce: 1, balance: U256::from(1), bytecode_hash: None };
+
+        // seed two accounts with storage, remember the state root with all storage present, and
+        // prune one account's storage body
+        let (state_root, pruned_storage_root) = {
+            let provider_rw = db.factory.database_provider_rw().unwrap();
+            for address in [pruned_address, retained_address] {
+                let hashed_address = keccak256(address);
+                provider_rw
+                    .tx_ref()
+                    .put::<tables::HashedAccounts>(hashed_address, account)
+                    .unwrap();
+                for byte in 1..=3u8 {
+                    let slot = alloy_primitives::B256::with_last_byte(byte);
+                    provider_rw
+                        .tx_ref()
+                        .put::<tables::PlainStorageState>(
+                            address,
+                            StorageEntry { key: slot, value: U256::from(byte) },
+                        )
+                        .unwrap();
+                    provider_rw
+                        .tx_ref()
+                        .put::<tables::HashedStorages>(
+                            hashed_address,
+                            StorageEntry { key: keccak256(slot), value: U256::from(byte) },
+                        )
+                        .unwrap();
+                }
+            }
+
+            let state_root = reth_trie_db::with_adapter!(provider_rw, |A| {
+                DbStateRoot::<_, A>::from_tx(provider_rw.tx_ref()).root().unwrap()
+            });
+            let pruned = provider_rw.prune_account_storage(pruned_address).unwrap();
+            provider_rw.commit().unwrap();
+            (state_root, pruned.storage_root)
+        };
+
+        // the target header commits to the state root with all storage present
+        db.insert_headers(
+            [
+                SealedHeader::seal_slow(Header::default()),
+                SealedHeader::seal_slow(Header { number: 1, state_root, ..Default::default() }),
+            ]
+            .iter(),
+        )
+        .unwrap();
+
+        // a fresh sync from block 1 takes the rebuild path
+        let mut stage = MerkleStage::new_execution(100_000, 10_000);
+        let provider_rw = db.factory.database_provider_rw().unwrap();
+        let output = stage
+            .execute(&provider_rw, ExecInput { target: Some(1), checkpoint: None })
+            .expect("rebuild must restore the pruned account's leaf from the retained marker");
+        assert!(output.done);
+        assert_eq!(output.checkpoint.block_number, 1);
+
+        // the marker survived the rebuild
+        let hashed_address = keccak256(pruned_address);
+        reth_trie_db::with_adapter!(provider_rw, |A| {
+            let empty_path = <A as reth_trie_db::TrieKeyAdapter>::StorageSubKey::from(
+                reth_trie::Nibbles::default(),
+            );
+            let mut cursor = provider_rw
+                .tx_ref()
+                .cursor_dup_read::<<A as reth_trie_db::TrieTableAdapter>::StorageTrieTable>()
+                .unwrap();
+            let entry = cursor
+                .seek_by_key_subkey(hashed_address, empty_path.clone())
+                .unwrap()
+                .expect("retained storage root marker");
+            assert_eq!(reth_trie_db::StorageTrieEntryLike::nibbles(&entry), &empty_path);
+            let node = reth_trie_db::StorageTrieEntryLike::node(&entry);
+            assert!(reth_trie::storage_root_marker::is_node(node));
+            assert_eq!(node.root_hash, Some(pruned_storage_root));
+        });
+    }
 
     /// Execute from genesis so as to merkelize whole state
     #[tokio::test]

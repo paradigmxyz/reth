@@ -52,6 +52,9 @@ pub use nibbles::{
 mod storage;
 pub use storage::{PackedStorageTrieEntry, StorageTrieEntry};
 
+/// Marker node retaining only a storage root commitment for pruned account storage.
+pub mod storage_root_marker;
+
 mod subnode;
 pub use subnode::StoredSubNode;
 

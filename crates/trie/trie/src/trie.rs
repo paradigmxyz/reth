@@ -18,6 +18,7 @@ use alloy_rlp::{BufMut, Encodable};
 use alloy_trie::proof::AddedRemovedKeys;
 use reth_execution_errors::{StateRootError, StorageRootError};
 use reth_primitives_traits::Account;
+use reth_trie_common::storage_root_marker;
 use tracing::{debug, instrument, trace, Span};
 
 /// The default updates after which root algorithms should return intermediate progress rather than
@@ -739,9 +740,12 @@ where
         // short circuit on empty storage
         if hashed_storage_cursor.is_storage_empty()? {
             trie_cursor.set_hashed_address(hashed_address);
+            // Regular root nodes stored at the empty path also carry a root hash, so the node
+            // must additionally be a prune marker before its root can stand in for the trie.
             if !prefix_set.all() &&
                 let Some((path, node)) = trie_cursor.seek_exact(Nibbles::default())? &&
                 path.is_empty() &&
+                storage_root_marker::is_node(&node) &&
                 let Some(storage_root) = node.root_hash
             {
                 Span::current().record("storage_root", format!("{storage_root:?}"));
