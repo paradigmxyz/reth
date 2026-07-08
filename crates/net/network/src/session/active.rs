@@ -454,6 +454,13 @@ impl<N: NetworkPrimitives> ActiveSession<N> {
             return;
         }
 
+        // `GetSnap` isn't covered by the eth-version check above, and a connection that never
+        // negotiated `snap/2` can't send one without erroring the whole session.
+        if matches!(request, PeerRequest::GetSnap { .. }) && !self.conn.supports_snap() {
+            request.send_err_response(RequestError::UnsupportedCapability);
+            return;
+        }
+
         let request_id = self.next_id();
         trace!(?request, peer_id=?self.remote_peer_id, ?request_id, "sending request to peer");
         let msg = match request.create_request_message(request_id) {
@@ -1257,9 +1264,9 @@ mod tests {
     use reth_chainspec::MAINNET;
     use reth_ecies::stream::ECIESStream;
     use reth_eth_wire::{
-        handshake::EthHandshake, EthNetworkPrimitives, EthStream, GetBlockAccessLists,
-        GetBlockBodies, HelloMessageWithProtocols, P2PStream, StatusBuilder, UnauthedEthStream,
-        UnauthedP2PStream, UnifiedStatus,
+        handshake::EthHandshake, protocol::Protocol, EthNetworkPrimitives, EthStream,
+        GetBlockAccessLists, GetBlockBodies, HelloMessageWithProtocols, P2PStream, StatusBuilder,
+        UnauthedEthStream, UnauthedP2PStream, UnifiedStatus,
     };
     use reth_eth_wire_types::{
         message::MAX_MESSAGE_SIZE,
@@ -1442,6 +1449,15 @@ mod tests {
                     .expect("The Frontier fork filter should exist on mainnet"),
             }
         }
+    }
+
+    /// Returns a [`SessionBuilder`] whose hello also advertises `snap/2`, so the negotiated
+    /// session ends up on an [`EthSnapStream`](reth_eth_wire::EthSnapStream) connection instead
+    /// of a plain `eth`-only one.
+    fn snap_session_builder() -> SessionBuilder {
+        let mut builder = SessionBuilder::default();
+        builder.hello.try_add_protocol(Protocol::snap_2()).unwrap();
+        builder
     }
 
     /// Dispatches a `snap/2` request via [`ActiveSession::on_internal_peer_request`] and returns
@@ -1629,7 +1645,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn snap_request_is_assigned_unique_id_and_response_correlated() {
-        let mut builder = SessionBuilder::default();
+        let mut builder = snap_session_builder();
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let local_addr = listener.local_addr().unwrap();
         let fut = builder.with_client_stream(local_addr, async move |client_stream| {
@@ -1664,7 +1680,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn wrong_type_snap_response_is_rejected() {
-        let mut builder = SessionBuilder::default();
+        let mut builder = snap_session_builder();
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let local_addr = listener.local_addr().unwrap();
         let fut = builder.with_client_stream(local_addr, async move |client_stream| {
@@ -1692,7 +1708,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn snap_request_times_out() {
-        let mut builder = SessionBuilder::default();
+        let mut builder = snap_session_builder();
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let local_addr = listener.local_addr().unwrap();
         let fut = builder.with_client_stream(local_addr, async move |client_stream| {
@@ -1721,7 +1737,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn late_snap_response_is_consumed_without_penalty() {
-        let mut builder = SessionBuilder::default();
+        let mut builder = snap_session_builder();
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let local_addr = listener.local_addr().unwrap();
         let fut = builder.with_client_stream(local_addr, async move |client_stream| {
@@ -1753,7 +1769,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn unknown_snap_response_is_penalized() {
-        let mut builder = SessionBuilder::default();
+        let mut builder = snap_session_builder();
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let local_addr = listener.local_addr().unwrap();
         let fut = builder.with_client_stream(local_addr, async move |client_stream| {
@@ -1778,6 +1794,36 @@ mod tests {
             builder.active_session_rx.next().await,
             Some(ActiveSessionMessage::BadMessage { .. })
         ));
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn get_snap_request_rejected_without_negotiated_snap() {
+        // A plain `eth`-only session: no `snap/2` was negotiated.
+        let mut builder = SessionBuilder::default();
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let local_addr = listener.local_addr().unwrap();
+        let fut = builder.with_client_stream(local_addr, async move |client_stream| {
+            let _client_stream = client_stream;
+            tokio::time::sleep(Duration::from_secs(60)).await;
+        });
+        tokio::task::spawn(fut);
+        let (incoming, _) = listener.accept().await.unwrap();
+        let mut session = builder.connect_incoming(incoming).await;
+        assert!(!session.conn.supports_snap());
+
+        let (response, rx) = oneshot::channel();
+        let request = SnapProtocolMessage::GetBlockAccessLists(GetBlockAccessListsMessage {
+            request_id: 0,
+            block_hashes: Vec::new(),
+            response_bytes: 0,
+        });
+        let deadline = session.request_deadline();
+        session.on_internal_peer_request(PeerRequest::GetSnap { request, response }, deadline);
+
+        // Rejected immediately instead of being queued for a connection that can't send it.
+        assert!(session.inflight_requests.is_empty());
+        assert!(session.queued_outgoing.pop_front().is_none());
+        assert_eq!(rx.await.unwrap().unwrap_err(), RequestError::UnsupportedCapability);
     }
 
     #[test]
