@@ -118,11 +118,16 @@ impl<Provider, S> Pruner<Provider, S> {
     ///
     /// The appended segments are pruned after the built-in ones and share the pruner's delete
     /// limit and timeout per run.
-    pub fn extend_segments(
-        &mut self,
-        segments: impl IntoIterator<Item = Box<dyn Segment<Provider>>>,
-    ) {
-        self.segments.extend(segments);
+    ///
+    /// Accepts any [`Segment`] implementation, including `Arc<dyn Segment>`, which allows a
+    /// single segment instance to be shared between multiple pruners, e.g. the engine-driven
+    /// pruner and the pipeline's prune stage.
+    pub fn extend_segments<Seg>(&mut self, segments: impl IntoIterator<Item = Seg>)
+    where
+        Seg: Segment<Provider> + 'static,
+    {
+        self.segments
+            .extend(segments.into_iter().map(|segment| Box::new(segment) as Box<dyn Segment<_>>));
     }
 }
 
@@ -500,9 +505,7 @@ mod tests {
             None,
             finished_exex_height_rx,
         );
-        pruner.extend_segments([
-            Box::new(CustomSegment { min_blocks: Some(0) }) as Box<dyn Segment<_>>
-        ]);
+        pruner.extend_segments([CustomSegment { min_blocks: Some(0) }]);
 
         let output = pruner.run(10).expect("pruner run");
         assert!(output.progress.is_finished());

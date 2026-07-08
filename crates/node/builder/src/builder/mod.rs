@@ -674,7 +674,7 @@ where
         }
     }
 
-    /// Installs an additional prune segment in the node's pruner.
+    /// Installs an additional prune segment in the node's pruners.
     ///
     /// See [`NodeBuilderWithComponents::install_prune_segment`].
     pub fn install_prune_segment<S>(self, segment: S) -> Self
@@ -687,7 +687,7 @@ where
         }
     }
 
-    /// Installs an additional prune segment in the node's pruner if the condition is true.
+    /// Installs an additional prune segment in the node's pruners if the condition is true.
     ///
     /// See [`NodeBuilderWithComponents::install_prune_segment`].
     pub fn install_prune_segment_if<S>(self, cond: bool, segment: S) -> Self

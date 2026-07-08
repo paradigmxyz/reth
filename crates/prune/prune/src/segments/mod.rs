@@ -110,6 +110,9 @@ where
 /// 2. If [`Segment::prune`] returned a [`Some`] in `checkpoint` of [`SegmentOutput`], call
 ///    [`Segment::save_checkpoint`].
 /// 3. Subtract `pruned` of [`SegmentOutput`] from `delete_limit` of next [`PruneInput`].
+// The `Arc` impl allows a single segment instance to be shared between multiple pruners, e.g. the
+// engine-driven pruner and the pipeline's prune stage.
+#[auto_impl::auto_impl(&, Arc, Box)]
 pub trait Segment<Provider>: Debug + Send + Sync {
     /// Segment of data that's pruned.
     fn segment(&self) -> PruneSegment;

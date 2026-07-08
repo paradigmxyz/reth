@@ -173,6 +173,7 @@ impl EngineNodeLauncher {
             maybe_exex_manager_handle.clone().unwrap_or_else(ExExManagerHandle::empty),
             ctx.era_import_source(),
             disabled_stages,
+            prune_segments.clone(),
         )?;
 
         // The new engine writes directly to static files. This ensures that they're up to the tip.
@@ -188,6 +189,8 @@ impl EngineNodeLauncher {
         let mut pruner = pruner_builder.build_with_provider_factory(ctx.provider_factory().clone());
         if !prune_segments.is_empty() {
             info!(target: "reth::cli", segments = prune_segments.len(), "Installing custom prune segments");
+            // The same segment instances also run in the pipeline's prune stage during backfill
+            // sync, sharing their checkpoints with the runs here.
             pruner.extend_segments(prune_segments);
         }
         let pruner_events = pruner.events();

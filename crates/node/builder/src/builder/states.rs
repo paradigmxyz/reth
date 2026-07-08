@@ -20,7 +20,7 @@ use reth_node_core::node_config::NodeConfig;
 use reth_provider::providers::RocksDBProvider;
 use reth_prune::segments::Segment;
 use reth_tasks::TaskExecutor;
-use std::{fmt, fmt::Debug, future::Future};
+use std::{fmt, fmt::Debug, future::Future, sync::Arc};
 
 /// A node builder that also has the configured types.
 pub struct NodeBuilderWithTypes<T: FullNodeTypes> {
@@ -239,7 +239,7 @@ where
         self
     }
 
-    /// Installs an additional prune segment in the node's pruner.
+    /// Installs an additional prune segment in the node's pruners.
     ///
     /// This allows downstream consumers to prune custom data alongside the built-in segments,
     /// without modifying reth's [`PruneSegment`](reth_prune::PruneSegment) for every downstream
@@ -248,20 +248,19 @@ where
     /// persisted, and are pruned after the built-in segments, sharing the pruner's delete limit
     /// and timeout per run.
     ///
-    /// # Note
-    ///
-    /// Custom segments only run in the pruner that is driven by the consensus engine. They are
-    /// not part of the pipeline's prune stage that is used during initial sync, so they catch up
-    /// once the node is live.
+    /// The segment runs everywhere pruning happens: in the pipeline's prune stage during initial
+    /// (backfill) sync, and in the pruner driven by the consensus engine during live sync. Both
+    /// share the segment's persisted checkpoint, so no work is repeated when the node switches
+    /// between the two.
     pub fn install_prune_segment<S>(mut self, segment: S) -> Self
     where
         S: Segment<PrunerProviderRW<NodeAdapter<T, CB::Components>>> + 'static,
     {
-        self.add_ons.prune_segments.push(Box::new(segment));
+        self.add_ons.prune_segments.push(Arc::new(segment));
         self
     }
 
-    /// Installs an additional prune segment in the node's pruner if the condition is true.
+    /// Installs an additional prune segment in the node's pruners if the condition is true.
     ///
     /// See [`Self::install_prune_segment`].
     pub fn install_prune_segment_if<S>(self, cond: bool, segment: S) -> Self

@@ -9,7 +9,8 @@ pub(crate) use macros::*;
 mod runner;
 #[cfg(test)]
 pub(crate) use runner::{
-    ExecuteStageTestRunner, StageTestRunner, TestRunnerError, UnwindStageTestRunner,
+    ExecuteStageTestRunner, StageTestRunner, TestRunnerError, TestStageProvider,
+    UnwindStageTestRunner,
 };
 
 mod test_db;

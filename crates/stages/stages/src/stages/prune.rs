@@ -5,12 +5,14 @@ use reth_provider::{
     RocksDBProviderFactory, StageCheckpointReader, StaticFileProviderFactory,
 };
 use reth_prune::{
-    PruneMode, PruneModes, PruneSegment, PrunerBuilder, SegmentOutput, SegmentOutputCheckpoint,
+    segments::Segment, PruneMode, PruneModes, PruneSegment, PrunerBuilder, SegmentOutput,
+    SegmentOutputCheckpoint,
 };
 use reth_stages_api::{
     ExecInput, ExecOutput, Stage, StageCheckpoint, StageError, StageId, UnwindInput, UnwindOutput,
 };
 use reth_storage_api::{ChangeSetReader, StorageChangeSetReader, StorageSettingsCache};
+use std::{fmt, sync::Arc};
 use tracing::info;
 
 /// The prune stage that runs the pruner with the provided prune modes.
@@ -24,20 +26,47 @@ use tracing::info;
 ///
 /// `commit_threshold` is the maximum number of entries to prune before committing
 /// progress to the database.
-#[derive(Debug)]
-pub struct PruneStage {
+pub struct PruneStage<Provider> {
     prune_modes: PruneModes,
     commit_threshold: usize,
+    /// Additional segments to prune besides the built-in ones, e.g. custom segments defined by a
+    /// downstream node, see [`PruneSegment::Custom`].
+    ///
+    /// Segments are `Arc`ed so a single instance can be shared with the pruner that runs during
+    /// live sync.
+    custom_segments: Vec<Arc<dyn Segment<Provider>>>,
 }
 
-impl PruneStage {
+impl<Provider> PruneStage<Provider> {
     /// Crate new prune stage with the given prune modes and commit threshold.
     pub const fn new(prune_modes: PruneModes, commit_threshold: usize) -> Self {
-        Self { prune_modes, commit_threshold }
+        Self { prune_modes, commit_threshold, custom_segments: Vec::new() }
+    }
+
+    /// Appends additional segments to prune besides the built-in ones, e.g. custom segments
+    /// defined by a downstream node, see [`PruneSegment::Custom`].
+    pub fn with_custom_segments(
+        mut self,
+        segments: impl IntoIterator<Item = Arc<dyn Segment<Provider>>>,
+    ) -> Self {
+        self.custom_segments.extend(segments);
+        self
     }
 }
 
-impl<Provider> Stage<Provider> for PruneStage
+// Not derived to avoid requiring `Provider: Debug`, which the stage only uses as the `dyn
+// Segment` parameter.
+impl<Provider> fmt::Debug for PruneStage<Provider> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("PruneStage")
+            .field("prune_modes", &self.prune_modes)
+            .field("commit_threshold", &self.commit_threshold)
+            .field("custom_segments", &self.custom_segments)
+            .finish()
+    }
+}
+
+impl<Provider> Stage<Provider> for PruneStage<Provider>
 where
     Provider: DBProvider<Tx: DbTxMut>
         + PruneCheckpointReader
@@ -50,7 +79,9 @@ where
         > + StorageSettingsCache
         + ChangeSetReader
         + StorageChangeSetReader
-        + RocksDBProviderFactory,
+        + RocksDBProviderFactory
+        // `'static` is required to pass the custom `dyn Segment<Provider>` segments to the pruner
+        + 'static,
 {
     fn id(&self) -> StageId {
         StageId::Prune
@@ -61,6 +92,7 @@ where
             .segments(self.prune_modes.clone())
             .delete_limit(self.commit_threshold)
             .build::<Provider>(provider.static_file_provider());
+        pruner.extend_segments(self.custom_segments.iter().cloned());
 
         let result = pruner.run_with_provider(provider, input.target())?;
         if result.progress.is_finished() {
@@ -132,10 +164,16 @@ where
 ///
 /// Should be run right after `Execution`, unlike [`PruneStage`] which runs at the end.
 /// This lets subsequent stages reuse the freed pages instead of growing the freelist.
-#[derive(Debug)]
-pub struct PruneSenderRecoveryStage(PruneStage);
+pub struct PruneSenderRecoveryStage<Provider>(PruneStage<Provider>);
 
-impl PruneSenderRecoveryStage {
+// Not derived to avoid requiring `Provider: Debug`, see [`PruneStage`]'s `Debug` impl.
+impl<Provider> fmt::Debug for PruneSenderRecoveryStage<Provider> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_tuple("PruneSenderRecoveryStage").field(&self.0).finish()
+    }
+}
+
+impl<Provider> PruneSenderRecoveryStage<Provider> {
     /// Create new prune sender recovery stage with the given prune mode and commit threshold.
     pub fn new(prune_mode: PruneMode, commit_threshold: usize) -> Self {
         Self(PruneStage::new(
@@ -145,7 +183,7 @@ impl PruneSenderRecoveryStage {
     }
 }
 
-impl<Provider> Stage<Provider> for PruneSenderRecoveryStage
+impl<Provider> Stage<Provider> for PruneSenderRecoveryStage<Provider>
 where
     Provider: DBProvider<Tx: DbTxMut>
         + PruneCheckpointReader
@@ -158,7 +196,8 @@ where
         > + StorageSettingsCache
         + ChangeSetReader
         + StorageChangeSetReader
-        + RocksDBProviderFactory,
+        + RocksDBProviderFactory
+        + 'static,
 {
     fn id(&self) -> StageId {
         StageId::PruneSenderRecovery
@@ -195,7 +234,7 @@ mod tests {
     use super::*;
     use crate::test_utils::{
         stage_test_suite_ext, ExecuteStageTestRunner, StageTestRunner, StorageKind,
-        TestRunnerError, TestStageDB, UnwindStageTestRunner,
+        TestRunnerError, TestStageDB, TestStageProvider, UnwindStageTestRunner,
     };
     use alloy_primitives::B256;
     use reth_ethereum_primitives::Block;
@@ -214,20 +253,17 @@ mod tests {
     }
 
     impl StageTestRunner for PruneTestRunner {
-        type S = PruneStage;
+        type S = PruneStage<TestStageProvider>;
 
         fn db(&self) -> &TestStageDB {
             &self.db
         }
 
         fn stage(&self) -> Self::S {
-            PruneStage {
-                prune_modes: PruneModes {
-                    sender_recovery: Some(PruneMode::Full),
-                    ..Default::default()
-                },
-                commit_threshold: usize::MAX,
-            }
+            PruneStage::new(
+                PruneModes { sender_recovery: Some(PruneMode::Full), ..Default::default() },
+                usize::MAX,
+            )
         }
     }
 
@@ -289,5 +325,69 @@ mod tests {
         fn validate_unwind(&self, _input: UnwindInput) -> Result<(), TestRunnerError> {
             Ok(())
         }
+    }
+
+    /// A user-defined segment, as a downstream node would install via the node builder: prunes
+    /// nothing, but records checkpoints under [`PruneSegment::Custom`].
+    #[derive(Debug)]
+    struct CustomSegment;
+
+    impl<Provider> Segment<Provider> for CustomSegment {
+        fn segment(&self) -> PruneSegment {
+            PruneSegment::Custom(7)
+        }
+
+        fn mode(&self) -> Option<PruneMode> {
+            Some(PruneMode::Full)
+        }
+
+        fn purpose(&self) -> reth_prune::PrunePurpose {
+            reth_prune::PrunePurpose::User
+        }
+
+        fn min_blocks(&self) -> Option<u64> {
+            Some(0)
+        }
+
+        fn prune(
+            &self,
+            _provider: &Provider,
+            input: reth_prune::segments::PruneInput,
+        ) -> Result<SegmentOutput, reth_prune::PrunerError> {
+            Ok(SegmentOutput {
+                progress: reth_prune::PruneProgress::Finished,
+                pruned: 0,
+                checkpoint: Some(SegmentOutputCheckpoint {
+                    block_number: Some(input.to_block),
+                    tx_number: None,
+                }),
+            })
+        }
+    }
+
+    #[test]
+    fn prune_stage_runs_custom_segments() {
+        use reth_provider::DatabaseProviderFactory;
+        use reth_prune::PruneCheckpoint;
+        use std::sync::Arc;
+
+        let db = TestStageDB::default();
+        let mut stage = PruneStage::new(PruneModes::default(), usize::MAX)
+            .with_custom_segments([Arc::new(CustomSegment) as Arc<dyn Segment<_>>]);
+
+        let provider = db.factory.database_provider_rw().unwrap();
+        let input = ExecInput { target: Some(10), checkpoint: None };
+        let output = stage.execute(&provider, input).expect("stage execution");
+        assert!(output.done);
+
+        // The custom segment's checkpoint is persisted under its custom segment key
+        assert_eq!(
+            provider.get_prune_checkpoint(PruneSegment::Custom(7)).unwrap(),
+            Some(PruneCheckpoint {
+                block_number: Some(10),
+                tx_number: None,
+                prune_mode: PruneMode::Full
+            })
+        );
     }
 }

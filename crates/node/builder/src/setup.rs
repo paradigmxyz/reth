@@ -16,10 +16,11 @@ use reth_network_p2p::{
     bodies::downloader::BodyDownloader, headers::downloader::HeaderDownloader, BlockClient,
 };
 use reth_node_api::HeaderTy;
-use reth_provider::{providers::ProviderNodeTypes, ProviderFactory};
+use reth_provider::{providers::ProviderNodeTypes, DatabaseProviderFactory, ProviderFactory};
+use reth_prune::segments::Segment;
 use reth_stages::{
     prelude::DefaultStages,
-    stages::{EraImportSource, ExecutionStage},
+    stages::{EraImportSource, ExecutionStage, PruneStage},
     Pipeline, StageId, StageSet,
 };
 use reth_static_file::StaticFileProducer;
@@ -43,6 +44,7 @@ pub fn build_networked_pipeline<N, Client, Evm>(
     exex_manager_handle: ExExManagerHandle<N::Primitives>,
     era_import_source: Option<EraImportSource>,
     disabled_stages: &[StageId],
+    custom_prune_segments: Vec<Arc<dyn Segment<PipelineProviderRW<N>>>>,
 ) -> eyre::Result<Pipeline<N>>
 where
     N: ProviderNodeTypes,
@@ -72,10 +74,14 @@ where
         exex_manager_handle,
         era_import_source,
         disabled_stages,
+        custom_prune_segments,
     )?;
 
     Ok(pipeline)
 }
+
+/// The read-write database provider type the stages of a [`Pipeline<N>`] operate on.
+pub type PipelineProviderRW<N> = <ProviderFactory<N> as DatabaseProviderFactory>::ProviderRW;
 
 /// Builds the [Pipeline] with the given [`ProviderFactory`] and downloaders.
 #[expect(clippy::too_many_arguments)]
@@ -93,6 +99,7 @@ pub fn build_pipeline<N, H, B, Evm>(
     exex_manager_handle: ExExManagerHandle<N::Primitives>,
     era_import_source: Option<EraImportSource>,
     disabled_stages: &[StageId],
+    custom_prune_segments: Vec<Arc<dyn Segment<PipelineProviderRW<N>>>>,
 ) -> eyre::Result<Pipeline<N>>
 where
     N: ProviderNodeTypes,
@@ -109,30 +116,36 @@ where
 
     let (tip_tx, tip_rx) = watch::channel(B256::ZERO);
 
+    let mut stages = DefaultStages::new(
+        provider_factory.clone(),
+        tip_rx,
+        Arc::clone(&consensus),
+        header_downloader,
+        body_downloader,
+        evm_config.clone(),
+        stage_config.clone(),
+        prune_config.segments.clone(),
+        era_import_source,
+    )
+    .set(ExecutionStage::new(
+        evm_config,
+        consensus,
+        stage_config.execution.into(),
+        stage_config.execution_external_clean_threshold(),
+        exex_manager_handle,
+    ));
+
+    if !custom_prune_segments.is_empty() {
+        stages = stages.set(
+            PruneStage::new(prune_config.segments, stage_config.prune.commit_threshold)
+                .with_custom_segments(custom_prune_segments),
+        );
+    }
+
     let pipeline = builder
         .with_tip_sender(tip_tx)
         .with_metrics_tx(metrics_tx)
-        .add_stages(
-            DefaultStages::new(
-                provider_factory.clone(),
-                tip_rx,
-                Arc::clone(&consensus),
-                header_downloader,
-                body_downloader,
-                evm_config.clone(),
-                stage_config.clone(),
-                prune_config.segments,
-                era_import_source,
-            )
-            .set(ExecutionStage::new(
-                evm_config,
-                consensus,
-                stage_config.execution.into(),
-                stage_config.execution_external_clean_threshold(),
-                exex_manager_handle,
-            ))
-            .disable_all(disabled_stages),
-        )
+        .add_stages(stages.disable_all(disabled_stages))
         .build(provider_factory, static_file_producer);
 
     Ok(pipeline)

@@ -4,6 +4,7 @@ use reth_db_api::database::Database;
 use reth_node_api::{FullNodeComponents, FullNodeTypes, NodeAddOns, NodeTypesWithDBAdapter};
 use reth_provider::DatabaseProvider;
 use reth_prune::segments::Segment;
+use std::sync::Arc;
 
 use crate::{exex::BoxedLaunchExEx, hooks::NodeHooks};
 
@@ -15,9 +16,12 @@ pub struct AddOns<Node: FullNodeComponents, AddOns: NodeAddOns<Node>> {
     pub hooks: NodeHooks<Node, AddOns>,
     /// The `ExExs` (execution extensions) of the node.
     pub exexs: Vec<(String, Box<dyn BoxedLaunchExEx<Node>>)>,
-    /// Additional prune segments that are run by the node's pruner, see
+    /// Additional prune segments that are run by the node's pruners, see
     /// [`PruneSegment::Custom`](reth_prune::PruneSegment::Custom).
-    pub prune_segments: Vec<Box<dyn Segment<PrunerProviderRW<Node>>>>,
+    ///
+    /// Segments are `Arc`ed because each instance is shared between the engine-driven pruner and
+    /// the pipeline's prune stage.
+    pub prune_segments: Vec<Arc<dyn Segment<PrunerProviderRW<Node>>>>,
     /// Additional captured addons.
     pub add_ons: AddOns,
 }
