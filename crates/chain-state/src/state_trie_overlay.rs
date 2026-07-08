@@ -358,12 +358,18 @@ impl<N: NodePrimitives> StateTrieOverlayManager<N> {
         anchor_hash: B256,
         hash: B256,
     ) -> bool {
-        Self::hash_between_anchor_and_parent_in(
-            self.blocks.as_ref(),
-            parent_hash,
-            anchor_hash,
-            hash,
-        )
+        let mut current_hash = parent_hash;
+        let mut found_hash = false;
+
+        loop {
+            found_hash |= current_hash == hash;
+            if current_hash == anchor_hash {
+                return found_hash
+            }
+
+            let Some(block) = self.blocks.get(&current_hash) else { return false };
+            current_hash = block.recovered_block().parent_hash();
+        }
     }
 
     fn anchor_for_parent_in(
@@ -386,26 +392,6 @@ impl<N: NodePrimitives> StateTrieOverlayManager<N> {
                 return Some(block_parent_hash)
             }
             hash = block_parent_hash;
-        }
-    }
-
-    fn hash_between_anchor_and_parent_in(
-        blocks: &DashMap<B256, ExecutedBlock<N>>,
-        parent_hash: B256,
-        anchor_hash: B256,
-        hash: B256,
-    ) -> bool {
-        let mut current_hash = parent_hash;
-        let mut found_hash = false;
-
-        loop {
-            found_hash |= current_hash == hash;
-            if current_hash == anchor_hash {
-                return found_hash
-            }
-
-            let Some(block) = blocks.get(&current_hash) else { return false };
-            current_hash = block.recovered_block().parent_hash();
         }
     }
 
