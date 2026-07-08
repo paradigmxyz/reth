@@ -863,9 +863,11 @@ where
             const MAX_STALLED_PROOF_TARGETS_TO_LOG: usize = 5;
 
             let mut account_targets = self
-                .fetched_account_targets
-                .iter()
-                .map(|(target, min_len)| (*target, *min_len))
+                .account_updates
+                .keys()
+                .filter_map(|target| {
+                    self.fetched_account_targets.get(target).map(|min_len| (*target, *min_len))
+                })
                 .collect::<Vec<_>>();
             account_targets.sort_unstable();
             let account_targets_truncated =
@@ -873,10 +875,15 @@ where
             account_targets.truncate(MAX_STALLED_PROOF_TARGETS_TO_LOG);
 
             let mut storage_targets = self
-                .fetched_storage_targets
+                .storage_updates
                 .iter()
-                .flat_map(|(address, targets)| {
-                    targets.iter().map(|(target, min_len)| (*address, *target, *min_len))
+                .flat_map(|(address, updates)| {
+                    let fetched_targets = self.fetched_storage_targets.get(address);
+                    updates.keys().filter_map(move |target| {
+                        fetched_targets
+                            .and_then(|targets| targets.get(target))
+                            .map(|min_len| (*address, *target, *min_len))
+                    })
                 })
                 .collect::<Vec<_>>();
             storage_targets.sort_unstable();
