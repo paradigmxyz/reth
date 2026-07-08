@@ -19,9 +19,7 @@ use alloy_rpc_types_engine::{
     ExecutionData, ExecutionPayloadSidecar, ExecutionPayloadV1, ForkchoiceState,
 };
 use assert_matches::assert_matches;
-use reth_chain_state::{
-    test_utils::TestBlockBuilder, BlockState, ComputedTrieData, StateTrieOverlayManager,
-};
+use reth_chain_state::{test_utils::TestBlockBuilder, BlockState, StateTrieOverlayManager};
 use reth_chainspec::{ChainSpec, HOLESKY, MAINNET};
 use reth_engine_primitives::{EngineApiValidator, ForkchoiceStatus, NoopInvalidBlockHook};
 use reth_ethereum_consensus::EthBeaconConsensus;
@@ -31,7 +29,11 @@ use reth_evm_ethereum::MockEvmConfig;
 use reth_primitives_traits::Block as _;
 use reth_provider::{test_utils::MockEthProvider, BalStoreHandle, InMemoryBalStore, RawBal};
 use reth_tasks::spawn_os_thread;
-use reth_trie::prefix_set::TriePrefixSetsMut;
+use reth_trie::{
+    prefix_set::{PrefixSetMut, TriePrefixSetsMut},
+    LazyTrieData,
+};
+use reth_trie_common::{ComputedTrieData, Nibbles};
 use std::{
     collections::BTreeMap,
     str::FromStr,
@@ -43,10 +45,46 @@ use std::{
 };
 use tokio::sync::oneshot;
 
-fn with_known_changed_paths(block: ExecutedBlock<EthPrimitives>) -> ExecutedBlock<EthPrimitives> {
+fn with_changed_paths(
+    block: ExecutedBlock<EthPrimitives>,
+    changed_paths: TriePrefixSetsMut,
+) -> ExecutedBlock<EthPrimitives> {
     let mut trie_data = block.trie_data();
-    trie_data.changed_paths = Some(Arc::new(TriePrefixSetsMut::default()));
-    ExecutedBlock::new(block.recovered_block, block.execution_output, trie_data)
+    trie_data.changed_paths = Some(Arc::new(changed_paths));
+    ExecutedBlock::with_deferred_trie_data(
+        block.recovered_block,
+        block.execution_output,
+        LazyTrieData::ready(trie_data),
+    )
+}
+
+fn with_empty_changed_paths(block: ExecutedBlock<EthPrimitives>) -> ExecutedBlock<EthPrimitives> {
+    with_changed_paths(block, TriePrefixSetsMut::default())
+}
+
+fn trie_changed_paths(
+    account_path: Nibbles,
+    storage_account: B256,
+    storage_path: Nibbles,
+) -> TriePrefixSetsMut {
+    TriePrefixSetsMut {
+        account_prefix_set: PrefixSetMut::from([account_path]),
+        storage_prefix_sets: B256Map::from_iter([(
+            storage_account,
+            PrefixSetMut::from([storage_path]),
+        )]),
+        destroyed_accounts: Default::default(),
+    }
+}
+
+fn merged_changed_paths(blocks: &[ExecutedBlock<EthPrimitives>]) -> TriePrefixSetsMut {
+    let mut merged = TriePrefixSetsMut::default();
+    for block in blocks {
+        let trie_data = block.trie_data();
+        let changed_paths = trie_data.changed_paths.as_deref().expect("changed paths are present");
+        merged.extend_ref(changed_paths);
+    }
+    merged
 }
 
 /// Mock engine validator for tests
@@ -587,8 +625,28 @@ async fn test_tree_persist_blocks() {
 
 #[test]
 fn on_new_persisted_block_queues_sparse_trie_prune_request() {
-    let blocks: Vec<_> =
-        TestBlockBuilder::eth().get_executed_blocks(1..4).map(with_known_changed_paths).collect();
+    let changed_paths = [
+        trie_changed_paths(
+            Nibbles::from_nibbles([0x01]),
+            B256::with_last_byte(0x01),
+            Nibbles::from_nibbles([0x02]),
+        ),
+        trie_changed_paths(
+            Nibbles::from_nibbles([0x03]),
+            B256::with_last_byte(0x02),
+            Nibbles::from_nibbles([0x04]),
+        ),
+        trie_changed_paths(
+            Nibbles::from_nibbles([0x05]),
+            B256::with_last_byte(0x03),
+            Nibbles::from_nibbles([0x06]),
+        ),
+    ];
+    let blocks: Vec<_> = TestBlockBuilder::eth()
+        .get_executed_blocks(1..4)
+        .zip(changed_paths)
+        .map(|(block, changed_paths)| with_changed_paths(block, changed_paths))
+        .collect();
     let mut test_harness = TestHarness::new(MAINNET.clone()).with_blocks(blocks.clone());
     test_harness
         .tree
@@ -597,7 +655,24 @@ fn on_new_persisted_block_queues_sparse_trie_prune_request() {
 
     test_harness.tree.on_new_persisted_block().unwrap();
 
-    assert!(test_harness.tree.pending_sparse_trie_prune.is_some());
+    let retained_paths =
+        test_harness.tree.pending_sparse_trie_prune.as_ref().unwrap().clone().freeze();
+    let expected_retained_paths = merged_changed_paths(&blocks[1..]).freeze();
+
+    assert_eq!(
+        retained_paths.account_prefix_set.slice(),
+        expected_retained_paths.account_prefix_set.slice()
+    );
+    assert_eq!(
+        retained_paths.storage_prefix_sets.len(),
+        expected_retained_paths.storage_prefix_sets.len()
+    );
+    for (storage_account, expected_slots) in expected_retained_paths.storage_prefix_sets {
+        assert_eq!(
+            retained_paths.storage_prefix_sets[&storage_account].slice(),
+            expected_slots.slice()
+        );
+    }
 }
 
 #[test]
@@ -617,7 +692,7 @@ fn on_new_persisted_block_skips_sparse_trie_prune_when_changed_paths_unknown() {
 #[test]
 fn on_new_persisted_block_skips_sparse_trie_prune_when_state_root_task_disabled() {
     let blocks: Vec<_> =
-        TestBlockBuilder::eth().get_executed_blocks(1..4).map(with_known_changed_paths).collect();
+        TestBlockBuilder::eth().get_executed_blocks(1..4).map(with_empty_changed_paths).collect();
     let configs = [
         TreeConfig::default().with_has_enough_parallelism(false),
         TreeConfig::default().with_has_enough_parallelism(true).with_state_root_fallback(true),
@@ -1506,16 +1581,16 @@ fn test_on_new_payload_malformed_payload() {
     }
 }
 
-/// Test different `StateRootStrategy` paths: `StateRootTask` and `Synchronous`.
+/// Test different state-root job paths: the sparse-trie job and the synchronous fallback.
 #[test]
 fn test_state_root_strategy_paths() {
     reth_tracing::init_test_tracing();
 
     let mut test_harness = TestHarness::new(MAINNET.clone());
 
-    // Test multiple scenarios to ensure different StateRootStrategy paths are taken:
-    // 1. `StateRootTask` strategy uses payload_processor.spawn()
-    // 2. `Synchronous` strategy uses spawn_cache_exclusive()
+    // Test multiple scenarios to ensure different state-root job paths are taken:
+    // 1. The default strategy spawns the sparse-trie state-root task.
+    // 2. With state-root fallback enabled, the synchronous job computes the root directly.
 
     let s1 = include_str!("../../test-data/holesky/1.rlp");
     let data1 = Bytes::from_str(s1).unwrap();
@@ -1558,11 +1633,9 @@ fn test_state_root_strategy_paths() {
 
     assert!(outcome2.outcome.is_syncing(), "Second strategy path should work");
 
-    // This test passes if multiple StateRootStrategy scenarios work correctly,
-    // confirming that passing arguments directly doesn't break:
-    // - `StateRootTask` strategy
-    // - `Synchronous` strategy
-    // - All parameter passing through the args struct
+    // This test passes if multiple state-root job scenarios work correctly:
+    // - the sparse-trie job
+    // - the synchronous job
 }
 
 // ================================================================================================
