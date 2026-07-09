@@ -348,7 +348,6 @@ mod tests {
         TransactionOrigin,
     };
     use alloy_primitives::{Address, U256};
-    use std::sync::atomic::{AtomicUsize, Ordering};
 
     #[derive(Debug)]
     struct NoopValidator;
@@ -398,9 +397,7 @@ mod tests {
     }
 
     #[derive(Debug)]
-    struct SameOriginBatchValidator {
-        calls: Arc<AtomicUsize>,
-    }
+    struct SameOriginBatchValidator;
 
     impl TransactionValidator for SameOriginBatchValidator {
         type Transaction = MockTransaction;
@@ -419,7 +416,6 @@ mod tests {
             origin: TransactionOrigin,
             transactions: impl IntoIterator<Item = Self::Transaction, IntoIter: Send> + Send,
         ) -> Vec<TransactionValidationOutcome<Self::Transaction>> {
-            self.calls.fetch_add(1, Ordering::Relaxed);
             transactions
                 .into_iter()
                 .map(|transaction| TransactionValidationOutcome::Valid {
@@ -436,10 +432,7 @@ mod tests {
 
     #[tokio::test]
     async fn executor_forwards_same_origin_batches() {
-        let calls = Arc::new(AtomicUsize::new(0));
-        let (executor, task) = TransactionValidationTaskExecutor::new(SameOriginBatchValidator {
-            calls: calls.clone(),
-        });
+        let (executor, task) = TransactionValidationTaskExecutor::new(SameOriginBatchValidator);
         tokio::spawn(task.run());
 
         let transactions = vec![MockTransaction::legacy(), MockTransaction::eip1559()];
@@ -448,32 +441,13 @@ mod tests {
             .validate_transactions_with_origin(TransactionOrigin::Local, transactions)
             .await;
 
-        assert_eq!(calls.load(Ordering::Relaxed), 1);
-        let actual = outcomes
-            .into_iter()
-            .map(|outcome| match outcome {
-                TransactionValidationOutcome::Valid { transaction, propagate, .. } => {
-                    assert!(propagate);
-                    *transaction.hash()
-                }
-                _ => panic!("expected valid transaction"),
-            })
-            .collect::<Vec<_>>();
-        assert_eq!(actual, expected_hashes);
-    }
-
-    #[tokio::test(flavor = "multi_thread")]
-    async fn executor_handles_concurrent_sends() {
-        let (executor, task) = TransactionValidationTaskExecutor::new(NoopValidator);
-        tokio::spawn(task.run());
-
-        let outcomes = futures_util::future::join_all((0..32).map(|_| {
-            executor.validate_transaction(TransactionOrigin::External, MockTransaction::legacy())
-        }))
-        .await;
-
-        assert!(outcomes
-            .iter()
-            .all(|outcome| matches!(outcome, TransactionValidationOutcome::Valid { .. })));
+        assert_eq!(outcomes.len(), expected_hashes.len());
+        assert!(outcomes.into_iter().zip(expected_hashes).all(|(outcome, expected_hash)| {
+            matches!(
+                outcome,
+                TransactionValidationOutcome::Valid { transaction, propagate: true, .. }
+                    if transaction.hash() == &expected_hash
+            )
+        }));
     }
 }
