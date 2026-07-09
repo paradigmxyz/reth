@@ -9683,7 +9683,6 @@ dependencies = [
  "assert_matches",
  "itertools 0.14.0",
  "metrics",
- "rayon",
  "reth-config",
  "reth-db",
  "reth-db-api",
