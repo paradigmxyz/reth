@@ -368,7 +368,8 @@ impl ArenaSparseSubtrie {
                 let child_kind = sparse_node_kind(&self.arena[old_child_idx]);
                 let child_short_key = self.arena[old_child_idx].short_key().cloned();
                 // Not retained — blind the child slot in the new arena.
-                let rlp_node = self.arena[old_child_idx]
+                let node = &self.arena[old_child_idx];
+                let rlp_node = node
                     .state_ref()
                     .expect("child must have state")
                     .cached_rlp_node()
@@ -382,6 +383,7 @@ impl ArenaSparseSubtrie {
                     child_path = ?child_path,
                     child_nibble = nibble,
                     child_kind,
+                    variant = %AsRef::<str>::as_ref(node),
                     child_short_key = ?child_short_key,
                     next_retained_path = ?matching_retained_path,
                     cached_rlp_node = ?rlp_node,
@@ -2400,16 +2402,18 @@ impl ArenaParallelSparseTrie {
     ) -> ArenaSparseNode {
         let path = cursor.head().expect("cursor is non-empty").path;
         let node_kind = sparse_node_kind(&arena[idx]);
+        let node = arena.remove(idx).expect("node must exist to be pruned");
+        let rlp_node = node.state_ref().and_then(|s| s.cached_rlp_node()).cloned();
         trace!(
             target: TRACE_TARGET,
             trie = "upper",
             path = ?path,
             child_nibble = ?nibble,
             node_kind,
-            "Removing pruned upper trie node"
+            variant = %AsRef::<str>::as_ref(&node),
+            cached_rlp_node = ?rlp_node,
+            "pruning node",
         );
-        let node = arena.remove(idx).expect("node must exist to be pruned");
-        let rlp_node = node.state_ref().and_then(|s| s.cached_rlp_node()).cloned();
 
         if let Some(rlp_node) = rlp_node {
             let parent_idx = cursor.parent().expect("pruned child has parent").index;
@@ -2775,9 +2779,13 @@ impl SparseTrie for ArenaParallelSparseTrie {
         } else {
             use rayon::iter::{IntoParallelRefMutIterator, ParallelIterator};
 
+            let parent_span = tracing::Span::current();
             let results: Vec<SparseTrieResult<()>> = taken
                 .par_iter_mut()
-                .map(|(_, subtrie, node_vec)| subtrie.reveal_nodes(node_vec))
+                .map(|(_, subtrie, node_vec)| {
+                    let _guard = parent_span.enter();
+                    subtrie.reveal_nodes(node_vec)
+                })
                 .collect();
 
             if let Some(err) = results.into_iter().find(|r| r.is_err()) {
@@ -2860,9 +2868,11 @@ impl SparseTrie for ArenaParallelSparseTrie {
             } else {
                 use rayon::iter::{IntoParallelIterator, ParallelIterator};
 
+                let parent_span = tracing::Span::current();
                 taken = taken
                     .into_par_iter()
                     .map(|(idx, mut subtrie)| {
+                        let _guard = parent_span.enter();
                         subtrie.update_cached_rlp();
                         (idx, subtrie)
                     })
@@ -3288,9 +3298,9 @@ impl SparseTrie for ArenaParallelSparseTrie {
                 pruned += taken
                     .par_iter_mut()
                     .map(|(_, subtrie, range)| {
+                        let _guard = parent_span.enter();
                         let _span = tracing::trace_span!(
                             target: TRACE_TARGET,
-                            parent: &parent_span,
                             "subtrie_prune",
                             subtrie = ?subtrie.path,
                         )
@@ -3574,7 +3584,9 @@ impl SparseTrie for ArenaParallelSparseTrie {
         } else {
             use rayon::iter::{IntoParallelRefMutIterator, ParallelIterator};
 
+            let parent_span = tracing::Span::current();
             taken.par_iter_mut().for_each(|(_, subtrie, range)| {
+                let _guard = parent_span.enter();
                 subtrie.update_leaves(&sorted[range.clone()]);
             });
         }
