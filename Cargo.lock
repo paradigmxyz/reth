@@ -266,6 +266,9 @@ source = "git+https://github.com/Rimeeeeee/eips?branch=eip8289-smt#82878b90e44be
 dependencies = [
  "alloy-eip7928",
  "alloy-primitives",
+ "arbitrary",
+ "borsh",
+ "serde",
  "sha2",
 ]
 
