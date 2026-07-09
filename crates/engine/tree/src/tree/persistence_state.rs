@@ -33,11 +33,17 @@ pub struct PersistenceState {
     /// Hash and number of the last block persisted.
     ///
     /// This tracks the chain height that is persisted on disk
-    pub(crate) last_persisted_block: BlockNumHash,
+    pub last_persisted_block: BlockNumHash,
     /// Receiver end of channel where the result of the persistence task will be
     /// sent when done. A None value means there's no persistence task in progress.
     pub(crate) rx:
         Option<(CrossbeamReceiver<PersistenceResult>, Instant, CurrentPersistenceAction)>,
+}
+
+impl Default for PersistenceState {
+    fn default() -> Self {
+        Self { last_persisted_block: BlockNumHash::default(), rx: None }
+    }
 }
 
 impl PersistenceState {

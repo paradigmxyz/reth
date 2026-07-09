@@ -26,6 +26,7 @@ pub trait Suite {
         }
     }
 
+
     /// Load and run each contained test case for the provided sub-folder.
     ///
     /// # Note
