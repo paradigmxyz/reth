@@ -37,7 +37,7 @@ use reth_provider::{
 use reth_revm::database::StateProviderDatabase;
 use reth_stages_api::ControlFlow;
 use reth_tasks::{spawn_os_thread, utils::increase_thread_priority};
-use reth_trie::{prefix_set::TriePrefixSetsMut, ComputedTrieData};
+use reth_trie::ComputedTrieData;
 use reth_trie_db::ChangesetCache;
 use revm::interpreter::debug_unreachable;
 use state::TreeState;
@@ -317,9 +317,8 @@ where
     /// Set when an FCU with payload attributes is received, cleared on the next FCU without.
     /// Suppresses persistence cycles during payload building.
     building_payload: bool,
-    /// Retained paths from the latest persistence cleanup to apply during the next sparse trie
-    /// cache preservation.
-    pending_sparse_trie_prune: Option<TriePrefixSetsMut>,
+    /// Whether the next sparse trie task should attempt cache pruning during trie preservation.
+    pending_sparse_trie_prune: bool,
     /// Task runtime for spawning blocking work on named, reusable threads.
     runtime: reth_tasks::Runtime,
 }
@@ -413,7 +412,7 @@ where
             changeset_cache,
             execution_timing_stats: B256Map::default(),
             building_payload: false,
-            pending_sparse_trie_prune: None,
+            pending_sparse_trie_prune: false,
             runtime,
         }
     }
@@ -1199,7 +1198,7 @@ where
     /// processing is complete. Returns `None` if the head is not canonical and processing
     /// should continue.
     fn handle_canonical_head(
-        &self,
+        &mut self,
         state: ForkchoiceState,
         attrs: &Option<T::PayloadAttributes>, // Changed to reference
     ) -> ProviderResult<Option<TreeOutcome<OnForkChoiceUpdated>>> {
@@ -1366,7 +1365,7 @@ where
         debug!(target: "engine::tree", ?new_tip_num, last_persisted_block_number=?self.persistence_state.last_persisted_block.number, "Removing blocks using persistence task");
         if new_tip_num < self.persistence_state.last_persisted_block.number {
             debug!(target: "engine::tree", ?new_tip_num, "Starting remove blocks job");
-            self.pending_sparse_trie_prune = None;
+            self.pending_sparse_trie_prune = false;
             let (tx, rx) = crossbeam_channel::bounded(1);
             let _ = self.persistence.remove_blocks_above(new_tip_num, tx);
             self.persistence_state.start_remove(new_tip_num, rx);
@@ -1837,7 +1836,7 @@ where
         if ctrl.is_unwind() {
             // the node reset so we need to clear everything above that height so that backfill
             // height is the new canonical block.
-            self.pending_sparse_trie_prune = None;
+            self.pending_sparse_trie_prune = false;
             self.state.tree_state.reset(backfill_num_hash)
         } else {
             self.state.tree_state.remove_until(
@@ -2202,35 +2201,15 @@ where
             self.persistence_state.last_persisted_block,
             in_memory_persisted_block.number,
         );
-        self.pending_sparse_trie_prune = self.sparse_trie_retained_paths_for_in_memory_blocks();
+        self.pending_sparse_trie_prune = self.should_prune_sparse_trie();
         Ok(())
     }
 
-    /// Builds sparse trie retained paths from all blocks still present in the in-memory tree.
-    fn sparse_trie_retained_paths_for_in_memory_blocks(&self) -> Option<TriePrefixSetsMut> {
-        if self.config.skip_state_root() ||
-            self.config.state_root_fallback() ||
-            !self.config.use_state_root_task()
-        {
-            return None
-        }
-
-        let mut retained_paths = TriePrefixSetsMut::default();
-        for block in self.state.tree_state.blocks_by_hash.values() {
-            let trie_data = block.trie_data();
-            let Some(changed_paths) = trie_data.changed_paths.as_deref() else {
-                // Custom state-root strategies may not track changed paths, so this is an
-                // expected way to opt out of pruning, not an anomaly.
-                debug!(
-                    target: "engine::tree",
-                    block = ?block.recovered_block().num_hash(),
-                    "Skipping sparse trie prune because changed paths for in-memory block are unknown"
-                );
-                return None
-            };
-            retained_paths.extend_ref(changed_paths);
-        }
-        Some(retained_paths)
+    /// Returns whether sparse trie pruning should be attempted by the next sparse trie task.
+    const fn should_prune_sparse_trie(&self) -> bool {
+        !self.config.skip_state_root() &&
+            !self.config.state_root_fallback() &&
+            self.config.use_state_root_task()
     }
 
     /// Return an [`ExecutedBlock`] from database or in-memory state by hash.
@@ -2757,7 +2736,7 @@ where
             let old_first = old.first().map(|first| first.recovered_block().num_hash());
             trace!(target: "engine::tree", ?new_first, ?old_first, "Reorg detected, new and old first blocks");
 
-            self.pending_sparse_trie_prune = None;
+            self.pending_sparse_trie_prune = false;
             self.update_reorg_metrics(old.len(), old_first);
             self.reinsert_reorged_blocks(new.clone());
             self.reinsert_reorged_blocks(old.clone());
@@ -3339,7 +3318,7 @@ where
     /// Note: At this point, the fork choice update is considered to be VALID, however, we can still
     /// return an error if the payload attributes are invalid.
     fn process_payload_attributes(
-        &self,
+        &mut self,
         attributes: T::PayloadAttributes,
         head: &N::BlockHeader,
         state: ForkchoiceState,
@@ -3367,6 +3346,7 @@ where
             head,
             attributes.timestamp(),
             &self.state,
+            &mut self.pending_sparse_trie_prune,
         );
 
         // send the payload to the builder and return the receiver for the pending payload
