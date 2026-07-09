@@ -308,7 +308,7 @@ mod tests {
     use alloy_consensus::Header;
     use alloy_eips::eip7685::EMPTY_REQUESTS_HASH;
     use alloy_primitives::B256;
-    use reth_chainspec::{ChainSpec, ChainSpecBuilder};
+    use reth_chainspec::{ChainSpec, ChainSpecBuilder, EthereumHardfork, ForkCondition};
     use reth_consensus_common::validation::validate_against_parent_gas_limit;
     use reth_ethereum_primitives::{Block as EthBlock, EthPrimitives, Receipt};
     use reth_primitives_traits::{
@@ -336,6 +336,14 @@ mod tests {
     fn prague_recovered_block_with_bal_hash(hash: B256) -> RecoveredBlock<EthBlock> {
         let mut header = valid_prague_header();
         header.block_access_list_hash = Some(hash);
+        RecoveredBlock::new_unhashed(EthBlock { header, body: Default::default() }, Vec::new())
+    }
+
+    fn bogota_recovered_block_with_wam_root(root: B256) -> RecoveredBlock<EthBlock> {
+        let mut header = valid_prague_header();
+        header.block_access_list_hash = Some(B256::ZERO);
+        header.slot_number = Some(0);
+        header.wam_root = Some(root);
         RecoveredBlock::new_unhashed(EthBlock { header, body: Default::default() }, Vec::new())
     }
 
@@ -512,6 +520,56 @@ mod tests {
             )
             .unwrap_err(),
             ConsensusError::BlockAccessListHashMismatch(_)
+        ));
+    }
+
+    #[test]
+    fn bogota_post_execution_requires_wam_root() {
+        let chain_spec = Arc::new(
+            ChainSpecBuilder::mainnet()
+                .amsterdam_activated()
+                .with_fork(EthereumHardfork::Bogota, ForkCondition::Timestamp(0))
+                .build(),
+        );
+        let expected_root = B256::repeat_byte(0x42);
+        let block = bogota_recovered_block_with_wam_root(expected_root);
+        let result = BlockExecutionResult::<Receipt>::default();
+        let consensus = EthBeaconConsensus::new(chain_spec);
+
+        assert!(matches!(
+            FullConsensus::<EthPrimitives>::validate_block_post_execution(
+                &consensus,
+                &block,
+                &result,
+                None,
+                Some(B256::ZERO),
+                None,
+            )
+            .unwrap_err(),
+            ConsensusError::WamRootMissing
+        ));
+
+        assert!(FullConsensus::<EthPrimitives>::validate_block_post_execution(
+            &consensus,
+            &block,
+            &result,
+            None,
+            Some(B256::ZERO),
+            Some(expected_root),
+        )
+        .is_ok());
+
+        assert!(matches!(
+            FullConsensus::<EthPrimitives>::validate_block_post_execution(
+                &consensus,
+                &block,
+                &result,
+                None,
+                Some(B256::ZERO),
+                Some(B256::repeat_byte(0x24)),
+            )
+            .unwrap_err(),
+            ConsensusError::WamRootMismatch(_)
         ));
     }
 

@@ -117,7 +117,6 @@ use alloy_primitives::{
 };
 use reth_tasks::LazyHandle;
 
-use alloy_consensus::BlockHeader;
 use crate::tree::{
     payload_processor::receipt_root_task::{IndexedReceipt, ReceiptRootTaskHandle},
     state_root_strategy::{
@@ -125,7 +124,7 @@ use crate::tree::{
         StateRootStrategy,
     },
 };
-use alloy_consensus::constants::KECCAK_EMPTY;
+use alloy_consensus::{constants::KECCAK_EMPTY, BlockHeader};
 use alloy_primitives::Address;
 use reth_chain_state::{
     CanonicalInMemoryState, ExecutedBlock, ExecutionTimingStats, StateTrieOverlayManager,
