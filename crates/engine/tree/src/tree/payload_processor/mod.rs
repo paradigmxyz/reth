@@ -15,7 +15,7 @@ use crossbeam_channel::{Receiver as CrossbeamReceiver, Sender as CrossbeamSender
 use multiproof::*;
 use prewarm::PrewarmMetrics;
 use rayon::prelude::*;
-use reth_chain_state::{PreservedSparseTrie, StateTrieOverlayManager};
+use reth_chain_state::{ExecutedBlock, PreservedSparseTrie, StateTrieOverlayManager};
 use reth_evm::{
     block::ExecutableTxParts,
     execute::{ExecutableTxFor, WithTxEnv},
@@ -130,10 +130,16 @@ where
     bal_prewarm_pool: OnceLock<Arc<bal_prewarm_pool::BalPrewarmPool>>,
 }
 
-struct SparseTrieTaskOptions {
+struct SparseTrieTaskOptions<N: NodePrimitives> {
     parent_state_root: B256,
     chunk_size: usize,
-    pending_sparse_trie_prune: Option<TriePrefixSetsMut>,
+    /// In-memory ancestor blocks whose changed paths must be retained while pruning the sparse
+    /// trie.
+    ///
+    /// `None` means this sparse trie task should not prune. `Some(Vec::new())` still means pruning
+    /// was requested, but the task only needs to retain paths changed by the current block. If any
+    /// listed ancestor block lacks changed paths, the task skips pruning.
+    pending_sparse_trie_prune_blocks: Option<Vec<ExecutedBlock<N>>>,
 }
 
 impl<Evm> PayloadProcessor<Evm>
@@ -238,7 +244,8 @@ where
         env: ExecutionEnv<Evm>,
         transactions: I,
         provider_builder: StateProviderBuilder<Evm::Primitives, P>,
-        state_root_streams: StateRootStreams,
+        hint_stream: Option<StateRootHintStream>,
+        hashed_update_stream: Option<StateRootUpdateStream>,
         parallel_bal_execution: bool,
     ) -> IteratorPayloadHandle<Evm, I>
     where
@@ -250,7 +257,8 @@ where
             env,
             prewarm_rx,
             provider_builder,
-            state_root_streams,
+            hint_stream,
+            hashed_update_stream,
             parallel_bal_execution,
         );
         PayloadHandle { prewarm_handle, transactions: execution_rx, _span: Span::current() }
@@ -259,8 +267,9 @@ where
     /// Spawns state root computation pipeline (multiproof + sparse trie tasks).
     ///
     /// The returned [`StateRootHandle`] provides:
-    /// - [`StateRootHandle::streams`] — semantic stream views that feed updates into the pipeline,
-    ///   including an execution hook for per-transaction state updates.
+    /// - [`StateRootHandle::take_hint_stream`], [`StateRootHandle::take_execution_hook`] and
+    ///   [`StateRootHandle::take_hashed_update_stream`] — capabilities that feed updates into the
+    ///   pipeline, owned by the producers of their messages.
     /// - [`StateRootHandle::state_root`] — blocks until the state root is computed and returns the
     ///   state root.
     ///
@@ -278,7 +287,7 @@ where
         parent_state_root: B256,
         transaction_count: Option<usize>,
         config: &TreeConfig,
-        pending_sparse_trie_prune: Option<TriePrefixSetsMut>,
+        pending_sparse_trie_prune_blocks: Option<Vec<ExecutedBlock<Evm::Primitives>>>,
     ) -> StateRootHandle
     where
         F: DatabaseProviderROFactory<Provider: TrieCursorFactory + HashedCursorFactory>
@@ -288,6 +297,7 @@ where
             + 'static,
     {
         let (updates_tx, from_multi_proof) = crossbeam_channel::unbounded();
+        let (cancel_guard, cancel_rx) = StateRootTaskCancelGuard::channel();
 
         let task_ctx = ProofTaskCtx::new(multiproof_provider_factory);
         #[cfg(feature = "trie-debug")]
@@ -304,18 +314,25 @@ where
             state_root_tx,
             hashed_state_tx,
             from_multi_proof,
+            cancel_rx,
             SparseTrieTaskOptions {
                 parent_state_root,
                 chunk_size: config.multiproof_chunk_size(),
-                pending_sparse_trie_prune: if self.disable_sparse_trie_cache_pruning {
+                pending_sparse_trie_prune_blocks: if self.disable_sparse_trie_cache_pruning {
                     None
                 } else {
-                    pending_sparse_trie_prune
+                    pending_sparse_trie_prune_blocks
                 },
             },
         );
 
-        StateRootHandle::new(parent_state_root, updates_tx, state_root_rx, hashed_state_rx)
+        StateRootHandle::new(
+            parent_state_root,
+            updates_tx,
+            cancel_guard,
+            state_root_rx,
+            hashed_state_rx,
+        )
     }
 
     /// Transaction count threshold below which proof workers are halved, since fewer transactions
@@ -466,22 +483,26 @@ where
         env: ExecutionEnv<Evm>,
         transactions: mpsc::Receiver<(usize, impl ExecutableTxFor<Evm> + Clone + Send + 'static)>,
         provider_builder: StateProviderBuilder<Evm::Primitives, P>,
-        state_root_streams: StateRootStreams,
+        hint_stream: Option<StateRootHintStream>,
+        hashed_update_stream: Option<StateRootUpdateStream>,
         parallel_bal_execution: bool,
     ) -> CacheTaskHandle<<Evm::Primitives as NodePrimitives>::Receipt>
     where
         P: BlockReader + StateProviderFactory + StateReader + Clone + 'static,
     {
+        // Each mode carries the capability its producers use; the rest is dropped here, so
+        // unused capabilities do not keep the state-root task's update channel open.
         let mode = if parallel_bal_execution {
-            PrewarmMode::BlockAccessList(
-                env.decoded_bal.clone().expect("BAL dispatch implies decoded BAL"),
-            )
+            PrewarmMode::BlockAccessList {
+                bal: env.decoded_bal.clone().expect("BAL dispatch implies decoded BAL"),
+                updates: hashed_update_stream,
+            }
         } else if self.disable_transaction_prewarming ||
             env.transaction_count < SMALL_BLOCK_TX_THRESHOLD
         {
             PrewarmMode::Skipped
         } else {
-            PrewarmMode::Transactions(transactions)
+            PrewarmMode::Transactions { pending: transactions, hints: hint_stream }
         };
         let saved_cache = self.disable_state_cache.not().then(|| self.cache_for(env.parent_hash));
 
@@ -504,12 +525,8 @@ where
             disable_bal_batch_io: self.disable_bal_batch_io,
         };
 
-        let (prewarm_task, to_prewarm_task) = PrewarmCacheTask::new(
-            self.executor.clone(),
-            self.execution_cache.clone(),
-            prewarm_ctx,
-            state_root_streams,
-        );
+        let (prewarm_task, to_prewarm_task) =
+            PrewarmCacheTask::new(self.executor.clone(), self.execution_cache.clone(), prewarm_ctx);
         {
             let to_prewarm_task = to_prewarm_task.clone();
             self.executor.spawn_blocking_named("prewarm", move || {
@@ -554,10 +571,14 @@ where
         state_root_tx: mpsc::Sender<Result<StateRootComputeOutcome, StateRootTaskError>>,
         hashed_state_tx: mpsc::Sender<HashedPostState>,
         from_multi_proof: CrossbeamReceiver<StateRootMessage>,
-        options: SparseTrieTaskOptions,
+        cancel_rx: CrossbeamReceiver<()>,
+        options: SparseTrieTaskOptions<Evm::Primitives>,
     ) {
-        let SparseTrieTaskOptions { parent_state_root, chunk_size, pending_sparse_trie_prune } =
-            options;
+        let SparseTrieTaskOptions {
+            parent_state_root,
+            chunk_size,
+            pending_sparse_trie_prune_blocks,
+        } = options;
         let state_trie_overlays = self.state_trie_overlays.clone();
         let trie_metrics = self.trie_metrics.clone();
         let max_hot_slots = self.sparse_trie_max_hot_slots;
@@ -601,6 +622,7 @@ where
             let mut task = SparseTrieCacheTask::new_with_trie(
                 &executor,
                 from_multi_proof,
+                cancel_rx,
                 hashed_state_tx,
                 proof_worker_handle,
                 trie_metrics.clone(),
@@ -642,13 +664,16 @@ where
             let deferred = if let Some(result) = task_result {
                 let start = Instant::now();
                 let (mut trie, deferred) = task.into_trie_for_reuse();
-                if let Some(mut retained_paths) = pending_sparse_trie_prune {
+                if let Some(prune_blocks) = pending_sparse_trie_prune_blocks {
                     let changed_paths = result
                         .changed_paths
                         .as_deref()
                         .expect("sparse trie task always returns changed paths");
-                    retained_paths.extend_ref(changed_paths);
-                    trie.prune(max_hot_slots, max_hot_accounts, retained_paths);
+                    if let Some(retained_paths) =
+                        sparse_trie_retained_paths(prune_blocks, changed_paths)
+                    {
+                        trie.prune(max_hot_slots, max_hot_accounts, retained_paths);
+                    }
                 }
                 trie_metrics
                     .into_trie_for_reuse_duration_histogram
@@ -728,6 +753,27 @@ where
             debug!(target: "engine::caching", ?block_with_parent, "Updated execution cache for inserted block");
         });
     }
+}
+
+fn sparse_trie_retained_paths<N: NodePrimitives>(
+    prune_blocks: Vec<ExecutedBlock<N>>,
+    current_changed_paths: &TriePrefixSetsMut,
+) -> Option<TriePrefixSetsMut> {
+    let mut retained_paths = TriePrefixSetsMut::default();
+    for block in prune_blocks {
+        let trie_data = block.trie_data();
+        let Some(changed_paths) = trie_data.changed_paths.as_deref() else {
+            debug!(
+                target: "engine::tree::payload_processor",
+                block = ?block.recovered_block().num_hash(),
+                "Skipping sparse trie prune because changed paths for in-memory block are unknown"
+            );
+            return None
+        };
+        retained_paths.extend_ref(changed_paths);
+    }
+    retained_paths.extend_ref(current_changed_paths);
+    Some(retained_paths)
 }
 
 /// Converts transactions sequentially and sends them to the prewarm and execute channels.
@@ -934,7 +980,7 @@ mod tests {
     use alloy_eips::eip1898::{BlockNumHash, BlockWithParent};
     use alloy_primitives::{map::HashMap, Address, B256, U256};
     use rand::Rng;
-    use reth_chain_state::StateTrieOverlayManager;
+    use reth_chain_state::{test_utils::TestBlockBuilder, ExecutedBlock, StateTrieOverlayManager};
     use reth_chainspec::ChainSpec;
     use reth_db_common::init::init_genesis;
     use reth_ethereum_primitives::EthPrimitives;
@@ -949,7 +995,12 @@ mod tests {
     };
     use reth_revm::db::BundleState;
     use reth_testing_utils::generators;
-    use reth_trie::{test_utils::state_root, HashedPostState};
+    use reth_trie::{
+        prefix_set::{PrefixSetMut, TriePrefixSetsMut},
+        test_utils::state_root,
+        HashedPostState, LazyTrieData,
+    };
+    use reth_trie_common::Nibbles;
     use reth_trie_db::ChangesetCache;
     use revm::state::{AccountInfo, AccountStatus, EvmState, EvmStorageSlot, TransactionId};
     use std::sync::Arc;
@@ -961,6 +1012,30 @@ mod tests {
 
     fn state_trie_overlays() -> StateTrieOverlayManager<EthPrimitives> {
         StateTrieOverlayManager::default()
+    }
+
+    fn with_changed_paths(
+        block: ExecutedBlock<EthPrimitives>,
+        changed_paths: TriePrefixSetsMut,
+    ) -> ExecutedBlock<EthPrimitives> {
+        let mut trie_data = block.trie_data();
+        trie_data.changed_paths = Some(Arc::new(changed_paths));
+        ExecutedBlock::with_deferred_trie_data(
+            block.recovered_block,
+            block.execution_output,
+            LazyTrieData::ready(trie_data),
+        )
+    }
+
+    fn trie_changed_paths(account_path: u8, storage_path: u8) -> TriePrefixSetsMut {
+        TriePrefixSetsMut {
+            account_prefix_set: PrefixSetMut::from([Nibbles::from_nibbles([account_path])]),
+            storage_prefix_sets: HashMap::from_iter([(
+                B256::with_last_byte(account_path),
+                PrefixSetMut::from([Nibbles::from_nibbles([storage_path])]),
+            )]),
+            destroyed_accounts: Default::default(),
+        }
     }
 
     #[test]
@@ -997,6 +1072,30 @@ mod tests {
 
         let retry = execution_cache.get_cache_for(hash);
         assert!(retry.is_some(), "checkout should succeed after guard drop");
+    }
+
+    #[test]
+    fn sparse_trie_retained_paths_merges_prune_blocks_with_current_block() {
+        let blocks: Vec<_> = TestBlockBuilder::eth()
+            .get_executed_blocks(1..3)
+            .zip([trie_changed_paths(0x01, 0x02), trie_changed_paths(0x03, 0x04)])
+            .map(|(block, changed_paths)| with_changed_paths(block, changed_paths))
+            .collect();
+        let current_changed_paths = trie_changed_paths(0x05, 0x06);
+
+        let retained_paths =
+            super::sparse_trie_retained_paths(blocks, &current_changed_paths).unwrap().freeze();
+
+        assert_eq!(retained_paths.account_prefix_set.len(), 3);
+        assert_eq!(retained_paths.storage_prefix_sets.len(), 3);
+    }
+
+    #[test]
+    fn sparse_trie_retained_paths_skips_prune_when_changed_paths_missing() {
+        let blocks: Vec<_> = TestBlockBuilder::eth().get_executed_blocks(1..2).collect();
+        let current_changed_paths = trie_changed_paths(0x01, 0x02);
+
+        assert!(super::sparse_trie_retained_paths(blocks, &current_changed_paths).is_none());
     }
 
     #[test]
@@ -1287,9 +1386,7 @@ mod tests {
             None,
         );
 
-        let mut streams = state_root_handle.streams(true);
-        let mut state_hook =
-            streams.take_execution_stream().expect("execution stream installed").state_hook();
+        let mut state_hook = state_root_handle.take_execution_hook();
 
         for update in state_updates {
             state_hook.on_state(update);
