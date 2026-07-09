@@ -88,10 +88,7 @@ use crate::{
     TransactionValidator,
 };
 
-use alloy_primitives::{
-    map::{AddressSet, HashSet},
-    Address, TxHash, B256,
-};
+use alloy_primitives::{map::AddressSet, Address, TxHash, B256};
 use parking_lot::{Mutex, RwLock, RwLockReadGuard, RwLockWriteGuard};
 use reth_eth_wire_types::HandleMempoolData;
 use reth_execution_types::ChangedAccount;
@@ -674,7 +671,7 @@ where
         >,
     ) -> Vec<PoolResult<AddedTransactionOutcome>> {
         // Collect results and metadata while holding the pool write lock
-        let (mut results, added_metas, discarded) = {
+        let (mut results, added_metas, mut discarded) = {
             let mut pool = self.pool.write();
             let mut added_metas = Vec::new();
 
@@ -715,14 +712,15 @@ where
             self.delete_discarded_blobs(discarded.iter());
             self.with_event_listener(|listener| listener.discarded_many(&discarded));
 
-            let discarded_hashes =
-                discarded.into_iter().map(|tx| *tx.hash()).collect::<HashSet<_>>();
+            // Notifications preserve eviction order; sorting afterward enables allocation-free
+            // lookups.
+            discarded.sort_unstable_by(|a, b| a.hash().cmp(b.hash()));
 
             // A newly added transaction may be immediately discarded, so we need to
             // adjust the result here
             for res in &mut results {
                 if let Ok(AddedTransactionOutcome { hash, .. }) = res &&
-                    discarded_hashes.contains(hash)
+                    discarded.binary_search_by(|tx| tx.hash().cmp(hash)).is_ok()
                 {
                     *res = Err(PoolError::new(*hash, PoolErrorKind::DiscardedOnInsert))
                 }
