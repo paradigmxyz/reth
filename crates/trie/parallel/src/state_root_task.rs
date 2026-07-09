@@ -95,8 +95,25 @@ impl StateRootHandle {
 
     /// Returns semantic stream views backed by this sparse trie task.
     pub fn streams(&self, install_execution_hook: bool) -> StateRootStreams {
-        StateRootStreams::from_sink(
+        StateRootStreams::from_sink_views(
             Arc::new(SparseTrieStateRootSink::new(self.updates_tx.clone())),
+            true,
+            true,
+            install_execution_hook,
+        )
+    }
+
+    /// Returns only the semantic stream views needed by the caller.
+    pub fn streams_with_views(
+        &self,
+        install_hint: bool,
+        install_hashed_updates: bool,
+        install_execution_hook: bool,
+    ) -> StateRootStreams {
+        StateRootStreams::from_sink_views(
+            Arc::new(SparseTrieStateRootSink::new(self.updates_tx.clone())),
+            install_hint,
+            install_hashed_updates,
             install_execution_hook,
         )
     }
@@ -375,9 +392,20 @@ impl fmt::Debug for StateRootStreams {
 impl StateRootStreams {
     /// Creates stream views backed by one sink.
     pub fn from_sink(inner: Arc<dyn StateRootSink>, install_execution_hook: bool) -> Self {
+        Self::from_sink_views(inner, true, true, install_execution_hook)
+    }
+
+    /// Creates selected stream views backed by one sink.
+    pub fn from_sink_views(
+        inner: Arc<dyn StateRootSink>,
+        install_hint: bool,
+        install_hashed_updates: bool,
+        install_execution_hook: bool,
+    ) -> Self {
         Self {
-            hint: Some(StateRootHintStream::new(Arc::clone(&inner))),
-            hashed_updates: Some(StateRootHashedUpdateStream::new(Arc::clone(&inner))),
+            hint: install_hint.then(|| StateRootHintStream::new(Arc::clone(&inner))),
+            hashed_updates: install_hashed_updates
+                .then(|| StateRootHashedUpdateStream::new(Arc::clone(&inner))),
             execution: install_execution_hook.then(|| StateRootExecutionStream::new(inner)),
         }
     }
@@ -587,6 +615,21 @@ mod tests {
         assert_eq!(sink.state_updates.load(Ordering::Relaxed), 1);
         assert_eq!(sink.hashed_state_updates.load(Ordering::Relaxed), 1);
         assert_eq!(sink.finished_updates.load(Ordering::Relaxed), 2);
+    }
+
+    #[test]
+    fn state_root_streams_install_selected_views() {
+        let sink = Arc::new(CountingSink::default());
+
+        let mut serial_streams = StateRootStreams::from_sink_views(sink.clone(), true, false, true);
+        assert!(serial_streams.hint_stream().is_some());
+        assert!(serial_streams.hashed_update_stream().is_none());
+        assert!(serial_streams.take_execution_stream().is_some());
+
+        let mut bal_streams = StateRootStreams::from_sink_views(sink, false, true, false);
+        assert!(bal_streams.hint_stream().is_none());
+        assert!(bal_streams.hashed_update_stream().is_some());
+        assert!(bal_streams.take_execution_stream().is_none());
     }
 
     /// Lifecycle of the opaque handle a strategy hands to the payload builder: the execution

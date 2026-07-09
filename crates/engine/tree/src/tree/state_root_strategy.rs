@@ -462,7 +462,11 @@ where
             config,
             pending_sparse_trie_prune,
         );
-        let streams = handle.streams(!parallel_bal_execution);
+        let streams = if parallel_bal_execution {
+            handle.streams_with_views(false, true, false)
+        } else {
+            handle.streams_with_views(true, false, true)
+        };
         let hashed_state_rx = Some(handle.take_hashed_state_rx());
 
         Ok(PreparedStateRootJob::new(
