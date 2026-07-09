@@ -117,6 +117,7 @@ impl From<Header> for SealedHeader {
             requests_hash: value.requests_hash,
             block_access_list_hash: None,
             slot_number: None,
+            wam_root: None,
         };
         Self::new(header, value.hash)
     }
