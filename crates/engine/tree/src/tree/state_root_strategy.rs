@@ -461,9 +461,22 @@ where
             ))
         }
 
+        let preserved_sparse_trie = payload_processor.take_preserved_sparse_trie();
+        let overlay_factory = if let Some(anchor_hash) = preserved_sparse_trie
+            .as_ref()
+            .filter(|trie| trie.state_root() == env.parent_state_root)
+            .map(|trie| trie.anchor_hash())
+        {
+            overlay_factory.with_skip_overlay_for_reused_sparse_trie(anchor_hash)
+        } else {
+            overlay_factory
+        };
+
         let mut handle = payload_processor.spawn_state_root(
             overlay_factory.clone(),
+            env.parent_hash,
             env.parent_state_root,
+            preserved_sparse_trie,
             Some(env.transaction_count),
             config,
             pending_sparse_trie_prune_blocks,
@@ -491,6 +504,7 @@ where
         mut ctx: PayloadStateRootJobContext<'_, N, P, Evm>,
     ) -> ProviderResult<Option<PayloadStateRootHandle>> {
         let parent_state_root = ctx.parent_state_root();
+        let parent_hash = ctx.parent_hash();
         let payload_processor = ctx.payload_processor;
         let overlay_factory = ctx.overlay_factory.clone();
         let config = ctx.config;
@@ -504,11 +518,24 @@ where
             return Ok(None)
         }
 
+        let preserved_sparse_trie = payload_processor.take_preserved_sparse_trie();
+        let overlay_factory = if let Some(anchor_hash) = preserved_sparse_trie
+            .as_ref()
+            .filter(|trie| trie.state_root() == parent_state_root)
+            .map(|trie| trie.anchor_hash())
+        {
+            overlay_factory.with_skip_overlay_for_reused_sparse_trie(anchor_hash)
+        } else {
+            overlay_factory
+        };
+
         Ok(Some(
             payload_processor
                 .spawn_state_root(
                     overlay_factory,
+                    parent_hash,
                     parent_state_root,
+                    preserved_sparse_trie,
                     // Tx count unknown at FCU time (block built incrementally): full proof
                     // workers.
                     None,
