@@ -14,9 +14,12 @@ use reth_eth_wire::{
     NewPooledTransactionHashes, NodeData, PooledTransactions, Receipts, SharedTransactions,
     Transactions,
 };
-use reth_eth_wire_types::RawCapabilityMessage;
-use reth_network_api::PeerRequest;
-use reth_network_p2p::error::{RequestError, RequestResult};
+use reth_eth_wire_types::{snap::SnapProtocolMessage, RawCapabilityMessage};
+use reth_network_api::{PeerRequest, RequestMessage};
+use reth_network_p2p::{
+    error::{RequestError, RequestResult},
+    snap::client::SnapResponse,
+};
 use reth_primitives_traits::Block;
 use std::{
     sync::Arc,
@@ -134,6 +137,10 @@ pub enum BlockRequest {
     ///
     /// The response should be sent through the channel.
     GetReceipts(GetReceipts),
+    /// Requests a `snap/2` (EIP-8189) message from the peer.
+    ///
+    /// The response should be sent through the channel.
+    GetSnap(SnapProtocolMessage),
 }
 
 /// Corresponding variant for [`PeerRequest`].
@@ -189,6 +196,11 @@ pub enum PeerResponse<N: NetworkPrimitives = EthNetworkPrimitives> {
         /// The receiver channel for the response to a cells request.
         response: oneshot::Receiver<RequestResult<Cells>>,
     },
+    /// Represents a response to a `snap/2` (EIP-8189) request.
+    Snap {
+        /// The receiver channel for the response to a `snap/2` request.
+        response: oneshot::Receiver<RequestResult<SnapResponse>>,
+    },
 }
 
 // === impl PeerResponse ===
@@ -236,6 +248,10 @@ impl<N: NetworkPrimitives> PeerResponse<N> {
                 Ok(res) => PeerResponseResult::Cells(res),
                 Err(err) => PeerResponseResult::Cells(Err(err.into())),
             },
+            Self::Snap { response } => match ready!(response.poll_unpin(cx)) {
+                Ok(res) => PeerResponseResult::Snap(res),
+                Err(err) => PeerResponseResult::Snap(Err(err.into())),
+            },
         };
         Poll::Ready(res)
     }
@@ -262,19 +278,23 @@ pub enum PeerResponseResult<N: NetworkPrimitives = EthNetworkPrimitives> {
     BlockAccessLists(RequestResult<BlockAccessLists>),
     /// Represents a result containing cells or an error.
     Cells(RequestResult<Cells>),
+    /// Represents a result containing a `snap/2` response or an error.
+    Snap(RequestResult<SnapResponse>),
 }
 
 // === impl PeerResponseResult ===
 
 impl<N: NetworkPrimitives> PeerResponseResult<N> {
-    /// Converts this response into an [`EthMessage`]
-    pub fn try_into_message(self, id: u64) -> RequestResult<EthMessage<N>> {
+    /// Converts this response into the [`RequestMessage`] to send back to the peer: an
+    /// [`EthMessage`] for every variant except [`Self::Snap`], which becomes a
+    /// [`SnapProtocolMessage`].
+    pub fn try_into_message(self, id: u64) -> RequestResult<RequestMessage<N>> {
         macro_rules! to_message {
             ($response:ident, $item:ident, $request_id:ident) => {
                 match $response {
                     Ok(res) => {
                         let request = RequestPair { request_id: $request_id, message: $item(res) };
-                        Ok(EthMessage::$item(request))
+                        Ok(RequestMessage::Eth(EthMessage::$item(request)))
                     }
                     Err(err) => Err(err),
                 }
@@ -302,21 +322,29 @@ impl<N: NetworkPrimitives> PeerResponseResult<N> {
             Self::Receipts70(resp) => match resp {
                 Ok(res) => {
                     let request = RequestPair { request_id: id, message: res };
-                    Ok(EthMessage::Receipts70(request))
+                    Ok(RequestMessage::Eth(EthMessage::Receipts70(request)))
                 }
                 Err(err) => Err(err),
             },
             Self::BlockAccessLists(resp) => match resp {
                 Ok(res) => {
                     let request = RequestPair { request_id: id, message: res };
-                    Ok(EthMessage::BlockAccessLists(request))
+                    Ok(RequestMessage::Eth(EthMessage::BlockAccessLists(request)))
                 }
                 Err(err) => Err(err),
             },
             Self::Cells(resp) => match resp {
                 Ok(res) => {
                     let request = RequestPair { request_id: id, message: res };
-                    Ok(EthMessage::Cells(request))
+                    Ok(RequestMessage::Eth(EthMessage::Cells(request)))
+                }
+                Err(err) => Err(err),
+            },
+            Self::Snap(resp) => match resp {
+                Ok(res) => {
+                    let mut message: SnapProtocolMessage = res.into();
+                    message.set_request_id(id);
+                    Ok(RequestMessage::Snap(message))
                 }
                 Err(err) => Err(err),
             },
@@ -335,6 +363,7 @@ impl<N: NetworkPrimitives> PeerResponseResult<N> {
             Self::Receipts70(res) => res.as_ref().err(),
             Self::BlockAccessLists(res) => res.as_ref().err(),
             Self::Cells(res) => res.as_ref().err(),
+            Self::Snap(res) => res.as_ref().err(),
         }
     }
 
