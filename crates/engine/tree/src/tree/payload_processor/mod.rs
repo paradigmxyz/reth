@@ -8,6 +8,7 @@ use crate::tree::{
     ExecutionCache, PayloadExecutionCache, SavedCache, StateProviderBuilder, TreeConfig,
     WaitForCaches,
 };
+use alloy_consensus::BlockHeader;
 use alloy_eip7928::bal::DecodedBal;
 use alloy_eips::{eip1898::BlockWithParent, eip4895::Withdrawal};
 use alloy_primitives::B256;
@@ -131,7 +132,9 @@ where
 }
 
 struct SparseTrieTaskOptions<N: NodePrimitives> {
+    parent_hash: B256,
     parent_state_root: B256,
+    preserved_sparse_trie: Option<PreservedSparseTrie>,
     chunk_size: usize,
     pending_sparse_trie_prune_blocks: Option<Vec<ExecutedBlock<N>>>,
 }
@@ -143,6 +146,11 @@ where
     /// Returns a reference to the workload executor driving payload tasks.
     pub const fn executor(&self) -> &Runtime {
         &self.executor
+    }
+
+    /// Takes the preserved sparse trie handle, if present.
+    pub(crate) fn take_preserved_sparse_trie(&self) -> Option<PreservedSparseTrie> {
+        self.state_trie_overlays.take_sparse_trie()
     }
 
     /// Creates a new payload processor.
@@ -275,7 +283,9 @@ where
     pub fn spawn_state_root<F>(
         &self,
         multiproof_provider_factory: F,
+        parent_hash: B256,
         parent_state_root: B256,
+        preserved_sparse_trie: Option<PreservedSparseTrie>,
         transaction_count: Option<usize>,
         config: &TreeConfig,
         pending_sparse_trie_prune_blocks: Option<Vec<ExecutedBlock<Evm::Primitives>>>,
@@ -305,7 +315,9 @@ where
             hashed_state_tx,
             from_multi_proof,
             SparseTrieTaskOptions {
+                parent_hash,
                 parent_state_root,
+                preserved_sparse_trie,
                 chunk_size: config.multiproof_chunk_size(),
                 pending_sparse_trie_prune_blocks: if self.disable_sparse_trie_cache_pruning {
                     None
@@ -557,7 +569,9 @@ where
         options: SparseTrieTaskOptions<Evm::Primitives>,
     ) {
         let SparseTrieTaskOptions {
+            parent_hash,
             parent_state_root,
+            preserved_sparse_trie,
             chunk_size,
             pending_sparse_trie_prune_blocks,
         } = options;
@@ -574,30 +588,44 @@ where
             let _enter = debug_span!(target: "engine::tree::payload_processor", parent: parent_span, "sparse_trie_task")
                 .entered();
 
-            // Reuse a stored SparseStateTrie if available, applying continuation logic.
-            // If this payload's parent state root matches the preserved trie's anchor,
-            // we can reuse the preserved trie structure. Otherwise, we clear the trie but
-            // keep allocations.
-            let start = Instant::now();
-            let preserved = state_trie_overlays.take_sparse_trie();
-            trie_metrics
-                .sparse_trie_cache_wait_duration_histogram
-                .record(start.elapsed().as_secs_f64());
+            let new_sparse_state_trie = || {
+                debug!(
+                    target: "engine::tree::payload_processor",
+                    "Creating new sparse trie - no preserved trie available"
+                );
+                let default_trie =
+                    RevealableSparseTrie::blind_from(ArenaParallelSparseTrie::default());
+                SparseStateTrie::default()
+                    .with_accounts_trie(default_trie.clone())
+                    .with_default_storage_trie(default_trie)
+                    .with_updates(true)
+            };
 
-            let mut sparse_state_trie = preserved
-                .map(|preserved| preserved.into_trie_for(parent_state_root))
-                .unwrap_or_else(|| {
-                    debug!(
-                        target: "engine::tree::payload_processor",
-                        "Creating new sparse trie - no preserved trie available"
-                    );
-                    let default_trie =
-                        RevealableSparseTrie::blind_from(ArenaParallelSparseTrie::default());
-                    SparseStateTrie::default()
-                        .with_accounts_trie(default_trie.clone())
-                        .with_default_storage_trie(default_trie)
-                        .with_updates(true)
-                });
+            let mut sparse_trie_anchor_hash = parent_hash;
+            let mut sparse_state_trie = match preserved_sparse_trie {
+                Some(preserved) => {
+                    let start = Instant::now();
+                    let preserved_anchor_hash = preserved.anchor_hash();
+                    let preserved = preserved.into_trie_for(parent_state_root);
+                    trie_metrics
+                        .sparse_trie_cache_wait_duration_histogram
+                        .record(start.elapsed().as_secs_f64());
+
+                    match preserved {
+                        Ok(Some(trie)) => {
+                            sparse_trie_anchor_hash = preserved_anchor_hash;
+                            trie
+                        }
+                        Ok(None) => new_sparse_state_trie(),
+                        Err(err) => {
+                            let _ = state_root_tx
+                                .send(Err(StateRootTaskError::Other(err.to_string())));
+                            return;
+                        }
+                    }
+                }
+                None => new_sparse_state_trie(),
+            };
             sparse_state_trie.set_changed_paths(true);
             sparse_state_trie.set_hot_cache_capacities(max_hot_slots, max_hot_accounts);
 
@@ -613,36 +641,51 @@ where
             );
 
             let result = task.run();
-
-            // Acquire the guard before sending the result to prevent a race condition:
-            // Without this, the next block could start after send() but before store(),
-            // causing take_sparse_trie() to return None and forcing it to create a new empty trie
-            // instead of reusing the preserved one. Holding the guard ensures the next
-            // block's take_sparse_trie() blocks until we've stored the trie for reuse.
-            let mut guard = state_trie_overlays.lock_sparse_trie();
-
             let task_result = result.as_ref().ok().cloned();
-            // Send state root computation result - next block may start but will block on
-            // take_sparse_trie().
+
+            // Publish the preserved trie handle before sending the result so the next block can
+            // take the handle and inspect its state root without waiting for trie pruning below.
+            let mut guard = state_trie_overlays.lock_sparse_trie();
+            let pending_trie = if let Some(result) = &task_result {
+                let preserved_anchor_hash = pending_sparse_trie_prune_blocks
+                    .as_ref()
+                    .and_then(|blocks| {
+                        blocks.last().map(|block| block.recovered_block().parent_hash())
+                    })
+                    .unwrap_or(sparse_trie_anchor_hash);
+                let (preserved, completer) =
+                    PreservedSparseTrie::pending(result.state_root, preserved_anchor_hash);
+                guard.store(preserved);
+                Some(completer)
+            } else {
+                guard.clear();
+                None
+            };
+
             if state_root_tx.send(result).is_err() {
                 // Receiver dropped - payload was likely invalid or cancelled.
                 // Clear the trie instead of preserving potentially invalid state.
                 debug!(
                     target: "engine::tree::payload_processor",
-                    "State root receiver dropped, clearing trie"
+                    "State root receiver dropped, dropping trie"
                 );
                 let (trie, deferred) = task.into_cleared_trie();
-                guard.store(PreservedSparseTrie::cleared(trie));
+                guard.clear();
                 drop(guard);
+                executor.spawn_drop(trie);
                 executor.spawn_drop(deferred);
                 return;
             }
+            drop(guard);
 
-            // Only preserve the trie as anchored if computation succeeded.
+            // Only preserve the trie for reuse if computation succeeded.
             // A failed computation may have left the trie in a partially updated state.
             let _enter =
                 debug_span!(target: "engine::tree::payload_processor", "preserve").entered();
+            let mut trie_to_drop = None;
             let deferred = if let Some(result) = task_result {
+                let pending_trie =
+                    pending_trie.expect("pending trie is created for successful task result");
                 let start = Instant::now();
                 let (mut trie, deferred) = task.into_trie_for_reuse();
                 if let Some(prune_blocks) = pending_sparse_trie_prune_blocks {
@@ -665,18 +708,22 @@ where
                 trie_metrics
                     .sparse_trie_retained_storage_tries
                     .set(trie.retained_storage_tries_count() as f64);
-                guard.store(PreservedSparseTrie::anchored(trie, result.state_root));
+                if let Err(trie) = pending_trie.complete(trie) {
+                    trie_to_drop = Some(trie);
+                }
                 deferred
             } else {
                 debug!(
                     target: "engine::tree::payload_processor",
-                    "State root computation failed, clearing trie"
+                    "State root computation failed, dropping trie"
                 );
                 let (trie, deferred) = task.into_cleared_trie();
-                guard.store(PreservedSparseTrie::cleared(trie));
+                trie_to_drop = Some(trie);
                 deferred
             };
-            drop(guard);
+            if let Some(trie) = trie_to_drop {
+                executor.spawn_drop(trie);
+            }
             executor.spawn_drop(deferred);
         });
     }
@@ -913,8 +960,8 @@ pub struct ExecutionEnv<Evm: ConfigureEvm> {
     /// Hash of the parent block.
     pub parent_hash: B256,
     /// State root of the parent block.
-    /// Used for sparse trie continuation: if the preserved trie's anchor matches this,
-    /// the trie can be reused directly.
+    /// Used for sparse trie continuation: if the preserved trie's state root matches this, the
+    /// trie can be reused directly.
     pub parent_state_root: B256,
     /// Number of transactions in the block.
     /// Used to determine parallel worker count for prewarming.
@@ -1361,7 +1408,9 @@ mod tests {
                 provider_factory,
                 OverlayBuilder::<EthPrimitives>::new(genesis_hash, ChangesetCache::new()),
             ),
+            genesis_hash,
             env.parent_state_root,
+            None,
             Some(env.transaction_count),
             &TreeConfig::default(),
             None,
