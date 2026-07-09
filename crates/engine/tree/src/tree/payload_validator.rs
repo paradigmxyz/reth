@@ -1843,17 +1843,17 @@ where
             Self::overlay_builder_for_parent(parent_hash, state, self.changeset_cache.clone()),
         );
 
-        match self.state_root_strategy.prepare_payload_builder(PayloadStateRootJobContext::new(
-            &self.payload_processor,
+        match self.state_root_strategy.prepare_payload_builder(PayloadStateRootJobContext {
+            payload_processor: &self.payload_processor,
             parent_hash,
             parent_header,
             timestamp,
             state,
             provider_builder,
             overlay_factory,
-            &self.config,
+            config: &self.config,
             pending_sparse_trie_prune,
-        )) {
+        }) {
             Ok(handle) => handle,
             Err(err) => {
                 warn!(

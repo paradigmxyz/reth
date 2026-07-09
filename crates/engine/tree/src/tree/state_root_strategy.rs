@@ -111,15 +111,15 @@ where
     N: NodePrimitives,
     Evm: ConfigureEvm<Primitives = N>,
 {
-    payload_processor: &'a PayloadProcessor<Evm>,
-    parent_hash: B256,
-    parent_header: &'a N::BlockHeader,
-    timestamp: u64,
-    state: &'a EngineApiTreeState<N>,
-    provider_builder: StateProviderBuilder<N, P>,
-    overlay_factory: OverlayStateProviderFactory<P, N>,
-    config: &'a TreeConfig,
-    pending_sparse_trie_prune: &'a mut bool,
+    pub(crate) payload_processor: &'a PayloadProcessor<Evm>,
+    pub(crate) parent_hash: B256,
+    pub(crate) parent_header: &'a N::BlockHeader,
+    pub(crate) timestamp: u64,
+    pub(crate) state: &'a EngineApiTreeState<N>,
+    pub(crate) provider_builder: StateProviderBuilder<N, P>,
+    pub(crate) overlay_factory: OverlayStateProviderFactory<P, N>,
+    pub(crate) config: &'a TreeConfig,
+    pub(crate) pending_sparse_trie_prune: &'a mut bool,
 }
 
 impl<N, P, Evm> fmt::Debug for PayloadStateRootJobContext<'_, N, P, Evm>
@@ -142,31 +142,6 @@ where
     N: NodePrimitives,
     Evm: ConfigureEvm<Primitives = N>,
 {
-    /// Creates a new payload-builder state-root job context.
-    pub(crate) const fn new(
-        payload_processor: &'a PayloadProcessor<Evm>,
-        parent_hash: B256,
-        parent_header: &'a N::BlockHeader,
-        timestamp: u64,
-        state: &'a EngineApiTreeState<N>,
-        provider_builder: StateProviderBuilder<N, P>,
-        overlay_factory: OverlayStateProviderFactory<P, N>,
-        config: &'a TreeConfig,
-        pending_sparse_trie_prune: &'a mut bool,
-    ) -> Self {
-        Self {
-            payload_processor,
-            parent_hash,
-            parent_header,
-            timestamp,
-            state,
-            provider_builder,
-            overlay_factory,
-            config,
-            pending_sparse_trie_prune,
-        }
-    }
-
     /// Returns the parent block hash for the payload being built.
     pub const fn parent_hash(&self) -> B256 {
         self.parent_hash

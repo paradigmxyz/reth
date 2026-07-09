@@ -2149,7 +2149,7 @@ where
     }
 
     /// Returns whether sparse trie pruning should be attempted by the next sparse trie task.
-    fn should_prune_sparse_trie(&self) -> bool {
+    const fn should_prune_sparse_trie(&self) -> bool {
         !self.config.skip_state_root() &&
             !self.config.state_root_fallback() &&
             self.config.use_state_root_task()
