@@ -2,10 +2,7 @@
 
 use crate::{EthApiTypes, RpcConvert, RpcNodeCore, RpcReceipt};
 use alloy_consensus::{transaction::TxHashRef, BlockHeader, TxReceipt};
-use alloy_rpc_types_eth::{
-    pubsub::{Params, SubscriptionKind, TransactionReceiptsParams},
-    Filter, Log,
-};
+use alloy_rpc_types_eth::{pubsub::TransactionReceiptsParams, Filter, Log};
 use futures::StreamExt;
 use jsonrpsee_types::ErrorObject;
 use reth_chain_state::CanonStateSubscriptions;
@@ -21,33 +18,23 @@ use tracing::error;
 pub trait EthSubscriptions:
     RpcNodeCore + EthApiTypes<RpcConvert: RpcConvert<Primitives = Self::Primitives>>
 {
-    /// Ensures the subscription params are supported by this subscription provider.
-    ///
-    /// The default log stream only watches canonical chain updates, so pending block log filters
-    /// are rejected instead of being silently treated as canonical log subscriptions. Providers
-    /// that support pending log streams can override this together with [`Self::log_stream`].
-    fn ensure_subscription_params_supported(
+    /// Returns a stream that yields matching logs from canonical chain updates.
+    fn log_stream(
         &self,
-        kind: SubscriptionKind,
-        params: Option<&Params>,
-    ) -> Result<(), ErrorObject<'static>> {
-        if let (SubscriptionKind::Logs, Some(Params::Logs(filter))) = (kind, params) {
-            let (from_block, to_block) = filter.block_option.as_range();
-            if from_block.is_some_and(|block| block.is_pending()) ||
-                to_block.is_some_and(|block| block.is_pending())
-            {
-                return Err(invalid_params_rpc_err(
-                    "pending block filters are not supported for logs subscriptions",
-                ));
-            }
+        filter: Filter,
+    ) -> Result<impl futures::Stream<Item = Log> + Send + Unpin + 'static, ErrorObject<'static>>
+    {
+        let (from_block, to_block) = filter.block_option.as_range();
+        if from_block.is_some_and(|block| block.is_pending()) ||
+            to_block.is_some_and(|block| block.is_pending())
+        {
+            return Err(invalid_params_rpc_err(
+                "pending block filters are not supported for logs subscriptions",
+            ));
         }
 
-        Ok(())
-    }
-
-    /// Returns a stream that yields matching logs from canonical chain updates.
-    fn log_stream(&self, filter: Filter) -> impl futures::Stream<Item = Log> + Send + Unpin {
-        self.provider()
+        Ok(self
+            .provider()
             .canonical_state_stream()
             .map(move |canon_state| canon_state.block_receipts())
             .flat_map(futures::stream::iter)
@@ -60,7 +47,7 @@ pub trait EthSubscriptions:
                     removed,
                 );
                 futures::stream::iter(all_logs)
-            })
+            }))
     }
 
     /// Returns a stream that yields new block headers from canonical chain updates.
