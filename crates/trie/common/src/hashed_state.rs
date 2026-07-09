@@ -433,6 +433,11 @@ impl HashedStorage {
         Self { wiped, storage: HashMap::default() }
     }
 
+    /// Create new instance of [`HashedStorage`] with preallocated capacity for storage entries.
+    pub fn with_capacity(wiped: bool, capacity: usize) -> Self {
+        Self { wiped, storage: HashMap::with_capacity_and_hasher(capacity, Default::default()) }
+    }
+
     /// Check if self is empty.
     pub fn is_empty(&self) -> bool {
         !self.wiped && self.storage.is_empty()

@@ -570,6 +570,16 @@ where
                 .map_err(ConsensusError::from));
         }
 
+        // Hash the received BAL concurrently with execution. When the BAL rebuilt from execution
+        // matches the received one (the norm for valid blocks), post-execution validation reuses
+        // this hash instead of re-encoding and hashing the rebuilt BAL on the engine thread.
+        let received_bal_hash = decoded_bal.as_ref().map(|bal| {
+            let bal = Arc::clone(bal);
+            self.payload_processor.executor().spawn_blocking_named("bal-hash", move || {
+                compute_block_access_list_hash(bal.as_bal().as_slice())
+            })
+        });
+
         let env = ExecutionEnv {
             evm_env,
             hash: input.hash(),
@@ -789,7 +799,9 @@ where
                 &output,
                 &mut ctx,
                 receipt_root_bloom,
-                built_bal
+                built_bal,
+                decoded_bal.as_deref(),
+                received_bal_hash.as_ref(),
             ),
             block
         );
@@ -1297,6 +1309,7 @@ where
     /// and logs bloom from the receipts.
     ///
     /// The `hashed_state` handle wraps the background hashed post state computation.
+    #[expect(clippy::too_many_arguments)]
     #[instrument(level = "debug", target = "engine::tree::payload_validator", skip_all)]
     fn validate_post_execution<T: PayloadTypes<BuiltPayload: BuiltPayload<Primitives = N>>>(
         &self,
@@ -1306,6 +1319,8 @@ where
         ctx: &mut TreeCtx<'_, N>,
         receipt_root_bloom: Option<ReceiptRootBloom>,
         built_bal: Option<BlockAccessList>,
+        received_bal: Option<&DecodedBal>,
+        received_bal_hash: Option<&LazyHandle<B256>>,
     ) -> Result<(), InsertBlockErrorKind>
     where
         V: PayloadValidator<T, Block = N::Block>,
@@ -1318,8 +1333,18 @@ where
         let _enter =
             debug_span!(target: "engine::tree::payload_validator", "validate_block_post_execution")
                 .entered();
-        let block_access_list_hash =
-            built_bal.as_ref().map(|bal| compute_block_access_list_hash(bal));
+        let block_access_list_hash = built_bal.as_ref().map(|bal| {
+            // When the rebuilt BAL is identical to the received one its hash is the received
+            // hash, which was computed concurrently with execution. Only a rebuilt BAL that
+            // diverged (an invalid block) has to be encoded and hashed here.
+            if let (Some(received), Some(hash)) = (received_bal, received_bal_hash) &&
+                bal.as_slice() == received.as_bal().as_slice()
+            {
+                *hash.get()
+            } else {
+                compute_block_access_list_hash(bal)
+            }
+        });
 
         if let Err(err) = self.consensus.validate_block_post_execution(
             block,

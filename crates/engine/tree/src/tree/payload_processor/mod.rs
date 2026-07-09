@@ -299,6 +299,13 @@ where
         let (updates_tx, from_multi_proof) = crossbeam_channel::unbounded();
         let (cancel_guard, cancel_rx) = StateRootTaskCancelGuard::channel();
 
+        // Warm the factory's overlay cache concurrently with worker startup so proof workers
+        // don't all serialize on computing the overlay for the first proof of the payload.
+        let warm_factory = multiproof_provider_factory.clone();
+        self.executor.spawn_blocking_named("warm-overlay", move || {
+            let _ = warm_factory.database_provider_ro();
+        });
+
         let task_ctx = ProofTaskCtx::new(multiproof_provider_factory);
         #[cfg(feature = "trie-debug")]
         let task_ctx = task_ctx.with_proof_jitter(config.proof_jitter());
