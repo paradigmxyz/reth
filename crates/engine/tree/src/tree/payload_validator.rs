@@ -118,8 +118,8 @@ use reth_tasks::LazyHandle;
 use crate::tree::{
     payload_processor::receipt_root_task::{IndexedReceipt, ReceiptRootTaskHandle},
     state_root_strategy::{
-        DefaultStateRootStrategy, PayloadStateRootJobContext, StateRootJobContext,
-        StateRootStrategy,
+        take_pending_sparse_trie_prune_blocks, DefaultStateRootStrategy,
+        PayloadStateRootJobContext, StateRootJobContext, StateRootStrategy,
     },
 };
 use alloy_consensus::constants::KECCAK_EMPTY;
@@ -234,22 +234,15 @@ impl<'a, N: NodePrimitives> TreeCtx<'a, N> {
         self.canonical_in_memory_state
     }
 
-    /// Takes the pending sparse trie prune request as in-memory ancestor blocks, if any.
+    /// Takes the pending sparse trie prune request as in-memory parent-chain blocks, if any.
     pub fn take_sparse_trie_prune_blocks(
         &mut self,
         parent_hash: B256,
     ) -> Option<Vec<ExecutedBlock<N>>> {
-        if !*self.pending_sparse_trie_prune {
-            return None
-        }
-
-        *self.pending_sparse_trie_prune = false;
-        Some(
-            self.state
-                .tree_state()
-                .blocks_by_hash(parent_hash)
-                .map(|(_, blocks)| blocks)
-                .unwrap_or_default(),
+        take_pending_sparse_trie_prune_blocks(
+            self.pending_sparse_trie_prune,
+            self.state,
+            parent_hash,
         )
     }
 }

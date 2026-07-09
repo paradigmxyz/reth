@@ -81,6 +81,31 @@ use std::{
 };
 use tracing::{debug, warn};
 
+/// Takes a pending sparse trie prune request, if any, and snapshots the in-memory parent chain
+/// ending at `parent_hash`.
+///
+/// `None` means no prune request is pending. `Some(Vec::new())` means a prune was requested, but no
+/// in-memory parent-chain blocks were found for the parent hash; the sparse trie task should still
+/// prune using the current block's changed paths.
+pub(crate) fn take_pending_sparse_trie_prune_blocks<N: NodePrimitives>(
+    pending_sparse_trie_prune: &mut bool,
+    state: &EngineApiTreeState<N>,
+    parent_hash: B256,
+) -> Option<Vec<ExecutedBlock<N>>> {
+    if !*pending_sparse_trie_prune {
+        return None
+    }
+
+    *pending_sparse_trie_prune = false;
+    Some(
+        state
+            .tree_state()
+            .blocks_by_hash(parent_hash)
+            .map(|(_, blocks)| blocks)
+            .unwrap_or_default(),
+    )
+}
+
 /// Strategy used by engine-tree validation to prepare per-block state-root work.
 pub trait StateRootStrategy<N, P, Evm>: Send + Sync
 where
@@ -182,19 +207,12 @@ where
         self.provider_builder.clone()
     }
 
-    /// Takes the pending sparse trie prune request as in-memory ancestor blocks, if any.
+    /// Takes the pending sparse trie prune request as in-memory parent-chain blocks, if any.
     pub fn take_sparse_trie_prune_blocks(&mut self) -> Option<Vec<ExecutedBlock<N>>> {
-        if !*self.pending_sparse_trie_prune {
-            return None
-        }
-
-        *self.pending_sparse_trie_prune = false;
-        Some(
-            self.state
-                .tree_state()
-                .blocks_by_hash(self.parent_hash)
-                .map(|(_, blocks)| blocks)
-                .unwrap_or_default(),
+        take_pending_sparse_trie_prune_blocks(
+            self.pending_sparse_trie_prune,
+            self.state,
+            self.parent_hash,
         )
     }
 }

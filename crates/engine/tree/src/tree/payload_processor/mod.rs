@@ -133,6 +133,12 @@ where
 struct SparseTrieTaskOptions<N: NodePrimitives> {
     parent_state_root: B256,
     chunk_size: usize,
+    /// In-memory ancestor blocks whose changed paths must be retained while pruning the sparse
+    /// trie.
+    ///
+    /// `None` means this sparse trie task should not prune. `Some(Vec::new())` still means pruning
+    /// was requested, but the task only needs to retain paths changed by the current block. If any
+    /// listed ancestor block lacks changed paths, the task skips pruning.
     pending_sparse_trie_prune_blocks: Option<Vec<ExecutedBlock<N>>>,
 }
 
