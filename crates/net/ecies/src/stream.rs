@@ -26,6 +26,16 @@ use tracing::{instrument, trace};
 
 const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(10);
 
+/// Write buffer size at which the underlying `Framed` transport starts flushing frames to the
+/// socket from `poll_ready`, replacing the tokio-util default of 8KiB.
+///
+/// `RLPx` callers queue batches of messages (e.g. transaction broadcasts) and drive one flush per
+/// batch; the 8KiB default splits such a batch into one write syscall per few messages. A larger
+/// boundary batches them into fewer, larger writes. Once grown, the write buffer's capacity is
+/// retained for the connection's lifetime, so this also bounds the resident write buffer per
+/// connection.
+const DEFAULT_BACKPRESSURE_BOUNDARY: usize = 64 * 1024;
+
 /// `ECIES` stream over TCP exchanging raw bytes
 #[derive(Debug)]
 #[pin_project::pin_project]
@@ -70,6 +80,7 @@ where
         let ecies = ECIESCodec::new_client(secret_key, remote_id)?;
 
         let mut transport = ecies.framed(transport);
+        transport.set_backpressure_boundary(DEFAULT_BACKPRESSURE_BOUNDARY);
 
         trace!("sending ecies auth ...");
         transport.send(EgressECIESValue::Auth).await?;
@@ -101,6 +112,7 @@ where
 
         trace!("incoming ecies stream");
         let mut transport = ecies.framed(transport);
+        transport.set_backpressure_boundary(DEFAULT_BACKPRESSURE_BOUNDARY);
         let msg = transport.try_next().await?;
 
         trace!("receiving ecies auth");
@@ -124,6 +136,17 @@ where
     /// Get the remote id
     pub const fn remote_id(&self) -> PeerId {
         self.remote_id
+    }
+}
+
+impl<Io> ECIESStream<Io> {
+    /// Sets the write buffer size at which the underlying transport starts flushing to the socket
+    /// from `poll_ready`, overriding [`DEFAULT_BACKPRESSURE_BOUNDARY`].
+    ///
+    /// A larger boundary batches more frames into a single write syscall when many messages are
+    /// sent back to back, at the cost of buffering more encrypted data in memory per connection.
+    pub fn set_backpressure_boundary(&mut self, boundary: usize) {
+        self.stream.set_backpressure_boundary(boundary);
     }
 }
 
