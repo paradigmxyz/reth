@@ -29,6 +29,7 @@ serde = { workspace = true, features = ["derive"], optional = true }
 serde_json = { workspace = true, optional = true }
 smallvec = { workspace = true, optional = true }
 slotmap = { workspace = true, optional = true }
+strum = { workspace = true, features = ["derive"] }
 
 # metrics
 reth-metrics = { workspace = true, optional = true }
@@ -68,6 +69,7 @@ std = [
     "tracing/std",
     "serde?/std",
     "serde_json?/std",
+    "strum/std",
     "reth-tracing/std",
     "either/std",
 ]
