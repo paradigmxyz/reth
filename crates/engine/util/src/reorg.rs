@@ -202,33 +202,19 @@ where
                         BeaconEngineMessage::ForkchoiceUpdated {
                             state: reorg_forkchoice_state,
                             payload_attrs: None,
-                            force_canonical_head_unwind: false,
                             tx: reorg_fcu_tx,
                         },
                     ]);
                     *this.state = EngineReorgState::Reorg { queue };
                     continue
                 }
-                (
-                    Some(BeaconEngineMessage::ForkchoiceUpdated {
-                        state,
-                        payload_attrs,
-                        force_canonical_head_unwind,
-                        tx,
-                    }),
-                    _,
-                ) => {
+                (Some(BeaconEngineMessage::ForkchoiceUpdated { state, payload_attrs, tx }), _) => {
                     // Record last forkchoice state forwarded to the engine.
                     // We do not care if it's valid since engine should be able to handle
                     // reorgs that rely on invalid forkchoice state.
                     *this.last_forkchoice_state = Some(state);
                     *this.forkchoice_states_forwarded += 1;
-                    Some(BeaconEngineMessage::ForkchoiceUpdated {
-                        state,
-                        payload_attrs,
-                        force_canonical_head_unwind,
-                        tx,
-                    })
+                    Some(BeaconEngineMessage::ForkchoiceUpdated { state, payload_attrs, tx })
                 }
                 (item, _) => item,
             };

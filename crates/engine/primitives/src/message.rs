@@ -268,8 +268,6 @@ pub enum BeaconEngineMessage<Payload: PayloadTypes> {
         state: ForkchoiceState,
         /// The payload attributes for block building.
         payload_attrs: Option<Payload::PayloadAttributes>,
-        /// Whether this forkchoice update should force rewinding to a canonical ancestor.
-        force_canonical_head_unwind: bool,
         /// The sender for returning forkchoice updated result.
         tx: oneshot::Sender<RethResult<OnForkChoiceUpdated>>,
     },
@@ -373,22 +371,7 @@ where
         payload_attrs: Option<Payload::PayloadAttributes>,
     ) -> Result<ForkchoiceUpdated, BeaconForkChoiceUpdateError> {
         Ok(self
-            .send_fork_choice_updated(state, payload_attrs, false)
-            .map_err(|_| BeaconForkChoiceUpdateError::EngineUnavailable)
-            .await?
-            .map_err(BeaconForkChoiceUpdateError::internal)?
-            .await?)
-    }
-
-    /// Sends a forkchoice update message that forces rewinding to a canonical ancestor and waits
-    /// for a response.
-    pub async fn fork_choice_updated_with_canonical_head_unwind(
-        &self,
-        state: ForkchoiceState,
-        payload_attrs: Option<Payload::PayloadAttributes>,
-    ) -> Result<ForkchoiceUpdated, BeaconForkChoiceUpdateError> {
-        Ok(self
-            .send_fork_choice_updated(state, payload_attrs, true)
+            .send_fork_choice_updated(state, payload_attrs)
             .map_err(|_| BeaconForkChoiceUpdateError::EngineUnavailable)
             .await?
             .map_err(BeaconForkChoiceUpdateError::internal)?
@@ -401,13 +384,11 @@ where
         &self,
         state: ForkchoiceState,
         payload_attrs: Option<Payload::PayloadAttributes>,
-        force_canonical_head_unwind: bool,
     ) -> oneshot::Receiver<RethResult<OnForkChoiceUpdated>> {
         let (tx, rx) = oneshot::channel();
         let _ = self.to_engine.send(BeaconEngineMessage::ForkchoiceUpdated {
             state,
             payload_attrs,
-            force_canonical_head_unwind,
             tx,
         });
         rx

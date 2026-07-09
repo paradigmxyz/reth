@@ -366,7 +366,6 @@ impl TestHarness {
                 BeaconEngineMessage::ForkchoiceUpdated {
                     state: fcu_state,
                     payload_attrs: None,
-                    force_canonical_head_unwind: false,
                     tx,
                 }
                 .into(),
@@ -770,7 +769,6 @@ async fn test_engine_request_during_backfill() {
                     finalized_block_hash: B256::random(),
                 },
                 payload_attrs: None,
-                force_canonical_head_unwind: false,
                 tx,
             }
             .into(),
@@ -917,7 +915,6 @@ fn test_backpressure_waits_for_persistence_before_reading_incoming() {
                     finalized_block_hash: B256::random(),
                 },
                 payload_attrs: None,
-                force_canonical_head_unwind: false,
                 tx,
             }
             .into(),
@@ -1322,7 +1319,6 @@ async fn test_fcu_with_canonical_ancestor_updates_latest_block() {
 
     // Create test harness
     let mut test_harness = TestHarness::new(chain_spec.clone());
-    test_harness.tree.config = test_harness.tree.config.clone().with_unwind_canonical_header(true);
 
     let mut test_block_builder = TestBlockBuilder::eth().with_chain_spec((*chain_spec).clone());
 
@@ -1355,7 +1351,6 @@ async fn test_fcu_with_canonical_ancestor_updates_latest_block() {
                     finalized_block_hash: B256::ZERO,
                 },
                 payload_attrs: None,
-                force_canonical_head_unwind: false,
                 tx,
             }
             .into(),
@@ -2101,7 +2096,7 @@ mod forkchoice_updated_tests {
             finalized_block_hash: B256::ZERO,
         };
 
-        let result = test_harness.tree.apply_chain_update(state, &None, false).unwrap();
+        let result = test_harness.tree.apply_chain_update(state, &None).unwrap();
         assert!(result.is_some(), "Should apply chain update for new head");
         let outcome = result.unwrap();
         let fcu_result = outcome.outcome.await.unwrap();
@@ -2114,7 +2109,7 @@ mod forkchoice_updated_tests {
             finalized_block_hash: B256::ZERO,
         };
 
-        let result = test_harness.tree.apply_chain_update(missing_state, &None, false).unwrap();
+        let result = test_harness.tree.apply_chain_update(missing_state, &None).unwrap();
         assert!(result.is_none(), "Missing block should return None");
     }
 
@@ -2168,7 +2163,7 @@ mod forkchoice_updated_tests {
             finalized_block_hash: canonical_head,
         };
 
-        let result = test_harness.tree.on_forkchoice_updated(state, None, false).unwrap();
+        let result = test_harness.tree.on_forkchoice_updated(state, None).unwrap();
         let fcu_result = result.outcome.await.unwrap();
         assert!(fcu_result.payload_status.is_valid());
 
@@ -2179,7 +2174,7 @@ mod forkchoice_updated_tests {
             finalized_block_hash: B256::ZERO,
         };
 
-        let result = test_harness.tree.on_forkchoice_updated(missing_state, None, false).unwrap();
+        let result = test_harness.tree.on_forkchoice_updated(missing_state, None).unwrap();
         let fcu_result = result.outcome.await.unwrap();
         assert!(fcu_result.payload_status.is_syncing());
         assert!(result.event.is_some(), "Should trigger download event for missing block");
@@ -2192,7 +2187,7 @@ mod forkchoice_updated_tests {
             finalized_block_hash: B256::ZERO,
         };
 
-        let result = test_harness.tree.on_forkchoice_updated(state, None, false).unwrap();
+        let result = test_harness.tree.on_forkchoice_updated(state, None).unwrap();
         let fcu_result = result.outcome.await.unwrap();
         assert!(fcu_result.payload_status.is_syncing(), "Should return syncing during backfill");
     }
