@@ -28,7 +28,7 @@ use reth_primitives_traits::{
     Block, HeaderTy, NodePrimitives, ReceiptTy, RecoveredBlock, SealedHeader, TxTy,
 };
 use reth_storage_api::StateProvider;
-use reth_trie_common::{updates::TrieUpdates, KeccakKeyHasher};
+use reth_trie_common::updates::TrieUpdates;
 
 /// Gas used by a successfully executed transaction.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
@@ -86,7 +86,6 @@ pub trait ReceiptBuilder<TxType, TransactionResult> {
         &self,
         receipts: Vec<Self::Receipt>,
         state: BlockStateAccumulator,
-        hashed_state: Option<HashedPostState>,
     ) -> BlockExecutionOutput<Self::Receipt> {
         let gas_used = receipts.last().map_or(0, TxReceipt::cumulative_gas_used);
 
@@ -99,7 +98,6 @@ pub trait ReceiptBuilder<TxType, TransactionResult> {
             },
             state,
         )
-        .with_hashed_state(hashed_state)
     }
 }
 
@@ -574,7 +572,7 @@ where
         let Self { executor, evm_env, transactions, ctx, parent, assembler } = self;
 
         let output = executor.finish()?;
-        let hashed_state = output.hash_state_slow::<KeccakKeyHasher>();
+        let hashed_state = state_provider.hashed_post_state(output.state.inner());
         let (state_root, trie_updates) = match state_root(&output)? {
             Some(precomputed) => precomputed,
             None => state_provider

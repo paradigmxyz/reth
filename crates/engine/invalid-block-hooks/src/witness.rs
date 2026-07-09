@@ -179,7 +179,9 @@ where
         let state_provider = self.provider.state_by_block_hash(parent_header.hash())?;
         let database = StateProviderDatabase::new(state_provider.as_ref());
         let output = self.evm_config.executor(database).execute(block)?;
-        let hashed_state = output.hash_state_slow::<reth_trie::KeccakKeyHasher>();
+        let hashed_state = reth_execution_types::hashed_post_state_from_execution_state::<
+            reth_trie::KeccakKeyHasher,
+        >(output.state.inner());
         let (codes, preimages, block_state) = collect_execution_data(output.state.into_inner())?;
         let witness = generate(codes, preimages, hashed_state.clone(), state_provider)?;
 
@@ -418,8 +420,9 @@ mod tests {
     }
 
     fn hashed_state_for_block_state(block_state: EvmState) -> reth_trie::HashedPostState {
-        BlockExecutionOutput::<()>::new(Default::default(), block_state)
-            .hash_state_slow::<reth_trie::KeccakKeyHasher>()
+        reth_execution_types::hashed_post_state_from_execution_state::<reth_trie::KeccakKeyHasher>(
+            BlockExecutionOutput::<()>::new(Default::default(), block_state).state.inner(),
+        )
     }
 
     #[test]

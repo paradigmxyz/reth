@@ -12,7 +12,6 @@ use evm2::{
     StorageKey,
 };
 use reth_primitives_traits::{Account, Bytecode};
-use reth_trie_common::{HashedPostState, KeyHasher};
 #[cfg(feature = "std")]
 use std::sync::OnceLock as OnceCell;
 
@@ -60,32 +59,12 @@ pub struct BlockExecutionOutput<T> {
     pub result: BlockExecutionResult<T>,
     /// The changed state of the block after execution.
     pub state: IndexedBlockState,
-    /// Trie-ready hashed post-state for this block, if produced during execution.
-    hashed_state: Option<HashedPostState>,
 }
 
 impl<T> BlockExecutionOutput<T> {
     /// Creates a new block execution output and indexes the changed state for hot overlay lookups.
     pub fn new(result: BlockExecutionResult<T>, state: BlockStateAccumulator) -> Self {
-        Self { result, state: state.into(), hashed_state: None }
-    }
-
-    /// Attaches an optional precomputed hashed post-state to the output.
-    pub fn with_hashed_state(mut self, hashed_state: Option<HashedPostState>) -> Self {
-        self.hashed_state = hashed_state;
-        self
-    }
-
-    /// Returns precomputed hashed post-state for this block, if execution produced it.
-    pub const fn precomputed_hashed_state(&self) -> Option<&HashedPostState> {
-        self.hashed_state.as_ref()
-    }
-
-    /// Returns the hashed post-state for this block output.
-    pub fn hash_state_slow<KH: KeyHasher>(&self) -> HashedPostState {
-        self.hashed_state
-            .clone()
-            .unwrap_or_else(|| crate::hashed_post_state_from_state_source::<KH, _>(&self.state))
+        Self { result, state: state.into() }
     }
 
     /// Return bytecode if known.
@@ -127,7 +106,6 @@ impl<T> Default for BlockExecutionOutput<T> {
                 blob_gas_used: 0,
             },
             state: Default::default(),
-            hashed_state: None,
         }
     }
 }

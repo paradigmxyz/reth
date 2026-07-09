@@ -467,10 +467,7 @@ where
             context.withdrawals,
         )?;
 
-        let hashed_state = hashed_state_mode
-            .output()
-            .then(|| hashed_post_state_from_execution_state::<KeccakKeyHasher>(&block_state));
-        let mut output = RethReceiptBuilder.build_block_output(receipts, block_state, hashed_state);
+        let mut output = RethReceiptBuilder.build_block_output(receipts, block_state);
         output.result.requests = requests;
 
         Ok(output)
@@ -1077,15 +1074,6 @@ mod tests {
     };
     use reth_execution_types::hashed_post_state_from_execution_state;
 
-    fn assert_hashed_state_matches_output(output: &BlockExecutionOutput<Receipt>) {
-        let hashed_state =
-            output.precomputed_hashed_state().cloned().expect("EVM execution hashes post-state");
-        let recomputed =
-            hashed_post_state_from_execution_state::<KeccakKeyHasher>(output.state.inner());
-
-        assert_eq!(hashed_state.into_sorted(), recomputed.into_sorted());
-    }
-
     fn assert_hashed_state_matches_streamed_updates(
         output: &BlockExecutionOutput<Receipt>,
         updates: Vec<HashedPostState>,
@@ -1293,7 +1281,6 @@ mod tests {
         )
         .expect("EVM execution succeeds");
 
-        assert!(output.precomputed_hashed_state().is_none());
         assert!(!streamed_updates.is_empty());
         assert_hashed_state_matches_streamed_updates(&output, streamed_updates);
     }
@@ -1329,7 +1316,6 @@ mod tests {
         .expect("EVM execution succeeds");
 
         assert!(streamed_updates.is_empty());
-        assert_hashed_state_matches_output(&output);
     }
 
     #[test]
@@ -1448,7 +1434,6 @@ mod tests {
             output.account_state(&new).unwrap().current.as_ref().unwrap().balance,
             U256::from(5_000_000_000u64)
         );
-        assert_hashed_state_matches_output(&output);
     }
 
     #[test]
@@ -1541,7 +1526,6 @@ mod tests {
             output.storage(&BEACON_ROOTS_ADDRESS, root_index).unwrap(),
             U256::from_be_bytes(parent_beacon_block_root.0)
         );
-        assert_hashed_state_matches_output(&output);
     }
 
     #[test]
@@ -1578,7 +1562,6 @@ mod tests {
             output.storage(&HISTORY_STORAGE_ADDRESS, U256::ZERO).unwrap(),
             U256::from_be_bytes(parent_hash.0)
         );
-        assert_hashed_state_matches_output(&output);
     }
 
     #[test]
@@ -1645,7 +1628,6 @@ mod tests {
             ]
         );
         assert!(output.result.receipts.is_empty());
-        assert_hashed_state_matches_output(&output);
     }
 
     #[test]
@@ -1741,7 +1723,6 @@ mod tests {
         assert!(output.result.receipts.first().unwrap().success);
         assert_eq!(output.result.requests.len(), 1);
         assert_eq!(output.result.requests[0][0], WITHDRAWAL_REQUEST_TYPE);
-        assert_hashed_state_matches_output(&output);
     }
 
     fn return_byte_code(value: u8) -> Bytecode {

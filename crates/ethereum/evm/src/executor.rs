@@ -18,8 +18,7 @@ use reth_evm::{
     BlockExecutionError, BlockExecutionOutput, BlockExecutor, CommitChanges, GasOutput,
     ReceiptBuilder, ReceiptBuilderCtx,
 };
-use reth_execution_types::hashed_post_state_from_execution_state;
-use reth_trie_common::{HashedPostState, KeccakKeyHasher};
+use reth_trie_common::HashedPostState;
 
 /// Configured Ethereum block executor backed by evm2.
 #[expect(missing_debug_implementations)]
@@ -43,21 +42,16 @@ pub struct EthBlockExecutor<'a> {
 
 type HashedStateUpdateHook = Option<Box<dyn FnMut(HashedPostState) + Send>>;
 
-/// Controls how Ethereum execution produces trie-ready hashed post-state.
+/// Controls whether Ethereum execution streams trie-ready hashed post-state updates.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum HashedStateMode {
-    /// Accumulate final hashed post-state in the returned block execution output.
+    /// Do not stream hashed state updates.
     OutputOnly,
-    /// Stream hashed state updates to the provided hook without accumulating output hashed state.
+    /// Stream hashed state updates to the provided hook.
     StreamOnly,
 }
 
 impl HashedStateMode {
-    /// Returns true if execution should include hashed state in its output.
-    pub(crate) const fn output(self) -> bool {
-        matches!(self, Self::OutputOnly)
-    }
-
     /// Returns true if execution should stream hashed state updates.
     pub(crate) const fn stream(self) -> bool {
         matches!(self, Self::StreamOnly)
@@ -238,12 +232,7 @@ impl<'a> BlockExecutor for EthBlockExecutor<'a> {
         )
         .map_err(BlockExecutionError::from)?;
 
-        let hashed_state = self
-            .hashed_state_mode
-            .output()
-            .then(|| hashed_post_state_from_execution_state::<KeccakKeyHasher>(&self.block_state));
-        let mut output =
-            RethReceiptBuilder.build_block_output(self.receipts, self.block_state, hashed_state);
+        let mut output = RethReceiptBuilder.build_block_output(self.receipts, self.block_state);
         output.result.requests = requests;
 
         Ok(output)

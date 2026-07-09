@@ -709,12 +709,8 @@ where
         // block conversion and receipt root computation. This is a pure CPU-bound task
         // (keccak256 hashing of all changed addresses and storage slots).
         let mut hashed_state_rx = handle.take_hashed_state_rx();
-        let mut hashed_state: LazyHashedPostState = if let Some(hashed_state) =
-            output.precomputed_hashed_state().cloned()
-        {
-            LazyHandle::ready(Arc::new(hashed_state))
-        } else {
-            let hashed_state_output = output.clone();
+        let hashed_state_output = output.clone();
+        let mut hashed_state: LazyHashedPostState =
             self.payload_processor.executor().spawn_blocking_named("hash-post-state", move || {
                 let _span = debug_span!(
                     target: "engine::tree::payload_validator",
@@ -724,11 +720,12 @@ where
                 let state = if let Some(Ok(state)) = hashed_state_rx.as_mut().map(|rx| rx.recv()) {
                     state
                 } else {
-                    hashed_state_output.hash_state_slow::<KeccakKeyHasher>()
+                    reth_execution_types::hashed_post_state_from_execution_state::<KeccakKeyHasher>(
+                        hashed_state_output.state.inner(),
+                    )
                 };
                 Arc::new(state)
-            })
-        };
+            });
 
         let block = validated_block.try_into_inner().expect("sole handle")?;
         let block = block.with_senders(senders);
@@ -873,7 +870,11 @@ where
                 // validation.
                 if maybe_new_hashed_state.is_some() || state_root_task_failed {
                     hashed_state = maybe_new_hashed_state.unwrap_or_else(|| {
-                        LazyHandle::ready(Arc::new(output.hash_state_slow::<KeccakKeyHasher>()))
+                        LazyHandle::ready(Arc::new(
+                            reth_execution_types::hashed_post_state_from_execution_state::<
+                                KeccakKeyHasher,
+                            >(output.state.inner()),
+                        ))
                     });
                     hashed_state_validate_result =
                         self.validator.validate_block_post_execution_with_hashed_state(
@@ -1181,7 +1182,9 @@ where
         drop(receipt_tx);
 
         if !streamed_state_updates && let Some(updates_tx) = handle.sparse_trie_updates_tx() {
-            let hashed_state = output.hash_state_slow::<KeccakKeyHasher>();
+            let hashed_state = reth_execution_types::hashed_post_state_from_execution_state::<
+                KeccakKeyHasher,
+            >(output.state.inner());
             let _ = updates_tx.send(StateRootMessage::HashedStateUpdate(hashed_state));
             let _ = updates_tx.send(StateRootMessage::FinishedStateUpdates);
         }
@@ -1366,7 +1369,9 @@ where
                 self.payload_processor.executor().spawn_blocking_named("serial-root", move || {
                     let result = state_provider_builder.build().and_then(|provider| {
                         let hashed_state = LazyHandle::ready(Arc::new(
-                            output.hash_state_slow::<KeccakKeyHasher>(),
+                            reth_execution_types::hashed_post_state_from_execution_state::<
+                                KeccakKeyHasher,
+                            >(output.state.inner()),
                         ));
                         let (state_root, trie_updates) =
                             Self::compute_state_root_serial(provider, &hashed_state)?;
@@ -1451,7 +1456,10 @@ where
         debug!(target: "engine::tree::payload_validator", "Comparing trie updates with serial computation");
 
         match state_provider_builder.build().and_then(|provider| {
-            let hashed_state = Arc::new(output.hash_state_slow::<KeccakKeyHasher>());
+            let hashed_state =
+                Arc::new(reth_execution_types::hashed_post_state_from_execution_state::<
+                    KeccakKeyHasher,
+                >(output.state.inner()));
             Self::compute_state_root_serial(provider, &LazyHandle::ready(hashed_state))
         }) {
             Ok((serial_root, serial_trie_updates)) => {

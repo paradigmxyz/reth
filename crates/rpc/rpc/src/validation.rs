@@ -223,10 +223,7 @@ where
 
         self.ensure_payment(&block, &output, &message)?;
 
-        let hashed_state = output
-            .precomputed_hashed_state()
-            .cloned()
-            .unwrap_or_else(|| state_provider.hashed_post_state(output.state.inner()));
+        let hashed_state = state_provider.hashed_post_state(output.state.inner());
         let state_root = state_provider.state_root(hashed_state)?;
 
         if state_root != block.header().state_root() {
