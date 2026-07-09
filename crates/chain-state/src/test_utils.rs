@@ -17,8 +17,8 @@ use reth_ethereum_primitives::{
     Block, BlockBody, EthPrimitives, Receipt, Transaction, TransactionSigned,
 };
 use reth_execution_types::{
-    hashed_post_state_sorted_from_execution_state, BlockExecutionOutput, BlockExecutionResult,
-    Chain, EvmStateInit, ExecutionOutcome, RevertsInit,
+    hashed_post_state_from_execution_state, BlockExecutionOutput, BlockExecutionResult, Chain,
+    EvmStateInit, ExecutionOutcome, RevertsInit,
 };
 use reth_primitives_traits::{
     proofs::{calculate_receipt_root, calculate_transaction_root, calculate_withdrawals_root},
@@ -303,9 +303,9 @@ impl<N: NodePrimitives> TestBlockBuilder<N> {
         );
 
         let block_state = execution_outcome.execution_state();
-        let hashed_state = hashed_post_state_sorted_from_execution_state::<
-            reth_trie::KeccakKeyHasher,
-        >(&block_state);
+        let hashed_state =
+            hashed_post_state_from_execution_state::<reth_trie::KeccakKeyHasher>(&block_state)
+                .into_sorted();
 
         let block_receipts = if receipts.is_empty() {
             recovered

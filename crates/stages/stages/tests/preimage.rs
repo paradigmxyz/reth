@@ -20,7 +20,7 @@ use reth_downloaders::{
 use reth_ethereum_primitives::{Block, BlockBody, Transaction, TransactionSigned};
 use reth_evm::{database::StateProviderDatabase, execute::Executor, ConfigureEvm};
 use reth_evm_ethereum::EthEvmConfig;
-use reth_execution_types::hashed_post_state_sorted_from_execution_state;
+use reth_execution_types::hashed_post_state_from_execution_state;
 use reth_libmdbx::{Environment, EnvironmentFlags, Mode};
 use reth_network_p2p::{
     bodies::downloader::BodyDownloader,
@@ -955,7 +955,8 @@ fn execute_and_commit_block(
 
     let gas_used = output.gas_used;
     let hashed_state =
-        hashed_post_state_sorted_from_execution_state::<KeccakKeyHasher>(output.state.inner());
+        hashed_post_state_from_execution_state::<KeccakKeyHasher>(output.state.inner())
+            .into_sorted();
     type TestStateRoot<'a, TX, A> = StateRoot<
         reth_trie_db::DatabaseTrieCursorFactory<&'a TX, A>,
         reth_trie_db::DatabaseHashedCursorFactory<&'a TX>,

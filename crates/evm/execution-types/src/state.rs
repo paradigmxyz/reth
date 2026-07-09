@@ -1,7 +1,7 @@
-use alloc::{collections::BTreeMap, vec::Vec};
+use alloc::collections::BTreeMap;
 use alloy_consensus::constants::KECCAK_EMPTY;
 use alloy_primitives::{
-    map::{AddressMap, B256Map, B256Set},
+    map::{AddressMap, B256Set},
     Address, B256, U256,
 };
 use core::{convert::Infallible, marker::PhantomData};
@@ -13,7 +13,7 @@ use evm2::{
     },
 };
 use reth_primitives_traits::{Account, Bytecode as RethBytecode};
-use reth_trie_common::{HashedPostState, HashedPostStateSorted, HashedStorageSorted, KeyHasher};
+use reth_trie_common::{HashedPostState, KeyHasher};
 
 /// Reverts for one block of execution state changes.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -222,49 +222,6 @@ where
     reverts.reverts
 }
 
-/// Returns trie-ready sorted hashed post-state for an execution state.
-pub fn hashed_post_state_sorted_from_execution_state<KH>(
-    state: &BlockStateAccumulator,
-) -> HashedPostStateSorted
-where
-    KH: KeyHasher,
-{
-    let mut accounts = state
-        .accounts_sorted()
-        .into_iter()
-        .map(|(address, delta)| {
-            (KH::hash_key(address), delta.current.as_ref().map(account_info_to_reth))
-        })
-        .collect::<Vec<_>>();
-    accounts.sort_unstable_by_key(|(address, _)| *address);
-
-    let mut storages = B256Map::default();
-    for address in state.storage_wipes_sorted() {
-        storages.insert(
-            KH::hash_key(address),
-            HashedStorageSorted { storage_slots: Vec::new(), wiped: true },
-        );
-    }
-
-    for (key, delta) in state.storage_sorted() {
-        let storage = storages
-            .entry(KH::hash_key(key.address()))
-            .or_insert_with(|| HashedStorageSorted { storage_slots: Vec::new(), wiped: false });
-        if storage.wiped && delta.current.is_zero() {
-            continue
-        }
-        storage
-            .storage_slots
-            .push((KH::hash_key(B256::new(key.key().to_be_bytes())), delta.current));
-    }
-
-    for storage in storages.values_mut() {
-        storage.storage_slots.sort_unstable_by_key(|(slot, _)| *slot);
-    }
-
-    HashedPostStateSorted::new(accounts, storages)
-}
-
 /// Execution state-change sink that builds trie-ready hashed post-state as changes stream in.
 #[derive(Debug)]
 pub struct HashedPostStateSink<KH> {
@@ -453,10 +410,6 @@ fn account_info_ref_to_reth(info: AccountInfoRef<'_>) -> Account {
     account_parts_to_reth(info.nonce, info.balance, info.code_hash)
 }
 
-fn account_info_to_reth(info: &AccountInfo) -> Account {
-    account_parts_to_reth(info.nonce, info.balance, info.code_hash)
-}
-
 fn account_ref_to_info_ref(account: &Account) -> AccountInfoRef<'_> {
     AccountInfoRef {
         balance: account.balance,
@@ -477,76 +430,6 @@ mod tests {
     use alloy_primitives::{Address, U256};
     use evm2::evm::{AccountChangeRef, AccountInfoRef, StorageChange};
     use reth_trie_common::KeccakKeyHasher;
-
-    #[test]
-    fn sorted_hashed_post_state_matches_streaming_conversion() {
-        let address = Address::repeat_byte(0x01);
-        let wiped_address = Address::repeat_byte(0x02);
-        let deleted_address = Address::repeat_byte(0x03);
-
-        let mut accumulator = BlockStateAccumulator::new();
-        accumulator
-            .account(AccountChangeRef {
-                address,
-                original: None,
-                current: Some(AccountInfoRef {
-                    balance: U256::from(10),
-                    nonce: 1,
-                    code_hash: B256::ZERO,
-                    code: None,
-                }),
-            })
-            .unwrap();
-        accumulator
-            .account(AccountChangeRef {
-                address: deleted_address,
-                original: Some(AccountInfoRef {
-                    balance: U256::from(1),
-                    nonce: 1,
-                    code_hash: B256::ZERO,
-                    code: None,
-                }),
-                current: None,
-            })
-            .unwrap();
-        accumulator.storage_wipe(wiped_address).unwrap();
-        StateChangeSink::storage(
-            &mut accumulator,
-            StorageChange {
-                address,
-                key: U256::from(1),
-                original: U256::ZERO,
-                current: U256::from(2),
-            },
-        )
-        .unwrap();
-        StateChangeSink::storage(
-            &mut accumulator,
-            StorageChange {
-                address: wiped_address,
-                key: U256::from(3),
-                original: U256::from(4),
-                current: U256::ZERO,
-            },
-        )
-        .unwrap();
-        StateChangeSink::storage(
-            &mut accumulator,
-            StorageChange {
-                address: wiped_address,
-                key: U256::from(5),
-                original: U256::ZERO,
-                current: U256::from(6),
-            },
-        )
-        .unwrap();
-
-        let sorted = hashed_post_state_sorted_from_execution_state::<KeccakKeyHasher>(&accumulator);
-        let streaming =
-            hashed_post_state_from_state_source::<KeccakKeyHasher, _>(&accumulator).into_sorted();
-
-        assert_eq!(sorted, streaming);
-    }
 
     #[test]
     fn hashed_post_state_sink_clears_prior_slots_on_storage_wipe() {

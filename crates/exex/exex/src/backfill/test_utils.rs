@@ -11,7 +11,7 @@ use reth_evm::{
     ConfigureEvm,
 };
 use reth_evm_ethereum::EthEvmConfig;
-use reth_execution_types::hashed_post_state_sorted_from_execution_state;
+use reth_execution_types::hashed_post_state_from_execution_state;
 use reth_node_api::NodePrimitives;
 use reth_primitives_traits::{Block as _, RecoveredBlock};
 use reth_provider::{
@@ -80,9 +80,10 @@ where
     let execution_outcome = to_execution_outcome(block.number(), &block_execution_output);
 
     // Commit the block's execution outcome to the database
-    let hashed_state = hashed_post_state_sorted_from_execution_state::<KeccakKeyHasher>(
+    let hashed_state = hashed_post_state_from_execution_state::<KeccakKeyHasher>(
         block_execution_output.state.inner(),
-    );
+    )
+    .into_sorted();
     let provider_rw = provider_factory.provider_rw()?;
     provider_rw.append_blocks_with_state(vec![block.clone()], &execution_outcome, hashed_state)?;
     provider_rw.commit()?;
