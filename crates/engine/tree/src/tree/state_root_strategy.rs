@@ -53,9 +53,10 @@ use crate::tree::{
     },
     payload_processor::PayloadProcessor,
     payload_validator::LazyHashedPostState,
-    ExecutionEnv, StateProviderBuilder, TreeConfig,
+    EngineApiTreeState, ExecutionEnv, StateProviderBuilder, TreeConfig,
 };
 use alloy_primitives::B256;
+use reth_chain_state::ExecutedBlock;
 use reth_errors::ProviderResult;
 use reth_evm::{ConfigureEvm, OnStateHook};
 use reth_primitives_traits::{AlloyBlockHeader, NodePrimitives, RecoveredBlock};
@@ -116,6 +117,7 @@ where
     parent_hash: B256,
     parent_header: &'a N::BlockHeader,
     timestamp: u64,
+    state: &'a mut EngineApiTreeState<N>,
     provider_builder: StateProviderBuilder<N, P>,
     overlay_factory: OverlayStateProviderFactory<P, N>,
     config: &'a TreeConfig,
@@ -131,6 +133,7 @@ where
             .field("parent_hash", &self.parent_hash)
             .field("parent_state_root", &self.parent_state_root())
             .field("timestamp", &self.timestamp)
+            .field("pending_sparse_trie_prune", &self.state.pending_sparse_trie_prune())
             .finish_non_exhaustive()
     }
 }
@@ -140,12 +143,14 @@ where
     N: NodePrimitives,
     Evm: ConfigureEvm<Primitives = N>,
 {
-    /// Creates a new payload-builder state-root job context.
+    /// Creates a payload-builder state-root job context.
+    #[expect(clippy::too_many_arguments)]
     pub(crate) const fn new(
         payload_processor: &'a PayloadProcessor<Evm>,
         parent_hash: B256,
         parent_header: &'a N::BlockHeader,
         timestamp: u64,
+        state: &'a mut EngineApiTreeState<N>,
         provider_builder: StateProviderBuilder<N, P>,
         overlay_factory: OverlayStateProviderFactory<P, N>,
         config: &'a TreeConfig,
@@ -155,6 +160,7 @@ where
             parent_hash,
             parent_header,
             timestamp,
+            state,
             provider_builder,
             overlay_factory,
             config,
@@ -198,6 +204,11 @@ where
     {
         self.provider_builder.clone()
     }
+
+    /// Takes the pending sparse trie prune request as in-memory parent-chain blocks, if any.
+    pub fn take_sparse_trie_prune_blocks(&mut self) -> Option<Vec<ExecutedBlock<N>>> {
+        self.state.take_sparse_trie_prune_blocks(self.parent_hash)
+    }
 }
 
 /// Data available while preparing one state-root job.
@@ -212,7 +223,7 @@ where
     overlay_factory: OverlayStateProviderFactory<P, N>,
     config: &'a TreeConfig,
     parallel_bal_execution: bool,
-    pending_sparse_trie_prune: Option<TriePrefixSetsMut>,
+    pending_sparse_trie_prune_blocks: Option<Vec<ExecutedBlock<N>>>,
 }
 
 impl<N, P, Evm> fmt::Debug for StateRootJobContext<'_, N, P, Evm>
@@ -223,7 +234,10 @@ where
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("StateRootJobContext")
             .field("parallel_bal_execution", &self.parallel_bal_execution)
-            .field("has_pending_sparse_trie_prune", &self.pending_sparse_trie_prune.is_some())
+            .field(
+                "has_pending_sparse_trie_prune",
+                &self.pending_sparse_trie_prune_blocks.is_some(),
+            )
             .finish_non_exhaustive()
     }
 }
@@ -241,7 +255,7 @@ where
         overlay_factory: OverlayStateProviderFactory<P, N>,
         config: &'a TreeConfig,
         parallel_bal_execution: bool,
-        pending_sparse_trie_prune: Option<TriePrefixSetsMut>,
+        pending_sparse_trie_prune_blocks: Option<Vec<ExecutedBlock<N>>>,
     ) -> Self {
         Self {
             payload_processor,
@@ -250,7 +264,7 @@ where
             overlay_factory,
             config,
             parallel_bal_execution,
-            pending_sparse_trie_prune,
+            pending_sparse_trie_prune_blocks,
         }
     }
 
@@ -469,7 +483,7 @@ where
             overlay_factory,
             config,
             parallel_bal_execution,
-            pending_sparse_trie_prune,
+            pending_sparse_trie_prune_blocks,
         } = ctx;
 
         if config.skip_state_root() {
@@ -492,7 +506,7 @@ where
             env.parent_state_root,
             Some(env.transaction_count),
             config,
-            pending_sparse_trie_prune,
+            pending_sparse_trie_prune_blocks,
         );
 
         // The execution mode decides who finishes the update stream: the execution hook on
@@ -533,10 +547,12 @@ where
 
     fn prepare_payload_builder(
         &self,
-        ctx: PayloadStateRootJobContext<'_, N, P, Evm>,
+        mut ctx: PayloadStateRootJobContext<'_, N, P, Evm>,
     ) -> ProviderResult<Option<PayloadStateRootHandle>> {
         let parent_state_root = ctx.parent_state_root();
-        let PayloadStateRootJobContext { payload_processor, overlay_factory, config, .. } = ctx;
+        let payload_processor = ctx.payload_processor;
+        let overlay_factory = ctx.overlay_factory.clone();
+        let config = ctx.config;
 
         // Sharing the engine state-root task with the payload builder is opt-in, and needs a
         // host that can run the task pipeline at all.
@@ -556,7 +572,7 @@ where
                     // workers.
                     None,
                     config,
-                    None,
+                    ctx.take_sparse_trie_prune_blocks(),
                 )
                 .into_payload_state_root_handle(),
         ))
