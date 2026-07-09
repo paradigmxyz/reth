@@ -118,8 +118,8 @@ use reth_tasks::LazyHandle;
 use crate::tree::{
     payload_processor::receipt_root_task::{IndexedReceipt, ReceiptRootTaskHandle},
     state_root_strategy::{
-        take_pending_sparse_trie_prune_blocks, DefaultStateRootStrategy,
-        PayloadStateRootJobContext, StateRootJobContext, StateRootStrategy,
+        DefaultStateRootStrategy, PayloadStateRootJobContext, StateRootJobContext,
+        StateRootStrategy,
     },
 };
 use alloy_consensus::constants::KECCAK_EMPTY;
@@ -193,8 +193,6 @@ pub struct TreeCtx<'a, N: NodePrimitives> {
     state: &'a mut EngineApiTreeState<N>,
     /// Reference to the canonical in-memory state
     canonical_in_memory_state: &'a CanonicalInMemoryState<N>,
-    /// Pending sparse trie prune request to consume when spawning a sparse trie task.
-    pending_sparse_trie_prune: &'a mut bool,
 }
 
 impl<'a, N: NodePrimitives> std::fmt::Debug for TreeCtx<'a, N> {
@@ -202,7 +200,6 @@ impl<'a, N: NodePrimitives> std::fmt::Debug for TreeCtx<'a, N> {
         f.debug_struct("TreeCtx")
             .field("state", &"EngineApiTreeState")
             .field("canonical_in_memory_state", &self.canonical_in_memory_state)
-            .field("pending_sparse_trie_prune", &self.pending_sparse_trie_prune)
             .finish()
     }
 }
@@ -212,9 +209,8 @@ impl<'a, N: NodePrimitives> TreeCtx<'a, N> {
     pub const fn new(
         state: &'a mut EngineApiTreeState<N>,
         canonical_in_memory_state: &'a CanonicalInMemoryState<N>,
-        pending_sparse_trie_prune: &'a mut bool,
     ) -> Self {
-        Self { state, canonical_in_memory_state, pending_sparse_trie_prune }
+        Self { state, canonical_in_memory_state }
     }
 }
 
@@ -239,11 +235,7 @@ impl<'a, N: NodePrimitives> TreeCtx<'a, N> {
         &mut self,
         parent_hash: B256,
     ) -> Option<Vec<ExecutedBlock<N>>> {
-        take_pending_sparse_trie_prune_blocks(
-            self.pending_sparse_trie_prune,
-            self.state,
-            parent_hash,
-        )
+        self.state.take_sparse_trie_prune_blocks(parent_hash)
     }
 }
 
@@ -1724,16 +1716,12 @@ pub trait EngineValidator<
     ///
     /// `timestamp` is the timestamp of the payload being built, taken from the payload
     /// attributes.
-    ///
-    /// `pending_sparse_trie_prune` should be consumed only when the returned handle owns a sparse
-    /// trie task that can apply it.
     fn payload_state_root_handle_for(
         &self,
         parent_hash: B256,
         parent_header: &N::BlockHeader,
         timestamp: u64,
-        state: &EngineApiTreeState<N>,
-        pending_sparse_trie_prune: &mut bool,
+        state: &mut EngineApiTreeState<N>,
     ) -> Option<PayloadStateRootHandle>;
 }
 
@@ -1824,8 +1812,7 @@ where
         parent_hash: B256,
         parent_header: &N::BlockHeader,
         timestamp: u64,
-        state: &EngineApiTreeState<N>,
-        pending_sparse_trie_prune: &mut bool,
+        state: &mut EngineApiTreeState<N>,
     ) -> Option<PayloadStateRootHandle> {
         let provider_builder = match self.state_provider_builder(parent_hash, state) {
             Ok(Some(provider_builder)) => provider_builder,
@@ -1854,7 +1841,6 @@ where
             provider_builder,
             overlay_factory,
             config: &self.config,
-            pending_sparse_trie_prune,
         }) {
             Ok(handle) => handle,
             Err(err) => {

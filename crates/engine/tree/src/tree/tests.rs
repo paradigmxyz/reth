@@ -494,7 +494,6 @@ impl ValidatorTestHarness {
         let ctx = TreeCtx::new(
             &mut self.harness.tree.state,
             &self.harness.tree.canonical_in_memory_state,
-            &mut self.harness.tree.pending_sparse_trie_prune,
         );
         let result = self.validator.validate_block(block, ctx);
         self.metrics.record_validation(result.is_ok());
@@ -626,7 +625,7 @@ fn on_new_persisted_block_queues_sparse_trie_prune_request() {
 
     test_harness.tree.on_new_persisted_block().unwrap();
 
-    assert!(test_harness.tree.pending_sparse_trie_prune);
+    assert!(test_harness.tree.state.pending_sparse_trie_prune());
 }
 
 #[test]
@@ -640,7 +639,7 @@ fn on_new_persisted_block_queues_sparse_trie_prune_when_changed_paths_unknown() 
 
     test_harness.tree.on_new_persisted_block().unwrap();
 
-    assert!(test_harness.tree.pending_sparse_trie_prune);
+    assert!(test_harness.tree.state.pending_sparse_trie_prune());
 }
 
 #[test]
@@ -663,7 +662,7 @@ fn on_new_persisted_block_skips_sparse_trie_prune_when_state_root_task_disabled(
 
         test_harness.tree.on_new_persisted_block().unwrap();
 
-        assert!(!test_harness.tree.pending_sparse_trie_prune);
+        assert!(!test_harness.tree.state.pending_sparse_trie_prune());
     }
 }
 
@@ -672,11 +671,11 @@ fn remove_blocks_clears_pending_sparse_trie_prune_request() {
     let mut test_harness = TestHarness::new(MAINNET.clone());
     test_harness.tree.persistence_state.last_persisted_block =
         BlockNumHash { hash: B256::random(), number: 10 };
-    test_harness.tree.pending_sparse_trie_prune = true;
+    test_harness.tree.state.set_pending_sparse_trie_prune(true);
 
     test_harness.tree.remove_blocks(9);
 
-    assert!(!test_harness.tree.pending_sparse_trie_prune);
+    assert!(!test_harness.tree.state.pending_sparse_trie_prune());
 }
 
 #[test]
@@ -690,7 +689,7 @@ fn process_payload_attributes_threads_sparse_trie_prune_into_payload_builder_tas
         test_harness.blocks.last().unwrap().recovered_block().clone_sealed_header().clone_header();
     let head_hash = test_harness.blocks.last().unwrap().recovered_block().hash();
     let state = test_harness.fcu_state(head_hash);
-    test_harness.tree.pending_sparse_trie_prune = true;
+    test_harness.tree.state.set_pending_sparse_trie_prune(true);
 
     let updated = test_harness.tree.process_payload_attributes(
         EthPayloadAttributes {
@@ -707,7 +706,7 @@ fn process_payload_attributes_threads_sparse_trie_prune_into_payload_builder_tas
     );
 
     assert_eq!(updated.forkchoice_status(), ForkchoiceStatus::Valid);
-    assert!(!test_harness.tree.pending_sparse_trie_prune);
+    assert!(!test_harness.tree.state.pending_sparse_trie_prune());
 
     let command = test_harness.payload_command_rx.try_recv().unwrap();
     let PayloadServiceCommand::BuildNewPayload(input, _, _) = command else {

@@ -142,6 +142,8 @@ where
 pub struct EngineApiTreeState<N: NodePrimitives> {
     /// Tracks the state of the blockchain tree.
     tree_state: TreeState<N>,
+    /// Whether the next sparse trie task should attempt cache pruning during trie preservation.
+    pending_sparse_trie_prune: bool,
     /// Tracks the forkchoice state updates received by the CL.
     forkchoice_state_tracker: ForkchoiceStateTracker,
     /// Buffer of detached blocks.
@@ -167,6 +169,7 @@ impl<N: NodePrimitives> EngineApiTreeState<N> {
             ),
             buffer: BlockBuffer::new(block_buffer_limit),
             tree_state: TreeState::new(canonical_block, engine_kind, state_trie_overlays),
+            pending_sparse_trie_prune: false,
             forkchoice_state_tracker: ForkchoiceStateTracker::default(),
         }
     }
@@ -174,6 +177,39 @@ impl<N: NodePrimitives> EngineApiTreeState<N> {
     /// Returns a reference to the tree state.
     pub const fn tree_state(&self) -> &TreeState<N> {
         &self.tree_state
+    }
+
+    /// Returns whether sparse trie pruning is pending.
+    pub const fn pending_sparse_trie_prune(&self) -> bool {
+        self.pending_sparse_trie_prune
+    }
+
+    /// Sets whether sparse trie pruning is pending for the next sparse trie task.
+    pub const fn set_pending_sparse_trie_prune(&mut self, pending: bool) {
+        self.pending_sparse_trie_prune = pending;
+    }
+
+    /// Takes a pending sparse trie prune request, if any, and snapshots the in-memory parent chain
+    /// ending at `parent_hash`.
+    ///
+    /// `None` means no prune request is pending. `Some(Vec::new())` means a prune was requested,
+    /// but no in-memory parent-chain blocks were found for the parent hash; the sparse trie task
+    /// should still prune using the current block's changed paths.
+    pub fn take_sparse_trie_prune_blocks(
+        &mut self,
+        parent_hash: B256,
+    ) -> Option<Vec<ExecutedBlock<N>>> {
+        if !self.pending_sparse_trie_prune {
+            return None
+        }
+
+        self.pending_sparse_trie_prune = false;
+        Some(
+            self.tree_state
+                .blocks_by_hash(parent_hash)
+                .map(|(_, blocks)| blocks)
+                .unwrap_or_default(),
+        )
     }
 
     /// Returns true if the block has been marked as invalid.
@@ -317,8 +353,6 @@ where
     /// Set when an FCU with payload attributes is received, cleared on the next FCU without.
     /// Suppresses persistence cycles during payload building.
     building_payload: bool,
-    /// Whether the next sparse trie task should attempt cache pruning during trie preservation.
-    pending_sparse_trie_prune: bool,
     /// Task runtime for spawning blocking work on named, reusable threads.
     runtime: reth_tasks::Runtime,
 }
@@ -412,7 +446,6 @@ where
             changeset_cache,
             execution_timing_stats: B256Map::default(),
             building_payload: false,
-            pending_sparse_trie_prune: false,
             runtime,
         }
     }
@@ -1364,7 +1397,7 @@ where
         debug!(target: "engine::tree", ?new_tip_num, last_persisted_block_number=?self.persistence_state.last_persisted_block.number, "Removing blocks using persistence task");
         if new_tip_num < self.persistence_state.last_persisted_block.number {
             debug!(target: "engine::tree", ?new_tip_num, "Starting remove blocks job");
-            self.pending_sparse_trie_prune = false;
+            self.state.set_pending_sparse_trie_prune(false);
             let (tx, rx) = crossbeam_channel::bounded(1);
             let _ = self.persistence.remove_blocks_above(new_tip_num, tx);
             self.persistence_state.start_remove(new_tip_num, rx);
@@ -1815,7 +1848,7 @@ where
         if ctrl.is_unwind() {
             // the node reset so we need to clear everything above that height so that backfill
             // height is the new canonical block.
-            self.pending_sparse_trie_prune = false;
+            self.state.set_pending_sparse_trie_prune(false);
             self.state.tree_state.reset(backfill_num_hash)
         } else {
             self.state.tree_state.remove_until(
@@ -2144,7 +2177,7 @@ where
             number: self.persistence_state.last_persisted_block.number,
             hash: self.persistence_state.last_persisted_block.hash,
         });
-        self.pending_sparse_trie_prune = self.should_prune_sparse_trie();
+        self.state.set_pending_sparse_trie_prune(self.should_prune_sparse_trie());
         Ok(())
     }
 
@@ -2679,7 +2712,7 @@ where
             let old_first = old.first().map(|first| first.recovered_block().num_hash());
             trace!(target: "engine::tree", ?new_first, ?old_first, "Reorg detected, new and old first blocks");
 
-            self.pending_sparse_trie_prune = false;
+            self.state.set_pending_sparse_trie_prune(false);
             self.update_reorg_metrics(old.len(), old_first);
             self.reinsert_reorged_blocks(new.clone());
             self.reinsert_reorged_blocks(old.clone());
@@ -2993,11 +3026,7 @@ where
         // as this indicates there's already a canonical block at that height.
         let is_fork = block_id.block.number <= self.state.tree_state.current_canonical_head.number;
 
-        let ctx = TreeCtx::new(
-            &mut self.state,
-            &self.canonical_in_memory_state,
-            &mut self.pending_sparse_trie_prune,
-        );
+        let ctx = TreeCtx::new(&mut self.state, &self.canonical_in_memory_state);
 
         let start = Instant::now();
 
@@ -3288,8 +3317,7 @@ where
             state.head_block_hash,
             head,
             attributes.timestamp(),
-            &self.state,
-            &mut self.pending_sparse_trie_prune,
+            &mut self.state,
         );
 
         // send the payload to the builder and return the receiver for the pending payload
