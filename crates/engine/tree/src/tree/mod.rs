@@ -63,6 +63,7 @@ pub mod state_root_strategy;
 #[cfg(test)]
 mod tests;
 mod trie_updates;
+mod txpool_prewarm;
 pub mod types;
 
 use crate::{persistence::PersistenceResult, tree::error::AdvancePersistenceError};
@@ -77,6 +78,7 @@ pub use reth_execution_cache::{
     CachedStateCacheMetrics, CachedStateMetrics, CachedStateMetricsSource, CachedStateProvider,
     ExecutionCache, PayloadExecutionCache, SavedCache,
 };
+pub use txpool_prewarm::{TxPoolPrewarmSelection, TxPoolPrewarmSource, TxPoolPrewarmTransaction};
 pub use types::{ValidationOutcome, ValidationOutput};
 
 pub mod state;
@@ -118,6 +120,12 @@ impl<N: NodePrimitives, P> StateProviderBuilder<N, P> {
         overlay: Option<Vec<ExecutedBlock<N>>>,
     ) -> Self {
         Self { provider_factory, historical, overlay }
+    }
+
+    /// Returns a builder that overlays an additional executed block.
+    pub fn with_overlay_block(mut self, block: ExecutedBlock<N>) -> Self {
+        self.overlay.get_or_insert_default().push(block);
+        self
     }
 }
 

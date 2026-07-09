@@ -1,5 +1,6 @@
 //! Builder support for rpc components.
 
+use crate::txpool_prewarm::PoolTxPoolPrewarmSource;
 pub use jsonrpsee::{
     core::middleware::layer::Either,
     server::middleware::rpc::{RpcService, RpcServiceBuilder},
@@ -1468,7 +1469,11 @@ where
         let data_dir = ctx.config.datadir.clone().resolve_datadir(ctx.config.chain.chain());
         let invalid_block_hook = ctx.create_invalid_block_hook(&data_dir).await?;
 
-        Ok(BasicEngineValidator::new(
+        let txpool_prewarming = tree_config.txpool_prewarming();
+        let disable_state_cache = tree_config.disable_state_cache();
+        let disable_prewarming = tree_config.disable_prewarming();
+
+        let mut validator = BasicEngineValidator::new(
             ctx.node.provider().clone(),
             std::sync::Arc::new(ctx.node.consensus().clone()),
             ctx.node.evm_config().clone(),
@@ -1478,7 +1483,18 @@ where
             changeset_cache,
             state_trie_overlays,
             ctx.node.task_executor().clone(),
-        ))
+        );
+
+        if txpool_prewarming.should_prewarm() && !disable_state_cache && !disable_prewarming {
+            validator = validator.with_txpool_prewarm_source(PoolTxPoolPrewarmSource::<
+                PrimitivesTy<Node::Types>,
+                _,
+            >::new(
+                ctx.node.pool().clone()
+            ));
+        }
+
+        Ok(validator)
     }
 }
 

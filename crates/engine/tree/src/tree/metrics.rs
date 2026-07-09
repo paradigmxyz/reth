@@ -527,6 +527,18 @@ pub struct BlockValidationMetrics {
     pub payload_validation_histogram: Histogram,
     /// Payload processor spawning duration
     pub spawn_payload_processor: Histogram,
+    /// Txpool prewarm candidate selection duration.
+    pub txpool_prewarm_selection_duration: Histogram,
+    /// Txpool prewarm execution duration.
+    pub txpool_prewarm_execution_duration: Histogram,
+    /// Number of txpool candidates scanned for prewarming.
+    pub txpool_prewarm_scanned_transactions: Histogram,
+    /// Number of txpool transactions selected for prewarming.
+    pub txpool_prewarm_selected_transactions: Histogram,
+    /// Total number of txpool prewarm attempts canceled before completion.
+    pub txpool_prewarm_canceled_total: Counter,
+    /// Total number of txpool prewarm attempts skipped because the exact cache was unavailable.
+    pub txpool_prewarm_cache_unavailable_total: Counter,
     /// Post-execution validation duration
     pub post_execution_validation_duration: Histogram,
     /// Total duration of the new payload call

@@ -101,6 +101,53 @@ impl PayloadExecutionCache {
         None
     }
 
+    /// Returns the cache for `parent_hash` only if the current shared cache already matches that
+    /// hash and is not checked out.
+    ///
+    /// Unlike [`Self::get_cache_for`], this never retargets or clears a cache for a different hash.
+    /// This is useful for speculative consumers that should skip work instead of disturbing the
+    /// canonical sequential cache.
+    #[instrument(level = "debug", target = "engine::tree::payload_processor", skip(self))]
+    pub fn get_cache_for_exact_hash(&self, parent_hash: B256) -> Option<SavedCache> {
+        let start = Instant::now();
+        let cache = self.inner.lock();
+
+        let elapsed = start.elapsed();
+        self.metrics.execution_cache_wait_duration.record(elapsed.as_secs_f64());
+        if elapsed.as_millis() > 5 {
+            warn!(blocked_for=?elapsed, "Blocked waiting for execution cache mutex");
+        }
+
+        let Some(cached) = cache.as_ref() else {
+            debug!(target: "engine::caching", %parent_hash, "No cache found");
+            return None
+        };
+
+        let cached_hash = cached.executed_block_hash();
+        let hash_matches = cached_hash == parent_hash;
+        let available = cached.is_available();
+        let usage_count = cached.usage_count();
+
+        debug!(
+            target: "engine::caching",
+            %cached_hash,
+            %parent_hash,
+            hash_matches,
+            available,
+            usage_count,
+            "Exact cache lookup"
+        );
+
+        if hash_matches && available {
+            Some(cached.clone())
+        } else {
+            if hash_matches {
+                self.metrics.execution_cache_in_use.increment(1);
+            }
+            None
+        }
+    }
+
     /// Waits until the execution cache becomes available for use.
     ///
     /// This acquires a write lock to ensure exclusive access, then immediately releases it.
@@ -227,6 +274,20 @@ mod tests {
         let checked_out = cache.get_cache_for(hash_b);
         assert!(checked_out.is_some());
         assert_eq!(checked_out.unwrap().executed_block_hash(), hash_b);
+    }
+
+    #[test]
+    fn exact_hash_lookup_does_not_retarget_stale_cache() {
+        let cache = PayloadExecutionCache::default();
+        let hash_a = B256::from([0xAA; 32]);
+        let hash_b = B256::from([0xBB; 32]);
+
+        cache.update_with_guard(|slot| {
+            *slot = Some(SavedCache::new(hash_a, ExecutionCache::new(1_000)))
+        });
+
+        assert!(cache.get_cache_for_exact_hash(hash_b).is_none());
+        assert!(cache.get_cache_for(hash_a).is_some());
     }
 
     #[test]

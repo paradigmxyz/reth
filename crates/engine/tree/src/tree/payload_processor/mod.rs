@@ -145,6 +145,11 @@ where
         &self.executor
     }
 
+    /// Returns a clone of the shared execution cache handle.
+    pub(crate) fn execution_cache(&self) -> PayloadExecutionCache {
+        self.execution_cache.clone()
+    }
+
     /// Creates a new payload processor.
     pub fn new(
         executor: Runtime,

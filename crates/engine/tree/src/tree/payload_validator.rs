@@ -103,7 +103,8 @@ use crate::tree::{
     precompile_cache::{CachedPrecompile, CachedPrecompileMetrics, PrecompileCacheMap},
     types::{InsertPayloadResult, ValidationOutput},
     CacheWaitDurations, CachedStateProvider, EngineApiMetrics, EngineApiTreeState, ExecutionEnv,
-    PayloadHandle, StateProviderBuilder, StateProviderDatabase, TreeConfig, WaitForCaches,
+    PayloadHandle, StateProviderBuilder, StateProviderDatabase, TreeConfig, TxPoolPrewarmSource,
+    TxPoolPrewarmTransaction, WaitForCaches,
 };
 use alloy_consensus::transaction::{Either, TxHashRef};
 use alloy_eip7928::{bal::DecodedBal, compute_block_access_list_hash, BlockAccessList};
@@ -160,7 +161,7 @@ use reth_trie::{
 use reth_trie_db::ChangesetCache;
 use std::{
     sync::{
-        atomic::{AtomicUsize, Ordering},
+        atomic::{AtomicBool, AtomicUsize, Ordering},
         Arc,
     },
     time::Duration,
@@ -179,6 +180,56 @@ const MAX_EXPECTED_GAS_USAGE_MULTIPLIER: u64 = 2;
 
 /// Worker name for deferred trie data preparation.
 const DEFERRED_TRIE_WORKER_NAME: &str = "deferred-trie";
+
+/// Worker name for post-validation txpool cache prewarming.
+const TXPOOL_PREWARM_WORKER_NAME: &str = "txpool-prewarm";
+
+/// Maximum time the background txpool prewarm task waits for the just-validated block's exact
+/// execution cache to become visible and available.
+const TXPOOL_PREWARM_EXACT_CACHE_WAIT: Duration = Duration::from_millis(50);
+
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+struct TxPoolPrewarmStats {
+    scanned: usize,
+    selected: usize,
+    selected_gas: u64,
+    attempted: usize,
+    succeeded: usize,
+    failed: usize,
+    canceled: bool,
+    cache_unavailable: bool,
+}
+
+impl TxPoolPrewarmStats {
+    fn merge(mut self, other: Self) -> Self {
+        self.scanned += other.scanned;
+        self.selected += other.selected;
+        self.selected_gas = self.selected_gas.saturating_add(other.selected_gas);
+        self.attempted += other.attempted;
+        self.succeeded += other.succeeded;
+        self.failed += other.failed;
+        self.canceled |= other.canceled;
+        self.cache_unavailable |= other.cache_unavailable;
+        self
+    }
+}
+
+#[derive(Debug)]
+struct ActiveTxPoolPrewarm {
+    stop: Arc<AtomicBool>,
+}
+
+impl ActiveTxPoolPrewarm {
+    fn stop(&self) {
+        self.stop.store(true, Ordering::Relaxed);
+    }
+}
+
+impl Drop for ActiveTxPoolPrewarm {
+    fn drop(&mut self) {
+        self.stop();
+    }
+}
 
 type ReceiptRootSender<N> =
     crossbeam_channel::Sender<IndexedReceipt<<N as NodePrimitives>::Receipt>>;
@@ -304,6 +355,12 @@ where
     /// State-root strategy used to prepare per-block commitment tasks.
     #[debug(skip)]
     state_root_strategy: Arc<dyn StateRootStrategy<Evm::Primitives, P, Evm>>,
+    /// Source of txpool transactions used for post-validation cache prewarming.
+    #[debug(skip)]
+    txpool_prewarm_source: Option<Arc<dyn TxPoolPrewarmSource<Evm::Primitives>>>,
+    /// Active post-validation txpool prewarming task.
+    #[debug(skip)]
+    active_txpool_prewarm: Option<ActiveTxPoolPrewarm>,
 }
 
 impl<N, P, Evm, V> BasicEngineValidator<P, Evm, V>
@@ -324,6 +381,8 @@ where
         + StateReader
         + HashedPostStateProvider
         + Clone
+        + Send
+        + Sync
         + 'static,
     OverlayStateProviderFactory<P, N>: DatabaseProviderROFactory<Provider: TrieCursorFactory + HashedCursorFactory>
         + Clone
@@ -367,6 +426,8 @@ where
             changeset_cache,
             runtime,
             state_root_strategy: Arc::new(DefaultStateRootStrategy),
+            txpool_prewarm_source: None,
+            active_txpool_prewarm: None,
         }
     }
 
@@ -376,6 +437,15 @@ where
         state_root_strategy: Arc<dyn StateRootStrategy<N, P, Evm>>,
     ) -> Self {
         self.state_root_strategy = state_root_strategy;
+        self
+    }
+
+    /// Sets the source used for post-validation txpool prewarming.
+    pub fn with_txpool_prewarm_source(
+        mut self,
+        source: impl TxPoolPrewarmSource<N> + 'static,
+    ) -> Self {
+        self.txpool_prewarm_source = Some(Arc::new(source));
         self
     }
 
@@ -475,6 +545,8 @@ where
         Evm: ConfigureEngineEvm<T::ExecutionData, Primitives = N>,
     {
         let parent_hash = input.parent_hash();
+        self.stop_txpool_prewarming();
+
         let _jit_pause = JitPauseGuard::new(&self.evm_config);
 
         // Fetch parent block. This goes to memory most of the time unless the parent block is
@@ -581,6 +653,7 @@ where
             withdrawals: input.withdrawals().map(|w| w.to_vec()),
             decoded_bal: decoded_bal.as_ref().map(Arc::clone),
         };
+        let txpool_prewarm_env = env.clone();
 
         // Get an iterator over the transactions in the payload
         let txs = self.tx_iterator_for(&input)?;
@@ -760,6 +833,7 @@ where
 
         let block = validated_block.try_into_inner().expect("sole handle")?;
         let block = block.with_senders(senders);
+        let block_gas_limit = block.header().gas_limit();
 
         // Wait for the receipt root computation to complete.
         let receipt_root_bloom = {
@@ -889,6 +963,12 @@ where
             trie_output,
             changed_paths,
         );
+        self.spawn_txpool_prewarming(
+            txpool_prewarm_env,
+            provider_builder.with_overlay_block(executed_block.clone()),
+            block_gas_limit,
+        );
+
         let raw_bal = decoded_bal.map(|decoded_bal| decoded_bal.as_raw_bal().clone());
         Ok(ValidationOutput::new(executed_block, timing_stats).with_raw_bal(raw_bal))
     }
@@ -1379,6 +1459,238 @@ where
         Ok(handle)
     }
 
+    /// Stops the active txpool prewarming task, if any.
+    fn stop_txpool_prewarming(&mut self) {
+        let Some(active) = self.active_txpool_prewarm.take() else { return };
+
+        active.stop();
+        debug!(
+            target: "engine::tree::payload_validator",
+            "signaled txpool prewarming to stop"
+        );
+    }
+
+    /// Starts best-effort txpool transaction prewarming for the next block.
+    fn spawn_txpool_prewarming(
+        &mut self,
+        env: ExecutionEnv<Evm>,
+        provider_builder: StateProviderBuilder<N, P>,
+        block_gas_limit: u64,
+    ) {
+        let config = self.config.txpool_prewarming();
+        if self.config.disable_state_cache() ||
+            self.config.disable_prewarming() ||
+            !config.should_prewarm()
+        {
+            return;
+        }
+
+        let Some(source) = self.txpool_prewarm_source.as_ref().cloned() else { return };
+
+        let block_hash = env.hash;
+        let execution_cache = self.payload_processor.execution_cache();
+        let evm_config = self.evm_config.clone();
+        let metrics = self.metrics.block_validation.clone();
+        let runtime = self.runtime.clone();
+        let stop = Arc::new(AtomicBool::new(false));
+        let stop_for_task = Arc::clone(&stop);
+
+        debug!(
+            target: "engine::tree::payload_validator",
+            %block_hash,
+            max_transactions_per_sender = config.max_transactions_per_sender,
+            max_candidate_scan = config.max_candidate_scan,
+            gas_limit_multiplier = config.gas_limit_multiplier,
+            "starting txpool prewarming"
+        );
+
+        let _handle = runtime.spawn_blocking_named(TXPOOL_PREWARM_WORKER_NAME, move || {
+            let selection_start = Instant::now();
+            let selection = source.best_transactions(block_gas_limit, config, &stop_for_task);
+            metrics
+                .txpool_prewarm_selection_duration
+                .record(selection_start.elapsed().as_secs_f64());
+            metrics.txpool_prewarm_scanned_transactions.record(selection.scanned as f64);
+            metrics.txpool_prewarm_selected_transactions.record(selection.len() as f64);
+
+            let mut stats = TxPoolPrewarmStats {
+                scanned: selection.scanned,
+                selected: selection.len(),
+                selected_gas: selection.selected_gas,
+                canceled: selection.canceled,
+                ..Default::default()
+            };
+
+            if selection.is_empty() || stop_for_task.load(Ordering::Relaxed) {
+                stats.canceled |= stop_for_task.load(Ordering::Relaxed);
+                if stats.canceled {
+                    metrics.txpool_prewarm_canceled_total.increment(1);
+                }
+                debug!(
+                    target: "engine::tree::payload_validator",
+                    %block_hash,
+                    scanned = stats.scanned,
+                    selected = stats.selected,
+                    selected_gas = stats.selected_gas,
+                    canceled = stats.canceled,
+                    "finished txpool prewarming selection without execution"
+                );
+                return stats
+            }
+
+            let cache_wait_start = Instant::now();
+            let saved_cache = loop {
+                if let Some(saved_cache) = execution_cache.get_cache_for_exact_hash(block_hash) {
+                    break Some(saved_cache)
+                }
+
+                if stop_for_task.load(Ordering::Relaxed) {
+                    stats.canceled = true;
+                    metrics.txpool_prewarm_canceled_total.increment(1);
+                    break None
+                }
+
+                if cache_wait_start.elapsed() >= TXPOOL_PREWARM_EXACT_CACHE_WAIT {
+                    break None
+                }
+
+                std::thread::sleep(Duration::from_millis(1));
+            };
+
+            if stats.canceled {
+                debug!(
+                    target: "engine::tree::payload_validator",
+                    %block_hash,
+                    scanned = stats.scanned,
+                    selected = stats.selected,
+                    selected_gas = stats.selected_gas,
+                    "canceled txpool prewarming while waiting for exact execution cache"
+                );
+                return stats
+            }
+
+            let Some(saved_cache) = saved_cache else {
+                stats.cache_unavailable = true;
+                metrics.txpool_prewarm_cache_unavailable_total.increment(1);
+                debug!(
+                    target: "engine::tree::payload_validator",
+                    %block_hash,
+                    scanned = stats.scanned,
+                    selected = stats.selected,
+                    selected_gas = stats.selected_gas,
+                    "skipped txpool prewarming because exact execution cache is unavailable"
+                );
+                return stats
+            };
+
+            let mut by_sender = AddressMap::<Vec<TxPoolPrewarmTransaction<N>>>::default();
+            for transaction in selection.transactions {
+                by_sender.entry(transaction.sender).or_default().push(transaction);
+            }
+
+            let execution_start = Instant::now();
+            for transactions in by_sender.into_values() {
+                stats = stats.merge(Self::prewarm_txpool_transactions(
+                    &evm_config,
+                    &provider_builder,
+                    &env,
+                    &saved_cache,
+                    &transactions,
+                    &stop_for_task,
+                ));
+
+                if stop_for_task.load(Ordering::Relaxed) {
+                    stats.canceled = true;
+                    break
+                }
+            }
+            metrics
+                .txpool_prewarm_execution_duration
+                .record(execution_start.elapsed().as_secs_f64());
+            if stats.canceled {
+                metrics.txpool_prewarm_canceled_total.increment(1);
+            }
+
+            debug!(
+                target: "engine::tree::payload_validator",
+                %block_hash,
+                scanned = stats.scanned,
+                selected = stats.selected,
+                selected_gas = stats.selected_gas,
+                attempted = stats.attempted,
+                succeeded = stats.succeeded,
+                failed = stats.failed,
+                canceled = stats.canceled,
+                "finished txpool prewarming"
+            );
+
+            stats
+        });
+
+        self.active_txpool_prewarm = Some(ActiveTxPoolPrewarm { stop });
+    }
+
+    /// Executes one sender chunk against a cached state provider to warm account/storage/code.
+    fn prewarm_txpool_transactions(
+        evm_config: &Evm,
+        provider_builder: &StateProviderBuilder<N, P>,
+        env: &ExecutionEnv<Evm>,
+        saved_cache: &SavedCache,
+        transactions: &[TxPoolPrewarmTransaction<N>],
+        stop: &AtomicBool,
+    ) -> TxPoolPrewarmStats {
+        let mut stats = TxPoolPrewarmStats::default();
+        if stop.load(Ordering::Relaxed) {
+            stats.canceled = true;
+            return stats;
+        }
+
+        let state_provider = match provider_builder.build() {
+            Ok(provider) => provider,
+            Err(err) => {
+                trace!(
+                    target: "engine::tree::payload_validator",
+                    %err,
+                    transactions = transactions.len(),
+                    "failed to build state provider for txpool prewarming"
+                );
+                stats.failed = transactions.len();
+                return stats;
+            }
+        };
+        let state_provider =
+            CachedStateProvider::new_prewarm(state_provider, saved_cache.cache().clone());
+        let state_provider = StateProviderDatabase::new(state_provider);
+
+        let mut evm_env = env.evm_env.clone();
+        evm_env.cfg_env.disable_nonce_check = true;
+        evm_env.cfg_env.disable_balance_check = true;
+        let mut evm = evm_config.evm_with_env(state_provider, evm_env);
+
+        for transaction in transactions {
+            if stop.load(Ordering::Relaxed) {
+                stats.canceled = true;
+                break;
+            }
+
+            stats.attempted += 1;
+            if let Err(err) = evm.transact(transaction.transaction.clone()) {
+                stats.failed += 1;
+                trace!(
+                    target: "engine::tree::payload_validator",
+                    %err,
+                    tx_hash = ?transaction.transaction.tx_hash(),
+                    sender = %transaction.sender,
+                    "error executing txpool prewarm transaction"
+                );
+            } else {
+                stats.succeeded += 1;
+            }
+        }
+
+        stats
+    }
+
     /// Creates a `StateProviderBuilder` for the given parent hash.
     ///
     /// This method checks if the parent is in the tree state (in-memory) or persisted to disk,
@@ -1734,6 +2046,8 @@ where
         + BlockNumReader
         + HashedPostStateProvider
         + Clone
+        + Send
+        + Sync
         + 'static,
     OverlayStateProviderFactory<P, N>: DatabaseProviderROFactory<Provider: TrieCursorFactory + HashedCursorFactory>
         + Clone
