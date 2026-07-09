@@ -90,17 +90,32 @@ async fn test_eth_subscribe_syncing_delivers_initial_status() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn test_eth_subscribe_invalid_kind_rejected() {
+async fn test_eth_subscribe_invalid_kinds_rejected() {
     reth_tracing::init_test_tracing();
 
     let handle = launch_ws_eth().await;
     let client = handle.ws_client().await.unwrap();
 
-    let result: Result<Subscription<Value>, _> = client
-        .subscribe("eth_subscribe", jsonrpsee::rpc_params!["invalidKind"], "eth_unsubscribe")
-        .await;
+    let cases: Vec<(&str, Vec<Value>)> = vec![
+        ("invalidKind", vec![]),
+        (
+            "pendingLogs",
+            vec![serde_json::json!({"address": "0x0000000000000000000000000000000000000001"})],
+        ),
+    ];
 
-    assert!(result.is_err(), "invalid subscription kind must be rejected");
+    for (kind, params) in cases {
+        let mut rpc_params = jsonrpsee::core::params::ArrayParams::new();
+        rpc_params.insert(kind).unwrap();
+        for p in params {
+            rpc_params.insert(p).unwrap();
+        }
+
+        let result: Result<Subscription<Value>, _> =
+            client.subscribe("eth_subscribe", rpc_params, "eth_unsubscribe").await;
+
+        assert!(result.is_err(), "{kind} subscription kind must be rejected");
+    }
 }
 
 #[tokio::test(flavor = "multi_thread")]
