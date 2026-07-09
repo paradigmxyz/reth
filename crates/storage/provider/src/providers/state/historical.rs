@@ -26,9 +26,9 @@ use reth_trie::{
     trie_cursor::InMemoryTrieCursorFactory,
     updates::TrieUpdates,
     witness::TrieWitness,
-    AccountProof, ExecutionWitnessMode, HashedPostState, HashedPostStateSorted, HashedStorage,
-    KeccakKeyHasher, MultiProof, MultiProofTargets, StateRoot, StorageMultiProof, StorageRoot,
-    TrieInput, TrieInputSorted,
+    AccountProof, ExecutionWitnessMode, HashedPostState, HashedStorage, KeccakKeyHasher,
+    MultiProof, MultiProofTargets, StateRoot, StorageMultiProof, StorageRoot, TrieInput,
+    TrieInputSorted,
 };
 use reth_trie_db::{
     ChangesetCache, DatabaseProof, DatabaseStateRoot, DatabaseStorageProof, DatabaseStorageRoot,
@@ -418,16 +418,9 @@ where
     N: NodePrimitives,
 {
     fn state_root(&self, hashed_state: HashedPostState) -> ProviderResult<B256> {
-        self.state_root_sorted(hashed_state.into_sorted())
-    }
-
-    fn state_root_sorted(&self, hashed_state: HashedPostStateSorted) -> ProviderResult<B256> {
         reth_trie_db::with_adapter!(self.provider, |A| {
-            let prefix_sets = hashed_state.construct_prefix_sets();
-            let input = self.build_overlay(TrieInputSorted::new(
-                Default::default(),
-                Arc::new(hashed_state),
-                prefix_sets,
+            let input = self.build_overlay(TrieInputSorted::from_unsorted(
+                TrieInput::from_state(hashed_state),
             ))?;
             Ok(<DbStateRoot<'_, _, A>>::overlay_root_from_nodes(self.tx(), input)?)
         })
@@ -444,19 +437,9 @@ where
         &self,
         hashed_state: HashedPostState,
     ) -> ProviderResult<(B256, TrieUpdates)> {
-        self.state_root_sorted_with_updates(hashed_state.into_sorted())
-    }
-
-    fn state_root_sorted_with_updates(
-        &self,
-        hashed_state: HashedPostStateSorted,
-    ) -> ProviderResult<(B256, TrieUpdates)> {
         reth_trie_db::with_adapter!(self.provider, |A| {
-            let prefix_sets = hashed_state.construct_prefix_sets();
-            let input = self.build_overlay(TrieInputSorted::new(
-                Default::default(),
-                Arc::new(hashed_state),
-                prefix_sets,
+            let input = self.build_overlay(TrieInputSorted::from_unsorted(
+                TrieInput::from_state(hashed_state),
             ))?;
             Ok(<DbStateRoot<'_, _, A>>::overlay_root_from_nodes_with_updates(self.tx(), input)?)
         })

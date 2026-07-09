@@ -3,8 +3,8 @@ use alloy_primitives::{Address, Bytes, B256};
 use reth_storage_errors::provider::ProviderResult;
 use reth_trie_common::{
     updates::{StorageTrieUpdatesSorted, TrieUpdates, TrieUpdatesSorted},
-    AccountProof, ExecutionWitnessMode, HashedPostState, HashedPostStateSorted, HashedStorage,
-    MultiProof, MultiProofTargets, StorageMultiProof, StorageProof, TrieInput,
+    AccountProof, ExecutionWitnessMode, HashedPostState, HashedStorage, MultiProof,
+    MultiProofTargets, StorageMultiProof, StorageProof, TrieInput,
 };
 
 /// A type that can compute the state root of a given post state.
@@ -19,11 +19,6 @@ pub trait StateRootProvider {
     /// computation.
     fn state_root(&self, hashed_state: HashedPostState) -> ProviderResult<B256>;
 
-    /// Returns the state root of sorted hashed post-state on top of the current state.
-    fn state_root_sorted(&self, hashed_state: HashedPostStateSorted) -> ProviderResult<B256> {
-        self.state_root(hashed_state.into())
-    }
-
     /// Returns the state root of the `HashedPostState` on top of the current state but reuses the
     /// intermediate nodes to speed up the computation. It's up to the caller to construct the
     /// prefix sets and inform the provider of the trie paths that have changes.
@@ -35,14 +30,6 @@ pub trait StateRootProvider {
         &self,
         hashed_state: HashedPostState,
     ) -> ProviderResult<(B256, TrieUpdates)>;
-
-    /// Returns the state root of sorted hashed post-state with trie updates.
-    fn state_root_sorted_with_updates(
-        &self,
-        hashed_state: HashedPostStateSorted,
-    ) -> ProviderResult<(B256, TrieUpdates)> {
-        self.state_root_with_updates(hashed_state.into())
-    }
 
     /// Returns state root and trie updates.
     /// See [`StateRootProvider::state_root_from_nodes`] for more info.

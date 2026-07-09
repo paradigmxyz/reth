@@ -15,9 +15,9 @@ use reth_trie::{
     trie_cursor::InMemoryTrieCursorFactory,
     updates::TrieUpdates,
     witness::TrieWitness,
-    AccountProof, ExecutionWitnessMode, HashedPostState, HashedPostStateSorted, HashedStorage,
-    KeccakKeyHasher, MultiProof, MultiProofTargets, StateRoot, StorageMultiProof, StorageRoot,
-    TrieInput, TrieInputSorted,
+    AccountProof, ExecutionWitnessMode, HashedPostState, HashedStorage, KeccakKeyHasher,
+    MultiProof, MultiProofTargets, StateRoot, StorageMultiProof, StorageRoot, TrieInput,
+    TrieInputSorted,
 };
 use reth_trie_db::{DatabaseProof, DatabaseStateRoot, DatabaseStorageProof, DatabaseStorageRoot};
 
@@ -102,15 +102,9 @@ impl<Provider: DBProvider + StorageSettingsCache> StateRootProvider
     for LatestStateProviderRef<'_, Provider>
 {
     fn state_root(&self, hashed_state: HashedPostState) -> ProviderResult<B256> {
-        self.state_root_sorted(hashed_state.into_sorted())
-    }
-
-    fn state_root_sorted(&self, hashed_state: HashedPostStateSorted) -> ProviderResult<B256> {
         reth_trie_db::with_adapter!(self.0, |A| {
-            Ok(<DbStateRoot<'_, _, A> as DatabaseStateRoot<_>>::overlay_root(
-                self.tx(),
-                &hashed_state,
-            )?)
+            let sorted = hashed_state.into_sorted();
+            Ok(<DbStateRoot<'_, _, A> as DatabaseStateRoot<_>>::overlay_root(self.tx(), &sorted)?)
         })
     }
 
@@ -127,17 +121,11 @@ impl<Provider: DBProvider + StorageSettingsCache> StateRootProvider
         &self,
         hashed_state: HashedPostState,
     ) -> ProviderResult<(B256, TrieUpdates)> {
-        self.state_root_sorted_with_updates(hashed_state.into_sorted())
-    }
-
-    fn state_root_sorted_with_updates(
-        &self,
-        hashed_state: HashedPostStateSorted,
-    ) -> ProviderResult<(B256, TrieUpdates)> {
         reth_trie_db::with_adapter!(self.0, |A| {
+            let sorted = hashed_state.into_sorted();
             Ok(<DbStateRoot<'_, _, A> as DatabaseStateRoot<_>>::overlay_root_with_updates(
                 self.tx(),
-                &hashed_state,
+                &sorted,
             )?)
         })
     }

@@ -28,13 +28,6 @@ impl reth_storage_api::StateRootProvider for StateProviderTraitObjWrapper {
         self.0.state_root(hashed_state)
     }
 
-    fn state_root_sorted(
-        &self,
-        hashed_state: reth_trie::HashedPostStateSorted,
-    ) -> reth_errors::ProviderResult<B256> {
-        self.0.state_root_sorted(hashed_state)
-    }
-
     fn state_root_from_nodes(
         &self,
         input: reth_trie::TrieInput,
@@ -47,13 +40,6 @@ impl reth_storage_api::StateRootProvider for StateProviderTraitObjWrapper {
         hashed_state: reth_trie::HashedPostState,
     ) -> reth_errors::ProviderResult<(B256, reth_trie::updates::TrieUpdates)> {
         self.0.state_root_with_updates(hashed_state)
-    }
-
-    fn state_root_sorted_with_updates(
-        &self,
-        hashed_state: reth_trie::HashedPostStateSorted,
-    ) -> reth_errors::ProviderResult<(B256, reth_trie::updates::TrieUpdates)> {
-        self.0.state_root_sorted_with_updates(hashed_state)
     }
 
     fn state_root_from_nodes_with_updates(
