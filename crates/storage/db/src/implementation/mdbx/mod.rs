@@ -315,17 +315,9 @@ impl DatabaseMetrics for DatabaseEnv {
     fn gauge_metrics(&self) -> Vec<(&'static str, f64, Vec<Label>)> {
         let mut metrics = Vec::new();
 
-        // Report the static tables and any tracked custom tables, e.g. node-specific tables
-        // created through [`DatabaseEnv::create_and_track_tables_for`].
-        let custom_tables = self
-            .dbis
-            .keys()
-            .copied()
-            .filter(|name| Tables::ALL.iter().all(|table| table.name() != *name));
-
         let _ = self
             .view(|tx| {
-                for table in Tables::ALL.iter().map(Tables::name).chain(custom_tables) {
+                for table in self.dbis.keys().copied() {
                     let table_db =
                         tx.inner().open_db(Some(table)).wrap_err("Could not open db.")?;
 
