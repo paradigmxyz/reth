@@ -206,6 +206,24 @@ where
     }
 }
 
+fn ensure_supported_subscription_params(
+    kind: SubscriptionKind,
+    params: Option<&Params>,
+) -> Result<(), ErrorObject<'static>> {
+    if let (SubscriptionKind::Logs, Some(Params::Logs(filter))) = (kind, params) {
+        let (from_block, to_block) = filter.block_option.as_range();
+        if from_block.is_some_and(|block| block.is_pending()) ||
+            to_block.is_some_and(|block| block.is_pending())
+        {
+            return Err(invalid_params_rpc_err(
+                "pending block filters are not supported for logs subscriptions",
+            ));
+        }
+    }
+
+    Ok(())
+}
+
 #[async_trait::async_trait]
 impl<Eth> EthPubSubApiServer<RpcTransaction<Eth::NetworkTypes>> for EthPubSub<Eth>
 where
@@ -218,6 +236,11 @@ where
         kind: SubscriptionKind,
         params: Option<Params>,
     ) -> jsonrpsee::core::SubscriptionResult {
+        if let Err(err) = ensure_supported_subscription_params(kind, params.as_ref()) {
+            pending.reject(err).await;
+            return Ok(())
+        }
+
         let sink = pending.accept().await?;
         let pubsub = self.clone();
         self.inner.subscription_task_spawner.spawn_task(async move {

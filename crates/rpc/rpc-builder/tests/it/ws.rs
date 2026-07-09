@@ -104,6 +104,28 @@ async fn test_eth_subscribe_invalid_kind_rejected() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn test_eth_subscribe_logs_pending_block_filter_rejected() {
+    reth_tracing::init_test_tracing();
+
+    let handle = launch_ws_eth().await;
+    let client = handle.ws_client().await.unwrap();
+
+    let cases = [
+        serde_json::json!({"fromBlock": "pending"}),
+        serde_json::json!({"toBlock": "pending"}),
+        serde_json::json!({"fromBlock": "pending", "toBlock": "pending"}),
+    ];
+
+    for filter in cases {
+        let result: Result<Subscription<Value>, _> = client
+            .subscribe("eth_subscribe", jsonrpsee::rpc_params!["logs", filter], "eth_unsubscribe")
+            .await;
+
+        assert!(result.is_err(), "pending logs filter must be rejected");
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn test_eth_subscribe_server_survives_client_disconnect() {
     reth_tracing::init_test_tracing();
 
