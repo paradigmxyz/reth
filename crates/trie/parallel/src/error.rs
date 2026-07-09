@@ -8,9 +8,15 @@ pub enum StateRootTaskError {
     /// Provider error.
     #[error(transparent)]
     Provider(#[from] ProviderError),
+    /// Proof dispatch error.
+    #[error("proof dispatch failed: {_0}")]
+    ProofDispatch(ProviderError),
     /// Sparse trie error.
     #[error(transparent)]
     SparseTrie(#[from] SparseTrieError),
+    /// Sparse trie task stalled.
+    #[error("sparse trie task stalled")]
+    Stalled,
     /// Other unspecified error.
     #[error("{_0}")]
     Other(String),
