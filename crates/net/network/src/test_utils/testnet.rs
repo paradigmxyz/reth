@@ -29,7 +29,7 @@ use reth_network_api::{
 use reth_network_peers::PeerId;
 use reth_storage_api::{
     noop::NoopProvider, BalProvider, BlockReader, BlockReaderIdExt, HeaderProvider,
-    StateProviderFactory,
+    StateProviderFactory, StateRangeProvider,
 };
 use reth_tasks::Runtime;
 use reth_tokio_util::EventStream;
@@ -249,6 +249,8 @@ where
             Header = alloy_consensus::Header,
         > + HeaderProvider
         + BalProvider
+        + StateProviderFactory
+        + StateRangeProvider
         + Clone
         + Unpin
         + 'static,
@@ -322,6 +324,8 @@ where
             Header = alloy_consensus::Header,
         > + HeaderProvider
         + BalProvider
+        + StateProviderFactory
+        + StateRangeProvider
         + Unpin
         + 'static,
     Pool: TransactionPool<
@@ -589,6 +593,8 @@ where
             Header = alloy_consensus::Header,
         > + HeaderProvider
         + BalProvider
+        + StateProviderFactory
+        + StateRangeProvider
         + Unpin
         + 'static,
     Pool: TransactionPool<

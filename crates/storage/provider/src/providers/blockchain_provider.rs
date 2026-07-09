@@ -13,7 +13,7 @@ use crate::{
 };
 use alloy_consensus::transaction::TransactionMeta;
 use alloy_eips::{BlockHashOrNumber, BlockId, BlockNumHash, BlockNumberOrTag};
-use alloy_primitives::{Address, BlockHash, BlockNumber, TxHash, TxNumber, B256};
+use alloy_primitives::{Address, BlockHash, BlockNumber, Bytes, TxHash, TxNumber, B256, U256};
 use alloy_rpc_types_engine::ForkchoiceState;
 use reth_chain_state::{
     BlockState, CanonicalInMemoryState, ForkChoiceNotifications, ForkChoiceSubscriptions,
@@ -29,9 +29,19 @@ use reth_primitives_traits::{
 use reth_prune_types::{PruneCheckpoint, PruneSegment};
 use reth_stages_types::{StageCheckpoint, StageId};
 use reth_static_file_types::StaticFileSegment;
-use reth_storage_api::{BlockBodyIndicesProvider, NodePrimitivesProvider, StorageChangeSetReader};
+use reth_storage_api::{
+    BlockBodyIndicesProvider, NodePrimitivesProvider, RangeResult, StateRangeProvider,
+    StorageChangeSetReader, StorageSettingsCache,
+};
 use reth_storage_errors::provider::ProviderResult;
-use reth_trie::{HashedPostState, KeccakKeyHasher};
+use reth_trie::{
+    hashed_cursor::{HashedCursor, HashedCursorFactory},
+    proof::{Proof, StorageProof},
+    HashedPostState, KeccakKeyHasher, MultiProofTargets, StorageRoot,
+};
+use reth_trie_db::{
+    DatabaseHashedCursorFactory, DatabaseProof, DatabaseStorageRoot, DatabaseTrieCursorFactory,
+};
 use revm::database::BundleState;
 use std::{
     ops::{RangeBounds, RangeInclusive},
@@ -39,6 +49,11 @@ use std::{
     time::Instant,
 };
 use tracing::trace;
+
+type DbStorageRoot<'a, TX, A> =
+    StorageRoot<DatabaseTrieCursorFactory<&'a TX, A>, DatabaseHashedCursorFactory<&'a TX>>;
+type DbProof<'a, TX, A> =
+    Proof<DatabaseTrieCursorFactory<&'a TX, A>, DatabaseHashedCursorFactory<&'a TX>>;
 
 /// The main type for interacting with the blockchain.
 ///
@@ -150,6 +165,156 @@ impl<N: NodeTypesWithDB> NodePrimitivesProvider for BlockchainProvider<N> {
 impl<N: NodeTypesWithDB> BalProvider for BlockchainProvider<N> {
     fn bal_store(&self) -> &BalStoreHandle {
         &self.bal_store
+    }
+}
+
+impl<N: ProviderNodeTypes> StateRangeProvider for BlockchainProvider<N> {
+    /// Only serves the latest, database-backed state: returns `Ok(None)` whenever an in-memory
+    /// reorg overlay is active, rather than risk iterating the wrong state.
+    fn account_range(
+        &self,
+        start: B256,
+        limit: B256,
+        response_bytes: usize,
+    ) -> RangeResult<(B256, Account)> {
+        if self.canonical_in_memory_state.head_state().is_some() {
+            return Ok(None)
+        }
+
+        let provider = self.database.provider()?;
+        let hashed_cursor_factory = DatabaseHashedCursorFactory::new(provider.tx_ref());
+        let mut cursor =
+            hashed_cursor_factory.hashed_account_cursor().map_err(ProviderError::Database)?;
+
+        let mut accounts = Vec::new();
+        let mut total_bytes = 0usize;
+        let mut complete = true;
+
+        let mut entry = cursor.seek(start).map_err(ProviderError::Database)?;
+        while let Some((hash, account)) = entry {
+            if hash > limit {
+                break
+            }
+            total_bytes += 32 + 4 * 32; // hash + rough upper bound of the RLP account body
+            accounts.push((hash, account));
+            if total_bytes > response_bytes {
+                complete = false;
+                break
+            }
+            entry = cursor.next().map_err(ProviderError::Database)?;
+        }
+
+        Ok(Some((accounts, complete)))
+    }
+
+    /// Only serves the latest, database-backed state; see [`Self::account_range`].
+    fn storage_root_by_hash(&self, hashed_address: B256) -> ProviderResult<Option<B256>> {
+        if self.canonical_in_memory_state.head_state().is_some() {
+            return Ok(None)
+        }
+
+        let provider = self.database.provider()?;
+        reth_trie_db::with_adapter!(provider, |A| {
+            let root = <DbStorageRoot<'_, _, A>>::from_tx_hashed(provider.tx_ref(), hashed_address)
+                .root()
+                .map_err(|err| ProviderError::Database(err.into()))?;
+            Ok(Some(root))
+        })
+    }
+
+    /// Only serves the latest, database-backed state: returns `Ok(None)` whenever an in-memory
+    /// reorg overlay is active, rather than risk iterating the wrong state.
+    fn storage_range(
+        &self,
+        hashed_address: B256,
+        start: B256,
+        limit: B256,
+        response_bytes: usize,
+    ) -> RangeResult<(B256, U256)> {
+        // No cursor-based range access for the in-memory reorg overlay yet.
+        if self.canonical_in_memory_state.head_state().is_some() {
+            return Ok(None)
+        }
+
+        let provider = self.database.provider()?;
+        let hashed_cursor_factory = DatabaseHashedCursorFactory::new(provider.tx_ref());
+        let mut cursor = hashed_cursor_factory
+            .hashed_storage_cursor(hashed_address)
+            .map_err(ProviderError::Database)?;
+
+        let mut slots = Vec::new();
+        let mut total_bytes = 0usize;
+        let mut complete = true;
+
+        let mut entry = cursor.seek(start).map_err(ProviderError::Database)?;
+        while let Some((hash, value)) = entry {
+            if hash > limit {
+                break
+            }
+            total_bytes += 64; // 32-byte hash + 32-byte value
+            slots.push((hash, value));
+            if total_bytes > response_bytes {
+                complete = false;
+                break
+            }
+            entry = cursor.next().map_err(ProviderError::Database)?;
+        }
+
+        Ok(Some((slots, complete)))
+    }
+
+    /// Only serves the latest, database-backed state; see [`Self::account_range`].
+    fn account_range_proof(&self, keys: &[B256]) -> ProviderResult<Option<Vec<Bytes>>> {
+        if self.canonical_in_memory_state.head_state().is_some() {
+            return Ok(None)
+        }
+
+        let provider = self.database.provider()?;
+        reth_trie_db::with_adapter!(provider, |A| {
+            let multiproof = <DbProof<'_, _, A>>::from_tx(provider.tx_ref())
+                .multiproof(MultiProofTargets::accounts(keys.iter().copied()))
+                .map_err(ProviderError::from)?;
+            Ok(Some(
+                multiproof
+                    .account_subtree
+                    .into_nodes_sorted()
+                    .into_iter()
+                    .map(|(_, bytes)| bytes)
+                    .collect(),
+            ))
+        })
+    }
+
+    /// Only serves the latest, database-backed state; see [`Self::account_range`].
+    fn storage_range_proof(
+        &self,
+        hashed_address: B256,
+        keys: &[B256],
+    ) -> ProviderResult<Option<Vec<Bytes>>> {
+        if self.canonical_in_memory_state.head_state().is_some() {
+            return Ok(None)
+        }
+
+        let provider = self.database.provider()?;
+        reth_trie_db::with_adapter!(provider, |A| {
+            let trie_cursor_factory = DatabaseTrieCursorFactory::<_, A>::new(provider.tx_ref());
+            let hashed_cursor_factory = DatabaseHashedCursorFactory::new(provider.tx_ref());
+            let multiproof = StorageProof::new_hashed(
+                trie_cursor_factory,
+                hashed_cursor_factory,
+                hashed_address,
+            )
+            .storage_multiproof(keys.iter().copied().collect())
+            .map_err(ProviderError::from)?;
+            Ok(Some(
+                multiproof
+                    .subtree
+                    .into_nodes_sorted()
+                    .into_iter()
+                    .map(|(_, bytes)| bytes)
+                    .collect(),
+            ))
+        })
     }
 }
 

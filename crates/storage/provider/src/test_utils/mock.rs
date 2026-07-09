@@ -2,8 +2,9 @@ use crate::{
     traits::{BlockSource, ReceiptProvider},
     AccountReader, BalProvider, BalStoreHandle, BlockHashReader, BlockIdReader, BlockNumReader,
     BlockReader, BlockReaderIdExt, ChainSpecProvider, ChangeSetReader, HeaderProvider,
-    PruneCheckpointReader, ReceiptProviderIdExt, StateProvider, StateProviderBox,
-    StateProviderFactory, StateReader, StateRootProvider, TransactionVariant, TransactionsProvider,
+    PruneCheckpointReader, RangeResult, ReceiptProviderIdExt, StateProvider, StateProviderBox,
+    StateProviderFactory, StateRangeProvider, StateReader, StateRootProvider, TransactionVariant,
+    TransactionsProvider,
 };
 use alloy_consensus::{
     constants::EMPTY_ROOT_HASH,
@@ -220,6 +221,43 @@ impl Default for MockEthProvider {
 impl<T: NodePrimitives, ChainSpec> BalProvider for MockEthProvider<T, ChainSpec> {
     fn bal_store(&self) -> &BalStoreHandle {
         &self.bal_store
+    }
+}
+
+impl<T: NodePrimitives, ChainSpec> StateRangeProvider for MockEthProvider<T, ChainSpec> {
+    fn account_range(
+        &self,
+        _start: B256,
+        _limit: B256,
+        _response_bytes: usize,
+    ) -> RangeResult<(B256, Account)> {
+        Ok(None)
+    }
+
+    fn storage_root_by_hash(&self, _hashed_address: B256) -> ProviderResult<Option<B256>> {
+        Ok(None)
+    }
+
+    fn storage_range(
+        &self,
+        _hashed_address: B256,
+        _start: B256,
+        _limit: B256,
+        _response_bytes: usize,
+    ) -> RangeResult<(B256, U256)> {
+        Ok(None)
+    }
+
+    fn account_range_proof(&self, _keys: &[B256]) -> ProviderResult<Option<Vec<Bytes>>> {
+        Ok(None)
+    }
+
+    fn storage_range_proof(
+        &self,
+        _hashed_address: B256,
+        _keys: &[B256],
+    ) -> ProviderResult<Option<Vec<Bytes>>> {
+        Ok(None)
     }
 }
 

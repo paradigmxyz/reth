@@ -6,10 +6,15 @@ use crate::{
 };
 use alloy_consensus::{BlockHeader, ReceiptWithBloom};
 use alloy_eips::BlockHashOrNumber;
+use alloy_primitives::{Bytes, B256};
 use alloy_rlp::Encodable;
 use futures::StreamExt;
 use reth_eth_wire::{
-    snap::{BlockAccessListsMessage, SnapProtocolMessage},
+    snap::{
+        AccountData, AccountRangeMessage, BlockAccessListsMessage, ByteCodesMessage,
+        GetAccountRangeMessage, GetStorageRangesMessage, SnapProtocolMessage, StorageData,
+        StorageRangesMessage,
+    },
     BlockAccessLists, BlockBodies, BlockHeaders, Cells, EthNetworkPrimitives, GetBlockAccessLists,
     GetBlockBodies, GetBlockHeaders, GetCells, GetNodeData, GetReceipts, GetReceipts70,
     HeadersDirection, NetworkPrimitives, NodeData, Receipts, Receipts69, Receipts70,
@@ -21,7 +26,10 @@ use reth_network_p2p::{
 };
 use reth_network_peers::PeerId;
 use reth_primitives_traits::Block;
-use reth_storage_api::{BalProvider, BlockReader, GetBlockAccessListLimit, HeaderProvider};
+use reth_storage_api::{
+    BalProvider, BlockReader, BytecodeReader, GetBlockAccessListLimit, HeaderProvider,
+    StateProviderFactory, StateRangeProvider,
+};
 use reth_transaction_pool::{blobstore::NoopBlobStore, BlobStore};
 use std::{
     future::Future,
@@ -59,6 +67,11 @@ pub const MAX_BLOCK_ACCESS_LISTS_SERVE: usize = 1024;
 ///
 /// Used to limit lookups.
 pub const MAX_CELLS_SERVE: usize = 1024;
+
+/// Maximum number of bytecode lookups to serve.
+///
+/// Used to limit lookups.
+pub const MAX_BYTE_CODES_SERVE: usize = 1024;
 
 /// Maximum size of replies to data retrievals: 2MB
 pub const SOFT_RESPONSE_LIMIT: usize = 2 * 1024 * 1024;
@@ -383,14 +396,20 @@ where
             self.client.bal_store().get_by_hashes_with_limit(&request.0, limit).unwrap_or_default();
         let _ = response.send(Ok(BlockAccessLists(access_lists)));
     }
+}
 
+impl<C, N> EthRequestHandler<C, N>
+where
+    N: NetworkPrimitives,
+    C: BalProvider + StateProviderFactory + StateRangeProvider,
+{
     /// Handles `snap/2` (EIP-8189) requests.
     ///
-    /// `GetAccountRange`/`GetStorageRanges`/`GetByteCodes` stay unsupported until a real
-    /// state-trie-backed store exists; an empty response would falsely claim served data.
+    /// `GetAccountRange`/`GetStorageRanges` are hash-native throughout and served from
+    /// [`StateRangeProvider`], for the latest state only. `GetByteCodes` is content-addressed
+    /// and independent of any particular state root, so it's served directly.
     /// `GetBlockAccessLists` is answered from the same [`BalProvider`] store eth71's
-    /// `GetBlockAccessLists` uses, since both serve the same
-    /// underlying data.
+    /// `GetBlockAccessLists` uses, since both serve the same underlying data.
     fn on_snap_request(
         &self,
         _peer_id: PeerId,
@@ -400,9 +419,16 @@ where
         self.metrics.snap_requests_received_total.increment(1);
 
         let result = match request {
-            SnapProtocolMessage::GetAccountRange(_) |
-            SnapProtocolMessage::GetStorageRanges(_) |
-            SnapProtocolMessage::GetByteCodes(_) => Err(RequestError::UnsupportedCapability),
+            SnapProtocolMessage::GetAccountRange(req) => {
+                Ok(SnapResponse::AccountRange(self.get_account_range_response(req)))
+            }
+            SnapProtocolMessage::GetStorageRanges(req) => {
+                Ok(SnapResponse::StorageRanges(self.get_storage_ranges_response(req)))
+            }
+            SnapProtocolMessage::GetByteCodes(req) => {
+                let codes = self.get_byte_codes_response(&req.hashes, req.response_bytes as usize);
+                Ok(SnapResponse::ByteCodes(ByteCodesMessage { request_id: req.request_id, codes }))
+            }
             SnapProtocolMessage::GetBlockAccessLists(mut req) => {
                 req.block_hashes.truncate(MAX_BLOCK_ACCESS_LISTS_SERVE);
                 let limit = GetBlockAccessListLimit::ResponseSizeSoftLimit(
@@ -425,6 +451,132 @@ where
 
         let _ = response.send(result);
     }
+
+    /// Returns the bytecode for each of `hashes`, skipping hashes with no known code, stopping
+    /// once `response_bytes` (capped at [`SOFT_RESPONSE_LIMIT`]) is exceeded.
+    fn get_byte_codes_response(&self, hashes: &[B256], response_bytes: usize) -> Vec<Bytes> {
+        let Ok(state) = self.client.latest() else { return Vec::new() };
+        let response_bytes = response_bytes.min(SOFT_RESPONSE_LIMIT);
+
+        let mut codes = Vec::new();
+        let mut total_bytes = 0;
+        for hash in hashes.iter().take(MAX_BYTE_CODES_SERVE) {
+            let Ok(Some(bytecode)) = state.bytecode_by_hash(hash) else { continue };
+            let bytes = bytecode.original_bytes();
+            total_bytes += bytes.len();
+            codes.push(bytes);
+
+            if total_bytes > response_bytes {
+                break
+            }
+        }
+        codes
+    }
+
+    /// Serves a `GetAccountRange` request via [`StateRangeProvider`], for the latest state only.
+    ///
+    /// Skips (rather than serves with a wrong root) any account whose storage root can't be
+    /// computed, e.g. because the in-memory reorg overlay is active. A complete range (nothing
+    /// left beyond what's returned) needs no proof; a truncated one is proven via a boundary
+    /// proof over its first and last account.
+    fn get_account_range_response(&self, req: GetAccountRangeMessage) -> AccountRangeMessage {
+        let response_bytes = (req.response_bytes as usize).min(SOFT_RESPONSE_LIMIT);
+        let Ok(Some((accounts, complete))) =
+            self.client.account_range(req.starting_hash, req.limit_hash, response_bytes)
+        else {
+            return AccountRangeMessage {
+                request_id: req.request_id,
+                accounts: Vec::new(),
+                proof: Vec::new(),
+            }
+        };
+
+        let boundary_keys = match (complete, accounts.first(), accounts.last()) {
+            (false, Some((first, _)), Some((last, _))) => vec![*first, *last],
+            _ => Vec::new(),
+        };
+
+        let accounts = accounts
+            .into_iter()
+            .filter_map(|(hash, account)| {
+                let storage_root = self.client.storage_root_by_hash(hash).ok()??;
+                let body = alloy_rlp::encode(account.into_trie_account(storage_root)).into();
+                Some(AccountData { hash, body })
+            })
+            .collect();
+
+        let proof = if boundary_keys.is_empty() {
+            Vec::new()
+        } else {
+            self.client.account_range_proof(&boundary_keys).ok().flatten().unwrap_or_default()
+        };
+
+        AccountRangeMessage { request_id: req.request_id, accounts, proof }
+    }
+
+    /// Serves a `GetStorageRanges` request via [`StateRangeProvider`], for the latest state only.
+    ///
+    /// `starting_hash` only applies to the first account; later accounts start from zero.
+    /// `limit_hash` isn't applied per-account here — the shared `response_bytes` budget across
+    /// all accounts is what actually bounds the response, and iteration stops at the first
+    /// account whose range doesn't fully complete within that budget.
+    fn get_storage_ranges_response(&self, req: GetStorageRangesMessage) -> StorageRangesMessage {
+        let mut slots = Vec::new();
+        let mut remaining_bytes = (req.response_bytes as usize).min(SOFT_RESPONSE_LIMIT);
+        // Boundary keys for the last account processed, unless its range fully completed and it
+        // was the last one requested, in which case no proof is needed at all.
+        let mut proof_target: Option<(B256, Vec<B256>)> = None;
+
+        for (i, &hashed_address) in req.account_hashes.iter().enumerate() {
+            if remaining_bytes == 0 {
+                break
+            }
+            let start = if i == 0 { req.starting_hash } else { B256::ZERO };
+            let Ok(Some((account_slots, complete))) = self.client.storage_range(
+                hashed_address,
+                start,
+                B256::repeat_byte(0xff),
+                remaining_bytes,
+            ) else {
+                break
+            };
+
+            remaining_bytes = remaining_bytes.saturating_sub(account_slots.len() * 64);
+            let is_last_requested = i == req.account_hashes.len() - 1;
+            proof_target = if complete && is_last_requested {
+                None
+            } else {
+                match (account_slots.first(), account_slots.last()) {
+                    (Some((first, _)), Some((last, _))) => {
+                        Some((hashed_address, vec![*first, *last]))
+                    }
+                    _ => None,
+                }
+            };
+
+            slots.push(
+                account_slots
+                    .into_iter()
+                    .map(|(hash, value)| StorageData {
+                        hash,
+                        data: value.to_be_bytes_trimmed_vec().into(),
+                    })
+                    .collect(),
+            );
+
+            if !complete {
+                break
+            }
+        }
+
+        let proof = proof_target
+            .and_then(|(hashed_address, keys)| {
+                self.client.storage_range_proof(hashed_address, &keys).ok().flatten()
+            })
+            .unwrap_or_default();
+
+        StorageRangesMessage { request_id: req.request_id, slots, proof }
+    }
 }
 
 /// An endless future.
@@ -434,6 +586,8 @@ impl<C, N> Future for EthRequestHandler<C, N>
 where
     N: NetworkPrimitives,
     C: BalProvider
+        + StateProviderFactory
+        + StateRangeProvider
         + BlockReader<Block = N::Block, Receipt = N::Receipt>
         + HeaderProvider<Header = N::BlockHeader>
         + Unpin,
@@ -606,7 +760,7 @@ mod tests {
         eip4844::{BlobAndProofV1, BlobAndProofV2, BlobCellsAndProofsV1},
         eip7594::{BlobTransactionSidecarVariant, Cell},
     };
-    use alloy_primitives::{TxHash, B128, B256};
+    use alloy_primitives::{TxHash, B128};
     use reth_network_api::test_utils::PeersHandle;
     use reth_storage_api::noop::NoopProvider;
     use reth_transaction_pool::blobstore::{BlobStoreCleanupStat, BlobStoreError};

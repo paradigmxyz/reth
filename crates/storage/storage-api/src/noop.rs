@@ -6,9 +6,10 @@ use crate::{
     AccountReader, BalProvider, BalStoreHandle, BlockBodyIndicesProvider, BlockHashReader,
     BlockIdReader, BlockNumReader, BlockReader, BlockReaderIdExt, BlockSource, BytecodeReader,
     ChangeSetReader, HashedPostStateProvider, HeaderProvider, NodePrimitivesProvider,
-    PruneCheckpointReader, ReceiptProvider, ReceiptProviderIdExt, StageCheckpointReader,
-    StateProofProvider, StateProvider, StateProviderBox, StateProviderFactory, StateReader,
-    StateRootProvider, StorageRootProvider, TransactionVariant, TransactionsProvider,
+    PruneCheckpointReader, RangeResult, ReceiptProvider, ReceiptProviderIdExt,
+    StageCheckpointReader, StateProofProvider, StateProvider, StateProviderBox,
+    StateProviderFactory, StateRangeProvider, StateReader, StateRootProvider, StorageRootProvider,
+    TransactionVariant, TransactionsProvider,
 };
 
 #[cfg(feature = "db-api")]
@@ -17,7 +18,7 @@ use alloc::{boxed::Box, string::String, sync::Arc, vec::Vec};
 use alloy_consensus::transaction::TransactionMeta;
 use alloy_eips::{BlockHashOrNumber, BlockId, BlockNumberOrTag};
 use alloy_primitives::{
-    Address, BlockHash, BlockNumber, Bytes, StorageKey, StorageValue, TxHash, TxNumber, B256,
+    Address, BlockHash, BlockNumber, Bytes, StorageKey, StorageValue, TxHash, TxNumber, B256, U256,
 };
 use core::{
     fmt::Debug,
@@ -114,6 +115,43 @@ impl<ChainSpec, N> Clone for NoopProvider<ChainSpec, N> {
 impl<ChainSpec, N> BalProvider for NoopProvider<ChainSpec, N> {
     fn bal_store(&self) -> &BalStoreHandle {
         &self.bal_store
+    }
+}
+
+impl<ChainSpec, N> StateRangeProvider for NoopProvider<ChainSpec, N> {
+    fn account_range(
+        &self,
+        _start: B256,
+        _limit: B256,
+        _response_bytes: usize,
+    ) -> RangeResult<(B256, Account)> {
+        Ok(None)
+    }
+
+    fn storage_root_by_hash(&self, _hashed_address: B256) -> ProviderResult<Option<B256>> {
+        Ok(None)
+    }
+
+    fn storage_range(
+        &self,
+        _hashed_address: B256,
+        _start: B256,
+        _limit: B256,
+        _response_bytes: usize,
+    ) -> RangeResult<(B256, U256)> {
+        Ok(None)
+    }
+
+    fn account_range_proof(&self, _keys: &[B256]) -> ProviderResult<Option<Vec<Bytes>>> {
+        Ok(None)
+    }
+
+    fn storage_range_proof(
+        &self,
+        _hashed_address: B256,
+        _keys: &[B256],
+    ) -> ProviderResult<Option<Vec<Bytes>>> {
+        Ok(None)
     }
 }
 
