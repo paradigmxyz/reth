@@ -121,6 +121,7 @@ use crate::tree::{
         DefaultStateRootStrategy, PayloadStateRootJobContext, StateRootJobContext,
         StateRootStrategy,
     },
+    PendingSparseTriePrune,
 };
 use alloy_consensus::constants::KECCAK_EMPTY;
 use alloy_primitives::Address;
@@ -194,7 +195,7 @@ pub struct TreeCtx<'a, N: NodePrimitives> {
     /// Reference to the canonical in-memory state
     canonical_in_memory_state: &'a CanonicalInMemoryState<N>,
     /// Pending sparse trie prune request to consume when spawning a sparse trie task.
-    pending_sparse_trie_prune: &'a mut Option<TriePrefixSetsMut>,
+    pending_sparse_trie_prune: &'a mut Option<PendingSparseTriePrune>,
 }
 
 impl<'a, N: NodePrimitives> std::fmt::Debug for TreeCtx<'a, N> {
@@ -212,7 +213,7 @@ impl<'a, N: NodePrimitives> TreeCtx<'a, N> {
     pub const fn new(
         state: &'a mut EngineApiTreeState<N>,
         canonical_in_memory_state: &'a CanonicalInMemoryState<N>,
-        pending_sparse_trie_prune: &'a mut Option<TriePrefixSetsMut>,
+        pending_sparse_trie_prune: &'a mut Option<PendingSparseTriePrune>,
     ) -> Self {
         Self { state, canonical_in_memory_state, pending_sparse_trie_prune }
     }
@@ -235,7 +236,7 @@ impl<'a, N: NodePrimitives> TreeCtx<'a, N> {
     }
 
     /// Takes the pending sparse trie prune request, if any.
-    pub const fn take_sparse_trie_prune(&mut self) -> Option<TriePrefixSetsMut> {
+    pub const fn take_sparse_trie_prune(&mut self) -> Option<PendingSparseTriePrune> {
         self.pending_sparse_trie_prune.take()
     }
 }

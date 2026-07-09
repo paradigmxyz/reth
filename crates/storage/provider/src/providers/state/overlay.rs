@@ -52,6 +52,9 @@ pub(crate) struct OverlayStateProviderMetrics {
     database_provider_ro_duration: Histogram,
     /// Number of cache misses when fetching [`Overlay`]s from the overlay cache.
     overlay_cache_misses: Counter,
+    /// Number of managed overlay creations skipped because the reused sparse trie already covers
+    /// the DB tip to parent range.
+    sparse_trie_overlay_skips: Counter,
 }
 
 /// Contains all fields required to initialize an [`OverlayStateProvider`].
@@ -59,6 +62,15 @@ pub(crate) struct OverlayStateProviderMetrics {
 pub(super) struct Overlay {
     pub(super) trie_updates: Arc<TrieUpdatesSorted>,
     pub(super) hashed_post_state: Arc<HashedPostStateSorted>,
+}
+
+impl Overlay {
+    fn empty() -> Self {
+        Self {
+            trie_updates: Arc::new(TrieUpdatesSorted::default()),
+            hashed_post_state: Arc::new(HashedPostStateSorted::default()),
+        }
+    }
 }
 
 /// Source of overlay data for [`OverlayStateProviderFactory`].
@@ -97,6 +109,8 @@ pub struct OverlayBuilder<N: NodePrimitives = EthPrimitives> {
     overlay_source: Option<OverlaySource<N>>,
     /// Changeset cache handle for retrieving trie changesets
     changeset_cache: ChangesetCache,
+    /// Anchor hash of the reused sparse trie, if this task reused one.
+    reused_sparse_trie_anchor_hash: Option<B256>,
     /// Metrics for tracking provider operations
     metrics: OverlayStateProviderMetrics,
 }
@@ -108,6 +122,7 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
             parent_hash,
             overlay_source: None,
             changeset_cache,
+            reused_sparse_trie_anchor_hash: None,
             metrics: OverlayStateProviderMetrics::default(),
         }
     }
@@ -117,6 +132,13 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
     /// This overlay will be applied on top of any reverts.
     pub(super) fn with_overlay_source(mut self, source: Option<OverlaySource<N>>) -> Self {
         self.overlay_source = source;
+        self
+    }
+
+    /// Skips managed overlay construction when the sparse trie was reused and the DB tip is
+    /// already covered by its anchor-to-parent range.
+    pub const fn with_skip_overlay_for_reused_sparse_trie(mut self, anchor_hash: B256) -> Self {
+        self.reused_sparse_trie_anchor_hash = Some(anchor_hash);
         self
     }
 
@@ -210,6 +232,23 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
                 Arc::new(TrieUpdatesSorted::default()),
                 Arc::new(HashedPostStateSorted::default()),
             )),
+        }
+    }
+
+    /// Returns true if managed overlay resolution can be skipped for this builder.
+    fn should_skip_overlay_for_reused_sparse_trie(&self, db_tip_hash: B256) -> bool {
+        let Some(anchor_hash) = self.reused_sparse_trie_anchor_hash else { return false };
+
+        match &self.overlay_source {
+            Some(OverlaySource::Managed { manager, state }) if state.is_empty() => {
+                db_tip_hash == anchor_hash ||
+                    manager.hash_between_anchor_and_parent(
+                        self.parent_hash,
+                        anchor_hash,
+                        db_tip_hash,
+                    )
+            }
+            _ => false,
         }
     }
 
@@ -395,14 +434,28 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
             (trie_updates, hashed_state_updates)
         } else {
             // If no reverts are needed then the db tip is the anchor hash. Use overlays directly.
-            let (trie_updates, hashed_state) = self.resolve_overlays(db_tip_block.hash)?;
+            if self.should_skip_overlay_for_reused_sparse_trie(db_tip_block.hash) {
+                debug!(
+                    target: "providers::state::overlay",
+                    parent_hash = %self.parent_hash,
+                    db_tip_hash = %db_tip_block.hash,
+                    sparse_trie_anchor_hash = ?self.reused_sparse_trie_anchor_hash,
+                    "Skipping overlay construction because reused sparse trie covers DB tip to parent"
+                );
+
+                self.metrics.sparse_trie_overlay_skips.increment(1);
+
+                return Ok(Overlay::empty())
+            }
+
+            let (trie_updates, hashed_post_state) = self.resolve_overlays(db_tip_block.hash)?;
 
             retrieve_trie_reverts_duration = Duration::ZERO;
             retrieve_hashed_state_reverts_duration = Duration::ZERO;
             trie_updates_total_len = trie_updates.total_len();
-            hashed_state_updates_total_len = hashed_state.total_len();
+            hashed_state_updates_total_len = hashed_post_state.total_len();
 
-            (trie_updates, hashed_state)
+            (trie_updates, hashed_post_state)
         };
 
         // Record metrics
@@ -462,6 +515,15 @@ impl<F, N: NodePrimitives> OverlayStateProviderFactory<F, N> {
         hashed_state_overlay: Option<Arc<HashedPostStateSorted>>,
     ) -> Self {
         self.overlay_builder = self.overlay_builder.with_hashed_state_overlay(hashed_state_overlay);
+        self.overlay_cache = Default::default();
+        self
+    }
+
+    /// Skips managed overlay construction when this factory is used by a task that reused a sparse
+    /// trie covering the DB tip to parent range.
+    pub fn with_skip_overlay_for_reused_sparse_trie(mut self, anchor_hash: B256) -> Self {
+        self.overlay_builder =
+            self.overlay_builder.with_skip_overlay_for_reused_sparse_trie(anchor_hash);
         self.overlay_cache = Default::default();
         self
     }
@@ -698,5 +760,23 @@ mod tests {
             panic!("expected managed overlay source")
         };
         assert_eq!(state.total_len(), 1);
+    }
+
+    #[test]
+    fn managed_overlay_skip_requires_reused_sparse_trie_and_no_immediate_state() {
+        let parent_hash = B256::with_last_byte(1);
+        let builder = OverlayBuilder::<EthPrimitives>::new(parent_hash, ChangesetCache::default())
+            .with_state_trie_overlay_manager(StateTrieOverlayManager::default());
+        assert!(!builder.should_skip_overlay_for_reused_sparse_trie(parent_hash));
+
+        let builder = builder.with_skip_overlay_for_reused_sparse_trie(parent_hash);
+        assert!(builder.should_skip_overlay_for_reused_sparse_trie(parent_hash));
+        assert!(!builder.should_skip_overlay_for_reused_sparse_trie(B256::with_last_byte(3)));
+
+        let hashed_state = HashedPostState::default()
+            .with_accounts([(B256::with_last_byte(2), Some(Account::default()))])
+            .into_sorted();
+        let builder = builder.with_extended_hashed_state_overlay(hashed_state);
+        assert!(!builder.should_skip_overlay_for_reused_sparse_trie(parent_hash));
     }
 }

@@ -115,7 +115,6 @@ pub(super) struct SparseTrieCacheTask<A = ArenaParallelSparseTrie, S = ArenaPara
     /// final [`HashedPostState`] and share it with main engine thread without requiring any extra
     /// hashing work.
     final_hashed_state: HashedPostState,
-
     /// Metrics for the sparse trie.
     metrics: MultiProofTaskMetrics,
 }
@@ -201,7 +200,11 @@ where
                     SparseTrieTaskMessage::HashedState(hashed)
                 }
                 StateRootMessage::FinishedStateUpdates => {
-                    SparseTrieTaskMessage::FinishedStateUpdates
+                    // The finish marker ends the update stream, so exit instead of waiting
+                    // for the channel to close. Handles and streams keep sender clones
+                    // alive after the last update, which would park this worker forever.
+                    let _ = hashed_state_tx.send(SparseTrieTaskMessage::FinishedStateUpdates);
+                    break;
                 }
                 StateRootMessage::HashedStateUpdate(state) => {
                     SparseTrieTaskMessage::HashedState(state)
@@ -408,7 +411,11 @@ where
                     .take()
                     .unwrap()
                     .send(core::mem::take(&mut self.final_hashed_state));
-                self.finished_state_updates = true
+                self.finished_state_updates = true;
+                // The hashing task exits after it sends this marker, so nothing more
+                // will arrive on the updates channel. Swap in a channel that never
+                // receives so the run loop does not observe the disconnect.
+                self.updates = crossbeam_channel::never();
             }
         }
     }
@@ -1030,6 +1037,31 @@ mod tests {
 
         assert!(hashed_state_rx.recv().is_err());
         handle.join().unwrap();
+    }
+
+    #[test]
+    fn test_run_hashing_task_exits_on_finished_marker_with_live_sender() {
+        let (updates_tx, updates_rx) = crossbeam_channel::unbounded();
+        let (hashed_state_tx, hashed_state_rx) = crossbeam_channel::unbounded();
+
+        let handle = std::thread::spawn(move || {
+            SparseTrieCacheTask::<ArenaParallelSparseTrie, ArenaParallelSparseTrie>::run_hashing_task(
+                updates_rx,
+                hashed_state_tx,
+                MultiProofTaskMetrics::default(),
+            );
+        });
+
+        updates_tx.send(StateRootMessage::FinishedStateUpdates).unwrap();
+
+        // The task must forward the finish marker and exit even though `updates_tx`
+        // is still alive.
+        let msg = hashed_state_rx.recv().unwrap();
+        assert!(matches!(msg, SparseTrieTaskMessage::FinishedStateUpdates));
+        assert!(hashed_state_rx.recv().is_err());
+        handle.join().unwrap();
+
+        drop(updates_tx);
     }
 
     #[test]
