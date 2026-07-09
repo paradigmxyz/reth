@@ -262,8 +262,8 @@ where
     ///
     /// The returned [`StateRootHandle`] provides:
     /// - [`StateRootHandle::take_hint_stream`], [`StateRootHandle::take_execution_hook`] and
-    ///   [`StateRootHandle::take_hashed_update_stream`] — capabilities that feed updates into
-    ///   the pipeline, owned by the producers of their messages.
+    ///   [`StateRootHandle::take_hashed_update_stream`] — capabilities that feed updates into the
+    ///   pipeline, owned by the producers of their messages.
     /// - [`StateRootHandle::state_root`] — blocks until the state root is computed and returns the
     ///   state root.
     ///
@@ -1373,3 +1373,4 @@ mod tests {
         );
     }
 }
+
