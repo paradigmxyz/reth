@@ -2915,7 +2915,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7ab67060fc6b8ef687992d439ca0fa36e7ed17e9a0b16b25b601e8757df720de"
 dependencies = [
  "data-encoding",
- "syn 2.0.117",
+ "syn 1.0.109",
 ]
 
 [[package]]
@@ -7995,7 +7995,7 @@ dependencies = [
  "rustc-hash",
  "serde",
  "serde_json",
- "strum 0.27.2",
+ "strum 0.28.0",
  "sysinfo",
  "tempfile",
  "thiserror 2.0.18",
@@ -9348,7 +9348,7 @@ dependencies = [
  "reth-transaction-pool",
  "secp256k1 0.30.0",
  "serde",
- "strum 0.27.2",
+ "strum 0.28.0",
  "thiserror 2.0.18",
  "tokio",
  "toml",
@@ -9667,7 +9667,7 @@ dependencies = [
  "revm",
  "rocksdb",
  "smallvec",
- "strum 0.27.2",
+ "strum 0.28.0",
  "tempfile",
  "tokio",
  "tokio-stream",
@@ -9724,7 +9724,7 @@ dependencies = [
  "reth-codecs",
  "serde",
  "serde_json",
- "strum 0.27.2",
+ "strum 0.28.0",
  "thiserror 2.0.18",
  "toml",
  "tracing",
@@ -10136,7 +10136,7 @@ dependencies = [
  "reth-errors",
  "reth-network-api",
  "serde",
- "strum 0.27.2",
+ "strum 0.28.0",
 ]
 
 [[package]]
@@ -10302,7 +10302,7 @@ dependencies = [
  "reth-stages-types",
  "serde",
  "serde_json",
- "strum 0.27.2",
+ "strum 0.28.0",
  "tempfile",
  "tracing",
 ]
@@ -10660,7 +10660,7 @@ dependencies = [
  "serde_json",
  "slotmap",
  "smallvec",
- "strum 0.27.2",
+ "strum 0.28.0",
  "tracing",
 ]
 
