@@ -498,8 +498,7 @@ where
         transaction: Self::Transaction,
     ) -> PoolResult<AddedTransactionOutcome> {
         let tx = self.validate(origin, transaction).await;
-        let mut results = self.pool.add_transactions(origin, std::iter::once(tx));
-        results.pop().expect("result length is the same as the input")
+        self.pool.add_transaction(origin, tx)
     }
 
     async fn add_transactions(
@@ -510,11 +509,8 @@ where
         if transactions.is_empty() {
             return Vec::new()
         }
-        let validated = self
-            .pool
-            .validator()
-            .validate_transactions(transactions.into_iter().map(|tx| (origin, tx)))
-            .await;
+        let validated =
+            self.pool.validator().validate_transactions_with_origin(origin, transactions).await;
         self.pool.add_transactions(origin, validated)
     }
 

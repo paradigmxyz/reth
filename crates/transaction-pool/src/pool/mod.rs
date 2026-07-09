@@ -572,10 +572,7 @@ where
     ///
     /// Returns the outcome and optionally metadata to be processed after the pool lock is
     /// released.
-    ///
-    /// Note: this is only used internally by [`Self::add_transactions()`], all new transaction(s)
-    /// come in through that function, either as a batch or `std::iter::once`.
-    fn add_transaction(
+    fn add_transaction_locked(
         &self,
         pool: &mut RwLockWriteGuard<'_, TxPool<T>>,
         origin: TransactionOrigin,
@@ -590,7 +587,13 @@ where
                 bytecode_hash,
                 authorities,
             } => {
-                let sender_id = self.get_sender_id(transaction.sender());
+                let (sender_id, authority_ids) = {
+                    let mut identifiers = self.identifiers.write();
+                    let sender_id = identifiers.sender_id_or_create(transaction.sender());
+                    let authority_ids =
+                        authorities.map(|auths| identifiers.sender_ids_or_create(auths));
+                    (sender_id, authority_ids)
+                };
                 let transaction_id = TransactionId::new(sender_id, transaction.nonce());
 
                 // split the valid transaction and the blob sidecar if it has any
@@ -611,7 +614,7 @@ where
                     propagate,
                     timestamp: Instant::now(),
                     origin,
-                    authority_ids: authorities.map(|auths| self.get_sender_ids(auths)),
+                    authority_ids,
                 };
 
                 let added = match pool.add_transaction(tx, balance, state_nonce, bytecode_hash) {
@@ -636,6 +639,32 @@ where
         }
     }
 
+    /// Adds a single validated transaction to the pool.
+    pub(crate) fn add_transaction(
+        &self,
+        origin: TransactionOrigin,
+        tx: TransactionValidationOutcome<T::Transaction>,
+    ) -> PoolResult<AddedTransactionOutcome> {
+        let (mut result, added_meta, discarded) = {
+            let mut pool = self.pool.write();
+            let (result, added_meta) = self.add_transaction_locked(&mut pool, origin, tx);
+            let discarded = if added_meta.is_some() {
+                let discarded = pool.discard_worst();
+                pool.update_size_metrics();
+                discarded
+            } else {
+                Default::default()
+            };
+            (result, added_meta, discarded)
+        };
+
+        if let Some(meta) = added_meta {
+            self.on_added_transaction(meta);
+        }
+        self.process_discarded_results(std::slice::from_mut(&mut result), discarded);
+        result
+    }
+
     /// Adds a transaction and returns the event stream.
     pub fn add_transaction_and_subscribe(
         &self,
@@ -648,8 +677,7 @@ where
             self.mark_event_listener_installed();
             events
         };
-        let mut results = self.add_transactions(origin, std::iter::once(tx));
-        results.pop().expect("result length is the same as the input")?;
+        self.add_transaction(origin, tx)?;
         Ok(listener)
     }
 
@@ -673,34 +701,29 @@ where
             Item = (TransactionOrigin, TransactionValidationOutcome<T::Transaction>),
         >,
     ) -> Vec<PoolResult<AddedTransactionOutcome>> {
+        let mut transactions = transactions.into_iter();
+        let capacity = transactions.size_hint().0;
+
         // Collect results and metadata while holding the pool write lock
         let (mut results, added_metas, discarded) = {
             let mut pool = self.pool.write();
             let mut added_metas = Vec::new();
+            let mut results = Vec::with_capacity(capacity);
 
-            let results = transactions
-                .into_iter()
-                .map(|(origin, tx)| {
-                    let (result, meta) = self.add_transaction(&mut pool, origin, tx);
-
-                    // Only collect metadata for successful insertions
-                    if result.is_ok() &&
-                        let Some(meta) = meta
-                    {
-                        added_metas.push(meta);
-                    }
-
-                    result
-                })
-                .collect::<Vec<_>>();
-
+            for (origin, tx) in transactions.by_ref() {
+                let (result, meta) = self.add_transaction_locked(&mut pool, origin, tx);
+                if let Some(meta) = meta {
+                    added_metas.push(meta);
+                }
+                results.push(result);
+            }
             // Enforce the pool size limits if at least one transaction was added successfully
-            let discarded = if results.iter().any(Result::is_ok) {
+            let discarded = if added_metas.is_empty() {
+                Default::default()
+            } else {
                 let discarded = pool.discard_worst();
                 pool.update_size_metrics();
                 discarded
-            } else {
-                Default::default()
             };
 
             (results, added_metas, discarded)
@@ -710,26 +733,41 @@ where
             self.on_added_transaction(meta);
         }
 
-        if !discarded.is_empty() {
-            // Delete any blobs associated with discarded blob transactions
-            self.delete_discarded_blobs(discarded.iter());
-            self.with_event_listener(|listener| listener.discarded_many(&discarded));
-
-            let discarded_hashes =
-                discarded.into_iter().map(|tx| *tx.hash()).collect::<HashSet<_>>();
-
-            // A newly added transaction may be immediately discarded, so we need to
-            // adjust the result here
-            for res in &mut results {
-                if let Ok(AddedTransactionOutcome { hash, .. }) = res &&
-                    discarded_hashes.contains(hash)
-                {
-                    *res = Err(PoolError::new(*hash, PoolErrorKind::DiscardedOnInsert))
-                }
-            }
-        };
+        self.process_discarded_results(&mut results, discarded);
 
         results
+    }
+
+    fn process_discarded_results(
+        &self,
+        results: &mut [PoolResult<AddedTransactionOutcome>],
+        discarded: Vec<Arc<ValidPoolTransaction<T::Transaction>>>,
+    ) {
+        if discarded.is_empty() {
+            return
+        }
+
+        self.delete_discarded_blobs(discarded.iter());
+        self.with_event_listener(|listener| listener.discarded_many(&discarded));
+
+        if results.len() == 1 {
+            let added_hash = results[0].as_ref().ok().map(|outcome| outcome.hash);
+            if let Some(hash) = added_hash &&
+                discarded.iter().any(|tx| *tx.hash() == hash)
+            {
+                results[0] = Err(PoolError::new(hash, PoolErrorKind::DiscardedOnInsert));
+            }
+            return
+        }
+
+        let discarded_hashes = discarded.iter().map(|tx| *tx.hash()).collect::<HashSet<_>>();
+        for res in results {
+            if let Ok(AddedTransactionOutcome { hash, .. }) = res &&
+                discarded_hashes.contains(hash)
+            {
+                *res = Err(PoolError::new(*hash, PoolErrorKind::DiscardedOnInsert))
+            }
+        }
     }
 
     /// Process a transaction that was added to the pool.
@@ -1661,6 +1699,7 @@ impl<T: PoolTransaction> OnNewCanonicalStateOutcome<T> {
 mod tests {
     use crate::{
         blobstore::{BlobStore, InMemoryBlobStore},
+        error::PoolErrorKind,
         identifier::SenderId,
         test_utils::{MockTransaction, TestPoolBuilder},
         validate::ValidTransaction,
@@ -1669,6 +1708,40 @@ mod tests {
     use alloy_eips::{eip4844::BlobTransactionSidecar, eip7594::BlobTransactionSidecarVariant};
     use alloy_primitives::Address;
     use std::{fs, path::PathBuf};
+
+    #[test]
+    fn single_transaction_reports_discard_on_insert() {
+        let limit = SubPoolLimit::new(0, usize::MAX);
+        let config = PoolConfig {
+            pending_limit: limit,
+            basefee_limit: limit,
+            queued_limit: limit,
+            blob_limit: limit,
+            ..Default::default()
+        }
+        .with_disabled_protocol_base_fee();
+        let test_pool = &TestPoolBuilder::default().with_config(config).pool;
+        let tx = MockTransaction::legacy();
+        let hash = *tx.get_hash();
+
+        let err = test_pool
+            .add_transaction(
+                TransactionOrigin::External,
+                TransactionValidationOutcome::Valid {
+                    balance: U256::MAX,
+                    state_nonce: 0,
+                    bytecode_hash: None,
+                    transaction: ValidTransaction::Valid(tx),
+                    propagate: true,
+                    authorities: None,
+                },
+            )
+            .unwrap_err();
+
+        assert_eq!(err.hash, hash);
+        assert!(matches!(err.kind, PoolErrorKind::DiscardedOnInsert));
+        assert!(test_pool.is_empty());
+    }
 
     #[test]
     fn test_discard_blobs_on_blob_tx_eviction() {
