@@ -51,7 +51,7 @@ use crate::tree::{
     },
     payload_processor::PayloadProcessor,
     payload_validator::LazyHashedPostState,
-    ExecutionEnv, PendingSparseTriePrune, StateProviderBuilder, TreeConfig,
+    EngineApiTreeState, ExecutionEnv, PendingSparseTriePrune, StateProviderBuilder, TreeConfig,
 };
 use alloy_primitives::B256;
 use reth_errors::ProviderResult;
@@ -110,13 +110,15 @@ where
     N: NodePrimitives,
     Evm: ConfigureEvm<Primitives = N>,
 {
-    payload_processor: &'a PayloadProcessor<Evm>,
-    parent_hash: B256,
-    parent_header: &'a N::BlockHeader,
-    timestamp: u64,
-    provider_builder: StateProviderBuilder<N, P>,
-    overlay_factory: OverlayStateProviderFactory<P, N>,
-    config: &'a TreeConfig,
+    pub(crate) payload_processor: &'a PayloadProcessor<Evm>,
+    pub(crate) parent_hash: B256,
+    pub(crate) parent_header: &'a N::BlockHeader,
+    pub(crate) timestamp: u64,
+    pub(crate) state: &'a EngineApiTreeState<N>,
+    pub(crate) provider_builder: StateProviderBuilder<N, P>,
+    pub(crate) overlay_factory: OverlayStateProviderFactory<P, N>,
+    pub(crate) config: &'a TreeConfig,
+    pub(crate) pending_sparse_trie_prune: &'a mut Option<PendingSparseTriePrune>,
 }
 
 impl<N, P, Evm> fmt::Debug for PayloadStateRootJobContext<'_, N, P, Evm>
@@ -129,6 +131,7 @@ where
             .field("parent_hash", &self.parent_hash)
             .field("parent_state_root", &self.parent_state_root())
             .field("timestamp", &self.timestamp)
+            .field("pending_sparse_trie_prune", &self.pending_sparse_trie_prune)
             .finish_non_exhaustive()
     }
 }
@@ -138,27 +141,6 @@ where
     N: NodePrimitives,
     Evm: ConfigureEvm<Primitives = N>,
 {
-    /// Creates a new payload-builder state-root job context.
-    pub(crate) const fn new(
-        payload_processor: &'a PayloadProcessor<Evm>,
-        parent_hash: B256,
-        parent_header: &'a N::BlockHeader,
-        timestamp: u64,
-        provider_builder: StateProviderBuilder<N, P>,
-        overlay_factory: OverlayStateProviderFactory<P, N>,
-        config: &'a TreeConfig,
-    ) -> Self {
-        Self {
-            payload_processor,
-            parent_hash,
-            parent_header,
-            timestamp,
-            provider_builder,
-            overlay_factory,
-            config,
-        }
-    }
-
     /// Returns the parent block hash for the payload being built.
     pub const fn parent_hash(&self) -> B256 {
         self.parent_hash
@@ -195,6 +177,19 @@ where
         P: Clone,
     {
         self.provider_builder.clone()
+    }
+
+    /// Takes the pending sparse trie prune request, if any.
+    pub fn take_sparse_trie_prune(&mut self) -> Option<PendingSparseTriePrune> {
+        self.pending_sparse_trie_prune.take().and_then(|prune| {
+            prune.with_in_memory_blocks(
+                self.state
+                    .tree_state()
+                    .blocks_by_hash(self.parent_hash)
+                    .map(|(_, blocks)| blocks)
+                    .unwrap_or_default(),
+            )
+        })
     }
 }
 
@@ -495,11 +490,13 @@ where
 
     fn prepare_payload_builder(
         &self,
-        ctx: PayloadStateRootJobContext<'_, N, P, Evm>,
+        mut ctx: PayloadStateRootJobContext<'_, N, P, Evm>,
     ) -> ProviderResult<Option<PayloadStateRootHandle>> {
         let parent_state_root = ctx.parent_state_root();
         let parent_hash = ctx.parent_hash();
-        let PayloadStateRootJobContext { payload_processor, overlay_factory, config, .. } = ctx;
+        let payload_processor = ctx.payload_processor;
+        let overlay_factory = ctx.overlay_factory.clone();
+        let config = ctx.config;
 
         // Sharing the engine state-root task with the payload builder is opt-in, and needs a
         // host that can run the task pipeline at all.
@@ -532,7 +529,7 @@ where
                     // workers.
                     None,
                     config,
-                    None,
+                    ctx.take_sparse_trie_prune(),
                 )
                 .into_payload_state_root_handle(),
         ))

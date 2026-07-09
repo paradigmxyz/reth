@@ -88,6 +88,31 @@ pub struct PendingSparseTriePrune {
     pub(crate) retained_paths: TriePrefixSetsMut,
 }
 
+impl PendingSparseTriePrune {
+    /// Adds changed paths from in-memory ancestors of the block whose sparse trie task will consume
+    /// this request.
+    pub(crate) fn with_in_memory_blocks<N: NodePrimitives>(
+        mut self,
+        blocks: impl IntoIterator<Item = ExecutedBlock<N>>,
+    ) -> Option<Self> {
+        for block in blocks {
+            let trie_data = block.trie_data();
+            let Some(changed_paths) = trie_data.changed_paths.as_deref() else {
+                // Custom state-root strategies may not track changed paths, so this is an
+                // expected way to opt out of pruning, not an anomaly.
+                debug!(
+                    target: "engine::tree",
+                    block = ?block.recovered_block().num_hash(),
+                    "Skipping sparse trie prune because changed paths for in-memory block are unknown"
+                );
+                return None
+            };
+            self.retained_paths.extend_ref(changed_paths);
+        }
+        Some(self)
+    }
+}
+
 pub mod state;
 
 /// The largest gap for which the tree will be used to sync individual blocks by downloading them.
@@ -1207,7 +1232,7 @@ where
     /// processing is complete. Returns `None` if the head is not canonical and processing
     /// should continue.
     fn handle_canonical_head(
-        &self,
+        &mut self,
         state: ForkchoiceState,
         attrs: &Option<T::PayloadAttributes>, // Changed to reference
     ) -> ProviderResult<Option<TreeOutcome<OnForkChoiceUpdated>>> {
@@ -2154,12 +2179,12 @@ where
             number: self.persistence_state.last_persisted_block.number,
             hash: self.persistence_state.last_persisted_block.hash,
         });
-        self.pending_sparse_trie_prune = self.sparse_trie_prune_for_in_memory_blocks();
+        self.pending_sparse_trie_prune = self.sparse_trie_prune_request();
         Ok(())
     }
 
-    /// Builds a sparse trie prune request from all blocks still present in the in-memory tree.
-    fn sparse_trie_prune_for_in_memory_blocks(&self) -> Option<PendingSparseTriePrune> {
+    /// Builds a sparse trie prune request for the next sparse trie task.
+    fn sparse_trie_prune_request(&self) -> Option<PendingSparseTriePrune> {
         if self.config.skip_state_root() ||
             self.config.state_root_fallback() ||
             !self.config.use_state_root_task()
@@ -2167,24 +2192,9 @@ where
             return None
         }
 
-        let mut retained_paths = TriePrefixSetsMut::default();
-        for block in self.state.tree_state.blocks_by_hash.values() {
-            let trie_data = block.trie_data();
-            let Some(changed_paths) = trie_data.changed_paths.as_deref() else {
-                // Custom state-root strategies may not track changed paths, so this is an
-                // expected way to opt out of pruning, not an anomaly.
-                debug!(
-                    target: "engine::tree",
-                    block = ?block.recovered_block().num_hash(),
-                    "Skipping sparse trie prune because changed paths for in-memory block are unknown"
-                );
-                return None
-            };
-            retained_paths.extend_ref(changed_paths);
-        }
         Some(PendingSparseTriePrune {
             anchor_hash: self.persistence_state.last_persisted_block.hash,
-            retained_paths,
+            retained_paths: Default::default(),
         })
     }
 
@@ -3294,7 +3304,7 @@ where
     /// Note: At this point, the fork choice update is considered to be VALID, however, we can still
     /// return an error if the payload attributes are invalid.
     fn process_payload_attributes(
-        &self,
+        &mut self,
         attributes: T::PayloadAttributes,
         head: &N::BlockHeader,
         state: ForkchoiceState,
@@ -3322,6 +3332,7 @@ where
             head,
             attributes.timestamp(),
             &self.state,
+            &mut self.pending_sparse_trie_prune,
         );
 
         // send the payload to the builder and return the receiver for the pending payload

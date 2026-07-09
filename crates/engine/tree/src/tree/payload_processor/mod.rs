@@ -28,7 +28,8 @@ use reth_provider::{
 use reth_revm::db::BundleState;
 use reth_tasks::{utils::increase_thread_priority, Runtime};
 use reth_trie::{
-    hashed_cursor::HashedCursorFactory, trie_cursor::TrieCursorFactory, HashedPostState,
+    hashed_cursor::HashedCursorFactory, prefix_set::TriePrefixSetsMut,
+    trie_cursor::TrieCursorFactory, HashedPostState,
 };
 use reth_trie_parallel::{
     error::StateRootTaskError,
@@ -683,14 +684,12 @@ where
                     pending_trie.expect("pending trie is created for successful task result");
                 let start = Instant::now();
                 let (mut trie, deferred) = task.into_trie_for_reuse();
-                if let Some(PendingSparseTriePrune { mut retained_paths, .. }) =
-                    pending_sparse_trie_prune
-                {
+                if let Some(pending_prune) = pending_sparse_trie_prune {
                     let changed_paths = result
                         .changed_paths
                         .as_deref()
                         .expect("sparse trie task always returns changed paths");
-                    retained_paths.extend_ref(changed_paths);
+                    let retained_paths = sparse_trie_retained_paths(pending_prune, changed_paths);
                     trie.prune(max_hot_slots, max_hot_accounts, retained_paths);
                 }
                 trie_metrics
@@ -775,6 +774,14 @@ where
             debug!(target: "engine::caching", ?block_with_parent, "Updated execution cache for inserted block");
         });
     }
+}
+
+fn sparse_trie_retained_paths(
+    mut pending_prune: PendingSparseTriePrune,
+    current_changed_paths: &TriePrefixSetsMut,
+) -> TriePrefixSetsMut {
+    pending_prune.retained_paths.extend_ref(current_changed_paths);
+    pending_prune.retained_paths
 }
 
 /// Converts transactions sequentially and sends them to the prewarm and execute channels.
@@ -975,7 +982,7 @@ mod tests {
     use crate::tree::{
         payload_processor::{evm_state_to_hashed_post_state, ExecutionEnv, PayloadProcessor},
         precompile_cache::PrecompileCacheMap,
-        ExecutionCache, PayloadExecutionCache, SavedCache, TreeConfig,
+        ExecutionCache, PayloadExecutionCache, PendingSparseTriePrune, SavedCache, TreeConfig,
     };
     use alloy_consensus::constants::KECCAK_EMPTY;
     use alloy_eips::eip1898::{BlockNumHash, BlockWithParent};
@@ -996,7 +1003,12 @@ mod tests {
     };
     use reth_revm::db::BundleState;
     use reth_testing_utils::generators;
-    use reth_trie::{test_utils::state_root, HashedPostState};
+    use reth_trie::{
+        prefix_set::{PrefixSetMut, TriePrefixSetsMut},
+        test_utils::state_root,
+        HashedPostState,
+    };
+    use reth_trie_common::Nibbles;
     use reth_trie_db::ChangesetCache;
     use revm::state::{AccountInfo, AccountStatus, EvmState, EvmStorageSlot, TransactionId};
     use std::sync::Arc;
@@ -1008,6 +1020,17 @@ mod tests {
 
     fn state_trie_overlays() -> StateTrieOverlayManager<EthPrimitives> {
         StateTrieOverlayManager::default()
+    }
+
+    fn trie_changed_paths(account_path: u8, storage_path: u8) -> TriePrefixSetsMut {
+        TriePrefixSetsMut {
+            account_prefix_set: PrefixSetMut::from([Nibbles::from_nibbles([account_path])]),
+            storage_prefix_sets: HashMap::from_iter([(
+                B256::with_last_byte(account_path),
+                PrefixSetMut::from([Nibbles::from_nibbles([storage_path])]),
+            )]),
+            destroyed_accounts: Default::default(),
+        }
     }
 
     #[test]
@@ -1044,6 +1067,21 @@ mod tests {
 
         let retry = execution_cache.get_cache_for(hash);
         assert!(retry.is_some(), "checkout should succeed after guard drop");
+    }
+
+    #[test]
+    fn sparse_trie_retained_paths_merges_pending_paths_with_current_block() {
+        let pending_prune = PendingSparseTriePrune {
+            anchor_hash: B256::ZERO,
+            retained_paths: trie_changed_paths(0x01, 0x02),
+        };
+        let current_changed_paths = trie_changed_paths(0x05, 0x06);
+
+        let retained_paths =
+            super::sparse_trie_retained_paths(pending_prune, &current_changed_paths).freeze();
+
+        assert_eq!(retained_paths.account_prefix_set.len(), 2);
+        assert_eq!(retained_paths.storage_prefix_sets.len(), 2);
     }
 
     #[test]
