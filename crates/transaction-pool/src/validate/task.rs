@@ -325,6 +325,7 @@ where
     }
 }
 
+#[inline]
 fn validation_service_error_outcomes<T: PoolTransaction>(
     hashes: Vec<alloy_primitives::TxHash>,
 ) -> Vec<TransactionValidationOutcome<T>> {
