@@ -3,7 +3,11 @@ use metrics::Histogram;
 use quanta::Instant;
 use reth_metrics::{metrics::Counter, Metrics};
 use rustc_hash::FxHashMap;
-use std::{array, sync::Arc, time::Duration};
+use std::{
+    array,
+    sync::{Arc, RwLock},
+    time::Duration,
+};
 use strum::{EnumCount, EnumIter, IntoEnumIterator};
 
 const LARGE_VALUE_THRESHOLD_BYTES: usize = 4096;
@@ -15,8 +19,15 @@ const LARGE_VALUE_THRESHOLD_BYTES: usize = 4096;
 /// Otherwise, metric recording will no-op.
 #[derive(Debug)]
 pub(crate) struct DatabaseEnvMetrics {
-    /// Caches per-table operation metric handles for all database operation metrics.
+    /// Caches per-table operation metric handles for all tables in the static [`Tables`] set.
+    /// Pre-populated at construction, so lookups on the hot path are lock-free.
     operations: FxHashMap<&'static str, TableOperationMetrics>,
+    /// Caches operation metric handles for tables outside the static [`Tables`] set, e.g.
+    /// node-specific tables created through
+    /// [`create_and_track_tables_for`](crate::DatabaseEnv::create_and_track_tables_for).
+    /// Such tables can be created at any point after metrics are enabled, so their handles are
+    /// bound lazily on first use.
+    custom_operations: RwLock<FxHashMap<&'static str, TableOperationMetrics>>,
     /// Caches `TransactionMetrics` handles for counters grouped by only transaction mode.
     /// Updated both at tx open and close.
     transactions: FxHashMap<TransactionMode, TransactionMetrics>,
@@ -35,6 +46,7 @@ impl DatabaseEnvMetrics {
         // to avoid runtime locks on the map when recording metrics.
         Self {
             operations: Self::generate_operation_handles(),
+            custom_operations: RwLock::new(FxHashMap::default()),
             transactions: Self::generate_transaction_handles(),
             transaction_outcomes: Self::generate_transaction_outcome_handles(),
         }
@@ -45,19 +57,21 @@ impl DatabaseEnvMetrics {
         let mut operations = FxHashMap::with_capacity_and_hasher(Tables::COUNT, Default::default());
 
         for table in Tables::ALL {
-            let table_name = table.name();
-            let metrics = array::from_fn(|index| {
-                let operation = Operation::from_index(index);
-                OperationMetrics::new_with_labels(&[
-                    (Labels::Table.as_str(), table_name),
-                    (Labels::Operation.as_str(), operation.as_str()),
-                ])
-            });
-
-            operations.insert(table_name, Arc::new(metrics));
+            operations.insert(table.name(), Self::operation_handles(table.name()));
         }
 
         operations
+    }
+
+    /// Creates pre-bound operation metric handles for one table.
+    fn operation_handles(table_name: &'static str) -> TableOperationMetrics {
+        Arc::new(array::from_fn(|index| {
+            let operation = Operation::from_index(index);
+            OperationMetrics::new_with_labels(&[
+                (Labels::Table.as_str(), table_name),
+                (Labels::Operation.as_str(), operation.as_str()),
+            ])
+        }))
     }
 
     /// Generate a map of all possible transaction modes to metric handles.
@@ -99,7 +113,6 @@ impl DatabaseEnvMetrics {
     }
 
     /// Record a metric for database operation executed in `f`.
-    /// Panics if a metric recorder is not found for the given table and operation.
     pub(crate) fn record_operation<R>(
         &self,
         table: &'static str,
@@ -108,15 +121,40 @@ impl DatabaseEnvMetrics {
         f: impl FnOnce() -> R,
     ) -> R {
         if let Some(metrics) = self.operations.get(table) {
-            metrics[operation.index()].record(value_size, f)
-        } else {
-            f()
+            return metrics[operation.index()].record(value_size, f)
         }
+        // Clone the handle out of the map, so the lock is not held across the database
+        // operation.
+        let metrics = self.clone_custom_table_operation_metrics(table);
+        metrics[operation.index()].record(value_size, f)
     }
 
     /// Returns pre-bound operation metric handles for a single table.
+    ///
+    /// Handles for tables in the static [`Tables`] set are pre-populated. Handles for other
+    /// tables are bound on first use, see [`Self::clone_custom_table_operation_metrics`].
     pub(crate) fn table_operation_metrics(&self, table: &'static str) -> TableOperationMetrics {
-        self.operations.get(table).expect("table operation metric handles not found").clone()
+        match self.operations.get(table) {
+            Some(metrics) => metrics.clone(),
+            None => self.clone_custom_table_operation_metrics(table),
+        }
+    }
+
+    /// Returns operation metric handles for a table outside the static [`Tables`] set, creating
+    /// and caching them on first use.
+    fn clone_custom_table_operation_metrics(&self, table: &'static str) -> TableOperationMetrics {
+        if let Some(metrics) = self.custom_operations.read().unwrap().get(table) {
+            return metrics.clone()
+        }
+        // Two threads can race past the read miss for the same table. The `entry` call under the
+        // write lock keeps a single cached handle, and metrics-rs resolves equal names and labels
+        // to the same series anyway.
+        self.custom_operations
+            .write()
+            .unwrap()
+            .entry(table)
+            .or_insert_with(|| Self::operation_handles(table))
+            .clone()
     }
 
     /// Record metrics for opening a database transaction.

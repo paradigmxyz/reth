@@ -59,6 +59,7 @@ alloy-consensus.workspace = true
 serde_json.workspace = true
 tempfile.workspace = true
 parking_lot.workspace = true
+metrics-util = { workspace = true, features = ["debugging"] }
 
 serde.workspace = true
 

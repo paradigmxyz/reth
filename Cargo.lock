@@ -7978,6 +7978,7 @@ dependencies = [
  "eyre",
  "libc",
  "metrics",
+ "metrics-util",
  "page_size",
  "parking_lot",
  "proptest",

@@ -315,9 +315,17 @@ impl DatabaseMetrics for DatabaseEnv {
     fn gauge_metrics(&self) -> Vec<(&'static str, f64, Vec<Label>)> {
         let mut metrics = Vec::new();
 
+        // Report the static tables and any tracked custom tables, e.g. node-specific tables
+        // created through [`DatabaseEnv::create_and_track_tables_for`].
+        let custom_tables = self
+            .dbis
+            .keys()
+            .copied()
+            .filter(|name| Tables::ALL.iter().all(|table| table.name() != *name));
+
         let _ = self
             .view(|tx| {
-                for table in Tables::ALL.iter().map(Tables::name) {
+                for table in Tables::ALL.iter().map(Tables::name).chain(custom_tables) {
                     let table_db =
                         tx.inner().open_db(Some(table)).wrap_err("Could not open db.")?;
 
@@ -727,6 +735,84 @@ mod tests {
     #[test]
     fn db_creation() {
         let _tempdir = create_test_db(DatabaseEnvKind::RW);
+    }
+
+    #[test]
+    fn db_metrics_on_custom_table() {
+        use metrics_util::debugging::{DebugValue, DebuggingRecorder};
+
+        /// Tables outside the static [`crate::Tables`] set.
+        mod custom_tables {
+            use reth_db_api::{table::TableInfo, tables, TableSet, TableType, TableViewer};
+            use std::fmt;
+
+            tables! {
+                /// A node-specific table.
+                table CustomTable {
+                    type Key = u64;
+                    type Value = Vec<u8>;
+                }
+            }
+        }
+        use custom_tables::{CustomTable, Tables as CustomTables};
+
+        let recorder = DebuggingRecorder::new();
+        let snapshotter = recorder.snapshotter();
+
+        metrics::with_local_recorder(&recorder, || {
+            let tempdir = tempfile::TempDir::new().expect(ERROR_TEMPDIR);
+            let mut env = DatabaseEnv::open(
+                tempdir.path(),
+                DatabaseEnvKind::RW,
+                DatabaseArguments::new(ClientVersion::default()),
+            )
+            .expect(ERROR_DB_CREATION);
+            env.create_tables().expect(ERROR_TABLE_CREATION);
+            env.create_and_track_tables_for::<CustomTables>().expect(ERROR_TABLE_CREATION);
+            let env = env.with_metrics();
+
+            let tx = env.tx_mut().expect(ERROR_INIT_TX);
+            tx.put::<CustomTable>(1, vec![0xff]).expect(ERROR_PUT);
+            assert_eq!(tx.get::<CustomTable>(1).expect(ERROR_GET), Some(vec![0xff]));
+
+            // Regression: opening a cursor on a table without pre-bound metric handles used to
+            // panic with "table operation metric handles not found".
+            let mut cursor = tx.cursor_write::<CustomTable>().expect("could not create cursor");
+            cursor.upsert(2, &vec![0xee]).expect(ERROR_UPSERT);
+            tx.commit().expect(ERROR_COMMIT);
+
+            // Table stat gauges must include tracked custom tables.
+            let gauges = env.gauge_metrics();
+            assert!(
+                gauges.iter().any(|(name, _, labels)| {
+                    *name == "db.table_size" &&
+                        labels.iter().any(|label| {
+                            label.key() == "table" && label.value() == "CustomTable"
+                        })
+                }),
+                "no table size gauge for the custom table"
+            );
+        });
+
+        // Operations on the custom table must be recorded like operations on static tables.
+        let snapshot = snapshotter.snapshot().into_vec();
+        let operation_calls = |operation: &str| {
+            snapshot.iter().find_map(|(key, _, _, value)| {
+                let key = key.key();
+                let matches = key.name() == "database.operation.calls_total" &&
+                    key.labels()
+                        .any(|label| label.key() == "table" && label.value() == "CustomTable") &&
+                    key.labels()
+                        .any(|label| label.key() == "operation" && label.value() == operation);
+                match value {
+                    DebugValue::Counter(count) if matches => Some(*count),
+                    _ => None,
+                }
+            })
+        };
+        assert_eq!(operation_calls("get"), Some(1));
+        assert_eq!(operation_calls("put-upsert"), Some(1));
+        assert_eq!(operation_calls("cursor-upsert"), Some(1));
     }
 
     #[test]
