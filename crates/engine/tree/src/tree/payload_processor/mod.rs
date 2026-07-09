@@ -641,25 +641,55 @@ where
                 debug_span!(target: "engine::tree::payload_processor", "preserve").entered();
             let deferred = if let Some(result) = task_result {
                 let start = Instant::now();
-                let (mut trie, deferred) = task.into_trie_for_reuse();
-                if let Some(mut retained_paths) = pending_sparse_trie_prune {
+                let (trie, deferred) = task.into_trie_for_reuse();
+                let retained_paths = pending_sparse_trie_prune.map(|mut retained_paths| {
                     let changed_paths = result
                         .changed_paths
                         .as_deref()
                         .expect("sparse trie task always returns changed paths");
                     retained_paths.extend_ref(changed_paths);
-                    trie.prune(max_hot_slots, max_hot_accounts, retained_paths);
-                }
+                    retained_paths
+                });
+                let state_root = result.state_root;
                 trie_metrics
                     .into_trie_for_reuse_duration_histogram
                     .record(start.elapsed().as_secs_f64());
-                trie_metrics
-                    .sparse_trie_retained_memory_bytes
-                    .set(trie.memory_size() as f64);
-                trie_metrics
-                    .sparse_trie_retained_storage_tries
-                    .set(trie.retained_storage_tries_count() as f64);
-                guard.store(PreservedSparseTrie::anchored(trie, result.state_root));
+
+                if retained_paths.is_none() {
+                    trie_metrics
+                        .sparse_trie_retained_memory_bytes
+                        .set(trie.memory_size() as f64);
+                    trie_metrics
+                        .sparse_trie_retained_storage_tries
+                        .set(trie.retained_storage_tries_count() as f64);
+                }
+                guard.store(PreservedSparseTrie::anchored(trie, state_root));
+                drop(guard);
+
+                if let Some(retained_paths) = retained_paths {
+                    let state_trie_overlays = state_trie_overlays.clone();
+                    let trie_metrics = trie_metrics.clone();
+                    let _ = executor.spawn_blocking_named("sparse-prune", move || {
+                        let _enter = debug_span!(
+                            target: "engine::tree::payload_processor",
+                            "sparse_prune"
+                        )
+                        .entered();
+                        if let Some((memory_size, retained_storage_tries)) =
+                            state_trie_overlays.prune_sparse_trie_if_anchored(
+                                state_root,
+                                max_hot_slots,
+                                max_hot_accounts,
+                                retained_paths,
+                            )
+                        {
+                            trie_metrics.sparse_trie_retained_memory_bytes.set(memory_size as f64);
+                            trie_metrics
+                                .sparse_trie_retained_storage_tries
+                                .set(retained_storage_tries as f64);
+                        }
+                    });
+                }
                 deferred
             } else {
                 debug!(
@@ -668,9 +698,9 @@ where
                 );
                 let (trie, deferred) = task.into_cleared_trie();
                 guard.store(PreservedSparseTrie::cleared(trie));
+                drop(guard);
                 deferred
             };
-            drop(guard);
             executor.spawn_drop(deferred);
         });
     }

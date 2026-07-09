@@ -17,7 +17,10 @@ use reth_primitives_traits::{
 };
 #[cfg(feature = "rayon")]
 use reth_tasks::WorkerPool;
-use reth_trie::{updates::TrieUpdatesSorted, HashedPostStateSorted, TrieInputSorted};
+use reth_trie::{
+    prefix_set::TriePrefixSetsMut, updates::TrieUpdatesSorted, HashedPostStateSorted,
+    TrieInputSorted,
+};
 use std::{
     fmt,
     sync::{Arc, OnceLock},
@@ -115,6 +118,31 @@ impl<N: NodePrimitives> StateTrieOverlayManager<N> {
             );
         }
         elapsed
+    }
+
+    /// Prunes the preserved sparse trie if it is still anchored at `state_root`.
+    ///
+    /// This is intentionally opportunistic: when the next payload is already taking the preserved
+    /// trie, skip instead of blocking that handoff behind cache pruning.
+    pub fn prune_sparse_trie_if_anchored(
+        &self,
+        state_root: B256,
+        max_hot_slots: usize,
+        max_hot_accounts: usize,
+        retained_paths: TriePrefixSetsMut,
+    ) -> Option<(usize, usize)> {
+        let mut guard = self.preserved_sparse_trie.try_lock()?;
+        let Some(PreservedSparseTrie::Anchored { trie, state_root: preserved_state_root }) =
+            guard.as_mut()
+        else {
+            return None;
+        };
+        if *preserved_state_root != state_root {
+            return None;
+        }
+
+        trie.prune(max_hot_slots, max_hot_accounts, retained_paths);
+        Some((trie.memory_size(), trie.retained_storage_tries_count()))
     }
 
     /// Inserts an executed in-memory block into the state trie overlay manager.
@@ -712,6 +740,52 @@ mod tests {
             .enumerate()
             .map(|(index, block)| with_unique_state(&block, index as u8 + 1))
             .collect()
+    }
+
+    #[test]
+    fn prune_sparse_trie_if_anchored_skips_mismatched_root() {
+        let manager = StateTrieOverlayManager::<EthPrimitives>::default();
+        let anchored_root = B256::with_last_byte(7);
+        manager
+            .preserved_sparse_trie
+            .lock()
+            .replace(PreservedSparseTrie::anchored(Default::default(), anchored_root));
+
+        let result = manager.prune_sparse_trie_if_anchored(
+            B256::with_last_byte(8),
+            0,
+            0,
+            TriePrefixSetsMut::default(),
+        );
+
+        assert!(result.is_none());
+        assert!(matches!(
+            manager.preserved_sparse_trie.lock().as_ref(),
+            Some(PreservedSparseTrie::Anchored { state_root, .. }) if *state_root == anchored_root
+        ));
+    }
+
+    #[test]
+    fn prune_sparse_trie_if_anchored_prunes_matching_root() {
+        let manager = StateTrieOverlayManager::<EthPrimitives>::default();
+        let anchored_root = B256::with_last_byte(7);
+        manager
+            .preserved_sparse_trie
+            .lock()
+            .replace(PreservedSparseTrie::anchored(Default::default(), anchored_root));
+
+        let result = manager.prune_sparse_trie_if_anchored(
+            anchored_root,
+            0,
+            0,
+            TriePrefixSetsMut::default(),
+        );
+
+        assert!(result.is_some());
+        assert!(matches!(
+            manager.preserved_sparse_trie.lock().as_ref(),
+            Some(PreservedSparseTrie::Anchored { state_root, .. }) if *state_root == anchored_root
+        ));
     }
 
     #[test]
