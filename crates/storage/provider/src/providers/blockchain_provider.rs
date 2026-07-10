@@ -981,7 +981,7 @@ mod tests {
         BlockWriter, CanonChainTracker, ProviderFactory, SaveBlocksMode,
     };
     use alloy_eips::{BlockHashOrNumber, BlockNumHash, BlockNumberOrTag};
-    use alloy_primitives::{BlockNumber, TxNumber, B256};
+    use alloy_primitives::{keccak256, Address, BlockNumber, TxNumber, B256, U256};
     use itertools::Itertools;
     use rand::Rng;
     use reth_chain_state::{
@@ -995,17 +995,21 @@ mod tests {
     use reth_execution_types::{
         BlockExecutionOutput, BlockExecutionResult, Chain, ExecutionOutcome,
     };
-    use reth_primitives_traits::{RecoveredBlock, SealedBlock, SignerRecoverable};
+    use reth_primitives_traits::{
+        Account, RecoveredBlock, SealedBlock, SignerRecoverable, StorageEntry,
+    };
     use reth_storage_api::{
         BlockBodyIndicesProvider, BlockHashReader, BlockIdReader, BlockNumReader, BlockReader,
         BlockReaderIdExt, BlockSource, ChangeSetReader, DBProvider, DatabaseProviderFactory,
-        HeaderProvider, ReceiptProvider, ReceiptProviderIdExt, StateProviderFactory,
-        StateWriteConfig, StateWriter, TransactionVariant, TransactionsProvider,
+        HashingWriter, HeaderProvider, ReceiptProvider, ReceiptProviderIdExt, StateProviderFactory,
+        StateRangeProvider, StateRootProvider, StateWriteConfig, StateWriter, StorageRootProvider,
+        TransactionVariant, TransactionsProvider,
     };
     use reth_testing_utils::generators::{
         self, random_block, random_block_range, random_changeset_range, random_eoa_accounts,
         random_receipt, BlockParams, BlockRangeParams,
     };
+    use reth_trie::{HashedPostState, HashedStorage};
     use revm::database::{BundleState, OriginalValuesKnown};
     use std::{
         collections::BTreeMap,
@@ -2789,6 +2793,179 @@ mod tests {
                 Some(to_be_persisted_tx)
             );
         }
+
+        Ok(())
+    }
+
+    fn random_account(nonce: u64) -> (Address, Account) {
+        (Address::random(), Account { nonce, balance: U256::from(nonce), bytecode_hash: None })
+    }
+
+    /// [`BlockchainProvider::new`] needs a genesis header to initialize its chain tracker.
+    fn test_provider_factory_with_genesis() -> eyre::Result<ProviderFactory<MockNodeTypesWithDB>> {
+        let factory = create_test_provider_factory();
+        let provider_rw = factory.provider_rw()?;
+        let mut rng = generators::rng();
+        let genesis =
+            random_block(&mut rng, 0, BlockParams { tx_count: Some(0), ..Default::default() });
+        provider_rw
+            .insert_block(&genesis.try_recover().expect("failed to seal block with senders"))?;
+        provider_rw.commit()?;
+        Ok(factory)
+    }
+
+    #[test]
+    fn state_range_provider_account_range_is_sorted_and_bounded() -> eyre::Result<()> {
+        let factory = test_provider_factory_with_genesis()?;
+        let provider_rw = factory.provider_rw()?;
+
+        let accounts: Vec<_> = (0..5u64).map(random_account).collect();
+        provider_rw.insert_account_for_hashing(
+            accounts.iter().map(|(address, account)| (*address, Some(*account))),
+        )?;
+        provider_rw.commit()?;
+
+        let provider = BlockchainProvider::new(factory)?;
+
+        let mut expected: Vec<_> =
+            accounts.iter().map(|(address, account)| (keccak256(address), *account)).collect();
+        expected.sort_by_key(|(hash, _)| *hash);
+
+        let (all, complete) =
+            provider.account_range(B256::ZERO, B256::repeat_byte(0xff), 10_000)?.unwrap();
+        assert!(complete);
+        assert_eq!(all, expected);
+
+        let (bounded, complete) =
+            provider.account_range(B256::ZERO, expected[1].0, 10_000)?.unwrap();
+        assert!(complete);
+        assert_eq!(bounded, expected[..2]);
+
+        Ok(())
+    }
+
+    #[test]
+    fn state_range_provider_account_range_respects_response_bytes() -> eyre::Result<()> {
+        let factory = test_provider_factory_with_genesis()?;
+        let provider_rw = factory.provider_rw()?;
+
+        let accounts: Vec<_> = (0..5u64).map(random_account).collect();
+        provider_rw.insert_account_for_hashing(
+            accounts.iter().map(|(address, account)| (*address, Some(*account))),
+        )?;
+        provider_rw.commit()?;
+
+        let provider = BlockchainProvider::new(factory)?;
+
+        // Budget only fits a single account.
+        let (partial, complete) =
+            provider.account_range(B256::ZERO, B256::repeat_byte(0xff), 150)?.unwrap();
+        assert!(!complete);
+        assert_eq!(partial.len(), 1);
+
+        Ok(())
+    }
+
+    #[test]
+    fn state_range_provider_storage_range_and_root() -> eyre::Result<()> {
+        let factory = test_provider_factory_with_genesis()?;
+        let provider_rw = factory.provider_rw()?;
+
+        let (address, account) = random_account(1);
+        let hashed_address = keccak256(address);
+        provider_rw.insert_account_for_hashing([(address, Some(account))])?;
+        let slots = [
+            StorageEntry { key: B256::with_last_byte(1), value: U256::from(10) },
+            StorageEntry { key: B256::with_last_byte(2), value: U256::from(20) },
+        ];
+        provider_rw.insert_storage_for_hashing([(address, slots)])?;
+        provider_rw.commit()?;
+
+        let provider = BlockchainProvider::new(factory)?;
+
+        let expected_root = provider.latest()?.storage_root(address, HashedStorage::default())?;
+        assert_eq!(provider.storage_root_by_hash(hashed_address)?, Some(expected_root));
+
+        let (returned, complete) = provider
+            .storage_range(hashed_address, B256::ZERO, B256::repeat_byte(0xff), 10_000)?
+            .unwrap();
+        assert!(complete);
+        let mut expected: Vec<_> =
+            slots.iter().map(|entry| (keccak256(entry.key), entry.value)).collect();
+        expected.sort_by_key(|(hash, _)| *hash);
+        assert_eq!(returned, expected);
+
+        Ok(())
+    }
+
+    #[test]
+    fn state_range_provider_proofs_start_at_the_real_root() -> eyre::Result<()> {
+        let factory = test_provider_factory_with_genesis()?;
+        let provider_rw = factory.provider_rw()?;
+
+        let (address, account) = random_account(1);
+        let hashed_address = keccak256(address);
+        let hashed_slot = keccak256(B256::with_last_byte(1));
+        provider_rw.insert_account_for_hashing([(address, Some(account))])?;
+        provider_rw.insert_storage_for_hashing([(
+            address,
+            [StorageEntry { key: B256::with_last_byte(1), value: U256::from(10) }],
+        )])?;
+        provider_rw.commit()?;
+
+        let provider = BlockchainProvider::new(factory)?;
+
+        // The first node of a sorted boundary proof is always the trie root, so this checks the
+        // proof was generated against the real, current root rather than a stale or empty one.
+        let state_root = provider.latest()?.state_root(HashedPostState::default())?;
+        let account_proof = provider.account_range_proof(&[hashed_address])?.unwrap();
+        assert!(!account_proof.is_empty());
+        assert_eq!(keccak256(&account_proof[0]), state_root);
+
+        let storage_root = provider.storage_root_by_hash(hashed_address)?.unwrap();
+        let storage_proof = provider.storage_range_proof(hashed_address, &[hashed_slot])?.unwrap();
+        assert!(!storage_proof.is_empty());
+        assert_eq!(keccak256(&storage_proof[0]), storage_root);
+
+        Ok(())
+    }
+
+    #[test]
+    fn state_range_provider_current_state_root_matches_latest_header() -> eyre::Result<()> {
+        let mut rng = generators::rng();
+        let (provider, _, _, _) = provider_with_random_blocks(
+            &mut rng,
+            TEST_BLOCKS_COUNT,
+            0,
+            BlockRangeParams::default(),
+        )?;
+
+        let expected = provider.latest()?.state_root(HashedPostState::default())?;
+        assert_eq!(provider.current_state_root()?, Some(expected));
+
+        Ok(())
+    }
+
+    #[test]
+    fn state_range_provider_declines_with_in_memory_overlay() -> eyre::Result<()> {
+        let mut rng = generators::rng();
+        let (provider, _, _, _) = provider_with_random_blocks(
+            &mut rng,
+            TEST_BLOCKS_COUNT - 1,
+            1,
+            BlockRangeParams::default(),
+        )?;
+        assert!(provider.canonical_in_memory_state.head_state().is_some());
+
+        assert_eq!(provider.current_state_root()?, None);
+        assert_eq!(provider.account_range(B256::ZERO, B256::repeat_byte(0xff), 10_000)?, None);
+        assert_eq!(provider.storage_root_by_hash(B256::ZERO)?, None);
+        assert_eq!(
+            provider.storage_range(B256::ZERO, B256::ZERO, B256::repeat_byte(0xff), 10_000)?,
+            None
+        );
+        assert_eq!(provider.account_range_proof(&[B256::ZERO])?, None);
+        assert_eq!(provider.storage_range_proof(B256::ZERO, &[B256::ZERO])?, None);
 
         Ok(())
     }
