@@ -464,8 +464,12 @@ where
         let mut codes = Vec::new();
         let mut total_bytes = 0;
         for hash in hashes.iter().take(MAX_BYTE_CODES_SERVE) {
-            let Ok(Some(bytecode)) = state.bytecode_by_hash(hash) else { continue };
-            let bytes = bytecode.original_bytes();
+            let bytes = if *hash == KECCAK_EMPTY {
+                Bytes::new()
+            } else {
+                let Ok(Some(bytecode)) = state.bytecode_by_hash(hash) else { continue };
+                bytecode.original_bytes()
+            };
             total_bytes += bytes.len();
             codes.push(bytes);
 
