@@ -12,7 +12,7 @@ use crate::{LeafLookup, LeafLookupError, LeafUpdate, SparseTrie, SparseTrieUpdat
 use alloc::{borrow::Cow, boxed::Box, collections::VecDeque, vec::Vec};
 use alloy_primitives::{keccak256, map::B256Map, B256};
 use alloy_trie::TrieMask;
-use core::{cmp::Reverse, mem};
+use core::mem;
 use reth_execution_errors::SparseTrieResult;
 use reth_trie_common::{
     prefix_set::PrefixSetMut, BranchNodeMasks, BranchNodeRef, ExtensionNodeRef, LeafNodeRef,
@@ -2459,7 +2459,8 @@ impl SparseTrie for ArenaParallelSparseTrie {
         }
 
         // Sort nodes lexicographically by path.
-        nodes.sort_unstable_by_key(|n| n.path);
+        #[expect(clippy::unnecessary_sort_by, reason = "avoids copying the path per comparison")]
+        nodes.sort_unstable_by(|a, b| a.path.cmp(&b.path));
 
         let threshold = self.parallelism_thresholds.min_revealed_nodes;
 
@@ -2667,7 +2668,8 @@ impl SparseTrie for ArenaParallelSparseTrie {
         // Walk the upper trie depth-first, restoring hashed subtries and inline-hashing
         // any remaining dirty subtries. Only descend into dirty branches; clean subtrees
         // cannot contain dirty subtries since dirty state propagates upward.
-        taken.sort_unstable_by_key(|(_, b)| Reverse(b.path));
+        #[expect(clippy::unnecessary_sort_by, reason = "avoids copying the path per comparison")]
+        taken.sort_unstable_by(|(_, a), (_, b)| b.path.cmp(&a.path));
 
         self.buffers.cursor.reset(&self.upper_arena, self.root, Nibbles::default());
 
@@ -2959,10 +2961,13 @@ impl SparseTrie for ArenaParallelSparseTrie {
         #[cfg(feature = "trie-debug")]
         let mut recorded_proof_targets: Vec<(B256, u8)> = Vec::new();
 
-        // Drain and sort updates lexicographically by nibbles path.
+        // Drain and sort updates lexicographically by nibbles path. All paths are full-width
+        // key unpacks, so comparing the packed keys yields the same order as comparing nibble
+        // paths while being much cheaper per comparison.
         let mut sorted: Vec<_> =
             updates.drain().map(|(key, update)| (key, Nibbles::unpack(key), update)).collect();
-        sorted.sort_unstable_by_key(|entry| entry.1);
+        #[expect(clippy::unnecessary_sort_by, reason = "avoids copying the key per comparison")]
+        sorted.sort_unstable_by(|a, b| a.0.cmp(&b.0));
 
         let threshold = self.parallelism_thresholds.min_updates;
         let parallelize_distributed_updates = sorted.len() >= threshold.saturating_mul(4);

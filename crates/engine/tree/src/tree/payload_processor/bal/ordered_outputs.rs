@@ -117,7 +117,13 @@ mod tests {
     use alloy_primitives::Address;
 
     fn output(index: usize, result: u64) -> BalWorkerOutput<u64> {
-        BalWorkerOutput { index, signer: Address::ZERO, tx_gas_limit: 0, result }
+        BalWorkerOutput {
+            index,
+            signer: Address::ZERO,
+            tx_gas_limit: 0,
+            result,
+            bal_state: Default::default(),
+        }
     }
 
     fn expect_err_contains<R>(

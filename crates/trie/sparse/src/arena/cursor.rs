@@ -351,7 +351,10 @@ impl ArenaCursor {
                 }
                 ArenaSparseNodeBranchChild::Revealed(child_idx) => {
                     let child_idx = *child_idx;
-                    let path = self.child_path(arena, child_nibble);
+                    // Reuse the logical path built above instead of reconstructing it via
+                    // `child_path`.
+                    let mut path = head_branch_logical_path;
+                    path.push_unchecked(child_nibble);
                     self.push(arena, child_idx, path);
                 }
             }

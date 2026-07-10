@@ -116,7 +116,10 @@ use alloy_primitives::{
 use reth_tasks::LazyHandle;
 
 use crate::tree::{
-    payload_processor::receipt_root_task::{IndexedReceipt, ReceiptRootTaskHandle},
+    payload_processor::{
+        bal::execute::{precompute_bal, PrecomputedBal},
+        receipt_root_task::{IndexedReceipt, ReceiptRootTaskHandle},
+    },
     state_root_strategy::{
         DefaultStateRootStrategy, PayloadStateRootJobContext, StateRootJobContext,
         StateRootStrategy,
@@ -570,6 +573,17 @@ where
                 .map_err(ConsensusError::from));
         }
 
+        // Hash and convert the received BAL concurrently with execution. Post-execution
+        // validation reuses the hash when the rebuilt BAL matches the received one (the norm
+        // for valid blocks), and BAL execution reuses the revm conversion, so neither is paid
+        // on the serial path.
+        let precomputed_bal = decoded_bal.as_ref().map(|bal| {
+            let bal = Arc::clone(bal);
+            self.payload_processor
+                .executor()
+                .spawn_blocking_named("bal-hash", move || precompute_bal(bal.as_bal()))
+        });
+
         let env = ExecutionEnv {
             evm_env,
             hash: input.hash(),
@@ -707,7 +721,13 @@ where
         // as transactions complete, allowing parallel computation during execution.
         let execute_block_start = Instant::now();
         let execution_result = if parallel_bal_execution {
-            self.execute_block_bal(env, &input, &handle, &make_state_provider)
+            self.execute_block_bal(
+                env,
+                &input,
+                &handle,
+                &make_state_provider,
+                precomputed_bal.clone(),
+            )
         } else {
             let state_provider = make_state_provider(false);
             match state_provider {
@@ -789,7 +809,9 @@ where
                 &output,
                 &mut ctx,
                 receipt_root_bloom,
-                built_bal
+                built_bal,
+                decoded_bal.as_deref(),
+                precomputed_bal.as_ref(),
             ),
             block
         );
@@ -1118,6 +1140,7 @@ where
         input: &BlockOrPayload<T>,
         handle: &PayloadHandle<Tx, Err, N::Receipt>,
         make_state_provider: &MakeStateProvider,
+        precomputed_bal: Option<LazyHandle<PrecomputedBal>>,
     ) -> Result<
         (
             BlockExecutionOutput<N::Receipt>,
@@ -1155,6 +1178,7 @@ where
             &self.evm_config,
             &make_db,
             input_bal,
+            precomputed_bal,
             env.evm_env,
             ctx,
             env.transaction_count,
@@ -1297,6 +1321,7 @@ where
     /// and logs bloom from the receipts.
     ///
     /// The `hashed_state` handle wraps the background hashed post state computation.
+    #[expect(clippy::too_many_arguments)]
     #[instrument(level = "debug", target = "engine::tree::payload_validator", skip_all)]
     fn validate_post_execution<T: PayloadTypes<BuiltPayload: BuiltPayload<Primitives = N>>>(
         &self,
@@ -1306,6 +1331,8 @@ where
         ctx: &mut TreeCtx<'_, N>,
         receipt_root_bloom: Option<ReceiptRootBloom>,
         built_bal: Option<BlockAccessList>,
+        received_bal: Option<&DecodedBal>,
+        precomputed_bal: Option<&LazyHandle<PrecomputedBal>>,
     ) -> Result<(), InsertBlockErrorKind>
     where
         V: PayloadValidator<T, Block = N::Block>,
@@ -1318,8 +1345,18 @@ where
         let _enter =
             debug_span!(target: "engine::tree::payload_validator", "validate_block_post_execution")
                 .entered();
-        let block_access_list_hash =
-            built_bal.as_ref().map(|bal| compute_block_access_list_hash(bal));
+        let block_access_list_hash = built_bal.as_ref().map(|bal| {
+            // When the rebuilt BAL is identical to the received one its hash is the received
+            // hash, which was computed concurrently with execution. Only a rebuilt BAL that
+            // diverged (an invalid block) has to be encoded and hashed here.
+            if let (Some(received), Some(precomputed)) = (received_bal, precomputed_bal) &&
+                bal.as_slice() == received.as_bal().as_slice()
+            {
+                precomputed.get().hash
+            } else {
+                compute_block_access_list_hash(bal)
+            }
+        });
 
         if let Err(err) = self.consensus.validate_block_post_execution(
             block,

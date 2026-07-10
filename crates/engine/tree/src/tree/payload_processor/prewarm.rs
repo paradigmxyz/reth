@@ -11,7 +11,7 @@
 //! 2. Prewarming tasks execute transactions in parallel using shared caches
 //! 3. When actual block execution happens, it benefits from the warmed cache
 
-use super::bal_prewarm_pool::BalPrewarmPool;
+use super::bal_prewarm_pool::{BalPrewarmPool, PrewarmTarget, PREWARM_BATCH_SIZE};
 use crate::tree::{
     payload_processor::multiproof::{StateRootHintStream, StateRootUpdateStream},
     precompile_cache::{CachedPrecompile, PrecompileCacheMap},
@@ -364,7 +364,11 @@ where
 
         if let Some(hashed_update_stream) = hashed_update_stream {
             let ctx = ctx.clone();
-            executor.bal_streaming_pool().spawn(move || {
+            // Stream on the prewarming pool, which is otherwise idle on the BAL path. The BAL
+            // streaming pool is occupied by the parallel execution workers for the entire
+            // execution phase, so streaming there starves the state-root pipeline (proof
+            // dispatch, reveals, storage roots) until execution has finished.
+            executor.prewarming_pool().spawn(move || {
                 let branch_span = debug_span!(
                     target: "engine::tree::payload_processor::prewarm",
                     parent: &stream_parent_span,
@@ -415,15 +419,29 @@ where
             let build = Arc::new(move || provider_builder.build());
 
             pool.begin_block(build, caches);
+            // Batch targets so each message carries a chunk of work instead of a single slot.
+            let mut batch = Vec::with_capacity(PREWARM_BATCH_SIZE);
+            let flush = |batch: &mut Vec<PrewarmTarget>| {
+                if batch.len() >= PREWARM_BATCH_SIZE {
+                    pool.warm_batch(std::mem::replace(
+                        batch,
+                        Vec::with_capacity(PREWARM_BATCH_SIZE),
+                    ));
+                }
+            };
             for account in prefetch_bal.as_bal() {
-                pool.warm_account(account.address);
+                batch.push(PrewarmTarget::Account(account.address));
+                flush(&mut batch);
                 for change in &account.storage_changes {
-                    pool.warm_storage(account.address, change.slot.into());
+                    batch.push(PrewarmTarget::Storage(account.address, change.slot.into()));
+                    flush(&mut batch);
                 }
                 for &slot in &account.storage_reads {
-                    pool.warm_storage(account.address, slot.into());
+                    batch.push(PrewarmTarget::Storage(account.address, slot.into()));
+                    flush(&mut batch);
                 }
             }
+            pool.warm_batch(batch);
             pool.end_block();
         }
 
@@ -658,7 +676,10 @@ where
 
         if !account_changes.storage_changes.is_empty() {
             let hashed_address = *hashed_address.get_or_insert_with(|| keccak256(address));
-            let mut storage_map = reth_trie::HashedStorage::new(false);
+            let mut storage_map = reth_trie::HashedStorage::with_capacity(
+                false,
+                account_changes.storage_changes.len(),
+            );
 
             for slot_changes in &account_changes.storage_changes {
                 let hashed_slot = keccak256(slot_changes.slot.to_be_bytes::<32>());

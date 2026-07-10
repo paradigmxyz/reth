@@ -18,8 +18,10 @@ use tracing::trace;
 type BuildProviderFn = dyn Fn() -> ProviderResult<StateProviderBox> + Send + Sync;
 
 /// A single warm request: a whole account (basic account + its bytecode) or one storage slot.
-enum PrewarmTarget {
+pub(crate) enum PrewarmTarget {
+    /// Warm an account's basic account data and bytecode.
     Account(Address),
+    /// Warm one storage slot.
     Storage(Address, StorageKey),
 }
 
@@ -28,8 +30,11 @@ enum PrewarmTarget {
 enum PrewarmMsg {
     /// Open a read txn for the new block: build a provider over the parent state and hold it.
     BeginBlock { build: Arc<BuildProviderFn>, caches: ExecutionCache },
-    /// Warm one target into the held provider's cache. Ignored if no provider is held.
-    Warm(PrewarmTarget),
+    /// Warm a batch of targets into the held provider's cache. Ignored if no provider is held.
+    ///
+    /// Targets are batched so workers spend their time reading state instead of cycling through
+    /// the channel receive path (spin, yield, park) for every single slot.
+    Warm(Vec<PrewarmTarget>),
     /// Drop the held provider (and its read txn).
     EndBlock(Arc<SendOnDrop>),
 }
@@ -39,7 +44,7 @@ enum PrewarmMsg {
 pub(crate) struct BalPrewarmPool {
     /// One queue per worker. `BeginBlock`/`EndBlock` are broadcast to all; `Warm`s round-robin.
     workers: Vec<crossbeam_channel::Sender<PrewarmMsg>>,
-    /// Round-robin cursor for distributing warm requests across workers.
+    /// Round-robin cursor for distributing warm batches across workers.
     next: AtomicUsize,
     _handles: Vec<JoinHandle<()>>,
 }
@@ -73,14 +78,13 @@ impl BalPrewarmPool {
         }
     }
 
-    /// Fire-and-forget: warm an account (basic account + bytecode) on some worker.
-    pub(crate) fn warm_account(&self, addr: Address) {
-        self.send_warm(PrewarmTarget::Account(addr));
-    }
-
-    /// Fire-and-forget: warm one storage slot on some worker.
-    pub(crate) fn warm_storage(&self, addr: Address, slot: StorageKey) {
-        self.send_warm(PrewarmTarget::Storage(addr, slot));
+    /// Fire-and-forget: warm a batch of targets on some worker.
+    pub(crate) fn warm_batch(&self, batch: Vec<PrewarmTarget>) {
+        if batch.is_empty() {
+            return;
+        }
+        let i = self.next.fetch_add(1, Ordering::Relaxed) % self.workers.len();
+        let _ = self.workers[i].send(PrewarmMsg::Warm(batch));
     }
 
     /// Ends the block: every worker drops its provider (and read txn) once it has drained the warm
@@ -97,11 +101,6 @@ impl BalPrewarmPool {
 
         drop(tx);
         rx.blocking_recv().expect("BAL prewarm pool dropped without signaling completion");
-    }
-
-    fn send_warm(&self, target: PrewarmTarget) {
-        let i = self.next.fetch_add(1, Ordering::Relaxed) % self.workers.len();
-        let _ = self.workers[i].send(PrewarmMsg::Warm(target));
     }
 }
 
@@ -120,12 +119,18 @@ impl BalPrewarmPool {
 /// a high number of threads is counterproductive due to the effects of context switching, core
 /// migration, contention, etc.
 ///
-/// However, that overhead is considered negligible compared to the benefits of fully utilizing
-/// `NVMe` resources. For example, with request latency of 100µs, 100k IO requests the expected
-/// time to finish is 312.5ms at QD=32 and 156.26ms at QD=64.
+/// The prewarm pool also runs concurrently with the parallel execution workers, whose own reads
+/// (bytecode loads and keys not served by the BAL) go to the same MDBX map. Profiles of warm-cache
+/// big-block runs show execution workers mostly off-CPU while a large prewarm pool saturates the
+/// scheduler and the page-cache locks, so the pool is sized to leave the execution workers room
+/// while still keeping a reasonable `NVMe` queue depth for cold pages.
+pub(crate) const DEFAULT_BAL_PREWARM_THREADS: usize = 32;
+
+/// Number of targets per warm batch.
 ///
-/// This should explain why this particular value is picked.
-pub(crate) const DEFAULT_BAL_PREWARM_THREADS: usize = 128;
+/// Batches amortize the per-message channel overhead while staying small enough that the
+/// round-robin distribution keeps all workers busy.
+pub(crate) const PREWARM_BATCH_SIZE: usize = 64;
 
 fn prewarm_loop(rx: crossbeam_channel::Receiver<PrewarmMsg>) {
     // The provider (and its MDBX read txn) held for the current block, between `BeginBlock` and
@@ -144,19 +149,21 @@ fn prewarm_loop(rx: crossbeam_channel::Receiver<PrewarmMsg>) {
                     }
                 };
             }
-            PrewarmMsg::Warm(target) => {
+            PrewarmMsg::Warm(batch) => {
                 let Some(provider) = provider.as_ref() else { continue };
-                match target {
-                    PrewarmTarget::Account(addr) => {
-                        if let Ok(Some(account)) = provider.basic_account(&addr) &&
-                            let Some(code_hash) = account.bytecode_hash &&
-                            code_hash != alloy_consensus::constants::KECCAK_EMPTY
-                        {
-                            let _ = provider.bytecode_by_hash(&code_hash);
+                for target in batch {
+                    match target {
+                        PrewarmTarget::Account(addr) => {
+                            if let Ok(Some(account)) = provider.basic_account(&addr) &&
+                                let Some(code_hash) = account.bytecode_hash &&
+                                code_hash != alloy_consensus::constants::KECCAK_EMPTY
+                            {
+                                let _ = provider.bytecode_by_hash(&code_hash);
+                            }
                         }
-                    }
-                    PrewarmTarget::Storage(addr, slot) => {
-                        let _ = provider.storage(addr, slot);
+                        PrewarmTarget::Storage(addr, slot) => {
+                            let _ = provider.storage(addr, slot);
+                        }
                     }
                 }
             }
