@@ -521,10 +521,9 @@ where
 
     /// Serves a `GetStorageRanges` request via [`StateRangeProvider`], for the latest state only.
     ///
-    /// `starting_hash` only applies to the first account; later accounts start from zero.
-    /// `limit_hash` isn't applied per-account here — the shared `response_bytes` budget across
-    /// all accounts is what actually bounds the response, and iteration stops at the first
-    /// account whose range doesn't fully complete within that budget.
+    /// `starting_hash`/`limit_hash` apply only to the first account. An account with no slots
+    /// gets no entry at all, and a proof stops the response at the first account that isn't a
+    /// complete, zero-origin range.
     fn get_storage_ranges_response(&self, req: GetStorageRangesMessage) -> StorageRangesMessage {
         let empty = StorageRangesMessage {
             request_id: req.request_id,
@@ -540,50 +539,50 @@ where
         }
 
         let mut slots = Vec::new();
+        let mut proof = Vec::new();
         let mut remaining_bytes = (req.response_bytes as usize).min(SOFT_RESPONSE_LIMIT);
-        // Boundary keys for the last account processed, unless its range fully completed and it
-        // was the last one requested, in which case no proof is needed at all.
-        let mut proof_target: Option<(B256, Vec<B256>)> = None;
 
         for (i, &hashed_address) in req.account_hashes.iter().enumerate() {
             if remaining_bytes == 0 {
                 break
             }
-            let start = if i == 0 { req.starting_hash } else { B256::ZERO };
-            let Ok(Some((account_slots, complete))) = self.client.storage_range(
-                hashed_address,
-                start,
-                B256::repeat_byte(0xff),
-                remaining_bytes,
-            ) else {
+            let origin = if i == 0 { req.starting_hash } else { B256::ZERO };
+            let limit = if i == 0 { req.limit_hash } else { B256::repeat_byte(0xff) };
+            let Ok(Some((account_slots, complete))) =
+                self.client.storage_range(hashed_address, origin, limit, remaining_bytes)
+            else {
                 break
             };
 
             remaining_bytes = remaining_bytes.saturating_sub(account_slots.len() * 64);
-            let is_last_requested = i == req.account_hashes.len() - 1;
-            proof_target = (!(complete && is_last_requested))
-                .then(|| (hashed_address, boundary_proof_keys(start, account_slots.last())));
+            let last = account_slots.last().map(|(hash, _)| *hash);
+            let needs_proof = origin != B256::ZERO || (!complete && last.is_some());
+            if !account_slots.is_empty() {
+                slots.push(
+                    account_slots
+                        .into_iter()
+                        .map(|(hash, value)| StorageData {
+                            hash,
+                            data: value.to_be_bytes_trimmed_vec().into(),
+                        })
+                        .collect(),
+                );
+            }
 
-            slots.push(
-                account_slots
-                    .into_iter()
-                    .map(|(hash, value)| StorageData {
-                        hash,
-                        data: value.to_be_bytes_trimmed_vec().into(),
-                    })
-                    .collect(),
-            );
-
-            if !complete {
+            if needs_proof {
+                let boundary_keys = match last {
+                    Some(last) => vec![origin, last],
+                    None => vec![origin],
+                };
+                proof = self
+                    .client
+                    .storage_range_proof(hashed_address, &boundary_keys)
+                    .ok()
+                    .flatten()
+                    .unwrap_or_default();
                 break
             }
         }
-
-        let proof = proof_target
-            .and_then(|(hashed_address, keys)| {
-                self.client.storage_range_proof(hashed_address, &keys).ok().flatten()
-            })
-            .unwrap_or_default();
 
         StorageRangesMessage { request_id: req.request_id, slots, proof }
     }
