@@ -116,7 +116,10 @@ use alloy_primitives::{
 use reth_tasks::LazyHandle;
 
 use crate::tree::{
-    payload_processor::receipt_root_task::{IndexedReceipt, ReceiptRootTaskHandle},
+    payload_processor::{
+        bal::execute::{precompute_bal, PrecomputedBal},
+        receipt_root_task::{IndexedReceipt, ReceiptRootTaskHandle},
+    },
     state_root_strategy::{
         DefaultStateRootStrategy, PayloadStateRootJobContext, StateRootJobContext,
         StateRootStrategy,
@@ -570,14 +573,15 @@ where
                 .map_err(ConsensusError::from));
         }
 
-        // Hash the received BAL concurrently with execution. When the BAL rebuilt from execution
-        // matches the received one (the norm for valid blocks), post-execution validation reuses
-        // this hash instead of re-encoding and hashing the rebuilt BAL on the engine thread.
-        let received_bal_hash = decoded_bal.as_ref().map(|bal| {
+        // Hash and convert the received BAL concurrently with execution. Post-execution
+        // validation reuses the hash when the rebuilt BAL matches the received one (the norm
+        // for valid blocks), and BAL execution reuses the revm conversion, so neither is paid
+        // on the serial path.
+        let precomputed_bal = decoded_bal.as_ref().map(|bal| {
             let bal = Arc::clone(bal);
-            self.payload_processor.executor().spawn_blocking_named("bal-hash", move || {
-                compute_block_access_list_hash(bal.as_bal().as_slice())
-            })
+            self.payload_processor
+                .executor()
+                .spawn_blocking_named("bal-hash", move || precompute_bal(bal.as_bal()))
         });
 
         let env = ExecutionEnv {
@@ -717,7 +721,13 @@ where
         // as transactions complete, allowing parallel computation during execution.
         let execute_block_start = Instant::now();
         let execution_result = if parallel_bal_execution {
-            self.execute_block_bal(env, &input, &handle, &make_state_provider)
+            self.execute_block_bal(
+                env,
+                &input,
+                &handle,
+                &make_state_provider,
+                precomputed_bal.clone(),
+            )
         } else {
             let state_provider = make_state_provider(false);
             match state_provider {
@@ -801,7 +811,7 @@ where
                 receipt_root_bloom,
                 built_bal,
                 decoded_bal.as_deref(),
-                received_bal_hash.as_ref(),
+                precomputed_bal.as_ref(),
             ),
             block
         );
@@ -1130,6 +1140,7 @@ where
         input: &BlockOrPayload<T>,
         handle: &PayloadHandle<Tx, Err, N::Receipt>,
         make_state_provider: &MakeStateProvider,
+        precomputed_bal: Option<LazyHandle<PrecomputedBal>>,
     ) -> Result<
         (
             BlockExecutionOutput<N::Receipt>,
@@ -1167,6 +1178,7 @@ where
             &self.evm_config,
             &make_db,
             input_bal,
+            precomputed_bal,
             env.evm_env,
             ctx,
             env.transaction_count,
@@ -1320,7 +1332,7 @@ where
         receipt_root_bloom: Option<ReceiptRootBloom>,
         built_bal: Option<BlockAccessList>,
         received_bal: Option<&DecodedBal>,
-        received_bal_hash: Option<&LazyHandle<B256>>,
+        precomputed_bal: Option<&LazyHandle<PrecomputedBal>>,
     ) -> Result<(), InsertBlockErrorKind>
     where
         V: PayloadValidator<T, Block = N::Block>,
@@ -1337,10 +1349,10 @@ where
             // When the rebuilt BAL is identical to the received one its hash is the received
             // hash, which was computed concurrently with execution. Only a rebuilt BAL that
             // diverged (an invalid block) has to be encoded and hashed here.
-            if let (Some(received), Some(hash)) = (received_bal, received_bal_hash) &&
+            if let (Some(received), Some(precomputed)) = (received_bal, precomputed_bal) &&
                 bal.as_slice() == received.as_bal().as_slice()
             {
-                *hash.get()
+                precomputed.get().hash
             } else {
                 compute_block_access_list_hash(bal)
             }

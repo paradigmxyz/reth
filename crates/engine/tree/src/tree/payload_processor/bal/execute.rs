@@ -17,24 +17,26 @@
 use super::{ordered_outputs::ordered_worker_outputs, worker, BalExecutionError};
 use alloy_eip7928::{
     bal::{Bal as AlloyBal, DecodedBal},
-    compute_block_access_list_hash, BlockAccessList,
+    compute_block_access_list_hash, BlockAccessIndex, BlockAccessList,
 };
-use alloy_evm::{
-    block::{BlockExecutionError, BlockExecutor, BlockValidationError, TxResult},
-    Evm,
-};
-use alloy_primitives::Address;
+use alloy_evm::block::{BlockExecutionError, BlockExecutor, BlockValidationError, TxResult};
+use alloy_primitives::{Address, B256};
 use crossbeam_channel::{Receiver, Sender};
-use reth_evm::{execute::ExecutableTxFor, ConfigureEvm, Database, EvmEnvFor, ExecutionCtxFor};
+use reth_evm::{
+    execute::ExecutableTxFor, ConfigureEvm, Database, EvmEnvFor, ExecutionCtxFor, OnStateHook,
+};
 use reth_primitives_traits::ReceiptTy;
 use reth_provider::BlockExecutionOutput;
-use reth_tasks::Runtime;
+use reth_tasks::{LazyHandle, Runtime};
 use revm::{
     context::{result::ResultAndState, Block},
     database::{states::bundle_state::BundleRetention, State},
-    state::bal::Bal as RevmBal,
+    state::{bal::Bal as RevmBal, EvmState},
 };
-use std::sync::Arc;
+use std::sync::{
+    atomic::{AtomicU64, Ordering},
+    Arc,
+};
 
 use crate::tree::payload_processor::receipt_root_task::IndexedReceipt;
 
@@ -45,6 +47,7 @@ pub fn execute_block<'a, Evm, Tx, Err, DB, MakeDb>(
     evm_config: &'a Evm,
     make_db: &'a MakeDb,
     input_bal: Arc<DecodedBal>,
+    precomputed_bal: Option<LazyHandle<PrecomputedBal>>,
     evm_env: EvmEnvFor<Evm>,
     ctx: ExecutionCtxFor<'a, Evm>,
     transaction_count: usize,
@@ -71,6 +74,7 @@ where
             evm_config,
             make_db,
             input_bal,
+            precomputed_bal,
             evm_env,
             ctx,
             transaction_count,
@@ -87,6 +91,7 @@ fn execute_block_inner<'scope, Evm, Tx, Err, DB, MakeDb>(
     evm_config: &'scope Evm,
     make_db: &'scope MakeDb,
     input_bal: Arc<DecodedBal>,
+    precomputed_bal: Option<LazyHandle<PrecomputedBal>>,
     evm_env: EvmEnvFor<Evm>,
     ctx: ExecutionCtxFor<'scope, Evm>,
     transaction_count: usize,
@@ -106,16 +111,42 @@ where
     ReceiptTy<Evm::Primitives>: Clone,
 {
     let bal = input_bal.as_bal();
-    let input_bal_revm = convert_alloy_to_revm_bal(bal)?;
+    // Use the conversion computed concurrently with payload preparation when available so the
+    // serial path doesn't pay for it.
+    let input_bal_revm = match &precomputed_bal {
+        Some(handle) => handle.get().converted.clone().map_err(|msg| {
+            BalExecutionError::Consensus(reth_consensus::ConsensusError::BlockAccessListInvalid(
+                msg,
+            ))
+        })?,
+        None => convert_alloy_to_revm_bal(bal)?,
+    };
 
     let block_gas_limit = evm_env.block_env.gas_limit();
     let enable_amsterdam_eip8037 = evm_env.cfg_env.enable_amsterdam_eip8037;
     let tx_gas_limit_cap = evm_env.cfg_env.tx_gas_limit_cap;
-    let mut canonical_state = State::builder()
-        .with_database(make_db(false)?)
-        .with_bundle_update()
-        .with_bal_builder()
-        .build();
+    let mut canonical_state =
+        State::builder().with_database(make_db(false)?).with_bundle_update().build();
+
+    // Build the BAL on a pool thread instead of with the canonical state's builder: the BAL fold
+    // is an order-dependent function of the committed state diffs, which the state hook streams
+    // by value, so folding here removes the builder bookkeeping from the serial commit loop.
+    let bal_index = Arc::new(AtomicU64::new(0));
+    let (bal_tx, bal_rx) = crossbeam_channel::unbounded::<(BlockAccessIndex, EvmState)>();
+    let (built_bal_tx, built_bal_rx) = crossbeam_channel::bounded(1);
+    scope.spawn(move |_| {
+        let mut bal = RevmBal::default();
+        while let Ok((index, state)) = bal_rx.recv() {
+            for (address, account) in &state {
+                bal.update_account(index, *address, account);
+            }
+        }
+        let _ = built_bal_tx.send(bal.into_alloy_bal());
+    });
+    canonical_state.set_state_hook(Some(Box::new(BalForwardHook {
+        index: Arc::clone(&bal_index),
+        tx: bal_tx,
+    })));
 
     let (block_result, senders) = {
         let (result_tx, result_rx) = crossbeam_channel::unbounded();
@@ -144,12 +175,14 @@ where
         canonical_executor.apply_pre_execution_changes()?;
         let mut senders = Vec::with_capacity(transaction_count);
         let mut last_sent_len = 0usize;
+        let mut next_bal_index = 0u64;
         for output in ordered_worker_outputs(&result_rx, transaction_count) {
             let output = output?;
 
             gas_tracker.validate_tx_limit(output.tx_gas_limit)?;
             gas_tracker.record_result(output.result.result());
-            canonical_executor.evm_mut().db_mut().bump_bal_index();
+            next_bal_index += 1;
+            bal_index.store(next_bal_index, Ordering::Relaxed);
 
             let _ = canonical_executor.commit_transaction(output.result);
             senders.push(output.signer);
@@ -165,12 +198,17 @@ where
         }
         drop(abort_guard);
 
-        canonical_executor.evm_mut().db_mut().bump_bal_index();
+        next_bal_index += 1;
+        bal_index.store(next_bal_index, Ordering::Relaxed);
         let block_result = canonical_executor.apply_post_execution_changes()?;
         (block_result, senders)
     };
 
-    let built_bal = take_built_bal_and_log_divergence(&mut canonical_state, bal);
+    // Drop the forwarding hook so the BAL task sees end-of-stream and finalizes.
+    canonical_state.set_state_hook(None);
+    let built_bal: BlockAccessList =
+        built_bal_rx.recv().expect("BAL builder task dropped without producing a BAL");
+    log_bal_divergence(&built_bal, bal);
 
     canonical_state.merge_transitions(BundleRetention::Reverts);
     Ok((
@@ -178,6 +216,28 @@ where
         senders,
         built_bal,
     ))
+}
+
+/// Received-BAL data computed concurrently with payload preparation: the BAL hash used by
+/// post-execution validation and the revm-side conversion used by BAL execution.
+#[derive(Debug, Clone)]
+pub struct PrecomputedBal {
+    /// Hash of the received BAL.
+    pub hash: B256,
+    /// Conversion of the received BAL into revm's representation, or the conversion error
+    /// message for invalid BALs.
+    pub converted: Result<Arc<RevmBal>, String>,
+}
+
+/// Computes the hash and revm conversion of the received BAL. Intended to run on a background
+/// task concurrently with execution setup.
+pub fn precompute_bal(bal: &AlloyBal) -> PrecomputedBal {
+    PrecomputedBal {
+        hash: compute_block_access_list_hash(bal.as_slice()),
+        converted: RevmBal::clone_from_alloy(bal.as_vec())
+            .map(Arc::new)
+            .map_err(|e| format!("{e:?}")),
+    }
 }
 
 fn convert_alloy_to_revm_bal(alloy_bal: &AlloyBal) -> Result<Arc<RevmBal>, BalExecutionError> {
@@ -201,14 +261,7 @@ fn convert_alloy_to_revm_bal(alloy_bal: &AlloyBal) -> Result<Arc<RevmBal>, BalEx
     Ok(Arc::new(received_bal_revm))
 }
 
-fn take_built_bal_and_log_divergence<DB>(
-    canonical_state: &mut State<DB>,
-    received_bal: &AlloyBal,
-) -> BlockAccessList
-where
-    DB: Database,
-{
-    let built_bal = canonical_state.take_built_alloy_bal().expect("with_bal_builder set");
+fn log_bal_divergence(built_bal: &BlockAccessList, received_bal: &AlloyBal) {
     if tracing::enabled!(target: "engine::tree::payload_processor::bal", tracing::Level::DEBUG) &&
         built_bal.as_slice() != received_bal.as_slice()
     {
@@ -223,8 +276,19 @@ where
             "first BAL divergence",
         );
     }
+}
 
-    built_bal
+/// Streams committed state diffs, tagged with the BAL index the committer set, to the BAL
+/// builder task.
+struct BalForwardHook {
+    index: Arc<AtomicU64>,
+    tx: Sender<(BlockAccessIndex, EvmState)>,
+}
+
+impl OnStateHook for BalForwardHook {
+    fn on_state(&mut self, state: EvmState) {
+        let _ = self.tx.send((BlockAccessIndex::new(self.index.load(Ordering::Relaxed)), state));
+    }
 }
 
 /// Closes the abort channel on drop, waking scoped workers before the scope exits.
@@ -303,6 +367,7 @@ mod tests {
         eip4788::{BEACON_ROOTS_ADDRESS, BEACON_ROOTS_CODE},
         eip7002::{WITHDRAWAL_REQUEST_PREDEPLOY_ADDRESS, WITHDRAWAL_REQUEST_PREDEPLOY_CODE},
     };
+    use alloy_evm::Evm;
     use alloy_primitives::{keccak256, B256, U256};
     use reth_ethereum_primitives::{Block, BlockBody, Receipt, TransactionSigned};
     use reth_evm_ethereum::EthEvmConfig;
@@ -504,6 +569,7 @@ mod tests {
             &evm_config,
             &make_db,
             input_bal,
+            None,
             evm_env,
             execution_ctx,
             transaction_count,
@@ -654,19 +720,23 @@ mod tests {
         let bal_hash = alloy_eip7928::compute_block_access_list_hash(&reference_bal);
         let block = empty_amsterdam_block(bal_hash);
 
-        let result = run_execute_block(
+        let result = run_execute_block_full(
             &Runtime::test(),
             evm_config,
             db_factory(pre_block_db),
-            to_arc_decoded(reference_bal),
+            to_arc_decoded(reference_bal.clone()),
             &block,
             vec![recovered1, recovered2],
         );
 
         match result {
-            Ok(output) => {
+            Ok((output, built_bal)) => {
                 assert_eq!(output.receipts.len(), 2, "expected 2 receipts");
                 assert!(output.gas_used >= 2 * 21_000, "expected at least 42k gas used");
+                assert_eq!(
+                    built_bal, reference_bal,
+                    "BAL rebuilt by the builder task must match the serially built reference"
+                );
             }
             Err(e) => panic!("expected success, got {e:?}"),
         }
@@ -1129,6 +1199,7 @@ mod tests {
             &evm_config,
             &make_db,
             to_arc_decoded(BlockAccessList::default()),
+            None,
             evm_env,
             execution_ctx,
             1, // transaction_count = 1 → exactly one worker spawned
