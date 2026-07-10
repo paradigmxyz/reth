@@ -11,7 +11,7 @@ use crate::{
     RocksDBProviderFactory, StageCheckpointReader, StateProviderBox, StateProviderFactory,
     StateReader, StaticFileProviderFactory, TransactionVariant, TransactionsProvider,
 };
-use alloy_consensus::transaction::TransactionMeta;
+use alloy_consensus::{transaction::TransactionMeta, BlockHeader};
 use alloy_eips::{BlockHashOrNumber, BlockId, BlockNumHash, BlockNumberOrTag};
 use alloy_primitives::{Address, BlockHash, BlockNumber, Bytes, TxHash, TxNumber, B256, U256};
 use alloy_rpc_types_engine::ForkchoiceState;
@@ -169,6 +169,15 @@ impl<N: NodeTypesWithDB> BalProvider for BlockchainProvider<N> {
 }
 
 impl<N: ProviderNodeTypes> StateRangeProvider for BlockchainProvider<N> {
+    /// Only serves the latest, database-backed state; see [`Self::account_range`].
+    fn current_state_root(&self) -> ProviderResult<Option<B256>> {
+        if self.canonical_in_memory_state.head_state().is_some() {
+            return Ok(None)
+        }
+        let number = self.last_block_number()?;
+        Ok(self.header_by_number(number)?.map(|header| header.state_root()))
+    }
+
     /// Only serves the latest, database-backed state: returns `Ok(None)` whenever an in-memory
     /// reorg overlay is active, rather than risk iterating the wrong state.
     fn account_range(

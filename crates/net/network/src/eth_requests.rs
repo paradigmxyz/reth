@@ -480,15 +480,24 @@ where
     /// left beyond what's returned) needs no proof; a truncated one is proven via a boundary
     /// proof over its first and last account.
     fn get_account_range_response(&self, req: GetAccountRangeMessage) -> AccountRangeMessage {
+        let empty = AccountRangeMessage {
+            request_id: req.request_id,
+            accounts: Vec::new(),
+            proof: Vec::new(),
+        };
+
+        // We only ever serve the current state, so a request for any other root can't be
+        // answered correctly.
+        let Ok(Some(state_root)) = self.client.current_state_root() else { return empty };
+        if state_root != req.root_hash {
+            return empty
+        }
+
         let response_bytes = (req.response_bytes as usize).min(SOFT_RESPONSE_LIMIT);
         let Ok(Some((accounts, complete))) =
             self.client.account_range(req.starting_hash, req.limit_hash, response_bytes)
         else {
-            return AccountRangeMessage {
-                request_id: req.request_id,
-                accounts: Vec::new(),
-                proof: Vec::new(),
-            }
+            return empty
         };
 
         let boundary_keys = match (complete, accounts.first(), accounts.last()) {
@@ -521,6 +530,19 @@ where
     /// all accounts is what actually bounds the response, and iteration stops at the first
     /// account whose range doesn't fully complete within that budget.
     fn get_storage_ranges_response(&self, req: GetStorageRangesMessage) -> StorageRangesMessage {
+        let empty = StorageRangesMessage {
+            request_id: req.request_id,
+            slots: Vec::new(),
+            proof: Vec::new(),
+        };
+
+        // We only ever serve the current state, so a request for any other root can't be
+        // answered correctly.
+        let Ok(Some(state_root)) = self.client.current_state_root() else { return empty };
+        if state_root != req.root_hash {
+            return empty
+        }
+
         let mut slots = Vec::new();
         let mut remaining_bytes = (req.response_bytes as usize).min(SOFT_RESPONSE_LIMIT);
         // Boundary keys for the last account processed, unless its range fully completed and it

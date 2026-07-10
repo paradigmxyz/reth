@@ -75,6 +75,11 @@ pub type RangeResult<T> = ProviderResult<Option<(Vec<T>, bool)>>;
 /// requests. Hash-native throughout, unlike [`StorageRootProvider`].
 #[auto_impl::auto_impl(&, Arc)]
 pub trait StateRangeProvider {
+    /// Returns the state root that `account_range`/`storage_range` currently serve, so callers
+    /// can reject requests for a root they can't (or no longer) serve. `Ok(None)` under the same
+    /// conditions as [`Self::account_range`].
+    fn current_state_root(&self) -> ProviderResult<Option<B256>>;
+
     /// Returns accounts (hash, account) in `[start, limit]`, bounded by `response_bytes`.
     fn account_range(
         &self,

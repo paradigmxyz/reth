@@ -119,6 +119,10 @@ impl<ChainSpec, N> BalProvider for NoopProvider<ChainSpec, N> {
 }
 
 impl<ChainSpec, N> StateRangeProvider for NoopProvider<ChainSpec, N> {
+    fn current_state_root(&self) -> ProviderResult<Option<B256>> {
+        Ok(None)
+    }
+
     fn account_range(
         &self,
         _start: B256,
