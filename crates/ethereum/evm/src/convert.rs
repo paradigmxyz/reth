@@ -43,7 +43,10 @@ where
         SpecId::BERLIN
     } else if chain_spec.is_istanbul_active_at_block(block_number) {
         SpecId::ISTANBUL
-    } else if chain_spec.is_petersburg_active_at_block(block_number) {
+    } else if chain_spec.is_petersburg_active_at_block(block_number)
+        || chain_spec.is_constantinople_active_at_block(block_number)
+    {
+        // evm2 aliases Constantinople/ConstantinopleFix to Petersburg.
         SpecId::PETERSBURG
     } else if chain_spec.is_byzantium_active_at_block(block_number) {
         SpecId::BYZANTIUM
