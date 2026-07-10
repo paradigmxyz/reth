@@ -166,6 +166,8 @@ where
     bal_index_setter: Option<BalIndexSetter<DB>>,
     /// Whether the executor has selected its starting segment.
     initialized: bool,
+    /// Whether this executor is a BAL worker executing isolated transactions.
+    bal_worker_mode: bool,
 }
 
 impl<'a, DB, I, P, Spec> BbBlockExecutor<'a, DB, I, P, Spec>
@@ -207,51 +209,11 @@ where
             bal_index_bumper,
             bal_index_setter,
             initialized: false,
+            bal_worker_mode: false,
         }
     }
 
-    /// Idempotent first-use init. Reads `bal_index` from the DB to pick the
-    /// starting segment, swaps the inner executor's env/ctx to that segment,
-    /// and reseeds the block hash cache for its window.
-    ///
-    /// `bal_index == 0` selects segment 0 — canonical execution that walks
-    /// all segments via `maybe_apply_boundary`. `bal_index > 0` selects the
-    /// segment containing the `(bal_index - 1)`-th transaction and drops the
-    /// plan so segment boundaries don't fire — a BAL worker only runs one
-    /// transaction in its segment.
-    fn initialize(&mut self) -> Result<(), BlockExecutionError> {
-        if self.initialized {
-            return Ok(());
-        }
-
-        let segment_idx = if let Some(bal_index) = self
-            .bal_index_reader
-            .map(|reader| reader(self.inner().evm().db()))
-            .filter(|bal_index| *bal_index > 0)
-        {
-            let segment_idx = self.plan.segment_index_for_tx((bal_index - 1) as usize);
-
-            // Renumber the worker's bal_index from the raw "tx i + 1"
-            // convention to "tx i + 1 + 2k" where k is the segment index.
-            // This reserves two `bal_indexes` per crossed segment boundary
-            // (one for post-N's `finish()`, one for pre-N+1's
-            // `apply_pre_execution_changes`) so worker reads via
-            // `BalWrites::get` see those writes via the strict less-than
-            // semantic.
-            if let Some(setter) = self.bal_index_setter {
-                let renumbered = bal_index + 2 * segment_idx as u64;
-                setter(self.inner_mut().evm_mut().db_mut(), renumbered);
-            }
-
-            segment_idx
-        } else {
-            if self.initialized {
-                return Ok(());
-            }
-
-            self.initialized = true;
-            0
-        };
+    fn select_segment(&mut self, segment_idx: usize) {
         let segment = &self.plan.segments[segment_idx];
         let block_env = segment.evm_env.block_env.clone();
         let block_number = block_env.number.saturating_to::<u64>();
@@ -265,7 +227,55 @@ where
         inner.ctx = segment.ctx.clone();
 
         self.reseed_block_hashes_for(block_number);
+    }
 
+    fn select_bal_worker_segment(&mut self, bal_index: u64) {
+        let segment_idx = self.plan.segment_index_for_tx((bal_index - 1) as usize);
+
+        // Renumber the worker's bal_index from the raw "tx i + 1"
+        // convention to "tx i + 1 + 2k" where k is the segment index.
+        // This reserves two `bal_indexes` per crossed segment boundary
+        // (one for post-N's `finish()`, one for pre-N+1's
+        // `apply_pre_execution_changes`) so worker reads via
+        // `BalWrites::get` see those writes via the strict less-than
+        // semantic.
+        if let Some(setter) = self.bal_index_setter {
+            let renumbered = bal_index + 2 * segment_idx as u64;
+            setter(self.inner_mut().evm_mut().db_mut(), renumbered);
+        }
+
+        self.select_segment(segment_idx);
+    }
+
+    /// Idempotent first-use init. Reads `bal_index` from the DB to pick the
+    /// starting segment, swaps the inner executor's env/ctx to that segment,
+    /// and reseeds the block hash cache for its window.
+    ///
+    /// `bal_index == 0` selects segment 0 — canonical execution that walks
+    /// all segments via `maybe_apply_boundary`. `bal_index > 0` selects the
+    /// segment containing the `(bal_index - 1)`-th transaction and drops the
+    /// plan so segment boundaries don't fire — a BAL worker only runs one
+    /// transaction in its segment.
+    fn initialize(&mut self) -> Result<(), BlockExecutionError> {
+        if self.initialized && !self.bal_worker_mode {
+            return Ok(());
+        }
+
+        if let Some(bal_index) = self
+            .bal_index_reader
+            .map(|reader| reader(self.inner().evm().db()))
+            .filter(|bal_index| *bal_index > 0)
+        {
+            self.bal_worker_mode = true;
+            self.initialized = true;
+            self.select_bal_worker_segment(bal_index);
+            return Ok(())
+        }
+
+        if !self.initialized {
+            self.initialized = true;
+            self.select_segment(0);
+        }
         Ok(())
     }
 
