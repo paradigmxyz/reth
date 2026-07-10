@@ -90,7 +90,7 @@ pub(crate) fn block_env_with_blob_params<H: BlockHeader>(
             .map(|hash| U256::from_be_slice(hash.as_slice()))
             .unwrap_or_default(),
         blob_basefee: blob_basefee(header.excess_blob_gas(), blob_params),
-        slot_num: U256::ZERO,
+        slot_num: U256::from(header.slot_number().unwrap_or_default()),
         ext: (),
         _non_exhaustive: (),
     }
@@ -251,5 +251,14 @@ mod tests {
         let env = block_env(&header);
 
         assert_eq!(env.blob_basefee, U256::ZERO);
+    }
+
+    #[test]
+    fn block_env_uses_header_slot_number() {
+        let header = Header { slot_number: Some(42), ..Default::default() };
+
+        let env = block_env(&header);
+
+        assert_eq!(env.slot_num, U256::from(42));
     }
 }

@@ -86,6 +86,7 @@ pub trait ReceiptBuilder<TxType, TransactionResult> {
         &self,
         receipts: Vec<Self::Receipt>,
         state: BlockStateAccumulator,
+        blob_gas_used: u64,
     ) -> BlockExecutionOutput<Self::Receipt> {
         let gas_used = receipts.last().map_or(0, TxReceipt::cumulative_gas_used);
 
@@ -94,7 +95,7 @@ pub trait ReceiptBuilder<TxType, TransactionResult> {
                 receipts,
                 requests: Default::default(),
                 gas_used,
-                blob_gas_used: 0,
+                blob_gas_used,
             },
             state,
         )

@@ -16,7 +16,7 @@ use alloc::{
 use alloy_consensus::transaction::Recovered;
 #[cfg(test)]
 use alloy_consensus::TxType;
-use alloy_consensus::{constants::ETH_TO_WEI, BlockHeader, Header};
+use alloy_consensus::{constants::ETH_TO_WEI, transaction::Transaction, BlockHeader, Header};
 #[cfg(test)]
 use alloy_eips::eip2718::Typed2718;
 use alloy_eips::{
@@ -421,9 +421,11 @@ where
         )?;
         let mut receipts = Vec::new();
         let mut cumulative_gas_used = 0;
+        let mut blob_gas_used = 0;
 
         for (index, transaction) in transactions.into_iter().enumerate() {
             let transaction = transaction.map_err(PayloadExecutionError::Transaction)?;
+            let tx_blob_gas_used = transaction_blob_gas_used(&transaction);
             let tx_type =
                 TxType::try_from(transaction.ty()).expect("transaction envelope has valid type");
             let outcome = execute_transaction(
@@ -434,6 +436,7 @@ where
                 &transaction,
             )?;
             cumulative_gas_used += outcome.tx_gas_used();
+            blob_gas_used += tx_blob_gas_used;
             let receipt = RethReceiptBuilder.build_receipt(ReceiptBuilderCtx {
                 tx_type,
                 result: outcome,
@@ -467,11 +470,19 @@ where
             context.withdrawals,
         )?;
 
-        let mut output = RethReceiptBuilder.build_block_output(receipts, block_state);
+        let mut output =
+            RethReceiptBuilder.build_block_output(receipts, block_state, blob_gas_used);
         output.result.requests = requests;
 
         Ok(output)
     }
+}
+
+pub(crate) fn transaction_blob_gas_used(transaction: &RecoveredTxEnvelope) -> u64 {
+    transaction
+        .as_eip4844()
+        .map(|tx| tx.inner().blob_gas_used().unwrap_or_default())
+        .unwrap_or_default()
 }
 
 /// Hooks invoked while executing an Ethereum block.

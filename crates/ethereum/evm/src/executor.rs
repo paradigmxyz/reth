@@ -4,7 +4,8 @@ use crate::{
     execution::{
         block_requests_from_receipts, execute_transaction_with_commit_condition,
         post_block_balance_state_changes, post_execution_system_call_state_changes,
-        pre_execution_system_call_state_changes, BlockExecutionContext, BlockSystemCalls,
+        pre_execution_system_call_state_changes, transaction_blob_gas_used, BlockExecutionContext,
+        BlockSystemCalls,
     },
     EthBlockExecutionCtx, EthTxEnv, RethReceiptBuilder,
 };
@@ -38,6 +39,7 @@ pub struct EthBlockExecutor<'a> {
     hashed_state_update_hook: HashedStateUpdateHook,
     receipts: Vec<Receipt>,
     cumulative_gas_used: u64,
+    blob_gas_used: u64,
 }
 
 type HashedStateUpdateHook = Option<Box<dyn FnMut(HashedPostState) + Send>>;
@@ -88,6 +90,7 @@ impl<'a> EthBlockExecutor<'a> {
             hashed_state_update_hook: None,
             receipts: Vec::new(),
             cumulative_gas_used: 0,
+            blob_gas_used: 0,
         }
     }
 
@@ -161,6 +164,7 @@ impl<'a> BlockExecutor for EthBlockExecutor<'a> {
     ) -> Result<Option<Self::TransactionOutput>, BlockExecutionError> {
         let tx_hash = transaction.tx_hash();
         let transaction = transaction.into_envelope();
+        let tx_blob_gas_used = transaction_blob_gas_used(&transaction);
         let tx_type =
             TxType::try_from(transaction.ty()).expect("transaction envelope has valid type");
         let Some(outcome) = execute_transaction_with_commit_condition(
@@ -175,14 +179,16 @@ impl<'a> BlockExecutor for EthBlockExecutor<'a> {
         else {
             return Ok(None)
         };
-        let gas_used = outcome.tx_gas_used();
-        self.cumulative_gas_used += gas_used;
+        let tx_gas_used = outcome.tx_gas_used();
+        let state_gas_used = outcome.state_gas_spent();
+        self.cumulative_gas_used += tx_gas_used;
+        self.blob_gas_used += tx_blob_gas_used;
         self.receipts.push(RethReceiptBuilder.build_receipt(ReceiptBuilderCtx {
             tx_type,
             result: outcome,
             cumulative_gas_used: self.cumulative_gas_used,
         }));
-        Ok(Some(GasOutput::from(gas_used)))
+        Ok(Some(GasOutput::new(tx_gas_used, state_gas_used)))
     }
 
     fn receipts(&self) -> &[Receipt] {
@@ -232,7 +238,11 @@ impl<'a> BlockExecutor for EthBlockExecutor<'a> {
         )
         .map_err(BlockExecutionError::from)?;
 
-        let mut output = RethReceiptBuilder.build_block_output(self.receipts, self.block_state);
+        let mut output = RethReceiptBuilder.build_block_output(
+            self.receipts,
+            self.block_state,
+            self.blob_gas_used,
+        );
         output.result.requests = requests;
 
         Ok(output)

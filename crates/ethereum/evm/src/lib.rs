@@ -12,10 +12,10 @@
 extern crate alloc;
 
 use alloc::{borrow::Cow, sync::Arc};
-use alloy_consensus::Header;
-use alloy_eips::eip4895::Withdrawal;
+use alloy_consensus::{BlockHeader, Header};
 #[cfg(feature = "std")]
 use alloy_eips::Decodable2718;
+use alloy_eips::{eip4895::Withdrawal, eip7840::BlobParams};
 use alloy_primitives::{Address, Bytes, B256};
 #[cfg(feature = "std")]
 use alloy_rpc_types_engine::ExecutionData;
@@ -62,6 +62,23 @@ impl EthEvmEnv {
         let mut version = evm2::Version::new(spec);
         version.chain_id = chain_id;
         Self { spec, version, block }
+    }
+
+    fn new_with_blob_params(
+        spec: evm2::SpecId,
+        block: evm2::env::BlockEnv,
+        chain_id: u64,
+        blob_params: Option<BlobParams>,
+    ) -> Self {
+        let mut env = Self::new(spec, block, chain_id);
+        if let Some(blob_params) = blob_params {
+            env.version.max_blobs_per_tx = blob_params.max_blobs_per_tx as usize;
+            env.version.blob_base_fee_update_fraction = blob_params
+                .update_fraction
+                .try_into()
+                .expect("blob base fee update fraction exceeds evm2 u64 capacity");
+        }
+        env
     }
 }
 
@@ -358,13 +375,12 @@ where
 
     fn evm_env(&self, header: &Header) -> Result<EvmEnvFor<Self>, Self::Error> {
         let spec = spec_id(self.chain_spec().as_ref(), header);
-        Ok(EthEvmEnv::new(
+        let blob_params = self.chain_spec().as_ref().blob_params_at_timestamp(header.timestamp);
+        Ok(EthEvmEnv::new_with_blob_params(
             spec,
-            block_env_with_blob_params(
-                header,
-                self.chain_spec().as_ref().blob_params_at_timestamp(header.timestamp),
-            ),
+            block_env_with_blob_params(header, blob_params),
             self.chain_spec().chain_id(),
+            blob_params,
         ))
     }
 
@@ -378,6 +394,7 @@ where
             .as_ref()
             .next_block_base_fee(parent, attributes.timestamp)
             .unwrap_or_default();
+        let blob_params = self.chain_spec().as_ref().blob_params_at_timestamp(attributes.timestamp);
         let header = Header {
             parent_hash: parent.hash_slow(),
             beneficiary: attributes.suggested_fee_recipient,
@@ -387,17 +404,18 @@ where
             base_fee_per_gas: Some(base_fee),
             mix_hash: attributes.prev_randao,
             slot_number: attributes.slot_number,
+            excess_blob_gas: parent
+                .maybe_next_block_excess_blob_gas(blob_params)
+                .or_else(|| blob_params.map(|_| 0)),
             ..Default::default()
         };
 
         let spec = spec_id(self.chain_spec().as_ref(), &header);
-        Ok(EthEvmEnv::new(
+        Ok(EthEvmEnv::new_with_blob_params(
             spec,
-            block_env_with_blob_params(
-                &header,
-                self.chain_spec().as_ref().blob_params_at_timestamp(attributes.timestamp),
-            ),
+            block_env_with_blob_params(&header, blob_params),
             self.chain_spec().chain_id(),
+            blob_params,
         ))
     }
 
@@ -479,13 +497,13 @@ where
             payload.payload.timestamp(),
             payload.payload.block_number(),
         );
-        Ok(EthEvmEnv::new(
+        let blob_params =
+            self.chain_spec().as_ref().blob_params_at_timestamp(payload.payload.timestamp());
+        Ok(EthEvmEnv::new_with_blob_params(
             spec,
-            payload_block_env(
-                payload,
-                self.chain_spec().as_ref().blob_params_at_timestamp(payload.payload.timestamp()),
-            ),
+            payload_block_env(payload, blob_params),
             self.chain_spec().chain_id(),
+            blob_params,
         ))
     }
 
