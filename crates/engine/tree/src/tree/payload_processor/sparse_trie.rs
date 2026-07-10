@@ -293,7 +293,7 @@ where
                 recv(self.cancel_rx) -> _ => return Err(StateRootTaskError::Canceled),
             }
 
-            done = self.make_progress(!self.updates.is_empty())?;
+            done = self.make_progress(!self.finished_state_updates && !self.updates.is_empty())?;
             idle_start = Instant::now();
         }
 
@@ -1353,5 +1353,58 @@ mod tests {
         assert!(matches!(error, StateRootTaskError::Canceled));
 
         drop(updates_tx);
+    }
+
+    #[test]
+    fn run_ignores_hints_queued_after_updates_finish() {
+        let runtime = reth_tasks::Runtime::test();
+        let provider_factory = create_test_provider_factory();
+        let anchor_hash = provider_factory.chain_spec().genesis_hash();
+        let overlay_factory = OverlayStateProviderFactory::new(
+            provider_factory,
+            OverlayBuilder::<reth_chain_state::EthPrimitives>::new(
+                anchor_hash,
+                ChangesetCache::new(),
+            ),
+        );
+        let proof_worker_handle =
+            ProofWorkerHandle::new(&runtime, ProofTaskCtx::new(overlay_factory), false);
+
+        let default_trie = RevealableSparseTrie::blind_from(ArenaParallelSparseTrie::default());
+        let trie = SparseStateTrie::default()
+            .with_accounts_trie(default_trie.clone())
+            .with_default_storage_trie(default_trie)
+            .with_updates(true);
+
+        let (updates_tx, updates_rx) = crossbeam_channel::unbounded();
+        let (cancel_guard, cancel_rx) = crossbeam_channel::bounded::<()>(0);
+        let mut task = SparseTrieCacheTask::new_with_trie(
+            &runtime,
+            updates_rx,
+            cancel_rx,
+            std::sync::mpsc::channel().0,
+            proof_worker_handle,
+            SparseTrieTaskMetrics::default(),
+            trie,
+            B256::from([0x55; 32]),
+            1,
+        );
+
+        updates_tx.send(StateRootMessage::FinishedStateUpdates).unwrap();
+        updates_tx.send(StateRootMessage::PrefetchProofs(Default::default())).unwrap();
+        while task.updates.len() < 2 {
+            std::thread::yield_now();
+        }
+
+        let (result_tx, result_rx) = std::sync::mpsc::channel();
+        let handle = std::thread::spawn(move || {
+            let _ = result_tx.send(task.run());
+        });
+
+        let result = result_rx.recv_timeout(std::time::Duration::from_secs(1));
+        drop(cancel_guard);
+        handle.join().unwrap();
+
+        assert!(result.expect("state root task stalled on a late hint").is_ok());
     }
 }
