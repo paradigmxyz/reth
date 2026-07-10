@@ -364,7 +364,11 @@ where
 
         if let Some(hashed_update_stream) = hashed_update_stream {
             let ctx = ctx.clone();
-            executor.bal_streaming_pool().spawn(move || {
+            // Stream on the prewarming pool, which is otherwise idle on the BAL path. The BAL
+            // streaming pool is occupied by the parallel execution workers for the entire
+            // execution phase, so streaming there starves the state-root pipeline (proof
+            // dispatch, reveals, storage roots) until execution has finished.
+            executor.prewarming_pool().spawn(move || {
                 let branch_span = debug_span!(
                     target: "engine::tree::payload_processor::prewarm",
                     parent: &stream_parent_span,
