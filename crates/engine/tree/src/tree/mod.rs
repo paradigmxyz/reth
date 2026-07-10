@@ -77,7 +77,7 @@ pub use reth_execution_cache::{
     CachedStateCacheMetrics, CachedStateMetrics, CachedStateMetricsSource, CachedStateProvider,
     ExecutionCache, PayloadExecutionCache, SavedCache,
 };
-pub use types::{ValidationOutcome, ValidationOutput};
+pub use types::{ExecutionEnv, ValidationOutcome, ValidationOutput};
 
 pub mod state;
 
