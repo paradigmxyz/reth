@@ -7,6 +7,7 @@ mod requests;
 mod session;
 mod startup;
 mod transaction_hash_fetching;
+mod tx_throughput;
 mod txgossip;
 
 const fn main() {}
