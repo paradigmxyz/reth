@@ -2,13 +2,14 @@ use alloy_primitives::{Address, Bytes, B256, U256};
 use eyre::{bail, eyre, Result};
 use partial_stateless::{
     accessed_state::BlockAccessedState,
-    check_sidecar_context, check_sidecar_miss_targets,
+    check_sidecar_context, check_sidecar_miss_targets, compute_trustless_state_root,
     network_cache::{NetworkStateCache, UpdateStats},
     witness_check::{
         materialize_sidecar_witness_with_limits, root_witness_completeness_from_bundle,
         SidecarWitnessCheckLimits,
     },
-    CacheAnchor, PartialStatelessSidecar, RootWitnessCompletenessReport, StateTargetSet,
+    CacheAnchor, PartialStatelessSidecar, PartialTrieNodeCache, RootWitnessCompletenessReport,
+    StateTargetSet,
 };
 use reth_ethereum::EthPrimitives;
 use reth_evm::{execute::Executor, ConfigureEvm};
@@ -28,6 +29,9 @@ pub(crate) struct SidecarReexecReport {
     pub next_cache_anchor: CacheAnchor,
     pub cache_update: UpdateStats,
     pub root_witness_completeness: RootWitnessCompletenessReport,
+    /// State root computed trustlessly from the trie-node cache + witness only (no full-DB trie
+    /// access). `None` when the cache was not warm enough (a cache-hit path is blind).
+    pub trustless_state_root: Option<B256>,
 }
 
 pub(crate) fn verify_and_apply_provider_assisted_sidecar<Evm>(
@@ -37,14 +41,17 @@ pub(crate) fn verify_and_apply_provider_assisted_sidecar<Evm>(
     prev_cache: &mut NetworkStateCache,
     sidecar: &PartialStatelessSidecar,
     limits: &SidecarReexecLimits,
+    trie_cache: &mut PartialTrieNodeCache,
 ) -> Result<SidecarReexecReport>
 where
     Evm: ConfigureEvm<Primitives = EthPrimitives>,
 {
     prefilter(block, prev_cache, sidecar)?;
 
-    let materialized = materialize_sidecar_witness_with_limits(sidecar, limits)
+    let materialized = materialize_sidecar_witness_with_limits(sidecar, limits, trie_cache)
         .map_err(|err| eyre!("sidecar witness check failed: {err}"))?;
+    // Retained for trustless root computation before the other fields are moved into the provider.
+    let witness_multiproof = materialized.multiproof;
     let witness_provider = WitnessBackedStateProvider {
         cache: prev_cache,
         witness_accounts: materialized.accounts,
@@ -65,6 +72,15 @@ where
         })
         .map_err(|err| eyre!("partial sidecar re-execution failed: {err:?}"))?;
     drop(db);
+
+    // Trustless post-state root: trie-node cache + witness only, no full-DB trie access. This is
+    // the stateless-validator path. `None` means the cache was not warm enough this block; the
+    // provider-assisted root below stays the ground-truth cross-check.
+    let trustless_state_root = compute_trustless_state_root(
+        witness_multiproof.clone(),
+        trie_cache,
+        &execution_output.state,
+    );
 
     let hashed_post_state = full_provider.hashed_post_state(&execution_output.state);
     let (computed_state_root, _) = full_provider
@@ -94,6 +110,12 @@ where
     let root_witness_completeness =
         root_witness_completeness_from_bundle(&execution_output.state, &sidecar.cache_miss_targets);
 
+    // Advance the trie-node cache only after every sidecar and value-cache check has succeeded.
+    // The proof was reconstructed from the sidecar plus the pre-block trie cache above.
+    trie_cache.on_block_executed(&witness_multiproof, &expected_miss.accounts, |address| {
+        prev_cache.contains_account(address)
+    });
+
     Ok(SidecarReexecReport {
         computed_state_root,
         actual_accessed,
@@ -101,6 +123,7 @@ where
         next_cache_anchor,
         cache_update,
         root_witness_completeness,
+        trustless_state_root,
     })
 }
 

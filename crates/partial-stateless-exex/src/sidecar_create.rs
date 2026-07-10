@@ -17,8 +17,9 @@ use partial_stateless::{
         measure_multiproof_size, state_targets_to_proof_targets, WitnessResult,
     },
     CacheFootprintStats, PartialExecutionWitness, PartialExecutionWitnessState,
-    PartialStatelessSidecar, RootWitnessCompletenessSummary, SerializableMultiProof,
-    SidecarBenchmarkManifest, StateTargetSet, StateTargetStats, WitnessReductionStats,
+    PartialStatelessSidecar, PartialTrieNodeCache, RootWitnessCompletenessSummary,
+    SerializableMultiProof, SidecarBenchmarkManifest, StateTargetSet, StateTargetStats,
+    WitnessReductionStats,
 };
 use reth_ethereum::EthPrimitives;
 use reth_evm::{execute::Executor, ConfigureEvm};
@@ -70,6 +71,7 @@ pub(crate) fn create_sidecar_for_block<Evm, ParentStateRootFn, AncestorHeadersFn
     state_provider: &dyn StateProvider,
     block: &RecoveredBlock<BlockTy<EthPrimitives>>,
     cache: &mut NetworkStateCache,
+    trie_cache: &mut PartialTrieNodeCache,
     config: &CacheConfig,
     options: BuilderOptions<'_>,
     parent_state_root_by_hash: ParentStateRootFn,
@@ -286,7 +288,11 @@ where
 
                 let ancestor_headers =
                     ancestor_headers_for_range(lowest_block_number, block_number)?;
-                let serializable_proof = SerializableMultiProof::from_multiproof(&proof);
+                // Omit nodes that a validator with the same pre-block trie cache already holds.
+                // The verifier reconstructs the full proof before checking it against the parent
+                // root and computing the post-state root.
+                let pruned_proof = trie_cache.prune_known_nodes(&proof);
+                let serializable_proof = SerializableMultiProof::from_multiproof(&pruned_proof);
                 let serialized_multiproof = bincode::serialize(&serializable_proof)
                     .map_err(|err| eyre::eyre!("failed to serialize multiproof: {err}"))?;
                 let sidecar_miss = StateTargetSet::from(&raw_targets);
@@ -316,6 +322,7 @@ where
                 };
 
                 let root_witness_completeness = if options.run_sidecar_preflight {
+                    let mut trie_cache_for_reexec = trie_cache.clone();
                     let reexec_report = verify_and_apply_provider_assisted_sidecar(
                         evm_config,
                         state_provider,
@@ -323,6 +330,7 @@ where
                         prev_cache_for_reexec,
                         &sidecar,
                         options.reexec_limits,
+                        &mut trie_cache_for_reexec,
                     )
                     .map_err(|err| {
                         eyre::eyre!("provider-assisted sidecar preflight failed: {err}")
@@ -360,6 +368,28 @@ where
                         next_cache_root = ?reexec_report.next_cache_anchor.cache_root,
                         "Provider-assisted sidecar preflight succeeded"
                     );
+                    match reexec_report.trustless_state_root {
+                        Some(root) if root == block.state_root() => info!(
+                            target: "partial_stateless",
+                            block = block_number,
+                            trustless_state_root = ?root,
+                            "Trustless state root VERIFIED (trie node cache + witness only)"
+                        ),
+                        Some(root) => warn!(
+                            target: "partial_stateless",
+                            block = block_number,
+                            trustless_state_root = ?root,
+                            expected = ?block.state_root(),
+                            "Trustless state root MISMATCH — trie cache/witness stale or insufficient"
+                        ),
+                        None => info!(
+                            target: "partial_stateless",
+                            block = block_number,
+                            trie_warm_nodes = trie_cache.warm_node_count(),
+                            tracked_accounts = trie_cache.tracked_account_count(),
+                            "Trustless state root unavailable — trie node cache not warm enough this block (blind path)"
+                        ),
+                    }
                     RootWitnessCompletenessSummary::from_report(
                         &reexec_report.root_witness_completeness,
                     )
@@ -468,6 +498,13 @@ where
                     "Sidecar generation failed while cache was not coherent"
                 ),
             }
+
+            // Advance only after sidecar generation/preflight has either succeeded or been
+            // intentionally skipped. Coherent failures return above after rolling back the value
+            // cache, so the two caches remain aligned.
+            trie_cache.on_block_executed(&proof, &miss.missed_accounts, |address| {
+                cache.contains_account(address)
+            });
             Some(result)
         }
         Err(e) => {

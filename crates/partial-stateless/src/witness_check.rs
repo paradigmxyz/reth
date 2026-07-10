@@ -2,10 +2,13 @@ use crate::sidecar::{
     check_sidecar_self_consistency, PartialStatelessSidecar, RootWitnessCompletenessReport,
     SerializableMultiProof, SidecarCheckError, StateTargetSet,
 };
+use crate::trie_cache::PartialTrieNodeCache;
 use alloy_consensus::Header;
 use alloy_primitives::{keccak256, Address, Bytes, B256, U256};
 use alloy_rlp::Decodable;
 use reth_primitives_traits::Account;
+use reth_trie_common::{HashedPostState, KeccakKeyHasher, MultiProof, Nibbles};
+use reth_trie_sparse::SparseStateTrie;
 use revm_database::BundleState;
 use std::{
     collections::{BTreeMap, BTreeSet, HashMap, HashSet},
@@ -71,6 +74,10 @@ type Result<T> = std::result::Result<T, SidecarWitnessCheckError>;
 
 #[derive(Debug)]
 pub struct MaterializedSidecarWitness {
+    /// The account/storage trie multiproof, reconstructed to full (pruned witness merged back with
+    /// the trie-node cache) so it can be revealed into a [`SparseStateTrie`] for trustless
+    /// state-root computation (see [`compute_trustless_state_root`]).
+    pub multiproof: MultiProof,
     pub accounts: HashMap<Address, Option<Account>>,
     pub storage: HashMap<(Address, B256), U256>,
     pub codes: HashMap<B256, Bytes>,
@@ -115,12 +122,19 @@ pub fn check_sidecar_witness_prefilter(
 pub fn materialize_sidecar_witness(
     sidecar: &PartialStatelessSidecar,
 ) -> Result<MaterializedSidecarWitness> {
-    materialize_sidecar_witness_with_limits(sidecar, &SidecarWitnessCheckLimits::default())
+    // No trie-node cache available (e.g. the standalone sidecar verifier): the witness must be
+    // self-contained. An empty cache reconstructs nothing, so a pruned sidecar would fail here.
+    materialize_sidecar_witness_with_limits(
+        sidecar,
+        &SidecarWitnessCheckLimits::default(),
+        &PartialTrieNodeCache::new(),
+    )
 }
 
 pub fn materialize_sidecar_witness_with_limits(
     sidecar: &PartialStatelessSidecar,
     limits: &SidecarWitnessCheckLimits,
+    trie_cache: &PartialTrieNodeCache,
 ) -> Result<MaterializedSidecarWitness> {
     check_sidecar_witness_prefilter(sidecar, limits)?;
 
@@ -128,7 +142,11 @@ pub fn materialize_sidecar_witness_with_limits(
         bincode::deserialize(sidecar.witness.state.mpt_multiproof_bytes()).map_err(|err| {
             SidecarWitnessCheckError::Decode(format!("failed to decode sidecar multiproof: {err}"))
         })?;
-    let multiproof = serializable_proof.to_multiproof();
+    // The builder may have pruned nodes the validator already holds; reconstruct the full proof
+    // from the trie-node cache before verifying/extracting (lossless: only byte-identical nodes
+    // were dropped). `account_proof(..).verify(..)` then anchors the full path to the parent root.
+    let mut multiproof = serializable_proof.to_multiproof();
+    trie_cache.reveal_known_nodes(&mut multiproof);
 
     let mut grouped_targets: BTreeMap<Address, BTreeSet<B256>> = BTreeMap::new();
     for address in &sidecar.cache_miss_targets.accounts {
@@ -163,7 +181,75 @@ pub fn materialize_sidecar_witness_with_limits(
     let codes = materialize_codes(sidecar)?;
     let headers = materialize_headers(sidecar)?;
 
-    Ok(MaterializedSidecarWitness { accounts, storage, codes, headers })
+    Ok(MaterializedSidecarWitness { multiproof, accounts, storage, codes, headers })
+}
+
+/// Compute the block's post-state root **trustlessly**, using only the trie-node cache plus the
+/// witness multiproof — never a full-database trie walk. This is what a stateless validator does.
+///
+/// The witness supplies the trie paths for cache-*missed* accounts; the [`PartialTrieNodeCache`]
+/// supplies the paths for cache-*hit* accounts. They are merged into one multiproof (the witness
+/// always wins on a path conflict, since its nodes are fresh for this block), revealed once into a
+/// [`SparseStateTrie`], and then the block's state diff is applied.
+///
+/// Returns:
+/// - `Some(root)` when the merged trie was complete enough to recompute the root, or
+/// - `None` when the trie is *blind* along some path (a cache-hit account/slot whose trie nodes are
+///   not warm yet) — i.e. the cache was not sufficient for a fully trustless proof this block.
+///
+/// The caller compares `Some(root)` against the block's real state root; the provider-assisted root
+/// remains the ground-truth check.
+pub fn compute_trustless_state_root(
+    witness_multiproof: MultiProof,
+    trie_cache: &PartialTrieNodeCache,
+    bundle_state: &BundleState,
+) -> Option<B256> {
+    let mut sparse = SparseStateTrie::new();
+
+    // Merge the cache's account-trie nodes into the witness multiproof. The witness nodes are fresh
+    // for this block, so they take precedence: only fill paths the witness does not already cover.
+    let mut merged = witness_multiproof;
+    trie_cache.reveal_known_nodes(&mut merged);
+
+    if sparse.reveal_multiproof(merged).is_err() {
+        return None;
+    }
+
+    let hashed_post_state =
+        HashedPostState::from_bundle_state::<KeccakKeyHasher>(&bundle_state.state);
+
+    // Apply storage changes first so that each account's storage root is up to date before its
+    // account leaf is (re)computed by `update_account_stateless`.
+    for (hashed_address, hashed_storage) in &hashed_post_state.storages {
+        if hashed_storage.wiped && sparse.wipe_storage(*hashed_address).is_err() {
+            return None;
+        }
+        for (slot_hash, value) in &hashed_storage.storage {
+            let slot_path = Nibbles::unpack(*slot_hash);
+            // A zero value clears the slot. For a wiped storage trie the slot is already gone, so
+            // only the explicit removal path needs handling.
+            let result = if *value == U256::ZERO {
+                if hashed_storage.wiped {
+                    Ok(())
+                } else {
+                    sparse.remove_storage_leaf(*hashed_address, &slot_path)
+                }
+            } else {
+                sparse.update_storage_leaf(*hashed_address, slot_path, alloy_rlp::encode(value))
+            };
+            if result.is_err() {
+                return None;
+            }
+        }
+    }
+
+    for (hashed_address, account) in &hashed_post_state.accounts {
+        if sparse.update_account_stateless(*hashed_address, *account).is_err() {
+            return None;
+        }
+    }
+
+    sparse.root().ok()
 }
 
 fn ensure_cap(label: &'static str, actual: usize, cap: usize) -> Result<()> {
@@ -497,5 +583,46 @@ mod tests {
             Err(SidecarWitnessCheckError::Header(err))
                 if err.contains("range has a gap")
         ));
+    }
+
+    #[test]
+    fn trustless_root_is_none_when_trie_is_blind() {
+        // With no witness and no cached trie nodes, the account trie is never revealed, so a
+        // trustless root cannot be produced — the function must report `None`, not panic.
+        let root = compute_trustless_state_root(
+            MultiProof::default(),
+            &PartialTrieNodeCache::new(),
+            &BundleState::default(),
+        );
+        assert_eq!(root, None);
+    }
+
+    #[test]
+    fn trustless_root_is_none_when_witness_and_cache_cannot_cover_diff() {
+        // A bundle that changes an account, but neither the witness nor the trie cache reveals its
+        // path → blind → `None` (never a spurious `Some`).
+        use revm_state::AccountInfo;
+
+        let mut bundle = BundleState::default();
+        bundle.state.insert(
+            Address::repeat_byte(0x42),
+            revm_database::BundleAccount {
+                info: Some(AccountInfo {
+                    balance: U256::from(1u64),
+                    nonce: 1,
+                    ..Default::default()
+                }),
+                original_info: None,
+                storage: Default::default(),
+                status: revm_database::AccountStatus::Changed,
+            },
+        );
+
+        let root = compute_trustless_state_root(
+            MultiProof::default(),
+            &PartialTrieNodeCache::new(),
+            &bundle,
+        );
+        assert_eq!(root, None);
     }
 }

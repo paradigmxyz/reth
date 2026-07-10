@@ -14,6 +14,7 @@ revm-state = { workspace = true, features = ["std"] }
 revm-primitives = { workspace = true, features = ["std"] }
 reth-primitives-traits = { workspace = true }
 reth-trie-common = { workspace = true }
+reth-trie-sparse = { workspace = true }
 
 # serialization
 serde = { workspace = true, features = ["derive"] }

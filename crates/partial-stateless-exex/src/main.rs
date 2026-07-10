@@ -22,6 +22,7 @@ use partial_stateless::{
     network_cache::NetworkStateCache,
     persistence::{load_from_file, save_to_file},
     policy::LastNBlocksPolicy,
+    PartialTrieNodeCache,
 };
 use reth_ethereum::{
     chainspec::EthChainSpec,
@@ -266,6 +267,10 @@ async fn partial_stateless_exex<
     }
     let reexec_limits = SidecarReexecLimits::default();
 
+    // This mirrors the value cache with trie nodes used to prune and reconstruct witnesses. It is
+    // intentionally cold on restart and reset on reorg because it has no persisted undo log.
+    let mut trie_cache = PartialTrieNodeCache::new();
+
     while let Some(notification) = ctx.notifications.try_next().await? {
         match &notification {
             ExExNotification::ChainCommitted { new } => {
@@ -297,6 +302,7 @@ async fn partial_stateless_exex<
                             state_provider.as_ref(),
                             block,
                             &mut cache,
+                            &mut trie_cache,
                             &config,
                             &sidecar_dir,
                             &reexec_limits,
@@ -345,6 +351,7 @@ async fn partial_stateless_exex<
                         state_provider.as_ref(),
                         block,
                         &mut cache,
+                        &mut trie_cache,
                         &config,
                         BuilderOptions {
                             capture_dir: capture_dir.as_deref(),
@@ -389,6 +396,8 @@ async fn partial_stateless_exex<
                     to_chain = ?new.range(),
                     "Chain reorg detected — rolling back old blocks, then applying new chain"
                 );
+
+                trie_cache = PartialTrieNodeCache::new();
 
                 // 1. Roll back the reverted (old) blocks newest→oldest, returning the
                 //    cache to the fork point. On failure (history pruned/missing),
@@ -436,6 +445,7 @@ async fn partial_stateless_exex<
                             state_provider.as_ref(),
                             block,
                             &mut cache,
+                            &mut trie_cache,
                             &config,
                             &sidecar_dir,
                             &reexec_limits,
@@ -484,6 +494,7 @@ async fn partial_stateless_exex<
                         state_provider.as_ref(),
                         block,
                         &mut cache,
+                        &mut trie_cache,
                         &config,
                         BuilderOptions {
                             capture_dir: capture_dir.as_deref(),
@@ -527,6 +538,8 @@ async fn partial_stateless_exex<
                     reverted_chain = ?old.range(),
                     "Chain reverted — rolling back cache to the pre-revert state"
                 );
+
+                trie_cache = PartialTrieNodeCache::new();
 
                 // Undo reverted blocks newest→oldest so each matches the top of the
                 // undo stack. If a block can't be rolled back (history pruned/missing),
