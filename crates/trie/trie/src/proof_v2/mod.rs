@@ -205,15 +205,6 @@ where
 
         let (mut lower, mut upper) = targets.current();
 
-        debug_assert!(self.retained_proofs.last().is_none_or(
-                |ProofTrieNodeV2 { path: last_retained_path, .. }| {
-                    depth_first::cmp(path, last_retained_path) == Ordering::Greater
-                }
-            ),
-            "should_retain called with path {path:?} which is not after previously retained node {:?} in depth-first order",
-            self.retained_proofs.last().map(|n| n.path),
-        );
-
         loop {
             // If the node in question is a prefix of the target then we do not iterate targets
             // further.
@@ -701,9 +692,11 @@ where
             (key, val)
         };
 
-        // If the cursor hasn't been used, or the last iterated key is prior to this range's
-        // key range, then seek forward to at least the first key.
-        if hashed_cursor_current.as_ref().is_none_or(|(key, _)| key < &lower_bound) {
+        // If the cursor hasn't been used, or the last iterated key is outside this range, seek to
+        // the first key in the range.
+        if hashed_cursor_current.as_ref().is_none_or(|(key, _)| {
+            key < &lower_bound || upper_bound.as_ref().is_some_and(|upper_bound| key >= upper_bound)
+        }) {
             trace!(
                 target: TRACE_TARGET,
                 current=?hashed_cursor_current.as_ref().map(|(k, _)| k),
@@ -1330,13 +1323,11 @@ where
         debug_assert!(self.child_stack.is_empty());
 
         // `next_uncached_key_range`, which will be called in the loop below, expects the trie
-        // cursor to have already been seeked. If it's not yet seeked, or seeked to a prior node,
-        // then we seek it to the prefix (the first possible node) to initialize it.
-        if trie_cursor_state.before(&sub_trie_targets.prefix) {
-            trace!(target: TRACE_TARGET, "Doing initial seek of trie cursor");
-            *trie_cursor_state =
-                TrieCursorState::seeked(self.trie_cursor_seek(sub_trie_targets.prefix)?);
-        }
+        // cursor to have already been seeked. Exact sub-trie chunks can overlap previous chunks,
+        // so seek to this chunk's prefix even if a previous chunk advanced the cursor beyond it.
+        trace!(target: TRACE_TARGET, "Doing initial seek of trie cursor");
+        *trie_cursor_state =
+            TrieCursorState::seeked(self.trie_cursor_seek(sub_trie_targets.prefix)?);
 
         // `uncalculated_lower_bound` tracks the lower bound of node paths which have yet to be
         // visited, either via the hashed key cursor (`calculate_key_range`) or trie cursor
@@ -1505,6 +1496,8 @@ where
             retained_proofs_len = ?self.retained_proofs.len(),
             "proof_inner: returning",
         );
+        self.retained_proofs.sort_unstable_by(|a, b| depth_first::cmp(&a.path, &b.path));
+        self.retained_proofs.dedup();
         Ok(core::mem::take(&mut self.retained_proofs))
     }
 
@@ -1764,15 +1757,6 @@ impl TrieCursorState {
             Self::Unseeked => panic!("cursor is unseeked"),
             Self::Available(path, _) | Self::Taken(path) => Some(path),
             Self::Exhausted => None,
-        }
-    }
-
-    /// Returns true if the cursor is unseeked, or is seeked to a node prior to the given one.
-    fn before(&self, path: &Nibbles) -> bool {
-        match self {
-            Self::Unseeked => true,
-            Self::Available(seeked_to, _) | Self::Taken(seeked_to) => path < seeked_to,
-            Self::Exhausted => false,
         }
     }
 
@@ -2067,6 +2051,24 @@ mod tests {
                 harness.assert_proof(targets).expect("Proof generation failed");
             }
         }
+    }
+
+    #[test]
+    fn test_exact_subtrie_targets_with_root_target() {
+        reth_tracing::init_test_tracing();
+
+        let slot_80 = B256::right_padding_from(&[0x80]);
+        let slot_82 = B256::right_padding_from(&[0x82]);
+        let slot_f0 = B256::right_padding_from(&[0xf0]);
+        let storage = BTreeMap::from([
+            (slot_80, U256::from(1)),
+            (slot_82, U256::from(2)),
+            (slot_f0, U256::from(3)),
+        ]);
+        let targets = [ProofV2Target::new(B256::ZERO), ProofV2Target::new(slot_80).with_min_len(2)];
+
+        let harness = ProofTestHarness::new(storage);
+        harness.assert_proof(targets).expect("Proof generation failed");
     }
 
     #[test]
