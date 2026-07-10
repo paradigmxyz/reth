@@ -490,11 +490,7 @@ where
             return Ok(PreparedStateRootJob::new(Box::new(SkippedStateRootJob {}), None))
         }
 
-        // `state_root_fallback` forces serial computation for tests and debugging. Hosts
-        // without enough parallelism for the state-root task pipeline also compute the root
-        // synchronously, since the pipeline's threads can starve each other there; see
-        // [`TreeConfig::use_state_root_task`].
-        if config.state_root_fallback() || !config.use_state_root_task() {
+        if !config.use_state_root_task() {
             return Ok(PreparedStateRootJob::new(
                 Box::new(SynchronousStateRootJob { provider_builder }),
                 None,
@@ -558,7 +554,7 @@ where
         // host that can run the task pipeline at all.
         if !config.share_sparse_trie_with_payload_builder() ||
             config.skip_state_root() ||
-            !config.use_state_root_task()
+            !config.has_enough_parallelism()
         {
             return Ok(None)
         }
