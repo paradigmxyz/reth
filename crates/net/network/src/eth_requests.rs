@@ -4,10 +4,13 @@ use crate::{
     budget::DEFAULT_BUDGET_TRY_DRAIN_DOWNLOADERS, metered_poll_nested_stream_with_budget,
     metrics::EthRequestHandlerMetrics,
 };
-use alloy_consensus::{BlockHeader, ReceiptWithBloom};
+use alloy_consensus::{
+    constants::{EMPTY_ROOT_HASH, KECCAK_EMPTY},
+    BlockHeader, ReceiptWithBloom,
+};
 use alloy_eips::BlockHashOrNumber;
 use alloy_primitives::{Bytes, B256};
-use alloy_rlp::Encodable;
+use alloy_rlp::{Encodable, Header};
 use futures::StreamExt;
 use reth_eth_wire::{
     snap::{
@@ -25,7 +28,7 @@ use reth_network_p2p::{
     snap::client::SnapResponse,
 };
 use reth_network_peers::PeerId;
-use reth_primitives_traits::Block;
+use reth_primitives_traits::{Account, Block};
 use reth_storage_api::{
     BalProvider, BlockReader, BytecodeReader, GetBlockAccessListLimit, HeaderProvider,
     StateProviderFactory, StateRangeProvider,
@@ -506,8 +509,7 @@ where
             .into_iter()
             .filter_map(|(hash, account)| {
                 let storage_root = self.client.storage_root_by_hash(hash).ok()??;
-                let body = alloy_rlp::encode(account.into_trie_account(storage_root)).into();
-                Some(AccountData { hash, body })
+                Some(AccountData { hash, body: slim_account_body(&account, storage_root) })
             })
             .collect();
 
@@ -593,6 +595,30 @@ fn boundary_proof_keys<T>(origin: B256, last: Option<&(B256, T)>) -> Vec<B256> {
         Some((last, _)) => vec![origin, *last],
         None => vec![origin],
     }
+}
+
+/// RLP-encodes `account` in snap/2's slim format: like the consensus trie account, but the code
+/// hash and storage root are empty byte strings rather than [`KECCAK_EMPTY`]/[`EMPTY_ROOT_HASH`]
+/// when the account has no code/storage, to avoid transferring the same 32 bytes for every EOA.
+fn slim_account_body(account: &Account, storage_root: B256) -> Bytes {
+    let storage_root: &[u8] =
+        if storage_root == EMPTY_ROOT_HASH { &[] } else { storage_root.as_slice() };
+    let code_hash: &[u8] = match &account.bytecode_hash {
+        Some(hash) if *hash != KECCAK_EMPTY => hash.as_slice(),
+        _ => &[],
+    };
+
+    let payload_length = account.nonce.length() +
+        account.balance.length() +
+        storage_root.length() +
+        code_hash.length();
+    let mut body = Vec::with_capacity(payload_length + 4);
+    Header { list: true, payload_length }.encode(&mut body);
+    account.nonce.encode(&mut body);
+    account.balance.encode(&mut body);
+    storage_root.encode(&mut body);
+    code_hash.encode(&mut body);
+    body.into()
 }
 
 /// An endless future.
