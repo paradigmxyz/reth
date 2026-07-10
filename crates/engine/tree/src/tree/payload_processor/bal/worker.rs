@@ -2,13 +2,16 @@ use super::BalExecutionError;
 use alloy_consensus::Transaction;
 use alloy_eip7928::BlockAccessIndex;
 use alloy_evm::{
-    block::{BlockExecutionError, BlockExecutor, BlockExecutorFactory},
+    block::{BlockExecutionError, BlockExecutor, BlockExecutorFactory, TxResult},
     Evm,
 };
 use alloy_primitives::Address;
 use crossbeam_channel::{Receiver, Sender};
 use reth_evm::{execute::ExecutableTxFor, ConfigureEvm, Database, EvmEnvFor, ExecutionCtxFor};
-use revm::{database::State, state::bal::Bal as RevmBal};
+use revm::{
+    database::State,
+    state::{bal::Bal as RevmBal, EvmState},
+};
 use std::sync::Arc;
 
 #[derive(Debug, thiserror::Error)]
@@ -39,6 +42,9 @@ pub(super) struct BalWorkerOutput<R> {
     pub(super) signer: Address,
     pub(super) tx_gas_limit: u64,
     pub(super) result: R,
+    /// Clone of the result's state diff, made on the worker so the committer can forward it to
+    /// the BAL builder task without cloning on the serial path.
+    pub(super) bal_state: EvmState,
 }
 
 type WorkerExecutorResult<Cfg> =
@@ -94,9 +100,10 @@ pub(super) fn spawn_worker<'scope, Evm, Tx, Err, DB, MakeDb>(
                 let result = executor
                     .execute_transaction_without_commit(tx)
                     .map_err(BalWorkerError::Execution)?;
+                let bal_state = result.result().state.clone();
 
                 if result_tx
-                    .send(Ok(BalWorkerOutput { index, signer, tx_gas_limit, result }))
+                    .send(Ok(BalWorkerOutput { index, signer, tx_gas_limit, result, bal_state }))
                     .is_err()
                 {
                     break;

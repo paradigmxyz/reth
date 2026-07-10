@@ -19,7 +19,10 @@ use alloy_eip7928::{
     bal::{Bal as AlloyBal, DecodedBal},
     compute_block_access_list_hash, BlockAccessIndex, BlockAccessList,
 };
-use alloy_evm::block::{BlockExecutionError, BlockExecutor, BlockValidationError, TxResult};
+use alloy_evm::{
+    block::{BlockExecutionError, BlockExecutor, BlockValidationError, TxResult},
+    Evm as _,
+};
 use alloy_primitives::{Address, B256};
 use crossbeam_channel::{Receiver, Sender};
 use reth_evm::{
@@ -129,8 +132,11 @@ where
         State::builder().with_database(make_db(false)?).with_bundle_update().build();
 
     // Build the BAL on a pool thread instead of with the canonical state's builder: the BAL fold
-    // is an order-dependent function of the committed state diffs, which the state hook streams
-    // by value, so folding here removes the builder bookkeeping from the serial commit loop.
+    // is an order-dependent function of the committed state diffs and reads no canonical state,
+    // so folding it there removes the builder bookkeeping from the serial commit loop.
+    // Transaction diffs are cloned by the workers and forwarded here; only the pre/post
+    // system-call diffs are captured via a temporarily installed state hook, since a permanently
+    // installed hook would switch every commit onto revm's clone-based cache-apply path.
     let bal_index = Arc::new(AtomicU64::new(0));
     let (bal_tx, bal_rx) = crossbeam_channel::unbounded::<(BlockAccessIndex, EvmState)>();
     let (built_bal_tx, built_bal_rx) = crossbeam_channel::bounded(1);
@@ -143,10 +149,6 @@ where
         }
         let _ = built_bal_tx.send(bal.into_alloy_bal());
     });
-    canonical_state.set_state_hook(Some(Box::new(BalForwardHook {
-        index: Arc::clone(&bal_index),
-        tx: bal_tx,
-    })));
 
     let (block_result, senders) = {
         let (result_tx, result_rx) = crossbeam_channel::unbounded();
@@ -172,7 +174,13 @@ where
         let evm = evm_config.evm_with_env(&mut canonical_state, evm_env);
         let mut canonical_executor = evm_config.create_executor_with_state(evm, ctx.clone());
 
+        canonical_executor.evm_mut().db_mut().set_state_hook(Some(Box::new(BalForwardHook {
+            index: Arc::clone(&bal_index),
+            tx: bal_tx.clone(),
+        })));
         canonical_executor.apply_pre_execution_changes()?;
+        canonical_executor.evm_mut().db_mut().set_state_hook(None);
+
         let mut senders = Vec::with_capacity(transaction_count);
         let mut last_sent_len = 0usize;
         let mut next_bal_index = 0u64;
@@ -182,7 +190,7 @@ where
             gas_tracker.validate_tx_limit(output.tx_gas_limit)?;
             gas_tracker.record_result(output.result.result());
             next_bal_index += 1;
-            bal_index.store(next_bal_index, Ordering::Relaxed);
+            let _ = bal_tx.send((BlockAccessIndex::new(next_bal_index), output.bal_state));
 
             let _ = canonical_executor.commit_transaction(output.result);
             senders.push(output.signer);
@@ -200,12 +208,18 @@ where
 
         next_bal_index += 1;
         bal_index.store(next_bal_index, Ordering::Relaxed);
+        canonical_executor.evm_mut().db_mut().set_state_hook(Some(Box::new(BalForwardHook {
+            index: Arc::clone(&bal_index),
+            tx: bal_tx.clone(),
+        })));
         let block_result = canonical_executor.apply_post_execution_changes()?;
         (block_result, senders)
     };
 
-    // Drop the forwarding hook so the BAL task sees end-of-stream and finalizes.
+    // Drop the forwarding hook and the committer's sender so the BAL task sees end-of-stream
+    // and finalizes.
     canonical_state.set_state_hook(None);
+    drop(bal_tx);
     let built_bal: BlockAccessList =
         built_bal_rx.recv().expect("BAL builder task dropped without producing a BAL");
     log_bal_divergence(&built_bal, bal);
