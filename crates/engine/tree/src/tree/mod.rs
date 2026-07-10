@@ -8,7 +8,7 @@ use crate::{
 use alloy_consensus::BlockHeader;
 use alloy_eip8289::{WamItems, WarmAccessMultiset, WARMING_WINDOW};
 use alloy_eips::{eip1898::BlockWithParent, merge::EPOCH_SLOTS, BlockNumHash, NumHash};
-use alloy_primitives::{hardfork::SpecId, map::B256Map, B256};
+use alloy_primitives::{map::B256Map, B256};
 use alloy_rpc_types_engine::{
     ForkchoiceState, PayloadStatus, PayloadStatusEnum, PayloadValidationError,
 };
@@ -40,7 +40,7 @@ use reth_stages_api::ControlFlow;
 use reth_tasks::{spawn_os_thread, utils::increase_thread_priority};
 use reth_trie::{prefix_set::TriePrefixSetsMut, ComputedTrieData};
 use reth_trie_db::ChangesetCache;
-use revm::interpreter::debug_unreachable;
+use revm::{interpreter::debug_unreachable, primitives::hardfork::SpecId};
 use state::TreeState;
 use std::{fmt::Debug, ops, sync::Arc, time::Duration};
 

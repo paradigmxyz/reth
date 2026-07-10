@@ -125,7 +125,7 @@ use crate::tree::{
     },
 };
 use alloy_consensus::{constants::KECCAK_EMPTY, BlockHeader};
-use alloy_primitives::{hardfork::SpecId, Address, KECCAK_EMPTY};
+use alloy_primitives::Address;
 use reth_chain_state::{
     CanonicalInMemoryState, ExecutedBlock, ExecutionTimingStats, StateTrieOverlayManager,
 };
@@ -160,6 +160,7 @@ use reth_trie::{
     trie_cursor::TrieCursorFactory, updates::TrieUpdates, HashedPostState, LazyTrieData,
 };
 use reth_trie_db::ChangesetCache;
+use revm::primitives::hardfork::SpecId;
 use std::{
     sync::{
         atomic::{AtomicUsize, Ordering},
