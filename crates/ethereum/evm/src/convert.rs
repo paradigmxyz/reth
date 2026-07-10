@@ -232,6 +232,7 @@ mod tests {
     use super::*;
     use alloy_consensus::Header;
     use alloy_eips::eip7840::BlobParams;
+    use reth_chainspec::ChainSpecBuilder;
 
     #[test]
     fn block_env_uses_blob_params_for_blob_basefee() {
@@ -260,5 +261,14 @@ mod tests {
         let env = block_env(&header);
 
         assert_eq!(env.slot_num, U256::from(42));
+    }
+
+    #[test]
+    fn constantinople_active_maps_to_petersburg_spec() {
+        let chain_spec = ChainSpecBuilder::mainnet().reset().constantinople_activated().build();
+
+        assert!(chain_spec.is_constantinople_active_at_block(0));
+        assert!(!chain_spec.is_petersburg_active_at_block(0));
+        assert_eq!(spec_id_by_timestamp_and_block_number(&chain_spec, 0, 0), SpecId::PETERSBURG);
     }
 }
