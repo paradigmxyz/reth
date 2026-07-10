@@ -597,11 +597,11 @@ where
         let parallel_bal_execution = ensure_ok!(self.bal_path_eligible(env.decoded_bal.as_deref()));
 
         // Prepare the state-root job before execution so it can provide streaming hooks.
-        let pending_sparse_trie_prune_blocks = (!self.config.skip_state_root() &&
-            !self.config.state_root_fallback() &&
-            self.config.use_state_root_task())
-        .then(|| ctx.take_sparse_trie_prune_blocks(env.parent_hash))
-        .flatten();
+        let pending_sparse_trie_prune_blocks = self
+            .config
+            .use_state_root_task()
+            .then(|| ctx.take_sparse_trie_prune_blocks(env.parent_hash))
+            .flatten();
         let mut state_root_job =
             ensure_ok!(self.state_root_strategy.prepare(StateRootJobContext::new(
                 &self.payload_processor,
