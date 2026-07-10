@@ -476,9 +476,9 @@ where
     /// Serves a `GetAccountRange` request via [`StateRangeProvider`], for the latest state only.
     ///
     /// Skips (rather than serves with a wrong root) any account whose storage root can't be
-    /// computed, e.g. because the in-memory reorg overlay is active. A complete range (nothing
-    /// left beyond what's returned) needs no proof; a truncated one is proven via a boundary
-    /// proof over its first and last account.
+    /// computed, e.g. because the in-memory reorg overlay is active. Always proves the boundary
+    /// between `starting_hash` and the last returned account, per snap/2's boundary-proof
+    /// requirement.
     fn get_account_range_response(&self, req: GetAccountRangeMessage) -> AccountRangeMessage {
         let empty = AccountRangeMessage {
             request_id: req.request_id,
@@ -494,16 +494,13 @@ where
         }
 
         let response_bytes = (req.response_bytes as usize).min(SOFT_RESPONSE_LIMIT);
-        let Ok(Some((accounts, complete))) =
+        let Ok(Some((accounts, _))) =
             self.client.account_range(req.starting_hash, req.limit_hash, response_bytes)
         else {
             return empty
         };
 
-        let boundary_keys = match (complete, accounts.first(), accounts.last()) {
-            (false, Some((first, _)), Some((last, _))) => vec![*first, *last],
-            _ => Vec::new(),
-        };
+        let boundary_keys = boundary_proof_keys(req.starting_hash, accounts.last());
 
         let accounts = accounts
             .into_iter()
@@ -514,11 +511,8 @@ where
             })
             .collect();
 
-        let proof = if boundary_keys.is_empty() {
-            Vec::new()
-        } else {
-            self.client.account_range_proof(&boundary_keys).ok().flatten().unwrap_or_default()
-        };
+        let proof =
+            self.client.account_range_proof(&boundary_keys).ok().flatten().unwrap_or_default();
 
         AccountRangeMessage { request_id: req.request_id, accounts, proof }
     }
@@ -565,16 +559,8 @@ where
 
             remaining_bytes = remaining_bytes.saturating_sub(account_slots.len() * 64);
             let is_last_requested = i == req.account_hashes.len() - 1;
-            proof_target = if complete && is_last_requested {
-                None
-            } else {
-                match (account_slots.first(), account_slots.last()) {
-                    (Some((first, _)), Some((last, _))) => {
-                        Some((hashed_address, vec![*first, *last]))
-                    }
-                    _ => None,
-                }
-            };
+            proof_target = (!(complete && is_last_requested))
+                .then(|| (hashed_address, boundary_proof_keys(start, account_slots.last())));
 
             slots.push(
                 account_slots
@@ -598,6 +584,14 @@ where
             .unwrap_or_default();
 
         StorageRangesMessage { request_id: req.request_id, slots, proof }
+    }
+}
+
+/// Boundary-proof keys for a range reply: `origin`, plus the last returned item's key if any.
+fn boundary_proof_keys<T>(origin: B256, last: Option<&(B256, T)>) -> Vec<B256> {
+    match last {
+        Some((last, _)) => vec![origin, *last],
+        None => vec![origin],
     }
 }
 

@@ -199,13 +199,15 @@ impl<N: ProviderNodeTypes> StateRangeProvider for BlockchainProvider<N> {
         let mut total_bytes = 0usize;
         let mut complete = true;
 
+        // Append before checking `limit`, so an empty `[start, limit]` still returns the account
+        // right past `limit`, provable as an empty range rather than a skipped one.
         let mut entry = cursor.seek(start).map_err(ProviderError::Database)?;
         while let Some((hash, account)) = entry {
-            if hash > limit {
-                break
-            }
             total_bytes += 32 + 4 * 32; // hash + rough upper bound of the RLP account body
             accounts.push((hash, account));
+            if hash >= limit {
+                break
+            }
             if total_bytes > response_bytes {
                 complete = false;
                 break
