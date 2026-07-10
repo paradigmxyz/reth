@@ -289,7 +289,7 @@ where
     changeset_cache: ChangesetCache,
     /// Task runtime for spawning parallel work.
     runtime: reth_tasks::Runtime,
-    /// Shared sparse-trie state used by the default state-root strategy.
+    /// Shared state trie in-memory overlay data.
     state_trie_overlays: StateTrieOverlayManager<Evm::Primitives>,
     /// State-root strategy used to prepare per-block commitment tasks.
     #[debug(skip)]
