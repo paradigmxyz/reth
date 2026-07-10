@@ -9,8 +9,8 @@ use alloy_consensus::{
     BlockHeader, ReceiptWithBloom,
 };
 use alloy_eips::BlockHashOrNumber;
-use alloy_primitives::{Bytes, B256};
-use alloy_rlp::{Encodable, Header};
+use alloy_primitives::{Bytes, B256, U256};
+use alloy_rlp::{Encodable, RlpEncodable};
 use futures::StreamExt;
 use reth_eth_wire::{
     snap::{
@@ -596,9 +596,18 @@ fn boundary_proof_keys<T>(origin: B256, last: Option<&(B256, T)>) -> Vec<B256> {
     }
 }
 
-/// RLP-encodes `account` in snap/2's slim format: like the consensus trie account, but the code
-/// hash and storage root are empty byte strings rather than [`KECCAK_EMPTY`]/[`EMPTY_ROOT_HASH`]
-/// when the account has no code/storage, to avoid transferring the same 32 bytes for every EOA.
+/// Like the consensus trie account, but the code hash and storage root are empty byte strings
+/// rather than [`KECCAK_EMPTY`]/[`EMPTY_ROOT_HASH`] when the account has no code/storage, to
+/// avoid transferring the same 32 bytes for every EOA.
+#[derive(RlpEncodable)]
+struct SlimAccountBody<'a> {
+    nonce: u64,
+    balance: U256,
+    storage_root: &'a [u8],
+    code_hash: &'a [u8],
+}
+
+/// RLP-encodes `account` in snap/2's slim format; see [`SlimAccountBody`].
 fn slim_account_body(account: &Account, storage_root: B256) -> Bytes {
     let storage_root: &[u8] =
         if storage_root == EMPTY_ROOT_HASH { &[] } else { storage_root.as_slice() };
@@ -607,17 +616,13 @@ fn slim_account_body(account: &Account, storage_root: B256) -> Bytes {
         _ => &[],
     };
 
-    let payload_length = account.nonce.length() +
-        account.balance.length() +
-        storage_root.length() +
-        code_hash.length();
-    let mut body = Vec::with_capacity(payload_length + 4);
-    Header { list: true, payload_length }.encode(&mut body);
-    account.nonce.encode(&mut body);
-    account.balance.encode(&mut body);
-    storage_root.encode(&mut body);
-    code_hash.encode(&mut body);
-    body.into()
+    alloy_rlp::encode(SlimAccountBody {
+        nonce: account.nonce,
+        balance: account.balance,
+        storage_root,
+        code_hash,
+    })
+    .into()
 }
 
 /// An endless future.
