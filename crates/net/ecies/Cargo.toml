@@ -40,3 +40,8 @@ cipher.workspace = true
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["net", "rt", "macros"] }
+criterion.workspace = true
+
+[[bench]]
+name = "mac"
+harness = false

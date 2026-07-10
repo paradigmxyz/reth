@@ -61,6 +61,7 @@ proptest-arbitrary-interop.workspace = true
 async-stream.workspace = true
 serde.workspace = true
 alloy-eips.workspace = true
+criterion.workspace = true
 
 [features]
 arbitrary = [
@@ -94,3 +95,7 @@ serde = [
 name = "fuzz_roundtrip"
 path = "tests/fuzz_roundtrip.rs"
 required-features = ["arbitrary", "serde"]
+
+[[bench]]
+name = "stream_pipeline"
+harness = false
