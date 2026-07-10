@@ -48,26 +48,20 @@ impl MAC {
 
     /// Accumulate the given header bytes into the MAC's internal state.
     pub fn update_header(&mut self, data: &[u8; 16]) {
-        let mut encrypted = self.digest().0;
+        let mut encrypted = self.digest();
 
-        self.aes.encrypt_block(Block::from_mut_slice(&mut encrypted));
-        for i in 0..data.len() {
-            encrypted[i] ^= data[i];
-        }
-        self.hasher.update(encrypted);
+        self.aes.encrypt_block(Block::from_mut_slice(encrypted.as_mut_slice()));
+        self.hasher.update(encrypted ^ B128::from(data));
     }
 
     /// Accumulate the given message body into the MAC's internal state.
     pub fn update_body(&mut self, data: &[u8]) {
         self.hasher.update(data);
         let prev = self.digest();
-        let mut encrypted = prev.0;
+        let mut encrypted = prev;
 
-        self.aes.encrypt_block(Block::from_mut_slice(&mut encrypted));
-        for i in 0..16 {
-            encrypted[i] ^= prev[i];
-        }
-        self.hasher.update(encrypted);
+        self.aes.encrypt_block(Block::from_mut_slice(encrypted.as_mut_slice()));
+        self.hasher.update(encrypted ^ prev);
     }
 
     /// Produce a digest by finalizing the internal keccak256 hasher and returning the first 128
