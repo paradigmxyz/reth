@@ -11,9 +11,8 @@
 //! 2. Prewarming tasks execute transactions in parallel using shared caches
 //! 3. When actual block execution happens, it benefits from the warmed cache
 
-use super::bal_prewarm_pool::BalPrewarmPool;
+use super::{bal_prewarm_pool::BalPrewarmPool, StateRootHintStream, StateRootUpdateStream};
 use crate::tree::{
-    payload_processor::multiproof::{StateRootHintStream, StateRootUpdateStream},
     precompile_cache::{CachedPrecompile, PrecompileCacheMap},
     CachedStateCacheMetrics, CachedStateMetrics, CachedStateProvider, ExecutionEnv,
     PayloadExecutionCache, SavedCache, StateProviderBuilder,
