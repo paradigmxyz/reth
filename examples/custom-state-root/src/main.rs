@@ -24,7 +24,7 @@ use alloy_genesis::Genesis;
 use alloy_primitives::B256;
 use reth_chain_state::StateTrieOverlayManager;
 use reth_engine_tree::tree::{
-    payload_processor::multiproof::{PayloadStateRootHandle, StateRootStreams},
+    payload_processor::PayloadStateRootHandle,
     payload_validator::LazyHashedPostState,
     state_root_strategy::{
         DefaultStateRootStrategy, PayloadStateRootJobContext, PreparedStateRootJob, StateRootJob,
@@ -77,7 +77,7 @@ where
         if timestamp < self.activation_timestamp {
             return self.default.prepare(ctx)
         }
-        Ok(PreparedStateRootJob::new(Box::new(ZeroStateRootJob), StateRootStreams::empty(), None))
+        Ok(PreparedStateRootJob::new(Box::new(ZeroStateRootJob), None))
     }
 
     fn prepare_payload_builder(

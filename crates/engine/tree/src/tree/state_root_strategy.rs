@@ -22,11 +22,12 @@
 //!
 //! # Stream delivery contract
 //!
-//! A prepared job exposes [`StateRootStreams`] views over its sink. Exactly one authoritative
-//! source fires per block, and the job does not control which one:
+//! A prepared job exposes update-stream capabilities over its sink. `prepare` installs exactly
+//! one authoritative capability per block, matching the execution mode:
 //!
 //! - On the parallel BAL execution path, prewarm converts the block access list and delivers
-//!   pre-hashed updates through the hashed-update stream, terminated by `on_updates_finished`.
+//!   pre-hashed updates through the hashed update stream, terminated by
+//!   [`StateRootUpdateStream::finish`].
 //! - On the serial execution path, per-transaction `EvmState` updates arrive through the execution
 //!   hook, terminated when the hook is dropped after execution.
 //!
@@ -46,10 +47,10 @@
 
 use crate::tree::{
     metrics::BlockValidationMetrics,
-    multiproof::{
-        PayloadStateRootHandle, StateRootComputeOutcome, StateRootHandle, StateRootStreams,
+    payload_processor::{
+        PayloadProcessor, PayloadStateRootHandle, StateRootComputeOutcome, StateRootHandle,
+        StateRootHintStream, StateRootUpdateHook, StateRootUpdateStream,
     },
-    payload_processor::PayloadProcessor,
     payload_validator::LazyHashedPostState,
     EngineApiTreeState, ExecutionEnv, StateProviderBuilder, TreeConfig,
 };
@@ -111,15 +112,14 @@ where
     N: NodePrimitives,
     Evm: ConfigureEvm<Primitives = N>,
 {
-    pub(crate) payload_processor: &'a PayloadProcessor<Evm>,
-    pub(crate) parent_hash: B256,
-    pub(crate) parent_header: &'a N::BlockHeader,
-    pub(crate) timestamp: u64,
-    pub(crate) state: &'a EngineApiTreeState<N>,
-    pub(crate) provider_builder: StateProviderBuilder<N, P>,
-    pub(crate) overlay_factory: OverlayStateProviderFactory<P, N>,
-    pub(crate) config: &'a TreeConfig,
-    pub(crate) pending_sparse_trie_prune: &'a mut bool,
+    payload_processor: &'a PayloadProcessor<Evm>,
+    parent_hash: B256,
+    parent_header: &'a N::BlockHeader,
+    timestamp: u64,
+    state: &'a mut EngineApiTreeState<N>,
+    provider_builder: StateProviderBuilder<N, P>,
+    overlay_factory: OverlayStateProviderFactory<P, N>,
+    config: &'a TreeConfig,
 }
 
 impl<N, P, Evm> fmt::Debug for PayloadStateRootJobContext<'_, N, P, Evm>
@@ -132,7 +132,7 @@ where
             .field("parent_hash", &self.parent_hash)
             .field("parent_state_root", &self.parent_state_root())
             .field("timestamp", &self.timestamp)
-            .field("pending_sparse_trie_prune", &self.pending_sparse_trie_prune)
+            .field("pending_sparse_trie_prune", &self.state.pending_sparse_trie_prune())
             .finish_non_exhaustive()
     }
 }
@@ -142,6 +142,30 @@ where
     N: NodePrimitives,
     Evm: ConfigureEvm<Primitives = N>,
 {
+    /// Creates a payload-builder state-root job context.
+    #[expect(clippy::too_many_arguments)]
+    pub(crate) const fn new(
+        payload_processor: &'a PayloadProcessor<Evm>,
+        parent_hash: B256,
+        parent_header: &'a N::BlockHeader,
+        timestamp: u64,
+        state: &'a mut EngineApiTreeState<N>,
+        provider_builder: StateProviderBuilder<N, P>,
+        overlay_factory: OverlayStateProviderFactory<P, N>,
+        config: &'a TreeConfig,
+    ) -> Self {
+        Self {
+            payload_processor,
+            parent_hash,
+            parent_header,
+            timestamp,
+            state,
+            provider_builder,
+            overlay_factory,
+            config,
+        }
+    }
+
     /// Returns the parent block hash for the payload being built.
     pub const fn parent_hash(&self) -> B256 {
         self.parent_hash
@@ -180,20 +204,9 @@ where
         self.provider_builder.clone()
     }
 
-    /// Takes the pending sparse trie prune request as in-memory ancestor blocks, if any.
+    /// Takes the pending sparse trie prune request as in-memory parent-chain blocks, if any.
     pub fn take_sparse_trie_prune_blocks(&mut self) -> Option<Vec<ExecutedBlock<N>>> {
-        if !*self.pending_sparse_trie_prune {
-            return None
-        }
-
-        *self.pending_sparse_trie_prune = false;
-        Some(
-            self.state
-                .tree_state()
-                .blocks_by_hash(self.parent_hash)
-                .map(|(_, blocks)| blocks)
-                .unwrap_or_default(),
-        )
+        self.state.take_sparse_trie_prune_blocks(self.parent_hash)
     }
 }
 
@@ -278,10 +291,17 @@ where
     }
 }
 
-/// Prepared per-block state-root work and its stream wiring.
+/// Prepared per-block state-root work and its update-stream capabilities.
+///
+/// The capabilities are populated by the strategy's `prepare` according to the execution
+/// mode: the execution hook on the serial path, the hashed update stream on the parallel BAL
+/// path, never both. Each capability is taken once by the code that produces its messages
+/// and is not retained here, so the task's update channel closes when the producers are done.
 pub struct PreparedStateRootJob<N: NodePrimitives> {
     job: Box<dyn StateRootJob<N>>,
-    streams: StateRootStreams,
+    execution_hook: Option<StateRootUpdateHook>,
+    hint_stream: Option<StateRootHintStream>,
+    hashed_update_stream: Option<StateRootUpdateStream>,
     hashed_state_rx: Option<mpsc::Receiver<HashedPostState>>,
 }
 
@@ -289,20 +309,45 @@ impl<N: NodePrimitives> fmt::Debug for PreparedStateRootJob<N> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("PreparedStateRootJob")
             .field("name", &self.job.name())
-            .field("streams", &self.streams)
+            .field("has_execution_hook", &self.execution_hook.is_some())
+            .field("has_hint_stream", &self.hint_stream.is_some())
+            .field("has_hashed_update_stream", &self.hashed_update_stream.is_some())
             .field("has_hashed_state_rx", &self.hashed_state_rx.is_some())
             .finish()
     }
 }
 
 impl<N: NodePrimitives> PreparedStateRootJob<N> {
-    /// Creates a prepared state-root job.
+    /// Creates a prepared state-root job without update-stream capabilities.
     pub const fn new(
         job: Box<dyn StateRootJob<N>>,
-        streams: StateRootStreams,
         hashed_state_rx: Option<mpsc::Receiver<HashedPostState>>,
     ) -> Self {
-        Self { job, streams, hashed_state_rx }
+        Self {
+            job,
+            execution_hook: None,
+            hint_stream: None,
+            hashed_update_stream: None,
+            hashed_state_rx,
+        }
+    }
+
+    /// Attaches the execution hook capability (serial execution path).
+    pub fn with_execution_hook(mut self, hook: StateRootUpdateHook) -> Self {
+        self.execution_hook = Some(hook);
+        self
+    }
+
+    /// Attaches the hint stream capability.
+    pub fn with_hint_stream(mut self, hint_stream: StateRootHintStream) -> Self {
+        self.hint_stream = Some(hint_stream);
+        self
+    }
+
+    /// Attaches the hashed update stream capability (parallel BAL path).
+    pub fn with_hashed_update_stream(mut self, stream: StateRootUpdateStream) -> Self {
+        self.hashed_update_stream = Some(stream);
+        self
     }
 
     /// Returns the job name used in logs.
@@ -310,16 +355,19 @@ impl<N: NodePrimitives> PreparedStateRootJob<N> {
         self.job.name()
     }
 
-    /// Returns stream views used by prewarm.
-    pub fn streams(&self) -> StateRootStreams {
-        self.streams.clone()
+    /// Takes the execution hook, present only when the job wants normal execution updates.
+    pub fn take_execution_hook(&mut self) -> Option<Box<dyn OnStateHook + 'static>> {
+        self.execution_hook.take().map(|hook| Box::new(hook) as Box<dyn OnStateHook + 'static>)
     }
 
-    /// Takes the execution hook, if the job wants normal execution updates.
-    pub fn take_execution_hook(&mut self) -> Option<Box<dyn OnStateHook + 'static>> {
-        self.streams
-            .take_execution_stream()
-            .map(|stream| Box::new(stream.state_hook()) as Box<dyn OnStateHook + 'static>)
+    /// Takes the hint stream for transaction prewarming.
+    pub const fn take_hint_stream(&mut self) -> Option<StateRootHintStream> {
+        self.hint_stream.take()
+    }
+
+    /// Takes the hashed update stream, present only on the parallel BAL path.
+    pub const fn take_hashed_update_stream(&mut self) -> Option<StateRootUpdateStream> {
+        self.hashed_update_stream.take()
     }
 
     /// Takes the optional hashed-state receiver produced by the job.
@@ -438,11 +486,7 @@ where
         } = ctx;
 
         if config.skip_state_root() {
-            return Ok(PreparedStateRootJob::new(
-                Box::new(SkippedStateRootJob {}),
-                StateRootStreams::empty(),
-                None,
-            ))
+            return Ok(PreparedStateRootJob::new(Box::new(SkippedStateRootJob {}), None))
         }
 
         // `state_root_fallback` forces serial computation for tests and debugging. Hosts
@@ -452,7 +496,6 @@ where
         if config.state_root_fallback() || !config.use_state_root_task() {
             return Ok(PreparedStateRootJob::new(
                 Box::new(SynchronousStateRootJob { provider_builder }),
-                StateRootStreams::empty(),
                 None,
             ))
         }
@@ -477,10 +520,22 @@ where
             config,
             pending_sparse_trie_prune_blocks,
         );
-        let streams = handle.streams(!parallel_bal_execution);
+
+        // The execution mode decides who finishes the update stream: the execution hook on
+        // the serial path, the BAL streamer on the parallel path. Both come from one slot in
+        // the handle, so only one of them can exist.
+        let (hashed_update_stream, execution_hook): (
+            Option<StateRootUpdateStream>,
+            Option<StateRootUpdateHook>,
+        ) = match parallel_bal_execution {
+            true => (Some(handle.take_hashed_update_stream()), None),
+            false => (None, Some(handle.take_execution_hook())),
+        };
+        let hint_stream = handle.take_hint_stream();
+
         let hashed_state_rx = Some(handle.take_hashed_state_rx());
 
-        Ok(PreparedStateRootJob::new(
+        let mut prepared = PreparedStateRootJob::new(
             Box::new(SparseTrieStateRootJob {
                 handle,
                 provider_builder,
@@ -490,9 +545,16 @@ where
                 compare_trie_updates: config.always_compare_trie_updates(),
                 metrics: BlockValidationMetrics::default(),
             }),
-            streams,
             hashed_state_rx,
-        ))
+        )
+        .with_hint_stream(hint_stream);
+        if let Some(hook) = execution_hook {
+            prepared = prepared.with_execution_hook(hook);
+        }
+        if let Some(stream) = hashed_update_stream {
+            prepared = prepared.with_hashed_update_stream(stream);
+        }
+        Ok(prepared)
     }
 
     fn prepare_payload_builder(

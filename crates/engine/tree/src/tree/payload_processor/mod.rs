@@ -3,7 +3,7 @@
 use super::precompile_cache::PrecompileCacheMap;
 use crate::tree::{
     payload_processor::prewarm::{PrewarmCacheTask, PrewarmContext, PrewarmMode, PrewarmTaskEvent},
-    sparse_trie::SparseTrieCacheTask,
+    sparse_trie::{SparseTrieCacheTask, SparseTrieTaskMetrics},
     CacheWaitDurations, CachedStateCacheMetrics, CachedStateMetrics, CachedStateMetricsSource,
     ExecutionCache, PayloadExecutionCache, SavedCache, StateProviderBuilder, TreeConfig,
     WaitForCaches,
@@ -13,7 +13,6 @@ use alloy_eip7928::bal::DecodedBal;
 use alloy_eips::{eip1898::BlockWithParent, eip4895::Withdrawal};
 use alloy_primitives::B256;
 use crossbeam_channel::{Receiver as CrossbeamReceiver, Sender as CrossbeamSender};
-use multiproof::*;
 use prewarm::PrewarmMetrics;
 use rayon::prelude::*;
 use reth_chain_state::{ExecutedBlock, PreservedSparseTrie, StateTrieOverlayManager};
@@ -32,9 +31,14 @@ use reth_trie::{
     hashed_cursor::HashedCursorFactory, prefix_set::TriePrefixSetsMut,
     trie_cursor::TrieCursorFactory, HashedPostState,
 };
-use reth_trie_parallel::{
+use reth_trie_parallel::proof_task::{ProofTaskCtx, ProofWorkerHandle};
+pub use reth_trie_parallel::{
     error::StateRootTaskError,
-    proof_task::{ProofTaskCtx, ProofWorkerHandle},
+    state_root_task::{
+        evm_state_to_hashed_post_state, PayloadStateRootHandle, StateAccessHint,
+        StateRootComputeOutcome, StateRootHandle, StateRootHintStream, StateRootMessage,
+        StateRootSink, StateRootTaskCancelGuard, StateRootUpdateHook, StateRootUpdateStream,
+    },
 };
 use reth_trie_sparse::{ArenaParallelSparseTrie, RevealableSparseTrie, SparseStateTrie};
 use std::{
@@ -49,7 +53,6 @@ use tracing::{debug, debug_span, instrument, trace, warn, Span};
 
 pub mod bal;
 pub(crate) mod bal_prewarm_pool;
-pub mod multiproof;
 pub mod prewarm;
 pub mod receipt_root_task;
 pub mod sparse_trie;
@@ -100,7 +103,7 @@ where
     /// Metrics for shared execution cache state.
     cache_state_metrics: Option<CachedStateCacheMetrics>,
     /// Metrics for trie operations
-    trie_metrics: MultiProofTaskMetrics,
+    trie_metrics: SparseTrieTaskMetrics,
     /// Cross-block cache size in bytes.
     cross_block_cache_size: usize,
     /// Whether transactions should not be executed on prewarming task.
@@ -136,6 +139,12 @@ struct SparseTrieTaskOptions<N: NodePrimitives> {
     parent_state_root: B256,
     preserved_sparse_trie: Option<PreservedSparseTrie>,
     chunk_size: usize,
+    /// In-memory ancestor blocks whose changed paths must be retained while pruning the sparse
+    /// trie.
+    ///
+    /// `None` means this sparse trie task should not prune. `Some(Vec::new())` still means pruning
+    /// was requested, but the task only needs to retain paths changed by the current block. If any
+    /// listed ancestor block lacks changed paths, the task skips pruning.
     pending_sparse_trie_prune_blocks: Option<Vec<ExecutedBlock<N>>>,
 }
 
@@ -246,7 +255,8 @@ where
         env: ExecutionEnv<Evm>,
         transactions: I,
         provider_builder: StateProviderBuilder<Evm::Primitives, P>,
-        state_root_streams: StateRootStreams,
+        hint_stream: Option<StateRootHintStream>,
+        hashed_update_stream: Option<StateRootUpdateStream>,
         parallel_bal_execution: bool,
     ) -> IteratorPayloadHandle<Evm, I>
     where
@@ -258,7 +268,8 @@ where
             env,
             prewarm_rx,
             provider_builder,
-            state_root_streams,
+            hint_stream,
+            hashed_update_stream,
             parallel_bal_execution,
         );
         PayloadHandle { prewarm_handle, transactions: execution_rx, _span: Span::current() }
@@ -267,8 +278,9 @@ where
     /// Spawns state root computation pipeline (multiproof + sparse trie tasks).
     ///
     /// The returned [`StateRootHandle`] provides:
-    /// - [`StateRootHandle::streams`] — semantic stream views that feed updates into the pipeline,
-    ///   including an execution hook for per-transaction state updates.
+    /// - [`StateRootHandle::take_hint_stream`], [`StateRootHandle::take_execution_hook`] and
+    ///   [`StateRootHandle::take_hashed_update_stream`] — capabilities that feed updates into the
+    ///   pipeline, owned by the producers of their messages.
     /// - [`StateRootHandle::state_root`] — blocks until the state root is computed and returns the
     ///   state root.
     ///
@@ -298,6 +310,7 @@ where
             + 'static,
     {
         let (updates_tx, from_multi_proof) = crossbeam_channel::unbounded();
+        let (cancel_guard, cancel_rx) = StateRootTaskCancelGuard::channel();
 
         let task_ctx = ProofTaskCtx::new(multiproof_provider_factory);
         #[cfg(feature = "trie-debug")]
@@ -314,6 +327,7 @@ where
             state_root_tx,
             hashed_state_tx,
             from_multi_proof,
+            cancel_rx,
             SparseTrieTaskOptions {
                 parent_hash,
                 parent_state_root,
@@ -327,7 +341,13 @@ where
             },
         );
 
-        StateRootHandle::new(parent_state_root, updates_tx, state_root_rx, hashed_state_rx)
+        StateRootHandle::new(
+            parent_state_root,
+            updates_tx,
+            cancel_guard,
+            state_root_rx,
+            hashed_state_rx,
+        )
     }
 
     /// Transaction count threshold below which proof workers are halved, since fewer transactions
@@ -478,22 +498,26 @@ where
         env: ExecutionEnv<Evm>,
         transactions: mpsc::Receiver<(usize, impl ExecutableTxFor<Evm> + Clone + Send + 'static)>,
         provider_builder: StateProviderBuilder<Evm::Primitives, P>,
-        state_root_streams: StateRootStreams,
+        hint_stream: Option<StateRootHintStream>,
+        hashed_update_stream: Option<StateRootUpdateStream>,
         parallel_bal_execution: bool,
     ) -> CacheTaskHandle<<Evm::Primitives as NodePrimitives>::Receipt>
     where
         P: BlockReader + StateProviderFactory + StateReader + Clone + 'static,
     {
+        // Each mode carries the capability its producers use; the rest is dropped here, so
+        // unused capabilities do not keep the state-root task's update channel open.
         let mode = if parallel_bal_execution {
-            PrewarmMode::BlockAccessList(
-                env.decoded_bal.clone().expect("BAL dispatch implies decoded BAL"),
-            )
+            PrewarmMode::BlockAccessList {
+                bal: env.decoded_bal.clone().expect("BAL dispatch implies decoded BAL"),
+                updates: hashed_update_stream,
+            }
         } else if self.disable_transaction_prewarming ||
             env.transaction_count < SMALL_BLOCK_TX_THRESHOLD
         {
             PrewarmMode::Skipped
         } else {
-            PrewarmMode::Transactions(transactions)
+            PrewarmMode::Transactions { pending: transactions, hints: hint_stream }
         };
         let saved_cache = self.disable_state_cache.not().then(|| self.cache_for(env.parent_hash));
 
@@ -516,12 +540,8 @@ where
             disable_bal_batch_io: self.disable_bal_batch_io,
         };
 
-        let (prewarm_task, to_prewarm_task) = PrewarmCacheTask::new(
-            self.executor.clone(),
-            self.execution_cache.clone(),
-            prewarm_ctx,
-            state_root_streams,
-        );
+        let (prewarm_task, to_prewarm_task) =
+            PrewarmCacheTask::new(self.executor.clone(), self.execution_cache.clone(), prewarm_ctx);
         {
             let to_prewarm_task = to_prewarm_task.clone();
             self.executor.spawn_blocking_named("prewarm", move || {
@@ -566,6 +586,7 @@ where
         state_root_tx: mpsc::Sender<Result<StateRootComputeOutcome, StateRootTaskError>>,
         hashed_state_tx: mpsc::Sender<HashedPostState>,
         from_multi_proof: CrossbeamReceiver<StateRootMessage>,
+        cancel_rx: CrossbeamReceiver<()>,
         options: SparseTrieTaskOptions<Evm::Primitives>,
     ) {
         let SparseTrieTaskOptions {
@@ -632,6 +653,7 @@ where
             let mut task = SparseTrieCacheTask::new_with_trie(
                 &executor,
                 from_multi_proof,
+                cancel_rx,
                 hashed_state_tx,
                 proof_worker_handle,
                 trie_metrics.clone(),
@@ -1416,9 +1438,7 @@ mod tests {
             None,
         );
 
-        let mut streams = state_root_handle.streams(true);
-        let mut state_hook =
-            streams.take_execution_stream().expect("execution stream installed").state_hook();
+        let mut state_hook = state_root_handle.take_execution_hook();
 
         for update in state_updates {
             state_hook.on_state(update);

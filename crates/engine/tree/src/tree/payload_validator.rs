@@ -98,8 +98,9 @@
 use crate::tree::{
     error::{InsertBlockError, InsertBlockErrorKind, InsertPayloadError},
     instrumented_state::{InstrumentedStateProvider, StateProviderMetrics, StateProviderStats},
-    multiproof::{PayloadStateRootHandle, StateRootStreams},
-    payload_processor::PayloadProcessor,
+    payload_processor::{
+        PayloadProcessor, PayloadStateRootHandle, StateRootHintStream, StateRootUpdateStream,
+    },
     precompile_cache::{CachedPrecompile, CachedPrecompileMetrics, PrecompileCacheMap},
     types::{InsertPayloadResult, ValidationOutput},
     CacheWaitDurations, CachedStateProvider, EngineApiMetrics, EngineApiTreeState, ExecutionEnv,
@@ -193,8 +194,6 @@ pub struct TreeCtx<'a, N: NodePrimitives> {
     state: &'a mut EngineApiTreeState<N>,
     /// Reference to the canonical in-memory state
     canonical_in_memory_state: &'a CanonicalInMemoryState<N>,
-    /// Pending sparse trie prune request to consume when spawning a sparse trie task.
-    pending_sparse_trie_prune: &'a mut bool,
 }
 
 impl<'a, N: NodePrimitives> std::fmt::Debug for TreeCtx<'a, N> {
@@ -202,7 +201,6 @@ impl<'a, N: NodePrimitives> std::fmt::Debug for TreeCtx<'a, N> {
         f.debug_struct("TreeCtx")
             .field("state", &"EngineApiTreeState")
             .field("canonical_in_memory_state", &self.canonical_in_memory_state)
-            .field("pending_sparse_trie_prune", &self.pending_sparse_trie_prune)
             .finish()
     }
 }
@@ -212,9 +210,8 @@ impl<'a, N: NodePrimitives> TreeCtx<'a, N> {
     pub const fn new(
         state: &'a mut EngineApiTreeState<N>,
         canonical_in_memory_state: &'a CanonicalInMemoryState<N>,
-        pending_sparse_trie_prune: &'a mut bool,
     ) -> Self {
-        Self { state, canonical_in_memory_state, pending_sparse_trie_prune }
+        Self { state, canonical_in_memory_state }
     }
 }
 
@@ -234,23 +231,12 @@ impl<'a, N: NodePrimitives> TreeCtx<'a, N> {
         self.canonical_in_memory_state
     }
 
-    /// Takes the pending sparse trie prune request as in-memory ancestor blocks, if any.
+    /// Takes the pending sparse trie prune request as in-memory parent-chain blocks, if any.
     pub fn take_sparse_trie_prune_blocks(
         &mut self,
         parent_hash: B256,
     ) -> Option<Vec<ExecutedBlock<N>>> {
-        if !*self.pending_sparse_trie_prune {
-            return None
-        }
-
-        *self.pending_sparse_trie_prune = false;
-        Some(
-            self.state
-                .tree_state()
-                .blocks_by_hash(parent_hash)
-                .map(|(_, blocks)| blocks)
-                .unwrap_or_default(),
-        )
+        self.state.take_sparse_trie_prune_blocks(parent_hash)
     }
 }
 
@@ -634,18 +620,21 @@ where
             "Prepared state root job"
         );
 
-        let state_root_streams = state_root_job.streams();
-        // Only take the hook on the serial path: on the parallel BAL path it would be dropped
-        // unused, and the drop would fire a spurious end-of-updates signal into the job.
-        let execution_state_hook =
-            (!parallel_bal_execution).then(|| state_root_job.take_execution_hook()).flatten();
+        // The hook exists only when `prepare` installed it (serial path); on the parallel BAL
+        // path the authoritative capability went to the hashed update stream instead.
+        let execution_state_hook = state_root_job.take_execution_hook();
+        // The prewarm capabilities go to the code that produces their messages and are not
+        // retained anywhere else, so the task's update channel closes when producers finish.
+        let hint_stream = state_root_job.take_hint_stream();
+        let hashed_update_stream = state_root_job.take_hashed_update_stream();
 
         // Spawn transaction conversion and prewarming.
         let mut handle = ensure_ok!(self.spawn_payload_processor(
             env.clone(),
             txs,
             provider_builder.clone(),
-            state_root_streams,
+            hint_stream,
+            hashed_update_stream,
             parallel_bal_execution,
         ));
 
@@ -1356,20 +1345,25 @@ where
 
     /// Spawns transaction conversion and cache prewarming for payload validation.
     ///
-    /// State-root tasks are prepared before this method and can provide streams that prewarm uses
-    /// for BAL-derived authoritative updates or transaction-derived hints.
+    /// State-root tasks are prepared before this method and can provide capabilities that
+    /// prewarm uses for BAL-derived authoritative updates or transaction-derived hints.
     #[instrument(
         level = "debug",
         target = "engine::tree::payload_validator",
         skip_all,
-        fields(has_state_root_streams = !state_root_streams.is_empty(), parallel_bal_execution)
+        fields(
+            has_hint_stream = hint_stream.is_some(),
+            has_hashed_update_stream = hashed_update_stream.is_some(),
+            parallel_bal_execution
+        )
     )]
     fn spawn_payload_processor<T: ExecutableTxIterator<Evm>>(
         &self,
         env: ExecutionEnv<Evm>,
         txs: T,
         provider_builder: StateProviderBuilder<N, P>,
-        state_root_streams: StateRootStreams,
+        hint_stream: Option<StateRootHintStream>,
+        hashed_update_stream: Option<StateRootUpdateStream>,
         parallel_bal_execution: bool,
     ) -> Result<
         PayloadHandle<
@@ -1384,7 +1378,8 @@ where
             env,
             txs,
             provider_builder,
-            state_root_streams,
+            hint_stream,
+            hashed_update_stream,
             parallel_bal_execution,
         );
 
@@ -1723,15 +1718,14 @@ pub trait EngineValidator<
     /// `timestamp` is the timestamp of the payload being built, taken from the payload
     /// attributes.
     ///
-    /// `pending_sparse_trie_prune` should be consumed only when the returned handle owns a sparse
-    /// trie task that can apply it.
+    /// Pending sparse trie pruning should be consumed from `state` only when the returned handle
+    /// owns a sparse trie task that can apply it.
     fn payload_state_root_handle_for(
         &self,
         parent_hash: B256,
         parent_header: &N::BlockHeader,
         timestamp: u64,
-        state: &EngineApiTreeState<N>,
-        pending_sparse_trie_prune: &mut bool,
+        state: &mut EngineApiTreeState<N>,
     ) -> Option<PayloadStateRootHandle>;
 }
 
@@ -1822,8 +1816,7 @@ where
         parent_hash: B256,
         parent_header: &N::BlockHeader,
         timestamp: u64,
-        state: &EngineApiTreeState<N>,
-        pending_sparse_trie_prune: &mut bool,
+        state: &mut EngineApiTreeState<N>,
     ) -> Option<PayloadStateRootHandle> {
         let provider_builder = match self.state_provider_builder(parent_hash, state) {
             Ok(Some(provider_builder)) => provider_builder,
@@ -1843,17 +1836,16 @@ where
             Self::overlay_builder_for_parent(parent_hash, state, self.changeset_cache.clone()),
         );
 
-        match self.state_root_strategy.prepare_payload_builder(PayloadStateRootJobContext {
-            payload_processor: &self.payload_processor,
+        match self.state_root_strategy.prepare_payload_builder(PayloadStateRootJobContext::new(
+            &self.payload_processor,
             parent_hash,
             parent_header,
             timestamp,
             state,
             provider_builder,
             overlay_factory,
-            config: &self.config,
-            pending_sparse_trie_prune,
-        }) {
+            &self.config,
+        )) {
             Ok(handle) => handle,
             Err(err) => {
                 warn!(
