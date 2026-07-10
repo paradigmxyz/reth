@@ -2,20 +2,16 @@
 
 use std::sync::Arc;
 
-use crate::tree::{
-    multiproof::{
-        dispatch_with_chunking, evm_state_to_hashed_post_state, StateRootComputeOutcome,
-        StateRootMessage, DEFAULT_MAX_TARGETS_FOR_CHUNKING,
-    },
-    payload_processor::multiproof::MultiProofTaskMetrics,
-};
+use super::{evm_state_to_hashed_post_state, StateRootComputeOutcome, StateRootMessage};
 use alloy_primitives::{
     map::{hash_map::Entry, B256Map},
     B256,
 };
 use alloy_rlp::{Decodable, Encodable};
 use crossbeam_channel::{Receiver as CrossbeamReceiver, Sender as CrossbeamSender};
+use metrics::{Gauge, Histogram};
 use rayon::iter::{IntoParallelIterator, ParallelIterator};
+use reth_metrics::Metrics;
 use reth_primitives_traits::{Account, FastInstant as Instant};
 use reth_tasks::Runtime;
 use reth_trie::{
@@ -121,7 +117,7 @@ pub(super) struct SparseTrieCacheTask<A = ArenaParallelSparseTrie, S = ArenaPara
     final_hashed_state: HashedPostState,
 
     /// Metrics for the sparse trie.
-    metrics: MultiProofTaskMetrics,
+    metrics: SparseTrieTaskMetrics,
 }
 
 impl<A, S> SparseTrieCacheTask<A, S>
@@ -137,7 +133,7 @@ where
         cancel_rx: CrossbeamReceiver<()>,
         final_hashed_state_tx: std::sync::mpsc::Sender<HashedPostState>,
         proof_worker_handle: ProofWorkerHandle,
-        metrics: MultiProofTaskMetrics,
+        metrics: SparseTrieTaskMetrics,
         trie: SparseStateTrie<A, S>,
         parent_state_root: B256,
         chunk_size: usize,
@@ -189,7 +185,7 @@ where
     fn run_hashing_task(
         updates: CrossbeamReceiver<StateRootMessage>,
         hashed_state_tx: CrossbeamSender<SparseTrieTaskMessage>,
-        metrics: MultiProofTaskMetrics,
+        metrics: SparseTrieTaskMetrics,
     ) {
         let mut total_idle_time = std::time::Duration::ZERO;
         let mut idle_start = Instant::now();
@@ -961,6 +957,82 @@ where
     }
 }
 
+/// Metrics recorded by sparse trie and hashing tasks.
+#[derive(Metrics, Clone)]
+#[metrics(scope = "tree.root")]
+pub(super) struct SparseTrieTaskMetrics {
+    /// Histogram of durations spent revealing multiproof results into the sparse trie.
+    pub(super) sparse_trie_reveal_multiproof_duration_histogram: Histogram,
+    /// Histogram of durations spent coalescing multiple proof results from the channel.
+    pub(super) sparse_trie_proof_coalesce_duration_histogram: Histogram,
+    /// Histogram of durations the event loop spent blocked waiting on channels.
+    pub(super) sparse_trie_channel_wait_duration_histogram: Histogram,
+    /// Histogram of durations spent processing trie updates and promoting pending accounts.
+    pub(super) sparse_trie_process_updates_duration_histogram: Histogram,
+    /// Histogram of sparse trie final update durations.
+    pub(super) sparse_trie_final_update_duration_histogram: Histogram,
+    /// Histogram of sparse trie total durations.
+    pub(super) sparse_trie_total_duration_histogram: Histogram,
+    /// Time spent preparing the sparse trie for reuse after state root computation.
+    pub(super) into_trie_for_reuse_duration_histogram: Histogram,
+    /// Time spent waiting for preserved sparse trie cache to become available.
+    pub(super) sparse_trie_cache_wait_duration_histogram: Histogram,
+    /// Histogram for sparse trie task idle time in seconds (waiting for updates or proof
+    /// results). Excludes the final wait after the channel is closed.
+    pub(super) sparse_trie_idle_time_seconds: Histogram,
+    /// Histogram for hashing task idle time in seconds (waiting for messages from execution).
+    /// Excludes the final wait after the channel is closed.
+    pub(super) hashing_task_idle_time_seconds: Histogram,
+
+    /// Number of account leaf updates applied without needing a new proof (cache hits).
+    pub(super) sparse_trie_account_cache_hits: Histogram,
+    /// Number of account leaf updates that required a new proof (cache misses).
+    pub(super) sparse_trie_account_cache_misses: Histogram,
+    /// Number of storage leaf updates applied without needing a new proof (cache hits).
+    pub(super) sparse_trie_storage_cache_hits: Histogram,
+    /// Number of storage leaf updates that required a new proof (cache misses).
+    pub(super) sparse_trie_storage_cache_misses: Histogram,
+
+    /// Retained memory of the preserved sparse trie cache in bytes.
+    pub(super) sparse_trie_retained_memory_bytes: Gauge,
+    /// Number of storage tries retained in the preserved sparse trie cache.
+    pub(super) sparse_trie_retained_storage_tries: Gauge,
+}
+
+/// The default max targets, for limiting the number of account and storage proof targets to be
+/// fetched by a single worker. If exceeded, chunking is forced regardless of worker availability.
+const DEFAULT_MAX_TARGETS_FOR_CHUNKING: usize = 300;
+
+/// Dispatches work items as a single unit or in chunks based on target size and worker
+/// availability.
+#[expect(clippy::too_many_arguments)]
+fn dispatch_with_chunking<T, I>(
+    items: T,
+    chunking_len: usize,
+    chunk_size: usize,
+    max_targets_for_chunking: usize,
+    has_multiple_idle_account_workers: bool,
+    has_multiple_idle_storage_workers: bool,
+    chunker: impl FnOnce(T, usize) -> I,
+    mut dispatch: impl FnMut(T),
+) where
+    I: IntoIterator<Item = T>,
+{
+    let has_full_chunks = chunking_len >= chunk_size.saturating_mul(2);
+    let should_chunk = chunking_len > max_targets_for_chunking ||
+        (has_full_chunks &&
+            (has_multiple_idle_account_workers || has_multiple_idle_storage_workers));
+
+    if should_chunk && chunking_len > chunk_size {
+        for chunk in chunker(items, chunk_size) {
+            dispatch(chunk);
+        }
+        return;
+    }
+
+    dispatch(items);
+}
+
 /// RLP-encodes the account as a [`TrieAccount`] leaf value, or returns empty for deletions.
 fn encode_account_leaf_value(
     account: Option<Account>,
@@ -1061,7 +1133,7 @@ mod tests {
             SparseTrieCacheTask::<ArenaParallelSparseTrie, ArenaParallelSparseTrie>::run_hashing_task(
                 updates_rx,
                 hashed_state_tx,
-                MultiProofTaskMetrics::default(),
+                SparseTrieTaskMetrics::default(),
             );
         });
 
@@ -1146,7 +1218,7 @@ mod tests {
             cancel_rx,
             std::sync::mpsc::channel().0,
             proof_worker_handle,
-            MultiProofTaskMetrics::default(),
+            SparseTrieTaskMetrics::default(),
             trie,
             parent_state_root,
             1,
@@ -1191,7 +1263,7 @@ mod tests {
             cancel_rx,
             std::sync::mpsc::channel().0,
             proof_worker_handle,
-            MultiProofTaskMetrics::default(),
+            SparseTrieTaskMetrics::default(),
             trie,
             B256::from([0x55; 32]),
             1,
@@ -1267,7 +1339,7 @@ mod tests {
             cancel_rx,
             std::sync::mpsc::channel().0,
             proof_worker_handle,
-            MultiProofTaskMetrics::default(),
+            SparseTrieTaskMetrics::default(),
             trie,
             B256::from([0x55; 32]),
             1,

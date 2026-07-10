@@ -98,8 +98,9 @@
 use crate::tree::{
     error::{InsertBlockError, InsertBlockErrorKind, InsertPayloadError},
     instrumented_state::{InstrumentedStateProvider, StateProviderMetrics, StateProviderStats},
-    multiproof::{PayloadStateRootHandle, StateRootHintStream, StateRootUpdateStream},
-    payload_processor::PayloadProcessor,
+    payload_processor::{
+        PayloadProcessor, PayloadStateRootHandle, StateRootHintStream, StateRootUpdateStream,
+    },
     precompile_cache::{CachedPrecompile, CachedPrecompileMetrics, PrecompileCacheMap},
     types::{InsertPayloadResult, ValidationOutput},
     CacheWaitDurations, CachedStateProvider, EngineApiMetrics, EngineApiTreeState, ExecutionEnv,

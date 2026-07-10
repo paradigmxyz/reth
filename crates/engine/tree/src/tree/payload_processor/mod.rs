@@ -3,7 +3,7 @@
 use super::precompile_cache::PrecompileCacheMap;
 use crate::tree::{
     payload_processor::prewarm::{PrewarmCacheTask, PrewarmContext, PrewarmMode, PrewarmTaskEvent},
-    sparse_trie::SparseTrieCacheTask,
+    sparse_trie::{SparseTrieCacheTask, SparseTrieTaskMetrics},
     CacheWaitDurations, CachedStateCacheMetrics, CachedStateMetrics, CachedStateMetricsSource,
     ExecutionCache, PayloadExecutionCache, SavedCache, StateProviderBuilder, TreeConfig,
     WaitForCaches,
@@ -12,7 +12,6 @@ use alloy_eip7928::bal::DecodedBal;
 use alloy_eips::{eip1898::BlockWithParent, eip4895::Withdrawal};
 use alloy_primitives::B256;
 use crossbeam_channel::{Receiver as CrossbeamReceiver, Sender as CrossbeamSender};
-use multiproof::*;
 use prewarm::PrewarmMetrics;
 use rayon::prelude::*;
 use reth_chain_state::{ExecutedBlock, PreservedSparseTrie, StateTrieOverlayManager};
@@ -31,9 +30,14 @@ use reth_trie::{
     hashed_cursor::HashedCursorFactory, prefix_set::TriePrefixSetsMut,
     trie_cursor::TrieCursorFactory, HashedPostState,
 };
-use reth_trie_parallel::{
+use reth_trie_parallel::proof_task::{ProofTaskCtx, ProofWorkerHandle};
+pub use reth_trie_parallel::{
     error::StateRootTaskError,
-    proof_task::{ProofTaskCtx, ProofWorkerHandle},
+    state_root_task::{
+        evm_state_to_hashed_post_state, PayloadStateRootHandle, StateAccessHint,
+        StateRootComputeOutcome, StateRootHandle, StateRootHintStream, StateRootMessage,
+        StateRootSink, StateRootTaskCancelGuard, StateRootUpdateHook, StateRootUpdateStream,
+    },
 };
 use reth_trie_sparse::{ArenaParallelSparseTrie, RevealableSparseTrie, SparseStateTrie};
 use std::{
@@ -48,7 +52,6 @@ use tracing::{debug, debug_span, instrument, trace, warn, Span};
 
 pub mod bal;
 pub(crate) mod bal_prewarm_pool;
-pub mod multiproof;
 pub mod prewarm;
 pub mod receipt_root_task;
 pub mod sparse_trie;
@@ -99,7 +102,7 @@ where
     /// Metrics for shared execution cache state.
     cache_state_metrics: Option<CachedStateCacheMetrics>,
     /// Metrics for trie operations
-    trie_metrics: MultiProofTaskMetrics,
+    trie_metrics: SparseTrieTaskMetrics,
     /// Cross-block cache size in bytes.
     cross_block_cache_size: usize,
     /// Whether transactions should not be executed on prewarming task.

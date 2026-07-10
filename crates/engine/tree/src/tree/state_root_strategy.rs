@@ -47,11 +47,10 @@
 
 use crate::tree::{
     metrics::BlockValidationMetrics,
-    multiproof::{
-        PayloadStateRootHandle, StateRootComputeOutcome, StateRootHandle, StateRootHintStream,
-        StateRootUpdateHook, StateRootUpdateStream,
+    payload_processor::{
+        PayloadProcessor, PayloadStateRootHandle, StateRootComputeOutcome, StateRootHandle,
+        StateRootHintStream, StateRootUpdateHook, StateRootUpdateStream,
     },
-    payload_processor::PayloadProcessor,
     payload_validator::LazyHashedPostState,
     EngineApiTreeState, ExecutionEnv, StateProviderBuilder, TreeConfig,
 };
