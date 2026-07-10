@@ -119,12 +119,12 @@ impl BalPrewarmPool {
 /// a high number of threads is counterproductive due to the effects of context switching, core
 /// migration, contention, etc.
 ///
-/// However, that overhead is considered negligible compared to the benefits of fully utilizing
-/// `NVMe` resources. For example, with request latency of 100µs, 100k IO requests the expected
-/// time to finish is 312.5ms at QD=32 and 156.26ms at QD=64.
-///
-/// This should explain why this particular value is picked.
-pub(crate) const DEFAULT_BAL_PREWARM_THREADS: usize = 128;
+/// The prewarm pool also runs concurrently with the parallel execution workers, whose own reads
+/// (bytecode loads and keys not served by the BAL) go to the same MDBX map. Profiles of warm-cache
+/// big-block runs show execution workers mostly off-CPU while a large prewarm pool saturates the
+/// scheduler and the page-cache locks, so the pool is sized to leave the execution workers room
+/// while still keeping a reasonable `NVMe` queue depth for cold pages.
+pub(crate) const DEFAULT_BAL_PREWARM_THREADS: usize = 32;
 
 /// Number of targets per warm batch.
 ///
