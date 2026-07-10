@@ -7,6 +7,7 @@ use crate::{
         PersistTarget, TreeConfig,
     },
 };
+use alloy_consensus::constants::{EMPTY_RECEIPTS, EMPTY_TRANSACTIONS};
 use reth_trie_db::ChangesetCache;
 
 use alloy_eips::eip1898::BlockWithParent;
@@ -20,15 +21,22 @@ use alloy_rpc_types_engine::{
 };
 use assert_matches::assert_matches;
 use reth_chain_state::{test_utils::TestBlockBuilder, BlockState, StateTrieOverlayManager};
-use reth_chainspec::{ChainSpec, HOLESKY, MAINNET};
+use reth_chainspec::{ChainSpec, ChainSpecBuilder, EthChainSpec, HOLESKY, MAINNET};
+use reth_db_common::init::init_genesis;
 use reth_engine_primitives::{EngineApiValidator, ForkchoiceStatus, NoopInvalidBlockHook};
 use reth_ethereum_consensus::EthBeaconConsensus;
 use reth_ethereum_engine_primitives::{EthEngineTypes, EthPayloadAttributes};
 use reth_ethereum_primitives::{Block, EthPrimitives};
-use reth_evm_ethereum::MockEvmConfig;
+use reth_evm_ethereum::{EthEvmConfig, MockEvmConfig};
 use reth_payload_builder::PayloadServiceCommand;
 use reth_primitives_traits::Block as _;
-use reth_provider::{test_utils::MockEthProvider, BalStoreHandle, InMemoryBalStore, RawBal};
+use reth_provider::{
+    providers::BlockchainProvider,
+    test_utils::{
+        create_test_provider_factory_with_chain_spec, MockEthProvider, MockNodeTypesWithDB,
+    },
+    BalStoreHandle, InMemoryBalStore, RawBal,
+};
 use reth_tasks::spawn_os_thread;
 use reth_trie::{prefix_set::TriePrefixSetsMut, LazyTrieData};
 use reth_trie_common::ComputedTrieData;
@@ -436,7 +444,11 @@ pub(crate) struct ValidatorTestHarness {
     /// Basic test harness
     harness: TestHarness,
     /// Direct access to validator for `validate_block_with_state` calls
-    validator: BasicEngineValidator<MockEthProvider, MockEvmConfig, MockEngineValidator>,
+    validator: BasicEngineValidator<
+        BlockchainProvider<MockNodeTypesWithDB>,
+        EthEvmConfig,
+        MockEngineValidator,
+    >,
     /// Simple validation metrics
     metrics: TestMetrics,
 }
@@ -445,23 +457,29 @@ impl ValidatorTestHarness {
     fn new(chain_spec: Arc<ChainSpec>) -> Self {
         let harness = TestHarness::new(chain_spec.clone());
 
-        // Create validator identical to the one in TestHarness
-        let consensus = Arc::new(EthBeaconConsensus::new(chain_spec));
-        let provider = harness.provider.clone();
+        // Create a direct validator that can execute the successful validation path.
+        let consensus = Arc::new(EthBeaconConsensus::new(chain_spec.clone()));
+        let provider_factory = create_test_provider_factory_with_chain_spec(chain_spec.clone());
+        let genesis_hash = init_genesis(&provider_factory).expect("failed to initialize genesis");
+        assert_eq!(genesis_hash, chain_spec.genesis_hash());
+        let provider =
+            BlockchainProvider::new(provider_factory).expect("failed to create provider");
         let payload_validator = MockEngineValidator;
-        let evm_config = MockEvmConfig::default();
+        let evm_config = EthEvmConfig::new(chain_spec);
         let changeset_cache = ChangesetCache::new();
+        let state_trie_overlays = harness.tree.state.tree_state.state_trie_overlays.clone();
+        let runtime = harness.tree.runtime.clone();
 
         let validator = BasicEngineValidator::new(
             provider,
             consensus,
             evm_config,
             payload_validator,
-            TreeConfig::default(),
+            TreeConfig::default().with_has_enough_parallelism(true),
             Box::new(NoopInvalidBlockHook::default()),
             changeset_cache,
-            StateTrieOverlayManager::default(),
-            reth_tasks::Runtime::test(),
+            state_trie_overlays,
+            runtime,
         );
 
         Self { harness, validator, metrics: TestMetrics::default() }
@@ -516,9 +534,24 @@ impl TestBlockFactory {
         Self { builder: TestBlockBuilder::eth().with_chain_spec(chain_spec) }
     }
 
+    fn create_empty_block(&mut self, parent_hash: B256) -> Block {
+        let mut block = self.builder.generate_random_block(1, parent_hash).into_block();
+        block.body.transactions.clear();
+        block.header.gas_limit = self.builder.chain_spec.genesis_header().gas_limit;
+        block.header.gas_used = 0;
+        block.header.transactions_root = EMPTY_TRANSACTIONS;
+        block.header.receipts_root = EMPTY_RECEIPTS;
+        block.header.state_root = self.builder.chain_spec.genesis_header().state_root;
+        block.header.base_fee_per_gas = self
+            .builder
+            .chain_spec
+            .next_block_base_fee(self.builder.chain_spec.genesis_header(), block.header.timestamp);
+        block
+    }
+
     /// Create block that triggers consensus violation by corrupting state root
     fn create_invalid_consensus_block(&mut self, parent_hash: B256) -> SealedBlock<Block> {
-        let mut block = self.builder.generate_random_block(1, parent_hash).into_block();
+        let mut block = self.create_empty_block(parent_hash);
 
         // Corrupt state root to trigger consensus violation
         block.header.state_root = B256::random();
@@ -539,8 +572,7 @@ impl TestBlockFactory {
 
     /// Create valid block
     fn create_valid_block(&mut self, parent_hash: B256) -> SealedBlock<Block> {
-        let block = self.builder.generate_random_block(1, parent_hash).into_block();
-        block.seal_slow()
+        self.create_empty_block(parent_hash).seal_slow()
     }
 }
 
@@ -626,6 +658,39 @@ fn on_new_persisted_block_queues_sparse_trie_prune_request() {
     test_harness.tree.on_new_persisted_block().unwrap();
 
     assert!(test_harness.tree.state.pending_sparse_trie_prune());
+}
+
+#[test]
+fn sparse_trie_prune_request_is_consumed_after_successful_validation() {
+    reth_tracing::init_test_tracing();
+
+    let chain_spec = Arc::new(ChainSpecBuilder::from(&*MAINNET).cancun_activated().build());
+    let mut test_harness = ValidatorTestHarness::new(chain_spec.clone());
+    test_harness.harness.tree.state.set_pending_sparse_trie_prune(true);
+
+    let mut block_factory = TestBlockFactory::new(chain_spec.as_ref().clone());
+    let valid_block = block_factory.create_valid_block(chain_spec.genesis_hash());
+
+    let result = test_harness.validate_block_direct(valid_block);
+
+    assert!(result.is_ok(), "valid block validation should succeed: {result:?}");
+    assert!(!test_harness.harness.tree.state.pending_sparse_trie_prune());
+}
+
+#[test]
+fn sparse_trie_prune_request_survives_failed_validation() {
+    reth_tracing::init_test_tracing();
+
+    let mut test_harness = ValidatorTestHarness::new(MAINNET.clone());
+    test_harness.harness.tree.state.set_pending_sparse_trie_prune(true);
+
+    let mut block_factory = TestBlockFactory::new(MAINNET.as_ref().clone());
+    let invalid_block = block_factory.create_invalid_consensus_block(MAINNET.genesis_hash());
+
+    let result = test_harness.validate_block_direct(invalid_block);
+
+    assert!(result.is_err(), "invalid block validation should fail");
+    assert!(test_harness.harness.tree.state.pending_sparse_trie_prune());
 }
 
 #[test]

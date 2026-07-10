@@ -189,27 +189,34 @@ impl<N: NodePrimitives> EngineApiTreeState<N> {
         self.pending_sparse_trie_prune = pending;
     }
 
-    /// Takes a pending sparse trie prune request, if any, and snapshots the in-memory parent chain
-    /// ending at `parent_hash`.
+    /// Snapshots the in-memory parent chain ending at `parent_hash` for a pending sparse trie prune
+    /// request, if any.
     ///
     /// `None` means no prune request is pending. `Some(Vec::new())` means a prune was requested,
     /// but no in-memory parent-chain blocks were found for the parent hash; the sparse trie task
     /// should still prune using the current block's changed paths.
-    pub fn take_sparse_trie_prune_blocks(
-        &mut self,
-        parent_hash: B256,
-    ) -> Option<Vec<ExecutedBlock<N>>> {
+    pub fn sparse_trie_prune_blocks(&self, parent_hash: B256) -> Option<Vec<ExecutedBlock<N>>> {
         if !self.pending_sparse_trie_prune {
             return None
         }
 
-        self.pending_sparse_trie_prune = false;
         Some(
             self.tree_state
                 .blocks_by_hash(parent_hash)
                 .map(|(_, blocks)| blocks)
                 .unwrap_or_default(),
         )
+    }
+
+    /// Takes a pending sparse trie prune request, if any, and snapshots the in-memory parent chain
+    /// ending at `parent_hash`.
+    pub fn take_sparse_trie_prune_blocks(
+        &mut self,
+        parent_hash: B256,
+    ) -> Option<Vec<ExecutedBlock<N>>> {
+        let blocks = self.sparse_trie_prune_blocks(parent_hash)?;
+        self.pending_sparse_trie_prune = false;
+        Some(blocks)
     }
 
     /// Returns true if the block has been marked as invalid.
