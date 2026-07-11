@@ -83,8 +83,18 @@ const TIMEOUT_SCALING: u32 = 3;
 /// before reading any more messages from the remote peer, throttling the peer.
 const MAX_QUEUED_OUTGOING_RESPONSES: usize = 4;
 
-/// Minimum capacity to retain for buffered incoming requests from the remote peer.
-const MIN_RECEIVED_REQUESTS_CAPACITY: usize = 1;
+/// Capacity above which the drained outgoing message queue is shrunk back to its steady-state
+/// size, see [`QueuedOutgoingMessages::shrink_to_fit`].
+const SHRINK_CAPACITY_THRESHOLD: usize = 64;
+
+/// Maximum number of messages read from the connection per session poll before the task yields
+/// back to the scheduler, see the receive loop in the session's `Future` impl.
+///
+/// Message decoding is CPU intensive, so the budget bounds how long a single busy session can
+/// occupy the executor thread. Small tx gossip messages dominate under load and are cheap to
+/// decode individually, so the budget is sized such that their per-poll fixed costs (draining
+/// command channels, advancing the sink, flushing the transport) amortize over a larger batch.
+const RECEIVE_MESSAGE_BUDGET: usize = 16;
 
 /// Soft limit for the total number of buffered outgoing broadcast items (e.g. transaction hashes).
 ///
@@ -210,10 +220,37 @@ impl<N: NetworkPrimitives> ActiveSession<N> {
         id
     }
 
-    /// Shrinks the capacity of the internal buffers.
+    /// Shrinks the capacity of the outgoing message queue once it is drained.
+    ///
+    /// The buffered incoming requests need no shrinking: the receive loop stops reading from the
+    /// wire while more than [`MAX_QUEUED_OUTGOING_RESPONSES`] of them are pending, which keeps
+    /// that buffer's capacity small.
     pub fn shrink_to_fit(&mut self) {
-        self.received_requests_from_remote.shrink_to(MIN_RECEIVED_REQUESTS_CAPACITY);
-        self.queued_outgoing.shrink_to(MAX_QUEUED_OUTGOING_RESPONSES);
+        self.queued_outgoing.shrink_to_fit();
+    }
+
+    /// Drains messages queued for sending into the connection's sink as long as the connection
+    /// can accept more, without flushing the underlying transport.
+    ///
+    /// This always advances the sink at least once, even with nothing queued, so connection
+    /// keepalive (ping) timers embedded in the sink's readiness logic are polled every session
+    /// poll.
+    ///
+    /// Returns `true` if at least one message was handed to the connection.
+    fn poll_send_queued(&mut self, cx: &mut Context<'_>) -> Result<bool, EthStreamError> {
+        let mut progress = false;
+        while self.conn.poll_ready_unpin(cx).is_ready() {
+            let Some(msg) = self.queued_outgoing.pop_front() else { break };
+            progress = true;
+            let res = match msg {
+                OutgoingMessage::Snap(msg) => self.conn.start_send_snap(msg),
+                OutgoingMessage::Eth(msg) => self.conn.start_send_unpin(msg),
+                OutgoingMessage::Broadcast(msg) => self.conn.start_send_broadcast(msg),
+                OutgoingMessage::Raw(msg) => self.conn.start_send_raw(msg),
+            };
+            res?;
+        }
+        Ok(progress)
     }
 
     /// Handle a message read from the connection.
@@ -738,7 +775,7 @@ impl<N: NetworkPrimitives> Future for ActiveSession<N> {
         // If the budget is exhausted we manually yield back control to the (coop) scheduler. This
         // manual yield point should prevent situations where polling appears to be frozen. See also <https://tokio.rs/blog/2020-04-preemption>
         // And tokio's docs on cooperative scheduling <https://docs.rs/tokio/latest/tokio/task/#cooperative-scheduling>
-        let mut budget = 4;
+        let mut budget = RECEIVE_MESSAGE_BUDGET;
 
         // The main poll loop that drives the session
         'main: loop {
@@ -814,34 +851,15 @@ impl<N: NetworkPrimitives> Future for ActiveSession<N> {
                 }
             }
 
-            // Send messages by advancing the sink and queuing in buffered messages
-            while this.conn.poll_ready_unpin(cx).is_ready() {
-                if let Some(msg) = this.queued_outgoing.pop_front() {
-                    progress = true;
-                    let res = match msg {
-                        OutgoingMessage::Snap(msg) => this.conn.start_send_snap(msg),
-                        OutgoingMessage::Eth(msg) => this.conn.start_send_unpin(msg),
-                        OutgoingMessage::Broadcast(msg) => this.conn.start_send_broadcast(msg),
-                        OutgoingMessage::Raw(msg) => this.conn.start_send_raw(msg),
-                    };
-                    if let Err(err) = res {
-                        debug!(target: "net::session", %err, remote_peer_id=?this.remote_peer_id, "failed to send message");
-                        // notify the manager
-                        return this.close_on_error(err, cx)
-                    }
-                } else {
-                    // no more messages to send over the wire
-                    break
-                }
-            }
-
-            // The sink only buffers sent messages; `poll_flush` performs the actual writes and
-            // flushes the transport once for the entire batch queued above. This also resumes a
-            // flush that returned pending on an earlier pass; a no-op if nothing is buffered.
-            match this.conn.poll_flush_unpin(cx) {
-                Poll::Pending | Poll::Ready(Ok(())) => {}
-                Poll::Ready(Err(err)) => {
-                    debug!(target: "net::session", %err, remote_peer_id=?this.remote_peer_id, "failed to flush connection");
+            // Send messages by advancing the sink and queuing in buffered messages. The sink only
+            // buffers sent messages; the explicit flush happens once per poll after the main
+            // loop, so messages queued across the loop's passes batch up (the sink still writes
+            // out on its own for control messages and when its write buffer runs full).
+            match this.poll_send_queued(cx) {
+                Ok(sent) => progress |= sent,
+                Err(err) => {
+                    debug!(target: "net::session", %err, remote_peer_id=?this.remote_peer_id, "failed to send message");
+                    // notify the manager
                     return this.close_on_error(err, cx)
                 }
             }
@@ -990,6 +1008,21 @@ impl<N: NetworkPrimitives> Future for ActiveSession<N> {
                     let msg = ActiveSessionMessage::ProtocolBreach { peer_id: this.remote_peer_id };
                     this.pending_message_to_session = Some(msg);
                 }
+            }
+        }
+
+        // Send anything the interval handlers above queued, then flush the transport for
+        // everything buffered during this poll. This also resumes a flush that returned pending
+        // on an earlier poll; a no-op if nothing is buffered.
+        if let Err(err) = this.poll_send_queued(cx) {
+            debug!(target: "net::session", %err, remote_peer_id=?this.remote_peer_id, "failed to send message");
+            return this.close_on_error(err, cx)
+        }
+        match this.conn.poll_flush_unpin(cx) {
+            Poll::Pending | Poll::Ready(Ok(())) => {}
+            Poll::Ready(Err(err)) => {
+                debug!(target: "net::session", %err, remote_peer_id=?this.remote_peer_id, "failed to flush connection");
+                return this.close_on_error(err, cx)
             }
         }
 
@@ -1253,8 +1286,13 @@ impl<N: NetworkPrimitives> QueuedOutgoingMessages<N> {
         self.count.increment(1);
     }
 
-    pub(crate) fn shrink_to(&mut self, min_capacity: usize) {
-        self.messages.shrink_to(min_capacity);
+    /// Shrinks the queue's capacity back to its steady-state size once it is drained, if it grew
+    /// well beyond it. The threshold avoids a shrink/regrow reallocation cycle on every poll
+    /// under regular bursty traffic.
+    pub(crate) fn shrink_to_fit(&mut self) {
+        if self.messages.is_empty() && self.messages.capacity() > SHRINK_CAPACITY_THRESHOLD {
+            self.messages.shrink_to(MAX_QUEUED_OUTGOING_RESPONSES);
+        }
     }
 }
 
