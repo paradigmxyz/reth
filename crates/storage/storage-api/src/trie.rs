@@ -66,57 +66,53 @@ pub trait StorageRootProvider {
     ) -> ProviderResult<StorageMultiProof>;
 }
 
-/// A range query's items and whether the range is complete, or `None` if the requested state is
-/// not available.
-pub type RangeResult<T> = ProviderResult<Option<(Vec<T>, bool)>>;
+/// A range query's items and whether the requested range is complete.
+pub type RangeResult<T> = ProviderResult<(Vec<T>, bool)>;
+
+/// A reusable state range view resolved for a specific state root.
+pub type StateRangeView = Box<dyn StateRangeProvider + Send + 'static>;
+
+/// A type that resolves retained state roots into reusable state range views.
+#[auto_impl::auto_impl(&, Arc)]
+pub trait StateRangeProviderFactory {
+    /// Returns a view pinned to `state_root`, or `None` if that root is not retained.
+    fn state_range_provider(&self, state_root: B256) -> ProviderResult<Option<StateRangeView>>;
+}
 
 /// A type that can iterate over consecutive hashed accounts and storage slots, and generate
 /// boundary proofs for them, for serving `snap/2` (EIP-8189) `GetAccountRange`/`GetStorageRanges`
 /// requests. Hash-native throughout, unlike [`StorageRootProvider`].
-#[auto_impl::auto_impl(&, Arc)]
+#[auto_impl::auto_impl(&, Box, Arc)]
 pub trait StateRangeProvider {
     /// Returns accounts (hash, account) in `[start, limit]`, bounded by `response_bytes`.
     fn account_range(
         &self,
-        state_root: B256,
         start: B256,
         limit: B256,
         response_bytes: usize,
     ) -> RangeResult<(B256, Account)>;
 
-    /// Returns the storage root for the account with hash `hashed_address`, without needing its
-    /// address preimage. `Ok(None)` under the same conditions as [`Self::account_range`].
-    fn storage_root_by_hash(
-        &self,
-        state_root: B256,
-        hashed_address: B256,
-    ) -> ProviderResult<Option<B256>>;
+    /// Returns the storage root for `hashed_address` without needing its address preimage.
+    fn storage_root_by_hash(&self, hashed_address: B256) -> ProviderResult<B256>;
 
     /// Same as [`Self::account_range`], but for the storage slots of `hashed_address`.
     fn storage_range(
         &self,
-        state_root: B256,
         hashed_address: B256,
         start: B256,
         limit: B256,
         response_bytes: usize,
     ) -> RangeResult<(B256, U256)>;
 
-    /// Returns a boundary proof for the account trie, proving inclusion of each of `keys`
-    /// (already hashed). `Ok(None)` under the same conditions as [`Self::account_range`].
-    fn account_range_proof(
-        &self,
-        state_root: B256,
-        keys: &[B256],
-    ) -> ProviderResult<Option<Vec<Bytes>>>;
+    /// Returns an account-trie boundary proof for the already-hashed `keys`.
+    fn account_range_proof(&self, keys: &[B256]) -> ProviderResult<Vec<Bytes>>;
 
     /// Same as [`Self::account_range_proof`], but for the storage trie of `hashed_address`.
     fn storage_range_proof(
         &self,
-        state_root: B256,
         hashed_address: B256,
         keys: &[B256],
-    ) -> ProviderResult<Option<Vec<Bytes>>>;
+    ) -> ProviderResult<Vec<Bytes>>;
 }
 
 /// A type that can generate state proof on top of a given post state.
