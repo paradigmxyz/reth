@@ -2,9 +2,9 @@ use crate::{
     traits::{BlockSource, ReceiptProvider},
     AccountReader, BalProvider, BalStoreHandle, BlockHashReader, BlockIdReader, BlockNumReader,
     BlockReader, BlockReaderIdExt, ChainSpecProvider, ChangeSetReader, HeaderProvider,
-    PruneCheckpointReader, RangeResult, ReceiptProviderIdExt, StateProvider, StateProviderBox,
-    StateProviderFactory, StateRangeProvider, StateRangeProviderFactory, StateRangeView,
-    StateReader, StateRootProvider, TransactionVariant, TransactionsProvider,
+    PruneCheckpointReader, RangeResponse, RangeResult, ReceiptProviderIdExt, StateProvider,
+    StateProviderBox, StateProviderFactory, StateRangeProvider, StateRangeProviderFactory,
+    StateRangeView, StateReader, StateRootProvider, TransactionVariant, TransactionsProvider,
 };
 use alloy_consensus::{
     constants::EMPTY_ROOT_HASH,
@@ -363,7 +363,9 @@ impl<T: NodePrimitives, ChainSpec> StateRangeProvider for MockEthProvider<T, Cha
         _response_bytes: usize,
     ) -> RangeResult<(B256, Account)> {
         self.ensure_snap_state_reads_succeed()?;
-        self.snap_account_range.lock().clone().ok_or(ProviderError::BestBlockNotFound)
+        let (items, complete) =
+            self.snap_account_range.lock().clone().ok_or(ProviderError::BestBlockNotFound)?;
+        Ok(RangeResponse { items, complete })
     }
 
     fn storage_root_by_hash(&self, hashed_address: B256) -> ProviderResult<B256> {
@@ -389,11 +391,13 @@ impl<T: NodePrimitives, ChainSpec> StateRangeProvider for MockEthProvider<T, Cha
             limit,
             response_bytes,
         ));
-        self.snap_storage_ranges
+        let (items, complete) = self
+            .snap_storage_ranges
             .lock()
             .pop_front()
             .flatten()
-            .ok_or(ProviderError::BestBlockNotFound)
+            .ok_or(ProviderError::BestBlockNotFound)?;
+        Ok(RangeResponse { items, complete })
     }
 
     fn account_range_proof(&self, _keys: &[B256]) -> ProviderResult<Vec<Bytes>> {

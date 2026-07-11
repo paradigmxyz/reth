@@ -30,8 +30,8 @@ use reth_prune_types::{PruneCheckpoint, PruneSegment};
 use reth_stages_types::{StageCheckpoint, StageId};
 use reth_static_file_types::StaticFileSegment;
 use reth_storage_api::{
-    BlockBodyIndicesProvider, NodePrimitivesProvider, RangeResult, StateRangeProvider,
-    StateRangeProviderFactory, StateRangeView, StorageChangeSetReader,
+    BlockBodyIndicesProvider, NodePrimitivesProvider, RangeResponse, RangeResult,
+    StateRangeProvider, StateRangeProviderFactory, StateRangeView, StorageChangeSetReader,
 };
 use reth_storage_errors::provider::ProviderResult;
 use reth_trie::{
@@ -237,7 +237,7 @@ impl<N: ProviderNodeTypes> StateRangeProvider for HistoricalStateRangeView<N> {
             entry = cursor.next().map_err(ProviderError::Database)?;
         }
 
-        Ok((accounts, complete))
+        Ok(RangeResponse { items: accounts, complete })
     }
 
     fn storage_root_by_hash(&self, hashed_address: B256) -> ProviderResult<B256> {
@@ -281,7 +281,7 @@ impl<N: ProviderNodeTypes> StateRangeProvider for HistoricalStateRangeView<N> {
             entry = cursor.next().map_err(ProviderError::Database)?;
         }
 
-        Ok((slots, complete))
+        Ok(RangeResponse { items: slots, complete })
     }
 
     fn account_range_proof(&self, keys: &[B256]) -> ProviderResult<Vec<Bytes>> {
@@ -2816,13 +2816,13 @@ mod tests {
         expected.sort_by_key(|(hash, _)| *hash);
         let state = provider.state_range_provider(EMPTY_ROOT_HASH)?.unwrap();
 
-        let (all, complete) = state.account_range(B256::ZERO, B256::repeat_byte(0xff), 10_000)?;
-        assert!(complete);
-        assert_eq!(all, expected);
+        let all = state.account_range(B256::ZERO, B256::repeat_byte(0xff), 10_000)?;
+        assert!(all.complete);
+        assert_eq!(all.items, expected);
 
-        let (bounded, complete) = state.account_range(B256::ZERO, expected[1].0, 10_000)?;
-        assert!(complete);
-        assert_eq!(bounded, expected[..2]);
+        let bounded = state.account_range(B256::ZERO, expected[1].0, 10_000)?;
+        assert!(bounded.complete);
+        assert_eq!(bounded.items, expected[..2]);
 
         Ok(())
     }
@@ -2842,9 +2842,9 @@ mod tests {
         let state = provider.state_range_provider(EMPTY_ROOT_HASH)?.unwrap();
 
         // Budget only fits a single account.
-        let (partial, complete) = state.account_range(B256::ZERO, B256::repeat_byte(0xff), 150)?;
-        assert!(!complete);
-        assert_eq!(partial.len(), 1);
+        let partial = state.account_range(B256::ZERO, B256::repeat_byte(0xff), 150)?;
+        assert!(!partial.complete);
+        assert_eq!(partial.items.len(), 1);
 
         Ok(())
     }
@@ -2870,13 +2870,13 @@ mod tests {
         let expected_root = provider.latest()?.storage_root(address, HashedStorage::default())?;
         assert_eq!(state.storage_root_by_hash(hashed_address)?, expected_root);
 
-        let (returned, complete) =
+        let returned =
             state.storage_range(hashed_address, B256::ZERO, B256::repeat_byte(0xff), 10_000)?;
-        assert!(complete);
+        assert!(returned.complete);
         let mut expected: Vec<_> =
             slots.iter().map(|entry| (keccak256(entry.key), entry.value)).collect();
         expected.sort_by_key(|(hash, _)| *hash);
-        assert_eq!(returned, expected);
+        assert_eq!(returned.items, expected);
 
         Ok(())
     }

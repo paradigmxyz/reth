@@ -31,7 +31,7 @@ use reth_network_peers::PeerId;
 use reth_primitives_traits::{Account, Block};
 use reth_storage_api::{
     BalProvider, BlockReader, BytecodeReader, GetBlockAccessListLimit, HeaderProvider,
-    StateProviderFactory, StateRangeProviderFactory,
+    RangeResponse, StateProviderFactory, StateRangeProviderFactory,
 };
 use reth_transaction_pool::{blobstore::NoopBlobStore, BlobStore};
 use std::{
@@ -514,7 +514,7 @@ where
         else {
             return Ok(empty)
         };
-        let (accounts, _) = state
+        let RangeResponse { items: accounts, .. } = state
             .account_range(req.starting_hash, req.limit_hash, response_bytes)
             .map_err(|_| RequestError::BadResponse)?;
 
@@ -567,7 +567,7 @@ where
             }
             let origin = if i == 0 { req.starting_hash } else { B256::ZERO };
             let limit = if i == 0 { req.limit_hash } else { B256::repeat_byte(0xff) };
-            let (account_slots, complete) = state
+            let RangeResponse { items: account_slots, complete } = state
                 .storage_range(hashed_address, origin, limit, remaining_bytes)
                 .map_err(|_| RequestError::BadResponse)?;
 

@@ -67,7 +67,16 @@ pub trait StorageRootProvider {
 }
 
 /// A range query's items and whether the requested range is complete.
-pub type RangeResult<T> = ProviderResult<(Vec<T>, bool)>;
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RangeResponse<T> {
+    /// The items found within the requested range, in ascending key order.
+    pub items: Vec<T>,
+    /// Whether `items` covers the entire requested range, or was cut short by the byte budget.
+    pub complete: bool,
+}
+
+/// Result of a [`StateRangeProvider`] range query.
+pub type RangeResult<T> = ProviderResult<RangeResponse<T>>;
 
 /// A reusable state range view resolved for a specific state root.
 pub type StateRangeView = Box<dyn StateRangeProvider + Send + 'static>;
