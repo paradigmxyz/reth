@@ -118,6 +118,9 @@ impl<T: ssz::Decode> ssz::Decode for Optional<T> {
 }
 
 /// Engine API v2 REST-SSZ payload status.
+///
+/// This is separate from the legacy status because REST-SSZ uses `Optional` fields instead of
+/// zero-value sentinels and legacy byte lists.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PayloadStatus {
     /// Payload validation status.
@@ -282,6 +285,8 @@ impl From<PayloadStatus> for LegacyPayloadStatus {
 }
 
 /// Engine API v2 REST-SSZ forkchoice update response.
+///
+/// The REST response is a container of two variable fields, unlike the legacy fixed payload ID.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ForkchoiceUpdateResponse {
     /// Restricted payload status; `ACCEPTED` is invalid here.
@@ -367,6 +372,9 @@ pub type ExecutionPayloadOsaka = ExecutionPayloadV3;
 pub type ExecutionPayloadAmsterdam = ExecutionPayloadV4;
 
 /// Paris payload attributes.
+///
+/// Fork-specific attributes keep later-fork fields out of the SSZ body; the legacy type is a
+/// permissive superset.
 #[derive(Clone, Debug, Default, PartialEq, Eq, ssz_derive::Encode, ssz_derive::Decode)]
 pub struct PayloadAttributesParis {
     /// Payload timestamp.
@@ -378,6 +386,9 @@ pub struct PayloadAttributesParis {
 }
 
 /// Shanghai payload attributes.
+///
+/// Fork-specific attributes keep later-fork fields out of the SSZ body; the legacy type is a
+/// permissive superset.
 #[derive(Clone, Debug, Default, PartialEq, Eq, ssz_derive::Encode, ssz_derive::Decode)]
 pub struct PayloadAttributesShanghai {
     /// Payload timestamp.
@@ -391,6 +402,9 @@ pub struct PayloadAttributesShanghai {
 }
 
 /// Cancun payload attributes.
+///
+/// Fork-specific attributes keep later-fork fields out of the SSZ body; the legacy type is a
+/// permissive superset.
 #[derive(Clone, Debug, Default, PartialEq, Eq, ssz_derive::Encode, ssz_derive::Decode)]
 pub struct PayloadAttributesCancun {
     /// Payload timestamp.
@@ -412,6 +426,8 @@ pub type PayloadAttributesPrague = PayloadAttributesCancun;
 pub type PayloadAttributesOsaka = PayloadAttributesCancun;
 
 /// Amsterdam payload attributes.
+///
+/// Fork-specific attributes keep the Amsterdam-only fields in their defined SSZ position.
 #[derive(Clone, Debug, Default, PartialEq, Eq, ssz_derive::Encode, ssz_derive::Decode)]
 pub struct PayloadAttributesAmsterdam {
     /// Payload timestamp.
@@ -613,6 +629,7 @@ pub struct BuiltPayloadParis {
 ///
 /// This follows the legacy `engine_getPayloadV2` payload-build response shape: execution payload
 /// plus block value only. `should_override_builder` starts at Cancun.
+/// The concrete V2 payload prevents the legacy V1/V2 untagged field from accepting a Paris payload.
 #[derive(Clone, Debug, PartialEq, Eq, ssz_derive::Encode, ssz_derive::Decode)]
 pub struct BuiltPayloadShanghai {
     /// Execution payload V2.
@@ -646,6 +663,9 @@ pub struct BuiltPayloadPrague {
 }
 
 /// This structure maps to the Engine API v2 REST-SSZ payload-build response for Osaka.
+///
+/// It is separate from legacy V5 because REST-SSZ places `execution_requests` before the builder
+/// override flag.
 #[derive(Clone, Debug, PartialEq, Eq, ssz_derive::Encode, ssz_derive::Decode)]
 pub struct BuiltPayloadOsaka {
     /// Execution payload V3.
@@ -662,6 +682,9 @@ pub struct BuiltPayloadOsaka {
 }
 
 /// This structure maps to the Engine API v2 REST-SSZ payload-build response for Amsterdam.
+///
+/// It is separate from legacy V6 because REST-SSZ places `execution_requests` before the builder
+/// override flag.
 #[derive(Clone, Debug, PartialEq, Eq, ssz_derive::Encode, ssz_derive::Decode)]
 pub struct BuiltPayloadAmsterdam {
     /// Execution payload V4.
@@ -802,6 +825,9 @@ impl From<BuiltPayloadAmsterdam> for LegacyBuiltPayloadAmsterdam {
 /// override hints, or a different field order.
 ///
 /// Paris payload-submission request.
+///
+/// The single-field container is required by REST-SSZ; the legacy endpoint submitted a bare
+/// payload.
 #[derive(Clone, Debug, PartialEq, Eq, ssz_derive::Encode, ssz_derive::Decode)]
 pub struct ExecutionPayloadEnvelopeParis {
     /// Submitted execution payload.
@@ -809,6 +835,8 @@ pub struct ExecutionPayloadEnvelopeParis {
 }
 
 /// Shanghai payload-submission request.
+///
+/// The single-field container is required by REST-SSZ and fixes the payload fork at decode time.
 #[derive(Clone, Debug, PartialEq, Eq, ssz_derive::Encode, ssz_derive::Decode)]
 pub struct ExecutionPayloadEnvelopeShanghai {
     /// Submitted execution payload.
@@ -816,6 +844,8 @@ pub struct ExecutionPayloadEnvelopeShanghai {
 }
 
 /// Cancun payload-submission request.
+///
+/// Cancun adds the parent beacon block root to the REST request envelope.
 #[derive(Clone, Debug, PartialEq, Eq, ssz_derive::Encode, ssz_derive::Decode)]
 pub struct ExecutionPayloadEnvelopeCancun {
     /// Submitted execution payload.
@@ -825,6 +855,8 @@ pub struct ExecutionPayloadEnvelopeCancun {
 }
 
 /// Prague payload-submission request.
+///
+/// Prague adds execution requests to the REST request envelope.
 #[derive(Clone, Debug, PartialEq, Eq, ssz_derive::Encode, ssz_derive::Decode)]
 pub struct ExecutionPayloadEnvelopePrague {
     /// Submitted execution payload.
@@ -836,6 +868,8 @@ pub struct ExecutionPayloadEnvelopePrague {
 }
 
 /// Osaka payload-submission request.
+///
+/// Osaka keeps the REST envelope shape while selecting the Osaka payload schema.
 #[derive(Clone, Debug, PartialEq, Eq, ssz_derive::Encode, ssz_derive::Decode)]
 pub struct ExecutionPayloadEnvelopeOsaka {
     /// Submitted execution payload.
@@ -847,6 +881,8 @@ pub struct ExecutionPayloadEnvelopeOsaka {
 }
 
 /// Amsterdam payload-submission request.
+///
+/// Amsterdam selects the V4 payload while retaining the Cancun and Prague envelope fields.
 #[derive(Clone, Debug, PartialEq, Eq, ssz_derive::Encode, ssz_derive::Decode)]
 pub struct ExecutionPayloadEnvelopeAmsterdam {
     /// Submitted execution payload.
@@ -912,6 +948,9 @@ impl From<(ExecutionPayloadAmsterdam, B256, Requests)> for ExecutionPayloadEnvel
 }
 
 /// Paris forkchoice-update request.
+///
+/// REST-SSZ uses an `Optional` field inside one container; legacy FCU used separate RPC
+/// parameters and a legacy `Option` encoding.
 #[derive(Clone, Debug, PartialEq, Eq, ssz_derive::Encode, ssz_derive::Decode)]
 pub struct ForkchoiceUpdateParis {
     /// Current forkchoice state.
@@ -968,6 +1007,8 @@ pub struct ForkchoiceUpdateAmsterdam {
 }
 
 /// Fork-specific execution payload body for Paris.
+///
+/// Paris omits withdrawals entirely; the legacy body keeps them as an optional union field.
 #[derive(Clone, Debug, Default, PartialEq, Eq, ssz_derive::Encode, ssz_derive::Decode)]
 pub struct ExecutionPayloadBodyParis {
     /// Enveloped encoded transactions.
@@ -975,6 +1016,8 @@ pub struct ExecutionPayloadBodyParis {
 }
 
 /// Fork-specific execution payload body for Shanghai.
+///
+/// Shanghai makes withdrawals a direct field rather than the legacy optional union.
 #[derive(Clone, Debug, Default, PartialEq, Eq, ssz_derive::Encode, ssz_derive::Decode)]
 pub struct ExecutionPayloadBodyShanghai {
     /// Enveloped encoded transactions.
@@ -993,6 +1036,8 @@ pub type ExecutionPayloadBodyPrague = ExecutionPayloadBodyShanghai;
 pub type ExecutionPayloadBodyOsaka = ExecutionPayloadBodyShanghai;
 
 /// Fork-specific execution payload body for Amsterdam.
+///
+/// Amsterdam adds the block access list as a direct field rather than a legacy optional field.
 #[derive(Clone, Debug, Default, PartialEq, Eq, ssz_derive::Encode, ssz_derive::Decode)]
 pub struct ExecutionPayloadBodyAmsterdam {
     /// Enveloped encoded transactions.
@@ -1119,6 +1164,8 @@ impl ssz::Decode for BodiesByHashRequest {
 }
 
 /// Historical body response entry with explicit availability.
+///
+/// REST-SSZ uses a boolean availability bit instead of the legacy `Option<body>` union.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct BodyEntry<T> {
     /// Whether the body is available and belongs to the requested fork.
@@ -1198,6 +1245,8 @@ impl<T: ssz::Decode> ssz::Decode for BodyEntry<T> {
 }
 
 /// Bounded REST-SSZ historical bodies response.
+///
+/// The response is a one-field SSZ container around the entries list, not a bare list.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct BodiesResponse<T> {
     /// Body entries in request or range order.
@@ -1370,6 +1419,8 @@ impl ssz::Decode for BlobsV4Request {
 }
 
 /// Blob response entry with explicit outer availability.
+///
+/// REST-SSZ keeps availability separate from the blob contents instead of using a legacy option.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct BlobEntry<T> {
     /// Whether the complete blob contents are available.
@@ -1435,6 +1486,8 @@ impl<T: ssz::Decode> ssz::Decode for BlobEntry<T> {
 }
 
 /// Bounded blob response container.
+///
+/// The outer container and entry availability match the REST-SSZ blob endpoint contract.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct BlobsResponse<T> {
     /// One response entry per requested hash.
