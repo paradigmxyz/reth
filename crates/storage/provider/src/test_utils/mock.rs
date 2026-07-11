@@ -47,7 +47,10 @@ use std::{
     collections::BTreeMap,
     fmt::Debug,
     ops::{RangeBounds, RangeInclusive},
-    sync::Arc,
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc,
+    },
 };
 use tokio::sync::broadcast;
 
@@ -71,6 +74,8 @@ pub struct MockEthProvider<T: NodePrimitives = EthPrimitives, ChainSpec = reth_c
     pub block_body_indices: Arc<Mutex<HashMap<BlockNumber, StoredBlockBodyIndices>>>,
     /// Local BAL store handle
     pub bal_store: BalStoreHandle,
+    /// Whether snap state reads should fail for handler error-path tests.
+    snap_state_reads_fail: Arc<AtomicBool>,
     tx: TxMock,
     prune_modes: Arc<PruneModes>,
 }
@@ -89,6 +94,7 @@ where
             state_roots: self.state_roots.clone(),
             block_body_indices: self.block_body_indices.clone(),
             bal_store: self.bal_store.clone(),
+            snap_state_reads_fail: self.snap_state_reads_fail.clone(),
             tx: self.tx.clone(),
             prune_modes: self.prune_modes.clone(),
         }
@@ -107,6 +113,7 @@ impl<T: NodePrimitives> MockEthProvider<T, reth_chainspec::ChainSpec> {
             state_roots: Default::default(),
             block_body_indices: Default::default(),
             bal_store: Default::default(),
+            snap_state_reads_fail: Default::default(),
             tx: Default::default(),
             prune_modes: Default::default(),
         }
@@ -114,6 +121,18 @@ impl<T: NodePrimitives> MockEthProvider<T, reth_chainspec::ChainSpec> {
 }
 
 impl<T: NodePrimitives, ChainSpec> MockEthProvider<T, ChainSpec> {
+    /// Makes snap state reads return provider errors when `fail` is true.
+    pub fn set_snap_state_reads_fail(&self, fail: bool) {
+        self.snap_state_reads_fail.store(fail, Ordering::Relaxed);
+    }
+
+    fn ensure_snap_state_reads_succeed(&self) -> ProviderResult<()> {
+        if self.snap_state_reads_fail.load(Ordering::Relaxed) {
+            return Err(ProviderError::BestBlockNotFound)
+        }
+        Ok(())
+    }
+
     /// Add block to local block store
     pub fn add_block(&self, hash: B256, block: T::Block) {
         self.add_header(hash, block.header().clone());
@@ -191,6 +210,7 @@ impl<T: NodePrimitives, ChainSpec> MockEthProvider<T, ChainSpec> {
             state_roots: self.state_roots,
             block_body_indices: self.block_body_indices,
             bal_store: self.bal_store,
+            snap_state_reads_fail: self.snap_state_reads_fail,
             tx: self.tx,
             prune_modes: self.prune_modes,
         }
@@ -232,6 +252,7 @@ impl<T: NodePrimitives, ChainSpec> StateRangeProvider for MockEthProvider<T, Cha
         _limit: B256,
         _response_bytes: usize,
     ) -> RangeResult<(B256, Account)> {
+        self.ensure_snap_state_reads_succeed()?;
         Ok(None)
     }
 
@@ -240,6 +261,7 @@ impl<T: NodePrimitives, ChainSpec> StateRangeProvider for MockEthProvider<T, Cha
         _state_root: B256,
         _hashed_address: B256,
     ) -> ProviderResult<Option<B256>> {
+        self.ensure_snap_state_reads_succeed()?;
         Ok(None)
     }
 
@@ -251,6 +273,7 @@ impl<T: NodePrimitives, ChainSpec> StateRangeProvider for MockEthProvider<T, Cha
         _limit: B256,
         _response_bytes: usize,
     ) -> RangeResult<(B256, U256)> {
+        self.ensure_snap_state_reads_succeed()?;
         Ok(None)
     }
 
@@ -259,6 +282,7 @@ impl<T: NodePrimitives, ChainSpec> StateRangeProvider for MockEthProvider<T, Cha
         _state_root: B256,
         _keys: &[B256],
     ) -> ProviderResult<Option<Vec<Bytes>>> {
+        self.ensure_snap_state_reads_succeed()?;
         Ok(None)
     }
 
@@ -268,6 +292,7 @@ impl<T: NodePrimitives, ChainSpec> StateRangeProvider for MockEthProvider<T, Cha
         _hashed_address: B256,
         _keys: &[B256],
     ) -> ProviderResult<Option<Vec<Bytes>>> {
+        self.ensure_snap_state_reads_succeed()?;
         Ok(None)
     }
 }
@@ -982,6 +1007,7 @@ impl<T: NodePrimitives, ChainSpec: EthChainSpec + Send + Sync + 'static> StatePr
     for MockEthProvider<T, ChainSpec>
 {
     fn latest(&self) -> ProviderResult<StateProviderBox> {
+        self.ensure_snap_state_reads_succeed()?;
         Ok(Box::new(self.clone()))
     }
 
