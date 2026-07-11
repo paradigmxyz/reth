@@ -15,7 +15,7 @@ use crate::engine_ssz_containers::{
 };
 use alloy_consensus::{Transaction, TxEnvelope};
 use alloy_eips::{eip2718::Decodable2718, eip7685::RequestsOrHash};
-use alloy_primitives::{hex, Bytes, B128, B256};
+use alloy_primitives::{Bytes, B128, B256, B64};
 use alloy_rpc_types_engine::{
     CancunPayloadFields, ExecutionData, ExecutionPayload, ExecutionPayloadFieldV2,
     ExecutionPayloadSidecar, ForkchoiceState, PayloadAttributes, PayloadId, PraguePayloadFields,
@@ -294,7 +294,8 @@ fn parse_engine_path(path: &str) -> Option<EngineSszEndpoint> {
             Some(EngineSszEndpoint::NewPayload)
         }
         (Some("engine"), Some("v1"), Some("payloads"), Some(payload_id), None) => {
-            Some(EngineSszEndpoint::GetPayload(parse_payload_id(payload_id)?))
+            let payload_id = payload_id.parse::<B64>().ok()?;
+            Some(EngineSszEndpoint::GetPayload(PayloadId::from(payload_id)))
         }
         (Some("engine"), Some("v1"), Some("forkchoice"), None, None) => {
             Some(EngineSszEndpoint::Forkchoice)
@@ -365,16 +366,6 @@ impl std::str::FromStr for EngineSszFork {
 
 fn parse_method_version(version: &str) -> Option<u8> {
     version.strip_prefix('v')?.parse().ok().filter(|version| (1..=4).contains(version))
-}
-
-fn parse_payload_id(payload_id: &str) -> Option<PayloadId> {
-    let payload_id = payload_id.strip_prefix("0x").unwrap_or(payload_id);
-    if payload_id.len() != 16 {
-        return None
-    }
-    let mut bytes = [0u8; 8];
-    hex::decode_to_slice(payload_id, &mut bytes).ok()?;
-    Some(PayloadId::new(bytes))
 }
 
 fn handle_capabilities() -> HttpResponse {
