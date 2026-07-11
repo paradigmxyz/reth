@@ -577,11 +577,20 @@ where
                 .map_err(ConsensusError::from));
         }
 
-        let is_bogota_active =
-            Into::<SpecId>::into(*evm_env.spec_id()).is_enabled_in(SpecId::BOGOTA);
-        let (warm_accesses, wam_root) = if is_bogota_active {
+        let is_amsterdam_active =
+            Into::<SpecId>::into(*evm_env.spec_id()).is_enabled_in(SpecId::AMSTERDAM);
+        let (warm_accesses, wam_root) = if is_amsterdam_active {
             let parent_wam = ensure_ok!(self.warm_accesses_for_parent(input.parent_hash(), &ctx));
             let wam_root = CommittedWarmAccessMultiset::from_wam(parent_wam.clone()).root();
+            info!(
+                target: "engine::tree::payload_validator",
+                block_hash = ?input.hash(),
+                parent_hash = ?input.parent_hash(),
+                wam = ?parent_wam,
+                ?wam_root,
+                decoded_bal = ?decoded_bal,
+                "Prepared WAM before block execution"
+            );
             (
                 WarmAccessSnapshot::from_wam_and_bal(&parent_wam, decoded_bal.as_deref()),
                 Some(wam_root),
@@ -801,7 +810,7 @@ where
         };
 
         let wam_items =
-            is_bogota_active.then(|| built_bal.as_ref().map(WamItems::from_bal)).flatten();
+            is_amsterdam_active.then(|| built_bal.as_ref().map(WamItems::from_bal)).flatten();
         ensure_ok_post_block!(
             self.validate_post_execution(
                 &block,
@@ -1175,7 +1184,7 @@ where
 
             let Some(bal) = self.provider.bal_store().get_decoded_by_hash(hash)? else {
                 if self.block_has_bal_hash(hash, ctx)? {
-                    return Err(Self::missing_expected_bal_error(number, hash))
+                    warn!(target: "engine::tree::payload_validator", ?number, ?hash, "Expected BAL is unavailable while reconstructing WAM; skipping block");
                 }
                 continue;
             };
@@ -1201,12 +1210,6 @@ where
             .header(hash)?
             .ok_or(ProviderError::HeaderNotFound(hash.into()))
             .map(|header| header.block_access_list_hash().is_some())
-    }
-
-    fn missing_expected_bal_error(number: u64, hash: B256) -> ProviderError {
-        ProviderError::other(std::io::Error::other(format!(
-            "missing expected BAL for block #{number} ({hash})"
-        )))
     }
 
     fn missing_canonical_hash_error(number: u64, tip_hash: B256, tip_number: u64) -> ProviderError {

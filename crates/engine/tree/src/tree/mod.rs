@@ -535,7 +535,7 @@ where
 
             let Some(bal) = self.provider.bal_store().get_decoded_by_hash(hash)? else {
                 if self.block_has_bal_hash(hash)? {
-                    return Err(Self::missing_expected_bal_error(number, hash))
+                    warn!(target: "engine::tree", ?number, ?hash, "Expected BAL is unavailable while reconstructing WAM; skipping block");
                 }
                 continue;
             };
@@ -563,7 +563,7 @@ where
             .map(|header| header.block_access_list_hash().is_some())
     }
 
-    fn is_bogota_active_at(&self, tip: BlockNumHash) -> ProviderResult<bool> {
+    fn is_amsterdam_active_at(&self, tip: BlockNumHash) -> ProviderResult<bool> {
         let canonical_head = self.canonical_in_memory_state.get_canonical_head();
         let header = if canonical_head.hash() == tip.hash {
             canonical_head
@@ -578,13 +578,7 @@ where
         };
 
         let evm_env = self.evm_config.evm_env(header.header()).map_err(ProviderError::other)?;
-        Ok(Into::<SpecId>::into(*evm_env.spec_id()).is_enabled_in(SpecId::BOGOTA))
-    }
-
-    fn missing_expected_bal_error(number: u64, hash: B256) -> ProviderError {
-        ProviderError::other(std::io::Error::other(format!(
-            "missing expected BAL for block #{number} ({hash})"
-        )))
+        Ok(Into::<SpecId>::into(*evm_env.spec_id()).is_enabled_in(SpecId::AMSTERDAM))
     }
 
     fn missing_canonical_hash_error(number: u64, tip: BlockNumHash) -> ProviderError {
@@ -595,7 +589,7 @@ where
     }
 
     fn update_canonical_warm_accesses(&mut self, tip: BlockNumHash) -> ProviderResult<()> {
-        if !self.is_bogota_active_at(tip)? {
+        if !self.is_amsterdam_active_at(tip)? {
             self.state.tree_state.set_warm_accesses(WarmAccessMultiset::default(), 0);
             return Ok(())
         }
@@ -611,7 +605,7 @@ where
     ) -> ProviderResult<()> {
         for block in new_blocks {
             let num_hash = block.recovered_block().num_hash();
-            if !self.is_bogota_active_at(num_hash)? {
+            if !self.is_amsterdam_active_at(num_hash)? {
                 self.state.tree_state.set_warm_accesses(WarmAccessMultiset::default(), 0);
                 continue
             }
@@ -619,7 +613,8 @@ where
             let Some(add_bal) = self.provider.bal_store().get_decoded_by_hash(num_hash.hash)?
             else {
                 if block.recovered_block().header().block_access_list_hash().is_some() {
-                    return Err(Self::missing_expected_bal_error(num_hash.number, num_hash.hash))
+                    warn!(target: "engine::tree", number = num_hash.number, hash = ?num_hash.hash, "Expected BAL is unavailable while advancing WAM; rebuilding from available history");
+                    return self.update_canonical_warm_accesses(num_hash)
                 }
                 continue;
             };
@@ -639,7 +634,8 @@ where
                 match self.provider.bal_store().get_decoded_by_hash(hash)? {
                     Some(bal) => Some(WamItems::from_accounts(bal.as_bal().as_slice())),
                     None if self.block_has_bal_hash(hash)? => {
-                        return Err(Self::missing_expected_bal_error(number, hash))
+                        warn!(target: "engine::tree", ?number, ?hash, "Expected leaving BAL is unavailable while advancing WAM; rebuilding from available history");
+                        return self.update_canonical_warm_accesses(num_hash)
                     }
                     None => {
                         warn!(target: "engine::tree", ?number, ?hash, "Leaving pre-BAL block has no BAL; rebuilding WAM");

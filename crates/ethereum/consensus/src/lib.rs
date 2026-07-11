@@ -263,7 +263,7 @@ where
             }
         }
 
-        if self.chain_spec.is_bogota_active_at_timestamp(header.timestamp()) {
+        if self.chain_spec.is_amsterdam_active_at_timestamp(header.timestamp()) {
             if header.wam_root().is_none() {
                 return Err(ConsensusError::WamRootMissing)
             }
@@ -339,7 +339,7 @@ mod tests {
         RecoveredBlock::new_unhashed(EthBlock { header, body: Default::default() }, Vec::new())
     }
 
-    fn bogota_recovered_block_with_wam_root(root: B256) -> RecoveredBlock<EthBlock> {
+    fn amsterdam_recovered_block_with_wam_root(root: B256) -> RecoveredBlock<EthBlock> {
         let mut header = valid_prague_header();
         header.block_access_list_hash = Some(B256::ZERO);
         header.slot_number = Some(0);
@@ -524,15 +524,15 @@ mod tests {
     }
 
     #[test]
-    fn bogota_post_execution_requires_wam_root() {
+    fn amsterdam_post_execution_requires_wam_root() {
         let chain_spec = Arc::new(
             ChainSpecBuilder::mainnet()
                 .amsterdam_activated()
-                .with_fork(EthereumHardfork::Bogota, ForkCondition::Timestamp(0))
+                .with_fork(EthereumHardfork::Amsterdam, ForkCondition::Timestamp(0))
                 .build(),
         );
         let expected_root = B256::repeat_byte(0x42);
-        let block = bogota_recovered_block_with_wam_root(expected_root);
+        let block = amsterdam_recovered_block_with_wam_root(expected_root);
         let result = BlockExecutionResult::<Receipt>::default();
         let consensus = EthBeaconConsensus::new(chain_spec);
 

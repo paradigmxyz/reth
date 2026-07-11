@@ -190,7 +190,7 @@ where
     let state = StateProviderDatabase::new(state_provider.as_ref());
     let chain_spec = client.chain_spec();
     let is_amsterdam = chain_spec.is_amsterdam_active_at_timestamp(attributes.timestamp());
-    let wam_root = if chain_spec.is_bogota_active_at_timestamp(attributes.timestamp()) {
+    let wam_root = if chain_spec.is_amsterdam_active_at_timestamp(attributes.timestamp()) {
         Some(compute_wam_root(&client, parent_header.num_hash())?)
     } else {
         None
@@ -573,7 +573,7 @@ where
 
     let Some(bal) = client.bal_store().get_decoded_by_hash(hash)? else {
         if block_has_bal_hash(client, hash)? {
-            return Err(PayloadBuilderError::other(missing_expected_bal_error(number, hash)))
+            warn!(target: "payload_builder", ?number, ?hash, "Expected BAL is unavailable while computing WAM root; skipping block");
         }
         return Ok(None)
     };
@@ -589,10 +589,4 @@ where
         .header(hash)?
         .ok_or(ProviderError::HeaderNotFound(hash.into()))
         .map(|header| header.block_access_list_hash().is_some())
-}
-
-fn missing_expected_bal_error(number: u64, hash: B256) -> ProviderError {
-    ProviderError::other(std::io::Error::other(format!(
-        "missing expected BAL for block #{number} ({hash})"
-    )))
 }

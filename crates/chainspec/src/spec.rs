@@ -91,7 +91,7 @@ pub fn make_genesis_header(genesis: &Genesis, hardforks: &ChainHardforks) -> Hea
 
     // Bogota starts with an empty WAM before any BAL enters the warming window.
     let wam_root = hardforks
-        .fork(EthereumHardfork::Bogota)
+        .fork(EthereumHardfork::Amsterdam)
         .active_at_timestamp(genesis.timestamp)
         .then(|| CommittedWarmAccessMultiset::new().root());
 
