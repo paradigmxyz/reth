@@ -44,7 +44,7 @@ use reth_trie::{
     MultiProofTargets, StorageMultiProof, StorageProof, TrieInput,
 };
 use std::{
-    collections::BTreeMap,
+    collections::{BTreeMap, VecDeque},
     fmt::Debug,
     ops::{RangeBounds, RangeInclusive},
     sync::{
@@ -76,6 +76,10 @@ pub struct MockEthProvider<T: NodePrimitives = EthPrimitives, ChainSpec = reth_c
     pub bal_store: BalStoreHandle,
     /// Whether snap state reads should fail for handler error-path tests.
     snap_state_reads_fail: Arc<AtomicBool>,
+    /// Account range returned to snap handler tests.
+    snap_account_range: Arc<Mutex<Option<(Vec<(B256, Account)>, bool)>>>,
+    /// Storage ranges returned to snap handler tests.
+    snap_storage_ranges: Arc<Mutex<VecDeque<Option<(Vec<(B256, U256)>, bool)>>>>,
     tx: TxMock,
     prune_modes: Arc<PruneModes>,
 }
@@ -95,6 +99,8 @@ where
             block_body_indices: self.block_body_indices.clone(),
             bal_store: self.bal_store.clone(),
             snap_state_reads_fail: self.snap_state_reads_fail.clone(),
+            snap_account_range: self.snap_account_range.clone(),
+            snap_storage_ranges: self.snap_storage_ranges.clone(),
             tx: self.tx.clone(),
             prune_modes: self.prune_modes.clone(),
         }
@@ -114,6 +120,8 @@ impl<T: NodePrimitives> MockEthProvider<T, reth_chainspec::ChainSpec> {
             block_body_indices: Default::default(),
             bal_store: Default::default(),
             snap_state_reads_fail: Default::default(),
+            snap_account_range: Default::default(),
+            snap_storage_ranges: Default::default(),
             tx: Default::default(),
             prune_modes: Default::default(),
         }
@@ -124,6 +132,16 @@ impl<T: NodePrimitives, ChainSpec> MockEthProvider<T, ChainSpec> {
     /// Makes snap state reads return provider errors when `fail` is true.
     pub fn set_snap_state_reads_fail(&self, fail: bool) {
         self.snap_state_reads_fail.store(fail, Ordering::Relaxed);
+    }
+
+    /// Sets the account range returned to snap handler tests.
+    pub fn set_snap_account_range(&self, range: Option<(Vec<(B256, Account)>, bool)>) {
+        *self.snap_account_range.lock() = range;
+    }
+
+    /// Sets the storage ranges returned to consecutive snap handler calls.
+    pub fn set_snap_storage_ranges(&self, ranges: Vec<Option<(Vec<(B256, U256)>, bool)>>) {
+        *self.snap_storage_ranges.lock() = ranges.into();
     }
 
     fn ensure_snap_state_reads_succeed(&self) -> ProviderResult<()> {
@@ -211,6 +229,8 @@ impl<T: NodePrimitives, ChainSpec> MockEthProvider<T, ChainSpec> {
             block_body_indices: self.block_body_indices,
             bal_store: self.bal_store,
             snap_state_reads_fail: self.snap_state_reads_fail,
+            snap_account_range: self.snap_account_range,
+            snap_storage_ranges: self.snap_storage_ranges,
             tx: self.tx,
             prune_modes: self.prune_modes,
         }
@@ -253,7 +273,7 @@ impl<T: NodePrimitives, ChainSpec> StateRangeProvider for MockEthProvider<T, Cha
         _response_bytes: usize,
     ) -> RangeResult<(B256, Account)> {
         self.ensure_snap_state_reads_succeed()?;
-        Ok(None)
+        Ok(self.snap_account_range.lock().clone())
     }
 
     fn storage_root_by_hash(
@@ -274,7 +294,7 @@ impl<T: NodePrimitives, ChainSpec> StateRangeProvider for MockEthProvider<T, Cha
         _response_bytes: usize,
     ) -> RangeResult<(B256, U256)> {
         self.ensure_snap_state_reads_succeed()?;
-        Ok(None)
+        Ok(self.snap_storage_ranges.lock().pop_front().flatten())
     }
 
     fn account_range_proof(
