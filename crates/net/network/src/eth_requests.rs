@@ -821,9 +821,9 @@ mod tests {
         eip4844::{BlobAndProofV1, BlobAndProofV2, BlobCellsAndProofsV1},
         eip7594::{BlobTransactionSidecarVariant, Cell},
     };
-    use alloy_primitives::{TxHash, B128};
+    use alloy_primitives::{keccak256, Address, TxHash, B128};
     use reth_network_api::test_utils::PeersHandle;
-    use reth_provider::test_utils::MockEthProvider;
+    use reth_provider::test_utils::{ExtendedAccount, MockEthProvider};
     use reth_storage_api::noop::NoopProvider;
     use reth_transaction_pool::blobstore::{BlobStoreCleanupStat, BlobStoreError};
     use std::sync::{
@@ -1045,18 +1045,17 @@ mod tests {
     #[tokio::test]
     async fn snap_requests_reject_inconsistent_provider_results() {
         let missing_storage_root = MockEthProvider::default();
-        missing_storage_root
-            .set_snap_account_range(Some((vec![(B256::ZERO, Account::default())], true)));
+        missing_storage_root.set_snap_account_range(vec![(B256::ZERO, Account::default())], true);
 
         let missing_account_proof = MockEthProvider::default();
-        missing_account_proof.set_snap_account_range(Some((Vec::new(), true)));
+        missing_account_proof.set_snap_account_range(Vec::new(), true);
 
         let missing_storage_proof = MockEthProvider::default();
-        missing_storage_proof
-            .set_snap_storage_ranges(vec![Some((vec![(B256::ZERO, U256::from(1))], false))]);
+        missing_storage_proof.push_snap_storage_range(vec![(B256::ZERO, U256::from(1))], false);
 
         let storage_disappears = MockEthProvider::default();
-        storage_disappears.set_snap_storage_ranges(vec![Some((Vec::new(), true)), None]);
+        storage_disappears.push_snap_storage_range(Vec::new(), true);
+        storage_disappears.push_unavailable_snap_storage_range();
 
         let account_request = || {
             SnapProtocolMessage::GetAccountRange(GetAccountRangeMessage {
@@ -1090,5 +1089,137 @@ mod tests {
             handler.on_snap_request(PeerId::default(), request, response);
             assert_eq!(rx.await.unwrap(), Err(RequestError::BadResponse));
         }
+    }
+
+    #[tokio::test]
+    async fn snap_account_range_response_encodes_accounts_and_proof() {
+        let provider = MockEthProvider::default();
+        let first_hash = B256::repeat_byte(0x01);
+        let second_hash = B256::repeat_byte(0x02);
+        let storage_root = B256::repeat_byte(0x11);
+        let code_hash = B256::repeat_byte(0x22);
+        let proof = vec![Bytes::from_static(&[0xaa])];
+        provider.set_snap_account_range(
+            vec![
+                (
+                    first_hash,
+                    Account { nonce: 1, balance: U256::from(2), bytecode_hash: Some(code_hash) },
+                ),
+                (second_hash, Account { nonce: 3, balance: U256::from(4), bytecode_hash: None }),
+            ],
+            true,
+        );
+        provider.set_snap_storage_root(first_hash, storage_root);
+        provider.set_snap_storage_root(second_hash, EMPTY_ROOT_HASH);
+        provider.set_snap_account_proof(Some(proof.clone()));
+
+        let mut full_body = vec![0xf8, 0x44, 0x01, 0x02, 0xa0];
+        full_body.extend_from_slice(storage_root.as_slice());
+        full_body.push(0xa0);
+        full_body.extend_from_slice(code_hash.as_slice());
+        let empty_body = Bytes::from_static(&[0xc4, 0x03, 0x04, 0x80, 0x80]);
+
+        let handler = snap_handler(provider);
+        let (response, rx) = oneshot::channel();
+        handler.on_snap_request(
+            PeerId::default(),
+            SnapProtocolMessage::GetAccountRange(GetAccountRangeMessage {
+                request_id: 1,
+                root_hash: B256::ZERO,
+                starting_hash: B256::ZERO,
+                limit_hash: B256::repeat_byte(0xff),
+                response_bytes: SOFT_RESPONSE_LIMIT as u64,
+            }),
+            response,
+        );
+
+        assert_eq!(
+            rx.await.unwrap(),
+            Ok(SnapResponse::AccountRange(AccountRangeMessage {
+                request_id: 1,
+                accounts: vec![
+                    AccountData { hash: first_hash, body: full_body.into() },
+                    AccountData { hash: second_hash, body: empty_body },
+                ],
+                proof,
+            }))
+        );
+    }
+
+    #[tokio::test]
+    async fn snap_storage_range_response_encodes_values_and_proof() {
+        let provider = MockEthProvider::default();
+        let first_hash = B256::repeat_byte(0x01);
+        let second_hash = B256::repeat_byte(0x02);
+        let proof = vec![Bytes::from_static(&[0xbb])];
+        provider.push_snap_storage_range(
+            vec![(first_hash, U256::from(0x0102)), (second_hash, U256::from(0xff))],
+            false,
+        );
+        provider.set_snap_storage_proof(Some(proof.clone()));
+
+        let handler = snap_handler(provider);
+        let (response, rx) = oneshot::channel();
+        handler.on_snap_request(
+            PeerId::default(),
+            SnapProtocolMessage::GetStorageRanges(GetStorageRangesMessage {
+                request_id: 2,
+                root_hash: B256::ZERO,
+                account_hashes: vec![B256::repeat_byte(0x03)],
+                starting_hash: B256::ZERO,
+                limit_hash: B256::repeat_byte(0xff),
+                response_bytes: SOFT_RESPONSE_LIMIT as u64,
+            }),
+            response,
+        );
+
+        assert_eq!(
+            rx.await.unwrap(),
+            Ok(SnapResponse::StorageRanges(StorageRangesMessage {
+                request_id: 2,
+                slots: vec![vec![
+                    StorageData { hash: first_hash, data: Bytes::from_static(&[0x01, 0x02]) },
+                    StorageData { hash: second_hash, data: Bytes::from_static(&[0xff]) },
+                ]],
+                proof,
+            }))
+        );
+    }
+
+    #[tokio::test]
+    async fn snap_byte_codes_response_preserves_found_code_order() {
+        let provider = MockEthProvider::default();
+        let code = Bytes::from_static(&[0x60, 0x00]);
+        let code_hash = keccak256(&code);
+        let later_code = Bytes::from_static(&[0x60, 0x01]);
+        let later_code_hash = keccak256(&later_code);
+        provider.add_account(
+            Address::repeat_byte(0x01),
+            ExtendedAccount::new(1, U256::ZERO).with_bytecode(code.clone()),
+        );
+        provider.add_account(
+            Address::repeat_byte(0x02),
+            ExtendedAccount::new(1, U256::ZERO).with_bytecode(later_code),
+        );
+
+        let handler = snap_handler(provider);
+        let (response, rx) = oneshot::channel();
+        handler.on_snap_request(
+            PeerId::default(),
+            SnapProtocolMessage::GetByteCodes(reth_eth_wire::snap::GetByteCodesMessage {
+                request_id: 3,
+                hashes: vec![KECCAK_EMPTY, B256::repeat_byte(0xff), code_hash, later_code_hash],
+                response_bytes: 1,
+            }),
+            response,
+        );
+
+        assert_eq!(
+            rx.await.unwrap(),
+            Ok(SnapResponse::ByteCodes(ByteCodesMessage {
+                request_id: 3,
+                codes: vec![Bytes::new(), code],
+            }))
+        );
     }
 }

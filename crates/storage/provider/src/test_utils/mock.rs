@@ -77,12 +77,23 @@ pub struct MockEthProvider<T: NodePrimitives = EthPrimitives, ChainSpec = reth_c
     /// Whether snap state reads should fail for handler error-path tests.
     snap_state_reads_fail: Arc<AtomicBool>,
     /// Account range returned to snap handler tests.
-    snap_account_range: Arc<Mutex<Option<(Vec<(B256, Account)>, bool)>>>,
+    snap_account_range: Arc<Mutex<MockAccountRange>>,
+    /// Storage roots returned to snap handler tests, keyed by hashed address.
+    snap_storage_roots: Arc<Mutex<B256Map<B256>>>,
     /// Storage ranges returned to snap handler tests.
-    snap_storage_ranges: Arc<Mutex<VecDeque<Option<(Vec<(B256, U256)>, bool)>>>>,
+    snap_storage_ranges: Arc<Mutex<VecDeque<MockStorageRange>>>,
+    /// Account proof returned to snap handler tests.
+    snap_account_proof: Arc<Mutex<Option<Vec<Bytes>>>>,
+    /// Storage proof returned to snap handler tests.
+    snap_storage_proof: Arc<Mutex<Option<Vec<Bytes>>>>,
     tx: TxMock,
     prune_modes: Arc<PruneModes>,
 }
+
+/// Optional mock account entries paired with their range-completion status.
+type MockAccountRange = Option<(Vec<(B256, Account)>, bool)>;
+/// Optional mock storage slots paired with their range-completion status.
+type MockStorageRange = Option<(Vec<(B256, U256)>, bool)>;
 
 impl<T: NodePrimitives, ChainSpec> Clone for MockEthProvider<T, ChainSpec>
 where
@@ -100,7 +111,10 @@ where
             bal_store: self.bal_store.clone(),
             snap_state_reads_fail: self.snap_state_reads_fail.clone(),
             snap_account_range: self.snap_account_range.clone(),
+            snap_storage_roots: self.snap_storage_roots.clone(),
             snap_storage_ranges: self.snap_storage_ranges.clone(),
+            snap_account_proof: self.snap_account_proof.clone(),
+            snap_storage_proof: self.snap_storage_proof.clone(),
             tx: self.tx.clone(),
             prune_modes: self.prune_modes.clone(),
         }
@@ -121,7 +135,10 @@ impl<T: NodePrimitives> MockEthProvider<T, reth_chainspec::ChainSpec> {
             bal_store: Default::default(),
             snap_state_reads_fail: Default::default(),
             snap_account_range: Default::default(),
+            snap_storage_roots: Default::default(),
             snap_storage_ranges: Default::default(),
+            snap_account_proof: Default::default(),
+            snap_storage_proof: Default::default(),
             tx: Default::default(),
             prune_modes: Default::default(),
         }
@@ -134,14 +151,34 @@ impl<T: NodePrimitives, ChainSpec> MockEthProvider<T, ChainSpec> {
         self.snap_state_reads_fail.store(fail, Ordering::Relaxed);
     }
 
-    /// Sets the account range returned to snap handler tests.
-    pub fn set_snap_account_range(&self, range: Option<(Vec<(B256, Account)>, bool)>) {
-        *self.snap_account_range.lock() = range;
+    /// Sets the available account range returned to snap handler tests.
+    pub fn set_snap_account_range(&self, accounts: Vec<(B256, Account)>, complete: bool) {
+        *self.snap_account_range.lock() = Some((accounts, complete));
     }
 
-    /// Sets the storage ranges returned to consecutive snap handler calls.
-    pub fn set_snap_storage_ranges(&self, ranges: Vec<Option<(Vec<(B256, U256)>, bool)>>) {
-        *self.snap_storage_ranges.lock() = ranges.into();
+    /// Sets an account's storage root for snap handler tests.
+    pub fn set_snap_storage_root(&self, hashed_address: B256, storage_root: B256) {
+        self.snap_storage_roots.lock().insert(hashed_address, storage_root);
+    }
+
+    /// Adds an available storage range for the next snap handler call.
+    pub fn push_snap_storage_range(&self, slots: Vec<(B256, U256)>, complete: bool) {
+        self.snap_storage_ranges.lock().push_back(Some((slots, complete)));
+    }
+
+    /// Adds an unavailable storage range for the next snap handler call.
+    pub fn push_unavailable_snap_storage_range(&self) {
+        self.snap_storage_ranges.lock().push_back(None);
+    }
+
+    /// Sets the account proof returned to snap handler tests.
+    pub fn set_snap_account_proof(&self, proof: Option<Vec<Bytes>>) {
+        *self.snap_account_proof.lock() = proof;
+    }
+
+    /// Sets the storage proof returned to snap handler tests.
+    pub fn set_snap_storage_proof(&self, proof: Option<Vec<Bytes>>) {
+        *self.snap_storage_proof.lock() = proof;
     }
 
     fn ensure_snap_state_reads_succeed(&self) -> ProviderResult<()> {
@@ -230,7 +267,10 @@ impl<T: NodePrimitives, ChainSpec> MockEthProvider<T, ChainSpec> {
             bal_store: self.bal_store,
             snap_state_reads_fail: self.snap_state_reads_fail,
             snap_account_range: self.snap_account_range,
+            snap_storage_roots: self.snap_storage_roots,
             snap_storage_ranges: self.snap_storage_ranges,
+            snap_account_proof: self.snap_account_proof,
+            snap_storage_proof: self.snap_storage_proof,
             tx: self.tx,
             prune_modes: self.prune_modes,
         }
@@ -279,10 +319,10 @@ impl<T: NodePrimitives, ChainSpec> StateRangeProvider for MockEthProvider<T, Cha
     fn storage_root_by_hash(
         &self,
         _state_root: B256,
-        _hashed_address: B256,
+        hashed_address: B256,
     ) -> ProviderResult<Option<B256>> {
         self.ensure_snap_state_reads_succeed()?;
-        Ok(None)
+        Ok(self.snap_storage_roots.lock().get(&hashed_address).copied())
     }
 
     fn storage_range(
@@ -303,7 +343,7 @@ impl<T: NodePrimitives, ChainSpec> StateRangeProvider for MockEthProvider<T, Cha
         _keys: &[B256],
     ) -> ProviderResult<Option<Vec<Bytes>>> {
         self.ensure_snap_state_reads_succeed()?;
-        Ok(None)
+        Ok(self.snap_account_proof.lock().clone())
     }
 
     fn storage_range_proof(
@@ -313,7 +353,7 @@ impl<T: NodePrimitives, ChainSpec> StateRangeProvider for MockEthProvider<T, Cha
         _keys: &[B256],
     ) -> ProviderResult<Option<Vec<Bytes>>> {
         self.ensure_snap_state_reads_succeed()?;
-        Ok(None)
+        Ok(self.snap_storage_proof.lock().clone())
     }
 }
 
