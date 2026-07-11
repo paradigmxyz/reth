@@ -27,6 +27,7 @@ use reth_engine_primitives::EngineApiValidator;
 use reth_ethereum_engine_primitives::EthEngineTypes;
 use reth_provider::{BalProvider, BlockReader, HeaderProvider, StateProviderFactory};
 use reth_rpc::EngineApi;
+use reth_rpc_engine_api::EngineApiError;
 use reth_transaction_pool::TransactionPool;
 use ssz::Decode;
 use std::{
@@ -239,6 +240,9 @@ where
             if method != "GET" {
                 return text_response(STATUS_METHOD_NOT_ALLOWED, "method not allowed")
             }
+            let Ok(payload_id) = payload_id else {
+                return text_response(STATUS_BAD_REQUEST, "invalid payload id")
+            };
             let Some(fork) = request_fork(&request) else {
                 return text_response(STATUS_BAD_REQUEST, "unsupported fork")
             };
@@ -294,8 +298,8 @@ fn parse_engine_path(path: &str) -> Option<EngineSszEndpoint> {
             Some(EngineSszEndpoint::NewPayload)
         }
         (Some("engine"), Some("v1"), Some("payloads"), Some(payload_id), None) => {
-            let payload_id = payload_id.parse::<B64>().ok()?;
-            Some(EngineSszEndpoint::GetPayload(PayloadId::from(payload_id)))
+            let payload_id = payload_id.parse::<B64>().map(PayloadId::from);
+            Some(EngineSszEndpoint::GetPayload(payload_id))
         }
         (Some("engine"), Some("v1"), Some("forkchoice"), None, None) => {
             Some(EngineSszEndpoint::Forkchoice)
@@ -312,7 +316,7 @@ enum EngineSszEndpoint {
     Capabilities,
     Identity,
     NewPayload,
-    GetPayload(PayloadId),
+    GetPayload(Result<PayloadId, <B64 as std::str::FromStr>::Err>),
     Forkchoice,
     Blobs(u8),
 }
@@ -420,32 +424,41 @@ where
                     }
                 }
             }
-            Err(err) => text_response(STATUS_INTERNAL_SERVER_ERROR, err.to_string()),
+            Err(err) => get_payload_error_response(err),
         },
         EngineSszFork::Shanghai => match engine_api.get_payload_v2_metered(payload_id).await {
             Ok(payload) => match BuiltPayloadShanghai::try_from(payload) {
                 Ok(payload) => ssz_response(payload),
                 Err(err) => text_response(STATUS_INTERNAL_SERVER_ERROR, err.to_string()),
             },
-            Err(err) => text_response(STATUS_INTERNAL_SERVER_ERROR, err.to_string()),
+            Err(err) => get_payload_error_response(err),
         },
         EngineSszFork::Cancun => match engine_api.get_payload_v3_metered(payload_id).await {
             Ok(payload) => ssz_response(BuiltPayloadCancun::from(payload)),
-            Err(err) => text_response(STATUS_INTERNAL_SERVER_ERROR, err.to_string()),
+            Err(err) => get_payload_error_response(err),
         },
         EngineSszFork::Prague => match engine_api.get_payload_v4_metered(payload_id).await {
             Ok(payload) => ssz_response(BuiltPayloadPrague::from(payload)),
-            Err(err) => text_response(STATUS_INTERNAL_SERVER_ERROR, err.to_string()),
+            Err(err) => get_payload_error_response(err),
         },
         EngineSszFork::Osaka => match engine_api.get_payload_v5_metered(payload_id).await {
             Ok(payload) => ssz_response(BuiltPayloadOsaka::from(payload)),
-            Err(err) => text_response(STATUS_INTERNAL_SERVER_ERROR, err.to_string()),
+            Err(err) => get_payload_error_response(err),
         },
         EngineSszFork::Amsterdam => match engine_api.get_payload_v6_metered(payload_id).await {
             Ok(payload) => ssz_response(BuiltPayloadAmsterdam::from(payload)),
-            Err(err) => text_response(STATUS_INTERNAL_SERVER_ERROR, err.to_string()),
+            Err(err) => get_payload_error_response(err),
         },
     }
+}
+
+fn get_payload_error_response(err: EngineApiError) -> HttpResponse {
+    let status = if matches!(&err, EngineApiError::UnknownPayload) {
+        STATUS_NOT_FOUND
+    } else {
+        STATUS_INTERNAL_SERVER_ERROR
+    };
+    text_response(status, err.to_string())
 }
 
 async fn handle_new_payload<Provider, Pool, Validator, ChainSpec>(
@@ -786,8 +799,16 @@ mod tests {
         let endpoint = parse_engine_path("/engine/v1/payloads/0x0000000000000001").unwrap();
         assert_eq!(
             endpoint,
-            EngineSszEndpoint::GetPayload(PayloadId::new([0, 0, 0, 0, 0, 0, 0, 1]))
+            EngineSszEndpoint::GetPayload(Ok(PayloadId::new([0, 0, 0, 0, 0, 0, 0, 1])))
         );
+    }
+
+    #[test]
+    fn matches_malformed_get_payload_endpoint() {
+        assert!(matches!(
+            parse_engine_path("/engine/v1/payloads/0x01"),
+            Some(EngineSszEndpoint::GetPayload(Err(_)))
+        ));
     }
 
     #[test]
