@@ -835,7 +835,12 @@ impl PeersManager {
     }
 
     /// Marks the given peer as trusted.
+    ///
+    /// Banned peers are not promoted; this mirrors the ban gate in [`Self::add_peer_kind`].
     pub(crate) fn add_trusted_peer_id(&mut self, peer_id: PeerId) {
+        if self.ban_list.is_banned_peer(&peer_id) {
+            return
+        }
         self.trusted_peer_ids.insert(peer_id);
         if let Some(peer) = self.peers.get_mut(&peer_id) {
             peer.kind = PeerKind::Trusted;
@@ -1692,6 +1697,20 @@ mod tests {
         let (_, unbanned_peers) =
             peers.ban_list.evict(std::time::Instant::now() + Duration::from_secs(1));
         assert!(unbanned_peers.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_add_trusted_peer_id_respects_ban_list() {
+        let peer = PeerId::random();
+        let socket_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 1, 2)), 8008);
+        let mut peers = PeersManager::default();
+        peers.peers.insert(peer, Peer::new(PeerAddr::from_tcp(socket_addr)));
+        peers.ban_list.ban_peer(peer);
+
+        peers.add_trusted_peer_id(peer);
+
+        assert!(!peers.trusted_peer_ids.contains(&peer));
+        assert!(!peers.peers.get(&peer).is_some_and(Peer::is_trusted));
     }
 
     #[tokio::test]
