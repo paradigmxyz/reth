@@ -119,12 +119,9 @@ impl<ChainSpec, N> BalProvider for NoopProvider<ChainSpec, N> {
 }
 
 impl<ChainSpec, N> StateRangeProvider for NoopProvider<ChainSpec, N> {
-    fn current_state_root(&self) -> ProviderResult<Option<B256>> {
-        Ok(None)
-    }
-
     fn account_range(
         &self,
+        _state_root: B256,
         _start: B256,
         _limit: B256,
         _response_bytes: usize,
@@ -132,12 +129,17 @@ impl<ChainSpec, N> StateRangeProvider for NoopProvider<ChainSpec, N> {
         Ok(None)
     }
 
-    fn storage_root_by_hash(&self, _hashed_address: B256) -> ProviderResult<Option<B256>> {
+    fn storage_root_by_hash(
+        &self,
+        _state_root: B256,
+        _hashed_address: B256,
+    ) -> ProviderResult<Option<B256>> {
         Ok(None)
     }
 
     fn storage_range(
         &self,
+        _state_root: B256,
         _hashed_address: B256,
         _start: B256,
         _limit: B256,
@@ -146,12 +148,17 @@ impl<ChainSpec, N> StateRangeProvider for NoopProvider<ChainSpec, N> {
         Ok(None)
     }
 
-    fn account_range_proof(&self, _keys: &[B256]) -> ProviderResult<Option<Vec<Bytes>>> {
+    fn account_range_proof(
+        &self,
+        _state_root: B256,
+        _keys: &[B256],
+    ) -> ProviderResult<Option<Vec<Bytes>>> {
         Ok(None)
     }
 
     fn storage_range_proof(
         &self,
+        _state_root: B256,
         _hashed_address: B256,
         _keys: &[B256],
     ) -> ProviderResult<Option<Vec<Bytes>>> {

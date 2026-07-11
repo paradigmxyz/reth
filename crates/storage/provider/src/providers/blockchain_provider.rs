@@ -1,7 +1,7 @@
 use crate::{
     providers::{
-        ConsistentProvider, ProviderNodeTypes, RocksDBProvider, StaticFileProvider,
-        StaticFileProviderRWRefMut,
+        ConsistentProvider, OverlayBuilder, OverlayStateProvider, OverlayStateProviderFactory,
+        ProviderNodeTypes, RocksDBProvider, StaticFileProvider, StaticFileProviderRWRefMut,
     },
     AccountReader, BalProvider, BalStoreHandle, BlockHashReader, BlockIdReader, BlockNumReader,
     BlockReader, BlockReaderIdExt, BlockSource, CanonChainTracker, CanonStateNotifications,
@@ -31,16 +31,14 @@ use reth_stages_types::{StageCheckpoint, StageId};
 use reth_static_file_types::StaticFileSegment;
 use reth_storage_api::{
     BlockBodyIndicesProvider, NodePrimitivesProvider, RangeResult, StateRangeProvider,
-    StorageChangeSetReader, StorageSettingsCache,
+    StorageChangeSetReader,
 };
 use reth_storage_errors::provider::ProviderResult;
 use reth_trie::{
     hashed_cursor::{HashedCursor, HashedCursorFactory},
+    metrics::TrieRootMetrics,
     proof::{Proof, StorageProof},
-    HashedPostState, KeccakKeyHasher, MultiProofTargets, StorageRoot,
-};
-use reth_trie_db::{
-    DatabaseHashedCursorFactory, DatabaseProof, DatabaseStorageRoot, DatabaseTrieCursorFactory,
+    HashedPostState, KeccakKeyHasher, MultiProofTargets, StorageRoot, TrieType,
 };
 use revm::database::BundleState;
 use std::{
@@ -50,10 +48,10 @@ use std::{
 };
 use tracing::trace;
 
-type DbStorageRoot<'a, TX, A> =
-    StorageRoot<DatabaseTrieCursorFactory<&'a TX, A>, DatabaseHashedCursorFactory<&'a TX>>;
-type DbProof<'a, TX, A> =
-    Proof<DatabaseTrieCursorFactory<&'a TX, A>, DatabaseHashedCursorFactory<&'a TX>>;
+const SNAPSHOT_STATE_RETENTION: u64 = 128;
+
+type StateRangeDbProvider<N> = <ProviderFactory<N> as DatabaseProviderFactory>::Provider;
+type HistoricalStateRangeProvider<N> = OverlayStateProvider<StateRangeDbProvider<N>>;
 
 /// The main type for interacting with the blockchain.
 ///
@@ -156,6 +154,34 @@ impl<N: ProviderNodeTypes> BlockchainProvider<N> {
         let latest_historical = self.database.history_by_block_hash(anchor_hash)?;
         Ok(state.state_provider(latest_historical))
     }
+
+    /// Returns a cursor-backed state view for a retained canonical state root.
+    fn state_range_provider(
+        &self,
+        state_root: B256,
+    ) -> ProviderResult<Option<HistoricalStateRangeProvider<N>>> {
+        let provider = self.database.provider()?;
+        let Some(finish) = provider.get_stage_checkpoint(StageId::Finish)? else { return Ok(None) };
+        let oldest = finish.block_number.saturating_sub(SNAPSHOT_STATE_RETENTION - 1);
+        let mut block_hash = None;
+
+        for number in (oldest..=finish.block_number).rev() {
+            let Some(header) = provider.sealed_header(number)? else { continue };
+            if header.state_root() == state_root {
+                block_hash = Some(header.hash());
+                break
+            }
+        }
+        drop(provider);
+
+        let Some(block_hash) = block_hash else { return Ok(None) };
+        let overlay_factory = OverlayStateProviderFactory::new(
+            self.database.clone(),
+            OverlayBuilder::<N::Primitives>::new(block_hash, self.database.changeset_cache()),
+        );
+        reth_storage_api::DatabaseProviderROFactory::database_provider_ro(&overlay_factory)
+            .map(Some)
+    }
 }
 
 impl<N: NodeTypesWithDB> NodePrimitivesProvider for BlockchainProvider<N> {
@@ -169,31 +195,16 @@ impl<N: NodeTypesWithDB> BalProvider for BlockchainProvider<N> {
 }
 
 impl<N: ProviderNodeTypes> StateRangeProvider for BlockchainProvider<N> {
-    /// Only serves the latest, database-backed state; see [`Self::account_range`].
-    fn current_state_root(&self) -> ProviderResult<Option<B256>> {
-        if self.canonical_in_memory_state.head_state().is_some() {
-            return Ok(None)
-        }
-        let number = self.last_block_number()?;
-        Ok(self.header_by_number(number)?.map(|header| header.state_root()))
-    }
-
-    /// Only serves the latest, database-backed state: returns `Ok(None)` whenever an in-memory
-    /// reorg overlay is active, rather than risk iterating the wrong state.
+    /// Serves retained, database-backed canonical state roots.
     fn account_range(
         &self,
+        state_root: B256,
         start: B256,
         limit: B256,
         response_bytes: usize,
     ) -> RangeResult<(B256, Account)> {
-        if self.canonical_in_memory_state.head_state().is_some() {
-            return Ok(None)
-        }
-
-        let provider = self.database.provider()?;
-        let hashed_cursor_factory = DatabaseHashedCursorFactory::new(provider.tx_ref());
-        let mut cursor =
-            hashed_cursor_factory.hashed_account_cursor().map_err(ProviderError::Database)?;
+        let Some(provider) = self.state_range_provider(state_root)? else { return Ok(None) };
+        let mut cursor = provider.hashed_account_cursor().map_err(ProviderError::Database)?;
 
         let mut accounts = Vec::new();
         let mut total_bytes = 0usize;
@@ -218,40 +229,37 @@ impl<N: ProviderNodeTypes> StateRangeProvider for BlockchainProvider<N> {
         Ok(Some((accounts, complete)))
     }
 
-    /// Only serves the latest, database-backed state; see [`Self::account_range`].
-    fn storage_root_by_hash(&self, hashed_address: B256) -> ProviderResult<Option<B256>> {
-        if self.canonical_in_memory_state.head_state().is_some() {
-            return Ok(None)
-        }
-
-        let provider = self.database.provider()?;
-        reth_trie_db::with_adapter!(provider, |A| {
-            let root = <DbStorageRoot<'_, _, A>>::from_tx_hashed(provider.tx_ref(), hashed_address)
-                .root()
-                .map_err(|err| ProviderError::Database(err.into()))?;
-            Ok(Some(root))
-        })
+    /// Returns an account's storage root from the retained state selected by `state_root`.
+    fn storage_root_by_hash(
+        &self,
+        state_root: B256,
+        hashed_address: B256,
+    ) -> ProviderResult<Option<B256>> {
+        let Some(provider) = self.state_range_provider(state_root)? else { return Ok(None) };
+        let root = StorageRoot::new_hashed(
+            &provider,
+            &provider,
+            hashed_address,
+            Default::default(),
+            TrieRootMetrics::new(TrieType::Storage),
+        )
+        .root()
+        .map_err(|err| ProviderError::Database(err.into()))?;
+        Ok(Some(root))
     }
 
-    /// Only serves the latest, database-backed state: returns `Ok(None)` whenever an in-memory
-    /// reorg overlay is active, rather than risk iterating the wrong state.
+    /// Returns a storage range from the retained state selected by `state_root`.
     fn storage_range(
         &self,
+        state_root: B256,
         hashed_address: B256,
         start: B256,
         limit: B256,
         response_bytes: usize,
     ) -> RangeResult<(B256, U256)> {
-        // No cursor-based range access for the in-memory reorg overlay yet.
-        if self.canonical_in_memory_state.head_state().is_some() {
-            return Ok(None)
-        }
-
-        let provider = self.database.provider()?;
-        let hashed_cursor_factory = DatabaseHashedCursorFactory::new(provider.tx_ref());
-        let mut cursor = hashed_cursor_factory
-            .hashed_storage_cursor(hashed_address)
-            .map_err(ProviderError::Database)?;
+        let Some(provider) = self.state_range_provider(state_root)? else { return Ok(None) };
+        let mut cursor =
+            provider.hashed_storage_cursor(hashed_address).map_err(ProviderError::Database)?;
 
         let mut slots = Vec::new();
         let mut total_bytes = 0usize;
@@ -274,58 +282,39 @@ impl<N: ProviderNodeTypes> StateRangeProvider for BlockchainProvider<N> {
         Ok(Some((slots, complete)))
     }
 
-    /// Only serves the latest, database-backed state; see [`Self::account_range`].
-    fn account_range_proof(&self, keys: &[B256]) -> ProviderResult<Option<Vec<Bytes>>> {
-        if self.canonical_in_memory_state.head_state().is_some() {
-            return Ok(None)
-        }
-
-        let provider = self.database.provider()?;
-        reth_trie_db::with_adapter!(provider, |A| {
-            let multiproof = <DbProof<'_, _, A>>::from_tx(provider.tx_ref())
-                .multiproof(MultiProofTargets::accounts(keys.iter().copied()))
-                .map_err(ProviderError::from)?;
-            Ok(Some(
-                multiproof
-                    .account_subtree
-                    .into_nodes_sorted()
-                    .into_iter()
-                    .map(|(_, bytes)| bytes)
-                    .collect(),
-            ))
-        })
+    fn account_range_proof(
+        &self,
+        state_root: B256,
+        keys: &[B256],
+    ) -> ProviderResult<Option<Vec<Bytes>>> {
+        let Some(provider) = self.state_range_provider(state_root)? else { return Ok(None) };
+        let multiproof = Proof::new(&provider, &provider)
+            .multiproof(MultiProofTargets::accounts(keys.iter().copied()))
+            .map_err(ProviderError::from)?;
+        Ok(Some(
+            multiproof
+                .account_subtree
+                .into_nodes_sorted()
+                .into_iter()
+                .map(|(_, bytes)| bytes)
+                .collect(),
+        ))
     }
 
-    /// Only serves the latest, database-backed state; see [`Self::account_range`].
+    /// Returns a storage range proof from the retained state selected by `state_root`.
     fn storage_range_proof(
         &self,
+        state_root: B256,
         hashed_address: B256,
         keys: &[B256],
     ) -> ProviderResult<Option<Vec<Bytes>>> {
-        if self.canonical_in_memory_state.head_state().is_some() {
-            return Ok(None)
-        }
-
-        let provider = self.database.provider()?;
-        reth_trie_db::with_adapter!(provider, |A| {
-            let trie_cursor_factory = DatabaseTrieCursorFactory::<_, A>::new(provider.tx_ref());
-            let hashed_cursor_factory = DatabaseHashedCursorFactory::new(provider.tx_ref());
-            let multiproof = StorageProof::new_hashed(
-                trie_cursor_factory,
-                hashed_cursor_factory,
-                hashed_address,
-            )
+        let Some(provider) = self.state_range_provider(state_root)? else { return Ok(None) };
+        let multiproof = StorageProof::new_hashed(&provider, &provider, hashed_address)
             .storage_multiproof(keys.iter().copied().collect())
             .map_err(ProviderError::from)?;
-            Ok(Some(
-                multiproof
-                    .subtree
-                    .into_nodes_sorted()
-                    .into_iter()
-                    .map(|(_, bytes)| bytes)
-                    .collect(),
-            ))
-        })
+        Ok(Some(
+            multiproof.subtree.into_nodes_sorted().into_iter().map(|(_, bytes)| bytes).collect(),
+        ))
     }
 }
 
@@ -335,11 +324,11 @@ impl<N: ProviderNodeTypes> DatabaseProviderFactory for BlockchainProvider<N> {
     type ProviderRW = <ProviderFactory<N> as DatabaseProviderFactory>::ProviderRW;
 
     fn database_provider_ro(&self) -> ProviderResult<Self::Provider> {
-        self.database.database_provider_ro()
+        DatabaseProviderFactory::database_provider_ro(&self.database)
     }
 
     fn database_provider_rw(&self) -> ProviderResult<Self::ProviderRW> {
-        self.database.database_provider_rw()
+        DatabaseProviderFactory::database_provider_rw(&self.database)
     }
 }
 
@@ -972,6 +961,7 @@ impl<N: ProviderNodeTypes> StateReader for BlockchainProvider<N> {
 
 #[cfg(test)]
 mod tests {
+    use super::SNAPSHOT_STATE_RETENTION;
     use crate::{
         providers::BlockchainProvider,
         test_utils::{
@@ -980,6 +970,7 @@ mod tests {
         },
         BlockWriter, CanonChainTracker, ProviderFactory, SaveBlocksMode,
     };
+    use alloy_consensus::constants::EMPTY_ROOT_HASH;
     use alloy_eips::{BlockHashOrNumber, BlockNumHash, BlockNumberOrTag};
     use alloy_primitives::{keccak256, Address, BlockNumber, TxNumber, B256, U256};
     use itertools::Itertools;
@@ -996,14 +987,16 @@ mod tests {
         BlockExecutionOutput, BlockExecutionResult, Chain, ExecutionOutcome,
     };
     use reth_primitives_traits::{
-        Account, RecoveredBlock, SealedBlock, SignerRecoverable, StorageEntry,
+        Account, Block as _, RecoveredBlock, SealedBlock, SignerRecoverable, StorageEntry,
     };
+    use reth_stages_types::{StageCheckpoint, StageId};
     use reth_storage_api::{
         BlockBodyIndicesProvider, BlockHashReader, BlockIdReader, BlockNumReader, BlockReader,
         BlockReaderIdExt, BlockSource, ChangeSetReader, DBProvider, DatabaseProviderFactory,
-        HashingWriter, HeaderProvider, ReceiptProvider, ReceiptProviderIdExt, StateProviderFactory,
-        StateRangeProvider, StateRootProvider, StateWriteConfig, StateWriter, StorageRootProvider,
-        TransactionVariant, TransactionsProvider,
+        HashingWriter, HeaderProvider, ReceiptProvider, ReceiptProviderIdExt,
+        StageCheckpointWriter, StateProviderFactory, StateRangeProvider, StateRootProvider,
+        StateWriteConfig, StateWriter, StorageRootProvider, TransactionVariant,
+        TransactionsProvider,
     };
     use reth_testing_utils::generators::{
         self, random_block, random_block_range, random_changeset_range, random_eoa_accounts,
@@ -2810,6 +2803,7 @@ mod tests {
             random_block(&mut rng, 0, BlockParams { tx_count: Some(0), ..Default::default() });
         provider_rw
             .insert_block(&genesis.try_recover().expect("failed to seal block with senders"))?;
+        provider_rw.save_stage_checkpoint(StageId::Finish, StageCheckpoint::new(0))?;
         provider_rw.commit()?;
         Ok(factory)
     }
@@ -2831,13 +2825,14 @@ mod tests {
             accounts.iter().map(|(address, account)| (keccak256(address), *account)).collect();
         expected.sort_by_key(|(hash, _)| *hash);
 
-        let (all, complete) =
-            provider.account_range(B256::ZERO, B256::repeat_byte(0xff), 10_000)?.unwrap();
+        let (all, complete) = provider
+            .account_range(EMPTY_ROOT_HASH, B256::ZERO, B256::repeat_byte(0xff), 10_000)?
+            .unwrap();
         assert!(complete);
         assert_eq!(all, expected);
 
         let (bounded, complete) =
-            provider.account_range(B256::ZERO, expected[1].0, 10_000)?.unwrap();
+            provider.account_range(EMPTY_ROOT_HASH, B256::ZERO, expected[1].0, 10_000)?.unwrap();
         assert!(complete);
         assert_eq!(bounded, expected[..2]);
 
@@ -2858,8 +2853,9 @@ mod tests {
         let provider = BlockchainProvider::new(factory)?;
 
         // Budget only fits a single account.
-        let (partial, complete) =
-            provider.account_range(B256::ZERO, B256::repeat_byte(0xff), 150)?.unwrap();
+        let (partial, complete) = provider
+            .account_range(EMPTY_ROOT_HASH, B256::ZERO, B256::repeat_byte(0xff), 150)?
+            .unwrap();
         assert!(!complete);
         assert_eq!(partial.len(), 1);
 
@@ -2884,10 +2880,19 @@ mod tests {
         let provider = BlockchainProvider::new(factory)?;
 
         let expected_root = provider.latest()?.storage_root(address, HashedStorage::default())?;
-        assert_eq!(provider.storage_root_by_hash(hashed_address)?, Some(expected_root));
+        assert_eq!(
+            provider.storage_root_by_hash(EMPTY_ROOT_HASH, hashed_address)?,
+            Some(expected_root)
+        );
 
         let (returned, complete) = provider
-            .storage_range(hashed_address, B256::ZERO, B256::repeat_byte(0xff), 10_000)?
+            .storage_range(
+                EMPTY_ROOT_HASH,
+                hashed_address,
+                B256::ZERO,
+                B256::repeat_byte(0xff),
+                10_000,
+            )?
             .unwrap();
         assert!(complete);
         let mut expected: Vec<_> =
@@ -2918,12 +2923,14 @@ mod tests {
         // The first node of a sorted boundary proof is always the trie root, so this checks the
         // proof was generated against the real, current root rather than a stale or empty one.
         let state_root = provider.latest()?.state_root(HashedPostState::default())?;
-        let account_proof = provider.account_range_proof(&[hashed_address])?.unwrap();
+        let account_proof =
+            provider.account_range_proof(EMPTY_ROOT_HASH, &[hashed_address])?.unwrap();
         assert!(!account_proof.is_empty());
         assert_eq!(keccak256(&account_proof[0]), state_root);
 
-        let storage_root = provider.storage_root_by_hash(hashed_address)?.unwrap();
-        let storage_proof = provider.storage_range_proof(hashed_address, &[hashed_slot])?.unwrap();
+        let storage_root = provider.storage_root_by_hash(EMPTY_ROOT_HASH, hashed_address)?.unwrap();
+        let storage_proof =
+            provider.storage_range_proof(EMPTY_ROOT_HASH, hashed_address, &[hashed_slot])?.unwrap();
         assert!(!storage_proof.is_empty());
         assert_eq!(keccak256(&storage_proof[0]), storage_root);
 
@@ -2931,23 +2938,51 @@ mod tests {
     }
 
     #[test]
-    fn state_range_provider_current_state_root_matches_latest_header() -> eyre::Result<()> {
+    fn state_range_provider_serves_recent_root_and_rejects_expired_root() -> eyre::Result<()> {
         let mut rng = generators::rng();
-        let (provider, _, _, _) = provider_with_random_blocks(
-            &mut rng,
-            TEST_BLOCKS_COUNT,
-            0,
-            BlockRangeParams::default(),
-        )?;
+        let factory = create_test_provider_factory();
+        let provider_rw = factory.provider_rw()?;
+        let expired_root = B256::repeat_byte(0x11);
+        let recent_root = B256::repeat_byte(0x22);
+        let mut parent = B256::ZERO;
 
-        let expected = provider.latest()?.state_root(HashedPostState::default())?;
-        assert_eq!(provider.current_state_root()?, Some(expected));
+        for number in 0..=SNAPSHOT_STATE_RETENTION {
+            let mut block = random_block(
+                &mut rng,
+                number,
+                BlockParams { parent: Some(parent), tx_count: Some(0), ..Default::default() },
+            )
+            .unseal();
+            block.header.state_root = match number {
+                0 => expired_root,
+                64 => recent_root,
+                _ => EMPTY_ROOT_HASH,
+            };
+            let block = block.seal_slow();
+            parent = block.hash();
+            provider_rw
+                .insert_block(&block.try_recover().expect("failed to seal block with senders"))?;
+        }
+        provider_rw.save_stage_checkpoint(
+            StageId::Finish,
+            StageCheckpoint::new(SNAPSHOT_STATE_RETENTION),
+        )?;
+        provider_rw.commit()?;
+
+        let provider = BlockchainProvider::new(factory)?;
+        assert!(provider
+            .account_range(recent_root, B256::ZERO, B256::repeat_byte(0xff), 10_000)?
+            .is_some());
+        assert_eq!(
+            provider.account_range(expired_root, B256::ZERO, B256::repeat_byte(0xff), 10_000,)?,
+            None
+        );
 
         Ok(())
     }
 
     #[test]
-    fn state_range_provider_declines_with_in_memory_overlay() -> eyre::Result<()> {
+    fn state_range_provider_serves_persisted_root_with_in_memory_overlay() -> eyre::Result<()> {
         let mut rng = generators::rng();
         let (provider, _, _, _) = provider_with_random_blocks(
             &mut rng,
@@ -2956,16 +2991,16 @@ mod tests {
             BlockRangeParams::default(),
         )?;
         assert!(provider.canonical_in_memory_state.head_state().is_some());
+        let provider_rw = provider.database.provider_rw()?;
+        provider_rw.save_stage_checkpoint(
+            StageId::Finish,
+            StageCheckpoint::new((TEST_BLOCKS_COUNT - 2) as u64),
+        )?;
+        provider_rw.commit()?;
 
-        assert_eq!(provider.current_state_root()?, None);
-        assert_eq!(provider.account_range(B256::ZERO, B256::repeat_byte(0xff), 10_000)?, None);
-        assert_eq!(provider.storage_root_by_hash(B256::ZERO)?, None);
-        assert_eq!(
-            provider.storage_range(B256::ZERO, B256::ZERO, B256::repeat_byte(0xff), 10_000)?,
-            None
-        );
-        assert_eq!(provider.account_range_proof(&[B256::ZERO])?, None);
-        assert_eq!(provider.storage_range_proof(B256::ZERO, &[B256::ZERO])?, None);
+        assert!(provider
+            .account_range(EMPTY_ROOT_HASH, B256::ZERO, B256::repeat_byte(0xff), 10_000,)?
+            .is_some());
 
         Ok(())
     }

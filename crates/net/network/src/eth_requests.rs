@@ -408,9 +408,9 @@ where
 {
     /// Handles `snap/2` (EIP-8189) requests.
     ///
-    /// `GetAccountRange`/`GetStorageRanges` are hash-native throughout and served from
-    /// [`StateRangeProvider`], for the latest state only. `GetByteCodes` is content-addressed
-    /// and independent of any particular state root, so it's served directly.
+    /// `GetAccountRange`/`GetStorageRanges` are hash-native throughout and served from retained
+    /// canonical roots via [`StateRangeProvider`]. `GetByteCodes` is content-addressed and
+    /// independent of any particular state root, so it's served directly.
     /// `GetBlockAccessLists` is answered from the same [`BalProvider`] store eth71's
     /// `GetBlockAccessLists` uses, since both serve the same underlying data.
     fn on_snap_request(
@@ -480,7 +480,7 @@ where
         codes
     }
 
-    /// Serves a `GetAccountRange` request via [`StateRangeProvider`], for the latest state only.
+    /// Serves a `GetAccountRange` request via [`StateRangeProvider`].
     ///
     /// Skips (rather than serves with a wrong root) any account whose storage root can't be
     /// computed, e.g. because the in-memory reorg overlay is active. Always proves the boundary
@@ -493,17 +493,13 @@ where
             proof: Vec::new(),
         };
 
-        // We only ever serve the current state, so a request for any other root can't be
-        // answered correctly.
-        let Ok(Some(state_root)) = self.client.current_state_root() else { return empty };
-        if state_root != req.root_hash {
-            return empty
-        }
-
         let response_bytes = (req.response_bytes as usize).min(SOFT_RESPONSE_LIMIT);
-        let Ok(Some((accounts, _))) =
-            self.client.account_range(req.starting_hash, req.limit_hash, response_bytes)
-        else {
+        let Ok(Some((accounts, _))) = self.client.account_range(
+            req.root_hash,
+            req.starting_hash,
+            req.limit_hash,
+            response_bytes,
+        ) else {
             return empty
         };
 
@@ -512,36 +508,27 @@ where
         let accounts = accounts
             .into_iter()
             .filter_map(|(hash, account)| {
-                let storage_root = self.client.storage_root_by_hash(hash).ok()??;
+                let storage_root = self.client.storage_root_by_hash(req.root_hash, hash).ok()??;
                 Some(AccountData { hash, body: slim_account_body(&account, storage_root) })
             })
             .collect();
 
-        let proof =
-            self.client.account_range_proof(&boundary_keys).ok().flatten().unwrap_or_default();
+        let proof = self
+            .client
+            .account_range_proof(req.root_hash, &boundary_keys)
+            .ok()
+            .flatten()
+            .unwrap_or_default();
 
         AccountRangeMessage { request_id: req.request_id, accounts, proof }
     }
 
-    /// Serves a `GetStorageRanges` request via [`StateRangeProvider`], for the latest state only.
+    /// Serves a `GetStorageRanges` request via [`StateRangeProvider`].
     ///
     /// `starting_hash`/`limit_hash` apply only to the first account. An account with no slots
     /// gets no entry at all, and a proof stops the response at the first account that isn't a
     /// complete, zero-origin range.
     fn get_storage_ranges_response(&self, req: GetStorageRangesMessage) -> StorageRangesMessage {
-        let empty = StorageRangesMessage {
-            request_id: req.request_id,
-            slots: Vec::new(),
-            proof: Vec::new(),
-        };
-
-        // We only ever serve the current state, so a request for any other root can't be
-        // answered correctly.
-        let Ok(Some(state_root)) = self.client.current_state_root() else { return empty };
-        if state_root != req.root_hash {
-            return empty
-        }
-
         let mut slots = Vec::new();
         let mut proof = Vec::new();
         let mut remaining_bytes = (req.response_bytes as usize).min(SOFT_RESPONSE_LIMIT);
@@ -552,9 +539,13 @@ where
             }
             let origin = if i == 0 { req.starting_hash } else { B256::ZERO };
             let limit = if i == 0 { req.limit_hash } else { B256::repeat_byte(0xff) };
-            let Ok(Some((account_slots, complete))) =
-                self.client.storage_range(hashed_address, origin, limit, remaining_bytes)
-            else {
+            let Ok(Some((account_slots, complete))) = self.client.storage_range(
+                req.root_hash,
+                hashed_address,
+                origin,
+                limit,
+                remaining_bytes,
+            ) else {
                 break
             };
 
@@ -580,7 +571,7 @@ where
                 };
                 proof = self
                     .client
-                    .storage_range_proof(hashed_address, &boundary_keys)
+                    .storage_range_proof(req.root_hash, hashed_address, &boundary_keys)
                     .ok()
                     .flatten()
                     .unwrap_or_default();
