@@ -171,6 +171,11 @@ impl<T: NodePrimitives, ChainSpec> MockEthProvider<T, ChainSpec> {
         self.snap_storage_ranges.lock().push_back(None);
     }
 
+    /// Returns the number of queued storage ranges for snap handler tests.
+    pub fn snap_storage_ranges_remaining(&self) -> usize {
+        self.snap_storage_ranges.lock().len()
+    }
+
     /// Sets the account proof returned to snap handler tests.
     pub fn set_snap_account_proof(&self, proof: Option<Vec<Bytes>>) {
         *self.snap_account_proof.lock() = proof;

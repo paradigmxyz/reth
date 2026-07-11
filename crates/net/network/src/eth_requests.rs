@@ -76,6 +76,9 @@ pub const MAX_CELLS_SERVE: usize = 1024;
 /// Used to limit lookups.
 pub const MAX_BYTE_CODES_SERVE: usize = 1024;
 
+/// Maximum number of storage range account lookups to serve.
+pub const MAX_STORAGE_RANGE_ACCOUNTS_SERVE: usize = 1024;
+
 /// Maximum size of replies to data retrievals: 2MB
 pub const SOFT_RESPONSE_LIMIT: usize = 2 * 1024 * 1024;
 
@@ -550,7 +553,9 @@ where
         let mut remaining_bytes = (req.response_bytes as usize).min(SOFT_RESPONSE_LIMIT);
         let mut served_range = false;
 
-        for (i, &hashed_address) in req.account_hashes.iter().enumerate() {
+        for (i, &hashed_address) in
+            req.account_hashes.iter().take(MAX_STORAGE_RANGE_ACCOUNTS_SERVE).enumerate()
+        {
             if remaining_bytes == 0 {
                 break
             }
@@ -1221,5 +1226,37 @@ mod tests {
                 codes: vec![Bytes::new(), code],
             }))
         );
+    }
+
+    #[tokio::test]
+    async fn snap_storage_ranges_limit_account_lookups() {
+        let provider = MockEthProvider::default();
+        for _ in 0..=MAX_STORAGE_RANGE_ACCOUNTS_SERVE {
+            provider.push_snap_storage_range(Vec::new(), true);
+        }
+        let handler = snap_handler(provider.clone());
+        let (response, rx) = oneshot::channel();
+        handler.on_snap_request(
+            PeerId::default(),
+            SnapProtocolMessage::GetStorageRanges(GetStorageRangesMessage {
+                request_id: 4,
+                root_hash: B256::ZERO,
+                account_hashes: vec![B256::ZERO; MAX_STORAGE_RANGE_ACCOUNTS_SERVE + 1],
+                starting_hash: B256::ZERO,
+                limit_hash: B256::repeat_byte(0xff),
+                response_bytes: SOFT_RESPONSE_LIMIT as u64,
+            }),
+            response,
+        );
+
+        assert_eq!(
+            rx.await.unwrap(),
+            Ok(SnapResponse::StorageRanges(StorageRangesMessage {
+                request_id: 4,
+                slots: Vec::new(),
+                proof: Vec::new(),
+            }))
+        );
+        assert_eq!(provider.snap_storage_ranges_remaining(), 1);
     }
 }
