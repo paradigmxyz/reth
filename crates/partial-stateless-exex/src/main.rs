@@ -302,12 +302,10 @@ async fn partial_stateless_exex<
                             &reexec_limits,
                             verifier_wait,
                         ) {
-                            warn!(
-                                target: "partial_stateless",
-                                block = *block_number,
-                                error = %e,
-                                "Live sidecar verification failed; cache was not advanced"
-                            );
+                            return Err(eyre::eyre!(
+                                "live sidecar verification failed at block {}: {e}",
+                                block_number
+                            ));
                         }
                         continue;
                     }
@@ -365,12 +363,10 @@ async fn partial_stateless_exex<
                             sidecar_path: _sidecar_path,
                         }) => {}
                         Err(e) => {
-                            warn!(
-                                target: "partial_stateless",
-                                block = *block_number,
-                                error = %e,
-                                "Sidecar builder block processing failed"
-                            );
+                            return Err(eyre::eyre!(
+                                "sidecar builder failed at block {}: {e}",
+                                block_number
+                            ));
                         }
                     }
                 }
@@ -445,12 +441,10 @@ async fn partial_stateless_exex<
                             &reexec_limits,
                             verifier_wait,
                         ) {
-                            warn!(
-                                target: "partial_stateless",
-                                block = *block_number,
-                                error = %e,
-                                "Live sidecar verification failed while applying reorg; cache was not advanced"
-                            );
+                            return Err(eyre::eyre!(
+                                "live sidecar verification failed while applying reorg block {}: {e}",
+                                block_number
+                            ));
                         }
                         continue;
                     }
@@ -508,12 +502,10 @@ async fn partial_stateless_exex<
                             sidecar_path: _sidecar_path,
                         }) => {}
                         Err(e) => {
-                            warn!(
-                                target: "partial_stateless",
-                                block = *block_number,
-                                error = %e,
-                                "Sidecar builder block processing failed while applying reorg"
-                            );
+                            return Err(eyre::eyre!(
+                                "sidecar builder failed while applying reorg block {}: {e}",
+                                block_number
+                            ));
                         }
                     }
                 }

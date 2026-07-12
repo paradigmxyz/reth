@@ -1,6 +1,6 @@
 use crate::{
     sidecar_io::{read_sidecar, sidecar_path},
-    sidecar_reexec::{check_provider_assisted_sidecar, SidecarReexecLimits},
+    sidecar_reexec::{verify_and_apply_provider_assisted_sidecar, SidecarReexecLimits},
     CacheConfig,
 };
 use partial_stateless::{last_n_blocks_cache_policy_id, network_cache::NetworkStateCache};
@@ -48,13 +48,12 @@ where
         ));
     }
 
-    let report = check_provider_assisted_sidecar(
+    let report = verify_and_apply_provider_assisted_sidecar(
         evm_config,
         state_provider,
         block,
         cache,
         &sidecar,
-        config,
         limits,
     )?;
 
@@ -69,7 +68,7 @@ where
         );
     }
 
-    let stats = cache.on_block_executed(block_number, &report.actual_accessed);
+    let stats = &report.cache_update;
     info!(
         target: "partial_stateless",
         block = block_number,

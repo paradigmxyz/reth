@@ -1,7 +1,7 @@
 use crate::{
     format_bytes,
     sidecar_io::sidecar_path,
-    sidecar_reexec::{check_provider_assisted_sidecar, SidecarReexecLimits},
+    sidecar_reexec::{verify_and_apply_provider_assisted_sidecar, SidecarReexecLimits},
     thread_rusage, CacheConfig,
 };
 use alloy_primitives::{Bytes, B256};
@@ -48,6 +48,21 @@ pub(crate) struct BuilderBlockReport {
     pub(crate) cache_update: UpdateStats,
     pub(crate) witness: Option<WitnessResult>,
     pub(crate) sidecar_path: Option<PathBuf>,
+}
+
+fn rollback_sidecar_transition(
+    cache: &mut NetworkStateCache,
+    block_number: u64,
+    cause: eyre::Report,
+) -> eyre::Report {
+    match cache.rollback_block(block_number) {
+        Ok(()) => eyre::eyre!(
+            "sidecar generation failed; cache transition for block {block_number} was rolled back: {cause:#}"
+        ),
+        Err(rollback_err) => eyre::eyre!(
+            "sidecar generation failed for block {block_number} ({cause:#}); cache rollback also failed: {rollback_err}"
+        ),
+    }
 }
 
 pub(crate) fn create_sidecar_for_block<Evm, ParentStateRootFn, AncestorHeadersFn>(
@@ -142,7 +157,7 @@ where
     }
     let prev_cache_anchor = cache_parent_synced
         .then(|| cache.cache_anchor(parent_block_number, parent_hash, cache_policy_id));
-    let prev_cache_for_reexec = cache_parent_synced.then(|| {
+    let mut prev_cache_for_reexec = cache_parent_synced.then(|| {
         NetworkStateCache::restore(
             cache.accounts().clone(),
             cache.storage().clone(),
@@ -252,7 +267,7 @@ where
 
             let sidecar_generation_result: eyre::Result<Option<PathBuf>> = 'sidecar: {
                 let (Some(prev_cache_anchor), Some(next_cache_anchor), Some(prev_cache_for_reexec)) =
-                    (prev_cache_anchor, next_cache_anchor, prev_cache_for_reexec.as_ref())
+                    (prev_cache_anchor, next_cache_anchor, prev_cache_for_reexec.as_mut())
                 else {
                     break 'sidecar Ok(None);
                 };
@@ -301,13 +316,12 @@ where
                 };
 
                 let root_witness_completeness = if options.run_sidecar_preflight {
-                    let reexec_report = check_provider_assisted_sidecar(
+                    let reexec_report = verify_and_apply_provider_assisted_sidecar(
                         evm_config,
                         state_provider,
                         block,
                         prev_cache_for_reexec,
                         &sidecar,
-                        config,
                         options.reexec_limits,
                     )
                     .map_err(|err| {
@@ -406,16 +420,36 @@ where
                         .map(|full| WitnessReductionStats::new(&result, full)),
                 };
                 let manifest_path = sidecar_path.with_extension("manifest.json");
-                let manifest_bytes = serde_json::to_vec_pretty(&manifest)
-                    .map_err(|err| eyre::eyre!("failed to serialize sidecar manifest: {err}"))?;
-                fs::write(&manifest_path, manifest_bytes).map_err(|err| {
-                    eyre::eyre!("failed to write sidecar manifest {:?}: {err}", manifest_path)
-                })?;
+                let manifest_saved = match serde_json::to_vec_pretty(&manifest) {
+                    Ok(manifest_bytes) => match fs::write(&manifest_path, manifest_bytes) {
+                        Ok(()) => true,
+                        Err(err) => {
+                            warn!(
+                                target: "partial_stateless",
+                                block = block_number,
+                                path = %manifest_path.display(),
+                                error = %err,
+                                "Failed to write diagnostic sidecar manifest"
+                            );
+                            false
+                        }
+                    },
+                    Err(err) => {
+                        warn!(
+                            target: "partial_stateless",
+                            block = block_number,
+                            error = %err,
+                            "Failed to serialize diagnostic sidecar manifest"
+                        );
+                        false
+                    }
+                };
                 info!(
                     target: "partial_stateless",
                     block = block_number,
                     path = %sidecar_path.display(),
                     manifest = %manifest_path.display(),
+                    manifest_saved,
                     size = format_bytes(sidecar_bytes_len),
                     "Saved witness sidecar successfully"
                 );
@@ -424,21 +458,31 @@ where
 
             match sidecar_generation_result {
                 Ok(path) => saved_sidecar_path = path,
+                Err(e) if cache_parent_synced => {
+                    return Err(rollback_sidecar_transition(cache, block_number, e));
+                }
                 Err(e) => warn!(
                     target: "partial_stateless",
                     block = block_number,
                     error = %e,
-                    "Sidecar generation failed (non-fatal)"
+                    "Sidecar generation failed while cache was not coherent"
                 ),
             }
             Some(result)
         }
         Err(e) => {
+            if cache_parent_synced {
+                return Err(rollback_sidecar_transition(
+                    cache,
+                    block_number,
+                    eyre::eyre!("failed to compute sidecar multiproof: {e}"),
+                ));
+            }
             warn!(
                 target: "partial_stateless",
                 block = block_number,
                 error = %e,
-                "Failed to compute multiproof"
+                "Failed to compute multiproof while cache was not coherent"
             );
             None
         }
