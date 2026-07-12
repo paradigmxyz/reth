@@ -4,15 +4,15 @@
 //! `SnapClient` request encoding, `RLPx` session transport, `EthRequestHandler`/
 //! `StateRangeProviderFactory` serving, and response decoding.
 
-use alloy_consensus::constants::EMPTY_ROOT_HASH;
-use alloy_primitives::{keccak256, Address, B256, U256};
+use alloy_consensus::constants::{EMPTY_ROOT_HASH, KECCAK_EMPTY};
+use alloy_primitives::{keccak256, Address, Bytes, B256, U256};
 use alloy_rlp::Decodable;
 use reth_chainspec::Hardforks;
 use reth_eth_wire::{
     protocol::Protocol,
     snap::{
-        AccountData, AccountRangeMessage, GetAccountRangeMessage, GetStorageRangesMessage,
-        StorageRangesMessage,
+        AccountData, AccountRangeMessage, ByteCodesMessage, GetAccountRangeMessage,
+        GetByteCodesMessage, GetStorageRangesMessage, StorageRangesMessage,
     },
     EthVersion,
 };
@@ -25,7 +25,9 @@ use reth_network_p2p::snap::client::{SnapClient, SnapResponse};
 use reth_primitives_traits::{Account, Block as _, StorageEntry};
 use reth_provider::{
     providers::BlockchainProvider,
-    test_utils::{create_test_provider_factory, MockNodeTypesWithDB},
+    test_utils::{
+        create_test_provider_factory, ExtendedAccount, MockEthProvider, MockNodeTypesWithDB,
+    },
     BalProvider, BlockReader, BlockWriter, ChainSpecProvider, HashingWriter, HeaderProvider,
     ProviderFactory, StageCheckpointWriter, StateProviderFactory, StateRangeProviderFactory,
     StateRootProvider, StorageRootProvider,
@@ -34,7 +36,7 @@ use reth_stages_types::{StageCheckpoint, StageId};
 use reth_testing_utils::generators::{self, random_block, BlockParams};
 use reth_transaction_pool::test_utils::TestPool;
 use reth_trie::{HashedPostState, HashedStorage};
-use std::time::Duration;
+use std::{sync::Arc, time::Duration};
 
 type SnapTestnetHandle<C> = TestnetHandle<C, TestPool>;
 
@@ -469,4 +471,46 @@ async fn retained_and_expired_state_roots_respond_without_hanging() {
     assert_eq!(request_id, 2);
     assert!(accounts.is_empty());
     assert!(proof.is_empty());
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn byte_codes_roundtrip_preserves_found_code_order() {
+    reth_tracing::init_test_tracing();
+
+    let provider = Arc::new(MockEthProvider::default());
+    let code_a = Bytes::from_static(&[0x60, 0x01, 0x60, 0x02, 0x01]);
+    let code_b = Bytes::from_static(&[0x5b]);
+    let hash_a = keccak256(&code_a);
+    let hash_b = keccak256(&code_b);
+    let missing_hash = B256::random();
+
+    provider.add_account(
+        Address::random(),
+        ExtendedAccount::new(0, U256::ZERO).with_bytecode(code_a.clone()),
+    );
+    provider.add_account(
+        Address::random(),
+        ExtendedAccount::new(0, U256::ZERO).with_bytecode(code_b.clone()),
+    );
+
+    let net = spawn_snap_testnet(provider).await;
+    let fetch = net.peers()[0].network().fetch_client().await.unwrap();
+
+    let response = fetch
+        .get_byte_codes(GetByteCodesMessage {
+            request_id: 13,
+            hashes: vec![KECCAK_EMPTY, hash_a, missing_hash, hash_b],
+            response_bytes: SOFT_RESPONSE_LIMIT as u64,
+        })
+        .await
+        .unwrap()
+        .into_data();
+
+    let SnapResponse::ByteCodes(ByteCodesMessage { request_id, codes }) = response else {
+        panic!("expected a byte codes response");
+    };
+    assert_eq!(request_id, 13);
+    // The empty-code hash resolves without a lookup, the missing hash is skipped, and found
+    // codes preserve request order rather than storage order.
+    assert_eq!(codes, vec![Bytes::new(), code_a, code_b]);
 }
