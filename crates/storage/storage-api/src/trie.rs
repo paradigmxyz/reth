@@ -42,6 +42,11 @@ pub trait StateRootProvider {
 /// A type that can compute the storage root for a given account.
 #[auto_impl::auto_impl(&, Box, Arc)]
 pub trait StorageRootProvider {
+    /// Returns whether the account has no hashed storage entries.
+    fn is_storage_empty(&self, _address: Address) -> ProviderResult<bool> {
+        Err(reth_storage_errors::provider::ProviderError::UnsupportedProvider)
+    }
+
     /// Returns the storage root of the `HashedStorage` for target address on top of the current
     /// state.
     fn storage_root(&self, address: Address, hashed_storage: HashedStorage)

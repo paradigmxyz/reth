@@ -29,7 +29,7 @@ use reth_primitives_traits::{Account, FastInstant as Instant, NodePrimitives};
 use reth_provider::{BlockExecutionOutput, BlockReader, StateProviderFactory, StateReader};
 use reth_revm::database::StateProviderDatabase;
 use reth_tasks::{pool::WorkerPool, Runtime};
-use reth_trie_common::{HashedStorage, MultiProofTargetsV2, EMPTY_ROOT_HASH};
+use reth_trie_common::MultiProofTargetsV2;
 use std::sync::{
     atomic::{AtomicBool, AtomicUsize, Ordering},
     mpsc::{self, channel, Receiver, Sender},
@@ -669,9 +669,6 @@ where
             hashed_update_stream.on_hashed_state_update(hashed_state);
         }
 
-        // An account that ends empty without storage changes may be a no-op when it did not exist
-        // in the parent state. Read the parent account even when all leaf fields are present so we
-        // can distinguish that case from deleting an existing account.
         let existing_account = if account_fields.needs_parent_account() ||
             (account_changes.storage_changes.is_empty() && account_fields.is_empty_account())
         {
@@ -718,16 +715,11 @@ where
             account_changes.storage_changes.is_empty()
         {
             let state_provider = provider.as_ref().expect("provider initialized for empty account");
-            match state_provider.storage_root(address, HashedStorage::default()) {
-                Ok(EMPTY_ROOT_HASH) => return,
-                Ok(_) => {}
+            match state_provider.is_storage_empty(address) {
+                Ok(true) => return,
+                Ok(false) => {}
                 Err(err) => {
-                    warn!(
-                        target: "engine::tree::payload_processor::prewarm",
-                        ?address,
-                        ?err,
-                        "Failed to check BAL account storage root"
-                    );
+                    warn!(target: "engine::tree::payload_processor::prewarm", ?address, ?err, "Failed to check BAL account storage");
                 }
             }
         }

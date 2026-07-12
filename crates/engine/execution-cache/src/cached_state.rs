@@ -776,6 +776,10 @@ impl<S: StateProofProvider> StateProofProvider for CachedStateProvider<S> {
 }
 
 impl<S: StorageRootProvider> StorageRootProvider for CachedStateProvider<S> {
+    fn is_storage_empty(&self, address: Address) -> ProviderResult<bool> {
+        self.state_provider.is_storage_empty(address)
+    }
+
     fn storage_root(
         &self,
         address: Address,
