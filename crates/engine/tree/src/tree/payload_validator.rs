@@ -148,7 +148,7 @@ use reth_primitives_traits::{
     SealedBlock, SealedHeader, SignerRecoverable,
 };
 use reth_provider::{
-    providers::{OverlayBuilder, OverlayStateProvider, OverlayStateProviderFactory},
+    providers::{OverlayBuilder, OverlayStateProviderFactory},
     BalProvider, BlockExecutionOutput, BlockNumReader, BlockReader, ChangeSetReader,
     DatabaseProviderFactory, DatabaseProviderROFactory, HashedPostStateProvider, ProviderError,
     PruneCheckpointReader, StageCheckpointReader, StateProvider, StateProviderBox,

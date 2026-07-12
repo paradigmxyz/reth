@@ -2,9 +2,9 @@
 
 use crate::tree::error::InsertPayloadError;
 use alloy_eip7928::bal::{DecodedBal, RawBal};
+use alloy_eip8289::WamItems;
 use alloy_eips::eip4895::Withdrawal;
 use alloy_primitives::B256;
-use alloy_eip8289::WamItems;
 use reth_chain_state::{ExecutedBlock, ExecutionTimingStats};
 use reth_evm::{ConfigureEvm, EvmEnvFor};
 use reth_primitives_traits::{BlockTy, NodePrimitives};
@@ -35,6 +35,8 @@ pub struct ExecutionEnv<Evm: ConfigureEvm> {
     /// Optional decoded BAL for the block.
     /// Used to validate and optimize execution.
     pub decoded_bal: Option<Arc<DecodedBal>>,
+    /// Payload BAL accesses that are present in the EIP-8289 warming window.
+    pub(crate) warm_accesses: crate::tree::warm_access::WarmAccessSnapshot,
 }
 
 impl<Evm: ConfigureEvm> ExecutionEnv<Evm>
@@ -53,6 +55,7 @@ where
             gas_used: 0,
             withdrawals: None,
             decoded_bal: None,
+            warm_accesses: Default::default(),
         }
     }
 }
