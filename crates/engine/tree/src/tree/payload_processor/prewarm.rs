@@ -671,7 +671,12 @@ where
             hashed_update_stream.on_hashed_state_update(hashed_state);
         }
 
-        let existing_account = if account_fields.needs_parent_account() {
+        // An account that ends empty without storage changes may be a no-op when it did not exist
+        // in the parent state. Read the parent account even when all leaf fields are present so we
+        // can distinguish that case from deleting an existing account.
+        let existing_account = if account_fields.needs_parent_account() ||
+            (account_changes.storage_changes.is_empty() && account_fields.is_empty_account())
+        {
             if provider.is_none() {
                 let _span = debug_span!(
                     target: "engine::tree::payload_processor::prewarm",
@@ -710,6 +715,13 @@ where
 
         let account = account_fields.into_account(existing_account);
 
+        if existing_account.is_none() &&
+            account.is_empty() &&
+            account_changes.storage_changes.is_empty()
+        {
+            return;
+        }
+
         let hashed_address = hashed_address.unwrap_or_else(|| keccak256(address));
         let mut hashed_state = reth_trie::HashedPostState::default();
         hashed_state.accounts.insert(hashed_address, Some(account));
@@ -746,6 +758,12 @@ impl BalAccountStateFields {
 
     const fn needs_parent_account(self) -> bool {
         self.balance.is_none() || self.nonce.is_none() || self.code_hash.is_none()
+    }
+
+    fn is_empty_account(self) -> bool {
+        self.balance == Some(U256::ZERO) &&
+            self.nonce == Some(0) &&
+            self.code_hash == Some(alloy_consensus::constants::KECCAK_EMPTY)
     }
 
     fn into_account(self, existing_account: Option<Account>) -> Account {
@@ -844,6 +862,18 @@ mod tests {
         assert_eq!(account.balance, U256::from(10));
         assert_eq!(account.nonce, 3);
         assert_eq!(account.bytecode_hash, Some(B256::repeat_byte(0xaa)));
+    }
+
+    #[test]
+    fn bal_account_with_all_zero_fields_is_empty() {
+        let changes = AccountChanges::new(address!("0000000000000000000000000000000000000001"))
+            .with_balance_change(BalanceChange::new(BlockAccessIndex::new(1), U256::ZERO))
+            .with_nonce_change(NonceChange::new(BlockAccessIndex::new(1), 0))
+            .with_code_change(CodeChange::new(BlockAccessIndex::new(1), Default::default()));
+        let fields = BalAccountStateFields::from_changes(&changes);
+
+        assert!(fields.is_empty_account());
+        assert!(fields.into_account(None).is_empty());
     }
 }
 
