@@ -358,7 +358,8 @@ async fn storage_ranges_multi_account_bounds_only_first_account() {
     assert_eq!(keccak256(&proof[0]), storage_root_b, "the proof should cover the final account");
 
     // A non-zero origin on the request only bounds the first account: since it forces a proof for
-    // A regardless of budget, B is never reached, proving the origin isn't (mis)applied to B too.
+    // A regardless of budget, B is never reached, proving the origin isn't wrongly applied to B
+    // too.
     let origin = expected_a[1].0;
     let response = fetch
         .get_storage_ranges(GetStorageRangesMessage {
