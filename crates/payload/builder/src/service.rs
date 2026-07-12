@@ -32,8 +32,7 @@ use tokio_stream::wrappers::UnboundedReceiverStream;
 use tracing::{debug, debug_span, info, trace, warn, Span};
 
 type PayloadFuture<P> = Pin<Box<dyn Future<Output = Result<P, PayloadBuilderError>> + Send>>;
-type PayloadJobEntry<Job> = (Job, PayloadId, Span);
-type ResolvePayloadResult<P, Job> = (Option<PayloadFuture<P>>, Option<PayloadJobEntry<Job>>);
+type PayloadResponse<P> = oneshot::Sender<Option<PayloadFuture<P>>>;
 
 /// A communication channel to the [`PayloadBuilderService`] that can retrieve payloads.
 ///
@@ -150,9 +149,9 @@ impl<T: PayloadTypes> PayloadBuilderHandle<T> {
     ///
     /// # Cancellation safety
     ///
-    /// The future returned by this method is not cancellation-safe. This method sends the resolve
-    /// command before returning the future, so dropping the returned future drops the response
-    /// receiver and cancels the job identified by `id`.
+    /// Dropping the returned future does not consume the payload id. If the service has not started
+    /// resolving yet, the payload job remains available. If a terminating resolve has started, the
+    /// service drives it to completion and caches the result for a retry.
     pub fn resolve_kind(
         &self,
         id: PayloadId,
@@ -224,6 +223,9 @@ where
     /// propagated across the channel so that poll and resolve work appears as children of the
     /// original Engine API request.
     payload_jobs: Vec<(Gen::Job, PayloadId, Span)>,
+    /// Terminating payload resolutions that the service drives to completion so request
+    /// cancellation cannot consume an advertised payload id.
+    pending_resolutions: Vec<PendingPayloadResolution<T::BuiltPayload>>,
     /// Copy of the sender half, so new [`PayloadBuilderHandle`] can be created on demand.
     service_tx: mpsc::UnboundedSender<PayloadServiceCommand<T>>,
     /// Receiver half of the command channel.
@@ -239,6 +241,23 @@ where
     cached_payload_rx: watch::Receiver<Option<(PayloadId, BlockTimestamp, T::BuiltPayload)>>,
     /// Sender half of the cached payload channel.
     cached_payload_tx: watch::Sender<Option<(PayloadId, BlockTimestamp, T::BuiltPayload)>>,
+}
+
+/// A terminating payload resolution owned by the service until its result is cached.
+#[derive(derive_more::Debug)]
+struct PendingPayloadResolution<P> {
+    /// Payload id being resolved.
+    id: PayloadId,
+    /// Timestamp retained after the payload job is removed.
+    timestamp: Option<BlockTimestamp>,
+    /// Span inherited from the payload job.
+    span: Span,
+    /// Resolve future taken from the terminating payload job.
+    #[debug(skip)]
+    future: PayloadFuture<P>,
+    /// Requests waiting for the service-owned resolution.
+    #[debug(skip)]
+    responses: Vec<PayloadResponse<P>>,
 }
 
 const PAYLOAD_EVENTS_BUFFER_SIZE: usize = 20;
@@ -267,6 +286,7 @@ where
         let service = Self {
             generator,
             payload_jobs: Vec::new(),
+            pending_resolutions: Vec::new(),
             service_tx,
             command_rx: UnboundedReceiverStream::new(command_rx),
             metrics: Default::default(),
@@ -293,7 +313,8 @@ where
 
     /// Returns true if the given payload is currently being built.
     fn contains_payload(&self, id: PayloadId) -> bool {
-        self.payload_jobs.iter().any(|(_, job_id, _)| *job_id == id)
+        self.payload_jobs.iter().any(|(_, job_id, _)| *job_id == id) ||
+            self.pending_resolutions.iter().any(|resolution| resolution.id == id)
     }
 
     /// Returns the best payload for the given identifier that has been built so far.
@@ -310,33 +331,50 @@ where
         res
     }
 
-    /// Returns the best payload for the given identifier that has been built so far.
+    /// Resolves the payload for the given identifier.
     ///
-    /// If the job should be terminated, this removes it from active polling and returns it so the
-    /// caller can drop it after the response is sent.
+    /// Returns `true` when a new service-owned resolution was started and should be polled before
+    /// the service yields.
     fn resolve(
         &mut self,
         id: PayloadId,
         kind: PayloadKind,
-    ) -> ResolvePayloadResult<T::BuiltPayload, Gen::Job> {
+        response: PayloadResponse<T::BuiltPayload>,
+    ) -> bool {
+        if response.is_closed() {
+            debug!(target: "payload_builder", %id, "resolve request already dropped, keeping payload job");
+            return false
+        }
+
         let start = Instant::now();
         debug!(target: "payload_builder", %id, "resolving payload job");
 
-        if let Some((cached, _, payload)) = &*self.cached_payload_rx.borrow() &&
-            *cached == id
-        {
+        let cached_payload = self
+            .cached_payload_rx
+            .borrow()
+            .as_ref()
+            .filter(|(cached_id, _, _)| *cached_id == id)
+            .map(|(_, _, payload)| payload.clone());
+        if let Some(payload) = cached_payload {
             self.metrics.resolve_duration_seconds.record(start.elapsed());
-            return (Some(Box::pin(core::future::ready(Ok(payload.clone())))), None);
+            let _ = response.send(Some(Box::pin(core::future::ready(Ok(payload)))));
+            return false
+        }
+
+        if let Some(resolution) =
+            self.pending_resolutions.iter_mut().find(|resolution| resolution.id == id)
+        {
+            resolution.responses.push(response);
+            return false
         }
 
         let Some(job) = self.payload_jobs.iter().position(|(_, job_id, _)| *job_id == id) else {
-            return (None, None)
+            let _ = response.send(None);
+            return false
         };
         let (fut, keep_alive) = self.payload_jobs[job].0.resolve_kind(kind);
         let payload_timestamp = self.payload_jobs[job].0.payload_timestamp();
-
-        let resolved_job =
-            (keep_alive == KeepPayloadJobAlive::No).then(|| self.payload_jobs.swap_remove(job));
+        let pending_timestamp = payload_timestamp.as_ref().ok().copied();
 
         // Since the fees will not be known until the payload future is resolved / awaited, we wrap
         // the future in a new future that will update the metrics.
@@ -362,7 +400,23 @@ where
             res.map(|p| p.into())
         };
 
-        (Some(Box::pin(fut)), resolved_job)
+        let fut: PayloadFuture<T::BuiltPayload> = Box::pin(fut);
+        if keep_alive == KeepPayloadJobAlive::Yes {
+            let _ = response.send(Some(fut));
+            return false
+        }
+
+        let (_job, _, span) = self.payload_jobs.swap_remove(job);
+        self.metrics.set_active_jobs(self.payload_jobs.len());
+        self.pending_resolutions.push(PendingPayloadResolution {
+            id,
+            timestamp: pending_timestamp,
+            span,
+            future: fut,
+            responses: vec![response],
+        });
+        debug!(target: "payload_builder", %id, "service is completing terminating payload resolution");
+        true
     }
 
     /// Returns the payload timestamp for the given payload.
@@ -371,6 +425,15 @@ where
             cached_id == id
         {
             return Some(Ok(timestamp));
+        }
+
+        if let Some(timestamp) = self
+            .pending_resolutions
+            .iter()
+            .find(|resolution| resolution.id == id)
+            .and_then(|resolution| resolution.timestamp)
+        {
+            return Some(Ok(timestamp))
         }
 
         let timestamp = self
@@ -434,8 +497,45 @@ where
                 }
             }
 
-            // marker for exit condition
-            let mut new_job = false;
+            // Poll terminating resolutions independently of their request futures. This ensures a
+            // dropped Engine API request cannot cancel the only path to a retryable payload.
+            for idx in (0..this.pending_resolutions.len()).rev() {
+                let mut resolution = this.pending_resolutions.swap_remove(idx);
+                let poll_result = {
+                    let _entered = resolution.span.enter();
+                    resolution.future.poll_unpin(cx)
+                };
+
+                match poll_result {
+                    Poll::Ready(Ok(payload)) => {
+                        debug!(target: "payload_builder", id=%resolution.id, "terminating payload resolution completed");
+                        for response in resolution.responses {
+                            if !response.is_closed() {
+                                let _ = response
+                                    .send(Some(Box::pin(core::future::ready(Ok(payload.clone())))));
+                            }
+                        }
+                    }
+                    Poll::Ready(Err(err)) => {
+                        warn!(target: "payload_builder", %err, id=%resolution.id, "terminating payload resolution failed");
+                        let mut err = Some(err);
+                        for response in resolution.responses {
+                            if response.is_closed() {
+                                continue
+                            }
+                            let response_err =
+                                err.take().unwrap_or(PayloadBuilderError::MissingPayload);
+                            let _ = response
+                                .send(Some(Box::pin(core::future::ready(Err(response_err)))));
+                        }
+                    }
+                    Poll::Pending => this.pending_resolutions.push(resolution),
+                }
+            }
+
+            // Marker for the exit condition. Newly created futures must be polled once before the
+            // service yields so they can register their wakers.
+            let mut poll_again = false;
 
             // drain all requests
             while let Poll::Ready(Some(cmd)) = this.command_rx.poll_next_unpin(cx) {
@@ -460,7 +560,7 @@ where
                                     this.metrics.new_job_duration_seconds.record(start.elapsed());
                                     info!(target: "payload_builder", %id, %parent, "New payload job created");
                                     this.metrics.inc_initiated_jobs();
-                                    new_job = true;
+                                    poll_again = true;
                                     this.payload_jobs.push((job, id, job_span));
                                     this.payload_events.send(Events::Attributes(attributes)).ok();
 
@@ -496,12 +596,7 @@ where
                         let _ = tx.send(timestamp);
                     }
                     PayloadServiceCommand::Resolve(id, strategy, tx) => {
-                        let (payload_fut, resolved_job) = this.resolve(id, strategy);
-                        let _ = tx.send(payload_fut);
-
-                        if let Some((_job, id, _job_span)) = resolved_job {
-                            debug!(target: "payload_builder", %id, "terminated resolved job");
-                        }
+                        poll_again |= this.resolve(id, strategy, tx);
                     }
                     PayloadServiceCommand::Subscribe(tx) => {
                         let new_rx = this.payload_events.subscribe();
@@ -510,7 +605,7 @@ where
                 }
             }
 
-            if !new_job {
+            if !poll_again {
                 return Poll::Pending
             }
         }
@@ -562,5 +657,241 @@ impl<T: PayloadAttributes> BuildNewPayload<T> {
     /// Returns the payload id for the new payload.
     pub fn payload_id(&self) -> PayloadId {
         self.attributes.payload_id(&self.parent_hash)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use alloy_consensus::Block;
+    use alloy_primitives::{Address, U256};
+    use futures_util::future::{poll_fn, BoxFuture};
+    use reth_ethereum_engine_primitives::{EthBuiltPayload, EthEngineTypes, EthPayloadAttributes};
+    use reth_primitives_traits::{Block as _, RecoveredBlock};
+    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+
+    #[derive(Clone, Debug)]
+    struct MockPayloadJobGenerator {
+        resolve_calls: Arc<AtomicUsize>,
+        resolve_ready: Arc<AtomicBool>,
+        resolve_fails: bool,
+    }
+
+    impl PayloadJobGenerator for MockPayloadJobGenerator {
+        type Job = MockPayloadJob;
+
+        fn new_payload_job(
+            &self,
+            input: BuildNewPayload<EthPayloadAttributes>,
+            _id: PayloadId,
+        ) -> Result<Self::Job, PayloadBuilderError> {
+            Ok(MockPayloadJob {
+                attr: input.attributes,
+                resolve_calls: self.resolve_calls.clone(),
+                resolve_ready: self.resolve_ready.clone(),
+                resolve_fails: self.resolve_fails,
+            })
+        }
+    }
+
+    #[derive(Debug)]
+    struct MockPayloadJob {
+        attr: EthPayloadAttributes,
+        resolve_calls: Arc<AtomicUsize>,
+        resolve_ready: Arc<AtomicBool>,
+        resolve_fails: bool,
+    }
+
+    impl Future for MockPayloadJob {
+        type Output = Result<(), PayloadBuilderError>;
+
+        fn poll(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<Self::Output> {
+            Poll::Pending
+        }
+    }
+
+    impl PayloadJob for MockPayloadJob {
+        type PayloadAttributes = EthPayloadAttributes;
+        type ResolvePayloadFuture =
+            BoxFuture<'static, Result<EthBuiltPayload, PayloadBuilderError>>;
+        type BuiltPayload = EthBuiltPayload;
+
+        fn best_payload(&self) -> Result<EthBuiltPayload, PayloadBuilderError> {
+            Ok(test_payload())
+        }
+
+        fn payload_attributes(&self) -> Result<EthPayloadAttributes, PayloadBuilderError> {
+            Ok(self.attr.clone())
+        }
+
+        fn payload_timestamp(&self) -> Result<u64, PayloadBuilderError> {
+            Ok(self.attr.timestamp)
+        }
+
+        fn resolve_kind(
+            &mut self,
+            _kind: PayloadKind,
+        ) -> (Self::ResolvePayloadFuture, KeepPayloadJobAlive) {
+            self.resolve_calls.fetch_add(1, Ordering::SeqCst);
+            let resolve_ready = self.resolve_ready.clone();
+            let resolve_fails = self.resolve_fails;
+            let fut = poll_fn(move |_cx| {
+                if resolve_ready.load(Ordering::SeqCst) {
+                    if resolve_fails {
+                        Poll::Ready(Err(PayloadBuilderError::MissingPayload))
+                    } else {
+                        Poll::Ready(Ok(test_payload()))
+                    }
+                } else {
+                    Poll::Pending
+                }
+            });
+            (Box::pin(fut), KeepPayloadJobAlive::No)
+        }
+    }
+
+    #[test]
+    fn dropped_resolve_before_service_processing_keeps_job_for_retry() {
+        let resolve_calls = Arc::new(AtomicUsize::new(0));
+        let resolve_ready = Arc::new(AtomicBool::new(true));
+        let generator = MockPayloadJobGenerator {
+            resolve_calls: resolve_calls.clone(),
+            resolve_ready,
+            resolve_fails: false,
+        };
+        let chain_events = futures_util::stream::empty::<CanonStateNotification>();
+        let (mut service, handle) =
+            PayloadBuilderService::<_, _, EthEngineTypes>::new(generator, chain_events);
+        let mut cx = Context::from_waker(futures_util::task::noop_waker_ref());
+
+        let payload_id = start_payload_job(&mut service, &handle, &mut cx);
+
+        // The command is queued eagerly, then its caller disappears before the service sees it.
+        drop(handle.resolve_kind(payload_id, PayloadKind::Earliest));
+        assert!(Pin::new(&mut service).poll(&mut cx).is_pending());
+
+        assert_eq!(resolve_calls.load(Ordering::SeqCst), 0);
+        assert_eq!(service.payload_jobs.len(), 1);
+
+        let mut retry = Box::pin(handle.resolve_kind(payload_id, PayloadKind::Earliest));
+        assert!(Pin::new(&mut service).poll(&mut cx).is_pending());
+        assert!(matches!(retry.as_mut().poll(&mut cx), Poll::Ready(Some(Ok(_)))));
+        assert_eq!(resolve_calls.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn cancelled_in_progress_resolve_keeps_payload_id_resolvable() {
+        let resolve_calls = Arc::new(AtomicUsize::new(0));
+        let resolve_ready = Arc::new(AtomicBool::new(false));
+        let generator = MockPayloadJobGenerator {
+            resolve_calls: resolve_calls.clone(),
+            resolve_ready: resolve_ready.clone(),
+            resolve_fails: false,
+        };
+        let chain_events = futures_util::stream::empty::<CanonStateNotification>();
+        let (mut service, handle) =
+            PayloadBuilderService::<_, _, EthEngineTypes>::new(generator, chain_events);
+        let mut cx = Context::from_waker(futures_util::task::noop_waker_ref());
+
+        let payload_id = start_payload_job(&mut service, &handle, &mut cx);
+
+        let mut first_resolve = Box::pin(handle.resolve_kind(payload_id, PayloadKind::Earliest));
+        assert!(Pin::new(&mut service).poll(&mut cx).is_pending());
+        assert!(first_resolve.as_mut().poll(&mut cx).is_pending());
+        assert_eq!(resolve_calls.load(Ordering::SeqCst), 1);
+
+        // Resolution has consumed the terminating job, but request cancellation must not consume
+        // the advertised payload id or cancel the service-owned resolution.
+        drop(first_resolve);
+
+        let mut timestamp = Box::pin(handle.payload_timestamp(payload_id));
+        assert!(timestamp.as_mut().poll(&mut cx).is_pending());
+        assert!(Pin::new(&mut service).poll(&mut cx).is_pending());
+        assert!(matches!(timestamp.as_mut().poll(&mut cx), Poll::Ready(Some(Ok(1)))));
+
+        let mut retry = Box::pin(handle.resolve_kind(payload_id, PayloadKind::Earliest));
+        assert!(Pin::new(&mut service).poll(&mut cx).is_pending());
+        assert!(retry.as_mut().poll(&mut cx).is_pending());
+        assert_eq!(resolve_calls.load(Ordering::SeqCst), 1);
+
+        resolve_ready.store(true, Ordering::SeqCst);
+        assert!(Pin::new(&mut service).poll(&mut cx).is_pending());
+        assert!(matches!(retry.as_mut().poll(&mut cx), Poll::Ready(Some(Ok(_)))));
+
+        let mut cached_retry = Box::pin(handle.resolve_kind(payload_id, PayloadKind::Earliest));
+        assert!(Pin::new(&mut service).poll(&mut cx).is_pending());
+        assert!(matches!(cached_retry.as_mut().poll(&mut cx), Poll::Ready(Some(Ok(_)))));
+        assert_eq!(resolve_calls.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn failed_service_owned_resolve_clears_pending_state() {
+        let resolve_calls = Arc::new(AtomicUsize::new(0));
+        let resolve_ready = Arc::new(AtomicBool::new(true));
+        let generator =
+            MockPayloadJobGenerator { resolve_calls, resolve_ready, resolve_fails: true };
+        let chain_events = futures_util::stream::empty::<CanonStateNotification>();
+        let (mut service, handle) =
+            PayloadBuilderService::<_, _, EthEngineTypes>::new(generator, chain_events);
+        let mut cx = Context::from_waker(futures_util::task::noop_waker_ref());
+
+        let payload_id = start_payload_job(&mut service, &handle, &mut cx);
+        let mut resolve = Box::pin(handle.resolve_kind(payload_id, PayloadKind::Earliest));
+
+        assert!(Pin::new(&mut service).poll(&mut cx).is_pending());
+        assert!(matches!(resolve.as_mut().poll(&mut cx), Poll::Ready(Some(Err(_)))));
+        assert!(service.pending_resolutions.is_empty());
+        assert!(service.cached_payload_rx.borrow().is_none());
+    }
+
+    fn start_payload_job(
+        service: &mut PayloadBuilderService<
+            MockPayloadJobGenerator,
+            futures_util::stream::Empty<CanonStateNotification>,
+            EthEngineTypes,
+        >,
+        handle: &PayloadBuilderHandle<EthEngineTypes>,
+        cx: &mut Context<'_>,
+    ) -> PayloadId {
+        let parent_hash = B256::ZERO;
+        let attributes = test_payload_attributes();
+        let payload_id = attributes.payload_id(&parent_hash);
+        let mut new_payload = Box::pin(handle.send_new_payload(BuildNewPayload {
+            attributes,
+            parent_hash,
+            cache: None,
+            state_root_handle: None,
+        }));
+
+        assert!(Pin::new(&mut *service).poll(cx).is_pending());
+        match new_payload.as_mut().poll(cx) {
+            Poll::Ready(Ok(Ok(returned_id))) => assert_eq!(returned_id, payload_id),
+            other => panic!("payload id should be returned for the build command: {other:?}"),
+        }
+
+        assert!(Pin::new(&mut *service).poll(cx).is_pending());
+        assert_eq!(service.payload_jobs.len(), 1);
+        payload_id
+    }
+
+    fn test_payload_attributes() -> EthPayloadAttributes {
+        EthPayloadAttributes {
+            timestamp: 1,
+            prev_randao: B256::ZERO,
+            suggested_fee_recipient: Address::ZERO,
+            withdrawals: Some(vec![]),
+            parent_beacon_block_root: Some(B256::ZERO),
+            slot_number: None,
+            target_gas_limit: None,
+        }
+    }
+
+    fn test_payload() -> EthBuiltPayload {
+        EthBuiltPayload::new(
+            Arc::new(RecoveredBlock::new_sealed(Block::<_>::default().seal_slow(), vec![])),
+            U256::ZERO,
+            None,
+            None,
+        )
     }
 }
