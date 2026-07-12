@@ -184,11 +184,6 @@ impl<N: ProviderNodeTypes> BlockchainProvider<N> {
     }
 }
 
-/// State range view backed by one resolved historical overlay.
-struct HistoricalStateRangeView<N: ProviderNodeTypes> {
-    provider: HistoricalStateRangeProvider<N>,
-}
-
 impl<N: NodeTypesWithDB> NodePrimitivesProvider for BlockchainProvider<N> {
     type Primitives = N::Primitives;
 }
@@ -197,6 +192,11 @@ impl<N: NodeTypesWithDB> BalProvider for BlockchainProvider<N> {
     fn bal_store(&self) -> &BalStoreHandle {
         &self.bal_store
     }
+}
+
+/// State range view backed by one resolved historical overlay.
+struct HistoricalStateRangeView<N: ProviderNodeTypes> {
+    provider: HistoricalStateRangeProvider<N>,
 }
 
 impl<N: ProviderNodeTypes> StateRangeProviderFactory for BlockchainProvider<N> {
@@ -267,13 +267,15 @@ impl<N: ProviderNodeTypes> StateRangeProvider for HistoricalStateRangeView<N> {
         let mut total_bytes = 0usize;
         let mut complete = true;
 
+        // Append before checking `limit`, so an empty `[start, limit]` still returns the slot
+        // right past `limit`, provable as an empty range rather than a skipped one.
         let mut entry = cursor.seek(start).map_err(ProviderError::Database)?;
         while let Some((hash, value)) = entry {
-            if hash > limit {
+            total_bytes += 64;
+            slots.push((hash, value));
+            if hash >= limit {
                 break
             }
-            total_bytes += 64; // 32-byte hash + 32-byte value
-            slots.push((hash, value));
             if total_bytes > response_bytes {
                 complete = false;
                 break
@@ -2877,6 +2879,10 @@ mod tests {
             slots.iter().map(|entry| (keccak256(entry.key), entry.value)).collect();
         expected.sort_by_key(|(hash, _)| *hash);
         assert_eq!(returned.items, expected);
+
+        let empty_window = state.storage_range(hashed_address, B256::ZERO, B256::ZERO, 10_000)?;
+        assert!(empty_window.complete);
+        assert_eq!(empty_window.items, expected[..1]);
 
         Ok(())
     }
