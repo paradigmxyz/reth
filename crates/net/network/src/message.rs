@@ -15,7 +15,7 @@ use reth_eth_wire::{
     Transactions,
 };
 use reth_eth_wire_types::{snap::SnapProtocolMessage, RawCapabilityMessage};
-use reth_network_api::PeerRequest;
+use reth_network_api::{PeerRequest, RequestMessage};
 use reth_network_p2p::{
     error::{RequestError, RequestResult},
     snap::client::SnapResponse,
@@ -285,14 +285,16 @@ pub enum PeerResponseResult<N: NetworkPrimitives = EthNetworkPrimitives> {
 // === impl PeerResponseResult ===
 
 impl<N: NetworkPrimitives> PeerResponseResult<N> {
-    /// Converts this response into an [`EthMessage`]
-    pub fn try_into_message(self, id: u64) -> RequestResult<EthMessage<N>> {
+    /// Converts this response into the [`RequestMessage`] to send back to the peer: an
+    /// [`EthMessage`] for every variant except [`Self::Snap`], which becomes a
+    /// [`SnapProtocolMessage`].
+    pub fn try_into_message(self, id: u64) -> RequestResult<RequestMessage<N>> {
         macro_rules! to_message {
             ($response:ident, $item:ident, $request_id:ident) => {
                 match $response {
                     Ok(res) => {
                         let request = RequestPair { request_id: $request_id, message: $item(res) };
-                        Ok(EthMessage::$item(request))
+                        Ok(RequestMessage::Eth(EthMessage::$item(request)))
                     }
                     Err(err) => Err(err),
                 }
@@ -320,27 +322,32 @@ impl<N: NetworkPrimitives> PeerResponseResult<N> {
             Self::Receipts70(resp) => match resp {
                 Ok(res) => {
                     let request = RequestPair { request_id: id, message: res };
-                    Ok(EthMessage::Receipts70(request))
+                    Ok(RequestMessage::Eth(EthMessage::Receipts70(request)))
                 }
                 Err(err) => Err(err),
             },
             Self::BlockAccessLists(resp) => match resp {
                 Ok(res) => {
                     let request = RequestPair { request_id: id, message: res };
-                    Ok(EthMessage::BlockAccessLists(request))
+                    Ok(RequestMessage::Eth(EthMessage::BlockAccessLists(request)))
                 }
                 Err(err) => Err(err),
             },
             Self::Cells(resp) => match resp {
                 Ok(res) => {
                     let request = RequestPair { request_id: id, message: res };
-                    Ok(EthMessage::Cells(request))
+                    Ok(RequestMessage::Eth(EthMessage::Cells(request)))
                 }
                 Err(err) => Err(err),
             },
-            // `snap/2` responses aren't `eth` wire messages and never reach this conversion: it's
-            // only used to answer inbound eth requests, and there's no snap/2 server yet.
-            Self::Snap(_) => Err(RequestError::UnsupportedCapability),
+            Self::Snap(resp) => match resp {
+                Ok(res) => {
+                    let mut message: SnapProtocolMessage = res.into();
+                    message.set_request_id(id);
+                    Ok(RequestMessage::Snap(message))
+                }
+                Err(err) => Err(err),
+            },
         }
     }
 

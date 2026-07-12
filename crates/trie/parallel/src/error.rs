@@ -17,6 +17,9 @@ pub enum StateRootTaskError {
     /// Sparse trie task stalled.
     #[error("sparse trie task stalled")]
     Stalled,
+    /// The consumer dropped its cancel guard without waiting for the result.
+    #[error("state root task canceled: consumer dropped the handle")]
+    Canceled,
     /// Other unspecified error.
     #[error("{_0}")]
     Other(String),

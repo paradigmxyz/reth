@@ -956,9 +956,15 @@ impl PeersManager {
         self.ban_list.ban_peer(peer_id);
     }
 
-    /// Removes the peer from the ban list.
+    /// Removes the peer from the ban list and resets its reputation.
     pub(crate) fn unban_peer_by_admin(&mut self, peer_id: PeerId) {
         self.ban_list.unban_peer(&peer_id);
+        if let Some(peer) = self.peers.get_mut(&peer_id) &&
+            peer.is_banned()
+        {
+            peer.unban();
+            self.queued_actions.push_back(PeerAction::UnBanPeer { peer_id });
+        }
     }
 
     /// Connect to the given peer. NOTE: if the maximum number of outbound sessions is reached,
@@ -1703,7 +1709,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_admin_unban_only_removes_banlist_entry() {
+    async fn test_admin_unban_resets_reputation() {
         let peer = PeerId::random();
         let socket_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 1, 2)), 8008);
         let mut peers = PeersManager::default();
@@ -1716,7 +1722,11 @@ mod tests {
         peers.unban_peer_by_admin(peer);
 
         assert!(!peers.ban_list.is_banned_peer(&peer));
-        assert!(peers.peers.get(&peer).is_some_and(Peer::is_banned));
+        assert!(!peers.peers.get(&peer).is_some_and(Peer::is_banned));
+        assert!(matches!(
+            peers.queued_actions.pop_front(),
+            Some(PeerAction::UnBanPeer { peer_id }) if peer_id == peer
+        ));
     }
 
     #[tokio::test]
