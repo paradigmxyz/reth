@@ -126,10 +126,11 @@ where
         }
     }
 
-    if chain_spec.is_amsterdam_active_at_timestamp(block.header().timestamp()) {
+    if chain_spec.is_amsterdam_active_at_timestamp(block.header().timestamp()) &&
+        let Some(header_wam_root) = block.header().wam_root()
+    {
         let Some(wam_root) = wam_root else { return Err(ConsensusError::WamRootMissing) };
 
-        let header_wam_root = block.header().wam_root().unwrap_or_default();
         if wam_root != header_wam_root {
             return Err(ConsensusError::WamRootMismatch(
                 GotExpected::new(wam_root, header_wam_root).into(),

@@ -263,11 +263,9 @@ where
             }
         }
 
-        if self.chain_spec.is_amsterdam_active_at_timestamp(header.timestamp()) {
-            if header.wam_root().is_none() {
-                return Err(ConsensusError::WamRootMissing)
-            }
-        } else if header.wam_root().is_some() {
+        if !self.chain_spec.is_amsterdam_active_at_timestamp(header.timestamp()) &&
+            header.wam_root().is_some()
+        {
             return Err(ConsensusError::WamRootUnexpected)
         }
 
@@ -344,6 +342,13 @@ mod tests {
         header.block_access_list_hash = Some(B256::ZERO);
         header.slot_number = Some(0);
         header.wam_root = Some(root);
+        RecoveredBlock::new_unhashed(EthBlock { header, body: Default::default() }, Vec::new())
+    }
+
+    fn amsterdam_recovered_block_without_wam_root() -> RecoveredBlock<EthBlock> {
+        let mut header = valid_prague_header();
+        header.block_access_list_hash = Some(B256::ZERO);
+        header.slot_number = Some(0);
         RecoveredBlock::new_unhashed(EthBlock { header, body: Default::default() }, Vec::new())
     }
 
@@ -524,7 +529,7 @@ mod tests {
     }
 
     #[test]
-    fn amsterdam_post_execution_requires_wam_root() {
+    fn amsterdam_post_execution_validates_present_wam_root() {
         let chain_spec = Arc::new(
             ChainSpecBuilder::mainnet()
                 .amsterdam_activated()
@@ -574,6 +579,24 @@ mod tests {
     }
 
     #[test]
+    fn amsterdam_post_execution_accepts_missing_header_wam_root() {
+        let chain_spec = Arc::new(ChainSpecBuilder::mainnet().amsterdam_activated().build());
+        let block = amsterdam_recovered_block_without_wam_root();
+        let result = BlockExecutionResult::<Receipt>::default();
+        let consensus = EthBeaconConsensus::new(chain_spec);
+
+        assert!(FullConsensus::<EthPrimitives>::validate_block_post_execution(
+            &consensus,
+            &block,
+            &result,
+            None,
+            Some(B256::ZERO),
+            Some(B256::repeat_byte(0x42)),
+        )
+        .is_ok());
+    }
+
+    #[test]
     fn amsterdam_header_requires_block_access_list_hash() {
         let chain_spec = Arc::new(ChainSpecBuilder::mainnet().amsterdam_activated().build());
         let mut header = valid_prague_header();
@@ -610,6 +633,19 @@ mod tests {
 
         assert!(EthBeaconConsensus::new(chain_spec)
             .validate_header(&SealedHeader::seal_slow(header,))
+            .is_ok());
+    }
+
+    #[test]
+    fn amsterdam_header_accepts_missing_wam_root() {
+        let chain_spec = Arc::new(ChainSpecBuilder::mainnet().amsterdam_activated().build());
+        let mut header = valid_prague_header();
+        header.block_access_list_hash = Some(B256::ZERO);
+        header.slot_number = Some(0);
+        header.wam_root = None;
+
+        assert!(EthBeaconConsensus::new(chain_spec)
+            .validate_header(&SealedHeader::seal_slow(header))
             .is_ok());
     }
 }
