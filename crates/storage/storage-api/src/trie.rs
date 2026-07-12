@@ -1,4 +1,4 @@
-use alloc::vec::Vec;
+use alloc::{boxed::Box, vec::Vec};
 use alloy_primitives::{Address, Bytes, B256, U256};
 use reth_primitives_traits::Account;
 use reth_storage_errors::provider::ProviderResult;
