@@ -10,7 +10,7 @@ use alloy_consensus::{
 };
 use alloy_eips::BlockHashOrNumber;
 use alloy_primitives::{Bytes, B256, U256};
-use alloy_rlp::{Encodable, RlpEncodable};
+use alloy_rlp::{Encodable, RlpDecodable, RlpEncodable};
 use futures::StreamExt;
 use reth_eth_wire::{
     snap::{
@@ -616,21 +616,28 @@ fn boundary_proof_keys<T>(origin: B256, last: Option<&(B256, T)>) -> Vec<B256> {
 /// Like the consensus trie account, but the code hash and storage root are empty byte strings
 /// rather than [`KECCAK_EMPTY`]/[`EMPTY_ROOT_HASH`] when the account has no code/storage, to
 /// avoid transferring the same 32 bytes for every EOA.
-#[derive(RlpEncodable)]
-struct SlimAccountBody<'a> {
-    nonce: u64,
-    balance: U256,
-    storage_root: &'a [u8],
-    code_hash: &'a [u8],
+#[derive(Debug, RlpEncodable, RlpDecodable)]
+pub struct SlimAccountBody {
+    /// The account's nonce.
+    pub nonce: u64,
+    /// The account's balance.
+    pub balance: U256,
+    /// Empty when the account has no storage.
+    pub storage_root: Bytes,
+    /// Empty when the account has no code.
+    pub code_hash: Bytes,
 }
 
 /// RLP-encodes `account` in snap/2's slim format; see [`SlimAccountBody`].
 fn slim_account_body(account: &Account, storage_root: B256) -> Bytes {
-    let storage_root: &[u8] =
-        if storage_root == EMPTY_ROOT_HASH { &[] } else { storage_root.as_slice() };
-    let code_hash: &[u8] = match &account.bytecode_hash {
-        Some(hash) if *hash != KECCAK_EMPTY => hash.as_slice(),
-        _ => &[],
+    let storage_root = if storage_root == EMPTY_ROOT_HASH {
+        Bytes::new()
+    } else {
+        Bytes::copy_from_slice(storage_root.as_slice())
+    };
+    let code_hash = match &account.bytecode_hash {
+        Some(hash) if *hash != KECCAK_EMPTY => Bytes::copy_from_slice(hash.as_slice()),
+        _ => Bytes::new(),
     };
 
     alloy_rlp::encode(SlimAccountBody {
