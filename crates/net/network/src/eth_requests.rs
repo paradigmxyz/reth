@@ -580,7 +580,8 @@ where
                         .into_iter()
                         .map(|(hash, value)| StorageData {
                             hash,
-                            data: value.to_be_bytes_trimmed_vec().into(),
+                            // snap clients verify proofs against RLP-encoded storage trie leaves.
+                            data: alloy_rlp::encode(value).into(),
                         })
                         .collect(),
                 );
@@ -1182,8 +1183,8 @@ mod tests {
             Ok(SnapResponse::StorageRanges(StorageRangesMessage {
                 request_id: 2,
                 slots: vec![vec![
-                    StorageData { hash: first_hash, data: Bytes::from_static(&[0x01, 0x02]) },
-                    StorageData { hash: second_hash, data: Bytes::from_static(&[0xff]) },
+                    StorageData { hash: first_hash, data: Bytes::from_static(&[0x82, 0x01, 0x02]) },
+                    StorageData { hash: second_hash, data: Bytes::from_static(&[0x81, 0xff]) },
                 ]],
                 proof,
             }))
