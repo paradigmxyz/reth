@@ -66,28 +66,6 @@ pub trait StorageRootProvider {
     ) -> ProviderResult<StorageMultiProof>;
 }
 
-/// A range query's items and whether the requested range is complete.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct RangeResponse<T> {
-    /// The items found within the requested range, in ascending key order.
-    pub items: Vec<T>,
-    /// Whether `items` covers the entire requested range, or was cut short by the byte budget.
-    pub complete: bool,
-}
-
-/// Result of a [`StateRangeProvider`] range query.
-pub type RangeResult<T> = ProviderResult<RangeResponse<T>>;
-
-/// A reusable state range view resolved for a specific state root.
-pub type StateRangeView = Box<dyn StateRangeProvider + Send + 'static>;
-
-/// A type that resolves retained state roots into reusable state range views.
-#[auto_impl::auto_impl(&, Arc)]
-pub trait StateRangeProviderFactory {
-    /// Returns a view pinned to `state_root`, or `None` if that root is not retained.
-    fn state_range_provider(&self, state_root: B256) -> ProviderResult<Option<StateRangeView>>;
-}
-
 /// A type that can iterate over consecutive hashed accounts and storage slots, and generate
 /// boundary proofs for them, for serving `snap/2` (EIP-8189) `GetAccountRange`/`GetStorageRanges`
 /// requests. Hash-native throughout, unlike [`StorageRootProvider`].
@@ -123,6 +101,28 @@ pub trait StateRangeProvider {
         keys: &[B256],
     ) -> ProviderResult<Vec<Bytes>>;
 }
+
+/// A type that resolves retained state roots into reusable state range views.
+#[auto_impl::auto_impl(&, Arc)]
+pub trait StateRangeProviderFactory {
+    /// Returns a view pinned to `state_root`, or `None` if that root is not retained.
+    fn state_range_provider(&self, state_root: B256) -> ProviderResult<Option<StateRangeView>>;
+}
+
+/// A range query's items and whether the requested range is complete.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RangeResponse<T> {
+    /// The items found within the requested range, in ascending key order.
+    pub items: Vec<T>,
+    /// Whether `items` covers the entire requested range, or was cut short by the byte budget.
+    pub complete: bool,
+}
+
+/// Result of a [`StateRangeProvider`] range query.
+pub type RangeResult<T> = ProviderResult<RangeResponse<T>>;
+
+/// A reusable state range view resolved for a specific state root.
+pub type StateRangeView = Box<dyn StateRangeProvider + Send + 'static>;
 
 /// A type that can generate state proof on top of a given post state.
 #[auto_impl::auto_impl(&, Box, Arc)]
