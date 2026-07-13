@@ -598,7 +598,7 @@ secp256k1 = { version = "0.30", default-features = false, features = ["global-co
 rand_08 = { package = "rand", version = "0.8" }
 
 # for eip-4844
-c-kzg = "2.1.5"
+c-kzg = "2.1.8"
 
 # config
 toml = "0.9"
@@ -643,7 +643,6 @@ aes = "0.8.1"
 ahash = "0.8"
 anyhow = "1.0"
 bindgen = { version = "0.72", default-features = false }
-block-padding = "0.3"
 cc = "1.2.62"
 cipher = "0.4.3"
 comfy-table = "7.0"
