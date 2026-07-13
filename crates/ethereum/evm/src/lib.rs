@@ -227,6 +227,25 @@ where
         ))
     }
 
+    fn txpool_prewarm_env(&self, parent: &Header) -> Result<Option<EvmEnv>, Self::Error> {
+        self.next_evm_env(
+            parent,
+            &NextBlockEnvAttributes {
+                timestamp: parent.timestamp.saturating_add(12),
+                suggested_fee_recipient: parent.beneficiary,
+                prev_randao: alloy_primitives::B256::ZERO,
+                gas_limit: parent.gas_limit,
+                parent_beacon_block_root: parent
+                    .parent_beacon_block_root
+                    .map(|_| Default::default()),
+                withdrawals: parent.withdrawals_root.map(|_| Default::default()),
+                extra_data: parent.extra_data.clone(),
+                slot_number: parent.slot_number.map(|slot| slot.saturating_add(1)),
+            },
+        )
+        .map(Some)
+    }
+
     fn context_for_block<'a>(
         &self,
         block: &'a SealedBlock<Block>,
