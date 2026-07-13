@@ -190,10 +190,14 @@ impl WorkerMap {
 
 impl Drop for WorkerMap {
     fn drop(&mut self) {
+        let current_thread = thread::current().id();
         for (_, mut w) in std::mem::take(&mut self.workers) {
             // Drop sender so the thread's recv loop exits, then join.
             drop(w.tx);
             if let Some(handle) = w.handle.take() {
+                if handle.thread().id() == current_thread {
+                    continue;
+                }
                 let _ = handle.join();
             }
         }
@@ -293,5 +297,26 @@ mod tests {
 
         let third = map.try_spawn_on("busy-worker", || 3).expect("worker should be idle");
         assert_eq!(third.await.unwrap(), 3);
+    }
+
+    #[test]
+    fn worker_map_can_drop_on_own_worker_thread() {
+        let map = Arc::new(std::sync::Mutex::new(Some(WorkerMap::new())));
+        let (done_tx, done_rx) = std::sync::mpsc::channel();
+
+        {
+            let guard = map.lock().unwrap();
+            let worker_map = guard.as_ref().unwrap();
+            let map_for_worker = map.clone();
+
+            worker_map.spawn_on("drop-self-test", move || {
+                drop(map_for_worker.lock().unwrap().take());
+                done_tx.send(()).unwrap();
+            });
+        }
+
+        drop(map);
+
+        done_rx.recv_timeout(std::time::Duration::from_secs(5)).unwrap();
     }
 }
