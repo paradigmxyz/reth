@@ -2,20 +2,16 @@
 
 use std::sync::Arc;
 
-use crate::tree::{
-    multiproof::{
-        dispatch_with_chunking, evm_state_to_hashed_post_state, StateRootComputeOutcome,
-        StateRootMessage, DEFAULT_MAX_TARGETS_FOR_CHUNKING,
-    },
-    payload_processor::multiproof::MultiProofTaskMetrics,
-};
+use super::{evm_state_to_hashed_post_state, StateRootComputeOutcome, StateRootMessage};
 use alloy_primitives::{
     map::{hash_map::Entry, B256Map},
     B256,
 };
 use alloy_rlp::{Decodable, Encodable};
 use crossbeam_channel::{Receiver as CrossbeamReceiver, Sender as CrossbeamSender};
+use metrics::{Gauge, Histogram};
 use rayon::iter::{IntoParallelIterator, ParallelIterator};
+use reth_metrics::Metrics;
 use reth_primitives_traits::{Account, FastInstant as Instant};
 use reth_tasks::Runtime;
 use reth_trie::{
@@ -121,7 +117,7 @@ pub(super) struct SparseTrieCacheTask<A = ArenaParallelSparseTrie, S = ArenaPara
     final_hashed_state: HashedPostState,
 
     /// Metrics for the sparse trie.
-    metrics: MultiProofTaskMetrics,
+    metrics: SparseTrieTaskMetrics,
 }
 
 impl<A, S> SparseTrieCacheTask<A, S>
@@ -137,7 +133,7 @@ where
         cancel_rx: CrossbeamReceiver<()>,
         final_hashed_state_tx: std::sync::mpsc::Sender<HashedPostState>,
         proof_worker_handle: ProofWorkerHandle,
-        metrics: MultiProofTaskMetrics,
+        metrics: SparseTrieTaskMetrics,
         trie: SparseStateTrie<A, S>,
         parent_state_root: B256,
         chunk_size: usize,
@@ -189,7 +185,7 @@ where
     fn run_hashing_task(
         updates: CrossbeamReceiver<StateRootMessage>,
         hashed_state_tx: CrossbeamSender<SparseTrieTaskMessage>,
-        metrics: MultiProofTaskMetrics,
+        metrics: SparseTrieTaskMetrics,
     ) {
         let mut total_idle_time = std::time::Duration::ZERO;
         let mut idle_start = Instant::now();
@@ -297,7 +293,7 @@ where
                 recv(self.cancel_rx) -> _ => return Err(StateRootTaskError::Canceled),
             }
 
-            done = self.make_progress(!self.updates.is_empty())?;
+            done = self.make_progress()?;
             idle_start = Instant::now();
         }
 
@@ -324,7 +320,7 @@ where
                 recv(self.cancel_rx) -> _ => return Err(StateRootTaskError::Canceled),
             }
 
-            done = self.make_progress(false)?;
+            done = self.make_progress()?;
             idle_start = Instant::now();
         }
 
@@ -405,10 +401,11 @@ where
 
     /// Applies buffered updates to the trie and dispatches proof targets.
     ///
-    /// `updates_queued` is whether the updates channel has messages waiting; the draining
-    /// phase always passes `false` since the channel is not read anymore. Returns `true` once
-    /// the finish marker was received and all pending trie work is done.
-    fn make_progress(&mut self, updates_queued: bool) -> Result<bool, StateRootTaskError> {
+    /// Messages queued after the finish marker are best-effort hints and are not actionable.
+    /// Returns `true` once the finish marker was received and all pending trie work is done.
+    fn make_progress(&mut self) -> Result<bool, StateRootTaskError> {
+        let updates_queued = !self.finished_state_updates && !self.updates.is_empty();
+
         if !updates_queued && self.proof_result_rx.is_empty() {
             // If we don't have any pending messages, we can spend some time on computing
             // storage roots and promoting account updates.
@@ -961,6 +958,82 @@ where
     }
 }
 
+/// Metrics recorded by sparse trie and hashing tasks.
+#[derive(Metrics, Clone)]
+#[metrics(scope = "tree.root")]
+pub(super) struct SparseTrieTaskMetrics {
+    /// Histogram of durations spent revealing multiproof results into the sparse trie.
+    pub(super) sparse_trie_reveal_multiproof_duration_histogram: Histogram,
+    /// Histogram of durations spent coalescing multiple proof results from the channel.
+    pub(super) sparse_trie_proof_coalesce_duration_histogram: Histogram,
+    /// Histogram of durations the event loop spent blocked waiting on channels.
+    pub(super) sparse_trie_channel_wait_duration_histogram: Histogram,
+    /// Histogram of durations spent processing trie updates and promoting pending accounts.
+    pub(super) sparse_trie_process_updates_duration_histogram: Histogram,
+    /// Histogram of sparse trie final update durations.
+    pub(super) sparse_trie_final_update_duration_histogram: Histogram,
+    /// Histogram of sparse trie total durations.
+    pub(super) sparse_trie_total_duration_histogram: Histogram,
+    /// Time spent preparing the sparse trie for reuse after state root computation.
+    pub(super) into_trie_for_reuse_duration_histogram: Histogram,
+    /// Time spent waiting for preserved sparse trie cache to become available.
+    pub(super) sparse_trie_cache_wait_duration_histogram: Histogram,
+    /// Histogram for sparse trie task idle time in seconds (waiting for updates or proof
+    /// results). Excludes the final wait after the channel is closed.
+    pub(super) sparse_trie_idle_time_seconds: Histogram,
+    /// Histogram for hashing task idle time in seconds (waiting for messages from execution).
+    /// Excludes the final wait after the channel is closed.
+    pub(super) hashing_task_idle_time_seconds: Histogram,
+
+    /// Number of account leaf updates applied without needing a new proof (cache hits).
+    pub(super) sparse_trie_account_cache_hits: Histogram,
+    /// Number of account leaf updates that required a new proof (cache misses).
+    pub(super) sparse_trie_account_cache_misses: Histogram,
+    /// Number of storage leaf updates applied without needing a new proof (cache hits).
+    pub(super) sparse_trie_storage_cache_hits: Histogram,
+    /// Number of storage leaf updates that required a new proof (cache misses).
+    pub(super) sparse_trie_storage_cache_misses: Histogram,
+
+    /// Retained memory of the preserved sparse trie cache in bytes.
+    pub(super) sparse_trie_retained_memory_bytes: Gauge,
+    /// Number of storage tries retained in the preserved sparse trie cache.
+    pub(super) sparse_trie_retained_storage_tries: Gauge,
+}
+
+/// The default max targets, for limiting the number of account and storage proof targets to be
+/// fetched by a single worker. If exceeded, chunking is forced regardless of worker availability.
+const DEFAULT_MAX_TARGETS_FOR_CHUNKING: usize = 300;
+
+/// Dispatches work items as a single unit or in chunks based on target size and worker
+/// availability.
+#[expect(clippy::too_many_arguments)]
+fn dispatch_with_chunking<T, I>(
+    items: T,
+    chunking_len: usize,
+    chunk_size: usize,
+    max_targets_for_chunking: usize,
+    has_multiple_idle_account_workers: bool,
+    has_multiple_idle_storage_workers: bool,
+    chunker: impl FnOnce(T, usize) -> I,
+    mut dispatch: impl FnMut(T),
+) where
+    I: IntoIterator<Item = T>,
+{
+    let has_full_chunks = chunking_len >= chunk_size.saturating_mul(2);
+    let should_chunk = chunking_len > max_targets_for_chunking ||
+        (has_full_chunks &&
+            (has_multiple_idle_account_workers || has_multiple_idle_storage_workers));
+
+    if should_chunk && chunking_len > chunk_size {
+        for chunk in chunker(items, chunk_size) {
+            dispatch(chunk);
+        }
+        return;
+    }
+
+    dispatch(items);
+}
+
 /// RLP-encodes the account as a [`TrieAccount`] leaf value, or returns empty for deletions.
 fn encode_account_leaf_value(
     account: Option<Account>,
@@ -1061,7 +1134,7 @@ mod tests {
             SparseTrieCacheTask::<ArenaParallelSparseTrie, ArenaParallelSparseTrie>::run_hashing_task(
                 updates_rx,
                 hashed_state_tx,
-                MultiProofTaskMetrics::default(),
+                SparseTrieTaskMetrics::default(),
             );
         });
 
@@ -1146,7 +1219,7 @@ mod tests {
             cancel_rx,
             std::sync::mpsc::channel().0,
             proof_worker_handle,
-            MultiProofTaskMetrics::default(),
+            SparseTrieTaskMetrics::default(),
             trie,
             parent_state_root,
             1,
@@ -1191,7 +1264,7 @@ mod tests {
             cancel_rx,
             std::sync::mpsc::channel().0,
             proof_worker_handle,
-            MultiProofTaskMetrics::default(),
+            SparseTrieTaskMetrics::default(),
             trie,
             B256::from([0x55; 32]),
             1,
@@ -1267,7 +1340,7 @@ mod tests {
             cancel_rx,
             std::sync::mpsc::channel().0,
             proof_worker_handle,
-            MultiProofTaskMetrics::default(),
+            SparseTrieTaskMetrics::default(),
             trie,
             B256::from([0x55; 32]),
             1,
@@ -1281,5 +1354,64 @@ mod tests {
         assert!(matches!(error, StateRootTaskError::Canceled));
 
         drop(updates_tx);
+    }
+
+    #[test]
+    fn run_ignores_hints_queued_after_updates_finish() {
+        let runtime = reth_tasks::Runtime::test();
+        let provider_factory = create_test_provider_factory();
+        let anchor_hash = provider_factory.chain_spec().genesis_hash();
+        let overlay_factory = OverlayStateProviderFactory::new(
+            provider_factory,
+            OverlayBuilder::<reth_chain_state::EthPrimitives>::new(
+                anchor_hash,
+                ChangesetCache::new(),
+            ),
+        );
+        let proof_worker_handle =
+            ProofWorkerHandle::new(&runtime, ProofTaskCtx::new(overlay_factory), false);
+
+        let default_trie = RevealableSparseTrie::blind_from(ArenaParallelSparseTrie::default());
+        let trie = SparseStateTrie::default()
+            .with_accounts_trie(default_trie.clone())
+            .with_default_storage_trie(default_trie)
+            .with_updates(true);
+
+        let (updates_tx, updates_rx) = crossbeam_channel::unbounded();
+        let (cancel_guard, cancel_rx) = crossbeam_channel::bounded::<()>(0);
+        let mut task = SparseTrieCacheTask::new_with_trie(
+            &runtime,
+            updates_rx,
+            cancel_rx,
+            std::sync::mpsc::channel().0,
+            proof_worker_handle,
+            SparseTrieTaskMetrics::default(),
+            trie,
+            B256::from([0x55; 32]),
+            1,
+        );
+
+        updates_tx.send(StateRootMessage::FinishedStateUpdates).unwrap();
+        updates_tx.send(StateRootMessage::PrefetchProofs(Default::default())).unwrap();
+
+        let wait_start = std::time::Instant::now();
+        while task.updates.len() < 2 {
+            assert!(
+                wait_start.elapsed() < std::time::Duration::from_secs(1),
+                "hashing task did not queue the test messages"
+            );
+            std::thread::yield_now();
+        }
+
+        let (result_tx, result_rx) = std::sync::mpsc::channel();
+        let handle = std::thread::spawn(move || {
+            let _ = result_tx.send(task.run());
+        });
+
+        let result = result_rx.recv_timeout(std::time::Duration::from_secs(1));
+        drop(cancel_guard);
+        handle.join().unwrap();
+
+        assert!(result.expect("state root task stalled on a late hint").is_ok());
     }
 }
