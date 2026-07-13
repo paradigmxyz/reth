@@ -1699,9 +1699,6 @@ pub trait EngineValidator<
     ///
     /// `timestamp` is the timestamp of the payload being built, taken from the payload
     /// attributes.
-    ///
-    /// Pending sparse trie pruning should be consumed from `state` only when the returned handle
-    /// owns a sparse trie task that can apply it.
     fn payload_state_root_handle_for(
         &self,
         parent_hash: B256,

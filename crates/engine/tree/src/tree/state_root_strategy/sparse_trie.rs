@@ -115,6 +115,7 @@ pub(super) struct SparseTrieCacheTask<A = ArenaParallelSparseTrie, S = ArenaPara
     /// final [`HashedPostState`] and share it with main engine thread without requiring any extra
     /// hashing work.
     final_hashed_state: HashedPostState,
+
     /// Metrics for the sparse trie.
     metrics: SparseTrieTaskMetrics,
 }
@@ -202,11 +203,7 @@ where
                     SparseTrieTaskMessage::HashedState(hashed)
                 }
                 StateRootMessage::FinishedStateUpdates => {
-                    // The finish marker ends the update stream, so exit instead of waiting
-                    // for the channel to close. Handles and streams keep sender clones
-                    // alive after the last update, which would park this worker forever.
-                    let _ = hashed_state_tx.send(SparseTrieTaskMessage::FinishedStateUpdates);
-                    break;
+                    SparseTrieTaskMessage::FinishedStateUpdates
                 }
                 StateRootMessage::HashedStateUpdate(state) => {
                     SparseTrieTaskMessage::HashedState(state)
@@ -296,7 +293,7 @@ where
                 recv(self.cancel_rx) -> _ => return Err(StateRootTaskError::Canceled),
             }
 
-            done = self.make_progress(!self.updates.is_empty())?;
+            done = self.make_progress()?;
             idle_start = Instant::now();
         }
 
@@ -323,7 +320,7 @@ where
                 recv(self.cancel_rx) -> _ => return Err(StateRootTaskError::Canceled),
             }
 
-            done = self.make_progress(false)?;
+            done = self.make_progress()?;
             idle_start = Instant::now();
         }
 
@@ -404,10 +401,11 @@ where
 
     /// Applies buffered updates to the trie and dispatches proof targets.
     ///
-    /// `updates_queued` is whether the updates channel has messages waiting; the draining
-    /// phase always passes `false` since the channel is not read anymore. Returns `true` once
-    /// the finish marker was received and all pending trie work is done.
-    fn make_progress(&mut self, updates_queued: bool) -> Result<bool, StateRootTaskError> {
+    /// Messages queued after the finish marker are best-effort hints and are not actionable.
+    /// Returns `true` once the finish marker was received and all pending trie work is done.
+    fn make_progress(&mut self) -> Result<bool, StateRootTaskError> {
+        let updates_queued = !self.finished_state_updates && !self.updates.is_empty();
+
         if !updates_queued && self.proof_result_rx.is_empty() {
             // If we don't have any pending messages, we can spend some time on computing
             // storage roots and promoting account updates.
@@ -455,11 +453,7 @@ where
                     .take()
                     .unwrap()
                     .send(core::mem::take(&mut self.final_hashed_state));
-                self.finished_state_updates = true;
-                // The hashing task exits after it sends this marker, so nothing more
-                // will arrive on the updates channel. Swap in a channel that never
-                // receives so the run loop does not observe the disconnect.
-                self.updates = crossbeam_channel::never();
+                self.finished_state_updates = true
             }
         }
     }
@@ -1167,31 +1161,6 @@ mod tests {
     }
 
     #[test]
-    fn test_run_hashing_task_exits_on_finished_marker_with_live_sender() {
-        let (updates_tx, updates_rx) = crossbeam_channel::unbounded();
-        let (hashed_state_tx, hashed_state_rx) = crossbeam_channel::unbounded();
-
-        let handle = std::thread::spawn(move || {
-            SparseTrieCacheTask::<ArenaParallelSparseTrie, ArenaParallelSparseTrie>::run_hashing_task(
-                updates_rx,
-                hashed_state_tx,
-                SparseTrieTaskMetrics::default(),
-            );
-        });
-
-        updates_tx.send(StateRootMessage::FinishedStateUpdates).unwrap();
-
-        // The task must forward the finish marker and exit even though `updates_tx`
-        // is still alive.
-        let msg = hashed_state_rx.recv().unwrap();
-        assert!(matches!(msg, SparseTrieTaskMessage::FinishedStateUpdates));
-        assert!(hashed_state_rx.recv().is_err());
-        handle.join().unwrap();
-
-        drop(updates_tx);
-    }
-
-    #[test]
     fn test_encode_account_leaf_value_empty_account_and_empty_root_is_empty() {
         let mut account_rlp_buf = vec![0xAB];
         let encoded = encode_account_leaf_value(None, EMPTY_ROOT_HASH, &mut account_rlp_buf);
@@ -1385,5 +1354,64 @@ mod tests {
         assert!(matches!(error, StateRootTaskError::Canceled));
 
         drop(updates_tx);
+    }
+
+    #[test]
+    fn run_ignores_hints_queued_after_updates_finish() {
+        let runtime = reth_tasks::Runtime::test();
+        let provider_factory = create_test_provider_factory();
+        let anchor_hash = provider_factory.chain_spec().genesis_hash();
+        let overlay_factory = OverlayStateProviderFactory::new(
+            provider_factory,
+            OverlayBuilder::<reth_chain_state::EthPrimitives>::new(
+                anchor_hash,
+                ChangesetCache::new(),
+            ),
+        );
+        let proof_worker_handle =
+            ProofWorkerHandle::new(&runtime, ProofTaskCtx::new(overlay_factory), false);
+
+        let default_trie = RevealableSparseTrie::blind_from(ArenaParallelSparseTrie::default());
+        let trie = SparseStateTrie::default()
+            .with_accounts_trie(default_trie.clone())
+            .with_default_storage_trie(default_trie)
+            .with_updates(true);
+
+        let (updates_tx, updates_rx) = crossbeam_channel::unbounded();
+        let (cancel_guard, cancel_rx) = crossbeam_channel::bounded::<()>(0);
+        let mut task = SparseTrieCacheTask::new_with_trie(
+            &runtime,
+            updates_rx,
+            cancel_rx,
+            std::sync::mpsc::channel().0,
+            proof_worker_handle,
+            SparseTrieTaskMetrics::default(),
+            trie,
+            B256::from([0x55; 32]),
+            1,
+        );
+
+        updates_tx.send(StateRootMessage::FinishedStateUpdates).unwrap();
+        updates_tx.send(StateRootMessage::PrefetchProofs(Default::default())).unwrap();
+
+        let wait_start = std::time::Instant::now();
+        while task.updates.len() < 2 {
+            assert!(
+                wait_start.elapsed() < std::time::Duration::from_secs(1),
+                "hashing task did not queue the test messages"
+            );
+            std::thread::yield_now();
+        }
+
+        let (result_tx, result_rx) = std::sync::mpsc::channel();
+        let handle = std::thread::spawn(move || {
+            let _ = result_tx.send(task.run());
+        });
+
+        let result = result_rx.recv_timeout(std::time::Duration::from_secs(1));
+        drop(cancel_guard);
+        handle.join().unwrap();
+
+        assert!(result.expect("state root task stalled on a late hint").is_ok());
     }
 }
