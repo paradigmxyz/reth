@@ -63,6 +63,7 @@ pub mod state_root_strategy;
 #[cfg(test)]
 mod tests;
 mod trie_updates;
+mod txpool_prewarm;
 pub mod types;
 
 use crate::{persistence::PersistenceResult, tree::error::AdvancePersistenceError};
@@ -75,7 +76,12 @@ pub use persistence_state::PersistenceState;
 pub use reth_engine_primitives::TreeConfig;
 pub use reth_execution_cache::{
     CachedStateCacheMetrics, CachedStateMetrics, CachedStateMetricsSource, CachedStateProvider,
-    ExecutionCache, PayloadExecutionCache, SavedCache,
+    ExecutionCache, PayloadExecutionCache, SavedCache, TxPoolPrewarmCache,
+    TxPoolPrewarmCacheSnapshot,
+};
+pub use txpool_prewarm::{
+    TxPoolPrewarmSelection, TxPoolPrewarmSource, TxPoolPrewarmTransaction,
+    TxPoolPrewarmTransactions,
 };
 pub use types::{ExecutionEnv, ValidationOutcome, ValidationOutput};
 
@@ -1262,15 +1268,23 @@ where
             return Ok(Some(TreeOutcome::new(outcome)));
         }
 
+        let notify_canonical_head = self.payload_validator.canonical_head_notifications_enabled();
+        let tip = if attrs.is_some() || notify_canonical_head {
+            self.sealed_header_by_hash(self.state.tree_state.canonical_block_hash())?
+        } else {
+            None
+        };
+        if notify_canonical_head && let Some(tip) = tip.as_ref() {
+            self.payload_validator.on_canonical_head_changed(tip, &self.state);
+        }
+
         // Process payload attributes if the head is already canonical
         if let Some(attr) = attrs {
-            let tip = self
-                .sealed_header_by_hash(self.state.tree_state.canonical_block_hash())?
-                .ok_or_else(|| {
-                    // If we can't find the canonical block, then something is wrong and we need
-                    // to return an error
-                    ProviderError::HeaderNotFound(state.head_block_hash.into())
-                })?;
+            let tip = tip.ok_or_else(|| {
+                // If we can't find the canonical block, then something is wrong and we need
+                // to return an error
+                ProviderError::HeaderNotFound(state.head_block_hash.into())
+            })?;
             // Clone only when we actually need to process the attributes
             let updated = self.process_payload_attributes(attr.clone(), &tip, state);
             return Ok(Some(TreeOutcome::new(updated)));
@@ -1752,6 +1766,9 @@ where
                                 let gas_used = payload.gas_used();
                                 let num_hash = payload.num_hash();
                                 let mut output = self.on_new_payload(payload);
+                                if cache_wait.is_some() {
+                                    self.payload_validator.resume_caches();
+                                }
                                 let latency = start.elapsed();
                                 self.metrics.engine.new_payload.update_response_metrics(
                                     start,
@@ -2721,6 +2738,7 @@ where
         // update the tracked in-memory state with the new chain
         self.canonical_in_memory_state.update_chain(chain_update);
         self.canonical_in_memory_state.set_canonical_head(tip.clone());
+        self.payload_validator.on_canonical_head_changed(&tip, &self.state);
 
         // Update metrics based on new tip
         self.metrics.tree.canonical_chain_height.set(tip.number() as f64);
@@ -3477,4 +3495,7 @@ pub trait WaitForCaches {
     ///
     /// Returns the time spent waiting for each cache separately.
     fn wait_for_caches(&self) -> CacheWaitDurations;
+
+    /// Resumes cache work suspended by [`Self::wait_for_caches`].
+    fn resume_caches(&self) {}
 }
