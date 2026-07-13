@@ -297,12 +297,20 @@ impl ArenaSparseSubtrie {
                 }
             } else {
                 // Not retained — blind the child slot in the new arena.
-                let rlp_node = self.arena[old_child_idx]
+                let node = &self.arena[old_child_idx];
+                let rlp_node = node
                     .state_ref()
                     .expect("child must have state")
                     .cached_rlp_node()
                     .cloned()
                     .expect("pruned child must have cached RLP (prune runs after hashing)");
+                trace!(
+                    target: TRACE_TARGET,
+                    path = ?child_path,
+                    variant = %AsRef::<str>::as_ref(node),
+                    cached_rlp_node = ?rlp_node,
+                    "pruning node",
+                );
                 let ArenaSparseNode::Branch(b) = &mut new_arena[parent_new_idx] else {
                     unreachable!()
                 };
@@ -2192,9 +2200,16 @@ impl ArenaParallelSparseTrie {
         idx: Index,
         nibble: Option<u8>,
     ) -> ArenaSparseNode {
-        trace!(target: TRACE_TARGET, path = ?cursor.head().unwrap().path, "pruning node");
+        let path = cursor.head().expect("cursor is non-empty").path;
         let node = arena.remove(idx).expect("node must exist to be pruned");
         let rlp_node = node.state_ref().and_then(|s| s.cached_rlp_node()).cloned();
+        trace!(
+            target: TRACE_TARGET,
+            ?path,
+            variant = %AsRef::<str>::as_ref(&node),
+            cached_rlp_node = ?rlp_node,
+            "pruning node",
+        );
 
         if let Some(rlp_node) = rlp_node {
             let parent_idx = cursor.parent().expect("pruned child has parent").index;
@@ -2542,9 +2557,13 @@ impl SparseTrie for ArenaParallelSparseTrie {
         } else {
             use rayon::iter::{IntoParallelRefMutIterator, ParallelIterator};
 
+            let parent_span = tracing::Span::current();
             let results: Vec<SparseTrieResult<()>> = taken
                 .par_iter_mut()
-                .map(|(_, subtrie, node_vec)| subtrie.reveal_nodes(node_vec))
+                .map(|(_, subtrie, node_vec)| {
+                    let _guard = parent_span.enter();
+                    subtrie.reveal_nodes(node_vec)
+                })
                 .collect();
 
             if let Some(err) = results.into_iter().find(|r| r.is_err()) {
@@ -2627,9 +2646,11 @@ impl SparseTrie for ArenaParallelSparseTrie {
             } else {
                 use rayon::iter::{IntoParallelIterator, ParallelIterator};
 
+                let parent_span = tracing::Span::current();
                 taken = taken
                     .into_par_iter()
                     .map(|(idx, mut subtrie)| {
+                        let _guard = parent_span.enter();
                         subtrie.update_cached_rlp();
                         (idx, subtrie)
                     })
@@ -2888,9 +2909,9 @@ impl SparseTrie for ArenaParallelSparseTrie {
                 pruned += taken
                     .par_iter_mut()
                     .map(|(_, subtrie, range)| {
+                        let _guard = parent_span.enter();
                         let _span = tracing::trace_span!(
                             target: TRACE_TARGET,
-                            parent: &parent_span,
                             "subtrie_prune",
                             subtrie = ?subtrie.path,
                         )
@@ -3162,7 +3183,9 @@ impl SparseTrie for ArenaParallelSparseTrie {
         } else {
             use rayon::iter::{IntoParallelRefMutIterator, ParallelIterator};
 
+            let parent_span = tracing::Span::current();
             taken.par_iter_mut().for_each(|(_, subtrie, range)| {
+                let _guard = parent_span.enter();
                 subtrie.update_leaves(&sorted[range.clone()]);
             });
         }
