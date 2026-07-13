@@ -643,7 +643,6 @@ aes = "0.8.1"
 ahash = "0.8"
 anyhow = "1.0"
 bindgen = { version = "0.72", default-features = false }
-block-padding = "0.3"
 cc = "1.2.62"
 cipher = "0.4.3"
 comfy-table = "7.0"

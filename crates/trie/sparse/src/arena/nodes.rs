@@ -8,6 +8,7 @@ use alloy_trie::{BranchNodeCompact, TrieMask};
 use core::mem;
 use reth_trie_common::{BranchNodeMasks, Nibbles, ProofTrieNodeV2, RlpNode, TrieNodeV2};
 use smallvec::SmallVec;
+use strum::AsRefStr;
 
 /// Tracks whether a node's RLP encoding is cached or needs recomputation.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -163,7 +164,7 @@ impl ArenaSparseNodeBranch {
 }
 
 /// A node in the arena-based sparse trie.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, AsRefStr)]
 pub(super) enum ArenaSparseNode {
     /// Indicates a trie with no nodes.
     EmptyRoot,
