@@ -6,7 +6,7 @@ use crate::tree::{
     sparse_trie::SparseTrieCacheTask,
     CacheWaitDurations, CachedStateCacheMetrics, CachedStateMetrics, CachedStateMetricsSource,
     ExecutionCache, PayloadExecutionCache, SavedCache, StateProviderBuilder, TreeConfig,
-    WaitForCaches,
+    TxPoolPrewarmCacheSnapshot, WaitForCaches,
 };
 use alloy_eip7928::bal::DecodedBal;
 use alloy_eips::{eip1898::BlockWithParent, eip4895::Withdrawal};
@@ -947,6 +947,8 @@ pub struct ExecutionEnv<Evm: ConfigureEvm> {
     /// Optional decoded BAL for the block.
     /// Used to validate and optimize execution.
     pub decoded_bal: Option<Arc<DecodedBal>>,
+    /// Latest completed txpool-prewarm snapshot for this block's parent state.
+    pub txpool_snapshot: Option<TxPoolPrewarmCacheSnapshot>,
 }
 
 impl<Evm: ConfigureEvm> ExecutionEnv<Evm>
@@ -965,6 +967,7 @@ where
             gas_used: 0,
             withdrawals: None,
             decoded_bal: None,
+            txpool_snapshot: None,
         }
     }
 }

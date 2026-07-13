@@ -87,6 +87,74 @@ pub fn has_enough_parallelism() -> bool {
     false
 }
 
+/// Configuration for best-effort txpool transaction prewarming.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TxPoolPrewarmingConfig {
+    /// Whether txpool transaction prewarming is enabled.
+    pub enabled: bool,
+    /// Maximum transactions to prewarm for one sender while warming one parent head.
+    pub max_transactions_per_sender: usize,
+    /// Maximum fresh candidates considered from the txpool for one refresh.
+    pub max_candidate_scan: usize,
+    /// Multiplier applied to the parent block gas limit for one refresh's fresh-transaction gas
+    /// budget.
+    pub gas_limit_multiplier: u64,
+}
+
+impl TxPoolPrewarmingConfig {
+    /// Default per-sender transaction cap.
+    pub const DEFAULT_MAX_TRANSACTIONS_PER_SENDER: usize = 16;
+    /// Default candidate scan cap.
+    pub const DEFAULT_MAX_CANDIDATE_SCAN: usize = 4096;
+    /// Default gas-budget multiplier.
+    pub const DEFAULT_GAS_LIMIT_MULTIPLIER: u64 = 6;
+    /// Default configuration. The feature is opt-in.
+    pub const DEFAULT: Self = Self {
+        enabled: false,
+        max_transactions_per_sender: Self::DEFAULT_MAX_TRANSACTIONS_PER_SENDER,
+        max_candidate_scan: Self::DEFAULT_MAX_CANDIDATE_SCAN,
+        gas_limit_multiplier: Self::DEFAULT_GAS_LIMIT_MULTIPLIER,
+    };
+
+    /// Returns whether this configuration can launch work.
+    pub const fn should_prewarm(self) -> bool {
+        self.enabled &&
+            self.max_transactions_per_sender > 0 &&
+            self.max_candidate_scan > 0 &&
+            self.gas_limit_multiplier > 0
+    }
+
+    /// Enables or disables txpool prewarming.
+    pub const fn with_enabled(mut self, enabled: bool) -> Self {
+        self.enabled = enabled;
+        self
+    }
+
+    /// Sets the per-sender transaction cap.
+    pub const fn with_max_transactions_per_sender(mut self, max: usize) -> Self {
+        self.max_transactions_per_sender = max;
+        self
+    }
+
+    /// Sets the candidate scan cap.
+    pub const fn with_max_candidate_scan(mut self, max: usize) -> Self {
+        self.max_candidate_scan = max;
+        self
+    }
+
+    /// Sets the gas-budget multiplier.
+    pub const fn with_gas_limit_multiplier(mut self, multiplier: u64) -> Self {
+        self.gas_limit_multiplier = multiplier;
+        self
+    }
+}
+
+impl Default for TxPoolPrewarmingConfig {
+    fn default() -> Self {
+        Self::DEFAULT
+    }
+}
+
 /// The configuration of the engine tree.
 #[derive(Debug, Clone)]
 pub struct TreeConfig {
@@ -122,6 +190,8 @@ pub struct TreeConfig {
     disable_state_cache: bool,
     /// Whether to disable parallel prewarming.
     disable_prewarming: bool,
+    /// Configuration for txpool-driven prewarming between payloads.
+    txpool_prewarming: TxPoolPrewarmingConfig,
     /// Whether to enable state provider metrics.
     state_provider_metrics: bool,
     /// Cross-block cache size in bytes.
@@ -228,6 +298,7 @@ impl Default for TreeConfig {
             always_compare_trie_updates: false,
             disable_state_cache: false,
             disable_prewarming: false,
+            txpool_prewarming: TxPoolPrewarmingConfig::DEFAULT,
             state_provider_metrics: false,
             cross_block_cache_size: DEFAULT_CROSS_BLOCK_CACHE_SIZE,
             has_enough_parallelism: has_enough_parallelism(),
@@ -304,6 +375,7 @@ impl TreeConfig {
             always_compare_trie_updates,
             disable_state_cache,
             disable_prewarming,
+            txpool_prewarming: TxPoolPrewarmingConfig::DEFAULT,
             state_provider_metrics,
             cross_block_cache_size,
             has_enough_parallelism,
@@ -398,6 +470,11 @@ impl TreeConfig {
     /// Returns whether or not parallel prewarming is disabled.
     pub const fn disable_prewarming(&self) -> bool {
         self.disable_prewarming
+    }
+
+    /// Returns txpool prewarming configuration.
+    pub const fn txpool_prewarming(&self) -> TxPoolPrewarmingConfig {
+        self.txpool_prewarming
     }
 
     /// Returns whether to always compare trie updates from the state root task to the trie updates
@@ -516,6 +593,12 @@ impl TreeConfig {
     /// Setter for whether to disable parallel prewarming.
     pub const fn without_prewarming(mut self, disable_prewarming: bool) -> Self {
         self.disable_prewarming = disable_prewarming;
+        self
+    }
+
+    /// Sets txpool transaction prewarming configuration.
+    pub const fn with_txpool_prewarming(mut self, config: TxPoolPrewarmingConfig) -> Self {
+        self.txpool_prewarming = config;
         self
     }
 
