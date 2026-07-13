@@ -222,12 +222,12 @@ impl ArenaSparseSubtrie {
     /// Prunes revealed subtrees that are not ancestors of any retained leaf, compacting the arena
     /// in lexicographic order.
     ///
-    /// `retained_leaves` must be sorted and scoped to this subtrie's key range. Builds a fresh
-    /// arena by copying retained nodes from the root, blinding non-retained children at the
-    /// boundary unless their parent branch is retained.
+    /// `retained_leaves` must yield leaves in sorted order and be scoped to this subtrie's key
+    /// range. Builds a fresh arena by copying retained nodes from the root, blinding non-retained
+    /// children at the boundary unless their parent branch is retained.
     ///
     /// Expects that all nodes have computed hashes (i.e. `prune` is called after hashing).
-    fn prune(&mut self, retained_leaves: &[Nibbles]) -> usize {
+    fn prune<'a>(&mut self, retained_leaves: impl IntoIterator<Item = &'a Nibbles>) -> usize {
         // Only branches can have pruneable children.
         if !matches!(&self.arena[self.root], ArenaSparseNode::Branch(_)) {
             return 0;
@@ -235,12 +235,15 @@ impl ArenaSparseSubtrie {
 
         debug_assert_eq!(self.num_dirty_leaves, 0, "prune must run after hashing");
 
+        let retained_leaves = retained_leaves.into_iter();
+        let (retained_lower_bound, retained_upper_bound) = retained_leaves.size_hint();
         let old_count = self.arena.len();
         // In a tree where every branch has ≥2 children, #branches ≤ #leaves − 1, so
         // total nodes ≤ 2N − 1. This is a reasonable upper-bound capacity hint that
         // avoids most reallocations without over-allocating when pruning is heavy.
-        let mut new_arena = SlotMap::with_capacity(retained_leaves.len() * 2);
-        let mut retained_iter = retained_leaves.iter().peekable();
+        let mut new_arena =
+            SlotMap::with_capacity(retained_upper_bound.unwrap_or(retained_lower_bound) * 2);
+        let mut retained_leaves = retained_leaves.peekable();
         let mut new_num_leaves = 0u64;
         let mut new_nodes_heap_size = 0usize;
 
@@ -248,11 +251,12 @@ impl ArenaSparseSubtrie {
         let root_node = self.arena.remove(self.root).expect("root exists");
         let new_root = new_arena.insert(root_node);
         let mut stack = Vec::new();
+        let root_is_retained = retained_leaves.peek().is_some();
         if let Some(frame) = prepare_retained_node(
             &new_arena,
             new_root,
             self.path,
-            retained_leaves,
+            root_is_retained,
             &mut new_num_leaves,
             &mut new_nodes_heap_size,
         ) {
@@ -271,12 +275,12 @@ impl ArenaSparseSubtrie {
             let mut child_path = frame.branch_logical_path;
             child_path.push(nibble);
 
-            while retained_iter.peek().is_some_and(|retained| *retained < &child_path) {
-                retained_iter.next();
+            while retained_leaves.peek().is_some_and(|retained| *retained < &child_path) {
+                retained_leaves.next();
             }
 
             let child_is_retained =
-                retained_iter.peek().is_some_and(|retained| retained.starts_with(&child_path));
+                retained_leaves.peek().is_some_and(|retained| retained.starts_with(&child_path));
             if child_is_retained || frame.branch_is_retained {
                 // Retained or protected by a retained parent branch.
                 let child_node = self.arena.remove(old_child_idx).expect("child exists");
@@ -285,7 +289,7 @@ impl ArenaSparseSubtrie {
                     &new_arena,
                     new_child_idx,
                     child_path,
-                    retained_leaves,
+                    child_is_retained,
                     &mut new_num_leaves,
                     &mut new_nodes_heap_size,
                 ) {
@@ -361,7 +365,7 @@ impl ArenaSparseSubtrie {
             new_arena: &NodeArena,
             new_idx: Index,
             node_path: Nibbles,
-            retained_leaves: &[Nibbles],
+            branch_is_retained: bool,
             new_num_leaves: &mut u64,
             new_nodes_heap_size: &mut usize,
         ) -> Option<CopyFrame> {
@@ -377,8 +381,6 @@ impl ArenaSparseSubtrie {
             // Logical path of this branch (path TO node + its extension/short_key).
             let mut branch_logical_path = node_path;
             branch_logical_path.extend(&b.short_key);
-            let branch_is_retained =
-                !prefix_range(retained_leaves, 0, &branch_logical_path).is_empty();
 
             Some(CopyFrame {
                 new_idx,
