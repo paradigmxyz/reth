@@ -212,14 +212,16 @@ where
 /// `snap/2`, or after `snap/2` would be routed incorrectly. Such layouts belong on the
 /// general-purpose satellite multiplexer and are rejected here.
 fn eth_snap_layout(caps: &SharedCapabilities) -> Result<u8, EthStreamError> {
+    if !caps.is_exact_eth_snap_v2() {
+        return Err(P2PStreamError::CapabilityNotShared.into())
+    }
     let snap = caps
         .ensure_matching_capability(&Capability::snap_2())
         .map_err(|_| EthStreamError::from(P2PStreamError::CapabilityNotShared))?;
     let snap_offset = snap.relative_message_id_offset();
 
     let eth = caps.eth()?;
-    if caps.len() != 2 || eth.relative_message_id_offset() != 0 || eth.num_messages() != snap_offset
-    {
+    if eth.relative_message_id_offset() != 0 || eth.num_messages() != snap_offset {
         return Err(P2PStreamError::CapabilityNotShared.into())
     }
     Ok(snap_offset)
