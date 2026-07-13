@@ -22,6 +22,7 @@ use reth_evm::{
     ConfigureEvm, ConvertTx, EvmEnvFor, ExecutableTxIterator, ExecutableTxTuple, OnStateHook,
     SpecFor, TxEnvFor,
 };
+use reth_execution_cache::TxPoolPrewarmCacheSnapshot;
 use reth_primitives_traits::{FastInstant as Instant, NodePrimitives};
 use reth_provider::{
     BlockExecutionOutput, BlockReader, DatabaseProviderROFactory, StateProviderFactory, StateReader,
@@ -1062,6 +1063,8 @@ pub struct ExecutionEnv<Evm: ConfigureEvm> {
     /// Optional decoded BAL for the block.
     /// Used to validate and optimize execution.
     pub decoded_bal: Option<Arc<DecodedBal>>,
+    /// Latest completed txpool-prewarm snapshot for this block's parent state.
+    pub txpool_snapshot: Option<TxPoolPrewarmCacheSnapshot>,
 }
 
 impl<Evm: ConfigureEvm> ExecutionEnv<Evm>
@@ -1080,6 +1083,7 @@ where
             gas_used: 0,
             withdrawals: None,
             decoded_bal: None,
+            txpool_snapshot: None,
         }
     }
 }
