@@ -94,6 +94,9 @@ pub enum BlockValidationError {
         /// The available block gas.
         block_available_gas: u64,
     },
+    /// An EIP-7928 transaction read state not covered by its block access list.
+    #[error("block access list does not cover transaction state reads")]
+    BlockAccessListNotCovered,
     /// Error for EIP-4788 when parent beacon block root is missing.
     #[error("EIP-4788 parent beacon block root missing for active Cancun block")]
     MissingParentBeaconBlockRoot,

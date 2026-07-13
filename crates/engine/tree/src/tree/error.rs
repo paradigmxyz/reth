@@ -7,6 +7,8 @@ use reth_evm::InternalBlockExecutionError;
 use reth_payload_primitives::NewPayloadError;
 use reth_primitives_traits::{Block, BlockBody, SealedBlock};
 
+use super::payload_processor::bal::BalExecutionError;
+
 /// This is an error that can come from advancing persistence.
 #[derive(Debug, thiserror::Error)]
 pub enum AdvancePersistenceError {
@@ -119,6 +121,17 @@ pub enum InsertBlockErrorKind {
     /// Other errors.
     #[error(transparent)]
     Other(#[from] Box<dyn core::error::Error + Send + Sync + 'static>),
+}
+
+impl From<BalExecutionError> for InsertBlockErrorKind {
+    fn from(err: BalExecutionError) -> Self {
+        match err {
+            BalExecutionError::Consensus(err) => Self::Consensus(err),
+            BalExecutionError::Execution(err) => Self::Execution(err),
+            BalExecutionError::Provider(err) => Self::Provider(err),
+            BalExecutionError::Other(err) => Self::Other(err),
+        }
+    }
 }
 
 impl InsertBlockErrorKind {

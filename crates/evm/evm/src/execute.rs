@@ -8,6 +8,7 @@ use alloy_consensus::{
     transaction::{Either, Recovered},
     BlockHeader as _, Header, TxReceipt,
 };
+use alloy_eip7928::{compute_block_access_list_hash, BlockAccessIndex, BlockAccessList};
 use alloy_eips::eip2718::{Typed2718, WithEncoded};
 use alloy_primitives::{Address, Bytes, B256};
 use core::{borrow::Borrow, fmt::Debug};
@@ -35,6 +36,8 @@ use reth_trie_common::updates::TrieUpdates;
 pub struct GasOutput {
     /// Gas used for receipt accounting.
     tx_gas_used: u64,
+    /// Regular gas used for Amsterdam block-capacity accounting.
+    regular_gas_used: u64,
     /// Gas used for state-capacity accounting.
     state_gas_used: u64,
 }
@@ -42,12 +45,26 @@ pub struct GasOutput {
 impl GasOutput {
     /// Creates a new gas output.
     pub const fn new(tx_gas_used: u64, state_gas_used: u64) -> Self {
-        Self { tx_gas_used, state_gas_used }
+        Self { tx_gas_used, regular_gas_used: tx_gas_used, state_gas_used }
+    }
+
+    /// Creates a gas output with independent receipt, regular, and state gas accounting.
+    pub const fn new_with_regular(
+        tx_gas_used: u64,
+        regular_gas_used: u64,
+        state_gas_used: u64,
+    ) -> Self {
+        Self { tx_gas_used, regular_gas_used, state_gas_used }
     }
 
     /// Returns transaction gas used for receipt accounting.
     pub const fn tx_gas_used(&self) -> u64 {
         self.tx_gas_used
+    }
+
+    /// Returns regular gas used for Amsterdam block-capacity accounting.
+    pub const fn regular_gas_used(&self) -> u64 {
+        self.regular_gas_used
     }
 
     /// Returns state gas used for state-capacity accounting.
@@ -178,6 +195,10 @@ pub trait BlockExecutor: Sized {
     type Transaction;
     /// Raw transaction execution result produced before receipt conversion.
     type TransactionResult;
+    /// Owned transaction execution result and detached state changes.
+    type TransactionResultWithState: Send;
+    /// EVM-native block access list used for indexed reads.
+    type BlockAccessList: Send + Sync;
     /// Output returned after a transaction is committed.
     type TransactionOutput: Default;
 
@@ -194,6 +215,26 @@ pub trait BlockExecutor: Sized {
         false
     }
 
+    /// Converts a canonical EIP-7928 block access list into the EVM-native representation.
+    fn convert_block_access_list(
+        block_access_list: &BlockAccessList,
+    ) -> Result<Self::BlockAccessList, BlockExecutionError>;
+
+    /// Attaches an EIP-7928 block access list for indexed state reads.
+    fn set_block_access_list(&mut self, block_access_list: Arc<Self::BlockAccessList>);
+
+    /// Sets the EIP-7928 block access index used by state reads and BAL construction.
+    fn set_block_access_index(&mut self, index: BlockAccessIndex);
+
+    /// Enables construction of an EIP-7928 block access list from committed state changes.
+    fn enable_block_access_list_builder(&mut self);
+
+    /// Returns whether EIP-7928 block access list construction is enabled.
+    fn block_access_list_builder_enabled(&self) -> bool;
+
+    /// Takes the canonical EIP-7928 block access list built from committed state changes.
+    fn take_block_access_list(&mut self) -> Option<BlockAccessList>;
+
     /// Applies pre-execution block changes.
     fn apply_pre_execution_changes(&mut self) -> Result<(), BlockExecutionError>;
 
@@ -204,6 +245,26 @@ pub trait BlockExecutor: Sized {
         transaction: Self::Transaction,
         f: impl FnOnce(&Self::TransactionResult) -> CommitChanges,
     ) -> Result<Option<Self::TransactionOutput>, BlockExecutionError>;
+
+    /// Executes a transaction and detaches its state changes without committing them.
+    fn execute_transaction_without_commit(
+        &mut self,
+        transaction: Self::Transaction,
+    ) -> Result<Self::TransactionResultWithState, BlockExecutionError>;
+
+    /// Returns the raw execution result from a detached transaction output.
+    fn detached_transaction_result(
+        output: &Self::TransactionResultWithState,
+    ) -> &Self::TransactionResult;
+
+    /// Returns the gas accounting output from a detached transaction output.
+    fn detached_transaction_gas(output: &Self::TransactionResultWithState) -> GasOutput;
+
+    /// Commits detached transaction state and records its receipt and gas accounting.
+    fn commit_transaction(
+        &mut self,
+        output: Self::TransactionResultWithState,
+    ) -> Result<Self::TransactionOutput, BlockExecutionError>;
 
     /// Executes a transaction, invokes `f` with the transaction result, and commits changes.
     fn execute_transaction_with_result_closure(
@@ -230,9 +291,20 @@ pub trait BlockExecutor: Sized {
     fn receipts(&self) -> &[ReceiptTy<Self::Primitives>];
 
     /// Finishes block execution and returns the output.
+    #[expect(clippy::type_complexity)]
+    fn finish_with_block_access_list(
+        self,
+    ) -> Result<
+        (BlockExecutionOutput<ReceiptTy<Self::Primitives>>, Option<BlockAccessList>),
+        BlockExecutionError,
+    >;
+
+    /// Finishes block execution and returns the output.
     fn finish(
         self,
-    ) -> Result<BlockExecutionOutput<ReceiptTy<Self::Primitives>>, BlockExecutionError>;
+    ) -> Result<BlockExecutionOutput<ReceiptTy<Self::Primitives>>, BlockExecutionError> {
+        self.finish_with_block_access_list().map(|(output, _)| output)
+    }
 }
 
 /// A type that creates configured block executors.
@@ -572,7 +644,9 @@ where
     ) -> Result<BlockBuilderOutcome<N>, BlockExecutionError> {
         let Self { executor, evm_env, transactions, ctx, parent, assembler } = self;
 
-        let output = executor.finish()?;
+        let (output, block_access_list) = executor.finish_with_block_access_list()?;
+        let block_access_list_hash =
+            block_access_list.as_ref().map(|bal| compute_block_access_list_hash(bal.as_slice()));
         let hashed_state = state_provider.hashed_post_state(output.state.inner());
         let (state_root, trie_updates) = match state_root(&output)? {
             Some(precomputed) => precomputed,
@@ -591,7 +665,7 @@ where
             execution_state: output.state.inner(),
             state_provider: &state_provider,
             state_root,
-            block_access_list_hash: None,
+            block_access_list_hash,
         })?;
         let block = RecoveredBlock::new_unhashed(block, senders);
 
@@ -600,7 +674,7 @@ where
             hashed_state,
             trie_updates,
             block,
-            block_access_list: None,
+            block_access_list: block_access_list.map(|bal| alloy_rlp::encode(&bal).into()),
         })
     }
 
@@ -745,6 +819,7 @@ pub struct BasicBlockExecutor<Evm, DB: Database> {
     evm_config: Evm,
     batch_database: CacheDB<Db<DB>>,
     batch_state: ExecutionOutcomeState,
+    block_access_list: Option<Bytes>,
 }
 
 #[cfg(feature = "std")]
@@ -755,6 +830,7 @@ impl<Evm, DB: Database> BasicBlockExecutor<Evm, DB> {
             evm_config,
             batch_database: CacheDB::new(Db::new(database)),
             batch_state: ExecutionOutcomeState::default(),
+            block_access_list: None,
         }
     }
 }
@@ -779,26 +855,37 @@ where
         BlockExecutionOutput::new(result, batch_state.into_execution_state())
     }
 
+    #[expect(clippy::type_complexity)]
     fn execute_block_with_database(
         evm_config: &Evm,
         block: &RecoveredBlock<BlockTy<Evm::Primitives>>,
         database: impl DynDatabase,
-    ) -> Result<BlockExecutionOutput<ReceiptTy<Evm::Primitives>>, BlockExecutionError> {
+    ) -> Result<
+        (BlockExecutionOutput<ReceiptTy<Evm::Primitives>>, Option<Bytes>),
+        BlockExecutionError,
+    > {
         Self::execute_block_with_database_and_state_hook(evm_config, block, database, None)
     }
 
+    #[expect(clippy::type_complexity)]
     fn execute_block_with_database_and_state_hook(
         evm_config: &Evm,
         block: &RecoveredBlock<BlockTy<Evm::Primitives>>,
         database: impl DynDatabase,
         state_hook: Option<Box<dyn FnMut(HashedPostState) + Send>>,
-    ) -> Result<BlockExecutionOutput<ReceiptTy<Evm::Primitives>>, BlockExecutionError> {
+    ) -> Result<
+        (BlockExecutionOutput<ReceiptTy<Evm::Primitives>>, Option<Bytes>),
+        BlockExecutionError,
+    > {
         let evm_env = evm_config.evm_env(block.header()).map_err(BlockExecutionError::other)?;
         let evm = evm_config.block_executor_factory().evm_with_env(database, evm_env);
         let ctx = evm_config
             .context_for_block(block.sealed_block())
             .map_err(BlockExecutionError::other)?;
         let mut executor = evm_config.block_executor_factory().create_executor(evm, ctx);
+        if block.header().block_access_list_hash().is_some() {
+            executor.enable_block_access_list_builder();
+        }
         if let Some(hook) = state_hook &&
             !executor.set_state_hook(hook)
         {
@@ -813,7 +900,8 @@ where
                 );
             executor.execute_transaction(tx_env)?;
         }
-        executor.finish()
+        let (output, block_access_list) = executor.finish_with_block_access_list()?;
+        Ok((output, block_access_list.map(|bal| alloy_rlp::encode(bal).into())))
     }
 }
 
@@ -831,11 +919,12 @@ where
         block: &RecoveredBlock<<Self::Primitives as NodePrimitives>::Block>,
     ) -> Result<BlockExecutionResult<<Self::Primitives as NodePrimitives>::Receipt>, Self::Error>
     {
-        let output = Self::execute_block_with_database(
+        let (output, block_access_list) = Self::execute_block_with_database(
             &self.evm_config,
             block,
             BorrowedDatabase::new(&mut self.batch_database),
         )?;
+        self.block_access_list = block_access_list;
         self.batch_database.commit_source(&output.state);
 
         let block_state = output.state.into_inner();
@@ -852,12 +941,13 @@ where
     where
         F: FnMut(HashedPostState) + Send + 'static,
     {
-        let output = Self::execute_block_with_database_and_state_hook(
+        let (output, block_access_list) = Self::execute_block_with_database_and_state_hook(
             &self.evm_config,
             block,
             BorrowedDatabase::new(&mut self.batch_database),
             Some(Box::new(state_hook)),
         )?;
+        self.block_access_list = block_access_list;
         self.batch_database.commit_source(&output.state);
 
         let block_state = output.state.into_inner();
@@ -871,8 +961,8 @@ where
         block: &RecoveredBlock<<Self::Primitives as NodePrimitives>::Block>,
     ) -> Result<BlockExecutionOutput<<Self::Primitives as NodePrimitives>::Receipt>, Self::Error>
     {
-        let Self { evm_config, batch_database, batch_state } = self;
-        let output = Self::execute_block_with_database(&evm_config, block, batch_database)?;
+        let Self { evm_config, batch_database, batch_state, .. } = self;
+        let (output, _) = Self::execute_block_with_database(&evm_config, block, batch_database)?;
         Ok(Self::merge_batch_output(batch_state, output))
     }
 
@@ -884,8 +974,8 @@ where
     where
         F: FnMut(HashedPostState) + Send + 'static,
     {
-        let Self { evm_config, batch_database, batch_state } = self;
-        let output = Self::execute_block_with_database_and_state_hook(
+        let Self { evm_config, batch_database, batch_state, .. } = self;
+        let (output, _) = Self::execute_block_with_database_and_state_hook(
             &evm_config,
             block,
             batch_database,
@@ -903,7 +993,7 @@ where
     }
 
     fn take_bal(&mut self) -> Option<Bytes> {
-        None
+        self.block_access_list.take()
     }
 }
 

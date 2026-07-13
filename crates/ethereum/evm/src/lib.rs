@@ -174,6 +174,14 @@ impl EvmEnv for EthEvmEnv {
         }
     }
 
+    fn uses_separate_block_gas(&self) -> bool {
+        self.version.feature(evm2::EvmFeatures::EIP8037)
+    }
+
+    fn regular_gas_limit_cap(&self) -> u64 {
+        self.version.tx_gas_limit_cap
+    }
+
     fn with_nonce_check_disabled(mut self) -> Self {
         self.version.features.remove(evm2::EvmFeatures::NONCE_CHECK);
         self

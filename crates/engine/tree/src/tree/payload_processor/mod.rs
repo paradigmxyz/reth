@@ -7,7 +7,6 @@ use crate::tree::{
     ExecutionCache, PayloadExecutionCache, SavedCache, StateProviderBuilder, TreeConfig,
     WaitForCaches,
 };
-#[cfg(any())]
 use alloy_eip7928::bal::DecodedBal;
 use alloy_eips::{eip1898::BlockWithParent, eip4895::Withdrawal};
 use alloy_primitives::B256;
@@ -46,9 +45,6 @@ use std::{
 };
 use tracing::{debug, debug_span, instrument, trace, warn, Span};
 
-// Block-level access list execution is Amsterdam-only and out of scope for the active EVM
-// pre-Amsterdam sync path. Keep the implementation in-tree, but do not compile it.
-#[cfg(any())]
 pub mod bal;
 pub(crate) mod bal_prewarm_pool;
 pub mod multiproof;
@@ -565,24 +561,12 @@ where
         TxEnvFor<Evm>: Clone + Send + 'static,
     {
         let mode = if parallel_bal_execution {
-            #[cfg(any())]
-            {
-                if let Some(decoded_bal) = env.decoded_bal.clone() {
-                    PrewarmMode::BlockAccessList(decoded_bal)
-                } else {
-                    warn!(
-                        target: "engine::tree::payload_processor",
-                        "BAL prewarming requested without a decoded block access list"
-                    );
-                    PrewarmMode::Skipped
-                }
-            }
-
-            #[cfg(not(any()))]
-            {
+            if let Some(decoded_bal) = env.decoded_bal.clone() {
+                PrewarmMode::BlockAccessList(decoded_bal)
+            } else {
                 warn!(
                     target: "engine::tree::payload_processor",
-                    "BAL prewarming is unsupported in the active pre-Amsterdam execution path"
+                    "BAL prewarming requested without a decoded block access list"
                 );
                 PrewarmMode::Skipped
             }
@@ -1056,7 +1040,6 @@ pub struct ExecutionEnv<Evm: ConfigureEvm> {
     /// Used to generate prefetch targets for withdrawal addresses.
     pub withdrawals: Option<Vec<Withdrawal>>,
     /// Decoded block access list for Amsterdam BAL prewarming.
-    #[cfg(any())]
     pub decoded_bal: Option<Arc<DecodedBal>>,
 }
 
@@ -1075,7 +1058,6 @@ where
             transaction_count: 0,
             gas_used: 0,
             withdrawals: None,
-            #[cfg(any())]
             decoded_bal: None,
         }
     }

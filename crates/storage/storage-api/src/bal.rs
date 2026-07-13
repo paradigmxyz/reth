@@ -3,6 +3,7 @@ use alloy_eip7928::bal::DecodedBal;
 pub use alloy_eip7928::bal::RawBal;
 use alloy_eips::NumHash;
 use alloy_primitives::{BlockHash, BlockNumber, Bytes};
+use evm2::evm::Bal as EvmBal;
 use reth_storage_errors::provider::ProviderResult;
 
 /// Notification emitted when a new BAL is inserted into the store.
@@ -83,6 +84,22 @@ pub trait BalStore: Send + Sync + 'static {
             .map(DecodedBal::from_rlp_bytes)
             .transpose()
             .map_err(Into::into)
+    }
+
+    /// Fetches the BAL for the given block hash in the active EVM representation.
+    fn evm_bal_by_hash(
+        &self,
+        block_hash: BlockHash,
+    ) -> ProviderResult<Option<DecodedBal<Arc<EvmBal>>>> {
+        self.get_decoded_by_hash(block_hash)?
+            .map(|decoded| {
+                decoded.try_map(|bal| {
+                    EvmBal::try_from(bal.as_slice())
+                        .map(Arc::new)
+                        .map_err(reth_storage_errors::provider::ProviderError::other)
+                })
+            })
+            .transpose()
     }
 
     /// Fetch BAL response entries for the given block hashes, stopping after the soft limit is
@@ -207,6 +224,15 @@ impl BalStoreHandle {
     #[inline]
     pub fn get_decoded_by_hash(&self, block_hash: BlockHash) -> ProviderResult<Option<DecodedBal>> {
         self.inner.get_decoded_by_hash(block_hash)
+    }
+
+    /// Fetches the BAL for the given block hash in the active EVM representation.
+    #[inline]
+    pub fn evm_bal_by_hash(
+        &self,
+        block_hash: BlockHash,
+    ) -> ProviderResult<Option<DecodedBal<Arc<EvmBal>>>> {
+        self.inner.evm_bal_by_hash(block_hash)
     }
 
     /// Fetch BAL response entries for the given block hashes, stopping after the soft limit is

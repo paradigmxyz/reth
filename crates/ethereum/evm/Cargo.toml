@@ -26,6 +26,7 @@ evm2-jit = { workspace = true, optional = true, features = ["llvm"] }
 # Alloy
 alloy-primitives.workspace = true
 alloy-eips.workspace = true
+alloy-eip7928.workspace = true
 alloy-consensus.workspace = true
 alloy-rpc-types-engine.workspace = true
 alloy-sol-types.workspace = true
@@ -93,6 +94,7 @@ std = [
     "dep:reth-storage-errors",
     "reth-storage-errors/std",
     "alloy-sol-types/std",
+    "alloy-eip7928/std",
 ]
 test-utils = [
     "std",

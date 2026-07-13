@@ -195,20 +195,18 @@ where
             let db = StateProviderDatabase::new(state_provider.as_ref());
             let cached_db = request_cache.as_db_mut(db);
             let cached_db_handle = cached_db.clone();
-            let output = self
-                .evm_config
-                .batch_executor(cached_db)
-                .execute(&block)
-                .map_err(BlockExecutionError::other)?;
+            let mut executor = self.evm_config.batch_executor(cached_db);
+            let result = executor.execute_one(&block).map_err(BlockExecutionError::other)?;
+            let block_access_list_hash = executor.take_bal().map(alloy_primitives::keccak256);
+            let output =
+                BlockExecutionOutput::new(result, executor.into_state().into_execution_state());
             cached_db_handle.sync(&mut request_cache);
 
             if !self.disallow.is_empty() {
                 self.ensure_no_disallowed_accounts(&request_cache, &output)?;
             }
 
-            // evm2 BAL construction is not wired yet, so we cannot rebuild and compare the
-            // submitted BAL hash here. Header-level BAL requirements are still validated above.
-            (output, None)
+            (output, block_access_list_hash)
         };
 
         // update the cached reads

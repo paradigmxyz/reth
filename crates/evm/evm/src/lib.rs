@@ -169,6 +169,16 @@ pub trait EvmEnv: Debug + Clone + Send + Sync + 'static {
     /// Returns transaction validation gas rules active in this environment.
     fn transaction_validation_gas_rules(&self) -> EvmTransactionValidationGasRules;
 
+    /// Returns whether the block uses independent regular and state gas capacity.
+    fn uses_separate_block_gas(&self) -> bool {
+        false
+    }
+
+    /// Returns the transaction limit used to reserve regular block gas.
+    fn regular_gas_limit_cap(&self) -> u64 {
+        u64::MAX
+    }
+
     /// Returns this environment with transaction nonce checks disabled.
     fn with_nonce_check_disabled(self) -> Self;
 

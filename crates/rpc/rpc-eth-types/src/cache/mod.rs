@@ -3,8 +3,17 @@
 use super::{EthStateCacheConfig, MultiConsumerLruCache};
 use crate::block::CachedTransaction;
 use alloy_consensus::{transaction::TxHashRef, BlockHeader};
+use alloy_eip7928::bal::DecodedBal;
 use alloy_eips::BlockHashOrNumber;
 use alloy_primitives::{TxHash, B256};
+use evm2::{
+    bytecode::Bytecode,
+    evm::{
+        AccountBal as EvmAccountBal, AccountInfoBal as EvmAccountInfoBal, Bal as EvmBal,
+        BalChanges as EvmBalChanges, BalCodeChange as EvmBalCodeChange,
+        StorageBal as EvmStorageBal,
+    },
+};
 use futures::{stream::FuturesOrdered, Stream, StreamExt};
 use reth_chain_state::CanonStateNotification;
 use reth_errors::{ProviderError, ProviderResult};
@@ -268,11 +277,15 @@ impl<N: NodePrimitives> EthStateCache<N> {
     /// Requests the BAL for the block hash.
     ///
     /// Returns `None` if the BAL does not exist.
-    #[cfg(any())]
-    pub async fn get_bal(&self, block_hash: B256) -> ProviderResult<Option<Arc<CachedBal>>> {
+    pub async fn get_bal(
+        &self,
+        block_hash: B256,
+    ) -> ProviderResult<Option<Arc<DecodedBal<Arc<EvmBal>>>>> {
         let (response_tx, rx) = oneshot::channel();
         let _ = self.to_service.send(CacheAction::GetBal { block_hash, response_tx });
-        rx.await.map_err(|_| CacheServiceUnavailable)?.map(|maybe_bal| maybe_bal.map(Arc::new))
+        rx.await
+            .map_err(|_| CacheServiceUnavailable)?
+            .map(|maybe_bal| maybe_bal.map(|cached| cached.0))
     }
 }
 /// Thrown when the cache service task dropped.
@@ -595,13 +608,18 @@ where
                             }
 
                             if this.bal_cache.queue(block_hash, response_tx) {
+                                let provider = this.provider.clone();
                                 let action_tx = this.action_tx.clone();
                                 let rate_limiter = this.rate_limiter.clone();
                                 let mut action_sender =
                                     ActionSender::new(CacheKind::Bal, block_hash, action_tx);
                                 this.action_task_spawner.spawn_blocking_task(async move {
                                     let _permit = rate_limiter.acquire().await;
-                                    action_sender.send_bal(Ok(None));
+                                    let res = provider
+                                        .bal_store()
+                                        .evm_bal_by_hash(block_hash)
+                                        .map(|maybe_bal| maybe_bal.map(CachedBal::new));
+                                    action_sender.send_bal(res);
                                 });
                             }
                         }
@@ -723,7 +741,6 @@ enum CacheAction<B: Block, R> {
         block_hash: B256,
         response_tx: ReceiptsResponseSender<R>,
     },
-    #[expect(dead_code)]
     GetBal {
         block_hash: B256,
         response_tx: BalResponseSender,
@@ -907,14 +924,70 @@ pub async fn cache_new_blocks_task<St, N: NodePrimitives>(
     }
 }
 
-/// Cached decoded BAL.
+/// Cached decoded EVM BAL.
 #[derive(Clone, Debug)]
-pub(crate) struct CachedBal;
+pub(crate) struct CachedBal(Arc<DecodedBal<Arc<EvmBal>>>);
+
+impl CachedBal {
+    /// Creates a cached EVM BAL from an owned decoded BAL.
+    #[inline]
+    fn new(bal: DecodedBal<Arc<EvmBal>>) -> Self {
+        Self(Arc::new(bal))
+    }
+}
 
 impl InMemorySize for CachedBal {
     fn size(&self) -> usize {
-        core::mem::size_of::<Self>()
+        core::mem::size_of::<Self>() +
+            core::mem::size_of::<DecodedBal<Arc<EvmBal>>>() +
+            self.0.as_raw().len() +
+            evm_bal_size(self.0.as_bal())
     }
+}
+
+fn evm_bal_size(bal: &EvmBal) -> usize {
+    core::mem::size_of::<EvmBal>() +
+        bal.accounts.capacity() *
+            core::mem::size_of::<(alloy_primitives::Address, EvmAccountBal)>() +
+        bal.accounts.values().map(evm_account_bal_heap_size).sum::<usize>()
+}
+
+fn evm_account_bal_heap_size(account: &EvmAccountBal) -> usize {
+    evm_account_info_bal_heap_size(&account.account_info) +
+        evm_storage_bal_heap_size(&account.storage)
+}
+
+fn evm_account_info_bal_heap_size(account_info: &EvmAccountInfoBal) -> usize {
+    evm_bal_changes_heap_size(&account_info.nonce, |_| 0) +
+        evm_bal_changes_heap_size(&account_info.balance, |_| 0) +
+        evm_bal_changes_heap_size(&account_info.code, evm_code_change_heap_size)
+}
+
+fn evm_storage_bal_heap_size(storage: &EvmStorageBal) -> usize {
+    storage.storage.capacity() *
+        core::mem::size_of::<(alloy_primitives::U256, EvmBalChanges<alloy_eip7928::StorageChange>)>(
+        ) +
+        storage
+            .storage
+            .values()
+            .map(|changes| evm_bal_changes_heap_size(changes, |_| 0))
+            .sum::<usize>()
+}
+
+fn evm_bal_changes_heap_size<T, F>(changes: &EvmBalChanges<T>, mut item_heap_size: F) -> usize
+where
+    F: FnMut(&T) -> usize,
+{
+    changes.changes.capacity() * core::mem::size_of::<T>() +
+        changes.changes.iter().map(&mut item_heap_size).sum::<usize>()
+}
+
+fn evm_code_change_heap_size(change: &EvmBalCodeChange) -> usize {
+    bytecode_heap_size(&change.code.1)
+}
+
+fn bytecode_heap_size(bytecode: &Bytecode) -> usize {
+    bytecode.original_bytes().len()
 }
 
 #[cfg(test)]
@@ -958,6 +1031,13 @@ mod tests {
             },
             vec![Address::ZERO],
         )
+    }
+
+    fn test_cached_bal() -> CachedBal {
+        CachedBal::new(DecodedBal::new(
+            Arc::new(EvmBal::default()),
+            alloy_primitives::Bytes::from_static(&[0xc0]),
+        ))
     }
 
     #[test]
@@ -1006,12 +1086,11 @@ mod tests {
     }
 
     #[test]
-    #[cfg(any())]
     fn reorg_evicts_cached_bal() {
         let mut service = test_service();
         let block_hash = B256::repeat_byte(0x44);
 
-        assert!(service.bal_cache.insert(block_hash, CachedBal));
+        assert!(service.bal_cache.insert(block_hash, test_cached_bal()));
         assert!(service.bal_cache.get(&block_hash).is_some());
 
         service.on_reorg_bal(block_hash, Ok(None));
@@ -1020,12 +1099,11 @@ mod tests {
     }
 
     #[test]
-    #[cfg(any())]
     fn reorg_forwards_bal_to_queued_requests() {
         let mut service = test_service();
         let block_hash = B256::repeat_byte(0x55);
         let (response_tx, mut response_rx) = oneshot::channel();
-        let bal = CachedBal;
+        let bal = test_cached_bal();
 
         assert!(service.bal_cache.queue(block_hash, response_tx));
 
@@ -1036,9 +1114,44 @@ mod tests {
         assert!(bal.is_some());
     }
 
+    #[test]
+    fn cached_bal_size_accounts_for_nested_allocations() {
+        let index = alloy_eip7928::BlockAccessIndex::new(1);
+        let mut account = EvmAccountBal::default();
+        account.account_info.nonce.changes.push(alloy_eip7928::NonceChange::new(index, 1));
+        account
+            .account_info
+            .balance
+            .changes
+            .push(alloy_eip7928::BalanceChange::new(index, alloy_primitives::U256::from(1)));
+        account.account_info.code.changes.push(EvmBalCodeChange::new(
+            index,
+            (
+                B256::repeat_byte(0xaa),
+                Bytecode::new_raw(alloy_primitives::Bytes::from_static(&[0x60, 0x00])),
+            ),
+        ));
+        account.storage.storage.insert(
+            alloy_primitives::U256::from(1),
+            EvmBalChanges::new(vec![alloy_eip7928::StorageChange::new(
+                index,
+                alloy_primitives::U256::from(2),
+            )]),
+        );
+
+        let mut bal = EvmBal::default();
+        bal.accounts.insert(Address::ZERO, account);
+
+        let raw = alloy_primitives::Bytes::from_static(&[0xc0, 0x01, 0x02]);
+        let top_level_estimate = core::mem::size_of::<CachedBal>() +
+            core::mem::size_of::<DecodedBal<Arc<EvmBal>>>() +
+            raw.len() +
+            core::mem::size_of::<EvmBal>();
+        assert!(CachedBal::new(DecodedBal::new(Arc::new(bal), raw)).size() > top_level_estimate);
+    }
+
     #[tokio::test]
-    #[cfg(any())]
-    async fn get_bal_returns_none_while_stubbed() {
+    async fn get_bal_returns_none_when_store_misses() {
         let cache = EthStateCache::<EthPrimitives>::spawn_with(
             NoopProvider::default(),
             EthStateCacheConfig {

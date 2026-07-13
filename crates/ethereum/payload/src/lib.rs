@@ -22,7 +22,9 @@ use reth_errors::ConsensusError;
 use reth_ethereum_primitives::{EthPrimitives, TransactionSigned};
 use reth_evm::{
     database::StateProviderDatabase,
-    execute::{BlockBuilder, BlockBuilderOutcome, BlockExecutionError, BlockValidationError},
+    execute::{
+        BlockBuilder, BlockBuilderOutcome, BlockExecutionError, BlockExecutor, BlockValidationError,
+    },
     ConfigureEvm, EvmEnv, NextBlockEnvAttributes,
 };
 use reth_evm_ethereum::EthEvmConfig;
@@ -168,13 +170,6 @@ where
     let PayloadConfig { parent_header, attributes, payload_id, .. } = config;
     let skip_state_root = builder_config.skip_state_root;
 
-    if client.chain_spec().is_amsterdam_active_at_timestamp(attributes.timestamp()) {
-        return Err(PayloadBuilderError::other(std::io::Error::new(
-            std::io::ErrorKind::Unsupported,
-            "Amsterdam payload building is unsupported by the active pre-Amsterdam execution path",
-        )))
-    }
-
     let mut state_provider = client.state_by_block_hash(parent_header.hash())?;
     if let Some(execution_cache) = execution_cache {
         state_provider = Box::new(CachedStateProvider::new(
@@ -184,6 +179,7 @@ where
         ));
     }
     let chain_spec = client.chain_spec();
+    let is_amsterdam = chain_spec.is_amsterdam_active_at_timestamp(attributes.timestamp());
     let gas_limit = builder_config
         .gas_limit_with_target(parent_header.gas_limit, attributes.target_gas_limit());
     let blob_params = chain_spec.blob_params_at_timestamp(attributes.timestamp());
@@ -214,8 +210,13 @@ where
     let mut builder = evm_config
         .builder_for_next_block(cached_db, &parent_header, next_block_env_attributes)
         .map_err(PayloadBuilderError::other)?;
+    if is_amsterdam {
+        builder.executor_mut().enable_block_access_list_builder();
+    }
     let base_fee = builder.evm_env().block_base_fee();
     let blob_fee = blob_params.as_ref().map(|_| builder.evm_env().block_blob_base_fee());
+    let separate_block_gas = builder.evm_env().uses_separate_block_gas();
+    let regular_gas_limit_cap = builder.evm_env().regular_gas_limit_cap();
 
     let use_sparse_trie =
         if let Some(handle) = trie_handle.as_ref().filter(|_| stream_state_updates) {
@@ -233,6 +234,8 @@ where
     let mut best_txs = best_txs(BestTransactionsAttributes::new(base_fee, blob_fee));
     let mut total_fees = U256::ZERO;
     let mut cumulative_tx_gas_used = 0u64;
+    let mut block_regular_gas_used = 0u64;
+    let mut block_state_gas_used = 0u64;
     let mut blob_sidecars = BlobSidecars::Empty;
     let mut block_blob_count = 0;
     let mut block_transactions_rlp_length = 0;
@@ -251,12 +254,26 @@ where
             return Ok(BuildOutcome::Cancelled)
         }
 
-        let block_available_gas = gas_limit.saturating_sub(cumulative_tx_gas_used);
-        if pool_tx.gas_limit() > block_available_gas {
+        let exceeds_gas_limit = if separate_block_gas {
+            let regular_available = gas_limit.saturating_sub(block_regular_gas_used);
+            let state_available = gas_limit.saturating_sub(block_state_gas_used);
+            let regular_limit = pool_tx.gas_limit().min(regular_gas_limit_cap);
+            if regular_limit > regular_available {
+                Some((regular_limit, regular_available))
+            } else if pool_tx.gas_limit() > state_available {
+                Some((pool_tx.gas_limit(), state_available))
+            } else {
+                None
+            }
+        } else {
+            let available = gas_limit.saturating_sub(cumulative_tx_gas_used);
+            (pool_tx.gas_limit() > available).then_some((pool_tx.gas_limit(), available))
+        };
+        if let Some((transaction_gas_limit, block_available_gas)) = exceeds_gas_limit {
             best_txs.mark_invalid(
                 &pool_tx,
                 InvalidPoolTransactionError::ExceedsGasLimit(
-                    pool_tx.gas_limit(),
+                    transaction_gas_limit,
                     block_available_gas,
                 ),
             );
@@ -382,6 +399,8 @@ where
         let miner_fee = miner_fee.expect("fee is always valid; execution succeeded");
         total_fees += U256::from(miner_fee) * U256::from(gas_used);
         cumulative_tx_gas_used += gas_used;
+        block_regular_gas_used += gas_output.regular_gas_used();
+        block_state_gas_used += gas_output.state_gas_used();
 
         if let Some(sidecar) = blob_tx_sidecar {
             blob_sidecars.push_sidecar_variant(sidecar.as_ref().clone());

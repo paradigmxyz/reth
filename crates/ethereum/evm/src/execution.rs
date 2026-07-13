@@ -39,10 +39,11 @@ use evm2::{
     evm::{
         AccountChange, AccountChangeRef, AccountInfo, BlockStateAccumulator, StateChangeSink,
         StateChangeSource, StateChanges, StorageChange, SystemTx, BEACON_ROOTS_ADDRESS,
+        BUILDER_DEPOSIT_REQUEST_ADDRESS, BUILDER_EXIT_REQUEST_ADDRESS,
         CONSOLIDATION_REQUEST_ADDRESS, HISTORY_STORAGE_ADDRESS, WITHDRAWAL_REQUEST_ADDRESS,
     },
     registry::HandlerError,
-    BaseEvmTypes, ErrorCode, Evm, SpecId, TxResult,
+    BaseEvmTypes, ErrorCode, Evm, SpecId, TxResult, TxResultWithState,
 };
 #[cfg(test)]
 use evm2::{
@@ -59,12 +60,14 @@ use reth_evm::{
 };
 #[cfg(test)]
 use reth_evm::{ReceiptBuilder, ReceiptBuilderCtx};
-use reth_execution_types::HashedPostStateSink;
 #[cfg(test)]
-use reth_execution_types::{hashed_post_state_from_execution_state, BlockExecutionOutput};
+use reth_execution_types::BlockExecutionOutput;
+use reth_execution_types::HashedPostStateSink;
 use reth_trie_common::{HashedPostState, KeccakKeyHasher};
 
 const DEPOSIT_BYTES_SIZE: usize = 48 + 32 + 8 + 96 + 8;
+const BUILDER_DEPOSIT_REQUEST_TYPE: u8 = 0x03;
+const BUILDER_EXIT_REQUEST_TYPE: u8 = 0x04;
 
 sol! {
     #[allow(missing_docs)]
@@ -88,6 +91,8 @@ pub enum EthExecutionError<E = DynamicDatabaseError> {
     Database(E),
     /// EVM reported a database error, but the typed database error was no longer available.
     MissingDatabaseError(ErrorCode),
+    /// An attached EIP-7928 BAL did not cover a transaction state read.
+    BlockAccessListNotCovered,
     /// Cancun requires a parent beacon block root after genesis.
     MissingParentBeaconBlockRoot,
     /// Cancun genesis payloads must carry a zero parent beacon block root.
@@ -132,6 +137,9 @@ where
             Self::Database(err) => write!(f, "EVM database error: {err}"),
             Self::MissingDatabaseError(code) => {
                 write!(f, "EVM database error {code:?} was not available")
+            }
+            Self::BlockAccessListNotCovered => {
+                f.write_str("block access list does not cover transaction state reads")
             }
             Self::MissingParentBeaconBlockRoot => {
                 f.write_str("missing parent beacon block root for Cancun system call")
@@ -231,6 +239,9 @@ where
                 parent_beacon_block_root,
             }
             .into(),
+            EthExecutionError::BlockAccessListNotCovered => {
+                BlockValidationError::BlockAccessListNotCovered.into()
+            }
             EthExecutionError::DepositRequestDecode(err) => {
                 BlockValidationError::DepositRequestDecode(err).into()
             }
@@ -769,8 +780,63 @@ pub(crate) fn execute_transaction_with_commit_condition(
     }
 }
 
+pub(crate) fn execute_transaction_without_commit(
+    evm: &mut Evm<'_, BaseEvmTypes>,
+    transaction: &RecoveredTxEnvelope,
+) -> Result<TxResultWithState, EthExecutionError> {
+    enum TransactionResolution {
+        Outcome(TxResultWithState),
+        DatabaseError(ErrorCode),
+        HandlerError(HandlerError),
+    }
+
+    let resolution = match evm.transact(transaction) {
+        Ok(executed) => {
+            if let Some(code) = executed.result().error_code {
+                let _ = executed.discard();
+                TransactionResolution::DatabaseError(code)
+            } else {
+                TransactionResolution::Outcome(executed.detach())
+            }
+        }
+        Err(err) => TransactionResolution::HandlerError(err),
+    };
+
+    match resolution {
+        TransactionResolution::Outcome(outcome) => Ok(outcome),
+        TransactionResolution::DatabaseError(code) => Err(map_db_error_code(evm, code)),
+        TransactionResolution::HandlerError(err) => Err(map_handler_error(evm, err)),
+    }
+}
+
+pub(crate) fn commit_detached_transaction(
+    evm: &mut Evm<'_, BaseEvmTypes>,
+    block_state: &mut BlockStateAccumulator,
+    stream_hashed_state: bool,
+    on_hashed_state_update: &mut impl FnMut(HashedPostState),
+    output: TxResultWithState,
+) -> TxResult {
+    let state_changes = output.state_changes;
+    if evm.state().bal_builder().is_some() {
+        evm.state_mut().overlay_db_mut().bal_context.commit_bal(&state_changes);
+    }
+
+    let result = {
+        let mut sink = RethStateSink::new(None, block_state, stream_hashed_state);
+        let Ok(()) = state_changes.visit(&mut sink);
+        sink.flush_streamed_hashed_state(on_hashed_state_update);
+        output.result
+    };
+    evm.state_mut().commit_source(&state_changes);
+    result
+}
+
 fn map_db_error_code(evm: &mut Evm<'_, BaseEvmTypes>, code: ErrorCode) -> EthExecutionError {
-    EthExecutionError::Database(take_database_error(evm, code))
+    if code == ErrorCode::BAL_NOT_COVERED {
+        EthExecutionError::BlockAccessListNotCovered
+    } else {
+        EthExecutionError::Database(take_database_error(evm, code))
+    }
 }
 
 pub(crate) fn pre_execution_system_call_state_changes(
@@ -908,6 +974,34 @@ pub(crate) fn post_execution_system_call_state_changes(
         consolidation_requests.output.iter().copied(),
     );
 
+    if spec_id.enables(SpecId::AMSTERDAM) {
+        let builder_deposit_requests = execute_system_call(
+            evm,
+            block_state,
+            stream_hashed_state,
+            on_hashed_state_update,
+            BUILDER_DEPOSIT_REQUEST_ADDRESS,
+            Bytes::new(),
+        )?;
+        requests.push_request_with_type(
+            BUILDER_DEPOSIT_REQUEST_TYPE,
+            builder_deposit_requests.output.iter().copied(),
+        );
+
+        let builder_exit_requests = execute_system_call(
+            evm,
+            block_state,
+            stream_hashed_state,
+            on_hashed_state_update,
+            BUILDER_EXIT_REQUEST_ADDRESS,
+            Bytes::new(),
+        )?;
+        requests.push_request_with_type(
+            BUILDER_EXIT_REQUEST_TYPE,
+            builder_exit_requests.output.iter().copied(),
+        );
+    }
+
     Ok(())
 }
 
@@ -958,13 +1052,16 @@ fn execute_system_call(
     }
 }
 
-fn commit_state_changes<S: StateChangeSource>(
+fn commit_state_changes(
     evm: &mut Evm<'_, BaseEvmTypes>,
     block_state: &mut BlockStateAccumulator,
     stream_hashed_state: bool,
     on_hashed_state_update: &mut impl FnMut(HashedPostState),
-    changes: &S,
+    changes: &StateChanges,
 ) {
+    if evm.state().bal_builder().is_some() {
+        evm.state_mut().overlay_db_mut().bal_context.commit_bal(changes);
+    }
     let result = {
         let mut sink = RethStateSink::new(
             Some(evm.overlay_db_mut() as &mut dyn StateChangeSink<Error = Infallible>),
@@ -1307,7 +1404,7 @@ mod tests {
         let transaction = legacy_transfer(caller, target, U256::from(1));
 
         let mut streamed_updates = Vec::new();
-        let output = BlockExecutionInput::new(
+        let _output = BlockExecutionInput::new(
             SpecId::FRONTIER,
             BlockEnv::default(),
             Db::new(database),
@@ -1639,6 +1736,50 @@ mod tests {
             ]
         );
         assert!(output.result.receipts.is_empty());
+    }
+
+    #[test]
+    fn collects_amsterdam_builder_requests() {
+        let mut database = TestDatabase::default();
+        for (address, byte) in [
+            (WITHDRAWAL_REQUEST_ADDRESS, 0xaa),
+            (CONSOLIDATION_REQUEST_ADDRESS, 0xbb),
+            (BUILDER_DEPOSIT_REQUEST_ADDRESS, 0xcc),
+            (BUILDER_EXIT_REQUEST_ADDRESS, 0xdd),
+        ] {
+            database
+                .accounts
+                .insert(address, AccountInfo::default().with_code(return_byte_code(byte)));
+        }
+
+        let output = execute_block_with_context(
+            SpecId::AMSTERDAM,
+            BlockEnv::default(),
+            database,
+            1,
+            core::iter::empty::<Recovered<TransactionSigned>>(),
+            BlockExecutionContext {
+                chain_id: 1,
+                system_calls: Some(BlockSystemCalls {
+                    parent_hash: B256::ZERO,
+                    parent_beacon_block_root: Some(B256::ZERO),
+                }),
+                ommers: None,
+                withdrawals: None,
+                deposit_contract_address: None,
+            },
+        )
+        .expect("system calls succeed");
+
+        assert_eq!(
+            output.result.requests.iter().cloned().collect::<Vec<_>>(),
+            vec![
+                Bytes::from_static(&[WITHDRAWAL_REQUEST_TYPE, 0xaa]),
+                Bytes::from_static(&[CONSOLIDATION_REQUEST_TYPE, 0xbb]),
+                Bytes::from_static(&[BUILDER_DEPOSIT_REQUEST_TYPE, 0xcc]),
+                Bytes::from_static(&[BUILDER_EXIT_REQUEST_TYPE, 0xdd]),
+            ]
+        );
     }
 
     #[test]

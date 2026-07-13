@@ -11,7 +11,10 @@ use reth_engine_primitives::{
 };
 use reth_engine_tree::tree::EngineValidator;
 use reth_errors::{BlockExecutionError, BlockValidationError, RethError, RethResult};
-use reth_evm::{database::StateProviderDatabase, BlockBuilder, BlockBuilderOutcome, ConfigureEvm};
+use reth_evm::{
+    database::StateProviderDatabase, BlockBuilder, BlockBuilderOutcome, BlockExecutor,
+    ConfigureEvm, EvmEnv,
+};
 use reth_payload_primitives::{BuiltPayload, PayloadTypes};
 use reth_primitives_traits::{
     block::Block as _, BlockBody as _, BlockTy, HeaderTy, SealedBlock, SignedTransaction,
@@ -262,35 +265,42 @@ where
 
     debug!(target: "engine::stream::reorg", number = reorg_target.header().number(), hash = %previous_hash, "Selected reorg target");
 
-    if reorg_target.header().block_access_list_hash().is_some() {
-        return Err(RethError::Execution(
-            BlockValidationError::msg(
-                "engine reorg simulation for BAL payloads is unsupported by the active execution path",
-            )
-            .into(),
-        ))
-    }
-
+    let has_bal = reorg_target.header().block_access_list_hash().is_some();
     let state_provider = provider.state_by_block_hash(reorg_target.header().parent_hash())?;
     let evm_env = evm_config.evm_env(reorg_target.header()).map_err(RethError::other)?;
     let evm = evm_config
         .evm_with_env(StateProviderDatabase::new(state_provider.as_ref()), evm_env.clone());
     let ctx = evm_config.context_for_block(&reorg_target).map_err(RethError::other)?;
     let mut builder = evm_config.create_block_builder(evm, evm_env, &reorg_target_parent, ctx);
+    if has_bal {
+        builder.executor_mut().enable_block_access_list_builder();
+    }
 
     builder.apply_pre_execution_changes()?;
 
     let mut cumulative_gas_used = 0;
+    let mut block_regular_gas_used = 0;
+    let mut block_state_gas_used = 0;
+    let separate_block_gas = builder.evm_env().uses_separate_block_gas();
+    let regular_gas_limit_cap = builder.evm_env().regular_gas_limit_cap();
     for tx in candidate_transactions {
         // ensure we still have capacity for this transaction
-        if cumulative_gas_used + tx.gas_limit() > reorg_target.gas_limit() {
+        let exceeds_gas_limit = if separate_block_gas {
+            let regular_available = reorg_target.gas_limit().saturating_sub(block_regular_gas_used);
+            let state_available = reorg_target.gas_limit().saturating_sub(block_state_gas_used);
+            tx.gas_limit().min(regular_gas_limit_cap) > regular_available ||
+                tx.gas_limit() > state_available
+        } else {
+            tx.gas_limit() > reorg_target.gas_limit().saturating_sub(cumulative_gas_used)
+        };
+        if exceeds_gas_limit {
             continue
         }
 
         let tx_recovered =
             tx.try_into_recovered().map_err(|_| ProviderError::SenderRecoveryError)?;
-        let gas_used = match builder.execute_transaction(tx_recovered) {
-            Ok(gas_used) => gas_used.tx_gas_used(),
+        let gas_output = match builder.execute_transaction(tx_recovered) {
+            Ok(gas_output) => gas_output,
             Err(BlockExecutionError::Validation(BlockValidationError::InvalidTx {
                 hash,
                 error,
@@ -302,7 +312,9 @@ where
             Err(error) => return Err(RethError::Execution(error)),
         };
 
-        cumulative_gas_used += gas_used;
+        cumulative_gas_used += gas_output.tx_gas_used();
+        block_regular_gas_used += gas_output.regular_gas_used();
+        block_state_gas_used += gas_output.state_gas_used();
     }
 
     let BlockBuilderOutcome { block, block_access_list, .. } =

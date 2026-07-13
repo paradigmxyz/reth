@@ -26,10 +26,12 @@ reth-rpc-convert.workspace = true
 reth-tasks.workspace = true
 reth-transaction-pool.workspace = true
 reth-trie.workspace = true
+evm2.workspace = true
 
 # ethereum
 alloy-chains.workspace = true
 alloy-eips.workspace = true
+alloy-eip7928.workspace = true
 alloy-primitives.workspace = true
 alloy-consensus.workspace = true
 alloy-sol-types.workspace = true
