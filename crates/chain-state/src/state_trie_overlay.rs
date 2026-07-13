@@ -350,22 +350,17 @@ impl<N: NodePrimitives> StateTrieOverlayManager<N> {
         Self::anchor_for_parent_in(self.blocks.as_ref(), parent_hash, preferred_anchor)
     }
 
-    /// Returns true if `hash` is in the parent chain segment from `anchor_hash` exclusive to
+    /// Returns true if `hash` is in the parent chain segment from `anchor_hash` inclusive to
     /// `parent_hash` inclusive.
-    pub fn hash_between_anchor_and_parent(
-        &self,
-        parent_hash: B256,
-        anchor_hash: B256,
-        hash: B256,
-    ) -> bool {
+    pub fn contains_hash(&self, parent_hash: B256, anchor_hash: B256, hash: B256) -> bool {
         let mut current_hash = parent_hash;
 
         loop {
-            if current_hash == anchor_hash {
-                return false
-            }
             if current_hash == hash {
                 return true
+            }
+            if current_hash == anchor_hash {
+                return false
             }
 
             let Some(block) = self.blocks.get(&current_hash) else { return false };
@@ -723,7 +718,7 @@ mod tests {
     }
 
     #[test]
-    fn detects_hashes_between_anchor_and_parent() {
+    fn contains_hash_detects_hashes_from_anchor_to_parent() {
         let manager = StateTrieOverlayManager::default();
         let blocks = test_blocks();
         for block in &blocks {
@@ -733,19 +728,19 @@ mod tests {
         let anchor_hash = blocks[0].recovered_block().parent_hash();
         let parent_hash = blocks[2].recovered_block().hash();
 
-        assert!(!manager.hash_between_anchor_and_parent(parent_hash, anchor_hash, anchor_hash));
+        assert!(manager.contains_hash(parent_hash, anchor_hash, anchor_hash));
         for block in &blocks {
-            assert!(manager.hash_between_anchor_and_parent(
+            assert!(manager.contains_hash(
                 parent_hash,
                 anchor_hash,
                 block.recovered_block().hash()
             ));
         }
-        assert!(!manager.hash_between_anchor_and_parent(parent_hash, anchor_hash, B256::random()));
+        assert!(!manager.contains_hash(parent_hash, anchor_hash, B256::random()));
     }
 
     #[test]
-    fn hash_between_anchor_and_parent_rejects_hash_before_anchor() {
+    fn contains_hash_rejects_hash_before_anchor() {
         let manager = StateTrieOverlayManager::default();
         let blocks = test_blocks();
         for block in &blocks {
@@ -756,17 +751,13 @@ mod tests {
         let anchor_hash = blocks[1].recovered_block().hash();
         let before_anchor_hash = blocks[0].recovered_block().hash();
 
-        assert!(manager.hash_between_anchor_and_parent(parent_hash, anchor_hash, parent_hash));
-        assert!(!manager.hash_between_anchor_and_parent(parent_hash, anchor_hash, anchor_hash));
-        assert!(!manager.hash_between_anchor_and_parent(
-            parent_hash,
-            anchor_hash,
-            before_anchor_hash
-        ));
+        assert!(manager.contains_hash(parent_hash, anchor_hash, parent_hash));
+        assert!(manager.contains_hash(parent_hash, anchor_hash, anchor_hash));
+        assert!(!manager.contains_hash(parent_hash, anchor_hash, before_anchor_hash));
     }
 
     #[test]
-    fn hash_between_anchor_and_parent_rejects_unknown_anchor() {
+    fn contains_hash_rejects_unknown_anchor() {
         let manager = StateTrieOverlayManager::default();
         let blocks = test_blocks();
         for block in &blocks {
@@ -776,7 +767,7 @@ mod tests {
         let parent_hash = blocks[2].recovered_block().hash();
         let anchor_hash = B256::random();
 
-        assert!(!manager.hash_between_anchor_and_parent(parent_hash, anchor_hash, anchor_hash));
+        assert!(!manager.contains_hash(parent_hash, anchor_hash, anchor_hash));
     }
 
     #[test]
