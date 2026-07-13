@@ -10,7 +10,7 @@ use alloy_consensus::{
 };
 use alloy_eip7928::{compute_block_access_list_hash, BlockAccessIndex, BlockAccessList};
 use alloy_eips::eip2718::{Typed2718, WithEncoded};
-use alloy_primitives::{Address, Bytes, B256};
+use alloy_primitives::{Address, B256};
 use core::{borrow::Borrow, fmt::Debug};
 use evm2::evm::BlockStateAccumulator;
 #[cfg(feature = "std")]
@@ -229,9 +229,6 @@ pub trait BlockExecutor: Sized {
     /// Enables construction of an EIP-7928 block access list from committed state changes.
     fn enable_block_access_list_builder(&mut self);
 
-    /// Returns whether EIP-7928 block access list construction is enabled.
-    fn block_access_list_builder_enabled(&self) -> bool;
-
     /// Takes the canonical EIP-7928 block access list built from committed state changes.
     fn take_block_access_list(&mut self) -> Option<BlockAccessList>;
 
@@ -251,14 +248,6 @@ pub trait BlockExecutor: Sized {
         &mut self,
         transaction: Self::Transaction,
     ) -> Result<Self::TransactionResultWithState, BlockExecutionError>;
-
-    /// Returns the raw execution result from a detached transaction output.
-    fn detached_transaction_result(
-        output: &Self::TransactionResultWithState,
-    ) -> &Self::TransactionResult;
-
-    /// Returns the gas accounting output from a detached transaction output.
-    fn detached_transaction_gas(output: &Self::TransactionResultWithState) -> GasOutput;
 
     /// Commits detached transaction state and records its receipt and gas accounting.
     fn commit_transaction(
@@ -438,8 +427,8 @@ pub struct BlockBuilderOutcome<N: NodePrimitives> {
     pub trie_updates: TrieUpdates,
     /// The built block.
     pub block: RecoveredBlock<N::Block>,
-    /// Encoded block access list built during execution.
-    pub block_access_list: Option<Bytes>,
+    /// Block access list built during execution.
+    pub block_access_list: Option<BlockAccessList>,
 }
 
 /// A type that knows how to execute transactions and assemble a block.
@@ -674,7 +663,7 @@ where
             hashed_state,
             trie_updates,
             block,
-            block_access_list: block_access_list.map(|bal| alloy_rlp::encode(&bal).into()),
+            block_access_list,
         })
     }
 
@@ -808,8 +797,8 @@ pub trait Executor<DB: Database>: Sized {
     /// Converts the executor into its accumulated batch state.
     fn into_state(self) -> ExecutionOutcomeState;
 
-    /// Takes the encoded block access list from executor.
-    fn take_bal(&mut self) -> Option<Bytes>;
+    /// Takes the canonical block access list from executor.
+    fn take_bal(&mut self) -> Option<BlockAccessList>;
 }
 
 /// Generic block executor backed by a [`ConfigureEvm`] implementation.
@@ -819,7 +808,7 @@ pub struct BasicBlockExecutor<Evm, DB: Database> {
     evm_config: Evm,
     batch_database: CacheDB<Db<DB>>,
     batch_state: ExecutionOutcomeState,
-    block_access_list: Option<Bytes>,
+    block_access_list: Option<BlockAccessList>,
 }
 
 #[cfg(feature = "std")]
@@ -861,7 +850,7 @@ where
         block: &RecoveredBlock<BlockTy<Evm::Primitives>>,
         database: impl DynDatabase,
     ) -> Result<
-        (BlockExecutionOutput<ReceiptTy<Evm::Primitives>>, Option<Bytes>),
+        (BlockExecutionOutput<ReceiptTy<Evm::Primitives>>, Option<BlockAccessList>),
         BlockExecutionError,
     > {
         Self::execute_block_with_database_and_state_hook(evm_config, block, database, None)
@@ -874,7 +863,7 @@ where
         database: impl DynDatabase,
         state_hook: Option<Box<dyn FnMut(HashedPostState) + Send>>,
     ) -> Result<
-        (BlockExecutionOutput<ReceiptTy<Evm::Primitives>>, Option<Bytes>),
+        (BlockExecutionOutput<ReceiptTy<Evm::Primitives>>, Option<BlockAccessList>),
         BlockExecutionError,
     > {
         let evm_env = evm_config.evm_env(block.header()).map_err(BlockExecutionError::other)?;
@@ -901,7 +890,7 @@ where
             executor.execute_transaction(tx_env)?;
         }
         let (output, block_access_list) = executor.finish_with_block_access_list()?;
-        Ok((output, block_access_list.map(|bal| alloy_rlp::encode(bal).into())))
+        Ok((output, block_access_list))
     }
 }
 
@@ -992,7 +981,7 @@ where
         self.batch_state
     }
 
-    fn take_bal(&mut self) -> Option<Bytes> {
+    fn take_bal(&mut self) -> Option<BlockAccessList> {
         self.block_access_list.take()
     }
 }
@@ -1075,7 +1064,7 @@ where
         ExecutionOutcomeState::default()
     }
 
-    fn take_bal(&mut self) -> Option<Bytes> {
+    fn take_bal(&mut self) -> Option<BlockAccessList> {
         None
     }
 }

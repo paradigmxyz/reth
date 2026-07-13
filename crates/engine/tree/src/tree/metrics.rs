@@ -510,8 +510,6 @@ pub(crate) struct BalMetrics {
 pub struct BlockValidationMetrics {
     /// Total number of storage tries updated in the state root calculation
     pub state_root_storage_tries_updated_total: Counter,
-    /// Total number of times the parallel state root computation fell back to regular.
-    pub state_root_parallel_fallback_total: Counter,
     /// Total number of times the state root task failed but the fallback succeeded.
     pub state_root_task_fallback_success_total: Counter,
     /// Total number of times the state root task timed out and a sequential fallback was spawned.

@@ -1,6 +1,6 @@
 use crate::{
     in_memory::ExecutedBlock, CanonStateNotification, CanonStateNotifications,
-    CanonStateSubscriptions, ComputedTrieData,
+    CanonStateSubscriptions,
 };
 use alloy_consensus::{Header, SignableTransaction, TxEip1559, TxReceipt, EMPTY_ROOT_HASH};
 use alloy_eips::eip1559::{ETHEREUM_BLOCK_GAS_LIMIT_30M, INITIAL_BASE_FEE};
@@ -26,7 +26,7 @@ use reth_primitives_traits::{
     SignedTransaction, StorageEntry,
 };
 use reth_storage_api::NodePrimitivesProvider;
-use reth_trie::root::state_root_unhashed;
+use reth_trie::{root::state_root_unhashed, ComputedTrieData, SortedTrieData};
 use std::{
     ops::Range,
     sync::{Arc, Mutex},
@@ -222,7 +222,7 @@ impl<N: NodePrimitives> TestBlockBuilder<N> {
 
     /// Gets an [`ExecutedBlock`] with [`BlockNumber`], receipts and parent hash.
     ///
-    /// When `self.with_state` is enabled, the returned block includes a proper
+    /// When `self.with_state` is enabled, the returned block includes proper
     /// state changes plus reverts, so
     /// that `save_blocks` writes real changesets, history indices, and hashed state.
     fn get_executed_block(
@@ -301,7 +301,6 @@ impl<N: NodePrimitives> TestBlockBuilder<N> {
             block_number,
             Vec::new(),
         );
-
         let block_state = execution_outcome.execution_state();
         let hashed_state =
             hashed_post_state_from_execution_state::<reth_trie::KeccakKeyHasher>(&block_state)
@@ -324,8 +323,10 @@ impl<N: NodePrimitives> TestBlockBuilder<N> {
             receipts.into_iter().flatten().collect()
         };
 
-        let trie_data =
-            ComputedTrieData { hashed_state: Arc::new(hashed_state), ..Default::default() };
+        let trie_data = ComputedTrieData {
+            sorted: SortedTrieData { hashed_state: Arc::new(hashed_state), ..Default::default() },
+            ..Default::default()
+        };
 
         let block_hash = recovered.hash();
         let executed = ExecutedBlock::new(

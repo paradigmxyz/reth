@@ -28,4 +28,5 @@ pub mod payload;
 pub mod engine;
 pub use engine::EthereumEngineValidator;
 
+pub mod engine_ssz_containers;
 pub mod engine_ssz_proxy;

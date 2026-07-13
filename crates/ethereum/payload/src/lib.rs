@@ -162,7 +162,7 @@ where
     let BuildArguments {
         mut cached_reads,
         execution_cache,
-        trie_handle,
+        mut state_root_handle,
         config,
         cancel,
         best_payload,
@@ -196,7 +196,7 @@ where
     let cached_db = cached_reads.as_db_mut(db);
     let cached_db_handle = cached_db.clone();
     let evm_config = evm_config.with_jit_support();
-    let stream_state_updates = trie_handle.is_some() && !skip_state_root;
+    let stream_state_updates = state_root_handle.is_some() && !skip_state_root;
     let next_block_env_attributes = NextBlockEnvAttributes {
         timestamp: attributes.timestamp(),
         suggested_fee_recipient: attributes.suggested_fee_recipient,
@@ -218,10 +218,10 @@ where
     let separate_block_gas = builder.evm_env().uses_separate_block_gas();
     let regular_gas_limit_cap = builder.evm_env().regular_gas_limit_cap();
 
-    let use_sparse_trie =
-        if let Some(handle) = trie_handle.as_ref().filter(|_| stream_state_updates) {
-            let sender = handle.state_hook_sender();
-            builder.set_state_hook(move |hashed_state| sender.send_hashed_state(hashed_state))
+    let use_state_root_task =
+        if let Some(task) = state_root_handle.as_mut().filter(|_| stream_state_updates) {
+            let mut hook = task.take_state_hook();
+            builder.set_state_hook(move |hashed_state| hook.on_hashed_state_update(hashed_state))
         } else {
             false
         };
@@ -425,20 +425,21 @@ where
             state_provider.as_ref(),
             Some((parent_header.state_root, TrieUpdates::default())),
         )?
-    } else if use_sparse_trie {
-        let mut handle = trie_handle.expect("sparse trie handle exists if hook was installed");
-        builder.finish_with_state_root(state_provider.as_ref(), |_| match handle.state_root() {
+    } else if use_state_root_task {
+        let mut task = state_root_handle.expect("state-root task exists if hook was installed");
+        builder.finish_with_state_root(state_provider.as_ref(), |_| match task.state_root() {
             Ok(outcome) => {
                 debug!(
                     target: "payload_builder",
                     id = %payload_id,
                     state_root = ?outcome.state_root,
-                    "received state root from sparse trie"
+                    job = task.name(),
+                    "received state root from state-root job"
                 );
                 Ok(Some((outcome.state_root, Arc::unwrap_or_clone(outcome.trie_updates))))
             }
             Err(err) => {
-                warn!(target: "payload_builder", id = %payload_id, %err, "sparse trie failed, falling back to sync state root");
+                warn!(target: "payload_builder", id = %payload_id, %err, "state-root job failed, falling back to sync state root");
                 Ok(None)
             }
         })?
@@ -465,6 +466,8 @@ where
         }));
     }
 
+    let block_access_list =
+        block_access_list.map(|block_access_list| alloy_rlp::encode(&block_access_list).into());
     let payload = EthBuiltPayload::new(Arc::new(block), total_fees, requests, block_access_list)
         .with_sidecars(blob_sidecars);
 

@@ -190,6 +190,10 @@ impl<'a> EthBlockExecutor<'a> {
         }
         Ok(())
     }
+
+    const fn block_access_list_builder_enabled(&self) -> bool {
+        self.evm.state().bal_builder().is_some()
+    }
 }
 
 impl<'a> BlockExecutor for EthBlockExecutor<'a> {
@@ -238,10 +242,6 @@ impl<'a> BlockExecutor for EthBlockExecutor<'a> {
     fn enable_block_access_list_builder(&mut self) {
         self.evm.state_mut().enable_bal_builder();
         self.evm.state_mut().reset_bal_index();
-    }
-
-    fn block_access_list_builder_enabled(&self) -> bool {
-        self.evm.state().bal_builder().is_some()
     }
 
     fn take_block_access_list(&mut self) -> Option<BlockAccessList> {
@@ -311,20 +311,6 @@ impl<'a> BlockExecutor for EthBlockExecutor<'a> {
         let result = execute_transaction_without_commit(&mut self.evm, &transaction)
             .map_err(|err| map_transaction_execution_error(err, tx_hash))?;
         Ok(EthTransactionResultWithState { result, tx_type, blob_gas_used, tx_gas_limit })
-    }
-
-    fn detached_transaction_result(
-        output: &Self::TransactionResultWithState,
-    ) -> &Self::TransactionResult {
-        &output.result.result
-    }
-
-    fn detached_transaction_gas(output: &Self::TransactionResultWithState) -> GasOutput {
-        GasOutput::new_with_regular(
-            output.result.result.tx_gas_used(),
-            output.result.result.regular_gas_spent(),
-            output.result.result.state_gas_spent(),
-        )
     }
 
     fn commit_transaction(

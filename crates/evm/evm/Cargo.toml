@@ -27,7 +27,6 @@ alloy-primitives.workspace = true
 alloy-eips.workspace = true
 alloy-consensus.workspace = true
 alloy-eip7928.workspace = true
-alloy-rlp.workspace = true
 
 auto_impl.workspace = true
 futures-util.workspace = true
@@ -81,7 +80,6 @@ std = [
     "reth-ethereum-primitives/std",
     "tracing?/std",
     "alloy-eip7928/std",
-    "alloy-rlp/std",
 ]
 metrics = ["std", "dep:metrics", "dep:reth-metrics"]
 test-utils = [

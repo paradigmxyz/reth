@@ -20,7 +20,7 @@ use async_trait::async_trait;
 use jsonrpsee::core::RpcResult;
 use reth_engine_primitives::ConsensusEngineHandle;
 use reth_payload_primitives::PayloadTypes;
-use reth_rpc_api::{TestingApiServer, TestingBuildBlockRequestV1};
+use reth_rpc_api::TestingApiServer;
 use reth_rpc_eth_types::EthApiError;
 
 /// Testing API handler.
@@ -89,9 +89,12 @@ where
     /// Handles `testing_buildBlockV1`.
     async fn build_block_v1(
         &self,
-        request: TestingBuildBlockRequestV1,
+        parent_block_hash: B256,
+        payload_attributes: PayloadAttributes,
+        transactions: Option<Vec<Bytes>>,
+        extra_data: Option<Bytes>,
     ) -> RpcResult<ExecutionPayloadEnvelopeV5> {
-        let _ = request;
+        let _ = (parent_block_hash, payload_attributes, transactions, extra_data);
         unsupported_testing()
     }
 

@@ -1,7 +1,10 @@
 use alloy_consensus::{
     BlobTransactionValidationError, BlockHeader, EnvKzgSettings, Transaction, TxReceipt,
 };
-use alloy_eips::{eip7685::RequestsOrHash, eip7928::bal::DecodedBal};
+use alloy_eips::{
+    eip7685::RequestsOrHash,
+    eip7928::{bal::DecodedBal, compute_block_access_list_hash},
+};
 use alloy_primitives::{map::AddressSet, Address, B256, U256};
 use alloy_rpc_types_beacon::relay::{
     BidTrace, BuilderBlockValidationRequest, BuilderBlockValidationRequestV2,
@@ -197,7 +200,8 @@ where
             let cached_db_handle = cached_db.clone();
             let mut executor = self.evm_config.batch_executor(cached_db);
             let result = executor.execute_one(&block).map_err(BlockExecutionError::other)?;
-            let block_access_list_hash = executor.take_bal().map(alloy_primitives::keccak256);
+            let block_access_list_hash =
+                executor.take_bal().as_ref().map(|bal| compute_block_access_list_hash(bal));
             let output =
                 BlockExecutionOutput::new(result, executor.into_state().into_execution_state());
             cached_db_handle.sync(&mut request_cache);

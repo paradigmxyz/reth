@@ -2,7 +2,7 @@
 
 use reth_errors::{BlockExecutionError, ConsensusError, ProviderError};
 
-/// Errors surfaced by parallel BAL block execution.
+/// Errors surfaced by `execute_block`.
 #[derive(Debug, thiserror::Error)]
 pub enum BalExecutionError {
     /// Block violated consensus rules while running the BAL path.
@@ -20,6 +20,7 @@ pub enum BalExecutionError {
 }
 
 impl BalExecutionError {
+    /// Create an [`Self::Other`] error from any boxed-error-compatible value.
     pub(crate) fn other<E>(error: E) -> Self
     where
         E: Into<Box<dyn core::error::Error + Send + Sync + 'static>>,
