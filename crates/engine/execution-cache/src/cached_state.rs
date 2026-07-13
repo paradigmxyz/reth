@@ -1195,8 +1195,8 @@ mod tests {
     use super::*;
     use alloy_primitives::U256;
     use reth_execution_types::{
-        EvmState, EvmStateAccumulator, EvmStateChangeSink, ExecutionAccountChangeRef,
-        ExecutionAccountInfo, ExecutionAccountInfoRef,
+        EvmState, EvmStateChangeSink, ExecutionAccountChangeRef, ExecutionAccountInfo,
+        ExecutionAccountInfoRef,
     };
     use reth_provider::test_utils::{ExtendedAccount, MockEthProvider};
 
@@ -1204,7 +1204,7 @@ mod tests {
         address: Address,
         original: Option<ExecutionAccountInfo>,
     ) -> EvmState {
-        let mut accumulator = EvmStateAccumulator::new();
+        let mut accumulator = EvmState::new();
         accumulator
             .account(ExecutionAccountChangeRef {
                 address,

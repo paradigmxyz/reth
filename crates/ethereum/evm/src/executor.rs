@@ -40,7 +40,6 @@ pub struct EthBlockExecutor<'a> {
     parent_beacon_block_root: Option<B256>,
     ommers: &'a [Header],
     withdrawals: Option<Cow<'a, [Withdrawal]>>,
-    chain_id: u64,
     deposit_contract_address: Option<Address>,
     block_state: BlockStateAccumulator,
     hashed_state_mode: HashedStateMode,
@@ -88,7 +87,6 @@ impl<'a> EthBlockExecutor<'a> {
         mut evm: Evm<'a, BaseEvmTypes>,
         context: EthBlockExecutionCtx<'a>,
         chain_spec: &C,
-        chain_id: u64,
         deposit_contract_address: Option<alloy_primitives::Address>,
         hashed_state_mode: HashedStateMode,
     ) -> Self
@@ -113,7 +111,6 @@ impl<'a> EthBlockExecutor<'a> {
             parent_beacon_block_root: context.parent_beacon_block_root,
             ommers: context.ommers,
             withdrawals: context.withdrawals,
-            chain_id,
             deposit_contract_address,
             block_state: BlockStateAccumulator::new(),
             hashed_state_mode,
@@ -130,7 +127,6 @@ impl<'a> EthBlockExecutor<'a> {
     }
 
     const fn block_context<'ctx>(
-        chain_id: u64,
         deposit_contract_address: Option<Address>,
         parent_hash: B256,
         parent_beacon_block_root: Option<B256>,
@@ -138,7 +134,6 @@ impl<'a> EthBlockExecutor<'a> {
         withdrawals: Option<&'ctx [Withdrawal]>,
     ) -> BlockExecutionContext<'ctx> {
         BlockExecutionContext {
-            chain_id,
             system_calls: Some(BlockSystemCalls { parent_hash, parent_beacon_block_root }),
             ommers: Some(ommers),
             withdrawals,
@@ -257,7 +252,6 @@ impl<'a> BlockExecutor for EthBlockExecutor<'a> {
 
     fn apply_pre_execution_changes(&mut self) -> Result<(), BlockExecutionError> {
         let context = Self::block_context(
-            self.chain_id,
             self.deposit_contract_address,
             self.parent_hash,
             self.parent_beacon_block_root,
@@ -349,7 +343,6 @@ impl<'a> BlockExecutor for EthBlockExecutor<'a> {
             self.set_block_access_index(BlockAccessIndex::new(self.receipts.len() as u64 + 1));
         }
         let context = Self::block_context(
-            self.chain_id,
             self.deposit_contract_address,
             self.parent_hash,
             self.parent_beacon_block_root,
@@ -370,7 +363,6 @@ impl<'a> BlockExecutor for EthBlockExecutor<'a> {
 
         let withdrawals = self.withdrawals.clone();
         let context = Self::block_context(
-            self.chain_id,
             self.deposit_contract_address,
             self.parent_hash,
             self.parent_beacon_block_root,

@@ -162,13 +162,6 @@ impl<E> core::error::Error for EthExecutionError<E> where E: core::error::Error 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct EthInvalidTxError(HandlerError);
 
-impl EthInvalidTxError {
-    /// Returns the underlying evm2 handler error.
-    pub fn handler_error(&self) -> HandlerError {
-        self.0.clone()
-    }
-}
-
 impl core::fmt::Display for EthInvalidTxError {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         self.0.fmt(f)
@@ -302,9 +295,6 @@ where
 /// Additional block-level execution context.
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct BlockExecutionContext<'a> {
-    /// Chain id used for transaction validation and the `CHAINID` opcode.
-    #[cfg_attr(not(test), allow(dead_code))]
-    pub chain_id: u64,
     /// Pre-block system calls to run before transaction execution.
     pub system_calls: Option<BlockSystemCalls>,
     /// Pre-merge ommer headers included in the block.
@@ -317,13 +307,7 @@ pub(crate) struct BlockExecutionContext<'a> {
 
 impl Default for BlockExecutionContext<'_> {
     fn default() -> Self {
-        Self {
-            chain_id: 1,
-            system_calls: None,
-            ommers: None,
-            withdrawals: None,
-            deposit_contract_address: None,
-        }
+        Self { system_calls: None, ommers: None, withdrawals: None, deposit_contract_address: None }
     }
 }
 
@@ -412,7 +396,7 @@ where
 
         let block_beneficiary = block_env.beneficiary;
         let mut version = Version::new(spec_id);
-        version.chain_id = context.chain_id;
+        version.chain_id = 1;
         let mut evm = Evm::<BaseEvmTypes>::new_with_execution_config(
             ExecutionConfig::for_spec_and_version(spec_id, version),
             spec_id,
@@ -560,7 +544,6 @@ where
         block_number,
         transactions,
         BlockExecutionContext {
-            chain_id: 1,
             system_calls: None,
             ommers: None,
             withdrawals,
@@ -1529,13 +1512,9 @@ mod tests {
 
         assert!(matches!(
             err,
-            EthExecutionError::InvalidTx(err)
-                if matches!(
-                    err.handler_error(),
-                    HandlerError::GasLimitMoreThanBlock { gas_limit, block_gas_limit }
-                        if gas_limit == 2_500_000 &&
-                            block_gas_limit == U256::from(1_500_000)
-                )
+            EthExecutionError::InvalidTx(EthInvalidTxError(
+                HandlerError::GasLimitMoreThanBlock { gas_limit, block_gas_limit }
+            )) if gas_limit == 2_500_000 && block_gas_limit == U256::from(1_500_000)
         ));
     }
 
@@ -1629,7 +1608,6 @@ mod tests {
             1,
             core::iter::empty::<Recovered<TransactionSigned>>(),
             BlockExecutionContext {
-                chain_id: 1,
                 system_calls: Some(BlockSystemCalls {
                     parent_hash: B256::ZERO,
                     parent_beacon_block_root: None,
@@ -1654,7 +1632,6 @@ mod tests {
             0,
             core::iter::empty::<Recovered<TransactionSigned>>(),
             BlockExecutionContext {
-                chain_id: 1,
                 system_calls: Some(BlockSystemCalls {
                     parent_hash: B256::ZERO,
                     parent_beacon_block_root: Some(root),
@@ -1691,7 +1668,6 @@ mod tests {
             1,
             core::iter::empty::<Recovered<TransactionSigned>>(),
             BlockExecutionContext {
-                chain_id: 1,
                 system_calls: Some(BlockSystemCalls {
                     parent_hash: B256::ZERO,
                     parent_beacon_block_root: Some(parent_beacon_block_root),
@@ -1730,7 +1706,6 @@ mod tests {
             1,
             core::iter::empty::<Recovered<TransactionSigned>>(),
             BlockExecutionContext {
-                chain_id: 1,
                 system_calls: Some(BlockSystemCalls {
                     parent_hash,
                     parent_beacon_block_root: Some(B256::ZERO),
@@ -1757,7 +1732,6 @@ mod tests {
             1,
             core::iter::empty::<Recovered<TransactionSigned>>(),
             BlockExecutionContext {
-                chain_id: 1,
                 system_calls: Some(BlockSystemCalls {
                     parent_hash: B256::from([2u8; 32]),
                     parent_beacon_block_root: Some(B256::ZERO),
@@ -1792,7 +1766,6 @@ mod tests {
             1,
             core::iter::empty::<Recovered<TransactionSigned>>(),
             BlockExecutionContext {
-                chain_id: 1,
                 system_calls: Some(BlockSystemCalls {
                     parent_hash: B256::ZERO,
                     parent_beacon_block_root: Some(B256::ZERO),
@@ -1835,7 +1808,6 @@ mod tests {
             1,
             core::iter::empty::<Recovered<TransactionSigned>>(),
             BlockExecutionContext {
-                chain_id: 1,
                 system_calls: Some(BlockSystemCalls {
                     parent_hash: B256::ZERO,
                     parent_beacon_block_root: Some(B256::ZERO),
@@ -1876,7 +1848,6 @@ mod tests {
         let requests = block_requests_from_receipts(
             SpecId::PRAGUE,
             BlockExecutionContext {
-                chain_id: 1,
                 system_calls: Some(BlockSystemCalls {
                     parent_hash: B256::ZERO,
                     parent_beacon_block_root: Some(B256::ZERO),
@@ -1936,7 +1907,6 @@ mod tests {
             1,
             [transaction],
             BlockExecutionContext {
-                chain_id: 1,
                 system_calls: Some(BlockSystemCalls {
                     parent_hash: B256::ZERO,
                     parent_beacon_block_root: Some(B256::ZERO),

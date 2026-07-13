@@ -341,11 +341,6 @@ impl<T> ExecutionOutcome<T> {
             .map(|(hash, bytecode)| (*hash, bytecode.clone().into()))
     }
 
-    /// Returns the number of changed accounts.
-    pub fn changed_account_count(&self) -> usize {
-        self.state.accounts().count()
-    }
-
     /// Returns the current state changes as a frozen execution state.
     pub fn execution_state(&self) -> EvmState {
         self.state.inner().clone()
