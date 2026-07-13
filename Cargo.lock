@@ -2730,9 +2730,9 @@ dependencies = [
 
 [[package]]
 name = "crossbeam-epoch"
-version = "0.9.18"
+version = "0.9.20"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5b82ac4a3c2ca9c3460964f020e1402edd5753411d7737aa39c3714ad1b5420e"
+checksum = "2d6914041f254d6e9176c01941b21115dcfb7089e55135a35411081bd106ef3f"
 dependencies = [
  "crossbeam-utils",
 ]
@@ -3720,12 +3720,6 @@ dependencies = [
 [[package]]
 name = "example-custom-beacon-withdrawals"
 version = "0.0.0"
-dependencies = [
- "alloy-eips",
- "alloy-sol-types",
- "eyre",
- "reth-ethereum",
-]
 
 [[package]]
 name = "example-custom-dev-node"
@@ -3761,14 +3755,6 @@ dependencies = [
 [[package]]
 name = "example-custom-evm"
 version = "0.0.0"
-dependencies = [
- "alloy-genesis",
- "alloy-primitives",
- "eyre",
- "reth-ethereum",
- "reth-tracing",
- "tokio",
-]
 
 [[package]]
 name = "example-custom-inspector"
@@ -3966,16 +3952,6 @@ dependencies = [
 [[package]]
 name = "example-precompile-cache"
 version = "0.0.0"
-dependencies = [
- "alloy-genesis",
- "alloy-primitives",
- "eyre",
- "parking_lot",
- "reth-ethereum",
- "reth-tracing",
- "schnellru",
- "tokio",
-]
 
 [[package]]
 name = "example-rpc-db"
@@ -8937,7 +8913,6 @@ dependencies = [
  "reth-metrics",
  "reth-primitives-traits",
  "reth-storage-errors",
- "reth-testing-utils",
  "reth-trie-common",
  "secp256k1 0.30.0",
 ]

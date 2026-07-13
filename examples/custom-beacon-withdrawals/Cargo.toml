@@ -6,9 +6,8 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
-reth-ethereum = { workspace = true, features = ["node", "node-api", "evm", "cli"] }
-
-alloy-sol-types.workspace = true
-alloy-eips.workspace = true
-
-eyre.workspace = true
+# This example is parked in `src/main.rs`. Uncomment these dependencies when resuming its port.
+# reth-ethereum = { workspace = true, features = ["node", "node-api", "evm", "cli"] }
+# alloy-sol-types.workspace = true
+# alloy-eips.workspace = true
+# eyre.workspace = true

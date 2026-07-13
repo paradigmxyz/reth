@@ -389,7 +389,7 @@ impl<T> ExecutionOutcome<T> {
         self.state.bytecode(code_hash)
     }
 
-    /// Returns [`HashedPostState`] for this execution outcome.
+    /// Returns [`reth_trie_common::HashedPostState`] for this execution outcome.
     /// Returns the hashed post-state represented by the aggregate execution state.
     pub fn hash_state_slow<KH: reth_trie_common::KeyHasher>(
         &self,
@@ -664,6 +664,73 @@ fn account_info_to_reth(info: &AccountInfo) -> Account {
     Account { nonce: info.nonce, balance: info.balance, bytecode_hash }
 }
 
+#[cfg(test)]
+fn multi_block_outcome_for_serde() -> ExecutionOutcome {
+    let address = Address::repeat_byte(0x42);
+    let mut block1 = BlockStateAccumulator::new();
+    block1
+        .account(AccountChangeRef {
+            address,
+            original: None,
+            current: Some(AccountInfoRef {
+                balance: U256::from(1),
+                nonce: 1,
+                code_hash: KECCAK_EMPTY,
+                code: None,
+            }),
+        })
+        .unwrap();
+    StateChangeSink::storage(
+        &mut block1,
+        StorageChange { address, key: U256::from(1), original: U256::ZERO, current: U256::from(2) },
+    )
+    .unwrap();
+
+    let mut block2 = BlockStateAccumulator::new();
+    block2
+        .account(AccountChangeRef {
+            address,
+            original: Some(AccountInfoRef {
+                balance: U256::from(1),
+                nonce: 1,
+                code_hash: KECCAK_EMPTY,
+                code: None,
+            }),
+            current: Some(AccountInfoRef {
+                balance: U256::from(3),
+                nonce: 2,
+                code_hash: KECCAK_EMPTY,
+                code: None,
+            }),
+        })
+        .unwrap();
+    block2.storage_wipe(address).unwrap();
+    StateChangeSink::storage(
+        &mut block2,
+        StorageChange { address, key: U256::from(3), original: U256::ZERO, current: U256::from(4) },
+    )
+    .unwrap();
+
+    let results: Vec<BlockExecutionResult<reth_ethereum_primitives::Receipt>> = vec![
+        BlockExecutionResult { gas_used: 1, ..Default::default() },
+        BlockExecutionResult { gas_used: 2, ..Default::default() },
+    ];
+    ExecutionOutcome::from_block_states(10, [block1, block2], results)
+}
+
+#[cfg(test)]
+fn assert_serde_preserves_block_operations(expected: ExecutionOutcome, actual: ExecutionOutcome) {
+    assert_eq!(actual, expected);
+
+    let mut expected_reverted = expected.clone();
+    let mut actual_reverted = actual.clone();
+    assert!(expected_reverted.revert_to(10));
+    assert!(actual_reverted.revert_to(10));
+    assert_eq!(actual_reverted, expected_reverted);
+
+    assert_eq!(actual.split_at(11), expected.split_at(11));
+}
+
 #[cfg(any(feature = "serde", feature = "serde-bincode-compat"))]
 mod serde_state {
     // `BlockStateAccumulator` lives in evm2 with private fields and does not currently implement
@@ -807,6 +874,7 @@ mod serde_impl {
     #[derive(Serialize)]
     struct ExecutionOutcomeSerde<'a, T> {
         state: serde_state::BlockStateSerde,
+        block_states: Vec<serde_state::BlockStateSerde>,
         block_reverts: &'a [BlockReverts],
         receipts: &'a Vec<Vec<T>>,
         first_block: BlockNumber,
@@ -816,6 +884,7 @@ mod serde_impl {
     #[derive(Deserialize)]
     struct ExecutionOutcomeSerdeOwned<T> {
         state: serde_state::BlockStateSerde,
+        block_states: Vec<serde_state::BlockStateSerde>,
         block_reverts: Vec<BlockReverts>,
         receipts: Vec<Vec<T>>,
         first_block: BlockNumber,
@@ -832,6 +901,11 @@ mod serde_impl {
         {
             ExecutionOutcomeSerde {
                 state: serde_state::BlockStateSerde::from(self.state.inner()),
+                block_states: self
+                    .block_states
+                    .iter()
+                    .map(serde_state::BlockStateSerde::from)
+                    .collect(),
                 block_reverts: self.block_reverts(),
                 receipts: &self.receipts,
                 first_block: self.first_block,
@@ -850,8 +924,9 @@ mod serde_impl {
             D: Deserializer<'de>,
         {
             let value = ExecutionOutcomeSerdeOwned::<T>::deserialize(deserializer)?;
-            Ok(Self::from_state_and_reverts(
+            Ok(Self::from_parts(
                 value.state.into(),
+                value.block_states.into_iter().map(Into::into).collect(),
                 value.block_reverts,
                 value.receipts,
                 value.first_block,
@@ -888,6 +963,7 @@ pub(super) mod serde_bincode_compat {
     #[derive(Debug, Serialize, Deserialize)]
     pub struct ExecutionOutcome<'a> {
         state: super::serde_state::BlockStateSerde,
+        block_states: Vec<super::serde_state::BlockStateSerde>,
         block_reverts: Vec<super::BlockReverts>,
         receipts: Vec<Vec<Bytes>>,
         first_block: BlockNumber,
@@ -902,6 +978,11 @@ pub(super) mod serde_bincode_compat {
         fn from(value: &'a super::ExecutionOutcome<T>) -> Self {
             ExecutionOutcome {
                 state: super::serde_state::BlockStateSerde::from(value.state.inner()),
+                block_states: value
+                    .block_states
+                    .iter()
+                    .map(super::serde_state::BlockStateSerde::from)
+                    .collect(),
                 block_reverts: value.block_reverts.clone(),
                 receipts: value
                     .receipts
@@ -921,8 +1002,9 @@ pub(super) mod serde_bincode_compat {
         T: Receipt,
     {
         fn from(value: ExecutionOutcome<'_>) -> Self {
-            Self::from_state_and_reverts(
+            Self::from_parts(
                 value.state.into(),
+                value.block_states.into_iter().map(Into::into).collect(),
                 value.block_reverts,
                 value
                     .receipts
@@ -971,14 +1053,16 @@ pub(super) mod serde_bincode_compat {
 
     #[cfg(test)]
     mod tests {
-        use super::super::{serde_bincode_compat, ExecutionOutcome};
-        use rand::Rng;
+        use super::super::{
+            assert_serde_preserves_block_operations, multi_block_outcome_for_serde,
+            serde_bincode_compat, ExecutionOutcome,
+        };
         use reth_ethereum_primitives::Receipt;
         use serde::{Deserialize, Serialize};
         use serde_with::serde_as;
 
         #[test]
-        fn test_chain_bincode_roundtrip() {
+        fn bincode_roundtrip_preserves_multi_block_operations() {
             #[serde_as]
             #[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
             struct Data<T: reth_primitives_traits::Receipt> {
@@ -986,13 +1070,11 @@ pub(super) mod serde_bincode_compat {
                 data: ExecutionOutcome<T>,
             }
 
-            let mut bytes = [0u8; 1024];
-            rand::rng().fill(bytes.as_mut_slice());
-            let data = Data { data: ExecutionOutcome::new_empty(0) };
+            let data = Data { data: multi_block_outcome_for_serde() };
 
             let encoded = bincode::serialize(&data).unwrap();
             let decoded = bincode::deserialize::<Data<Receipt>>(&encoded).unwrap();
-            assert_eq!(decoded, data);
+            assert_serde_preserves_block_operations(data.data, decoded.data);
         }
     }
 }
@@ -1010,6 +1092,16 @@ mod tests {
         requests: Vec<Requests>,
     ) -> ExecutionOutcome<T> {
         ExecutionOutcome::new_empty(first_block).with_receipts(receipts).with_requests(requests)
+    }
+
+    #[cfg(feature = "serde")]
+    #[test]
+    fn serde_roundtrip_preserves_multi_block_operations() {
+        let expected = multi_block_outcome_for_serde();
+        let encoded = bincode::serialize(&expected).unwrap();
+        let actual = bincode::deserialize(&encoded).unwrap();
+
+        assert_serde_preserves_block_operations(expected, actual);
     }
 
     #[test]

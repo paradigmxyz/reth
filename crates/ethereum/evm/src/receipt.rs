@@ -3,8 +3,7 @@ use evm2::TxResult;
 use reth_ethereum_primitives::Receipt;
 use reth_evm::{ReceiptBuilder, ReceiptBuilderCtx};
 
-/// A builder that operates on Reth primitive types, specifically [`TransactionSigned`] and
-/// [`Receipt`].
+/// A builder that produces Reth [`Receipt`] values from evm2 transaction results.
 #[derive(Debug, Clone, Copy, Default)]
 #[non_exhaustive]
 pub struct RethReceiptBuilder;

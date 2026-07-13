@@ -1,4 +1,5 @@
 use alloc::vec::Vec;
+use alloy_consensus::constants::KECCAK_EMPTY;
 use alloy_eips::eip7685::Requests;
 use alloy_primitives::{
     map::{AddressMap, AddressSet, B256Map, U256Map},
@@ -239,7 +240,8 @@ fn account_info_to_reth(info: &AccountInfo) -> Account {
     Account {
         balance: info.balance,
         nonce: info.nonce,
-        bytecode_hash: (!info.code_hash.is_zero()).then_some(info.code_hash),
+        bytecode_hash: (!info.code_hash.is_zero() && info.code_hash != KECCAK_EMPTY)
+            .then_some(info.code_hash),
     }
 }
 
@@ -248,6 +250,18 @@ mod tests {
     use super::*;
     use alloy_primitives::Bytes;
     use evm2::evm::{AccountChangeRef, AccountInfoRef, StorageChange};
+
+    #[test]
+    fn account_info_normalizes_empty_code_hashes() {
+        for code_hash in [B256::ZERO, KECCAK_EMPTY] {
+            let info = AccountInfo { code_hash, ..Default::default() };
+            assert_eq!(account_info_to_reth(&info).bytecode_hash, None);
+        }
+
+        let code_hash = B256::repeat_byte(0x42);
+        let info = AccountInfo { code_hash, ..Default::default() };
+        assert_eq!(account_info_to_reth(&info).bytecode_hash, Some(code_hash));
+    }
 
     #[test]
     fn indexed_block_state_builds_lookup_index_lazily() {

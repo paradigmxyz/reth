@@ -6,10 +6,10 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
-reth-ethereum = { workspace = true, features = ["test-utils", "node", "evm", "pool"] }
-reth-tracing.workspace = true
-alloy-genesis.workspace = true
-alloy-primitives.workspace = true
-
-eyre.workspace = true
-tokio.workspace = true
+# This example is parked in `src/main.rs`. Uncomment these dependencies when resuming its port.
+# reth-ethereum = { workspace = true, features = ["test-utils", "node", "evm", "pool"] }
+# reth-tracing.workspace = true
+# alloy-genesis.workspace = true
+# alloy-primitives.workspace = true
+# eyre.workspace = true
+# tokio.workspace = true

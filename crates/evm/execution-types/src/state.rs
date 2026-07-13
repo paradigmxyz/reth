@@ -99,7 +99,8 @@ impl From<&RevertAccount> for Account {
         Self {
             nonce: value.nonce,
             balance: value.balance,
-            bytecode_hash: (!value.code_hash.is_zero()).then_some(value.code_hash),
+            bytecode_hash: (!value.code_hash.is_zero() && value.code_hash != KECCAK_EMPTY)
+                .then_some(value.code_hash),
         }
     }
 }
@@ -430,6 +431,18 @@ mod tests {
     use alloy_primitives::{Address, U256};
     use evm2::evm::{AccountChangeRef, AccountInfoRef, StorageChange};
     use reth_trie_common::KeccakKeyHasher;
+
+    #[test]
+    fn revert_account_normalizes_empty_code_hashes() {
+        for code_hash in [B256::ZERO, KECCAK_EMPTY] {
+            let account = RevertAccount { code_hash, ..Default::default() };
+            assert_eq!(Account::from(&account).bytecode_hash, None);
+        }
+
+        let code_hash = B256::repeat_byte(0x42);
+        let account = RevertAccount { code_hash, ..Default::default() };
+        assert_eq!(Account::from(&account).bytecode_hash, Some(code_hash));
+    }
 
     #[test]
     fn hashed_post_state_sink_clears_prior_slots_on_storage_wipe() {

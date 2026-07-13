@@ -29,7 +29,7 @@ reth-node-api.workspace = true
 reth-trie-common = { workspace = true, features = ["eip1186"] }
 reth-prune-types.workspace = true
 evm2.workspace = true
-evm2-inspectors.workspace = true
+evm2-inspectors = { workspace = true, features = ["std"] }
 
 # ethereum
 alloy-rlp.workspace = true

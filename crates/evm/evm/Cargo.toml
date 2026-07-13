@@ -15,7 +15,7 @@ workspace = true
 reth-execution-errors.workspace = true
 reth-execution-types.workspace = true
 reth-metrics = { workspace = true, optional = true }
-reth-primitives-traits = { workspace = true, features = ["dashmap"] }
+reth-primitives-traits.workspace = true
 reth-storage-api.workspace = true
 reth-storage-errors.workspace = true
 reth-trie-common.workspace = true
@@ -66,11 +66,13 @@ std = [
     "dep:moka",
     "dep:rayon",
     "dep:tracing",
+    "reth-primitives-traits/dashmap",
     "reth-primitives-traits/std",
     "alloy-eips/std",
     "alloy-primitives/std",
     "alloy-consensus/std",
     "evm2/std",
+    "evm2/secp256k1",
     "reth-execution-errors/std",
     "reth-execution-types/std",
     "reth-storage-errors/std",

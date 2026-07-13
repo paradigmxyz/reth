@@ -39,7 +39,7 @@ reth-node-api.workspace = true
 reth-payload-primitives.workspace = true
 reth-trie-common.workspace = true
 evm2.workspace = true
-evm2-inspectors.workspace = true
+evm2-inspectors = { workspace = true, features = ["std"] }
 
 # ethereum
 alloy-consensus.workspace = true

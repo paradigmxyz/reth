@@ -213,7 +213,7 @@ pub trait ConfigureEvm: Clone + Debug + Send + Sync + Unpin {
     type NextBlockEnvCtx: Debug + Clone;
 
     /// Configured block executor factory.
-    type BlockExecutorFactory: for<'a> crate::execute::BlockExecutorFactory<
+    type BlockExecutorFactory: crate::execute::BlockExecutorFactory<
         Primitives = Self::Primitives,
         Transaction: FromTxWithEncoded<TxTy<Self::Primitives>>,
     >;

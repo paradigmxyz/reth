@@ -36,7 +36,6 @@ metrics = { workspace = true, optional = true }
 reth-metrics = { workspace = true, optional = true }
 
 [dev-dependencies]
-reth-testing-utils.workspace = true
 reth-evm = { workspace = true, features = ["test-utils"] }
 secp256k1.workspace = true
 alloy-genesis.workspace = true

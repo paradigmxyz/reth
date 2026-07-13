@@ -1,7 +1,7 @@
 [workspace.package]
 version = "2.3.0"
 edition = "2024"
-rust-version = "1.95"
+rust-version = "1.96"
 license = "MIT OR Apache-2.0"
 homepage = "https://paradigmxyz.github.io/reth"
 repository = "https://github.com/paradigmxyz/reth"
@@ -429,8 +429,8 @@ reth-trie-sparse = { path = "crates/trie/sparse", default-features = false }
 reth-zstd-compressors = { git = "https://github.com/paradigmxyz/reth-core", rev = "cd6d1253cd46eec80250776c8c88ee340c15f6f5", default-features = false }
 
 # evm2
-evm2 = { git = "https://github.com/alloy-rs/evm2", rev = "a428621afa3b441f10346e278c55430c8b49b4c6", default-features = false, features = ["std", "secp256k1"] }
-evm2-inspectors = { git = "https://github.com/alloy-rs/evm2", rev = "a428621afa3b441f10346e278c55430c8b49b4c6", default-features = false, features = ["std"] }
+evm2 = { git = "https://github.com/alloy-rs/evm2", rev = "a428621afa3b441f10346e278c55430c8b49b4c6", default-features = false }
+evm2-inspectors = { git = "https://github.com/alloy-rs/evm2", rev = "a428621afa3b441f10346e278c55430c8b49b4c6", default-features = false }
 evm2-jit = { git = "https://github.com/alloy-rs/evm2", rev = "a428621afa3b441f10346e278c55430c8b49b4c6", default-features = false }
 evm2-jit-build = { git = "https://github.com/alloy-rs/evm2", rev = "a428621afa3b441f10346e278c55430c8b49b4c6", default-features = false }
 

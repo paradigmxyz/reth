@@ -89,10 +89,12 @@ unused-allowed-source = "allow"
 # Frequently patched dependencies
 allow-git = [
     "https://github.com/alloy-rs/alloy",
+    "https://github.com/alloy-rs/evm2",
     "https://github.com/foundry-rs/block-explorers",
     "https://github.com/alloy-rs/evm",
     "https://github.com/alloy-rs/hardforks",
     "https://github.com/paradigmxyz/jsonrpsee",
+    "https://github.com/paradigmxyz/reth-core",
     "https://github.com/DaniPopes/slotmap.git",
     "https://github.com/sigp/discv5",
     "https://github.com/TheDan64/inkwell",
