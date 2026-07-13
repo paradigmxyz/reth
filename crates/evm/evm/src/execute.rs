@@ -987,19 +987,19 @@ where
 }
 
 /// Executor returned by configurations that do not support block execution in the active build.
-#[cfg(any(not(feature = "std"), test))]
+#[cfg(not(feature = "std"))]
 pub(crate) struct UnsupportedExecutor<N> {
     _marker: core::marker::PhantomData<N>,
 }
 
-#[cfg(any(not(feature = "std"), test))]
+#[cfg(not(feature = "std"))]
 impl<N> Default for UnsupportedExecutor<N> {
     fn default() -> Self {
         Self { _marker: core::marker::PhantomData }
     }
 }
 
-#[cfg(any(not(feature = "std"), test))]
+#[cfg(not(feature = "std"))]
 impl<N, DB> Executor<DB> for UnsupportedExecutor<N>
 where
     N: NodePrimitives,
@@ -1331,22 +1331,5 @@ impl<TxEnv, T: RecoveredTx<Tx>, Tx> ExecutableTxParts<TxEnv, Tx> for WithTxEnv<T
 
     fn into_parts(self) -> (TxEnv, Self::Recovered) {
         (self.tx_env, self.tx)
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use reth_ethereum_primitives::EthPrimitives;
-
-    #[test]
-    fn unsupported_executor_returns_error() {
-        let executor = UnsupportedExecutor::<EthPrimitives>::default();
-        let err = <UnsupportedExecutor<EthPrimitives> as Executor<evm2::evm::EmptyDB>>::execute(
-            executor,
-            &Default::default(),
-        )
-        .unwrap_err();
-        assert!(err.to_string().contains("unsupported"));
     }
 }

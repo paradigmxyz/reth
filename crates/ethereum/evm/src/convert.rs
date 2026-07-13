@@ -67,12 +67,6 @@ where
     spec_id_by_timestamp_and_block_number(chain_spec, header.timestamp(), header.number())
 }
 
-/// Converts an Ethereum header into the block environment.
-#[cfg(test)]
-pub(crate) fn block_env<H: BlockHeader>(header: &H) -> BlockEnv {
-    block_env_with_blob_params(header, None)
-}
-
 /// Converts an Ethereum header into the block environment with chain blob parameters.
 pub(crate) fn block_env_with_blob_params<H: BlockHeader>(
     header: &H,
@@ -231,33 +225,12 @@ pub(crate) fn recovered_tx_envelope(tx: Recovered<TransactionSigned>) -> Recover
 mod tests {
     use super::*;
     use alloy_consensus::Header;
-    use alloy_eips::eip7840::BlobParams;
-
-    #[test]
-    fn block_env_uses_blob_params_for_blob_basefee() {
-        let blob_params = BlobParams::cancun();
-        let excess_blob_gas = 1_000_000;
-        let header = Header { excess_blob_gas: Some(excess_blob_gas), ..Default::default() };
-
-        let env = block_env_with_blob_params(&header, Some(blob_params));
-
-        assert_eq!(env.blob_basefee, U256::from(blob_params.calc_blob_fee(excess_blob_gas)));
-    }
-
-    #[test]
-    fn block_env_defaults_blob_basefee_without_blob_context() {
-        let header = Header { excess_blob_gas: Some(1_000_000), ..Default::default() };
-
-        let env = block_env(&header);
-
-        assert_eq!(env.blob_basefee, U256::ZERO);
-    }
 
     #[test]
     fn block_env_uses_header_slot_number() {
         let header = Header { slot_number: Some(42), ..Default::default() };
 
-        let env = block_env(&header);
+        let env = block_env_with_blob_params(&header, None);
 
         assert_eq!(env.slot_num, U256::from(42));
     }

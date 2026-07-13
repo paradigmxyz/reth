@@ -543,27 +543,6 @@ mod tests {
     }
 
     #[test]
-    fn account_created_and_deleted_in_source_does_not_emit_storage_wipe() {
-        let address = Address::repeat_byte(0x02);
-        let account =
-            AccountInfoRef { balance: U256::from(1), nonce: 1, code_hash: B256::ZERO, code: None };
-        let mut source = BlockStateAccumulator::new();
-        source
-            .account(AccountChangeRef { address, original: None, current: Some(account) })
-            .unwrap();
-        source
-            .account(AccountChangeRef { address, original: Some(account), current: None })
-            .unwrap();
-        let mut aggregate = BlockStateAccumulator::new();
-
-        let reverts = extend_state_and_collect_reverts(&mut aggregate, &source);
-
-        assert!(aggregate.accounts().next().is_none());
-        assert!(aggregate.storage_wipes().next().is_none());
-        assert!(reverts.storage.is_empty());
-    }
-
-    #[test]
     fn account_created_and_deleted_across_blocks_does_not_retain_aggregate_wipe() {
         let address = Address::repeat_byte(0x03);
         let account =

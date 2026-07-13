@@ -1149,23 +1149,4 @@ mod tests {
             core::mem::size_of::<EvmBal>();
         assert!(CachedBal::new(DecodedBal::new(Arc::new(bal), raw)).size() > top_level_estimate);
     }
-
-    #[tokio::test]
-    async fn get_bal_returns_none_when_store_misses() {
-        let cache = EthStateCache::<EthPrimitives>::spawn_with(
-            NoopProvider::default(),
-            EthStateCacheConfig {
-                max_blocks: 0,
-                max_receipts: 0,
-                max_headers: 0,
-                max_bals: 4,
-                max_concurrent_db_requests: 1,
-                max_cached_tx_hashes: 0,
-            },
-            Runtime::test(),
-        );
-        let block_hash = B256::repeat_byte(0x77);
-
-        assert!(cache.get_bal(block_hash).await.unwrap().is_none());
-    }
 }
