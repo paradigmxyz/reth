@@ -341,11 +341,6 @@ impl<T> ExecutionOutcome<T> {
             .map(|(hash, bytecode)| (*hash, bytecode.clone().into()))
     }
 
-    /// Returns the number of changed accounts.
-    pub fn changed_account_count(&self) -> usize {
-        self.state.accounts().count()
-    }
-
     /// Returns the current state changes as a frozen execution state.
     pub fn execution_state(&self) -> EvmState {
         self.state.inner().clone()
@@ -1102,68 +1097,6 @@ mod tests {
         let actual = bincode::deserialize(&encoded).unwrap();
 
         assert_serde_preserves_block_operations(expected, actual);
-    }
-
-    #[test]
-    fn from_blocks_matches_from_block_states() {
-        let address = Address::repeat_byte(0x42);
-        let mut block1 = BlockStateAccumulator::new();
-        StateChangeSink::storage(
-            &mut block1,
-            StorageChange {
-                address,
-                key: U256::from(1),
-                original: U256::ZERO,
-                current: U256::from(2),
-            },
-        )
-        .unwrap();
-
-        let mut block2 = BlockStateAccumulator::new();
-        block2.storage_wipe(address).unwrap();
-        StateChangeSink::storage(
-            &mut block2,
-            StorageChange {
-                address,
-                key: U256::from(3),
-                original: U256::ZERO,
-                current: U256::from(4),
-            },
-        )
-        .unwrap();
-
-        let block_states = vec![block1, block2];
-        let results = vec![
-            BlockExecutionResult {
-                receipts: vec![1u8],
-                requests: Requests::default(),
-                gas_used: 1,
-                blob_gas_used: 0,
-            },
-            BlockExecutionResult {
-                receipts: vec![2u8],
-                requests: Requests::default(),
-                gas_used: 2,
-                blob_gas_used: 0,
-            },
-        ];
-        let expected =
-            ExecutionOutcome::from_block_states(10, block_states.clone(), results.clone());
-
-        let mut aggregate_state = BlockStateAccumulator::new();
-        let mut block_reverts = Vec::with_capacity(block_states.len());
-        for block_state in &block_states {
-            block_reverts
-                .push(state::extend_state_and_collect_reverts(&mut aggregate_state, block_state));
-        }
-
-        let actual = ExecutionOutcome::from_blocks(
-            10,
-            ExecutionOutcomeState::new(aggregate_state, block_states, block_reverts),
-            results,
-        );
-
-        assert_eq!(actual, expected);
     }
 
     #[test]

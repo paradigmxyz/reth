@@ -265,7 +265,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
                                 evm_config.batch_executor(db_at(last_block)?),
                             );
                             let state = old_executor.into_state();
-                            verify_reverts_against_changesets(
+                            verify_bundle_against_changesets(
                                 &provider,
                                 state.block_reverts(),
                                 last_block,
@@ -278,7 +278,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
                     let state = executor.into_state();
                     if !state.block_reverts().is_empty() {
                         let last_block = last_executed_block.unwrap_or(chunk_end.saturating_sub(1));
-                        verify_reverts_against_changesets(
+                        verify_bundle_against_changesets(
                             &provider,
                             state.block_reverts(),
                             last_block,
@@ -376,7 +376,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
 /// For each block, reverts must match changeset entries exactly. No extra slots/accounts
 /// in reverts for non-destroyed accounts. Destroyed accounts may have extra changeset slots
 /// (from DB storage wipe) absent from reverts.
-fn verify_reverts_against_changesets<P>(
+fn verify_bundle_against_changesets<P>(
     provider: &P,
     reverts: &[BlockReverts],
     last_block: u64,

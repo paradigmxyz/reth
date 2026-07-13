@@ -140,7 +140,7 @@ pub struct TreeConfig {
     multiproof_chunk_size: usize,
     /// Number of reserved CPU cores for non-reth processes
     reserved_cpu_cores: usize,
-    /// Whether to disable the precompile cache.
+    /// Whether to disable the precompile cache
     precompile_cache_disabled: bool,
     /// Whether to use state root fallback for testing
     state_root_fallback: bool,

@@ -240,11 +240,9 @@ impl EthBlockExecutionCtx<'_> {
     #[cfg_attr(not(feature = "std"), allow(dead_code))]
     fn block_execution_context(
         &self,
-        chain_id: u64,
         deposit_contract_address: Option<Address>,
     ) -> crate::execution::BlockExecutionContext<'_> {
         crate::execution::BlockExecutionContext {
-            chain_id,
             system_calls: Some(crate::execution::BlockSystemCalls {
                 parent_hash: self.parent_hash,
                 parent_beacon_block_root: self.parent_beacon_block_root,
@@ -508,7 +506,6 @@ where
             spec_id,
             block_number,
             ctx.block_execution_context(
-                self.chain_spec().chain_id(),
                 self.chain_spec().deposit_contract().map(|contract| contract.address),
             ),
         )

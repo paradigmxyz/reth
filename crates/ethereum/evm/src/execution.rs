@@ -52,6 +52,7 @@ use evm2::{
     evm::{precompile::PrecompileProvider, Database, DynDatabase},
     ExecutionConfig, Version,
 };
+use reth_ethereum_forks::EthereumHardforks;
 use reth_ethereum_primitives::Receipt;
 #[cfg(test)]
 use reth_ethereum_primitives::TransactionSigned;
@@ -160,13 +161,6 @@ impl<E> core::error::Error for EthExecutionError<E> where E: core::error::Error 
 /// Ethereum transaction validation error returned by evm2 handlers.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct EthInvalidTxError(HandlerError);
-
-impl EthInvalidTxError {
-    /// Returns the underlying evm2 handler error.
-    pub fn handler_error(&self) -> HandlerError {
-        self.0.clone()
-    }
-}
 
 impl core::fmt::Display for EthInvalidTxError {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
@@ -301,9 +295,6 @@ where
 /// Additional block-level execution context.
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct BlockExecutionContext<'a> {
-    /// Chain id used for transaction validation and the `CHAINID` opcode.
-    #[cfg_attr(not(test), allow(dead_code))]
-    pub chain_id: u64,
     /// Pre-block system calls to run before transaction execution.
     pub system_calls: Option<BlockSystemCalls>,
     /// Pre-merge ommer headers included in the block.
@@ -316,13 +307,7 @@ pub(crate) struct BlockExecutionContext<'a> {
 
 impl Default for BlockExecutionContext<'_> {
     fn default() -> Self {
-        Self {
-            chain_id: 1,
-            system_calls: None,
-            ommers: None,
-            withdrawals: None,
-            deposit_contract_address: None,
-        }
+        Self { system_calls: None, ommers: None, withdrawals: None, deposit_contract_address: None }
     }
 }
 
@@ -411,7 +396,7 @@ where
 
         let block_beneficiary = block_env.beneficiary;
         let mut version = Version::new(spec_id);
-        version.chain_id = context.chain_id;
+        version.chain_id = 1;
         let mut evm = Evm::<BaseEvmTypes>::new_with_execution_config(
             ExecutionConfig::for_spec_and_version(spec_id, version),
             spec_id,
@@ -474,7 +459,7 @@ where
             &mut block_state,
             hashed_state_mode.stream(),
             &mut on_hashed_state_update,
-            spec_id,
+            base_block_reward_for_spec_id(spec_id),
             block_number,
             block_beneficiary,
             context.ommers,
@@ -559,7 +544,6 @@ where
         block_number,
         transactions,
         BlockExecutionContext {
-            chain_id: 1,
             system_calls: None,
             ommers: None,
             withdrawals,
@@ -1086,7 +1070,7 @@ pub(crate) fn post_block_balance_state_changes(
     block_state: &mut BlockStateAccumulator,
     stream_hashed_state: bool,
     on_hashed_state_update: &mut impl FnMut(HashedPostState),
-    spec_id: SpecId,
+    base_block_reward: Option<u128>,
     block_number: u64,
     block_beneficiary: Address,
     ommers: Option<&[Header]>,
@@ -1094,7 +1078,7 @@ pub(crate) fn post_block_balance_state_changes(
 ) -> Result<(), EthExecutionError> {
     let mut balance_increments = AddressMap::<U256>::default();
 
-    if let Some(base_block_reward) = base_block_reward(spec_id) {
+    if let Some(base_block_reward) = base_block_reward {
         let ommers = ommers.unwrap_or_default();
         for ommer in ommers {
             *balance_increments.entry(ommer.beneficiary()).or_default() +=
@@ -1117,12 +1101,20 @@ pub(crate) fn post_block_balance_state_changes(
     for (address, increment) in balance_increments {
         let original =
             evm.read_account_info(&address).map_err(|code| map_db_error_code(evm, code))?;
-        let mut current = original.clone().unwrap_or_else(empty_account);
-
-        current.balance = current.balance.saturating_add(increment);
+        let current = if increment.is_zero() && original.as_ref().is_none_or(AccountInfo::is_empty)
+        {
+            None
+        } else {
+            let mut current = original.clone().unwrap_or_else(empty_account);
+            current.balance = current.balance.saturating_add(increment);
+            Some(current)
+        };
+        if original == current {
+            continue
+        }
         let mut change = AccountChange::default();
         change.original = original;
-        change.current = Some(current);
+        change.current = current;
         changes.accounts.insert(address, change);
     }
 
@@ -1131,7 +1123,23 @@ pub(crate) fn post_block_balance_state_changes(
     Ok(())
 }
 
-const fn base_block_reward(spec_id: SpecId) -> Option<u128> {
+pub(crate) fn base_block_reward<C>(chain_spec: &C, block_number: u64) -> Option<u128>
+where
+    C: EthereumHardforks + ?Sized,
+{
+    if chain_spec.is_paris_active_at_block(block_number) {
+        None
+    } else if chain_spec.is_constantinople_active_at_block(block_number) {
+        Some(ETH_TO_WEI * 2)
+    } else if chain_spec.is_byzantium_active_at_block(block_number) {
+        Some(ETH_TO_WEI * 3)
+    } else {
+        Some(ETH_TO_WEI * 5)
+    }
+}
+
+#[cfg(test)]
+const fn base_block_reward_for_spec_id(spec_id: SpecId) -> Option<u128> {
     if spec_id.enables(SpecId::MERGE) {
         None
     } else if spec_id.enables(SpecId::PETERSBURG) {
@@ -1173,6 +1181,7 @@ mod tests {
         eip4895::Withdrawal,
         eip7002::WITHDRAWAL_REQUEST_PREDEPLOY_CODE,
     };
+    use alloy_genesis::Genesis;
     use alloy_primitives::{address, Address, Bytes, Log, Signature, TxKind, B256, U256};
     use core::convert::Infallible;
     use evm2::{
@@ -1180,6 +1189,8 @@ mod tests {
         evm::AccountInfo,
         interpreter::{opcode::op, Word},
     };
+    use reth_chainspec::{Chain, ChainSpec};
+    use reth_ethereum_forks::{EthereumHardfork, ForkCondition};
     use reth_execution_types::hashed_post_state_from_execution_state;
 
     fn assert_hashed_state_matches_streamed_updates(
@@ -1501,13 +1512,9 @@ mod tests {
 
         assert!(matches!(
             err,
-            EthExecutionError::InvalidTx(err)
-                if matches!(
-                    err.handler_error(),
-                    HandlerError::GasLimitMoreThanBlock { gas_limit, block_gas_limit }
-                        if gas_limit == 2_500_000 &&
-                            block_gas_limit == U256::from(1_500_000)
-                )
+            EthExecutionError::InvalidTx(EthInvalidTxError(
+                HandlerError::GasLimitMoreThanBlock { gas_limit, block_gas_limit }
+            )) if gas_limit == 2_500_000 && block_gas_limit == U256::from(1_500_000)
         ));
     }
 
@@ -1545,6 +1552,54 @@ mod tests {
     }
 
     #[test]
+    fn zero_withdrawals_apply_eip161_state_clearing() {
+        let nonexistent = address!("0000000000000000000000000000000000000001");
+        let empty = address!("0000000000000000000000000000000000000002");
+        let contract = address!("0000000000000000000000000000000000000003");
+        let mut database = TestDatabase::default();
+        database.accounts.insert(empty, AccountInfo::default());
+        database.accounts.insert(contract, AccountInfo::default().with_nonce(1));
+        let withdrawals = [
+            Withdrawal { index: 0, validator_index: 0, address: nonexistent, amount: 0 },
+            Withdrawal { index: 1, validator_index: 1, address: empty, amount: 0 },
+            Withdrawal { index: 2, validator_index: 2, address: contract, amount: 0 },
+        ];
+
+        let output = execute_block_with_withdrawals(
+            SpecId::SHANGHAI,
+            BlockEnv::default(),
+            database,
+            1,
+            core::iter::empty::<Recovered<TransactionSigned>>(),
+            Some(&withdrawals),
+        )
+        .expect("EVM execution succeeds");
+
+        assert!(output.account_state(&nonexistent).is_none());
+        assert!(output.account_state(&empty).unwrap().current.is_none());
+        assert!(output.account_state(&contract).is_none());
+    }
+
+    #[test]
+    fn block_reward_uses_constantinople_activation() {
+        let chain_spec = ChainSpec::builder()
+            .chain(Chain::mainnet())
+            .genesis(Genesis::default())
+            .with_fork(EthereumHardfork::Byzantium, ForkCondition::Block(9))
+            .with_fork(EthereumHardfork::Constantinople, ForkCondition::Block(12))
+            .with_fork(EthereumHardfork::Petersburg, ForkCondition::Block(15))
+            .with_fork(EthereumHardfork::Paris, ForkCondition::Never)
+            .build();
+
+        assert_eq!(base_block_reward(&chain_spec, 11), Some(ETH_TO_WEI * 3));
+        let reward = base_block_reward(&chain_spec, 12).unwrap();
+        assert_eq!(reward, ETH_TO_WEI * 2);
+        assert_eq!(block_reward(reward, 1), ETH_TO_WEI * 2 + ((ETH_TO_WEI * 2) >> 5));
+        assert_eq!(ommer_reward(reward, 12, 11), ETH_TO_WEI * 7 / 4);
+        assert_eq!(base_block_reward(&chain_spec, 14), Some(ETH_TO_WEI * 2));
+    }
+
+    #[test]
     fn rejects_missing_cancun_parent_beacon_root() {
         let err = execute_block_with_context(
             SpecId::CANCUN,
@@ -1553,7 +1608,6 @@ mod tests {
             1,
             core::iter::empty::<Recovered<TransactionSigned>>(),
             BlockExecutionContext {
-                chain_id: 1,
                 system_calls: Some(BlockSystemCalls {
                     parent_hash: B256::ZERO,
                     parent_beacon_block_root: None,
@@ -1578,7 +1632,6 @@ mod tests {
             0,
             core::iter::empty::<Recovered<TransactionSigned>>(),
             BlockExecutionContext {
-                chain_id: 1,
                 system_calls: Some(BlockSystemCalls {
                     parent_hash: B256::ZERO,
                     parent_beacon_block_root: Some(root),
@@ -1615,7 +1668,6 @@ mod tests {
             1,
             core::iter::empty::<Recovered<TransactionSigned>>(),
             BlockExecutionContext {
-                chain_id: 1,
                 system_calls: Some(BlockSystemCalls {
                     parent_hash: B256::ZERO,
                     parent_beacon_block_root: Some(parent_beacon_block_root),
@@ -1654,7 +1706,6 @@ mod tests {
             1,
             core::iter::empty::<Recovered<TransactionSigned>>(),
             BlockExecutionContext {
-                chain_id: 1,
                 system_calls: Some(BlockSystemCalls {
                     parent_hash,
                     parent_beacon_block_root: Some(B256::ZERO),
@@ -1681,7 +1732,6 @@ mod tests {
             1,
             core::iter::empty::<Recovered<TransactionSigned>>(),
             BlockExecutionContext {
-                chain_id: 1,
                 system_calls: Some(BlockSystemCalls {
                     parent_hash: B256::from([2u8; 32]),
                     parent_beacon_block_root: Some(B256::ZERO),
@@ -1716,7 +1766,6 @@ mod tests {
             1,
             core::iter::empty::<Recovered<TransactionSigned>>(),
             BlockExecutionContext {
-                chain_id: 1,
                 system_calls: Some(BlockSystemCalls {
                     parent_hash: B256::ZERO,
                     parent_beacon_block_root: Some(B256::ZERO),
@@ -1759,7 +1808,6 @@ mod tests {
             1,
             core::iter::empty::<Recovered<TransactionSigned>>(),
             BlockExecutionContext {
-                chain_id: 1,
                 system_calls: Some(BlockSystemCalls {
                     parent_hash: B256::ZERO,
                     parent_beacon_block_root: Some(B256::ZERO),
@@ -1800,7 +1848,6 @@ mod tests {
         let requests = block_requests_from_receipts(
             SpecId::PRAGUE,
             BlockExecutionContext {
-                chain_id: 1,
                 system_calls: Some(BlockSystemCalls {
                     parent_hash: B256::ZERO,
                     parent_beacon_block_root: Some(B256::ZERO),
@@ -1860,7 +1907,6 @@ mod tests {
             1,
             [transaction],
             BlockExecutionContext {
-                chain_id: 1,
                 system_calls: Some(BlockSystemCalls {
                     parent_hash: B256::ZERO,
                     parent_beacon_block_root: Some(B256::ZERO),

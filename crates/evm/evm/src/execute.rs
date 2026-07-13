@@ -488,7 +488,7 @@ pub struct BlockAssemblerInput<'a, 'b, F: BlockExecutorFactory + 'a, H = Header>
     pub execution_ctx: F::ExecutionCtx<'a>,
     /// Parent block header.
     pub parent: &'a SealedHeader<H>,
-    /// Transactions included in the block.
+    /// Transactions that were executed in this block.
     pub transactions: Vec<TxTy<F::Primitives>>,
     /// Output of block execution.
     pub output: &'b BlockExecutionResult<ReceiptTy<F::Primitives>>,
@@ -533,10 +533,10 @@ impl<'a, 'b, F: BlockExecutorFactory + 'a, H> BlockAssemblerInput<'a, 'b, F, H> 
 /// A type that assembles a block from execution output.
 #[auto_impl::auto_impl(&, Arc)]
 pub trait BlockAssembler<F: BlockExecutorFactory> {
-    /// Block produced by the assembler.
+    /// The block type produced by the assembler.
     type Block: Block;
 
-    /// Assembles a block from execution output.
+    /// Builds a block. see [`BlockAssemblerInput`] documentation for more details.
     fn assemble_block(
         &self,
         input: BlockAssemblerInput<'_, '_, F, HeaderTy<F::Primitives>>,
@@ -556,7 +556,7 @@ pub struct BlockBuilderOutcome<N: NodePrimitives> {
     pub trie_updates: TrieUpdates,
     /// The built block.
     pub block: RecoveredBlock<N::Block>,
-    /// Block access list built during execution.
+    /// Block access list built during execution (EIP-7928, Amsterdam).
     pub block_access_list: Option<BlockAccessList>,
 }
 
@@ -1125,19 +1125,19 @@ where
 }
 
 /// Executor returned by configurations that do not support block execution in the active build.
-#[cfg(any(not(feature = "std"), test))]
+#[cfg(not(feature = "std"))]
 pub(crate) struct UnsupportedExecutor<N> {
     _marker: core::marker::PhantomData<N>,
 }
 
-#[cfg(any(not(feature = "std"), test))]
+#[cfg(not(feature = "std"))]
 impl<N> Default for UnsupportedExecutor<N> {
     fn default() -> Self {
         Self { _marker: core::marker::PhantomData }
     }
 }
 
-#[cfg(any(not(feature = "std"), test))]
+#[cfg(not(feature = "std"))]
 impl<N, DB> Executor<DB> for UnsupportedExecutor<N>
 where
     N: NodePrimitives,
@@ -1469,22 +1469,5 @@ impl<TxEnv, T: RecoveredTx<Tx>, Tx> ExecutableTxParts<TxEnv, Tx> for WithTxEnv<T
 
     fn into_parts(self) -> (TxEnv, Self::Recovered) {
         (self.tx_env, self.tx)
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use reth_ethereum_primitives::EthPrimitives;
-
-    #[test]
-    fn unsupported_executor_returns_error() {
-        let executor = UnsupportedExecutor::<EthPrimitives>::default();
-        let err = <UnsupportedExecutor<EthPrimitives> as Executor<evm2::evm::EmptyDB>>::execute(
-            executor,
-            &Default::default(),
-        )
-        .unwrap_err();
-        assert!(err.to_string().contains("unsupported"));
     }
 }

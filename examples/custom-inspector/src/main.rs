@@ -1,4 +1,4 @@
-//! Example of how to use a custom inspector to trace new pending transactions.
+//! Example of how to use a custom inspector to trace new pending transactions
 //!
 //! Run with
 //!

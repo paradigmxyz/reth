@@ -339,9 +339,9 @@ async fn run_pipeline_forward_and_unwind(
         // Execute in a scope so state_provider is dropped before we use provider for writes
         let output = {
             let state_provider = provider.latest();
-            let database = StateProviderDatabase::new(&*state_provider);
+            let db = StateProviderDatabase::new(&*state_provider);
             evm_config
-                .executor(database)
+                .executor(db)
                 .execute(&block_with_senders)
                 .map_err(|err| eyre::eyre!(err.to_string()))?
         };

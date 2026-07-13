@@ -68,11 +68,9 @@ where
 {
     let provider = provider_factory.provider()?;
 
-    // Execute the block to produce a block execution output.
-    let state_provider = LatestStateProvider::new(provider);
-    let database = StateProviderDatabase::new(state_provider);
+    // Execute the block to produce a block execution output
     let block_execution_output = EthEvmConfig::ethereum(chain_spec)
-        .batch_executor(database)
+        .batch_executor(StateProviderDatabase::new(LatestStateProvider::new(provider)))
         .execute(block)
         .map_err(|err| eyre::eyre!(err.to_string()))?;
 
@@ -211,6 +209,7 @@ where
 
     let execution_outcome = executor.execute_batch([&block1, &block2])?;
 
+    // Commit the block's execution outcome to the database
     let hashed_state = execution_outcome.hash_state_slow::<KeccakKeyHasher>().into_sorted();
     let provider_rw = provider_factory.provider_rw()?;
     provider_rw.append_blocks_with_state(

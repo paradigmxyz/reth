@@ -4,7 +4,7 @@ use crate::{
     lfu::BucketedLfu, traits::SparseTrie as SparseTrieTrait, ArenaParallelSparseTrie,
     RevealableSparseTrie,
 };
-use alloc::vec::Vec;
+use alloc::{boxed::Box, vec::Vec};
 use alloy_primitives::{map::B256Map, B256};
 use either::Either;
 use reth_execution_errors::{SparseStateTrieResult, SparseTrieErrorKind};
@@ -436,8 +436,16 @@ where
 
     /// Wipe the storage trie at the provided address.
     pub fn wipe_storage(&mut self, address: B256) -> SparseStateTrieResult<()> {
-        if let Some(trie) = self.storage.tries.get_mut(&address) {
+        if let Some(trie) = self.storage.tries.get_mut(&address) &&
+            trie.is_revealed()
+        {
             trie.wipe()?;
+        } else {
+            let mut trie = S::default();
+            trie.set_updates(self.retain_updates);
+            trie.set_changed_paths(self.retain_changed_paths);
+            trie.wipe();
+            self.storage.tries.insert(address, RevealableSparseTrie::Revealed(Box::new(trie)));
         }
         Ok(())
     }
@@ -984,6 +992,32 @@ mod tests {
         assert!(changed_paths.storage_prefix_sets[&account]
             .iter()
             .any(|path| *path == Nibbles::default()));
+    }
+
+    #[test]
+    fn wipe_blind_storage_then_apply_slot_update() {
+        let account = B256::with_last_byte(0x01);
+        let slot = B256::with_last_byte(0x02);
+        let value = U256::from(42);
+        let encoded_value = alloy_rlp::encode_fixed_size(&value).to_vec();
+        let default_trie = RevealableSparseTrie::blind_from(ArenaParallelSparseTrie::default());
+        let mut sparse = SparseStateTrie::<ArenaParallelSparseTrie>::default()
+            .with_default_storage_trie(default_trie)
+            .with_updates(true);
+
+        sparse.wipe_storage(account).expect("blind storage wipe should succeed");
+        assert_eq!(sparse.storage_root(&account), Some(EMPTY_ROOT_HASH));
+
+        let mut updates = B256Map::from_iter([(slot, LeafUpdate::Changed(encoded_value.clone()))]);
+        sparse
+            .storage_trie_mut(&account)
+            .expect("wiped storage trie should be revealed")
+            .update_leaves(&mut updates, |_, _| {})
+            .expect("slot update should succeed");
+
+        assert!(updates.is_empty());
+        assert_eq!(sparse.get_storage_slot_value(&account, &slot), Some(&encoded_value));
+        assert_ne!(sparse.storage_root(&account), Some(EMPTY_ROOT_HASH));
     }
 
     #[test]

@@ -490,7 +490,7 @@ pub struct NextBlockEnvAttributes {
     pub gas_limit: u64,
     /// The parent beacon block root.
     pub parent_beacon_block_root: Option<B256>,
-    /// Withdrawals.
+    /// Withdrawals
     pub withdrawals: Option<Withdrawals>,
     /// Optional extra data.
     pub extra_data: Bytes,

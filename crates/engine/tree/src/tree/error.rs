@@ -1,13 +1,12 @@
 //! Internal errors for the tree module.
 
+use crate::tree::payload_processor::bal::BalExecutionError;
 use alloy_consensus::BlockHeader;
 use reth_consensus::ConsensusError;
 use reth_errors::{BlockExecutionError, BlockValidationError, ProviderError};
 use reth_evm::InternalBlockExecutionError;
 use reth_payload_primitives::NewPayloadError;
 use reth_primitives_traits::{Block, BlockBody, SealedBlock};
-
-use super::payload_processor::bal::BalExecutionError;
 
 /// This is an error that can come from advancing persistence.
 #[derive(Debug, thiserror::Error)]
@@ -124,12 +123,12 @@ pub enum InsertBlockErrorKind {
 }
 
 impl From<BalExecutionError> for InsertBlockErrorKind {
-    fn from(err: BalExecutionError) -> Self {
-        match err {
-            BalExecutionError::Consensus(err) => Self::Consensus(err),
-            BalExecutionError::Execution(err) => Self::Execution(err),
-            BalExecutionError::Provider(err) => Self::Provider(err),
-            BalExecutionError::Other(err) => Self::Other(err),
+    fn from(e: BalExecutionError) -> Self {
+        match e {
+            BalExecutionError::Consensus(inner) => Self::Consensus(inner),
+            BalExecutionError::Execution(inner) => Self::Execution(inner),
+            BalExecutionError::Provider(inner) => Self::Provider(inner),
+            BalExecutionError::Other(inner) => Self::Other(inner),
         }
     }
 }

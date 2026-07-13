@@ -2,7 +2,7 @@
 
 use crate::{
     execution::{
-        block_requests_from_receipts, commit_detached_transaction,
+        base_block_reward, block_requests_from_receipts, commit_detached_transaction,
         execute_transaction_with_commit_condition, execute_transaction_without_commit,
         post_block_balance_state_changes, post_execution_system_call_state_changes,
         pre_execution_system_call_state_changes, transaction_blob_gas_used, BlockExecutionContext,
@@ -20,6 +20,7 @@ use evm2::{
     interpreter::Host,
     BaseEvmTypes, Evm, TxResult, TxResultWithState,
 };
+use reth_ethereum_forks::EthereumHardforks;
 use reth_ethereum_primitives::{EthPrimitives, Receipt};
 use reth_evm::{
     BlockExecutionError, BlockExecutionOutput, BlockExecutor, BlockValidationError, CommitChanges,
@@ -34,11 +35,11 @@ pub struct EthBlockExecutor<'a> {
     spec_id: evm2::SpecId,
     block_number: u64,
     block_beneficiary: Address,
+    base_block_reward: Option<u128>,
     parent_hash: B256,
     parent_beacon_block_root: Option<B256>,
     ommers: &'a [Header],
     withdrawals: Option<Cow<'a, [Withdrawal]>>,
-    chain_id: u64,
     deposit_contract_address: Option<Address>,
     block_state: BlockStateAccumulator,
     hashed_state_mode: HashedStateMode,
@@ -82,13 +83,16 @@ impl HashedStateMode {
 
 impl<'a> EthBlockExecutor<'a> {
     /// Creates a configured Ethereum block executor.
-    pub(crate) fn new(
+    pub(crate) fn new<C>(
         mut evm: Evm<'a, BaseEvmTypes>,
         context: EthBlockExecutionCtx<'a>,
-        chain_id: u64,
+        chain_spec: &C,
         deposit_contract_address: Option<alloy_primitives::Address>,
         hashed_state_mode: HashedStateMode,
-    ) -> Self {
+    ) -> Self
+    where
+        C: EthereumHardforks + ?Sized,
+    {
         let spec_id = evm.spec_id();
         let block = *evm.block_env();
         let block_number = block.number.to::<u64>();
@@ -102,11 +106,11 @@ impl<'a> EthBlockExecutor<'a> {
             spec_id,
             block_number,
             block_beneficiary,
+            base_block_reward: base_block_reward(chain_spec, block_number),
             parent_hash: context.parent_hash,
             parent_beacon_block_root: context.parent_beacon_block_root,
             ommers: context.ommers,
             withdrawals: context.withdrawals,
-            chain_id,
             deposit_contract_address,
             block_state: BlockStateAccumulator::new(),
             hashed_state_mode,
@@ -123,7 +127,6 @@ impl<'a> EthBlockExecutor<'a> {
     }
 
     const fn block_context<'ctx>(
-        chain_id: u64,
         deposit_contract_address: Option<Address>,
         parent_hash: B256,
         parent_beacon_block_root: Option<B256>,
@@ -131,7 +134,6 @@ impl<'a> EthBlockExecutor<'a> {
         withdrawals: Option<&'ctx [Withdrawal]>,
     ) -> BlockExecutionContext<'ctx> {
         BlockExecutionContext {
-            chain_id,
             system_calls: Some(BlockSystemCalls { parent_hash, parent_beacon_block_root }),
             ommers: Some(ommers),
             withdrawals,
@@ -250,7 +252,6 @@ impl<'a> BlockExecutor for EthBlockExecutor<'a> {
 
     fn apply_pre_execution_changes(&mut self) -> Result<(), BlockExecutionError> {
         let context = Self::block_context(
-            self.chain_id,
             self.deposit_contract_address,
             self.parent_hash,
             self.parent_beacon_block_root,
@@ -342,7 +343,6 @@ impl<'a> BlockExecutor for EthBlockExecutor<'a> {
             self.set_block_access_index(BlockAccessIndex::new(self.receipts.len() as u64 + 1));
         }
         let context = Self::block_context(
-            self.chain_id,
             self.deposit_contract_address,
             self.parent_hash,
             self.parent_beacon_block_root,
@@ -363,7 +363,6 @@ impl<'a> BlockExecutor for EthBlockExecutor<'a> {
 
         let withdrawals = self.withdrawals.clone();
         let context = Self::block_context(
-            self.chain_id,
             self.deposit_contract_address,
             self.parent_hash,
             self.parent_beacon_block_root,
@@ -375,7 +374,7 @@ impl<'a> BlockExecutor for EthBlockExecutor<'a> {
             &mut self.block_state,
             self.hashed_state_mode.stream(),
             &mut |state| emit_hashed_state(&mut self.hashed_state_update_hook, state),
-            self.spec_id,
+            self.base_block_reward,
             self.block_number,
             self.block_beneficiary,
             context.ommers,
