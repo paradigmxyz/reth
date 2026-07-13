@@ -282,6 +282,9 @@ sparse_trie_tests! {
 
     // prune
     test_prune_retains_specified_leaves,
+    test_prune_keeps_upper_children_of_retained_branch,
+    test_prune_keeps_lower_children_of_retained_branch,
+    test_prune_protects_children_by_parent_base_path,
     test_prune_reduces_node_count,
     test_prune_empty_retained_set,
     test_prune_requires_computed_hashes,
