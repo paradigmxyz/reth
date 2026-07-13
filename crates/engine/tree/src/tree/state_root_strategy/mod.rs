@@ -67,13 +67,9 @@ use reth_provider::{
 };
 use reth_tasks::utils::increase_thread_priority;
 use reth_trie::{
-    hashed_cursor::HashedCursorFactory,
-    prefix_set::{PrefixSetMut, TriePrefixSetsMut},
-    trie_cursor::TrieCursorFactory,
-    updates::TrieUpdates,
-    HashedPostState, HashedPostStateSorted,
+    hashed_cursor::HashedCursorFactory, prefix_set::TriePrefixSetsMut,
+    trie_cursor::TrieCursorFactory, updates::TrieUpdates, HashedPostState,
 };
-use reth_trie_common::Nibbles;
 use reth_trie_parallel::proof_task::{ProofTaskCtx, ProofWorkerHandle};
 pub use reth_trie_parallel::{
     error::StateRootTaskError,
@@ -336,7 +332,7 @@ pub struct PreparedStateRootJob<N: NodePrimitives> {
     execution_hook: Option<StateRootUpdateHook>,
     hint_stream: Option<StateRootHintStream>,
     hashed_update_stream: Option<StateRootUpdateStream>,
-    hashed_state_rx: Option<mpsc::Receiver<HashedPostState>>,
+    hashed_state_rx: Option<mpsc::Receiver<Arc<HashedPostState>>>,
 }
 
 impl<N: NodePrimitives> fmt::Debug for PreparedStateRootJob<N> {
@@ -355,7 +351,7 @@ impl<N: NodePrimitives> PreparedStateRootJob<N> {
     /// Creates a prepared state-root job without update-stream capabilities.
     pub const fn new(
         job: Box<dyn StateRootJob<N>>,
-        hashed_state_rx: Option<mpsc::Receiver<HashedPostState>>,
+        hashed_state_rx: Option<mpsc::Receiver<Arc<HashedPostState>>>,
     ) -> Self {
         Self {
             job,
@@ -409,7 +405,7 @@ impl<N: NodePrimitives> PreparedStateRootJob<N> {
     /// The sender behind a returned receiver must either deliver one value or be dropped;
     /// validation blocks on it while hashing the post state, so a job that keeps the sender
     /// alive without sending stalls block validation.
-    pub const fn take_hashed_state_rx(&mut self) -> Option<mpsc::Receiver<HashedPostState>> {
+    pub const fn take_hashed_state_rx(&mut self) -> Option<mpsc::Receiver<Arc<HashedPostState>>> {
         self.hashed_state_rx.take()
     }
 
@@ -580,7 +576,7 @@ impl DefaultStateRootStrategy {
         state_trie_overlays: &StateTrieOverlayManager<N>,
         proof_worker_handle: ProofWorkerHandle,
         state_root_tx: mpsc::Sender<Result<StateRootComputeOutcome, StateRootTaskError>>,
-        hashed_state_tx: mpsc::Sender<HashedPostState>,
+        hashed_state_tx: mpsc::Sender<Arc<HashedPostState>>,
         from_multi_proof: CrossbeamReceiver<StateRootMessage>,
         cancel_rx: CrossbeamReceiver<()>,
         options: SparseTrieTaskOptions<N>,
@@ -665,11 +661,10 @@ impl DefaultStateRootStrategy {
                 debug_span!(target: "engine::tree::payload_processor", "preserve").entered();
             let deferred = if let Some(result) = task_result {
                 let start = Instant::now();
-                let current_retention_paths = task.take_retention_paths();
                 let (mut trie, deferred) = task.into_trie_for_reuse();
                 if let Some(prune_blocks) = pending_sparse_trie_prune_blocks {
                     let retained_paths =
-                        sparse_trie_retained_paths(prune_blocks, current_retention_paths);
+                        sparse_trie_retained_paths(prune_blocks, result.hashed_state.as_ref());
                     trie.prune(max_hot_slots, max_hot_accounts, retained_paths);
                 }
                 trie_metrics
@@ -714,71 +709,15 @@ struct StateRootTaskOptions<'a, N: NodePrimitives> {
 
 fn sparse_trie_retained_paths<N: NodePrimitives>(
     prune_blocks: Vec<ExecutedBlock<N>>,
-    current_retention_paths: TriePrefixSetsMut,
+    current_hashed_state: &HashedPostState,
 ) -> TriePrefixSetsMut {
     let mut retained_paths = TriePrefixSetsMut::default();
     for block in prune_blocks {
         let trie_data = block.trie_data();
-        extend_retained_paths_from_sorted_hashed_post_state(
-            &mut retained_paths,
-            &trie_data.sorted.hashed_state,
-        );
+        retained_paths.extend(trie_data.sorted.hashed_state.construct_prefix_sets());
     }
-    retained_paths.extend(current_retention_paths);
+    retained_paths.extend(current_hashed_state.construct_prefix_sets());
     retained_paths
-}
-
-fn extend_retained_paths_from_hashed_post_state(
-    retained_paths: &mut TriePrefixSetsMut,
-    hashed_state: &HashedPostState,
-) {
-    retained_paths.account_prefix_set.extend_keys(
-        hashed_state.accounts.keys().map(|hashed_address| Nibbles::unpack(*hashed_address)),
-    );
-    retained_paths.destroyed_accounts.extend(
-        hashed_state
-            .accounts
-            .iter()
-            .filter_map(|(hashed_address, account)| account.is_none().then_some(*hashed_address)),
-    );
-
-    for (hashed_address, storage) in &hashed_state.storages {
-        retained_paths.account_prefix_set.insert(Nibbles::unpack(*hashed_address));
-        retained_paths
-            .storage_prefix_sets
-            .entry(*hashed_address)
-            .or_insert_with(|| PrefixSetMut::with_capacity(storage.storage.len()))
-            .extend_keys(storage.storage.keys().map(|hashed_slot| Nibbles::unpack(*hashed_slot)));
-    }
-}
-
-fn extend_retained_paths_from_sorted_hashed_post_state(
-    retained_paths: &mut TriePrefixSetsMut,
-    hashed_state: &HashedPostStateSorted,
-) {
-    retained_paths.account_prefix_set.extend_keys(
-        hashed_state.accounts.iter().map(|(hashed_address, _)| Nibbles::unpack(*hashed_address)),
-    );
-    retained_paths.destroyed_accounts.extend(
-        hashed_state
-            .accounts
-            .iter()
-            .filter_map(|(hashed_address, account)| account.is_none().then_some(*hashed_address)),
-    );
-
-    for (hashed_address, storage) in &hashed_state.storages {
-        retained_paths.account_prefix_set.insert(Nibbles::unpack(*hashed_address));
-        retained_paths
-            .storage_prefix_sets
-            .entry(*hashed_address)
-            .or_insert_with(|| PrefixSetMut::with_capacity(storage.storage_slots_ref().len()))
-            .extend_keys(
-                storage
-                    .storage_slots_ref()
-                    .iter()
-                    .map(|(hashed_slot, _)| Nibbles::unpack(*hashed_slot)),
-            );
-    }
 }
 
 impl<N, P, Evm> StateRootStrategy<N, P, Evm> for DefaultStateRootStrategy
@@ -1040,6 +979,7 @@ where
         let StateRootComputeOutcome {
             state_root,
             trie_updates,
+            hashed_state: _hashed_state,
             changed_paths,
             #[cfg(feature = "trie-debug")]
             debug_recorders,
@@ -1310,9 +1250,9 @@ mod tests {
             .zip([trie_hashed_state(0x01, 0x02), trie_hashed_state(0x03, 0x04)])
             .map(|(block, hashed_state)| with_hashed_state(block, hashed_state))
             .collect();
-        let current_retention_paths = trie_hashed_state(0x05, 0x06).construct_prefix_sets();
+        let current_hashed_state = trie_hashed_state(0x05, 0x06);
 
-        let retained_paths = sparse_trie_retained_paths(blocks, current_retention_paths).freeze();
+        let retained_paths = sparse_trie_retained_paths(blocks, &current_hashed_state).freeze();
 
         assert_eq!(retained_paths.account_prefix_set.len(), 3);
         assert_eq!(retained_paths.storage_prefix_sets.len(), 3);
@@ -1324,9 +1264,9 @@ mod tests {
             .get_executed_blocks(1..2)
             .map(|block| with_hashed_state(block, trie_hashed_state(0x01, 0x02)))
             .collect();
-        let current_retention_paths = trie_hashed_state(0x03, 0x04).construct_prefix_sets();
+        let current_hashed_state = trie_hashed_state(0x03, 0x04);
 
-        let retained_paths = sparse_trie_retained_paths(blocks, current_retention_paths).freeze();
+        let retained_paths = sparse_trie_retained_paths(blocks, &current_hashed_state).freeze();
 
         assert_eq!(retained_paths.account_prefix_set.len(), 2);
         assert_eq!(retained_paths.storage_prefix_sets.len(), 2);
