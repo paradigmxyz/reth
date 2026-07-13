@@ -786,8 +786,11 @@ where
             "validate_block_post_execution_with_hashed_state"
         )
         .in_scope(|| {
-            self.validator
-                .validate_block_post_execution_with_hashed_state(&|| hashed_state.get(), &block)
+            self.validator.validate_block_post_execution_with_hashed_state(
+                &|| hashed_state.get(),
+                &block,
+                || provider_builder.build(),
+            )
         });
 
         let root_start = Instant::now();
@@ -819,15 +822,19 @@ where
                 "validate_block_post_execution_with_hashed_state"
             )
             .in_scope(|| {
-                self.validator
-                    .validate_block_post_execution_with_hashed_state(&|| hashed_state.get(), &block)
+                self.validator.validate_block_post_execution_with_hashed_state(
+                    &|| hashed_state.get(),
+                    &block,
+                    || provider_builder.build(),
+                )
             });
         }
 
         if let Err(err) = hashed_state_validate_result {
-            // call post-block hook
-            self.on_invalid_block(&parent_block, &block, &output, None, ctx.state_mut());
-            return Err(InsertBlockError::new(block.into_sealed_block(), err.into()).into())
+            if err.is_validation_error() {
+                self.on_invalid_block(&parent_block, &block, &output, None, ctx.state_mut());
+            }
+            return Err(InsertBlockError::new(block.into_sealed_block(), err).into())
         }
 
         self.metrics.block_validation.record_state_root(&trie_output, root_elapsed.as_secs_f64());
