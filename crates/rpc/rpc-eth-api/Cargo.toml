@@ -13,7 +13,9 @@ workspace = true
 
 [dependencies]
 # reth
+evm2.workspace = true
 reth-chain-state.workspace = true
+evm2-inspectors = { workspace = true, features = ["std"] }
 reth-primitives-traits = { workspace = true, features = ["rpc-compat"] }
 reth-errors.workspace = true
 reth-evm.workspace = true
@@ -28,8 +30,6 @@ reth-network-api.workspace = true
 reth-node-api.workspace = true
 reth-trie-common = { workspace = true, features = ["eip1186"] }
 reth-prune-types.workspace = true
-evm2.workspace = true
-evm2-inspectors = { workspace = true, features = ["std"] }
 
 # ethereum
 alloy-rlp.workspace = true
@@ -61,8 +61,5 @@ serde_json.workspace = true
 tracing.workspace = true
 
 [features]
-js-tracer = [
-    "reth-rpc-eth-types/js-tracer",
-    "evm2-inspectors/js-tracer",
-]
+js-tracer = ["evm2-inspectors/js-tracer", "reth-rpc-eth-types/js-tracer"]
 client = ["jsonrpsee/client", "jsonrpsee/async-client"]

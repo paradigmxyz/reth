@@ -33,7 +33,6 @@ use reth_engine_tree::tree::{
 };
 use reth_ethereum::{
     chainspec::ChainSpec,
-    evm::EthEvmEnv,
     node::{
         builder::{
             rpc::{
@@ -48,7 +47,7 @@ use reth_ethereum::{
     tasks::Runtime,
     EthPrimitives,
 };
-use reth_evm::{BlockExecutorFactory, ConfigureEvm, TxEnvFor};
+use reth_evm::{ConfigureEvm, EvmEnv};
 use reth_primitives_traits::{NodePrimitives, RecoveredBlock};
 use reth_provider::{BlockExecutionOutput, ProviderResult};
 use reth_trie::updates::TrieUpdates;
@@ -67,14 +66,13 @@ impl<N, P, Evm> StateRootStrategy<N, P, Evm> for ZeroStateRootStrategy
 where
     N: NodePrimitives,
     Evm: ConfigureEvm<Primitives = N>,
-    Evm::BlockExecutorFactory: BlockExecutorFactory<EvmEnv = EthEvmEnv>,
     DefaultStateRootStrategy: StateRootStrategy<N, P, Evm>,
 {
     fn prepare(
         &self,
         ctx: StateRootJobContext<'_, N, P, Evm>,
     ) -> ProviderResult<PreparedStateRootJob<N>> {
-        let timestamp: u64 = ctx.env().evm_env.block.timestamp.saturating_to();
+        let timestamp: u64 = ctx.env().evm_env.block_env().timestamp.saturating_to();
         if timestamp < self.activation_timestamp {
             return self.default.prepare(ctx)
         }
@@ -139,8 +137,6 @@ where
             alloy_rpc_types_engine::ExecutionData,
         >,
     >,
-    <N::Evm as ConfigureEvm>::BlockExecutorFactory: BlockExecutorFactory<EvmEnv = EthEvmEnv>,
-    TxEnvFor<N::Evm>: Clone + Send + 'static,
 {
     type EngineValidator = BasicEngineValidator<
         N::Provider,

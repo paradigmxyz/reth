@@ -22,7 +22,6 @@ use jsonrpsee::RpcModule;
 use parking_lot::Mutex;
 use reth_chain_state::{CanonStateSubscriptions, StateTrieOverlayManager};
 use reth_chainspec::{ChainSpecProvider, EthChainSpec, EthereumHardforks, Hardforks};
-use reth_evm::{BlockExecutorFactory, ConfigureEvm, EvmEnvFor, TxEnvFor};
 use reth_node_api::{
     AddOnsContext, BlockTy, EngineApiValidator, EngineTypes, FullNodeComponents, FullNodeTypes,
     NodeAddOns, NodeTypes, PayloadTypes, PayloadValidator, PrimitivesTy, TreeConfig,
@@ -34,15 +33,14 @@ use reth_node_core::{
 };
 use reth_payload_builder::{PayloadBuilderHandle, PayloadStore};
 use reth_rpc::{
-    eth::{core::EthRpcConverterFor, DevSigner, EthApiTypes, FullEthApiServer, RpcNodeCore},
+    eth::{core::EthRpcConverterFor, DevSigner, EthApiTypes, FullEthApiServer},
     AdminApi,
 };
 use reth_rpc_api::{eth::helpers::EthTransactions, IntoEngineApiRpcModule};
 use reth_rpc_builder::{
     auth::{AuthRpcModule, AuthServerHandle},
     config::RethRpcServerConfig,
-    RpcModuleBuilder, RpcRegistryInner, RpcServerConfig, RpcServerHandle, TraceBlockEnv,
-    TraceEvmInstance, TraceTxEnvelope, TransportRpcModules,
+    RpcModuleBuilder, RpcRegistryInner, RpcServerConfig, RpcServerHandle, TransportRpcModules,
 };
 use reth_rpc_engine_api::{capabilities::EngineCapabilities, EngineApi};
 use reth_rpc_eth_types::{cache::cache_new_blocks_task, EthConfig, EthStateCache};
@@ -940,11 +938,6 @@ where
     N: FullNodeComponents,
     N::Provider: ChainSpecProvider<ChainSpec: EthereumHardforks>,
     EthB: EthApiBuilder<N>,
-    <EthB::EthApi as RpcNodeCore>::Evm: ConfigureEvm,
-    EvmEnvFor<<EthB::EthApi as RpcNodeCore>::Evm>: AsRef<TraceBlockEnv>,
-    <<EthB::EthApi as RpcNodeCore>::Evm as ConfigureEvm>::BlockExecutorFactory:
-        for<'evm> BlockExecutorFactory<Evm<'evm> = TraceEvmInstance<'evm>>,
-    TxEnvFor<<EthB::EthApi as RpcNodeCore>::Evm>: AsRef<TraceTxEnvelope> + Clone,
     EB: EngineApiBuilder<N>,
     EVB: EngineValidatorBuilder<N>,
     RpcMiddleware: RethRpcMiddleware,
@@ -1250,11 +1243,6 @@ where
     N: FullNodeComponents,
     <N as FullNodeTypes>::Provider: ChainSpecProvider<ChainSpec: EthereumHardforks>,
     EthB: EthApiBuilder<N>,
-    <EthB::EthApi as RpcNodeCore>::Evm: ConfigureEvm,
-    EvmEnvFor<<EthB::EthApi as RpcNodeCore>::Evm>: AsRef<TraceBlockEnv>,
-    <<EthB::EthApi as RpcNodeCore>::Evm as ConfigureEvm>::BlockExecutorFactory:
-        for<'evm> BlockExecutorFactory<Evm<'evm> = TraceEvmInstance<'evm>>,
-    TxEnvFor<<EthB::EthApi as RpcNodeCore>::Evm>: AsRef<TraceTxEnvelope> + Clone,
     PVB: PayloadValidatorBuilder<N>,
     EB: EngineApiBuilder<N>,
     EVB: EngineValidatorBuilder<N>,
@@ -1466,7 +1454,6 @@ where
             <Node::Types as NodeTypes>::Payload,
             Block = BlockTy<Node::Types>,
         > + Clone,
-    TxEnvFor<Node::Evm>: Clone + Send + 'static,
 {
     type EngineValidator = BasicEngineValidator<Node::Provider, Node::Evm, EV::Validator>;
 

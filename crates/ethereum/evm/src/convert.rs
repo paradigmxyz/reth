@@ -155,6 +155,12 @@ impl AsRef<RecoveredTxEnvelope> for EthTxEnv {
     }
 }
 
+impl From<RecoveredTxEnvelope> for EthTxEnv {
+    fn from(envelope: RecoveredTxEnvelope) -> Self {
+        Self { envelope, tx_hash: B256::ZERO }
+    }
+}
+
 impl core::borrow::Borrow<RecoveredTxEnvelope> for EthTxEnv {
     fn borrow(&self) -> &RecoveredTxEnvelope {
         self.as_envelope()

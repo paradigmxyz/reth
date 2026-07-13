@@ -145,6 +145,30 @@ where
 }
 
 #[cfg(feature = "std")]
+impl<DB> Database for BorrowedDatabase<'_, DB>
+where
+    DB: DynDatabase + ?Sized,
+{
+    type Error = evm2::AnyError;
+
+    fn get_account(&mut self, address: &Address) -> Result<Option<AccountInfo>, Self::Error> {
+        self.0.get_account(address).map_err(|code| self.0.error(code))
+    }
+
+    fn get_code_by_hash(&mut self, code_hash: &B256) -> Result<Bytecode, Self::Error> {
+        self.0.get_code_by_hash(code_hash).map_err(|code| self.0.error(code))
+    }
+
+    fn get_storage(&mut self, address: &Address, key: &Word) -> Result<Word, Self::Error> {
+        self.0.get_storage(address, key).map_err(|code| self.0.error(code))
+    }
+
+    fn get_block_hash(&mut self, number: &Word) -> Result<Option<B256>, Self::Error> {
+        self.0.get_block_hash(number).map_err(|code| self.0.error(code))
+    }
+}
+
+#[cfg(feature = "std")]
 impl<DB> Database for StateProviderDatabase<DB>
 where
     DB: EvmStateProvider,

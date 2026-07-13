@@ -1,8 +1,20 @@
 //! Loads chain configuration.
 
-use alloy_eips::eip7910::EthConfig;
+use alloy_consensus::BlockHeader;
+use alloy_eips::{
+    eip7840::BlobParams,
+    eip7910::{EthConfig, EthForkConfig, SystemContract},
+};
+use alloy_primitives::Address;
 use jsonrpsee::{core::RpcResult, proc_macros::rpc};
+use reth_chainspec::{ChainSpecProvider, EthChainSpec, EthereumHardforks, Hardforks, Head};
+use reth_errors::{ProviderError, RethError};
+use reth_evm::{ConfigureEvm, EvmEnv};
+use reth_node_api::NodePrimitives;
+use reth_primitives_traits::header::HeaderMut;
 use reth_rpc_eth_types::EthApiError;
+use reth_storage_api::BlockReaderIdExt;
+use std::collections::BTreeMap;
 
 /// RPC endpoint support for [EIP-7910](https://eips.ethereum.org/EIPS/eip-7910)
 #[cfg_attr(not(feature = "client"), rpc(server, namespace = "eth"))]
@@ -18,20 +30,10 @@ pub trait EthConfigApi {
 /// Ref: <https://eips.ethereum.org/EIPS/eip-7910>
 #[derive(Debug, Clone)]
 pub struct EthConfigHandler<Provider, Evm> {
-    #[expect(dead_code)]
     provider: Provider,
-    #[expect(dead_code)]
     evm_config: Evm,
 }
 
-impl<Provider, Evm> EthConfigHandler<Provider, Evm> {
-    /// Creates a new [`EthConfigHandler`].
-    pub const fn new(provider: Provider, evm_config: Evm) -> Self {
-        Self { provider, evm_config }
-    }
-}
-
-#[cfg(any())]
 impl<Provider, Evm> EthConfigHandler<Provider, Evm>
 where
     Provider: ChainSpecProvider<ChainSpec: Hardforks + EthereumHardforks>
@@ -39,6 +41,11 @@ where
         + 'static,
     Evm: ConfigureEvm<Primitives: NodePrimitives<BlockHeader = Provider::Header>> + 'static,
 {
+    /// Creates a new [`EthConfigHandler`].
+    pub const fn new(provider: Provider, evm_config: Evm) -> Self {
+        Self { provider, evm_config }
+    }
+
     /// Returns fork config for specific timestamp.
     fn build_fork_config_at(
         &self,
@@ -87,7 +94,7 @@ where
             .into_header();
 
         let current_precompiles = evm_to_precompiles_map(
-            self.evm_config.evm_for_block(EmptyDB::default(), &latest).map_err(RethError::other)?,
+            self.evm_config.evm_env(&latest).map_err(RethError::other)?.spec_id(),
         );
 
         let mut fork_timestamps =
@@ -119,9 +126,7 @@ where
                 header
             };
             let next_precompiles = evm_to_precompiles_map(
-                self.evm_config
-                    .evm_for_block(EmptyDB::default(), &fake_header)
-                    .map_err(RethError::other)?,
+                self.evm_config.evm_env(&fake_header).map_err(RethError::other)?.spec_id(),
             );
 
             config.next = Some(self.build_fork_config_at(next_fork_timestamp, next_precompiles));
@@ -137,9 +142,7 @@ where
             header
         };
         let last_precompiles = evm_to_precompiles_map(
-            self.evm_config
-                .evm_for_block(EmptyDB::default(), &fake_header)
-                .map_err(RethError::other)?,
+            self.evm_config.evm_env(&fake_header).map_err(RethError::other)?.spec_id(),
         );
 
         config.last = Some(self.build_fork_config_at(last_fork_timestamp, last_precompiles));
@@ -150,24 +153,21 @@ where
 
 impl<Provider, Evm> EthConfigApiServer for EthConfigHandler<Provider, Evm>
 where
-    Provider: Send + Sync + 'static,
-    Evm: Send + Sync + 'static,
+    Provider: ChainSpecProvider<ChainSpec: Hardforks + EthereumHardforks>
+        + BlockReaderIdExt<Header: HeaderMut>
+        + 'static,
+    Evm: ConfigureEvm<Primitives: NodePrimitives<BlockHeader = Provider::Header>> + 'static,
 {
     fn config(&self) -> RpcResult<EthConfig> {
-        Err(EthApiError::Unsupported("eth_config is unsupported by the active EVM execution path")
-            .into())
+        Ok(self.config().map_err(EthApiError::from)?)
     }
 }
 
-#[cfg(any())]
-fn evm_to_precompiles_map(
-    evm: impl Evm<Precompiles = PrecompilesMap>,
-) -> BTreeMap<String, Address> {
-    let precompiles = evm.precompiles();
+fn evm_to_precompiles_map(spec_id: evm2::SpecId) -> BTreeMap<String, Address> {
+    let precompiles = evm2::Precompiles::<evm2::BaseEvmTypes>::base(spec_id);
+    let precompiles = precompiles.as_map();
     precompiles
         .addresses()
-        .filter_map(|address| {
-            Some((precompiles.get(address)?.precompile_id().name().to_string(), *address))
-        })
+        .filter_map(|address| Some((precompiles.get(&address)?.id().name().to_string(), address)))
         .collect()
 }

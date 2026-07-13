@@ -41,9 +41,7 @@ pub use signer::EthSigner;
 pub use spec::EthApiSpec;
 pub use state::{EthState, LoadState};
 pub use subscriptions::EthSubscriptions;
-pub use trace::{
-    Trace, TraceBlockEnv, TraceEvmInstance, TraceStateProviderDatabase, TraceTxEnvelope, TracingCtx,
-};
+pub use trace::Trace;
 pub use transaction::{EthTransactions, LoadTransaction};
 
 use crate::FullEthApiTypes;

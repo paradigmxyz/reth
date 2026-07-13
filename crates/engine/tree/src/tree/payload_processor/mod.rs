@@ -160,7 +160,6 @@ where
     ) -> IteratorPayloadHandle<Evm, I>
     where
         P: BlockReader + StateProviderFactory + StateReader + Clone + 'static,
-        TxEnvFor<Evm>: Clone + Send + 'static,
     {
         let (prewarm_rx, execution_rx) =
             self.spawn_tx_iterator(transactions, env.transaction_count, parallel_bal_execution);
@@ -209,10 +208,7 @@ where
         transactions: I,
         transaction_count: usize,
         parallel_bal_execution: bool,
-    ) -> (IteratorPrewarmTxReceiver<Evm, I>, IteratorExecuteTxReceiver<Evm, I>)
-    where
-        TxEnvFor<Evm>: Clone + Send + 'static,
-    {
+    ) -> (IteratorPrewarmTxReceiver<Evm, I>, IteratorExecuteTxReceiver<Evm, I>) {
         let (prewarm_tx, prewarm_rx) = mpsc::sync_channel(transaction_count);
         let (execute_tx, execute_rx) = crossbeam_channel::bounded(transaction_count);
 

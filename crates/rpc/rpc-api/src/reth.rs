@@ -29,7 +29,7 @@ pub trait RethApi {
         count: Option<U64>,
     ) -> RpcResult<Option<serde_json::Value>>;
 
-    /// Controls the JIT backend, if one is configured.
+    /// Controls the revmc JIT backend.
     #[method(name = "jit")]
     async fn reth_jit(&self, action: RethJitAction) -> RpcResult<()>;
 

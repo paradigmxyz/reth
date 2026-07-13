@@ -448,7 +448,6 @@ where
     where
         V: PayloadValidator<T, Block = N::Block> + Clone,
         Evm: ConfigureEngineEvm<T::ExecutionData, Primitives = N>,
-        TxEnvFor<Evm>: Clone + Send + 'static,
     {
         let parent_hash = input.parent_hash();
         let _jit_pause = JitPauseGuard::new(&self.evm_config);
@@ -1279,10 +1278,7 @@ where
             N::Receipt,
         >,
         InsertBlockErrorKind,
-    >
-    where
-        TxEnvFor<Evm>: Clone + Send + 'static,
-    {
+    > {
         let start = Instant::now();
         let handle = self.payload_processor.spawn_with_state_root_streams(
             env,
@@ -1666,7 +1662,6 @@ where
     N: NodePrimitives,
     V: PayloadValidator<Types, Block = N::Block> + Clone,
     Evm: ConfigureEngineEvm<Types::ExecutionData, Primitives = N> + 'static,
-    TxEnvFor<Evm>: Clone + Send + 'static,
     Types: PayloadTypes<BuiltPayload: BuiltPayload<Primitives = N>>,
 {
     fn validate_payload_attributes_against_header(

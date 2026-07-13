@@ -3975,7 +3975,6 @@ dependencies = [
  "eyre",
  "futures-util",
  "reth-ethereum",
- "reth-rpc-api",
 ]
 
 [[package]]
@@ -9895,9 +9894,11 @@ dependencies = [
  "reth-db-api",
  "reth-engine-primitives",
  "reth-errors",
+ "reth-ethereum-engine-primitives",
  "reth-ethereum-primitives",
  "reth-evm",
  "reth-evm-ethereum",
+ "reth-execution-types",
  "reth-metrics",
  "reth-network-api",
  "reth-network-peers",
@@ -10045,6 +10046,7 @@ dependencies = [
  "alloy-rpc-types-eth",
  "auto_impl",
  "dyn-clone",
+ "evm2",
  "jsonrpsee-types",
  "reth-evm",
  "reth-primitives-traits",
@@ -10161,6 +10163,7 @@ dependencies = [
  "alloy-consensus",
  "alloy-eip7928",
  "alloy-eips",
+ "alloy-network",
  "alloy-primitives",
  "alloy-rpc-client",
  "alloy-rpc-types-eth",
@@ -10169,6 +10172,7 @@ dependencies = [
  "alloy-transport",
  "derive_more",
  "evm2",
+ "evm2-inspectors",
  "futures",
  "itertools 0.14.0",
  "jsonrpsee-core",

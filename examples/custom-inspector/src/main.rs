@@ -81,12 +81,8 @@ fn main() {
                         let tx_env = EthTxEnv::from(tx.to_consensus());
 
                         let mut db = CacheDB::new(Db::new(StateProviderDatabase::new(state)));
-                        let result = eth_api.inspect_with_inspector(
-                            &mut db,
-                            evm_env,
-                            tx_env,
-                            DummyInspector::default(),
-                        );
+                        let result =
+                            eth_api.inspect(&mut db, evm_env, &tx_env, DummyInspector::default());
 
                         if let Ok((inspector, _)) = result {
                             let hash = tx.hash();

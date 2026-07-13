@@ -96,6 +96,30 @@ impl AsRef<evm2::env::BlockEnv> for EthEvmEnv {
 }
 
 impl EvmEnv for EthEvmEnv {
+    fn spec_id(&self) -> evm2::SpecId {
+        self.spec
+    }
+
+    fn chain_id(&self) -> u64 {
+        self.version.chain_id
+    }
+
+    fn block_env(&self) -> &evm2::env::BlockEnv {
+        &self.block
+    }
+
+    fn block_env_mut(&mut self) -> &mut evm2::env::BlockEnv {
+        &mut self.block
+    }
+
+    fn version(&self) -> &evm2::Version {
+        &self.version
+    }
+
+    fn version_mut(&mut self) -> &mut evm2::Version {
+        &mut self.version
+    }
+
     fn block_base_fee(&self) -> u64 {
         self.block.basefee.to()
     }

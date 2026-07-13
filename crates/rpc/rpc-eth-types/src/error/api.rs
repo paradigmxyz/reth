@@ -1,7 +1,10 @@
 //! Helper traits to wrap generic l1 errors, in network specific error type configured in
 //! `reth_rpc_eth_api::EthApiTypes`.
 
-use crate::{simulate::EthSimulateError, EthApiError};
+use crate::{simulate::EthSimulateError, EthApiError, RevertError};
+use alloy_primitives::Bytes;
+use evm2::{interpreter::InstrStop, TxResult};
+use reth_evm::{BlockExecutionError, ConfigureEvm};
 
 use super::RpcInvalidTransactionError;
 
@@ -106,6 +109,55 @@ impl AsEthApiError for EthApiError {
 }
 
 /// Helper trait to convert from EVM errors.
-pub trait FromEvmError<Evm>: FromEthApiError {}
+pub trait FromEvmError<Evm: ConfigureEvm>:
+    FromEthApiError + FromEvmHalt<InstrStop> + FromRevert
+{
+    /// Converts from EVM error to this type.
+    fn from_evm_err(err: BlockExecutionError) -> Self {
+        Self::from_eth_err(err)
+    }
 
-impl<T, Evm> FromEvmError<Evm> for T where T: FromEthApiError {}
+    /// Ensures the execution result is successful or returns an error.
+    fn ensure_success(result: TxResult) -> Result<Bytes, Self> {
+        if result.status {
+            Ok(result.output)
+        } else if result.stop.is_revert() {
+            Err(Self::from_revert(result.output))
+        } else {
+            Err(Self::from_evm_halt(result.stop, result.tx_gas_used()))
+        }
+    }
+}
+
+impl<T, Evm> FromEvmError<Evm> for T
+where
+    T: FromEthApiError + FromEvmHalt<InstrStop> + FromRevert,
+    Evm: ConfigureEvm,
+{
+}
+
+/// Helper trait to convert from EVM halts.
+pub trait FromEvmHalt<Halt> {
+    /// Converts from EVM halt to this type.
+    fn from_evm_halt(halt: Halt, gas_limit: u64) -> Self;
+}
+
+impl FromEvmHalt<InstrStop> for EthApiError {
+    fn from_evm_halt(halt: InstrStop, gas_limit: u64) -> Self {
+        RpcInvalidTransactionError::halt(halt, gas_limit).into()
+    }
+}
+
+/// Helper trait to construct errors from unexpected reverts.
+pub trait FromRevert {
+    /// Constructs an error from revert bytes.
+    ///
+    /// This is only invoked when revert was unexpected (`eth_call`, `eth_estimateGas`, etc).
+    fn from_revert(output: Bytes) -> Self;
+}
+
+impl FromRevert for EthApiError {
+    fn from_revert(output: Bytes) -> Self {
+        RpcInvalidTransactionError::Revert(RevertError::new(output)).into()
+    }
+}
