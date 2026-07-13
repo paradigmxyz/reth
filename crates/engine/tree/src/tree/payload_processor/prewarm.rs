@@ -484,7 +484,7 @@ where
 
                     if finished_execution {
                         // all tasks are done, we can exit, which will save caches and exit
-                        break
+                        break;
                     }
                 }
                 PrewarmTaskEvent::FinishedTxExecution { executed_transactions } => {
@@ -496,7 +496,7 @@ where
 
                     if final_execution_outcome.is_some() {
                         // all tasks are done, we can exit, which will save caches and exit
-                        break
+                        break;
                     }
                 }
             }
@@ -575,7 +575,7 @@ where
                     %err,
                     "Failed to build state provider in prewarm thread"
                 );
-                return None
+                return None;
             }
         };
 
@@ -648,11 +648,30 @@ where
             return;
         }
         let address = account_changes.address;
-        let hashed_address = keccak256(address);
+        let mut hashed_address = None;
         let account_fields = BalAccountStateFields::from_changes(account_changes);
 
         if !bal_account_changes_state_root(account_changes, account_fields) {
             return;
+        }
+
+        // If there are any storage changes we can assume that the resulting account info will be
+        // non-empty, so the account will exist, and therefore we can pre-emptively send out storage
+        // changes to start processing them before potentially hitting the db in the next step.
+        if !account_changes.storage_changes.is_empty() {
+            let hashed_address = *hashed_address.get_or_insert_with(|| keccak256(address));
+            let mut storage_map = reth_trie::HashedStorage::new(false);
+
+            for slot_changes in &account_changes.storage_changes {
+                let hashed_slot = keccak256(slot_changes.slot.to_be_bytes::<32>());
+                if let Some(last_change) = slot_changes.changes.last() {
+                    storage_map.storage.insert(hashed_slot, last_change.new_value);
+                }
+            }
+
+            let mut hashed_state = reth_trie::HashedPostState::default();
+            hashed_state.storages.insert(hashed_address, storage_map);
+            hashed_update_stream.on_hashed_state_update(hashed_state);
         }
 
         let existing_account = if account_fields.needs_parent_account() {
@@ -693,32 +712,23 @@ where
         };
 
         let account = account_fields.into_account(existing_account);
+        let hashed_address = hashed_address.unwrap_or_else(|| keccak256(address));
 
-        if account.is_empty() {
-            let mut hashed_state = reth_trie::HashedPostState::default();
-            hashed_state.accounts.insert(hashed_address, None);
-            hashed_update_stream.on_hashed_state_update(hashed_state);
-            return;
-        }
-
-        if !account_changes.storage_changes.is_empty() {
-            let mut storage_map = reth_trie::HashedStorage::new(false);
-
-            for slot_changes in &account_changes.storage_changes {
-                let hashed_slot = keccak256(slot_changes.slot.to_be_bytes::<32>());
-                if let Some(last_change) = slot_changes.changes.last() {
-                    storage_map.storage.insert(hashed_slot, last_change.new_value);
-                }
-            }
-
-            let mut hashed_state = reth_trie::HashedPostState::default();
-            hashed_state.storages.insert(hashed_address, storage_map);
-            hashed_update_stream.on_hashed_state_update(hashed_state);
-        }
+        // It is possible for the resulting account info to be empty. This can happen when, in the
+        // same block:
+        // * tx1: A new account is funded
+        // * tx2: CREATE2 is called on the new account, SELFDESTRUCT is called within the init code
+        //
+        // In this case the account will have only balance_changes, one for funding and the second
+        // setting balance back to zero. The resulting account is fully empty, we mark it as None
+        // with no storage changes to indicate that it should be deleted if nothing else.
+        //
+        // We assume that if the account info is all zero then it can't have storage, so we don't
+        // have to explicitly check for empty storage.
+        let account = (!account.is_empty()).then_some(account);
 
         let mut hashed_state = reth_trie::HashedPostState::default();
-        hashed_state.accounts.insert(hashed_address, Some(account));
-
+        hashed_state.accounts.insert(hashed_address, account);
         hashed_update_stream.on_hashed_state_update(hashed_state);
     }
 }
