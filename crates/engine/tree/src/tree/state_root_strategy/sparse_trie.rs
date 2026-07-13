@@ -2,7 +2,10 @@
 
 use std::sync::Arc;
 
-use super::{evm_state_to_hashed_post_state, StateRootComputeOutcome, StateRootMessage};
+use super::{
+    evm_state_to_hashed_post_state, extend_retained_paths_from_hashed_post_state,
+    StateRootComputeOutcome, StateRootMessage,
+};
 use alloy_primitives::{
     map::{hash_map::Entry, B256Map},
     B256,
@@ -15,8 +18,8 @@ use reth_metrics::Metrics;
 use reth_primitives_traits::{Account, FastInstant as Instant};
 use reth_tasks::Runtime;
 use reth_trie::{
-    updates::TrieUpdates, DecodedMultiProofV2, HashedPostState, TrieAccount, EMPTY_ROOT_HASH,
-    TRIE_ACCOUNT_RLP_MAX_SIZE,
+    prefix_set::TriePrefixSetsMut, updates::TrieUpdates, DecodedMultiProofV2, HashedPostState,
+    TrieAccount, EMPTY_ROOT_HASH, TRIE_ACCOUNT_RLP_MAX_SIZE,
 };
 use reth_trie_common::{MultiProofTargetsV2, ProofV2Target};
 use reth_trie_parallel::{
@@ -115,6 +118,9 @@ pub(super) struct SparseTrieCacheTask<A = ArenaParallelSparseTrie, S = ArenaPara
     /// final [`HashedPostState`] and share it with main engine thread without requiring any extra
     /// hashing work.
     final_hashed_state: HashedPostState,
+    /// Retention paths derived from the current block's final hashed post state.
+    retention_paths: TriePrefixSetsMut,
+
     /// Metrics for the sparse trie.
     metrics: SparseTrieTaskMetrics,
 }
@@ -175,6 +181,7 @@ where
             in_flight_proof_batches: 0,
             pending_updates: Default::default(),
             final_hashed_state: Default::default(),
+            retention_paths: Default::default(),
             metrics,
         }
     }
@@ -202,11 +209,7 @@ where
                     SparseTrieTaskMessage::HashedState(hashed)
                 }
                 StateRootMessage::FinishedStateUpdates => {
-                    // The finish marker ends the update stream, so exit instead of waiting
-                    // for the channel to close. Handles and streams keep sender clones
-                    // alive after the last update, which would park this worker forever.
-                    let _ = hashed_state_tx.send(SparseTrieTaskMessage::FinishedStateUpdates);
-                    break;
+                    SparseTrieTaskMessage::FinishedStateUpdates
                 }
                 StateRootMessage::HashedStateUpdate(state) => {
                     SparseTrieTaskMessage::HashedState(state)
@@ -240,6 +243,11 @@ where
         trie.clear();
         let deferred = trie.take_deferred_drops();
         (trie, deferred)
+    }
+
+    /// Takes retention paths derived from the current block's final hashed post state.
+    pub(super) fn take_retention_paths(&mut self) -> TriePrefixSetsMut {
+        core::mem::take(&mut self.retention_paths)
     }
 
     /// Runs the sparse trie task to completion.
@@ -353,8 +361,6 @@ where
         };
 
         #[cfg(feature = "trie-debug")]
-        let trie_witness = self.trie.witness();
-        #[cfg(feature = "trie-debug")]
         let debug_recorders = self.trie.take_debug_recorders();
         let changed_paths = Some(Arc::new(self.trie.take_changed_paths().unwrap_or_default()));
 
@@ -377,8 +383,6 @@ where
             changed_paths,
             #[cfg(feature = "trie-debug")]
             debug_recorders,
-            #[cfg(feature = "trie-debug")]
-            trie_witness,
         })
     }
 
@@ -455,16 +459,16 @@ where
                 self.on_hashed_state_update(hashed_state)
             }
             SparseTrieTaskMessage::FinishedStateUpdates => {
+                extend_retained_paths_from_hashed_post_state(
+                    &mut self.retention_paths,
+                    &self.final_hashed_state,
+                );
                 let _ = self
                     .final_hashed_state_tx
                     .take()
                     .unwrap()
                     .send(core::mem::take(&mut self.final_hashed_state));
-                self.finished_state_updates = true;
-                // The hashing task exits after it sends this marker, so nothing more
-                // will arrive on the updates channel. Swap in a channel that never
-                // receives so the run loop does not observe the disconnect.
-                self.updates = crossbeam_channel::never();
+                self.finished_state_updates = true
             }
         }
     }
@@ -1169,31 +1173,6 @@ mod tests {
 
         assert!(hashed_state_rx.recv().is_err());
         handle.join().unwrap();
-    }
-
-    #[test]
-    fn test_run_hashing_task_exits_on_finished_marker_with_live_sender() {
-        let (updates_tx, updates_rx) = crossbeam_channel::unbounded();
-        let (hashed_state_tx, hashed_state_rx) = crossbeam_channel::unbounded();
-
-        let handle = std::thread::spawn(move || {
-            SparseTrieCacheTask::<ArenaParallelSparseTrie, ArenaParallelSparseTrie>::run_hashing_task(
-                updates_rx,
-                hashed_state_tx,
-                MultiProofTaskMetrics::default(),
-            );
-        });
-
-        updates_tx.send(StateRootMessage::FinishedStateUpdates).unwrap();
-
-        // The task must forward the finish marker and exit even though `updates_tx`
-        // is still alive.
-        let msg = hashed_state_rx.recv().unwrap();
-        assert!(matches!(msg, SparseTrieTaskMessage::FinishedStateUpdates));
-        assert!(hashed_state_rx.recv().is_err());
-        handle.join().unwrap();
-
-        drop(updates_tx);
     }
 
     #[test]
