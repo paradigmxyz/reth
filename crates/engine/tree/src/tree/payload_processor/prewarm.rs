@@ -24,6 +24,7 @@ use alloy_primitives::{keccak256, B256, U256};
 use metrics::{Counter, Gauge, Histogram};
 use rayon::prelude::*;
 use reth_evm::{execute::ExecutableTxFor, ConfigureEvm, Evm, EvmFor, RecoveredTx, SpecFor};
+use reth_execution_cache::CacheFillMode;
 use reth_metrics::Metrics;
 use reth_primitives_traits::{Account, FastInstant as Instant, NodePrimitives};
 use reth_provider::{
@@ -413,7 +414,7 @@ where
             let provider_builder = ctx.provider.clone();
             let build = Arc::new(move || provider_builder.build());
 
-            pool.begin_block(build, caches);
+            pool.begin_block(build, caches, ctx.env.txpool_snapshot.clone());
             for account in prefetch_bal.as_bal() {
                 pool.warm_account(account.address);
                 for change in &account.storage_changes {
@@ -582,7 +583,10 @@ where
         // Use the caches to create a new provider with caching
         if let Some(saved_cache) = &self.saved_cache {
             let caches = saved_cache.cache().clone();
-            state_provider = Box::new(CachedStateProvider::new_prewarm(state_provider, caches));
+            state_provider = Box::new(
+                CachedStateProvider::new_prewarm(state_provider, caches)
+                    .with_txpool_snapshot(self.env.txpool_snapshot.clone()),
+            );
         }
 
         let state_provider = StateProviderDatabase::new(state_provider);
@@ -695,14 +699,29 @@ where
                         return;
                     }
                 };
-                let boxed: Box<dyn AccountReader> =
-                    match (self.disable_bal_batch_io, &self.saved_cache) {
-                        (false, Some(saved)) => {
-                            let caches = saved.cache().clone();
-                            Box::new(CachedStateProvider::new_prewarm(inner, caches))
+                let boxed: Box<dyn AccountReader> = match &self.saved_cache {
+                    Some(saved) => {
+                        let caches = saved.cache().clone();
+                        if self.disable_bal_batch_io {
+                            Box::new(
+                                CachedStateProvider::new_with_mode(
+                                    inner,
+                                    caches,
+                                    CacheFillMode::LookupOnly,
+                                    None,
+                                    None,
+                                )
+                                .with_txpool_snapshot(self.env.txpool_snapshot.clone()),
+                            )
+                        } else {
+                            Box::new(
+                                CachedStateProvider::new_prewarm(inner, caches)
+                                    .with_txpool_snapshot(self.env.txpool_snapshot.clone()),
+                            )
                         }
-                        _ => Box::new(inner),
-                    };
+                    }
+                    None => Box::new(inner),
+                };
                 *provider = Some(boxed);
             }
             let account_reader = provider.as_ref().expect("provider just initialized");

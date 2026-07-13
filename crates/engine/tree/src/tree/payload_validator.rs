@@ -100,6 +100,7 @@ use crate::tree::{
     instrumented_state::{InstrumentedStateProvider, StateProviderMetrics, StateProviderStats},
     payload_processor::PayloadProcessor,
     precompile_cache::{CachedPrecompile, CachedPrecompileMetrics, PrecompileCacheMap},
+    txpool_prewarm::TxPoolPrewarmHandle,
     types::{InsertPayloadResult, ValidationOutput},
     CacheWaitDurations, CachedStateProvider, EngineApiMetrics, EngineApiTreeState, ExecutionEnv,
     PayloadHandle, StateProviderBuilder, StateProviderDatabase, TreeConfig, WaitForCaches,
@@ -294,6 +295,9 @@ where
     /// State-root strategy used to prepare per-block commitment tasks.
     #[debug(skip)]
     state_root_strategy: Arc<dyn StateRootStrategy<Evm::Primitives, P, Evm>>,
+    /// Persistent txpool prewarming worker and its latest immutable snapshot.
+    #[debug(skip)]
+    txpool_prewarm: Option<TxPoolPrewarmHandle<Evm::Primitives, P, Evm>>,
 }
 
 impl<N, P, Evm, V> BasicEngineValidator<P, Evm, V>
@@ -314,6 +318,8 @@ where
         + StateReader
         + HashedPostStateProvider
         + Clone
+        + Send
+        + Sync
         + 'static,
     OverlayStateProviderFactory<P, N>: DatabaseProviderROFactory<Provider: TrieCursorFactory + HashedCursorFactory>
         + Clone
@@ -357,6 +363,7 @@ where
             runtime,
             state_trie_overlays,
             state_root_strategy: Arc::new(DefaultStateRootStrategy::default()),
+            txpool_prewarm: None,
         }
     }
 
@@ -366,6 +373,27 @@ where
         state_root_strategy: Arc<dyn StateRootStrategy<N, P, Evm>>,
     ) -> Self {
         self.state_root_strategy = state_root_strategy;
+        self
+    }
+
+    /// Installs the txpool source and starts the persistent cache-prewarming worker.
+    pub fn with_txpool_prewarm_source(
+        mut self,
+        source: impl crate::tree::TxPoolPrewarmSource<N> + 'static,
+    ) -> Self {
+        let config = self.config.txpool_prewarming();
+        if !config.should_prewarm() ||
+            self.config.disable_state_cache() ||
+            self.config.disable_prewarming()
+        {
+            return self
+        }
+        self.txpool_prewarm = Some(TxPoolPrewarmHandle::spawn(
+            &self.runtime,
+            Arc::new(source),
+            self.evm_config.clone(),
+            config,
+        ));
         self
     }
 
@@ -465,6 +493,13 @@ where
         Evm: ConfigureEngineEvm<T::ExecutionData, Primitives = N>,
     {
         let parent_hash = input.parent_hash();
+        let (txpool_snapshot, _txpool_prewarm_guard) =
+            if let Some(prewarmer) = self.txpool_prewarm.as_ref() {
+                let (snapshot, guard) = prewarmer.pause_and_snapshot(parent_hash);
+                (snapshot, Some(guard))
+            } else {
+                (None, None)
+            };
         let _jit_pause = JitPauseGuard::new(&self.evm_config);
 
         // Fetch parent block. This goes to memory most of the time unless the parent block is
@@ -570,7 +605,9 @@ where
             gas_used: input.gas_used(),
             withdrawals: input.withdrawals().map(|w| w.to_vec()),
             decoded_bal: decoded_bal.as_ref().map(Arc::clone),
+            txpool_snapshot,
         };
+        let validation_txpool_snapshot = env.txpool_snapshot.clone();
 
         // Get an iterator over the transactions in the payload
         let txs = self.tx_iterator_for(&input)?;
@@ -661,13 +698,16 @@ where
                 } else {
                     CacheFillMode::LookupOnly
                 };
-                Box::new(CachedStateProvider::new_with_mode(
-                    provider,
-                    caches.clone(),
-                    fill_mode,
-                    cache_metrics.clone(),
-                    cache_stats.clone(),
-                )) as StateProviderBox
+                Box::new(
+                    CachedStateProvider::new_with_mode(
+                        provider,
+                        caches.clone(),
+                        fill_mode,
+                        cache_metrics.clone(),
+                        cache_stats.clone(),
+                    )
+                    .with_txpool_snapshot(validation_txpool_snapshot.clone()),
+                ) as StateProviderBox
             } else {
                 provider
             };
@@ -1596,6 +1636,18 @@ where
             .unwrap_or_default();
         let (code_cache_hits, code_cache_misses) =
             cache_stats.as_ref().map(|s| (s.code_hits(), s.code_misses())).unwrap_or_default();
+        let (txpool_snapshot_account_hits, txpool_snapshot_account_misses) = cache_stats
+            .as_ref()
+            .map(|s| (s.txpool_snapshot_account_hits(), s.txpool_snapshot_account_misses()))
+            .unwrap_or_default();
+        let (txpool_snapshot_storage_hits, txpool_snapshot_storage_misses) = cache_stats
+            .as_ref()
+            .map(|s| (s.txpool_snapshot_storage_hits(), s.txpool_snapshot_storage_misses()))
+            .unwrap_or_default();
+        let (txpool_snapshot_code_hits, txpool_snapshot_code_misses) = cache_stats
+            .as_ref()
+            .map(|s| (s.txpool_snapshot_code_hits(), s.txpool_snapshot_code_misses()))
+            .unwrap_or_default();
 
         // Build execution timing stats for detailed block logging
         Box::new(ExecutionTimingStats {
@@ -1624,6 +1676,12 @@ where
             storage_cache_misses,
             code_cache_hits,
             code_cache_misses,
+            txpool_snapshot_account_hits,
+            txpool_snapshot_account_misses,
+            txpool_snapshot_storage_hits,
+            txpool_snapshot_storage_misses,
+            txpool_snapshot_code_hits,
+            txpool_snapshot_code_misses,
         })
     }
 }
@@ -1686,6 +1744,19 @@ pub trait EngineValidator<
         &self,
         block: BuiltPayloadExecutedBlock<N>,
     ) -> ProviderResult<ExecutedBlock<N>>;
+
+    /// Registers the exact state for a new canonical head with background cache prewarming.
+    fn on_canonical_head_changed(
+        &self,
+        _header: &SealedHeader<N::BlockHeader>,
+        _state: &EngineApiTreeState<N>,
+    ) {
+    }
+
+    /// Returns whether canonical-head notifications require otherwise-unneeded provider work.
+    fn canonical_head_notifications_enabled(&self) -> bool {
+        false
+    }
 
     /// Returns [`SavedCache`] for the given block hash.
     fn cache_for(&self, _block_hash: B256) -> Option<SavedCache>;
@@ -1784,6 +1855,45 @@ where
         ))
     }
 
+    fn on_canonical_head_changed(
+        &self,
+        header: &SealedHeader<N::BlockHeader>,
+        state: &EngineApiTreeState<N>,
+    ) {
+        let Some(txpool_prewarm) = self.txpool_prewarm.as_ref() else { return };
+        let provider_builder = match self.state_provider_builder(header.hash(), state) {
+            Ok(Some(provider_builder)) => provider_builder,
+            Ok(None) => return,
+            Err(err) => {
+                trace!(
+                    target: "engine::tree::txpool_prewarm",
+                    %err,
+                    block_hash = ?header.hash(),
+                    "failed to derive canonical txpool prewarming provider"
+                );
+                return
+            }
+        };
+        match self.evm_config.txpool_prewarm_env(header.header()) {
+            Ok(Some(evm_env)) => {
+                txpool_prewarm.start(header.hash(), evm_env, provider_builder, header.gas_limit())
+            }
+            Ok(None) => {}
+            Err(err) => {
+                trace!(
+                    target: "engine::tree::txpool_prewarm",
+                    %err,
+                    block_hash = ?header.hash(),
+                    "failed to derive canonical txpool prewarming environment"
+                );
+            }
+        }
+    }
+
+    fn canonical_head_notifications_enabled(&self) -> bool {
+        self.txpool_prewarm.is_some()
+    }
+
     fn cache_for(&self, block_hash: B256) -> Option<SavedCache> {
         Some(self.payload_processor.cache_for(block_hash))
     }
@@ -1843,6 +1953,11 @@ where
     Evm: ConfigureEvm,
 {
     fn wait_for_caches(&self) -> CacheWaitDurations {
+        let txpool_wait = self
+            .txpool_prewarm
+            .as_ref()
+            .map_or(Duration::ZERO, TxPoolPrewarmHandle::cancel_and_wait);
+
         debug!(target: "engine::tree::payload_validator", "Waiting for execution cache and sparse trie locks");
 
         let execution_cache = self.payload_processor.execution_cache();
@@ -1857,10 +1972,11 @@ where
             let _ = sparse_trie_tx.send(state_trie_overlays.wait_for_sparse_trie_availability());
         });
 
-        let execution_cache =
+        let mut execution_cache =
             execution_rx.recv().expect("execution cache wait task failed to send result");
         let sparse_trie =
             sparse_trie_rx.recv().expect("sparse trie wait task failed to send result");
+        execution_cache += txpool_wait;
         debug!(
             target: "engine::tree::payload_validator",
             ?execution_cache,
@@ -1868,6 +1984,12 @@ where
             "Execution cache and sparse trie locks acquired"
         );
         CacheWaitDurations { execution_cache, sparse_trie }
+    }
+
+    fn resume_caches(&self) {
+        if let Some(txpool_prewarm) = &self.txpool_prewarm {
+            txpool_prewarm.resume_after_wait();
+        }
     }
 }
 
