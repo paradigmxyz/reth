@@ -751,13 +751,6 @@ impl BalAccountStateFields {
         self.balance.is_none() || self.nonce.is_none() || self.code_hash.is_none()
     }
 
-    #[cfg(test)]
-    fn is_empty_account(self) -> bool {
-        self.balance == Some(U256::ZERO) &&
-            self.nonce == Some(0) &&
-            self.code_hash == Some(alloy_consensus::constants::KECCAK_EMPTY)
-    }
-
     fn into_account(self, existing_account: Option<Account>) -> Account {
         let existing_account = existing_account.as_ref();
         Account {
@@ -854,18 +847,6 @@ mod tests {
         assert_eq!(account.balance, U256::from(10));
         assert_eq!(account.nonce, 3);
         assert_eq!(account.bytecode_hash, Some(B256::repeat_byte(0xaa)));
-    }
-
-    #[test]
-    fn bal_account_with_all_zero_fields_is_empty() {
-        let changes = AccountChanges::new(address!("0000000000000000000000000000000000000001"))
-            .with_balance_change(BalanceChange::new(BlockAccessIndex::new(1), U256::ZERO))
-            .with_nonce_change(NonceChange::new(BlockAccessIndex::new(1), 0))
-            .with_code_change(CodeChange::new(BlockAccessIndex::new(1), Default::default()));
-        let fields = BalAccountStateFields::from_changes(&changes);
-
-        assert!(fields.is_empty_account());
-        assert!(fields.into_account(None).is_empty());
     }
 }
 

@@ -20,7 +20,7 @@ use reth_storage_api::{
 };
 use reth_storage_errors::provider::ProviderResult;
 use reth_trie::{
-    hashed_cursor::{HashedCursorFactory, HashedPostStateCursorFactory, HashedStorageCursor},
+    hashed_cursor::HashedPostStateCursorFactory,
     proof::{Proof, StorageProof},
     trie_cursor::InMemoryTrieCursorFactory,
     updates::TrieUpdates,
@@ -468,18 +468,6 @@ where
         + NodePrimitivesProvider<Primitives = N>,
     N: NodePrimitives,
 {
-    fn is_storage_empty(&self, address: Address) -> ProviderResult<bool> {
-        reth_trie_db::with_adapter!(self.provider, |_A| {
-            let input = self.build_overlay(TrieInputSorted::default())?;
-            let factory = HashedPostStateCursorFactory::new(
-                reth_trie_db::DatabaseHashedCursorFactory::new(self.tx()),
-                input.state.as_ref(),
-            );
-            let mut cursor = factory.hashed_storage_cursor(alloy_primitives::keccak256(address))?;
-            Ok(cursor.is_storage_empty()?)
-        })
-    }
-
     fn storage_root(
         &self,
         address: Address,

@@ -9,7 +9,7 @@ use reth_storage_api::{
 };
 use reth_storage_errors::provider::{ProviderError, ProviderResult};
 use reth_trie::{
-    hashed_cursor::{HashedCursorFactory, HashedPostStateCursorFactory, HashedStorageCursor},
+    hashed_cursor::HashedPostStateCursorFactory,
     proof::{Proof, StorageProof},
     trie_cursor::InMemoryTrieCursorFactory,
     updates::TrieUpdates,
@@ -147,14 +147,6 @@ impl<Provider: DBProvider + StorageSettingsCache> StateRootProvider
 impl<Provider: DBProvider + StorageSettingsCache> StorageRootProvider
     for LatestStateProviderRef<'_, Provider>
 {
-    fn is_storage_empty(&self, address: Address) -> ProviderResult<bool> {
-        reth_trie_db::with_adapter!(self.0, |_A| {
-            let factory = reth_trie_db::DatabaseHashedCursorFactory::new(self.tx());
-            let mut cursor = factory.hashed_storage_cursor(alloy_primitives::keccak256(address))?;
-            Ok(cursor.is_storage_empty()?)
-        })
-    }
-
     fn storage_root(
         &self,
         address: Address,
