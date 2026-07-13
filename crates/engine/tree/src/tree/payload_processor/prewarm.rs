@@ -26,7 +26,9 @@ use rayon::prelude::*;
 use reth_evm::{execute::ExecutableTxFor, ConfigureEvm, Evm, EvmFor, RecoveredTx, SpecFor};
 use reth_metrics::Metrics;
 use reth_primitives_traits::{Account, FastInstant as Instant, NodePrimitives};
-use reth_provider::{BlockExecutionOutput, BlockReader, StateProviderFactory, StateReader};
+use reth_provider::{
+    AccountReader, BlockExecutionOutput, BlockReader, StateProviderFactory, StateReader,
+};
 use reth_revm::database::StateProviderDatabase;
 use reth_tasks::{pool::WorkerPool, Runtime};
 use reth_trie_common::MultiProofTargetsV2;
@@ -374,7 +376,7 @@ where
                 stream_bal.as_bal().par_iter().for_each(|account_changes| {
                     WorkerPool::with_worker_mut(|worker| {
                         let provider =
-                            worker.get_or_init::<Option<reth_provider::StateProviderBox>>(|| None);
+                            worker.get_or_init::<Option<Box<dyn AccountReader>>>(|| None);
                         ctx.send_bal_hashed_state(
                             &parent_span,
                             provider,
@@ -638,7 +640,7 @@ where
     fn send_bal_hashed_state(
         &self,
         parent_span: &Span,
-        provider: &mut Option<reth_provider::StateProviderBox>,
+        provider: &mut Option<Box<dyn AccountReader>>,
         account_changes: &alloy_eip7928::AccountChanges,
         hashed_update_stream: &StateRootUpdateStream,
     ) {
@@ -674,14 +676,14 @@ where
                         return;
                     }
                 };
-                let boxed = match (self.disable_bal_batch_io, &self.saved_cache) {
-                    (false, Some(saved)) => {
-                        let caches = saved.cache().clone();
-                        Box::new(CachedStateProvider::new_prewarm(inner, caches))
-                            as reth_provider::StateProviderBox
-                    }
-                    _ => inner,
-                };
+                let boxed: Box<dyn AccountReader> =
+                    match (self.disable_bal_batch_io, &self.saved_cache) {
+                        (false, Some(saved)) => {
+                            let caches = saved.cache().clone();
+                            Box::new(CachedStateProvider::new_prewarm(inner, caches))
+                        }
+                        _ => Box::new(inner),
+                    };
                 *provider = Some(boxed);
             }
             let account_reader = provider.as_ref().expect("provider just initialized");
