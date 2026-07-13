@@ -20,7 +20,8 @@ use crate::tree::{
 use alloy_consensus::transaction::TxHashRef;
 use alloy_eip7928::bal::DecodedBal;
 use alloy_eips::eip4895::Withdrawal;
-use alloy_primitives::{keccak256, B256, U256};
+use alloy_primitives::{keccak256, Address, B256, U256};
+use crossbeam_channel::unbounded;
 use metrics::{Counter, Gauge, Histogram};
 use rayon::prelude::*;
 use reth_evm::{execute::ExecutableTxFor, ConfigureEvm, Evm, EvmFor, RecoveredTx, SpecFor};
@@ -114,12 +115,11 @@ where
         )
     }
 
-    /// Streams pending transactions and executes them in parallel on the prewarming pool.
+    /// Streams pending transactions to sender-affine workers in the prewarming pool.
     ///
-    /// Kicks off EVM init on every pool thread, then uses `in_place_scope` to dispatch
-    /// transactions as they arrive and wait for all spawned tasks to complete before
-    /// clearing per-thread state. Workers that start via work-stealing lazily initialise
-    /// their EVM state on first access via [`get_or_init`](reth_tasks::pool::Worker::get_or_init).
+    /// One broadcast job runs on every worker and drains that worker's FIFO channel. Transactions
+    /// are routed to those channels by sender, so transactions from the same sender execute in
+    /// order and observe that worker's prior EVM state.
     fn spawn_txs_prewarm<Tx>(
         &self,
         pending: mpsc::Receiver<(usize, Tx)>,
@@ -143,11 +143,29 @@ where
             let ctx = &ctx;
             let pool = executor.prewarming_pool();
 
+            let num_workers = pool.current_num_threads();
             let mut tx_count = 0usize;
             let state_root_hint_stream = state_root_hint_stream.as_ref();
             pool.in_place_scope(|s| {
-                s.spawn(|_| {
-                    pool.init::<PrewarmEvmState<Evm>>(|_| ctx.evm_for_ctx());
+                let (worker_txs, worker_rxs): (Vec<_>, Vec<_>) =
+                    (0..num_workers).map(|_| unbounded::<(usize, Tx)>()).unzip();
+
+                s.spawn_broadcast(move |_, broadcast_ctx| {
+                    let worker_id = broadcast_ctx.index();
+                    while let Ok((index, tx)) = worker_rxs[worker_id].recv() {
+                        if ctx.should_stop() {
+                            break;
+                        }
+
+                        let _enter = trace_span!(
+                            target: "engine::tree::payload_processor::prewarm",
+                            "prewarm_tx",
+                            i = index,
+                            worker_id,
+                        )
+                        .entered();
+                        Self::transact_worker(ctx, index, tx, state_root_hint_stream);
+                    }
                 });
 
                 while let Ok((index, tx)) = pending.recv() {
@@ -159,24 +177,19 @@ where
                         break;
                     }
 
-                    // skip transactions already executed by the main loop
+                    // Skip transactions already executed by the main loop.
                     if index < ctx.executed_tx_index.load(Ordering::Relaxed) {
                         continue;
                     }
 
                     tx_count += 1;
-                    let parent_span = Span::current();
-                    s.spawn(move |_| {
-                        let _enter = trace_span!(
-                            target: "engine::tree::payload_processor::prewarm",
-                            parent: parent_span,
-                            "prewarm_tx",
-                            i = index,
-                        )
-                        .entered();
-                        Self::transact_worker(ctx, index, tx, state_root_hint_stream);
-                    });
+                    let worker_id = sender_to_worker_index(tx.signer(), num_workers);
+                    let _ = worker_txs[worker_id].send((index, tx));
                 }
+
+                // Closing the channels lets every broadcast worker finish after draining its
+                // sender-affine queue.
+                drop(worker_txs);
 
                 // Send withdrawal prefetch targets after all transactions dispatched
                 if let Some(state_root_hint_stream) = state_root_hint_stream &&
@@ -731,6 +744,13 @@ where
         hashed_state.accounts.insert(hashed_address, account);
         hashed_update_stream.on_hashed_state_update(hashed_state);
     }
+}
+
+/// Maps a sender to a stable prewarming worker index.
+fn sender_to_worker_index(sender: &Address, num_workers: usize) -> usize {
+    let bytes = sender.as_slice();
+    let suffix = u64::from_be_bytes(bytes[12..].try_into().expect("address suffix is eight bytes"));
+    suffix as usize % num_workers
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
