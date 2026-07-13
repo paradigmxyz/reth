@@ -120,6 +120,11 @@ pub trait BlobStore: fmt::Debug + Send + Sync + 'static {
         indices_bitarray: B128,
     ) -> Result<Vec<Option<BlobCellsAndProofsV1>>, BlobStoreError>;
 
+    /// Return whether each requested blob versioned hash is available.
+    ///
+    /// The response is always the same length and order as the request.
+    fn has_versioned_hashes(&self, versioned_hashes: &[B256]) -> Result<Vec<bool>, BlobStoreError>;
+
     /// Returns all requested cells for all blobs belonging to the transaction.
     ///
     /// The `indices_bitarray` is applied independently to every blob in the tx.
@@ -182,7 +187,7 @@ impl BlobStoreSize {
 
     #[inline]
     pub(crate) fn sub_size(&self, sub: usize) {
-        let _ = self.data_size.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |current| {
+        let _ = self.data_size.try_update(Ordering::Relaxed, Ordering::Relaxed, |current| {
             Some(current.saturating_sub(sub))
         });
     }
@@ -199,7 +204,7 @@ impl BlobStoreSize {
 
     #[inline]
     pub(crate) fn sub_len(&self, sub: usize) {
-        let _ = self.num_blobs.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |current| {
+        let _ = self.num_blobs.try_update(Ordering::Relaxed, Ordering::Relaxed, |current| {
             Some(current.saturating_sub(sub))
         });
     }
