@@ -514,6 +514,7 @@ pub(super) mod serde_bincode_compat {
     use core::marker::PhantomData;
     use reth_ethereum_primitives::EthPrimitives;
     use reth_primitives_traits::{NodePrimitives, SealedBlock};
+    use reth_trie_common::ComputedTrieData;
     use serde::{Deserialize, Deserializer, Serialize, Serializer};
     use serde_with::{DeserializeAs, SerializeAs};
 
@@ -580,12 +581,12 @@ pub(super) mod serde_bincode_compat {
                 trie_updates: value
                     .trie_data
                     .iter()
-                    .map(|(k, v)| (*k, v.get().trie_updates.as_ref().into()))
+                    .map(|(k, v)| (*k, v.get().sorted.trie_updates.as_ref().into()))
                     .collect(),
                 hashed_state: value
                     .trie_data
                     .iter()
-                    .map(|(k, v)| (*k, v.get().hashed_state.as_ref().into()))
+                    .map(|(k, v)| (*k, v.get().sorted.hashed_state.as_ref().into()))
                     .collect(),
             }
         }
@@ -607,7 +608,13 @@ pub(super) mod serde_bincode_compat {
                 .into_iter()
                 .map(|(k, v)| {
                     let hashed_state = hashed_state_map.get(&k).cloned().unwrap_or_default();
-                    (k, LazyTrieData::ready(hashed_state, Arc::new(v.into())))
+                    (
+                        k,
+                        LazyTrieData::ready(ComputedTrieData::new(
+                            hashed_state,
+                            Arc::new(v.into()),
+                        )),
+                    )
                 })
                 .collect();
 
