@@ -1343,7 +1343,7 @@ where
         *trie_cursor_state =
             TrieCursorState::seeked(self.trie_cursor_seek(sub_trie_targets.prefix)?);
 
-        if hashed_cursor_current.as_ref().is_none_or(|(key, _)| key >= &sub_trie_targets.prefix) {
+        if hashed_cursor_current.as_ref().is_some_and(|(key, _)| key >= &sub_trie_targets.prefix) {
             trace!(target: TRACE_TARGET, "Doing initial seek of hashed cursor");
             self.seek_hashed_cursor(value_encoder, hashed_cursor_current, sub_trie_targets.prefix)?;
         }
