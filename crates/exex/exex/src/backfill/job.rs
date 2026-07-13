@@ -76,17 +76,16 @@ where
             "Executing block range"
         );
 
+        let mut executor = self.evm_config.batch_executor(StateProviderDatabase::new(
+            self.provider
+                .history_by_block_number(self.range.start().saturating_sub(1))
+                .map_err(BlockExecutionError::other)?,
+        ));
+
         let mut fetch_block_duration = Duration::default();
         let mut execution_duration = Duration::default();
         let mut cumulative_gas = 0;
         let batch_start = Instant::now();
-
-        let database = StateProviderDatabase::new(
-            self.provider
-                .history_by_block_number(self.range.start().saturating_sub(1))
-                .map_err(BlockExecutionError::other)?,
-        );
-        let mut executor = self.evm_config.batch_executor(database);
 
         let mut blocks = Vec::new();
         let mut results = Vec::new();
@@ -117,10 +116,8 @@ where
             let (header, body) = block.split_sealed_header_body();
             let block = P::Block::new_sealed(header, body).with_senders(senders);
 
-            let result = executor.execute_one(&block)?;
+            results.push(executor.execute_one(&block)?);
             execution_duration += execute_start.elapsed();
-
-            results.push(result);
 
             // Seal the block back and save it
             blocks.push(block);
@@ -207,16 +204,16 @@ where
             .ok_or_else(|| ProviderError::HeaderNotFound(block_number.into()))
             .map_err(BlockExecutionError::other)?;
 
+        // Configure the executor to use the previous block's state.
+        let executor = self.evm_config.batch_executor(StateProviderDatabase::new(
+            self.provider
+                .history_by_block_number(block_number.saturating_sub(1))
+                .map_err(BlockExecutionError::other)?,
+        ));
+
         trace!(target: "exex::backfill", number = block_number, txs = block_with_senders.body().transaction_count(), "Executing block");
 
-        let block_execution_output = self
-            .evm_config
-            .batch_executor(StateProviderDatabase::new(
-                self.provider
-                    .history_by_block_number(block_number.saturating_sub(1))
-                    .map_err(BlockExecutionError::other)?,
-            ))
-            .execute(&block_with_senders)?;
+        let block_execution_output = executor.execute(&block_with_senders)?;
 
         Ok((block_with_senders, block_execution_output))
     }

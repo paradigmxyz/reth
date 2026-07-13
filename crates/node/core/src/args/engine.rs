@@ -141,7 +141,7 @@ impl DefaultEngineValues {
         self
     }
 
-    /// Set whether to disable precompile cache by default.
+    /// Set whether to disable precompile cache by default
     pub const fn with_precompile_cache_disabled(mut self, v: bool) -> Self {
         self.precompile_cache_disabled = v;
         self
@@ -387,8 +387,8 @@ pub struct EngineArgs {
     #[arg(long = "engine.reserved-cpu-cores", default_value_t = DefaultEngineValues::get_global().reserved_cpu_cores)]
     pub reserved_cpu_cores: usize,
 
-    /// CAUTION: This CLI flag has no effect anymore, use --engine.disable-precompile-cache if you
-    /// want to disable precompile cache
+    /// CAUTION: This CLI flag has no effect anymore, use --engine.disable-precompile-cache
+    /// if you want to disable precompile cache
     #[arg(long = "engine.precompile-cache", default_value = "true", hide = true)]
     #[deprecated]
     pub precompile_cache_enabled: bool,

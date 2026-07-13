@@ -222,7 +222,7 @@ where
         self.provider_builder.clone()
     }
 
-    /// Consumes the pending sparse trie prune request as in-memory parent-chain blocks, if any.
+    /// Takes the pending sparse trie prune request as in-memory parent-chain blocks, if any.
     ///
     /// Custom strategies that maintain a reusable sparse trie should call this when starting the
     /// corresponding job. Strategies that do not use the request should leave it pending.
@@ -312,7 +312,7 @@ where
         self.provider_builder.clone()
     }
 
-    /// Consumes the pending sparse trie prune request as in-memory parent-chain blocks, if any.
+    /// Takes the pending sparse trie prune request as in-memory parent-chain blocks, if any.
     ///
     /// Custom strategies that maintain a reusable sparse trie should call this when starting the
     /// corresponding job. Strategies that do not use the request should leave it pending.

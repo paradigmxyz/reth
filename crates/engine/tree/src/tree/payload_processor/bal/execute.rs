@@ -377,11 +377,12 @@ mod tests {
 
     fn run_serial_path(
         evm_config: &EthEvmConfig,
-        db: TestDatabase,
+        canonical_db: TestDatabase,
         block: &SealedBlock<Block>,
         txs: &[Recovered<TransactionSigned>],
     ) -> (BlockExecutionOutput<Receipt>, BlockAccessList) {
-        let mut executor = evm_config.executor_for_block(db, block).expect("build serial executor");
+        let mut executor =
+            evm_config.executor_for_block(canonical_db, block).expect("build serial executor");
         executor.enable_block_access_list_builder();
         executor.apply_pre_execution_changes().expect("serial pre-exec");
         for (index, tx) in txs.iter().cloned().enumerate() {
@@ -430,30 +431,30 @@ mod tests {
 
     fn assert_shadow_equal(
         evm_config: EthEvmConfig,
-        db: TestDatabase,
+        canonical_db_template: TestDatabase,
         block_header_only: SealedBlock<Block>,
         txs: Vec<Recovered<TransactionSigned>>,
     ) {
         let (serial, reference_bal) =
-            run_serial_path(&evm_config, db.clone(), &block_header_only, &txs);
+            run_serial_path(&evm_config, canonical_db_template.clone(), &block_header_only, &txs);
         let block = empty_amsterdam_block_with_gas_limit(
             compute_block_access_list_hash(&reference_bal),
             block_header_only.header().gas_limit(),
         );
-        let bal_output = run_execute_block(
+        let bal_out = run_execute_block(
             &Runtime::test(),
             evm_config,
-            db_factory(db),
+            db_factory(canonical_db_template),
             to_arc_decoded(reference_bal),
             &block,
             txs,
         )
-        .unwrap_or_else(|err| panic!("BAL path failed: {err:?}"));
+        .unwrap_or_else(|e| panic!("BAL path failed: {e:?}"));
 
-        assert_eq!(serial.receipts, bal_output.receipts, "receipts diverged");
-        assert_eq!(serial.gas_used, bal_output.gas_used, "gas used diverged");
-        assert_eq!(serial.requests, bal_output.requests, "requests diverged");
-        assert_eq!(serial.state, bal_output.state, "execution state diverged");
+        assert_eq!(serial.receipts, bal_out.receipts, "receipts diverged");
+        assert_eq!(serial.gas_used, bal_out.gas_used, "gas used diverged");
+        assert_eq!(serial.requests, bal_out.requests, "requests diverged");
+        assert_eq!(serial.state, bal_out.state, "execution state diverged");
     }
 
     #[test]
@@ -478,19 +479,19 @@ mod tests {
     #[test]
     fn multi_tx_happy_path_round_trip() {
         let evm_config = test_evm_config();
-        let recipient = Address::repeat_byte(0xca);
-        let balance = U256::from(alloy_consensus::constants::ETH_TO_WEI);
-        let alice_key = generate_key(&mut rng());
-        let alice = public_key_to_address(alice_key.public_key());
-        let bob_key = generate_key(&mut rng());
-        let bob = public_key_to_address(bob_key.public_key());
+        let carol = Address::repeat_byte(0xca);
+        let sender_balance = U256::from(alloy_consensus::constants::ETH_TO_WEI);
+        let alice_kp = generate_key(&mut rng());
+        let alice = public_key_to_address(alice_kp.public_key());
+        let bob_kp = generate_key(&mut rng());
+        let bob = public_key_to_address(bob_kp.public_key());
         let txs = vec![
-            signed_transfer!(alice_key, alice, recipient, 100, 0, 21_000),
-            signed_transfer!(bob_key, bob, recipient, 200, 0, 21_000),
+            signed_transfer!(alice_kp, alice, carol, 100, 0, 21_000),
+            signed_transfer!(bob_kp, bob, carol, 200, 0, 21_000),
         ];
         let mut db = system_contracts_db();
-        insert_funded(&mut db, alice, balance);
-        insert_funded(&mut db, bob, balance);
+        insert_funded(&mut db, alice, sender_balance);
+        insert_funded(&mut db, bob, sender_balance);
         let reference_bal = reference_bal_for_block(
             &evm_config,
             db.clone(),
@@ -518,25 +519,25 @@ mod tests {
             test_evm_config(),
             system_contracts_db(),
             empty_amsterdam_block(B256::ZERO),
-            vec![],
+            Vec::new(),
         );
     }
 
     #[test]
     fn shadow_multi_value_transfer() {
         let evm_config = test_evm_config();
-        let recipient = Address::repeat_byte(0xca);
-        let balance = U256::from(alloy_consensus::constants::ETH_TO_WEI);
-        let alice_key = generate_key(&mut rng());
-        let alice = public_key_to_address(alice_key.public_key());
-        let bob_key = generate_key(&mut rng());
-        let bob = public_key_to_address(bob_key.public_key());
+        let carol = Address::repeat_byte(0xca);
+        let sender_balance = U256::from(alloy_consensus::constants::ETH_TO_WEI);
+        let alice_kp = generate_key(&mut rng());
+        let alice = public_key_to_address(alice_kp.public_key());
+        let bob_kp = generate_key(&mut rng());
+        let bob = public_key_to_address(bob_kp.public_key());
         let mut db = system_contracts_db();
-        insert_funded(&mut db, alice, balance);
-        insert_funded(&mut db, bob, balance);
+        insert_funded(&mut db, alice, sender_balance);
+        insert_funded(&mut db, bob, sender_balance);
         let txs = vec![
-            signed_transfer!(alice_key, alice, recipient, 100, 0, 21_000),
-            signed_transfer!(bob_key, bob, recipient, 200, 0, 21_000),
+            signed_transfer!(alice_kp, alice, carol, 100, 0, 21_000),
+            signed_transfer!(bob_kp, bob, carol, 200, 0, 21_000),
         ];
         assert_shadow_equal(evm_config, db, empty_amsterdam_block(B256::ZERO), txs);
     }
@@ -544,22 +545,22 @@ mod tests {
     #[test]
     fn rejects_tx_gas_limit_that_exceeds_remaining_block_gas() {
         let evm_config = test_evm_config();
-        let recipient = Address::repeat_byte(0xca);
-        let balance = U256::from(alloy_consensus::constants::ETH_TO_WEI);
-        let alice_key = generate_key(&mut rng());
-        let alice = public_key_to_address(alice_key.public_key());
-        let bob_key = generate_key(&mut rng());
-        let bob = public_key_to_address(bob_key.public_key());
+        let carol = Address::repeat_byte(0xca);
+        let sender_balance = U256::from(alloy_consensus::constants::ETH_TO_WEI);
+        let alice_kp = generate_key(&mut rng());
+        let alice = public_key_to_address(alice_kp.public_key());
+        let bob_kp = generate_key(&mut rng());
+        let bob = public_key_to_address(bob_kp.public_key());
         let txs = vec![
-            signed_transfer!(alice_key, alice, recipient, 100, 0, 990_000),
-            signed_transfer!(bob_key, bob, recipient, 200, 0, 990_000),
+            signed_transfer!(alice_kp, alice, carol, 100, 0, 990_000),
+            signed_transfer!(bob_kp, bob, carol, 200, 0, 990_000),
         ];
-        let mut db = system_contracts_db();
-        insert_funded(&mut db, alice, balance);
-        insert_funded(&mut db, bob, balance);
+        let mut pre_block_db = system_contracts_db();
+        insert_funded(&mut pre_block_db, alice, sender_balance);
+        insert_funded(&mut pre_block_db, bob, sender_balance);
         let reference_bal = reference_bal_for_block(
             &evm_config,
-            db.clone(),
+            pre_block_db.clone(),
             &empty_amsterdam_block(B256::ZERO),
             &txs,
         );
@@ -571,7 +572,7 @@ mod tests {
         let result = run_execute_block(
             &Runtime::test(),
             evm_config,
-            db_factory(db),
+            db_factory(pre_block_db),
             to_arc_decoded(reference_bal),
             &block,
             txs,
@@ -653,13 +654,13 @@ mod tests {
     #[test]
     fn canonical_make_db_failure() {
         let block = empty_amsterdam_block(B256::ZERO);
-        let make_db = |_: bool| -> Result<TestDatabase, BalExecutionError> {
+        let failing_make_db = |_: bool| -> Result<TestDatabase, BalExecutionError> {
             Err(reth_provider::ProviderError::BestBlockNotFound.into())
         };
         let result = run_execute_block(
             &Runtime::test(),
             test_evm_config(),
-            make_db,
+            failing_make_db,
             to_arc_decoded(BlockAccessList::default()),
             &block,
             Vec::<Recovered<TransactionSigned>>::new(),
@@ -671,12 +672,12 @@ mod tests {
     fn worker_tx_recovery_error_becomes_other_error() {
         let evm_config = test_evm_config();
         let block = empty_amsterdam_block(B256::ZERO);
-        let (tx, rx) = crossbeam_channel::unbounded::<(
+        let (tx_tx, tx_rx) = crossbeam_channel::unbounded::<(
             usize,
             Result<Recovered<TransactionSigned>, std::io::Error>,
         )>();
-        tx.send((0, Err(std::io::Error::other("sig fail")))).unwrap();
-        drop(tx);
+        tx_tx.send((0, Err(std::io::Error::other("sig fail")))).unwrap();
+        drop(tx_tx);
         let (receipt_tx, _receipt_rx) = crossbeam_channel::unbounded();
         let evm_env = evm_config.evm_env(block.header()).unwrap();
         let execution_ctx = evm_config.context_for_block(&block).unwrap();
@@ -689,7 +690,7 @@ mod tests {
             evm_env,
             execution_ctx,
             1,
-            rx,
+            tx_rx,
             receipt_tx,
         );
         assert!(matches!(result, Err(BalExecutionError::Other(_))));

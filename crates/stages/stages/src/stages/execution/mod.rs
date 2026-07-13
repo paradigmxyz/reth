@@ -492,8 +492,8 @@ where
         provider.write_state(&state, OriginalValuesKnown::Yes, StateWriteConfig::default())?;
 
         if provider.cached_storage_settings().use_hashed_state() {
-            let hashed_state = state.hash_state_slow::<KeccakKeyHasher>().into_sorted();
-            provider.write_hashed_state(&hashed_state)?;
+            let hashed_state = state.hash_state_slow::<KeccakKeyHasher>();
+            provider.write_hashed_state(&hashed_state.into_sorted())?;
         }
 
         let db_write_duration = time.elapsed();
@@ -548,7 +548,7 @@ where
         // Unwind account and storage changesets, as well as receipts.
         //
         // This also updates `PlainStorageState` and `PlainAccountState`.
-        let block_state_with_receipts = provider.take_state_above(unwind_to)?;
+        let bundle_state_with_receipts = provider.take_state_above(unwind_to)?;
 
         // Prepare the input for post unwind commit hook, where an `ExExNotification` will be sent.
         if self.exex_manager_handle.has_exexs() {
@@ -556,7 +556,7 @@ where
             let blocks = provider.recovered_block_range(range.clone())?;
             let previous_input = self.post_unwind_commit_input.replace(Chain::new(
                 blocks,
-                block_state_with_receipts,
+                bundle_state_with_receipts,
                 BTreeMap::new(),
             ));
 
