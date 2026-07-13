@@ -679,9 +679,10 @@ fn remove_blocks_clears_pending_sparse_trie_prune_request() {
 }
 
 #[test]
-fn process_payload_attributes_threads_sparse_trie_prune_into_payload_builder_task() {
+fn process_payload_attributes_shares_sparse_trie_during_validation_fallback() {
     let config = TreeConfig::default()
         .with_has_enough_parallelism(true)
+        .with_state_root_fallback(true)
         .with_share_sparse_trie_with_payload_builder(true);
     let blocks: Vec<_> = TestBlockBuilder::eth().get_executed_blocks(1..2).collect();
     let mut test_harness = TestHarness::with_config(MAINNET.clone(), config).with_blocks(blocks);
