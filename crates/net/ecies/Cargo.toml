@@ -36,8 +36,7 @@ concat-kdf.workspace = true
 sha2.workspace = true
 aes.workspace = true
 hmac.workspace = true
-block-padding.workspace = true
-cipher = { workspace = true, features = ["block-padding"] }
+cipher.workspace = true
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["net", "rt", "macros"] }

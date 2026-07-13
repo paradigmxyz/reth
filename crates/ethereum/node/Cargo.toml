@@ -57,6 +57,7 @@ revm = { workspace = true, features = ["secp256k1", "blst", "c-kzg", "memory_lim
 # misc
 eyre.workspace = true
 ethereum_ssz.workspace = true
+ethereum_ssz_derive.workspace = true
 http-body-util.workspace = true
 serde.workspace = true
 serde_json.workspace = true
@@ -94,6 +95,7 @@ reth-rpc-layer.workspace = true
 [features]
 default = []
 jit = ["reth-evm-ethereum/jit"]
+gmp = ["reth-evm-ethereum/gmp"]
 asm-keccak = [
     "alloy-primitives/asm-keccak",
     "reth-node-core/asm-keccak",

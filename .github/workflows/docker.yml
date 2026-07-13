@@ -41,7 +41,7 @@ jobs:
       contents: read
       id-token: write
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           persist-credentials: false
 
@@ -148,7 +148,7 @@ jobs:
 
             *Action required:* Re-run the workflow or investigate the build failure.
 
-            <@U0AAA8F0JEM> investigate and re-run if flaky
+            <@U0ANX3AM5RR> investigate and re-run if flaky
           SLACK_FOOTER: "paradigmxyz/reth · docker.yml"
           MSG_MINIMAL: true
           SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK_URL }}
