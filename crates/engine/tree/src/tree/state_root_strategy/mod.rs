@@ -68,6 +68,8 @@ use reth_provider::{
     StateProviderFactory, StateReader, StateRootProvider,
 };
 use reth_tasks::utils::increase_thread_priority;
+#[cfg(feature = "trie-debug")]
+use reth_trie::witness::TrieWitness;
 use reth_trie::{
     hashed_cursor::HashedCursorFactory,
     prefix_set::{PrefixSetMut, TriePrefixSetsMut},
@@ -75,8 +77,6 @@ use reth_trie::{
     updates::TrieUpdates,
     HashedPostState, HashedPostStateSorted,
 };
-#[cfg(feature = "trie-debug")]
-use reth_trie::witness::TrieWitness;
 use reth_trie_common::Nibbles;
 use reth_trie_parallel::proof_task::{ProofTaskCtx, ProofWorkerHandle};
 pub use reth_trie_parallel::{
