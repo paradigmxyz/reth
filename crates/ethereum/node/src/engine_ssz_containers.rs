@@ -1141,21 +1141,21 @@ pub struct BodiesByHashRequest {
 ///
 /// REST-SSZ uses a boolean availability bit instead of the legacy `Option<body>` union.
 #[derive(Clone, Debug, PartialEq, Eq, ssz_derive::Encode, ssz_derive::Decode)]
-pub struct BodyEntry<T> {
+pub struct BodyEntry<T: ssz::Encode + ssz::Decode> {
     /// Whether the body is available and belongs to the requested fork.
     pub available: bool,
     /// Fork-specific body, ignored when `available` is false.
     pub body: T,
 }
 
-impl<T> BodyEntry<T> {
+impl<T: ssz::Encode + ssz::Decode> BodyEntry<T> {
     /// Creates an available body entry.
     pub const fn available(body: T) -> Self {
         Self { available: true, body }
     }
 }
 
-impl<T: Default> BodyEntry<T> {
+impl<T: ssz::Encode + ssz::Decode + Default> BodyEntry<T> {
     /// Creates an unavailable body entry.
     pub fn unavailable() -> Self {
         Self { available: false, body: T::default() }
@@ -1165,13 +1165,13 @@ impl<T: Default> BodyEntry<T> {
 /// REST-SSZ historical bodies response.
 ///
 /// The response is a one-field SSZ container around the entries list, not a bare list.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct BodiesResponse<T> {
+#[derive(Clone, Debug, PartialEq, Eq, ssz_derive::Encode, ssz_derive::Decode)]
+pub struct BodiesResponse<T: ssz::Encode + ssz::Decode> {
     /// Body entries in request or range order.
     pub entries: Vec<BodyEntry<T>>,
 }
 
-impl<T: Default> BodiesResponse<T> {
+impl<T: ssz::Encode + ssz::Decode + Default> BodiesResponse<T> {
     /// Creates a response from optional legacy bodies.
     ///
     /// Missing bodies, or bodies that do not convert to the requested fork container, are encoded
@@ -1239,7 +1239,7 @@ pub struct BlobsV4Request {
 ///
 /// REST-SSZ keeps availability separate from the blob contents instead of using a legacy option.
 #[derive(Clone, Debug, PartialEq, Eq, ssz_derive::Encode, ssz_derive::Decode)]
-pub struct BlobEntry<T> {
+pub struct BlobEntry<T: ssz::Encode + ssz::Decode> {
     /// Whether the complete blob contents are available.
     pub available: bool,
     /// Complete contents, or valid zero-valued contents when unavailable.
@@ -1250,7 +1250,7 @@ pub struct BlobEntry<T> {
 ///
 /// The outer container and entry availability match the REST-SSZ blob endpoint contract.
 #[derive(Clone, Debug, PartialEq, Eq, ssz_derive::Encode, ssz_derive::Decode)]
-pub struct BlobsResponse<T> {
+pub struct BlobsResponse<T: ssz::Encode + ssz::Decode> {
     /// One response entry per requested hash.
     pub entries: Vec<BlobEntry<T>>,
 }
