@@ -959,8 +959,7 @@ fn test_backpressure_waits_for_persistence_before_reading_incoming() {
 
 #[test]
 fn changeset_cache_eviction_threshold_is_bounded_by_persisted_tip() {
-    assert_eq!(changeset_cache_eviction_threshold(130, Some(10)), 66);
-    assert_eq!(changeset_cache_eviction_threshold(130, None), 66);
+    assert_eq!(changeset_cache_eviction_threshold(130), 66);
 }
 
 #[tokio::test]

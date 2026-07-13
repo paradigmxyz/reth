@@ -98,10 +98,7 @@ pub(crate) const MIN_BLOCKS_FOR_PIPELINE_RUN: u64 = EPOCH_SLOTS;
 /// even when the finalized block is not set (e.g., on L2s like Optimism).
 const CHANGESET_CACHE_RETENTION_BLOCKS: u64 = 64;
 
-fn changeset_cache_eviction_threshold(
-    last_persisted_block_number: u64,
-    _finalized_block_number: Option<u64>,
-) -> u64 {
+fn changeset_cache_eviction_threshold(last_persisted_block_number: u64) -> u64 {
     last_persisted_block_number.saturating_sub(CHANGESET_CACHE_RETENTION_BLOCKS)
 }
 
@@ -1505,8 +1502,7 @@ where
         // window behind the persisted tip.
         let finalized_number =
             self.canonical_in_memory_state.get_finalized_num_hash().map(|f| f.number);
-        let eviction_threshold =
-            changeset_cache_eviction_threshold(last_persisted_block_number, finalized_number);
+        let eviction_threshold = changeset_cache_eviction_threshold(last_persisted_block_number);
         debug!(
             target: "engine::tree",
             last_persisted = last_persisted_block_number,
