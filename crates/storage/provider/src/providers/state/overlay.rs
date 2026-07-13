@@ -241,12 +241,7 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
 
         match &self.overlay_source {
             Some(OverlaySource::Managed { manager, state }) if state.is_empty() => {
-                db_tip_hash == anchor_hash ||
-                    manager.hash_between_anchor_and_parent(
-                        self.parent_hash,
-                        anchor_hash,
-                        db_tip_hash,
-                    )
+                manager.contains_hash(self.parent_hash, anchor_hash, db_tip_hash)
             }
             _ => false,
         }

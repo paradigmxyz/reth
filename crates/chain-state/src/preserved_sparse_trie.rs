@@ -11,28 +11,6 @@ use tracing::debug;
 /// Type alias for the sparse trie type used in preservation.
 pub type SparseTrie = SparseStateTrie;
 
-/// Guard that holds the lock on the preserved trie.
-/// While held, the next trie take will block. Call `store()` to save the trie before dropping.
-#[derive(Debug)]
-pub struct PreservedTrieGuard<'a>(parking_lot::MutexGuard<'a, PreservedSparseTrieState>);
-
-impl<'a> PreservedTrieGuard<'a> {
-    /// Creates a new guard from the preserved trie lock.
-    pub(crate) const fn new(guard: parking_lot::MutexGuard<'a, PreservedSparseTrieState>) -> Self {
-        PreservedTrieGuard(guard)
-    }
-
-    /// Stores a preserved trie for later reuse.
-    pub fn store(&mut self, trie: PreservedSparseTrie) {
-        self.0.store(trie);
-    }
-
-    /// Clears any preserved sparse trie state.
-    pub fn clear(&mut self) {
-        self.0.clear();
-    }
-}
-
 /// Current state of the sparse trie owned by the overlay manager.
 #[allow(clippy::large_enum_variant)]
 #[derive(Debug, Default)]
@@ -62,12 +40,12 @@ impl PreservedSparseTrieState {
     }
 
     /// Stores an available preserved trie.
-    fn store(&mut self, trie: PreservedSparseTrie) {
+    pub(crate) fn store(&mut self, trie: PreservedSparseTrie) {
         *self = Self::Available(trie);
     }
 
     /// Clears the sparse trie state.
-    fn clear(&mut self) {
+    pub(crate) fn clear(&mut self) {
         *self = Self::Empty;
     }
 }

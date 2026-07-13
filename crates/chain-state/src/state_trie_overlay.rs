@@ -4,9 +4,7 @@
 //! parent has not been persisted yet. [`StateTrieOverlayManager`] tracks those in-memory blocks and
 //! builds reusable flattened state trie overlays on demand.
 
-use crate::{
-    EthPrimitives, ExecutedBlock, PreservedSparseTrie, PreservedSparseTrieState, PreservedTrieGuard,
-};
+use crate::{EthPrimitives, ExecutedBlock, PreservedSparseTrie, PreservedSparseTrieState};
 use alloy_primitives::B256;
 use parking_lot::Mutex;
 use reth_metrics::{
@@ -93,12 +91,14 @@ impl<N: NodePrimitives> StateTrieOverlayManager<N> {
         self.preserved_sparse_trie.lock().take()
     }
 
-    /// Acquires a guard that blocks taking the trie until dropped.
-    ///
-    /// Use this before sending the state root result to ensure the next block waits for the trie
-    /// to be stored.
-    pub fn lock_sparse_trie(&self) -> PreservedTrieGuard<'_> {
-        PreservedTrieGuard::new(self.preserved_sparse_trie.lock())
+    /// Stores a preserved sparse trie for later reuse.
+    pub fn store_sparse_trie(&self, trie: PreservedSparseTrie) {
+        self.preserved_sparse_trie.lock().store(trie);
+    }
+
+    /// Clears any preserved sparse trie state.
+    pub fn clear_sparse_trie(&self) {
+        self.preserved_sparse_trie.lock().clear();
     }
 
     /// Waits until the sparse trie lock becomes available.
@@ -350,22 +350,17 @@ impl<N: NodePrimitives> StateTrieOverlayManager<N> {
         Self::anchor_for_parent_in(self.blocks.as_ref(), parent_hash, preferred_anchor)
     }
 
-    /// Returns true if `hash` is in the parent chain segment from `anchor_hash` exclusive to
+    /// Returns true if `hash` is in the parent chain segment from `anchor_hash` inclusive to
     /// `parent_hash` inclusive.
-    pub fn hash_between_anchor_and_parent(
-        &self,
-        parent_hash: B256,
-        anchor_hash: B256,
-        hash: B256,
-    ) -> bool {
+    pub fn contains_hash(&self, parent_hash: B256, anchor_hash: B256, hash: B256) -> bool {
         let mut current_hash = parent_hash;
 
         loop {
-            if current_hash == anchor_hash {
-                return false
-            }
             if current_hash == hash {
                 return true
+            }
+            if current_hash == anchor_hash {
+                return false
             }
 
             let Some(block) = self.blocks.get(&current_hash) else { return false };
@@ -614,8 +609,6 @@ mod tests {
     use alloy_primitives::U256;
     use reth_primitives_traits::Account;
     use reth_trie::{updates::TrieUpdatesSorted, ComputedTrieData, HashedPostState, HashedStorage};
-    #[cfg(feature = "rayon")]
-    use std::time::Instant;
     use std::{
         sync::{mpsc, Arc},
         thread,
@@ -725,7 +718,7 @@ mod tests {
     }
 
     #[test]
-    fn detects_hashes_between_anchor_and_parent() {
+    fn contains_hash_detects_hashes_from_anchor_to_parent() {
         let manager = StateTrieOverlayManager::default();
         let blocks = test_blocks();
         for block in &blocks {
@@ -735,19 +728,19 @@ mod tests {
         let anchor_hash = blocks[0].recovered_block().parent_hash();
         let parent_hash = blocks[2].recovered_block().hash();
 
-        assert!(!manager.hash_between_anchor_and_parent(parent_hash, anchor_hash, anchor_hash));
+        assert!(manager.contains_hash(parent_hash, anchor_hash, anchor_hash));
         for block in &blocks {
-            assert!(manager.hash_between_anchor_and_parent(
+            assert!(manager.contains_hash(
                 parent_hash,
                 anchor_hash,
                 block.recovered_block().hash()
             ));
         }
-        assert!(!manager.hash_between_anchor_and_parent(parent_hash, anchor_hash, B256::random()));
+        assert!(!manager.contains_hash(parent_hash, anchor_hash, B256::random()));
     }
 
     #[test]
-    fn hash_between_anchor_and_parent_rejects_hash_before_anchor() {
+    fn contains_hash_rejects_hash_before_anchor() {
         let manager = StateTrieOverlayManager::default();
         let blocks = test_blocks();
         for block in &blocks {
@@ -758,17 +751,13 @@ mod tests {
         let anchor_hash = blocks[1].recovered_block().hash();
         let before_anchor_hash = blocks[0].recovered_block().hash();
 
-        assert!(manager.hash_between_anchor_and_parent(parent_hash, anchor_hash, parent_hash));
-        assert!(!manager.hash_between_anchor_and_parent(parent_hash, anchor_hash, anchor_hash));
-        assert!(!manager.hash_between_anchor_and_parent(
-            parent_hash,
-            anchor_hash,
-            before_anchor_hash
-        ));
+        assert!(manager.contains_hash(parent_hash, anchor_hash, parent_hash));
+        assert!(manager.contains_hash(parent_hash, anchor_hash, anchor_hash));
+        assert!(!manager.contains_hash(parent_hash, anchor_hash, before_anchor_hash));
     }
 
     #[test]
-    fn hash_between_anchor_and_parent_rejects_unknown_anchor() {
+    fn contains_hash_rejects_unknown_anchor() {
         let manager = StateTrieOverlayManager::default();
         let blocks = test_blocks();
         for block in &blocks {
@@ -778,7 +767,7 @@ mod tests {
         let parent_hash = blocks[2].recovered_block().hash();
         let anchor_hash = B256::random();
 
-        assert!(!manager.hash_between_anchor_and_parent(parent_hash, anchor_hash, anchor_hash));
+        assert!(!manager.contains_hash(parent_hash, anchor_hash, anchor_hash));
     }
 
     #[test]
@@ -788,14 +777,11 @@ mod tests {
         let other_state_root = B256::with_last_byte(2);
         let anchor_hash = B256::with_last_byte(3);
 
-        {
-            let mut guard = manager.lock_sparse_trie();
-            guard.store(PreservedSparseTrie::anchored(
-                SparseTrie::default(),
-                state_root,
-                anchor_hash,
-            ));
-        }
+        manager.store_sparse_trie(PreservedSparseTrie::anchored(
+            SparseTrie::default(),
+            state_root,
+            anchor_hash,
+        ));
 
         let preserved = manager.take_sparse_trie().expect("preserved trie should be available");
         assert_eq!(preserved.state_root(), state_root);
@@ -803,10 +789,7 @@ mod tests {
         assert!(preserved.into_trie_for(other_state_root).unwrap().is_none());
         assert!(manager.take_sparse_trie().is_none());
 
-        {
-            let mut guard = manager.lock_sparse_trie();
-            guard.clear();
-        }
+        manager.clear_sparse_trie();
         assert!(manager.take_sparse_trie().is_none());
     }
 
