@@ -205,15 +205,6 @@ where
 
         let (mut lower, mut upper) = targets.current();
 
-        debug_assert!(self.retained_proofs.last().is_none_or(
-                |ProofTrieNodeV2 { path: last_retained_path, .. }| {
-                    depth_first::cmp(path, last_retained_path) == Ordering::Greater
-                }
-            ),
-            "should_retain called with path {path:?} which is not after previously retained node {:?} in depth-first order",
-            self.retained_proofs.last().map(|n| n.path),
-        );
-
         loop {
             // If the node in question is a prefix of the target then we do not iterate targets
             // further.
@@ -688,6 +679,7 @@ where
         value_encoder: &mut VE,
         targets: &mut Option<TargetsCursor<'a>>,
         hashed_cursor_current: &mut Option<(Nibbles, VE::DeferredEncoder)>,
+        hashed_cursor_exhausted_at: &mut Option<Nibbles>,
         lower_bound: Nibbles,
         upper_bound: Option<Nibbles>,
     ) -> Result<(), StateProofError> {
@@ -701,9 +693,11 @@ where
             (key, val)
         };
 
-        // If the cursor hasn't been used, or the last iterated key is prior to this range's
-        // key range, then seek forward to at least the first key.
-        if hashed_cursor_current.as_ref().is_none_or(|(key, _)| key < &lower_bound) {
+        // If the cursor hasn't been used, or the last iterated key is prior to this range's key
+        // range, then seek forward to at least the first key.
+        if hashed_cursor_current.as_ref().is_none_or(|(key, _)| key < &lower_bound) &&
+            hashed_cursor_exhausted_at.as_ref().is_none_or(|key| key > &lower_bound)
+        {
             trace!(
                 target: TRACE_TARGET,
                 current=?hashed_cursor_current.as_ref().map(|(k, _)| k),
@@ -713,6 +707,7 @@ where
             let lower_key = B256::right_padding_from(&lower_bound.pack());
             *hashed_cursor_current =
                 self.hashed_cursor.seek(lower_key)?.map(&mut map_hashed_cursor_entry);
+            *hashed_cursor_exhausted_at = hashed_cursor_current.is_none().then_some(lower_bound);
         }
 
         // Loop over all keys in the range, calling `push_leaf` on each.
@@ -723,6 +718,7 @@ where
                 core::mem::take(hashed_cursor_current).expect("while-let checks for Some");
             self.push_leaf(targets, key, val)?;
             *hashed_cursor_current = self.hashed_cursor.next()?.map(&mut map_hashed_cursor_entry);
+            *hashed_cursor_exhausted_at = hashed_cursor_current.is_none().then_some(key);
         }
 
         trace!(target: TRACE_TARGET, "No further keys within range");
@@ -927,8 +923,10 @@ where
         // If the trie cursor is seeked to a branch whose leaves have already been processed
         // then we can't use it, instead we seek forward and try again.
         if trie_cursor_path < uncalculated_lower_bound {
-            *trie_cursor_state =
-                TrieCursorState::seeked(self.trie_cursor_seek(*uncalculated_lower_bound)?);
+            *trie_cursor_state = TrieCursorState::seeked(
+                *uncalculated_lower_bound,
+                self.trie_cursor_seek(*uncalculated_lower_bound)?,
+            );
 
             // Having just seeked forward we need to check if the cursor is now exhausted,
             // extracting the new path at the same time.
@@ -1244,7 +1242,8 @@ where
             // trie cursor to the next cached node at-or-after `child_path`.
             if trie_cursor_state.path().is_some_and(|path| path < &child_path) {
                 trace!(target: TRACE_TARGET, ?child_path, "Seeking trie cursor to child path");
-                *trie_cursor_state = TrieCursorState::seeked(self.trie_cursor_seek(child_path)?);
+                *trie_cursor_state =
+                    TrieCursorState::seeked(child_path, self.trie_cursor_seek(child_path)?);
             }
 
             // If the next cached branch node is a child of `child_path` then we can assume it is
@@ -1310,6 +1309,7 @@ where
         value_encoder: &mut VE,
         trie_cursor_state: &mut TrieCursorState,
         hashed_cursor_current: &mut Option<(Nibbles, VE::DeferredEncoder)>,
+        hashed_cursor_exhausted_at: &mut Option<Nibbles>,
         sub_trie_targets: SubTrieTargets<'a>,
     ) -> Result<(), StateProofError> {
         let sub_trie_upper_bound = sub_trie_targets.upper_bound();
@@ -1330,12 +1330,27 @@ where
         debug_assert!(self.child_stack.is_empty());
 
         // `next_uncached_key_range`, which will be called in the loop below, expects the trie
-        // cursor to have already been seeked. If it's not yet seeked, or seeked to a prior node,
-        // then we seek it to the prefix (the first possible node) to initialize it.
-        if trie_cursor_state.before(&sub_trie_targets.prefix) {
-            trace!(target: TRACE_TARGET, "Doing initial seek of trie cursor");
-            *trie_cursor_state =
-                TrieCursorState::seeked(self.trie_cursor_seek(sub_trie_targets.prefix)?);
+        // cursor to have already been seeked. The trie cursor is forward-only, but exact sub-trie
+        // chunks can overlap previous chunks, so reset it if this seek needs to move backwards.
+        if trie_cursor_state.needs_reset_before_seek(&sub_trie_targets.prefix) {
+            trace!(target: TRACE_TARGET, "Resetting trie cursor before sub-trie");
+            self.trie_cursor.reset();
+            *trie_cursor_state = TrieCursorState::unseeked();
+        }
+
+        trace!(target: TRACE_TARGET, "Doing initial seek of trie cursor");
+        *trie_cursor_state = TrieCursorState::seeked(
+            sub_trie_targets.prefix,
+            self.trie_cursor_seek(sub_trie_targets.prefix)?,
+        );
+
+        if hashed_cursor_current.as_ref().is_some_and(|(key, _)| key > &sub_trie_targets.prefix) ||
+            hashed_cursor_exhausted_at.as_ref().is_some_and(|key| key > &sub_trie_targets.prefix)
+        {
+            trace!(target: TRACE_TARGET, "Resetting hashed cursor before sub-trie");
+            self.hashed_cursor.reset();
+            *hashed_cursor_current = None;
+            *hashed_cursor_exhausted_at = None;
         }
 
         // `uncalculated_lower_bound` tracks the lower bound of node paths which have yet to be
@@ -1386,6 +1401,7 @@ where
                 value_encoder,
                 &mut targets,
                 hashed_cursor_current,
+                hashed_cursor_exhausted_at,
                 calc_lower_bound,
                 calc_upper_bound,
             )?;
@@ -1485,6 +1501,7 @@ where
         // cursors are unseeked.
         let mut trie_cursor_state = TrieCursorState::unseeked();
         let mut hashed_cursor_current: Option<(Nibbles, VE::DeferredEncoder)> = None;
+        let mut hashed_cursor_exhausted_at: Option<Nibbles> = None;
 
         // Divide targets into chunks, each chunk corresponding to a different sub-trie within the
         // overall trie, and handle all proofs within that sub-trie.
@@ -1493,6 +1510,7 @@ where
                 value_encoder,
                 &mut trie_cursor_state,
                 &mut hashed_cursor_current,
+                &mut hashed_cursor_exhausted_at,
                 sub_trie_targets,
             ) {
                 self.clear_computation_state();
@@ -1505,6 +1523,8 @@ where
             retained_proofs_len = ?self.retained_proofs.len(),
             "proof_inner: returning",
         );
+        self.retained_proofs.sort_unstable_by(|a, b| depth_first::cmp(&a.path, &b.path));
+        self.retained_proofs.dedup();
         Ok(core::mem::take(&mut self.retained_proofs))
     }
 
@@ -1565,6 +1585,7 @@ where
         // cursors are unseeked.
         let mut trie_cursor_state = TrieCursorState::unseeked();
         let mut hashed_cursor_current: Option<(Nibbles, VE::DeferredEncoder)> = None;
+        let mut hashed_cursor_exhausted_at: Option<Nibbles> = None;
 
         static EMPTY_TARGETS: [ProofV2Target; 0] = [];
         let sub_trie_targets =
@@ -1574,6 +1595,7 @@ where
             value_encoder,
             &mut trie_cursor_state,
             &mut hashed_cursor_current,
+            &mut hashed_cursor_exhausted_at,
             sub_trie_targets,
         ) {
             self.clear_computation_state();
@@ -1739,8 +1761,8 @@ enum TrieCursorState {
     Available(Nibbles, BranchNodeCompact),
     /// Cursor is seeked to this path, but the node has been used.
     Taken(Nibbles),
-    /// Cursor has been exhausted.
-    Exhausted,
+    /// Cursor has been exhausted after seeking from the given lower bound.
+    Exhausted(Nibbles),
 }
 
 impl TrieCursorState {
@@ -1750,8 +1772,8 @@ impl TrieCursorState {
     }
 
     /// Creates a [`Self`] based on an entry returned from the cursor itself.
-    fn seeked(entry: Option<(Nibbles, BranchNodeCompact)>) -> Self {
-        entry.map_or(Self::Exhausted, |(path, node)| Self::Available(path, node))
+    fn seeked(key: Nibbles, entry: Option<(Nibbles, BranchNodeCompact)>) -> Self {
+        entry.map_or(Self::Exhausted(key), |(path, node)| Self::Available(path, node))
     }
 
     /// Returns the path the cursor is seeked to, or None if it's exhausted.
@@ -1763,16 +1785,16 @@ impl TrieCursorState {
         match self {
             Self::Unseeked => panic!("cursor is unseeked"),
             Self::Available(path, _) | Self::Taken(path) => Some(path),
-            Self::Exhausted => None,
+            Self::Exhausted(_) => None,
         }
     }
 
-    /// Returns true if the cursor is unseeked, or is seeked to a node prior to the given one.
-    fn before(&self, path: &Nibbles) -> bool {
+    /// Returns true if seeking to `key` requires resetting the forward-only cursor.
+    fn needs_reset_before_seek(&self, key: &Nibbles) -> bool {
         match self {
-            Self::Unseeked => true,
-            Self::Available(seeked_to, _) | Self::Taken(seeked_to) => path < seeked_to,
-            Self::Exhausted => false,
+            Self::Unseeked => false,
+            Self::Available(path, _) | Self::Taken(path) => path > key,
+            Self::Exhausted(exhausted_at) => exhausted_at > key,
         }
     }
 
@@ -2067,6 +2089,24 @@ mod tests {
                 harness.assert_proof(targets).expect("Proof generation failed");
             }
         }
+    }
+
+    #[test]
+    fn test_exact_subtrie_targets_with_root_target() {
+        reth_tracing::init_test_tracing();
+
+        let slot_80 = B256::right_padding_from(&[0x80]);
+        let slot_82 = B256::right_padding_from(&[0x82]);
+        let slot_f0 = B256::right_padding_from(&[0xf0]);
+        let storage = BTreeMap::from([
+            (slot_80, U256::from(1)),
+            (slot_82, U256::from(2)),
+            (slot_f0, U256::from(3)),
+        ]);
+        let targets = [ProofV2Target::new(B256::ZERO), ProofV2Target::new(slot_80).with_min_len(2)];
+
+        let harness = ProofTestHarness::new(storage);
+        harness.assert_proof(targets).expect("Proof generation failed");
     }
 
     #[test]
