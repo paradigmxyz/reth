@@ -1,6 +1,6 @@
 //! Helpers for `eth_blockAccessList` RPC method.
 use alloy_consensus::BlockHeader;
-use alloy_eip7928::BlockAccessList;
+use alloy_eip7928::{bal::DecodedBal, BlockAccessList};
 use alloy_primitives::Bytes;
 use alloy_rpc_types_eth::BlockId;
 use reth_errors::RethError;
@@ -31,7 +31,10 @@ pub trait GetBlockAccessList: Trace + Call + LoadBlock + RpcNodeCoreExt {
             if let Some(cached_bal) =
                 self.cache().get_bal(block.hash()).await.map_err(Self::Error::from_eth_err)?
             {
-                return Ok(Some((**cached_bal.as_bal()).clone().into()))
+                let bal = decode_cached_block_access_list(cached_bal.as_ref())
+                    .map_err(RethError::other)
+                    .map_err(Self::Error::from_eth_err)?;
+                return Ok(Some(bal))
             }
 
             self.spawn_blocking_io(move |eth_api| {
@@ -79,5 +82,40 @@ pub trait GetBlockAccessList: Trace + Call + LoadBlock + RpcNodeCoreExt {
 
             Ok(self.get_block_access_list(block_id).await?.map(|bal| alloy_rlp::encode(bal).into()))
         }
+    }
+}
+
+fn decode_cached_block_access_list<T>(
+    cached_bal: &DecodedBal<T>,
+) -> Result<BlockAccessList, alloy_rlp::Error> {
+    let (bal, _) = DecodedBal::from_rlp_bytes(cached_bal.as_raw().clone())?.split();
+    Ok(bal.into())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use alloy_eip7928::{bal::Bal, AccountChanges};
+    use alloy_primitives::Address;
+    use evm2::evm::Bal as EvmBal;
+    use std::sync::Arc;
+
+    #[test]
+    fn cached_response_decodes_preserved_raw_bal() {
+        let expected = vec![AccountChanges::new(Address::repeat_byte(0x11))];
+        let raw = alloy_rlp::encode(Bal::from(expected.clone())).into();
+        let cached = DecodedBal::new(Arc::new(EvmBal::default()), raw);
+
+        assert_eq!(decode_cached_block_access_list(&cached).unwrap(), expected);
+    }
+
+    #[test]
+    fn cached_response_rejects_malformed_raw_bal() {
+        let cached = DecodedBal::new(
+            Arc::new(EvmBal::default()),
+            Bytes::from_static(&[alloy_rlp::EMPTY_STRING_CODE]),
+        );
+
+        assert!(decode_cached_block_access_list(&cached).is_err());
     }
 }
