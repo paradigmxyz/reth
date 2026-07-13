@@ -130,7 +130,6 @@ use reth_chain_state::{
 use reth_consensus::{ConsensusError, FullConsensus, ReceiptRootBloom};
 use reth_engine_primitives::{
     ConfigureEngineEvm, ExecutableTxIterator, ExecutionPayload, InvalidBlockHook, PayloadValidator,
-    PostExecutionValidationError,
 };
 use reth_errors::{BlockExecutionError, ProviderResult};
 use reth_evm::{
@@ -843,16 +842,10 @@ where
         }
 
         if let Err(err) = hashed_state_validate_result {
-            let err_kind: InsertBlockErrorKind = match err {
-                PostExecutionValidationError::Consensus(err) => {
-                    // only a consensus violation marks the block invalid; a provider error is an
-                    // internal failure to load the state the check needs, not an invalid block
-                    self.on_invalid_block(&parent_block, &block, &output, None, ctx.state_mut());
-                    err.into()
-                }
-                PostExecutionValidationError::Provider(err) => err.into(),
-            };
-            return Err(InsertBlockError::new(block.into_sealed_block(), err_kind).into())
+            if err.is_validation_error() {
+                self.on_invalid_block(&parent_block, &block, &output, None, ctx.state_mut());
+            }
+            return Err(InsertBlockError::new(block.into_sealed_block(), err).into())
         }
 
         self.metrics.block_validation.record_state_root(&trie_output, root_elapsed.as_secs_f64());

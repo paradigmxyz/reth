@@ -17,7 +17,7 @@ use reth_payload_primitives::{
     NewPayloadError, PayloadAttributes, PayloadOrAttributes, PayloadTypes,
 };
 use reth_primitives_traits::{Block, RecoveredBlock, SealedBlock};
-use reth_storage_api::{StateProviderBox, errors::ProviderResult};
+use reth_storage_api::{errors::ProviderResult, StateProviderBox};
 use reth_trie_common::HashedPostState;
 use serde::{de::DeserializeOwned, Serialize};
 
@@ -222,7 +222,7 @@ pub trait PayloadValidator<Types: PayloadTypes>: Send + Sync + Unpin + 'static {
         _state_updates: &dyn FnOnce() -> &'a HashedPostState,
         _block: &RecoveredBlock<Self::Block>,
         _parent_state: impl FnOnce() -> ProviderResult<StateProviderBox>,
-    ) -> Result<(), PostExecutionValidationError>
+    ) -> Result<(), InsertBlockErrorKind>
     where
         Self: Sized,
     {
