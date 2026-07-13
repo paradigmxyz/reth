@@ -706,7 +706,7 @@ impl DefaultStateRootStrategy {
             let _enter =
                 debug_span!(target: "engine::tree::payload_processor", "preserve").entered();
             let mut trie_to_drop = None;
-            let deferred = if let Some(result) = task_result {
+            let deferred = if let Some(_result) = task_result {
                 let pending_trie =
                     pending_trie.expect("pending trie is created for successful task result");
                 let start = Instant::now();
