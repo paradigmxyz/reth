@@ -541,7 +541,7 @@ fn txpool_prewarm_loop<N, P, Evm>(
                     std::thread::sleep(TXPOOL_REFRESH_INTERVAL);
                     continue
                 }
-                let (selection, cursor_panicked) = select_best_transactions(
+                let (selection, cursor_panicked, cursor_exhausted) = select_best_transactions(
                     best_txs.as_mut().expect("best transactions opened for active parent"),
                     &mut deferred,
                     job.block_gas_limit,
@@ -557,6 +557,22 @@ fn txpool_prewarm_loop<N, P, Evm>(
                         parent_hash = ?job.parent_hash,
                         "txpool best-transactions iterator panicked; retiring it for this parent"
                     );
+                }
+                if cursor_exhausted {
+                    match catch_unwind(AssertUnwindSafe(|| {
+                        source.best_transactions(job.parent_hash)
+                    })) {
+                        Ok(Some(opened)) => best_txs = Some(opened),
+                        Ok(None) => {}
+                        Err(_) => {
+                            best_txs_failed = true;
+                            warn!(
+                                target: "engine::tree::txpool_prewarm",
+                                parent_hash = ?job.parent_hash,
+                                "reopening txpool best-transactions iterator panicked; retiring it for this parent"
+                            );
+                        }
+                    }
                 }
                 let canceled = selection.canceled;
                 if !selection.is_empty() {
@@ -662,7 +678,7 @@ fn select_best_transactions<N: NodePrimitives>(
     warmed: &HashSet<B256>,
     warmed_per_sender: &AddressMap<usize>,
     stop: &AtomicBool,
-) -> (TxPoolPrewarmSelection<N>, bool) {
+) -> (TxPoolPrewarmSelection<N>, bool, bool) {
     let gas_limit = block_gas_limit.saturating_mul(config.gas_limit_multiplier);
     let mut selection = TxPoolPrewarmSelection::default();
     let mut selected_per_sender = AddressMap::<usize>::default();
@@ -678,10 +694,10 @@ fn select_best_transactions<N: NodePrimitives>(
         } else {
             match catch_unwind(AssertUnwindSafe(|| best_txs.next())) {
                 Ok(transaction) => transaction,
-                Err(_) => return (selection, true),
+                Err(_) => return (selection, true, false),
             }
         };
-        let Some(transaction) = transaction else { break };
+        let Some(transaction) = transaction else { return (selection, false, true) };
         if warmed.contains(&transaction.hash) {
             selection.scanned += 1;
             continue
@@ -712,7 +728,7 @@ fn select_best_transactions<N: NodePrimitives>(
         selection.transactions.push(transaction);
     }
 
-    (selection, false)
+    (selection, false, false)
 }
 
 /// Merges fresh transactions into the published nonce-ordered prefixes for affected senders.
@@ -853,4 +869,29 @@ fn cached_value<T>(status: reth_execution_cache::CachedStatus<T>) -> T {
 
 fn nonzero_storage_value(value: StorageValue) -> Option<StorageValue> {
     (!value.is_zero()).then_some(value)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use reth_ethereum_primitives::EthPrimitives;
+
+    #[test]
+    fn reports_exhausted_best_transactions_iterator() {
+        let mut transactions: TxPoolPrewarmTransactions<EthPrimitives> =
+            Box::new(std::iter::empty());
+        let (selection, panicked, exhausted) = select_best_transactions(
+            &mut transactions,
+            &mut None,
+            30_000_000,
+            TxPoolPrewarmingConfig::DEFAULT,
+            &HashSet::default(),
+            &AddressMap::default(),
+            &AtomicBool::new(false),
+        );
+
+        assert!(selection.is_empty());
+        assert!(!panicked);
+        assert!(exhausted);
+    }
 }
