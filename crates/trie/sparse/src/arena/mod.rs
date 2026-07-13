@@ -2844,7 +2844,7 @@ impl SparseTrie for ArenaParallelSparseTrie {
             let protected_by_retained_parent = if cursor.depth() == 0 {
                 false
             } else {
-                let parent_path = cursor.parent_logical_branch_path(&self.upper_arena);
+                let parent_path = cursor.parent().expect("cursor must have a parent").path;
                 !prefix_range(retained_leaves, 0, &parent_path).is_empty()
             };
 
@@ -3329,11 +3329,20 @@ mod tests {
         children: smallvec::SmallVec<[ArenaSparseNodeBranchChild; 4]>,
         byte: u8,
     ) -> ArenaSparseNode {
+        cached_branch_with_short_key(state_mask, children, Nibbles::default(), byte)
+    }
+
+    fn cached_branch_with_short_key(
+        state_mask: TrieMask,
+        children: smallvec::SmallVec<[ArenaSparseNodeBranchChild; 4]>,
+        short_key: Nibbles,
+        byte: u8,
+    ) -> ArenaSparseNode {
         ArenaSparseNode::Branch(ArenaSparseNodeBranch {
             state: cached_state(byte),
             children,
             state_mask,
-            short_key: Nibbles::default(),
+            short_key,
             branch_masks: BranchNodeMasks::default(),
         })
     }
@@ -3434,6 +3443,40 @@ mod tests {
             .find_map(|(nibble, child)| (nibble == 0x3).then_some(child))
             .expect("child exists")
             .is_blinded());
+    }
+
+    #[test]
+    fn upper_prune_protects_children_by_parent_base_path() {
+        let mut trie = ArenaParallelSparseTrie::default();
+
+        let protected_leaf_a = trie.upper_arena.insert(cached_leaf(0x32));
+        let protected_leaf_b = trie.upper_arena.insert(cached_leaf(0x33));
+        let retained_parent = trie.upper_arena.insert(cached_branch_with_short_key(
+            TrieMask::new(0b1100),
+            smallvec![
+                ArenaSparseNodeBranchChild::Revealed(protected_leaf_a),
+                ArenaSparseNodeBranchChild::Revealed(protected_leaf_b),
+            ],
+            Nibbles::from_nibbles([0xa]),
+            0x31,
+        ));
+        trie.upper_arena[trie.root] = cached_branch(
+            TrieMask::new(0b0001),
+            smallvec![ArenaSparseNodeBranchChild::Revealed(retained_parent)],
+            0x30,
+        );
+
+        let retained = [Nibbles::from_nibbles([0x0, 0x0])];
+        let pruned = trie.prune(&retained);
+
+        assert_eq!(pruned, 0);
+        let root_branch = trie.upper_arena[trie.root].branch_ref();
+        let retained_parent_idx = revealed_child_idx(root_branch, 0x0);
+        let retained_parent = trie.upper_arena[retained_parent_idx].branch_ref();
+        let protected_leaf_a = revealed_child_idx(retained_parent, 0x2);
+        let protected_leaf_b = revealed_child_idx(retained_parent, 0x3);
+        assert!(matches!(trie.upper_arena[protected_leaf_a], ArenaSparseNode::Leaf { .. }));
+        assert!(matches!(trie.upper_arena[protected_leaf_b], ArenaSparseNode::Leaf { .. }));
     }
 
     /// Test harness for proptest-based arena sparse trie testing.
