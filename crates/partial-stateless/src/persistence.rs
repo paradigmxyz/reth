@@ -11,22 +11,51 @@ use std::{fs, io, path::Path};
 use tracing::info;
 
 /// Serializable representation of the cache state (without policy).
-#[derive(serde::Serialize, serde::Deserialize)]
-struct CacheState {
-    accounts: Vec<(Address, CachedEntry<AccountData>)>,
-    storage: Vec<((Address, B256), CachedEntry<U256>)>,
-    codes: Vec<(B256, CachedEntry<Bytes>)>,
-    current_block: u64,
+///
+/// Policies are intentionally excluded: they are behavior, not state, and are
+/// supplied separately when reconstructing a cache (see [`CacheState::into_cache`]).
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct CacheState {
+    pub accounts: Vec<(Address, CachedEntry<AccountData>)>,
+    pub storage: Vec<((Address, B256), CachedEntry<U256>)>,
+    pub codes: Vec<(B256, CachedEntry<Bytes>)>,
+    pub current_block: u64,
+}
+
+impl CacheState {
+    /// Capture a serializable snapshot of a live cache's contents.
+    pub fn from_cache(cache: &NetworkStateCache) -> Self {
+        Self {
+            accounts: cache.accounts().iter().map(|(k, v)| (*k, v.clone())).collect(),
+            storage: cache.storage().iter().map(|(k, v)| (*k, v.clone())).collect(),
+            codes: cache.codes().iter().map(|(k, v)| (*k, v.clone())).collect(),
+            current_block: cache.current_block(),
+        }
+    }
+
+    /// Reconstruct a live cache from this state, attaching the given policies.
+    ///
+    /// The restored cache has no undo history, so a reorg deeper than the state
+    /// captured here triggers a cold reset (see [`NetworkStateCache::restore`]).
+    pub fn into_cache(
+        self,
+        account_policy: Box<dyn CachePolicy>,
+        storage_policy: Box<dyn CachePolicy>,
+    ) -> NetworkStateCache {
+        NetworkStateCache::restore(
+            self.accounts.into_iter().collect(),
+            self.storage.into_iter().collect(),
+            self.codes.into_iter().collect(),
+            self.current_block,
+            account_policy,
+            storage_policy,
+        )
+    }
 }
 
 /// Save the current cache state to a file using bincode.
 pub fn save_to_file(cache: &NetworkStateCache, path: &Path) -> io::Result<()> {
-    let state = CacheState {
-        accounts: cache.accounts().iter().map(|(k, v)| (*k, v.clone())).collect(),
-        storage: cache.storage().iter().map(|(k, v)| (*k, v.clone())).collect(),
-        codes: cache.codes().iter().map(|(k, v)| (*k, v.clone())).collect(),
-        current_block: cache.current_block(),
-    };
+    let state = CacheState::from_cache(cache);
 
     let encoded = bincode::serialize(&state)
         .map_err(|e| io::Error::new(io::ErrorKind::Other, e.to_string()))?;
@@ -70,12 +99,5 @@ pub fn load_from_file(
         "Cache loaded from file"
     );
 
-    Ok(NetworkStateCache::restore(
-        state.accounts.into_iter().collect(),
-        state.storage.into_iter().collect(),
-        state.codes.into_iter().collect(),
-        state.current_block,
-        account_policy,
-        storage_policy,
-    ))
+    Ok(state.into_cache(account_policy, storage_policy))
 }
