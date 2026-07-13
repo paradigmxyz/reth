@@ -6,8 +6,9 @@ use crate::tree::{
     sparse_trie::SparseTrieCacheTask,
     CacheWaitDurations, CachedStateCacheMetrics, CachedStateMetrics, CachedStateMetricsSource,
     ExecutionCache, PayloadExecutionCache, SavedCache, StateProviderBuilder, TreeConfig,
-    WaitForCaches,
+    TxPoolPrewarmHints, WaitForCaches,
 };
+use alloy_consensus::transaction::TxHashRef;
 use alloy_eip7928::bal::DecodedBal;
 use alloy_eips::{eip1898::BlockWithParent, eip4895::Withdrawal};
 use alloy_primitives::B256;
@@ -20,7 +21,7 @@ use reth_evm::{
     block::ExecutableTxParts,
     execute::{ExecutableTxFor, WithTxEnv},
     ConfigureEvm, ConvertTx, EvmEnvFor, ExecutableTxIterator, ExecutableTxTuple, OnStateHook,
-    SpecFor, TxEnvFor,
+    RecoveredTx as RecoveredTxTrait, SpecFor, TxEnvFor,
 };
 use reth_execution_cache::TxPoolPrewarmCacheSnapshot;
 use reth_primitives_traits::{FastInstant as Instant, NodePrimitives};
@@ -155,6 +156,25 @@ struct SparseTrieTaskOptions {
     parent_state_root: B256,
     chunk_size: usize,
     pending_sparse_trie_prune: Option<TriePrefixSetsMut>,
+}
+
+#[derive(Clone, Debug)]
+struct TxPoolHintReplay {
+    hints: TxPoolPrewarmHints,
+    updates_tx: CrossbeamSender<StateRootMessage>,
+}
+
+impl TxPoolHintReplay {
+    fn replay<TxEnv, Tx, Recovered>(&self, transaction: &WithTxEnv<TxEnv, Recovered>)
+    where
+        Tx: TxHashRef,
+        Recovered: RecoveredTxTrait<Tx>,
+    {
+        let transaction_hash = transaction.tx.as_ref().tx().tx_hash();
+        if let Some(hint) = self.hints.get(transaction_hash) {
+            let _ = self.updates_tx.send(StateRootMessage::PrefetchProofs(hint.clone()));
+        }
+    }
 }
 
 impl<Evm> PayloadProcessor<Evm>
@@ -298,10 +318,6 @@ where
     {
         let PayloadProcessorSpawnOptions { parallel_bal_execution, pending_sparse_trie_prune } =
             options;
-        // start preparing transactions immediately
-        let (prewarm_rx, execution_rx) =
-            self.spawn_tx_iterator(transactions, env.transaction_count, parallel_bal_execution);
-
         let span = Span::current();
 
         let halve_workers = env.transaction_count <= Self::SMALL_BLOCK_PROOF_WORKER_TX_THRESHOLD;
@@ -311,6 +327,18 @@ where
             halve_workers,
             config,
             pending_sparse_trie_prune,
+        );
+        let txpool_hint_replay =
+            (!parallel_bal_execution).then(|| env.txpool_hints.clone()).flatten().map(|hints| {
+                TxPoolHintReplay { hints, updates_tx: state_root_handle.updates_tx().clone() }
+            });
+        // Start preparing transactions after the state-root channel is available so matching
+        // txpool hints can be replayed as proof-prefetch targets during conversion.
+        let (prewarm_rx, execution_rx) = self.spawn_tx_iterator(
+            transactions,
+            env.transaction_count,
+            parallel_bal_execution,
+            txpool_hint_replay,
         );
         // BAL blocks only bypass the normal execution state hook when the validator decided that
         // the parallel BAL executor will consume this block. If not, treat the BAL as absent here
@@ -352,8 +380,12 @@ where
     where
         P: BlockReader + StateProviderFactory + StateReader + Clone + 'static,
     {
-        let (prewarm_rx, execution_rx) =
-            self.spawn_tx_iterator(transactions, env.transaction_count, parallel_bal_execution);
+        let (prewarm_rx, execution_rx) = self.spawn_tx_iterator(
+            transactions,
+            env.transaction_count,
+            parallel_bal_execution,
+            None,
+        );
         let prewarm_handle = self.spawn_caching_with(
             env,
             prewarm_rx,
@@ -465,6 +497,7 @@ where
         transactions: I,
         transaction_count: usize,
         parallel_bal_execution: bool,
+        txpool_hint_replay: Option<TxPoolHintReplay>,
     ) -> (IteratorPrewarmTxReceiver<Evm, I>, IteratorExecuteTxReceiver<Evm, I>) {
         let (prewarm_tx, prewarm_rx) = mpsc::sync_channel(transaction_count);
         let (execute_tx, execute_rx) = crossbeam_channel::bounded(transaction_count);
@@ -481,7 +514,13 @@ where
             );
             self.executor.spawn_blocking_named("tx-iterator", move || {
                 let (transactions, convert) = transactions.into_parts();
-                convert_serial(transactions.into_iter(), &convert, &prewarm_tx, &execute_tx);
+                convert_serial(
+                    transactions.into_iter(),
+                    &convert,
+                    &prewarm_tx,
+                    &execute_tx,
+                    txpool_hint_replay.as_ref(),
+                );
             });
         } else {
             // Parallel path — recover signatures in parallel on rayon, stream results
@@ -519,7 +558,13 @@ where
 
                     // Convert the first few transactions sequentially so execution can
                     // start immediately without waiting for rayon work-stealing.
-                    convert_serial(iter.by_ref().take(prefetch), &convert, &prewarm_tx, &execute_tx);
+                    convert_serial(
+                        iter.by_ref().take(prefetch),
+                        &convert,
+                        &prewarm_tx,
+                        &execute_tx,
+                        txpool_hint_replay.as_ref(),
+                    );
 
                     let mut iter = iter.enumerate();
 
@@ -550,6 +595,9 @@ where
 
                             for (idx, tx) in chunk {
                                 if let Ok(tx) = &tx {
+                                    if let Some(replay) = &txpool_hint_replay {
+                                        replay.replay(tx);
+                                    }
                                     let _ = prewarm_tx.send((idx, tx.clone()));
                                 }
                                 let _ = execute_tx.send((idx, tx));
@@ -845,15 +893,21 @@ fn convert_serial<RawTx, Tx, TxEnv, InnerTx, Recovered, Err, C>(
     convert: &C,
     prewarm_tx: &mpsc::SyncSender<(usize, WithTxEnv<TxEnv, Recovered>)>,
     execute_tx: &ExecuteTxSender<TxEnv, Recovered, Err>,
+    txpool_hint_replay: Option<&TxPoolHintReplay>,
 ) where
     Tx: ExecutableTxParts<TxEnv, InnerTx, Recovered = Recovered>,
     TxEnv: Clone,
+    InnerTx: TxHashRef,
+    Recovered: RecoveredTxTrait<InnerTx>,
     C: ConvertTx<RawTx, Tx = Tx, Error = Err>,
 {
     for (idx, raw_tx) in iter.enumerate() {
         let tx = convert.convert(raw_tx);
         let tx = tx.map(|tx| WithTxEnv::new(tx));
         if let Ok(tx) = &tx {
+            if let Some(replay) = txpool_hint_replay {
+                replay.replay(tx);
+            }
             let _ = prewarm_tx.send((idx, tx.clone()));
         }
         let _ = execute_tx.send((idx, tx));
@@ -1065,6 +1119,8 @@ pub struct ExecutionEnv<Evm: ConfigureEvm> {
     pub decoded_bal: Option<Arc<DecodedBal>>,
     /// Latest completed txpool-prewarm snapshot for this block's parent state.
     pub txpool_snapshot: Option<TxPoolPrewarmCacheSnapshot>,
+    /// Predicted changed accounts and storage slots keyed by transaction hash.
+    pub txpool_hints: Option<TxPoolPrewarmHints>,
 }
 
 impl<Evm: ConfigureEvm> ExecutionEnv<Evm>
@@ -1084,21 +1140,27 @@ where
             withdrawals: None,
             decoded_bal: None,
             txpool_snapshot: None,
+            txpool_hints: None,
         }
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use super::{convert_serial, TxPoolHintReplay};
     use crate::tree::{
         payload_processor::{
             evm_state_to_hashed_post_state, ExecutionEnv, PayloadProcessor,
-            PayloadProcessorSpawnOptions,
+            PayloadProcessorSpawnOptions, StateRootMessage,
         },
         precompile_cache::PrecompileCacheMap,
         ExecutionCache, PayloadExecutionCache, SavedCache, StateProviderBuilder, TreeConfig,
+        TxPoolPrewarmHints,
     };
-    use alloy_consensus::constants::KECCAK_EMPTY;
+    use alloy_consensus::{
+        constants::KECCAK_EMPTY,
+        transaction::{Recovered, TxHashRef},
+    };
     use alloy_eips::eip1898::{BlockNumHash, BlockWithParent};
     use alloy_primitives::{map::HashMap, Address, B256, U256};
     use rand::Rng;
@@ -1109,7 +1171,7 @@ mod tests {
     use reth_evm::OnStateHook;
     use reth_evm_ethereum::EthEvmConfig;
     use reth_execution_cache::CachedStatus;
-    use reth_primitives_traits::{Account, Recovered, StorageEntry};
+    use reth_primitives_traits::{Account, StorageEntry};
     use reth_provider::{
         providers::{BlockchainProvider, OverlayBuilder, OverlayStateProviderFactory},
         test_utils::create_test_provider_factory_with_chain_spec,
@@ -1117,7 +1179,7 @@ mod tests {
     };
     use reth_revm::db::BundleState;
     use reth_testing_utils::generators;
-    use reth_trie::{test_utils::state_root, HashedPostState};
+    use reth_trie::{test_utils::state_root, HashedPostState, MultiProofTargetsV2};
     use reth_trie_db::ChangesetCache;
     use revm::state::{AccountInfo, AccountStatus, EvmState, EvmStorageSlot, TransactionId};
     use std::sync::Arc;
@@ -1129,6 +1191,59 @@ mod tests {
 
     fn state_trie_overlays() -> StateTrieOverlayManager<EthPrimitives> {
         StateTrieOverlayManager::default()
+    }
+
+    #[derive(Clone, Debug)]
+    struct HashOnlyTx(B256);
+
+    impl TxHashRef for HashOnlyTx {
+        fn tx_hash(&self) -> &B256 {
+            &self.0
+        }
+    }
+
+    #[test]
+    fn convert_serial_replays_only_matching_successful_txpool_hints() {
+        let matching_hash = B256::with_last_byte(1);
+        let missing_hash = B256::with_last_byte(2);
+        let failed_hash = B256::with_last_byte(3);
+        let account = B256::with_last_byte(4);
+        let hints = TxPoolPrewarmHints::new(HashMap::from_iter([
+            (
+                matching_hash,
+                Arc::new(MultiProofTargetsV2 {
+                    account_targets: vec![account.into()],
+                    storage_targets: Default::default(),
+                }),
+            ),
+            (failed_hash, Arc::new(MultiProofTargetsV2::default())),
+        ]));
+        let (updates_tx, updates_rx) = crossbeam_channel::unbounded();
+        let replay = TxPoolHintReplay { hints, updates_tx };
+        let transactions = vec![
+            Ok(((), Recovered::new_unchecked(HashOnlyTx(matching_hash), Address::ZERO))),
+            Ok(((), Recovered::new_unchecked(HashOnlyTx(missing_hash), Address::ZERO))),
+            Err(()),
+        ];
+        let (prewarm_tx, prewarm_rx) = std::sync::mpsc::sync_channel(3);
+        let (execute_tx, execute_rx) = crossbeam_channel::bounded(3);
+
+        convert_serial(
+            transactions.into_iter(),
+            &|result| result,
+            &prewarm_tx,
+            &execute_tx,
+            Some(&replay),
+        );
+
+        let StateRootMessage::PrefetchProofs(targets) = updates_rx.try_recv().unwrap() else {
+            panic!("expected proof prefetch targets")
+        };
+        assert_eq!(targets.account_targets.len(), 1);
+        assert_eq!(targets.account_targets[0].key(), account);
+        assert!(updates_rx.try_recv().is_err());
+        assert_eq!(prewarm_rx.try_iter().count(), 2);
+        assert_eq!(execute_rx.try_iter().count(), 3);
     }
 
     #[test]

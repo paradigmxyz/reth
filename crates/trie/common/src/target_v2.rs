@@ -49,7 +49,7 @@ impl From<B256> for ProofV2Target {
 
 /// A set of account and storage V2 proof targets. The account and storage targets do not need to
 /// necessarily overlap.
-#[derive(Debug, Default)]
+#[derive(Clone, Debug, Default)]
 pub struct MultiProofTargetsV2 {
     /// The set of account proof targets to generate proofs for.
     pub account_targets: Vec<ProofV2Target>,
@@ -77,6 +77,11 @@ impl MultiProofTargetsV2 {
     /// Returns a set of [`MultiProofTargetsV2`] and the total amount of storage targets, based on
     /// the given state.
     pub fn from_state(state: EvmState) -> (Self, usize) {
+        Self::from_state_ref(&state)
+    }
+
+    /// Returns proof targets for changed accounts and storage slots without consuming `state`.
+    pub fn from_state_ref(state: &EvmState) -> (Self, usize) {
         let mut targets = Self::default();
         targets.account_targets.reserve(state.len());
         targets.storage_targets.reserve(state.len());
@@ -100,7 +105,7 @@ impl MultiProofTargetsV2 {
             }
 
             let mut storage_slots = Vec::with_capacity(account.storage.len());
-            for (key, slot) in account.storage {
+            for (key, slot) in &account.storage {
                 // do nothing if unchanged
                 if !slot.is_changed() {
                     continue
@@ -117,6 +122,83 @@ impl MultiProofTargetsV2 {
         }
 
         (targets, storage_target_count)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use alloy_primitives::{Address, U256};
+    use revm::state::{Account, EvmStorageSlot, TransactionId};
+
+    #[test]
+    fn from_state_ref_returns_changed_targets_without_consuming_state() {
+        let changed_account_address = Address::with_last_byte(1);
+        let changed_storage_address = Address::with_last_byte(2);
+        let unchanged_address = Address::with_last_byte(3);
+        let selfdestructed_address = Address::with_last_byte(4);
+        let changed_slot = U256::from(1);
+        let unchanged_slot = U256::from(2);
+
+        let mut changed_account = Account::default();
+        changed_account.caller_initial_modification(U256::from(1), false);
+
+        let changed_storage = Account::default().with_touched_mark().with_storage(
+            [
+                (
+                    changed_slot,
+                    EvmStorageSlot::new_changed(U256::ZERO, U256::from(1), TransactionId::ZERO),
+                ),
+                (unchanged_slot, EvmStorageSlot::new(U256::from(2), TransactionId::ZERO)),
+            ]
+            .into_iter(),
+        );
+
+        let mut selfdestructed = Account::default();
+        selfdestructed.caller_initial_modification(U256::from(1), false);
+        selfdestructed.mark_selfdestruct();
+
+        let mut state = EvmState::default();
+        state.insert(changed_account_address, changed_account);
+        state.insert(changed_storage_address, changed_storage);
+        state.insert(unchanged_address, Account::default().with_touched_mark());
+        state.insert(selfdestructed_address, selfdestructed);
+        let original_state = state.clone();
+
+        let (targets, storage_target_count) = MultiProofTargetsV2::from_state_ref(&state);
+
+        assert_eq!(state, original_state);
+        assert_eq!(storage_target_count, 1);
+        assert_eq!(targets.account_targets.len(), 1);
+        assert_eq!(targets.account_targets[0].key(), keccak256(changed_account_address));
+        assert_eq!(targets.storage_targets.len(), 1);
+
+        let hashed_storage_address = keccak256(changed_storage_address);
+        let storage_targets = targets.storage_targets.get(&hashed_storage_address).unwrap();
+        assert_eq!(storage_targets.len(), 1);
+        assert_eq!(storage_targets[0].key(), keccak256(B256::new(changed_slot.to_be_bytes())));
+    }
+
+    #[test]
+    fn from_state_delegates_to_borrowed_constructor() {
+        let address = Address::with_last_byte(1);
+        let slot = U256::from(1);
+        let account = Account::default().with_touched_mark().with_storage(std::iter::once((
+            slot,
+            EvmStorageSlot::new_changed(U256::ZERO, U256::from(1), TransactionId::ZERO),
+        )));
+        let state = EvmState::from_iter([(address, account)]);
+
+        let (borrowed, borrowed_storage_count) = MultiProofTargetsV2::from_state_ref(&state);
+        let (owned, owned_storage_count) = MultiProofTargetsV2::from_state(state);
+
+        assert_eq!(borrowed_storage_count, owned_storage_count);
+        assert_eq!(borrowed.account_targets.len(), owned.account_targets.len());
+        assert_eq!(borrowed.storage_targets.len(), owned.storage_targets.len());
+        assert_eq!(
+            borrowed.storage_targets[&keccak256(address)][0].key(),
+            owned.storage_targets[&keccak256(address)][0].key()
+        );
     }
 }
 
