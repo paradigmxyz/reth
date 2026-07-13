@@ -2914,7 +2914,7 @@ impl SparseTrie for ArenaParallelSparseTrie {
                         else {
                             unreachable!()
                         };
-                        pruned += subtrie.prune(&retained_leaves[subtrie_range]);
+                        pruned += subtrie.prune(retained_leaves[subtrie_range].iter());
                     }
                 }
                 _ => unreachable!("NonBranch in prune walk must be Subtrie, Leaf, or Branch"),
@@ -2927,7 +2927,7 @@ impl SparseTrie for ArenaParallelSparseTrie {
             // Prune taken subtries, in parallel if more than one.
             if taken.len() == 1 {
                 let (_, ref mut subtrie, ref range) = taken[0];
-                pruned += subtrie.prune(&retained_leaves[range.clone()]);
+                pruned += subtrie.prune(retained_leaves[range.clone()].iter());
             } else {
                 use rayon::iter::{IntoParallelRefMutIterator, ParallelIterator};
 
@@ -2943,7 +2943,7 @@ impl SparseTrie for ArenaParallelSparseTrie {
                         )
                         .entered();
 
-                        subtrie.prune(&retained_leaves[range.clone()])
+                        subtrie.prune(retained_leaves[range.clone()].iter())
                     })
                     .sum::<usize>();
             }
