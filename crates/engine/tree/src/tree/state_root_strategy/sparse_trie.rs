@@ -2,7 +2,10 @@
 
 use std::sync::Arc;
 
-use super::{evm_state_to_hashed_post_state, StateRootComputeOutcome, StateRootMessage};
+use super::{
+    evm_state_to_hashed_post_state, extend_retained_paths_from_hashed_post_state,
+    StateRootComputeOutcome, StateRootMessage,
+};
 use alloy_primitives::{
     map::{hash_map::Entry, B256Map},
     B256,
@@ -15,8 +18,8 @@ use reth_metrics::Metrics;
 use reth_primitives_traits::{Account, FastInstant as Instant};
 use reth_tasks::Runtime;
 use reth_trie::{
-    updates::TrieUpdates, DecodedMultiProofV2, HashedPostState, TrieAccount, EMPTY_ROOT_HASH,
-    TRIE_ACCOUNT_RLP_MAX_SIZE,
+    prefix_set::TriePrefixSetsMut, updates::TrieUpdates, DecodedMultiProofV2, HashedPostState,
+    TrieAccount, EMPTY_ROOT_HASH, TRIE_ACCOUNT_RLP_MAX_SIZE,
 };
 use reth_trie_common::{MultiProofTargetsV2, ProofV2Target};
 use reth_trie_parallel::{
@@ -115,6 +118,8 @@ pub(super) struct SparseTrieCacheTask<A = ArenaParallelSparseTrie, S = ArenaPara
     /// final [`HashedPostState`] and share it with main engine thread without requiring any extra
     /// hashing work.
     final_hashed_state: HashedPostState,
+    /// Retention paths derived from the current block's final hashed post state.
+    retention_paths: TriePrefixSetsMut,
 
     /// Metrics for the sparse trie.
     metrics: SparseTrieTaskMetrics,
@@ -176,6 +181,7 @@ where
             in_flight_proof_batches: 0,
             pending_updates: Default::default(),
             final_hashed_state: Default::default(),
+            retention_paths: Default::default(),
             metrics,
         }
     }
@@ -237,6 +243,11 @@ where
         trie.clear();
         let deferred = trie.take_deferred_drops();
         (trie, deferred)
+    }
+
+    /// Takes retention paths derived from the current block's final hashed post state.
+    pub(super) fn take_retention_paths(&mut self) -> TriePrefixSetsMut {
+        core::mem::take(&mut self.retention_paths)
     }
 
     /// Runs the sparse trie task to completion.
@@ -448,6 +459,10 @@ where
                 self.on_hashed_state_update(hashed_state)
             }
             SparseTrieTaskMessage::FinishedStateUpdates => {
+                extend_retained_paths_from_hashed_post_state(
+                    &mut self.retention_paths,
+                    &self.final_hashed_state,
+                );
                 let _ = self
                     .final_hashed_state_tx
                     .take()
