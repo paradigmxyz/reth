@@ -56,7 +56,7 @@ pub struct StateRootComputeOutcome {
 /// block building). Provides channels for streaming state updates into the pipeline and receiving
 /// the final computed state root.
 ///
-/// Created by `PayloadProcessor::spawn_state_root`.
+/// Created by the engine's state-root strategy.
 #[derive(Debug)]
 pub struct StateRootHandle {
     /// The state root that the cached sparse trie is anchored at (parent block's state root).

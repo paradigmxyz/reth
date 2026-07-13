@@ -624,12 +624,17 @@ impl TreeConfig {
         self
     }
 
-    /// Whether or not to use the state root task.
+    /// Returns whether the host has enough parallelism to run the state root task.
+    pub const fn has_enough_parallelism(&self) -> bool {
+        self.has_enough_parallelism
+    }
+
+    /// Returns whether engine validation should use the state root task.
     ///
     /// The state root task requires at least 5 parallel threads, see
     /// [`has_enough_parallelism`].
     pub const fn use_state_root_task(&self) -> bool {
-        self.has_enough_parallelism
+        !self.skip_state_root && !self.state_root_fallback && self.has_enough_parallelism
     }
 
     /// Setter for state provider metrics.
@@ -859,6 +864,20 @@ impl TreeConfig {
 #[cfg(test)]
 mod tests {
     use super::TreeConfig;
+
+    #[test]
+    fn state_root_task_requires_parallelism_without_overrides() {
+        assert!(TreeConfig::default().with_has_enough_parallelism(true).use_state_root_task());
+        assert!(!TreeConfig::default().with_has_enough_parallelism(false).use_state_root_task());
+        assert!(!TreeConfig::default()
+            .with_has_enough_parallelism(true)
+            .with_state_root_fallback(true)
+            .use_state_root_task());
+        assert!(!TreeConfig::default()
+            .with_has_enough_parallelism(true)
+            .with_skip_state_root(true)
+            .use_state_root_task());
+    }
 
     #[test]
     #[should_panic(
