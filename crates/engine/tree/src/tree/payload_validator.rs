@@ -98,9 +98,7 @@
 use crate::tree::{
     error::{InsertBlockError, InsertBlockErrorKind, InsertPayloadError},
     instrumented_state::{InstrumentedStateProvider, StateProviderMetrics, StateProviderStats},
-    payload_processor::{
-        PayloadProcessor, PayloadStateRootHandle, StateRootHintStream, StateRootUpdateStream,
-    },
+    payload_processor::PayloadProcessor,
     precompile_cache::{CachedPrecompile, CachedPrecompileMetrics, PrecompileCacheMap},
     types::{InsertPayloadResult, ValidationOutput},
     CacheWaitDurations, CachedStateProvider, EngineApiMetrics, EngineApiTreeState, ExecutionEnv,
@@ -119,8 +117,9 @@ use reth_tasks::LazyHandle;
 use crate::tree::{
     payload_processor::receipt_root_task::{IndexedReceipt, ReceiptRootTaskHandle},
     state_root_strategy::{
-        DefaultStateRootStrategy, PayloadStateRootJobContext, StateRootJobContext,
-        StateRootStrategy,
+        DefaultStateRootStrategy, LazyHashedPostState, PayloadStateRootHandle,
+        PayloadStateRootJobContext, StateRootHintStream, StateRootJobContext, StateRootStrategy,
+        StateRootUpdateStream,
     },
 };
 use alloy_consensus::constants::KECCAK_EMPTY;
@@ -156,7 +155,7 @@ use reth_provider::{
 use reth_revm::db::{states::bundle_state::BundleRetention, BundleAccount, State};
 use reth_trie::{
     hashed_cursor::HashedCursorFactory, prefix_set::TriePrefixSetsMut,
-    trie_cursor::TrieCursorFactory, updates::TrieUpdates, HashedPostState, LazyTrieData,
+    trie_cursor::TrieCursorFactory, updates::TrieUpdates, LazyTrieData,
 };
 use reth_trie_db::ChangesetCache;
 use std::{
@@ -169,9 +168,6 @@ use std::{
 use tracing::{debug, debug_span, error, info, instrument, trace, warn, Level, Span};
 
 pub use crate::tree::types::ValidationOutcome;
-
-/// Handle to a [`HashedPostState`] computed on a background thread.
-pub type LazyHashedPostState = reth_tasks::LazyHandle<Arc<HashedPostState>>;
 
 /// Multiplier over the parent's gas limit beyond which a block's claimed gas usage cannot be
 /// legitimate. Gas limit can change by at most 1/1024 per block, so anything over this is rejected
@@ -230,14 +226,6 @@ impl<'a, N: NodePrimitives> TreeCtx<'a, N> {
     pub const fn canonical_in_memory_state(&self) -> &'a CanonicalInMemoryState<N> {
         self.canonical_in_memory_state
     }
-
-    /// Takes the pending sparse trie prune request as in-memory parent-chain blocks, if any.
-    pub fn take_sparse_trie_prune_blocks(
-        &mut self,
-        parent_hash: B256,
-    ) -> Option<Vec<ExecutedBlock<N>>> {
-        self.state.take_sparse_trie_prune_blocks(parent_hash)
-    }
 }
 
 /// Pauses JIT helper execution while validating imported payloads.
@@ -284,7 +272,7 @@ where
     evm_config: Evm,
     /// Configuration for the tree.
     config: TreeConfig,
-    /// Payload processor for state root computation.
+    /// Payload processor for transaction conversion, prewarming, and execution caching.
     payload_processor: PayloadProcessor<Evm>,
     /// Precompile cache map.
     precompile_cache_map: PrecompileCacheMap<SpecFor<Evm>>,
@@ -301,6 +289,8 @@ where
     changeset_cache: ChangesetCache,
     /// Task runtime for spawning parallel work.
     runtime: reth_tasks::Runtime,
+    /// Shared state trie in-memory overlay data.
+    state_trie_overlays: StateTrieOverlayManager<Evm::Primitives>,
     /// State-root strategy used to prepare per-block commitment tasks.
     #[debug(skip)]
     state_root_strategy: Arc<dyn StateRootStrategy<Evm::Primitives, P, Evm>>,
@@ -351,7 +341,6 @@ where
             evm_config.clone(),
             &config,
             precompile_cache_map.clone(),
-            state_trie_overlays,
         );
         Self {
             provider,
@@ -366,7 +355,8 @@ where
             validator,
             changeset_cache,
             runtime,
-            state_root_strategy: Arc::new(DefaultStateRootStrategy),
+            state_trie_overlays,
+            state_root_strategy: Arc::new(DefaultStateRootStrategy::default()),
         }
     }
 
@@ -597,20 +587,16 @@ where
         let parallel_bal_execution = ensure_ok!(self.bal_path_eligible(env.decoded_bal.as_deref()));
 
         // Prepare the state-root job before execution so it can provide streaming hooks.
-        let pending_sparse_trie_prune_blocks = (!self.config.skip_state_root() &&
-            !self.config.state_root_fallback() &&
-            self.config.use_state_root_task())
-        .then(|| ctx.take_sparse_trie_prune_blocks(env.parent_hash))
-        .flatten();
         let mut state_root_job =
             ensure_ok!(self.state_root_strategy.prepare(StateRootJobContext::new(
-                &self.payload_processor,
+                &self.runtime,
+                &self.state_trie_overlays,
                 &env,
                 provider_builder.clone(),
                 overlay_factory,
                 &self.config,
                 parallel_bal_execution,
-                pending_sparse_trie_prune_blocks,
+                ctx.state_mut(),
             )));
         let state_root_job_name = state_root_job.name();
 
@@ -747,7 +733,7 @@ where
         let hashed_state_provider = self.provider.clone();
         let mut hashed_state_rx = state_root_job.take_hashed_state_rx();
         let mut hashed_state: LazyHashedPostState =
-            self.payload_processor.executor().spawn_blocking_named("hash-post-state", move || {
+            self.runtime.spawn_blocking_named("hash-post-state", move || {
                 let _span = debug_span!(
                     target: "engine::tree::payload_validator",
                     "hashed_post_state",
@@ -912,7 +898,7 @@ where
         let validator = self.validator.clone();
         let consensus = self.consensus.clone();
         let parent_span = Span::current();
-        self.payload_processor.executor().spawn_blocking_named("payload-convert", move || {
+        self.runtime.spawn_blocking_named("payload-convert", move || {
             let _span = debug_span!(
                 target: "engine::tree::payload_validator",
                 parent: parent_span,
@@ -1183,9 +1169,7 @@ where
         let (receipt_tx, receipt_rx) = crossbeam_channel::unbounded();
         let (result_tx, result_rx) = tokio::sync::oneshot::channel();
         let task_handle = ReceiptRootTaskHandle::new(receipt_rx, result_tx);
-        self.payload_processor
-            .executor()
-            .spawn_blocking_named("receipt-root", move || task_handle.run(receipts_len));
+        self.runtime.spawn_blocking_named("receipt-root", move || task_handle.run(receipts_len));
 
         (receipt_tx, result_rx)
     }
@@ -1504,9 +1488,7 @@ where
         };
 
         // Spawn task that computes trie data asynchronously.
-        self.payload_processor
-            .executor()
-            .spawn_blocking_named(DEFERRED_TRIE_WORKER_NAME, compute_trie_input_task);
+        self.runtime.spawn_blocking_named(DEFERRED_TRIE_WORKER_NAME, compute_trie_input_task);
 
         ExecutedBlock::with_deferred_trie_data(block, execution_outcome, deferred_trie_data)
     }
@@ -1834,7 +1816,8 @@ where
         );
 
         match self.state_root_strategy.prepare_payload_builder(PayloadStateRootJobContext::new(
-            &self.payload_processor,
+            &self.runtime,
+            &self.state_trie_overlays,
             parent_hash,
             parent_header,
             timestamp,
@@ -1862,7 +1845,31 @@ where
     Evm: ConfigureEvm,
 {
     fn wait_for_caches(&self) -> CacheWaitDurations {
-        self.payload_processor.wait_for_caches()
+        debug!(target: "engine::tree::payload_validator", "Waiting for execution cache and sparse trie locks");
+
+        let execution_cache = self.payload_processor.execution_cache();
+        let state_trie_overlays = self.state_trie_overlays.clone();
+        let (execution_tx, execution_rx) = std::sync::mpsc::channel();
+        let (sparse_trie_tx, sparse_trie_rx) = std::sync::mpsc::channel();
+
+        self.runtime.spawn_blocking_named("wait-exec-cache", move || {
+            let _ = execution_tx.send(execution_cache.wait_for_availability());
+        });
+        self.runtime.spawn_blocking_named("wait-sparse-tri", move || {
+            let _ = sparse_trie_tx.send(state_trie_overlays.wait_for_sparse_trie_availability());
+        });
+
+        let execution_cache =
+            execution_rx.recv().expect("execution cache wait task failed to send result");
+        let sparse_trie =
+            sparse_trie_rx.recv().expect("sparse trie wait task failed to send result");
+        debug!(
+            target: "engine::tree::payload_validator",
+            ?execution_cache,
+            ?sparse_trie,
+            "Execution cache and sparse trie locks acquired"
+        );
+        CacheWaitDurations { execution_cache, sparse_trie }
     }
 }
 
