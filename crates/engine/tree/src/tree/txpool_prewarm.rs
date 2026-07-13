@@ -244,7 +244,7 @@ impl TxPoolWorkerActivity {
         generation: u64,
     ) -> Option<TxPoolWorkerActivityGuard> {
         let mut active = self.active.lock().expect("txpool worker activity lock poisoned");
-        if publication.is_paused() || !publication.is_current(generation) {
+        if *active || publication.is_paused() || !publication.is_current(generation) {
             return None
         }
         *active = true;
@@ -612,7 +612,7 @@ fn txpool_prewarm_loop<N, P, Evm>(
             // The deep clone happens privately. Only the short pointer swap below is serialized
             // with `newPayload` snapshot acquisition.
             let snapshot = cache.snapshot(job.parent_hash);
-            let entries = snapshot.entry_counts();
+            let (accounts, storage, bytecodes) = snapshot.entry_counts();
             if publication.publish(active_generation, snapshot) {
                 let selection = inflight.take().expect("published selection is in flight");
                 for transaction in &selection.transactions {
@@ -628,9 +628,9 @@ fn txpool_prewarm_loop<N, P, Evm>(
                     transactions = selection.len(),
                     scanned = selection.scanned,
                     selected_gas = selection.selected_gas,
-                    accounts = entries.0,
-                    storage = entries.1,
-                    bytecodes = entries.2,
+                    accounts,
+                    storage,
+                    bytecodes,
                     "published txpool prewarming snapshot"
                 );
             } else {
