@@ -8,7 +8,7 @@
 use alloy_eips::{
     eip4844::{Blob, BlobAndProofV1, BlobAndProofV2, BlobCellsAndProofsV1, Bytes48},
     eip4895::Withdrawal,
-    eip7594::{Cell, CELLS_PER_EXT_BLOB},
+    eip7594::Cell,
     eip7685::Requests,
 };
 use alloy_primitives::{Address, Bytes, B128, B256, U256};
@@ -32,12 +32,6 @@ pub const MAX_BLOBS_REQUEST: usize = 128;
 
 /// Maximum number of payload bodies in a REST-SSZ request or response.
 pub const MAX_BODIES_REQUEST: usize = 32;
-
-/// Maximum number of entries in each execution-witness byte-list field.
-pub const MAX_EXECUTION_WITNESS_ENTRIES: usize = 1_048_576;
-
-/// Maximum byte length for a single execution-witness node, code, or header entry.
-pub const MAX_EXECUTION_WITNESS_BYTES: usize = 1_048_576;
 
 /// An Engine API v2 SSZ optional encoded as `List[T, 1]`.
 ///
@@ -1137,36 +1131,16 @@ impl TryFrom<LegacyExecutionPayloadBodyV2> for ExecutionPayloadBodyAmsterdam {
 /// REST-SSZ historical bodies-by-hash request.
 ///
 /// This is a single-field container, not a bare SSZ list.
-#[derive(Clone, Debug, PartialEq, Eq, ssz_derive::Encode)]
+#[derive(Clone, Debug, PartialEq, Eq, ssz_derive::Encode, ssz_derive::Decode)]
 pub struct BodiesByHashRequest {
     /// Requested block hashes.
     pub block_hashes: Vec<B256>,
 }
 
-impl ssz::Decode for BodiesByHashRequest {
-    fn is_ssz_fixed_len() -> bool {
-        false
-    }
-
-    fn from_ssz_bytes(bytes: &[u8]) -> Result<Self, ssz::DecodeError> {
-        let mut builder = ssz::SszDecoderBuilder::new(bytes);
-        builder.register_type::<Vec<B256>>()?;
-        let mut decoder = builder.build()?;
-        let request = Self { block_hashes: decoder.decode_next()? };
-        if request.block_hashes.len() > MAX_BODIES_REQUEST {
-            return Err(ssz::DecodeError::BytesInvalid(format!(
-                "too many payload body hashes: expected at most {MAX_BODIES_REQUEST}, got {}",
-                request.block_hashes.len()
-            )))
-        }
-        Ok(request)
-    }
-}
-
 /// Historical body response entry with explicit availability.
 ///
 /// REST-SSZ uses a boolean availability bit instead of the legacy `Option<body>` union.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, ssz_derive::Encode, ssz_derive::Decode)]
 pub struct BodyEntry<T> {
     /// Whether the body is available and belongs to the requested fork.
     pub available: bool,
@@ -1188,63 +1162,7 @@ impl<T: Default> BodyEntry<T> {
     }
 }
 
-impl<T: ssz::Encode> ssz::Encode for BodyEntry<T> {
-    fn is_ssz_fixed_len() -> bool {
-        T::is_ssz_fixed_len()
-    }
-
-    fn ssz_fixed_len() -> usize {
-        if T::is_ssz_fixed_len() {
-            1 + T::ssz_fixed_len()
-        } else {
-            1 + ssz::BYTES_PER_LENGTH_OFFSET
-        }
-    }
-
-    fn ssz_bytes_len(&self) -> usize {
-        1 + if T::is_ssz_fixed_len() {
-            self.body.ssz_bytes_len()
-        } else {
-            ssz::BYTES_PER_LENGTH_OFFSET + self.body.ssz_bytes_len()
-        }
-    }
-
-    fn ssz_append(&self, buf: &mut Vec<u8>) {
-        let fixed_len = 1 + if T::is_ssz_fixed_len() {
-            T::ssz_fixed_len()
-        } else {
-            ssz::BYTES_PER_LENGTH_OFFSET
-        };
-        let mut encoder = ssz::SszEncoder::container(buf, fixed_len);
-        encoder.append(&self.available);
-        encoder.append(&self.body);
-        encoder.finalize();
-    }
-}
-
-impl<T: ssz::Decode> ssz::Decode for BodyEntry<T> {
-    fn is_ssz_fixed_len() -> bool {
-        T::is_ssz_fixed_len()
-    }
-
-    fn ssz_fixed_len() -> usize {
-        if T::is_ssz_fixed_len() {
-            1 + T::ssz_fixed_len()
-        } else {
-            1 + ssz::BYTES_PER_LENGTH_OFFSET
-        }
-    }
-
-    fn from_ssz_bytes(bytes: &[u8]) -> Result<Self, ssz::DecodeError> {
-        let mut builder = ssz::SszDecoderBuilder::new(bytes);
-        builder.register_type::<bool>()?;
-        builder.register_type::<T>()?;
-        let mut decoder = builder.build()?;
-        Ok(Self { available: decoder.decode_next()?, body: decoder.decode_next()? })
-    }
-}
-
-/// Bounded REST-SSZ historical bodies response.
+/// REST-SSZ historical bodies response.
 ///
 /// The response is a one-field SSZ container around the entries list, not a bare list.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -1252,23 +1170,6 @@ pub struct BodiesResponse<T> {
     /// Body entries in request or range order.
     pub entries: Vec<BodyEntry<T>>,
 }
-
-/// Error constructing a bounded REST-SSZ historical bodies response.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum BodiesResponseConversionError {
-    /// The response contains more entries than the SSZ response limit.
-    TooManyEntries,
-}
-
-impl core::fmt::Display for BodiesResponseConversionError {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        match self {
-            Self::TooManyEntries => f.write_str("too many payload body entries"),
-        }
-    }
-}
-
-impl core::error::Error for BodiesResponseConversionError {}
 
 impl<T: Default> BodiesResponse<T> {
     /// Creates a response from optional legacy bodies.
@@ -1278,11 +1179,7 @@ impl<T: Default> BodiesResponse<T> {
     pub fn from_optional_bodies<LegacyBody>(
         bodies: Vec<Option<LegacyBody>>,
         convert: impl Fn(LegacyBody) -> Option<T>,
-    ) -> Result<Self, BodiesResponseConversionError> {
-        if bodies.len() > MAX_BODIES_REQUEST {
-            return Err(BodiesResponseConversionError::TooManyEntries)
-        }
-
+    ) -> Self {
         let entries = bodies
             .into_iter()
             .map(|body| match body.and_then(&convert) {
@@ -1291,43 +1188,7 @@ impl<T: Default> BodiesResponse<T> {
             })
             .collect();
 
-        Ok(Self { entries })
-    }
-}
-
-impl<T: ssz::Encode> ssz::Encode for BodiesResponse<T> {
-    fn is_ssz_fixed_len() -> bool {
-        false
-    }
-
-    fn ssz_bytes_len(&self) -> usize {
-        ssz::BYTES_PER_LENGTH_OFFSET + self.entries.ssz_bytes_len()
-    }
-
-    fn ssz_append(&self, buf: &mut Vec<u8>) {
-        let mut encoder = ssz::SszEncoder::container(buf, ssz::BYTES_PER_LENGTH_OFFSET);
-        encoder.append(&self.entries);
-        encoder.finalize();
-    }
-}
-
-impl<T: ssz::Decode + 'static> ssz::Decode for BodiesResponse<T> {
-    fn is_ssz_fixed_len() -> bool {
-        false
-    }
-
-    fn from_ssz_bytes(bytes: &[u8]) -> Result<Self, ssz::DecodeError> {
-        let mut builder = ssz::SszDecoderBuilder::new(bytes);
-        builder.register_type::<Vec<BodyEntry<T>>>()?;
-        let mut decoder = builder.build()?;
-        let response = Self { entries: decoder.decode_next()? };
-        if response.entries.len() > MAX_BODIES_REQUEST {
-            return Err(ssz::DecodeError::BytesInvalid(format!(
-                "too many payload body entries: expected at most {MAX_BODIES_REQUEST}, got {}",
-                response.entries.len()
-            )))
-        }
-        Ok(response)
+        Self { entries }
     }
 }
 
@@ -1353,7 +1214,7 @@ pub type BodiesResponseAmsterdam = BodiesResponse<ExecutionPayloadBodyAmsterdam>
 ///
 /// This single-field container starts with a four-byte SSZ offset and is not wire-equivalent to a
 /// top-level list.
-#[derive(Clone, Debug, PartialEq, Eq, ssz_derive::Encode)]
+#[derive(Clone, Debug, PartialEq, Eq, ssz_derive::Encode, ssz_derive::Decode)]
 pub struct BlobsV1Request {
     /// Requested versioned blob hashes.
     pub versioned_hashes: Vec<B256>,
@@ -1365,28 +1226,8 @@ pub type BlobsV2Request = BlobsV1Request;
 /// V3 uses the V1 request schema.
 pub type BlobsV3Request = BlobsV1Request;
 
-impl ssz::Decode for BlobsV1Request {
-    fn is_ssz_fixed_len() -> bool {
-        false
-    }
-
-    fn from_ssz_bytes(bytes: &[u8]) -> Result<Self, ssz::DecodeError> {
-        let mut builder = ssz::SszDecoderBuilder::new(bytes);
-        builder.register_type::<Vec<B256>>()?;
-        let mut decoder = builder.build()?;
-        let request = Self { versioned_hashes: decoder.decode_next()? };
-        if request.versioned_hashes.len() > MAX_BLOBS_REQUEST {
-            return Err(ssz::DecodeError::BytesInvalid(format!(
-                "too many blob hashes: expected at most {MAX_BLOBS_REQUEST}, got {}",
-                request.versioned_hashes.len()
-            )))
-        }
-        Ok(request)
-    }
-}
-
 /// V4 blob request container with a packed 128-bit index bitvector.
-#[derive(Clone, Debug, PartialEq, Eq, ssz_derive::Encode)]
+#[derive(Clone, Debug, PartialEq, Eq, ssz_derive::Encode, ssz_derive::Decode)]
 pub struct BlobsV4Request {
     /// Requested versioned blob hashes.
     pub versioned_hashes: Vec<B256>,
@@ -1394,34 +1235,10 @@ pub struct BlobsV4Request {
     pub indices_bitarray: B128,
 }
 
-impl ssz::Decode for BlobsV4Request {
-    fn is_ssz_fixed_len() -> bool {
-        false
-    }
-
-    fn from_ssz_bytes(bytes: &[u8]) -> Result<Self, ssz::DecodeError> {
-        let mut builder = ssz::SszDecoderBuilder::new(bytes);
-        builder.register_type::<Vec<B256>>()?;
-        builder.register_type::<B128>()?;
-        let mut decoder = builder.build()?;
-        let request = Self {
-            versioned_hashes: decoder.decode_next()?,
-            indices_bitarray: decoder.decode_next()?,
-        };
-        if request.versioned_hashes.len() > MAX_BLOBS_REQUEST {
-            return Err(ssz::DecodeError::BytesInvalid(format!(
-                "too many blob hashes: expected at most {MAX_BLOBS_REQUEST}, got {}",
-                request.versioned_hashes.len()
-            )))
-        }
-        Ok(request)
-    }
-}
-
 /// Blob response entry with explicit outer availability.
 ///
 /// REST-SSZ keeps availability separate from the blob contents instead of using a legacy option.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, ssz_derive::Encode, ssz_derive::Decode)]
 pub struct BlobEntry<T> {
     /// Whether the complete blob contents are available.
     pub available: bool,
@@ -1429,66 +1246,10 @@ pub struct BlobEntry<T> {
     pub contents: T,
 }
 
-impl<T: ssz::Encode> ssz::Encode for BlobEntry<T> {
-    fn is_ssz_fixed_len() -> bool {
-        T::is_ssz_fixed_len()
-    }
-
-    fn ssz_fixed_len() -> usize {
-        if T::is_ssz_fixed_len() {
-            1 + T::ssz_fixed_len()
-        } else {
-            1 + ssz::BYTES_PER_LENGTH_OFFSET
-        }
-    }
-
-    fn ssz_bytes_len(&self) -> usize {
-        1 + if T::is_ssz_fixed_len() {
-            self.contents.ssz_bytes_len()
-        } else {
-            ssz::BYTES_PER_LENGTH_OFFSET + self.contents.ssz_bytes_len()
-        }
-    }
-
-    fn ssz_append(&self, buf: &mut Vec<u8>) {
-        let fixed_len = 1 + if T::is_ssz_fixed_len() {
-            T::ssz_fixed_len()
-        } else {
-            ssz::BYTES_PER_LENGTH_OFFSET
-        };
-        let mut encoder = ssz::SszEncoder::container(buf, fixed_len);
-        encoder.append(&self.available);
-        encoder.append(&self.contents);
-        encoder.finalize();
-    }
-}
-
-impl<T: ssz::Decode> ssz::Decode for BlobEntry<T> {
-    fn is_ssz_fixed_len() -> bool {
-        T::is_ssz_fixed_len()
-    }
-
-    fn ssz_fixed_len() -> usize {
-        if T::is_ssz_fixed_len() {
-            1 + T::ssz_fixed_len()
-        } else {
-            1 + ssz::BYTES_PER_LENGTH_OFFSET
-        }
-    }
-
-    fn from_ssz_bytes(bytes: &[u8]) -> Result<Self, ssz::DecodeError> {
-        let mut builder = ssz::SszDecoderBuilder::new(bytes);
-        builder.register_type::<bool>()?;
-        builder.register_type::<T>()?;
-        let mut decoder = builder.build()?;
-        Ok(Self { available: decoder.decode_next()?, contents: decoder.decode_next()? })
-    }
-}
-
 /// Bounded blob response container.
 ///
 /// The outer container and entry availability match the REST-SSZ blob endpoint contract.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, ssz_derive::Encode, ssz_derive::Decode)]
 pub struct BlobsResponse<T> {
     /// One response entry per requested hash.
     pub entries: Vec<BlobEntry<T>>,
@@ -1510,93 +1271,12 @@ pub type BlobsV4Response = BlobsResponse<BlobCellsAndProofs>;
 ///
 /// This uses [`Optional`] (`List[T, 1]`) for per-cell nullability, not Rust [`Option`]'s SSZ
 /// union encoding.
-#[derive(Clone, Debug, Default, PartialEq, Eq, ssz_derive::Encode)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, ssz_derive::Encode, ssz_derive::Decode)]
 pub struct BlobCellsAndProofs {
     /// Requested blob cells.
     pub blob_cells: Vec<Optional<Cell>>,
     /// KZG proofs for the requested blob cells.
     pub proofs: Vec<Optional<Bytes48>>,
-}
-
-impl ssz::Decode for BlobCellsAndProofs {
-    fn is_ssz_fixed_len() -> bool {
-        false
-    }
-
-    fn from_ssz_bytes(bytes: &[u8]) -> Result<Self, ssz::DecodeError> {
-        #[derive(ssz_derive::Decode)]
-        struct Raw {
-            blob_cells: Vec<Optional<Cell>>,
-            proofs: Vec<Optional<Bytes48>>,
-        }
-
-        let raw = Raw::from_ssz_bytes(bytes)?;
-
-        if raw.blob_cells.len() > CELLS_PER_EXT_BLOB {
-            return Err(ssz::DecodeError::BytesInvalid(format!(
-                "Invalid BlobCellsAndProofs: expected at most {CELLS_PER_EXT_BLOB} blob cells, got {}",
-                raw.blob_cells.len()
-            )))
-        }
-
-        if raw.blob_cells.len() != raw.proofs.len() {
-            return Err(ssz::DecodeError::BytesInvalid(format!(
-                "Invalid BlobCellsAndProofs: blob_cells length {} does not match proofs length {}",
-                raw.blob_cells.len(),
-                raw.proofs.len()
-            )))
-        }
-
-        if raw
-            .blob_cells
-            .iter()
-            .zip(raw.proofs.iter())
-            .any(|(cell, proof)| cell.is_some() != proof.is_some())
-        {
-            return Err(ssz::DecodeError::BytesInvalid(
-                "Invalid BlobCellsAndProofs: blob_cells and proofs must have matching optional positions"
-                    .into(),
-            ))
-        }
-
-        Ok(Self { blob_cells: raw.blob_cells, proofs: raw.proofs })
-    }
-}
-
-impl<T: ssz::Encode> ssz::Encode for BlobsResponse<T> {
-    fn is_ssz_fixed_len() -> bool {
-        false
-    }
-
-    fn ssz_bytes_len(&self) -> usize {
-        ssz::BYTES_PER_LENGTH_OFFSET + self.entries.ssz_bytes_len()
-    }
-
-    fn ssz_append(&self, buf: &mut Vec<u8>) {
-        let mut encoder = ssz::SszEncoder::container(buf, ssz::BYTES_PER_LENGTH_OFFSET);
-        encoder.append(&self.entries);
-        encoder.finalize();
-    }
-}
-
-impl<T: ssz::Decode + 'static> ssz::Decode for BlobsResponse<T> {
-    fn is_ssz_fixed_len() -> bool {
-        false
-    }
-
-    fn from_ssz_bytes(bytes: &[u8]) -> Result<Self, ssz::DecodeError> {
-        let mut builder = ssz::SszDecoderBuilder::new(bytes);
-        builder.register_type::<Vec<BlobEntry<T>>>()?;
-        let mut decoder = builder.build()?;
-        let response = Self { entries: decoder.decode_next()? };
-        if response.entries.len() > MAX_BLOBS_REQUEST {
-            return Err(ssz::DecodeError::BytesInvalid(format!(
-                "too many blob response entries: expected at most {MAX_BLOBS_REQUEST}, got {}",
-                response.entries.len()
-            )))
-        }
-        Ok(response)
-    }
 }
 
 fn zero_blob_v1() -> BlobAndProofV1 {
@@ -1700,13 +1380,13 @@ impl TryFrom<Vec<Option<BlobCellsAndProofsV1>>> for BlobsV4Response {
     }
 }
 
-/// A bounded trie-node byte list in an [`ExecutionWitnessV1`].
+/// A trie-node byte list in an [`ExecutionWitnessV1`].
 pub type WitnessNodeV1 = Vec<u8>;
 
-/// A bounded contract-code byte list in an [`ExecutionWitnessV1`].
+/// A contract-code byte list in an [`ExecutionWitnessV1`].
 pub type WitnessCodeV1 = Vec<u8>;
 
-/// A bounded RLP-encoded header byte list in an [`ExecutionWitnessV1`].
+/// An RLP-encoded header byte list in an [`ExecutionWitnessV1`].
 pub type WitnessHeaderV1 = Vec<u8>;
 
 /// Canonical execution witness for `POST /payloads/witness`.
@@ -1716,7 +1396,7 @@ pub type WitnessHeaderV1 = Vec<u8>;
 /// These ordering rules are producer-side requirements from the execution-specs witness builder.
 ///
 /// This is a REST-SSZ wire container, not the JSON-RPC debug witness shape.
-#[derive(Clone, Debug, Default, PartialEq, Eq, ssz_derive::Encode)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, ssz_derive::Encode, ssz_derive::Decode)]
 pub struct ExecutionWitnessV1 {
     /// Hashed trie-node preimages required during execution and state-root recomputation.
     pub state: Vec<WitnessNodeV1>,
@@ -1751,27 +1431,6 @@ impl PayloadStatusWithWitness {
 /// Backwards-compatible alias for the experimental witness response name.
 pub type NewPayloadWithWitnessResponseV1 = PayloadStatusWithWitness;
 
-impl ssz::Decode for ExecutionWitnessV1 {
-    fn is_ssz_fixed_len() -> bool {
-        false
-    }
-
-    fn from_ssz_bytes(bytes: &[u8]) -> Result<Self, ssz::DecodeError> {
-        #[derive(ssz_derive::Decode)]
-        struct Raw {
-            state: Vec<Vec<u8>>,
-            codes: Vec<Vec<u8>>,
-            headers: Vec<Vec<u8>>,
-        }
-
-        let raw = Raw::from_ssz_bytes(bytes)?;
-        validate_witness_list("state", &raw.state)?;
-        validate_witness_list("codes", &raw.codes)?;
-        validate_witness_list("headers", &raw.headers)?;
-        Ok(Self { state: raw.state, codes: raw.codes, headers: raw.headers })
-    }
-}
-
 impl ssz::Decode for PayloadStatusWithWitness {
     fn is_ssz_fixed_len() -> bool {
         false
@@ -1793,22 +1452,6 @@ impl ssz::Decode for PayloadStatusWithWitness {
         }
         Ok(response)
     }
-}
-
-fn validate_witness_list(name: &'static str, values: &[Vec<u8>]) -> Result<(), ssz::DecodeError> {
-    if values.len() > MAX_EXECUTION_WITNESS_ENTRIES {
-        return Err(ssz::DecodeError::BytesInvalid(format!(
-            "too many witness {name} entries: expected at most {MAX_EXECUTION_WITNESS_ENTRIES}, got {}",
-            values.len()
-        )))
-    }
-    if let Some(value) = values.iter().find(|value| value.len() > MAX_EXECUTION_WITNESS_BYTES) {
-        return Err(ssz::DecodeError::BytesInvalid(format!(
-            "witness {name} entry too large: expected at most {MAX_EXECUTION_WITNESS_BYTES} bytes, got {}",
-            value.len()
-        )))
-    }
-    Ok(())
 }
 
 #[cfg(test)]
@@ -2277,8 +1920,7 @@ mod tests {
         let response =
             BodiesResponseShanghai::from_optional_bodies(vec![Some(legacy), None], |body| {
                 ExecutionPayloadBodyShanghai::try_from(body).ok()
-            })
-            .unwrap();
+            });
 
         assert!(response.entries[0].available);
         assert!(!response.entries[1].available);
