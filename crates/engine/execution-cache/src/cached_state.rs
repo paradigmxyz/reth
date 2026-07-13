@@ -93,7 +93,7 @@ type FixedCache<K, V, H = DefaultHashBuilder> = fixed_cache::Cache<K, V, H, Epoc
 /// prewarmers and speculative execution workers that intentionally seed the cache for other
 /// readers. Canonical execution usually leaves this disabled because the EVM database `State`
 /// already caches reads during the block, and the shared cache is updated after the block from the
-/// final execution state. See also [`ExecutionCache::insert_execution_state`].
+/// final execution state. See also [`ExecutionCache::insert_state`].
 ///
 /// Normal cache hit/miss metrics are recorded when [`CachedStateMetrics`] is provided. Slow-block
 /// [`CacheStats`] are controlled separately by [`Self::new_with_mode`].
@@ -994,14 +994,7 @@ impl ExecutionCache {
     /// Inserts post-execution state changes into the cache.
     #[instrument(level = "debug", target = "engine::caching", skip_all)]
     #[expect(clippy::result_unit_err)]
-    pub fn insert_execution_state(&self, state_updates: &EvmState) -> Result<(), ()> {
-        self.insert_state_source(state_updates)
-    }
-
-    fn insert_state_source<S>(&self, state_updates: &S) -> Result<(), ()>
-    where
-        S: EvmStateChangeSource,
-    {
+    pub fn insert_state(&self, state_updates: &EvmState) -> Result<(), ()> {
         let _enter = debug_span!(target: "engine::tree", "state_source").entered();
         let mut sink = ExecutionCacheInsertSink {
             cache: self,
@@ -1330,7 +1323,7 @@ mod tests {
     }
 
     #[test]
-    fn test_insert_execution_state_destroyed_account_with_code_clears_cache() {
+    fn test_insert_state_destroyed_account_with_code_clears_cache() {
         let caches = ExecutionCache::new(1000);
 
         // Pre-populate caches with some data
@@ -1359,7 +1352,7 @@ mod tests {
         );
 
         // Insert state should clear all caches because a contract was destroyed
-        let result = caches.insert_execution_state(&state);
+        let result = caches.insert_state(&state);
         assert!(result.is_ok());
 
         // Verify all caches were cleared
@@ -1369,7 +1362,7 @@ mod tests {
     }
 
     #[test]
-    fn test_insert_execution_state_destroyed_account_without_code_removes_only_account() {
+    fn test_insert_state_destroyed_account_without_code_removes_only_account() {
         let caches = ExecutionCache::new(1000);
 
         // Pre-populate caches with some data
@@ -1392,7 +1385,7 @@ mod tests {
         );
 
         // Insert state should only remove the destroyed account
-        assert!(caches.insert_execution_state(&state).is_ok());
+        assert!(caches.insert_state(&state).is_ok());
 
         // Verify only addr1 was removed, other data is still present
         assert!(caches.0.account_cache.get(&addr1).is_none());
@@ -1401,14 +1394,14 @@ mod tests {
     }
 
     #[test]
-    fn test_insert_execution_state_destroyed_uncached_account_keeps_size_zero() {
+    fn test_insert_state_destroyed_uncached_account_keeps_size_zero() {
         let caches = ExecutionCache::new(1000);
         assert_eq!(caches.0.account_stats.size(), 0);
 
         let addr = Address::random();
         let state = destroyed_account_state(addr, None);
 
-        assert!(caches.insert_execution_state(&state).is_ok());
+        assert!(caches.insert_state(&state).is_ok());
         assert_eq!(caches.0.account_stats.size(), 0);
         assert!(caches.0.account_cache.get(&addr).is_none());
     }
