@@ -72,6 +72,11 @@ impl<Provider, PayloadT: PayloadTypes, Pool, Validator, ChainSpec>
     pub fn chain_spec(&self) -> &Arc<ChainSpec> {
         &self.inner.chain_spec
     }
+
+    /// Returns the configured client version.
+    pub fn client_version(&self) -> &ClientVersionV1 {
+        &self.inner.client
+    }
 }
 
 impl<Provider, PayloadT, Pool, Validator, ChainSpec>
@@ -927,6 +932,25 @@ where
         &self.inner.capabilities
     }
 
+    fn has_blobs(&self, versioned_hashes: Vec<B256>) -> EngineApiResult<Vec<bool>> {
+        if versioned_hashes.len() > MAX_BLOB_LIMIT {
+            return Err(EngineApiError::BlobRequestTooLarge { len: versioned_hashes.len() })
+        }
+
+        self.inner
+            .tx_pool
+            .has_blobs_for_versioned_hashes(&versioned_hashes)
+            .map_err(|err| EngineApiError::Internal(Box::new(err)))
+    }
+
+    /// Metered version of `has_blobs`.
+    pub fn has_blobs_metered(&self, versioned_hashes: Vec<B256>) -> EngineApiResult<Vec<bool>> {
+        let start = Instant::now();
+        let res = Self::has_blobs(self, versioned_hashes);
+        self.inner.metrics.latency.has_blobs.record(start.elapsed());
+        res
+    }
+
     fn get_blobs_v1(
         &self,
         versioned_hashes: Vec<B256>,
@@ -1476,6 +1500,11 @@ where
         Ok(el_caps.list())
     }
 
+    async fn has_blobs(&self, versioned_hashes: Vec<B256>) -> RpcResult<Vec<bool>> {
+        trace!(target: "rpc::engine", "Serving engine_hasBlobs");
+        Ok(self.has_blobs_metered(versioned_hashes)?)
+    }
+
     async fn get_blobs_v1(
         &self,
         versioned_hashes: Vec<B256>,
@@ -1643,6 +1672,25 @@ mod tests {
         let (_, api) = setup_engine_api();
         let res = api.get_client_version_v1(client.clone());
         assert_eq!(res.unwrap(), vec![client]);
+    }
+
+    #[tokio::test]
+    async fn has_blobs_returns_ordered_availability() {
+        let (_, api) = setup_engine_api();
+
+        let res = api.has_blobs_metered(vec![B256::ZERO, B256::with_last_byte(1)]).unwrap();
+        assert_eq!(res, vec![false, false]);
+    }
+
+    #[tokio::test]
+    async fn has_blobs_rejects_large_requests() {
+        let (_, api) = setup_engine_api();
+
+        let res = api.has_blobs_metered(vec![B256::ZERO; MAX_BLOB_LIMIT + 1]);
+        assert_matches!(
+            res,
+            Err(EngineApiError::BlobRequestTooLarge { len }) if len == MAX_BLOB_LIMIT + 1
+        );
     }
 
     #[tokio::test]
@@ -2044,6 +2092,7 @@ mod tests {
             withdrawals: Some(vec![]),
             parent_beacon_block_root: None,
             slot_number: None,
+            target_gas_limit: None,
         };
         let custody_columns = B128::from(0b1010u128);
 
@@ -2099,6 +2148,7 @@ mod tests {
             // Invalid for V3/Cancun, but should be ignored if forkchoice is SYNCING.
             parent_beacon_block_root: None,
             slot_number: None,
+            target_gas_limit: None,
         };
 
         let api_task = tokio::spawn(async move {
@@ -2147,6 +2197,7 @@ mod tests {
             withdrawals: Some(vec![]),
             parent_beacon_block_root: None,
             slot_number: None,
+            target_gas_limit: None,
         };
 
         let api_task = tokio::spawn(async move {

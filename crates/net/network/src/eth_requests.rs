@@ -9,12 +9,16 @@ use alloy_eips::BlockHashOrNumber;
 use alloy_rlp::Encodable;
 use futures::StreamExt;
 use reth_eth_wire::{
+    snap::{BlockAccessListsMessage, SnapProtocolMessage},
     BlockAccessLists, BlockBodies, BlockHeaders, Cells, EthNetworkPrimitives, GetBlockAccessLists,
     GetBlockBodies, GetBlockHeaders, GetCells, GetNodeData, GetReceipts, GetReceipts70,
     HeadersDirection, NetworkPrimitives, NodeData, Receipts, Receipts69, Receipts70,
 };
 use reth_network_api::test_utils::PeersHandle;
-use reth_network_p2p::error::RequestResult;
+use reth_network_p2p::{
+    error::{RequestError, RequestResult},
+    snap::client::SnapResponse,
+};
 use reth_network_peers::PeerId;
 use reth_primitives_traits::Block;
 use reth_storage_api::{BalProvider, BlockReader, GetBlockAccessListLimit, HeaderProvider};
@@ -379,6 +383,48 @@ where
             self.client.bal_store().get_by_hashes_with_limit(&request.0, limit).unwrap_or_default();
         let _ = response.send(Ok(BlockAccessLists(access_lists)));
     }
+
+    /// Handles `snap/2` (EIP-8189) requests.
+    ///
+    /// `GetAccountRange`/`GetStorageRanges`/`GetByteCodes` stay unsupported until a real
+    /// state-trie-backed store exists; an empty response would falsely claim served data.
+    /// `GetBlockAccessLists` is answered from the same [`BalProvider`] store eth71's
+    /// `GetBlockAccessLists` uses, since both serve the same
+    /// underlying data.
+    fn on_snap_request(
+        &self,
+        _peer_id: PeerId,
+        request: SnapProtocolMessage,
+        response: oneshot::Sender<RequestResult<SnapResponse>>,
+    ) {
+        self.metrics.snap_requests_received_total.increment(1);
+
+        let result = match request {
+            SnapProtocolMessage::GetAccountRange(_) |
+            SnapProtocolMessage::GetStorageRanges(_) |
+            SnapProtocolMessage::GetByteCodes(_) => Err(RequestError::UnsupportedCapability),
+            SnapProtocolMessage::GetBlockAccessLists(mut req) => {
+                req.block_hashes.truncate(MAX_BLOCK_ACCESS_LISTS_SERVE);
+                let limit = GetBlockAccessListLimit::ResponseSizeSoftLimit(
+                    (req.response_bytes as usize).min(SOFT_RESPONSE_LIMIT),
+                );
+                let block_access_lists = self
+                    .client
+                    .bal_store()
+                    .get_by_hashes_with_limit(&req.block_hashes, limit)
+                    .unwrap_or_default();
+                Ok(SnapResponse::BlockAccessLists(BlockAccessListsMessage {
+                    request_id: req.request_id,
+                    block_access_lists: BlockAccessLists(block_access_lists),
+                }))
+            }
+            // The peer sent us a response-shaped message instead of a request; not something we
+            // asked for.
+            _ => Err(RequestError::BadResponse),
+        };
+
+        let _ = response.send(result);
+    }
 }
 
 /// An endless future.
@@ -429,6 +475,9 @@ where
                     }
                     IncomingEthRequest::GetCells { peer_id, request, response } => {
                         this.on_cells_request(peer_id, request, response)
+                    }
+                    IncomingEthRequest::GetSnap { peer_id, request, response } => {
+                        this.on_snap_request(peer_id, request, response)
                     }
                 }
             },
@@ -536,6 +585,17 @@ pub enum IncomingEthRequest<N: NetworkPrimitives = EthNetworkPrimitives> {
         request: GetCells,
         /// The channel sender for the response containing cells.
         response: oneshot::Sender<RequestResult<Cells>>,
+    },
+    /// Request a `snap/2` message from the peer.
+    ///
+    /// The response should be sent through the channel.
+    GetSnap {
+        /// The ID of the peer to request from.
+        peer_id: PeerId,
+        /// The `snap/2` request.
+        request: SnapProtocolMessage,
+        /// The channel sender for the response.
+        response: oneshot::Sender<RequestResult<SnapResponse>>,
     },
 }
 
@@ -645,6 +705,13 @@ mod tests {
             _indices_bitarray: B128,
         ) -> Result<Vec<Option<BlobCellsAndProofsV1>>, BlobStoreError> {
             Ok(vec![None; versioned_hashes.len()])
+        }
+
+        fn has_versioned_hashes(
+            &self,
+            versioned_hashes: &[B256],
+        ) -> Result<Vec<bool>, BlobStoreError> {
+            Ok(vec![false; versioned_hashes.len()])
         }
 
         fn get_cells(

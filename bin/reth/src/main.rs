@@ -18,12 +18,15 @@ use reth_node_ethereum::EthereumNode;
 use tracing::info;
 
 fn main() {
-    match reth_node_ethereum::node::maybe_run_jit_helper() {
-        Ok(std::ops::ControlFlow::Break(())) => return,
-        Ok(std::ops::ControlFlow::Continue(())) => {}
-        Err(err) => {
-            eprintln!("Error: {err:?}");
-            std::process::exit(1);
+    #[cfg(feature = "jit")]
+    {
+        match reth_node_ethereum::node::maybe_run_jit_helper() {
+            Ok(std::ops::ControlFlow::Break(())) => return,
+            Ok(std::ops::ControlFlow::Continue(())) => {}
+            Err(err) => {
+                eprintln!("Error: {err:?}");
+                std::process::exit(1);
+            }
         }
     }
 
