@@ -493,13 +493,15 @@ where
         Evm: ConfigureEngineEvm<T::ExecutionData, Primitives = N>,
     {
         let parent_hash = input.parent_hash();
-        let (txpool_snapshot, _txpool_prewarm_guard) =
+        let (txpool_prewarm_snapshot, _txpool_prewarm_guard) =
             if let Some(prewarmer) = self.txpool_prewarm.as_ref() {
                 let (snapshot, guard) = prewarmer.pause_and_snapshot(parent_hash);
                 (snapshot, Some(guard))
             } else {
                 (None, None)
             };
+        let (txpool_snapshot, txpool_hints) =
+            txpool_prewarm_snapshot.map(|snapshot| snapshot.into_parts()).unzip();
         let _jit_pause = JitPauseGuard::new(&self.evm_config);
 
         // Fetch parent block. This goes to memory most of the time unless the parent block is
@@ -606,6 +608,7 @@ where
             withdrawals: input.withdrawals().map(|w| w.to_vec()),
             decoded_bal: decoded_bal.as_ref().map(Arc::clone),
             txpool_snapshot,
+            txpool_hints,
         };
         let validation_txpool_snapshot = env.txpool_snapshot.clone();
 

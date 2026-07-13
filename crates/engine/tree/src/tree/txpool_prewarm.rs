@@ -6,7 +6,7 @@ use crate::tree::{
 use alloy_consensus::{transaction::Recovered, Transaction as _};
 use alloy_evm::Evm;
 use alloy_primitives::{
-    map::{AddressMap, HashSet},
+    map::{AddressMap, B256Map, HashSet},
     Address, BlockNumber, StorageKey, StorageValue, B256,
 };
 use reth_engine_primitives::TxPoolPrewarmingConfig;
@@ -14,6 +14,9 @@ use reth_evm::{ConfigureEvm, EvmEnvFor};
 use reth_primitives_traits::{NodePrimitives, TxTy};
 use reth_provider::{BlockReader, StateProviderBox, StateProviderFactory, StateReader};
 use reth_revm::{database::EvmStateProvider, db::State};
+use reth_trie_common::MultiProofTargetsV2;
+use reth_trie_parallel::state_root_task::StateAccessHint;
+use revm::DatabaseCommit;
 use std::{
     fmt::Debug,
     marker::PhantomData,
@@ -96,12 +99,60 @@ pub trait TxPoolPrewarmSource<N: NodePrimitives>: Send + Sync + Debug {
     fn best_transactions(&self, parent_hash: B256) -> Option<TxPoolPrewarmTransactions<N>>;
 }
 
+/// Immutable per-transaction state-root prefetch hints for one canonical parent.
+#[derive(Clone, Debug, Default)]
+pub struct TxPoolPrewarmHints {
+    inner: Arc<B256Map<Arc<StateAccessHint>>>,
+}
+
+impl TxPoolPrewarmHints {
+    pub(crate) fn new(hints: B256Map<Arc<StateAccessHint>>) -> Self {
+        Self { inner: Arc::new(hints) }
+    }
+
+    fn snapshot(hints: &B256Map<Arc<StateAccessHint>>) -> Self {
+        Self::new(hints.clone())
+    }
+
+    /// Returns the predicted state-root access hint for `transaction_hash`.
+    pub fn get(&self, transaction_hash: &B256) -> Option<&StateAccessHint> {
+        self.inner.get(transaction_hash).map(AsRef::as_ref)
+    }
+
+    /// Returns the number of transactions with published hints.
+    pub fn len(&self) -> usize {
+        self.inner.len()
+    }
+
+    /// Returns whether no transaction hints were published.
+    pub fn is_empty(&self) -> bool {
+        self.inner.is_empty()
+    }
+}
+
 /// A request to warm txpool transactions against one fully validated parent state.
 struct TxPoolPrewarmJob<N: NodePrimitives, P, Evm: ConfigureEvm<Primitives = N>> {
     parent_hash: B256,
     evm_env: EvmEnvFor<Evm>,
     provider_builder: StateProviderBuilder<N, P>,
     block_gas_limit: u64,
+}
+
+/// Cache data and trie hints published atomically for one canonical parent.
+#[derive(Clone, Debug)]
+pub(crate) struct TxPoolPrewarmSnapshot {
+    cache: TxPoolPrewarmCacheSnapshot,
+    hints: TxPoolPrewarmHints,
+}
+
+impl TxPoolPrewarmSnapshot {
+    fn parent_hash(&self) -> B256 {
+        self.cache.parent_hash()
+    }
+
+    pub(crate) fn into_parts(self) -> (TxPoolPrewarmCacheSnapshot, TxPoolPrewarmHints) {
+        (self.cache, self.hints)
+    }
 }
 
 /// Latest-wins canonical-head request slot shared with the worker.
@@ -160,7 +211,7 @@ impl<J> TxPoolPrewarmRequests<J> {
 struct TxPoolSnapshotPublication {
     generation: AtomicU64,
     paused: AtomicBool,
-    snapshot: RwLock<Option<TxPoolPrewarmCacheSnapshot>>,
+    snapshot: RwLock<Option<TxPoolPrewarmSnapshot>>,
 }
 
 impl TxPoolSnapshotPublication {
@@ -189,7 +240,7 @@ impl TxPoolSnapshotPublication {
         self.generation.fetch_add(1, Ordering::SeqCst) + 1
     }
 
-    fn cancel_and_snapshot(&self, parent_hash: B256) -> (Option<TxPoolPrewarmCacheSnapshot>, u64) {
+    fn cancel_and_snapshot(&self, parent_hash: B256) -> (Option<TxPoolPrewarmSnapshot>, u64) {
         let snapshot = self.snapshot.write().expect("txpool snapshot publication lock poisoned");
         self.paused.store(true, Ordering::Release);
         let generation = self.generation.fetch_add(1, Ordering::SeqCst) + 1;
@@ -199,7 +250,7 @@ impl TxPoolSnapshotPublication {
         )
     }
 
-    fn publish(&self, generation: u64, snapshot: TxPoolPrewarmCacheSnapshot) -> bool {
+    fn publish(&self, generation: u64, snapshot: TxPoolPrewarmSnapshot) -> bool {
         let mut published =
             self.snapshot.write().expect("txpool snapshot publication lock poisoned");
         if self.generation.load(Ordering::Acquire) != generation {
@@ -383,7 +434,7 @@ where
     pub(crate) fn pause_and_snapshot(
         &self,
         parent_hash: B256,
-    ) -> (Option<TxPoolPrewarmCacheSnapshot>, TxPoolPrewarmPauseGuard) {
+    ) -> (Option<TxPoolPrewarmSnapshot>, TxPoolPrewarmPauseGuard) {
         let (snapshot, generation) = self.publication.cancel_and_snapshot(parent_hash);
         (
             snapshot,
@@ -432,6 +483,7 @@ fn txpool_prewarm_loop<N, P, Evm>(
     Evm: ConfigureEvm<Primitives = N> + 'static,
 {
     let cache = TxPoolPrewarmCache::new();
+    let mut hints = B256Map::<Arc<StateAccessHint>>::default();
     let mut warmed = HashSet::default();
     let mut warmed_per_sender = AddressMap::<usize>::default();
     let mut sender_prefixes = AddressMap::<Vec<TxPoolPrewarmTransaction<N>>>::default();
@@ -513,6 +565,7 @@ fn txpool_prewarm_loop<N, P, Evm>(
         };
         if new_parent {
             cache.clear();
+            hints.clear();
             warmed.clear();
             warmed_per_sender.clear();
             sender_prefixes.clear();
@@ -595,7 +648,7 @@ fn txpool_prewarm_loop<N, P, Evm>(
             let Some(activity_guard) = activity.try_enter(&publication, active_generation) else {
                 break
             };
-            let completed = catch_unwind(AssertUnwindSafe(|| {
+            let wave_hints = catch_unwind(AssertUnwindSafe(|| {
                 prewarm_transactions(
                     &evm_config,
                     &job,
@@ -611,24 +664,50 @@ fn txpool_prewarm_loop<N, P, Evm>(
                     parent_hash = ?job.parent_hash,
                     "txpool prewarming batch panicked"
                 );
-                false
+                None
             });
             drop(activity_guard);
 
-            if !completed {
+            let Some(wave_hints) = wave_hints else {
                 if publication.is_current(active_generation) && !publication.is_paused() {
                     std::thread::sleep(TXPOOL_REFRESH_INTERVAL);
                 }
                 break
-            }
+            };
             if !publication.is_current(active_generation) {
                 break
             }
 
+            // Replaying a sender prefix can change later transactions' predicted state, and a
+            // replacement can remove the old transaction hash entirely. Replace every hint for
+            // affected prefixes as one completed wave instead of retaining stale entries.
+            for sender in sender_transactions.keys() {
+                if let Some(previous) = sender_prefixes.get(sender) {
+                    for transaction in previous {
+                        hints.remove(&transaction.hash);
+                    }
+                }
+            }
+            for transaction in sender_transactions.values().flatten() {
+                hints.remove(&transaction.hash);
+            }
+            // The live iterator can keep producing transactions for a long-lived head. Reuse the
+            // configured scan breadth as a hard bound on retained per-transaction hint state.
+            for (transaction_hash, hint) in wave_hints {
+                if hints.len() >= config.max_candidate_scan {
+                    break
+                }
+                hints.insert(transaction_hash, hint);
+            }
+
             // The deep clone happens privately. Only the short pointer swap below is serialized
             // with `newPayload` snapshot acquisition.
-            let snapshot = cache.snapshot(job.parent_hash);
-            let (accounts, storage, bytecodes) = snapshot.entry_counts();
+            let snapshot = TxPoolPrewarmSnapshot {
+                cache: cache.snapshot(job.parent_hash),
+                hints: TxPoolPrewarmHints::snapshot(&hints),
+            };
+            let (accounts, storage, bytecodes) = snapshot.cache.entry_counts();
+            let hinted_transactions = snapshot.hints.len();
             if publication.publish(active_generation, snapshot) {
                 let selection = inflight.take().expect("published selection is in flight");
                 for transaction in &selection.transactions {
@@ -647,6 +726,7 @@ fn txpool_prewarm_loop<N, P, Evm>(
                     accounts,
                     storage,
                     bytecodes,
+                    hinted_transactions,
                     "published txpool prewarming snapshot"
                 );
             } else {
@@ -766,15 +846,17 @@ fn prewarm_transactions<N, P, Evm>(
     transactions: &AddressMap<Vec<TxPoolPrewarmTransaction<N>>>,
     generation: u64,
     publication: &TxPoolSnapshotPublication,
-) -> bool
+) -> Option<B256Map<Arc<StateAccessHint>>>
 where
     N: NodePrimitives,
     P: BlockReader + StateProviderFactory + StateReader + Clone,
     Evm: ConfigureEvm<Primitives = N>,
 {
+    let mut hints = B256Map::default();
+
     for sender_transactions in transactions.values() {
         if !publication.is_current(generation) {
-            return false
+            return None
         }
 
         let state_provider = match job.provider_builder.build() {
@@ -786,7 +868,7 @@ where
                     parent_hash = ?job.parent_hash,
                     "failed to build txpool prewarming state provider"
                 );
-                return false
+                return None
             }
         };
         let state_provider = TxPoolPrewarmStateProvider { inner: state_provider, cache };
@@ -799,22 +881,35 @@ where
 
         for transaction in sender_transactions {
             if !publication.is_current(generation) {
-                return false
+                return None
             }
 
-            if let Err(err) = evm.transact_commit(transaction.transaction.clone()) {
-                trace!(
-                    target: "engine::tree::txpool_prewarm",
-                    %err,
-                    tx_hash = ?transaction.hash,
-                    sender = %transaction.sender,
-                    "speculative txpool transaction execution failed"
-                );
+            match evm.transact(transaction.transaction.clone()) {
+                Ok(result) => {
+                    if !publication.is_current(generation) {
+                        return None
+                    }
+
+                    let (targets, _) = MultiProofTargetsV2::from_state_ref(&result.state);
+                    evm.db_mut().commit(result.state);
+                    if !targets.is_empty() {
+                        hints.insert(transaction.hash, Arc::new(targets.into()));
+                    }
+                }
+                Err(err) => {
+                    trace!(
+                        target: "engine::tree::txpool_prewarm",
+                        %err,
+                        tx_hash = ?transaction.hash,
+                        sender = %transaction.sender,
+                        "speculative txpool transaction execution failed"
+                    );
+                }
             }
         }
     }
 
-    true
+    Some(hints)
 }
 
 /// Provider that fills only the reusable txpool-prewarm cache.
@@ -893,5 +988,69 @@ mod tests {
         assert!(selection.is_empty());
         assert!(!panicked);
         assert!(exhausted);
+    }
+
+    fn snapshot(parent_hash: B256, hints: B256Map<Arc<StateAccessHint>>) -> TxPoolPrewarmSnapshot {
+        TxPoolPrewarmSnapshot {
+            cache: TxPoolPrewarmCache::new().snapshot(parent_hash),
+            hints: TxPoolPrewarmHints::new(hints),
+        }
+    }
+
+    #[test]
+    fn hint_snapshot_is_immutable() {
+        let first_hash = B256::with_last_byte(1);
+        let second_hash = B256::with_last_byte(2);
+        let mut hints = B256Map::from_iter([(
+            first_hash,
+            Arc::new(StateAccessHint {
+                accounts: vec![B256::with_last_byte(3)],
+                storages: B256Map::default(),
+            }),
+        )]);
+
+        let snapshot = TxPoolPrewarmHints::snapshot(&hints);
+        hints.insert(second_hash, Arc::new(StateAccessHint::default()));
+
+        assert!(snapshot.get(&first_hash).is_some());
+        assert!(snapshot.get(&second_hash).is_none());
+    }
+
+    #[test]
+    fn publication_returns_cache_and_hints_for_matching_parent() {
+        let parent_hash = B256::with_last_byte(1);
+        let transaction_hash = B256::with_last_byte(2);
+        let publication = TxPoolSnapshotPublication::default();
+        let generation = publication.begin_head().unwrap();
+        let published = snapshot(
+            parent_hash,
+            B256Map::from_iter([(
+                transaction_hash,
+                Arc::new(StateAccessHint {
+                    accounts: vec![B256::with_last_byte(3)],
+                    storages: B256Map::default(),
+                }),
+            )]),
+        );
+
+        assert!(publication.publish(generation, published));
+        let (published, _) = publication.cancel_and_snapshot(parent_hash);
+        let (cache, hints) = published.unwrap().into_parts();
+
+        assert_eq!(cache.parent_hash(), parent_hash);
+        assert!(hints.get(&transaction_hash).is_some());
+    }
+
+    #[test]
+    fn publication_rejects_snapshot_for_other_parent() {
+        let publication = TxPoolSnapshotPublication::default();
+        let generation = publication.begin_head().unwrap();
+
+        assert!(
+            publication.publish(generation, snapshot(B256::with_last_byte(1), B256Map::default()))
+        );
+        let (published, _) = publication.cancel_and_snapshot(B256::with_last_byte(2));
+
+        assert!(published.is_none());
     }
 }
