@@ -678,8 +678,7 @@ where
         &mut self,
         value_encoder: &mut VE,
         targets: &mut Option<TargetsCursor<'a>>,
-        hashed_cursor_current: &mut Option<(Nibbles, VE::DeferredEncoder)>,
-        hashed_cursor_exhausted_at: &mut Option<Nibbles>,
+        hashed_cursor_state: &mut HashedCursorState<VE::DeferredEncoder>,
         lower_bound: Nibbles,
         upper_bound: Option<Nibbles>,
     ) -> Result<(), StateProofError> {
@@ -695,30 +694,31 @@ where
 
         // If the cursor hasn't been used, or the last iterated key is prior to this range's key
         // range, then seek forward to at least the first key.
-        if hashed_cursor_current.as_ref().is_none_or(|(key, _)| key < &lower_bound) &&
-            hashed_cursor_exhausted_at.as_ref().is_none_or(|key| key > &lower_bound)
-        {
+        if hashed_cursor_state.needs_seek_to(&lower_bound) {
             trace!(
                 target: TRACE_TARGET,
-                current=?hashed_cursor_current.as_ref().map(|(k, _)| k),
+                current=?hashed_cursor_state.path(),
                 "Seeking hashed cursor to meet lower bound",
             );
 
             let lower_key = B256::right_padding_from(&lower_bound.pack());
-            *hashed_cursor_current =
-                self.hashed_cursor.seek(lower_key)?.map(&mut map_hashed_cursor_entry);
-            *hashed_cursor_exhausted_at = hashed_cursor_current.is_none().then_some(lower_bound);
+            *hashed_cursor_state = HashedCursorState::seeked(
+                lower_bound,
+                self.hashed_cursor.seek(lower_key)?.map(&mut map_hashed_cursor_entry),
+            );
         }
 
         // Loop over all keys in the range, calling `push_leaf` on each.
-        while let Some((key, _)) = hashed_cursor_current.as_ref() &&
-            upper_bound.is_none_or(|upper_bound| key < &upper_bound)
+        while hashed_cursor_state
+            .path()
+            .is_some_and(|key| upper_bound.is_none_or(|upper_bound| key < &upper_bound))
         {
-            let (key, val) =
-                core::mem::take(hashed_cursor_current).expect("while-let checks for Some");
+            let (key, val) = hashed_cursor_state.take();
             self.push_leaf(targets, key, val)?;
-            *hashed_cursor_current = self.hashed_cursor.next()?.map(&mut map_hashed_cursor_entry);
-            *hashed_cursor_exhausted_at = hashed_cursor_current.is_none().then_some(key);
+            *hashed_cursor_state = HashedCursorState::seeked(
+                key,
+                self.hashed_cursor.next()?.map(&mut map_hashed_cursor_entry),
+            );
         }
 
         trace!(target: TRACE_TARGET, "No further keys within range");
@@ -1308,8 +1308,7 @@ where
         &mut self,
         value_encoder: &mut VE,
         trie_cursor_state: &mut TrieCursorState,
-        hashed_cursor_current: &mut Option<(Nibbles, VE::DeferredEncoder)>,
-        hashed_cursor_exhausted_at: &mut Option<Nibbles>,
+        hashed_cursor_state: &mut HashedCursorState<VE::DeferredEncoder>,
         sub_trie_targets: SubTrieTargets<'a>,
     ) -> Result<(), StateProofError> {
         let sub_trie_upper_bound = sub_trie_targets.upper_bound();
@@ -1344,13 +1343,10 @@ where
             self.trie_cursor_seek(sub_trie_targets.prefix)?,
         );
 
-        if hashed_cursor_current.as_ref().is_some_and(|(key, _)| key > &sub_trie_targets.prefix) ||
-            hashed_cursor_exhausted_at.as_ref().is_some_and(|key| key > &sub_trie_targets.prefix)
-        {
+        if hashed_cursor_state.needs_reset_before_seek(&sub_trie_targets.prefix) {
             trace!(target: TRACE_TARGET, "Resetting hashed cursor before sub-trie");
             self.hashed_cursor.reset();
-            *hashed_cursor_current = None;
-            *hashed_cursor_exhausted_at = None;
+            *hashed_cursor_state = HashedCursorState::unseeked();
         }
 
         // `uncalculated_lower_bound` tracks the lower bound of node paths which have yet to be
@@ -1400,21 +1396,20 @@ where
             self.calculate_key_range(
                 value_encoder,
                 &mut targets,
-                hashed_cursor_current,
-                hashed_cursor_exhausted_at,
+                hashed_cursor_state,
                 calc_lower_bound,
                 calc_upper_bound,
             )?;
 
-            // Once outside `calculate_key_range`, `hashed_cursor_current` will be at the first key
-            // after the range.
+            // Once outside `calculate_key_range`, `hashed_cursor_state` will be at the first key
+            // after the range, or exhausted.
             //
-            // If the `hashed_cursor_current` is None (exhausted), or not within the range of the
+            // If the hashed cursor is exhausted, or not within the range of the
             // sub-trie, then there are no more keys at all, meaning the trie couldn't possibly have
             // more data and we should complete computation.
-            if hashed_cursor_current
-                .as_ref()
-                .is_none_or(|(key, _)| !key.starts_with(&sub_trie_targets.prefix))
+            if hashed_cursor_state
+                .path()
+                .is_none_or(|key| !key.starts_with(&sub_trie_targets.prefix))
             {
                 break;
             }
@@ -1500,8 +1495,7 @@ where
         // Initialize the variables which track the state of the two cursors. Both indicate the
         // cursors are unseeked.
         let mut trie_cursor_state = TrieCursorState::unseeked();
-        let mut hashed_cursor_current: Option<(Nibbles, VE::DeferredEncoder)> = None;
-        let mut hashed_cursor_exhausted_at: Option<Nibbles> = None;
+        let mut hashed_cursor_state = HashedCursorState::unseeked();
 
         // Divide targets into chunks, each chunk corresponding to a different sub-trie within the
         // overall trie, and handle all proofs within that sub-trie.
@@ -1509,8 +1503,7 @@ where
             if let Err(err) = self.proof_subtrie(
                 value_encoder,
                 &mut trie_cursor_state,
-                &mut hashed_cursor_current,
-                &mut hashed_cursor_exhausted_at,
+                &mut hashed_cursor_state,
                 sub_trie_targets,
             ) {
                 self.clear_computation_state();
@@ -1584,8 +1577,7 @@ where
         // Initialize the variables which track the state of the two cursors. Both indicate the
         // cursors are unseeked.
         let mut trie_cursor_state = TrieCursorState::unseeked();
-        let mut hashed_cursor_current: Option<(Nibbles, VE::DeferredEncoder)> = None;
-        let mut hashed_cursor_exhausted_at: Option<Nibbles> = None;
+        let mut hashed_cursor_state = HashedCursorState::unseeked();
 
         static EMPTY_TARGETS: [ProofV2Target; 0] = [];
         let sub_trie_targets =
@@ -1594,8 +1586,7 @@ where
         if let Err(err) = self.proof_subtrie(
             value_encoder,
             &mut trie_cursor_state,
-            &mut hashed_cursor_current,
-            &mut hashed_cursor_exhausted_at,
+            &mut hashed_cursor_state,
             sub_trie_targets,
         ) {
             self.clear_computation_state();
@@ -1810,6 +1801,62 @@ impl TrieCursorState {
         };
 
         (path, node)
+    }
+}
+
+/// Used to track the state of the hashed cursor, including the path that established exhaustion.
+enum HashedCursorState<V> {
+    /// The initial state of the cursor, indicating it's never been seeked.
+    Unseeked,
+    /// Cursor is seeked to this path and the value has not been used yet.
+    Available(Nibbles, V),
+    /// Cursor has been exhausted at or after the given path.
+    Exhausted(Nibbles),
+}
+
+impl<V> HashedCursorState<V> {
+    /// Creates a [`Self::Unseeked`] state.
+    const fn unseeked() -> Self {
+        Self::Unseeked
+    }
+
+    /// Creates a [`Self`] based on an entry returned from the cursor itself.
+    fn seeked(key: Nibbles, entry: Option<(Nibbles, V)>) -> Self {
+        entry.map_or(Self::Exhausted(key), |(path, value)| Self::Available(path, value))
+    }
+
+    /// Returns the path the cursor is seeked to, or None if it's unseeked or exhausted.
+    const fn path(&self) -> Option<&Nibbles> {
+        match self {
+            Self::Available(path, _) => Some(path),
+            Self::Unseeked | Self::Exhausted(_) => None,
+        }
+    }
+
+    /// Returns true if the cursor must seek to be usable for a range starting at `key`.
+    fn needs_seek_to(&self, key: &Nibbles) -> bool {
+        match self {
+            Self::Unseeked => true,
+            Self::Available(path, _) => path < key,
+            Self::Exhausted(exhausted_at) => exhausted_at > key,
+        }
+    }
+
+    /// Returns true if seeking to `key` requires resetting the forward-only cursor.
+    fn needs_reset_before_seek(&self, key: &Nibbles) -> bool {
+        match self {
+            Self::Unseeked => false,
+            Self::Available(path, _) => path > key,
+            Self::Exhausted(exhausted_at) => exhausted_at > key,
+        }
+    }
+
+    /// Takes the path and value from a [`Self::Available`]. Panics if not [`Self::Available`].
+    fn take(&mut self) -> (Nibbles, V) {
+        match core::mem::replace(self, Self::Unseeked) {
+            Self::Available(path, value) => (path, value),
+            _ => panic!("take called on non-Available hashed cursor state"),
+        }
     }
 }
 
