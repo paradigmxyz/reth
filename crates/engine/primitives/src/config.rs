@@ -117,7 +117,7 @@ impl TxPoolPrewarmingConfig {
     };
 
     /// Returns whether this configuration can launch work.
-    pub const fn should_prewarm(self) -> bool {
+    pub const fn should_prewarm(&self) -> bool {
         self.enabled &&
             self.max_transactions_per_sender > 0 &&
             self.max_candidate_scan > 0 &&
