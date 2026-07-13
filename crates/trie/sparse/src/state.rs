@@ -8,8 +8,10 @@ use alloc::vec::Vec;
 use alloy_primitives::{map::B256Map, B256};
 use either::Either;
 use reth_execution_errors::{SparseStateTrieResult, SparseTrieErrorKind};
+#[cfg(feature = "std")]
+use reth_trie_common::prefix_set::{PrefixSet, TriePrefixSets};
 use reth_trie_common::{
-    prefix_set::{PrefixSet, PrefixSetMut, TriePrefixSets, TriePrefixSetsMut},
+    prefix_set::{PrefixSetMut, TriePrefixSetsMut},
     updates::{StorageTrieUpdates, TrieUpdates},
     DecodedMultiProof, MultiProof, Nibbles, ProofTrieNodeV2,
 };
