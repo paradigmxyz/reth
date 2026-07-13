@@ -662,31 +662,6 @@ where
         }
     }
 
-    fn deferred_hashed_cursor_entry(
-        value_encoder: &mut VE,
-        (key_b256, val): (B256, HC::Value),
-    ) -> (Nibbles, VE::DeferredEncoder) {
-        debug_assert_eq!(key_b256.len(), 32);
-        let key = Nibbles::unpack_array(key_b256.as_ref());
-        let val = value_encoder.deferred_encoder(key_b256, val);
-        (key, val)
-    }
-
-    /// Seeks the hashed cursor and updates the cached current entry.
-    fn seek_hashed_cursor(
-        &mut self,
-        value_encoder: &mut VE,
-        hashed_cursor_current: &mut Option<(Nibbles, VE::DeferredEncoder)>,
-        lower_bound: Nibbles,
-    ) -> Result<(), StateProofError> {
-        let lower_key = B256::right_padding_from(&lower_bound.pack());
-        *hashed_cursor_current = self
-            .hashed_cursor
-            .seek(lower_key)?
-            .map(|entry| Self::deferred_hashed_cursor_entry(value_encoder, entry));
-        Ok(())
-    }
-
     /// Given the lower and upper bounds (exclusive) of a range of keys, iterates over the
     /// `hashed_cursor` and calculates all trie nodes possible based on those keys. If the upper
     /// bound is None then it is considered unbounded.
@@ -707,6 +682,16 @@ where
         lower_bound: Nibbles,
         upper_bound: Option<Nibbles>,
     ) -> Result<(), StateProofError> {
+        // A helper closure for mapping entries returned from the `hashed_cursor`, converting the
+        // key to Nibbles and immediately creating the DeferredValueEncoder so that encoding of the
+        // leaf value can begin ASAP.
+        let mut map_hashed_cursor_entry = |(key_b256, val): (B256, _)| {
+            debug_assert_eq!(key_b256.len(), 32);
+            let key = Nibbles::unpack_array(key_b256.as_ref());
+            let val = value_encoder.deferred_encoder(key_b256, val);
+            (key, val)
+        };
+
         // If the cursor hasn't been used, or the last iterated key is prior to this range's key
         // range, then seek forward to at least the first key.
         if hashed_cursor_current.as_ref().is_none_or(|(key, _)| key < &lower_bound) {
@@ -716,7 +701,9 @@ where
                 "Seeking hashed cursor to meet lower bound",
             );
 
-            self.seek_hashed_cursor(value_encoder, hashed_cursor_current, lower_bound)?;
+            let lower_key = B256::right_padding_from(&lower_bound.pack());
+            *hashed_cursor_current =
+                self.hashed_cursor.seek(lower_key)?.map(&mut map_hashed_cursor_entry);
         }
 
         // Loop over all keys in the range, calling `push_leaf` on each.
@@ -726,10 +713,7 @@ where
             let (key, val) =
                 core::mem::take(hashed_cursor_current).expect("while-let checks for Some");
             self.push_leaf(targets, key, val)?;
-            *hashed_cursor_current = self
-                .hashed_cursor
-                .next()?
-                .map(|entry| Self::deferred_hashed_cursor_entry(value_encoder, entry));
+            *hashed_cursor_current = self.hashed_cursor.next()?.map(&mut map_hashed_cursor_entry);
         }
 
         trace!(target: TRACE_TARGET, "No further keys within range");
@@ -1344,8 +1328,8 @@ where
             TrieCursorState::seeked(self.trie_cursor_seek(sub_trie_targets.prefix)?);
 
         if hashed_cursor_current.as_ref().is_some_and(|(key, _)| key >= &sub_trie_targets.prefix) {
-            trace!(target: TRACE_TARGET, "Doing initial seek of hashed cursor");
-            self.seek_hashed_cursor(value_encoder, hashed_cursor_current, sub_trie_targets.prefix)?;
+            trace!(target: TRACE_TARGET, "Resetting hashed cursor before sub-trie");
+            *hashed_cursor_current = None;
         }
 
         // `uncalculated_lower_bound` tracks the lower bound of node paths which have yet to be
