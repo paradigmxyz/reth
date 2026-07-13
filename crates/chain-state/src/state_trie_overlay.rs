@@ -4,9 +4,7 @@
 //! parent has not been persisted yet. [`StateTrieOverlayManager`] tracks those in-memory blocks and
 //! builds reusable flattened state trie overlays on demand.
 
-use crate::{
-    EthPrimitives, ExecutedBlock, PreservedSparseTrie, PreservedSparseTrieState, PreservedTrieGuard,
-};
+use crate::{EthPrimitives, ExecutedBlock, PreservedSparseTrie, PreservedSparseTrieState};
 use alloy_primitives::B256;
 use parking_lot::Mutex;
 use reth_metrics::{
@@ -93,12 +91,14 @@ impl<N: NodePrimitives> StateTrieOverlayManager<N> {
         self.preserved_sparse_trie.lock().take()
     }
 
-    /// Acquires a guard that blocks taking the trie until dropped.
-    ///
-    /// Use this before sending the state root result to ensure the next block waits for the trie
-    /// to be stored.
-    pub fn lock_sparse_trie(&self) -> PreservedTrieGuard<'_> {
-        PreservedTrieGuard::new(self.preserved_sparse_trie.lock())
+    /// Stores a preserved sparse trie for later reuse.
+    pub fn store_sparse_trie(&self, trie: PreservedSparseTrie) {
+        self.preserved_sparse_trie.lock().store(trie);
+    }
+
+    /// Clears any preserved sparse trie state.
+    pub fn clear_sparse_trie(&self) {
+        self.preserved_sparse_trie.lock().clear();
     }
 
     /// Waits until the sparse trie lock becomes available.
@@ -777,14 +777,11 @@ mod tests {
         let other_state_root = B256::with_last_byte(2);
         let anchor_hash = B256::with_last_byte(3);
 
-        {
-            let mut guard = manager.lock_sparse_trie();
-            guard.store(PreservedSparseTrie::anchored(
-                SparseTrie::default(),
-                state_root,
-                anchor_hash,
-            ));
-        }
+        manager.store_sparse_trie(PreservedSparseTrie::anchored(
+            SparseTrie::default(),
+            state_root,
+            anchor_hash,
+        ));
 
         let preserved = manager.take_sparse_trie().expect("preserved trie should be available");
         assert_eq!(preserved.state_root(), state_root);
@@ -792,10 +789,7 @@ mod tests {
         assert!(preserved.into_trie_for(other_state_root).unwrap().is_none());
         assert!(manager.take_sparse_trie().is_none());
 
-        {
-            let mut guard = manager.lock_sparse_trie();
-            guard.clear();
-        }
+        manager.clear_sparse_trie();
         assert!(manager.take_sparse_trie().is_none());
     }
 

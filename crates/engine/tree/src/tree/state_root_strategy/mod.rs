@@ -667,7 +667,6 @@ impl DefaultStateRootStrategy {
 
             // Publish a handle before sending the result so the next block can inspect the
             // state root immediately while the trie is finalized for reuse below.
-            let mut guard = state_trie_overlays.lock_sparse_trie();
             let pending_trie = if let Some(result) = &task_result {
                 let preserved_anchor_hash = pending_sparse_trie_prune_blocks
                     .as_ref()
@@ -677,10 +676,10 @@ impl DefaultStateRootStrategy {
                     .unwrap_or(sparse_trie_anchor_hash);
                 let (preserved, completer) =
                     PreservedSparseTrie::pending(result.state_root, preserved_anchor_hash);
-                guard.store(preserved);
+                state_trie_overlays.store_sparse_trie(preserved);
                 Some(completer)
             } else {
-                guard.clear();
+                state_trie_overlays.clear_sparse_trie();
                 None
             };
 
@@ -690,13 +689,11 @@ impl DefaultStateRootStrategy {
                     "State root receiver dropped, dropping trie"
                 );
                 let (trie, deferred) = task.into_cleared_trie();
-                guard.clear();
-                drop(guard);
+                state_trie_overlays.clear_sparse_trie();
                 executor.spawn_drop(trie);
                 executor.spawn_drop(deferred);
                 return;
             }
-            drop(guard);
 
             let _enter =
                 debug_span!(target: "engine::tree::payload_processor", "preserve").entered();
