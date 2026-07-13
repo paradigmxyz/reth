@@ -2,7 +2,10 @@
 //! `WebSocket` subscription tests for `eth_subscribe` / `eth_unsubscribe`
 
 use crate::utils::{launch_ws, test_rpc_builder};
-use jsonrpsee::core::client::{Subscription, SubscriptionClientT};
+use jsonrpsee::{
+    core::client::{Error, Subscription, SubscriptionClientT},
+    types::error::ErrorCode,
+};
 use reth_rpc_server_types::RpcModuleSelection;
 use reth_tokio_util::EventSender;
 use serde_json::Value;
@@ -117,11 +120,20 @@ async fn test_eth_subscribe_logs_pending_block_filter_rejected() {
     ];
 
     for filter in cases {
-        let result: Result<Subscription<Value>, _> = client
-            .subscribe("eth_subscribe", jsonrpsee::rpc_params!["logs", filter], "eth_unsubscribe")
-            .await;
+        let err = client
+            .subscribe::<Value, _>(
+                "eth_subscribe",
+                jsonrpsee::rpc_params!["logs", filter],
+                "eth_unsubscribe",
+            )
+            .await
+            .unwrap_err();
 
-        assert!(result.is_err(), "pending logs filter must be rejected");
+        let Error::Call(err) = err else {
+            panic!("pending logs filter returned unexpected error: {err}")
+        };
+        assert_eq!(err.code(), ErrorCode::InvalidParams.code());
+        assert_eq!(err.message(), "pending block filters are not supported for logs subscriptions");
     }
 }
 

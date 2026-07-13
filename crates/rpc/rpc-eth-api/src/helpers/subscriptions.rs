@@ -22,8 +22,7 @@ pub trait EthSubscriptions:
     fn log_stream(
         &self,
         filter: Filter,
-    ) -> Result<impl futures::Stream<Item = Log> + Send + Unpin + 'static, ErrorObject<'static>>
-    {
+    ) -> Result<impl futures::Stream<Item = Log> + Send + Unpin, ErrorObject<'static>> {
         let (from_block, to_block) = filter.block_option.as_range();
         if from_block.is_some_and(|block| block.is_pending()) ||
             to_block.is_some_and(|block| block.is_pending())

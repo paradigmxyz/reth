@@ -79,7 +79,7 @@ where
     pub fn log_stream(
         &self,
         filter: Filter,
-    ) -> Result<impl Stream<Item = Log> + Send + Unpin + 'static, ErrorObject<'static>> {
+    ) -> Result<impl Stream<Item = Log> + Send + Unpin, ErrorObject<'static>> {
         self.inner.eth_api.log_stream(filter)
     }
 
@@ -215,16 +215,18 @@ where
         params: Option<Params>,
     ) -> jsonrpsee::core::SubscriptionResult {
         if kind == SubscriptionKind::Logs {
-            let stream = match logs_filter(params).and_then(|filter| self.log_stream(filter)) {
-                Ok(stream) => stream,
-                Err(err) => {
-                    pending.reject(err).await;
-                    return Ok(())
-                }
-            };
-
-            let sink = pending.accept().await?;
+            let pubsub = self.clone();
             self.inner.subscription_task_spawner.spawn_task(async move {
+                let stream = match logs_filter(params).and_then(|filter| pubsub.log_stream(filter))
+                {
+                    Ok(stream) => stream,
+                    Err(err) => {
+                        pending.reject(err).await;
+                        return
+                    }
+                };
+
+                let Ok(sink) = pending.accept().await else { return };
                 let _ = pipe_from_stream(sink, stream).await;
             });
 
