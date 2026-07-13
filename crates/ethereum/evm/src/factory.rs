@@ -2,7 +2,7 @@
 use alloc::string::String;
 use alloc::{boxed::Box, sync::Arc};
 use alloy_consensus::Header;
-use reth_chainspec::{ChainSpec, EthChainSpec};
+use reth_chainspec::{ChainSpec, EthChainSpec, EthereumHardforks};
 #[cfg(feature = "std")]
 use reth_evm::precompile_cache::{CachedPrecompileProvider, PrecompileCacheMap};
 
@@ -105,7 +105,7 @@ impl<C, EvmFactory> EthBlockExecutorFactory<C, EvmFactory> {
         ctx: EthBlockExecutionCtx<'a>,
     ) -> EthBlockExecutor<'a>
     where
-        C: EthChainSpec<Header = Header>,
+        C: EthChainSpec<Header = Header> + EthereumHardforks,
     {
         self.create_executor_with_hashed_state_mode(evm, ctx, HashedStateMode::OutputOnly)
     }
@@ -118,11 +118,12 @@ impl<C, EvmFactory> EthBlockExecutorFactory<C, EvmFactory> {
         hashed_state_mode: HashedStateMode,
     ) -> EthBlockExecutor<'a>
     where
-        C: EthChainSpec<Header = Header>,
+        C: EthChainSpec<Header = Header> + EthereumHardforks,
     {
         EthBlockExecutor::new(
             evm,
             ctx,
+            self.chain_spec.as_ref(),
             self.chain_spec.chain_id(),
             self.chain_spec.deposit_contract().map(|contract| contract.address),
             hashed_state_mode,
@@ -181,7 +182,7 @@ impl<C, EvmFactory> EthBlockExecutorFactory<C, EvmFactory> {
 
 impl<C, EvmFactory> reth_evm::BlockExecutorFactory for EthBlockExecutorFactory<C, EvmFactory>
 where
-    C: EthChainSpec<Header = Header>,
+    C: EthChainSpec<Header = Header> + EthereumHardforks,
     EvmFactory: 'static,
 {
     type Primitives = EthPrimitives;

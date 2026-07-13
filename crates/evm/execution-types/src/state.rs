@@ -1,7 +1,7 @@
-use alloc::collections::BTreeMap;
+use alloc::{collections::BTreeMap, vec::Vec};
 use alloy_consensus::constants::KECCAK_EMPTY;
 use alloy_primitives::{
-    map::{AddressMap, B256Set},
+    map::{AddressMap, AddressSet, B256Set},
     Address, B256, U256,
 };
 use core::{convert::Infallible, marker::PhantomData};
@@ -9,7 +9,7 @@ use evm2::{
     bytecode::Bytecode as ExecutableBytecode,
     evm::{
         AccountChangeRef, AccountInfo, AccountInfoRef, BlockStateAccumulator, StateChangeSink,
-        StateChangeSource, StorageChange, Tee,
+        StateChangeSource, StorageChange,
     },
 };
 use reth_primitives_traits::{Account, Bytecode as RethBytecode};
@@ -214,13 +214,30 @@ pub(crate) fn extend_state_and_collect_reverts<S>(
 where
     S: StateChangeSource,
 {
-    let mut reverts = BlockRevertsSink::default();
-    let mut sink = Tee::new(&mut reverts, accumulator);
+    let mut sink = StateAndRevertsSink {
+        accumulator,
+        reverts: BlockRevertsSink::default(),
+        block_wipes: AddressSet::default(),
+    };
     match source.visit(&mut sink) {
         Ok(()) => {}
         Err(err) => match err {},
     }
-    reverts.reverts
+    sink.reverts.reverts
+}
+
+/// Makes evm2's implicit deletion wipe explicit for Reth state consumers.
+pub(crate) fn normalize_deleted_account_storage_wipes(state: &mut BlockStateAccumulator) {
+    let deleted_accounts = state
+        .accounts()
+        .filter_map(|(address, account)| account.current.is_none().then_some(address))
+        .collect::<Vec<_>>();
+    for address in deleted_accounts {
+        match state.storage_wipe(address) {
+            Ok(()) => {}
+            Err(err) => match err {},
+        }
+    }
 }
 
 /// Execution state-change sink that builds trie-ready hashed post-state as changes stream in.
@@ -239,6 +256,67 @@ struct StateSizeHintSink {
 #[derive(Default)]
 struct BlockRevertsSink {
     reverts: BlockReverts,
+}
+
+// A plain Tee cannot capture aggregate slots before a wipe clears them or retain the wipe after
+// evm2 folds the following account deletion into the accumulator.
+struct StateAndRevertsSink<'a> {
+    accumulator: &'a mut BlockStateAccumulator,
+    reverts: BlockRevertsSink,
+    block_wipes: AddressSet,
+}
+
+impl StateAndRevertsSink<'_> {
+    fn record_storage_wipe(&mut self, address: Address) -> Result<(), Infallible> {
+        if self.block_wipes.insert(address) {
+            let previous_wipe = self.accumulator.storage_wipes().any(|item| item == address);
+            let prior_slots = BlockStateAccumulator::storage(self.accumulator)
+                .filter(|(key, _)| key.address() == address)
+                .map(|(key, value)| (key.key(), value.current))
+                .collect::<Vec<_>>();
+            let revert = self.reverts.reverts.storage.entry(address).or_default();
+            revert.wiped = true;
+            revert.previous_wipe = previous_wipe;
+            for (key, value) in prior_slots {
+                revert.slots.entry(key).or_insert(value);
+            }
+        }
+        self.accumulator.storage_wipe(address)
+    }
+}
+
+impl StateChangeSink for StateAndRevertsSink<'_> {
+    type Error = Infallible;
+
+    fn bytecode(&mut self, code_hash: B256, code: &ExecutableBytecode) -> Result<(), Self::Error> {
+        self.accumulator.bytecode(code_hash, code)
+    }
+
+    fn account(&mut self, change: AccountChangeRef<'_>) -> Result<(), Self::Error> {
+        let deletes_pre_aggregate_account = change.deleted() &&
+            self.accumulator
+                .accounts()
+                .find(|(address, _)| *address == change.address)
+                .is_none_or(|(_, account)| account.original.is_some());
+        self.reverts.account(change)?;
+        if change.deleted() && !self.block_wipes.contains(&change.address) {
+            self.record_storage_wipe(change.address)?;
+        }
+        self.accumulator.account(change)?;
+        if deletes_pre_aggregate_account {
+            self.accumulator.storage_wipe(change.address)?;
+        }
+        Ok(())
+    }
+
+    fn storage_wipe(&mut self, address: Address) -> Result<(), Self::Error> {
+        self.record_storage_wipe(address)
+    }
+
+    fn storage(&mut self, change: StorageChange) -> Result<(), Self::Error> {
+        self.reverts.storage(change)?;
+        self.accumulator.storage(change)
+    }
 }
 
 impl<KH> Default for HashedPostStateSink<KH> {
@@ -378,7 +456,10 @@ where
             None => {
                 self.state.accounts.insert(hashed_address, None);
                 self.created_accounts.remove(&hashed_address);
-                self.state.storages.remove(&hashed_address);
+                // The account leaves the trie, but persisted storage tables still need the wipe.
+                let storage = self.state.storages.entry(hashed_address).or_default();
+                storage.wiped = true;
+                storage.storage.clear();
             }
         }
 
@@ -429,7 +510,7 @@ fn account_parts_to_reth(nonce: u64, balance: alloy_primitives::U256, code_hash:
 mod tests {
     use super::*;
     use alloy_primitives::{Address, U256};
-    use evm2::evm::{AccountChangeRef, AccountInfoRef, StorageChange};
+    use evm2::evm::{AccountChangeRef, AccountInfoRef, StorageChange, Tee};
     use reth_trie_common::KeccakKeyHasher;
 
     #[test]
@@ -442,6 +523,67 @@ mod tests {
         let code_hash = B256::repeat_byte(0x42);
         let account = RevertAccount { code_hash, ..Default::default() };
         assert_eq!(Account::from(&account).bytecode_hash, Some(code_hash));
+    }
+
+    #[test]
+    fn deleted_account_preserves_storage_wipe_when_state_is_extended() {
+        let address = Address::repeat_byte(0x01);
+        let original =
+            AccountInfoRef { balance: U256::from(1), nonce: 1, code_hash: B256::ZERO, code: None };
+        let mut source = BlockStateAccumulator::new();
+        source
+            .account(AccountChangeRef { address, original: Some(original), current: None })
+            .unwrap();
+        let mut aggregate = BlockStateAccumulator::new();
+
+        let reverts = extend_state_and_collect_reverts(&mut aggregate, &source);
+
+        assert_eq!(aggregate.storage_wipes().collect::<Vec<_>>(), [address]);
+        assert!(reverts.storage.get(&address).is_some_and(|storage| storage.wiped));
+    }
+
+    #[test]
+    fn account_created_and_deleted_in_source_does_not_emit_storage_wipe() {
+        let address = Address::repeat_byte(0x02);
+        let account =
+            AccountInfoRef { balance: U256::from(1), nonce: 1, code_hash: B256::ZERO, code: None };
+        let mut source = BlockStateAccumulator::new();
+        source
+            .account(AccountChangeRef { address, original: None, current: Some(account) })
+            .unwrap();
+        source
+            .account(AccountChangeRef { address, original: Some(account), current: None })
+            .unwrap();
+        let mut aggregate = BlockStateAccumulator::new();
+
+        let reverts = extend_state_and_collect_reverts(&mut aggregate, &source);
+
+        assert!(aggregate.accounts().next().is_none());
+        assert!(aggregate.storage_wipes().next().is_none());
+        assert!(reverts.storage.is_empty());
+    }
+
+    #[test]
+    fn account_created_and_deleted_across_blocks_does_not_retain_aggregate_wipe() {
+        let address = Address::repeat_byte(0x03);
+        let account =
+            AccountInfoRef { balance: U256::from(1), nonce: 1, code_hash: B256::ZERO, code: None };
+        let mut creation = BlockStateAccumulator::new();
+        creation
+            .account(AccountChangeRef { address, original: None, current: Some(account) })
+            .unwrap();
+        let mut deletion = BlockStateAccumulator::new();
+        deletion
+            .account(AccountChangeRef { address, original: Some(account), current: None })
+            .unwrap();
+        let mut aggregate = BlockStateAccumulator::new();
+
+        extend_state_and_collect_reverts(&mut aggregate, &creation);
+        let deletion_reverts = extend_state_and_collect_reverts(&mut aggregate, &deletion);
+
+        assert!(aggregate.accounts().next().is_none());
+        assert!(aggregate.storage_wipes().next().is_none());
+        assert!(deletion_reverts.storage.get(&address).is_some_and(|storage| storage.wiped));
     }
 
     #[test]

@@ -128,7 +128,8 @@ struct BlockStateIndex {
 
 impl IndexedBlockState {
     /// Creates a new lazily indexed execution state.
-    pub const fn new(inner: BlockStateAccumulator) -> Self {
+    pub fn new(mut inner: BlockStateAccumulator) -> Self {
+        crate::state::normalize_deleted_account_storage_wipes(&mut inner);
         Self { inner, index: OnceCell::new() }
     }
 
@@ -307,5 +308,20 @@ mod tests {
             indexed.bytecode(&code_hash).unwrap().original_bytes(),
             bytecode.original_bytes()
         );
+    }
+
+    #[test]
+    fn indexed_block_state_makes_deleted_account_storage_wipe_explicit() {
+        let address = Address::repeat_byte(0x42);
+        let original =
+            AccountInfoRef { balance: U256::from(1), nonce: 1, code_hash: B256::ZERO, code: None };
+        let mut state = BlockStateAccumulator::new();
+        state
+            .account(AccountChangeRef { address, original: Some(original), current: None })
+            .unwrap();
+
+        let indexed = IndexedBlockState::new(state);
+
+        assert_eq!(indexed.storage_wipes().collect::<Vec<_>>(), [address]);
     }
 }
