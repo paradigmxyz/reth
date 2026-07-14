@@ -58,7 +58,7 @@ use std::{
     },
     time::Duration,
 };
-use tracing::{debug, debug_span, error, instrument, trace};
+use tracing::{debug, debug_span, error, instrument, trace, trace_span};
 
 #[cfg(feature = "metrics")]
 use crate::proof_task_metrics::{
@@ -432,9 +432,9 @@ where
     {
         let StorageProofInput { hashed_address, mut targets } = input;
 
-        let span = debug_span!(
+        let span = trace_span!(
             target: "trie::proof_task",
-            "V2 Storage proof calculation",
+            "Storage proof calculation",
             n = %targets.len(),
         );
         let _span_guard = span.enter();
@@ -969,9 +969,9 @@ where
     {
         let MultiProofTargetsV2 { mut account_targets, storage_targets } = targets;
 
-        let span = debug_span!(
+        let span = trace_span!(
             target: "trie::proof_task",
-            "Account V2 multiproof calculation",
+            "Account multiproof calculation",
             account_targets = account_targets.len(),
             storage_targets = storage_targets.values().map(|t| t.len()).sum::<usize>(),
         );
