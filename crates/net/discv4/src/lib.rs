@@ -3275,7 +3275,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_bootnode_not_in_update_stream() {
+    async fn test_bootnode_in_update_stream() {
         reth_tracing::init_test_tracing();
         let (_, service_1) = create_discv4().await;
         let peerid_1 = *service_1.local_peer_id();
@@ -3307,7 +3307,6 @@ mod tests {
             }
         }
 
-        // Assert bootnode did not appear in update stream
         assert!(bootnode_appeared, "Bootnode should appear in update stream");
     }
 

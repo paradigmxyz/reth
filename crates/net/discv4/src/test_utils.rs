@@ -51,7 +51,8 @@ impl MockDiscovery {
     /// Creates a new instance and opens a socket
     pub async fn new() -> io::Result<(Self, mpsc::Sender<MockCommand>)> {
         let mut rng = thread_rng();
-        let socket = SocketAddr::from_str("0.0.0.0:0").unwrap();
+        // loopback, not 0.0.0.0: only Linux delivers sends to a 0.0.0.0 destination
+        let socket = SocketAddr::from_str("127.0.0.1:0").unwrap();
         let (secret_key, pk) = SECP256K1.generate_keypair(&mut rng);
         let id = pk2id(&pk);
         let socket = Arc::new(UdpSocket::bind(socket).await?);
@@ -242,7 +243,8 @@ pub async fn create_discv4() -> (Discv4, Discv4Service) {
 /// Creates a new testing instance for [`Discv4`] and its service with the given config.
 pub async fn create_discv4_with_config(config: Discv4Config) -> (Discv4, Discv4Service) {
     let mut rng = thread_rng();
-    let socket = SocketAddr::from_str("0.0.0.0:0").unwrap();
+    // loopback, not 0.0.0.0: only Linux delivers sends to a 0.0.0.0 destination
+    let socket = SocketAddr::from_str("127.0.0.1:0").unwrap();
     let (secret_key, pk) = SECP256K1.generate_keypair(&mut rng);
     let id = pk2id(&pk);
     let local_enr =
