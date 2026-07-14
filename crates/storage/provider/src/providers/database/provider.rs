@@ -2428,6 +2428,78 @@ impl<TX: DbTx + 'static, N: NodeTypes> StorageReader for DatabaseProvider<TX, N>
     }
 }
 
+const HASHED_STORAGE_SEQUENTIAL_DELETE_THRESHOLD: usize = 8;
+
+fn write_hashed_storage_exact<C>(
+    hashed_storage_cursor: &mut C,
+    hashed_address: B256,
+    storage_slots: &[(B256, StorageValue)],
+) -> ProviderResult<()>
+where
+    C: DbDupCursorRO<tables::HashedStorages> + DbCursorRW<tables::HashedStorages>,
+{
+    for (hashed_slot, value) in storage_slots {
+        let entry = StorageEntry { key: *hashed_slot, value: *value };
+
+        if let Some(db_entry) =
+            hashed_storage_cursor.seek_by_key_subkey(hashed_address, entry.key)? &&
+            db_entry.key == entry.key
+        {
+            hashed_storage_cursor.delete_current()?;
+        }
+
+        if !entry.value.is_zero() {
+            hashed_storage_cursor.upsert(hashed_address, &entry)?;
+        }
+    }
+
+    Ok(())
+}
+
+fn write_hashed_storage_with_scan<C>(
+    hashed_storage_cursor: &mut C,
+    hashed_address: B256,
+    storage_slots: &[(B256, StorageValue)],
+) -> ProviderResult<()>
+where
+    C: DbDupCursorRO<tables::HashedStorages> + DbCursorRW<tables::HashedStorages>,
+{
+    let Some((first_slot, _)) = storage_slots.first() else { return Ok(()) };
+
+    {
+        let mut walker = hashed_storage_cursor.walk_dup(Some(hashed_address), Some(*first_slot))?;
+        let mut update_index = 0usize;
+
+        while update_index < storage_slots.len() {
+            let Some(row) = walker.next() else { break };
+            let (_, db_entry) = row?;
+            let db_slot = db_entry.key;
+
+            while update_index < storage_slots.len() && storage_slots[update_index].0 < db_slot {
+                update_index += 1;
+            }
+
+            if update_index == storage_slots.len() {
+                break
+            }
+
+            if storage_slots[update_index].0 == db_slot {
+                walker.delete_current()?;
+                update_index += 1;
+            }
+        }
+    }
+
+    for (hashed_slot, value) in storage_slots {
+        if !value.is_zero() {
+            let entry = StorageEntry { key: *hashed_slot, value: *value };
+            hashed_storage_cursor.upsert(hashed_address, &entry)?;
+        }
+    }
+
+    Ok(())
+}
+
 impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
     for DatabaseProvider<TX, N>
 {
@@ -2716,19 +2788,21 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
                 hashed_storage_cursor.delete_current_duplicates()?;
             }
 
-            for (hashed_slot, value) in storage.storage_slots_ref() {
-                let entry = StorageEntry { key: *hashed_slot, value: *value };
-
-                if let Some(db_entry) =
-                    hashed_storage_cursor.seek_by_key_subkey(*hashed_address, entry.key)? &&
-                    db_entry.key == entry.key
-                {
-                    hashed_storage_cursor.delete_current()?;
-                }
-
-                if !entry.value.is_zero() {
-                    hashed_storage_cursor.upsert(*hashed_address, &entry)?;
-                }
+            let storage_slots = storage.storage_slots_ref();
+            if !storage.is_wiped() &&
+                storage_slots.len() >= HASHED_STORAGE_SEQUENTIAL_DELETE_THRESHOLD
+            {
+                write_hashed_storage_with_scan(
+                    &mut hashed_storage_cursor,
+                    *hashed_address,
+                    storage_slots,
+                )?;
+            } else {
+                write_hashed_storage_exact(
+                    &mut hashed_storage_cursor,
+                    *hashed_address,
+                    storage_slots,
+                )?;
             }
         }
 
@@ -4692,6 +4766,76 @@ mod tests {
             .expect("entry should exist");
         assert_eq!(entry.key, hashed_slot);
         assert_eq!(entry.value, old_value);
+    }
+
+    #[test]
+    fn test_write_hashed_state_large_storage_uses_scan_path() {
+        let factory = create_test_provider_factory();
+        let provider_rw = factory.provider_rw().unwrap();
+        let hashed_address = B256::with_last_byte(0x42);
+        let untouched_slot = B256::with_last_byte(0x19);
+
+        {
+            let mut cursor = provider_rw.tx.cursor_dup_write::<tables::HashedStorages>().unwrap();
+            for i in 0..12u8 {
+                let key = B256::with_last_byte(i);
+                cursor
+                    .upsert(hashed_address, &StorageEntry { key, value: U256::from(i + 1) })
+                    .unwrap();
+            }
+            cursor
+                .upsert(
+                    hashed_address,
+                    &StorageEntry { key: untouched_slot, value: U256::from(99) },
+                )
+                .unwrap();
+        }
+
+        let storage = reth_trie::HashedStorage::from_iter(
+            false,
+            (0..HASHED_STORAGE_SEQUENTIAL_DELETE_THRESHOLD as u8).map(|i| {
+                let key = B256::with_last_byte(i);
+                let value = if i % 3 == 0 { U256::ZERO } else { U256::from(100 + i) };
+                (key, value)
+            }),
+        );
+        let mut hashed_state = HashedPostState::default();
+        hashed_state.storages.insert(hashed_address, storage);
+
+        provider_rw.write_hashed_state(&hashed_state.into_sorted()).unwrap();
+
+        let mut cursor = provider_rw.tx.cursor_dup_read::<tables::HashedStorages>().unwrap();
+        let entries = cursor
+            .walk_dup(Some(hashed_address), None)
+            .unwrap()
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
+
+        for i in 0..HASHED_STORAGE_SEQUENTIAL_DELETE_THRESHOLD as u8 {
+            let key = B256::with_last_byte(i);
+            let entry = entries.iter().find(|(_, entry)| entry.key == key);
+            if i % 3 == 0 {
+                assert!(entry.is_none(), "zero-valued slot {i} should be deleted");
+            } else {
+                assert_eq!(entry.map(|(_, entry)| entry.value), Some(U256::from(100 + i)));
+            }
+        }
+
+        for i in HASHED_STORAGE_SEQUENTIAL_DELETE_THRESHOLD as u8..12u8 {
+            let key = B256::with_last_byte(i);
+            assert_eq!(
+                entries.iter().find(|(_, entry)| entry.key == key).map(|(_, entry)| entry.value),
+                Some(U256::from(i + 1)),
+                "untargeted in-range slot {i} should be preserved"
+            );
+        }
+        assert_eq!(
+            entries
+                .iter()
+                .find(|(_, entry)| entry.key == untouched_slot)
+                .map(|(_, entry)| entry.value),
+            Some(U256::from(99))
+        );
     }
 
     #[test]
