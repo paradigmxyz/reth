@@ -61,7 +61,7 @@ pub use layers::{FileInfo, FileWorkerGuard, Layers, TracingGuards};
 #[cfg(feature = "std")]
 pub use log_handle::{
     install_log_handle, log_handle_available, set_log_verbosity, set_log_vmodule,
-    LogFilterReloadHandle,
+    set_startup_log_directives, startup_log_directives, LogFilterReloadHandle,
 };
 #[cfg(feature = "std")]
 pub use test_tracer::TestTracer;

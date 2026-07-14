@@ -1,6 +1,29 @@
 use alloy_rpc_types_admin::{NodeInfo, PeerInfo};
 use jsonrpsee::{core::RpcResult, proc_macros::rpc};
 use reth_network_peers::{AnyNode, NodeRecord};
+use serde::{Deserialize, Serialize};
+
+/// Request parameters for [`AdminApi::tracing_directives`].
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TracingDirectivesRequest {
+    /// `RUST_LOG`-style tracing directives.
+    pub directives: String,
+    /// Number of seconds before the startup tracing configuration is restored.
+    pub ttl_secs: u64,
+}
+
+/// Result returned by [`AdminApi::tracing_directives`].
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TracingDirectivesResponse {
+    /// The tracing directives that were applied.
+    pub applied: String,
+    /// Number of seconds before the override is reverted.
+    pub ttl_secs: u64,
+    /// The startup tracing directives that will be restored.
+    pub reverts_to: String,
+}
 
 /// Admin namespace rpc interface that gives access to several non-standard RPC methods.
 #[cfg_attr(not(feature = "client"), rpc(server, namespace = "admin"))]
@@ -58,4 +81,13 @@ pub trait AdminApi {
     /// Returns the number of transactions that were removed from the pool.
     #[method(name = "clearTxpool")]
     async fn clear_txpool(&self) -> RpcResult<u64>;
+
+    /// Temporarily overrides the node's tracing directives.
+    ///
+    /// The startup tracing configuration is restored after `ttlSecs`.
+    #[method(name = "tracingDirectives")]
+    async fn tracing_directives(
+        &self,
+        request: TracingDirectivesRequest,
+    ) -> RpcResult<TracingDirectivesResponse>;
 }

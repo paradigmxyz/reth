@@ -7,6 +7,9 @@
 use tracing::level_filters::LevelFilter;
 use tracing_subscriber::{reload, EnvFilter, Registry};
 
+/// Tracing directives in effect when the node started.
+static STARTUP_LOG_DIRECTIVES: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+
 /// Type alias for a single layer's reload handle.
 pub type LogFilterReloadHandle = reload::Handle<EnvFilter, Registry>;
 
@@ -59,6 +62,18 @@ pub fn install_log_handle(handle: LogFilterReloadHandle) {
 /// Returns `true` if at least one global log handle is available.
 pub fn log_handle_available() -> bool {
     LOG_HANDLE.lock().expect("log handle poisoned").is_available()
+}
+
+/// Records the tracing directives in effect at startup.
+///
+/// The first call wins so the baseline cannot be replaced by a runtime override.
+pub fn set_startup_log_directives(directives: String) {
+    let _ = STARTUP_LOG_DIRECTIVES.set(directives);
+}
+
+/// Returns the tracing directives in effect when the node started.
+pub fn startup_log_directives() -> Option<&'static str> {
+    STARTUP_LOG_DIRECTIVES.get().map(String::as_str)
 }
 
 /// Sets the global log verbosity level.

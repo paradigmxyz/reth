@@ -1,4 +1,7 @@
-use std::sync::Arc;
+use std::{
+    sync::{Arc, Mutex},
+    time::Duration,
+};
 
 use alloy_genesis::ChainConfig;
 use alloy_primitives::keccak256;
@@ -7,14 +10,30 @@ use alloy_rpc_types_admin::{
     Ports, ProtocolInfo,
 };
 use async_trait::async_trait;
-use jsonrpsee::core::RpcResult;
+use jsonrpsee::{core::RpcResult, types::ErrorObjectOwned};
 use reth_chainspec::{EthChainSpec, EthereumHardfork, EthereumHardforks, ForkCondition};
 use reth_network_api::{NetworkInfo, Peers};
 use reth_network_peers::{AnyNode, NodeRecord};
 use reth_network_types::PeerKind;
-use reth_rpc_api::AdminApiServer;
+use reth_rpc_api::{AdminApiServer, TracingDirectivesRequest, TracingDirectivesResponse};
 use reth_rpc_server_types::ToRpcResult;
 use reth_transaction_pool::TransactionPool;
+use tokio::task::JoinHandle;
+use tracing::{info, warn};
+
+/// Maximum duration of a tracing override.
+const MAX_TRACING_TTL_SECS: u64 = 3600;
+/// Maximum accepted tracing directive length.
+const MAX_TRACING_DIRECTIVES_LEN: usize = 1024;
+
+#[derive(Debug, Default)]
+struct TracingRevertState {
+    generation: u64,
+    task: Option<JoinHandle<()>>,
+}
+
+static TRACING_REVERT: Mutex<TracingRevertState> =
+    Mutex::new(TracingRevertState { generation: 0, task: None });
 
 /// `admin` API implementation.
 ///
@@ -211,10 +230,119 @@ where
         let _ = self.pool.remove_transactions(all_hashes);
         Ok(count)
     }
+
+    /// Handler for `admin_tracingDirectives`.
+    async fn tracing_directives(
+        &self,
+        request: TracingDirectivesRequest,
+    ) -> RpcResult<TracingDirectivesResponse> {
+        let directives = validate_tracing_directives(&request)?.to_string();
+        if !reth_tracing::log_handle_available() {
+            return Err(ErrorObjectOwned::owned(
+                jsonrpsee_types::error::INTERNAL_ERROR_CODE,
+                "tracing reload is not active; enable the admin RPC namespace at startup",
+                None::<()>,
+            ));
+        }
+
+        let baseline = reth_tracing::startup_log_directives().unwrap_or_default().to_string();
+        let ttl_secs = request.ttl_secs;
+        let mut state = TRACING_REVERT.lock().expect("tracing revert mutex poisoned");
+
+        reth_tracing::set_log_vmodule(&directives).map_err(invalid_params)?;
+        if let Some(previous) = state.task.take() {
+            previous.abort();
+        }
+        state.generation = state.generation.wrapping_add(1);
+        let generation = state.generation;
+
+        let revert_baseline = baseline.clone();
+        state.task = Some(tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_secs(ttl_secs)).await;
+            let mut state = TRACING_REVERT.lock().expect("tracing revert mutex poisoned");
+            if state.generation != generation {
+                return;
+            }
+            match reth_tracing::set_log_vmodule(&revert_baseline) {
+                Ok(()) => {
+                    info!(target: "reth::rpc::admin", %revert_baseline, "Reverted tracing directives after TTL")
+                }
+                Err(err) => {
+                    warn!(target: "reth::rpc::admin", %err, "Failed to revert tracing directives after TTL")
+                }
+            }
+            state.task = None;
+        }));
+        drop(state);
+
+        info!(target: "reth::rpc::admin", %directives, ttl_secs, "Applied ephemeral tracing directives");
+        Ok(TracingDirectivesResponse { applied: directives, ttl_secs, reverts_to: baseline })
+    }
+}
+
+fn invalid_params(message: impl ToString) -> ErrorObjectOwned {
+    ErrorObjectOwned::owned(
+        jsonrpsee_types::error::INVALID_PARAMS_CODE,
+        message.to_string(),
+        None::<()>,
+    )
+}
+
+fn validate_tracing_directives(
+    request: &TracingDirectivesRequest,
+) -> Result<&str, ErrorObjectOwned> {
+    if request.ttl_secs == 0 || request.ttl_secs > MAX_TRACING_TTL_SECS {
+        return Err(invalid_params(format!("ttlSecs must be in 1..={MAX_TRACING_TTL_SECS}")));
+    }
+    let directives = request.directives.trim();
+    if directives.is_empty() {
+        return Err(invalid_params("directives must not be empty"));
+    }
+    if directives.len() > MAX_TRACING_DIRECTIVES_LEN {
+        return Err(invalid_params(format!(
+            "directives must be at most {MAX_TRACING_DIRECTIVES_LEN} characters"
+        )));
+    }
+    Ok(directives)
 }
 
 impl<N, ChainSpec, Pool> std::fmt::Debug for AdminApi<N, ChainSpec, Pool> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("AdminApi").finish_non_exhaustive()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn validates_tracing_directives() {
+        let request = TracingDirectivesRequest {
+            directives: "  info,reth::net=trace  ".to_string(),
+            ttl_secs: 30,
+        };
+        assert_eq!(validate_tracing_directives(&request).unwrap(), "info,reth::net=trace");
+    }
+
+    #[test]
+    fn rejects_invalid_tracing_directives() {
+        for request in [
+            TracingDirectivesRequest { directives: "info".to_string(), ttl_secs: 0 },
+            TracingDirectivesRequest {
+                directives: "info".to_string(),
+                ttl_secs: MAX_TRACING_TTL_SECS + 1,
+            },
+            TracingDirectivesRequest { directives: "  ".to_string(), ttl_secs: 30 },
+            TracingDirectivesRequest {
+                directives: "x".repeat(MAX_TRACING_DIRECTIVES_LEN + 1),
+                ttl_secs: 30,
+            },
+        ] {
+            assert_eq!(
+                validate_tracing_directives(&request).unwrap_err().code(),
+                jsonrpsee_types::error::INVALID_PARAMS_CODE
+            );
+        }
     }
 }

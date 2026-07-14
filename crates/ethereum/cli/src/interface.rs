@@ -250,9 +250,18 @@ impl<
         let otlp_status = runner.block_on(self.traces.init_otlp_tracing(&mut layers))?;
         let otlp_logs_status = runner.block_on(self.traces.init_otlp_logs(&mut layers))?;
 
-        // Enable reload support if debug RPC namespace is available
-        let enable_reload = self.command.debug_namespace_enabled();
+        // Enable reload support if an RPC namespace with runtime tracing controls is available.
+        let enable_reload = self.command.tracing_reload_enabled();
         let guards = self.logs.init_tracing_with_layers(layers, enable_reload)?;
+        if enable_reload {
+            let directive = self.logs.verbosity.directive().to_string();
+            let baseline = if self.logs.log_stdout_filter.is_empty() {
+                directive
+            } else {
+                format!("{directive},{}", self.logs.log_stdout_filter)
+            };
+            reth_tracing::set_startup_log_directives(baseline);
+        }
         info!(target: "reth::cli", "Initialized tracing, debug log directory: {}", self.logs.log_file_directory);
 
         match otlp_status {
@@ -379,12 +388,15 @@ impl<C: ChainSpecParser, Ext: clap::Args + fmt::Debug, SubCmd: Subcommand + fmt:
         }
     }
 
-    /// Returns `true` if this is a node command with debug RPC namespace enabled.
+    /// Returns `true` if this is a node command with runtime tracing RPCs enabled.
     ///
     /// This is used to determine whether to enable runtime log level changes.
-    pub fn debug_namespace_enabled(&self) -> bool {
+    pub fn tracing_reload_enabled(&self) -> bool {
         match self {
-            Self::Node(cmd) => cmd.rpc.is_namespace_enabled(RethRpcModule::Debug),
+            Self::Node(cmd) => {
+                cmd.rpc.is_namespace_enabled(RethRpcModule::Debug) ||
+                    cmd.rpc.is_namespace_enabled(RethRpcModule::Admin)
+            }
             _ => false,
         }
     }
