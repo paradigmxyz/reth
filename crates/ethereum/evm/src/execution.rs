@@ -293,7 +293,7 @@ where
 }
 
 /// Additional block-level execution context.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Default)]
 pub(crate) struct BlockExecutionContext<'a> {
     /// Pre-block system calls to run before transaction execution.
     pub system_calls: Option<BlockSystemCalls>,
@@ -303,12 +303,6 @@ pub(crate) struct BlockExecutionContext<'a> {
     pub withdrawals: Option<&'a [Withdrawal]>,
     /// Deposit contract address used to derive EIP-6110 deposit requests from receipts.
     pub deposit_contract_address: Option<Address>,
-}
-
-impl Default for BlockExecutionContext<'_> {
-    fn default() -> Self {
-        Self { system_calls: None, ommers: None, withdrawals: None, deposit_contract_address: None }
-    }
 }
 
 /// Inputs required by Ethereum pre-block system calls.

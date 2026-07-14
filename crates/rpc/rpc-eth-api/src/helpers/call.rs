@@ -747,8 +747,8 @@ pub trait Call:
     ///
     /// Before the transaction is executed, all previous transaction in the block are applied to the
     /// state by executing them first.
-    /// The callback `f` is invoked with the [`ResultAndState`] after the transaction was executed
-    /// and the database that points to the beginning of the transaction.
+    /// The callback `f` is invoked with the [`TxResultWithState`] after the transaction was
+    /// executed and the database that points to the beginning of the transaction.
     ///
     /// Note: Implementers should use a threadpool where blocking is allowed, such as
     /// [`BlockingTaskPool`](reth_tasks::pool::BlockingTaskPool).
@@ -818,7 +818,7 @@ pub trait Call:
     /// Replays all the transactions until the target transaction is found.
     ///
     /// All transactions before the target transaction are executed and their changes are written to
-    /// the _runtime_ db ([`State`]).
+    /// the runtime database.
     ///
     /// Note: This assumes the target transaction is in the given iterator.
     /// Returns the index of the target transaction in the given iterator.
