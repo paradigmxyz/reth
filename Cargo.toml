@@ -1,5 +1,5 @@
 [workspace.package]
-version = "2.3.0"
+version = "2.4.0"
 edition = "2024"
 rust-version = "1.95"
 license = "MIT OR Apache-2.0"
