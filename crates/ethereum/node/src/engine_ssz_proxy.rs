@@ -453,12 +453,15 @@ where
 }
 
 fn get_payload_error_response(err: EngineApiError) -> HttpResponse {
-    let status = if matches!(&err, EngineApiError::UnknownPayload) {
-        STATUS_NOT_FOUND
-    } else {
-        STATUS_INTERNAL_SERVER_ERROR
+    let status = match &err {
+        EngineApiError::UnknownPayload => STATUS_NOT_FOUND,
+        EngineApiError::EngineObjectValidationError(
+            reth_payload_primitives::EngineObjectValidationError::UnsupportedFork,
+        ) => STATUS_BAD_REQUEST,
+        _ => STATUS_INTERNAL_SERVER_ERROR,
     };
     text_response(status, err.to_string())
+}
 }
 
 async fn handle_new_payload<Provider, Pool, Validator, ChainSpec>(
