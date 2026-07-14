@@ -243,11 +243,10 @@ mod build;
 pub use build::EthBlockAssembler;
 
 mod executor;
-pub use executor::EthBlockExecutor;
+pub use executor::{EthBigBlockExecutor, EthBigBlockPlan, EthBigBlockSegment, EthBlockExecutor};
 
 /// Ethereum block executor and EVM factory implementations.
 pub mod factory;
-pub use factory::EthBlockExecutorFactory;
 #[cfg(not(feature = "jit"))]
 pub use factory::RethEvmFactory;
 #[cfg(feature = "jit")]
@@ -255,6 +254,7 @@ pub use factory::{
     maybe_run_jit_helper, CompilationEvent, CompilationKind, CompileTimings, JitBackend,
     JitMetrics, JitMode, RethEvmFactory, RuntimeConfig, RuntimeStatsSnapshot, RuntimeTuning,
 };
+pub use factory::{EthBigBlockExecutorFactory, EthBlockExecutorFactory};
 
 mod convert;
 pub use convert::{EthTxEnv, ExecutableRecoveredTx};

@@ -16,8 +16,8 @@ pub use evm2_jit::{
 };
 
 use crate::{
-    executor::HashedStateMode, EthBlockExecutionCtx, EthBlockExecutor, EthEvmEnv, EthPrimitives,
-    EthTxEnv,
+    executor::{EthBigBlockExecutor, EthBigBlockPlan, HashedStateMode},
+    EthBlockExecutionCtx, EthBlockExecutor, EthEvmEnv, EthPrimitives, EthTxEnv,
 };
 
 /// Ethereum block executor factory.
@@ -33,6 +33,68 @@ pub struct EthBlockExecutorFactory<C = ChainSpec, EvmFactory = ()> {
     precompile_cache_disabled: bool,
     /// EVM factory configuration.
     evm_factory: EvmFactory,
+}
+
+/// Executor factory for merged payloads that switch block context at segment boundaries.
+#[derive(Debug, Clone)]
+pub struct EthBigBlockExecutorFactory<C = ChainSpec, EvmFactory = ()> {
+    inner: EthBlockExecutorFactory<C, EvmFactory>,
+}
+
+impl<C, EvmFactory> EthBigBlockExecutorFactory<C, EvmFactory> {
+    /// Creates a big-block executor factory from the standard Ethereum factory.
+    pub const fn new(inner: EthBlockExecutorFactory<C, EvmFactory>) -> Self {
+        Self { inner }
+    }
+
+    /// Returns the wrapped Ethereum executor factory.
+    pub const fn inner(&self) -> &EthBlockExecutorFactory<C, EvmFactory> {
+        &self.inner
+    }
+}
+
+impl<C, EvmFactory> reth_evm::BlockExecutorFactory for EthBigBlockExecutorFactory<C, EvmFactory>
+where
+    C: EthChainSpec<Header = Header> + EthereumHardforks,
+    EvmFactory: 'static,
+{
+    type Primitives = EthPrimitives;
+    type EvmFactory = EvmFactory;
+    type EvmTransaction = evm2::ethereum::RecoveredTxEnvelope;
+    type Transaction = EthTxEnv;
+    type Evm<'a> = evm2::Evm<'a, evm2::BaseEvmTypes>;
+    type EvmEnv = EthEvmEnv;
+    type ExecutionCtx<'a>
+        = EthBigBlockPlan<'a>
+    where
+        Self: 'a;
+    type Executor<'a>
+        = EthBigBlockExecutor<'a, C>
+    where
+        Self: 'a;
+
+    fn create_executor<'a>(
+        &'a self,
+        evm: Self::Evm<'a>,
+        ctx: Self::ExecutionCtx<'a>,
+    ) -> Self::Executor<'a>
+    where
+        Self: 'a,
+    {
+        let executor = self.inner.create_eth_executor(evm, ctx.segments[0].ctx.clone());
+        EthBigBlockExecutor::new(executor, self.inner.chain_spec().clone(), ctx)
+    }
+
+    fn evm_factory(&self) -> &Self::EvmFactory {
+        self.inner.evm_factory()
+    }
+
+    fn evm_with_env<'a, DB>(&self, db: DB, evm_env: Self::EvmEnv) -> Self::Evm<'a>
+    where
+        DB: evm2::evm::DynDatabase + 'a,
+    {
+        self.inner.evm_with_env(db, evm_env)
+    }
 }
 
 impl<C, EvmFactory: Clone> Clone for EthBlockExecutorFactory<C, EvmFactory> {

@@ -4,7 +4,6 @@
 #[global_allocator]
 static ALLOC: reth_cli_util::allocator::Allocator = reth_cli_util::allocator::new_allocator();
 
-mod evm;
 mod evm_config;
 
 use alloy_consensus::Header;
@@ -81,6 +80,13 @@ impl PayloadValidator<BbPayloadTypes> for BbEngineValidator {
         &self,
         payload: BigBlockData<ExecutionData>,
     ) -> Result<SealedBlock<Block>, NewPayloadError> {
+        if payload.env_switches.is_empty() {
+            return Err(NewPayloadError::other(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "big-block payload has no environment segments",
+            )))
+        }
+
         let mut blocks = payload
             .env_switches
             .into_iter()
