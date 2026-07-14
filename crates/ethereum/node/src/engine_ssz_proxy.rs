@@ -420,7 +420,7 @@ where
                         ssz_response(BuiltPayloadParis { payload, block_value })
                     }
                     ExecutionPayloadFieldV2::V2(_) => {
-                        text_response(STATUS_INTERNAL_SERVER_ERROR, "unexpected payload fork")
+                        text_response(STATUS_BAD_REQUEST, "unsupported fork")
                     }
                 }
             }
