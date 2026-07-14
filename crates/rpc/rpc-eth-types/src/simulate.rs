@@ -284,7 +284,7 @@ pub fn apply_precompile_overrides(
 }
 
 /// Converts all [`TransactionRequest`]s into [`Recovered`] transactions and applies them to the
-/// given [`BlockExecutor`].
+/// given [`BlockBuilder`].
 ///
 /// Returns all executed transactions and the result of the execution.
 ///
