@@ -584,8 +584,13 @@ impl Discv4Service {
         local_address: SocketAddr,
         local_node_record: NodeRecord,
         secret_key: SecretKey,
-        config: Discv4Config,
+        mut config: Discv4Config,
     ) -> Self {
+        // normalize once: a same-family secondary would overwrite the primary ENR endpoint
+        config.secondary_advertised_ip = config
+            .secondary_advertised_ip
+            .filter(|ip| ip.is_ipv4() != local_node_record.address.is_ipv4());
+
         let (egress_tx, egress_rx) = mpsc::channel(config.udp_egress_message_buffer);
         let mut tasks = JoinSet::<()>::new();
 
@@ -595,7 +600,7 @@ impl Discv4Service {
         }
 
         let udp = Arc::clone(&socket);
-        tasks.spawn(send_loop(udp, secondary_socket, egress_rx));
+        tasks.spawn(send_loop(udp, secondary_socket, local_address.is_ipv4(), egress_rx));
 
         let kbuckets = KBucketsTable::new(
             NodeKey::from(&local_node_record).into(),
@@ -628,28 +633,24 @@ impl Discv4Service {
         // for EIP-868 construct an ENR
         let local_eip_868_enr = {
             let mut builder = Enr::builder();
-            builder.ip(local_node_record.address);
-            if local_node_record.address.is_ipv4() {
-                builder.udp4(local_node_record.udp_port);
-                builder.tcp4(local_node_record.tcp_port);
-            } else {
-                builder.udp6(local_node_record.udp_port);
-                builder.tcp6(local_node_record.tcp_port);
-            }
-
-            // a same-family secondary would overwrite the primary endpoint, so only the
-            // opposite family is added
-            if let Some(ip) = config
-                .secondary_advertised_ip
-                .filter(|ip| ip.is_ipv4() != local_node_record.address.is_ipv4())
             {
-                builder.ip(ip);
-                if ip.is_ipv4() {
-                    builder.udp4(local_node_record.udp_port);
-                    builder.tcp4(local_node_record.tcp_port);
-                } else {
-                    builder.udp6(local_node_record.udp_port);
-                    builder.tcp6(local_node_record.tcp_port);
+                let mut set_endpoint = |ip: IpAddr| {
+                    builder.ip(ip);
+                    if ip.is_ipv4() {
+                        builder.udp4(local_node_record.udp_port);
+                        builder.tcp4(local_node_record.tcp_port);
+                    } else {
+                        builder.udp6(local_node_record.udp_port);
+                        builder.tcp6(local_node_record.tcp_port);
+                    }
+                };
+                // leave an unspecified address's keys unset (EIP-778 keys are optional) rather
+                // than advertise 0.0.0.0 next to a valid opposite-family endpoint
+                if !local_node_record.address.is_unspecified() {
+                    set_endpoint(local_node_record.address);
+                }
+                if let Some(ip) = config.secondary_advertised_ip.filter(|ip| !ip.is_unspecified()) {
+                    set_endpoint(ip);
                 }
             }
 
@@ -730,6 +731,14 @@ impl Discv4Service {
     /// Sets the given ip address as the node's external IP in the node record announced in
     /// discovery
     pub fn set_external_ip_addr(&mut self, external_ip: IpAddr) {
+        // a secondary advertisement pins the record's family: an opposite-family resolution
+        // would silently overwrite the secondary ENR key and flip the record's family
+        if self.config.secondary_advertised_ip.is_some() &&
+            external_ip.is_ipv4() != self.local_node_record.address.is_ipv4()
+        {
+            debug!(target: "discv4", ?external_ip, "Ignoring opposite-family external ip");
+            return
+        }
         if self.local_node_record.address != external_ip {
             debug!(target: "discv4", ?external_ip, "Updating external ip");
             self.local_node_record.address = external_ip;
@@ -1897,11 +1906,7 @@ impl Discv4Service {
                         } else {
                             let _ = self.local_eip_868_enr.set_tcp6(port, &self.secret_key);
                         }
-                        if let Some(ip) = self
-                            .config
-                            .secondary_advertised_ip
-                            .filter(|ip| ip.is_ipv4() != self.local_node_record.address.is_ipv4())
-                        {
+                        if let Some(ip) = self.config.secondary_advertised_ip {
                             if ip.is_ipv4() {
                                 let _ = self.local_eip_868_enr.set_tcp4(port, &self.secret_key);
                             } else {
@@ -2048,9 +2053,9 @@ pub enum Discv4Event {
 pub(crate) async fn send_loop(
     udp: Arc<UdpSocket>,
     secondary_udp: Option<Arc<UdpSocket>>,
+    primary_is_ipv4: bool,
     rx: EgressReceiver,
 ) {
-    let primary_is_ipv4 = udp.local_addr().is_ok_and(|addr| addr.is_ipv4());
     let mut stream = ReceiverStream::new(rx);
     while let Some((payload, to)) = stream.next().await {
         // a destination with no matching-family socket falls through to the primary, failing
@@ -2671,7 +2676,7 @@ mod tests {
         let sink4 = UdpSocket::bind("127.0.0.1:0").await.unwrap();
 
         let (tx, rx) = mpsc::channel(8);
-        tokio::spawn(send_loop(primary, Some(Arc::new(secondary)), rx));
+        tokio::spawn(send_loop(primary, Some(Arc::new(secondary)), true, rx));
 
         tx.send((Bytes::from_static(b"v4"), sink4.local_addr().unwrap())).await.unwrap();
         tx.send((Bytes::from_static(b"v6"), sink6.local_addr().unwrap())).await.unwrap();

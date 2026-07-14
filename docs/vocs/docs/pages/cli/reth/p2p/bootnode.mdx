@@ -27,7 +27,9 @@ Options:
           [default: any]
 
       --v5
-          Also run discv5, sharing the discv4 UDP port (`--addr`)
+          Also run discv5, sharing the discv4 UDP port (`--addr`).
+
+          The opposite-family sibling socket is only bound when an `extip:<IP>` of that family is advertised via `--nat`; the default `--nat any` serves the `--addr` family only.
 
       --bootnodes <BOOTNODES>
           Comma-separated nodes to seed discovery: `enode://` URLs with an IP host and/or signed `enr:` records. Each entry seeds discv4 and (with `--v5`) discv5

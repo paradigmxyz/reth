@@ -9,7 +9,7 @@ use reth_discv5::{
     Config, Discv5,
 };
 use reth_net_nat::NatResolver;
-use reth_network_peers::{AnyNode, NodeRecord};
+use reth_network_peers::{id2pk, AnyNode, Enr, NodeRecord};
 use secp256k1::SecretKey;
 use std::{
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
@@ -45,6 +45,9 @@ pub struct Command {
     pub nat: Vec<NatResolver>,
 
     /// Also run discv5, sharing the discv4 UDP port (`--addr`).
+    ///
+    /// The opposite-family sibling socket is only bound when an `extip:<IP>` of that family is
+    /// advertised via `--nat`; the default `--nat any` serves the `--addr` family only.
     #[arg(long)]
     pub v5: bool,
 
@@ -64,7 +67,7 @@ impl Command {
         // (`enode://…@<ip>:0?discport=<udp>`).
         let local_enr = NodeRecord::from_secret_key(self.addr, &sk).with_tcp_port(0);
         let nat = self.resolved_nat()?;
-        let seeds = self.seed_nodes()?;
+        let seeds = self.seed_nodes(&nat)?;
 
         for record in seeds.discv4_records() {
             if !self.serves_family(record.address, &nat) {
@@ -242,23 +245,56 @@ impl Command {
 
     /// Parses `--bootnodes`, keeping enode-sourced records separate from signed ENRs so an ENR
     /// entry is not seeded into discv5 twice (signed and again as an unsigned enode).
-    fn seed_nodes(&self) -> eyre::Result<BootnodeSeeds> {
+    fn seed_nodes(&self, nat: &BootnodeNat) -> eyre::Result<BootnodeSeeds> {
         let mut seeds = BootnodeSeeds::default();
         for node in &self.bootnodes {
-            match node {
-                AnyNode::NodeRecord(record) => seeds.enodes.push(*record),
+            let record = match node {
+                AnyNode::NodeRecord(record) => {
+                    // v4-mapped hosts parse as V6; normalize so family routing is semantic
+                    let record = record.into_ipv4_mapped();
+                    id2pk(record.id).map_err(|err| {
+                        eyre::eyre!("--bootnodes entry has an invalid node id ({err}): {node}")
+                    })?;
+                    seeds.enodes.push(record);
+                    record
+                }
                 AnyNode::Enr(enr) => {
-                    let record = NodeRecord::try_from(enr)
-                        .map_err(|err| eyre::eyre!("unusable --bootnodes ENR ({err}): {enr}"))?;
+                    let record = self.enr_endpoint(enr, nat)?;
                     seeds.enr_records.push(record);
                     seeds.enrs.push(EnrCombinedKeyWrapper::from(enr.clone()).0);
+                    record
                 }
                 node => eyre::bail!(
                     "--bootnodes entries must be enode URLs with an IP host or signed ENRs: {node}"
                 ),
+            };
+            if record.udp_port == 0 {
+                eyre::bail!("--bootnodes entry has no discovery port: {node}");
             }
         }
         Ok(seeds)
+    }
+
+    /// Derives an ENR seed's discv4 endpoint, preferring a family this bootnode serves over the
+    /// conversion default (IPv4 first).
+    fn enr_endpoint(&self, enr: &Enr<SecretKey>, nat: &BootnodeNat) -> eyre::Result<NodeRecord> {
+        let record = NodeRecord::try_from(enr)
+            .map_err(|err| eyre::eyre!("unusable --bootnodes ENR ({err}): {enr}"))?;
+        if self.serves_family(record.address, nat) {
+            return Ok(record)
+        }
+        let alt = if record.address.is_ipv4() {
+            enr.ip6().map(IpAddr::from).zip(enr.udp6()).map(|e| (e, enr.tcp6()))
+        } else {
+            enr.ip4().map(IpAddr::from).zip(enr.udp4()).map(|e| (e, enr.tcp4()))
+        };
+        if let Some(((address, udp_port), tcp)) = alt &&
+            self.serves_family(address, nat)
+        {
+            return Ok(NodeRecord { address, udp_port, tcp_port: tcp.unwrap_or(0), id: record.id })
+        }
+        // unservable either way; the startup warning covers it
+        Ok(record)
     }
 
     /// Whether a socket of `ip`'s family will be bound: the `--addr` family always, the opposite
@@ -299,9 +335,26 @@ impl Command {
             builder = builder.advertised_ip(*ip);
         }
 
-        builder = builder
-            .add_signed_boot_nodes(seeds.enrs.iter().cloned())
-            .add_unsigned_boot_nodes(seeds.enodes.iter().copied());
+        // discv5's bootstrap aborts on an ENR it cannot contact (AddNodeFailed) and wastes a
+        // request_enr round-trip on an unreachable enode: seed only what the listen config serves
+        let enrs = seeds.enrs.iter().filter(|enr| {
+            let contactable = (bind_ipv4 && enr.udp4_socket().is_some()) ||
+                (bind_ipv6 && enr.udp6_socket().is_some());
+            if !contactable {
+                warn!("--bootnodes ENR has no endpoint for a served IP family; discv5 will not dial it: {enr}");
+            }
+            contactable
+        });
+        let enodes = seeds.enodes.iter().filter(|record| {
+            if record.address.is_ipv4() {
+                bind_ipv4
+            } else {
+                bind_ipv6
+            }
+        });
+
+        builder =
+            builder.add_signed_boot_nodes(enrs.cloned()).add_unsigned_boot_nodes(enodes.copied());
 
         builder.build()
     }
@@ -447,7 +500,7 @@ mod tests {
             "extip:2001:db8::1",
         ]);
         let nat = command.resolved_nat().unwrap();
-        let config = command.discv5_config(&nat, &command.seed_nodes().unwrap());
+        let config = command.discv5_config(&nat, &command.seed_nodes(&nat).unwrap());
         let sk = SecretKey::from_byte_array(&[1u8; 32]).unwrap();
 
         let (enr, _, _, _) = build_local_enr(&sk, &config);
@@ -469,7 +522,7 @@ mod tests {
             "extip:1.2.3.4",
         ]);
         let nat = command.resolved_nat().unwrap();
-        let config = command.discv5_config(&nat, &command.seed_nodes().unwrap());
+        let config = command.discv5_config(&nat, &command.seed_nodes(&nat).unwrap());
         let sk = SecretKey::from_byte_array(&[1u8; 32]).unwrap();
 
         let (enr, _, _, _) = build_local_enr(&sk, &config);
@@ -491,7 +544,7 @@ mod tests {
             "extip:2001:db8::1",
         ]);
         let nat = command.resolved_nat().unwrap();
-        let config = command.discv5_config(&nat, &command.seed_nodes().unwrap());
+        let config = command.discv5_config(&nat, &command.seed_nodes(&nat).unwrap());
         let sk = SecretKey::from_byte_array(&[1u8; 32]).unwrap();
 
         let (enr, _, _, _) = build_local_enr(&sk, &config);
@@ -553,13 +606,13 @@ mod tests {
 
         let command = Command::parse_from(args);
         let nat = command.resolved_nat().unwrap();
-        let config = command.discv4_config(&nat, &command.seed_nodes().unwrap());
+        let config = command.discv4_config(&nat, &command.seed_nodes(&nat).unwrap());
         assert_eq!(nat.resolver, NatResolver::ExternalIp("1.2.3.4".parse().unwrap()));
         assert_eq!(config.secondary_advertised_ip, None);
 
         let command = Command::parse_from(args.iter().chain(&["--v5"]));
         let nat = command.resolved_nat().unwrap();
-        let config = command.discv4_config(&nat, &command.seed_nodes().unwrap());
+        let config = command.discv4_config(&nat, &command.seed_nodes(&nat).unwrap());
         assert_eq!(nat.resolver, NatResolver::ExternalIp("1.2.3.4".parse().unwrap()));
         assert_eq!(config.secondary_advertised_ip, Some("2001:db8::1".parse().unwrap()));
     }
@@ -571,7 +624,8 @@ mod tests {
         let enode = "enode://d860a01f9722d78051619d1e2351aba3f43f943f6f00718d1b9baa4101932a1f5011f16bb2b1bb35db20d6fe28fa0bf09636d26a87d31de9ec6203eeedb1f666@1.2.3.4:0?discport=30303";
 
         let command = Command::parse_from(["reth", "--bootnodes", &format!("{enode},{enr}")]);
-        let seeds = command.seed_nodes().unwrap();
+        let nat = command.resolved_nat().unwrap();
+        let seeds = command.seed_nodes(&nat).unwrap();
 
         assert_eq!(seeds.enodes.len(), 1);
         assert_eq!(seeds.enodes[0].address, "1.2.3.4".parse::<IpAddr>().unwrap());
@@ -591,11 +645,73 @@ mod tests {
     }
 
     #[test]
+    fn bootnodes_normalize_and_validate_enodes() {
+        let peer_id = "d860a01f9722d78051619d1e2351aba3f43f943f6f00718d1b9baa4101932a1f5011f16bb2b1bb35db20d6fe28fa0bf09636d26a87d31de9ec6203eeedb1f666";
+
+        // a v4-mapped host normalizes to its semantic IPv4 family
+        let command = Command::parse_from([
+            "reth",
+            "--bootnodes",
+            &format!("enode://{peer_id}@[::ffff:9.9.9.9]:0?discport=30303"),
+        ]);
+        let seeds = command.seed_nodes(&command.resolved_nat().unwrap()).unwrap();
+        assert_eq!(seeds.enodes[0].address, "9.9.9.9".parse::<IpAddr>().unwrap());
+
+        // a zero discovery port can never be pinged
+        let command =
+            Command::parse_from(["reth", "--bootnodes", &format!("enode://{peer_id}@1.2.3.4:0")]);
+        assert!(command.seed_nodes(&command.resolved_nat().unwrap()).is_err());
+
+        // an id off the secp256k1 curve would be silently dropped by discv5's bootstrap
+        let bad_id = "ff".repeat(64);
+        let command = Command::parse_from([
+            "reth",
+            "--bootnodes",
+            &format!("enode://{bad_id}@1.2.3.4:30303"),
+        ]);
+        assert!(command.seed_nodes(&command.resolved_nat().unwrap()).is_err());
+    }
+
+    #[test]
+    fn enr_seed_prefers_served_family() {
+        // Deterministic record (key 0xaa..aa): ip 9.9.9.9/udp 30303 + ip6 2001:db8::9/udp6 30304.
+        let dual = "enr:-KG4QF9o9jc3N31d-QdtzGq_HRKxncK1dmwMPQv8upyE43wzaMXsUrFdXobKuBTEwRaxToiampTdT9gw0sbWMjrE8SoBgmlkgnY0gmlwhAkJCQmDaXA2kCABDbgAAAAAAAAAAAAAAAmJc2VjcDI1NmsxoQJqBKuY2eR3StgG4wLd3rY76ha1y18iPud0eOhhu1g-s4N1ZHCCdl-EdWRwNoJ2YA";
+
+        // v6-primary: the discv4 seed must be the ENR's IPv6 endpoint, not the ip4-first default
+        let command = Command::parse_from([
+            "reth",
+            "--addr",
+            "[::]:30303",
+            "--nat",
+            "extip:2001:db8::1",
+            "--bootnodes",
+            dual,
+        ]);
+        let seeds = command.seed_nodes(&command.resolved_nat().unwrap()).unwrap();
+        assert_eq!(seeds.enr_records[0].address, "2001:db8::9".parse::<IpAddr>().unwrap());
+        assert_eq!(seeds.enr_records[0].udp_port, 30304);
+
+        // v4-primary keeps the IPv4 endpoint
+        let command = Command::parse_from([
+            "reth",
+            "--addr",
+            "0.0.0.0:30303",
+            "--nat",
+            "extip:1.2.3.4",
+            "--bootnodes",
+            dual,
+        ]);
+        let seeds = command.seed_nodes(&command.resolved_nat().unwrap()).unwrap();
+        assert_eq!(seeds.enr_records[0].address, "9.9.9.9".parse::<IpAddr>().unwrap());
+        assert_eq!(seeds.enr_records[0].udp_port, 30303);
+    }
+
+    #[test]
     fn bootnodes_reject_endpointless_entries() {
         let peer_id = "d860a01f9722d78051619d1e2351aba3f43f943f6f00718d1b9baa4101932a1f5011f16bb2b1bb35db20d6fe28fa0bf09636d26a87d31de9ec6203eeedb1f666";
 
         let command = Command::parse_from(["reth", "--bootnodes", &format!("enode://{peer_id}")]);
-        assert!(command.seed_nodes().is_err());
+        assert!(command.seed_nodes(&command.resolved_nat().unwrap()).is_err());
     }
 
     #[test]
@@ -611,7 +727,7 @@ mod tests {
             "extip:2001:db8::1",
         ]);
         let nat = command.resolved_nat().unwrap();
-        let config = command.discv5_config(&nat, &command.seed_nodes().unwrap());
+        let config = command.discv5_config(&nat, &command.seed_nodes(&nat).unwrap());
         let sk = SecretKey::from_byte_array(&[1u8; 32]).unwrap();
 
         let (enr, _, _, _) = build_local_enr(&sk, &config);
