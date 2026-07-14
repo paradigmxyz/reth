@@ -1,7 +1,4 @@
-use std::{
-    sync::{Arc, Mutex},
-    time::Duration,
-};
+use std::{sync::Arc, time::Duration};
 
 use alloy_genesis::ChainConfig;
 use alloy_primitives::keccak256;
@@ -21,7 +18,7 @@ use reth_rpc_server_types::{
     ToRpcResult,
 };
 use reth_transaction_pool::TransactionPool;
-use tokio::task::JoinHandle;
+use tokio::{sync::Mutex, task::JoinHandle};
 use tracing::{info, warn};
 
 /// Maximum duration of a tracing override.
@@ -36,7 +33,7 @@ struct TracingRevertState {
 }
 
 static TRACING_REVERT: Mutex<TracingRevertState> =
-    Mutex::new(TracingRevertState { generation: 0, task: None });
+    Mutex::const_new(TracingRevertState { generation: 0, task: None });
 
 /// `admin` API implementation.
 ///
@@ -248,7 +245,7 @@ where
 
         let baseline = reth_tracing::startup_log_directives().unwrap_or_default().to_string();
         let ttl_secs = request.ttl_secs;
-        let mut state = TRACING_REVERT.lock().expect("tracing revert mutex poisoned");
+        let mut state = TRACING_REVERT.lock().await;
 
         let directives = if ttl_secs == Some(0) {
             reth_tracing::set_log_vmodule(&baseline).map_err(internal_rpc_err)?;
@@ -269,7 +266,7 @@ where
             let revert_baseline = baseline.clone();
             state.task = Some(tokio::spawn(async move {
                 tokio::time::sleep(Duration::from_secs(ttl_secs)).await;
-                let mut state = TRACING_REVERT.lock().expect("tracing revert mutex poisoned");
+                let mut state = TRACING_REVERT.lock().await;
                 if state.generation != generation {
                     return;
                 }
