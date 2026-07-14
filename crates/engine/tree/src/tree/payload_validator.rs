@@ -909,6 +909,10 @@ where
             .into())
         }
 
+        if let Some(guard) = _txpool_prewarm_guard.as_ref() {
+            guard.record_trie_target_overlap(block.number(), block.hash(), hashed_state.get());
+        }
+
         let timing_stats = state_provider_stats.filter(|_| slow_block_enabled).map(|stats| {
             self.calculate_timing_stats(
                 &block,

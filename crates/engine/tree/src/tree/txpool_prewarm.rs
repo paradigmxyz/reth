@@ -17,7 +17,7 @@ use reth_metrics::Metrics;
 use reth_primitives_traits::{NodePrimitives, TxTy};
 use reth_provider::{BlockReader, StateProviderBox, StateProviderFactory, StateReader};
 use reth_revm::{database::EvmStateProvider, db::State};
-use reth_trie::{MultiProofTargetsV2, ProofV2Target};
+use reth_trie::{HashedPostState, MultiProofTargetsV2, ProofV2Target};
 use revm::{state::EvmState, DatabaseCommit};
 use std::{
     fmt::Debug,
@@ -29,7 +29,7 @@ use std::{
     },
     time::{Duration, Instant},
 };
-use tracing::{debug, trace, warn};
+use tracing::{debug, info, trace, warn};
 
 /// Delay between txpool refreshes after a completed or empty selection.
 const TXPOOL_REFRESH_INTERVAL: Duration = Duration::from_millis(100);
@@ -38,7 +38,7 @@ const TXPOOL_REFRESH_INTERVAL: Duration = Duration::from_millis(100);
 const TXPOOL_HEAD_POLL_INTERVAL: Duration = Duration::from_millis(10);
 
 /// Maximum changed trie targets retained from one speculative execution wave.
-const TXPOOL_TRIE_PREWARM_MAX_TARGETS_PER_WAVE: usize = 300;
+const TXPOOL_TRIE_PREWARM_MAX_TARGETS_PER_WAVE: usize = 600;
 
 /// Maximum cumulative proof calculation time spent warming one canonical parent.
 const TXPOOL_TRIE_PREWARM_PARENT_BUDGET: Duration = Duration::from_secs(1);
@@ -130,6 +130,7 @@ struct TxPoolTriePrewarmRequest {
     parent_hash: B256,
     head_epoch: u64,
     epoch: u64,
+    enqueued_at: Instant,
     targets: MultiProofTargetsV2,
     calculator: Arc<TxPoolTrieProofCalculator>,
 }
@@ -139,6 +140,169 @@ struct TxPoolTriePrewarmRequest {
 struct TxPoolTriePrewarmTargets {
     accounts: Vec<B256>,
     storages: B256Map<Vec<B256>>,
+    collected: usize,
+    truncated: usize,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum TxPoolTrieTargetAdmission {
+    Duplicate,
+    Admitted,
+    Truncated,
+}
+
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+struct TxPoolTrieTargetMerge {
+    admitted: usize,
+    truncated: usize,
+}
+
+impl TxPoolTrieTargetMerge {
+    fn record(&mut self, admission: TxPoolTrieTargetAdmission) {
+        match admission {
+            TxPoolTrieTargetAdmission::Duplicate => {}
+            TxPoolTrieTargetAdmission::Admitted => self.admitted += 1,
+            TxPoolTrieTargetAdmission::Truncated => self.truncated += 1,
+        }
+    }
+}
+
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+struct TxPoolTriePrewarmTargetStats {
+    fresh_collected: usize,
+    fresh_admitted: usize,
+    fresh_truncated: usize,
+    replayed_collected: usize,
+    replayed_admitted: usize,
+    replayed_truncated: usize,
+}
+
+impl TxPoolTriePrewarmTargetStats {
+    const fn collected(self) -> usize {
+        self.fresh_collected + self.replayed_collected
+    }
+
+    const fn admitted(self) -> usize {
+        self.fresh_admitted + self.replayed_admitted
+    }
+
+    const fn truncated(self) -> usize {
+        self.fresh_truncated + self.replayed_truncated
+    }
+}
+
+#[derive(Debug)]
+struct TxPoolTriePrewarmWave {
+    targets: TxPoolTriePrewarmTargets,
+    stats: TxPoolTriePrewarmTargetStats,
+}
+
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+struct TxPoolTrieTargetIdentities {
+    accounts: HashSet<B256>,
+    storages: HashSet<(B256, B256)>,
+}
+
+impl TxPoolTrieTargetIdentities {
+    fn from_multiproof_targets(targets: &MultiProofTargetsV2) -> Self {
+        Self {
+            accounts: targets.account_targets.iter().map(ProofV2Target::key).collect(),
+            storages: targets
+                .storage_targets
+                .iter()
+                .flat_map(|(account, slots)| slots.iter().map(move |slot| (*account, slot.key())))
+                .collect(),
+        }
+    }
+
+    fn from_hashed_post_state(state: &HashedPostState) -> Self {
+        let mut accounts = state.accounts.keys().copied().collect::<HashSet<_>>();
+        accounts.extend(state.storages.keys().copied());
+        let storages = state
+            .storages
+            .iter()
+            .flat_map(|(account, storage)| {
+                storage.storage.keys().map(move |slot| (*account, *slot))
+            })
+            .collect();
+        Self { accounts, storages }
+    }
+
+    fn extend(&mut self, other: Self) {
+        self.accounts.extend(other.accounts);
+        self.storages.extend(other.storages);
+    }
+}
+
+#[derive(Debug, Default, Clone)]
+struct TxPoolTriePrewarmCoverage {
+    parent_hash: Option<B256>,
+    admitted: TxPoolTrieTargetIdentities,
+    proved: TxPoolTrieTargetIdentities,
+}
+
+impl TxPoolTriePrewarmCoverage {
+    fn reset(&mut self, parent_hash: B256) {
+        self.parent_hash = Some(parent_hash);
+        self.admitted = TxPoolTrieTargetIdentities::default();
+        self.proved = TxPoolTrieTargetIdentities::default();
+    }
+
+    fn report(&self, actual_state: &HashedPostState) -> TxPoolTriePrewarmCoverageReport {
+        let actual = TxPoolTrieTargetIdentities::from_hashed_post_state(actual_state);
+        TxPoolTriePrewarmCoverageReport {
+            admitted_accounts: self.admitted.accounts.len(),
+            admitted_storage: self.admitted.storages.len(),
+            proved_accounts: self.proved.accounts.len(),
+            proved_storage: self.proved.storages.len(),
+            actual_accounts: actual.accounts.len(),
+            actual_storage: actual.storages.len(),
+            admitted_account_hits: self
+                .admitted
+                .accounts
+                .iter()
+                .filter(|account| actual.accounts.contains(*account))
+                .count(),
+            admitted_storage_hits: self
+                .admitted
+                .storages
+                .iter()
+                .filter(|target| actual.storages.contains(*target))
+                .count(),
+            proved_account_hits: self
+                .proved
+                .accounts
+                .iter()
+                .filter(|account| actual.accounts.contains(*account))
+                .count(),
+            proved_storage_hits: self
+                .proved
+                .storages
+                .iter()
+                .filter(|target| actual.storages.contains(*target))
+                .count(),
+            wiped_storage_accounts: actual_state
+                .storages
+                .values()
+                .filter(|storage| storage.wiped)
+                .count(),
+        }
+    }
+}
+
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+struct TxPoolTriePrewarmCoverageReport {
+    admitted_accounts: usize,
+    admitted_storage: usize,
+    proved_accounts: usize,
+    proved_storage: usize,
+    actual_accounts: usize,
+    actual_storage: usize,
+    admitted_account_hits: usize,
+    admitted_storage_hits: usize,
+    proved_account_hits: usize,
+    proved_storage_hits: usize,
+    wiped_storage_accounts: usize,
 }
 
 impl TxPoolTriePrewarmTargets {
@@ -166,42 +330,62 @@ impl TxPoolTriePrewarmTargets {
         }
     }
 
-    fn insert_account(&mut self, account: B256) {
-        if !self.accounts.contains(&account) &&
-            self.len() < TXPOOL_TRIE_PREWARM_MAX_TARGETS_PER_WAVE
-        {
-            self.accounts.push(account);
+    fn insert_account(&mut self, account: B256) -> TxPoolTrieTargetAdmission {
+        if self.accounts.contains(&account) {
+            return TxPoolTrieTargetAdmission::Duplicate
         }
+
+        self.collected += 1;
+        if self.len() >= TXPOOL_TRIE_PREWARM_MAX_TARGETS_PER_WAVE {
+            self.truncated += 1;
+            return TxPoolTrieTargetAdmission::Truncated
+        }
+
+        self.accounts.push(account);
+        TxPoolTrieTargetAdmission::Admitted
     }
 
-    fn insert_storage(&mut self, account: B256, slot: B256) {
+    fn insert_storage(&mut self, account: B256, slot: B256) -> TxPoolTrieTargetAdmission {
         // Direct V2 proof calculation does not promote storage targets into the account trie.
         // Include the account path so the calculator reads the storage root first.
         self.insert_account(account);
         if !self.accounts.contains(&account) {
-            return
+            self.collected += 1;
+            self.truncated += 1;
+            return TxPoolTrieTargetAdmission::Truncated
         }
 
         let already_present =
             self.storages.get(&account).is_some_and(|slots| slots.contains(&slot));
-        if !already_present && self.len() < TXPOOL_TRIE_PREWARM_MAX_TARGETS_PER_WAVE {
-            self.storages.entry(account).or_default().push(slot);
+        if already_present {
+            return TxPoolTrieTargetAdmission::Duplicate
         }
+
+        self.collected += 1;
+        if self.len() >= TXPOOL_TRIE_PREWARM_MAX_TARGETS_PER_WAVE {
+            self.truncated += 1;
+            return TxPoolTrieTargetAdmission::Truncated
+        }
+
+        self.storages.entry(account).or_default().push(slot);
+        TxPoolTrieTargetAdmission::Admitted
     }
 
     fn len(&self) -> usize {
         self.accounts.len() + self.storages.values().map(Vec::len).sum::<usize>()
     }
 
-    fn extend(&mut self, other: Self) {
+    fn extend(&mut self, other: Self) -> TxPoolTrieTargetMerge {
+        let mut merged = TxPoolTrieTargetMerge::default();
         for account in other.accounts {
-            self.insert_account(account);
+            merged.record(self.insert_account(account));
             if let Some(slots) = other.storages.get(&account) {
                 for slot in slots {
-                    self.insert_storage(account, *slot);
+                    merged.record(self.insert_storage(account, *slot));
                 }
             }
         }
+        merged
     }
 
     fn is_empty(&self) -> bool {
@@ -222,9 +406,63 @@ impl TxPoolTriePrewarmTargets {
     }
 }
 
+fn finish_trie_prewarm_wave(
+    mut fresh: TxPoolTriePrewarmTargets,
+    replayed: TxPoolTriePrewarmTargets,
+) -> TxPoolTriePrewarmWave {
+    let fresh_collected = fresh.collected;
+    let fresh_admitted = fresh.len();
+    let fresh_truncated = fresh.truncated;
+    let replayed_collected = replayed.collected;
+    let replayed_truncated = replayed.truncated;
+    let replayed_merge = fresh.extend(replayed);
+
+    TxPoolTriePrewarmWave {
+        targets: fresh,
+        stats: TxPoolTriePrewarmTargetStats {
+            fresh_collected,
+            fresh_admitted,
+            fresh_truncated,
+            replayed_collected,
+            replayed_admitted: replayed_merge.admitted,
+            replayed_truncated: replayed_truncated + replayed_merge.truncated,
+        },
+    }
+}
+
 #[derive(Clone, Metrics)]
 #[metrics(scope = "sync.txpool_trie_prewarm")]
 struct TxPoolTriePrewarmMetrics {
+    /// Candidate targets observed in one speculative execution wave.
+    wave_targets_collected: Histogram,
+    /// Deduplicated targets admitted to one bounded trie warming wave.
+    wave_targets_admitted: Histogram,
+    /// Target insertions rejected by the per-wave bound.
+    wave_targets_truncated: Histogram,
+    /// Candidate targets observed from newly selected transactions in one wave.
+    wave_fresh_targets_collected: Histogram,
+    /// Fresh targets admitted to one bounded trie warming wave.
+    wave_fresh_targets_admitted: Histogram,
+    /// Fresh target insertions rejected by the per-wave bound.
+    wave_fresh_targets_truncated: Histogram,
+    /// Candidate targets observed while replaying sender prefixes in one wave.
+    wave_replayed_targets_collected: Histogram,
+    /// Replayed targets admitted after fresh targets in one bounded wave.
+    wave_replayed_targets_admitted: Histogram,
+    /// Replayed target insertions rejected by the per-wave bound.
+    wave_replayed_targets_truncated: Histogram,
+    /// Number of speculative execution waves that hit the target bound.
+    waves_truncated: Counter,
+    /// Number of trie warming waves accepted into the single-slot queue.
+    waves_enqueued: Counter,
+    /// Number of trie warming waves rejected by the single-slot queue.
+    waves_dropped: Counter,
+    /// Number of trie warming waves whose complete target set was processed.
+    waves_completed: Counter,
+    /// Number of queued or active trie warming waves invalidated by an epoch change.
+    waves_cancelled: Counter,
+    /// Time an accepted trie warming wave spent in the single-slot queue.
+    queue_age_seconds: Histogram,
     /// Duration of one bounded V2 proof calculation in seconds.
     proof_duration_seconds: Histogram,
     /// Number of targets in one bounded V2 proof calculation.
@@ -235,6 +473,23 @@ struct TxPoolTriePrewarmMetrics {
     proof_errors: Counter,
     /// Time validation spent waiting for an active proof calculation to release its provider.
     validation_wait_duration_seconds: Histogram,
+}
+
+impl TxPoolTriePrewarmMetrics {
+    fn record_target_wave(&self, stats: TxPoolTriePrewarmTargetStats) {
+        self.wave_targets_collected.record(stats.collected() as f64);
+        self.wave_targets_admitted.record(stats.admitted() as f64);
+        self.wave_targets_truncated.record(stats.truncated() as f64);
+        self.wave_fresh_targets_collected.record(stats.fresh_collected as f64);
+        self.wave_fresh_targets_admitted.record(stats.fresh_admitted as f64);
+        self.wave_fresh_targets_truncated.record(stats.fresh_truncated as f64);
+        self.wave_replayed_targets_collected.record(stats.replayed_collected as f64);
+        self.wave_replayed_targets_admitted.record(stats.replayed_admitted as f64);
+        self.wave_replayed_targets_truncated.record(stats.replayed_truncated as f64);
+        if stats.truncated() > 0 {
+            self.waves_truncated.increment(1);
+        }
+    }
 }
 
 /// Single pending request slot shared with a worker.
@@ -294,32 +549,44 @@ impl<J> TxPoolPrewarmRequests<J> {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum TxPoolTrieEnqueueOutcome {
+    Enqueued,
+    ReplacedStale,
+    Dropped,
+}
+
 impl TxPoolPrewarmRequests<TxPoolTriePrewarmRequest> {
     /// Preserves the oldest queued wave for one epoch, but replaces stale epochs.
-    fn try_enqueue(&self, request: TxPoolTriePrewarmRequest) -> bool {
+    fn try_enqueue(&self, request: TxPoolTriePrewarmRequest) -> TxPoolTrieEnqueueOutcome {
         let mut pending = self.latest.lock().expect("txpool prewarm request lock poisoned");
         if self.closed.load(Ordering::Acquire) ||
             request.epoch < self.minimum_epoch.load(Ordering::Acquire)
         {
-            return false
+            return TxPoolTrieEnqueueOutcome::Dropped
         }
 
-        match pending.as_ref() {
-            None => *pending = Some(request),
-            Some(current) if current.epoch < request.epoch => *pending = Some(request),
-            Some(_) => return false,
-        }
+        let outcome = match pending.as_ref() {
+            None => TxPoolTrieEnqueueOutcome::Enqueued,
+            Some(current) if current.epoch < request.epoch => {
+                TxPoolTrieEnqueueOutcome::ReplacedStale
+            }
+            Some(_) => return TxPoolTrieEnqueueOutcome::Dropped,
+        };
+        *pending = Some(request);
         self.available.notify_one();
-        true
+        outcome
     }
 
-    fn advance_epoch(&self, epoch: u64) {
+    fn advance_epoch(&self, epoch: u64) -> bool {
         let mut pending = self.latest.lock().expect("txpool prewarm request lock poisoned");
         let minimum_epoch = self.minimum_epoch.load(Ordering::Relaxed).max(epoch);
         self.minimum_epoch.store(minimum_epoch, Ordering::Release);
         if pending.as_ref().is_some_and(|request| request.epoch < minimum_epoch) {
             pending.take();
+            return true
         }
+        false
     }
 }
 
@@ -397,6 +664,7 @@ impl TxPoolSnapshotPublication {
 pub(crate) struct TxPoolPrewarmPauseGuard {
     publication: Arc<TxPoolSnapshotPublication>,
     generation: u64,
+    trie_coverage: Option<TxPoolTriePrewarmCoverage>,
 }
 
 #[derive(Debug, Default)]
@@ -451,6 +719,7 @@ struct TxPoolTriePrewarmState {
     requests: TxPoolPrewarmRequests<TxPoolTriePrewarmRequest>,
     activity: Arc<TxPoolWorkerActivity>,
     current_head: Mutex<Option<B256>>,
+    coverage: Mutex<TxPoolTriePrewarmCoverage>,
     head_epoch: AtomicU64,
     epoch: AtomicU64,
     metrics: TxPoolTriePrewarmMetrics,
@@ -462,6 +731,7 @@ impl TxPoolTriePrewarmState {
             requests: TxPoolPrewarmRequests::new(),
             activity: Arc::new(TxPoolWorkerActivity::default()),
             current_head: Mutex::new(None),
+            coverage: Mutex::new(TxPoolTriePrewarmCoverage::default()),
             head_epoch: AtomicU64::new(0),
             epoch: AtomicU64::new(0),
             metrics: TxPoolTriePrewarmMetrics::default(),
@@ -474,7 +744,9 @@ impl TxPoolTriePrewarmState {
                 self.activity.active.lock().expect("txpool worker activity lock poisoned");
             self.epoch.fetch_add(1, Ordering::SeqCst) + 1
         };
-        self.requests.advance_epoch(epoch);
+        if self.requests.advance_epoch(epoch) {
+            self.metrics.waves_cancelled.increment(1);
+        }
         epoch
     }
 
@@ -493,15 +765,54 @@ impl TxPoolTriePrewarmState {
                 self.epoch.fetch_add(1, Ordering::SeqCst) + 1,
             )
         };
-        self.requests.advance_epoch(epoch);
+        if self.requests.advance_epoch(epoch) {
+            self.metrics.waves_cancelled.increment(1);
+        }
+        self.coverage.lock().expect("txpool trie coverage lock poisoned").reset(parent_hash);
         head_epoch
     }
 
     fn try_enqueue(&self, request: TxPoolTriePrewarmRequest) -> bool {
         if self.head_epoch.load(Ordering::Acquire) != request.head_epoch {
+            self.metrics.waves_dropped.increment(1);
             return false
         }
-        self.requests.try_enqueue(request)
+        let parent_hash = request.parent_hash;
+        let targets = TxPoolTrieTargetIdentities::from_multiproof_targets(&request.targets);
+        let mut coverage = self.coverage.lock().expect("txpool trie coverage lock poisoned");
+        match self.requests.try_enqueue(request) {
+            TxPoolTrieEnqueueOutcome::Enqueued => {
+                if coverage.parent_hash == Some(parent_hash) {
+                    coverage.admitted.extend(targets);
+                }
+                self.metrics.waves_enqueued.increment(1);
+                true
+            }
+            TxPoolTrieEnqueueOutcome::ReplacedStale => {
+                if coverage.parent_hash == Some(parent_hash) {
+                    coverage.admitted.extend(targets);
+                }
+                self.metrics.waves_enqueued.increment(1);
+                self.metrics.waves_cancelled.increment(1);
+                true
+            }
+            TxPoolTrieEnqueueOutcome::Dropped => {
+                self.metrics.waves_dropped.increment(1);
+                false
+            }
+        }
+    }
+
+    fn record_proved(&self, parent_hash: B256, targets: TxPoolTrieTargetIdentities) {
+        let mut coverage = self.coverage.lock().expect("txpool trie coverage lock poisoned");
+        if coverage.parent_hash == Some(parent_hash) {
+            coverage.proved.extend(targets);
+        }
+    }
+
+    fn coverage_for(&self, parent_hash: B256) -> Option<TxPoolTriePrewarmCoverage> {
+        let coverage = self.coverage.lock().expect("txpool trie coverage lock poisoned");
+        (coverage.parent_hash == Some(parent_hash)).then(|| coverage.clone())
     }
 }
 
@@ -519,6 +830,38 @@ impl Drop for TxPoolWorkerActivityGuard {
 impl Drop for TxPoolPrewarmPauseGuard {
     fn drop(&mut self) {
         self.publication.resume(self.generation);
+    }
+}
+
+impl TxPoolPrewarmPauseGuard {
+    /// Records overlap only after the payload's state root has matched its header.
+    pub(crate) fn record_trie_target_overlap(
+        &self,
+        block_number: u64,
+        block_hash: B256,
+        hashed_state: &HashedPostState,
+    ) {
+        let Some(coverage) = self.trie_coverage.as_ref() else { return };
+        let Some(parent_hash) = coverage.parent_hash else { return };
+        let report = coverage.report(hashed_state);
+        info!(
+            target: "engine::tree::txpool_prewarm",
+            ?parent_hash,
+            block_number,
+            ?block_hash,
+            admitted_accounts = report.admitted_accounts,
+            admitted_storage = report.admitted_storage,
+            proved_accounts = report.proved_accounts,
+            proved_storage = report.proved_storage,
+            actual_accounts = report.actual_accounts,
+            actual_storage = report.actual_storage,
+            admitted_account_hits = report.admitted_account_hits,
+            admitted_storage_hits = report.admitted_storage_hits,
+            proved_account_hits = report.proved_account_hits,
+            proved_storage_hits = report.proved_storage_hits,
+            wiped_storage_accounts = report.wiped_storage_accounts,
+            "measured txpool trie prewarming target overlap"
+        );
     }
 }
 
@@ -654,6 +997,7 @@ where
         let (snapshot, generation) = self.publication.cancel_and_snapshot(parent_hash);
         self.advance_trie_epoch();
         let wait = self.trie.activity.wait_until_idle();
+        let trie_coverage = self.trie.coverage_for(parent_hash);
         self.trie.metrics.validation_wait_duration_seconds.record(wait.as_secs_f64());
         if wait.as_millis() > 5 {
             debug!(
@@ -664,7 +1008,11 @@ where
         }
         (
             snapshot,
-            TxPoolPrewarmPauseGuard { publication: Arc::clone(&self.publication), generation },
+            TxPoolPrewarmPauseGuard {
+                publication: Arc::clone(&self.publication),
+                generation,
+                trie_coverage,
+            },
         )
     }
 
@@ -707,15 +1055,23 @@ where
 }
 
 fn txpool_trie_prewarm_loop(trie: Arc<TxPoolTriePrewarmState>, chunk_size: usize) {
+    enum WaveOutcome {
+        Completed,
+        Cancelled,
+        Stopped,
+    }
+
     let mut budget_parent = None;
     let mut parent_spent = Duration::ZERO;
 
     while !trie.requests.is_closed() {
         let Some(request) = trie.requests.wait(None) else { continue };
+        trie.metrics.queue_age_seconds.record(request.enqueued_at.elapsed().as_secs_f64());
         if trie.requests.is_closed() ||
             trie.head_epoch.load(Ordering::Acquire) != request.head_epoch ||
             trie.epoch.load(Ordering::Acquire) != request.epoch
         {
+            trie.metrics.waves_cancelled.increment(1);
             continue
         }
         if budget_parent != Some(request.parent_hash) {
@@ -727,12 +1083,15 @@ fn txpool_trie_prewarm_loop(trie: Arc<TxPoolTriePrewarmState>, chunk_size: usize
         }
 
         let chunks = txpool_trie_prewarm_chunks(request.targets, chunk_size.max(1));
+        let chunk_count = chunks.len();
+        let mut outcome = WaveOutcome::Completed;
 
-        for chunk in chunks {
+        for (chunk_index, chunk) in chunks.into_iter().enumerate() {
             if trie.requests.is_closed() ||
                 trie.head_epoch.load(Ordering::Acquire) != request.head_epoch ||
                 trie.epoch.load(Ordering::Acquire) != request.epoch
             {
+                outcome = WaveOutcome::Cancelled;
                 break
             }
 
@@ -742,9 +1101,11 @@ fn txpool_trie_prewarm_loop(trie: Arc<TxPoolTriePrewarmState>, chunk_size: usize
                 &trie.epoch,
                 request.epoch,
             ) else {
+                outcome = WaveOutcome::Cancelled;
                 break
             };
             let target_count = chunk.chunking_length();
+            let target_identities = TxPoolTrieTargetIdentities::from_multiproof_targets(&chunk);
             let started_at = Instant::now();
             let result = catch_unwind(AssertUnwindSafe(|| (request.calculator)(chunk)));
             let elapsed = started_at.elapsed();
@@ -752,6 +1113,7 @@ fn txpool_trie_prewarm_loop(trie: Arc<TxPoolTriePrewarmState>, chunk_size: usize
 
             match result {
                 Ok(Ok(returned_proof_nodes)) => {
+                    trie.record_proved(request.parent_hash, target_identities);
                     trie.metrics.proof_duration_seconds.record(elapsed.as_secs_f64());
                     trie.metrics.proof_targets.record(target_count as f64);
                     trie.metrics.returned_proof_nodes.record(returned_proof_nodes as f64);
@@ -773,6 +1135,7 @@ fn txpool_trie_prewarm_loop(trie: Arc<TxPoolTriePrewarmState>, chunk_size: usize
                         "failed to warm trie pages from speculative txpool targets"
                     );
                     drop(activity_guard);
+                    outcome = WaveOutcome::Stopped;
                     break
                 }
                 Err(_) => {
@@ -783,6 +1146,7 @@ fn txpool_trie_prewarm_loop(trie: Arc<TxPoolTriePrewarmState>, chunk_size: usize
                         "txpool trie page prewarming panicked"
                     );
                     drop(activity_guard);
+                    outcome = WaveOutcome::Stopped;
                     break
                 }
             }
@@ -798,6 +1162,9 @@ fn txpool_trie_prewarm_loop(trie: Arc<TxPoolTriePrewarmState>, chunk_size: usize
                     ?elapsed,
                     "stopping slow txpool trie page prewarming request"
                 );
+                if chunk_index + 1 < chunk_count {
+                    outcome = WaveOutcome::Stopped;
+                }
                 break
             }
             if parent_spent >= TXPOOL_TRIE_PREWARM_PARENT_BUDGET {
@@ -807,8 +1174,17 @@ fn txpool_trie_prewarm_loop(trie: Arc<TxPoolTriePrewarmState>, chunk_size: usize
                     ?parent_spent,
                     "exhausted txpool trie page prewarming budget"
                 );
+                if chunk_index + 1 < chunk_count {
+                    outcome = WaveOutcome::Stopped;
+                }
                 break
             }
+        }
+
+        match outcome {
+            WaveOutcome::Completed => trie.metrics.waves_completed.increment(1),
+            WaveOutcome::Cancelled => trie.metrics.waves_cancelled.increment(1),
+            WaveOutcome::Stopped => {}
         }
     }
 }
@@ -1045,7 +1421,7 @@ fn txpool_prewarm_loop<N, P, Evm>(
             let Some(activity_guard) = activity.try_enter(&publication, active_generation) else {
                 break
             };
-            let trie_targets = catch_unwind(AssertUnwindSafe(|| {
+            let trie_wave = catch_unwind(AssertUnwindSafe(|| {
                 prewarm_transactions(
                     &evm_config,
                     &job,
@@ -1066,7 +1442,7 @@ fn txpool_prewarm_loop<N, P, Evm>(
             });
             drop(activity_guard);
 
-            let Some(trie_targets) = trie_targets else {
+            let Some(trie_wave) = trie_wave else {
                 if publication.is_current(active_generation) && !publication.is_paused() {
                     std::thread::sleep(TXPOOL_REFRESH_INTERVAL);
                 }
@@ -1081,6 +1457,7 @@ fn txpool_prewarm_loop<N, P, Evm>(
             let snapshot = cache.snapshot(job.parent_hash);
             let (accounts, storage, bytecodes) = snapshot.entry_counts();
             if publication.publish(active_generation, snapshot) {
+                trie.metrics.record_target_wave(trie_wave.stats);
                 let selection = inflight.take().expect("published selection is in flight");
                 for transaction in &selection.transactions {
                     warmed.insert(transaction.hash);
@@ -1101,12 +1478,13 @@ fn txpool_prewarm_loop<N, P, Evm>(
                     "published txpool prewarming snapshot"
                 );
 
-                if !trie_targets.is_empty() {
+                if !trie_wave.targets.is_empty() {
                     let request = TxPoolTriePrewarmRequest {
                         parent_hash: job.parent_hash,
                         head_epoch: job.head_epoch,
                         epoch: active_trie_epoch,
-                        targets: trie_targets.into_multiproof_targets(),
+                        enqueued_at: Instant::now(),
+                        targets: trie_wave.targets.into_multiproof_targets(),
                         calculator: Arc::clone(&job.trie_proof_calculator),
                     };
                     if !trie.try_enqueue(request) {
@@ -1236,7 +1614,7 @@ fn prewarm_transactions<N, P, Evm>(
     fresh_transaction_hashes: &HashSet<B256>,
     generation: u64,
     publication: &TxPoolSnapshotPublication,
-) -> Option<TxPoolTriePrewarmTargets>
+) -> Option<TxPoolTriePrewarmWave>
 where
     N: NodePrimitives,
     P: BlockReader + StateProviderFactory + StateReader + Clone,
@@ -1302,8 +1680,7 @@ where
 
     // Replayed prefixes can contain more paths than the bounded wave. Admit the freshly selected
     // transactions first, then use any remaining capacity for downstream replay effects.
-    fresh_targets.extend(replayed_targets);
-    Some(fresh_targets)
+    Some(finish_trie_prewarm_wave(fresh_targets, replayed_targets))
 }
 
 /// Provider that fills only the reusable txpool-prewarm cache.
@@ -1379,7 +1756,14 @@ mod tests {
         targets: MultiProofTargetsV2,
         calculator: Arc<TxPoolTrieProofCalculator>,
     ) -> TxPoolTriePrewarmRequest {
-        TxPoolTriePrewarmRequest { parent_hash, head_epoch: epoch, epoch, targets, calculator }
+        TxPoolTriePrewarmRequest {
+            parent_hash,
+            head_epoch: epoch,
+            epoch,
+            enqueued_at: Instant::now(),
+            targets,
+            calculator,
+        }
     }
 
     #[test]
@@ -1443,6 +1827,85 @@ mod tests {
         assert_eq!(targets.len(), TXPOOL_TRIE_PREWARM_MAX_TARGETS_PER_WAVE);
         assert_eq!(targets.accounts.len(), 1);
         assert_eq!(targets.storages[&account].len(), TXPOOL_TRIE_PREWARM_MAX_TARGETS_PER_WAVE - 1);
+        assert_eq!(targets.collected, TXPOOL_TRIE_PREWARM_MAX_TARGETS_PER_WAVE * 2 + 1);
+        assert_eq!(targets.truncated, TXPOOL_TRIE_PREWARM_MAX_TARGETS_PER_WAVE + 1);
+    }
+
+    #[test]
+    fn fresh_targets_take_capacity_before_replayed_targets() {
+        let mut fresh = TxPoolTriePrewarmTargets::default();
+        for target in 0..TXPOOL_TRIE_PREWARM_MAX_TARGETS_PER_WAVE - 1 {
+            fresh.insert_account(B256::from(U256::from(target)));
+        }
+        let duplicate = B256::from(U256::ZERO);
+        let admitted = B256::from(U256::from(TXPOOL_TRIE_PREWARM_MAX_TARGETS_PER_WAVE));
+        let truncated = B256::from(U256::from(TXPOOL_TRIE_PREWARM_MAX_TARGETS_PER_WAVE + 1));
+        let mut replayed = TxPoolTriePrewarmTargets::default();
+        replayed.insert_account(duplicate);
+        replayed.insert_account(admitted);
+        replayed.insert_account(truncated);
+
+        let wave = finish_trie_prewarm_wave(fresh, replayed);
+
+        assert_eq!(wave.targets.len(), TXPOOL_TRIE_PREWARM_MAX_TARGETS_PER_WAVE);
+        assert!(wave.targets.accounts.contains(&admitted));
+        assert!(!wave.targets.accounts.contains(&truncated));
+        assert_eq!(
+            wave.stats,
+            TxPoolTriePrewarmTargetStats {
+                fresh_collected: TXPOOL_TRIE_PREWARM_MAX_TARGETS_PER_WAVE - 1,
+                fresh_admitted: TXPOOL_TRIE_PREWARM_MAX_TARGETS_PER_WAVE - 1,
+                fresh_truncated: 0,
+                replayed_collected: 3,
+                replayed_admitted: 1,
+                replayed_truncated: 1,
+            }
+        );
+    }
+
+    #[test]
+    fn trie_coverage_reports_actual_account_and_storage_overlap() {
+        let first = B256::with_last_byte(1);
+        let second = B256::with_last_byte(2);
+        let wiped = B256::with_last_byte(3);
+        let first_slot = B256::with_last_byte(11);
+        let second_slot = B256::with_last_byte(12);
+        let wiped_slot = B256::with_last_byte(13);
+        let coverage = TxPoolTriePrewarmCoverage {
+            parent_hash: Some(B256::with_last_byte(9)),
+            admitted: TxPoolTrieTargetIdentities {
+                accounts: HashSet::from_iter([first, second]),
+                storages: HashSet::from_iter([(first, first_slot), (second, second_slot)]),
+            },
+            proved: TxPoolTrieTargetIdentities {
+                accounts: HashSet::from_iter([first]),
+                storages: HashSet::from_iter([(first, first_slot)]),
+            },
+        };
+        let actual = HashedPostState {
+            accounts: B256Map::from_iter([(second, None)]),
+            storages: B256Map::from_iter([
+                (first, reth_trie::HashedStorage::from_iter(false, [(first_slot, U256::from(1))])),
+                (wiped, reth_trie::HashedStorage::from_iter(true, [(wiped_slot, U256::from(2))])),
+            ]),
+        };
+
+        assert_eq!(
+            coverage.report(&actual),
+            TxPoolTriePrewarmCoverageReport {
+                admitted_accounts: 2,
+                admitted_storage: 2,
+                proved_accounts: 1,
+                proved_storage: 1,
+                actual_accounts: 3,
+                actual_storage: 2,
+                admitted_account_hits: 2,
+                admitted_storage_hits: 1,
+                proved_account_hits: 1,
+                proved_storage_hits: 1,
+                wiped_storage_accounts: 1,
+            }
+        );
     }
 
     #[test]
@@ -1494,43 +1957,58 @@ mod tests {
         let requests = TxPoolPrewarmRequests::new();
         let calculator = noop_calculator();
 
-        assert!(requests.try_enqueue(request(
-            B256::with_last_byte(1),
-            1,
-            MultiProofTargetsV2::default(),
-            Arc::clone(&calculator),
-        )));
-        assert!(!requests.try_enqueue(request(
-            B256::with_last_byte(2),
-            1,
-            MultiProofTargetsV2::default(),
-            Arc::clone(&calculator),
-        )));
+        assert_eq!(
+            requests.try_enqueue(request(
+                B256::with_last_byte(1),
+                1,
+                MultiProofTargetsV2::default(),
+                Arc::clone(&calculator),
+            )),
+            TxPoolTrieEnqueueOutcome::Enqueued
+        );
+        assert_eq!(
+            requests.try_enqueue(request(
+                B256::with_last_byte(2),
+                1,
+                MultiProofTargetsV2::default(),
+                Arc::clone(&calculator),
+            )),
+            TxPoolTrieEnqueueOutcome::Dropped
+        );
         assert_eq!(requests.take().unwrap().parent_hash, B256::with_last_byte(1));
 
-        assert!(requests.try_enqueue(request(
-            B256::with_last_byte(3),
-            1,
-            MultiProofTargetsV2::default(),
-            Arc::clone(&calculator),
-        )));
-        assert!(requests.try_enqueue(request(
-            B256::with_last_byte(4),
-            2,
-            MultiProofTargetsV2::default(),
-            calculator,
-        )));
+        assert_eq!(
+            requests.try_enqueue(request(
+                B256::with_last_byte(3),
+                1,
+                MultiProofTargetsV2::default(),
+                Arc::clone(&calculator),
+            )),
+            TxPoolTrieEnqueueOutcome::Enqueued
+        );
+        assert_eq!(
+            requests.try_enqueue(request(
+                B256::with_last_byte(4),
+                2,
+                MultiProofTargetsV2::default(),
+                calculator,
+            )),
+            TxPoolTrieEnqueueOutcome::ReplacedStale
+        );
         let pending = requests.take().unwrap();
         assert_eq!(pending.parent_hash, B256::with_last_byte(4));
         assert_eq!(pending.epoch, 2);
 
-        requests.advance_epoch(3);
-        assert!(!requests.try_enqueue(request(
-            B256::with_last_byte(5),
-            2,
-            MultiProofTargetsV2::default(),
-            noop_calculator(),
-        )));
+        assert!(!requests.advance_epoch(3));
+        assert_eq!(
+            requests.try_enqueue(request(
+                B256::with_last_byte(5),
+                2,
+                MultiProofTargetsV2::default(),
+                noop_calculator(),
+            )),
+            TxPoolTrieEnqueueOutcome::Dropped
+        );
     }
 
     #[test]
@@ -1583,12 +2061,10 @@ mod tests {
             let trie = Arc::clone(&trie);
             std::thread::spawn(move || txpool_trie_prewarm_loop(trie, 5))
         };
-        assert!(trie.requests.try_enqueue(request(
-            B256::with_last_byte(1),
-            epoch,
-            targets,
-            calculator
-        )));
+        assert_eq!(
+            trie.requests.try_enqueue(request(B256::with_last_byte(1), epoch, targets, calculator)),
+            TxPoolTrieEnqueueOutcome::Enqueued
+        );
         entered_rx.recv_timeout(Duration::from_secs(1)).unwrap();
 
         let (wait_started_tx, wait_started_rx) = mpsc::channel();
