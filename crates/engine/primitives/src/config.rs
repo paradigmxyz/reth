@@ -108,9 +108,9 @@ impl TxPoolPrewarmingConfig {
     pub const DEFAULT_MAX_CANDIDATE_SCAN: usize = 4096;
     /// Default gas-budget multiplier.
     pub const DEFAULT_GAS_LIMIT_MULTIPLIER: u64 = 6;
-    /// Default configuration. The feature is opt-in.
+    /// Default configuration.
     pub const DEFAULT: Self = Self {
-        enabled: false,
+        enabled: true,
         max_transactions_per_sender: Self::DEFAULT_MAX_TRANSACTIONS_PER_SENDER,
         max_candidate_scan: Self::DEFAULT_MAX_CANDIDATE_SCAN,
         gas_limit_multiplier: Self::DEFAULT_GAS_LIMIT_MULTIPLIER,
