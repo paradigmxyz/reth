@@ -60,9 +60,10 @@ pub use formatter::LogFormat;
 pub use layers::{FileInfo, FileWorkerGuard, Layers, TracingGuards};
 #[cfg(feature = "std")]
 pub use log_handle::{
-    install_log_handle, install_log_handle_with_baseline, log_handle_available, reset_log_filters,
-    set_log_verbosity, set_log_vmodule, set_startup_log_directives, startup_log_directives,
-    LogFilterReloadHandle,
+    available_log_filter_targets, install_log_handle, install_log_handle_with_baseline,
+    install_log_handle_with_target, log_handle_available, reset_log_filters,
+    reset_log_filters_for_targets, set_log_verbosity, set_log_vmodule, set_log_vmodule_for_targets,
+    LogFilterReloadHandle, LogFilterTarget,
 };
 #[cfg(feature = "std")]
 pub use test_tracer::TestTracer;
@@ -282,7 +283,7 @@ impl Tracer for RethTracer {
             self.stdout.color,
             self.enable_reload,
         )? {
-            install_log_handle_with_baseline(handle, startup_filter);
+            install_log_handle_with_target(LogFilterTarget::Stdout, handle, startup_filter);
         }
 
         if let Some(config) = self.journald {
@@ -293,7 +294,7 @@ impl Tracer for RethTracer {
             let (guard, handle) =
                 layers.file(config.format, &config.filters, file_info, self.enable_reload)?;
             if let Some((handle, startup_filter)) = handle {
-                install_log_handle_with_baseline(handle, startup_filter);
+                install_log_handle_with_target(LogFilterTarget::File, handle, startup_filter);
             }
             Some(guard)
         } else {

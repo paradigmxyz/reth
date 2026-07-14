@@ -12,7 +12,9 @@ use reth_chainspec::{EthChainSpec, EthereumHardfork, EthereumHardforks, ForkCond
 use reth_network_api::{NetworkInfo, Peers};
 use reth_network_peers::{AnyNode, NodeRecord};
 use reth_network_types::PeerKind;
-use reth_rpc_api::{AdminApiServer, TracingDirectivesRequest, TracingDirectivesResponse};
+use reth_rpc_api::{
+    AdminApiServer, TracingDirectivesRequest, TracingDirectivesResponse, TracingTarget,
+};
 use reth_rpc_server_types::{
     result::{internal_rpc_err, invalid_params_rpc_err},
     ToRpcResult,
@@ -27,13 +29,36 @@ const MAX_TRACING_TTL_SECS: u64 = 3600;
 const MAX_TRACING_DIRECTIVES_LEN: usize = 1024;
 
 #[derive(Debug, Default)]
-struct TracingRevertState {
+struct TargetRevertState {
     generation: u64,
     task: Option<JoinHandle<()>>,
 }
 
-static TRACING_REVERT: Mutex<TracingRevertState> =
-    Mutex::const_new(TracingRevertState { generation: 0, task: None });
+#[derive(Debug, Default)]
+struct TracingRevertState {
+    stdout: TargetRevertState,
+    file: TargetRevertState,
+    otlp_traces: TargetRevertState,
+    otlp_logs: TargetRevertState,
+}
+
+impl TracingRevertState {
+    fn target_mut(&mut self, target: TracingTarget) -> &mut TargetRevertState {
+        match target {
+            TracingTarget::Stdout => &mut self.stdout,
+            TracingTarget::File => &mut self.file,
+            TracingTarget::OtlpTraces => &mut self.otlp_traces,
+            TracingTarget::OtlpLogs => &mut self.otlp_logs,
+        }
+    }
+}
+
+static TRACING_REVERT: Mutex<TracingRevertState> = Mutex::const_new(TracingRevertState {
+    stdout: TargetRevertState { generation: 0, task: None },
+    file: TargetRevertState { generation: 0, task: None },
+    otlp_traces: TargetRevertState { generation: 0, task: None },
+    otlp_logs: TargetRevertState { generation: 0, task: None },
+});
 
 /// `admin` API implementation.
 ///
@@ -243,48 +268,97 @@ where
             ));
         }
 
-        let baseline = reth_tracing::startup_log_directives().unwrap_or_default().to_string();
+        let targets = resolve_tracing_targets(&request)?;
+        let filter_targets = targets.iter().copied().map(log_filter_target).collect::<Vec<_>>();
         let ttl_secs = request.ttl_secs;
         let mut state = TRACING_REVERT.lock().await;
 
         let directives = if ttl_secs == Some(0) {
-            reth_tracing::reset_log_filters().map_err(internal_rpc_err)?;
-            baseline.clone()
+            reth_tracing::reset_log_filters_for_targets(&filter_targets)
+                .map_err(internal_rpc_err)?;
+            "startup configuration".to_string()
         } else {
             let directives = request.directives.trim().to_string();
-            reth_tracing::set_log_vmodule(&directives).map_err(invalid_params_rpc_err)?;
+            reth_tracing::set_log_vmodule_for_targets(&directives, &filter_targets)
+                .map_err(invalid_params_rpc_err)?;
             directives
         };
 
-        if let Some(previous) = state.task.take() {
-            previous.abort();
-        }
-        state.generation = state.generation.wrapping_add(1);
-        let generation = state.generation;
+        for target in targets.iter().copied() {
+            let target_state = state.target_mut(target);
+            if let Some(previous) = target_state.task.take() {
+                previous.abort();
+            }
+            target_state.generation = target_state.generation.wrapping_add(1);
+            let generation = target_state.generation;
 
-        if let Some(ttl_secs @ 1..=MAX_TRACING_TTL_SECS) = ttl_secs {
-            state.task = Some(tokio::spawn(async move {
-                tokio::time::sleep(Duration::from_secs(ttl_secs)).await;
-                let mut state = TRACING_REVERT.lock().await;
-                if state.generation != generation {
-                    return;
-                }
-                match reth_tracing::reset_log_filters() {
-                    Ok(()) => {
-                        info!(target: "reth::rpc::admin", "Reverted tracing directives after TTL")
+            if let Some(ttl_secs @ 1..=MAX_TRACING_TTL_SECS) = ttl_secs {
+                target_state.task = Some(tokio::spawn(async move {
+                    tokio::time::sleep(Duration::from_secs(ttl_secs)).await;
+                    let mut state = TRACING_REVERT.lock().await;
+                    if state.target_mut(target).generation != generation {
+                        return;
                     }
-                    Err(err) => {
-                        warn!(target: "reth::rpc::admin", %err, "Failed to revert tracing directives after TTL")
+                    let filter_target = log_filter_target(target);
+                    match reth_tracing::reset_log_filters_for_targets(&[filter_target]) {
+                        Ok(()) => {
+                            info!(target: "reth::rpc::admin", ?target, "Reverted tracing directives after TTL")
+                        }
+                        Err(err) => {
+                            warn!(target: "reth::rpc::admin", ?target, %err, "Failed to revert tracing directives after TTL")
+                        }
                     }
-                }
-                state.task = None;
-            }));
+                    state.target_mut(target).task = None;
+                }));
+            }
         }
         drop(state);
 
-        info!(target: "reth::rpc::admin", %directives, ?ttl_secs, "Applied tracing directives");
-        Ok(TracingDirectivesResponse { applied: directives, ttl_secs, reverts_to: baseline })
+        info!(target: "reth::rpc::admin", %directives, ?targets, ?ttl_secs, "Applied tracing directives");
+        Ok(TracingDirectivesResponse { applied: directives, ttl_secs, targets })
     }
+}
+
+const fn log_filter_target(target: TracingTarget) -> reth_tracing::LogFilterTarget {
+    match target {
+        TracingTarget::Stdout => reth_tracing::LogFilterTarget::Stdout,
+        TracingTarget::File => reth_tracing::LogFilterTarget::File,
+        TracingTarget::OtlpTraces => reth_tracing::LogFilterTarget::OtlpTraces,
+        TracingTarget::OtlpLogs => reth_tracing::LogFilterTarget::OtlpLogs,
+    }
+}
+
+const fn tracing_target(target: reth_tracing::LogFilterTarget) -> TracingTarget {
+    match target {
+        reth_tracing::LogFilterTarget::Stdout => TracingTarget::Stdout,
+        reth_tracing::LogFilterTarget::File => TracingTarget::File,
+        reth_tracing::LogFilterTarget::OtlpTraces => TracingTarget::OtlpTraces,
+        reth_tracing::LogFilterTarget::OtlpLogs => TracingTarget::OtlpLogs,
+    }
+}
+
+fn resolve_tracing_targets(request: &TracingDirectivesRequest) -> RpcResult<Vec<TracingTarget>> {
+    let available = reth_tracing::available_log_filter_targets();
+    let requested = request
+        .targets
+        .clone()
+        .unwrap_or_else(|| available.iter().copied().map(tracing_target).collect());
+    if requested.is_empty() {
+        return Err(invalid_params_rpc_err("targets must not be empty"));
+    }
+
+    let mut targets = Vec::with_capacity(requested.len());
+    for target in requested {
+        if !available.contains(&log_filter_target(target)) {
+            return Err(invalid_params_rpc_err(format!(
+                "tracing target {target:?} is not configured"
+            )));
+        }
+        if !targets.contains(&target) {
+            targets.push(target);
+        }
+    }
+    Ok(targets)
 }
 
 fn validate_tracing_directives(request: &TracingDirectivesRequest) -> RpcResult<()> {
@@ -322,16 +396,19 @@ mod tests {
     fn validates_tracing_directives() {
         let request = TracingDirectivesRequest {
             directives: "  info,reth::net=trace  ".to_string(),
+            targets: None,
             ttl_secs: Some(30),
         };
         validate_tracing_directives(&request).unwrap();
         validate_tracing_directives(&TracingDirectivesRequest {
             directives: "trace".to_string(),
+            targets: Some(vec![TracingTarget::OtlpTraces]),
             ttl_secs: None,
         })
         .unwrap();
         validate_tracing_directives(&TracingDirectivesRequest {
             directives: String::new(),
+            targets: None,
             ttl_secs: Some(0),
         })
         .unwrap();
@@ -342,11 +419,17 @@ mod tests {
         for request in [
             TracingDirectivesRequest {
                 directives: "info".to_string(),
+                targets: None,
                 ttl_secs: Some(MAX_TRACING_TTL_SECS + 1),
             },
-            TracingDirectivesRequest { directives: "  ".to_string(), ttl_secs: Some(30) },
+            TracingDirectivesRequest {
+                directives: "  ".to_string(),
+                targets: None,
+                ttl_secs: Some(30),
+            },
             TracingDirectivesRequest {
                 directives: "x".repeat(MAX_TRACING_DIRECTIVES_LEN + 1),
+                targets: None,
                 ttl_secs: None,
             },
         ] {

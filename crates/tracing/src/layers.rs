@@ -1,6 +1,6 @@
-use crate::{
-    formatter::LogFormat, install_log_handle_with_baseline, LayerInfo, LogFilterReloadHandle,
-};
+use crate::{formatter::LogFormat, LayerInfo, LogFilterReloadHandle};
+#[cfg(any(feature = "otlp", feature = "otlp-logs"))]
+use crate::{install_log_handle_with_target, LogFilterTarget};
 #[cfg(feature = "otlp-logs")]
 use reth_tracing_otlp::{log_layer, OtlpLogsConfig};
 #[cfg(feature = "otlp")]
@@ -273,7 +273,7 @@ impl Layers {
             .with_filter(filter);
 
         self.add_layer(span_layer);
-        install_log_handle_with_baseline(handle, startup_filter);
+        install_log_handle_with_target(LogFilterTarget::OtlpTraces, handle, startup_filter);
 
         Ok(())
     }
@@ -292,7 +292,7 @@ impl Layers {
             .with_filter(filter);
 
         self.add_layer(log_layer);
-        install_log_handle_with_baseline(handle, startup_filter);
+        install_log_handle_with_target(LogFilterTarget::OtlpLogs, handle, startup_filter);
 
         Ok(())
     }

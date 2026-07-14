@@ -253,15 +253,6 @@ impl<
         // Enable reload support if an RPC namespace with runtime tracing controls is available.
         let enable_reload = self.command.tracing_reload_enabled();
         let guards = self.logs.init_tracing_with_layers(layers, enable_reload)?;
-        if enable_reload {
-            let directive = self.logs.verbosity.directive().to_string();
-            let baseline = if self.logs.log_stdout_filter.is_empty() {
-                directive
-            } else {
-                format!("{directive},{}", self.logs.log_stdout_filter)
-            };
-            reth_tracing::set_startup_log_directives(baseline);
-        }
         info!(target: "reth::cli", "Initialized tracing, debug log directory: {}", self.logs.log_file_directory);
 
         match otlp_status {

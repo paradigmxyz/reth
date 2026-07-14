@@ -7,14 +7,25 @@
 use tracing::level_filters::LevelFilter;
 use tracing_subscriber::{reload, EnvFilter, Registry};
 
-/// Tracing directives in effect when the node started.
-static STARTUP_LOG_DIRECTIVES: std::sync::OnceLock<String> = std::sync::OnceLock::new();
-
 /// Type alias for a single layer's reload handle.
 pub type LogFilterReloadHandle = reload::Handle<EnvFilter, Registry>;
 
+/// Reloadable tracing output.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum LogFilterTarget {
+    /// Standard output logs.
+    Stdout,
+    /// File logs.
+    File,
+    /// OTLP traces.
+    OtlpTraces,
+    /// OTLP logs.
+    OtlpLogs,
+}
+
 #[derive(Debug)]
 struct ReloadableFilter {
+    target: LogFilterTarget,
     handle: LogFilterReloadHandle,
     startup_filter: EnvFilter,
 }
@@ -32,13 +43,29 @@ impl LogFilterHandle {
     }
 
     /// Adds a reload handle for a layer.
-    fn push(&mut self, handle: LogFilterReloadHandle, startup_filter: EnvFilter) {
-        self.filters.push(ReloadableFilter { handle, startup_filter });
+    fn push(
+        &mut self,
+        target: LogFilterTarget,
+        handle: LogFilterReloadHandle,
+        startup_filter: EnvFilter,
+    ) {
+        self.filters.push(ReloadableFilter { target, handle, startup_filter });
     }
 
     /// Returns `true` if at least one handle is registered.
     const fn is_available(&self) -> bool {
         !self.filters.is_empty()
+    }
+
+    /// Returns the unique targets with registered reload handles.
+    fn available_targets(&self) -> Vec<LogFilterTarget> {
+        let mut targets = Vec::new();
+        for filter in &self.filters {
+            if !targets.contains(&filter.target) {
+                targets.push(filter.target);
+            }
+        }
+        targets
     }
 
     /// Reloads every registered layer with a fresh filter built by `make_filter`.
@@ -53,9 +80,33 @@ impl LogFilterHandle {
         Ok(())
     }
 
+    /// Reloads layers matching one of the requested targets.
+    fn reload_targets(
+        &self,
+        targets: &[LogFilterTarget],
+        make_filter: impl Fn() -> Result<EnvFilter, String>,
+    ) -> Result<(), String> {
+        for reloadable in self.filters.iter().filter(|filter| targets.contains(&filter.target)) {
+            let filter = make_filter()?;
+            reloadable.handle.reload(filter).map_err(|e| e.to_string())?;
+        }
+        Ok(())
+    }
+
     /// Restores every registered layer to its own startup directives.
     fn reset_all(&self) -> Result<(), String> {
         for reloadable in &self.filters {
+            reloadable
+                .handle
+                .reload(reloadable.startup_filter.clone())
+                .map_err(|e| e.to_string())?;
+        }
+        Ok(())
+    }
+
+    /// Restores matching layers to their own startup directives.
+    fn reset_targets(&self, targets: &[LogFilterTarget]) -> Result<(), String> {
+        for reloadable in self.filters.iter().filter(|filter| targets.contains(&filter.target)) {
             reloadable
                 .handle
                 .reload(reloadable.startup_filter.clone())
@@ -73,7 +124,8 @@ static LOG_HANDLE: std::sync::Mutex<LogFilterHandle> =
 ///
 /// Can be called multiple times — each handle is appended.
 pub fn install_log_handle(handle: LogFilterReloadHandle) {
-    install_log_handle_with_baseline(
+    install_log_handle_with_target(
+        LogFilterTarget::Stdout,
         handle,
         EnvFilter::builder().with_default_directive(LevelFilter::INFO.into()).parse_lossy(""),
     );
@@ -81,7 +133,16 @@ pub fn install_log_handle(handle: LogFilterReloadHandle) {
 
 /// Registers a reload handle and the filter that should be restored on reset.
 pub fn install_log_handle_with_baseline(handle: LogFilterReloadHandle, startup_filter: EnvFilter) {
-    LOG_HANDLE.lock().expect("log handle poisoned").push(handle, startup_filter);
+    install_log_handle_with_target(LogFilterTarget::Stdout, handle, startup_filter);
+}
+
+/// Registers a targeted reload handle and the filter that should be restored on reset.
+pub fn install_log_handle_with_target(
+    target: LogFilterTarget,
+    handle: LogFilterReloadHandle,
+    startup_filter: EnvFilter,
+) {
+    LOG_HANDLE.lock().expect("log handle poisoned").push(target, handle, startup_filter);
 }
 
 /// Returns `true` if at least one global log handle is available.
@@ -89,16 +150,9 @@ pub fn log_handle_available() -> bool {
     LOG_HANDLE.lock().expect("log handle poisoned").is_available()
 }
 
-/// Records the tracing directives in effect at startup.
-///
-/// The first call wins so the baseline cannot be replaced by a runtime override.
-pub fn set_startup_log_directives(directives: String) {
-    let _ = STARTUP_LOG_DIRECTIVES.set(directives);
-}
-
-/// Returns the tracing directives in effect when the node started.
-pub fn startup_log_directives() -> Option<&'static str> {
-    STARTUP_LOG_DIRECTIVES.get().map(String::as_str)
+/// Returns the tracing targets with registered reload handles.
+pub fn available_log_filter_targets() -> Vec<LogFilterTarget> {
+    LOG_HANDLE.lock().expect("log handle poisoned").available_targets()
 }
 
 /// Restores every reloadable layer to the tracing directives it started with.
@@ -108,6 +162,15 @@ pub fn reset_log_filters() -> Result<(), String> {
         return Err("Log filter reload not available".to_string());
     }
     guard.reset_all()
+}
+
+/// Restores the requested reloadable layers to their startup filters.
+pub fn reset_log_filters_for_targets(targets: &[LogFilterTarget]) -> Result<(), String> {
+    let guard = LOG_HANDLE.lock().expect("log handle poisoned");
+    if !guard.is_available() {
+        return Err("Log filter reload not available".to_string());
+    }
+    guard.reset_targets(targets)
 }
 
 /// Sets the global log verbosity level.
@@ -177,12 +240,28 @@ pub fn set_log_vmodule(pattern: &str) -> Result<(), String> {
     }
 }
 
+/// Sets module-specific log levels for the requested reloadable layers.
+pub fn set_log_vmodule_for_targets(
+    pattern: &str,
+    targets: &[LogFilterTarget],
+) -> Result<(), String> {
+    let guard = LOG_HANDLE.lock().expect("log handle poisoned");
+    if !guard.is_available() {
+        return Err("Log filter reload not available".to_string());
+    }
+
+    EnvFilter::try_new(pattern).map_err(|e| format!("Invalid filter pattern: {e}"))?;
+    guard.reload_targets(targets, || {
+        EnvFilter::try_new(pattern).map_err(|e| format!("Invalid filter pattern: {e}"))
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
-    fn reset_restores_each_layers_startup_directives() {
+    fn scoped_reload_and_reset_only_affect_targeted_layers() {
         let (_stdout_layer, stdout_handle): (_, LogFilterReloadHandle) =
             reload::Layer::new(EnvFilter::try_new("info,reth=debug").unwrap());
         let (_otlp_layer, otlp_handle): (_, LogFilterReloadHandle) =
@@ -191,10 +270,20 @@ mod tests {
         let otlp_baseline = otlp_handle.with_current(Clone::clone).unwrap();
 
         let mut filters = LogFilterHandle::new();
-        filters.push(stdout_handle.clone(), stdout_baseline.clone());
-        filters.push(otlp_handle.clone(), otlp_baseline.clone());
-        filters.reload_all(|| EnvFilter::try_new("trace").map_err(|err| err.to_string())).unwrap();
-        filters.reset_all().unwrap();
+        filters.push(LogFilterTarget::Stdout, stdout_handle.clone(), stdout_baseline.clone());
+        filters.push(LogFilterTarget::OtlpTraces, otlp_handle.clone(), otlp_baseline.clone());
+        filters
+            .reload_targets(&[LogFilterTarget::Stdout], || {
+                EnvFilter::try_new("trace").map_err(|err| err.to_string())
+            })
+            .unwrap();
+        assert_eq!(stdout_handle.with_current(ToString::to_string).unwrap(), "trace");
+        assert_eq!(
+            otlp_handle.with_current(ToString::to_string).unwrap(),
+            otlp_baseline.to_string()
+        );
+
+        filters.reset_targets(&[LogFilterTarget::Stdout]).unwrap();
 
         assert_eq!(
             stdout_handle.with_current(ToString::to_string).unwrap(),
