@@ -10,13 +10,16 @@ use alloy_rpc_types_admin::{
     Ports, ProtocolInfo,
 };
 use async_trait::async_trait;
-use jsonrpsee::{core::RpcResult, types::ErrorObjectOwned};
+use jsonrpsee::core::RpcResult;
 use reth_chainspec::{EthChainSpec, EthereumHardfork, EthereumHardforks, ForkCondition};
 use reth_network_api::{NetworkInfo, Peers};
 use reth_network_peers::{AnyNode, NodeRecord};
 use reth_network_types::PeerKind;
 use reth_rpc_api::{AdminApiServer, TracingDirectivesRequest, TracingDirectivesResponse};
-use reth_rpc_server_types::ToRpcResult;
+use reth_rpc_server_types::{
+    result::{internal_rpc_err, invalid_params_rpc_err},
+    ToRpcResult,
+};
 use reth_transaction_pool::TransactionPool;
 use tokio::task::JoinHandle;
 use tracing::{info, warn};
@@ -238,10 +241,8 @@ where
     ) -> RpcResult<TracingDirectivesResponse> {
         let directives = validate_tracing_directives(&request)?.to_string();
         if !reth_tracing::log_handle_available() {
-            return Err(ErrorObjectOwned::owned(
-                jsonrpsee_types::error::INTERNAL_ERROR_CODE,
+            return Err(internal_rpc_err(
                 "tracing reload is not active; enable the admin RPC namespace at startup",
-                None::<()>,
             ));
         }
 
@@ -249,7 +250,7 @@ where
         let ttl_secs = request.ttl_secs;
         let mut state = TRACING_REVERT.lock().expect("tracing revert mutex poisoned");
 
-        reth_tracing::set_log_vmodule(&directives).map_err(invalid_params)?;
+        reth_tracing::set_log_vmodule(&directives).map_err(invalid_params_rpc_err)?;
         if let Some(previous) = state.task.take() {
             previous.abort();
         }
@@ -280,26 +281,18 @@ where
     }
 }
 
-fn invalid_params(message: impl ToString) -> ErrorObjectOwned {
-    ErrorObjectOwned::owned(
-        jsonrpsee_types::error::INVALID_PARAMS_CODE,
-        message.to_string(),
-        None::<()>,
-    )
-}
-
-fn validate_tracing_directives(
-    request: &TracingDirectivesRequest,
-) -> Result<&str, ErrorObjectOwned> {
+fn validate_tracing_directives(request: &TracingDirectivesRequest) -> RpcResult<&str> {
     if request.ttl_secs == 0 || request.ttl_secs > MAX_TRACING_TTL_SECS {
-        return Err(invalid_params(format!("ttlSecs must be in 1..={MAX_TRACING_TTL_SECS}")));
+        return Err(invalid_params_rpc_err(format!(
+            "ttlSecs must be in 1..={MAX_TRACING_TTL_SECS}"
+        )));
     }
     let directives = request.directives.trim();
     if directives.is_empty() {
-        return Err(invalid_params("directives must not be empty"));
+        return Err(invalid_params_rpc_err("directives must not be empty"));
     }
     if directives.len() > MAX_TRACING_DIRECTIVES_LEN {
-        return Err(invalid_params(format!(
+        return Err(invalid_params_rpc_err(format!(
             "directives must be at most {MAX_TRACING_DIRECTIVES_LEN} characters"
         )));
     }
