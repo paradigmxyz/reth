@@ -223,9 +223,8 @@ impl ArenaSparseSubtrie {
     /// in lexicographic order.
     ///
     /// `retained_leaves` must yield leaves in sorted order and be scoped to this subtrie's key
-    /// range. Builds a fresh arena by copying only retained nodes from the root, blinding
-    /// non-retained children at the boundary. Non-retained subtrees are never visited — they
-    /// are dropped with the old arena.
+    /// range. Builds a fresh arena by copying retained nodes from the root, blinding non-retained
+    /// children at the boundary unless their parent branch is retained.
     ///
     /// Expects that all nodes have computed hashes (i.e. `prune` is called after hashing).
     fn prune<'a>(&mut self, retained_leaves: impl IntoIterator<Item = &'a Nibbles>) -> usize {
@@ -252,10 +251,12 @@ impl ArenaSparseSubtrie {
         let root_node = self.arena.remove(self.root).expect("root exists");
         let new_root = new_arena.insert(root_node);
         let mut stack = Vec::new();
+        let root_is_retained = retained_leaves.peek().is_some();
         if let Some(frame) = prepare_retained_node(
             &new_arena,
             new_root,
             self.path,
+            root_is_retained,
             &mut new_num_leaves,
             &mut new_nodes_heap_size,
         ) {
@@ -278,23 +279,26 @@ impl ArenaSparseSubtrie {
                 retained_leaves.next();
             }
 
-            if retained_leaves.peek().is_some_and(|retained| retained.starts_with(&child_path)) {
-                // Retained — move child to new arena.
+            let child_is_retained =
+                retained_leaves.peek().is_some_and(|retained| retained.starts_with(&child_path));
+            if child_is_retained || frame.branch_is_retained {
+                // Retained or protected by a retained parent branch.
                 let child_node = self.arena.remove(old_child_idx).expect("child exists");
                 let new_child_idx = new_arena.insert(child_node);
-                let ArenaSparseNode::Branch(b) = &mut new_arena[parent_new_idx] else {
-                    unreachable!()
-                };
-                b.children[child_pos] = ArenaSparseNodeBranchChild::Revealed(new_child_idx);
                 if let Some(frame) = prepare_retained_node(
                     &new_arena,
                     new_child_idx,
                     child_path,
+                    child_is_retained,
                     &mut new_num_leaves,
                     &mut new_nodes_heap_size,
                 ) {
                     stack.push(frame);
                 }
+                let ArenaSparseNode::Branch(b) = &mut new_arena[parent_new_idx] else {
+                    unreachable!()
+                };
+                b.children[child_pos] = ArenaSparseNodeBranchChild::Revealed(new_child_idx);
             } else {
                 // Not retained — blind the child slot in the new arena.
                 let node = &self.arena[old_child_idx];
@@ -335,6 +339,7 @@ impl ArenaSparseSubtrie {
             branch_logical_path: Nibbles,
             state_mask: TrieMask,
             remaining_child_mask: TrieMask,
+            branch_is_retained: bool,
         }
 
         impl CopyFrame {
@@ -360,6 +365,7 @@ impl ArenaSparseSubtrie {
             new_arena: &NodeArena,
             new_idx: Index,
             node_path: Nibbles,
+            branch_is_retained: bool,
             new_num_leaves: &mut u64,
             new_nodes_heap_size: &mut usize,
         ) -> Option<CopyFrame> {
@@ -381,6 +387,7 @@ impl ArenaSparseSubtrie {
                 branch_logical_path,
                 state_mask: b.state_mask,
                 remaining_child_mask: b.state_mask,
+                branch_is_retained,
             })
         }
     }
@@ -2834,6 +2841,12 @@ impl SparseTrie for ArenaParallelSparseTrie {
             let head = cursor.head().expect("cursor is non-empty");
             let head_idx = head.index;
             let head_path = head.path;
+            let protected_by_retained_parent = if cursor.depth() == 0 {
+                false
+            } else {
+                let parent_path = cursor.parent().expect("cursor must have a parent").path;
+                !prefix_range(retained_leaves, 0, &parent_path).is_empty()
+            };
 
             match &self.upper_arena[head_idx] {
                 ArenaSparseNode::Branch(_) | ArenaSparseNode::Leaf { .. } => {
@@ -2844,6 +2857,10 @@ impl SparseTrie for ArenaParallelSparseTrie {
 
                     let range = prefix_range(retained_leaves, 0, &head_path);
                     if !range.is_empty() {
+                        continue;
+                    }
+
+                    if protected_by_retained_parent {
                         continue;
                     }
 
@@ -2860,6 +2877,15 @@ impl SparseTrie for ArenaParallelSparseTrie {
                     retained_idx = subtrie_range.end;
 
                     if subtrie_range.is_empty() {
+                        if protected_by_retained_parent {
+                            let ArenaSparseNode::Subtrie(subtrie) = &mut self.upper_arena[head_idx]
+                            else {
+                                unreachable!()
+                            };
+                            pruned += subtrie.prune(&[]);
+                            continue;
+                        }
+
                         let removed = Self::remove_pruned_node(
                             &mut self.upper_arena,
                             &cursor,

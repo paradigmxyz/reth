@@ -2,14 +2,20 @@
 //!
 //! These types intentionally live apart from the legacy JSON-RPC Engine API types because their
 //! SSZ encodings are not always wire-compatible. This module contains the shared endpoint
-//! containers and fork-specific payload containers from
-//! [execution-apis PR #793](https://github.com/ethereum/execution-apis/pull/793), plus the
-//! experimental payload-with-witness response type that extends the same REST-SSZ model.
+//! containers, fork-specific payload containers, blob containers, payload-body containers, and the
+//! experimental payload-with-witness response type from the same REST-SSZ model.
 
-use alloy_eips::{eip4895::Withdrawal, eip7685::Requests};
-use alloy_primitives::{Address, B128, B256, U256};
+use alloy_eips::{
+    eip4844::{Blob, BlobAndProofV1, BlobAndProofV2, BlobCellsAndProofsV1, Bytes48},
+    eip4895::Withdrawal,
+    eip7594::Cell,
+    eip7685::Requests,
+};
+use alloy_primitives::{Address, Bytes, B128, B256, U256};
 use alloy_rpc_types_engine::{
-    BlobsBundleV1, BlobsBundleV2, ExecutionPayloadEnvelopeV2 as LegacyBuiltPayloadShanghai,
+    BlobsBundleV1, BlobsBundleV2, ExecutionPayloadBodyV1 as LegacyExecutionPayloadBodyV1,
+    ExecutionPayloadBodyV2 as LegacyExecutionPayloadBodyV2,
+    ExecutionPayloadEnvelopeV2 as LegacyBuiltPayloadShanghai,
     ExecutionPayloadEnvelopeV4 as LegacyBuiltPayloadPrague,
     ExecutionPayloadEnvelopeV5 as LegacyBuiltPayloadOsaka,
     ExecutionPayloadEnvelopeV6 as LegacyBuiltPayloadAmsterdam, ExecutionPayloadFieldV2,
@@ -20,6 +26,12 @@ use alloy_rpc_types_engine::{
 };
 
 type ErrorBytes = Vec<u8>;
+
+/// Maximum number of blobs in a REST-SSZ blob request or response.
+pub const MAX_BLOBS_REQUEST: usize = 128;
+
+/// Maximum number of payload bodies in a REST-SSZ request or response.
+pub const MAX_BODIES_REQUEST: usize = 32;
 
 /// An Engine API v2 SSZ optional encoded as `List[T, 1]`.
 ///
@@ -100,6 +112,9 @@ impl<T: ssz::Decode> ssz::Decode for Optional<T> {
 }
 
 /// Engine API v2 REST-SSZ payload status.
+///
+/// This is separate from the legacy status because REST-SSZ uses `Optional` fields instead of
+/// zero-value sentinels and legacy byte lists.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PayloadStatus {
     /// Payload validation status.
@@ -207,6 +222,15 @@ pub enum ConversionError {
     ErrorBytesTooLong,
     /// `ACCEPTED` is not permitted in a forkchoice response.
     AcceptedForkchoice,
+    /// A bounded REST-SSZ list exceeded its maximum length.
+    TooManyItems {
+        /// Name of the field that exceeded its bound.
+        field: &'static str,
+        /// Maximum permitted item count.
+        max: usize,
+        /// Actual item count.
+        actual: usize,
+    },
 }
 
 impl core::fmt::Display for ConversionError {
@@ -215,6 +239,9 @@ impl core::fmt::Display for ConversionError {
             Self::ErrorBytesTooLong => f.write_str("payload validation error is too long"),
             Self::AcceptedForkchoice => {
                 f.write_str("ACCEPTED is not valid in a forkchoice response")
+            }
+            Self::TooManyItems { field, max, actual } => {
+                write!(f, "too many {field}: expected at most {max}, got {actual}")
             }
         }
     }
@@ -252,6 +279,8 @@ impl From<PayloadStatus> for LegacyPayloadStatus {
 }
 
 /// Engine API v2 REST-SSZ forkchoice update response.
+///
+/// The REST response is a container of two variable fields, unlike the legacy fixed payload ID.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ForkchoiceUpdateResponse {
     /// Restricted payload status; `ACCEPTED` is invalid here.
@@ -337,6 +366,9 @@ pub type ExecutionPayloadOsaka = ExecutionPayloadV3;
 pub type ExecutionPayloadAmsterdam = ExecutionPayloadV4;
 
 /// Paris payload attributes.
+///
+/// Fork-specific attributes keep later-fork fields out of the SSZ body; the legacy type is a
+/// permissive superset.
 #[derive(Clone, Debug, Default, PartialEq, Eq, ssz_derive::Encode, ssz_derive::Decode)]
 pub struct PayloadAttributesParis {
     /// Payload timestamp.
@@ -348,6 +380,9 @@ pub struct PayloadAttributesParis {
 }
 
 /// Shanghai payload attributes.
+///
+/// Fork-specific attributes keep later-fork fields out of the SSZ body; the legacy type is a
+/// permissive superset.
 #[derive(Clone, Debug, Default, PartialEq, Eq, ssz_derive::Encode, ssz_derive::Decode)]
 pub struct PayloadAttributesShanghai {
     /// Payload timestamp.
@@ -361,6 +396,9 @@ pub struct PayloadAttributesShanghai {
 }
 
 /// Cancun payload attributes.
+///
+/// Fork-specific attributes keep later-fork fields out of the SSZ body; the legacy type is a
+/// permissive superset.
 #[derive(Clone, Debug, Default, PartialEq, Eq, ssz_derive::Encode, ssz_derive::Decode)]
 pub struct PayloadAttributesCancun {
     /// Payload timestamp.
@@ -382,6 +420,8 @@ pub type PayloadAttributesPrague = PayloadAttributesCancun;
 pub type PayloadAttributesOsaka = PayloadAttributesCancun;
 
 /// Amsterdam payload attributes.
+///
+/// Fork-specific attributes keep the Amsterdam-only fields in their defined SSZ position.
 #[derive(Clone, Debug, Default, PartialEq, Eq, ssz_derive::Encode, ssz_derive::Decode)]
 pub struct PayloadAttributesAmsterdam {
     /// Payload timestamp.
@@ -583,6 +623,7 @@ pub struct BuiltPayloadParis {
 ///
 /// This follows the legacy `engine_getPayloadV2` payload-build response shape: execution payload
 /// plus block value only. `should_override_builder` starts at Cancun.
+/// The concrete V2 payload prevents the legacy V1/V2 untagged field from accepting a Paris payload.
 #[derive(Clone, Debug, PartialEq, Eq, ssz_derive::Encode, ssz_derive::Decode)]
 pub struct BuiltPayloadShanghai {
     /// Execution payload V2.
@@ -616,6 +657,9 @@ pub struct BuiltPayloadPrague {
 }
 
 /// This structure maps to the Engine API v2 REST-SSZ payload-build response for Osaka.
+///
+/// It is separate from legacy V5 because REST-SSZ places `execution_requests` before the builder
+/// override flag.
 #[derive(Clone, Debug, PartialEq, Eq, ssz_derive::Encode, ssz_derive::Decode)]
 pub struct BuiltPayloadOsaka {
     /// Execution payload V3.
@@ -632,6 +676,9 @@ pub struct BuiltPayloadOsaka {
 }
 
 /// This structure maps to the Engine API v2 REST-SSZ payload-build response for Amsterdam.
+///
+/// It is separate from legacy V6 because REST-SSZ places `execution_requests` before the builder
+/// override flag.
 #[derive(Clone, Debug, PartialEq, Eq, ssz_derive::Encode, ssz_derive::Decode)]
 pub struct BuiltPayloadAmsterdam {
     /// Execution payload V4.
@@ -772,6 +819,9 @@ impl From<BuiltPayloadAmsterdam> for LegacyBuiltPayloadAmsterdam {
 /// override hints, or a different field order.
 ///
 /// Paris payload-submission request.
+///
+/// The single-field container is required by REST-SSZ; the legacy endpoint submitted a bare
+/// payload.
 #[derive(Clone, Debug, PartialEq, Eq, ssz_derive::Encode, ssz_derive::Decode)]
 pub struct ExecutionPayloadEnvelopeParis {
     /// Submitted execution payload.
@@ -779,6 +829,8 @@ pub struct ExecutionPayloadEnvelopeParis {
 }
 
 /// Shanghai payload-submission request.
+///
+/// The single-field container is required by REST-SSZ and fixes the payload fork at decode time.
 #[derive(Clone, Debug, PartialEq, Eq, ssz_derive::Encode, ssz_derive::Decode)]
 pub struct ExecutionPayloadEnvelopeShanghai {
     /// Submitted execution payload.
@@ -786,6 +838,8 @@ pub struct ExecutionPayloadEnvelopeShanghai {
 }
 
 /// Cancun payload-submission request.
+///
+/// Cancun adds the parent beacon block root to the REST request envelope.
 #[derive(Clone, Debug, PartialEq, Eq, ssz_derive::Encode, ssz_derive::Decode)]
 pub struct ExecutionPayloadEnvelopeCancun {
     /// Submitted execution payload.
@@ -795,6 +849,8 @@ pub struct ExecutionPayloadEnvelopeCancun {
 }
 
 /// Prague payload-submission request.
+///
+/// Prague adds execution requests to the REST request envelope.
 #[derive(Clone, Debug, PartialEq, Eq, ssz_derive::Encode, ssz_derive::Decode)]
 pub struct ExecutionPayloadEnvelopePrague {
     /// Submitted execution payload.
@@ -806,6 +862,8 @@ pub struct ExecutionPayloadEnvelopePrague {
 }
 
 /// Osaka payload-submission request.
+///
+/// Osaka keeps the REST envelope shape while selecting the Osaka payload schema.
 #[derive(Clone, Debug, PartialEq, Eq, ssz_derive::Encode, ssz_derive::Decode)]
 pub struct ExecutionPayloadEnvelopeOsaka {
     /// Submitted execution payload.
@@ -817,6 +875,8 @@ pub struct ExecutionPayloadEnvelopeOsaka {
 }
 
 /// Amsterdam payload-submission request.
+///
+/// Amsterdam selects the V4 payload while retaining the Cancun and Prague envelope fields.
 #[derive(Clone, Debug, PartialEq, Eq, ssz_derive::Encode, ssz_derive::Decode)]
 pub struct ExecutionPayloadEnvelopeAmsterdam {
     /// Submitted execution payload.
@@ -882,6 +942,9 @@ impl From<(ExecutionPayloadAmsterdam, B256, Requests)> for ExecutionPayloadEnvel
 }
 
 /// Paris forkchoice-update request.
+///
+/// REST-SSZ uses an `Optional` field inside one container; legacy FCU used separate RPC
+/// parameters and a legacy `Option` encoding.
 #[derive(Clone, Debug, PartialEq, Eq, ssz_derive::Encode, ssz_derive::Decode)]
 pub struct ForkchoiceUpdateParis {
     /// Current forkchoice state.
@@ -935,6 +998,464 @@ pub struct ForkchoiceUpdateAmsterdam {
     pub payload_attributes: Optional<PayloadAttributesAmsterdam>,
     /// Optional `Bitvector[128]` custody-column selection.
     pub custody_columns: Optional<B128>,
+}
+
+/// Fork-specific execution payload body for Paris.
+///
+/// Paris omits withdrawals entirely; the legacy body keeps them as an optional union field.
+#[derive(Clone, Debug, Default, PartialEq, Eq, ssz_derive::Encode, ssz_derive::Decode)]
+pub struct ExecutionPayloadBodyParis {
+    /// Enveloped encoded transactions.
+    pub transactions: Vec<Bytes>,
+}
+
+/// Fork-specific execution payload body for Shanghai.
+///
+/// Shanghai makes withdrawals a direct field rather than the legacy optional union.
+#[derive(Clone, Debug, Default, PartialEq, Eq, ssz_derive::Encode, ssz_derive::Decode)]
+pub struct ExecutionPayloadBodyShanghai {
+    /// Enveloped encoded transactions.
+    pub transactions: Vec<Bytes>,
+    /// Withdrawals included in the block.
+    pub withdrawals: Vec<Withdrawal>,
+}
+
+/// Cancun uses the Shanghai execution-payload-body schema.
+pub type ExecutionPayloadBodyCancun = ExecutionPayloadBodyShanghai;
+
+/// Prague uses the Shanghai execution-payload-body schema.
+pub type ExecutionPayloadBodyPrague = ExecutionPayloadBodyShanghai;
+
+/// Osaka uses the Shanghai execution-payload-body schema.
+pub type ExecutionPayloadBodyOsaka = ExecutionPayloadBodyShanghai;
+
+/// Fork-specific execution payload body for Amsterdam.
+///
+/// Amsterdam adds the block access list as a direct field rather than a legacy optional field.
+#[derive(Clone, Debug, Default, PartialEq, Eq, ssz_derive::Encode, ssz_derive::Decode)]
+pub struct ExecutionPayloadBodyAmsterdam {
+    /// Enveloped encoded transactions.
+    pub transactions: Vec<Bytes>,
+    /// Withdrawals included in the block.
+    pub withdrawals: Vec<Withdrawal>,
+    /// RLP-encoded EIP-7928 block access list.
+    pub block_access_list: Bytes,
+}
+
+/// Error converting legacy cross-fork execution payload bodies into fork-specific containers.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ExecutionPayloadBodyConversionError {
+    /// A field required by the selected fork is absent.
+    MissingField(&'static str),
+    /// A field from a later fork is populated and would be lost.
+    UnexpectedField(&'static str),
+}
+
+impl core::fmt::Display for ExecutionPayloadBodyConversionError {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            Self::MissingField(field) => {
+                write!(f, "missing required execution payload body field: {field}")
+            }
+            Self::UnexpectedField(field) => {
+                write!(f, "unexpected later-fork execution payload body field: {field}")
+            }
+        }
+    }
+}
+
+impl core::error::Error for ExecutionPayloadBodyConversionError {}
+
+impl From<ExecutionPayloadBodyParis> for LegacyExecutionPayloadBodyV1 {
+    fn from(value: ExecutionPayloadBodyParis) -> Self {
+        Self { transactions: value.transactions, withdrawals: None }
+    }
+}
+
+impl TryFrom<LegacyExecutionPayloadBodyV1> for ExecutionPayloadBodyParis {
+    type Error = ExecutionPayloadBodyConversionError;
+
+    fn try_from(value: LegacyExecutionPayloadBodyV1) -> Result<Self, Self::Error> {
+        if value.withdrawals.is_some() {
+            return Err(ExecutionPayloadBodyConversionError::UnexpectedField("withdrawals"))
+        }
+        Ok(Self { transactions: value.transactions })
+    }
+}
+
+impl From<ExecutionPayloadBodyShanghai> for LegacyExecutionPayloadBodyV1 {
+    fn from(value: ExecutionPayloadBodyShanghai) -> Self {
+        Self { transactions: value.transactions, withdrawals: Some(value.withdrawals) }
+    }
+}
+
+impl TryFrom<LegacyExecutionPayloadBodyV1> for ExecutionPayloadBodyShanghai {
+    type Error = ExecutionPayloadBodyConversionError;
+
+    fn try_from(value: LegacyExecutionPayloadBodyV1) -> Result<Self, Self::Error> {
+        Ok(Self {
+            transactions: value.transactions,
+            withdrawals: value
+                .withdrawals
+                .ok_or(ExecutionPayloadBodyConversionError::MissingField("withdrawals"))?,
+        })
+    }
+}
+
+impl From<ExecutionPayloadBodyAmsterdam> for LegacyExecutionPayloadBodyV2 {
+    fn from(value: ExecutionPayloadBodyAmsterdam) -> Self {
+        Self {
+            transactions: value.transactions,
+            withdrawals: Some(value.withdrawals),
+            block_access_list: Some(value.block_access_list),
+        }
+    }
+}
+
+impl TryFrom<LegacyExecutionPayloadBodyV2> for ExecutionPayloadBodyAmsterdam {
+    type Error = ExecutionPayloadBodyConversionError;
+
+    fn try_from(value: LegacyExecutionPayloadBodyV2) -> Result<Self, Self::Error> {
+        Ok(Self {
+            transactions: value.transactions,
+            withdrawals: value
+                .withdrawals
+                .ok_or(ExecutionPayloadBodyConversionError::MissingField("withdrawals"))?,
+            block_access_list: value
+                .block_access_list
+                .ok_or(ExecutionPayloadBodyConversionError::MissingField("block_access_list"))?,
+        })
+    }
+}
+
+/// REST-SSZ historical bodies-by-hash request.
+///
+/// This is a single-field container, not a bare SSZ list.
+#[derive(Clone, Debug, PartialEq, Eq, ssz_derive::Encode, ssz_derive::Decode)]
+pub struct BodiesByHashRequest {
+    /// Requested block hashes.
+    pub block_hashes: Vec<B256>,
+}
+
+/// Historical body response entry with explicit availability.
+///
+/// REST-SSZ uses a boolean availability bit instead of the legacy `Option<body>` union.
+#[derive(Clone, Debug, PartialEq, Eq, ssz_derive::Encode, ssz_derive::Decode)]
+pub struct BodyEntry<T: ssz::Encode + ssz::Decode> {
+    /// Whether the body is available and belongs to the requested fork.
+    pub available: bool,
+    /// Fork-specific body, ignored when `available` is false.
+    pub body: T,
+}
+
+impl<T: ssz::Encode + ssz::Decode> BodyEntry<T> {
+    /// Creates an available body entry.
+    pub const fn available(body: T) -> Self {
+        Self { available: true, body }
+    }
+}
+
+impl<T: ssz::Encode + ssz::Decode + Default> BodyEntry<T> {
+    /// Creates an unavailable body entry.
+    pub fn unavailable() -> Self {
+        Self { available: false, body: T::default() }
+    }
+}
+
+/// REST-SSZ historical bodies response.
+///
+/// The response is a one-field SSZ container around the entries list, not a bare list.
+#[derive(Clone, Debug, PartialEq, Eq, ssz_derive::Encode, ssz_derive::Decode)]
+pub struct BodiesResponse<T: ssz::Encode + ssz::Decode> {
+    /// Body entries in request or range order.
+    pub entries: Vec<BodyEntry<T>>,
+}
+
+impl<T: ssz::Encode + ssz::Decode + Default> BodiesResponse<T> {
+    /// Creates a response from optional legacy bodies.
+    ///
+    /// Missing bodies, or bodies that do not convert to the requested fork container, are encoded
+    /// as unavailable entries.
+    pub fn from_optional_bodies<LegacyBody>(
+        bodies: Vec<Option<LegacyBody>>,
+        convert: impl Fn(LegacyBody) -> Option<T>,
+    ) -> Self {
+        let entries = bodies
+            .into_iter()
+            .map(|body| match body.and_then(&convert) {
+                Some(body) => BodyEntry::available(body),
+                None => BodyEntry::unavailable(),
+            })
+            .collect();
+
+        Self { entries }
+    }
+}
+
+/// Paris historical bodies response.
+pub type BodiesResponseParis = BodiesResponse<ExecutionPayloadBodyParis>;
+
+/// Shanghai historical bodies response.
+pub type BodiesResponseShanghai = BodiesResponse<ExecutionPayloadBodyShanghai>;
+
+/// Cancun historical bodies response.
+pub type BodiesResponseCancun = BodiesResponse<ExecutionPayloadBodyCancun>;
+
+/// Prague historical bodies response.
+pub type BodiesResponsePrague = BodiesResponse<ExecutionPayloadBodyPrague>;
+
+/// Osaka historical bodies response.
+pub type BodiesResponseOsaka = BodiesResponse<ExecutionPayloadBodyOsaka>;
+
+/// Amsterdam historical bodies response.
+pub type BodiesResponseAmsterdam = BodiesResponse<ExecutionPayloadBodyAmsterdam>;
+
+/// V1-V3 blob request container.
+///
+/// This single-field container starts with a four-byte SSZ offset and is not wire-equivalent to a
+/// top-level list.
+#[derive(Clone, Debug, PartialEq, Eq, ssz_derive::Encode, ssz_derive::Decode)]
+pub struct BlobsV1Request {
+    /// Requested versioned blob hashes.
+    pub versioned_hashes: Vec<B256>,
+}
+
+/// V2 uses the V1 request schema.
+pub type BlobsV2Request = BlobsV1Request;
+
+/// V3 uses the V1 request schema.
+pub type BlobsV3Request = BlobsV1Request;
+
+/// V4 blob request container with a packed 128-bit index bitvector.
+#[derive(Clone, Debug, PartialEq, Eq, ssz_derive::Encode, ssz_derive::Decode)]
+pub struct BlobsV4Request {
+    /// Requested versioned blob hashes.
+    pub versioned_hashes: Vec<B256>,
+    /// Requested cell indices, SSZ `Bitvector[128]`.
+    pub indices_bitarray: B128,
+}
+
+/// Blob response entry with explicit outer availability.
+///
+/// REST-SSZ keeps availability separate from the blob contents instead of using a legacy option.
+#[derive(Clone, Debug, PartialEq, Eq, ssz_derive::Encode, ssz_derive::Decode)]
+pub struct BlobEntry<T: ssz::Encode + ssz::Decode> {
+    /// Whether the complete blob contents are available.
+    pub available: bool,
+    /// Complete contents, or valid zero-valued contents when unavailable.
+    pub contents: T,
+}
+
+/// Bounded blob response container.
+///
+/// The outer container and entry availability match the REST-SSZ blob endpoint contract.
+#[derive(Clone, Debug, PartialEq, Eq, ssz_derive::Encode, ssz_derive::Decode)]
+pub struct BlobsResponse<T: ssz::Encode + ssz::Decode> {
+    /// One response entry per requested hash.
+    pub entries: Vec<BlobEntry<T>>,
+}
+
+/// V1 whole-blob response.
+pub type BlobsV1Response = BlobsResponse<BlobAndProofV1>;
+
+/// V2 all-or-nothing cell-proof response.
+pub type BlobsV2Response = BlobsResponse<BlobAndProofV2>;
+
+/// V3 partial cell-proof response.
+pub type BlobsV3Response = BlobsResponse<BlobAndProofV2>;
+
+/// V4 partial cell-range response.
+pub type BlobsV4Response = BlobsResponse<BlobCellsAndProofs>;
+
+/// Blob cells and proofs with REST-SSZ optional cell positions.
+///
+/// This uses [`Optional`] (`List[T, 1]`) for per-cell nullability, not Rust [`Option`]'s SSZ
+/// union encoding.
+#[derive(Clone, Debug, Default, PartialEq, Eq, ssz_derive::Encode, ssz_derive::Decode)]
+pub struct BlobCellsAndProofs {
+    /// Requested blob cells.
+    pub blob_cells: Vec<Optional<Cell>>,
+    /// KZG proofs for the requested blob cells.
+    pub proofs: Vec<Optional<Bytes48>>,
+}
+
+fn zero_blob_v1() -> BlobAndProofV1 {
+    BlobAndProofV1 { blob: Box::new(Blob::ZERO), proof: Bytes48::ZERO }
+}
+
+fn zero_blob_v2() -> BlobAndProofV2 {
+    BlobAndProofV2 { blob: Box::new(Blob::ZERO), proofs: Vec::new() }
+}
+
+impl TryFrom<Vec<Option<BlobAndProofV1>>> for BlobsV1Response {
+    type Error = ConversionError;
+
+    fn try_from(value: Vec<Option<BlobAndProofV1>>) -> Result<Self, Self::Error> {
+        if value.len() > MAX_BLOBS_REQUEST {
+            return Err(ConversionError::TooManyItems {
+                field: "blobs",
+                max: MAX_BLOBS_REQUEST,
+                actual: value.len(),
+            })
+        }
+
+        let entries = value
+            .into_iter()
+            .map(|value| match value {
+                Some(contents) => BlobEntry { available: true, contents },
+                None => BlobEntry { available: false, contents: zero_blob_v1() },
+            })
+            .collect();
+        Ok(Self { entries })
+    }
+}
+
+impl TryFrom<Vec<BlobAndProofV2>> for BlobsV2Response {
+    type Error = ConversionError;
+
+    fn try_from(value: Vec<BlobAndProofV2>) -> Result<Self, Self::Error> {
+        if value.len() > MAX_BLOBS_REQUEST {
+            return Err(ConversionError::TooManyItems {
+                field: "blobs",
+                max: MAX_BLOBS_REQUEST,
+                actual: value.len(),
+            })
+        }
+
+        let entries =
+            value.into_iter().map(|contents| BlobEntry { available: true, contents }).collect();
+        Ok(Self { entries })
+    }
+}
+
+impl TryFrom<Vec<Option<BlobAndProofV2>>> for BlobsV3Response {
+    type Error = ConversionError;
+
+    fn try_from(value: Vec<Option<BlobAndProofV2>>) -> Result<Self, Self::Error> {
+        if value.len() > MAX_BLOBS_REQUEST {
+            return Err(ConversionError::TooManyItems {
+                field: "blobs",
+                max: MAX_BLOBS_REQUEST,
+                actual: value.len(),
+            })
+        }
+
+        let entries = value
+            .into_iter()
+            .map(|value| match value {
+                Some(contents) => BlobEntry { available: true, contents },
+                None => BlobEntry { available: false, contents: zero_blob_v2() },
+            })
+            .collect();
+        Ok(Self { entries })
+    }
+}
+
+impl TryFrom<Vec<Option<BlobCellsAndProofsV1>>> for BlobsV4Response {
+    type Error = ConversionError;
+
+    fn try_from(value: Vec<Option<BlobCellsAndProofsV1>>) -> Result<Self, Self::Error> {
+        if value.len() > MAX_BLOBS_REQUEST {
+            return Err(ConversionError::TooManyItems {
+                field: "blobs",
+                max: MAX_BLOBS_REQUEST,
+                actual: value.len(),
+            })
+        }
+
+        let entries = value
+            .into_iter()
+            .map(|value| match value {
+                Some(contents) => BlobEntry {
+                    available: true,
+                    contents: BlobCellsAndProofs {
+                        blob_cells: contents.blob_cells.into_iter().map(Optional::from).collect(),
+                        proofs: contents.proofs.into_iter().map(Optional::from).collect(),
+                    },
+                },
+                None => BlobEntry { available: false, contents: BlobCellsAndProofs::default() },
+            })
+            .collect();
+        Ok(Self { entries })
+    }
+}
+
+/// A trie-node byte list in an [`ExecutionWitnessV1`].
+pub type WitnessNodeV1 = Vec<u8>;
+
+/// A contract-code byte list in an [`ExecutionWitnessV1`].
+pub type WitnessCodeV1 = Vec<u8>;
+
+/// An RLP-encoded header byte list in an [`ExecutionWitnessV1`].
+pub type WitnessHeaderV1 = Vec<u8>;
+
+/// Canonical execution witness for `POST /payloads/witness`.
+///
+/// `state` and `codes` are produced in lexicographic ascending byte order. `headers` are
+/// RLP-encoded and ordered by ascending block number; consecutive headers must be parent-linked.
+/// These ordering rules are producer-side requirements from the execution-specs witness builder.
+///
+/// This is a REST-SSZ wire container, not the JSON-RPC debug witness shape.
+#[derive(Clone, Debug, Default, PartialEq, Eq, ssz_derive::Encode, ssz_derive::Decode)]
+pub struct ExecutionWitnessV1 {
+    /// Hashed trie-node preimages required during execution and state-root recomputation.
+    pub state: Vec<WitnessNodeV1>,
+    /// Contract bytecode preimages created or accessed during execution.
+    pub codes: Vec<WitnessCodeV1>,
+    /// RLP-encoded ancestor headers used for pre-state and `BLOCKHASH` correctness proofs.
+    pub headers: Vec<WitnessHeaderV1>,
+}
+
+/// Canonical execution witness for `POST /payloads/witness`.
+pub type ExecutionWitness = ExecutionWitnessV1;
+
+/// REST-SSZ response for `POST /payloads/witness`.
+///
+/// The witness uses the Engine REST-SSZ `Optional[T]` encoding from execution-apis and is present
+/// only when the payload status is `VALID`.
+#[derive(Clone, Debug, PartialEq, Eq, ssz_derive::Encode)]
+pub struct PayloadStatusWithWitness {
+    /// Result of processing the submitted payload.
+    pub payload_status: PayloadStatus,
+    /// Execution witness produced for a valid payload.
+    pub witness: Optional<ExecutionWitnessV1>,
+}
+
+impl PayloadStatusWithWitness {
+    /// Creates a response, converting the witness into the REST-SSZ `Optional[T]` representation.
+    pub fn new(payload_status: PayloadStatus, witness: Option<ExecutionWitnessV1>) -> Self {
+        let witness = match &payload_status.status {
+            PayloadStatusEnum::Valid => witness.into(),
+            _ => Optional::none(),
+        };
+        Self { payload_status, witness }
+    }
+}
+
+/// Backwards-compatible alias for the experimental witness response name.
+pub type NewPayloadWithWitnessResponseV1 = PayloadStatusWithWitness;
+
+impl ssz::Decode for PayloadStatusWithWitness {
+    fn is_ssz_fixed_len() -> bool {
+        false
+    }
+
+    fn from_ssz_bytes(bytes: &[u8]) -> Result<Self, ssz::DecodeError> {
+        let mut builder = ssz::SszDecoderBuilder::new(bytes);
+        builder.register_type::<PayloadStatus>()?;
+        builder.register_type::<Optional<ExecutionWitnessV1>>()?;
+        let mut decoder = builder.build()?;
+        let response =
+            Self { payload_status: decoder.decode_next()?, witness: decoder.decode_next()? };
+        if response.witness.is_some() &&
+            !matches!(response.payload_status.status, PayloadStatusEnum::Valid)
+        {
+            return Err(ssz::DecodeError::BytesInvalid(
+                "execution witness is only valid for VALID payload status".into(),
+            ))
+        }
+        Ok(response)
+    }
 }
 
 #[cfg(test)]
@@ -1313,6 +1834,132 @@ mod tests {
             ForkchoiceUpdateResponse::try_from(legacy),
             Err(ConversionError::AcceptedForkchoice)
         );
+    }
+
+    fn blob_v2(byte: u8) -> BlobAndProofV2 {
+        BlobAndProofV2 {
+            blob: Box::new(Blob::repeat_byte(byte)),
+            proofs: vec![Bytes48::repeat_byte(byte)],
+        }
+    }
+
+    #[test]
+    fn blob_requests_are_single_field_containers() {
+        let request = BlobsV1Request { versioned_hashes: vec![B256::repeat_byte(0x42)] };
+        let encoded = request.as_ssz_bytes();
+
+        assert_eq!(&encoded[..4], &4u32.to_le_bytes());
+        assert_eq!(&encoded[4..], B256::repeat_byte(0x42).as_slice());
+        assert_eq!(BlobsV1Request::from_ssz_bytes(&encoded).unwrap(), request);
+
+        let _: BlobsV2Request = BlobsV2Request::from_ssz_bytes(&encoded).unwrap();
+        let _: BlobsV3Request = BlobsV3Request::from_ssz_bytes(&encoded).unwrap();
+    }
+
+    #[test]
+    fn blob_v4_request_roundtrips_bitvector() {
+        let request = BlobsV4Request {
+            versioned_hashes: vec![B256::repeat_byte(0x11)],
+            indices_bitarray: B128::repeat_byte(0xa5),
+        };
+
+        assert_roundtrip(&request);
+    }
+
+    #[test]
+    fn blob_response_conversions_preserve_availability_and_order() {
+        let v1 = BlobsV1Response::try_from(vec![None]).unwrap();
+        assert!(!v1.entries[0].available);
+        assert_eq!(v1.entries[0].contents, zero_blob_v1());
+
+        let v2 = BlobsV2Response::try_from(vec![blob_v2(1), blob_v2(2)]).unwrap();
+        assert!(v2.entries.iter().all(|entry| entry.available));
+
+        let v3 = BlobsV3Response::try_from(vec![Some(blob_v2(1)), None, Some(blob_v2(3))]).unwrap();
+        assert_eq!(
+            v3.entries.iter().map(|entry| entry.available).collect::<Vec<_>>(),
+            [true, false, true]
+        );
+        assert_eq!(v3.entries[2].contents.blob.as_slice(), Blob::repeat_byte(3).as_slice());
+
+        let legacy_partial = BlobCellsAndProofsV1 {
+            blob_cells: vec![Some(Cell::repeat_byte(1)), None],
+            proofs: vec![Some(Bytes48::repeat_byte(2)), None],
+        };
+        let v4 = BlobsV4Response::try_from(vec![None, Some(legacy_partial)]).unwrap();
+        assert!(!v4.entries[0].available);
+        assert!(v4.entries[1].available);
+        assert!(v4.entries[1].contents.blob_cells[0].is_some());
+        assert!(v4.entries[1].contents.proofs[1].is_none());
+    }
+
+    #[test]
+    fn blob_cells_and_proofs_uses_rest_optional() {
+        let value = BlobCellsAndProofs {
+            blob_cells: vec![Optional::some(Cell::repeat_byte(1))],
+            proofs: vec![Optional::some(Bytes48::repeat_byte(2))],
+        };
+        let encoded = value.as_ssz_bytes();
+
+        assert_eq!(BlobCellsAndProofs::from_ssz_bytes(&encoded).unwrap(), value);
+        assert!(!encoded[8..].starts_with(&[1, 0, 0, 0]));
+    }
+
+    #[test]
+    fn payload_body_requests_are_single_field_containers() {
+        let request = BodiesByHashRequest { block_hashes: vec![B256::repeat_byte(0x33)] };
+        let encoded = request.as_ssz_bytes();
+
+        assert_eq!(&encoded[..4], &4u32.to_le_bytes());
+        assert_eq!(&encoded[4..], B256::repeat_byte(0x33).as_slice());
+        assert_eq!(BodiesByHashRequest::from_ssz_bytes(&encoded).unwrap(), request);
+    }
+
+    #[test]
+    fn payload_body_responses_preserve_availability() {
+        let legacy = LegacyExecutionPayloadBodyV1 {
+            transactions: vec![Bytes::from_static(&[1, 2, 3])],
+            withdrawals: Some(vec![Withdrawal::default()]),
+        };
+        let response =
+            BodiesResponseShanghai::from_optional_bodies(vec![Some(legacy), None], |body| {
+                ExecutionPayloadBodyShanghai::try_from(body).ok()
+            });
+
+        assert!(response.entries[0].available);
+        assert!(!response.entries[1].available);
+        assert_roundtrip(&response);
+    }
+
+    #[test]
+    fn witness_response_roundtrips_when_status_is_valid() {
+        let payload_status = PayloadStatus {
+            status: PayloadStatusEnum::Valid,
+            latest_valid_hash: Optional::none(),
+            validation_error: Optional::none(),
+        };
+        let witness = ExecutionWitnessV1 {
+            state: vec![vec![1, 2, 3]],
+            codes: vec![vec![4, 5]],
+            headers: vec![vec![6]],
+        };
+        let response = PayloadStatusWithWitness::new(payload_status, Some(witness));
+
+        assert_roundtrip(&response);
+    }
+
+    #[test]
+    fn witness_response_omits_witness_for_non_valid_status() {
+        let payload_status = PayloadStatus {
+            status: PayloadStatusEnum::Syncing,
+            latest_valid_hash: Optional::none(),
+            validation_error: Optional::none(),
+        };
+        let response =
+            PayloadStatusWithWitness::new(payload_status, Some(ExecutionWitnessV1::default()));
+
+        assert!(response.witness.is_none());
+        assert_roundtrip(&response);
     }
 
     #[test]
