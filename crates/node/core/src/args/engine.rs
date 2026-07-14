@@ -386,7 +386,7 @@ pub struct EngineArgs {
     pub prewarming_disabled: bool,
 
     /// Enable best-effort txpool transaction prewarming between payloads.
-    #[arg(long = "engine.txpool-prewarming", default_value_t = DefaultEngineValues::get_global().txpool_prewarming_enabled)]
+    #[arg(long = "engine.txpool-prewarming", default_value_t = true)]
     pub txpool_prewarming_enabled: bool,
 
     /// Configure the maximum transactions prewarmed per sender for one parent head.
