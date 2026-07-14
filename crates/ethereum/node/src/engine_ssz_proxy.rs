@@ -24,7 +24,7 @@ use alloy_rpc_types_engine::{
     ExecutionPayloadBodiesV2, ExecutionPayloadFieldV2, ExecutionPayloadSidecar, ForkchoiceState,
     PayloadAttributes, PayloadId, PraguePayloadFields,
 };
-use http_body_util::BodyExt;
+use http_body_util::{BodyExt, LengthLimitError, Limited};
 use jsonrpsee::server::{HttpBody, HttpRequest, HttpResponse};
 use reth_chainspec::EthereumHardforks;
 use reth_engine_primitives::EngineApiValidator;
@@ -54,11 +54,16 @@ const STATUS_OK: u16 = 200;
 const STATUS_BAD_REQUEST: u16 = 400;
 const STATUS_NOT_FOUND: u16 = 404;
 const STATUS_METHOD_NOT_ALLOWED: u16 = 405;
+const STATUS_PAYLOAD_TOO_LARGE: u16 = 413;
 const STATUS_INTERNAL_SERVER_ERROR: u16 = 500;
 const STATUS_SERVICE_UNAVAILABLE: u16 = 503;
+const STATUS_UNSUPPORTED_MEDIA_TYPE: u16 = 415;
 
 const MAX_BLOB_LIMIT: usize = 128;
+const MAX_BODIES_REQUEST: usize = 128;
+const MAX_BODIES_REQUEST_BYTES: u64 = 4 + (MAX_BODIES_REQUEST as u64 * 32);
 const MAX_PAYLOAD_BYTES: u64 = 64 * 1024 * 1024;
+const PROBLEM_JSON: &str = "application/problem+json";
 
 type EthEngineApi<Provider, Pool, Validator, ChainSpec> =
     EngineApi<Provider, EthEngineTypes, Pool, Validator, ChainSpec>;
@@ -273,50 +278,81 @@ where
         }
         EngineSszEndpoint::PayloadBodiesByHash => {
             if method != "POST" {
-                return text_response(STATUS_METHOD_NOT_ALLOWED, "method not allowed")
+                return problem_response(STATUS_METHOD_NOT_ALLOWED, "method-not-allowed", None)
             }
             let Some(fork) = request_fork(&request) else {
-                return text_response(STATUS_BAD_REQUEST, "unsupported fork")
+                return problem_response(
+                    STATUS_BAD_REQUEST,
+                    "invalid-request",
+                    Some("unsupported fork".to_string()),
+                )
             };
-            let Ok(body) = request.into_body().collect().await.map(|body| body.to_bytes()) else {
-                return text_response(STATUS_BAD_REQUEST, "failed to read request body")
+            let body = match read_bodies_hash_body(request).await {
+                Ok(body) => body,
+                Err(response) => return response,
             };
             let request = match BodiesByHashRequest::from_ssz_bytes(&body) {
-                Ok(request) => PayloadBodiesRequest::Hash(request.block_hashes),
-                Err(_) => return text_response(STATUS_BAD_REQUEST, "invalid ssz"),
+                Ok(request) if request.block_hashes.len() <= MAX_BODIES_REQUEST => {
+                    PayloadBodiesRequest::Hash(request.block_hashes)
+                }
+                Ok(_) => {
+                    return problem_response(STATUS_PAYLOAD_TOO_LARGE, "request-too-large", None)
+                }
+                Err(_) => return problem_response(STATUS_BAD_REQUEST, "ssz-decode-error", None),
             };
             let Some(engine_api) = handle.engine_api().await else {
-                return text_response(STATUS_SERVICE_UNAVAILABLE, "engine api unavailable")
+                return problem_response(STATUS_SERVICE_UNAVAILABLE, "service-unavailable", None)
             };
             handle_get_payload_bodies(engine_api, fork, request).await
         }
         EngineSszEndpoint::PayloadBodiesByRange => {
             if method != "GET" {
-                return text_response(STATUS_METHOD_NOT_ALLOWED, "method not allowed")
+                return problem_response(STATUS_METHOD_NOT_ALLOWED, "method-not-allowed", None)
             }
             let Some(fork) = request_fork(&request) else {
-                return text_response(STATUS_BAD_REQUEST, "unsupported fork")
+                return problem_response(
+                    STATUS_BAD_REQUEST,
+                    "invalid-request",
+                    Some("unsupported fork".to_string()),
+                )
             };
             let Some(query) = request.uri().query() else {
-                return text_response(STATUS_BAD_REQUEST, "missing payload bodies query")
+                return problem_response(
+                    STATUS_BAD_REQUEST,
+                    "invalid-request",
+                    Some("missing payload bodies query".to_string()),
+                )
             };
             let mut start = None;
             let mut count = None;
             for pair in query.split('&') {
                 let Some((key, value)) = pair.split_once('=') else {
-                    return text_response(STATUS_BAD_REQUEST, "invalid payload bodies query")
+                    return problem_response(STATUS_BAD_REQUEST, "invalid-request", None)
                 };
                 match key {
-                    "from" => start = value.parse().ok(),
-                    "count" => count = value.parse().ok(),
-                    _ => return text_response(STATUS_BAD_REQUEST, "unknown payload bodies query"),
+                    "from" => match value.parse() {
+                        Ok(value) => start = Some(value),
+                        Err(_) => {
+                            return problem_response(STATUS_BAD_REQUEST, "invalid-request", None)
+                        }
+                    },
+                    "count" => match value.parse() {
+                        Ok(value) => count = Some(value),
+                        Err(_) => {
+                            return problem_response(STATUS_BAD_REQUEST, "invalid-request", None)
+                        }
+                    },
+                    _ => return problem_response(STATUS_BAD_REQUEST, "invalid-request", None),
                 }
             }
             let (Some(start), Some(count)) = (start, count) else {
-                return text_response(STATUS_BAD_REQUEST, "missing payload bodies query")
+                return problem_response(STATUS_BAD_REQUEST, "invalid-request", None)
+            };
+            if count > MAX_BODIES_REQUEST as u64 {
+                return problem_response(STATUS_PAYLOAD_TOO_LARGE, "request-too-large", None)
             };
             let Some(engine_api) = handle.engine_api().await else {
-                return text_response(STATUS_SERVICE_UNAVAILABLE, "engine api unavailable")
+                return problem_response(STATUS_SERVICE_UNAVAILABLE, "service-unavailable", None)
             };
             handle_get_payload_bodies(
                 engine_api,
@@ -727,7 +763,36 @@ where
 {
     match payload_bodies_response(response, convert) {
         Ok(response) => ssz_response(response),
-        Err(err) => text_response(STATUS_INTERNAL_SERVER_ERROR, err),
+        Err(err) => problem_response(STATUS_INTERNAL_SERVER_ERROR, "internal", Some(err)),
+    }
+}
+
+async fn read_bodies_hash_body(request: HttpRequest) -> Result<Vec<u8>, HttpResponse> {
+    let content_type = request.headers().get(CONTENT_TYPE).and_then(|value| value.to_str().ok());
+    if content_type != Some(OCTET_STREAM) {
+        return Err(problem_response(STATUS_UNSUPPORTED_MEDIA_TYPE, "unsupported-media-type", None))
+    }
+
+    if let Some(content_length) = request.headers().get("content-length") {
+        let Some(content_length) =
+            content_length.to_str().ok().and_then(|value| value.parse::<u64>().ok())
+        else {
+            return Err(problem_response(STATUS_BAD_REQUEST, "invalid-request", None))
+        };
+        if content_length > MAX_BODIES_REQUEST_BYTES {
+            return Err(problem_response(STATUS_PAYLOAD_TOO_LARGE, "request-too-large", None))
+        }
+    }
+
+    let Ok(limit) = usize::try_from(MAX_BODIES_REQUEST_BYTES) else {
+        return Err(problem_response(STATUS_INTERNAL_SERVER_ERROR, "internal", None))
+    };
+    match Limited::new(request.into_body(), limit).collect().await {
+        Ok(body) => Ok(body.to_bytes().to_vec()),
+        Err(err) if err.downcast_ref::<LengthLimitError>().is_some() => {
+            Err(problem_response(STATUS_PAYLOAD_TOO_LARGE, "request-too-large", None))
+        }
+        Err(_) => Err(problem_response(STATUS_BAD_REQUEST, "invalid-request", None)),
     }
 }
 
@@ -980,6 +1045,23 @@ fn text_response(status: u16, body: impl Into<String>) -> HttpResponse {
         .status(status)
         .header(CONTENT_TYPE, TEXT_PLAIN)
         .body(HttpBody::from(body.into()))
+        .expect("valid response")
+}
+
+fn problem_response(
+    status: u16,
+    problem_type: &'static str,
+    detail: Option<String>,
+) -> HttpResponse {
+    let body = match detail {
+        Some(detail) => serde_json::json!({ "type": problem_type, "detail": detail }),
+        None => serde_json::json!({ "type": problem_type }),
+    };
+
+    HttpResponse::builder()
+        .status(status)
+        .header(CONTENT_TYPE, PROBLEM_JSON)
+        .body(HttpBody::from(body.to_string()))
         .expect("valid response")
 }
 
