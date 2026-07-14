@@ -24,11 +24,7 @@ use parking_lot::RwLock;
 use reth_chainspec::{ChainSpecProvider, EthChainSpec, EthereumHardforks};
 use reth_engine_primitives::ConsensusEngineEvent;
 use reth_errors::RethError;
-use reth_evm::{
-    database::BorrowedDatabase,
-    execute::{BlockExecutor, Executor},
-    ConfigureEvm, EvmEnv, EvmEnvFor,
-};
+use reth_evm::{database::BorrowedDatabase, execute::Executor, ConfigureEvm, EvmEnv, EvmEnvFor};
 use reth_primitives_traits::{
     Account as PrimitiveAccount, Block as BlockTrait, BlockBody, BlockTy, ReceiptWithBloom,
     RecoveredBlock,
@@ -705,21 +701,17 @@ where
             ))
             .into())
         }
+        let evm_env = self.eth_api().evm_env_for_header(block.sealed_block().sealed_header())?;
 
         self.eth_api()
             .spawn_with_state_at_block(block.parent_hash(), move |eth_api, mut db| {
-                let mut executor = eth_api
-                    .evm_config()
-                    .executor_for_block(BorrowedDatabase::new(&mut db), block.sealed_block())
-                    .map_err(RethError::other)
-                    .map_err(Eth::Error::from_eth_err)?;
-                executor.apply_pre_execution_changes().map_err(Eth::Error::from_eth_err)?;
+                eth_api.apply_pre_execution_changes(&block, &mut db)?;
 
                 for tx in block.transactions_recovered().take(tx_index + 1) {
                     let tx_env = eth_api.evm_config().tx_env(tx.cloned());
-                    executor.execute_transaction(tx_env).map_err(Eth::Error::from_eth_err)?;
+                    let result = eth_api.transact(&mut db, evm_env.clone(), tx_env)?;
+                    db.commit_source(&result.state_changes);
                 }
-                drop(executor);
 
                 f(&mut db)
             })
