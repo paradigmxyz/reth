@@ -2562,16 +2562,10 @@ impl SparseTrie for ArenaParallelSparseTrie {
             let (_, subtrie, node_vec) = &mut taken[0];
             subtrie.reveal_nodes(node_vec)?;
         } else {
-            use rayon::iter::{IntoParallelRefMutIterator, ParallelIterator};
-
-            let parent_span = tracing::Span::current();
-            let results: Vec<SparseTrieResult<()>> = taken
-                .par_iter_mut()
-                .map(|(_, subtrie, node_vec)| {
-                    let _guard = parent_span.enter();
+            let results: Vec<SparseTrieResult<()>> =
+                rayon_or_sequential(&mut taken, |(_, subtrie, node_vec)| {
                     subtrie.reveal_nodes(node_vec)
-                })
-                .collect();
+                });
 
             if let Some(err) = results.into_iter().find(|r| r.is_err()) {
                 // Restore before returning so we don't leave TakenSubtrie holes.
@@ -2651,17 +2645,10 @@ impl SparseTrie for ArenaParallelSparseTrie {
                     subtrie.update_cached_rlp();
                 }
             } else {
-                use rayon::iter::{IntoParallelIterator, ParallelIterator};
-
-                let parent_span = tracing::Span::current();
-                taken = taken
-                    .into_par_iter()
-                    .map(|(idx, mut subtrie)| {
-                        let _guard = parent_span.enter();
-                        subtrie.update_cached_rlp();
-                        (idx, subtrie)
-                    })
-                    .collect();
+                taken = rayon_or_sequential(taken, |(idx, mut subtrie)| {
+                    subtrie.update_cached_rlp();
+                    (idx, subtrie)
+                });
             }
         }
 
@@ -2929,13 +2916,8 @@ impl SparseTrie for ArenaParallelSparseTrie {
                 let (_, ref mut subtrie, ref range) = taken[0];
                 pruned += subtrie.prune(retained_leaves[range.clone()].iter());
             } else {
-                use rayon::iter::{IntoParallelRefMutIterator, ParallelIterator};
-
-                let parent_span = tracing::Span::current();
-                pruned += taken
-                    .par_iter_mut()
-                    .map(|(_, subtrie, range)| {
-                        let _guard = parent_span.enter();
+                let pruned_subtries: Vec<usize> =
+                    rayon_or_sequential(&mut taken, |(_, subtrie, range)| {
                         let _span = tracing::trace_span!(
                             target: TRACE_TARGET,
                             "subtrie_prune",
@@ -2944,8 +2926,8 @@ impl SparseTrie for ArenaParallelSparseTrie {
                         .entered();
 
                         subtrie.prune(retained_leaves[range.clone()].iter())
-                    })
-                    .sum::<usize>();
+                    });
+                pruned += pruned_subtries.into_iter().sum::<usize>();
             }
 
             // Restore taken subtries into the upper arena.
@@ -3207,11 +3189,7 @@ impl SparseTrie for ArenaParallelSparseTrie {
             let (_, ref mut subtrie, ref range) = taken[0];
             subtrie.update_leaves(&sorted[range.clone()]);
         } else {
-            use rayon::iter::{IntoParallelRefMutIterator, ParallelIterator};
-
-            let parent_span = tracing::Span::current();
-            taken.par_iter_mut().for_each(|(_, subtrie, range)| {
-                let _guard = parent_span.enter();
+            let _: Vec<()> = rayon_or_sequential(&mut taken, |(_, subtrie, range)| {
                 subtrie.update_leaves(&sorted[range.clone()]);
             });
         }
@@ -3291,6 +3269,35 @@ impl SparseTrie for ArenaParallelSparseTrie {
     fn take_debug_recorder(&mut self) -> TrieDebugRecorder {
         core::mem::take(&mut self.debug_recorder)
     }
+}
+
+/// Runs independent work in parallel when `std` enables Rayon, or sequentially otherwise.
+#[cfg(feature = "std")]
+fn rayon_or_sequential<I, F, R>(iter: I, op: F) -> Vec<R>
+where
+    I: rayon::iter::IntoParallelIterator,
+    F: Fn(I::Item) -> R + Send + Sync,
+    R: Send,
+{
+    use rayon::iter::ParallelIterator;
+
+    let parent_span = tracing::Span::current();
+    iter.into_par_iter()
+        .map(|item| {
+            let _guard = parent_span.enter();
+            op(item)
+        })
+        .collect()
+}
+
+/// Runs independent work sequentially when Rayon is unavailable.
+#[cfg(not(feature = "std"))]
+fn rayon_or_sequential<I, F, R>(iter: I, op: F) -> Vec<R>
+where
+    I: IntoIterator,
+    F: FnMut(I::Item) -> R,
+{
+    iter.into_iter().map(op).collect()
 }
 
 #[cfg(test)]
