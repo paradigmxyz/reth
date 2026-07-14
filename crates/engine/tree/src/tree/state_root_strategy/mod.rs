@@ -140,6 +140,70 @@ where
     config: &'a TreeConfig,
 }
 
+/// Inputs for starting the default sparse-trie state-root task from a direct payload producer.
+///
+/// Unlike [`PayloadStateRootJobContext`], this does not require an Engine API forkchoice update.
+/// It is intended for chains that execute their own payloads outside reth's standard payload
+/// builder while still using reth's state-trie overlays and task lifecycle.
+pub struct PayloadStateRootTaskContext<'a, N, F>
+where
+    N: NodePrimitives,
+{
+    executor: &'a reth_tasks::Runtime,
+    state_trie_overlays: &'a StateTrieOverlayManager<N>,
+    multiproof_provider_factory: F,
+    parent_state_root: B256,
+    transaction_count: Option<usize>,
+    config: &'a TreeConfig,
+    pending_sparse_trie_prune_blocks: Option<Vec<ExecutedBlock<N>>>,
+}
+
+impl<N, F> fmt::Debug for PayloadStateRootTaskContext<'_, N, F>
+where
+    N: NodePrimitives,
+{
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("PayloadStateRootTaskContext")
+            .field("parent_state_root", &self.parent_state_root)
+            .field("transaction_count", &self.transaction_count)
+            .field(
+                "has_pending_sparse_trie_prune_blocks",
+                &self.pending_sparse_trie_prune_blocks.is_some(),
+            )
+            .finish_non_exhaustive()
+    }
+}
+
+impl<'a, N, F> PayloadStateRootTaskContext<'a, N, F>
+where
+    N: NodePrimitives,
+{
+    /// Creates the inputs for one direct payload state-root task.
+    ///
+    /// Pass `None` for `transaction_count` when the producer discovers transactions while it is
+    /// executing the payload. Pass the blocks selected for sparse-trie pruning when the producer
+    /// maintains a reusable in-memory chain; `None` disables pruning for this task.
+    pub const fn new(
+        executor: &'a reth_tasks::Runtime,
+        state_trie_overlays: &'a StateTrieOverlayManager<N>,
+        multiproof_provider_factory: F,
+        parent_state_root: B256,
+        transaction_count: Option<usize>,
+        config: &'a TreeConfig,
+        pending_sparse_trie_prune_blocks: Option<Vec<ExecutedBlock<N>>>,
+    ) -> Self {
+        Self {
+            executor,
+            state_trie_overlays,
+            multiproof_provider_factory,
+            parent_state_root,
+            transaction_count,
+            config,
+            pending_sparse_trie_prune_blocks,
+        }
+    }
+}
+
 impl<N, P> fmt::Debug for PayloadStateRootJobContext<'_, N, P>
 where
     N: NodePrimitives,
@@ -498,6 +562,57 @@ impl DefaultStateRootStrategy {
     /// produce fewer state changes and most workers would be idle overhead.
     const SMALL_BLOCK_PROOF_WORKER_TX_THRESHOLD: usize = 30;
 
+    /// Starts the default sparse-trie state-root task for a direct payload producer.
+    ///
+    /// The returned handle owns the authoritative execution hook. Install it before executing the
+    /// payload, remove it after the final state update, then await
+    /// [`PayloadStateRootHandle::state_root`] and pass the resulting root and trie updates to
+    /// the block builder. Dropping the handle before awaiting its result cancels the task.
+    ///
+    /// Returns `None` when state-root calculation is skipped or the host lacks enough parallelism
+    /// for the task pipeline. Callers should use their normal synchronous state-root path in that
+    /// case.
+    pub fn spawn_payload_state_root_task<N, F>(
+        &self,
+        ctx: PayloadStateRootTaskContext<'_, N, F>,
+    ) -> Option<PayloadStateRootHandle>
+    where
+        N: NodePrimitives,
+        F: DatabaseProviderROFactory<Provider: TrieCursorFactory + HashedCursorFactory>
+            + Clone
+            + Send
+            + Sync
+            + 'static,
+    {
+        let PayloadStateRootTaskContext {
+            executor,
+            state_trie_overlays,
+            multiproof_provider_factory,
+            parent_state_root,
+            transaction_count,
+            config,
+            pending_sparse_trie_prune_blocks,
+        } = ctx;
+        if config.skip_state_root() || !config.has_enough_parallelism() {
+            return None
+        }
+
+        Some(
+            self.spawn_state_root(
+                executor,
+                state_trie_overlays,
+                multiproof_provider_factory,
+                StateRootTaskOptions {
+                    parent_state_root,
+                    transaction_count,
+                    config,
+                    pending_sparse_trie_prune_blocks,
+                },
+            )
+            .into_payload_state_root_handle(),
+        )
+    }
+
     /// Spawns the default state-root computation pipeline.
     ///
     /// The authoritative update capability taken from the returned handle must be dropped or
@@ -824,22 +939,16 @@ where
             return Ok(None)
         }
 
-        let pending_sparse_trie_prune_blocks = ctx.take_sparse_trie_prune_blocks();
-        Ok(Some(
-            self.spawn_state_root(
-                ctx.executor,
-                ctx.state_trie_overlays,
-                ctx.overlay_factory.clone(),
-                StateRootTaskOptions {
-                    parent_state_root: ctx.parent_state_root(),
-                    // Tx count unknown at FCU time (block built incrementally): full proof workers.
-                    transaction_count: None,
-                    config: ctx.config,
-                    pending_sparse_trie_prune_blocks,
-                },
-            )
-            .into_payload_state_root_handle(),
-        ))
+        Ok(self.spawn_payload_state_root_task(PayloadStateRootTaskContext::new(
+            ctx.executor,
+            ctx.state_trie_overlays,
+            ctx.overlay_factory.clone(),
+            ctx.parent_state_root(),
+            // Tx count unknown at FCU time (block built incrementally): full proof workers.
+            None,
+            ctx.config,
+            ctx.take_sparse_trie_prune_blocks(),
+        )))
     }
 }
 
@@ -1367,22 +1476,23 @@ mod tests {
         let env: ExecutionEnv<EthEvmConfig> = ExecutionEnv::test_default();
         let runtime = reth_tasks::Runtime::test();
         let state_trie_overlays = StateTrieOverlayManager::<EthPrimitives>::default();
-        let mut state_root_handle = DefaultStateRootStrategy::default().spawn_state_root(
-            &runtime,
-            &state_trie_overlays,
-            OverlayStateProviderFactory::new(
-                provider_factory,
-                OverlayBuilder::<EthPrimitives>::new(genesis_hash, ChangesetCache::new()),
-            ),
-            StateRootTaskOptions {
-                parent_state_root: env.parent_state_root,
-                transaction_count: Some(env.transaction_count),
-                config: &TreeConfig::default(),
-                pending_sparse_trie_prune_blocks: None,
-            },
-        );
+        let config = TreeConfig::default().with_has_enough_parallelism(true);
+        let mut state_root_handle = DefaultStateRootStrategy::default()
+            .spawn_payload_state_root_task(PayloadStateRootTaskContext::new(
+                &runtime,
+                &state_trie_overlays,
+                OverlayStateProviderFactory::new(
+                    provider_factory,
+                    OverlayBuilder::<EthPrimitives>::new(genesis_hash, ChangesetCache::new()),
+                ),
+                env.parent_state_root,
+                Some(env.transaction_count),
+                &config,
+                None,
+            ))
+            .expect("test runtime has sufficient parallelism");
 
-        let mut state_hook = state_root_handle.take_execution_hook();
+        let mut state_hook = state_root_handle.take_state_hook();
         for update in state_updates {
             state_hook.on_state(update);
         }
