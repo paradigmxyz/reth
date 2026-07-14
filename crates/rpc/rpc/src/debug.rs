@@ -591,7 +591,7 @@ where
                     .contracts
                     .values()
                     .map(|code| code.original_bytes())
-                    .filter(|code| !code.is_empty())
+                    .filter(|code| !mode.is_canonical() || !code.is_empty())
                     .collect::<Vec<_>>();
                 if mode.is_canonical() {
                     codes.sort_unstable();
