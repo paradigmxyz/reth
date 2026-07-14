@@ -1,74 +1,108 @@
-// Stubbed big-block EVM configuration.
-//
-// Big-block execution is parked while it is ported to the active EVM. This wrapper keeps the node
-// type and payload shape available without retaining a direct legacy executor dependency in
-// `reth-bb`.
+//! EVM configuration for merged big-block payloads.
 
 pub(crate) use reth_engine_primitives::BigBlockData;
 
-use alloy_consensus::transaction::Recovered;
+use alloy_consensus::Header;
+use alloy_eips::Decodable2718;
 use alloy_primitives::Bytes;
 use alloy_rpc_types::engine::ExecutionData;
 use core::{convert::Infallible, fmt};
-use reth_ethereum_primitives::EthPrimitives;
+use reth_chainspec::{ChainSpec, EthChainSpec, EthereumHardforks};
+use reth_ethereum_forks::Hardforks;
+use reth_ethereum_primitives::{Block, EthPrimitives, TransactionSigned};
 use reth_evm::{
-    ConfigureEngineEvm, ConfigureEvm, DynDatabase, EvmEnvFor, EvmState, ExecutableTxIterator,
-    ExecutionCtxFor, NextBlockEnvAttributes,
+    BlockAssembler, BlockAssemblerInput, BlockExecutionError, ConfigureEngineEvm, ConfigureEvm,
+    DynDatabase, EvmEnvFor, EvmState, ExecutableTxIterator, ExecutionCtxFor,
+    NextBlockEnvAttributes,
 };
-use reth_evm_ethereum::EthEvmConfig;
-use reth_primitives_traits::{BlockTy, HeaderTy, SealedBlock, SealedHeader, TxTy};
+use reth_evm_ethereum::{
+    EthBigBlockExecutorFactory, EthBigBlockPlan, EthBigBlockSegment, EthEvmConfig,
+    ExecutableRecoveredTx,
+};
+use reth_primitives_traits::{BlockTy, HeaderTy, SealedBlock, SealedHeader, SignedTransaction};
 use reth_storage_errors::any::AnyError;
+use std::vec::Vec;
+
+/// Block assembler marker for replay-only big-block execution.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct BbBlockAssembler;
+
+impl<C> BlockAssembler<EthBigBlockExecutorFactory<C>> for BbBlockAssembler
+where
+    C: EthChainSpec<Header = Header> + EthereumHardforks + 'static,
+{
+    type Block = Block;
+
+    fn assemble_block(
+        &self,
+        _input: BlockAssemblerInput<'_, '_, EthBigBlockExecutorFactory<C>, Header>,
+    ) -> Result<Self::Block, BlockExecutionError> {
+        unreachable!("big-block execution is replay-only")
+    }
+}
 
 /// EVM configuration for big-block execution.
-pub struct BbEvmConfig<C = reth_chainspec::ChainSpec> {
+pub struct BbEvmConfig<C = ChainSpec> {
     inner: EthEvmConfig<C>,
+    executor_factory: EthBigBlockExecutorFactory<C>,
+    block_assembler: BbBlockAssembler,
 }
 
 impl<C> Clone for BbEvmConfig<C>
 where
     EthEvmConfig<C>: Clone,
+    EthBigBlockExecutorFactory<C>: Clone,
 {
     fn clone(&self) -> Self {
-        Self { inner: self.inner.clone() }
+        Self {
+            inner: self.inner.clone(),
+            executor_factory: self.executor_factory.clone(),
+            block_assembler: self.block_assembler,
+        }
     }
 }
 
 impl<C> fmt::Debug for BbEvmConfig<C>
 where
     EthEvmConfig<C>: fmt::Debug,
+    EthBigBlockExecutorFactory<C>: fmt::Debug,
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("BbEvmConfig").field("inner", &self.inner).finish()
+        f.debug_struct("BbEvmConfig")
+            .field("inner", &self.inner)
+            .field("executor_factory", &self.executor_factory)
+            .finish()
     }
 }
 
 impl<C> BbEvmConfig<C> {
-    /// Creates a new stubbed big-block EVM configuration.
-    pub const fn new(inner: EthEvmConfig<C>) -> Self {
-        Self { inner }
+    /// Creates a big-block EVM configuration from the standard Ethereum configuration.
+    pub fn new(inner: EthEvmConfig<C>) -> Self
+    where
+        EthEvmConfig<C>: Clone,
+        EthBigBlockExecutorFactory<C>: Clone,
+    {
+        let executor_factory = EthBigBlockExecutorFactory::new(inner.executor_factory.clone());
+        Self { inner, executor_factory, block_assembler: BbBlockAssembler }
     }
 }
 
 impl<C> ConfigureEvm for BbEvmConfig<C>
 where
-    EthEvmConfig<C>: ConfigureEvm<
-        Primitives = EthPrimitives,
-        Error = Infallible,
-        NextBlockEnvCtx = NextBlockEnvAttributes,
-    >,
+    C: EthChainSpec<Header = Header> + EthereumHardforks + Hardforks + 'static,
 {
     type Primitives = EthPrimitives;
     type Error = Infallible;
     type NextBlockEnvCtx = NextBlockEnvAttributes;
-    type BlockExecutorFactory = <EthEvmConfig<C> as ConfigureEvm>::BlockExecutorFactory;
-    type BlockAssembler = <EthEvmConfig<C> as ConfigureEvm>::BlockAssembler;
+    type BlockExecutorFactory = EthBigBlockExecutorFactory<C>;
+    type BlockAssembler = BbBlockAssembler;
 
     fn block_executor_factory(&self) -> &Self::BlockExecutorFactory {
-        self.inner.block_executor_factory()
+        &self.executor_factory
     }
 
     fn block_assembler(&self) -> &Self::BlockAssembler {
-        self.inner.block_assembler()
+        &self.block_assembler
     }
 
     fn evm_env(&self, header: &HeaderTy<Self::Primitives>) -> Result<EvmEnvFor<Self>, Self::Error> {
@@ -90,7 +124,13 @@ where
     where
         Self: 'a,
     {
-        self.inner.context_for_block(block)
+        let evm_env = self.inner.evm_env(block.header())?;
+        let ctx = self.inner.context_for_block(block)?;
+        Ok(EthBigBlockPlan::new(
+            vec![EthBigBlockSegment { start_tx: 0, evm_env, ctx }],
+            Vec::new(),
+            block.transaction_count(),
+        ))
     }
 
     fn context_for_next_block(
@@ -98,7 +138,13 @@ where
         parent: &SealedHeader<HeaderTy<Self::Primitives>>,
         attributes: Self::NextBlockEnvCtx,
     ) -> Result<ExecutionCtxFor<'_, Self>, Self::Error> {
-        self.inner.context_for_next_block(parent, attributes)
+        let evm_env = self.inner.next_evm_env(parent, &attributes)?;
+        let ctx = self.inner.context_for_next_block(parent, attributes)?;
+        Ok(EthBigBlockPlan::new(
+            vec![EthBigBlockSegment { start_tx: 0, evm_env, ctx }],
+            Vec::new(),
+            0,
+        ))
     }
 
     fn pre_block_state_changes<'a, DB>(
@@ -112,37 +158,54 @@ where
         Self: 'a,
         DB: DynDatabase + 'a,
     {
-        self.inner.pre_block_state_changes(db, evm_env, block_number, ctx)
+        let segment = ctx.segments.first().expect("big-block context has a segment");
+        self.inner.pre_block_state_changes(db, evm_env, block_number, segment.ctx.clone())
     }
 }
 
 impl<C> ConfigureEngineEvm<BigBlockData<ExecutionData>> for BbEvmConfig<C>
 where
-    Self: ConfigureEvm<Primitives = EthPrimitives, Error = Infallible>,
-    EthEvmConfig<C>: ConfigureEngineEvm<ExecutionData>
-        + ConfigureEvm<Primitives = EthPrimitives, Error = Infallible>,
+    C: EthChainSpec<Header = Header> + EthereumHardforks + Hardforks + 'static,
 {
     fn evm_env_for_payload(
         &self,
-        _payload: &BigBlockData<ExecutionData>,
+        payload: &BigBlockData<ExecutionData>,
     ) -> Result<EvmEnvFor<Self>, Self::Error> {
-        unreachable!("big-block payload execution is unsupported by the active EVM path")
+        let first = payload.env_switches.first().expect("big-block payload has no segments");
+        self.inner.evm_env_for_payload(first)
     }
 
     fn context_for_payload<'a>(
         &self,
-        _payload: &'a BigBlockData<ExecutionData>,
+        payload: &'a BigBlockData<ExecutionData>,
     ) -> Result<ExecutionCtxFor<'a, Self>, Self::Error> {
-        unreachable!("big-block payload execution is unsupported by the active EVM path")
+        assert!(!payload.env_switches.is_empty(), "big-block payload has no segments");
+
+        let mut start_tx = 0;
+        let mut segments = Vec::with_capacity(payload.env_switches.len());
+        for data in &payload.env_switches {
+            let evm_env = self.inner.evm_env_for_payload(data)?;
+            let ctx = self.inner.context_for_payload(data)?;
+            segments.push(EthBigBlockSegment { start_tx, evm_env, ctx });
+            start_tx += data.payload.transactions().len();
+        }
+
+        Ok(EthBigBlockPlan::new(segments, payload.prior_block_hashes.clone(), start_tx))
     }
 
     fn tx_iterator_for_payload(
         &self,
-        _payload: &BigBlockData<ExecutionData>,
+        payload: &BigBlockData<ExecutionData>,
     ) -> Result<impl ExecutableTxIterator<Self>, Self::Error> {
-        let transactions: Vec<Bytes> = Vec::new();
-        let convert = |_tx: Bytes| -> Result<Recovered<TxTy<Self::Primitives>>, AnyError> {
-            unreachable!("big-block payload execution is unsupported by the active EVM path")
+        let transactions = payload
+            .env_switches
+            .iter()
+            .flat_map(|data| data.payload.transactions().iter().cloned())
+            .collect::<Vec<_>>();
+        let convert = |tx: Bytes| {
+            let tx = TransactionSigned::decode_2718_exact(tx.as_ref()).map_err(AnyError::new)?;
+            let signer = tx.try_recover().map_err(AnyError::new)?;
+            Ok::<_, AnyError>(ExecutableRecoveredTx::new(tx.with_signer(signer)))
         };
 
         Ok((transactions, convert))
