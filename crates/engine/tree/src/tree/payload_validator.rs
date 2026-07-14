@@ -787,7 +787,7 @@ where
         )
         .in_scope(|| {
             self.validator.validate_block_post_execution_with_hashed_state(
-                &|| hashed_state.get(),
+                || hashed_state.get(),
                 &block,
                 || provider_builder.build(),
             )
@@ -823,7 +823,7 @@ where
             )
             .in_scope(|| {
                 self.validator.validate_block_post_execution_with_hashed_state(
-                    &|| hashed_state.get(),
+                    || hashed_state.get(),
                     &block,
                     || provider_builder.build(),
                 )
