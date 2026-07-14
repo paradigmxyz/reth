@@ -1,6 +1,6 @@
 //! Shared types for blockchain tree validation.
 
-use crate::tree::{error::InsertPayloadError, TxPoolPrewarmCacheSnapshot};
+use crate::tree::{error::InsertPayloadError, TxPoolPrewarmCacheSnapshot, TxPoolPrewarmHints};
 use alloy_eip7928::bal::{DecodedBal, RawBal};
 use alloy_eips::eip4895::Withdrawal;
 use alloy_primitives::B256;
@@ -36,6 +36,8 @@ pub struct ExecutionEnv<Evm: ConfigureEvm> {
     pub decoded_bal: Option<Arc<DecodedBal>>,
     /// Latest completed txpool-prewarm snapshot for this block's parent state.
     pub txpool_snapshot: Option<TxPoolPrewarmCacheSnapshot>,
+    /// Predicted changed accounts and storage slots keyed by transaction hash.
+    pub txpool_hints: Option<TxPoolPrewarmHints>,
 }
 
 impl<Evm: ConfigureEvm> ExecutionEnv<Evm>
@@ -55,6 +57,7 @@ where
             withdrawals: None,
             decoded_bal: None,
             txpool_snapshot: None,
+            txpool_hints: None,
         }
     }
 }
