@@ -5,10 +5,11 @@ use reth_cli_util::{get_secret_key, load_secret_key::rng_secret_key};
 use reth_discv4::{DiscoveryUpdate, Discv4, Discv4Config};
 use reth_discv5::{
     discv5::{self, Event, ListenConfig},
+    enr::EnrCombinedKeyWrapper,
     Config, Discv5,
 };
 use reth_net_nat::NatResolver;
-use reth_network_peers::NodeRecord;
+use reth_network_peers::{AnyNode, NodeRecord};
 use secp256k1::SecretKey;
 use std::{
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
@@ -17,7 +18,7 @@ use std::{
 };
 use tokio::{net::UdpSocket, select};
 use tokio_stream::StreamExt;
-use tracing::info;
+use tracing::{info, warn};
 
 /// Start a discovery only bootnode.
 #[derive(Parser, Debug)]
@@ -37,14 +38,20 @@ pub struct Command {
 
     /// NAT resolution method (any|none|upnp|publicip|extip:\<IP\>).
     ///
-    /// Can be repeated with one IPv4 and one IPv6 `extip:<IP>` to advertise a dual-stack discv5
-    /// ENR (discv4 binds a single socket and always advertises only the `--addr` family).
+    /// Can be repeated with one IPv4 and one IPv6 `extip:<IP>` to advertise a dual-stack node.
+    /// The enode advertises only the `--addr` family; the discv5 and EIP-868 ENRs carry both
+    /// families, and with `--v5` discv4 also answers the opposite family on the shared port.
     #[arg(long, default_value = "any")]
     pub nat: Vec<NatResolver>,
 
     /// Also run discv5, sharing the discv4 UDP port (`--addr`).
     #[arg(long)]
     pub v5: bool,
+
+    /// Comma-separated nodes to seed discovery: `enode://` URLs with an IP host and/or signed
+    /// `enr:` records. Each entry seeds discv4 and (with `--v5`) discv5.
+    #[arg(long, value_delimiter = ',')]
+    pub bootnodes: Vec<AnyNode>,
 }
 
 impl Command {
@@ -57,8 +64,18 @@ impl Command {
         // (`enode://…@<ip>:0?discport=<udp>`).
         let local_enr = NodeRecord::from_secret_key(self.addr, &sk).with_tcp_port(0);
         let nat = self.resolved_nat()?;
+        let seeds = self.seed_nodes()?;
 
-        let discv4_config = self.discv4_config(&nat);
+        for record in seeds.discv4_records() {
+            if !self.serves_family(record.address, &nat) {
+                warn!(
+                    "No socket will be bound for the IP family of --bootnodes entry {record}; \
+                     it will not be contacted (advertise a matching --nat extip with --v5)"
+                );
+            }
+        }
+
+        let discv4_config = self.discv4_config(&nat, &seeds);
 
         // In v5 mode discv4 and discv5 share a single UDP socket: discv5 owns the read loop and
         // discv4 packets surface as `UnrecognizedFrame`s forwarded to its ingress. The discv5
@@ -68,29 +85,31 @@ impl Command {
             // Actual port, so an ephemeral `--addr` port (`:0`) still yields one shared port.
             let shared_port = shared_socket.local_addr()?.port();
 
-            let (discv4, discv4_service, mut ingress) =
-                Discv4::bind_shared(shared_socket.clone(), local_enr, sk, discv4_config)?;
-            info!("Started discv4 (shared port) at address: {local_enr:?}");
-
             // Hand discv5 the shared socket and bind the opposite family (if advertised) on the
-            // same port.
-            let mut discv5_config = self.discv5_config(&nat);
+            // same port. That sibling socket doubles as discv4's secondary-family egress, so
+            // discv4 answers both families on the shared port.
+            let mut discv5_config = self.discv5_config(&nat, &seeds);
             let discv5_cfg = discv5_config.discv5_config_mut();
             let (mut ipv4, mut ipv6) = (None, None);
             if self.addr.is_ipv4() {
-                ipv4 = Some(shared_socket);
+                ipv4 = Some(shared_socket.clone());
                 if let Some(mut addr) = reth_discv5::config::ipv6(&discv5_cfg.listen_config) {
                     addr.set_port(shared_port);
                     ipv6 = Some(bind_socket(SocketAddr::V6(addr)).await?);
                 }
             } else {
-                ipv6 = Some(shared_socket);
+                ipv6 = Some(shared_socket.clone());
                 if let Some(mut addr) = reth_discv5::config::ipv4(&discv5_cfg.listen_config) {
                     addr.set_port(shared_port);
                     ipv4 = Some(bind_socket(SocketAddr::V4(addr)).await?);
                 }
             }
+            let secondary_socket = if self.addr.is_ipv4() { ipv6.clone() } else { ipv4.clone() };
             discv5_cfg.listen_config = ListenConfig::FromSockets { ipv4, ipv6 };
+
+            let (discv4, discv4_service, mut ingress) =
+                Discv4::bind_shared(shared_socket, secondary_socket, local_enr, sk, discv4_config)?;
+            info!("Started discv4 (shared port) at address: {local_enr:?}");
 
             info!("Starting discv5 (shared port)");
             let (discv5, mut updates) = Discv5::start(&sk, discv5_config).await?;
@@ -167,8 +186,8 @@ impl Command {
     ///
     /// A single value behaves like the rest of the node: the resolver drives discv4's external IP
     /// resolution, and any fixed IP is also advertised in the discv5 ENR. Two `extip:<IP>` values
-    /// (one per family) advertise a dual-stack discv5 record; discv4 advertises only the family
-    /// matching `--addr`, since it binds a single socket.
+    /// (one per family) advertise a dual-stack record; the enode advertises only the family
+    /// matching `--addr`, since discv4's own record carries a single address.
     fn resolved_nat(&self) -> eyre::Result<BootnodeNat> {
         match self.nat.as_slice() {
             [] => Ok(BootnodeNat::single(NatResolver::Any, self.addr.port())),
@@ -206,11 +225,50 @@ impl Command {
         }
     }
 
-    fn discv4_config(&self, nat: &BootnodeNat) -> Discv4Config {
-        Discv4Config::builder().external_ip_resolver(Some(nat.resolver.clone())).build()
+    fn discv4_config(&self, nat: &BootnodeNat, seeds: &BootnodeSeeds) -> Discv4Config {
+        let mut builder = Discv4Config::builder();
+        builder
+            .external_ip_resolver(Some(nat.resolver.clone()))
+            .add_boot_nodes(seeds.discv4_records());
+        // the opposite-family address is only served with the `--v5` sibling socket
+        if self.v5 &&
+            let Some(ip) =
+                nat.advertised_ips.iter().find(|ip| ip.is_ipv4() != self.addr.is_ipv4())
+        {
+            builder.secondary_advertised_ip(*ip);
+        }
+        builder.build()
     }
 
-    fn discv5_config(&self, nat: &BootnodeNat) -> Config {
+    /// Parses `--bootnodes`, keeping enode-sourced records separate from signed ENRs so an ENR
+    /// entry is not seeded into discv5 twice (signed and again as an unsigned enode).
+    fn seed_nodes(&self) -> eyre::Result<BootnodeSeeds> {
+        let mut seeds = BootnodeSeeds::default();
+        for node in &self.bootnodes {
+            match node {
+                AnyNode::NodeRecord(record) => seeds.enodes.push(*record),
+                AnyNode::Enr(enr) => {
+                    let record = NodeRecord::try_from(enr)
+                        .map_err(|err| eyre::eyre!("unusable --bootnodes ENR ({err}): {enr}"))?;
+                    seeds.enr_records.push(record);
+                    seeds.enrs.push(EnrCombinedKeyWrapper::from(enr.clone()).0);
+                }
+                node => eyre::bail!(
+                    "--bootnodes entries must be enode URLs with an IP host or signed ENRs: {node}"
+                ),
+            }
+        }
+        Ok(seeds)
+    }
+
+    /// Whether a socket of `ip`'s family will be bound: the `--addr` family always, the opposite
+    /// family only when `--v5` binds its sibling socket (an address of that family is advertised).
+    fn serves_family(&self, ip: IpAddr, nat: &BootnodeNat) -> bool {
+        ip.is_ipv4() == self.addr.is_ipv4() ||
+            (self.v5 && nat.advertised_ips.iter().any(|a| a.is_ipv4() == ip.is_ipv4()))
+    }
+
+    fn discv5_config(&self, nat: &BootnodeNat, seeds: &BootnodeSeeds) -> Config {
         // Discovery-only bootnode: no RLPx, so the ENR carries `tcp=0`; the discovery listen
         // port is set from `--addr` below.
         let mut builder = Config::builder(SocketAddr::new(self.addr.ip(), 0));
@@ -241,6 +299,10 @@ impl Command {
             builder = builder.advertised_ip(*ip);
         }
 
+        builder = builder
+            .add_signed_boot_nodes(seeds.enrs.iter().cloned())
+            .add_unsigned_boot_nodes(seeds.enodes.iter().copied());
+
         builder.build()
     }
 }
@@ -258,6 +320,24 @@ impl BootnodeNat {
     fn single(resolver: NatResolver, port: u16) -> Self {
         let advertised_ips = resolver.clone().as_external_ip(port).into_iter().collect();
         Self { resolver, advertised_ips }
+    }
+}
+
+/// Parsed `--bootnodes`, split by record kind.
+#[derive(Debug, Default)]
+struct BootnodeSeeds {
+    /// `enode://` entries: seed discv4 directly and discv5 as unsigned boot nodes.
+    enodes: Vec<NodeRecord>,
+    /// Signed `enr:` entries: seed discv5.
+    enrs: Vec<discv5::Enr>,
+    /// Endpoints derived from `enrs`: seed discv4.
+    enr_records: Vec<NodeRecord>,
+}
+
+impl BootnodeSeeds {
+    /// All discv4 bootstrap records (enode entries + ENR-derived endpoints).
+    fn discv4_records(&self) -> impl Iterator<Item = NodeRecord> + '_ {
+        self.enodes.iter().chain(&self.enr_records).copied()
     }
 }
 
@@ -367,7 +447,7 @@ mod tests {
             "extip:2001:db8::1",
         ]);
         let nat = command.resolved_nat().unwrap();
-        let config = command.discv5_config(&nat);
+        let config = command.discv5_config(&nat, &command.seed_nodes().unwrap());
         let sk = SecretKey::from_byte_array(&[1u8; 32]).unwrap();
 
         let (enr, _, _, _) = build_local_enr(&sk, &config);
@@ -389,7 +469,7 @@ mod tests {
             "extip:1.2.3.4",
         ]);
         let nat = command.resolved_nat().unwrap();
-        let config = command.discv5_config(&nat);
+        let config = command.discv5_config(&nat, &command.seed_nodes().unwrap());
         let sk = SecretKey::from_byte_array(&[1u8; 32]).unwrap();
 
         let (enr, _, _, _) = build_local_enr(&sk, &config);
@@ -411,7 +491,7 @@ mod tests {
             "extip:2001:db8::1",
         ]);
         let nat = command.resolved_nat().unwrap();
-        let config = command.discv5_config(&nat);
+        let config = command.discv5_config(&nat, &command.seed_nodes().unwrap());
         let sk = SecretKey::from_byte_array(&[1u8; 32]).unwrap();
 
         let (enr, _, _, _) = build_local_enr(&sk, &config);
@@ -458,10 +538,10 @@ mod tests {
     }
 
     #[test]
-    fn discv4_config_advertises_only_the_addr_family() {
-        // discv4 binds a single socket, so it must not advertise the secondary (IPv6) family it
-        // cannot serve; the IPv4 resolver drives discv4 and only discv5 carries both families.
-        let command = Command::parse_from([
+    fn discv4_config_serves_secondary_family_only_with_v5() {
+        // The IPv4 resolver drives discv4's own record either way; the v6 address is only
+        // advertised (EIP-868 ENR) when the `--v5` sibling socket exists to serve it.
+        let args = [
             "reth",
             "--addr",
             "0.0.0.0:30303",
@@ -469,12 +549,53 @@ mod tests {
             "extip:1.2.3.4",
             "--nat",
             "extip:2001:db8::1",
-        ]);
-        let nat = command.resolved_nat().unwrap();
-        let config = command.discv4_config(&nat);
+        ];
 
+        let command = Command::parse_from(args);
+        let nat = command.resolved_nat().unwrap();
+        let config = command.discv4_config(&nat, &command.seed_nodes().unwrap());
         assert_eq!(nat.resolver, NatResolver::ExternalIp("1.2.3.4".parse().unwrap()));
-        assert!(config.additional_eip868_rlp_pairs.is_empty());
+        assert_eq!(config.secondary_advertised_ip, None);
+
+        let command = Command::parse_from(args.iter().chain(&["--v5"]));
+        let nat = command.resolved_nat().unwrap();
+        let config = command.discv4_config(&nat, &command.seed_nodes().unwrap());
+        assert_eq!(nat.resolver, NatResolver::ExternalIp("1.2.3.4".parse().unwrap()));
+        assert_eq!(config.secondary_advertised_ip, Some("2001:db8::1".parse().unwrap()));
+    }
+
+    #[test]
+    fn bootnodes_seed_discv4_and_discv5() {
+        // The EIP-778 example record: ip 127.0.0.1, udp 30303, no tcp key (discovery-only).
+        let enr = "enr:-IS4QHCYrYZbAKWCBRlAy5zzaDZXJBGkcnh4MHcBFZntXNFrdvJjX04jRzjzCBOonrkTfj499SZuOh8R33Ls8RRcy5wBgmlkgnY0gmlwhH8AAAGJc2VjcDI1NmsxoQPKY0yuDUmstAHYpMa2_oxVtw0RW_QAdpzBQA8yWM0xOIN1ZHCCdl8";
+        let enode = "enode://d860a01f9722d78051619d1e2351aba3f43f943f6f00718d1b9baa4101932a1f5011f16bb2b1bb35db20d6fe28fa0bf09636d26a87d31de9ec6203eeedb1f666@1.2.3.4:0?discport=30303";
+
+        let command = Command::parse_from(["reth", "--bootnodes", &format!("{enode},{enr}")]);
+        let seeds = command.seed_nodes().unwrap();
+
+        assert_eq!(seeds.enodes.len(), 1);
+        assert_eq!(seeds.enodes[0].address, "1.2.3.4".parse::<IpAddr>().unwrap());
+        assert_eq!(seeds.enodes[0].udp_port, 30303);
+        assert_eq!(seeds.enodes[0].tcp_port, 0);
+        // the ENR seeds discv4 too, with an absent tcp key meaning no RLPx — but stays out of
+        // `enodes` so discv5 doesn't bootstrap it twice (signed + unsigned)
+        assert_eq!(seeds.enr_records.len(), 1);
+        assert_eq!(seeds.enr_records[0].address, "127.0.0.1".parse::<IpAddr>().unwrap());
+        assert_eq!(seeds.enr_records[0].udp_port, 30303);
+        assert_eq!(seeds.enr_records[0].tcp_port, 0);
+        assert_eq!(seeds.enrs.len(), 1);
+        assert_eq!(seeds.enrs[0].udp4(), Some(30303));
+
+        let config = command.discv4_config(&command.resolved_nat().unwrap(), &seeds);
+        assert_eq!(config.bootstrap_nodes.len(), 2);
+    }
+
+    #[test]
+    fn bootnodes_reject_endpointless_entries() {
+        let peer_id = "d860a01f9722d78051619d1e2351aba3f43f943f6f00718d1b9baa4101932a1f5011f16bb2b1bb35db20d6fe28fa0bf09636d26a87d31de9ec6203eeedb1f666";
+
+        let command = Command::parse_from(["reth", "--bootnodes", &format!("enode://{peer_id}")]);
+        assert!(command.seed_nodes().is_err());
     }
 
     #[test]
@@ -490,7 +611,7 @@ mod tests {
             "extip:2001:db8::1",
         ]);
         let nat = command.resolved_nat().unwrap();
-        let config = command.discv5_config(&nat);
+        let config = command.discv5_config(&nat, &command.seed_nodes().unwrap());
         let sk = SecretKey::from_byte_array(&[1u8; 32]).unwrap();
 
         let (enr, _, _, _) = build_local_enr(&sk, &config);

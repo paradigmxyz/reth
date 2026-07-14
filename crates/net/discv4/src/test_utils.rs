@@ -71,7 +71,7 @@ impl MockDiscovery {
         tasks.spawn(receive_loop(udp, ingress_tx, local_enr.id));
 
         let udp = Arc::clone(&socket);
-        tasks.spawn(send_loop(udp, egress_rx));
+        tasks.spawn(send_loop(udp, None, egress_rx));
 
         let (tx, command_rx) = mpsc::channel(128);
         let this = Self {

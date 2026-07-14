@@ -249,22 +249,35 @@ impl Discv4 {
         trace!(target: "discv4", local_addr=?socket.local_addr(), "opened UDP socket");
         let (tx, rx) = mpsc::channel(config.udp_ingress_message_buffer);
 
-        Self::bind_with_socket(socket, Some(tx), rx, local_node_record, secret_key, config)
+        Self::bind_with_socket(socket, None, Some(tx), rx, local_node_record, secret_key, config)
     }
 
     /// Creates a new `Discv4` instance using a pre-bound shared socket. No receive loop is
     /// spawned; instead returns an [`IngressHandler`] that should be used to forward raw packets
     /// received by the socket owner (e.g. discv5 unrecognized frames).
+    ///
+    /// An optional secondary socket of the opposite IP family (e.g. discv5's dual-stack sibling
+    /// socket) makes the service answer peers of that family too: outgoing packets are routed to
+    /// the socket matching the destination family, while ingress for both arrives via the
+    /// returned [`IngressHandler`].
     pub fn bind_shared(
         socket: Arc<UdpSocket>,
+        secondary_socket: Option<Arc<UdpSocket>>,
         local_node_record: NodeRecord,
         secret_key: SecretKey,
         config: Discv4Config,
     ) -> io::Result<(Self, Discv4Service, IngressHandler)> {
         let (tx, rx) = mpsc::channel(config.udp_ingress_message_buffer);
         let local_id = local_node_record.id;
-        let (discv4, service) =
-            Self::bind_with_socket(socket, None, rx, local_node_record, secret_key, config)?;
+        let (discv4, service) = Self::bind_with_socket(
+            socket,
+            secondary_socket,
+            None,
+            rx,
+            local_node_record,
+            secret_key,
+            config,
+        )?;
 
         let handler = IngressHandler::new(tx, local_id);
 
@@ -273,6 +286,7 @@ impl Discv4 {
 
     fn bind_with_socket(
         socket: Arc<UdpSocket>,
+        secondary_socket: Option<Arc<UdpSocket>>,
         ingress_tx: Option<IngressSender>,
         ingress_rx: IngressReceiver,
         mut local_node_record: NodeRecord,
@@ -284,6 +298,7 @@ impl Discv4 {
 
         let mut service = Discv4Service::new(
             socket,
+            secondary_socket,
             ingress_tx,
             ingress_rx,
             local_addr,
@@ -560,8 +575,10 @@ impl Discv4Service {
     ///
     /// If `ingress_tx` is `Some`, the receive loop is spawned to read from the socket. If `None`,
     /// the caller feeds packets into `ingress_rx` externally (shared socket mode).
+    #[expect(clippy::too_many_arguments)]
     pub(crate) fn new(
         socket: Arc<UdpSocket>,
+        secondary_socket: Option<Arc<UdpSocket>>,
         ingress_tx: Option<IngressSender>,
         ingress_rx: IngressReceiver,
         local_address: SocketAddr,
@@ -578,7 +595,7 @@ impl Discv4Service {
         }
 
         let udp = Arc::clone(&socket);
-        tasks.spawn(send_loop(udp, egress_rx));
+        tasks.spawn(send_loop(udp, secondary_socket, egress_rx));
 
         let kbuckets = KBucketsTable::new(
             NodeKey::from(&local_node_record).into(),
@@ -618,6 +635,22 @@ impl Discv4Service {
             } else {
                 builder.udp6(local_node_record.udp_port);
                 builder.tcp6(local_node_record.tcp_port);
+            }
+
+            // a same-family secondary would overwrite the primary endpoint, so only the
+            // opposite family is added
+            if let Some(ip) = config
+                .secondary_advertised_ip
+                .filter(|ip| ip.is_ipv4() != local_node_record.address.is_ipv4())
+            {
+                builder.ip(ip);
+                if ip.is_ipv4() {
+                    builder.udp4(local_node_record.udp_port);
+                    builder.tcp4(local_node_record.tcp_port);
+                } else {
+                    builder.udp6(local_node_record.udp_port);
+                    builder.tcp6(local_node_record.tcp_port);
+                }
             }
 
             for (key, val) in &config.additional_eip868_rlp_pairs {
@@ -1864,6 +1897,17 @@ impl Discv4Service {
                         } else {
                             let _ = self.local_eip_868_enr.set_tcp6(port, &self.secret_key);
                         }
+                        if let Some(ip) = self
+                            .config
+                            .secondary_advertised_ip
+                            .filter(|ip| ip.is_ipv4() != self.local_node_record.address.is_ipv4())
+                        {
+                            if ip.is_ipv4() {
+                                let _ = self.local_eip_868_enr.set_tcp4(port, &self.secret_key);
+                            } else {
+                                let _ = self.local_eip_868_enr.set_tcp6(port, &self.secret_key);
+                            }
+                        }
                     }
 
                     Discv4Command::Terminated => {
@@ -2001,10 +2045,22 @@ pub enum Discv4Event {
 }
 
 /// Continuously reads new messages from the channel and writes them to the socket
-pub(crate) async fn send_loop(udp: Arc<UdpSocket>, rx: EgressReceiver) {
+pub(crate) async fn send_loop(
+    udp: Arc<UdpSocket>,
+    secondary_udp: Option<Arc<UdpSocket>>,
+    rx: EgressReceiver,
+) {
+    let primary_is_ipv4 = udp.local_addr().is_ok_and(|addr| addr.is_ipv4());
     let mut stream = ReceiverStream::new(rx);
     while let Some((payload, to)) = stream.next().await {
-        match udp.send_to(&payload, to).await {
+        // a destination with no matching-family socket falls through to the primary, failing
+        // in `send_to` like any other unreachable destination
+        let socket = if to.is_ipv4() == primary_is_ipv4 {
+            &udp
+        } else {
+            secondary_udp.as_ref().unwrap_or(&udp)
+        };
+        match socket.send_to(&payload, to).await {
             Ok(size) => {
                 trace!(target: "discv4", ?to, ?size,"sent payload");
             }
@@ -2571,7 +2627,7 @@ mod tests {
     use rand_08::Rng;
     use reth_ethereum_forks::{EnrForkIdEntry, ForkHash};
     use reth_network_peers::mainnet_nodes;
-    use std::future::poll_fn;
+    use std::{future::poll_fn, net::Ipv6Addr};
 
     #[tokio::test]
     async fn test_configured_enr_forkid_entry() {
@@ -2589,6 +2645,48 @@ mod tests {
         };
         assert_eq!(expected, fork_entry_id);
         assert_eq!(expected, decoded);
+    }
+
+    #[tokio::test]
+    async fn test_secondary_advertised_ip_in_enr() {
+        let ip6: Ipv6Addr = "2001:db8::1".parse().unwrap();
+        let config = Discv4Config::builder().secondary_advertised_ip(ip6.into()).build();
+        let (_discv4, service) = create_discv4_with_config(config).await;
+
+        let enr = &service.local_eip_868_enr;
+        assert_eq!(enr.ip6(), Some(ip6));
+        assert_eq!(enr.udp6(), Some(service.local_node_record.udp_port));
+        assert_eq!(enr.tcp6(), Some(service.local_node_record.tcp_port));
+    }
+
+    #[tokio::test]
+    async fn test_send_loop_routes_by_destination_family() {
+        let (Ok(secondary), Ok(sink6)) =
+            (UdpSocket::bind("[::1]:0").await, UdpSocket::bind("[::1]:0").await)
+        else {
+            // no IPv6 loopback on this host
+            return;
+        };
+        let primary = Arc::new(UdpSocket::bind("127.0.0.1:0").await.unwrap());
+        let sink4 = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+
+        let (tx, rx) = mpsc::channel(8);
+        tokio::spawn(send_loop(primary, Some(Arc::new(secondary)), rx));
+
+        tx.send((Bytes::from_static(b"v4"), sink4.local_addr().unwrap())).await.unwrap();
+        tx.send((Bytes::from_static(b"v6"), sink6.local_addr().unwrap())).await.unwrap();
+
+        let mut buf = [0u8; 2];
+        let (read, _) = tokio::time::timeout(Duration::from_secs(5), sink4.recv_from(&mut buf))
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(&buf[..read], b"v4");
+        let (read, _) = tokio::time::timeout(Duration::from_secs(5), sink6.recv_from(&mut buf))
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(&buf[..read], b"v6");
     }
 
     #[test]
