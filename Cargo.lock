@@ -9843,25 +9843,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "reth-rpc-api-testing-util"
-version = "2.4.0"
-dependencies = [
- "alloy-eips",
- "alloy-primitives",
- "alloy-rpc-types-eth",
- "alloy-rpc-types-trace",
- "futures",
- "jsonrpsee",
- "jsonrpsee-http-client",
- "reth-ethereum-primitives",
- "reth-rpc-api",
- "reth-rpc-eth-api",
- "serde_json",
- "similar-asserts",
- "tokio",
-]
-
-[[package]]
 name = "reth-rpc-builder"
 version = "2.4.0"
 dependencies = [
