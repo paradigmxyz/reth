@@ -1726,6 +1726,12 @@ where
 
                                 let backpressure_wait = enqueued_at.elapsed();
 
+                                // Cache workers can hold MDBX readers. When requested, quiesce them
+                                // before waiting for persistence so speculative readers receive
+                                // their cancellation signal first.
+                                let cache_wait = wait_for_caches
+                                    .then(|| self.payload_validator.wait_for_caches());
+
                                 let explicit_persistence_wait = if wait_for_persistence {
                                     let pending_persistence = self.persistence_state.rx.take();
                                     if let Some((rx, start_time, _action)) = pending_persistence {
@@ -1756,9 +1762,6 @@ where
                                 } else {
                                     Duration::ZERO
                                 };
-
-                                let cache_wait = wait_for_caches
-                                    .then(|| self.payload_validator.wait_for_caches());
 
                                 let start = Instant::now();
                                 let gas_used = payload.gas_used();

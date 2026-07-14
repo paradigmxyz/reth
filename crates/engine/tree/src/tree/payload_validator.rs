@@ -155,7 +155,7 @@ use reth_provider::{
 };
 use reth_revm::db::{states::bundle_state::BundleRetention, BundleAccount, State};
 use reth_trie::{
-    hashed_cursor::HashedCursorFactory, prefix_set::TriePrefixSetsMut,
+    hashed_cursor::HashedCursorFactory, prefix_set::TriePrefixSetsMut, proof::Proof,
     trie_cursor::TrieCursorFactory, updates::TrieUpdates, HashedPostState, LazyTrieData,
 };
 use reth_trie_db::ChangesetCache;
@@ -1880,6 +1880,7 @@ where
         state: &EngineApiTreeState<N>,
     ) {
         let Some(txpool_prewarm) = self.txpool_prewarm.as_ref() else { return };
+        let trie_head_epoch = txpool_prewarm.begin_trie_head(header.hash());
         let provider_builder = match self.state_provider_builder(header.hash(), state) {
             Ok(Some(provider_builder)) => provider_builder,
             Ok(None) => return,
@@ -1895,7 +1896,31 @@ where
         };
         match self.evm_config.txpool_prewarm_env(header.header()) {
             Ok(Some(evm_env)) => {
-                txpool_prewarm.start(header.hash(), evm_env, provider_builder, header.gas_limit())
+                let overlay_factory = OverlayStateProviderFactory::new(
+                    self.provider.clone(),
+                    Self::overlay_builder_for_parent(
+                        header.hash(),
+                        state,
+                        self.changeset_cache.clone(),
+                    ),
+                );
+                txpool_prewarm.start(
+                    header.hash(),
+                    trie_head_epoch,
+                    evm_env,
+                    provider_builder,
+                    header.gas_limit(),
+                    move |targets| {
+                        let provider = overlay_factory
+                            .database_provider_ro()
+                            .map_err(|err| err.to_string())?;
+                        let proof = Proof::new(&provider, &provider)
+                            .multiproof_v2(targets)
+                            .map_err(|err| err.to_string())?;
+                        Ok(proof.account_proofs.len() +
+                            proof.storage_proofs.values().map(Vec::len).sum::<usize>())
+                    },
+                )
             }
             Ok(None) => {}
             Err(err) => {
