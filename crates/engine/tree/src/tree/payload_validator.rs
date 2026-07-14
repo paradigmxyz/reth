@@ -739,12 +739,11 @@ where
                     "hashed_post_state",
                 )
                 .entered();
-                let state = if let Some(Ok(state)) = hashed_state_rx.as_mut().map(|rx| rx.recv()) {
+                if let Some(Ok(state)) = hashed_state_rx.as_mut().map(|rx| rx.recv()) {
                     state
                 } else {
-                    hashed_state_provider.hashed_post_state(&hashed_state_output.state)
-                };
-                Arc::new(state)
+                    Arc::new(hashed_state_provider.hashed_post_state(&hashed_state_output.state))
+                }
             });
 
         let block = validated_block.try_into_inner().expect("sole handle")?;

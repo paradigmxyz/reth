@@ -42,6 +42,8 @@ pub struct StateRootComputeOutcome {
     pub state_root: B256,
     /// The trie updates.
     pub trie_updates: Arc<TrieUpdates>,
+    /// Hashed post state produced while computing the state root.
+    pub hashed_state: Arc<HashedPostState>,
     /// Changed trie node base paths retained while computing the root.
     pub changed_paths: Option<Arc<TriePrefixSetsMut>>,
     /// Debug recorders taken from the sparse tries, keyed by `None` for account trie
@@ -76,7 +78,7 @@ pub struct StateRootHandle {
     state_root_rx:
         Option<std::sync::mpsc::Receiver<Result<StateRootComputeOutcome, StateRootTaskError>>>,
     /// Receiver for the hashed post state.
-    hashed_state_rx: Option<std::sync::mpsc::Receiver<HashedPostState>>,
+    hashed_state_rx: Option<std::sync::mpsc::Receiver<Arc<HashedPostState>>>,
 }
 
 impl StateRootHandle {
@@ -88,7 +90,7 @@ impl StateRootHandle {
         state_root_rx: std::sync::mpsc::Receiver<
             Result<StateRootComputeOutcome, StateRootTaskError>,
         >,
-        hashed_state_rx: std::sync::mpsc::Receiver<HashedPostState>,
+        hashed_state_rx: std::sync::mpsc::Receiver<Arc<HashedPostState>>,
     ) -> Self {
         let sink: Arc<dyn StateRootSink> = Arc::new(SparseTrieStateRootSink::new(updates_tx));
         Self {
@@ -169,7 +171,9 @@ impl StateRootHandle {
     /// # Panics
     ///
     /// If called more than once.
-    pub const fn take_hashed_state_rx(&mut self) -> std::sync::mpsc::Receiver<HashedPostState> {
+    pub const fn take_hashed_state_rx(
+        &mut self,
+    ) -> std::sync::mpsc::Receiver<Arc<HashedPostState>> {
         self.hashed_state_rx.take().expect("hashed_state already taken")
     }
 
@@ -214,7 +218,7 @@ pub struct PayloadStateRootHandle {
     cancel_guard: Option<StateRootTaskCancelGuard>,
     state_root_rx:
         Option<std::sync::mpsc::Receiver<Result<StateRootComputeOutcome, StateRootTaskError>>>,
-    hashed_state_rx: Option<std::sync::mpsc::Receiver<HashedPostState>>,
+    hashed_state_rx: Option<std::sync::mpsc::Receiver<Arc<HashedPostState>>>,
 }
 
 impl fmt::Debug for PayloadStateRootHandle {
@@ -240,7 +244,7 @@ impl PayloadStateRootHandle {
         state_root_rx: std::sync::mpsc::Receiver<
             Result<StateRootComputeOutcome, StateRootTaskError>,
         >,
-        hashed_state_rx: Option<std::sync::mpsc::Receiver<HashedPostState>>,
+        hashed_state_rx: Option<std::sync::mpsc::Receiver<Arc<HashedPostState>>>,
     ) -> Self {
         Self { name, hook, cancel_guard: None, state_root_rx: Some(state_root_rx), hashed_state_rx }
     }
@@ -276,7 +280,7 @@ impl PayloadStateRootHandle {
     /// yet.
     pub const fn try_take_hashed_state_rx(
         &mut self,
-    ) -> Option<std::sync::mpsc::Receiver<HashedPostState>> {
+    ) -> Option<std::sync::mpsc::Receiver<Arc<HashedPostState>>> {
         self.hashed_state_rx.take()
     }
 }
@@ -660,7 +664,7 @@ mod tests {
         assert_eq!(sink.state_updates.load(Ordering::Relaxed), 1);
         assert_eq!(sink.finished_updates.load(Ordering::Relaxed), 1);
 
-        hashed_state_tx.send(HashedPostState::default()).unwrap();
+        hashed_state_tx.send(Arc::new(HashedPostState::default())).unwrap();
         let rx = handle.try_take_hashed_state_rx().expect("first take returns the receiver");
         assert!(rx.recv().is_ok());
         assert!(handle.try_take_hashed_state_rx().is_none(), "second take returns None");
@@ -669,6 +673,7 @@ mod tests {
             .send(Ok(StateRootComputeOutcome {
                 state_root: B256::repeat_byte(0x42),
                 trie_updates: Arc::new(TrieUpdates::default()),
+                hashed_state: Arc::new(HashedPostState::default()),
                 changed_paths: None,
                 #[cfg(feature = "trie-debug")]
                 debug_recorders: Vec::new(),

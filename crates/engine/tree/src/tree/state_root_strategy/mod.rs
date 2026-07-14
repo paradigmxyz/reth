@@ -43,7 +43,7 @@
 //!
 //! Returning empty trie updates in the outcome means the trie tables are no longer maintained:
 //! `eth_getProof` and anything else that reads the stored trie will not work for new blocks.
-//! Returning no changed paths opts the block out of sparse-trie cache pruning.
+//! Sparse-trie cache pruning derives retained paths from each block's hashed post state.
 
 mod sparse_trie;
 
@@ -332,7 +332,7 @@ pub struct PreparedStateRootJob<N: NodePrimitives> {
     execution_hook: Option<StateRootUpdateHook>,
     hint_stream: Option<StateRootHintStream>,
     hashed_update_stream: Option<StateRootUpdateStream>,
-    hashed_state_rx: Option<mpsc::Receiver<HashedPostState>>,
+    hashed_state_rx: Option<mpsc::Receiver<Arc<HashedPostState>>>,
 }
 
 impl<N: NodePrimitives> fmt::Debug for PreparedStateRootJob<N> {
@@ -351,7 +351,7 @@ impl<N: NodePrimitives> PreparedStateRootJob<N> {
     /// Creates a prepared state-root job without update-stream capabilities.
     pub const fn new(
         job: Box<dyn StateRootJob<N>>,
-        hashed_state_rx: Option<mpsc::Receiver<HashedPostState>>,
+        hashed_state_rx: Option<mpsc::Receiver<Arc<HashedPostState>>>,
     ) -> Self {
         Self {
             job,
@@ -405,7 +405,7 @@ impl<N: NodePrimitives> PreparedStateRootJob<N> {
     /// The sender behind a returned receiver must either deliver one value or be dropped;
     /// validation blocks on it while hashing the post state, so a job that keeps the sender
     /// alive without sending stalls block validation.
-    pub const fn take_hashed_state_rx(&mut self) -> Option<mpsc::Receiver<HashedPostState>> {
+    pub const fn take_hashed_state_rx(&mut self) -> Option<mpsc::Receiver<Arc<HashedPostState>>> {
         self.hashed_state_rx.take()
     }
 
@@ -576,7 +576,7 @@ impl DefaultStateRootStrategy {
         state_trie_overlays: &StateTrieOverlayManager<N>,
         proof_worker_handle: ProofWorkerHandle,
         state_root_tx: mpsc::Sender<Result<StateRootComputeOutcome, StateRootTaskError>>,
-        hashed_state_tx: mpsc::Sender<HashedPostState>,
+        hashed_state_tx: mpsc::Sender<Arc<HashedPostState>>,
         from_multi_proof: CrossbeamReceiver<StateRootMessage>,
         cancel_rx: CrossbeamReceiver<()>,
         options: SparseTrieTaskOptions<N>,
@@ -663,15 +663,9 @@ impl DefaultStateRootStrategy {
                 let start = Instant::now();
                 let (mut trie, deferred) = task.into_trie_for_reuse();
                 if let Some(prune_blocks) = pending_sparse_trie_prune_blocks {
-                    let changed_paths = result
-                        .changed_paths
-                        .as_deref()
-                        .expect("sparse trie task always returns changed paths");
-                    if let Some(retained_paths) =
-                        sparse_trie_retained_paths(prune_blocks, changed_paths)
-                    {
-                        trie.prune(max_hot_slots, max_hot_accounts, retained_paths);
-                    }
+                    let retained_paths =
+                        sparse_trie_retained_paths(prune_blocks, result.hashed_state.as_ref());
+                    trie.prune(max_hot_slots, max_hot_accounts, retained_paths);
                 }
                 trie_metrics
                     .into_trie_for_reuse_duration_histogram
@@ -715,23 +709,15 @@ struct StateRootTaskOptions<'a, N: NodePrimitives> {
 
 fn sparse_trie_retained_paths<N: NodePrimitives>(
     prune_blocks: Vec<ExecutedBlock<N>>,
-    current_changed_paths: &TriePrefixSetsMut,
-) -> Option<TriePrefixSetsMut> {
+    current_hashed_state: &HashedPostState,
+) -> TriePrefixSetsMut {
     let mut retained_paths = TriePrefixSetsMut::default();
     for block in prune_blocks {
         let trie_data = block.trie_data();
-        let Some(changed_paths) = trie_data.changed_paths.as_deref() else {
-            debug!(
-                target: "engine::tree::payload_processor",
-                block = ?block.recovered_block().num_hash(),
-                "Skipping sparse trie prune because changed paths for in-memory block are unknown"
-            );
-            return None
-        };
-        retained_paths.extend_ref(changed_paths);
+        retained_paths.extend(trie_data.sorted.hashed_state.construct_prefix_sets());
     }
-    retained_paths.extend_ref(current_changed_paths);
-    Some(retained_paths)
+    retained_paths.extend(current_hashed_state.construct_prefix_sets());
+    retained_paths
 }
 
 impl<N, P, Evm> StateRootStrategy<N, P, Evm> for DefaultStateRootStrategy
@@ -993,6 +979,7 @@ where
         let StateRootComputeOutcome {
             state_root,
             trie_updates,
+            hashed_state: _hashed_state,
             changed_paths,
             #[cfg(feature = "trie-debug")]
             debug_recorders,
@@ -1230,21 +1217,16 @@ mod tests {
         HashingWriter,
     };
     use reth_testing_utils::generators;
-    use reth_trie::{
-        prefix_set::{PrefixSetMut, TriePrefixSetsMut},
-        test_utils::state_root,
-        LazyTrieData,
-    };
-    use reth_trie_common::Nibbles;
+    use reth_trie::{test_utils::state_root, HashedPostState, HashedStorage, LazyTrieData};
     use reth_trie_db::ChangesetCache;
     use revm::state::{AccountInfo, AccountStatus, EvmState, EvmStorageSlot, TransactionId};
 
-    fn with_changed_paths(
+    fn with_hashed_state(
         block: ExecutedBlock<EthPrimitives>,
-        changed_paths: TriePrefixSetsMut,
+        hashed_state: HashedPostState,
     ) -> ExecutedBlock<EthPrimitives> {
         let mut trie_data = block.trie_data();
-        trie_data.changed_paths = Some(Arc::new(changed_paths));
+        trie_data.sorted.hashed_state = Arc::new(hashed_state.into_sorted());
         ExecutedBlock::with_deferred_trie_data(
             block.recovered_block,
             block.execution_output,
@@ -1252,39 +1234,42 @@ mod tests {
         )
     }
 
-    fn trie_changed_paths(account_path: u8, storage_path: u8) -> TriePrefixSetsMut {
-        TriePrefixSetsMut {
-            account_prefix_set: PrefixSetMut::from([Nibbles::from_nibbles([account_path])]),
-            storage_prefix_sets: HashMap::from_iter([(
+    fn trie_hashed_state(account_path: u8, storage_path: u8) -> HashedPostState {
+        HashedPostState::default()
+            .with_accounts([(B256::with_last_byte(account_path), Some(Account::default()))])
+            .with_storages([(
                 B256::with_last_byte(account_path),
-                PrefixSetMut::from([Nibbles::from_nibbles([storage_path])]),
-            )]),
-            destroyed_accounts: Default::default(),
-        }
+                HashedStorage::from_iter(false, [(B256::with_last_byte(storage_path), U256::ONE)]),
+            )])
     }
 
     #[test]
     fn sparse_trie_retained_paths_merges_prune_blocks_with_current_block() {
         let blocks: Vec<_> = TestBlockBuilder::eth()
             .get_executed_blocks(1..3)
-            .zip([trie_changed_paths(0x01, 0x02), trie_changed_paths(0x03, 0x04)])
-            .map(|(block, changed_paths)| with_changed_paths(block, changed_paths))
+            .zip([trie_hashed_state(0x01, 0x02), trie_hashed_state(0x03, 0x04)])
+            .map(|(block, hashed_state)| with_hashed_state(block, hashed_state))
             .collect();
-        let current_changed_paths = trie_changed_paths(0x05, 0x06);
+        let current_hashed_state = trie_hashed_state(0x05, 0x06);
 
-        let retained_paths =
-            sparse_trie_retained_paths(blocks, &current_changed_paths).unwrap().freeze();
+        let retained_paths = sparse_trie_retained_paths(blocks, &current_hashed_state).freeze();
 
         assert_eq!(retained_paths.account_prefix_set.len(), 3);
         assert_eq!(retained_paths.storage_prefix_sets.len(), 3);
     }
 
     #[test]
-    fn sparse_trie_retained_paths_skips_prune_when_changed_paths_missing() {
-        let blocks: Vec<_> = TestBlockBuilder::eth().get_executed_blocks(1..2).collect();
-        let current_changed_paths = trie_changed_paths(0x01, 0x02);
+    fn sparse_trie_retained_paths_uses_hashed_state_when_changed_paths_missing() {
+        let blocks: Vec<_> = TestBlockBuilder::eth()
+            .get_executed_blocks(1..2)
+            .map(|block| with_hashed_state(block, trie_hashed_state(0x01, 0x02)))
+            .collect();
+        let current_hashed_state = trie_hashed_state(0x03, 0x04);
 
-        assert!(sparse_trie_retained_paths(blocks, &current_changed_paths).is_none());
+        let retained_paths = sparse_trie_retained_paths(blocks, &current_hashed_state).freeze();
+
+        assert_eq!(retained_paths.account_prefix_set.len(), 2);
+        assert_eq!(retained_paths.storage_prefix_sets.len(), 2);
     }
 
     fn create_mock_state_updates(num_accounts: usize, updates_per_account: usize) -> Vec<EvmState> {
