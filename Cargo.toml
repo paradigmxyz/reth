@@ -313,7 +313,6 @@ panic = "abort"
 codegen-units = 1
 incremental = false
 
-
 [workspace.dependencies]
 # reth
 reth = { path = "bin/reth" }
