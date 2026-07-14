@@ -60,6 +60,7 @@ where
 {
     type Primitives = EthPrimitives;
     type EvmFactory = EvmFactory;
+    type EvmTypes = evm2::BaseEvmTypes;
     type EvmTransaction = evm2::ethereum::RecoveredTxEnvelope;
     type Transaction = EthTxEnv;
     type Evm<'a> = evm2::Evm<'a, evm2::BaseEvmTypes>;
