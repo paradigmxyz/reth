@@ -393,10 +393,7 @@ impl<C: ChainSpecParser, Ext: clap::Args + fmt::Debug, SubCmd: Subcommand + fmt:
     /// This is used to determine whether to enable runtime log level changes.
     pub fn tracing_reload_enabled(&self) -> bool {
         match self {
-            Self::Node(cmd) => {
-                cmd.rpc.is_namespace_enabled(RethRpcModule::Debug) ||
-                    cmd.rpc.is_namespace_enabled(RethRpcModule::Admin)
-            }
+            Self::Node(cmd) => cmd.rpc.is_namespace_enabled(RethRpcModule::Admin),
             _ => false,
         }
     }
