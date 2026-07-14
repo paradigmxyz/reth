@@ -6,7 +6,7 @@ use crate::{
     helpers::estimate::EstimateCall, FromEvmError, FullEthApiTypes, RpcBlock, RpcNodeCore,
 };
 use alloy_consensus::{transaction::TxHashRef, BlockHeader};
-use alloy_eips::eip2930::AccessListResult;
+use alloy_eips::{eip1559::calc_effective_gas_price, eip2930::AccessListResult};
 use alloy_network::TransactionBuilder;
 use alloy_primitives::{Bytes, B256, U256};
 use alloy_rpc_types_eth::{
@@ -14,11 +14,7 @@ use alloy_rpc_types_eth::{
     state::{EvmOverrides, StateOverride},
     BlockId, Bundle, EthCallResponse, StateContext, TransactionInfo,
 };
-use evm2::{
-    ethereum::RecoveredTxEnvelope,
-    evm::{CacheDB, DynDatabase, StateChangeSink, StateChangeSource},
-    TxResultWithState,
-};
+use evm2::evm::{CacheDB, DynDatabase, StateChangeSink, StateChangeSource};
 use evm2_inspectors::{access_list::AccessListInspector, transfer::TransferInspector};
 use futures::Future;
 use reth_chainspec::{ChainSpecProvider, EthChainSpec, EthereumHardforks};
@@ -27,7 +23,7 @@ use reth_evm::{
     cancelled::CancelOnDrop,
     database::{BorrowedDatabase, StateProviderDatabase},
     execute::{BlockBuilder, BlockExecutorFactory},
-    ConfigureEvm, Database, Evm, EvmEnv, EvmEnvFor, TxEnvFor,
+    ConfigureEvm, Database, Evm, EvmEnv, EvmEnvFor, EvmTypesFor, TxEnvFor, TxResultWithStateFor,
 };
 use reth_node_api::BlockBody;
 use reth_primitives_traits::Recovered;
@@ -36,7 +32,7 @@ use reth_rpc_eth_types::{
     cache::db::{apply_block_overrides, apply_state_overrides, StateProviderTraitObjWrapper},
     error::{AsEthApiError, FromEthApiError},
     simulate::{self, EthSimulateError},
-    EthApiError, RpcInvalidTransactionError, StateCacheDb,
+    EthApiError, StateCacheDb,
 };
 use reth_storage_api::{BlockIdReader, ProviderTx, StateProviderBox};
 use std::{borrow::Borrow, fmt};
@@ -250,7 +246,7 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
                     );
                     parent = simulated_header;
 
-                    let block = simulate::build_simulated_block::<Self::Error, _>(
+                    let block = simulate::build_simulated_block::<Self::Error, _, _>(
                         result.block,
                         results,
                         return_full_transactions.into(),
@@ -505,8 +501,9 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
 
             let tx_env =
                 this.create_txn_env(&evm_env, request.clone(), BorrowedDatabase::new(&mut db))?;
-            let transaction: &RecoveredTxEnvelope = tx_env.borrow().borrow();
-            if !request_has_gas_limit && transaction.effective_gas_price(None) > 0 {
+            if !request_has_gas_limit &&
+                request_gas_price(request.as_ref(), evm_env.block_base_fee()) > 0
+            {
                 let cap =
                     this.caller_gas_allowance(BorrowedDatabase::new(&mut db), &evm_env, &tx_env)?;
                 // no gas limit was provided in the request, so we need to cap the request's gas
@@ -568,27 +565,10 @@ pub trait Call:
     /// Returns the max gas limit that the caller can afford given a transaction environment.
     fn caller_gas_allowance(
         &self,
-        mut db: impl Database<Error: Into<EthApiError>>,
-        _evm_env: &EvmEnvFor<Self::Evm>,
+        db: impl Database<Error: Into<EthApiError>>,
+        evm_env: &EvmEnvFor<Self::Evm>,
         tx_env: &TxEnvFor<Self::Evm>,
-    ) -> Result<u64, Self::Error> {
-        let tx: &RecoveredTxEnvelope = tx_env.borrow().borrow();
-        let gas_price = tx.effective_gas_price(None);
-        let balance = db
-            .get_account(&tx.signer())
-            .map_err(Into::into)
-            .map_err(Self::Error::from_eth_err)?
-            .map(|account| account.balance)
-            .unwrap_or_default();
-        let value = tx.value();
-        let allowance = balance.checked_sub(value).ok_or_else(|| {
-            Self::Error::from_eth_err(EthApiError::from(
-                RpcInvalidTransactionError::InsufficientFunds { cost: value, balance },
-            ))
-        })? / U256::from(gas_price);
-
-        Ok(allowance.try_into().unwrap_or(u64::MAX))
-    }
+    ) -> Result<u64, Self::Error>;
 
     /// Executes the closure with the state that corresponds to the given [`BlockId`].
     fn with_state_at_block<F, R>(
@@ -613,7 +593,7 @@ pub trait Call:
         db: DB,
         evm_env: EvmEnvFor<Self::Evm>,
         tx_env: TxEnvFor<Self::Evm>,
-    ) -> Result<TxResultWithState, Self::Error>
+    ) -> Result<TxResultWithStateFor<Self::Evm>, Self::Error>
     where
         DB: DynDatabase + fmt::Debug,
     {
@@ -631,10 +611,10 @@ pub trait Call:
         evm_env: EvmEnvFor<Self::Evm>,
         tx_env: TxEnvFor<Self::Evm>,
         inspector: I,
-    ) -> Result<(I, TxResultWithState), Self::Error>
+    ) -> Result<(I, TxResultWithStateFor<Self::Evm>), Self::Error>
     where
         DB: DynDatabase + fmt::Debug,
-        I: evm2::Inspector<evm2::BaseEvmTypes> + 'static,
+        I: evm2::Inspector<EvmTypesFor<Self::Evm>> + 'static,
     {
         let mut evm = self.evm_config().block_executor_factory().evm_with_env(db, evm_env);
         let res = evm
@@ -655,7 +635,7 @@ pub trait Call:
         request: RpcTxReq<<Self::RpcConvert as RpcConvert>::Network>,
         at: BlockId,
         overrides: EvmOverrides,
-    ) -> impl Future<Output = Result<TxResultWithState, Self::Error>> + Send
+    ) -> impl Future<Output = Result<TxResultWithStateFor<Self::Evm>, Self::Error>> + Send
     where
         Self: LoadPendingBlock,
     {
@@ -747,7 +727,7 @@ pub trait Call:
     ///
     /// Before the transaction is executed, all previous transaction in the block are applied to the
     /// state by executing them first.
-    /// The callback `f` is invoked with the [`TxResultWithState`] after the transaction was
+    /// The callback `f` is invoked with the transaction result after the transaction was
     /// executed and the database that points to the beginning of the transaction.
     ///
     /// Note: Implementers should use a threadpool where blocking is allowed, such as
@@ -759,7 +739,11 @@ pub trait Call:
     ) -> impl Future<Output = Result<Option<R>, Self::Error>> + Send
     where
         Self: LoadBlock + LoadTransaction,
-        F: FnOnce(TransactionInfo, TxResultWithState, StateCacheDb) -> Result<R, Self::Error>
+        F: FnOnce(
+                TransactionInfo,
+                TxResultWithStateFor<Self::Evm>,
+                StateCacheDb,
+            ) -> Result<R, Self::Error>
             + Send
             + 'static,
         R: Send + 'static,
@@ -942,18 +926,18 @@ pub trait Call:
                 .map_err(EthApiError::from_state_overrides_err)?;
         }
 
+        let gas_price = request_gas_price(request.as_ref(), evm_env.block_base_fee());
         let tx_env =
             self.create_txn_env(&evm_env, request.clone(), BorrowedDatabase::new(&mut *db))?;
 
         // lower the basefee to 0 to avoid breaking EVM invariants (basefee < gasprice): <https://github.com/ethereum/go-ethereum/blob/355228b011ef9a85ebc0f21e7196f892038d49f0/internal/ethapi/api.go#L700-L704>
-        let transaction: &RecoveredTxEnvelope = tx_env.borrow().borrow();
-        if transaction.effective_gas_price(None) == 0 {
+        if gas_price == 0 {
             evm_env.block_env_mut().basefee = U256::ZERO;
         }
 
         if !request_has_gas_limit {
             // No gas limit was provided in the request, so we need to cap the transaction gas limit
-            if transaction.effective_gas_price(None) > 0 {
+            if gas_price > 0 {
                 // If gas price is specified, cap transaction gas limit with caller allowance
                 trace!(target: "rpc::eth::call", ?request, "Applying gas limit cap with caller allowance");
                 let cap =
@@ -965,5 +949,23 @@ pub trait Call:
 
         let tx_env = self.create_txn_env(&evm_env, request, BorrowedDatabase::new(&mut *db))?;
         Ok((evm_env, tx_env))
+    }
+}
+
+pub(super) fn request_gas_price(
+    request: &alloy_rpc_types_eth::TransactionRequest,
+    block_base_fee: u64,
+) -> u128 {
+    if let Some(gas_price) = request.gas_price {
+        return gas_price
+    }
+
+    match (request.max_fee_per_gas, request.max_priority_fee_per_gas) {
+        (None, None) => 0,
+        (max_fee, priority_fee) => calc_effective_gas_price(
+            max_fee.unwrap_or(u128::MAX),
+            priority_fee.unwrap_or_default(),
+            Some(block_base_fee),
+        ),
     }
 }

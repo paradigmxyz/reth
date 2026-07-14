@@ -118,7 +118,7 @@ pub trait FromEvmError<Evm: ConfigureEvm>:
     }
 
     /// Ensures the execution result is successful or returns an error.
-    fn ensure_success(result: TxResult) -> Result<Bytes, Self> {
+    fn ensure_success<EvmTypes: evm2::EvmTypes>(result: TxResult<EvmTypes>) -> Result<Bytes, Self> {
         if result.status {
             Ok(result.output)
         } else if result.stop.is_revert() {

@@ -294,7 +294,8 @@ pub fn apply_precompile_overrides(
 /// geth's per-call `sanitizeCall` behavior.
 ///
 /// [`TransactionRequest`]: alloy_rpc_types_eth::TransactionRequest
-pub fn execute_transactions<S, T>(
+#[expect(clippy::type_complexity)]
+pub fn execute_transactions<S, T, EvmTypes>(
     mut builder: S,
     state_provider: impl StateProvider,
     calls: Vec<RpcTxReq<T::Network>>,
@@ -302,10 +303,16 @@ pub fn execute_transactions<S, T>(
     chain_id: u64,
     compute_state_root: bool,
     converter: &T,
-) -> Result<(BlockBuilderOutcome<S::Primitives>, Vec<TxResult>), EthApiError>
+) -> Result<(BlockBuilderOutcome<S::Primitives>, Vec<TxResult<EvmTypes>>), EthApiError>
 where
-    S: BlockBuilder,
+    S: BlockBuilder<
+        Executor: reth_evm::BlockExecutor<
+            Evm: RethEvm<EvmTypes = EvmTypes>,
+            TransactionResult = TxResult<EvmTypes>,
+        >,
+    >,
     T: RpcConvert<Primitives = S::Primitives>,
+    EvmTypes: evm2::EvmTypes,
 {
     builder.apply_pre_execution_changes()?;
 
@@ -522,9 +529,9 @@ where
 }
 
 /// Handles outputs of the calls execution and builds a [`SimulatedBlock`].
-pub fn build_simulated_block<Err, T>(
+pub fn build_simulated_block<Err, T, EvmTypes>(
     block: RecoveredBlock<BlockTy<T::Primitives>>,
-    results: Vec<TxResult>,
+    results: Vec<TxResult<EvmTypes>>,
     txs_kind: BlockTransactionsKind,
     converter: &T,
 ) -> Result<SimulatedBlock<RpcBlock<T::Network>>, Err>
@@ -535,6 +542,7 @@ where
         + From<T::Error>
         + Into<jsonrpsee_types::ErrorObject<'static>>,
     T: RpcConvert,
+    EvmTypes: evm2::EvmTypes,
 {
     let mut calls: Vec<SimCallResult> = Vec::with_capacity(results.len());
 

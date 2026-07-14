@@ -1,11 +1,11 @@
 //! Estimate gas needed implementation
 
-use super::{Call, LoadPendingBlock};
+use super::{call::request_gas_price, Call, LoadPendingBlock};
 use crate::{AsEthApiError, FromEthApiError, IntoEthApiError};
 use alloy_network::TransactionBuilder;
 use alloy_primitives::{TxKind, KECCAK256_EMPTY, U256};
 use alloy_rpc_types_eth::{state::EvmOverrides, BlockId};
-use evm2::{ethereum::RecoveredTxEnvelope, evm::DynDatabase, EvmFeatures, TxResult};
+use evm2::{evm::DynDatabase, EvmFeatures, TxResult};
 use futures::Future;
 use reth_chainspec::MIN_TRANSACTION_GAS;
 use reth_evm::{database::BorrowedDatabase, EvmEnv, EvmEnvFor};
@@ -17,7 +17,6 @@ use reth_rpc_eth_types::{
 };
 use reth_rpc_server_types::constants::gas_oracle::{CALL_STIPEND_GAS, ESTIMATE_GAS_ERROR_RATIO};
 use reth_storage_api::{StateProvider, StateProviderBox};
-use std::borrow::Borrow;
 use tracing::trace;
 
 /// Gas execution estimates
@@ -116,8 +115,7 @@ pub trait EstimateCall: Call {
         // Check funds of the sender (only useful to check if transaction gas price is more than 0).
         //
         // The caller allowance is check by doing `(account.balance - tx.value) / tx.gas_price`
-        let transaction: &RecoveredTxEnvelope = tx_env.borrow().borrow();
-        if transaction.effective_gas_price(None) > 0 {
+        if request_gas_price(request.as_ref(), evm_env.block_base_fee()) > 0 {
             let allowance =
                 self.caller_gas_allowance(BorrowedDatabase::new(&mut db), &evm_env, &tx_env)?;
             highest_gas_limit = highest_gas_limit.min(allowance);
@@ -151,7 +149,7 @@ pub trait EstimateCall: Call {
                     (tx_request_gas_limit.is_some() || tx_request_gas_price.is_some()) =>
             {
                 let retry = execute(max_gas_limit)?;
-                return map_out_of_gas_result::<Self::Error>(retry, highest_gas_limit)
+                return map_out_of_gas_result::<Self::Error, _>(retry, highest_gas_limit)
             }
             Err(err) if err.is_gas_too_low() => {
                 // This failed because the configured gas cost of the tx was lower than what
@@ -174,7 +172,7 @@ pub trait EstimateCall: Call {
             // again with the block's gas limit to check if revert is gas related or not
             return if tx_request_gas_limit.is_some() || tx_request_gas_price.is_some() {
                 let retry = execute(max_gas_limit)?;
-                map_out_of_gas_result::<Self::Error>(retry, highest_gas_limit)
+                map_out_of_gas_result::<Self::Error, _>(retry, highest_gas_limit)
             } else {
                 // the transaction did revert
                 Err(Self::Error::from_revert(res.output))
@@ -287,9 +285,13 @@ pub trait EstimateCall: Call {
     }
 }
 
-fn map_out_of_gas_result<Error>(result: TxResult, requested_gas_limit: u64) -> Result<U256, Error>
+fn map_out_of_gas_result<Error, EvmTypes>(
+    result: TxResult<EvmTypes>,
+    requested_gas_limit: u64,
+) -> Result<U256, Error>
 where
     Error: FromEvmHalt<evm2::interpreter::InstrStop> + FromRevert + FromEthApiError,
+    EvmTypes: evm2::EvmTypes,
 {
     if result.status {
         // Transaction succeeded by manually increasing the gas limit,
@@ -309,8 +311,8 @@ where
 /// gas limit for a transaction. It adjusts the highest or lowest gas limits depending on
 /// whether the execution succeeded, reverted, or halted due to specific reasons.
 #[inline]
-pub fn update_estimated_gas_range(
-    result: TxResult,
+pub fn update_estimated_gas_range<EvmTypes: evm2::EvmTypes>(
+    result: TxResult<EvmTypes>,
     tx_gas_limit: u64,
     highest_gas_limit: &mut u64,
     lowest_gas_limit: &mut u64,

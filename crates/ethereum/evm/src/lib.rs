@@ -96,6 +96,8 @@ impl AsRef<evm2::env::BlockEnv> for EthEvmEnv {
 }
 
 impl EvmEnv for EthEvmEnv {
+    type EvmTypes = evm2::BaseEvmTypes;
+
     fn spec_id(&self) -> evm2::SpecId {
         self.spec
     }

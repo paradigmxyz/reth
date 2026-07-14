@@ -5,13 +5,13 @@ use crate::{FromEthApiError, FromEvmError};
 use alloy_consensus::{transaction::TxHashRef, BlockHeader};
 use alloy_primitives::B256;
 use alloy_rpc_types_eth::{BlockId, TransactionInfo};
-use evm2::{evm::DynDatabase, BaseEvmTypes, TxResultWithState};
+use evm2::evm::DynDatabase;
 use evm2_inspectors::tracing::{TracingInspector, TracingInspectorConfig};
 use futures::Future;
 use reth_errors::RethError;
 use reth_evm::{
     database::BorrowedDatabase, execute::BlockExecutorFactory, ConfigureEvm, Evm, EvmEnvFor,
-    TxEnvFor,
+    EvmTypesFor, TxEnvFor, TxResultWithStateFor,
 };
 use reth_primitives_traits::{BlockBody, RecoveredBlock};
 use reth_rpc_eth_types::{EthApiError, StateCacheDb};
@@ -19,22 +19,22 @@ use reth_storage_api::ProviderBlock;
 use std::{borrow::Borrow, sync::Arc};
 
 /// Context passed to per-transaction trace callbacks.
-pub struct TracingCtx<'a, Insp> {
+pub struct TracingCtx<'a, Insp, EvmTypes: evm2::EvmTypes> {
     /// Execution result and detached state changes for the transaction.
-    pub result: TxResultWithState,
+    pub result: evm2::TxResultWithState<EvmTypes>,
     /// Database pointing to the transaction pre-state.
     pub db: &'a mut StateCacheDb,
     /// Inspector used while executing the transaction.
     pub inspector: Insp,
 }
 
-impl<Insp> core::fmt::Debug for TracingCtx<'_, Insp> {
+impl<Insp, EvmTypes: evm2::EvmTypes> core::fmt::Debug for TracingCtx<'_, Insp, EvmTypes> {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         f.debug_struct("TracingCtx").finish_non_exhaustive()
     }
 }
 
-impl<Insp> TracingCtx<'_, Insp> {
+impl<Insp, EvmTypes: evm2::EvmTypes> TracingCtx<'_, Insp, EvmTypes> {
     /// Consumes this context and returns the inspector.
     pub fn take_inspector(self) -> Insp {
         self.inspector
@@ -50,10 +50,10 @@ pub trait Trace: LoadState<Error: FromEvmError<Self::Evm>> + Call {
         evm_env: EvmEnvFor<Self::Evm>,
         tx_env: &TxEnvFor<Self::Evm>,
         inspector: I,
-    ) -> Result<(I, TxResultWithState), Self::Error>
+    ) -> Result<(I, TxResultWithStateFor<Self::Evm>), Self::Error>
     where
         DB: DynDatabase,
-        I: evm2::Inspector<BaseEvmTypes> + 'static,
+        I: evm2::Inspector<EvmTypesFor<Self::Evm>> + 'static,
     {
         let mut evm = self.evm_config().block_executor_factory().evm_with_env(db, evm_env);
         evm.transact_with_inspector(tx_env.borrow(), inspector).map_err(Self::Error::from_evm_err)
@@ -71,7 +71,9 @@ pub trait Trace: LoadState<Error: FromEvmError<Self::Evm>> + Call {
     ) -> impl Future<Output = Result<R, Self::Error>> + Send
     where
         R: Send + 'static,
-        F: FnOnce(TracingInspector, TxResultWithState) -> Result<R, Self::Error> + Send + 'static,
+        F: FnOnce(TracingInspector, TxResultWithStateFor<Self::Evm>) -> Result<R, Self::Error>
+            + Send
+            + 'static,
     {
         self.spawn_with_state_at_block(at, move |this, mut db| {
             let (inspector, result) =
@@ -90,7 +92,11 @@ pub trait Trace: LoadState<Error: FromEvmError<Self::Evm>> + Call {
         f: F,
     ) -> impl Future<Output = Result<R, Self::Error>> + Send
     where
-        F: FnOnce(TracingInspector, TxResultWithState, StateCacheDb) -> Result<R, Self::Error>
+        F: FnOnce(
+                TracingInspector,
+                TxResultWithStateFor<Self::Evm>,
+                StateCacheDb,
+            ) -> Result<R, Self::Error>
             + Send
             + 'static,
         R: Send + 'static,
@@ -114,7 +120,7 @@ pub trait Trace: LoadState<Error: FromEvmError<Self::Evm>> + Call {
         F: FnOnce(
                 TransactionInfo,
                 TracingInspector,
-                TxResultWithState,
+                TxResultWithStateFor<Self::Evm>,
                 StateCacheDb,
             ) -> Result<R, Self::Error>
             + Send
@@ -133,10 +139,15 @@ pub trait Trace: LoadState<Error: FromEvmError<Self::Evm>> + Call {
     ) -> impl Future<Output = Result<Option<R>, Self::Error>> + Send
     where
         Self: LoadTransaction,
-        F: FnOnce(TransactionInfo, Insp, TxResultWithState, StateCacheDb) -> Result<R, Self::Error>
+        F: FnOnce(
+                TransactionInfo,
+                Insp,
+                TxResultWithStateFor<Self::Evm>,
+                StateCacheDb,
+            ) -> Result<R, Self::Error>
             + Send
             + 'static,
-        Insp: evm2::Inspector<BaseEvmTypes> + Send + 'static,
+        Insp: evm2::Inspector<EvmTypesFor<Self::Evm>> + Send + 'static,
         R: Send + 'static,
     {
         async move {
@@ -178,9 +189,14 @@ pub trait Trace: LoadState<Error: FromEvmError<Self::Evm>> + Call {
     ) -> impl Future<Output = Result<Option<Vec<R>>, Self::Error>> + Send
     where
         Self: LoadBlock,
-        F: Fn(TransactionInfo, TracingCtx<'_, Insp>) -> Result<R, Self::Error> + Send + 'static,
+        F: Fn(
+                TransactionInfo,
+                TracingCtx<'_, Insp, EvmTypesFor<Self::Evm>>,
+            ) -> Result<R, Self::Error>
+            + Send
+            + 'static,
         Setup: FnMut() -> Insp + Send + 'static,
-        Insp: Clone + evm2::Inspector<BaseEvmTypes> + 'static,
+        Insp: Clone + evm2::Inspector<EvmTypesFor<Self::Evm>> + 'static,
         R: Send + 'static,
     {
         async move {
@@ -241,7 +257,10 @@ pub trait Trace: LoadState<Error: FromEvmError<Self::Evm>> + Call {
     ) -> impl Future<Output = Result<Option<Vec<R>>, Self::Error>> + Send
     where
         Self: LoadBlock,
-        F: Fn(TransactionInfo, TracingCtx<'_, TracingInspector>) -> Result<R, Self::Error>
+        F: Fn(
+                TransactionInfo,
+                TracingCtx<'_, TracingInspector, EvmTypesFor<Self::Evm>>,
+            ) -> Result<R, Self::Error>
             + Send
             + 'static,
         R: Send + 'static,
@@ -265,7 +284,10 @@ pub trait Trace: LoadState<Error: FromEvmError<Self::Evm>> + Call {
     ) -> impl Future<Output = Result<Option<Vec<R>>, Self::Error>> + Send
     where
         Self: LoadBlock,
-        F: Fn(TransactionInfo, TracingCtx<'_, TracingInspector>) -> Result<R, Self::Error>
+        F: Fn(
+                TransactionInfo,
+                TracingCtx<'_, TracingInspector, EvmTypesFor<Self::Evm>>,
+            ) -> Result<R, Self::Error>
             + Send
             + 'static,
         R: Send + 'static,
@@ -289,9 +311,14 @@ pub trait Trace: LoadState<Error: FromEvmError<Self::Evm>> + Call {
     ) -> impl Future<Output = Result<Option<Vec<R>>, Self::Error>> + Send
     where
         Self: LoadBlock,
-        F: Fn(TransactionInfo, TracingCtx<'_, Insp>) -> Result<R, Self::Error> + Send + 'static,
+        F: Fn(
+                TransactionInfo,
+                TracingCtx<'_, Insp, EvmTypesFor<Self::Evm>>,
+            ) -> Result<R, Self::Error>
+            + Send
+            + 'static,
         Setup: FnMut() -> Insp + Send + 'static,
-        Insp: Clone + evm2::Inspector<BaseEvmTypes> + 'static,
+        Insp: Clone + evm2::Inspector<EvmTypesFor<Self::Evm>> + 'static,
         R: Send + 'static,
     {
         self.trace_block_until_with_inspector(block_id, block, None, insp_setup, f)

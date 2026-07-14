@@ -15,6 +15,13 @@ pub type EvmEnvFor<Evm> =
 pub type EvmFor<'a, Evm> =
     <<Evm as ConfigureEvm>::BlockExecutorFactory as BlockExecutorFactory>::Evm<'a>;
 
+/// Type alias for the configured runtime EVM type family.
+pub type EvmTypesFor<Evm> =
+    <<Evm as ConfigureEvm>::BlockExecutorFactory as BlockExecutorFactory>::EvmTypes;
+
+/// Type alias for a configured EVM transaction result with detached state changes.
+pub type TxResultWithStateFor<Evm> = evm2::TxResultWithState<EvmTypesFor<Evm>>;
+
 /// Type alias for the configured transaction environment.
 pub type TxEnvFor<Evm> =
     <<Evm as ConfigureEvm>::BlockExecutorFactory as BlockExecutorFactory>::Transaction;

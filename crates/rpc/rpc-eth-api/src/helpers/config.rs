@@ -163,8 +163,8 @@ where
     }
 }
 
-fn evm_to_precompiles_map(spec_id: evm2::SpecId) -> BTreeMap<String, Address> {
-    let precompiles = evm2::Precompiles::<evm2::BaseEvmTypes>::base(spec_id);
+fn evm_to_precompiles_map(spec_id: impl Into<evm2::SpecId>) -> BTreeMap<String, Address> {
+    let precompiles = evm2::Precompiles::<evm2::BaseEvmTypes>::base(spec_id.into());
     let precompiles = precompiles.as_map();
     precompiles
         .addresses()

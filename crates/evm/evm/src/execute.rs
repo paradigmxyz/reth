@@ -9,7 +9,7 @@ use alloy_consensus::{
     BlockHeader as _, Header, TxReceipt,
 };
 use alloy_eip7928::{compute_block_access_list_hash, BlockAccessIndex, BlockAccessList};
-use alloy_eips::eip2718::WithEncoded;
+use alloy_eips::eip2718::{Typed2718, WithEncoded};
 use alloy_primitives::{Address, B256};
 use core::{borrow::Borrow, fmt::Debug};
 #[cfg(feature = "std")]
@@ -138,6 +138,8 @@ impl CommitChanges {
 
 /// A configured EVM instance.
 pub trait Evm {
+    /// Runtime EVM type family.
+    type EvmTypes: evm2::EvmTypes<Tx = Self::Transaction>;
     /// Transaction environment consumed by this EVM.
     type Transaction;
 
@@ -145,21 +147,21 @@ pub trait Evm {
     fn transact(
         &mut self,
         transaction: &Self::Transaction,
-    ) -> Result<evm2::TxResultWithState, BlockExecutionError>;
+    ) -> Result<evm2::TxResultWithState<Self::EvmTypes>, BlockExecutionError>;
 
     /// Executes a transaction with an inspector without committing its state changes.
     fn transact_with_inspector<I>(
         &mut self,
         transaction: &Self::Transaction,
         inspector: I,
-    ) -> Result<(I, evm2::TxResultWithState), BlockExecutionError>
+    ) -> Result<(I, evm2::TxResultWithState<Self::EvmTypes>), BlockExecutionError>
     where
-        I: evm2::Inspector<evm2::BaseEvmTypes> + 'static;
+        I: evm2::Inspector<Self::EvmTypes> + 'static;
 
     /// Sets the inspector used by subsequent transactions.
     fn set_inspector<I>(&mut self, inspector: I)
     where
-        I: evm2::Inspector<evm2::BaseEvmTypes> + 'static;
+        I: evm2::Inspector<Self::EvmTypes> + 'static;
 
     /// Returns whether an address is an active precompile.
     fn has_precompile(&self, address: &Address) -> bool;
@@ -188,13 +190,17 @@ pub trait Evm {
         S::Error: Debug;
 }
 
-impl Evm for evm2::Evm<'_, evm2::BaseEvmTypes> {
-    type Transaction = evm2::ethereum::RecoveredTxEnvelope;
+impl<T> Evm for evm2::Evm<'_, T>
+where
+    T: evm2::EvmTypes<Tx: Typed2718>,
+{
+    type EvmTypes = T;
+    type Transaction = T::Tx;
 
     fn transact(
         &mut self,
         transaction: &Self::Transaction,
-    ) -> Result<evm2::TxResultWithState, BlockExecutionError> {
+    ) -> Result<evm2::TxResultWithState<T>, BlockExecutionError> {
         let resolution = transaction_resolution(evm2::Evm::transact(self, transaction));
         resolve_transaction(self, resolution)
     }
@@ -203,9 +209,9 @@ impl Evm for evm2::Evm<'_, evm2::BaseEvmTypes> {
         &mut self,
         transaction: &Self::Transaction,
         inspector: I,
-    ) -> Result<(I, evm2::TxResultWithState), BlockExecutionError>
+    ) -> Result<(I, evm2::TxResultWithState<T>), BlockExecutionError>
     where
-        I: evm2::Inspector<evm2::BaseEvmTypes> + 'static,
+        I: evm2::Inspector<T> + 'static,
     {
         evm2::Evm::set_inspector(self, inspector);
         let resolution = transaction_resolution(evm2::Evm::transact(self, transaction));
@@ -218,7 +224,7 @@ impl Evm for evm2::Evm<'_, evm2::BaseEvmTypes> {
 
     fn set_inspector<I>(&mut self, inspector: I)
     where
-        I: evm2::Inspector<evm2::BaseEvmTypes> + 'static,
+        I: evm2::Inspector<T> + 'static,
     {
         evm2::Evm::set_inspector(self, inspector);
     }
@@ -241,7 +247,7 @@ impl Evm for evm2::Evm<'_, evm2::BaseEvmTypes> {
         &mut self,
         moves: impl IntoIterator<Item = (Address, Address)>,
     ) -> Result<(), evm2::precompiles::MovePrecompileError> {
-        let mut precompiles = evm2::Precompiles::base(self.spec_id());
+        let mut precompiles = evm2::Precompiles::<T>::base(self.spec_id());
         precompiles.as_map_mut().move_precompiles(moves)?;
         self.set_precompiles(precompiles);
         Ok(())
@@ -273,15 +279,15 @@ impl Evm for evm2::Evm<'_, evm2::BaseEvmTypes> {
     }
 }
 
-enum TransactionResolution {
-    Result(evm2::TxResultWithState),
+enum TransactionResolution<T: evm2::EvmTypes> {
+    Result(evm2::TxResultWithState<T>),
     DatabaseError(ErrorCode),
     HandlerError(HandlerError),
 }
 
-fn transaction_resolution(
-    executed: Result<evm2::ExecutedTx<'_, '_, evm2::BaseEvmTypes>, HandlerError>,
-) -> TransactionResolution {
+fn transaction_resolution<T: evm2::EvmTypes>(
+    executed: Result<evm2::ExecutedTx<'_, '_, T>, HandlerError>,
+) -> TransactionResolution<T> {
     match executed {
         Ok(executed) => {
             if let Some(code) = executed.result().error_code {
@@ -295,10 +301,10 @@ fn transaction_resolution(
     }
 }
 
-fn resolve_transaction(
-    evm: &mut evm2::Evm<'_, evm2::BaseEvmTypes>,
-    resolution: TransactionResolution,
-) -> Result<evm2::TxResultWithState, BlockExecutionError> {
+fn resolve_transaction<T: evm2::EvmTypes>(
+    evm: &mut evm2::Evm<'_, T>,
+    resolution: TransactionResolution<T>,
+) -> Result<evm2::TxResultWithState<T>, BlockExecutionError> {
     match resolution {
         TransactionResolution::Result(result) => Ok(result),
         TransactionResolution::DatabaseError(code) |
@@ -429,13 +435,15 @@ pub trait BlockExecutorFactory {
     /// Additional EVM factory configuration owned by this executor factory.
     type EvmFactory;
     /// Transaction environment consumed by the configured EVM instance.
-    type EvmTransaction: Borrow<evm2::ethereum::RecoveredTxEnvelope>;
+    type EvmTypes: evm2::EvmTypes<Tx = Self::EvmTransaction, TxResultExt: Send>;
+    /// Transaction environment consumed by the configured EVM instance.
+    type EvmTransaction;
     /// Transaction environment consumed by executors from this factory.
     type Transaction: Borrow<Self::EvmTransaction> + Debug + Clone + Send + Sync + 'static;
     /// EVM instance consumed by executors from this factory.
-    type Evm<'a>: Evm<Transaction = Self::EvmTransaction>;
+    type Evm<'a>: Evm<EvmTypes = Self::EvmTypes, Transaction = Self::EvmTransaction>;
     /// EVM environment consumed by this factory.
-    type EvmEnv: EvmEnv;
+    type EvmEnv: EvmEnv<EvmTypes = Self::EvmTypes>;
     /// Execution context for a block or payload.
     type ExecutionCtx<'a>: Debug + Clone + Send
     where
@@ -445,7 +453,7 @@ pub trait BlockExecutorFactory {
         Primitives = Self::Primitives,
         Evm = Self::Evm<'a>,
         Transaction = Self::Transaction,
-        TransactionResult = evm2::TxResult,
+        TransactionResult = evm2::TxResult<Self::EvmTypes>,
         TransactionOutput = GasOutput,
     >
     where
@@ -565,11 +573,7 @@ pub trait BlockBuilder: Sized {
     /// The primitive types used by the inner [`BlockExecutor`].
     type Primitives: NodePrimitives;
     /// Inner block executor.
-    type Executor: BlockExecutor<
-        Primitives = Self::Primitives,
-        TransactionResult = evm2::TxResult,
-        TransactionOutput = GasOutput,
-    >;
+    type Executor: BlockExecutor<Primitives = Self::Primitives, TransactionOutput = GasOutput>;
     /// EVM environment used for block execution.
     type EvmEnv: EvmEnv;
 
@@ -727,8 +731,9 @@ where
     F: BlockExecutorFactory<Primitives = N>,
     Executor: BlockExecutor<
         Primitives = N,
+        Evm: Evm<EvmTypes = F::EvmTypes>,
         Transaction = F::Transaction,
-        TransactionResult = evm2::TxResult,
+        TransactionResult = evm2::TxResult<F::EvmTypes>,
         TransactionOutput = GasOutput,
     >,
     Assembler: BlockAssembler<F, Block = N::Block>,
