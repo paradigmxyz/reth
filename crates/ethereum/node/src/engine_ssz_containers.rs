@@ -1424,7 +1424,13 @@ pub struct PayloadStatusWithWitness {
 impl PayloadStatusWithWitness {
     /// Creates a response, converting the witness into the REST-SSZ `Optional[T]` representation.
     pub fn new(payload_status: PayloadStatus, witness: Option<ExecutionWitnessV1>) -> Self {
+        let witness = if matches!(&payload_status.status, PayloadStatusEnum::Valid) {
+            witness
+        } else {
+            None
+        };
         Self { payload_status, witness: witness.into() }
+    }
     }
 }
 
