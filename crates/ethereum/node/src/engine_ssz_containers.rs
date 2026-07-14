@@ -1424,13 +1424,11 @@ pub struct PayloadStatusWithWitness {
 impl PayloadStatusWithWitness {
     /// Creates a response, converting the witness into the REST-SSZ `Optional[T]` representation.
     pub fn new(payload_status: PayloadStatus, witness: Option<ExecutionWitnessV1>) -> Self {
-        let witness = if matches!(&payload_status.status, PayloadStatusEnum::Valid) {
-            witness
-        } else {
-            None
+        let witness = match &payload_status.status {
+            PayloadStatusEnum::Valid => witness.into(),
+            _ => Optional::none(),
         };
-        Self { payload_status, witness: witness.into() }
-    }
+        Self { payload_status, witness }
     }
 }
 
@@ -1951,7 +1949,7 @@ mod tests {
     }
 
     #[test]
-    fn witness_response_rejects_non_valid_status_with_witness() {
+    fn witness_response_omits_witness_for_non_valid_status() {
         let payload_status = PayloadStatus {
             status: PayloadStatusEnum::Syncing,
             latest_valid_hash: Optional::none(),
@@ -1960,7 +1958,8 @@ mod tests {
         let response =
             PayloadStatusWithWitness::new(payload_status, Some(ExecutionWitnessV1::default()));
 
-        assert!(PayloadStatusWithWitness::from_ssz_bytes(&response.as_ssz_bytes()).is_err());
+        assert!(response.witness.is_none());
+        assert_roundtrip(&response);
     }
 
     #[test]
