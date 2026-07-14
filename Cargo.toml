@@ -77,7 +77,6 @@ members = [
     "crates/payload/primitives/",
     "crates/payload/validator/",
     "crates/payload/util/",
-    "crates/prune/db",
     "crates/prune/prune",
     "crates/prune/types",
     "crates/revm/",
