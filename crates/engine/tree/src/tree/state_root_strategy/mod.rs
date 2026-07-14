@@ -1502,4 +1502,100 @@ mod tests {
         let root_from_regular = state_root(accumulated_state);
         assert_eq!(root_from_task, root_from_regular);
     }
+
+    #[test]
+    fn direct_payload_state_root_task_respects_gates() {
+        let factory = create_test_provider_factory_with_chain_spec(Arc::new(ChainSpec::default()));
+        let genesis_hash = init_genesis(&factory).unwrap();
+        let provider_factory = BlockchainProvider::new(factory).unwrap();
+        let runtime = reth_tasks::Runtime::test();
+        let state_trie_overlays = StateTrieOverlayManager::<EthPrimitives>::default();
+        let strategy = DefaultStateRootStrategy::default();
+
+        let insufficient_parallelism = TreeConfig::default().with_has_enough_parallelism(false);
+        assert!(
+            strategy
+                .spawn_payload_state_root_task(PayloadStateRootTaskContext::new(
+                    &runtime,
+                    &state_trie_overlays,
+                    OverlayStateProviderFactory::new(
+                        provider_factory.clone(),
+                        OverlayBuilder::<EthPrimitives>::new(genesis_hash, ChangesetCache::new()),
+                    ),
+                    B256::ZERO,
+                    None,
+                    &insufficient_parallelism,
+                    None,
+                ))
+                .is_none(),
+            "the task must not start without enough executor parallelism"
+        );
+
+        let skipped_state_root =
+            TreeConfig::default().with_has_enough_parallelism(true).with_skip_state_root(true);
+        assert!(
+            strategy
+                .spawn_payload_state_root_task(PayloadStateRootTaskContext::new(
+                    &runtime,
+                    &state_trie_overlays,
+                    OverlayStateProviderFactory::new(
+                        provider_factory,
+                        OverlayBuilder::<EthPrimitives>::new(genesis_hash, ChangesetCache::new()),
+                    ),
+                    B256::ZERO,
+                    None,
+                    &skipped_state_root,
+                    None,
+                ))
+                .is_none(),
+            "the task must not start when state-root calculation is disabled"
+        );
+    }
+
+    #[test]
+    fn prepare_payload_builder_spawns_state_root_task() {
+        let chain_spec = Arc::new(ChainSpec::default());
+        let factory = create_test_provider_factory_with_chain_spec(chain_spec.clone());
+        let genesis_hash = init_genesis(&factory).unwrap();
+        let provider_factory = BlockchainProvider::new(factory).unwrap();
+        let runtime = reth_tasks::Runtime::test();
+        let state_trie_overlays = StateTrieOverlayManager::<EthPrimitives>::default();
+        let config = TreeConfig::default()
+            .with_has_enough_parallelism(true)
+            .with_share_sparse_trie_with_payload_builder(true);
+        let mut state = EngineApiTreeState::new(
+            10,
+            10,
+            config.invalid_header_hit_eviction_threshold(),
+            alloy_eips::BlockNumHash::default(),
+            crate::engine::EngineApiKind::Ethereum,
+            state_trie_overlays.clone(),
+        );
+
+        let strategy = DefaultStateRootStrategy::default();
+        let handle = <DefaultStateRootStrategy as StateRootStrategy<
+            EthPrimitives,
+            _,
+            EthEvmConfig,
+        >>::prepare_payload_builder(
+            &strategy,
+            PayloadStateRootJobContext::new(
+                &runtime,
+                &state_trie_overlays,
+                genesis_hash,
+                chain_spec.genesis_header(),
+                0,
+                &mut state,
+                StateProviderBuilder::new(provider_factory.clone(), genesis_hash, None),
+                OverlayStateProviderFactory::new(
+                    provider_factory,
+                    OverlayBuilder::<EthPrimitives>::new(genesis_hash, ChangesetCache::new()),
+                ),
+                &config,
+            ),
+        )
+        .expect("preparing the state-root task must succeed");
+
+        assert!(handle.is_some(), "the enabled payload builder must receive a state-root task");
+    }
 }
