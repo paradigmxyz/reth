@@ -970,6 +970,13 @@ where
                 "sparse trie task stalled: pending updates remain but no proof targets are queued or in flight"
             );
 
+            if std::env::var_os("RETH_EXIT_ON_SPARSE_TRIE_STALL").is_some() {
+                eprintln!(
+                    "fatal sparse trie stall: exiting before fallback/persistence can continue"
+                );
+                std::process::exit(101);
+            }
+
             return Err(StateRootTaskError::Stalled)
         }
 
