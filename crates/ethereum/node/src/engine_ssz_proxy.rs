@@ -43,6 +43,7 @@ const OCTET_STREAM: &str = "application/octet-stream";
 const APPLICATION_JSON: &str = "application/json";
 const TEXT_PLAIN: &str = "text/plain";
 const CONTENT_TYPE: &str = "content-type";
+const CACHE_CONTROL: &str = "cache-control";
 const ETH_EXECUTION_VERSION: &str = "eth-execution-version";
 
 const STATUS_OK: u16 = 200;
@@ -417,7 +418,7 @@ where
                 let block_value = payload.block_value;
                 match payload.execution_payload {
                     ExecutionPayloadFieldV2::V1(payload) => {
-                        ssz_response(BuiltPayloadParis { payload, block_value })
+                        get_payload_response(BuiltPayloadParis { payload, block_value })
                     }
                     ExecutionPayloadFieldV2::V2(_) => {
                         text_response(STATUS_BAD_REQUEST, "unsupported fork")
@@ -428,25 +429,25 @@ where
         },
         EngineSszFork::Shanghai => match engine_api.get_payload_v2_metered(payload_id).await {
             Ok(payload) => match BuiltPayloadShanghai::try_from(payload) {
-                Ok(payload) => ssz_response(payload),
+                Ok(payload) => get_payload_response(payload),
                 Err(err) => text_response(STATUS_BAD_REQUEST, err.to_string()),
             },
             Err(err) => get_payload_error_response(err),
         },
         EngineSszFork::Cancun => match engine_api.get_payload_v3_metered(payload_id).await {
-            Ok(payload) => ssz_response(BuiltPayloadCancun::from(payload)),
+            Ok(payload) => get_payload_response(BuiltPayloadCancun::from(payload)),
             Err(err) => get_payload_error_response(err),
         },
         EngineSszFork::Prague => match engine_api.get_payload_v4_metered(payload_id).await {
-            Ok(payload) => ssz_response(BuiltPayloadPrague::from(payload)),
+            Ok(payload) => get_payload_response(BuiltPayloadPrague::from(payload)),
             Err(err) => get_payload_error_response(err),
         },
         EngineSszFork::Osaka => match engine_api.get_payload_v5_metered(payload_id).await {
-            Ok(payload) => ssz_response(BuiltPayloadOsaka::from(payload)),
+            Ok(payload) => get_payload_response(BuiltPayloadOsaka::from(payload)),
             Err(err) => get_payload_error_response(err),
         },
         EngineSszFork::Amsterdam => match engine_api.get_payload_v6_metered(payload_id).await {
-            Ok(payload) => ssz_response(BuiltPayloadAmsterdam::from(payload)),
+            Ok(payload) => get_payload_response(BuiltPayloadAmsterdam::from(payload)),
             Err(err) => get_payload_error_response(err),
         },
     }
@@ -461,7 +462,6 @@ fn get_payload_error_response(err: EngineApiError) -> HttpResponse {
         _ => STATUS_INTERNAL_SERVER_ERROR,
     };
     text_response(status, err.to_string())
-}
 }
 
 async fn handle_new_payload<Provider, Pool, Validator, ChainSpec>(
@@ -746,6 +746,15 @@ fn ssz_response<T: ssz::Encode>(value: T) -> HttpResponse {
     HttpResponse::builder()
         .status(STATUS_OK)
         .header(CONTENT_TYPE, OCTET_STREAM)
+        .body(HttpBody::from(value.as_ssz_bytes()))
+        .expect("valid response")
+}
+
+fn get_payload_response<T: ssz::Encode>(value: T) -> HttpResponse {
+    HttpResponse::builder()
+        .status(STATUS_OK)
+        .header(CONTENT_TYPE, OCTET_STREAM)
+        .header(CACHE_CONTROL, "no-store")
         .body(HttpBody::from(value.as_ssz_bytes()))
         .expect("valid response")
 }
