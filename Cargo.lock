@@ -9697,10 +9697,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "reth-prune-db"
-version = "2.4.0"
-
-[[package]]
 name = "reth-prune-types"
 version = "2.4.0"
 dependencies = [
