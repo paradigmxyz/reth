@@ -4,22 +4,25 @@
 //!
 //! [EIP-8178]: https://eips.ethereum.org/EIPS/eip-8178
 
-use alloy_consensus::{Transaction, TxEnvelope};
-use alloy_eips::{
-    eip2718::Decodable2718,
-    eip7685::{Requests, RequestsOrHash},
+use crate::engine_ssz_containers::{
+    BodiesByHashRequest, BodiesResponseCancun, BodiesResponseOsaka, BodiesResponsePrague,
+    BuiltPayloadAmsterdam, BuiltPayloadCancun, BuiltPayloadOsaka, BuiltPayloadParis,
+    BuiltPayloadPrague, BuiltPayloadShanghai, ExecutionPayloadBodyAmsterdam,
+    ExecutionPayloadBodyCancun, ExecutionPayloadBodyParis, ExecutionPayloadBodyPrague,
+    ExecutionPayloadBodyShanghai, ExecutionPayloadEnvelopeAmsterdam,
+    ExecutionPayloadEnvelopeCancun, ExecutionPayloadEnvelopeOsaka, ExecutionPayloadEnvelopeParis,
+    ExecutionPayloadEnvelopePrague, ExecutionPayloadEnvelopeShanghai, ForkchoiceUpdateAmsterdam,
+    ForkchoiceUpdateCancun, ForkchoiceUpdateOsaka, ForkchoiceUpdateParis, ForkchoiceUpdatePrague,
+    ForkchoiceUpdateResponse, ForkchoiceUpdateShanghai, Optional,
+    PayloadStatus as EngineSszPayloadStatus,
 };
-use alloy_primitives::{Bytes, B128, B256};
+use alloy_consensus::{Transaction, TxEnvelope};
+use alloy_eips::{eip2718::Decodable2718, eip7685::RequestsOrHash};
+use alloy_primitives::{Bytes, B128, B256, B64};
 use alloy_rpc_types_engine::{
-    ssz_engine_types::{
-        BodiesByHashRequest, BodiesResponse, BodiesResponseCancun, BodiesResponseOsaka,
-        BodiesResponsePrague, ExecutionPayloadBodyAmsterdam, ExecutionPayloadBodyParis,
-        ExecutionPayloadBodyShanghai,
-    },
     CancunPayloadFields, ExecutionData, ExecutionPayload, ExecutionPayloadBodiesV1,
-    ExecutionPayloadBodiesV2, ExecutionPayloadSidecar, ExecutionPayloadV1, ExecutionPayloadV2,
-    ExecutionPayloadV3, ExecutionPayloadV4, ForkchoiceState, PayloadAttributes,
-    PraguePayloadFields,
+    ExecutionPayloadBodiesV2, ExecutionPayloadFieldV2, ExecutionPayloadSidecar, ForkchoiceState,
+    PayloadAttributes, PayloadId, PraguePayloadFields,
 };
 use http_body_util::BodyExt;
 use jsonrpsee::server::{HttpBody, HttpRequest, HttpResponse};
@@ -28,6 +31,7 @@ use reth_engine_primitives::EngineApiValidator;
 use reth_ethereum_engine_primitives::EthEngineTypes;
 use reth_provider::{BalProvider, BlockReader, HeaderProvider, StateProviderFactory};
 use reth_rpc::EngineApi;
+use reth_rpc_engine_api::EngineApiError;
 use reth_transaction_pool::TransactionPool;
 use ssz::Decode;
 use std::{
@@ -43,6 +47,7 @@ const OCTET_STREAM: &str = "application/octet-stream";
 const APPLICATION_JSON: &str = "application/json";
 const TEXT_PLAIN: &str = "text/plain";
 const CONTENT_TYPE: &str = "content-type";
+const CACHE_CONTROL: &str = "cache-control";
 const ETH_EXECUTION_VERSION: &str = "eth-execution-version";
 
 const STATUS_OK: u16 = 200;
@@ -234,7 +239,22 @@ where
             let Some(engine_api) = handle.engine_api().await else {
                 return text_response(STATUS_SERVICE_UNAVAILABLE, "engine api unavailable")
             };
-            handle_new_payload(engine_api, fork.payloads_version(), &body).await
+            handle_new_payload(engine_api, fork, &body).await
+        }
+        EngineSszEndpoint::GetPayload(payload_id) => {
+            if method != "GET" {
+                return text_response(STATUS_METHOD_NOT_ALLOWED, "method not allowed")
+            }
+            let Ok(payload_id) = payload_id else {
+                return text_response(STATUS_BAD_REQUEST, "invalid payload id")
+            };
+            let Some(fork) = request_fork(&request) else {
+                return text_response(STATUS_BAD_REQUEST, "unsupported fork")
+            };
+            let Some(engine_api) = handle.engine_api().await else {
+                return text_response(STATUS_SERVICE_UNAVAILABLE, "engine api unavailable")
+            };
+            handle_get_payload(engine_api, fork, payload_id).await
         }
         EngineSszEndpoint::Forkchoice => {
             if method != "POST" {
@@ -249,19 +269,7 @@ where
             let Some(engine_api) = handle.engine_api().await else {
                 return text_response(STATUS_SERVICE_UNAVAILABLE, "engine api unavailable")
             };
-            handle_forkchoice_updated(engine_api, fork.forkchoice_version(), &body).await
-        }
-        EngineSszEndpoint::Blobs(version) => {
-            if method != "POST" {
-                return text_response(STATUS_METHOD_NOT_ALLOWED, "method not allowed")
-            }
-            let Ok(body) = request.into_body().collect().await.map(|body| body.to_bytes()) else {
-                return text_response(STATUS_BAD_REQUEST, "failed to read request body")
-            };
-            let Some(engine_api) = handle.engine_api().await else {
-                return text_response(STATUS_SERVICE_UNAVAILABLE, "engine api unavailable")
-            };
-            handle_get_blobs(engine_api, version, &body).await
+            handle_forkchoice_updated(engine_api, fork, &body).await
         }
         EngineSszEndpoint::PayloadBodiesByHash => {
             if method != "POST" {
@@ -270,14 +278,12 @@ where
             let Some(fork) = request_fork(&request) else {
                 return text_response(STATUS_BAD_REQUEST, "unsupported fork")
             };
-            let request = match request.into_body().collect().await.map(|body| body.to_bytes()) {
-                Ok(body) => match BodiesByHashRequest::from_ssz_bytes(&body) {
-                    Ok(request) => {
-                        PayloadBodiesRequest::Hash(request.block_hashes.into_iter().collect())
-                    }
-                    Err(_) => return text_response(STATUS_BAD_REQUEST, "invalid ssz"),
-                },
-                Err(_) => return text_response(STATUS_BAD_REQUEST, "failed to read request body"),
+            let Ok(body) = request.into_body().collect().await.map(|body| body.to_bytes()) else {
+                return text_response(STATUS_BAD_REQUEST, "failed to read request body")
+            };
+            let request = match BodiesByHashRequest::from_ssz_bytes(&body) {
+                Ok(request) => PayloadBodiesRequest::Hash(request.block_hashes),
+                Err(_) => return text_response(STATUS_BAD_REQUEST, "invalid ssz"),
             };
             let Some(engine_api) = handle.engine_api().await else {
                 return text_response(STATUS_SERVICE_UNAVAILABLE, "engine api unavailable")
@@ -291,7 +297,6 @@ where
             let Some(fork) = request_fork(&request) else {
                 return text_response(STATUS_BAD_REQUEST, "unsupported fork")
             };
-
             let Some(query) = request.uri().query() else {
                 return text_response(STATUS_BAD_REQUEST, "missing payload bodies query")
             };
@@ -302,38 +307,14 @@ where
                     return text_response(STATUS_BAD_REQUEST, "invalid payload bodies query")
                 };
                 match key {
-                    "from" => {
-                        start = match value.parse::<u64>() {
-                            Ok(value) => Some(value),
-                            Err(_) => {
-                                return text_response(
-                                    STATUS_BAD_REQUEST,
-                                    "invalid payload bodies from query",
-                                )
-                            }
-                        };
-                    }
-                    "count" => {
-                        count = match value.parse::<u64>() {
-                            Ok(value) => Some(value),
-                            Err(_) => {
-                                return text_response(
-                                    STATUS_BAD_REQUEST,
-                                    "invalid payload bodies count query",
-                                )
-                            }
-                        };
-                    }
+                    "from" => start = value.parse().ok(),
+                    "count" => count = value.parse().ok(),
                     _ => return text_response(STATUS_BAD_REQUEST, "unknown payload bodies query"),
                 }
             }
-            let Some(start) = start else {
-                return text_response(STATUS_BAD_REQUEST, "missing payload bodies from query")
+            let (Some(start), Some(count)) = (start, count) else {
+                return text_response(STATUS_BAD_REQUEST, "missing payload bodies query")
             };
-            let Some(count) = count else {
-                return text_response(STATUS_BAD_REQUEST, "missing payload bodies count query")
-            };
-
             let Some(engine_api) = handle.engine_api().await else {
                 return text_response(STATUS_SERVICE_UNAVAILABLE, "engine api unavailable")
             };
@@ -343,6 +324,18 @@ where
                 PayloadBodiesRequest::Range { start, count },
             )
             .await
+        }
+        EngineSszEndpoint::Blobs(version) => {
+            if method != "POST" {
+                return text_response(STATUS_METHOD_NOT_ALLOWED, "method not allowed")
+            }
+            let Ok(body) = request.into_body().collect().await.map(|body| body.to_bytes()) else {
+                return text_response(STATUS_BAD_REQUEST, "failed to read request body")
+            };
+            let Some(engine_api) = handle.engine_api().await else {
+                return text_response(STATUS_SERVICE_UNAVAILABLE, "engine api unavailable")
+            };
+            handle_get_blobs(engine_api, version, &body).await
         }
     }
 }
@@ -362,6 +355,10 @@ fn parse_engine_path(path: &str) -> Option<EngineSszEndpoint> {
         }
         (Some("engine"), Some("v1"), Some("payloads"), None, None) => {
             Some(EngineSszEndpoint::NewPayload)
+        }
+        (Some("engine"), Some("v1"), Some("payloads"), Some(payload_id), None) => {
+            let payload_id = payload_id.parse::<B64>().map(PayloadId::from);
+            Some(EngineSszEndpoint::GetPayload(payload_id))
         }
         (Some("engine"), Some("v1"), Some("forkchoice"), None, None) => {
             Some(EngineSszEndpoint::Forkchoice)
@@ -384,10 +381,11 @@ enum EngineSszEndpoint {
     Capabilities,
     Identity,
     NewPayload,
+    GetPayload(Result<PayloadId, <B64 as std::str::FromStr>::Err>),
     Forkchoice,
-    Blobs(u8),
     PayloadBodiesByHash,
     PayloadBodiesByRange,
+    Blobs(u8),
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -469,9 +467,72 @@ where
     json_response(vec![engine_api.client_version().clone()])
 }
 
+async fn handle_get_payload<Provider, Pool, Validator, ChainSpec>(
+    engine_api: EthEngineApi<Provider, Pool, Validator, ChainSpec>,
+    fork: EngineSszFork,
+    payload_id: PayloadId,
+) -> HttpResponse
+where
+    Provider: HeaderProvider + BlockReader + StateProviderFactory + BalProvider + 'static,
+    Pool: TransactionPool + 'static,
+    Validator: EngineApiValidator<EthEngineTypes>,
+    ChainSpec: EthereumHardforks + Send + Sync + 'static,
+{
+    match fork {
+        EngineSszFork::Paris => match engine_api.get_payload_v2_metered(payload_id).await {
+            Ok(payload) => {
+                let block_value = payload.block_value;
+                match payload.execution_payload {
+                    ExecutionPayloadFieldV2::V1(payload) => {
+                        get_payload_response(BuiltPayloadParis { payload, block_value })
+                    }
+                    ExecutionPayloadFieldV2::V2(_) => {
+                        text_response(STATUS_BAD_REQUEST, "unsupported fork")
+                    }
+                }
+            }
+            Err(err) => get_payload_error_response(err),
+        },
+        EngineSszFork::Shanghai => match engine_api.get_payload_v2_metered(payload_id).await {
+            Ok(payload) => match BuiltPayloadShanghai::try_from(payload) {
+                Ok(payload) => get_payload_response(payload),
+                Err(err) => text_response(STATUS_BAD_REQUEST, err.to_string()),
+            },
+            Err(err) => get_payload_error_response(err),
+        },
+        EngineSszFork::Cancun => match engine_api.get_payload_v3_metered(payload_id).await {
+            Ok(payload) => get_payload_response(BuiltPayloadCancun::from(payload)),
+            Err(err) => get_payload_error_response(err),
+        },
+        EngineSszFork::Prague => match engine_api.get_payload_v4_metered(payload_id).await {
+            Ok(payload) => get_payload_response(BuiltPayloadPrague::from(payload)),
+            Err(err) => get_payload_error_response(err),
+        },
+        EngineSszFork::Osaka => match engine_api.get_payload_v5_metered(payload_id).await {
+            Ok(payload) => get_payload_response(BuiltPayloadOsaka::from(payload)),
+            Err(err) => get_payload_error_response(err),
+        },
+        EngineSszFork::Amsterdam => match engine_api.get_payload_v6_metered(payload_id).await {
+            Ok(payload) => get_payload_response(BuiltPayloadAmsterdam::from(payload)),
+            Err(err) => get_payload_error_response(err),
+        },
+    }
+}
+
+fn get_payload_error_response(err: EngineApiError) -> HttpResponse {
+    let status = match &err {
+        EngineApiError::UnknownPayload => STATUS_NOT_FOUND,
+        EngineApiError::EngineObjectValidationError(
+            reth_payload_primitives::EngineObjectValidationError::UnsupportedFork,
+        ) => STATUS_BAD_REQUEST,
+        _ => STATUS_INTERNAL_SERVER_ERROR,
+    };
+    text_response(status, err.to_string())
+}
+
 async fn handle_new_payload<Provider, Pool, Validator, ChainSpec>(
     engine_api: EthEngineApi<Provider, Pool, Validator, ChainSpec>,
-    version: u8,
+    fork: EngineSszFork,
     body: &[u8],
 ) -> HttpResponse
 where
@@ -480,12 +541,12 @@ where
     Validator: EngineApiValidator<EthEngineTypes>,
     ChainSpec: EthereumHardforks + Send + Sync + 'static,
 {
-    let payload = match decode_new_payload_request(version, body) {
+    let payload = match decode_new_payload_request(fork, body) {
         Ok(payload) => payload,
         Err(err) => return text_response(STATUS_BAD_REQUEST, err),
     };
 
-    let response = match version {
+    let response = match fork.payloads_version() {
         1 => engine_api.new_payload_v1(payload).await,
         2 => engine_api.new_payload_v2(payload).await,
         3 => engine_api.new_payload_v3(payload).await,
@@ -495,14 +556,17 @@ where
     };
 
     match response {
-        Ok(status) => ssz_response(status),
+        Ok(status) => match EngineSszPayloadStatus::try_from(status) {
+            Ok(status) => ssz_response(status),
+            Err(err) => text_response(STATUS_INTERNAL_SERVER_ERROR, err.to_string()),
+        },
         Err(err) => text_response(STATUS_INTERNAL_SERVER_ERROR, err.to_string()),
     }
 }
 
 async fn handle_forkchoice_updated<Provider, Pool, Validator, ChainSpec>(
     engine_api: EthEngineApi<Provider, Pool, Validator, ChainSpec>,
-    version: u8,
+    fork: EngineSszFork,
     body: &[u8],
 ) -> HttpResponse
 where
@@ -511,12 +575,12 @@ where
     Validator: EngineApiValidator<EthEngineTypes>,
     ChainSpec: EthereumHardforks + Send + Sync + 'static,
 {
-    let (state, attrs, custody_columns) = match decode_forkchoice_request(version, body) {
+    let (state, attrs, custody_columns) = match decode_forkchoice_request(fork, body) {
         Ok(request) => request,
         Err(err) => return text_response(STATUS_BAD_REQUEST, err),
     };
 
-    let response = match version {
+    let response = match fork.forkchoice_version() {
         1 => engine_api.fork_choice_updated_v1_metered(state, attrs).await,
         2 => engine_api.fork_choice_updated_v2_metered(state, attrs).await,
         3 => engine_api.fork_choice_updated_v3_metered(state, attrs).await,
@@ -525,7 +589,10 @@ where
     };
 
     match response {
-        Ok(updated) => ssz_response(updated),
+        Ok(updated) => match ForkchoiceUpdateResponse::try_from(updated) {
+            Ok(updated) => ssz_response(updated),
+            Err(err) => text_response(STATUS_INTERNAL_SERVER_ERROR, err.to_string()),
+        },
         Err(err) => text_response(STATUS_INTERNAL_SERVER_ERROR, err.to_string()),
     }
 }
@@ -546,9 +613,6 @@ where
     Validator: EngineApiValidator<EthEngineTypes>,
     ChainSpec: EthereumHardforks + Send + Sync + 'static,
 {
-    // TODO: Enforce PR-793 fork-era filtering for bodies responses.
-    // The request fork selects both the SSZ body schema and the valid timestamp range.
-    // Blocks outside the request fork era should be returned as available=false.
     match fork {
         EngineSszFork::Paris => {
             let response = fetch_payload_bodies_v1(engine_api, request).await;
@@ -565,7 +629,7 @@ where
         EngineSszFork::Cancun => {
             let response = fetch_payload_bodies_v1(engine_api, request).await;
             let response: BodiesResponseCancun = match payload_bodies_response(response, |body| {
-                ExecutionPayloadBodyShanghai::try_from(body).ok()
+                ExecutionPayloadBodyCancun::try_from(body).ok()
             }) {
                 Ok(response) => response,
                 Err(err) => return text_response(STATUS_INTERNAL_SERVER_ERROR, err),
@@ -575,7 +639,7 @@ where
         EngineSszFork::Prague => {
             let response = fetch_payload_bodies_v1(engine_api, request).await;
             let response: BodiesResponsePrague = match payload_bodies_response(response, |body| {
-                ExecutionPayloadBodyShanghai::try_from(body).ok()
+                ExecutionPayloadBodyPrague::try_from(body).ok()
             }) {
                 Ok(response) => response,
                 Err(err) => return text_response(STATUS_INTERNAL_SERVER_ERROR, err),
@@ -651,7 +715,7 @@ where
     ForkBody: Default,
 {
     let bodies = response?;
-    BodiesResponse::from_optional_bodies(bodies, convert).map_err(|err| err.to_string())
+    Ok(BodiesResponse::from_optional_bodies(bodies, convert))
 }
 
 fn payload_bodies_http_response<LegacyBody, ForkBody>(
@@ -659,7 +723,7 @@ fn payload_bodies_http_response<LegacyBody, ForkBody>(
     convert: impl Fn(LegacyBody) -> Option<ForkBody>,
 ) -> HttpResponse
 where
-    ForkBody: Default + ssz::Encode,
+    ForkBody: Default + ssz::Encode + ssz::Decode,
 {
     match payload_bodies_response(response, convert) {
         Ok(response) => ssz_response(response),
@@ -737,21 +801,27 @@ fn decode_blob_cells_request(body: &[u8]) -> Result<(Vec<B256>, B128), &'static 
     <(Vec<B256>, B128) as ssz::Decode>::from_ssz_bytes(body).map_err(|_| "invalid ssz")
 }
 
-fn decode_new_payload_request(version: u8, body: &[u8]) -> Result<ExecutionData, &'static str> {
-    match version {
-        1 => {
-            let execution_payload =
-                decode_one::<ExecutionPayloadV1>(body).map_err(|_| "invalid ssz")?;
+fn decode_new_payload_request(
+    fork: EngineSszFork,
+    body: &[u8],
+) -> Result<ExecutionData, &'static str> {
+    match fork {
+        EngineSszFork::Paris => {
+            let ExecutionPayloadEnvelopeParis { payload: execution_payload } =
+                ExecutionPayloadEnvelopeParis::from_ssz_bytes(body).map_err(|_| "invalid ssz")?;
             Ok(ExecutionData::new(execution_payload.into(), ExecutionPayloadSidecar::none()))
         }
-        2 => {
-            let execution_payload =
-                decode_one::<ExecutionPayloadV2>(body).map_err(|_| "invalid ssz")?;
+        EngineSszFork::Shanghai => {
+            let ExecutionPayloadEnvelopeShanghai { payload: execution_payload } =
+                ExecutionPayloadEnvelopeShanghai::from_ssz_bytes(body)
+                    .map_err(|_| "invalid ssz")?;
             Ok(ExecutionData::new(execution_payload.into(), ExecutionPayloadSidecar::none()))
         }
-        3 => {
-            let (execution_payload, parent_beacon_block_root) =
-                <(ExecutionPayloadV3, B256)>::from_ssz_bytes(body).map_err(|_| "invalid ssz")?;
+        EngineSszFork::Cancun => {
+            let ExecutionPayloadEnvelopeCancun {
+                payload: execution_payload,
+                parent_beacon_block_root,
+            } = ExecutionPayloadEnvelopeCancun::from_ssz_bytes(body).map_err(|_| "invalid ssz")?;
             let versioned_hashes = calculate_versioned_hashes(
                 &execution_payload.payload_inner.payload_inner.transactions,
             )?;
@@ -761,37 +831,52 @@ fn decode_new_payload_request(version: u8, body: &[u8]) -> Result<ExecutionData,
             });
             Ok(ExecutionData::new(execution_payload.into(), sidecar))
         }
-        4 => {
-            let (execution_payload, parent_beacon_block_root, execution_requests) =
-                <(ExecutionPayloadV3, B256, Vec<Bytes>)>::from_ssz_bytes(body)
-                    .map_err(|_| "invalid ssz")?;
+        EngineSszFork::Prague => {
+            let ExecutionPayloadEnvelopePrague {
+                payload: execution_payload,
+                parent_beacon_block_root,
+                execution_requests,
+            } = ExecutionPayloadEnvelopePrague::from_ssz_bytes(body).map_err(|_| "invalid ssz")?;
             let versioned_hashes = calculate_versioned_hashes(
                 &execution_payload.payload_inner.payload_inner.transactions,
             )?;
             let sidecar = ExecutionPayloadSidecar::v4(
                 CancunPayloadFields { parent_beacon_block_root, versioned_hashes },
-                PraguePayloadFields::new(RequestsOrHash::Requests(Requests::new(
-                    execution_requests,
-                ))),
+                PraguePayloadFields::new(RequestsOrHash::Requests(execution_requests)),
             );
             Ok(ExecutionData::new(execution_payload.into(), sidecar))
         }
-        5 => {
-            let (execution_payload, parent_beacon_block_root, execution_requests) =
-                <(ExecutionPayloadV4, B256, Vec<Bytes>)>::from_ssz_bytes(body)
-                    .map_err(|_| "invalid ssz")?;
+        EngineSszFork::Osaka => {
+            let ExecutionPayloadEnvelopeOsaka {
+                payload: execution_payload,
+                parent_beacon_block_root,
+                execution_requests,
+            } = ExecutionPayloadEnvelopeOsaka::from_ssz_bytes(body).map_err(|_| "invalid ssz")?;
+            let versioned_hashes = calculate_versioned_hashes(
+                &execution_payload.payload_inner.payload_inner.transactions,
+            )?;
+            let sidecar = ExecutionPayloadSidecar::v4(
+                CancunPayloadFields { parent_beacon_block_root, versioned_hashes },
+                PraguePayloadFields::new(RequestsOrHash::Requests(execution_requests)),
+            );
+            Ok(ExecutionData::new(execution_payload.into(), sidecar))
+        }
+        EngineSszFork::Amsterdam => {
+            let ExecutionPayloadEnvelopeAmsterdam {
+                payload: execution_payload,
+                parent_beacon_block_root,
+                execution_requests,
+            } = ExecutionPayloadEnvelopeAmsterdam::from_ssz_bytes(body)
+                .map_err(|_| "invalid ssz")?;
             let versioned_hashes = calculate_versioned_hashes(
                 &execution_payload.payload_inner.payload_inner.payload_inner.transactions,
             )?;
             let sidecar = ExecutionPayloadSidecar::v4(
                 CancunPayloadFields { parent_beacon_block_root, versioned_hashes },
-                PraguePayloadFields::new(RequestsOrHash::Requests(Requests::new(
-                    execution_requests,
-                ))),
+                PraguePayloadFields::new(RequestsOrHash::Requests(execution_requests)),
             );
             Ok(ExecutionData::new(ExecutionPayload::V4(execution_payload), sidecar))
         }
-        _ => Err("unsupported payload endpoint version"),
     }
 }
 
@@ -809,95 +894,67 @@ fn calculate_versioned_hashes(transactions: &[Bytes]) -> Result<Vec<B256>, &'sta
 }
 
 fn decode_forkchoice_request(
-    version: u8,
+    fork: EngineSszFork,
     body: &[u8],
 ) -> Result<(ForkchoiceState, Option<PayloadAttributes>, Option<B128>), &'static str> {
-    match version {
-        1..=3 => {
-            let (forkchoice_state, payload_attributes) =
-                <(ForkchoiceState, Vec<PayloadAttributes>)>::from_ssz_bytes(body)
-                    .map_err(|_| "invalid ssz")?;
-            Ok((forkchoice_state, payload_attrs(version, payload_attributes)?, None))
+    match fork {
+        EngineSszFork::Paris => {
+            let ForkchoiceUpdateParis { forkchoice_state, payload_attributes } =
+                ForkchoiceUpdateParis::from_ssz_bytes(body).map_err(|_| "invalid ssz")?;
+            Ok((forkchoice_state, optional_attrs(payload_attributes), None))
         }
-        4 => {
-            let (forkchoice_state, payload_attributes, custody_columns) =
-                <(ForkchoiceState, Vec<PayloadAttributes>, Vec<B128>)>::from_ssz_bytes(body)
-                    .map_err(|_| "invalid ssz")?;
+        EngineSszFork::Shanghai => {
+            let ForkchoiceUpdateShanghai { forkchoice_state, payload_attributes } =
+                ForkchoiceUpdateShanghai::from_ssz_bytes(body).map_err(|_| "invalid ssz")?;
+            Ok((forkchoice_state, optional_attrs(payload_attributes), None))
+        }
+        EngineSszFork::Cancun => {
+            let ForkchoiceUpdateCancun { forkchoice_state, payload_attributes } =
+                ForkchoiceUpdateCancun::from_ssz_bytes(body).map_err(|_| "invalid ssz")?;
+            Ok((forkchoice_state, optional_attrs(payload_attributes), None))
+        }
+        EngineSszFork::Prague => {
+            let ForkchoiceUpdatePrague { forkchoice_state, payload_attributes } =
+                ForkchoiceUpdatePrague::from_ssz_bytes(body).map_err(|_| "invalid ssz")?;
+            Ok((forkchoice_state, optional_attrs(payload_attributes), None))
+        }
+        EngineSszFork::Osaka => {
+            let ForkchoiceUpdateOsaka { forkchoice_state, payload_attributes } =
+                ForkchoiceUpdateOsaka::from_ssz_bytes(body).map_err(|_| "invalid ssz")?;
+            Ok((forkchoice_state, optional_attrs(payload_attributes), None))
+        }
+        EngineSszFork::Amsterdam => {
+            let ForkchoiceUpdateAmsterdam { forkchoice_state, payload_attributes, custody_columns } =
+                ForkchoiceUpdateAmsterdam::from_ssz_bytes(body).map_err(|_| "invalid ssz")?;
             Ok((
                 forkchoice_state,
-                payload_attrs(version, payload_attributes)?,
-                custody_columns_opt(custody_columns)?,
+                optional_attrs(payload_attributes),
+                custody_columns.into_option(),
             ))
         }
-        _ => Err("unsupported forkchoice endpoint version"),
     }
 }
 
-fn decode_one<T: ssz::Decode>(body: &[u8]) -> Result<T, ssz::DecodeError> {
-    let mut builder = ssz::SszDecoderBuilder::new(body);
-    builder.register_type::<T>()?;
-    let mut decoder = builder.build()?;
-    decoder.decode_next()
-}
-
-fn payload_attrs(
-    version: u8,
-    attrs: Vec<PayloadAttributes>,
-) -> Result<Option<PayloadAttributes>, &'static str> {
-    if attrs.len() > 1 {
-        return Err("payload_attributes must contain at most one value")
-    }
-
-    attrs.into_iter().next().map(|attrs| validate_payload_attrs_version(version, attrs)).transpose()
-}
-
-fn custody_columns_opt(custody_columns: Vec<B128>) -> Result<Option<B128>, &'static str> {
-    if custody_columns.len() > 1 {
-        return Err("invalid params")
-    }
-
-    Ok(custody_columns.into_iter().next())
-}
-
-fn validate_payload_attrs_version(
-    version: u8,
-    attrs: PayloadAttributes,
-) -> Result<PayloadAttributes, &'static str> {
-    let matches_version = match version {
-        1 => {
-            attrs.withdrawals.is_none() &&
-                attrs.parent_beacon_block_root.is_none() &&
-                attrs.slot_number.is_none()
-        }
-        2 => {
-            attrs.withdrawals.is_some() &&
-                attrs.parent_beacon_block_root.is_none() &&
-                attrs.slot_number.is_none()
-        }
-        3 => {
-            attrs.withdrawals.is_some() &&
-                attrs.parent_beacon_block_root.is_some() &&
-                attrs.slot_number.is_none()
-        }
-        4 => {
-            attrs.withdrawals.is_some() &&
-                attrs.parent_beacon_block_root.is_some() &&
-                attrs.slot_number.is_some()
-        }
-        _ => false,
-    };
-
-    if matches_version {
-        Ok(attrs)
-    } else {
-        Err("payload_attributes version does not match endpoint")
-    }
+fn optional_attrs<T>(attrs: Optional<T>) -> Option<PayloadAttributes>
+where
+    T: Into<PayloadAttributes>,
+{
+    attrs.into_option().map(Into::into)
 }
 
 fn ssz_response<T: ssz::Encode>(value: T) -> HttpResponse {
     HttpResponse::builder()
         .status(STATUS_OK)
         .header(CONTENT_TYPE, OCTET_STREAM)
+        .body(HttpBody::from(value.as_ssz_bytes()))
+        .expect("valid response")
+}
+
+fn get_payload_response<T: ssz::Encode>(value: T) -> HttpResponse {
+    HttpResponse::builder()
+        .status(STATUS_OK)
+        .header(CONTENT_TYPE, OCTET_STREAM)
+        .header(CACHE_CONTROL, "no-store")
         .body(HttpBody::from(value.as_ssz_bytes()))
         .expect("valid response")
 }
@@ -929,21 +986,7 @@ fn text_response(status: u16, body: impl Into<String>) -> HttpResponse {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy_rpc_types_engine::{
-        ssz_engine_types::{BodiesResponseAmsterdam, BodiesResponseParis},
-        ExecutionPayloadBodyV1, ExecutionPayloadBodyV2,
-    };
     use ssz::Encode;
-
-    fn payload_bodies_response_from_bodies<LegacyBody, ForkBody>(
-        bodies: Vec<Option<LegacyBody>>,
-        convert: impl Fn(LegacyBody) -> Option<ForkBody>,
-    ) -> Result<BodiesResponse<ForkBody>, String>
-    where
-        ForkBody: Default,
-    {
-        BodiesResponse::from_optional_bodies(bodies, convert).map_err(|err| err.to_string())
-    }
 
     #[test]
     fn parses_capabilities_endpoint() {
@@ -964,21 +1007,38 @@ mod tests {
     }
 
     #[test]
+    fn parses_fork_scoped_get_payload_endpoint() {
+        let endpoint = parse_engine_path("/engine/v1/payloads/0x0000000000000001").unwrap();
+        assert_eq!(
+            endpoint,
+            EngineSszEndpoint::GetPayload(Ok(PayloadId::new([0, 0, 0, 0, 0, 0, 0, 1])))
+        );
+    }
+
+    #[test]
+    fn matches_malformed_get_payload_endpoint() {
+        assert!(matches!(
+            parse_engine_path("/engine/v1/payloads/0x01"),
+            Some(EngineSszEndpoint::GetPayload(Err(_)))
+        ));
+    }
+
+    #[test]
     fn parses_fork_scoped_forkchoice_endpoint() {
         let endpoint = parse_engine_path("/engine/v1/forkchoice").unwrap();
         assert_eq!(endpoint, EngineSszEndpoint::Forkchoice);
     }
 
     #[test]
-    fn parses_payload_bodies_by_hash_endpoint() {
-        let endpoint = parse_engine_path("/engine/v1/bodies/hash").unwrap();
-        assert_eq!(endpoint, EngineSszEndpoint::PayloadBodiesByHash);
-    }
-
-    #[test]
-    fn parses_payload_bodies_by_range_endpoint() {
-        let endpoint = parse_engine_path("/engine/v1/bodies").unwrap();
-        assert_eq!(endpoint, EngineSszEndpoint::PayloadBodiesByRange);
+    fn parses_payload_bodies_endpoints() {
+        assert_eq!(
+            parse_engine_path("/engine/v1/bodies/hash").unwrap(),
+            EngineSszEndpoint::PayloadBodiesByHash
+        );
+        assert_eq!(
+            parse_engine_path("/engine/v1/bodies").unwrap(),
+            EngineSszEndpoint::PayloadBodiesByRange
+        );
     }
 
     #[test]
@@ -994,77 +1054,51 @@ mod tests {
     }
 
     #[test]
-    fn encodes_payload_body_availability_for_selected_fork() {
-        let response: BodiesResponseParis = payload_bodies_response_from_bodies(
-            vec![
-                Some(ExecutionPayloadBodyV1 { transactions: vec![], withdrawals: None }),
-                Some(ExecutionPayloadBodyV1 { transactions: vec![], withdrawals: Some(vec![]) }),
-                None,
-            ],
-            |body| ExecutionPayloadBodyParis::try_from(body).ok(),
-        )
-        .unwrap();
-
-        assert_eq!(response.entries.len(), 3);
-        assert!(response.entries[0].available);
-        assert!(!response.entries[1].available);
-        assert!(!response.entries[2].available);
-
-        let response: BodiesResponseAmsterdam = payload_bodies_response_from_bodies(
-            vec![
-                Some(ExecutionPayloadBodyV2 {
-                    transactions: vec![],
-                    withdrawals: Some(vec![]),
-                    block_access_list: Some(Bytes::new()),
-                }),
-                Some(ExecutionPayloadBodyV2 {
-                    transactions: vec![],
-                    withdrawals: Some(vec![]),
-                    block_access_list: None,
-                }),
-            ],
-            |body| ExecutionPayloadBodyAmsterdam::try_from(body).ok(),
-        )
-        .unwrap();
-
-        assert_eq!(response.entries.len(), 2);
-        assert!(response.entries[0].available);
-        assert!(!response.entries[1].available);
-    }
-
-    #[test]
     fn decodes_forkchoice_v4_with_custody_columns() {
         let forkchoice_state = ForkchoiceState {
             head_block_hash: B256::ZERO,
             safe_block_hash: B256::ZERO,
             finalized_block_hash: B256::ZERO,
         };
-        let encoded =
-            (forkchoice_state, Vec::<PayloadAttributes>::new(), vec![B128::with_last_byte(1)])
-                .as_ssz_bytes();
+        let encoded = ForkchoiceUpdateAmsterdam {
+            forkchoice_state,
+            payload_attributes: Optional::none(),
+            custody_columns: Optional::some(B128::with_last_byte(1)),
+        }
+        .as_ssz_bytes();
 
         let (decoded_state, decoded_attrs, custody_columns) =
-            decode_forkchoice_request(4, &encoded).unwrap();
+            decode_forkchoice_request(EngineSszFork::Amsterdam, &encoded).unwrap();
         assert_eq!(decoded_state, forkchoice_state);
         assert!(decoded_attrs.is_none());
         assert_eq!(custody_columns, Some(B128::with_last_byte(1)));
     }
 
     #[test]
-    fn rejects_forkchoice_v4_with_multiple_custody_columns() {
+    fn decodes_forkchoice_cancun_payload_attributes() {
         let forkchoice_state = ForkchoiceState {
             head_block_hash: B256::ZERO,
             safe_block_hash: B256::ZERO,
             finalized_block_hash: B256::ZERO,
         };
-        let encoded = (
-            forkchoice_state,
-            Vec::<PayloadAttributes>::new(),
-            vec![B128::ZERO, B128::with_last_byte(1)],
-        )
-            .as_ssz_bytes();
+        let attrs = crate::engine_ssz_containers::PayloadAttributesCancun {
+            timestamp: 1,
+            prev_randao: B256::with_last_byte(2),
+            suggested_fee_recipient: Default::default(),
+            withdrawals: Vec::new(),
+            parent_beacon_block_root: B256::with_last_byte(3),
+        };
+        let encoded =
+            ForkchoiceUpdateCancun { forkchoice_state, payload_attributes: Optional::some(attrs) }
+                .as_ssz_bytes();
 
-        let err = decode_forkchoice_request(4, &encoded).unwrap_err();
-        assert_eq!(err, "invalid params");
+        let (decoded_state, decoded_attrs, custody_columns) =
+            decode_forkchoice_request(EngineSszFork::Cancun, &encoded).unwrap();
+        assert_eq!(decoded_state, forkchoice_state);
+        let decoded_attrs = decoded_attrs.unwrap();
+        assert_eq!(decoded_attrs.timestamp, 1);
+        assert!(decoded_attrs.withdrawals.as_ref().unwrap().is_empty());
+        assert_eq!(decoded_attrs.parent_beacon_block_root, Some(B256::with_last_byte(3)));
+        assert!(custody_columns.is_none());
     }
 }
