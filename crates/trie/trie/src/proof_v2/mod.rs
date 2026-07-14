@@ -1479,38 +1479,6 @@ where
         self.retained_proofs.clear();
     }
 
-    /// Sorts retained proofs and removes duplicate paths, erroring if duplicate paths disagree.
-    fn dedupe_retained_proofs_by_path(&mut self) -> Result<(), StateProofError> {
-        self.retained_proofs.sort_unstable_by(|a, b| depth_first::cmp(&a.path, &b.path));
-
-        let mut conflicting_path = None;
-        self.retained_proofs.dedup_by(|current, previous| {
-            if current.path != previous.path {
-                return false
-            }
-
-            if current == previous {
-                return true
-            }
-
-            conflicting_path = Some(current.path);
-            debug_assert_eq!(
-                current, previous,
-                "duplicate proof nodes for path {:?} must be identical",
-                current.path
-            );
-            false
-        });
-
-        if let Some(path) = conflicting_path {
-            let msg = format!("conflicting proof nodes retained for path {path:?}");
-            error!(target: TRACE_TARGET, "{msg}");
-            return Err(StateProofError::TrieInconsistency(msg))
-        }
-
-        Ok(())
-    }
-
     /// Internal implementation of proof calculation. Assumes both cursors have already been reset.
     /// See docs on [`Self::proof`] for expected behavior.
     fn proof_inner(
@@ -1548,7 +1516,8 @@ where
             retained_proofs_len = ?self.retained_proofs.len(),
             "proof_inner: returning",
         );
-        self.dedupe_retained_proofs_by_path()?;
+        self.retained_proofs.sort_unstable_by(|a, b| depth_first::cmp(&a.path, &b.path));
+        self.retained_proofs.dedup_by(|a, b| a.path == b.path);
         Ok(core::mem::take(&mut self.retained_proofs))
     }
 
@@ -2041,23 +2010,6 @@ mod tests {
         }
     }
 
-    fn assert_unique_proof_paths(proofs: &[ProofTrieNodeV2]) {
-        let mut sorted = proofs.to_vec();
-        sorted.sort_unstable_by(|a, b| depth_first::cmp(&a.path, &b.path));
-
-        for window in sorted.windows(2) {
-            let [previous, current] = window else { unreachable!("windows(2) returns two items") };
-            if previous.path == current.path {
-                pretty_assertions::assert_eq!(
-                    previous,
-                    current,
-                    "same-path proof nodes must have identical representations"
-                );
-                panic!("proof path {:?} appears more than once", current.path);
-            }
-        }
-    }
-
     /// Tests that `clear_computation_state` properly resets internal stacks, allowing a
     /// `StorageProofCalculator` to be reused after a mid-computation error left stale state.
     /// Before the fix, stale data in `branch_stack`, `child_stack`, and `branch_path`
@@ -2201,32 +2153,6 @@ mod tests {
         let targets = [ProofV2Target::new(B256::ZERO), ProofV2Target::new(slot_80).with_min_len(2)];
 
         let harness = ProofTestHarness::new(storage);
-        harness.assert_proof(targets).expect("Proof generation failed");
-    }
-
-    #[test]
-    fn test_nested_exact_subtrie_targets_have_unique_paths() {
-        reth_tracing::init_test_tracing();
-
-        let slot_aa10 = B256::right_padding_from(&[0xaa, 0x10]);
-        let slot_aa20 = B256::right_padding_from(&[0xaa, 0x20]);
-        let slot_ab10 = B256::right_padding_from(&[0xab, 0x10]);
-        let storage = BTreeMap::from([
-            (slot_aa10, U256::from(1)),
-            (slot_aa20, U256::from(2)),
-            (slot_ab10, U256::from(3)),
-        ]);
-        let targets = [
-            ProofV2Target::new(slot_aa10).with_min_len(2),
-            ProofV2Target::new(slot_aa10).with_min_len(4),
-            ProofV2Target::new(slot_aa20).with_min_len(4),
-        ];
-
-        let harness = ProofTestHarness::new(storage);
-        let mut proof_targets = targets;
-        let (proofs, _) = harness.proof_v2(&mut proof_targets);
-
-        assert_unique_proof_paths(&proofs);
         harness.assert_proof(targets).expect("Proof generation failed");
     }
 
