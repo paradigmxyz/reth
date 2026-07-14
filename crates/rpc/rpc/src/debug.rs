@@ -14,7 +14,7 @@ use alloy_rpc_types_trace::geth::{
 use async_trait::async_trait;
 use evm2::{
     ethereum::RecoveredTxEnvelope,
-    evm::{BlockStateAccumulator, DynDatabase, NonStaticAny, StateChangeSource},
+    evm::{DynDatabase, NonStaticAny, StateChangeSource},
     EvmTypes, TxResultWithState,
 };
 use evm2_inspectors::tracing::{DebugInspector, TransactionContext};
@@ -591,7 +591,7 @@ where
                     .contracts
                     .values()
                     .map(|code| code.original_bytes())
-                    .filter(|code| !mode.is_canonical() || !code.is_empty())
+                    .filter(|code| !code.is_empty())
                     .collect::<Vec<_>>();
                 if mode.is_canonical() {
                     codes.sort_unstable();
@@ -818,10 +818,8 @@ where
 
         self.eth_api()
             .spawn_with_state_at_block(block.parent_hash(), move |eth_api, mut db| {
-                eth_api.apply_pre_execution_changes(&block, &mut db)?;
-
                 let mut roots = Vec::with_capacity(block.body().transactions().len());
-                let mut state = BlockStateAccumulator::new();
+                let mut state = eth_api.apply_pre_execution_changes(&block, &mut db)?;
                 for tx in block.transactions_recovered() {
                     let tx_env = eth_api.evm_config().tx_env(tx.cloned());
                     let result = eth_api.transact(&mut db, evm_env.clone(), tx_env)?;
