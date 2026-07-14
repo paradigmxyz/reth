@@ -5,7 +5,7 @@ use alloy_genesis::ChainConfig;
 use alloy_primitives::{hex::decode, uint, Address, Bytes, B256, U64};
 use alloy_rlp::{Decodable, Encodable};
 use alloy_rpc_types::BlockTransactionsKind;
-use alloy_rpc_types_debug::ExecutionWitness;
+use alloy_rpc_types_debug::{ExecutionWitness, StorageRangeResult as RpcStorageRangeResult};
 use alloy_rpc_types_eth::{
     state::EvmOverrides, Account, AccountInfo, BlockError, Bundle, Index, StateContext,
 };
@@ -34,8 +34,8 @@ use reth_rpc_eth_types::{EthApiError, StateCacheDb};
 use reth_rpc_server_types::{result::internal_rpc_err, ToRpcResult};
 use reth_storage_api::{
     BlockIdReader, BlockReaderIdExt, HashedPostStateProvider, HeaderProvider, ProviderBlock,
-    ReceiptProviderIdExt, StateProviderFactory, StateRootProvider, StorageRootProvider,
-    TransactionVariant,
+    ReceiptProviderIdExt, StateProviderFactory, StateRootProvider, StorageRangeProvider,
+    StorageRootProvider, TransactionVariant,
 };
 use reth_tasks::{pool::BlockingTaskGuard, Runtime};
 use reth_transaction_pool::TransactionPool;
@@ -671,6 +671,94 @@ where
         Ok(AccountInfo { balance: account.balance, nonce: account.nonce, code })
     }
 
+    /// Returns paginated storage slots for a contract at a mid-block execution point.
+    pub async fn debug_storage_range_at(
+        &self,
+        block_hash: B256,
+        tx_idx: usize,
+        contract_address: Address,
+        key_start: B256,
+        max_result: u64,
+    ) -> Result<RpcStorageRangeResult, Eth::Error> {
+        let block = self
+            .eth_api()
+            .recovered_block(BlockId::Hash(block_hash.into()))
+            .await?
+            .ok_or(EthApiError::HeaderNotFound(BlockId::Hash(block_hash.into())))?;
+
+        let transaction_count = block.transaction_count();
+        if tx_idx >= transaction_count {
+            return Err(EthApiError::InvalidParams(format!(
+                "tx index {tx_idx} out of range for block with {transaction_count} transactions"
+            ))
+            .into())
+        }
+
+        self.eth_api()
+            .spawn_with_state_at_block(block.parent_hash(), move |eth_api, mut db| {
+                let mut executor = eth_api
+                    .evm_config()
+                    .executor_for_block(&mut db, block.sealed_block())
+                    .map_err(RethError::other)
+                    .map_err(Eth::Error::from_eth_err)?;
+                executor.apply_pre_execution_changes().map_err(Eth::Error::from_eth_err)?;
+
+                // Geth semantics: tx_idx is the count of transactions to execute
+                for tx in block.transactions_recovered().take(tx_idx) {
+                    executor.execute_transaction(tx).map_err(Eth::Error::from_eth_err)?;
+                }
+                drop(executor);
+
+                let hashed_storage = db
+                    .cache
+                    .accounts
+                    .get(&contract_address)
+                    .and_then(|account| {
+                        account.account.as_ref().map(|plain_account| {
+                            HashedStorage::from_plain_storage(
+                                account.status,
+                                plain_account.storage.iter(),
+                            )
+                        })
+                    })
+                    .unwrap_or_default();
+
+                let provider_result = db
+                    .database
+                    .storage_range(contract_address, key_start, max_result as usize, hashed_storage)
+                    .map_err(Eth::Error::from_eth_err)?;
+
+                let mut preimages = alloy_primitives::map::B256Map::<B256>::default();
+                if let Some(cached) = db.cache.accounts.get(&contract_address) &&
+                    let Some(plain_account) = cached.account.as_ref()
+                {
+                    for slot in plain_account.storage.keys() {
+                        let slot_b256 = B256::from(*slot);
+                        let hashed = alloy_primitives::keccak256(slot_b256);
+                        preimages.insert(hashed, slot_b256);
+                    }
+                }
+
+                let mut storage_map = alloy_rpc_types_debug::StorageMap::default();
+                for entry in &provider_result.entries {
+                    let unhashed_key = preimages.get(&entry.hash).copied().unwrap_or(B256::ZERO);
+                    storage_map.0.insert(
+                        entry.hash,
+                        alloy_rpc_types_debug::StorageResult {
+                            key: unhashed_key,
+                            value: entry.value.into(),
+                        },
+                    );
+                }
+
+                Ok(RpcStorageRangeResult {
+                    storage: storage_map,
+                    next_key: provider_result.next_key,
+                })
+            })
+            .await
+    }
+
     /// Returns the code associated with a given hash at the specified block ID. If no code is
     /// found, it returns None. If no block ID is provided, it defaults to the latest block.
     pub async fn debug_code_by_hash(
@@ -1152,13 +1240,22 @@ where
 
     async fn debug_storage_range_at(
         &self,
-        _block_hash: B256,
-        _tx_idx: usize,
-        _contract_address: Address,
-        _key_start: B256,
-        _max_result: u64,
-    ) -> RpcResult<()> {
-        Ok(())
+        block_hash: B256,
+        tx_idx: usize,
+        contract_address: Address,
+        key_start: B256,
+        max_result: u64,
+    ) -> RpcResult<RpcStorageRangeResult> {
+        Self::debug_storage_range_at(
+            self,
+            block_hash,
+            tx_idx,
+            contract_address,
+            key_start,
+            max_result,
+        )
+        .await
+        .map_err(Into::into)
     }
 
     async fn debug_trace_bad_block(

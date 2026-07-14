@@ -7,7 +7,7 @@ use alloy_primitives::{
 use reth_primitives_traits::{Account, Bytecode};
 use reth_storage_api::{
     AccountReader, BlockHashReader, BytecodeReader, HashedPostStateProvider, StateProofProvider,
-    StateProvider, StateRootProvider, StorageRootProvider,
+    StateProvider, StateRootProvider, StorageRangeProvider, StorageRootProvider,
 };
 use reth_storage_errors::provider::ProviderResult;
 use reth_trie::{
@@ -148,6 +148,18 @@ impl StateProofProvider for StateProviderTest {
         _mode: reth_trie::ExecutionWitnessMode,
     ) -> ProviderResult<Vec<Bytes>> {
         unimplemented!("witness generation is not supported")
+    }
+}
+
+impl StorageRangeProvider for StateProviderTest {
+    fn storage_range(
+        &self,
+        _address: Address,
+        _start: B256,
+        _limit: usize,
+        _hashed_storage: HashedStorage,
+    ) -> ProviderResult<reth_storage_api::StorageRangeResult> {
+        Ok(Default::default())
     }
 }
 

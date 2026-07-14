@@ -15,8 +15,8 @@ use reth_db_api::{
 use reth_primitives_traits::{Account, Bytecode, NodePrimitives};
 use reth_storage_api::{
     BlockNumReader, BytecodeReader, DBProvider, NodePrimitivesProvider, PruneCheckpointReader,
-    StageCheckpointReader, StateProofProvider, StorageChangeSetReader, StorageRootProvider,
-    StorageSettingsCache,
+    StageCheckpointReader, StateProofProvider, StorageChangeSetReader, StorageRangeProvider,
+    StorageRootProvider, StorageSettingsCache,
 };
 use reth_storage_errors::provider::ProviderResult;
 use reth_trie::{
@@ -635,6 +635,36 @@ where
                 values
             })
         })
+    }
+}
+
+impl<Provider, N> StorageRangeProvider for HistoricalStateProviderRef<'_, Provider, N>
+where
+    Provider: DBProvider
+        + ChangeSetReader
+        + StorageChangeSetReader
+        + BlockNumReader
+        + BlockHashReader
+        + PruneCheckpointReader
+        + StageCheckpointReader
+        + StorageSettingsCache
+        + NodePrimitivesProvider<Primitives = N>,
+    N: NodePrimitives,
+{
+    fn storage_range(
+        &self,
+        address: Address,
+        start: B256,
+        limit: usize,
+        hashed_storage: HashedStorage,
+    ) -> ProviderResult<reth_storage_api::StorageRangeResult> {
+        let hashed_address = alloy_primitives::keccak256(address);
+        let input = self.build_overlay(TrieInputSorted::from_unsorted(TrieInput::from_state(
+            HashedPostState::from_hashed_storage(hashed_address, hashed_storage),
+        )))?;
+        let db_cursor_factory = reth_trie_db::DatabaseHashedCursorFactory::new(self.tx());
+        let overlay_factory = HashedPostStateCursorFactory::new(db_cursor_factory, &input.state);
+        super::storage_range::storage_range(&overlay_factory, hashed_address, start, limit)
     }
 }
 

@@ -1,5 +1,6 @@
 use crate::{
     AccountReader, BlockHashReader, HashedPostStateProvider, StateProvider, StateRootProvider,
+    StorageRangeProvider,
 };
 use alloy_primitives::{Address, BlockNumber, Bytes, StorageKey, StorageValue, B256};
 use reth_db_api::{cursor::DbDupCursorRO, tables, transaction::DbTx};
@@ -251,6 +252,32 @@ impl<Provider: DBProvider + StorageSettingsCache> StateProofProvider
     }
 }
 
+impl<Provider: DBProvider + StorageSettingsCache> StorageRangeProvider
+    for LatestStateProviderRef<'_, Provider>
+{
+    fn storage_range(
+        &self,
+        address: Address,
+        start: B256,
+        limit: usize,
+        hashed_storage: reth_trie::HashedStorage,
+    ) -> reth_storage_errors::provider::ProviderResult<reth_storage_api::StorageRangeResult> {
+        let hashed_address = alloy_primitives::keccak256(address);
+        let db_cursor_factory = reth_trie_db::DatabaseHashedCursorFactory::new(self.tx());
+
+        if hashed_storage.storage.is_empty() && !hashed_storage.wiped {
+            super::storage_range::storage_range(&db_cursor_factory, hashed_address, start, limit)
+        } else {
+            let state_sorted =
+                reth_trie::HashedPostState::from_hashed_storage(hashed_address, hashed_storage)
+                    .into_sorted();
+            let overlay_factory =
+                HashedPostStateCursorFactory::new(db_cursor_factory, &state_sorted);
+            super::storage_range::storage_range(&overlay_factory, hashed_address, start, limit)
+        }
+    }
+}
+
 impl<Provider: DBProvider> HashedPostStateProvider for LatestStateProviderRef<'_, Provider> {
     fn hashed_post_state(&self, bundle_state: &revm::database::BundleState) -> HashedPostState {
         HashedPostState::from_bundle_state::<KeccakKeyHasher>(bundle_state.state())
@@ -438,5 +465,55 @@ mod tests {
         let db = factory.provider().unwrap();
         let provider_ref = LatestStateProviderRef::new(&db);
         assert_eq!(provider_ref.storage(address, slot).unwrap(), None);
+    }
+
+    #[test]
+    fn test_storage_range_basic() {
+        use reth_storage_api::StorageRangeProvider;
+        use reth_trie::HashedStorage;
+
+        let factory = create_test_provider_factory();
+        factory.set_storage_settings_cache(StorageSettings::v2());
+
+        let address = address!("0x0000000000000000000000000000000000000001");
+        let hashed_address = keccak256(address);
+
+        let slot1 = b256!("0x0000000000000000000000000000000000000000000000000000000000000001");
+        let slot2 = b256!("0x0000000000000000000000000000000000000000000000000000000000000002");
+        let slot3 = b256!("0x0000000000000000000000000000000000000000000000000000000000000003");
+        let hashed_slot1 = keccak256(slot1);
+        let hashed_slot2 = keccak256(slot2);
+        let hashed_slot3 = keccak256(slot3);
+
+        let tx = factory.provider_rw().unwrap().into_tx();
+        tx.put::<tables::HashedStorages>(
+            hashed_address,
+            StorageEntry { key: hashed_slot1, value: U256::from(10) },
+        )
+        .unwrap();
+        tx.put::<tables::HashedStorages>(
+            hashed_address,
+            StorageEntry { key: hashed_slot2, value: U256::from(20) },
+        )
+        .unwrap();
+        tx.put::<tables::HashedStorages>(
+            hashed_address,
+            StorageEntry { key: hashed_slot3, value: U256::from(30) },
+        )
+        .unwrap();
+        tx.commit().unwrap();
+
+        let db = factory.provider().unwrap();
+        let provider_ref = LatestStateProviderRef::new(&db);
+
+        let result =
+            provider_ref.storage_range(address, B256::ZERO, 2, HashedStorage::default()).unwrap();
+        assert_eq!(result.entries.len(), 2);
+        assert!(result.next_key.is_some());
+
+        let result_all =
+            provider_ref.storage_range(address, B256::ZERO, 100, HashedStorage::default()).unwrap();
+        assert_eq!(result_all.entries.len(), 3);
+        assert_eq!(result_all.next_key, None);
     }
 }
