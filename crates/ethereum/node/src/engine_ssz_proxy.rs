@@ -748,7 +748,7 @@ fn payload_bodies_response<LegacyBody, ForkBody>(
     convert: impl Fn(LegacyBody) -> Option<ForkBody>,
 ) -> Result<BodiesResponse<ForkBody>, String>
 where
-    ForkBody: Default,
+    ForkBody: Default + ssz::Encode + ssz::Decode,
 {
     let bodies = response?;
     Ok(BodiesResponse::from_optional_bodies(bodies, convert))
