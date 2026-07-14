@@ -7,10 +7,14 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TracingDirectivesRequest {
-    /// `RUST_LOG`-style tracing directives.
+    /// `RUST_LOG`-style tracing directives. Ignored when `ttlSecs` is `0`.
+    #[serde(default)]
     pub directives: String,
     /// Number of seconds before the startup tracing configuration is restored.
-    pub ttl_secs: u64,
+    ///
+    /// If omitted, the override remains active until explicitly reset. Set to `0` to reset
+    /// immediately.
+    pub ttl_secs: Option<u64>,
 }
 
 /// Result returned by [`AdminApi::tracing_directives`].
@@ -19,8 +23,8 @@ pub struct TracingDirectivesRequest {
 pub struct TracingDirectivesResponse {
     /// The tracing directives that were applied.
     pub applied: String,
-    /// Number of seconds before the override is reverted.
-    pub ttl_secs: u64,
+    /// Number of seconds before the override is reverted, or `None` for an indefinite override.
+    pub ttl_secs: Option<u64>,
     /// The startup tracing directives that will be restored.
     pub reverts_to: String,
 }
@@ -84,10 +88,24 @@ pub trait AdminApi {
 
     /// Temporarily overrides the node's tracing directives.
     ///
-    /// The startup tracing configuration is restored after `ttlSecs`.
+    /// The startup tracing configuration is restored after `ttlSecs`. If `ttlSecs` is omitted,
+    /// the override remains active until reset by calling this method with `ttlSecs: 0`.
     #[method(name = "tracingDirectives")]
     async fn tracing_directives(
         &self,
         request: TracingDirectivesRequest,
     ) -> RpcResult<TracingDirectivesResponse>;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn reset_request_only_requires_ttl() {
+        let request: TracingDirectivesRequest =
+            serde_json::from_value(serde_json::json!({ "ttlSecs": 0 })).unwrap();
+        assert!(request.directives.is_empty());
+        assert_eq!(request.ttl_secs, Some(0));
+    }
 }

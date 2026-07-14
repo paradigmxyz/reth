@@ -239,7 +239,7 @@ where
         &self,
         request: TracingDirectivesRequest,
     ) -> RpcResult<TracingDirectivesResponse> {
-        let directives = validate_tracing_directives(&request)?.to_string();
+        validate_tracing_directives(&request)?;
         if !reth_tracing::log_handle_available() {
             return Err(internal_rpc_err(
                 "tracing reload is not active; enable the admin RPC namespace at startup",
@@ -250,42 +250,55 @@ where
         let ttl_secs = request.ttl_secs;
         let mut state = TRACING_REVERT.lock().expect("tracing revert mutex poisoned");
 
-        reth_tracing::set_log_vmodule(&directives).map_err(invalid_params_rpc_err)?;
+        let directives = if ttl_secs == Some(0) {
+            reth_tracing::set_log_vmodule(&baseline).map_err(internal_rpc_err)?;
+            baseline.clone()
+        } else {
+            let directives = request.directives.trim().to_string();
+            reth_tracing::set_log_vmodule(&directives).map_err(invalid_params_rpc_err)?;
+            directives
+        };
+
         if let Some(previous) = state.task.take() {
             previous.abort();
         }
         state.generation = state.generation.wrapping_add(1);
         let generation = state.generation;
 
-        let revert_baseline = baseline.clone();
-        state.task = Some(tokio::spawn(async move {
-            tokio::time::sleep(Duration::from_secs(ttl_secs)).await;
-            let mut state = TRACING_REVERT.lock().expect("tracing revert mutex poisoned");
-            if state.generation != generation {
-                return;
-            }
-            match reth_tracing::set_log_vmodule(&revert_baseline) {
-                Ok(()) => {
-                    info!(target: "reth::rpc::admin", %revert_baseline, "Reverted tracing directives after TTL")
+        if let Some(ttl_secs @ 1..=MAX_TRACING_TTL_SECS) = ttl_secs {
+            let revert_baseline = baseline.clone();
+            state.task = Some(tokio::spawn(async move {
+                tokio::time::sleep(Duration::from_secs(ttl_secs)).await;
+                let mut state = TRACING_REVERT.lock().expect("tracing revert mutex poisoned");
+                if state.generation != generation {
+                    return;
                 }
-                Err(err) => {
-                    warn!(target: "reth::rpc::admin", %err, "Failed to revert tracing directives after TTL")
+                match reth_tracing::set_log_vmodule(&revert_baseline) {
+                    Ok(()) => {
+                        info!(target: "reth::rpc::admin", %revert_baseline, "Reverted tracing directives after TTL")
+                    }
+                    Err(err) => {
+                        warn!(target: "reth::rpc::admin", %err, "Failed to revert tracing directives after TTL")
+                    }
                 }
-            }
-            state.task = None;
-        }));
+                state.task = None;
+            }));
+        }
         drop(state);
 
-        info!(target: "reth::rpc::admin", %directives, ttl_secs, "Applied ephemeral tracing directives");
+        info!(target: "reth::rpc::admin", %directives, ?ttl_secs, "Applied tracing directives");
         Ok(TracingDirectivesResponse { applied: directives, ttl_secs, reverts_to: baseline })
     }
 }
 
-fn validate_tracing_directives(request: &TracingDirectivesRequest) -> RpcResult<&str> {
-    if request.ttl_secs == 0 || request.ttl_secs > MAX_TRACING_TTL_SECS {
+fn validate_tracing_directives(request: &TracingDirectivesRequest) -> RpcResult<()> {
+    if request.ttl_secs.is_some_and(|ttl| ttl > MAX_TRACING_TTL_SECS) {
         return Err(invalid_params_rpc_err(format!(
-            "ttlSecs must be in 1..={MAX_TRACING_TTL_SECS}"
+            "ttlSecs must be in 0..={MAX_TRACING_TTL_SECS}"
         )));
+    }
+    if request.ttl_secs == Some(0) {
+        return Ok(())
     }
     let directives = request.directives.trim();
     if directives.is_empty() {
@@ -296,7 +309,7 @@ fn validate_tracing_directives(request: &TracingDirectivesRequest) -> RpcResult<
             "directives must be at most {MAX_TRACING_DIRECTIVES_LEN} characters"
         )));
     }
-    Ok(directives)
+    Ok(())
 }
 
 impl<N, ChainSpec, Pool> std::fmt::Debug for AdminApi<N, ChainSpec, Pool> {
@@ -313,23 +326,32 @@ mod tests {
     fn validates_tracing_directives() {
         let request = TracingDirectivesRequest {
             directives: "  info,reth::net=trace  ".to_string(),
-            ttl_secs: 30,
+            ttl_secs: Some(30),
         };
-        assert_eq!(validate_tracing_directives(&request).unwrap(), "info,reth::net=trace");
+        validate_tracing_directives(&request).unwrap();
+        validate_tracing_directives(&TracingDirectivesRequest {
+            directives: "trace".to_string(),
+            ttl_secs: None,
+        })
+        .unwrap();
+        validate_tracing_directives(&TracingDirectivesRequest {
+            directives: String::new(),
+            ttl_secs: Some(0),
+        })
+        .unwrap();
     }
 
     #[test]
     fn rejects_invalid_tracing_directives() {
         for request in [
-            TracingDirectivesRequest { directives: "info".to_string(), ttl_secs: 0 },
             TracingDirectivesRequest {
                 directives: "info".to_string(),
-                ttl_secs: MAX_TRACING_TTL_SECS + 1,
+                ttl_secs: Some(MAX_TRACING_TTL_SECS + 1),
             },
-            TracingDirectivesRequest { directives: "  ".to_string(), ttl_secs: 30 },
+            TracingDirectivesRequest { directives: "  ".to_string(), ttl_secs: Some(30) },
             TracingDirectivesRequest {
                 directives: "x".repeat(MAX_TRACING_DIRECTIVES_LEN + 1),
-                ttl_secs: 30,
+                ttl_secs: None,
             },
         ] {
             assert_eq!(
