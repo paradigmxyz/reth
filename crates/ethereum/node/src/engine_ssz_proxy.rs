@@ -429,7 +429,7 @@ where
         EngineSszFork::Shanghai => match engine_api.get_payload_v2_metered(payload_id).await {
             Ok(payload) => match BuiltPayloadShanghai::try_from(payload) {
                 Ok(payload) => ssz_response(payload),
-                Err(err) => text_response(STATUS_INTERNAL_SERVER_ERROR, err.to_string()),
+                Err(err) => text_response(STATUS_BAD_REQUEST, err.to_string()),
             },
             Err(err) => get_payload_error_response(err),
         },
