@@ -4,12 +4,13 @@ use alloy_primitives::{keccak256, Address, BlockNumber, Bytes, StorageKey, Stora
 use reth_errors::ProviderResult;
 use reth_primitives_traits::{Account, Bytecode, NodePrimitives};
 use reth_storage_api::{
-    AccountReader, BlockHashReader, BytecodeReader, HashedPostStateProvider, StateProofProvider,
-    StateProvider, StateProviderBox, StateRootProvider, StorageRootProvider,
+    AccountRangeProvider, AccountRangeResult, AccountReader, BlockHashReader, BytecodeReader,
+    HashedPostStateProvider, StateProofProvider, StateProvider, StateProviderBox,
+    StateRootProvider, StorageRootProvider,
 };
 use reth_trie::{
     updates::TrieUpdates, AccountProof, HashedPostState, HashedStorage, MultiProof,
-    MultiProofTargets, StorageMultiProof, TrieInput,
+    MultiProofTargets, StorageMultiProof, TrieInput, TrieInputSorted,
 };
 use revm::database::BundleState;
 use std::{borrow::Cow, sync::OnceLock};
@@ -211,6 +212,29 @@ impl<N: NodePrimitives> StateProofProvider for MemoryOverlayStateProviderRef<'_,
 impl<N: NodePrimitives> HashedPostStateProvider for MemoryOverlayStateProviderRef<'_, N> {
     fn hashed_post_state(&self, bundle_state: &BundleState) -> HashedPostState {
         self.historical.hashed_post_state(bundle_state)
+    }
+}
+
+impl<N: NodePrimitives> AccountRangeProvider for MemoryOverlayStateProviderRef<'_, N> {
+    fn account_range_with_nodes(
+        &self,
+        input: TrieInputSorted,
+        start: B256,
+        limit: usize,
+    ) -> ProviderResult<AccountRangeResult> {
+        // This overlay owns no cursor, so it pushes its in-memory state down to `historical` (which
+        // does), mirroring how `state_root_from_nodes` delegates here. Its own trie input is kept
+        // unsorted (shared with the other trie methods), so layer the caller's already-sorted
+        // `input` on top of it and sort once before delegating.
+        let mut merged = self.trie_input().clone();
+        merged.nodes.extend_from_sorted(&input.nodes);
+        merged.state.extend_from_sorted(&input.state);
+        merged.prefix_sets.extend(input.prefix_sets);
+        self.historical.account_range_with_nodes(
+            TrieInputSorted::from_unsorted(merged),
+            start,
+            limit,
+        )
     }
 }
 

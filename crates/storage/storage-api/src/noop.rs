@@ -3,12 +3,13 @@
 pub use crate::bal::NoopBalStore;
 
 use crate::{
-    AccountReader, BalProvider, BalStoreHandle, BlockBodyIndicesProvider, BlockHashReader,
-    BlockIdReader, BlockNumReader, BlockReader, BlockReaderIdExt, BlockSource, BytecodeReader,
-    ChangeSetReader, HashedPostStateProvider, HeaderProvider, NodePrimitivesProvider,
-    PruneCheckpointReader, ReceiptProvider, ReceiptProviderIdExt, StageCheckpointReader,
-    StateProofProvider, StateProvider, StateProviderBox, StateProviderFactory, StateReader,
-    StateRootProvider, StorageRootProvider, TransactionVariant, TransactionsProvider,
+    AccountRangeProvider, AccountRangeResult, AccountReader, BalProvider, BalStoreHandle,
+    BlockBodyIndicesProvider, BlockHashReader, BlockIdReader, BlockNumReader, BlockReader,
+    BlockReaderIdExt, BlockSource, BytecodeReader, ChangeSetReader, HashedPostStateProvider,
+    HeaderProvider, NodePrimitivesProvider, PruneCheckpointReader, ReceiptProvider,
+    ReceiptProviderIdExt, StageCheckpointReader, StateProofProvider, StateProvider,
+    StateProviderBox, StateProviderFactory, StateReader, StateRootProvider, StorageRootProvider,
+    TransactionVariant, TransactionsProvider,
 };
 
 #[cfg(feature = "db-api")]
@@ -38,7 +39,7 @@ use reth_stages_types::{StageCheckpoint, StageId};
 use reth_storage_errors::provider::{ProviderError, ProviderResult};
 use reth_trie_common::{
     updates::TrieUpdates, AccountProof, ExecutionWitnessMode, HashedPostState, HashedStorage,
-    MultiProof, MultiProofTargets, StorageMultiProof, StorageProof, TrieInput,
+    MultiProof, MultiProofTargets, StorageMultiProof, StorageProof, TrieInput, TrieInputSorted,
 };
 
 /// Supports various api interfaces for testing purposes.
@@ -529,6 +530,17 @@ impl<C: Send + Sync, N: NodePrimitives> StateProofProvider for NoopProvider<C, N
 impl<C: Send + Sync, N: NodePrimitives> HashedPostStateProvider for NoopProvider<C, N> {
     fn hashed_post_state(&self, _bundle_state: &revm::database::BundleState) -> HashedPostState {
         HashedPostState::default()
+    }
+}
+
+impl<C: Send + Sync, N: NodePrimitives> AccountRangeProvider for NoopProvider<C, N> {
+    fn account_range_with_nodes(
+        &self,
+        _input: TrieInputSorted,
+        _start: B256,
+        _limit: usize,
+    ) -> ProviderResult<AccountRangeResult> {
+        Ok(AccountRangeResult::default())
     }
 }
 

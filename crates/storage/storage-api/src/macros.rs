@@ -64,6 +64,10 @@ macro_rules! delegate_provider_impls {
             HashedPostStateProvider $(where [$($generics)*])? {
                 fn hashed_post_state(&self, bundle_state: &revm::database::BundleState) -> reth_trie::HashedPostState;
             }
+            AccountRangeProvider $(where [$($generics)*])? {
+                fn account_range(&self, start: alloy_primitives::B256, limit: usize) -> reth_storage_api::errors::provider::ProviderResult<reth_storage_api::AccountRangeResult>;
+                fn account_range_with_nodes(&self, input: reth_trie::TrieInputSorted, start: alloy_primitives::B256, limit: usize) -> reth_storage_api::errors::provider::ProviderResult<reth_storage_api::AccountRangeResult>;
+            }
         );
     }
 }

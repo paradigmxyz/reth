@@ -981,12 +981,13 @@ mod tests {
     use reth_ethereum_primitives::{EthPrimitives, Receipt};
     use reth_primitives_traits::{Account, Bytecode};
     use reth_storage_api::{
-        AccountReader, BlockHashReader, BytecodeReader, HashedPostStateProvider,
-        StateProofProvider, StateProvider, StateRootProvider, StorageRootProvider,
+        AccountRangeProvider, AccountRangeResult, AccountReader, BlockHashReader, BytecodeReader,
+        HashedPostStateProvider, StateProofProvider, StateProvider, StateRootProvider,
+        StorageRootProvider,
     };
     use reth_trie::{
         updates::TrieUpdates, AccountProof, HashedPostState, HashedStorage, MultiProof,
-        MultiProofTargets, StorageMultiProof, StorageProof, TrieInput,
+        MultiProofTargets, StorageMultiProof, StorageProof, TrieInput, TrieInputSorted,
     };
 
     fn create_mock_state(
@@ -1021,6 +1022,17 @@ mod tests {
     }
 
     struct MockStateProvider;
+
+    impl AccountRangeProvider for MockStateProvider {
+        fn account_range_with_nodes(
+            &self,
+            _input: TrieInputSorted,
+            _start: B256,
+            _limit: usize,
+        ) -> ProviderResult<AccountRangeResult> {
+            Err(reth_errors::ProviderError::UnsupportedProvider)
+        }
+    }
 
     impl StateProvider for MockStateProvider {
         fn storage(

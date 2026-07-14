@@ -2009,6 +2009,71 @@ mod tests {
     }
 
     #[test]
+    fn memory_overlay_account_range_overlays_in_memory_state() {
+        use crate::providers::state::latest::LatestStateProviderRef;
+        use alloy_primitives::{map::B256Map, U256};
+        use reth_chain_state::MemoryOverlayStateProviderRef;
+        use reth_db_api::{
+            tables,
+            transaction::{DbTx, DbTxMut},
+        };
+        use reth_primitives_traits::Account;
+        use reth_storage_api::AccountRangeProvider;
+        use reth_trie::{ComputedTrieData, HashedPostState, LazyTrieData};
+
+        let modified = B256::with_last_byte(1); // present in the database, changed in memory
+        let deleted = B256::with_last_byte(2); // present in the database, destroyed in memory
+        let untouched = B256::with_last_byte(3); // present only in the database
+        let created = B256::with_last_byte(4); // present only in memory
+
+        let account =
+            |nonce: u64| Account { nonce, balance: U256::from(nonce), bytecode_hash: None };
+
+        let factory = create_test_provider_factory();
+        let tx = factory.provider_rw().unwrap().into_tx();
+        for (hash, nonce) in [(modified, 1u64), (deleted, 2), (untouched, 3)] {
+            tx.put::<tables::HashedAccounts>(hash, account(nonce)).unwrap();
+        }
+        tx.commit().unwrap();
+
+        let provider = factory.provider().unwrap();
+        let historical: Box<dyn reth_storage_api::StateProvider> =
+            Box::new(LatestStateProviderRef::new(&provider));
+
+        // In-memory block changes `modified`, destroys `deleted`, and creates `created`.
+        let hashed_state = HashedPostState {
+            accounts: B256Map::from_iter([
+                (modified, Some(account(10))),
+                (deleted, None),
+                (created, Some(account(40))),
+            ]),
+            storages: Default::default(),
+        };
+        let trie_data = ComputedTrieData::new(
+            Arc::new(hashed_state.into_sorted()),
+            Arc::new(Default::default()),
+        );
+        let block = ExecutedBlock::<reth_ethereum_primitives::EthPrimitives> {
+            trie_data: LazyTrieData::ready(trie_data),
+            ..Default::default()
+        };
+
+        let overlay = MemoryOverlayStateProviderRef::new(historical, vec![block]);
+        let page = overlay.account_range(B256::ZERO, 10).unwrap();
+
+        // Destroyed account is excluded, modified reflects the in-memory value, created appears,
+        // and untouched falls through to the database, all ordered by hashed key.
+        assert_eq!(
+            page.accounts.iter().map(|entry| entry.hash).collect::<Vec<_>>(),
+            vec![modified, untouched, created]
+        );
+        assert_eq!(page.accounts[0].account, account(10));
+        assert_eq!(page.accounts[1].account, account(3));
+        assert_eq!(page.accounts[2].account, account(40));
+        assert_eq!(page.next_key, None);
+    }
+
+    #[test]
     fn test_storage_changeset_consistent_keys_plain_state() -> eyre::Result<()> {
         use alloy_primitives::U256;
         use reth_db_api::models::StorageSettings;

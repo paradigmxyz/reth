@@ -5,12 +5,13 @@ use reth_errors::ProviderResult;
 use reth_metrics::Metrics;
 use reth_primitives_traits::{Account, Bytecode, FastInstant as Instant};
 use reth_provider::{
-    AccountReader, BlockHashReader, BytecodeReader, HashedPostStateProvider, StateProofProvider,
-    StateProvider, StateRootProvider, StorageRootProvider,
+    AccountRangeProvider, AccountRangeResult, AccountReader, BlockHashReader, BytecodeReader,
+    HashedPostStateProvider, StateProofProvider, StateProvider, StateRootProvider,
+    StorageRootProvider,
 };
 use reth_trie::{
     updates::TrieUpdates, AccountProof, HashedPostState, HashedStorage, MultiProof,
-    MultiProofTargets, StorageMultiProof, StorageProof, TrieInput,
+    MultiProofTargets, StorageMultiProof, StorageProof, TrieInput, TrieInputSorted,
 };
 use std::{
     sync::{
@@ -299,6 +300,17 @@ impl<S: BlockHashReader> BlockHashReader for InstrumentedStateProvider<S> {
 impl<S: HashedPostStateProvider> HashedPostStateProvider for InstrumentedStateProvider<S> {
     fn hashed_post_state(&self, bundle_state: &reth_revm::db::BundleState) -> HashedPostState {
         self.state_provider.hashed_post_state(bundle_state)
+    }
+}
+
+impl<S: StateProvider> AccountRangeProvider for InstrumentedStateProvider<S> {
+    fn account_range_with_nodes(
+        &self,
+        input: TrieInputSorted,
+        start: B256,
+        limit: usize,
+    ) -> ProviderResult<AccountRangeResult> {
+        self.state_provider.account_range_with_nodes(input, start, limit)
     }
 }
 
