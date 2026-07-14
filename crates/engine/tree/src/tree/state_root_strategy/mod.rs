@@ -514,11 +514,8 @@ impl DefaultStateRootStrategy {
             + Sync
             + 'static,
     {
-        let StateRootTaskOptions {
-            parent_state_root,
-            config,
-            pending_sparse_trie_prune_blocks,
-        } = options;
+        let StateRootTaskOptions { parent_state_root, config, pending_sparse_trie_prune_blocks } =
+            options;
         let (updates_tx, from_multi_proof) = crossbeam_channel::unbounded();
         let (cancel_guard, cancel_rx) = StateRootTaskCancelGuard::channel();
 
