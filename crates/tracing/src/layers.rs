@@ -1,4 +1,6 @@
-use crate::{formatter::LogFormat, LayerInfo, LogFilterReloadHandle};
+use crate::{
+    formatter::LogFormat, install_log_handle_with_baseline, LayerInfo, LogFilterReloadHandle,
+};
 #[cfg(feature = "otlp-logs")]
 use reth_tracing_otlp::{log_layer, OtlpLogsConfig};
 #[cfg(feature = "otlp")]
@@ -133,7 +135,7 @@ impl Layers {
         filters: &str,
         color: Option<String>,
         reloadable: bool,
-    ) -> eyre::Result<Option<LogFilterReloadHandle>> {
+    ) -> eyre::Result<Option<(LogFilterReloadHandle, EnvFilter)>> {
         let filter = build_env_filter(Some(default_directive), filters)?;
 
         // When reloadable, always show target since the user may switch to DEBUG/TRACE
@@ -143,10 +145,11 @@ impl Layers {
             filter.max_level_hint().is_none_or(|max_level| max_level > tracing::Level::INFO);
 
         if reloadable {
+            let startup_filter = filter.clone();
             let (reloadable_filter, handle) = reload::Layer::new(filter);
             let layer = format.apply(reloadable_filter, color, show_target, None);
             self.add_layer(layer);
-            Ok(Some(handle))
+            Ok(Some((handle, startup_filter)))
         } else {
             let layer = format.apply(filter, color, show_target, None);
             self.add_layer(layer);
@@ -172,14 +175,15 @@ impl Layers {
         filter: &str,
         file_info: FileInfo,
         reloadable: bool,
-    ) -> eyre::Result<(FileWorkerGuard, Option<LogFilterReloadHandle>)> {
+    ) -> eyre::Result<(FileWorkerGuard, Option<(LogFilterReloadHandle, EnvFilter)>)> {
         let (writer, guard) = file_info.create_log_writer()?;
         let file_filter = build_env_filter(None, filter)?;
 
         if reloadable {
+            let startup_filter = file_filter.clone();
             let (reloadable_filter, handle) = reload::Layer::new(file_filter);
             self.add_layer(format.apply(reloadable_filter, None, true, Some(writer)));
-            Ok((guard, Some(handle)))
+            Ok((guard, Some((handle, startup_filter))))
         } else {
             self.add_layer(format.apply(file_filter, None, true, Some(writer)));
             Ok((guard, None))
@@ -262,11 +266,14 @@ impl Layers {
     ) -> eyre::Result<()> {
         // Create the span provider
 
+        let startup_filter = filter.clone();
+        let (filter, handle) = reload::Layer::new(filter);
         let span_layer = span_layer(otlp_config)
             .map_err(|e| eyre::eyre!("Failed to build OTLP span exporter {}", e))?
             .with_filter(filter);
 
         self.add_layer(span_layer);
+        install_log_handle_with_baseline(handle, startup_filter);
 
         Ok(())
     }
@@ -278,11 +285,14 @@ impl Layers {
         otlp_config: OtlpLogsConfig,
         filter: EnvFilter,
     ) -> eyre::Result<()> {
+        let startup_filter = filter.clone();
+        let (filter, handle) = reload::Layer::new(filter);
         let log_layer = log_layer(otlp_config)
             .map_err(|e| eyre::eyre!("Failed to build OTLP log exporter {}", e))?
             .with_filter(filter);
 
         self.add_layer(log_layer);
+        install_log_handle_with_baseline(handle, startup_filter);
 
         Ok(())
     }

@@ -25,7 +25,9 @@ pub struct TracingDirectivesResponse {
     pub applied: String,
     /// Number of seconds before the override is reverted, or `None` for an indefinite override.
     pub ttl_secs: Option<u64>,
-    /// The startup tracing directives that will be restored.
+    /// The startup stdout directives that will be restored.
+    ///
+    /// Other reloadable layers restore their respective startup directives.
     pub reverts_to: String,
 }
 

@@ -1,8 +1,8 @@
 //! Global log handle for runtime filter changes.
 //!
 //! Provides a single global [`LogFilterHandle`] that collects reload handles from all
-//! reloadable layers (stdout, file, etc.). `set_log_verbosity` and `set_log_vmodule`
-//! update every registered layer in one shot.
+//! reloadable layers (stdout, file, OTLP traces, and OTLP logs). `set_log_verbosity` and
+//! `set_log_vmodule` update every registered layer in one shot.
 
 use tracing::level_filters::LevelFilter;
 use tracing_subscriber::{reload, EnvFilter, Registry};
@@ -13,26 +13,32 @@ static STARTUP_LOG_DIRECTIVES: std::sync::OnceLock<String> = std::sync::OnceLock
 /// Type alias for a single layer's reload handle.
 pub type LogFilterReloadHandle = reload::Handle<EnvFilter, Registry>;
 
+#[derive(Debug)]
+struct ReloadableFilter {
+    handle: LogFilterReloadHandle,
+    startup_filter: EnvFilter,
+}
+
 /// Collects reload handles so all layers can be updated together.
 #[derive(Debug)]
 pub struct LogFilterHandle {
-    handles: Vec<LogFilterReloadHandle>,
+    filters: Vec<ReloadableFilter>,
 }
 
 impl LogFilterHandle {
     /// Creates a new, empty handle collection.
     const fn new() -> Self {
-        Self { handles: Vec::new() }
+        Self { filters: Vec::new() }
     }
 
     /// Adds a reload handle for a layer.
-    fn push(&mut self, handle: LogFilterReloadHandle) {
-        self.handles.push(handle);
+    fn push(&mut self, handle: LogFilterReloadHandle, startup_filter: EnvFilter) {
+        self.filters.push(ReloadableFilter { handle, startup_filter });
     }
 
     /// Returns `true` if at least one handle is registered.
     const fn is_available(&self) -> bool {
-        !self.handles.is_empty()
+        !self.filters.is_empty()
     }
 
     /// Reloads every registered layer with a fresh filter built by `make_filter`.
@@ -40,9 +46,20 @@ impl LogFilterHandle {
         &self,
         make_filter: impl Fn() -> Result<EnvFilter, String>,
     ) -> Result<(), String> {
-        for handle in &self.handles {
+        for reloadable in &self.filters {
             let filter = make_filter()?;
-            handle.reload(filter).map_err(|e| e.to_string())?;
+            reloadable.handle.reload(filter).map_err(|e| e.to_string())?;
+        }
+        Ok(())
+    }
+
+    /// Restores every registered layer to its own startup directives.
+    fn reset_all(&self) -> Result<(), String> {
+        for reloadable in &self.filters {
+            reloadable
+                .handle
+                .reload(reloadable.startup_filter.clone())
+                .map_err(|e| e.to_string())?;
         }
         Ok(())
     }
@@ -52,11 +69,19 @@ impl LogFilterHandle {
 static LOG_HANDLE: std::sync::Mutex<LogFilterHandle> =
     std::sync::Mutex::new(LogFilterHandle::new());
 
-/// Registers a reload handle for a layer (stdout, file, etc.).
+/// Registers a reload handle for a layer with an INFO reset baseline.
 ///
 /// Can be called multiple times — each handle is appended.
 pub fn install_log_handle(handle: LogFilterReloadHandle) {
-    LOG_HANDLE.lock().expect("log handle poisoned").push(handle);
+    install_log_handle_with_baseline(
+        handle,
+        EnvFilter::builder().with_default_directive(LevelFilter::INFO.into()).parse_lossy(""),
+    );
+}
+
+/// Registers a reload handle and the filter that should be restored on reset.
+pub fn install_log_handle_with_baseline(handle: LogFilterReloadHandle, startup_filter: EnvFilter) {
+    LOG_HANDLE.lock().expect("log handle poisoned").push(handle, startup_filter);
 }
 
 /// Returns `true` if at least one global log handle is available.
@@ -76,6 +101,15 @@ pub fn startup_log_directives() -> Option<&'static str> {
     STARTUP_LOG_DIRECTIVES.get().map(String::as_str)
 }
 
+/// Restores every reloadable layer to the tracing directives it started with.
+pub fn reset_log_filters() -> Result<(), String> {
+    let guard = LOG_HANDLE.lock().expect("log handle poisoned");
+    if !guard.is_available() {
+        return Err("Log filter reload not available".to_string());
+    }
+    guard.reset_all()
+}
+
 /// Sets the global log verbosity level.
 ///
 /// - 0: OFF
@@ -85,7 +119,7 @@ pub fn startup_log_directives() -> Option<&'static str> {
 /// - 4: DEBUG
 /// - 5+: TRACE
 ///
-/// Updates all reloadable layers (stdout, file, etc.).
+/// Updates all reloadable tracing layers.
 ///
 /// Returns an error if no log handle is installed or if the reload fails.
 pub fn set_log_verbosity(level: usize) -> Result<(), String> {
@@ -118,7 +152,7 @@ pub fn set_log_verbosity(level: usize) -> Result<(), String> {
 ///
 /// An empty string resets the filter to the default level (INFO).
 ///
-/// Updates all reloadable layers (stdout, file, etc.).
+/// Updates all reloadable tracing layers.
 ///
 /// Returns an error if no log handle is installed or if parsing fails.
 pub fn set_log_vmodule(pattern: &str) -> Result<(), String> {
@@ -140,5 +174,35 @@ pub fn set_log_vmodule(pattern: &str) -> Result<(), String> {
         guard.reload_all(|| {
             EnvFilter::try_new(pattern).map_err(|e| format!("Invalid filter pattern: {e}"))
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn reset_restores_each_layers_startup_directives() {
+        let (_stdout_layer, stdout_handle): (_, LogFilterReloadHandle) =
+            reload::Layer::new(EnvFilter::try_new("info,reth=debug").unwrap());
+        let (_otlp_layer, otlp_handle): (_, LogFilterReloadHandle) =
+            reload::Layer::new(EnvFilter::try_new("warn,reth=trace").unwrap());
+        let stdout_baseline = stdout_handle.with_current(Clone::clone).unwrap();
+        let otlp_baseline = otlp_handle.with_current(Clone::clone).unwrap();
+
+        let mut filters = LogFilterHandle::new();
+        filters.push(stdout_handle.clone(), stdout_baseline.clone());
+        filters.push(otlp_handle.clone(), otlp_baseline.clone());
+        filters.reload_all(|| EnvFilter::try_new("trace").map_err(|err| err.to_string())).unwrap();
+        filters.reset_all().unwrap();
+
+        assert_eq!(
+            stdout_handle.with_current(ToString::to_string).unwrap(),
+            stdout_baseline.to_string()
+        );
+        assert_eq!(
+            otlp_handle.with_current(ToString::to_string).unwrap(),
+            otlp_baseline.to_string()
+        );
     }
 }

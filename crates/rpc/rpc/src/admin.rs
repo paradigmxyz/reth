@@ -248,7 +248,7 @@ where
         let mut state = TRACING_REVERT.lock().await;
 
         let directives = if ttl_secs == Some(0) {
-            reth_tracing::set_log_vmodule(&baseline).map_err(internal_rpc_err)?;
+            reth_tracing::reset_log_filters().map_err(internal_rpc_err)?;
             baseline.clone()
         } else {
             let directives = request.directives.trim().to_string();
@@ -263,16 +263,15 @@ where
         let generation = state.generation;
 
         if let Some(ttl_secs @ 1..=MAX_TRACING_TTL_SECS) = ttl_secs {
-            let revert_baseline = baseline.clone();
             state.task = Some(tokio::spawn(async move {
                 tokio::time::sleep(Duration::from_secs(ttl_secs)).await;
                 let mut state = TRACING_REVERT.lock().await;
                 if state.generation != generation {
                     return;
                 }
-                match reth_tracing::set_log_vmodule(&revert_baseline) {
+                match reth_tracing::reset_log_filters() {
                     Ok(()) => {
-                        info!(target: "reth::rpc::admin", %revert_baseline, "Reverted tracing directives after TTL")
+                        info!(target: "reth::rpc::admin", "Reverted tracing directives after TTL")
                     }
                     Err(err) => {
                         warn!(target: "reth::rpc::admin", %err, "Failed to revert tracing directives after TTL")

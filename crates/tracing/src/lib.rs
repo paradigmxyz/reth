@@ -60,8 +60,9 @@ pub use formatter::LogFormat;
 pub use layers::{FileInfo, FileWorkerGuard, Layers, TracingGuards};
 #[cfg(feature = "std")]
 pub use log_handle::{
-    install_log_handle, log_handle_available, set_log_verbosity, set_log_vmodule,
-    set_startup_log_directives, startup_log_directives, LogFilterReloadHandle,
+    install_log_handle, install_log_handle_with_baseline, log_handle_available, reset_log_filters,
+    set_log_verbosity, set_log_vmodule, set_startup_log_directives, startup_log_directives,
+    LogFilterReloadHandle,
 };
 #[cfg(feature = "std")]
 pub use test_tracer::TestTracer;
@@ -274,14 +275,14 @@ pub trait Tracer: Sized {
 impl Tracer for RethTracer {
     fn init_with_layers(self, mut layers: Layers) -> eyre::Result<TracingGuards> {
         // Configure stdout layer - reloadable if requested for runtime log level changes
-        if let Some(handle) = layers.stdout(
+        if let Some((handle, startup_filter)) = layers.stdout(
             self.stdout.format,
             self.stdout.default_directive.parse()?,
             &self.stdout.filters,
             self.stdout.color,
             self.enable_reload,
         )? {
-            install_log_handle(handle);
+            install_log_handle_with_baseline(handle, startup_filter);
         }
 
         if let Some(config) = self.journald {
@@ -291,8 +292,8 @@ impl Tracer for RethTracer {
         let file_guard = if let Some((config, file_info)) = self.file {
             let (guard, handle) =
                 layers.file(config.format, &config.filters, file_info, self.enable_reload)?;
-            if let Some(handle) = handle {
-                install_log_handle(handle);
+            if let Some((handle, startup_filter)) = handle {
+                install_log_handle_with_baseline(handle, startup_filter);
             }
             Some(guard)
         } else {
