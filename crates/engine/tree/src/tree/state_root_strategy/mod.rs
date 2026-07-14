@@ -494,15 +494,10 @@ impl fmt::Debug for DefaultStateRootStrategy {
 }
 
 impl DefaultStateRootStrategy {
-    /// Transaction count threshold below which proof workers are halved, since fewer transactions
-    /// produce fewer state changes and most workers would be idle overhead.
-    const SMALL_BLOCK_PROOF_WORKER_TX_THRESHOLD: usize = 30;
-
     /// Spawns the default state-root computation pipeline.
     ///
     /// The authoritative update capability taken from the returned handle must be dropped or
     /// explicitly finished after execution so the task observes the end of the update stream.
-    /// An unknown transaction count uses the full proof-worker pool.
     #[instrument(level = "debug", target = "engine::tree::payload_processor", skip_all)]
     fn spawn_state_root<N, F>(
         &self,
@@ -519,21 +514,15 @@ impl DefaultStateRootStrategy {
             + Sync
             + 'static,
     {
-        let StateRootTaskOptions {
-            parent_state_root,
-            transaction_count,
-            config,
-            pending_sparse_trie_prune_blocks,
-        } = options;
+        let StateRootTaskOptions { parent_state_root, config, pending_sparse_trie_prune_blocks } =
+            options;
         let (updates_tx, from_multi_proof) = crossbeam_channel::unbounded();
         let (cancel_guard, cancel_rx) = StateRootTaskCancelGuard::channel();
 
         let task_ctx = ProofTaskCtx::new(multiproof_provider_factory);
         #[cfg(feature = "trie-debug")]
         let task_ctx = task_ctx.with_proof_jitter(config.proof_jitter());
-        let halve_workers = transaction_count
-            .is_some_and(|count| count <= Self::SMALL_BLOCK_PROOF_WORKER_TX_THRESHOLD);
-        let proof_handle = ProofWorkerHandle::new(executor, task_ctx, halve_workers);
+        let proof_handle = ProofWorkerHandle::new(executor, task_ctx);
 
         let (state_root_tx, state_root_rx) = mpsc::channel();
         let (hashed_state_tx, hashed_state_rx) = mpsc::channel();
@@ -702,7 +691,6 @@ struct SparseTrieTaskOptions<N: NodePrimitives> {
 
 struct StateRootTaskOptions<'a, N: NodePrimitives> {
     parent_state_root: B256,
-    transaction_count: Option<usize>,
     config: &'a TreeConfig,
     pending_sparse_trie_prune_blocks: Option<Vec<ExecutedBlock<N>>>,
 }
@@ -769,7 +757,6 @@ where
             overlay_factory.clone(),
             StateRootTaskOptions {
                 parent_state_root: env.parent_state_root,
-                transaction_count: Some(env.transaction_count),
                 config,
                 pending_sparse_trie_prune_blocks,
             },
@@ -833,7 +820,6 @@ where
                 StateRootTaskOptions {
                     parent_state_root: ctx.parent_state_root(),
                     // Tx count unknown at FCU time (block built incrementally): full proof workers.
-                    transaction_count: None,
                     config: ctx.config,
                     pending_sparse_trie_prune_blocks,
                 },
@@ -1376,7 +1362,6 @@ mod tests {
             ),
             StateRootTaskOptions {
                 parent_state_root: env.parent_state_root,
-                transaction_count: Some(env.transaction_count),
                 config: &TreeConfig::default(),
                 pending_sparse_trie_prune_blocks: None,
             },
