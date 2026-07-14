@@ -115,8 +115,6 @@ pub(super) struct SparseTrieCacheTask<A = ArenaParallelSparseTrie, S = ArenaPara
     /// final [`HashedPostState`] and share it with main engine thread without requiring any extra
     /// hashing work.
     final_hashed_state: HashedPostState,
-    /// Final hashed state shared with consumers after the update stream finishes.
-    computed_hashed_state: Option<Arc<HashedPostState>>,
 
     /// Metrics for the sparse trie.
     metrics: SparseTrieTaskMetrics,
@@ -178,7 +176,6 @@ where
             in_flight_proof_batches: 0,
             pending_updates: Default::default(),
             final_hashed_state: Default::default(),
-            computed_hashed_state: None,
             metrics,
         }
     }
@@ -260,6 +257,7 @@ where
         let mut total_idle_time = std::time::Duration::ZERO;
         let mut idle_start = Instant::now();
         let mut done = false;
+        let mut finalized_hashed_state = None;
 
         // Streaming phase: updates are still arriving. Ends when the finish marker is
         // processed. Only producers hold update senders, so the channel closing before the
@@ -277,7 +275,9 @@ where
                     let update = message.map_err(|_| StateRootTaskError::Other(
                         "updates channel disconnected before state root calculation".to_string(),
                     ))?;
-                    self.on_message(update);
+                    if let Some(hashed_state) = self.on_message(update) {
+                        finalized_hashed_state = Some(hashed_state);
+                    }
                     self.pending_updates += 1;
                 }
                 recv(self.proof_result_rx) -> message => {
@@ -372,11 +372,8 @@ where
         Ok(StateRootComputeOutcome {
             state_root,
             trie_updates: Arc::new(trie_updates),
-            hashed_state: Arc::clone(
-                self.computed_hashed_state
-                    .as_ref()
-                    .expect("finished state updates publish the hashed post state"),
-            ),
+            hashed_state: finalized_hashed_state
+                .expect("finished state updates publish the hashed post state"),
             changed_paths,
             #[cfg(feature = "trie-debug")]
             debug_recorders,
@@ -449,17 +446,21 @@ where
     }
 
     /// Processes a [`SparseTrieTaskMessage`] from the hashing task.
-    fn on_message(&mut self, message: SparseTrieTaskMessage) {
+    fn on_message(&mut self, message: SparseTrieTaskMessage) -> Option<Arc<HashedPostState>> {
         match message {
-            SparseTrieTaskMessage::PrefetchProofs(targets) => self.on_prewarm_targets(targets),
+            SparseTrieTaskMessage::PrefetchProofs(targets) => {
+                self.on_prewarm_targets(targets);
+                None
+            }
             SparseTrieTaskMessage::HashedState(hashed_state) => {
-                self.on_hashed_state_update(hashed_state)
+                self.on_hashed_state_update(hashed_state);
+                None
             }
             SparseTrieTaskMessage::FinishedStateUpdates => {
                 let hashed_state = Arc::new(core::mem::take(&mut self.final_hashed_state));
                 let _ = self.final_hashed_state_tx.take().unwrap().send(Arc::clone(&hashed_state));
-                self.computed_hashed_state = Some(hashed_state);
-                self.finished_state_updates = true
+                self.finished_state_updates = true;
+                Some(hashed_state)
             }
         }
     }
