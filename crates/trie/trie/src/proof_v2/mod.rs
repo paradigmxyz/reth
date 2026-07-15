@@ -2902,6 +2902,62 @@ mod tests {
     }
 
     #[test]
+    fn test_prefix_set_root_proof_preserves_clean_sibling_after_cached_branch_collapse() {
+        reth_tracing::init_test_tracing();
+
+        let dirty = B256::right_padding_from(&[0x10, 0x00, 0x10]);
+        let clean_sibling = B256::right_padding_from(&[0x10, 0x10]);
+        let storage = [
+            B256::right_padding_from(&[0x10]),
+            dirty,
+            B256::right_padding_from(&[0x10, 0x01]),
+            B256::right_padding_from(&[0x10, 0x02]),
+            clean_sibling,
+            B256::right_padding_from(&[0x11]),
+            B256::right_padding_from(&[0x12]),
+        ]
+        .into_iter()
+        .map(|key| (key, U256::from(1u64)))
+        .collect();
+
+        let harness = ProofTestHarness::new(storage);
+        let expected_root = harness.original_root();
+
+        let root_with = |prefix_set: PrefixSet| {
+            let trie_cursor = harness
+                .trie_cursor_factory()
+                .storage_trie_cursor(harness.hashed_address())
+                .unwrap();
+            let hashed_cursor = harness
+                .hashed_cursor_factory()
+                .hashed_storage_cursor(harness.hashed_address())
+                .unwrap();
+            let mut calculator = StorageProofCalculator::new_storage(trie_cursor, hashed_cursor)
+                .with_prefix_set(prefix_set);
+
+            let mut targets = vec![ProofV2Target::new(B256::ZERO)];
+            let proof = calculator.storage_proof(harness.hashed_address(), &mut targets).unwrap();
+            calculator.compute_root_hash(&proof).unwrap()
+        };
+
+        let mut prefix_set = PrefixSetMut::default();
+        prefix_set.insert(Nibbles::unpack(dirty));
+        let actual_root = root_with(prefix_set.freeze());
+
+        let mut prefix_set_with_sibling = PrefixSetMut::default();
+        prefix_set_with_sibling.insert(Nibbles::unpack(dirty));
+        prefix_set_with_sibling.insert(Nibbles::unpack(clean_sibling));
+        let control_root = root_with(prefix_set_with_sibling.freeze());
+
+        pretty_assertions::assert_eq!(Some(expected_root), control_root);
+        pretty_assertions::assert_eq!(
+            Some(expected_root),
+            actual_root,
+            "a dirty prefix must not omit a clean sibling after collapsing a cached branch",
+        );
+    }
+
+    #[test]
     fn test_cached_hash_with_deleted_leaf() {
         reth_tracing::init_test_tracing();
 
