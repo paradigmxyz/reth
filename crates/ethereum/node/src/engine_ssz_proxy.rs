@@ -8,10 +8,11 @@ use crate::engine_ssz_containers::{
     BuiltPayloadAmsterdam, BuiltPayloadCancun, BuiltPayloadOsaka, BuiltPayloadParis,
     BuiltPayloadPrague, BuiltPayloadShanghai, ExecutionPayloadEnvelopeAmsterdam,
     ExecutionPayloadEnvelopeCancun, ExecutionPayloadEnvelopeOsaka, ExecutionPayloadEnvelopeParis,
-    ExecutionPayloadEnvelopePrague, ExecutionPayloadEnvelopeShanghai, ForkchoiceUpdateAmsterdam,
-    ForkchoiceUpdateCancun, ForkchoiceUpdateOsaka, ForkchoiceUpdateParis, ForkchoiceUpdatePrague,
-    ForkchoiceUpdateResponse, ForkchoiceUpdateShanghai, Optional,
-    ExecutionWitnessV1, PayloadStatus as EngineSszPayloadStatus, PayloadStatusWithWitness,
+    ExecutionPayloadEnvelopePrague, ExecutionPayloadEnvelopeShanghai, ExecutionWitnessV1,
+    ForkchoiceUpdateAmsterdam, ForkchoiceUpdateCancun, ForkchoiceUpdateOsaka,
+    ForkchoiceUpdateParis, ForkchoiceUpdatePrague, ForkchoiceUpdateResponse,
+    ForkchoiceUpdateShanghai, Optional, PayloadStatus as EngineSszPayloadStatus,
+    PayloadStatusWithWitness,
 };
 use alloy_consensus::{Transaction, TxEnvelope};
 use alloy_eips::{eip2718::Decodable2718, eip7685::RequestsOrHash};
@@ -21,7 +22,7 @@ use alloy_rpc_types_engine::{
     ExecutionPayloadSidecar, ForkchoiceState, PayloadAttributes, PayloadId,
     PayloadStatus as LegacyPayloadStatus, PayloadStatusEnum, PraguePayloadFields,
 };
-use http_body_util::BodyExt;
+use http_body_util::{BodyExt, LengthLimitError, Limited};
 use jsonrpsee::server::{HttpBody, HttpRequest, HttpResponse};
 use reth_chainspec::EthereumHardforks;
 use reth_engine_primitives::EngineApiValidator;
@@ -51,15 +52,26 @@ const OCTET_STREAM: &str = "application/octet-stream";
 const APPLICATION_JSON: &str = "application/json";
 const TEXT_PLAIN: &str = "text/plain";
 const CONTENT_TYPE: &str = "content-type";
+const CONTENT_LENGTH: &str = "content-length";
 const CACHE_CONTROL: &str = "cache-control";
 const ETH_EXECUTION_VERSION: &str = "eth-execution-version";
 
 const STATUS_OK: u16 = 200;
 const STATUS_BAD_REQUEST: u16 = 400;
+const STATUS_UNSUPPORTED_MEDIA_TYPE: u16 = 415;
 const STATUS_NOT_FOUND: u16 = 404;
+const STATUS_PAYLOAD_TOO_LARGE: u16 = 413;
 const STATUS_METHOD_NOT_ALLOWED: u16 = 405;
 const STATUS_INTERNAL_SERVER_ERROR: u16 = 500;
 const STATUS_SERVICE_UNAVAILABLE: u16 = 503;
+
+const PROBLEM_JSON: &str = "application/problem+json";
+const ERROR_INVALID_REQUEST: &str = "/engine-api/errors/invalid-request";
+const ERROR_UNSUPPORTED_MEDIA_TYPE: &str = "/engine-api/errors/unsupported-media-type";
+const ERROR_SSZ_DECODE: &str = "/engine-api/errors/ssz-decode-error";
+const ERROR_UNSUPPORTED_FORK: &str = "/engine-api/errors/unsupported-fork";
+const ERROR_INTERNAL: &str = "/engine-api/errors/internal";
+const ERROR_REQUEST_TOO_LARGE: &str = "/engine-api/errors/request-too-large";
 
 const MAX_BLOB_LIMIT: usize = 128;
 const MAX_PAYLOAD_BYTES: u64 = 64 * 1024 * 1024;
@@ -78,10 +90,7 @@ pub struct EngineSszProxyHandle<ChainSpec, Provider = (), Pool = (), Validator =
 
 impl<C, Provider, Pool, Validator> Clone for EngineSszProxyHandle<C, Provider, Pool, Validator> {
     fn clone(&self) -> Self {
-        Self {
-            engine_api: self.engine_api.clone(),
-            witness_handler: self.witness_handler.clone(),
-        }
+        Self { engine_api: self.engine_api.clone(), witness_handler: self.witness_handler.clone() }
     }
 }
 
@@ -364,16 +373,17 @@ where
         }
         EngineSszEndpoint::PayloadsWithWitness => {
             if method != "POST" {
-                return text_response(STATUS_METHOD_NOT_ALLOWED, "method not allowed")
+                return problem_response(STATUS_METHOD_NOT_ALLOWED, ERROR_INVALID_REQUEST, None)
             }
             let Some(fork) = request_fork(&request) else {
-                return text_response(STATUS_BAD_REQUEST, "unsupported fork")
+                return problem_response(STATUS_BAD_REQUEST, ERROR_UNSUPPORTED_FORK, None)
             };
-            let Ok(body) = request.into_body().collect().await.map(|body| body.to_bytes()) else {
-                return text_response(STATUS_BAD_REQUEST, "failed to read request body")
+            let body = match read_witness_body(request, MAX_PAYLOAD_BYTES).await {
+                Ok(body) => body,
+                Err(response) => return response,
             };
             let Some(engine_api) = handle.engine_api().await else {
-                return text_response(STATUS_SERVICE_UNAVAILABLE, "engine api unavailable")
+                return problem_response(STATUS_INTERNAL_SERVER_ERROR, ERROR_INTERNAL, None)
             };
             handle_new_payload_with_witness(engine_api, handle.witness_handler().await, fork, &body)
                 .await
@@ -660,46 +670,96 @@ where
     ChainSpec: EthereumHardforks + Send + Sync + 'static,
 {
     if !fork.supports_witness() {
-        return text_response(STATUS_BAD_REQUEST, "unsupported fork")
+        return problem_response(STATUS_BAD_REQUEST, ERROR_UNSUPPORTED_FORK, None)
     }
 
     let payload = match decode_new_payload_request(fork, body) {
         Ok(payload) => payload,
-        Err(err) => return text_response(STATUS_BAD_REQUEST, err),
+        Err(err) => return problem_response(STATUS_BAD_REQUEST, ERROR_SSZ_DECODE, Some(err.into())),
     };
 
     let response = match fork.payloads_version() {
         5 => engine_api.new_payload_v5(payload).await,
-        _ => return text_response(STATUS_BAD_REQUEST, "unsupported payload endpoint version"),
+        _ => return problem_response(STATUS_BAD_REQUEST, ERROR_UNSUPPORTED_FORK, None),
     };
 
     let status = match response {
         Ok(status) => match EngineSszPayloadStatus::try_from(status) {
             Ok(status) => status,
-            Err(err) => return text_response(STATUS_INTERNAL_SERVER_ERROR, err.to_string()),
+            Err(err) => {
+                return problem_response(
+                    STATUS_INTERNAL_SERVER_ERROR,
+                    ERROR_INTERNAL,
+                    Some(err.to_string()),
+                )
+            }
         },
-        Err(err) => return text_response(STATUS_INTERNAL_SERVER_ERROR, err.to_string()),
+        Err(err) => {
+            return problem_response(
+                STATUS_INTERNAL_SERVER_ERROR,
+                ERROR_INTERNAL,
+                Some(err.to_string()),
+            )
+        }
     };
 
-    let witness = if matches!(status.status, PayloadStatusEnum::Valid) {
-        let Some(block_hash) = status.latest_valid_hash.into_option() else {
-            return text_response(
+    let witness = if matches!(&status.status, PayloadStatusEnum::Valid) {
+        let Some(block_hash) = status.latest_valid_hash.as_ref().copied() else {
+            return problem_response(
                 STATUS_INTERNAL_SERVER_ERROR,
-                "valid payload status missing latest_valid_hash",
+                ERROR_INTERNAL,
+                Some("valid payload status missing latest_valid_hash".to_string()),
             )
         };
         let Some(witness_handler) = witness_handler else {
-            return text_response(STATUS_SERVICE_UNAVAILABLE, "witness generator unavailable")
+            return problem_response(STATUS_INTERNAL_SERVER_ERROR, ERROR_INTERNAL, None)
         };
         match witness_handler.generate_witness(block_hash).await {
             Ok(witness) => Some(witness),
-            Err(err) => return text_response(STATUS_INTERNAL_SERVER_ERROR, err),
+            Err(err) => {
+                return problem_response(STATUS_INTERNAL_SERVER_ERROR, ERROR_INTERNAL, Some(err))
+            }
         }
     } else {
         None
     };
 
     ssz_response(PayloadStatusWithWitness::new(status, witness))
+}
+
+async fn read_witness_body(request: HttpRequest, max_bytes: u64) -> Result<Bytes, HttpResponse> {
+    let content_type = request.headers().get(CONTENT_TYPE).and_then(|value| value.to_str().ok());
+    if content_type != Some(OCTET_STREAM) {
+        return Err(problem_response(
+            STATUS_UNSUPPORTED_MEDIA_TYPE,
+            ERROR_UNSUPPORTED_MEDIA_TYPE,
+            None,
+        ))
+    }
+
+    if let Some(content_length) = request.headers().get(CONTENT_LENGTH) {
+        let Some(content_length) =
+            content_length.to_str().ok().and_then(|value| value.parse::<u64>().ok())
+        else {
+            return Err(problem_response(STATUS_BAD_REQUEST, ERROR_INVALID_REQUEST, None))
+        };
+        if content_length > max_bytes {
+            return Err(problem_response(STATUS_PAYLOAD_TOO_LARGE, ERROR_REQUEST_TOO_LARGE, None))
+        }
+    }
+
+    let Ok(limit) = usize::try_from(max_bytes) else {
+        return Err(problem_response(STATUS_INTERNAL_SERVER_ERROR, ERROR_INTERNAL, None))
+    };
+    match Limited::new(request.into_body(), limit).collect().await {
+        Ok(body) => Ok(body.to_bytes().into()),
+        Err(err) if err.downcast_ref::<LengthLimitError>().is_some() => {
+            Err(problem_response(STATUS_PAYLOAD_TOO_LARGE, ERROR_REQUEST_TOO_LARGE, None))
+        }
+        Err(err) => {
+            Err(problem_response(STATUS_BAD_REQUEST, ERROR_INVALID_REQUEST, Some(err.to_string())))
+        }
+    }
 }
 
 async fn handle_forkchoice_updated<Provider, Pool, Validator, ChainSpec>(
@@ -984,6 +1044,22 @@ fn text_response(status: u16, body: impl Into<String>) -> HttpResponse {
         .status(status)
         .header(CONTENT_TYPE, TEXT_PLAIN)
         .body(HttpBody::from(body.into()))
+        .expect("valid response")
+}
+
+fn problem_response(
+    status: u16,
+    problem_type: &'static str,
+    detail: Option<String>,
+) -> HttpResponse {
+    let body = match detail {
+        Some(detail) => serde_json::json!({ "type": problem_type, "detail": detail }),
+        None => serde_json::json!({ "type": problem_type }),
+    };
+    HttpResponse::builder()
+        .status(status)
+        .header(CONTENT_TYPE, PROBLEM_JSON)
+        .body(HttpBody::from(body.to_string()))
         .expect("valid response")
 }
 

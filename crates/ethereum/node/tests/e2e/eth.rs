@@ -21,8 +21,7 @@ use reth_node_core::{
 };
 use reth_node_ethereum::{
     engine_ssz_containers::{
-        ExecutionPayloadEnvelopeAmsterdam,
-        ForkchoiceUpdateAmsterdam,
+        ExecutionPayloadEnvelopeAmsterdam, ForkchoiceUpdateAmsterdam,
         ForkchoiceUpdateResponse as SszForkchoiceUpdateResponse, Optional,
         PayloadStatus as SszPayloadStatus, PayloadStatusWithWitness,
     },
@@ -554,12 +553,9 @@ async fn test_engine_ssz_proxy_payloads_witness_returns_execution_witness() -> e
 
     let payload = envelope.execution_payload;
     let block_hash = payload.payload_inner.payload_inner.payload_inner.block_hash;
-    let payload_body = ExecutionPayloadEnvelopeAmsterdam::from((
-        payload,
-        B256::ZERO,
-        envelope.execution_requests,
-    ))
-    .as_ssz_bytes();
+    let payload_body =
+        ExecutionPayloadEnvelopeAmsterdam::from((payload, B256::ZERO, envelope.execution_requests))
+            .as_ssz_bytes();
     let client = reqwest::Client::new();
     let auth_server = node.auth_server_handle();
     let auth_url = auth_server.http_url();
