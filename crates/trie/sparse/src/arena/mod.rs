@@ -2984,7 +2984,7 @@ impl SparseTrie for ArenaParallelSparseTrie {
                         let ArenaSparseNode::Subtrie(subtrie) = &self.upper_arena[head_idx] else {
                             unreachable!()
                         };
-                        (subtrie.path.clone(), subtrie.num_leaves)
+                        (subtrie.path, subtrie.num_leaves)
                     };
 
                     if subtrie_range.is_empty() {
