@@ -89,7 +89,7 @@ pub struct ProofCalculator<TC, HC, VE: LeafValueEncoder> {
     rlp_encode_buf: Vec<u8>,
     /// Prefix set for tracking changed keys.
     prefix_set: PrefixSet,
-    /// Whether to retain every leaf node encountered during proof calculation.
+    /// Whether to retain leaf children of retained branches.
     always_retain_leaves: bool,
 }
 
@@ -123,7 +123,7 @@ impl<TC, HC, VE: LeafValueEncoder> ProofCalculator<TC, HC, VE> {
         self
     }
 
-    /// Retains every leaf node encountered during proof calculation.
+    /// Retains leaf children of retained branches.
     pub const fn always_retain_leaves(mut self) -> Self {
         self.always_retain_leaves = true;
         self
@@ -159,6 +159,14 @@ where
     #[inline]
     const fn maybe_parent_nibble(&self) -> usize {
         !self.branch_stack.is_empty() as usize
+    }
+
+    /// Returns true if the current branch is retained for a proof target.
+    fn current_branch_matches_target(&self, targets: &TargetsCursor<'_>) -> bool {
+        let branch = self.branch_stack.last().expect("leaf child must have a parent branch");
+        let branch_path =
+            self.branch_path.slice_unchecked(0, self.branch_path.len() - branch.ext_len as usize);
+        targets.contains_target_for_path(&branch_path)
     }
 
     /// Returns true if the proof of a node at the given path should be retained. A node is retained
@@ -224,7 +232,15 @@ where
             self.retained_proofs.last().map(|n| n.path),
         );
 
-        if self.always_retain_leaves && is_leaf {
+        if self.always_retain_leaves && is_leaf && self.current_branch_matches_target(targets) {
+            return true
+        }
+
+        // Retain the branch chain needed to attach over-revealed leaves.
+        if self.always_retain_leaves &&
+            !is_leaf &&
+            self.retained_proofs.last().is_some_and(|node| node.path.starts_with(path))
+        {
             return true
         }
 
@@ -1722,6 +1738,15 @@ impl<'a> TargetsCursor<'a> {
         (&self.targets[self.i], self.targets.get(self.i + 1))
     }
 
+    /// Returns true if the given path is retained for any target.
+    fn contains_target_for_path(&self, path: &Nibbles) -> bool {
+        let i = self.targets.partition_point(|target| target.key_nibbles < *path);
+        self.targets[i..]
+            .iter()
+            .take_while(|target| target.key_nibbles.starts_with(path))
+            .any(|target| path.len() >= target.min_len as usize)
+    }
+
     /// Iterates the cursor forward.
     ///
     /// # Panics
@@ -1961,12 +1986,17 @@ mod tests {
     fn test_always_retain_leaves() {
         let keys = [
             B256::right_padding_from(&[0x10]),
-            B256::right_padding_from(&[0x20]),
+            B256::right_padding_from(&[0x20, 0x00]),
+            B256::right_padding_from(&[0x20, 0x01]),
+            B256::right_padding_from(&[0x20, 0xf0]),
+            B256::right_padding_from(&[0x2f, 0x00]),
             B256::right_padding_from(&[0x30]),
+            B256::right_padding_from(&[0x31]),
+            B256::right_padding_from(&[0x40]),
         ];
         let mut harness =
             TrieTestHarness::new(keys.into_iter().map(|key| (key, U256::from(1))).collect());
-        // Force proof calculation to encounter the leaves instead of cached child hashes.
+        // Force proof calculation to encounter leaves below retained and unretained branches.
         harness.set_trie_nodes(BTreeMap::new());
 
         let leaf_paths = |proofs: &[ProofTrieNodeV2]| {
@@ -1979,7 +2009,7 @@ mod tests {
 
         let mut targets = vec![ProofV2Target::new(keys[1])];
         let (proofs, _) = harness.proof_v2(&mut targets);
-        assert_eq!(leaf_paths(&proofs), vec![Nibbles::from_nibbles([0x2])]);
+        assert_eq!(leaf_paths(&proofs), vec![Nibbles::from_nibbles([0x2, 0x0, 0x0, 0x0])]);
 
         let trie_cursor =
             harness.trie_cursor_factory().storage_trie_cursor(harness.hashed_address()).unwrap();
@@ -1995,8 +2025,31 @@ mod tests {
             leaf_paths(&proofs),
             vec![
                 Nibbles::from_nibbles([0x1]),
-                Nibbles::from_nibbles([0x2]),
-                Nibbles::from_nibbles([0x3]),
+                Nibbles::from_nibbles([0x2, 0x0, 0x0, 0x0]),
+                Nibbles::from_nibbles([0x2, 0x0, 0x0, 0x1]),
+                Nibbles::from_nibbles([0x2, 0x0, 0xf]),
+                Nibbles::from_nibbles([0x2, 0xf]),
+                Nibbles::from_nibbles([0x4]),
+            ]
+        );
+
+        let mut targets = vec![
+            ProofV2Target::new(keys[1]).with_min_len(3),
+            ProofV2Target::new(keys[4]).with_min_len(1),
+        ];
+        let proofs = calculator.storage_proof(harness.hashed_address(), &mut targets).unwrap();
+
+        assert!(proofs.iter().any(|proof| {
+            proof.path == Nibbles::from_nibbles([0x2, 0x0]) &&
+                matches!(&proof.node, TrieNodeV2::Branch(_))
+        }));
+        assert_eq!(
+            leaf_paths(&proofs),
+            vec![
+                Nibbles::from_nibbles([0x2, 0x0, 0x0, 0x0]),
+                Nibbles::from_nibbles([0x2, 0x0, 0x0, 0x1]),
+                Nibbles::from_nibbles([0x2, 0x0, 0xf]),
+                Nibbles::from_nibbles([0x2, 0xf]),
             ]
         );
     }
