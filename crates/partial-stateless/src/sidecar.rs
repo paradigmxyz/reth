@@ -99,6 +99,7 @@ pub struct CacheAnchor {
     pub block_number: u64,
     pub block_hash: B256,
     pub cache_policy_id: B256,
+    /// Deterministic key+value root of the cache at this block/policy context.
     pub cache_root: B256,
 }
 
@@ -358,6 +359,10 @@ pub struct SidecarBenchmarkManifest {
     pub sidecar_miss: StateTargetStats,
     /// Whether the ExEx ran the provider-assisted validator preflight for this sidecar.
     pub provider_assisted_preflight: bool,
+    /// Whether a partial-state node could verify the post-state root without the
+    /// full provider. Currently false when written cache-hit paths are missing
+    /// from the sidecar/cache shape.
+    pub partial_state_trustless_verification_ready: bool,
     /// Diagnostic-only readiness for a future fully trustless state-root proof.
     pub root_witness_completeness: RootWitnessCompletenessSummary,
     /// Full-witness baseline (all accessed state, ignoring the cache). `None` when
@@ -647,6 +652,9 @@ mod tests {
             target_accounts: 0,
             target_storage_slots: 0,
             computation_time_ms: None,
+            cpu_time_ms: None,
+            major_page_faults: None,
+            minor_page_faults: None,
         }
     }
 

@@ -350,6 +350,9 @@ mod tests {
             target_accounts: 0,
             target_storage_slots: 0,
             computation_time_ms: None,
+            cpu_time_ms: None,
+            major_page_faults: None,
+            minor_page_faults: None,
         }
     }
 
