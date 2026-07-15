@@ -5,7 +5,8 @@
 //! builds reusable flattened state trie overlays on demand.
 
 use crate::{EthPrimitives, ExecutedBlock, PreservedSparseTrie};
-use alloy_primitives::B256;
+use alloy_eips::BlockNumHash;
+use alloy_primitives::{map::B256Map, B256};
 use parking_lot::Mutex;
 use reth_metrics::{
     metrics::{Counter, Histogram},
@@ -13,7 +14,7 @@ use reth_metrics::{
 };
 use reth_primitives_traits::{
     dashmap::{mapref::entry::Entry, DashMap},
-    AlloyBlockHeader, FastInstant, NodePrimitives,
+    AlloyBlockHeader, Bytecode, FastInstant, NodePrimitives,
 };
 #[cfg(feature = "rayon")]
 use reth_tasks::WorkerPool;
@@ -37,6 +38,36 @@ pub struct StateTrieOverlayManager<N: NodePrimitives = EthPrimitives> {
     #[cfg(feature = "rayon")]
     worker_pool: Option<Arc<WorkerPool>>,
     metrics: StateTrieOverlayMetrics,
+}
+
+/// Flattened state overlay for an in-memory block range.
+#[derive(Clone, Debug, Default)]
+pub struct StateTrieOverlay {
+    trie_input: TrieInputSorted,
+    block_hashes: Arc<Vec<BlockNumHash>>,
+    bytecodes: Arc<B256Map<Bytecode>>,
+}
+
+impl StateTrieOverlay {
+    /// Returns the flattened trie updates.
+    pub fn trie_updates(&self) -> Arc<TrieUpdatesSorted> {
+        Arc::clone(&self.trie_input.nodes)
+    }
+
+    /// Returns the flattened hashed post state.
+    pub fn hashed_post_state(&self) -> Arc<HashedPostStateSorted> {
+        Arc::clone(&self.trie_input.state)
+    }
+
+    /// Returns block hashes for the overlaid in-memory chain, ordered by block number.
+    pub fn block_hashes(&self) -> Arc<Vec<BlockNumHash>> {
+        Arc::clone(&self.block_hashes)
+    }
+
+    /// Returns bytecodes created by the overlaid in-memory chain.
+    pub fn bytecodes(&self) -> Arc<B256Map<Bytecode>> {
+        Arc::clone(&self.bytecodes)
+    }
 }
 
 /// Metrics for state trie overlay management.
@@ -217,15 +248,14 @@ impl<N: NodePrimitives> StateTrieOverlayManager<N> {
         &self,
         parent_hash: B256,
         anchor_hash: B256,
-    ) -> Result<(Arc<TrieUpdatesSorted>, Arc<HashedPostStateSorted>), StateTrieOverlayError> {
+    ) -> Result<Arc<StateTrieOverlay>, StateTrieOverlayError> {
         debug!(
             target: "chain_state::state_trie_overlay",
             tip_hash = %parent_hash,
             %anchor_hash,
             "loading state trie overlay for parent"
         );
-        let input = self.get_overlay(parent_hash, anchor_hash)?;
-        Ok((Arc::clone(&input.nodes), Arc::clone(&input.state)))
+        self.get_overlay(parent_hash, anchor_hash)
     }
 
     #[tracing::instrument(
@@ -244,7 +274,7 @@ impl<N: NodePrimitives> StateTrieOverlayManager<N> {
         &self,
         tip_hash: B256,
         anchor_hash: B256,
-    ) -> Result<Arc<TrieInputSorted>, StateTrieOverlayError> {
+    ) -> Result<Arc<StateTrieOverlay>, StateTrieOverlayError> {
         let key = OverlayCacheKey { anchor_hash, tip_hash };
         let span = tracing::Span::current();
 
@@ -291,7 +321,7 @@ impl<N: NodePrimitives> StateTrieOverlayManager<N> {
         };
 
         enum CacheAction {
-            Ready(Arc<TrieInputSorted>),
+            Ready(Arc<StateTrieOverlay>),
             Wait(Arc<OverlayWaiter>),
             Compute(Arc<OverlayWaiter>),
         }
@@ -396,7 +426,7 @@ impl<N: NodePrimitives> StateTrieOverlayManager<N> {
         compute_input: ComputeOverlayInput<N>,
         anchor_hash: B256,
         _span: tracing::Span,
-    ) -> Arc<TrieInputSorted> {
+    ) -> Arc<StateTrieOverlay> {
         #[cfg(feature = "rayon")]
         {
             if let Some(worker_pool) = &self.worker_pool {
@@ -442,12 +472,12 @@ struct OverlayCacheKey {
 
 #[derive(Clone)]
 enum OverlayCacheEntry {
-    Ready(Arc<TrieInputSorted>),
+    Ready(Arc<StateTrieOverlay>),
     Computing(Arc<OverlayWaiter>),
 }
 
 impl OverlayCacheEntry {
-    fn ready(&self) -> Option<Arc<TrieInputSorted>> {
+    fn ready(&self) -> Option<Arc<StateTrieOverlay>> {
         match self {
             Self::Ready(input) => Some(Arc::clone(input)),
             Self::Computing(_) => None,
@@ -456,7 +486,7 @@ impl OverlayCacheEntry {
 }
 
 struct OverlayWaiter {
-    input: OnceLock<Arc<TrieInputSorted>>,
+    input: OnceLock<Arc<StateTrieOverlay>>,
 }
 
 impl OverlayWaiter {
@@ -464,17 +494,17 @@ impl OverlayWaiter {
         Self { input: OnceLock::new() }
     }
 
-    fn wait(&self) -> Arc<TrieInputSorted> {
+    fn wait(&self) -> Arc<StateTrieOverlay> {
         Arc::clone(self.input.wait())
     }
 
-    fn finish(&self, computed: Arc<TrieInputSorted>) {
+    fn finish(&self, computed: Arc<StateTrieOverlay>) {
         let _ = self.input.set(computed);
     }
 }
 
 enum ComputeOverlayInput<N: NodePrimitives> {
-    ExtendCached { block: ExecutedBlock<N>, parent_input: Arc<TrieInputSorted> },
+    ExtendCached { block: ExecutedBlock<N>, parent_input: Arc<StateTrieOverlay> },
     MergeBlocks(Vec<ExecutedBlock<N>>),
 }
 
@@ -493,7 +523,7 @@ fn compute_overlay<N: NodePrimitives>(
     input: ComputeOverlayInput<N>,
     anchor_hash: B256,
     metrics: &StateTrieOverlayMetrics,
-) -> TrieInputSorted {
+) -> StateTrieOverlay {
     let started_at = Instant::now();
     let block_count = match &input {
         ComputeOverlayInput::ExtendCached { .. } => 1,
@@ -515,11 +545,7 @@ fn compute_overlay<N: NodePrimitives>(
             );
 
             let mut overlay = parent_input.as_ref().clone();
-            extend_overlay(
-                &mut overlay,
-                &trie_data.sorted.hashed_state,
-                &trie_data.sorted.trie_updates,
-            );
+            extend_overlay(&mut overlay, &block, &trie_data.sorted);
             overlay
         }
         ComputeOverlayInput::MergeBlocks(blocks) => merge_blocks(blocks),
@@ -540,65 +566,116 @@ fn compute_overlay<N: NodePrimitives>(
     overlay
 }
 
-fn merge_blocks<N: NodePrimitives>(blocks: Vec<ExecutedBlock<N>>) -> TrieInputSorted {
+fn merge_blocks<N: NodePrimitives>(blocks: Vec<ExecutedBlock<N>>) -> StateTrieOverlay {
     let trie_data = blocks.iter().map(ExecutedBlock::trie_data).collect::<Vec<_>>();
 
     #[cfg(feature = "rayon")]
-    let (nodes, state) = rayon::join(
+    let ((nodes, state), (block_hashes, bytecodes)) = rayon::join(
         || {
-            TrieUpdatesSorted::merge_batch(
-                trie_data.iter().map(|data| Arc::clone(&data.sorted.trie_updates)),
+            rayon::join(
+                || {
+                    TrieUpdatesSorted::merge_batch(
+                        trie_data.iter().map(|data| Arc::clone(&data.sorted.trie_updates)),
+                    )
+                },
+                || {
+                    HashedPostStateSorted::merge_batch(
+                        trie_data.iter().map(|data| Arc::clone(&data.sorted.hashed_state)),
+                    )
+                },
             )
         },
-        || {
-            HashedPostStateSorted::merge_batch(
-                trie_data.iter().map(|data| Arc::clone(&data.sorted.hashed_state)),
-            )
-        },
+        || flatten_execution_data(&blocks),
     );
 
     #[cfg(not(feature = "rayon"))]
-    let (nodes, state) = (
-        TrieUpdatesSorted::merge_batch(
-            trie_data.iter().map(|data| Arc::clone(&data.sorted.trie_updates)),
+    let ((nodes, state), (block_hashes, bytecodes)) = (
+        (
+            TrieUpdatesSorted::merge_batch(
+                trie_data.iter().map(|data| Arc::clone(&data.sorted.trie_updates)),
+            ),
+            HashedPostStateSorted::merge_batch(
+                trie_data.iter().map(|data| Arc::clone(&data.sorted.hashed_state)),
+            ),
         ),
-        HashedPostStateSorted::merge_batch(
-            trie_data.iter().map(|data| Arc::clone(&data.sorted.hashed_state)),
-        ),
+        flatten_execution_data(&blocks),
     );
 
-    TrieInputSorted::new(nodes, state, Default::default())
+    StateTrieOverlay {
+        trie_input: TrieInputSorted::new(nodes, state, Default::default()),
+        block_hashes: Arc::new(block_hashes),
+        bytecodes: Arc::new(bytecodes),
+    }
 }
 
-fn extend_overlay(
-    overlay: &mut TrieInputSorted,
-    hashed_state: &HashedPostStateSorted,
-    trie_updates: &TrieUpdatesSorted,
+fn flatten_execution_data<N: NodePrimitives>(
+    blocks: &[ExecutedBlock<N>],
+) -> (Vec<BlockNumHash>, B256Map<Bytecode>) {
+    let mut block_hashes = Vec::with_capacity(blocks.len());
+    let mut bytecodes = B256Map::default();
+
+    for block in blocks.iter().rev() {
+        block_hashes.push(BlockNumHash::new(
+            block.recovered_block().number(),
+            block.recovered_block().hash(),
+        ));
+        bytecodes.extend(
+            block
+                .execution_outcome()
+                .state
+                .contracts
+                .iter()
+                .map(|(hash, bytecode)| (*hash, Bytecode(bytecode.clone()))),
+        );
+    }
+
+    (block_hashes, bytecodes)
+}
+
+fn extend_overlay<N: NodePrimitives>(
+    overlay: &mut StateTrieOverlay,
+    block: &ExecutedBlock<N>,
+    trie_data: &reth_trie::SortedTrieData,
 ) {
+    let hashed_state = &trie_data.hashed_state;
+    let trie_updates = &trie_data.trie_updates;
+
     #[cfg(feature = "rayon")]
     {
-        rayon::join(
+        let ((), (block_hashes, bytecodes)) = rayon::join(
             || {
-                if !hashed_state.is_empty() {
-                    Arc::make_mut(&mut overlay.state).extend_ref_and_sort(hashed_state);
-                }
+                rayon::join(
+                    || {
+                        if !hashed_state.is_empty() {
+                            Arc::make_mut(&mut overlay.trie_input.state)
+                                .extend_ref_and_sort(hashed_state);
+                        }
+                    },
+                    || {
+                        if !trie_updates.is_empty() {
+                            Arc::make_mut(&mut overlay.trie_input.nodes)
+                                .extend_ref_and_sort(trie_updates);
+                        }
+                    },
+                );
             },
-            || {
-                if !trie_updates.is_empty() {
-                    Arc::make_mut(&mut overlay.nodes).extend_ref_and_sort(trie_updates);
-                }
-            },
+            || flatten_execution_data(std::slice::from_ref(block)),
         );
+        Arc::make_mut(&mut overlay.block_hashes).extend(block_hashes);
+        Arc::make_mut(&mut overlay.bytecodes).extend(bytecodes);
     }
 
     #[cfg(not(feature = "rayon"))]
     {
         if !hashed_state.is_empty() {
-            Arc::make_mut(&mut overlay.state).extend_ref_and_sort(hashed_state);
+            Arc::make_mut(&mut overlay.trie_input.state).extend_ref_and_sort(hashed_state);
         }
         if !trie_updates.is_empty() {
-            Arc::make_mut(&mut overlay.nodes).extend_ref_and_sort(trie_updates);
+            Arc::make_mut(&mut overlay.trie_input.nodes).extend_ref_and_sort(trie_updates);
         }
+        let (block_hashes, bytecodes) = flatten_execution_data(std::slice::from_ref(block));
+        Arc::make_mut(&mut overlay.block_hashes).extend(block_hashes);
+        Arc::make_mut(&mut overlay.bytecodes).extend(bytecodes);
     }
 }
 
@@ -606,8 +683,8 @@ fn extend_overlay(
 mod tests {
     use super::*;
     use crate::{test_utils::TestBlockBuilder, EthPrimitives, ExecutedBlock, SparseTrie};
-    use alloy_primitives::U256;
-    use reth_primitives_traits::Account;
+    use alloy_primitives::{Bytes, U256};
+    use reth_primitives_traits::{Account, Bytecode};
     use reth_trie::{updates::TrieUpdatesSorted, ComputedTrieData, HashedPostState, HashedStorage};
     use std::{
         sync::{mpsc, Arc},
@@ -644,6 +721,21 @@ mod tests {
             .collect()
     }
 
+    fn with_bytecode(
+        block: &ExecutedBlock<EthPrimitives>,
+        code_hash: B256,
+        bytecode: Bytecode,
+    ) -> ExecutedBlock<EthPrimitives> {
+        let mut execution_output = block.execution_outcome().clone();
+        execution_output.state.contracts.insert(code_hash, bytecode.0);
+
+        ExecutedBlock::new(
+            Arc::clone(&block.recovered_block),
+            Arc::new(execution_output),
+            block.trie_data(),
+        )
+    }
+
     #[test]
     fn errors_for_unknown_parent() {
         let manager = StateTrieOverlayManager::<EthPrimitives>::default();
@@ -666,17 +758,55 @@ mod tests {
 
         let anchor_hash = blocks[0].recovered_block().parent_hash();
 
-        let (_, state) =
+        let overlay =
             manager.overlay_for_parent(blocks[2].recovered_block().hash(), anchor_hash).unwrap();
+        let state = overlay.hashed_post_state();
         assert_eq!(state.accounts.len(), 3);
 
         let short_anchor = blocks[1].recovered_block().hash();
-        let (_, short) =
-            manager.overlay_for_parent(blocks[2].recovered_block().hash(), short_anchor).unwrap();
+        let short = manager
+            .overlay_for_parent(blocks[2].recovered_block().hash(), short_anchor)
+            .unwrap()
+            .hashed_post_state();
         assert_eq!(short.accounts.len(), 1);
-        let (_, cached_short) =
-            manager.overlay_for_parent(blocks[2].recovered_block().hash(), short_anchor).unwrap();
+        let cached_short = manager
+            .overlay_for_parent(blocks[2].recovered_block().hash(), short_anchor)
+            .unwrap()
+            .hashed_post_state();
         assert!(Arc::ptr_eq(&short, &cached_short));
+    }
+
+    #[test]
+    fn flattens_execution_data_for_inserted_blocks() {
+        let manager = StateTrieOverlayManager::default();
+        let mut blocks = test_blocks();
+        let first_code_hash = B256::with_last_byte(10);
+        let last_code_hash = B256::with_last_byte(11);
+        let first_bytecode = Bytecode::new_raw(Bytes::from_static(&[0x60, 0x01]));
+        let last_bytecode = Bytecode::new_raw(Bytes::from_static(&[0x60, 0x02]));
+        blocks[0] = with_bytecode(&blocks[0], first_code_hash, first_bytecode.clone());
+        blocks[2] = with_bytecode(&blocks[2], last_code_hash, last_bytecode.clone());
+        for block in &blocks {
+            manager.insert_block(block.clone());
+        }
+
+        let anchor_hash = blocks[0].recovered_block().parent_hash();
+        manager.overlay_for_parent(blocks[1].recovered_block().hash(), anchor_hash).unwrap();
+        let overlay =
+            manager.overlay_for_parent(blocks[2].recovered_block().hash(), anchor_hash).unwrap();
+
+        assert_eq!(
+            overlay.block_hashes().as_slice(),
+            blocks
+                .iter()
+                .map(|block| BlockNumHash::new(
+                    block.block_number(),
+                    block.recovered_block().hash()
+                ))
+                .collect::<Vec<_>>()
+        );
+        assert_eq!(overlay.bytecodes().get(&first_code_hash), Some(&first_bytecode));
+        assert_eq!(overlay.bytecodes().get(&last_code_hash), Some(&last_bytecode));
     }
 
     #[test]
@@ -802,8 +932,9 @@ mod tests {
 
         let (tx, rx) = mpsc::channel();
         thread::spawn(move || {
-            let res =
-                manager.overlay_for_parent(key.tip_hash, key.anchor_hash).map(|(_, state)| state);
+            let res = manager
+                .overlay_for_parent(key.tip_hash, key.anchor_hash)
+                .map(|overlay| overlay.hashed_post_state());
             tx.send(res).unwrap();
         });
 
@@ -812,7 +943,7 @@ mod tests {
             Err(mpsc::RecvTimeoutError::Timeout)
         ));
 
-        waiter.finish(Arc::new(TrieInputSorted::default()));
+        waiter.finish(Arc::new(StateTrieOverlay::default()));
 
         let state = rx.recv_timeout(Duration::from_secs(1)).unwrap().unwrap();
         assert!(state.is_empty());
@@ -839,8 +970,10 @@ mod tests {
             .overlay_for_parent(blocks[2].recovered_block().hash(), original_anchor)
             .is_err());
 
-        let (_, state) =
-            manager.overlay_for_parent(blocks[2].recovered_block().hash(), anchor_hash).unwrap();
+        let state = manager
+            .overlay_for_parent(blocks[2].recovered_block().hash(), anchor_hash)
+            .unwrap()
+            .hashed_post_state();
         assert_eq!(state.accounts.len(), 1);
     }
 }

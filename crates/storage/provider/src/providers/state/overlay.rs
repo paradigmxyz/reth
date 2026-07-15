@@ -1,32 +1,38 @@
+use super::latest::LatestStateProviderRef;
 use alloy_eips::BlockNumHash;
-use alloy_primitives::{BlockHash, BlockNumber, B256};
+use alloy_primitives::{
+    keccak256, map::B256Map, Address, BlockHash, BlockNumber, Bytes, StorageKey, StorageValue, B256,
+};
 use metrics::{Counter, Histogram};
-use reth_chain_state::{EthPrimitives, StateTrieOverlayManager};
+use reth_chain_state::{EthPrimitives, StateTrieOverlay, StateTrieOverlayManager};
 use reth_db_api::{tables, transaction::DbTx, DatabaseError};
 use reth_errors::{ProviderError, ProviderResult};
 use reth_metrics::Metrics;
 use reth_primitives_traits::{
     dashmap::{self, DashMap},
-    NodePrimitives,
+    Account, Bytecode, NodePrimitives,
 };
 use reth_prune_types::PruneSegment;
 use reth_stages_types::StageId;
 use reth_storage_api::{
-    BlockNumReader, ChangeSetReader, DBProvider, DatabaseProviderFactory,
-    DatabaseProviderROFactory, PruneCheckpointReader, StageCheckpointReader,
-    StorageChangeSetReader, StorageSettingsCache,
+    AccountReader, BlockHashReader, BlockNumReader, BytecodeReader, ChangeSetReader, DBProvider,
+    DatabaseProviderFactory, DatabaseProviderROFactory, HashedPostStateProvider,
+    PruneCheckpointReader, StageCheckpointReader, StateProofProvider, StateProvider,
+    StateRootProvider, StorageChangeSetReader, StorageRootProvider, StorageSettingsCache,
 };
 use reth_trie::{
-    hashed_cursor::{HashedCursorFactory, HashedPostStateCursorFactory},
+    hashed_cursor::{HashedCursor, HashedCursorFactory, HashedPostStateCursorFactory},
     trie_cursor::{InMemoryTrieCursor, TrieCursor, TrieCursorFactory, TrieStorageCursor},
-    updates::TrieUpdatesSorted,
-    HashedPostStateSorted,
+    updates::{TrieUpdates, TrieUpdatesSorted},
+    AccountProof, ExecutionWitnessMode, HashedPostState, HashedPostStateSorted, HashedStorage,
+    KeccakKeyHasher, MultiProof, MultiProofTargets, StorageMultiProof, StorageProof, TrieInput,
 };
 use reth_trie_db::{
     ChangesetCache, DatabaseAccountTrieCursor, DatabaseHashedCursorFactory,
     DatabaseStorageTrieCursor, LegacyKeyAdapter, PackedAccountsTrie, PackedKeyAdapter,
     PackedStoragesTrie,
 };
+use revm::database::BundleState;
 use std::{
     ops::RangeInclusive,
     sync::Arc,
@@ -62,6 +68,8 @@ pub(crate) struct OverlayStateProviderMetrics {
 pub(super) struct Overlay {
     pub(super) trie_updates: Arc<TrieUpdatesSorted>,
     pub(super) hashed_post_state: Arc<HashedPostStateSorted>,
+    pub(super) block_hashes: Arc<Vec<BlockNumHash>>,
+    pub(super) bytecodes: Arc<B256Map<Bytecode>>,
 }
 
 impl Overlay {
@@ -69,6 +77,17 @@ impl Overlay {
         Self {
             trie_updates: Arc::new(TrieUpdatesSorted::default()),
             hashed_post_state: Arc::new(HashedPostStateSorted::default()),
+            block_hashes: Arc::new(Vec::new()),
+            bytecodes: Arc::new(B256Map::default()),
+        }
+    }
+
+    fn from_managed(overlay: &StateTrieOverlay) -> Self {
+        Self {
+            trie_updates: overlay.trie_updates(),
+            hashed_post_state: overlay.hashed_post_state(),
+            block_hashes: overlay.block_hashes(),
+            bytecodes: overlay.bytecodes(),
         }
     }
 }
@@ -193,31 +212,26 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
         self
     }
 
-    /// Resolves the effective overlay (trie updates, hashed state).
-    fn resolve_overlays(
-        &self,
-        anchor_hash: BlockHash,
-    ) -> ProviderResult<(Arc<TrieUpdatesSorted>, Arc<HashedPostStateSorted>)> {
+    /// Resolves the effective overlay.
+    fn resolve_overlays(&self, anchor_hash: BlockHash) -> ProviderResult<Overlay> {
         match &self.overlay_source {
             Some(OverlaySource::Managed { manager, state }) => {
-                let (trie, mut overlay_state) = if anchor_hash == self.parent_hash {
-                    (
-                        Arc::new(TrieUpdatesSorted::default()),
-                        Arc::new(HashedPostStateSorted::default()),
-                    )
+                let mut overlay = if anchor_hash == self.parent_hash {
+                    Overlay::empty()
                 } else {
-                    manager
+                    let managed = manager
                         .overlay_for_parent(self.parent_hash, anchor_hash)
-                        .map_err(ProviderError::other)?
+                        .map_err(ProviderError::other)?;
+                    Overlay::from_managed(&managed)
                 };
 
-                if overlay_state.is_empty() {
-                    overlay_state = Arc::clone(state);
+                if overlay.hashed_post_state.is_empty() {
+                    overlay.hashed_post_state = Arc::clone(state);
                 } else if !state.is_empty() {
-                    Arc::make_mut(&mut overlay_state).extend_ref_and_sort(state);
+                    Arc::make_mut(&mut overlay.hashed_post_state).extend_ref_and_sort(state);
                 }
 
-                Ok((trie, overlay_state))
+                Ok(overlay)
             }
             Some(OverlaySource::Immediate { trie, state }) => {
                 if anchor_hash != self.parent_hash {
@@ -226,12 +240,13 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
                         self.parent_hash
                     ))))
                 }
-                Ok((Arc::clone(trie), Arc::clone(state)))
+                Ok(Overlay {
+                    trie_updates: Arc::clone(trie),
+                    hashed_post_state: Arc::clone(state),
+                    ..Overlay::empty()
+                })
             }
-            None => Ok((
-                Arc::new(TrieUpdatesSorted::default()),
-                Arc::new(HashedPostStateSorted::default()),
-            )),
+            None => Ok(Overlay::empty()),
         }
     }
 
@@ -357,7 +372,7 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
         };
 
         // Collect any reverts which are required to bring the DB view back to the anchor hash.
-        let (trie_updates, hashed_post_state) = if let Some(revert_blocks) =
+        let overlay = if let Some(revert_blocks) =
             self.reverts_required(provider, db_tip_block, anchor_hash)?
         {
             debug!(
@@ -395,7 +410,12 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
 
             // Resolve overlays and extend reverts with them.
             // If reverts are empty, use overlays directly to avoid cloning.
-            let (overlay_trie, overlay_state) = self.resolve_overlays(anchor_hash)?;
+            let Overlay {
+                trie_updates: overlay_trie,
+                hashed_post_state: overlay_state,
+                block_hashes,
+                bytecodes,
+            } = self.resolve_overlays(anchor_hash)?;
 
             let trie_updates = if trie_reverts.is_empty() {
                 overlay_trie
@@ -426,7 +446,12 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
                 "Reverted to anchor block",
             );
 
-            (trie_updates, hashed_state_updates)
+            Overlay {
+                trie_updates,
+                hashed_post_state: hashed_state_updates,
+                block_hashes,
+                bytecodes,
+            }
         } else {
             // If no reverts are needed then the db tip is the anchor hash. Use overlays directly.
             if self.should_skip_overlay_for_reused_sparse_trie(db_tip_block.hash) {
@@ -443,14 +468,14 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
                 return Ok(Overlay::empty())
             }
 
-            let (trie_updates, hashed_post_state) = self.resolve_overlays(db_tip_block.hash)?;
+            let overlay = self.resolve_overlays(db_tip_block.hash)?;
 
             retrieve_trie_reverts_duration = Duration::ZERO;
             retrieve_hashed_state_reverts_duration = Duration::ZERO;
-            trie_updates_total_len = trie_updates.total_len();
-            hashed_state_updates_total_len = hashed_post_state.total_len();
+            trie_updates_total_len = overlay.trie_updates.total_len();
+            hashed_state_updates_total_len = overlay.hashed_post_state.total_len();
 
-            (trie_updates, hashed_post_state)
+            overlay
         };
 
         // Record metrics
@@ -463,7 +488,7 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
         self.metrics.trie_updates_size.record(trie_updates_total_len as f64);
         self.metrics.hashed_state_size.record(hashed_state_updates_total_len as f64);
 
-        Ok(Overlay { trie_updates, hashed_post_state })
+        Ok(overlay)
     }
 
     /// Builds the effective overlay for the given provider.
@@ -586,11 +611,19 @@ where
             res
         };
 
-        let Overlay { trie_updates, hashed_post_state } = self.get_overlay(&provider)?;
+        let Overlay { trie_updates, hashed_post_state, block_hashes, bytecodes } =
+            self.get_overlay(&provider)?;
 
         let is_v2 = provider.cached_storage_settings().is_v2();
         self.overlay_builder.metrics.database_provider_ro_duration.record(overall_start.elapsed());
-        Ok(OverlayStateProvider::new(provider, trie_updates, hashed_post_state, is_v2))
+        Ok(OverlayStateProvider::new_with_execution_data(
+            provider,
+            trie_updates,
+            hashed_post_state,
+            block_hashes,
+            bytecodes,
+            is_v2,
+        ))
     }
 }
 
@@ -604,6 +637,8 @@ pub struct OverlayStateProvider<Provider: DBProvider> {
     provider: Provider,
     trie_updates: Arc<TrieUpdatesSorted>,
     hashed_post_state: Arc<HashedPostStateSorted>,
+    block_hashes: Option<Arc<Vec<BlockNumHash>>>,
+    bytecodes: Option<Arc<B256Map<Bytecode>>>,
     is_v2: bool,
 }
 
@@ -611,15 +646,62 @@ impl<Provider> OverlayStateProvider<Provider>
 where
     Provider: DBProvider,
 {
-    /// Create new overlay state provider. The `Provider` must be cloneable, which generally means
-    /// it should be wrapped in an `Arc`.
+    /// Creates a new overlay state provider without block hash or bytecode overlays.
+    ///
+    /// Use [`Self::new_with_execution_data`] when the provider will execute on top of in-memory
+    /// blocks.
     pub const fn new(
         provider: Provider,
         trie_updates: Arc<TrieUpdatesSorted>,
         hashed_post_state: Arc<HashedPostStateSorted>,
         is_v2: bool,
     ) -> Self {
-        Self { provider, trie_updates, hashed_post_state, is_v2 }
+        Self {
+            provider,
+            trie_updates,
+            hashed_post_state,
+            block_hashes: None,
+            bytecodes: None,
+            is_v2,
+        }
+    }
+
+    /// Creates a new overlay state provider with flattened block hashes and bytecodes for
+    /// execution lookups.
+    pub const fn new_with_execution_data(
+        provider: Provider,
+        trie_updates: Arc<TrieUpdatesSorted>,
+        hashed_post_state: Arc<HashedPostStateSorted>,
+        block_hashes: Arc<Vec<BlockNumHash>>,
+        bytecodes: Arc<B256Map<Bytecode>>,
+        is_v2: bool,
+    ) -> Self {
+        Self {
+            provider,
+            trie_updates,
+            hashed_post_state,
+            block_hashes: Some(block_hashes),
+            bytecodes: Some(bytecodes),
+            is_v2,
+        }
+    }
+
+    fn trie_input(&self) -> TrieInput {
+        TrieInput::from_blocks_sorted([(
+            self.hashed_post_state.as_ref(),
+            self.trie_updates.as_ref(),
+        )])
+    }
+
+    fn merged_hashed_storage(&self, address: Address, storage: HashedStorage) -> HashedStorage {
+        let Some(overlay) = self.hashed_post_state.storages.get(&keccak256(address)) else {
+            return storage
+        };
+
+        let mut merged = HashedStorage::default();
+        merged.extend_from_sorted(overlay);
+        merged.extend(&storage);
+        merged
     }
 }
 
@@ -712,11 +794,205 @@ where
     }
 }
 
+impl<Provider> AccountReader for OverlayStateProvider<Provider>
+where
+    Provider: DBProvider,
+{
+    fn basic_account(&self, address: &Address) -> ProviderResult<Option<Account>> {
+        let hashed_address = keccak256(address);
+        let mut cursor = self.hashed_account_cursor()?;
+        Ok(cursor
+            .seek(hashed_address)?
+            .filter(|(key, _)| *key == hashed_address)
+            .map(|(_, account)| account))
+    }
+}
+
+impl<Provider> BlockHashReader for OverlayStateProvider<Provider>
+where
+    Provider: DBProvider + BlockHashReader,
+{
+    fn block_hash(&self, number: BlockNumber) -> ProviderResult<Option<B256>> {
+        if let Some(block_hashes) = &self.block_hashes &&
+            let Ok(index) = block_hashes.binary_search_by_key(&number, |block| block.number)
+        {
+            return Ok(Some(block_hashes[index].hash))
+        }
+
+        self.provider.block_hash(number)
+    }
+
+    fn canonical_hashes_range(
+        &self,
+        start: BlockNumber,
+        end: BlockNumber,
+    ) -> ProviderResult<Vec<B256>> {
+        let Some(block_hashes) = &self.block_hashes else {
+            return self.provider.canonical_hashes_range(start, end)
+        };
+        let first_overlay = block_hashes.partition_point(|block| block.number < start);
+        let Some(first) = block_hashes.get(first_overlay).filter(|block| block.number < end) else {
+            return self.provider.canonical_hashes_range(start, end)
+        };
+
+        let mut hashes = self.provider.canonical_hashes_range(start, first.number)?;
+        hashes.extend(
+            block_hashes[first_overlay..]
+                .iter()
+                .take_while(|block| block.number < end)
+                .map(|block| block.hash),
+        );
+        Ok(hashes)
+    }
+}
+
+impl<Provider> BytecodeReader for OverlayStateProvider<Provider>
+where
+    Provider: DBProvider + BlockHashReader,
+{
+    fn bytecode_by_hash(&self, code_hash: &B256) -> ProviderResult<Option<Bytecode>> {
+        if let Some(bytecode) = self.bytecodes.as_ref().and_then(|codes| codes.get(code_hash)) {
+            return Ok(Some(bytecode.clone()))
+        }
+
+        LatestStateProviderRef::new(&self.provider).bytecode_by_hash(code_hash)
+    }
+}
+
+impl<Provider> StateRootProvider for OverlayStateProvider<Provider>
+where
+    Provider: DBProvider + BlockHashReader + StorageSettingsCache,
+{
+    fn state_root(&self, state: HashedPostState) -> ProviderResult<B256> {
+        self.state_root_from_nodes(TrieInput::from_state(state))
+    }
+
+    fn state_root_from_nodes(&self, mut input: TrieInput) -> ProviderResult<B256> {
+        input.prepend_self(self.trie_input());
+        LatestStateProviderRef::new(&self.provider).state_root_from_nodes(input)
+    }
+
+    fn state_root_with_updates(
+        &self,
+        state: HashedPostState,
+    ) -> ProviderResult<(B256, TrieUpdates)> {
+        self.state_root_from_nodes_with_updates(TrieInput::from_state(state))
+    }
+
+    fn state_root_from_nodes_with_updates(
+        &self,
+        mut input: TrieInput,
+    ) -> ProviderResult<(B256, TrieUpdates)> {
+        input.prepend_self(self.trie_input());
+        LatestStateProviderRef::new(&self.provider).state_root_from_nodes_with_updates(input)
+    }
+}
+
+impl<Provider> StorageRootProvider for OverlayStateProvider<Provider>
+where
+    Provider: DBProvider + BlockHashReader + StorageSettingsCache,
+{
+    fn storage_root(&self, address: Address, storage: HashedStorage) -> ProviderResult<B256> {
+        LatestStateProviderRef::new(&self.provider)
+            .storage_root(address, self.merged_hashed_storage(address, storage))
+    }
+
+    fn storage_proof(
+        &self,
+        address: Address,
+        slot: B256,
+        storage: HashedStorage,
+    ) -> ProviderResult<StorageProof> {
+        LatestStateProviderRef::new(&self.provider).storage_proof(
+            address,
+            slot,
+            self.merged_hashed_storage(address, storage),
+        )
+    }
+
+    fn storage_multiproof(
+        &self,
+        address: Address,
+        slots: &[B256],
+        storage: HashedStorage,
+    ) -> ProviderResult<StorageMultiProof> {
+        LatestStateProviderRef::new(&self.provider).storage_multiproof(
+            address,
+            slots,
+            self.merged_hashed_storage(address, storage),
+        )
+    }
+}
+
+impl<Provider> StateProofProvider for OverlayStateProvider<Provider>
+where
+    Provider: DBProvider + BlockHashReader + StorageSettingsCache,
+{
+    fn proof(
+        &self,
+        mut input: TrieInput,
+        address: Address,
+        slots: &[B256],
+    ) -> ProviderResult<AccountProof> {
+        input.prepend_self(self.trie_input());
+        LatestStateProviderRef::new(&self.provider).proof(input, address, slots)
+    }
+
+    fn multiproof(
+        &self,
+        mut input: TrieInput,
+        targets: MultiProofTargets,
+    ) -> ProviderResult<MultiProof> {
+        input.prepend_self(self.trie_input());
+        LatestStateProviderRef::new(&self.provider).multiproof(input, targets)
+    }
+
+    fn witness(
+        &self,
+        mut input: TrieInput,
+        target: HashedPostState,
+        mode: ExecutionWitnessMode,
+    ) -> ProviderResult<Vec<Bytes>> {
+        input.prepend_self(self.trie_input());
+        LatestStateProviderRef::new(&self.provider).witness(input, target, mode)
+    }
+}
+
+impl<Provider> HashedPostStateProvider for OverlayStateProvider<Provider>
+where
+    Provider: DBProvider,
+{
+    fn hashed_post_state(&self, bundle_state: &BundleState) -> HashedPostState {
+        HashedPostState::from_bundle_state::<KeccakKeyHasher>(bundle_state.state())
+    }
+}
+
+impl<Provider> StateProvider for OverlayStateProvider<Provider>
+where
+    Provider: DBProvider + BlockHashReader + StorageSettingsCache,
+{
+    fn storage(
+        &self,
+        address: Address,
+        storage_key: StorageKey,
+    ) -> ProviderResult<Option<StorageValue>> {
+        let hashed_address = keccak256(address);
+        let hashed_storage_key = keccak256(storage_key);
+        let mut cursor = self.hashed_storage_cursor(hashed_address)?;
+        Ok(cursor
+            .seek(hashed_storage_key)?
+            .filter(|(key, _)| *key == hashed_storage_key)
+            .map(|(_, value)| value))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_utils::create_test_provider_factory;
+    use alloy_primitives::U256;
     use reth_primitives_traits::Account;
-    use reth_trie::HashedPostState;
+    use reth_trie::{HashedPostState, HashedStorage};
 
     #[test]
     fn managed_overlay_skips_manager_for_persisted_parent() {
@@ -724,9 +1000,11 @@ mod tests {
         let builder = OverlayBuilder::<EthPrimitives>::new(parent_hash, ChangesetCache::default())
             .with_state_trie_overlay_manager(StateTrieOverlayManager::default());
 
-        let (trie, state) = builder.resolve_overlays(parent_hash).unwrap();
-        assert!(trie.is_empty());
-        assert!(state.is_empty());
+        let overlay = builder.resolve_overlays(parent_hash).unwrap();
+        assert!(overlay.trie_updates.is_empty());
+        assert!(overlay.hashed_post_state.is_empty());
+        assert!(overlay.block_hashes.is_empty());
+        assert!(overlay.bytecodes.is_empty());
     }
 
     #[test]
@@ -773,5 +1051,49 @@ mod tests {
             .into_sorted();
         let builder = builder.with_extended_hashed_state_overlay(hashed_state);
         assert!(!builder.should_skip_overlay_for_reused_sparse_trie(parent_hash));
+    }
+
+    #[test]
+    fn serves_execution_state_from_overlay() {
+        let factory = create_test_provider_factory();
+        let provider = factory.provider().unwrap();
+        let is_v2 = provider.cached_storage_settings().is_v2();
+        let address = Address::repeat_byte(0x11);
+        let storage_key = B256::with_last_byte(1);
+        let storage_value = U256::from(2);
+        let code_hash = B256::with_last_byte(3);
+        let bytecode = Bytecode::new_raw(Bytes::from_static(&[0x60, 0x01]));
+        let account = Account { nonce: 4, balance: U256::from(5), bytecode_hash: Some(code_hash) };
+        let hashed_state = HashedPostState::default()
+            .with_accounts([(keccak256(address), Some(account))])
+            .with_storages([(
+                keccak256(address),
+                HashedStorage::from_iter(false, [(keccak256(storage_key), storage_value)]),
+            )])
+            .into_sorted();
+        let block_hashes = vec![
+            BlockNumHash::new(1, B256::with_last_byte(6)),
+            BlockNumHash::new(2, B256::with_last_byte(7)),
+        ];
+        let bytecodes = B256Map::from_iter([(code_hash, bytecode.clone())]);
+        let provider = OverlayStateProvider::new_with_execution_data(
+            provider,
+            Arc::new(TrieUpdatesSorted::default()),
+            Arc::new(hashed_state),
+            Arc::new(block_hashes.clone()),
+            Arc::new(bytecodes),
+            is_v2,
+        );
+
+        fn assert_state_provider<T: StateProvider>(_: &T) {}
+        assert_state_provider(&provider);
+        assert_eq!(provider.basic_account(&address).unwrap(), Some(account));
+        assert_eq!(provider.storage(address, storage_key).unwrap(), Some(storage_value));
+        assert_eq!(provider.bytecode_by_hash(&code_hash).unwrap(), Some(bytecode));
+        assert_eq!(provider.block_hash(2).unwrap(), Some(block_hashes[1].hash));
+        assert_eq!(
+            provider.canonical_hashes_range(1, 3).unwrap(),
+            block_hashes.iter().map(|block| block.hash).collect::<Vec<_>>()
+        );
     }
 }
