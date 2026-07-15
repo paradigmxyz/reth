@@ -26,11 +26,11 @@ where
         .collect()
 }
 
-/// Merge sorted left slices into a sorted `Vec`, excluding keys present in any right slice.
+/// Merge sorted left slices into a sorted `Vec`, excluding keys present in any right slice unless
+/// one of the right values is equal to the selected left value.
 ///
 /// Callers pass left slices in priority order (index 0 = highest priority), so the first
-/// left slice's value for a key takes precedence over later slices. Right slice order is ignored;
-/// the right-hand side only contributes keys to exclude.
+/// left slice's value for a key takes precedence over later slices. Right slice order is ignored.
 pub(crate) fn kway_merge_disjoint_sorted<'a, K, V>(
     capacity: usize,
     left_slices: impl IntoIterator<Item = &'a [(K, V)]>,
@@ -38,14 +38,13 @@ pub(crate) fn kway_merge_disjoint_sorted<'a, K, V>(
 ) -> Vec<(K, V)>
 where
     K: Ord + Clone + 'a,
-    V: Clone + 'a,
+    V: Clone + PartialEq + 'a,
 {
-    let mut right_keys = right_slices
+    let mut right_entries = right_slices
         .into_iter()
         .filter(|s| !s.is_empty())
-        .map(|s| s.iter().map(|(k, _)| k))
-        .kmerge()
-        .dedup()
+        .map(|s| s.iter())
+        .kmerge_by(|(left_key, _), (right_key, _)| left_key < right_key)
         .peekable();
 
     let mut out = Vec::with_capacity(capacity);
@@ -57,11 +56,28 @@ where
         .kmerge_by(|(i1, k1, _), (i2, k2, _)| (k1, i1) < (k2, i2))
         .dedup_by(|(_, k1, _), (_, k2, _)| *k1 == *k2)
     {
-        while right_keys.peek().is_some_and(|right_key| *right_key < key) {
-            right_keys.next();
+        while let Some((right_key, _)) = right_entries.peek().copied() {
+            if right_key >= key {
+                break
+            }
+            right_entries.next();
         }
 
-        if right_keys.peek().is_some_and(|right_key| *right_key == key) {
+        let mut has_mask = false;
+        let mut has_equal_mask = false;
+        while let Some((right_key, right_value)) = right_entries.peek().copied() {
+            if right_key != key {
+                break
+            }
+
+            has_mask = true;
+            if !has_equal_mask {
+                has_equal_mask = right_value == value;
+            }
+            right_entries.next();
+        }
+
+        if has_mask && !has_equal_mask {
             continue;
         }
 
@@ -243,5 +259,26 @@ mod tests {
         );
 
         assert_eq!(result, vec![(1, "new"), (4, "keep")]);
+    }
+
+    #[test]
+    fn test_kway_merge_disjoint_sorted_keeps_equal_overlaps() {
+        let left = vec![(1, "equal"), (2, "equal"), (3, "drop")];
+        let right_a = vec![(1, "different"), (2, "equal"), (3, "different")];
+        let right_b = vec![(1, "equal"), (2, "different")];
+
+        let result = kway_merge_disjoint_sorted(
+            left.len(),
+            [left.as_slice()],
+            [right_a.as_slice(), right_b.as_slice()],
+        );
+        let reversed = kway_merge_disjoint_sorted(
+            left.len(),
+            [left.as_slice()],
+            [right_b.as_slice(), right_a.as_slice()],
+        );
+
+        assert_eq!(result, vec![(1, "equal"), (2, "equal")]);
+        assert_eq!(reversed, result);
     }
 }

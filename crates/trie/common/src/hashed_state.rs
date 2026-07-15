@@ -691,11 +691,13 @@ impl HashedPostStateSorted {
         Self { accounts, storages }
     }
 
-    /// Merges the batch and removes any overlapping keys present in the mask.
+    /// Merges the batch and removes overlapping keys whose mask values all differ from the merged
+    /// batch value.
     ///
     /// Account keys are masked at the top level, while storage entries are only masked at the slot
     /// level unless the mask wipes the entire storage. For duplicate keys in the batch, later
-    /// items take precedence over earlier ones. The order of the mask does not matter.
+    /// items take precedence over earlier ones. An overlapping entry is retained if any mask
+    /// value is equal to the merged batch value. The order of the mask does not matter.
     pub fn disjointed_merge_batch<'a>(batch: Vec<&'a Self>, mask: Vec<&'a Self>) -> Self {
         let accounts = kway_merge_disjoint_sorted(
             batch.iter().map(|item| item.accounts.len()).sum(),
@@ -1746,6 +1748,71 @@ mod tests {
 
         assert!(result.accounts.is_empty());
         assert!(result.storages.is_empty());
+    }
+
+    #[test]
+    fn test_hashed_post_state_sorted_disjointed_merge_batch_keeps_equal_overlaps() {
+        fn account(nonce: u64) -> Account {
+            Account { nonce, balance: U256::ZERO, bytecode_hash: None }
+        }
+
+        let address = B256::with_last_byte(21);
+        let deleted_address = B256::with_last_byte(24);
+        let storage = B256::with_last_byte(22);
+        let deleted_storage = B256::with_last_byte(25);
+        let slot = B256::with_last_byte(23);
+        let deleted_slot = B256::with_last_byte(26);
+        let batch = HashedPostStateSorted::new(
+            vec![(address, Some(account(1))), (deleted_address, None)],
+            B256Map::from_iter([
+                (
+                    storage,
+                    HashedStorageSorted {
+                        wiped: false,
+                        storage_slots: vec![(slot, U256::from(1))],
+                    },
+                ),
+                (
+                    deleted_storage,
+                    HashedStorageSorted {
+                        wiped: false,
+                        storage_slots: vec![(deleted_slot, U256::ZERO)],
+                    },
+                ),
+            ]),
+        );
+        let different_mask = HashedPostStateSorted::new(
+            vec![(address, Some(account(2))), (deleted_address, Some(account(3)))],
+            B256Map::from_iter([
+                (
+                    storage,
+                    HashedStorageSorted {
+                        wiped: false,
+                        storage_slots: vec![(slot, U256::from(2))],
+                    },
+                ),
+                (
+                    deleted_storage,
+                    HashedStorageSorted {
+                        wiped: false,
+                        storage_slots: vec![(deleted_slot, U256::from(3))],
+                    },
+                ),
+            ]),
+        );
+        let equal_mask = batch.clone();
+
+        let result = HashedPostStateSorted::disjointed_merge_batch(
+            vec![&batch],
+            vec![&different_mask, &equal_mask],
+        );
+        let reversed = HashedPostStateSorted::disjointed_merge_batch(
+            vec![&batch],
+            vec![&equal_mask, &different_mask],
+        );
+
+        assert_eq!(result, batch);
+        assert_eq!(reversed, result);
     }
 
     #[test]
