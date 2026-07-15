@@ -236,14 +236,6 @@ where
             return true
         }
 
-        // Retain the branch chain needed to attach over-revealed leaves.
-        if self.always_retain_leaves &&
-            !is_leaf &&
-            self.retained_proofs.last().is_some_and(|node| node.path.starts_with(path))
-        {
-            return true
-        }
-
         loop {
             // If the node in question is a prefix of the target then we do not iterate targets
             // further.
@@ -2039,10 +2031,6 @@ mod tests {
         ];
         let proofs = calculator.storage_proof(harness.hashed_address(), &mut targets).unwrap();
 
-        assert!(proofs.iter().any(|proof| {
-            proof.path == Nibbles::from_nibbles([0x2, 0x0]) &&
-                matches!(&proof.node, TrieNodeV2::Branch(_))
-        }));
         assert_eq!(
             leaf_paths(&proofs),
             vec![
