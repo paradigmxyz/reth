@@ -66,8 +66,11 @@ pub trait EngineSszApi: Clone + Send + Sync + 'static {
     fn identity(&self) -> HttpResponse;
 
     /// Handles a new payload request.
-    fn new_payload(&self, fork: EngineSszFork, body: Bytes)
-        -> impl Future<Output = HttpResponse> + Send;
+    fn new_payload(
+        &self,
+        fork: EngineSszFork,
+        body: Bytes,
+    ) -> impl Future<Output = HttpResponse> + Send;
 
     /// Handles a getPayload request.
     fn get_payload(
@@ -670,11 +673,7 @@ where
         async { text_response(STATUS_NOT_FOUND, "getPayloadBodiesByRange not implemented") }
     }
 
-    fn get_blobs(
-        &self,
-        version: u8,
-        body: Bytes,
-    ) -> impl Future<Output = HttpResponse> + Send {
+    fn get_blobs(&self, version: u8, body: Bytes) -> impl Future<Output = HttpResponse> + Send {
         let engine_api = self.clone();
         async move { handle_get_blobs(engine_api, version, body.as_ref()).await }
     }
