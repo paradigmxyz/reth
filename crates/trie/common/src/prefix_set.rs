@@ -271,24 +271,14 @@ impl PrefixSet {
             return true
         }
 
-        let start_bound = match range.start_bound() {
-            Bound::Included(bound) => Bound::Included(*bound),
-            Bound::Excluded(bound) => Bound::Excluded(*bound),
-            Bound::Unbounded => Bound::Unbounded,
-        };
-        let end_bound = match range.end_bound() {
-            Bound::Included(bound) => Bound::Included(*bound),
-            Bound::Excluded(bound) => Bound::Excluded(*bound),
-            Bound::Unbounded => Bound::Unbounded,
-        };
-        let satisfies_start = |key: &Nibbles| match start_bound {
-            Bound::Included(start) => key >= start,
-            Bound::Excluded(start) => key > start,
+        let satisfies_start = |key: &Nibbles| match range.start_bound() {
+            Bound::Included(start) => key >= *start,
+            Bound::Excluded(start) => key > *start,
             Bound::Unbounded => true,
         };
-        let satisfies_end = |key: &Nibbles| match end_bound {
-            Bound::Included(end) => key <= end,
-            Bound::Excluded(end) => key < end,
+        let satisfies_end = |key: &Nibbles| match range.end_bound() {
+            Bound::Included(end) => key <= *end,
+            Bound::Excluded(end) => key < *end,
             Bound::Unbounded => true,
         };
 
