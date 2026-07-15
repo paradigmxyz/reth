@@ -32,7 +32,7 @@ use reth_static_file_types::StaticFileSegment;
 use reth_storage_api::{
     BlockBodyIndicesProvider, NodePrimitivesProvider, RangeEnd, RangeResponse, RangeResult,
     StateRangeProvider, StateRangeProviderFactory, StateRangeView, StorageChangeSetReader,
-    StorageRangeResult, StorageSettingsCache,
+    StorageRangeResult,
 };
 use reth_storage_errors::provider::ProviderResult;
 use reth_trie::{
@@ -180,10 +180,19 @@ impl<N: ProviderNodeTypes> BlockchainProvider<N> {
         );
         let merged = TrieInputSorted::from_unsorted(input);
 
-        // The anchor is persisted, so the current database tip already reflects its state.
-        let provider = self.database.database_provider_ro()?;
-        let is_v2 = provider.cached_storage_settings().is_v2();
-        Ok(Some(OverlayStateProvider::new(provider, merged.nodes, merged.state, is_v2)))
+        // Anchor at the persisted block; the overlay reverts any db-tip advancement past it
+        // via changesets, then the merged in-memory delta applies on top.
+        let overlay_factory = OverlayStateProviderFactory::new(
+            self.database.clone(),
+            OverlayBuilder::<N::Primitives>::new(
+                matched.anchor().hash,
+                self.database.changeset_cache(),
+            )
+            .with_hashed_state_overlay(Some(merged.state))
+            .with_trie_updates_overlay(Some(merged.nodes)),
+        );
+        reth_storage_api::DatabaseProviderROFactory::database_provider_ro(&overlay_factory)
+            .map(Some)
     }
 
     /// Returns a cursor-backed state view for a retained canonical state root.
@@ -3083,6 +3092,87 @@ mod tests {
             provider.state_range_provider(unique_root)?.expect("in-memory root must resolve");
         let range = state.account_range(B256::ZERO, B256::repeat_byte(0xff), 10_000)?;
         assert_eq!(range.items, vec![(hashed_address, account)]);
+
+        Ok(())
+    }
+
+    #[test]
+    fn state_range_provider_reverts_database_advancement_past_anchor() -> eyre::Result<()> {
+        let mut rng = generators::rng();
+        let factory = test_provider_factory_with_genesis()?;
+        let provider = BlockchainProvider::new(factory)?;
+        let genesis = provider.canonical_in_memory_state.get_canonical_head();
+
+        // In-memory target block anchored on genesis, with a known account.
+        let (target_address, target_account) = random_account(1);
+        let target_hashed = keccak256(target_address);
+        let mut target_state = HashedPostState::default();
+        target_state.accounts.insert(target_hashed, Some(target_account));
+
+        let unique_root = B256::repeat_byte(0x77);
+        let mut block = random_block(
+            &mut rng,
+            genesis.number + 1,
+            BlockParams { parent: Some(genesis.hash()), tx_count: Some(0), ..Default::default() },
+        )
+        .unseal();
+        block.header.state_root = unique_root;
+        let block = block.seal_slow().try_recover().expect("failed to seal block with senders");
+        let trie_data = ComputedTrieData::new(
+            Arc::new(target_state.into_sorted()),
+            Arc::new(TrieUpdates::default().into_sorted()),
+        );
+        let execution_output = BlockExecutionOutput {
+            result: BlockExecutionResult {
+                receipts: Default::default(),
+                requests: Default::default(),
+                gas_used: 0,
+                blob_gas_used: 0,
+            },
+            state: Default::default(),
+        };
+        let executed = ExecutedBlock::new(Arc::new(block), Arc::new(execution_output), trie_data);
+        provider
+            .canonical_in_memory_state
+            .update_chain(NewCanonicalChain::Commit { new: vec![executed] });
+
+        // Persistence races ahead: a *different* block, with a *different* account, lands in
+        // the database on top of the same genesis anchor while the in-memory chain above still
+        // references genesis as its anchor.
+        let (noise_address, noise_account) = random_account(2);
+        let noise_block = random_block(
+            &mut rng,
+            genesis.number + 1,
+            BlockParams { parent: Some(genesis.hash()), tx_count: Some(0), ..Default::default() },
+        )
+        .try_recover()
+        .expect("failed to seal block with senders");
+        let mut noise_state = HashedPostState::default();
+        noise_state.accounts.insert(keccak256(noise_address), Some(noise_account));
+        let provider_rw = provider.database.provider_rw()?;
+        provider_rw.append_blocks_with_state(
+            vec![noise_block],
+            &ExecutionOutcome {
+                bundle: BundleState::new(
+                    [(noise_address, None, Some(noise_account.into()), Default::default())],
+                    [[(noise_address, Some(None), [])]],
+                    [],
+                ),
+                first_block: genesis.number + 1,
+                ..Default::default()
+            },
+            noise_state.into_sorted(),
+        )?;
+        provider_rw
+            .save_stage_checkpoint(StageId::Finish, StageCheckpoint::new(genesis.number + 1))?;
+        provider_rw.commit()?;
+
+        // Resolving the in-memory root must revert the database's advancement back to genesis,
+        // so the noise account must not leak into the result.
+        let state =
+            provider.state_range_provider(unique_root)?.expect("in-memory root must resolve");
+        let range = state.account_range(B256::ZERO, B256::repeat_byte(0xff), 10_000)?;
+        assert_eq!(range.items, vec![(target_hashed, target_account)]);
 
         Ok(())
     }
