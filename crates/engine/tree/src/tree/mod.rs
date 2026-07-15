@@ -2,7 +2,7 @@ use crate::{
     backfill::{BackfillAction, BackfillSyncState},
     chain::FromOrchestrator,
     engine::{DownloadRequest, EngineApiEvent, EngineApiKind, EngineApiRequest, FromEngine},
-    persistence::PersistenceHandle,
+    persistence::{PersistenceCanceller, PersistenceHandle},
     tree::{error::InsertPayloadError, payload_validator::TreeCtx},
 };
 use alloy_consensus::BlockHeader;
@@ -477,6 +477,7 @@ where
         let persistence_state = PersistenceState {
             last_persisted_block: BlockNumHash::new(best_block_number, header.hash()),
             rx: None,
+            save_canceller: None,
         };
 
         let (tx, outgoing) = unbounded_channel();
@@ -1004,6 +1005,10 @@ where
         let new_head_number = canonical_header.number();
         let new_head_hash = canonical_header.hash();
 
+        if new_head_number < current_head_number {
+            self.persistence_state.cancel_save_if_intersects(new_head_number.saturating_add(1));
+        }
+
         // Update tree state with the new canonical head
         self.state.tree_state.set_canonical_head(canonical_header.num_hash());
 
@@ -1421,9 +1426,10 @@ where
 
         debug!(target: "engine::tree", count=blocks_to_persist.len(), blocks = ?blocks_to_persist.iter().map(|block| block.recovered_block().num_hash()).collect::<Vec<_>>(), "Persisting blocks");
         let (tx, rx) = crossbeam_channel::bounded(1);
-        let _ = self.persistence.save_blocks(blocks_to_persist, tx);
+        let canceller = PersistenceCanceller::default();
+        let _ = self.persistence.save_blocks(blocks_to_persist, canceller.clone(), tx);
 
-        self.persistence_state.start_save(highest_num_hash, rx);
+        self.persistence_state.start_save(highest_num_hash, canceller, rx);
     }
 
     /// Triggers new persistence actions if no persistence task is currently in progress.
@@ -1511,6 +1517,12 @@ where
         start_time: Instant,
     ) -> Result<(), AdvancePersistenceError> {
         self.metrics.engine.persistence_duration.record(start_time.elapsed());
+
+        if result.cancelled {
+            debug!(target: "engine::tree", elapsed=?start_time.elapsed(), "Persistence task cancelled");
+            self.persistence_state.finish_cancelled();
+            return Ok(())
+        }
 
         let commit_duration = result.commit_duration;
         let Some(BlockNumHash {
@@ -2697,6 +2709,13 @@ where
     fn on_canonical_chain_update(&mut self, chain_update: NewCanonicalChain<N>) {
         trace!(target: "engine::tree", new_blocks = %chain_update.new_block_count(), reorged_blocks =  %chain_update.reorged_block_count(), "applying new chain update");
         let start = Instant::now();
+
+        if let NewCanonicalChain::Reorg { old, .. } = &chain_update &&
+            let Some(first_reorged) = old.first()
+        {
+            self.persistence_state
+                .cancel_save_if_intersects(first_reorged.recovered_block().number());
+        }
 
         // update the tracked canonical head
         self.state.tree_state.set_canonical_head(chain_update.tip().num_hash());

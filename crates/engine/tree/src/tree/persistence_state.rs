@@ -20,7 +20,7 @@
 //! The [`PersistenceState`] tracks ongoing persistence operations and coordinates
 //! between the main execution thread and background persistence workers.
 
-use crate::persistence::PersistenceResult;
+use crate::persistence::{PersistenceCanceller, PersistenceResult};
 use alloy_eips::BlockNumHash;
 use alloy_primitives::B256;
 use crossbeam_channel::Receiver as CrossbeamReceiver;
@@ -38,6 +38,8 @@ pub struct PersistenceState {
     /// sent when done. A None value means there's no persistence task in progress.
     pub(crate) rx:
         Option<(CrossbeamReceiver<PersistenceResult>, Instant, CurrentPersistenceAction)>,
+    /// Cancels the currently running block save, if any.
+    pub(crate) save_canceller: Option<PersistenceCanceller>,
 }
 
 impl PersistenceState {
@@ -53,6 +55,7 @@ impl PersistenceState {
         new_tip_num: u64,
         rx: CrossbeamReceiver<PersistenceResult>,
     ) {
+        self.save_canceller = None;
         self.rx =
             Some((rx, Instant::now(), CurrentPersistenceAction::RemovingBlocks { new_tip_num }));
     }
@@ -61,9 +64,21 @@ impl PersistenceState {
     pub(crate) fn start_save(
         &mut self,
         highest: BlockNumHash,
+        canceller: PersistenceCanceller,
         rx: CrossbeamReceiver<PersistenceResult>,
     ) {
+        self.save_canceller = Some(canceller);
         self.rx = Some((rx, Instant::now(), CurrentPersistenceAction::SavingBlocks { highest }));
+    }
+
+    /// Cancels the current block save if it includes a block at or above `first_invalidated`.
+    pub(crate) fn cancel_save_if_intersects(&self, first_invalidated: u64) {
+        if let Some((_, _, CurrentPersistenceAction::SavingBlocks { highest })) = &self.rx &&
+            first_invalidated <= highest.number &&
+            let Some(canceller) = &self.save_canceller
+        {
+            canceller.cancel();
+        }
     }
 
     /// Returns the current persistence action. If there is no persistence task in progress, then
@@ -71,6 +86,12 @@ impl PersistenceState {
     #[cfg(test)]
     pub(crate) fn current_action(&self) -> Option<&CurrentPersistenceAction> {
         self.rx.as_ref().map(|rx| &rx.2)
+    }
+
+    /// Clears the currently running persistence operation without advancing the persisted tip.
+    pub(crate) fn finish_cancelled(&mut self) {
+        self.rx = None;
+        self.save_canceller = None;
     }
 
     /// Sets state for a finished persistence task.
@@ -81,6 +102,7 @@ impl PersistenceState {
     ) {
         trace!(target: "engine::tree", block= %last_persisted_block_number, hash=%last_persisted_block_hash, "updating persistence state");
         self.rx = None;
+        self.save_canceller = None;
         self.last_persisted_block =
             BlockNumHash::new(last_persisted_block_number, last_persisted_block_hash);
     }

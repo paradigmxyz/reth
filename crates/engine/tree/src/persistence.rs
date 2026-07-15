@@ -7,13 +7,15 @@ use reth_ethereum_primitives::EthPrimitives;
 use reth_primitives_traits::{FastInstant as Instant, NodePrimitives};
 use reth_provider::{
     providers::ProviderNodeTypes, BalProvider, BlockExecutionWriter, BlockHashReader,
-    ChainStateBlockWriter, DBProvider, DatabaseProviderFactory, ProviderFactory, SaveBlocksMode,
+    BlockNumReader, ChainStateBlockWriter, DBProvider, DatabaseProviderFactory, ProviderFactory,
+    SaveBlocksMode, StaticFileProviderFactory, StaticFileWriter,
 };
 use reth_prune::{PrunerError, PrunerWithFactory};
 use reth_stages_api::{MetricEvent, MetricEventsSender};
 use reth_tasks::spawn_os_thread;
 use std::{
     sync::{
+        atomic::{AtomicBool, Ordering},
         mpsc::{Receiver, SendError, Sender},
         Arc,
     },
@@ -30,6 +32,24 @@ pub struct PersistenceResult {
     pub last_block: Option<BlockNumHash>,
     /// The commit duration, only available for save-blocks operations.
     pub commit_duration: Option<Duration>,
+    /// Whether the save was cancelled and its staged writes were rolled back.
+    pub cancelled: bool,
+}
+
+/// Best-effort cancellation signal for an in-flight persistence operation.
+#[derive(Clone, Debug, Default)]
+pub struct PersistenceCanceller(Arc<AtomicBool>);
+
+impl PersistenceCanceller {
+    /// Cancels the associated persistence operation.
+    pub fn cancel(&self) {
+        self.0.store(true, Ordering::Relaxed);
+    }
+
+    /// Returns whether the associated persistence operation was cancelled.
+    pub fn is_cancelled(&self) -> bool {
+        self.0.load(Ordering::Relaxed)
+    }
 }
 
 /// Writes parts of reth's in memory tree state to the database and static files.
@@ -100,10 +120,14 @@ where
                     // send new sync metrics based on removed blocks
                     let _ =
                         self.sync_metrics_tx.send(MetricEvent::SyncHeight { height: new_tip_num });
-                    let _ = sender.send(PersistenceResult { last_block, commit_duration: None });
+                    let _ = sender.send(PersistenceResult {
+                        last_block,
+                        commit_duration: None,
+                        cancelled: false,
+                    });
                 }
-                PersistenceAction::SaveBlocks(blocks, sender) => {
-                    let result = self.on_save_blocks(blocks)?;
+                PersistenceAction::SaveBlocks(blocks, canceller, sender) => {
+                    let result = self.on_save_blocks(blocks, canceller)?;
                     let result_number = result.last_block.map(|b| b.number);
 
                     let _ = sender.send(result);
@@ -149,6 +173,7 @@ where
     fn on_save_blocks(
         &mut self,
         blocks: Vec<ExecutedBlock<N::Primitives>>,
+        canceller: PersistenceCanceller,
     ) -> Result<PersistenceResult, PersistenceError> {
         let first_block = blocks.first().map(|b| b.recovered_block.num_hash());
         let last_block = blocks.last().map(|b| b.recovered_block.num_hash());
@@ -163,7 +188,33 @@ where
 
         if let Some(last) = last_block {
             let provider_rw = self.provider.database_provider_rw()?;
+            let previous_tip = provider_rw.last_block_number()?;
             provider_rw.save_blocks(blocks, SaveBlocksMode::Full)?;
+
+            if canceller.is_cancelled() {
+                self.pending_finalized_block = pending_finalized;
+                self.pending_safe_block = pending_safe;
+
+                // Replace the append-side RocksDB batches with those produced by unwind.
+                provider_rw.discard_pending_rocksdb_batches();
+                // Unwind reads changesets from static files. Finalizing makes the staged rows
+                // visible; the subsequently queued prunes make commit use unwind ordering.
+                provider_rw.static_file_provider().finalize()?;
+                provider_rw.remove_block_and_execution_above(previous_tip)?;
+                provider_rw.commit()?;
+
+                let elapsed = start_time.elapsed();
+                self.metrics.save_blocks_batch_size.record(block_count as f64);
+                self.metrics.save_blocks_duration_seconds.record(elapsed);
+
+                debug!(target: "engine::persistence", first=?first_block, last=?last_block, ?previous_tip, "Rolled back cancelled block save");
+
+                return Ok(PersistenceResult {
+                    last_block: None,
+                    commit_duration: Some(elapsed),
+                    cancelled: true,
+                });
+            }
 
             if let Some(finalized) = pending_finalized {
                 provider_rw.save_finalized_block_number(finalized.min(last.number))?;
@@ -189,7 +240,7 @@ where
         self.metrics.save_blocks_batch_size.record(block_count as f64);
         self.metrics.save_blocks_duration_seconds.record(elapsed);
 
-        Ok(PersistenceResult { last_block, commit_duration: Some(elapsed) })
+        Ok(PersistenceResult { last_block, commit_duration: Some(elapsed), cancelled: false })
     }
 
     fn maybe_run_pruner(&mut self, block_number: u64) -> Result<(), PersistenceError> {
@@ -237,7 +288,7 @@ pub enum PersistenceAction<N: NodePrimitives = EthPrimitives> {
     ///
     /// First, header, transaction, and receipt-related data should be written to static files.
     /// Then the execution history-related data will be written to the database.
-    SaveBlocks(Vec<ExecutedBlock<N>>, CrossbeamSender<PersistenceResult>),
+    SaveBlocks(Vec<ExecutedBlock<N>>, PersistenceCanceller, CrossbeamSender<PersistenceResult>),
 
     /// Removes block data above the given block number from the database.
     ///
@@ -322,9 +373,10 @@ impl<T: NodePrimitives> PersistenceHandle<T> {
     pub fn save_blocks(
         &self,
         blocks: Vec<ExecutedBlock<T>>,
+        canceller: PersistenceCanceller,
         tx: CrossbeamSender<PersistenceResult>,
     ) -> Result<(), SendError<PersistenceAction<T>>> {
-        self.send_action(PersistenceAction::SaveBlocks(blocks, tx))
+        self.send_action(PersistenceAction::SaveBlocks(blocks, canceller, tx))
     }
 
     /// Queues the finalized block number to be persisted on disk.
@@ -395,8 +447,8 @@ mod tests {
         providers::{ProviderFactoryBuilder, ReadOnlyConfig},
         test_utils::{create_test_provider_factory, MockNodeTypes},
         AccountReader, BalConfig, BalNotificationStream, BalStore, BalStoreHandle,
-        ChainSpecProvider, HeaderProvider, InMemoryBalStore, ProviderError, ProviderResult, RawBal,
-        StorageSettingsCache, TryIntoHistoricalStateProvider,
+        ChainSpecProvider, ChainStateBlockReader, HeaderProvider, InMemoryBalStore, ProviderError,
+        ProviderResult, RawBal, StorageSettingsCache, TryIntoHistoricalStateProvider,
     };
     use reth_prune::Pruner;
     use reth_prune_types::PruneMode;
@@ -495,7 +547,7 @@ mod tests {
         let blocks = vec![];
         let (tx, rx) = crossbeam_channel::bounded(1);
 
-        handle.save_blocks(blocks, tx).unwrap();
+        handle.save_blocks(blocks, PersistenceCanceller::default(), tx).unwrap();
 
         let result = rx.recv().unwrap();
         assert!(result.last_block.is_none());
@@ -514,7 +566,7 @@ mod tests {
         let blocks = vec![executed];
         let (tx, rx) = crossbeam_channel::bounded(1);
 
-        handle.save_blocks(blocks, tx).unwrap();
+        handle.save_blocks(blocks, PersistenceCanceller::default(), tx).unwrap();
 
         let result = rx.recv_timeout(std::time::Duration::from_secs(10)).expect("test timed out");
 
@@ -531,7 +583,7 @@ mod tests {
         let last_hash = blocks.last().unwrap().recovered_block().hash();
         let (tx, rx) = crossbeam_channel::bounded(1);
 
-        handle.save_blocks(blocks, tx).unwrap();
+        handle.save_blocks(blocks, PersistenceCanceller::default(), tx).unwrap();
         let result = rx.recv().unwrap();
         assert_eq!(last_hash, result.last_block.unwrap().hash);
     }
@@ -548,11 +600,68 @@ mod tests {
             let last_hash = blocks.last().unwrap().recovered_block().hash();
             let (tx, rx) = crossbeam_channel::bounded(1);
 
-            handle.save_blocks(blocks, tx).unwrap();
+            handle.save_blocks(blocks, PersistenceCanceller::default(), tx).unwrap();
 
             let result = rx.recv().unwrap();
             assert_eq!(last_hash, result.last_block.unwrap().hash);
         }
+    }
+
+    #[test]
+    fn test_cancelled_save_blocks_rolls_back() {
+        reth_tracing::init_test_tracing();
+
+        let provider = create_test_provider_factory();
+        let (_finished_exex_height_tx, finished_exex_height_rx) =
+            tokio::sync::watch::channel(FinishedExExHeight::NoExExs);
+        let pruner =
+            Pruner::new_with_factory(provider.clone(), vec![], 5, 0, None, finished_exex_height_rx);
+        let (sync_metrics_tx, _sync_metrics_rx) = unbounded_channel();
+        let handle = PersistenceHandle::<EthPrimitives>::spawn_service(
+            provider.clone(),
+            pruner,
+            sync_metrics_tx,
+        );
+
+        let mut test_block_builder = TestBlockBuilder::eth();
+        let mut blocks = test_block_builder.get_executed_blocks(0..2);
+        let first = blocks.next().unwrap();
+        let second = blocks.next().unwrap();
+
+        let (tx, rx) = crossbeam_channel::bounded(1);
+        handle.save_blocks(vec![first], PersistenceCanceller::default(), tx).unwrap();
+        let result = rx.recv().unwrap();
+        assert!(!result.cancelled);
+        assert_eq!(result.last_block.unwrap().number, 0);
+
+        handle.save_finalized_block_number(1).unwrap();
+        handle.save_safe_block_number(1).unwrap();
+
+        let canceller = PersistenceCanceller::default();
+        canceller.cancel();
+        let (tx, rx) = crossbeam_channel::bounded(1);
+        handle.save_blocks(vec![second.clone()], canceller, tx).unwrap();
+
+        let result = rx.recv().unwrap();
+        assert!(result.cancelled);
+        assert!(result.last_block.is_none());
+
+        let provider_ro = provider.provider().unwrap();
+        assert_eq!(provider_ro.last_block_number().unwrap(), 0);
+        assert_eq!(provider_ro.block_hash(1).unwrap(), None);
+        assert_eq!(provider_ro.last_finalized_block_number().unwrap(), None);
+        assert_eq!(provider_ro.last_safe_block_number().unwrap(), None);
+        drop(provider_ro);
+
+        let (tx, rx) = crossbeam_channel::bounded(1);
+        handle.save_blocks(vec![second], PersistenceCanceller::default(), tx).unwrap();
+        let result = rx.recv().unwrap();
+        assert!(!result.cancelled);
+        assert_eq!(result.last_block.unwrap().number, 1);
+
+        let provider_ro = provider.provider().unwrap();
+        assert_eq!(provider_ro.last_finalized_block_number().unwrap(), Some(1));
+        assert_eq!(provider_ro.last_safe_block_number().unwrap(), Some(1));
     }
 
     /// Verifies that committing `save_blocks` history before running the pruner

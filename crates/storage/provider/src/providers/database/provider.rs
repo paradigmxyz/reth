@@ -508,6 +508,14 @@ impl<TX, N: NodeTypes> AsRef<Self> for DatabaseProvider<TX, N> {
 }
 
 impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX, N> {
+    /// Discards all pending `RocksDB` batches without committing them.
+    ///
+    /// This restores the pending batch state of a fresh provider and is intended for aborting
+    /// writes before preparing replacement batches, such as when unwinding a staged block save.
+    pub fn discard_pending_rocksdb_batches(&self) {
+        self.pending_rocksdb_batches.lock().clear();
+    }
+
     /// Executes a closure with a `RocksDB` batch, automatically registering it for commit.
     ///
     /// This helper encapsulates all the cfg-gated `RocksDB` batch handling.
@@ -5019,6 +5027,151 @@ mod tests {
     enum StorageMode {
         V1,
         V2,
+    }
+
+    fn executed_block_with_state(
+        number: BlockNumber,
+        parent_hash: B256,
+        state: BundleState,
+    ) -> ExecutedBlock {
+        let hashed_state =
+            HashedPostState::from_bundle_state::<KeccakKeyHasher>(state.state()).into_sorted();
+        let block = SealedBlock::<reth_ethereum_primitives::Block>::seal_parts(
+            Header { number, parent_hash, ..Default::default() },
+            Default::default(),
+        );
+
+        ExecutedBlock::new(
+            Arc::new(block.try_recover().unwrap()),
+            Arc::new(BlockExecutionOutput {
+                result: BlockExecutionResult {
+                    receipts: Vec::new(),
+                    requests: Default::default(),
+                    gas_used: 0,
+                    blob_gas_used: 0,
+                },
+                state,
+            }),
+            ComputedTrieData {
+                sorted: SortedTrieData::new(Arc::new(hashed_state), Default::default()),
+            },
+        )
+    }
+
+    fn run_cancelled_save_rollback(mode: StorageMode) {
+        let factory = create_test_provider_factory();
+        factory.set_storage_settings_cache(match mode {
+            StorageMode::V1 => StorageSettings::v1(),
+            StorageMode::V2 => StorageSettings::v2(),
+        });
+
+        let address = Address::with_last_byte(1);
+        let slot = U256::from(1);
+        let retained_account =
+            AccountInfo { nonce: 1, balance: U256::from(10), ..Default::default() };
+        let retained_storage = U256::from(10);
+
+        let genesis = executed_block_with_state(0, B256::ZERO, BundleState::default());
+        let retained_state = BundleState::builder(1..=1)
+            .state_present_account_info(address, retained_account.clone())
+            .revert_account_info(1, address, Some(None))
+            .state_storage(address, HashMap::from_iter([(slot, (U256::ZERO, retained_storage))]))
+            .revert_storage(1, address, vec![(slot, U256::ZERO)])
+            .build();
+        let retained_block =
+            executed_block_with_state(1, genesis.recovered_block().hash(), retained_state);
+        let retained_hash = retained_block.recovered_block().hash();
+
+        let staged_state = BundleState::builder(2..=2)
+            .state_present_account_info(
+                address,
+                AccountInfo { nonce: 2, balance: U256::from(20), ..Default::default() },
+            )
+            .revert_account_info(2, address, Some(Some(retained_account)))
+            .state_storage(
+                address,
+                HashMap::from_iter([(slot, (retained_storage, U256::from(20)))]),
+            )
+            .revert_storage(2, address, vec![(slot, retained_storage)])
+            .build();
+        let staged_block = executed_block_with_state(2, retained_hash, staged_state);
+
+        let provider_rw = factory.provider_rw().unwrap();
+        provider_rw.save_blocks(vec![genesis, retained_block], SaveBlocksMode::Full).unwrap();
+        provider_rw.commit().unwrap();
+
+        let expected_hashed_accounts =
+            factory.provider().unwrap().table::<tables::HashedAccounts>().unwrap();
+        let expected_hashed_storages =
+            factory.provider().unwrap().table::<tables::HashedStorages>().unwrap();
+        assert!(!expected_hashed_accounts.is_empty());
+        assert!(!expected_hashed_storages.is_empty());
+        let rocksdb = factory.rocksdb_provider();
+        let expected_account_history = rocksdb
+            .iter::<tables::AccountsHistory>()
+            .unwrap()
+            .collect::<ProviderResult<Vec<_>>>()
+            .unwrap();
+        let expected_storage_history = rocksdb
+            .iter::<tables::StoragesHistory>()
+            .unwrap()
+            .collect::<ProviderResult<Vec<_>>>()
+            .unwrap();
+        if mode == StorageMode::V2 {
+            assert!(!expected_account_history.is_empty());
+            assert!(!expected_storage_history.is_empty());
+        }
+
+        let provider_rw = factory.provider_rw().unwrap();
+        provider_rw.save_blocks(vec![staged_block], SaveBlocksMode::Full).unwrap();
+
+        // Make staged static-file rows visible to the existing unwind implementation, then
+        // replace the append-side RocksDB batches with the batches produced by unwind.
+        provider_rw.static_file_provider().finalize().unwrap();
+        provider_rw.discard_pending_rocksdb_batches();
+        provider_rw.remove_block_and_execution_above(1).unwrap();
+        provider_rw.commit().unwrap();
+
+        let provider = factory.provider().unwrap();
+        assert_eq!(provider.best_block_number().unwrap(), 1);
+        assert_eq!(provider.block_hash(1).unwrap(), Some(retained_hash));
+        assert_eq!(provider.block_hash(2).unwrap(), None);
+        assert_eq!(provider.table::<tables::HashedAccounts>().unwrap(), expected_hashed_accounts);
+        assert_eq!(provider.table::<tables::HashedStorages>().unwrap(), expected_hashed_storages);
+        assert_eq!(
+            provider
+                .static_file_provider()
+                .get_highest_static_file_block(StaticFileSegment::Headers),
+            Some(1)
+        );
+
+        let rocksdb = factory.rocksdb_provider();
+        assert_eq!(
+            rocksdb
+                .iter::<tables::AccountsHistory>()
+                .unwrap()
+                .collect::<ProviderResult<Vec<_>>>()
+                .unwrap(),
+            expected_account_history
+        );
+        assert_eq!(
+            rocksdb
+                .iter::<tables::StoragesHistory>()
+                .unwrap()
+                .collect::<ProviderResult<Vec<_>>>()
+                .unwrap(),
+            expected_storage_history
+        );
+    }
+
+    #[test]
+    fn cancelled_save_rolls_back_with_same_provider_v1() {
+        run_cancelled_save_rollback(StorageMode::V1);
+    }
+
+    #[test]
+    fn cancelled_save_rolls_back_with_same_provider_v2() {
+        run_cancelled_save_rollback(StorageMode::V2);
     }
 
     fn run_save_blocks_and_verify(mode: StorageMode) {

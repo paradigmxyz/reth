@@ -1,6 +1,6 @@
 use super::*;
 use crate::{
-    persistence::PersistenceAction,
+    persistence::{PersistenceAction, PersistenceCanceller},
     tree::{
         payload_validator::{BasicEngineValidator, TreeCtx, ValidationOutcome},
         persistence_state::CurrentPersistenceAction,
@@ -246,7 +246,11 @@ impl TestHarness {
             engine_api_tree_state,
             canonical_in_memory_state,
             persistence_handle,
-            PersistenceState { last_persisted_block: BlockNumHash::default(), rx: None },
+            PersistenceState {
+                last_persisted_block: BlockNumHash::default(),
+                rx: None,
+                save_canceller: None,
+            },
             payload_builder,
             tree_config,
             EngineApiKind::Ethereum,
@@ -454,7 +458,11 @@ impl ValidatorTestHarness {
         match action {
             CurrentPersistenceAction::SavingBlocks { highest } => {
                 let (_tx, rx) = crossbeam_channel::bounded(1);
-                self.harness.tree.persistence_state.start_save(highest, rx);
+                self.harness.tree.persistence_state.start_save(
+                    highest,
+                    PersistenceCanceller::default(),
+                    rx,
+                );
             }
             CurrentPersistenceAction::RemovingBlocks { new_tip_num } => {
                 let (_tx, rx) = crossbeam_channel::bounded(1);
@@ -585,7 +593,7 @@ async fn test_tree_persist_blocks() {
 
     let received_action =
         test_harness.action_rx.recv().expect("Failed to receive save blocks action");
-    if let PersistenceAction::SaveBlocks(saved_blocks, _) = received_action {
+    if let PersistenceAction::SaveBlocks(saved_blocks, _, _) = received_action {
         // only blocks.len() - tree_config.memory_block_buffer_target() will be
         // persisted
         let expected_persist_len = blocks.len() - tree_config.memory_block_buffer_target() as usize;
@@ -873,7 +881,11 @@ fn test_backpressure_waits_for_persistence_before_reading_incoming() {
 
     let (persist_tx, persist_rx) = crossbeam_channel::bounded(1);
     let persisted = blocks.last().unwrap().recovered_block().num_hash();
-    test_harness.tree.persistence_state.start_save(persisted, persist_rx);
+    test_harness.tree.persistence_state.start_save(
+        persisted,
+        PersistenceCanceller::default(),
+        persist_rx,
+    );
     assert!(test_harness.tree.should_backpressure());
 
     let (tx, mut rx) = oneshot::channel();
@@ -901,6 +913,7 @@ fn test_backpressure_waits_for_persistence_before_reading_incoming() {
             .send(PersistenceResult {
                 last_block: Some(persisted),
                 commit_duration: Some(Duration::ZERO),
+                cancelled: false,
             })
             .unwrap();
     });
@@ -988,7 +1001,7 @@ async fn test_tree_state_on_new_head_reorg() {
 
     // get rid of the prev action
     let received_action = test_harness.action_rx.recv().unwrap();
-    let PersistenceAction::SaveBlocks(saved_blocks, sender) = received_action else {
+    let PersistenceAction::SaveBlocks(saved_blocks, _, sender) = received_action else {
         panic!("received wrong action");
     };
     assert_eq!(saved_blocks, vec![blocks[0].clone(), blocks[1].clone()]);
@@ -998,6 +1011,7 @@ async fn test_tree_state_on_new_head_reorg() {
         .send(PersistenceResult {
             last_block: Some(blocks[1].recovered_block().num_hash()),
             commit_duration: Some(Duration::ZERO),
+            cancelled: false,
         })
         .unwrap();
 
@@ -1051,6 +1065,80 @@ async fn test_tree_state_on_new_head_reorg() {
             highest: fork_block_4.recovered_block().num_hash()
         })
     );
+}
+
+#[test]
+fn canonical_reorg_cancels_only_intersecting_persistence() {
+    let chain_spec = MAINNET.clone();
+    let mut test_harness = TestHarness::new(chain_spec);
+    let mut test_block_builder = TestBlockBuilder::eth();
+    let blocks: Vec<_> = test_block_builder.get_executed_blocks(1..6).collect();
+
+    for block in &blocks {
+        test_harness.tree.state.tree_state.insert_executed(block.clone());
+    }
+    test_harness.tree.state.tree_state.set_canonical_head(blocks[2].recovered_block().num_hash());
+
+    let fork_block_3 =
+        test_block_builder.get_executed_block_with_number(3, blocks[1].recovered_block().hash());
+    let fork_block_4 =
+        test_block_builder.get_executed_block_with_number(4, fork_block_3.recovered_block().hash());
+    let fork_block_5 =
+        test_block_builder.get_executed_block_with_number(5, fork_block_4.recovered_block().hash());
+    for block in [&fork_block_3, &fork_block_4, &fork_block_5] {
+        test_harness.tree.state.tree_state.insert_executed(block.clone());
+    }
+
+    let chain_update = test_harness
+        .tree
+        .on_new_head(fork_block_5.recovered_block().hash())
+        .unwrap()
+        .expect("fork should connect to canonical chain");
+    let (persist_tx, persist_rx) = crossbeam_channel::bounded(1);
+    let canceller = PersistenceCanceller::default();
+    test_harness.tree.persistence_state.start_save(
+        blocks[2].recovered_block().num_hash(),
+        canceller.clone(),
+        persist_rx,
+    );
+
+    test_harness.tree.persistence_state.cancel_save_if_intersects(4);
+    assert!(!canceller.is_cancelled());
+
+    test_harness.tree.on_canonical_chain_update(chain_update);
+
+    assert!(canceller.is_cancelled());
+    drop(persist_tx);
+}
+
+#[test]
+fn cancelled_persistence_does_not_advance_persisted_tip() {
+    let mut test_harness = TestHarness::new(MAINNET.clone());
+    let previous_tip = BlockNumHash::new(1, B256::random());
+    let attempted_tip = BlockNumHash::new(2, B256::random());
+    test_harness.tree.persistence_state.last_persisted_block = previous_tip;
+
+    let (_persist_tx, persist_rx) = crossbeam_channel::bounded(1);
+    test_harness.tree.persistence_state.start_save(
+        attempted_tip,
+        PersistenceCanceller::default(),
+        persist_rx,
+    );
+
+    test_harness
+        .tree
+        .on_persistence_complete(
+            PersistenceResult {
+                last_block: Some(attempted_tip),
+                commit_duration: Some(Duration::ZERO),
+                cancelled: true,
+            },
+            Instant::now(),
+        )
+        .unwrap();
+
+    assert_eq!(test_harness.tree.persistence_state.last_persisted_block, previous_tip);
+    assert!(!test_harness.tree.persistence_state.in_progress());
 }
 
 #[test]
@@ -1313,6 +1401,13 @@ async fn test_fcu_with_canonical_ancestor_updates_latest_block() {
 
     // Now perform FCU to a canonical ancestor (block 2)
     let ancestor_block = blocks[1].recovered_block().clone(); // Block 2 (0-indexed as blocks[1])
+    let (_persist_tx, persist_rx) = crossbeam_channel::bounded(1);
+    let canceller = PersistenceCanceller::default();
+    test_harness.tree.persistence_state.start_save(
+        blocks[2].recovered_block().num_hash(),
+        canceller.clone(),
+        persist_rx,
+    );
 
     // Send FCU to the canonical ancestor
     let (tx, rx) = oneshot::channel();
@@ -1335,6 +1430,7 @@ async fn test_fcu_with_canonical_ancestor_updates_latest_block() {
     // Verify FCU succeeds
     let response = rx.await.unwrap().unwrap().await.unwrap();
     assert!(response.payload_status.is_valid());
+    assert!(canceller.is_cancelled());
 
     // The critical test: verify that Latest block has been updated to the canonical ancestor
     // Check tree state
@@ -2269,7 +2365,7 @@ mod forkchoice_updated_tests {
                 break;
             }
 
-            if let Ok(PersistenceAction::SaveBlocks(saved_blocks, sender)) =
+            if let Ok(PersistenceAction::SaveBlocks(saved_blocks, _, sender)) =
                 action_rx.recv_timeout(std::time::Duration::from_millis(100))
             {
                 if let Some(last) = saved_blocks.last() {
@@ -2279,6 +2375,7 @@ mod forkchoice_updated_tests {
                     .send(PersistenceResult {
                         last_block: saved_blocks.last().map(|b| b.recovered_block().num_hash()),
                         commit_duration: Some(Duration::ZERO),
+                        cancelled: false,
                     })
                     .unwrap();
             }
