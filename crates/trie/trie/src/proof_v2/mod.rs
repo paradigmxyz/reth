@@ -161,16 +161,14 @@ where
         !self.branch_stack.is_empty() as usize
     }
 
-    /// Returns true if the current branch is retained for a proof target.
+    /// Returns true if a proof target reaches the current branch's logical path.
     fn current_branch_matches_target(&mut self, targets: &TargetsCursor<'_>) -> bool {
         let branch = self.branch_stack.last().expect("leaf child must have a parent branch");
         if let Some(matches_target) = branch.matches_target {
             return matches_target
         }
 
-        let branch_path =
-            self.branch_path.slice_unchecked(0, self.branch_path.len() - branch.ext_len as usize);
-        let matches_target = targets.contains_target_for_path(&branch_path);
+        let matches_target = targets.contains_target_for_path(&self.branch_path);
         self.branch_stack
             .last_mut()
             .expect("leaf child must have a parent branch")
@@ -2071,7 +2069,6 @@ mod tests {
             vec![
                 Nibbles::from_nibbles([0x2, 0x0, 0x0, 0x0]),
                 Nibbles::from_nibbles([0x2, 0x0, 0x0, 0x1]),
-                Nibbles::from_nibbles([0x2, 0x0, 0xf]),
                 Nibbles::from_nibbles([0x2, 0xf]),
             ]
         );
