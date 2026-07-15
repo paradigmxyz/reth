@@ -2,7 +2,6 @@
 #
 # Triggers:
 #   - Push tag v*: builds release (RC or latest)
-#   - Schedule: builds nightly + profiling
 #   - Manual: builds git-sha or nightly
 
 name: docker
@@ -11,8 +10,6 @@ on:
   push:
     tags:
       - v*
-  schedule:
-    - cron: "0 1 * * *"
   workflow_dispatch:
     inputs:
       build_type:
