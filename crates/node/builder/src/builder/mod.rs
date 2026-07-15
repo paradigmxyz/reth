@@ -751,17 +751,25 @@ pub struct BuilderContext<Node: FullNodeTypes> {
     pub(crate) executor: TaskExecutor,
     /// Config container
     pub(crate) config_container: WithConfigs<<Node::Types as NodeTypes>::ChainSpec>,
+    /// Cache of recovered transaction senders shared by node components.
+    sender_recovery_cache: reth_evm::SenderRecoveryCache,
 }
 
 impl<Node: FullNodeTypes> BuilderContext<Node> {
     /// Create a new instance of [`BuilderContext`]
-    pub const fn new(
+    pub fn new(
         head: Head,
         provider: Node::Provider,
         executor: TaskExecutor,
         config_container: WithConfigs<<Node::Types as NodeTypes>::ChainSpec>,
     ) -> Self {
-        Self { head, provider, executor, config_container }
+        Self {
+            head,
+            provider,
+            executor,
+            config_container,
+            sender_recovery_cache: reth_evm::SenderRecoveryCache::default(),
+        }
     }
 
     /// Returns the configured provider to interact with the blockchain.
@@ -794,6 +802,11 @@ impl<Node: FullNodeTypes> BuilderContext<Node> {
     /// This can be used to execute async tasks or functions during the setup.
     pub const fn task_executor(&self) -> &TaskExecutor {
         &self.executor
+    }
+
+    /// Returns the sender recovery cache shared by node components.
+    pub const fn sender_recovery_cache(&self) -> &reth_evm::SenderRecoveryCache {
+        &self.sender_recovery_cache
     }
 
     /// Returns the chain spec of the node.
@@ -920,6 +933,9 @@ impl<Node: FullNodeTypes> BuilderContext<Node> {
                 propagation_policy,
                 announcement_policy,
             )
+            .map_transactions(|transactions| {
+                transactions.with_sender_recovery_cache(self.sender_recovery_cache.clone())
+            })
             .request_handler_with_blob_store(self.provider().clone(), pool.blob_store())
             .split_with_handle();
 

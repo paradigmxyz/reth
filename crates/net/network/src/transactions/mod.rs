@@ -55,6 +55,7 @@ use reth_eth_wire::{
     PooledTransactions, RequestTxHashes, Transactions, ValidAnnouncementData,
 };
 use reth_ethereum_primitives::TxType;
+use reth_evm::SenderRecoveryCache;
 use reth_metrics::common::mpsc::MemoryBoundedReceiver;
 use reth_network_api::{
     events::{PeerEvent, SessionInfo},
@@ -285,6 +286,8 @@ impl<N: NetworkPrimitives> TransactionsHandle<N> {
 pub struct TransactionsManager<Pool, N: NetworkPrimitives = EthNetworkPrimitives> {
     /// Access to the transaction pool.
     pool: Pool,
+    /// Cache of recovered transaction senders shared with payload prewarming.
+    sender_recovery_cache: SenderRecoveryCache,
     /// Network access.
     network: NetworkHandle<N>,
     /// Subscriptions to all network related events.
@@ -400,6 +403,7 @@ impl<Pool: TransactionPool, N: NetworkPrimitives> TransactionsManager<Pool, N> {
 
         Self {
             pool,
+            sender_recovery_cache: SenderRecoveryCache::default(),
             network,
             network_events,
             transaction_fetcher,
@@ -422,6 +426,12 @@ impl<Pool: TransactionPool, N: NetworkPrimitives> TransactionsManager<Pool, N> {
     /// Returns a new handle that can send commands to this type.
     pub fn handle(&self) -> TransactionsHandle<N> {
         TransactionsHandle { manager_tx: self.command_tx.clone() }
+    }
+
+    /// Uses the provided sender recovery cache.
+    pub fn with_sender_recovery_cache(mut self, cache: SenderRecoveryCache) -> Self {
+        self.sender_recovery_cache = cache;
+        self
     }
 
     /// Returns `true` if [`TransactionsManager`] has capacity to request pending hashes. Returns
@@ -1454,18 +1464,19 @@ where
 
         let txs_len = transactions.len();
 
-        let recover = |tx| match Pool::Transaction::try_recover(tx) {
-            Ok(tx) => Some(tx),
-            Err(badtx) => {
-                trace!(target: "net::tx",
-                    peer_id=format!("{peer_id:#}"),
-                    hash=%badtx.tx_hash(),
-                    client_version=%client_version,
-                    "failed ecrecovery for transaction"
-                );
-                None
-            }
-        };
+        let recover =
+            |tx| match Pool::Transaction::try_recover_with_cache(tx, &self.sender_recovery_cache) {
+                Ok(tx) => Some(tx),
+                Err(badtx) => {
+                    trace!(target: "net::tx",
+                        peer_id=format!("{peer_id:#}"),
+                        hash=%badtx.tx_hash(),
+                        client_version=%client_version,
+                        "failed ecrecovery for transaction"
+                    );
+                    None
+                }
+            };
 
         let new_txs = transactions.into_par_iter().filter_map(recover).collect::<Vec<_>>();
 
