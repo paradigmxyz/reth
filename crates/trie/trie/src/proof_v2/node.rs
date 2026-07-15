@@ -150,6 +150,8 @@ pub(crate) struct ProofTrieBranch {
     pub(crate) state_mask: TrieMask,
     /// Bitmasks which are subsets of `state_mask`.
     pub(crate) masks: Option<BranchNodeMasks>,
+    /// Whether this branch matches a proof target, cached when checking its leaf children.
+    pub(crate) matches_target: Option<bool>,
 }
 
 /// Trims the first `len` nibbles from the head of the given `Nibbles`.
