@@ -2,9 +2,10 @@ use crate::{
     traits::{BlockSource, ReceiptProvider},
     AccountReader, BalProvider, BalStoreHandle, BlockHashReader, BlockIdReader, BlockNumReader,
     BlockReader, BlockReaderIdExt, ChainSpecProvider, ChangeSetReader, HeaderProvider,
-    PruneCheckpointReader, RangeResponse, RangeResult, ReceiptProviderIdExt, StateProvider,
-    StateProviderBox, StateProviderFactory, StateRangeProvider, StateRangeProviderFactory,
-    StateRangeView, StateReader, StateRootProvider, TransactionVariant, TransactionsProvider,
+    PruneCheckpointReader, RangeEnd, RangeResponse, RangeResult, ReceiptProviderIdExt,
+    StateProvider, StateProviderBox, StateProviderFactory, StateRangeProvider,
+    StateRangeProviderFactory, StateRangeView, StateReader, StateRootProvider, StorageRangeResult,
+    TransactionVariant, TransactionsProvider,
 };
 use alloy_consensus::{
     constants::EMPTY_ROOT_HASH,
@@ -85,7 +86,7 @@ pub struct MockEthProvider<T: NodePrimitives = EthPrimitives, ChainSpec = reth_c
     /// Storage roots returned to snap handler tests, keyed by hashed address.
     snap_storage_roots: Arc<Mutex<B256Map<B256>>>,
     /// Storage ranges returned to snap handler tests.
-    snap_storage_ranges: Arc<Mutex<VecDeque<MockStorageRange>>>,
+    snap_storage_ranges: Arc<Mutex<VecDeque<MockStorageRangeOutcome>>>,
     /// Storage range requests observed by snap handler tests.
     snap_storage_range_requests: Arc<Mutex<Vec<MockStorageRangeRequest>>>,
     /// Account proof returned to snap handler tests.
@@ -96,10 +97,18 @@ pub struct MockEthProvider<T: NodePrimitives = EthPrimitives, ChainSpec = reth_c
     prune_modes: Arc<PruneModes>,
 }
 
-/// Optional mock account entries paired with their range-completion status.
-type MockAccountRange = Option<(Vec<(B256, Account)>, bool)>;
-/// Optional mock storage slots paired with their range-completion status.
-type MockStorageRange = Option<(Vec<(B256, U256)>, bool)>;
+/// Optional mock account entries paired with why the range ended.
+type MockAccountRange = Option<(Vec<(B256, Account)>, RangeEnd)>;
+/// Outcome of a queued mock `storage_range` call.
+#[derive(Debug, Clone)]
+enum MockStorageRangeOutcome {
+    /// The provider fails this call (e.g. simulating a database error).
+    Error,
+    /// The requested account isn't present in the pinned state.
+    AccountMissing,
+    /// The account is present; these are its slots and why the range ended.
+    Found(Vec<(B256, U256)>, RangeEnd),
+}
 /// Hashed address, origin, limit, and byte budget of a mock storage range request.
 type MockStorageRangeRequest = (B256, B256, B256, usize);
 
@@ -166,9 +175,9 @@ impl<T: NodePrimitives, ChainSpec> MockEthProvider<T, ChainSpec> {
     }
 
     /// Sets the available account range returned to snap handler tests.
-    pub fn set_snap_account_range(&self, accounts: Vec<(B256, Account)>, complete: bool) {
+    pub fn set_snap_account_range(&self, accounts: Vec<(B256, Account)>, end: RangeEnd) {
         self.snap_state_range_available.store(true, Ordering::Relaxed);
-        *self.snap_account_range.lock() = Some((accounts, complete));
+        *self.snap_account_range.lock() = Some((accounts, end));
     }
 
     /// Sets an account's storage root for snap handler tests.
@@ -177,15 +186,21 @@ impl<T: NodePrimitives, ChainSpec> MockEthProvider<T, ChainSpec> {
     }
 
     /// Adds an available storage range for the next snap handler call.
-    pub fn push_snap_storage_range(&self, slots: Vec<(B256, U256)>, complete: bool) {
+    pub fn push_snap_storage_range(&self, slots: Vec<(B256, U256)>, end: RangeEnd) {
         self.snap_state_range_available.store(true, Ordering::Relaxed);
-        self.snap_storage_ranges.lock().push_back(Some((slots, complete)));
+        self.snap_storage_ranges.lock().push_back(MockStorageRangeOutcome::Found(slots, end));
+    }
+
+    /// Marks the account for the next snap handler call as absent from the pinned state.
+    pub fn push_missing_snap_storage_account(&self) {
+        self.snap_state_range_available.store(true, Ordering::Relaxed);
+        self.snap_storage_ranges.lock().push_back(MockStorageRangeOutcome::AccountMissing);
     }
 
     /// Adds an unavailable storage range for the next snap handler call.
     pub fn push_unavailable_snap_storage_range(&self) {
         self.snap_state_range_available.store(true, Ordering::Relaxed);
-        self.snap_storage_ranges.lock().push_back(None);
+        self.snap_storage_ranges.lock().push_back(MockStorageRangeOutcome::Error);
     }
 
     /// Returns the number of queued storage ranges for snap handler tests.
@@ -363,9 +378,9 @@ impl<T: NodePrimitives, ChainSpec> StateRangeProvider for MockEthProvider<T, Cha
         _response_bytes: usize,
     ) -> RangeResult<(B256, Account)> {
         self.ensure_snap_state_reads_succeed()?;
-        let (items, complete) =
+        let (items, end) =
             self.snap_account_range.lock().clone().ok_or(ProviderError::BestBlockNotFound)?;
-        Ok(RangeResponse { items, complete })
+        Ok(RangeResponse { items, end })
     }
 
     fn storage_root_by_hash(&self, hashed_address: B256) -> ProviderResult<B256> {
@@ -383,7 +398,7 @@ impl<T: NodePrimitives, ChainSpec> StateRangeProvider for MockEthProvider<T, Cha
         start: B256,
         limit: B256,
         response_bytes: usize,
-    ) -> RangeResult<(B256, U256)> {
+    ) -> StorageRangeResult {
         self.ensure_snap_state_reads_succeed()?;
         self.snap_storage_range_requests.lock().push((
             hashed_address,
@@ -391,13 +406,13 @@ impl<T: NodePrimitives, ChainSpec> StateRangeProvider for MockEthProvider<T, Cha
             limit,
             response_bytes,
         ));
-        let (items, complete) = self
-            .snap_storage_ranges
-            .lock()
-            .pop_front()
-            .flatten()
-            .ok_or(ProviderError::BestBlockNotFound)?;
-        Ok(RangeResponse { items, complete })
+        let outcome =
+            self.snap_storage_ranges.lock().pop_front().ok_or(ProviderError::BestBlockNotFound)?;
+        match outcome {
+            MockStorageRangeOutcome::Error => Err(ProviderError::BestBlockNotFound),
+            MockStorageRangeOutcome::AccountMissing => Ok(None),
+            MockStorageRangeOutcome::Found(items, end) => Ok(Some(RangeResponse { items, end })),
+        }
     }
 
     fn account_range_proof(&self, _keys: &[B256]) -> ProviderResult<Vec<Bytes>> {

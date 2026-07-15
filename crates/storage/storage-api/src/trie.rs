@@ -83,13 +83,16 @@ pub trait StateRangeProvider {
     fn storage_root_by_hash(&self, hashed_address: B256) -> ProviderResult<B256>;
 
     /// Same as [`Self::account_range`], but for the storage slots of `hashed_address`.
+    ///
+    /// Returns `None` if `hashed_address` isn't present in the account trie at the pinned state
+    /// root, distinct from an account that is present but has no storage.
     fn storage_range(
         &self,
         hashed_address: B256,
         start: B256,
         limit: B256,
         response_bytes: usize,
-    ) -> RangeResult<(B256, U256)>;
+    ) -> StorageRangeResult;
 
     /// Returns an account-trie boundary proof for the already-hashed `keys`.
     fn account_range_proof(&self, keys: &[B256]) -> ProviderResult<Vec<Bytes>>;
@@ -109,17 +112,32 @@ pub trait StateRangeProviderFactory {
     fn state_range_provider(&self, state_root: B256) -> ProviderResult<Option<StateRangeView>>;
 }
 
-/// A range query's items and whether the requested range is complete.
+/// A range query's items and why the range ended where it did.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RangeResponse<T> {
     /// The items found within the requested range, in ascending key order.
     pub items: Vec<T>,
-    /// Whether `items` covers the entire requested range, or was cut short by the byte budget.
-    pub complete: bool,
+    /// Why `items` doesn't necessarily continue past its last entry.
+    pub end: RangeEnd,
+}
+
+/// Why a range query stopped before the caller-requested `limit`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RangeEnd {
+    /// The cursor ran out of entries: `items` covers everything from `start` onward.
+    Exhausted,
+    /// The last returned item's key reached or passed the requested `limit`.
+    HashLimit,
+    /// `response_bytes` was exceeded before `limit` was reached.
+    ByteLimit,
 }
 
 /// Result of a [`StateRangeProvider`] range query.
 pub type RangeResult<T> = ProviderResult<RangeResponse<T>>;
+
+/// Result of a [`StateRangeProvider::storage_range`] query: `None` if the account itself isn't
+/// present in the trie at the pinned state root.
+pub type StorageRangeResult = ProviderResult<Option<RangeResponse<(B256, U256)>>>;
 
 /// A reusable state range view resolved for a specific state root.
 pub type StateRangeView = Box<dyn StateRangeProvider + Send + 'static>;

@@ -13,7 +13,7 @@ use crate::{
 };
 use alloy_consensus::{transaction::TransactionMeta, BlockHeader};
 use alloy_eips::{BlockHashOrNumber, BlockId, BlockNumHash, BlockNumberOrTag};
-use alloy_primitives::{Address, BlockHash, BlockNumber, Bytes, TxHash, TxNumber, B256, U256};
+use alloy_primitives::{Address, BlockHash, BlockNumber, Bytes, TxHash, TxNumber, B256};
 use alloy_rpc_types_engine::ForkchoiceState;
 use reth_chain_state::{
     BlockState, CanonicalInMemoryState, ForkChoiceNotifications, ForkChoiceSubscriptions,
@@ -30,8 +30,9 @@ use reth_prune_types::{PruneCheckpoint, PruneSegment};
 use reth_stages_types::{StageCheckpoint, StageId};
 use reth_static_file_types::StaticFileSegment;
 use reth_storage_api::{
-    BlockBodyIndicesProvider, NodePrimitivesProvider, RangeResponse, RangeResult,
+    BlockBodyIndicesProvider, NodePrimitivesProvider, RangeEnd, RangeResponse, RangeResult,
     StateRangeProvider, StateRangeProviderFactory, StateRangeView, StorageChangeSetReader,
+    StorageRangeResult,
 };
 use reth_storage_errors::provider::ProviderResult;
 use reth_trie::{
@@ -219,7 +220,7 @@ impl<N: ProviderNodeTypes> StateRangeProvider for HistoricalStateRangeView<N> {
 
         let mut accounts = Vec::new();
         let mut total_bytes = 0usize;
-        let mut complete = true;
+        let mut end = RangeEnd::Exhausted;
 
         // Append before checking `limit`, so an empty `[start, limit]` still returns the account
         // right past `limit`, provable as an empty range rather than a skipped one.
@@ -228,16 +229,17 @@ impl<N: ProviderNodeTypes> StateRangeProvider for HistoricalStateRangeView<N> {
             total_bytes += 32 + 4 * 32; // hash + rough upper bound of the RLP account body
             accounts.push((hash, account));
             if hash >= limit {
+                end = RangeEnd::HashLimit;
                 break
             }
             if total_bytes > response_bytes {
-                complete = false;
+                end = RangeEnd::ByteLimit;
                 break
             }
             entry = cursor.next().map_err(ProviderError::Database)?;
         }
 
-        Ok(RangeResponse { items: accounts, complete })
+        Ok(RangeResponse { items: accounts, end })
     }
 
     fn storage_root_by_hash(&self, hashed_address: B256) -> ProviderResult<B256> {
@@ -259,13 +261,22 @@ impl<N: ProviderNodeTypes> StateRangeProvider for HistoricalStateRangeView<N> {
         start: B256,
         limit: B256,
         response_bytes: usize,
-    ) -> RangeResult<(B256, U256)> {
+    ) -> StorageRangeResult {
+        // Distinguish an absent account from one with no storage, so callers don't silently
+        // omit it and shift later accounts' positions.
+        let mut account_cursor =
+            self.provider.hashed_account_cursor().map_err(ProviderError::Database)?;
+        let found = account_cursor.seek(hashed_address).map_err(ProviderError::Database)?;
+        if found.map(|(hash, _)| hash) != Some(hashed_address) {
+            return Ok(None)
+        }
+
         let mut cursor =
             self.provider.hashed_storage_cursor(hashed_address).map_err(ProviderError::Database)?;
 
         let mut slots = Vec::new();
         let mut total_bytes = 0usize;
-        let mut complete = true;
+        let mut end = RangeEnd::Exhausted;
 
         // Append before checking `limit`, so an empty `[start, limit]` still returns the slot
         // right past `limit`, provable as an empty range rather than a skipped one.
@@ -274,16 +285,17 @@ impl<N: ProviderNodeTypes> StateRangeProvider for HistoricalStateRangeView<N> {
             total_bytes += 64;
             slots.push((hash, value));
             if hash >= limit {
+                end = RangeEnd::HashLimit;
                 break
             }
             if total_bytes > response_bytes {
-                complete = false;
+                end = RangeEnd::ByteLimit;
                 break
             }
             entry = cursor.next().map_err(ProviderError::Database)?;
         }
 
-        Ok(RangeResponse { items: slots, complete })
+        Ok(Some(RangeResponse { items: slots, end }))
     }
 
     fn account_range_proof(&self, keys: &[B256]) -> ProviderResult<Vec<Bytes>> {
@@ -985,7 +997,7 @@ mod tests {
     use reth_storage_api::{
         BlockBodyIndicesProvider, BlockHashReader, BlockIdReader, BlockNumReader, BlockReader,
         BlockReaderIdExt, BlockSource, ChangeSetReader, DBProvider, DatabaseProviderFactory,
-        HashingWriter, HeaderProvider, ReceiptProvider, ReceiptProviderIdExt,
+        HashingWriter, HeaderProvider, RangeEnd, ReceiptProvider, ReceiptProviderIdExt,
         StageCheckpointWriter, StateProviderFactory, StateRangeProvider, StateRangeProviderFactory,
         StateRootProvider, StateWriteConfig, StateWriter, StorageRootProvider, TransactionVariant,
         TransactionsProvider,
@@ -2819,11 +2831,13 @@ mod tests {
         let state = provider.state_range_provider(EMPTY_ROOT_HASH)?.unwrap();
 
         let all = state.account_range(B256::ZERO, B256::repeat_byte(0xff), 10_000)?;
-        assert!(all.complete);
+        assert_eq!(all.end, RangeEnd::Exhausted);
         assert_eq!(all.items, expected);
 
+        // The limit exactly matches the second account's hash, so the range ends there rather
+        // than by exhausting the trie.
         let bounded = state.account_range(B256::ZERO, expected[1].0, 10_000)?;
-        assert!(bounded.complete);
+        assert_eq!(bounded.end, RangeEnd::HashLimit);
         assert_eq!(bounded.items, expected[..2]);
 
         Ok(())
@@ -2845,7 +2859,7 @@ mod tests {
 
         // Budget only fits a single account.
         let partial = state.account_range(B256::ZERO, B256::repeat_byte(0xff), 150)?;
-        assert!(!partial.complete);
+        assert_eq!(partial.end, RangeEnd::ByteLimit);
         assert_eq!(partial.items.len(), 1);
 
         Ok(())
@@ -2872,17 +2886,25 @@ mod tests {
         let expected_root = provider.latest()?.storage_root(address, HashedStorage::default())?;
         assert_eq!(state.storage_root_by_hash(hashed_address)?, expected_root);
 
-        let returned =
-            state.storage_range(hashed_address, B256::ZERO, B256::repeat_byte(0xff), 10_000)?;
-        assert!(returned.complete);
+        let returned = state
+            .storage_range(hashed_address, B256::ZERO, B256::repeat_byte(0xff), 10_000)?
+            .unwrap();
+        assert_eq!(returned.end, RangeEnd::Exhausted);
         let mut expected: Vec<_> =
             slots.iter().map(|entry| (keccak256(entry.key), entry.value)).collect();
         expected.sort_by_key(|(hash, _)| *hash);
         assert_eq!(returned.items, expected);
 
-        let empty_window = state.storage_range(hashed_address, B256::ZERO, B256::ZERO, 10_000)?;
-        assert!(empty_window.complete);
+        // `start == limit == ZERO` means the first real slot's hash already reaches the limit.
+        let empty_window =
+            state.storage_range(hashed_address, B256::ZERO, B256::ZERO, 10_000)?.unwrap();
+        assert_eq!(empty_window.end, RangeEnd::HashLimit);
         assert_eq!(empty_window.items, expected[..1]);
+
+        // An account absent from the trie is distinguished from one with no storage.
+        assert!(state
+            .storage_range(B256::repeat_byte(0xee), B256::ZERO, B256::repeat_byte(0xff), 10_000)?
+            .is_none());
 
         Ok(())
     }

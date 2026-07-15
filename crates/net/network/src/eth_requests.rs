@@ -31,7 +31,7 @@ use reth_network_peers::PeerId;
 use reth_primitives_traits::{Account, Block};
 use reth_storage_api::{
     errors::provider::ProviderResult, BalProvider, BlockReader, BytecodeReader,
-    GetBlockAccessListLimit, HeaderProvider, RangeResponse, StateProviderFactory,
+    GetBlockAccessListLimit, HeaderProvider, RangeEnd, RangeResponse, StateProviderFactory,
     StateRangeProviderFactory,
 };
 use reth_transaction_pool::{blobstore::NoopBlobStore, BlobStore};
@@ -543,8 +543,9 @@ where
 
     /// Serves a `GetStorageRanges` request via [`StateRangeProviderFactory`].
     ///
-    /// `starting_hash`/`limit_hash` apply only to the first account. An account with no slots
-    /// gets no entry at all, and a proof stops the response at the first account that isn't a
+    /// `starting_hash`/`limit_hash` apply only to the first account. An account unavailable at
+    /// this root makes the whole response empty, rather than skipping it and shifting later
+    /// accounts' positions. A proof stops the response at the first account that isn't a
     /// complete, zero-origin range.
     fn get_storage_ranges_response(
         &self,
@@ -570,24 +571,25 @@ where
             }
             let origin = if i == 0 { req.starting_hash } else { B256::ZERO };
             let limit = if i == 0 { req.limit_hash } else { B256::repeat_byte(0xff) };
-            let RangeResponse { items: account_slots, complete } =
-                state.storage_range(hashed_address, origin, limit, remaining_bytes)?;
+            let Some(RangeResponse { items: account_slots, end }) =
+                state.storage_range(hashed_address, origin, limit, remaining_bytes)?
+            else {
+                return Ok(empty)
+            };
 
             remaining_bytes = remaining_bytes.saturating_sub(account_slots.len() * 64);
             let last = account_slots.last().map(|(hash, _)| *hash);
-            let needs_proof = origin != B256::ZERO || (!complete && last.is_some());
-            if !account_slots.is_empty() {
-                slots.push(
-                    account_slots
-                        .into_iter()
-                        .map(|(hash, value)| StorageData {
-                            hash,
-                            // snap clients verify proofs against RLP-encoded storage trie leaves.
-                            data: alloy_rlp::encode(value).into(),
-                        })
-                        .collect(),
-                );
-            }
+            let needs_proof = origin != B256::ZERO || end != RangeEnd::Exhausted;
+            slots.push(
+                account_slots
+                    .into_iter()
+                    .map(|(hash, value)| StorageData {
+                        hash,
+                        // snap clients verify proofs against RLP-encoded storage trie leaves.
+                        data: alloy_rlp::encode(value).into(),
+                    })
+                    .collect(),
+            );
 
             if needs_proof {
                 let boundary_keys = match last {
@@ -1064,16 +1066,18 @@ mod tests {
     #[tokio::test]
     async fn snap_requests_return_empty_responses_on_inconsistent_provider_results() {
         let missing_storage_root = MockEthProvider::default();
-        missing_storage_root.set_snap_account_range(vec![(B256::ZERO, Account::default())], true);
+        missing_storage_root
+            .set_snap_account_range(vec![(B256::ZERO, Account::default())], RangeEnd::Exhausted);
 
         let missing_account_proof = MockEthProvider::default();
-        missing_account_proof.set_snap_account_range(Vec::new(), true);
+        missing_account_proof.set_snap_account_range(Vec::new(), RangeEnd::Exhausted);
 
         let missing_storage_proof = MockEthProvider::default();
-        missing_storage_proof.push_snap_storage_range(vec![(B256::ZERO, U256::from(1))], false);
+        missing_storage_proof
+            .push_snap_storage_range(vec![(B256::ZERO, U256::from(1))], RangeEnd::ByteLimit);
 
         let storage_disappears = MockEthProvider::default();
-        storage_disappears.push_snap_storage_range(Vec::new(), true);
+        storage_disappears.push_snap_storage_range(Vec::new(), RangeEnd::Exhausted);
         storage_disappears.push_unavailable_snap_storage_range();
 
         let account_request = || {
@@ -1137,7 +1141,7 @@ mod tests {
                 ),
                 (second_hash, Account { nonce: 3, balance: U256::from(4), bytecode_hash: None }),
             ],
-            true,
+            RangeEnd::Exhausted,
         );
         provider.set_snap_storage_root(first_hash, storage_root);
         provider.set_snap_storage_root(second_hash, EMPTY_ROOT_HASH);
@@ -1186,7 +1190,7 @@ mod tests {
         let proof = vec![Bytes::from_static(&[0xbb])];
         provider.push_snap_storage_range(
             vec![(first_hash, U256::from(0x0102)), (second_hash, U256::from(0xff))],
-            true,
+            RangeEnd::Exhausted,
         );
         provider.set_snap_storage_proof(Some(proof.clone()));
 
@@ -1223,8 +1227,8 @@ mod tests {
     #[tokio::test]
     async fn snap_storage_ranges_only_bound_the_first_account() {
         let provider = MockEthProvider::default();
-        provider.push_snap_storage_range(Vec::new(), true);
-        provider.push_snap_storage_range(Vec::new(), true);
+        provider.push_snap_storage_range(Vec::new(), RangeEnd::Exhausted);
+        provider.push_snap_storage_range(Vec::new(), RangeEnd::Exhausted);
         let first_account = B256::repeat_byte(0x01);
         let second_account = B256::repeat_byte(0x02);
         let origin = B256::ZERO;
@@ -1249,7 +1253,7 @@ mod tests {
             rx.await.unwrap(),
             Ok(SnapResponse::StorageRanges(StorageRangesMessage {
                 request_id: 3,
-                slots: Vec::new(),
+                slots: vec![Vec::new(), Vec::new()],
                 proof: Vec::new(),
             }))
         );
@@ -1304,7 +1308,7 @@ mod tests {
     async fn snap_storage_ranges_limit_account_lookups() {
         let provider = MockEthProvider::default();
         for _ in 0..=MAX_STORAGE_RANGE_ACCOUNTS_SERVE {
-            provider.push_snap_storage_range(Vec::new(), true);
+            provider.push_snap_storage_range(Vec::new(), RangeEnd::Exhausted);
         }
         let handler = snap_handler(provider.clone());
         let (response, rx) = oneshot::channel();
@@ -1325,11 +1329,85 @@ mod tests {
             rx.await.unwrap(),
             Ok(SnapResponse::StorageRanges(StorageRangesMessage {
                 request_id: 4,
-                slots: Vec::new(),
+                slots: vec![Vec::new(); MAX_STORAGE_RANGE_ACCOUNTS_SERVE],
                 proof: Vec::new(),
             }))
         );
         assert_eq!(provider.snap_storage_ranges_remaining(), 1);
         assert_eq!(provider.snap_state_range_resolutions(), 1);
+    }
+
+    #[tokio::test]
+    async fn snap_storage_range_proves_finite_limit_from_zero_origin() {
+        let provider = MockEthProvider::default();
+        let hash = B256::repeat_byte(0x01);
+        let proof = vec![Bytes::from_static(&[0xcc])];
+        // More entries exist beyond `limit_hash`, so the cursor stopped at the hash limit
+        // rather than exhausting the trie -- a proof is required even though origin is zero.
+        provider.push_snap_storage_range(vec![(hash, U256::from(1))], RangeEnd::HashLimit);
+        provider.set_snap_storage_proof(Some(proof.clone()));
+
+        let handler = snap_handler(provider.clone());
+        let (response, rx) = oneshot::channel();
+        handler.on_snap_request(
+            PeerId::default(),
+            SnapProtocolMessage::GetStorageRanges(GetStorageRangesMessage {
+                request_id: 5,
+                root_hash: B256::ZERO,
+                account_hashes: vec![B256::repeat_byte(0x03)],
+                starting_hash: B256::ZERO,
+                limit_hash: B256::repeat_byte(0x20),
+                response_bytes: SOFT_RESPONSE_LIMIT as u64,
+            }),
+            response,
+        );
+
+        assert_eq!(
+            rx.await.unwrap(),
+            Ok(SnapResponse::StorageRanges(StorageRangesMessage {
+                request_id: 5,
+                slots: vec![vec![StorageData { hash, data: Bytes::from_static(&[0x01]) }]],
+                proof,
+            }))
+        );
+    }
+
+    #[tokio::test]
+    async fn snap_storage_ranges_are_entirely_empty_when_an_account_is_missing() {
+        let provider = MockEthProvider::default();
+        provider.push_missing_snap_storage_account();
+        provider.push_snap_storage_range(
+            vec![(B256::repeat_byte(0x01), U256::from(1))],
+            RangeEnd::Exhausted,
+        );
+        let missing_account = B256::repeat_byte(0x01);
+        let valid_account = B256::repeat_byte(0x02);
+
+        let handler = snap_handler(provider.clone());
+        let (response, rx) = oneshot::channel();
+        handler.on_snap_request(
+            PeerId::default(),
+            SnapProtocolMessage::GetStorageRanges(GetStorageRangesMessage {
+                request_id: 6,
+                root_hash: B256::ZERO,
+                account_hashes: vec![missing_account, valid_account],
+                starting_hash: B256::ZERO,
+                limit_hash: B256::repeat_byte(0xff),
+                response_bytes: SOFT_RESPONSE_LIMIT as u64,
+            }),
+            response,
+        );
+
+        assert_eq!(
+            rx.await.unwrap(),
+            Ok(SnapResponse::StorageRanges(StorageRangesMessage {
+                request_id: 6,
+                slots: Vec::new(),
+                proof: Vec::new(),
+            }))
+        );
+        // The valid account's queued range is never consumed: the response bails out at the
+        // first missing account instead of skipping it and shifting later positions.
+        assert_eq!(provider.snap_storage_ranges_remaining(), 1);
     }
 }
