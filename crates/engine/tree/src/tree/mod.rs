@@ -18,8 +18,9 @@ use reth_chain_state::{
 };
 use reth_consensus::{Consensus, FullConsensus};
 use reth_engine_primitives::{
-    BeaconEngineMessage, BeaconOnNewPayloadError, ConsensusEngineEvent, ExecutionPayload,
-    ForkchoiceStateTracker, NewPayloadTimings, OnForkChoiceUpdated, SlowBlockInfo,
+    BeaconEngineMessage, BeaconOnNewPayloadError, ConsensusEngineEvent, DebugSetHeadError,
+    ExecutionPayload, ForkchoiceStateTracker, NewPayloadTimings, OnForkChoiceUpdated,
+    SlowBlockInfo,
 };
 use reth_errors::{ConsensusError, ProviderResult};
 use reth_evm::ConfigureEvm;
@@ -998,6 +999,44 @@ where
         }
     }
 
+    /// Sets the canonical head for `debug_setHead` without changing forkchoice state.
+    fn on_debug_set_head(&mut self, block_number: u64) -> Result<(), DebugSetHeadError> {
+        if !self.backfill_sync_state.is_idle() {
+            return Err(DebugSetHeadError::Syncing)
+        }
+
+        let canonical_header = self
+            .provider
+            .sealed_header(block_number)
+            .map_err(DebugSetHeadError::internal)?
+            .ok_or(DebugSetHeadError::BlockNotFound(block_number))?;
+
+        if let Some(finalized) = self.canonical_in_memory_state.get_finalized_num_hash() &&
+            block_number < finalized.number
+        {
+            return Err(DebugSetHeadError::Finalized {
+                target: block_number,
+                finalized: finalized.number,
+            })
+        }
+
+        // Ensure the historical execution data is available before mutating either head tracker.
+        self.canonical_block_by_hash(canonical_header.hash())
+            .map_err(DebugSetHeadError::internal)?;
+        self.update_latest_block_to_canonical_ancestor(&canonical_header)
+            .map_err(DebugSetHeadError::internal)?;
+
+        if let Some(safe) = self.canonical_in_memory_state.get_safe_num_hash() &&
+            safe.number > block_number
+        {
+            let _ = self.persistence.save_safe_block_number(block_number);
+            self.canonical_in_memory_state.set_safe(canonical_header);
+            self.metrics.tree.safe_block_height.set(block_number as f64);
+        }
+
+        Ok(())
+    }
+
     /// Handles chain unwind scenarios by collecting blocks to remove and performing an unwind back
     /// to the canonical header
     fn handle_canonical_chain_unwind(
@@ -1266,17 +1305,20 @@ where
         if let Ok(Some(canonical_header)) = self.find_canonical_header(state.head_block_hash) {
             debug!(target: "engine::tree", head = canonical_header.number(), "fcu head block is already canonical");
 
-            // Keep the in-memory latest block aligned with the FCU head when rewinding to a
-            // canonical ancestor.
-            if self.config.unwind_canonical_header() {
-                self.update_latest_block_to_canonical_ancestor(&canonical_header)?;
-            }
-
             // For OpStack, or if explicitly configured, the proposers are allowed to reorg their
             // own chain at will, so we need to always trigger a new payload job if requested.
             if self.engine_kind.is_opstack() ||
                 self.config.always_process_payload_attributes_on_canonical_head()
             {
+                // We need to effectively unwind the _canonical_ chain to the FCU's head, which is
+                // part of the canonical chain. We need to update the latest block state to reflect
+                // the canonical ancestor. This ensures that state providers and the transaction
+                // pool operate with the correct chain state after forkchoice update processing, and
+                // new payloads built on the reorg'd head will be added to the tree immediately.
+                if self.config.unwind_canonical_header() {
+                    self.update_latest_block_to_canonical_ancestor(&canonical_header)?;
+                }
+
                 if let Some(attr) = attrs {
                     debug!(target: "engine::tree", head = canonical_header.number(), "handling payload attributes for canonical head");
                     // Clone only when we actually need to process the attributes
@@ -1628,6 +1670,15 @@ where
                                         .failed_forkchoice_updated_response_deliveries
                                         .increment(1);
                                     warn!(target: "engine::tree", ?state, elapsed=?start.elapsed(), "Failed to deliver forkchoiceUpdated response, receiver dropped (request cancelled): {err:?}");
+                                }
+                            }
+                            BeaconEngineMessage::DebugSetHead { block_number, tx } => {
+                                let output = self.on_debug_set_head(block_number);
+                                if let Err(err) = &output {
+                                    error!(target: "engine::tree", %err, block_number, "Error setting debug head");
+                                }
+                                if let Err(err) = tx.send(output) {
+                                    warn!(target: "engine::tree", block_number, "Failed to deliver debug_setHead response, receiver dropped (request cancelled): {err:?}");
                                 }
                             }
                             BeaconEngineMessage::NewPayload { payload, tx } => {

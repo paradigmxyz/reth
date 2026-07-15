@@ -361,10 +361,7 @@ where
 
                 container.modules.add_or_replace_if_module_configured(
                     RethRpcModule::Debug,
-                    debug_set_head_rpc_module(
-                        container.registry.provider().clone(),
-                        debug_engine_handle.clone(),
-                    ),
+                    debug_set_head_rpc_module(debug_engine_handle.clone()),
                 )?;
 
                 // testing_buildBlockV1: only wire when the hidden testing module is explicitly

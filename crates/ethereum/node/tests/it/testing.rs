@@ -13,6 +13,7 @@ use reth_node_core::{
     dirs::{DataDirPath, MaybePlatformPath},
 };
 use reth_node_ethereum::{node::EthereumAddOns, EthereumNode};
+use reth_provider::{CanonChainTracker, HeaderProvider};
 use reth_rpc_api::TestingBuildBlockRequestV1;
 use reth_rpc_server_types::{RethRpcModule, RpcModuleSelection};
 use reth_tasks::Runtime;
@@ -141,6 +142,7 @@ async fn testing_rpc_commit_block_works() -> eyre::Result<()> {
             let Some(client) = handles.rpc.http_client() else { return Ok(()) };
 
             let chain = ctx.config().chain.clone();
+            let provider = ctx.provider().clone();
             let timestamp = chain.genesis().timestamp + 1;
             let payload_attributes = EthPayloadAttributes {
                 timestamp,
@@ -203,6 +205,24 @@ async fn testing_rpc_commit_block_works() -> eyre::Result<()> {
                     assert_eq!(
                         next_latest.get("parentHash").and_then(Value::as_str),
                         Some(block_hash.as_str())
+                    );
+
+                    let finalized = provider
+                        .sealed_header(1)?
+                        .expect("committed block should be available as finalized boundary");
+                    provider.set_finalized(finalized);
+
+                    let err = client
+                        .request::<(), _>("debug_setHead", (U64::from(0),))
+                        .await
+                        .expect_err("cannot rewind below finalized block");
+                    assert!(err.to_string().contains("below finalized block 1"));
+                    let unchanged_latest: Value = client
+                        .request("eth_getBlockByNumber", (BlockNumberOrTag::Latest, false))
+                        .await?;
+                    assert_eq!(
+                        unchanged_latest.get("hash").and_then(Value::as_str),
+                        Some(next_block_hash.as_str())
                     );
 
                     let _: () = client.request("debug_setHead", (U64::from(1),)).await?;
