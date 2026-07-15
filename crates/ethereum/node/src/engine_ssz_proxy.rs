@@ -19,8 +19,8 @@ use alloy_eips::{eip2718::Decodable2718, eip7685::RequestsOrHash};
 use alloy_primitives::{Bytes, B128, B256, B64};
 use alloy_rpc_types_engine::{
     CancunPayloadFields, ExecutionData, ExecutionPayload, ExecutionPayloadFieldV2,
-    ExecutionPayloadSidecar, ForkchoiceState, PayloadAttributes, PayloadId,
-    PayloadStatus as LegacyPayloadStatus, PayloadStatusEnum, PraguePayloadFields,
+    ExecutionPayloadSidecar, ForkchoiceState, PayloadAttributes, PayloadId, PayloadStatusEnum,
+    PraguePayloadFields,
 };
 use http_body_util::{BodyExt, LengthLimitError, Limited};
 use jsonrpsee::server::{HttpBody, HttpRequest, HttpResponse};
@@ -233,13 +233,9 @@ where
                         .map_err(|err| err.to_string())?;
 
                     Ok(ExecutionWitnessV1 {
-                        state: witness.state.into_iter().map(|bytes| bytes.into_vec()).collect(),
-                        codes: witness.codes.into_iter().map(|bytes| bytes.into_vec()).collect(),
-                        headers: witness
-                            .headers
-                            .into_iter()
-                            .map(|bytes| bytes.into_vec())
-                            .collect(),
+                        state: witness.state.into_iter().map(|bytes| bytes.to_vec()).collect(),
+                        codes: witness.codes.into_iter().map(|bytes| bytes.to_vec()).collect(),
+                        headers: witness.headers.into_iter().map(|bytes| bytes.to_vec()).collect(),
                     })
                 })
                 .await
@@ -1066,6 +1062,7 @@ fn problem_response(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloy_rpc_types_engine::PayloadStatus as LegacyPayloadStatus;
     use ssz::Encode;
 
     #[test]

@@ -49,7 +49,6 @@ alloy-rlp.workspace = true
 alloy-primitives.workspace = true
 jsonrpsee.workspace = true
 alloy-network.workspace = true
-alloy-rpc-types-debug.workspace = true
 alloy-rpc-types-eth.workspace = true
 alloy-rpc-types-engine = { workspace = true, features = ["ssz"] }
 
