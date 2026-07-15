@@ -16,7 +16,7 @@ async fn transaction_hash_fetching() {
     let mut config = TransactionsManagerConfig { propagation_mode: Max(0), ..Default::default() };
     config.transaction_fetcher_config.max_inflight_requests = 1;
 
-    let provider = MockEthProvider::default();
+    let provider = MockEthProvider::default().with_genesis_block();
     let num_peers = 10;
     let net = Testnet::create_with(num_peers, provider.clone()).await;
 
