@@ -525,6 +525,8 @@ pub struct BlockValidationMetrics {
     pub payload_validation_duration: Gauge,
     /// Histogram of payload validation latency
     pub payload_validation_histogram: Histogram,
+    /// Ratio of block transactions prewarmed through the transaction pool.
+    pub txpool_prewarming_hit_rate: Histogram,
     /// Payload processor spawning duration
     pub spawn_payload_processor: Histogram,
     /// Post-execution validation duration
