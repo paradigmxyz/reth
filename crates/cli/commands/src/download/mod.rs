@@ -994,6 +994,11 @@ where
 }
 
 impl<C: ChainSpecParser> DownloadCommand<C> {
+    /// Returns a reference to the environment arguments.
+    pub const fn env(&self) -> &EnvironmentArgs<C> {
+        &self.env
+    }
+
     /// Returns the underlying chain being used to run this command
     pub fn chain_spec(&self) -> Option<&Arc<C::ChainSpec>> {
         Some(&self.env.chain)
