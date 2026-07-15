@@ -25,7 +25,7 @@ use reth_payload_primitives::{
     validate_payload_timestamp, EngineApiMessageVersion, MessageValidationKind,
     PayloadOrAttributes, PayloadTypes,
 };
-use reth_primitives_traits::{Block, BlockBody};
+use reth_primitives_traits::{Block, BlockBody, BlockHeader};
 use reth_rpc_api::{EngineApiServer, IntoEngineApiRpcModule};
 use reth_storage_api::{BalProvider, BlockReader, HeaderProvider, StateProviderFactory};
 use reth_tasks::Runtime;
@@ -671,6 +671,16 @@ where
         rx.await.map_err(|err| EngineApiError::Internal(Box::new(err)))?
     }
 
+    /// Returns timestamps for the blocks in a payload-bodies range.
+    pub async fn get_payload_body_timestamps_by_range(
+        &self,
+        start: BlockNumber,
+        count: u64,
+    ) -> EngineApiResult<Vec<Option<u64>>> {
+        self.get_payload_bodies_by_range_with(start, count, |block| block.header().timestamp())
+            .await
+    }
+
     /// Returns the execution payload bodies by the range starting at `start`, containing `count`
     /// blocks.
     ///
@@ -797,6 +807,14 @@ where
         });
 
         rx.await.map_err(|err| EngineApiError::Internal(Box::new(err)))?
+    }
+
+    /// Returns timestamps for the blocks in a payload-bodies hash request.
+    pub async fn get_payload_body_timestamps_by_hash(
+        &self,
+        hashes: Vec<BlockHash>,
+    ) -> EngineApiResult<Vec<Option<u64>>> {
+        self.get_payload_bodies_by_hash_with(hashes, |block| block.header().timestamp()).await
     }
 
     async fn get_block_access_lists_by_hashes(

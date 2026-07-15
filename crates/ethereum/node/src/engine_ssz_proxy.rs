@@ -5,11 +5,10 @@
 //! [EIP-8178]: https://eips.ethereum.org/EIPS/eip-8178
 
 use crate::engine_ssz_containers::{
-    BodiesByHashRequest, BodiesResponse, BodiesResponseCancun, BodiesResponseOsaka,
-    BodiesResponsePrague, BuiltPayloadAmsterdam, BuiltPayloadCancun, BuiltPayloadOsaka,
-    BuiltPayloadParis, BuiltPayloadPrague, BuiltPayloadShanghai, ExecutionPayloadBodyAmsterdam,
-    ExecutionPayloadBodyCancun, ExecutionPayloadBodyParis, ExecutionPayloadBodyPrague,
-    ExecutionPayloadBodyShanghai, ExecutionPayloadEnvelopeAmsterdam,
+    BodiesByHashRequest, BodiesResponse, BuiltPayloadAmsterdam, BuiltPayloadCancun,
+    BuiltPayloadOsaka, BuiltPayloadParis, BuiltPayloadPrague, BuiltPayloadShanghai,
+    ExecutionPayloadBodyAmsterdam, ExecutionPayloadBodyCancun, ExecutionPayloadBodyParis,
+    ExecutionPayloadBodyPrague, ExecutionPayloadBodyShanghai, ExecutionPayloadEnvelopeAmsterdam,
     ExecutionPayloadEnvelopeCancun, ExecutionPayloadEnvelopeOsaka, ExecutionPayloadEnvelopeParis,
     ExecutionPayloadEnvelopePrague, ExecutionPayloadEnvelopeShanghai, ForkchoiceUpdateAmsterdam,
     ForkchoiceUpdateCancun, ForkchoiceUpdateOsaka, ForkchoiceUpdateParis, ForkchoiceUpdatePrague,
@@ -20,13 +19,13 @@ use alloy_consensus::{Transaction, TxEnvelope};
 use alloy_eips::{eip2718::Decodable2718, eip7685::RequestsOrHash};
 use alloy_primitives::{Bytes, B128, B256, B64};
 use alloy_rpc_types_engine::{
-    CancunPayloadFields, ExecutionData, ExecutionPayload, ExecutionPayloadBodiesV1,
-    ExecutionPayloadBodiesV2, ExecutionPayloadFieldV2, ExecutionPayloadSidecar, ForkchoiceState,
+    CancunPayloadFields, ExecutionData, ExecutionPayload, ExecutionPayloadBodyV1,
+    ExecutionPayloadBodyV2, ExecutionPayloadFieldV2, ExecutionPayloadSidecar, ForkchoiceState,
     PayloadAttributes, PayloadId, PraguePayloadFields,
 };
 use http_body_util::{BodyExt, LengthLimitError, Limited};
 use jsonrpsee::server::{HttpBody, HttpRequest, HttpResponse};
-use reth_chainspec::EthereumHardforks;
+use reth_chainspec::{EthereumHardfork, EthereumHardforks};
 use reth_engine_primitives::EngineApiValidator;
 use reth_ethereum_engine_primitives::EthEngineTypes;
 use reth_provider::{BalProvider, BlockReader, HeaderProvider, StateProviderFactory};
@@ -60,7 +59,7 @@ const STATUS_SERVICE_UNAVAILABLE: u16 = 503;
 const STATUS_UNSUPPORTED_MEDIA_TYPE: u16 = 415;
 
 const MAX_BLOB_LIMIT: usize = 128;
-const MAX_BODIES_REQUEST: usize = 128;
+const MAX_BODIES_REQUEST: usize = crate::engine_ssz_containers::MAX_BODIES_REQUEST;
 const MAX_BODIES_REQUEST_BYTES: u64 = 4 + (MAX_BODIES_REQUEST as u64 * 32);
 const MAX_PAYLOAD_BYTES: u64 = 64 * 1024 * 1024;
 const PROBLEM_JSON: &str = "application/problem+json";
@@ -281,11 +280,7 @@ where
                 return problem_response(STATUS_METHOD_NOT_ALLOWED, "method-not-allowed", None)
             }
             let Some(fork) = request_fork(&request) else {
-                return problem_response(
-                    STATUS_BAD_REQUEST,
-                    "invalid-request",
-                    Some("unsupported fork".to_string()),
-                )
+                return problem_response(STATUS_BAD_REQUEST, "unsupported-fork", None)
             };
             let body = match read_bodies_hash_body(request).await {
                 Ok(body) => body,
@@ -310,11 +305,7 @@ where
                 return problem_response(STATUS_METHOD_NOT_ALLOWED, "method-not-allowed", None)
             }
             let Some(fork) = request_fork(&request) else {
-                return problem_response(
-                    STATUS_BAD_REQUEST,
-                    "invalid-request",
-                    Some("unsupported fork".to_string()),
-                )
+                return problem_response(STATUS_BAD_REQUEST, "unsupported-fork", None)
             };
             let Some(query) = request.uri().query() else {
                 return problem_response(
@@ -484,7 +475,7 @@ fn handle_capabilities() -> HttpResponse {
         },
         "unscoped_endpoints": ["capabilities", "identity"],
         "limits": {
-            "bodies.max_count": 128,
+            "bodies.max_count": MAX_BODIES_REQUEST,
             "blobs.max_versioned_hashes": MAX_BLOB_LIMIT,
             "payload.max_bytes": MAX_PAYLOAD_BYTES,
         },
@@ -649,54 +640,61 @@ where
     Validator: EngineApiValidator<EthEngineTypes>,
     ChainSpec: EthereumHardforks + Send + Sync + 'static,
 {
+    let chain_spec = engine_api.chain_spec().clone();
     match fork {
         EngineSszFork::Paris => {
             let response = fetch_payload_bodies_v1(engine_api, request).await;
-            payload_bodies_http_response(response, |body| {
-                ExecutionPayloadBodyParis::try_from(body).ok()
-            })
+            payload_bodies_http_response(
+                response,
+                |body| ExecutionPayloadBodyParis::try_from(body).ok(),
+                fork,
+                &chain_spec,
+            )
         }
         EngineSszFork::Shanghai => {
             let response = fetch_payload_bodies_v1(engine_api, request).await;
-            payload_bodies_http_response(response, |body| {
-                ExecutionPayloadBodyShanghai::try_from(body).ok()
-            })
+            payload_bodies_http_response(
+                response,
+                |body| ExecutionPayloadBodyShanghai::try_from(body).ok(),
+                fork,
+                &chain_spec,
+            )
         }
         EngineSszFork::Cancun => {
             let response = fetch_payload_bodies_v1(engine_api, request).await;
-            let response: BodiesResponseCancun = match payload_bodies_response(response, |body| {
-                ExecutionPayloadBodyCancun::try_from(body).ok()
-            }) {
-                Ok(response) => response,
-                Err(err) => return text_response(STATUS_INTERNAL_SERVER_ERROR, err),
-            };
-            ssz_response(response)
+            payload_bodies_http_response(
+                response,
+                |body| ExecutionPayloadBodyCancun::try_from(body).ok(),
+                fork,
+                &chain_spec,
+            )
         }
         EngineSszFork::Prague => {
             let response = fetch_payload_bodies_v1(engine_api, request).await;
-            let response: BodiesResponsePrague = match payload_bodies_response(response, |body| {
-                ExecutionPayloadBodyPrague::try_from(body).ok()
-            }) {
-                Ok(response) => response,
-                Err(err) => return text_response(STATUS_INTERNAL_SERVER_ERROR, err),
-            };
-            ssz_response(response)
+            payload_bodies_http_response(
+                response,
+                |body| ExecutionPayloadBodyPrague::try_from(body).ok(),
+                fork,
+                &chain_spec,
+            )
         }
         EngineSszFork::Osaka => {
             let response = fetch_payload_bodies_v1(engine_api, request).await;
-            let response: BodiesResponseOsaka = match payload_bodies_response(response, |body| {
-                ExecutionPayloadBodyShanghai::try_from(body).ok()
-            }) {
-                Ok(response) => response,
-                Err(err) => return text_response(STATUS_INTERNAL_SERVER_ERROR, err),
-            };
-            ssz_response(response)
+            payload_bodies_http_response(
+                response,
+                |body| ExecutionPayloadBodyShanghai::try_from(body).ok(),
+                fork,
+                &chain_spec,
+            )
         }
         EngineSszFork::Amsterdam => {
             let response = fetch_payload_bodies_v2(engine_api, request).await;
-            payload_bodies_http_response(response, |body| {
-                ExecutionPayloadBodyAmsterdam::try_from(body).ok()
-            })
+            payload_bodies_http_response(
+                response,
+                |body| ExecutionPayloadBodyAmsterdam::try_from(body).ok(),
+                fork,
+                &chain_spec,
+            )
         }
     }
 }
@@ -704,67 +702,129 @@ where
 async fn fetch_payload_bodies_v1<Provider, Pool, Validator, ChainSpec>(
     engine_api: EthEngineApi<Provider, Pool, Validator, ChainSpec>,
     request: PayloadBodiesRequest,
-) -> Result<ExecutionPayloadBodiesV1, String>
+) -> Result<Vec<Option<(u64, ExecutionPayloadBodyV1)>>, EngineApiError>
 where
     Provider: HeaderProvider + BlockReader + StateProviderFactory + BalProvider + 'static,
     Pool: TransactionPool + 'static,
     Validator: EngineApiValidator<EthEngineTypes>,
     ChainSpec: EthereumHardforks + Send + Sync + 'static,
 {
-    match request {
-        PayloadBodiesRequest::Hash(hashes) => {
-            engine_api.get_payload_bodies_by_hash_v1_metered(hashes).await
-        }
-        PayloadBodiesRequest::Range { start, count } => {
-            engine_api.get_payload_bodies_by_range_v1_metered(start, count).await
-        }
-    }
-    .map_err(|err| err.to_string())
+    let (bodies, timestamps) = match request {
+        PayloadBodiesRequest::Hash(hashes) => tokio::try_join!(
+            engine_api.get_payload_bodies_by_hash_v1_metered(hashes.clone()),
+            engine_api.get_payload_body_timestamps_by_hash(hashes),
+        )?,
+        PayloadBodiesRequest::Range { start, count } => tokio::try_join!(
+            engine_api.get_payload_bodies_by_range_v1_metered(start, count),
+            engine_api.get_payload_body_timestamps_by_range(start, count),
+        )?,
+    };
+    Ok(attach_body_timestamps(bodies, timestamps))
 }
 
 async fn fetch_payload_bodies_v2<Provider, Pool, Validator, ChainSpec>(
     engine_api: EthEngineApi<Provider, Pool, Validator, ChainSpec>,
     request: PayloadBodiesRequest,
-) -> Result<ExecutionPayloadBodiesV2, String>
+) -> Result<Vec<Option<(u64, ExecutionPayloadBodyV2)>>, EngineApiError>
 where
     Provider: HeaderProvider + BlockReader + StateProviderFactory + BalProvider + 'static,
     Pool: TransactionPool + 'static,
     Validator: EngineApiValidator<EthEngineTypes>,
     ChainSpec: EthereumHardforks + Send + Sync + 'static,
 {
-    match request {
-        PayloadBodiesRequest::Hash(hashes) => {
-            engine_api.get_payload_bodies_by_hash_v2_metered(hashes).await
-        }
-        PayloadBodiesRequest::Range { start, count } => {
-            engine_api.get_payload_bodies_by_range_v2_metered(start, count).await
-        }
-    }
-    .map_err(|err| err.to_string())
+    let (bodies, timestamps) = match request {
+        PayloadBodiesRequest::Hash(hashes) => tokio::try_join!(
+            engine_api.get_payload_bodies_by_hash_v2_metered(hashes.clone()),
+            engine_api.get_payload_body_timestamps_by_hash(hashes),
+        )?,
+        PayloadBodiesRequest::Range { start, count } => tokio::try_join!(
+            engine_api.get_payload_bodies_by_range_v2_metered(start, count),
+            engine_api.get_payload_body_timestamps_by_range(start, count),
+        )?,
+    };
+    Ok(attach_body_timestamps(bodies, timestamps))
+}
+
+fn attach_body_timestamps<Body>(
+    bodies: Vec<Option<Body>>,
+    timestamps: Vec<Option<u64>>,
+) -> Vec<Option<(u64, Body)>> {
+    debug_assert_eq!(bodies.len(), timestamps.len());
+    bodies
+        .into_iter()
+        .zip(timestamps)
+        .map(|(body, timestamp)| body.zip(timestamp).map(|(body, timestamp)| (timestamp, body)))
+        .collect()
 }
 
 fn payload_bodies_response<LegacyBody, ForkBody>(
-    response: Result<Vec<Option<LegacyBody>>, String>,
+    response: Result<Vec<Option<(u64, LegacyBody)>>, EngineApiError>,
     convert: impl Fn(LegacyBody) -> Option<ForkBody>,
-) -> Result<BodiesResponse<ForkBody>, String>
+    fork: EngineSszFork,
+    chain_spec: &impl EthereumHardforks,
+) -> Result<BodiesResponse<ForkBody>, EngineApiError>
 where
     ForkBody: Default + ssz::Encode + ssz::Decode,
 {
     let bodies = response?;
+    let bodies = bodies
+        .into_iter()
+        .map(|body| {
+            body.filter(|(timestamp, _)| body_matches_fork(chain_spec, fork, *timestamp))
+                .map(|(_, body)| body)
+        })
+        .collect();
     Ok(BodiesResponse::from_optional_bodies(bodies, convert))
 }
 
 fn payload_bodies_http_response<LegacyBody, ForkBody>(
-    response: Result<Vec<Option<LegacyBody>>, String>,
+    response: Result<Vec<Option<(u64, LegacyBody)>>, EngineApiError>,
     convert: impl Fn(LegacyBody) -> Option<ForkBody>,
+    fork: EngineSszFork,
+    chain_spec: &impl EthereumHardforks,
 ) -> HttpResponse
 where
     ForkBody: Default + ssz::Encode + ssz::Decode,
 {
-    match payload_bodies_response(response, convert) {
+    match payload_bodies_response(response, convert, fork, chain_spec) {
         Ok(response) => ssz_response(response),
-        Err(err) => problem_response(STATUS_INTERNAL_SERVER_ERROR, "internal", Some(err)),
+        Err(err) => payload_bodies_error_response(err),
     }
+}
+
+fn body_matches_fork<ChainSpec: EthereumHardforks>(
+    chain_spec: &ChainSpec,
+    fork: EngineSszFork,
+    timestamp: u64,
+) -> bool {
+    let active = |fork| chain_spec.is_ethereum_fork_active_at_timestamp(fork, timestamp);
+    match fork {
+        EngineSszFork::Paris => !active(EthereumHardfork::Shanghai),
+        EngineSszFork::Shanghai => {
+            active(EthereumHardfork::Shanghai) && !active(EthereumHardfork::Cancun)
+        }
+        EngineSszFork::Cancun => {
+            active(EthereumHardfork::Cancun) && !active(EthereumHardfork::Prague)
+        }
+        EngineSszFork::Prague => {
+            active(EthereumHardfork::Prague) && !active(EthereumHardfork::Osaka)
+        }
+        EngineSszFork::Osaka => {
+            active(EthereumHardfork::Osaka) && !active(EthereumHardfork::Amsterdam)
+        }
+        EngineSszFork::Amsterdam => active(EthereumHardfork::Amsterdam),
+    }
+}
+
+fn payload_bodies_error_response(err: EngineApiError) -> HttpResponse {
+    let (status, problem_type) = match &err {
+        EngineApiError::PayloadRequestTooLarge { .. } => {
+            (STATUS_PAYLOAD_TOO_LARGE, "request-too-large")
+        }
+        EngineApiError::InvalidBodiesRange { .. } => (422, "invalid-body"),
+        _ => (STATUS_INTERNAL_SERVER_ERROR, "internal"),
+    };
+    problem_response(status, problem_type, Some(err.to_string()))
 }
 
 async fn read_bodies_hash_body(request: HttpRequest) -> Result<Vec<u8>, HttpResponse> {
@@ -1053,6 +1113,7 @@ fn problem_response(
     problem_type: &'static str,
     detail: Option<String>,
 ) -> HttpResponse {
+    let problem_type = format!("/engine-api/errors/{problem_type}");
     let body = match detail {
         Some(detail) => serde_json::json!({ "type": problem_type, "detail": detail }),
         None => serde_json::json!({ "type": problem_type }),
