@@ -431,7 +431,7 @@ fn txpool_prewarm_loop<N, P, Evm>(
     P: BlockReader + StateProviderFactory + StateReader + Clone + Send + Sync + 'static,
     Evm: ConfigureEvm<Primitives = N> + 'static,
 {
-    let cache = TxPoolPrewarmCache::new();
+    let cache = TxPoolPrewarmCache::default();
     let mut warmed = HashSet::default();
     let mut warmed_per_sender = AddressMap::<usize>::default();
     let mut sender_prefixes = AddressMap::<Vec<TxPoolPrewarmTransaction<N>>>::default();
