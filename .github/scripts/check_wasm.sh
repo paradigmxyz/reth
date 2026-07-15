@@ -41,7 +41,6 @@ exclude_crates=(
   reth-node-metrics
   reth-rpc
   reth-rpc-api
-  reth-rpc-api-testing-util
   reth-rpc-builder
   reth-rpc-convert
   reth-rpc-e2e-tests
