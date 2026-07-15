@@ -33,6 +33,7 @@ use reth_provider::{
 use reth_revm::database::StateProviderDatabase;
 use reth_tasks::{pool::WorkerPool, Runtime};
 use reth_trie_common::MultiProofTargetsV2;
+use revm::DatabaseCommit;
 use std::sync::{
     atomic::{AtomicBool, AtomicUsize, Ordering},
     mpsc::{self, channel, Receiver, Sender},
@@ -261,12 +262,16 @@ where
             }
 
             if index > 0 {
-                let (targets, storage_targets) = MultiProofTargetsV2::from_state(res.state);
+                let (targets, storage_targets) = MultiProofTargetsV2::from_state(&res.state);
                 ctx.metrics.prefetch_storage_targets.record(storage_targets as f64);
                 if let Some(state_root_hint_stream) = state_root_hint_stream {
                     state_root_hint_stream.on_access_hint(targets.into());
                 }
             }
+
+            // Preserve the changes made by this sender-affine transaction so the next
+            // transaction assigned to this worker executes against the updated state.
+            evm.db_mut().commit(res.state);
 
             ctx.metrics.total_runtime.record(start.elapsed());
         });

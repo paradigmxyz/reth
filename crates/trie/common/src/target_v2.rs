@@ -76,7 +76,7 @@ impl MultiProofTargetsV2 {
 
     /// Returns a set of [`MultiProofTargetsV2`] and the total amount of storage targets, based on
     /// the given state.
-    pub fn from_state(state: EvmState) -> (Self, usize) {
+    pub fn from_state(state: &EvmState) -> (Self, usize) {
         let mut targets = Self::default();
         targets.account_targets.reserve(state.len());
         targets.storage_targets.reserve(state.len());
@@ -100,7 +100,7 @@ impl MultiProofTargetsV2 {
             }
 
             let mut storage_slots = Vec::with_capacity(account.storage.len());
-            for (key, slot) in account.storage {
+            for (key, slot) in &account.storage {
                 // do nothing if unchanged
                 if !slot.is_changed() {
                     continue
