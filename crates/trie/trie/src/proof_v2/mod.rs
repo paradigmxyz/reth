@@ -1100,6 +1100,12 @@ where
                         child_path.truncate(branch_path_len);
                         child_path.push_unchecked(nibble);
                         if self.prefix_set.contains(&child_path) {
+                            trace!(
+                                target: TRACE_TARGET,
+                                branch_path = ?self.branch_path,
+                                ?nibble,
+                                "Setting child nibble from prefix set on next_child_nibbles",
+                            );
                             next_child_nibbles.set_bit(nibble);
                         }
                     }
@@ -1132,6 +1138,13 @@ where
                             child_path_upper.as_ref().map_or(Bound::Unbounded, Bound::Excluded),
                         ));
                         if contains_remaining {
+                            trace!(
+                                target: TRACE_TARGET,
+                                branch_path = ?self.branch_path,
+                                ?uncalculated_lower_bound,
+                                nibble = ?child_nibble,
+                                "Setting child nibble from uncalculated lower bound on next_child_nibbles",
+                            );
                             next_child_nibbles.set_bit(child_nibble);
                         }
                     }
