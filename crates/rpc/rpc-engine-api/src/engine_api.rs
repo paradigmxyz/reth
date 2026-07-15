@@ -25,7 +25,7 @@ use reth_payload_primitives::{
     validate_payload_timestamp, EngineApiMessageVersion, MessageValidationKind,
     PayloadOrAttributes, PayloadTypes,
 };
-use reth_primitives_traits::{Block, BlockBody, BlockHeader};
+use reth_primitives_traits::{AlloyBlockHeader, Block, BlockBody};
 use reth_rpc_api::{EngineApiServer, IntoEngineApiRpcModule};
 use reth_storage_api::{BalProvider, BlockReader, HeaderProvider, StateProviderFactory};
 use reth_tasks::Runtime;
