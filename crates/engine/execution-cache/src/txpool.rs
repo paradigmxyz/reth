@@ -1,7 +1,7 @@
 //! Reusable cache and immutable snapshots for txpool-driven state prewarming.
 
 use crate::CachedStatus;
-use alloy_primitives::{map::HashMap, Address, StorageKey, StorageValue, B256};
+use alloy_primitives::{Address, B256, StorageKey, StorageValue, map::{AddressMap, B256Map, HashMap}};
 use parking_lot::RwLock;
 use reth_primitives_traits::{Account, Bytecode};
 use std::sync::Arc;
@@ -12,17 +12,12 @@ use std::sync::Arc;
 /// concurrently. [`Self::clear`] retains the maps' allocations for the next head.
 #[derive(Debug, Default)]
 pub struct TxPoolPrewarmCache {
-    accounts: RwLock<HashMap<Address, Option<Account>>>,
+    accounts: RwLock<AddressMap<Option<Account>>>,
     storage: RwLock<HashMap<(Address, StorageKey), StorageValue>>,
-    bytecodes: RwLock<HashMap<B256, Option<Bytecode>>>,
+    bytecodes: RwLock<B256Map<Option<Bytecode>>>,
 }
 
 impl TxPoolPrewarmCache {
-    /// Creates an empty reusable cache.
-    pub fn new() -> Self {
-        Self::default()
-    }
-
     /// Clears all cached state while retaining the backing allocations.
     pub fn clear(&self) {
         self.accounts.write().clear();
@@ -113,14 +108,6 @@ pub struct TxPoolPrewarmCacheSnapshot {
     inner: Arc<TxPoolPrewarmCacheSnapshotInner>,
 }
 
-#[derive(Debug)]
-struct TxPoolPrewarmCacheSnapshotInner {
-    parent_hash: B256,
-    accounts: HashMap<Address, Option<Account>>,
-    storage: HashMap<(Address, StorageKey), StorageValue>,
-    bytecodes: HashMap<B256, Option<Bytecode>>,
-}
-
 impl TxPoolPrewarmCacheSnapshot {
     /// Returns the hash of the state this snapshot was warmed against.
     pub fn parent_hash(&self) -> B256 {
@@ -146,4 +133,12 @@ impl TxPoolPrewarmCacheSnapshot {
     pub fn entry_counts(&self) -> (usize, usize, usize) {
         (self.inner.accounts.len(), self.inner.storage.len(), self.inner.bytecodes.len())
     }
+}
+
+#[derive(Debug)]
+struct TxPoolPrewarmCacheSnapshotInner {
+    parent_hash: B256,
+    accounts: AddressMap<Option<Account>>,
+    storage: HashMap<(Address, StorageKey), StorageValue>,
+    bytecodes: B256Map<Option<Bytecode>>,
 }
