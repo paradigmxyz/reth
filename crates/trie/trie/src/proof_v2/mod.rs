@@ -89,6 +89,8 @@ pub struct ProofCalculator<TC, HC, VE: LeafValueEncoder> {
     rlp_encode_buf: Vec<u8>,
     /// Prefix set for tracking changed keys.
     prefix_set: PrefixSet,
+    /// Whether to retain every leaf node encountered during proof calculation.
+    always_retain_leaves: bool,
 }
 
 impl<TC, HC, VE: LeafValueEncoder> ProofCalculator<TC, HC, VE> {
@@ -105,6 +107,7 @@ impl<TC, HC, VE: LeafValueEncoder> ProofCalculator<TC, HC, VE> {
             rlp_nodes_bufs: Vec::<_>::with_capacity(8),
             rlp_encode_buf: Vec::<_>::with_capacity(RLP_ENCODE_BUF_SIZE),
             prefix_set: PrefixSet::default(),
+            always_retain_leaves: false,
         }
     }
 
@@ -117,6 +120,12 @@ impl<TC, HC, VE: LeafValueEncoder> ProofCalculator<TC, HC, VE> {
     /// unrevealed in order to collapse the branch.
     pub fn with_prefix_set(mut self, prefix_set: PrefixSet) -> Self {
         self.prefix_set = prefix_set;
+        self
+    }
+
+    /// Retains every leaf node encountered during proof calculation.
+    pub const fn always_retain_leaves(mut self) -> Self {
+        self.always_retain_leaves = true;
         self
     }
 }
@@ -191,7 +200,7 @@ where
         target = TRACE_TARGET,
         level = "trace",
         skip_all,
-        fields(?path, ?check_min_len),
+        fields(?path, ?check_min_len, ?is_leaf),
         ret,
     )]
     fn should_retain<'a>(
@@ -199,6 +208,7 @@ where
         targets: &mut Option<TargetsCursor<'a>>,
         path: &Nibbles,
         check_min_len: bool,
+        is_leaf: bool,
     ) -> bool {
         // If no targets are given then we never retain anything
         let Some(targets) = targets.as_mut() else { return false };
@@ -213,6 +223,10 @@ where
             "should_retain called with path {path:?} which is not after previously retained node {:?} in depth-first order",
             self.retained_proofs.last().map(|n| n.path),
         );
+
+        if self.always_retain_leaves && is_leaf {
+            return true
+        }
 
         loop {
             // If the node in question is a prefix of the target then we do not iterate targets
@@ -280,7 +294,8 @@ where
         }
 
         // If we should retain the child then do so.
-        if self.should_retain(targets, &child_path, true) {
+        let is_leaf = matches!(&child, ProofTrieBranchChild::Leaf { .. });
+        if self.should_retain(targets, &child_path, true, is_leaf) {
             trace!(target: TRACE_TARGET, ?child_path, "Retaining child");
 
             // Convert to `ProofTrieNodeV2`, which will be what is retained.
@@ -376,7 +391,8 @@ where
 
         // Only commit immediately if retained for the proof. Otherwise, defer conversion
         // to pop_branch() to give DeferredEncoder time for async work.
-        if self.should_retain(targets, &child_path, true) {
+        let is_leaf = matches!(&child, ProofTrieBranchChild::Leaf { .. });
+        if self.should_retain(targets, &child_path, true, is_leaf) {
             let child_rlp_node = self.commit_child(targets, child_path, child)?;
             trace!(target: TRACE_TARGET, ?child_rlp_node, "Pushing committed child RlpNode onto stack");
             self.child_stack.push(ProofTrieBranchChild::RlpNode(child_rlp_node));
@@ -1203,7 +1219,7 @@ where
                 //   last child before pushing a new one onto the stack anyway.
                 self.commit_last_child(targets)?;
 
-                if !self.should_retain(targets, &child_path, false) {
+                if !self.should_retain(targets, &child_path, false, false) {
                     // Pull this child's hash out of the cached branch node. The hash index
                     // is the number of hash_mask bits set below this child's nibble.
                     let lower_bits = TrieMask::new((1u16 << child_nibble) - 1);
@@ -1939,6 +1955,50 @@ mod tests {
 
             Ok(())
         }
+    }
+
+    #[test]
+    fn test_always_retain_leaves() {
+        let keys = [
+            B256::right_padding_from(&[0x10]),
+            B256::right_padding_from(&[0x20]),
+            B256::right_padding_from(&[0x30]),
+        ];
+        let mut harness =
+            TrieTestHarness::new(keys.into_iter().map(|key| (key, U256::from(1))).collect());
+        // Force proof calculation to encounter the leaves instead of cached child hashes.
+        harness.set_trie_nodes(BTreeMap::new());
+
+        let leaf_paths = |proofs: &[ProofTrieNodeV2]| {
+            proofs
+                .iter()
+                .filter(|proof| matches!(&proof.node, TrieNodeV2::Leaf(_)))
+                .map(|proof| proof.path)
+                .collect::<Vec<_>>()
+        };
+
+        let mut targets = vec![ProofV2Target::new(keys[1])];
+        let (proofs, _) = harness.proof_v2(&mut targets);
+        assert_eq!(leaf_paths(&proofs), vec![Nibbles::from_nibbles([0x2])]);
+
+        let trie_cursor =
+            harness.trie_cursor_factory().storage_trie_cursor(harness.hashed_address()).unwrap();
+        let hashed_cursor = harness
+            .hashed_cursor_factory()
+            .hashed_storage_cursor(harness.hashed_address())
+            .unwrap();
+        let mut calculator =
+            StorageProofCalculator::new_storage(trie_cursor, hashed_cursor).always_retain_leaves();
+        let proofs = calculator.storage_proof(harness.hashed_address(), &mut targets).unwrap();
+
+        assert_eq!(
+            leaf_paths(&proofs),
+            vec![
+                Nibbles::from_nibbles([0x1]),
+                Nibbles::from_nibbles([0x2]),
+                Nibbles::from_nibbles([0x3]),
+            ]
+        );
     }
 
     /// Tests that `clear_computation_state` properly resets internal stacks, allowing a
