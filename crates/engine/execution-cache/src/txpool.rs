@@ -1,7 +1,10 @@
 //! Reusable cache and immutable snapshots for txpool-driven state prewarming.
 
 use crate::CachedStatus;
-use alloy_primitives::{map::HashMap, Address, StorageKey, StorageValue, B256};
+use alloy_primitives::{
+    map::{HashMap, HashSet},
+    Address, StorageKey, StorageValue, B256,
+};
 use parking_lot::RwLock;
 use reth_primitives_traits::{Account, Bytecode};
 use std::sync::Arc;
@@ -34,10 +37,15 @@ impl TxPoolPrewarmCache {
     ///
     /// Callers must only snapshot at a completed prewarming-wave boundary, when no workers are
     /// writing to the cache.
-    pub fn snapshot(&self, parent_hash: B256) -> TxPoolPrewarmCacheSnapshot {
+    pub fn snapshot(
+        &self,
+        parent_hash: B256,
+        warmed_transactions: impl IntoIterator<Item = B256>,
+    ) -> TxPoolPrewarmCacheSnapshot {
         TxPoolPrewarmCacheSnapshot {
             inner: Arc::new(TxPoolPrewarmCacheSnapshotInner {
                 parent_hash,
+                warmed_transactions: warmed_transactions.into_iter().collect(),
                 accounts: self.accounts.read().clone(),
                 storage: self.storage.read().clone(),
                 bytecodes: self.bytecodes.read().clone(),
@@ -116,6 +124,7 @@ pub struct TxPoolPrewarmCacheSnapshot {
 #[derive(Debug)]
 struct TxPoolPrewarmCacheSnapshotInner {
     parent_hash: B256,
+    warmed_transactions: HashSet<B256>,
     accounts: HashMap<Address, Option<Account>>,
     storage: HashMap<(Address, StorageKey), StorageValue>,
     bytecodes: HashMap<B256, Option<Bytecode>>,
@@ -125,6 +134,11 @@ impl TxPoolPrewarmCacheSnapshot {
     /// Returns the hash of the state this snapshot was warmed against.
     pub fn parent_hash(&self) -> B256 {
         self.inner.parent_hash
+    }
+
+    /// Returns whether the transaction contributed to this prewarmed snapshot.
+    pub fn contains_transaction(&self, transaction_hash: &B256) -> bool {
+        self.inner.warmed_transactions.contains(transaction_hash)
     }
 
     /// Returns a cached account, preserving cached non-existence.

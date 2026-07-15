@@ -789,6 +789,21 @@ where
 
         let block = validated_block.try_into_inner().expect("sole handle")?;
         let block = block.with_senders(senders);
+        let txpool_prewarmed_transactions =
+            validation_txpool_snapshot.as_ref().map_or(0, |snapshot| {
+                block
+                    .body()
+                    .transactions()
+                    .iter()
+                    .filter(|transaction| snapshot.contains_transaction(transaction.tx_hash()))
+                    .count()
+            });
+        let txpool_prewarming_hit_rate = if block.transaction_count() == 0 {
+            0.0
+        } else {
+            txpool_prewarmed_transactions as f64 / block.transaction_count() as f64
+        };
+        self.metrics.block_validation.txpool_prewarming_hit_rate.record(txpool_prewarming_hit_rate);
 
         // Wait for the receipt root computation to complete.
         let receipt_root_bloom = {

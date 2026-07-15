@@ -627,7 +627,17 @@ fn txpool_prewarm_loop<N, P, Evm>(
 
             // The deep clone happens privately. Only the short pointer swap below is serialized
             // with `newPayload` snapshot acquisition.
-            let snapshot = cache.snapshot(job.parent_hash);
+            let snapshot = cache.snapshot(
+                job.parent_hash,
+                warmed.iter().copied().chain(
+                    inflight
+                        .as_ref()
+                        .expect("completed selection is in flight")
+                        .transactions
+                        .iter()
+                        .map(|transaction| transaction.hash),
+                ),
+            );
             let (accounts, storage, bytecodes) = snapshot.entry_counts();
             if publication.publish(active_generation, snapshot) {
                 let selection = inflight.take().expect("published selection is in flight");
