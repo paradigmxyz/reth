@@ -1107,9 +1107,19 @@ where
 
                 // A cached branch can be a strict descendant of this branch's child. In that
                 // case the child's bit is set before later prefix-set paths in the same child
-                // range have been processed. For example, after cached branch `0x120` is processed
-                // while building branch `0x1`, child `0x12` is set and the lower bound is `0x121`,
-                // but a prefix-set path under `0x122` still needs to be processed.
+                // range have been processed.
+                //
+                // For example:
+                // - Branch at 0x1 is being built
+                // - Cached branch 0x120 is processed
+                //   - Child bit 2 on branch 0x1 is set
+                //   - uncalculated_lower_bound ends up at 0x121
+                // - 0x122 is set in the prefix set
+                //
+                // Once the calculator pops back to 0x1, next_child_nibbles won't have child nibble
+                // 2 set, because the processing of 0x120 will have set that nibble on the
+                // state_mask. We set the child nibble on next_child_nibbles here to indicate that
+                // there might be more work to do at that prefix.
                 if uncalculated_lower_bound_ref.starts_with(&self.branch_path) &&
                     uncalculated_lower_bound_ref.len() > branch_path_len + 1
                 {
