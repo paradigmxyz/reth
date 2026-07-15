@@ -214,11 +214,12 @@ pub trait SparseTrie: Sized + Debug + Send + Sync {
     /// and auxiliary data structures.
     fn memory_size(&self) -> usize;
 
-    /// Prunes all subtrees that do not contain retained leaves.
+    /// Prunes revealed branches according to the retained leaf paths.
     ///
     /// Each retained leaf is a full key path (usually 64 nibbles for hashed keys).
-    /// Any revealed subtree that is not a prefix of at least one retained key is collapsed into
-    /// hash stubs when hashes are available.
+    /// Revealed branches that are not a prefix of at least one retained key are collapsed into
+    /// hash stubs when hashes are available. A leaf remains revealed while its parent branch does
+    /// and is only pruned together with that branch.
     ///
     /// # Preconditions
     ///

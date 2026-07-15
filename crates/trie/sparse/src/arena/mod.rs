@@ -219,12 +219,13 @@ impl ArenaSparseSubtrie {
         );
     }
 
-    /// Prunes revealed subtrees that are not ancestors of any retained leaf, compacting the arena
+    /// Prunes revealed branches that are not ancestors of any retained leaf, compacting the arena
     /// in lexicographic order.
     ///
     /// `retained_leaves` must yield leaves in sorted order and be scoped to this subtrie's key
     /// range. Builds a fresh arena by copying retained nodes from the root, blinding non-retained
-    /// children at the boundary unless their parent branch is retained.
+    /// branch children at the boundary. Leaves remain revealed as long as their parent branch
+    /// does.
     ///
     /// Expects that all nodes have computed hashes (i.e. `prune` is called after hashing).
     fn prune<'a>(&mut self, retained_leaves: impl IntoIterator<Item = &'a Nibbles>) -> usize {
@@ -281,8 +282,9 @@ impl ArenaSparseSubtrie {
 
             let child_is_retained =
                 retained_leaves.peek().is_some_and(|retained| retained.starts_with(&child_path));
-            if child_is_retained || frame.branch_is_retained {
-                // Retained or protected by a retained parent branch.
+            let child_is_leaf = matches!(self.arena[old_child_idx], ArenaSparseNode::Leaf { .. });
+            if child_is_retained || frame.branch_is_retained || child_is_leaf {
+                // A leaf stays revealed for as long as its parent branch does.
                 let child_node = self.arena.remove(old_child_idx).expect("child exists");
                 let new_child_idx = new_arena.insert(child_node);
                 if let Some(frame) = prepare_retained_node(
@@ -666,10 +668,10 @@ impl Default for ArenaParallelismThresholds {
 ///
 /// ## Pruning
 ///
-/// [`SparseTrie::prune`] removes revealed nodes that are not ancestors of any retained leaf.
-/// Pruned nodes are replaced with `ArenaSparseNodeBranchChild::Blinded` entries using their
-/// cached RLP. Subtries are pruned in parallel when their leaf count exceeds
-/// [`ArenaParallelismThresholds::min_leaves_for_prune`].
+/// [`SparseTrie::prune`] removes revealed branches that are not ancestors of any retained leaf.
+/// Leaves stay revealed until their parent branch is pruned. Pruned nodes are replaced with
+/// `ArenaSparseNodeBranchChild::Blinded` entries using their cached RLP. Subtries are pruned in
+/// parallel when their leaf count exceeds [`ArenaParallelismThresholds::min_leaves_for_prune`].
 #[derive(Debug, Clone)]
 pub struct ArenaParallelSparseTrie {
     /// The arena allocating nodes in the upper trie.
@@ -2841,15 +2843,28 @@ impl SparseTrie for ArenaParallelSparseTrie {
             let head = cursor.head().expect("cursor is non-empty");
             let head_idx = head.index;
             let head_path = head.path;
-            let protected_by_retained_parent = if cursor.depth() == 0 {
-                false
-            } else {
+            let protected_by_retained_parent = || {
+                if cursor.depth() == 0 {
+                    return false
+                }
+
                 let parent_path = cursor.parent().expect("cursor must have a parent").path;
                 !prefix_range(retained_leaves, 0, &parent_path).is_empty()
             };
+            let leaf_parent_will_be_pruned = || {
+                if cursor.depth() <= 1 {
+                    return false
+                }
+
+                let parent_path = cursor.parent().expect("cursor must have a parent").path;
+                let grandparent_path =
+                    cursor.grandparent().expect("cursor must have a grandparent").path;
+                prefix_range(retained_leaves, 0, &parent_path).is_empty() &&
+                    prefix_range(retained_leaves, 0, &grandparent_path).is_empty()
+            };
 
             match &self.upper_arena[head_idx] {
-                ArenaSparseNode::Branch(_) | ArenaSparseNode::Leaf { .. } => {
+                ArenaSparseNode::Branch(_) => {
                     // Don't prune the root.
                     if cursor.depth() == 0 {
                         continue;
@@ -2860,7 +2875,20 @@ impl SparseTrie for ArenaParallelSparseTrie {
                         continue;
                     }
 
-                    if protected_by_retained_parent {
+                    if protected_by_retained_parent() {
+                        continue;
+                    }
+
+                    Self::remove_pruned_node(
+                        &mut self.upper_arena,
+                        &cursor,
+                        head_idx,
+                        head_path.last(),
+                    );
+                    pruned += 1;
+                }
+                ArenaSparseNode::Leaf { .. } => {
+                    if !leaf_parent_will_be_pruned() {
                         continue;
                     }
 
@@ -2877,7 +2905,14 @@ impl SparseTrie for ArenaParallelSparseTrie {
                     retained_idx = subtrie_range.end;
 
                     if subtrie_range.is_empty() {
-                        if protected_by_retained_parent {
+                        let ArenaSparseNode::Subtrie(subtrie) = &self.upper_arena[head_idx] else {
+                            unreachable!()
+                        };
+                        let root_is_leaf =
+                            matches!(subtrie.arena[subtrie.root], ArenaSparseNode::Leaf { .. });
+                        if protected_by_retained_parent() ||
+                            (root_is_leaf && !leaf_parent_will_be_pruned())
+                        {
                             let ArenaSparseNode::Subtrie(subtrie) = &mut self.upper_arena[head_idx]
                             else {
                                 unreachable!()

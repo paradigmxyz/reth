@@ -15,23 +15,15 @@ fn key_with_prefix(prefix: &[u8]) -> B256 {
     key
 }
 
-fn changed_update(value: u64) -> LeafUpdate {
-    LeafUpdate::Changed(encode_fixed_size(&U256::from(value)).to_vec())
-}
-
-fn assert_update_requests_min_len<T: SparseTrie>(trie: &mut T, key: B256, min_len: u8, value: u64) {
-    let mut leaf_updates = B256Map::from_iter([(key, changed_update(value))]);
-    let mut targets = Vec::new();
-    trie.update_leaves(&mut leaf_updates, |key, min_len| {
-        targets.push((key, min_len));
-    })
-    .expect("update_leaves should succeed");
-
-    assert_eq!(targets, vec![(key, min_len)]);
-    assert!(
-        leaf_updates.contains_key(&key),
-        "update should remain pending until proof is revealed"
-    );
+fn branched_keys() -> Vec<B256> {
+    (0u8..16)
+        .flat_map(|root_child| {
+            (0u8..2).flat_map(move |branch_child| {
+                (0u8..2)
+                    .map(move |leaf_child| key_with_prefix(&[root_child, branch_child, leaf_child]))
+            })
+        })
+        .collect()
 }
 
 fn rlp_node(node: TrieNodeV2) -> RlpNode {
@@ -80,7 +72,26 @@ pub(super) fn test_prune_retains_specified_leaves<T: SparseTrie>(new_trie: fn() 
     assert!(val_b.is_some(), "retained leaf B should be accessible after prune");
 }
 
-pub(super) fn test_prune_keeps_upper_children_of_retained_branch<T: SparseTrie>(
+pub(super) fn test_prune_keeps_upper_leaves_with_root_branch<T: SparseTrie>(new_trie: fn() -> T) {
+    let key_a = key_with_prefix(&[0x0]);
+    let key_b = key_with_prefix(&[0x1]);
+    let storage = BTreeMap::from([(key_a, U256::from(1)), (key_b, U256::from(2))]);
+
+    let harness = SuiteTestHarness::new(storage);
+    let mut trie: T = harness.init_trie_fully_revealed(false, new_trie);
+    let root_before = trie.root();
+
+    let pruned = trie.prune(&[]);
+
+    assert_eq!(trie.root(), root_before, "root must not change after prune");
+    assert_eq!(pruned, 0, "leaves should remain revealed with the root branch");
+    assert!(
+        trie.get_leaf_value(&Nibbles::unpack(key_b)).is_some(),
+        "leaf should remain accessible after prune"
+    );
+}
+
+pub(super) fn test_prune_keeps_subtrie_root_leaves_with_their_branch<T: SparseTrie>(
     new_trie: fn() -> T,
 ) {
     let retained_key = key_with_prefix(&[0x0]);
@@ -100,13 +111,14 @@ pub(super) fn test_prune_keeps_upper_children_of_retained_branch<T: SparseTrie>(
     let pruned = trie.prune(&retained);
 
     assert_eq!(trie.root(), root_before, "root must not change after prune");
-    assert_eq!(pruned, 2, "protected branch children should be blinded, not removed");
-    assert_update_requests_min_len(&mut trie, protected_key_a, 2, 20);
+    assert_eq!(pruned, 0, "leaves should remain revealed with their parent branch");
+    assert!(
+        trie.get_leaf_value(&Nibbles::unpack(protected_key_a)).is_some(),
+        "leaf should remain accessible after prune"
+    );
 }
 
-pub(super) fn test_prune_keeps_lower_children_of_retained_branch<T: SparseTrie>(
-    new_trie: fn() -> T,
-) {
+pub(super) fn test_prune_keeps_lower_leaves_with_their_branch<T: SparseTrie>(new_trie: fn() -> T) {
     let retained_key = key_with_prefix(&[0x0, 0x0, 0x0]);
     let protected_key_a = key_with_prefix(&[0x0, 0x0, 0x1, 0x2]);
     let protected_key_b = key_with_prefix(&[0x0, 0x0, 0x1, 0x3]);
@@ -124,8 +136,11 @@ pub(super) fn test_prune_keeps_lower_children_of_retained_branch<T: SparseTrie>(
     let pruned = trie.prune(&retained);
 
     assert_eq!(trie.root(), root_before, "root must not change after prune");
-    assert_eq!(pruned, 2, "protected lower branch children should be blinded, not removed");
-    assert_update_requests_min_len(&mut trie, protected_key_a, 4, 20);
+    assert_eq!(pruned, 0, "leaves should remain revealed with their parent branch");
+    assert!(
+        trie.get_leaf_value(&Nibbles::unpack(protected_key_a)).is_some(),
+        "leaf should remain accessible after prune"
+    );
 }
 
 pub(super) fn test_prune_protects_children_by_parent_base_path<T: SparseTrie>(new_trie: fn() -> T) {
@@ -179,21 +194,11 @@ pub(super) fn test_prune_protects_children_by_parent_base_path<T: SparseTrie>(ne
 
 /// Pruning should reduce the node count.
 ///
-/// Build a trie with several root children that each contain grandchildren, fully reveal
+/// Build a trie with several root children that each contain lower branches, fully reveal
 /// and compute root. Then prune retaining only 1 leaf. `size_hint()` must
 /// decrease and `prune` must return > 0.
 pub(super) fn test_prune_reduces_node_count<T: SparseTrie>(new_trie: fn() -> T) {
-    // Create 16 pairs with different first nibbles. Pruning keeps direct
-    // children of the retained root branch, so each child needs grandchildren that can be pruned.
-    let keys: Vec<B256> = (0u8..16)
-        .flat_map(|i| {
-            [0u8, 1].map(move |child| {
-                let mut k = B256::ZERO;
-                k.0[0] = (i << 4) | child;
-                k
-            })
-        })
-        .collect();
+    let keys = branched_keys();
 
     let storage: BTreeMap<B256, U256> =
         keys.iter().enumerate().map(|(i, k)| (*k, U256::from(i + 1))).collect();
@@ -222,13 +227,7 @@ pub(super) fn test_prune_reduces_node_count<T: SparseTrie>(new_trie: fn() -> T) 
 /// Pruning with an empty retained set should convert all subtrees to
 /// hash stubs (maximum pruning). Root hash must be unchanged.
 pub(super) fn test_prune_empty_retained_set<T: SparseTrie>(new_trie: fn() -> T) {
-    let keys: Vec<B256> = (0u8..16)
-        .map(|i| {
-            let mut k = B256::ZERO;
-            k.0[0] = (i + 1) << 4;
-            k
-        })
-        .collect();
+    let keys = branched_keys();
 
     let storage: BTreeMap<B256, U256> =
         keys.iter().enumerate().map(|(i, k)| (*k, U256::from(i + 1))).collect();

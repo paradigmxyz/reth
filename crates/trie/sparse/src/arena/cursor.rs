@@ -78,6 +78,12 @@ impl ArenaCursor {
         (len >= 2).then(|| &self.stack[len - 2])
     }
 
+    /// Returns the entry two below the top of the stack, or `None`.
+    pub(super) fn grandparent(&self) -> Option<&ArenaCursorStackEntry> {
+        let len = self.stack.len();
+        (len >= 3).then(|| &self.stack[len - 3])
+    }
+
     /// Returns the depth of the head node (0 for the root).
     ///
     /// # Panics

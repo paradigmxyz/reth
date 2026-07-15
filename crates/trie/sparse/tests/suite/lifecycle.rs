@@ -64,18 +64,27 @@ pub(super) fn test_full_lifecycle_update_root_take_updates<T: SparseTrie>(new_tr
 /// Multiple rounds of (update → root → `take_updates`), followed by a prune, simulating block
 /// processing.
 pub(super) fn test_multi_round_update_take_updates_prune_cycle<T: SparseTrie>(new_trie: fn() -> T) {
-    // Build a trie with 10 primary leaves, each with a sibling under the same root child.
+    // Build a trie with 10 primary leaves, each below a branch that can be pruned independently
+    // of the root's immediate children.
     let mut storage: BTreeMap<B256, U256> = BTreeMap::new();
     let mut keys = Vec::new();
     for i in 0u8..10 {
         let mut key = B256::ZERO;
-        key.0[0] = i << 4; // nibble prefixes: 0x0, 0x1, 0x2, ... 0x9
+        key.0[0] = i << 4;
         storage.insert(key, U256::from(i as u64 + 1));
         keys.push(key);
 
-        let mut sibling = B256::ZERO;
-        sibling.0[0] = (i << 4) | 1;
+        let mut sibling = key;
+        sibling.0[1] = 0x10;
         storage.insert(sibling, U256::from(i as u64 + 100));
+
+        let mut other_branch = key;
+        other_branch.0[0] |= 1;
+        storage.insert(other_branch, U256::from(i as u64 + 200));
+
+        let mut other_sibling = other_branch;
+        other_sibling.0[1] = 0x10;
+        storage.insert(other_sibling, U256::from(i as u64 + 300));
     }
 
     let mut harness = SuiteTestHarness::new(storage.clone());
@@ -120,6 +129,10 @@ pub(super) fn test_multi_round_update_take_updates_prune_cycle<T: SparseTrie>(ne
     if pre_prune_size > 0 {
         assert!(post_prune_size < pre_prune_size, "prune should reduce node count");
     }
+    assert!(
+        trie.get_leaf_value(&Nibbles::unpack(keys[4])).is_none(),
+        "cold leaf should be pruned with its parent branch"
+    );
 
     // Root should still be correct after prune.
     let root_after_prune = trie.root();
