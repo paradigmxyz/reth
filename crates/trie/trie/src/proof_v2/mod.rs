@@ -1107,7 +1107,9 @@ where
 
                 // A cached branch can be a strict descendant of this branch's child. In that
                 // case the child's bit is set before later prefix-set paths in the same child
-                // range have been processed.
+                // range have been processed. For example, after cached branch `0x120` is processed
+                // while building branch `0x1`, child `0x12` is set and the lower bound is `0x121`,
+                // but a prefix-set path under `0x122` still needs to be processed.
                 if uncalculated_lower_bound_ref.starts_with(&self.branch_path) &&
                     uncalculated_lower_bound_ref.len() > branch_path_len + 1
                 {
