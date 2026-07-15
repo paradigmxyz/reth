@@ -685,6 +685,11 @@ impl DefaultStateRootStrategy {
             };
 
             if state_root_tx.send(result).is_err() {
+                // A continuation task can take the pending trie during the narrow window between
+                // publishing it and detecting the abandoned receiver here. Returning drops the
+                // completer, so the taker wakes with `ProducerDropped` and its state-root consumer
+                // falls back to serial computation. No partially finalized trie is exposed; the
+                // worst case is a redundant fallback.
                 debug!(
                     target: "engine::tree::payload_processor",
                     "State root receiver dropped, dropping trie"
