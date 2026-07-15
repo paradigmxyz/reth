@@ -19,7 +19,7 @@ use reth_trie_common::{
     prefix_set::PrefixSet, BranchNodeMasks, BranchNodeRef, BranchNodeV2, Nibbles, ProofTrieNodeV2,
     ProofV2Target, RlpNode, TrieNodeV2,
 };
-use std::cmp::Ordering;
+use std::{cmp::Ordering, ops::Bound};
 use tracing::{error, instrument, trace};
 
 mod value;
@@ -1116,18 +1116,11 @@ where
                     let child_nibble = uncalculated_lower_bound_ref.get_unchecked(branch_path_len);
                     if curr_state_mask.is_bit_set(child_nibble) {
                         let child_path = self.child_path_at(child_nibble);
-                        let contains_remaining = match child_path.next_without_prefix() {
-                            None => {
-                                self.prefix_set.contains(uncalculated_lower_bound_ref) ||
-                                    self.prefix_set
-                                        .iter()
-                                        .next_back()
-                                        .is_some_and(|key| key >= uncalculated_lower_bound_ref)
-                            }
-                            Some(upper) => {
-                                self.prefix_set.contains_range(uncalculated_lower_bound_ref..&upper)
-                            }
-                        };
+                        let child_path_upper = child_path.next_without_prefix();
+                        let contains_remaining = self.prefix_set.contains_range((
+                            Bound::Included(uncalculated_lower_bound_ref),
+                            child_path_upper.as_ref().map_or(Bound::Unbounded, Bound::Excluded),
+                        ));
                         if contains_remaining {
                             next_child_nibbles.set_bit(child_nibble);
                         }

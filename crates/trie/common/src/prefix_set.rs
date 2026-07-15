@@ -1,7 +1,7 @@
 use crate::Nibbles;
 use alloc::{sync::Arc, vec::Vec};
 use alloy_primitives::map::{B256Map, B256Set};
-use core::ops::Range;
+use core::ops::{Bound, RangeBounds};
 
 /// Collection of mutable prefix sets.
 #[derive(Clone, Default, Debug, PartialEq, Eq)]
@@ -261,28 +261,48 @@ impl PrefixSet {
         false
     }
 
-    /// Returns `true` if any key in the set falls within the given half-open range
-    /// `[start, end)`.
+    /// Returns `true` if any key in the set falls within the given range bounds.
     ///
     /// Like [`Self::contains`], this method maintains the internal index for sequential access
     /// optimization.
     #[inline]
-    pub fn contains_range(&mut self, range: Range<&Nibbles>) -> bool {
+    pub fn contains_range<'a>(&mut self, range: impl RangeBounds<&'a Nibbles>) -> bool {
         if self.all {
             return true
         }
 
-        while self.index > 0 && &self.keys[self.index] >= range.end {
+        let start_bound = match range.start_bound() {
+            Bound::Included(bound) => Bound::Included(*bound),
+            Bound::Excluded(bound) => Bound::Excluded(*bound),
+            Bound::Unbounded => Bound::Unbounded,
+        };
+        let end_bound = match range.end_bound() {
+            Bound::Included(bound) => Bound::Included(*bound),
+            Bound::Excluded(bound) => Bound::Excluded(*bound),
+            Bound::Unbounded => Bound::Unbounded,
+        };
+        let satisfies_start = |key: &Nibbles| match start_bound {
+            Bound::Included(start) => key >= start,
+            Bound::Excluded(start) => key > start,
+            Bound::Unbounded => true,
+        };
+        let satisfies_end = |key: &Nibbles| match end_bound {
+            Bound::Included(end) => key <= end,
+            Bound::Excluded(end) => key < end,
+            Bound::Unbounded => true,
+        };
+
+        while self.index > 0 && !satisfies_end(&self.keys[self.index]) {
             self.index -= 1;
         }
 
         for (idx, key) in self.keys[self.index..].iter().enumerate() {
-            if key >= range.start && key < range.end {
+            if satisfies_start(key) && satisfies_end(key) {
                 self.index += idx;
                 return true
             }
 
-            if key >= range.end {
+            if !satisfies_end(key) {
                 self.index += idx;
                 return false
             }
@@ -402,6 +422,21 @@ mod tests {
 
         let prefix_set = prefix_set_mut.freeze();
         assert_eq!(prefix_set.slice(), &[path_a, path_b]);
+    }
+
+    #[test]
+    fn test_contains_range_bounds() {
+        let first = Nibbles::from_nibbles([1, 2, 3]);
+        let middle = Nibbles::from_nibbles([1, 2, 4]);
+        let last = Nibbles::from_nibbles([4, 5, 6]);
+        let mut prefix_set = PrefixSetMut::from([first, middle, last]).freeze();
+
+        assert!(prefix_set.contains_range(&first..&middle));
+        assert!(!prefix_set.contains_range((Bound::Excluded(&first), Bound::Excluded(&middle))));
+        assert!(prefix_set.contains_range(&middle..));
+        assert!(prefix_set.contains_range(..=&first));
+        assert!(!prefix_set.contains_range(..&first));
+        assert!(prefix_set.contains_range((Bound::Excluded(&middle), Bound::Included(&last))));
     }
 
     #[test]
