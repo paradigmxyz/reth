@@ -2,10 +2,7 @@
 
 use std::sync::Arc;
 
-use super::{
-    evm_state_to_hashed_post_state, extend_retained_paths_from_hashed_post_state,
-    StateRootComputeOutcome, StateRootMessage,
-};
+use super::{evm_state_to_hashed_post_state, StateRootComputeOutcome, StateRootMessage};
 use alloy_primitives::{
     map::{hash_map::Entry, B256Map},
     B256,
@@ -18,8 +15,8 @@ use reth_metrics::Metrics;
 use reth_primitives_traits::{Account, FastInstant as Instant};
 use reth_tasks::Runtime;
 use reth_trie::{
-    prefix_set::TriePrefixSetsMut, updates::TrieUpdates, DecodedMultiProofV2, HashedPostState,
-    TrieAccount, EMPTY_ROOT_HASH, TRIE_ACCOUNT_RLP_MAX_SIZE,
+    updates::TrieUpdates, DecodedMultiProofV2, HashedPostState, TrieAccount, EMPTY_ROOT_HASH,
+    TRIE_ACCOUNT_RLP_MAX_SIZE,
 };
 use reth_trie_common::{MultiProofTargetsV2, ProofV2Target};
 use reth_trie_parallel::{
@@ -48,7 +45,7 @@ pub(super) struct SparseTrieCacheTask<A = ArenaParallelSparseTrie, S = ArenaPara
     /// work never drains, since the updates channel closing is a normal end of stream.
     cancel_rx: CrossbeamReceiver<()>,
     /// Sender half for the channel to send final hashed state to.
-    final_hashed_state_tx: Option<std::sync::mpsc::Sender<HashedPostState>>,
+    final_hashed_state_tx: Option<std::sync::mpsc::Sender<Arc<HashedPostState>>>,
     /// `SparseStateTrie` used for computing the state root.
     trie: SparseStateTrie<A, S>,
     /// The parent block's state root.
@@ -118,9 +115,6 @@ pub(super) struct SparseTrieCacheTask<A = ArenaParallelSparseTrie, S = ArenaPara
     /// final [`HashedPostState`] and share it with main engine thread without requiring any extra
     /// hashing work.
     final_hashed_state: HashedPostState,
-    /// Retention paths derived from the current block's final hashed post state.
-    retention_paths: TriePrefixSetsMut,
-
     /// Metrics for the sparse trie.
     metrics: SparseTrieTaskMetrics,
 }
@@ -136,7 +130,7 @@ where
         executor: &Runtime,
         updates: CrossbeamReceiver<StateRootMessage>,
         cancel_rx: CrossbeamReceiver<()>,
-        final_hashed_state_tx: std::sync::mpsc::Sender<HashedPostState>,
+        final_hashed_state_tx: std::sync::mpsc::Sender<Arc<HashedPostState>>,
         proof_worker_handle: ProofWorkerHandle,
         metrics: SparseTrieTaskMetrics,
         trie: SparseStateTrie<A, S>,
@@ -181,7 +175,6 @@ where
             in_flight_proof_batches: 0,
             pending_updates: Default::default(),
             final_hashed_state: Default::default(),
-            retention_paths: Default::default(),
             metrics,
         }
     }
@@ -245,11 +238,6 @@ where
         (trie, deferred)
     }
 
-    /// Takes retention paths derived from the current block's final hashed post state.
-    pub(super) fn take_retention_paths(&mut self) -> TriePrefixSetsMut {
-        core::mem::take(&mut self.retention_paths)
-    }
-
     /// Runs the sparse trie task to completion.
     ///
     /// This waits for new incoming [`SparseTrieTaskMessage`]s, applies updates
@@ -268,6 +256,7 @@ where
         let mut total_idle_time = std::time::Duration::ZERO;
         let mut idle_start = Instant::now();
         let mut done = false;
+        let mut finalized_hashed_state = None;
 
         // Streaming phase: updates are still arriving. Ends when the finish marker is
         // processed. Only producers hold update senders, so the channel closing before the
@@ -285,7 +274,9 @@ where
                     let update = message.map_err(|_| StateRootTaskError::Other(
                         "updates channel disconnected before state root calculation".to_string(),
                     ))?;
-                    self.on_message(update);
+                    if let Some(hashed_state) = self.on_message(update) {
+                        finalized_hashed_state = Some(hashed_state);
+                    }
                     self.pending_updates += 1;
                 }
                 recv(self.proof_result_rx) -> message => {
@@ -364,7 +355,6 @@ where
         let debug_recorders = self.trie.take_debug_recorders();
         #[cfg(feature = "trie-debug")]
         let trie_witness = self.trie.witness();
-        let changed_paths = Some(Arc::new(self.trie.take_changed_paths().unwrap_or_default()));
 
         let end = Instant::now();
         self.metrics.sparse_trie_final_update_duration_histogram.record(end.duration_since(start));
@@ -382,7 +372,8 @@ where
         Ok(StateRootComputeOutcome {
             state_root,
             trie_updates: Arc::new(trie_updates),
-            changed_paths,
+            hashed_state: finalized_hashed_state
+                .expect("finished state updates publish the hashed post state"),
             #[cfg(feature = "trie-debug")]
             debug_recorders,
             #[cfg(feature = "trie-debug")]
@@ -456,23 +447,21 @@ where
     }
 
     /// Processes a [`SparseTrieTaskMessage`] from the hashing task.
-    fn on_message(&mut self, message: SparseTrieTaskMessage) {
+    fn on_message(&mut self, message: SparseTrieTaskMessage) -> Option<Arc<HashedPostState>> {
         match message {
-            SparseTrieTaskMessage::PrefetchProofs(targets) => self.on_prewarm_targets(targets),
+            SparseTrieTaskMessage::PrefetchProofs(targets) => {
+                self.on_prewarm_targets(targets);
+                None
+            }
             SparseTrieTaskMessage::HashedState(hashed_state) => {
-                self.on_hashed_state_update(hashed_state)
+                self.on_hashed_state_update(hashed_state);
+                None
             }
             SparseTrieTaskMessage::FinishedStateUpdates => {
-                extend_retained_paths_from_hashed_post_state(
-                    &mut self.retention_paths,
-                    &self.final_hashed_state,
-                );
-                let _ = self
-                    .final_hashed_state_tx
-                    .take()
-                    .unwrap()
-                    .send(core::mem::take(&mut self.final_hashed_state));
-                self.finished_state_updates = true
+                let hashed_state = Arc::new(core::mem::take(&mut self.final_hashed_state));
+                let _ = self.final_hashed_state_tx.take().unwrap().send(Arc::clone(&hashed_state));
+                self.finished_state_updates = true;
+                Some(hashed_state)
             }
         }
     }

@@ -4,10 +4,7 @@ use crate::{
 use alloc::{borrow::Cow, boxed::Box};
 use alloy_primitives::{map::B256Map, Bytes, B256};
 use reth_execution_errors::{SparseTrieErrorKind, SparseTrieResult};
-use reth_trie_common::{
-    prefix_set::PrefixSetMut, BranchNodeMasks, Nibbles, ProofTrieNodeV2, RlpNode, TrieMask,
-    TrieNodeV2,
-};
+use reth_trie_common::{BranchNodeMasks, Nibbles, ProofTrieNodeV2, RlpNode, TrieMask, TrieNodeV2};
 
 /// A sparse trie that is either in a "blind" state (no nodes are revealed, root node hash is
 /// unknown) or in a "revealed" state (root node has been revealed and the trie can be updated).
@@ -56,8 +53,7 @@ impl<T: SparseTrieTrait + Default> RevealableSparseTrie<T> {
     /// If the trie is blinded, its root node is replaced with `root`.
     ///
     /// The `masks` are used to determine how the node's children are stored.
-    /// The retention flags control whether trie updates and changed node base paths
-    /// should be tracked.
+    /// The retention flag controls whether trie updates should be tracked.
     ///
     /// # Returns
     ///
@@ -67,7 +63,6 @@ impl<T: SparseTrieTrait + Default> RevealableSparseTrie<T> {
         root: TrieNodeV2,
         masks: Option<BranchNodeMasks>,
         retain_updates: bool,
-        retain_changed_paths: bool,
     ) -> SparseTrieResult<&mut T> {
         // if `Blind`, we initialize the revealed trie with the given root node, using a
         // pre-allocated trie if available.
@@ -79,7 +74,6 @@ impl<T: SparseTrieTrait + Default> RevealableSparseTrie<T> {
             };
 
             revealed_trie.set_root(root, masks, retain_updates)?;
-            revealed_trie.set_changed_paths(retain_changed_paths);
             *self = Self::Revealed(revealed_trie);
         }
 
@@ -94,15 +88,9 @@ impl<T: SparseTrieTrait + Default> RevealableSparseTrie<T> {
         &mut self,
         nodes: &mut [ProofTrieNodeV2],
         retain_updates: bool,
-        retain_changed_paths: bool,
     ) -> SparseTrieResult<()> {
         let trie = if let Some(root_node) = nodes.iter().find(|n| n.path.is_empty()) {
-            self.reveal_root(
-                root_node.node.clone(),
-                root_node.masks,
-                retain_updates,
-                retain_changed_paths,
-            )?
+            self.reveal_root(root_node.node.clone(), root_node.masks, retain_updates)?
         } else {
             self.as_revealed_mut().ok_or(SparseTrieErrorKind::Blind)?
         };
@@ -219,23 +207,6 @@ impl<T: SparseTrieTrait> RevealableSparseTrie<T> {
     pub fn root_with_updates(&mut self) -> Option<(B256, SparseTrieUpdates)> {
         let revealed = self.as_revealed_mut()?;
         Some((revealed.root(), revealed.take_updates()))
-    }
-
-    /// Configures a revealed or retained cleared trie to collect changed node base paths.
-    pub fn set_changed_paths(&mut self, retain_changed_paths: bool) {
-        match self {
-            Self::Revealed(trie) | Self::Blind(Some(trie)) => {
-                trie.set_changed_paths(retain_changed_paths);
-            }
-            Self::Blind(None) => {}
-        }
-    }
-
-    /// Takes changed node base paths from the revealed trie.
-    ///
-    /// Returns `None` if the trie is still blind.
-    pub fn take_changed_paths(&mut self) -> Option<PrefixSetMut> {
-        Some(self.as_revealed_mut()?.take_changed_paths())
     }
 
     /// Clears this trie, setting it to a blind state.

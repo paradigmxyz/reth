@@ -9,7 +9,7 @@ use alloy_primitives::{map::B256Map, Bytes, B256};
 use either::Either;
 use reth_execution_errors::{SparseStateTrieResult, SparseTrieErrorKind};
 use reth_trie_common::{
-    prefix_set::{PrefixSet, PrefixSetMut, TriePrefixSets, TriePrefixSetsMut},
+    prefix_set::{PrefixSet, TriePrefixSets, TriePrefixSetsMut},
     updates::{StorageTrieUpdates, TrieUpdates},
     DecodedMultiProof, MultiProof, Nibbles, ProofTrieNodeV2,
 };
@@ -39,8 +39,6 @@ pub struct SparseStateTrie<
     storage: StorageTries<S>,
     /// Flag indicating whether trie updates should be retained.
     retain_updates: bool,
-    /// Flag indicating whether changed node base paths should be retained.
-    retain_changed_paths: bool,
     /// Holds data that should be dropped after final state root is calculated.
     deferred_drops: DeferredDrops,
     /// Global LFU tracker for hot `(address, slot)` storage entries.
@@ -62,7 +60,6 @@ where
             state: Default::default(),
             storage: Default::default(),
             retain_updates: false,
-            retain_changed_paths: false,
             deferred_drops: DeferredDrops::default(),
             hot_slots_lfu: BucketedLfu::default(),
             hot_accounts_lfu: BucketedLfu::default(),
@@ -152,49 +149,6 @@ impl SparseStateTrie {
 }
 
 impl<A: SparseTrieTrait, S: SparseTrieTrait> SparseStateTrie<A, S> {
-    /// Set the retention of changed node base paths.
-    pub fn set_changed_paths(&mut self, retain_changed_paths: bool) {
-        self.retain_changed_paths = retain_changed_paths;
-        self.state.set_changed_paths(retain_changed_paths);
-        for trie in self.storage.tries.values_mut() {
-            trie.set_changed_paths(retain_changed_paths);
-        }
-        for trie in &mut self.storage.cleared_tries {
-            trie.set_changed_paths(retain_changed_paths);
-        }
-        self.storage.default_trie.set_changed_paths(retain_changed_paths);
-    }
-
-    /// Set the retention of changed node base paths.
-    pub fn with_changed_paths(mut self, retain_changed_paths: bool) -> Self {
-        self.set_changed_paths(retain_changed_paths);
-        self
-    }
-
-    /// Returns storage trie changed paths for tries that have been revealed.
-    fn storage_trie_changed_paths(&mut self) -> B256Map<PrefixSetMut> {
-        self.storage
-            .tries
-            .iter_mut()
-            .filter_map(|(address, trie)| {
-                let changed_paths = trie.take_changed_paths()?;
-                (!changed_paths.is_empty()).then_some((*address, changed_paths))
-            })
-            .collect()
-    }
-
-    /// Returns changed paths by taking them from the revealed sparse tries.
-    ///
-    /// Returns `None` if the accounts trie is not revealed.
-    pub fn take_changed_paths(&mut self) -> Option<TriePrefixSetsMut> {
-        let storage_prefix_sets = self.storage_trie_changed_paths();
-        self.state.take_changed_paths().map(|account_prefix_set| TriePrefixSetsMut {
-            account_prefix_set,
-            storage_prefix_sets,
-            destroyed_accounts: Default::default(),
-        })
-    }
-
     /// Takes all debug recorders from the account trie and all revealed storage tries.
     ///
     /// Returns a vec of `(Option<B256>, TrieDebugRecorder)` where `None` is the account trie
@@ -382,19 +336,14 @@ where
         }
 
         let retain_updates = self.retain_updates;
-        let retain_changed_paths = self.retain_changed_paths;
 
         #[cfg(not(feature = "std"))]
         let results: Vec<_> = targets
             .into_iter()
             .map(|(_, target, mut nodes)| {
                 let result = match target {
-                    Either::Left(trie) => {
-                        trie.reveal_v2_proof_nodes(&mut nodes, retain_updates, retain_changed_paths)
-                    }
-                    Either::Right(trie) => {
-                        trie.reveal_v2_proof_nodes(&mut nodes, retain_updates, retain_changed_paths)
-                    }
+                    Either::Left(trie) => trie.reveal_v2_proof_nodes(&mut nodes, retain_updates),
+                    Either::Right(trie) => trie.reveal_v2_proof_nodes(&mut nodes, retain_updates),
                 };
                 (result, nodes)
             })
@@ -419,16 +368,12 @@ where
                     .entered();
 
                     let result = match target {
-                        Either::Left(trie) => trie.reveal_v2_proof_nodes(
-                            &mut nodes,
-                            retain_updates,
-                            retain_changed_paths,
-                        ),
-                        Either::Right(trie) => trie.reveal_v2_proof_nodes(
-                            &mut nodes,
-                            retain_updates,
-                            retain_changed_paths,
-                        ),
+                        Either::Left(trie) => {
+                            trie.reveal_v2_proof_nodes(&mut nodes, retain_updates)
+                        }
+                        Either::Right(trie) => {
+                            trie.reveal_v2_proof_nodes(&mut nodes, retain_updates)
+                        }
                     };
                     (result, nodes)
                 })
@@ -970,37 +915,6 @@ mod tests {
             sparse.hot_slots_lfu.keys().copied().collect::<Vec<_>>(),
             vec![HotSlotKey { address: account, slot }]
         );
-    }
-
-    #[test]
-    fn take_changed_paths_from_sparse_state_trie() {
-        let account = B256::with_last_byte(0x01);
-        let slot = B256::with_last_byte(0x02);
-        let mut sparse = SparseStateTrie::<ArenaParallelSparseTrie>::default();
-        sparse.set_accounts_trie(RevealableSparseTrie::revealed_empty());
-        sparse.insert_storage_trie(account, RevealableSparseTrie::revealed_empty());
-        sparse.set_changed_paths(true);
-
-        let mut account_updates =
-            B256Map::from_iter([(account, LeafUpdate::Changed(vec![0x01; 32]))]);
-        sparse.trie_mut().update_leaves(&mut account_updates, |_, _| {}).unwrap();
-        assert!(account_updates.is_empty());
-        let _ = sparse.root().unwrap();
-
-        let mut storage_updates = B256Map::from_iter([(slot, LeafUpdate::Changed(vec![0x02; 32]))]);
-        sparse
-            .storage_trie_mut(&account)
-            .unwrap()
-            .update_leaves(&mut storage_updates, |_, _| {})
-            .unwrap();
-        assert!(storage_updates.is_empty());
-        let _ = sparse.storage_root(&account).unwrap();
-
-        let changed_paths = sparse.take_changed_paths().unwrap();
-        assert!(changed_paths.account_prefix_set.iter().any(|path| *path == Nibbles::default()));
-        assert!(changed_paths.storage_prefix_sets[&account]
-            .iter()
-            .any(|path| *path == Nibbles::default()));
     }
 
     #[test]

@@ -314,7 +314,6 @@ impl<N: NodePrimitives> TestBlockBuilder<N> {
 
         let trie_data = ComputedTrieData {
             sorted: SortedTrieData { hashed_state: Arc::new(hashed_state), ..Default::default() },
-            ..Default::default()
         };
 
         let block_hash = recovered.hash();
