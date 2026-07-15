@@ -32,14 +32,15 @@ use reth_static_file_types::StaticFileSegment;
 use reth_storage_api::{
     BlockBodyIndicesProvider, NodePrimitivesProvider, RangeEnd, RangeResponse, RangeResult,
     StateRangeProvider, StateRangeProviderFactory, StateRangeView, StorageChangeSetReader,
-    StorageRangeResult,
+    StorageRangeResult, StorageSettingsCache,
 };
 use reth_storage_errors::provider::ProviderResult;
 use reth_trie::{
     hashed_cursor::{HashedCursor, HashedCursorFactory},
     metrics::TrieRootMetrics,
     proof::{Proof, StorageProof},
-    HashedPostState, KeccakKeyHasher, MultiProofTargets, StorageRoot, TrieType,
+    HashedPostState, KeccakKeyHasher, MultiProofTargets, StorageRoot, TrieInput, TrieInputSorted,
+    TrieType,
 };
 use revm::database::BundleState;
 use std::{
@@ -156,6 +157,35 @@ impl<N: ProviderNodeTypes> BlockchainProvider<N> {
         Ok(state.state_provider(latest_historical))
     }
 
+    /// Returns a cursor-backed state view for a state root still only in canonical in-memory
+    /// blocks, overlaying their merged trie state on the persisted anchor.
+    fn block_state_range_provider(
+        &self,
+        state_root: B256,
+    ) -> ProviderResult<Option<HistoricalStateRangeProvider<N>>> {
+        let Some(matched) = self
+            .canonical_in_memory_state
+            .canonical_chain()
+            .find(|state| state.state_root() == state_root)
+        else {
+            return Ok(None)
+        };
+
+        // Merge each in-memory block's trie delta, anchor to `matched`, oldest to newest.
+        let blocks: Vec<_> = matched.chain().map(|state| state.block()).collect();
+        let sorted: Vec<_> =
+            blocks.iter().rev().map(|block| (block.hashed_state(), block.trie_updates())).collect();
+        let input = TrieInput::from_blocks_sorted(
+            sorted.iter().map(|(state, nodes)| (state.as_ref(), nodes.as_ref())),
+        );
+        let merged = TrieInputSorted::from_unsorted(input);
+
+        // The anchor is persisted, so the current database tip already reflects its state.
+        let provider = self.database.database_provider_ro()?;
+        let is_v2 = provider.cached_storage_settings().is_v2();
+        Ok(Some(OverlayStateProvider::new(provider, merged.nodes, merged.state, is_v2)))
+    }
+
     /// Returns a cursor-backed state view for a retained canonical state root.
     fn historical_state_range_provider(
         &self,
@@ -201,10 +231,14 @@ struct HistoricalStateRangeView<N: ProviderNodeTypes> {
 }
 
 impl<N: ProviderNodeTypes> StateRangeProviderFactory for BlockchainProvider<N> {
-    /// Resolves a retained canonical state root into a pinned range view.
+    /// Resolves a retained canonical state root into a pinned range view, preferring a still
+    /// in-memory block over the persisted-history fallback.
     fn state_range_provider(&self, state_root: B256) -> ProviderResult<Option<StateRangeView>> {
-        Ok(self
-            .historical_state_range_provider(state_root)?
+        let provider = match self.block_state_range_provider(state_root)? {
+            Some(provider) => Some(provider),
+            None => self.historical_state_range_provider(state_root)?,
+        };
+        Ok(provider
             .map(|provider| Box::new(HistoricalStateRangeView { provider }) as StateRangeView))
     }
 }
@@ -1006,7 +1040,7 @@ mod tests {
         self, random_block, random_block_range, random_changeset_range, random_eoa_accounts,
         random_receipt, BlockParams, BlockRangeParams,
     };
-    use reth_trie::{HashedPostState, HashedStorage};
+    use reth_trie::{updates::TrieUpdates, ComputedTrieData, HashedPostState, HashedStorage};
     use revm::database::{BundleState, OriginalValuesKnown};
     use std::{
         collections::BTreeMap,
@@ -2999,6 +3033,56 @@ mod tests {
         provider_rw.commit()?;
 
         assert!(provider.state_range_provider(EMPTY_ROOT_HASH)?.is_some());
+
+        Ok(())
+    }
+
+    #[test]
+    fn state_range_provider_resolves_root_from_in_memory_block() -> eyre::Result<()> {
+        let mut rng = generators::rng();
+        let factory = test_provider_factory_with_genesis()?;
+        let provider = BlockchainProvider::new(factory)?;
+
+        let (address, account) = random_account(1);
+        let hashed_address = keccak256(address);
+        let mut hashed_state = HashedPostState::default();
+        hashed_state.accounts.insert(hashed_address, Some(account));
+
+        // A root only the in-memory block carries, so a match proves the in-memory path (not
+        // persisted history, which has no block with this root) resolved it.
+        let unique_root = B256::repeat_byte(0x77);
+        let parent = provider.canonical_in_memory_state.get_canonical_head();
+        let mut block = random_block(
+            &mut rng,
+            parent.number + 1,
+            BlockParams { parent: Some(parent.hash()), tx_count: Some(0), ..Default::default() },
+        )
+        .unseal();
+        block.header.state_root = unique_root;
+        let block = block.seal_slow().try_recover().expect("failed to seal block with senders");
+
+        let trie_data = ComputedTrieData::new(
+            Arc::new(hashed_state.into_sorted()),
+            Arc::new(TrieUpdates::default().into_sorted()),
+        );
+        let execution_output = BlockExecutionOutput {
+            result: BlockExecutionResult {
+                receipts: Default::default(),
+                requests: Default::default(),
+                gas_used: 0,
+                blob_gas_used: 0,
+            },
+            state: Default::default(),
+        };
+        let executed = ExecutedBlock::new(Arc::new(block), Arc::new(execution_output), trie_data);
+        provider
+            .canonical_in_memory_state
+            .update_chain(NewCanonicalChain::Commit { new: vec![executed] });
+
+        let state =
+            provider.state_range_provider(unique_root)?.expect("in-memory root must resolve");
+        let range = state.account_range(B256::ZERO, B256::repeat_byte(0xff), 10_000)?;
+        assert_eq!(range.items, vec![(hashed_address, account)]);
 
         Ok(())
     }
