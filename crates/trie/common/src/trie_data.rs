@@ -4,7 +4,6 @@
 //! trie-related data containing sorted hashed state and trie updates.
 
 use crate::{
-    prefix_set::TriePrefixSetsMut,
     updates::{TrieUpdates, TrieUpdatesSorted},
     HashedPostState, HashedPostStateSorted,
 };
@@ -35,13 +34,11 @@ impl SortedTrieData {
     }
 }
 
-/// Container for sorted trie data that also includes `changed_paths`.
+/// Container for sorted trie data.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct ComputedTrieData {
     /// Sorted trie data: hashed state and trie updates.
     pub sorted: SortedTrieData,
-    /// Changed trie node base paths produced by state root computation.
-    pub changed_paths: Option<Arc<TriePrefixSetsMut>>,
 }
 
 impl ComputedTrieData {
@@ -50,16 +47,7 @@ impl ComputedTrieData {
         hashed_state: Arc<HashedPostStateSorted>,
         trie_updates: Arc<TrieUpdatesSorted>,
     ) -> Self {
-        Self::new_with_changed_paths(hashed_state, trie_updates, None)
-    }
-
-    /// Construct sorted trie data with changed trie node base paths for one block.
-    pub const fn new_with_changed_paths(
-        hashed_state: Arc<HashedPostStateSorted>,
-        trie_updates: Arc<TrieUpdatesSorted>,
-        changed_paths: Option<Arc<TriePrefixSetsMut>>,
-    ) -> Self {
-        Self { sorted: SortedTrieData::new(hashed_state, trie_updates), changed_paths }
+        Self { sorted: SortedTrieData::new(hashed_state, trie_updates) }
     }
 }
 
@@ -128,15 +116,11 @@ impl LazyTrieData {
     pub fn pending(
         hashed_state: Arc<HashedPostState>,
         trie_updates: Arc<TrieUpdates>,
-        changed_paths: Option<Arc<TriePrefixSetsMut>>,
     ) -> (Self, LazyTrieDataProducer) {
         let value = Arc::new(OnceLock::new());
         (
             Self { data: Arc::clone(&value), mode: LazyTrieDataMode::Pending },
-            LazyTrieDataProducer {
-                value,
-                inputs: PendingInputs { hashed_state, trie_updates, changed_paths },
-            },
+            LazyTrieDataProducer { value, inputs: PendingInputs { hashed_state, trie_updates } },
         )
     }
 
@@ -235,7 +219,7 @@ impl LazyTrieDataProducer {
     /// Computes sorted trie data, publishes it to waiters, and returns it to the task owner.
     pub fn compute_and_publish(self) -> ComputedTrieData {
         let Self { value, inputs } = self;
-        let computed = Self::sort(inputs.hashed_state, inputs.trie_updates, inputs.changed_paths);
+        let computed = Self::sort(inputs.hashed_state, inputs.trie_updates);
         let _ = value.set(computed.clone());
         computed
     }
@@ -244,7 +228,6 @@ impl LazyTrieDataProducer {
     pub fn sort(
         hashed_state: Arc<HashedPostState>,
         trie_updates: Arc<TrieUpdates>,
-        changed_paths: Option<Arc<TriePrefixSetsMut>>,
     ) -> ComputedTrieData {
         #[cfg(feature = "rayon")]
         let (sorted_hashed_state, sorted_trie_updates) = rayon::join(
@@ -270,11 +253,7 @@ impl LazyTrieDataProducer {
             },
         );
 
-        ComputedTrieData::new_with_changed_paths(
-            Arc::new(sorted_hashed_state),
-            Arc::new(sorted_trie_updates),
-            changed_paths,
-        )
+        ComputedTrieData::new(Arc::new(sorted_hashed_state), Arc::new(sorted_trie_updates))
     }
 }
 
@@ -285,8 +264,6 @@ struct PendingInputs {
     hashed_state: Arc<HashedPostState>,
     /// Unsorted trie updates from state root computation.
     trie_updates: Arc<TrieUpdates>,
-    /// Changed trie node base paths from state root computation.
-    changed_paths: Option<Arc<TriePrefixSetsMut>>,
 }
 
 #[cfg(test)]
@@ -306,19 +283,7 @@ mod tests {
         LazyTrieData::pending(
             Arc::new(HashedPostState::default()),
             Arc::new(TrieUpdates::default()),
-            None,
         )
-    }
-
-    fn assert_changed_paths_ptr_eq(
-        left: &Option<Arc<TriePrefixSetsMut>>,
-        right: &Option<Arc<TriePrefixSetsMut>>,
-    ) {
-        match (left, right) {
-            (Some(left), Some(right)) => assert!(Arc::ptr_eq(left, right)),
-            (None, None) => {}
-            _ => panic!("changed paths presence mismatch"),
-        }
     }
 
     #[test]
@@ -366,10 +331,8 @@ mod tests {
 
         assert!(Arc::ptr_eq(&published.sorted.hashed_state, &first.sorted.hashed_state));
         assert!(Arc::ptr_eq(&published.sorted.trie_updates, &first.sorted.trie_updates));
-        assert_changed_paths_ptr_eq(&published.changed_paths, &first.changed_paths);
         assert!(Arc::ptr_eq(&first.sorted.hashed_state, &second.sorted.hashed_state));
         assert!(Arc::ptr_eq(&first.sorted.trie_updates, &second.sorted.trie_updates));
-        assert_changed_paths_ptr_eq(&first.changed_paths, &second.changed_paths);
     }
 
     #[test]
@@ -385,7 +348,6 @@ mod tests {
 
         assert!(Arc::ptr_eq(&published.sorted.hashed_state, &result.sorted.hashed_state));
         assert!(Arc::ptr_eq(&published.sorted.trie_updates, &result.sorted.trie_updates));
-        assert_changed_paths_ptr_eq(&published.changed_paths, &result.changed_paths);
     }
 
     #[test]
@@ -400,10 +362,8 @@ mod tests {
 
         assert!(Arc::ptr_eq(&published.sorted.hashed_state, &result1.sorted.hashed_state));
         assert!(Arc::ptr_eq(&published.sorted.trie_updates, &result1.sorted.trie_updates));
-        assert_changed_paths_ptr_eq(&published.changed_paths, &result1.changed_paths);
         assert!(Arc::ptr_eq(&result1.sorted.hashed_state, &result2.sorted.hashed_state));
         assert!(Arc::ptr_eq(&result1.sorted.trie_updates, &result2.sorted.trie_updates));
-        assert_changed_paths_ptr_eq(&result1.changed_paths, &result2.changed_paths);
     }
 
     #[test]
@@ -418,7 +378,7 @@ mod tests {
             )]);
 
         let (deferred, task) =
-            LazyTrieData::pending(Arc::new(hashed_state), Arc::new(TrieUpdates::default()), None);
+            LazyTrieData::pending(Arc::new(hashed_state), Arc::new(TrieUpdates::default()));
         let _ = task.compute_and_publish();
         let result = deferred.get().clone();
 
@@ -435,7 +395,6 @@ mod tests {
         let (deferred, task) = LazyTrieData::pending(
             Arc::new(HashedPostState { accounts, storages: Default::default() }),
             Arc::new(TrieUpdates::default()),
-            None,
         );
 
         let _ = task.compute_and_publish();

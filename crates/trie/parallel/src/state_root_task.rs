@@ -11,8 +11,7 @@ use crate::error::StateRootTaskError;
 use alloy_evm::block::OnStateHook;
 use alloy_primitives::{keccak256, map::B256Map, B256};
 use reth_trie::{
-    prefix_set::TriePrefixSetsMut, updates::TrieUpdates, HashedPostState, HashedStorage,
-    MultiProofTargetsV2, ProofV2Target,
+    updates::TrieUpdates, HashedPostState, HashedStorage, MultiProofTargetsV2, ProofV2Target,
 };
 use revm::state::EvmState;
 use std::{fmt, sync::Arc};
@@ -44,8 +43,6 @@ pub struct StateRootComputeOutcome {
     pub trie_updates: Arc<TrieUpdates>,
     /// Hashed post state produced while computing the state root.
     pub hashed_state: Arc<HashedPostState>,
-    /// Changed trie node base paths retained while computing the root.
-    pub changed_paths: Option<Arc<TriePrefixSetsMut>>,
     /// Debug recorders taken from the sparse tries, keyed by `None` for account trie
     /// and `Some(address)` for storage tries.
     #[cfg(feature = "trie-debug")]
@@ -674,7 +671,6 @@ mod tests {
                 state_root: B256::repeat_byte(0x42),
                 trie_updates: Arc::new(TrieUpdates::default()),
                 hashed_state: Arc::new(HashedPostState::default()),
-                changed_paths: None,
                 #[cfg(feature = "trie-debug")]
                 debug_recorders: Vec::new(),
             }))

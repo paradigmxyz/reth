@@ -443,8 +443,6 @@ pub struct StateRootJobOutcome {
     pub state_root: B256,
     /// Trie updates associated with the computed state root.
     pub trie_updates: Arc<TrieUpdates>,
-    /// Changed trie node base paths retained while computing the root, if the job tracks them.
-    pub changed_paths: Option<Arc<TriePrefixSetsMut>>,
     /// Hashed post state recomputed by a fallback path.
     ///
     /// When set, the root was not derived from the streamed updates, so validation replaces its
@@ -453,15 +451,9 @@ pub struct StateRootJobOutcome {
 }
 
 impl StateRootJobOutcome {
-    /// Creates a state-root job outcome without changed paths.
+    /// Creates a state-root job outcome.
     pub const fn new(state_root: B256, trie_updates: Arc<TrieUpdates>) -> Self {
-        Self { state_root, trie_updates, changed_paths: None, hashed_state: None }
-    }
-
-    /// Sets the changed trie node base paths retained while computing the root.
-    pub fn with_changed_paths(mut self, changed_paths: Option<Arc<TriePrefixSetsMut>>) -> Self {
-        self.changed_paths = changed_paths;
-        self
+        Self { state_root, trie_updates, hashed_state: None }
     }
 
     /// Sets the hashed post state recomputed by a fallback path.
@@ -623,7 +615,6 @@ impl DefaultStateRootStrategy {
                         .with_default_storage_trie(default_trie)
                         .with_updates(true)
                 });
-            sparse_state_trie.set_changed_paths(true);
             sparse_state_trie.set_hot_cache_capacities(max_hot_slots, max_hot_accounts);
 
             let mut task = SparseTrieCacheTask::new_with_trie(
@@ -980,7 +971,6 @@ where
             state_root,
             trie_updates,
             hashed_state: _hashed_state,
-            changed_paths,
             #[cfg(feature = "trie-debug")]
             debug_recorders,
         } = outcome;
@@ -1003,7 +993,7 @@ where
             write_trie_debug_recorders(_block.header().number(), &debug_recorders);
         }
 
-        StateRootJobOutcome::new(state_root, trie_updates).with_changed_paths(changed_paths)
+        StateRootJobOutcome::new(state_root, trie_updates)
     }
 }
 
@@ -1259,7 +1249,7 @@ mod tests {
     }
 
     #[test]
-    fn sparse_trie_retained_paths_uses_hashed_state_when_changed_paths_missing() {
+    fn sparse_trie_retained_paths_uses_hashed_state() {
         let blocks: Vec<_> = TestBlockBuilder::eth()
             .get_executed_blocks(1..2)
             .map(|block| with_hashed_state(block, trie_hashed_state(0x01, 0x02)))
