@@ -30,10 +30,10 @@ use reth_primitives_traits::{Account, FastInstant as Instant, NodePrimitives};
 use reth_provider::{
     AccountReader, BlockExecutionOutput, BlockReader, StateProviderFactory, StateReader,
 };
-use reth_revm::database::{CacheDB, StateProviderDatabase};
+use reth_revm::database::StateProviderDatabase;
 use reth_tasks::{pool::WorkerPool, Runtime};
 use reth_trie_common::MultiProofTargetsV2;
-use revm::DatabaseCommit;
+use revm::{database::CacheDB, DatabaseCommit};
 use std::sync::{
     atomic::{AtomicBool, AtomicUsize, Ordering},
     mpsc::{self, channel, Receiver, Sender},
