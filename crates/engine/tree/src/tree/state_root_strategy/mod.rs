@@ -631,6 +631,7 @@ impl DefaultStateRootStrategy {
             };
 
             let mut sparse_trie_anchor_hash = parent_hash;
+            let mut reused_preserved_sparse_trie = false;
             let mut sparse_state_trie = match preserved_sparse_trie {
                 Some(preserved) => {
                     let start = Instant::now();
@@ -643,6 +644,7 @@ impl DefaultStateRootStrategy {
                     match preserved {
                         Ok(Some(trie)) => {
                             sparse_trie_anchor_hash = preserved_anchor_hash;
+                            reused_preserved_sparse_trie = true;
                             trie
                         }
                         Ok(None) => new_sparse_state_trie(),
@@ -676,12 +678,11 @@ impl DefaultStateRootStrategy {
             // Publish a handle before sending the result so the next block can inspect the
             // state root immediately while the trie is finalized for reuse below.
             let pending_trie = if let Some(result) = &task_result {
-                let preserved_anchor_hash = pending_sparse_trie_prune_blocks
-                    .as_ref()
-                    .and_then(|blocks| {
-                        blocks.last().map(|block| block.recovered_block().parent_hash())
-                    })
-                    .unwrap_or(sparse_trie_anchor_hash);
+                let preserved_anchor_hash = published_sparse_trie_anchor_hash(
+                    sparse_trie_anchor_hash,
+                    reused_preserved_sparse_trie,
+                    pending_sparse_trie_prune_blocks.as_deref(),
+                );
                 let (preserved, completer) =
                     PreservedSparseTrie::pending(result.state_root, preserved_anchor_hash);
                 state_trie_overlays.store_sparse_trie(preserved);
@@ -832,6 +833,20 @@ fn extend_retained_paths_from_sorted_hashed_post_state(
                     .map(|(hashed_slot, _)| Nibbles::unpack(*hashed_slot)),
             );
     }
+}
+
+fn published_sparse_trie_anchor_hash<N: NodePrimitives>(
+    sparse_trie_anchor_hash: B256,
+    reused_preserved_sparse_trie: bool,
+    pending_sparse_trie_prune_blocks: Option<&[ExecutedBlock<N>]>,
+) -> B256 {
+    if !reused_preserved_sparse_trie {
+        return sparse_trie_anchor_hash
+    }
+
+    pending_sparse_trie_prune_blocks
+        .and_then(|blocks| blocks.last().map(|block| block.recovered_block().parent_hash()))
+        .unwrap_or(sparse_trie_anchor_hash)
 }
 
 impl<N, P, Evm> StateRootStrategy<N, P, Evm> for DefaultStateRootStrategy
@@ -1540,6 +1555,28 @@ mod tests {
 
         assert_eq!(retained_paths.account_prefix_set.len(), 2);
         assert_eq!(retained_paths.storage_prefix_sets.len(), 2);
+    }
+
+    #[test]
+    fn published_sparse_trie_anchor_uses_prune_anchor_for_reused_trie() {
+        let blocks: Vec<_> = TestBlockBuilder::eth().get_executed_blocks(1..3).collect();
+        let reused_anchor_hash = B256::with_last_byte(0xaa);
+
+        assert_eq!(
+            published_sparse_trie_anchor_hash(reused_anchor_hash, true, Some(&blocks)),
+            blocks.last().unwrap().recovered_block().parent_hash()
+        );
+    }
+
+    #[test]
+    fn published_sparse_trie_anchor_keeps_parent_for_fresh_trie() {
+        let blocks: Vec<_> = TestBlockBuilder::eth().get_executed_blocks(1..3).collect();
+        let parent_hash = B256::with_last_byte(0xaa);
+
+        assert_eq!(
+            published_sparse_trie_anchor_hash(parent_hash, false, Some(&blocks)),
+            parent_hash
+        );
     }
 
     fn create_mock_state_updates(num_accounts: usize, updates_per_account: usize) -> Vec<EvmState> {
