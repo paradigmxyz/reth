@@ -30,7 +30,7 @@ use reth_primitives_traits::{Account, FastInstant as Instant, NodePrimitives};
 use reth_provider::{
     AccountReader, BlockExecutionOutput, BlockReader, StateProviderFactory, StateReader,
 };
-use reth_revm::database::StateProviderDatabase;
+use reth_revm::database::{CacheDB, StateProviderDatabase};
 use reth_tasks::{pool::WorkerPool, Runtime};
 use reth_trie_common::MultiProofTargetsV2;
 use revm::DatabaseCommit;
@@ -574,7 +574,7 @@ where
 /// Per-thread EVM state initialised by [`PrewarmContext::evm_for_ctx`] and stored in
 /// [`WorkerPool`] workers via [`Worker::get_or_init`](reth_tasks::pool::Worker::get_or_init).
 type PrewarmEvmState<Evm> =
-    Option<EvmFor<Evm, StateProviderDatabase<reth_provider::StateProviderBox>>>;
+    Option<EvmFor<Evm, CacheDB<StateProviderDatabase<reth_provider::StateProviderBox>>>>;
 
 impl<N, P, Evm> PrewarmContext<N, P, Evm>
 where
@@ -603,7 +603,7 @@ where
             state_provider = Box::new(CachedStateProvider::new_prewarm(state_provider, caches));
         }
 
-        let state_provider = StateProviderDatabase::new(state_provider);
+        let state_provider = CacheDB::new(StateProviderDatabase::new(state_provider));
 
         let mut evm_env = self.env.evm_env.clone();
 
