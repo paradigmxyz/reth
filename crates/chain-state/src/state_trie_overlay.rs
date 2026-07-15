@@ -4,7 +4,7 @@
 //! parent has not been persisted yet. [`StateTrieOverlayManager`] tracks those in-memory blocks and
 //! builds reusable flattened state trie overlays on demand.
 
-use crate::{EthPrimitives, ExecutedBlock, PreservedSparseTrie, PreservedSparseTrieState};
+use crate::{EthPrimitives, ExecutedBlock, PreservedSparseTrie};
 use alloy_primitives::B256;
 use parking_lot::Mutex;
 use reth_metrics::{
@@ -33,7 +33,7 @@ use tracing::{debug, trace};
 pub struct StateTrieOverlayManager<N: NodePrimitives = EthPrimitives> {
     blocks: Arc<DashMap<B256, ExecutedBlock<N>>>,
     overlays: Arc<DashMap<OverlayCacheKey, OverlayCacheEntry>>,
-    preserved_sparse_trie: Arc<Mutex<PreservedSparseTrieState>>,
+    preserved_sparse_trie: Arc<Mutex<Option<PreservedSparseTrie>>>,
     #[cfg(feature = "rayon")]
     worker_pool: Option<Arc<WorkerPool>>,
     metrics: StateTrieOverlayMetrics,
@@ -86,19 +86,19 @@ impl<N: NodePrimitives> StateTrieOverlayManager<N> {
         }
     }
 
-    /// Takes the preserved sparse trie if present, marking it as in use.
+    /// Takes the preserved sparse trie if present.
     pub fn take_sparse_trie(&self) -> Option<PreservedSparseTrie> {
         self.preserved_sparse_trie.lock().take()
     }
 
     /// Stores a preserved sparse trie for later reuse.
     pub fn store_sparse_trie(&self, trie: PreservedSparseTrie) {
-        self.preserved_sparse_trie.lock().store(trie);
+        *self.preserved_sparse_trie.lock() = Some(trie);
     }
 
     /// Clears any preserved sparse trie state.
     pub fn clear_sparse_trie(&self) {
-        self.preserved_sparse_trie.lock().clear();
+        *self.preserved_sparse_trie.lock() = None;
     }
 
     /// Waits until the sparse trie lock becomes available.
@@ -771,7 +771,7 @@ mod tests {
     }
 
     #[test]
-    fn taking_sparse_trie_marks_it_in_use_until_stored_or_cleared() {
+    fn taking_sparse_trie_removes_it() {
         let manager = StateTrieOverlayManager::<EthPrimitives>::default();
         let state_root = B256::with_last_byte(1);
         let other_state_root = B256::with_last_byte(2);
@@ -787,9 +787,6 @@ mod tests {
         assert_eq!(preserved.state_root(), state_root);
         assert_eq!(preserved.anchor_hash(), anchor_hash);
         assert!(preserved.into_trie_for(other_state_root).unwrap().is_none());
-        assert!(manager.take_sparse_trie().is_none());
-
-        manager.clear_sparse_trie();
         assert!(manager.take_sparse_trie().is_none());
     }
 
