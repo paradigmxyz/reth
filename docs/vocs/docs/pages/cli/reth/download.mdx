@@ -92,6 +92,17 @@ Database:
       --db.sync-mode <SYNC_MODE>
           Controls how aggressively the database synchronizes data to disk
 
+      --db.rocksdb-block-cache-size <ROCKSDB_BLOCK_CACHE_SIZE>
+          `RocksDB` block cache size (e.g., 512MB, 4GB).
+
+          Controls the size of the in-memory LRU cache for decompressed `RocksDB` blocks. A larger cache reduces repeated decompression of hot blocks, improving read performance for history lookups.
+
+      --db.balstore-cache-size <BALSTORE_CACHE_SIZE>
+          Number of recent blocks to keep in the in-memory BAL store cache
+
+      --db.disable-metrics
+          Disable built-in database metrics
+
 Static Files:
       --static-files.blocks-per-file.headers <BLOCKS_PER_FILE_HEADERS>
           Number of blocks per file for the headers segment
@@ -130,8 +141,9 @@ Storage:
           - https://snapshots.reth.rs (default)
           - https://publicnode.com/snapshots (full nodes & testnets)
 
-          If no URL is provided, the latest archive snapshot for the selected chain
-          will be proposed for download from https://snapshots-r2.reth.rs.
+          If no URL is provided, the latest archive snapshot will only be proposed
+          for Ethereum mainnet. For other chains, provide --manifest-url, --manifest-path,
+          or -u explicitly.
 
           Local file:// URLs are also supported for extracting snapshots from disk.
 
@@ -144,13 +156,31 @@ Storage:
           Local path to a snapshot manifest.json for modular component downloads
 
       --with-txs
-          Include transaction static files
+          Include all transaction static files
+
+      --with-txs-since <BLOCK_NUMBER>
+          Include transaction static files starting at the specified block
+
+      --with-txs-distance <BLOCKS>
+          Include transaction static files covering the last N blocks
 
       --with-receipts
-          Include receipt static files
+          Include all receipt static files
+
+      --with-receipts-since <BLOCK_NUMBER>
+          Include receipt static files starting at the specified block
+
+      --with-receipts-distance <BLOCKS>
+          Include receipt static files covering the last N blocks
 
       --with-state-history
-          Include account and storage history static files
+          Include all account and storage history static files
+
+      --with-state-history-since <BLOCK_NUMBER>
+          Include account and storage history static files starting at the specified block
+
+      --with-state-history-distance <BLOCKS>
+          Include account and storage history static files covering the last N blocks
 
       --with-senders
           Include transaction sender static files. Requires `--with-txs`
@@ -175,13 +205,21 @@ Storage:
   -y, --non-interactive
           Skip interactive component selection. Downloads the minimal set (state + headers + transactions + changesets) unless explicit --with-* flags narrow it
 
-      --resumable
-          Use resumable two-phase downloads (download to disk first, then extract).
+      --force
+          Overwrite existing snapshot data by removing db, rocksdb, static_files, and reth.toml
 
-          Archives are downloaded to a .part file with HTTP Range resume support before extraction. Slower but tolerates network interruptions without restarting. By default, archives stream directly into the extractor.
+      --resumable [<RESUMABLE>]
+          Enable resumable two-phase downloads (download to disk first, then extract).
+
+          Archives are downloaded to a `.part` file with HTTP Range resume support before extraction. This is enabled by default because it tolerates network interruptions without restarting. Pass `--resumable=false` to stream archives directly into the extractor instead.
+
+          [default: true]
+          [possible values: true, false]
 
       --download-concurrency <DOWNLOAD_CONCURRENCY>
-          Maximum number of concurrent modular archive workers
+          Maximum number of simultaneous HTTP downloads.
+
+          Applies across the entire snapshot download. Small files use one slot, while large files may use multiple slots by splitting into fixed-size pieces.
 
           [default: 8]
 

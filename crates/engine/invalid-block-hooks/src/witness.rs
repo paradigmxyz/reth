@@ -13,11 +13,13 @@ use reth_revm::{
 use reth_rpc_api::DebugApiClient;
 use reth_tracing::tracing::warn;
 use reth_trie::{updates::TrieUpdates, HashedStorage};
-use revm::state::AccountInfo;
-use revm_bytecode::Bytecode;
-use revm_database::{
-    states::{reverts::AccountInfoRevert, StorageSlot},
-    AccountStatus, RevertToSlot,
+use revm::{
+    bytecode::Bytecode,
+    database::{
+        states::{reverts::AccountInfoRevert, StorageSlot},
+        AccountStatus, RevertToSlot,
+    },
+    state::AccountInfo,
 };
 use serde::Serialize;
 use std::{collections::BTreeMap, fmt::Debug, fs::File, io::Write, path::PathBuf};
@@ -160,7 +162,11 @@ fn generate(
     hashed_state: reth_trie::HashedPostState,
     state_provider: Box<dyn StateProvider>,
 ) -> eyre::Result<ExecutionWitness> {
-    let state = state_provider.witness(Default::default(), hashed_state)?;
+    let state = state_provider.witness(
+        Default::default(),
+        hashed_state,
+        reth_trie::ExecutionWitnessMode::Legacy,
+    )?;
     Ok(ExecutionWitness {
         state,
         codes: codes.into_values().collect(),
@@ -239,6 +245,7 @@ where
                 DebugApiClient::<()>::debug_execution_witness(
                     healthy_node_client,
                     block_number.into(),
+                    None,
                 )
                 .await
             })?;
@@ -415,12 +422,12 @@ mod tests {
     use reth_evm_ethereum::EthEvmConfig;
     use reth_provider::test_utils::MockEthProvider;
     use reth_revm::db::{BundleAccount, BundleState};
-    use revm_database::states::reverts::AccountRevert;
+    use revm::database::states::reverts::AccountRevert;
     use tempfile::TempDir;
 
     use reth_revm::test_utils::StateProviderTest;
     use reth_testing_utils::generators::{self, random_block, random_eoa_accounts, BlockParams};
-    use revm_bytecode::Bytecode;
+    use revm::bytecode::Bytecode;
 
     /// Creates a test `BundleState` with realistic accounts, contracts, and reverts
     fn create_bundle_state() -> BundleState {

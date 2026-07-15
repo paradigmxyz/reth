@@ -92,6 +92,17 @@ Database:
       --db.sync-mode <SYNC_MODE>
           Controls how aggressively the database synchronizes data to disk
 
+      --db.rocksdb-block-cache-size <ROCKSDB_BLOCK_CACHE_SIZE>
+          `RocksDB` block cache size (e.g., 512MB, 4GB).
+
+          Controls the size of the in-memory LRU cache for decompressed `RocksDB` blocks. A larger cache reduces repeated decompression of hot blocks, improving read performance for history lookups.
+
+      --db.balstore-cache-size <BALSTORE_CACHE_SIZE>
+          Number of recent blocks to keep in the in-memory BAL store cache
+
+      --db.disable-metrics
+          Disable built-in database metrics
+
 Static Files:
       --static-files.blocks-per-file.headers <BLOCKS_PER_FILE_HEADERS>
           Number of blocks per file for the headers segment
@@ -138,6 +149,48 @@ Storage:
 
       --skip-invalid-blocks
           Continues with execution when an invalid block is encountered and collects these blocks
+
+JIT:
+      --jit
+          Enable JIT compilation of EVM bytecode
+
+      --jit.hot-threshold <HOT_THRESHOLD>
+          Number of observed misses before a bytecode is promoted to JIT compilation
+
+          [default: 8]
+
+      --jit.worker-count <WORKER_COUNT>
+          Number of JIT compilation worker threads
+
+      --jit.channel-capacity <CHANNEL_CAPACITY>
+          Capacity of the lookup-observed event channel. Events are silently dropped when the channel is full
+
+          [default: 4096]
+
+      --jit.max-pending-jobs <MAX_PENDING_JOBS>
+          Maximum number of pending JIT compilation jobs
+
+          [default: 2048]
+
+      --jit.max-bytecode-len <MAX_BYTECODE_LEN>
+          Maximum bytecode length eligible for JIT compilation. Contracts with bytecode larger than this are never promoted to JIT. 0 means no limit
+
+          [default: 0]
+
+      --jit.code-cache-bytes <CODE_CACHE_BYTES>
+          Maximum total resident compiled code size in bytes. When exceeded, the backend evicts least-recently-used entries. 0 means no limit
+
+          [default: 1073741824]
+
+      --jit.idle-evict-duration <IDLE_EVICT_DURATION>
+          Duration after which a compiled program with no lookup hits is evicted
+
+          [default: 1h]
+
+      --jit.debug
+          Enable compiler debug dumps.
+
+          IR, assembly, and bytecode are written to `<datadir>/jit/<spec_id>/<code_hash>/` for each compiled contract. Note that this is not ever cleaned up, and has a non negligible performance overhead.
 
 Logging:
       --log.stdout.format <FORMAT>

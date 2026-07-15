@@ -26,7 +26,7 @@ reth-rpc-server-types.workspace = true
 reth-rpc-convert.workspace = true
 reth-transaction-pool.workspace = true
 reth-tasks.workspace = true
-reth-tracing.workspace = true
+reth-tracing = { workspace = true, features = ["std"] }
 reth-config = { workspace = true, features = ["serde"] }
 reth-discv4.workspace = true
 reth-discv5.workspace = true
@@ -41,7 +41,7 @@ reth-engine-primitives.workspace = true
 
 # ethereum
 alloy-primitives.workspace = true
-alloy-rpc-types-engine = { workspace = true, features = ["std", "jwt"] }
+alloy-rpc-types-engine = { workspace = true, features = ["std", "jwt-aws-lc-rs"] }
 alloy-consensus.workspace = true
 alloy-eips.workspace = true
 

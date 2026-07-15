@@ -1,12 +1,14 @@
 //! Various noop implementations for traits.
 
+pub use crate::bal::NoopBalStore;
+
 use crate::{
-    AccountReader, BlockBodyIndicesProvider, BlockHashReader, BlockIdReader, BlockNumReader,
-    BlockReader, BlockReaderIdExt, BlockSource, BytecodeReader, ChangeSetReader,
-    HashedPostStateProvider, HeaderProvider, NodePrimitivesProvider, PruneCheckpointReader,
-    ReceiptProvider, ReceiptProviderIdExt, StageCheckpointReader, StateProofProvider,
-    StateProvider, StateProviderBox, StateProviderFactory, StateReader, StateRootProvider,
-    StorageRootProvider, TransactionVariant, TransactionsProvider,
+    AccountReader, BalProvider, BalStoreHandle, BlockBodyIndicesProvider, BlockHashReader,
+    BlockIdReader, BlockNumReader, BlockReader, BlockReaderIdExt, BlockSource, BytecodeReader,
+    ChangeSetReader, HashedPostStateProvider, HeaderProvider, NodePrimitivesProvider,
+    PruneCheckpointReader, ReceiptProvider, ReceiptProviderIdExt, StageCheckpointReader,
+    StateProofProvider, StateProvider, StateProviderBox, StateProviderFactory, StateReader,
+    StateRootProvider, StorageRootProvider, TransactionVariant, TransactionsProvider,
 };
 
 #[cfg(feature = "db-api")]
@@ -35,8 +37,8 @@ use reth_prune_types::{PruneCheckpoint, PruneSegment};
 use reth_stages_types::{StageCheckpoint, StageId};
 use reth_storage_errors::provider::{ProviderError, ProviderResult};
 use reth_trie_common::{
-    updates::TrieUpdates, AccountProof, HashedPostState, HashedStorage, MultiProof,
-    MultiProofTargets, StorageMultiProof, StorageProof, TrieInput,
+    updates::TrieUpdates, AccountProof, ExecutionWitnessMode, HashedPostState, HashedStorage,
+    MultiProof, MultiProofTargets, StorageMultiProof, StorageProof, TrieInput,
 };
 
 /// Supports various api interfaces for testing purposes.
@@ -44,6 +46,7 @@ use reth_trie_common::{
 #[non_exhaustive]
 pub struct NoopProvider<ChainSpec = reth_chainspec::ChainSpec, N = EthPrimitives> {
     chain_spec: Arc<ChainSpec>,
+    bal_store: BalStoreHandle,
     #[cfg(feature = "db-api")]
     tx: TxMock,
     #[cfg(feature = "db-api")]
@@ -56,6 +59,7 @@ impl<ChainSpec, N> NoopProvider<ChainSpec, N> {
     pub fn new(chain_spec: Arc<ChainSpec>) -> Self {
         Self {
             chain_spec,
+            bal_store: BalStoreHandle::default(),
             #[cfg(feature = "db-api")]
             tx: TxMock::default(),
             #[cfg(feature = "db-api")]
@@ -70,6 +74,7 @@ impl<ChainSpec> NoopProvider<ChainSpec> {
     pub fn eth(chain_spec: Arc<ChainSpec>) -> Self {
         Self {
             chain_spec,
+            bal_store: BalStoreHandle::default(),
             #[cfg(feature = "db-api")]
             tx: TxMock::default(),
             #[cfg(feature = "db-api")]
@@ -96,12 +101,19 @@ impl<ChainSpec, N> Clone for NoopProvider<ChainSpec, N> {
     fn clone(&self) -> Self {
         Self {
             chain_spec: Arc::clone(&self.chain_spec),
+            bal_store: self.bal_store.clone(),
             #[cfg(feature = "db-api")]
             tx: self.tx.clone(),
             #[cfg(feature = "db-api")]
             prune_modes: self.prune_modes.clone(),
             _phantom: Default::default(),
         }
+    }
+}
+
+impl<ChainSpec, N> BalProvider for NoopProvider<ChainSpec, N> {
+    fn bal_store(&self) -> &BalStoreHandle {
+        &self.bal_store
     }
 }
 
@@ -504,13 +516,18 @@ impl<C: Send + Sync, N: NodePrimitives> StateProofProvider for NoopProvider<C, N
         Ok(MultiProof::default())
     }
 
-    fn witness(&self, _input: TrieInput, _target: HashedPostState) -> ProviderResult<Vec<Bytes>> {
+    fn witness(
+        &self,
+        _input: TrieInput,
+        _target: HashedPostState,
+        _mode: ExecutionWitnessMode,
+    ) -> ProviderResult<Vec<Bytes>> {
         Ok(Vec::default())
     }
 }
 
 impl<C: Send + Sync, N: NodePrimitives> HashedPostStateProvider for NoopProvider<C, N> {
-    fn hashed_post_state(&self, _bundle_state: &revm_database::BundleState) -> HashedPostState {
+    fn hashed_post_state(&self, _bundle_state: &revm::database::BundleState) -> HashedPostState {
         HashedPostState::default()
     }
 }

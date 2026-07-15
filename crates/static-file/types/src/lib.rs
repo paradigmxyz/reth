@@ -15,9 +15,9 @@ mod compression;
 mod event;
 mod segment;
 
-#[cfg(feature = "std")]
+#[cfg(all(feature = "std", unix))]
 mod changeset_offsets;
-#[cfg(feature = "std")]
+#[cfg(all(feature = "std", unix))]
 pub use changeset_offsets::{ChangesetOffsetReader, ChangesetOffsetWriter};
 
 use alloy_primitives::BlockNumber;
@@ -95,6 +95,26 @@ pub const fn find_fixed_range(
 ) -> SegmentRangeInclusive {
     let start = (block / blocks_per_static_file) * blocks_per_static_file;
     SegmentRangeInclusive::new(start, start + blocks_per_static_file - 1)
+}
+
+/// Derives the number of blocks per static file for a segment that is pruned with a distance
+/// prune mode.
+///
+/// Static file segments are pruned by deleting whole files, so the file size bounds how much
+/// data is retained beyond the configured distance: a file only becomes deletable once the
+/// prune target has moved past its end. A quarter of the distance keeps the worst-case
+/// retention overshoot at ~25% while only a handful of files are live at any time. The result
+/// is clamped to avoid excessive file churn for small distances and is never larger than
+/// [`DEFAULT_BLOCKS_PER_STATIC_FILE`].
+pub const fn blocks_per_file_for_prune_distance(distance: u64) -> u64 {
+    let blocks = distance / 4;
+    if blocks < 1_000 {
+        1_000
+    } else if blocks > DEFAULT_BLOCKS_PER_STATIC_FILE {
+        DEFAULT_BLOCKS_PER_STATIC_FILE
+    } else {
+        blocks
+    }
 }
 
 #[cfg(test)]

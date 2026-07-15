@@ -227,8 +227,8 @@ where
                 suggested_fee_recipient: alloy_primitives::Address::random(),
                 withdrawals: Some(vec![]),
                 parent_beacon_block_root: Some(B256::ZERO),
-                // TODO(focil): add IL fixture for testing
-                inclusion_list_transactions: None,
+                slot_number: None,
+                target_gas_limit: None,
             };
 
             env.active_node_state_mut()?
@@ -301,8 +301,8 @@ where
                     suggested_fee_recipient: alloy_primitives::Address::random(),
                     withdrawals: Some(vec![]),
                     parent_beacon_block_root: Some(B256::ZERO),
-                    // TODO(focil): add IL fixture for testing
-                    inclusion_list_transactions: None,
+                    slot_number: None,
+                    target_gas_limit: None,
                 };
 
                 let fresh_fcu_result = EngineApiClient::<Engine>::fork_choice_updated_v3(

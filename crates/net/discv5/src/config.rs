@@ -72,6 +72,15 @@ pub struct ConfigBuilder {
     /// NOTE: IP address of `RLPx` socket overwrites IP address of same IP version in
     /// [`discv5::ListenConfig`].
     tcp_socket: SocketAddr,
+    /// IPv4 address to advertise in the local ENR instead of the listen socket address.
+    ///
+    /// This is separate from [`discv5::ListenConfig`] because the listen address describes where
+    /// discv5 binds its UDP socket. Nodes commonly bind to an unspecified address like `0.0.0.0`
+    /// while advertising an externally reachable address from NAT configuration.
+    advertised_ipv4: Option<Ipv4Addr>,
+    /// IPv6 address to advertise in the local ENR instead of the listen socket address. See
+    /// [`Self::advertised_ipv4`].
+    advertised_ipv6: Option<Ipv6Addr>,
     /// List of `(key, rlp-encoded-value)` tuples that should be advertised in local node record
     /// (in addition to tcp port, udp port and fork).
     other_enr_kv_pairs: Vec<(&'static [u8], Bytes)>,
@@ -95,6 +104,8 @@ impl ConfigBuilder {
             bootstrap_nodes,
             fork,
             tcp_socket,
+            advertised_ipv4,
+            advertised_ipv6,
             other_enr_kv_pairs,
             lookup_interval,
             bootstrap_lookup_interval,
@@ -107,6 +118,8 @@ impl ConfigBuilder {
             bootstrap_nodes,
             fork: fork.map(|(key, fork_id)| (key, fork_id.fork_id)),
             tcp_socket,
+            advertised_ipv4,
+            advertised_ipv6,
             other_enr_kv_pairs,
             lookup_interval: Some(lookup_interval),
             bootstrap_lookup_interval: Some(bootstrap_lookup_interval),
@@ -177,6 +190,19 @@ impl ConfigBuilder {
         self
     }
 
+    /// Sets the IP address to advertise in the local [`Enr`](discv5::enr::Enr), without changing
+    /// the discv5 listen socket.
+    ///
+    /// Routed to the matching address family, so calling this once per family yields a dual-stack
+    /// advertisement.
+    pub const fn advertised_ip(mut self, ip: IpAddr) -> Self {
+        match ip {
+            IpAddr::V4(ip) => self.advertised_ipv4 = Some(ip),
+            IpAddr::V6(ip) => self.advertised_ipv6 = Some(ip),
+        }
+        self
+    }
+
     /// Adds an additional kv-pair to include in the local [`Enr`](discv5::enr::Enr). Takes the key
     /// to use for the kv-pair and the rlp encoded value.
     pub fn add_enr_kv_pair(mut self, key: &'static [u8], value: Bytes) -> Self {
@@ -221,6 +247,8 @@ impl ConfigBuilder {
             bootstrap_nodes,
             fork,
             tcp_socket,
+            advertised_ipv4,
+            advertised_ipv6,
             other_enr_kv_pairs,
             lookup_interval,
             bootstrap_lookup_interval,
@@ -234,6 +262,12 @@ impl ConfigBuilder {
 
         discv5_config.listen_config =
             amend_listen_config_wrt_rlpx(&discv5_config.listen_config, tcp_socket.ip());
+        if advertised_ipv4.is_some() || advertised_ipv6.is_some() {
+            // The upstream discv5 service can update local ENR IP fields from peer-observed
+            // socket addresses. When the operator configured a NAT address, that address is
+            // intentional advertisement state and must not be replaced by peer observations.
+            discv5_config.enr_update = false;
+        }
 
         let fork = fork.map(|(key, fork_id)| (key, fork_id.into()));
 
@@ -251,6 +285,8 @@ impl ConfigBuilder {
             bootstrap_nodes,
             fork,
             tcp_socket,
+            advertised_ipv4,
+            advertised_ipv6,
             other_enr_kv_pairs,
             lookup_interval,
             bootstrap_lookup_interval,
@@ -276,6 +312,10 @@ pub struct Config {
     /// NOTE: IP address of `RLPx` socket overwrites IP address of same IP version in
     /// [`discv5::ListenConfig`].
     pub(super) tcp_socket: SocketAddr,
+    /// IPv4 address to advertise in the local ENR instead of the listen socket address.
+    pub(super) advertised_ipv4: Option<Ipv4Addr>,
+    /// IPv6 address to advertise in the local ENR instead of the listen socket address.
+    pub(super) advertised_ipv6: Option<Ipv6Addr>,
     /// Additional kv-pairs (besides tcp port, udp port and fork) that should be advertised to
     /// peers by including in local node record.
     pub(super) other_enr_kv_pairs: Vec<(&'static [u8], Bytes)>,
@@ -300,12 +340,26 @@ impl Config {
             bootstrap_nodes: HashSet::default(),
             fork: None,
             tcp_socket: rlpx_tcp_socket,
+            advertised_ipv4: None,
+            advertised_ipv6: None,
             other_enr_kv_pairs: Vec::new(),
             lookup_interval: None,
             bootstrap_lookup_interval: None,
             bootstrap_lookup_countdown: None,
             discovered_peer_filter: None,
         }
+    }
+
+    /// Returns a mutable reference to the inner [`discv5::Config`]. This allows overriding
+    /// the listen config after the config has been built.
+    pub const fn discv5_config_mut(&mut self) -> &mut discv5::Config {
+        &mut self.discv5_config
+    }
+
+    /// Returns `true` if any socket in the discv5 listen config matches the given address.
+    pub fn has_matching_socket(&self, addr: SocketAddr) -> bool {
+        ipv4(&self.discv5_config.listen_config).is_some_and(|v4| SocketAddr::V4(v4) == addr) ||
+            ipv6(&self.discv5_config.listen_config).is_some_and(|v6| SocketAddr::V6(v6) == addr)
     }
 
     /// Inserts a new boot node to the list of boot nodes.
@@ -333,11 +387,11 @@ impl Config {
     /// socket, if both IPv4 and v6 are configured. This socket will be advertised to peers in the
     /// local [`Enr`](discv5::enr::Enr).
     pub fn discovery_socket(&self) -> SocketAddr {
-        match self.discv5_config.listen_config {
-            ListenConfig::Ipv4 { ip, port } => (ip, port).into(),
-            ListenConfig::Ipv6 { ip, port } => (ip, port).into(),
-            ListenConfig::DualStack { ipv6, ipv6_port, .. } => (ipv6, ipv6_port).into(),
-        }
+        // Prefer v6 when both are configured (matches original `DualStack` behavior).
+        ipv6(&self.discv5_config.listen_config)
+            .map(SocketAddr::V6)
+            .or_else(|| ipv4(&self.discv5_config.listen_config).map(SocketAddr::V4))
+            .unwrap_or_else(|| SocketAddr::from((std::net::Ipv4Addr::UNSPECIFIED, 0)))
     }
 
     /// Returns the `RLPx` (TCP) socket contained in the [`discv5::Config`]. This socket will be
@@ -345,27 +399,41 @@ impl Config {
     pub const fn rlpx_socket(&self) -> &SocketAddr {
         &self.tcp_socket
     }
+
+    /// Sets the port of the `RLPx` TCP socket to advertise. This allows advertising the actually
+    /// bound listener port when the configured port was 0 (OS-assigned).
+    pub const fn set_rlpx_port(&mut self, port: u16) {
+        self.tcp_socket.set_port(port);
+    }
 }
 
 /// Returns the IPv4 discovery socket if one is configured.
-pub const fn ipv4(listen_config: &ListenConfig) -> Option<SocketAddrV4> {
+pub fn ipv4(listen_config: &ListenConfig) -> Option<SocketAddrV4> {
     match listen_config {
         ListenConfig::Ipv4 { ip, port } |
         ListenConfig::DualStack { ipv4: ip, ipv4_port: port, .. } => {
             Some(SocketAddrV4::new(*ip, *port))
         }
-        ListenConfig::Ipv6 { .. } => None,
+        ListenConfig::FromSockets { ipv4: Some(s), .. } => match s.local_addr().ok()? {
+            SocketAddr::V4(addr) => Some(addr),
+            SocketAddr::V6(_) => None,
+        },
+        _ => None,
     }
 }
 
 /// Returns the IPv6 discovery socket if one is configured.
-pub const fn ipv6(listen_config: &ListenConfig) -> Option<SocketAddrV6> {
+pub fn ipv6(listen_config: &ListenConfig) -> Option<SocketAddrV6> {
     match listen_config {
-        ListenConfig::Ipv4 { .. } => None,
         ListenConfig::Ipv6 { ip, port } |
         ListenConfig::DualStack { ipv6: ip, ipv6_port: port, .. } => {
             Some(SocketAddrV6::new(*ip, *port, 0, 0))
         }
+        ListenConfig::FromSockets { ipv6: Some(s), .. } => match s.local_addr().ok()? {
+            SocketAddr::V6(addr) => Some(addr),
+            SocketAddr::V4(_) => None,
+        },
+        _ => None,
     }
 }
 

@@ -32,8 +32,12 @@ pub(crate) struct EngineApiLatencyMetrics {
     pub(crate) fork_choice_updated_v2: Histogram,
     /// Latency for `engine_forkchoiceUpdatedV3`
     pub(crate) fork_choice_updated_v3: Histogram,
+    /// Latency for `engine_forkchoiceUpdatedV4`
+    pub(crate) fork_choice_updated_v4: Histogram,
     /// Latency for `engine_forkchoiceUpdatedV5`
     pub(crate) fork_choice_updated_v5: Histogram,
+    /// Latency for `engine_getInclusionListV1`
+    pub(crate) get_inclusion_list_v1: Histogram,
     /// Latency for `engine_getPayloadV1`
     pub(crate) get_payload_v1: Histogram,
     /// Latency for `engine_getPayloadV2`
@@ -44,6 +48,8 @@ pub(crate) struct EngineApiLatencyMetrics {
     pub(crate) get_payload_v4: Histogram,
     /// Latency for `engine_getPayloadV5`
     pub(crate) get_payload_v5: Histogram,
+    /// Latency for `engine_getPayloadV6`
+    pub(crate) get_payload_v6: Histogram,
     /// Latency for `engine_getPayloadBodiesByRangeV1`
     pub(crate) get_payload_bodies_by_range_v1: Histogram,
     /// Latency for `engine_getPayloadBodiesByRangeV2`
@@ -58,6 +64,10 @@ pub(crate) struct EngineApiLatencyMetrics {
     pub(crate) get_blobs_v2: Histogram,
     /// Latency for `engine_getBlobsV3`
     pub(crate) get_blobs_v3: Histogram,
+    /// Latency for `engine_getBlobsV4`
+    pub(crate) get_blobs_v4: Histogram,
+    /// Latency for `engine_hasBlobs`
+    pub(crate) has_blobs: Histogram,
 }
 
 #[derive(Metrics)]
@@ -71,8 +81,8 @@ pub(crate) struct BlobMetrics {
     pub(crate) get_blobs_requests_blobs_total: Counter,
     /// Number of blobs requested via getBlobsV2 that are present in the blobpool
     pub(crate) get_blobs_requests_blobs_in_blobpool_total: Counter,
-    /// Number of times getBlobsV2 responded with "hit"
+    /// Number of times getBlobsV2 responded with “hit”
     pub(crate) get_blobs_requests_success_total: Counter,
-    /// Number of times getBlobsV2 responded with "miss"
+    /// Number of times getBlobsV2 responded with “miss”
     pub(crate) get_blobs_requests_failure_total: Counter,
 }

@@ -1,0 +1,64 @@
+---
+description: Run Reth with the smallest built-in storage profile.
+---
+
+# Minimal Storage Mode
+
+Minimal storage mode is Reth's smallest built-in node profile. It uses the
+default [storage V2 layout](/run/storage) with the most aggressive built-in
+pruning settings and smaller static file segments.
+
+Use `--minimal` when disk usage matters more than serving old historical RPC
+data.
+
+## Size
+
+Measured on disk at block `24,396,823` on Ethereum mainnet, minimal mode with
+storage V2 used `224 GB`, compared to `449 GB` with legacy V1 storage.
+
+The latest snapshot download size is compressed and changes as new snapshots
+are published. Check [snapshots.reth.rs](https://snapshots.reth.rs) or run
+`reth download --list` for the current compressed size.
+
+## Run a minimal node
+
+```bash
+reth node \
+    --minimal \
+    --authrpc.jwtsecret /path/to/secret \
+    --authrpc.addr 127.0.0.1 \
+    --authrpc.port 8551
+```
+
+## Retention profile
+
+| Data segment | Minimal mode behavior |
+| ------------ | --------------------- |
+| Sender recovery | Fully pruned |
+| Transaction lookup | Fully pruned |
+| Receipts | Retains the last 64 blocks |
+| Account history | Retains the last 10,064 blocks |
+| Storage history | Retains the last 10,064 blocks |
+| Block bodies | Retains the last 10,064 blocks |
+| Static files | Uses 10,000 blocks per file segment |
+
+## Trade-offs
+
+Minimal mode is suitable for nodes that need to follow the chain, serve recent
+state, and keep disk usage low. It is not suitable for workloads that require
+older transaction lookup, receipts, logs, traces, or historical state.
+
+For more detail on which RPC methods are affected by pruning, see
+[Pruning & Node Modes](/run/storage/pruning#rpc-support).
+
+## Snapshots
+
+To start from a [snapshot](/run/storage/snapshots) with the minimal component
+set:
+
+```bash
+reth download --chain mainnet --minimal
+
+reth node \
+    --authrpc.jwtsecret /path/to/secret
+```

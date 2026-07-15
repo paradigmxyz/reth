@@ -1,5 +1,7 @@
 use crate::PruneMode;
-use alloy_primitives::{bytes, BlockNumber, TxNumber};
+#[cfg(any(test, feature = "reth-codec"))]
+use alloy_primitives::bytes;
+use alloy_primitives::{BlockNumber, TxNumber};
 
 /// Saves the pruning progress of a stage.
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]

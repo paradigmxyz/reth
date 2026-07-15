@@ -58,6 +58,22 @@ pub struct DebugArgs {
     #[arg(long = "debug.skip-new-payload", help_heading = "Debug")]
     pub skip_new_payload: Option<usize>,
 
+    /// Skip trie state-root computation during engine validation.
+    ///
+    /// This trusts the block header's state root and is intended for experiments that measure
+    /// execution without trie state-root work.
+    #[arg(long = "debug.skip-state-root", help_heading = "Debug", hide = true)]
+    pub skip_state_root: bool,
+
+    /// If set, bypasses genesis hash validation during init.
+    /// Intended for tools that direct-write the database (e.g. snapshot
+    /// importers, state-actor) and want reth to trust the DB-resident
+    /// genesis state instead of recomputing it from the chainspec's alloc.
+    /// When the bypass fires, a structured `tracing::warn!` is emitted so
+    /// the divergence stays observable in operator logs.
+    #[arg(long = "debug.skip-genesis-validation", help_heading = "Debug")]
+    pub skip_genesis_validation: bool,
+
     /// If provided, the chain will be reorged at specified frequency.
     #[arg(long = "debug.reorg-frequency", help_heading = "Debug")]
     pub reorg_frequency: Option<usize>,
@@ -120,6 +136,8 @@ impl Default for DebugArgs {
             rpc_consensus_url: None,
             skip_fcu: None,
             skip_new_payload: None,
+            skip_state_root: false,
+            skip_genesis_validation: false,
             reorg_frequency: None,
             reorg_depth: None,
             engine_api_store: None,
@@ -355,6 +373,13 @@ mod tests {
         let default_args = DebugArgs::default();
         let args = CommandParser::<DebugArgs>::parse_from(["reth"]).args;
         assert_eq!(args, default_args);
+    }
+
+    #[test]
+    fn test_parse_skip_state_root() {
+        let expected_args = DebugArgs { skip_state_root: true, ..Default::default() };
+        let args = CommandParser::<DebugArgs>::parse_from(["reth", "--debug.skip-state-root"]).args;
+        assert_eq!(args, expected_args);
     }
 
     #[test]

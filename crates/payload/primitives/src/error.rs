@@ -126,9 +126,34 @@ pub enum VersionSpecificValidationError {
     /// root after Cancun
     #[error("no parent beacon block root post-cancun")]
     NoParentBeaconBlockRootPostCancun,
-    /// Thrown if the pre-Bogota `PayloadAttributes` or `ExecutionPayload` contains an IL.
-    #[error("IL not supported before Bogota")]
-    IlNotSupportedPreBogota,
+    /// Thrown if the current engine method version does not support a block access list
+    #[error("block access list not supported in this engine API version")]
+    BlockAccessListNotSupported,
+    /// Thrown if  `engine_newPayload` contains no block access list
+    /// after Amsterdam
+    #[error("no block access list post-Amsterdam")]
+    NoBlockAccessListPostAmsterdam,
+    /// Thrown if  `engine_newPayload` contains block access list
+    /// before Amsterdam
+    #[error("block access list pre-Amsterdam")]
+    HasBlockAccessListPreAmsterdam,
+    /// Thrown if the current engine method version does not support a slot number
+    #[error("slot number not supported in this engine API version")]
+    SlotNumberNotSupported,
+    /// Thrown if  `engine_newPayload` contains no slot number
+    /// after Amsterdam
+    #[error("no slot number post-Amsterdam")]
+    NoSlotNumberPostAmsterdam,
+    /// Thrown if  `engine_newPayload` contains slot number
+    /// before Amsterdam
+    #[error("slot number pre-Amsterdam")]
+    HasSlotNumberPreAmsterdam,
+    /// Thrown if an inclusion list is supplied to an earlier forkchoice method.
+    #[error("inclusion list not supported before forkchoiceUpdatedV5")]
+    InclusionListNotSupported,
+    /// Thrown if `forkchoiceUpdatedV5` omits its EIP-7805 inclusion list.
+    #[error("no inclusion list in forkchoiceUpdatedV5 payload attributes")]
+    NoInclusionList,
 }
 
 /// Error validating payload received over `newPayload` API.

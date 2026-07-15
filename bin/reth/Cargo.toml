@@ -20,6 +20,7 @@ assets = [
     ["../../README.md", "usr/share/doc/reth/", "644"],
     ["../../LICENSE-APACHE", "usr/share/doc/reth/", "644"],
     ["../../LICENSE-MIT", "usr/share/doc/reth/", "644"],
+    ["../../LICENSES/*", "usr/share/doc/reth/LICENSES/", "644"],
 ]
 systemd-units = { enable = false, start = false, unit-name = "reth", unit-scripts = "../../pkg/reth/debian" }
 
@@ -70,14 +71,16 @@ aquamarine.workspace = true
 clap = { workspace = true, features = ["derive", "env"] }
 
 [dev-dependencies]
-alloy-node-bindings = "1.6.3"
+alloy-node-bindings = "2.1.1"
 alloy-provider = { workspace = true, features = ["reqwest"] }
 alloy-rpc-types-eth.workspace = true
 backon.workspace = true
 serde_json.workspace = true
+tar.workspace = true
 tempfile.workspace = true
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
 toml.workspace = true
+zstd.workspace = true
 
 [features]
 default = [
@@ -86,9 +89,21 @@ default = [
     "otlp-logs",
     "reth-revm/portable",
     "js-tracer",
+    "jit",
     "keccak-cache-global",
     "asm-keccak",
-    "min-debug-logs",
+    "gmp",
+    "min-trace-logs",
+]
+
+jit = [
+    "reth-ethereum-cli/jit",
+    "reth-node-ethereum/jit",
+]
+gmp = [
+    "reth-ethereum-cli/gmp",
+    "reth-node-ethereum/gmp",
+    "reth-revm/gmp",
 ]
 
 otlp = [

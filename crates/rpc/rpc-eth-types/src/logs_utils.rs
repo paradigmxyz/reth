@@ -2,8 +2,8 @@
 //!
 //! Log parsing for building filter.
 
-use alloy_consensus::TxReceipt;
-use alloy_eips::{eip2718::Encodable2718, BlockNumHash};
+use alloy_consensus::{transaction::TxHashRef, TxReceipt};
+use alloy_eips::BlockNumHash;
 use alloy_primitives::TxHash;
 use alloy_rpc_types_eth::{Filter, Log};
 use reth_chainspec::ChainInfo;
@@ -102,7 +102,7 @@ where
                 if transaction_hash.is_none() {
                     transaction_hash = match &provider_or_block {
                         ProviderOrBlock::Block(block) => {
-                            block.body().transactions().get(receipt_idx).map(|t| t.trie_hash())
+                            block.body().transactions().get(receipt_idx).map(|t| *t.tx_hash())
                         }
                         ProviderOrBlock::Provider(provider) => {
                             let first_tx_num = match loaded_first_tx_num {
@@ -126,7 +126,7 @@ where
                                     ProviderError::TransactionNotFound(transaction_id.into())
                                 })?;
 
-                            Some(transaction.trie_hash())
+                            Some(*transaction.tx_hash())
                         }
                     };
                 }
@@ -169,7 +169,10 @@ pub fn get_filter_block_range(
 
     // we cannot query blocks that don't exist yet
     if to_block_number > info.best_number {
-        return Err(FilterBlockRangeError::BlockRangeExceedsHead);
+        return Err(FilterBlockRangeError::BlockRangeExceedsHead {
+            requested: to_block_number,
+            head: info.best_number,
+        });
     }
 
     Ok((from_block_number, to_block_number))
@@ -184,8 +187,13 @@ pub enum FilterBlockRangeError {
     #[error("invalid block range params")]
     InvalidBlockRange,
     /// Block range extends beyond current head
-    #[error("block range extends beyond current head block")]
-    BlockRangeExceedsHead,
+    #[error("block range extends beyond current head block: requested {requested}, head {head}")]
+    BlockRangeExceedsHead {
+        /// The requested `toBlock` number
+        requested: u64,
+        /// The current head block number
+        head: u64,
+    },
 }
 
 #[cfg(test)]
@@ -227,7 +235,10 @@ mod tests {
         let to = 15000002u64;
         let info = ChainInfo { best_number: 15000000, ..Default::default() };
         let err = get_filter_block_range(Some(from), Some(to), info.best_number, info).unwrap_err();
-        assert_eq!(err, FilterBlockRangeError::BlockRangeExceedsHead);
+        assert_eq!(
+            err,
+            FilterBlockRangeError::BlockRangeExceedsHead { requested: to, head: info.best_number }
+        );
     }
 
     #[test]
@@ -263,7 +274,10 @@ mod tests {
         let to = 200;
         let info = ChainInfo { best_number: 150, ..Default::default() };
         let err = get_filter_block_range(Some(from), Some(to), 0, info).unwrap_err();
-        assert_eq!(err, FilterBlockRangeError::BlockRangeExceedsHead);
+        assert_eq!(
+            err,
+            FilterBlockRangeError::BlockRangeExceedsHead { requested: to, head: info.best_number }
+        );
     }
 
     #[test]

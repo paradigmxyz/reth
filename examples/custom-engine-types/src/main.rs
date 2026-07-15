@@ -98,8 +98,12 @@ impl PayloadAttributes for CustomPayloadAttributes {
         self.inner.parent_beacon_block_root()
     }
 
-    fn il(&self) -> Option<&Vec<Bytes>> {
-        self.inner.il()
+    fn slot_number(&self) -> Option<u64> {
+        self.inner.slot_number()
+    }
+
+    fn target_gas_limit(&self) -> Option<u64> {
+        self.inner.target_gas_limit()
     }
 }
 
@@ -118,6 +122,7 @@ impl PayloadTypes for CustomEngineTypes {
         block: SealedBlock<
                 <<Self::BuiltPayload as reth_ethereum::node::api::BuiltPayload>::Primitives as reth_ethereum::node::api::NodePrimitives>::Block,
             >,
+        _bal: Option<Bytes>,
     ) -> ExecutionData {
         let (payload, sidecar) =
             ExecutionPayload::from_block_unchecked(block.hash(), &block.into_block());
@@ -333,20 +338,25 @@ where
         let BuildArguments {
             cached_reads,
             execution_cache,
-            trie_handle,
+            state_root_handle,
             config,
             cancel,
             best_payload,
         } = args;
-        let PayloadConfig { parent_header, attributes, payload_id } = config;
+        let PayloadConfig { parent_header, parent_block_info, attributes, payload_id } = config;
 
         // This reuses the default EthereumPayloadBuilder to build the payload
         // but any custom logic can be implemented here
         self.inner.try_build(BuildArguments {
             cached_reads,
             execution_cache,
-            trie_handle,
-            config: PayloadConfig { parent_header, attributes: attributes.inner, payload_id },
+            state_root_handle,
+            config: PayloadConfig {
+                parent_header,
+                parent_block_info,
+                attributes: attributes.inner.into(),
+                payload_id,
+            },
             cancel,
             best_payload,
         })
@@ -356,10 +366,11 @@ where
         &self,
         config: PayloadConfig<Self::Attributes>,
     ) -> Result<Self::BuiltPayload, PayloadBuilderError> {
-        let PayloadConfig { parent_header, attributes, payload_id } = config;
+        let PayloadConfig { parent_header, parent_block_info, attributes, payload_id } = config;
         self.inner.build_empty_payload(PayloadConfig {
             parent_header,
-            attributes: attributes.inner,
+            parent_block_info,
+            attributes: attributes.inner.into(),
             payload_id,
         })
     }

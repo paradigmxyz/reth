@@ -4,7 +4,7 @@ use alloy_eips::BlockId;
 use alloy_primitives::{BlockHash, BlockNumber, Bytes, Sealable, B256};
 use alloy_rpc_types_engine::{ExecutionPayloadEnvelopeV5, ForkchoiceState};
 use alloy_rpc_types_eth::BlockNumberOrTag;
-
+use eyre::Ok;
 use futures_util::Future;
 use jsonrpsee::{core::client::ClientT, http_client::HttpClient};
 use reth_chainspec::EthereumHardforks;
@@ -53,10 +53,14 @@ where
     AddOns: RethRpcAddOns<Node>,
 {
     /// Creates a new test node
-    pub async fn new(
+    pub async fn new<A>(
         node: FullNode<Node, AddOns>,
-        attributes_generator: impl Fn(u64) -> Payload::PayloadAttributes + Send + Sync + 'static,
-    ) -> eyre::Result<Self> {
+        attributes_generator: impl Fn(u64) -> A + Send + Sync + 'static,
+    ) -> eyre::Result<Self>
+    where
+        Payload::PayloadAttributes: From<A>,
+    {
+        let attributes_generator = move |timestamp| attributes_generator(timestamp).into();
         Ok(Self {
             inner: node.clone(),
             payload: PayloadTestContext::new(
@@ -148,7 +152,7 @@ where
         // wait for the payload builder to have finished building
         self.payload.wait_for_built_payload(payload_id).await;
         // ensure we're also receiving the built payload as event
-        self.payload.expect_built_payload().await
+        Ok(self.payload.expect_built_payload().await?)
     }
 
     /// Triggers payload building job and submits it to the engine.
@@ -309,11 +313,7 @@ where
     /// Submits a payload to the engine.
     pub async fn submit_payload(&self, payload: Payload::BuiltPayload) -> eyre::Result<B256> {
         let block_hash = payload.block().hash();
-        self.inner
-            .add_ons_handle
-            .beacon_engine_handle
-            .new_payload(Payload::block_to_payload(payload.block().clone()))
-            .await?;
+        self.inner.add_ons_handle.beacon_engine_handle.new_payload(payload.into()).await?;
 
         Ok(block_hash)
     }
@@ -362,7 +362,7 @@ where
             self.rpc_client().ok_or_else(|| eyre::eyre!("HTTP RPC client not available"))?;
 
         let res: ExecutionPayloadEnvelopeV5 =
-            client.request("testing_buildBlockV1", [request]).await?;
+            client.request("testing_buildBlockV1", request.into_params()).await?;
         eyre::Ok(res)
     }
 }

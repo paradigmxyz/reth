@@ -85,6 +85,7 @@ pub trait AsEthApiError {
                     Some(EthSimulateError::NonceTooLow { tx: *tx, state: *state })
                 }
                 RpcInvalidTransactionError::NonceTooHigh => Some(EthSimulateError::NonceTooHigh),
+                RpcInvalidTransactionError::NonceMaxValue => Some(EthSimulateError::NonceMaxValue),
                 RpcInvalidTransactionError::FeeCapTooLow => {
                     Some(EthSimulateError::BaseFeePerGasTooLow)
                 }
@@ -126,7 +127,7 @@ pub trait FromEvmError<Evm: ConfigureEvm>:
             ExecutionResult::Success { output, .. } => Ok(output.into_data()),
             ExecutionResult::Revert { output, .. } => Err(Self::from_revert(output)),
             ExecutionResult::Halt { reason, gas, .. } => {
-                Err(Self::from_evm_halt(reason, gas.used()))
+                Err(Self::from_evm_halt(reason, gas.tx_gas_used()))
             }
         }
     }

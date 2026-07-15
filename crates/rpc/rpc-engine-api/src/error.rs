@@ -18,8 +18,6 @@ pub type EngineApiResult<Ok> = Result<Ok, EngineApiError>;
 pub const UNSUPPORTED_FORK_CODE: i32 = -38005;
 /// Payload unknown error code.
 pub const UNKNOWN_PAYLOAD_CODE: i32 = -38001;
-/// Parent Hash unknown error code.
-pub const UNKNOWN_PARENT_CODE: i32 = -38006;
 /// Request too large error code.
 pub const REQUEST_TOO_LARGE_CODE: i32 = -38004;
 
@@ -123,7 +121,14 @@ impl From<EngineApiError> for jsonrpsee_types::error::ErrorObject<'static> {
                     VersionSpecificValidationError::WithdrawalsNotSupportedInV1 |
                     VersionSpecificValidationError::NoWithdrawalsPostShanghai |
                     VersionSpecificValidationError::HasWithdrawalsPreShanghai |
-                    VersionSpecificValidationError::IlNotSupportedPreBogota,
+                    VersionSpecificValidationError::BlockAccessListNotSupported |
+                    VersionSpecificValidationError::HasBlockAccessListPreAmsterdam |
+                    VersionSpecificValidationError::NoBlockAccessListPostAmsterdam |
+                    VersionSpecificValidationError::HasSlotNumberPreAmsterdam |
+                    VersionSpecificValidationError::NoSlotNumberPostAmsterdam |
+                    VersionSpecificValidationError::SlotNumberNotSupported |
+                    VersionSpecificValidationError::InclusionListNotSupported |
+                    VersionSpecificValidationError::NoInclusionList,
                 ),
             ) |
             EngineApiError::UnexpectedRequestsHash => {
@@ -191,6 +196,15 @@ impl From<EngineApiError> for jsonrpsee_types::error::ErrorObject<'static> {
                             INVALID_FORK_CHOICE_STATE_ERROR_MSG,
                             None::<()>,
                         )
+                    }
+                    // Map future alloy forkchoice errors as internal until handled.
+                    #[allow(unreachable_patterns, clippy::needless_return)]
+                    _ => {
+                        return jsonrpsee_types::error::ErrorObject::owned(
+                            INTERNAL_ERROR_CODE,
+                            SERVER_ERROR_MSG,
+                            Some(ErrorData::new(error)),
+                        );
                     }
                 },
                 BeaconForkChoiceUpdateError::EngineUnavailable |

@@ -171,7 +171,10 @@ where
                     .instrument(span)
                     .await?;
 
-                let node = NodeTestContext::new(node, self.attributes_generator).await?;
+                let node = NodeTestContext::new::<
+                    <<N as NodeTypes>::Payload as PayloadTypes>::PayloadAttributes,
+                >(node, self.attributes_generator)
+                .await?;
                 let genesis_number = self.chain_spec.genesis_header().number();
                 let genesis = node.block_hash(genesis_number);
                 node.update_forkchoice(genesis, genesis).await?;

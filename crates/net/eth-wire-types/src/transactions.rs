@@ -1,12 +1,14 @@
 //! Implements the `GetPooledTransactions` and `PooledTransactions` message types.
 
+use crate::broadcast::decode_list_with_memory_budget;
 use alloc::vec::Vec;
-use alloy_consensus::transaction::PooledTransaction;
-use alloy_eips::eip2718::Encodable2718;
-use alloy_primitives::B256;
-use alloy_rlp::{RlpDecodableWrapper, RlpEncodableWrapper};
+use alloy_consensus::transaction::{PooledTransaction, TxHashRef};
+use alloy_eips::eip7594::Cell;
+use alloy_primitives::{B128, B256};
+use alloy_rlp::{Decodable, RlpDecodable, RlpDecodableWrapper, RlpEncodable, RlpEncodableWrapper};
 use derive_more::{Constructor, Deref, IntoIterator};
 use reth_codecs_derive::add_arbitrary_tests;
+use reth_primitives_traits::InMemorySize;
 
 /// A list of transaction hashes that the peer would like transaction bodies for.
 #[derive(
@@ -37,6 +39,12 @@ where
     }
 }
 
+impl InMemorySize for GetPooledTransactions {
+    fn size(&self) -> usize {
+        self.0.len() * core::mem::size_of::<B256>()
+    }
+}
+
 /// The response to [`GetPooledTransactions`], containing the transaction bodies associated with
 /// the requested hashes.
 ///
@@ -62,10 +70,22 @@ pub struct PooledTransactions<T = PooledTransaction>(
     pub Vec<T>,
 );
 
-impl<T: Encodable2718> PooledTransactions<T> {
+impl<T: Decodable + InMemorySize> PooledTransactions<T> {
+    /// Decodes the RLP list of transactions, stopping once the cumulative
+    /// [`InMemorySize`] of decoded transactions exceeds `memory_budget` bytes.
+    /// Any remaining transactions in the payload are skipped.
+    pub fn decode_with_memory_budget(
+        buf: &mut &[u8],
+        memory_budget: usize,
+    ) -> alloy_rlp::Result<Self> {
+        decode_list_with_memory_budget(buf, memory_budget).map(Self)
+    }
+}
+
+impl<T: TxHashRef> PooledTransactions<T> {
     /// Returns an iterator over the transaction hashes in this response.
     pub fn hashes(&self) -> impl Iterator<Item = B256> + '_ {
-        self.iter().map(|tx| tx.trie_hash())
+        self.iter().map(|tx| *tx.tx_hash())
     }
 }
 
@@ -90,6 +110,39 @@ impl<T> Default for PooledTransactions<T> {
     fn default() -> Self {
         Self(Default::default())
     }
+}
+
+/// A list of transaction hashes and the cell indices requested for each transaction.
+///
+/// See [EIP-8070]: Sparse Blobpool
+///
+/// [EIP-8070]: https://eips.ethereum.org/EIPS/eip-8070
+#[derive(Clone, Debug, PartialEq, Eq, RlpEncodable, RlpDecodable, Default)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct GetCells {
+    /// Transaction hashes to request cells for.
+    pub hashes: Vec<B256>,
+    /// Requested cell indices, encoded with the same syntax as the `cell_mask` in
+    /// `NewPooledTransactionHashes`.
+    pub cell_mask: B128,
+}
+
+impl InMemorySize for GetCells {
+    fn size(&self) -> usize {
+        self.hashes.len() * core::mem::size_of::<B256>() + core::mem::size_of::<B128>()
+    }
+}
+
+/// The response to [`GetCells`], containing requested cells for each transaction hash.
+#[derive(Clone, Debug, PartialEq, Eq, RlpEncodable, RlpDecodable, Default)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct Cells {
+    /// Transaction hashes corresponding to the returned cell lists.
+    pub hashes: Vec<B256>,
+    /// Requested cells for each transaction hash.
+    pub cells: Vec<Vec<Cell>>,
+    /// Cell indices included in each cell list.
+    pub cell_mask: B128,
 }
 
 #[cfg(test)]

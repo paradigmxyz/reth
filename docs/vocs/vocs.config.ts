@@ -1,14 +1,17 @@
-import React from 'react'
-import { defineConfig } from 'vocs'
+import { defineConfig } from 'vocs/config'
 import { sidebar } from './sidebar'
 import { basePath } from './redirects.config'
 
 export default defineConfig({
   title: 'Reth',
   description: 'Reth is a secure, performant, and modular Ethereum execution client built in Rust.',
+  accentColor: 'light-dark(#1f1f1f, #ffffff)',
+  srcDir: 'docs',
   logoUrl: '/logo.png',
   iconUrl: '/logo.png',
   ogImageUrl: '/reth-prod.png',
+  outDir: 'docs/dist',
+  renderStrategy: 'full-static',
   sidebar,
   basePath,
   search: {
@@ -17,12 +20,10 @@ export default defineConfig({
   topNav: [
     { text: 'Run', link: '/run/ethereum' },
     { text: 'SDK', link: '/sdk' },
-    {
-      element: React.createElement('a', { href: '/docs', target: '_self' }, 'Rustdocs')
-    },
+    { text: 'Rustdocs', link: '/docs' },
     { text: 'GitHub', link: 'https://github.com/paradigmxyz/reth' },
     {
-      text: 'v2.0.0',
+      text: 'v2.4.0',
       items: [
         {
           text: 'Releases',
@@ -45,34 +46,8 @@ export default defineConfig({
       link: 'https://t.me/paradigm_reth',
     },
   ],
-  sponsors: [
-    {
-      name: 'Collaborators',
-      height: 120,
-      items: [
-        [
-          {
-            name: 'Paradigm',
-            link: 'https://paradigm.xyz',
-            image: 'https://raw.githubusercontent.com/wevm/.github/main/content/sponsors/paradigm-light.svg',
-          },
-          {
-            name: 'Ithaca',
-            link: 'https://ithaca.xyz',
-            image: 'https://raw.githubusercontent.com/wevm/.github/main/content/sponsors/ithaca-light.svg',
-          }
-        ]
-      ]
-    }
-  ],
-  theme: {
-    accentColor: {
-      light: '#1f1f1f',
-      dark: '#ffffff',
-    }
-  },
   editLink: {
-    pattern: "https://github.com/paradigmxyz/reth/edit/main/docs/vocs/docs/pages/:path",
+    link: "https://github.com/paradigmxyz/reth/edit/main/docs/vocs/docs/pages/:path",
   },
   vite: {
     plugins: [

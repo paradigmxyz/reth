@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-set -uo pipefail
+set -uxo pipefail
 
 readarray -t crates < <(
   cargo metadata --format-version=1 --no-deps | jq -r '.packages[].name' | grep '^reth' | sort
@@ -9,7 +9,6 @@ readarray -t crates < <(
 exclude_crates=(
   # The following require investigation if they can be fixed
   reth-basic-payload-builder
-  reth-bench
   reth-bench-compare
   reth-cli
   reth-cli-commands
@@ -42,7 +41,6 @@ exclude_crates=(
   reth-node-metrics
   reth-rpc
   reth-rpc-api
-  reth-rpc-api-testing-util
   reth-rpc-builder
   reth-rpc-convert
   reth-rpc-e2e-tests
@@ -77,6 +75,16 @@ exclude_crates=(
   reth-era-utils # tokio
   reth-tracing-otlp
   reth-node-ethstats
+  # The following pull in C libraries (secp256k1-sys, zstd-sys) that cannot compile to wasm
+  reth-cli-util       # secp256k1-sys via enr
+  reth-db             # zstd-sys via reth-nippy-jar
+  reth-db-api         # zstd-sys via reth-codecs -> reth-zstd-compressors
+  reth-ecies          # secp256k1-sys via enr
+  reth-network-api    # secp256k1-sys via enr
+  reth-nippy-jar      # zstd-sys (direct dependency)
+  reth-node-types     # zstd-sys via reth-codecs -> reth-zstd-compressors
+  reth-rpc-server-types # secp256k1-sys via reth-network-api -> enr
+  reth-trie-db        # zstd-sys via reth-codecs -> reth-zstd-compressors
 )
 
 any_failed=0

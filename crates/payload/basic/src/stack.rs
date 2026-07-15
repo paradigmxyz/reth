@@ -79,10 +79,11 @@ where
             Self::Right(r) => r.withdrawals(),
         }
     }
-    fn il(&self) -> Option<&Vec<Bytes>> {
+
+    fn slot_number(&self) -> Option<u64> {
         match self {
-            Self::Left(l) => l.il(),
-            Self::Right(r) => r.il(),
+            Self::Left(l) => l.slot_number(),
+            Self::Right(r) => r.slot_number(),
         }
     }
 }
@@ -134,6 +135,13 @@ where
         }
     }
 
+    fn block_access_list(&self) -> Option<&Bytes> {
+        match self {
+            Self::Left(l) => l.block_access_list(),
+            Self::Right(r) => r.block_access_list(),
+        }
+    }
+
     fn requests(&self) -> Option<Requests> {
         match self {
             Self::Left(l) => l.requests(),
@@ -162,20 +170,25 @@ where
         let BuildArguments {
             cached_reads,
             execution_cache,
-            trie_handle,
+            state_root_handle,
             config,
             cancel,
             best_payload,
         } = args;
-        let PayloadConfig { parent_header, attributes, payload_id } = config;
+        let PayloadConfig { parent_header, parent_block_info, attributes, payload_id } = config;
 
         match attributes {
             Either::Left(left_attr) => {
                 let left_args: BuildArguments<L::Attributes, L::BuiltPayload> = BuildArguments {
                     cached_reads,
                     execution_cache,
-                    trie_handle,
-                    config: PayloadConfig { parent_header, attributes: left_attr, payload_id },
+                    state_root_handle,
+                    config: PayloadConfig {
+                        parent_header,
+                        parent_block_info,
+                        attributes: left_attr,
+                        payload_id,
+                    },
                     cancel,
                     best_payload: best_payload.and_then(|payload| {
                         if let Either::Left(p) = payload {
@@ -191,8 +204,13 @@ where
                 let right_args = BuildArguments {
                     cached_reads,
                     execution_cache,
-                    trie_handle,
-                    config: PayloadConfig { parent_header, attributes: right_attr, payload_id },
+                    state_root_handle,
+                    config: PayloadConfig {
+                        parent_header,
+                        parent_block_info,
+                        attributes: right_attr,
+                        payload_id,
+                    },
                     cancel,
                     best_payload: best_payload.and_then(|payload| {
                         if let Either::Right(p) = payload {
@@ -212,14 +230,32 @@ where
         config: PayloadConfig<Self::Attributes, HeaderForPayload<Self::BuiltPayload>>,
     ) -> Result<Self::BuiltPayload, PayloadBuilderError> {
         match config {
-            PayloadConfig { parent_header, attributes: Either::Left(left_attr), payload_id } => {
-                let left_config =
-                    PayloadConfig { parent_header, attributes: left_attr, payload_id };
+            PayloadConfig {
+                parent_header,
+                parent_block_info,
+                attributes: Either::Left(left_attr),
+                payload_id,
+            } => {
+                let left_config = PayloadConfig {
+                    parent_header,
+                    parent_block_info,
+                    attributes: left_attr,
+                    payload_id,
+                };
                 self.left.build_empty_payload(left_config).map(Either::Left)
             }
-            PayloadConfig { parent_header, attributes: Either::Right(right_attr), payload_id } => {
-                let right_config =
-                    PayloadConfig { parent_header, attributes: right_attr, payload_id };
+            PayloadConfig {
+                parent_header,
+                parent_block_info,
+                attributes: Either::Right(right_attr),
+                payload_id,
+            } => {
+                let right_config = PayloadConfig {
+                    parent_header,
+                    parent_block_info,
+                    attributes: right_attr,
+                    payload_id,
+                };
                 self.right.build_empty_payload(right_config).map(Either::Right)
             }
         }

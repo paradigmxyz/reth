@@ -3,21 +3,20 @@
 use alloc::{sync::Arc, vec::Vec};
 use alloy_eips::{
     eip4844::BlobTransactionSidecar,
-    eip4895::Withdrawals,
     eip7594::{BlobTransactionSidecarEip7594, BlobTransactionSidecarVariant},
     eip7685::Requests,
 };
-use alloy_primitives::{Address, Bytes, B256, U256};
-use alloy_rlp::Decodable;
+use alloy_primitives::{Bytes, U256};
 use alloy_rpc_types_engine::{
-    BlobsBundleV1, BlobsBundleV2, ExecutionPayloadEnvelopeV2, ExecutionPayloadEnvelopeV3,
-    ExecutionPayloadEnvelopeV4, ExecutionPayloadEnvelopeV5, ExecutionPayloadEnvelopeV6,
-    ExecutionPayloadFieldV2, ExecutionPayloadV1, ExecutionPayloadV3, PayloadAttributes, PayloadId,
+    BlobsBundleV1, BlobsBundleV2, CancunPayloadFields, ExecutionData, ExecutionPayload,
+    ExecutionPayloadEnvelopeV2, ExecutionPayloadEnvelopeV3, ExecutionPayloadEnvelopeV4,
+    ExecutionPayloadEnvelopeV5, ExecutionPayloadEnvelopeV6, ExecutionPayloadFieldV2,
+    ExecutionPayloadSidecar, ExecutionPayloadV1, ExecutionPayloadV3, ExecutionPayloadV4,
+    PraguePayloadFields,
 };
-use core::convert::Infallible;
-use reth_ethereum_primitives::{EthPrimitives, TransactionSigned};
-use reth_payload_primitives::{payload_id, BuiltPayload, PayloadBuilderAttributes};
-use reth_primitives_traits::{NodePrimitives, Recovered, SealedBlock};
+use reth_ethereum_primitives::EthPrimitives;
+use reth_payload_primitives::BuiltPayload;
+use reth_primitives_traits::{NodePrimitives, RecoveredBlock, SealedBlock};
 
 use crate::BuiltPayloadConversionError;
 
@@ -31,7 +30,7 @@ use crate::BuiltPayloadConversionError;
 #[derive(Debug, Clone)]
 pub struct EthBuiltPayload<N: NodePrimitives = EthPrimitives> {
     /// The built block
-    pub(crate) block: Arc<SealedBlock<N::Block>>,
+    pub(crate) block: Arc<RecoveredBlock<N::Block>>,
     /// The fees of the block
     pub(crate) fees: U256,
     /// The blobs, proofs, and commitments in the block. If the block is pre-cancun, this will be
@@ -39,6 +38,8 @@ pub struct EthBuiltPayload<N: NodePrimitives = EthPrimitives> {
     pub(crate) sidecars: BlobSidecars,
     /// The requests of the payload
     pub(crate) requests: Option<Requests>,
+    /// The block access list of the payload
+    pub(crate) block_access_list: Option<Bytes>,
 }
 
 // === impl BuiltPayload ===
@@ -48,16 +49,32 @@ impl<N: NodePrimitives> EthBuiltPayload<N> {
     ///
     /// Caution: This does not set any [`BlobSidecars`].
     pub const fn new(
-        block: Arc<SealedBlock<N::Block>>,
+        block: Arc<RecoveredBlock<N::Block>>,
         fees: U256,
         requests: Option<Requests>,
+        block_access_list: Option<Bytes>,
     ) -> Self {
-        Self { block, fees, requests, sidecars: BlobSidecars::Empty }
+        Self { block, fees, requests, sidecars: BlobSidecars::Empty, block_access_list }
     }
 
     /// Returns the built block(sealed)
     pub fn block(&self) -> &SealedBlock<N::Block> {
+        self.block.sealed_block()
+    }
+
+    /// Returns the built block with recovered senders.
+    pub fn recovered_block(&self) -> &RecoveredBlock<N::Block> {
         &self.block
+    }
+
+    /// Returns the built block with shared ownership.
+    pub const fn block_arc(&self) -> &Arc<RecoveredBlock<N::Block>> {
+        &self.block
+    }
+
+    /// Consumes the payload and returns the built block with shared ownership.
+    pub fn into_block_arc(self) -> Arc<RecoveredBlock<N::Block>> {
+        self.block
     }
 
     /// Fees of the block
@@ -155,9 +172,72 @@ impl EthBuiltPayload {
 
     /// Try converting built payload into [`ExecutionPayloadEnvelopeV6`].
     ///
-    /// Note: Amsterdam fork is not yet implemented, so this conversion is not yet supported.
+    /// Returns an error if the block access list is missing, as it's required for V6 envelopes.
     pub fn try_into_v6(self) -> Result<ExecutionPayloadEnvelopeV6, BuiltPayloadConversionError> {
-        unimplemented!("ExecutionPayloadEnvelopeV6 not yet supported")
+        let Self { block, fees, sidecars, requests, block_access_list, .. } = self;
+
+        let block_access_list =
+            block_access_list.ok_or(BuiltPayloadConversionError::MissingBlockAccessList)?;
+
+        let blobs_bundle = match sidecars {
+            BlobSidecars::Empty => BlobsBundleV2::empty(),
+            BlobSidecars::Eip7594(sidecars) => BlobsBundleV2::from(sidecars),
+            BlobSidecars::Eip4844(_) => {
+                return Err(BuiltPayloadConversionError::UnexpectedEip4844Sidecars)
+            }
+        };
+        Ok(ExecutionPayloadEnvelopeV6 {
+            execution_payload: ExecutionPayloadV4::from_block_unchecked_with_bal(
+                block.hash(),
+                &Arc::unwrap_or_clone(block).into_block(),
+                block_access_list,
+            ),
+            block_value: fees,
+            // From the engine API spec:
+            //
+            // > Client software **MAY** use any heuristics to decide whether to set
+            // `shouldOverrideBuilder` flag or not. If client software does not implement any
+            // heuristic this flag **SHOULD** be set to `false`.
+            //
+            // Spec:
+            // <https://github.com/ethereum/execution-apis/blob/fe8e13c288c592ec154ce25c534e26cb7ce0530d/src/engine/cancun.md#specification-2>
+            should_override_builder: false,
+            blobs_bundle,
+            execution_requests: requests.unwrap_or_default(),
+        })
+    }
+
+    /// Converts built payload into [`ExecutionData`].
+    pub fn into_execution_data(self) -> ExecutionData {
+        let Self { block, requests, block_access_list, .. } = self;
+        let block_hash = block.hash();
+        let block = Arc::unwrap_or_clone(block).into_block();
+
+        let (payload, sidecar) = ExecutionPayload::from_block_unchecked_with_extras(
+            block_hash,
+            &block,
+            block_access_list,
+        );
+
+        let sidecar = if let Some(requests) = requests {
+            block.header.parent_beacon_block_root.map_or(sidecar, |parent_beacon_block_root| {
+                ExecutionPayloadSidecar::v4(
+                    CancunPayloadFields {
+                        parent_beacon_block_root,
+                        versioned_hashes: block
+                            .body
+                            .blob_versioned_hashes_iter()
+                            .copied()
+                            .collect(),
+                    },
+                    PraguePayloadFields::new(requests),
+                )
+            })
+        } else {
+            sidecar
+        };
+
+        ExecutionData::new(payload, sidecar)
     }
 }
 
@@ -165,11 +245,15 @@ impl<N: NodePrimitives> BuiltPayload for EthBuiltPayload<N> {
     type Primitives = N;
 
     fn block(&self) -> &SealedBlock<N::Block> {
-        &self.block
+        self.block.sealed_block()
     }
 
     fn fees(&self) -> U256 {
         self.fees
+    }
+
+    fn block_access_list(&self) -> Option<&Bytes> {
+        self.block_access_list.as_ref()
     }
 
     fn requests(&self) -> Option<Requests> {
@@ -231,6 +315,19 @@ impl TryFrom<EthBuiltPayload> for ExecutionPayloadEnvelopeV6 {
 
     fn try_from(value: EthBuiltPayload) -> Result<Self, Self::Error> {
         value.try_into_v6()
+    }
+}
+
+impl From<EthBuiltPayload> for ExecutionData {
+    fn from(value: EthBuiltPayload) -> Self {
+        value.into_execution_data()
+    }
+}
+
+#[cfg(feature = "std")]
+impl From<EthBuiltPayload> for reth_engine_primitives::BigBlockData<ExecutionData> {
+    fn from(_value: EthBuiltPayload) -> Self {
+        unreachable!("payload building is not supported for big blocks");
     }
 }
 
@@ -321,128 +418,61 @@ impl From<alloc::vec::IntoIter<BlobTransactionSidecarEip7594>> for BlobSidecars 
     }
 }
 
-/// Container type for all components required to build a payload.
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
-pub struct EthPayloadBuilderAttributes {
-    /// Id of the payload
-    pub id: PayloadId,
-    /// Parent block to build the payload on top
-    pub parent: B256,
-    /// Unix timestamp for the generated payload
-    ///
-    /// Number of seconds since the Unix epoch.
-    pub timestamp: u64,
-    /// Address of the recipient for collecting transaction fee
-    pub suggested_fee_recipient: Address,
-    /// Randomness value for the generated payload
-    pub prev_randao: B256,
-    /// Withdrawals for the generated payload
-    pub withdrawals: Withdrawals,
-    /// Root of the parent beacon block
-    pub parent_beacon_block_root: Option<B256>,
-    /// Inclusion list for the generated payload.
-    pub il: Option<Vec<Option<Recovered<TransactionSigned>>>>,
-}
-
-// === impl EthPayloadBuilderAttributes ===
-
-impl EthPayloadBuilderAttributes {
-    /// Returns the identifier of the payload.
-    pub const fn payload_id(&self) -> PayloadId {
-        self.id
-    }
-
-    /// Creates a new payload builder for the given parent block and the attributes.
-    ///
-    /// Derives the unique [`PayloadId`] for the given parent and attributes
-    pub fn new(parent: B256, attributes: PayloadAttributes) -> Self {
-        let id = payload_id(&parent, &attributes);
-
-        // if the IL is present, then attempt to decode each transaction in the IL.
-        let il = attributes.inclusion_list_transactions.map(|il| {
-            il.into_iter().map(|tx| Recovered::decode(&mut tx.0.as_ref()).ok()).collect()
-        });
-
-        Self {
-            id,
-            parent,
-            timestamp: attributes.timestamp,
-            suggested_fee_recipient: attributes.suggested_fee_recipient,
-            prev_randao: attributes.prev_randao,
-            withdrawals: attributes.withdrawals.unwrap_or_default().into(),
-            parent_beacon_block_root: attributes.parent_beacon_block_root,
-            il,
-        }
-    }
-}
-
-impl PayloadBuilderAttributes for EthPayloadBuilderAttributes {
-    type RpcPayloadAttributes = PayloadAttributes;
-    type Error = Infallible;
-
-    /// Creates a new payload builder for the given parent block and the attributes.
-    ///
-    /// Derives the unique [`PayloadId`] for the given parent and attributes
-    fn try_new(
-        parent: B256,
-        attributes: PayloadAttributes,
-        _version: u8,
-    ) -> Result<Self, Infallible> {
-        Ok(Self::new(parent, attributes))
-    }
-
-    fn payload_id(&self) -> PayloadId {
-        self.id
-    }
-
-    fn parent(&self) -> B256 {
-        self.parent
-    }
-
-    fn timestamp(&self) -> u64 {
-        self.timestamp
-    }
-
-    fn parent_beacon_block_root(&self) -> Option<B256> {
-        self.parent_beacon_block_root
-    }
-
-    fn suggested_fee_recipient(&self) -> Address {
-        self.suggested_fee_recipient
-    }
-
-    fn prev_randao(&self) -> B256 {
-        self.prev_randao
-    }
-
-    fn withdrawals(&self) -> &Withdrawals {
-        &self.withdrawals
-    }
-
-    fn il(&self) -> Option<&Vec<Option<Recovered<TransactionSigned>>>> {
-        self.il.as_ref()
-    }
-
-    fn clone_with_il(&self, il: Vec<Bytes>) -> Self {
-        let attributes = PayloadAttributes {
-            timestamp: self.timestamp,
-            prev_randao: self.prev_randao,
-            suggested_fee_recipient: self.suggested_fee_recipient,
-            withdrawals: Some(self.withdrawals.0.clone()),
-            parent_beacon_block_root: self.parent_beacon_block_root,
-            inclusion_list_transactions: Some(il),
-        };
-        Self::new(self.parent, attributes)
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloy_primitives::B256;
+    use reth_primitives_traits::{Block as _, RecoveredBlock};
 
     #[test]
-    fn attributes_serde() {
-        let attributes = r#"{"timestamp":"0x1235","prevRandao":"0xf343b00e02dc34ec0124241f74f32191be28fb370bb48060f5fa4df99bda774c","suggestedFeeRecipient":"0x0000000000000000000000000000000000000000","withdrawals":null,"parentBeaconBlockRoot":null}"#;
-        let _attributes: PayloadAttributes = serde_json::from_str(attributes).unwrap();
+    fn into_execution_data_preserves_requests() {
+        let requests = Requests::from_requests([Bytes::from_static(&[1, 2])]);
+        let parent_beacon_block_root = B256::with_last_byte(1);
+
+        let mut block = reth_ethereum_primitives::Block::default();
+        block.header.parent_beacon_block_root = Some(parent_beacon_block_root);
+        block.header.requests_hash = Some(requests.requests_hash());
+
+        let payload = EthBuiltPayload::new(
+            Arc::new(RecoveredBlock::new_sealed(block.seal_slow(), vec![])),
+            U256::ZERO,
+            Some(requests.clone()),
+            None,
+        );
+
+        let execution_data: ExecutionData = payload.into();
+
+        assert_eq!(
+            execution_data.sidecar.parent_beacon_block_root(),
+            Some(parent_beacon_block_root)
+        );
+        assert_eq!(execution_data.sidecar.requests(), Some(&requests));
+    }
+
+    #[test]
+    fn into_execution_data_preserves_block_access_list() {
+        let block_access_list = Bytes::from_static(&[0xc0]);
+
+        let mut block = reth_ethereum_primitives::Block::default();
+        block.header.parent_beacon_block_root = Some(B256::ZERO);
+        block.header.block_access_list_hash = Some(B256::ZERO);
+
+        let payload = EthBuiltPayload::new(
+            Arc::new(RecoveredBlock::new_sealed(block.seal_slow(), vec![])),
+            U256::ZERO,
+            None,
+            Some(block_access_list.clone()),
+        );
+
+        let execution_data: ExecutionData = payload.into();
+
+        assert_eq!(execution_data.payload.block_access_list(), Some(&block_access_list));
+    }
+
+    #[test]
+    fn execution_data_has_infallible_try_from_impl() {
+        fn assert_try_from<T: TryFrom<EthBuiltPayload, Error = core::convert::Infallible>>() {}
+
+        assert_try_from::<ExecutionData>();
     }
 }

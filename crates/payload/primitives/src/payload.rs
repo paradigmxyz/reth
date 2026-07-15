@@ -56,11 +56,15 @@ pub trait ExecutionPayload:
     /// Returns the total gas consumed by all transactions in this block.
     fn gas_used(&self) -> u64;
 
-    /// Returns the (optional) inclusion list for the block.
-    fn inclusion_list(&self) -> Option<&Vec<Bytes>>;
+    /// Returns the total gas limit for this block.
+    fn gas_limit(&self) -> u64;
 
     /// Returns the number of transactions in the payload.
     fn transaction_count(&self) -> usize;
+    /// Returns the slot number included in this payload.
+    ///
+    /// Returns `None` for pre-Amsterdam blocks.
+    fn slot_number(&self) -> Option<u64>;
 }
 
 impl ExecutionPayload for ExecutionData {
@@ -81,7 +85,7 @@ impl ExecutionPayload for ExecutionData {
     }
 
     fn block_access_list(&self) -> Option<&Bytes> {
-        None
+        self.payload.block_access_list()
     }
 
     fn parent_beacon_block_root(&self) -> Option<B256> {
@@ -96,12 +100,16 @@ impl ExecutionPayload for ExecutionData {
         self.payload.as_v1().gas_used
     }
 
-    fn inclusion_list(&self) -> Option<&Vec<Bytes>> {
-        self.sidecar.inclusion_list_transactions()
+    fn gas_limit(&self) -> u64 {
+        self.payload.as_v1().gas_limit
     }
 
     fn transaction_count(&self) -> usize {
         self.payload.as_v1().transactions.len()
+    }
+
+    fn slot_number(&self) -> Option<u64> {
+        self.payload.slot_number()
     }
 }
 
@@ -166,11 +174,27 @@ where
         }
     }
 
-    /// Returns the IL for the payload or attributes.
-    pub fn il(&self) -> Option<&Vec<Bytes>> {
+    /// Returns `block_access_list` from  payload.
+    pub fn block_access_list(&self) -> Option<&Bytes> {
         match self {
-            Self::ExecutionPayload { .. } => None,
-            Self::PayloadAttributes(attributes) => attributes.il(),
+            Self::ExecutionPayload(payload) => payload.block_access_list(),
+            Self::PayloadAttributes(_attributes) => None,
+        }
+    }
+
+    /// Returns `slot_number` from  payload or attributes.
+    pub fn slot_number(&self) -> Option<u64> {
+        match self {
+            Self::ExecutionPayload(payload) => payload.slot_number(),
+            Self::PayloadAttributes(attributes) => attributes.slot_number(),
+        }
+    }
+
+    /// Returns `target_gas_limit` from payload attributes.
+    pub fn target_gas_limit(&self) -> Option<u64> {
+        match self {
+            Self::ExecutionPayload(_) => None,
+            Self::PayloadAttributes(attributes) => attributes.target_gas_limit(),
         }
     }
 }

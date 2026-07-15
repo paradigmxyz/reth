@@ -36,21 +36,26 @@ async fn test_build_inclusion_list_respects_size_limit() {
     let tx2 = factory.validated(MockTransaction::legacy().with_gas_price(1_000_000_000u128));
 
     let consensus_tx = tx1.transaction.clone().into_consensus().into_inner();
-    let tx_sz = consensus_tx.encoded_2718().len();
+    let encoded_tx = alloy_primitives::Bytes::from(consensus_tx.encoded_2718());
+    let one_tx_list_size = alloy_rlp::list_length::<alloy_primitives::Bytes, [u8]>(&[encoded_tx]);
 
     let _ = pool.add_transaction(TransactionOrigin::External, tx1.transaction.clone()).await;
     let _ = pool.add_transaction(TransactionOrigin::External, tx2.transaction.clone()).await;
 
     // Too small of a size limit
-    let il_small = pool.build_inclusion_list(1_000_000_000, tx_sz.saturating_sub(1));
+    let il_small = pool.build_inclusion_list(1_000_000_000, one_tx_list_size.saturating_sub(1));
     assert!(il_small.is_empty(), "Inclusion list must respect a tiny size limit");
 
     // Just enough of a size limit
-    let il_large = pool.build_inclusion_list(1_000_000_000, tx_sz);
+    let il_large = pool.build_inclusion_list(1_000_000_000, one_tx_list_size);
     assert!(
         il_large.len() == 1,
         "There should only be room for one Tx. IL Size: {:?}",
         il_large.len()
+    );
+    assert_eq!(
+        alloy_rlp::list_length::<alloy_primitives::Bytes, [u8]>(&il_large),
+        one_tx_list_size
     );
 }
 

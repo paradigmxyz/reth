@@ -11,6 +11,7 @@ use reth_chainspec::{ChainSpec, ChainSpecBuilder, MAINNET};
 use reth_db::tables;
 use reth_e2e_test_utils::{transaction::TransactionTestContext, wallet, E2ETestSetupBuilder};
 use reth_node_ethereum::EthereumNode;
+use reth_payload_builder::EthPayloadAttributes;
 use reth_provider::RocksDBProviderFactory;
 use std::{sync::Arc, time::Duration};
 
@@ -83,13 +84,17 @@ fn test_chain_spec() -> Arc<ChainSpec> {
 }
 
 /// Returns test payload attributes for the given timestamp.
-const fn test_attributes_generator(timestamp: u64) -> PayloadAttributes {
-    PayloadAttributes {
-        timestamp,
-        prev_randao: B256::ZERO,
-        suggested_fee_recipient: alloy_primitives::Address::ZERO,
-        withdrawals: Some(vec![]),
-        parent_beacon_block_root: Some(B256::ZERO),
+const fn test_attributes_generator(timestamp: u64) -> EthPayloadAttributes {
+    EthPayloadAttributes {
+        inner: PayloadAttributes {
+            timestamp,
+            prev_randao: B256::ZERO,
+            suggested_fee_recipient: alloy_primitives::Address::ZERO,
+            withdrawals: Some(vec![]),
+            parent_beacon_block_root: Some(B256::ZERO),
+            slot_number: None,
+            target_gas_limit: None,
+        },
         inclusion_list_transactions: None,
     }
 }

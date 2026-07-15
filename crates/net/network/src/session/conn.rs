@@ -1,12 +1,14 @@
 //! Connection types for a session
 
-use futures::{Sink, Stream};
+use futures::{Sink, SinkExt, Stream, StreamExt};
 use reth_ecies::stream::ECIESStream;
 use reth_eth_wire::{
-    errors::EthStreamError,
+    errors::{EthStreamError, P2PStreamError},
     message::EthBroadcastMessage,
     multiplex::{ProtocolProxy, RlpxSatelliteStream},
-    EthMessage, EthNetworkPrimitives, EthStream, EthVersion, NetworkPrimitives, P2PStream,
+    snap::SnapProtocolMessage,
+    EthMessage, EthNetworkPrimitives, EthSnapMessage, EthSnapStream, EthStream, EthVersion,
+    NetworkPrimitives, P2PStream,
 };
 use reth_eth_wire_types::RawCapabilityMessage;
 use std::{
@@ -22,10 +24,14 @@ pub type EthPeerConnection<N> = EthStream<P2PStream<ECIESStream<TcpStream>>, N>;
 pub type EthSatelliteConnection<N = EthNetworkPrimitives> =
     RlpxSatelliteStream<ECIESStream<TcpStream>, EthStream<ProtocolProxy, N>>;
 
+/// A dedicated `eth` + `snap/2` connection.
+pub type EthSnapConnection<N = EthNetworkPrimitives> = EthSnapStream<ECIESStream<TcpStream>, N>;
+
 /// Connection types that support the ETH protocol.
 ///
 /// This can be either:
 /// - A connection that only supports the ETH protocol
+/// - A connection that supports the ETH protocol and `snap/2` ([`EthSnapStream`])
 /// - A connection that supports the ETH protocol and at least one other `RLPx` protocol
 // This type is boxed because the underlying stream is ~6KB,
 // mostly coming from `P2PStream`'s `snap::Encoder` (2072), and `ECIESStream` (3600).
@@ -33,6 +39,8 @@ pub type EthSatelliteConnection<N = EthNetworkPrimitives> =
 pub enum EthRlpxConnection<N: NetworkPrimitives = EthNetworkPrimitives> {
     /// A connection that only supports the ETH protocol.
     EthOnly(Box<EthPeerConnection<N>>),
+    /// A dedicated connection that supports the ETH protocol and `snap/2` (EIP-8189).
+    EthSnap(Box<EthSnapConnection<N>>),
     /// A connection that supports the ETH protocol and __at least one other__ `RLPx` protocol.
     Satellite(Box<EthSatelliteConnection<N>>),
 }
@@ -43,8 +51,15 @@ impl<N: NetworkPrimitives> EthRlpxConnection<N> {
     pub(crate) const fn version(&self) -> EthVersion {
         match self {
             Self::EthOnly(conn) => conn.version(),
+            Self::EthSnap(conn) => conn.version(),
             Self::Satellite(conn) => conn.primary().version(),
         }
+    }
+
+    /// Returns `true` if `snap/2` was negotiated on this connection.
+    #[inline]
+    pub(crate) const fn supports_snap(&self) -> bool {
+        matches!(self, Self::EthSnap(_))
     }
 
     /// Consumes this type and returns the wrapped [`P2PStream`].
@@ -52,6 +67,7 @@ impl<N: NetworkPrimitives> EthRlpxConnection<N> {
     pub(crate) fn into_inner(self) -> P2PStream<ECIESStream<TcpStream>> {
         match self {
             Self::EthOnly(conn) => conn.into_inner(),
+            Self::EthSnap(conn) => conn.into_inner(),
             Self::Satellite(conn) => conn.into_inner(),
         }
     }
@@ -61,6 +77,7 @@ impl<N: NetworkPrimitives> EthRlpxConnection<N> {
     pub(crate) fn inner_mut(&mut self) -> &mut P2PStream<ECIESStream<TcpStream>> {
         match self {
             Self::EthOnly(conn) => conn.inner_mut(),
+            Self::EthSnap(conn) => conn.inner_mut(),
             Self::Satellite(conn) => conn.inner_mut(),
         }
     }
@@ -70,6 +87,7 @@ impl<N: NetworkPrimitives> EthRlpxConnection<N> {
     pub(crate) const fn inner(&self) -> &P2PStream<ECIESStream<TcpStream>> {
         match self {
             Self::EthOnly(conn) => conn.inner(),
+            Self::EthSnap(conn) => conn.inner(),
             Self::Satellite(conn) => conn.inner(),
         }
     }
@@ -82,6 +100,7 @@ impl<N: NetworkPrimitives> EthRlpxConnection<N> {
     ) -> Result<(), EthStreamError> {
         match self {
             Self::EthOnly(conn) => conn.start_send_broadcast(item),
+            Self::EthSnap(conn) => conn.start_send_broadcast(item),
             Self::Satellite(conn) => conn.primary_mut().start_send_broadcast(item),
         }
     }
@@ -90,7 +109,31 @@ impl<N: NetworkPrimitives> EthRlpxConnection<N> {
     pub fn start_send_raw(&mut self, msg: RawCapabilityMessage) -> Result<(), EthStreamError> {
         match self {
             Self::EthOnly(conn) => conn.start_send_raw(msg),
+            Self::EthSnap(conn) => conn.start_send_raw(msg),
             Self::Satellite(conn) => conn.primary_mut().start_send_raw(msg),
+        }
+    }
+
+    /// Queues a `snap/2` message to be sent on the wire.
+    ///
+    /// Returns an error on connections that did not negotiate `snap/2`, so a caller never believes
+    /// a request was sent when it was discarded.
+    pub fn start_send_snap(&mut self, msg: SnapProtocolMessage) -> Result<(), EthStreamError> {
+        match self {
+            Self::EthSnap(conn) => conn.start_send_unpin(EthSnapMessage::Snap(msg)),
+            Self::EthOnly(_) | Self::Satellite(_) => {
+                Err(P2PStreamError::CapabilityNotShared.into())
+            }
+        }
+    }
+
+    /// Sets whether to reject block announcement messages (`NewBlock`, `NewBlockHashes`) before
+    /// RLP decoding to avoid memory amplification from deserializing blocks that will be discarded.
+    pub fn set_reject_block_announcements(&mut self, reject: bool) {
+        match self {
+            Self::EthOnly(conn) => conn.set_reject_block_announcements(reject),
+            Self::EthSnap(conn) => conn.set_reject_block_announcements(reject),
+            Self::Satellite(conn) => conn.primary_mut().set_reject_block_announcements(reject),
         }
     }
 }
@@ -102,6 +145,13 @@ impl<N: NetworkPrimitives> From<EthPeerConnection<N>> for EthRlpxConnection<N> {
     }
 }
 
+impl<N: NetworkPrimitives> From<EthSnapConnection<N>> for EthRlpxConnection<N> {
+    #[inline]
+    fn from(conn: EthSnapConnection<N>) -> Self {
+        Self::EthSnap(Box::new(conn))
+    }
+}
+
 impl<N: NetworkPrimitives> From<EthSatelliteConnection<N>> for EthRlpxConnection<N> {
     #[inline]
     fn from(conn: EthSatelliteConnection<N>) -> Self {
@@ -109,22 +159,32 @@ impl<N: NetworkPrimitives> From<EthSatelliteConnection<N>> for EthRlpxConnection
     }
 }
 
+/// Delegates a call to the active variant's boxed stream (every variant is `Unpin`).
+///
+/// The second form runs `$adapt` on the eth-only variants to lift their result into the shared
+/// item type; the snap variant already yields it.
 macro_rules! delegate_call {
     ($self:ident.$method:ident($($args:ident),+)) => {
-        unsafe {
-            match $self.get_unchecked_mut() {
-                Self::EthOnly(l) => Pin::new_unchecked(l).$method($($args),+),
-                Self::Satellite(r) => Pin::new_unchecked(r).$method($($args),+),
-            }
+        match $self.get_mut() {
+            Self::EthOnly(l) => l.$method($($args),+),
+            Self::EthSnap(s) => s.$method($($args),+),
+            Self::Satellite(r) => r.$method($($args),+),
         }
-    }
+    };
+    ($self:ident.$method:ident($($args:ident),+) => $adapt:expr) => {
+        match $self.get_mut() {
+            Self::EthOnly(l) => $adapt(l.$method($($args),+)),
+            Self::Satellite(r) => $adapt(r.$method($($args),+)),
+            Self::EthSnap(s) => s.$method($($args),+),
+        }
+    };
 }
 
 impl<N: NetworkPrimitives> Stream for EthRlpxConnection<N> {
-    type Item = Result<EthMessage<N>, EthStreamError>;
+    type Item = Result<EthSnapMessage<N>, EthStreamError>;
 
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        delegate_call!(self.poll_next(cx))
+        delegate_call!(self.poll_next_unpin(cx) => lift_eth)
     }
 }
 
@@ -132,20 +192,32 @@ impl<N: NetworkPrimitives> Sink<EthMessage<N>> for EthRlpxConnection<N> {
     type Error = EthStreamError;
 
     fn poll_ready(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        delegate_call!(self.poll_ready(cx))
+        delegate_call!(self.poll_ready_unpin(cx))
     }
 
     fn start_send(self: Pin<&mut Self>, item: EthMessage<N>) -> Result<(), Self::Error> {
-        delegate_call!(self.start_send(item))
+        match self.get_mut() {
+            Self::EthOnly(l) => l.start_send_unpin(item),
+            Self::Satellite(r) => r.start_send_unpin(item),
+            Self::EthSnap(s) => s.start_send_unpin(EthSnapMessage::Eth(item)),
+        }
     }
 
     fn poll_flush(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        delegate_call!(self.poll_flush(cx))
+        delegate_call!(self.poll_flush_unpin(cx))
     }
 
     fn poll_close(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        delegate_call!(self.poll_close(cx))
+        delegate_call!(self.poll_close_unpin(cx))
     }
+}
+
+/// Lifts a polled `eth` item into the shared [`EthSnapMessage`] item type.
+#[inline]
+fn lift_eth<N: NetworkPrimitives>(
+    poll: Poll<Option<Result<EthMessage<N>, EthStreamError>>>,
+) -> Poll<Option<Result<EthSnapMessage<N>, EthStreamError>>> {
+    poll.map(|opt| opt.map(|res| res.map(EthSnapMessage::Eth)))
 }
 
 #[cfg(test)]
@@ -159,9 +231,16 @@ mod tests {
     {
     }
 
+    const fn assert_eth_snap_stream<N, St>()
+    where
+        N: NetworkPrimitives,
+        St: Stream<Item = Result<EthSnapMessage<N>, EthStreamError>> + Sink<EthMessage<N>>,
+    {
+    }
+
     #[test]
     const fn test_eth_stream_variants() {
         assert_eth_stream::<EthNetworkPrimitives, EthSatelliteConnection<EthNetworkPrimitives>>();
-        assert_eth_stream::<EthNetworkPrimitives, EthRlpxConnection<EthNetworkPrimitives>>();
+        assert_eth_snap_stream::<EthNetworkPrimitives, EthRlpxConnection<EthNetworkPrimitives>>();
     }
 }

@@ -403,7 +403,7 @@ pub fn validate_against_parent_gas_limit<
         })
     }
     // Check if the self gas limit is below the minimum required limit.
-    else if header.gas_limit() < MINIMUM_GAS_LIMIT {
+    if header.gas_limit() < MINIMUM_GAS_LIMIT {
         return Err(ConsensusError::GasLimitInvalidMinimum { child_gas_limit: header.gas_limit() })
     }
 

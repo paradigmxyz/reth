@@ -33,7 +33,7 @@
 //! use reth_payload_builder::PayloadId;
 //! use alloy_primitives::U256;
 //! use reth_payload_builder::{EthBuiltPayload, PayloadBuilderError, KeepPayloadJobAlive, PayloadJob, PayloadJobGenerator, PayloadKind};
-//! use reth_primitives_traits::SealedBlock;
+//! use reth_primitives_traits::{RecoveredBlock, SealedBlock};
 //! use alloy_rpc_types::engine::PayloadAttributes;
 //! use reth_payload_builder::BuildNewPayload;
 //!
@@ -72,7 +72,8 @@
 //!         },
 //!         ..Default::default()
 //!     };
-//!     let payload = EthBuiltPayload::new(Arc::new(SealedBlock::seal_slow(block)), U256::ZERO, None);
+//!     let block = RecoveredBlock::new_sealed(SealedBlock::seal_slow(block), vec![]);
+//!     let payload = EthBuiltPayload::new(Arc::new(block), U256::ZERO, None, None);
 //!     Ok(payload)
 //! }
 //!
@@ -132,4 +133,4 @@ pub use traits::{KeepPayloadJobAlive, PayloadJob, PayloadJobGenerator};
 
 // re-export the Ethereum engine primitives for convenience
 #[doc(inline)]
-pub use reth_ethereum_engine_primitives::{BlobSidecars, EthBuiltPayload};
+pub use reth_ethereum_engine_primitives::{BlobSidecars, EthBuiltPayload, EthPayloadAttributes};

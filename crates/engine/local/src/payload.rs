@@ -45,7 +45,7 @@ where
             timestamp = std::cmp::max(parent.timestamp().saturating_add(1), timestamp);
         }
 
-        EthPayloadAttributes {
+        alloy_rpc_types_engine::PayloadAttributes {
             timestamp,
             prev_randao: B256::random(),
             suggested_fee_recipient: Address::random(),
@@ -57,8 +57,9 @@ where
                 .chain_spec
                 .is_cancun_active_at_timestamp(timestamp)
                 .then(B256::random),
-            // TODO(focil): add IL fixture for testing
-            inclusion_list_transactions: Some(vec![]),
+            slot_number: self.chain_spec.is_amsterdam_active_at_timestamp(timestamp).then_some(0),
+            ..Default::default()
         }
+        .into()
     }
 }

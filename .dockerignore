@@ -6,6 +6,7 @@
 !/crates
 !/pkg
 !/testing
+!/.github/scripts/install_llvm_ubuntu.sh
 !book.toml
 !Cargo.lock
 !Cargo.toml
@@ -20,13 +21,10 @@
 # include dist directory, where the reth binary is located after compilation
 !/dist
 
-# include PGO build helper used by Dockerfile.depot
-!/.github
-!/.github/scripts
-!/.github/scripts/build_pgo_bolt.sh
-
 # include licenses
 !LICENSE-*
+!/LICENSES
+!/LICENSES/**
 
 # include example files
 !/examples

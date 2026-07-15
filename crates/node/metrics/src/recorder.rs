@@ -104,19 +104,7 @@ impl PrometheusRecorder {
     /// Caution: This only configures the global recorder and does not spawn the exporter.
     /// Callers must run [`Self::spawn_upkeep`] manually.
     pub fn install() -> eyre::Result<Self> {
-        // Register custom histogram buckets before building the recorder
-        crate::buckets::register_default_histogram_buckets();
-
-        let mut builder = PrometheusBuilder::new();
-
-        // Apply all registered bucket configurations
-        for bucket_config in crate::buckets::get_registered_buckets() {
-            builder = builder
-                .set_buckets_for_metric(bucket_config.matcher, &bucket_config.buckets)
-                .wrap_err("Failed to set histogram buckets")?;
-        }
-
-        Self::install_with_builder(builder)
+        Self::install_with_builder(PrometheusBuilder::new())
     }
 
     /// Installs Prometheus as the metrics recorder with a custom builder.
