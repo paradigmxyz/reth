@@ -154,8 +154,8 @@ use reth_provider::{
 };
 use reth_revm::db::{states::bundle_state::BundleRetention, BundleAccount, State};
 use reth_trie::{
-    hashed_cursor::HashedCursorFactory, prefix_set::TriePrefixSetsMut,
-    trie_cursor::TrieCursorFactory, updates::TrieUpdates, LazyTrieData,
+    hashed_cursor::HashedCursorFactory, trie_cursor::TrieCursorFactory, updates::TrieUpdates,
+    LazyTrieData,
 };
 use reth_trie_db::ChangesetCache;
 use std::{
@@ -786,7 +786,7 @@ where
         )
         .in_scope(|| {
             self.validator.validate_block_post_execution_with_hashed_state(
-                &|| hashed_state.get(),
+                || hashed_state.get(),
                 &block,
                 || provider_builder.build(),
             )
@@ -809,7 +809,6 @@ where
 
         let state_root = root_outcome.state_root;
         let trie_output = root_outcome.trie_updates;
-        let changed_paths = root_outcome.changed_paths;
 
         // A fallback path recomputed the hashed post state. Replace the streaming-derived one
         // and re-run hashed-state validation against it, since a failed state-root task may
@@ -822,7 +821,7 @@ where
             )
             .in_scope(|| {
                 self.validator.validate_block_post_execution_with_hashed_state(
-                    &|| hashed_state.get(),
+                    || hashed_state.get(),
                     &block,
                     || provider_builder.build(),
                 )
@@ -877,13 +876,8 @@ where
             let _ = valid_block_tx.send(());
         }
 
-        let executed_block = self.spawn_deferred_trie_task(
-            Arc::new(block),
-            output,
-            hashed_state,
-            trie_output,
-            changed_paths,
-        );
+        let executed_block =
+            self.spawn_deferred_trie_task(Arc::new(block), output, hashed_state, trie_output);
         let raw_bal = decoded_bal.map(|decoded_bal| decoded_bal.as_raw_bal().clone());
         Ok(ValidationOutput::new(executed_block, timing_stats).with_raw_bal(raw_bal))
     }
@@ -1453,7 +1447,6 @@ where
         execution_outcome: Arc<BlockExecutionOutput<N::Receipt>>,
         hashed_state: LazyHashedPostState,
         trie_output: Arc<TrieUpdates>,
-        changed_paths: Option<Arc<TriePrefixSetsMut>>,
     ) -> ExecutedBlock<N> {
         // Create deferred handle and task that owns the unsorted inputs.
         // Resolve the lazy handle into Arc<HashedPostState>. By this point the hashed state has
@@ -1463,7 +1456,7 @@ where
             Err(handle) => handle.get().clone(),
         };
         let (deferred_trie_data, deferred_trie_task) =
-            LazyTrieData::pending(hashed_state, trie_output, changed_paths);
+            LazyTrieData::pending(hashed_state, trie_output);
         let block_validation_metrics = self.metrics.block_validation.clone();
 
         // Capture block info for tracing.
@@ -1788,7 +1781,6 @@ where
             block.execution_output,
             LazyHashedPostState::ready(block.hashed_state),
             block.trie_updates,
-            block.changed_paths,
         ))
     }
 

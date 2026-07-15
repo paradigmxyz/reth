@@ -88,7 +88,6 @@ members = [
     "crates/rpc/rpc-eth-types/",
     "crates/rpc/rpc-layer",
     "crates/rpc/rpc-server-types/",
-    "crates/rpc/rpc-testing-util/",
     "crates/rpc/rpc-e2e-tests/",
     "crates/rpc/rpc-convert/",
     "crates/rpc/rpc/",
@@ -399,7 +398,6 @@ reth-prune-types = { path = "crates/prune/types", default-features = false }
 reth-revm = { path = "crates/revm", default-features = false }
 reth-rpc = { path = "crates/rpc/rpc" }
 reth-rpc-api = { path = "crates/rpc/rpc-api" }
-reth-rpc-api-testing-util = { path = "crates/rpc/rpc-testing-util" }
 reth-rpc-builder = { path = "crates/rpc/rpc-builder" }
 reth-rpc-e2e-tests = { path = "crates/rpc/rpc-e2e-tests" }
 reth-rpc-engine-api = { path = "crates/rpc/rpc-engine-api" }
