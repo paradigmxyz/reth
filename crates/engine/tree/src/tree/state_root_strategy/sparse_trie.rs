@@ -354,7 +354,6 @@ where
 
         #[cfg(feature = "trie-debug")]
         let debug_recorders = self.trie.take_debug_recorders();
-        let changed_paths = Some(Arc::new(self.trie.take_changed_paths().unwrap_or_default()));
 
         let end = Instant::now();
         self.metrics.sparse_trie_final_update_duration_histogram.record(end.duration_since(start));
@@ -374,7 +373,6 @@ where
             trie_updates: Arc::new(trie_updates),
             hashed_state: finalized_hashed_state
                 .expect("finished state updates publish the hashed post state"),
-            changed_paths,
             #[cfg(feature = "trie-debug")]
             debug_recorders,
         })

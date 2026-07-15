@@ -214,12 +214,15 @@ pub trait PayloadValidator<Types: PayloadTypes>: Send + Sync + Unpin + 'static {
 
     /// Verifies payload post-execution w.r.t. hashed state updates.
     ///
+    /// `state_updates` lazily yields the block's hashed post-state; call it only if the
+    /// implementation needs the executed state changes (the L1 default does not).
+    ///
     /// `parent_state` lazily builds the overlay-aware provider for the block's parent that the
     /// engine used for execution — resolving even a not-yet-canonical in-memory parent. It is only
     /// built if the implementation needs it (the L1 default does not).
     fn validate_block_post_execution_with_hashed_state<'a>(
         &self,
-        _state_updates: &dyn FnOnce() -> &'a HashedPostState,
+        _state_updates: impl FnOnce() -> &'a HashedPostState,
         _block: &RecoveredBlock<Self::Block>,
         _parent_state: impl FnOnce() -> ProviderResult<StateProviderBox>,
     ) -> Result<(), InsertBlockErrorKind>
