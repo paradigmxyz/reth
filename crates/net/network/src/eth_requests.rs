@@ -1158,7 +1158,9 @@ mod tests {
                 ),
                 (second_hash, Account { nonce: 3, balance: U256::from(4), bytecode_hash: None }),
             ],
-            RangeEnd::Exhausted,
+            // A hash-limit stop (not an exhausted trie) so a boundary proof is still expected,
+            // matching the mocked `proof` below.
+            RangeEnd::HashLimit,
         );
         provider.set_snap_storage_root(first_hash, storage_root);
         provider.set_snap_storage_root(second_hash, EMPTY_ROOT_HASH);
