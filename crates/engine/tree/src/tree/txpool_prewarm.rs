@@ -12,10 +12,9 @@ use reth_provider::{BlockReader, StateProviderBox, StateProviderFactory, StateRe
 use reth_revm::{database::EvmStateProvider, db::State};
 use std::{
     fmt::Debug,
-    marker::PhantomData,
     sync::{
-        atomic::{AtomicBool, AtomicU64, Ordering},
-        Arc, Condvar, Mutex, RwLock,
+        atomic::{AtomicBool, Ordering},
+        Arc, Condvar, Mutex,
     },
     time::{Duration, Instant},
 };
@@ -116,113 +115,105 @@ impl<J> TxPoolPrewarmRequests<J> {
     }
 }
 
-/// Coordinates stale-publication rejection and the latest completed snapshot.
+/// Coordinates snapshot publication and worker quiescence.
 #[derive(Debug, Default)]
 struct TxPoolSnapshotPublication {
-    generation: AtomicU64,
     paused: AtomicBool,
-    snapshot: RwLock<Option<TxPoolPrewarmCacheSnapshot>>,
+    state: Mutex<TxPoolSnapshotPublicationState>,
+    idle: Condvar,
+}
+
+#[derive(Debug, Default)]
+struct TxPoolSnapshotPublicationState {
+    active: bool,
+    snapshot: Option<TxPoolPrewarmCacheSnapshot>,
 }
 
 impl TxPoolSnapshotPublication {
-    fn begin_head(&self) -> Option<u64> {
-        let mut snapshot =
-            self.snapshot.write().expect("txpool snapshot publication lock poisoned");
+    fn begin_head(&self) -> bool {
+        let mut state = self.state.lock().expect("txpool snapshot publication lock poisoned");
         if self.paused.load(Ordering::Acquire) {
-            return None
+            return false
         }
-        let generation = self.generation.fetch_add(1, Ordering::AcqRel) + 1;
-        *snapshot = None;
-        Some(generation)
+        state.snapshot = None;
+        true
     }
 
-    fn resume_head(&self) -> Option<u64> {
-        let _snapshot = self.snapshot.write().expect("txpool snapshot publication lock poisoned");
-        if self.paused.load(Ordering::Acquire) {
-            return None
-        }
-        Some(self.generation.fetch_add(1, Ordering::AcqRel) + 1)
-    }
-
-    fn cancel(&self) -> u64 {
-        let _snapshot = self.snapshot.write().expect("txpool snapshot publication lock poisoned");
+    fn pause(&self) {
         self.paused.store(true, Ordering::Release);
-        self.generation.fetch_add(1, Ordering::AcqRel) + 1
+    }
+
+    fn pause_and_wait(&self) -> Duration {
+        let start = Instant::now();
+        self.pause();
+        let mut state = self.state.lock().expect("txpool snapshot publication lock poisoned");
+        while state.active {
+            state = self.idle.wait(state).expect("txpool snapshot publication lock poisoned");
+        }
+        start.elapsed()
+    }
+
+    fn resume(&self) {
+        self.paused.store(false, Ordering::Release);
+    }
+
+    fn try_enter(self: &Arc<Self>) -> Option<TxPoolPrewarmWaveGuard> {
+        let mut state = self.state.lock().expect("txpool snapshot publication lock poisoned");
+        if state.active || self.paused.load(Ordering::Acquire) {
+            return None
+        }
+        state.active = true;
+        Some(TxPoolPrewarmWaveGuard { publication: Arc::clone(self), active: true })
+    }
+
+    fn finish_wave(&self, snapshot: Option<TxPoolPrewarmCacheSnapshot>) -> bool {
+        let mut state = self.state.lock().expect("txpool snapshot publication lock poisoned");
+        let published = if self.paused.load(Ordering::Acquire) {
+            false
+        } else if let Some(snapshot) = snapshot {
+            state.snapshot = Some(snapshot);
+            true
+        } else {
+            false
+        };
+        state.active = false;
+        self.idle.notify_all();
+        published
     }
 
     fn snapshot(&self, parent_hash: B256) -> Option<TxPoolPrewarmCacheSnapshot> {
-        self.snapshot
-            .read()
+        self.state
+            .lock()
             .expect("txpool snapshot publication lock poisoned")
+            .snapshot
             .as_ref()
             .filter(|snapshot| snapshot.parent_hash() == parent_hash)
             .cloned()
     }
 
-    fn publish(&self, generation: u64, snapshot: TxPoolPrewarmCacheSnapshot) -> bool {
-        let mut published =
-            self.snapshot.write().expect("txpool snapshot publication lock poisoned");
-        if self.generation.load(Ordering::Acquire) != generation {
-            return false
-        }
-        *published = Some(snapshot);
-        true
-    }
-
-    fn is_current(&self, generation: u64) -> bool {
-        self.generation.load(Ordering::Acquire) == generation
-    }
-
     fn is_paused(&self) -> bool {
         self.paused.load(Ordering::Acquire)
     }
+}
 
-    fn resume(&self, generation: u64) {
-        let _snapshot = self.snapshot.write().expect("txpool snapshot publication lock poisoned");
-        if self.generation.load(Ordering::Acquire) == generation {
-            self.paused.store(false, Ordering::Release);
-        }
+struct TxPoolPrewarmWaveGuard {
+    publication: Arc<TxPoolSnapshotPublication>,
+    active: bool,
+}
+
+impl TxPoolPrewarmWaveGuard {
+    fn publish(mut self, snapshot: TxPoolPrewarmCacheSnapshot) -> bool {
+        let published = self.publication.finish_wave(Some(snapshot));
+        self.active = false;
+        published
     }
 }
 
-#[derive(Debug, Default)]
-struct TxPoolWorkerActivity {
-    active: Mutex<bool>,
-    idle: Condvar,
-}
-
-impl TxPoolWorkerActivity {
-    fn try_enter(
-        self: &Arc<Self>,
-        publication: &TxPoolSnapshotPublication,
-        generation: u64,
-    ) -> Option<TxPoolWorkerActivityGuard> {
-        let mut active = self.active.lock().expect("txpool worker activity lock poisoned");
-        if *active || publication.is_paused() || !publication.is_current(generation) {
-            return None
-        }
-        *active = true;
-        Some(TxPoolWorkerActivityGuard { activity: Arc::clone(self) })
-    }
-
-    fn wait_until_idle(&self) -> Duration {
-        let start = Instant::now();
-        let mut active = self.active.lock().expect("txpool worker activity lock poisoned");
-        while *active {
-            active = self.idle.wait(active).expect("txpool worker activity lock poisoned");
-        }
-        start.elapsed()
-    }
-}
-
-struct TxPoolWorkerActivityGuard {
-    activity: Arc<TxPoolWorkerActivity>,
-}
-
-impl Drop for TxPoolWorkerActivityGuard {
+impl Drop for TxPoolPrewarmWaveGuard {
     fn drop(&mut self) {
-        *self.activity.active.lock().expect("txpool worker activity lock poisoned") = false;
-        self.activity.idle.notify_all();
+        if self.active {
+            self.publication.finish_wave(None);
+        }
     }
 }
 
@@ -234,8 +225,6 @@ where
 {
     requests: Arc<TxPoolPrewarmRequests<TxPoolPrewarmJob<N, P, Evm>>>,
     publication: Arc<TxPoolSnapshotPublication>,
-    activity: Arc<TxPoolWorkerActivity>,
-    wait_generation: AtomicU64,
 }
 
 impl<N, P, Evm> Debug for TxPoolPrewarmHandle<N, P, Evm>
@@ -244,18 +233,12 @@ where
     Evm: ConfigureEvm<Primitives = N>,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let state =
+            self.publication.state.lock().expect("txpool snapshot publication lock poisoned");
         f.debug_struct("TxPoolPrewarmHandle")
-            .field("generation", &self.publication.generation.load(Ordering::Relaxed))
-            .field(
-                "published",
-                &self
-                    .publication
-                    .snapshot
-                    .read()
-                    .expect("txpool snapshot publication lock poisoned")
-                    .as_ref()
-                    .map(|s| s.parent_hash()),
-            )
+            .field("paused", &self.publication.is_paused())
+            .field("active", &state.active)
+            .field("published", &state.snapshot.as_ref().map(|s| s.parent_hash()))
             .finish_non_exhaustive()
     }
 }
@@ -267,17 +250,12 @@ where
 {
     /// Cancels speculative work and waits for any provider-backed EVM call to release its state.
     pub(crate) fn cancel_and_wait(&self) -> Duration {
-        let generation = self.publication.cancel();
-        self.wait_generation.store(generation, Ordering::Release);
-        self.activity.wait_until_idle()
+        self.publication.pause_and_wait()
     }
 
     /// Resumes work after an explicit cache wait, including early-return payload paths.
     pub(crate) fn resume_after_wait(&self) {
-        let generation = self.wait_generation.swap(0, Ordering::AcqRel);
-        if generation > 0 {
-            self.publication.resume(generation);
-        }
+        self.publication.resume();
     }
 }
 
@@ -298,25 +276,12 @@ where
         let worker_requests = Arc::clone(&requests);
         let publication = Arc::new(TxPoolSnapshotPublication::default());
         let worker_publication = Arc::clone(&publication);
-        let activity = Arc::new(TxPoolWorkerActivity::default());
-        let worker_activity = Arc::clone(&activity);
 
         runtime.spawn_blocking_named("txpool-prewarm", move || {
-            txpool_prewarm_loop(
-                worker_requests,
-                source,
-                evm_config,
-                worker_publication,
-                worker_activity,
-            )
+            txpool_prewarm_loop(worker_requests, source, evm_config, worker_publication)
         });
 
-        Self {
-            requests,
-            publication,
-            activity,
-            wait_generation: AtomicU64::new(0),
-        }
+        Self { requests, publication }
     }
 
     /// Returns the latest fully published snapshot for `parent_hash`.
@@ -341,8 +306,48 @@ where
     Evm: ConfigureEvm<Primitives = N>,
 {
     fn drop(&mut self) {
-        self.publication.cancel();
+        self.publication.pause();
         self.requests.close();
+    }
+}
+
+/// Provider that fills only the reusable txpool-prewarm cache.
+struct TxPoolPrewarmStateProvider<'a> {
+    inner: StateProviderBox,
+    cache: &'a TxPoolPrewarmCache,
+}
+
+impl EvmStateProvider for TxPoolPrewarmStateProvider<'_> {
+    fn basic_account(
+        &self,
+        address: &Address,
+    ) -> reth_errors::ProviderResult<Option<reth_primitives_traits::Account>> {
+        self.cache
+            .get_or_try_insert_account_with(*address, || self.inner.basic_account(address))
+    }
+
+    fn block_hash(&self, number: BlockNumber) -> reth_errors::ProviderResult<Option<B256>> {
+        EvmStateProvider::block_hash(&self.inner, number)
+    }
+
+    fn bytecode_by_hash(
+        &self,
+        code_hash: &B256,
+    ) -> reth_errors::ProviderResult<Option<reth_primitives_traits::Bytecode>> {
+        self.cache
+            .get_or_try_insert_code_with(*code_hash, || self.inner.bytecode_by_hash(code_hash))
+    }
+
+    fn storage(
+        &self,
+        account: Address,
+        storage_key: StorageKey,
+    ) -> reth_errors::ProviderResult<Option<StorageValue>> {
+        self.cache
+            .get_or_try_insert_storage_with(account, storage_key, || {
+                self.inner.storage(account, storage_key).map(Option::unwrap_or_default)
+            })
+            .map(|value| (!value.is_zero()).then_some(value))
     }
 }
 
@@ -351,7 +356,6 @@ fn txpool_prewarm_loop<N, P, Evm>(
     source: Arc<dyn TxPoolPrewarmSource<N>>,
     evm_config: Evm,
     publication: Arc<TxPoolSnapshotPublication>,
-    activity: Arc<TxPoolWorkerActivity>,
 ) where
     N: NodePrimitives,
     P: BlockReader + StateProviderFactory + StateReader + Clone + Send + Sync + 'static,
@@ -405,14 +409,12 @@ fn txpool_prewarm_loop<N, P, Evm>(
         // Wait for pool maintenance to catch up to the authoritative canonical-head request
         // before invalidating the previous publication.
         let new_parent = cache_parent_hash != Some(job.parent_hash);
-        let active_generation =
-            if new_parent { publication.begin_head() } else { publication.resume_head() };
-        let Some(active_generation) = active_generation else {
+        if new_parent && !publication.begin_head() {
             if pending.is_none() {
                 pending = Some(job);
             }
             continue
-        };
+        }
         if new_parent {
             cache.clear();
             cache_parent_hash = Some(job.parent_hash);
@@ -423,7 +425,7 @@ fn txpool_prewarm_loop<N, P, Evm>(
             "started txpool prewarming"
         );
 
-        while publication.is_current(active_generation) && !publication.is_paused() {
+        while !publication.is_paused() {
             if let Some(request) = requests.take() {
                 pending = Some(request);
             }
@@ -435,39 +437,32 @@ fn txpool_prewarm_loop<N, P, Evm>(
                 break
             }
 
-            let Some(activity_guard) = activity.try_enter(&publication, active_generation) else {
-                break
-            };
+            let Some(activity_guard) = publication.try_enter() else { break };
             let (completed, transaction_count) = prewarm_transactions(
                 &evm_config,
                 &job,
                 &cache,
                 best_txs.as_mut().expect("best transactions opened for active parent"),
                 Instant::now() + TXPOOL_REFRESH_INTERVAL,
-                active_generation,
                 &publication,
             );
-            drop(activity_guard);
 
             if !completed {
-                if publication.is_current(active_generation) && !publication.is_paused() {
+                drop(activity_guard);
+                if !publication.is_paused() {
                     std::thread::sleep(TXPOOL_REFRESH_INTERVAL);
                 }
                 break
             }
-            if !publication.is_current(active_generation) {
-                break
-            }
             if transaction_count == 0 {
+                drop(activity_guard);
                 std::thread::sleep(TXPOOL_REFRESH_INTERVAL);
                 continue
             }
 
-            // The deep clone happens privately. Only the short pointer swap below is serialized
-            // with `newPayload` snapshot acquisition.
             let snapshot = cache.snapshot(job.parent_hash);
             let (accounts, storage, bytecodes) = snapshot.entry_counts();
-            if publication.publish(active_generation, snapshot) {
+            if activity_guard.publish(snapshot) {
                 debug!(
                     target: "engine::tree::txpool_prewarm",
                     parent_hash = ?job.parent_hash,
@@ -497,7 +492,6 @@ fn prewarm_transactions<N, P, Evm, I>(
     cache: &TxPoolPrewarmCache,
     transactions: I,
     deadline: Instant,
-    generation: u64,
     publication: &TxPoolSnapshotPublication,
 ) -> (bool, usize)
 where
@@ -528,7 +522,7 @@ where
 
     let mut transaction_count = 0;
     for transaction in transactions {
-        if !publication.is_current(generation) {
+        if publication.is_paused() {
             return (false, transaction_count)
         }
         transaction_count += 1;
@@ -550,59 +544,6 @@ where
     (true, transaction_count)
 }
 
-/// Provider that fills only the reusable txpool-prewarm cache.
-struct TxPoolPrewarmStateProvider<'a> {
-    inner: StateProviderBox,
-    cache: &'a TxPoolPrewarmCache,
-}
-
-impl EvmStateProvider for TxPoolPrewarmStateProvider<'_> {
-    fn basic_account(
-        &self,
-        address: &Address,
-    ) -> reth_errors::ProviderResult<Option<reth_primitives_traits::Account>> {
-        self.cache
-            .get_or_try_insert_account_with(*address, || self.inner.basic_account(address))
-            .map(cached_value)
-    }
-
-    fn block_hash(&self, number: BlockNumber) -> reth_errors::ProviderResult<Option<B256>> {
-        EvmStateProvider::block_hash(&self.inner, number)
-    }
-
-    fn bytecode_by_hash(
-        &self,
-        code_hash: &B256,
-    ) -> reth_errors::ProviderResult<Option<reth_primitives_traits::Bytecode>> {
-        self.cache
-            .get_or_try_insert_code_with(*code_hash, || self.inner.bytecode_by_hash(code_hash))
-            .map(cached_value)
-    }
-
-    fn storage(
-        &self,
-        account: Address,
-        storage_key: StorageKey,
-    ) -> reth_errors::ProviderResult<Option<StorageValue>> {
-        self.cache
-            .get_or_try_insert_storage_with(account, storage_key, || {
-                self.inner.storage(account, storage_key).map(Option::unwrap_or_default)
-            })
-            .map(cached_value)
-            .map(nonzero_storage_value)
-    }
-}
-
-fn cached_value<T>(status: reth_execution_cache::CachedStatus<T>) -> T {
-    match status {
-        reth_execution_cache::CachedStatus::Cached(value) |
-        reth_execution_cache::CachedStatus::NotCached(value) => value,
-    }
-}
-
-fn nonzero_storage_value(value: StorageValue) -> Option<StorageValue> {
-    (!value.is_zero()).then_some(value)
-}
 
 #[cfg(test)]
 mod tests {
@@ -610,18 +551,31 @@ mod tests {
 
     #[test]
     fn reading_snapshot_does_not_interrupt_publication() {
-        let publication = TxPoolSnapshotPublication::default();
-        let generation = publication.begin_head().expect("publication should be active");
+        let publication = Arc::new(TxPoolSnapshotPublication::default());
+        assert!(publication.begin_head());
+        let activity_guard = publication.try_enter().expect("publication should be active");
         let parent_hash = B256::repeat_byte(0x01);
         let snapshot = TxPoolPrewarmCache::default().snapshot(parent_hash);
-        assert!(publication.publish(generation, snapshot));
+        assert!(activity_guard.publish(snapshot));
 
         assert_eq!(
             publication.snapshot(parent_hash).map(|snapshot| snapshot.parent_hash()),
             Some(parent_hash)
         );
         assert!(publication.snapshot(B256::ZERO).is_none());
-        assert!(publication.is_current(generation));
         assert!(!publication.is_paused());
+    }
+
+    #[test]
+    fn paused_wave_is_not_published() {
+        let publication = Arc::new(TxPoolSnapshotPublication::default());
+        assert!(publication.begin_head());
+        let activity_guard = publication.try_enter().expect("publication should be active");
+
+        publication.pause();
+        let parent_hash = B256::repeat_byte(0x01);
+        let snapshot = TxPoolPrewarmCache::default().snapshot(parent_hash);
+        assert!(!activity_guard.publish(snapshot));
+        assert!(publication.snapshot(parent_hash).is_none());
     }
 }
