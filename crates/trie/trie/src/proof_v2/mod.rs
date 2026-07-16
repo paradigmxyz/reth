@@ -89,8 +89,6 @@ pub struct ProofCalculator<TC, HC, VE: LeafValueEncoder> {
     rlp_encode_buf: Vec<u8>,
     /// Prefix set for tracking changed keys.
     prefix_set: PrefixSet,
-    /// Whether to retain leaf children of retained branches.
-    always_retain_leaves: bool,
 }
 
 impl<TC, HC, VE: LeafValueEncoder> ProofCalculator<TC, HC, VE> {
@@ -107,7 +105,6 @@ impl<TC, HC, VE: LeafValueEncoder> ProofCalculator<TC, HC, VE> {
             rlp_nodes_bufs: Vec::<_>::with_capacity(8),
             rlp_encode_buf: Vec::<_>::with_capacity(RLP_ENCODE_BUF_SIZE),
             prefix_set: PrefixSet::default(),
-            always_retain_leaves: false,
         }
     }
 
@@ -120,12 +117,6 @@ impl<TC, HC, VE: LeafValueEncoder> ProofCalculator<TC, HC, VE> {
     /// unrevealed in order to collapse the branch.
     pub fn with_prefix_set(mut self, prefix_set: PrefixSet) -> Self {
         self.prefix_set = prefix_set;
-        self
-    }
-
-    /// Retains leaf children of retained branches.
-    pub const fn always_retain_leaves(mut self) -> Self {
-        self.always_retain_leaves = true;
         self
     }
 }
@@ -159,21 +150,6 @@ where
     #[inline]
     const fn maybe_parent_nibble(&self) -> usize {
         !self.branch_stack.is_empty() as usize
-    }
-
-    /// Returns true if a proof target reaches the current branch's logical path.
-    fn current_branch_matches_target(&mut self, targets: &TargetsCursor<'_>) -> bool {
-        let branch = self.branch_stack.last().expect("leaf child must have a parent branch");
-        if let Some(matches_target) = branch.matches_target {
-            return matches_target
-        }
-
-        let matches_target = targets.contains_target_for_path(&self.branch_path);
-        self.branch_stack
-            .last_mut()
-            .expect("leaf child must have a parent branch")
-            .matches_target = Some(matches_target);
-        matches_target
     }
 
     /// Returns true if the proof of a node at the given path should be retained. A node is retained
@@ -215,15 +191,14 @@ where
         target = TRACE_TARGET,
         level = "trace",
         skip_all,
-        fields(?path, ?check_min_len, ?is_leaf),
+        fields(?path, ?check_min_len),
         ret,
     )]
     fn should_retain<'a>(
-        &mut self,
+        &self,
         targets: &mut Option<TargetsCursor<'a>>,
         path: &Nibbles,
         check_min_len: bool,
-        is_leaf: bool,
     ) -> bool {
         // If no targets are given then we never retain anything
         let Some(targets) = targets.as_mut() else { return false };
@@ -254,7 +229,7 @@ where
             // point the target for 0xabc2 will not match the branch due to its prefix, but any of
             // the other targets would, so we need to check those as well.
             if lower.key_nibbles.starts_with(path) {
-                if !check_min_len ||
+                return !check_min_len ||
                     (path.len() >= lower.min_len as usize ||
                         targets
                             .skip_iter()
@@ -264,10 +239,6 @@ where
                             .rev_iter()
                             .take_while(|target| target.key_nibbles.starts_with(path))
                             .any(|target| path.len() >= target.min_len as usize))
-                {
-                    return true
-                }
-                break
             }
 
             // If the path isn't in the current range then iterate forward until it is (or until
@@ -278,20 +249,19 @@ where
                 (lower, upper) = targets.next();
                 trace!(target: TRACE_TARGET, target = ?lower, "upper target <= path, next target");
             } else {
-                break
+                return false
             }
         }
-
-        self.always_retain_leaves && is_leaf && self.current_branch_matches_target(targets)
     }
 
     /// Takes a child which has been removed from the `child_stack` and converts it to an
     /// [`RlpNode`].
     ///
-    /// Calling this method indicates that the child will not undergo any further modifications and
-    /// should be retained as a proof node.
-    fn commit_child(
+    /// Calling this method indicates that the child will not undergo any further modifications, and
+    /// therefore can be retained as a proof node if applicable.
+    fn commit_child<'a>(
         &mut self,
+        targets: &mut Option<TargetsCursor<'a>>,
         child_path: Nibbles,
         child: ProofTrieBranchChild<VE::DeferredEncoder>,
     ) -> Result<RlpNode, StateProofError> {
@@ -300,22 +270,38 @@ where
             return Ok(rlp_node)
         }
 
-        trace!(target: TRACE_TARGET, ?child_path, "Retaining child");
+        // If we should retain the child then do so.
+        if self.should_retain(targets, &child_path, true) {
+            trace!(target: TRACE_TARGET, ?child_path, "Retaining child");
 
-        // Convert to `ProofTrieNodeV2`, which will be what is retained.
-        //
-        // If this node is a branch then its `rlp_nodes_buf` will be taken and not returned to
-        // the `rlp_nodes_bufs` free-list.
+            // Convert to `ProofTrieNodeV2`, which will be what is retained.
+            //
+            // If this node is a branch then its `rlp_nodes_buf` will be taken and not returned to
+            // the `rlp_nodes_bufs` free-list.
+            self.rlp_encode_buf.clear();
+            let proof_node = child.into_proof_trie_node(child_path, &mut self.rlp_encode_buf)?;
+
+            // Use the `ProofTrieNodeV2` to encode the `RlpNode`, and then push it onto retained
+            // nodes before returning.
+            self.rlp_encode_buf.clear();
+            proof_node.node.encode(&mut self.rlp_encode_buf);
+
+            self.retained_proofs.push(proof_node);
+            return Ok(RlpNode::from_rlp(&self.rlp_encode_buf));
+        }
+
+        // If the child path is not being retained then we convert directly to an `RlpNode`
+        // using `into_rlp`. Since we are not retaining the node we can recover any `RlpNode`
+        // buffers for the free-list here, hence why we do this as a separate logical branch.
         self.rlp_encode_buf.clear();
-        let proof_node = child.into_proof_trie_node(child_path, &mut self.rlp_encode_buf)?;
+        let (child_rlp_node, freed_rlp_nodes_buf) = child.into_rlp(&mut self.rlp_encode_buf)?;
 
-        // Use the `ProofTrieNodeV2` to encode the `RlpNode`, and then push it onto retained
-        // nodes before returning.
-        self.rlp_encode_buf.clear();
-        proof_node.node.encode(&mut self.rlp_encode_buf);
+        // If there is an `RlpNode` buffer which can be re-used then push it onto the free-list.
+        if let Some(buf) = freed_rlp_nodes_buf {
+            self.rlp_nodes_bufs.push(buf);
+        }
 
-        self.retained_proofs.push(proof_node);
-        Ok(RlpNode::from_rlp(&self.rlp_encode_buf))
+        Ok(child_rlp_node)
     }
 
     /// Returns the path of the child of the currently under-construction branch at the given
@@ -381,9 +367,8 @@ where
 
         // Only commit immediately if retained for the proof. Otherwise, defer conversion
         // to pop_branch() to give DeferredEncoder time for async work.
-        let is_leaf = matches!(&child, ProofTrieBranchChild::Leaf { .. });
-        if self.should_retain(targets, &child_path, true, is_leaf) {
-            let child_rlp_node = self.commit_child(child_path, child)?;
+        if self.should_retain(targets, &child_path, true) {
+            let child_rlp_node = self.commit_child(targets, child_path, child)?;
             trace!(target: TRACE_TARGET, ?child_rlp_node, "Pushing committed child RlpNode onto stack");
             self.child_stack.push(ProofTrieBranchChild::RlpNode(child_rlp_node));
         } else {
@@ -487,7 +472,6 @@ where
             ext_len: common_prefix_len as u8,
             state_mask: TrieMask::new(1 << first_child_nibble),
             masks: None,
-            matches_target: None,
         });
 
         trace!(
@@ -754,7 +738,6 @@ where
                 tree_mask: cached_branch.tree_mask,
                 hash_mask: cached_branch.hash_mask,
             }),
-            matches_target: None,
         }
     }
 
@@ -1218,7 +1201,7 @@ where
                 //   last child before pushing a new one onto the stack anyway.
                 self.commit_last_child(targets)?;
 
-                if !self.should_retain(targets, &child_path, false, false) {
+                if !self.should_retain(targets, &child_path, false) {
                     // Pull this child's hash out of the cached branch node. The hash index
                     // is the number of hash_mask bits set below this child's nibble.
                     let lower_bits = TrieMask::new((1u16 << child_nibble) - 1);
@@ -1736,25 +1719,6 @@ impl<'a> TargetsCursor<'a> {
         (&self.targets[self.i], self.targets.get(self.i + 1))
     }
 
-    /// Returns true if the given path is retained for any target near the cursor's current
-    /// position. The cursor must already be positioned for a child of `path`.
-    fn contains_target_for_path(&self, path: &Nibbles) -> bool {
-        let current = &self.targets[self.i];
-        let matches = |target: &ProofV2Target| path.len() >= target.min_len as usize;
-
-        if current.key_nibbles.starts_with(path) {
-            matches(current) ||
-                self.skip_iter()
-                    .take_while(|target| target.key_nibbles.starts_with(path))
-                    .any(matches) ||
-                self.rev_iter()
-                    .take_while(|target| target.key_nibbles.starts_with(path))
-                    .any(matches)
-        } else {
-            self.skip_iter().take_while(|target| target.key_nibbles.starts_with(path)).any(matches)
-        }
-    }
-
     /// Iterates the cursor forward.
     ///
     /// # Panics
@@ -2046,151 +2010,6 @@ mod tests {
         }
     }
 
-    #[test]
-    fn test_targets_cursor_contains_target_for_path() {
-        let branch_path = Nibbles::from_nibbles([0x2]);
-        let target = |key, min_len| {
-            ProofV2Target::new(B256::right_padding_from(&[key])).with_min_len(min_len)
-        };
-
-        let targets =
-            [target(0x10, 0), target(0x20, 2), target(0x21, 2), target(0x2f, 1), target(0x30, 0)];
-        let mut cursor = TargetsCursor::new(&targets);
-        assert!(cursor.contains_target_for_path(&branch_path));
-        cursor.next();
-        cursor.next();
-        assert!(cursor.contains_target_for_path(&branch_path));
-
-        let targets = [target(0x20, 1), target(0x21, 2), target(0x2f, 2), target(0x30, 0)];
-        let mut cursor = TargetsCursor::new(&targets);
-        cursor.next();
-        cursor.next();
-        assert!(cursor.contains_target_for_path(&branch_path));
-
-        let targets = [target(0x10, 0), target(0x20, 2), target(0x2f, 2), target(0x30, 0)];
-        let cursor = TargetsCursor::new(&targets);
-        assert!(!cursor.contains_target_for_path(&branch_path));
-
-        let targets = [target(0x20, 2), target(0x20, 1)];
-        let cursor = TargetsCursor::new(&targets);
-        assert!(cursor.contains_target_for_path(&branch_path));
-    }
-
-    #[test]
-    fn test_always_retain_leaves() {
-        let keys = [
-            B256::right_padding_from(&[0x10]),
-            B256::right_padding_from(&[0x20, 0x00]),
-            B256::right_padding_from(&[0x20, 0x01]),
-            B256::right_padding_from(&[0x20, 0xf0]),
-            B256::right_padding_from(&[0x2f, 0x00]),
-            B256::right_padding_from(&[0x30]),
-            B256::right_padding_from(&[0x31]),
-            B256::right_padding_from(&[0x40]),
-        ];
-        let mut harness =
-            TrieTestHarness::new(keys.into_iter().map(|key| (key, U256::from(1))).collect());
-        // Force proof calculation to encounter leaves below retained and unretained branches.
-        harness.set_trie_nodes(BTreeMap::new());
-
-        let leaf_paths = |proofs: &[ProofTrieNodeV2]| {
-            proofs
-                .iter()
-                .filter(|proof| matches!(&proof.node, TrieNodeV2::Leaf(_)))
-                .map(|proof| proof.path)
-                .collect::<Vec<_>>()
-        };
-
-        let mut targets = vec![ProofV2Target::new(keys[1])];
-        let (proofs, _) = harness.proof_v2(&mut targets);
-        assert_eq!(leaf_paths(&proofs), vec![Nibbles::from_nibbles([0x2, 0x0, 0x0, 0x0])]);
-
-        let trie_cursor =
-            harness.trie_cursor_factory().storage_trie_cursor(harness.hashed_address()).unwrap();
-        let hashed_cursor = harness
-            .hashed_cursor_factory()
-            .hashed_storage_cursor(harness.hashed_address())
-            .unwrap();
-        let mut calculator =
-            StorageProofCalculator::new_storage(trie_cursor, hashed_cursor).always_retain_leaves();
-        let proofs = calculator.storage_proof(harness.hashed_address(), &mut targets).unwrap();
-
-        assert_eq!(
-            leaf_paths(&proofs),
-            vec![
-                Nibbles::from_nibbles([0x1]),
-                Nibbles::from_nibbles([0x2, 0x0, 0x0, 0x0]),
-                Nibbles::from_nibbles([0x2, 0x0, 0x0, 0x1]),
-                Nibbles::from_nibbles([0x2, 0x0, 0xf]),
-                Nibbles::from_nibbles([0x2, 0xf]),
-                Nibbles::from_nibbles([0x4]),
-            ]
-        );
-
-        let mut targets = vec![
-            ProofV2Target::new(keys[1]).with_min_len(3),
-            ProofV2Target::new(keys[4]).with_min_len(1),
-        ];
-        let proofs = calculator.storage_proof(harness.hashed_address(), &mut targets).unwrap();
-
-        assert_eq!(
-            leaf_paths(&proofs),
-            vec![
-                Nibbles::from_nibbles([0x2, 0x0, 0x0, 0x0]),
-                Nibbles::from_nibbles([0x2, 0x0, 0x0, 0x1]),
-                Nibbles::from_nibbles([0x2, 0xf]),
-            ]
-        );
-    }
-
-    #[test]
-    fn test_always_retain_leaves_advances_target_cursor() {
-        let keys = [
-            B256::right_padding_from(&[0x10]),
-            B256::right_padding_from(&[0x20]),
-            B256::right_padding_from(&[0x30]),
-            B256::right_padding_from(&[0x80, 0x00]),
-            B256::right_padding_from(&[0x80, 0x01]),
-            B256::right_padding_from(&[0x90]),
-        ];
-        let mut harness =
-            TrieTestHarness::new(keys.into_iter().map(|key| (key, U256::from(1))).collect());
-        harness.set_trie_nodes(BTreeMap::new());
-
-        let mut targets = vec![
-            ProofV2Target::new(keys[0]),
-            ProofV2Target::new(keys[1]).with_min_len(1),
-            ProofV2Target::new(keys[2]).with_min_len(1),
-            ProofV2Target::new(keys[4]).with_min_len(1),
-        ];
-        let trie_cursor =
-            harness.trie_cursor_factory().storage_trie_cursor(harness.hashed_address()).unwrap();
-        let hashed_cursor = harness
-            .hashed_cursor_factory()
-            .hashed_storage_cursor(harness.hashed_address())
-            .unwrap();
-        let mut calculator =
-            StorageProofCalculator::new_storage(trie_cursor, hashed_cursor).always_retain_leaves();
-        let proofs = calculator.storage_proof(harness.hashed_address(), &mut targets).unwrap();
-        let leaf_paths = proofs
-            .iter()
-            .filter(|proof| matches!(&proof.node, TrieNodeV2::Leaf(_)))
-            .map(|proof| proof.path)
-            .collect::<Vec<_>>();
-
-        assert_eq!(
-            leaf_paths,
-            vec![
-                Nibbles::from_nibbles([0x1]),
-                Nibbles::from_nibbles([0x2]),
-                Nibbles::from_nibbles([0x3]),
-                Nibbles::from_nibbles([0x8, 0x0, 0x0, 0x0]),
-                Nibbles::from_nibbles([0x8, 0x0, 0x0, 0x1]),
-                Nibbles::from_nibbles([0x9]),
-            ]
-        );
-    }
-
     /// Tests that `clear_computation_state` properly resets internal stacks, allowing a
     /// `StorageProofCalculator` to be reused after a mid-computation error left stale state.
     /// Before the fix, stale data in `branch_stack`, `child_stack`, and `branch_path`
@@ -2224,13 +2043,11 @@ mod tests {
             ext_len: 2,
             state_mask: TrieMask::new(0b1111),
             masks: None,
-            matches_target: None,
         });
         proof_calculator.branch_stack.push(ProofTrieBranch {
             ext_len: 0,
             state_mask: TrieMask::new(0b11),
             masks: None,
-            matches_target: None,
         });
         proof_calculator
             .child_stack

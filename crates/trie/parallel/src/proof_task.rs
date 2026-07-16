@@ -639,8 +639,7 @@ where
         let mut v2_calculator = proof_v2::StorageProofCalculator::new_storage(
             instrumented_trie_cursor,
             instrumented_hashed_cursor,
-        )
-        .always_retain_leaves();
+        );
 
         // Initially mark this worker as available.
         self.availability.mark_idle(self.worker_id);
@@ -885,8 +884,7 @@ where
                         <Factory::Provider as HashedCursorFactory>::StorageCursor<'_>,
                     >,
                 >,
-            >::new(instrumented_account_trie_cursor, instrumented_account_hashed_cursor)
-            .always_retain_leaves();
+            >::new(instrumented_account_trie_cursor, instrumented_account_hashed_cursor);
         let v2_storage_calculator =
             Rc::new(RefCell::new(proof_v2::StorageProofCalculator::new_storage(
                 instrumented_storage_trie_cursor,
