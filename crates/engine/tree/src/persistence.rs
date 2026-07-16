@@ -192,7 +192,7 @@ where
 
         if let Some(last_block) = last_block {
             let provider_rw = self.provider.database_provider_rw()?;
-            provider_rw.save_blocks_partial(&input)?;
+            provider_rw.save_blocks_with_frontiers(&input)?;
 
             if let Some(finalized) = pending_finalized {
                 provider_rw.save_finalized_block_number(finalized.min(last_block.number))?;
