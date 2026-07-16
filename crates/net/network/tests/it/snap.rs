@@ -111,9 +111,26 @@ async fn account_range_roundtrip_carries_slim_encoding_and_proof() {
         .unwrap();
     provider_rw.commit().unwrap();
 
-    let provider = BlockchainProvider::new(factory).unwrap();
-    let state_root = provider.latest().unwrap().state_root(HashedPostState::default()).unwrap();
+    let state_root = factory.latest().unwrap().state_root(HashedPostState::default()).unwrap();
 
+    // Persist a block whose header actually carries `state_root`, and advance the retained range
+    // to it, so the request below resolves the real post-insertion root rather than the stale,
+    // now-incorrect genesis-declared `EMPTY_ROOT_HASH`.
+    let genesis_hash = factory.sealed_header(0).unwrap().unwrap().hash();
+    let mut block = random_block(
+        &mut generators::rng(),
+        1,
+        BlockParams { parent: Some(genesis_hash), tx_count: Some(0), ..Default::default() },
+    )
+    .unseal();
+    block.header.state_root = state_root;
+    let block = block.seal_slow();
+    let provider_rw = factory.provider_rw().unwrap();
+    provider_rw.insert_block(&block.try_recover().unwrap()).unwrap();
+    provider_rw.save_stage_checkpoint(StageId::Finish, StageCheckpoint::new(1)).unwrap();
+    provider_rw.commit().unwrap();
+
+    let provider = BlockchainProvider::new(factory).unwrap();
     let net = spawn_snap_testnet(provider).await;
     let fetch = net.peers()[0].network().fetch_client().await.unwrap();
 
@@ -124,9 +141,12 @@ async fn account_range_roundtrip_carries_slim_encoding_and_proof() {
     let response = fetch
         .get_account_range(GetAccountRangeMessage {
             request_id: 7,
-            root_hash: EMPTY_ROOT_HASH,
+            root_hash: state_root,
             starting_hash: B256::ZERO,
-            limit_hash: B256::repeat_byte(0xff),
+            // The real highest account hash rather than `B256::repeat_byte(0xff)`: this still
+            // returns every account, but the cursor stops via the hash limit instead of
+            // exhausting the trie, so a boundary proof is still expected below.
+            limit_hash: expected.last().unwrap().0,
             response_bytes: SOFT_RESPONSE_LIMIT as u64,
         })
         .await
@@ -153,7 +173,7 @@ async fn account_range_roundtrip_carries_slim_encoding_and_proof() {
     }
 
     // A boundary proof's first node is always the trie root, so this proves the wire response
-    // carries a real proof against the requested state root, not an empty placeholder.
+    // carries a real proof against the requested (and now correctly resolved) state root.
     assert!(!proof.is_empty());
     assert_eq!(keccak256(&proof[0]), state_root);
 }
