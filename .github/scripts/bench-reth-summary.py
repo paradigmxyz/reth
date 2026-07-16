@@ -1660,6 +1660,7 @@ def generate_comparison_table(
     warmup_blocks: str | None = None,
     wait_time: str | None = None,
     bal_mode: str | None = None,
+    mode: str = "engine",
     run_pairs: int | None = None,
 ) -> str:
     """Generate a markdown comparison table between baseline and feature."""
@@ -1715,7 +1716,7 @@ def generate_comparison_table(
         f"| Persist Wait | {fmt_ms(run1['mean_persist_ms'])} | {fmt_ms(run2['mean_persist_ms'])} | {change_str(persist_pct, persist_ci_pct, persist_floor, lower_is_better=True, informational=persist_informational)} |",
         "",
     ]
-    meta_parts = [f"{n} {'big blocks' if big_blocks else 'blocks'}"]
+    meta_parts = [f"{n} {'big blocks' if big_blocks else 'blocks'}", f"mode: {mode}"]
     if warmup_blocks:
         meta_parts.append(f"{warmup_blocks} warmup")
     if run_pairs:
@@ -1970,6 +1971,7 @@ def main():
     parser.add_argument("--warmup-blocks", default=None, help="Number of warmup blocks")
     parser.add_argument("--wait-time", default=None, help="Wait time interval used between blocks")
     parser.add_argument("--bal-mode", default=None, help="BAL mode (true, feature, baseline)")
+    parser.add_argument("--mode", choices=("engine", "rpc"), default="engine", help="Benchmark execution mode")
     parser.add_argument("--benchmark-id", default=os.environ.get("BENCH_ID"), help="Benchmark ID used for OTLP labels")
     parser.add_argument("--grafana-url", default=None, help="Grafana dashboard URL for this benchmark run")
     parser.add_argument("--logs-url", default=None, help="Grafana Explore URL for benchmark logs")
@@ -2034,6 +2036,7 @@ def main():
         warmup_blocks=args.warmup_blocks,
         wait_time=args.wait_time,
         bal_mode=bal_mode,
+        mode=args.mode,
         run_pairs=args.run_pairs,
     )
     print(
@@ -2085,6 +2088,7 @@ def main():
         "run_pairs": args.run_pairs,
         "wait_time": args.wait_time,
         "bal_mode": bal_mode,
+        "mode": args.mode,
         "baseline": {
             "name": baseline_name,
             "ref": baseline_ref,
