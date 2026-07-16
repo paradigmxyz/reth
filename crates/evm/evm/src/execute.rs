@@ -595,12 +595,23 @@ where
             .cache
             .accounts
             .get(&account_changes.address)
-            .and_then(|account| {
-                account.account.as_ref().map(|plain_account| {
-                    HashedStorage::from_plain_storage(account.status, plain_account.storage.iter())
-                })
+            .map(|account| {
+                account.account.as_ref().map_or_else(
+                    || HashedStorage::new(account.status.was_destroyed()),
+                    |plain_account| {
+                        HashedStorage::from_plain_storage(
+                            account.status,
+                            plain_account.storage.iter(),
+                        )
+                    },
+                )
             })
             .unwrap_or_default();
+
+        if hashed_storage.proves_post_state_empty() {
+            account_changes.storage_root = Some(StorageRoot::Empty);
+            continue
+        }
 
         let storage_root =
             storage_root_provider.storage_root(account_changes.address, hashed_storage)?;

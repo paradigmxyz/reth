@@ -438,6 +438,14 @@ impl HashedStorage {
         !self.wiped && self.storage.is_empty()
     }
 
+    /// Returns true if this overlay proves the post-state storage trie is empty.
+    ///
+    /// A wiped overlay discards every slot from the parent state. If it contains no non-zero
+    /// values after that wipe, no storage leaf can remain in the post-state trie.
+    pub fn proves_post_state_empty(&self) -> bool {
+        self.wiped && self.storage.values().all(U256::is_zero)
+    }
+
     /// Create new hashed storage from iterator.
     pub fn from_iter(wiped: bool, iter: impl IntoIterator<Item = (B256, U256)>) -> Self {
         Self { wiped, storage: HashMap::from_iter(iter) }
@@ -908,6 +916,19 @@ mod tests {
     use alloy_primitives::Bytes;
     use revm_database::{states::StorageSlot, StorageWithOriginalValues};
     use revm_state::{AccountInfo, Bytecode};
+
+    #[test]
+    fn hashed_storage_proves_post_state_empty() {
+        let slot = B256::with_last_byte(1);
+
+        assert!(HashedStorage::new(true).proves_post_state_empty());
+        assert!(HashedStorage::from_iter(true, [(slot, U256::ZERO)]).proves_post_state_empty());
+        assert!(!HashedStorage::from_iter(true, [(slot, U256::from(1))]).proves_post_state_empty());
+
+        // An empty non-wiped overlay says only that storage was unchanged. The parent trie can
+        // still contain slots, so it does not prove an empty post-state trie.
+        assert!(!HashedStorage::new(false).proves_post_state_empty());
+    }
 
     #[test]
     fn hashed_state_wiped_extension() {
