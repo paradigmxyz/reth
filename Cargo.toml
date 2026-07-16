@@ -695,22 +695,22 @@ vergen-git2 = "10.0.1"
 ipnet = "2.11"
 
 [patch.crates-io]
-revm = { git = "https://github.com/bluealloy/revm", rev = "30e04db0a6285a79f613dc404bfc04e4b757b0c9" }
-revm-bytecode = { git = "https://github.com/bluealloy/revm", rev = "30e04db0a6285a79f613dc404bfc04e4b757b0c9" }
-revm-context = { git = "https://github.com/bluealloy/revm", rev = "30e04db0a6285a79f613dc404bfc04e4b757b0c9" }
-revm-context-interface = { git = "https://github.com/bluealloy/revm", rev = "30e04db0a6285a79f613dc404bfc04e4b757b0c9" }
-revm-database = { git = "https://github.com/bluealloy/revm", rev = "30e04db0a6285a79f613dc404bfc04e4b757b0c9" }
-revm-database-interface = { git = "https://github.com/bluealloy/revm", rev = "30e04db0a6285a79f613dc404bfc04e4b757b0c9" }
-revm-handler = { git = "https://github.com/bluealloy/revm", rev = "30e04db0a6285a79f613dc404bfc04e4b757b0c9" }
-revm-inspector = { git = "https://github.com/bluealloy/revm", rev = "30e04db0a6285a79f613dc404bfc04e4b757b0c9" }
-revm-interpreter = { git = "https://github.com/bluealloy/revm", rev = "30e04db0a6285a79f613dc404bfc04e4b757b0c9" }
-revm-precompile = { git = "https://github.com/bluealloy/revm", rev = "30e04db0a6285a79f613dc404bfc04e4b757b0c9" }
-revm-primitives = { git = "https://github.com/bluealloy/revm", rev = "30e04db0a6285a79f613dc404bfc04e4b757b0c9" }
-revm-state = { git = "https://github.com/bluealloy/revm", rev = "30e04db0a6285a79f613dc404bfc04e4b757b0c9" }
-revm-inspectors = { git = "https://github.com/paradigmxyz/revm-inspectors", rev = "74a378788dac0001905c9119d6b979218725f424" }
-alloy-evm = { git = "https://github.com/alloy-rs/evm", rev = "bb4565dc2df8689bb470fef972b9ce13cb1a171d" }
-reth-codecs = { git = "https://github.com/paradigmxyz/reth-core", rev = "05b03df6427fb6ab26f32bff450ec7a0f77e8c1b" }
-reth-codecs-derive = { git = "https://github.com/paradigmxyz/reth-core", rev = "05b03df6427fb6ab26f32bff450ec7a0f77e8c1b" }
-reth-primitives-traits = { git = "https://github.com/paradigmxyz/reth-core", rev = "05b03df6427fb6ab26f32bff450ec7a0f77e8c1b" }
-reth-rpc-traits = { git = "https://github.com/paradigmxyz/reth-core", rev = "05b03df6427fb6ab26f32bff450ec7a0f77e8c1b" }
-reth-zstd-compressors = { git = "https://github.com/paradigmxyz/reth-core", rev = "05b03df6427fb6ab26f32bff450ec7a0f77e8c1b" }
+revm = { git = "https://github.com/bluealloy/revm", rev = "335a35ddb370b667bff248109524a4efc589213f" }
+revm-bytecode = { git = "https://github.com/bluealloy/revm", rev = "335a35ddb370b667bff248109524a4efc589213f" }
+revm-context = { git = "https://github.com/bluealloy/revm", rev = "335a35ddb370b667bff248109524a4efc589213f" }
+revm-context-interface = { git = "https://github.com/bluealloy/revm", rev = "335a35ddb370b667bff248109524a4efc589213f" }
+revm-database = { git = "https://github.com/bluealloy/revm", rev = "335a35ddb370b667bff248109524a4efc589213f" }
+revm-database-interface = { git = "https://github.com/bluealloy/revm", rev = "335a35ddb370b667bff248109524a4efc589213f" }
+revm-handler = { git = "https://github.com/bluealloy/revm", rev = "335a35ddb370b667bff248109524a4efc589213f" }
+revm-inspector = { git = "https://github.com/bluealloy/revm", rev = "335a35ddb370b667bff248109524a4efc589213f" }
+revm-interpreter = { git = "https://github.com/bluealloy/revm", rev = "335a35ddb370b667bff248109524a4efc589213f" }
+revm-precompile = { git = "https://github.com/bluealloy/revm", rev = "335a35ddb370b667bff248109524a4efc589213f" }
+revm-primitives = { git = "https://github.com/bluealloy/revm", rev = "335a35ddb370b667bff248109524a4efc589213f" }
+revm-state = { git = "https://github.com/bluealloy/revm", rev = "335a35ddb370b667bff248109524a4efc589213f" }
+revm-inspectors = { git = "https://github.com/paradigmxyz/revm-inspectors", rev = "4663db6869c18b72438e0d68769dfb9fb80bf10e" }
+alloy-evm = { git = "https://github.com/alloy-rs/evm", rev = "721c59b9e4f640c9e646c0516e5be7142c956a26" }
+reth-codecs = { git = "https://github.com/paradigmxyz/reth-core", rev = "1030ec2e47bfd01956e2239ad3399bf3b5121cbe" }
+reth-codecs-derive = { git = "https://github.com/paradigmxyz/reth-core", rev = "1030ec2e47bfd01956e2239ad3399bf3b5121cbe" }
+reth-primitives-traits = { git = "https://github.com/paradigmxyz/reth-core", rev = "1030ec2e47bfd01956e2239ad3399bf3b5121cbe" }
+reth-rpc-traits = { git = "https://github.com/paradigmxyz/reth-core", rev = "1030ec2e47bfd01956e2239ad3399bf3b5121cbe" }
+reth-zstd-compressors = { git = "https://github.com/paradigmxyz/reth-core", rev = "1030ec2e47bfd01956e2239ad3399bf3b5121cbe" }
