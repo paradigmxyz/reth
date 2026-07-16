@@ -26,6 +26,13 @@ const TXPOOL_REFRESH_INTERVAL: Duration = Duration::from_millis(100);
 /// Delay while waiting for pool maintenance to advance to the state being warmed.
 const TXPOOL_HEAD_POLL_INTERVAL: Duration = Duration::from_millis(10);
 
+/// A live, forward-only view of the pool's best transactions for one canonical parent.
+///
+/// Returning [`None`](Iterator::next) only means no transaction is currently ready. The same
+/// iterator can yield transactions that become pending later.
+pub type TxPoolPrewarmTransactions<N> =
+    Box<dyn Iterator<Item = TxPoolPrewarmTransaction<N>> + Send>;
+
 /// A transaction selected from the txpool for cache-only prewarming.
 #[derive(Debug, Clone)]
 pub struct TxPoolPrewarmTransaction<N: NodePrimitives> {
@@ -36,13 +43,6 @@ pub struct TxPoolPrewarmTransaction<N: NodePrimitives> {
     /// Recovered consensus transaction.
     pub transaction: Recovered<TxTy<N>>,
 }
-
-/// A live, forward-only view of the pool's best transactions for one canonical parent.
-///
-/// Returning [`None`](Iterator::next) only means no transaction is currently ready. The same
-/// iterator can yield transactions that become pending later.
-pub type TxPoolPrewarmTransactions<N> =
-    Box<dyn Iterator<Item = TxPoolPrewarmTransaction<N>> + Send>;
 
 /// Source of txpool transactions for best-effort cache prewarming.
 pub trait TxPoolPrewarmSource<N: NodePrimitives>: Send + Sync + Debug {

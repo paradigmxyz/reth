@@ -12,19 +12,19 @@ use std::{fmt::Debug, marker::PhantomData};
 
 /// [`TransactionPool`]-backed [`TxPoolPrewarmSource`].
 #[derive(Debug)]
-pub(crate) struct PoolTxPoolPrewarmSource<N: NodePrimitives, P> {
+pub(crate) struct TransactionPoolPrewarmSource<N: NodePrimitives, P> {
     pool: P,
     _marker: PhantomData<N>,
 }
 
-impl<N: NodePrimitives, P: TransactionPool> PoolTxPoolPrewarmSource<N, P> {
+impl<N: NodePrimitives, P: TransactionPool> TransactionPoolPrewarmSource<N, P> {
     /// Creates a new txpool prewarm source.
     pub(crate) const fn new(pool: P) -> Self {
         Self { pool, _marker: PhantomData }
     }
 }
 
-impl<N, P> TxPoolPrewarmSource<N> for PoolTxPoolPrewarmSource<N, P>
+impl<N, P> TxPoolPrewarmSource<N> for TransactionPoolPrewarmSource<N, P>
 where
     N: NodePrimitives,
     P: TransactionPool<Transaction: PoolTransaction<Consensus = TxTy<N>>>
@@ -47,10 +47,6 @@ where
             ));
         best.allow_updates_out_of_order();
         best.skip_blobs();
-
-        if self.pool.block_info().last_seen_block_hash != parent_hash {
-            return None
-        }
 
         Some(Box::new(best.map(|transaction| TxPoolPrewarmTransaction {
             hash: *transaction.hash(),
