@@ -19,12 +19,12 @@ use crate::tree::{
 use alloy_eip7928::bal::DecodedBal;
 use alloy_eips::eip4895::Withdrawal;
 use alloy_primitives::{keccak256, Address, B256, U256};
-use core::{borrow::Borrow, convert::Infallible};
+use core::convert::Infallible;
 use metrics::{Counter, Gauge, Histogram};
 use rayon::prelude::*;
 use reth_evm::{
     database::StateProviderDatabase, ConfigureEvm, Evm as EvmInstance, EvmEnv, EvmFor,
-    ExecutableTxFor,
+    ExecutableTxFor, RecoveredTx,
 };
 use reth_execution_types::{EvmStateChangeSink, ExecutionAccountChangeRef, ExecutionStorageChange};
 use reth_metrics::Metrics;
@@ -228,12 +228,13 @@ where
 
             let start = Instant::now();
 
-            let (tx_env, _tx) = tx.into_parts();
+            let (_tx_env, tx) = tx.into_parts();
+            let tx_env = ctx.evm_config.tx_env(tx.to_recovered());
             // Prewarm workers must not commit speculative writes into the reused worker EVM:
             // task scheduling would otherwise make later prewarm reads observe non-canonical state.
             let mut proof_targets = PrewarmProofTargetsSink::default();
 
-            match evm.transact_and_discard(tx_env.borrow(), &mut proof_targets) {
+            match evm.transact_and_discard(&tx_env, &mut proof_targets) {
                 Ok(()) => {}
                 Err(err) => {
                     trace!(

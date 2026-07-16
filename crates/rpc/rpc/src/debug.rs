@@ -12,11 +12,7 @@ use alloy_rpc_types_trace::geth::{
     BlockTraceResult, GethDebugTracingCallOptions, GethDebugTracingOptions, GethTrace, TraceResult,
 };
 use async_trait::async_trait;
-use evm2::{
-    ethereum::RecoveredTxEnvelope,
-    evm::{DynDatabase, NonStaticAny, StateChangeSource},
-    EvmTypes, TxResultWithState,
-};
+use evm2::evm::StateChangeSource;
 use evm2_inspectors::tracing::{DebugInspector, TransactionContext};
 use futures::Stream;
 use jsonrpsee::core::RpcResult;
@@ -24,7 +20,7 @@ use parking_lot::RwLock;
 use reth_chainspec::{ChainSpecProvider, EthChainSpec, EthereumHardforks};
 use reth_engine_primitives::ConsensusEngineEvent;
 use reth_errors::RethError;
-use reth_evm::{database::BorrowedDatabase, execute::Executor, ConfigureEvm, EvmEnv, EvmEnvFor};
+use reth_evm::{execute::Executor, ConfigureEvm, DynDatabase, EvmEnv, EvmEnvFor};
 use reth_primitives_traits::{
     Account as PrimitiveAccount, Block as BlockTrait, BlockBody, BlockTy, ReceiptWithBloom,
     RecoveredBlock,
@@ -48,7 +44,7 @@ use reth_trie_common::{
     updates::TrieUpdates, ExecutionWitnessMode, HashedPostState, HashedStorage,
 };
 use serde::{Deserialize, Serialize};
-use std::{borrow::Borrow, collections::VecDeque, sync::Arc};
+use std::{collections::VecDeque, sync::Arc};
 use tokio::sync::{AcquireError, OwnedSemaphorePermit};
 use tokio_stream::StreamExt;
 
@@ -102,27 +98,6 @@ where
     }
 }
 
-fn debug_result<T: EvmTypes>(
-    inspector: &mut DebugInspector,
-    tx_context: Option<TransactionContext>,
-    tx: &T::Tx,
-    block_env: &evm2::env::BlockEnv<T>,
-    result: &TxResultWithState<T>,
-    db: &mut dyn DynDatabase,
-) -> Result<GethTrace, EthApiError> {
-    if NonStaticAny::type_id(tx) != core::any::TypeId::of::<RecoveredTxEnvelope>() ||
-        NonStaticAny::type_id(block_env) != core::any::TypeId::of::<evm2::env::BlockEnv>()
-    {
-        return Err(EthApiError::Unsupported("debug tracing for custom EVM types"))
-    }
-
-    // SAFETY: The type IDs above verify both erased values have the target concrete types.
-    let tx = unsafe { &*core::ptr::from_ref(tx).cast::<RecoveredTxEnvelope>() };
-    // SAFETY: The type IDs above verify both erased values have the target concrete types.
-    let block_env = unsafe { &*core::ptr::from_ref(block_env).cast::<evm2::env::BlockEnv>() };
-    inspector.get_result(tx_context, tx, block_env, result, db).map_err(Into::into)
-}
-
 // === impl DebugApi ===
 
 impl<Eth> DebugApi<Eth>
@@ -156,19 +131,19 @@ where
                     let (next_inspector, res) =
                         eth_api.inspect(&mut db, evm_env.clone(), &tx_env, inspector)?;
                     inspector = next_inspector;
-                    let result = debug_result(
-                        &mut inspector,
-                        Some(TransactionContext {
-                            block_hash: Some(block.hash()),
-                            tx_hash: Some(tx_hash),
-                            tx_index: Some(index),
-                        }),
-                        tx_env.borrow(),
-                        evm_env.block_env(),
-                        &res,
-                        &mut db,
-                    )
-                    .map_err(Eth::Error::from_eth_err)?;
+                    let result = inspector
+                        .get_result(
+                            Some(TransactionContext {
+                                block_hash: Some(block.hash()),
+                                tx_hash: Some(tx_hash),
+                                tx_index: Some(index),
+                            }),
+                            &tx_env,
+                            evm_env.block_env(),
+                            &res,
+                            &mut db,
+                        )
+                        .map_err(Eth::Error::from_eth_err)?;
 
                     results.push(TraceResult::Success { result, tx_hash: Some(tx_hash) });
                     if transactions.peek().is_some() {
@@ -275,19 +250,19 @@ where
                 let inspector = DebugInspector::new(opts).map_err(Eth::Error::from_eth_err)?;
                 let (mut inspector, res) =
                     eth_api.inspect(&mut db, evm_env.clone(), &tx_env, inspector)?;
-                let trace = debug_result(
-                    &mut inspector,
-                    Some(TransactionContext {
-                        block_hash: Some(block_hash),
-                        tx_index: Some(index),
-                        tx_hash: Some(tx_hash),
-                    }),
-                    tx_env.borrow(),
-                    evm_env.block_env(),
-                    &res,
-                    &mut db,
-                )
-                .map_err(Eth::Error::from_eth_err)?;
+                let trace = inspector
+                    .get_result(
+                        Some(TransactionContext {
+                            block_hash: Some(block_hash),
+                            tx_index: Some(index),
+                            tx_hash: Some(tx_hash),
+                        }),
+                        &tx_env,
+                        evm_env.block_env(),
+                        &res,
+                        &mut db,
+                    )
+                    .map_err(Eth::Error::from_eth_err)?;
 
                 Ok(trace)
             })
@@ -332,15 +307,9 @@ where
                     DebugInspector::new(tracing_options).map_err(Eth::Error::from_eth_err)?;
                 let (mut inspector, res) =
                     this.eth_api().inspect(&mut *db, evm_env.clone(), &tx_env, inspector)?;
-                let trace = debug_result(
-                    &mut inspector,
-                    None,
-                    tx_env.borrow(),
-                    evm_env.block_env(),
-                    &res,
-                    db,
-                )
-                .map_err(Eth::Error::from_eth_err)?;
+                let trace = inspector
+                    .get_result(None, &tx_env, evm_env.block_env(), &res, db)
+                    .map_err(Eth::Error::from_eth_err)?;
                 Ok(trace)
             })
             .await
@@ -400,15 +369,9 @@ where
                     DebugInspector::new(tracing_options).map_err(Eth::Error::from_eth_err)?;
                 let (mut inspector, res) =
                     eth_api.inspect(&mut db, evm_env.clone(), &tx_env, inspector)?;
-                let trace = debug_result(
-                    &mut inspector,
-                    None,
-                    tx_env.borrow(),
-                    evm_env.block_env(),
-                    &res,
-                    &mut db,
-                )
-                .map_err(Eth::Error::from_eth_err)?;
+                let trace = inspector
+                    .get_result(None, &tx_env, evm_env.block_env(), &res, &mut db)
+                    .map_err(Eth::Error::from_eth_err)?;
 
                 Ok(trace)
             })
@@ -501,15 +464,9 @@ where
                         let (next_inspector, res) =
                             eth_api.inspect(&mut db, evm_env.clone(), &tx_env, inspector)?;
                         inspector = next_inspector;
-                        let trace = debug_result(
-                            &mut inspector,
-                            None,
-                            tx_env.borrow(),
-                            evm_env.block_env(),
-                            &res,
-                            &mut db,
-                        )
-                        .map_err(Eth::Error::from_eth_err)?;
+                        let trace = inspector
+                            .get_result(None, &tx_env, evm_env.block_env(), &res, &mut db)
+                            .map_err(Eth::Error::from_eth_err)?;
 
                         // If there is more transactions, commit the database
                         // If there is no transactions, but more bundles, commit to the database too
@@ -577,7 +534,7 @@ where
             .spawn_with_state_at_block(block.parent_hash(), move |eth_api, mut db| {
                 let output = eth_api
                     .evm_config()
-                    .executor(BorrowedDatabase::new(&mut db))
+                    .executor(&mut db)
                     .execute(&block)
                     .map_err(|err| EthApiError::Internal(err.into()))?;
                 db.commit_source(output.state.inner());

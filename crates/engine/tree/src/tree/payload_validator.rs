@@ -131,8 +131,9 @@ use reth_engine_primitives::{
 };
 use reth_errors::{BlockExecutionError, ProviderResult};
 use reth_evm::{
-    database::StateProviderDatabase, BlockExecutor, BlockExecutorFactory, ConfigureEvm, EvmEnvFor,
-    ExecutableTxFor, ExecutionCtxFor, RecoveredTx, TxEnvFor,
+    database::StateProviderDatabase, BlockExecutor, BlockExecutorFactory,
+    BlockExecutorTransactionFor, ConfigureEvm, EvmEnvFor, ExecutableTxFor, ExecutionCtxFor,
+    RecoveredTx,
 };
 use reth_execution_cache::{CacheFillMode, CacheStats, SavedCache};
 use reth_payload_primitives::{
@@ -1140,7 +1141,7 @@ where
     where
         Tx: ExecutableTxFor<Evm>,
         Err: core::error::Error + Send + Sync + 'static,
-        Executor: BlockExecutor<Primitives = N, Transaction = TxEnvFor<Evm>>,
+        Executor: BlockExecutor<Primitives = N, Transaction = BlockExecutorTransactionFor<Evm>>,
     {
         let pre_exec_start = Instant::now();
         debug_span!(target: "engine::tree", "pre_execution").in_scope(|| {

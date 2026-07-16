@@ -24,6 +24,10 @@ pub type TxResultWithStateFor<Evm> = evm2::TxResultWithState<EvmTypesFor<Evm>>;
 
 /// Type alias for the configured transaction environment.
 pub type TxEnvFor<Evm> =
+    <<Evm as ConfigureEvm>::BlockExecutorFactory as BlockExecutorFactory>::EvmTransaction;
+
+/// Type alias for the transaction consumed by the configured block executor.
+pub type BlockExecutorTransactionFor<Evm> =
     <<Evm as ConfigureEvm>::BlockExecutorFactory as BlockExecutorFactory>::Transaction;
 
 /// Helper to access the configured execution context.

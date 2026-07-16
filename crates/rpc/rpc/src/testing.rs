@@ -31,7 +31,7 @@ use reth_errors::RethError;
 use reth_ethereum_engine_primitives::EthBuiltPayload;
 use reth_ethereum_primitives::EthPrimitives;
 use reth_evm::{
-    database::{BorrowedDatabase, StateProviderDatabase},
+    database::StateProviderDatabase,
     execute::{BlockBuilder, BlockExecutor},
     ConfigureEvm, EvmEnv, NextBlockEnvAttributes,
 };
@@ -158,7 +158,7 @@ where
                 };
 
                 let mut builder = evm_config
-                    .builder_for_next_block(BorrowedDatabase::new(&mut state), &parent, env_attrs)
+                    .builder_for_next_block(&mut state, &parent, env_attrs)
                     .map_err(RethError::other)
                     .map_err(Eth::Error::from_eth_err)?;
                 if is_amsterdam {

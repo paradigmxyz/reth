@@ -10,13 +10,13 @@ use evm2_inspectors::tracing::{TracingInspector, TracingInspectorConfig};
 use futures::Future;
 use reth_errors::RethError;
 use reth_evm::{
-    database::BorrowedDatabase, execute::BlockExecutorFactory, ConfigureEvm, Evm, EvmEnvFor,
-    EvmTypesFor, TxEnvFor, TxResultWithStateFor,
+    execute::BlockExecutorFactory, ConfigureEvm, Evm, EvmEnvFor, EvmTypesFor, TxEnvFor,
+    TxResultWithStateFor,
 };
 use reth_primitives_traits::{BlockBody, RecoveredBlock};
 use reth_rpc_eth_types::{EthApiError, StateCacheDb};
 use reth_storage_api::ProviderBlock;
-use std::{borrow::Borrow, sync::Arc};
+use std::sync::Arc;
 
 /// Context passed to per-transaction trace callbacks.
 pub struct TracingCtx<'a, Insp, EvmTypes: evm2::EvmTypes> {
@@ -56,7 +56,7 @@ pub trait Trace: LoadState<Error: FromEvmError<Self::Evm>> + Call {
         I: evm2::Inspector<EvmTypesFor<Self::Evm>> + 'static,
     {
         let mut evm = self.evm_config().block_executor_factory().evm_with_env(db, evm_env);
-        evm.transact_with_inspector(tx_env.borrow(), inspector).map_err(Self::Error::from_evm_err)
+        evm.transact_with_inspector(tx_env, inspector).map_err(Self::Error::from_evm_err)
     }
 
     /// Executes the transaction on top of the given [`BlockId`] with a tracer configured by the
@@ -338,7 +338,7 @@ pub trait Trace: LoadState<Error: FromEvmError<Self::Evm>> + Call {
             .map_err(Self::Error::from_eth_err)?;
         let changes = self
             .evm_config()
-            .pre_block_state_changes(BorrowedDatabase::new(&mut *db), evm_env, block.number(), ctx)
+            .pre_block_state_changes(&mut *db, evm_env, block.number(), ctx)
             .map_err(|err| EthApiError::EvmCustom(err.to_string()))
             .map_err(Self::Error::from_eth_err)?;
         db.commit_source(&changes);

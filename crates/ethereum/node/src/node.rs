@@ -10,8 +10,7 @@ use reth_engine_primitives::EngineTypes;
 use reth_ethereum_consensus::EthBeaconConsensus;
 use reth_ethereum_engine_primitives::{EthBuiltPayload, EthPayloadAttributes};
 use reth_ethereum_primitives::{EthPrimitives, TransactionSigned};
-use reth_evm::{BlockExecutorFactory, ConfigureEvm, NextBlockEnvAttributes};
-use reth_evm_ethereum::EthTxEnv;
+use reth_evm::{ConfigureEvm, NextBlockEnvAttributes};
 #[cfg(not(feature = "jit"))]
 use reth_evm_ethereum::RethEvmFactory;
 #[cfg(feature = "jit")]
@@ -154,10 +153,7 @@ impl<N, NetworkT> EthApiBuilder<N> for EthereumEthApiBuilder<NetworkT>
 where
     N: FullNodeComponents<
         Types: NodeTypes<ChainSpec: Hardforks + EthereumHardforks>,
-        Evm: ConfigureEvm<
-            NextBlockEnvCtx: BuildPendingEnv<HeaderTy<N::Types>>,
-            BlockExecutorFactory: BlockExecutorFactory<Transaction = EthTxEnv>,
-        >,
+        Evm: ConfigureEvm<NextBlockEnvCtx: BuildPendingEnv<HeaderTy<N::Types>>>,
     >,
     NetworkT: RpcTypes<TransactionRequest: SignableTxRequest<TxTy<N::Types>>>,
     EthRpcConverterFor<N, NetworkT>: RpcConvert<

@@ -14,16 +14,19 @@ use alloy_rpc_types_eth::{
     state::{EvmOverrides, StateOverride},
     BlockId, Bundle, EthCallResponse, StateContext, TransactionInfo,
 };
-use evm2::evm::{CacheDB, DynDatabase, StateChangeSink, StateChangeSource};
+use evm2::{
+    ethereum::TransactionExt,
+    evm::{CacheDB, DynDatabase, StateChangeSink, StateChangeSource},
+};
 use evm2_inspectors::{access_list::AccessListInspector, transfer::TransferInspector};
 use futures::Future;
 use reth_chainspec::{ChainSpecProvider, EthChainSpec, EthereumHardforks};
 use reth_errors::{ProviderError, RethError};
 use reth_evm::{
     cancelled::CancelOnDrop,
-    database::{BorrowedDatabase, StateProviderDatabase},
+    database::StateProviderDatabase,
     execute::{BlockBuilder, BlockExecutorFactory},
-    ConfigureEvm, Database, Evm, EvmEnv, EvmEnvFor, EvmTypesFor, TxEnvFor, TxResultWithStateFor,
+    ConfigureEvm, Evm, EvmEnv, EvmEnvFor, EvmTypesFor, TxEnvFor, TxResultWithStateFor,
 };
 use reth_node_api::BlockBody;
 use reth_primitives_traits::Recovered;
@@ -32,10 +35,10 @@ use reth_rpc_eth_types::{
     cache::db::{apply_block_overrides, apply_state_overrides, StateProviderTraitObjWrapper},
     error::{AsEthApiError, FromEthApiError},
     simulate::{self, EthSimulateError},
-    EthApiError, StateCacheDb,
+    EthApiError, RpcInvalidTransactionError, StateCacheDb,
 };
 use reth_storage_api::{BlockIdReader, ProviderTx, StateProviderBox};
-use std::{borrow::Borrow, fmt};
+use std::fmt;
 use tracing::{trace, warn};
 
 /// Result type for `eth_simulateV1` RPC method.
@@ -188,7 +191,7 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
                         let mut evm = this
                             .evm_config()
                             .block_executor_factory()
-                            .evm_with_env(BorrowedDatabase::new(&mut db), evm_env.clone());
+                            .evm_with_env(&mut db, evm_env.clone());
                         evm.set_inspector(inspector);
                         let mut builder =
                             this.evm_config().create_block_builder(evm, evm_env, &parent, ctx);
@@ -215,7 +218,7 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
                         let evm = this
                             .evm_config()
                             .block_executor_factory()
-                            .evm_with_env(BorrowedDatabase::new(&mut db), evm_env.clone());
+                            .evm_with_env(&mut db, evm_env.clone());
                         let mut builder =
                             this.evm_config().create_block_builder(evm, evm_env, &parent, ctx);
 
@@ -347,12 +350,7 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
                         .map_err(Self::Error::from_eth_err)?;
                     let changes = this
                         .evm_config()
-                        .pre_block_state_changes(
-                            BorrowedDatabase::new(&mut db),
-                            evm_env.clone(),
-                            block.number(),
-                            ctx,
-                        )
+                        .pre_block_state_changes(&mut db, evm_env.clone(), block.number(), ctx)
                         .map_err(|err| EthApiError::EvmCustom(err.to_string()))
                         .map_err(Self::Error::from_eth_err)?;
                     db.commit_source(&changes);
@@ -499,21 +497,18 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
             // per-tx cap (2^24 ≈ 16.7M post-Osaka).
             evm_env.version_mut().tx_gas_limit_cap = u64::MAX;
 
-            let tx_env =
-                this.create_txn_env(&evm_env, request.clone(), BorrowedDatabase::new(&mut db))?;
+            let tx_env = this.create_txn_env(&evm_env, request.clone(), &mut db)?;
             if !request_has_gas_limit &&
                 request_gas_price(request.as_ref(), evm_env.block_base_fee()) > 0
             {
-                let cap =
-                    this.caller_gas_allowance(BorrowedDatabase::new(&mut db), &evm_env, &tx_env)?;
+                let cap = this.caller_gas_allowance(&mut db, &evm_env, &tx_env)?;
                 // no gas limit was provided in the request, so we need to cap the request's gas
                 // limit
                 request.as_mut().set_gas_limit(cap.min(evm_env.block_env().gas_limit.to::<u64>()));
             }
 
             let inspector = AccessListInspector::new(initial);
-            let tx_env =
-                this.create_txn_env(&evm_env, request.clone(), BorrowedDatabase::new(&mut db))?;
+            let tx_env = this.create_txn_env(&evm_env, request.clone(), &mut db)?;
 
             let (inspector, result) =
                 this.transact_with_inspector(&mut db, evm_env.clone(), tx_env, inspector)?;
@@ -529,7 +524,7 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
 
             // transact again to get the exact gas used
             request.as_mut().set_access_list(access_list.clone());
-            let tx_env = this.create_txn_env(&evm_env, request, BorrowedDatabase::new(&mut db))?;
+            let tx_env = this.create_txn_env(&evm_env, request, &mut db)?;
             let result = this.transact(&mut db, evm_env, tx_env)?;
             let gas_used = result.result.tx_gas_used();
             let error = Self::Error::ensure_success(result.result).err().map(|e| e.to_string());
@@ -565,10 +560,27 @@ pub trait Call:
     /// Returns the max gas limit that the caller can afford given a transaction environment.
     fn caller_gas_allowance(
         &self,
-        db: impl Database<Error: Into<EthApiError>>,
-        evm_env: &EvmEnvFor<Self::Evm>,
+        mut db: impl DynDatabase,
+        _evm_env: &EvmEnvFor<Self::Evm>,
         tx_env: &TxEnvFor<Self::Evm>,
-    ) -> Result<u64, Self::Error>;
+    ) -> Result<u64, Self::Error> {
+        let balance = match db.get_account(&tx_env.caller()) {
+            Ok(account) => account.map(|account| account.balance).unwrap_or_default(),
+            Err(code) => return Err(Self::Error::from_eth_err(EthApiError::from(db.error(code)))),
+        };
+        let value = tx_env.value();
+        let balance = balance.checked_sub(value).ok_or_else(|| {
+            EthApiError::from(RpcInvalidTransactionError::InsufficientFunds {
+                cost: value,
+                balance,
+            })
+        })?;
+
+        Ok(balance
+            .checked_div(U256::from(tx_env.effective_gas_price(None)))
+            .unwrap_or_default()
+            .saturating_to())
+    }
 
     /// Executes the closure with the state that corresponds to the given [`BlockId`].
     fn with_state_at_block<F, R>(
@@ -586,7 +598,7 @@ pub trait Call:
         })
     }
 
-    /// Executes the `TxEnv` against the given [Database] without committing state
+    /// Executes the `TxEnv` against the given [`DynDatabase`] without committing state
     /// changes.
     fn transact<DB>(
         &self,
@@ -598,12 +610,12 @@ pub trait Call:
         DB: DynDatabase + fmt::Debug,
     {
         let mut evm = self.evm_config().block_executor_factory().evm_with_env(db, evm_env);
-        let res = evm.transact(tx_env.borrow()).map_err(Self::Error::from_evm_err)?;
+        let res = evm.transact(&tx_env).map_err(Self::Error::from_evm_err)?;
 
         Ok(res)
     }
 
-    /// Executes the [`reth_evm::EvmEnv`] against the given [Database] without committing state
+    /// Executes the [`reth_evm::EvmEnv`] against the given [`DynDatabase`] without committing state
     /// changes.
     fn transact_with_inspector<DB, I>(
         &self,
@@ -617,9 +629,8 @@ pub trait Call:
         I: evm2::Inspector<EvmTypesFor<Self::Evm>> + 'static,
     {
         let mut evm = self.evm_config().block_executor_factory().evm_with_env(db, evm_env);
-        let res = evm
-            .transact_with_inspector(tx_env.borrow(), inspector)
-            .map_err(Self::Error::from_evm_err)?;
+        let res =
+            evm.transact_with_inspector(&tx_env, inspector).map_err(Self::Error::from_evm_err)?;
 
         Ok(res)
     }
@@ -770,12 +781,7 @@ pub trait Call:
                     .map_err(Self::Error::from_eth_err)?;
                 let changes = this
                     .evm_config()
-                    .pre_block_state_changes(
-                        BorrowedDatabase::new(&mut db),
-                        evm_env.clone(),
-                        block.number(),
-                        ctx,
-                    )
+                    .pre_block_state_changes(&mut db, evm_env.clone(), block.number(), ctx)
                     .map_err(|err| EthApiError::EvmCustom(err.to_string()))
                     .map_err(Self::Error::from_eth_err)?;
                 db.commit_source(&changes);
@@ -839,15 +845,15 @@ pub trait Call:
         &self,
         evm_env: &EvmEnvFor<Self::Evm>,
         mut request: RpcTxReq<<Self::RpcConvert as RpcConvert>::Network>,
-        mut db: impl Database<Error: Into<EthApiError>>,
+        mut db: impl DynDatabase,
     ) -> Result<TxEnvFor<Self::Evm>, Self::Error> {
         if request.as_ref().nonce().is_none() {
-            let nonce = db
-                .get_account(&request.as_ref().from().unwrap_or_default())
-                .map_err(Into::into)
-                .map_err(Self::Error::from_eth_err)?
-                .map(|account| account.nonce)
-                .unwrap_or_default();
+            let nonce = match db.get_account(&request.as_ref().from().unwrap_or_default()) {
+                Ok(account) => account.map(|account| account.nonce).unwrap_or_default(),
+                Err(code) => {
+                    return Err(Self::Error::from_eth_err(EthApiError::from(db.error(code))))
+                }
+            };
             request.as_mut().set_nonce(nonce);
         }
 
@@ -927,8 +933,7 @@ pub trait Call:
         }
 
         let gas_price = request_gas_price(request.as_ref(), evm_env.block_base_fee());
-        let tx_env =
-            self.create_txn_env(&evm_env, request.clone(), BorrowedDatabase::new(&mut *db))?;
+        let tx_env = self.create_txn_env(&evm_env, request.clone(), &mut *db)?;
 
         // lower the basefee to 0 to avoid breaking EVM invariants (basefee < gasprice): <https://github.com/ethereum/go-ethereum/blob/355228b011ef9a85ebc0f21e7196f892038d49f0/internal/ethapi/api.go#L700-L704>
         if gas_price == 0 {
@@ -940,14 +945,13 @@ pub trait Call:
             if gas_price > 0 {
                 // If gas price is specified, cap transaction gas limit with caller allowance
                 trace!(target: "rpc::eth::call", ?request, "Applying gas limit cap with caller allowance");
-                let cap =
-                    self.caller_gas_allowance(BorrowedDatabase::new(&mut *db), &evm_env, &tx_env)?;
+                let cap = self.caller_gas_allowance(&mut *db, &evm_env, &tx_env)?;
                 // ensure we cap gas_limit to the block's
                 request.as_mut().set_gas_limit(cap.min(evm_env.block_env().gas_limit.to::<u64>()));
             }
         }
 
-        let tx_env = self.create_txn_env(&evm_env, request, BorrowedDatabase::new(&mut *db))?;
+        let tx_env = self.create_txn_env(&evm_env, request, &mut *db)?;
         Ok((evm_env, tx_env))
     }
 }

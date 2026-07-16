@@ -429,10 +429,10 @@ reth-trie-sparse = { path = "crates/trie/sparse", default-features = false }
 reth-zstd-compressors = { git = "https://github.com/paradigmxyz/reth-core", rev = "cd6d1253cd46eec80250776c8c88ee340c15f6f5", default-features = false }
 
 # evm2
-evm2 = { git = "https://github.com/alloy-rs/evm2", rev = "0b5f142e839f9e124ff847cbd7b965a8c1cdb9a9", default-features = false }
-evm2-inspectors = { git = "https://github.com/alloy-rs/evm2", rev = "0b5f142e839f9e124ff847cbd7b965a8c1cdb9a9", default-features = false }
-evm2-jit = { git = "https://github.com/alloy-rs/evm2", rev = "0b5f142e839f9e124ff847cbd7b965a8c1cdb9a9", default-features = false }
-evm2-jit-build = { git = "https://github.com/alloy-rs/evm2", rev = "0b5f142e839f9e124ff847cbd7b965a8c1cdb9a9", default-features = false }
+evm2 = { git = "https://github.com/alloy-rs/evm2", rev = "d0db90562a67cd09a2f5f16a7f61784428784575", default-features = false }
+evm2-inspectors = { git = "https://github.com/alloy-rs/evm2", rev = "d0db90562a67cd09a2f5f16a7f61784428784575", default-features = false }
+evm2-jit = { git = "https://github.com/alloy-rs/evm2", rev = "d0db90562a67cd09a2f5f16a7f61784428784575", default-features = false }
+evm2-jit-build = { git = "https://github.com/alloy-rs/evm2", rev = "d0db90562a67cd09a2f5f16a7f61784428784575", default-features = false }
 
 # eth
 alloy-dyn-abi = "1.6.0"
@@ -694,4 +694,4 @@ vergen-git2 = "10.0.1"
 ipnet = "2.11"
 
 [patch."https://github.com/alloy-rs/evm2"]
-evm2 = { git = "https://github.com/alloy-rs/evm2?branch=main", rev = "0b5f142e839f9e124ff847cbd7b965a8c1cdb9a9" }
+evm2 = { git = "https://github.com/alloy-rs/evm2?branch=main", rev = "d0db90562a67cd09a2f5f16a7f61784428784575" }

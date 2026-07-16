@@ -8,7 +8,7 @@ use alloy_rpc_types_eth::{state::EvmOverrides, BlockId};
 use evm2::{evm::DynDatabase, EvmFeatures, TxResult};
 use futures::Future;
 use reth_chainspec::MIN_TRANSACTION_GAS;
-use reth_evm::{database::BorrowedDatabase, EvmEnv, EvmEnvFor};
+use reth_evm::{EvmEnv, EvmEnvFor};
 use reth_rpc_convert::{RpcConvert, RpcTxReq};
 use reth_rpc_eth_types::{
     cache::db::{apply_block_overrides, apply_state_overrides, StateProviderTraitObjWrapper},
@@ -109,22 +109,20 @@ pub trait EstimateCall: Call {
             false
         };
 
-        let tx_env =
-            self.create_txn_env(&evm_env, request.clone(), BorrowedDatabase::new(&mut db))?;
+        let tx_env = self.create_txn_env(&evm_env, request.clone(), &mut db)?;
 
         // Check funds of the sender (only useful to check if transaction gas price is more than 0).
         //
         // The caller allowance is check by doing `(account.balance - tx.value) / tx.gas_price`
         if request_gas_price(request.as_ref(), evm_env.block_base_fee()) > 0 {
-            let allowance =
-                self.caller_gas_allowance(BorrowedDatabase::new(&mut db), &evm_env, &tx_env)?;
+            let allowance = self.caller_gas_allowance(&mut db, &evm_env, &tx_env)?;
             highest_gas_limit = highest_gas_limit.min(allowance);
         }
 
         let mut execute = |gas_limit| {
             let mut request = request.clone();
             request.as_mut().set_gas_limit(gas_limit);
-            let tx_env = self.create_txn_env(&evm_env, request, BorrowedDatabase::new(&mut db))?;
+            let tx_env = self.create_txn_env(&evm_env, request, &mut db)?;
             self.transact(&mut db, evm_env.clone(), tx_env).map(|res| res.result)
         };
 

@@ -357,15 +357,14 @@ pub enum EthTxEnvError {
     AuthorizationListInvalidFields,
 }
 
-impl<T, Env> TryIntoTxEnv<T, Env> for TransactionRequest
+impl<Env> TryIntoTxEnv<RecoveredTxEnvelope, Env> for TransactionRequest
 where
-    T: From<RecoveredTxEnvelope>,
     Env: EvmEnv,
 {
     type Err = EthTxEnvError;
 
-    fn try_into_tx_env(self, evm_env: &Env) -> Result<T, Self::Err> {
-        transaction_request_to_evm2(self, evm_env).map(Into::into)
+    fn try_into_tx_env(self, evm_env: &Env) -> Result<RecoveredTxEnvelope, Self::Err> {
+        transaction_request_to_evm2(self, evm_env)
     }
 }
 

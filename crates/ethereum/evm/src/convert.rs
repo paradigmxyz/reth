@@ -7,11 +7,7 @@ use alloy_consensus::{
 use alloy_eips::eip7840::BlobParams;
 use alloy_primitives::{Address, BlockNumber, BlockTimestamp, B256, U256};
 use alloy_rpc_types_engine::ExecutionData;
-use evm2::{
-    env::BlockEnv,
-    ethereum::{LazyTxEip7702, RecoveredTxEnvelope},
-    SpecId,
-};
+use evm2::{env::BlockEnv, ethereum::RecoveredTxEnvelope, SpecId};
 use reth_chainspec::EthereumHardforks;
 use reth_ethereum_primitives::TransactionSigned;
 use reth_evm::{ExecutableTxParts, FromTxWithEncoded, RecoveredTx};
@@ -127,11 +123,6 @@ pub struct EthTxEnv {
 }
 
 impl EthTxEnv {
-    /// Returns the wrapped transaction envelope.
-    pub const fn as_envelope(&self) -> &RecoveredTxEnvelope {
-        &self.envelope
-    }
-
     /// Returns the original transaction hash.
     pub const fn tx_hash(&self) -> B256 {
         self.tx_hash
@@ -140,24 +131,6 @@ impl EthTxEnv {
     /// Consumes the wrapper and returns the transaction envelope.
     pub fn into_envelope(self) -> RecoveredTxEnvelope {
         self.envelope
-    }
-}
-
-impl AsRef<RecoveredTxEnvelope> for EthTxEnv {
-    fn as_ref(&self) -> &RecoveredTxEnvelope {
-        self.as_envelope()
-    }
-}
-
-impl From<RecoveredTxEnvelope> for EthTxEnv {
-    fn from(envelope: RecoveredTxEnvelope) -> Self {
-        Self { envelope, tx_hash: B256::ZERO }
-    }
-}
-
-impl core::borrow::Borrow<RecoveredTxEnvelope> for EthTxEnv {
-    fn borrow(&self) -> &RecoveredTxEnvelope {
-        self.as_envelope()
     }
 }
 
@@ -205,26 +178,7 @@ impl ExecutableTxParts<EthTxEnv, TransactionSigned> for ExecutableRecoveredTx {
 
 /// Converts an owned recovered Reth Ethereum transaction into a recovered envelope.
 pub(crate) fn recovered_tx_envelope(tx: Recovered<TransactionSigned>) -> RecoveredTxEnvelope {
-    let (tx, signer) = tx.into_parts();
-    match tx {
-        TransactionSigned::Legacy(tx) => {
-            RecoveredTxEnvelope::Legacy(Recovered::new_unchecked(tx.strip_signature(), signer))
-        }
-        TransactionSigned::Eip2930(tx) => {
-            RecoveredTxEnvelope::Eip2930(Recovered::new_unchecked(tx.strip_signature(), signer))
-        }
-        TransactionSigned::Eip1559(tx) => {
-            RecoveredTxEnvelope::Eip1559(Recovered::new_unchecked(tx.strip_signature(), signer))
-        }
-        TransactionSigned::Eip4844(tx) => RecoveredTxEnvelope::Eip4844(Recovered::new_unchecked(
-            tx.strip_signature().into(),
-            signer,
-        )),
-        TransactionSigned::Eip7702(tx) => RecoveredTxEnvelope::Eip7702(Recovered::new_unchecked(
-            LazyTxEip7702::from_recovered_authorizations(tx.strip_signature()),
-            signer,
-        )),
-    }
+    tx.into()
 }
 
 #[cfg(test)]

@@ -6,10 +6,11 @@ use alloy_eips::{
     eip7910::{EthConfig, EthForkConfig, SystemContract},
 };
 use alloy_primitives::Address;
+use evm2::evm::EmptyDB;
 use jsonrpsee::{core::RpcResult, proc_macros::rpc};
 use reth_chainspec::{ChainSpecProvider, EthChainSpec, EthereumHardforks, Hardforks, Head};
 use reth_errors::{ProviderError, RethError};
-use reth_evm::{ConfigureEvm, EvmEnv};
+use reth_evm::{ConfigureEvm, Evm};
 use reth_node_api::NodePrimitives;
 use reth_primitives_traits::header::HeaderMut;
 use reth_rpc_eth_types::EthApiError;
@@ -94,7 +95,7 @@ where
             .into_header();
 
         let current_precompiles = evm_to_precompiles_map(
-            self.evm_config.evm_env(&latest).map_err(RethError::other)?.spec_id(),
+            self.evm_config.evm_for_block(EmptyDB::default(), &latest).map_err(RethError::other)?,
         );
 
         let mut fork_timestamps =
@@ -126,7 +127,9 @@ where
                 header
             };
             let next_precompiles = evm_to_precompiles_map(
-                self.evm_config.evm_env(&fake_header).map_err(RethError::other)?.spec_id(),
+                self.evm_config
+                    .evm_for_block(EmptyDB::default(), &fake_header)
+                    .map_err(RethError::other)?,
             );
 
             config.next = Some(self.build_fork_config_at(next_fork_timestamp, next_precompiles));
@@ -142,7 +145,9 @@ where
             header
         };
         let last_precompiles = evm_to_precompiles_map(
-            self.evm_config.evm_env(&fake_header).map_err(RethError::other)?.spec_id(),
+            self.evm_config
+                .evm_for_block(EmptyDB::default(), &fake_header)
+                .map_err(RethError::other)?,
         );
 
         config.last = Some(self.build_fork_config_at(last_fork_timestamp, last_precompiles));
@@ -163,11 +168,6 @@ where
     }
 }
 
-fn evm_to_precompiles_map(spec_id: impl Into<evm2::SpecId>) -> BTreeMap<String, Address> {
-    let precompiles = evm2::Precompiles::<evm2::BaseEvmTypes>::base(spec_id.into());
-    let precompiles = precompiles.as_map();
-    precompiles
-        .addresses()
-        .filter_map(|address| Some((precompiles.get(&address)?.id().name().to_string(), address)))
-        .collect()
+fn evm_to_precompiles_map(evm: impl Evm) -> BTreeMap<String, Address> {
+    evm.precompile_ids().into_iter().map(|(address, id)| (id.name().to_string(), address)).collect()
 }
