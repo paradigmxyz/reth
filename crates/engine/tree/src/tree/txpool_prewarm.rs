@@ -27,8 +27,6 @@ const TXPOOL_REFRESH_INTERVAL: Duration = Duration::from_millis(100);
 /// Delay while waiting for pool maintenance to advance to the state being warmed.
 const TXPOOL_HEAD_POLL_INTERVAL: Duration = Duration::from_millis(10);
 
-type TxPoolPrewarmMarker<N, P, Evm> = PhantomData<fn() -> (N, P, Evm)>;
-
 /// A transaction selected from the txpool for cache-only prewarming.
 #[derive(Debug, Clone)]
 pub struct TxPoolPrewarmTransaction<N: NodePrimitives> {
@@ -238,7 +236,6 @@ where
     publication: Arc<TxPoolSnapshotPublication>,
     activity: Arc<TxPoolWorkerActivity>,
     wait_generation: AtomicU64,
-    _marker: TxPoolPrewarmMarker<N, P, Evm>,
 }
 
 impl<N, P, Evm> Debug for TxPoolPrewarmHandle<N, P, Evm>
@@ -319,7 +316,6 @@ where
             publication,
             activity,
             wait_generation: AtomicU64::new(0),
-            _marker: PhantomData,
         }
     }
 
