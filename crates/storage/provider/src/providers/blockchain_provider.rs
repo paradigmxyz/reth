@@ -802,8 +802,7 @@ mod tests {
             create_test_provider_factory, create_test_provider_factory_with_chain_spec,
             MockNodeTypesWithDB,
         },
-        BlockWriter, CanonChainTracker, ProviderFactory, SaveBlocksMode, SaveBlocksPlan,
-        SaveBlocksPlanStep,
+        BlockWriter, CanonChainTracker, ProviderFactory, SaveBlocksMode,
     };
     use alloy_eips::{BlockHashOrNumber, BlockNumHash, BlockNumberOrTag};
     use alloy_primitives::{BlockNumber, TxNumber, B256};
@@ -1020,15 +1019,7 @@ mod tests {
 
                 // Push to disk
                 let provider_rw = hook_provider.database_provider_rw().unwrap();
-                provider_rw
-                    .save_blocks(
-                        &SaveBlocksPlan::new(
-                            vec![lowest_memory_block],
-                            vec![SaveBlocksPlanStep::new(0..1, Some(1..1), true)],
-                        ),
-                        SaveBlocksMode::Full,
-                    )
-                    .unwrap();
+                provider_rw.save_blocks(vec![lowest_memory_block], SaveBlocksMode::Full).unwrap();
                 provider_rw.commit().unwrap();
 
                 // Remove from memory
