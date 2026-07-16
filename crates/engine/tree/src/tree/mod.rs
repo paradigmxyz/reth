@@ -30,8 +30,8 @@ use reth_primitives_traits::{
 };
 use reth_provider::{
     BalProvider, BlockExecutionOutput, BlockExecutionResult, BlockReader, ChangeSetReader,
-    DatabaseProviderFactory, HashedPostStateProvider, ProviderError, SaveBlocksInput,
-    StageCheckpointReader, StateProviderBox, StateProviderFactory, StateReader,
+    DatabaseProviderFactory, HashedPostStateProvider, ProviderError, SaveBlocksPlan,
+    SaveBlocksPlanStep, StageCheckpointReader, StateProviderBox, StateProviderFactory, StateReader,
     StorageChangeSetReader, StorageSettingsCache, TransactionVariant,
 };
 use reth_revm::database::StateProviderDatabase;
@@ -1407,26 +1407,23 @@ where
 
     /// Helper method to save blocks and set the persistence state. This ensures we keep track of
     /// the current persistence action while we're saving blocks.
-    fn persist_blocks(&mut self, input: SaveBlocksInput<N>) {
-        if input.is_empty() {
+    fn persist_blocks(&mut self, plan: SaveBlocksPlan<N>) {
+        if plan.is_empty() {
             debug!(target: "engine::tree", "Returned empty set of blocks to persist");
             return
         }
 
-        let highest_num_hash = input.last_block().expect("checked non-empty persisting blocks");
+        let highest_num_hash = plan.last_block().expect("checked non-empty persisting blocks");
 
         debug!(
             target: "engine::tree",
-            count = input.blocks().len(),
-            prev_db_tip = input.prev_db_tip(),
-            prev_partial_state_trie = input.prev_partial_state_trie(),
-            new_db_tip = input.new_db_tip(),
-            new_partial_state_trie = input.new_partial_state_trie(),
-            blocks = ?input.blocks().iter().map(|block| block.recovered_block().num_hash()).collect::<Vec<_>>(),
+            count = plan.blocks.len(),
+            steps = ?plan.steps,
+            blocks = ?plan.blocks.iter().map(|block| block.recovered_block().num_hash()).collect::<Vec<_>>(),
             "Persisting blocks"
         );
         let (tx, rx) = crossbeam_channel::bounded(1);
-        let _ = self.persistence.save_blocks(input, tx);
+        let _ = self.persistence.save_blocks(plan, tx);
 
         self.persistence_state.start_save(highest_num_hash, rx);
     }
@@ -1440,8 +1437,8 @@ where
             if let Some(new_tip_num) = self.find_disk_reorg()? {
                 self.remove_blocks(new_tip_num)
             } else if self.should_persist() {
-                let input = self.get_save_blocks_input(PersistTarget::Threshold)?;
-                self.persist_blocks(input);
+                let plan = self.get_save_blocks_plan(PersistTarget::Threshold)?;
+                self.persist_blocks(plan);
             }
         }
 
@@ -1472,15 +1469,15 @@ where
                 self.on_persistence_complete(result, start_time)?;
             }
 
-            let input = self.get_save_blocks_input(PersistTarget::Head)?;
+            let plan = self.get_save_blocks_plan(PersistTarget::Head)?;
 
-            if input.is_empty() {
+            if plan.is_empty() {
                 debug!(target: "engine::tree", "persistence complete, signaling termination");
                 return Ok(())
             }
 
-            debug!(target: "engine::tree", count = input.blocks().len(), "persisting remaining blocks before shutdown");
-            self.persist_blocks(input);
+            debug!(target: "engine::tree", count = plan.blocks.len(), "persisting remaining blocks before shutdown");
+            self.persist_blocks(plan);
         }
     }
 
@@ -2151,54 +2148,46 @@ where
             self.config.persistence_threshold()
     }
 
-    /// Returns the blocks and frontiers for the next persistence cycle.
-    fn get_save_blocks_input(
+    /// Returns the save plan for the next persistence cycle.
+    fn get_save_blocks_plan(
         &self,
         target: PersistTarget,
-    ) -> Result<SaveBlocksInput<N>, AdvancePersistenceError> {
+    ) -> Result<SaveBlocksPlan<N>, AdvancePersistenceError> {
         // We will calculate the state root using the database, so we need to be sure there are no
         // changes
         debug_assert!(!self.persistence_state.in_progress());
 
         let mut blocks = Vec::new();
         let mut current_hash = self.state.tree_state.canonical_block_hash();
-        let prev_partial_state_trie = self.persistence_state.last_state_trie_persisted_block.number;
-        let prev_db_tip = self.persistence_state.last_persisted_block.number;
+        let last_state_trie_persisted_block_number =
+            self.persistence_state.last_state_trie_persisted_block.number;
+        let last_persisted_block_number = self.persistence_state.last_persisted_block.number;
         let canonical_head_number = self.state.tree_state.canonical_block_number();
 
-        let new_db_tip = match target {
+        let last_block_target_number = match target {
             PersistTarget::Head => canonical_head_number,
             PersistTarget::Threshold => {
-                canonical_head_number.saturating_sub(self.config.memory_block_buffer_target())
+                canonical_head_number.saturating_sub(self.config.memory_block_buffer_target()).min(
+                    last_persisted_block_number.saturating_add(self.config.persistence_threshold()),
+                )
             }
-        };
-        debug_assert!(new_db_tip >= prev_db_tip, "database reorg must be handled before saving");
-
-        let new_partial_state_trie = match target {
-            // A graceful shutdown must leave no state/trie suffix in memory.
-            PersistTarget::Head => new_db_tip,
-            PersistTarget::Threshold => new_db_tip
-                .saturating_sub(self.config.num_state_masking_blocks())
-                .max(prev_partial_state_trie),
         };
 
         debug!(
             target: "engine::tree",
             ?current_hash,
-            ?prev_partial_state_trie,
-            ?prev_db_tip,
+            ?last_state_trie_persisted_block_number,
+            ?last_persisted_block_number,
             ?canonical_head_number,
-            ?new_partial_state_trie,
-            ?new_db_tip,
             target = ?target,
-            "Returning save input"
+            "Returning save plan"
         );
         while let Some(block) = self.state.tree_state.blocks_by_hash.get(&current_hash) {
-            if block.recovered_block().number() <= prev_partial_state_trie {
+            if block.recovered_block().number() <= last_state_trie_persisted_block_number {
                 break;
             }
 
-            if block.recovered_block().number() <= new_db_tip {
+            if block.recovered_block().number() <= last_block_target_number {
                 blocks.push(block.clone());
             }
 
@@ -2208,13 +2197,37 @@ where
         // Reverse the order so that the oldest block comes first
         blocks.reverse();
 
-        Ok(SaveBlocksInput::new(
-            blocks,
-            prev_db_tip,
-            prev_partial_state_trie,
-            new_db_tip,
-            new_partial_state_trie,
-        ))
+        let trie_catchup_block_count = last_persisted_block_number
+            .saturating_sub(last_state_trie_persisted_block_number)
+            .min(blocks.len() as u64) as usize;
+        let persist_rest_block_count = blocks.len().saturating_sub(trie_catchup_block_count);
+        let state_masking_block_count =
+            persist_rest_block_count.min(self.config.num_state_masking_blocks() as usize);
+        let full_persist_block_count = persist_rest_block_count - state_masking_block_count;
+        let full_persist_start = trie_catchup_block_count;
+        let state_masking_start = full_persist_start + full_persist_block_count;
+        let state_masking_range = state_masking_start..blocks.len();
+        let mut steps = Vec::new();
+
+        if trie_catchup_block_count > 0 {
+            steps.push(SaveBlocksPlanStep::new(
+                0..trie_catchup_block_count,
+                Some(state_masking_range.clone()),
+                false,
+            ));
+        }
+        if full_persist_block_count > 0 {
+            steps.push(SaveBlocksPlanStep::new(
+                full_persist_start..state_masking_start,
+                Some(state_masking_range.clone()),
+                true,
+            ));
+        }
+        if state_masking_block_count > 0 {
+            steps.push(SaveBlocksPlanStep::new(state_masking_range, None, true));
+        }
+
+        Ok(SaveBlocksPlan::new(blocks, steps))
     }
 
     /// This clears the blocks from the in-memory tree state that no longer need to stay resident
@@ -3524,7 +3537,7 @@ pub enum InsertPayloadOk {
 enum PersistTarget {
     /// Persist up to `canonical_head - memory_block_buffer_target`.
     Threshold,
-    /// Persist all block and state/trie data up to and including the canonical head.
+    /// Persist all blocks up to and including the canonical head.
     Head,
 }
 

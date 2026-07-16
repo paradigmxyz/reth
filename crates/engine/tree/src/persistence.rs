@@ -6,8 +6,8 @@ use reth_ethereum_primitives::EthPrimitives;
 use reth_primitives_traits::{FastInstant as Instant, NodePrimitives};
 use reth_provider::{
     providers::ProviderNodeTypes, BalProvider, BlockExecutionWriter, BlockHashReader,
-    ChainStateBlockWriter, DBProvider, DatabaseProviderFactory, ProviderFactory, SaveBlocksInput,
-    StageCheckpointReader,
+    ChainStateBlockWriter, DBProvider, DatabaseProviderFactory, ProviderFactory, SaveBlocksMode,
+    SaveBlocksPlan, StageCheckpointReader,
 };
 use reth_prune::{PrunerError, PrunerWithFactory};
 use reth_stages_api::{MetricEvent, MetricEventsSender, StageId};
@@ -107,8 +107,8 @@ where
                         self.sync_metrics_tx.send(MetricEvent::SyncHeight { height: new_tip_num });
                     let _ = sender.send(result);
                 }
-                PersistenceAction::SaveBlocks(input, sender) => {
-                    let result = self.on_save_blocks(input)?;
+                PersistenceAction::SaveBlocks(plan, sender) => {
+                    let result = self.on_save_blocks(plan)?;
                     let result_number = result.last_block.map(|b| b.number);
 
                     let _ = sender.send(result);
@@ -162,25 +162,15 @@ where
         })
     }
 
-    #[instrument(
-        level = "debug",
-        target = "engine::persistence",
-        skip_all,
-        fields(
-            block_count = input.blocks().len(),
-            persist_block_count = input.blocks_to_persist().len(),
-            state_trie_block_count = input.state_trie_blocks().len(),
-        )
-    )]
+    #[instrument(level = "debug", target = "engine::persistence", skip_all, fields(block_count = plan.blocks.len()))]
     fn on_save_blocks(
         &mut self,
-        input: SaveBlocksInput<N::Primitives>,
+        plan: SaveBlocksPlan<N::Primitives>,
     ) -> Result<PersistenceResult, PersistenceError> {
-        let first_block =
-            input.blocks_to_persist().first().map(|block| block.recovered_block().num_hash());
-        let last_block = input.last_block();
-        let block_count = input.blocks().len();
-        let last_state_trie_block = (!input.is_empty()).then_some(input.new_partial_state_trie());
+        let first_block = plan.blocks.first().map(|block| block.recovered_block().num_hash());
+        let last_block = plan.last_block();
+        let block_count = plan.blocks.len();
+        let mut last_state_trie_block = None;
 
         let pending_finalized = self.pending_finalized_block.take();
         let pending_safe = self.pending_safe_block.take();
@@ -191,7 +181,15 @@ where
 
         if let Some(last_block) = last_block {
             let provider_rw = self.provider.database_provider_rw()?;
-            provider_rw.save_blocks_partial(&input)?;
+            provider_rw.save_blocks(&plan, SaveBlocksMode::Full)?;
+            last_state_trie_block = provider_rw
+                .get_stage_checkpoint(StageId::Finish)?
+                .and_then(|checkpoint| {
+                    checkpoint
+                        .finish_stage_checkpoint()
+                        .and_then(|finish| finish.partial_state_trie)
+                })
+                .or(Some(last_block.number));
 
             if let Some(finalized) = pending_finalized {
                 provider_rw.save_finalized_block_number(finalized.min(last_block.number))?;
@@ -260,11 +258,13 @@ pub enum PersistenceError {
 /// A signal to the persistence service that part of the tree state can be persisted.
 #[derive(Debug)]
 pub enum PersistenceAction<N: NodePrimitives = EthPrimitives> {
-    /// Persists independently advancing block-data and state/trie frontiers.
+    /// The section of tree state that should be persisted. These blocks are expected in order of
+    /// increasing block number.
     ///
-    /// The input carries all blocks needed to write fresh non-state/trie data, catch the
-    /// state/trie frontier up, and mask that state/trie batch with the durable suffix.
-    SaveBlocks(SaveBlocksInput<N>, CrossbeamSender<PersistenceResult>),
+    /// First, header, transaction, and receipt-related data should be written to static files for
+    /// the deferred trie region. Then the execution history-related data will be written to the
+    /// database, while trie catchup is persisted for the prefix.
+    SaveBlocks(SaveBlocksPlan<N>, CrossbeamSender<PersistenceResult>),
 
     /// Removes block data above the given block number from the database.
     ///
@@ -348,10 +348,10 @@ impl<T: NodePrimitives> PersistenceHandle<T> {
     /// If there are no blocks to persist, then `None` is sent in the sender.
     pub fn save_blocks(
         &self,
-        input: SaveBlocksInput<T>,
+        plan: SaveBlocksPlan<T>,
         tx: CrossbeamSender<PersistenceResult>,
     ) -> Result<(), SendError<PersistenceAction<T>>> {
-        self.send_action(PersistenceAction::SaveBlocks(input, tx))
+        self.send_action(PersistenceAction::SaveBlocks(plan, tx))
     }
 
     /// Queues the finalized block number to be persisted on disk.
@@ -423,7 +423,7 @@ mod tests {
         test_utils::{create_test_provider_factory, MockNodeTypes},
         AccountReader, BalConfig, BalNotificationStream, BalStore, BalStoreHandle,
         ChainSpecProvider, HeaderProvider, InMemoryBalStore, ProviderError, ProviderResult, RawBal,
-        SaveBlocksMode, StorageSettingsCache, TryIntoHistoricalStateProvider,
+        SaveBlocksPlanStep, StorageSettingsCache, TryIntoHistoricalStateProvider,
     };
     use reth_prune::Pruner;
     use reth_prune_types::PruneMode;
@@ -431,10 +431,6 @@ mod tests {
 
     fn default_persistence_handle() -> PersistenceHandle<EthPrimitives> {
         let provider = create_test_provider_factory();
-        let genesis = TestBlockBuilder::eth().get_executed_blocks(0..1).next().unwrap();
-        let provider_rw = provider.database_provider_rw().unwrap();
-        provider_rw.save_blocks(vec![genesis], SaveBlocksMode::Full).unwrap();
-        provider_rw.commit().unwrap();
 
         persistence_handle(provider)
     }
@@ -453,15 +449,16 @@ mod tests {
         PersistenceHandle::<EthPrimitives>::spawn_service(provider, pruner, sync_metrics_tx)
     }
 
-    fn full_save_input(
-        blocks: Vec<ExecutedBlock<EthPrimitives>>,
-    ) -> SaveBlocksInput<EthPrimitives> {
-        let prev_tip = blocks
-            .first()
-            .map(|block| block.recovered_block().number.saturating_sub(1))
-            .unwrap_or_default();
-        let new_tip = blocks.last().map(|block| block.recovered_block().number).unwrap_or(prev_tip);
-        SaveBlocksInput::new(blocks, prev_tip, prev_tip, new_tip, new_tip)
+    fn full_save_plan(blocks: Vec<ExecutedBlock<EthPrimitives>>) -> SaveBlocksPlan<EthPrimitives> {
+        let full_range = 0..blocks.len();
+        SaveBlocksPlan::new(
+            blocks,
+            vec![SaveBlocksPlanStep::new(
+                full_range.clone(),
+                Some(full_range.end..full_range.end),
+                true,
+            )],
+        )
     }
 
     #[test]
@@ -541,7 +538,7 @@ mod tests {
         reth_tracing::init_test_tracing();
         let handle = default_persistence_handle();
 
-        let blocks = full_save_input(vec![]);
+        let blocks = full_save_plan(vec![]);
         let (tx, rx) = crossbeam_channel::bounded(1);
 
         handle.save_blocks(blocks, tx).unwrap();
@@ -555,13 +552,13 @@ mod tests {
     fn test_save_blocks_single_block() {
         reth_tracing::init_test_tracing();
         let handle = default_persistence_handle();
-        let block_number = 1;
+        let block_number = 0;
         let mut test_block_builder = TestBlockBuilder::eth();
         let executed =
             test_block_builder.get_executed_block_with_number(block_number, B256::random());
         let block_hash = executed.recovered_block().hash();
 
-        let blocks = full_save_input(vec![executed]);
+        let blocks = full_save_plan(vec![executed]);
         let (tx, rx) = crossbeam_channel::bounded(1);
 
         handle.save_blocks(blocks, tx).unwrap();
@@ -579,11 +576,11 @@ mod tests {
         let handle = default_persistence_handle();
 
         let mut test_block_builder = TestBlockBuilder::eth();
-        let blocks = test_block_builder.get_executed_blocks(1..6).collect::<Vec<_>>();
+        let blocks = test_block_builder.get_executed_blocks(0..5).collect::<Vec<_>>();
         let last_hash = blocks.last().unwrap().recovered_block().hash();
         let (tx, rx) = crossbeam_channel::bounded(1);
 
-        handle.save_blocks(full_save_input(blocks), tx).unwrap();
+        handle.save_blocks(full_save_plan(blocks), tx).unwrap();
         let result = rx.recv().unwrap();
         let last_block = result.last_block.unwrap();
         assert_eq!(last_hash, last_block.hash);
@@ -595,14 +592,14 @@ mod tests {
         reth_tracing::init_test_tracing();
         let handle = default_persistence_handle();
 
-        let ranges = [1..2, 2..3, 3..5, 5..6];
+        let ranges = [0..1, 1..2, 2..4, 4..5];
         let mut test_block_builder = TestBlockBuilder::eth();
         for range in ranges {
             let blocks = test_block_builder.get_executed_blocks(range).collect::<Vec<_>>();
             let last_hash = blocks.last().unwrap().recovered_block().hash();
             let (tx, rx) = crossbeam_channel::bounded(1);
 
-            handle.save_blocks(full_save_input(blocks), tx).unwrap();
+            handle.save_blocks(full_save_plan(blocks), tx).unwrap();
 
             let result = rx.recv().unwrap();
             let last_block = result.last_block.unwrap();
@@ -699,7 +696,7 @@ mod tests {
 
         {
             let provider_rw = provider_factory.database_provider_rw().unwrap();
-            provider_rw.save_blocks(blocks_a, SaveBlocksMode::Full).unwrap();
+            provider_rw.save_blocks(&full_save_plan(blocks_a), SaveBlocksMode::Full).unwrap();
             provider_rw.commit().unwrap();
         }
 
@@ -757,7 +754,10 @@ mod tests {
 
             let provider_rw = pf.database_provider_rw().unwrap();
             provider_rw
-                .save_blocks(std::slice::from_ref(&block_b2).to_vec(), SaveBlocksMode::Full)
+                .save_blocks(
+                    &full_save_plan(std::slice::from_ref(&block_b2).to_vec()),
+                    SaveBlocksMode::Full,
+                )
                 .unwrap();
             provider_rw.commit().unwrap();
         });
