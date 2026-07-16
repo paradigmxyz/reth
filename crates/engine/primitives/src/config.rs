@@ -92,59 +92,20 @@ pub fn has_enough_parallelism() -> bool {
 pub struct TxPoolPrewarmingConfig {
     /// Whether txpool transaction prewarming is enabled.
     pub enabled: bool,
-    /// Maximum transactions to prewarm for one sender while warming one parent head.
-    pub max_transactions_per_sender: usize,
-    /// Maximum fresh candidates considered from the txpool for one refresh.
-    pub max_candidate_scan: usize,
-    /// Multiplier applied to the parent block gas limit for one refresh's fresh-transaction gas
-    /// budget.
-    pub gas_limit_multiplier: u64,
 }
 
 impl TxPoolPrewarmingConfig {
-    /// Default per-sender transaction cap.
-    pub const DEFAULT_MAX_TRANSACTIONS_PER_SENDER: usize = 16;
-    /// Default candidate scan cap.
-    pub const DEFAULT_MAX_CANDIDATE_SCAN: usize = 4096;
-    /// Default gas-budget multiplier.
-    pub const DEFAULT_GAS_LIMIT_MULTIPLIER: u64 = 6;
     /// Default configuration.
-    pub const DEFAULT: Self = Self {
-        enabled: true,
-        max_transactions_per_sender: Self::DEFAULT_MAX_TRANSACTIONS_PER_SENDER,
-        max_candidate_scan: Self::DEFAULT_MAX_CANDIDATE_SCAN,
-        gas_limit_multiplier: Self::DEFAULT_GAS_LIMIT_MULTIPLIER,
-    };
+    pub const DEFAULT: Self = Self { enabled: false };
 
     /// Returns whether this configuration can launch work.
     pub const fn should_prewarm(&self) -> bool {
-        self.enabled &&
-            self.max_transactions_per_sender > 0 &&
-            self.max_candidate_scan > 0 &&
-            self.gas_limit_multiplier > 0
+        self.enabled
     }
 
     /// Enables or disables txpool prewarming.
     pub const fn with_enabled(mut self, enabled: bool) -> Self {
         self.enabled = enabled;
-        self
-    }
-
-    /// Sets the per-sender transaction cap.
-    pub const fn with_max_transactions_per_sender(mut self, max: usize) -> Self {
-        self.max_transactions_per_sender = max;
-        self
-    }
-
-    /// Sets the candidate scan cap.
-    pub const fn with_max_candidate_scan(mut self, max: usize) -> Self {
-        self.max_candidate_scan = max;
-        self
-    }
-
-    /// Sets the gas-budget multiplier.
-    pub const fn with_gas_limit_multiplier(mut self, multiplier: u64) -> Self {
-        self.gas_limit_multiplier = multiplier;
         self
     }
 }

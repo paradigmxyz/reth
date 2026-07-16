@@ -33,9 +33,6 @@ pub struct DefaultEngineValues {
     state_cache_disabled: bool,
     prewarming_disabled: bool,
     txpool_prewarming_enabled: bool,
-    txpool_prewarming_max_transactions_per_sender: usize,
-    txpool_prewarming_max_candidate_scan: usize,
-    txpool_prewarming_gas_limit_multiplier: u64,
     state_provider_metrics: bool,
     cross_block_cache_size: usize,
     state_root_task_compare_updates: bool,
@@ -112,24 +109,6 @@ impl DefaultEngineValues {
     /// Set whether to enable txpool prewarming by default
     pub const fn with_txpool_prewarming_enabled(mut self, v: bool) -> Self {
         self.txpool_prewarming_enabled = v;
-        self
-    }
-
-    /// Set the default maximum transactions prewarmed per sender and parent head
-    pub const fn with_txpool_prewarming_max_transactions_per_sender(mut self, v: usize) -> Self {
-        self.txpool_prewarming_max_transactions_per_sender = v;
-        self
-    }
-
-    /// Set the default maximum fresh txpool candidates considered per refresh
-    pub const fn with_txpool_prewarming_max_candidate_scan(mut self, v: usize) -> Self {
-        self.txpool_prewarming_max_candidate_scan = v;
-        self
-    }
-
-    /// Set the default txpool prewarming gas-limit multiplier
-    pub const fn with_txpool_prewarming_gas_limit_multiplier(mut self, v: u64) -> Self {
-        self.txpool_prewarming_gas_limit_multiplier = v;
         self
     }
 
@@ -291,12 +270,6 @@ impl Default for DefaultEngineValues {
             state_cache_disabled: false,
             prewarming_disabled: false,
             txpool_prewarming_enabled: TxPoolPrewarmingConfig::DEFAULT.enabled,
-            txpool_prewarming_max_transactions_per_sender:
-                TxPoolPrewarmingConfig::DEFAULT_MAX_TRANSACTIONS_PER_SENDER,
-            txpool_prewarming_max_candidate_scan:
-                TxPoolPrewarmingConfig::DEFAULT_MAX_CANDIDATE_SCAN,
-            txpool_prewarming_gas_limit_multiplier:
-                TxPoolPrewarmingConfig::DEFAULT_GAS_LIMIT_MULTIPLIER,
             state_provider_metrics: false,
             cross_block_cache_size: DEFAULT_CROSS_BLOCK_CACHE_SIZE_MB,
             state_root_task_compare_updates: false,
@@ -388,18 +361,6 @@ pub struct EngineArgs {
     /// Enable best-effort txpool transaction prewarming between payloads.
     #[arg(long = "engine.txpool-prewarming", default_value_t = DefaultEngineValues::get_global().txpool_prewarming_enabled)]
     pub txpool_prewarming_enabled: bool,
-
-    /// Configure the maximum transactions prewarmed per sender for one parent head.
-    #[arg(long = "engine.txpool-prewarming-max-transactions-per-sender", default_value_t = DefaultEngineValues::get_global().txpool_prewarming_max_transactions_per_sender, value_parser = RangedU64ValueParser::<usize>::new().range(1..))]
-    pub txpool_prewarming_max_transactions_per_sender: usize,
-
-    /// Configure the maximum fresh txpool candidates considered per prewarming refresh.
-    #[arg(long = "engine.txpool-prewarming-max-candidate-scan", default_value_t = DefaultEngineValues::get_global().txpool_prewarming_max_candidate_scan, value_parser = RangedU64ValueParser::<usize>::new().range(1..))]
-    pub txpool_prewarming_max_candidate_scan: usize,
-
-    /// Configure the parent gas-limit multiplier used as each refresh's fresh-transaction budget.
-    #[arg(long = "engine.txpool-prewarming-gas-limit-multiplier", default_value_t = DefaultEngineValues::get_global().txpool_prewarming_gas_limit_multiplier, value_parser = RangedU64ValueParser::<u64>::new().range(1..))]
-    pub txpool_prewarming_gas_limit_multiplier: u64,
 
     /// CAUTION: This CLI flag has no effect anymore. The parallel sparse trie is always enabled.
     #[deprecated]
@@ -607,9 +568,6 @@ impl Default for EngineArgs {
             state_cache_disabled,
             prewarming_disabled,
             txpool_prewarming_enabled,
-            txpool_prewarming_max_transactions_per_sender,
-            txpool_prewarming_max_candidate_scan,
-            txpool_prewarming_gas_limit_multiplier,
             state_provider_metrics,
             cross_block_cache_size,
             state_root_task_compare_updates,
@@ -646,9 +604,6 @@ impl Default for EngineArgs {
             state_cache_disabled,
             prewarming_disabled,
             txpool_prewarming_enabled,
-            txpool_prewarming_max_transactions_per_sender,
-            txpool_prewarming_max_candidate_scan,
-            txpool_prewarming_gas_limit_multiplier,
             parallel_sparse_trie_enabled: true,
             parallel_sparse_trie_disabled: false,
             state_provider_metrics,
@@ -722,13 +677,7 @@ impl EngineArgs {
             .without_state_cache(self.state_cache_disabled)
             .without_prewarming(self.prewarming_disabled)
             .with_txpool_prewarming(
-                TxPoolPrewarmingConfig::DEFAULT
-                    .with_enabled(self.txpool_prewarming_enabled)
-                    .with_max_transactions_per_sender(
-                        self.txpool_prewarming_max_transactions_per_sender,
-                    )
-                    .with_max_candidate_scan(self.txpool_prewarming_max_candidate_scan)
-                    .with_gas_limit_multiplier(self.txpool_prewarming_gas_limit_multiplier),
+                TxPoolPrewarmingConfig::DEFAULT.with_enabled(self.txpool_prewarming_enabled),
             )
             .with_state_provider_metrics(self.state_provider_metrics)
             .with_always_compare_trie_updates(self.state_root_task_compare_updates)
@@ -849,9 +798,6 @@ mod tests {
             state_cache_disabled: true,
             prewarming_disabled: true,
             txpool_prewarming_enabled: true,
-            txpool_prewarming_max_transactions_per_sender: 8,
-            txpool_prewarming_max_candidate_scan: 1024,
-            txpool_prewarming_gas_limit_multiplier: 3,
             parallel_sparse_trie_enabled: true,
             parallel_sparse_trie_disabled: false,
             state_provider_metrics: true,
@@ -898,12 +844,6 @@ mod tests {
             "--engine.disable-state-cache",
             "--engine.disable-prewarming",
             "--engine.txpool-prewarming",
-            "--engine.txpool-prewarming-max-transactions-per-sender",
-            "8",
-            "--engine.txpool-prewarming-max-candidate-scan",
-            "1024",
-            "--engine.txpool-prewarming-gas-limit-multiplier",
-            "3",
             "--engine.state-provider-metrics",
             "--engine.cross-block-cache-size",
             "256",

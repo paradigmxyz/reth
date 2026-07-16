@@ -1,7 +1,10 @@
 //! Reusable cache and immutable snapshots for txpool-driven state prewarming.
 
 use crate::CachedStatus;
-use alloy_primitives::{Address, B256, StorageKey, StorageValue, map::{AddressMap, B256Map, HashMap}};
+use alloy_primitives::{
+    map::{AddressMap, B256Map, HashMap},
+    Address, StorageKey, StorageValue, B256,
+};
 use parking_lot::RwLock;
 use reth_primitives_traits::{Account, Bytecode};
 use std::sync::Arc;

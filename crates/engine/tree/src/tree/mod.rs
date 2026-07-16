@@ -79,8 +79,7 @@ pub use reth_execution_cache::{
     TxPoolPrewarmCacheSnapshot,
 };
 pub use txpool_prewarm::{
-    TxPoolPrewarmSelection, TxPoolPrewarmSource, TxPoolPrewarmTransaction,
-    TxPoolPrewarmTransactions,
+    TxPoolPrewarmSource, TxPoolPrewarmTransaction, TxPoolPrewarmTransactions,
 };
 pub use types::{ValidationOutcome, ValidationOutput};
 
