@@ -223,7 +223,7 @@ impl<T: SparseTrieTrait + Default> RevealableSparseTrie<T> {
     /// Applies batch leaf updates to the sparse trie.
     ///
     /// For blind tries, all updates are kept in the map and proof targets are emitted
-    /// for every key (with `min_len = 0` since nothing is revealed).
+    /// for every key (with `parent_path_len = None` since nothing is revealed).
     ///
     /// For revealed tries, delegates to the inner implementation which will:
     /// - Apply updates where possible
@@ -232,13 +232,13 @@ impl<T: SparseTrieTrait + Default> RevealableSparseTrie<T> {
     pub fn update_leaves(
         &mut self,
         updates: &mut B256Map<LeafUpdate>,
-        mut proof_required_fn: impl FnMut(B256, u8),
+        mut proof_required_fn: impl FnMut(B256, Option<u8>),
     ) -> SparseTrieResult<()> {
         match self {
             Self::Blind(_) => {
-                // Nothing is revealed - emit proof targets for all keys with min_len = 0
+                // Nothing is revealed - emit proof targets for all keys without a known parent.
                 for key in updates.keys() {
-                    proof_required_fn(*key, 0);
+                    proof_required_fn(*key, None);
                 }
                 // All updates remain in the map for retry after proofs are fetched
                 Ok(())

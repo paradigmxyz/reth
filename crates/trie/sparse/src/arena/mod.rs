@@ -472,7 +472,7 @@ impl ArenaSparseSubtrie {
                 let logical_len = self.buffers.cursor.head_logical_branch_path_len(&self.arena);
                 self.required_proofs.push((
                     idx,
-                    ArenaRequiredProof { key, min_len: (logical_len as u8 + 1).min(64) },
+                    ArenaRequiredProof { key, parent_path_len: Some(logical_len as u8) },
                 ));
                 continue;
             }
@@ -506,10 +506,12 @@ impl ArenaSparseSubtrie {
                     self.num_dirty_leaves =
                         (self.num_dirty_leaves as i64 + deltas.num_dirty_leaves_delta) as u64;
 
-                    if let RemoveLeafResult::NeedsProof { key, proof_key, min_len } = result {
+                    if let RemoveLeafResult::NeedsProof { key, proof_key, parent_path_len } = result
+                    {
                         self.required_proofs
-                            .push((idx, ArenaRequiredProof { key: proof_key, min_len }));
-                        self.required_proofs.push((idx, ArenaRequiredProof { key, min_len }));
+                            .push((idx, ArenaRequiredProof { key: proof_key, parent_path_len }));
+                        self.required_proofs
+                            .push((idx, ArenaRequiredProof { key, parent_path_len }));
                     }
                 }
                 LeafUpdate::Touched => {}
@@ -609,8 +611,8 @@ enum RemoveLeafResult {
     /// No leaf was found at the given path (no-op).
     NotFound,
     /// The branch collapse requires revealing a blinded sibling. The caller must request a
-    /// proof for the given key at the given minimum depth.
-    NeedsProof { key: B256, proof_key: B256, min_len: u8 },
+    /// proof for the given key below the revealed logical parent branch.
+    NeedsProof { key: B256, proof_key: B256, parent_path_len: Option<u8> },
 }
 
 /// A proof request generated during leaf updates when a blinded node is encountered.
@@ -618,8 +620,8 @@ enum RemoveLeafResult {
 struct ArenaRequiredProof {
     /// The key requiring a proof.
     key: B256,
-    /// Minimum depth at which proof nodes should be returned.
-    min_len: u8,
+    /// Length of the revealed logical parent branch path.
+    parent_path_len: Option<u8>,
 }
 
 /// An arena-based parallel sparse trie.
@@ -1810,7 +1812,13 @@ impl ArenaParallelSparseTrie {
                             RemoveLeafResult::NeedsProof {
                                 key,
                                 proof_key: Self::nibbles_to_padded_b256(&sibling_path),
-                                min_len: (sibling_path.len() as u8).min(64),
+                                parent_path_len: Some(
+                                    sibling_path
+                                        .len()
+                                        .checked_sub(1)
+                                        .expect("sibling path has a child nibble")
+                                        as u8,
+                                ),
                             },
                             SubtrieCounterDeltas::default(),
                         );
@@ -1931,7 +1939,9 @@ impl ArenaParallelSparseTrie {
 
         Some(ArenaRequiredProof {
             key: Self::nibbles_to_padded_b256(&sibling_path),
-            min_len: (sibling_path.len() as u8).min(64),
+            parent_path_len: Some(
+                sibling_path.len().checked_sub(1).expect("sibling path has a child nibble") as u8,
+            ),
         })
     }
 
@@ -3018,7 +3028,7 @@ impl SparseTrie for ArenaParallelSparseTrie {
     fn update_leaves(
         &mut self,
         updates: &mut B256Map<LeafUpdate>,
-        mut proof_required_fn: impl FnMut(B256, u8),
+        mut proof_required_fn: impl FnMut(B256, Option<u8>),
     ) -> SparseTrieResult<()> {
         if updates.is_empty() {
             return Ok(());
@@ -3028,7 +3038,7 @@ impl SparseTrie for ArenaParallelSparseTrie {
         let recorded_updates: Vec<_> =
             updates.iter().map(|(k, v)| (*k, LeafUpdateRecord::from(v))).collect();
         #[cfg(feature = "trie-debug")]
-        let mut recorded_proof_targets: Vec<(B256, u8)> = Vec::new();
+        let mut recorded_proof_targets: Vec<(B256, Option<u8>)> = Vec::new();
 
         // Drain and sort updates lexicographically by nibbles path.
         let mut sorted: Vec<_> =
@@ -3054,11 +3064,11 @@ impl SparseTrie for ArenaParallelSparseTrie {
                 // Blinded — request a proof regardless of update type.
                 SeekResult::Blinded => {
                     let logical_len = cursor.head_logical_branch_path_len(&self.upper_arena);
-                    let min_len = (logical_len as u8 + 1).min(64);
-                    trace!(target: TRACE_TARGET, ?key, min_len, "Update hit blinded node, requesting proof");
-                    proof_required_fn(key, min_len);
+                    let parent_path_len = Some(logical_len as u8);
+                    trace!(target: TRACE_TARGET, ?key, ?parent_path_len, "Update hit blinded node, requesting proof");
+                    proof_required_fn(key, parent_path_len);
                     #[cfg(feature = "trie-debug")]
-                    recorded_proof_targets.push((key, min_len));
+                    recorded_proof_targets.push((key, parent_path_len));
                     updates.insert(key, update.clone());
                 }
                 // Subtrie — forward all consecutive updates under this subtrie's prefix.
@@ -3084,10 +3094,10 @@ impl SparseTrie for ArenaParallelSparseTrie {
                         &cursor,
                         subtrie_updates,
                     ) {
-                        trace!(target: TRACE_TARGET, proof_key = ?proof.key, proof_min_len = proof.min_len, "Subtrie collapse would need blinded sibling, requesting proof");
-                        proof_required_fn(proof.key, proof.min_len);
+                        trace!(target: TRACE_TARGET, proof_key = ?proof.key, proof_parent_path_len = ?proof.parent_path_len, "Subtrie collapse would need blinded sibling, requesting proof");
+                        proof_required_fn(proof.key, proof.parent_path_len);
                         #[cfg(feature = "trie-debug")]
-                        recorded_proof_targets.push((proof.key, proof.min_len));
+                        recorded_proof_targets.push((proof.key, proof.parent_path_len));
                         for &(key, _, ref update) in subtrie_updates {
                             updates.insert(key, update.clone());
                         }
@@ -3137,9 +3147,9 @@ impl SparseTrie for ArenaParallelSparseTrie {
                         subtrie.update_leaves(subtrie_updates);
 
                         for (target_idx, proof) in subtrie.required_proofs.drain(..) {
-                            proof_required_fn(proof.key, proof.min_len);
+                            proof_required_fn(proof.key, proof.parent_path_len);
                             #[cfg(feature = "trie-debug")]
-                            recorded_proof_targets.push((proof.key, proof.min_len));
+                            recorded_proof_targets.push((proof.key, proof.parent_path_len));
                             let (key, _, ref update) = subtrie_updates[target_idx];
                             updates.insert(key, update.clone());
                         }
@@ -3198,10 +3208,10 @@ impl SparseTrie for ArenaParallelSparseTrie {
                             &mut self.buffers.updates,
                         );
                         match result {
-                            RemoveLeafResult::NeedsProof { key, proof_key, min_len } => {
-                                proof_required_fn(proof_key, min_len);
+                            RemoveLeafResult::NeedsProof { key, proof_key, parent_path_len } => {
+                                proof_required_fn(proof_key, parent_path_len);
                                 #[cfg(feature = "trie-debug")]
-                                recorded_proof_targets.push((proof_key, min_len));
+                                recorded_proof_targets.push((proof_key, parent_path_len));
                                 let update =
                                     mem::replace(&mut sorted[update_idx].2, LeafUpdate::Touched);
                                 updates.insert(key, update);
@@ -3267,9 +3277,9 @@ impl SparseTrie for ArenaParallelSparseTrie {
         for (child_idx, mut subtrie, range) in taken {
             let subtrie_updates = &sorted[range];
             for (target_idx, proof) in subtrie.required_proofs.drain(..) {
-                proof_required_fn(proof.key, proof.min_len);
+                proof_required_fn(proof.key, proof.parent_path_len);
                 #[cfg(feature = "trie-debug")]
-                recorded_proof_targets.push((proof.key, proof.min_len));
+                recorded_proof_targets.push((proof.key, proof.parent_path_len));
                 let (key, _, ref update) = subtrie_updates[target_idx];
                 updates.insert(key, update.clone());
             }
@@ -3412,8 +3422,8 @@ mod tests {
             // reveal, and repeat until no more proofs are needed.
             loop {
                 let mut targets: Vec<ProofV2Target> = Vec::new();
-                apst.update_leaves(&mut leaf_updates, |key, min_len| {
-                    targets.push(ProofV2Target::new(key).with_min_len(min_len));
+                apst.update_leaves(&mut leaf_updates, |key, parent_path_len| {
+                    targets.push(ProofV2Target::new(key).with_parent_path_len(parent_path_len));
                 })
                 .expect("update_leaves should succeed");
 

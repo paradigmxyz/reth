@@ -1,27 +1,11 @@
 use reth_trie_common::{Nibbles, ProofV2Target};
 
-// A helper function for getting the largest prefix of the sub-trie which contains a particular
-// target, based on its `min_len`.
-//
-// A target will only match nodes which share the target's prefix, where the target's prefix is
-// the first `min_len` nibbles of its key. E.g. a target with `key` 0xabcd and `min_len` 2 will
-// only match nodes with prefix 0xab.
-//
-// In general the target will only match within the sub-trie whose prefix is identical to the
-// target's. However there is an exception:
-//
-// Given a trie with a node at 0xabc, there must be a branch at 0xab. A target with prefix 0xabc
-// needs to match that node, but the branch at 0xab must be constructed order to know the node
-// is at that path. Therefore the sub-trie prefix is the target prefix with a nibble truncated.
-//
-// For a target with an empty prefix (`min_len` of 0) we still use an empty sub-trie prefix;
-// this will still construct the branch at the root node (if there is one). Targets with
-// `min_len` of both 0 and 1 will therefore construct the root node, but only those with
-// `min_len` of 0 will retain it.
+// Returns the path of the already-revealed parent branch for a target, or the root path if the
+// target needs the actual trie root.
 #[inline]
 pub(crate) fn sub_trie_prefix(target: &ProofV2Target) -> Nibbles {
     let mut sub_trie_prefix = target.key_nibbles;
-    sub_trie_prefix.truncate(target.min_len.saturating_sub(1) as usize);
+    sub_trie_prefix.truncate(target.parent_path_len.unwrap_or_default() as usize);
     sub_trie_prefix
 }
 
@@ -40,10 +24,8 @@ pub(crate) struct SubTrieTargets<'a> {
     /// The targets belonging to this sub-trie. These will be sorted by their `key` field,
     /// lexicographically.
     pub(crate) targets: &'a [ProofV2Target],
-    /// Will be true if at least one target in the set has a zero `min_len`.
-    ///
-    /// If this is true then `prefix.is_empty()`, though not necessarily vice-versa.
-    pub(crate) retain_root: bool,
+    /// The logical path length of the already-revealed parent branch, if any.
+    pub(crate) parent_path_len: Option<u8>,
 }
 
 impl<'a> SubTrieTargets<'a> {
@@ -59,24 +41,28 @@ impl<'a> SubTrieTargets<'a> {
 pub(crate) fn iter_sub_trie_targets(
     targets: &mut [ProofV2Target],
 ) -> impl Iterator<Item = SubTrieTargets<'_>> {
-    // Sort globally by sub-trie prefix, then by target key. This makes equal-prefix targets
-    // contiguous and already ordered for the `ProofCalculator`.
+    // Sort globally by sub-trie prefix, parent context, then target key. `None` and `Some(0)` both
+    // use an empty prefix but require different representations of the calculated root. This also
+    // leaves each resulting chunk ordered for the `ProofCalculator`.
     targets.sort_unstable_by(|a, b| {
-        sub_trie_prefix(a).cmp(&sub_trie_prefix(b)).then_with(|| a.key_nibbles.cmp(&b.key_nibbles))
+        sub_trie_prefix(a)
+            .cmp(&sub_trie_prefix(b))
+            .then_with(|| a.parent_path_len.cmp(&b.parent_path_len))
+            .then_with(|| a.key_nibbles.cmp(&b.key_nibbles))
     });
 
-    // Chunk targets by exact sub-trie prefix. Prefixes nested below a previous prefix are still
-    // processed as their own sub-trie.
-    let target_chunks =
-        targets.chunk_by_mut(|current, next| sub_trie_prefix(current) == sub_trie_prefix(next));
+    // Chunk targets by exact sub-trie prefix and parent context. Prefixes nested below a previous
+    // prefix are still processed as their own sub-trie.
+    let target_chunks = targets.chunk_by_mut(|current, next| {
+        current.parent_path_len == next.parent_path_len &&
+            sub_trie_prefix(current) == sub_trie_prefix(next)
+    });
 
     // Map the chunks to the return type.
     target_chunks.map(move |targets| {
         let prefix = sub_trie_prefix(&targets[0]);
-        // Targets with `min_len` 0 and 1 share the empty prefix, so key ordering cannot indicate
-        // whether the root should be retained.
-        let retain_root = targets.iter().any(|target| target.min_len == 0);
-        SubTrieTargets { prefix, targets, retain_root }
+        let parent_path_len = targets[0].parent_path_len;
+        SubTrieTargets { prefix, targets, parent_path_len }
     })
 }
 
@@ -96,19 +82,20 @@ mod tests {
         };
 
         // Test cases: (input_targets, expected_output)
-        // Expected output format: Vec<(exp_prefix_hex, Vec<key_hex>)>
+        // Expected output format: Vec<(exp_prefix_hex, parent_path_len, Vec<key_hex>)>
         let test_cases = vec![
             // Case 1: Empty targets
             (vec![], vec![]),
-            // Case 2: Single target without min_len
+            // Case 2: Single target without a known parent
             (
                 vec![ProofV2Target::new(B256::repeat_byte(0x20))],
                 vec![(
                     "",
+                    None,
                     vec!["2020202020202020202020202020202020202020202020202020202020202020"],
                 )],
             ),
-            // Case 3: Multiple targets in same sub-trie (no min_len)
+            // Case 3: Multiple targets in same sub-trie without known parents
             (
                 vec![
                     ProofV2Target::new(B256::repeat_byte(0x20)),
@@ -116,6 +103,7 @@ mod tests {
                 ],
                 vec![(
                     "",
+                    None,
                     vec![
                         "2020202020202020202020202020202020202020202020202020202020202020",
                         "2121212121212121212121212121212121212121212121212121212121212121",
@@ -125,42 +113,60 @@ mod tests {
             // Case 4: Multiple targets in different sub-tries
             (
                 vec![
-                    ProofV2Target::new(B256::repeat_byte(0x20)).with_min_len(2),
-                    ProofV2Target::new(B256::repeat_byte(0x40)).with_min_len(2),
+                    ProofV2Target::new(B256::repeat_byte(0x20)).with_parent_path_len(Some(1)),
+                    ProofV2Target::new(B256::repeat_byte(0x40)).with_parent_path_len(Some(1)),
                 ],
                 vec![
-                    ("2", vec!["2020202020202020202020202020202020202020202020202020202020202020"]),
-                    ("4", vec!["4040404040404040404040404040404040404040404040404040404040404040"]),
+                    (
+                        "2",
+                        Some(1),
+                        vec!["2020202020202020202020202020202020202020202020202020202020202020"],
+                    ),
+                    (
+                        "4",
+                        Some(1),
+                        vec!["4040404040404040404040404040404040404040404040404040404040404040"],
+                    ),
                 ],
             ),
             // Case 5: Three targets, two in same sub-trie, one separate
             (
                 vec![
-                    ProofV2Target::new(B256::repeat_byte(0x20)).with_min_len(2),
-                    ProofV2Target::new(B256::repeat_byte(0x2f)).with_min_len(2),
-                    ProofV2Target::new(B256::repeat_byte(0x40)).with_min_len(2),
+                    ProofV2Target::new(B256::repeat_byte(0x20)).with_parent_path_len(Some(1)),
+                    ProofV2Target::new(B256::repeat_byte(0x2f)).with_parent_path_len(Some(1)),
+                    ProofV2Target::new(B256::repeat_byte(0x40)).with_parent_path_len(Some(1)),
                 ],
                 vec![
                     (
                         "2",
+                        Some(1),
                         vec![
                             "2020202020202020202020202020202020202020202020202020202020202020",
                             "2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f",
                         ],
                     ),
-                    ("4", vec!["4040404040404040404040404040404040404040404040404040404040404040"]),
+                    (
+                        "4",
+                        Some(1),
+                        vec!["4040404040404040404040404040404040404040404040404040404040404040"],
+                    ),
                 ],
             ),
-            // Case 6: Targets with different min_len values in different sub-tries
+            // Case 6: Targets with different parent paths in different sub-tries
             (
                 vec![
-                    ProofV2Target::new(B256::repeat_byte(0x20)).with_min_len(2),
-                    ProofV2Target::new(B256::repeat_byte(0x2f)).with_min_len(3),
+                    ProofV2Target::new(B256::repeat_byte(0x20)).with_parent_path_len(Some(1)),
+                    ProofV2Target::new(B256::repeat_byte(0x2f)).with_parent_path_len(Some(2)),
                 ],
                 vec![
-                    ("2", vec!["2020202020202020202020202020202020202020202020202020202020202020"]),
+                    (
+                        "2",
+                        Some(1),
+                        vec!["2020202020202020202020202020202020202020202020202020202020202020"],
+                    ),
                     (
                         "2f",
+                        Some(2),
                         vec!["2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f"],
                     ),
                 ],
@@ -168,40 +174,49 @@ mod tests {
             // Case 7: More complex chunking with nested sub-trie prefixes
             (
                 vec![
-                    ProofV2Target::new(B256::repeat_byte(0x20)).with_min_len(2),
-                    ProofV2Target::new(B256::repeat_byte(0x2f)).with_min_len(4),
-                    ProofV2Target::new(B256::repeat_byte(0x4c)).with_min_len(3),
-                    ProofV2Target::new(B256::repeat_byte(0x4c)).with_min_len(4),
-                    ProofV2Target::new(B256::repeat_byte(0x4e)).with_min_len(3),
+                    ProofV2Target::new(B256::repeat_byte(0x20)).with_parent_path_len(Some(1)),
+                    ProofV2Target::new(B256::repeat_byte(0x2f)).with_parent_path_len(Some(3)),
+                    ProofV2Target::new(B256::repeat_byte(0x4c)).with_parent_path_len(Some(2)),
+                    ProofV2Target::new(B256::repeat_byte(0x4c)).with_parent_path_len(Some(3)),
+                    ProofV2Target::new(B256::repeat_byte(0x4e)).with_parent_path_len(Some(2)),
                 ],
                 vec![
-                    ("2", vec!["2020202020202020202020202020202020202020202020202020202020202020"]),
+                    (
+                        "2",
+                        Some(1),
+                        vec!["2020202020202020202020202020202020202020202020202020202020202020"],
+                    ),
                     (
                         "2f2",
+                        Some(3),
                         vec!["2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f"],
                     ),
                     (
                         "4c",
+                        Some(2),
                         vec!["4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c"],
                     ),
                     (
                         "4c4",
+                        Some(3),
                         vec!["4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c"],
                     ),
                     (
                         "4e",
+                        Some(2),
                         vec!["4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e"],
                     ),
                 ],
             ),
-            // Case 8: Min-len 1 should result in zero-length sub-trie prefix
+            // Case 8: A root parent should result in a zero-length sub-trie prefix
             (
                 vec![
-                    ProofV2Target::new(B256::repeat_byte(0x20)).with_min_len(1),
-                    ProofV2Target::new(B256::repeat_byte(0x40)).with_min_len(1),
+                    ProofV2Target::new(B256::repeat_byte(0x20)).with_parent_path_len(Some(0)),
+                    ProofV2Target::new(B256::repeat_byte(0x40)).with_parent_path_len(Some(0)),
                 ],
                 vec![(
                     "",
+                    Some(0),
                     vec![
                         "2020202020202020202020202020202020202020202020202020202020202020",
                         "4040404040404040404040404040404040404040404040404040404040404040",
@@ -211,12 +226,39 @@ mod tests {
             // Case 9: Second target's sub-trie prefix is root
             (
                 vec![
-                    ProofV2Target::new(B256::repeat_byte(0x20)).with_min_len(2),
-                    ProofV2Target::new(B256::repeat_byte(0x40)).with_min_len(1),
+                    ProofV2Target::new(B256::repeat_byte(0x20)).with_parent_path_len(Some(1)),
+                    ProofV2Target::new(B256::repeat_byte(0x40)).with_parent_path_len(Some(0)),
                 ],
                 vec![
-                    ("", vec!["4040404040404040404040404040404040404040404040404040404040404040"]),
-                    ("2", vec!["2020202020202020202020202020202020202020202020202020202020202020"]),
+                    (
+                        "",
+                        Some(0),
+                        vec!["4040404040404040404040404040404040404040404040404040404040404040"],
+                    ),
+                    (
+                        "2",
+                        Some(1),
+                        vec!["2020202020202020202020202020202020202020202020202020202020202020"],
+                    ),
+                ],
+            ),
+            // Case 10: Root and root-parent targets are distinct despite sharing a prefix
+            (
+                vec![
+                    ProofV2Target::new(B256::repeat_byte(0x20)),
+                    ProofV2Target::new(B256::repeat_byte(0x40)).with_parent_path_len(Some(0)),
+                ],
+                vec![
+                    (
+                        "",
+                        None,
+                        vec!["2020202020202020202020202020202020202020202020202020202020202020"],
+                    ),
+                    (
+                        "",
+                        Some(0),
+                        vec!["4040404040404040404040404040404040404040404040404040404040404040"],
+                    ),
                 ],
             ),
         ];
@@ -234,7 +276,7 @@ mod tests {
                 sub_tries.len()
             );
 
-            for (j, (sub_trie, (exp_prefix_hex, exp_keys))) in
+            for (j, (sub_trie, (exp_prefix_hex, exp_parent_path_len, exp_keys))) in
                 sub_tries.iter().zip(expected.iter()).enumerate()
             {
                 let exp_prefix = nibbles(exp_prefix_hex);
@@ -242,6 +284,11 @@ mod tests {
                 assert_eq!(
                     sub_trie.prefix, exp_prefix,
                     "Test case {} sub-trie {}: prefix mismatch",
+                    test_case, j
+                );
+                assert_eq!(
+                    sub_trie.parent_path_len, *exp_parent_path_len,
+                    "Test case {} sub-trie {}: parent path mismatch",
                     test_case, j
                 );
                 assert_eq!(
@@ -269,16 +316,16 @@ mod tests {
     }
 
     #[test]
-    fn test_iter_sub_trie_targets_retain_root_after_key_sort() {
+    fn test_iter_sub_trie_targets_key_order_after_global_sort() {
         let mut targets = [
             ProofV2Target::new(B256::repeat_byte(0x40)),
-            ProofV2Target::new(B256::repeat_byte(0x20)).with_min_len(1),
+            ProofV2Target::new(B256::repeat_byte(0x20)),
         ];
 
         let sub_tries = iter_sub_trie_targets(&mut targets).collect::<Vec<_>>();
 
         assert_eq!(sub_tries.len(), 1);
         assert_eq!(sub_tries[0].targets[0].key(), B256::repeat_byte(0x20));
-        assert!(sub_tries[0].retain_root);
+        assert_eq!(sub_tries[0].parent_path_len, None);
     }
 }

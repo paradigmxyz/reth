@@ -468,7 +468,7 @@ pub(super) fn test_remove_nonexistent_leaf_preserves_hashes<T: SparseTrie>(new_t
 
 /// When `update_leaves` encounters a blinded node (insufficient
 /// proof data), it should invoke the `proof_required_fn` callback with the correct target key
-/// and minimum depth, and leave the key in the updates map for retry.
+/// and revealed parent path length, and leave the key in the updates map for retry.
 pub(super) fn test_update_leaves_blinded_node_requests_proof<T: SparseTrie>(new_trie: fn() -> T) {
     // Use enough keys under two different first nibbles so that branch children become
     // hash nodes (>32 bytes RLP). This ensures partial reveal leaves blinded subtries.
@@ -504,8 +504,8 @@ pub(super) fn test_update_leaves_blinded_node_requests_proof<T: SparseTrie>(new_
 
     // First update_leaves call: should invoke callback for the blinded node.
     let mut targets: Vec<ProofV2Target> = Vec::new();
-    trie.update_leaves(&mut leaf_updates, |key, min_len| {
-        targets.push(ProofV2Target::new(key).with_min_len(min_len));
+    trie.update_leaves(&mut leaf_updates, |key, parent_path_len| {
+        targets.push(ProofV2Target::new(key).with_parent_path_len(parent_path_len));
     })
     .expect("update_leaves should succeed");
 
@@ -553,8 +553,8 @@ pub(super) fn test_update_leaves_retry_after_reveal<T: SparseTrie>(new_trie: fn(
 
     // First update_leaves: callback fires, key stays in map.
     let mut targets: Vec<ProofV2Target> = Vec::new();
-    trie.update_leaves(&mut leaf_updates, |key, min_len| {
-        targets.push(ProofV2Target::new(key).with_min_len(min_len));
+    trie.update_leaves(&mut leaf_updates, |key, parent_path_len| {
+        targets.push(ProofV2Target::new(key).with_parent_path_len(parent_path_len));
     })
     .expect("update_leaves should succeed");
     assert!(!targets.is_empty(), "callback should fire for blinded node");
@@ -566,8 +566,8 @@ pub(super) fn test_update_leaves_retry_after_reveal<T: SparseTrie>(new_trie: fn(
 
     // Second update_leaves: now the path is revealed, key should be drained.
     let mut targets2: Vec<ProofV2Target> = Vec::new();
-    trie.update_leaves(&mut leaf_updates, |key, min_len| {
-        targets2.push(ProofV2Target::new(key).with_min_len(min_len));
+    trie.update_leaves(&mut leaf_updates, |key, parent_path_len| {
+        targets2.push(ProofV2Target::new(key).with_parent_path_len(parent_path_len));
     })
     .expect("update_leaves should succeed on retry");
     assert!(targets2.is_empty(), "no callback should fire after reveal");
@@ -616,8 +616,8 @@ pub(super) fn test_remove_leaf_blinded_sibling_requires_reveal<T: SparseTrie>(ne
         SuiteTestHarness::leaf_updates(&BTreeMap::from([(revealed_key, U256::ZERO)]));
 
     let mut targets: Vec<ProofV2Target> = Vec::new();
-    trie.update_leaves(&mut leaf_updates, |key, min_len| {
-        targets.push(ProofV2Target::new(key).with_min_len(min_len));
+    trie.update_leaves(&mut leaf_updates, |key, parent_path_len| {
+        targets.push(ProofV2Target::new(key).with_parent_path_len(parent_path_len));
     })
     .expect("update_leaves should succeed");
     assert!(!targets.is_empty(), "callback should fire for blinded sibling");
@@ -685,8 +685,8 @@ pub(super) fn test_update_leaves_removal_branch_collapse_blinded_sibling<T: Spar
         SuiteTestHarness::leaf_updates(&BTreeMap::from([(revealed_key, U256::ZERO)]));
 
     let mut targets: Vec<ProofV2Target> = Vec::new();
-    trie.update_leaves(&mut leaf_updates, |key, min_len| {
-        targets.push(ProofV2Target::new(key).with_min_len(min_len));
+    trie.update_leaves(&mut leaf_updates, |key, parent_path_len| {
+        targets.push(ProofV2Target::new(key).with_parent_path_len(parent_path_len));
     })
     .expect("update_leaves should succeed");
 
@@ -756,8 +756,8 @@ pub(super) fn test_update_leaves_subtrie_collapse_requests_proof<T: SparseTrie>(
     ]));
 
     let mut targets: Vec<ProofV2Target> = Vec::new();
-    trie.update_leaves(&mut leaf_updates, |key, min_len| {
-        targets.push(ProofV2Target::new(key).with_min_len(min_len));
+    trie.update_leaves(&mut leaf_updates, |key, parent_path_len| {
+        targets.push(ProofV2Target::new(key).with_parent_path_len(parent_path_len));
     })
     .expect("update_leaves should succeed");
 
@@ -810,8 +810,8 @@ pub(super) fn test_update_leaves_multiple_keys_same_blinded_node<T: SparseTrie>(
     let mut leaf_updates = SuiteTestHarness::leaf_updates(&blinded_keys);
 
     let mut targets: Vec<ProofV2Target> = Vec::new();
-    trie.update_leaves(&mut leaf_updates, |key, min_len| {
-        targets.push(ProofV2Target::new(key).with_min_len(min_len));
+    trie.update_leaves(&mut leaf_updates, |key, parent_path_len| {
+        targets.push(ProofV2Target::new(key).with_parent_path_len(parent_path_len));
     })
     .expect("update_leaves should succeed");
 
@@ -839,8 +839,8 @@ pub(super) fn test_update_leaves_touched_fully_revealed<T: SparseTrie>(new_trie:
     let mut leaf_updates: B256Map<LeafUpdate> = once((key2, LeafUpdate::Touched)).collect();
 
     let mut targets: Vec<ProofV2Target> = Vec::new();
-    trie.update_leaves(&mut leaf_updates, |key, min_len| {
-        targets.push(ProofV2Target::new(key).with_min_len(min_len));
+    trie.update_leaves(&mut leaf_updates, |key, parent_path_len| {
+        targets.push(ProofV2Target::new(key).with_parent_path_len(parent_path_len));
     })
     .expect("update_leaves should succeed");
 
@@ -891,8 +891,8 @@ pub(super) fn test_update_leaves_touched_blinded_requests_proof<T: SparseTrie>(
     let mut leaf_updates: B256Map<LeafUpdate> = once((target_key, LeafUpdate::Touched)).collect();
 
     let mut targets: Vec<ProofV2Target> = Vec::new();
-    trie.update_leaves(&mut leaf_updates, |key, min_len| {
-        targets.push(ProofV2Target::new(key).with_min_len(min_len));
+    trie.update_leaves(&mut leaf_updates, |key, parent_path_len| {
+        targets.push(ProofV2Target::new(key).with_parent_path_len(parent_path_len));
     })
     .expect("update_leaves should succeed");
 
@@ -916,7 +916,7 @@ pub(super) fn test_update_leaves_touched_nonexistent_key<T: SparseTrie>(new_trie
     let mut leaf_updates: B256Map<LeafUpdate> = once((target_key, LeafUpdate::Touched)).collect();
 
     let mut callback_count = 0usize;
-    trie.update_leaves(&mut leaf_updates, |_key, _min_len| {
+    trie.update_leaves(&mut leaf_updates, |_key, _parent_path_len| {
         callback_count += 1;
     })
     .expect("update_leaves should succeed");
@@ -953,7 +953,7 @@ pub(super) fn test_update_leaves_touched_nonexistent_in_populated_trie<T: Sparse
         once((nonexistent_key, LeafUpdate::Touched)).collect();
 
     let mut callback_count = 0usize;
-    trie.update_leaves(&mut leaf_updates, |_key, _min_len| {
+    trie.update_leaves(&mut leaf_updates, |_key, _parent_path_len| {
         callback_count += 1;
     })
     .expect("update_leaves should succeed");
@@ -1375,8 +1375,8 @@ pub(super) fn test_branch_collapse_multi_empty_subtries_blinded_remaining<T: Spa
     ]));
 
     let mut targets: Vec<ProofV2Target> = Vec::new();
-    trie.update_leaves(&mut leaf_updates, |key, min_len| {
-        targets.push(ProofV2Target::new(key).with_min_len(min_len));
+    trie.update_leaves(&mut leaf_updates, |key, parent_path_len| {
+        targets.push(ProofV2Target::new(key).with_parent_path_len(parent_path_len));
     })
     .expect("update_leaves should succeed");
 

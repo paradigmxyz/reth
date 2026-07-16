@@ -11,8 +11,11 @@ use revm::state::EvmState;
 pub struct ProofV2Target {
     /// The key of the proof target, as nibbles.
     pub key_nibbles: Nibbles,
-    /// The minimum length of a node's path for it to be retained.
-    pub min_len: u8,
+    /// The logical path length of the already-revealed parent branch.
+    ///
+    /// `None` requests the actual trie root. `Some(0)` means the root branch is already revealed,
+    /// so the proof starts at its direct child.
+    pub parent_path_len: Option<u8>,
 }
 
 impl ProofV2Target {
@@ -21,7 +24,7 @@ impl ProofV2Target {
     pub fn new(key: B256) -> Self {
         // SAFETY: key is a B256 and so is exactly 32-bytes.
         let key_nibbles = unsafe { Nibbles::unpack_unchecked(key.as_slice()) };
-        Self { key_nibbles, min_len: 0 }
+        Self { key_nibbles, parent_path_len: None }
     }
 
     /// Returns the key the target was initialized with.
@@ -29,14 +32,17 @@ impl ProofV2Target {
         B256::from_slice(&self.key_nibbles.pack())
     }
 
-    /// Only match trie nodes whose path is at least this long.
+    /// Sets the logical path length of the already-revealed parent branch.
+    ///
+    /// A known parent at path length `n` makes the proof start at its direct child at length
+    /// `n + 1`. `None` requests the actual trie root.
     ///
     /// # Panics
     ///
-    /// This method panics if `min_len` is greater than 64.
-    pub fn with_min_len(mut self, min_len: u8) -> Self {
-        debug_assert!(min_len <= 64);
-        self.min_len = min_len;
+    /// This method panics if `parent_path_len` is greater than or equal to 64.
+    pub fn with_parent_path_len(mut self, parent_path_len: Option<u8>) -> Self {
+        debug_assert!(parent_path_len.is_none_or(|len| len < 64));
+        self.parent_path_len = parent_path_len;
         self
     }
 }
@@ -123,10 +129,10 @@ impl MultiProofTargetsV2 {
 /// An iterator that yields chunks of V2 proof targets of at most `size` account and storage
 /// targets.
 ///
-/// Unlike legacy chunking, V2 preserves account targets exactly as they were (with their `min_len`
-/// metadata). Account targets must appear in a chunk. Storage targets for those accounts are
-/// chunked together, but if they exceed the chunk size, subsequent chunks contain only the
-/// remaining storage targets without repeating the account target.
+/// Unlike legacy chunking, V2 preserves account targets exactly as they were (with their
+/// `parent_path_len` metadata). Account targets must appear in a chunk. Storage targets for those
+/// accounts are chunked together, but if they exceed the chunk size, subsequent chunks contain
+/// only the remaining storage targets without repeating the account target.
 #[derive(Debug)]
 pub struct ChunkedMultiProofTargetsV2 {
     /// Remaining account targets to process
