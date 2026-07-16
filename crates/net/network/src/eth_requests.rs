@@ -508,8 +508,9 @@ where
     /// Serves a `GetAccountRange` request via [`StateRangeProviderFactory`].
     ///
     /// Fails the request if a storage root or proof becomes unavailable after the range lookup.
-    /// Always proves the boundary between `starting_hash` and the last returned account, per
-    /// snap/2's boundary-proof requirement.
+    /// Proves the boundary between `starting_hash` and the last returned account, per snap/2's
+    /// boundary-proof requirement, unless the range is a zero-origin range that exhausted the
+    /// trie, in which case no proof is needed.
     fn get_account_range_response(
         &self,
         req: GetAccountRangeMessage,
@@ -524,10 +525,15 @@ where
         let Some(state) = self.client.state_range_provider(req.root_hash)? else {
             return Ok(empty)
         };
-        let RangeResponse { items: accounts, .. } =
+        let RangeResponse { items: accounts, end } =
             state.account_range(req.starting_hash, req.limit_hash, response_bytes)?;
 
-        let boundary_keys = boundary_proof_keys(req.starting_hash, accounts.last());
+        let proof = if req.starting_hash == B256::ZERO && end == RangeEnd::Exhausted {
+            Vec::new()
+        } else {
+            let boundary_keys = boundary_proof_keys(req.starting_hash, accounts.last());
+            state.account_range_proof(&boundary_keys)?
+        };
 
         let mut account_data = Vec::with_capacity(accounts.len());
         for (hash, account) in accounts {
@@ -535,8 +541,6 @@ where
             account_data
                 .push(AccountData { hash, body: slim_account_body(&account, storage_root) });
         }
-
-        let proof = state.account_range_proof(&boundary_keys)?;
 
         Ok(AccountRangeMessage { request_id: req.request_id, accounts: account_data, proof })
     }
