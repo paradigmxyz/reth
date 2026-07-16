@@ -563,14 +563,14 @@ where
         let Some(state) = self.client.state_range_provider(req.root_hash)? else {
             return Ok(empty)
         };
-        let mut slots = Vec::new();
+        let mut slots: Vec<Vec<StorageData>> = Vec::new();
         let mut proof = Vec::new();
         let mut remaining_bytes = (req.response_bytes as usize).min(SOFT_RESPONSE_LIMIT);
 
         for (i, &hashed_address) in
             req.account_hashes.iter().take(MAX_STORAGE_RANGE_ACCOUNTS_SERVE).enumerate()
         {
-            if remaining_bytes == 0 {
+            if remaining_bytes == 0 && slots.iter().any(|range| !range.is_empty()) {
                 break
             }
             let origin = if i == 0 { req.starting_hash } else { B256::ZERO };
