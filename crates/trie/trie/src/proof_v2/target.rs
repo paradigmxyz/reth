@@ -59,11 +59,10 @@ impl<'a> SubTrieTargets<'a> {
 pub(crate) fn iter_sub_trie_targets(
     targets: &mut [ProofV2Target],
 ) -> impl Iterator<Item = SubTrieTargets<'_>> {
-    // First sort by the sub-trie prefix of each target, falling back to the `min_len` in cases
-    // where the sub-trie prefixes are equal (to differentiate targets which match the root node and
-    // those which don't).
+    // Sort globally by sub-trie prefix, then by target key. This makes equal-prefix targets
+    // contiguous and already ordered for the `ProofCalculator`.
     targets.sort_unstable_by(|a, b| {
-        sub_trie_prefix(a).cmp(&sub_trie_prefix(b)).then_with(|| a.min_len.cmp(&b.min_len))
+        sub_trie_prefix(a).cmp(&sub_trie_prefix(b)).then_with(|| a.key_nibbles.cmp(&b.key_nibbles))
     });
 
     // Chunk targets by exact sub-trie prefix. Prefixes nested below a previous prefix are still
@@ -71,12 +70,12 @@ pub(crate) fn iter_sub_trie_targets(
     let target_chunks =
         targets.chunk_by_mut(|current, next| sub_trie_prefix(current) == sub_trie_prefix(next));
 
-    // Map the chunks to the return type. Within each chunk we want targets to be sorted by their
-    // key, as that will be the order they are checked by the `ProofCalculator`.
+    // Map the chunks to the return type.
     target_chunks.map(move |targets| {
         let prefix = sub_trie_prefix(&targets[0]);
-        let retain_root = targets[0].min_len == 0;
-        targets.sort_unstable_by_key(|target| target.key_nibbles);
+        // Targets with `min_len` 0 and 1 share the empty prefix, so key ordering cannot indicate
+        // whether the root should be retained.
+        let retain_root = targets.iter().any(|target| target.min_len == 0);
         SubTrieTargets { prefix, targets, retain_root }
     })
 }
@@ -267,5 +266,19 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn test_iter_sub_trie_targets_retain_root_after_key_sort() {
+        let mut targets = [
+            ProofV2Target::new(B256::repeat_byte(0x40)),
+            ProofV2Target::new(B256::repeat_byte(0x20)).with_min_len(1),
+        ];
+
+        let sub_tries = iter_sub_trie_targets(&mut targets).collect::<Vec<_>>();
+
+        assert_eq!(sub_tries.len(), 1);
+        assert_eq!(sub_tries[0].targets[0].key(), B256::repeat_byte(0x20));
+        assert!(sub_tries[0].retain_root);
     }
 }
