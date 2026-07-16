@@ -1793,17 +1793,7 @@ pub trait EngineValidator<
     ) -> ProviderResult<ExecutedBlock<N>>;
 
     /// Registers the exact state for a new canonical head with background cache prewarming.
-    fn on_canonical_head_changed(
-        &self,
-        _header: &SealedHeader<N::BlockHeader>,
-        _state: &EngineApiTreeState<N>,
-    ) {
-    }
-
-    /// Returns whether canonical-head notifications require otherwise-unneeded provider work.
-    fn canonical_head_notifications_enabled(&self) -> bool {
-        false
-    }
+    fn on_canonical_head_changed(&self, _hash: B256, _state: &EngineApiTreeState<N>) {}
 
     /// Prepares the resources loaned to a payload builder job.
     ///
@@ -1894,12 +1884,22 @@ where
         ))
     }
 
-    fn on_canonical_head_changed(
-        &self,
-        header: &SealedHeader<N::BlockHeader>,
-        state: &EngineApiTreeState<N>,
-    ) {
+    fn on_canonical_head_changed(&self, hash: B256, state: &EngineApiTreeState<N>) {
         let Some(txpool_prewarm) = self.txpool_prewarm.as_ref() else { return };
+
+        let header = match self.sealed_header_by_hash(hash, state) {
+            Ok(Some(header)) => header,
+            Ok(None) => return,
+            Err(err) => {
+                trace!(
+                    target: "engine::tree::txpool_prewarm",
+                    %err,
+                    block_hash = ?hash,
+                    "failed to fetch canonical header for txpool prewarming"
+                );
+                return
+            }
+        };
         let parent_parent = match self.sealed_header_by_hash(header.parent_hash(), state) {
             Ok(Some(parent_parent)) => parent_parent,
             Ok(None) => return,
@@ -1914,6 +1914,7 @@ where
                 return
             }
         };
+
         let provider_builder = match self.state_provider_builder(header.hash(), state) {
             Ok(Some(provider_builder)) => provider_builder,
             Ok(None) => return,
@@ -1939,10 +1940,6 @@ where
                 );
             }
         }
-    }
-
-    fn canonical_head_notifications_enabled(&self) -> bool {
-        self.txpool_prewarm.is_some()
     }
 
     fn payload_builder_resources(
