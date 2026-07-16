@@ -159,15 +159,38 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
         mut self,
         hashed_state_overlay: Option<Arc<HashedPostStateSorted>>,
     ) -> Self {
-        if let Some(state) = hashed_state_overlay {
+        if let Some(new_state) = hashed_state_overlay {
             match &mut self.overlay_source {
-                Some(OverlaySource::Managed { state: managed_state, .. }) => {
-                    *managed_state = state;
-                }
-                _ => {
+                Some(
+                    OverlaySource::Managed { state, .. } | OverlaySource::Immediate { state, .. },
+                ) => *state = new_state,
+                None => {
                     self.overlay_source = Some(OverlaySource::Immediate {
                         trie: Arc::new(TrieUpdatesSorted::default()),
-                        state,
+                        state: new_state,
+                    });
+                }
+            }
+        }
+        self
+    }
+
+    /// Set the trie updates overlay.
+    ///
+    /// Only applies to an immediate overlay: a managed overlay's trie updates are resolved from
+    /// its manager instead.
+    pub fn with_trie_updates_overlay(
+        mut self,
+        trie_updates_overlay: Option<Arc<TrieUpdatesSorted>>,
+    ) -> Self {
+        if let Some(trie) = trie_updates_overlay {
+            match &mut self.overlay_source {
+                Some(OverlaySource::Immediate { trie: existing, .. }) => *existing = trie,
+                Some(OverlaySource::Managed { .. }) => {}
+                None => {
+                    self.overlay_source = Some(OverlaySource::Immediate {
+                        trie,
+                        state: Arc::new(HashedPostStateSorted::default()),
                     });
                 }
             }
