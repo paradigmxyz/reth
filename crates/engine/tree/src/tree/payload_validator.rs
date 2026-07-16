@@ -379,8 +379,7 @@ where
         mut self,
         source: impl crate::tree::TxPoolPrewarmSource<N> + 'static,
     ) -> Self {
-        let config = self.config.txpool_prewarming();
-        if !config.should_prewarm() ||
+        if !self.config.txpool_prewarming() ||
             self.config.disable_state_cache() ||
             self.config.disable_prewarming()
         {

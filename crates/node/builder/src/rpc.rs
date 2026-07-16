@@ -1483,7 +1483,7 @@ where
             ctx.node.task_executor().clone(),
         );
 
-        if txpool_prewarming.should_prewarm() && txpool_prewarming_available {
+        if txpool_prewarming && txpool_prewarming_available {
             validator = validator.with_txpool_prewarm_source(PoolTxPoolPrewarmSource::<
                 PrimitivesTy<Node::Types>,
                 _,

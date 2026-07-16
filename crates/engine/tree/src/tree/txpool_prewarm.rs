@@ -322,8 +322,7 @@ impl EvmStateProvider for TxPoolPrewarmStateProvider<'_> {
         &self,
         address: &Address,
     ) -> reth_errors::ProviderResult<Option<reth_primitives_traits::Account>> {
-        self.cache
-            .get_or_try_insert_account_with(*address, || self.inner.basic_account(address))
+        self.cache.get_or_try_insert_account_with(*address, || self.inner.basic_account(address))
     }
 
     fn block_hash(&self, number: BlockNumber) -> reth_errors::ProviderResult<Option<B256>> {
@@ -543,7 +542,6 @@ where
 
     (true, transaction_count)
 }
-
 
 #[cfg(test)]
 mod tests {

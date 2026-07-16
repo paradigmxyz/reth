@@ -87,35 +87,6 @@ pub fn has_enough_parallelism() -> bool {
     false
 }
 
-/// Configuration for best-effort txpool transaction prewarming.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct TxPoolPrewarmingConfig {
-    /// Whether txpool transaction prewarming is enabled.
-    pub enabled: bool,
-}
-
-impl TxPoolPrewarmingConfig {
-    /// Default configuration.
-    pub const DEFAULT: Self = Self { enabled: false };
-
-    /// Returns whether this configuration can launch work.
-    pub const fn should_prewarm(&self) -> bool {
-        self.enabled
-    }
-
-    /// Enables or disables txpool prewarming.
-    pub const fn with_enabled(mut self, enabled: bool) -> Self {
-        self.enabled = enabled;
-        self
-    }
-}
-
-impl Default for TxPoolPrewarmingConfig {
-    fn default() -> Self {
-        Self::DEFAULT
-    }
-}
-
 /// The configuration of the engine tree.
 #[derive(Debug, Clone)]
 pub struct TreeConfig {
@@ -151,8 +122,8 @@ pub struct TreeConfig {
     disable_state_cache: bool,
     /// Whether to disable parallel prewarming.
     disable_prewarming: bool,
-    /// Configuration for txpool-driven prewarming between payloads.
-    txpool_prewarming: TxPoolPrewarmingConfig,
+    /// Whether txpool-driven prewarming between payloads is enabled.
+    txpool_prewarming: bool,
     /// Whether to enable state provider metrics.
     state_provider_metrics: bool,
     /// Cross-block cache size in bytes.
@@ -259,7 +230,7 @@ impl Default for TreeConfig {
             always_compare_trie_updates: false,
             disable_state_cache: false,
             disable_prewarming: false,
-            txpool_prewarming: TxPoolPrewarmingConfig::DEFAULT,
+            txpool_prewarming: false,
             state_provider_metrics: false,
             cross_block_cache_size: DEFAULT_CROSS_BLOCK_CACHE_SIZE,
             has_enough_parallelism: has_enough_parallelism(),
@@ -336,7 +307,7 @@ impl TreeConfig {
             always_compare_trie_updates,
             disable_state_cache,
             disable_prewarming,
-            txpool_prewarming: TxPoolPrewarmingConfig::DEFAULT,
+            txpool_prewarming: false,
             state_provider_metrics,
             cross_block_cache_size,
             has_enough_parallelism,
@@ -433,8 +404,8 @@ impl TreeConfig {
         self.disable_prewarming
     }
 
-    /// Returns txpool prewarming configuration.
-    pub const fn txpool_prewarming(&self) -> TxPoolPrewarmingConfig {
+    /// Returns whether txpool prewarming is enabled.
+    pub const fn txpool_prewarming(&self) -> bool {
         self.txpool_prewarming
     }
 
@@ -557,9 +528,9 @@ impl TreeConfig {
         self
     }
 
-    /// Sets txpool transaction prewarming configuration.
-    pub const fn with_txpool_prewarming(mut self, config: TxPoolPrewarmingConfig) -> Self {
-        self.txpool_prewarming = config;
+    /// Enables or disables txpool transaction prewarming.
+    pub const fn with_txpool_prewarming(mut self, enabled: bool) -> Self {
+        self.txpool_prewarming = enabled;
         self
     }
 
