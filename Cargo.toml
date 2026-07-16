@@ -433,9 +433,9 @@ revmc = { git = "https://github.com/paradigmxyz/revmc", branch = "main", default
 revm-inspectors = "0.41.0"
 
 # eth
-alloy-dyn-abi = "1.6.0"
-alloy-primitives = { version = "1.6.0", default-features = false, features = ["map-foldhash"] }
-alloy-sol-types = { version = "1.6.0", default-features = false }
+alloy-dyn-abi = "1.6.1"
+alloy-primitives = { version = "1.6.1", default-features = false, features = ["map-foldhash"] }
+alloy-sol-types = { version = "1.6.1", default-features = false }
 
 alloy-chains = { version = "0.2.33", default-features = false }
 alloy-eip2124 = { version = "0.2.0", default-features = false }
