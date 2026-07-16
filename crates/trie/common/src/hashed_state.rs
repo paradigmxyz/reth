@@ -694,10 +694,14 @@ impl HashedPostStateSorted {
     /// Merges the batch and removes overlapping keys whose mask values all differ from the merged
     /// batch value.
     ///
-    /// Account keys are masked at the top level, while storage entries are only masked at the slot
-    /// level unless the mask wipes the entire storage. For duplicate keys in the batch, later
-    /// items take precedence over earlier ones. An overlapping entry is retained if any mask
-    /// value is equal to the merged batch value. The order of the mask does not matter.
+    /// Account keys are masked at the top level, while storage entries are masked at the slot
+    /// level. For duplicate keys in the batch, later items take precedence over earlier ones. An
+    /// overlapping entry is retained if any mask value is equal to the merged batch value. The
+    /// order of the mask does not matter.
+    ///
+    /// # Panics
+    ///
+    /// Panics if any batch or mask entry wipes an entire storage.
     pub fn disjointed_merge_batch<'a>(batch: Vec<&'a Self>, mask: Vec<&'a Self>) -> Self {
         let account_count = batch.iter().map(|item| item.accounts.len()).sum();
         let mut accounts = Vec::with_capacity(account_count);
@@ -707,15 +711,12 @@ impl HashedPostStateSorted {
         ));
 
         struct StorageAcc<'a> {
-            wiped: bool,
-            sealed: bool,
             slot_count: usize,
             slices: Vec<&'a [(B256, U256)]>,
         }
 
         #[derive(Default)]
         struct StorageMaskAcc<'a> {
-            wiped: bool,
             slices: Vec<&'a [(B256, U256)]>,
         }
 
@@ -726,23 +727,15 @@ impl HashedPostStateSorted {
 
         for item in batch.iter().rev() {
             for (hashed_address, storage) in &item.storages {
-                let entry = storages.entry(*hashed_address).or_insert_with(|| StorageAcc {
-                    wiped: false,
-                    sealed: false,
-                    slot_count: 0,
-                    slices: Vec::new(),
-                });
-
-                if entry.sealed {
-                    continue;
-                }
-
+                assert!(
+                    !storage.wiped,
+                    "storage wipes are not supported by disjointed_merge_batch"
+                );
+                let entry = storages
+                    .entry(*hashed_address)
+                    .or_insert_with(|| StorageAcc { slot_count: 0, slices: Vec::new() });
                 entry.slices.push(storage.storage_slots.as_slice());
                 entry.slot_count += storage.storage_slots.len();
-                if storage.wiped {
-                    entry.wiped = true;
-                    entry.sealed = true;
-                }
             }
         }
 
@@ -752,16 +745,12 @@ impl HashedPostStateSorted {
         );
         for item in mask {
             for (hashed_address, storage) in &item.storages {
+                assert!(
+                    !storage.wiped,
+                    "storage wipes are not supported by disjointed_merge_batch"
+                );
                 let entry = storage_masks.entry(*hashed_address).or_default();
-                if entry.wiped {
-                    continue;
-                }
-                if storage.wiped {
-                    entry.wiped = true;
-                    entry.slices.clear();
-                } else {
-                    entry.slices.push(storage.storage_slots.as_slice());
-                }
+                entry.slices.push(storage.storage_slots.as_slice());
             }
         }
 
@@ -769,7 +758,6 @@ impl HashedPostStateSorted {
             .into_iter()
             .filter_map(|(hashed_address, entry)| {
                 let storage_slots = match storage_masks.get(&hashed_address) {
-                    Some(mask_entry) if mask_entry.wiped => return None,
                     Some(mask_entry) => {
                         let mut storage_slots = Vec::with_capacity(entry.slot_count);
                         storage_slots.extend(kway_merge_disjoint_sorted(
@@ -781,9 +769,9 @@ impl HashedPostStateSorted {
                     None => kway_merge_sorted(entry.slices),
                 };
 
-                (!storage_slots.is_empty() || entry.wiped).then_some((
+                (!storage_slots.is_empty()).then_some((
                     hashed_address,
-                    HashedStorageSorted { wiped: entry.wiped, storage_slots },
+                    HashedStorageSorted { wiped: false, storage_slots },
                 ))
             })
             .collect();
@@ -1645,28 +1633,15 @@ mod tests {
         let kept_account = B256::with_last_byte(1);
         let removed_account = B256::with_last_byte(2);
         let kept_storage = B256::with_last_byte(3);
-        let removed_storage = B256::with_last_byte(4);
         let slot1 = B256::with_last_byte(11);
         let slot2 = B256::with_last_byte(12);
 
         let older = HashedPostStateSorted::new(
             vec![(kept_account, Some(account(1))), (removed_account, Some(account(10)))],
-            B256Map::from_iter([
-                (
-                    kept_storage,
-                    HashedStorageSorted {
-                        wiped: false,
-                        storage_slots: vec![(slot1, U256::from(1))],
-                    },
-                ),
-                (
-                    removed_storage,
-                    HashedStorageSorted {
-                        wiped: false,
-                        storage_slots: vec![(slot1, U256::from(2))],
-                    },
-                ),
-            ]),
+            B256Map::from_iter([(
+                kept_storage,
+                HashedStorageSorted { wiped: false, storage_slots: vec![(slot1, U256::from(1))] },
+            )]),
         );
 
         let newer = HashedPostStateSorted::new(
@@ -1682,13 +1657,10 @@ mod tests {
 
         let remove_a = HashedPostStateSorted::new(
             vec![(removed_account, None)],
-            B256Map::from_iter([
-                (
-                    kept_storage,
-                    HashedStorageSorted { wiped: false, storage_slots: vec![(slot2, U256::ZERO)] },
-                ),
-                (removed_storage, HashedStorageSorted { wiped: true, storage_slots: vec![] }),
-            ]),
+            B256Map::from_iter([(
+                kept_storage,
+                HashedStorageSorted { wiped: false, storage_slots: vec![(slot2, U256::ZERO)] },
+            )]),
         );
 
         let remove_b = HashedPostStateSorted::new(
@@ -1710,7 +1682,6 @@ mod tests {
                 storage_slots: vec![(slot1, U256::from(3))],
             })
         );
-        assert!(!result.storages.contains_key(&removed_storage));
     }
 
     #[test]
@@ -1720,38 +1691,24 @@ mod tests {
         }
 
         let overlapping_account = B256::with_last_byte(21);
-        let overlapping_storage = B256::with_last_byte(22);
-        let slot = B256::with_last_byte(23);
 
         let older = HashedPostStateSorted::new(
             vec![(overlapping_account, Some(account(1)))],
-            B256Map::from_iter([(
-                overlapping_storage,
-                HashedStorageSorted { wiped: false, storage_slots: vec![(slot, U256::from(1))] },
-            )]),
+            B256Map::default(),
         );
 
         let newer = HashedPostStateSorted::new(
             vec![(overlapping_account, Some(account(2)))],
-            B256Map::from_iter([(
-                overlapping_storage,
-                HashedStorageSorted { wiped: false, storage_slots: vec![(slot, U256::from(2))] },
-            )]),
+            B256Map::default(),
         );
 
-        let remove = HashedPostStateSorted::new(
-            vec![(overlapping_account, None)],
-            B256Map::from_iter([(
-                overlapping_storage,
-                HashedStorageSorted { wiped: true, storage_slots: vec![] },
-            )]),
-        );
+        let remove =
+            HashedPostStateSorted::new(vec![(overlapping_account, None)], B256Map::default());
 
         let result =
             HashedPostStateSorted::disjointed_merge_batch(vec![&older, &newer], vec![&remove]);
 
         assert!(result.accounts.is_empty());
-        assert!(result.storages.is_empty());
     }
 
     #[test]
