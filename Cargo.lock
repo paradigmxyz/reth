@@ -9094,6 +9094,7 @@ dependencies = [
  "serde",
  "smallvec",
  "socket2",
+ "test-case",
  "thiserror 2.0.18",
  "tokio",
  "tokio-stream",

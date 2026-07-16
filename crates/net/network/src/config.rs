@@ -22,6 +22,7 @@ use reth_network_peers::{mainnet_nodes, pk2id, sepolia_nodes, PeerId, TrustedPee
 use reth_network_types::{PeersConfig, SessionsConfig};
 use reth_storage_api::{
     noop::NoopProvider, BalProvider, BlockNumReader, BlockReader, HeaderProvider,
+    StateProviderFactory, StateRangeProviderFactory,
 };
 use reth_tasks::Runtime;
 use secp256k1::SECP256K1;
@@ -163,6 +164,8 @@ impl<C, N> NetworkConfig<C, N>
 where
     N: NetworkPrimitives,
     C: BalProvider
+        + StateProviderFactory
+        + StateRangeProviderFactory
         + BlockReader<Block = N::Block, Receipt = N::Receipt, Header = N::BlockHeader>
         + HeaderProvider
         + Clone
