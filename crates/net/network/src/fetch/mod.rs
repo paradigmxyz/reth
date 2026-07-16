@@ -232,7 +232,7 @@ impl<N: NetworkPrimitives> StateFetcher<N> {
 
         let request = self.prepare_block_request(peer_id, request);
 
-        PollAction::Ready(FetchAction::BlockRequest { peer_id, request })
+        PollAction::Ready(Box::new(FetchAction::BlockRequest { peer_id, request }))
     }
 
     /// Advance the state the syncer
@@ -240,7 +240,7 @@ impl<N: NetworkPrimitives> StateFetcher<N> {
         // drain buffered actions first
         loop {
             let no_peers_available = match self.poll_action() {
-                PollAction::Ready(action) => return Poll::Ready(action),
+                PollAction::Ready(action) => return Poll::Ready(*action),
                 PollAction::NoRequests => false,
                 PollAction::NoPeersAvailable => true,
             };
@@ -512,7 +512,7 @@ impl<N: NetworkPrimitives> StateFetcher<N> {
 
 /// The outcome of [`StateFetcher::poll_action`]
 enum PollAction {
-    Ready(FetchAction),
+    Ready(Box<FetchAction>),
     NoRequests,
     NoPeersAvailable,
 }
