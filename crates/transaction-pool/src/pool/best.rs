@@ -1127,6 +1127,23 @@ mod tests {
     }
 
     #[test]
+    fn test_best_transactions_yields_updates_after_empty() {
+        let mut pool = PendingPool::new(MockOrdering::default());
+        let mut best = pool.best();
+        best.allow_updates_out_of_order();
+
+        assert!(best.next().is_none());
+
+        let mut f = MockTransactionFactory::default();
+        let tx = MockTransaction::eip1559().rng_hash();
+        let valid_tx = Arc::new(f.validated(tx));
+        let expected_hash = *valid_tx.hash();
+        pool.add_transaction(valid_tx, 0);
+
+        assert_eq!(*best.next().expect("new transaction should be yielded").hash(), expected_hash);
+    }
+
+    #[test]
     fn test_best_update_transaction_priority() {
         let mut pool = PendingPool::new(MockOrdering::default());
         let mut f = MockTransactionFactory::default();

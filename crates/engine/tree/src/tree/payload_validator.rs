@@ -393,7 +393,6 @@ where
             &self.runtime,
             Arc::new(source),
             self.evm_config.clone(),
-            config,
         ));
         self
     }
@@ -494,13 +493,8 @@ where
         Evm: ConfigureEngineEvm<T::ExecutionData, Primitives = N>,
     {
         let parent_hash = input.parent_hash();
-        let (txpool_snapshot, _txpool_prewarm_guard) =
-            if let Some(prewarmer) = self.txpool_prewarm.as_ref() {
-                let (snapshot, guard) = prewarmer.pause_and_snapshot(parent_hash);
-                (snapshot, Some(guard))
-            } else {
-                (None, None)
-            };
+        let txpool_snapshot =
+            self.txpool_prewarm.as_ref().and_then(|prewarmer| prewarmer.snapshot(parent_hash));
         let _jit_pause = JitPauseGuard::new(&self.evm_config);
 
         // Fetch parent block. This goes to memory most of the time unless the parent block is
@@ -1907,6 +1901,20 @@ where
         state: &EngineApiTreeState<N>,
     ) {
         let Some(txpool_prewarm) = self.txpool_prewarm.as_ref() else { return };
+        let parent_parent = match self.sealed_header_by_hash(header.parent_hash(), state) {
+            Ok(Some(parent_parent)) => parent_parent,
+            Ok(None) => return,
+            Err(err) => {
+                trace!(
+                    target: "engine::tree::txpool_prewarm",
+                    %err,
+                    block_hash = ?header.hash(),
+                    parent_hash = ?header.parent_hash(),
+                    "failed to fetch parent header for txpool prewarming"
+                );
+                return
+            }
+        };
         let provider_builder = match self.state_provider_builder(header.hash(), state) {
             Ok(Some(provider_builder)) => provider_builder,
             Ok(None) => return,
@@ -1920,9 +1928,9 @@ where
                 return
             }
         };
-        match self.evm_config.txpool_prewarm_env(header.header()) {
+        match self.evm_config.txpool_prewarm_env(header.header(), parent_parent.header()) {
             Ok(Some(evm_env)) => {
-                txpool_prewarm.start(header.hash(), evm_env, provider_builder, header.gas_limit())
+                txpool_prewarm.start(header.hash(), evm_env, provider_builder)
             }
             Ok(None) => {}
             Err(err) => {

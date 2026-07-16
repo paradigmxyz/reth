@@ -3,13 +3,9 @@
 use crate::tree::{
     StateProviderBuilder, StateProviderDatabase, TxPoolPrewarmCache, TxPoolPrewarmCacheSnapshot,
 };
-use alloy_consensus::{transaction::Recovered, Transaction as _};
+use alloy_consensus::transaction::Recovered;
 use alloy_evm::Evm;
-use alloy_primitives::{
-    map::{AddressMap, HashSet},
-    Address, BlockNumber, StorageKey, StorageValue, B256,
-};
-use reth_engine_primitives::TxPoolPrewarmingConfig;
+use alloy_primitives::{Address, BlockNumber, StorageKey, StorageValue, B256};
 use reth_evm::{ConfigureEvm, EvmEnvFor};
 use reth_primitives_traits::{NodePrimitives, TxTy};
 use reth_provider::{BlockReader, StateProviderBox, StateProviderFactory, StateReader};
@@ -17,16 +13,15 @@ use reth_revm::{database::EvmStateProvider, db::State};
 use std::{
     fmt::Debug,
     marker::PhantomData,
-    panic::{catch_unwind, AssertUnwindSafe},
     sync::{
         atomic::{AtomicBool, AtomicU64, Ordering},
         Arc, Condvar, Mutex, RwLock,
     },
     time::{Duration, Instant},
 };
-use tracing::{debug, trace, warn};
+use tracing::{debug, trace};
 
-/// Delay between txpool refreshes after a completed or empty selection.
+/// Maximum interval between snapshot publications and delay when no transaction is ready.
 const TXPOOL_REFRESH_INTERVAL: Duration = Duration::from_millis(100);
 
 /// Delay while waiting for pool maintenance to advance to the state being warmed.
@@ -43,37 +38,6 @@ pub struct TxPoolPrewarmTransaction<N: NodePrimitives> {
     pub sender: Address,
     /// Recovered consensus transaction.
     pub transaction: Recovered<TxTy<N>>,
-}
-
-/// Transactions selected for one refresh of the reusable txpool cache.
-#[derive(Debug, Clone)]
-pub struct TxPoolPrewarmSelection<N: NodePrimitives> {
-    /// Fresh selected transactions in block-builder order.
-    pub transactions: Vec<TxPoolPrewarmTransaction<N>>,
-    /// Fresh candidates scanned while selecting.
-    pub scanned: usize,
-    /// Sum of selected transaction gas limits.
-    pub selected_gas: u64,
-    /// Whether selection observed cancellation.
-    pub canceled: bool,
-}
-
-impl<N: NodePrimitives> Default for TxPoolPrewarmSelection<N> {
-    fn default() -> Self {
-        Self { transactions: Vec::new(), scanned: 0, selected_gas: 0, canceled: false }
-    }
-}
-
-impl<N: NodePrimitives> TxPoolPrewarmSelection<N> {
-    /// Returns whether no transactions were selected.
-    pub const fn is_empty(&self) -> bool {
-        self.transactions.is_empty()
-    }
-
-    /// Returns the selected transaction count.
-    pub const fn len(&self) -> usize {
-        self.transactions.len()
-    }
 }
 
 /// A live, forward-only view of the pool's best transactions for one canonical parent.
@@ -101,7 +65,6 @@ struct TxPoolPrewarmJob<N: NodePrimitives, P, Evm: ConfigureEvm<Primitives = N>>
     parent_hash: B256,
     evm_env: EvmEnvFor<Evm>,
     provider_builder: StateProviderBuilder<N, P>,
-    block_gas_limit: u64,
 }
 
 /// Latest-wins canonical-head request slot shared with the worker.
@@ -155,7 +118,7 @@ impl<J> TxPoolPrewarmRequests<J> {
     }
 }
 
-/// Linearization point shared by worker publication and payload snapshot acquisition.
+/// Coordinates stale-publication rejection and the latest completed snapshot.
 #[derive(Debug, Default)]
 struct TxPoolSnapshotPublication {
     generation: AtomicU64,
@@ -170,7 +133,7 @@ impl TxPoolSnapshotPublication {
         if self.paused.load(Ordering::Acquire) {
             return None
         }
-        let generation = self.generation.fetch_add(1, Ordering::SeqCst) + 1;
+        let generation = self.generation.fetch_add(1, Ordering::AcqRel) + 1;
         *snapshot = None;
         Some(generation)
     }
@@ -180,23 +143,22 @@ impl TxPoolSnapshotPublication {
         if self.paused.load(Ordering::Acquire) {
             return None
         }
-        Some(self.generation.fetch_add(1, Ordering::SeqCst) + 1)
+        Some(self.generation.fetch_add(1, Ordering::AcqRel) + 1)
     }
 
     fn cancel(&self) -> u64 {
         let _snapshot = self.snapshot.write().expect("txpool snapshot publication lock poisoned");
         self.paused.store(true, Ordering::Release);
-        self.generation.fetch_add(1, Ordering::SeqCst) + 1
+        self.generation.fetch_add(1, Ordering::AcqRel) + 1
     }
 
-    fn cancel_and_snapshot(&self, parent_hash: B256) -> (Option<TxPoolPrewarmCacheSnapshot>, u64) {
-        let snapshot = self.snapshot.write().expect("txpool snapshot publication lock poisoned");
-        self.paused.store(true, Ordering::Release);
-        let generation = self.generation.fetch_add(1, Ordering::SeqCst) + 1;
-        (
-            snapshot.as_ref().filter(|snapshot| snapshot.parent_hash() == parent_hash).cloned(),
-            generation,
-        )
+    fn snapshot(&self, parent_hash: B256) -> Option<TxPoolPrewarmCacheSnapshot> {
+        self.snapshot
+            .read()
+            .expect("txpool snapshot publication lock poisoned")
+            .as_ref()
+            .filter(|snapshot| snapshot.parent_hash() == parent_hash)
+            .cloned()
     }
 
     fn publish(&self, generation: u64, snapshot: TxPoolPrewarmCacheSnapshot) -> bool {
@@ -223,12 +185,6 @@ impl TxPoolSnapshotPublication {
             self.paused.store(false, Ordering::Release);
         }
     }
-}
-
-/// Resumes head tracking after payload validation, including every early-return path.
-pub(crate) struct TxPoolPrewarmPauseGuard {
-    publication: Arc<TxPoolSnapshotPublication>,
-    generation: u64,
 }
 
 #[derive(Debug, Default)]
@@ -269,12 +225,6 @@ impl Drop for TxPoolWorkerActivityGuard {
     fn drop(&mut self) {
         *self.activity.active.lock().expect("txpool worker activity lock poisoned") = false;
         self.activity.idle.notify_all();
-    }
-}
-
-impl Drop for TxPoolPrewarmPauseGuard {
-    fn drop(&mut self) {
-        self.publication.resume(self.generation);
     }
 }
 
@@ -346,7 +296,6 @@ where
         runtime: &reth_tasks::Runtime,
         source: Arc<dyn TxPoolPrewarmSource<N>>,
         evm_config: Evm,
-        config: TxPoolPrewarmingConfig,
     ) -> Self {
         let requests = Arc::new(TxPoolPrewarmRequests::new());
         let worker_requests = Arc::clone(&requests);
@@ -360,7 +309,6 @@ where
                 worker_requests,
                 source,
                 evm_config,
-                config,
                 worker_publication,
                 worker_activity,
             )
@@ -375,20 +323,9 @@ where
         }
     }
 
-    /// Cancels the active wave and returns the latest fully published snapshot for `parent_hash`.
-    ///
-    /// Taking the publication write lock linearizes cancellation with publication. The worker
-    /// either published a completed snapshot before this method and it is returned, or observes the
-    /// new generation and discards its unfinished wave.
-    pub(crate) fn pause_and_snapshot(
-        &self,
-        parent_hash: B256,
-    ) -> (Option<TxPoolPrewarmCacheSnapshot>, TxPoolPrewarmPauseGuard) {
-        let (snapshot, generation) = self.publication.cancel_and_snapshot(parent_hash);
-        (
-            snapshot,
-            TxPoolPrewarmPauseGuard { publication: Arc::clone(&self.publication), generation },
-        )
+    /// Returns the latest fully published snapshot for `parent_hash`.
+    pub(crate) fn snapshot(&self, parent_hash: B256) -> Option<TxPoolPrewarmCacheSnapshot> {
+        self.publication.snapshot(parent_hash)
     }
 
     /// Starts continuous warming for the latest canonical head.
@@ -397,14 +334,8 @@ where
         parent_hash: B256,
         evm_env: EvmEnvFor<Evm>,
         provider_builder: StateProviderBuilder<N, P>,
-        block_gas_limit: u64,
     ) {
-        self.requests.replace(TxPoolPrewarmJob {
-            parent_hash,
-            evm_env,
-            provider_builder,
-            block_gas_limit,
-        });
+        self.requests.replace(TxPoolPrewarmJob { parent_hash, evm_env, provider_builder });
     }
 }
 
@@ -423,7 +354,6 @@ fn txpool_prewarm_loop<N, P, Evm>(
     requests: Arc<TxPoolPrewarmRequests<TxPoolPrewarmJob<N, P, Evm>>>,
     source: Arc<dyn TxPoolPrewarmSource<N>>,
     evm_config: Evm,
-    config: TxPoolPrewarmingConfig,
     publication: Arc<TxPoolSnapshotPublication>,
     activity: Arc<TxPoolWorkerActivity>,
 ) where
@@ -432,14 +362,8 @@ fn txpool_prewarm_loop<N, P, Evm>(
     Evm: ConfigureEvm<Primitives = N> + 'static,
 {
     let cache = TxPoolPrewarmCache::default();
-    let mut warmed = HashSet::default();
-    let mut warmed_per_sender = AddressMap::<usize>::default();
-    let mut sender_prefixes = AddressMap::<Vec<TxPoolPrewarmTransaction<N>>>::default();
     let mut best_txs: Option<TxPoolPrewarmTransactions<N>> = None;
     let mut best_txs_parent_hash = None;
-    let mut best_txs_failed = false;
-    let mut deferred = None;
-    let mut inflight: Option<TxPoolPrewarmSelection<N>> = None;
     let mut pending = None;
     let mut cache_parent_hash = None;
 
@@ -468,31 +392,13 @@ fn txpool_prewarm_loop<N, P, Evm>(
         let job = pending.take().expect("matching canonical request exists");
 
         if best_txs_parent_hash != Some(job.parent_hash) {
-            let opened =
-                catch_unwind(AssertUnwindSafe(|| source.best_transactions(job.parent_hash)));
-            let opened = match opened {
-                Ok(Some(opened)) => opened,
-                Ok(None) => {
-                    pending = Some(job);
-                    std::thread::sleep(TXPOOL_HEAD_POLL_INTERVAL);
-                    continue
-                }
-                Err(_) => {
-                    warn!(
-                        target: "engine::tree::txpool_prewarm",
-                        parent_hash = ?job.parent_hash,
-                        "opening txpool best-transactions iterator panicked"
-                    );
-                    pending = Some(job);
-                    std::thread::sleep(TXPOOL_REFRESH_INTERVAL);
-                    continue
-                }
+            let Some(opened) = source.best_transactions(job.parent_hash) else {
+                pending = Some(job);
+                std::thread::sleep(TXPOOL_HEAD_POLL_INTERVAL);
+                continue
             };
             best_txs = Some(opened);
             best_txs_parent_hash = Some(job.parent_hash);
-            best_txs_failed = false;
-            deferred = None;
-            inflight = None;
         }
 
         if source.tracked_block_hash() != job.parent_hash {
@@ -513,9 +419,6 @@ fn txpool_prewarm_loop<N, P, Evm>(
         };
         if new_parent {
             cache.clear();
-            warmed.clear();
-            warmed_per_sender.clear();
-            sender_prefixes.clear();
             cache_parent_hash = Some(job.parent_hash);
         }
         debug!(
@@ -536,83 +439,18 @@ fn txpool_prewarm_loop<N, P, Evm>(
                 break
             }
 
-            if inflight.is_none() {
-                if best_txs_failed {
-                    std::thread::sleep(TXPOOL_REFRESH_INTERVAL);
-                    continue
-                }
-                let (selection, cursor_panicked, cursor_exhausted) = select_best_transactions(
-                    best_txs.as_mut().expect("best transactions opened for active parent"),
-                    &mut deferred,
-                    job.block_gas_limit,
-                    config,
-                    &warmed,
-                    &warmed_per_sender,
-                    &publication.paused,
-                );
-                if cursor_panicked {
-                    best_txs_failed = true;
-                    warn!(
-                        target: "engine::tree::txpool_prewarm",
-                        parent_hash = ?job.parent_hash,
-                        "txpool best-transactions iterator panicked; retiring it for this parent"
-                    );
-                }
-                if cursor_exhausted {
-                    match catch_unwind(AssertUnwindSafe(|| {
-                        source.best_transactions(job.parent_hash)
-                    })) {
-                        Ok(Some(opened)) => best_txs = Some(opened),
-                        Ok(None) => {}
-                        Err(_) => {
-                            best_txs_failed = true;
-                            warn!(
-                                target: "engine::tree::txpool_prewarm",
-                                parent_hash = ?job.parent_hash,
-                                "reopening txpool best-transactions iterator panicked; retiring it for this parent"
-                            );
-                        }
-                    }
-                }
-                let canceled = selection.canceled;
-                if !selection.is_empty() {
-                    inflight = Some(selection);
-                }
-                if canceled || !publication.is_current(active_generation) || publication.is_paused()
-                {
-                    break
-                }
-                if inflight.is_none() {
-                    std::thread::sleep(TXPOOL_REFRESH_INTERVAL);
-                    continue
-                }
-            }
-
-            let sender_transactions = transactions_with_prefixes(
-                &sender_prefixes,
-                &inflight.as_ref().expect("non-empty selection is in flight").transactions,
-            );
             let Some(activity_guard) = activity.try_enter(&publication, active_generation) else {
                 break
             };
-            let completed = catch_unwind(AssertUnwindSafe(|| {
-                prewarm_transactions(
-                    &evm_config,
-                    &job,
-                    &cache,
-                    &sender_transactions,
-                    active_generation,
-                    &publication,
-                )
-            }))
-            .unwrap_or_else(|_| {
-                warn!(
-                    target: "engine::tree::txpool_prewarm",
-                    parent_hash = ?job.parent_hash,
-                    "txpool prewarming batch panicked"
-                );
-                false
-            });
+            let (completed, transaction_count) = prewarm_transactions(
+                &evm_config,
+                &job,
+                &cache,
+                best_txs.as_mut().expect("best transactions opened for active parent"),
+                Instant::now() + TXPOOL_REFRESH_INTERVAL,
+                active_generation,
+                &publication,
+            );
             drop(activity_guard);
 
             if !completed {
@@ -624,26 +462,20 @@ fn txpool_prewarm_loop<N, P, Evm>(
             if !publication.is_current(active_generation) {
                 break
             }
+            if transaction_count == 0 {
+                std::thread::sleep(TXPOOL_REFRESH_INTERVAL);
+                continue
+            }
 
             // The deep clone happens privately. Only the short pointer swap below is serialized
             // with `newPayload` snapshot acquisition.
             let snapshot = cache.snapshot(job.parent_hash);
             let (accounts, storage, bytecodes) = snapshot.entry_counts();
             if publication.publish(active_generation, snapshot) {
-                let selection = inflight.take().expect("published selection is in flight");
-                for transaction in &selection.transactions {
-                    warmed.insert(transaction.hash);
-                    *warmed_per_sender.entry(transaction.sender).or_default() += 1;
-                }
-                for (sender, transactions) in sender_transactions {
-                    sender_prefixes.insert(sender, transactions);
-                }
                 debug!(
                     target: "engine::tree::txpool_prewarm",
                     parent_hash = ?job.parent_hash,
-                    transactions = selection.len(),
-                    scanned = selection.scanned,
-                    selected_gas = selection.selected_gas,
+                    transactions = transaction_count,
                     accounts,
                     storage,
                     bytecodes,
@@ -652,8 +484,6 @@ fn txpool_prewarm_loop<N, P, Evm>(
             } else {
                 break
             }
-
-            std::thread::sleep(TXPOOL_REFRESH_INTERVAL);
         }
 
         if !requests.is_closed() &&
@@ -665,156 +495,63 @@ fn txpool_prewarm_loop<N, P, Evm>(
     }
 }
 
-/// Selects the next bounded batch from a live best-transactions iterator.
-///
-/// `best_txs` is forward-only and retained for the entire canonical parent. A transaction that
-/// would overflow a non-empty batch is deferred rather than discarded, so the next batch resumes
-/// at that transaction without reopening the iterator.
-fn select_best_transactions<N: NodePrimitives>(
-    best_txs: &mut TxPoolPrewarmTransactions<N>,
-    deferred: &mut Option<TxPoolPrewarmTransaction<N>>,
-    block_gas_limit: u64,
-    config: TxPoolPrewarmingConfig,
-    warmed: &HashSet<B256>,
-    warmed_per_sender: &AddressMap<usize>,
-    stop: &AtomicBool,
-) -> (TxPoolPrewarmSelection<N>, bool, bool) {
-    let gas_limit = block_gas_limit.saturating_mul(config.gas_limit_multiplier);
-    let mut selection = TxPoolPrewarmSelection::default();
-    let mut selected_per_sender = AddressMap::<usize>::default();
-
-    while selection.scanned < config.max_candidate_scan {
-        if stop.load(Ordering::Relaxed) {
-            selection.canceled = true;
-            break
-        }
-
-        let transaction = if let Some(transaction) = deferred.take() {
-            Some(transaction)
-        } else {
-            match catch_unwind(AssertUnwindSafe(|| best_txs.next())) {
-                Ok(transaction) => transaction,
-                Err(_) => return (selection, true, false),
-            }
-        };
-        let Some(transaction) = transaction else { return (selection, false, true) };
-        if warmed.contains(&transaction.hash) {
-            selection.scanned += 1;
-            continue
-        }
-
-        let selected_for_sender = selected_per_sender.entry(transaction.sender).or_default();
-        let already_warmed =
-            warmed_per_sender.get(&transaction.sender).copied().unwrap_or_default();
-        if already_warmed.saturating_add(*selected_for_sender) >= config.max_transactions_per_sender
-        {
-            selection.scanned += 1;
-            continue
-        }
-
-        let tx_gas_limit = transaction.transaction.gas_limit();
-        if tx_gas_limit > gas_limit {
-            selection.scanned += 1;
-            continue
-        }
-        if selection.selected_gas.saturating_add(tx_gas_limit) > gas_limit {
-            *deferred = Some(transaction);
-            break
-        }
-
-        selection.scanned += 1;
-        *selected_for_sender += 1;
-        selection.selected_gas = selection.selected_gas.saturating_add(tx_gas_limit);
-        selection.transactions.push(transaction);
-    }
-
-    (selection, false, false)
-}
-
-/// Merges fresh transactions into the published nonce-ordered prefixes for affected senders.
-///
-/// Replaying the bounded prefix lets a later delta observe speculative state produced by earlier
-/// transactions from the same sender. A replacement overwrites the transaction at its nonce.
-fn transactions_with_prefixes<N: NodePrimitives>(
-    prefixes: &AddressMap<Vec<TxPoolPrewarmTransaction<N>>>,
-    fresh: &[TxPoolPrewarmTransaction<N>],
-) -> AddressMap<Vec<TxPoolPrewarmTransaction<N>>> {
-    let mut merged = AddressMap::<Vec<TxPoolPrewarmTransaction<N>>>::default();
-    for transaction in fresh {
-        let transactions = merged
-            .entry(transaction.sender)
-            .or_insert_with(|| prefixes.get(&transaction.sender).cloned().unwrap_or_default());
-        if let Some(existing) = transactions
-            .iter_mut()
-            .find(|existing| existing.transaction.nonce() == transaction.transaction.nonce())
-        {
-            *existing = transaction.clone();
-        } else {
-            transactions.push(transaction.clone());
-        }
-    }
-    for transactions in merged.values_mut() {
-        transactions.sort_unstable_by_key(|transaction| transaction.transaction.nonce());
-    }
-    merged
-}
-
-fn prewarm_transactions<N, P, Evm>(
+fn prewarm_transactions<N, P, Evm, I>(
     evm_config: &Evm,
     job: &TxPoolPrewarmJob<N, P, Evm>,
     cache: &TxPoolPrewarmCache,
-    transactions: &AddressMap<Vec<TxPoolPrewarmTransaction<N>>>,
+    transactions: I,
+    deadline: Instant,
     generation: u64,
     publication: &TxPoolSnapshotPublication,
-) -> bool
+) -> (bool, usize)
 where
     N: NodePrimitives,
     P: BlockReader + StateProviderFactory + StateReader + Clone,
     Evm: ConfigureEvm<Primitives = N>,
+    I: IntoIterator<Item = TxPoolPrewarmTransaction<N>>,
 {
-    for sender_transactions in transactions.values() {
-        if !publication.is_current(generation) {
-            return false
+    let state_provider = match job.provider_builder.build() {
+        Ok(provider) => provider,
+        Err(err) => {
+            trace!(
+                target: "engine::tree::txpool_prewarm",
+                %err,
+                parent_hash = ?job.parent_hash,
+                "failed to build txpool prewarming state provider"
+            );
+            return (false, 0)
         }
+    };
+    let state_provider = TxPoolPrewarmStateProvider { inner: state_provider, cache };
+    let state_provider = StateProviderDatabase::new(state_provider);
+    let mut state = State::builder().with_database(state_provider).build();
+    let mut evm_env = job.evm_env.clone();
+    evm_env.cfg_env.disable_nonce_check = true;
+    evm_env.cfg_env.disable_balance_check = true;
+    let mut evm = evm_config.evm_with_env(&mut state, evm_env);
 
-        let state_provider = match job.provider_builder.build() {
-            Ok(provider) => provider,
-            Err(err) => {
-                trace!(
-                    target: "engine::tree::txpool_prewarm",
-                    %err,
-                    parent_hash = ?job.parent_hash,
-                    "failed to build txpool prewarming state provider"
-                );
-                return false
-            }
-        };
-        let state_provider = TxPoolPrewarmStateProvider { inner: state_provider, cache };
-        let state_provider = StateProviderDatabase::new(state_provider);
-        let mut state = State::builder().with_database(state_provider).build();
-        let mut evm_env = job.evm_env.clone();
-        evm_env.cfg_env.disable_nonce_check = true;
-        evm_env.cfg_env.disable_balance_check = true;
-        let mut evm = evm_config.evm_with_env(&mut state, evm_env);
+    let mut transaction_count = 0;
+    for transaction in transactions {
+        if !publication.is_current(generation) {
+            return (false, transaction_count)
+        }
+        transaction_count += 1;
 
-        for transaction in sender_transactions {
-            if !publication.is_current(generation) {
-                return false
-            }
-
-            if let Err(err) = evm.transact_commit(transaction.transaction.clone()) {
-                trace!(
-                    target: "engine::tree::txpool_prewarm",
-                    %err,
-                    tx_hash = ?transaction.hash,
-                    sender = %transaction.sender,
-                    "speculative txpool transaction execution failed"
-                );
-            }
+        if let Err(err) = evm.transact(transaction.transaction) {
+            trace!(
+                target: "engine::tree::txpool_prewarm",
+                %err,
+                tx_hash = ?transaction.hash,
+                sender = %transaction.sender,
+                "speculative txpool transaction execution failed"
+            );
+        }
+        if Instant::now() >= deadline {
+            break
         }
     }
 
-    true
+    (true, transaction_count)
 }
 
 /// Provider that fills only the reusable txpool-prewarm cache.
@@ -874,24 +611,21 @@ fn nonzero_storage_value(value: StorageValue) -> Option<StorageValue> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use reth_ethereum_primitives::EthPrimitives;
 
     #[test]
-    fn reports_exhausted_best_transactions_iterator() {
-        let mut transactions: TxPoolPrewarmTransactions<EthPrimitives> =
-            Box::new(std::iter::empty());
-        let (selection, panicked, exhausted) = select_best_transactions(
-            &mut transactions,
-            &mut None,
-            30_000_000,
-            TxPoolPrewarmingConfig::DEFAULT,
-            &HashSet::default(),
-            &AddressMap::default(),
-            &AtomicBool::new(false),
-        );
+    fn reading_snapshot_does_not_interrupt_publication() {
+        let publication = TxPoolSnapshotPublication::default();
+        let generation = publication.begin_head().expect("publication should be active");
+        let parent_hash = B256::repeat_byte(0x01);
+        let snapshot = TxPoolPrewarmCache::default().snapshot(parent_hash);
+        assert!(publication.publish(generation, snapshot));
 
-        assert!(selection.is_empty());
-        assert!(!panicked);
-        assert!(exhausted);
+        assert_eq!(
+            publication.snapshot(parent_hash).map(|snapshot| snapshot.parent_hash()),
+            Some(parent_hash)
+        );
+        assert!(publication.snapshot(B256::ZERO).is_none());
+        assert!(publication.is_current(generation));
+        assert!(!publication.is_paused());
     }
 }

@@ -50,6 +50,7 @@ where
                 block_info.pending_blob_fee.map(|fee| u64::try_from(fee).unwrap_or(u64::MAX)),
             ));
         best.allow_updates_out_of_order();
+        best.skip_blobs();
 
         if self.pool.block_info().last_seen_block_hash != parent_hash {
             return None
