@@ -1232,23 +1232,17 @@ where
             return Ok(Some(TreeOutcome::new(outcome)));
         }
 
-        let notify_canonical_head = self.payload_validator.canonical_head_notifications_enabled();
-        let tip = if attrs.is_some() || notify_canonical_head {
-            self.sealed_header_by_hash(self.state.tree_state.canonical_block_hash())?
-        } else {
-            None
-        };
-        if notify_canonical_head && let Some(tip) = tip.as_ref() {
-            self.payload_validator.on_canonical_head_changed(tip, &self.state);
-        }
+        self.payload_validator.on_canonical_head_changed(state.head_block_hash, &self.state);
 
         // Process payload attributes if the head is already canonical
         if let Some(attr) = attrs {
-            let tip = tip.ok_or_else(|| {
-                // If we can't find the canonical block, then something is wrong and we need
-                // to return an error
-                ProviderError::HeaderNotFound(state.head_block_hash.into())
-            })?;
+            let tip = self
+                .sealed_header_by_hash(self.state.tree_state.canonical_block_hash())?
+                .ok_or_else(|| {
+                    // If we can't find the canonical block, then something is wrong and we need
+                    // to return an error
+                    ProviderError::HeaderNotFound(state.head_block_hash.into())
+                })?;
             // Clone only when we actually need to process the attributes
             let updated = self.process_payload_attributes(attr.clone(), &tip, state);
             return Ok(Some(TreeOutcome::new(updated)));
@@ -2722,7 +2716,7 @@ where
         // update the tracked in-memory state with the new chain
         self.canonical_in_memory_state.update_chain(chain_update);
         self.canonical_in_memory_state.set_canonical_head(tip.clone());
-        self.payload_validator.on_canonical_head_changed(&tip, &self.state);
+        self.payload_validator.on_canonical_head_changed(tip.hash(), &self.state);
 
         // Update metrics based on new tip
         self.metrics.tree.canonical_chain_height.set(tip.number() as f64);
