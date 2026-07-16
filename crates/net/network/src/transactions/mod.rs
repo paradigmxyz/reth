@@ -10,6 +10,8 @@ pub mod config;
 pub mod constants;
 /// Component responsible for fetching transactions from [`NewPooledTransactionHashes`].
 pub mod fetcher;
+#[expect(dead_code)]
+mod fetcher2;
 /// Defines the traits for transaction-related policies.
 pub mod policy;
 
