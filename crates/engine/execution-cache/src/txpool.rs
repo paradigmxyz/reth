@@ -1,6 +1,5 @@
 //! Reusable cache and immutable snapshots for txpool-driven state prewarming.
 
-use crate::CachedStatus;
 use alloy_primitives::{
     map::{AddressMap, B256Map, HashMap},
     Address, StorageKey, StorageValue, B256,
@@ -48,18 +47,18 @@ impl TxPoolPrewarmCache {
         &self,
         address: Address,
         f: impl FnOnce() -> Result<Option<Account>, E>,
-    ) -> Result<CachedStatus<Option<Account>>, E> {
+    ) -> Result<Option<Account>, E> {
         if let Some(account) = self.accounts.read().get(&address).copied() {
-            return Ok(CachedStatus::Cached(account))
+            return Ok(account)
         }
 
         let account = f()?;
         let mut accounts = self.accounts.write();
         if let Some(cached) = accounts.get(&address).copied() {
-            Ok(CachedStatus::Cached(cached))
+            Ok(cached)
         } else {
             accounts.insert(address, account);
-            Ok(CachedStatus::NotCached(account))
+            Ok(account)
         }
     }
 
@@ -69,18 +68,18 @@ impl TxPoolPrewarmCache {
         address: Address,
         key: StorageKey,
         f: impl FnOnce() -> Result<StorageValue, E>,
-    ) -> Result<CachedStatus<StorageValue>, E> {
+    ) -> Result<StorageValue, E> {
         if let Some(value) = self.storage.read().get(&(address, key)).copied() {
-            return Ok(CachedStatus::Cached(value))
+            return Ok(value)
         }
 
         let value = f()?;
         let mut storage = self.storage.write();
         if let Some(cached) = storage.get(&(address, key)).copied() {
-            Ok(CachedStatus::Cached(cached))
+            Ok(cached)
         } else {
             storage.insert((address, key), value);
-            Ok(CachedStatus::NotCached(value))
+            Ok(value)
         }
     }
 
@@ -89,18 +88,18 @@ impl TxPoolPrewarmCache {
         &self,
         code_hash: B256,
         f: impl FnOnce() -> Result<Option<Bytecode>, E>,
-    ) -> Result<CachedStatus<Option<Bytecode>>, E> {
+    ) -> Result<Option<Bytecode>, E> {
         if let Some(code) = self.bytecodes.read().get(&code_hash).cloned() {
-            return Ok(CachedStatus::Cached(code))
+            return Ok(code)
         }
 
         let code = f()?;
         let mut bytecodes = self.bytecodes.write();
         if let Some(cached) = bytecodes.get(&code_hash).cloned() {
-            Ok(CachedStatus::Cached(cached))
+            Ok(cached)
         } else {
             bytecodes.insert(code_hash, code.clone());
-            Ok(CachedStatus::NotCached(code))
+            Ok(code)
         }
     }
 }

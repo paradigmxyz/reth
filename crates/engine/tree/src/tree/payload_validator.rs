@@ -2288,9 +2288,7 @@ where
             }
         };
         match self.evm_config.txpool_prewarm_env(header.header(), parent_parent.header()) {
-            Ok(Some(evm_env)) => {
-                txpool_prewarm.start(header.hash(), evm_env, provider_builder)
-            }
+            Ok(Some(evm_env)) => txpool_prewarm.start(header.hash(), evm_env, provider_builder),
             Ok(None) => {}
             Err(err) => {
                 trace!(
