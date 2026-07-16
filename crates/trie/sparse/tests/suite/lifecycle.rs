@@ -64,14 +64,18 @@ pub(super) fn test_full_lifecycle_update_root_take_updates<T: SparseTrie>(new_tr
 /// Multiple rounds of (update → root → `take_updates`), followed by a prune, simulating block
 /// processing.
 pub(super) fn test_multi_round_update_take_updates_prune_cycle<T: SparseTrie>(new_trie: fn() -> T) {
-    // Build a trie with 10 leaves.
+    // Build a trie with 10 primary leaves, each with a sibling under the same root child.
     let mut storage: BTreeMap<B256, U256> = BTreeMap::new();
     let mut keys = Vec::new();
     for i in 0u8..10 {
         let mut key = B256::ZERO;
-        key.0[0] = i * 16; // nibble prefixes: 0x0, 0x1, 0x2, ... 0x9
+        key.0[0] = i << 4; // nibble prefixes: 0x0, 0x1, 0x2, ... 0x9
         storage.insert(key, U256::from(i as u64 + 1));
         keys.push(key);
+
+        let mut sibling = B256::ZERO;
+        sibling.0[0] = (i << 4) | 1;
+        storage.insert(sibling, U256::from(i as u64 + 100));
     }
 
     let mut harness = SuiteTestHarness::new(storage.clone());
