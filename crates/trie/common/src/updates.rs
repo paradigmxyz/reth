@@ -719,11 +719,12 @@ impl TrieUpdatesSorted {
     /// the batch, later items take precedence over earlier ones. An overlapping entry is retained
     /// if any mask value is equal to the merged batch value. The order of the mask does not matter.
     pub fn disjointed_merge_batch<'a>(batch: Vec<&'a Self>, mask: Vec<&'a Self>) -> Self {
-        let account_nodes = kway_merge_disjoint_sorted(
-            batch.iter().map(|item| item.account_nodes.len()).sum(),
+        let account_node_count = batch.iter().map(|item| item.account_nodes.len()).sum();
+        let mut account_nodes = Vec::with_capacity(account_node_count);
+        account_nodes.extend(kway_merge_disjoint_sorted(
             batch.iter().rev().map(|item| item.account_nodes.as_slice()),
             mask.iter().map(|item| item.account_nodes.as_slice()),
-        );
+        ));
 
         struct StorageAcc<'a> {
             is_deleted: bool,
@@ -789,11 +790,14 @@ impl TrieUpdatesSorted {
             .filter_map(|(hashed_address, entry)| {
                 let storage_nodes = match storage_masks.get(&hashed_address) {
                     Some(mask_entry) if mask_entry.is_deleted => return None,
-                    Some(mask_entry) => kway_merge_disjoint_sorted(
-                        entry.node_count,
-                        entry.slices,
-                        mask_entry.slices.iter().copied(),
-                    ),
+                    Some(mask_entry) => {
+                        let mut storage_nodes = Vec::with_capacity(entry.node_count);
+                        storage_nodes.extend(kway_merge_disjoint_sorted(
+                            entry.slices,
+                            mask_entry.slices.iter().copied(),
+                        ));
+                        storage_nodes
+                    }
                     None => kway_merge_sorted(entry.slices),
                 };
 

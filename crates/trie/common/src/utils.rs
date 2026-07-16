@@ -26,16 +26,16 @@ where
         .collect()
 }
 
-/// Merge sorted left slices into a sorted `Vec`, excluding keys present in any right slice unless
-/// one of the right values is equal to the selected left value.
+/// Merge sorted left slices, excluding keys present in any right slice unless one of the right
+/// values is equal to the selected left value.
+/// Retained keys and values are cloned as the returned iterator is consumed.
 ///
 /// Callers pass left slices in priority order (index 0 = highest priority), so the first
 /// left slice's value for a key takes precedence over later slices. Right slice order is ignored.
 pub(crate) fn kway_merge_disjoint_sorted<'a, K, V>(
-    capacity: usize,
     left_slices: impl IntoIterator<Item = &'a [(K, V)]>,
     right_slices: impl IntoIterator<Item = &'a [(K, V)]>,
-) -> Vec<(K, V)>
+) -> impl Iterator<Item = (K, V)>
 where
     K: Ord + Clone + 'a,
     V: Clone + PartialEq + 'a,
@@ -47,44 +47,41 @@ where
         .kmerge_by(|(left_key, _), (right_key, _)| left_key < right_key)
         .peekable();
 
-    let mut out = Vec::with_capacity(capacity);
-    for (_, key, value) in left_slices
+    left_slices
         .into_iter()
         .filter(|s| !s.is_empty())
         .enumerate()
         .map(|(i, s)| s.iter().map(move |(k, v)| (i, k, v)))
         .kmerge_by(|(i1, k1, _), (i2, k2, _)| (k1, i1) < (k2, i2))
         .dedup_by(|(_, k1, _), (_, k2, _)| *k1 == *k2)
-    {
-        while let Some((right_key, _)) = right_entries.peek().copied() {
-            if right_key >= key {
-                break
-            }
-            right_entries.next();
-        }
-
-        let mut has_mask = false;
-        let mut has_equal_mask = false;
-        while let Some((right_key, right_value)) = right_entries.peek().copied() {
-            if right_key != key {
-                break
+        .filter_map(move |(_, key, value)| {
+            while let Some((right_key, _)) = right_entries.peek().copied() {
+                if right_key >= key {
+                    break
+                }
+                right_entries.next();
             }
 
-            has_mask = true;
-            if !has_equal_mask {
-                has_equal_mask = right_value == value;
+            let mut has_mask = false;
+            let mut has_equal_mask = false;
+            while let Some((right_key, right_value)) = right_entries.peek().copied() {
+                if right_key != key {
+                    break
+                }
+
+                has_mask = true;
+                if !has_equal_mask {
+                    has_equal_mask = right_value == value;
+                }
+                right_entries.next();
             }
-            right_entries.next();
-        }
 
-        if has_mask && !has_equal_mask {
-            continue;
-        }
+            if has_mask && !has_equal_mask {
+                return None
+            }
 
-        out.push((key.clone(), value.clone()));
-    }
-
-    out
+            Some((key.clone(), value.clone()))
+        })
 }
 
 /// Extend a sorted vector with another sorted vector using 2 pointer merge.
@@ -142,6 +139,27 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloc::rc::Rc;
+    use core::cell::Cell;
+
+    #[derive(Debug)]
+    struct CloneCounter {
+        value: u8,
+        count: Rc<Cell<usize>>,
+    }
+
+    impl Clone for CloneCounter {
+        fn clone(&self) -> Self {
+            self.count.set(self.count.get() + 1);
+            Self { value: self.value, count: Rc::clone(&self.count) }
+        }
+    }
+
+    impl PartialEq for CloneCounter {
+        fn eq(&self, other: &Self) -> bool {
+            self.value == other.value
+        }
+    }
 
     #[test]
     fn test_extend_sorted_vec() {
@@ -253,10 +271,10 @@ mod tests {
         let right_b = vec![(3, "ignored")];
 
         let result = kway_merge_disjoint_sorted(
-            left_old.len() + left_new.len(),
             [left_new.as_slice(), left_old.as_slice()],
             [right_a.as_slice(), right_b.as_slice()],
-        );
+        )
+        .collect::<Vec<_>>();
 
         assert_eq!(result, vec![(1, "new"), (4, "keep")]);
     }
@@ -267,18 +285,34 @@ mod tests {
         let right_a = vec![(1, "different"), (2, "equal"), (3, "different")];
         let right_b = vec![(1, "equal"), (2, "different")];
 
-        let result = kway_merge_disjoint_sorted(
-            left.len(),
-            [left.as_slice()],
-            [right_a.as_slice(), right_b.as_slice()],
-        );
-        let reversed = kway_merge_disjoint_sorted(
-            left.len(),
-            [left.as_slice()],
-            [right_b.as_slice(), right_a.as_slice()],
-        );
+        let result =
+            kway_merge_disjoint_sorted([left.as_slice()], [right_a.as_slice(), right_b.as_slice()])
+                .collect::<Vec<_>>();
+        let reversed =
+            kway_merge_disjoint_sorted([left.as_slice()], [right_b.as_slice(), right_a.as_slice()])
+                .collect::<Vec<_>>();
 
         assert_eq!(result, vec![(1, "equal"), (2, "equal")]);
         assert_eq!(reversed, result);
+    }
+
+    #[test]
+    fn test_kway_merge_disjoint_sorted_clones_lazily() {
+        let clone_count = Rc::new(Cell::new(0));
+        let left = vec![
+            (1, CloneCounter { value: 1, count: Rc::clone(&clone_count) }),
+            (2, CloneCounter { value: 2, count: Rc::clone(&clone_count) }),
+            (3, CloneCounter { value: 3, count: Rc::clone(&clone_count) }),
+        ];
+        let mut result = kway_merge_disjoint_sorted(
+            [left.as_slice()],
+            core::iter::empty::<&[(i32, CloneCounter)]>(),
+        );
+
+        assert_eq!(clone_count.get(), 0);
+        assert_eq!(result.next().map(|(key, _)| key), Some(1));
+        assert_eq!(clone_count.get(), 1);
+        drop(result);
+        assert_eq!(clone_count.get(), 1);
     }
 }
