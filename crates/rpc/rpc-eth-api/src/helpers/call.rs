@@ -26,7 +26,7 @@ use reth_evm::{
     cancelled::CancelOnDrop,
     database::StateProviderDatabase,
     execute::{BlockBuilder, BlockExecutorFactory},
-    ConfigureEvm, Evm, EvmEnv, EvmEnvFor, EvmTypesFor, TxEnvFor, TxResultWithStateFor,
+    ConfigureEvm, Database, Evm, EvmEnv, EvmEnvFor, EvmTypesFor, TxEnvFor, TxResultWithStateFor,
 };
 use reth_node_api::BlockBody;
 use reth_primitives_traits::Recovered;
@@ -560,14 +560,16 @@ pub trait Call:
     /// Returns the max gas limit that the caller can afford given a transaction environment.
     fn caller_gas_allowance(
         &self,
-        mut db: impl DynDatabase,
+        mut db: impl Database<Error: Into<EthApiError>>,
         _evm_env: &EvmEnvFor<Self::Evm>,
         tx_env: &TxEnvFor<Self::Evm>,
     ) -> Result<u64, Self::Error> {
-        let balance = match db.get_account(&tx_env.caller()) {
-            Ok(account) => account.map(|account| account.balance).unwrap_or_default(),
-            Err(code) => return Err(Self::Error::from_eth_err(EthApiError::from(db.error(code)))),
-        };
+        let balance = db
+            .get_account(&tx_env.caller())
+            .map_err(Into::into)
+            .map_err(Self::Error::from_eth_err)?
+            .map(|account| account.balance)
+            .unwrap_or_default();
         let value = tx_env.value();
         let balance = balance.checked_sub(value).ok_or_else(|| {
             EthApiError::from(RpcInvalidTransactionError::InsufficientFunds {
@@ -598,7 +600,7 @@ pub trait Call:
         })
     }
 
-    /// Executes the `TxEnv` against the given [`DynDatabase`] without committing state
+    /// Executes the `TxEnv` against the given [`Database`] without committing state
     /// changes.
     fn transact<DB>(
         &self,
@@ -607,15 +609,15 @@ pub trait Call:
         tx_env: TxEnvFor<Self::Evm>,
     ) -> Result<TxResultWithStateFor<Self::Evm>, Self::Error>
     where
-        DB: DynDatabase + fmt::Debug,
+        DB: Database + fmt::Debug,
     {
-        let mut evm = self.evm_config().block_executor_factory().evm_with_env(db, evm_env);
+        let mut evm = self.evm_config().block_executor_factory().evm_with_database(db, evm_env);
         let res = evm.transact(&tx_env).map_err(Self::Error::from_evm_err)?;
 
         Ok(res)
     }
 
-    /// Executes the [`reth_evm::EvmEnv`] against the given [`DynDatabase`] without committing state
+    /// Executes the [`reth_evm::EvmEnv`] against the given [`Database`] without committing state
     /// changes.
     fn transact_with_inspector<DB, I>(
         &self,
@@ -625,10 +627,10 @@ pub trait Call:
         inspector: I,
     ) -> Result<(I, TxResultWithStateFor<Self::Evm>), Self::Error>
     where
-        DB: DynDatabase + fmt::Debug,
+        DB: Database + fmt::Debug,
         I: evm2::Inspector<EvmTypesFor<Self::Evm>> + 'static,
     {
-        let mut evm = self.evm_config().block_executor_factory().evm_with_env(db, evm_env);
+        let mut evm = self.evm_config().block_executor_factory().evm_with_database(db, evm_env);
         let res =
             evm.transact_with_inspector(&tx_env, inspector).map_err(Self::Error::from_evm_err)?;
 
@@ -820,7 +822,7 @@ pub trait Call:
         target_tx_hash: B256,
     ) -> Result<usize, Self::Error>
     where
-        DB: DynDatabase + StateChangeSink<Error = core::convert::Infallible> + core::fmt::Debug,
+        DB: Database + StateChangeSink<Error = core::convert::Infallible> + core::fmt::Debug,
         I: IntoIterator<Item = Recovered<&'a ProviderTx<Self::Provider>>>,
     {
         let mut index = 0;
@@ -845,15 +847,15 @@ pub trait Call:
         &self,
         evm_env: &EvmEnvFor<Self::Evm>,
         mut request: RpcTxReq<<Self::RpcConvert as RpcConvert>::Network>,
-        mut db: impl DynDatabase,
+        mut db: impl Database<Error: Into<EthApiError>>,
     ) -> Result<TxEnvFor<Self::Evm>, Self::Error> {
         if request.as_ref().nonce().is_none() {
-            let nonce = match db.get_account(&request.as_ref().from().unwrap_or_default()) {
-                Ok(account) => account.map(|account| account.nonce).unwrap_or_default(),
-                Err(code) => {
-                    return Err(Self::Error::from_eth_err(EthApiError::from(db.error(code))))
-                }
-            };
+            let nonce = db
+                .get_account(&request.as_ref().from().unwrap_or_default())
+                .map_err(Into::into)
+                .map_err(Self::Error::from_eth_err)?
+                .map(|account| account.nonce)
+                .unwrap_or_default();
             request.as_mut().set_nonce(nonce);
         }
 

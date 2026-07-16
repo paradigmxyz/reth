@@ -5,12 +5,11 @@ use crate::{FromEthApiError, FromEvmError};
 use alloy_consensus::{transaction::TxHashRef, BlockHeader};
 use alloy_primitives::B256;
 use alloy_rpc_types_eth::{BlockId, TransactionInfo};
-use evm2::evm::DynDatabase;
 use evm2_inspectors::tracing::{TracingInspector, TracingInspectorConfig};
 use futures::Future;
 use reth_errors::RethError;
 use reth_evm::{
-    execute::BlockExecutorFactory, ConfigureEvm, Evm, EvmEnvFor, EvmTypesFor, TxEnvFor,
+    execute::BlockExecutorFactory, ConfigureEvm, Database, Evm, EvmEnvFor, EvmTypesFor, TxEnvFor,
     TxResultWithStateFor,
 };
 use reth_primitives_traits::{BlockBody, RecoveredBlock};
@@ -52,10 +51,10 @@ pub trait Trace: LoadState<Error: FromEvmError<Self::Evm>> + Call {
         inspector: I,
     ) -> Result<(I, TxResultWithStateFor<Self::Evm>), Self::Error>
     where
-        DB: DynDatabase,
+        DB: Database,
         I: evm2::Inspector<EvmTypesFor<Self::Evm>> + 'static,
     {
-        let mut evm = self.evm_config().block_executor_factory().evm_with_env(db, evm_env);
+        let mut evm = self.evm_config().block_executor_factory().evm_with_database(db, evm_env);
         evm.transact_with_inspector(tx_env, inspector).map_err(Self::Error::from_evm_err)
     }
 
