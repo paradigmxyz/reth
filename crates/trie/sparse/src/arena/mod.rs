@@ -10,11 +10,7 @@ use nodes::{
 
 use crate::{LeafLookup, LeafLookupError, LeafUpdate, SparseTrie, SparseTrieUpdates};
 use alloc::{borrow::Cow, boxed::Box, collections::VecDeque, vec::Vec};
-use alloy_primitives::{
-    keccak256,
-    map::{B256Map, HashMap},
-    Bytes, B256,
-};
+use alloy_primitives::{keccak256, map::B256Map, B256};
 use alloy_trie::TrieMask;
 use core::{cmp::Reverse, mem};
 use reth_execution_errors::SparseTrieResult;
@@ -1399,111 +1395,6 @@ impl ArenaParallelSparseTrie {
         rlp_node.clone()
     }
 
-    /// Records an RLP-encoded trie node in the witness.
-    fn record_witness_node(witness: &mut B256Map<Bytes>, encoded: &[u8]) {
-        witness.entry(keccak256(encoded)).or_insert_with(|| Bytes::from(encoded.to_vec()));
-    }
-
-    /// Records all revealed nodes in an arena using cursor post-order traversal.
-    fn record_witness_nodes(
-        arena: &mut NodeArena,
-        root: Index,
-        cursor: &mut ArenaCursor,
-        rlp_nodes: &mut HashMap<Index, RlpNode>,
-        witness: &mut B256Map<Bytes>,
-    ) {
-        cursor.reset(arena, root, Nibbles::default());
-
-        loop {
-            match cursor.next(arena, |_, _, node| {
-                matches!(
-                    node,
-                    ArenaSparseNode::Branch(_) |
-                        ArenaSparseNode::Leaf { .. } |
-                        ArenaSparseNode::Subtrie(_)
-                )
-            }) {
-                NextResult::Done => break,
-                NextResult::Branch | NextResult::NonBranch => {
-                    let idx = cursor.head().expect("cursor is non-empty").index;
-                    let rlp_node = match &mut arena[idx] {
-                        ArenaSparseNode::EmptyRoot => {
-                            Self::record_witness_node(witness, &[0x80]);
-                            RlpNode::word_rlp(&EMPTY_ROOT_HASH)
-                        }
-                        ArenaSparseNode::Leaf { key, value, .. } => {
-                            let mut encoded = Vec::new();
-                            let rlp_node = LeafNodeRef::new(key, value).rlp(&mut encoded);
-                            Self::record_witness_node(witness, &encoded);
-                            rlp_node
-                        }
-                        ArenaSparseNode::Branch(branch) => {
-                            let mut stack = Vec::with_capacity(branch.children.len());
-                            for (_, child) in branch.child_iter() {
-                                let rlp_node = match child {
-                                    ArenaSparseNodeBranchChild::Blinded(rlp_node) => {
-                                        rlp_node.clone()
-                                    }
-                                    ArenaSparseNodeBranchChild::Revealed(child_idx) => {
-                                        rlp_nodes.remove(child_idx).expect(
-                                            "revealed child must be recorded before parent branch",
-                                        )
-                                    }
-                                };
-                                stack.push(rlp_node);
-                            }
-
-                            let mut branch_rlp = Vec::new();
-                            let branch_rlp_node =
-                                BranchNodeRef::new(&stack, branch.state_mask).rlp(&mut branch_rlp);
-                            // A branch with a short key is encoded as an extension node pointing to
-                            // the branch. Witness consumers need both the extension and the branch
-                            // node.
-                            Self::record_witness_node(witness, &branch_rlp);
-
-                            if branch.short_key.is_empty() {
-                                branch_rlp_node
-                            } else {
-                                let mut extension_rlp = Vec::new();
-                                let extension_rlp_node = ExtensionNodeRef::new(
-                                    &branch.short_key,
-                                    branch_rlp_node.as_slice(),
-                                )
-                                .rlp(&mut extension_rlp);
-                                Self::record_witness_node(witness, &extension_rlp);
-                                extension_rlp_node
-                            }
-                        }
-                        ArenaSparseNode::Subtrie(subtrie) => {
-                            let mut subtrie_rlp_nodes = HashMap::default();
-                            Self::record_witness_nodes(
-                                &mut subtrie.arena,
-                                subtrie.root,
-                                &mut subtrie.buffers.cursor,
-                                &mut subtrie_rlp_nodes,
-                                witness,
-                            );
-                            let root_rlp_node = subtrie_rlp_nodes
-                                .remove(&subtrie.root)
-                                .expect("cursor traversal must record the subtrie root node");
-                            debug_assert!(
-                                subtrie_rlp_nodes.is_empty(),
-                                "all subtrie child RLP nodes must be consumed"
-                            );
-                            root_rlp_node
-                        }
-                        ArenaSparseNode::TakenSubtrie => {
-                            unreachable!(
-                                "TakenSubtrie should not be present outside of active operations"
-                            )
-                        }
-                    };
-                    rlp_nodes.insert(idx, rlp_node);
-                }
-            }
-        }
-    }
-
     /// Immutable traversal to find a leaf value at `full_path` starting from `root` in `arena`.
     /// `path_offset` is the number of nibbles already consumed from `full_path`.
     fn get_leaf_value_in_arena<'a>(
@@ -2761,19 +2652,6 @@ impl SparseTrie for ArenaParallelSparseTrie {
 
     fn get_leaf_value(&self, full_path: &Nibbles) -> Option<&Vec<u8>> {
         Self::get_leaf_value_in_arena(&self.upper_arena, self.root, full_path, 0)
-    }
-
-    fn witness(&mut self, witness: &mut B256Map<Bytes>) {
-        let mut rlp_nodes = HashMap::default();
-        Self::record_witness_nodes(
-            &mut self.upper_arena,
-            self.root,
-            &mut self.buffers.cursor,
-            &mut rlp_nodes,
-            witness,
-        );
-        rlp_nodes.remove(&self.root);
-        debug_assert!(rlp_nodes.is_empty(), "all witness RLP nodes must be consumed");
     }
 
     fn find_leaf(

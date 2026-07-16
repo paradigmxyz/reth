@@ -5,7 +5,7 @@ use core::fmt::Debug;
 use alloc::{borrow::Cow, vec::Vec};
 use alloy_primitives::{
     map::{B256Map, HashMap, HashSet},
-    Bytes, B256,
+    B256,
 };
 use alloy_trie::BranchNodeCompact;
 use reth_execution_errors::SparseTrieResult;
@@ -134,13 +134,6 @@ pub trait SparseTrie: Sized + Debug + Send + Sync {
     /// - The value has not yet been revealed. In order to determine which is true, one would need
     ///   an exclusion proof.
     fn get_leaf_value(&self, full_path: &Nibbles) -> Option<&Vec<u8>>;
-
-    /// Adds all revealed trie nodes to the provided witness.
-    ///
-    /// The witness maps `keccak256(rlp_node)` to the full RLP-encoded trie node. Blinded children
-    /// are included as references inside their revealed parents, but are not added as separate
-    /// witness entries.
-    fn witness(&mut self, witness: &mut B256Map<Bytes>);
 
     /// Attempts to find a leaf node at the specified path.
     ///

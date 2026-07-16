@@ -353,8 +353,6 @@ where
 
         #[cfg(feature = "trie-debug")]
         let debug_recorders = self.trie.take_debug_recorders();
-        #[cfg(feature = "trie-debug")]
-        let trie_witness = self.trie.witness();
 
         let end = Instant::now();
         self.metrics.sparse_trie_final_update_duration_histogram.record(end.duration_since(start));
@@ -376,8 +374,6 @@ where
                 .expect("finished state updates publish the hashed post state"),
             #[cfg(feature = "trie-debug")]
             debug_recorders,
-            #[cfg(feature = "trie-debug")]
-            trie_witness,
         })
     }
 
