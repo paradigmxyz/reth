@@ -59,51 +59,23 @@ impl<'a> SubTrieTargets<'a> {
 pub(crate) fn iter_sub_trie_targets(
     targets: &mut [ProofV2Target],
 ) -> impl Iterator<Item = SubTrieTargets<'_>> {
-    // First sort by the sub-trie prefix of each target, falling back to the `min_len` in cases
-    // where the sub-trie prefixes are equal (to differentiate targets which match the root node and
-    // those which don't).
+    // Sort globally by sub-trie prefix, then by target key. This makes equal-prefix targets
+    // contiguous and already ordered for the `ProofCalculator`.
     targets.sort_unstable_by(|a, b| {
-        sub_trie_prefix(a).cmp(&sub_trie_prefix(b)).then_with(|| a.min_len.cmp(&b.min_len))
+        sub_trie_prefix(a).cmp(&sub_trie_prefix(b)).then_with(|| a.key_nibbles.cmp(&b.key_nibbles))
     });
 
-    // We now chunk targets, such that each chunk contains all targets belonging to the same
-    // sub-trie. We are taking advantage of the following properties:
-    //
-    // - The first target in the chunk has the shortest sub-trie prefix (see previous sorting step).
-    //
-    // - The upper bound of the first target in the chunk's sub-trie will therefore be the upper
-    //   bound of the whole chunk.
-    //      - For example, given a chunk with sub-trie prefixes [0x2, 0x2f, 0x2fa], the upper bounds
-    //        will be [0x3, 0x3, 0x2fb]. Note that no target could match a trie node with path equal
-    //        to or greater than 0x3.
-    //
-    // - If a target's sub-trie's prefix does not lie within the bounds of the current chunk, then
-    //   that target must be the first target of the next chunk, lying in a separate sub-trie.
-    //      - Example: given sub-trie prefixes of [0x2, 0x2fa, 0x4c, 0x4ce, 0x4e], we would end up
-    //        with the following chunks:
-    //          - [0x2, 0x2fa] w/ upper bound 0x3
-    //          - [0x4c 0x4ce] w/ upper bound 0x4d
-    //          - [0x4e]       w/ upper bound 0x4f
-    let mut upper_bound = targets.first().and_then(|t| sub_trie_upper_bound(&sub_trie_prefix(t)));
-    let target_chunks = targets.chunk_by_mut(move |_, next| {
-        if let Some(some_upper_bound) = upper_bound {
-            let prefix = sub_trie_prefix(next);
-            let same_chunk = prefix < some_upper_bound;
-            if !same_chunk {
-                upper_bound = sub_trie_upper_bound(&prefix);
-            }
-            same_chunk
-        } else {
-            true
-        }
-    });
+    // Chunk targets by exact sub-trie prefix. Prefixes nested below a previous prefix are still
+    // processed as their own sub-trie.
+    let target_chunks =
+        targets.chunk_by_mut(|current, next| sub_trie_prefix(current) == sub_trie_prefix(next));
 
-    // Map the chunks to the return type. Within each chunk we want targets to be sorted by their
-    // key, as that will be the order they are checked by the `ProofCalculator`.
+    // Map the chunks to the return type.
     target_chunks.map(move |targets| {
         let prefix = sub_trie_prefix(&targets[0]);
-        let retain_root = targets[0].min_len == 0;
-        targets.sort_unstable_by_key(|target| target.key_nibbles);
+        // Targets with `min_len` 0 and 1 share the empty prefix, so key ordering cannot indicate
+        // whether the root should be retained.
+        let retain_root = targets.iter().any(|target| target.min_len == 0);
         SubTrieTargets { prefix, targets, retain_root }
     })
 }
@@ -179,21 +151,21 @@ mod tests {
                     ("4", vec!["4040404040404040404040404040404040404040404040404040404040404040"]),
                 ],
             ),
-            // Case 6: Targets with different min_len values in same sub-trie
+            // Case 6: Targets with different min_len values in different sub-tries
             (
                 vec![
                     ProofV2Target::new(B256::repeat_byte(0x20)).with_min_len(2),
                     ProofV2Target::new(B256::repeat_byte(0x2f)).with_min_len(3),
                 ],
-                vec![(
-                    "2",
-                    vec![
-                        "2020202020202020202020202020202020202020202020202020202020202020",
-                        "2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f",
-                    ],
-                )],
+                vec![
+                    ("2", vec!["2020202020202020202020202020202020202020202020202020202020202020"]),
+                    (
+                        "2f",
+                        vec!["2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f"],
+                    ),
+                ],
             ),
-            // Case 7: More complex chunking with multiple sub-tries
+            // Case 7: More complex chunking with nested sub-trie prefixes
             (
                 vec![
                     ProofV2Target::new(B256::repeat_byte(0x20)).with_min_len(2),
@@ -203,19 +175,18 @@ mod tests {
                     ProofV2Target::new(B256::repeat_byte(0x4e)).with_min_len(3),
                 ],
                 vec![
+                    ("2", vec!["2020202020202020202020202020202020202020202020202020202020202020"]),
                     (
-                        "2",
-                        vec![
-                            "2020202020202020202020202020202020202020202020202020202020202020",
-                            "2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f",
-                        ],
+                        "2f2",
+                        vec!["2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f"],
                     ),
                     (
                         "4c",
-                        vec![
-                            "4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c",
-                            "4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c",
-                        ],
+                        vec!["4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c"],
+                    ),
+                    (
+                        "4c4",
+                        vec!["4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c"],
                     ),
                     (
                         "4e",
@@ -243,13 +214,10 @@ mod tests {
                     ProofV2Target::new(B256::repeat_byte(0x20)).with_min_len(2),
                     ProofV2Target::new(B256::repeat_byte(0x40)).with_min_len(1),
                 ],
-                vec![(
-                    "",
-                    vec![
-                        "2020202020202020202020202020202020202020202020202020202020202020",
-                        "4040404040404040404040404040404040404040404040404040404040404040",
-                    ],
-                )],
+                vec![
+                    ("", vec!["4040404040404040404040404040404040404040404040404040404040404040"]),
+                    ("2", vec!["2020202020202020202020202020202020202020202020202020202020202020"]),
+                ],
             ),
         ];
 
@@ -298,5 +266,19 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn test_iter_sub_trie_targets_retain_root_after_key_sort() {
+        let mut targets = [
+            ProofV2Target::new(B256::repeat_byte(0x40)),
+            ProofV2Target::new(B256::repeat_byte(0x20)).with_min_len(1),
+        ];
+
+        let sub_tries = iter_sub_trie_targets(&mut targets).collect::<Vec<_>>();
+
+        assert_eq!(sub_tries.len(), 1);
+        assert_eq!(sub_tries[0].targets[0].key(), B256::repeat_byte(0x20));
+        assert!(sub_tries[0].retain_root);
     }
 }

@@ -269,6 +269,10 @@ if [ "$EXECUTION_MODE" = "rpc" ]; then
   RETH_ARGS+=(--chain mainnet --dev --dev.block-time "${BENCH_BLOCK_TIME:-1s}")
 fi
 
+if [ -n "${BENCH_REORG:-}" ]; then
+  RETH_ARGS+=(--testing.skip-invalid-transactions)
+fi
+
 SYNC_STATE_IDLE=false
 if "$BINARY" node --help 2>/dev/null | grep -qF -- '--debug.startup-sync-state-idle'; then
   RETH_ARGS+=(--debug.startup-sync-state-idle)
