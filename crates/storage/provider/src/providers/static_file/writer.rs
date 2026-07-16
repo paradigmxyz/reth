@@ -8,7 +8,7 @@ use parking_lot::{lock_api::RwLockWriteGuard, RawRwLock, RwLock};
 use reth_codecs::Compact;
 use reth_db::models::{AccountBeforeTx, StorageBeforeTx};
 use reth_db_api::models::CompactU256;
-use reth_nippy_jar::{NippyJar, NippyJarError, NippyJarWriter};
+use reth_nippy_jar::{NippyJar, NippyJarError, NippyJarWriter, NippyJarWriterSavepoint};
 use reth_node_types::NodePrimitives;
 use reth_primitives_traits::FastInstant as Instant;
 use reth_static_file_types::{
@@ -94,6 +94,59 @@ impl<N> Default for StaticFileWriters<N> {
 }
 
 impl<N: NodePrimitives> StaticFileWriters<N> {
+    /// Captures the current state of a cached segment writer without creating one.
+    pub(crate) fn savepoint(
+        &self,
+        segment: StaticFileSegment,
+    ) -> ProviderResult<Option<StaticFileWriterSavepoint>> {
+        let mut writer = match segment {
+            StaticFileSegment::Headers => self.headers.write(),
+            StaticFileSegment::Transactions => self.transactions.write(),
+            StaticFileSegment::Receipts => self.receipts.write(),
+            StaticFileSegment::TransactionSenders => self.transaction_senders.write(),
+            StaticFileSegment::AccountChangeSets => self.account_change_sets.write(),
+            StaticFileSegment::StorageChangeSets => self.storage_change_sets.write(),
+        };
+
+        writer.as_mut().map(StaticFileProviderRW::savepoint).transpose()
+    }
+
+    /// Restores a cached segment writer to a previously captured state.
+    ///
+    /// Returns `false` if the segment has no cached writer and therefore has not been modified
+    /// through this provider since the savepoint was captured.
+    pub(crate) fn rollback(
+        &self,
+        segment: StaticFileSegment,
+        savepoint: &StaticFileWriterSavepoint,
+    ) -> ProviderResult<bool> {
+        let mut writer = match segment {
+            StaticFileSegment::Headers => self.headers.write(),
+            StaticFileSegment::Transactions => self.transactions.write(),
+            StaticFileSegment::Receipts => self.receipts.write(),
+            StaticFileSegment::TransactionSenders => self.transaction_senders.write(),
+            StaticFileSegment::AccountChangeSets => self.account_change_sets.write(),
+            StaticFileSegment::StorageChangeSets => self.storage_change_sets.write(),
+        };
+
+        let Some(writer) = writer.as_mut() else { return Ok(false) };
+        writer.rollback(savepoint)?;
+        Ok(true)
+    }
+
+    /// Removes and returns the cached writer for a segment.
+    pub(crate) fn take(&self, segment: StaticFileSegment) -> Option<StaticFileProviderRW<N>> {
+        let mut writer = match segment {
+            StaticFileSegment::Headers => self.headers.write(),
+            StaticFileSegment::Transactions => self.transactions.write(),
+            StaticFileSegment::Receipts => self.receipts.write(),
+            StaticFileSegment::TransactionSenders => self.transaction_senders.write(),
+            StaticFileSegment::AccountChangeSets => self.account_change_sets.write(),
+            StaticFileSegment::StorageChangeSets => self.storage_change_sets.write(),
+        };
+        writer.take()
+    }
+
     pub(crate) fn get_or_create(
         &self,
         segment: StaticFileSegment,
@@ -241,6 +294,8 @@ pub struct StaticFileProviderRW<N> {
     writer: NippyJarWriter<SegmentHeader>,
     /// Path to opened file.
     data_path: PathBuf,
+    /// Jars opened while this writer advanced. Used to remove an entirely new segment on rollback.
+    opened_paths: Vec<PathBuf>,
     /// Reusable buffer for encoding appended data.
     buf: Vec<u8>,
     /// Metrics.
@@ -255,7 +310,82 @@ pub struct StaticFileProviderRW<N> {
     current_changeset_offset: Option<ChangesetOffset>,
 }
 
+/// Exact state of a single static file writer before an append operation.
+#[derive(Debug, Clone)]
+pub(crate) struct StaticFileWriterSavepoint {
+    data_path: PathBuf,
+    header: SegmentHeader,
+    writer: NippyJarWriterSavepoint,
+}
+
 impl<N: NodePrimitives> StaticFileProviderRW<N> {
+    /// Captures enough writer state to restore this segment without consulting database state.
+    pub(crate) fn savepoint(&mut self) -> ProviderResult<StaticFileWriterSavepoint> {
+        if self.writer.is_dirty() ||
+            self.prune_on_commit.is_some() ||
+            self.synced ||
+            self.current_changeset_offset.is_some()
+        {
+            return Err(ProviderError::other(StaticFileWriterError::new(
+                "cannot create a static file savepoint with uncommitted writer state",
+            )))
+        }
+
+        Ok(StaticFileWriterSavepoint {
+            data_path: self.data_path.clone(),
+            header: self.writer.user_header().clone(),
+            writer: self.writer.savepoint().map_err(ProviderError::other)?,
+        })
+    }
+
+    /// Restores this writer to an exact previously captured state.
+    ///
+    /// Jars created after the savepoint are deleted. The original jar is truncated to its old
+    /// physical row count, including for changeset segments where the row count cannot be derived
+    /// from the segment header, and its changeset sidecar and configuration are restored.
+    fn rollback(&mut self, savepoint: &StaticFileWriterSavepoint) -> ProviderResult<()> {
+        let segment = self.writer.user_header().segment();
+        if segment != savepoint.header.segment() {
+            return Err(ProviderError::other(StaticFileWriterError::new(
+                "cannot roll back a static file writer using a savepoint for another segment",
+            )))
+        }
+
+        self.prune_on_commit = None;
+        self.current_changeset_offset = None;
+
+        while self.data_path != savepoint.data_path {
+            if self.writer.user_header().expected_block_start() <=
+                savepoint.header.expected_block_start()
+            {
+                return Err(ProviderError::other(StaticFileWriterError::new(
+                    "static file writer is not descended from its rollback savepoint",
+                )))
+            }
+            self.delete_current_and_open_previous()?;
+        }
+
+        if segment.is_change_based() {
+            let changeset_offsets = self.changeset_offsets.as_mut().ok_or_else(|| {
+                ProviderError::other(StaticFileWriterError::new(
+                    "changeset static file writer is missing its offset sidecar",
+                ))
+            })?;
+            changeset_offsets
+                .truncate(savepoint.header.changeset_offsets_len())
+                .map_err(ProviderError::other)?;
+        }
+
+        *self.writer.user_header_mut() = savepoint.header.clone();
+        self.writer.rollback(&savepoint.writer).map_err(ProviderError::other)?;
+
+        // Persist the restored header and exact row count, including for empty blocks.
+        self.writer.commit().map_err(ProviderError::other)?;
+        self.synced = false;
+        self.update_index()?;
+        Ok(())
+    }
+
     /// Creates a new [`StaticFileProviderRW`] for a [`StaticFileSegment`].
     ///
     /// Before use, transaction based segments should ensure the block end range is the expected
@@ -271,6 +401,7 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
         // Create writer WITHOUT sidecar first - we'll add it after healing
         let mut writer = Self {
             writer,
+            opened_paths: vec![data_path.clone()],
             data_path,
             buf: Vec::with_capacity(100),
             reader,
@@ -790,6 +921,7 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
                     Self::open(segment, last_block + 1, self.reader.clone(), self.metrics.clone())?;
                 self.writer = writer;
                 self.data_path = data_path.clone();
+                self.opened_paths.push(data_path.clone());
 
                 // Update changeset offsets writer for the new file (starts empty)
                 if segment.is_change_based() {
@@ -1704,6 +1836,11 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
     /// Helper function to access a mutable reference to [`SegmentHeader`].
     pub const fn user_header_mut(&mut self) -> &mut SegmentHeader {
         self.writer.user_header_mut()
+    }
+
+    /// Returns every jar opened while this writer advanced.
+    pub(crate) fn opened_paths(&self) -> &[PathBuf] {
+        &self.opened_paths
     }
 
     /// Helper function to override block range for testing.

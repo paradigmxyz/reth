@@ -5,7 +5,7 @@ use crate::{
 use std::{
     fs::{File, OpenOptions},
     io::{BufWriter, Read, Seek, SeekFrom, Write},
-    path::Path,
+    path::{Path, PathBuf},
 };
 
 /// Size of one offset in bytes.
@@ -45,7 +45,77 @@ pub struct NippyJarWriter<H: NippyJarHeader = ()> {
     dirty: bool,
 }
 
+/// Exact append position of a [`NippyJarWriter`].
+///
+/// This is an opaque token used to discard all rows and even a partially written row appended
+/// after it was captured.
+#[derive(Debug, Clone)]
+pub struct NippyJarWriterSavepoint {
+    data_path: PathBuf,
+    rows: usize,
+    max_row_size: usize,
+    data_file_len: u64,
+    offsets_file_len: u64,
+}
+
 impl<H: NippyJarHeader> NippyJarWriter<H> {
+    /// Captures the current append position without committing the jar configuration.
+    ///
+    /// Buffered complete rows and offsets are flushed to the operating system so their exact file
+    /// boundaries can be restored later. A partial row cannot be used as a savepoint.
+    pub fn savepoint(&mut self) -> Result<NippyJarWriterSavepoint, NippyJarError> {
+        if self.column != 0 {
+            return Err(NippyJarError::Custom(
+                "cannot create a NippyJar savepoint in the middle of a row".to_string(),
+            ))
+        }
+
+        self.data_file.flush()?;
+        self.commit_offsets_inner()?;
+        self.offsets_file.flush()?;
+
+        Ok(NippyJarWriterSavepoint {
+            data_path: self.jar.data_path().to_path_buf(),
+            rows: self.jar.rows,
+            max_row_size: self.jar.max_row_size,
+            data_file_len: self.data_file.get_ref().metadata()?.len(),
+            offsets_file_len: self.offsets_file.get_ref().metadata()?.len(),
+        })
+    }
+
+    /// Discards everything appended after `savepoint`, including a partially written row.
+    pub fn rollback(&mut self, savepoint: &NippyJarWriterSavepoint) -> Result<(), NippyJarError> {
+        if self.jar.data_path() != savepoint.data_path {
+            return Err(NippyJarError::Custom(
+                "NippyJar rollback savepoint belongs to another writer".to_string(),
+            ))
+        }
+        if self.jar.rows < savepoint.rows {
+            return Err(NippyJarError::Custom(
+                "NippyJar has fewer rows than its rollback savepoint".to_string(),
+            ))
+        }
+
+        // Flush buffered data before truncating it. Pending offsets are deliberately discarded:
+        // they describe rows written after the savepoint and may include a partial row.
+        self.data_file.flush()?;
+        self.offsets.clear();
+        self.offsets_file.flush()?;
+
+        self.data_file.get_mut().set_len(savepoint.data_file_len)?;
+        self.data_file.seek(SeekFrom::End(0))?;
+        self.offsets_file.get_mut().set_len(savepoint.offsets_file_len)?;
+        self.offsets_file.seek(SeekFrom::End(0))?;
+
+        self.jar.rows = savepoint.rows;
+        self.jar.max_row_size = savepoint.max_row_size;
+        self.tmp_buf.clear();
+        self.uncompressed_row_size = 0;
+        self.column = 0;
+        self.dirty = true;
+        Ok(())
+    }
+
     /// Creates a [`NippyJarWriter`] from [`NippyJar`].
     ///
     /// It will **always** attempt to heal any inconsistent state when called.

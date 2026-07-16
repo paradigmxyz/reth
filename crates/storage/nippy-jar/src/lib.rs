@@ -46,7 +46,7 @@ mod cursor;
 pub use cursor::NippyJarCursor;
 
 mod writer;
-pub use writer::NippyJarWriter;
+pub use writer::{NippyJarWriter, NippyJarWriterSavepoint};
 
 mod consistency;
 pub use consistency::NippyJarChecker;
@@ -813,6 +813,69 @@ mod tests {
 
         // Simulate an unexpected shutdown during commit, and see that it unwinds successfully
         test_append_consistency_partial_commit(file_path.path(), &col1, &col2);
+    }
+
+    #[test]
+    fn test_writer_rollback_discards_partial_row() {
+        let (col1, col2) = test_data(None);
+        let file_path = tempfile::NamedTempFile::new().unwrap();
+        let nippy = NippyJar::new_without_header(2, file_path.path());
+        nippy.freeze_config().unwrap();
+
+        let mut writer = NippyJarWriter::new(nippy).unwrap();
+        writer.append_column(Some(Ok(&col1[0]))).unwrap();
+        writer.append_column(Some(Ok(&col2[0]))).unwrap();
+        writer.commit().unwrap();
+
+        let savepoint = writer.savepoint().unwrap();
+        let expected_data_len = File::open(writer.data_path()).unwrap().metadata().unwrap().len();
+        let expected_offsets_len =
+            File::open(writer.offsets_path()).unwrap().metadata().unwrap().len();
+
+        writer.append_column(Some(Ok(&col1[1]))).unwrap();
+        writer.append_column(Some(Ok(&col2[1]))).unwrap();
+        writer.append_column(Some(Ok(&col1[2]))).unwrap();
+        writer.rollback(&savepoint).unwrap();
+        writer.commit().unwrap();
+        drop(writer);
+
+        let nippy = NippyJar::load_without_header(file_path.path()).unwrap();
+        assert_eq!(nippy.rows(), 1);
+        assert_eq!(
+            File::open(nippy.data_path()).unwrap().metadata().unwrap().len(),
+            expected_data_len
+        );
+        assert_eq!(
+            File::open(nippy.offsets_path()).unwrap().metadata().unwrap().len(),
+            expected_offsets_len
+        );
+        let mut cursor = NippyJarCursor::new(&nippy).unwrap();
+        let row = cursor.next_row().unwrap().unwrap();
+        assert_eq!(row, vec![col1[0].as_slice(), col2[0].as_slice()]);
+        assert!(cursor.next_row().unwrap().is_none());
+    }
+
+    #[test]
+    fn test_writer_rejects_foreign_rollback_savepoint() {
+        let (col1, col2) = test_data(None);
+        let first_path = tempfile::NamedTempFile::new().unwrap();
+        let first = NippyJar::new_without_header(2, first_path.path());
+        first.freeze_config().unwrap();
+        let mut first_writer = NippyJarWriter::new(first).unwrap();
+        first_writer.append_column(Some(Ok(&col1[0]))).unwrap();
+        first_writer.append_column(Some(Ok(&col2[0]))).unwrap();
+        first_writer.commit().unwrap();
+        let savepoint = first_writer.savepoint().unwrap();
+
+        let second_path = tempfile::NamedTempFile::new().unwrap();
+        let second = NippyJar::new_without_header(2, second_path.path());
+        second.freeze_config().unwrap();
+        let mut second_writer = NippyJarWriter::new(second).unwrap();
+        second_writer.append_column(Some(Ok(&col1[0]))).unwrap();
+        second_writer.append_column(Some(Ok(&col2[0]))).unwrap();
+        second_writer.commit().unwrap();
+
+        assert!(second_writer.rollback(&savepoint).is_err());
     }
 
     #[test]

@@ -142,6 +142,13 @@ impl<DB: Database, N: NodeTypes + 'static> DatabaseProviderRW<DB, N> {
         self.0.commit()
     }
 
+    /// Aborts the database transaction and discards all deferred writes.
+    ///
+    /// Static file writers are shared by the provider factory and must be rolled back separately.
+    pub fn abort(self) {
+        self.0.abort()
+    }
+
     /// Consume `DbTx` or `DbTxMut`.
     pub fn into_tx(self) -> <DB as Database>::TXMut {
         self.0.into_tx()
@@ -260,6 +267,13 @@ impl<TX, N: NodeTypes> DatabaseProvider<TX, N> {
 }
 
 impl<TX: DbTx + 'static, N: NodeTypes> DatabaseProvider<TX, N> {
+    /// Aborts the database transaction and discards all deferred writes.
+    ///
+    /// Static file writers are shared by the provider factory and must be rolled back separately.
+    pub fn abort(self) {
+        self.tx.abort()
+    }
+
     /// Commits unwind writes in MDBX -> `RocksDB` -> static-file order.
     ///
     /// This keeps MDBX as the first durable step so an interrupted unwind can be recovered by
@@ -508,14 +522,6 @@ impl<TX, N: NodeTypes> AsRef<Self> for DatabaseProvider<TX, N> {
 }
 
 impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX, N> {
-    /// Discards all pending `RocksDB` batches without committing them.
-    ///
-    /// This restores the pending batch state of a fresh provider and is intended for aborting
-    /// writes before preparing replacement batches, such as when unwinding a staged block save.
-    pub fn discard_pending_rocksdb_batches(&self) {
-        self.pending_rocksdb_batches.lock().clear();
-    }
-
     /// Executes a closure with a `RocksDB` batch, automatically registering it for commit.
     ///
     /// This helper encapsulates all the cfg-gated `RocksDB` batch handling.
@@ -5121,18 +5127,19 @@ mod tests {
             assert!(!expected_account_history.is_empty());
             assert!(!expected_storage_history.is_empty());
         }
+        let expected_mdbx_txid = factory.db_ref().last_txnid();
+        let expected_rocksdb_sequence = rocksdb.latest_sequence_number();
 
         let provider_rw = factory.provider_rw().unwrap();
+        let static_file_provider = provider_rw.static_file_provider();
+        let static_file_savepoint = static_file_provider.savepoint().unwrap();
         provider_rw.save_blocks(vec![staged_block], SaveBlocksMode::Full).unwrap();
-
-        // Make staged static-file rows visible to the existing unwind implementation, then
-        // replace the append-side RocksDB batches with the batches produced by unwind.
-        provider_rw.static_file_provider().finalize().unwrap();
-        provider_rw.discard_pending_rocksdb_batches();
-        provider_rw.remove_block_and_execution_above(1).unwrap();
-        provider_rw.commit().unwrap();
+        provider_rw.abort();
+        static_file_provider.rollback(static_file_savepoint).unwrap();
 
         let provider = factory.provider().unwrap();
+        assert_eq!(factory.db_ref().last_txnid(), expected_mdbx_txid);
+        assert_eq!(rocksdb.latest_sequence_number(), expected_rocksdb_sequence);
         assert_eq!(provider.best_block_number().unwrap(), 1);
         assert_eq!(provider.block_hash(1).unwrap(), Some(retained_hash));
         assert_eq!(provider.block_hash(2).unwrap(), None);

@@ -750,6 +750,15 @@ impl RocksDBProvider {
         matches!(self.0.as_ref(), RocksDBProviderInner::Secondary { .. })
     }
 
+    /// Returns the sequence number of the most recent committed write.
+    #[cfg(any(test, feature = "test-utils"))]
+    pub fn latest_sequence_number(&self) -> u64 {
+        match self.0.as_ref() {
+            RocksDBProviderInner::ReadWrite { db, .. } => db.latest_sequence_number(),
+            RocksDBProviderInner::Secondary { db, .. } => db.latest_sequence_number(),
+        }
+    }
+
     /// Tries to catch up with the primary instance by reading new WAL and MANIFEST entries.
     ///
     /// This is a no-op for read-write and read-only providers.

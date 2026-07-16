@@ -883,4 +883,80 @@ mod tests {
 
         drop(writer);
     }
+
+    #[test]
+    fn test_rollback_removes_new_segment_across_jars() {
+        let (static_dir, _) = create_test_static_files_dir();
+        let provider = setup_test_provider(&static_dir, 3);
+        let savepoint = provider.savepoint().unwrap();
+
+        {
+            let mut writer = provider.get_writer(0, StaticFileSegment::AccountChangeSets).unwrap();
+            for block in 0..8 {
+                writer.append_account_changeset(generate_test_changeset(block, 2), block).unwrap();
+            }
+            writer.sync_all().unwrap();
+        }
+
+        provider.rollback(savepoint).unwrap();
+
+        assert_eq!(
+            provider.get_highest_static_file_block(StaticFileSegment::AccountChangeSets),
+            None
+        );
+        let has_account_changeset_file = std::fs::read_dir(provider.directory())
+            .unwrap()
+            .filter_map(Result::ok)
+            .any(|entry| entry.file_name().to_string_lossy().contains("account-change-sets"));
+        assert!(!has_account_changeset_file);
+    }
+
+    #[test]
+    fn test_rollback_restores_changesets_across_jars() {
+        let (static_dir, _) = create_test_static_files_dir();
+        let provider = setup_test_provider(&static_dir, 3);
+
+        {
+            let mut writer = provider.get_writer(0, StaticFileSegment::AccountChangeSets).unwrap();
+            for block in 0..2 {
+                writer.append_account_changeset(generate_test_changeset(block, 2), block).unwrap();
+            }
+            writer.commit().unwrap();
+        }
+
+        let sidecar_path = get_sidecar_path(&provider, 0);
+        let savepoint = provider.savepoint().unwrap();
+        {
+            let mut writer = provider.latest_writer(StaticFileSegment::AccountChangeSets).unwrap();
+            for block in 2..9 {
+                writer.append_account_changeset(generate_test_changeset(block, 3), block).unwrap();
+            }
+            writer.sync_all().unwrap();
+        }
+
+        provider.rollback(savepoint).unwrap();
+
+        assert_eq!(
+            provider.get_highest_static_file_block(StaticFileSegment::AccountChangeSets),
+            Some(1)
+        );
+        assert_eq!(get_nippy_row_count(&provider, 0), 4);
+        assert_eq!(get_header_block_count(&provider, 0), 2);
+        assert_eq!(get_sidecar_block_count(&sidecar_path), 2);
+        assert!(!get_sidecar_path(&provider, 3).exists());
+        assert!(!get_sidecar_path(&provider, 6).exists());
+    }
+
+    #[test]
+    fn test_savepoint_rejects_uncommitted_writer_state() {
+        let (static_dir, _) = create_test_static_files_dir();
+        let provider = setup_test_provider(&static_dir, 3);
+
+        {
+            let mut writer = provider.get_writer(0, StaticFileSegment::AccountChangeSets).unwrap();
+            writer.append_account_changeset(generate_test_changeset(0, 2), 0).unwrap();
+        }
+
+        assert!(provider.savepoint().is_err());
+    }
 }

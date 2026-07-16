@@ -7,8 +7,8 @@ use reth_ethereum_primitives::EthPrimitives;
 use reth_primitives_traits::{FastInstant as Instant, NodePrimitives};
 use reth_provider::{
     providers::ProviderNodeTypes, BalProvider, BlockExecutionWriter, BlockHashReader,
-    BlockNumReader, ChainStateBlockWriter, DBProvider, DatabaseProviderFactory, ProviderFactory,
-    SaveBlocksMode, StaticFileProviderFactory, StaticFileWriter,
+    ChainStateBlockWriter, DBProvider, DatabaseProviderFactory, ProviderFactory, SaveBlocksMode,
+    StaticFileProviderFactory,
 };
 use reth_prune::{PrunerError, PrunerWithFactory};
 use reth_stages_api::{MetricEvent, MetricEventsSender};
@@ -179,35 +179,54 @@ where
         let last_block = blocks.last().map(|b| b.recovered_block.num_hash());
         let block_count = blocks.len();
 
-        let pending_finalized = self.pending_finalized_block.take();
-        let pending_safe = self.pending_safe_block.take();
-
         debug!(target: "engine::persistence", ?block_count, first=?first_block, last=?last_block, "Saving range of blocks");
 
         let start_time = Instant::now();
 
         if let Some(last) = last_block {
             let provider_rw = self.provider.database_provider_rw()?;
-            let previous_tip = provider_rw.last_block_number()?;
-            provider_rw.save_blocks(blocks, SaveBlocksMode::Full)?;
+            let static_file_provider = provider_rw.static_file_provider();
+            let static_file_savepoint = static_file_provider.savepoint()?;
+            let pending_finalized = self.pending_finalized_block.take();
+            let pending_safe = self.pending_safe_block.take();
+
+            let save_result = (|| -> Result<(), ProviderError> {
+                provider_rw.save_blocks(blocks, SaveBlocksMode::Full)?;
+
+                if let Some(finalized) = pending_finalized {
+                    provider_rw.save_finalized_block_number(finalized.min(last.number))?;
+                }
+                if let Some(safe) = pending_safe {
+                    provider_rw.save_safe_block_number(safe.min(last.number))?;
+                }
+
+                Ok(())
+            })();
+
+            if let Err(save_error) = save_result {
+                self.pending_finalized_block = pending_finalized;
+                self.pending_safe_block = pending_safe;
+                provider_rw.abort();
+
+                if let Err(rollback_error) = static_file_provider.rollback(static_file_savepoint) {
+                    error!(target: "engine::persistence", ?save_error, ?rollback_error, "Failed to roll back static files after block save error");
+                    return Err(rollback_error.into())
+                }
+
+                return Err(save_error.into())
+            }
 
             if canceller.is_cancelled() {
                 self.pending_finalized_block = pending_finalized;
                 self.pending_safe_block = pending_safe;
-
-                // Replace the append-side RocksDB batches with those produced by unwind.
-                provider_rw.discard_pending_rocksdb_batches();
-                // Unwind reads changesets from static files. Finalizing makes the staged rows
-                // visible; the subsequently queued prunes make commit use unwind ordering.
-                provider_rw.static_file_provider().finalize()?;
-                provider_rw.remove_block_and_execution_above(previous_tip)?;
-                provider_rw.commit()?;
+                provider_rw.abort();
+                static_file_provider.rollback(static_file_savepoint)?;
 
                 let elapsed = start_time.elapsed();
                 self.metrics.save_blocks_batch_size.record(block_count as f64);
                 self.metrics.save_blocks_duration_seconds.record(elapsed);
 
-                debug!(target: "engine::persistence", first=?first_block, last=?last_block, ?previous_tip, "Rolled back cancelled block save");
+                debug!(target: "engine::persistence", first=?first_block, last=?last_block, "Rolled back cancelled block save");
 
                 return Ok(PersistenceResult {
                     last_block: None,
@@ -216,20 +235,23 @@ where
                 });
             }
 
-            if let Some(finalized) = pending_finalized {
-                provider_rw.save_finalized_block_number(finalized.min(last.number))?;
-                if finalized > last.number {
-                    self.pending_finalized_block = Some(finalized);
-                }
-            }
-            if let Some(safe) = pending_safe {
-                provider_rw.save_safe_block_number(safe.min(last.number))?;
-                if safe > last.number {
-                    self.pending_safe_block = Some(safe);
-                }
-            }
+            if let Err(commit_error) = provider_rw.commit() {
+                self.pending_finalized_block = pending_finalized;
+                self.pending_safe_block = pending_safe;
 
-            provider_rw.commit()?;
+                if let Err(rollback_error) = static_file_provider.rollback(static_file_savepoint) {
+                    error!(target: "engine::persistence", ?commit_error, ?rollback_error, "Failed to roll back static files after block commit error");
+                    return Err(rollback_error.into())
+                }
+
+                return Err(commit_error.into())
+            }
+            if pending_finalized.is_some_and(|finalized| finalized > last.number) {
+                self.pending_finalized_block = pending_finalized;
+            }
+            if pending_safe.is_some_and(|safe| safe > last.number) {
+                self.pending_safe_block = pending_safe;
+            }
             let _ = self.provider.bal_store().flush().inspect_err(|err| {
                 warn!(target: "engine::persistence", last=?last_block, ?err, "Failed to flush BAL store");
             });
@@ -442,13 +464,15 @@ mod tests {
     use alloy_eips::NumHash;
     use alloy_primitives::{BlockHash, BlockNumber, Bytes, B256, U256};
     use reth_chain_state::test_utils::TestBlockBuilder;
+    use reth_db::Database;
     use reth_exex_types::FinishedExExHeight;
     use reth_provider::{
         providers::{ProviderFactoryBuilder, ReadOnlyConfig},
         test_utils::{create_test_provider_factory, MockNodeTypes},
-        AccountReader, BalConfig, BalNotificationStream, BalStore, BalStoreHandle,
+        AccountReader, BalConfig, BalNotificationStream, BalStore, BalStoreHandle, BlockNumReader,
         ChainSpecProvider, ChainStateBlockReader, HeaderProvider, InMemoryBalStore, ProviderError,
-        ProviderResult, RawBal, StorageSettingsCache, TryIntoHistoricalStateProvider,
+        ProviderResult, RawBal, RocksDBProviderFactory, StorageSettingsCache,
+        TryIntoHistoricalStateProvider,
     };
     use reth_prune::Pruner;
     use reth_prune_types::PruneMode;
@@ -637,6 +661,10 @@ mod tests {
         handle.save_finalized_block_number(1).unwrap();
         handle.save_safe_block_number(1).unwrap();
 
+        let expected_mdbx_txid = provider.db_ref().last_txnid();
+        let rocksdb = provider.rocksdb_provider();
+        let expected_rocksdb_sequence = rocksdb.latest_sequence_number();
+
         let canceller = PersistenceCanceller::default();
         canceller.cancel();
         let (tx, rx) = crossbeam_channel::bounded(1);
@@ -645,6 +673,8 @@ mod tests {
         let result = rx.recv().unwrap();
         assert!(result.cancelled);
         assert!(result.last_block.is_none());
+        assert_eq!(provider.db_ref().last_txnid(), expected_mdbx_txid);
+        assert_eq!(rocksdb.latest_sequence_number(), expected_rocksdb_sequence);
 
         let provider_ro = provider.provider().unwrap();
         assert_eq!(provider_ro.last_block_number().unwrap(), 0);
@@ -664,6 +694,58 @@ mod tests {
         assert_eq!(provider_ro.last_safe_block_number().unwrap(), Some(1));
     }
 
+    #[test]
+    fn test_save_blocks_error_rolls_back_static_files() {
+        reth_tracing::init_test_tracing();
+
+        let provider = create_test_provider_factory();
+        provider.set_storage_settings_cache(reth_provider::StorageSettings::v2());
+        let (_finished_exex_height_tx, finished_exex_height_rx) =
+            tokio::sync::watch::channel(FinishedExExHeight::NoExExs);
+        let pruner =
+            Pruner::new_with_factory(provider.clone(), vec![], 5, 0, None, finished_exex_height_rx);
+        let (sync_metrics_tx, _sync_metrics_rx) = unbounded_channel();
+        let (_tx, rx) = std::sync::mpsc::channel::<PersistenceAction<EthPrimitives>>();
+        let mut service = PersistenceService::new(provider.clone(), rx, pruner, sync_metrics_tx);
+
+        let mut block_builder = TestBlockBuilder::eth().with_state();
+        let mut blocks = block_builder.get_executed_blocks(0..4);
+        let genesis = blocks.next().unwrap();
+        let block_1 = blocks.next().unwrap();
+        let block_2 = blocks.next().unwrap();
+        let block_3 = blocks.next().unwrap();
+
+        service.on_save_blocks(vec![genesis], PersistenceCanceller::default()).unwrap();
+        service.pending_finalized_block = Some(3);
+        service.pending_safe_block = Some(3);
+
+        let expected_mdbx_txid = provider.db_ref().last_txnid();
+        let rocksdb = provider.rocksdb_provider();
+        let expected_rocksdb_sequence = rocksdb.latest_sequence_number();
+
+        // The gap makes each static writer append block 1 before rejecting block 3.
+        assert!(
+            service
+                .on_save_blocks(
+                    vec![block_1.clone(), block_3.clone()],
+                    PersistenceCanceller::default(),
+                )
+                .is_err()
+        );
+
+        assert_eq!(provider.db_ref().last_txnid(), expected_mdbx_txid);
+        assert_eq!(rocksdb.latest_sequence_number(), expected_rocksdb_sequence);
+        assert_eq!(service.pending_finalized_block, Some(3));
+        assert_eq!(service.pending_safe_block, Some(3));
+        assert_eq!(provider.provider().unwrap().last_block_number().unwrap(), 0);
+
+        let result = service
+            .on_save_blocks(vec![block_1, block_2, block_3], PersistenceCanceller::default())
+            .unwrap();
+        assert_eq!(result.last_block.unwrap().number, 3);
+        assert!(!result.cancelled);
+    }
+
     /// Verifies that committing `save_blocks` history before running the pruner
     /// prevents the pruner from overwriting new entries.
     ///
@@ -674,7 +756,6 @@ mod tests {
     #[test]
     fn test_save_blocks_then_prune_preserves_new_history() {
         use reth_db::{models::ShardedKey, tables, BlockNumberList};
-        use reth_provider::RocksDBProviderFactory;
 
         reth_tracing::init_test_tracing();
 

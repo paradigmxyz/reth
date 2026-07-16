@@ -25,7 +25,7 @@ pub use providers::{
     DatabaseProvider, DatabaseProviderRO, DatabaseProviderRW, HistoricalStateProvider,
     HistoricalStateProviderRef, LatestStateProvider, LatestStateProviderRef, ProviderFactory,
     PruneShardOutcome, PrunedIndices, SaveBlocksMode, StaticFileAccess, StaticFileProviderBuilder,
-    StaticFileWriteCtx, StaticFileWriter,
+    StaticFileProviderSavepoint, StaticFileWriteCtx, StaticFileWriter,
 };
 
 pub mod changeset_walker;

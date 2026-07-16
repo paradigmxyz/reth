@@ -1,6 +1,7 @@
 use super::{
-    metrics::StaticFileProviderMetrics, writer::StaticFileWriters, LoadedJar,
-    StaticFileJarProvider, StaticFileProviderRW, StaticFileProviderRWRefMut,
+    metrics::StaticFileProviderMetrics,
+    writer::{StaticFileWriterSavepoint, StaticFileWriters},
+    LoadedJar, StaticFileJarProvider, StaticFileProviderRW, StaticFileProviderRWRefMut,
 };
 use crate::{
     changeset_walker::{StaticFileAccountChangesetWalker, StaticFileStorageChangesetWalker},
@@ -121,6 +122,22 @@ impl<N> Clone for StaticFileProvider<N> {
     fn clone(&self) -> Self {
         Self(self.0.clone())
     }
+}
+
+/// Captures the exact static file state before a group of append operations.
+///
+/// This token is intentionally opaque. It can only be consumed by
+/// [`StaticFileProvider::rollback`] on the provider that created it.
+#[derive(Debug)]
+pub struct StaticFileProviderSavepoint {
+    directory: PathBuf,
+    segments: StaticFileMap<StaticFileSegmentSavepoint>,
+}
+
+#[derive(Debug)]
+enum StaticFileSegmentSavepoint {
+    Absent,
+    Present(StaticFileWriterSavepoint),
 }
 
 /// Builder for [`StaticFileProvider`] that allows configuration before initialization.
@@ -257,6 +274,82 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
     /// Creates a new [`StaticFileProvider`] with read-write access.
     pub fn read_write(path: impl AsRef<Path>) -> ProviderResult<Self> {
         Self::new(path, StaticFileAccess::RW)
+    }
+
+    /// Captures the current state of every static file segment.
+    ///
+    /// Cached writers are captured directly at their latest commit boundary. Segments without a
+    /// cached writer are opened directly from the provider's per-segment tip index.
+    pub fn savepoint(&self) -> ProviderResult<StaticFileProviderSavepoint> {
+        let mut segments = StaticFileMap::default();
+
+        for segment in StaticFileSegment::iter() {
+            let savepoint = if let Some(savepoint) = self.writers.savepoint(segment)? {
+                StaticFileSegmentSavepoint::Present(savepoint)
+            } else if let Some(block) = self.get_highest_static_file_block(segment) {
+                // Opening by the indexed tip is O(1) and also caches the writer for the upcoming
+                // append, avoiding a static-directory scan on every persistence job.
+                let mut writer = self.get_writer(block, segment)?;
+                StaticFileSegmentSavepoint::Present(writer.savepoint()?)
+            } else {
+                StaticFileSegmentSavepoint::Absent
+            };
+            segments.insert(segment, savepoint);
+        }
+
+        Ok(StaticFileProviderSavepoint { directory: self.path.clone(), segments })
+    }
+
+    /// Restores static files to a previously captured savepoint without reading or unwinding
+    /// database state.
+    ///
+    /// Appended rows are truncated directly, jars created after the savepoint are deleted, and
+    /// changeset sidecars, configurations, indexes, and read caches are restored. The savepoint is
+    /// consumed so it cannot accidentally be reused after subsequent writes.
+    pub fn rollback(&self, mut savepoint: StaticFileProviderSavepoint) -> ProviderResult<()> {
+        if self.access.is_read_only() {
+            return Err(ProviderError::ReadOnlyStaticFileAccess)
+        }
+        if self.path != savepoint.directory {
+            return Err(ProviderError::other(StaticFileWriterError::new(
+                "static file savepoint belongs to another provider",
+            )))
+        }
+
+        for segment in StaticFileSegment::iter() {
+            match savepoint
+                .segments
+                .remove(segment)
+                .expect("savepoint contains every static file segment")
+            {
+                StaticFileSegmentSavepoint::Present(segment_savepoint) => {
+                    if !self.writers.rollback(segment, &segment_savepoint)? {
+                        return Err(ProviderError::other(StaticFileWriterError::new(
+                            "static file writer was removed after its savepoint was captured",
+                        )))
+                    }
+                }
+                StaticFileSegmentSavepoint::Absent => {
+                    let Some(writer) = self.writers.take(segment) else {
+                        // No writer means this segment was not touched after the savepoint.
+                        continue
+                    };
+                    let opened_paths = writer.opened_paths().to_vec();
+                    drop(writer);
+
+                    self.map.retain(|(_, cached_segment), _| *cached_segment != segment);
+                    for path in opened_paths {
+                        NippyJar::<SegmentHeader>::load(&path)
+                            .map_err(ProviderError::other)?
+                            .delete()
+                            .map_err(ProviderError::other)?;
+                    }
+                    self.indexes.write().remove(segment);
+                }
+            }
+        }
+
+        Ok(())
     }
 }
 
