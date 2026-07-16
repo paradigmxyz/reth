@@ -1,6 +1,6 @@
 //! Traits for execution.
 
-use crate::{BlockExecutorTransactionFor, ConfigureEvm, Database, DynDatabase, EvmEnv};
+use crate::{ConfigureEvm, Database, DynDatabase, EvmEnv, TxFor};
 use alloc::{boxed::Box, format, sync::Arc, vec::Vec};
 use alloy_consensus::{
     transaction::{Either, Recovered},
@@ -1026,10 +1026,10 @@ where
 
         executor.apply_pre_execution_changes()?;
         for transaction in block.transactions_recovered() {
-            let (tx_env, _) = <_ as ExecutableTxParts<
-                BlockExecutorTransactionFor<Evm>,
-                TxTy<Evm::Primitives>,
-            >>::into_parts(transaction);
+            let (tx_env, _) =
+                <_ as ExecutableTxParts<TxFor<Evm>, TxTy<Evm::Primitives>>>::into_parts(
+                    transaction,
+                );
             executor.execute_transaction(tx_env)?;
         }
         let (output, block_access_list) = executor.finish_with_block_access_list()?;
@@ -1417,14 +1417,12 @@ where
 /// A helper trait marking a type that can be converted into an [`ExecutableTxParts`] for block
 /// executor.
 pub trait ExecutableTxFor<Evm: ConfigureEvm>:
-    ExecutableTxParts<BlockExecutorTransactionFor<Evm>, TxTy<Evm::Primitives>>
-    + RecoveredTx<TxTy<Evm::Primitives>>
+    ExecutableTxParts<TxFor<Evm>, TxTy<Evm::Primitives>> + RecoveredTx<TxTy<Evm::Primitives>>
 {
 }
 
 impl<T, Evm: ConfigureEvm> ExecutableTxFor<Evm> for T where
-    T: ExecutableTxParts<BlockExecutorTransactionFor<Evm>, TxTy<Evm::Primitives>>
-        + RecoveredTx<TxTy<Evm::Primitives>>
+    T: ExecutableTxParts<TxFor<Evm>, TxTy<Evm::Primitives>> + RecoveredTx<TxTy<Evm::Primitives>>
 {
 }
 

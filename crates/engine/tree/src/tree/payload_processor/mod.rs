@@ -11,8 +11,8 @@ use crossbeam_channel::{Receiver as CrossbeamReceiver, Sender as CrossbeamSender
 use prewarm::PrewarmMetrics;
 use rayon::prelude::*;
 use reth_evm::{
-    BlockExecutorTransactionFor, ConfigureEvm, ConvertTx, ExecutableTxFor, ExecutableTxIterator,
-    ExecutableTxParts, ExecutableTxTuple, WithTxEnv,
+    ConfigureEvm, ConvertTx, ExecutableTxFor, ExecutableTxIterator, ExecutableTxParts,
+    ExecutableTxTuple, TxFor, WithTxEnv,
 };
 use reth_execution_types::EvmState;
 use reth_primitives_traits::{FastInstant as Instant, NodePrimitives};
@@ -45,8 +45,7 @@ pub mod receipt_root_task;
 pub const SMALL_BLOCK_TX_THRESHOLD: usize = 5;
 
 /// Type alias for [`PayloadHandle`] returned by payload processor spawn methods.
-type IteratorTx<Evm, I> =
-    RecoveredTx<BlockExecutorTransactionFor<Evm>, <I as ExecutableTxIterator<Evm>>::Recovered>;
+type IteratorTx<Evm, I> = RecoveredTx<TxFor<Evm>, <I as ExecutableTxIterator<Evm>>::Recovered>;
 
 type IteratorPayloadHandle<Evm, I> = PayloadHandle<
     IteratorTx<Evm, I>,
@@ -54,13 +53,11 @@ type IteratorPayloadHandle<Evm, I> = PayloadHandle<
     <<Evm as ConfigureEvm>::Primitives as NodePrimitives>::Receipt,
 >;
 
-type IteratorPrewarmTxReceiver<Evm, I> = PrewarmTxReceiver<
-    BlockExecutorTransactionFor<Evm>,
-    <I as ExecutableTxIterator<Evm>>::Recovered,
->;
+type IteratorPrewarmTxReceiver<Evm, I> =
+    PrewarmTxReceiver<TxFor<Evm>, <I as ExecutableTxIterator<Evm>>::Recovered>;
 
 type IteratorExecuteTxReceiver<Evm, I> = ExecuteTxReceiver<
-    BlockExecutorTransactionFor<Evm>,
+    TxFor<Evm>,
     <I as ExecutableTxIterator<Evm>>::Recovered,
     <I as ExecutableTxTuple>::Error,
 >;
