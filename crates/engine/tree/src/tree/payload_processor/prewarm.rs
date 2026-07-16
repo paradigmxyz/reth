@@ -24,7 +24,6 @@ use alloy_primitives::{keccak256, B256, U256};
 use metrics::{Counter, Gauge, Histogram};
 use rayon::prelude::*;
 use reth_evm::{execute::ExecutableTxFor, ConfigureEvm, Evm, EvmFor, RecoveredTx, SpecFor};
-use reth_execution_cache::CacheFillMode;
 use reth_metrics::Metrics;
 use reth_primitives_traits::{Account, FastInstant as Instant, NodePrimitives};
 use reth_provider::{
@@ -699,29 +698,17 @@ where
                         return;
                     }
                 };
-                let boxed: Box<dyn AccountReader> = match &self.saved_cache {
-                    Some(saved) => {
-                        let caches = saved.cache().clone();
-                        if self.disable_bal_batch_io {
-                            Box::new(
-                                CachedStateProvider::new_with_mode(
-                                    inner,
-                                    caches,
-                                    CacheFillMode::LookupOnly,
-                                    None,
-                                    None,
-                                )
-                                .with_txpool_snapshot(self.env.txpool_snapshot.clone()),
-                            )
-                        } else {
+                let boxed: Box<dyn AccountReader> =
+                    match (self.disable_bal_batch_io, &self.saved_cache) {
+                        (false, Some(saved)) => {
+                            let caches = saved.cache().clone();
                             Box::new(
                                 CachedStateProvider::new_prewarm(inner, caches)
                                     .with_txpool_snapshot(self.env.txpool_snapshot.clone()),
                             )
                         }
-                    }
-                    None => Box::new(inner),
-                };
+                        _ => Box::new(inner),
+                    };
                 *provider = Some(boxed);
             }
             let account_reader = provider.as_ref().expect("provider just initialized");

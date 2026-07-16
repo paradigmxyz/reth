@@ -102,8 +102,9 @@ use crate::tree::{
     precompile_cache::{CachedPrecompile, CachedPrecompileMetrics, PrecompileCacheMap},
     txpool_prewarm::TxPoolPrewarmHandle,
     types::{InsertPayloadResult, ValidationOutput},
-    CacheWaitDurations, CachedStateProvider, EngineApiMetrics, EngineApiTreeState, ExecutionEnv,
-    PayloadHandle, StateProviderBuilder, StateProviderDatabase, TreeConfig, WaitForCaches,
+    CacheWaitDurations, CacheWaitGuard, CachedStateProvider, EngineApiMetrics, EngineApiTreeState,
+    ExecutionEnv, PayloadHandle, StateProviderBuilder, StateProviderDatabase, TreeConfig,
+    WaitForCaches,
 };
 use alloy_consensus::transaction::{Either, TxHashRef};
 use alloy_eip7928::{bal::DecodedBal, compute_block_access_list_hash, BlockAccessList};

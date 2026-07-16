@@ -66,6 +66,7 @@ mod trie_updates;
 mod txpool_prewarm;
 pub mod types;
 
+use self::txpool_prewarm::TxPoolPrewarmPauseGuard;
 use crate::{persistence::PersistenceResult, tree::error::AdvancePersistenceError};
 pub use block_buffer::BlockBuffer;
 pub use invalid_headers::InvalidHeaderCache;
@@ -1752,23 +1753,30 @@ where
                                     Duration::ZERO
                                 };
 
-                                let cache_wait = wait_for_caches
-                                    .then(|| self.payload_validator.wait_for_caches());
-
-                                let start = Instant::now();
                                 let gas_used = payload.gas_used();
                                 let num_hash = payload.num_hash();
-                                let mut output = self.on_new_payload(payload);
-                                if cache_wait.is_some() {
-                                    self.payload_validator.resume_caches();
-                                }
-                                let latency = start.elapsed();
-                                self.metrics.engine.new_payload.update_response_metrics(
-                                    start,
-                                    &mut self.metrics.engine.forkchoice_updated.latest_finish_at,
-                                    &output,
-                                    gas_used,
-                                );
+
+                                let (mut output, latency, cache_wait) = {
+                                    let guard = wait_for_caches
+                                        .then(|| self.payload_validator.wait_for_caches());
+                                    let durations = guard.as_ref().map(CacheWaitGuard::durations);
+
+                                    let start = Instant::now();
+                                    let output = self.on_new_payload(payload);
+                                    let latency = start.elapsed();
+                                    self.metrics.engine.new_payload.update_response_metrics(
+                                        start,
+                                        &mut self
+                                            .metrics
+                                            .engine
+                                            .forkchoice_updated
+                                            .latest_finish_at,
+                                        &output,
+                                        gas_used,
+                                    );
+
+                                    (output, latency, durations)
+                                };
 
                                 let maybe_event =
                                     output.as_mut().ok().and_then(|out| out.event.take());
@@ -1785,7 +1793,7 @@ where
                                         BeaconOnNewPayloadError::Internal(Box::new(e))
                                     }))
                                 {
-                                    error!(target: "engine::tree", payload=?num_hash, elapsed=?start.elapsed(), "Failed to send event: {err:?}");
+                                    error!(target: "engine::tree", payload=?num_hash, elapsed=?latency, "Failed to send event: {err:?}");
                                     self.metrics
                                         .engine
                                         .failed_new_payload_response_deliveries
@@ -3479,6 +3487,25 @@ pub struct CacheWaitDurations {
     pub sparse_trie: Duration,
 }
 
+/// Keeps speculative cache work suspended while a payload is being processed.
+#[derive(Debug)]
+#[must_use = "dropping the guard resumes speculative cache work"]
+pub struct CacheWaitGuard {
+    durations: CacheWaitDurations,
+    _txpool: Option<TxPoolPrewarmPauseGuard>,
+}
+
+impl CacheWaitGuard {
+    const fn new(durations: CacheWaitDurations, txpool: Option<TxPoolPrewarmPauseGuard>) -> Self {
+        Self { durations, _txpool: txpool }
+    }
+
+    /// Returns the time spent waiting for each cache.
+    pub const fn durations(&self) -> CacheWaitDurations {
+        self.durations
+    }
+}
+
 /// Trait for types that can wait for caches to become available.
 ///
 /// This is used by `reth_newPayload` endpoint to ensure that payload processing
@@ -3486,9 +3513,6 @@ pub struct CacheWaitDurations {
 pub trait WaitForCaches {
     /// Waits for cache updates to complete.
     ///
-    /// Returns the time spent waiting for each cache separately.
-    fn wait_for_caches(&self) -> CacheWaitDurations;
-
-    /// Resumes cache work suspended by [`Self::wait_for_caches`].
-    fn resume_caches(&self) {}
+    /// Returns a guard that resumes suspended work when dropped.
+    fn wait_for_caches(&self) -> CacheWaitGuard;
 }
