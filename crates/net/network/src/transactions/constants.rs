@@ -1,12 +1,6 @@
 /* ==================== BROADCAST ==================== */
 
-/// Soft limit for the number of hashes in a
-/// [`NewPooledTransactionHashes`](reth_eth_wire::NewPooledTransactionHashes) broadcast message.
-///
-/// Spec'd at 4096 hashes.
-///
-/// <https://github.com/ethereum/devp2p/blob/master/caps/eth.md#newpooledtransactionhashes-0x08>
-pub const SOFT_LIMIT_COUNT_HASHES_IN_NEW_POOLED_TRANSACTIONS_BROADCAST_MESSAGE: usize = 4096;
+pub use reth_eth_wire_types::SOFT_LIMIT_COUNT_HASHES_IN_NEW_POOLED_TRANSACTIONS_BROADCAST_MESSAGE;
 
 /// Default soft limit for the byte size of a [`Transactions`](reth_eth_wire::Transactions)
 /// broadcast message.
@@ -53,6 +47,15 @@ pub mod tx_manager {
     ///
     /// Default is 100 KiB, i.e. 3 200 transaction hashes.
     pub const DEFAULT_MAX_COUNT_BAD_IMPORTS: u32 = 100 * 1024 / 32;
+
+    /// Default memory limit (in bytes) for the channel between
+    /// [`NetworkManager`](crate::NetworkManager) and
+    /// [`TransactionsManager`](crate::transactions::TransactionsManager).
+    ///
+    /// Caps the total in-flight bytes of `NetworkTransactionEvent`s buffered between the two
+    /// tasks. When the budget is exhausted, new events are dropped (see metric
+    /// `total_dropped_tx_events_at_full_capacity`).
+    pub const DEFAULT_TX_MANAGER_CHANNEL_MEMORY_LIMIT_BYTES: usize = 1024 * 1024 * 1024;
 }
 
 /// Constants used by [`TransactionFetcher`](super::TransactionFetcher).

@@ -6,8 +6,8 @@ use reth_errors::ProviderError;
 use reth_ethereum_primitives::EthPrimitives;
 use reth_primitives_traits::{FastInstant as Instant, NodePrimitives};
 use reth_provider::{
-    providers::ProviderNodeTypes, BlockExecutionWriter, BlockHashReader, ChainStateBlockWriter,
-    DBProvider, DatabaseProviderFactory, ProviderFactory, SaveBlocksMode,
+    providers::ProviderNodeTypes, BalProvider, BlockExecutionWriter, BlockHashReader,
+    ChainStateBlockWriter, DBProvider, DatabaseProviderFactory, ProviderFactory, SaveBlocksMode,
 };
 use reth_prune::{PrunerError, PrunerWithFactory};
 use reth_stages_api::{MetricEvent, MetricEventsSender};
@@ -21,7 +21,7 @@ use std::{
     time::Duration,
 };
 use thiserror::Error;
-use tracing::{debug, error, instrument};
+use tracing::{debug, error, instrument, warn};
 
 /// Unified result of any persistence operation.
 #[derive(Debug)]
@@ -113,6 +113,7 @@ where
                         let _ = self
                             .sync_metrics_tx
                             .send(MetricEvent::SyncHeight { height: block_number });
+                        self.maybe_run_pruner(block_number)?;
                     }
                 }
                 PersistenceAction::SaveFinalizedBlock(finalized_block) => {
@@ -178,22 +179,10 @@ where
             }
 
             provider_rw.commit()?;
+            let _ = self.provider.bal_store().flush().inspect_err(|err| {
+                warn!(target: "engine::persistence", last=?last_block, ?err, "Failed to flush BAL store");
+            });
             debug!(target: "engine::persistence", first=?first_block, last=?last_block, "Saved range of blocks");
-
-            // Run the pruner in a separate provider so it reads committed RocksDB state
-            // that includes the history entries written by save_blocks above.
-            //
-            // The pruner reads the indices from rocksdb, filters it, and writes to indices, so it
-            // must be able to read anything written by save_blocks.
-            if self.pruner.is_pruning_needed(last.number) {
-                debug!(target: "engine::persistence", block_num=?last.number, "Running pruner");
-                let prune_start = Instant::now();
-                let provider_rw = self.provider.database_provider_rw()?;
-                let _ = self.pruner.run_with_provider(&provider_rw, last.number)?;
-                provider_rw.commit()?;
-                debug!(target: "engine::persistence", tip=?last.number, "Finished pruning after saving blocks");
-                self.metrics.prune_before_duration_seconds.record(prune_start.elapsed());
-            }
         }
 
         let elapsed = start_time.elapsed();
@@ -201,6 +190,30 @@ where
         self.metrics.save_blocks_duration_seconds.record(elapsed);
 
         Ok(PersistenceResult { last_block, commit_duration: Some(elapsed) })
+    }
+
+    fn maybe_run_pruner(&mut self, block_number: u64) -> Result<(), PersistenceError> {
+        // The durable save is already committed at this point, so pruning can happen after we
+        // acknowledge the save without extending the synchronous persistence wait.
+        if self.pruner.is_pruning_needed(block_number) {
+            debug!(target: "engine::persistence", block_num=?block_number, "Running pruner");
+            let prune_start = Instant::now();
+            let provider_rw = self.provider.database_provider_rw()?;
+            let _ = self.pruner.run_with_provider(&provider_rw, block_number)?;
+            provider_rw.commit()?;
+            let pruned_bals = self
+                .provider
+                .bal_store()
+                .prune(block_number)
+                .inspect_err(|err| {
+                    warn!(target: "engine::persistence", tip=?block_number, ?err, "Failed to prune BAL store");
+                })
+                .unwrap_or_default();
+            debug!(target: "engine::persistence", tip=?block_number, pruned_bals, "Finished pruning after saving blocks");
+            self.metrics.prune_before_duration_seconds.record(prune_start.elapsed());
+        }
+
+        Ok(())
     }
 }
 
@@ -374,16 +387,19 @@ impl Drop for ServiceGuard {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy_primitives::{B256, U256};
+    use alloy_eips::NumHash;
+    use alloy_primitives::{BlockHash, BlockNumber, Bytes, B256, U256};
     use reth_chain_state::test_utils::TestBlockBuilder;
     use reth_exex_types::FinishedExExHeight;
     use reth_provider::{
         providers::{ProviderFactoryBuilder, ReadOnlyConfig},
         test_utils::{create_test_provider_factory, MockNodeTypes},
-        AccountReader, ChainSpecProvider, HeaderProvider, StorageSettingsCache,
-        TryIntoHistoricalStateProvider,
+        AccountReader, BalConfig, BalNotificationStream, BalStore, BalStoreHandle,
+        ChainSpecProvider, HeaderProvider, InMemoryBalStore, ProviderError, ProviderResult, RawBal,
+        StorageSettingsCache, TryIntoHistoricalStateProvider,
     };
     use reth_prune::Pruner;
+    use reth_prune_types::PruneMode;
     use tokio::sync::mpsc::unbounded_channel;
 
     fn default_persistence_handle() -> PersistenceHandle<EthPrimitives> {
@@ -397,6 +413,78 @@ mod tests {
 
         let (sync_metrics_tx, _sync_metrics_rx) = unbounded_channel();
         PersistenceHandle::<EthPrimitives>::spawn_service(provider, pruner, sync_metrics_tx)
+    }
+
+    #[test]
+    fn test_pruner_prunes_bal_store() {
+        reth_tracing::init_test_tracing();
+
+        let old_hash = B256::random();
+        let retained_hash = B256::random();
+        let old_bal = Bytes::from_static(b"old");
+        let retained_bal = Bytes::from_static(b"retained");
+        let bal_store = BalStoreHandle::new(InMemoryBalStore::new(
+            BalConfig::with_in_memory_retention(PruneMode::Before(2)),
+        ));
+
+        bal_store.insert(NumHash::new(1, old_hash), RawBal::new(old_bal)).unwrap();
+        bal_store
+            .insert(NumHash::new(2, retained_hash), RawBal::new(retained_bal.clone()))
+            .unwrap();
+
+        let provider = create_test_provider_factory().with_bal_store(bal_store.clone());
+        let (_finished_exex_height_tx, finished_exex_height_rx) =
+            tokio::sync::watch::channel(FinishedExExHeight::NoExExs);
+        let pruner =
+            Pruner::new_with_factory(provider.clone(), vec![], 0, 0, None, finished_exex_height_rx);
+        let (_db_service_tx, db_service_rx) = std::sync::mpsc::channel();
+        let (sync_metrics_tx, _sync_metrics_rx) = unbounded_channel();
+        let mut service = PersistenceService::new(provider, db_service_rx, pruner, sync_metrics_tx);
+
+        service.maybe_run_pruner(2).unwrap();
+
+        assert_eq!(
+            bal_store.get_by_hashes(&[old_hash, retained_hash]).unwrap(),
+            vec![None, Some(retained_bal)]
+        );
+    }
+
+    #[test]
+    fn test_pruner_ignores_bal_store_prune_error() {
+        reth_tracing::init_test_tracing();
+
+        let provider = create_test_provider_factory()
+            .with_bal_store(BalStoreHandle::new(FailingPruneBalStore));
+        let (_finished_exex_height_tx, finished_exex_height_rx) =
+            tokio::sync::watch::channel(FinishedExExHeight::NoExExs);
+        let pruner =
+            Pruner::new_with_factory(provider.clone(), vec![], 0, 0, None, finished_exex_height_rx);
+        let (_db_service_tx, db_service_rx) = std::sync::mpsc::channel();
+        let (sync_metrics_tx, _sync_metrics_rx) = unbounded_channel();
+        let mut service = PersistenceService::new(provider, db_service_rx, pruner, sync_metrics_tx);
+
+        service.maybe_run_pruner(2).unwrap();
+    }
+
+    #[derive(Debug)]
+    struct FailingPruneBalStore;
+
+    impl BalStore for FailingPruneBalStore {
+        fn insert(&self, _num_hash: NumHash, _bal: RawBal) -> ProviderResult<()> {
+            Ok(())
+        }
+
+        fn prune(&self, _tip: BlockNumber) -> ProviderResult<usize> {
+            Err(ProviderError::other(std::io::Error::other("BAL store prune failed")))
+        }
+
+        fn get_by_hashes(&self, block_hashes: &[BlockHash]) -> ProviderResult<Vec<Option<Bytes>>> {
+            Ok(vec![None; block_hashes.len()])
+        }
+
+        fn bal_stream(&self) -> BalNotificationStream {
+            BalStoreHandle::noop().bal_stream()
+        }
     }
 
     #[test]

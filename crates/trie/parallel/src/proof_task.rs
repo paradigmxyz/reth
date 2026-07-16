@@ -30,7 +30,7 @@
 //! ```
 
 use crate::{
-    root::ParallelStateRootError,
+    error::StateRootTaskError,
     value_encoder::{AsyncAccountValueEncoder, ValueEncoderStats},
 };
 use alloy_primitives::{
@@ -362,7 +362,7 @@ impl ProofWorkerHandle {
                     input.into_proof_result_sender();
 
                 let _ = result_tx.send(ProofResultMessage {
-                    result: Err(ParallelStateRootError::Provider(error.clone())),
+                    result: Err(StateRootTaskError::ProofDispatch(error.clone())),
                     elapsed: start.elapsed(),
                     state,
                 });
@@ -434,7 +434,7 @@ where
 
         let span = debug_span!(
             target: "trie::proof_task",
-            "V2 Storage proof calculation",
+            "Storage proof calculation",
             n = %targets.len(),
         );
         let _span_guard = span.enter();
@@ -478,7 +478,7 @@ pub type ProofResultSender = CrossbeamSender<ProofResultMessage>;
 #[derive(Debug)]
 pub struct ProofResultMessage {
     /// The proof calculation result
-    pub result: Result<DecodedMultiProofV2, ParallelStateRootError>,
+    pub result: Result<DecodedMultiProofV2, StateRootTaskError>,
     /// Time taken for the entire proof calculation (from dispatch to completion)
     pub elapsed: Duration,
     /// Original state update that triggered this proof
@@ -963,7 +963,7 @@ where
         v2_account_calculator: &mut V2AccountProofCalculator<'a, Provider>,
         v2_storage_calculator: Rc<RefCell<V2StorageProofCalculator<'a, Provider>>>,
         targets: MultiProofTargetsV2,
-    ) -> Result<(DecodedMultiProofV2, ValueEncoderStats), ParallelStateRootError>
+    ) -> Result<(DecodedMultiProofV2, ValueEncoderStats), StateRootTaskError>
     where
         Provider: TrieCursorFactory + HashedCursorFactory + 'a,
     {
@@ -971,7 +971,7 @@ where
 
         let span = debug_span!(
             target: "trie::proof_task",
-            "Account V2 multiproof calculation",
+            "Account multiproof calculation",
             account_targets = account_targets.len(),
             storage_targets = storage_targets.values().map(|t| t.len()).sum::<usize>(),
         );
@@ -1063,9 +1063,13 @@ fn dispatch_v2_storage_proofs(
     storage_work_tx: &CrossbeamSender<StorageWorkerJob>,
     account_targets: &[ProofV2Target],
     mut storage_targets: B256Map<Vec<ProofV2Target>>,
-) -> Result<B256Map<CrossbeamReceiver<StorageProofResultMessage>>, ParallelStateRootError> {
+) -> Result<B256Map<CrossbeamReceiver<StorageProofResultMessage>>, StateRootTaskError> {
+    if storage_targets.is_empty() {
+        return Ok(B256Map::default())
+    }
+
     let mut storage_proof_receivers =
-        B256Map::with_capacity_and_hasher(account_targets.len(), Default::default());
+        B256Map::with_capacity_and_hasher(storage_targets.len(), Default::default());
 
     // Collect hashed addresses from account targets that need their storage roots computed
     let account_target_addresses: B256Set = account_targets.iter().map(|t| t.key()).collect();
@@ -1095,7 +1099,7 @@ fn dispatch_v2_storage_proofs(
         storage_work_tx
             .send(StorageWorkerJob::StorageProof { input, proof_result_sender: result_tx })
             .map_err(|_| {
-                ParallelStateRootError::Other(format!(
+                StateRootTaskError::Other(format!(
                     "Failed to queue storage proof for {hashed_address:?}: storage worker pool unavailable",
                 ))
             })?;

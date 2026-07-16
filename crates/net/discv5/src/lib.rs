@@ -18,7 +18,6 @@ use std::{
 
 use ::enr::Enr;
 use alloy_primitives::bytes::Bytes;
-use discv5::ListenConfig;
 use enr::{discv4_id_to_discv5_id, EnrCombinedKeyWrapper};
 use futures::future::join_all;
 use itertools::Itertools;
@@ -247,7 +246,9 @@ impl Discv5 {
         match update {
             discv5::Event::SocketUpdated(_) | discv5::Event::TalkRequest(_) |
             // `Discovered` not unique discovered peers
-            discv5::Event::Discovered(_) => None,
+            discv5::Event::Discovered(_) |
+            // Unrecognized frames are handled separately by the discovery layer
+            discv5::Event::UnrecognizedFrame(_) => None,
             discv5::Event::NodeInserted { .. } => {
 
                 // node has been inserted into kbuckets
@@ -470,41 +471,49 @@ pub fn build_local_enr(
 ) -> (Enr<SecretKey>, NodeRecord, Option<&'static [u8]>, IpMode) {
     let mut builder = discv5::enr::Enr::builder();
 
-    let Config { discv5_config, fork, tcp_socket, other_enr_kv_pairs, .. } = config;
+    let Config {
+        discv5_config,
+        fork,
+        tcp_socket,
+        advertised_ipv4,
+        advertised_ipv6,
+        other_enr_kv_pairs,
+        ..
+    } = config;
 
-    let socket = match discv5_config.listen_config {
-        ListenConfig::Ipv4 { ip, port } => {
-            if ip != Ipv4Addr::UNSPECIFIED {
-                builder.ip4(ip);
+    let socket = {
+        let v4 = crate::config::ipv4(&discv5_config.listen_config);
+        let v6 = crate::config::ipv6(&discv5_config.listen_config);
+
+        // Prefer an explicit advertised IP for ENR IP fields. Listen sockets still supply UDP
+        // ports and determine which address-family fields are emitted.
+        if let Some(addr) = v4 {
+            if let Some(ip) = advertised_ipv4 {
+                builder.ip4(*ip);
+            } else if *addr.ip() != Ipv4Addr::UNSPECIFIED {
+                builder.ip4(*addr.ip());
             }
-            builder.udp4(port);
-            builder.tcp4(tcp_socket.port());
-
-            (ip, port).into()
+            builder.udp4(addr.port());
         }
-        ListenConfig::Ipv6 { ip, port } => {
-            if ip != Ipv6Addr::UNSPECIFIED {
-                builder.ip6(ip);
+        if let Some(addr) = v6 {
+            if let Some(ip) = advertised_ipv6 {
+                builder.ip6(*ip);
+            } else if *addr.ip() != Ipv6Addr::UNSPECIFIED {
+                builder.ip6(*addr.ip());
             }
-            builder.udp6(port);
+            builder.udp6(addr.port());
+        }
+        // Advertise tcp4 when v4 is configured, else tcp6.
+        if v4.is_some() {
+            builder.tcp4(tcp_socket.port());
+        } else if v6.is_some() {
             builder.tcp6(tcp_socket.port());
-
-            (ip, port).into()
         }
-        ListenConfig::DualStack { ipv4, ipv4_port, ipv6, ipv6_port } => {
-            if ipv4 != Ipv4Addr::UNSPECIFIED {
-                builder.ip4(ipv4);
-            }
-            builder.udp4(ipv4_port);
-            builder.tcp4(tcp_socket.port());
 
-            if ipv6 != Ipv6Addr::UNSPECIFIED {
-                builder.ip6(ipv6);
-            }
-            builder.udp6(ipv6_port);
-
-            (ipv6, ipv6_port).into()
-        }
+        // Prefer v6 when both are configured
+        v6.map(SocketAddr::V6)
+            .or_else(|| v4.map(SocketAddr::V4))
+            .unwrap_or_else(|| SocketAddr::from((Ipv4Addr::UNSPECIFIED, 0)))
     };
 
     let rlpx_ip_mode = if tcp_socket.is_ipv4() { IpMode::Ip4 } else { IpMode::Ip6 };
@@ -711,6 +720,7 @@ mod test {
     #![allow(deprecated)]
     use super::*;
     use ::enr::{CombinedKey, EnrKey};
+    use discv5::ListenConfig;
     use rand_08::thread_rng;
     use reth_chainspec::MAINNET;
     use std::{

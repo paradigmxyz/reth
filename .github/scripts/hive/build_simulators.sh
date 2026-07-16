@@ -5,12 +5,12 @@ fixture_variant="${1:-osaka}"
 
 case "${fixture_variant}" in
     amsterdam)
-        eels_fixtures="https://github.com/ethereum/execution-spec-tests/releases/download/bal@v6.0.0/fixtures_bal.tar.gz"
-        eels_branch="devnets/snøbal/4"
+        eels_fixtures="https://github.com/ethereum/execution-spec-tests/releases/download/bal@v7.1.1/fixtures_bal.tar.gz"
+        eels_branch="devnets/bal/7"
         ;;
     osaka)
         eels_fixtures="https://github.com/ethereum/execution-spec-tests/releases/download/v5.3.0/fixtures_develop.tar.gz"
-        eels_branch="forks/osaka"
+        eels_branch="mainnet"
         ;;
     *)
         echo "unknown hive fixture variant: ${fixture_variant}"

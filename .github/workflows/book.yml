@@ -10,19 +10,24 @@ on:
     types: [opened, reopened, synchronize, closed]
   merge_group:
 
-env:
-  RUSTC_WRAPPER: "sccache"
+permissions: {}
 
 jobs:
   build:
     runs-on: ${{ github.repository == 'paradigmxyz/reth' && 'depot-ubuntu-latest-8' || 'ubuntu-latest' }}
+    permissions:
+      contents: read
     timeout-minutes: 90
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+
+      - run: .github/scripts/install_llvm.sh ubuntu
 
       - name: Install bun
-        uses: oven-sh/setup-bun@v2
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
           bun-version: v1.2.23
 
@@ -36,23 +41,30 @@ jobs:
       - name: Install Rust nightly
         uses: dtolnay/rust-toolchain@nightly
 
-      - uses: mozilla-actions/sccache-action@v0.0.9
-
       - name: Build docs
         run: cd docs/vocs && bash scripts/build-cargo-docs.sh
 
       - name: Build Vocs
         run: |
           cd docs/vocs/ && bun run build
+          test -f docs/dist/public/index.html
+          test -f docs/dist/public/overview/index.html
+          test -f docs/dist/public/sdk/index.html
+          test -f docs/dist/public/logo.png
+          test -f docs/dist/public/reth-prod.png
+          test -f docs/dist/public/docs/index.html
+          test -f docs/dist/public/docs/reth/index.html
+          test -d docs/dist/public/docs/static.files
+          grep -q 'content="rustdoc"' docs/dist/public/docs/index.html
           echo "Vocs Build Complete"
 
       - name: Setup Pages
-        uses: actions/configure-pages@v6
+        uses: actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d # v6.0.0
 
       - name: Upload artifact
-        uses: actions/upload-pages-artifact@v5
+        uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
         with:
-          path: "./docs/vocs/docs/dist"
+          path: "./docs/vocs/docs/dist/public"
 
   deploy:
     # Only deploy if a push to main
@@ -74,4 +86,4 @@ jobs:
     steps:
       - name: Deploy to GitHub Pages
         id: deployment
-        uses: actions/deploy-pages@v5
+        uses: actions/deploy-pages@cd2ce8fcbc39b97be8ca5fce6e763baed58fa128 # v5.0.0

@@ -57,7 +57,6 @@ derive_more.workspace = true
 crossbeam-channel.workspace = true
 tokio = { workspace = true, features = ["sync"] }
 revm.workspace = true
-revm-primitives.workspace = true
 alloy-hardforks.workspace = true
 metrics.workspace = true
 
@@ -70,7 +69,24 @@ default = [
     "reth-cli-util/jemalloc",
     "asm-keccak",
     "keccak-cache-global",
-    "min-debug-logs",
+    "min-trace-logs",
+    "otlp",
+    "otlp-logs",
+    "reth-revm/portable",
+    "js-tracer",
+]
+
+otlp = [
+    "reth-ethereum-cli/otlp",
+    "reth-node-core/otlp",
+]
+otlp-logs = [
+    "reth-ethereum-cli/otlp-logs",
+    "reth-node-core/otlp-logs",
+]
+js-tracer = [
+    "reth-node-builder/js-tracer",
+    "reth-node-ethereum/js-tracer",
 ]
 
 jemalloc = [
@@ -87,7 +103,6 @@ asm-keccak = [
     "alloy-primitives/asm-keccak",
     "alloy-evm/asm-keccak",
     "revm/asm-keccak",
-    "revm-primitives/asm-keccak",
 ]
 
 keccak-cache-global = [
@@ -100,6 +115,11 @@ min-debug-logs = [
     "tracing/release_max_level_debug",
     "reth-ethereum-cli/min-debug-logs",
     "reth-node-core/min-debug-logs",
+]
+min-trace-logs = [
+    "tracing/release_max_level_trace",
+    "reth-ethereum-cli/min-trace-logs",
+    "reth-node-core/min-trace-logs",
 ]
 
 [[bin]]

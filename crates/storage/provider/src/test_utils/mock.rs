@@ -441,7 +441,7 @@ impl<T: NodePrimitives, ChainSpec: EthChainSpec + 'static> TransactionsProvider
     ) -> ProviderResult<Vec<Vec<Self::Transaction>>> {
         // init btreemap so we can return in order
         let mut map = BTreeMap::new();
-        for (_, block) in self.blocks.lock().iter() {
+        for block in self.blocks.lock().values() {
             if range.contains(&block.header().number()) {
                 map.insert(block.header().number(), block.body().clone_transactions());
             }
@@ -881,7 +881,7 @@ where
 impl<T: NodePrimitives, ChainSpec: EthChainSpec + 'static> HashedPostStateProvider
     for MockEthProvider<T, ChainSpec>
 {
-    fn hashed_post_state(&self, _state: &revm_database::BundleState) -> HashedPostState {
+    fn hashed_post_state(&self, _state: &revm::database::BundleState) -> HashedPostState {
         HashedPostState::default()
     }
 }

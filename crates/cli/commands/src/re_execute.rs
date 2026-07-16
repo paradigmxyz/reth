@@ -13,6 +13,7 @@ use reth_cli::chainspec::ChainSpecParser;
 use reth_cli_util::cancellation::CancellationToken;
 use reth_consensus::FullConsensus;
 use reth_evm::{execute::Executor, ConfigureEvm};
+use reth_node_core::args::JitArgs;
 use reth_primitives_traits::{format_gas_throughput, Account, BlockBody, GotExpected};
 use reth_provider::{
     BlockNumReader, BlockReader, ChainSpecProvider, DatabaseProviderFactory, ReceiptProvider,
@@ -20,7 +21,10 @@ use reth_provider::{
 };
 use reth_revm::{
     database::StateProviderDatabase,
-    db::{states::reverts::AccountInfoRevert, BundleState},
+    db::{
+        states::reverts::{AccountInfoRevert, RevertToSlot},
+        BundleState,
+    },
 };
 use reth_stages::stages::calculate_gas_used_from_headers;
 use reth_storage_api::{ChangeSetReader, DBProvider, StorageChangeSetReader};
@@ -62,6 +66,9 @@ pub struct Command<C: ChainSpecParser> {
     /// Continues with execution when an invalid block is encountered and collects these blocks.
     #[arg(long)]
     skip_invalid_blocks: bool,
+
+    #[command(flatten)]
+    pub jit: JitArgs,
 }
 
 impl<C: ChainSpecParser> Command<C> {
@@ -139,6 +146,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
             let cancellation = cancellation.clone();
             let next_block = Arc::clone(&next_block);
             tasks.spawn_blocking(move || {
+                let evm_config = evm_config.with_jit_support();
                 let executor_lifetime = Duration::from_secs(600);
                 let provider = provider_factory.database_provider_ro()?.disable_long_read_transaction_safety();
 
@@ -192,7 +200,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
                         };
 
                         if let Err(err) = consensus
-                            .validate_block_post_execution(&block, &result, None)
+                            .validate_block_post_execution(&block, &result, None,None)
                             .wrap_err_with(|| {
                                 format!(
                                     "Failed to validate block {} {}",
@@ -254,7 +262,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
 
                             return Err(err);
                         }
-                        let _ = stats_tx.send(block.gas_used());
+                        let _ = stats_tx.send((block.number(), block.gas_used()));
 
                         // Reset DB once in a while to avoid OOM or read tx timeouts
                         if executor.size_hint() > 5_000_000 ||
@@ -291,6 +299,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
         let instant = Instant::now();
         let mut total_executed_blocks = 0;
         let mut total_executed_gas = 0;
+        let mut latest_executed_block = None;
 
         let mut last_logged_gas = 0;
         let mut last_logged_blocks = 0;
@@ -301,9 +310,11 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
 
         loop {
             tokio::select! {
-                Some(gas_used) = stats_rx.recv() => {
+                Some((block_number, gas_used)) = stats_rx.recv() => {
                     total_executed_blocks += 1;
                     total_executed_gas += gas_used;
+                    latest_executed_block =
+                        Some(latest_executed_block.unwrap_or(block_number).max(block_number));
                 }
                 Some((block, err)) = info_rx.recv() => {
                     error!(?err, block=?block.num_hash(), "Invalid block");
@@ -328,6 +339,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
                         info!(
                             throughput=?format_gas_throughput(gas_executed, last_logged_time.elapsed()),
                             progress=format!("{progress:.2}%"),
+                            ?latest_executed_block,
                             "Executed {blocks_executed} blocks"
                         );
                     }
@@ -344,6 +356,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
                 start_block = min_block,
                 end_block = max_block,
                 %total_executed_blocks,
+                ?latest_executed_block,
                 throughput=?format_gas_throughput(total_executed_gas, instant.elapsed()),
                 "Re-executed successfully"
             );
@@ -352,6 +365,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
                 start_block = min_block,
                 end_block = max_block,
                 %total_executed_blocks,
+                ?latest_executed_block,
                 invalid_block_count = invalid_blocks.len(),
                 ?invalid_blocks,
                 throughput=?format_gas_throughput(total_executed_gas, instant.elapsed()),
@@ -425,14 +439,19 @@ where
             let mut cs_slots = cs_storage.get_mut(addr);
             for (slot_key, revert_slot) in &revert.storage {
                 let b256_key = B256::from(*slot_key);
-                match cs_slots.as_mut().and_then(|s| s.remove(&b256_key)) {
-                    Some(cs_value) => eyre::ensure!(
-                        revert_slot.to_previous_value() == cs_value,
+                let cs_value = cs_slots.as_mut().and_then(|s| s.remove(&b256_key));
+                match (revert_slot, cs_value) {
+                    // When a contract is selfdestructed and re-created at the same address
+                    // within the same block, revm marks slots touched by the new contract
+                    // as `Destroyed` and never reads the original DB value, so
+                    // `to_previous_value()` would resolve to zero, which might be wrong.
+                    (RevertToSlot::Destroyed, _) => {}
+                    (RevertToSlot::Some(prev), Some(cs_value)) => eyre::ensure!(
+                        *prev == cs_value,
                         "Block {block_number}: {addr} slot {b256_key} mismatch: \
-                         revert={} cs={cs_value}",
-                        revert_slot.to_previous_value(),
+                         revert={prev} cs={cs_value}",
                     ),
-                    None => eyre::ensure!(
+                    (RevertToSlot::Some(_), None) => eyre::ensure!(
                         revert.wipe_storage,
                         "Block {block_number}: {addr} slot {b256_key} in reverts but not in changeset",
                     ),

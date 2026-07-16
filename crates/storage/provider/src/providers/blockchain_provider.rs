@@ -6,8 +6,8 @@ use crate::{
     AccountReader, BalProvider, BalStoreHandle, BlockHashReader, BlockIdReader, BlockNumReader,
     BlockReader, BlockReaderIdExt, BlockSource, CanonChainTracker, CanonStateNotifications,
     CanonStateSubscriptions, ChainSpecProvider, ChainStateBlockReader, ChangeSetReader,
-    DatabaseProviderFactory, HashedPostStateProvider, HeaderProvider, InMemoryBalStore,
-    ProviderError, ProviderFactory, PruneCheckpointReader, ReceiptProvider, ReceiptProviderIdExt,
+    DatabaseProviderFactory, HashedPostStateProvider, HeaderProvider, ProviderError,
+    ProviderFactory, PruneCheckpointReader, ReceiptProvider, ReceiptProviderIdExt,
     RocksDBProviderFactory, StageCheckpointReader, StateProviderBox, StateProviderFactory,
     StateReader, StaticFileProviderFactory, TransactionVariant, TransactionsProvider,
 };
@@ -23,14 +23,16 @@ use reth_chainspec::ChainInfo;
 use reth_db_api::models::{AccountBeforeTx, BlockNumberAddress, StoredBlockBodyIndices};
 use reth_execution_types::ExecutionOutcome;
 use reth_node_types::{BlockTy, HeaderTy, NodeTypesWithDB, ReceiptTy, TxTy};
-use reth_primitives_traits::{Account, RecoveredBlock, SealedHeader, StorageEntry};
+use reth_primitives_traits::{
+    Account, RecoveredBlock, SealedHeader, SealedOrRecoveredBlock, StorageEntry,
+};
 use reth_prune_types::{PruneCheckpoint, PruneSegment};
 use reth_stages_types::{StageCheckpoint, StageId};
 use reth_static_file_types::StaticFileSegment;
 use reth_storage_api::{BlockBodyIndicesProvider, NodePrimitivesProvider, StorageChangeSetReader};
 use reth_storage_errors::provider::ProviderResult;
 use reth_trie::{HashedPostState, KeccakKeyHasher};
-use revm_database::BundleState;
+use revm::database::BundleState;
 use std::{
     ops::{RangeBounds, RangeInclusive},
     sync::Arc,
@@ -104,6 +106,8 @@ impl<N: ProviderNodeTypes> BlockchainProvider<N> {
             .map(|num| provider.sealed_header(num))
             .transpose()?
             .flatten();
+        let bal_store = storage.bal_store().clone();
+
         Ok(Self {
             database: storage,
             canonical_in_memory_state: CanonicalInMemoryState::with_head(
@@ -111,7 +115,7 @@ impl<N: ProviderNodeTypes> BlockchainProvider<N> {
                 finalized_header,
                 safe_header,
             ),
-            bal_store: BalStoreHandle::new(InMemoryBalStore::default()),
+            bal_store,
         })
     }
 
@@ -291,6 +295,14 @@ impl<N: ProviderNodeTypes> BlockReader for BlockchainProvider<N> {
         source: BlockSource,
     ) -> ProviderResult<Option<Self::Block>> {
         self.consistent_provider()?.find_block_by_hash(hash, source)
+    }
+
+    fn find_sealed_or_recovered_block(
+        &self,
+        hash: B256,
+        source: BlockSource,
+    ) -> ProviderResult<Option<SealedOrRecoveredBlock<Self::Block>>> {
+        self.consistent_provider()?.find_sealed_or_recovered_block(hash, source)
     }
 
     fn block(&self, id: BlockHashOrNumber) -> ProviderResult<Option<Self::Block>> {
@@ -818,7 +830,7 @@ mod tests {
         self, random_block, random_block_range, random_changeset_range, random_eoa_accounts,
         random_receipt, BlockParams, BlockRangeParams,
     };
-    use revm_database::{BundleState, OriginalValuesKnown};
+    use revm::database::{BundleState, OriginalValuesKnown};
     use std::{
         collections::BTreeMap,
         ops::{Bound, Range, RangeBounds},

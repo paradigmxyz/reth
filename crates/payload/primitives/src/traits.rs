@@ -3,18 +3,14 @@
 use crate::PayloadBuilderError;
 use alloc::{boxed::Box, sync::Arc, vec::Vec};
 use alloy_eips::{eip4895::Withdrawal, eip7685::Requests};
-use alloy_primitives::{B256, U256};
+use alloy_primitives::{Bytes, B256, U256};
 use alloy_rlp::Encodable;
 use alloy_rpc_types_engine::{PayloadAttributes as EthPayloadAttributes, PayloadId};
 use core::fmt;
 use either::Either;
-use reth_chain_state::ComputedTrieData;
 use reth_execution_types::BlockExecutionOutput;
 use reth_primitives_traits::{NodePrimitives, RecoveredBlock, SealedBlock, SealedHeader};
-use reth_trie_common::{
-    updates::{TrieUpdates, TrieUpdatesSorted},
-    HashedPostState, HashedPostStateSorted,
-};
+use reth_trie_common::{updates::TrieUpdates, HashedPostState};
 
 /// Represents an executed block for payload building purposes.
 ///
@@ -26,44 +22,10 @@ pub struct BuiltPayloadExecutedBlock<N: NodePrimitives> {
     pub recovered_block: Arc<RecoveredBlock<N::Block>>,
     /// Block's execution outcome.
     pub execution_output: Arc<BlockExecutionOutput<N::Receipt>>,
-    /// Block's hashed state.
-    ///
-    /// Supports both unsorted and sorted variants so payload builders can avoid cloning in order
-    /// to convert from one to the other when it's not necessary.
-    pub hashed_state: Either<Arc<HashedPostState>, Arc<HashedPostStateSorted>>,
-    /// Trie updates that result from calculating the state root for the block.
-    ///
-    /// Supports both unsorted and sorted variants so payload builders can avoid cloning in order
-    /// to convert from one to the other when it's not necessary.
-    pub trie_updates: Either<Arc<TrieUpdates>, Arc<TrieUpdatesSorted>>,
-}
-
-impl<N: NodePrimitives> BuiltPayloadExecutedBlock<N> {
-    /// Converts this into an [`reth_chain_state::ExecutedBlock`].
-    ///
-    /// Ensures hashed state and trie updates are in their sorted representations
-    /// as required by `reth_chain_state::ExecutedBlock`.
-    pub fn into_executed_payload(self) -> reth_chain_state::ExecutedBlock<N> {
-        let hashed_state = match self.hashed_state {
-            // Convert unsorted to sorted
-            Either::Left(unsorted) => Arc::new(Arc::unwrap_or_clone(unsorted).into_sorted()),
-            // Already sorted
-            Either::Right(sorted) => sorted,
-        };
-
-        let trie_updates = match self.trie_updates {
-            // Convert unsorted to sorted
-            Either::Left(unsorted) => Arc::new(Arc::unwrap_or_clone(unsorted).into_sorted()),
-            // Already sorted
-            Either::Right(sorted) => sorted,
-        };
-
-        reth_chain_state::ExecutedBlock::new(
-            self.recovered_block,
-            self.execution_output,
-            ComputedTrieData::without_trie_input(hashed_state, trie_updates),
-        )
-    }
+    /// Block's hashed state (unsorted).
+    pub hashed_state: Arc<HashedPostState>,
+    /// Trie updates that result from calculating the state root for the block (unsorted).
+    pub trie_updates: Arc<TrieUpdates>,
 }
 
 /// Represents a successfully built execution payload (block).
@@ -80,6 +42,13 @@ pub trait BuiltPayload: Send + Sync + fmt::Debug {
 
     /// Returns the total fees collected from all transactions in this block.
     fn fees(&self) -> U256;
+
+    /// Returns the EIP-7928 block access list included in this payload.
+    ///
+    /// Returns `None` for payloads that do not carry a block access list.
+    fn block_access_list(&self) -> Option<&Bytes> {
+        None
+    }
 
     /// Returns the complete execution result including state updates.
     ///
@@ -122,6 +91,14 @@ pub trait PayloadAttributes:
     ///
     /// `Some` for post-Amsterdam blocks, `None` for earlier blocks.
     fn slot_number(&self) -> Option<u64>;
+
+    /// Returns the target gas limit for the new payload.
+    ///
+    /// `Some` for payload attributes that specify the desired gas limit, `None` if the builder
+    /// should use its configured target.
+    fn target_gas_limit(&self) -> Option<u64> {
+        None
+    }
 }
 
 impl PayloadAttributes for EthPayloadAttributes {
@@ -143,6 +120,10 @@ impl PayloadAttributes for EthPayloadAttributes {
 
     fn slot_number(&self) -> Option<u64> {
         self.slot_number
+    }
+
+    fn target_gas_limit(&self) -> Option<u64> {
+        self.target_gas_limit
     }
 }
 
@@ -226,6 +207,14 @@ pub fn payload_id(
         hasher.update(parent_beacon_block);
     }
 
+    if let Some(slot_number) = attributes.slot_number {
+        hasher.update(slot_number.to_be_bytes());
+    }
+
+    if let Some(target_gas_limit) = attributes.target_gas_limit {
+        hasher.update(target_gas_limit.to_be_bytes());
+    }
+
     let out = hasher.finalize();
 
     #[allow(deprecated)] // generic-array 0.14 deprecated
@@ -264,6 +253,7 @@ mod tests {
             withdrawals: None,
             parent_beacon_block_root: None,
             slot_number: None,
+            target_gas_limit: None,
         };
 
         // Verify that the generated payload ID matches the expected value
@@ -302,6 +292,7 @@ mod tests {
             ]),
             parent_beacon_block_root: None,
             slot_number: None,
+            target_gas_limit: None,
         };
 
         // Verify that the generated payload ID matches the expected value
@@ -335,6 +326,7 @@ mod tests {
                 .unwrap(),
             ),
             slot_number: None,
+            target_gas_limit: None,
         };
 
         // Verify that the generated payload ID matches the expected value
@@ -342,5 +334,53 @@ mod tests {
             payload_id(&parent, &attributes),
             PayloadId(B64::from_str("0x0fc49cd532094cce").unwrap())
         );
+    }
+
+    #[test]
+    fn test_payload_id_with_slot_number() {
+        let parent =
+            B256::from_str("0x9876543210abcdef9876543210abcdef9876543210abcdef9876543210abcdef")
+                .unwrap();
+        let mut attributes = EthPayloadAttributes {
+            timestamp: 1622553200,
+            prev_randao: B256::from_slice(&[1; 32]),
+            suggested_fee_recipient: Address::from_str(
+                "0xb94f5374fce5edbc8e2a8697c15331677e6ebf0b",
+            )
+            .unwrap(),
+            withdrawals: Some(vec![]),
+            parent_beacon_block_root: Some(B256::from_slice(&[2; 32])),
+            slot_number: Some(1),
+            target_gas_limit: None,
+        };
+
+        let first = payload_id(&parent, &attributes);
+        attributes.slot_number = Some(2);
+
+        assert_ne!(first, payload_id(&parent, &attributes));
+    }
+
+    #[test]
+    fn test_payload_id_with_target_gas_limit() {
+        let parent =
+            B256::from_str("0x9876543210abcdef9876543210abcdef9876543210abcdef9876543210abcdef")
+                .unwrap();
+        let mut attributes = EthPayloadAttributes {
+            timestamp: 1622553200,
+            prev_randao: B256::from_slice(&[1; 32]),
+            suggested_fee_recipient: Address::from_str(
+                "0xb94f5374fce5edbc8e2a8697c15331677e6ebf0b",
+            )
+            .unwrap(),
+            withdrawals: Some(vec![]),
+            parent_beacon_block_root: Some(B256::from_slice(&[2; 32])),
+            slot_number: Some(1),
+            target_gas_limit: Some(30_000_000),
+        };
+
+        let first = payload_id(&parent, &attributes);
+        attributes.target_gas_limit = Some(60_000_000);
+
+        assert_ne!(first, payload_id(&parent, &attributes));
     }
 }

@@ -1,4 +1,4 @@
-// Shared utilities for reth-bench result rendering.
+// Shared utilities for benchmark result rendering.
 //
 // Used by bench-job-summary.js and bench-slack-notify.js.
 
@@ -14,12 +14,20 @@ function fmtS(v) { return v.toFixed(2) + 's'; }
 function fmtChange(ch) {
   if (!ch || (!ch.pct && !ch.ci_pct)) return '';
   const pctStr = `${ch.pct >= 0 ? '+' : ''}${ch.pct.toFixed(2)}%`;
-  const ciStr = ch.ci_pct ? ` (±${ch.ci_pct.toFixed(2)}%)` : '';
-  return `${pctStr}${ciStr} ${SIG_EMOJI[ch.sig]}`;
+  const details = [];
+  if (ch.ci_pct) details.push(`±${ch.ci_pct.toFixed(2)}%`);
+  if (ch.floor_pct) details.push(`floor ${ch.floor_pct.toFixed(2)}%`);
+  if (ch.materiality?.threshold_ms) {
+    details.push(`materiality ${ch.materiality.threshold_ms.toFixed(2)}ms`);
+  }
+  if (ch.informational) details.push('informational');
+  const detailStr = details.length ? ` (${details.join(', ')})` : '';
+  const sig = ch.informational ? 'neutral' : ch.sig;
+  return `${pctStr}${detailStr} ${SIG_EMOJI[sig]}`;
 }
 
 function verdict(changes) {
-  const vals = Object.values(changes);
+  const vals = Object.values(changes).filter(v => !v.informational);
   const hasBad = vals.some(v => v.sig === 'bad');
   const hasGood = vals.some(v => v.sig === 'good');
   if (hasBad && hasGood) return { emoji: '⚠️', label: 'Mixed Results' };
@@ -28,11 +36,32 @@ function verdict(changes) {
   return { emoji: '⚪', label: 'No Difference' };
 }
 
+function isWin(changes) {
+  const vals = Object.values(changes || {}).filter(v => !v.informational);
+  return vals.some(v => v.sig === 'good') && !vals.some(v => v.sig === 'bad');
+}
+
 function loadSamplyUrls(workDir) {
+  return loadProfileUrls(workDir, 'samply-profile-url.txt');
+}
+
+function loadTracingChromeUrls(workDir) {
+  return loadProfileUrls(workDir, 'tracing-chrome-profile-url.txt');
+}
+
+function loadProfileUrls(workDir, fileName) {
   const urls = {};
-  for (const run of ['baseline-1', 'baseline-2', 'feature-1', 'feature-2']) {
+  let runs = [];
+  try {
+    runs = fs.readdirSync(workDir)
+      .filter(run => /^(baseline|feature)-\d+$/.test(run))
+      .sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+  } catch {
+    return urls;
+  }
+  for (const run of runs) {
     try {
-      const url = fs.readFileSync(path.join(workDir, run, 'samply-profile-url.txt'), 'utf8').trim();
+      const url = fs.readFileSync(path.join(workDir, run, fileName), 'utf8').trim();
       if (url) urls[run] = url;
     } catch {}
   }
@@ -66,10 +95,14 @@ function blocksLabel(summary) {
   const cores = process.env.BENCH_CORES || '0';
   if (cores !== '0') parts.push({ key: 'Cores', value: cores });
   if (summary.wait_time) parts.push({ key: 'Wait time', value: summary.wait_time });
+  const runPairs = summary.run_pairs || process.env.BENCH_RUN_PAIRS || '';
+  if (runPairs) {
+    parts.push({ key: 'Run pairs', value: runPairs });
+  }
   return parts;
 }
 
-// The 7 metric rows shared by all renderers.
+// The metric rows shared by all renderers.
 // Returns an array of { label, baseline, feature, change } objects.
 function metricRows(summary) {
   const b = summary.baseline.stats;
@@ -105,7 +138,9 @@ module.exports = {
   fmtS,
   fmtChange,
   verdict,
+  isWin,
   loadSamplyUrls,
+  loadTracingChromeUrls,
   blocksLabel,
   metricRows,
   waitTimeRows,

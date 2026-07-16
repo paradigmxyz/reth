@@ -1,10 +1,10 @@
 //! Storage for blob data of EIP4844 transactions.
 
 use alloy_eips::{
-    eip4844::{BlobAndProofV1, BlobAndProofV2},
-    eip7594::BlobTransactionSidecarVariant,
+    eip4844::{BlobAndProofV1, BlobAndProofV2, BlobCellsAndProofsV1},
+    eip7594::{BlobTransactionSidecarVariant, Cell},
 };
-use alloy_primitives::B256;
+use alloy_primitives::{TxHash, B128, B256};
 pub use converter::BlobSidecarConverter;
 pub use disk::{DiskFileBlobStore, DiskFileBlobStoreConfig, OpenDiskFileBlobStore};
 pub use mem::InMemoryBlobStore;
@@ -109,6 +109,48 @@ pub trait BlobStore: fmt::Debug + Send + Sync + 'static {
         versioned_hashes: &[B256],
     ) -> Result<Vec<Option<BlobAndProofV2>>, BlobStoreError>;
 
+    /// Return the [`BlobCellsAndProofsV1`]s for a list of blob versioned hashes and requested cell
+    /// indices.
+    ///
+    /// The response is always the same length as the request. Missing or older-version blobs are
+    /// returned as `None` elements.
+    fn get_by_versioned_hashes_v4(
+        &self,
+        versioned_hashes: &[B256],
+        indices_bitarray: B128,
+    ) -> Result<Vec<Option<BlobCellsAndProofsV1>>, BlobStoreError>;
+
+    /// Return whether each requested blob versioned hash is available.
+    ///
+    /// The response is always the same length and order as the request.
+    fn has_versioned_hashes(&self, versioned_hashes: &[B256]) -> Result<Vec<bool>, BlobStoreError>;
+
+    /// Returns all requested cells for all blobs belonging to the transaction.
+    ///
+    /// The `indices_bitarray` is applied independently to every blob in the tx.
+    ///
+    /// Returned cells are flattened in blob order, then cell-index order.
+    ///
+    /// Example:
+    /// If the tx contains blobs `[blob0, blob1]` and the requested indices are
+    /// `[2, 5, 9]`, the returned vector is:
+    ///
+    /// ```text
+    /// [
+    ///   blob0_cell2,
+    ///   blob0_cell5,
+    ///   blob0_cell9,
+    ///   blob1_cell2,
+    ///   blob1_cell5,
+    ///   blob1_cell9,
+    /// ]
+    /// ```
+    fn get_cells(
+        &self,
+        tx_hash: TxHash,
+        indices_bitarray: B128,
+    ) -> Result<Option<Vec<Cell>>, BlobStoreError>;
+
     /// Data size of all transactions in the blob store.
     fn data_size_hint(&self) -> Option<usize>;
 
@@ -145,7 +187,7 @@ impl BlobStoreSize {
 
     #[inline]
     pub(crate) fn sub_size(&self, sub: usize) {
-        let _ = self.data_size.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |current| {
+        let _ = self.data_size.try_update(Ordering::Relaxed, Ordering::Relaxed, |current| {
             Some(current.saturating_sub(sub))
         });
     }
@@ -162,7 +204,7 @@ impl BlobStoreSize {
 
     #[inline]
     pub(crate) fn sub_len(&self, sub: usize) {
-        let _ = self.num_blobs.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |current| {
+        let _ = self.num_blobs.try_update(Ordering::Relaxed, Ordering::Relaxed, |current| {
             Some(current.saturating_sub(sub))
         });
     }

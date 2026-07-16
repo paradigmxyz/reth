@@ -111,10 +111,9 @@ impl<T: Decodable2718, TxReq: SignableTxRequest<T>> EthSigner<T, TxReq> for DevS
 mod tests {
     use super::*;
     use alloy_consensus::Transaction;
-    use alloy_primitives::{Bytes, U256};
+    use alloy_primitives::{Bytes, TxKind, U256};
     use alloy_rpc_types_eth::{TransactionInput, TransactionRequest};
     use reth_ethereum_primitives::TransactionSigned;
-    use revm_primitives::TxKind;
 
     fn build_signer() -> DevSigner {
         let signer: PrivateKeySigner =

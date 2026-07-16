@@ -10,6 +10,10 @@ use tracing::warn;
 const CRITICAL_METHOD_PREFIXES: &[&str] =
     &["engine_forkchoiceUpdated", "engine_getPayload", "engine_newPayload"];
 
+/// Engine API methods for upcoming hardforks that should not warn while they are still unstable.
+const UNSTABLE_METHODS: &[&str] =
+    &["engine_forkchoiceUpdatedV4", "engine_getPayloadV6", "engine_newPayloadV5"];
+
 /// All Engine API capabilities supported by Reth (Ethereum mainnet).
 ///
 /// See <https://github.com/ethereum/execution-apis/tree/main/src/engine> for updates.
@@ -37,6 +41,8 @@ pub const CAPABILITIES: &[&str] = &[
     "engine_getBlobsV1",
     "engine_getBlobsV2",
     "engine_getBlobsV3",
+    "engine_getBlobsV4",
+    "engine_hasBlobs",
 ];
 
 /// Engine API capabilities set.
@@ -96,11 +102,19 @@ impl EngineCapabilities {
     pub fn log_capability_mismatches(&self, cl_capabilities: &[String]) {
         let mismatches = self.get_capability_mismatches(cl_capabilities);
 
-        let critical_missing_in_el: Vec<_> =
-            mismatches.missing_in_el.iter().filter(|m| is_critical_method(m)).cloned().collect();
+        let critical_missing_in_el: Vec<_> = mismatches
+            .missing_in_el
+            .iter()
+            .filter(|m| should_warn_for_method(m))
+            .cloned()
+            .collect();
 
-        let critical_missing_in_cl: Vec<_> =
-            mismatches.missing_in_cl.iter().filter(|m| is_critical_method(m)).cloned().collect();
+        let critical_missing_in_cl: Vec<_> = mismatches
+            .missing_in_cl
+            .iter()
+            .filter(|m| should_warn_for_method(m))
+            .cloned()
+            .collect();
 
         if !critical_missing_in_el.is_empty() {
             warn!(
@@ -128,6 +142,16 @@ fn is_critical_method(method: &str) -> bool {
                 .strip_prefix('V')
                 .is_some_and(|s| s.chars().next().is_some_and(|c| c.is_ascii_digit()))
     })
+}
+
+/// Returns `true` if the method should warn on a capability mismatch.
+fn should_warn_for_method(method: &str) -> bool {
+    is_critical_method(method) && !is_unstable_method(method)
+}
+
+/// Returns `true` if the method belongs to an upcoming, unstable Engine API fork.
+fn is_unstable_method(method: &str) -> bool {
+    UNSTABLE_METHODS.contains(&method)
 }
 
 impl Default for EngineCapabilities {
@@ -211,15 +235,34 @@ mod tests {
     fn test_is_critical_method() {
         assert!(is_critical_method("engine_forkchoiceUpdatedV1"));
         assert!(is_critical_method("engine_forkchoiceUpdatedV3"));
+        assert!(is_critical_method("engine_forkchoiceUpdatedV4"));
         assert!(is_critical_method("engine_getPayloadV1"));
         assert!(is_critical_method("engine_getPayloadV4"));
+        assert!(is_critical_method("engine_getPayloadV6"));
         assert!(is_critical_method("engine_newPayloadV1"));
         assert!(is_critical_method("engine_newPayloadV4"));
+        assert!(is_critical_method("engine_newPayloadV5"));
 
         assert!(!is_critical_method("engine_getBlobsV1"));
         assert!(!is_critical_method("engine_getBlobsV3"));
+        assert!(!is_critical_method("engine_getBlobsV4"));
+        assert!(!is_critical_method("engine_hasBlobs"));
         assert!(!is_critical_method("engine_getPayloadBodiesByHashV1"));
         assert!(!is_critical_method("engine_getPayloadBodiesByRangeV1"));
         assert!(!is_critical_method("engine_getClientVersionV1"));
+    }
+
+    #[test]
+    fn test_unstable_methods_do_not_warn() {
+        assert!(!should_warn_for_method("engine_forkchoiceUpdatedV4"));
+        assert!(!should_warn_for_method("engine_getPayloadV6"));
+        assert!(!should_warn_for_method("engine_newPayloadV5"));
+
+        assert!(should_warn_for_method("engine_forkchoiceUpdatedV3"));
+        assert!(should_warn_for_method("engine_getPayloadV5"));
+        assert!(should_warn_for_method("engine_newPayloadV4"));
+
+        assert!(!should_warn_for_method("engine_getBlobsV4"));
+        assert!(!should_warn_for_method("engine_hasBlobs"));
     }
 }

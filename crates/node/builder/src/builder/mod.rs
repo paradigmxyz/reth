@@ -719,7 +719,7 @@ where
     {
         let Self { builder, task_executor } = self;
 
-        let engine_tree_config = builder.config.engine.tree_config();
+        let engine_tree_config = builder.config.tree_config();
 
         let launcher = DebugNodeLauncher::new(EngineNodeLauncher::new(
             task_executor,
@@ -732,7 +732,7 @@ where
     /// Returns an [`EngineNodeLauncher`] that can be used to launch the node with engine API
     /// support.
     pub fn engine_api_launcher(&self) -> EngineNodeLauncher {
-        let engine_tree_config = self.builder.config.engine.tree_config();
+        let engine_tree_config = self.builder.config.tree_config();
         EngineNodeLauncher::new(
             self.task_executor.clone(),
             self.builder.config.datadir(),
@@ -914,8 +914,13 @@ impl<Node: FullNodeTypes> BuilderContext<Node> {
         AnnPolicy: AnnouncementFilteringPolicy<N>,
     {
         let (handle, network, txpool, eth) = builder
-            .transactions_with_policies(pool, tx_config, propagation_policy, announcement_policy)
-            .request_handler(self.provider().clone())
+            .transactions_with_policies(
+                pool.clone(),
+                tx_config,
+                propagation_policy,
+                announcement_policy,
+            )
+            .request_handler_with_blob_store(self.provider().clone(), pool.blob_store())
             .split_with_handle();
 
         self.executor.spawn_critical_blocking_task("p2p txpool", txpool);

@@ -11,7 +11,10 @@ use std::{
 };
 
 use crate::version::version_metadata;
-use clap::Args;
+use clap::{
+    builder::{OsStr, Resettable},
+    Args,
+};
 use reth_chainspec::EthChainSpec;
 use reth_cli_util::{get_secret_key, load_secret_key::SecretKeyError};
 use reth_config::Config;
@@ -31,7 +34,9 @@ use reth_network::{
                 DEFAULT_MAX_COUNT_CONCURRENT_REQUESTS_PER_PEER,
             },
             tx_manager::{
-                DEFAULT_MAX_COUNT_PENDING_POOL_IMPORTS, DEFAULT_MAX_COUNT_TRANSACTIONS_SEEN_BY_PEER,
+                DEFAULT_MAX_COUNT_PENDING_POOL_IMPORTS,
+                DEFAULT_MAX_COUNT_TRANSACTIONS_SEEN_BY_PEER,
+                DEFAULT_TX_MANAGER_CHANNEL_MEMORY_LIMIT_BYTES,
             },
         },
         TransactionFetcherConfig, TransactionPropagationMode, TransactionsManagerConfig,
@@ -76,6 +81,8 @@ pub struct DefaultNetworkArgs {
     pub soft_limit_byte_size_pooled_transactions_response_on_pack_request: usize,
     /// Default max capacity of cache of hashes for transactions pending fetch.
     pub max_capacity_cache_txns_pending_fetch: u32,
+    /// Default memory limit (in bytes) for the network manager → transactions manager channel.
+    pub tx_channel_memory_limit_bytes: usize,
     /// Default transaction propagation policy.
     pub tx_propagation_policy: TransactionPropagationKind,
     /// Default transaction ingress policy.
@@ -169,6 +176,13 @@ impl DefaultNetworkArgs {
         self
     }
 
+    /// Set the default memory limit (in bytes) for the network manager → transactions
+    /// manager channel.
+    pub const fn with_tx_channel_memory_limit_bytes(mut self, v: usize) -> Self {
+        self.tx_channel_memory_limit_bytes = v;
+        self
+    }
+
     /// Set the default transaction propagation policy.
     pub const fn with_tx_propagation_policy(mut self, v: TransactionPropagationKind) -> Self {
         self.tx_propagation_policy = v;
@@ -210,6 +224,7 @@ impl Default for DefaultNetworkArgs {
             soft_limit_byte_size_pooled_transactions_response_on_pack_request:
                 DEFAULT_SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESP_ON_PACK_GET_POOLED_TRANSACTIONS_REQ,
             max_capacity_cache_txns_pending_fetch: DEFAULT_MAX_CAPACITY_CACHE_PENDING_FETCH,
+            tx_channel_memory_limit_bytes: DEFAULT_TX_MANAGER_CHANNEL_MEMORY_LIMIT_BYTES,
             tx_propagation_policy: TransactionPropagationKind::default(),
             tx_ingress_policy: TransactionIngressPolicy::default(),
             propagation_mode: TransactionPropagationMode::Sqrt,
@@ -348,9 +363,20 @@ pub struct NetworkArgs {
     #[arg(long = "max-tx-pending-fetch", value_name = "COUNT", default_value_t = DefaultNetworkArgs::get_global().max_capacity_cache_txns_pending_fetch, verbatim_doc_comment)]
     pub max_capacity_cache_txns_pending_fetch: u32,
 
+    /// Memory limit (in bytes) for the channel that buffers transaction events flowing
+    /// from the network manager to the transactions manager.
+    ///
+    /// When the budget is exhausted, new events are dropped (see metric
+    /// `total_dropped_tx_events_at_full_capacity`). Acts as a backstop against unbounded
+    /// memory growth under sustained P2P transaction flooding.
+    #[arg(long = "tx-channel-memory-limit", value_name = "BYTES", default_value_t = DefaultNetworkArgs::get_global().tx_channel_memory_limit_bytes, verbatim_doc_comment)]
+    pub tx_channel_memory_limit_bytes: usize,
+
     /// Name of network interface used to communicate with peers.
     ///
     /// If flag is set, but no value is passed, the default interface for docker `eth0` is tried.
+    /// If `--discovery.addr` is left at its default, discv4 will also bind to the resolved
+    /// interface address.
     #[arg(long = "net-if.experimental", conflicts_with = "addr", value_name = "IF_NAME")]
     pub net_if: Option<String>,
 
@@ -417,7 +443,13 @@ pub struct NetworkArgs {
 }
 
 impl NetworkArgs {
-    /// Returns the resolved IP address.
+    /// Returns the IP address used for the `RLPx` TCP listener.
+    ///
+    /// If `--net-if.experimental` is set, this resolves the interface name to a concrete local IP
+    /// address. That concrete address is also passed to discv5 as the default address to advertise
+    /// in the local ENR.
+    ///
+    /// If no interface is configured, this returns the configured `--addr` value.
     pub fn resolved_addr(&self) -> IpAddr {
         if let Some(ref if_name) = self.net_if {
             let if_name = if if_name.is_empty() { DEFAULT_NET_IF_NAME } else { if_name };
@@ -436,6 +468,21 @@ impl NetworkArgs {
         }
 
         self.addr
+    }
+
+    /// Returns the IP address used for the discovery v4 UDP bind socket.
+    ///
+    /// By default this is `--discovery.addr`. When `--net-if.experimental` is set and
+    /// `--discovery.addr` is still the wildcard default, discovery v4 follows the resolved `RLPx`
+    /// listener address. That keeps discv4 and discv5 on the same concrete UDP address when they
+    /// share a port; otherwise discv4 would bind wildcard while discv5 binds the resolved
+    /// interface address, which prevents socket sharing.
+    fn resolved_discovery_addr(&self, listener_addr: IpAddr) -> IpAddr {
+        if self.net_if.is_some() && self.discovery.addr == DEFAULT_DISCOVERY_ADDR {
+            return listener_addr;
+        }
+
+        self.discovery.addr
     }
 
     /// Returns the resolved bootnodes if any are provided.
@@ -483,8 +530,10 @@ impl NetworkArgs {
                 self.max_capacity_cache_txns_pending_fetch,
             ),
             max_transactions_seen_by_peer_history: self.max_seen_tx_history,
+            max_pending_pool_imports: self.max_pending_pool_imports,
             propagation_mode: self.propagation_mode,
             ingress_policy: self.tx_ingress_policy,
+            tx_channel_memory_limit_bytes: self.tx_channel_memory_limit_bytes,
         }
     }
 
@@ -507,7 +556,13 @@ impl NetworkArgs {
         default_peers_file: PathBuf,
         executor: Runtime,
     ) -> NetworkConfigBuilder<N> {
-        let addr = self.resolved_addr();
+        // `listener_addr` is the concrete RLPx TCP bind address. With `--net-if.experimental`,
+        // this is the resolved interface IP and is also used as discv5's default address.
+        let listener_addr = self.resolved_addr();
+        // Discovery v4 has its own CLI bind address. If left at the wildcard default while
+        // `--net-if.experimental` is active, make it follow the listener address so discv4 and
+        // discv5 can share the same UDP socket.
+        let discovery_addr = self.resolved_discovery_addr(listener_addr);
         let chain_bootnodes = self
             .resolved_bootnodes()
             .unwrap_or_else(|| chain_spec.bootnodes().unwrap_or_else(mainnet_nodes));
@@ -544,18 +599,11 @@ impl NetworkArgs {
             })
             // apply discovery settings
             .apply(|builder| {
-                let rlpx_socket = (addr, self.port).into();
+                let rlpx_socket = (listener_addr, self.port).into();
                 self.discovery.apply_to_builder(builder, rlpx_socket, chain_bootnodes)
             })
-            .listener_addr(SocketAddr::new(
-                addr, // set discovery port based on instance number
-                self.port,
-            ))
-            .discovery_addr(SocketAddr::new(
-                self.discovery.addr,
-                // set discovery port based on instance number
-                self.discovery.port,
-            ))
+            .listener_addr(SocketAddr::new(listener_addr, self.port))
+            .discovery_addr(SocketAddr::new(discovery_addr, self.discovery.port))
             .disable_tx_gossip(self.disable_tx_gossip)
             .required_block_hashes(self.required_block_hashes.clone())
             .eth_max_message_size_opt(self.eth_max_message_size.map(NonZeroUsize::get))
@@ -660,6 +708,7 @@ impl Default for NetworkArgs {
             soft_limit_byte_size_pooled_transactions_response,
             soft_limit_byte_size_pooled_transactions_response_on_pack_request,
             max_capacity_cache_txns_pending_fetch,
+            tx_channel_memory_limit_bytes,
             tx_propagation_policy,
             tx_ingress_policy,
             propagation_mode,
@@ -689,6 +738,7 @@ impl Default for NetworkArgs {
             max_pending_pool_imports,
             max_seen_tx_history,
             max_capacity_cache_txns_pending_fetch,
+            tx_channel_memory_limit_bytes,
             net_if: None,
             tx_propagation_policy,
             tx_ingress_policy,
@@ -703,19 +753,172 @@ impl Default for NetworkArgs {
     }
 }
 
+/// Global static discovery defaults
+static DISCOVERY_DEFAULTS: OnceLock<DefaultDiscoveryArgs> = OnceLock::new();
+
+/// Default values for discovery CLI arguments that can be customized.
+#[derive(Debug, Clone, Copy)]
+pub struct DefaultDiscoveryArgs {
+    /// Default for `--disable-discovery`.
+    pub disable_discovery: bool,
+    /// Default for `--disable-dns-discovery`.
+    pub disable_dns_discovery: bool,
+    /// Default for `--disable-discv4-discovery`.
+    pub disable_discv4_discovery: bool,
+    /// Default for `--disable-discv5-discovery`.
+    pub disable_discv5_discovery: bool,
+    /// Default for `--disable-nat`.
+    pub disable_nat: bool,
+    /// Default UDP address for devp2p discovery v4.
+    pub addr: IpAddr,
+    /// Default UDP port for devp2p discovery v4.
+    pub port: u16,
+    /// Default UDP IPv4 address for devp2p discovery v5.
+    pub discv5_addr: Option<Ipv4Addr>,
+    /// Default UDP IPv6 address for devp2p discovery v5.
+    pub discv5_addr_ipv6: Option<Ipv6Addr>,
+    /// Default UDP IPv4 port for devp2p discovery v5.
+    pub discv5_port: Option<u16>,
+    /// Default UDP IPv6 port for devp2p discovery v5.
+    pub discv5_port_ipv6: Option<u16>,
+    /// Default discv5 periodic lookup interval (seconds).
+    pub discv5_lookup_interval: u64,
+    /// Default discv5 bootstrap lookup interval (seconds).
+    pub discv5_bootstrap_lookup_interval: u64,
+    /// Default discv5 bootstrap lookup countdown.
+    pub discv5_bootstrap_lookup_countdown: u64,
+}
+
+impl DefaultDiscoveryArgs {
+    /// Initialize the global discovery defaults with this configuration.
+    pub fn try_init(self) -> Result<(), Self> {
+        DISCOVERY_DEFAULTS.set(self)
+    }
+
+    /// Get a reference to the global discovery defaults.
+    pub fn get_global() -> &'static Self {
+        DISCOVERY_DEFAULTS.get_or_init(Self::default)
+    }
+
+    /// Set the default for `--disable-discovery`.
+    pub const fn with_disable_discovery(mut self, disable: bool) -> Self {
+        self.disable_discovery = disable;
+        self
+    }
+
+    /// Set the default for `--disable-dns-discovery`.
+    pub const fn with_disable_dns_discovery(mut self, disable: bool) -> Self {
+        self.disable_dns_discovery = disable;
+        self
+    }
+
+    /// Set the default for `--disable-discv4-discovery`.
+    pub const fn with_disable_discv4_discovery(mut self, disable: bool) -> Self {
+        self.disable_discv4_discovery = disable;
+        self
+    }
+
+    /// Set the default for `--disable-discv5-discovery`.
+    pub const fn with_disable_discv5_discovery(mut self, disable: bool) -> Self {
+        self.disable_discv5_discovery = disable;
+        self
+    }
+
+    /// Set the default for `--disable-nat`.
+    pub const fn with_disable_nat(mut self, disable: bool) -> Self {
+        self.disable_nat = disable;
+        self
+    }
+
+    /// Set the default discovery v4 address.
+    pub const fn with_addr(mut self, addr: IpAddr) -> Self {
+        self.addr = addr;
+        self
+    }
+
+    /// Set the default discovery v4 port.
+    pub const fn with_port(mut self, port: u16) -> Self {
+        self.port = port;
+        self
+    }
+
+    /// Set the default discovery v5 IPv4 address.
+    pub fn with_discv5_addr(mut self, addr: impl Into<Option<Ipv4Addr>>) -> Self {
+        self.discv5_addr = addr.into();
+        self
+    }
+
+    /// Set the default discovery v5 IPv6 address.
+    pub fn with_discv5_addr_ipv6(mut self, addr: impl Into<Option<Ipv6Addr>>) -> Self {
+        self.discv5_addr_ipv6 = addr.into();
+        self
+    }
+
+    /// Set the default discovery V5 port.
+    pub fn with_discv5_port(mut self, port: impl Into<Option<u16>>) -> Self {
+        self.discv5_port = port.into();
+        self
+    }
+
+    /// Set the default discovery v5 IPv6 port.
+    pub fn with_discv5_port_ipv6(mut self, port: impl Into<Option<u16>>) -> Self {
+        self.discv5_port_ipv6 = port.into();
+        self
+    }
+
+    /// Set the default discv5 periodic lookup interval (seconds).
+    pub const fn with_discv5_lookup_interval(mut self, interval: u64) -> Self {
+        self.discv5_lookup_interval = interval;
+        self
+    }
+
+    /// Set the default discv5 bootstrap lookup interval (seconds).
+    pub const fn with_discv5_bootstrap_lookup_interval(mut self, interval: u64) -> Self {
+        self.discv5_bootstrap_lookup_interval = interval;
+        self
+    }
+
+    /// Set the default discv5 bootstrap lookup countdown.
+    pub const fn with_discv5_bootstrap_lookup_countdown(mut self, countdown: u64) -> Self {
+        self.discv5_bootstrap_lookup_countdown = countdown;
+        self
+    }
+}
+
+impl Default for DefaultDiscoveryArgs {
+    fn default() -> Self {
+        Self {
+            disable_discovery: false,
+            disable_dns_discovery: false,
+            disable_discv4_discovery: false,
+            disable_discv5_discovery: false,
+            disable_nat: false,
+            addr: DEFAULT_DISCOVERY_ADDR,
+            port: DEFAULT_DISCOVERY_PORT,
+            discv5_addr: None,
+            discv5_addr_ipv6: None,
+            discv5_port: Some(DEFAULT_DISCOVERY_V5_PORT),
+            discv5_port_ipv6: Some(DEFAULT_DISCOVERY_V5_PORT),
+            discv5_lookup_interval: DEFAULT_SECONDS_LOOKUP_INTERVAL,
+            discv5_bootstrap_lookup_interval: DEFAULT_SECONDS_BOOTSTRAP_LOOKUP_INTERVAL,
+            discv5_bootstrap_lookup_countdown: DEFAULT_COUNT_BOOTSTRAP_LOOKUPS,
+        }
+    }
+}
+
 /// Arguments to setup discovery
 #[derive(Debug, Clone, Args, PartialEq, Eq)]
 pub struct DiscoveryArgs {
     /// Disable the discovery service.
-    #[arg(short, long, default_value_if("dev", "true", "true"))]
+    #[arg(short, long, default_value_if("dev", "true", "true"), default_value_t = DefaultDiscoveryArgs::get_global().disable_discovery)]
     pub disable_discovery: bool,
 
     /// Disable the DNS discovery.
-    #[arg(long, conflicts_with = "disable_discovery")]
+    #[arg(long, conflicts_with = "disable_discovery", default_value_t = DefaultDiscoveryArgs::get_global().disable_dns_discovery)]
     pub disable_dns_discovery: bool,
 
     /// Disable Discv4 discovery.
-    #[arg(long, conflicts_with = "disable_discovery")]
+    #[arg(long, conflicts_with = "disable_discovery", default_value_t = DefaultDiscoveryArgs::get_global().disable_discv4_discovery)]
     pub disable_discv4_discovery: bool,
 
     /// Enable Discv5 discovery.
@@ -726,57 +929,60 @@ pub struct DiscoveryArgs {
     pub enable_discv5_discovery: bool,
 
     /// Disable Discv5 discovery.
-    #[arg(long, conflicts_with = "disable_discovery")]
+    #[arg(long, conflicts_with = "disable_discovery", default_value_t = DefaultDiscoveryArgs::get_global().disable_discv5_discovery)]
     pub disable_discv5_discovery: bool,
 
     /// Disable Nat discovery.
-    #[arg(long, conflicts_with = "disable_discovery")]
+    #[arg(long, conflicts_with = "disable_discovery", default_value_t = DefaultDiscoveryArgs::get_global().disable_nat)]
     pub disable_nat: bool,
 
     /// The UDP address to use for devp2p peer discovery version 4.
-    #[arg(id = "discovery.addr", long = "discovery.addr", value_name = "DISCOVERY_ADDR", default_value_t = DEFAULT_DISCOVERY_ADDR)]
+    ///
+    /// If unset and `--net-if.experimental` is used, discv4 binds to the resolved interface
+    /// address.
+    #[arg(id = "discovery.addr", long = "discovery.addr", value_name = "DISCOVERY_ADDR", default_value_t = DefaultDiscoveryArgs::get_global().addr)]
     pub addr: IpAddr,
 
     /// The UDP port to use for devp2p peer discovery version 4.
-    #[arg(id = "discovery.port", long = "discovery.port", value_name = "DISCOVERY_PORT", default_value_t = DEFAULT_DISCOVERY_PORT)]
+    #[arg(id = "discovery.port", long = "discovery.port", value_name = "DISCOVERY_PORT", default_value_t = DefaultDiscoveryArgs::get_global().port)]
     pub port: u16,
 
     /// The UDP IPv4 address to use for devp2p peer discovery version 5. Overwritten by `RLPx`
     /// address, if it's also IPv4.
-    #[arg(id = "discovery.v5.addr", long = "discovery.v5.addr", value_name = "DISCOVERY_V5_ADDR", default_value = None)]
+    #[arg(id = "discovery.v5.addr", long = "discovery.v5.addr", value_name = "DISCOVERY_V5_ADDR", default_value = Resettable::from(DefaultDiscoveryArgs::get_global().discv5_addr.map(|a| OsStr::from(a.to_string()))))]
     pub discv5_addr: Option<Ipv4Addr>,
 
     /// The UDP IPv6 address to use for devp2p peer discovery version 5. Overwritten by `RLPx`
     /// address, if it's also IPv6.
-    #[arg(id = "discovery.v5.addr.ipv6", long = "discovery.v5.addr.ipv6", value_name = "DISCOVERY_V5_ADDR_IPV6", default_value = None)]
+    #[arg(id = "discovery.v5.addr.ipv6", long = "discovery.v5.addr.ipv6", value_name = "DISCOVERY_V5_ADDR_IPV6", default_value = Resettable::from(DefaultDiscoveryArgs::get_global().discv5_addr_ipv6.map(|a| OsStr::from(a.to_string()))))]
     pub discv5_addr_ipv6: Option<Ipv6Addr>,
 
     /// The UDP IPv4 port to use for devp2p peer discovery version 5. Not used unless `--addr` is
     /// IPv4, or `--discovery.v5.addr` is set.
-    #[arg(id = "discovery.v5.port", long = "discovery.v5.port", value_name = "DISCOVERY_V5_PORT",
-    default_value_t = DEFAULT_DISCOVERY_V5_PORT)]
-    pub discv5_port: u16,
+    #[arg(id = "discovery.v5.port", long = "discovery.v5.port", value_name = "DISCOVERY_V5_PORT", default_value = Resettable::from(DefaultDiscoveryArgs::get_global().discv5_port.map(|p| OsStr::from(p.to_string()))))]
+    pub discv5_port: Option<u16>,
 
     /// The UDP IPv6 port to use for devp2p peer discovery version 5. Not used unless `--addr` is
     /// IPv6, or `--discovery.addr.ipv6` is set.
-    #[arg(id = "discovery.v5.port.ipv6", long = "discovery.v5.port.ipv6", value_name = "DISCOVERY_V5_PORT_IPV6",
-    default_value_t = DEFAULT_DISCOVERY_V5_PORT)]
-    pub discv5_port_ipv6: u16,
+    ///
+    /// If not provided, discovery V5 defaults to same port as discovery V4 (--discovery.port).
+    #[arg(id = "discovery.v5.port.ipv6", long = "discovery.v5.port.ipv6", value_name = "DISCOVERY_V5_PORT_IPV6", default_value = Resettable::from(DefaultDiscoveryArgs::get_global().discv5_port_ipv6.map(|p| OsStr::from(p.to_string()))))]
+    pub discv5_port_ipv6: Option<u16>,
 
     /// The interval in seconds at which to carry out periodic lookup queries, for the whole
     /// run of the program.
-    #[arg(id = "discovery.v5.lookup-interval", long = "discovery.v5.lookup-interval", value_name = "DISCOVERY_V5_LOOKUP_INTERVAL", default_value_t = DEFAULT_SECONDS_LOOKUP_INTERVAL)]
+    #[arg(id = "discovery.v5.lookup-interval", long = "discovery.v5.lookup-interval", value_name = "DISCOVERY_V5_LOOKUP_INTERVAL", default_value_t = DefaultDiscoveryArgs::get_global().discv5_lookup_interval)]
     pub discv5_lookup_interval: u64,
 
     /// The interval in seconds at which to carry out boost lookup queries, for a fixed number of
     /// times, at bootstrap.
     #[arg(id = "discovery.v5.bootstrap.lookup-interval", long = "discovery.v5.bootstrap.lookup-interval", value_name = "DISCOVERY_V5_BOOTSTRAP_LOOKUP_INTERVAL",
-        default_value_t = DEFAULT_SECONDS_BOOTSTRAP_LOOKUP_INTERVAL)]
+        default_value_t = DefaultDiscoveryArgs::get_global().discv5_bootstrap_lookup_interval)]
     pub discv5_bootstrap_lookup_interval: u64,
 
     /// The number of times to carry out boost lookup queries at bootstrap.
     #[arg(id = "discovery.v5.bootstrap.lookup-countdown", long = "discovery.v5.bootstrap.lookup-countdown", value_name = "DISCOVERY_V5_BOOTSTRAP_LOOKUP_COUNTDOWN",
-        default_value_t = DEFAULT_COUNT_BOOTSTRAP_LOOKUPS)]
+        default_value_t = DefaultDiscoveryArgs::get_global().discv5_bootstrap_lookup_countdown)]
     pub discv5_bootstrap_lookup_countdown: u64,
 }
 
@@ -826,6 +1032,7 @@ impl DiscoveryArgs {
             discv5_lookup_interval,
             discv5_bootstrap_lookup_interval,
             discv5_bootstrap_lookup_countdown,
+            port,
             ..
         } = self;
 
@@ -843,8 +1050,9 @@ impl DiscoveryArgs {
 
         let mut discv5_config_builder =
             reth_discv5::discv5::ConfigBuilder::new(ListenConfig::from_two_sockets(
-                discv5_addr_ipv4.map(|addr| SocketAddrV4::new(addr, *discv5_port)),
-                discv5_addr_ipv6.map(|addr| SocketAddrV6::new(addr, *discv5_port_ipv6, 0, 0)),
+                discv5_addr_ipv4.map(|addr| SocketAddrV4::new(addr, discv5_port.unwrap_or(*port))),
+                discv5_addr_ipv6
+                    .map(|addr| SocketAddrV6::new(addr, discv5_port_ipv6.unwrap_or(*port), 0, 0)),
             ));
 
         if has_discv5_addr_args || self.disable_nat {
@@ -874,14 +1082,14 @@ impl DiscoveryArgs {
     /// discovery binds to the sockets.
     pub const fn with_unused_discovery_port(mut self) -> Self {
         self.port = 0;
-        self.discv5_port = 0;
-        self.discv5_port_ipv6 = 0;
+        self.discv5_port = Some(0);
+        self.discv5_port_ipv6 = Some(0);
         self
     }
 
     /// Set the discovery V5 port
-    pub const fn with_discv5_port(mut self, port: u16) -> Self {
-        self.discv5_port = port;
+    pub fn with_discv5_port(mut self, port: impl Into<Option<u16>>) -> Self {
+        self.discv5_port = port.into();
         self
     }
 
@@ -893,29 +1101,45 @@ impl DiscoveryArgs {
     pub fn adjust_instance_ports(&mut self, instance: u16) {
         debug_assert_ne!(instance, 0, "instance must be non-zero");
         self.port += instance - 1;
-        self.discv5_port += instance - 1;
-        self.discv5_port_ipv6 += instance - 1;
+        self.discv5_port = self.discv5_port.map(|port| port + instance - 1);
+        self.discv5_port_ipv6 = self.discv5_port_ipv6.map(|port| port + instance - 1);
     }
 }
 
 impl Default for DiscoveryArgs {
     fn default() -> Self {
+        let DefaultDiscoveryArgs {
+            disable_discovery,
+            disable_dns_discovery,
+            disable_discv4_discovery,
+            disable_discv5_discovery,
+            disable_nat,
+            addr,
+            port,
+            discv5_addr,
+            discv5_addr_ipv6,
+            discv5_port,
+            discv5_port_ipv6,
+            discv5_lookup_interval,
+            discv5_bootstrap_lookup_interval,
+            discv5_bootstrap_lookup_countdown,
+        } = *DefaultDiscoveryArgs::get_global();
         Self {
-            disable_discovery: false,
-            disable_dns_discovery: false,
-            disable_discv4_discovery: false,
+            disable_discovery,
+            disable_dns_discovery,
+            disable_discv4_discovery,
             enable_discv5_discovery: false,
-            disable_discv5_discovery: false,
-            disable_nat: false,
-            addr: DEFAULT_DISCOVERY_ADDR,
-            port: DEFAULT_DISCOVERY_PORT,
-            discv5_addr: None,
-            discv5_addr_ipv6: None,
-            discv5_port: DEFAULT_DISCOVERY_V5_PORT,
-            discv5_port_ipv6: DEFAULT_DISCOVERY_V5_PORT,
-            discv5_lookup_interval: DEFAULT_SECONDS_LOOKUP_INTERVAL,
-            discv5_bootstrap_lookup_interval: DEFAULT_SECONDS_BOOTSTRAP_LOOKUP_INTERVAL,
-            discv5_bootstrap_lookup_countdown: DEFAULT_COUNT_BOOTSTRAP_LOOKUPS,
+            disable_discv5_discovery,
+            disable_nat,
+            addr,
+            port,
+            discv5_addr,
+            discv5_addr_ipv6,
+            discv5_port,
+            discv5_port_ipv6,
+            discv5_lookup_interval,
+            discv5_bootstrap_lookup_interval,
+            discv5_bootstrap_lookup_countdown,
         }
     }
 }
@@ -1016,6 +1240,15 @@ mod tests {
 
             assert_eq!(args.dns_retries, retries);
         }
+    }
+
+    #[test]
+    fn transactions_manager_config_uses_max_pending_imports() {
+        let args = NetworkArgs { max_pending_pool_imports: 50_000, ..Default::default() };
+
+        let config = args.transactions_manager_config();
+
+        assert_eq!(config.max_pending_pool_imports, 50_000);
     }
 
     #[test]
@@ -1120,6 +1353,39 @@ mod tests {
         let args = CommandParser::<NetworkArgs>::parse_from(["reth"]).args;
 
         assert_eq!(args, default_args);
+    }
+
+    #[test]
+    fn net_if_uses_resolved_addr_for_default_discovery_addr() {
+        let args =
+            CommandParser::<NetworkArgs>::parse_from(["reth", "--net-if.experimental", "en0"]).args;
+        let listener_addr = IpAddr::V4(Ipv4Addr::new(192, 0, 2, 1));
+
+        assert_eq!(args.resolved_discovery_addr(listener_addr), listener_addr);
+    }
+
+    #[test]
+    fn net_if_preserves_custom_discovery_addr() {
+        let custom_discovery_addr = IpAddr::V4(Ipv4Addr::new(192, 0, 2, 2));
+        let args = CommandParser::<NetworkArgs>::parse_from([
+            "reth",
+            "--net-if.experimental",
+            "en0",
+            "--discovery.addr",
+            "192.0.2.2",
+        ])
+        .args;
+        let listener_addr = IpAddr::V4(Ipv4Addr::new(192, 0, 2, 1));
+
+        assert_eq!(args.resolved_discovery_addr(listener_addr), custom_discovery_addr);
+    }
+
+    #[test]
+    fn default_discovery_addr_is_preserved_without_net_if() {
+        let args = CommandParser::<NetworkArgs>::parse_from(["reth"]).args;
+        let listener_addr = IpAddr::V4(Ipv4Addr::new(192, 0, 2, 1));
+
+        assert_eq!(args.resolved_discovery_addr(listener_addr), DEFAULT_DISCOVERY_ADDR);
     }
 
     #[test]

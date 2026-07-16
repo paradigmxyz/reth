@@ -36,7 +36,9 @@ use tracing::*;
 
 use super::missing_static_data_error;
 
-mod slot_preimages;
+/// Slot-preimage database for recovering plain storage keys from hashed keys during
+/// pre-Cancun `SELFDESTRUCT` handling.
+pub mod slot_preimages;
 
 /// The execution stage executes all transactions and
 /// update history indexes.
@@ -357,7 +359,9 @@ where
                 })
             })?;
 
-            if let Err(err) = self.consensus.validate_block_post_execution(&block, &result, None) {
+            if let Err(err) =
+                self.consensus.validate_block_post_execution(&block, &result, None, None)
+            {
                 return Err(StageError::Block {
                     block: Box::new(block.block_with_parent()),
                     error: BlockErrorKind::Validation(err),

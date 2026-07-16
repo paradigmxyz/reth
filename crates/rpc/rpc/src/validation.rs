@@ -1,12 +1,13 @@
 use alloy_consensus::{
     BlobTransactionValidationError, BlockHeader, EnvKzgSettings, Transaction, TxReceipt,
 };
-use alloy_eips::{eip4844::kzg_to_versioned_hash, eip7685::RequestsOrHash};
-use alloy_primitives::map::AddressSet;
+use alloy_eip7928::{bal::DecodedBal, compute_block_access_list_hash};
+use alloy_eips::eip7685::RequestsOrHash;
+use alloy_primitives::{map::AddressSet, Address, B256, U256};
 use alloy_rpc_types_beacon::relay::{
     BidTrace, BuilderBlockValidationRequest, BuilderBlockValidationRequestV2,
     BuilderBlockValidationRequestV3, BuilderBlockValidationRequestV4,
-    BuilderBlockValidationRequestV5,
+    BuilderBlockValidationRequestV5, BuilderBlockValidationRequestV6,
 };
 use alloy_rpc_types_engine::{
     BlobsBundleV1, BlobsBundleV2, CancunPayloadFields, ExecutionData, ExecutionPayload,
@@ -38,7 +39,6 @@ use reth_rpc_api::BlockSubmissionValidationApiServer;
 use reth_rpc_server_types::result::{internal_rpc_err, invalid_params_rpc_err};
 use reth_storage_api::{BlockReaderIdExt, StateProviderFactory};
 use reth_tasks::Runtime;
-use revm_primitives::{Address, B256, U256};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::sync::Arc;
@@ -127,6 +127,7 @@ where
         block: RecoveredBlock<<E::Primitives as NodePrimitives>::Block>,
         message: BidTrace,
         registered_gas_limit: u64,
+        decoded_bal: Option<DecodedBal>,
     ) -> Result<(), ValidationApiError> {
         self.validate_message_against_header(block.sealed_header(), &message)?;
 
@@ -174,35 +175,57 @@ where
 
         self.consensus.validate_header_against_parent(block.sealed_header(), &parent_header)?;
         self.validate_gas_limit(registered_gas_limit, &parent_header, block.sealed_header())?;
+
+        // Ensure the submitted block access list does not exceed the block gas limit (EIP-7928)
+        if let Some(decoded_bal) = decoded_bal {
+            decoded_bal
+                .as_bal()
+                .validate_gas_limit(block.gas_limit())
+                .map_err(ConsensusError::from)?;
+        }
+
         let parent_header_hash = parent_header.hash();
         let state_provider = self.provider.state_by_block_hash(parent_header_hash)?;
 
         let mut request_cache = self.cached_reads(parent_header_hash).await;
 
-        let cached_db = request_cache.as_db_mut(StateProviderDatabase::new(&state_provider));
-        let executor = self.evm_config.batch_executor(cached_db);
+        let (output, block_access_list_hash) = {
+            let cached_db = request_cache.as_db_mut(StateProviderDatabase::new(&state_provider));
+            let mut executor = self.evm_config.batch_executor(cached_db);
 
-        let mut accessed_blacklisted = None;
-        let output = executor.execute_with_state_closure(&block, |state| {
+            let result = executor.execute_one(&block)?;
+
+            // The executor rebuilds the block access list whenever the block header contains a
+            // BAL hash. Comparing the rebuilt hash against the header post execution also
+            // commits to the submitted access list, because the header's BAL hash is derived
+            // from the submitted bytes.
+            let block_access_list_hash =
+                executor.take_bal().map(|bal| compute_block_access_list_hash(&bal));
+
+            let mut state = executor.into_state();
             if !self.disallow.is_empty() {
-                // Check whether the submission interacted with any blacklisted account by scanning
-                // the `State`'s cache that records everything read from database during execution.
+                // Check whether the submission interacted with any blacklisted account by
+                // scanning the `State`'s cache that records everything read from database
+                // during execution.
                 for account in state.cache.accounts.keys() {
                     if self.disallow.contains(account) {
-                        accessed_blacklisted = Some(*account);
+                        return Err(ValidationApiError::Blacklist(*account))
                     }
                 }
             }
-        })?;
 
-        if let Some(account) = accessed_blacklisted {
-            return Err(ValidationApiError::Blacklist(account))
-        }
+            (BlockExecutionOutput { state: state.take_bundle(), result }, block_access_list_hash)
+        };
 
         // update the cached reads
         self.update_cached_reads(parent_header_hash, request_cache).await;
 
-        self.consensus.validate_block_post_execution(&block, &output, None)?;
+        self.consensus.validate_block_post_execution(
+            &block,
+            &output,
+            None,
+            block_access_list_hash,
+        )?;
 
         self.ensure_payment(&block, &output, &message)?;
 
@@ -347,42 +370,26 @@ where
     /// Validates the given [`BlobsBundleV1`] and returns versioned hashes for blobs.
     pub fn validate_blobs_bundle(
         &self,
-        mut blobs_bundle: BlobsBundleV1,
+        blobs_bundle: BlobsBundleV1,
     ) -> Result<Vec<B256>, ValidationApiError> {
-        if blobs_bundle.commitments.len() != blobs_bundle.proofs.len() ||
-            blobs_bundle.commitments.len() != blobs_bundle.blobs.len()
-        {
-            return Err(ValidationApiError::InvalidBlobsBundle)
-        }
-
-        let versioned_hashes = blobs_bundle
-            .commitments
-            .iter()
-            .map(|c| kzg_to_versioned_hash(c.as_slice()))
-            .collect::<Vec<_>>();
-
-        let sidecar = blobs_bundle.pop_sidecar(blobs_bundle.blobs.len());
+        let versioned_hashes = blobs_bundle.versioned_hashes();
+        let sidecar =
+            blobs_bundle.try_into_sidecar().map_err(|_| ValidationApiError::InvalidBlobsBundle)?;
 
         sidecar.validate(&versioned_hashes, EnvKzgSettings::default().get())?;
-
         Ok(versioned_hashes)
     }
-    /// Validates the given [`BlobsBundleV1`] and returns versioned hashes for blobs.
+
+    /// Validates the given [`BlobsBundleV2`] and returns versioned hashes for blobs.
     pub fn validate_blobs_bundle_v2(
         &self,
         blobs_bundle: BlobsBundleV2,
     ) -> Result<Vec<B256>, ValidationApiError> {
-        let versioned_hashes = blobs_bundle
-            .commitments
-            .iter()
-            .map(|c| kzg_to_versioned_hash(c.as_slice()))
-            .collect::<Vec<_>>();
+        let versioned_hashes = blobs_bundle.versioned_hashes();
+        let sidecar =
+            blobs_bundle.try_into_sidecar().map_err(|_| ValidationApiError::InvalidBlobsBundle)?;
 
-        blobs_bundle
-            .try_into_sidecar()
-            .map_err(|_| ValidationApiError::InvalidBlobsBundle)?
-            .validate(&versioned_hashes, EnvKzgSettings::default().get())?;
-
+        sidecar.validate(&versioned_hashes, EnvKzgSettings::default().get())?;
         Ok(versioned_hashes)
     }
 
@@ -403,6 +410,7 @@ where
             block,
             request.request.message,
             request.registered_gas_limit,
+            None,
         )
         .await
     }
@@ -431,6 +439,7 @@ where
             block,
             request.request.message,
             request.registered_gas_limit,
+            None,
         )
         .await
     }
@@ -471,6 +480,51 @@ where
             block,
             request.request.message,
             request.registered_gas_limit,
+            None,
+        )
+        .await
+    }
+
+    /// Core logic for validating the builder submission v6
+    async fn validate_builder_submission_v6(
+        &self,
+        request: BuilderBlockValidationRequestV6,
+    ) -> Result<(), ValidationApiError> {
+        let decoded_bal =
+            DecodedBal::from_rlp_bytes(request.request.execution_payload.block_access_list.clone())
+                .map_err(ValidationApiError::InvalidBlockAccessList)?;
+
+        let block = self.payload_validator.ensure_well_formed_payload(ExecutionData {
+            payload: ExecutionPayload::V4(request.request.execution_payload),
+            sidecar: ExecutionPayloadSidecar::v4(
+                CancunPayloadFields {
+                    parent_beacon_block_root: request.parent_beacon_block_root,
+                    versioned_hashes: self
+                        .validate_blobs_bundle_v2(request.request.blobs_bundle)?,
+                },
+                PraguePayloadFields {
+                    requests: RequestsOrHash::Requests(
+                        request.request.execution_requests.to_requests(),
+                    ),
+                },
+            ),
+        })?;
+
+        let chain_spec = self.provider.chain_spec();
+        if chain_spec.is_osaka_active_at_timestamp(block.timestamp()) &&
+            block.rlp_length() > MAX_RLP_BLOCK_SIZE
+        {
+            return Err(ValidationApiError::Consensus(ConsensusError::BlockTooLarge {
+                rlp_length: block.rlp_length(),
+                max_rlp_length: MAX_RLP_BLOCK_SIZE,
+            }));
+        }
+
+        self.validate_message_against_block(
+            block,
+            request.request.message,
+            request.registered_gas_limit,
+            Some(decoded_bal),
         )
         .await
     }
@@ -549,6 +603,24 @@ where
 
         self.task_spawner.spawn_blocking_task(async move {
             let result = Self::validate_builder_submission_v5(&this, request)
+                .await
+                .map_err(ErrorObject::from);
+            let _ = tx.send(result);
+        });
+
+        rx.await.map_err(|_| internal_rpc_err("Internal blocking task error"))?
+    }
+
+    /// Validates a block submitted to the relay
+    async fn validate_builder_submission_v6(
+        &self,
+        request: BuilderBlockValidationRequestV6,
+    ) -> RpcResult<()> {
+        let this = self.clone();
+        let (tx, rx) = oneshot::channel();
+
+        self.task_spawner.spawn_blocking_task(async move {
+            let result = Self::validate_builder_submission_v6(&this, request)
                 .await
                 .map_err(ErrorObject::from);
             let _ = tx.send(result);
@@ -646,6 +718,8 @@ pub enum ValidationApiError {
     ProposerPayment,
     #[error("invalid blobs bundle")]
     InvalidBlobsBundle,
+    #[error("invalid block access list: {_0}")]
+    InvalidBlockAccessList(alloy_rlp::Error),
     #[error("block accesses blacklisted address: {_0}")]
     Blacklist(Address),
     #[error(transparent)]
@@ -670,8 +744,13 @@ impl From<ValidationApiError> for ErrorObject<'static> {
             ValidationApiError::Blacklist(_) |
             ValidationApiError::ProposerPayment |
             ValidationApiError::InvalidBlobsBundle |
+            ValidationApiError::InvalidBlockAccessList(_) |
             ValidationApiError::Blob(_) => invalid_params_rpc_err(error.to_string()),
 
+            ValidationApiError::Consensus(
+                error @ (ConsensusError::BlockAccessListCostMoreThanGasLimit(_) |
+                ConsensusError::BlockAccessListHashMismatch(_)),
+            ) => invalid_params_rpc_err(error.to_string()),
             ValidationApiError::MissingLatestBlock |
             ValidationApiError::MissingParentBlock |
             ValidationApiError::BlockTooOld |
@@ -702,7 +781,7 @@ pub(crate) struct ValidationMetrics {
 #[cfg(test)]
 mod tests {
     use super::{hash_disallow_list, AddressSet};
-    use revm_primitives::Address;
+    use alloy_primitives::Address;
 
     #[test]
     fn test_hash_disallow_list_deterministic() {

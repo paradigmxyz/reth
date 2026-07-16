@@ -12,15 +12,17 @@ workspace = true
 
 [dependencies]
 # reth
-reth-evm.workspace = true
+reth-evm = { workspace = true, optional = true }
+reth-execution-errors.workspace = true
 reth-execution-types.workspace = true
 reth-payload-primitives.workspace = true
-reth-payload-builder-primitives.workspace = true
+reth-payload-builder-primitives = { workspace = true, optional = true }
 reth-primitives-traits.workspace = true
 reth-ethereum-primitives.workspace = true
 reth-chain-state.workspace = true
 reth-errors.workspace = true
 reth-trie-common.workspace = true
+reth-storage-api.workspace = true
 
 # alloy
 alloy-primitives.workspace = true
@@ -41,10 +43,14 @@ thiserror.workspace = true
 default = ["std"]
 trie-debug = []
 std = [
+    "dep:reth-evm",
+    "dep:reth-payload-builder-primitives",
+    "reth-execution-errors/std",
     "reth-execution-types/std",
     "reth-ethereum-primitives/std",
     "reth-primitives-traits/std",
     "reth-trie-common/std",
+    "reth-storage-api/std",
     "alloy-primitives/std",
     "alloy-consensus/std",
     "alloy-rpc-types-engine/std",
@@ -53,5 +59,5 @@ std = [
     "tokio",
     "serde/std",
     "thiserror/std",
-    "reth-evm/std",
+    "reth-evm?/std",
 ]

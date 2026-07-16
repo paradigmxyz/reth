@@ -11,29 +11,27 @@
 //! 2. Prewarming tasks execute transactions in parallel using shared caches
 //! 3. When actual block execution happens, it benefits from the warmed cache
 
+use super::{bal_prewarm_pool::BalPrewarmPool, StateRootHintStream, StateRootUpdateStream};
 use crate::tree::{
-    payload_processor::multiproof::StateRootMessage,
     precompile_cache::{CachedPrecompile, PrecompileCacheMap},
-    CachedStateMetrics, CachedStateProvider, ExecutionEnv, PayloadExecutionCache, SavedCache,
-    StateProviderBuilder,
+    CachedStateCacheMetrics, CachedStateMetrics, CachedStateProvider, ExecutionEnv,
+    PayloadExecutionCache, SavedCache, StateProviderBuilder,
 };
 use alloy_consensus::transaction::TxHashRef;
 use alloy_eip7928::bal::DecodedBal;
 use alloy_eips::eip4895::Withdrawal;
-use alloy_primitives::{keccak256, StorageKey, B256};
-use crossbeam_channel::Sender as CrossbeamSender;
+use alloy_primitives::{keccak256, B256, U256};
 use metrics::{Counter, Gauge, Histogram};
 use rayon::prelude::*;
 use reth_evm::{execute::ExecutableTxFor, ConfigureEvm, Evm, EvmFor, RecoveredTx, SpecFor};
 use reth_metrics::Metrics;
-use reth_primitives_traits::{FastInstant as Instant, NodePrimitives};
+use reth_primitives_traits::{Account, FastInstant as Instant, NodePrimitives};
 use reth_provider::{
-    AccountReader, BlockExecutionOutput, BlockReader, StateProvider, StateProviderFactory,
-    StateReader,
+    AccountReader, BlockExecutionOutput, BlockReader, StateProviderFactory, StateReader,
 };
-use reth_revm::{database::StateProviderDatabase, state::EvmState};
+use reth_revm::database::StateProviderDatabase;
 use reth_tasks::{pool::WorkerPool, Runtime};
-use reth_trie_common::{MultiProofTargetsV2, ProofV2Target};
+use reth_trie_common::MultiProofTargetsV2;
 use std::sync::{
     atomic::{AtomicBool, AtomicUsize, Ordering},
     mpsc::{self, channel, Receiver, Sender},
@@ -43,12 +41,25 @@ use tokio::sync::oneshot;
 use tracing::{debug, debug_span, instrument, trace, trace_span, warn, Span};
 
 /// Determines the prewarming mode: transaction-based, BAL-based, or skipped.
+///
+/// Each variant carries the state-root capability its producers use, so the capability dies
+/// with the workers instead of outliving them.
 #[derive(Debug)]
 pub enum PrewarmMode<Tx> {
     /// Prewarm by executing transactions from a stream, each paired with its block index.
-    Transactions(Receiver<(usize, Tx)>),
+    Transactions {
+        /// Stream of transactions pending prewarm execution.
+        pending: Receiver<(usize, Tx)>,
+        /// Best-effort access hints emitted by the prewarm workers.
+        hints: Option<StateRootHintStream>,
+    },
     /// Prewarm by prefetching slots from a Block Access List.
-    BlockAccessList(Arc<DecodedBal>),
+    BlockAccessList {
+        /// The decoded block access list.
+        bal: Arc<DecodedBal>,
+        /// Authoritative pre-hashed updates derived from the BAL.
+        updates: Option<StateRootUpdateStream>,
+    },
     /// Transaction prewarming is skipped (e.g. small blocks where the overhead exceeds the
     /// benefit). No workers are spawned.
     Skipped,
@@ -70,8 +81,6 @@ where
     execution_cache: PayloadExecutionCache,
     /// Context provided to execution tasks
     ctx: PrewarmContext<N, P, Evm>,
-    /// Sender to emit evm state outcome messages to the sparse trie task, if any.
-    to_sparse_trie_task: Option<CrossbeamSender<StateRootMessage>>,
     /// Receiver for events produced by tx execution
     actions_rx: Receiver<PrewarmTaskEvent<N::Receipt>>,
     /// Parent span for tracing
@@ -89,7 +98,6 @@ where
         executor: Runtime,
         execution_cache: PayloadExecutionCache,
         ctx: PrewarmContext<N, P, Evm>,
-        to_sparse_trie_task: Option<CrossbeamSender<StateRootMessage>>,
     ) -> (Self, Sender<PrewarmTaskEvent<N::Receipt>>) {
         let (actions_tx, actions_rx) = channel();
 
@@ -101,14 +109,7 @@ where
         );
 
         (
-            Self {
-                executor,
-                execution_cache,
-                ctx,
-                to_sparse_trie_task,
-                actions_rx,
-                parent_span: Span::current(),
-            },
+            Self { executor, execution_cache, ctx, actions_rx, parent_span: Span::current() },
             actions_tx,
         )
     }
@@ -123,7 +124,7 @@ where
         &self,
         pending: mpsc::Receiver<(usize, Tx)>,
         actions_tx: Sender<PrewarmTaskEvent<N::Receipt>>,
-        to_sparse_trie_task: Option<CrossbeamSender<StateRootMessage>>,
+        state_root_hint_stream: Option<StateRootHintStream>,
     ) where
         Tx: ExecutableTxFor<Evm> + Send + 'static,
     {
@@ -143,7 +144,7 @@ where
             let pool = executor.prewarming_pool();
 
             let mut tx_count = 0usize;
-            let to_sparse_trie_task = to_sparse_trie_task.as_ref();
+            let state_root_hint_stream = state_root_hint_stream.as_ref();
             pool.in_place_scope(|s| {
                 s.spawn(|_| {
                     pool.init::<PrewarmEvmState<Evm>>(|_| ctx.evm_for_ctx());
@@ -173,17 +174,17 @@ where
                             i = index,
                         )
                         .entered();
-                        Self::transact_worker(ctx, index, tx, to_sparse_trie_task);
+                        Self::transact_worker(ctx, index, tx, state_root_hint_stream);
                     });
                 }
 
                 // Send withdrawal prefetch targets after all transactions dispatched
-                if let Some(to_sparse_trie_task) = to_sparse_trie_task &&
+                if let Some(state_root_hint_stream) = state_root_hint_stream &&
                     let Some(withdrawals) = &ctx.env.withdrawals &&
                     !withdrawals.is_empty()
                 {
                     let targets = multiproof_targets_from_withdrawals(withdrawals);
-                    let _ = to_sparse_trie_task.send(StateRootMessage::PrefetchProofs(targets));
+                    state_root_hint_stream.on_access_hint(targets.into());
                 }
             });
 
@@ -203,7 +204,7 @@ where
         ctx: &PrewarmContext<N, P, Evm>,
         index: usize,
         tx: Tx,
-        to_sparse_trie_task: Option<&CrossbeamSender<StateRootMessage>>,
+        state_root_hint_stream: Option<&StateRootHintStream>,
     ) where
         Tx: ExecutableTxFor<Evm>,
     {
@@ -247,10 +248,10 @@ where
             }
 
             if index > 0 {
-                let (targets, storage_targets) = multiproof_targets_from_state(res.state);
+                let (targets, storage_targets) = MultiProofTargetsV2::from_state(res.state);
                 ctx.metrics.prefetch_storage_targets.record(storage_targets as f64);
-                if let Some(to_sparse_trie_task) = to_sparse_trie_task {
-                    let _ = to_sparse_trie_task.send(StateRootMessage::PrefetchProofs(targets));
+                if let Some(state_root_hint_stream) = state_root_hint_stream {
+                    state_root_hint_stream.on_access_hint(targets.into());
                 }
             }
 
@@ -265,7 +266,7 @@ where
     ///
     /// Saves the warmed caches back into the shared slot after prewarming completes.
     ///
-    /// This consumes the `SavedCache` held by the task, which releases its usage guard and allows
+    /// This consumes the `SavedCache` held by the task, which releases its cache handle and allows
     /// the new, warmed cache to be inserted.
     ///
     /// This method is called from `run()` only after all execution tasks are complete.
@@ -279,7 +280,7 @@ where
 
         let Self {
             execution_cache,
-            ctx: PrewarmContext { env, metrics, cache_metrics, saved_cache, .. },
+            ctx: PrewarmContext { env, metrics, cache_state_metrics, saved_cache, .. },
             ..
         } = self;
         let hash = env.hash;
@@ -287,8 +288,8 @@ where
         if let Some(saved_cache) = saved_cache {
             debug!(target: "engine::caching", parent_hash=?hash, "Updating execution cache");
             execution_cache.update_with_guard(|cached| {
-                // consumes the `SavedCache` held by the prewarming task, which releases its usage
-                // guard
+                // consumes the `SavedCache` held by the prewarming task, which releases its cache
+                // handle
                 let caches = saved_cache.cache().clone();
                 let new_cache = SavedCache::new(hash, caches);
 
@@ -301,7 +302,7 @@ where
                     return;
                 }
 
-                new_cache.update_metrics(cache_metrics.as_ref());
+                new_cache.update_metrics(cache_state_metrics.as_ref());
 
                 if valid_block_rx.recv().is_ok() {
                     // Replace the shared cache with the new one; the previous cache (if any) is
@@ -322,22 +323,24 @@ where
         }
     }
 
-    /// Runs BAL-based prewarming and sparse-trie work inline.
+    /// Runs BAL-based prewarming and state-root streaming inline.
     ///
     /// Spawns two halves concurrently on separate pools, then waits for both to complete:
-    /// 1. Storage prefetch on the prewarming pool to populate the execution cache.
-    /// 2. Hashed state streaming on the BAL streaming pool so storage updates can reach the sparse
-    ///    trie before account reads finish.
+    /// 1. Hashed state streaming on the BAL streaming pool so storage updates can reach the
+    ///    state-root job before account reads finish.
+    /// 2. Storage prefetch on the prewarming pool to populate the execution cache, unless BAL batch
+    ///    I/O is disabled.
     #[instrument(level = "debug", target = "engine::tree::payload_processor::prewarm", skip_all)]
     fn run_bal_prewarm(
         &self,
         decoded_bal: Arc<DecodedBal>,
         actions_tx: Sender<PrewarmTaskEvent<N::Receipt>>,
+        hashed_update_stream: Option<StateRootUpdateStream>,
     ) {
         let bal = decoded_bal.as_bal();
         if bal.is_empty() {
-            if let Some(to_sparse_trie_task) = self.to_sparse_trie_task.as_ref() {
-                let _ = to_sparse_trie_task.send(StateRootMessage::FinishedStateUpdates);
+            if let Some(hashed_update_stream) = hashed_update_stream {
+                hashed_update_stream.finish();
             }
             let _ =
                 actions_tx.send(PrewarmTaskEvent::FinishedTxExecution { executed_transactions: 0 });
@@ -351,18 +354,15 @@ where
         );
 
         let ctx = self.ctx.clone();
-        let to_sparse_trie_task = self.to_sparse_trie_task.clone();
         let executor = self.executor.clone();
         let parent_span = Span::current();
-        let prefetch_parent_span = parent_span.clone();
         let stream_parent_span = parent_span;
         let prefetch_bal = Arc::clone(&decoded_bal);
         let stream_bal = Arc::clone(&decoded_bal);
-        let (prefetch_tx, prefetch_rx) = oneshot::channel();
         let (stream_tx, stream_rx) = oneshot::channel();
 
-        if let Some(to_sparse_trie_task) = to_sparse_trie_task {
-            let stream_ctx = ctx.clone();
+        if let Some(hashed_update_stream) = hashed_update_stream {
+            let ctx = ctx.clone();
             executor.bal_streaming_pool().spawn(move || {
                 let branch_span = debug_span!(
                     target: "engine::tree::payload_processor::prewarm",
@@ -370,73 +370,69 @@ where
                     "bal_hashed_state_stream",
                     bal_accounts = stream_bal.as_bal().len(),
                 );
-                let provider_parent_span = branch_span.clone();
+                let parent_span = branch_span.clone();
                 let _span = branch_span.entered();
 
-                stream_bal.as_bal().par_iter().for_each_init(
-                    || {
-                        (
-                            stream_ctx.clone(),
-                            None::<Box<dyn AccountReader>>,
-                            provider_parent_span.clone(),
-                        )
-                    },
-                    |(ctx, provider, parent_span), account_changes| {
+                stream_bal.as_bal().par_iter().for_each(|account_changes| {
+                    WorkerPool::with_worker_mut(|worker| {
+                        let provider =
+                            worker.get_or_init::<Option<Box<dyn AccountReader>>>(|| None);
                         ctx.send_bal_hashed_state(
-                            parent_span,
+                            &parent_span,
                             provider,
                             account_changes,
-                            &to_sparse_trie_task,
+                            &hashed_update_stream,
                         );
-                    },
-                );
+                    });
+                });
 
-                let _ = to_sparse_trie_task.send(StateRootMessage::FinishedStateUpdates);
+                hashed_update_stream.finish();
                 let _ = stream_tx.send(());
             });
         } else {
             let _ = stream_tx.send(());
         }
 
-        if ctx.saved_cache.is_some() {
-            executor.prewarming_pool().spawn(move || {
-                let branch_span = debug_span!(
-                    target: "engine::tree::payload_processor::prewarm",
-                    parent: &prefetch_parent_span,
-                    "bal_prefetch_storage",
-                    bal_accounts = prefetch_bal.as_bal().len(),
-                );
-                let provider_parent_span = branch_span.clone();
-                let _span = branch_span.entered();
+        if let Some(saved_cache) = ctx.saved_cache &&
+            !ctx.disable_bal_batch_io &&
+            let Some(pool) = ctx.bal_prewarm_pool.as_ref()
+        {
+            // If
+            //
+            // - BAL path is enabled (and so bal_prewarm_pool is present),
+            // - dispatch_bal_batch_io is false
+            // - execution cache is not disabled
+            //
+            // we launch prewarming sequence of the BAL read set here. The BAL read-set consists
+            // of the accounts, their code if present, and declared storages (both storage_reads
+            // and storage_changes).
+            //
+            // This runs side-by-side with the parallel transaction execution reducing the time it
+            // spends blocking on the data.
+            let caches = saved_cache.cache().clone();
+            let provider_builder = ctx.provider.clone();
+            let build = Arc::new(move || provider_builder.build());
 
-                prefetch_bal.as_bal().par_iter().for_each_init(
-                    || {
-                        (
-                            ctx.clone(),
-                            None::<CachedStateProvider<reth_provider::StateProviderBox, true>>,
-                            provider_parent_span.clone(),
-                        )
-                    },
-                    |(ctx, provider, parent_span), account| {
-                        if ctx.should_stop() {
-                            return;
-                        }
-                        ctx.prefetch_bal_storage(parent_span, provider, account);
-                    },
-                );
-
-                let _ = prefetch_tx.send(());
-            });
-        } else {
-            let _ = prefetch_tx.send(());
+            pool.begin_block(build, caches);
+            for account in prefetch_bal.as_bal() {
+                pool.warm_account(account.address);
+                for change in &account.storage_changes {
+                    pool.warm_storage(account.address, change.slot.into());
+                }
+                for &slot in &account.storage_reads {
+                    pool.warm_storage(account.address, slot.into());
+                }
+            }
+            pool.end_block();
         }
 
-        prefetch_rx
-            .blocking_recv()
-            .expect("BAL prefetch task dropped without signaling completion");
         stream_rx
             .blocking_recv()
             .expect("BAL hashed-state streaming task dropped without signaling completion");
+
+        // Drop the per-thread providers
+        executor.bal_streaming_pool().clear();
+        executor.prewarming_pool().clear();
 
         let _ = actions_tx.send(PrewarmTaskEvent::FinishedTxExecution { executed_transactions: 0 });
     }
@@ -456,13 +452,15 @@ where
     where
         Tx: ExecutableTxFor<Evm> + Send + 'static,
     {
-        // Spawn execution tasks based on mode
+        // Spawn execution tasks based on mode. The state-root capabilities arrive inside the
+        // mode and move into the spawned producers, so they die with the producers instead of
+        // living for the full lifetime of this task.
         match mode {
-            PrewarmMode::Transactions(pending) => {
-                self.spawn_txs_prewarm(pending, actions_tx, self.to_sparse_trie_task.clone());
+            PrewarmMode::Transactions { pending, hints } => {
+                self.spawn_txs_prewarm(pending, actions_tx, hints);
             }
-            PrewarmMode::BlockAccessList(bal) => {
-                self.run_bal_prewarm(bal, actions_tx);
+            PrewarmMode::BlockAccessList { bal, updates } => {
+                self.run_bal_prewarm(bal, actions_tx, updates);
             }
             PrewarmMode::Skipped => {
                 let _ = actions_tx
@@ -528,11 +526,16 @@ where
     pub saved_cache: Option<SavedCache>,
     /// Provider to obtain the state
     pub provider: StateProviderBuilder<N, P>,
+    /// Dedicated blocking pool for warming the BAL read-set. `Some` only on the BAL parallel
+    /// execution path; the pool is owned by the [`PayloadProcessor`](super::PayloadProcessor).
+    pub(crate) bal_prewarm_pool: Option<Arc<BalPrewarmPool>>,
     /// The metrics for the prewarm task.
     pub metrics: PrewarmMetrics,
     /// Metrics for the execution cache.
     /// Metrics for the execution cache. `None` disables metrics recording.
     pub cache_metrics: Option<CachedStateMetrics>,
+    /// Metrics for shared execution cache state. `None` disables metrics recording.
+    pub cache_state_metrics: Option<CachedStateCacheMetrics>,
     /// An atomic bool that tells prewarm tasks to not start any more execution.
     pub terminate_execution: Arc<AtomicBool>,
     /// Shared counter tracking the next transaction index to be executed by the main execution
@@ -544,8 +547,9 @@ where
     /// The precompile cache map.
     pub precompile_cache_map: PrecompileCacheMap<SpecFor<Evm>>,
     /// Whether to disable BAL-driven parallel state root computation.
+    /// Only valid when BAL parallel execution is also disabled.
     pub disable_bal_parallel_state_root: bool,
-    /// Whether BAL batched IO is disabled.
+    /// Whether BAL state prefetching during prewarm is disabled.
     pub disable_bal_batch_io: bool,
 }
 
@@ -578,11 +582,7 @@ where
         // Use the caches to create a new provider with caching
         if let Some(saved_cache) = &self.saved_cache {
             let caches = saved_cache.cache().clone();
-            state_provider = Box::new(CachedStateProvider::new_prewarm(
-                state_provider,
-                caches,
-                self.cache_metrics.clone().unwrap_or_default(),
-            ));
+            state_provider = Box::new(CachedStateProvider::new_prewarm(state_provider, caches));
         }
 
         let state_provider = StateProviderDatabase::new(state_provider);
@@ -628,10 +628,12 @@ where
         self.terminate_execution.store(true, Ordering::Relaxed);
     }
 
-    /// Hashes and streams a single BAL account's state to the sparse trie task.
+    /// Hashes and streams a single BAL account's state to the state-root job's hashed-update
+    /// stream.
     ///
-    /// For each account, storage slots are hashed and sent immediately, then the account is read
-    /// from the database and sent as a separate update.
+    /// For each changed account, storage slots are hashed and sent immediately, then the account
+    /// is sent as a separate update. The parent account is read only when the BAL did not provide
+    /// all account leaf fields needed for state-root computation.
     ///
     /// The `provider` is lazily initialized on first call and reused across accounts on the same
     /// thread.
@@ -640,14 +642,22 @@ where
         parent_span: &Span,
         provider: &mut Option<Box<dyn AccountReader>>,
         account_changes: &alloy_eip7928::AccountChanges,
-        to_sparse_trie_task: &CrossbeamSender<StateRootMessage>,
+        hashed_update_stream: &StateRootUpdateStream,
     ) {
         if self.disable_bal_parallel_state_root {
             return;
         }
         let address = account_changes.address;
         let mut hashed_address = None;
+        let account_fields = BalAccountStateFields::from_changes(account_changes);
 
+        if !bal_account_changes_state_root(account_changes, account_fields) {
+            return;
+        }
+
+        // If there are any storage changes we can assume that the resulting account info will be
+        // non-empty, so the account will exist, and therefore we can pre-emptively send out storage
+        // changes to start processing them before potentially hitting the db in the next step.
         if !account_changes.storage_changes.is_empty() {
             let hashed_address = *hashed_address.get_or_insert_with(|| keccak256(address));
             let mut storage_map = reth_trie::HashedStorage::new(false);
@@ -661,189 +671,123 @@ where
 
             let mut hashed_state = reth_trie::HashedPostState::default();
             hashed_state.storages.insert(hashed_address, storage_map);
-            let _ = to_sparse_trie_task.send(StateRootMessage::HashedStateUpdate(hashed_state));
+            hashed_update_stream.on_hashed_state_update(hashed_state);
         }
 
-        if provider.is_none() {
-            let _span = debug_span!(
-                target: "engine::tree::payload_processor::prewarm",
-                parent: parent_span,
-                "bal_hashed_state_provider_init",
-                has_saved_cache = self.saved_cache.is_some(),
-            )
-            .entered();
-
-            let inner = match self.provider.build() {
-                Ok(p) => p,
-                Err(err) => {
-                    warn!(
-                        target: "engine::tree::payload_processor::prewarm",
-                        ?err,
-                        "Failed to build provider for BAL account reads"
-                    );
-                    return;
-                }
-            };
-            let boxed: Box<dyn AccountReader> = if let Some(saved) = &self.saved_cache {
-                let caches = saved.cache().clone();
-                Box::new(CachedStateProvider::new_prewarm(
-                    inner,
-                    caches,
-                    self.cache_metrics.clone().unwrap_or_default(),
-                ))
-            } else {
-                Box::new(inner)
-            };
-            *provider = Some(boxed);
-        }
-        let account_reader = provider.as_ref().expect("provider just initialized");
-
-        let existing_account = account_reader.basic_account(&address).ok().flatten();
-
-        let balance = account_changes.balance_changes.last().map(|change| change.post_balance);
-        let nonce = account_changes.nonce_changes.last().map(|change| change.new_nonce);
-        let code_hash = account_changes.code_changes.last().map(|code_change| {
-            if code_change.new_code.is_empty() {
-                alloy_consensus::constants::KECCAK_EMPTY
-            } else {
-                keccak256(&code_change.new_code)
-            }
-        });
-
-        if balance.is_none() &&
-            nonce.is_none() &&
-            code_hash.is_none() &&
-            account_changes.storage_changes.is_empty()
-        {
-            return;
-        }
-
-        let account = reth_primitives_traits::Account {
-            balance: balance.unwrap_or_else(|| {
-                existing_account
-                    .as_ref()
-                    .map(|account| account.balance)
-                    .unwrap_or(alloy_primitives::U256::ZERO)
-            }),
-            nonce: nonce.unwrap_or_else(|| {
-                existing_account.as_ref().map(|account| account.nonce).unwrap_or(0)
-            }),
-            bytecode_hash: code_hash.or_else(|| {
-                existing_account
-                    .as_ref()
-                    .and_then(|account| account.bytecode_hash)
-                    .or(Some(alloy_consensus::constants::KECCAK_EMPTY))
-            }),
-        };
-
-        let hashed_address = hashed_address.unwrap_or_else(|| keccak256(address));
-        let mut hashed_state = reth_trie::HashedPostState::default();
-        hashed_state.accounts.insert(hashed_address, Some(account));
-
-        let _ = to_sparse_trie_task.send(StateRootMessage::HashedStateUpdate(hashed_state));
-    }
-
-    /// Prefetches storage slots for a single BAL account into the cache.
-    ///
-    /// Account reads are handled separately by [`Self::send_bal_hashed_state`], so this method
-    /// only
-    /// warms storage.
-    ///
-    /// The `provider` is lazily initialized on first call and reused across accounts on the same
-    /// thread.
-    fn prefetch_bal_storage(
-        &self,
-        parent_span: &Span,
-        provider: &mut Option<CachedStateProvider<reth_provider::StateProviderBox, true>>,
-        account: &alloy_eip7928::AccountChanges,
-    ) {
-        if account.storage_changes.is_empty() && account.storage_reads.is_empty() {
-            return;
-        }
-
-        let state_provider = match provider {
-            Some(p) => p,
-            slot @ None => {
+        let existing_account = if account_fields.needs_parent_account() {
+            if provider.is_none() {
                 let _span = debug_span!(
                     target: "engine::tree::payload_processor::prewarm",
                     parent: parent_span,
-                    "bal_prefetch_provider_init",
+                    "bal_hashed_state_provider_init",
+                    has_saved_cache = !self.disable_bal_batch_io && self.saved_cache.is_some(),
                 )
                 .entered();
 
-                let built = match self.provider.build() {
+                let inner = match self.provider.build() {
                     Ok(p) => p,
                     Err(err) => {
-                        trace!(
+                        warn!(
                             target: "engine::tree::payload_processor::prewarm",
-                            %err,
-                            "Failed to build state provider in BAL prewarm thread"
+                            ?err,
+                            "Failed to build provider for BAL account reads"
                         );
                         return;
                     }
                 };
-                let saved_cache =
-                    self.saved_cache.as_ref().expect("BAL prewarm should only run with cache");
-                let caches = saved_cache.cache().clone();
-                slot.insert(CachedStateProvider::new_prewarm(
-                    built,
-                    caches,
-                    self.cache_metrics.clone().unwrap_or_default(),
-                ))
+                let boxed: Box<dyn AccountReader> =
+                    match (self.disable_bal_batch_io, &self.saved_cache) {
+                        (false, Some(saved)) => {
+                            let caches = saved.cache().clone();
+                            Box::new(CachedStateProvider::new_prewarm(inner, caches))
+                        }
+                        _ => Box::new(inner),
+                    };
+                *provider = Some(boxed);
             }
+            let account_reader = provider.as_ref().expect("provider just initialized");
+            account_reader.basic_account(&address).ok().flatten()
+        } else {
+            None
         };
 
-        let start = Instant::now();
+        let account = account_fields.into_account(existing_account);
+        let hashed_address = hashed_address.unwrap_or_else(|| keccak256(address));
 
-        for slot in &account.storage_changes {
-            let _ = state_provider.storage(account.address, StorageKey::from(slot.slot));
-        }
-        for &slot in &account.storage_reads {
-            let _ = state_provider.storage(account.address, StorageKey::from(slot));
-        }
+        // It is possible for the resulting account info to be empty. This can happen when, in the
+        // same block:
+        // * tx1: A new account is funded
+        // * tx2: CREATE2 is called on the new account, SELFDESTRUCT is called within the init code
+        //
+        // In this case the account will have only balance_changes, one for funding and the second
+        // setting balance back to zero. The resulting account is fully empty, we mark it as None
+        // with no storage changes to indicate that it should be deleted if nothing else.
+        //
+        // We assume that if the account info is all zero then it can't have storage, so we don't
+        // have to explicitly check for empty storage.
+        let account = (!account.is_empty()).then_some(account);
 
-        self.metrics.bal_slot_iteration_duration.record(start.elapsed().as_secs_f64());
+        let mut hashed_state = reth_trie::HashedPostState::default();
+        hashed_state.accounts.insert(hashed_address, account);
+        hashed_update_stream.on_hashed_state_update(hashed_state);
     }
 }
 
-/// Returns a set of [`MultiProofTargetsV2`] and the total amount of storage targets, based on the
-/// given state.
-fn multiproof_targets_from_state(state: EvmState) -> (MultiProofTargetsV2, usize) {
-    let mut targets = MultiProofTargetsV2::default();
-    let mut storage_target_count = 0;
-    for (addr, account) in state {
-        // if the account was not touched, or if the account was selfdestructed, do not
-        // fetch proofs for it
-        //
-        // Since selfdestruct can only happen in the same transaction, we can skip
-        // prefetching proofs for selfdestructed accounts
-        //
-        // See: https://eips.ethereum.org/EIPS/eip-6780
-        if !account.is_touched() || account.is_selfdestructed() {
-            continue
-        }
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+struct BalAccountStateFields {
+    balance: Option<U256>,
+    nonce: Option<u64>,
+    code_hash: Option<B256>,
+}
 
-        let hashed_address = keccak256(addr);
-        targets.account_targets.push(hashed_address.into());
-
-        let mut storage_slots = Vec::with_capacity(account.storage.len());
-        for (key, slot) in account.storage {
-            // do nothing if unchanged
-            if !slot.is_changed() {
-                continue
-            }
-
-            let hashed_slot = keccak256(B256::new(key.to_be_bytes()));
-            storage_slots.push(ProofV2Target::from(hashed_slot));
-        }
-
-        storage_target_count += storage_slots.len();
-        if !storage_slots.is_empty() {
-            targets.storage_targets.insert(hashed_address, storage_slots);
+impl BalAccountStateFields {
+    fn from_changes(account_changes: &alloy_eip7928::AccountChanges) -> Self {
+        Self {
+            balance: account_changes.balance_changes.last().map(|change| change.post_balance),
+            nonce: account_changes.nonce_changes.last().map(|change| change.new_nonce),
+            code_hash: account_changes.code_changes.last().map(|code_change| {
+                if code_change.new_code.is_empty() {
+                    alloy_consensus::constants::KECCAK_EMPTY
+                } else {
+                    keccak256(&code_change.new_code)
+                }
+            }),
         }
     }
 
-    (targets, storage_target_count)
+    const fn is_empty(self) -> bool {
+        self.balance.is_none() && self.nonce.is_none() && self.code_hash.is_none()
+    }
+
+    const fn needs_parent_account(self) -> bool {
+        self.balance.is_none() || self.nonce.is_none() || self.code_hash.is_none()
+    }
+
+    fn into_account(self, existing_account: Option<Account>) -> Account {
+        let existing_account = existing_account.as_ref();
+        Account {
+            balance: self.balance.unwrap_or_else(|| {
+                existing_account
+                    .map(|account| account.balance)
+                    .unwrap_or(alloy_primitives::U256::ZERO)
+            }),
+            nonce: self
+                .nonce
+                .unwrap_or_else(|| existing_account.map(|account| account.nonce).unwrap_or(0)),
+            bytecode_hash: self.code_hash.or_else(|| {
+                existing_account
+                    .and_then(|account| account.bytecode_hash)
+                    .or(Some(alloy_consensus::constants::KECCAK_EMPTY))
+            }),
+        }
+    }
+}
+
+const fn bal_account_changes_state_root(
+    account_changes: &alloy_eip7928::AccountChanges,
+    account_fields: BalAccountStateFields,
+) -> bool {
+    !account_fields.is_empty() || !account_changes.storage_changes.is_empty()
 }
 
 /// Returns [`MultiProofTargetsV2`] for withdrawal addresses.
@@ -854,6 +798,67 @@ fn multiproof_targets_from_withdrawals(withdrawals: &[Withdrawal]) -> MultiProof
     MultiProofTargetsV2 {
         account_targets: withdrawals.iter().map(|w| keccak256(w.address).into()).collect(),
         ..Default::default()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use alloy_eip7928::{
+        AccountChanges, BalanceChange, BlockAccessIndex, CodeChange, NonceChange, SlotChanges,
+        StorageChange,
+    };
+    use alloy_primitives::{address, bytes};
+
+    #[test]
+    fn bal_read_only_account_does_not_change_state_root() {
+        let changes = AccountChanges::new(address!("0000000000000000000000000000000000000001"))
+            .with_storage_read(U256::from(1));
+        let fields = BalAccountStateFields::from_changes(&changes);
+
+        assert!(fields.is_empty());
+        assert!(!bal_account_changes_state_root(&changes, fields));
+    }
+
+    #[test]
+    fn bal_account_with_all_leaf_fields_does_not_need_parent_account() {
+        let changes = AccountChanges::new(address!("0000000000000000000000000000000000000001"))
+            .with_balance_change(BalanceChange::new(BlockAccessIndex::new(1), U256::from(10)))
+            .with_nonce_change(NonceChange::new(BlockAccessIndex::new(1), 7))
+            .with_code_change(CodeChange::new(BlockAccessIndex::new(1), bytes!("6001600155")));
+        let fields = BalAccountStateFields::from_changes(&changes);
+
+        assert!(bal_account_changes_state_root(&changes, fields));
+        assert!(!fields.needs_parent_account());
+    }
+
+    #[test]
+    fn bal_storage_change_needs_parent_account_when_leaf_fields_missing() {
+        let changes = AccountChanges::new(address!("0000000000000000000000000000000000000001"))
+            .with_storage_change(SlotChanges::new(
+                U256::from(1),
+                vec![StorageChange::new(BlockAccessIndex::new(1), U256::from(2))],
+            ));
+        let fields = BalAccountStateFields::from_changes(&changes);
+
+        assert!(bal_account_changes_state_root(&changes, fields));
+        assert!(fields.needs_parent_account());
+    }
+
+    #[test]
+    fn bal_account_uses_existing_fields_only_when_missing() {
+        let changes = AccountChanges::new(address!("0000000000000000000000000000000000000001"))
+            .with_balance_change(BalanceChange::new(BlockAccessIndex::new(1), U256::from(10)));
+        let fields = BalAccountStateFields::from_changes(&changes);
+        let account = fields.into_account(Some(Account {
+            balance: U256::from(1),
+            nonce: 3,
+            bytecode_hash: Some(B256::repeat_byte(0xaa)),
+        }));
+
+        assert_eq!(account.balance, U256::from(10));
+        assert_eq!(account.nonce, 3);
+        assert_eq!(account.bytecode_hash, Some(B256::repeat_byte(0xaa)));
     }
 }
 

@@ -1,10 +1,128 @@
 //! Opentelemetry tracing and logging configuration through CLI args.
 
-use clap::Parser;
+use clap::{builder::Resettable, Parser};
 use eyre::WrapErr;
 use reth_tracing::{tracing_subscriber::EnvFilter, Layers};
 use reth_tracing_otlp::OtlpProtocol;
+use std::sync::OnceLock;
 use url::Url;
+
+static TRACE_DEFAULTS: OnceLock<DefaultTraceValues> = OnceLock::new();
+
+/// Overridable defaults for OTLP trace configuration.
+///
+/// Downstream binaries that embed reth can call
+/// `DefaultTraceValues::default().with_service_name("myapp").try_init()` before CLI parsing to
+/// change the defaults that clap will use.
+#[derive(Debug, Clone)]
+pub struct DefaultTraceValues {
+    otlp: Option<Url>,
+    logs_otlp: Option<Url>,
+    otlp_default_endpoint: String,
+    logs_otlp_default_endpoint: String,
+    protocol: OtlpProtocol,
+    service_name: String,
+    service_version: Option<String>,
+    otlp_filter: String,
+    logs_otlp_filter: String,
+    sample_ratio: Option<f64>,
+}
+
+impl Default for DefaultTraceValues {
+    fn default() -> Self {
+        Self {
+            otlp: None,
+            logs_otlp: None,
+            otlp_default_endpoint: "http://localhost:4318/v1/traces".to_string(),
+            logs_otlp_default_endpoint: "http://localhost:4318/v1/logs".to_string(),
+            protocol: OtlpProtocol::Http,
+            service_name: "reth".to_string(),
+            service_version: None,
+            otlp_filter: "debug".to_string(),
+            logs_otlp_filter: "info".to_string(),
+            sample_ratio: None,
+        }
+    }
+}
+
+impl DefaultTraceValues {
+    /// Initialize the global trace defaults with this configuration.
+    pub fn try_init(self) -> Result<(), Self> {
+        TRACE_DEFAULTS.set(self)
+    }
+
+    /// Get a reference to the global trace defaults.
+    pub fn get_global() -> &'static Self {
+        TRACE_DEFAULTS.get_or_init(Self::default)
+    }
+
+    /// Set the default OTLP tracing endpoint.
+    pub fn with_otlp(mut self, otlp: Option<Url>) -> Self {
+        self.otlp = otlp;
+        self
+    }
+
+    /// Set the default OTLP logs endpoint.
+    pub fn with_logs_otlp(mut self, logs_otlp: Option<Url>) -> Self {
+        self.logs_otlp = logs_otlp;
+        self
+    }
+
+    /// Set the endpoint used when `--tracing-otlp` is provided without a value.
+    pub fn with_otlp_default_endpoint(mut self, endpoint: impl Into<String>) -> Self {
+        self.otlp_default_endpoint = endpoint.into();
+        self
+    }
+
+    /// Set the endpoint used when `--logs-otlp` is provided without a value.
+    pub fn with_logs_otlp_default_endpoint(mut self, endpoint: impl Into<String>) -> Self {
+        self.logs_otlp_default_endpoint = endpoint.into();
+        self
+    }
+
+    /// Set the default OTLP transport protocol.
+    pub const fn with_protocol(mut self, protocol: OtlpProtocol) -> Self {
+        self.protocol = protocol;
+        self
+    }
+
+    /// Set the default service name.
+    pub fn with_service_name(mut self, name: impl Into<String>) -> Self {
+        self.service_name = name.into();
+        self
+    }
+
+    /// Set the default service version.
+    pub fn with_service_version(mut self, version: impl Into<String>) -> Self {
+        self.service_version = Some(version.into());
+        self
+    }
+
+    /// Set the default OTLP tracing filter.
+    pub fn with_otlp_filter(mut self, filter: impl Into<String>) -> Self {
+        self.otlp_filter = filter.into();
+        self
+    }
+
+    /// Set the default OTLP logs filter.
+    pub fn with_logs_otlp_filter(mut self, filter: impl Into<String>) -> Self {
+        self.logs_otlp_filter = filter.into();
+        self
+    }
+
+    /// Set the default OTLP trace sampling ratio.
+    pub const fn with_sample_ratio(mut self, sample_ratio: Option<f64>) -> Self {
+        self.sample_ratio = sample_ratio;
+        self
+    }
+
+    const fn protocol_as_str(&self) -> &'static str {
+        match self.protocol {
+            OtlpProtocol::Http => "http",
+            OtlpProtocol::Grpc => "grpc",
+        }
+    }
+}
 
 /// CLI arguments for configuring `Opentelemetry` trace and logs export.
 #[derive(Debug, Clone, Parser)]
@@ -23,7 +141,8 @@ pub struct TraceArgs {
         global = true,
         value_name = "URL",
         num_args = 0..=1,
-        default_missing_value = "http://localhost:4318/v1/traces",
+        default_value = Resettable::from(DefaultTraceValues::get_global().otlp.as_ref().map(|url| url.as_str().into())),
+        default_missing_value = DefaultTraceValues::get_global().otlp_default_endpoint.as_str(),
         require_equals = true,
         value_parser = parse_otlp_endpoint,
         help_heading = "Tracing"
@@ -43,7 +162,8 @@ pub struct TraceArgs {
         global = true,
         value_name = "URL",
         num_args = 0..=1,
-        default_missing_value = "http://localhost:4318/v1/logs",
+        default_value = Resettable::from(DefaultTraceValues::get_global().logs_otlp.as_ref().map(|url| url.as_str().into())),
+        default_missing_value = DefaultTraceValues::get_global().logs_otlp_default_endpoint.as_str(),
         require_equals = true,
         value_parser = parse_otlp_endpoint,
         help_heading = "Logging"
@@ -61,7 +181,7 @@ pub struct TraceArgs {
         env = "OTEL_EXPORTER_OTLP_PROTOCOL",
         global = true,
         value_name = "PROTOCOL",
-        default_value = "http",
+        default_value = DefaultTraceValues::get_global().protocol_as_str(),
         help_heading = "Tracing"
     )]
     pub protocol: OtlpProtocol,
@@ -77,7 +197,7 @@ pub struct TraceArgs {
         long = "tracing-otlp.filter",
         global = true,
         value_name = "FILTER",
-        default_value = "debug",
+        default_value = DefaultTraceValues::get_global().otlp_filter.as_str(),
         help_heading = "Tracing"
     )]
     pub otlp_filter: EnvFilter,
@@ -93,7 +213,7 @@ pub struct TraceArgs {
         long = "logs-otlp.filter",
         global = true,
         value_name = "FILTER",
-        default_value = "info",
+        default_value = DefaultTraceValues::get_global().logs_otlp_filter.as_str(),
         help_heading = "Logging"
     )]
     pub logs_otlp_filter: EnvFilter,
@@ -109,11 +229,26 @@ pub struct TraceArgs {
         env = "OTEL_SERVICE_NAME",
         global = true,
         value_name = "NAME",
-        default_value = "reth",
+        default_value = DefaultTraceValues::get_global().service_name.as_str(),
         hide = true,
         help_heading = "Tracing"
     )]
     pub service_name: String,
+
+    /// Service version to use for OTLP tracing export.
+    ///
+    /// Overrides the default version reported in the `service.version` OTLP resource attribute.
+    /// Falls back to the crate's `CARGO_PKG_VERSION` if not specified.
+    #[arg(
+        long = "tracing-otlp.service-version",
+        env = "OTEL_SERVICE_VERSION",
+        global = true,
+        value_name = "VERSION",
+        default_value = Resettable::from(DefaultTraceValues::get_global().service_version.as_ref().map(|version| version.as_str().into())),
+        hide = true,
+        help_heading = "Tracing"
+    )]
+    pub service_version: Option<String>,
 
     /// Trace sampling ratio to control the percentage of traces to export.
     ///
@@ -128,6 +263,7 @@ pub struct TraceArgs {
         env = "OTEL_TRACES_SAMPLER_ARG",
         global = true,
         value_name = "RATIO",
+        default_value = Resettable::from(DefaultTraceValues::get_global().sample_ratio.map(|ratio| ratio.to_string().into())),
         help_heading = "Tracing"
     )]
     pub sample_ratio: Option<f64>,
@@ -135,14 +271,16 @@ pub struct TraceArgs {
 
 impl Default for TraceArgs {
     fn default() -> Self {
+        let defaults = DefaultTraceValues::get_global();
         Self {
-            otlp: None,
-            logs_otlp: None,
-            protocol: OtlpProtocol::Http,
-            otlp_filter: EnvFilter::from_default_env(),
-            logs_otlp_filter: EnvFilter::try_new("info").expect("valid filter"),
-            sample_ratio: None,
-            service_name: "reth".to_string(),
+            otlp: defaults.otlp.clone(),
+            logs_otlp: defaults.logs_otlp.clone(),
+            protocol: defaults.protocol,
+            otlp_filter: defaults.otlp_filter.parse().expect("valid filter"),
+            logs_otlp_filter: defaults.logs_otlp_filter.parse().expect("valid filter"),
+            sample_ratio: defaults.sample_ratio,
+            service_name: defaults.service_name.clone(),
+            service_version: defaults.service_version.clone(),
         }
     }
 }
@@ -168,12 +306,15 @@ impl TraceArgs {
             #[cfg(feature = "otlp")]
             {
                 {
-                    let config = reth_tracing_otlp::OtlpConfig::new(
+                    let mut config = reth_tracing_otlp::OtlpConfig::new(
                         self.service_name.clone(),
                         endpoint.clone(),
                         self.protocol,
                         self.sample_ratio,
                     )?;
+                    if let Some(version) = &self.service_version {
+                        config = config.with_service_version(version.clone());
+                    }
 
                     _layers.with_span_layer(config.clone(), self.otlp_filter.clone())?;
 
@@ -201,11 +342,14 @@ impl TraceArgs {
 
             #[cfg(feature = "otlp-logs")]
             {
-                let config = reth_tracing_otlp::OtlpLogsConfig::new(
+                let mut config = reth_tracing_otlp::OtlpLogsConfig::new(
                     self.service_name.clone(),
                     endpoint.clone(),
                     self.protocol,
                 )?;
+                if let Some(version) = &self.service_version {
+                    config = config.with_service_version(version.clone());
+                }
 
                 _layers.with_log_layer(config.clone(), self.logs_otlp_filter.clone())?;
 
@@ -246,4 +390,56 @@ pub enum OtlpLogsStatus {
 // Parses an OTLP endpoint url.
 fn parse_otlp_endpoint(arg: &str) -> eyre::Result<Url> {
     Url::parse(arg).wrap_err("Invalid URL for OTLP trace output")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{DefaultTraceValues, TraceArgs};
+    use reth_tracing_otlp::OtlpProtocol;
+
+    #[test]
+    fn default_trace_values_can_override_filters() {
+        let defaults =
+            DefaultTraceValues::default().with_otlp_filter("trace").with_logs_otlp_filter("debug");
+
+        assert_eq!(defaults.otlp_filter, "trace");
+        assert_eq!(defaults.logs_otlp_filter, "debug");
+    }
+
+    #[test]
+    fn default_trace_values_can_override_all_defaults() {
+        let otlp = "http://localhost:4318/v1/traces".parse().unwrap();
+        let logs_otlp = "http://localhost:4318/v1/logs".parse().unwrap();
+        let defaults = DefaultTraceValues::default()
+            .with_otlp(Some(otlp))
+            .with_logs_otlp(Some(logs_otlp))
+            .with_otlp_default_endpoint("http://collector:4318/v1/traces")
+            .with_logs_otlp_default_endpoint("http://collector:4318/v1/logs")
+            .with_protocol(OtlpProtocol::Grpc)
+            .with_service_name("custom")
+            .with_service_version("1.2.3")
+            .with_otlp_filter("info")
+            .with_logs_otlp_filter("debug")
+            .with_sample_ratio(Some(0.5));
+
+        let args = TraceArgs {
+            otlp: defaults.otlp.clone(),
+            logs_otlp: defaults.logs_otlp.clone(),
+            protocol: defaults.protocol,
+            otlp_filter: defaults.otlp_filter.parse().unwrap(),
+            logs_otlp_filter: defaults.logs_otlp_filter.parse().unwrap(),
+            service_name: defaults.service_name.clone(),
+            service_version: defaults.service_version.clone(),
+            sample_ratio: defaults.sample_ratio,
+        };
+
+        assert!(args.otlp.is_some());
+        assert!(args.logs_otlp.is_some());
+        assert_eq!(args.protocol, OtlpProtocol::Grpc);
+        assert_eq!(args.service_name, "custom");
+        assert_eq!(args.service_version.as_deref(), Some("1.2.3"));
+        assert_eq!(args.sample_ratio, Some(0.5));
+        assert_eq!(defaults.otlp_default_endpoint, "http://collector:4318/v1/traces");
+        assert_eq!(defaults.logs_otlp_default_endpoint, "http://collector:4318/v1/logs");
+    }
 }

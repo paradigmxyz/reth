@@ -2,18 +2,17 @@
 
 use alloy_primitives::{
     map::{DefaultHashBuilder, FbBuildHasher},
-    Bytes,
+    Address, Bytes,
 };
 use moka::policy::EvictionPolicy;
 use reth_evm::precompiles::{DynPrecompile, Precompile, PrecompileInput};
 use reth_primitives_traits::dashmap::DashMap;
 use revm::precompile::{PrecompileId, PrecompileOutput, PrecompileResult};
-use revm_primitives::Address;
 use std::{hash::Hash, sync::Arc};
 use tracing::error;
 
 /// Default max cache size for [`PrecompileCache`]
-const MAX_CACHE_SIZE: u32 = 10_000;
+const MAX_CACHE_SIZE: u32 = 1024 * 1024;
 
 /// Stores caches for each precompile.
 #[derive(Debug, Clone, Default)]
@@ -52,8 +51,10 @@ where
     fn default() -> Self {
         Self(
             moka::sync::CacheBuilder::new(MAX_CACHE_SIZE as u64)
-                .initial_capacity(MAX_CACHE_SIZE as usize)
                 .eviction_policy(EvictionPolicy::lru())
+                .weigher(|key: &Bytes, value: &CacheEntry<S>| {
+                    (key.len() + value.output.bytes.len()) as u32
+                })
                 .build_with_hasher(Default::default()),
         )
     }
@@ -254,8 +255,8 @@ mod tests {
     use revm::{
         context::TxEnv,
         precompile::{PrecompileOutput, PrecompileStatus},
+        primitives::hardfork::SpecId,
     };
-    use revm_primitives::hardfork::SpecId;
 
     #[test]
     fn test_precompile_cache_basic() {

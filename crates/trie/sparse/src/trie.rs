@@ -1,9 +1,10 @@
-use crate::{LeafUpdate, ParallelSparseTrie, SparseTrie as SparseTrieTrait, SparseTrieUpdates};
-use alloc::{borrow::Cow, boxed::Box, vec::Vec};
+use crate::{
+    ArenaParallelSparseTrie, LeafUpdate, SparseTrie as SparseTrieTrait, SparseTrieUpdates,
+};
+use alloc::{borrow::Cow, boxed::Box};
 use alloy_primitives::{map::B256Map, B256};
 use reth_execution_errors::{SparseTrieErrorKind, SparseTrieResult};
-use reth_trie_common::{BranchNodeMasks, Nibbles, RlpNode, TrieMask, TrieNodeV2};
-use tracing::instrument;
+use reth_trie_common::{BranchNodeMasks, Nibbles, ProofTrieNodeV2, RlpNode, TrieMask, TrieNodeV2};
 
 /// A sparse trie that is either in a "blind" state (no nodes are revealed, root node hash is
 /// unknown) or in a "revealed" state (root node has been revealed and the trie can be updated).
@@ -18,7 +19,7 @@ use tracing::instrument;
 /// 3. Incremental operations - nodes can be revealed as needed without loading the entire trie.
 ///    This is what gives rise to the notion of a "sparse" trie.
 #[derive(PartialEq, Eq, Debug, Clone)]
-pub enum RevealableSparseTrie<T = ParallelSparseTrie> {
+pub enum RevealableSparseTrie<T = ArenaParallelSparseTrie> {
     /// The trie is blind -- no nodes have been revealed
     ///
     /// This is the default state. In this state, the trie cannot be directly queried or modified
@@ -42,7 +43,7 @@ impl<T: Default> Default for RevealableSparseTrie<T> {
 }
 
 impl<T: SparseTrieTrait + Default> RevealableSparseTrie<T> {
-    /// Creates a new revealed but empty sparse trie with `SparseNode::Empty` as root node.
+    /// Creates a new revealed but empty sparse trie.
     pub fn revealed_empty() -> Self {
         Self::Revealed(Box::default())
     }
@@ -52,8 +53,7 @@ impl<T: SparseTrieTrait + Default> RevealableSparseTrie<T> {
     /// If the trie is blinded, its root node is replaced with `root`.
     ///
     /// The `masks` are used to determine how the node's children are stored.
-    /// The `retain_updates` flag controls whether changes to the trie structure
-    /// should be tracked.
+    /// The retention flag controls whether trie updates should be tracked.
     ///
     /// # Returns
     ///
@@ -78,6 +78,25 @@ impl<T: SparseTrieTrait + Default> RevealableSparseTrie<T> {
         }
 
         Ok(self.as_revealed_mut().unwrap())
+    }
+
+    /// Reveals a batch of V2 proof nodes into this trie.
+    ///
+    /// If `nodes` contains a node at the empty path it is used to reveal the root (transitioning
+    /// the trie from blind to revealed). Otherwise the trie must already be revealed.
+    pub fn reveal_v2_proof_nodes(
+        &mut self,
+        nodes: &mut [ProofTrieNodeV2],
+        retain_updates: bool,
+    ) -> SparseTrieResult<()> {
+        let trie = if let Some(root_node) = nodes.iter().find(|n| n.path.is_empty()) {
+            self.reveal_root(root_node.node.clone(), root_node.masks, retain_updates)?
+        } else {
+            self.as_revealed_mut().ok_or(SparseTrieErrorKind::Blind)?
+        };
+        trie.reveal_nodes(nodes)?;
+
+        Ok(())
     }
 }
 
@@ -197,54 +216,6 @@ impl<T: SparseTrieTrait> RevealableSparseTrie<T> {
                 Self::Blind(Some(trie))
             }
         };
-    }
-
-    /// Shrinks the capacity of the sparse trie's node storage.
-    /// Works for both revealed and blind tries with allocated storage.
-    pub fn shrink_nodes_to(&mut self, size: usize) {
-        match self {
-            Self::Blind(Some(trie)) | Self::Revealed(trie) => {
-                trie.shrink_nodes_to(size);
-            }
-            _ => {}
-        }
-    }
-
-    /// Shrinks the capacity of the sparse trie's value storage.
-    /// Works for both revealed and blind tries with allocated storage.
-    pub fn shrink_values_to(&mut self, size: usize) {
-        match self {
-            Self::Blind(Some(trie)) | Self::Revealed(trie) => {
-                trie.shrink_values_to(size);
-            }
-            _ => {}
-        }
-    }
-}
-
-impl RevealableSparseTrie {
-    /// Updates (or inserts) a leaf at the given key path with the specified RLP-encoded value.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the trie is still blind, or if the update fails.
-    #[instrument(level = "trace", target = "trie::sparse", skip_all)]
-    pub fn update_leaf(&mut self, path: Nibbles, value: Vec<u8>) -> SparseTrieResult<()> {
-        let revealed = self.as_revealed_mut().ok_or(SparseTrieErrorKind::Blind)?;
-        revealed.update_leaf(path, value)?;
-        Ok(())
-    }
-
-    /// Removes a leaf node at the specified key path.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the trie is still blind, or if the leaf cannot be removed.
-    #[instrument(level = "trace", target = "trie::sparse", skip_all)]
-    pub fn remove_leaf(&mut self, path: &Nibbles) -> SparseTrieResult<()> {
-        let revealed = self.as_revealed_mut().ok_or(SparseTrieErrorKind::Blind)?;
-        revealed.remove_leaf(path)?;
-        Ok(())
     }
 }
 

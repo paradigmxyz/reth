@@ -8,6 +8,7 @@ use alloy_primitives::{
 use itertools::Itertools;
 use metrics::Label;
 use parking_lot::Mutex;
+use rayon::prelude::*;
 use reth_chain_state::ExecutedBlock;
 use reth_db_api::{
     database_metrics::DatabaseMetrics,
@@ -28,7 +29,7 @@ use rocksdb::{
     BlockBasedOptions, Cache, ColumnFamilyDescriptor, CompactionPri, DBCompressionType,
     DBRawIteratorWithThreadMode, IteratorMode, OptimisticTransactionDB,
     OptimisticTransactionOptions, Options, SnapshotWithThreadMode, Transaction,
-    WriteBatchWithTransaction, WriteOptions, DB,
+    WriteBatchWithTransaction, WriteBufferManager, WriteOptions, DB,
 };
 use std::{
     collections::BTreeMap,
@@ -133,17 +134,24 @@ const DEFAULT_BYTES_PER_SYNC: u64 = 1_048_576;
 /// to 64 MB default, with negligible impact on mean throughput.
 const DEFAULT_WRITE_BUFFER_SIZE: usize = 128 << 20;
 
+/// Default total `RocksDB` memtable memory budget across column families (4 GiB).
+///
+/// This is a soft limit; with write stalls enabled, `RocksDB` waits for flushes once
+/// memtable arena usage exceeds the budget.
+const DEFAULT_WRITE_BUFFER_MANAGER_SIZE: usize = 4 * 1024 * 1024 * 1024;
+
 /// Default buffer capacity for compression in batches.
 /// 4 KiB matches common block/page sizes and comfortably holds typical history values,
 /// reducing the first few reallocations without over-allocating.
 const DEFAULT_COMPRESS_BUF_CAPACITY: usize = 4096;
 
-/// Default auto-commit threshold for batch writes (4 GiB).
+/// Default auto-commit threshold for batch writes (512 MiB).
 ///
 /// When a batch exceeds this size, it is automatically committed to prevent OOM
-/// during large bulk writes. The consistency check on startup heals any crash
-/// that occurs between auto-commits.
-const DEFAULT_AUTO_COMMIT_THRESHOLD: usize = 4 * 1024 * 1024 * 1024;
+/// during large bulk writes. Keep this below the `RocksDB` write buffer manager
+/// budget so stalls can recover without waiting on a single large flush.
+/// The consistency check on startup heals any crash that occurs between auto-commits.
+const DEFAULT_AUTO_COMMIT_THRESHOLD: usize = 512 * 1024 * 1024;
 
 /// Builder for [`RocksDBProvider`].
 pub struct RocksDBBuilder {
@@ -207,6 +215,9 @@ impl RocksDBBuilder {
         options.create_missing_column_families(true);
         options.set_max_background_jobs(DEFAULT_MAX_BACKGROUND_JOBS);
         options.set_bytes_per_sync(DEFAULT_BYTES_PER_SYNC);
+        let write_buffer_manager =
+            WriteBufferManager::new_write_buffer_manager(DEFAULT_WRITE_BUFFER_MANAGER_SIZE, true);
+        options.set_write_buffer_manager(&write_buffer_manager);
 
         options.set_bottommost_compression_type(DBCompressionType::Zstd);
         options.set_bottommost_zstd_max_train_bytes(0, true);
@@ -1421,7 +1432,6 @@ impl RocksDBProvider {
         blocks: &[ExecutedBlock<N>],
         ctx: &RocksDBWriteCtx,
     ) -> ProviderResult<()> {
-        let mut batch = self.batch();
         let mut storage_history: BTreeMap<(Address, B256), Vec<u64>> = BTreeMap::new();
 
         for (block_idx, block) in blocks.iter().enumerate() {
@@ -1443,12 +1453,68 @@ impl RocksDBProvider {
             }
         }
 
-        // Write storage history using proper shard append logic
-        for ((address, slot), indices) in storage_history {
-            batch.append_storage_history_shard(address, slot, indices)?;
+        let shard_puts = storage_history
+            .into_par_iter()
+            .map(|((address, slot), indices)| {
+                self.storage_history_shards_to_put(address, slot, indices)
+            })
+            .collect::<ProviderResult<Vec<_>>>()?;
+
+        let mut batch = self.batch();
+        for shards in shard_puts {
+            for (key, shard) in shards {
+                batch.put::<tables::StoragesHistory>(key, &shard)?;
+            }
         }
         ctx.pending_batches.lock().push(batch.into_inner());
         Ok(())
+    }
+
+    /// Prepares storage history shard writes by reading the current last shard and appending
+    /// indices.
+    fn storage_history_shards_to_put(
+        &self,
+        address: Address,
+        storage_key: B256,
+        indices: Vec<u64>,
+    ) -> ProviderResult<Vec<(StorageShardedKey, BlockNumberList)>> {
+        if indices.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        debug_assert!(
+            indices.windows(2).all(|w| w[0] < w[1]),
+            "indices must be strictly increasing: {:?}",
+            indices
+        );
+
+        let last_key = StorageShardedKey::last(address, storage_key);
+        let last_shard_opt = self.get::<tables::StoragesHistory>(last_key.clone())?;
+        let mut last_shard = last_shard_opt.unwrap_or_else(BlockNumberList::empty);
+
+        last_shard.append(indices).map_err(ProviderError::other)?;
+
+        if last_shard.len() <= NUM_OF_INDICES_IN_SHARD as u64 {
+            return Ok(vec![(last_key, last_shard)]);
+        }
+
+        let chunks = last_shard.iter().chunks(NUM_OF_INDICES_IN_SHARD);
+        let mut chunks_peekable = chunks.into_iter().peekable();
+        let mut shards = Vec::new();
+
+        while let Some(chunk) = chunks_peekable.next() {
+            let shard = BlockNumberList::new_pre_sorted(chunk);
+            let highest_block_number = if chunks_peekable.peek().is_some() {
+                shard.iter().next_back().expect("`chunks` does not return empty list")
+            } else {
+                u64::MAX
+            };
+
+            shards
+                .push((StorageShardedKey::new(address, storage_key, highest_block_number), shard));
+        }
+
+        Ok(shards)
     }
 }
 
@@ -1899,44 +1965,10 @@ impl<'a> RocksDBBatch<'a> {
     ) -> ProviderResult<()> {
         let indices: Vec<u64> = indices.into_iter().collect();
 
-        if indices.is_empty() {
-            return Ok(());
-        }
-
-        debug_assert!(
-            indices.windows(2).all(|w| w[0] < w[1]),
-            "indices must be strictly increasing: {:?}",
-            indices
-        );
-
-        let last_key = StorageShardedKey::last(address, storage_key);
-        let last_shard_opt = self.provider.get::<tables::StoragesHistory>(last_key.clone())?;
-        let mut last_shard = last_shard_opt.unwrap_or_else(BlockNumberList::empty);
-
-        last_shard.append(indices).map_err(ProviderError::other)?;
-
-        // Fast path: all indices fit in one shard
-        if last_shard.len() <= NUM_OF_INDICES_IN_SHARD as u64 {
-            self.put::<tables::StoragesHistory>(last_key, &last_shard)?;
-            return Ok(());
-        }
-
-        // Slow path: rechunk into multiple shards
-        let chunks = last_shard.iter().chunks(NUM_OF_INDICES_IN_SHARD);
-        let mut chunks_peekable = chunks.into_iter().peekable();
-
-        while let Some(chunk) = chunks_peekable.next() {
-            let shard = BlockNumberList::new_pre_sorted(chunk);
-            let highest_block_number = if chunks_peekable.peek().is_some() {
-                shard.iter().next_back().expect("`chunks` does not return empty list")
-            } else {
-                u64::MAX
-            };
-
-            self.put::<tables::StoragesHistory>(
-                StorageShardedKey::new(address, storage_key, highest_block_number),
-                &shard,
-            )?;
+        for (key, shard) in
+            self.provider.storage_history_shards_to_put(address, storage_key, indices)?
+        {
+            self.put::<tables::StoragesHistory>(key, &shard)?;
         }
 
         Ok(())

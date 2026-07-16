@@ -19,16 +19,18 @@ use alloy_rpc_types_engine::{
     ExecutionData, ExecutionPayloadSidecar, ExecutionPayloadV1, ForkchoiceState,
 };
 use assert_matches::assert_matches;
-use reth_chain_state::{test_utils::TestBlockBuilder, BlockState, ComputedTrieData};
+use reth_chain_state::{test_utils::TestBlockBuilder, BlockState, StateTrieOverlayManager};
 use reth_chainspec::{ChainSpec, HOLESKY, MAINNET};
 use reth_engine_primitives::{EngineApiValidator, ForkchoiceStatus, NoopInvalidBlockHook};
 use reth_ethereum_consensus::EthBeaconConsensus;
-use reth_ethereum_engine_primitives::EthEngineTypes;
+use reth_ethereum_engine_primitives::{EthEngineTypes, EthPayloadAttributes};
 use reth_ethereum_primitives::{Block, EthPrimitives};
 use reth_evm_ethereum::MockEvmConfig;
+use reth_payload_builder::PayloadServiceCommand;
 use reth_primitives_traits::Block as _;
-use reth_provider::test_utils::MockEthProvider;
+use reth_provider::{test_utils::MockEthProvider, BalStoreHandle, InMemoryBalStore, RawBal};
 use reth_tasks::spawn_os_thread;
+use reth_trie_common::ComputedTrieData;
 use std::{
     collections::BTreeMap,
     str::FromStr,
@@ -151,6 +153,7 @@ struct TestHarness {
         FromEngine<EngineApiRequest<EthEngineTypes, EthPrimitives>, Block>,
     >,
     from_tree_rx: UnboundedReceiver<EngineApiEvent>,
+    payload_command_rx: UnboundedReceiver<PayloadServiceCommand<EthEngineTypes>>,
     blocks: Vec<ExecutedBlock>,
     action_rx: Receiver<PersistenceAction>,
     block_builder: TestBlockBuilder,
@@ -159,9 +162,13 @@ struct TestHarness {
 
 impl TestHarness {
     fn new(chain_spec: Arc<ChainSpec>) -> Self {
+        Self::with_config(chain_spec, TreeConfig::default().with_has_enough_parallelism(true))
+    }
+
+    fn with_config(chain_spec: Arc<ChainSpec>, tree_config: TreeConfig) -> Self {
         use std::sync::mpsc::channel;
         let (action_tx, action_rx) = channel();
-        Self::with_persistence_channel(chain_spec, action_tx, action_rx)
+        Self::with_persistence_channel_and_config(chain_spec, action_tx, action_rx, tree_config)
     }
 
     #[expect(dead_code)]
@@ -175,6 +182,20 @@ impl TestHarness {
         action_tx: Sender<PersistenceAction>,
         action_rx: Receiver<PersistenceAction>,
     ) -> Self {
+        Self::with_persistence_channel_and_config(
+            chain_spec,
+            action_tx,
+            action_rx,
+            TreeConfig::default().with_has_enough_parallelism(true),
+        )
+    }
+
+    fn with_persistence_channel_and_config(
+        chain_spec: Arc<ChainSpec>,
+        action_tx: Sender<PersistenceAction>,
+        action_rx: Receiver<PersistenceAction>,
+        tree_config: TreeConfig,
+    ) -> Self {
         let persistence_handle = PersistenceHandle::new(action_tx);
 
         let consensus = Arc::new(EthBeaconConsensus::new(chain_spec.clone()));
@@ -184,8 +205,9 @@ impl TestHarness {
         let payload_validator = MockEngineValidator;
 
         let (from_tree_tx, from_tree_rx) = unbounded_channel();
-        let tree_config =
-            TreeConfig::default().with_legacy_state_root(false).with_has_enough_parallelism(true);
+        let runtime = reth_tasks::Runtime::test();
+        let state_trie_overlays =
+            StateTrieOverlayManager::new(runtime.state_trie_overlay_worker_pool());
 
         let header = chain_spec.genesis_header().clone();
         let header = SealedHeader::seal_slow(header);
@@ -195,10 +217,11 @@ impl TestHarness {
             tree_config.invalid_header_hit_eviction_threshold(),
             header.num_hash(),
             EngineApiKind::Ethereum,
+            state_trie_overlays.clone(),
         );
         let canonical_in_memory_state = CanonicalInMemoryState::with_head(header, None, None);
 
-        let (to_payload_service, _payload_command_rx) = unbounded_channel();
+        let (to_payload_service, payload_command_rx) = unbounded_channel();
         let payload_builder = PayloadBuilderHandle::new(to_payload_service);
 
         let evm_config = MockEvmConfig::default();
@@ -208,10 +231,11 @@ impl TestHarness {
             consensus.clone(),
             evm_config.clone(),
             payload_validator,
-            TreeConfig::default(),
+            tree_config.clone(),
             Box::new(NoopInvalidBlockHook::default()),
             changeset_cache.clone(),
-            reth_tasks::Runtime::test(),
+            state_trie_overlays,
+            runtime.clone(),
         );
 
         let tree = EngineApiTreeHandler::new(
@@ -228,7 +252,7 @@ impl TestHarness {
             EngineApiKind::Ethereum,
             evm_config,
             changeset_cache,
-            reth_tasks::Runtime::test(),
+            runtime,
         );
 
         let block_builder = TestBlockBuilder::default().with_chain_spec((*chain_spec).clone());
@@ -236,6 +260,7 @@ impl TestHarness {
             to_tree_tx: tree.incoming_tx.clone(),
             tree,
             from_tree_rx,
+            payload_command_rx,
             blocks: vec![],
             action_rx,
             block_builder,
@@ -263,13 +288,18 @@ impl TestHarness {
             parent_hash = hash;
         }
 
+        let state_trie_overlays = StateTrieOverlayManager::default();
+        for block in &blocks {
+            state_trie_overlays.insert_block(block.clone());
+        }
+
         self.tree.state.tree_state = TreeState {
             blocks_by_hash,
             blocks_by_number,
             current_canonical_head: blocks.last().unwrap().recovered_block().num_hash(),
             parent_to_child,
             engine_kind: EngineApiKind::Ethereum,
-            cached_canonical_overlay: None,
+            state_trie_overlays,
         };
 
         let last_executed_block = blocks.last().unwrap().clone();
@@ -412,6 +442,7 @@ impl ValidatorTestHarness {
             TreeConfig::default(),
             Box::new(NoopInvalidBlockHook::default()),
             changeset_cache,
+            StateTrieOverlayManager::default(),
             reth_tasks::Runtime::test(),
         );
 
@@ -565,6 +596,107 @@ async fn test_tree_persist_blocks() {
     }
 }
 
+#[test]
+fn on_new_persisted_block_queues_sparse_trie_prune_request() {
+    let blocks: Vec<_> = TestBlockBuilder::eth().get_executed_blocks(1..4).collect();
+    let mut test_harness = TestHarness::new(MAINNET.clone()).with_blocks(blocks.clone());
+    test_harness
+        .tree
+        .persistence_state
+        .finish(blocks[0].recovered_block().hash(), blocks[0].recovered_block().number);
+
+    test_harness.tree.on_new_persisted_block().unwrap();
+
+    assert!(test_harness.tree.state.pending_sparse_trie_prune());
+}
+
+#[test]
+fn on_new_persisted_block_queues_sparse_trie_prune_with_in_memory_blocks() {
+    let blocks: Vec<_> = TestBlockBuilder::eth().get_executed_blocks(1..4).collect();
+    let mut test_harness = TestHarness::new(MAINNET.clone()).with_blocks(blocks.clone());
+    test_harness
+        .tree
+        .persistence_state
+        .finish(blocks[0].recovered_block().hash(), blocks[0].recovered_block().number);
+
+    test_harness.tree.on_new_persisted_block().unwrap();
+
+    assert!(test_harness.tree.state.pending_sparse_trie_prune());
+}
+
+#[test]
+fn on_new_persisted_block_skips_sparse_trie_prune_when_state_root_task_disabled() {
+    let blocks: Vec<_> = TestBlockBuilder::eth().get_executed_blocks(1..4).collect();
+    let configs = [
+        TreeConfig::default().with_has_enough_parallelism(false),
+        TreeConfig::default().with_has_enough_parallelism(true).with_state_root_fallback(true),
+        TreeConfig::default().with_has_enough_parallelism(true).with_skip_state_root(true),
+    ];
+
+    for config in configs {
+        let mut test_harness = TestHarness::new(MAINNET.clone()).with_blocks(blocks.clone());
+        test_harness.tree.config = config;
+        test_harness
+            .tree
+            .persistence_state
+            .finish(blocks[0].recovered_block().hash(), blocks[0].recovered_block().number);
+
+        test_harness.tree.on_new_persisted_block().unwrap();
+
+        assert!(!test_harness.tree.state.pending_sparse_trie_prune());
+    }
+}
+
+#[test]
+fn remove_blocks_clears_pending_sparse_trie_prune_request() {
+    let mut test_harness = TestHarness::new(MAINNET.clone());
+    test_harness.tree.persistence_state.last_persisted_block =
+        BlockNumHash { hash: B256::random(), number: 10 };
+    test_harness.tree.state.set_pending_sparse_trie_prune(true);
+
+    test_harness.tree.remove_blocks(9);
+
+    assert!(!test_harness.tree.state.pending_sparse_trie_prune());
+}
+
+#[test]
+fn process_payload_attributes_shares_sparse_trie_during_validation_fallback() {
+    let config = TreeConfig::default()
+        .with_has_enough_parallelism(true)
+        .with_state_root_fallback(true)
+        .with_share_sparse_trie_with_payload_builder(true);
+    let blocks: Vec<_> = TestBlockBuilder::eth().get_executed_blocks(1..2).collect();
+    let mut test_harness = TestHarness::with_config(MAINNET.clone(), config).with_blocks(blocks);
+    let head =
+        test_harness.blocks.last().unwrap().recovered_block().clone_sealed_header().clone_header();
+    let head_hash = test_harness.blocks.last().unwrap().recovered_block().hash();
+    let state = test_harness.fcu_state(head_hash);
+    test_harness.tree.state.set_pending_sparse_trie_prune(true);
+
+    let updated = test_harness.tree.process_payload_attributes(
+        EthPayloadAttributes {
+            timestamp: head.timestamp() + 1,
+            prev_randao: B256::ZERO,
+            suggested_fee_recipient: Default::default(),
+            withdrawals: None,
+            parent_beacon_block_root: None,
+            slot_number: None,
+            target_gas_limit: None,
+        },
+        &head,
+        state,
+    );
+
+    assert_eq!(updated.forkchoice_status(), ForkchoiceStatus::Valid);
+    assert!(!test_harness.tree.state.pending_sparse_trie_prune());
+
+    let command = test_harness.payload_command_rx.try_recv().unwrap();
+    let PayloadServiceCommand::BuildNewPayload(input, _, _) = command else {
+        panic!("expected build new payload command")
+    };
+    assert!(input.state_root_handle.is_some());
+}
+
 #[tokio::test]
 async fn test_in_memory_state_trait_impl() {
     let blocks: Vec<_> = TestBlockBuilder::eth().get_executed_blocks(0..10).collect();
@@ -663,6 +795,38 @@ fn test_disconnected_block() {
             missing_ancestor: sealed.parent_num_hash()
         })
     );
+}
+
+#[test]
+fn test_validated_payload_bal_is_inserted_into_store() {
+    let mut block_builder = TestBlockBuilder::eth();
+    let parent = block_builder.get_executed_block_with_number(1, B256::ZERO);
+    let child = block_builder.get_executed_block_with_number(2, parent.recovered_block().hash());
+    let child_block = child.recovered_block().clone_sealed_block();
+    let child_num_hash = child_block.num_hash();
+    let raw_bal = Bytes::from_static(&[0xc0]);
+
+    let mut test_harness = TestHarness::new(MAINNET.clone()).with_blocks(vec![parent]);
+    let bal_store = BalStoreHandle::new(InMemoryBalStore::default());
+    test_harness.tree.provider.bal_store = bal_store.clone();
+
+    let outcome = test_harness
+        .tree
+        .insert_block_or_payload(
+            child_block.block_with_parent(),
+            child,
+            |_, executed, _| {
+                Ok::<_, InsertPayloadError<Block>>(
+                    ValidationOutput::new(executed, None)
+                        .with_raw_bal(Some(RawBal::from(raw_bal.clone()))),
+                )
+            },
+            |_, executed| Ok(executed.recovered_block().clone_sealed_block()),
+        )
+        .unwrap();
+
+    assert_eq!(outcome, InsertPayloadOk::Inserted(BlockStatus::Valid));
+    assert_eq!(bal_store.get_by_hash(child_num_hash.hash).unwrap(), Some(raw_bal));
 }
 
 #[tokio::test]
@@ -1389,20 +1553,16 @@ fn test_on_new_payload_malformed_payload() {
     }
 }
 
-/// Test different `StateRootStrategy` paths: `StateRootTask` with empty/non-empty prefix sets,
-/// `Parallel`, `Synchronous`
+/// Test different state-root job paths: the sparse-trie job and the synchronous fallback.
 #[test]
 fn test_state_root_strategy_paths() {
     reth_tracing::init_test_tracing();
 
     let mut test_harness = TestHarness::new(MAINNET.clone());
 
-    // Test multiple scenarios to ensure different StateRootStrategy paths are taken:
-    // 1. `StateRootTask` with empty prefix_sets → uses payload_processor.spawn()
-    // 2. `StateRootTask` with non-empty prefix_sets → switches to `Parallel`, uses
-    //    spawn_cache_exclusive()
-    // 3. `Parallel` strategy → uses spawn_cache_exclusive()
-    // 4. `Synchronous` strategy → uses spawn_cache_exclusive()
+    // Test multiple scenarios to ensure different state-root job paths are taken:
+    // 1. The default strategy spawns the sparse-trie state-root task.
+    // 2. With state-root fallback enabled, the synchronous job computes the root directly.
 
     let s1 = include_str!("../../test-data/holesky/1.rlp");
     let data1 = Bytes::from_str(s1).unwrap();
@@ -1445,12 +1605,9 @@ fn test_state_root_strategy_paths() {
 
     assert!(outcome2.outcome.is_syncing(), "Second strategy path should work");
 
-    // This test passes if multiple StateRootStrategy scenarios work correctly,
-    // confirming that passing arguments directly doesn't break:
-    // - `StateRootTask` strategy with empty/non-empty prefix_sets
-    // - Dynamic strategy switching (StateRootTask → Parallel)
-    // - Parallel and Synchronous strategy paths
-    // - All parameter passing through the args struct
+    // This test passes if multiple state-root job scenarios work correctly:
+    // - the sparse-trie job
+    // - the synchronous job
 }
 
 // ================================================================================================
@@ -1459,7 +1616,7 @@ fn test_state_root_strategy_paths() {
 //
 // This test suite exercises `validate_block_with_state` across different scenarios including:
 // - Basic block validation with state root computation
-// - Strategy selection based on conditions (`StateRootTask`, `Parallel`, `Synchronous`)
+// - Strategy selection based on conditions (`StateRootTask`, `Synchronous`)
 // - Trie update retention and discard logic
 // - Error precedence handling (consensus vs execution errors)
 // - Different validation scenarios (valid, invalid consensus, invalid execution blocks)
@@ -2253,4 +2410,321 @@ fn test_on_valid_downloaded_head_sync_target_returns_make_canonical() {
         }
         other => panic!("Expected MakeCanonical for head block, got: {other:?}"),
     }
+}
+
+/// Tests that canonicalizing a downloaded sync target head also applies the tracked finalized
+/// block from the original `SYNCING` forkchoice state.
+#[test]
+fn test_canonicalizing_downloaded_sync_target_head_updates_finalized() {
+    reth_tracing::init_test_tracing();
+
+    let chain_spec = MAINNET.clone();
+    let mut test_harness = TestHarness::new(chain_spec);
+
+    let blocks: Vec<_> = test_harness.block_builder.get_executed_blocks(0..3).collect();
+    let genesis = &blocks[0];
+    let finalized_block = &blocks[1];
+    let head_block = &blocks[2];
+
+    test_harness = test_harness.with_blocks(vec![
+        genesis.clone(),
+        finalized_block.clone(),
+        head_block.clone(),
+    ]);
+
+    let finalized_num_hash = finalized_block.recovered_block().num_hash();
+    let head_num_hash = head_block.recovered_block().num_hash();
+
+    test_harness.tree.state.tree_state.set_canonical_head(genesis.recovered_block().num_hash());
+
+    let fcu_state = ForkchoiceState {
+        head_block_hash: head_num_hash.hash,
+        safe_block_hash: head_num_hash.hash,
+        finalized_block_hash: finalized_num_hash.hash,
+    };
+    test_harness
+        .tree
+        .state
+        .forkchoice_state_tracker
+        .set_latest(fcu_state, ForkchoiceStatus::Syncing);
+
+    let event = test_harness
+        .tree
+        .on_valid_downloaded_block(head_num_hash)
+        .unwrap()
+        .expect("expected canonicalization event for sync target head");
+
+    test_harness.tree.on_tree_event(event).unwrap();
+
+    assert_eq!(test_harness.tree.state.tree_state.canonical_block_hash(), head_num_hash.hash);
+    assert_eq!(
+        test_harness.tree.canonical_in_memory_state.get_finalized_num_hash(),
+        Some(finalized_num_hash),
+        "Finalized block from the syncing FCU should be applied once the head becomes canonical"
+    );
+    assert_eq!(
+        test_harness.tree.canonical_in_memory_state.get_safe_num_hash(),
+        Some(head_num_hash),
+        "Safe block from the syncing FCU should be applied once the head becomes canonical"
+    );
+    assert_eq!(
+        test_harness.tree.state.forkchoice_state_tracker.last_valid_state(),
+        Some(fcu_state)
+    );
+    assert!(test_harness.tree.state.forkchoice_state_tracker.sync_target_state().is_none());
+}
+
+// --- Backfill target selection tests ---
+//
+// Cover `backfill_target_hash` and its consumer `backfill_sync_target`, exercised end-to-end
+// via `on_disconnected_downloaded_block`. The OP Stack branch targets head; the Ethereum
+// branch targets finalized. When the CL has no finalized hash yet, the optimistic fallback to
+// head is handled by `backfill_sync_target`.
+
+#[test]
+fn test_backfill_target_hash_eth_returns_finalized() {
+    let test_harness = TestHarness::new(MAINNET.clone());
+    let head = B256::from([0xAA; 32]);
+    let finalized = B256::from([0xBB; 32]);
+    let state = ForkchoiceState {
+        head_block_hash: head,
+        safe_block_hash: B256::ZERO,
+        finalized_block_hash: finalized,
+    };
+
+    assert_eq!(test_harness.tree.backfill_target_hash(state), finalized);
+}
+
+#[test]
+fn test_backfill_target_hash_eth_returns_zero_finalized() {
+    let test_harness = TestHarness::new(MAINNET.clone());
+    let head = B256::from([0xAA; 32]);
+    let state = ForkchoiceState {
+        head_block_hash: head,
+        safe_block_hash: B256::ZERO,
+        finalized_block_hash: B256::ZERO,
+    };
+
+    assert_eq!(test_harness.tree.backfill_target_hash(state), B256::ZERO);
+}
+
+#[test]
+fn test_backfill_target_hash_opstack_returns_head() {
+    let mut test_harness = TestHarness::new(MAINNET.clone());
+    test_harness.tree.engine_kind = EngineApiKind::OpStack;
+    let head = B256::from([0xAA; 32]);
+    let finalized = B256::from([0xBB; 32]);
+    let state = ForkchoiceState {
+        head_block_hash: head,
+        safe_block_hash: B256::ZERO,
+        finalized_block_hash: finalized,
+    };
+
+    // OP Stack: finalized can lag far behind the canonical tip; target head regardless.
+    assert_eq!(test_harness.tree.backfill_target_hash(state), head);
+}
+
+#[test]
+fn test_backfill_sync_target_without_sync_state_returns_none() {
+    let test_harness = TestHarness::new(MAINNET.clone());
+    assert_eq!(
+        test_harness.tree.backfill_sync_target(0, MIN_BLOCKS_FOR_PIPELINE_RUN + 100, None),
+        None
+    );
+}
+
+/// On OP Stack, a disconnected downloaded block whose missing parent is far ahead of the
+/// canonical tip should trigger a backfill targeting `head_block_hash`, not finalized.
+#[test]
+fn test_on_disconnected_downloaded_block_opstack_targets_head() {
+    let mut test_harness = TestHarness::new(MAINNET.clone());
+    test_harness.tree.engine_kind = EngineApiKind::OpStack;
+
+    let head_hash = B256::from([0xAA; 32]);
+    let finalized_hash = B256::from([0xBB; 32]);
+    test_harness.tree.state.forkchoice_state_tracker.set_latest(
+        ForkchoiceState {
+            head_block_hash: head_hash,
+            safe_block_hash: B256::ZERO,
+            finalized_block_hash: finalized_hash,
+        },
+        ForkchoiceStatus::Syncing,
+    );
+
+    let canonical_head = BlockNumHash::new(0, B256::ZERO);
+    let downloaded_block =
+        BlockNumHash::new(MIN_BLOCKS_FOR_PIPELINE_RUN + 100, B256::from([0xCC; 32]));
+    let missing_parent =
+        BlockNumHash::new(MIN_BLOCKS_FOR_PIPELINE_RUN + 99, B256::from([0xDD; 32]));
+
+    let event = test_harness.tree.on_disconnected_downloaded_block(
+        downloaded_block,
+        missing_parent,
+        canonical_head,
+    );
+
+    match event {
+        Some(TreeEvent::BackfillAction(BackfillAction::Start(target))) => {
+            assert_eq!(
+                target.sync_target(),
+                Some(head_hash),
+                "OP Stack backfill should target head, not finalized"
+            );
+        }
+        other => panic!("Expected BackfillAction(Start), got: {other:?}"),
+    }
+}
+
+/// On Ethereum, a disconnected downloaded block whose missing parent is far ahead of the
+/// canonical tip should trigger a backfill targeting `finalized_block_hash`.
+#[test]
+fn test_on_disconnected_downloaded_block_eth_targets_finalized() {
+    let mut test_harness = TestHarness::new(MAINNET.clone());
+
+    let head_hash = B256::from([0xAA; 32]);
+    let finalized_hash = B256::from([0xBB; 32]);
+    test_harness.tree.state.forkchoice_state_tracker.set_latest(
+        ForkchoiceState {
+            head_block_hash: head_hash,
+            safe_block_hash: B256::ZERO,
+            finalized_block_hash: finalized_hash,
+        },
+        ForkchoiceStatus::Syncing,
+    );
+
+    let canonical_head = BlockNumHash::new(0, B256::ZERO);
+    let downloaded_block =
+        BlockNumHash::new(MIN_BLOCKS_FOR_PIPELINE_RUN + 100, B256::from([0xCC; 32]));
+    let missing_parent =
+        BlockNumHash::new(MIN_BLOCKS_FOR_PIPELINE_RUN + 99, B256::from([0xDD; 32]));
+
+    let event = test_harness.tree.on_disconnected_downloaded_block(
+        downloaded_block,
+        missing_parent,
+        canonical_head,
+    );
+
+    match event {
+        Some(TreeEvent::BackfillAction(BackfillAction::Start(target))) => {
+            assert_eq!(
+                target.sync_target(),
+                Some(finalized_hash),
+                "Ethereum backfill should target finalized"
+            );
+        }
+        other => panic!("Expected BackfillAction(Start), got: {other:?}"),
+    }
+}
+
+/// On Ethereum, a zero finalized hash means optimistic sync. The helper still selects finalized,
+/// but the sync-target builder falls back to `head_block_hash`.
+#[test]
+fn test_on_disconnected_downloaded_block_eth_zero_finalized_targets_head() {
+    let mut test_harness = TestHarness::new(MAINNET.clone());
+
+    let head_hash = B256::from([0xAA; 32]);
+    test_harness.tree.state.forkchoice_state_tracker.set_latest(
+        ForkchoiceState {
+            head_block_hash: head_hash,
+            safe_block_hash: B256::ZERO,
+            finalized_block_hash: B256::ZERO,
+        },
+        ForkchoiceStatus::Syncing,
+    );
+
+    let canonical_head = BlockNumHash::new(0, B256::ZERO);
+    let downloaded_block =
+        BlockNumHash::new(MIN_BLOCKS_FOR_PIPELINE_RUN + 100, B256::from([0xCC; 32]));
+    let missing_parent =
+        BlockNumHash::new(MIN_BLOCKS_FOR_PIPELINE_RUN + 99, B256::from([0xDD; 32]));
+
+    let event = test_harness.tree.on_disconnected_downloaded_block(
+        downloaded_block,
+        missing_parent,
+        canonical_head,
+    );
+
+    match event {
+        Some(TreeEvent::BackfillAction(BackfillAction::Start(target))) => {
+            assert_eq!(
+                target.sync_target(),
+                Some(head_hash),
+                "Ethereum optimistic backfill should target head when finalized is zero"
+            );
+        }
+        other => panic!("Expected BackfillAction(Start), got: {other:?}"),
+    }
+}
+
+/// Verifies that the post-backfill recheck path in `on_backfill_sync_finished` retriggers a
+/// new backfill targeting whichever block `backfill_target_hash` resolves to — head on OP
+/// Stack, finalized on Ethereum — when that block is buffered far ahead of where the
+/// just-finished pipeline landed.
+async fn assert_post_backfill_recheck_retriggers_to_buffered_target(engine_kind: EngineApiKind) {
+    reth_tracing::init_test_tracing();
+
+    let chain_spec = MAINNET.clone();
+    let mut test_harness = TestHarness::new(chain_spec.clone());
+    test_harness.tree.engine_kind = engine_kind;
+
+    let base_chain: Vec<_> = test_harness.block_builder.get_executed_blocks(0..1).collect();
+    test_harness = test_harness.with_blocks(base_chain.clone());
+    test_harness
+        .fcu_to(base_chain.last().unwrap().recovered_block().hash(), ForkchoiceStatus::Valid)
+        .await;
+
+    // Long unsynced chain. The last block is what the helper should resolve to.
+    let main_chain = test_harness
+        .block_builder
+        .create_fork(base_chain[0].recovered_block(), MIN_BLOCKS_FOR_PIPELINE_RUN + 50);
+    let target_block = main_chain.last().unwrap().clone();
+    let target_hash = target_block.hash();
+
+    // Buffer the target block — the recheck looks up the helper's resolved hash in the buffer
+    // to decide whether to retrigger.
+    test_harness.tree.state.buffer.insert_block(target_block.clone_sealed_block());
+
+    // Place the buffered hash in the FCU slot the helper picks for this chain type, and put
+    // an unrelated hash (not in buffer) in the other slot to keep the two slots distinct.
+    let other_hash = B256::from([0xFF; 32]);
+    let (head_block_hash, finalized_block_hash) = if engine_kind.is_opstack() {
+        (target_hash, other_hash)
+    } else {
+        (other_hash, target_hash)
+    };
+    test_harness.tree.state.forkchoice_state_tracker.set_latest(
+        ForkchoiceState { head_block_hash, safe_block_hash: head_block_hash, finalized_block_hash },
+        ForkchoiceStatus::Syncing,
+    );
+
+    // Simulate backfill finishing far below the buffered target (gap > threshold).
+    let backfill_finished_block_number = MIN_BLOCKS_FOR_PIPELINE_RUN + 1;
+    let backfill_tip_block = main_chain[(backfill_finished_block_number - 1) as usize].clone();
+    test_harness.provider.add_block(backfill_tip_block.hash(), backfill_tip_block.into_block());
+    let backfill_finished = FromOrchestrator::BackfillSyncFinished(ControlFlow::Continue {
+        block_number: backfill_finished_block_number,
+    });
+    let _ = test_harness.tree.on_engine_message(FromEngine::Event(backfill_finished)).unwrap();
+
+    let event = test_harness.from_tree_rx.recv().await.unwrap();
+    match event {
+        EngineApiEvent::BackfillAction(BackfillAction::Start(emitted_target)) => {
+            assert_eq!(
+                emitted_target.sync_target(),
+                Some(target_hash),
+                "post-backfill recheck should retrigger backfill to the buffered target"
+            );
+        }
+        _ => panic!("Expected BackfillAction(Start), got: {event:#?}"),
+    }
+}
+
+#[tokio::test]
+async fn test_on_backfill_sync_finished_opstack_retriggers_backfill_to_buffered_head() {
+    assert_post_backfill_recheck_retriggers_to_buffered_target(EngineApiKind::OpStack).await;
+}
+
+#[tokio::test]
+async fn test_on_backfill_sync_finished_eth_retriggers_backfill_to_buffered_finalized() {
+    assert_post_backfill_recheck_retriggers_to_buffered_target(EngineApiKind::Ethereum).await;
 }
