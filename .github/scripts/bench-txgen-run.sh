@@ -266,7 +266,7 @@ if [ "$EXECUTION_MODE" = "rpc" ]; then
     echo "::error::RPC mode does not support big blocks, reorg, or BAL"
     exit 1
   fi
-  RETH_ARGS+=(--dev --dev.block-time "${BENCH_BLOCK_TIME:-1s}")
+  RETH_ARGS+=(--chain mainnet --dev --dev.block-time "${BENCH_BLOCK_TIME:-1s}")
 fi
 
 SYNC_STATE_IDLE=false
