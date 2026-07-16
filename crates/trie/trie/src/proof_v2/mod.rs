@@ -19,7 +19,7 @@ use reth_trie_common::{
     prefix_set::PrefixSet, BranchNodeMasks, BranchNodeRef, BranchNodeV2, Nibbles, ProofTrieNodeV2,
     ProofV2Target, RlpNode, TrieNodeV2,
 };
-use std::cmp::Ordering;
+use std::{cmp::Ordering, ops::Bound};
 use tracing::{error, instrument, trace};
 
 mod value;
@@ -1100,7 +1100,52 @@ where
                         child_path.truncate(branch_path_len);
                         child_path.push_unchecked(nibble);
                         if self.prefix_set.contains(&child_path) {
+                            trace!(
+                                target: TRACE_TARGET,
+                                branch_path = ?self.branch_path,
+                                ?nibble,
+                                "Setting child nibble from prefix set on next_child_nibbles",
+                            );
                             next_child_nibbles.set_bit(nibble);
+                        }
+                    }
+                }
+
+                // A cached branch can be a strict descendant of this branch's child. In that
+                // case the child's bit is set before later prefix-set paths in the same child
+                // range have been processed.
+                //
+                // For example:
+                // - Branch at 0x1 is being built
+                // - Cached branch 0x120 is processed
+                //   - Child bit 2 on branch 0x1 is set
+                //   - uncalculated_lower_bound ends up at 0x121
+                // - 0x122 is set in the prefix set
+                //
+                // Once the calculator pops back to 0x1, next_child_nibbles won't have child nibble
+                // 2 set, because the processing of 0x120 will have set that nibble on the
+                // state_mask. We set the child nibble on next_child_nibbles here to indicate that
+                // there might be more work to do at that prefix.
+                if uncalculated_lower_bound_ref.starts_with(&self.branch_path) &&
+                    uncalculated_lower_bound_ref.len() > branch_path_len + 1
+                {
+                    let child_nibble = uncalculated_lower_bound_ref.get_unchecked(branch_path_len);
+                    if curr_state_mask.is_bit_set(child_nibble) {
+                        let child_path = self.child_path_at(child_nibble);
+                        let child_path_upper = child_path.next_without_prefix();
+                        let contains_remaining = self.prefix_set.contains_range((
+                            Bound::Included(uncalculated_lower_bound_ref),
+                            child_path_upper.as_ref().map_or(Bound::Unbounded, Bound::Excluded),
+                        ));
+                        if contains_remaining {
+                            trace!(
+                                target: TRACE_TARGET,
+                                branch_path = ?self.branch_path,
+                                ?uncalculated_lower_bound,
+                                nibble = ?child_nibble,
+                                "Setting child nibble from uncalculated lower bound on next_child_nibbles",
+                            );
+                            next_child_nibbles.set_bit(child_nibble);
                         }
                     }
                 }
@@ -1240,11 +1285,18 @@ where
             // branch node may be the node at this child directly, or this child may be an
             // extension and the cached branch is the child of that extension.
 
-            // All trie nodes prior to `child_path` will not be modified further, so we can seek the
-            // trie cursor to the next cached node at-or-after `child_path`.
-            if trie_cursor_state.path().is_some_and(|path| path < &child_path) {
-                trace!(target: TRACE_TARGET, ?child_path, "Seeking trie cursor to child path");
-                *trie_cursor_state = TrieCursorState::seeked(self.trie_cursor_seek(child_path)?);
+            let child_lower_bound = if uncalculated_lower_bound_ref.starts_with(&child_path) {
+                *uncalculated_lower_bound_ref
+            } else {
+                child_path
+            };
+
+            // All trie nodes prior to `child_lower_bound` have been processed, so seek the trie
+            // cursor to the next cached node at-or-after it.
+            if trie_cursor_state.path().is_some_and(|path| path < &child_lower_bound) {
+                trace!(target: TRACE_TARGET, ?child_lower_bound, "Seeking trie cursor to child path");
+                *trie_cursor_state =
+                    TrieCursorState::seeked(self.trie_cursor_seek(child_lower_bound)?);
             }
 
             // If the next cached branch node is a child of `child_path` then we can assume it is
@@ -1284,7 +1336,7 @@ where
             let child_path_upper = child_path.next_without_prefix();
             trace!(
                 target: TRACE_TARGET,
-                lower=?child_path,
+                lower=?child_lower_bound,
                 upper=?child_path_upper,
                 "Returning sub-trie's key range to calculate",
             );
@@ -1292,7 +1344,7 @@ where
             // Push the current cached branch back onto the stack before returning.
             self.cached_branch_stack.push((cached_path, cached_branch));
 
-            return Ok(Some((child_path, child_path_upper)));
+            return Ok(Some((child_lower_bound, child_path_upper)));
         }
     }
 
@@ -2799,6 +2851,110 @@ mod tests {
             .expect("root hash should succeed")
             .expect("root should get hashed");
         pretty_assertions::assert_eq!(expected_root, got_root);
+    }
+
+    #[test]
+    fn test_prefix_set_root_proof_processes_sibling_after_cached_descendant() {
+        reth_tracing::init_test_tracing();
+
+        fn b256(s: &str) -> B256 {
+            B256::from_slice(&alloy_primitives::hex::decode(s).expect("valid hex string"))
+        }
+
+        let storage: BTreeMap<B256, U256> = [
+            ("1022c69e9d900e40775cd387c134899f465f291dbc3c97899ff6bfb8dc972b37", 45u64),
+            ("1111ad8083c8a3a398b2b781217b989ff4d1ed182f46cc765eda49a7b316139d", 60),
+            ("12012d20943649899b2fc0f87b9840b70ef68e93613aac17c269bf8c5a78a712", 17),
+            ("12014b57b9a162c03d072eb6acd4e936f1c4bc23b803a054347c5ee9a9bcfb9a", 49),
+            ("1203f800840af3f898ab4572f2750106a7c4bd2b3e844b6e7fa72704673cc2c6", 76),
+            ("12208f18fbcd6971c92808721392acbf11d5af58e9143a374cc86e70bdd1f097", 10),
+        ]
+        .into_iter()
+        .map(|(key, value)| (b256(key), U256::from(value)))
+        .collect();
+
+        let dirty = b256("12208f18fbcd6971c92808721392acbf11d5af58e9143a374cc86e70bdd1f097");
+        let harness = ProofTestHarness::new(storage);
+        let expected_root = harness.original_root();
+
+        let mut prefix_set = PrefixSetMut::default();
+        prefix_set.insert(Nibbles::unpack(dirty));
+
+        let trie_cursor =
+            harness.trie_cursor_factory().storage_trie_cursor(harness.hashed_address()).unwrap();
+        let hashed_cursor = harness
+            .hashed_cursor_factory()
+            .hashed_storage_cursor(harness.hashed_address())
+            .unwrap();
+        let mut calculator = StorageProofCalculator::new_storage(trie_cursor, hashed_cursor)
+            .with_prefix_set(prefix_set.freeze());
+
+        let mut targets = vec![ProofV2Target::new(B256::ZERO)];
+        let proof = calculator.storage_proof(harness.hashed_address(), &mut targets).unwrap();
+        let actual_root = calculator.compute_root_hash(&proof).unwrap();
+
+        pretty_assertions::assert_eq!(
+            Some(expected_root),
+            actual_root,
+            "root proof must process a prefix-set sibling after a cached descendant: expected \
+             {expected_root:?}, got {actual_root:?}"
+        );
+    }
+
+    #[test]
+    fn test_prefix_set_root_proof_preserves_clean_sibling_after_cached_branch_collapse() {
+        reth_tracing::init_test_tracing();
+
+        let dirty = B256::right_padding_from(&[0x10, 0x00, 0x10]);
+        let clean_sibling = B256::right_padding_from(&[0x10, 0x10]);
+        let storage = [
+            B256::right_padding_from(&[0x10]),
+            dirty,
+            B256::right_padding_from(&[0x10, 0x01]),
+            B256::right_padding_from(&[0x10, 0x02]),
+            clean_sibling,
+            B256::right_padding_from(&[0x11]),
+            B256::right_padding_from(&[0x12]),
+        ]
+        .into_iter()
+        .map(|key| (key, U256::from(1u64)))
+        .collect();
+
+        let harness = ProofTestHarness::new(storage);
+        let expected_root = harness.original_root();
+
+        let root_with = |prefix_set: PrefixSet| {
+            let trie_cursor = harness
+                .trie_cursor_factory()
+                .storage_trie_cursor(harness.hashed_address())
+                .unwrap();
+            let hashed_cursor = harness
+                .hashed_cursor_factory()
+                .hashed_storage_cursor(harness.hashed_address())
+                .unwrap();
+            let mut calculator = StorageProofCalculator::new_storage(trie_cursor, hashed_cursor)
+                .with_prefix_set(prefix_set);
+
+            let mut targets = vec![ProofV2Target::new(B256::ZERO)];
+            let proof = calculator.storage_proof(harness.hashed_address(), &mut targets).unwrap();
+            calculator.compute_root_hash(&proof).unwrap()
+        };
+
+        let mut prefix_set = PrefixSetMut::default();
+        prefix_set.insert(Nibbles::unpack(dirty));
+        let actual_root = root_with(prefix_set.freeze());
+
+        let mut prefix_set_with_sibling = PrefixSetMut::default();
+        prefix_set_with_sibling.insert(Nibbles::unpack(dirty));
+        prefix_set_with_sibling.insert(Nibbles::unpack(clean_sibling));
+        let control_root = root_with(prefix_set_with_sibling.freeze());
+
+        pretty_assertions::assert_eq!(Some(expected_root), control_root);
+        pretty_assertions::assert_eq!(
+            Some(expected_root),
+            actual_root,
+            "a dirty prefix must not omit a clean sibling after collapsing a cached branch",
+        );
     }
 
     #[test]
