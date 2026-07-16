@@ -1303,38 +1303,53 @@ where
             let always_trigger_payload_job = self.engine_kind.is_opstack() ||
                 self.config.always_process_payload_attributes_on_canonical_head();
 
-            // The Engine API permits skipping an FCU only when its head is a canonical ancestor of
-            // the latest known finalized block. Use the stored finalized block because a later FCU
-            // can carry a zero finalized hash without clearing previously established finality.
-            if !always_trigger_payload_job &&
-                self.canonical_in_memory_state
-                    .get_finalized_header()
-                    .is_some_and(|finalized| canonical_header.number() <= finalized.number())
+            // If not always triggering a new payload job, we need to check if the new head is below
+            // the finalized block, meaning a too deep reorg is requested.
+            //
+            // Change: https://github.com/ethereum/execution-apis/pull/786
+            let too_deep_reorg = if !always_trigger_payload_job &&
+                let Ok(Some(finalized_header)) =
+                    self.find_canonical_header(state.finalized_block_hash)
             {
-                return Ok(Some(Self::valid_outcome(state)));
+                canonical_header.number() <= finalized_header.number()
+            } else {
+                false
+            };
+
+            // TODO: use proper error type when https://github.com/alloy-rs/alloy/pull/3935 is merged
+            if too_deep_reorg {
+                return Ok(Some(TreeOutcome::new(OnForkChoiceUpdated::invalid_state())));
             }
 
-            // Canonical ancestors above finality must become the new head. Chains that always
-            // process canonical-head attributes retain their explicit unwind configuration.
-            if !always_trigger_payload_job || self.config.unwind_canonical_header() {
-                self.update_latest_block_to_canonical_ancestor(&canonical_header)?;
+            if always_trigger_payload_job {
+                // We need to effectively unwind the _canonical_ chain to the FCU's head, which is
+                // part of the canonical chain. We need to update the latest block state to reflect
+                // the canonical ancestor. This ensures that state providers and the transaction
+                // pool operate with the correct chain state after forkchoice update processing, and
+                // new payloads built on the reorg'd head will be added to the tree immediately.
+                if self.config.unwind_canonical_header() {
+                    self.update_latest_block_to_canonical_ancestor(&canonical_header)?;
+                }
+
+                if let Some(attr) = attrs {
+                    debug!(target: "engine::tree", head = canonical_header.number(), "handling payload attributes for canonical head");
+                    // Clone only when we actually need to process the attributes
+                    let updated =
+                        self.process_payload_attributes(attr.clone(), &canonical_header, state);
+                    return Ok(Some(TreeOutcome::new(updated)));
+                }
             }
 
-            if !always_trigger_payload_job &&
-                let Err(outcome) = self.ensure_consistent_forkchoice_state(state)
-            {
-                return Ok(Some(TreeOutcome::new(outcome)));
-            }
+            // According to the Engine API specification, client software MAY skip an update of the
+            // forkchoice state and MUST NOT begin a payload build process if
+            // `forkchoiceState.headBlockHash` references a `VALID` ancestor of the head
+            // of canonical chain, i.e. the ancestor passed payload validation process
+            // and deemed `VALID`. In the case of such an event, client software MUST
+            // return `{payloadStatus: {status: VALID, latestValidHash:
+            // forkchoiceState.headBlockHash, validationError: null}, payloadId: null}`
 
-            if let Some(attr) = attrs {
-                debug!(target: "engine::tree", head = canonical_header.number(), "handling payload attributes for canonical head");
-                // Clone only when we actually need to process the attributes
-                let updated =
-                    self.process_payload_attributes(attr.clone(), &canonical_header, state);
-                return Ok(Some(TreeOutcome::new(updated)));
-            }
-
-            // No payload build was requested.
+            // The head block is already canonical and we're not processing payload attributes,
+            // so we're not triggering a payload job and can return right away
             return Ok(Some(Self::valid_outcome(state)));
         }
 
