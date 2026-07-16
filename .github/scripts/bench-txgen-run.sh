@@ -9,7 +9,7 @@
 # Required env: SCHELK_MOUNT, BENCH_RPC_URL, BENCH_BLOCKS, BENCH_WARMUP_BLOCKS
 # Optional env: BENCH_EXECUTION_MODE, BENCH_BIG_BLOCKS, BENCH_BIG_BLOCKS_TARGET_GAS,
 #               BENCH_REORG, BENCH_BAL,
-#               BENCH_WORK_DIR, BENCH_WAIT_TIME, BENCH_BASELINE_ARGS,
+#               BENCH_WORK_DIR, BENCH_WAIT_TIME, BENCH_BLOCK_TIME, BENCH_BASELINE_ARGS,
 #               BENCH_FEATURE_ARGS, BENCH_OTLP_TRACES_ENDPOINT,
 #               BENCH_OTLP_LOGS_ENDPOINT, BENCH_OTLP_DISABLED,
 #               BENCH_TRACING_CHROME, BENCH_TRACY,
@@ -266,7 +266,7 @@ if [ "$EXECUTION_MODE" = "rpc" ]; then
     echo "::error::RPC mode does not support big blocks, reorg, or BAL"
     exit 1
   fi
-  RETH_ARGS+=(--dev --dev.block-time "${BENCH_WAIT_TIME:-1s}")
+  RETH_ARGS+=(--dev --dev.block-time "${BENCH_BLOCK_TIME:-1s}")
 fi
 
 SYNC_STATE_IDLE=false
