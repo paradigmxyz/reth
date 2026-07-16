@@ -96,8 +96,8 @@ impl SuiteTestHarness {
     ) {
         loop {
             let mut targets: Vec<ProofV2Target> = Vec::new();
-            trie.update_leaves(leaf_updates, |key, min_len| {
-                targets.push(ProofV2Target::new(key).with_min_len(min_len));
+            trie.update_leaves(leaf_updates, |key, parent_path_len| {
+                targets.push(ProofV2Target::new(key).with_parent_path_len(parent_path_len));
             })
             .expect("update_leaves should succeed");
 

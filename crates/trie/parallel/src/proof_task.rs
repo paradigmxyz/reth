@@ -430,7 +430,7 @@ where
         TC: TrieStorageCursor,
         HC: HashedStorageCursor<Value = U256>,
     {
-        let StorageProofInput { hashed_address, mut targets } = input;
+        let StorageProofInput { hashed_address, mut targets, needs_root } = input;
 
         let span = debug_span!(
             target: "trie::proof_task",
@@ -442,14 +442,26 @@ where
         let proof_start = Instant::now();
 
         // If targets is empty it means the caller only wants the root node.
-        let proof = if targets.is_empty() {
+        let (proof, root) = if targets.is_empty() {
             let root_node = calculator.storage_root_node(hashed_address)?;
-            vec![root_node]
+            let root = calculator.compute_root_hash(core::slice::from_ref(&root_node))?;
+            (vec![root_node], root)
         } else {
-            calculator.storage_proof(hashed_address, &mut targets)?
-        };
+            // A partial proof cannot provide the storage root. Calculate it separately without
+            // changing the target's parent context, then reset the storage cursors by starting the
+            // targeted proof.
+            let root =
+                if needs_root && targets.iter().all(|target| target.parent_path_len.is_some()) {
+                    let root_node = calculator.storage_root_node(hashed_address)?;
+                    calculator.compute_root_hash(core::slice::from_ref(&root_node))?
+                } else {
+                    None
+                };
 
-        let root = calculator.compute_root_hash(&proof)?;
+            let proof = calculator.storage_proof(hashed_address, &mut targets)?;
+            let root = if root.is_some() { root } else { calculator.compute_root_hash(&proof)? };
+            (proof, root)
+        };
 
         trace!(
             target: "trie::proof_task",
@@ -1062,7 +1074,7 @@ where
 fn dispatch_v2_storage_proofs(
     storage_work_tx: &CrossbeamSender<StorageWorkerJob>,
     account_targets: &[ProofV2Target],
-    mut storage_targets: B256Map<Vec<ProofV2Target>>,
+    storage_targets: B256Map<Vec<ProofV2Target>>,
 ) -> Result<B256Map<CrossbeamReceiver<StorageProofResultMessage>>, StateRootTaskError> {
     if storage_targets.is_empty() {
         return Ok(B256Map::default())
@@ -1071,18 +1083,8 @@ fn dispatch_v2_storage_proofs(
     let mut storage_proof_receivers =
         B256Map::with_capacity_and_hasher(storage_targets.len(), Default::default());
 
-    // Collect hashed addresses from account targets that need their storage roots computed
+    // Collect hashed addresses from account targets that need their storage roots computed.
     let account_target_addresses: B256Set = account_targets.iter().map(|t| t.key()).collect();
-
-    // For storage targets with associated account proofs, ensure the first target has
-    // min_len(0) so the root node is returned for storage root computation
-    for (hashed_address, targets) in &mut storage_targets {
-        if account_target_addresses.contains(hashed_address) &&
-            let Some(first) = targets.first_mut()
-        {
-            *first = first.with_min_len(0);
-        }
-    }
 
     // Sort storage targets by address for optimal dispatch order.
     // Since trie walk processes accounts in lexicographical order, dispatching in the same order
@@ -1094,7 +1096,8 @@ fn dispatch_v2_storage_proofs(
     for (hashed_address, targets) in sorted_storage_targets {
         // Create channel for receiving StorageProofResultMessage
         let (result_tx, result_rx) = crossbeam_channel::unbounded();
-        let input = StorageProofInput::new(hashed_address, targets);
+        let needs_root = account_target_addresses.contains(&hashed_address);
+        let input = StorageProofInput::new(hashed_address, targets, needs_root);
 
         storage_work_tx
             .send(StorageWorkerJob::StorageProof { input, proof_result_sender: result_tx })
@@ -1117,12 +1120,14 @@ pub struct StorageProofInput {
     pub hashed_address: B256,
     /// The set of proof targets
     pub targets: Vec<ProofV2Target>,
+    /// Whether the account proof needs the storage root for leaf encoding.
+    pub needs_root: bool,
 }
 
 impl StorageProofInput {
     /// Creates a new [`StorageProofInput`] with the given hashed address and target slots.
-    pub const fn new(hashed_address: B256, targets: Vec<ProofV2Target>) -> Self {
-        Self { hashed_address, targets }
+    pub const fn new(hashed_address: B256, targets: Vec<ProofV2Target>, needs_root: bool) -> Self {
+        Self { hashed_address, targets, needs_root }
     }
 }
 

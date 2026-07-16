@@ -85,11 +85,11 @@ pub(super) struct SparseTrieCacheTask<A = ArenaParallelSparseTrie, S = ArenaPara
     ///     to complete.
     pending_account_updates: B256Map<Option<Option<Account>>>,
     /// Cache of account proof targets that were already fetched/requested from the proof workers.
-    /// account -> lowest `min_len` requested.
-    fetched_account_targets: B256Map<u8>,
+    /// Account to the broadest requested parent context (`None` sorts before every known parent).
+    fetched_account_targets: B256Map<Option<u8>>,
     /// Cache of storage proof targets that have already been fetched/requested from the proof
-    /// workers. account -> slot -> lowest `min_len` requested.
-    fetched_storage_targets: B256Map<B256Map<u8>>,
+    /// workers. Account to slot to the broadest requested parent context.
+    fetched_storage_targets: B256Map<B256Map<Option<u8>>>,
     /// Reusable buffer for RLP encoding of accounts.
     account_rlp_buf: Vec<u8>,
     /// Whether the last state update has been received.
@@ -638,16 +638,17 @@ where
             let mut targets = Vec::new();
 
             let updates_len_before = updates.len();
-            trie.update_leaves(updates, |path, min_len| match fetched.entry(path) {
+            trie.update_leaves(updates, |path, parent_path_len| match fetched.entry(path) {
                 Entry::Occupied(mut entry) => {
-                    if min_len < *entry.get() {
-                        entry.insert(min_len);
-                        targets.push(ProofV2Target::new(path).with_min_len(min_len));
+                    if parent_path_len < *entry.get() {
+                        entry.insert(parent_path_len);
+                        targets
+                            .push(ProofV2Target::new(path).with_parent_path_len(parent_path_len));
                     }
                 }
                 Entry::Vacant(entry) => {
-                    entry.insert(min_len);
-                    targets.push(ProofV2Target::new(path).with_min_len(min_len));
+                    entry.insert(parent_path_len);
+                    targets.push(ProofV2Target::new(path).with_parent_path_len(parent_path_len));
                 }
             })?;
             let updates_len_after = updates.len();
@@ -681,22 +682,25 @@ where
 
         let updates_len_before = account_updates.len();
 
-        self.trie.trie_mut().update_leaves(account_updates, |target, min_len| {
-            match self.fetched_account_targets.entry(target) {
+        self.trie.trie_mut().update_leaves(
+            account_updates,
+            |target, parent_path_len| match self.fetched_account_targets.entry(target) {
                 Entry::Occupied(mut entry) => {
-                    if min_len < *entry.get() {
-                        entry.insert(min_len);
-                        self.pending_targets
-                            .push_account_target(ProofV2Target::new(target).with_min_len(min_len));
+                    if parent_path_len < *entry.get() {
+                        entry.insert(parent_path_len);
+                        self.pending_targets.push_account_target(
+                            ProofV2Target::new(target).with_parent_path_len(parent_path_len),
+                        );
                     }
                 }
                 Entry::Vacant(entry) => {
-                    entry.insert(min_len);
-                    self.pending_targets
-                        .push_account_target(ProofV2Target::new(target).with_min_len(min_len));
+                    entry.insert(parent_path_len);
+                    self.pending_targets.push_account_target(
+                        ProofV2Target::new(target).with_parent_path_len(parent_path_len),
+                    );
                 }
-            }
-        })?;
+            },
+        )?;
 
         let updates_len_after = account_updates.len();
         self.account_cache_hits += (updates_len_before - updates_len_after) as u64;
@@ -1286,8 +1290,8 @@ mod tests {
         task.account_updates.insert(account, LeafUpdate::Touched);
         task.storage_updates.entry(account).or_default().insert(slot, LeafUpdate::Touched);
         task.pending_account_updates.insert(account, None);
-        task.fetched_account_targets.insert(account_target, 0);
-        task.fetched_storage_targets.entry(account).or_default().insert(storage_target, 12);
+        task.fetched_account_targets.insert(account_target, None);
+        task.fetched_storage_targets.entry(account).or_default().insert(storage_target, Some(11));
         task.in_flight_proof_batches = 1;
 
         assert!(task.ensure_not_stalled(false).is_ok());

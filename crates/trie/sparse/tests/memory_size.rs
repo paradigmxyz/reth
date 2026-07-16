@@ -88,8 +88,8 @@ fn build_trie(num_leaves: usize) -> (TrieTestHarness, ArenaParallelSparseTrie) {
 
     loop {
         let mut proof_targets: Vec<ProofV2Target> = Vec::new();
-        trie.update_leaves(&mut leaf_updates, |key, min_len| {
-            proof_targets.push(ProofV2Target::new(key).with_min_len(min_len));
+        trie.update_leaves(&mut leaf_updates, |key, parent_path_len| {
+            proof_targets.push(ProofV2Target::new(key).with_parent_path_len(parent_path_len));
         })
         .expect("update_leaves");
 
