@@ -34,10 +34,6 @@ where
         + Debug
         + 'static,
 {
-    fn tracked_block_hash(&self) -> B256 {
-        self.pool.block_info().last_seen_block_hash
-    }
-
     fn best_transactions(&self, parent_hash: B256) -> Option<TxPoolPrewarmTransactions<N>> {
         let block_info = self.pool.block_info();
         if block_info.last_seen_block_hash != parent_hash {

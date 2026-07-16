@@ -46,9 +46,6 @@ pub type TxPoolPrewarmTransactions<N> =
 
 /// Source of txpool transactions for best-effort cache prewarming.
 pub trait TxPoolPrewarmSource<N: NodePrimitives>: Send + Sync + Debug {
-    /// Returns the canonical block hash currently tracked by the pool.
-    fn tracked_block_hash(&self) -> B256;
-
     /// Opens a live best-transactions iterator for `parent_hash`.
     ///
     /// The worker opens this once per canonical parent and retains it across empty polls, snapshot
@@ -129,6 +126,25 @@ struct TxPoolSnapshotPublicationState {
     snapshot: Option<TxPoolPrewarmCacheSnapshot>,
 }
 
+/// Keeps txpool prewarming paused until the cache-sensitive work is complete.
+#[derive(Debug)]
+pub(super) struct TxPoolPrewarmPauseGuard {
+    publication: Arc<TxPoolSnapshotPublication>,
+    wait_duration: Duration,
+}
+
+impl TxPoolPrewarmPauseGuard {
+    pub(super) const fn wait_duration(&self) -> Duration {
+        self.wait_duration
+    }
+}
+
+impl Drop for TxPoolPrewarmPauseGuard {
+    fn drop(&mut self) {
+        self.publication.resume();
+    }
+}
+
 impl TxPoolSnapshotPublication {
     fn begin_head(&self) -> bool {
         let mut state = self.state.lock().expect("txpool snapshot publication lock poisoned");
@@ -143,14 +159,14 @@ impl TxPoolSnapshotPublication {
         self.paused.store(true, Ordering::Release);
     }
 
-    fn pause_and_wait(&self) -> Duration {
+    fn pause_and_wait(self: &Arc<Self>) -> TxPoolPrewarmPauseGuard {
         let start = Instant::now();
         self.pause();
         let mut state = self.state.lock().expect("txpool snapshot publication lock poisoned");
         while state.active {
             state = self.idle.wait(state).expect("txpool snapshot publication lock poisoned");
         }
-        start.elapsed()
+        TxPoolPrewarmPauseGuard { publication: Arc::clone(self), wait_duration: start.elapsed() }
     }
 
     fn resume(&self) {
@@ -249,13 +265,8 @@ where
     Evm: ConfigureEvm<Primitives = N>,
 {
     /// Cancels speculative work and waits for any provider-backed EVM call to release its state.
-    pub(crate) fn cancel_and_wait(&self) -> Duration {
+    pub(crate) fn cancel_and_wait(&self) -> TxPoolPrewarmPauseGuard {
         self.publication.pause_and_wait()
-    }
-
-    /// Resumes work after an explicit cache wait, including early-return payload paths.
-    pub(crate) fn resume_after_wait(&self) {
-        self.publication.resume();
     }
 }
 
@@ -381,14 +392,7 @@ fn txpool_prewarm_loop<N, P, Evm>(
             continue
         }
 
-        let tracked_hash = source.tracked_block_hash();
-        if pending.as_ref().is_none_or(|job| job.parent_hash != tracked_hash) {
-            if let Some(request) = requests.wait(Some(TXPOOL_HEAD_POLL_INTERVAL)) {
-                pending = Some(request);
-            }
-            continue
-        }
-        let job = pending.take().expect("matching canonical request exists");
+        let job = pending.take().expect("canonical request exists");
 
         if best_txs_parent_hash != Some(job.parent_hash) {
             let Some(opened) = source.best_transactions(job.parent_hash) else {
@@ -398,11 +402,6 @@ fn txpool_prewarm_loop<N, P, Evm>(
             };
             best_txs = Some(opened);
             best_txs_parent_hash = Some(job.parent_hash);
-        }
-
-        if source.tracked_block_hash() != job.parent_hash {
-            pending = Some(job);
-            continue
         }
 
         // Wait for pool maintenance to catch up to the authoritative canonical-head request
@@ -427,12 +426,9 @@ fn txpool_prewarm_loop<N, P, Evm>(
         while !publication.is_paused() {
             if let Some(request) = requests.take() {
                 pending = Some(request);
-            }
-            if requests.is_closed() || publication.is_paused() {
                 break
             }
-
-            if source.tracked_block_hash() != job.parent_hash {
+            if requests.is_closed() || publication.is_paused() {
                 break
             }
 
@@ -476,10 +472,7 @@ fn txpool_prewarm_loop<N, P, Evm>(
             }
         }
 
-        if !requests.is_closed() &&
-            pending.is_none() &&
-            source.tracked_block_hash() == job.parent_hash
-        {
+        if !requests.is_closed() && pending.is_none() {
             pending = Some(job);
         }
     }
@@ -575,5 +568,16 @@ mod tests {
         let snapshot = TxPoolPrewarmCache::default().snapshot(parent_hash);
         assert!(!activity_guard.publish(snapshot));
         assert!(publication.snapshot(parent_hash).is_none());
+    }
+
+    #[test]
+    fn pause_guard_resumes_publication_on_drop() {
+        let publication = Arc::new(TxPoolSnapshotPublication::default());
+
+        let guard = publication.pause_and_wait();
+        assert!(publication.is_paused());
+
+        drop(guard);
+        assert!(!publication.is_paused());
     }
 }
