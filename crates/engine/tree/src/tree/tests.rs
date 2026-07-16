@@ -903,6 +903,17 @@ async fn test_holesky_payload() {
 }
 
 #[test]
+fn test_backpressure_waits_for_block_removal() {
+    let blocks: Vec<_> = TestBlockBuilder::eth().get_executed_blocks(1..4).collect();
+    let mut test_harness = TestHarness::new(MAINNET.clone()).with_blocks(blocks);
+
+    let (_remove_tx, remove_rx) = crossbeam_channel::bounded(1);
+    test_harness.tree.persistence_state.start_remove(1, remove_rx);
+
+    assert!(test_harness.tree.should_backpressure());
+}
+
+#[test]
 fn test_backpressure_waits_for_persistence_before_reading_incoming() {
     let blocks: Vec<_> = TestBlockBuilder::eth().get_executed_blocks(1..4).collect();
     let mut test_harness = TestHarness::new(MAINNET.clone()).with_blocks(blocks.clone());
@@ -1411,7 +1422,25 @@ async fn test_debug_set_head_rewinds_to_finalized_block() {
     let blocks: Vec<_> = test_block_builder.get_executed_blocks(1..5).collect();
     test_harness = test_harness.with_blocks(blocks.clone());
 
-    let target = blocks[1].recovered_block().clone_sealed_header();
+    // Model a persisted parent with only its child retained in the execution tree. If that child
+    // survives the rewind, its state provider remains anchored to state that persistence removes.
+    let target_block = blocks[1].clone();
+    let current = blocks[3].clone();
+    let persisted = blocks[2].recovered_block().num_hash();
+    test_harness.tree.state.tree_state.reset(current.recovered_block().num_hash());
+    test_harness.tree.state.tree_state.insert_executed(target_block.clone());
+    test_harness.tree.state.tree_state.insert_executed(current.clone());
+    test_harness.tree.persistence_state.last_persisted_block = persisted;
+    let (historical, overlay) = test_harness
+        .tree
+        .state
+        .tree_state
+        .blocks_by_hash(current.recovered_block().hash())
+        .unwrap();
+    assert_eq!(historical, persisted.hash);
+    assert_eq!(overlay.len(), 1);
+
+    let target = target_block.recovered_block().clone_sealed_header();
     let safe = blocks[2].recovered_block().clone_sealed_header();
     test_harness.tree.canonical_in_memory_state.set_finalized(target.clone());
     test_harness.tree.canonical_in_memory_state.set_safe(safe);
@@ -1419,6 +1448,12 @@ async fn test_debug_set_head_rewinds_to_finalized_block() {
     test_harness.debug_set_head(target.number).await.unwrap();
 
     assert_eq!(test_harness.tree.state.tree_state.current_canonical_head, target.num_hash());
+    assert_eq!(test_harness.tree.state.tree_state.block_count(), 0);
+    assert!(blocks.iter().all(|block| !test_harness
+        .tree
+        .state
+        .tree_state
+        .contains_hash(&block.recovered_block().hash())));
     assert_eq!(test_harness.tree.canonical_in_memory_state.get_canonical_head(), target);
     assert_eq!(
         test_harness.tree.canonical_in_memory_state.get_finalized_num_hash(),
