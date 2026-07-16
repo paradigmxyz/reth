@@ -2152,15 +2152,6 @@ where
     }
 
     /// Returns the blocks and frontiers for the next persistence cycle.
-    ///
-    /// Threshold persistence advances the Finish checkpoint to the configured in-memory block
-    /// buffer target. The hashed-state/trie frontier follows behind it by at most
-    /// `num_state_masking_blocks`; blocks above that frontier are the fixed masking suffix retained
-    /// in memory. Both frontiers are monotonic, so the suffix grows to its configured size and then
-    /// slides forward as old masking blocks catch up to disk.
-    ///
-    /// Head persistence is used for graceful shutdown and aligns both frontiers at the canonical
-    /// head, leaving no masking suffix.
     fn get_save_blocks_input(
         &self,
         target: PersistTarget,
