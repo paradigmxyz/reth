@@ -52,7 +52,7 @@ pub use provider::{
 };
 
 mod save_blocks;
-pub use save_blocks::{SaveBlocksPlan, SaveBlocksPlanStep};
+pub use save_blocks::SaveBlocksInput;
 
 use super::ProviderNodeTypes;
 use reth_trie::KeccakKeyHasher;

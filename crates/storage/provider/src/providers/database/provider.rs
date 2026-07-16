@@ -1,4 +1,4 @@
-use super::SaveBlocksPlan;
+use super::SaveBlocksInput;
 use crate::{
     changesets_utils::StorageRevertsIter,
     providers::{
@@ -559,62 +559,124 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
     }
 
     /// Creates the context for `RocksDB` writes.
-    fn rocksdb_write_ctx(&self, first_block: BlockNumber) -> RocksDBWriteCtx {
+    fn rocksdb_write_ctx(
+        &self,
+        first_block: BlockNumber,
+        storage_settings: StorageSettings,
+    ) -> RocksDBWriteCtx {
         RocksDBWriteCtx {
             first_block_number: first_block,
             prune_tx_lookup: self.prune_modes.transaction_lookup,
-            storage_settings: self.cached_storage_settings(),
+            storage_settings,
             pending_batches: self.pending_rocksdb_batches.clone(),
         }
     }
 
     /// Writes executed blocks and state to storage.
     ///
-    /// This method parallelizes static file (SF) writes with MDBX writes.
-    /// The SF thread writes headers, transactions, senders (if SF), and receipts (if SF, Full mode
-    /// only). The main thread writes MDBX data (indices, state, trie - Full mode only).
-    ///
-    /// `plan.steps` describes which ranges of `plan.blocks` persist non-state/trie data, which
-    /// ranges persist state/trie data, and which ranges should mask durable state/trie writes.
-    ///
-    /// In the partial-persistence case this typically includes:
-    /// - a trie catchup prefix whose non-state/trie data is already durable;
-    /// - a fully persisted middle region;
-    /// - and a state-masking tail whose non-state/trie data becomes durable in this call while its
-    ///   state/trie data remains in memory.
-    ///
     /// Use [`SaveBlocksMode::Full`] for production (includes receipts, state, trie).
     /// Use [`SaveBlocksMode::BlocksOnly`] for block structure only (used by `insert_block`).
-    #[instrument(
-        level = "debug",
-        target = "providers::db",
-        skip_all,
-        fields(
-            block_count = plan.blocks.len(),
-            step_count = plan.steps.len()
-        )
-    )]
+    #[instrument(level = "debug", target = "providers::db", skip_all, fields(block_count = blocks.len()))]
     pub fn save_blocks(
         &self,
-        plan: &SaveBlocksPlan<N::Primitives>,
+        blocks: Vec<ExecutedBlock<N::Primitives>>,
         save_mode: SaveBlocksMode,
     ) -> ProviderResult<()> {
-        let blocks = &plan.blocks;
         if blocks.is_empty() {
             debug!(target: "providers::db", "Attempted to write empty block range");
             return Ok(())
         }
 
-        let persist_rest_range = plan.persist_rest_range();
-        let persist_rest_blocks =
-            persist_rest_range.as_ref().map(|range| &blocks[range.clone()]).unwrap_or(&[]);
+        let last_block_number =
+            blocks.last().expect("checked non-empty").recovered_block().number();
+        let partial_state_trie = save_mode.with_state().then_some(last_block_number);
+        self.save_blocks_inner(
+            &blocks,
+            [&[], &blocks],
+            &[],
+            last_block_number,
+            partial_state_trie,
+            save_mode,
+        )
+    }
+
+    /// Writes the independently advancing ranges described by [`SaveBlocksInput`].
+    #[instrument(
+        level = "debug",
+        target = "providers::db",
+        skip_all,
+        fields(
+            block_count = input.blocks().len(),
+            persist_block_count = input.persist_rest_blocks().len(),
+            state_trie_block_count = input.state_trie_blocks().len(),
+            mask_block_count = input.state_trie_masking_blocks().len(),
+        )
+    )]
+    pub fn save_blocks_partial(
+        &self,
+        input: &SaveBlocksInput<N::Primitives>,
+    ) -> ProviderResult<()> {
+        if input.is_empty() {
+            debug!(target: "providers::db", "Attempted to write empty persistence ranges");
+            return Ok(())
+        }
+
+        if let Some(checkpoint) = self.get_stage_checkpoint(StageId::Finish)? {
+            let partial_state_trie = checkpoint
+                .finish_stage_checkpoint()
+                .and_then(|finish| finish.partial_state_trie)
+                .unwrap_or(checkpoint.block_number);
+            assert_eq!(
+                checkpoint.block_number,
+                input.prev_db_tip(),
+                "previous database tip does not match Finish checkpoint"
+            );
+            assert_eq!(
+                partial_state_trie,
+                input.prev_partial_state_trie(),
+                "previous state/trie tip does not match Finish checkpoint"
+            );
+        }
+
+        self.save_blocks_inner(
+            input.persist_rest_blocks(),
+            [input.state_trie_catchup_blocks(), input.new_state_trie_blocks()],
+            input.state_trie_masking_blocks(),
+            input.new_db_tip(),
+            Some(input.new_partial_state_trie()),
+            SaveBlocksMode::Full,
+        )
+    }
+
+    /// Writes the block-data and derived state/trie ranges while retaining backend parallelism.
+    fn save_blocks_inner(
+        &self,
+        persist_rest_blocks: &[ExecutedBlock<N::Primitives>],
+        state_trie_ranges: [&[ExecutedBlock<N::Primitives>]; 2],
+        state_trie_masking_blocks: &[ExecutedBlock<N::Primitives>],
+        last_block_number: BlockNumber,
+        partial_state_trie: Option<BlockNumber>,
+        save_mode: SaveBlocksMode,
+    ) -> ProviderResult<()> {
+        if persist_rest_blocks.is_empty() && state_trie_ranges.iter().all(|range| range.is_empty())
+        {
+            debug!(target: "providers::db", "Attempted to write empty persistence ranges");
+            return Ok(())
+        }
 
         let total_start = Instant::now();
-        let block_count = blocks.len() as u64;
-        let first_number = blocks.first().unwrap().recovered_block().number();
-        let last_block_number = plan.last_block().expect("checked non-empty block range").number;
+        let storage_settings = self.cached_storage_settings();
+        let state_trie_block_count =
+            state_trie_ranges.iter().map(|range| range.len()).sum::<usize>();
+        let block_count = (state_trie_block_count + state_trie_masking_blocks.len()) as u64;
 
-        debug!(target: "providers::db", block_count, "Writing blocks and execution data to storage");
+        debug!(
+            target: "providers::db",
+            block_count,
+            state_trie_block_count,
+            mask_block_count = state_trie_masking_blocks.len(),
+            "Writing blocks and execution data to storage"
+        );
         let tx_nums: SmallVec<[TxNumber; 4]> = if persist_rest_blocks.is_empty() {
             SmallVec::new()
         } else {
@@ -638,7 +700,7 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
             metrics::SaveBlocksTimings { batch_size: block_count, ..Default::default() };
 
         let has_persist_rest_blocks = !persist_rest_blocks.is_empty();
-        let rocksdb_enabled = has_persist_rest_blocks && self.cached_storage_settings().storage_v2;
+        let rocksdb_enabled = has_persist_rest_blocks && storage_settings.storage_v2;
         let first_persist_rest_block_number =
             persist_rest_blocks.first().map(|block| block.recovered_block().number());
         let sf_ctx = if let Some(first_persist_rest_block_number) = first_persist_rest_block_number
@@ -696,7 +758,8 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
                 // RocksDB writes
                 if rocksdb_enabled {
                     let rocksdb_provider = self.rocksdb_provider.clone();
-                    let rocksdb_ctx = self.rocksdb_write_ctx(first_persist_rest_block_number);
+                    let rocksdb_ctx =
+                        self.rocksdb_write_ctx(first_persist_rest_block_number, storage_settings);
                     let rocksdb_span = span.clone();
                     let rocksdb_tx_nums = tx_nums.clone();
                     let rocksdb_result = &mut rocksdb_result;
@@ -722,7 +785,7 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
 
             // Collect all transaction hashes across all blocks, sort them, and write in batch
             if has_persist_rest_blocks &&
-                !self.cached_storage_settings().storage_v2 &&
+                !storage_settings.storage_v2 &&
                 self.prune_modes.transaction_lookup.is_none_or(|m| !m.is_full())
             {
                 let start = Instant::now();
@@ -757,83 +820,106 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
                 );
             }
 
-            let mut next_persist_rest_tx_num = 0;
-            for step in &plan.steps {
-                let step_blocks = &blocks[step.block_range.clone()];
-
-                if step.persist_rest {
-                    for block in step_blocks {
-                        let recovered_block = block.recovered_block();
-
-                        let start = Instant::now();
-                        self.insert_block_mdbx_only(
-                            recovered_block,
-                            tx_nums[next_persist_rest_tx_num],
-                        )?;
-                        timings.insert_block += start.elapsed();
-                        next_persist_rest_tx_num += 1;
-
-                        if save_mode.with_state() {
-                            let execution_output = block.execution_outcome();
-
-                            // Write state and changesets to the database.
-                            // Must be written after blocks because of the receipt lookup.
-                            // Skip receipts/account changesets if they're being written to static
-                            // files.
-                            let start = Instant::now();
-                            self.write_state(
-                                WriteStateInput::Single {
-                                    outcome: execution_output,
-                                    block: recovered_block.number(),
-                                },
-                                OriginalValuesKnown::No,
-                                state_write_config,
-                            )?;
-                            timings.write_state += start.elapsed();
-                        }
-                    }
-                }
-
-                if !save_mode.with_state() {
-                    continue
-                }
-
-                let Some(masking_range) = step.state_trie_masking_range.as_ref() else { continue };
-
-                let step_trie_data =
-                    step_blocks.iter().map(|block| block.trie_data()).collect::<Vec<_>>();
-                let masking_trie_data = blocks[masking_range.clone()]
-                    .iter()
-                    .map(|block| block.trie_data())
-                    .collect::<Vec<_>>();
-                let start = Instant::now();
-                let merged_hashed_state = HashedPostStateSorted::disjointed_merge_batch(
-                    step_trie_data.iter().map(|data| data.sorted.hashed_state.as_ref()).collect(),
-                    masking_trie_data
-                        .iter()
-                        .map(|data| data.sorted.hashed_state.as_ref())
-                        .collect(),
-                );
-                if !merged_hashed_state.is_empty() {
-                    self.write_hashed_state(&merged_hashed_state)?;
-                }
-                timings.write_hashed_state += start.elapsed();
+            for (block, first_tx_num) in persist_rest_blocks.iter().zip(&tx_nums) {
+                let recovered_block = block.recovered_block();
 
                 let start = Instant::now();
-                let merged_trie = TrieUpdatesSorted::disjointed_merge_batch(
-                    step_trie_data.iter().map(|data| data.sorted.trie_updates.as_ref()).collect(),
-                    masking_trie_data
-                        .iter()
-                        .map(|data| data.sorted.trie_updates.as_ref())
-                        .collect(),
-                );
-                if !merged_trie.is_empty() {
-                    self.write_trie_updates_sorted(&merged_trie)?;
+                self.insert_block_mdbx_only(recovered_block, *first_tx_num)?;
+                timings.insert_block += start.elapsed();
+
+                if save_mode.with_state() {
+                    let execution_output = block.execution_outcome();
+
+                    // Write state and changesets after blocks because receipt lookup depends on
+                    // block body indices.
+                    let start = Instant::now();
+                    self.write_state(
+                        WriteStateInput::Single {
+                            outcome: execution_output,
+                            block: recovered_block.number(),
+                        },
+                        OriginalValuesKnown::No,
+                        state_write_config,
+                    )?;
+                    timings.write_state += start.elapsed();
                 }
-                timings.write_trie_updates += start.elapsed();
             }
 
-            debug_assert_eq!(next_persist_rest_tx_num, tx_nums.len());
+            // Keep catchup and newly durable blocks as separate merge batches. Large k-way merges
+            // regress when these ranges are combined, while the ordinary path remains unchanged
+            // when catchup and masking are both empty.
+            if save_mode.with_state() && state_trie_block_count > 0 {
+                if state_trie_masking_blocks.is_empty() {
+                    for blocks in state_trie_ranges {
+                        if blocks.is_empty() {
+                            continue
+                        }
+
+                        let start = Instant::now();
+                        let merged_hashed_state = HashedPostStateSorted::merge_batch(
+                            blocks.iter().rev().map(|block| block.trie_data().sorted.hashed_state),
+                        );
+                        if !merged_hashed_state.is_empty() {
+                            self.write_hashed_state(&merged_hashed_state)?;
+                        }
+                        timings.write_hashed_state += start.elapsed();
+
+                        let start = Instant::now();
+                        let merged_trie = TrieUpdatesSorted::merge_batch(
+                            blocks.iter().rev().map(|block| block.trie_data().sorted.trie_updates),
+                        );
+                        if !merged_trie.is_empty() {
+                            self.write_trie_updates_sorted(&merged_trie)?;
+                        }
+                        timings.write_trie_updates += start.elapsed();
+                    }
+                } else {
+                    let masking_trie_data = state_trie_masking_blocks
+                        .iter()
+                        .map(|block| block.trie_data())
+                        .collect::<Vec<_>>();
+
+                    for blocks in state_trie_ranges {
+                        if blocks.is_empty() {
+                            continue
+                        }
+
+                        let state_trie_data =
+                            blocks.iter().map(|block| block.trie_data()).collect::<Vec<_>>();
+                        let start = Instant::now();
+                        let merged_hashed_state = HashedPostStateSorted::disjointed_merge_batch(
+                            state_trie_data
+                                .iter()
+                                .map(|data| data.sorted.hashed_state.as_ref())
+                                .collect(),
+                            masking_trie_data
+                                .iter()
+                                .map(|data| data.sorted.hashed_state.as_ref())
+                                .collect(),
+                        );
+                        if !merged_hashed_state.is_empty() {
+                            self.write_hashed_state(&merged_hashed_state)?;
+                        }
+                        timings.write_hashed_state += start.elapsed();
+
+                        let start = Instant::now();
+                        let merged_trie = TrieUpdatesSorted::disjointed_merge_batch(
+                            state_trie_data
+                                .iter()
+                                .map(|data| data.sorted.trie_updates.as_ref())
+                                .collect(),
+                            masking_trie_data
+                                .iter()
+                                .map(|data| data.sorted.trie_updates.as_ref())
+                                .collect(),
+                        );
+                        if !merged_trie.is_empty() {
+                            self.write_trie_updates_sorted(&merged_trie)?;
+                        }
+                        timings.write_trie_updates += start.elapsed();
+                    }
+                }
+            }
 
             // Full mode: update history indices
             if save_mode.with_state() && has_persist_rest_blocks {
@@ -847,23 +933,12 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
             // Update pipeline progress
             let start = Instant::now();
             self.update_pipeline_stages(last_block_number, false)?;
-            if save_mode.with_state() {
-                let current_trie_persisted_tip =
-                    self.get_stage_checkpoint(StageId::Finish)?.map(|checkpoint| {
-                        checkpoint
-                            .finish_stage_checkpoint()
-                            .and_then(|finish| finish.partial_state_trie)
-                            .unwrap_or(checkpoint.block_number)
-                    });
-                let partial_state_trie = plan
-                    .last_state_trie_block()
-                    .map(|last_state_trie_block| last_state_trie_block.number)
-                    .or(current_trie_persisted_tip)
-                    .or(Some(last_block_number));
+            if let Some(partial_state_trie) = partial_state_trie {
                 self.save_stage_checkpoint(
                     StageId::Finish,
-                    StageCheckpoint::new(last_block_number)
-                        .with_finish_stage_checkpoint(FinishCheckpoint { partial_state_trie }),
+                    StageCheckpoint::new(last_block_number).with_finish_stage_checkpoint(
+                        FinishCheckpoint { partial_state_trie: Some(partial_state_trie) },
+                    ),
                 )?;
             }
             timings.update_pipeline_stages = start.elapsed();
@@ -891,7 +966,8 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
         self.metrics.record_save_blocks(&timings);
         debug!(
             target: "providers::db",
-            range = ?first_number..=last_block_number,
+            ?last_block_number,
+            ?partial_state_trie,
             "Appended block data"
         );
 
@@ -3682,13 +3758,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> BlockWriter
         );
 
         // Delegate to save_blocks with BlocksOnly mode (skips receipts/state/trie)
-        self.save_blocks(
-            &SaveBlocksPlan::new(
-                vec![executed_block],
-                vec![super::SaveBlocksPlanStep::new(0..1, None, true)],
-            ),
-            SaveBlocksMode::BlocksOnly,
-        )?;
+        self.save_blocks(vec![executed_block], SaveBlocksMode::BlocksOnly)?;
 
         // Return the body indices
         self.block_body_indices(block_number)?
@@ -4102,7 +4172,6 @@ impl<TX: Send, N: NodeTypes> StoragePath for DatabaseProvider<TX, N> {
 mod tests {
     use super::*;
     use crate::{
-        providers::database::SaveBlocksPlanStep,
         test_utils::{blocks::BlockchainTestData, create_test_provider_factory},
         BlockWriter,
     };
@@ -4127,28 +4196,6 @@ mod tests {
         sync::{mpsc, Arc},
         time::Duration,
     };
-
-    fn full_save_plan(
-        blocks: impl IntoIterator<Item = ExecutedBlock<EthPrimitives>>,
-    ) -> SaveBlocksPlan<EthPrimitives> {
-        let blocks = blocks.into_iter().collect::<Vec<_>>();
-        let full_range = 0..blocks.len();
-        SaveBlocksPlan::new(
-            blocks,
-            vec![SaveBlocksPlanStep::new(
-                full_range.clone(),
-                Some(full_range.end..full_range.end),
-                true,
-            )],
-        )
-    }
-
-    fn partial_save_plan(
-        blocks: impl IntoIterator<Item = ExecutedBlock<EthPrimitives>>,
-        steps: Vec<SaveBlocksPlanStep>,
-    ) -> SaveBlocksPlan<EthPrimitives> {
-        SaveBlocksPlan::new(blocks.into_iter().collect(), steps)
-    }
 
     #[test]
     fn test_receipts_by_block_range_empty_range() {
@@ -4692,10 +4739,7 @@ mod tests {
 
         let provider_rw = factory.provider_rw().unwrap();
         provider_rw
-            .save_blocks(
-                &full_save_plan(std::slice::from_ref(&genesis_executed).to_vec()),
-                SaveBlocksMode::Full,
-            )
+            .save_blocks(std::slice::from_ref(&genesis_executed).to_vec(), SaveBlocksMode::Full)
             .unwrap();
         provider_rw.commit().unwrap();
 
@@ -4868,7 +4912,7 @@ mod tests {
                 ),
             ]),
         );
-        let in_memory_only_block = ExecutedBlock::new(
+        let _in_memory_only_block: ExecutedBlock<EthPrimitives> = ExecutedBlock::new(
             Arc::clone(&in_memory_only_base.recovered_block),
             Arc::clone(&in_memory_only_base.execution_output),
             ComputedTrieData::new(
@@ -4878,19 +4922,8 @@ mod tests {
         );
 
         let provider_rw = factory.provider_rw().unwrap();
-        let blocks = vec![full_persist_block, deferred_trie_block, in_memory_only_block];
-        provider_rw
-            .save_blocks(
-                &partial_save_plan(
-                    blocks,
-                    vec![
-                        SaveBlocksPlanStep::new(0..1, Some(1..2), true),
-                        SaveBlocksPlanStep::new(1..2, None, true),
-                    ],
-                ),
-                SaveBlocksMode::Full,
-            )
-            .unwrap();
+        let input = SaveBlocksInput::new(vec![full_persist_block, deferred_trie_block], 0, 0, 2, 1);
+        provider_rw.save_blocks_partial(&input).unwrap();
         provider_rw.commit().unwrap();
 
         let provider = factory.provider().unwrap();
@@ -4988,32 +5021,17 @@ mod tests {
 
         let provider_rw = factory.provider_rw().unwrap();
         provider_rw
-            .save_blocks(
-                &full_save_plan(std::slice::from_ref(&genesis).to_vec()),
-                SaveBlocksMode::Full,
-            )
+            .save_blocks(std::slice::from_ref(&genesis).to_vec(), SaveBlocksMode::Full)
             .unwrap();
         provider_rw.commit().unwrap();
 
         let provider_rw = factory.provider_rw().unwrap();
-        provider_rw
-            .save_blocks(&full_save_plan(blocks[..2].to_vec()), SaveBlocksMode::Full)
-            .unwrap();
+        provider_rw.save_blocks(blocks[..2].to_vec(), SaveBlocksMode::Full).unwrap();
         provider_rw.commit().unwrap();
 
         let provider_rw = factory.provider_rw().unwrap();
-        provider_rw
-            .save_blocks(
-                &partial_save_plan(
-                    blocks,
-                    vec![
-                        SaveBlocksPlanStep::new(0..2, Some(2..4), false),
-                        SaveBlocksPlanStep::new(2..4, None, true),
-                    ],
-                ),
-                SaveBlocksMode::Full,
-            )
-            .unwrap();
+        let input = SaveBlocksInput::new(blocks[2..].to_vec(), 2, 2, 4, 2);
+        provider_rw.save_blocks_partial(&input).unwrap();
         provider_rw.commit().unwrap();
 
         let provider = factory.provider().unwrap();
@@ -5622,10 +5640,7 @@ mod tests {
         );
         let provider_rw = factory.provider_rw().unwrap();
         provider_rw
-            .save_blocks(
-                &full_save_plan(std::slice::from_ref(&genesis_executed).to_vec()),
-                SaveBlocksMode::Full,
-            )
+            .save_blocks(std::slice::from_ref(&genesis_executed).to_vec(), SaveBlocksMode::Full)
             .unwrap();
         provider_rw.commit().unwrap();
 
@@ -5700,7 +5715,7 @@ mod tests {
         }
 
         let provider_rw = factory.provider_rw().unwrap();
-        provider_rw.save_blocks(&full_save_plan(blocks), SaveBlocksMode::Full).unwrap();
+        provider_rw.save_blocks(blocks, SaveBlocksMode::Full).unwrap();
         provider_rw.commit().unwrap();
 
         let provider = factory.provider().unwrap();

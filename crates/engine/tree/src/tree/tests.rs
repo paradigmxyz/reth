@@ -394,17 +394,6 @@ impl TestHarness {
     }
 }
 
-type ExpectedPlanStep = (std::ops::Range<usize>, Option<std::ops::Range<usize>>, bool);
-
-fn assert_plan_steps(plan: &SaveBlocksPlan<EthPrimitives>, expected: &[ExpectedPlanStep]) {
-    assert_eq!(plan.steps.len(), expected.len());
-    for (step, (block_range, masking_range, persist_rest)) in plan.steps.iter().zip(expected) {
-        assert_eq!(&step.block_range, block_range);
-        assert_eq!(&step.state_trie_masking_range, masking_range);
-        assert_eq!(step.persist_rest, *persist_rest);
-    }
-}
-
 /// Simplified test metrics for validation calls
 #[derive(Debug, Default)]
 struct TestMetrics {
@@ -600,14 +589,13 @@ async fn test_tree_persist_blocks() {
 
     let received_action =
         test_harness.action_rx.recv().expect("Failed to receive save blocks action");
-    if let PersistenceAction::SaveBlocks(plan, _) = received_action {
+    if let PersistenceAction::SaveBlocks(input, _) = received_action {
         let expected_persist_len = blocks.len();
-        assert_eq!(plan.blocks.len(), expected_persist_len);
-        assert_eq!(plan.blocks, blocks);
-        assert_plan_steps(
-            &plan,
-            &[(0..expected_persist_len, Some(expected_persist_len..expected_persist_len), true)],
-        );
+        assert_eq!(input.blocks().len(), expected_persist_len);
+        assert_eq!(input.blocks(), blocks);
+        assert_eq!(input.persist_rest_blocks(), blocks);
+        assert_eq!(input.state_trie_blocks(), blocks);
+        assert!(input.state_trie_masking_blocks().is_empty());
     } else {
         panic!("unexpected action received {received_action:?}");
     }
@@ -999,10 +987,10 @@ async fn test_tree_state_on_new_head_reorg() {
 
     // get rid of the prev action
     let received_action = test_harness.action_rx.recv().unwrap();
-    let PersistenceAction::SaveBlocks(saved_blocks, sender) = received_action else {
+    let PersistenceAction::SaveBlocks(input, sender) = received_action else {
         panic!("received wrong action");
     };
-    assert_eq!(saved_blocks.blocks, vec![blocks[0].clone(), blocks[1].clone()]);
+    assert_eq!(input.persist_rest_blocks(), &blocks[..2]);
 
     // send the response so we can advance again
     sender
@@ -1133,7 +1121,7 @@ fn test_tree_state_on_new_head_deep_fork() {
 }
 
 #[tokio::test]
-async fn test_get_save_blocks_plan() {
+async fn test_get_save_blocks_input() {
     let chain_spec = MAINNET.clone();
     let mut test_harness = TestHarness::new(chain_spec);
     let mut test_block_builder = TestBlockBuilder::eth();
@@ -1155,17 +1143,22 @@ async fn test_get_save_blocks_plan() {
         .with_persistence_threshold(persistence_threshold)
         .with_memory_block_buffer_target(memory_block_buffer_target);
 
-    let plan = test_harness.tree.get_save_blocks_plan(PersistTarget::Threshold).unwrap();
+    let input = test_harness.tree.get_save_blocks_input(PersistTarget::Threshold).unwrap();
 
     let expected_blocks_to_persist_length: usize =
         (canonical_head_number - memory_block_buffer_target - last_persisted_block_number)
             .try_into()
             .unwrap();
 
-    assert_eq!(plan.blocks.len(), expected_blocks_to_persist_length);
-    for (i, item) in plan.blocks.iter().enumerate().take(expected_blocks_to_persist_length) {
+    assert_eq!(input.blocks().len(), expected_blocks_to_persist_length);
+    for (i, item) in input.blocks().iter().enumerate().take(expected_blocks_to_persist_length) {
         assert_eq!(item.recovered_block().number, last_persisted_block_number + i as u64 + 1);
     }
+    assert_eq!(input.prev_db_tip(), 3);
+    assert_eq!(input.prev_partial_state_trie(), 3);
+    assert_eq!(input.new_db_tip(), 6);
+    assert_eq!(input.new_partial_state_trie(), 6);
+    assert!(input.state_trie_masking_blocks().is_empty());
 
     // make sure only canonical blocks are included
     let fork_block = test_block_builder.get_executed_block_with_number(4, B256::random());
@@ -1174,26 +1167,26 @@ async fn test_get_save_blocks_plan() {
 
     assert!(test_harness.tree.state.tree_state.sealed_header_by_hash(&fork_block_hash).is_some());
 
-    let plan = test_harness.tree.get_save_blocks_plan(PersistTarget::Threshold).unwrap();
-    assert_eq!(plan.blocks.len(), expected_blocks_to_persist_length);
+    let input = test_harness.tree.get_save_blocks_input(PersistTarget::Threshold).unwrap();
+    assert_eq!(input.blocks().len(), expected_blocks_to_persist_length);
 
     // check that the fork block is not included in the blocks to persist
-    assert!(!plan.blocks.iter().any(|b| b.recovered_block().hash() == fork_block_hash));
+    assert!(!input.blocks().iter().any(|b| b.recovered_block().hash() == fork_block_hash));
 
     // check that the original block 4 is still included
-    assert!(plan.blocks.iter().any(|b| b.recovered_block().number == 4 &&
+    assert!(input.blocks().iter().any(|b| b.recovered_block().number == 4 &&
         b.recovered_block().hash() == blocks[4].recovered_block().hash()));
 
     // check that if we advance persistence, the persistence action is the correct value
     test_harness.tree.advance_persistence().expect("advancing persistence should succeed");
     assert_eq!(
         test_harness.tree.persistence_state.current_action().cloned(),
-        Some(CurrentPersistenceAction::SavingBlocks { highest: plan.last_block().unwrap() })
+        Some(CurrentPersistenceAction::SavingBlocks { highest: input.last_block().unwrap() })
     );
 }
 
 #[test]
-fn test_get_save_blocks_plan_with_state_masking_blocks() {
+fn test_get_save_blocks_input_with_state_masking_blocks() {
     let chain_spec = MAINNET.clone();
     let mut test_harness = TestHarness::new(chain_spec);
     let mut test_block_builder = TestBlockBuilder::eth();
@@ -1209,19 +1202,44 @@ fn test_get_save_blocks_plan_with_state_masking_blocks() {
         .with_memory_block_buffer_target(1)
         .with_num_state_masking_blocks(2);
 
-    let plan = test_harness.tree.get_save_blocks_plan(PersistTarget::Threshold).unwrap();
+    let input = test_harness.tree.get_save_blocks_input(PersistTarget::Threshold).unwrap();
 
-    assert_plan_steps(&plan, &[(0..2, Some(2..4), false), (2..4, None, true)]);
-    assert_eq!(plan.blocks.len(), 4);
+    assert_eq!(input.prev_partial_state_trie(), 1);
+    assert_eq!(input.prev_db_tip(), 3);
+    assert_eq!(input.new_partial_state_trie(), 3);
+    assert_eq!(input.new_db_tip(), 5);
     assert_eq!(
-        plan.blocks.iter().map(|block| block.recovered_block().number()).collect::<Vec<_>>(),
+        input.blocks().iter().map(|block| block.recovered_block().number()).collect::<Vec<_>>(),
         vec![2, 3, 4, 5]
     );
-    assert_eq!(plan.last_block(), Some(blocks[5].recovered_block().num_hash()));
+    assert_eq!(
+        input
+            .persist_rest_blocks()
+            .iter()
+            .map(|block| block.recovered_block().number())
+            .collect::<Vec<_>>(),
+        vec![4, 5]
+    );
+    assert_eq!(
+        input
+            .state_trie_blocks()
+            .iter()
+            .map(|block| block.recovered_block().number())
+            .collect::<Vec<_>>(),
+        vec![2, 3]
+    );
+    assert_eq!(
+        input
+            .state_trie_masking_blocks()
+            .iter()
+            .map(|block| block.recovered_block().number())
+            .collect::<Vec<_>>(),
+        vec![4, 5]
+    );
 }
 
 #[test]
-fn test_get_save_blocks_plan_drains_eligible_backlog() {
+fn test_get_save_blocks_input_drains_eligible_backlog() {
     let chain_spec = MAINNET.clone();
     let mut test_harness = TestHarness::new(chain_spec);
     let mut test_block_builder = TestBlockBuilder::eth();
@@ -1237,22 +1255,46 @@ fn test_get_save_blocks_plan_drains_eligible_backlog() {
         .with_memory_block_buffer_target(2)
         .with_num_state_masking_blocks(2);
 
-    let plan = test_harness.tree.get_save_blocks_plan(PersistTarget::Threshold).unwrap();
+    let input = test_harness.tree.get_save_blocks_input(PersistTarget::Threshold).unwrap();
 
-    assert_plan_steps(
-        &plan,
-        &[(0..3, Some(14..16), false), (3..14, Some(14..16), true), (14..16, None, true)],
-    );
-    assert_eq!(plan.blocks.len(), 16);
+    assert_eq!(input.prev_partial_state_trie(), 12);
+    assert_eq!(input.prev_db_tip(), 15);
+    assert_eq!(input.new_partial_state_trie(), 26);
+    assert_eq!(input.new_db_tip(), 28);
+    assert_eq!(input.blocks().len(), 16);
     assert_eq!(
-        plan.blocks.iter().map(|block| block.recovered_block().number()).collect::<Vec<_>>(),
+        input.blocks().iter().map(|block| block.recovered_block().number()).collect::<Vec<_>>(),
         (13..=28).collect::<Vec<_>>()
     );
-    assert_eq!(plan.last_block(), Some(blocks[28].recovered_block().num_hash()));
+    assert_eq!(
+        input
+            .persist_rest_blocks()
+            .iter()
+            .map(|block| block.recovered_block().number())
+            .collect::<Vec<_>>(),
+        (16..=28).collect::<Vec<_>>()
+    );
+    assert_eq!(
+        input
+            .state_trie_blocks()
+            .iter()
+            .map(|block| block.recovered_block().number())
+            .collect::<Vec<_>>(),
+        (13..=26).collect::<Vec<_>>()
+    );
+    assert_eq!(
+        input
+            .state_trie_masking_blocks()
+            .iter()
+            .map(|block| block.recovered_block().number())
+            .collect::<Vec<_>>(),
+        vec![27, 28]
+    );
+    assert_eq!(input.last_block(), Some(blocks[28].recovered_block().num_hash()));
 }
 
 #[test]
-fn test_get_save_blocks_plan_state_masking_keeps_full_eligible_backlog() {
+fn test_get_save_blocks_input_state_masking_keeps_full_eligible_backlog() {
     let chain_spec = MAINNET.clone();
     let mut test_harness = TestHarness::new(chain_spec);
     let mut test_block_builder = TestBlockBuilder::eth();
@@ -1266,22 +1308,46 @@ fn test_get_save_blocks_plan_state_masking_keeps_full_eligible_backlog() {
     test_harness.tree.config =
         TreeConfig::default().with_persistence_threshold(13).with_num_state_masking_blocks(10);
 
-    let plan = test_harness.tree.get_save_blocks_plan(PersistTarget::Threshold).unwrap();
+    let input = test_harness.tree.get_save_blocks_input(PersistTarget::Threshold).unwrap();
 
-    assert_plan_steps(
-        &plan,
-        &[(0..3, Some(9..19), false), (3..9, Some(9..19), true), (9..19, None, true)],
-    );
-    assert_eq!(plan.blocks.len(), 19);
+    assert_eq!(input.prev_partial_state_trie(), 0);
+    assert_eq!(input.prev_db_tip(), 3);
+    assert_eq!(input.new_partial_state_trie(), 9);
+    assert_eq!(input.new_db_tip(), 19);
+    assert_eq!(input.blocks().len(), 19);
     assert_eq!(
-        plan.blocks.iter().map(|block| block.recovered_block().number()).collect::<Vec<_>>(),
+        input.blocks().iter().map(|block| block.recovered_block().number()).collect::<Vec<_>>(),
         (1..=19).collect::<Vec<_>>()
     );
-    assert_eq!(plan.last_block(), Some(blocks[19].recovered_block().num_hash()));
+    assert_eq!(
+        input
+            .persist_rest_blocks()
+            .iter()
+            .map(|block| block.recovered_block().number())
+            .collect::<Vec<_>>(),
+        (4..=19).collect::<Vec<_>>()
+    );
+    assert_eq!(
+        input
+            .state_trie_blocks()
+            .iter()
+            .map(|block| block.recovered_block().number())
+            .collect::<Vec<_>>(),
+        (1..=9).collect::<Vec<_>>()
+    );
+    assert_eq!(
+        input
+            .state_trie_masking_blocks()
+            .iter()
+            .map(|block| block.recovered_block().number())
+            .collect::<Vec<_>>(),
+        (10..=19).collect::<Vec<_>>()
+    );
+    assert_eq!(input.last_block(), Some(blocks[19].recovered_block().num_hash()));
 }
 
 #[test]
-fn test_get_save_blocks_plan_steady_state_masking_has_catchup_overlap_and_masked_tail() {
+fn test_get_save_blocks_input_steady_state_masking_has_catchup_overlap_and_masked_tail() {
     let chain_spec = MAINNET.clone();
     let mut test_harness = TestHarness::new(chain_spec);
     let mut test_block_builder = TestBlockBuilder::eth();
@@ -1295,19 +1361,55 @@ fn test_get_save_blocks_plan_steady_state_masking_has_catchup_overlap_and_masked
     test_harness.tree.config =
         TreeConfig::default().with_persistence_threshold(11).with_num_state_masking_blocks(6);
 
-    let plan = test_harness.tree.get_save_blocks_plan(PersistTarget::Threshold).unwrap();
+    let input = test_harness.tree.get_save_blocks_input(PersistTarget::Threshold).unwrap();
 
-    assert_plan_steps(
-        &plan,
-        &[(0..6, Some(18..24), false), (6..18, Some(18..24), true), (18..24, None, true)],
-    );
-    assert_eq!(plan.blocks.len(), 24);
+    assert_eq!(input.prev_partial_state_trie(), 5);
+    assert_eq!(input.prev_db_tip(), 11);
+    assert_eq!(input.new_partial_state_trie(), 23);
+    assert_eq!(input.new_db_tip(), 29);
+    assert_eq!(input.blocks().len(), 24);
     assert_eq!(
-        plan.blocks.iter().map(|block| block.recovered_block().number()).collect::<Vec<_>>(),
+        input.blocks().iter().map(|block| block.recovered_block().number()).collect::<Vec<_>>(),
         (6..=29).collect::<Vec<_>>()
     );
-    assert_eq!(plan.last_block(), Some(blocks[29].recovered_block().num_hash()));
-    assert_eq!(plan.last_state_trie_block(), Some(blocks[23].recovered_block().num_hash()));
+    assert_eq!(
+        input
+            .persist_rest_blocks()
+            .iter()
+            .map(|block| block.recovered_block().number())
+            .collect::<Vec<_>>(),
+        (12..=29).collect::<Vec<_>>()
+    );
+    assert_eq!(
+        input
+            .state_trie_blocks()
+            .iter()
+            .map(|block| block.recovered_block().number())
+            .collect::<Vec<_>>(),
+        (6..=23).collect::<Vec<_>>()
+    );
+    assert_eq!(
+        input
+            .state_trie_masking_blocks()
+            .iter()
+            .map(|block| block.recovered_block().number())
+            .collect::<Vec<_>>(),
+        (24..=29).collect::<Vec<_>>()
+    );
+    assert_eq!(input.last_block(), Some(blocks[29].recovered_block().num_hash()));
+
+    let shutdown_input = test_harness.tree.get_save_blocks_input(PersistTarget::Head).unwrap();
+    assert_eq!(shutdown_input.new_db_tip(), 29);
+    assert_eq!(shutdown_input.new_partial_state_trie(), 29);
+    assert_eq!(
+        shutdown_input
+            .state_trie_blocks()
+            .iter()
+            .map(|block| block.recovered_block().number())
+            .collect::<Vec<_>>(),
+        (6..=29).collect::<Vec<_>>()
+    );
+    assert!(shutdown_input.state_trie_masking_blocks().is_empty());
 }
 
 #[test]
@@ -2530,9 +2632,8 @@ mod forkchoice_updated_tests {
                 sender
                     .send(PersistenceResult {
                         last_block,
-                        last_state_trie_block: saved_blocks
-                            .last_state_trie_block()
-                            .map(|block| block.number),
+                        last_state_trie_block: (!saved_blocks.is_empty())
+                            .then_some(saved_blocks.new_partial_state_trie()),
                         commit_duration: Some(Duration::ZERO),
                     })
                     .unwrap();
