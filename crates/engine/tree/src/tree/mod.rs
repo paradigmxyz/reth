@@ -2167,9 +2167,7 @@ where
         let last_block_target_number = match target {
             PersistTarget::Head => canonical_head_number,
             PersistTarget::Threshold => {
-                canonical_head_number.saturating_sub(self.config.memory_block_buffer_target()).min(
-                    last_persisted_block_number.saturating_add(self.config.persistence_threshold()),
-                )
+                canonical_head_number.saturating_sub(self.config.memory_block_buffer_target())
             }
         };
 

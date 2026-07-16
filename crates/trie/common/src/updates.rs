@@ -717,12 +717,17 @@ impl TrieUpdatesSorted {
     /// Account trie nodes are masked at the top level, while storage trie entries are masked at the
     /// node level. For duplicate keys in the batch, later items take precedence over earlier ones.
     /// An overlapping entry is retained if any mask value is equal to the merged batch value. The
-    /// order of the mask does not matter.
+    /// order of the mask does not matter. An empty mask uses the ordinary batch merge path.
     ///
     /// # Panics
     ///
-    /// Panics if any batch or mask entry deletes an entire storage trie.
-    pub fn disjointed_merge_batch<'a>(batch: Vec<&'a Self>, mask: Vec<&'a Self>) -> Self {
+    /// Panics if the mask is non-empty and any batch or mask entry deletes an entire storage trie.
+    pub fn disjointed_merge_batch<'a>(mut batch: Vec<&'a Self>, mask: Vec<&'a Self>) -> Self {
+        if mask.is_empty() {
+            batch.reverse();
+            return Self::merge_slice(&batch)
+        }
+
         let account_node_count = batch.iter().map(|item| item.account_nodes.len()).sum();
         let mut account_nodes = Vec::with_capacity(account_node_count);
         account_nodes.extend(kway_merge_disjoint_sorted(
@@ -1122,6 +1127,28 @@ mod tests {
                 storage_nodes: vec![(slot1, Some(BranchNodeCompact::default()))],
             })
         );
+    }
+
+    #[test]
+    fn test_trie_updates_sorted_disjointed_merge_batch_empty_mask_uses_regular_merge() {
+        let node = Nibbles::from_nibbles_unchecked([0x01]);
+        let storage = B256::with_last_byte(2);
+        let older = TrieUpdatesSorted::new(
+            vec![(node, Some(BranchNodeCompact::default()))],
+            B256Map::default(),
+        );
+        let newer = TrieUpdatesSorted::new(
+            vec![(node, None)],
+            B256Map::from_iter([(
+                storage,
+                StorageTrieUpdatesSorted { is_deleted: true, ..Default::default() },
+            )]),
+        );
+        let expected = TrieUpdatesSorted::merge_batch(vec![newer.clone(), older.clone()]);
+
+        let result = TrieUpdatesSorted::disjointed_merge_batch(vec![&older, &newer], vec![]);
+
+        assert_eq!(result, expected);
     }
 
     #[test]

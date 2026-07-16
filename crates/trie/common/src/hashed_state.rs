@@ -697,12 +697,17 @@ impl HashedPostStateSorted {
     /// Account keys are masked at the top level, while storage entries are masked at the slot
     /// level. For duplicate keys in the batch, later items take precedence over earlier ones. An
     /// overlapping entry is retained if any mask value is equal to the merged batch value. The
-    /// order of the mask does not matter.
+    /// order of the mask does not matter. An empty mask uses the ordinary batch merge path.
     ///
     /// # Panics
     ///
-    /// Panics if any batch or mask entry wipes an entire storage.
-    pub fn disjointed_merge_batch<'a>(batch: Vec<&'a Self>, mask: Vec<&'a Self>) -> Self {
+    /// Panics if the mask is non-empty and any batch or mask entry wipes an entire storage.
+    pub fn disjointed_merge_batch<'a>(mut batch: Vec<&'a Self>, mask: Vec<&'a Self>) -> Self {
+        if mask.is_empty() {
+            batch.reverse();
+            return Self::merge_slice(&batch)
+        }
+
         let account_count = batch.iter().map(|item| item.accounts.len()).sum();
         let mut accounts = Vec::with_capacity(account_count);
         accounts.extend(kway_merge_disjoint_sorted(
@@ -1682,6 +1687,28 @@ mod tests {
                 storage_slots: vec![(slot1, U256::from(3))],
             })
         );
+    }
+
+    #[test]
+    fn test_hashed_post_state_sorted_disjointed_merge_batch_empty_mask_uses_regular_merge() {
+        let address = B256::with_last_byte(1);
+        let storage = B256::with_last_byte(2);
+        let older = HashedPostStateSorted::new(
+            vec![(address, Some(Account { nonce: 1, ..Default::default() }))],
+            B256Map::default(),
+        );
+        let newer = HashedPostStateSorted::new(
+            vec![(address, Some(Account { nonce: 2, ..Default::default() }))],
+            B256Map::from_iter([(
+                storage,
+                HashedStorageSorted { wiped: true, ..Default::default() },
+            )]),
+        );
+        let expected = HashedPostStateSorted::merge_batch(vec![newer.clone(), older.clone()]);
+
+        let result = HashedPostStateSorted::disjointed_merge_batch(vec![&older, &newer], vec![]);
+
+        assert_eq!(result, expected);
     }
 
     #[test]

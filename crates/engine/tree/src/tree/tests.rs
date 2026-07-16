@@ -601,9 +601,9 @@ async fn test_tree_persist_blocks() {
     let received_action =
         test_harness.action_rx.recv().expect("Failed to receive save blocks action");
     if let PersistenceAction::SaveBlocks(plan, _) = received_action {
-        let expected_persist_len = tree_config.persistence_threshold() as usize;
+        let expected_persist_len = blocks.len();
         assert_eq!(plan.blocks.len(), expected_persist_len);
-        assert_eq!(plan.blocks, blocks[..expected_persist_len]);
+        assert_eq!(plan.blocks, blocks);
         assert_plan_steps(
             &plan,
             &[(0..expected_persist_len, Some(expected_persist_len..expected_persist_len), true)],
@@ -987,7 +987,7 @@ async fn test_tree_state_on_new_head_reorg() {
 
     // let's attempt to persist and check that it attempts to save blocks
     //
-    // The threshold caps this persistence cycle at blocks[1].
+    // The canonical head is still block 3, so retaining one block persists through block 2.
     test_harness.tree.advance_persistence().unwrap();
     let current_action = test_harness.tree.persistence_state.current_action().cloned();
     assert_eq!(
@@ -1221,7 +1221,7 @@ fn test_get_save_blocks_plan_with_state_masking_blocks() {
 }
 
 #[test]
-fn test_get_save_blocks_plan_limits_partial_persistence_to_threshold() {
+fn test_get_save_blocks_plan_drains_eligible_backlog() {
     let chain_spec = MAINNET.clone();
     let mut test_harness = TestHarness::new(chain_spec);
     let mut test_block_builder = TestBlockBuilder::eth();
@@ -1241,18 +1241,18 @@ fn test_get_save_blocks_plan_limits_partial_persistence_to_threshold() {
 
     assert_plan_steps(
         &plan,
-        &[(0..3, Some(6..8), false), (3..6, Some(6..8), true), (6..8, None, true)],
+        &[(0..3, Some(14..16), false), (3..14, Some(14..16), true), (14..16, None, true)],
     );
-    assert_eq!(plan.blocks.len(), 8);
+    assert_eq!(plan.blocks.len(), 16);
     assert_eq!(
         plan.blocks.iter().map(|block| block.recovered_block().number()).collect::<Vec<_>>(),
-        (13..=20).collect::<Vec<_>>()
+        (13..=28).collect::<Vec<_>>()
     );
-    assert_eq!(plan.last_block(), Some(blocks[20].recovered_block().num_hash()));
+    assert_eq!(plan.last_block(), Some(blocks[28].recovered_block().num_hash()));
 }
 
 #[test]
-fn test_get_save_blocks_plan_state_masking_does_not_reduce_persist_rest_threshold() {
+fn test_get_save_blocks_plan_state_masking_keeps_full_eligible_backlog() {
     let chain_spec = MAINNET.clone();
     let mut test_harness = TestHarness::new(chain_spec);
     let mut test_block_builder = TestBlockBuilder::eth();
@@ -1270,14 +1270,14 @@ fn test_get_save_blocks_plan_state_masking_does_not_reduce_persist_rest_threshol
 
     assert_plan_steps(
         &plan,
-        &[(0..3, Some(6..16), false), (3..6, Some(6..16), true), (6..16, None, true)],
+        &[(0..3, Some(9..19), false), (3..9, Some(9..19), true), (9..19, None, true)],
     );
-    assert_eq!(plan.blocks.len(), 16);
+    assert_eq!(plan.blocks.len(), 19);
     assert_eq!(
         plan.blocks.iter().map(|block| block.recovered_block().number()).collect::<Vec<_>>(),
-        (1..=16).collect::<Vec<_>>()
+        (1..=19).collect::<Vec<_>>()
     );
-    assert_eq!(plan.last_block(), Some(blocks[16].recovered_block().num_hash()));
+    assert_eq!(plan.last_block(), Some(blocks[19].recovered_block().num_hash()));
 }
 
 #[test]
@@ -1299,15 +1299,15 @@ fn test_get_save_blocks_plan_steady_state_masking_has_catchup_overlap_and_masked
 
     assert_plan_steps(
         &plan,
-        &[(0..6, Some(11..17), false), (6..11, Some(11..17), true), (11..17, None, true)],
+        &[(0..6, Some(18..24), false), (6..18, Some(18..24), true), (18..24, None, true)],
     );
-    assert_eq!(plan.blocks.len(), 17);
+    assert_eq!(plan.blocks.len(), 24);
     assert_eq!(
         plan.blocks.iter().map(|block| block.recovered_block().number()).collect::<Vec<_>>(),
-        (6..=22).collect::<Vec<_>>()
+        (6..=29).collect::<Vec<_>>()
     );
-    assert_eq!(plan.last_block(), Some(blocks[22].recovered_block().num_hash()));
-    assert_eq!(plan.last_state_trie_block(), Some(blocks[16].recovered_block().num_hash()));
+    assert_eq!(plan.last_block(), Some(blocks[29].recovered_block().num_hash()));
+    assert_eq!(plan.last_state_trie_block(), Some(blocks[23].recovered_block().num_hash()));
 }
 
 #[test]
