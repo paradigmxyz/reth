@@ -36,7 +36,7 @@ impl<N: NodeTypesWithDB> DbTool<N> {
     pub fn list<T: Table>(&self, filter: &ListFilter) -> Result<(Vec<TableRow<T>>, usize)> {
         let bmb = Rc::new(BMByte::from(&filter.search));
         if bmb.is_none() && filter.has_search() {
-            eyre::bail!("Invalid search.")
+            eyre::bail!("Invalid search.");
         }
 
         let mut hits = 0;
