@@ -194,8 +194,8 @@ async fn storage_range_roundtrip_carries_rlp_values_and_proof() {
             request_id: 9,
             root_hash: EMPTY_ROOT_HASH,
             account_hashes: vec![hashed_address],
-            starting_hash: origin,
-            limit_hash: limit,
+            starting_hash: origin.into(),
+            limit_hash: limit.into(),
             response_bytes: SOFT_RESPONSE_LIMIT as u64,
         })
         .await
@@ -260,8 +260,8 @@ async fn storage_range_empty_window_returns_boundary_slot() {
             request_id: 11,
             root_hash: EMPTY_ROOT_HASH,
             account_hashes: vec![hashed_address],
-            starting_hash: origin,
-            limit_hash: limit,
+            starting_hash: origin.into(),
+            limit_hash: limit.into(),
             response_bytes: SOFT_RESPONSE_LIMIT as u64,
         })
         .await
@@ -331,8 +331,8 @@ async fn storage_ranges_multi_account_bounds_only_first_account() {
             request_id: 21,
             root_hash: EMPTY_ROOT_HASH,
             account_hashes: vec![hashed_a, hashed_b],
-            starting_hash: B256::ZERO,
-            limit_hash: B256::repeat_byte(0xff),
+            starting_hash: B256::ZERO.into(),
+            limit_hash: B256::repeat_byte(0xff).into(),
             response_bytes,
         })
         .await
@@ -366,8 +366,8 @@ async fn storage_ranges_multi_account_bounds_only_first_account() {
             request_id: 22,
             root_hash: EMPTY_ROOT_HASH,
             account_hashes: vec![hashed_a, hashed_b],
-            starting_hash: origin,
-            limit_hash: B256::repeat_byte(0xff),
+            starting_hash: origin.into(),
+            limit_hash: B256::repeat_byte(0xff).into(),
             response_bytes: SOFT_RESPONSE_LIMIT as u64,
         })
         .await

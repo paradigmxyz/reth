@@ -8,7 +8,7 @@
 use crate::BlockAccessLists;
 use alloc::vec::Vec;
 use alloy_primitives::{Bytes, B256};
-use alloy_rlp::{Decodable, Encodable, RlpDecodable, RlpEncodable};
+use alloy_rlp::{BufMut, Decodable, Encodable, RlpDecodable, RlpEncodable};
 use reth_codecs_derive::add_arbitrary_tests;
 
 /// Supported SNAP protocol versions.
@@ -139,12 +139,66 @@ pub struct GetStorageRangesMessage {
     pub root_hash: B256,
     /// Account hashes of the storage tries to serve
     pub account_hashes: Vec<B256>,
-    /// Storage slot hash of the first to retrieve
-    pub starting_hash: B256,
-    /// Storage slot hash after which to stop serving
-    pub limit_hash: B256,
+    /// Storage slot hash of the first to retrieve; unbounded (served as `B256::ZERO`) when the
+    /// wire encoding is an empty byte string.
+    pub starting_hash: RangeBound,
+    /// Storage slot hash after which to stop serving; unbounded (served as
+    /// `B256::repeat_byte(0xff)`) when the wire encoding is an empty byte string.
+    pub limit_hash: RangeBound,
     /// Soft limit at which to stop returning data
     pub response_bytes: u64,
+}
+
+/// A `snap/2` storage-range bound (`origin`/`limit` on [`GetStorageRangesMessage`]).
+///
+/// Geth encodes these as variable-length byte strings: empty for an unbounded range, or exactly
+/// 32 bytes for a specific hash. `B256`'s RLP decoder requires exactly 32 bytes, so it can't
+/// represent geth's empty encoding, sent for the common unbounded multi-account request.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[cfg_attr(any(test, feature = "arbitrary"), derive(arbitrary::Arbitrary))]
+pub struct RangeBound(Option<B256>);
+
+impl RangeBound {
+    /// Returns the bound's hash, or `default` if it was encoded as an empty byte string.
+    pub const fn unwrap_or(self, default: B256) -> B256 {
+        match self.0 {
+            Some(hash) => hash,
+            None => default,
+        }
+    }
+}
+
+impl From<B256> for RangeBound {
+    fn from(hash: B256) -> Self {
+        Self(Some(hash))
+    }
+}
+
+impl Encodable for RangeBound {
+    fn encode(&self, out: &mut dyn BufMut) {
+        match self.0 {
+            Some(hash) => hash.encode(out),
+            None => Bytes::new().encode(out),
+        }
+    }
+
+    fn length(&self) -> usize {
+        match self.0 {
+            Some(hash) => hash.length(),
+            None => Bytes::new().length(),
+        }
+    }
+}
+
+impl Decodable for RangeBound {
+    fn decode(buf: &mut &[u8]) -> alloy_rlp::Result<Self> {
+        let bytes = Bytes::decode(buf)?;
+        match bytes.len() {
+            0 => Ok(Self(None)),
+            32 => Ok(Self(Some(B256::from_slice(&bytes)))),
+            _ => Err(alloy_rlp::Error::UnexpectedLength),
+        }
+    }
 }
 
 /// Storage slot data in the response.
@@ -476,8 +530,18 @@ mod tests {
             request_id: 42,
             root_hash: b256_from_u64(123),
             account_hashes: vec![b256_from_u64(456)],
-            starting_hash: b256_from_u64(789),
-            limit_hash: b256_from_u64(101112),
+            starting_hash: b256_from_u64(789).into(),
+            limit_hash: b256_from_u64(101112).into(),
+            response_bytes: 2048,
+        }));
+
+        // Geth's empty-byte-string encoding for an unbounded storage range.
+        test_roundtrip(SnapProtocolMessage::GetStorageRanges(GetStorageRangesMessage {
+            request_id: 43,
+            root_hash: b256_from_u64(123),
+            account_hashes: vec![b256_from_u64(456), b256_from_u64(789)],
+            starting_hash: RangeBound::default(),
+            limit_hash: RangeBound::default(),
             response_bytes: 2048,
         }));
 
@@ -562,7 +626,7 @@ mod tests {
     #[test_case(
         SnapProtocolMessage::GetStorageRanges(GetStorageRangesMessage {
             request_id: 3, root_hash: B256::ZERO, account_hashes: vec![],
-            starting_hash: B256::ZERO, limit_hash: B256::ZERO, response_bytes: 0,
+            starting_hash: B256::ZERO.into(), limit_hash: B256::ZERO.into(), response_bytes: 0,
         }), 3, false ; "get_storage_ranges is a request"
     )]
     #[test_case(
@@ -608,7 +672,7 @@ mod tests {
     #[test_case(
         SnapProtocolMessage::GetStorageRanges(GetStorageRangesMessage {
             request_id: 1, root_hash: B256::ZERO, account_hashes: vec![],
-            starting_hash: B256::ZERO, limit_hash: B256::ZERO, response_bytes: 0,
+            starting_hash: B256::ZERO.into(), limit_hash: B256::ZERO.into(), response_bytes: 0,
         }) ; "get_storage_ranges"
     )]
     #[test_case(
@@ -692,5 +756,39 @@ mod tests {
             SnapProtocolMessage::decode_versioned(SnapVersion::V2, &framed),
             Err(SnapProtocolError::Rlp(alloy_rlp::Error::UnexpectedLength))
         ));
+    }
+
+    #[test]
+    fn get_storage_ranges_decodes_geths_empty_origin_and_limit() {
+        // geth's GetStorageRangesPacket types Origin/Limit as raw byte strings and sends them
+        // empty for the common unbounded multi-account request, rather than as 32-byte
+        // zero/max-value hashes. A conforming decoder must accept this raw packet shape.
+        #[derive(alloy_rlp::RlpEncodable)]
+        struct GethStorageRequest {
+            request_id: u64,
+            root_hash: B256,
+            account_hashes: Vec<B256>,
+            origin: Bytes,
+            limit: Bytes,
+            response_bytes: u64,
+        }
+
+        let body = alloy_rlp::encode(GethStorageRequest {
+            request_id: 21,
+            root_hash: B256::ZERO,
+            account_hashes: vec![B256::repeat_byte(1), B256::repeat_byte(2)],
+            origin: Bytes::new(),
+            limit: Bytes::new(),
+            response_bytes: 1024,
+        });
+        let mut framed = vec![SnapMessageId::GetStorageRanges as u8];
+        framed.extend_from_slice(&body);
+
+        let decoded = SnapProtocolMessage::decode_versioned(SnapVersion::V2, &framed).unwrap();
+        let SnapProtocolMessage::GetStorageRanges(msg) = decoded else {
+            panic!("expected a GetStorageRanges message");
+        };
+        assert_eq!(msg.starting_hash.unwrap_or(B256::ZERO), B256::ZERO);
+        assert_eq!(msg.limit_hash.unwrap_or(B256::repeat_byte(0xff)), B256::repeat_byte(0xff));
     }
 }

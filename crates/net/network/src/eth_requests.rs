@@ -573,8 +573,14 @@ where
             if remaining_bytes == 0 && slots.iter().any(|range| !range.is_empty()) {
                 break
             }
-            let origin = if i == 0 { req.starting_hash } else { B256::ZERO };
-            let limit = if i == 0 { req.limit_hash } else { B256::repeat_byte(0xff) };
+            let (origin, limit) = if i == 0 {
+                (
+                    req.starting_hash.unwrap_or(B256::ZERO),
+                    req.limit_hash.unwrap_or(B256::repeat_byte(0xff)),
+                )
+            } else {
+                (B256::ZERO, B256::repeat_byte(0xff))
+            };
             let Some(RangeResponse { items: account_slots, end }) =
                 state.storage_range(hashed_address, origin, limit, remaining_bytes)?
             else {
@@ -1013,8 +1019,8 @@ mod tests {
             request_id: 2,
             root_hash: B256::ZERO,
             account_hashes: vec![B256::ZERO],
-            starting_hash: B256::ZERO,
-            limit_hash: B256::repeat_byte(0xff),
+            starting_hash: B256::ZERO.into(),
+            limit_hash: B256::repeat_byte(0xff).into(),
             response_bytes: SOFT_RESPONSE_LIMIT as u64,
         }),
         SnapResponse::StorageRanges(StorageRangesMessage {
@@ -1105,8 +1111,8 @@ mod tests {
                 request_id: 2,
                 root_hash: B256::ZERO,
                 account_hashes,
-                starting_hash: B256::ZERO,
-                limit_hash: B256::repeat_byte(0xff),
+                starting_hash: B256::ZERO.into(),
+                limit_hash: B256::repeat_byte(0xff).into(),
                 response_bytes: SOFT_RESPONSE_LIMIT as u64,
             })
         };
@@ -1213,8 +1219,8 @@ mod tests {
                 request_id: 2,
                 root_hash: B256::ZERO,
                 account_hashes: vec![B256::repeat_byte(0x03)],
-                starting_hash: origin,
-                limit_hash: B256::repeat_byte(0xff),
+                starting_hash: origin.into(),
+                limit_hash: B256::repeat_byte(0xff).into(),
                 response_bytes: SOFT_RESPONSE_LIMIT as u64,
             }),
             response,
@@ -1253,8 +1259,8 @@ mod tests {
                 request_id: 3,
                 root_hash: B256::ZERO,
                 account_hashes: vec![first_account, second_account],
-                starting_hash: origin,
-                limit_hash: limit,
+                starting_hash: origin.into(),
+                limit_hash: limit.into(),
                 response_bytes: 1_000,
             }),
             response,
@@ -1329,8 +1335,8 @@ mod tests {
                 request_id: 4,
                 root_hash: B256::ZERO,
                 account_hashes: vec![B256::ZERO; MAX_STORAGE_RANGE_ACCOUNTS_SERVE + 1],
-                starting_hash: B256::ZERO,
-                limit_hash: B256::repeat_byte(0xff),
+                starting_hash: B256::ZERO.into(),
+                limit_hash: B256::repeat_byte(0xff).into(),
                 response_bytes: SOFT_RESPONSE_LIMIT as u64,
             }),
             response,
@@ -1366,8 +1372,8 @@ mod tests {
                 request_id: 5,
                 root_hash: B256::ZERO,
                 account_hashes: vec![B256::repeat_byte(0x03)],
-                starting_hash: B256::ZERO,
-                limit_hash: B256::repeat_byte(0x20),
+                starting_hash: B256::ZERO.into(),
+                limit_hash: B256::repeat_byte(0x20).into(),
                 response_bytes: SOFT_RESPONSE_LIMIT as u64,
             }),
             response,
@@ -1402,8 +1408,8 @@ mod tests {
                 request_id: 6,
                 root_hash: B256::ZERO,
                 account_hashes: vec![missing_account, valid_account],
-                starting_hash: B256::ZERO,
-                limit_hash: B256::repeat_byte(0xff),
+                starting_hash: B256::ZERO.into(),
+                limit_hash: B256::repeat_byte(0xff).into(),
                 response_bytes: SOFT_RESPONSE_LIMIT as u64,
             }),
             response,
