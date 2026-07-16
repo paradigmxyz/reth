@@ -13,7 +13,7 @@ pub use reth_rpc_builder::{
 pub use reth_trie_db::ChangesetCache;
 
 use crate::{
-    invalid_block_hook::InvalidBlockHookExt, txpool_prewarm::PoolTxPoolPrewarmSource,
+    invalid_block_hook::InvalidBlockHookExt, txpool_prewarm::TransactionPoolPrewarmSource,
     ConfigureEngineEvm, ConsensusEngineEvent, ConsensusEngineHandle,
 };
 use alloy_rpc_types::engine::ClientVersionV1;
@@ -1469,8 +1469,6 @@ where
         let invalid_block_hook = ctx.create_invalid_block_hook(&data_dir).await?;
 
         let txpool_prewarming = tree_config.txpool_prewarming();
-        let txpool_prewarming_available =
-            !tree_config.disable_state_cache() && !tree_config.disable_prewarming();
         let mut validator = BasicEngineValidator::new(
             ctx.node.provider().clone(),
             std::sync::Arc::new(ctx.node.consensus().clone()),
@@ -1483,13 +1481,12 @@ where
             ctx.node.task_executor().clone(),
         );
 
-        if txpool_prewarming && txpool_prewarming_available {
-            validator = validator.with_txpool_prewarm_source(PoolTxPoolPrewarmSource::<
-                PrimitivesTy<Node::Types>,
-                _,
-            >::new(
-                ctx.node.pool().clone()
-            ));
+        if txpool_prewarming {
+            validator =
+                validator.with_txpool_prewarming(TransactionPoolPrewarmSource::<
+                    PrimitivesTy<Node::Types>,
+                    _,
+                >::new(ctx.node.pool().clone()));
         }
 
         Ok(validator)

@@ -379,16 +379,10 @@ where
     }
 
     /// Installs the txpool source and starts the persistent cache-prewarming worker.
-    pub fn with_txpool_prewarm_source(
+    pub fn with_txpool_prewarming(
         mut self,
         source: impl crate::tree::TxPoolPrewarmSource<N> + 'static,
     ) -> Self {
-        if !self.config.txpool_prewarming() ||
-            self.config.disable_state_cache() ||
-            self.config.disable_prewarming()
-        {
-            return self
-        }
         self.txpool_prewarm = Some(TxPoolPrewarmHandle::spawn(
             &self.runtime,
             Arc::new(source),
