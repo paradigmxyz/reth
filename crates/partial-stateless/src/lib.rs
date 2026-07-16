@@ -15,6 +15,7 @@ pub mod persistence;
 pub mod policy;
 pub mod witness;
 
+pub mod sender_proof;
 pub mod sidecar;
 pub mod witness_check;
 
@@ -22,6 +23,9 @@ pub use accessed_state::BlockAccessedState;
 pub use fixture::{load_fixtures, save_fixture, AccessedStateFixture, LoadedFixtures};
 pub use network_cache::{CachedEntry, NetworkStateCache};
 pub use policy::{CachePolicy, LastNBlocksPolicy};
+pub use sender_proof::{
+    SenderAccountProof, SenderAdmissionInput, SenderProofError, VerifiedSender,
+};
 pub use sidecar::{
     check_next_cache_anchor, check_sidecar_context, check_sidecar_miss_targets,
     check_sidecar_self_consistency, last_n_blocks_cache_policy_id, partial_witness_commitment,
