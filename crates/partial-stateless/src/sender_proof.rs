@@ -92,6 +92,15 @@ impl SenderAccountProof {
             });
         }
 
+        // Sender admission only needs the account leaf. Reject storage proofs before
+        // AccountProof::verify, which would otherwise verify every supplied proof and
+        // accept valid-but-unnecessary storage data.
+        if !self.proof.storage_proofs.is_empty() {
+            return Err(SenderProofError::UnexpectedStorageProofs {
+                count: self.proof.storage_proofs.len(),
+            });
+        }
+
         // Rule 2 — anchor is canonical and its state root matches the claimed one.
         match is_canonical(self.anchor_block_number, self.anchor_block_hash) {
             None => {
@@ -231,6 +240,11 @@ pub enum SenderProofError {
         /// The address the proof is for.
         proof: Address,
     },
+    /// Sender admission requires only an account proof, but storage proofs were supplied.
+    UnexpectedStorageProofs {
+        /// Number of unexpected storage proofs.
+        count: usize,
+    },
     /// The anchor `(number, hash)` is not on the canonical chain (Rule 2).
     AnchorNotCanonical {
         /// Anchor block number.
@@ -305,7 +319,9 @@ mod tests {
     use super::*;
     use alloy_primitives::{address, U256};
     use reth_primitives_traits::Account;
-    use reth_trie_common::{proof::ProofRetainer, HashBuilder, Nibbles, EMPTY_ROOT_HASH};
+    use reth_trie_common::{
+        proof::ProofRetainer, HashBuilder, Nibbles, StorageProof, EMPTY_ROOT_HASH,
+    };
 
     const SENDER: Address = address!("0x1111111111111111111111111111111111111111");
     const ANCHOR_HASH: B256 = B256::repeat_byte(0xa1);
@@ -378,6 +394,15 @@ mod tests {
         let other = address!("0x2222222222222222222222222222222222222222");
         let err = sp.verify(&input(other, 7, 130), canonical(100, ANCHOR_HASH, root)).unwrap_err();
         assert_eq!(err, SenderProofError::SenderMismatch { expected: other, proof: SENDER });
+    }
+
+    #[test]
+    fn rejects_unexpected_storage_proofs() {
+        let (mut sp, root) = funded_eoa_proof(SENDER, 5, 100);
+        sp.proof.storage_proofs.push(StorageProof::new(B256::ZERO));
+
+        let err = sp.verify(&input(SENDER, 7, 130), canonical(100, ANCHOR_HASH, root)).unwrap_err();
+        assert_eq!(err, SenderProofError::UnexpectedStorageProofs { count: 1 });
     }
 
     #[test]
