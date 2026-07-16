@@ -151,9 +151,7 @@ pub struct GetStorageRangesMessage {
 
 /// A `snap/2` storage-range bound (`origin`/`limit` on [`GetStorageRangesMessage`]).
 ///
-/// Geth encodes these as variable-length byte strings: empty for an unbounded range, or exactly
-/// 32 bytes for a specific hash. `B256`'s RLP decoder requires exactly 32 bytes, so it can't
-/// represent geth's empty encoding, sent for the common unbounded multi-account request.
+/// Encoded as either an empty byte string (unbounded) or a 32-byte hash.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 #[cfg_attr(any(test, feature = "arbitrary"), derive(arbitrary::Arbitrary))]
 pub struct RangeBound(Option<B256>);

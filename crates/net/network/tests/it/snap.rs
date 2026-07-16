@@ -5,16 +5,19 @@
 //! `StateRangeProviderFactory` serving, and response decoding.
 
 use alloy_consensus::constants::{EMPTY_ROOT_HASH, KECCAK_EMPTY};
+use alloy_eips::NumHash;
 use alloy_primitives::{keccak256, Address, Bytes, B256, U256};
 use alloy_rlp::Decodable;
+use alloy_trie::{nodes::RlpNode, proof::verify_proof, Nibbles};
 use reth_chainspec::Hardforks;
 use reth_eth_wire::{
     protocol::Protocol,
     snap::{
-        AccountData, AccountRangeMessage, ByteCodesMessage, GetAccountRangeMessage,
-        GetByteCodesMessage, GetStorageRangesMessage, StorageRangesMessage,
+        AccountData, AccountRangeMessage, BlockAccessListsMessage, ByteCodesMessage,
+        GetAccountRangeMessage, GetBlockAccessListsMessage, GetByteCodesMessage,
+        GetStorageRangesMessage, StorageRangesMessage,
     },
-    EthVersion,
+    BlockAccessLists, EthVersion,
 };
 use reth_network::{
     eth_requests::{SlimAccountBody, SOFT_RESPONSE_LIMIT},
@@ -28,9 +31,9 @@ use reth_provider::{
     test_utils::{
         create_test_provider_factory, ExtendedAccount, MockEthProvider, MockNodeTypesWithDB,
     },
-    BalProvider, BlockReader, BlockWriter, ChainSpecProvider, HashingWriter, HeaderProvider,
-    ProviderFactory, StageCheckpointWriter, StateProviderFactory, StateRangeProviderFactory,
-    StateRootProvider, StorageRootProvider,
+    BalProvider, BalStoreHandle, BlockReader, BlockWriter, ChainSpecProvider, HashingWriter,
+    HeaderProvider, InMemoryBalStore, ProviderFactory, RawBal, StageCheckpointWriter,
+    StateProviderFactory, StateRangeProviderFactory, StateRootProvider, StorageRootProvider,
 };
 use reth_stages_types::{StageCheckpoint, StageId};
 use reth_testing_utils::generators::{self, random_block, BlockParams};
@@ -78,8 +81,7 @@ where
 }
 
 /// A fresh temp-database provider factory with a genesis block and a `StageId::Finish` checkpoint
-/// at block 0, so [`StateRangeProviderFactory::state_range_provider`] can resolve
-/// [`EMPTY_ROOT_HASH`] once hashed state is written on top.
+/// at block 0.
 fn genesis_provider_factory() -> ProviderFactory<MockNodeTypesWithDB> {
     let factory = create_test_provider_factory();
     let provider_rw = factory.provider_rw().unwrap();
@@ -90,6 +92,81 @@ fn genesis_provider_factory() -> ProviderFactory<MockNodeTypesWithDB> {
     provider_rw.save_stage_checkpoint(StageId::Finish, StageCheckpoint::new(0)).unwrap();
     provider_rw.commit().unwrap();
     factory
+}
+
+/// Commits the current hashed state root to a canonical block and advances the retained-state
+/// checkpoint to it.
+///
+/// Snap requests are keyed by a header-committed root. Writing hashed tables without advancing the
+/// chain would make a request for the genesis empty root accidentally serve newer state.
+fn persist_fixture_state_root(factory: &ProviderFactory<MockNodeTypesWithDB>) -> B256 {
+    let state_root = factory.latest().unwrap().state_root(HashedPostState::default()).unwrap();
+    let genesis_hash = factory.sealed_header(0).unwrap().unwrap().hash();
+    let mut block = random_block(
+        &mut generators::rng(),
+        1,
+        BlockParams { parent: Some(genesis_hash), tx_count: Some(0), ..Default::default() },
+    )
+    .unseal();
+    block.header.state_root = state_root;
+    let block = block.seal_slow();
+
+    let provider_rw = factory.provider_rw().unwrap();
+    provider_rw.insert_block(&block.try_recover().unwrap()).unwrap();
+    provider_rw.save_stage_checkpoint(StageId::Finish, StageCheckpoint::new(1)).unwrap();
+    provider_rw.commit().unwrap();
+    state_root
+}
+
+/// Verifies one boundary path from the unordered union of trie nodes carried by a snap range
+/// proof.
+///
+/// Snap responses omit each proof node's nibble path and combine both boundary paths into one
+/// sorted node list. This finds the subsequence belonging to the requested boundary and passes it
+/// to [`verify_proof`], ignoring nodes used only by the other boundary.
+fn assert_boundary_proof(root: B256, key: B256, expected_value: Option<Vec<u8>>, proof: &[Bytes]) {
+    let root_reference = RlpNode::word_rlp(&root);
+    let Some(root_index) = proof
+        .iter()
+        .position(|node| RlpNode::from_rlp(node).as_slice() == root_reference.as_slice())
+    else {
+        panic!("proof does not contain the committed root node")
+    };
+
+    let key = Nibbles::unpack(key);
+    let remaining: Vec<_> = proof
+        .iter()
+        .enumerate()
+        .filter_map(|(index, node)| (index != root_index).then_some(node))
+        .collect();
+    let mut path = vec![&proof[root_index]];
+
+    fn verifies_subsequence<'a>(
+        root: B256,
+        key: Nibbles,
+        expected_value: &Option<Vec<u8>>,
+        remaining: &[&'a Bytes],
+        next: usize,
+        path: &mut Vec<&'a Bytes>,
+    ) -> bool {
+        if verify_proof(root, key, expected_value.clone(), path.iter().copied()).is_ok() {
+            return true
+        }
+
+        for index in next..remaining.len() {
+            path.push(remaining[index]);
+            if verifies_subsequence(root, key, expected_value, remaining, index + 1, path) {
+                return true
+            }
+            path.pop();
+        }
+        false
+    }
+
+    assert!(
+        verifies_subsequence(root, key, &expected_value, &remaining, 0, &mut path),
+        "invalid or incomplete proof at boundary {key:?}"
+    );
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -111,24 +188,7 @@ async fn account_range_roundtrip_carries_slim_encoding_and_proof() {
         .unwrap();
     provider_rw.commit().unwrap();
 
-    let state_root = factory.latest().unwrap().state_root(HashedPostState::default()).unwrap();
-
-    // Persist a block whose header actually carries `state_root`, and advance the retained range
-    // to it, so the request below resolves the real post-insertion root rather than the stale,
-    // now-incorrect genesis-declared `EMPTY_ROOT_HASH`.
-    let genesis_hash = factory.sealed_header(0).unwrap().unwrap().hash();
-    let mut block = random_block(
-        &mut generators::rng(),
-        1,
-        BlockParams { parent: Some(genesis_hash), tx_count: Some(0), ..Default::default() },
-    )
-    .unseal();
-    block.header.state_root = state_root;
-    let block = block.seal_slow();
-    let provider_rw = factory.provider_rw().unwrap();
-    provider_rw.insert_block(&block.try_recover().unwrap()).unwrap();
-    provider_rw.save_stage_checkpoint(StageId::Finish, StageCheckpoint::new(1)).unwrap();
-    provider_rw.commit().unwrap();
+    let state_root = persist_fixture_state_root(&factory);
 
     let provider = BlockchainProvider::new(factory).unwrap();
     let net = spawn_snap_testnet(provider).await;
@@ -172,10 +232,15 @@ async fn account_range_roundtrip_carries_slim_encoding_and_proof() {
         assert!(decoded.code_hash.is_empty());
     }
 
-    // A boundary proof's first node is always the trie root, so this proves the wire response
-    // carries a real proof against the requested (and now correctly resolved) state root.
     assert!(!proof.is_empty());
-    assert_eq!(keccak256(&proof[0]), state_root);
+    assert_boundary_proof(state_root, B256::ZERO, None, &proof);
+    let (last_hash, last_account) = expected.last().unwrap();
+    assert_boundary_proof(
+        state_root,
+        *last_hash,
+        Some(alloy_rlp::encode(last_account.into_trie_account(EMPTY_ROOT_HASH))),
+        &proof,
+    );
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -193,6 +258,8 @@ async fn storage_range_roundtrip_carries_rlp_values_and_proof() {
     provider_rw.insert_account_for_hashing([(address, Some(account))]).unwrap();
     provider_rw.insert_storage_for_hashing([(address, slots.clone())]).unwrap();
     provider_rw.commit().unwrap();
+
+    let state_root = persist_fixture_state_root(&factory);
 
     let provider = BlockchainProvider::new(factory).unwrap();
     let storage_root =
@@ -212,7 +279,7 @@ async fn storage_range_roundtrip_carries_rlp_values_and_proof() {
     let response = fetch
         .get_storage_ranges(GetStorageRangesMessage {
             request_id: 9,
-            root_hash: EMPTY_ROOT_HASH,
+            root_hash: state_root,
             account_hashes: vec![hashed_address],
             starting_hash: origin.into(),
             limit_hash: limit.into(),
@@ -239,7 +306,13 @@ async fn storage_range_roundtrip_carries_rlp_values_and_proof() {
     assert_eq!(decoded, expected_bounded);
 
     assert!(!proof.is_empty());
-    assert_eq!(keccak256(&proof[0]), storage_root);
+    assert_boundary_proof(storage_root, origin, Some(alloy_rlp::encode(expected[1].1)), &proof);
+    assert_boundary_proof(
+        storage_root,
+        expected_bounded.last().unwrap().0,
+        Some(alloy_rlp::encode(expected_bounded.last().unwrap().1)),
+        &proof,
+    );
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -257,6 +330,8 @@ async fn storage_range_empty_window_returns_boundary_slot() {
     provider_rw.insert_account_for_hashing([(address, Some(account))]).unwrap();
     provider_rw.insert_storage_for_hashing([(address, slots.clone())]).unwrap();
     provider_rw.commit().unwrap();
+
+    let state_root = persist_fixture_state_root(&factory);
 
     let provider = BlockchainProvider::new(factory).unwrap();
     let storage_root =
@@ -278,7 +353,7 @@ async fn storage_range_empty_window_returns_boundary_slot() {
     let response = fetch
         .get_storage_ranges(GetStorageRangesMessage {
             request_id: 11,
-            root_hash: EMPTY_ROOT_HASH,
+            root_hash: state_root,
             account_hashes: vec![hashed_address],
             starting_hash: origin.into(),
             limit_hash: limit.into(),
@@ -300,7 +375,13 @@ async fn storage_range_empty_window_returns_boundary_slot() {
     assert_eq!(decoded, vec![expected[2]]);
 
     assert!(!proof.is_empty());
-    assert_eq!(keccak256(&proof[0]), storage_root);
+    assert_boundary_proof(storage_root, origin, None, &proof);
+    assert_boundary_proof(
+        storage_root,
+        expected[2].0,
+        Some(alloy_rlp::encode(expected[2].1)),
+        &proof,
+    );
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -329,7 +410,11 @@ async fn storage_ranges_multi_account_bounds_only_first_account() {
         .unwrap();
     provider_rw.commit().unwrap();
 
+    let state_root = persist_fixture_state_root(&factory);
+
     let provider = BlockchainProvider::new(factory).unwrap();
+    let storage_root_a =
+        provider.latest().unwrap().storage_root(address_a, HashedStorage::default()).unwrap();
     let storage_root_b =
         provider.latest().unwrap().storage_root(address_b, HashedStorage::default()).unwrap();
 
@@ -349,7 +434,7 @@ async fn storage_ranges_multi_account_bounds_only_first_account() {
     let response = fetch
         .get_storage_ranges(GetStorageRangesMessage {
             request_id: 21,
-            root_hash: EMPTY_ROOT_HASH,
+            root_hash: state_root,
             account_hashes: vec![hashed_a, hashed_b],
             starting_hash: B256::ZERO.into(),
             limit_hash: B256::repeat_byte(0xff).into(),
@@ -375,7 +460,9 @@ async fn storage_ranges_multi_account_bounds_only_first_account() {
     assert!(decoded_b.len() < expected_b.len(), "the final account's range should be truncated");
     assert_eq!(decoded_b, expected_b[..decoded_b.len()]);
     assert!(!proof.is_empty());
-    assert_eq!(keccak256(&proof[0]), storage_root_b, "the proof should cover the final account");
+    assert_boundary_proof(storage_root_b, B256::ZERO, None, &proof);
+    let last_b = decoded_b.last().unwrap();
+    assert_boundary_proof(storage_root_b, last_b.0, Some(alloy_rlp::encode(last_b.1)), &proof);
 
     // A non-zero origin on the request only bounds the first account: since it forces a proof for
     // A regardless of budget, B is never reached, proving the origin isn't wrongly applied to B
@@ -384,7 +471,7 @@ async fn storage_ranges_multi_account_bounds_only_first_account() {
     let response = fetch
         .get_storage_ranges(GetStorageRangesMessage {
             request_id: 22,
-            root_hash: EMPTY_ROOT_HASH,
+            root_hash: state_root,
             account_hashes: vec![hashed_a, hashed_b],
             starting_hash: origin.into(),
             limit_hash: B256::repeat_byte(0xff).into(),
@@ -404,6 +491,9 @@ async fn storage_ranges_multi_account_bounds_only_first_account() {
         .collect();
     assert_eq!(decoded_a, expected_a[1..]);
     assert!(!proof.is_empty());
+    assert_boundary_proof(storage_root_a, origin, Some(alloy_rlp::encode(expected_a[1].1)), &proof);
+    let last_a = decoded_a.last().unwrap();
+    assert_boundary_proof(storage_root_a, last_a.0, Some(alloy_rlp::encode(last_a.1)), &proof);
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -492,6 +582,118 @@ async fn retained_and_expired_state_roots_respond_without_hanging() {
     assert_eq!(request_id, 2);
     assert!(accounts.is_empty());
     assert!(proof.is_empty());
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn block_access_lists_roundtrip_preserves_positions_and_request_id() {
+    reth_tracing::init_test_tracing();
+
+    let bal_store = BalStoreHandle::new(InMemoryBalStore::default());
+    let mut provider = MockEthProvider::default();
+    provider.bal_store = bal_store.clone();
+    let provider = Arc::new(provider);
+
+    let hash_a = B256::random();
+    let missing_hash = B256::random();
+    let hash_b = B256::random();
+    let bal_a = Bytes::from_static(&[0xc1, 0x01]);
+    let bal_b = Bytes::from_static(&[0xc1, 0x02]);
+    bal_store.insert(NumHash::new(1, hash_a), RawBal::from(bal_a.clone())).unwrap();
+    bal_store.insert(NumHash::new(2, hash_b), RawBal::from(bal_b.clone())).unwrap();
+
+    let net = spawn_snap_testnet(provider).await;
+    let fetch = net.peers()[0].network().fetch_client().await.unwrap();
+    let response = fetch
+        .get_block_access_lists(GetBlockAccessListsMessage {
+            request_id: 31,
+            block_hashes: vec![hash_a, missing_hash, hash_b],
+            response_bytes: SOFT_RESPONSE_LIMIT as u64,
+        })
+        .await
+        .unwrap()
+        .into_data();
+
+    let SnapResponse::BlockAccessLists(BlockAccessListsMessage { request_id, block_access_lists }) =
+        response
+    else {
+        panic!("expected a block access lists response");
+    };
+    assert_eq!(request_id, 31);
+    assert_eq!(block_access_lists, BlockAccessLists(vec![Some(bal_a), None, Some(bal_b)]));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn block_access_lists_roundtrip_honors_request_soft_limit() {
+    reth_tracing::init_test_tracing();
+
+    let bal_store = BalStoreHandle::new(InMemoryBalStore::default());
+    let mut provider = MockEthProvider::default();
+    provider.bal_store = bal_store.clone();
+    let provider = Arc::new(provider);
+
+    let hash_a = B256::random();
+    let missing_hash = B256::random();
+    let hash_b = B256::random();
+    let bal_a = Bytes::from_static(&[0xc1, 0x01]);
+    let bal_b = Bytes::from_static(&[0xc1, 0x02]);
+    bal_store.insert(NumHash::new(1, hash_a), RawBal::from(bal_a.clone())).unwrap();
+    bal_store.insert(NumHash::new(2, hash_b), RawBal::from(bal_b)).unwrap();
+
+    let net = spawn_snap_testnet(provider).await;
+    let fetch = net.peers()[0].network().fetch_client().await.unwrap();
+
+    // The limit is soft: the missing entry that crosses it is included, then the suffix is
+    // truncated. This also checks that an unavailable entry counts as its 0x80 placeholder byte.
+    let response = fetch
+        .get_block_access_lists(GetBlockAccessListsMessage {
+            request_id: 32,
+            block_hashes: vec![hash_a, missing_hash, hash_b],
+            response_bytes: bal_a.len() as u64,
+        })
+        .await
+        .unwrap()
+        .into_data();
+    let SnapResponse::BlockAccessLists(BlockAccessListsMessage { block_access_lists, .. }) =
+        response
+    else {
+        panic!("expected a block access lists response");
+    };
+    assert_eq!(block_access_lists, BlockAccessLists(vec![Some(bal_a.clone()), None]));
+
+    // Even a zero limit returns the first entry that crosses the soft cap rather than dropping the
+    // connection or treating zero as an invalid request.
+    let response = fetch
+        .get_block_access_lists(GetBlockAccessListsMessage {
+            request_id: 33,
+            block_hashes: vec![hash_a, missing_hash],
+            response_bytes: 0,
+        })
+        .await
+        .unwrap()
+        .into_data();
+    let SnapResponse::BlockAccessLists(BlockAccessListsMessage { block_access_lists, .. }) =
+        response
+    else {
+        panic!("expected a block access lists response");
+    };
+    assert_eq!(block_access_lists, BlockAccessLists(vec![Some(bal_a)]));
+
+    let response = fetch
+        .get_block_access_lists(GetBlockAccessListsMessage {
+            request_id: 34,
+            block_hashes: Vec::new(),
+            response_bytes: SOFT_RESPONSE_LIMIT as u64,
+        })
+        .await
+        .unwrap()
+        .into_data();
+    let SnapResponse::BlockAccessLists(BlockAccessListsMessage { request_id, block_access_lists }) =
+        response
+    else {
+        panic!("expected a block access lists response");
+    };
+    assert_eq!(request_id, 34);
+    assert_eq!(block_access_lists, BlockAccessLists(Vec::new()));
 }
 
 #[tokio::test(flavor = "multi_thread")]

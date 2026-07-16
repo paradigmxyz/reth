@@ -9070,6 +9070,7 @@ dependencies = [
  "alloy-genesis",
  "alloy-primitives",
  "alloy-rlp",
+ "alloy-trie",
  "aquamarine",
  "auto_impl",
  "derive_more",
