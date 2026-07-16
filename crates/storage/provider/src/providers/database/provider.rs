@@ -167,8 +167,11 @@ impl<DB: Database, N: NodeTypes> From<DatabaseProviderRW<DB, N>>
 /// Mode for [`DatabaseProvider::save_blocks`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SaveBlocksMode {
-    /// Full mode: write block structure + receipts + state + trie.
-    /// Used by engine/production code.
+    /// Write block structure, receipts, state, history, hashed state, and trie updates.
+    ///
+    /// This mode advances all datasets through the same final block. Engine persistence uses
+    /// [`DatabaseProvider::save_blocks_with_frontiers`] when the hashed-state/trie frontier may
+    /// advance independently.
     Full,
     /// Blocks only: write block structure (headers, txs, senders, indices).
     /// Receipts/state/trie are skipped - they may come later via separate calls.
@@ -572,10 +575,15 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
         }
     }
 
-    /// Writes executed blocks and state to storage.
+    /// Writes a contiguous block range using a single persistence frontier.
     ///
-    /// Use [`SaveBlocksMode::Full`] for production (includes receipts, state, trie).
-    /// Use [`SaveBlocksMode::BlocksOnly`] for block structure only (used by `insert_block`).
+    /// [`SaveBlocksMode::Full`] writes block, execution, history, hashed-state, and trie data
+    /// through the final block. Because there is no masking suffix, this uses the ordinary
+    /// unfiltered state/trie merge path. [`SaveBlocksMode::BlocksOnly`] writes block structure only
+    /// and is used by [`Self::insert_block`].
+    ///
+    /// Static-file and RocksDB writes run in parallel with MDBX writes. All pending backend writes
+    /// are committed by the caller's subsequent provider commit.
     #[instrument(level = "debug", target = "providers::db", skip_all, fields(block_count = blocks.len()))]
     pub fn save_blocks(
         &self,
@@ -600,7 +608,20 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
         )
     }
 
-    /// Writes the independently advancing ranges described by [`SaveBlocksInput`].
+    /// Advances the independent persistence frontiers described by [`SaveBlocksInput`].
+    ///
+    /// This is the engine persistence path. It writes ordinary data for newly persisted blocks,
+    /// catches up hashed-state/trie updates from blocks leaving the masking window, and keeps the
+    /// new masking suffix out of the hashed-state/trie tables. Older updates overwritten anywhere
+    /// in that suffix are filtered rather than written temporarily.
+    ///
+    /// An empty masking suffix is valid. It means both frontiers advance together and this falls
+    /// back to the same unfiltered merge used by [`Self::save_blocks`]. Graceful shutdown uses
+    /// that case to leave the database fully flushed.
+    ///
+    /// Static-file and RocksDB writes for newly persisted blocks continue to run in parallel with
+    /// MDBX writes. The previous frontiers are checked against the current Finish checkpoint
+    /// before any data is written.
     #[instrument(
         level = "debug",
         target = "providers::db",
@@ -612,7 +633,7 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
             mask_block_count = input.state_trie_masking_blocks().len(),
         )
     )]
-    pub fn save_blocks_partial(
+    pub fn save_blocks_with_frontiers(
         &self,
         input: &SaveBlocksInput<N::Primitives>,
     ) -> ProviderResult<()> {
@@ -648,7 +669,13 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
         )
     }
 
-    /// Writes the block-data and derived state/trie ranges while retaining backend parallelism.
+    /// Writes ordinary block data and up to two hashed-state/trie ranges in parallel backends.
+    ///
+    /// `state_trie_ranges` contains, in order, previously masked blocks that are catching up and
+    /// newly persisted blocks before the new mask. Keeping those naturally separate avoids the
+    /// performance regression of one larger k-way merge. When `state_trie_masking_blocks` is
+    /// empty, each range uses the ordinary `merge_batch` path without building or filtering a
+    /// mask.
     fn save_blocks_inner(
         &self,
         persist_rest_blocks: &[ExecutedBlock<N::Primitives>],
@@ -4923,7 +4950,7 @@ mod tests {
 
         let provider_rw = factory.provider_rw().unwrap();
         let input = SaveBlocksInput::new(vec![full_persist_block, deferred_trie_block], 0, 0, 2, 1);
-        provider_rw.save_blocks_partial(&input).unwrap();
+        provider_rw.save_blocks_with_frontiers(&input).unwrap();
         provider_rw.commit().unwrap();
 
         let provider = factory.provider().unwrap();
@@ -5031,7 +5058,7 @@ mod tests {
 
         let provider_rw = factory.provider_rw().unwrap();
         let input = SaveBlocksInput::new(blocks[2..].to_vec(), 2, 2, 4, 2);
-        provider_rw.save_blocks_partial(&input).unwrap();
+        provider_rw.save_blocks_with_frontiers(&input).unwrap();
         provider_rw.commit().unwrap();
 
         let provider = factory.provider().unwrap();

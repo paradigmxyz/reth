@@ -446,7 +446,15 @@ impl StageCheckpoint {
 #[cfg_attr(any(test, feature = "reth-codec"), reth_codecs::add_arbitrary_tests(compact))]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct FinishCheckpoint {
-    /// The highest block with a partially persisted state and trie.
+    /// Boundary between hashed-state/trie updates represented on disk and by the in-memory mask.
+    ///
+    /// When this is below the Finish stage's block number, blocks above it form a masking suffix:
+    /// their ordinary block and execution data is durable, but their hashed-state/trie updates are
+    /// retained in memory. Hashed-state/trie updates at or below this boundary may also be omitted
+    /// from disk when the suffix overwrites them. The database and mask together represent state
+    /// at the Finish block.
+    ///
+    /// `None`, or a value equal to the Finish block, means no partial-persistence gap exists.
     pub partial_state_trie: Option<BlockNumber>,
 }
 
