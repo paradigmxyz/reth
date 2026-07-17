@@ -27,7 +27,7 @@ use reth_network::{
 use reth_network_p2p::snap::client::{SnapClient, SnapResponse};
 use reth_primitives_traits::{Account, Block as _, StorageEntry};
 use reth_provider::{
-    providers::BlockchainProvider,
+    providers::{BlockchainProvider, SNAPSHOT_STATE_RETENTION},
     test_utils::{
         create_test_provider_factory, ExtendedAccount, MockEthProvider, MockNodeTypesWithDB,
     },
@@ -500,10 +500,6 @@ async fn storage_ranges_multi_account_bounds_only_first_account() {
 async fn retained_and_expired_state_roots_respond_without_hanging() {
     reth_tracing::init_test_tracing();
 
-    // Mirrors `SNAPSHOT_STATE_RETENTION` in `blockchain_provider.rs`: the window of the most
-    // recent blocks whose state roots are still resolvable.
-    const RETENTION: u64 = 128;
-
     let factory = create_test_provider_factory();
     let mut rng = generators::rng();
     let expired_root = B256::repeat_byte(0x11);
@@ -511,7 +507,7 @@ async fn retained_and_expired_state_roots_respond_without_hanging() {
     let mut parent = B256::ZERO;
 
     let provider_rw = factory.provider_rw().unwrap();
-    for number in 0..=RETENTION {
+    for number in 0..=SNAPSHOT_STATE_RETENTION {
         let mut block = random_block(
             &mut rng,
             number,
@@ -527,7 +523,9 @@ async fn retained_and_expired_state_roots_respond_without_hanging() {
         parent = block.hash();
         provider_rw.insert_block(&block.try_recover().unwrap()).unwrap();
     }
-    provider_rw.save_stage_checkpoint(StageId::Finish, StageCheckpoint::new(RETENTION)).unwrap();
+    provider_rw
+        .save_stage_checkpoint(StageId::Finish, StageCheckpoint::new(SNAPSHOT_STATE_RETENTION))
+        .unwrap();
 
     let account =
         (Address::random(), Account { nonce: 7, balance: U256::from(7), bytecode_hash: None });
