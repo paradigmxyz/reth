@@ -726,138 +726,6 @@ fn assert_serde_preserves_block_operations(expected: ExecutionOutcome, actual: E
     assert_eq!(actual.split_at(11), expected.split_at(11));
 }
 
-#[cfg(any(feature = "serde", feature = "serde-bincode-compat"))]
-mod serde_state {
-    // `BlockStateAccumulator` lives in evm2 with private fields and does not currently implement
-    // serde. Until evm2 exposes serde derives for it upstream, this adapter is the narrow
-    // boundary that serializes it through the public `StateChangeSource` stream.
-    use super::*;
-    use alloy_primitives::Bytes;
-    use evm2::{bytecode::Bytecode as ExecutableBytecode, evm::StateChangeSource};
-    use serde::{Deserialize, Serialize};
-
-    #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
-    pub(super) struct BlockStateSerde {
-        accounts: AddressMap<TrackedSerde<Option<RevertAccount>>>,
-        storage: AddressMap<StorageChangeSetSerde>,
-        contracts: B256Map<Bytes>,
-    }
-
-    #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
-    struct StorageChangeSetSerde {
-        wipe: bool,
-        slots: BTreeMap<U256, TrackedSerde<U256>>,
-    }
-
-    #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-    struct TrackedSerde<T> {
-        original: T,
-        current: T,
-    }
-
-    impl From<&EvmState> for BlockStateSerde {
-        fn from(state: &EvmState) -> Self {
-            let mut sink = BlockStateSerdeSink::default();
-            match state.visit(&mut sink) {
-                Ok(()) => {}
-                Err(err) => match err {},
-            }
-            sink.state
-        }
-    }
-
-    impl From<BlockStateSerde> for EvmState {
-        fn from(value: BlockStateSerde) -> Self {
-            let mut accumulator = Self::new();
-            for (code_hash, bytecode) in value.contracts {
-                accumulator
-                    .bytecode(code_hash, &ExecutableBytecode::new_raw(bytecode))
-                    .expect("infallible");
-            }
-            for (address, storage) in value.storage {
-                if storage.wipe {
-                    accumulator.storage_wipe(address).expect("infallible");
-                }
-                for (key, slot) in storage.slots {
-                    StateChangeSink::storage(
-                        &mut accumulator,
-                        StorageChange {
-                            address,
-                            key,
-                            original: slot.original,
-                            current: slot.current,
-                        },
-                    )
-                    .expect("infallible");
-                }
-            }
-            for (address, account) in value.accounts {
-                let original = account.original.map(|account| account.to_account_info());
-                let current = account.current.map(|account| account.to_account_info());
-                accumulator
-                    .account(AccountChangeRef {
-                        address,
-                        original: original.as_ref().map(account_info_ref),
-                        current: current.as_ref().map(account_info_ref),
-                    })
-                    .expect("infallible");
-            }
-            accumulator
-        }
-    }
-
-    #[derive(Default)]
-    struct BlockStateSerdeSink {
-        state: BlockStateSerde,
-    }
-
-    impl StateChangeSink for BlockStateSerdeSink {
-        type Error = core::convert::Infallible;
-
-        fn bytecode(
-            &mut self,
-            code_hash: B256,
-            code: &ExecutableBytecode,
-        ) -> Result<(), Self::Error> {
-            self.state.contracts.insert(code_hash, code.original_bytes());
-            Ok(())
-        }
-
-        fn account(&mut self, change: AccountChangeRef<'_>) -> Result<(), Self::Error> {
-            self.state.accounts.insert(
-                change.address,
-                TrackedSerde {
-                    original: change.original.map(RevertAccount::from),
-                    current: change.current.map(RevertAccount::from),
-                },
-            );
-            Ok(())
-        }
-
-        fn storage_wipe(&mut self, address: Address) -> Result<(), Self::Error> {
-            self.state.storage.entry(address).or_default().wipe = true;
-            Ok(())
-        }
-
-        fn storage(&mut self, change: StorageChange) -> Result<(), Self::Error> {
-            self.state.storage.entry(change.address).or_default().slots.insert(
-                change.key,
-                TrackedSerde { original: change.original, current: change.current },
-            );
-            Ok(())
-        }
-    }
-
-    const fn account_info_ref(info: &AccountInfo) -> AccountInfoRef<'_> {
-        AccountInfoRef {
-            balance: info.balance,
-            nonce: info.nonce,
-            code_hash: info.code_hash,
-            code: info.code.as_ref(),
-        }
-    }
-}
-
 #[cfg(feature = "serde")]
 mod serde_impl {
     use super::*;
@@ -868,8 +736,8 @@ mod serde_impl {
 
     #[derive(Serialize)]
     struct ExecutionOutcomeSerde<'a, T> {
-        state: serde_state::BlockStateSerde,
-        block_states: Vec<serde_state::BlockStateSerde>,
+        state: &'a EvmState,
+        block_states: &'a [EvmState],
         block_reverts: &'a [BlockReverts],
         receipts: &'a Vec<Vec<T>>,
         first_block: BlockNumber,
@@ -878,8 +746,8 @@ mod serde_impl {
 
     #[derive(Deserialize)]
     struct ExecutionOutcomeSerdeOwned<T> {
-        state: serde_state::BlockStateSerde,
-        block_states: Vec<serde_state::BlockStateSerde>,
+        state: EvmState,
+        block_states: Vec<EvmState>,
         block_reverts: Vec<BlockReverts>,
         receipts: Vec<Vec<T>>,
         first_block: BlockNumber,
@@ -895,12 +763,8 @@ mod serde_impl {
             S: Serializer,
         {
             ExecutionOutcomeSerde {
-                state: serde_state::BlockStateSerde::from(self.state.inner()),
-                block_states: self
-                    .block_states
-                    .iter()
-                    .map(serde_state::BlockStateSerde::from)
-                    .collect(),
+                state: self.state.inner(),
+                block_states: &self.block_states,
                 block_reverts: self.block_reverts(),
                 receipts: &self.receipts,
                 first_block: self.first_block,
@@ -921,7 +785,7 @@ mod serde_impl {
             let value = ExecutionOutcomeSerdeOwned::<T>::deserialize(deserializer)?;
             Ok(Self::from_parts(
                 value.state.into(),
-                value.block_states.into_iter().map(Into::into).collect(),
+                value.block_states,
                 value.block_reverts,
                 value.receipts,
                 value.first_block,
@@ -957,8 +821,8 @@ pub(super) mod serde_bincode_compat {
     /// ```
     #[derive(Debug, Serialize, Deserialize)]
     pub struct ExecutionOutcome<'a> {
-        state: super::serde_state::BlockStateSerde,
-        block_states: Vec<super::serde_state::BlockStateSerde>,
+        state: Cow<'a, super::EvmState>,
+        block_states: Vec<super::EvmState>,
         block_reverts: Vec<super::BlockReverts>,
         receipts: Vec<Vec<Bytes>>,
         first_block: BlockNumber,
@@ -972,12 +836,8 @@ pub(super) mod serde_bincode_compat {
     {
         fn from(value: &'a super::ExecutionOutcome<T>) -> Self {
             ExecutionOutcome {
-                state: super::serde_state::BlockStateSerde::from(value.state.inner()),
-                block_states: value
-                    .block_states
-                    .iter()
-                    .map(super::serde_state::BlockStateSerde::from)
-                    .collect(),
+                state: Cow::Borrowed(value.state.inner()),
+                block_states: value.block_states.clone(),
                 block_reverts: value.block_reverts.clone(),
                 receipts: value
                     .receipts
@@ -998,8 +858,8 @@ pub(super) mod serde_bincode_compat {
     {
         fn from(value: ExecutionOutcome<'_>) -> Self {
             Self::from_parts(
-                value.state.into(),
-                value.block_states.into_iter().map(Into::into).collect(),
+                value.state.into_owned(),
+                value.block_states,
                 value.block_reverts,
                 value
                     .receipts
