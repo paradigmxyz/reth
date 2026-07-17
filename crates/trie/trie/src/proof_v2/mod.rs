@@ -1442,63 +1442,65 @@ where
             child_stack_empty = self.child_stack.is_empty(),
             "Maybe retaining local root",
         );
-        match (sub_trie_targets.parent_prefix, self.child_stack.pop()) {
-            (None, None) => {
-                // If `child_stack` is empty it means there was no keys at all, retain an empty
-                // root node.
-                self.retained_proofs.push(ProofTrieNodeV2 {
-                    path: Nibbles::new(), // root path
-                    node: TrieNodeV2::EmptyRoot,
-                    masks: None,
-                });
+        // Encoded nodes can only be children of branches, so popping all branches must leave a
+        // leaf or branch as the local root.
+        let root_node = match self.child_stack.pop() {
+            Some(ProofTrieBranchChild::RlpNode(_)) => {
+                unreachable!("local root cannot be an encoded RLP node")
             }
-            (None, Some(root_node)) => {
-                // Encode and retain the root node.
+            root_node => root_node,
+        };
+
+        // A full-trie calculation always retains a root, using an empty root when traversal
+        // produced no root node.
+        let Some(parent_prefix) = sub_trie_targets.parent_prefix else {
+            let root_node = if let Some(root_node) = root_node {
                 self.rlp_encode_buf.clear();
-                let root_node =
-                    root_node.into_proof_trie_node(Nibbles::new(), &mut self.rlp_encode_buf)?;
-                self.retained_proofs.push(root_node);
-            }
-            (Some(_), None) => {
-                // An empty partial sub-trie has no node to attach below the known parent.
-            }
-            (Some(parent_prefix), Some(mut root_node)) => {
-                if matches!(&root_node, ProofTrieBranchChild::RlpNode(_)) {
-                    return Err(StateProofError::TrieInconsistency(
-                        "partial proof calculation produced an encoded local root".to_string(),
-                    ))
-                }
+                root_node.into_proof_trie_node(Nibbles::new(), &mut self.rlp_encode_buf)?
+            } else {
+                ProofTrieNodeV2::empty()
+            };
+            self.retained_proofs.push(root_node);
+            return Ok(())
+        };
 
-                let parent_path_len = parent_prefix.len();
-                let root_short_key = *root_node.short_key();
-                if root_short_key.len() < parent_path_len {
-                    return Err(StateProofError::TrieInconsistency(format!(
-                        "local root short key {:?} is shorter than parent path length {}",
-                        root_short_key, parent_path_len,
-                    )))
-                }
+        // An empty partial sub-trie has no node to attach below its known parent.
+        let Some(mut root_node) = root_node else { return Ok(()) };
 
-                if root_short_key.len() > parent_path_len {
-                    // The parent branch edge is represented by the first nibble after the parent
-                    // path. Keep that nibble in the proof path and trim it from the node's short
-                    // key so the returned node is directly attachable below the parent.
-                    let child_path = root_short_key.slice_unchecked(0, parent_path_len + 1);
-                    if sub_trie_targets
-                        .targets
-                        .iter()
-                        .any(|target| target.key_nibbles.starts_with(&child_path))
-                    {
-                        root_node.trim_short_key_prefix(parent_path_len + 1);
-                        self.rlp_encode_buf.clear();
-                        let root_node =
-                            root_node.into_proof_trie_node(child_path, &mut self.rlp_encode_buf)?;
-                        self.retained_proofs.push(root_node);
-                    }
-                }
-                // If the short key is exactly the parent path, this local root reconstructed the
-                // already-revealed parent branch. Its targeted children were retained normally.
-            }
+        // The local root of a partial calculation must be at or below its known parent.
+        let root_short_key = *root_node.short_key();
+        if !root_short_key.starts_with(&parent_prefix) {
+            return Err(StateProofError::TrieInconsistency(format!(
+                "local root short key {root_short_key:?} does not start with parent prefix \
+                 {parent_prefix:?}",
+            )))
         }
+
+        // An exact match reconstructed the already-revealed parent; its targeted children were
+        // retained while that parent branch was popped.
+        if root_short_key == parent_prefix {
+            return Ok(())
+        }
+
+        // Keep the parent branch's child nibble in the proof path so the local root attaches
+        // directly below that parent.
+        let child_path_len = parent_prefix.len() + 1;
+        let child_path = root_short_key.slice_unchecked(0, child_path_len);
+
+        // A local root in another direct child is outside the targets for this sub-trie chunk.
+        if !sub_trie_targets
+            .targets
+            .iter()
+            .any(|target| target.key_nibbles.starts_with(&child_path))
+        {
+            return Ok(())
+        }
+
+        // Retain the requested child with only the path below its parent edge in the short key.
+        root_node.trim_short_key_prefix(child_path_len);
+        self.rlp_encode_buf.clear();
+        let root_node = root_node.into_proof_trie_node(child_path, &mut self.rlp_encode_buf)?;
+        self.retained_proofs.push(root_node);
 
         Ok(())
     }
