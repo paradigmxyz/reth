@@ -1434,8 +1434,8 @@ where
         self.cached_branch_stack.clear();
 
         // We always pop the local root node off of the `child_stack` in order to empty it. If the
-        // caller already has the parent branch, compressed roots need to be rebased into a direct
-        // child of that parent before they can be revealed into the sparse trie.
+        // parent branch is already known, compressed roots need to be rebased into a direct child
+        // of that parent before they can be attached to it.
         trace!(
             target: TRACE_TARGET,
             parent_prefix = ?sub_trie_targets.parent_prefix,
