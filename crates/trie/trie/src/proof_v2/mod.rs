@@ -1442,8 +1442,9 @@ where
             child_stack_empty = self.child_stack.is_empty(),
             "Maybe retaining local root",
         );
-        // Encoded nodes can only be children of branches, so popping all branches must leave a
-        // leaf or branch as the local root.
+        // Either there was only a single leaf node placed on the child stack, or the final branch
+        // was popped off the branch stack and placed unencoded on the child stack. Either way the
+        // child stack will not have an RlpNode at this point.
         let root_node = match self.child_stack.pop() {
             Some(ProofTrieBranchChild::RlpNode(_)) => {
                 unreachable!("local root cannot be an encoded RLP node")
@@ -1464,22 +1465,27 @@ where
             return Ok(())
         };
 
-        // An empty partial sub-trie has no node to attach below its known parent.
+        // If there's no root node then the subtrie has no keys, return nothing.
         let Some(mut root_node) = root_node else { return Ok(()) };
 
-        // The local root of a partial calculation must be at or below its known parent.
         let root_short_key = *root_node.short_key();
-        if !root_short_key.starts_with(&parent_prefix) {
-            return Err(StateProofError::TrieInconsistency(format!(
-                "local root short key {root_short_key:?} does not start with parent prefix \
-                 {parent_prefix:?}",
-            )))
-        }
 
         // An exact match reconstructed the already-revealed parent; its targeted children were
         // retained while that parent branch was popped.
         if root_short_key == parent_prefix {
             return Ok(())
+        }
+
+        // At this point we have a "root" node which the calculator has based at 0x (empty path),
+        // but the subtrie targets indicate that there is a known parent branch at parent_prefix
+        // which this root should be rebased onto.
+
+        // The local root of a partial calculation must be at or below its known parent.
+        if !root_short_key.starts_with(&parent_prefix) {
+            return Err(StateProofError::TrieInconsistency(format!(
+                "local root short key {root_short_key:?} does not start with parent prefix \
+                 {parent_prefix:?}",
+            )))
         }
 
         // Keep the parent branch's child nibble in the proof path so the local root attaches
