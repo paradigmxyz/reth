@@ -68,10 +68,11 @@ pub trait PayloadJob: Future<Output = Result<(), PayloadBuilderError>> {
     ///
     /// # Cancellation safety
     ///
-    /// The returned [`ResolvePayloadFuture`](Self::ResolvePayloadFuture) is not
-    /// cancellation-safe. Dropping it cancels resolving the payload and, when the corresponding
-    /// handle resolve call has removed the payload job, cancels the job identified by that
-    /// `payload_id`.
+    /// The returned [`ResolvePayloadFuture`](Self::ResolvePayloadFuture) is not required to be
+    /// cancellation-safe. [`PayloadBuilderService`](crate::PayloadBuilderService) takes ownership
+    /// of terminating resolutions and drives them to completion, so dropping an Engine API request
+    /// does not consume the corresponding payload id. Other callers that drive this future directly
+    /// are responsible for its cancellation semantics.
     ///
     /// The [`PayloadKind`] determines how the payload should be resolved in the
     /// `ResolvePayloadFuture`. [`PayloadKind::Earliest`] should return the earliest available
