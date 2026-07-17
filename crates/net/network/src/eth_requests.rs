@@ -570,6 +570,8 @@ where
         for (i, &hashed_address) in
             req.account_hashes.iter().take(MAX_STORAGE_RANGE_ACCOUNTS_SERVE).enumerate()
         {
+            // Keeps traversing storage-empty accounts under a zero budget so a real slot still
+            // gets served; worst case is a lookup per account, bounded by the take() above.
             if remaining_bytes == 0 && slots.iter().any(|range| !range.is_empty()) {
                 break
             }
