@@ -66,8 +66,11 @@ use reth_storage_api::{
 };
 use reth_storage_errors::provider::{ProviderResult, StaticFileWriterError};
 use reth_trie::{
-    updates::{StorageTrieUpdatesSorted, TrieUpdatesSorted},
-    ComputedTrieData, HashedPostStateSorted,
+    updates::{
+        LazyStorageTrieUpdatesSorted, LazyTrieUpdatesSorted, StorageTrieUpdatesSorted,
+        TrieUpdatesSorted,
+    },
+    BranchNodeCompact, ComputedTrieData, HashedPostStateSorted, LazyHashedPostStateSorted, Nibbles,
 };
 use reth_trie_db::{ChangesetCache, DatabaseStorageTrieCursor, TrieTableAdapter};
 use revm::database::states::{
@@ -724,21 +727,38 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
             // Write all hashed state and trie updates in single batches.
             // This reduces cursor open/close overhead from N calls to 1.
             if save_mode.with_state() {
-                // Blocks are oldest-to-newest, merge_batch expects newest-to-oldest.
                 let start = Instant::now();
-                let merged_hashed_state = HashedPostStateSorted::merge_batch(
-                    blocks.iter().rev().map(|b| b.trie_data().sorted.hashed_state),
-                );
-                if !merged_hashed_state.is_empty() {
-                    self.write_hashed_state(&merged_hashed_state)?;
+                if blocks.len() == 1 {
+                    let trie_data = blocks[0].trie_data_ref();
+                    if !trie_data.sorted.hashed_state.is_empty() {
+                        self.write_hashed_state(&trie_data.sorted.hashed_state)?;
+                    }
+                } else {
+                    // Blocks are oldest-to-newest; lazy merges expect newest-to-oldest.
+                    let merged_hashed_state = HashedPostStateSorted::merge_batch_lazy(
+                        blocks
+                            .iter()
+                            .rev()
+                            .map(|block| block.trie_data_ref().sorted.hashed_state.as_ref()),
+                    );
+                    self.write_hashed_state_lazy(merged_hashed_state)?;
                 }
                 timings.write_hashed_state += start.elapsed();
 
                 let start = Instant::now();
-                let merged_trie =
-                    TrieUpdatesSorted::merge_batch(blocks.iter().rev().map(|b| b.trie_updates()));
-                if !merged_trie.is_empty() {
-                    self.write_trie_updates_sorted(&merged_trie)?;
+                if blocks.len() == 1 {
+                    let trie_data = blocks[0].trie_data_ref();
+                    if !trie_data.sorted.trie_updates.is_empty() {
+                        self.write_trie_updates_sorted(&trie_data.sorted.trie_updates)?;
+                    }
+                } else {
+                    let merged_trie = TrieUpdatesSorted::merge_batch_lazy(
+                        blocks
+                            .iter()
+                            .rev()
+                            .map(|block| block.trie_data_ref().sorted.trie_updates.as_ref()),
+                    );
+                    self.write_trie_updates_lazy(merged_trie)?;
                 }
                 timings.write_trie_updates += start.elapsed();
             }
@@ -2735,6 +2755,48 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
         Ok(())
     }
 
+    #[instrument(level = "debug", target = "providers::db", skip_all)]
+    fn write_hashed_state_lazy(
+        &self,
+        hashed_state: LazyHashedPostStateSorted<'_>,
+    ) -> ProviderResult<()> {
+        let (accounts, storages) = hashed_state.into_parts();
+
+        let mut hashed_accounts_cursor = self.tx_ref().cursor_write::<tables::HashedAccounts>()?;
+        for (hashed_address, account) in accounts {
+            if let Some(account) = account {
+                hashed_accounts_cursor.upsert(hashed_address, &account)?;
+            } else if hashed_accounts_cursor.seek_exact(hashed_address)?.is_some() {
+                hashed_accounts_cursor.delete_current()?;
+            }
+        }
+
+        let mut hashed_storage_cursor =
+            self.tx_ref().cursor_dup_write::<tables::HashedStorages>()?;
+        for (hashed_address, storage) in storages {
+            let (wiped, storage_slots) = storage.into_parts();
+            if wiped && hashed_storage_cursor.seek_exact(hashed_address)?.is_some() {
+                hashed_storage_cursor.delete_current_duplicates()?;
+            }
+
+            for (hashed_slot, value) in storage_slots {
+                let entry = StorageEntry { key: hashed_slot, value };
+                if let Some(db_entry) =
+                    hashed_storage_cursor.seek_by_key_subkey(hashed_address, entry.key)? &&
+                    db_entry.key == entry.key
+                {
+                    hashed_storage_cursor.delete_current()?;
+                }
+
+                if !entry.value.is_zero() {
+                    hashed_storage_cursor.upsert(hashed_address, &entry)?;
+                }
+            }
+        }
+
+        Ok(())
+    }
+
     /// Remove the last N blocks of state.
     ///
     /// The latest state will be unwound
@@ -3136,6 +3198,54 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> DatabaseProvider<TX, N> {
         }
         Ok(())
     }
+
+    fn write_account_trie_updates_lazy<A: TrieTableAdapter>(
+        tx: &TX,
+        account_nodes: impl Iterator<Item = (Nibbles, Option<BranchNodeCompact>)>,
+        num_entries: &mut usize,
+    ) -> ProviderResult<()>
+    where
+        TX: DbTxMut,
+    {
+        let mut account_trie_cursor = tx.cursor_write::<A::AccountTrieTable>()?;
+        for (key, updated_node) in account_nodes {
+            let nibbles = A::AccountKey::from(key);
+            match updated_node {
+                Some(node) => {
+                    if !key.is_empty() {
+                        *num_entries += 1;
+                        account_trie_cursor.upsert(nibbles, &node)?;
+                    }
+                }
+                None => {
+                    *num_entries += 1;
+                    if account_trie_cursor.seek_exact(nibbles)?.is_some() {
+                        account_trie_cursor.delete_current()?;
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+
+    fn write_storage_tries_lazy<'a, A: TrieTableAdapter>(
+        tx: &TX,
+        storage_tries: impl Iterator<Item = (B256, LazyStorageTrieUpdatesSorted<'a>)>,
+        num_entries: &mut usize,
+    ) -> ProviderResult<()>
+    where
+        TX: DbTxMut,
+    {
+        let mut cursor = tx.cursor_dup_write::<A::StorageTrieTable>()?;
+        for (hashed_address, storage_trie_updates) in storage_tries {
+            let mut db_storage_trie_cursor: DatabaseStorageTrieCursor<_, A> =
+                DatabaseStorageTrieCursor::new(cursor, hashed_address);
+            *num_entries +=
+                db_storage_trie_cursor.write_storage_trie_updates_lazy(storage_trie_updates)?;
+            cursor = db_storage_trie_cursor.cursor;
+        }
+        Ok(())
+    }
 }
 
 impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> TrieWriter for DatabaseProvider<TX, N> {
@@ -3157,6 +3267,26 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> TrieWriter for DatabaseProvider
 
         num_entries +=
             self.write_storage_trie_updates_sorted(trie_updates.storage_tries_ref().iter())?;
+
+        Ok(num_entries)
+    }
+
+    #[instrument(level = "debug", target = "providers::db", skip_all)]
+    fn write_trie_updates_lazy(
+        &self,
+        trie_updates: LazyTrieUpdatesSorted<'_>,
+    ) -> ProviderResult<usize> {
+        let (account_nodes, storage_tries) = trie_updates.into_parts();
+        let mut num_entries = 0;
+
+        reth_trie_db::with_adapter!(self, |A| {
+            Self::write_account_trie_updates_lazy::<A>(
+                self.tx_ref(),
+                account_nodes,
+                &mut num_entries,
+            )?;
+            Self::write_storage_tries_lazy::<A>(self.tx_ref(), storage_tries, &mut num_entries)?;
+        });
 
         Ok(num_entries)
     }
@@ -4252,8 +4382,106 @@ mod tests {
         assert!(provider.receipts_by_block(1.into()).unwrap().is_none());
     }
 
+    fn run_write_hashed_state(lazy: bool) {
+        use reth_trie::HashedStorageSorted;
+
+        let factory = create_test_provider_factory();
+        let provider_rw = factory.provider_rw().unwrap();
+        let updated_account = B256::with_last_byte(0x10);
+        let deleted_account = B256::with_last_byte(0x11);
+        let wiped_storage = B256::with_last_byte(0x12);
+        let updated_storage = B256::with_last_byte(0x13);
+        let old_slot = B256::with_last_byte(0x20);
+        let deleted_slot = B256::with_last_byte(0x21);
+        let updated_slot = B256::with_last_byte(0x22);
+
+        {
+            let mut accounts =
+                provider_rw.tx_ref().cursor_write::<tables::HashedAccounts>().unwrap();
+            accounts.upsert(updated_account, &Account::default()).unwrap();
+            accounts.upsert(deleted_account, &Account::default()).unwrap();
+
+            let mut storages =
+                provider_rw.tx_ref().cursor_dup_write::<tables::HashedStorages>().unwrap();
+            storages
+                .upsert(wiped_storage, &StorageEntry { key: old_slot, value: U256::from(1) })
+                .unwrap();
+            storages
+                .upsert(updated_storage, &StorageEntry { key: deleted_slot, value: U256::from(2) })
+                .unwrap();
+            storages
+                .upsert(updated_storage, &StorageEntry { key: updated_slot, value: U256::from(3) })
+                .unwrap();
+        }
+
+        let hashed_state = HashedPostStateSorted::new(
+            vec![
+                (updated_account, Some(Account { nonce: 7, ..Default::default() })),
+                (deleted_account, None),
+            ],
+            B256Map::from_iter([
+                (
+                    wiped_storage,
+                    HashedStorageSorted {
+                        storage_slots: vec![(updated_slot, U256::from(4))],
+                        wiped: true,
+                    },
+                ),
+                (
+                    updated_storage,
+                    HashedStorageSorted {
+                        storage_slots: vec![
+                            (deleted_slot, U256::ZERO),
+                            (updated_slot, U256::from(5)),
+                        ],
+                        wiped: false,
+                    },
+                ),
+            ]),
+        );
+
+        if lazy {
+            let hashed_state = HashedPostStateSorted::merge_batch_lazy([&hashed_state]);
+            provider_rw.write_hashed_state_lazy(hashed_state).unwrap();
+        } else {
+            provider_rw.write_hashed_state(&hashed_state).unwrap();
+        }
+
+        let mut accounts = provider_rw.tx_ref().cursor_read::<tables::HashedAccounts>().unwrap();
+        assert_eq!(accounts.seek_exact(updated_account).unwrap().unwrap().1.nonce, 7);
+        assert!(accounts.seek_exact(deleted_account).unwrap().is_none());
+
+        let mut storages =
+            provider_rw.tx_ref().cursor_dup_read::<tables::HashedStorages>().unwrap();
+        assert!(storages
+            .seek_by_key_subkey(wiped_storage, old_slot)
+            .unwrap()
+            .is_none_or(|entry| entry.key != old_slot));
+        assert_eq!(
+            storages.seek_by_key_subkey(wiped_storage, updated_slot).unwrap().unwrap().value,
+            U256::from(4)
+        );
+        assert!(storages
+            .seek_by_key_subkey(updated_storage, deleted_slot)
+            .unwrap()
+            .is_none_or(|entry| entry.key != deleted_slot));
+        assert_eq!(
+            storages.seek_by_key_subkey(updated_storage, updated_slot).unwrap().unwrap().value,
+            U256::from(5)
+        );
+    }
+
     #[test]
-    fn test_write_trie_updates_sorted() {
+    fn test_write_hashed_state_sorted() {
+        run_write_hashed_state(false);
+    }
+
+    #[test]
+    fn test_write_hashed_state_lazy() {
+        run_write_hashed_state(true);
+    }
+
+    fn run_write_trie_updates(lazy: bool) {
         use reth_trie::{
             updates::{StorageTrieUpdatesSorted, TrieUpdatesSorted},
             BranchNodeCompact, StorageTrieEntry,
@@ -4409,8 +4637,12 @@ mod tests {
 
         let trie_updates = TrieUpdatesSorted::new(account_nodes, storage_tries);
 
-        // Write the sorted trie updates
-        let num_entries = provider_rw.write_trie_updates_sorted(&trie_updates).unwrap();
+        let num_entries = if lazy {
+            let trie_updates = TrieUpdatesSorted::merge_batch_lazy([&trie_updates]);
+            provider_rw.write_trie_updates_lazy(trie_updates).unwrap()
+        } else {
+            provider_rw.write_trie_updates_sorted(&trie_updates).unwrap()
+        };
 
         // We should have 2 account insertions + 1 account deletion + 1 storage insertion + 1
         // storage deletion = 5
@@ -4470,6 +4702,16 @@ mod tests {
         assert_eq!(storage_entries2.len(), 0, "Storage address2 should be empty after wipe");
 
         provider_rw.commit().unwrap();
+    }
+
+    #[test]
+    fn test_write_trie_updates_sorted() {
+        run_write_trie_updates(false);
+    }
+
+    #[test]
+    fn test_write_trie_updates_lazy() {
+        run_write_trie_updates(true);
     }
 
     #[test]

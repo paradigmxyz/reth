@@ -8,7 +8,7 @@ use reth_db_api::{
 };
 use reth_trie::{
     trie_cursor::{TrieCursor, TrieCursorFactory, TrieStorageCursor},
-    updates::StorageTrieUpdatesSorted,
+    updates::{LazyStorageTrieUpdatesSorted, StorageTrieUpdatesSorted},
     BranchNodeCompact, Nibbles, PackedStorageTrieEntry, PackedStoredNibbles,
     PackedStoredNibblesSubKey, StorageTrieEntry, StoredNibbles, StoredNibblesSubKey,
 };
@@ -305,6 +305,37 @@ where
             if let Some(node) = maybe_updated {
                 self.cursor
                     .upsert(self.hashed_address, &A::StorageValue::new(nibbles, node.clone()))?;
+            }
+        }
+
+        Ok(num_entries)
+    }
+
+    /// Writes lazily merged storage updates that are already sorted.
+    pub fn write_storage_trie_updates_lazy(
+        &mut self,
+        updates: LazyStorageTrieUpdatesSorted<'_>,
+    ) -> Result<usize, DatabaseError> {
+        let (is_deleted, storage_nodes) = updates.into_parts();
+        if is_deleted && self.cursor.seek_exact(self.hashed_address)?.is_some() {
+            self.cursor.delete_current_duplicates()?;
+        }
+
+        let mut num_entries = 0;
+        for (nibbles, maybe_updated) in storage_nodes.filter(|(nibbles, _)| !nibbles.is_empty()) {
+            num_entries += 1;
+            let nibbles = A::StorageSubKey::from(nibbles);
+            if self
+                .cursor
+                .seek_by_key_subkey(self.hashed_address, nibbles.clone())?
+                .as_ref()
+                .is_some_and(|entry| *entry.nibbles() == nibbles)
+            {
+                self.cursor.delete_current()?;
+            }
+
+            if let Some(node) = maybe_updated {
+                self.cursor.upsert(self.hashed_address, &A::StorageValue::new(nibbles, node))?;
             }
         }
 

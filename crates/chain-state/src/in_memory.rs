@@ -845,9 +845,15 @@ impl<N: NodePrimitives> ExecutedBlock<N> {
     /// - If already computed: returns cached result immediately
     /// - If not computed: first caller waits for the publishing task, others wait for that result
     #[inline]
-    #[tracing::instrument(level = "debug", target = "engine::tree", name = "trie_data", skip_all)]
     pub fn trie_data(&self) -> ComputedTrieData {
-        self.trie_data.get().clone()
+        self.trie_data_ref().clone()
+    }
+
+    /// Returns a reference to the trie data, waiting for the background task if needed.
+    #[inline]
+    #[tracing::instrument(level = "debug", target = "engine::tree", name = "trie_data", skip_all)]
+    pub fn trie_data_ref(&self) -> &ComputedTrieData {
+        self.trie_data.get()
     }
 
     /// Returns a clone of the deferred trie data handle.

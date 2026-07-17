@@ -3,7 +3,7 @@ use alloy_primitives::{Address, Bytes, B256, U256};
 use reth_primitives_traits::Account;
 use reth_storage_errors::provider::ProviderResult;
 use reth_trie_common::{
-    updates::{StorageTrieUpdatesSorted, TrieUpdates, TrieUpdatesSorted},
+    updates::{LazyTrieUpdatesSorted, StorageTrieUpdatesSorted, TrieUpdates, TrieUpdatesSorted},
     AccountProof, ExecutionWitnessMode, HashedPostState, HashedStorage, MultiProof,
     MultiProofTargets, StorageMultiProof, StorageProof, TrieInput,
 };
@@ -185,6 +185,16 @@ pub trait TrieWriter: Send {
     ///
     /// Returns the number of entries modified.
     fn write_trie_updates_sorted(&self, trie_updates: &TrieUpdatesSorted) -> ProviderResult<usize>;
+
+    /// Writes lazily merged trie updates to the database.
+    ///
+    /// Returns the number of entries modified.
+    fn write_trie_updates_lazy(
+        &self,
+        trie_updates: LazyTrieUpdatesSorted<'_>,
+    ) -> ProviderResult<usize> {
+        self.write_trie_updates_sorted(&trie_updates.into())
+    }
 }
 
 /// Storage Trie Writer

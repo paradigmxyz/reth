@@ -3,7 +3,7 @@ use alloy_consensus::transaction::Either;
 use alloy_primitives::BlockNumber;
 use reth_execution_types::{BlockExecutionOutput, ExecutionOutcome};
 use reth_storage_errors::provider::ProviderResult;
-use reth_trie_common::HashedPostStateSorted;
+use reth_trie_common::{HashedPostStateSorted, LazyHashedPostStateSorted};
 use revm::database::{
     states::{PlainStateReverts, StateChangeset},
     BundleState, OriginalValuesKnown,
@@ -114,6 +114,14 @@ pub trait StateWriter {
 
     /// Writes the hashed state changes to the database
     fn write_hashed_state(&self, hashed_state: &HashedPostStateSorted) -> ProviderResult<()>;
+
+    /// Writes lazily merged hashed state changes to the database.
+    fn write_hashed_state_lazy(
+        &self,
+        hashed_state: LazyHashedPostStateSorted<'_>,
+    ) -> ProviderResult<()> {
+        self.write_hashed_state(&hashed_state.into())
+    }
 
     /// Remove the block range of state above the given block. The state of the passed block is not
     /// removed.
