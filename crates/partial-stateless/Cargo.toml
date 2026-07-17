@@ -1,0 +1,27 @@
+[package]
+name = "partial-stateless"
+version = "0.1.0"
+edition = "2024"
+description = "Network-level state cache for Partial Statelessness PoC"
+
+[dependencies]
+# reth types (reuse existing structures)
+alloy-consensus.workspace = true
+alloy-primitives = { workspace = true, features = ["std", "map-foldhash", "serde"] }
+alloy-rlp = { workspace = true }
+revm-database = { workspace = true, features = ["std"] }
+revm-state = { workspace = true, features = ["std"] }
+revm-primitives = { workspace = true, features = ["std"] }
+reth-primitives-traits = { workspace = true }
+reth-trie-common = { workspace = true }
+
+# serialization
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+bincode = { workspace = true }
+
+# utilities
+tracing = { workspace = true }
+
+[dev-dependencies]
+serde_json = { workspace = true }

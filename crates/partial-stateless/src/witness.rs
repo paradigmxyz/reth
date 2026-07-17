@@ -1,0 +1,253 @@
+//! Witness computation for cache-missed state.
+//!
+//! Converts `MissResult` into `MultiProofTargets` and provides helpers
+//! for measuring witness (Merkle proof) size.
+
+use crate::{network_cache::MissResult, BlockAccessedState, StateTargetSet, WitnessTargets};
+use alloy_primitives::{keccak256, Address, B256};
+use reth_trie_common::{MultiProof, MultiProofTargets};
+use std::collections::HashSet;
+
+/// Result of witness computation for a single block.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct WitnessResult {
+    /// Total size of witness in bytes (account trie nodes + storage trie nodes + bytecode bytes).
+    pub total_size_bytes: usize,
+    /// Size of account proof nodes in bytes.
+    pub account_proof_bytes: usize,
+    /// Size of storage proof nodes in bytes.
+    pub storage_proof_bytes: usize,
+    /// Size of missed contract bytecodes in bytes.
+    pub bytecode_bytes: usize,
+    /// Number of account proof trie nodes.
+    pub account_proof_nodes: usize,
+    /// Number of storage proof trie nodes (across all accounts).
+    pub storage_proof_nodes: usize,
+    /// Number of unique accounts in the proof targets.
+    pub target_accounts: usize,
+    /// Number of unique storage slots in the proof targets.
+    pub target_storage_slots: usize,
+    /// Time taken to compute the multiproof (if measured).
+    pub computation_time_ms: Option<u64>,
+    /// CPU time (user+sys) consumed by the calling thread while computing the
+    /// multiproof, in milliseconds. Compared against `computation_time_ms`
+    /// (wall clock) this separates compute-bound blocks (cpu ≈ wall) from
+    /// I/O/wait-bound blocks (cpu ≪ wall). `None` when not instrumented.
+    #[serde(default)]
+    pub cpu_time_ms: Option<u64>,
+    /// Major page faults taken by the calling thread during multiproof
+    /// computation (faults served from disk/swap, not the page cache). A
+    /// nonzero value means the cold trie read actually hit disk — the
+    /// signature of the environmental I/O tail. `None` when not instrumented.
+    #[serde(default)]
+    pub major_page_faults: Option<u64>,
+    /// Minor page faults during multiproof (served without disk I/O).
+    /// `None` when not instrumented.
+    #[serde(default)]
+    pub minor_page_faults: Option<u64>,
+}
+
+/// Convert a `MissResult` into `MultiProofTargets` suitable for `StateProofProvider::multiproof()`.
+///
+/// This hashes addresses and storage slots with keccak256, which is what reth's
+/// trie infrastructure expects.
+pub fn miss_to_proof_targets(miss: &MissResult) -> MultiProofTargets {
+    let mut targets = MultiProofTargets::with_capacity(miss.missed_accounts.len());
+
+    // Add all missed accounts (even those without storage misses)
+    for address in &miss.missed_accounts {
+        let hashed_address = keccak256(address);
+        targets.entry(hashed_address).or_default();
+    }
+
+    // Add missed storage slots grouped by account
+    for (address, slot) in &miss.missed_storage {
+        let hashed_address = keccak256(address);
+        let hashed_slot = keccak256(slot);
+        targets.entry(hashed_address).or_default().insert(hashed_slot);
+    }
+
+    targets
+}
+
+/// Convert the complete block accessed universe into benchmark target metadata.
+pub fn accessed_to_state_targets(accessed: &BlockAccessedState) -> StateTargetSet {
+    let mut targets = StateTargetSet {
+        accounts: accessed.accounts.keys().copied().collect(),
+        storage: accessed.storage.keys().copied().collect(),
+        code_hashes: accessed.codes.keys().copied().collect(),
+    };
+    targets.sort_dedup();
+    targets
+}
+
+/// Compute the cache-hit side of `accessed == cache_hit ∪ sidecar_miss`.
+pub fn cache_hit_targets(accessed: &BlockAccessedState, miss: &MissResult) -> StateTargetSet {
+    let missed_accounts: HashSet<Address> = miss.missed_accounts.iter().copied().collect();
+    let missed_storage: HashSet<(Address, B256)> = miss.missed_storage.iter().copied().collect();
+    let missed_codes: HashSet<B256> = miss.missed_codes.iter().copied().collect();
+
+    let mut targets = StateTargetSet {
+        accounts: accessed
+            .accounts
+            .keys()
+            .filter(|address| !missed_accounts.contains(*address))
+            .copied()
+            .collect(),
+        storage: accessed
+            .storage
+            .keys()
+            .filter(|key| !missed_storage.contains(*key))
+            .copied()
+            .collect(),
+        code_hashes: accessed
+            .codes
+            .keys()
+            .filter(|code_hash| !missed_codes.contains(*code_hash))
+            .copied()
+            .collect(),
+    };
+    targets.sort_dedup();
+    targets
+}
+
+/// Convert raw state targets into hashed `MultiProofTargets`.
+pub fn state_targets_to_proof_targets(targets: &StateTargetSet) -> MultiProofTargets {
+    let mut multiproof_targets = MultiProofTargets::with_capacity(targets.accounts.len());
+
+    for address in &targets.accounts {
+        let hashed_address = keccak256(address);
+        multiproof_targets.entry(hashed_address).or_default();
+    }
+
+    for (address, slot) in &targets.storage {
+        let hashed_address = keccak256(address);
+        let hashed_slot = keccak256(slot);
+        multiproof_targets.entry(hashed_address).or_default().insert(hashed_slot);
+    }
+
+    multiproof_targets
+}
+
+/// Measure the total byte size of a `MultiProof`, adding the size of any missed bytecodes.
+///
+/// This counts the raw bytes of all trie nodes in the proof (account + storage subtrees)
+/// and sums them with the provided bytecode bytes.
+pub fn measure_multiproof_size(proof: &MultiProof, missed_bytecode_bytes: usize) -> WitnessResult {
+    // Account proof size
+    let mut account_proof_bytes = 0usize;
+    let mut account_proof_nodes = 0usize;
+    for node_bytes in proof.account_subtree.values() {
+        account_proof_bytes += node_bytes.len();
+        account_proof_nodes += 1;
+    }
+
+    // Storage proof sizes
+    let mut storage_proof_bytes = 0usize;
+    let mut storage_proof_nodes = 0usize;
+    for storage_mp in proof.storages.values() {
+        for node_bytes in storage_mp.subtree.values() {
+            storage_proof_bytes += node_bytes.len();
+            storage_proof_nodes += 1;
+        }
+    }
+
+    let total_size_bytes = account_proof_bytes + storage_proof_bytes + missed_bytecode_bytes;
+
+    // Count targets
+    let target_accounts = proof.storages.len().max(
+        // account_subtree doesn't directly tell us account count,
+        // but storages map has one entry per targeted account
+        proof.storages.len(),
+    );
+    let target_storage_slots: usize = proof
+        .storages
+        .values()
+        .map(|s| {
+            // Estimate slots from number of leaf nodes in storage proof
+            // (this is approximate, actual slot count comes from targets)
+            s.subtree.len()
+        })
+        .sum();
+
+    WitnessResult {
+        total_size_bytes,
+        account_proof_bytes,
+        storage_proof_bytes,
+        bytecode_bytes: missed_bytecode_bytes,
+        account_proof_nodes,
+        storage_proof_nodes,
+        target_accounts,
+        target_storage_slots,
+        computation_time_ms: None,
+        cpu_time_ms: None,
+        major_page_faults: None,
+        minor_page_faults: None,
+    }
+}
+
+/// Measure witness result from a `MissResult` and targets (before proof computation).
+/// This provides target counts without actual proof size.
+pub fn witness_targets_summary(miss: &MissResult) -> WitnessTargetsSummary {
+    // Group storage misses by account
+    let mut storage_by_account: std::collections::HashMap<Address, usize> =
+        std::collections::HashMap::new();
+    for (address, _slot) in &miss.missed_storage {
+        *storage_by_account.entry(*address).or_default() += 1;
+    }
+
+    WitnessTargetsSummary {
+        missed_accounts: miss.missed_accounts.len(),
+        missed_storage_slots: miss.missed_storage.len(),
+        missed_codes: miss.missed_codes.len(),
+        accounts_with_storage: storage_by_account.len(),
+        max_slots_per_account: storage_by_account.values().copied().max().unwrap_or(0),
+    }
+}
+
+/// Summary of witness targets (before proof computation).
+#[derive(Debug, Clone)]
+pub struct WitnessTargetsSummary {
+    /// Number of accounts that need witness.
+    pub missed_accounts: usize,
+    /// Number of storage slots that need witness.
+    pub missed_storage_slots: usize,
+    /// Number of code entries that need witness (codes are not part of trie proof).
+    pub missed_codes: usize,
+    /// Number of unique accounts that have storage misses.
+    pub accounts_with_storage: usize,
+    /// Maximum number of missed slots for a single account.
+    pub max_slots_per_account: usize,
+}
+
+/// Builds raw `WitnessTargets` (for Sidecar data payload) and hashed `MultiProofTargets` (for Trie Provider)
+/// in a single pass from `MissResult`.
+pub fn build_sidecar_targets(miss: &MissResult) -> (WitnessTargets, MultiProofTargets) {
+    let mut multiproof_targets = MultiProofTargets::with_capacity(miss.missed_accounts.len());
+
+    // 1. Convert missed accounts to WitnessTargets & hashed multiproof targets
+    let missed_accounts = miss.missed_accounts.clone();
+    for address in &missed_accounts {
+        let hashed_address = keccak256(address);
+        multiproof_targets.entry(hashed_address).or_default();
+    }
+
+    // 2. Convert missed storage to WitnessTargets & hashed multiproof targets
+    let missed_storage = miss.missed_storage.clone();
+    for (address, slot) in &missed_storage {
+        let hashed_address = keccak256(address);
+        let hashed_slot = keccak256(slot);
+        multiproof_targets.entry(hashed_address).or_default().insert(hashed_slot);
+    }
+
+    // 3. Convert missed codes to WitnessTargets
+    let missed_code_hashes = miss.missed_codes.clone();
+
+    let raw_targets = WitnessTargets {
+        missed_accounts,
+        missed_storage,
+        missed_code_hashes,
+    };
+
+    (raw_targets, multiproof_targets)
+}

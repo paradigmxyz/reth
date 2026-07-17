@@ -78,3 +78,7 @@ __pycache__/
 # direnv
 .envrc
 .direnv/
+
+# Partial Statefulness
+sidecar/
+fixtures/
