@@ -39,7 +39,7 @@ reth-network-types = { workspace = true, features = ["serde"] }
 alloy-consensus.workspace = true
 alloy-eips.workspace = true
 alloy-primitives.workspace = true
-alloy-rlp.workspace = true
+alloy-rlp = { workspace = true, features = ["derive"] }
 enr = { workspace = true, features = ["serde", "rust-secp256k1"] }
 discv5.workspace = true
 
@@ -95,6 +95,7 @@ reth-transaction-pool = { workspace = true, features = ["test-utils"] }
 alloy-genesis.workspace = true
 
 # misc
+test-case.workspace = true
 url.workspace = true
 secp256k1 = { workspace = true, features = ["rand"] }
 

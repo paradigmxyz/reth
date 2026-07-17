@@ -224,7 +224,9 @@ impl Command {
                     advertised_ips: vec![first_ip, second_ip],
                 })
             }
-            _ => eyre::bail!("--nat can be provided at most twice"),
+            _ => {
+                eyre::bail!("--nat can be provided at most twice");
+            }
         }
     }
 
@@ -416,7 +418,9 @@ async fn bind_socket(addr: SocketAddr) -> eyre::Result<Arc<UdpSocket>> {
 fn fixed_external_ip(nat: &NatResolver) -> eyre::Result<IpAddr> {
     match nat {
         NatResolver::ExternalIp(ip) => Ok(*ip),
-        _ => eyre::bail!("--nat can only be repeated with extip:<IP> values"),
+        _ => {
+            eyre::bail!("--nat can only be repeated with extip:<IP> values");
+        }
     }
 }
 
