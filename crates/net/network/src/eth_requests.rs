@@ -1201,6 +1201,42 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn snap_account_range_response_skips_proof_for_exhausted_zero_origin_range() {
+        let provider = MockEthProvider::default();
+        let hash = B256::repeat_byte(0x01);
+        provider.set_snap_account_range(
+            vec![(hash, Account { nonce: 1, balance: U256::from(2), bytecode_hash: None })],
+            RangeEnd::Exhausted,
+        );
+        provider.set_snap_storage_root(hash, EMPTY_ROOT_HASH);
+        // A non-empty mocked proof: if the skip-proof optimization regressed to "never skip",
+        // this wrongly-included proof would surface in the response and fail the assertion below.
+        provider.set_snap_account_proof(Some(vec![Bytes::from_static(&[0xaa])]));
+
+        let handler = snap_handler(provider.clone());
+        let (response, rx) = oneshot::channel();
+        handler.on_snap_request(
+            PeerId::default(),
+            SnapProtocolMessage::GetAccountRange(GetAccountRangeMessage {
+                request_id: 1,
+                root_hash: B256::ZERO,
+                starting_hash: B256::ZERO,
+                limit_hash: B256::repeat_byte(0xff),
+                response_bytes: SOFT_RESPONSE_LIMIT as u64,
+            }),
+            response,
+        );
+
+        let Ok(SnapResponse::AccountRange(AccountRangeMessage { accounts, proof, .. })) =
+            rx.await.unwrap()
+        else {
+            panic!("expected an account range response");
+        };
+        assert_eq!(accounts.len(), 1);
+        assert!(proof.is_empty(), "a zero-origin, exhausted range must not carry a boundary proof");
+    }
+
+    #[tokio::test]
     async fn snap_storage_range_response_encodes_values_and_proof() {
         let provider = MockEthProvider::default();
         let first_hash = B256::repeat_byte(0x01);
