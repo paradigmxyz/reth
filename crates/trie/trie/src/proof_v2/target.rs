@@ -1,12 +1,15 @@
 use reth_trie_common::{Nibbles, ProofV2Target};
 
-// Returns the path of the already-revealed parent branch for a target, or the root path if the
-// target needs the actual trie root.
+// Returns the path of the already-revealed parent branch for a target. `None` means the target
+// needs the actual trie root, while `Some(Nibbles::new())` means the root branch is already
+// revealed.
 #[inline]
-pub(crate) fn sub_trie_prefix(target: &ProofV2Target) -> Nibbles {
-    let mut sub_trie_prefix = target.key_nibbles;
-    sub_trie_prefix.truncate(target.parent_path_len.unwrap_or_default() as usize);
-    sub_trie_prefix
+pub(crate) fn known_parent_prefix(target: &ProofV2Target) -> Option<Nibbles> {
+    target.parent_path_len.map(|parent_path_len| {
+        let mut prefix = target.key_nibbles;
+        prefix.truncate(parent_path_len as usize);
+        prefix
+    })
 }
 
 // A helper function which returns the first path following a sub-trie in lexicographical order.
@@ -18,21 +21,25 @@ fn sub_trie_upper_bound(sub_trie_prefix: &Nibbles) -> Option<Nibbles> {
 /// Describes a set of targets which all apply to a single sub-trie, ie a section of the overall
 /// trie whose nodes all share a prefix.
 pub(crate) struct SubTrieTargets<'a> {
-    /// The prefix which all nodes in the sub-trie share. This is also the first node in the trie
-    /// in lexicographic order.
-    pub(crate) prefix: Nibbles,
+    /// The path of the already-revealed parent branch. `None` means the actual trie root is
+    /// requested, while `Some(Nibbles::new())` means the root branch is already revealed.
+    pub(crate) parent_prefix: Option<Nibbles>,
     /// The targets belonging to this sub-trie. These will be sorted by their `key` field,
     /// lexicographically.
     pub(crate) targets: &'a [ProofV2Target],
-    /// The logical path length of the already-revealed parent branch, if any.
-    pub(crate) parent_path_len: Option<u8>,
 }
 
 impl<'a> SubTrieTargets<'a> {
+    /// Returns the concrete prefix used to traverse this sub-trie.
+    #[inline]
+    pub(crate) fn prefix(&self) -> Nibbles {
+        self.parent_prefix.unwrap_or_default()
+    }
+
     // A helper function which returns the first path following a sub-trie in lexicographical order.
     #[inline]
     pub(crate) fn upper_bound(&self) -> Option<Nibbles> {
-        sub_trie_upper_bound(&self.prefix)
+        sub_trie_upper_bound(&self.prefix())
     }
 }
 
@@ -41,28 +48,24 @@ impl<'a> SubTrieTargets<'a> {
 pub(crate) fn iter_sub_trie_targets(
     targets: &mut [ProofV2Target],
 ) -> impl Iterator<Item = SubTrieTargets<'_>> {
-    // Sort globally by sub-trie prefix, parent context, then target key. `None` and `Some(0)` both
-    // use an empty prefix but require different representations of the calculated root. This also
-    // leaves each resulting chunk ordered for the `ProofCalculator`.
+    // Sort globally by parent context, then target key. `None` and `Some(Nibbles::new())` remain
+    // distinct despite both traversing from the root. This also leaves each resulting chunk
+    // ordered for the `ProofCalculator`.
     targets.sort_unstable_by(|a, b| {
-        sub_trie_prefix(a)
-            .cmp(&sub_trie_prefix(b))
-            .then_with(|| a.parent_path_len.cmp(&b.parent_path_len))
+        known_parent_prefix(a)
+            .cmp(&known_parent_prefix(b))
             .then_with(|| a.key_nibbles.cmp(&b.key_nibbles))
     });
 
-    // Chunk targets by exact sub-trie prefix and parent context. Prefixes nested below a previous
-    // prefix are still processed as their own sub-trie.
-    let target_chunks = targets.chunk_by_mut(|current, next| {
-        current.parent_path_len == next.parent_path_len &&
-            sub_trie_prefix(current) == sub_trie_prefix(next)
-    });
+    // Chunk targets by exact known-parent prefix. Prefixes nested below a previous prefix are still
+    // processed as their own sub-trie.
+    let target_chunks = targets
+        .chunk_by_mut(|current, next| known_parent_prefix(current) == known_parent_prefix(next));
 
     // Map the chunks to the return type.
     target_chunks.map(move |targets| {
-        let prefix = sub_trie_prefix(&targets[0]);
-        let parent_path_len = targets[0].parent_path_len;
-        SubTrieTargets { prefix, targets, parent_path_len }
+        let parent_prefix = known_parent_prefix(&targets[0]);
+        SubTrieTargets { parent_prefix, targets }
     })
 }
 
@@ -82,7 +85,7 @@ mod tests {
         };
 
         // Test cases: (input_targets, expected_output)
-        // Expected output format: Vec<(exp_prefix_hex, parent_path_len, Vec<key_hex>)>
+        // Expected output format: Vec<(known_parent_prefix_hex, Vec<key_hex>)>
         let test_cases = vec![
             // Case 1: Empty targets
             (vec![], vec![]),
@@ -90,7 +93,6 @@ mod tests {
             (
                 vec![ProofV2Target::new(B256::repeat_byte(0x20))],
                 vec![(
-                    "",
                     None,
                     vec!["2020202020202020202020202020202020202020202020202020202020202020"],
                 )],
@@ -102,7 +104,6 @@ mod tests {
                     ProofV2Target::new(B256::repeat_byte(0x21)),
                 ],
                 vec![(
-                    "",
                     None,
                     vec![
                         "2020202020202020202020202020202020202020202020202020202020202020",
@@ -118,13 +119,11 @@ mod tests {
                 ],
                 vec![
                     (
-                        "2",
-                        Some(1),
+                        Some("2"),
                         vec!["2020202020202020202020202020202020202020202020202020202020202020"],
                     ),
                     (
-                        "4",
-                        Some(1),
+                        Some("4"),
                         vec!["4040404040404040404040404040404040404040404040404040404040404040"],
                     ),
                 ],
@@ -138,16 +137,14 @@ mod tests {
                 ],
                 vec![
                     (
-                        "2",
-                        Some(1),
+                        Some("2"),
                         vec![
                             "2020202020202020202020202020202020202020202020202020202020202020",
                             "2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f",
                         ],
                     ),
                     (
-                        "4",
-                        Some(1),
+                        Some("4"),
                         vec!["4040404040404040404040404040404040404040404040404040404040404040"],
                     ),
                 ],
@@ -160,13 +157,11 @@ mod tests {
                 ],
                 vec![
                     (
-                        "2",
-                        Some(1),
+                        Some("2"),
                         vec!["2020202020202020202020202020202020202020202020202020202020202020"],
                     ),
                     (
-                        "2f",
-                        Some(2),
+                        Some("2f"),
                         vec!["2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f"],
                     ),
                 ],
@@ -182,28 +177,23 @@ mod tests {
                 ],
                 vec![
                     (
-                        "2",
-                        Some(1),
+                        Some("2"),
                         vec!["2020202020202020202020202020202020202020202020202020202020202020"],
                     ),
                     (
-                        "2f2",
-                        Some(3),
+                        Some("2f2"),
                         vec!["2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f"],
                     ),
                     (
-                        "4c",
-                        Some(2),
+                        Some("4c"),
                         vec!["4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c"],
                     ),
                     (
-                        "4c4",
-                        Some(3),
+                        Some("4c4"),
                         vec!["4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c"],
                     ),
                     (
-                        "4e",
-                        Some(2),
+                        Some("4e"),
                         vec!["4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e"],
                     ),
                 ],
@@ -215,8 +205,7 @@ mod tests {
                     ProofV2Target::new(B256::repeat_byte(0x40)).with_parent_path_len(Some(0)),
                 ],
                 vec![(
-                    "",
-                    Some(0),
+                    Some(""),
                     vec![
                         "2020202020202020202020202020202020202020202020202020202020202020",
                         "4040404040404040404040404040404040404040404040404040404040404040",
@@ -231,13 +220,11 @@ mod tests {
                 ],
                 vec![
                     (
-                        "",
-                        Some(0),
+                        Some(""),
                         vec!["4040404040404040404040404040404040404040404040404040404040404040"],
                     ),
                     (
-                        "2",
-                        Some(1),
+                        Some("2"),
                         vec!["2020202020202020202020202020202020202020202020202020202020202020"],
                     ),
                 ],
@@ -250,13 +237,11 @@ mod tests {
                 ],
                 vec![
                     (
-                        "",
                         None,
                         vec!["2020202020202020202020202020202020202020202020202020202020202020"],
                     ),
                     (
-                        "",
-                        Some(0),
+                        Some(""),
                         vec!["4040404040404040404040404040404040404040404040404040404040404040"],
                     ),
                 ],
@@ -276,20 +261,23 @@ mod tests {
                 sub_tries.len()
             );
 
-            for (j, (sub_trie, (exp_prefix_hex, exp_parent_path_len, exp_keys))) in
+            for (j, (sub_trie, (exp_parent_prefix_hex, exp_keys))) in
                 sub_tries.iter().zip(expected.iter()).enumerate()
             {
-                let exp_prefix = nibbles(exp_prefix_hex);
+                let exp_parent_prefix = exp_parent_prefix_hex.map(nibbles);
+                let exp_prefix = exp_parent_prefix.unwrap_or_default();
 
                 assert_eq!(
-                    sub_trie.prefix, exp_prefix,
-                    "Test case {} sub-trie {}: prefix mismatch",
+                    sub_trie.parent_prefix, exp_parent_prefix,
+                    "Test case {} sub-trie {}: parent prefix mismatch",
                     test_case, j
                 );
                 assert_eq!(
-                    sub_trie.parent_path_len, *exp_parent_path_len,
-                    "Test case {} sub-trie {}: parent path mismatch",
-                    test_case, j
+                    sub_trie.prefix(),
+                    exp_prefix,
+                    "Test case {} sub-trie {}: traversal prefix mismatch",
+                    test_case,
+                    j
                 );
                 assert_eq!(
                     sub_trie.targets.len(),
@@ -326,6 +314,6 @@ mod tests {
 
         assert_eq!(sub_tries.len(), 1);
         assert_eq!(sub_tries[0].targets[0].key(), B256::repeat_byte(0x20));
-        assert_eq!(sub_tries[0].parent_path_len, None);
+        assert_eq!(sub_tries[0].parent_prefix, None);
     }
 }

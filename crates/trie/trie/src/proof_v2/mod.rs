@@ -1303,7 +1303,7 @@ where
         target = TRACE_TARGET,
         level = "trace",
         skip_all,
-        fields(prefix=?sub_trie_targets.prefix),
+        fields(parent_prefix=?sub_trie_targets.parent_prefix),
     )]
     fn proof_subtrie<'a>(
         &mut self,
@@ -1312,6 +1312,7 @@ where
         hashed_cursor_state: &mut HashedCursorState<VE::DeferredEncoder>,
         sub_trie_targets: SubTrieTargets<'a>,
     ) -> Result<(), StateProofError> {
+        let sub_trie_prefix = sub_trie_targets.prefix();
         let sub_trie_upper_bound = sub_trie_targets.upper_bound();
 
         // Wrap targets into a `TargetsCursor`.  targets can be empty if we only want to calculate
@@ -1332,19 +1333,17 @@ where
         // `next_uncached_key_range`, which will be called in the loop below, expects the trie
         // cursor to have already been seeked. The trie cursor is forward-only, but exact sub-trie
         // chunks can overlap previous chunks, so reset it if this seek needs to move backwards.
-        if trie_cursor_state.needs_reset_before_seek(&sub_trie_targets.prefix) {
+        if trie_cursor_state.needs_reset_before_seek(&sub_trie_prefix) {
             trace!(target: TRACE_TARGET, "Resetting trie cursor before sub-trie");
             self.trie_cursor.reset();
             *trie_cursor_state = TrieCursorState::unseeked();
         }
 
         trace!(target: TRACE_TARGET, "Doing initial seek of trie cursor");
-        *trie_cursor_state = TrieCursorState::seeked(
-            sub_trie_targets.prefix,
-            self.trie_cursor_seek(sub_trie_targets.prefix)?,
-        );
+        *trie_cursor_state =
+            TrieCursorState::seeked(sub_trie_prefix, self.trie_cursor_seek(sub_trie_prefix)?);
 
-        if hashed_cursor_state.needs_reset_before_seek(&sub_trie_targets.prefix) {
+        if hashed_cursor_state.needs_reset_before_seek(&sub_trie_prefix) {
             trace!(target: TRACE_TARGET, "Resetting hashed cursor before sub-trie");
             self.hashed_cursor.reset();
             *hashed_cursor_state = HashedCursorState::unseeked();
@@ -1354,7 +1353,7 @@ where
         // visited, either via the hashed key cursor (`calculate_key_range`) or trie cursor
         // (`next_uncached_key_range`). If/when this becomes None then there are no further nodes
         // which could exist.
-        let mut uncalculated_lower_bound = Some(sub_trie_targets.prefix);
+        let mut uncalculated_lower_bound = Some(sub_trie_prefix);
 
         trace!(target: TRACE_TARGET, "Starting loop");
         loop {
@@ -1365,7 +1364,7 @@ where
             let Some((calc_lower_bound, calc_upper_bound)) = self.next_uncached_key_range(
                 &mut targets,
                 trie_cursor_state,
-                &sub_trie_targets.prefix,
+                &sub_trie_prefix,
                 sub_trie_upper_bound.as_ref(),
                 prev_uncalculated_lower_bound,
             )?
@@ -1387,7 +1386,7 @@ where
                 let msg = format!(
                     "next_uncached_key_range went backwards: calc_lower={calc_lower_bound:?} < \
                      prev_lower={prev_lower:?}, calc_upper={calc_upper_bound:?}, prefix={:?}",
-                    sub_trie_targets.prefix,
+                    sub_trie_prefix,
                 );
                 error!(target: TRACE_TARGET, "{msg}");
                 return Err(StateProofError::TrieInconsistency(msg));
@@ -1408,10 +1407,7 @@ where
             // If the hashed cursor is exhausted, or not within the range of the
             // sub-trie, then there are no more keys at all, meaning the trie couldn't possibly have
             // more data and we should complete computation.
-            if hashed_cursor_state
-                .path()
-                .is_none_or(|key| !key.starts_with(&sub_trie_targets.prefix))
-            {
+            if hashed_cursor_state.path().is_none_or(|key| !key.starts_with(&sub_trie_prefix)) {
                 break;
             }
 
@@ -1442,11 +1438,11 @@ where
         // child of that parent before they can be revealed into the sparse trie.
         trace!(
             target: TRACE_TARGET,
-            parent_path_len = ?sub_trie_targets.parent_path_len,
+            parent_prefix = ?sub_trie_targets.parent_prefix,
             child_stack_empty = self.child_stack.is_empty(),
             "Maybe retaining local root",
         );
-        match (sub_trie_targets.parent_path_len, self.child_stack.pop()) {
+        match (sub_trie_targets.parent_prefix, self.child_stack.pop()) {
             (None, None) => {
                 // If `child_stack` is empty it means there was no keys at all, retain an empty
                 // root node.
@@ -1466,14 +1462,14 @@ where
             (Some(_), None) => {
                 // An empty partial sub-trie has no node to attach below the known parent.
             }
-            (Some(parent_path_len), Some(mut root_node)) => {
+            (Some(parent_prefix), Some(mut root_node)) => {
                 if matches!(&root_node, ProofTrieBranchChild::RlpNode(_)) {
                     return Err(StateProofError::TrieInconsistency(
                         "partial proof calculation produced an encoded local root".to_string(),
                     ))
                 }
 
-                let parent_path_len = parent_path_len as usize;
+                let parent_path_len = parent_prefix.len();
                 let root_short_key = *root_node.short_key();
                 if root_short_key.len() < parent_path_len {
                     return Err(StateProofError::TrieInconsistency(format!(
@@ -1618,11 +1614,7 @@ where
         let mut hashed_cursor_state = HashedCursorState::unseeked();
 
         static EMPTY_TARGETS: [ProofV2Target; 0] = [];
-        let sub_trie_targets = SubTrieTargets {
-            prefix: Nibbles::new(),
-            targets: &EMPTY_TARGETS,
-            parent_path_len: None,
-        };
+        let sub_trie_targets = SubTrieTargets { parent_prefix: None, targets: &EMPTY_TARGETS };
 
         if let Err(err) = self.proof_subtrie(
             value_encoder,
