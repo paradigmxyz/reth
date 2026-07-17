@@ -1,29 +1,60 @@
-use alloc::vec::Vec;
+use alloc::{boxed::Box, vec::Vec};
 use core::cmp::Ordering;
 use itertools::Itertools;
 
-/// Merge sorted slices. First occurrence wins for duplicate keys.
+type BoxedIterator<'a, T> = Box<dyn Iterator<Item = T> + Send + 'a>;
+
+/// Merge sorted iterators. First occurrence wins for duplicate keys.
 ///
-/// Callers pass slices in priority order (index 0 = highest priority), so the first
-/// slice's value for a key takes precedence over later slices. Keys and values are cloned as the
-/// returned iterator is consumed.
-pub(crate) fn kway_merge_sorted<'a, K, V, I>(slices: I) -> impl Iterator<Item = (K, V)> + 'a
+/// Callers pass iterators in priority order (index 0 = highest priority), so the first iterator's
+/// value for a key takes precedence over later iterators.
+pub(crate) fn kway_merge_sorted<'a, K, V, I>(iterators: I) -> BoxedIterator<'a, (K, V)>
 where
-    K: Ord + Clone + 'a,
-    V: Clone + 'a,
-    I: IntoIterator<Item = &'a [(K, V)]> + 'a,
-    I::IntoIter: 'a,
+    K: Ord + Send + 'a,
+    V: Send + 'a,
+    I: IntoIterator<Item = BoxedIterator<'a, (K, V)>>,
+    I::IntoIter: Send + 'a,
 {
-    slices
+    let mut iterators = iterators.into_iter();
+    let Some(first) = iterators.next() else { return Box::new(core::iter::empty()) };
+    let Some(second) = iterators.next() else { return first };
+
+    Box::new(
+        core::iter::once(first)
+            .chain(core::iter::once(second))
+            .chain(iterators)
+            .enumerate()
+            .map(|(priority, entries)| entries.map(move |(key, value)| (priority, key, value)))
+            .kmerge_by(|(i1, k1, _), (i2, k2, _)| (k1, i1) < (k2, i2))
+            .dedup_by(|(_, k1, _), (_, k2, _)| k1 == k2)
+            .map(|(_, key, value)| (key, value)),
+    )
+}
+
+/// Merge sorted iterators and group values with the same key in priority order.
+pub(crate) fn kway_merge_sorted_groups<'a, K, V, I>(iterators: I) -> BoxedIterator<'a, (K, Vec<V>)>
+where
+    K: Ord + Send + 'a,
+    V: Send + 'a,
+    I: IntoIterator<Item = BoxedIterator<'a, (K, V)>>,
+    I::IntoIter: Send + 'a,
+{
+    let merged = iterators
         .into_iter()
-        .filter(|s| !s.is_empty())
         .enumerate()
-        // Merge by reference: (priority, &K, &V) - avoids cloning all elements upfront
-        .map(|(i, s)| s.iter().map(move |(k, v)| (i, k, v)))
-        .kmerge_by(|(i1, k1, _), (i2, k2, _)| (k1, i1) < (k2, i2))
-        .dedup_by(|(_, k1, _), (_, k2, _)| *k1 == *k2)
-        // Clone only surviving elements after dedup
-        .map(|(_, k, v)| (k.clone(), v.clone()))
+        .map(|(priority, entries)| entries.map(move |(key, value)| (priority, key, value)))
+        .kmerge_by(|(i1, k1, _), (i2, k2, _)| (k1, i1) < (k2, i2));
+    let mut merged = merged.peekable();
+
+    Box::new(core::iter::from_fn(move || {
+        let (_, key, value) = merged.next()?;
+        let mut values = Vec::new();
+        values.push(value);
+        while merged.peek().is_some_and(|(_, next_key, _)| next_key == &key) {
+            values.push(merged.next().expect("peeked value exists").2);
+        }
+        Some((key, values))
+    }))
 }
 
 /// Extend a sorted vector with another sorted vector using 2 pointer merge.
@@ -81,20 +112,24 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloc::rc::Rc;
-    use core::cell::Cell;
+    use alloc::sync::Arc;
+    use core::sync::atomic::{AtomicUsize, Ordering};
 
     #[derive(Debug)]
     struct CloneCounter {
         value: u8,
-        count: Rc<Cell<usize>>,
+        count: Arc<AtomicUsize>,
     }
 
     impl Clone for CloneCounter {
         fn clone(&self) -> Self {
-            self.count.set(self.count.get() + 1);
-            Self { value: self.value, count: Rc::clone(&self.count) }
+            self.count.fetch_add(1, Ordering::Relaxed);
+            Self { value: self.value, count: Arc::clone(&self.count) }
         }
+    }
+
+    fn boxed<'a, T: Send + 'a>(iter: impl Iterator<Item = T> + Send + 'a) -> BoxedIterator<'a, T> {
+        Box::new(iter)
     }
 
     #[test]
@@ -156,64 +191,77 @@ mod tests {
 
     #[test]
     fn test_kway_merge_sorted_basic() {
-        let slice1 = vec![(1, "a1"), (3, "c1")];
-        let slice2 = vec![(2, "b2"), (3, "c2")];
-        let slice3 = vec![(1, "a3"), (4, "d3")];
+        let slice1 = [(1, "a1"), (3, "c1")];
+        let slice2 = [(2, "b2"), (3, "c2")];
+        let slice3 = [(1, "a3"), (4, "d3")];
 
-        let result = kway_merge_sorted([slice1.as_slice(), slice2.as_slice(), slice3.as_slice()])
-            .collect::<Vec<_>>();
+        let result = kway_merge_sorted([
+            boxed(slice1.iter().copied()),
+            boxed(slice2.iter().copied()),
+            boxed(slice3.iter().copied()),
+        ])
+        .collect::<Vec<_>>();
         // First occurrence wins: key 1 -> a1 (slice1), key 3 -> c1 (slice1)
         assert_eq!(result, vec![(1, "a1"), (2, "b2"), (3, "c1"), (4, "d3")]);
     }
 
     #[test]
     fn test_kway_merge_sorted_empty_slices() {
-        let slice1: Vec<(i32, &str)> = vec![];
-        let slice2 = vec![(1, "a")];
-        let slice3: Vec<(i32, &str)> = vec![];
+        let slice1: [(i32, &str); 0] = [];
+        let slice2 = [(1, "a")];
+        let slice3: [(i32, &str); 0] = [];
 
-        let result = kway_merge_sorted([slice1.as_slice(), slice2.as_slice(), slice3.as_slice()])
-            .collect::<Vec<_>>();
+        let result = kway_merge_sorted([
+            boxed(slice1.iter().copied()),
+            boxed(slice2.iter().copied()),
+            boxed(slice3.iter().copied()),
+        ])
+        .collect::<Vec<_>>();
         assert_eq!(result, vec![(1, "a")]);
     }
 
     #[test]
     fn test_kway_merge_sorted_all_same_key() {
-        let slice1 = vec![(5, "first")];
-        let slice2 = vec![(5, "middle")];
-        let slice3 = vec![(5, "last")];
+        let slice1 = [(5, "first")];
+        let slice2 = [(5, "middle")];
+        let slice3 = [(5, "last")];
 
-        let result = kway_merge_sorted([slice1.as_slice(), slice2.as_slice(), slice3.as_slice()])
-            .collect::<Vec<_>>();
+        let result = kway_merge_sorted([
+            boxed(slice1.iter().copied()),
+            boxed(slice2.iter().copied()),
+            boxed(slice3.iter().copied()),
+        ])
+        .collect::<Vec<_>>();
         // First occurrence wins (slice1 has highest priority)
         assert_eq!(result, vec![(5, "first")]);
     }
 
     #[test]
     fn test_kway_merge_sorted_single_slice() {
-        let slice = vec![(1, "a"), (2, "b"), (3, "c")];
-        let result = kway_merge_sorted([slice.as_slice()]).collect::<Vec<_>>();
+        let slice = [(1, "a"), (2, "b"), (3, "c")];
+        let result = kway_merge_sorted([boxed(slice.iter().copied())]).collect::<Vec<_>>();
         assert_eq!(result, vec![(1, "a"), (2, "b"), (3, "c")]);
     }
 
     #[test]
     fn test_kway_merge_sorted_no_slices() {
-        let result: Vec<(i32, &str)> = kway_merge_sorted(Vec::<&[(i32, &str)]>::new()).collect();
+        let result: Vec<(i32, &str)> =
+            kway_merge_sorted(Vec::<BoxedIterator<'_, (i32, &str)>>::new()).collect();
         assert!(result.is_empty());
     }
 
     #[test]
     fn test_kway_merge_sorted_clones_lazily() {
-        let clone_count = Rc::new(Cell::new(0));
-        let slice = vec![
-            (1, CloneCounter { value: 1, count: Rc::clone(&clone_count) }),
-            (2, CloneCounter { value: 2, count: Rc::clone(&clone_count) }),
-            (3, CloneCounter { value: 3, count: Rc::clone(&clone_count) }),
+        let clone_count = Arc::new(AtomicUsize::new(0));
+        let slice = [
+            (1, CloneCounter { value: 1, count: Arc::clone(&clone_count) }),
+            (2, CloneCounter { value: 2, count: Arc::clone(&clone_count) }),
+            (3, CloneCounter { value: 3, count: Arc::clone(&clone_count) }),
         ];
 
-        let mut result = kway_merge_sorted([slice.as_slice()]);
-        assert_eq!(clone_count.get(), 0);
+        let mut result = kway_merge_sorted([boxed(slice.iter().cloned())]);
+        assert_eq!(clone_count.load(Ordering::Relaxed), 0);
         assert_eq!(result.next().unwrap().1.value, 1);
-        assert_eq!(clone_count.get(), 1);
+        assert_eq!(clone_count.load(Ordering::Relaxed), 1);
     }
 }

@@ -546,25 +546,25 @@ fn merge_blocks<N: NodePrimitives>(blocks: Vec<ExecutedBlock<N>>) -> TrieInputSo
     #[cfg(feature = "rayon")]
     let (nodes, state) = rayon::join(
         || {
-            TrieUpdatesSorted::merge_batch(
-                trie_data.iter().map(|data| Arc::clone(&data.sorted.trie_updates)),
-            )
+            Arc::new(TrieUpdatesSorted::from(TrieUpdatesSorted::merge_batch(
+                trie_data.iter().map(|data| data.sorted.trie_updates.as_lazy()),
+            )))
         },
         || {
-            HashedPostStateSorted::merge_batch(
-                trie_data.iter().map(|data| Arc::clone(&data.sorted.hashed_state)),
-            )
+            Arc::new(HashedPostStateSorted::from(HashedPostStateSorted::merge_batch(
+                trie_data.iter().map(|data| data.sorted.hashed_state.as_lazy()),
+            )))
         },
     );
 
     #[cfg(not(feature = "rayon"))]
     let (nodes, state) = (
-        TrieUpdatesSorted::merge_batch(
-            trie_data.iter().map(|data| Arc::clone(&data.sorted.trie_updates)),
-        ),
-        HashedPostStateSorted::merge_batch(
-            trie_data.iter().map(|data| Arc::clone(&data.sorted.hashed_state)),
-        ),
+        Arc::new(TrieUpdatesSorted::from(TrieUpdatesSorted::merge_batch(
+            trie_data.iter().map(|data| data.sorted.trie_updates.as_lazy()),
+        ))),
+        Arc::new(HashedPostStateSorted::from(HashedPostStateSorted::merge_batch(
+            trie_data.iter().map(|data| data.sorted.hashed_state.as_lazy()),
+        ))),
     );
 
     TrieInputSorted::new(nodes, state, Default::default())

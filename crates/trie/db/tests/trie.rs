@@ -93,9 +93,10 @@ fn incremental_vs_full_root(inputs: &[&str], modified: &str) {
         let modified_root = loader.root().unwrap();
 
         // Update the intermediate roots table so that we can run the incremental verification
+        let trie_updates = trie_updates.into_sorted();
         tx.write_storage_trie_updates_sorted(core::iter::once((
-            &hashed_address,
-            &trie_updates.into_sorted(),
+            hashed_address,
+            trie_updates.as_lazy(),
         )))
         .unwrap();
 

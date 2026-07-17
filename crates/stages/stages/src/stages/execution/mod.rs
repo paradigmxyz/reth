@@ -498,7 +498,7 @@ where
 
         if provider.cached_storage_settings().use_hashed_state() {
             let hashed_state = state.hash_state_slow::<KeccakKeyHasher>();
-            provider.write_hashed_state(&hashed_state.into_sorted())?;
+            provider.write_hashed_state(hashed_state.into_sorted().as_lazy())?;
         }
 
         let db_write_duration = time.elapsed();

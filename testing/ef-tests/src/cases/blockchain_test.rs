@@ -283,7 +283,7 @@ fn run_case(case: &BlockchainTest) -> Result<(), Error> {
             .map_err(|err| Error::block_failed(block_number, err))?;
 
         provider
-            .write_hashed_state(&hashed_state.into_sorted())
+            .write_hashed_state(hashed_state.into_sorted().as_lazy())
             .map_err(|err| Error::block_failed(block_number, err))?;
         provider
             .update_history_indices(block.number..=block.number)

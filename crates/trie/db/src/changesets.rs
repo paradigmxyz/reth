@@ -520,9 +520,12 @@ impl ChangesetCache {
         }
 
         if all_cached {
-            // `merge_slice` gives precedence to earlier items, so pass reverts oldest-to-newest.
+            // `merge_batch` gives precedence to earlier items, so pass reverts oldest-to-newest.
             cached_reverts.reverse();
-            let accumulated_reverts = Arc::new(TrieUpdatesSorted::merge_slice(&cached_reverts));
+            let accumulated_reverts =
+                Arc::new(TrieUpdatesSorted::from(TrieUpdatesSorted::merge_batch(
+                    cached_reverts.iter().map(|updates| updates.as_lazy()),
+                )));
             let elapsed = timer.elapsed();
 
             let num_account_nodes = accumulated_reverts.account_nodes_ref().len();

@@ -3,10 +3,10 @@ use core::{fmt, ops::Not};
 use crate::{
     added_removed_keys::MultiAddedRemovedKeys,
     prefix_set::{PrefixSetMut, TriePrefixSetsMut},
-    utils::{extend_sorted_vec, kway_merge_sorted},
+    utils::{extend_sorted_vec, kway_merge_sorted, kway_merge_sorted_groups},
     KeyHasher, MultiProofTargets, Nibbles,
 };
-use alloc::{borrow::Cow, boxed::Box, collections::BTreeMap, vec::Vec};
+use alloc::{borrow::Cow, boxed::Box, vec::Vec};
 use alloy_primitives::{
     keccak256,
     map::{hash_map, B256Map, HashMap, HashSet},
@@ -609,58 +609,46 @@ impl HashedPostStateSorted {
         }
     }
 
-    /// Batch-merge sorted hashed post states. Iterator yields **newest to oldest**.
-    ///
-    /// For small batches, uses `extend_ref_and_sort` loop.
-    /// For large batches, uses k-way merge for O(n log k) complexity.
-    pub fn merge_batch<T: AsRef<Self> + From<Self>>(iter: impl IntoIterator<Item = T>) -> T {
-        let items: alloc::vec::Vec<_> = iter.into_iter().collect();
-        match items.len() {
-            0 => Self::default().into(),
-            1 => items.into_iter().next().expect("len == 1"),
-            _ => Self::merge_slice(&items).into(),
+    /// Returns a borrowed lazy view of this sorted state.
+    pub fn as_lazy(&self) -> LazyHashedPostStateSorted<'_> {
+        LazyHashedPostStateSorted {
+            accounts: Box::new(self.accounts.iter().copied()),
+            storages: Box::new(
+                self.storages
+                    .iter()
+                    .sorted_by_key(|(address, _)| *address)
+                    .map(|(address, storage)| (*address, storage.as_lazy())),
+            ),
         }
     }
 
-    /// Batch-merge sorted hashed post states from a slice. Slice is **newest to oldest**.
+    /// Lazily batch-merges sorted hashed post states supplied **newest to oldest**.
     ///
-    /// This variant takes a slice reference directly, avoiding iterator collection overhead.
-    /// For small batches, uses `extend_ref_and_sort` loop.
-    /// For large batches, uses k-way merge for O(n log k) complexity.
-    pub fn merge_slice<T: AsRef<Self>>(items: &[T]) -> Self {
-        const THRESHOLD: usize = 30;
-
-        let k = items.len();
-
-        if k == 0 {
-            return Self::default();
-        }
-        if k == 1 {
-            return items[0].as_ref().clone();
-        }
-
-        if k < THRESHOLD {
-            // Small k: extend loop, oldest-to-newest so newer overrides older.
-            let mut iter = items.iter().rev();
-            let mut acc = iter.next().expect("k > 0").as_ref().clone();
-            for next in iter {
-                acc.extend_ref_and_sort(next.as_ref());
-            }
-            return acc;
-        }
-
-        // Large k: k-way merge.
-        Self::merge_batch_lazy(items.iter().map(|item| item.as_ref())).into()
-    }
-
-    /// Lazily batch-merge sorted hashed post states supplied **newest to oldest**.
-    ///
-    /// The returned iterators yield entries in ascending key order and clone them only as they are
-    /// consumed. For duplicate keys, the value from the newest input is retained.
-    pub fn merge_batch_lazy<'a>(
-        items: impl IntoIterator<Item = &'a Self>,
+    /// The returned iterators yield entries in ascending key order. For duplicate keys, the value
+    /// from the newest input is retained.
+    pub fn merge_batch<'a>(
+        states: impl IntoIterator<Item = LazyHashedPostStateSorted<'a>>,
     ) -> LazyHashedPostStateSorted<'a> {
-        LazyHashedPostStateSorted::merge_batch(items)
+        let mut states = states.into_iter();
+        let Some(first) = states.next() else { return LazyHashedPostStateSorted::default() };
+        let Some(second) = states.next() else { return first };
+
+        let mut account_iters = Vec::new();
+        let mut storage_iters = Vec::new();
+        for state in core::iter::once(first).chain(core::iter::once(second)).chain(states) {
+            let (accounts, storages) = state.into_parts();
+            account_iters.push(accounts);
+            storage_iters.push(storages);
+        }
+
+        LazyHashedPostStateSorted {
+            accounts: kway_merge_sorted(account_iters),
+            storages: Box::new(
+                kway_merge_sorted_groups(storage_iters).map(|(address, storages)| {
+                    (address, HashedStorageSorted::merge_batch(storages))
+                }),
+            ),
+        }
     }
 
     /// Clears all accounts and storage data.
@@ -676,20 +664,20 @@ impl AsRef<Self> for HashedPostStateSorted {
     }
 }
 
-/// Lazily merged sorted hashed post state optimized for streaming updates to storage.
+/// Lazy sorted hashed post state optimized for streaming updates to storage.
 pub struct LazyHashedPostStateSorted<'a> {
     accounts: LazyHashedAccountIter<'a>,
     storages: LazyHashedStorageIter<'a>,
 }
 
-/// Boxed iterator over lazily merged hashed account updates.
+/// Boxed iterator over lazy hashed account updates.
 pub type LazyHashedAccountIter<'a> = Box<dyn Iterator<Item = (B256, Option<Account>)> + Send + 'a>;
 
-/// Boxed iterator over lazily merged hashed storage updates.
+/// Boxed iterator over lazy hashed storage updates.
 pub type LazyHashedStorageIter<'a> =
     Box<dyn Iterator<Item = (B256, LazyHashedStorageSorted<'a>)> + Send + 'a>;
 
-/// Boxed iterator over lazily merged hashed storage slot updates.
+/// Boxed iterator over lazy hashed storage slot updates.
 pub type LazyHashedStorageSlotIter<'a> = Box<dyn Iterator<Item = (B256, U256)> + Send + 'a>;
 
 impl fmt::Debug for LazyHashedPostStateSorted<'_> {
@@ -698,51 +686,13 @@ impl fmt::Debug for LazyHashedPostStateSorted<'_> {
     }
 }
 
-impl<'a> LazyHashedPostStateSorted<'a> {
-    fn merge_batch(items: impl IntoIterator<Item = &'a HashedPostStateSorted>) -> Self {
-        struct StorageAcc<'a> {
-            wiped: bool,
-            sealed: bool,
-            slices: Vec<&'a [(B256, U256)]>,
-        }
-
-        let mut account_slices = Vec::new();
-        let mut acc = BTreeMap::<B256, StorageAcc<'a>>::new();
-        for item in items {
-            account_slices.push(item.accounts.as_slice());
-            for (address, storage) in &item.storages {
-                let entry = acc.entry(*address).or_insert_with(|| StorageAcc {
-                    wiped: false,
-                    sealed: false,
-                    slices: Vec::new(),
-                });
-
-                if entry.sealed {
-                    continue;
-                }
-
-                entry.slices.push(storage.storage_slots.as_slice());
-                if storage.wiped {
-                    entry.wiped = true;
-                    entry.sealed = true;
-                }
-            }
-        }
-
-        let accounts = Box::new(kway_merge_sorted(account_slices));
-        let storages = Box::new(acc.into_iter().map(|(address, entry)| {
-            (
-                address,
-                LazyHashedStorageSorted {
-                    storage_slots: Box::new(kway_merge_sorted(entry.slices)),
-                    wiped: entry.wiped,
-                },
-            )
-        }));
-
-        Self { accounts, storages }
+impl Default for LazyHashedPostStateSorted<'_> {
+    fn default() -> Self {
+        Self { accounts: Box::new(core::iter::empty()), storages: Box::new(core::iter::empty()) }
     }
+}
 
+impl<'a> LazyHashedPostStateSorted<'a> {
     /// Consumes the state and returns its account and storage update iterators.
     pub fn into_parts(self) -> (LazyHashedAccountIter<'a>, LazyHashedStorageIter<'a>) {
         (self.accounts, self.storages)
@@ -797,24 +747,44 @@ impl HashedStorageSorted {
         extend_sorted_vec(&mut self.storage_slots, &other.storage_slots);
     }
 
-    /// Batch-merge sorted hashed storage. Iterator yields **newest to oldest**.
-    /// If any update is wiped, prior data is discarded.
-    pub fn merge_batch<'a>(updates: impl IntoIterator<Item = &'a Self>) -> Self {
-        let updates: Vec<_> = updates.into_iter().collect();
-        if updates.is_empty() {
-            return Self::default();
+    /// Returns a borrowed lazy view of these sorted storage updates.
+    pub fn as_lazy(&self) -> LazyHashedStorageSorted<'_> {
+        LazyHashedStorageSorted {
+            storage_slots: Box::new(self.storage_slots.iter().copied()),
+            wiped: self.wiped,
+        }
+    }
+
+    /// Lazily batch-merges sorted hashed storage supplied **newest to oldest**.
+    ///
+    /// If any update is wiped, older data is discarded.
+    pub fn merge_batch<'a>(
+        updates: impl IntoIterator<Item = LazyHashedStorageSorted<'a>>,
+    ) -> LazyHashedStorageSorted<'a> {
+        let mut relevant = Vec::new();
+        for update in updates {
+            let wiped = update.wiped;
+            relevant.push(update);
+            if wiped {
+                break
+            }
         }
 
-        let wipe_idx = updates.iter().position(|u| u.wiped);
-        let relevant = wipe_idx.map_or(&updates[..], |idx| &updates[..=idx]);
-        let storage_slots =
-            kway_merge_sorted(relevant.iter().map(|u| u.storage_slots.as_slice())).collect();
+        let mut relevant = relevant.into_iter();
+        let Some(first) = relevant.next() else { return LazyHashedStorageSorted::default() };
+        let Some(second) = relevant.next() else { return first };
+        let wiped =
+            first.wiped || second.wiped || relevant.as_slice().iter().any(|item| item.wiped);
+        let storage_slots = core::iter::once(first)
+            .chain(core::iter::once(second))
+            .chain(relevant)
+            .map(|storage| storage.storage_slots);
 
-        Self { wiped: wipe_idx.is_some(), storage_slots }
+        LazyHashedStorageSorted { storage_slots: kway_merge_sorted(storage_slots), wiped }
     }
 }
 
-/// Lazily merged sorted hashed storage updates.
+/// Lazy sorted hashed storage updates.
 pub struct LazyHashedStorageSorted<'a> {
     storage_slots: LazyHashedStorageSlotIter<'a>,
     wiped: bool,
@@ -825,6 +795,12 @@ impl fmt::Debug for LazyHashedStorageSorted<'_> {
         f.debug_struct("LazyHashedStorageSorted")
             .field("wiped", &self.wiped)
             .finish_non_exhaustive()
+    }
+}
+
+impl Default for LazyHashedStorageSorted<'_> {
+    fn default() -> Self {
+        Self { storage_slots: Box::new(core::iter::empty()), wiped: false }
     }
 }
 
@@ -1519,7 +1495,31 @@ mod tests {
     }
 
     #[test]
-    fn test_hashed_post_state_sorted_lazy_merge() {
+    fn test_hashed_post_state_sorted_as_lazy() {
+        let low = B256::with_last_byte(0x01);
+        let high = B256::with_last_byte(0xff);
+        let state = HashedPostStateSorted::new(
+            vec![(low, Some(Account::default()))],
+            B256Map::from_iter([
+                (high, HashedStorageSorted::default()),
+                (low, HashedStorageSorted::default()),
+            ]),
+        );
+
+        let roundtrip: HashedPostStateSorted =
+            HashedPostStateSorted::merge_batch([state.as_lazy()]).into();
+        assert_eq!(roundtrip, state);
+
+        let (_, storages) = state.as_lazy().into_parts();
+        assert_eq!(storages.map(|(address, _)| address).collect::<Vec<_>>(), vec![low, high]);
+
+        let empty: HashedPostStateSorted =
+            HashedPostStateSorted::merge_batch(core::iter::empty()).into();
+        assert!(empty.is_empty());
+    }
+
+    #[test]
+    fn test_hashed_post_state_sorted_merge_batch() {
         fn assert_send<T: Send>() {}
         assert_send::<LazyHashedPostStateSorted<'static>>();
 
@@ -1575,8 +1575,10 @@ mod tests {
             ]),
         );
 
+        let newest_and_middle =
+            HashedPostStateSorted::merge_batch([newest.as_lazy(), middle.as_lazy()]);
         let merged: HashedPostStateSorted =
-            HashedPostStateSorted::merge_batch_lazy([&newest, &middle, &oldest]).into();
+            HashedPostStateSorted::merge_batch([newest_and_middle, oldest.as_lazy()]).into();
 
         assert_eq!(
             merged.accounts,

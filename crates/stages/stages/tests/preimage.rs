@@ -991,7 +991,7 @@ fn execute_and_commit_block(
 
     let plain_state = output.state.to_plain_state(OriginalValuesKnown::Yes);
     provider.write_state_changes(plain_state)?;
-    provider.write_hashed_state(&hashed_state.into_sorted())?;
+    provider.write_hashed_state(hashed_state.into_sorted().as_lazy())?;
     provider.commit()?;
 
     Ok(block)

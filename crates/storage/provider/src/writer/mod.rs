@@ -70,7 +70,10 @@ mod tests {
         hashed_state.storages.insert(destroyed_address_hashed, HashedStorage::new(true));
 
         let provider_rw = provider_factory.provider_rw().unwrap();
-        assert!(matches!(provider_rw.write_hashed_state(&hashed_state.into_sorted()), Ok(())));
+        assert!(matches!(
+            provider_rw.write_hashed_state(hashed_state.into_sorted().as_lazy()),
+            Ok(())
+        ));
         provider_rw.commit().unwrap();
 
         let provider = provider_factory.provider().unwrap();
@@ -1134,7 +1137,7 @@ mod tests {
         );
         let mut state = HashedPostState::default();
         state.storages.insert(hashed_address, init_storage.clone());
-        provider_rw.write_hashed_state(&state.clone().into_sorted()).unwrap();
+        provider_rw.write_hashed_state(state.clone().into_sorted().as_lazy()).unwrap();
 
         // calculate database storage root and write intermediate storage nodes.
         let StorageRootProgress::Complete(storage_root, _, storage_updates) =
@@ -1147,10 +1150,11 @@ mod tests {
         };
         assert_eq!(storage_root, storage_root_prehashed(init_storage.storage));
         assert!(!storage_updates.is_empty());
+        let storage_updates = storage_updates.into_sorted();
         provider_rw
             .write_storage_trie_updates_sorted(core::iter::once((
-                &hashed_address,
-                &storage_updates.into_sorted(),
+                hashed_address,
+                storage_updates.as_lazy(),
             )))
             .unwrap();
 
@@ -1166,7 +1170,7 @@ mod tests {
         );
         let mut state = HashedPostState::default();
         state.storages.insert(hashed_address, updated_storage.clone());
-        provider_rw.write_hashed_state(&state.clone().into_sorted()).unwrap();
+        provider_rw.write_hashed_state(state.clone().into_sorted().as_lazy()).unwrap();
 
         // re-calculate database storage root
         type TestStorageRoot<'a, TX, A> = StorageRoot<

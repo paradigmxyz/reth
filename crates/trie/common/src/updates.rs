@@ -1,5 +1,5 @@
 use crate::{
-    utils::{extend_sorted_vec, kway_merge_sorted},
+    utils::{extend_sorted_vec, kway_merge_sorted, kway_merge_sorted_groups},
     BranchNodeCompact, HashBuilder, Nibbles,
 };
 use alloc::{
@@ -11,6 +11,7 @@ use alloy_primitives::{
     map::{B256Map, B256Set, HashMap, HashSet},
     FixedBytes, B256,
 };
+use itertools::Itertools;
 
 /// The aggregation of trie updates.
 #[derive(PartialEq, Eq, Clone, Default, Debug)]
@@ -628,58 +629,44 @@ impl TrieUpdatesSorted {
         self.storage_tries.clear();
     }
 
-    /// Batch-merge sorted trie updates. Iterator yields **newest to oldest**.
-    ///
-    /// For small batches, uses `extend_ref_and_sort` loop.
-    /// For large batches, uses k-way merge for O(n log k) complexity.
-    pub fn merge_batch<T: AsRef<Self> + From<Self>>(iter: impl IntoIterator<Item = T>) -> T {
-        let items: alloc::vec::Vec<_> = iter.into_iter().collect();
-        match items.len() {
-            0 => Self::default().into(),
-            1 => items.into_iter().next().expect("len == 1"),
-            _ => Self::merge_slice(&items).into(),
+    /// Returns a borrowed lazy view of these sorted trie updates.
+    pub fn as_lazy(&self) -> LazyTrieUpdatesSorted<'_> {
+        LazyTrieUpdatesSorted {
+            account_nodes: Box::new(self.account_nodes.iter().cloned()),
+            storage_tries: Box::new(
+                self.storage_tries
+                    .iter()
+                    .sorted_by_key(|(address, _)| *address)
+                    .map(|(address, storage)| (*address, storage.as_lazy())),
+            ),
         }
     }
 
-    /// Batch-merge sorted trie updates from a slice. Slice is **newest to oldest**.
+    /// Lazily batch-merges sorted trie updates supplied **newest to oldest**.
     ///
-    /// This variant takes a slice reference directly, avoiding iterator collection overhead.
-    /// For small batches, uses `extend_ref_and_sort` loop.
-    /// For large batches, uses k-way merge for O(n log k) complexity.
-    pub fn merge_slice<T: AsRef<Self>>(items: &[T]) -> Self {
-        const THRESHOLD: usize = 30;
-
-        let k = items.len();
-
-        if k == 0 {
-            return Self::default();
-        }
-        if k == 1 {
-            return items[0].as_ref().clone();
-        }
-
-        if k < THRESHOLD {
-            // Small k: extend loop, oldest-to-newest so newer overrides older.
-            let mut iter = items.iter().rev();
-            let mut acc = iter.next().expect("k > 0").as_ref().clone();
-            for next in iter {
-                acc.extend_ref_and_sort(next.as_ref());
-            }
-            return acc;
-        }
-
-        // Large k: k-way merge.
-        Self::merge_batch_lazy(items.iter().map(|item| item.as_ref())).into()
-    }
-
-    /// Lazily batch-merge sorted trie updates supplied **newest to oldest**.
-    ///
-    /// The returned iterators yield entries in ascending key order and clone them only as they are
-    /// consumed. For duplicate keys, the value from the newest input is retained.
-    pub fn merge_batch_lazy<'a>(
-        items: impl IntoIterator<Item = &'a Self>,
+    /// The returned iterators yield entries in ascending key order. For duplicate keys, the value
+    /// from the newest input is retained.
+    pub fn merge_batch<'a>(
+        updates: impl IntoIterator<Item = LazyTrieUpdatesSorted<'a>>,
     ) -> LazyTrieUpdatesSorted<'a> {
-        LazyTrieUpdatesSorted::merge_batch(items)
+        let mut updates = updates.into_iter();
+        let Some(first) = updates.next() else { return LazyTrieUpdatesSorted::default() };
+        let Some(second) = updates.next() else { return first };
+
+        let mut account_iters = Vec::new();
+        let mut storage_iters = Vec::new();
+        for updates in core::iter::once(first).chain(core::iter::once(second)).chain(updates) {
+            let (account_nodes, storage_tries) = updates.into_parts();
+            account_iters.push(account_nodes);
+            storage_iters.push(storage_tries);
+        }
+
+        LazyTrieUpdatesSorted {
+            account_nodes: kway_merge_sorted(account_iters),
+            storage_tries: Box::new(kway_merge_sorted_groups(storage_iters).map(
+                |(address, updates)| (address, StorageTrieUpdatesSorted::merge_batch(updates)),
+            )),
+        }
     }
 }
 
@@ -689,17 +676,17 @@ impl AsRef<Self> for TrieUpdatesSorted {
     }
 }
 
-/// Lazily merged sorted trie updates optimized for streaming updates to storage.
+/// Lazy sorted trie updates optimized for streaming updates to storage.
 pub struct LazyTrieUpdatesSorted<'a> {
     account_nodes: LazyTrieNodeIter<'a>,
     storage_tries: LazyStorageTrieIter<'a>,
 }
 
-/// Boxed iterator over lazily merged trie node updates.
+/// Boxed iterator over lazy trie node updates.
 pub type LazyTrieNodeIter<'a> =
     Box<dyn Iterator<Item = (Nibbles, Option<BranchNodeCompact>)> + Send + 'a>;
 
-/// Boxed iterator over lazily merged storage trie updates.
+/// Boxed iterator over lazy storage trie updates.
 pub type LazyStorageTrieIter<'a> =
     Box<dyn Iterator<Item = (B256, LazyStorageTrieUpdatesSorted<'a>)> + Send + 'a>;
 
@@ -709,51 +696,16 @@ impl core::fmt::Debug for LazyTrieUpdatesSorted<'_> {
     }
 }
 
-impl<'a> LazyTrieUpdatesSorted<'a> {
-    fn merge_batch(items: impl IntoIterator<Item = &'a TrieUpdatesSorted>) -> Self {
-        struct StorageAcc<'a> {
-            is_deleted: bool,
-            sealed: bool,
-            slices: Vec<&'a [(Nibbles, Option<BranchNodeCompact>)]>,
+impl Default for LazyTrieUpdatesSorted<'_> {
+    fn default() -> Self {
+        Self {
+            account_nodes: Box::new(core::iter::empty()),
+            storage_tries: Box::new(core::iter::empty()),
         }
-
-        let mut account_slices = Vec::new();
-        let mut acc = BTreeMap::<B256, StorageAcc<'a>>::new();
-        for item in items {
-            account_slices.push(item.account_nodes.as_slice());
-            for (address, storage) in &item.storage_tries {
-                let entry = acc.entry(*address).or_insert_with(|| StorageAcc {
-                    is_deleted: false,
-                    sealed: false,
-                    slices: Vec::new(),
-                });
-
-                if entry.sealed {
-                    continue;
-                }
-
-                entry.slices.push(storage.storage_nodes.as_slice());
-                if storage.is_deleted {
-                    entry.is_deleted = true;
-                    entry.sealed = true;
-                }
-            }
-        }
-
-        let account_nodes = Box::new(kway_merge_sorted(account_slices));
-        let storage_tries = Box::new(acc.into_iter().map(|(address, entry)| {
-            (
-                address,
-                LazyStorageTrieUpdatesSorted {
-                    is_deleted: entry.is_deleted,
-                    storage_nodes: Box::new(kway_merge_sorted(entry.slices)),
-                },
-            )
-        }));
-
-        Self { account_nodes, storage_tries }
     }
+}
 
+impl<'a> LazyTrieUpdatesSorted<'a> {
     /// Consumes the updates and returns the account and storage trie update iterators.
     pub fn into_parts(self) -> (LazyTrieNodeIter<'a>, LazyStorageTrieIter<'a>) {
         (self.account_nodes, self.storage_tries)
@@ -844,25 +796,45 @@ impl StorageTrieUpdatesSorted {
         self.is_deleted = self.is_deleted || other.is_deleted;
     }
 
-    /// Batch-merge sorted storage trie updates. Iterator yields **newest to oldest**.
+    /// Returns a borrowed lazy view of these sorted storage trie updates.
+    pub fn as_lazy(&self) -> LazyStorageTrieUpdatesSorted<'_> {
+        LazyStorageTrieUpdatesSorted {
+            is_deleted: self.is_deleted,
+            storage_nodes: Box::new(self.storage_nodes.iter().cloned()),
+        }
+    }
+
+    /// Lazily batch-merges sorted storage trie updates supplied **newest to oldest**.
+    ///
     /// If any update is deleted, older data is discarded.
-    pub fn merge_batch<'a>(updates: impl IntoIterator<Item = &'a Self>) -> Self {
-        let updates: Vec<_> = updates.into_iter().collect();
-        if updates.is_empty() {
-            return Self::default();
+    pub fn merge_batch<'a>(
+        updates: impl IntoIterator<Item = LazyStorageTrieUpdatesSorted<'a>>,
+    ) -> LazyStorageTrieUpdatesSorted<'a> {
+        let mut relevant = Vec::new();
+        for update in updates {
+            let is_deleted = update.is_deleted;
+            relevant.push(update);
+            if is_deleted {
+                break
+            }
         }
 
-        // Discard updates older than the first deletion since the trie was wiped at that point.
-        let del_idx = updates.iter().position(|u| u.is_deleted);
-        let relevant = del_idx.map_or(&updates[..], |idx| &updates[..=idx]);
-        let storage_nodes =
-            kway_merge_sorted(relevant.iter().map(|u| u.storage_nodes.as_slice())).collect();
+        let mut relevant = relevant.into_iter();
+        let Some(first) = relevant.next() else { return LazyStorageTrieUpdatesSorted::default() };
+        let Some(second) = relevant.next() else { return first };
+        let is_deleted = first.is_deleted ||
+            second.is_deleted ||
+            relevant.as_slice().iter().any(|item| item.is_deleted);
+        let storage_nodes = core::iter::once(first)
+            .chain(core::iter::once(second))
+            .chain(relevant)
+            .map(|storage| storage.storage_nodes);
 
-        Self { is_deleted: del_idx.is_some(), storage_nodes }
+        LazyStorageTrieUpdatesSorted { is_deleted, storage_nodes: kway_merge_sorted(storage_nodes) }
     }
 }
 
-/// Lazily merged sorted storage trie updates.
+/// Lazy sorted storage trie updates.
 pub struct LazyStorageTrieUpdatesSorted<'a> {
     is_deleted: bool,
     storage_nodes: LazyTrieNodeIter<'a>,
@@ -873,6 +845,12 @@ impl core::fmt::Debug for LazyStorageTrieUpdatesSorted<'_> {
         f.debug_struct("LazyStorageTrieUpdatesSorted")
             .field("is_deleted", &self.is_deleted)
             .finish_non_exhaustive()
+    }
+}
+
+impl Default for LazyStorageTrieUpdatesSorted<'_> {
+    fn default() -> Self {
+        Self { is_deleted: false, storage_nodes: Box::new(core::iter::empty()) }
     }
 }
 
@@ -1006,7 +984,30 @@ mod tests {
     }
 
     #[test]
-    fn test_trie_updates_sorted_lazy_merge() {
+    fn test_trie_updates_sorted_as_lazy() {
+        let low = B256::with_last_byte(0x01);
+        let high = B256::with_last_byte(0xff);
+        let updates = TrieUpdatesSorted::new(
+            vec![(Nibbles::from_nibbles([0x01]), None)],
+            B256Map::from_iter([
+                (high, StorageTrieUpdatesSorted::default()),
+                (low, StorageTrieUpdatesSorted::default()),
+            ]),
+        );
+
+        let roundtrip: TrieUpdatesSorted =
+            TrieUpdatesSorted::merge_batch([updates.as_lazy()]).into();
+        assert_eq!(roundtrip, updates);
+
+        let (_, storage_tries) = updates.as_lazy().into_parts();
+        assert_eq!(storage_tries.map(|(address, _)| address).collect::<Vec<_>>(), vec![low, high]);
+
+        let empty: TrieUpdatesSorted = TrieUpdatesSorted::merge_batch(core::iter::empty()).into();
+        assert!(empty.is_empty());
+    }
+
+    #[test]
+    fn test_trie_updates_sorted_merge_batch() {
         fn assert_send<T: Send>() {}
         assert_send::<LazyTrieUpdatesSorted<'static>>();
 
@@ -1071,8 +1072,10 @@ mod tests {
             ]),
         );
 
+        let newest_and_middle =
+            TrieUpdatesSorted::merge_batch([newest.as_lazy(), middle.as_lazy()]);
         let merged: TrieUpdatesSorted =
-            TrieUpdatesSorted::merge_batch_lazy([&newest, &middle, &oldest]).into();
+            TrieUpdatesSorted::merge_batch([newest_and_middle, oldest.as_lazy()]).into();
 
         assert_eq!(
             merged.account_nodes,

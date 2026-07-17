@@ -3,7 +3,7 @@ use alloy_primitives::{Address, Bytes, B256, U256};
 use reth_primitives_traits::Account;
 use reth_storage_errors::provider::ProviderResult;
 use reth_trie_common::{
-    updates::{LazyTrieUpdatesSorted, StorageTrieUpdatesSorted, TrieUpdates, TrieUpdatesSorted},
+    updates::{LazyStorageTrieUpdatesSorted, LazyTrieUpdatesSorted, TrieUpdates},
     AccountProof, ExecutionWitnessMode, HashedPostState, HashedStorage, MultiProof,
     MultiProofTargets, StorageMultiProof, StorageProof, TrieInput,
 };
@@ -178,23 +178,17 @@ pub trait TrieWriter: Send {
     ///
     /// Returns the number of entries modified.
     fn write_trie_updates(&self, trie_updates: TrieUpdates) -> ProviderResult<usize> {
-        self.write_trie_updates_sorted(&trie_updates.into_sorted())
+        let trie_updates = trie_updates.into_sorted();
+        self.write_trie_updates_sorted(trie_updates.as_lazy())
     }
 
     /// Writes trie updates to the database with already sorted updates.
     ///
     /// Returns the number of entries modified.
-    fn write_trie_updates_sorted(&self, trie_updates: &TrieUpdatesSorted) -> ProviderResult<usize>;
-
-    /// Writes lazily merged trie updates to the database.
-    ///
-    /// Returns the number of entries modified.
-    fn write_trie_updates_lazy(
+    fn write_trie_updates_sorted(
         &self,
         trie_updates: LazyTrieUpdatesSorted<'_>,
-    ) -> ProviderResult<usize> {
-        self.write_trie_updates_sorted(&trie_updates.into())
-    }
+    ) -> ProviderResult<usize>;
 }
 
 /// Storage Trie Writer
@@ -207,6 +201,6 @@ pub trait StorageTrieWriter: Send {
     /// Returns the number of entries modified.
     fn write_storage_trie_updates_sorted<'a>(
         &self,
-        storage_tries: impl Iterator<Item = (&'a B256, &'a StorageTrieUpdatesSorted)>,
+        storage_tries: impl Iterator<Item = (B256, LazyStorageTrieUpdatesSorted<'a>)>,
     ) -> ProviderResult<usize>;
 }
