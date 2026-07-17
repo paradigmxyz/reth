@@ -58,10 +58,7 @@ where
                 .is_cancun_active_at_timestamp(timestamp)
                 .then(B256::random),
             slot_number: self.chain_spec.is_amsterdam_active_at_timestamp(timestamp).then_some(0),
-            target_gas_limit: self
-                .chain_spec
-                .is_amsterdam_active_at_timestamp(timestamp)
-                .then_some(0),
+            ..Default::default()
         }
     }
 }

@@ -10,12 +10,8 @@ use nodes::{
 
 use crate::{LeafLookup, LeafLookupError, LeafUpdate, SparseTrie, SparseTrieUpdates};
 use alloc::{borrow::Cow, boxed::Box, collections::VecDeque, vec::Vec};
-use alloy_primitives::{
-    keccak256,
-    map::{B256Map, HashMap, HashSet},
-    B256,
-};
-use alloy_trie::{BranchNodeCompact, TrieMask};
+use alloy_primitives::{keccak256, map::B256Map, B256};
+use alloy_trie::TrieMask;
 use core::{cmp::Reverse, mem};
 use reth_execution_errors::SparseTrieResult;
 use reth_trie_common::{
@@ -120,7 +116,8 @@ fn compact_arena(arena: &mut NodeArena, root: &mut Index) {
     *root = new_root;
 }
 
-/// Reusable buffers shared by both [`ArenaSparseSubtrie`] and [`ArenaParallelSparseTrie`].
+/// Reusable traversal state and optional accumulators shared by
+/// [`ArenaSparseSubtrie`] and [`ArenaParallelSparseTrie`].
 #[derive(Debug, Default, Clone)]
 struct ArenaTrieBuffers {
     /// Reusable cursor for trie traversals.
@@ -216,102 +213,106 @@ impl ArenaSparseSubtrie {
         );
     }
 
-    /// Prunes revealed subtrees that are not ancestors of any retained leaf, compacting the
-    /// arena in a single BFS pass.
+    /// Prunes revealed subtrees that are not ancestors of any retained leaf, compacting the arena
+    /// in lexicographic order.
     ///
-    /// `retained_leaves` must be sorted and scoped to this subtrie's key range. Builds a fresh
-    /// arena by BFS-copying only retained nodes from the root, blinding non-retained children
-    /// at the boundary. Non-retained subtrees are never visited — they are dropped with the
-    /// old arena.
+    /// `retained_leaves` must yield leaves in sorted order and be scoped to this subtrie's key
+    /// range. Builds a fresh arena by copying retained nodes from the root, blinding non-retained
+    /// children at the boundary unless their parent branch is retained.
     ///
     /// Expects that all nodes have computed hashes (i.e. `prune` is called after hashing).
-    fn prune(&mut self, retained_leaves: &[Nibbles]) -> usize {
+    fn prune<'a>(&mut self, retained_leaves: impl IntoIterator<Item = &'a Nibbles>) -> usize {
         // Only branches can have pruneable children.
         if !matches!(&self.arena[self.root], ArenaSparseNode::Branch(_)) {
             return 0;
         }
 
-        debug_assert!(
-            retained_leaves.windows(2).all(|w| w[0] <= w[1]),
-            "retained_leaves must be sorted"
-        );
         debug_assert_eq!(self.num_dirty_leaves, 0, "prune must run after hashing");
 
+        let retained_leaves = retained_leaves.into_iter();
+        let (retained_lower_bound, retained_upper_bound) = retained_leaves.size_hint();
         let old_count = self.arena.len();
         // In a tree where every branch has ≥2 children, #branches ≤ #leaves − 1, so
         // total nodes ≤ 2N − 1. This is a reasonable upper-bound capacity hint that
         // avoids most reallocations without over-allocating when pruning is heavy.
-        let mut new_arena = SlotMap::with_capacity(retained_leaves.len() * 2);
-        // Queue: (new_idx, path TO the node — excluding its own short_key)
-        let mut queue: VecDeque<(Index, Nibbles)> = VecDeque::new();
+        let mut new_arena =
+            SlotMap::with_capacity(retained_upper_bound.unwrap_or(retained_lower_bound) * 2);
+        let mut retained_leaves = retained_leaves.peekable();
         let mut new_num_leaves = 0u64;
         let mut new_nodes_heap_size = 0usize;
 
         // Root is always retained.
         let root_node = self.arena.remove(self.root).expect("root exists");
         let new_root = new_arena.insert(root_node);
-        queue.push_back((new_root, self.path));
+        let mut stack = Vec::new();
+        let root_is_retained = retained_leaves.peek().is_some();
+        if let Some(frame) = prepare_retained_node(
+            &new_arena,
+            new_root,
+            self.path,
+            root_is_retained,
+            &mut new_num_leaves,
+            &mut new_nodes_heap_size,
+        ) {
+            stack.push(frame);
+        }
 
-        while let Some((new_idx, node_path)) = queue.pop_front() {
-            new_nodes_heap_size += new_arena[new_idx].extra_heap_bytes();
-
-            let ArenaSparseNode::Branch(b) = &new_arena[new_idx] else {
-                if matches!(&new_arena[new_idx], ArenaSparseNode::Leaf { .. }) {
-                    new_num_leaves += 1;
-                }
+        while let Some(frame) = stack.last_mut() {
+            let Some((child_pos, nibble, old_child_idx)) = frame.next_revealed_child(&new_arena)
+            else {
+                stack.pop();
                 continue;
             };
 
-            // Logical path of this branch (path TO node + its extension/short_key).
-            let mut branch_logical_path = node_path;
-            branch_logical_path.extend(&b.short_key);
+            // Child's path in the trie (edges to reach it, excluding its own short_key).
+            let parent_new_idx = frame.new_idx;
+            let mut child_path = frame.branch_logical_path;
+            child_path.push(nibble);
 
-            // Collect (dense_pos, nibble, old_child_idx) for revealed children.
-            let children: SmallVec<[(usize, u8, Index); 16]> = BranchChildIter::new(b.state_mask)
-                .filter_map(|(dense_idx, nibble)| match &b.children[dense_idx] {
-                    ArenaSparseNodeBranchChild::Revealed(old_idx) => {
-                        Some((dense_idx.get(), nibble, *old_idx))
-                    }
-                    _ => None,
-                })
-                .collect();
+            while retained_leaves.peek().is_some_and(|retained| *retained < &child_path) {
+                retained_leaves.next();
+            }
 
-            for (child_pos, nibble, old_child_idx) in children {
-                // Child's path in the trie (edges to reach it, excluding its own short_key).
-                let mut child_path = branch_logical_path;
-                child_path.push(nibble);
-
-                // Child's full prefix for the retention check.
-                let child_short_key = match &self.arena[old_child_idx] {
-                    ArenaSparseNode::Branch(b) => &b.short_key,
-                    ArenaSparseNode::Leaf { key, .. } => key,
-                    other => unreachable!("subtrie prune: unexpected child node kind: {other:?}"),
-                };
-                let mut child_prefix = child_path;
-                child_prefix.extend(child_short_key);
-
-                if has_prefix(retained_leaves, &child_prefix) {
-                    // Retained — move child to new arena.
-                    let child_node = self.arena.remove(old_child_idx).expect("child exists");
-                    let new_child_idx = new_arena.insert(child_node);
-                    let ArenaSparseNode::Branch(b) = &mut new_arena[new_idx] else {
-                        unreachable!()
-                    };
-                    b.children[child_pos] = ArenaSparseNodeBranchChild::Revealed(new_child_idx);
-                    queue.push_back((new_child_idx, child_path));
-                } else {
-                    // Not retained — blind the child slot in the new arena.
-                    let rlp_node = self.arena[old_child_idx]
-                        .state_ref()
-                        .expect("child must have state")
-                        .cached_rlp_node()
-                        .cloned()
-                        .expect("pruned child must have cached RLP (prune runs after hashing)");
-                    let ArenaSparseNode::Branch(b) = &mut new_arena[new_idx] else {
-                        unreachable!()
-                    };
-                    b.children[child_pos] = ArenaSparseNodeBranchChild::Blinded(rlp_node);
+            let child_is_retained =
+                retained_leaves.peek().is_some_and(|retained| retained.starts_with(&child_path));
+            if child_is_retained || frame.branch_is_retained {
+                // Retained or protected by a retained parent branch.
+                let child_node = self.arena.remove(old_child_idx).expect("child exists");
+                let new_child_idx = new_arena.insert(child_node);
+                if let Some(frame) = prepare_retained_node(
+                    &new_arena,
+                    new_child_idx,
+                    child_path,
+                    child_is_retained,
+                    &mut new_num_leaves,
+                    &mut new_nodes_heap_size,
+                ) {
+                    stack.push(frame);
                 }
+                let ArenaSparseNode::Branch(b) = &mut new_arena[parent_new_idx] else {
+                    unreachable!()
+                };
+                b.children[child_pos] = ArenaSparseNodeBranchChild::Revealed(new_child_idx);
+            } else {
+                // Not retained — blind the child slot in the new arena.
+                let node = &self.arena[old_child_idx];
+                let rlp_node = node
+                    .state_ref()
+                    .expect("child must have state")
+                    .cached_rlp_node()
+                    .cloned()
+                    .expect("pruned child must have cached RLP (prune runs after hashing)");
+                trace!(
+                    target: TRACE_TARGET,
+                    path = ?child_path,
+                    variant = %AsRef::<str>::as_ref(node),
+                    cached_rlp_node = ?rlp_node,
+                    "pruning node",
+                );
+                let ArenaSparseNode::Branch(b) = &mut new_arena[parent_new_idx] else {
+                    unreachable!()
+                };
+                b.children[child_pos] = ArenaSparseNodeBranchChild::Blinded(rlp_node);
             }
         }
 
@@ -327,10 +328,61 @@ impl ArenaSparseSubtrie {
         self.debug_assert_counters();
         return pruned;
 
-        /// Returns `true` if any entry in `sorted_keys` starts with `prefix`.
-        fn has_prefix(sorted_keys: &[Nibbles], prefix: &Nibbles) -> bool {
-            let idx = sorted_keys.binary_search(prefix).unwrap_or_else(|i| i);
-            sorted_keys.get(idx).is_some_and(|p| p.starts_with(prefix))
+        struct CopyFrame {
+            new_idx: Index,
+            branch_logical_path: Nibbles,
+            state_mask: TrieMask,
+            remaining_child_mask: TrieMask,
+            branch_is_retained: bool,
+        }
+
+        impl CopyFrame {
+            fn next_revealed_child(&mut self, new_arena: &NodeArena) -> Option<(usize, u8, Index)> {
+                let ArenaSparseNode::Branch(b) = &new_arena[self.new_idx] else { unreachable!() };
+
+                loop {
+                    let nibble = self.remaining_child_mask.first_set_bit_index()?;
+                    self.remaining_child_mask.unset_bit(nibble);
+                    let child_idx = BranchChildIdx::new(self.state_mask, nibble)
+                        .expect("remaining_child_mask must be a subset of state_mask");
+
+                    if let ArenaSparseNodeBranchChild::Revealed(old_idx) = b.children[child_idx] {
+                        return Some((child_idx.get(), nibble, old_idx))
+                    }
+                }
+            }
+        }
+
+        /// Prepares a retained node for lexicographic copying, returning a stack frame when the
+        /// node has children to walk.
+        fn prepare_retained_node(
+            new_arena: &NodeArena,
+            new_idx: Index,
+            node_path: Nibbles,
+            branch_is_retained: bool,
+            new_num_leaves: &mut u64,
+            new_nodes_heap_size: &mut usize,
+        ) -> Option<CopyFrame> {
+            *new_nodes_heap_size += new_arena[new_idx].extra_heap_bytes();
+
+            let ArenaSparseNode::Branch(b) = &new_arena[new_idx] else {
+                if matches!(&new_arena[new_idx], ArenaSparseNode::Leaf { .. }) {
+                    *new_num_leaves += 1;
+                }
+                return None;
+            };
+
+            // Logical path of this branch (path TO node + its extension/short_key).
+            let mut branch_logical_path = node_path;
+            branch_logical_path.extend(&b.short_key);
+
+            Some(CopyFrame {
+                new_idx,
+                branch_logical_path,
+                state_mask: b.state_mask,
+                remaining_child_mask: b.state_mask,
+                branch_is_retained,
+            })
         }
     }
 
@@ -468,11 +520,8 @@ impl ArenaSparseSubtrie {
         ArenaParallelSparseTrie::update_cached_rlp(
             &mut self.arena,
             self.root,
-            &mut self.buffers.cursor,
-            &mut self.buffers.rlp_buf,
-            &mut self.buffers.rlp_node_buf,
             self.path,
-            &mut self.buffers.updates,
+            &mut self.buffers,
         );
         self.num_dirty_leaves = 0;
         #[cfg(debug_assertions)]
@@ -621,8 +670,6 @@ pub struct ArenaParallelSparseTrie {
     upper_arena: NodeArena,
     /// The root node of the upper trie.
     root: Index,
-    /// Optional tracking of trie updates for database persistence.
-    updates: Option<SparseTrieUpdates>,
     /// Reusable buffers for traversal, RLP encoding, and update actions.
     buffers: ArenaTrieBuffers,
     /// Thresholds controlling when parallelism is enabled for different operations.
@@ -656,7 +703,7 @@ impl ArenaParallelSparseTrie {
         fn state_to_record(state: &ArenaSparseNodeState) -> NodeStateRecord {
             match state {
                 ArenaSparseNodeState::Revealed => NodeStateRecord::Revealed,
-                ArenaSparseNodeState::Cached { rlp_node } => {
+                ArenaSparseNodeState::Cached { rlp_node, .. } => {
                     NodeStateRecord::Cached { rlp_node: hex::encode(rlp_node.as_ref()) }
                 }
                 ArenaSparseNodeState::Dirty => NodeStateRecord::Dirty,
@@ -814,7 +861,7 @@ impl ArenaParallelSparseTrie {
         }
 
         trace!(target: TRACE_TARGET, ?child_path, "Wrapping child into subtrie");
-        let mut subtrie = ArenaSparseSubtrie::new(self.updates.is_some());
+        let mut subtrie = ArenaSparseSubtrie::new(self.buffers.updates.is_some());
         subtrie.path = *child_path;
         let mut root_node =
             mem::replace(&mut self.upper_arena[child_idx], ArenaSparseNode::TakenSubtrie);
@@ -947,7 +994,9 @@ impl ArenaParallelSparseTrie {
     /// - **2+ children**: nothing to do.
     fn maybe_collapse_or_remove_branch(&mut self, cursor: &mut ArenaCursor) {
         loop {
-            let branch_idx = cursor.head().expect("cursor is non-empty").index;
+            let branch_entry = cursor.head().expect("cursor is non-empty");
+            let branch_idx = branch_entry.index;
+            let branch_path = branch_entry.path;
 
             // Read-only phase: extract the count and remaining-child info we need before
             // mutating. All values here are Copy so the borrow is released.
@@ -968,12 +1017,7 @@ impl ArenaParallelSparseTrie {
                     return;
                 }
                 // Remove the empty branch from its parent.
-                let branch_nibble = cursor
-                    .head()
-                    .expect("cursor is non-empty")
-                    .path
-                    .last()
-                    .expect("non-root branch");
+                let branch_nibble = branch_path.last().expect("non-root branch");
                 cursor.pop(&mut self.upper_arena);
                 self.upper_arena.remove(branch_idx);
                 let parent_idx = cursor.head().expect("cursor is non-empty").index;
@@ -1135,12 +1179,14 @@ impl ArenaParallelSparseTrie {
     fn update_cached_rlp(
         arena: &mut NodeArena,
         root: Index,
-        cursor: &mut ArenaCursor,
-        rlp_buf: &mut Vec<u8>,
-        rlp_node_buf: &mut Vec<RlpNode>,
         base_path: Nibbles,
-        updates: &mut Option<SparseTrieUpdates>,
+        buffers: &mut ArenaTrieBuffers,
     ) -> RlpNode {
+        let cursor = &mut buffers.cursor;
+        let rlp_buf = &mut buffers.rlp_buf;
+        let rlp_node_buf = &mut buffers.rlp_node_buf;
+        let updates = &mut buffers.updates;
+
         rlp_node_buf.clear();
 
         // Step 1: Handle trivial roots that don't need the stack-based walk.
@@ -1154,7 +1200,8 @@ impl ArenaParallelSparseTrie {
             }
             ArenaSparseNode::Branch(b) => {
                 if let ArenaSparseNodeState::Cached { rlp_node, .. } = &b.state {
-                    return rlp_node.clone();
+                    let rlp_node = rlp_node.clone();
+                    return rlp_node;
                 }
             }
             ArenaSparseNode::Subtrie(_) | ArenaSparseNode::TakenSubtrie => {
@@ -1216,7 +1263,8 @@ impl ArenaParallelSparseTrie {
                                 else {
                                     panic!("child branch must be cached after DFS");
                                 };
-                                rlp_node_buf.push(rlp_node.clone());
+                                let rlp_node = rlp_node.clone();
+                                rlp_node_buf.push(rlp_node);
                             }
                             ArenaSparseNode::Subtrie(subtrie) => {
                                 let subtrie_root = &subtrie.arena[subtrie.root];
@@ -1420,8 +1468,9 @@ impl ArenaParallelSparseTrie {
         }
     }
 
-    /// Encodes a leaf node's RLP and pushes it onto `rlp_node_buf`. If the leaf is already
-    /// cached, its existing `RlpNode` is reused.
+    /// Encodes a leaf node's RLP and pushes it onto `rlp_node_buf`.
+    ///
+    /// If the leaf is already cached, its existing `RlpNode` is reused.
     fn encode_leaf(
         arena: &mut NodeArena,
         idx: Index,
@@ -2058,9 +2107,16 @@ impl ArenaParallelSparseTrie {
         idx: Index,
         nibble: Option<u8>,
     ) -> ArenaSparseNode {
-        trace!(target: TRACE_TARGET, path = ?cursor.head().unwrap().path, "pruning node");
+        let path = cursor.head().expect("cursor is non-empty").path;
         let node = arena.remove(idx).expect("node must exist to be pruned");
         let rlp_node = node.state_ref().and_then(|s| s.cached_rlp_node()).cloned();
+        trace!(
+            target: TRACE_TARGET,
+            ?path,
+            variant = %AsRef::<str>::as_ref(&node),
+            cached_rlp_node = ?rlp_node,
+            "pruning node",
+        );
 
         if let Some(rlp_node) = rlp_node {
             let parent_idx = cursor.parent().expect("pruned child has parent").index;
@@ -2138,7 +2194,11 @@ impl ArenaParallelSparseTrie {
     }
 
     #[cfg(debug_assertions)]
-    fn collect_reachable_nodes(arena: &NodeArena, idx: Index, reachable: &mut HashSet<Index>) {
+    fn collect_reachable_nodes(
+        arena: &NodeArena,
+        idx: Index,
+        reachable: &mut alloy_primitives::map::HashSet<Index>,
+    ) {
         if !reachable.insert(idx) {
             return;
         }
@@ -2153,9 +2213,10 @@ impl ArenaParallelSparseTrie {
 
     #[cfg(debug_assertions)]
     fn assert_no_orphaned_nodes(arena: &NodeArena, root: Index, label: &str) {
-        let mut reachable = HashSet::default();
+        let mut reachable = alloy_primitives::map::HashSet::default();
         Self::collect_reachable_nodes(arena, root, &mut reachable);
-        let all_indices: HashSet<Index> = arena.iter().map(|(idx, _)| idx).collect();
+        let all_indices: alloy_primitives::map::HashSet<Index> =
+            arena.iter().map(|(idx, _)| idx).collect();
         let orphaned: Vec<_> = all_indices.difference(&reachable).collect();
         debug_assert!(
             orphaned.is_empty(),
@@ -2189,7 +2250,6 @@ impl Default for ArenaParallelSparseTrie {
         Self {
             upper_arena,
             root,
-            updates: None,
             buffers: ArenaTrieBuffers::default(),
             parallelism_thresholds: ArenaParallelismThresholds::default(),
             #[cfg(feature = "trie-debug")]
@@ -2274,16 +2334,11 @@ impl SparseTrie for ArenaParallelSparseTrie {
     }
 
     fn set_updates(&mut self, retain_updates: bool) {
-        self.updates = retain_updates.then(Default::default);
         if retain_updates {
             self.buffers.updates.get_or_insert_with(SparseTrieUpdates::default).clear();
         } else {
             self.buffers.updates = None;
         }
-    }
-
-    fn reserve_nodes(&mut self, additional: usize) {
-        self.upper_arena.reserve(additional);
     }
 
     #[instrument(level = "trace", target = TRACE_TARGET, skip_all, fields(num_nodes = nodes.len()))]
@@ -2401,9 +2456,13 @@ impl SparseTrie for ArenaParallelSparseTrie {
         } else {
             use rayon::iter::{IntoParallelRefMutIterator, ParallelIterator};
 
+            let parent_span = tracing::Span::current();
             let results: Vec<SparseTrieResult<()>> = taken
                 .par_iter_mut()
-                .map(|(_, subtrie, node_vec)| subtrie.reveal_nodes(node_vec))
+                .map(|(_, subtrie, node_vec)| {
+                    let _guard = parent_span.enter();
+                    subtrie.reveal_nodes(node_vec)
+                })
                 .collect();
 
             if let Some(err) = results.into_iter().find(|r| r.is_err()) {
@@ -2433,18 +2492,11 @@ impl SparseTrie for ArenaParallelSparseTrie {
 
         self.update_subtrie_hashes();
 
-        // Merge buffered subtrie updates into self.updates before hashing the upper trie,
-        // which will add its own updates directly into self.updates.
-        Self::merge_subtrie_updates(&mut self.updates, &mut self.buffers.updates);
-
         let rlp_node = Self::update_cached_rlp(
             &mut self.upper_arena,
             self.root,
-            &mut self.buffers.cursor,
-            &mut self.buffers.rlp_buf,
-            &mut self.buffers.rlp_node_buf,
             Nibbles::default(),
-            &mut self.updates,
+            &mut self.buffers,
         );
 
         rlp_node.as_hash().expect("root RlpNode must be a hash")
@@ -2466,8 +2518,7 @@ impl SparseTrie for ArenaParallelSparseTrie {
             return;
         }
 
-        // Count total dirty leaves across all subtries to make a global parallelism
-        // decision, matching the approach in ParallelSparseTrie.
+        // Count total dirty leaves across all subtries to make one global parallelism decision.
         let mut total_dirty_leaves: u64 = 0;
         let mut taken: Vec<(Index, Box<ArenaSparseSubtrie>)> = Vec::new();
         for (idx, node) in &mut self.upper_arena {
@@ -2484,8 +2535,7 @@ impl SparseTrie for ArenaParallelSparseTrie {
             taken.push((idx, subtrie));
         }
 
-        // Hash taken subtries: in parallel if total dirty leaves meet the threshold,
-        // otherwise serially. This mirrors ParallelSparseTrie's all-or-nothing approach.
+        // Hash taken subtries in parallel if total dirty leaves meet the threshold.
         if !taken.is_empty() {
             if taken.len() == 1 || total_dirty_leaves < self.parallelism_thresholds.min_dirty_leaves
             {
@@ -2495,9 +2545,11 @@ impl SparseTrie for ArenaParallelSparseTrie {
             } else {
                 use rayon::iter::{IntoParallelIterator, ParallelIterator};
 
+                let parent_span = tracing::Span::current();
                 taken = taken
                     .into_par_iter()
                     .map(|(idx, mut subtrie)| {
+                        let _guard = parent_span.enter();
                         subtrie.update_cached_rlp();
                         (idx, subtrie)
                     })
@@ -2561,13 +2613,16 @@ impl SparseTrie for ArenaParallelSparseTrie {
     }
 
     fn updates_ref(&self) -> Cow<'_, SparseTrieUpdates> {
-        self.updates.as_ref().map_or(Cow::Owned(SparseTrieUpdates::default()), Cow::Borrowed)
+        self.buffers
+            .updates
+            .as_ref()
+            .map_or(Cow::Owned(SparseTrieUpdates::default()), Cow::Borrowed)
     }
 
     fn take_updates(&mut self) -> SparseTrieUpdates {
-        match self.updates.take() {
+        match self.buffers.updates.take() {
             Some(updates) => {
-                self.updates = Some(SparseTrieUpdates::with_capacity(
+                self.buffers.updates = Some(SparseTrieUpdates::with_capacity(
                     updates.updated_nodes.len(),
                     updates.removed_nodes.len(),
                 ));
@@ -2581,7 +2636,7 @@ impl SparseTrie for ArenaParallelSparseTrie {
     fn wipe(&mut self) {
         trace!(target: TRACE_TARGET, "Wiping arena trie");
         self.clear();
-        self.updates = self.updates.is_some().then(SparseTrieUpdates::wiped);
+        self.buffers.updates = self.buffers.updates.is_some().then(SparseTrieUpdates::wiped);
     }
 
     #[instrument(level = "trace", target = TRACE_TARGET, skip_all)]
@@ -2591,18 +2646,7 @@ impl SparseTrie for ArenaParallelSparseTrie {
 
         self.upper_arena = SlotMap::new();
         self.root = self.upper_arena.insert(ArenaSparseNode::EmptyRoot);
-        if let Some(updates) = self.updates.as_mut() {
-            updates.clear()
-        }
         self.buffers.clear();
-    }
-
-    fn shrink_nodes_to(&mut self, _size: usize) {
-        // Subtries are recreated from scratch on each block, so there is nothing to shrink.
-    }
-
-    fn shrink_values_to(&mut self, _size: usize) {
-        // Values are stored inline in nodes; no separate value storage.
     }
 
     fn size_hint(&self) -> usize {
@@ -2651,8 +2695,10 @@ impl SparseTrie for ArenaParallelSparseTrie {
             return 0;
         }
 
-        let mut retained_leaves = retained_leaves.to_vec();
-        retained_leaves.sort_unstable();
+        debug_assert!(
+            retained_leaves.windows(2).all(|w| w[0] <= w[1]),
+            "retained_leaves must be sorted"
+        );
 
         let threshold = self.parallelism_thresholds.min_leaves_for_prune;
 
@@ -2683,6 +2729,12 @@ impl SparseTrie for ArenaParallelSparseTrie {
             let head = cursor.head().expect("cursor is non-empty");
             let head_idx = head.index;
             let head_path = head.path;
+            let protected_by_retained_parent = if cursor.depth() == 0 {
+                false
+            } else {
+                let parent_path = cursor.parent().expect("cursor must have a parent").path;
+                !prefix_range(retained_leaves, 0, &parent_path).is_empty()
+            };
 
             match &self.upper_arena[head_idx] {
                 ArenaSparseNode::Branch(_) | ArenaSparseNode::Leaf { .. } => {
@@ -2691,13 +2743,12 @@ impl SparseTrie for ArenaParallelSparseTrie {
                         continue;
                     }
 
-                    let short_key =
-                        self.upper_arena[head_idx].short_key().expect("must be branch or leaf");
-                    let mut node_prefix = head_path;
-                    node_prefix.extend(short_key);
-
-                    let range = prefix_range(&retained_leaves, 0, &node_prefix);
+                    let range = prefix_range(retained_leaves, 0, &head_path);
                     if !range.is_empty() {
+                        continue;
+                    }
+
+                    if protected_by_retained_parent {
                         continue;
                     }
 
@@ -2710,10 +2761,19 @@ impl SparseTrie for ArenaParallelSparseTrie {
                     pruned += 1;
                 }
                 ArenaSparseNode::Subtrie(_) => {
-                    let subtrie_range = prefix_range(&retained_leaves, retained_idx, &head_path);
+                    let subtrie_range = prefix_range(retained_leaves, retained_idx, &head_path);
                     retained_idx = subtrie_range.end;
 
                     if subtrie_range.is_empty() {
+                        if protected_by_retained_parent {
+                            let ArenaSparseNode::Subtrie(subtrie) = &mut self.upper_arena[head_idx]
+                            else {
+                                unreachable!()
+                            };
+                            pruned += subtrie.prune(&[]);
+                            continue;
+                        }
+
                         let removed = Self::remove_pruned_node(
                             &mut self.upper_arena,
                             &cursor,
@@ -2742,7 +2802,7 @@ impl SparseTrie for ArenaParallelSparseTrie {
                         else {
                             unreachable!()
                         };
-                        pruned += subtrie.prune(&retained_leaves[subtrie_range]);
+                        pruned += subtrie.prune(retained_leaves[subtrie_range].iter());
                     }
                 }
                 _ => unreachable!("NonBranch in prune walk must be Subtrie, Leaf, or Branch"),
@@ -2755,13 +2815,24 @@ impl SparseTrie for ArenaParallelSparseTrie {
             // Prune taken subtries, in parallel if more than one.
             if taken.len() == 1 {
                 let (_, ref mut subtrie, ref range) = taken[0];
-                pruned += subtrie.prune(&retained_leaves[range.clone()]);
+                pruned += subtrie.prune(retained_leaves[range.clone()].iter());
             } else {
                 use rayon::iter::{IntoParallelRefMutIterator, ParallelIterator};
 
+                let parent_span = tracing::Span::current();
                 pruned += taken
                     .par_iter_mut()
-                    .map(|(_, subtrie, range)| subtrie.prune(&retained_leaves[range.clone()]))
+                    .map(|(_, subtrie, range)| {
+                        let _guard = parent_span.enter();
+                        let _span = tracing::trace_span!(
+                            target: TRACE_TARGET,
+                            "subtrie_prune",
+                            subtrie = ?subtrie.path,
+                        )
+                        .entered();
+
+                        subtrie.prune(retained_leaves[range.clone()].iter())
+                    })
                     .sum::<usize>();
             }
 
@@ -2808,6 +2879,7 @@ impl SparseTrie for ArenaParallelSparseTrie {
         sorted.sort_unstable_by_key(|entry| entry.1);
 
         let threshold = self.parallelism_thresholds.min_updates;
+        let parallelize_distributed_updates = sorted.len() >= threshold.saturating_mul(4);
 
         let mut cursor = mem::take(&mut self.buffers.cursor);
         cursor.reset(&self.upper_arena, self.root, Nibbles::default());
@@ -2885,7 +2957,9 @@ impl SparseTrie for ArenaParallelSparseTrie {
                     let might_empty_subtrie =
                         all_removals && num_subtrie_updates as u64 >= subtrie_num_leaves;
 
-                    if num_subtrie_updates >= threshold && !might_empty_subtrie {
+                    if (num_subtrie_updates >= threshold || parallelize_distributed_updates) &&
+                        !might_empty_subtrie
+                    {
                         // Take subtrie for parallel update.
                         trace!(target: TRACE_TARGET, ?subtrie_root_path, num_subtrie_updates, "Taking subtrie for parallel update");
                         let ArenaSparseNode::Subtrie(subtrie) = mem::replace(
@@ -3023,7 +3097,9 @@ impl SparseTrie for ArenaParallelSparseTrie {
         } else {
             use rayon::iter::{IntoParallelRefMutIterator, ParallelIterator};
 
+            let parent_span = tracing::Span::current();
             taken.par_iter_mut().for_each(|(_, subtrie, range)| {
+                let _guard = parent_span.enter();
                 subtrie.update_leaves(&sorted[range.clone()]);
             });
         }
@@ -3102,14 +3178,6 @@ impl SparseTrie for ArenaParallelSparseTrie {
     #[cfg(feature = "trie-debug")]
     fn take_debug_recorder(&mut self) -> TrieDebugRecorder {
         core::mem::take(&mut self.debug_recorder)
-    }
-
-    fn commit_updates(
-        &mut self,
-        _updated: &HashMap<Nibbles, BranchNodeCompact>,
-        _removed: &HashSet<Nibbles>,
-    ) {
-        // no-op for arena trie
     }
 }
 
@@ -3312,7 +3380,8 @@ mod tests {
             let num_retain = if all_storage_keys.is_empty() { 0 } else {
                 rng.random_range(0..=all_storage_keys.len())
             };
-            let retained: Vec<Nibbles> = all_storage_keys[..num_retain].to_vec();
+            let mut retained: Vec<Nibbles> = all_storage_keys[..num_retain].to_vec();
+            retained.sort_unstable();
             apst.prune(&retained);
 
             let changeset2 = build_changeset(harness.storage(), changeset2_new_keys, overlap_pct, delete_pct, &mut rng);

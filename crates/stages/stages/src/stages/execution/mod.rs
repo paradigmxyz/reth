@@ -41,7 +41,9 @@ use tracing::*;
 
 use super::missing_static_data_error;
 
-mod slot_preimages;
+/// Slot-preimage database for recovering plain storage keys from hashed keys during
+/// pre-Cancun `SELFDESTRUCT` handling.
+pub mod slot_preimages;
 
 /// The execution stage executes all transactions and
 /// update history indexes.

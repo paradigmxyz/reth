@@ -20,7 +20,7 @@ use reth_primitives_traits::Account;
 #[cfg(feature = "rayon")]
 use rayon::prelude::{FromParallelIterator, IntoParallelIterator, ParallelIterator};
 
-use revm_database::{AccountStatus, BundleAccount};
+use revm::database::{AccountStatus, BundleAccount};
 
 /// In-memory hashed state that stores account and storage changes with keccak256-hashed keys in
 /// hash maps.
@@ -914,8 +914,10 @@ mod tests {
     use super::*;
     use crate::KeccakKeyHasher;
     use alloy_primitives::Bytes;
-    use revm_database::{states::StorageSlot, StorageWithOriginalValues};
-    use revm_state::{AccountInfo, Bytecode};
+    use revm::{
+        database::{states::StorageSlot, StorageWithOriginalValues},
+        state::{AccountInfo, Bytecode},
+    };
 
     #[test]
     fn hashed_storage_proves_post_state_empty() {

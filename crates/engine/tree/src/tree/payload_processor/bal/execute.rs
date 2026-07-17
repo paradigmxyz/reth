@@ -25,20 +25,15 @@ use alloy_evm::{
 };
 use alloy_primitives::Address;
 use crossbeam_channel::{Receiver, Sender};
-use reth_evm::{
-    execute::{fill_block_access_list_storage_roots, ExecutableTxFor},
-    ConfigureEvm, Database, EvmEnvFor, ExecutionCtxFor,
-};
+use reth_evm::{execute::ExecutableTxFor, ConfigureEvm, Database, EvmEnvFor, ExecutionCtxFor};
 use reth_primitives_traits::ReceiptTy;
-use reth_provider::{BlockExecutionOutput, StorageRootProvider};
+use reth_provider::BlockExecutionOutput;
 use reth_tasks::Runtime;
 use revm::{
-    bytecode::BytecodeDecodeError,
     context::{result::ResultAndState, Block},
     database::{states::bundle_state::BundleRetention, State},
+    state::bal::Bal as RevmBal,
 };
-use revm_primitives::hardfork::SpecId;
-use revm_state::bal::Bal as RevmBal;
 use std::sync::Arc;
 
 use crate::tree::payload_processor::receipt_root_task::IndexedReceipt;
@@ -55,7 +50,6 @@ pub fn execute_block<'a, Evm, Tx, Err, DB, MakeDb>(
     transaction_count: usize,
     txs: Receiver<(usize, Result<Tx, Err>)>,
     receipt_tx: Sender<IndexedReceipt<ReceiptTy<Evm::Primitives>>>,
-    storage_root_provider: Option<&'a dyn StorageRootProvider>,
 ) -> Result<
     (BlockExecutionOutput<ReceiptTy<Evm::Primitives>>, Vec<Address>, BlockAccessList),
     BalExecutionError,
@@ -83,7 +77,6 @@ where
             txs,
             receipt_tx,
             worker_count,
-            storage_root_provider,
         )
     })
 }
@@ -100,7 +93,6 @@ fn execute_block_inner<'scope, Evm, Tx, Err, DB, MakeDb>(
     txs: Receiver<(usize, Result<Tx, Err>)>,
     receipt_tx: Sender<IndexedReceipt<ReceiptTy<Evm::Primitives>>>,
     worker_count: usize,
-    storage_root_provider: Option<&'scope dyn StorageRootProvider>,
 ) -> Result<
     (BlockExecutionOutput<ReceiptTy<Evm::Primitives>>, Vec<Address>, BlockAccessList),
     BalExecutionError,
@@ -119,7 +111,6 @@ where
     let block_gas_limit = evm_env.block_env.gas_limit();
     let enable_amsterdam_eip8037 = evm_env.cfg_env.enable_amsterdam_eip8037;
     let tx_gas_limit_cap = evm_env.cfg_env.tx_gas_limit_cap;
-    let is_bogota_active = Into::<SpecId>::into(*evm_env.spec_id()).is_enabled_in(SpecId::BOGOTA);
     let mut canonical_state = State::builder()
         .with_database(make_db(false)?)
         .with_bundle_update()
@@ -179,12 +170,7 @@ where
         (block_result, senders)
     };
 
-    let built_bal = take_built_bal_and_validate(
-        &mut canonical_state,
-        bal,
-        is_bogota_active,
-        storage_root_provider,
-    )?;
+    let built_bal = take_built_bal_and_log_divergence(&mut canonical_state, bal);
 
     canonical_state.merge_transitions(BundleRetention::Reverts);
     Ok((
@@ -194,7 +180,7 @@ where
     ))
 }
 
-fn convert_alloy_to_revm_bal(bal: &AlloyBal) -> Result<Arc<RevmBal>, BalExecutionError> {
+fn convert_alloy_to_revm_bal(alloy_bal: &AlloyBal) -> Result<Arc<RevmBal>, BalExecutionError> {
     // Convert the BAL from alloy to a BAL that can be consumed by revm, that is more amenable
     // for state lookups.
     //
@@ -207,9 +193,7 @@ fn convert_alloy_to_revm_bal(bal: &AlloyBal) -> Result<Arc<RevmBal>, BalExecutio
     // is triggered then the execution is reverted, and as such no actual code change event takes
     // place. Therefore, if we do observe such a bytecode in a BAL then that means the BAL is
     // invalid as no legal execution should've led to this bytecode deployment.
-    let alloy_bal: Vec<_> = Vec::<_>::from(bal.clone());
-    let received_bal_revm = RevmBal::try_from(alloy_bal).map_err(|e| {
-        let e: BytecodeDecodeError = e;
+    let received_bal_revm = RevmBal::clone_from_alloy(alloy_bal.as_vec()).map_err(|e| {
         BalExecutionError::Consensus(reth_consensus::ConsensusError::BlockAccessListInvalid(
             format!("{e:?}"),
         ))
@@ -217,29 +201,14 @@ fn convert_alloy_to_revm_bal(bal: &AlloyBal) -> Result<Arc<RevmBal>, BalExecutio
     Ok(Arc::new(received_bal_revm))
 }
 
-fn take_built_bal_and_validate<DB>(
+fn take_built_bal_and_log_divergence<DB>(
     canonical_state: &mut State<DB>,
     received_bal: &AlloyBal,
-    is_bogota_active: bool,
-    storage_root_provider: Option<&dyn StorageRootProvider>,
-) -> Result<BlockAccessList, BalExecutionError>
+) -> BlockAccessList
 where
     DB: Database,
 {
-    let mut built_bal = canonical_state.take_built_alloy_bal().expect("with_bal_builder set");
-    if is_bogota_active {
-        if let Some(storage_root_provider) = storage_root_provider {
-            fill_block_access_list_storage_roots(
-                &mut built_bal,
-                canonical_state,
-                storage_root_provider,
-            )?;
-        }
-        // Validate that the built BAL matches the received BAL in terms of storage roots for
-        // accounts that specify them.(eip 8268)
-        validate_storage_roots(received_bal.as_slice(), built_bal.as_slice())?;
-    }
-
+    let built_bal = canonical_state.take_built_alloy_bal().expect("with_bal_builder set");
     if tracing::enabled!(target: "engine::tree::payload_processor::bal", tracing::Level::DEBUG) &&
         built_bal.as_slice() != received_bal.as_slice()
     {
@@ -255,37 +224,7 @@ where
         );
     }
 
-    Ok(built_bal)
-}
-
-/// Validates that for every account in the received BAL, the storage root matches the storage
-/// root(Bogota hardfork)
-fn validate_storage_roots(
-    received_bal: &[alloy_eip7928::AccountChanges],
-    built_bal: &[alloy_eip7928::AccountChanges],
-) -> Result<(), BalExecutionError> {
-    for received_account in received_bal {
-        let Some(received_storage_root) = received_account.storage_root() else { continue };
-        let built_storage_root = built_bal
-            .iter()
-            .find(|built_account| built_account.address() == received_account.address())
-            .and_then(|built_account| built_account.storage_root());
-
-        if built_storage_root != Some(received_storage_root) {
-            return Err(BalExecutionError::Consensus(
-                reth_consensus::ConsensusError::BlockAccessListInvalid(format!(
-                    "storage root mismatch for account {}: got {}, expected {}",
-                    received_account.address(),
-                    received_storage_root,
-                    built_storage_root
-                        .map(|root| root.to_string())
-                        .unwrap_or_else(|| "none".to_string())
-                )),
-            ));
-        }
-    }
-
-    Ok(())
+    built_bal
 }
 
 /// Closes the abort channel on drop, waking scoped workers before the scope exits.
@@ -570,7 +509,6 @@ mod tests {
             transaction_count,
             tx_stream(txs),
             receipt_tx,
-            None,
         )
         .map(|(output, _, built_bal)| (output, built_bal))
     }
@@ -985,12 +923,11 @@ mod tests {
         // Deploys `0x60006000fd` (PUSH1 0 PUSH1 0 REVERT) at `revert_contract`. Sender calls
         // it; the call reverts; fees + nonce still apply.
         use alloy_consensus::TxLegacy;
-        use alloy_primitives::{Bytes, TxKind};
+        use alloy_primitives::{keccak256, Bytes, TxKind};
         use reth_chainspec::MAINNET;
         use reth_ethereum_primitives::Transaction;
         use reth_primitives_traits::crypto::secp256k1::public_key_to_address;
         use reth_testing_utils::generators::{generate_key, rng, sign_tx_with_key_pair};
-        use revm::primitives::keccak256;
 
         let evm_config = EthEvmConfig::mainnet();
         let revert_contract: alloy_primitives::Address =
@@ -1043,12 +980,11 @@ mod tests {
         //
         // Bytecode: PUSH1 0x42, PUSH1 0x00, SSTORE, STOP → `0x60 0x42 0x60 0x00 0x55 0x00`.
         use alloy_consensus::TxLegacy;
-        use alloy_primitives::{Bytes, TxKind};
+        use alloy_primitives::{keccak256, Bytes, TxKind};
         use reth_chainspec::MAINNET;
         use reth_ethereum_primitives::Transaction;
         use reth_primitives_traits::crypto::secp256k1::public_key_to_address;
         use reth_testing_utils::generators::{generate_key, rng, sign_tx_with_key_pair};
-        use revm::primitives::keccak256;
 
         let evm_config = EthEvmConfig::mainnet();
         let sstore_contract: alloy_primitives::Address =
@@ -1091,85 +1027,6 @@ mod tests {
         );
 
         assert_shadow_equal(evm_config, db, empty_amsterdam_block(B256::ZERO), vec![tx]);
-    }
-
-    #[test]
-    fn rejects_account_changes_with_wrong_storage_root() {
-        use alloy_consensus::TxLegacy;
-        use alloy_primitives::{Bytes, TxKind};
-        use reth_chainspec::{ChainSpecBuilder, MAINNET};
-        use reth_ethereum_primitives::Transaction;
-        use reth_primitives_traits::crypto::secp256k1::public_key_to_address;
-        use reth_testing_utils::generators::{generate_key, rng, sign_tx_with_key_pair};
-        use revm::primitives::keccak256;
-
-        let evm_config = EthEvmConfig::new(Arc::new(
-            ChainSpecBuilder::from(&*MAINNET).bogota_activated().build(),
-        ));
-        let sstore_contract = alloy_primitives::Address::from([0x55; 20]);
-        let sender_balance = U256::from(alloy_consensus::constants::ETH_TO_WEI);
-
-        let alice_kp = generate_key(&mut rng());
-        let alice = public_key_to_address(alice_kp.public_key());
-
-        let sstore_code = Bytes::from_static(&[0x60, 0x42, 0x60, 0x00, 0x55, 0x00]);
-        let code_hash = keccak256(&sstore_code);
-        let mut db = system_contracts_db();
-        insert_funded(&mut db, alice, sender_balance);
-        db.insert_account_info(
-            sstore_contract,
-            AccountInfo {
-                nonce: 1,
-                balance: U256::ZERO,
-                code_hash,
-                code: Some(Bytecode::new_raw(sstore_code)),
-                account_id: None,
-            },
-        );
-
-        let tx = Recovered::new_unchecked(
-            sign_tx_with_key_pair(
-                alice_kp,
-                Transaction::Legacy(TxLegacy {
-                    chain_id: Some(MAINNET.chain.id()),
-                    nonce: 0,
-                    gas_price: 1,
-                    gas_limit: 100_000,
-                    to: TxKind::Call(sstore_contract),
-                    value: U256::ZERO,
-                    input: Default::default(),
-                }),
-            ),
-            alice,
-        );
-
-        let block_for_ref = empty_amsterdam_block(B256::ZERO);
-        let mut tampered_bal =
-            reference_bal_for_block(&evm_config, db.clone(), &block_for_ref, vec![tx.clone()]);
-        let account = tampered_bal
-            .iter_mut()
-            .find(|account| account.address() == sstore_contract)
-            .expect("SSTORE contract must be present in BAL");
-        account.storage_root = Some(alloy_eip7928::StorageRoot::Root(B256::from([0x99; 32])));
-
-        let tampered_hash = alloy_eip7928::compute_block_access_list_hash(&tampered_bal);
-        let block = empty_amsterdam_block(tampered_hash);
-
-        let result = run_execute_block(
-            &Runtime::test(),
-            evm_config,
-            db_factory(db),
-            to_arc_decoded(tampered_bal),
-            &block,
-            vec![tx],
-        );
-
-        assert!(matches!(
-            result,
-            Err(BalExecutionError::Consensus(
-                reth_consensus::ConsensusError::BlockAccessListInvalid(_)
-            ))
-        ));
     }
 
     #[test]
@@ -1277,7 +1134,6 @@ mod tests {
             1, // transaction_count = 1 → exactly one worker spawned
             tx_rx,
             receipt_tx,
-            None,
         );
 
         assert!(
@@ -1291,10 +1147,12 @@ mod tests {
         // All-state-gas results keep block_regular_gas_used at 0, so a second tx that fits
         // within the block limit but not the remaining cumulative budget proves that
         // non-Amsterdam reads cumulative_tx_gas_used while Amsterdam does not.
-        use revm::context::result::{
-            ExecResultAndState, ExecutionResult, Output, ResultGas, SuccessReason,
+        use revm::{
+            context::result::{
+                ExecResultAndState, ExecutionResult, Output, ResultGas, SuccessReason,
+            },
+            state::EvmState,
         };
-        use revm_state::EvmState;
 
         let block_gas_limit = 1_000_000u64;
         let first_tx_gas = 600_000u64;
@@ -1338,8 +1196,8 @@ mod tests {
                 ExecResultAndState, ExecutionResult, Output, ResultGas, SuccessReason,
             },
             primitives::eip7825::TX_GAS_LIMIT_CAP,
+            state::EvmState,
         };
-        use revm_state::EvmState;
 
         let block_gas_limit = 30_000_000u64;
         let oversized = TX_GAS_LIMIT_CAP + 1_000_000; // 17_777_216 — above the cap

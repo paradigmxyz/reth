@@ -154,12 +154,6 @@ impl<K: fmt::Debug + Copy + Eq + hash::Hash> BucketedLfu<K> {
     pub(crate) fn keys(&self) -> impl Iterator<Item = &K> {
         self.entries.keys()
     }
-
-    /// Returns the number of retained keys.
-    #[cfg(any(test, feature = "std"))]
-    pub(crate) fn len(&self) -> usize {
-        self.entries.len()
-    }
 }
 
 #[cfg(test)]

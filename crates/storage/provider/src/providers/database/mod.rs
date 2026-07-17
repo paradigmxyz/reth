@@ -35,7 +35,7 @@ use reth_storage_api::{
 use reth_storage_errors::provider::ProviderResult;
 use reth_trie::HashedPostState;
 use reth_trie_db::ChangesetCache;
-use revm_database::BundleState;
+use revm::database::BundleState;
 use std::{
     ops::{RangeBounds, RangeInclusive},
     path::Path,
@@ -58,6 +58,7 @@ mod builder;
 pub use builder::{ProviderFactoryBuilder, ReadOnlyConfig};
 
 mod metrics;
+pub use metrics::DatabaseProviderMetrics;
 
 mod chain;
 pub use chain::*;
@@ -96,6 +97,8 @@ pub struct ProviderFactory<N: NodeTypesWithDB> {
     runtime: reth_tasks::Runtime,
     /// Minimum distance from tip required before pruning can occur.
     minimum_pruning_distance: u64,
+    /// Database provider metrics shared by providers created from this factory.
+    database_provider_metrics: Arc<DatabaseProviderMetrics>,
     /// State for on-demand syncing of `RocksDB` secondary and static file indexes.
     ///
     /// Only set for read-only factories. Can be disabled if there is no concurrent read-write
@@ -130,6 +133,7 @@ impl<N: ProviderNodeTypes> ProviderFactory<N> {
         //
         // Both factory and all providers it creates should share these cached settings.
         let legacy_settings = StorageSettings::v1();
+        let database_provider_metrics = Arc::new(DatabaseProviderMetrics::default());
         let storage_settings = DatabaseProvider::<_, N>::new(
             db.tx()?,
             chain_spec.clone(),
@@ -141,6 +145,7 @@ impl<N: ProviderNodeTypes> ProviderFactory<N> {
             ChangesetCache::new(),
             runtime.clone(),
             db.path(),
+            database_provider_metrics.clone(),
         )
         .storage_settings()?
         .unwrap_or(legacy_settings);
@@ -157,6 +162,7 @@ impl<N: ProviderNodeTypes> ProviderFactory<N> {
             bal_store: BalStoreHandle::new(InMemoryBalStore::default()),
             runtime,
             minimum_pruning_distance: MINIMUM_UNWIND_SAFE_DISTANCE,
+            database_provider_metrics,
             read_only_sync: None,
         })
     }
@@ -196,6 +202,11 @@ impl<N: NodeTypesWithDB> ProviderFactory<N> {
     pub fn with_changeset_cache(mut self, changeset_cache: ChangesetCache) -> Self {
         self.changeset_cache = changeset_cache;
         self
+    }
+
+    /// Returns the shared changeset cache.
+    pub(crate) fn changeset_cache(&self) -> ChangesetCache {
+        self.changeset_cache.clone()
     }
 
     /// Sets the minimum pruning distance for an existing [`ProviderFactory`].
@@ -390,6 +401,7 @@ impl<N: ProviderNodeTypes> ProviderFactory<N> {
             self.changeset_cache.clone(),
             self.runtime.clone(),
             self.db.path(),
+            self.database_provider_metrics.clone(),
         )
         .with_minimum_pruning_distance(self.minimum_pruning_distance))
     }
@@ -412,6 +424,7 @@ impl<N: ProviderNodeTypes> ProviderFactory<N> {
                 self.changeset_cache.clone(),
                 self.runtime.clone(),
                 self.db.path(),
+                self.database_provider_metrics.clone(),
             )
             .with_reader_txn_tracker(self.db.clone())
             .with_minimum_pruning_distance(self.minimum_pruning_distance),
@@ -439,6 +452,7 @@ impl<N: ProviderNodeTypes> ProviderFactory<N> {
             self.changeset_cache.clone(),
             self.runtime.clone(),
             self.db.path(),
+            self.database_provider_metrics.clone(),
         )
         .with_reader_txn_tracker(self.db.clone())
         .with_minimum_pruning_distance(self.minimum_pruning_distance))
@@ -973,6 +987,7 @@ where
             bal_store,
             runtime,
             minimum_pruning_distance,
+            database_provider_metrics: _,
             read_only_sync,
         } = self;
         f.debug_struct("ProviderFactory")
@@ -1009,6 +1024,7 @@ impl<N: NodeTypesWithDB> Clone for ProviderFactory<N> {
             bal_store: self.bal_store.clone(),
             runtime: self.runtime.clone(),
             minimum_pruning_distance: self.minimum_pruning_distance,
+            database_provider_metrics: self.database_provider_metrics.clone(),
             read_only_sync: self.read_only_sync.clone(),
         }
     }

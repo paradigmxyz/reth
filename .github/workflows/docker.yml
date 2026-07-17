@@ -2,7 +2,6 @@
 #
 # Triggers:
 #   - Push tag v*: builds release (RC or latest)
-#   - Schedule: builds nightly + profiling
 #   - Manual: builds git-sha or nightly
 
 name: docker
@@ -11,8 +10,6 @@ on:
   push:
     tags:
       - v*
-  schedule:
-    - cron: "0 1 * * *"
   workflow_dispatch:
     inputs:
       build_type:
@@ -41,7 +38,7 @@ jobs:
       contents: read
       id-token: write
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           persist-credentials: false
 
@@ -133,7 +130,7 @@ jobs:
     if: failure() && github.event_name == 'schedule'
     steps:
       - name: Slack Webhook Action
-        uses: rtCamp/action-slack-notify@e31e87e03dd19038e411e38ae27cbad084a90661 # v2.3.3
+        uses: rtCamp/action-slack-notify@33ca3be66c6f378fe1610fd1d5258632dbed5e58 # v2.4.0
         env:
           SLACK_COLOR: danger
           SLACK_ICON_EMOJI: ":rotating_light:"
@@ -148,7 +145,7 @@ jobs:
 
             *Action required:* Re-run the workflow or investigate the build failure.
 
-            <@U0AAA8F0JEM> investigate and re-run if flaky
+            <@U0ANX3AM5RR> investigate and re-run if flaky
           SLACK_FOOTER: "paradigmxyz/reth · docker.yml"
           MSG_MINIMAL: true
           SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK_URL }}

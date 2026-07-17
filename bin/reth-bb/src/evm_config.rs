@@ -5,10 +5,10 @@
 //! [`BigBlockData`], the executor swaps the EVM environment (block env,
 //! cfg env) and applies pre/post execution changes for each segment.
 
+use alloy_primitives::Bytes;
 pub(crate) use reth_engine_primitives::BigBlockData;
 use reth_engine_primitives::ExecutionPayload as _;
 use reth_storage_errors::any::AnyError;
-use revm_primitives::Bytes;
 
 use crate::evm::{BalIndexReader, BbBlockExecutorFactory, BbEvmPlan};
 use alloy_consensus::Header;

@@ -16,7 +16,7 @@ Reth is a high-performance Ethereum execution client written in Rust, focusing o
 4. **RPC (`crates/rpc/`)**: JSON-RPC server supporting all standard Ethereum APIs
 5. **Execution (`crates/evm/`, `crates/ethereum/`)**: Transaction execution and state transitions
 6. **Pipeline (`crates/stages/`)**: Staged sync architecture for blockchain synchronization
-7. **Trie (`crates/trie/`)**: Merkle Patricia Trie implementation with parallel state root computation
+7. **Trie (`crates/trie/`)**: Merkle Patricia Trie implementation with a sparse trie state root task and parallel proof computation
 8. **Node Builder (`crates/node/`)**: High-level node orchestration and configuration
 9. **The Consensus Engine (`crates/engine/`)**: Handles processing blocks received from the consensus layer with the Engine API (newPayload, forkchoiceUpdated)
 
