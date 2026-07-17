@@ -1,7 +1,8 @@
 # Runs benchmarks.
 #
-# The bench job replays real blocks via the Engine API against a reth node
-# backed by a local snapshot managed with schelk.
+# The bench job replays real blocks either via the Engine API or by submitting
+# their transactions to a locally mined txpool against a reth node backed by a
+# local snapshot managed with schelk.
 #
 # It runs the baseline binary and the feature (candidate) binary on the
 # same block range (snapshot recovered between runs) to compare performance.
@@ -16,6 +17,14 @@ on:
         required: false
         default: ""
         type: string
+      mode:
+        description: "Benchmark mode: Engine API blocks or RPC transactions"
+        required: false
+        default: "engine"
+        type: choice
+        options:
+          - engine
+          - rpc
       big_blocks:
         description: "Use big blocks mode: false, true, or target gas like 100M/2G"
         required: false
@@ -53,6 +62,11 @@ on:
         type: string
       wait_time:
         description: "Minimum interval between block submissions (e.g. 500ms, 1s)"
+        required: false
+        default: ""
+        type: string
+      block_time:
+        description: "RPC mode local block interval (default: 1s)"
         required: false
         default: ""
         type: string
@@ -152,12 +166,14 @@ jobs:
       reorg: ${{ steps.args.outputs.reorg }}
       bal: ${{ steps.args.outputs.bal }}
       wait-time: ${{ steps.args.outputs.wait-time }}
+      block-time: ${{ steps.args.outputs.block-time }}
       baseline-args: ${{ steps.args.outputs.baseline-args }}
       feature-args: ${{ steps.args.outputs.feature-args }}
       run-pairs: ${{ steps.args.outputs.run-pairs }}
       run-order: ${{ steps.args.outputs.run-order }}
       otlp: ${{ steps.args.outputs.otlp }}
       node-bin: ${{ steps.args.outputs.node-bin }}
+      mode: ${{ steps.args.outputs.mode }}
       comment-id: ${{ steps.ack.outputs.comment-id }}
       pr-head-sha: ${{ steps.args.outputs.pr-head-sha }}
       pr-head-ref: ${{ steps.args.outputs.pr-head-ref }}
@@ -256,7 +272,8 @@ jobs:
           script: |
             const validBalModes = new Set(['false', 'true', 'feature', 'baseline']);
             const validSlackModes = new Set(['always', 'on-win', 'on-error', 'never']);
-            const usage = '`@decofe bench [blocks=N] [big-blocks[=true|false|100M|2G]] [reorg[=N]] [bal=true|false|feature|baseline] [warmup=N] [baseline=REF] [feature=REF] [samply] [tracing-chrome] [skip-state-root] [slack=always|on-win|on-error|never] [cores=N] [run-pairs=N] [otlp=true|false] [metrics[=true|false]] [wait-time=DURATION] [baseline-args="..."] [feature-args="..."]`';
+            const validModes = new Set(['engine', 'rpc']);
+            const usage = '`@decofe bench [mode=engine|rpc] [blocks=N] [big-blocks[=true|false|100M|2G]] [reorg[=N]] [bal=true|false|feature|baseline] [warmup=N] [baseline=REF] [feature=REF] [samply] [tracing-chrome] [skip-state-root] [slack=always|on-win|on-error|never] [cores=N] [run-pairs=N] [otlp=true|false] [metrics[=true|false]] [wait-time=DURATION] [block-time=DURATION] [baseline-args="..."] [feature-args="..."]`';
             let pr, actor, blocks, warmup, baseline, feature, samply, tracingChrome, cores, bigBlocks, bal;
             let bigBlocksTargetGas = '';
             let reorg = '';
@@ -291,6 +308,7 @@ jobs:
             if (context.eventName === 'workflow_dispatch') {
               actor = '${{ github.actor }}';
               blocks = '${{ github.event.inputs.blocks }}' || '';
+              var mode = '${{ github.event.inputs.mode }}' || 'engine';
               explicitBlocks = blocks !== '';
               warmup = '${{ github.event.inputs.warmup }}' || '';
               explicitWarmup = warmup !== '';
@@ -318,6 +336,7 @@ jobs:
               var otlp = '${{ github.event.inputs.otlp }}' === 'false' ? 'false' : 'true';
               var metrics = '${{ github.event.inputs.metrics }}' === 'true' ? 'true' : 'false';
               var waitTime = '${{ github.event.inputs.wait_time }}' || '';
+              var blockTime = '${{ github.event.inputs.block_time }}' || '';
               var baselineNodeArgs = '${{ github.event.inputs.baseline_args }}' || '';
               var featureNodeArgs = '${{ github.event.inputs.feature_args }}' || '';
               var skipStateRoot = 'false';
@@ -343,10 +362,10 @@ jobs:
               const intArgs = new Set(['warmup', 'cores', 'blocks', 'run-pairs']);
               const refArgs = new Set(['baseline', 'feature']);
               const boolArgs = new Set(['samply', 'tracing-chrome', 'otlp', 'metrics', 'skip-state-root']);
-              const enumArgs = new Map([['bal', validBalModes], ['slack', validSlackModes]]);
-              const durationArgs = new Set(['wait-time']);
+              const enumArgs = new Map([['bal', validBalModes], ['slack', validSlackModes], ['mode', validModes]]);
+              const durationArgs = new Set(['wait-time', 'block-time']);
               const stringArgs = new Set(['baseline-args', 'feature-args']);
-              const defaults = { blocks: '', warmup: '', baseline: '', feature: '', samply: 'false', 'tracing-chrome': 'false', slack: 'always', 'big-blocks': 'false', reorg: '', bal: 'false', cores: '0', 'run-pairs': '', otlp: 'true', metrics: 'false', 'skip-state-root': 'false', 'wait-time': '', 'baseline-args': '', 'feature-args': '' };
+              const defaults = { mode: 'engine', blocks: '', warmup: '', baseline: '', feature: '', samply: 'false', 'tracing-chrome': 'false', slack: 'always', 'big-blocks': 'false', reorg: '', bal: 'false', cores: '0', 'run-pairs': '', otlp: 'true', metrics: 'false', 'skip-state-root': 'false', 'wait-time': '', 'block-time': '', 'baseline-args': '', 'feature-args': '' };
               const unknown = [];
               const invalid = [];
               const args = body.replace(/^(?:@decofe|derek) bench\s*/, '');
@@ -405,7 +424,7 @@ jobs:
                   if (enumArgs.get(key).has(value)) {
                     defaults[key] = value;
                   } else {
-                    invalid.push(`\`${key}=${value}\` (must be true, false, feature, or baseline)`);
+                    invalid.push(`\`${key}=${value}\` (must be one of: ${[...enumArgs.get(key)].join(', ')})`);
                   }
                 } else if (intArgs.has(key)) {
                   if (!/^\d+$/.test(value)) {
@@ -443,6 +462,7 @@ jobs:
                 return;
               }
               blocks = defaults.blocks;
+              var mode = defaults.mode;
               warmup = defaults.warmup;
               baseline = defaults.baseline;
               feature = defaults.feature;
@@ -459,6 +479,7 @@ jobs:
               var otlp = defaults.otlp;
               var metrics = defaults.metrics;
               var waitTime = defaults['wait-time'];
+              var blockTime = defaults['block-time'];
               var baselineNodeArgs = defaults['baseline-args'];
               var featureNodeArgs = defaults['feature-args'];
               var skipStateRoot = defaults['skip-state-root'];
@@ -496,6 +517,25 @@ jobs:
             if (!validBalModes.has(bal)) {
               core.setFailed(`Invalid bal mode: ${bal}`);
               return;
+            }
+            if (!validModes.has(mode)) {
+              core.setFailed(`Invalid benchmark mode: ${mode}`);
+              return;
+            }
+            if (mode === 'rpc' && (isBigBlocks || reorg || bal !== 'false')) {
+              core.setFailed('RPC mode does not support big-blocks, reorg, or BAL');
+              return;
+            }
+            if (mode === 'engine' && blockTime) {
+              core.setFailed('block-time is only supported in RPC mode');
+              return;
+            }
+            if (mode === 'rpc' && waitTime) {
+              core.setFailed('wait-time is only supported in Engine mode');
+              return;
+            }
+            if (mode === 'rpc' && !blockTime) {
+              blockTime = '1s';
             }
 
             const releaseRef = (ref) => /^v\d+\.\d+\.\d+/.test(ref || '');
@@ -539,6 +579,7 @@ jobs:
             core.setOutput('reorg', reorg);
             core.setOutput('bal', bal);
             core.setOutput('wait-time', waitTime);
+            core.setOutput('block-time', blockTime);
             core.setOutput('baseline-args', baselineNodeArgs);
             core.setOutput('feature-args', featureNodeArgs);
             core.setOutput('run-pairs', runPairs);
@@ -546,6 +587,7 @@ jobs:
             core.setOutput('otlp', otlp);
             core.setOutput('metrics', metrics);
             core.setOutput('node-bin', nodeBin);
+            core.setOutput('mode', mode);
 
       - name: Acknowledge request
         id: ack
@@ -607,6 +649,7 @@ jobs:
             const tracingChrome = '${{ steps.args.outputs.tracing-chrome }}' === 'true';
             const slack = '${{ steps.args.outputs.slack }}' || 'always';
             const bigBlocks = '${{ steps.args.outputs.big-blocks }}' === 'true';
+            const mode = '${{ steps.args.outputs.mode }}' || 'engine';
             const reorg = '${{ steps.args.outputs.reorg }}';
             const bal = '${{ steps.args.outputs.bal }}' || 'false';
             const samplyNote = samply ? ', samply: `enabled`' : '';
@@ -614,6 +657,7 @@ jobs:
             const slackNote = slack !== 'always' ? `, slack: \`${slack}\`` : '';
             const reorgNote = reorg ? `, reorg: \`${reorg}\`` : '';
             const balNote = bal !== 'false' ? `, BAL: \`${bal}\`` : '';
+            const modeNote = mode !== 'engine' ? `, mode: \`${mode}\`` : '';
             const cores = '${{ steps.args.outputs.cores }}';
             const coresNote = cores && cores !== '0' ? `, cores: \`${cores}\`` : '';
             const runPairs = '${{ steps.args.outputs.run-pairs }}' || '6';
@@ -623,12 +667,14 @@ jobs:
             const otlpNote = !otlpEnabled ? ', otlp: `disabled`' : '';
             const waitTimeVal = '${{ steps.args.outputs.wait-time }}';
             const waitTimeNote = waitTimeVal ? `, wait-time: \`${waitTimeVal}\`` : '';
+            const blockTimeVal = '${{ steps.args.outputs.block-time }}';
+            const blockTimeNote = blockTimeVal ? `, block-time: \`${blockTimeVal}\`` : '';
             const baselineArgsVal = '${{ steps.args.outputs.baseline-args }}';
             const baselineArgsNote = baselineArgsVal ? `, baseline-args: \`${baselineArgsVal}\`` : '';
             const featureArgsVal = '${{ steps.args.outputs.feature-args }}';
             const featureArgsNote = featureArgsVal ? `, feature-args: \`${featureArgsVal}\`` : '';
             const blocksDesc = bigBlocks ? `${blocks} big blocks, ${warmup} warmup blocks` : `${blocks} blocks, ${warmup} warmup blocks`;
-            const config = `**Config:** ${blocksDesc}, baseline: \`${baseline}\`, feature: \`${feature}\`${samplyNote}${tracingChromeNote}${slackNote}${reorgNote}${balNote}${coresNote}${runPairsNote}${otlpNote}${waitTimeNote}${baselineArgsNote}${featureArgsNote}`;
+            const config = `**Config:** ${blocksDesc}, baseline: \`${baseline}\`, feature: \`${feature}\`${modeNote}${samplyNote}${tracingChromeNote}${slackNote}${reorgNote}${balNote}${coresNote}${runPairsNote}${otlpNote}${waitTimeNote}${blockTimeNote}${baselineArgsNote}${featureArgsNote}`;
 
             const { data: comment } = await github.rest.issues.createComment({
               owner: context.repo.owner,
@@ -656,6 +702,7 @@ jobs:
             const tracingChrome = '${{ steps.args.outputs.tracing-chrome }}' === 'true';
             const slack = '${{ steps.args.outputs.slack }}' || 'always';
             const bigBlocks = '${{ steps.args.outputs.big-blocks }}' === 'true';
+            const mode = '${{ steps.args.outputs.mode }}' || 'engine';
             const reorg = '${{ steps.args.outputs.reorg }}';
             const bal = '${{ steps.args.outputs.bal }}' || 'false';
             const samplyNote = samply ? ', samply: `enabled`' : '';
@@ -663,6 +710,7 @@ jobs:
             const slackNote = slack !== 'always' ? `, slack: \`${slack}\`` : '';
             const reorgNote = reorg ? `, reorg: \`${reorg}\`` : '';
             const balNote = bal !== 'false' ? `, BAL: \`${bal}\`` : '';
+            const modeNote = mode !== 'engine' ? `, mode: \`${mode}\`` : '';
             const cores = '${{ steps.args.outputs.cores }}';
             const coresNote = cores && cores !== '0' ? `, cores: \`${cores}\`` : '';
             const runPairs = '${{ steps.args.outputs.run-pairs }}' || '6';
@@ -672,12 +720,14 @@ jobs:
             const otlpNote = !otlpEnabled ? ', otlp: `disabled`' : '';
             const waitTimeVal = '${{ steps.args.outputs.wait-time }}';
             const waitTimeNote = waitTimeVal ? `, wait-time: \`${waitTimeVal}\`` : '';
+            const blockTimeVal = '${{ steps.args.outputs.block-time }}';
+            const blockTimeNote = blockTimeVal ? `, block-time: \`${blockTimeVal}\`` : '';
             const baselineArgsVal = '${{ steps.args.outputs.baseline-args }}';
             const baselineArgsNote = baselineArgsVal ? `, baseline-args: \`${baselineArgsVal}\`` : '';
             const featureArgsVal = '${{ steps.args.outputs.feature-args }}';
             const featureArgsNote = featureArgsVal ? `, feature-args: \`${featureArgsVal}\`` : '';
             const blocksDesc = bigBlocks ? `${blocks} big blocks, ${warmup} warmup blocks` : `${blocks} blocks, ${warmup} warmup blocks`;
-            const config = `**Config:** ${blocksDesc}, baseline: \`${baseline}\`, feature: \`${feature}\`${samplyNote}${tracingChromeNote}${slackNote}${reorgNote}${balNote}${coresNote}${runPairsNote}${otlpNote}${waitTimeNote}${baselineArgsNote}${featureArgsNote}`;
+            const config = `**Config:** ${blocksDesc}, baseline: \`${baseline}\`, feature: \`${feature}\`${modeNote}${samplyNote}${tracingChromeNote}${slackNote}${reorgNote}${balNote}${coresNote}${runPairsNote}${otlpNote}${waitTimeNote}${blockTimeNote}${baselineArgsNote}${featureArgsNote}`;
             const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
 
             const numRunners = parseInt(process.env.BENCH_RUNNERS) || 1;
@@ -755,6 +805,7 @@ jobs:
       BENCH_REORG: ${{ needs.bench-ack.outputs.reorg }}
       BENCH_BAL: ${{ needs.bench-ack.outputs.bal }}
       BENCH_WAIT_TIME: ${{ needs.bench-ack.outputs.wait-time }}
+      BENCH_BLOCK_TIME: ${{ needs.bench-ack.outputs.block-time }}
       BENCH_BASELINE_ARGS: ${{ needs.bench-ack.outputs.baseline-args }}
       BENCH_FEATURE_ARGS: ${{ needs.bench-ack.outputs.feature-args }}
       BENCH_RUN_PAIRS: ${{ needs.bench-ack.outputs.run-pairs }}
@@ -764,6 +815,7 @@ jobs:
       BENCH_COMMENT_ID: ${{ needs.bench-ack.outputs.comment-id }}
       BENCH_SLACK: ${{ needs.bench-ack.outputs.slack }}
       BENCH_NODE_BIN: ${{ needs.bench-ack.outputs.node-bin }}
+      BENCH_EXECUTION_MODE: ${{ needs.bench-ack.outputs.mode }}
       BENCH_SNAPSHOT_MANIFEST_URL: ${{ secrets.BENCH_SNAPSHOT_MANIFEST_URL }}
       BENCH_METRICS_ADDR: "127.0.0.1:9001"
       BENCH_TARGET_METRICS_CONFIG: .github/config/bench-metrics-targets.json
@@ -827,6 +879,7 @@ jobs:
             const tracingChrome = process.env.BENCH_TRACING_CHROME === 'true';
             const slack = process.env.BENCH_SLACK || 'always';
             const bigBlocks = process.env.BENCH_BIG_BLOCKS === 'true';
+            const mode = process.env.BENCH_EXECUTION_MODE || 'engine';
             const reorg = process.env.BENCH_REORG || '';
             const bal = process.env.BENCH_BAL || 'false';
             const samplyNote = samply ? ', samply: `enabled`' : '';
@@ -834,6 +887,7 @@ jobs:
             const slackNote = slack !== 'always' ? `, slack: \`${slack}\`` : '';
             const reorgNote = reorg ? `, reorg: \`${reorg}\`` : '';
             const balNote = bal !== 'false' ? `, BAL: \`${bal}\`` : '';
+            const modeNote = mode !== 'engine' ? `, mode: \`${mode}\`` : '';
             const cores = process.env.BENCH_CORES || '0';
             const coresNote = cores && cores !== '0' ? `, cores: \`${cores}\`` : '';
             const runPairs = process.env.BENCH_RUN_PAIRS || '6';
@@ -843,12 +897,14 @@ jobs:
             const otlpNote = !otlpEnabled ? ', otlp: `disabled`' : '';
             const waitTimeVal = process.env.BENCH_WAIT_TIME || '';
             const waitTimeNote = waitTimeVal ? `, wait-time: \`${waitTimeVal}\`` : '';
+            const blockTimeVal = process.env.BENCH_BLOCK_TIME || '';
+            const blockTimeNote = blockTimeVal ? `, block-time: \`${blockTimeVal}\`` : '';
             const baselineArgsVal = process.env.BENCH_BASELINE_ARGS || '';
             const baselineArgsNote = baselineArgsVal ? `, baseline-args: \`${baselineArgsVal}\`` : '';
             const featureArgsVal = process.env.BENCH_FEATURE_ARGS || '';
             const featureArgsNote = featureArgsVal ? `, feature-args: \`${featureArgsVal}\`` : '';
             const blocksDesc = bigBlocks ? `${blocks} big blocks, ${warmup} warmup blocks` : `${blocks} blocks, ${warmup} warmup blocks`;
-            core.exportVariable('BENCH_CONFIG', `**Config:** ${blocksDesc}, baseline: \`${baseline}\`, feature: \`${feature}\`${samplyNote}${tracingChromeNote}${slackNote}${reorgNote}${balNote}${coresNote}${runPairsNote}${otlpNote}${waitTimeNote}${baselineArgsNote}${featureArgsNote}`);
+            core.exportVariable('BENCH_CONFIG', `**Config:** ${blocksDesc}, baseline: \`${baseline}\`, feature: \`${feature}\`${modeNote}${samplyNote}${tracingChromeNote}${slackNote}${reorgNote}${balNote}${coresNote}${runPairsNote}${otlpNote}${waitTimeNote}${blockTimeNote}${baselineArgsNote}${featureArgsNote}`);
 
             const { buildBody } = require('./.github/scripts/bench-update-status.js');
             await github.rest.issues.updateComment({
@@ -1165,6 +1221,7 @@ jobs:
           }
 
           derek_cmd=(derek bench)
+          [ "$BENCH_EXECUTION_MODE" != "engine" ] && derek_cmd+=(mode="$BENCH_EXECUTION_MODE")
           [ "$BENCH_BIG_BLOCKS" = "true" ] && derek_cmd+=(big-blocks="${BENCH_BIG_BLOCKS_TARGET_GAS:-true}")
           [ -n "$BENCH_REORG" ] && derek_cmd+=(reorg="$BENCH_REORG")
           derek_cmd+=(
@@ -1182,6 +1239,7 @@ jobs:
           [ "$BENCH_SAMPLY" = "true" ] && derek_cmd+=(samply)
           [ "$BENCH_TRACING_CHROME" = "true" ] && derek_cmd+=(tracing-chrome)
           [ -n "$BENCH_WAIT_TIME" ] && derek_cmd+=(wait-time="$BENCH_WAIT_TIME")
+          [ -n "$BENCH_BLOCK_TIME" ] && derek_cmd+=(block-time="$BENCH_BLOCK_TIME")
           [ -n "$BENCH_BASELINE_ARGS" ] && derek_cmd+=(baseline-args="$BENCH_BASELINE_ARGS")
           [ -n "$BENCH_FEATURE_ARGS" ] && derek_cmd+=(feature-args="$BENCH_FEATURE_ARGS")
           DEREK_BENCH_COMMAND=""
@@ -1202,7 +1260,7 @@ jobs:
           echo '{}' > "$LABELS_FILE"
           echo "BENCH_LABELS_FILE=${LABELS_FILE}" >> "$GITHUB_ENV"
 
-      # Extract txgen payloads once so they are reused across all benchmark
+      # Extract txgen payloads or transactions once so they are reused across all benchmark
       # runs instead of re-fetching from the remote RPC for every run.
       - name: Extract txgen payloads
         run: |
@@ -1491,6 +1549,7 @@ jobs:
           SUMMARY_ARGS="$SUMMARY_ARGS --baseline-csv ${BASELINE_CSVS[*]}"
           SUMMARY_ARGS="$SUMMARY_ARGS --feature-csv ${FEATURE_CSVS[*]}"
           SUMMARY_ARGS="$SUMMARY_ARGS --run-pairs ${BENCH_RUN_PAIRS:-6}"
+          SUMMARY_ARGS="$SUMMARY_ARGS --mode ${BENCH_EXECUTION_MODE:-engine}"
           if [ "$BEHIND_BASELINE" -gt 0 ]; then
             SUMMARY_ARGS="$SUMMARY_ARGS --behind-baseline $BEHIND_BASELINE"
           fi
@@ -1502,6 +1561,9 @@ jobs:
           fi
           if [ -n "${BENCH_WAIT_TIME:-}" ]; then
             SUMMARY_ARGS="$SUMMARY_ARGS --wait-time $BENCH_WAIT_TIME"
+          fi
+          if [ -n "${BENCH_BLOCK_TIME:-}" ]; then
+            SUMMARY_ARGS="$SUMMARY_ARGS --block-time $BENCH_BLOCK_TIME"
           fi
           if [ -n "${BENCH_BAL:-}" ] && [ "${BENCH_BAL}" != "false" ]; then
             SUMMARY_ARGS="$SUMMARY_ARGS --bal-mode $BENCH_BAL"
@@ -1667,7 +1729,7 @@ jobs:
             try {
               comment = fs.readFileSync(process.env.BENCH_WORK_DIR + '/comment.md', 'utf8');
             } catch (e) {
-              comment = '⚠️ Engine benchmark completed but failed to generate comparison.';
+              comment = '⚠️ Benchmark completed but failed to generate comparison.';
             }
 
             const sha = '${{ steps.push-charts.outputs.sha }}';
