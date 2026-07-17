@@ -1381,14 +1381,10 @@ where
         hash: B256,
         state: &EngineApiTreeState<N>,
     ) -> ProviderResult<Option<StateProviderBuilder<N, P>>> {
-        if let Some((historical, blocks)) = state.tree_state.blocks_by_hash(hash) {
-            debug!(target: "engine::tree::payload_validator", %hash, %historical, "found canonical state for block in memory, creating provider builder");
+        if let Some((anchor, blocks)) = state.tree_state.blocks_by_hash(hash) {
+            debug!(target: "engine::tree::payload_validator", %hash, %anchor, "found canonical state for block in memory, creating provider builder");
             // the block leads back to the canonical chain
-            return Ok(Some(StateProviderBuilder::new(
-                self.provider.clone(),
-                historical,
-                Some(blocks),
-            )))
+            return Ok(Some(StateProviderBuilder::new(self.provider.clone(), anchor, Some(blocks))))
         }
 
         // Check if the block is persisted

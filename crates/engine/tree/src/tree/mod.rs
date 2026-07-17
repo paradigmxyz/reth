@@ -103,21 +103,21 @@ const CHANGESET_CACHE_RETENTION_BLOCKS: u64 = 64;
 pub struct StateProviderBuilder<N: NodePrimitives, P> {
     /// The provider factory used to create providers.
     provider_factory: P,
-    /// The historical block hash to fetch state from.
-    historical: B256,
-    /// The blocks that form the chain from historical to target and are in memory.
+    /// The persisted block hash on which the in-memory blocks are anchored.
+    anchor: B256,
+    /// The blocks that form the chain from the anchor to target and are in memory.
     overlay: Option<Vec<ExecutedBlock<N>>>,
 }
 
 impl<N: NodePrimitives, P> StateProviderBuilder<N, P> {
-    /// Creates a new state provider from the provider factory, historical block hash and optional
+    /// Creates a new state provider from the provider factory, persisted anchor hash and optional
     /// overlaid blocks.
     pub const fn new(
         provider_factory: P,
-        historical: B256,
+        anchor: B256,
         overlay: Option<Vec<ExecutedBlock<N>>>,
     ) -> Self {
-        Self { provider_factory, historical, overlay }
+        Self { provider_factory, anchor, overlay }
     }
 }
 
@@ -127,11 +127,289 @@ where
 {
     /// Creates a new state provider from this builder.
     pub fn build(&self) -> ProviderResult<StateProviderBox> {
-        let mut provider = self.provider_factory.state_by_block_hash(self.historical)?;
-        if let Some(overlay) = self.overlay.clone() {
-            provider = Box::new(MemoryOverlayStateProvider::new(provider, overlay))
+        let Some(mut overlay) = self.overlay.clone() else {
+            return self.provider_factory.state_by_block_hash(self.anchor)
+        };
+
+        // Under partial persistence, the database exposes a hybrid latest view: state/trie data
+        // is durable through the partial-state-trie frontier while the Finish frontier can be
+        // newer. That view is a valid base only if this in-memory chain covers both frontiers.
+        // Keep every block after the state/trie frontier, including blocks through Finish, so
+        // masked state is still supplied by the in-memory provider.
+        if let Some(latest) = self.provider_factory.latest_database_state()? {
+            let state_trie_tip = latest.state_trie_tip();
+            let finish_tip = latest.finish_tip();
+            if let Some(overlay_len) = latest_database_overlay_len(
+                self.anchor,
+                overlay.len(),
+                state_trie_tip,
+                finish_tip,
+                overlay.iter().map(|block| block.recovered_block().num_hash()),
+            ) {
+                overlay.truncate(overlay_len);
+                let mut provider = latest.into_provider();
+                if !overlay.is_empty() {
+                    provider = Box::new(MemoryOverlayStateProvider::new(provider, overlay));
+                }
+                return Ok(provider)
+            }
         }
+
+        let mut provider = self.provider_factory.state_by_block_hash(self.anchor)?;
+        provider = Box::new(MemoryOverlayStateProvider::new(provider, overlay));
         Ok(provider)
+    }
+}
+
+/// Returns the number of newest in-memory blocks that must be overlaid on the latest database
+/// state when the captured chain covers both durable frontiers.
+///
+/// The anchor is treated as the virtual element immediately after the oldest in-memory block.
+/// Because `overlay` uses newest-to-oldest positions, Finish must occur at or before the state/trie
+/// frontier. The returned position excludes the state/trie frontier itself and thus retains exactly
+/// the blocks after it.
+fn latest_database_overlay_len(
+    anchor_hash: B256,
+    overlay_len: usize,
+    state_trie_tip: BlockNumHash,
+    finish_tip: BlockNumHash,
+    overlay: impl IntoIterator<Item = BlockNumHash>,
+) -> Option<usize> {
+    if state_trie_tip.number > finish_tip.number {
+        return None
+    }
+
+    let mut state_trie_position = (state_trie_tip.hash == anchor_hash).then_some(overlay_len);
+    let mut finish_position = (finish_tip.hash == anchor_hash).then_some(overlay_len);
+    for (position, block) in overlay.into_iter().enumerate() {
+        if block == state_trie_tip {
+            state_trie_position = Some(position);
+        }
+        if block == finish_tip {
+            finish_position = Some(position);
+        }
+        if state_trie_position.is_some() && finish_position.is_some() {
+            break
+        }
+    }
+
+    let state_trie_position = state_trie_position?;
+    (finish_position? <= state_trie_position).then_some(state_trie_position)
+}
+
+#[cfg(test)]
+mod state_provider_builder_tests {
+    use super::*;
+    use alloy_primitives::{keccak256, Address, U256};
+    use reth_chain_state::test_utils::TestBlockBuilder;
+    use reth_ethereum_primitives::EthPrimitives;
+    use reth_primitives_traits::Account;
+    use reth_provider::{
+        providers::BlockchainProvider, test_utils::create_test_provider_factory,
+        PruneCheckpointWriter, SaveBlocksMode, StateWriter, StorageSettings,
+    };
+    use reth_prune::{PruneCheckpoint, PruneMode, PruneSegment};
+    use reth_trie::{HashedPostStateSorted, HashedStorageSorted};
+    use revm::{database::BundleState, state::AccountInfo};
+
+    fn hash(number: u8) -> B256 {
+        B256::with_last_byte(number)
+    }
+
+    #[test]
+    fn latest_database_overlay_covers_partial_gap_and_newer_blocks() {
+        // Newest to oldest: the latest DB is at #6, state/trie data is durable through #4, and
+        // the provider must retain all of #5..=#7 rather than only the blocks after Finish.
+        let blocks = [
+            BlockNumHash::new(7, hash(7)),
+            BlockNumHash::new(6, hash(6)),
+            BlockNumHash::new(5, hash(5)),
+            BlockNumHash::new(4, hash(4)),
+            BlockNumHash::new(3, hash(3)),
+        ];
+
+        assert_eq!(
+            latest_database_overlay_len(hash(2), blocks.len(), blocks[3], blocks[1], blocks,),
+            Some(3)
+        );
+    }
+
+    #[test]
+    fn latest_database_overlay_uses_anchor_as_partial_frontier() {
+        let blocks = [
+            BlockNumHash::new(5, hash(5)),
+            BlockNumHash::new(4, hash(4)),
+            BlockNumHash::new(3, hash(3)),
+        ];
+
+        assert_eq!(
+            latest_database_overlay_len(
+                hash(2),
+                blocks.len(),
+                BlockNumHash::new(2, hash(2)),
+                blocks[1],
+                blocks,
+            ),
+            Some(blocks.len())
+        );
+    }
+
+    #[test]
+    fn latest_database_overlay_without_partial_gap_keeps_only_newer_blocks() {
+        let blocks = [
+            BlockNumHash::new(7, hash(7)),
+            BlockNumHash::new(6, hash(6)),
+            BlockNumHash::new(5, hash(5)),
+        ];
+
+        assert_eq!(
+            latest_database_overlay_len(hash(4), blocks.len(), blocks[1], blocks[1], blocks),
+            Some(1)
+        );
+    }
+
+    #[test]
+    fn latest_database_overlay_rejects_uncovered_finish() {
+        let blocks = [
+            BlockNumHash::new(5, hash(5)),
+            BlockNumHash::new(4, hash(4)),
+            BlockNumHash::new(3, hash(3)),
+        ];
+
+        assert_eq!(
+            latest_database_overlay_len(
+                hash(2),
+                blocks.len(),
+                blocks[1],
+                BlockNumHash::new(6, hash(6)),
+                blocks,
+            ),
+            None
+        );
+    }
+
+    #[test]
+    fn latest_database_overlay_rejects_frontiers_in_wrong_order() {
+        let blocks = [
+            BlockNumHash::new(6, hash(6)),
+            BlockNumHash::new(5, hash(5)),
+            BlockNumHash::new(4, hash(4)),
+        ];
+
+        assert_eq!(
+            latest_database_overlay_len(hash(3), blocks.len(), blocks[0], blocks[1], blocks,),
+            None
+        );
+    }
+
+    #[test]
+    fn state_provider_uses_latest_database_with_partial_gap() -> eyre::Result<()> {
+        let factory = create_test_provider_factory();
+        factory.set_storage_settings_cache(StorageSettings::v2());
+        let mut block_builder = TestBlockBuilder::eth().with_state();
+        let mut blocks = block_builder.get_executed_blocks(0..4).collect::<Vec<_>>();
+
+        // Add state changed only by block 2, which is inside the partial-state-trie-to-Finish gap.
+        // Block 3 intentionally leaves these keys alone, so these assertions distinguish an
+        // S+1..=P overlay from an incorrect Finish+1..=P overlay.
+        let masked_address = Address::with_last_byte(0xaa);
+        let masked_account = Account { nonce: 7, balance: U256::from(700), ..Default::default() };
+        let masked_slot_number = U256::from(0x33);
+        let masked_slot = B256::from(masked_slot_number);
+        let masked_value = U256::from(0x44);
+        let masked_state = BundleState::builder(2..=2)
+            .state_present_account_info(masked_address, AccountInfo::from(masked_account))
+            .revert_account_info(2, masked_address, Some(None))
+            .state_storage(
+                masked_address,
+                alloy_primitives::map::HashMap::from_iter([(
+                    masked_slot_number,
+                    (U256::ZERO, masked_value),
+                )]),
+            )
+            .revert_storage(2, masked_address, vec![(masked_slot_number, U256::ZERO)])
+            .build();
+        let mut block_two_output = (*blocks[2].execution_output).clone();
+        block_two_output.state.extend(masked_state);
+        blocks[2].execution_output = Arc::new(block_two_output);
+
+        // Keep state that is never touched by the in-memory suffix in the database. These reads
+        // must fall through the memory overlay into the raw latest database provider.
+        let database_address = Address::with_last_byte(0xdb);
+        let database_account =
+            Account { nonce: 42, balance: U256::from(1_000), ..Default::default() };
+        let database_slot = B256::with_last_byte(0x11);
+        let database_value = U256::from(0x22);
+        let hashed_address = keccak256(database_address);
+        let database_state = HashedPostStateSorted::new(
+            vec![(hashed_address, Some(database_account))],
+            B256Map::from_iter([(
+                hashed_address,
+                HashedStorageSorted {
+                    storage_slots: vec![(keccak256(database_slot), database_value)],
+                    wiped: false,
+                },
+            )]),
+        );
+
+        let provider_rw = factory.provider_rw()?;
+        provider_rw.save_blocks(vec![blocks[0].clone()], SaveBlocksMode::Full)?;
+        provider_rw.write_hashed_state(&database_state)?;
+        provider_rw.commit()?;
+
+        // Advance Finish through block 2 while leaving the full state/trie frontier at block 0.
+        // Blocks 1 and 2 are therefore part of the in-memory masking suffix.
+        let provider_rw = factory.provider_rw()?;
+        provider_rw.save_blocks_with_frontiers(&SaveBlocksInput::new(
+            blocks[1..=2].to_vec(),
+            0,
+            0,
+            2,
+            0,
+        ))?;
+
+        // Make historical reads at the block-0 anchor unusable. If StateProviderBuilder invokes
+        // the historical fallback, the database-only assertions below fail with StateAtBlockPruned.
+        let pruned_history =
+            PruneCheckpoint { block_number: Some(1), tx_number: None, prune_mode: PruneMode::Full };
+        provider_rw.save_prune_checkpoint(PruneSegment::AccountHistory, pruned_history)?;
+        provider_rw.save_prune_checkpoint(PruneSegment::StorageHistory, pruned_history)?;
+        provider_rw.commit()?;
+
+        let provider = BlockchainProvider::new(factory)?;
+        let overlay = blocks[1..].iter().rev().cloned().collect::<Vec<_>>();
+        let state = StateProviderBuilder::<EthPrimitives, _>::new(
+            provider,
+            blocks[0].recovered_block().hash(),
+            Some(overlay),
+        )
+        .build()?;
+
+        // The newest block in memory supplies state after Finish.
+        let overlay_address = block_builder.signer;
+        assert_eq!(
+            state.basic_account(&overlay_address)?,
+            blocks[3].execution_output.account(&overlay_address).expect("account changed")
+        );
+        let overlay_storage_address = Address::new([0xaa; 20]);
+        let overlay_slot = B256::from(U256::from(1));
+        assert_eq!(
+            state.storage(overlay_storage_address, overlay_slot)?,
+            blocks[3]
+                .execution_output
+                .storage(&overlay_storage_address, overlay_slot.into())
+                .map(Some)
+                .expect("storage changed")
+        );
+
+        // Block 2 supplies state inside the masking gap, even though block 3 is newer.
+        assert_eq!(state.basic_account(&masked_address)?, Some(masked_account));
+        assert_eq!(state.storage(masked_address, masked_slot)?, Some(masked_value));
+
+        assert_eq!(state.basic_account(&database_address)?, Some(database_account));
+        assert_eq!(state.storage(database_address, database_slot)?, Some(database_value));
+
+        Ok(())
     }
 }
 
@@ -3446,14 +3724,10 @@ where
     where
         P: BlockReader + StateProviderFactory + StateReader + Clone,
     {
-        if let Some((historical, blocks)) = self.state.tree_state.blocks_by_hash(hash) {
-            debug!(target: "engine::tree", %hash, %historical, "found canonical state for block in memory, creating provider builder");
+        if let Some((anchor, blocks)) = self.state.tree_state.blocks_by_hash(hash) {
+            debug!(target: "engine::tree", %hash, %anchor, "found canonical state for block in memory, creating provider builder");
             // the block leads back to the canonical chain
-            return Ok(Some(StateProviderBuilder::new(
-                self.provider.clone(),
-                historical,
-                Some(blocks),
-            )))
+            return Ok(Some(StateProviderBuilder::new(self.provider.clone(), anchor, Some(blocks))))
         }
 
         // Check if the block is persisted

@@ -1,13 +1,14 @@
 use crate::{
     providers::{
-        ConsistentProvider, OverlayBuilder, OverlayStateProvider, OverlayStateProviderFactory,
-        ProviderNodeTypes, RocksDBProvider, StaticFileProvider, StaticFileProviderRWRefMut,
+        state::overlay::database_state_frontiers, ConsistentProvider, LatestStateProvider,
+        OverlayBuilder, OverlayStateProvider, OverlayStateProviderFactory, ProviderNodeTypes,
+        RocksDBProvider, StaticFileProvider, StaticFileProviderRWRefMut,
     },
     AccountReader, BalProvider, BalStoreHandle, BlockHashReader, BlockIdReader, BlockNumReader,
     BlockReader, BlockReaderIdExt, BlockSource, CanonChainTracker, CanonStateNotifications,
     CanonStateSubscriptions, ChainSpecProvider, ChainStateBlockReader, ChangeSetReader,
-    DatabaseProviderFactory, HashedPostStateProvider, HeaderProvider, ProviderError,
-    ProviderFactory, PruneCheckpointReader, ReceiptProvider, ReceiptProviderIdExt,
+    DatabaseProviderFactory, HashedPostStateProvider, HeaderProvider, LatestDatabaseState,
+    ProviderError, ProviderFactory, PruneCheckpointReader, ReceiptProvider, ReceiptProviderIdExt,
     RocksDBProviderFactory, StageCheckpointReader, StateProviderBox, StateProviderFactory,
     StateReader, StaticFileProviderFactory, TransactionVariant, TransactionsProvider,
 };
@@ -742,6 +743,14 @@ impl<N: ProviderNodeTypes> StateProviderFactory for BlockchainProvider<N> {
         }
     }
 
+    fn latest_database_state(&self) -> ProviderResult<Option<LatestDatabaseState>> {
+        let provider = self.database.database_provider_ro()?;
+        let (state_trie_tip, finish_tip) = database_state_frontiers(&provider)?;
+        let provider = Box::new(LatestStateProvider::new(provider));
+
+        Ok(Some(LatestDatabaseState::new(provider, state_trie_tip, finish_tip)))
+    }
+
     /// Returns a [`StateProviderBox`] indexed by the given block number or tag.
     fn state_by_block_number_or_tag(
         &self,
@@ -1036,7 +1045,7 @@ mod tests {
     use reth_primitives_traits::{
         Account, Block as _, RecoveredBlock, SealedBlock, SignerRecoverable, StorageEntry,
     };
-    use reth_stages_types::{StageCheckpoint, StageId};
+    use reth_stages_types::{FinishCheckpoint, StageCheckpoint, StageId};
     use reth_storage_api::{
         BlockBodyIndicesProvider, BlockHashReader, BlockIdReader, BlockNumReader, BlockReader,
         BlockReaderIdExt, BlockSource, ChangeSetReader, DBProvider, DatabaseProviderFactory,
@@ -1992,6 +2001,45 @@ mod tests {
                 .sorted_by_key(|(address, _, _)| *address)
                 .map(|(address, account, _)| AccountBeforeTx { address, info: Some(account) })
                 .collect::<Vec<_>>()
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_latest_database_state() -> eyre::Result<()> {
+        let mut rng = generators::rng();
+        let (provider, database_blocks, in_memory_blocks, _) = provider_with_random_blocks(
+            &mut rng,
+            TEST_BLOCKS_COUNT,
+            TEST_BLOCKS_COUNT,
+            BlockRangeParams::default(),
+        )?;
+        let state_trie_tip = &database_blocks[TEST_BLOCKS_COUNT - 3];
+        let finish_tip = database_blocks.last().unwrap();
+        let first_in_memory_block = in_memory_blocks.first().unwrap();
+
+        let provider_rw = provider.database.database_provider_rw()?;
+        provider_rw.save_stage_checkpoint(
+            StageId::Finish,
+            StageCheckpoint::new(finish_tip.number).with_finish_stage_checkpoint(
+                FinishCheckpoint { partial_state_trie: Some(state_trie_tip.number) },
+            ),
+        )?;
+        provider_rw.commit()?;
+
+        let latest_database_state = provider.latest_database_state()?.unwrap();
+        assert_eq!(
+            latest_database_state.state_trie_tip(),
+            BlockNumHash::new(state_trie_tip.number, state_trie_tip.hash())
+        );
+        assert_eq!(
+            latest_database_state.finish_tip(),
+            BlockNumHash::new(finish_tip.number, finish_tip.hash())
+        );
+        assert_eq!(
+            latest_database_state.into_provider().block_hash(first_in_memory_block.number)?,
+            None
         );
 
         Ok(())

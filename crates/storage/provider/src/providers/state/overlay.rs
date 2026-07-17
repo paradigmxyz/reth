@@ -79,6 +79,35 @@ struct OverlayRevertPlan {
     overlay_anchor_hash: BlockHash,
 }
 
+/// Returns the highest blocks whose state/trie data and non-state/trie data are durably
+/// available in the database.
+pub(crate) fn database_state_frontiers<Provider>(
+    provider: &Provider,
+) -> ProviderResult<(BlockNumHash, BlockNumHash)>
+where
+    Provider: StageCheckpointReader + BlockNumReader,
+{
+    let checkpoint = provider
+        .get_stage_checkpoint(StageId::Finish)?
+        .ok_or_else(|| ProviderError::InsufficientChangesets { requested: 0, available: 0..=0 })?;
+    let state_trie_tip_number = checkpoint
+        .finish_stage_checkpoint()
+        .and_then(|finish| finish.partial_state_trie)
+        .unwrap_or(checkpoint.block_number);
+    let state_trie_tip_hash = provider
+        .convert_number(state_trie_tip_number.into())?
+        .ok_or_else(|| ProviderError::HeaderNotFound(state_trie_tip_number.into()))?;
+    let finish_tip_number = checkpoint.block_number;
+    let finish_tip_hash = provider
+        .convert_number(finish_tip_number.into())?
+        .ok_or_else(|| ProviderError::HeaderNotFound(finish_tip_number.into()))?;
+
+    Ok((
+        BlockNumHash::new(state_trie_tip_number, state_trie_tip_hash),
+        BlockNumHash::new(finish_tip_number, finish_tip_hash),
+    ))
+}
+
 /// Source of overlay data for [`OverlayStateProviderFactory`].
 #[derive(Debug, Clone)]
 pub(super) enum OverlaySource<N: NodePrimitives = EthPrimitives> {
@@ -279,36 +308,6 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
             }
             _ => false,
         }
-    }
-
-    /// Returns the highest blocks whose state/trie data and non-state/trie data are durably
-    /// available in the database.
-    fn get_db_tip_blocks<Provider>(
-        &self,
-        provider: &Provider,
-    ) -> ProviderResult<(BlockNumHash, BlockNumHash)>
-    where
-        Provider: StageCheckpointReader + BlockNumReader,
-    {
-        let checkpoint = provider.get_stage_checkpoint(StageId::Finish)?.ok_or_else(|| {
-            ProviderError::InsufficientChangesets { requested: 0, available: 0..=0 }
-        })?;
-        let state_trie_tip_number = checkpoint
-            .finish_stage_checkpoint()
-            .and_then(|finish| finish.partial_state_trie)
-            .unwrap_or(checkpoint.block_number);
-        let state_trie_tip_hash = provider
-            .convert_number(state_trie_tip_number.into())?
-            .ok_or_else(|| ProviderError::HeaderNotFound(state_trie_tip_number.into()))?;
-        let finish_tip_number = checkpoint.block_number;
-        let finish_tip_hash = provider
-            .convert_number(finish_tip_number.into())?
-            .ok_or_else(|| ProviderError::HeaderNotFound(finish_tip_number.into()))?;
-
-        Ok((
-            BlockNumHash::new(state_trie_tip_number, state_trie_tip_hash),
-            BlockNumHash::new(finish_tip_number, finish_tip_hash),
-        ))
     }
 
     /// Returns the revert plan required to expose the requested overlay base state, and validates
@@ -566,7 +565,7 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
             + BlockNumReader
             + StorageSettingsCache,
     {
-        let (state_trie_tip_block, finish_tip_block) = self.get_db_tip_blocks(provider)?;
+        let (state_trie_tip_block, finish_tip_block) = database_state_frontiers(provider)?;
         self.calculate_overlay(provider, state_trie_tip_block, finish_tip_block)
     }
 }
@@ -633,8 +632,7 @@ impl<F, N: NodePrimitives> OverlayStateProviderFactory<F, N> {
             + BlockNumReader
             + StorageSettingsCache,
     {
-        let (state_trie_tip_block, finish_tip_block) =
-            self.overlay_builder.get_db_tip_blocks(provider)?;
+        let (state_trie_tip_block, finish_tip_block) = database_state_frontiers(provider)?;
 
         let overlay =
             match self.overlay_cache.entry((state_trie_tip_block.hash, finish_tip_block.hash)) {
@@ -930,7 +928,7 @@ mod tests {
             ChangesetCache::new(),
         )
         .with_state_trie_overlay_manager(manager);
-        let (state_trie_tip, finish_tip) = builder.get_db_tip_blocks(&provider).unwrap();
+        let (state_trie_tip, finish_tip) = database_state_frontiers(&provider).unwrap();
         let plan = builder.revert_plan(&provider, state_trie_tip, finish_tip).unwrap();
 
         assert_eq!(plan.overlay_anchor_hash, blocks[1].recovered_block().hash());
