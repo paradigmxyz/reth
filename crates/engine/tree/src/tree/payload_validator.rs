@@ -788,6 +788,7 @@ where
             self.validator.validate_block_post_execution_with_hashed_state(
                 || hashed_state.get(),
                 &block,
+                &parent_block,
                 || provider_builder.build(),
             )
         });
@@ -823,6 +824,7 @@ where
                 self.validator.validate_block_post_execution_with_hashed_state(
                     || hashed_state.get(),
                     &block,
+                    &parent_block,
                     || provider_builder.build(),
                 )
             });
