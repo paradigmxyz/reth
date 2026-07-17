@@ -1,4 +1,4 @@
-use crate::{ChainSpec, DepositContract};
+use crate::{BaseFeeParamsKind, ChainSpec, DepositContract};
 use alloc::{boxed::Box, vec::Vec};
 use alloy_chains::Chain;
 use alloy_eips::{calc_next_block_base_fee, eip1559::BaseFeeParams, eip7840::BlobParams};
@@ -83,6 +83,20 @@ impl<H: BlockHeader> EthChainSpec for ChainSpec<H> {
 
     fn base_fee_params_at_timestamp(&self, timestamp: u64) -> BaseFeeParams {
         self.base_fee_params_at_timestamp(timestamp)
+    }
+
+    fn next_block_base_fee(&self, parent: &Self::Header, target_timestamp: u64) -> Option<u64> {
+        // Only applies to post-London parents, mirroring the default implementation.
+        let parent_base_fee = parent.base_fee_per_gas()?;
+        if let BaseFeeParamsKind::TestingOverride { base_fee, .. } = self.base_fee_params {
+            return Some(base_fee);
+        }
+        Some(calc_next_block_base_fee(
+            parent.gas_used(),
+            parent.gas_limit(),
+            parent_base_fee,
+            self.base_fee_params_at_timestamp(target_timestamp),
+        ))
     }
 
     fn blob_params_at_timestamp(&self, timestamp: u64) -> Option<BlobParams> {

@@ -891,6 +891,16 @@ Dev testnet:
           Parses strings using [`humantime::parse_duration`]
           --dev.payload-wait-time 450ms
 
+      --dev.constant-base-fee[=<WEI>]
+          Keep the EIP-1559 base fee constant for locally mined blocks.
+
+          Without a value, disables base fee adjustment so every mined block inherits the
+          parent's base fee. With a value (`--dev.constant-base-fee=<WEI>`), pins the base fee
+          of every mined block to that value instead.
+
+          Useful when replaying already-signed transactions whose fee caps cannot be adjusted,
+          where sustained full blocks would otherwise drive the base fee above those caps.
+
       --dev.mnemonic <MNEMONIC>
           Derive dev accounts from a fixed mnemonic instead of random ones.
 
