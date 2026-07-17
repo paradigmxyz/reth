@@ -51,7 +51,7 @@ use std::{
 use tracing::trace;
 
 /// Number of most-recent blocks whose state roots remain resolvable via
-/// [`StateRangeProviderFactory::state_range_provider`](reth_storage_api::StateRangeProviderFactory::state_range_provider).
+/// [`StateRangeProviderFactory::state_range_provider`].
 pub const SNAPSHOT_STATE_RETENTION: u64 = 128;
 
 type StateRangeDbProvider<N> = <ProviderFactory<N> as DatabaseProviderFactory>::Provider;
