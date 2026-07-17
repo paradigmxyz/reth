@@ -248,7 +248,7 @@ pub trait ConfigureEvm: Clone + Debug + Send + Sync + Unpin {
     fn txpool_prewarm_env(
         &self,
         _parent: &HeaderTy<Self::Primitives>,
-        _parent_parent: &HeaderTy<Self::Primitives>,
+        _grandparent: &HeaderTy<Self::Primitives>,
     ) -> Result<Option<EvmEnvFor<Self>>, Self::Error> {
         Ok(None)
     }

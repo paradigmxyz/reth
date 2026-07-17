@@ -2,7 +2,8 @@
 
 use alloy_primitives::B256;
 use reth_engine_tree::tree::{
-    TxPoolPrewarmSource, TxPoolPrewarmTransaction, TxPoolPrewarmTransactions,
+    TxPoolPrewarmSource as PrewarmSource, TxPoolPrewarmTransaction as Transaction,
+    TxPoolPrewarmTransactions as Transactions,
 };
 use reth_primitives_traits::{NodePrimitives, TxTy};
 use reth_transaction_pool::{
@@ -10,21 +11,21 @@ use reth_transaction_pool::{
 };
 use std::{fmt::Debug, marker::PhantomData};
 
-/// [`TransactionPool`]-backed [`TxPoolPrewarmSource`].
+/// [`TransactionPool`]-backed [`PrewarmSource`].
 #[derive(Debug)]
-pub(crate) struct TransactionPoolPrewarmSource<N: NodePrimitives, P> {
+pub(crate) struct Source<N: NodePrimitives, P> {
     pool: P,
     _marker: PhantomData<N>,
 }
 
-impl<N: NodePrimitives, P: TransactionPool> TransactionPoolPrewarmSource<N, P> {
+impl<N: NodePrimitives, P: TransactionPool> Source<N, P> {
     /// Creates a new txpool prewarm source.
     pub(crate) const fn new(pool: P) -> Self {
         Self { pool, _marker: PhantomData }
     }
 }
 
-impl<N, P> TxPoolPrewarmSource<N> for TransactionPoolPrewarmSource<N, P>
+impl<N, P> PrewarmSource<N> for Source<N, P>
 where
     N: NodePrimitives,
     P: TransactionPool<Transaction: PoolTransaction<Consensus = TxTy<N>>>
@@ -34,7 +35,7 @@ where
         + Debug
         + 'static,
 {
-    fn best_transactions(&self, parent_hash: B256) -> Option<TxPoolPrewarmTransactions<N>> {
+    fn best_transactions(&self, parent_hash: B256) -> Option<Transactions<N>> {
         let block_info = self.pool.block_info();
         if block_info.last_seen_block_hash != parent_hash {
             return None
@@ -48,7 +49,7 @@ where
         best.allow_updates_out_of_order();
         best.skip_blobs();
 
-        Some(Box::new(best.map(|transaction| TxPoolPrewarmTransaction {
+        Some(Box::new(best.map(|transaction| Transaction {
             hash: *transaction.hash(),
             sender: transaction.sender(),
             transaction: transaction.transaction.clone_into_consensus(),

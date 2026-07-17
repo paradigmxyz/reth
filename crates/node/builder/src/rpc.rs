@@ -13,8 +13,8 @@ pub use reth_rpc_builder::{
 pub use reth_trie_db::ChangesetCache;
 
 use crate::{
-    invalid_block_hook::InvalidBlockHookExt, txpool_prewarm::TransactionPoolPrewarmSource,
-    ConfigureEngineEvm, ConsensusEngineEvent, ConsensusEngineHandle,
+    invalid_block_hook::InvalidBlockHookExt, txpool_prewarm, ConfigureEngineEvm,
+    ConsensusEngineEvent, ConsensusEngineHandle,
 };
 use alloy_rpc_types::engine::ClientVersionV1;
 use alloy_rpc_types_engine::ExecutionData;
@@ -1483,7 +1483,7 @@ where
 
         if txpool_prewarming {
             validator =
-                validator.with_txpool_prewarming(TransactionPoolPrewarmSource::<
+                validator.with_txpool_prewarming(txpool_prewarm::Source::<
                     PrimitivesTy<Node::Types>,
                     _,
                 >::new(ctx.node.pool().clone()));
