@@ -3305,13 +3305,7 @@ where
         //    payloadAttributes is not null and the forkchoice state has been updated successfully.
         //    The build process is specified in the Payload building section.
 
-        let cache = if self.config.share_execution_cache_with_payload_builder() {
-            self.payload_validator.cache_for(state.head_block_hash)
-        } else {
-            None
-        };
-
-        let state_root_handle = self.payload_validator.payload_state_root_handle_for(
+        let resources = self.payload_validator.payload_builder_resources(
             state.head_block_hash,
             head,
             attributes.timestamp(),
@@ -3323,8 +3317,7 @@ where
         let pending_payload_id = self.payload_builder.send_new_payload(BuildNewPayload {
             parent_hash: state.head_block_hash,
             attributes,
-            cache,
-            state_root_handle,
+            resources,
         });
 
         // Client software MUST respond to this method call in the following way:
