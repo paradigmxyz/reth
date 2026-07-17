@@ -1064,6 +1064,8 @@ pub struct ExecutionEnv<Evm: ConfigureEvm> {
     /// Used to validate and optimize execution.
     pub decoded_bal: Option<Arc<DecodedBal>>,
     /// Latest completed txpool-prewarm snapshot for this block's parent state.
+    ///
+    /// Can be `None` if txpool prewarming is disabled or the snapshot is not ready.
     pub txpool_snapshot: Option<TxPoolPrewarmCacheSnapshot>,
 }
 

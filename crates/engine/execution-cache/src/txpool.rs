@@ -1,108 +1,11 @@
-//! Reusable cache and immutable snapshots for txpool-driven state prewarming.
+//! Immutable snapshots produced by txpool-driven state prewarming.
 
 use alloy_primitives::{
     map::{AddressMap, B256Map, HashMap},
     Address, StorageKey, StorageValue, B256,
 };
-use parking_lot::RwLock;
 use reth_primitives_traits::{Account, Bytecode};
 use std::sync::Arc;
-
-/// A mutable state-read cache reused by the txpool prewarmer between canonical heads.
-///
-/// The prewarmer is the only logical writer, although its transaction workers can fill the cache
-/// concurrently. [`Self::clear`] retains the maps' allocations for the next head.
-#[derive(Debug, Default)]
-pub struct TxPoolPrewarmCache {
-    accounts: RwLock<AddressMap<Option<Account>>>,
-    storage: RwLock<HashMap<(Address, StorageKey), StorageValue>>,
-    bytecodes: RwLock<B256Map<Option<Bytecode>>>,
-}
-
-impl TxPoolPrewarmCache {
-    /// Clears all cached state while retaining the backing allocations.
-    pub fn clear(&self) {
-        self.accounts.write().clear();
-        self.storage.write().clear();
-        self.bytecodes.write().clear();
-    }
-
-    /// Creates a deep, immutable snapshot tagged with the state hash it was warmed against.
-    ///
-    /// Callers must only snapshot at a completed prewarming-wave boundary, when no workers are
-    /// writing to the cache.
-    pub fn snapshot(&self, parent_hash: B256) -> TxPoolPrewarmCacheSnapshot {
-        TxPoolPrewarmCacheSnapshot {
-            inner: Arc::new(TxPoolPrewarmCacheSnapshotInner {
-                parent_hash,
-                accounts: self.accounts.read().clone(),
-                storage: self.storage.read().clone(),
-                bytecodes: self.bytecodes.read().clone(),
-            }),
-        }
-    }
-
-    /// Gets an account or fills it using `f`.
-    pub fn get_or_try_insert_account_with<E>(
-        &self,
-        address: Address,
-        f: impl FnOnce() -> Result<Option<Account>, E>,
-    ) -> Result<Option<Account>, E> {
-        if let Some(account) = self.accounts.read().get(&address).copied() {
-            return Ok(account)
-        }
-
-        let account = f()?;
-        let mut accounts = self.accounts.write();
-        if let Some(cached) = accounts.get(&address).copied() {
-            Ok(cached)
-        } else {
-            accounts.insert(address, account);
-            Ok(account)
-        }
-    }
-
-    /// Gets a storage value or fills it using `f`.
-    pub fn get_or_try_insert_storage_with<E>(
-        &self,
-        address: Address,
-        key: StorageKey,
-        f: impl FnOnce() -> Result<StorageValue, E>,
-    ) -> Result<StorageValue, E> {
-        if let Some(value) = self.storage.read().get(&(address, key)).copied() {
-            return Ok(value)
-        }
-
-        let value = f()?;
-        let mut storage = self.storage.write();
-        if let Some(cached) = storage.get(&(address, key)).copied() {
-            Ok(cached)
-        } else {
-            storage.insert((address, key), value);
-            Ok(value)
-        }
-    }
-
-    /// Gets bytecode or fills it using `f`.
-    pub fn get_or_try_insert_code_with<E>(
-        &self,
-        code_hash: B256,
-        f: impl FnOnce() -> Result<Option<Bytecode>, E>,
-    ) -> Result<Option<Bytecode>, E> {
-        if let Some(code) = self.bytecodes.read().get(&code_hash).cloned() {
-            return Ok(code)
-        }
-
-        let code = f()?;
-        let mut bytecodes = self.bytecodes.write();
-        if let Some(cached) = bytecodes.get(&code_hash).cloned() {
-            Ok(cached)
-        } else {
-            bytecodes.insert(code_hash, code.clone());
-            Ok(code)
-        }
-    }
-}
 
 /// A deep, immutable txpool-prewarm cache snapshot for one parent state.
 #[derive(Clone, Debug)]
@@ -111,6 +14,23 @@ pub struct TxPoolPrewarmCacheSnapshot {
 }
 
 impl TxPoolPrewarmCacheSnapshot {
+    /// Creates a snapshot from fully owned cache maps.
+    pub fn from_parts(
+        parent_hash: B256,
+        accounts: AddressMap<Option<Account>>,
+        storage: HashMap<(Address, StorageKey), StorageValue>,
+        bytecodes: B256Map<Option<Bytecode>>,
+    ) -> Self {
+        Self {
+            inner: Arc::new(TxPoolPrewarmCacheSnapshotInner {
+                parent_hash,
+                accounts,
+                storage,
+                bytecodes,
+            }),
+        }
+    }
+
     /// Returns the hash of the state this snapshot was warmed against.
     pub fn parent_hash(&self) -> B256 {
         self.inner.parent_hash

@@ -230,9 +230,9 @@ where
     fn txpool_prewarm_env(
         &self,
         parent: &Header,
-        parent_parent: &Header,
+        grandparent: &Header,
     ) -> Result<Option<EvmEnv>, Self::Error> {
-        let block_time = parent.timestamp.saturating_sub(parent_parent.timestamp);
+        let block_time = parent.timestamp.saturating_sub(grandparent.timestamp);
         self.next_evm_env(
             parent,
             &NextBlockEnvAttributes {
@@ -422,11 +422,11 @@ mod tests {
     #[test]
     fn txpool_prewarm_env_uses_parent_block_time() {
         let evm_config = EthEvmConfig::mainnet();
-        let parent_parent = Header { timestamp: 1_000, ..Default::default() };
+        let grandparent = Header { timestamp: 1_000, ..Default::default() };
         let parent = Header { timestamp: 1_007, ..Default::default() };
 
         let env = evm_config
-            .txpool_prewarm_env(&parent, &parent_parent)
+            .txpool_prewarm_env(&parent, &grandparent)
             .unwrap()
             .expect("ethereum supports txpool prewarming");
 

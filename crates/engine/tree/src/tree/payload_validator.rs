@@ -102,11 +102,10 @@ use crate::tree::{
     multiproof::{StateRootComputeOutcome, StateRootHandle},
     payload_processor::{PayloadProcessor, PayloadProcessorSpawnOptions},
     precompile_cache::{CachedPrecompile, CachedPrecompileMetrics, PrecompileCacheMap},
-    txpool_prewarm::TxPoolPrewarmHandle,
+    txpool_prewarm,
     types::{InsertPayloadResult, ValidationOutput},
-    CacheWaitDurations, CacheWaitGuard, CachedStateProvider, EngineApiMetrics, EngineApiTreeState,
-    ExecutionEnv, PayloadHandle, StateProviderBuilder, StateProviderDatabase, TreeConfig,
-    WaitForCaches,
+    CacheWaitDurations, CachedStateProvider, EngineApiMetrics, EngineApiTreeState, ExecutionEnv,
+    PayloadHandle, StateProviderBuilder, StateProviderDatabase, TreeConfig, WaitForCaches,
 };
 use alloy_consensus::transaction::{Either, TxHashRef};
 use alloy_eip7928::{bal::DecodedBal, compute_block_access_list_hash, BlockAccessList};
@@ -303,8 +302,10 @@ where
     /// Custom state root computation function.
     custom_state_root: Option<CustomStateRoot<Evm::Primitives>>,
     /// Persistent txpool prewarming worker and its latest immutable snapshot.
+    ///
+    /// None if txpool prewarming is disabled.
     #[debug(skip)]
-    txpool_prewarm: Option<TxPoolPrewarmHandle<Evm::Primitives, P, Evm>>,
+    txpool_prewarm: Option<txpool_prewarm::Handle<Evm::Primitives, P, Evm>>,
 }
 
 impl<N, P, Evm, V> BasicEngineValidator<P, Evm, V>
@@ -380,7 +381,7 @@ where
         mut self,
         source: impl crate::tree::TxPoolPrewarmSource<N> + 'static,
     ) -> Self {
-        self.txpool_prewarm = Some(TxPoolPrewarmHandle::spawn(
+        self.txpool_prewarm = Some(txpool_prewarm::Handle::spawn(
             &self.runtime,
             Arc::new(source),
             self.evm_config.clone(),
@@ -484,6 +485,7 @@ where
         Evm: ConfigureEngineEvm<T::ExecutionData, Primitives = N>,
     {
         let parent_hash = input.parent_hash();
+        let _txpool_pause = self.txpool_prewarm.as_ref().map(txpool_prewarm::Handle::pause);
         let txpool_snapshot =
             self.txpool_prewarm.as_ref().and_then(|prewarmer| prewarmer.snapshot(parent_hash));
         let _jit_pause = JitPauseGuard::new(&self.evm_config);
@@ -591,9 +593,8 @@ where
             gas_used: input.gas_used(),
             withdrawals: input.withdrawals().map(|w| w.to_vec()),
             decoded_bal: decoded_bal.as_ref().map(Arc::clone),
-            txpool_snapshot,
+            txpool_snapshot: txpool_snapshot.clone(),
         };
-        let validation_txpool_snapshot = env.txpool_snapshot.clone();
 
         // Plan the strategy used for state root computation.
         let strategy = self.plan_state_root_computation();
@@ -682,7 +683,7 @@ where
                         cache_metrics.clone(),
                         cache_stats.clone(),
                     )
-                    .with_txpool_snapshot(validation_txpool_snapshot.clone()),
+                    .with_txpool_snapshot(txpool_snapshot.clone()),
                 ) as StateProviderBox
             } else {
                 provider
@@ -2150,7 +2151,9 @@ pub trait EngineValidator<
         block: BuiltPayloadExecutedBlock<N>,
     ) -> ProviderResult<ExecutedBlock<N>>;
 
-    /// Registers the exact state for a new canonical head with background cache prewarming.
+    /// Notifies the validator that `hash` is the current canonical head.
+    ///
+    /// This may also be called when a forkchoice update reaffirms the existing head.
     fn on_canonical_head_changed(&self, _hash: B256, _state: &EngineApiTreeState<N>) {}
 
     /// Returns [`SavedCache`] for the given block hash.
@@ -2241,7 +2244,9 @@ where
     fn on_canonical_head_changed(&self, hash: B256, state: &EngineApiTreeState<N>) {
         let Some(txpool_prewarm) = self.txpool_prewarm.as_ref() else { return };
 
-        let header = match self.sealed_header_by_hash(hash, state) {
+        // Obtain the headers for both the new canonical head and its parent. Those will be used to
+        // create the txpool prewarm EVM environment as a parent and a grandparent respectively.
+        let parent = match self.sealed_header_by_hash(hash, state) {
             Ok(Some(header)) => header,
             Ok(None) => return,
             Err(err) => {
@@ -2254,46 +2259,49 @@ where
                 return
             }
         };
-        let parent_parent = match self.sealed_header_by_hash(header.parent_hash(), state) {
+        let grandparent = match self.sealed_header_by_hash(parent.parent_hash(), state) {
             Ok(Some(parent_parent)) => parent_parent,
             Ok(None) => return,
             Err(err) => {
                 trace!(
                     target: "engine::tree::txpool_prewarm",
                     %err,
-                    block_hash = ?header.hash(),
-                    parent_hash = ?header.parent_hash(),
+                    block_hash = ?parent.hash(),
+                    parent_hash = ?parent.parent_hash(),
                     "failed to fetch parent header for txpool prewarming"
                 );
                 return
             }
         };
+        let evm_env =
+            match self.evm_config.txpool_prewarm_env(parent.header(), grandparent.header()) {
+                Ok(Some(evm_env)) => evm_env,
+                Ok(None) => return,
+                Err(err) => {
+                    trace!(
+                        target: "engine::tree::txpool_prewarm",
+                        %err,
+                        block_hash = ?parent.hash(),
+                        "failed to derive canonical txpool prewarming environment"
+                    );
+                    return
+                }
+            };
 
-        let provider_builder = match self.state_provider_builder(header.hash(), state) {
+        let provider_builder = match self.state_provider_builder(parent.hash(), state) {
             Ok(Some(provider_builder)) => provider_builder,
             Ok(None) => return,
             Err(err) => {
                 trace!(
                     target: "engine::tree::txpool_prewarm",
                     %err,
-                    block_hash = ?header.hash(),
+                    block_hash = ?parent.hash(),
                     "failed to derive canonical txpool prewarming provider"
                 );
                 return
             }
         };
-        match self.evm_config.txpool_prewarm_env(header.header(), parent_parent.header()) {
-            Ok(Some(evm_env)) => txpool_prewarm.start(header.hash(), evm_env, provider_builder),
-            Ok(None) => {}
-            Err(err) => {
-                trace!(
-                    target: "engine::tree::txpool_prewarm",
-                    %err,
-                    block_hash = ?header.hash(),
-                    "failed to derive canonical txpool prewarming environment"
-                );
-            }
-        }
+        txpool_prewarm.start(parent.hash(), evm_env, provider_builder)
     }
 
     fn cache_for(&self, block_hash: B256) -> Option<SavedCache> {
