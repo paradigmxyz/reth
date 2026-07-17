@@ -1,48 +1,35 @@
 name: Cyclops audit
 
 on:
-  pull_request_target: # zizmor: ignore[dangerous-triggers] Cyclops needs privileged PR-label triggers and does not check out PR code.
+  pull_request:
     types: [labeled]
-  issue_comment: # zizmor: ignore[dangerous-triggers] Cyclops gates comment callers before using secrets.
+  issue_comment:
     types: [created]
 
 permissions: {}
 
 jobs:
-  publish-label:
-    if: github.event_name == 'pull_request_target' && (github.event.label.name == 'cyclops' || github.event.label.name == 'agentic-audit')
-    runs-on: ubuntu-latest
-    steps:
-      - name: Publish event
-        env:
-          HAS_EVENTS_ARGS: ${{ secrets.EVENTS_ARGS != '' }}
-          HAS_EVENTS_KEY: ${{ secrets.EVENTS_KEY != '' }}
-          HAS_EVENTS_CERT: ${{ secrets.EVENTS_CERT != '' }}
-        run: |
-          set -euo pipefail
+  audit:
+    if: >-
+      github.event_name == 'pull_request' &&
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      (
+        github.event.label.name == 'cyclops' ||
+        github.event.label.name == 'agentic-audit'
+      )
+    permissions:
+      contents: read
+    uses: tempoxyz/gh-actions/.github/workflows/pr-audit.yml@6024a14a8addfcc6e282d6e6f6426b8cb7cc76f9
+    with:
+      required-labels: |
+        cyclops
+        agentic-audit
+    secrets:
+      EVENTS_KEY: ${{ secrets.EVENTS_KEY }}
+      EVENTS_CERT: ${{ secrets.EVENTS_CERT }}
+      EVENTS_ARGS: ${{ secrets.EVENTS_ARGS }}
 
-          [[ "$HAS_EVENTS_ARGS" == "true" ]] || { echo "::error::Missing EVENTS_ARGS secret"; exit 1; }
-          [[ "$HAS_EVENTS_KEY" == "true" ]] || { echo "::error::Missing EVENTS_KEY secret"; exit 1; }
-          [[ "$HAS_EVENTS_CERT" == "true" ]] || { echo "::error::Missing EVENTS_CERT secret"; exit 1; }
-
-          printf '%s' '${{ secrets.EVENTS_KEY }}' > "${RUNNER_TEMP}/key"
-          printf '%s' '${{ secrets.EVENTS_CERT }}' > "${RUNNER_TEMP}/cert"
-
-          # EVENTS_ARGS may contain additional curl arguments, not just a URL.
-          curl -sf -o /dev/null -X POST ${{ secrets.EVENTS_ARGS }} \
-            -H "Content-Type: application/json" \
-            --key "${RUNNER_TEMP}/key" \
-            --cert "${RUNNER_TEMP}/cert" \
-            -d '{
-              "repository": "${{ github.repository }}",
-              "event": "pr_audit",
-              "data": {
-                "pr_number": ${{ github.event.pull_request.number }},
-                "sha": "${{ github.event.pull_request.head.sha }}"
-              }
-            }'
-
-  publish-comment:
+  audit-comment:
     if: >-
       github.event_name == 'issue_comment' &&
       github.event.issue.pull_request &&
@@ -53,301 +40,16 @@ jobs:
       )
     runs-on: ubuntu-latest
     permissions:
+      contents: read
       issues: write
-      pull-requests: write
+      pull-requests: read
     steps:
-      - name: Check commenter permission
-        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+      - uses: tempoxyz/gh-actions/actions/pr-audit-comment@6024a14a8addfcc6e282d6e6f6426b8cb7cc76f9
         with:
+          command-regex: '^(?:@decofe\s+)?(?:cyclops\s+audit|derek\s+audit)\b'
+          permission-check-mode: association
+          organization: paradigmxyz
+          events-key: ${{ secrets.EVENTS_KEY }}
+          events-cert: ${{ secrets.EVENTS_CERT }}
+          events-args: ${{ secrets.EVENTS_ARGS }}
           github-token: ${{ github.token }}
-          script: |
-            const allowed = new Set(['OWNER', 'MEMBER', 'COLLABORATOR']);
-            const commenterAssociation = context.payload.comment.author_association;
-            if (!allowed.has(commenterAssociation)) {
-              core.setFailed(`@${context.payload.comment.user.login} is not allowed to trigger Cyclops audits (${commenterAssociation})`);
-              return;
-            }
-
-            const trustedPermissions = new Set(['admin', 'maintain', 'write']);
-            const { data: pr } = await github.rest.pulls.get({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              pull_number: context.issue.number,
-            });
-            if (!allowed.has(pr.author_association)) {
-              const { data: authorPermission } = await github.rest.repos.getCollaboratorPermissionLevel({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                username: pr.user.login,
-              });
-              if (!trustedPermissions.has(authorPermission.permission)) {
-                core.setFailed(`PR author @${pr.user.login} is not allowed to trigger Cyclops audits (${pr.author_association}, ${authorPermission.permission})`);
-                return;
-              }
-            }
-
-      - name: Parse arguments
-        id: args
-        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
-        with:
-          github-token: ${{ github.token }}
-          script: |
-            const usage = [
-              '**Usage:** `cyclops audit [fast] [perf] [iterations=N] [hours=N] [config=pr-review.yaml] ',
-              '[models="anthropic/claude-opus-4-7,openai/gpt-5.5"] [run-label=LABEL] ',
-              '[dry-run] [note="per-run audit guidance"]`',
-            ].join('');
-            const body = context.payload.comment.body.trim();
-            const prefix = /^(?:@decofe\s+)?(?:cyclops\s+audit|derek\s+audit)\b/i;
-            const args = body.replace(prefix, '').trim();
-            const parts = [];
-            const argRegex = /(\S+?[=:]"[^"]*"|\S+?[=:]'[^']*'|\S+?[=:]\S+|\S+)/g;
-            let match;
-            while ((match = argRegex.exec(args)) !== null) parts.push(match[1]);
-
-            const defaults = {
-              config: '',
-              iterations: '',
-              hours: '',
-              models: '',
-              'run-label': '',
-              'dry-run': 'false',
-              perf: 'false',
-              note: '',
-            };
-            const intArgs = new Set(['iterations', 'hours']);
-            const stringArgs = new Set(['config', 'models', 'run-label', 'note']);
-            const boolArgs = new Set(['dry-run', 'perf']);
-            const unknown = [];
-            const invalid = [];
-
-            for (const part of parts) {
-              if (part === 'fast') {
-                defaults.iterations = '1';
-                continue;
-              }
-
-              const eq = part.indexOf('=');
-              const colon = part.indexOf(':');
-              const sep = eq === -1 ? colon : colon === -1 ? eq : Math.min(eq, colon);
-              if (sep === -1) {
-                if (boolArgs.has(part)) {
-                  defaults[part] = 'true';
-                } else {
-                  unknown.push(part);
-                }
-                continue;
-              }
-
-              const key = part.slice(0, sep);
-              let value = part.slice(sep + 1);
-              if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) {
-                value = value.slice(1, -1);
-              }
-
-              if (intArgs.has(key)) {
-                if (!/^[1-9]\d*$/.test(value)) {
-                  invalid.push(`\`${key}=${value}\` (must be a positive integer)`);
-                } else {
-                  defaults[key] = value;
-                }
-              } else if (boolArgs.has(key)) {
-                if (value === 'true' || value === 'false') {
-                  defaults[key] = value;
-                } else {
-                  invalid.push(`\`${key}=${value}\` (must be true or false)`);
-                }
-              } else if (stringArgs.has(key)) {
-                if (!value) {
-                  invalid.push(`\`${key}=\` (must not be empty)`);
-                } else {
-                  defaults[key] = value;
-                }
-              } else {
-                unknown.push(key);
-              }
-            }
-
-            const errors = [];
-            if (unknown.length) errors.push(`Unknown argument(s): \`${unknown.join('`, `')}\``);
-            if (invalid.length) errors.push(`Invalid value(s): ${invalid.join(', ')}`);
-            if (errors.length) {
-              const msg = `Invalid cyclops audit command\n\n${errors.join('\n')}\n\n${usage}`;
-              await github.rest.issues.createComment({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                issue_number: context.issue.number,
-                body: msg,
-              });
-              core.setFailed(msg);
-              return;
-            }
-
-            const { data: pr } = await github.rest.pulls.get({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              pull_number: context.issue.number,
-            });
-
-            const data = {
-              pr_number: context.issue.number,
-              sha: pr.head.sha,
-              source: 'comment',
-              actor: context.payload.comment.user.login,
-              comment_id: context.payload.comment.id,
-              dry_run: defaults['dry-run'] === 'true',
-            };
-            if (defaults.config) data.config = defaults.config;
-            if (defaults.iterations) data.max_iterations = Number(defaults.iterations);
-            if (defaults.hours) data.max_hours = Number(defaults.hours);
-            if (defaults.models) data.models = defaults.models;
-            if (defaults['run-label']) data.run_label = defaults['run-label'];
-            if (defaults.note) data.audit_note_b64 = Buffer.from(defaults.note, 'utf8').toString('base64');
-            if (defaults.perf === 'true') data.perf = true;
-
-            const payload = {
-              repository: `${context.repo.owner}/${context.repo.repo}`,
-              event: 'pr_audit',
-              data,
-            };
-
-            const summaryParts = [
-              defaults.config ? `config: \`${defaults.config}\`` : 'config: `default`',
-              defaults.iterations ? `iterations: \`${defaults.iterations}\`` : 'iterations: `default`',
-              defaults.hours ? `hours: \`${defaults.hours}\`` : 'hours: `default`',
-            ];
-            if (defaults.models) summaryParts.push(`models: \`${defaults.models}\``);
-            if (defaults['run-label']) summaryParts.push(`run-label: \`${defaults['run-label']}\``);
-            if (defaults['dry-run'] === 'true') summaryParts.push('dry-run: `true`');
-            if (defaults.perf === 'true') summaryParts.push('perf: `true`');
-            if (defaults.note) {
-              const note = defaults.note.replace(/`/g, "'").slice(0, 160);
-              summaryParts.push(`note: \`${note}${defaults.note.length > 160 ? '...' : ''}\``);
-            }
-
-            core.setOutput('actor', context.payload.comment.user.login);
-            core.setOutput('payload-b64', Buffer.from(JSON.stringify(payload), 'utf8').toString('base64'));
-            core.setOutput('summary', `**Config:** ${summaryParts.join(', ')}`);
-
-      - name: Check publisher configuration
-        id: publisher-config
-        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
-        env:
-          ACTOR: ${{ steps.args.outputs.actor }}
-          HAS_EVENTS_ARGS: ${{ secrets.EVENTS_ARGS != '' }}
-          HAS_EVENTS_KEY: ${{ secrets.EVENTS_KEY != '' }}
-          HAS_EVENTS_CERT: ${{ secrets.EVENTS_CERT != '' }}
-        with:
-          github-token: ${{ github.token }}
-          script: |
-            const required = {
-              EVENTS_ARGS: process.env.HAS_EVENTS_ARGS,
-              EVENTS_KEY: process.env.HAS_EVENTS_KEY,
-              EVENTS_CERT: process.env.HAS_EVENTS_CERT,
-            };
-            const missing = Object.entries(required).filter(([, present]) => present !== 'true').map(([name]) => name);
-            if (!missing.length) return;
-
-            const msg = `Cyclops audit is not configured: missing ${missing.map((name) => `\`${name}\``).join(', ')} secret${missing.length === 1 ? '' : 's'}.`;
-            try {
-              await github.rest.issues.createComment({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                issue_number: context.issue.number,
-                body: `cc @${process.env.ACTOR}\n\n${msg}`,
-              });
-            } catch (error) {
-              core.warning(`Could not create configuration failure comment: ${error.message}`);
-            }
-            core.setFailed(msg);
-
-      - name: Acknowledge request
-        id: ack
-        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
-        env:
-          ACTOR: ${{ steps.args.outputs.actor }}
-          SUMMARY: ${{ steps.args.outputs.summary }}
-        with:
-          github-token: ${{ github.token }}
-          script: |
-            try {
-              await github.rest.reactions.createForIssueComment({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                comment_id: context.payload.comment.id,
-                content: 'eyes',
-              });
-            } catch (error) {
-              core.warning(`Could not add acknowledgement reaction: ${error.message}`);
-            }
-
-            const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
-            try {
-              const { data: comment } = await github.rest.issues.createComment({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                issue_number: context.issue.number,
-                body: `cc @${process.env.ACTOR}\n\nCyclops audit event queued. [View workflow run](${runUrl})\n\n${process.env.SUMMARY}`,
-              });
-              core.setOutput('comment-id', String(comment.id));
-            } catch (error) {
-              core.warning(`Could not create acknowledgement comment: ${error.message}`);
-              core.setOutput('comment-id', '');
-            }
-
-      - name: Publish event
-        id: publish
-        continue-on-error: true
-        env:
-          PAYLOAD_B64: ${{ steps.args.outputs.payload-b64 }}
-          HAS_EVENTS_ARGS: ${{ secrets.EVENTS_ARGS != '' }}
-          HAS_EVENTS_KEY: ${{ secrets.EVENTS_KEY != '' }}
-          HAS_EVENTS_CERT: ${{ secrets.EVENTS_CERT != '' }}
-        run: |
-          set -euo pipefail
-
-          [[ "$HAS_EVENTS_ARGS" == "true" ]] || { echo "::error::Missing EVENTS_ARGS secret"; exit 1; }
-          [[ "$HAS_EVENTS_KEY" == "true" ]] || { echo "::error::Missing EVENTS_KEY secret"; exit 1; }
-          [[ "$HAS_EVENTS_CERT" == "true" ]] || { echo "::error::Missing EVENTS_CERT secret"; exit 1; }
-
-          printf '%s' '${{ secrets.EVENTS_KEY }}' > "${RUNNER_TEMP}/key"
-          printf '%s' '${{ secrets.EVENTS_CERT }}' > "${RUNNER_TEMP}/cert"
-          printf '%s' "$PAYLOAD_B64" | base64 --decode > "${RUNNER_TEMP}/pr-audit-event.json"
-
-          # EVENTS_ARGS may contain additional curl arguments, not just a URL.
-          curl -sf -o /dev/null -X POST ${{ secrets.EVENTS_ARGS }} \
-            -H "Content-Type: application/json" \
-            --key "${RUNNER_TEMP}/key" \
-            --cert "${RUNNER_TEMP}/cert" \
-            -d @"${RUNNER_TEMP}/pr-audit-event.json"
-
-      - name: Update status
-        if: ${{ always() && steps.args.outcome == 'success' && steps.publisher-config.outcome == 'success' }}
-        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
-        env:
-          COMMENT_ID: ${{ steps.ack.outputs['comment-id'] }}
-          PUBLISH_OUTCOME: ${{ steps.publish.outcome }}
-          ACTOR: ${{ steps.args.outputs.actor }}
-          SUMMARY: ${{ steps.args.outputs.summary }}
-        with:
-          github-token: ${{ github.token }}
-          script: |
-            const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
-            const success = process.env.PUBLISH_OUTCOME === 'success';
-            const body = success
-              ? `cc @${process.env.ACTOR}\n\nCyclops audit event published. [View workflow run](${runUrl})\n\n${process.env.SUMMARY}`
-              : `cc @${process.env.ACTOR}\n\nCyclops audit event failed to publish. [View workflow run](${runUrl})\n\n${process.env.SUMMARY}`;
-
-            if (process.env.COMMENT_ID) {
-              try {
-                await github.rest.issues.updateComment({
-                  owner: context.repo.owner,
-                  repo: context.repo.repo,
-                  comment_id: Number(process.env.COMMENT_ID),
-                  body,
-                });
-              } catch (error) {
-                core.warning(`Could not update acknowledgement comment: ${error.message}`);
-              }
-            }
-            if (!success) core.setFailed('Failed to publish pr_audit event');
