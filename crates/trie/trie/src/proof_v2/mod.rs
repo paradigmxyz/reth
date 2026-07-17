@@ -1493,7 +1493,7 @@ where
         let child_path_len = parent_prefix.len() + 1;
         let child_path = root_short_key.slice_unchecked(0, child_path_len);
 
-        // It's possible that the local root lies on a child which is not targetted.
+        // It's possible that the local root lies on a child which is not targeted.
         if !sub_trie_targets
             .targets
             .iter()
