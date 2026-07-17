@@ -503,6 +503,19 @@ mod tests {
         assert_eq!(decoded, original);
     }
 
+    // geth's GetStorageRangesPacket types Origin/Limit as raw byte strings and sends them
+    // empty for the common unbounded multi-account request, rather than as 32-byte
+    // zero/max-value hashes. A conforming decoder must accept this raw packet shape.
+    #[derive(alloy_rlp::RlpEncodable)]
+    struct GethStorageRequest {
+        request_id: u64,
+        root_hash: B256,
+        account_hashes: Vec<B256>,
+        origin: Bytes,
+        limit: Bytes,
+        response_bytes: u64,
+    }
+
     #[test]
     fn test_all_message_roundtrips() {
         assert_eq!(SnapVersion::V2.message_count(), 10);
@@ -758,19 +771,6 @@ mod tests {
 
     #[test]
     fn get_storage_ranges_decodes_geths_empty_origin_and_limit() {
-        // geth's GetStorageRangesPacket types Origin/Limit as raw byte strings and sends them
-        // empty for the common unbounded multi-account request, rather than as 32-byte
-        // zero/max-value hashes. A conforming decoder must accept this raw packet shape.
-        #[derive(alloy_rlp::RlpEncodable)]
-        struct GethStorageRequest {
-            request_id: u64,
-            root_hash: B256,
-            account_hashes: Vec<B256>,
-            origin: Bytes,
-            limit: Bytes,
-            response_bytes: u64,
-        }
-
         let body = alloy_rlp::encode(GethStorageRequest {
             request_id: 21,
             root_hash: B256::ZERO,
