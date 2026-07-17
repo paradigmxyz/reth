@@ -10892,7 +10892,7 @@ dependencies = [
 [[package]]
 name = "revmc"
 version = "0.1.0"
-source = "git+https://github.com/Rimeeeeee/revmc?branch=eip-8268#11fd95a752f9790599e5b128c717a904cd4c7fd6"
+source = "git+https://github.com/Rimeeeeee/revmc?branch=eip-8268#f3b70551cf59d59d073dddb87cd044da090044b6"
 dependencies = [
  "revm-bytecode",
  "revm-context-interface",
@@ -10912,7 +10912,7 @@ dependencies = [
 [[package]]
 name = "revmc-backend"
 version = "0.1.0"
-source = "git+https://github.com/Rimeeeeee/revmc?branch=eip-8268#11fd95a752f9790599e5b128c717a904cd4c7fd6"
+source = "git+https://github.com/Rimeeeeee/revmc?branch=eip-8268#f3b70551cf59d59d073dddb87cd044da090044b6"
 dependencies = [
  "eyre",
  "ruint",
@@ -10921,12 +10921,12 @@ dependencies = [
 [[package]]
 name = "revmc-build"
 version = "0.1.0"
-source = "git+https://github.com/Rimeeeeee/revmc?branch=eip-8268#11fd95a752f9790599e5b128c717a904cd4c7fd6"
+source = "git+https://github.com/Rimeeeeee/revmc?branch=eip-8268#f3b70551cf59d59d073dddb87cd044da090044b6"
 
 [[package]]
 name = "revmc-builtins"
 version = "0.1.0"
-source = "git+https://github.com/Rimeeeeee/revmc?branch=eip-8268#11fd95a752f9790599e5b128c717a904cd4c7fd6"
+source = "git+https://github.com/Rimeeeeee/revmc?branch=eip-8268#f3b70551cf59d59d073dddb87cd044da090044b6"
 dependencies = [
  "paste",
  "revm-bytecode",
@@ -10941,7 +10941,7 @@ dependencies = [
 [[package]]
 name = "revmc-codegen"
 version = "0.1.0"
-source = "git+https://github.com/Rimeeeeee/revmc?branch=eip-8268#11fd95a752f9790599e5b128c717a904cd4c7fd6"
+source = "git+https://github.com/Rimeeeeee/revmc?branch=eip-8268#f3b70551cf59d59d073dddb87cd044da090044b6"
 dependencies = [
  "alloy-primitives",
  "bitflags",
@@ -10972,7 +10972,7 @@ dependencies = [
 [[package]]
 name = "revmc-context"
 version = "0.1.0"
-source = "git+https://github.com/Rimeeeeee/revmc?branch=eip-8268#11fd95a752f9790599e5b128c717a904cd4c7fd6"
+source = "git+https://github.com/Rimeeeeee/revmc?branch=eip-8268#f3b70551cf59d59d073dddb87cd044da090044b6"
 dependencies = [
  "revm-context",
  "revm-context-interface",
@@ -10987,7 +10987,7 @@ dependencies = [
 [[package]]
 name = "revmc-llvm"
 version = "0.1.0"
-source = "git+https://github.com/Rimeeeeee/revmc?branch=eip-8268#11fd95a752f9790599e5b128c717a904cd4c7fd6"
+source = "git+https://github.com/Rimeeeeee/revmc?branch=eip-8268#f3b70551cf59d59d073dddb87cd044da090044b6"
 dependencies = [
  "alloy-primitives",
  "cc",
@@ -11000,7 +11000,7 @@ dependencies = [
 [[package]]
 name = "revmc-runtime"
 version = "0.1.0"
-source = "git+https://github.com/Rimeeeeee/revmc?branch=eip-8268#11fd95a752f9790599e5b128c717a904cd4c7fd6"
+source = "git+https://github.com/Rimeeeeee/revmc?branch=eip-8268#f3b70551cf59d59d073dddb87cd044da090044b6"
 dependencies = [
  "alloy-evm",
  "alloy-primitives",
