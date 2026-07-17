@@ -54,7 +54,7 @@ impl Cache {
         )
     }
 
-    pub(super) fn parent_hash(&self) -> Option<B256> {
+    pub(super) const fn parent_hash(&self) -> Option<B256> {
         self.parent_hash
     }
 
