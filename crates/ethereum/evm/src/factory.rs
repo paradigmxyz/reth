@@ -20,56 +20,155 @@ use crate::{
     EthBlockExecutionCtx, EthBlockExecutor, EthEvmEnv, EthPrimitives, EthTxEnv,
 };
 
+/// Factory used to construct an evm2-backed EVM.
+///
+/// The transaction type defaults to Ethereum's recovered envelope so the standard block
+/// executor remains ergonomic. Custom-node integrations can select a different evm2 transaction
+/// type by implementing `EvmFactory<CustomTx>` and using that factory with their own executor and
+/// primitives.
+pub trait EvmFactory<Tx = evm2::ethereum::RecoveredTxEnvelope>:
+    Clone + core::fmt::Debug + Send + Sync + Unpin + 'static
+where
+    <Self::Types as evm2::EvmTypesHost>::BlockEnvExt: Send + Sync,
+    <Self::Types as evm2::EvmTypesHost>::TxResultExt: Send,
+{
+    /// Runtime evm2 type family used by the EVM.
+    type Types: evm2::EvmTypes<Tx = Tx> + evm2::EvmTypesHost<SpecId = Self::SpecId>;
+
+    /// Runtime specification identifier used by the EVM type family.
+    type SpecId: Copy
+        + Into<evm2::SpecId>
+        + Eq
+        + core::hash::Hash
+        + core::fmt::Debug
+        + Send
+        + Sync
+        + Clone
+        + 'static;
+
+    /// Maps an Ethereum hardfork to the runtime specification selected by this factory.
+    fn spec_id(&self, spec: evm2::SpecId) -> Self::SpecId;
+
+    /// Converts the standard Ethereum block environment into the factory's block environment.
+    fn block_env(&self, block: evm2::env::BlockEnv) -> evm2::env::BlockEnv<Self::Types> {
+        evm2::env::BlockEnv {
+            number: block.number,
+            beneficiary: block.beneficiary,
+            timestamp: block.timestamp,
+            gas_limit: block.gas_limit,
+            basefee: block.basefee,
+            difficulty: block.difficulty,
+            prevrandao: block.prevrandao,
+            blob_basefee: block.blob_basefee,
+            slot_num: block.slot_num,
+            ext: Default::default(),
+            _non_exhaustive: (),
+        }
+    }
+
+    /// Returns the runtime version for an Ethereum hardfork.
+    fn version(&self, spec: evm2::SpecId, chain_id: u64) -> evm2::Version {
+        let mut version = evm2::Version::new(spec);
+        version.chain_id = chain_id;
+        version
+    }
+
+    /// Builds the execution configuration for a runtime specification.
+    fn execution_config(
+        &self,
+        spec: Self::SpecId,
+        version: evm2::Version,
+    ) -> evm2::ExecutionConfig<Self::Types> {
+        evm2::ExecutionConfig::for_spec_and_version(spec, version)
+    }
+
+    /// Builds the transaction registry for a runtime specification.
+    fn tx_registry(
+        &self,
+        spec: Self::SpecId,
+    ) -> evm2::registry::TxRegistry<Self::Types, evm2::TxResult<Self::Types>>;
+
+    /// Builds the precompile table for a runtime specification.
+    fn precompiles(&self, spec: Self::SpecId) -> evm2::Precompiles<Self::Types> {
+        evm2::Precompiles::base(spec.into())
+    }
+
+    /// Applies factory-specific configuration to a newly created EVM.
+    fn configure_evm(&self, _evm: &mut evm2::Evm<'_, Self::Types>) {}
+}
+
+impl EvmFactory for () {
+    type Types = evm2::BaseEvmTypes;
+    type SpecId = evm2::SpecId;
+
+    fn spec_id(&self, spec: evm2::SpecId) -> evm2::SpecId {
+        spec
+    }
+
+    fn tx_registry(
+        &self,
+        spec: Self::SpecId,
+    ) -> evm2::registry::TxRegistry<Self::Types, evm2::TxResult<Self::Types>> {
+        evm2::ethereum::ethereum_tx_registry(spec)
+    }
+}
+
 /// Ethereum block executor factory.
 #[derive(Debug)]
-pub struct EthBlockExecutorFactory<C = ChainSpec, EvmFactory = ()> {
+pub struct EthBlockExecutorFactory<C = ChainSpec, F = RethEvmFactory>
+where
+    F: EvmFactory,
+{
     /// Chain specification.
     chain_spec: Arc<C>,
     /// Shared precompile cache.
     #[cfg(feature = "std")]
-    precompile_cache_map: PrecompileCacheMap<evm2::SpecId>,
+    precompile_cache_map: PrecompileCacheMap<F::SpecId>,
     /// Whether to disable the shared precompile cache.
     #[cfg(feature = "std")]
     precompile_cache_disabled: bool,
     /// EVM factory configuration.
-    evm_factory: EvmFactory,
+    evm_factory: F,
 }
 
 /// Executor factory for merged payloads that switch block context at segment boundaries.
 #[derive(Debug, Clone)]
-pub struct EthBigBlockExecutorFactory<C = ChainSpec, EvmFactory = ()> {
-    inner: EthBlockExecutorFactory<C, EvmFactory>,
+pub struct EthBigBlockExecutorFactory<C = ChainSpec, F = RethEvmFactory>
+where
+    F: EvmFactory,
+{
+    inner: EthBlockExecutorFactory<C, F>,
 }
 
-impl<C, EvmFactory> EthBigBlockExecutorFactory<C, EvmFactory> {
+impl<C, F: EvmFactory> EthBigBlockExecutorFactory<C, F> {
     /// Creates a big-block executor factory from the standard Ethereum factory.
-    pub const fn new(inner: EthBlockExecutorFactory<C, EvmFactory>) -> Self {
+    pub const fn new(inner: EthBlockExecutorFactory<C, F>) -> Self {
         Self { inner }
     }
 
     /// Returns the wrapped Ethereum executor factory.
-    pub const fn inner(&self) -> &EthBlockExecutorFactory<C, EvmFactory> {
+    pub const fn inner(&self) -> &EthBlockExecutorFactory<C, F> {
         &self.inner
     }
 }
 
-impl<C, EvmFactory> reth_evm::BlockExecutorFactory for EthBigBlockExecutorFactory<C, EvmFactory>
+impl<C, F> reth_evm::BlockExecutorFactory for EthBigBlockExecutorFactory<C, F>
 where
     C: EthChainSpec<Header = Header> + EthereumHardforks,
-    EvmFactory: 'static,
+    F: EvmFactory,
 {
     type Primitives = EthPrimitives;
-    type EvmFactory = EvmFactory;
+    type EvmFactory = F;
     type EvmTransaction = evm2::ethereum::RecoveredTxEnvelope;
     type Transaction = EthTxEnv;
-    type Evm<'a> = evm2::Evm<'a, evm2::BaseEvmTypes>;
-    type EvmEnv = EthEvmEnv;
+    type Evm<'a> = evm2::Evm<'a, F::Types>;
+    type EvmEnv = EthEvmEnv<F::Types>;
     type ExecutionCtx<'a>
-        = EthBigBlockPlan<'a>
+        = EthBigBlockPlan<'a, F::Types>
     where
         Self: 'a;
     type Executor<'a>
-        = EthBigBlockExecutor<'a, C>
+        = EthBigBlockExecutor<'a, C, F>
     where
         Self: 'a;
 
@@ -82,7 +181,7 @@ where
         Self: 'a,
     {
         let executor = self.inner.create_eth_executor(evm, ctx.segments[0].ctx.clone());
-        EthBigBlockExecutor::new(executor, self.inner.chain_spec().clone(), ctx)
+        EthBigBlockExecutor::new(executor, &self.inner, self.inner.chain_spec().clone(), ctx)
     }
 
     fn evm_factory(&self) -> &Self::EvmFactory {
@@ -97,7 +196,7 @@ where
     }
 }
 
-impl<C, EvmFactory: Clone> Clone for EthBlockExecutorFactory<C, EvmFactory> {
+impl<C, F: EvmFactory> Clone for EthBlockExecutorFactory<C, F> {
     fn clone(&self) -> Self {
         Self {
             chain_spec: self.chain_spec.clone(),
@@ -113,13 +212,13 @@ impl<C, EvmFactory: Clone> Clone for EthBlockExecutorFactory<C, EvmFactory> {
 impl<C> EthBlockExecutorFactory<C> {
     /// Creates a new Ethereum block executor factory.
     pub fn new(chain_spec: Arc<C>) -> Self {
-        Self::new_with_evm_factory(chain_spec, ())
+        Self::new_with_evm_factory(chain_spec, RethEvmFactory::default())
     }
 }
 
-impl<C, EvmFactory> EthBlockExecutorFactory<C, EvmFactory> {
+impl<C, F: EvmFactory> EthBlockExecutorFactory<C, F> {
     /// Creates a new Ethereum block executor factory with the given EVM factory configuration.
-    pub fn new_with_evm_factory(chain_spec: Arc<C>, evm_factory: EvmFactory) -> Self {
+    pub fn new_with_evm_factory(chain_spec: Arc<C>, evm_factory: F) -> Self {
         Self {
             chain_spec,
             #[cfg(feature = "std")]
@@ -136,13 +235,13 @@ impl<C, EvmFactory> EthBlockExecutorFactory<C, EvmFactory> {
     }
 
     /// Returns the configured EVM factory state.
-    pub const fn evm_factory(&self) -> &EvmFactory {
+    pub const fn evm_factory(&self) -> &F {
         &self.evm_factory
     }
 
     /// Returns mutable access to the configured EVM factory state.
     #[cfg(feature = "jit")]
-    pub(crate) const fn evm_factory_mut(&mut self) -> &mut EvmFactory {
+    pub(crate) const fn evm_factory_mut(&mut self) -> &mut F {
         &mut self.evm_factory
     }
 
@@ -164,9 +263,9 @@ impl<C, EvmFactory> EthBlockExecutorFactory<C, EvmFactory> {
     /// Creates a configured Ethereum block executor.
     pub(crate) fn create_eth_executor<'a>(
         &'a self,
-        evm: evm2::Evm<'a, evm2::BaseEvmTypes>,
+        evm: evm2::Evm<'a, F::Types>,
         ctx: EthBlockExecutionCtx<'a>,
-    ) -> EthBlockExecutor<'a>
+    ) -> EthBlockExecutor<'a, F::Types>
     where
         C: EthChainSpec<Header = Header> + EthereumHardforks,
     {
@@ -183,69 +282,92 @@ impl<C, EvmFactory> EthBlockExecutorFactory<C, EvmFactory> {
     pub(crate) fn build_evm_with_env<'a, DB>(
         &self,
         db: DB,
-        env: EthEvmEnv,
-    ) -> evm2::Evm<'a, evm2::BaseEvmTypes>
+        env: EthEvmEnv<F::Types>,
+    ) -> evm2::Evm<'a, F::Types>
     where
         C: EthChainSpec<Header = Header>,
         DB: evm2::evm::DynDatabase + 'a,
-        EvmFactory: 'static,
+        F: 'static,
     {
+        let spec = env.spec;
+        let config = self.evm_factory.execution_config(spec, env.version);
+        let registry = self.evm_factory.tx_registry(spec);
+        let precompiles = self.evm_factory.precompiles(spec);
         #[cfg(feature = "std")]
-        let precompiles: Box<
-            dyn evm2::evm::precompile::PrecompileProvider<evm2::BaseEvmTypes>,
-        > = if self.precompile_cache_disabled {
-            Box::new(evm2::Precompiles::base(env.spec))
-        } else {
-            Box::new(CachedPrecompileProvider::new(
-                evm2::Precompiles::base(env.spec),
-                self.precompile_cache_map.clone(),
-                env.spec,
-                None,
-            ))
-        };
+        let precompiles: Box<dyn evm2::evm::precompile::PrecompileProvider<F::Types>> =
+            if self.precompile_cache_disabled {
+                Box::new(precompiles)
+            } else {
+                Box::new(CachedPrecompileProvider::new(
+                    precompiles,
+                    self.precompile_cache_map.clone(),
+                    spec,
+                    None,
+                ))
+            };
         #[cfg(not(feature = "std"))]
-        let precompiles = Box::new(evm2::Precompiles::base(env.spec));
+        let precompiles = Box::new(precompiles);
 
-        let evm = evm2::Evm::<evm2::BaseEvmTypes>::new_with_execution_config(
-            evm2::ExecutionConfig::for_spec_and_version(env.spec, env.version),
-            env.spec,
+        let mut evm = evm2::Evm::<F::Types>::new_with_execution_config(
+            config,
+            spec,
             env.block,
-            evm2::ethereum::ethereum_tx_registry(env.spec),
+            registry,
             db,
             precompiles,
         );
-
-        #[cfg(feature = "jit")]
-        let mut evm = evm;
-
-        #[cfg(feature = "jit")]
-        if let Some(evm_factory) =
-            (&self.evm_factory as &dyn core::any::Any).downcast_ref::<RethEvmFactory>()
-        {
-            evm_factory.configure_evm(&mut evm);
-        }
-
+        self.evm_factory.configure_evm(&mut evm);
         evm
+    }
+
+    /// Replaces the execution configuration, transaction registry, and precompiles at a segment
+    /// boundary while preserving the EVM state and database.
+    pub(crate) fn reconfigure_evm<'a>(
+        &'a self,
+        evm: &mut evm2::Evm<'a, F::Types>,
+        env: &EthEvmEnv<F::Types>,
+    ) {
+        let spec = env.spec;
+        let config = self.evm_factory.execution_config(spec, env.version);
+        let registry = self.evm_factory.tx_registry(spec);
+        let precompiles = self.evm_factory.precompiles(spec);
+        #[cfg(feature = "std")]
+        let precompiles: Box<dyn evm2::evm::precompile::PrecompileProvider<F::Types>> =
+            if self.precompile_cache_disabled {
+                Box::new(precompiles)
+            } else {
+                Box::new(CachedPrecompileProvider::new(
+                    precompiles,
+                    self.precompile_cache_map.clone(),
+                    spec,
+                    None,
+                ))
+            };
+        #[cfg(not(feature = "std"))]
+        let precompiles = Box::new(precompiles);
+
+        evm.set_block_and_execution_config(env.block, config, spec, registry, precompiles);
+        self.evm_factory.configure_evm(evm);
     }
 }
 
-impl<C, EvmFactory> reth_evm::BlockExecutorFactory for EthBlockExecutorFactory<C, EvmFactory>
+impl<C, F> reth_evm::BlockExecutorFactory for EthBlockExecutorFactory<C, F>
 where
     C: EthChainSpec<Header = Header> + EthereumHardforks,
-    EvmFactory: 'static,
+    F: EvmFactory,
 {
     type Primitives = EthPrimitives;
-    type EvmFactory = EvmFactory;
+    type EvmFactory = F;
     type EvmTransaction = evm2::ethereum::RecoveredTxEnvelope;
     type Transaction = EthTxEnv;
-    type Evm<'a> = evm2::Evm<'a, evm2::BaseEvmTypes>;
-    type EvmEnv = EthEvmEnv;
+    type Evm<'a> = evm2::Evm<'a, F::Types>;
+    type EvmEnv = EthEvmEnv<F::Types>;
     type ExecutionCtx<'a>
         = EthBlockExecutionCtx<'a>
     where
         Self: 'a;
     type Executor<'a>
-        = EthBlockExecutor<'a>
+        = EthBlockExecutor<'a, F::Types>
     where
         Self: 'a;
 
@@ -305,6 +427,30 @@ impl RethEvmFactory {
         {
             Self {}
         }
+    }
+}
+
+impl EvmFactory for RethEvmFactory {
+    type Types = evm2::BaseEvmTypes;
+    type SpecId = evm2::SpecId;
+
+    fn spec_id(&self, spec: evm2::SpecId) -> evm2::SpecId {
+        spec
+    }
+
+    fn tx_registry(
+        &self,
+        spec: Self::SpecId,
+    ) -> evm2::registry::TxRegistry<Self::Types, evm2::TxResult<Self::Types>> {
+        evm2::ethereum::ethereum_tx_registry(spec)
+    }
+
+    fn configure_evm(&self, evm: &mut evm2::Evm<'_, Self::Types>) {
+        #[cfg(feature = "jit")]
+        self.configure_evm(evm);
+
+        #[cfg(not(feature = "jit"))]
+        let _ = evm;
     }
 }
 

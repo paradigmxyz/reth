@@ -28,8 +28,10 @@ use reth_ethereum_forks::Hardforks;
 use reth_ethereum_primitives::TransactionSigned;
 use reth_ethereum_primitives::{Block, EthPrimitives};
 #[cfg(feature = "std")]
+use reth_evm::ExecutionCtxFor;
+#[cfg(feature = "std")]
 use reth_evm::{ConfigureEngineEvm, ExecutableTxIterator};
-use reth_evm::{ConfigureEvm, EvmEnv, EvmEnvFor, ExecutionCtxFor, NextBlockEnvAttributes};
+use reth_evm::{ConfigureEvm, EvmEnv, EvmEnvFor, NextBlockEnvAttributes};
 #[cfg(feature = "std")]
 use reth_primitives_traits::SignedTransaction;
 use reth_primitives_traits::{SealedBlock, SealedHeader};
@@ -46,56 +48,78 @@ use convert::{payload_block_env, spec_id_by_timestamp_and_block_number};
 pub type EthEvm<DB = (), I = (), P = ()> = PhantomData<(DB, I, P)>;
 
 /// Configured Ethereum EVM environment.
-#[derive(Debug, Clone)]
-pub struct EthEvmEnv {
+pub struct EthEvmEnv<T = evm2::BaseEvmTypes>
+where
+    T: evm2::EvmTypesHost,
+{
     /// Active EVM spec.
-    pub spec: evm2::SpecId,
+    pub spec: T::SpecId,
     /// Runtime configuration for the active EVM spec.
     pub version: evm2::Version,
     /// EVM block environment.
-    pub block: evm2::env::BlockEnv,
+    pub block: evm2::env::BlockEnv<T>,
 }
 
-impl EthEvmEnv {
+impl<T: evm2::EvmTypesHost> Clone for EthEvmEnv<T> {
+    fn clone(&self) -> Self {
+        Self { spec: self.spec, version: self.version, block: self.block }
+    }
+}
+
+impl<T: evm2::EvmTypesHost> Debug for EthEvmEnv<T>
+where
+    T::SpecId: Debug,
+    T::BlockEnvExt: Debug,
+{
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("EthEvmEnv")
+            .field("spec", &self.spec)
+            .field("version", &self.version)
+            .field("block", &self.block)
+            .finish()
+    }
+}
+
+impl<T: evm2::EvmTypesHost> EthEvmEnv<T> {
     /// Creates a new Ethereum EVM environment.
-    pub const fn new(spec: evm2::SpecId, block: evm2::env::BlockEnv, chain_id: u64) -> Self {
-        let mut version = evm2::Version::new(spec);
+    pub fn new(spec: T::SpecId, block: evm2::env::BlockEnv<T>, chain_id: u64) -> Self {
+        let mut version = evm2::Version::new(spec.into());
         version.chain_id = chain_id;
         Self { spec, version, block }
     }
 
-    fn new_with_blob_params(
-        spec: evm2::SpecId,
-        block: evm2::env::BlockEnv,
-        chain_id: u64,
-        blob_params: Option<BlobParams>,
+    /// Creates a new Ethereum EVM environment with a preconfigured runtime version.
+    pub const fn new_with_version(
+        spec: T::SpecId,
+        block: evm2::env::BlockEnv<T>,
+        version: evm2::Version,
     ) -> Self {
-        let mut env = Self::new(spec, block, chain_id);
-        if let Some(blob_params) = blob_params {
-            env.version.max_blobs_per_tx = blob_params.max_blobs_per_tx as usize;
-            env.version.blob_base_fee_update_fraction = blob_params
-                .update_fraction
-                .try_into()
-                .expect("blob base fee update fraction exceeds evm2 u64 capacity");
-        }
-        env
+        Self { spec, version, block }
     }
 }
 
-impl Default for EthEvmEnv {
+impl<T> Default for EthEvmEnv<T>
+where
+    T: evm2::EvmTypesHost,
+    T::SpecId: Default,
+{
     fn default() -> Self {
-        let spec = evm2::SpecId::default();
-        Self { spec, version: evm2::Version::new(spec), block: Default::default() }
+        let spec = T::SpecId::default();
+        Self { spec, version: evm2::Version::new(spec.into()), block: Default::default() }
     }
 }
 
-impl AsRef<evm2::env::BlockEnv> for EthEvmEnv {
-    fn as_ref(&self) -> &evm2::env::BlockEnv {
+impl<T: evm2::EvmTypesHost> AsRef<evm2::env::BlockEnv<T>> for EthEvmEnv<T> {
+    fn as_ref(&self) -> &evm2::env::BlockEnv<T> {
         &self.block
     }
 }
 
-impl EvmEnv for EthEvmEnv {
+impl<T: evm2::EvmTypesHost> EvmEnv for EthEvmEnv<T>
+where
+    T::SpecId: Debug + Send + Sync,
+    T::BlockEnvExt: Send + Sync,
+{
     fn block_base_fee(&self) -> u64 {
         self.block.basefee.to()
     }
@@ -193,6 +217,81 @@ impl EvmEnv for EthEvmEnv {
     }
 }
 
+/// Common block-environment access required by the Ethereum block assembler.
+pub trait EthBlockEnv: Copy {
+    /// Returns the block number.
+    fn number(&self) -> u64;
+    /// Returns the block beneficiary.
+    fn beneficiary(&self) -> Address;
+    /// Returns the block timestamp.
+    fn timestamp(&self) -> u64;
+    /// Returns the block gas limit.
+    fn gas_limit(&self) -> u64;
+    /// Returns the block base fee.
+    fn basefee(&self) -> u64;
+    /// Returns the block difficulty.
+    fn difficulty(&self) -> alloy_primitives::U256;
+    /// Returns the block randomness value.
+    fn prevrandao(&self) -> alloy_primitives::U256;
+    /// Returns the block slot number.
+    fn slot_number(&self) -> u64;
+}
+
+impl<T: evm2::EvmTypesHost> EthBlockEnv for evm2::env::BlockEnv<T> {
+    fn number(&self) -> u64 {
+        self.number.to()
+    }
+
+    fn beneficiary(&self) -> Address {
+        self.beneficiary
+    }
+
+    fn timestamp(&self) -> u64 {
+        self.timestamp.to()
+    }
+
+    fn gas_limit(&self) -> u64 {
+        self.gas_limit.to()
+    }
+
+    fn basefee(&self) -> u64 {
+        self.basefee.to()
+    }
+
+    fn difficulty(&self) -> alloy_primitives::U256 {
+        self.difficulty
+    }
+
+    fn prevrandao(&self) -> alloy_primitives::U256 {
+        self.prevrandao
+    }
+
+    fn slot_number(&self) -> u64 {
+        self.slot_num.to()
+    }
+}
+
+/// EVM environment that can expose a block environment to the Ethereum assembler.
+pub trait EthEvmEnvLike: EvmEnv {
+    /// Block environment type.
+    type Block: EthBlockEnv;
+
+    /// Returns the block environment.
+    fn block(&self) -> Self::Block;
+}
+
+impl<T: evm2::EvmTypesHost> EthEvmEnvLike for EthEvmEnv<T>
+where
+    T::SpecId: Debug + Send + Sync,
+    T::BlockEnvExt: Send + Sync,
+{
+    type Block = evm2::env::BlockEnv<T>;
+
+    fn block(&self) -> Self::Block {
+        self.block
+    }
+}
+
 /// Ethereum block execution context.
 #[derive(Debug, Clone)]
 pub struct EthBlockExecutionCtx<'a> {
@@ -254,7 +353,7 @@ pub use factory::{
     maybe_run_jit_helper, CompilationEvent, CompilationKind, CompileTimings, JitBackend,
     JitMetrics, JitMode, RethEvmFactory, RuntimeConfig, RuntimeStatsSnapshot, RuntimeTuning,
 };
-pub use factory::{EthBigBlockExecutorFactory, EthBlockExecutorFactory};
+pub use factory::{EthBigBlockExecutorFactory, EthBlockExecutorFactory, EvmFactory};
 
 mod convert;
 pub use convert::{EthTxEnv, ExecutableRecoveredTx};
@@ -272,9 +371,12 @@ pub use test_utils::*;
 
 /// Ethereum-related EVM configuration.
 #[derive(Debug, Clone)]
-pub struct EthEvmConfig<C = ChainSpec, EvmFactory = ()> {
+pub struct EthEvmConfig<C = ChainSpec, F = RethEvmFactory>
+where
+    F: EvmFactory,
+{
     /// Inner Ethereum block executor factory.
-    pub executor_factory: EthBlockExecutorFactory<C, EvmFactory>,
+    pub executor_factory: EthBlockExecutorFactory<C, F>,
     /// Ethereum block assembler.
     pub block_assembler: EthBlockAssembler<C>,
 }
@@ -294,13 +396,13 @@ impl<ChainSpec> EthEvmConfig<ChainSpec> {
 
     /// Creates a new Ethereum EVM configuration.
     pub fn ethereum(chain_spec: Arc<ChainSpec>) -> Self {
-        Self::new_with_evm_factory(chain_spec, ())
+        Self::new_with_evm_factory(chain_spec, RethEvmFactory::default())
     }
 }
 
-impl<ChainSpec, EvmFactory> EthEvmConfig<ChainSpec, EvmFactory> {
+impl<ChainSpec, F: EvmFactory> EthEvmConfig<ChainSpec, F> {
     /// Creates a new Ethereum EVM configuration with the given EVM factory configuration.
-    pub fn new_with_evm_factory(chain_spec: Arc<ChainSpec>, evm_factory: EvmFactory) -> Self {
+    pub fn new_with_evm_factory(chain_spec: Arc<ChainSpec>, evm_factory: F) -> Self {
         Self {
             block_assembler: EthBlockAssembler::new(chain_spec.clone()),
             executor_factory: EthBlockExecutorFactory::new_with_evm_factory(
@@ -314,12 +416,33 @@ impl<ChainSpec, EvmFactory> EthEvmConfig<ChainSpec, EvmFactory> {
     pub const fn chain_spec(&self) -> &Arc<ChainSpec> {
         self.executor_factory.chain_spec()
     }
+
+    fn evm_env_from_base_spec(
+        &self,
+        spec: evm2::SpecId,
+        block: evm2::env::BlockEnv,
+        blob_params: Option<BlobParams>,
+    ) -> EthEvmEnv<F::Types>
+    where
+        ChainSpec: EthChainSpec,
+    {
+        let factory = self.executor_factory.evm_factory();
+        let mut version = factory.version(spec, self.chain_spec().chain_id());
+        if let Some(blob_params) = blob_params {
+            version.max_blobs_per_tx = blob_params.max_blobs_per_tx as usize;
+            version.blob_base_fee_update_fraction = blob_params
+                .update_fraction
+                .try_into()
+                .expect("blob base fee update fraction exceeds evm2 u64 capacity");
+        }
+        EthEvmEnv::new_with_version(factory.spec_id(spec), factory.block_env(block), version)
+    }
 }
 
 impl<ChainSpec, EvmF> ConfigureEvm for EthEvmConfig<ChainSpec, EvmF>
 where
     ChainSpec: EthChainSpec<Header = Header> + EthereumHardforks + Hardforks + 'static,
-    EvmF: Clone + Debug + Send + Sync + Unpin + 'static,
+    EvmF: EvmFactory,
 {
     type Primitives = EthPrimitives;
     type Error = Infallible;
@@ -382,10 +505,9 @@ where
     fn evm_env(&self, header: &Header) -> Result<EvmEnvFor<Self>, Self::Error> {
         let spec = spec_id(self.chain_spec().as_ref(), header);
         let blob_params = self.chain_spec().as_ref().blob_params_at_timestamp(header.timestamp);
-        Ok(EthEvmEnv::new_with_blob_params(
+        Ok(self.evm_env_from_base_spec(
             spec,
             block_env_with_blob_params(header, blob_params),
-            self.chain_spec().chain_id(),
             blob_params,
         ))
     }
@@ -417,10 +539,9 @@ where
         };
 
         let spec = spec_id(self.chain_spec().as_ref(), &header);
-        Ok(EthEvmEnv::new_with_blob_params(
+        Ok(self.evm_env_from_base_spec(
             spec,
             block_env_with_blob_params(&header, blob_params),
-            self.chain_spec().chain_id(),
             blob_params,
         ))
     }
@@ -463,7 +584,7 @@ where
     fn pre_block_state_changes<'a, DB>(
         &self,
         db: DB,
-        env: EthEvmEnv,
+        env: EvmEnvFor<Self>,
         block_number: u64,
         ctx: EthBlockExecutionCtx<'a>,
     ) -> Result<reth_evm::EvmState, Box<dyn core::error::Error + Send + Sync>>
@@ -471,7 +592,7 @@ where
         Self: 'a,
         DB: evm2::evm::DynDatabase + 'a,
     {
-        let spec_id = env.spec;
+        let spec_id = env.spec.into();
         let mut evm = self.block_executor_factory().build_evm_with_env(db, env);
         let mut block_state = evm2::evm::BlockStateAccumulator::new();
         crate::execution::pre_execution_system_call_state_changes(
@@ -494,7 +615,7 @@ where
 impl<ChainSpec, EvmF> ConfigureEngineEvm<ExecutionData> for EthEvmConfig<ChainSpec, EvmF>
 where
     ChainSpec: EthChainSpec<Header = Header> + EthereumHardforks + Hardforks + 'static,
-    EvmF: Clone + Debug + Send + Sync + Unpin + 'static,
+    EvmF: EvmFactory,
 {
     fn evm_env_for_payload(&self, payload: &ExecutionData) -> Result<EvmEnvFor<Self>, Self::Error> {
         let spec = spec_id_by_timestamp_and_block_number(
@@ -504,12 +625,7 @@ where
         );
         let blob_params =
             self.chain_spec().as_ref().blob_params_at_timestamp(payload.payload.timestamp());
-        Ok(EthEvmEnv::new_with_blob_params(
-            spec,
-            payload_block_env(payload, blob_params),
-            self.chain_spec().chain_id(),
-            blob_params,
-        ))
+        Ok(self.evm_env_from_base_spec(spec, payload_block_env(payload, blob_params), blob_params))
     }
 
     fn context_for_payload<'a>(
@@ -586,7 +702,7 @@ mod tests {
     #[cfg(feature = "jit")]
     #[test]
     fn test_jit_support_ignores_plain_factory() {
-        let evm_config = EthEvmConfig::mainnet();
+        let evm_config = EthEvmConfig::new_with_evm_factory(MAINNET.clone(), ());
 
         assert!(evm_config.jit_backend().is_none());
 

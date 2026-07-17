@@ -432,6 +432,7 @@ reth-zstd-compressors = { git = "https://github.com/paradigmxyz/reth-core", rev 
 evm2 = { git = "https://github.com/alloy-rs/evm2", rev = "8cf2766d5aa01964d973b38eedddc9267229ccfe", default-features = false }
 evm2-inspectors = { git = "https://github.com/alloy-rs/evm2", rev = "8cf2766d5aa01964d973b38eedddc9267229ccfe", default-features = false }
 evm2-jit = { git = "https://github.com/alloy-rs/evm2", rev = "8cf2766d5aa01964d973b38eedddc9267229ccfe", default-features = false }
+evm2-macros = { git = "https://github.com/alloy-rs/evm2", rev = "8cf2766d5aa01964d973b38eedddc9267229ccfe" }
 
 # eth
 alloy-dyn-abi = "1.6.0"

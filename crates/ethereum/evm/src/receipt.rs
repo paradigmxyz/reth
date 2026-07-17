@@ -1,5 +1,5 @@
 use alloy_consensus::TxType;
-use evm2::TxResult;
+use evm2::{EvmTypes, TxResult};
 use reth_ethereum_primitives::Receipt;
 use reth_evm::{ReceiptBuilder, ReceiptBuilderCtx};
 
@@ -8,10 +8,10 @@ use reth_evm::{ReceiptBuilder, ReceiptBuilderCtx};
 #[non_exhaustive]
 pub struct RethReceiptBuilder;
 
-impl ReceiptBuilder<TxType, TxResult> for RethReceiptBuilder {
+impl<T: EvmTypes> ReceiptBuilder<TxType, TxResult<T>> for RethReceiptBuilder {
     type Receipt = Receipt;
 
-    fn build_receipt(&self, ctx: ReceiptBuilderCtx<TxType, TxResult>) -> Receipt {
+    fn build_receipt(&self, ctx: ReceiptBuilderCtx<TxType, TxResult<T>>) -> Receipt {
         let ReceiptBuilderCtx { tx_type, result, cumulative_gas_used } = ctx;
         Receipt { tx_type, success: result.status, cumulative_gas_used, logs: result.logs }
     }

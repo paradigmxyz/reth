@@ -784,7 +784,7 @@ mod serde_impl {
         {
             let value = ExecutionOutcomeSerdeOwned::<T>::deserialize(deserializer)?;
             Ok(Self::from_parts(
-                value.state.into(),
+                value.state,
                 value.block_states,
                 value.block_reverts,
                 value.receipts,

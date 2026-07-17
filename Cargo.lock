@@ -3570,7 +3570,7 @@ dependencies = [
  "c-kzg",
  "cfg-if",
  "derive-where",
- "evm2-macros",
+ "evm2-macros 0.1.0 (git+https://github.com/alloy-rs/evm2?branch=main?rev=8cf2766d5aa01964d973b38eedddc9267229ccfe)",
  "k256 0.14.0",
  "once_cell",
  "p256",
@@ -3721,6 +3721,16 @@ dependencies = [
 [[package]]
 name = "evm2-macros"
 version = "0.1.0"
+source = "git+https://github.com/alloy-rs/evm2?rev=8cf2766d5aa01964d973b38eedddc9267229ccfe#8cf2766d5aa01964d973b38eedddc9267229ccfe"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.118",
+]
+
+[[package]]
+name = "evm2-macros"
+version = "0.1.0"
 source = "git+https://github.com/alloy-rs/evm2?branch=main?rev=8cf2766d5aa01964d973b38eedddc9267229ccfe#8cf2766d5aa01964d973b38eedddc9267229ccfe"
 dependencies = [
  "proc-macro2",
@@ -3857,6 +3867,19 @@ dependencies = [
 [[package]]
 name = "example-custom-evm"
 version = "0.0.0"
+dependencies = [
+ "alloy-consensus",
+ "alloy-eips",
+ "alloy-genesis",
+ "alloy-primitives",
+ "alloy-rlp",
+ "evm2",
+ "evm2-macros 0.1.0 (git+https://github.com/alloy-rs/evm2?rev=8cf2766d5aa01964d973b38eedddc9267229ccfe)",
+ "eyre",
+ "reth-ethereum",
+ "reth-tracing",
+ "tokio",
+]
 
 [[package]]
 name = "example-custom-inspector"
