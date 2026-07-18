@@ -136,7 +136,8 @@ use reth_evm::{
     block::BlockExecutor, execute::ExecutableTxFor, ConfigureEvm, EvmEnvFor, ExecutionCtxFor,
     OnStateHook, SpecFor,
 };
-use reth_execution_cache::{CacheFillMode, CacheStats, SavedCache};
+use reth_execution_cache::{CacheFillMode, CacheStats};
+use reth_payload_builder::PayloadBuilderResources;
 use reth_payload_primitives::{
     BuiltPayload, BuiltPayloadExecutedBlock, InvalidPayloadAttributesError, NewPayloadError,
     PayloadTypes,
@@ -788,6 +789,7 @@ where
             self.validator.validate_block_post_execution_with_hashed_state(
                 || hashed_state.get(),
                 &block,
+                &parent_block,
                 || provider_builder.build(),
             )
         });
@@ -823,6 +825,7 @@ where
                 self.validator.validate_block_post_execution_with_hashed_state(
                     || hashed_state.get(),
                     &block,
+                    &parent_block,
                     || provider_builder.build(),
                 )
             });
@@ -1425,6 +1428,57 @@ where
             .with_state_trie_overlay_manager(state.tree_state.state_trie_overlays.clone())
     }
 
+    /// Prepares the optional payload-builder state-root handle through the installed
+    /// [`StateRootStrategy`].
+    fn payload_state_root_handle_for(
+        &self,
+        parent_hash: B256,
+        parent_header: &N::BlockHeader,
+        timestamp: u64,
+        state: &mut EngineApiTreeState<N>,
+    ) -> Option<PayloadStateRootHandle> {
+        let provider_builder = match self.state_provider_builder(parent_hash, state) {
+            Ok(Some(provider_builder)) => provider_builder,
+            Ok(None) => return None,
+            Err(err) => {
+                warn!(
+                    target: "engine::tree::payload_validator",
+                    %err,
+                    %parent_hash,
+                    "failed to prepare payload-builder state-root provider"
+                );
+                return None
+            }
+        };
+        let overlay_factory = OverlayStateProviderFactory::new(
+            self.provider.clone(),
+            Self::overlay_builder_for_parent(parent_hash, state, self.changeset_cache.clone()),
+        );
+
+        match self.state_root_strategy.prepare_payload_builder(PayloadStateRootJobContext::new(
+            &self.runtime,
+            &self.state_trie_overlays,
+            parent_hash,
+            parent_header,
+            timestamp,
+            state,
+            provider_builder,
+            overlay_factory,
+            &self.config,
+        )) {
+            Ok(handle) => handle,
+            Err(err) => {
+                warn!(
+                    target: "engine::tree::payload_validator",
+                    %err,
+                    %parent_hash,
+                    "failed to prepare payload-builder state-root job"
+                );
+                None
+            }
+        }
+    }
+
     /// Spawns a background task to compute and sort trie data for the executed block.
     ///
     /// This function creates a [`LazyTrieData`] handle and spawns a blocking task that:
@@ -1683,24 +1737,16 @@ pub trait EngineValidator<
         block: BuiltPayloadExecutedBlock<N>,
     ) -> ProviderResult<ExecutedBlock<N>>;
 
-    /// Returns [`SavedCache`] for the given block hash.
-    fn cache_for(&self, _block_hash: B256) -> Option<SavedCache>;
-
-    /// Prepares the optional payload-builder state-root handle through the installed
-    /// [`StateRootStrategy`].
+    /// Prepares the resources loaned to a payload builder job.
     ///
-    /// Returns `None` when the strategy declines, in which case the payload builder computes
-    /// the state root itself.
-    ///
-    /// `timestamp` is the timestamp of the payload being built, taken from the payload
-    /// attributes.
-    fn payload_state_root_handle_for(
+    /// `timestamp` is taken from the payload attributes.
+    fn payload_builder_resources(
         &self,
         parent_hash: B256,
         parent_header: &N::BlockHeader,
         timestamp: u64,
         state: &mut EngineApiTreeState<N>,
-    ) -> Option<PayloadStateRootHandle>;
+    ) -> PayloadBuilderResources;
 }
 
 impl<N, Types, P, Evm, V> EngineValidator<Types> for BasicEngineValidator<P, Evm, V>
@@ -1780,57 +1826,21 @@ where
         ))
     }
 
-    fn cache_for(&self, block_hash: B256) -> Option<SavedCache> {
-        Some(self.payload_processor.cache_for(block_hash))
-    }
-
-    fn payload_state_root_handle_for(
+    fn payload_builder_resources(
         &self,
         parent_hash: B256,
         parent_header: &N::BlockHeader,
         timestamp: u64,
         state: &mut EngineApiTreeState<N>,
-    ) -> Option<PayloadStateRootHandle> {
-        let provider_builder = match self.state_provider_builder(parent_hash, state) {
-            Ok(Some(provider_builder)) => provider_builder,
-            Ok(None) => return None,
-            Err(err) => {
-                warn!(
-                    target: "engine::tree::payload_validator",
-                    %err,
-                    %parent_hash,
-                    "failed to prepare payload-builder state-root provider"
-                );
-                return None
-            }
-        };
-        let overlay_factory = OverlayStateProviderFactory::new(
-            self.provider.clone(),
-            Self::overlay_builder_for_parent(parent_hash, state, self.changeset_cache.clone()),
-        );
+    ) -> PayloadBuilderResources {
+        let execution_cache = self
+            .config
+            .share_execution_cache_with_payload_builder()
+            .then(|| self.payload_processor.cache_for(parent_hash));
+        let state_root_handle =
+            self.payload_state_root_handle_for(parent_hash, parent_header, timestamp, state);
 
-        match self.state_root_strategy.prepare_payload_builder(PayloadStateRootJobContext::new(
-            &self.runtime,
-            &self.state_trie_overlays,
-            parent_hash,
-            parent_header,
-            timestamp,
-            state,
-            provider_builder,
-            overlay_factory,
-            &self.config,
-        )) {
-            Ok(handle) => handle,
-            Err(err) => {
-                warn!(
-                    target: "engine::tree::payload_validator",
-                    %err,
-                    %parent_hash,
-                    "failed to prepare payload-builder state-root job"
-                );
-                None
-            }
-        }
+        PayloadBuilderResources::new(execution_cache, state_root_handle)
     }
 }
 
