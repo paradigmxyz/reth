@@ -15,6 +15,7 @@ use reth_cli_commands::{
 };
 use reth_cli_runner::CliRunner;
 use reth_db::DatabaseEnv;
+use reth_era::ere::types::execution::SlimReceipt;
 use reth_node_api::NodePrimitives;
 use reth_node_builder::{NodeBuilder, WithLaunchContext};
 use reth_node_core::{
@@ -180,7 +181,10 @@ impl<
         ) -> eyre::Result<()>,
     ) -> eyre::Result<()>
     where
-        N: CliNodeTypes<Primitives: NodePrimitives<BlockHeader: HeaderMut>, ChainSpec: Hardforks>,
+        N: CliNodeTypes<
+            Primitives: NodePrimitives<BlockHeader: HeaderMut, Receipt: From<SlimReceipt>>,
+            ChainSpec: Hardforks,
+        >,
         C: ChainSpecParser<ChainSpec = N::ChainSpec>,
     {
         self.configure().run_with_components(components, launcher)
@@ -228,7 +232,10 @@ impl<
         ) -> eyre::Result<()>,
     ) -> eyre::Result<()>
     where
-        N: CliNodeTypes<Primitives: NodePrimitives<BlockHeader: HeaderMut>, ChainSpec: Hardforks>,
+        N: CliNodeTypes<
+            Primitives: NodePrimitives<BlockHeader: HeaderMut, Receipt: From<SlimReceipt>>,
+            ChainSpec: Hardforks,
+        >,
         C: ChainSpecParser<ChainSpec = N::ChainSpec>,
     {
         let mut app = self.configure();

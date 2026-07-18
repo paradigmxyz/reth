@@ -260,6 +260,17 @@ pub struct SlimReceipt {
     pub logs: Vec<Log>,
 }
 
+impl From<SlimReceipt> for reth_ethereum_primitives::Receipt {
+    fn from(receipt: SlimReceipt) -> Self {
+        Self {
+            tx_type: receipt.tx_type,
+            success: receipt.status.coerce_status(),
+            cumulative_gas_used: receipt.cumulative_gas_used,
+            logs: receipt.logs,
+        }
+    }
+}
+
 /// Proof type discriminant used inside the Proof entry's RLP envelope.
 ///
 /// Maps to specific Portal Network proof objects.

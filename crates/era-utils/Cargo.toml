@@ -16,6 +16,7 @@ alloy-primitives.workspace = true
 alloy-rlp.workspace = true
 
 # reth
+reth-codecs.workspace = true
 reth-db-api.workspace = true
 reth-era.workspace = true
 reth-era-downloader.workspace = true
@@ -40,6 +41,7 @@ reth-provider.workspace = true
 reth-provider.features = ["test-utils"]
 reth-db-common.workspace = true
 reth-ethereum-primitives.workspace = true
+reth-static-file-types.workspace = true
 
 # async
 tokio-util.workspace = true

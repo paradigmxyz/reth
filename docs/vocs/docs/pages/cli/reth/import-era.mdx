@@ -148,6 +148,13 @@ Storage:
           The file containing the block is imported up to and including this height, then the
           import ends. By default all available blocks are imported.
 
+      --with-receipts
+          Also import receipts, writing them to the `Receipts` static file segment.
+
+          Off by default. Only `.era1` and `.ere` files may carry receipts (`.era1` always
+          includes them; `.ere` receipts are optional per spec); passing this flag with plain
+          `.era` files, or with `.ere` files that omit receipts, is an error.
+
 Logging:
       --log.stdout.format <FORMAT>
           The format to use for logs written to stdout

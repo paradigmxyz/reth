@@ -6,7 +6,12 @@ use reth_era_downloader::{EraClient, EraStream, EraStreamConfig};
 use reth_era_utils::{export, import, Era1, Ere, ExportConfig};
 use reth_etl::Collector;
 use reth_fs_util as fs;
-use reth_provider::{test_utils::create_test_provider_factory, BlockNumReader, BlockReader};
+use reth_primitives_traits::Block as _;
+use reth_provider::{
+    test_utils::create_test_provider_factory, BlockNumReader, BlockReader, ReceiptProvider,
+    StaticFileProviderFactory,
+};
+use reth_static_file_types::StaticFileSegment;
 use std::str::FromStr;
 use tempfile::tempdir;
 
@@ -39,9 +44,48 @@ async fn test_history_imports_from_fresh_state_successfully() {
 
     let expected_block_number = 8191;
     let actual_block_number =
-        import::<Era1, _, _, _, _, _, _>(stream, &pf, &mut hash_collector, None).unwrap();
+        import::<Era1, _, _, _, _, _, _>(stream, &pf, &mut hash_collector, None, false).unwrap();
 
     assert_eq!(actual_block_number, expected_block_number);
+}
+
+/// Importing a real `.era1` file with `--with-receipts`-style `store_receipts = true` must
+/// decode and persist its (always-present) receipts to the `Receipts` static file segment.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn test_history_import_with_receipts() {
+    let url = Url::from_str(ITHACA_ERA_INDEX_URL).unwrap();
+
+    let folder = tempdir().unwrap();
+    let client = EraClient::new(ClientWithFakeIndex(Client::new()), url, folder.path());
+    let config = EraStreamConfig::default().with_max_files(1).with_max_concurrent_downloads(1);
+    let stream = EraStream::new(client, config);
+
+    let pf = create_test_provider_factory();
+    init_genesis(&pf).unwrap();
+
+    let collector_dir = tempdir().unwrap();
+    let mut hash_collector = Collector::new(4096, Some(collector_dir.path().to_owned()));
+
+    let imported_height =
+        import::<Era1, _, _, _, _, _, _>(stream, &pf, &mut hash_collector, None, true).unwrap();
+    assert_eq!(imported_height, 8191);
+
+    assert_eq!(
+        pf.static_file_provider().get_highest_static_file_block(StaticFileSegment::Receipts),
+        Some(imported_height),
+        "receipts static file should cover every imported block"
+    );
+
+    let provider = pf.provider().unwrap();
+    for &block_num in &[0, 1, 100, 8191] {
+        let block = provider.block_by_number(block_num).unwrap().unwrap();
+        let receipts = provider.receipts_by_block(block_num.into()).unwrap().unwrap();
+        assert_eq!(
+            receipts.len(),
+            block.body().transactions().count(),
+            "block {block_num} should have one receipt per transaction"
+        );
+    }
 }
 
 /// Test that verifies the complete roundtrip from importing to exporting era1 files.
@@ -69,7 +113,7 @@ async fn test_roundtrip_export_after_import() {
 
     // Import blocks from one era1 file into database
     let last_imported_block_height =
-        import::<Era1, _, _, _, _, _, _>(stream, &pf, &mut hash_collector, None).unwrap();
+        import::<Era1, _, _, _, _, _, _>(stream, &pf, &mut hash_collector, None, false).unwrap();
 
     assert_eq!(last_imported_block_height, 8191);
     let provider_ref = pf.provider_rw().unwrap().0;
@@ -179,7 +223,7 @@ async fn test_ere_roundtrip_export_after_import() {
     let mut hash_collector = Collector::new(4096, Some(collector_dir.path().to_owned()));
 
     let imported_height =
-        import::<Era1, _, _, _, _, _, _>(stream, &pf, &mut hash_collector, None).unwrap();
+        import::<Era1, _, _, _, _, _, _>(stream, &pf, &mut hash_collector, None, false).unwrap();
     assert_eq!(imported_height, 8191);
 
     let provider_ref = pf.provider_rw().unwrap().0;
@@ -234,7 +278,7 @@ async fn test_ere_roundtrip_export_after_import() {
     // expects.
     let stream = futures_util::stream::iter(ere_files.into_iter().map(|p| Ok(FileMeta::new(p))));
     let reimported_height =
-        import::<Ere, _, _, _, _, _, _>(stream, &reimport_pf, &mut reimport_collector, None)
+        import::<Ere, _, _, _, _, _, _>(stream, &reimport_pf, &mut reimport_collector, None, false)
             .unwrap();
 
     assert_eq!(
