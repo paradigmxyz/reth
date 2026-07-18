@@ -35,6 +35,7 @@ index 1c9714df..2aa493ca 100644
 -	return tag, err
 +	return tag, nil
  }
+ 
  // BuildImage creates a container by archiving the given file system,
 diff --git a/internal/libdocker/proxy.go b/internal/libdocker/proxy.go
 index 386b4224..7545fda0 100644
