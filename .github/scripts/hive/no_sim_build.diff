@@ -1,5 +1,5 @@
 diff --git a/internal/libdocker/builder.go b/internal/libdocker/builder.go
-index e4bf99b6..2023f7e2 100644
+index 1c9714df..2aa493ca 100644
 --- a/internal/libdocker/builder.go
 +++ b/internal/libdocker/builder.go
 @@ -8,7 +8,6 @@ import (
@@ -8,9 +8,9 @@ index e4bf99b6..2023f7e2 100644
  	"log/slog"
 -	"os"
  	"path/filepath"
+ 	"regexp"
  	"slices"
- 	"strings"
-@@ -49,25 +48,8 @@ func (b *Builder) BuildClientImage(ctx context.Context, client libhive.ClientDes
+@@ -50,25 +49,8 @@ func (b *Builder) BuildClientImage(ctx context.Context, client libhive.ClientDes
  
  // BuildSimulatorImage builds a docker image of a simulator.
  func (b *Builder) BuildSimulatorImage(ctx context.Context, name string, buildArgs map[string]string) (string, error) {
@@ -38,15 +38,17 @@ index e4bf99b6..2023f7e2 100644
  
  // BuildImage creates a container by archiving the given file system,
 diff --git a/internal/libdocker/proxy.go b/internal/libdocker/proxy.go
-index d3a14ae6..8779671e 100644
+index 386b4224..7545fda0 100644
 --- a/internal/libdocker/proxy.go
 +++ b/internal/libdocker/proxy.go
-@@ -16,7 +16,7 @@ const hiveproxyTag = "hive/hiveproxy"
+@@ -16,10 +16,6 @@ const hiveproxyTag = "hive/hiveproxy"
  
  // Build builds the hiveproxy image.
  func (cb *ContainerBackend) Build(ctx context.Context, b libhive.Builder) error {
--	return b.BuildImage(ctx, hiveproxyTag, hiveproxy.Source)
-+	return nil
+-	err := b.BuildImage(ctx, hiveproxyTag, hiveproxy.Source)
+-	if err != nil && !imageAlreadyExists(err) {
+-		return err
+-	}
+ 	return nil
  }
  
- // ServeAPI starts the API server.
