@@ -26,6 +26,8 @@ pub enum StateRootMessage {
     StateUpdate(EvmState),
     /// Pre-hashed state update from BAL conversion that can be applied directly without proofs.
     HashedStateUpdate(HashedPostState),
+    /// Post-block storage roots keyed by hashed account address.
+    StorageRoots(B256Map<B256>),
     /// Signals state update stream end.
     ///
     /// This is triggered by block execution, indicating that no additional state updates are

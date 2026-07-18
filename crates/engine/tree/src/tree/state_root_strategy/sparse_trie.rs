@@ -460,6 +460,7 @@ where
             }
             SparseTrieTaskMessage::StorageRoots(roots) => {
                 self.precomputed_storage_roots.extend(roots);
+                None
             }
             SparseTrieTaskMessage::FinishedStateUpdates => {
                 let hashed_state = Arc::new(core::mem::take(&mut self.final_hashed_state));
