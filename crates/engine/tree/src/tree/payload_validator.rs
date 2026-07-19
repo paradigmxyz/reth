@@ -137,7 +137,7 @@ use reth_evm::{
     OnStateHook, SpecFor,
 };
 use reth_execution_cache::{CacheFillMode, CacheStats};
-use reth_payload_builder::PayloadBuilderResources;
+use reth_payload_builder::{PayloadBuilderLease, PayloadBuilderResources};
 use reth_payload_primitives::{
     BuiltPayload, BuiltPayloadExecutedBlock, InvalidPayloadAttributesError, NewPayloadError,
     PayloadTypes,
@@ -1841,6 +1841,7 @@ where
             self.payload_state_root_handle_for(parent_hash, parent_header, timestamp, state);
 
         PayloadBuilderResources::new(execution_cache, state_root_handle)
+            .with_lease(PayloadBuilderLease::new(JitPauseGuard::new(&self.evm_config)))
     }
 }
 
