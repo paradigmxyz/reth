@@ -4,7 +4,13 @@
 //! `SnapClient` request encoding, `RLPx` session transport, `EthRequestHandler`/
 //! `StateRangeProviderFactory` serving, and response decoding.
 
-use alloy_consensus::constants::{EMPTY_ROOT_HASH, KECCAK_EMPTY};
+use alloy_consensus::{
+    constants::{EMPTY_ROOT_HASH, KECCAK_EMPTY},
+    Header,
+};
+use alloy_eip7928::{
+    compute_block_access_list_hash, AccountChanges, BalanceChange, BlockAccessIndex,
+};
 use alloy_eips::NumHash;
 use alloy_primitives::{keccak256, Address, Bytes, B256, U256};
 use alloy_rlp::Decodable;
@@ -41,6 +47,8 @@ use reth_transaction_pool::test_utils::TestPool;
 use reth_trie::{HashedPostState, HashedStorage};
 use std::{sync::Arc, time::Duration};
 
+mod protocol;
+
 type SnapTestnetHandle<C> = TestnetHandle<C, TestPool>;
 
 /// Protocols a snap/2-capable peer advertises: `eth/71` plus `snap/2`.
@@ -51,11 +59,26 @@ fn snap_protocols() -> Vec<Protocol> {
     vec![EthVersion::Eth71.into(), Protocol::snap_2()]
 }
 
-/// Spawns a 2-peer testnet where both peers are snap/2-capable and serve requests against
-/// `provider`.
-async fn spawn_snap_testnet<C>(provider: C) -> SnapTestnetHandle<C>
-where
-    C: BlockReader<
+/// A provider usable by the snap/2 testnet helpers: real block, header, state, bal, and range
+/// access.
+trait SnapTestProvider:
+    BlockReader<
+        Block = reth_ethereum_primitives::Block,
+        Receipt = reth_ethereum_primitives::Receipt,
+        Header = alloy_consensus::Header,
+    > + HeaderProvider
+    + BalProvider
+    + StateProviderFactory
+    + StateRangeProviderFactory
+    + ChainSpecProvider<ChainSpec: Hardforks>
+    + Clone
+    + Unpin
+    + 'static
+{
+}
+
+impl<T> SnapTestProvider for T where
+    T: BlockReader<
             Block = reth_ethereum_primitives::Block,
             Receipt = reth_ethereum_primitives::Receipt,
             Header = alloy_consensus::Header,
@@ -66,11 +89,24 @@ where
         + ChainSpecProvider<ChainSpec: Hardforks>
         + Clone
         + Unpin
-        + 'static,
+        + 'static
 {
+}
+
+/// Spawns a 2-peer testnet where both peers are snap/2-capable and serve requests against
+/// `provider`.
+async fn spawn_snap_testnet<C: SnapTestProvider>(provider: C) -> SnapTestnetHandle<C> {
+    spawn_snap_testnet_with_protocols(provider, snap_protocols()).await
+}
+
+/// Like [`spawn_snap_testnet`], but with a caller-chosen protocol list.
+async fn spawn_snap_testnet_with_protocols<C: SnapTestProvider>(
+    provider: C,
+    protocols: Vec<Protocol>,
+) -> SnapTestnetHandle<C> {
     let mut net: Testnet<C, TestPool> = Testnet::default();
     for _ in 0..2 {
-        let peer = PeerConfig::with_protocols(provider.clone(), snap_protocols());
+        let peer = PeerConfig::with_protocols(provider.clone(), protocols.clone());
         net.add_peer_with_config(peer).await.unwrap();
     }
     net.for_each_mut(|peer| peer.install_request_handler());
@@ -169,6 +205,17 @@ fn assert_boundary_proof(root: B256, key: B256, expected_value: Option<Vec<u8>>,
     );
 }
 
+/// A valid RLP-encoded EIP-7928 block access list for `address`, with its commitment hash.
+fn valid_bal(address: Address) -> (Bytes, B256) {
+    let mut change = AccountChanges::new(address);
+    change.balance_changes.push(BalanceChange::new(BlockAccessIndex::PRE_EXECUTION, U256::from(1)));
+    let bal = vec![change];
+
+    let mut buf = Vec::new();
+    alloy_rlp::encode_list(&bal, &mut buf);
+    (Bytes::from(buf), compute_block_access_list_hash(&bal))
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn account_range_roundtrip_carries_slim_encoding_and_proof() {
     reth_tracing::init_test_tracing();
@@ -239,6 +286,71 @@ async fn account_range_roundtrip_carries_slim_encoding_and_proof() {
         state_root,
         *last_hash,
         Some(alloy_rlp::encode(last_account.into_trie_account(EMPTY_ROOT_HASH))),
+        &proof,
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn account_range_bounded_by_response_bytes_excludes_trailing_account() {
+    reth_tracing::init_test_tracing();
+
+    let factory = genesis_provider_factory();
+    let accounts: Vec<(Address, Account)> = (0..5u64)
+        .map(|nonce| {
+            (Address::random(), Account { nonce, balance: U256::from(nonce), bytecode_hash: None })
+        })
+        .collect();
+
+    let provider_rw = factory.provider_rw().unwrap();
+    provider_rw
+        .insert_account_for_hashing(
+            accounts.iter().map(|(address, account)| (*address, Some(*account))),
+        )
+        .unwrap();
+    provider_rw.commit().unwrap();
+
+    let state_root = persist_fixture_state_root(&factory);
+
+    let provider = BlockchainProvider::new(factory).unwrap();
+    let net = spawn_snap_testnet(provider).await;
+    let fetch = net.peers()[0].network().fetch_client().await.unwrap();
+
+    let mut expected: Vec<_> =
+        accounts.iter().map(|(address, account)| (keccak256(address), *account)).collect();
+    expected.sort_by_key(|(hash, _)| *hash);
+
+    // Each account costs a fixed 160 bytes. A budget below that admits only account A, since the
+    // server always returns at least the entry that crosses the limit.
+    let response_bytes = 100u64;
+    let response = fetch
+        .get_account_range(GetAccountRangeMessage {
+            request_id: 41,
+            root_hash: state_root,
+            starting_hash: B256::ZERO,
+            limit_hash: B256::repeat_byte(0xff),
+            response_bytes,
+        })
+        .await
+        .unwrap()
+        .into_data();
+
+    let SnapResponse::AccountRange(AccountRangeMessage { accounts: returned, proof, .. }) =
+        response
+    else {
+        panic!("expected an account range response");
+    };
+    assert_eq!(returned.len(), 1, "only account A should fit in the byte budget");
+    assert_eq!(returned[0].hash, expected[0].0);
+
+    let excluded = expected[1].0;
+    assert!(returned.iter().all(|a| a.hash != excluded), "account B must not be returned");
+
+    assert!(!proof.is_empty());
+    assert_boundary_proof(state_root, B256::ZERO, None, &proof);
+    assert_boundary_proof(
+        state_root,
+        expected[0].0,
+        Some(alloy_rlp::encode(expected[0].1.into_trie_account(EMPTY_ROOT_HASH))),
         &proof,
     );
 }
@@ -497,15 +609,38 @@ async fn storage_ranges_multi_account_bounds_only_first_account() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn retained_and_expired_state_roots_respond_without_hanging() {
+async fn retained_and_expired_account_range_requests_resolve_without_hanging() {
     reth_tracing::init_test_tracing();
 
+    // Covers request routing only, not changeset reversion.
     let factory = create_test_provider_factory();
     let mut rng = generators::rng();
-    let expired_root = B256::repeat_byte(0x11);
-    let retained_root = B256::repeat_byte(0x22);
-    let mut parent = B256::ZERO;
 
+    // Real trie root of `expired_account` alone, committed to block 0.
+    let expired_account =
+        (Address::random(), Account { nonce: 3, balance: U256::from(3), bytecode_hash: None });
+    {
+        let provider_rw = factory.provider_rw().unwrap();
+        provider_rw
+            .insert_account_for_hashing([(expired_account.0, Some(expired_account.1))])
+            .unwrap();
+        provider_rw.commit().unwrap();
+    }
+    let expired_root = factory.latest().unwrap().state_root(HashedPostState::default()).unwrap();
+
+    // Real trie root of `expired_account` + `retained_account` together, committed to block 64.
+    let retained_account =
+        (Address::random(), Account { nonce: 7, balance: U256::from(7), bytecode_hash: None });
+    {
+        let provider_rw = factory.provider_rw().unwrap();
+        provider_rw
+            .insert_account_for_hashing([(retained_account.0, Some(retained_account.1))])
+            .unwrap();
+        provider_rw.commit().unwrap();
+    }
+    let retained_root = factory.latest().unwrap().state_root(HashedPostState::default()).unwrap();
+
+    let mut parent = B256::ZERO;
     let provider_rw = factory.provider_rw().unwrap();
     for number in 0..=SNAPSHOT_STATE_RETENTION {
         let mut block = random_block(
@@ -526,48 +661,61 @@ async fn retained_and_expired_state_roots_respond_without_hanging() {
     provider_rw
         .save_stage_checkpoint(StageId::Finish, StageCheckpoint::new(SNAPSHOT_STATE_RETENTION))
         .unwrap();
-
-    let account =
-        (Address::random(), Account { nonce: 7, balance: U256::from(7), bytecode_hash: None });
-    provider_rw.insert_account_for_hashing([(account.0, Some(account.1))]).unwrap();
     provider_rw.commit().unwrap();
 
     let provider = BlockchainProvider::new(factory).unwrap();
     let net = spawn_snap_testnet(provider).await;
     let fetch = net.peers()[0].network().fetch_client().await.unwrap();
 
-    let request = |request_id: u64, root_hash: B256| GetAccountRangeMessage {
+    let request = |request_id: u64, root_hash: B256, limit_hash: B256| GetAccountRangeMessage {
         request_id,
         root_hash,
         starting_hash: B256::ZERO,
-        limit_hash: B256::repeat_byte(0xff),
+        limit_hash,
         response_bytes: SOFT_RESPONSE_LIMIT as u64,
     };
 
-    // An older root still inside the retention window resolves to the real account data as of
-    // that root, even though the chain has advanced well past it.
+    let mut expected: Vec<_> = [expired_account, retained_account]
+        .into_iter()
+        .map(|(address, account)| (keccak256(address), account))
+        .collect();
+    expected.sort_by_key(|(hash, _)| *hash);
+
+    // An older root inside the retention window resolves to the account data at that root.
+    // Using the real last account hash as the limit forces a hash-limit stop, so a proof is
+    // still expected.
     let response = tokio::time::timeout(
         Duration::from_secs(5),
-        fetch.get_account_range(request(1, retained_root)),
+        fetch.get_account_range(request(1, retained_root, expected.last().unwrap().0)),
     )
     .await
     .expect("request should not hang")
     .unwrap()
     .into_data();
-    let SnapResponse::AccountRange(AccountRangeMessage { request_id, accounts, .. }) = response
+    let SnapResponse::AccountRange(AccountRangeMessage { request_id, accounts, proof }) = response
     else {
         panic!("expected an account range response");
     };
     assert_eq!(request_id, 1);
-    assert_eq!(accounts.len(), 1);
-    assert_eq!(accounts[0].hash, keccak256(account.0));
+    assert_eq!(accounts.len(), expected.len());
+    for (AccountData { hash, .. }, (expected_hash, _)) in accounts.iter().zip(&expected) {
+        assert_eq!(hash, expected_hash);
+    }
+    assert!(!proof.is_empty());
+    assert_boundary_proof(retained_root, B256::ZERO, None, &proof);
+    let (last_hash, last_account) = expected.last().unwrap();
+    assert_boundary_proof(
+        retained_root,
+        *last_hash,
+        Some(alloy_rlp::encode(last_account.into_trie_account(EMPTY_ROOT_HASH))),
+        &proof,
+    );
 
-    // A root outside the retention window (same code path as a root that never existed) is
-    // unresolvable, so the handler returns the typed "unavailable" empty response instead of
-    // hanging or falling back to newer state.
+    // A root outside the retention window is treated like one that never existed and is
+    // unresolvable, so the handler returns an empty response instead of hanging.
     let response = tokio::time::timeout(
         Duration::from_secs(5),
-        fetch.get_account_range(request(2, expired_root)),
+        fetch.get_account_range(request(2, expired_root, B256::repeat_byte(0xff))),
     )
     .await
     .expect("request should not hang")
@@ -594,12 +742,20 @@ async fn block_access_lists_roundtrip_preserves_positions_and_request_id() {
     let hash_a = B256::random();
     let missing_hash = B256::random();
     let hash_b = B256::random();
-    let bal_a = Bytes::from_static(&[0xc1, 0x01]);
-    let bal_b = Bytes::from_static(&[0xc1, 0x02]);
+    let (bal_a, hash_a_commit) = valid_bal(Address::random());
+    let (bal_b, hash_b_commit) = valid_bal(Address::random());
     bal_store.insert(NumHash::new(1, hash_a), RawBal::from(bal_a.clone())).unwrap();
     bal_store.insert(NumHash::new(2, hash_b), RawBal::from(bal_b.clone())).unwrap();
+    provider.add_header(
+        hash_a,
+        Header { block_access_list_hash: Some(hash_a_commit), ..Default::default() },
+    );
+    provider.add_header(
+        hash_b,
+        Header { block_access_list_hash: Some(hash_b_commit), ..Default::default() },
+    );
 
-    let net = spawn_snap_testnet(provider).await;
+    let net = spawn_snap_testnet(provider.clone()).await;
     let fetch = net.peers()[0].network().fetch_client().await.unwrap();
     let response = fetch
         .get_block_access_lists(GetBlockAccessListsMessage {
@@ -617,7 +773,16 @@ async fn block_access_lists_roundtrip_preserves_positions_and_request_id() {
         panic!("expected a block access lists response");
     };
     assert_eq!(request_id, 31);
-    assert_eq!(block_access_lists, BlockAccessLists(vec![Some(bal_a), None, Some(bal_b)]));
+    assert_eq!(
+        block_access_lists,
+        BlockAccessLists(vec![Some(bal_a.clone()), None, Some(bal_b.clone())])
+    );
+
+    // The served bytes commit to the header's `block_access_list_hash`, per EIP-7928.
+    let header_a = provider.header(hash_a).unwrap().unwrap();
+    assert_eq!(header_a.block_access_list_hash, Some(keccak256(&bal_a)));
+    let header_b = provider.header(hash_b).unwrap().unwrap();
+    assert_eq!(header_b.block_access_list_hash, Some(keccak256(&bal_b)));
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -632,8 +797,8 @@ async fn block_access_lists_roundtrip_honors_request_soft_limit() {
     let hash_a = B256::random();
     let missing_hash = B256::random();
     let hash_b = B256::random();
-    let bal_a = Bytes::from_static(&[0xc1, 0x01]);
-    let bal_b = Bytes::from_static(&[0xc1, 0x02]);
+    let (bal_a, _) = valid_bal(Address::random());
+    let (bal_b, _) = valid_bal(Address::random());
     bal_store.insert(NumHash::new(1, hash_a), RawBal::from(bal_a.clone())).unwrap();
     bal_store.insert(NumHash::new(2, hash_b), RawBal::from(bal_b)).unwrap();
 

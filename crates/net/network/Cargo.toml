@@ -95,6 +95,7 @@ reth-trie.workspace = true
 reth-transaction-pool = { workspace = true, features = ["test-utils"] }
 
 # alloy deps for testing against nodes
+alloy-eip7928.workspace = true
 alloy-genesis.workspace = true
 alloy-trie.workspace = true
 
