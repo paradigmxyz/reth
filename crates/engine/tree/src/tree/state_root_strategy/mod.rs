@@ -63,7 +63,7 @@ use reth_primitives_traits::{
 use reth_provider::{
     providers::OverlayStateProviderFactory, BlockExecutionOutput, BlockReader,
     DatabaseProviderFactory, DatabaseProviderROFactory, HashedPostStateProvider, ProviderError,
-    StateProviderFactory, StateReader, StateRootProvider,
+    StateProviderFactory, StateReader,
 };
 use reth_tasks::utils::increase_thread_priority;
 use reth_trie::{
@@ -981,7 +981,7 @@ where
     ) -> ProviderResult<StateRootJobOutcome> {
         let provider = self.provider_builder.clone().build()?;
         let (state_root, trie_updates) =
-            provider.state_root_with_updates(hashed_state.get().as_ref().clone())?;
+            provider.state_root_with_updates_consumed(hashed_state.get().as_ref().clone())?;
         Ok(StateRootJobOutcome::new(state_root, Arc::new(trie_updates)))
     }
 }
@@ -1019,7 +1019,7 @@ where
             let result = (|| {
                 let hashed_state = Arc::new(provider.hashed_post_state(&output.state));
                 let (root, updates) =
-                    provider.state_root_with_updates(hashed_state.as_ref().clone())?;
+                    provider.state_root_with_updates_consumed(hashed_state.as_ref().clone())?;
                 Ok((root, updates, hashed_state))
             })();
             let _ = fallback_tx.send(result);
@@ -1039,7 +1039,7 @@ where
         let provider = self.provider_builder.clone().build()?;
         let hashed_state = Arc::new(provider.hashed_post_state(&output.state));
         let (state_root, trie_updates) =
-            provider.state_root_with_updates(hashed_state.as_ref().clone())?;
+            provider.state_root_with_updates_consumed(hashed_state.as_ref().clone())?;
         self.metrics.state_root_task_fallback_success_total.increment(1);
         Ok(StateRootJobOutcome::new(state_root, Arc::new(trie_updates))
             .with_hashed_state(Some(hashed_state)))
@@ -1216,7 +1216,7 @@ where
 
     match state_provider_builder.build().and_then(|provider| {
         let hashed_state = provider.hashed_post_state(&output.state);
-        provider.state_root_with_updates(hashed_state)
+        provider.state_root_with_updates_consumed(hashed_state)
     }) {
         Ok((serial_root, serial_trie_updates)) => {
             debug!(
