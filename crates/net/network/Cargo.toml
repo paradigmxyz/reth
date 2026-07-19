@@ -132,6 +132,7 @@ serde = [
     "reth-network-types/serde",
     "reth-stages-types/serde",
     "reth-trie/serde",
+    "alloy-eip7928/serde",
 ]
 test-utils = [
     "reth-transaction-pool/test-utils",
