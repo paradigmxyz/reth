@@ -27,7 +27,7 @@ use reth_revm::{db::State, witness::ExecutionWitnessRecord};
 use reth_rpc_api::DebugApiServer;
 use reth_rpc_convert::RpcTxReq;
 use reth_rpc_eth_api::{
-    helpers::{EthTransactions, TraceExt},
+    helpers::{EthTransactions, GetBlockAccessList, TraceExt},
     FromEthApiError, FromEvmError, RpcConvert, RpcNodeCore,
 };
 use reth_rpc_eth_types::{EthApiError, StateCacheDb};
@@ -779,6 +779,15 @@ where
         let mut res = Vec::new();
         block.encode(&mut res);
         Ok(res.into())
+    }
+
+    /// Handler for `debug_getRawBlockAccessList`
+    async fn raw_block_access_list(&self, block_id: BlockId) -> RpcResult<Bytes> {
+        self.eth_api()
+            .get_raw_block_access_list(block_id)
+            .await
+            .map_err(Into::into)?
+            .ok_or_else(|| EthApiError::HeaderNotFound(block_id).into())
     }
 
     /// Handler for `debug_getRawTransaction`
