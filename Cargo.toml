@@ -37,6 +37,7 @@ members = [
     "crates/ethereum/cli/",
     "crates/ethereum/consensus/",
     "crates/ethereum/engine-primitives/",
+    "crates/ethereum/eip8304/",
     "crates/ethereum/evm",
     "crates/ethereum/node",
     "crates/ethereum/payload/",
@@ -352,6 +353,7 @@ reth-eth-wire-types = { path = "crates/net/eth-wire-types" }
 reth-ethereum-payload-builder = { path = "crates/ethereum/payload" }
 reth-ethereum-cli = { path = "crates/ethereum/cli", default-features = false }
 reth-ethereum-consensus = { path = "crates/ethereum/consensus", default-features = false }
+reth-eip8304 = { path = "crates/ethereum/eip8304", default-features = false }
 reth-ethereum-engine-primitives = { path = "crates/ethereum/engine-primitives", default-features = false }
 reth-ethereum-forks = { path = "crates/ethereum/hardforks", default-features = false }
 reth-ethereum-primitives = { path = "crates/ethereum/primitives", default-features = false }

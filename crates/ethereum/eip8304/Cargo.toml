@@ -1,0 +1,27 @@
+[package]
+name = "reth-eip8304"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
+description = "EIP-8304 trustless log and transaction index implementation for Reth"
+
+[lints]
+workspace = true
+
+[dependencies]
+alloy-primitives.workspace = true
+
+sha2.workspace = true
+
+[dev-dependencies]
+alloy-primitives = { workspace = true, features = ["std"] }
+
+[features]
+default = ["std"]
+std = [
+    "alloy-primitives/std",
+    "sha2/std",
+]
