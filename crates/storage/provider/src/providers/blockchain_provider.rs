@@ -1054,7 +1054,7 @@ mod tests {
     use reth_trie::{updates::TrieUpdates, ComputedTrieData, HashedPostState, HashedStorage};
     use revm::database::{BundleState, OriginalValuesKnown};
     use std::{
-        collections::BTreeMap,
+        collections::{BTreeMap, HashMap},
         ops::{Bound, Range, RangeBounds},
         sync::Arc,
     };
@@ -3175,6 +3175,100 @@ mod tests {
             provider.state_range_provider(unique_root)?.expect("in-memory root must resolve");
         let range = state.account_range(B256::ZERO, B256::repeat_byte(0xff), 10_000)?;
         assert_eq!(range.items, vec![(target_hashed, target_account)]);
+
+        Ok(())
+    }
+
+    #[test]
+    fn historical_state_range_provider_reverts_state_change_past_retained_anchor(
+    ) -> eyre::Result<()> {
+        let mut rng = generators::rng();
+
+        // State A: the account and its one storage slot as of the retained anchor.
+        let (address, account_a) = random_account(1);
+        let hashed_address = keccak256(address);
+        let slot_key = B256::with_last_byte(1);
+        let slot = U256::from_be_bytes(slot_key.0);
+        let hashed_slot = keccak256(slot_key);
+        let value_a = U256::from(1);
+
+        let factory = test_provider_factory_with_genesis()?;
+        let provider_rw = factory.provider_rw()?;
+        provider_rw.insert_account_for_hashing([(address, Some(account_a))])?;
+        provider_rw.insert_storage_for_hashing([(
+            address,
+            [StorageEntry { key: slot_key, value: value_a }],
+        )])?;
+        provider_rw.commit()?;
+        let anchor_root = factory.latest()?.state_root(HashedPostState::default())?;
+
+        let genesis_hash = factory.sealed_header(0)?.unwrap().hash();
+        let mut anchor_block = random_block(
+            &mut rng,
+            1,
+            BlockParams { parent: Some(genesis_hash), tx_count: Some(0), ..Default::default() },
+        )
+        .unseal();
+        anchor_block.header.state_root = anchor_root;
+        let anchor_block =
+            anchor_block.seal_slow().try_recover().expect("failed to seal block with senders");
+        let anchor_hash = anchor_block.hash();
+
+        let provider_rw = factory.provider_rw()?;
+        provider_rw.insert_block(&anchor_block)?;
+        provider_rw.save_stage_checkpoint(StageId::Finish, StageCheckpoint::new(1))?;
+        provider_rw.commit()?;
+
+        // State B: a later block changes both the account and its storage slot.
+        let account_b = Account { nonce: 2, balance: U256::from(2), ..account_a };
+        let value_b = U256::from(2);
+
+        let mut storage = HashMap::default();
+        storage.insert(slot, (value_a, value_b));
+
+        let mut state_b = HashedPostState::default();
+        state_b.accounts.insert(hashed_address, Some(account_b));
+        state_b
+            .storages
+            .insert(hashed_address, HashedStorage::from_iter(false, [(hashed_slot, value_b)]));
+
+        let later_block = random_block(
+            &mut rng,
+            2,
+            BlockParams { parent: Some(anchor_hash), tx_count: Some(0), ..Default::default() },
+        )
+        .try_recover()
+        .expect("failed to seal block with senders");
+
+        let provider_rw = factory.provider_rw()?;
+        provider_rw.append_blocks_with_state(
+            vec![later_block],
+            &ExecutionOutcome {
+                bundle: BundleState::new(
+                    [(address, Some(account_a.into()), Some(account_b.into()), storage)],
+                    [[(address, Some(Some(account_a.into())), [(slot, value_a)])]],
+                    [],
+                ),
+                first_block: 2,
+                ..Default::default()
+            },
+            state_b.into_sorted(),
+        )?;
+        provider_rw.save_stage_checkpoint(StageId::Finish, StageCheckpoint::new(2))?;
+        provider_rw.commit()?;
+
+        // Resolving the anchor root must revert the later account and storage changes; state B
+        // must not leak into the response.
+        let provider = BlockchainProvider::new(factory)?;
+        let state =
+            provider.state_range_provider(anchor_root)?.expect("retained root must resolve");
+        let range = state.account_range(B256::ZERO, B256::repeat_byte(0xff), 10_000)?;
+        assert_eq!(range.items, vec![(hashed_address, account_a)]);
+
+        let storage_range = state
+            .storage_range(hashed_address, B256::ZERO, B256::repeat_byte(0xff), 10_000)?
+            .expect("account must have storage");
+        assert_eq!(storage_range.items, vec![(hashed_slot, value_a)]);
 
         Ok(())
     }
