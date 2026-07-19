@@ -12,7 +12,6 @@ use reth_cli_commands::{
 };
 use reth_cli_runner::CliRunner;
 use reth_db::DatabaseEnv;
-use reth_era::ere::types::execution::SlimReceipt;
 use reth_node_api::NodePrimitives;
 use reth_node_builder::{NodeBuilder, WithLaunchContext};
 use reth_node_ethereum::{consensus::EthBeaconConsensus, EthereumNode};
@@ -102,7 +101,7 @@ where
     ) -> Result<()>
     where
         N: CliNodeTypes<
-            Primitives: NodePrimitives<BlockHeader: HeaderMut, Receipt: From<SlimReceipt>>,
+            Primitives: NodePrimitives<BlockHeader: HeaderMut, Receipt: 'static>,
             ChainSpec: Hardforks,
         >,
         C: ChainSpecParser<ChainSpec = N::ChainSpec>,
@@ -176,7 +175,7 @@ where
     Ext: clap::Args + fmt::Debug,
     Rpc: RpcModuleValidator,
     N: CliNodeTypes<
-        Primitives: NodePrimitives<BlockHeader: HeaderMut, Receipt: From<SlimReceipt>>,
+        Primitives: NodePrimitives<BlockHeader: HeaderMut, Receipt: 'static>,
         ChainSpec: Hardforks,
     >,
     SubCmd: ExtendedCommand + Subcommand + fmt::Debug,

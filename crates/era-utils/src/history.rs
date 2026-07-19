@@ -16,7 +16,7 @@ use reth_era::{
     era1::{file::Era1Reader, types::execution::BlockTuple},
     ere::{
         file::EreReader,
-        types::execution::{BlockTuple as EreBlockTuple, SlimReceipt},
+        types::execution::{try_receipt_from_slim, BlockTuple as EreBlockTuple},
     },
 };
 use reth_era_downloader::EraMeta;
@@ -83,7 +83,7 @@ impl<BH, BB, R> EraBlockReader<BH, BB, R> for Ere
 where
     BH: FullBlockHeader + Value,
     BB: FullBlockBody<OmmerHeader = BH>,
-    R: From<SlimReceipt>,
+    R: 'static,
 {
     fn blocks<M: EraMeta + ?Sized>(
         meta: &M,
@@ -124,7 +124,7 @@ impl Ere {
     where
         BH: FullBlockHeader + Value,
         BB: FullBlockBody<OmmerHeader = BH>,
-        R: From<SlimReceipt>,
+        R: 'static,
         E: From<E2sError> + Error + Send + Sync + 'static,
     {
         let block = block?;
@@ -134,7 +134,19 @@ impl Ere {
             .then(|| block.receipts.as_ref().map(|r| r.decode_receipts()))
             .flatten()
             .transpose()?
-            .map(|slim| slim.into_iter().map(R::from).collect());
+            .map(|slim| {
+                slim.into_iter()
+                    .map(|receipt| {
+                        try_receipt_from_slim(receipt).ok_or_else(|| {
+                            eyre::eyre!(
+                                "`.ere` receipts import is not supported for this node's \
+                                 receipt type"
+                            )
+                        })
+                    })
+                    .collect::<eyre::Result<Vec<R>>>()
+            })
+            .transpose()?;
 
         Ok((header, body, receipts))
     }
@@ -296,7 +308,7 @@ where
         // file segment (including receipts) via `has_unwind_queued`.
         drop(receipts_writer);
 
-        save_stage_checkpoints(&provider, from, height, height, height, store_receipts)?;
+        save_stage_checkpoints(&provider, from, height, height, height)?;
 
         provider.commit()?;
 
@@ -318,20 +330,15 @@ where
 
 /// Saves progress of ERA import into stages sync.
 ///
-/// Since the ERA import does the same work as `HeaderStage` and `BodyStage`, it needs to inform
-/// these stages that this work has already been done. Otherwise, there might be some conflict with
-/// database integrity.
-///
-/// When `receipts_stored` is set, the `Execution` stage checkpoint is marked done up to `to` as
-/// well, since the import also did that stage's work of writing receipts; otherwise a later normal
-/// sync would try to re-execute and re-write receipts for a range the static file already covers.
+/// Only marks `Headers`/`Bodies` done, never `Execution`: unlike this import, execution also
+/// produces state, which imported receipts alone don't. `ExecutionStage::ensure_consistency`
+/// prunes any imported receipts back before a real sync re-executes the range.
 pub fn save_stage_checkpoints<P>(
     provider: P,
     from: BlockNumber,
     to: BlockNumber,
     processed: u64,
     total: u64,
-    receipts_stored: bool,
 ) -> ProviderResult<()>
 where
     P: StageCheckpointWriter,
@@ -348,9 +355,6 @@ where
         StageCheckpoint::new(to)
             .with_entities_stage_checkpoint(EntitiesCheckpoint { processed, total }),
     )?;
-    if receipts_stored {
-        provider.save_stage_checkpoint(StageId::Execution, StageCheckpoint::new(to))?;
-    }
     Ok(())
 }
 

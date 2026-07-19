@@ -6,7 +6,7 @@ use eyre::eyre;
 use reqwest::{Client, Url};
 use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_cli::chainspec::ChainSpecParser;
-use reth_era::{common::file_ops::EraFileType, ere::types::execution::SlimReceipt};
+use reth_era::common::file_ops::EraFileType;
 use reth_era_downloader::{read_dir, read_era_dir, EraClient, EraStream, EraStreamConfig};
 use reth_era_utils as era;
 use reth_etl::Collector;
@@ -84,7 +84,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> ImportEraC
     pub async fn execute<N>(self, runtime: reth_tasks::Runtime) -> eyre::Result<()>
     where
         N: CliNodeTypes<ChainSpec = C::ChainSpec>,
-        <N::Primitives as NodePrimitives>::Receipt: From<SlimReceipt>,
+        <N::Primitives as NodePrimitives>::Receipt: 'static,
     {
         info!(target: "reth::cli", "reth {} starting", version_metadata().short_version);
 

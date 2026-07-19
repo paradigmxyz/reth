@@ -254,7 +254,6 @@ where
                 height,
                 height,
                 input.target(),
-                false,
             )?;
 
             height

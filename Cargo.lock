@@ -8631,7 +8631,6 @@ dependencies = [
  "reth-cli-commands",
  "reth-cli-runner",
  "reth-db",
- "reth-era",
  "reth-node-api",
  "reth-node-builder",
  "reth-node-core",
