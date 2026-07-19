@@ -668,8 +668,13 @@ impl TrieUpdatesSorted {
         }
 
         // Large k: k-way merge.
-        let account_nodes =
-            kway_merge_sorted(items.iter().map(|i| i.as_ref().account_nodes.as_slice()));
+        let account_nodes = kway_merge_sorted(
+            items
+                .iter()
+                .map(|item| item.as_ref().account_nodes.iter().map(|(key, value)| (key, value))),
+        )
+        .map(|(key, value)| (*key, value.clone()))
+        .collect();
 
         struct StorageAcc<'a> {
             is_deleted: bool,
@@ -703,7 +708,14 @@ impl TrieUpdatesSorted {
         let storage_tries = acc
             .into_iter()
             .map(|(addr, entry)| {
-                let storage_nodes = kway_merge_sorted(entry.slices);
+                let storage_nodes = kway_merge_sorted(
+                    entry
+                        .slices
+                        .into_iter()
+                        .map(|slice| slice.iter().map(|(key, value)| (key, value))),
+                )
+                .map(|(key, value)| (*key, value.clone()))
+                .collect();
                 (addr, StorageTrieUpdatesSorted { is_deleted: entry.is_deleted, storage_nodes })
             })
             .collect();
@@ -813,7 +825,13 @@ impl StorageTrieUpdatesSorted {
         // Discard updates older than the first deletion since the trie was wiped at that point.
         let del_idx = updates.iter().position(|u| u.is_deleted);
         let relevant = del_idx.map_or(&updates[..], |idx| &updates[..=idx]);
-        let storage_nodes = kway_merge_sorted(relevant.iter().map(|u| u.storage_nodes.as_slice()));
+        let storage_nodes = kway_merge_sorted(
+            relevant
+                .iter()
+                .map(|update| update.storage_nodes.iter().map(|(key, value)| (key, value))),
+        )
+        .map(|(key, value)| (*key, value.clone()))
+        .collect();
 
         Self { is_deleted: del_idx.is_some(), storage_nodes }
     }
