@@ -239,6 +239,7 @@ where
                 provider,
                 &mut self.hash_collector,
                 last_header_number..=input.target(),
+                last_header_number,
             )
             .map_err(|e| StageError::Fatal(e.into()))?;
 

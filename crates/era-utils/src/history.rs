@@ -278,9 +278,20 @@ where
 
     // Consistency check of expected headers in static files vs DB is done on provider::sync_gap
     // when poll_execute_ready is polled.
-    let mut height = static_file_provider
+    let headers_tip = static_file_provider
         .get_highest_static_file_block(StaticFileSegment::Headers)
         .unwrap_or_default();
+
+    // When backfilling receipts, resume from the receipts tip so blocks whose headers were already
+    // imported still get their receipts; only blocks above `headers_tip` are written in full.
+    let mut height = if store_receipts {
+        let receipts_tip = static_file_provider
+            .get_highest_static_file_block(StaticFileSegment::Receipts)
+            .unwrap_or_default();
+        headers_tip.min(receipts_tip)
+    } else {
+        headers_tip
+    };
 
     let end = to_block.map_or(Bound::Unbounded, Bound::Included);
 
@@ -302,6 +313,7 @@ where
             &provider,
             hash_collector,
             (Bound::Included(height), end),
+            headers_tip,
         )?;
 
         // Drop the receipts writer's lock before `provider.commit()`, which locks every static
@@ -369,6 +381,7 @@ pub fn process<S, P, B, BB, BH>(
     provider: &P,
     hash_collector: &mut Collector<BlockHash, BlockNumber>,
     block_numbers: impl RangeBounds<BlockNumber>,
+    headers_tip: BlockNumber,
 ) -> eyre::Result<BlockNumber>
 where
     S: EraBlockReader<BH, BB, ReceiptOf<P>>,
@@ -394,7 +407,15 @@ where
         }))
         .flatten();
 
-    process_iter(iter, writer, receipts_writer, provider, hash_collector, block_numbers)
+    process_iter(
+        iter,
+        writer,
+        receipts_writer,
+        provider,
+        hash_collector,
+        block_numbers,
+        headers_tip,
+    )
 }
 
 /// Extracts a `(header, body)` pair from [`BlockTuple`].
@@ -444,6 +465,9 @@ where
 /// Skips all blocks below the [`start_bound`] of `block_numbers` and stops when reaching past the
 /// [`end_bound`] or the end of the file.
 ///
+/// Blocks at or below `headers_tip` only have their receipts backfilled; blocks above it get
+/// header, body and receipts written.
+///
 /// When `receipts_writer` is `Some`, every block must carry receipts, a block without them,
 /// possible for `.ere` files, whose receipts are optional per spec is an error.
 ///
@@ -460,6 +484,7 @@ pub fn process_iter<P, B, BB, BH>(
     provider: &P,
     hash_collector: &mut Collector<BlockHash, BlockNumber>,
     block_numbers: impl RangeBounds<BlockNumber>,
+    headers_tip: BlockNumber,
 ) -> eyre::Result<BlockNumber>
 where
     B: Block<Header = BH, Body = BB>,
@@ -510,20 +535,20 @@ where
             );
         }
 
-        let hash = header.hash_slow();
         last_header_number = number;
 
-        // Append to Headers segment
-        writer.append_header(&header, &hash)?;
-
-        // Write bodies to database.
-        provider.append_block_bodies(vec![(header.number(), Some(&body))])?;
+        // Header and body are only written for new blocks, when backfilling receipts onto an
+        // earlier import the block already has both persisted.
+        if number > headers_tip {
+            let hash = header.hash_slow();
+            writer.append_header(&header, &hash)?;
+            provider.append_block_bodies(vec![(header.number(), Some(&body))])?;
+            hash_collector.insert(hash, number)?;
+        }
 
         if let Some(receipts_writer) = receipts_writer.as_deref_mut() {
             provider.write_block_receipts(receipts_writer, number, receipts)?;
         }
-
-        hash_collector.insert(hash, number)?;
     }
 
     Ok(last_header_number)
@@ -791,6 +816,7 @@ mod tests {
             &provider,
             &mut hash_collector,
             0..=1,
+            0,
         )
         .unwrap();
 
@@ -822,6 +848,7 @@ mod tests {
             &provider,
             &mut hash_collector,
             0..,
+            0,
         );
 
         assert!(result.is_err());
@@ -848,6 +875,7 @@ mod tests {
             &provider,
             &mut hash_collector,
             0..=1,
+            0,
         )
         .unwrap();
         receipts_writer.commit().unwrap();
@@ -885,6 +913,7 @@ mod tests {
             &provider,
             &mut hash_collector,
             0..,
+            0,
         );
 
         assert!(result.is_err());
@@ -913,6 +942,7 @@ mod tests {
             &provider,
             &mut hash_collector,
             0..,
+            0,
         );
 
         assert!(result.is_err());

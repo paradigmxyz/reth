@@ -93,11 +93,22 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> ImportEraC
 
         let mut hash_collector = Collector::new(config.stages.etl.file_size, config.stages.etl.dir);
 
-        let next_block = provider_factory
-            .static_file_provider()
+        let static_file_provider = provider_factory.static_file_provider();
+        let headers_tip = static_file_provider
             .get_highest_static_file_block(StaticFileSegment::Headers)
-            .unwrap_or_default() +
-            1;
+            .unwrap_or_default();
+
+        // With `--with-receipts`, resume from the receipts tip so files covering already-imported
+        // headers are re-read to backfill their receipts.
+        let resume_block = if self.with_receipts {
+            let receipts_tip = static_file_provider
+                .get_highest_static_file_block(StaticFileSegment::Receipts)
+                .unwrap_or_default();
+            headers_tip.min(receipts_tip)
+        } else {
+            headers_tip
+        };
+        let next_block = resume_block + 1;
 
         if let Some(path) = self.import.path {
             let era_type = EraFileType::from_dir(&path)?.ok_or_else(|| {
