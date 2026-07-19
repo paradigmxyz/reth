@@ -543,17 +543,6 @@ where
     /// / `storage_root()` for their current state. Pruning a dirty revealed trie is a hard
     /// error and may panic.
     #[cfg(feature = "std")]
-    pub fn prune(
-        &mut self,
-        max_hot_slots: usize,
-        max_hot_accounts: usize,
-        retained_paths: TriePrefixSetsMut,
-    ) {
-        self.prune_frozen(max_hot_slots, max_hot_accounts, retained_paths.freeze());
-    }
-
-    /// Prunes the sparse trie, preserving the provided frozen paths and frequently accessed keys.
-    #[cfg(feature = "std")]
     #[instrument(
         level = "debug",
         name = "SparseStateTrie::prune",
@@ -561,16 +550,20 @@ where
         skip_all,
         fields(%max_hot_slots, %max_hot_accounts)
     )]
-    pub fn prune_frozen(
+    pub fn prune(
         &mut self,
         max_hot_slots: usize,
         max_hot_accounts: usize,
-        mut retained_paths: TriePrefixSets,
+        mut retained_paths: TriePrefixSetsMut,
     ) {
         self.hot_slots_lfu.decay_and_evict(max_hot_slots);
         self.hot_accounts_lfu.decay_and_evict(max_hot_accounts);
-        retained_paths
-            .extend(retained_paths_from_lfus(&self.hot_accounts_lfu, &self.hot_slots_lfu));
+        extend_retained_paths_from_lfus(
+            &mut retained_paths,
+            &self.hot_accounts_lfu,
+            &self.hot_slots_lfu,
+        );
+        let retained_paths = retained_paths.freeze();
 
         let retained_accounts = retained_paths.account_prefix_set.len();
         let retained_storage_tries = retained_paths.storage_prefix_sets.len();
@@ -614,30 +607,20 @@ where
 }
 
 #[cfg(feature = "std")]
-fn retained_paths_from_lfus(
+fn extend_retained_paths_from_lfus(
+    retained_paths: &mut TriePrefixSetsMut,
     hot_accounts: &BucketedLfu<B256>,
     hot_slots: &BucketedLfu<HotSlotKey>,
-) -> TriePrefixSets {
-    let mut account_keys = hot_accounts.keys().copied().collect::<Vec<_>>();
-    account_keys.sort_unstable();
-
-    let mut storage_keys: B256Map<Vec<B256>> = B256Map::default();
+) {
+    retained_paths
+        .account_prefix_set
+        .extend_keys(hot_accounts.keys().map(|key| Nibbles::unpack(*key)));
     for key in hot_slots.keys() {
-        storage_keys.entry(key.address).or_default().push(key.slot);
-    }
-
-    let storage_prefix_sets = storage_keys
-        .into_iter()
-        .map(|(address, mut slots)| {
-            slots.sort_unstable();
-            (address, PrefixSet::from(slots.into_iter()))
-        })
-        .collect();
-
-    TriePrefixSets {
-        account_prefix_set: PrefixSet::from(account_keys.into_iter()),
-        storage_prefix_sets,
-        ..Default::default()
+        retained_paths
+            .storage_prefix_sets
+            .entry(key.address)
+            .or_default()
+            .insert(Nibbles::unpack(key.slot));
     }
 }
 
@@ -908,13 +891,7 @@ mod tests {
         sparse.set_hot_cache_capacities(1, 1);
         sparse.record_account_touch(account);
         sparse.record_slot_touch(account, slot);
-
-        let retained_paths =
-            retained_paths_from_lfus(&sparse.hot_accounts_lfu, &sparse.hot_slots_lfu);
-        assert_eq!(retained_paths.account_prefix_set.slice(), &[Nibbles::unpack(account)]);
-        assert_eq!(retained_paths.storage_prefix_sets[&account].slice(), &[Nibbles::unpack(slot)]);
-
-        sparse.prune_frozen(1, 1, TriePrefixSets::default());
+        sparse.prune(1, 1, TriePrefixSetsMut::default());
 
         assert_eq!(sparse.hot_accounts_lfu.keys().copied().collect::<Vec<_>>(), vec![account]);
         assert_eq!(
@@ -989,7 +966,7 @@ mod tests {
             .entry(account)
             .or_default()
             .insert(Nibbles::unpack(slot));
-        sparse.prune_frozen(0, 0, retained_paths.freeze());
+        sparse.prune(0, 0, retained_paths);
 
         assert!(matches!(
             sparse.state_trie_ref().unwrap().find_leaf(&account_path, None),

@@ -67,8 +67,8 @@ use reth_provider::{
 };
 use reth_tasks::utils::increase_thread_priority;
 use reth_trie::{
-    hashed_cursor::HashedCursorFactory, prefix_set::TriePrefixSets, trie_cursor::TrieCursorFactory,
-    updates::TrieUpdates, HashedPostState, HashedPostStateSorted,
+    hashed_cursor::HashedCursorFactory, prefix_set::TriePrefixSetsMut,
+    trie_cursor::TrieCursorFactory, updates::TrieUpdates, HashedPostState,
 };
 use reth_trie_parallel::proof_task::{ProofTaskCtx, ProofWorkerHandle};
 pub use reth_trie_parallel::{
@@ -703,7 +703,7 @@ impl DefaultStateRootStrategy {
                 if let Some(prune_blocks) = pending_sparse_trie_prune_blocks {
                     let retained_paths =
                         sparse_trie_retained_paths(prune_blocks, result.hashed_state.as_ref());
-                    trie.prune_frozen(max_hot_slots, max_hot_accounts, retained_paths);
+                    trie.prune(max_hot_slots, max_hot_accounts, retained_paths);
                 }
                 trie_metrics
                     .into_trie_for_reuse_duration_histogram
@@ -756,13 +756,14 @@ struct StateRootTaskOptions<'a, N: NodePrimitives> {
 fn sparse_trie_retained_paths<N: NodePrimitives>(
     prune_blocks: Vec<ExecutedBlock<N>>,
     current_hashed_state: &HashedPostState,
-) -> TriePrefixSets {
-    let states =
-        prune_blocks.iter().map(|block| block.trie_data().sorted.hashed_state).collect::<Vec<_>>();
-    let current_hashed_state = current_hashed_state.clone_into_sorted();
-    HashedPostStateSorted::merge_into_frozen_prefix_set(
-        states.iter().map(AsRef::as_ref).chain(core::iter::once(&current_hashed_state)),
-    )
+) -> TriePrefixSetsMut {
+    let mut retained_paths = TriePrefixSetsMut::default();
+    for block in prune_blocks {
+        let trie_data = block.trie_data();
+        retained_paths.extend(trie_data.sorted.hashed_state.construct_prefix_sets());
+    }
+    retained_paths.extend(current_hashed_state.construct_prefix_sets());
+    retained_paths
 }
 
 fn published_sparse_trie_anchor_hash<N: NodePrimitives>(
@@ -1348,7 +1349,7 @@ mod tests {
             .collect();
         let current_hashed_state = trie_hashed_state(0x05, 0x06);
 
-        let retained_paths = sparse_trie_retained_paths(blocks, &current_hashed_state);
+        let retained_paths = sparse_trie_retained_paths(blocks, &current_hashed_state).freeze();
 
         assert_eq!(retained_paths.account_prefix_set.len(), 3);
         assert_eq!(retained_paths.storage_prefix_sets.len(), 3);
@@ -1362,7 +1363,7 @@ mod tests {
             .collect();
         let current_hashed_state = trie_hashed_state(0x03, 0x04);
 
-        let retained_paths = sparse_trie_retained_paths(blocks, &current_hashed_state);
+        let retained_paths = sparse_trie_retained_paths(blocks, &current_hashed_state).freeze();
 
         assert_eq!(retained_paths.account_prefix_set.len(), 2);
         assert_eq!(retained_paths.storage_prefix_sets.len(), 2);
