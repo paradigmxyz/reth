@@ -13,7 +13,7 @@ use alloy_eip7928::{
 };
 use alloy_eips::NumHash;
 use alloy_primitives::{keccak256, Address, Bytes, B256, U256};
-use alloy_rlp::Decodable;
+use alloy_rlp::{Decodable, RlpDecodable};
 use alloy_trie::{nodes::RlpNode, proof::verify_proof, Nibbles};
 use reth_chainspec::Hardforks;
 use reth_eth_wire::{
@@ -26,7 +26,7 @@ use reth_eth_wire::{
     BlockAccessLists, EthVersion,
 };
 use reth_network::{
-    eth_requests::{SlimAccountBody, SOFT_RESPONSE_LIMIT},
+    eth_requests::SOFT_RESPONSE_LIMIT,
     test_utils::{PeerConfig, Testnet, TestnetHandle},
     BlockDownloaderProvider,
 };
@@ -203,6 +203,19 @@ fn assert_boundary_proof(root: B256, key: B256, expected_value: Option<Vec<u8>>,
         verifies_subsequence(root, key, &expected_value, &remaining, 0, &mut path),
         "invalid or incomplete proof at boundary {key:?}"
     );
+}
+
+/// Owned decode counterpart of `eth_requests::SlimAccountBody`
+#[derive(Debug, RlpDecodable)]
+struct SlimAccountBody {
+    /// The account's nonce.
+    nonce: u64,
+    /// The account's balance.
+    balance: U256,
+    /// Empty when the account has no storage.
+    storage_root: Bytes,
+    /// Empty when the account has no code.
+    code_hash: Bytes,
 }
 
 /// A valid RLP-encoded EIP-7928 block access list for `address`, with its commitment hash.
