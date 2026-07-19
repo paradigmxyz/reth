@@ -16,7 +16,7 @@ use reth_payload_primitives::{
     EngineApiMessageVersion, EngineObjectValidationError, InvalidPayloadAttributesError,
     NewPayloadError, PayloadAttributes, PayloadOrAttributes, PayloadTypes,
 };
-use reth_primitives_traits::{Block, RecoveredBlock, SealedBlock};
+use reth_primitives_traits::{Block, RecoveredBlock, SealedBlock, SealedHeader};
 use reth_storage_api::{errors::ProviderResult, StateProviderBox};
 use reth_trie_common::HashedPostState;
 use serde::{de::DeserializeOwned, Serialize};
@@ -217,6 +217,8 @@ pub trait PayloadValidator<Types: PayloadTypes>: Send + Sync + Unpin + 'static {
     /// `state_updates` lazily yields the block's hashed post-state; call it only if the
     /// implementation needs the executed state changes (the L1 default does not).
     ///
+    /// `parent_header` is the parent header the engine resolved for the block.
+    ///
     /// `parent_state` lazily builds the overlay-aware provider for the block's parent that the
     /// engine used for execution — resolving even a not-yet-canonical in-memory parent. It is only
     /// built if the implementation needs it (the L1 default does not).
@@ -224,6 +226,7 @@ pub trait PayloadValidator<Types: PayloadTypes>: Send + Sync + Unpin + 'static {
         &self,
         _state_updates: impl FnOnce() -> &'a HashedPostState,
         _block: &RecoveredBlock<Self::Block>,
+        _parent_header: &SealedHeader<<Self::Block as Block>::Header>,
         _parent_state: impl FnOnce() -> ProviderResult<StateProviderBox>,
     ) -> Result<(), InsertBlockErrorKind>
     where

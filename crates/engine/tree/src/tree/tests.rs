@@ -694,7 +694,7 @@ fn process_payload_attributes_shares_sparse_trie_during_validation_fallback() {
     let PayloadServiceCommand::BuildNewPayload(input, _, _) = command else {
         panic!("expected build new payload command")
     };
-    assert!(input.state_root_handle.is_some());
+    assert!(input.resources.state_root_handle().is_some());
 }
 
 #[tokio::test]
