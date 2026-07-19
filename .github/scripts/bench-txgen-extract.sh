@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 #
-# Pre-extracts txgen payloads (normal or big blocks) so they can be reused
+# Pre-extracts txgen payloads or transactions so they can be reused
 # across multiple benchmark runs instead of re-fetching from the remote RPC
 # every time.
 #
 # Starts a throwaway reth node to discover the snapshot's chain tip, extracts
-# payloads from BENCH_RPC_URL, then stops the node and recovers the snapshot.
+# data from BENCH_RPC_URL, then stops the node and recovers the snapshot.
 #
 # Usage: bench-txgen-extract.sh <binary> <output-dir>
 #
@@ -13,15 +13,17 @@
 #   <output-dir>/all-blocks.ndjson   (or all-big-blocks.ndjson)
 #   <output-dir>/warmup-blocks.ndjson
 #   <output-dir>/benchmark-blocks.ndjson
+# In RPC mode, the corresponding names end in `-transactions.ndjson`.
 #
 # Required env: SCHELK_MOUNT, BENCH_RPC_URL, BENCH_BLOCKS, BENCH_WARMUP_BLOCKS
-# Optional env: BENCH_BIG_BLOCKS, BENCH_BIG_BLOCKS_TARGET_GAS, BENCH_BAL
+# Optional env: BENCH_EXECUTION_MODE, BENCH_BIG_BLOCKS, BENCH_BIG_BLOCKS_TARGET_GAS, BENCH_BAL
 set -euxo pipefail
 
 BINARY="$1"
 OUTPUT_DIR="$2"
 
 BIG_BLOCKS="${BENCH_BIG_BLOCKS:-false}"
+EXECUTION_MODE="${BENCH_EXECUTION_MODE:-engine}"
 BAL_MODE="${BENCH_BAL:-false}"
 INCLUDE_BAL=false
 if [ "$BAL_MODE" != "false" ] && [ -n "$BAL_MODE" ]; then
@@ -123,19 +125,44 @@ fi
 ALL_BLOCKS="$OUTPUT_DIR/all-blocks.ndjson"
 WARMUP_FILE="$OUTPUT_DIR/warmup-blocks.ndjson"
 BENCHMARK_FILE="$OUTPUT_DIR/benchmark-blocks.ndjson"
-
-if [ "$BIG_BLOCKS" = "true" ]; then
-  ALL_BLOCKS="$OUTPUT_DIR/all-big-blocks.ndjson"
-  WARMUP_FILE="$OUTPUT_DIR/warmup-big-blocks.ndjson"
-  BENCHMARK_FILE="$OUTPUT_DIR/measured-big-blocks.ndjson"
-fi
-
 EXTRACT_FROM=$(( HEAD_DEC + 1 ))
 TXGEN_EXTRACT_ARGS=()
 if [ "$INCLUDE_BAL" = "true" ]; then
   TXGEN_EXTRACT_ARGS+=(--bal)
 fi
-if [ "$BIG_BLOCKS" = "true" ]; then
+
+if [ "$EXECUTION_MODE" = "rpc" ]; then
+  ALL_BLOCKS="$OUTPUT_DIR/all-transactions.ndjson"
+  WARMUP_FILE="$OUTPUT_DIR/warmup-transactions.ndjson"
+  BENCHMARK_FILE="$OUTPUT_DIR/benchmark-transactions.ndjson"
+  if [ "$BIG_BLOCKS" = "true" ] || [ "$INCLUDE_BAL" = "true" ]; then
+    echo "::error::RPC mode does not support big blocks or BAL"
+    exit 1
+  fi
+
+  EXTRACT_TO=$(( HEAD_DEC + TOTAL ))
+  echo "Extracting transactions from blocks ${EXTRACT_FROM}..${EXTRACT_TO} for RPC benchmark (${WARMUP} warmup blocks, ${BLOCKS} measured blocks)"
+  if [ "$WARMUP" -gt 0 ] 2>/dev/null; then
+    "$TXGEN_ETHEREUM" extract \
+      --rpc "$BENCH_RPC_URL" \
+      --from "$EXTRACT_FROM" \
+      --to "$(( HEAD_DEC + WARMUP ))" \
+      --format transactions \
+      -o "$WARMUP_FILE"
+  else
+    : > "$WARMUP_FILE"
+  fi
+  "$TXGEN_ETHEREUM" extract \
+    --rpc "$BENCH_RPC_URL" \
+    --from "$(( HEAD_DEC + WARMUP + 1 ))" \
+    --to "$EXTRACT_TO" \
+    --format transactions \
+    -o "$BENCHMARK_FILE"
+  cat "$WARMUP_FILE" "$BENCHMARK_FILE" > "$ALL_BLOCKS"
+elif [ "$BIG_BLOCKS" = "true" ]; then
+  ALL_BLOCKS="$OUTPUT_DIR/all-big-blocks.ndjson"
+  WARMUP_FILE="$OUTPUT_DIR/warmup-big-blocks.ndjson"
+  BENCHMARK_FILE="$OUTPUT_DIR/measured-big-blocks.ndjson"
   echo "Extracting ${TOTAL} big blocks from ${EXTRACT_FROM} for txgen benchmark (${WARMUP} warmup, ${BLOCKS} measured, bal=${INCLUDE_BAL})"
   "$TXGEN_ETHEREUM" extract-big-blocks \
     --rpc "$BENCH_RPC_URL" \
@@ -155,13 +182,16 @@ else
     -o "$ALL_BLOCKS"
 fi
 
-# Split into warmup and measured files
-if [ "$WARMUP" -gt 0 ] 2>/dev/null; then
-  head -n "$WARMUP" "$ALL_BLOCKS" > "$WARMUP_FILE"
-else
-  : > "$WARMUP_FILE"
+# Block output has one line per source block. Transaction output is extracted
+# separately above because it has one line per transaction.
+if [ "$EXECUTION_MODE" = "engine" ]; then
+  if [ "$WARMUP" -gt 0 ] 2>/dev/null; then
+    head -n "$WARMUP" "$ALL_BLOCKS" > "$WARMUP_FILE"
+  else
+    : > "$WARMUP_FILE"
+  fi
+  awk -v warmup="$WARMUP" 'NR > warmup { print }' "$ALL_BLOCKS" > "$BENCHMARK_FILE"
 fi
-awk -v warmup="$WARMUP" 'NR > warmup { print }' "$ALL_BLOCKS" > "$BENCHMARK_FILE"
 
 if [ "$INCLUDE_BAL" = "true" ] && [ "$BAL_MODE" != "true" ]; then
   echo "Writing no-BAL payload variants for selective BAL mode (${BAL_MODE})"
@@ -170,4 +200,4 @@ if [ "$INCLUDE_BAL" = "true" ] && [ "$BAL_MODE" != "true" ]; then
   done
 fi
 
-echo "Extraction complete: $(wc -l < "$ALL_BLOCKS") payloads in ${OUTPUT_DIR}"
+echo "Extraction complete: $(wc -l < "$ALL_BLOCKS") ${EXECUTION_MODE} records in ${OUTPUT_DIR}"
