@@ -3232,13 +3232,16 @@ mod tests {
             .storages
             .insert(hashed_address, HashedStorage::from_iter(false, [(hashed_slot, value_b)]));
 
-        let later_block = random_block(
+        let state_b_root = factory.latest()?.state_root(state_b.clone())?;
+        let mut later_block = random_block(
             &mut rng,
             2,
             BlockParams { parent: Some(anchor_hash), tx_count: Some(0), ..Default::default() },
         )
-        .try_recover()
-        .expect("failed to seal block with senders");
+        .unseal();
+        later_block.header.state_root = state_b_root;
+        let later_block =
+            later_block.seal_slow().try_recover().expect("failed to seal block with senders");
 
         let provider_rw = factory.provider_rw()?;
         provider_rw.append_blocks_with_state(
