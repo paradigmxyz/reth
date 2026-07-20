@@ -10,7 +10,7 @@ use crate::{
             tx_manager::DEFAULT_MAX_COUNT_TRANSACTIONS_SEEN_BY_PEER,
         },
         fetcher::{TransactionFetcher, TxFetchMetadata},
-        PeerMetadata, TransactionsManager,
+        PeerMetadata, TransactionsManager, TransactionsManagerConfig,
     },
     NetworkConfigBuilder, NetworkManager,
 };
@@ -30,6 +30,13 @@ use tracing::trace;
 /// A new tx manager for testing.
 pub async fn new_tx_manager(
 ) -> (TransactionsManager<TestPool, EthNetworkPrimitives>, NetworkManager<EthNetworkPrimitives>) {
+    new_tx_manager_with_config(TransactionsManagerConfig::default()).await
+}
+
+/// A new transaction manager for testing with the provided configuration.
+pub(crate) async fn new_tx_manager_with_config(
+    transactions_manager_config: TransactionsManagerConfig,
+) -> (TransactionsManager<TestPool, EthNetworkPrimitives>, NetworkManager<EthNetworkPrimitives>) {
     let secret_key = SecretKey::new(&mut rand_08::thread_rng());
     let client = NoopProvider::default();
 
@@ -41,7 +48,6 @@ pub async fn new_tx_manager(
 
     let pool = testing_pool();
 
-    let transactions_manager_config = config.transactions_manager_config.clone();
     let (_network_handle, network, transactions, _) = NetworkManager::new(config)
         .await
         .unwrap()

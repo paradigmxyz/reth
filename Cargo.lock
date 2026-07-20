@@ -9051,6 +9051,7 @@ dependencies = [
  "alloy-rlp",
  "aquamarine",
  "auto_impl",
+ "codspeed-criterion-compat",
  "derive_more",
  "discv5",
  "enr",
