@@ -689,10 +689,8 @@ impl<N: NetworkPrimitives> NetworkConfigBuilder<N> {
             if let Some(network_stack_id) = NetworkStackId::id(&chain_spec) {
                 builder = builder.fork(network_stack_id, fork_id)
             } else {
-                // Discv4 advertises the fork entry unconditionally; without it fork-aware
-                // bootnodes reject the discv5 ENR of custom-chain-id (devnet) nodes. `id`
-                // returning `None` implies not optimism, hence the "eth" key. An explicitly
-                // configured fork kv-pair takes precedence.
+                // Custom Ethereum chains are not recognized by `NetworkStackId::id`, but still
+                // use the `eth` key for fork-aware discovery. Preserve any explicit override.
                 builder = builder.fork_if_unset(NetworkStackId::ETH, fork_id)
             }
 
