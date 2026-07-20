@@ -2,7 +2,7 @@ use core::ops::Not;
 
 use crate::{
     added_removed_keys::MultiAddedRemovedKeys,
-    prefix_set::{PrefixSetMut, TriePrefixSetsMut},
+    prefix_set::{PrefixSet, PrefixSetMut, TriePrefixSets, TriePrefixSetsMut},
     utils::{extend_sorted_vec, kway_merge_disjoint_sorted, kway_merge_sorted},
     KeyHasher, MultiProofTargets, Nibbles,
 };
@@ -592,6 +592,88 @@ impl HashedPostStateSorted {
         TriePrefixSetsMut { account_prefix_set, storage_prefix_sets, destroyed_accounts }
     }
 
+    /// Merges the changed paths from sorted post states into frozen trie prefix sets.
+    pub fn merge_into_frozen_prefix_set<'a>(
+        states: impl Iterator<Item = &'a Self>,
+    ) -> TriePrefixSets {
+        struct StorageAcc<'a> {
+            wiped: bool,
+            first: Option<&'a [(B256, U256)]>,
+            rest: Vec<&'a [(B256, U256)]>,
+        }
+
+        let (lower_bound, upper_bound) = states.size_hint();
+        let mut account_slices = Vec::with_capacity(upper_bound.unwrap_or(lower_bound));
+        let mut storage_acc: B256Map<StorageAcc<'a>> = B256Map::default();
+        let mut destroyed_accounts = HashSet::default();
+
+        for state in states {
+            account_slices.push(state.accounts.as_slice());
+            destroyed_accounts.extend(
+                state
+                    .accounts
+                    .iter()
+                    .filter_map(|(address, account)| account.is_none().then_some(*address)),
+            );
+
+            for (address, storage) in &state.storages {
+                let entry = storage_acc.entry(*address).or_insert_with(|| StorageAcc {
+                    wiped: false,
+                    first: None,
+                    rest: Vec::new(),
+                });
+                if entry.wiped {
+                    continue
+                }
+                if storage.wiped {
+                    entry.wiped = true;
+                    entry.first = None;
+                    entry.rest.clear();
+                } else if entry.first.is_some() {
+                    entry.rest.push(storage.storage_slots.as_slice());
+                } else {
+                    entry.first = Some(storage.storage_slots.as_slice());
+                }
+            }
+        }
+
+        let mut storage_addresses = storage_acc.keys().copied().collect::<Vec<_>>();
+        storage_addresses.sort_unstable();
+
+        let account_keys = kway_merge_sorted(
+            account_slices.into_iter().map(|slice| slice.iter().map(|(address, _)| (*address, ()))),
+        )
+        .map(|(address, ())| address)
+        .merge(storage_addresses)
+        .dedup();
+        let account_prefix_set = PrefixSet::from(account_keys);
+
+        let storage_prefix_sets = storage_acc
+            .into_iter()
+            .map(|(address, entry)| {
+                let prefix_set = if entry.wiped {
+                    PrefixSetMut::all().freeze()
+                } else if entry.rest.is_empty() {
+                    PrefixSet::from(entry.first.into_iter().flatten().map(|(slot, _)| *slot))
+                } else {
+                    PrefixSet::from(
+                        kway_merge_sorted(
+                            entry
+                                .first
+                                .into_iter()
+                                .chain(entry.rest)
+                                .map(|slice| slice.iter().map(|(slot, _)| (*slot, ()))),
+                        )
+                        .map(|(slot, ())| slot),
+                    )
+                };
+                (address, prefix_set)
+            })
+            .collect();
+
+        TriePrefixSets { account_prefix_set, storage_prefix_sets, destroyed_accounts }
+    }
+
     /// Extends this state with contents of another sorted state.
     /// Entries in `other` take precedence for duplicate keys.
     ///
@@ -650,7 +732,11 @@ impl HashedPostStateSorted {
         }
 
         // Large k: k-way merge.
-        let accounts = kway_merge_sorted(items.iter().map(|i| i.as_ref().accounts.as_slice()));
+        let accounts = kway_merge_sorted(
+            items.iter().map(|item| item.as_ref().accounts.iter().map(|(key, value)| (key, value))),
+        )
+        .map(|(key, value)| (*key, *value))
+        .collect();
 
         struct StorageAcc<'a> {
             wiped: bool,
@@ -683,7 +769,14 @@ impl HashedPostStateSorted {
         let storages = acc
             .into_iter()
             .map(|(addr, entry)| {
-                let storage_slots = kway_merge_sorted(entry.slices);
+                let storage_slots = kway_merge_sorted(
+                    entry
+                        .slices
+                        .into_iter()
+                        .map(|slice| slice.iter().map(|(key, value)| (key, value))),
+                )
+                .map(|(key, value)| (*key, *value))
+                .collect();
                 (addr, HashedStorageSorted { wiped: entry.wiped, storage_slots })
             })
             .collect();
@@ -771,7 +864,14 @@ impl HashedPostStateSorted {
                         ));
                         storage_slots
                     }
-                    None => kway_merge_sorted(entry.slices),
+                    None => kway_merge_sorted(
+                        entry
+                            .slices
+                            .into_iter()
+                            .map(|slice| slice.iter().map(|(key, value)| (key, value))),
+                    )
+                    .map(|(key, value)| (*key, *value))
+                    .collect(),
                 };
 
                 (!storage_slots.is_empty()).then_some((
@@ -855,7 +955,13 @@ impl HashedStorageSorted {
 
         let wipe_idx = updates.iter().position(|u| u.wiped);
         let relevant = wipe_idx.map_or(&updates[..], |idx| &updates[..=idx]);
-        let storage_slots = kway_merge_sorted(relevant.iter().map(|u| u.storage_slots.as_slice()));
+        let storage_slots = kway_merge_sorted(
+            relevant
+                .iter()
+                .map(|update| update.storage_slots.iter().map(|(key, value)| (key, value))),
+        )
+        .map(|(key, value)| (*key, *value))
+        .collect();
 
         Self { wiped: wipe_idx.is_some(), storage_slots }
     }
@@ -1525,6 +1631,79 @@ mod tests {
         assert_eq!(state1.accounts[4].1, None);
         assert_eq!(state1.accounts[5].0, B256::from([6; 32]));
         assert_eq!(state1.accounts[5].1, None);
+    }
+
+    #[test]
+    fn test_merge_into_frozen_prefix_set() {
+        let account = B256::with_last_byte(1);
+        let destroyed = B256::with_last_byte(2);
+        let storage_only = B256::with_last_byte(3);
+        let wiped_storage = B256::with_last_byte(4);
+        let first_slot = B256::with_last_byte(11);
+        let second_slot = B256::with_last_byte(12);
+        let third_slot = B256::with_last_byte(13);
+
+        let first = HashedPostStateSorted {
+            accounts: vec![(account, Some(Account::default())), (destroyed, None)],
+            storages: B256Map::from_iter([
+                (
+                    storage_only,
+                    HashedStorageSorted {
+                        storage_slots: vec![
+                            (first_slot, U256::from(1)),
+                            (third_slot, U256::from(3)),
+                        ],
+                        wiped: false,
+                    },
+                ),
+                (
+                    wiped_storage,
+                    HashedStorageSorted {
+                        storage_slots: vec![(first_slot, U256::from(1))],
+                        wiped: false,
+                    },
+                ),
+            ]),
+        };
+        let second = HashedPostStateSorted {
+            accounts: vec![(account, None)],
+            storages: B256Map::from_iter([
+                (
+                    storage_only,
+                    HashedStorageSorted {
+                        storage_slots: vec![
+                            (second_slot, U256::from(2)),
+                            (third_slot, U256::from(30)),
+                        ],
+                        wiped: false,
+                    },
+                ),
+                (wiped_storage, HashedStorageSorted { storage_slots: Vec::new(), wiped: true }),
+            ]),
+        };
+
+        let prefix_sets =
+            HashedPostStateSorted::merge_into_frozen_prefix_set([&first, &second].into_iter());
+
+        assert_eq!(
+            prefix_sets.account_prefix_set.slice(),
+            &[
+                Nibbles::unpack(account),
+                Nibbles::unpack(destroyed),
+                Nibbles::unpack(storage_only),
+                Nibbles::unpack(wiped_storage),
+            ]
+        );
+        assert_eq!(
+            prefix_sets.storage_prefix_sets[&storage_only].slice(),
+            &[
+                Nibbles::unpack(first_slot),
+                Nibbles::unpack(second_slot),
+                Nibbles::unpack(third_slot),
+            ]
+        );
+        assert!(prefix_sets.storage_prefix_sets[&wiped_storage].all());
+        assert_eq!(prefix_sets.destroyed_accounts, HashSet::from_iter([account, destroyed]));
     }
 
     #[test]

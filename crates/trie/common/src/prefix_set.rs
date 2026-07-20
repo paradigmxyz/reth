@@ -1,7 +1,10 @@
 use crate::Nibbles;
 use alloc::{sync::Arc, vec::Vec};
-use alloy_primitives::map::{B256Map, B256Set};
-use core::ops::Range;
+use alloy_primitives::{
+    map::{B256Map, B256Set},
+    B256,
+};
+use core::{cmp::Ordering, ops::Range};
 
 /// Collection of mutable prefix sets.
 #[derive(Clone, Default, Debug, PartialEq, Eq)]
@@ -74,6 +77,24 @@ pub struct TriePrefixSets {
     pub storage_prefix_sets: B256Map<PrefixSet>,
     /// A set of hashed addresses of destroyed accounts.
     pub destroyed_accounts: B256Set,
+}
+
+impl TriePrefixSets {
+    /// Extends these prefix sets with another frozen collection.
+    pub fn extend(&mut self, other: Self) {
+        self.account_prefix_set.extend(other.account_prefix_set);
+        for (hashed_address, prefix_set) in other.storage_prefix_sets {
+            match self.storage_prefix_sets.entry(hashed_address) {
+                alloy_primitives::map::hash_map::Entry::Occupied(mut entry) => {
+                    entry.get_mut().extend(prefix_set);
+                }
+                alloy_primitives::map::hash_map::Entry::Vacant(entry) => {
+                    entry.insert(prefix_set);
+                }
+            }
+        }
+        self.destroyed_accounts.extend(other.destroyed_accounts);
+    }
 }
 
 /// A container for efficiently storing and checking for the presence of key prefixes.
@@ -221,7 +242,63 @@ pub struct PrefixSet {
     keys: Arc<Vec<Nibbles>>,
 }
 
+impl<I> From<I> for PrefixSet
+where
+    I: Iterator<Item = B256>,
+{
+    fn from(keys: I) -> Self {
+        let (lower_bound, upper_bound) = keys.size_hint();
+        let mut unpacked = Vec::with_capacity(upper_bound.unwrap_or(lower_bound));
+        let mut previous = None;
+
+        for key in keys {
+            debug_assert!(
+                previous.is_none_or(|previous| previous <= key),
+                "prefix set keys must be sorted"
+            );
+            if previous != Some(key) {
+                unpacked.push(Nibbles::unpack(key));
+            }
+            previous = Some(key);
+        }
+
+        Self { index: 0, all: false, keys: Arc::new(unpacked) }
+    }
+}
+
 impl PrefixSet {
+    /// Extends this set with another frozen prefix set.
+    pub fn extend(&mut self, mut other: Self) {
+        if self.all || other.is_empty() {
+            return
+        }
+        if other.all || self.is_empty() {
+            other.index = 0;
+            *self = other;
+            return
+        }
+
+        let mut keys = Vec::with_capacity(self.keys.len() + other.keys.len());
+        let mut left = self.keys.iter().peekable();
+        let mut right = other.keys.iter().peekable();
+
+        while let (Some(left_key), Some(right_key)) = (left.peek(), right.peek()) {
+            match left_key.cmp(right_key) {
+                Ordering::Less => keys.push(*left.next().expect("left is not empty")),
+                Ordering::Greater => keys.push(*right.next().expect("right is not empty")),
+                Ordering::Equal => {
+                    keys.push(*left.next().expect("left is not empty"));
+                    right.next();
+                }
+            }
+        }
+        keys.extend(left.copied());
+        keys.extend(right.copied());
+
+        self.index = 0;
+        self.keys = Arc::new(keys);
+    }
+
     /// Returns `true` if any of the keys in the set has the given prefix
     ///
     /// # Note on Mutability
@@ -343,6 +420,46 @@ mod tests {
         assert!(prefix_set.contains(&Nibbles::from_nibbles_unchecked([4, 5])));
         assert!(!prefix_set.contains(&Nibbles::from_nibbles_unchecked([7, 8])));
         assert_eq!(prefix_set.len(), 3); // Length should be 3 (excluding duplicate)
+    }
+
+    #[test]
+    fn test_from_sorted_b256_iterator() {
+        let first = B256::with_last_byte(1);
+        let second = B256::with_last_byte(2);
+        let prefix_set = PrefixSet::from([first, second].into_iter());
+
+        assert_eq!(prefix_set.slice(), &[Nibbles::unpack(first), Nibbles::unpack(second)]);
+    }
+
+    #[test]
+    fn test_from_sorted_b256_iterator_with_duplicates() {
+        let first = B256::with_last_byte(1);
+        let second = B256::with_last_byte(2);
+        let prefix_set = PrefixSet::from([first, first, second].into_iter());
+
+        assert_eq!(prefix_set.slice(), &[Nibbles::unpack(first), Nibbles::unpack(second)]);
+    }
+
+    #[cfg(debug_assertions)]
+    #[test]
+    #[should_panic(expected = "prefix set keys must be sorted")]
+    fn test_from_unsorted_b256_iterator() {
+        let _: PrefixSet = [B256::with_last_byte(2), B256::with_last_byte(1)].into_iter().into();
+    }
+
+    #[test]
+    fn test_extend_frozen_prefix_set() {
+        let first = B256::with_last_byte(1);
+        let second = B256::with_last_byte(2);
+        let third = B256::with_last_byte(3);
+        let mut prefix_set = PrefixSet::from([first, third].into_iter());
+
+        prefix_set.extend(PrefixSet::from([first, second].into_iter()));
+
+        assert_eq!(
+            prefix_set.slice(),
+            &[Nibbles::unpack(first), Nibbles::unpack(second), Nibbles::unpack(third)]
+        );
     }
 
     #[test]
