@@ -273,6 +273,19 @@ impl PayloadStateRootHandle {
             .map_err(|_| StateRootTaskError::Other("state root task dropped".to_string()))?
     }
 
+    /// Takes the state root receiver for use with custom waiting logic (e.g., timeouts).
+    ///
+    /// Dropping the handle continues to cancel the backing task if it owns a cancellation guard.
+    ///
+    /// # Panics
+    ///
+    /// If called more than once.
+    pub const fn take_state_root_rx(
+        &mut self,
+    ) -> std::sync::mpsc::Receiver<Result<StateRootComputeOutcome, StateRootTaskError>> {
+        self.state_root_rx.take().expect("state_root already taken")
+    }
+
     /// Takes the hashed state receiver, if the handle was built with one and it was not taken
     /// yet.
     pub const fn try_take_hashed_state_rx(
@@ -516,7 +529,10 @@ pub fn evm_state_to_hashed_post_state(update: EvmState) -> HashedPostState {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::{
+        sync::atomic::{AtomicUsize, Ordering},
+        time::Duration,
+    };
 
     #[derive(Default)]
     struct CountingSink {
@@ -677,5 +693,44 @@ mod tests {
             .unwrap();
         let outcome = handle.state_root().expect("outcome is delivered");
         assert_eq!(outcome.state_root, B256::repeat_byte(0x42));
+    }
+
+    #[test]
+    #[should_panic(expected = "state_root already taken")]
+    fn payload_state_root_receiver_can_only_be_taken_once() {
+        let (_state_root_tx, state_root_rx) = std::sync::mpsc::channel();
+        let mut handle = PayloadStateRootHandle::new("test", None, state_root_rx, None);
+
+        let _state_root_rx = handle.take_state_root_rx();
+        let _ = handle.take_state_root_rx();
+    }
+
+    #[test]
+    fn payload_state_root_receiver_retains_cancellation() {
+        let (updates_tx, _updates_rx) = crossbeam_channel::unbounded();
+        let (cancel_guard, cancel_rx) = StateRootTaskCancelGuard::channel();
+        let (_state_root_tx, state_root_rx) = std::sync::mpsc::channel();
+        let (_hashed_state_tx, hashed_state_rx) = std::sync::mpsc::channel();
+        let mut handle = StateRootHandle::new(
+            B256::ZERO,
+            updates_tx,
+            cancel_guard,
+            state_root_rx,
+            hashed_state_rx,
+        )
+        .into_payload_state_root_handle();
+
+        let state_root_rx = handle.take_state_root_rx();
+        assert!(matches!(
+            state_root_rx.recv_timeout(Duration::ZERO),
+            Err(std::sync::mpsc::RecvTimeoutError::Timeout)
+        ));
+        assert!(matches!(cancel_rx.try_recv(), Err(crossbeam_channel::TryRecvError::Empty)));
+
+        drop(handle);
+        assert!(matches!(
+            cancel_rx.recv_timeout(Duration::from_secs(1)),
+            Err(crossbeam_channel::RecvTimeoutError::Disconnected)
+        ));
     }
 }
