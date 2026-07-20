@@ -74,6 +74,9 @@ impl<J> Coordinator<J> {
     }
 
     /// Waits until a job may run and marks the worker active before releasing the state lock.
+    ///
+    /// has_current_job indicates whether there is already a current job running. If there is none
+    /// the method will wait for a job to become available.
     pub(super) fn begin_activity(
         self: &Arc<Self>,
         has_current_job: bool,

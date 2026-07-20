@@ -49,7 +49,10 @@ pub(super) fn run<N, P, Evm>(
             current_job = Some(job);
         }
 
-        let job = current_job.as_ref().expect("runnable job exists");
+        // UNWRAP: `begin_activity` returns when there is a runnable job available.
+        // that is, either there is already a current job or when a new job becomes available.
+        // either way, `current_job` is guaranteed to be `Some` by this point.
+        let job = current_job.as_ref().unwrap();
 
         if best_transactions_parent_hash != Some(job.parent_hash) {
             let Some(opened) = source.best_transactions(job.parent_hash) else {
