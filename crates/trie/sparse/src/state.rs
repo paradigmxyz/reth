@@ -8,8 +8,10 @@ use alloc::vec::Vec;
 use alloy_primitives::{map::B256Map, B256};
 use either::Either;
 use reth_execution_errors::{SparseStateTrieResult, SparseTrieErrorKind};
+#[cfg(test)]
+use reth_trie_common::prefix_set::TriePrefixSetsMut;
 use reth_trie_common::{
-    prefix_set::{PrefixSet, TriePrefixSets, TriePrefixSetsMut},
+    prefix_set::{PrefixSet, TriePrefixSets},
     updates::{StorageTrieUpdates, TrieUpdates},
     DecodedMultiProof, MultiProof, Nibbles, ProofTrieNodeV2,
 };
@@ -527,15 +529,8 @@ where
         self.storage.tries.len() + self.storage.cleared_tries.len()
     }
 
-    /// Prunes account/storage tries according to global LFU retention and retained paths.
-    ///
-    /// - Top LFU `(address, slot)` entries are retained up to `max_hot_slots`.
-    ///
-    /// - Top LFU `(address, slot)` entries are retained in storage tries.
-    /// - Account trie retains only paths for accounts tracked by the account LFU.
-    /// - Storage tries retain only paths needed for retained slots.
-    /// - Additional retained paths are unioned with LFU-selected paths.
-    /// - All other revealed paths are pruned to hash stubs or fully evicted.
+    /// Prunes account/storage tries according to the provided retained paths. All other revealed
+    /// paths are pruned to hash stubs or fully evicted.
     ///
     /// # Preconditions
     ///
@@ -543,35 +538,13 @@ where
     /// / `storage_root()` for their current state. Pruning a dirty revealed trie is a hard
     /// error and may panic.
     #[cfg(feature = "std")]
-    pub fn prune(
-        &mut self,
-        max_hot_slots: usize,
-        max_hot_accounts: usize,
-        retained_paths: TriePrefixSetsMut,
-    ) {
-        self.prune_frozen(max_hot_slots, max_hot_accounts, retained_paths.freeze());
-    }
-
-    /// Prunes the sparse trie, preserving the provided frozen paths and frequently accessed keys.
-    #[cfg(feature = "std")]
     #[instrument(
         level = "debug",
         name = "SparseStateTrie::prune",
         target = "trie::sparse",
-        skip_all,
-        fields(%max_hot_slots, %max_hot_accounts)
+        skip_all
     )]
-    pub fn prune_frozen(
-        &mut self,
-        max_hot_slots: usize,
-        max_hot_accounts: usize,
-        mut retained_paths: TriePrefixSets,
-    ) {
-        self.hot_slots_lfu.decay_and_evict(max_hot_slots);
-        self.hot_accounts_lfu.decay_and_evict(max_hot_accounts);
-        retained_paths
-            .extend(retained_paths_from_lfus(&self.hot_accounts_lfu, &self.hot_slots_lfu));
-
+    pub fn prune(&mut self, retained_paths: TriePrefixSets) {
         let retained_accounts = retained_paths.account_prefix_set.len();
         let retained_storage_tries = retained_paths.storage_prefix_sets.len();
         let total_storage_tries_before = self.storage.tries.len();
@@ -613,34 +586,6 @@ where
     }
 }
 
-#[cfg(feature = "std")]
-fn retained_paths_from_lfus(
-    hot_accounts: &BucketedLfu<B256>,
-    hot_slots: &BucketedLfu<HotSlotKey>,
-) -> TriePrefixSets {
-    let mut account_keys = hot_accounts.keys().copied().collect::<Vec<_>>();
-    account_keys.sort_unstable();
-
-    let mut storage_keys: B256Map<Vec<B256>> = B256Map::default();
-    for key in hot_slots.keys() {
-        storage_keys.entry(key.address).or_default().push(key.slot);
-    }
-
-    let storage_prefix_sets = storage_keys
-        .into_iter()
-        .map(|(address, mut slots)| {
-            slots.sort_unstable();
-            (address, PrefixSet::from(slots.into_iter()))
-        })
-        .collect();
-
-    TriePrefixSets {
-        account_prefix_set: PrefixSet::from(account_keys.into_iter()),
-        storage_prefix_sets,
-        ..Default::default()
-    }
-}
-
 /// The fields of [`SparseStateTrie`] related to storage tries. This is kept separate from the rest
 /// of [`SparseStateTrie`] to help enforce allocation re-use.
 #[derive(Debug, Default)]
@@ -655,7 +600,7 @@ struct StorageTries<S = ArenaParallelSparseTrie> {
 
 #[cfg(feature = "std")]
 impl<S: SparseTrieTrait> StorageTries<S> {
-    /// Prunes storage tries using LFU-retained slots.
+    /// Prunes storage tries using the provided retained slots.
     ///
     /// Tries without retained slots are evicted entirely. Tries with retained slots are pruned to
     /// those slots.
@@ -900,7 +845,7 @@ mod tests {
     }
 
     #[test]
-    fn seeded_hot_cache_capacities_preserve_first_cycle_touches() {
+    fn seeded_hot_cache_capacities_record_first_cycle_touches() {
         let account = b256!("0x1000000000000000000000000000000000000000000000000000000000000000");
         let slot = b256!("0x2000000000000000000000000000000000000000000000000000000000000000");
         let mut sparse = SparseStateTrie::<ArenaParallelSparseTrie>::default();
@@ -908,13 +853,6 @@ mod tests {
         sparse.set_hot_cache_capacities(1, 1);
         sparse.record_account_touch(account);
         sparse.record_slot_touch(account, slot);
-
-        let retained_paths =
-            retained_paths_from_lfus(&sparse.hot_accounts_lfu, &sparse.hot_slots_lfu);
-        assert_eq!(retained_paths.account_prefix_set.slice(), &[Nibbles::unpack(account)]);
-        assert_eq!(retained_paths.storage_prefix_sets[&account].slice(), &[Nibbles::unpack(slot)]);
-
-        sparse.prune_frozen(1, 1, TriePrefixSets::default());
 
         assert_eq!(sparse.hot_accounts_lfu.keys().copied().collect::<Vec<_>>(), vec![account]);
         assert_eq!(
@@ -928,7 +866,10 @@ mod tests {
         let mut sparse = SparseStateTrie::<ArenaParallelSparseTrie>::default();
 
         let account = B256::ZERO;
+        let hot_account =
+            b256!("0x1000000000000000000000000000000000000000000000000000000000000000");
         let slot = B256::ZERO;
+        let hot_slot = B256::ZERO;
         let account_path = leaf_key([0x0], 64);
         let storage_path = leaf_key([0x0], 64);
 
@@ -959,18 +900,29 @@ mod tests {
 
         let multiproof = MultiProof {
             account_subtree: subtree(),
-            storages: HashMap::from_iter([(
-                account,
-                StorageMultiProof {
-                    root: B256::ZERO,
-                    subtree: subtree(),
-                    branch_node_masks: Default::default(),
-                },
-            )]),
+            storages: HashMap::from_iter([
+                (
+                    account,
+                    StorageMultiProof {
+                        root: B256::ZERO,
+                        subtree: subtree(),
+                        branch_node_masks: Default::default(),
+                    },
+                ),
+                (
+                    hot_account,
+                    StorageMultiProof {
+                        root: B256::ZERO,
+                        subtree: subtree(),
+                        branch_node_masks: Default::default(),
+                    },
+                ),
+            ]),
             ..Default::default()
         };
 
         sparse.reveal_decoded_multiproof(multiproof.try_into().unwrap()).unwrap();
+        sparse.storage_root(&hot_account).unwrap();
         let trie_account = TrieAccount {
             storage_root: sparse.storage_root(&account).unwrap(),
             ..Default::default()
@@ -981,6 +933,9 @@ mod tests {
             LeafUpdate::Changed(alloy_rlp::encode(trie_account)),
         );
         sparse.root().unwrap();
+        sparse.set_hot_cache_capacities(1, 1);
+        sparse.record_account_touch(hot_account);
+        sparse.record_slot_touch(hot_account, hot_slot);
 
         let mut retained_paths = TriePrefixSetsMut::default();
         retained_paths.account_prefix_set.insert(Nibbles::unpack(account));
@@ -989,7 +944,7 @@ mod tests {
             .entry(account)
             .or_default()
             .insert(Nibbles::unpack(slot));
-        sparse.prune_frozen(0, 0, retained_paths.freeze());
+        sparse.prune(retained_paths.freeze_unchecked());
 
         assert!(matches!(
             sparse.state_trie_ref().unwrap().find_leaf(&account_path, None),
@@ -999,6 +954,7 @@ mod tests {
             sparse.storage_trie_ref(&account).unwrap().find_leaf(&storage_path, None),
             Ok(LeafLookup::Exists)
         ));
+        assert!(sparse.storage_trie_ref(&hot_account).is_none());
     }
 
     #[test]

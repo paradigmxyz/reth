@@ -150,7 +150,7 @@ impl<K: fmt::Debug + Copy + Eq + hash::Hash> BucketedLfu<K> {
     }
 
     /// Returns an iterator over all retained keys.
-    #[cfg(any(test, feature = "std"))]
+    #[cfg(test)]
     pub(crate) fn keys(&self) -> impl Iterator<Item = &K> {
         self.entries.keys()
     }

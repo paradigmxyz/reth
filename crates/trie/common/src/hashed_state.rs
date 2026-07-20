@@ -596,6 +596,13 @@ impl HashedPostStateSorted {
     pub fn merge_into_frozen_prefix_set<'a>(
         states: impl Iterator<Item = &'a Self>,
     ) -> TriePrefixSets {
+        fn freeze_sorted_keys(keys: impl Iterator<Item = B256>) -> PrefixSet {
+            let (lower_bound, upper_bound) = keys.size_hint();
+            let mut prefix_set = PrefixSetMut::with_capacity(upper_bound.unwrap_or(lower_bound));
+            prefix_set.extend_keys(keys.map(Nibbles::unpack));
+            prefix_set.freeze_unchecked()
+        }
+
         struct StorageAcc<'a> {
             wiped: bool,
             first: Option<&'a [(B256, U256)]>,
@@ -646,17 +653,23 @@ impl HashedPostStateSorted {
         .map(|(address, ())| address)
         .merge(storage_addresses)
         .dedup();
-        let account_prefix_set = PrefixSet::from(account_keys);
+        let account_prefix_set = freeze_sorted_keys(account_keys);
 
         let storage_prefix_sets = storage_acc
             .into_iter()
             .map(|(address, entry)| {
                 let prefix_set = if entry.wiped {
-                    PrefixSetMut::all().freeze()
+                    PrefixSetMut::all().freeze_unchecked()
                 } else if entry.rest.is_empty() {
-                    PrefixSet::from(entry.first.into_iter().flatten().map(|(slot, _)| *slot))
+                    freeze_sorted_keys(
+                        entry
+                            .first
+                            .expect("non-wiped storage has at least one slot slice")
+                            .iter()
+                            .map(|(slot, _)| *slot),
+                    )
                 } else {
-                    PrefixSet::from(
+                    freeze_sorted_keys(
                         kway_merge_sorted(
                             entry
                                 .first
@@ -1539,6 +1552,7 @@ mod tests {
         let destroyed = B256::with_last_byte(2);
         let storage_only = B256::with_last_byte(3);
         let wiped_storage = B256::with_last_byte(4);
+        let account_slot = B256::with_last_byte(10);
         let first_slot = B256::with_last_byte(11);
         let second_slot = B256::with_last_byte(12);
         let third_slot = B256::with_last_byte(13);
@@ -1546,6 +1560,13 @@ mod tests {
         let first = HashedPostStateSorted {
             accounts: vec![(account, Some(Account::default())), (destroyed, None)],
             storages: B256Map::from_iter([
+                (
+                    account,
+                    HashedStorageSorted {
+                        storage_slots: vec![(account_slot, U256::from(1))],
+                        wiped: false,
+                    },
+                ),
                 (
                     storage_only,
                     HashedStorageSorted {
@@ -1601,6 +1622,10 @@ mod tests {
                 Nibbles::unpack(second_slot),
                 Nibbles::unpack(third_slot),
             ]
+        );
+        assert_eq!(
+            prefix_sets.storage_prefix_sets[&account].slice(),
+            &[Nibbles::unpack(account_slot)]
         );
         assert!(prefix_sets.storage_prefix_sets[&wiped_storage].all());
         assert_eq!(prefix_sets.destroyed_accounts, HashSet::from_iter([account, destroyed]));
