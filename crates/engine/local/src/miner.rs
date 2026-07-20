@@ -26,9 +26,6 @@ use tracing::error;
 /// Default number of confirmations required before a block is finalized in dev mode.
 pub const DEFAULT_FINALITY_DEPTH: NonZeroUsize = NonZeroUsize::new(64).unwrap();
 
-/// Default number of confirmations required before a block is considered safe in dev mode.
-const DEFAULT_SAFE_DEPTH: usize = 32;
-
 /// A mining mode for the local dev engine.
 pub enum MiningMode<Pool: TransactionPool + Unpin> {
     /// In this mode a block is built as soon as
@@ -225,10 +222,12 @@ where
     /// Returns current forkchoice state.
     fn forkchoice_state(&self) -> ForkchoiceState {
         let finality_depth = self.finality_depth.get();
-        let safe_depth = finality_depth.min(DEFAULT_SAFE_DEPTH);
         ForkchoiceState {
             head_block_hash: block_hash_at_depth(&self.last_block_hashes, 1),
-            safe_block_hash: block_hash_at_depth(&self.last_block_hashes, safe_depth),
+            safe_block_hash: block_hash_at_depth(
+                &self.last_block_hashes,
+                finality_depth.div_ceil(2),
+            ),
             finalized_block_hash: block_hash_at_depth(&self.last_block_hashes, finality_depth),
         }
     }
