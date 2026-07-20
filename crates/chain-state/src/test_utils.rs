@@ -1,6 +1,6 @@
 use crate::{
     in_memory::ExecutedBlock, CanonStateNotification, CanonStateNotifications,
-    CanonStateSubscriptions, ComputedTrieData,
+    CanonStateSubscriptions,
 };
 use alloy_consensus::{Header, SignableTransaction, TxEip1559, TxReceipt, EMPTY_ROOT_HASH};
 use alloy_eips::eip1559::{ETHEREUM_BLOCK_GAS_LIMIT_30M, INITIAL_BASE_FEE};
@@ -20,7 +20,7 @@ use reth_primitives_traits::{
     SignedTransaction,
 };
 use reth_storage_api::NodePrimitivesProvider;
-use reth_trie::root::state_root_unhashed;
+use reth_trie::{root::state_root_unhashed, ComputedTrieData, SortedTrieData};
 use revm::{database::BundleState, state::AccountInfo};
 use std::{
     ops::Range,
@@ -312,8 +312,9 @@ impl<N: NodePrimitives> TestBlockBuilder<N> {
             receipts.into_iter().flatten().collect()
         };
 
-        let trie_data =
-            ComputedTrieData { hashed_state: Arc::new(hashed_state), ..Default::default() };
+        let trie_data = ComputedTrieData {
+            sorted: SortedTrieData { hashed_state: Arc::new(hashed_state), ..Default::default() },
+        };
 
         let block_hash = recovered.hash();
         let executed = ExecutedBlock::new(

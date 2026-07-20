@@ -71,7 +71,7 @@ aquamarine.workspace = true
 clap = { workspace = true, features = ["derive", "env"] }
 
 [dev-dependencies]
-alloy-node-bindings = "2.1.0"
+alloy-node-bindings = "2.1.1"
 alloy-provider = { workspace = true, features = ["reqwest"] }
 alloy-rpc-types-eth.workspace = true
 backon.workspace = true
@@ -199,6 +199,7 @@ min-trace-logs = [
     "reth-node-core/min-trace-logs",
 ]
 
+partial-persistence = ["reth-node-core/partial-persistence"]
 trie-debug = ["reth-node-builder/trie-debug", "reth-node-core/trie-debug"]
 
 [[bin]]

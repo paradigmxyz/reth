@@ -22,6 +22,10 @@ pub trait DebugApi<TxReq: RpcObject> {
     #[method(name = "getRawBlock")]
     async fn raw_block(&self, block_id: BlockId) -> RpcResult<Bytes>;
 
+    /// Returns the RLP-encoded EIP-7928 block access list.
+    #[method(name = "getRawBlockAccessList")]
+    async fn raw_block_access_list(&self, block_id: BlockId) -> RpcResult<Bytes>;
+
     /// Returns an EIP-2718 binary-encoded transaction.
     ///
     /// If this is a pooled EIP-4844 transaction, the blob sidecar is included.

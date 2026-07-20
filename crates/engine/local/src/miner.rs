@@ -239,7 +239,7 @@ where
         let res = self.to_engine.fork_choice_updated(state, None).await?;
 
         if !res.is_valid() {
-            eyre::bail!("Invalid fork choice update {state:?}: {res:?}")
+            eyre::bail!("Invalid fork choice update {state:?}: {res:?}");
         }
 
         Ok(())
@@ -257,7 +257,7 @@ where
             .await?;
 
         if !res.is_valid() {
-            eyre::bail!("Invalid payload status")
+            eyre::bail!("Invalid payload status");
         }
 
         let payload_id = res.payload_id.ok_or_eyre("No payload id")?;
@@ -269,14 +269,14 @@ where
         let Some(Ok(payload)) =
             self.payload_builder.resolve_kind(payload_id, PayloadKind::WaitForPending).await
         else {
-            eyre::bail!("No payload")
+            eyre::bail!("No payload");
         };
 
         let header = payload.block().sealed_header().clone();
         let res = self.to_engine.new_payload(payload.into()).await?;
 
         if !res.is_valid() {
-            eyre::bail!("Invalid payload")
+            eyre::bail!("Invalid payload");
         }
 
         self.last_block_hashes.push_back(header.hash());

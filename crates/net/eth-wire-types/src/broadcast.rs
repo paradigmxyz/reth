@@ -10,7 +10,7 @@ use alloy_primitives::{
     Bytes, TxHash, B128, B256, U128,
 };
 use alloy_rlp::{
-    Decodable, Encodable, Header, RlpDecodable, RlpDecodableWrapper, RlpEncodable,
+    decode_append, Decodable, Encodable, Header, RlpDecodable, RlpDecodableWrapper, RlpEncodable,
     RlpEncodableWrapper,
 };
 use core::{fmt::Debug, mem};
@@ -18,6 +18,14 @@ use derive_more::{Constructor, Deref, DerefMut, From, IntoIterator};
 use reth_codecs_derive::{add_arbitrary_tests, generate_tests};
 use reth_ethereum_primitives::TransactionSigned;
 use reth_primitives_traits::{sync::OnceLock, Block, InMemorySize, SignedTransaction};
+
+/// Soft limit for the number of hashes in a
+/// [`NewPooledTransactionHashes`] broadcast message.
+///
+/// Spec'd at 4096 hashes.
+///
+/// <https://github.com/ethereum/devp2p/blob/master/caps/eth.md#newpooledtransactionhashes-0x08>
+pub const SOFT_LIMIT_COUNT_HASHES_IN_NEW_POOLED_TRANSACTIONS_BROADCAST_MESSAGE: usize = 4096;
 
 /// This informs peers of new blocks that have appeared on the network.
 #[derive(
@@ -176,7 +184,7 @@ pub fn decode_list_with_memory_budget<T: Decodable + InMemorySize>(
     let (payload, rest) = buf.split_at(header.payload_length);
     let mut payload = payload;
 
-    let mut txs = Vec::new();
+    let mut txs = Vec::with_capacity(estimated_transaction_list_capacity(header.payload_length));
     let mut total_size = 0usize;
 
     while !payload.is_empty() {
@@ -192,6 +200,23 @@ pub fn decode_list_with_memory_budget<T: Decodable + InMemorySize>(
 
     *buf = rest;
     Ok(txs)
+}
+
+// Keep this as a conservative hint: small lists stay allocation-free until the first push, while
+// large untrusted payloads cannot force an outsized preallocation.
+const MIN_TRANSACTION_RLP_SIZE_ESTIMATE: usize = 128;
+const MIN_PREALLOCATED_TRANSACTIONS: usize = 4;
+const MAX_PREALLOCATED_TRANSACTIONS: usize = 1024;
+
+const fn estimated_transaction_list_capacity(payload_length: usize) -> usize {
+    let estimate = payload_length / MIN_TRANSACTION_RLP_SIZE_ESTIMATE;
+    if estimate < MIN_PREALLOCATED_TRANSACTIONS {
+        0
+    } else if estimate > MAX_PREALLOCATED_TRANSACTIONS {
+        MAX_PREALLOCATED_TRANSACTIONS
+    } else {
+        estimate
+    }
 }
 
 /// Same as [`Transactions`] but this is intended as egress message send from local to _many_ peers.
@@ -720,33 +745,29 @@ impl Encodable for NewPooledTransactionHashes68 {
 
 impl Decodable for NewPooledTransactionHashes68 {
     fn decode(buf: &mut &[u8]) -> alloy_rlp::Result<Self> {
-        #[derive(RlpDecodable)]
-        struct EncodableNewPooledTransactionHashes68 {
-            types: Bytes,
-            sizes: Vec<usize>,
-            hashes: Vec<B256>,
+        let Header { list, payload_length } = Header::decode(buf)?;
+        if !list {
+            return Err(alloy_rlp::Error::UnexpectedString)
+        }
+        if buf.len() < payload_length {
+            return Err(alloy_rlp::Error::InputTooShort)
         }
 
-        let encodable = EncodableNewPooledTransactionHashes68::decode(buf)?;
-        let msg = Self {
-            types: encodable.types.into(),
-            sizes: encodable.sizes,
-            hashes: encodable.hashes,
-        };
+        let (mut payload, rest) = buf.split_at(payload_length);
+        let (types, sizes, hashes) = decode_pooled_transaction_hashes_payload(&mut payload)?;
 
-        if msg.hashes.len() != msg.types.len() {
+        if !payload.is_empty() {
             return Err(alloy_rlp::Error::ListLengthMismatch {
-                expected: msg.hashes.len(),
-                got: msg.types.len(),
-            })
-        }
-        if msg.hashes.len() != msg.sizes.len() {
-            return Err(alloy_rlp::Error::ListLengthMismatch {
-                expected: msg.hashes.len(),
-                got: msg.sizes.len(),
+                expected: payload_length,
+                got: payload_length - payload.len(),
             })
         }
 
+        ensure_pooled_transaction_hashes_lengths(hashes.len(), types.len(), sizes.len())?;
+
+        let msg = Self { types, sizes, hashes };
+
+        *buf = rest;
         Ok(msg)
     }
 }
@@ -898,9 +919,7 @@ impl Decodable for NewPooledTransactionHashes72 {
         }
 
         let (mut payload, rest) = buf.split_at(payload_length);
-        let types = Bytes::decode(&mut payload)?;
-        let sizes = Vec::<usize>::decode(&mut payload)?;
-        let hashes = Vec::<B256>::decode(&mut payload)?;
+        let (types, sizes, hashes) = decode_pooled_transaction_hashes_payload(&mut payload)?;
         let Some(first_byte) = payload.first().copied() else {
             return Err(alloy_rlp::Error::InputTooShort)
         };
@@ -918,25 +937,51 @@ impl Decodable for NewPooledTransactionHashes72 {
             })
         }
 
-        let msg = Self { types: types.into(), sizes, hashes, cell_mask };
-
-        if msg.hashes.len() != msg.types.len() {
-            return Err(alloy_rlp::Error::ListLengthMismatch {
-                expected: msg.hashes.len(),
-                got: msg.types.len(),
-            })
-        }
-        if msg.hashes.len() != msg.sizes.len() {
-            return Err(alloy_rlp::Error::ListLengthMismatch {
-                expected: msg.hashes.len(),
-                got: msg.sizes.len(),
-            })
-        }
+        ensure_pooled_transaction_hashes_lengths(hashes.len(), types.len(), sizes.len())?;
 
         *buf = rest;
 
-        Ok(msg)
+        Ok(Self { types, sizes, hashes, cell_mask })
     }
+}
+
+/// Twice the spec'd soft limit for `NewPooledTransactionHashes` announcements.
+///
+/// This keeps capacity hints bounded when a malformed packet spends most of its bytes on the
+/// one-byte `types` string before the size and hash lists are validated.
+const NEW_POOLED_TRANSACTION_HASHES_DECODE_CAP: usize =
+    2 * SOFT_LIMIT_COUNT_HASHES_IN_NEW_POOLED_TRANSACTIONS_BROADCAST_MESSAGE;
+
+#[inline]
+fn decode_pooled_transaction_hashes_payload(
+    payload: &mut &[u8],
+) -> alloy_rlp::Result<(Vec<u8>, Vec<usize>, Vec<B256>)> {
+    let types = Bytes::decode(payload)?;
+    let capacity = types.len().min(NEW_POOLED_TRANSACTION_HASHES_DECODE_CAP);
+
+    let mut sizes = Vec::with_capacity(capacity);
+    decode_append(payload, &mut sizes)?;
+
+    let mut hashes = Vec::with_capacity(capacity);
+    decode_append(payload, &mut hashes)?;
+
+    Ok((types.into(), sizes, hashes))
+}
+
+#[inline]
+const fn ensure_pooled_transaction_hashes_lengths(
+    hashes_len: usize,
+    types_len: usize,
+    sizes_len: usize,
+) -> alloy_rlp::Result<()> {
+    if hashes_len != types_len {
+        return Err(alloy_rlp::Error::ListLengthMismatch { expected: hashes_len, got: types_len })
+    }
+    if hashes_len != sizes_len {
+        return Err(alloy_rlp::Error::ListLengthMismatch { expected: hashes_len, got: sizes_len })
+    }
+
+    Ok(())
 }
 
 /// Validation pass that checks for unique transaction hashes.
@@ -1306,7 +1351,8 @@ mod tests {
     use super::*;
     use alloy_consensus::{transaction::TxHashRef, Typed2718};
     use alloy_eips::eip2718::Encodable2718;
-    use alloy_primitives::{b256, hex, Signature, U256};
+    use alloy_primitives::{b256, hex, Bytes, Signature, U256};
+    use alloy_rlp::{RlpDecodable, RlpEncodable};
     use proptest::prelude::*;
     use reth_ethereum_primitives::{Transaction, TransactionSigned};
     use std::str::FromStr;
@@ -1330,6 +1376,46 @@ mod tests {
         let mut out = Vec::new();
         value.encode(&mut out);
         out
+    }
+
+    #[derive(RlpEncodable, RlpDecodable)]
+    struct EncodableNewPooledTransactionHashes68 {
+        types: Bytes,
+        sizes: Vec<usize>,
+        hashes: Vec<B256>,
+    }
+
+    type NewPooledTransactionHashes68Fields = (Vec<u8>, Vec<usize>, Vec<B256>);
+
+    fn decode_eth68_hashes_derived(
+        buf: &mut &[u8],
+    ) -> alloy_rlp::Result<NewPooledTransactionHashes68> {
+        let encodable = EncodableNewPooledTransactionHashes68::decode(buf)?;
+        let msg = NewPooledTransactionHashes68 {
+            types: encodable.types.into(),
+            sizes: encodable.sizes,
+            hashes: encodable.hashes,
+        };
+
+        ensure_pooled_transaction_hashes_lengths(
+            msg.hashes.len(),
+            msg.types.len(),
+            msg.sizes.len(),
+        )?;
+
+        Ok(msg)
+    }
+
+    fn eth68_hash_fields_strategy() -> impl Strategy<Value = NewPooledTransactionHashes68Fields> {
+        (0usize..128, 0usize..128, 0usize..128).prop_flat_map(
+            |(types_len, sizes_len, hashes_len)| {
+                (
+                    proptest::collection::vec(any::<u8>(), types_len),
+                    proptest::collection::vec(0usize..131_072, sizes_len),
+                    proptest::collection::vec(any::<B256>(), hashes_len),
+                )
+            },
+        )
     }
 
     proptest! {
@@ -1368,6 +1454,31 @@ mod tests {
             prop_assert!(broadcast_bytes.is_empty());
 
             prop_assert_eq!(decoded_broadcast, decoded_shared);
+        }
+
+        #[test]
+        fn eth_68_handrolled_decode_matches_derived_implementation(
+            (types, sizes, hashes) in eth68_hash_fields_strategy()
+        ) {
+            let encodable = EncodableNewPooledTransactionHashes68 {
+                types: Bytes::from(types),
+                sizes,
+                hashes,
+            };
+            let encoded = encoded(&encodable);
+
+            let mut derived_buf = encoded.as_slice();
+            let derived = decode_eth68_hashes_derived(&mut derived_buf);
+
+            let mut handrolled_buf = encoded.as_slice();
+            let handrolled = NewPooledTransactionHashes68::decode(&mut handrolled_buf);
+
+            let handrolled_is_ok = handrolled.is_ok();
+            prop_assert_eq!(&handrolled, &derived);
+            if handrolled_is_ok {
+                prop_assert!(derived_buf.is_empty());
+                prop_assert!(handrolled_buf.is_empty());
+            }
         }
     }
 
