@@ -6466,6 +6466,7 @@ dependencies = [
  "alloy-rlp",
  "bincode",
  "reth-primitives-traits",
+ "reth-trie",
  "reth-trie-common",
  "reth-trie-sparse",
  "revm-database",

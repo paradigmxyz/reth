@@ -2,10 +2,11 @@ use alloy_primitives::{Address, Bytes, B256, U256};
 use eyre::{bail, eyre, Result};
 use partial_stateless::{
     accessed_state::BlockAccessedState,
-    check_sidecar_context, check_sidecar_miss_targets, compute_trustless_state_root,
+    check_sidecar_context, check_sidecar_miss_targets,
     network_cache::{NetworkStateCache, UpdateStats},
+    try_compute_trustless_state_root,
     witness_check::{
-        materialize_sidecar_witness_with_limits, root_witness_completeness_from_bundle,
+        materialize_sidecar_witness_with_limits, root_witness_completeness_from_bundle_with_cache,
         SidecarWitnessCheckLimits,
     },
     CacheAnchor, PartialStatelessSidecar, PartialTrieNodeCache, RootWitnessCompletenessReport,
@@ -29,8 +30,7 @@ pub(crate) struct SidecarReexecReport {
     pub next_cache_anchor: CacheAnchor,
     pub cache_update: UpdateStats,
     pub root_witness_completeness: RootWitnessCompletenessReport,
-    /// State root computed trustlessly from the trie-node cache + witness only (no full-DB trie
-    /// access). `None` when the cache was not warm enough (a cache-hit path is blind).
+    /// State root computed from the local sparse trie + parent-state miss proof.
     pub trustless_state_root: Option<B256>,
 }
 
@@ -48,7 +48,7 @@ where
 {
     prefilter(block, prev_cache, sidecar)?;
 
-    let materialized = materialize_sidecar_witness_with_limits(sidecar, limits, trie_cache)
+    let materialized = materialize_sidecar_witness_with_limits(sidecar, limits)
         .map_err(|err| eyre!("sidecar witness check failed: {err}"))?;
     // Retained for trustless root computation before the other fields are moved into the provider.
     let witness_multiproof = materialized.multiproof;
@@ -73,14 +73,22 @@ where
         .map_err(|err| eyre!("partial sidecar re-execution failed: {err:?}"))?;
     drop(db);
 
-    // Trustless post-state root: trie-node cache + witness only, no full-DB trie access. This is
-    // the stateless-validator path. `None` means the cache was not warm enough this block; the
-    // provider-assisted root below stays the ground-truth cross-check.
-    let trustless_state_root = compute_trustless_state_root(
-        witness_multiproof.clone(),
-        trie_cache,
+    // Apply the block to a transactional sparse-trie snapshot. The original cache is left
+    // untouched until the consensus root and next cache anchor have both been checked.
+    let mut next_trie_cache = trie_cache.clone();
+    let trustless_state_root = try_compute_trustless_state_root(
+        witness_multiproof,
+        &mut next_trie_cache,
         &execution_output.state,
-    );
+    )
+    .map_err(|err| eyre!("local sparse-trie transition failed: {err}"))?;
+    if trustless_state_root != block.state_root() {
+        bail!(
+            "local sparse-trie state root mismatch: expected {:?}, got {:?}",
+            block.state_root(),
+            trustless_state_root
+        );
+    }
 
     let hashed_post_state = full_provider.hashed_post_state(&execution_output.state);
     let (computed_state_root, _) = full_provider
@@ -94,6 +102,12 @@ where
         );
     }
 
+    let root_witness_completeness = root_witness_completeness_from_bundle_with_cache(
+        &execution_output.state,
+        &sidecar.cache_miss_targets,
+        trie_cache,
+    );
+
     let expected_miss = prev_cache.expected_miss_targets(&actual_accessed);
     check_sidecar_miss_targets(sidecar, &expected_miss)
         .map_err(|err| eyre!("cache-miss-only check failed: {err:?}"))?;
@@ -105,16 +119,9 @@ where
         sidecar.block_hash,
         sidecar.cache_policy_id,
         sidecar.next_cache_anchor,
+        trie_cache,
+        next_trie_cache,
     )?;
-
-    let root_witness_completeness =
-        root_witness_completeness_from_bundle(&execution_output.state, &sidecar.cache_miss_targets);
-
-    // Advance the trie-node cache only after every sidecar and value-cache check has succeeded.
-    // The proof was reconstructed from the sidecar plus the pre-block trie cache above.
-    trie_cache.on_block_executed(&witness_multiproof, &expected_miss.accounts, |address| {
-        prev_cache.contains_account(address)
-    });
 
     Ok(SidecarReexecReport {
         computed_state_root,
@@ -123,7 +130,7 @@ where
         next_cache_anchor,
         cache_update,
         root_witness_completeness,
-        trustless_state_root,
+        trustless_state_root: Some(trustless_state_root),
     })
 }
 
@@ -134,8 +141,11 @@ fn apply_cache_transition_and_check(
     block_hash: B256,
     cache_policy_id: B256,
     expected_next_anchor: CacheAnchor,
+    trie_cache: &mut PartialTrieNodeCache,
+    mut next_trie_cache: PartialTrieNodeCache,
 ) -> Result<(UpdateStats, CacheAnchor)> {
     let cache_update = cache.on_block_executed(block_number, accessed);
+    next_trie_cache.retain_from_value_cache(cache);
     let next_cache_anchor = cache.cache_anchor(block_number, block_hash, cache_policy_id);
     if next_cache_anchor != expected_next_anchor {
         cache.rollback_block(block_number).map_err(|rollback_err| {
@@ -145,6 +155,7 @@ fn apply_cache_transition_and_check(
             "next cache anchor mismatch: expected {expected_next_anchor:?}, got {next_cache_anchor:?}"
         );
     }
+    *trie_cache = next_trie_cache;
     Ok((cache_update, next_cache_anchor))
 }
 
@@ -255,6 +266,8 @@ mod tests {
         );
         cache.on_block_executed(99, &BlockAccessedState::default());
         let root_before = cache.cache_root();
+        let mut trie_cache = PartialTrieNodeCache::new();
+        let trie_root_before = trie_cache.cache_root();
         let address = Address::repeat_byte(0x11);
         let mut accessed = BlockAccessedState::default();
         accessed
@@ -273,11 +286,14 @@ mod tests {
                 cache_policy_id: B256::repeat_byte(0x33),
                 cache_root: B256::ZERO,
             },
+            &mut trie_cache,
+            PartialTrieNodeCache::new(),
         )
         .expect_err("wrong next cache root must fail");
 
         assert_eq!(cache.current_block(), 99);
         assert_eq!(cache.cache_root(), root_before);
+        assert_eq!(trie_cache.cache_root(), trie_root_before);
         assert!(!cache.contains_account(&address));
     }
 }

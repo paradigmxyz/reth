@@ -12,6 +12,7 @@ use partial_stateless::{
     network_cache::{NetworkStateCache, UpdateStats},
     partial_witness_commitment,
     policy::LastNBlocksPolicy,
+    root_witness_targets_from_bundle, try_compute_trustless_state_root,
     witness::{
         accessed_to_state_targets, build_sidecar_targets, cache_hit_targets,
         measure_multiproof_size, state_targets_to_proof_targets, WitnessResult,
@@ -19,7 +20,7 @@ use partial_stateless::{
     CacheFootprintStats, PartialExecutionWitness, PartialExecutionWitnessState,
     PartialStatelessSidecar, PartialTrieNodeCache, RootWitnessCompletenessSummary,
     SerializableMultiProof, SidecarBenchmarkManifest, StateTargetSet, StateTargetStats,
-    WitnessReductionStats,
+    TrieProofTarget, TrieTransitionError, WitnessReductionStats,
 };
 use reth_ethereum::EthPrimitives;
 use reth_evm::{execute::Executor, ConfigureEvm};
@@ -40,6 +41,7 @@ pub(crate) struct BuilderOptions<'a> {
     pub(crate) sidecar_dir: &'a Path,
     pub(crate) compute_baseline: bool,
     pub(crate) resource_metrics: bool,
+    pub(crate) trie_cache_diagnostics: bool,
     pub(crate) run_sidecar_preflight: bool,
     pub(crate) reexec_limits: &'a SidecarReexecLimits,
 }
@@ -176,8 +178,6 @@ where
     let cache_hit_targets = cache_hit_targets(&accessed, &miss);
 
     let stats = cache.on_block_executed(block_number, &accessed);
-    let next_cache_anchor =
-        cache_parent_synced.then(|| cache.cache_anchor(block_number, block_hash, cache_policy_id));
     let snapshot = cache.snapshot();
     let cache_memory_after = cache.estimated_memory_bytes();
 
@@ -206,9 +206,31 @@ where
         "Witness requirement (cache miss)"
     );
 
-    let (raw_targets, targets) = build_sidecar_targets(&miss);
-    let target_accounts = targets.len();
-    let target_slots: usize = targets.values().map(|slots| slots.len()).sum();
+    let (raw_targets, mut targets) = build_sidecar_targets(&miss);
+
+    // System-applied execution changes are not guaranteed to appear in the captured read set.
+    // Add only bundle paths not already held by the persistent trie to the same parent-state
+    // multiproof, without changing the authoritative value-cache miss manifest.
+    let bundle_targets = root_witness_targets_from_bundle(&execution_output.state);
+    let mut structural_targets = bundle_targets;
+    structural_targets.accounts.retain(|address| !trie_cache.contains_account_path(address));
+    structural_targets
+        .storage
+        .retain(|(address, slot)| !trie_cache.contains_storage_path(address, slot));
+    structural_targets.code_hashes.clear();
+    structural_targets.sort_dedup();
+    for (hashed_address, slots) in state_targets_to_proof_targets(&structural_targets) {
+        targets.entry(hashed_address).or_default().extend(slots);
+    }
+    if !structural_targets.accounts.is_empty() || !structural_targets.storage.is_empty() {
+        info!(
+            target: "partial_stateless",
+            block = block_number,
+            structural_accounts = structural_targets.accounts.len(),
+            structural_storage = structural_targets.storage.len(),
+            "Added uncovered execution-diff paths to parent multiproof"
+        );
+    }
     let missed_bytecode_bytes: usize = miss
         .missed_codes
         .iter()
@@ -252,276 +274,389 @@ where
 
     let rusage_before = options.resource_metrics.then(thread_rusage);
     let start = Instant::now();
-    let mut saved_sidecar_path = None;
-    let witness = match state_provider.multiproof(TrieInput::default(), targets) {
-        Ok(proof) => {
-            let elapsed_ms = start.elapsed().as_millis() as u64;
-            let mut result = measure_multiproof_size(&proof, missed_bytecode_bytes);
-            result.computation_time_ms = Some(elapsed_ms);
-            if let Some((cpu_us_before, majflt_before, minflt_before)) = rusage_before {
-                let (cpu_us_after, majflt_after, minflt_after) = thread_rusage();
-                result.cpu_time_ms = Some(cpu_us_after.saturating_sub(cpu_us_before) / 1000);
-                result.major_page_faults = Some(majflt_after.saturating_sub(majflt_before));
-                result.minor_page_faults = Some(minflt_after.saturating_sub(minflt_before));
-            }
-            result.target_accounts = target_accounts;
-            result.target_storage_slots = target_slots;
+    let saved_sidecar_path;
+    let mut proof_retry_count = 0usize;
+    let witness = loop {
+        match state_provider.multiproof(TrieInput::default(), targets.clone()) {
+            Ok(proof) => {
+                let elapsed_ms = start.elapsed().as_millis() as u64;
+                let mut result = measure_multiproof_size(&proof, missed_bytecode_bytes);
+                result.computation_time_ms = Some(elapsed_ms);
+                if let Some((cpu_us_before, majflt_before, minflt_before)) = rusage_before {
+                    let (cpu_us_after, majflt_after, minflt_after) = thread_rusage();
+                    result.cpu_time_ms = Some(cpu_us_after.saturating_sub(cpu_us_before) / 1000);
+                    result.major_page_faults = Some(majflt_after.saturating_sub(majflt_before));
+                    result.minor_page_faults = Some(minflt_after.saturating_sub(minflt_before));
+                }
+                result.target_accounts = targets.len();
+                result.target_storage_slots = targets.values().map(|slots| slots.len()).sum();
 
-            let sidecar_generation_result: eyre::Result<Option<PathBuf>> = 'sidecar: {
-                let (Some(prev_cache_anchor), Some(next_cache_anchor), Some(prev_cache_for_reexec)) =
-                    (prev_cache_anchor, next_cache_anchor, prev_cache_for_reexec.as_mut())
-                else {
-                    break 'sidecar Ok(None);
+                let trie_clone_start = Instant::now();
+                let mut next_trie_cache = trie_cache.clone();
+                let trie_clone_us = trie_clone_start.elapsed().as_micros() as u64;
+
+                let local_root_start = Instant::now();
+                let local_state_root = match try_compute_trustless_state_root(
+                    proof.clone(),
+                    &mut next_trie_cache,
+                    &execution_output.state,
+                ) {
+                    Ok(root) => root,
+                    Err(TrieTransitionError::ProofRequired(proof_targets)) => {
+                        let accounts_before = targets.len();
+                        let slots_before: usize = targets.values().map(|slots| slots.len()).sum();
+                        let proof_targets_requested = proof_targets.len();
+                        let first_proof_target = proof_targets.first().copied();
+                        for proof_target in proof_targets {
+                            match proof_target {
+                                TrieProofTarget::Account(hashed_address) => {
+                                    targets.entry(hashed_address).or_default();
+                                }
+                                TrieProofTarget::Storage { hashed_address, hashed_slot } => {
+                                    targets.entry(hashed_address).or_default().insert(hashed_slot);
+                                }
+                            }
+                        }
+                        let slots_after: usize = targets.values().map(|slots| slots.len()).sum();
+                        proof_retry_count += 1;
+                        if proof_retry_count > 128 ||
+                            (accounts_before == targets.len() && slots_before == slots_after)
+                        {
+                            return Err(rollback_sidecar_transition(
+                            cache,
+                            block_number,
+                            eyre::eyre!(
+                                "local sparse-trie requested {proof_targets_requested} proof targets without making progress after {proof_retry_count} retries; first target: {first_proof_target:?}"
+                            ),
+                        ))
+                        }
+                        info!(
+                            target: "partial_stateless",
+                            block = block_number,
+                            proof_retry_count,
+                            proof_targets_requested,
+                            ?first_proof_target,
+                            proof_target_accounts = targets.len(),
+                            proof_target_storage = slots_after,
+                            "Expanded parent multiproof for a canonical sparse-trie transition"
+                        );
+                        continue
+                    }
+                    Err(err) => {
+                        return Err(rollback_sidecar_transition(
+                            cache,
+                            block_number,
+                            eyre::eyre!("local sparse-trie transition failed: {err}"),
+                        ))
+                    }
                 };
-                let parent_state_root = parent_state_root_result?;
-
-                if cache.current_block() != block_number {
-                    warn!(
-                        target: "partial_stateless",
-                        block = block_number,
-                        cache_block = cache.current_block(),
-                        expected_block = block_number,
-                        "Cache state mismatch: cache block is not synced to block number. Skipping sidecar generation."
-                    );
-                    break 'sidecar Ok(None);
+                let local_root_us = local_root_start.elapsed().as_micros() as u64;
+                if local_state_root != block.state_root() {
+                    return Err(rollback_sidecar_transition(
+                        cache,
+                        block_number,
+                        eyre::eyre!(
+                            "local sparse-trie state root mismatch: expected {:?}, got {:?}",
+                            block.state_root(),
+                            local_state_root
+                        ),
+                    ))
                 }
 
-                let ancestor_headers =
-                    ancestor_headers_for_range(lowest_block_number, block_number)?;
-                // Omit nodes that a validator with the same pre-block trie cache already holds.
-                // The verifier reconstructs the full proof before checking it against the parent
-                // root and computing the post-state root.
-                let pruned_proof = trie_cache.prune_known_nodes(&proof);
-                let serializable_proof = SerializableMultiProof::from_multiproof(&pruned_proof);
-                let serialized_multiproof = bincode::serialize(&serializable_proof)
-                    .map_err(|err| eyre::eyre!("failed to serialize multiproof: {err}"))?;
-                let sidecar_miss = StateTargetSet::from(&raw_targets);
-                let witness_payload = PartialExecutionWitness {
-                    state: PartialExecutionWitnessState::MptMultiProof(serialized_multiproof),
-                    codes: missed_bytecodes.clone(),
-                    keys: raw_targets.key_preimages(),
-                    headers: ancestor_headers,
-                };
-                let witness_commitment =
-                    partial_witness_commitment(parent_state_root, &sidecar_miss, &witness_payload);
-                let sidecar = PartialStatelessSidecar {
-                    parent_hash,
-                    parent_state_root,
-                    block_hash,
-                    block_number,
-                    cache_block: parent_block_number,
-                    cache_policy_id,
-                    prev_cache_anchor,
-                    next_cache_anchor,
-                    cache_policy_metadata: cache_policy_metadata.clone(),
-                    cache_miss_targets: sidecar_miss.clone(),
-                    witness_commitment,
-                    miss_manifest: raw_targets.clone(),
-                    witness: witness_payload,
-                    stats: result.clone(),
-                };
+                let trie_retention_start = Instant::now();
+                next_trie_cache.retain_from_value_cache(cache);
+                let trie_retention_us = trie_retention_start.elapsed().as_micros() as u64;
 
-                let root_witness_completeness = if options.run_sidecar_preflight {
-                    let mut trie_cache_for_reexec = trie_cache.clone();
-                    let reexec_report = verify_and_apply_provider_assisted_sidecar(
-                        evm_config,
-                        state_provider,
-                        block,
-                        prev_cache_for_reexec,
-                        &sidecar,
-                        options.reexec_limits,
-                        &mut trie_cache_for_reexec,
-                    )
-                    .map_err(|err| {
-                        eyre::eyre!("provider-assisted sidecar preflight failed: {err}")
-                    })?;
+                let validation_start = Instant::now();
+                let trie_shape_metrics = if options.trie_cache_diagnostics {
+                    match next_trie_cache.validate_against_value_cache(cache) {
+                        Ok(metrics) => Some(metrics),
+                        Err(err) => {
+                            return Err(rollback_sidecar_transition(
+                                cache,
+                                block_number,
+                                eyre::eyre!("trie-cache invariant validation failed: {err}"),
+                            ))
+                        }
+                    }
+                } else {
+                    None
+                };
+                let trie_validation_us = validation_start.elapsed().as_micros() as u64;
+                let next_cache_anchor = cache_parent_synced
+                    .then(|| cache.cache_anchor(block_number, block_hash, cache_policy_id));
 
-                    if !reexec_report.root_witness_completeness.trustless_root_ready {
+                let sidecar_generation_result: eyre::Result<Option<PathBuf>> = 'sidecar: {
+                    let (
+                        Some(prev_cache_anchor),
+                        Some(next_cache_anchor),
+                        Some(prev_cache_for_reexec),
+                    ) = (prev_cache_anchor, next_cache_anchor, prev_cache_for_reexec.as_mut())
+                    else {
+                        break 'sidecar Ok(None);
+                    };
+                    let parent_state_root = parent_state_root_result?;
+
+                    if cache.current_block() != block_number {
                         warn!(
                             target: "partial_stateless",
                             block = block_number,
-                            partial_state_trustless_verification_ready = false,
-                            missing_account_paths = reexec_report
-                                .root_witness_completeness
-                                .missing_account_paths
-                                .len(),
-                            missing_storage_paths = reexec_report
-                                .root_witness_completeness
-                                .missing_storage_paths
-                                .len(),
-                            "Partial-state node trustless verification is not ready; current state_root check is provider-assisted"
+                            cache_block = cache.current_block(),
+                            expected_block = block_number,
+                            "Cache state mismatch: cache block is not synced to block number. Skipping sidecar generation."
                         );
+                        break 'sidecar Ok(None);
                     }
-                    info!(
-                        target: "partial_stateless",
-                        block = block_number,
-                        partial_state_trustless_verification_ready = reexec_report
-                            .root_witness_completeness
-                            .trustless_root_ready,
-                        computed_state_root = ?reexec_report.computed_state_root,
-                        reexec_accounts = reexec_report.actual_accessed.accounts.len(),
-                        reexec_storage = reexec_report.actual_accessed.storage.len(),
-                        reexec_codes = reexec_report.actual_accessed.codes.len(),
-                        expected_miss_accounts = reexec_report.expected_miss.accounts.len(),
-                        expected_miss_storage = reexec_report.expected_miss.storage.len(),
-                        expected_miss_codes = reexec_report.expected_miss.code_hashes.len(),
-                        next_cache_root = ?reexec_report.next_cache_anchor.cache_root,
-                        "Provider-assisted sidecar preflight succeeded"
-                    );
-                    match reexec_report.trustless_state_root {
-                        Some(root) if root == block.state_root() => info!(
-                            target: "partial_stateless",
-                            block = block_number,
-                            trustless_state_root = ?root,
-                            "Trustless state root VERIFIED (trie node cache + witness only)"
-                        ),
-                        Some(root) => warn!(
-                            target: "partial_stateless",
-                            block = block_number,
-                            trustless_state_root = ?root,
-                            expected = ?block.state_root(),
-                            "Trustless state root MISMATCH — trie cache/witness stale or insufficient"
-                        ),
-                        None => info!(
-                            target: "partial_stateless",
-                            block = block_number,
-                            trie_warm_nodes = trie_cache.warm_node_count(),
-                            tracked_accounts = trie_cache.tracked_account_count(),
-                            "Trustless state root unavailable — trie node cache not warm enough this block (blind path)"
-                        ),
-                    }
-                    RootWitnessCompletenessSummary::from_report(
-                        &reexec_report.root_witness_completeness,
-                    )
-                } else {
-                    RootWitnessCompletenessSummary::default()
-                };
 
-                fs::create_dir_all(options.sidecar_dir)
-                    .map_err(|err| eyre::eyre!("failed to create sidecar directory: {err}"))?;
-                let sidecar_path = sidecar_path(options.sidecar_dir, block_number, block_hash);
-                let sidecar_bytes = bincode::serialize(&sidecar)
-                    .map_err(|err| eyre::eyre!("failed to serialize sidecar: {err}"))?;
-                fs::write(&sidecar_path, sidecar_bytes).map_err(|err| {
-                    eyre::eyre!("failed to write sidecar file {:?}: {err}", sidecar_path)
-                })?;
-                let sidecar_bytes_len =
-                    fs::metadata(&sidecar_path).map(|m| m.len() as usize).unwrap_or(0);
-                let partial_state_trustless_verification_ready =
-                    root_witness_completeness.trustless_root_ready;
-                let manifest = SidecarBenchmarkManifest {
-                    schema_version: 1,
-                    block_number,
-                    block_hash,
-                    parent_hash,
-                    parent_state_root,
-                    cache_block: parent_block_number,
-                    cache_policy_id,
-                    prev_cache_anchor,
-                    next_cache_anchor,
-                    cache_policy_metadata: cache_policy_metadata.clone(),
-                    sidecar_file: sidecar_path
-                        .file_name()
-                        .map(|name| name.to_string_lossy().into_owned())
-                        .unwrap_or_else(|| sidecar_path.display().to_string()),
-                    sidecar_bytes: sidecar_bytes_len,
-                    cache_before: CacheFootprintStats::new(
-                        cache_snapshot_before.total_accounts,
-                        cache_snapshot_before.total_storage_slots,
-                        cache_snapshot_before.total_codes,
-                        cache_memory_before,
-                    ),
-                    cache_after: CacheFootprintStats::new(
-                        snapshot.total_accounts,
-                        snapshot.total_storage_slots,
-                        snapshot.total_codes,
-                        cache_memory_after,
-                    ),
-                    accessed: StateTargetStats::from_targets(&accessed_targets),
-                    cache_hit: StateTargetStats::from_targets(&cache_hit_targets),
-                    sidecar_miss: StateTargetStats::from_targets(&sidecar_miss),
-                    provider_assisted_preflight: options.run_sidecar_preflight,
-                    partial_state_trustless_verification_ready,
-                    root_witness_completeness,
-                    full_sidecar_baseline_stats: full_sidecar_baseline_stats.clone(),
-                    partial_sidecar_stats: result.clone(),
-                    reduction: full_sidecar_baseline_stats
-                        .as_ref()
-                        .map(|full| WitnessReductionStats::new(&result, full)),
-                };
-                let manifest_path = sidecar_path.with_extension("manifest.json");
-                let manifest_saved = match serde_json::to_vec_pretty(&manifest) {
-                    Ok(manifest_bytes) => match fs::write(&manifest_path, manifest_bytes) {
-                        Ok(()) => true,
+                    let ancestor_headers =
+                        ancestor_headers_for_range(lowest_block_number, block_number)?;
+                    // Miss proofs remain self-contained. The persistent sparse trie already holds
+                    // cache-hit paths and is updated locally after execution.
+                    let serializable_proof = SerializableMultiProof::from_multiproof(&proof);
+                    let serialized_multiproof = bincode::serialize(&serializable_proof)
+                        .map_err(|err| eyre::eyre!("failed to serialize multiproof: {err}"))?;
+                    let sidecar_miss = StateTargetSet::from(&raw_targets);
+                    let witness_payload = PartialExecutionWitness {
+                        state: PartialExecutionWitnessState::MptMultiProof(serialized_multiproof),
+                        codes: missed_bytecodes.clone(),
+                        keys: raw_targets.key_preimages(),
+                        headers: ancestor_headers,
+                    };
+                    let witness_commitment = partial_witness_commitment(
+                        parent_state_root,
+                        &sidecar_miss,
+                        &witness_payload,
+                    );
+                    let sidecar = PartialStatelessSidecar {
+                        parent_hash,
+                        parent_state_root,
+                        block_hash,
+                        block_number,
+                        cache_block: parent_block_number,
+                        cache_policy_id,
+                        prev_cache_anchor,
+                        next_cache_anchor,
+                        cache_policy_metadata: cache_policy_metadata.clone(),
+                        cache_miss_targets: sidecar_miss.clone(),
+                        witness_commitment,
+                        miss_manifest: raw_targets.clone(),
+                        witness: witness_payload,
+                        stats: result.clone(),
+                    };
+
+                    let root_witness_completeness = if options.run_sidecar_preflight {
+                        let mut trie_cache_for_reexec = trie_cache.clone();
+                        let reexec_report = verify_and_apply_provider_assisted_sidecar(
+                            evm_config,
+                            state_provider,
+                            block,
+                            prev_cache_for_reexec,
+                            &sidecar,
+                            options.reexec_limits,
+                            &mut trie_cache_for_reexec,
+                        )
+                        .map_err(|err| {
+                            eyre::eyre!("provider-assisted sidecar preflight failed: {err}")
+                        })?;
+
+                        if !reexec_report.root_witness_completeness.trustless_root_ready {
+                            warn!(
+                                target: "partial_stateless",
+                                block = block_number,
+                                partial_state_trustless_verification_ready = false,
+                                missing_account_paths = reexec_report
+                                    .root_witness_completeness
+                                    .missing_account_paths
+                                    .len(),
+                                missing_storage_paths = reexec_report
+                                    .root_witness_completeness
+                                    .missing_storage_paths
+                                    .len(),
+                                "Partial-state node trustless verification is not ready; current state_root check is provider-assisted"
+                            );
+                        }
+                        info!(
+                            target: "partial_stateless",
+                            block = block_number,
+                            partial_state_trustless_verification_ready = reexec_report
+                                .root_witness_completeness
+                                .trustless_root_ready,
+                            computed_state_root = ?reexec_report.computed_state_root,
+                            reexec_accounts = reexec_report.actual_accessed.accounts.len(),
+                            reexec_storage = reexec_report.actual_accessed.storage.len(),
+                            reexec_codes = reexec_report.actual_accessed.codes.len(),
+                            expected_miss_accounts = reexec_report.expected_miss.accounts.len(),
+                            expected_miss_storage = reexec_report.expected_miss.storage.len(),
+                            expected_miss_codes = reexec_report.expected_miss.code_hashes.len(),
+                            next_cache_root = ?reexec_report.next_cache_anchor.cache_root,
+                            "Provider-assisted sidecar preflight succeeded"
+                        );
+                        match reexec_report.trustless_state_root {
+                            Some(root) if root == block.state_root() => info!(
+                                target: "partial_stateless",
+                                block = block_number,
+                                trustless_state_root = ?root,
+                                "Trustless state root VERIFIED (trie node cache + witness only)"
+                            ),
+                            Some(root) => warn!(
+                                target: "partial_stateless",
+                                block = block_number,
+                                trustless_state_root = ?root,
+                                expected = ?block.state_root(),
+                                "Trustless state root MISMATCH — trie cache/witness stale or insufficient"
+                            ),
+                            None => info!(
+                                target: "partial_stateless",
+                                block = block_number,
+                                trie_warm_nodes = trie_cache.warm_node_count(),
+                                tracked_accounts = trie_cache.tracked_account_count(),
+                                "Trustless state root unavailable — trie node cache not warm enough this block (blind path)"
+                            ),
+                        }
+                        RootWitnessCompletenessSummary::from_report(
+                            &reexec_report.root_witness_completeness,
+                        )
+                    } else {
+                        RootWitnessCompletenessSummary::default()
+                    };
+
+                    fs::create_dir_all(options.sidecar_dir)
+                        .map_err(|err| eyre::eyre!("failed to create sidecar directory: {err}"))?;
+                    let sidecar_path = sidecar_path(options.sidecar_dir, block_number, block_hash);
+                    let sidecar_bytes = bincode::serialize(&sidecar)
+                        .map_err(|err| eyre::eyre!("failed to serialize sidecar: {err}"))?;
+                    fs::write(&sidecar_path, sidecar_bytes).map_err(|err| {
+                        eyre::eyre!("failed to write sidecar file {:?}: {err}", sidecar_path)
+                    })?;
+                    let sidecar_bytes_len =
+                        fs::metadata(&sidecar_path).map(|m| m.len() as usize).unwrap_or(0);
+                    let partial_state_trustless_verification_ready =
+                        root_witness_completeness.trustless_root_ready;
+                    let manifest = SidecarBenchmarkManifest {
+                        schema_version: 1,
+                        block_number,
+                        block_hash,
+                        parent_hash,
+                        parent_state_root,
+                        cache_block: parent_block_number,
+                        cache_policy_id,
+                        prev_cache_anchor,
+                        next_cache_anchor,
+                        cache_policy_metadata: cache_policy_metadata.clone(),
+                        sidecar_file: sidecar_path
+                            .file_name()
+                            .map(|name| name.to_string_lossy().into_owned())
+                            .unwrap_or_else(|| sidecar_path.display().to_string()),
+                        sidecar_bytes: sidecar_bytes_len,
+                        cache_before: CacheFootprintStats::new(
+                            cache_snapshot_before.total_accounts,
+                            cache_snapshot_before.total_storage_slots,
+                            cache_snapshot_before.total_codes,
+                            cache_memory_before,
+                        ),
+                        cache_after: CacheFootprintStats::new(
+                            snapshot.total_accounts,
+                            snapshot.total_storage_slots,
+                            snapshot.total_codes,
+                            cache_memory_after,
+                        ),
+                        accessed: StateTargetStats::from_targets(&accessed_targets),
+                        cache_hit: StateTargetStats::from_targets(&cache_hit_targets),
+                        sidecar_miss: StateTargetStats::from_targets(&sidecar_miss),
+                        provider_assisted_preflight: options.run_sidecar_preflight,
+                        partial_state_trustless_verification_ready,
+                        root_witness_completeness,
+                        full_sidecar_baseline_stats: full_sidecar_baseline_stats.clone(),
+                        partial_sidecar_stats: result.clone(),
+                        reduction: full_sidecar_baseline_stats
+                            .as_ref()
+                            .map(|full| WitnessReductionStats::new(&result, full)),
+                    };
+                    let manifest_path = sidecar_path.with_extension("manifest.json");
+                    let manifest_saved = match serde_json::to_vec_pretty(&manifest) {
+                        Ok(manifest_bytes) => match fs::write(&manifest_path, manifest_bytes) {
+                            Ok(()) => true,
+                            Err(err) => {
+                                warn!(
+                                    target: "partial_stateless",
+                                    block = block_number,
+                                    path = %manifest_path.display(),
+                                    error = %err,
+                                    "Failed to write diagnostic sidecar manifest"
+                                );
+                                false
+                            }
+                        },
                         Err(err) => {
                             warn!(
                                 target: "partial_stateless",
                                 block = block_number,
-                                path = %manifest_path.display(),
                                 error = %err,
-                                "Failed to write diagnostic sidecar manifest"
+                                "Failed to serialize diagnostic sidecar manifest"
                             );
                             false
                         }
-                    },
-                    Err(err) => {
-                        warn!(
-                            target: "partial_stateless",
-                            block = block_number,
-                            error = %err,
-                            "Failed to serialize diagnostic sidecar manifest"
-                        );
-                        false
-                    }
+                    };
+                    info!(
+                        target: "partial_stateless",
+                        block = block_number,
+                        path = %sidecar_path.display(),
+                        manifest = %manifest_path.display(),
+                        manifest_saved,
+                        size = format_bytes(sidecar_bytes_len),
+                        "Saved witness sidecar successfully"
+                    );
+                    Ok(Some(sidecar_path))
                 };
-                info!(
-                    target: "partial_stateless",
-                    block = block_number,
-                    path = %sidecar_path.display(),
-                    manifest = %manifest_path.display(),
-                    manifest_saved,
-                    size = format_bytes(sidecar_bytes_len),
-                    "Saved witness sidecar successfully"
-                );
-                Ok(Some(sidecar_path))
-            };
 
-            match sidecar_generation_result {
-                Ok(path) => saved_sidecar_path = path,
-                Err(e) if cache_parent_synced => {
-                    return Err(rollback_sidecar_transition(cache, block_number, e));
+                match sidecar_generation_result {
+                    Ok(path) => saved_sidecar_path = path,
+                    Err(e) => return Err(rollback_sidecar_transition(cache, block_number, e)),
                 }
-                Err(e) => warn!(
-                    target: "partial_stateless",
-                    block = block_number,
-                    error = %e,
-                    "Sidecar generation failed while cache was not coherent"
-                ),
-            }
 
-            // Advance only after sidecar generation/preflight has either succeeded or been
-            // intentionally skipped. Coherent failures return above after rolling back the value
-            // cache, so the two caches remain aligned.
-            trie_cache.on_block_executed(&proof, &miss.missed_accounts, |address| {
-                cache.contains_account(address)
-            });
-            Some(result)
-        }
-        Err(e) => {
-            if cache_parent_synced {
+                // Advance only after sidecar generation/preflight has either succeeded or been
+                // intentionally skipped. Coherent failures return above after rolling back the
+                // value cache, so the two caches remain aligned.
+                *trie_cache = next_trie_cache;
+                if let Some(metrics) = trie_shape_metrics {
+                    info!(
+                        target: "partial_stateless",
+                        block = block_number,
+                        validation = "passed",
+                        trie_clone_us,
+                        local_root_update_us = local_root_us,
+                        trie_retention_us,
+                        trie_validation_us,
+                        retained_account_paths = metrics.retained_account_paths,
+                        retained_storage_tries = metrics.retained_storage_tries,
+                        retained_storage_paths = metrics.retained_storage_paths,
+                        account_revealed_nodes = metrics.account_revealed_nodes,
+                        storage_revealed_nodes = metrics.storage_revealed_nodes,
+                        trie_cache_bytes = metrics.estimated_memory_bytes,
+                        account_key_prefixes_d0 = metrics.account_key_prefixes[0],
+                        account_key_prefixes_d1 = metrics.account_key_prefixes[1],
+                        account_key_prefixes_d2 = metrics.account_key_prefixes[2],
+                        account_key_prefixes_d3 = metrics.account_key_prefixes[3],
+                        account_key_prefixes_d4 = metrics.account_key_prefixes[4],
+                        account_key_prefixes_d5 = metrics.account_key_prefixes[5],
+                        account_prefix_coverage_d0_pct = metrics.account_prefix_coverage[0] * 100.0,
+                        account_prefix_coverage_d1_pct = metrics.account_prefix_coverage[1] * 100.0,
+                        account_prefix_coverage_d2_pct = metrics.account_prefix_coverage[2] * 100.0,
+                        account_prefix_coverage_d3_pct = metrics.account_prefix_coverage[3] * 100.0,
+                        account_prefix_coverage_d4_pct = metrics.account_prefix_coverage[4] * 100.0,
+                        account_prefix_coverage_d5_pct = metrics.account_prefix_coverage[5] * 100.0,
+                        "Trie-shape cache benchmark"
+                    );
+                }
+                break Some(result)
+            }
+            Err(e) => {
                 return Err(rollback_sidecar_transition(
                     cache,
                     block_number,
                     eyre::eyre!("failed to compute sidecar multiproof: {e}"),
-                ));
+                ))
             }
-            warn!(
-                target: "partial_stateless",
-                block = block_number,
-                error = %e,
-                "Failed to compute multiproof while cache was not coherent"
-            );
-            None
         }
     };
 

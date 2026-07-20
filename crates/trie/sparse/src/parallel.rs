@@ -829,6 +829,117 @@ impl SparseTrie for ParallelSparseTrie {
         Self::finalize_pruned_roots(self, effective_pruned_roots)
     }
 
+    fn retain_witness_paths(&mut self, retained_paths: &[Nibbles]) -> usize {
+        #[cfg(feature = "trie-debug")]
+        self.debug_recorder.reset();
+
+        let mut retained_paths = retained_paths.to_vec();
+        retained_paths.sort_unstable();
+
+        let mut effective_pruned_roots = Vec::<Nibbles>::new();
+        let mut stack: SmallVec<[Nibbles; 32]> = SmallVec::new();
+        stack.push(Nibbles::default());
+
+        while let Some(path) = stack.pop() {
+            let Some(node) =
+                self.subtrie_for_path(&path).and_then(|subtrie| subtrie.nodes.get(&path).cloned())
+            else {
+                continue;
+            };
+
+            match node {
+                SparseNode::Empty | SparseNode::Leaf { .. } => {}
+                SparseNode::Extension { key, state, .. } => {
+                    let mut child = path;
+                    child.extend(&key);
+
+                    // A retained lookup can terminate at this extension by diverging inside its
+                    // compressed key. Keep the extension and its child root in that case: the
+                    // extension proves exclusion and its cached encoding commits to the child.
+                    if has_retained_descendant(&retained_paths, &path) {
+                        stack.push(child);
+                        continue;
+                    }
+
+                    // Root extension has no parent branch edge to blind; keep it as-is.
+                    if path.is_empty() {
+                        continue;
+                    }
+
+                    let Some(hash) = state.cached_hash() else { continue };
+                    self.subtrie_for_path_mut_untracked(&path)
+                        .expect("node subtrie exists")
+                        .nodes
+                        .remove(&path);
+
+                    let parent_path = path.slice(0..path.len() - 1);
+                    let SparseNode::Branch { blinded_mask, blinded_hashes, .. } = self
+                        .subtrie_for_path_mut_untracked(&parent_path)
+                        .expect("parent subtrie exists")
+                        .nodes
+                        .get_mut(&parent_path)
+                        .expect("expected parent branch node")
+                    else {
+                        panic!("expected branch node at path {parent_path:?}");
+                    };
+
+                    let nibble = path.last().unwrap();
+                    blinded_mask.set_bit(nibble);
+                    blinded_hashes[nibble as usize] = hash;
+                    effective_pruned_roots.push(path);
+                }
+                SparseNode::Branch { state_mask, blinded_mask, blinded_hashes, .. } => {
+                    let mut blinded_mask = blinded_mask;
+                    let mut blinded_hashes = blinded_hashes;
+                    for nibble in state_mask.iter() {
+                        if blinded_mask.is_bit_set(nibble) {
+                            continue;
+                        }
+
+                        let mut child = path;
+                        child.push_unchecked(nibble);
+                        if has_retained_descendant(&retained_paths, &child) {
+                            stack.push(child);
+                            continue;
+                        }
+
+                        let Entry::Occupied(entry) =
+                            self.subtrie_for_path_mut_untracked(&child).unwrap().nodes.entry(child)
+                        else {
+                            panic!("expected node at path {child:?}");
+                        };
+
+                        let Some(hash) = entry.get().cached_hash() else {
+                            continue;
+                        };
+                        entry.remove();
+                        blinded_mask.set_bit(nibble);
+                        blinded_hashes[nibble as usize] = hash;
+                        effective_pruned_roots.push(child);
+                    }
+
+                    let SparseNode::Branch {
+                        blinded_mask: old_blinded_mask,
+                        blinded_hashes: old_blinded_hashes,
+                        ..
+                    } = self
+                        .subtrie_for_path_mut_untracked(&path)
+                        .unwrap()
+                        .nodes
+                        .get_mut(&path)
+                        .unwrap()
+                    else {
+                        unreachable!("expected branch node at path {path:?}");
+                    };
+                    *old_blinded_mask = blinded_mask;
+                    *old_blinded_hashes = blinded_hashes;
+                }
+            }
+        }
+
+        Self::finalize_pruned_roots(self, effective_pruned_roots)
+    }
+
     fn update_leaves(
         &mut self,
         updates: &mut alloy_primitives::map::B256Map<crate::LeafUpdate>,

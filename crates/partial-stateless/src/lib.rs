@@ -37,6 +37,11 @@ pub use sidecar::{
     SerializableMultiProof, SerializableStorageMultiProof, SidecarBenchmarkManifest,
     SidecarCheckError, StateTargetSet, StateTargetStats, WitnessReductionStats, WitnessTargets,
 };
-pub use trie_cache::{PartialTrieNodeCache, DEFAULT_PIN_NIBBLES};
+pub use trie_cache::{
+    PartialTrieNodeCache, TrieCacheValidationError, TrieShapeMetrics, TRIE_SHAPE_PREFIX_LEVELS,
+};
 pub use witness::{measure_multiproof_size, miss_to_proof_targets, WitnessResult};
-pub use witness_check::compute_trustless_state_root;
+pub use witness_check::{
+    compute_trustless_state_root, root_witness_targets_from_bundle,
+    try_compute_trustless_state_root, TrieProofTarget, TrieTransitionError,
+};
