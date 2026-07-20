@@ -503,8 +503,6 @@ where
                 let mut existing_updates = self.storage_updates.get_mut(&address);
 
                 for (&slot, &value) in &storage.storage {
-                    self.trie.record_slot_touch(address, slot);
-
                     let encoded = if value.is_zero() {
                         Vec::new()
                     } else {
@@ -529,8 +527,6 @@ where
         }
 
         for (&address, &account) in &hashed_state_update.accounts {
-            self.trie.record_account_touch(address);
-
             // Track account as touched.
             //
             // This might overwrite an existing update, which is fine, because storage root from it

@@ -550,8 +550,6 @@ impl DefaultStateRootStrategy {
                 } else {
                     pending_sparse_trie_prune_blocks
                 },
-                max_hot_slots: config.sparse_trie_max_hot_slots(),
-                max_hot_accounts: config.sparse_trie_max_hot_accounts(),
             },
         );
 
@@ -583,8 +581,6 @@ impl DefaultStateRootStrategy {
             preserved_sparse_trie,
             chunk_size,
             pending_sparse_trie_prune_blocks,
-            max_hot_slots,
-            max_hot_accounts,
         } = options;
         let state_trie_overlays = state_trie_overlays.clone();
         let trie_metrics = self.metrics.clone();
@@ -616,7 +612,7 @@ impl DefaultStateRootStrategy {
 
             let mut sparse_trie_anchor_hash = parent_hash;
             let mut reused_preserved_sparse_trie = false;
-            let mut sparse_state_trie = match preserved_sparse_trie {
+            let sparse_state_trie = match preserved_sparse_trie {
                 Some(preserved) => {
                     let start = Instant::now();
                     let preserved_anchor_hash = preserved.anchor_hash();
@@ -641,8 +637,6 @@ impl DefaultStateRootStrategy {
                 }
                 None => new_sparse_state_trie(),
             };
-            sparse_state_trie.set_hot_cache_capacities(max_hot_slots, max_hot_accounts);
-
             let mut task = SparseTrieCacheTask::new_with_trie(
                 &executor,
                 from_multi_proof,
@@ -703,7 +697,7 @@ impl DefaultStateRootStrategy {
                 if let Some(prune_blocks) = pending_sparse_trie_prune_blocks {
                     let retained_paths =
                         sparse_trie_retained_paths(prune_blocks, result.hashed_state.as_ref());
-                    trie.prune_frozen(max_hot_slots, max_hot_accounts, retained_paths);
+                    trie.prune(retained_paths);
                 }
                 trie_metrics
                     .into_trie_for_reuse_duration_histogram
@@ -740,8 +734,6 @@ struct SparseTrieTaskOptions<N: NodePrimitives> {
     chunk_size: usize,
     /// `None` disables pruning. `Some(Vec::new())` prunes using only the current block's paths.
     pending_sparse_trie_prune_blocks: Option<Vec<ExecutedBlock<N>>>,
-    max_hot_slots: usize,
-    max_hot_accounts: usize,
 }
 
 struct StateRootTaskOptions<'a, N: NodePrimitives> {
@@ -757,11 +749,12 @@ fn sparse_trie_retained_paths<N: NodePrimitives>(
     prune_blocks: Vec<ExecutedBlock<N>>,
     current_hashed_state: &HashedPostState,
 ) -> TriePrefixSets {
-    let states =
-        prune_blocks.iter().map(|block| block.trie_data().sorted.hashed_state).collect::<Vec<_>>();
     let current_hashed_state = current_hashed_state.clone_into_sorted();
     HashedPostStateSorted::merge_into_frozen_prefix_set(
-        states.iter().map(AsRef::as_ref).chain(core::iter::once(&current_hashed_state)),
+        prune_blocks
+            .iter()
+            .map(|block| block.trie_data.get().sorted.hashed_state.as_ref())
+            .chain(core::iter::once(&current_hashed_state)),
     )
 }
 
