@@ -725,8 +725,12 @@ where
         C: ChainSpecProvider<ChainSpec: Hardforks>,
     {
         let secret_key = SecretKey::new(&mut rand_08::thread_rng());
+        let protocols: Vec<Protocol> = protocols.into_iter().collect();
+        // `NetworkConfigBuilder::build` re-derives snap advertisement from `snap_enabled`, which
+        // would otherwise silently strip a manually included `snap` capability.
+        let snap_enabled = protocols.iter().any(|p| p.cap.name == Protocol::snap_2().cap.name);
 
-        let builder = Self::network_config_builder(secret_key);
+        let builder = Self::network_config_builder(secret_key).with_snap(snap_enabled);
         let hello_message =
             HelloMessageWithProtocols::builder(builder.get_peer_id()).protocols(protocols).build();
         let config = builder.hello_message(hello_message).build(client.clone());
