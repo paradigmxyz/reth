@@ -1014,21 +1014,6 @@ Engine:
       --engine.txpool-prewarming
           Enable best-effort txpool transaction prewarming between payloads
 
-      --engine.txpool-prewarming-max-transactions-per-sender <TXPOOL_PREWARMING_MAX_TRANSACTIONS_PER_SENDER>
-          Configure the maximum transactions prewarmed per sender for one parent head
-
-          [default: 16]
-
-      --engine.txpool-prewarming-max-candidate-scan <TXPOOL_PREWARMING_MAX_CANDIDATE_SCAN>
-          Configure the maximum fresh txpool candidates considered per prewarming refresh
-
-          [default: 4096]
-
-      --engine.txpool-prewarming-gas-limit-multiplier <TXPOOL_PREWARMING_GAS_LIMIT_MULTIPLIER>
-          Configure the parent gas-limit multiplier used as each refresh's fresh-transaction budget
-
-          [default: 6]
-
       --engine.state-provider-metrics
           Enable state provider latency metrics. This allows the engine to collect and report stats about how long state provider calls took during execution, but this does introduce slight overhead to state provider calls
 
