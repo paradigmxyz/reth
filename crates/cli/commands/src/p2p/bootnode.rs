@@ -9,7 +9,7 @@ use reth_discv5::{
     Config, Discv5,
 };
 use reth_net_nat::NatResolver;
-use reth_network_peers::{id2pk, AnyNode, Enr, NodeRecord};
+use reth_network_peers::{id2pk, pk2id, AnyNode, Enr, NodeRecord};
 use secp256k1::SecretKey;
 use std::{
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
@@ -278,25 +278,34 @@ impl Command {
     }
 
     /// Derives an ENR seed's discv4 endpoint, preferring a family this bootnode serves over the
-    /// conversion default (IPv4 first).
+    /// default order (IPv4 first).
+    ///
+    /// Endpoints are derived per IP family so a partial dual-stack ENR (e.g. `ip4` without
+    /// `udp4`, plus `ip6`/`udp6`) cannot yield a mixed-family socket.
     fn enr_endpoint(&self, enr: &Enr<SecretKey>, nat: &BootnodeNat) -> eyre::Result<NodeRecord> {
-        let record = NodeRecord::try_from(enr)
-            .map_err(|err| eyre::eyre!("unusable --bootnodes ENR ({err}): {enr}"))?;
-        if self.serves_family(record.address, nat) {
-            return Ok(record)
-        }
-        let alt = if record.address.is_ipv4() {
-            enr.ip6().map(IpAddr::from).zip(enr.udp6()).map(|e| (e, enr.tcp6()))
-        } else {
-            enr.ip4().map(IpAddr::from).zip(enr.udp4()).map(|e| (e, enr.tcp4()))
-        };
-        if let Some(((address, udp_port), tcp)) = alt &&
-            self.serves_family(address, nat)
-        {
-            return Ok(NodeRecord { address, udp_port, tcp_port: tcp.unwrap_or(0), id: record.id })
-        }
-        // unservable either way; the startup warning covers it
-        Ok(record)
+        let id = pk2id(&enr.public_key());
+        let v4 = enr.ip4().zip(enr.udp4()).map(|(ip, udp_port)| NodeRecord {
+            address: ip.into(),
+            udp_port,
+            tcp_port: enr.tcp4().unwrap_or(0),
+            id,
+        });
+        let v6 = enr.ip6().zip(enr.udp6()).map(|(ip, udp_port)| NodeRecord {
+            address: ip.into(),
+            udp_port,
+            tcp_port: enr.tcp6().unwrap_or(0),
+            id,
+        });
+
+        // an unservable endpoint is kept as a last resort; the startup warning covers it
+        v4.into_iter()
+            .chain(v6)
+            .find(|record| self.serves_family(record.address, nat))
+            .or(v4)
+            .or(v6)
+            .ok_or_else(|| {
+                eyre::eyre!("unusable --bootnodes ENR (no ip+udp endpoint for one family): {enr}")
+            })
     }
 
     /// Whether a socket of `ip`'s family will be bound: the `--addr` family always, the opposite
@@ -708,6 +717,46 @@ mod tests {
         let seeds = command.seed_nodes(&command.resolved_nat().unwrap()).unwrap();
         assert_eq!(seeds.enr_records[0].address, "9.9.9.9".parse::<IpAddr>().unwrap());
         assert_eq!(seeds.enr_records[0].udp_port, 30303);
+    }
+
+    #[test]
+    fn enr_seed_never_mixes_families() {
+        let sk = rng_secret_key();
+        let enr = Enr::builder()
+            .ip4("9.9.9.9".parse().unwrap())
+            .ip6("2001:db8::9".parse().unwrap())
+            .udp6(30304)
+            .build(&sk)
+            .unwrap();
+
+        // v4-primary bootnode: the lone ip4 key is not an endpoint; the discv4 seed must be the
+        // complete v6 endpoint, not a fabricated 9.9.9.9:30304
+        let command = Command::parse_from([
+            "reth",
+            "--addr",
+            "0.0.0.0:30303",
+            "--nat",
+            "extip:1.2.3.4",
+            "--bootnodes",
+            &enr.to_base64(),
+        ]);
+        let seeds = command.seed_nodes(&command.resolved_nat().unwrap()).unwrap();
+        assert_eq!(seeds.enr_records[0].address, "2001:db8::9".parse::<IpAddr>().unwrap());
+        assert_eq!(seeds.enr_records[0].udp_port, 30304);
+
+        // no complete endpoint for any family is an error
+        let enr = Enr::builder().ip4("9.9.9.9".parse().unwrap()).build(&sk).unwrap();
+        let command = Command::parse_from([
+            "reth",
+            "--addr",
+            "0.0.0.0:30303",
+            "--nat",
+            "extip:1.2.3.4",
+            "--bootnodes",
+            &enr.to_base64(),
+        ]);
+        let err = command.seed_nodes(&command.resolved_nat().unwrap()).unwrap_err();
+        assert!(err.to_string().contains("no ip+udp endpoint"), "{err}");
     }
 
     #[test]
