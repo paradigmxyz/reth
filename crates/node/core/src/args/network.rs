@@ -242,7 +242,7 @@ pub struct NetworkArgs {
     pub discovery: DiscoveryArgs,
 
     #[expect(clippy::doc_markdown)]
-    /// Comma separated enode URLs of trusted peers for P2P connections.
+    /// Comma separated enode URLs or ENRs of trusted peers for P2P connections.
     ///
     /// --trusted-peers enode://abcd@192.168.0.1:30303
     #[arg(long, value_delimiter = ',')]
@@ -252,7 +252,7 @@ pub struct NetworkArgs {
     #[arg(long)]
     pub trusted_only: bool,
 
-    /// Comma separated enode URLs for P2P discovery bootstrap.
+    /// Comma separated enode URLs or ENRs for P2P discovery bootstrap.
     ///
     /// Will fall back to a network-specific default if not specified.
     #[arg(long, value_delimiter = ',')]
@@ -1223,6 +1223,17 @@ mod tests {
             "enode://22a8232c3abc76a16ae9d6c3b164f98775fe226f0917b0ca871128a74a8e9630b458460865bab457221f1d448dd9791d24c4e5d88786180ac185df813a68d4de@3.209.45.79:30303".parse().unwrap()
             ]
         );
+    }
+
+    #[test]
+    fn parse_enr_bootnode_args() {
+        let enr = "enr:-IS4QHCYrYZbAKWCBRlAy5zzaDZXJBGkcnh4MHcBFZntXNFrdvJjX04jRzjzCBOonrkTfj499SZuOh8R33Ls8RRcy5wBgmlkgnY0gmlwhH8AAAGJc2VjcDI1NmsxoQPKY0yuDUmstAHYpMa2_oxVtw0RW_QAdpzBQA8yWM0xOIN1ZHCCdl8";
+        let args = CommandParser::<NetworkArgs>::parse_from(["reth", "--bootnodes", enr]).args;
+
+        let resolved = args.resolved_bootnodes().unwrap();
+        assert_eq!(resolved.len(), 1);
+        assert_eq!(resolved[0].address, "127.0.0.1".parse::<std::net::IpAddr>().unwrap());
+        assert_eq!(resolved[0].udp_port, 30303);
     }
 
     #[test]
