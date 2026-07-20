@@ -17,9 +17,8 @@ use alloy_consensus::transaction::Recovered;
 #[cfg(test)]
 use alloy_consensus::TxType;
 use alloy_consensus::{constants::ETH_TO_WEI, transaction::Transaction, BlockHeader, Header};
-#[cfg(test)]
-use alloy_eips::eip2718::Typed2718;
 use alloy_eips::{
+    eip2718::Typed2718,
     eip4895::Withdrawal,
     eip6110::{DEPOSIT_REQUEST_TYPE, MAINNET_DEPOSIT_CONTRACT_ADDRESS},
     eip7002::WITHDRAWAL_REQUEST_TYPE,
@@ -43,14 +42,14 @@ use evm2::{
         CONSOLIDATION_REQUEST_ADDRESS, HISTORY_STORAGE_ADDRESS, WITHDRAWAL_REQUEST_ADDRESS,
     },
     registry::HandlerError,
-    BaseEvmTypes, ErrorCode, Evm, SpecId, TxResult, TxResultWithState,
+    ErrorCode, Evm, EvmTypes, SpecId, TxResult, TxResultWithState,
 };
 #[cfg(test)]
 use evm2::{
     env::BlockEnv,
     ethereum::ethereum_tx_registry,
     evm::{precompile::PrecompileProvider, Database, DynDatabase},
-    ExecutionConfig, Version,
+    BaseEvmTypes, ExecutionConfig, Version,
 };
 use reth_ethereum_forks::EthereumHardforks;
 use reth_ethereum_primitives::Receipt;
@@ -460,8 +459,10 @@ where
             context.withdrawals,
         )?;
 
-        let mut output =
-            RethReceiptBuilder.build_block_output(receipts, block_state, blob_gas_used);
+        let mut output = <RethReceiptBuilder as ReceiptBuilder<
+            TxType,
+            TxResult<BaseEvmTypes>,
+        >>::build_block_output(&RethReceiptBuilder, receipts, block_state, blob_gas_used);
         output.result.requests = requests;
 
         Ok(output)
@@ -596,7 +597,7 @@ where
     .execute_recovered_transactions(transactions)
 }
 
-fn map_handler_error(evm: &mut Evm<'_, BaseEvmTypes>, err: HandlerError) -> EthExecutionError {
+fn map_handler_error<T: EvmTypes>(evm: &mut Evm<'_, T>, err: HandlerError) -> EthExecutionError {
     match err {
         HandlerError::Fatal(code) => map_db_error_code(evm, code),
         err if handler_error_is_invalid_tx(&err) => {
@@ -606,7 +607,7 @@ fn map_handler_error(evm: &mut Evm<'_, BaseEvmTypes>, err: HandlerError) -> EthE
     }
 }
 
-fn take_database_error(evm: &mut Evm<'_, BaseEvmTypes>, code: ErrorCode) -> DynamicDatabaseError {
+fn take_database_error<T: EvmTypes>(evm: &mut Evm<'_, T>, code: ErrorCode) -> DynamicDatabaseError {
     DynamicDatabaseError::new(evm.database_mut().error(code))
 }
 
@@ -698,13 +699,16 @@ fn send_hashed_state_update(
 }
 
 #[cfg(test)]
-pub(crate) fn execute_transaction(
-    evm: &mut Evm<'_, BaseEvmTypes>,
+pub(crate) fn execute_transaction<T: EvmTypes>(
+    evm: &mut Evm<'_, T>,
     block_state: &mut BlockStateAccumulator,
     stream_hashed_state: bool,
     on_hashed_state_update: &mut impl FnMut(HashedPostState),
-    transaction: &RecoveredTxEnvelope,
-) -> Result<TxResult, EthExecutionError> {
+    transaction: &T::Tx,
+) -> Result<TxResult<T>, EthExecutionError>
+where
+    T::Tx: Typed2718,
+{
     execute_transaction_with_commit_condition(
         evm,
         block_state,
@@ -716,16 +720,19 @@ pub(crate) fn execute_transaction(
     .map(|outcome| outcome.expect("transaction is always committed"))
 }
 
-pub(crate) fn execute_transaction_with_commit_condition(
-    evm: &mut Evm<'_, BaseEvmTypes>,
+pub(crate) fn execute_transaction_with_commit_condition<T: EvmTypes>(
+    evm: &mut Evm<'_, T>,
     block_state: &mut BlockStateAccumulator,
     stream_hashed_state: bool,
     on_hashed_state_update: &mut impl FnMut(HashedPostState),
-    transaction: &RecoveredTxEnvelope,
-    should_commit: impl FnOnce(&TxResult) -> CommitChanges,
-) -> Result<Option<TxResult>, EthExecutionError> {
-    enum TransactionResolution {
-        Outcome(Option<TxResult>),
+    transaction: &T::Tx,
+    should_commit: impl FnOnce(&TxResult<T>) -> CommitChanges,
+) -> Result<Option<TxResult<T>>, EthExecutionError>
+where
+    T::Tx: Typed2718,
+{
+    enum TransactionResolution<U: EvmTypes> {
+        Outcome(Option<TxResult<U>>),
         DatabaseError(ErrorCode),
         HandlerError(HandlerError),
     }
@@ -737,7 +744,7 @@ pub(crate) fn execute_transaction_with_commit_condition(
                 TransactionResolution::DatabaseError(code)
             } else if !should_commit(executed.result()).should_commit() {
                 let _ = executed.discard();
-                TransactionResolution::Outcome(None)
+                TransactionResolution::<T>::Outcome(None)
             } else {
                 let outcome = {
                     let mut sink = RethStateSink::new(None, block_state, stream_hashed_state);
@@ -745,7 +752,7 @@ pub(crate) fn execute_transaction_with_commit_condition(
                     sink.flush_streamed_hashed_state(on_hashed_state_update);
                     outcome
                 };
-                TransactionResolution::Outcome(Some(outcome))
+                TransactionResolution::<T>::Outcome(Some(outcome))
             }
         }
         Err(err) => TransactionResolution::HandlerError(err),
@@ -758,12 +765,15 @@ pub(crate) fn execute_transaction_with_commit_condition(
     }
 }
 
-pub(crate) fn execute_transaction_without_commit(
-    evm: &mut Evm<'_, BaseEvmTypes>,
-    transaction: &RecoveredTxEnvelope,
-) -> Result<TxResultWithState, EthExecutionError> {
-    enum TransactionResolution {
-        Outcome(TxResultWithState),
+pub(crate) fn execute_transaction_without_commit<T: EvmTypes>(
+    evm: &mut Evm<'_, T>,
+    transaction: &T::Tx,
+) -> Result<TxResultWithState<T>, EthExecutionError>
+where
+    T::Tx: Typed2718,
+{
+    enum TransactionResolution<U: EvmTypes> {
+        Outcome(TxResultWithState<U>),
         DatabaseError(ErrorCode),
         HandlerError(HandlerError),
     }
@@ -774,7 +784,7 @@ pub(crate) fn execute_transaction_without_commit(
                 let _ = executed.discard();
                 TransactionResolution::DatabaseError(code)
             } else {
-                TransactionResolution::Outcome(executed.detach())
+                TransactionResolution::<T>::Outcome(executed.detach())
             }
         }
         Err(err) => TransactionResolution::HandlerError(err),
@@ -787,13 +797,13 @@ pub(crate) fn execute_transaction_without_commit(
     }
 }
 
-pub(crate) fn commit_detached_transaction(
-    evm: &mut Evm<'_, BaseEvmTypes>,
+pub(crate) fn commit_detached_transaction<T: EvmTypes>(
+    evm: &mut Evm<'_, T>,
     block_state: &mut BlockStateAccumulator,
     stream_hashed_state: bool,
     on_hashed_state_update: &mut impl FnMut(HashedPostState),
-    output: TxResultWithState,
-) -> TxResult {
+    output: TxResultWithState<T>,
+) -> TxResult<T> {
     let state_changes = output.state_changes;
     if evm.state().bal_builder().is_some() {
         evm.state_mut().overlay_db_mut().bal_context.commit_bal(&state_changes);
@@ -809,7 +819,7 @@ pub(crate) fn commit_detached_transaction(
     result
 }
 
-fn map_db_error_code(evm: &mut Evm<'_, BaseEvmTypes>, code: ErrorCode) -> EthExecutionError {
+fn map_db_error_code<T: EvmTypes>(evm: &mut Evm<'_, T>, code: ErrorCode) -> EthExecutionError {
     if code == ErrorCode::BAL_NOT_COVERED {
         EthExecutionError::BlockAccessListNotCovered
     } else {
@@ -817,8 +827,8 @@ fn map_db_error_code(evm: &mut Evm<'_, BaseEvmTypes>, code: ErrorCode) -> EthExe
     }
 }
 
-pub(crate) fn pre_execution_system_call_state_changes(
-    evm: &mut Evm<'_, BaseEvmTypes>,
+pub(crate) fn pre_execution_system_call_state_changes<T: EvmTypes>(
+    evm: &mut Evm<'_, T>,
     block_state: &mut BlockStateAccumulator,
     stream_hashed_state: bool,
     on_hashed_state_update: &mut impl FnMut(HashedPostState),
@@ -913,8 +923,8 @@ fn parse_deposit_requests_from_receipts(
     Ok(out)
 }
 
-pub(crate) fn post_execution_system_call_state_changes(
-    evm: &mut Evm<'_, BaseEvmTypes>,
+pub(crate) fn post_execution_system_call_state_changes<T: EvmTypes>(
+    evm: &mut Evm<'_, T>,
     block_state: &mut BlockStateAccumulator,
     stream_hashed_state: bool,
     on_hashed_state_update: &mut impl FnMut(HashedPostState),
@@ -983,16 +993,16 @@ pub(crate) fn post_execution_system_call_state_changes(
     Ok(())
 }
 
-fn execute_system_call(
-    evm: &mut Evm<'_, BaseEvmTypes>,
+fn execute_system_call<T: EvmTypes>(
+    evm: &mut Evm<'_, T>,
     block_state: &mut BlockStateAccumulator,
     stream_hashed_state: bool,
     on_hashed_state_update: &mut impl FnMut(HashedPostState),
     address: Address,
     data: Bytes,
-) -> Result<TxResult, EthExecutionError> {
-    enum SystemCallResolution {
-        Outcome(TxResult),
+) -> Result<TxResult<T>, EthExecutionError> {
+    enum SystemCallResolution<U: EvmTypes> {
+        Outcome(TxResult<U>),
         DatabaseError(ErrorCode),
         HandlerError(HandlerError),
         Failed(String),
@@ -1014,7 +1024,7 @@ fn execute_system_call(
                     sink.flush_streamed_hashed_state(on_hashed_state_update);
                     outcome
                 };
-                SystemCallResolution::Outcome(outcome)
+                SystemCallResolution::<T>::Outcome(outcome)
             }
         }
         Err(err) => SystemCallResolution::HandlerError(err),
@@ -1030,8 +1040,8 @@ fn execute_system_call(
     }
 }
 
-fn commit_state_changes(
-    evm: &mut Evm<'_, BaseEvmTypes>,
+fn commit_state_changes<T: EvmTypes>(
+    evm: &mut Evm<'_, T>,
     block_state: &mut BlockStateAccumulator,
     stream_hashed_state: bool,
     on_hashed_state_update: &mut impl FnMut(HashedPostState),
@@ -1059,8 +1069,8 @@ fn commit_state_changes(
 }
 
 #[expect(clippy::too_many_arguments)]
-pub(crate) fn post_block_balance_state_changes(
-    evm: &mut Evm<'_, BaseEvmTypes>,
+pub(crate) fn post_block_balance_state_changes<T: EvmTypes>(
+    evm: &mut Evm<'_, T>,
     block_state: &mut BlockStateAccumulator,
     stream_hashed_state: bool,
     on_hashed_state_update: &mut impl FnMut(HashedPostState),

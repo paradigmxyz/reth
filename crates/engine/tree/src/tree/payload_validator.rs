@@ -328,6 +328,8 @@ where
         state_trie_overlays: StateTrieOverlayManager<N>,
         runtime: reth_tasks::Runtime,
     ) -> Self {
+        let evm_config =
+            evm_config.with_precompile_cache_disabled(config.precompile_cache_disabled());
         let payload_processor = PayloadProcessor::new(runtime.clone(), evm_config.clone(), &config);
         Self {
             provider,

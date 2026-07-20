@@ -8,6 +8,7 @@ use crate::{
         pre_execution_system_call_state_changes, transaction_blob_gas_used, BlockExecutionContext,
         BlockSystemCalls, EthExecutionError,
     },
+    factory::{EthBlockExecutorFactory, EvmFactory},
     EthBlockExecutionCtx, EthEvmEnv, EthTxEnv, RethReceiptBuilder,
 };
 use alloc::{borrow::Cow, boxed::Box, sync::Arc, vec::Vec};
@@ -16,9 +17,10 @@ use alloy_eip7928::{BlockAccessIndex, BlockAccessList};
 use alloy_eips::{eip2718::Typed2718, eip4895::Withdrawal, eip7685::Requests};
 use alloy_primitives::{Address, B256};
 use evm2::{
+    ethereum::RecoveredTxEnvelope,
     evm::{Bal, BlockStateAccumulator, StateChangeSource},
     interpreter::Host,
-    BaseEvmTypes, Evm, TxResult, TxResultWithState,
+    BaseEvmTypes, Evm, EvmTypes, TxResult, TxResultWithState,
 };
 use reth_ethereum_forks::EthereumHardforks;
 use reth_ethereum_primitives::{EthPrimitives, Receipt};
@@ -30,8 +32,13 @@ use reth_trie_common::HashedPostState;
 
 /// Configured Ethereum block executor backed by evm2.
 #[expect(missing_debug_implementations)]
-pub struct EthBlockExecutor<'a> {
-    evm: Evm<'a, BaseEvmTypes>,
+pub struct EthBlockExecutor<'a, T = BaseEvmTypes>
+where
+    T: EvmTypes<Tx = RecoveredTxEnvelope>,
+    T::Tx: Typed2718,
+    T::TxResultExt: Send,
+{
+    evm: Evm<'a, T>,
     spec_id: evm2::SpecId,
     block_number: u64,
     block_beneficiary: Address,
@@ -57,8 +64,11 @@ pub struct EthBlockExecutor<'a> {
 
 /// Detached Ethereum transaction result with the metadata needed for canonical receipt commit.
 #[derive(Debug)]
-pub struct EthTransactionResultWithState {
-    result: TxResultWithState,
+pub struct EthTransactionResultWithState<T = BaseEvmTypes>
+where
+    T: EvmTypes,
+{
+    result: TxResultWithState<T>,
     tx_type: TxType,
     blob_gas_used: u64,
     tx_gas_limit: u64,
@@ -82,10 +92,15 @@ impl HashedStateMode {
     }
 }
 
-impl<'a> EthBlockExecutor<'a> {
+impl<'a, T> EthBlockExecutor<'a, T>
+where
+    T: EvmTypes<Tx = RecoveredTxEnvelope>,
+    T::Tx: Typed2718,
+    T::TxResultExt: Send,
+{
     /// Creates a configured Ethereum block executor.
     pub(crate) fn new<C>(
-        mut evm: Evm<'a, BaseEvmTypes>,
+        mut evm: Evm<'a, T>,
         context: EthBlockExecutionCtx<'a>,
         chain_spec: &C,
         deposit_contract_address: Option<alloy_primitives::Address>,
@@ -94,7 +109,10 @@ impl<'a> EthBlockExecutor<'a> {
     where
         C: EthereumHardforks + ?Sized,
     {
-        let spec_id = evm.spec_id();
+        // The executor stores evm2's base spec ID, while custom type families may expose a
+        // richer host spec ID that converts into it.
+        #[allow(clippy::useless_conversion)]
+        let spec_id = evm.spec_id().into();
         let block = *evm.block_env();
         let block_number = block.number.to::<u64>();
         let block_beneficiary = block.beneficiary;
@@ -147,7 +165,7 @@ impl<'a> EthBlockExecutor<'a> {
         &mut self,
         tx_type: TxType,
         blob_gas_used: u64,
-        outcome: TxResult,
+        outcome: TxResult<T>,
     ) -> GasOutput {
         let tx_gas_used = outcome.tx_gas_used();
         let regular_gas_used = outcome.regular_gas_spent();
@@ -208,12 +226,17 @@ impl<'a> EthBlockExecutor<'a> {
     }
 }
 
-impl<'a> BlockExecutor for EthBlockExecutor<'a> {
+impl<'a, T> BlockExecutor for EthBlockExecutor<'a, T>
+where
+    T: EvmTypes<Tx = RecoveredTxEnvelope>,
+    T::Tx: Typed2718,
+    T::TxResultExt: Send,
+{
     type Primitives = EthPrimitives;
-    type Evm = Evm<'a, BaseEvmTypes>;
+    type Evm = Evm<'a, T>;
     type Transaction = EthTxEnv;
-    type TransactionResult = TxResult;
-    type TransactionResultWithState = EthTransactionResultWithState;
+    type TransactionResult = TxResult<T>;
+    type TransactionResultWithState = EthTransactionResultWithState<T>;
     type BlockAccessList = Bal;
     type TransactionOutput = GasOutput;
 
@@ -393,11 +416,13 @@ impl<'a> BlockExecutor for EthBlockExecutor<'a> {
             self.block_regular_gas_used,
             self.block_state_gas_used,
         );
-        let mut output = RethReceiptBuilder.build_block_output(
-            self.receipts,
-            self.block_state,
-            self.blob_gas_used,
-        );
+        let mut output =
+            <RethReceiptBuilder as ReceiptBuilder<TxType, TxResult<T>>>::build_block_output(
+                &RethReceiptBuilder,
+                self.receipts,
+                self.block_state,
+                self.blob_gas_used,
+            );
         output.result.gas_used = block_gas_used;
         output.result.requests = requests;
 
@@ -406,31 +431,88 @@ impl<'a> BlockExecutor for EthBlockExecutor<'a> {
 }
 
 /// One block execution segment inside a merged big-block payload.
-#[derive(Debug, Clone)]
-pub struct EthBigBlockSegment<'a> {
+pub struct EthBigBlockSegment<'a, T = BaseEvmTypes>
+where
+    T: EvmTypes<Tx = RecoveredTxEnvelope>,
+{
     /// Transaction index at which this segment starts.
     pub start_tx: usize,
     /// EVM environment for this segment.
-    pub evm_env: EthEvmEnv,
+    pub evm_env: EthEvmEnv<T>,
     /// Ethereum execution context for this segment.
     pub ctx: EthBlockExecutionCtx<'a>,
 }
 
+impl<'a, T> Clone for EthBigBlockSegment<'a, T>
+where
+    T: EvmTypes<Tx = RecoveredTxEnvelope>,
+{
+    fn clone(&self) -> Self {
+        Self { start_tx: self.start_tx, evm_env: self.evm_env.clone(), ctx: self.ctx.clone() }
+    }
+}
+
+impl<'a, T> core::fmt::Debug for EthBigBlockSegment<'a, T>
+where
+    T: EvmTypes<Tx = RecoveredTxEnvelope>,
+    T::SpecId: core::fmt::Debug,
+{
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("EthBigBlockSegment")
+            .field("start_tx", &self.start_tx)
+            .field("evm_env", &self.evm_env)
+            .field("ctx", &self.ctx)
+            .finish()
+    }
+}
+
 /// Execution plan for a merged big-block payload.
-#[derive(Debug, Clone)]
-pub struct EthBigBlockPlan<'a> {
+pub struct EthBigBlockPlan<'a, T = BaseEvmTypes>
+where
+    T: EvmTypes<Tx = RecoveredTxEnvelope>,
+{
     /// Ordered execution segments.
-    pub segments: Vec<EthBigBlockSegment<'a>>,
+    pub segments: Vec<EthBigBlockSegment<'a, T>>,
     /// Total number of transactions across all segments.
     pub transaction_count: usize,
     /// Block hashes that must be available to `BLOCKHASH` during execution.
     pub block_hashes: Vec<(u64, B256)>,
 }
 
-impl<'a> EthBigBlockPlan<'a> {
+impl<'a, T> Clone for EthBigBlockPlan<'a, T>
+where
+    T: EvmTypes<Tx = RecoveredTxEnvelope>,
+{
+    fn clone(&self) -> Self {
+        Self {
+            segments: self.segments.clone(),
+            transaction_count: self.transaction_count,
+            block_hashes: self.block_hashes.clone(),
+        }
+    }
+}
+
+impl<'a, T> core::fmt::Debug for EthBigBlockPlan<'a, T>
+where
+    T: EvmTypes<Tx = RecoveredTxEnvelope>,
+    T::SpecId: core::fmt::Debug,
+{
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("EthBigBlockPlan")
+            .field("segments", &self.segments)
+            .field("transaction_count", &self.transaction_count)
+            .field("block_hashes", &self.block_hashes)
+            .finish()
+    }
+}
+
+impl<'a, T> EthBigBlockPlan<'a, T>
+where
+    T: EvmTypes<Tx = RecoveredTxEnvelope>,
+{
     /// Creates a plan and adds hashes for the boundaries between segments.
     pub fn new(
-        segments: Vec<EthBigBlockSegment<'a>>,
+        segments: Vec<EthBigBlockSegment<'a, T>>,
         prior_block_hashes: Vec<(u64, B256)>,
         transaction_count: usize,
     ) -> Self {
@@ -471,10 +553,17 @@ struct FinishedBigBlockSegment {
 
 /// Block executor for merged payloads that switches the EVM context at block boundaries.
 #[expect(missing_debug_implementations)]
-pub struct EthBigBlockExecutor<'a, C> {
-    inner: EthBlockExecutor<'a>,
+pub struct EthBigBlockExecutor<'a, C, F = crate::factory::RethEvmFactory>
+where
+    F: EvmFactory,
+    F::Types: EvmTypes<Tx = RecoveredTxEnvelope>,
+    <F::Types as evm2::EvmTypesHost>::Tx: Typed2718,
+    <F::Types as evm2::EvmTypesHost>::TxResultExt: Send,
+{
+    inner: EthBlockExecutor<'a, F::Types>,
+    factory: &'a EthBlockExecutorFactory<C, F>,
     chain_spec: Arc<C>,
-    plan: EthBigBlockPlan<'a>,
+    plan: EthBigBlockPlan<'a, F::Types>,
     next_segment: usize,
     tx_counter: usize,
     segment_receipt_start: usize,
@@ -486,18 +575,24 @@ pub struct EthBigBlockExecutor<'a, C> {
     blob_gas_used_offset: u64,
 }
 
-impl<'a, C> EthBigBlockExecutor<'a, C>
+impl<'a, C, F> EthBigBlockExecutor<'a, C, F>
 where
     C: EthereumHardforks,
+    F: EvmFactory,
+    F::Types: EvmTypes<Tx = RecoveredTxEnvelope>,
+    <F::Types as evm2::EvmTypesHost>::Tx: Typed2718,
+    <F::Types as evm2::EvmTypesHost>::TxResultExt: Send,
 {
     pub(crate) fn new(
-        inner: EthBlockExecutor<'a>,
+        inner: EthBlockExecutor<'a, F::Types>,
+        factory: &'a EthBlockExecutorFactory<C, F>,
         chain_spec: Arc<C>,
-        plan: EthBigBlockPlan<'a>,
+        plan: EthBigBlockPlan<'a, F::Types>,
     ) -> Self {
         assert!(!plan.segments.is_empty(), "big-block execution requires at least one segment");
         Self {
             inner,
+            factory,
             chain_spec,
             plan,
             next_segment: 1,
@@ -515,21 +610,14 @@ where
     fn configure_segment(&mut self, segment_idx: usize) {
         let segment = &self.plan.segments[segment_idx];
         let env = &segment.evm_env;
-        if self.inner.evm.spec_id() == env.spec {
+        if self.inner.evm.config_spec_id() == env.spec {
             self.inner.evm.set_block(env.block);
         } else {
-            let config = evm2::ExecutionConfig::for_spec_and_version(env.spec, env.version);
-            self.inner.evm.set_block_and_execution_config(
-                env.block,
-                config,
-                env.spec,
-                evm2::ethereum::ethereum_tx_registry(env.spec),
-                evm2::Precompiles::base(env.spec),
-            );
+            self.factory.reconfigure_evm(&mut self.inner.evm, env);
         }
 
         let block_number = env.block.number.to::<u64>();
-        self.inner.spec_id = env.spec;
+        self.inner.spec_id = env.spec.into();
         self.inner.block_number = block_number;
         self.inner.block_beneficiary = env.block.beneficiary;
         self.inner.base_block_reward = base_block_reward(self.chain_spec.as_ref(), block_number);
@@ -585,7 +673,7 @@ where
 
     fn finish_segment(&mut self) -> Result<FinishedBigBlockSegment, BlockExecutionError> {
         self.inner.set_transaction_block_access_index();
-        let context = EthBlockExecutor::block_context(
+        let context = EthBlockExecutor::<F::Types>::block_context(
             self.inner.deposit_contract_address,
             self.inner.parent_hash,
             self.inner.parent_beacon_block_root,
@@ -606,7 +694,7 @@ where
         .map_err(BlockExecutionError::from)?;
 
         let withdrawals = self.inner.withdrawals.clone();
-        let context = EthBlockExecutor::block_context(
+        let context = EthBlockExecutor::<F::Types>::block_context(
             self.inner.deposit_contract_address,
             self.inner.parent_hash,
             self.inner.parent_beacon_block_root,
@@ -678,15 +766,19 @@ where
     }
 }
 
-impl<'a, C> BlockExecutor for EthBigBlockExecutor<'a, C>
+impl<'a, C, F> BlockExecutor for EthBigBlockExecutor<'a, C, F>
 where
     C: EthereumHardforks,
+    F: EvmFactory,
+    F::Types: EvmTypes<Tx = RecoveredTxEnvelope>,
+    <F::Types as evm2::EvmTypesHost>::Tx: Typed2718,
+    <F::Types as evm2::EvmTypesHost>::TxResultExt: Send,
 {
     type Primitives = EthPrimitives;
-    type Evm = Evm<'a, BaseEvmTypes>;
+    type Evm = Evm<'a, F::Types>;
     type Transaction = EthTxEnv;
-    type TransactionResult = TxResult;
-    type TransactionResultWithState = EthTransactionResultWithState;
+    type TransactionResult = TxResult<F::Types>;
+    type TransactionResultWithState = EthTransactionResultWithState<F::Types>;
     type BlockAccessList = Bal;
     type TransactionOutput = GasOutput;
 
@@ -705,7 +797,7 @@ where
     fn convert_block_access_list(
         block_access_list: &BlockAccessList,
     ) -> Result<Self::BlockAccessList, BlockExecutionError> {
-        EthBlockExecutor::convert_block_access_list(block_access_list)
+        EthBlockExecutor::<F::Types>::convert_block_access_list(block_access_list)
     }
 
     fn set_block_access_list(&mut self, block_access_list: Arc<Self::BlockAccessList>) {
