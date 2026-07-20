@@ -141,7 +141,10 @@ fn selfdestruct_contract_init_code() -> Bytes {
 async fn test_selfdestruct_post_dencun() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
 
-    let tree_config = TreeConfig::default().without_prewarming(true).without_state_cache(false);
+    let tree_config = TreeConfig::default()
+        .without_prewarming(true)
+        .without_txpool_prewarming(true)
+        .without_state_cache(false);
     let (mut nodes, wallet) =
         setup_engine::<EthereumNode>(1, cancun_spec(), false, tree_config, eth_payload_attributes)
             .await?;
@@ -235,7 +238,10 @@ async fn test_selfdestruct_post_dencun() -> eyre::Result<()> {
 async fn test_selfdestruct_same_tx_post_dencun() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
 
-    let tree_config = TreeConfig::default().without_prewarming(true).without_state_cache(false);
+    let tree_config = TreeConfig::default()
+        .without_prewarming(true)
+        .without_txpool_prewarming(true)
+        .without_state_cache(false);
     let (mut nodes, wallet) =
         setup_engine::<EthereumNode>(1, cancun_spec(), false, tree_config, eth_payload_attributes)
             .await?;
@@ -310,7 +316,10 @@ async fn test_selfdestruct_same_tx_post_dencun() -> eyre::Result<()> {
 async fn test_selfdestruct_pre_dencun() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
 
-    let tree_config = TreeConfig::default().without_prewarming(true).without_state_cache(false);
+    let tree_config = TreeConfig::default()
+        .without_prewarming(true)
+        .without_txpool_prewarming(true)
+        .without_state_cache(false);
     let (mut nodes, wallet) = setup_engine::<EthereumNode>(
         1,
         shanghai_spec(),
@@ -420,7 +429,10 @@ async fn test_selfdestruct_pre_dencun() -> eyre::Result<()> {
 async fn test_selfdestruct_same_tx_preexisting_account_post_dencun() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
 
-    let tree_config = TreeConfig::default().without_prewarming(true).without_state_cache(false);
+    let tree_config = TreeConfig::default()
+        .without_prewarming(true)
+        .without_txpool_prewarming(true)
+        .without_state_cache(false);
     let (mut nodes, wallet) =
         setup_engine::<EthereumNode>(1, cancun_spec(), false, tree_config, eth_payload_attributes)
             .await?;
