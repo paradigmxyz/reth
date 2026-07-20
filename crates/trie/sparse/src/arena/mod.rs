@@ -226,14 +226,23 @@ impl ArenaSparseSubtrie {
     ///
     /// Expects that all nodes have computed hashes (i.e. `prune` is called after hashing).
     fn prune(&mut self, retained_leaves: &[Nibbles]) -> usize {
+        self.prune_inner(retained_leaves, false)
+    }
+
+    /// Prunes this subtrie while retaining terminal nodes for exclusion witnesses.
+    fn retain_witness_paths(&mut self, retained_paths: &[Nibbles]) -> usize {
+        self.prune_inner(retained_paths, true)
+    }
+
+    fn prune_inner(&mut self, retained_paths: &[Nibbles], retain_exclusions: bool) -> usize {
         // Only branches can have pruneable children.
         if !matches!(&self.arena[self.root], ArenaSparseNode::Branch(_)) {
             return 0;
         }
 
         debug_assert!(
-            retained_leaves.windows(2).all(|w| w[0] <= w[1]),
-            "retained_leaves must be sorted"
+            retained_paths.windows(2).all(|w| w[0] <= w[1]),
+            "retained paths must be sorted"
         );
         debug_assert_eq!(self.num_dirty_leaves, 0, "prune must run after hashing");
 
@@ -241,7 +250,7 @@ impl ArenaSparseSubtrie {
         // In a tree where every branch has ≥2 children, #branches ≤ #leaves − 1, so
         // total nodes ≤ 2N − 1. This is a reasonable upper-bound capacity hint that
         // avoids most reallocations without over-allocating when pruning is heavy.
-        let mut new_arena = SlotMap::with_capacity(retained_leaves.len() * 2);
+        let mut new_arena = SlotMap::with_capacity(retained_paths.len() * 2);
         // Queue: (new_idx, path TO the node — excluding its own short_key)
         let mut queue: VecDeque<(Index, Nibbles)> = VecDeque::new();
         let mut new_num_leaves = 0u64;
@@ -290,7 +299,16 @@ impl ArenaSparseSubtrie {
                 let mut child_prefix = child_path;
                 child_prefix.extend(child_short_key);
 
-                if has_prefix(retained_leaves, &child_prefix) {
+                let retained = if retain_exclusions {
+                    // `child_path` excludes the child's compressed short key. A lookup that
+                    // reaches this edge but diverges inside the short key is an exclusion proof,
+                    // so the child itself must remain revealed.
+                    has_prefix(retained_paths, &child_path)
+                } else {
+                    has_prefix(retained_paths, &child_prefix)
+                };
+
+                if retained {
                     // Retained — move child to new arena.
                     let child_node = self.arena.remove(old_child_idx).expect("child exists");
                     let new_child_idx = new_arena.insert(child_node);
@@ -2199,6 +2217,157 @@ impl Default for ArenaParallelSparseTrie {
 }
 
 impl ArenaParallelSparseTrie {
+    fn prune_inner(&mut self, retained_leaves: &[Nibbles], retain_exclusions: bool) -> usize {
+        // Only descend if the root is a branch; otherwise there are no subtries.
+        if !matches!(&self.upper_arena[self.root], ArenaSparseNode::Branch(_)) {
+            return 0;
+        }
+
+        let mut retained_leaves = retained_leaves.to_vec();
+        retained_leaves.sort_unstable();
+
+        let threshold = self.parallelism_thresholds.min_leaves_for_prune;
+
+        let mut cursor = mem::take(&mut self.buffers.cursor);
+        cursor.reset(&self.upper_arena, self.root, Nibbles::default());
+
+        // Subtries taken for parallel pruning: (arena_index, subtrie, retained_range).
+        let mut taken: Vec<(Index, Box<ArenaSparseSubtrie>, core::ops::Range<usize>)> = Vec::new();
+
+        let mut pruned = 0;
+        let mut retained_idx = 0;
+
+        loop {
+            let result = cursor.next(&mut self.upper_arena, |_, child| {
+                matches!(
+                    child,
+                    ArenaSparseNode::Branch(_) |
+                        ArenaSparseNode::Subtrie(_) |
+                        ArenaSparseNode::Leaf { .. }
+                )
+            });
+
+            match result {
+                NextResult::Done => break,
+                NextResult::NonBranch | NextResult::Branch => {}
+            }
+
+            let head = cursor.head().expect("cursor is non-empty");
+            let head_idx = head.index;
+            let head_path = head.path;
+
+            match &self.upper_arena[head_idx] {
+                ArenaSparseNode::Branch(_) | ArenaSparseNode::Leaf { .. } => {
+                    // Don't prune the root.
+                    if cursor.depth() == 0 {
+                        continue;
+                    }
+
+                    let short_key =
+                        self.upper_arena[head_idx].short_key().expect("must be branch or leaf");
+                    let mut node_prefix = head_path;
+                    node_prefix.extend(short_key);
+
+                    let retention_prefix =
+                        if retain_exclusions { &head_path } else { &node_prefix };
+                    let range = prefix_range(&retained_leaves, 0, retention_prefix);
+                    if !range.is_empty() {
+                        continue;
+                    }
+
+                    Self::remove_pruned_node(
+                        &mut self.upper_arena,
+                        &cursor,
+                        head_idx,
+                        head_path.last(),
+                    );
+                    pruned += 1;
+                }
+                ArenaSparseNode::Subtrie(_) => {
+                    let subtrie_range = prefix_range(&retained_leaves, retained_idx, &head_path);
+                    retained_idx = subtrie_range.end;
+
+                    if subtrie_range.is_empty() {
+                        let removed = Self::remove_pruned_node(
+                            &mut self.upper_arena,
+                            &cursor,
+                            head_idx,
+                            head_path.last(),
+                        );
+                        let ArenaSparseNode::Subtrie(s) = &removed else { unreachable!() };
+                        pruned += s.num_leaves as usize;
+                        self.recycle_subtrie(removed);
+                        continue;
+                    }
+
+                    let ArenaSparseNode::Subtrie(subtrie) = &self.upper_arena[head_idx] else {
+                        unreachable!()
+                    };
+                    if subtrie.num_leaves >= threshold {
+                        let ArenaSparseNode::Subtrie(subtrie) = mem::replace(
+                            &mut self.upper_arena[head_idx],
+                            ArenaSparseNode::TakenSubtrie,
+                        ) else {
+                            unreachable!()
+                        };
+                        taken.push((head_idx, subtrie, subtrie_range));
+                    } else {
+                        let ArenaSparseNode::Subtrie(subtrie) = &mut self.upper_arena[head_idx]
+                        else {
+                            unreachable!()
+                        };
+                        pruned += if retain_exclusions {
+                            subtrie.retain_witness_paths(&retained_leaves[subtrie_range])
+                        } else {
+                            subtrie.prune(&retained_leaves[subtrie_range])
+                        };
+                    }
+                }
+                _ => unreachable!("NonBranch in prune walk must be Subtrie, Leaf, or Branch"),
+            }
+        }
+
+        self.buffers.cursor = cursor;
+
+        if !taken.is_empty() {
+            // Prune taken subtries, in parallel if more than one.
+            if taken.len() == 1 {
+                let (_, ref mut subtrie, ref range) = taken[0];
+                pruned += if retain_exclusions {
+                    subtrie.retain_witness_paths(&retained_leaves[range.clone()])
+                } else {
+                    subtrie.prune(&retained_leaves[range.clone()])
+                };
+            } else {
+                use rayon::iter::{IntoParallelRefMutIterator, ParallelIterator};
+
+                pruned += taken
+                    .par_iter_mut()
+                    .map(|(_, subtrie, range)| {
+                        if retain_exclusions {
+                            subtrie.retain_witness_paths(&retained_leaves[range.clone()])
+                        } else {
+                            subtrie.prune(&retained_leaves[range.clone()])
+                        }
+                    })
+                    .sum::<usize>();
+            }
+
+            // Restore taken subtries into the upper arena.
+            for (child_idx, subtrie, _) in taken {
+                self.upper_arena[child_idx] = ArenaSparseNode::Subtrie(subtrie);
+            }
+        }
+
+        if pruned > 0 {
+            compact_arena(&mut self.upper_arena, &mut self.root);
+        }
+
+        #[cfg(feature = "trie-debug")]
+        self.record_initial_state();
+
+        pruned
+    }
     /// Hashes a subtrie at `head_idx` and collects its update actions.
     fn update_upper_subtrie(&mut self, head_idx: Index) {
         let ArenaSparseNode::Subtrie(subtrie) = &mut self.upper_arena[head_idx] else {
@@ -2646,139 +2815,11 @@ impl SparseTrie for ArenaParallelSparseTrie {
         fields(num_retained_leaves = retained_leaves.len()),
     )]
     fn prune(&mut self, retained_leaves: &[Nibbles]) -> usize {
-        // Only descend if the root is a branch; otherwise there are no subtries.
-        if !matches!(&self.upper_arena[self.root], ArenaSparseNode::Branch(_)) {
-            return 0;
-        }
+        self.prune_inner(retained_leaves, false)
+    }
 
-        let mut retained_leaves = retained_leaves.to_vec();
-        retained_leaves.sort_unstable();
-
-        let threshold = self.parallelism_thresholds.min_leaves_for_prune;
-
-        let mut cursor = mem::take(&mut self.buffers.cursor);
-        cursor.reset(&self.upper_arena, self.root, Nibbles::default());
-
-        // Subtries taken for parallel pruning: (arena_index, subtrie, retained_range).
-        let mut taken: Vec<(Index, Box<ArenaSparseSubtrie>, core::ops::Range<usize>)> = Vec::new();
-
-        let mut pruned = 0;
-        let mut retained_idx = 0;
-
-        loop {
-            let result = cursor.next(&mut self.upper_arena, |_, child| {
-                matches!(
-                    child,
-                    ArenaSparseNode::Branch(_) |
-                        ArenaSparseNode::Subtrie(_) |
-                        ArenaSparseNode::Leaf { .. }
-                )
-            });
-
-            match result {
-                NextResult::Done => break,
-                NextResult::NonBranch | NextResult::Branch => {}
-            }
-
-            let head = cursor.head().expect("cursor is non-empty");
-            let head_idx = head.index;
-            let head_path = head.path;
-
-            match &self.upper_arena[head_idx] {
-                ArenaSparseNode::Branch(_) | ArenaSparseNode::Leaf { .. } => {
-                    // Don't prune the root.
-                    if cursor.depth() == 0 {
-                        continue;
-                    }
-
-                    let short_key =
-                        self.upper_arena[head_idx].short_key().expect("must be branch or leaf");
-                    let mut node_prefix = head_path;
-                    node_prefix.extend(short_key);
-
-                    let range = prefix_range(&retained_leaves, 0, &node_prefix);
-                    if !range.is_empty() {
-                        continue;
-                    }
-
-                    Self::remove_pruned_node(
-                        &mut self.upper_arena,
-                        &cursor,
-                        head_idx,
-                        head_path.last(),
-                    );
-                    pruned += 1;
-                }
-                ArenaSparseNode::Subtrie(_) => {
-                    let subtrie_range = prefix_range(&retained_leaves, retained_idx, &head_path);
-                    retained_idx = subtrie_range.end;
-
-                    if subtrie_range.is_empty() {
-                        let removed = Self::remove_pruned_node(
-                            &mut self.upper_arena,
-                            &cursor,
-                            head_idx,
-                            head_path.last(),
-                        );
-                        let ArenaSparseNode::Subtrie(s) = &removed else { unreachable!() };
-                        pruned += s.num_leaves as usize;
-                        self.recycle_subtrie(removed);
-                        continue;
-                    }
-
-                    let ArenaSparseNode::Subtrie(subtrie) = &self.upper_arena[head_idx] else {
-                        unreachable!()
-                    };
-                    if subtrie.num_leaves >= threshold {
-                        let ArenaSparseNode::Subtrie(subtrie) = mem::replace(
-                            &mut self.upper_arena[head_idx],
-                            ArenaSparseNode::TakenSubtrie,
-                        ) else {
-                            unreachable!()
-                        };
-                        taken.push((head_idx, subtrie, subtrie_range));
-                    } else {
-                        let ArenaSparseNode::Subtrie(subtrie) = &mut self.upper_arena[head_idx]
-                        else {
-                            unreachable!()
-                        };
-                        pruned += subtrie.prune(&retained_leaves[subtrie_range]);
-                    }
-                }
-                _ => unreachable!("NonBranch in prune walk must be Subtrie, Leaf, or Branch"),
-            }
-        }
-
-        self.buffers.cursor = cursor;
-
-        if !taken.is_empty() {
-            // Prune taken subtries, in parallel if more than one.
-            if taken.len() == 1 {
-                let (_, ref mut subtrie, ref range) = taken[0];
-                pruned += subtrie.prune(&retained_leaves[range.clone()]);
-            } else {
-                use rayon::iter::{IntoParallelRefMutIterator, ParallelIterator};
-
-                pruned += taken
-                    .par_iter_mut()
-                    .map(|(_, subtrie, range)| subtrie.prune(&retained_leaves[range.clone()]))
-                    .sum::<usize>();
-            }
-
-            // Restore taken subtries into the upper arena.
-            for (child_idx, subtrie, _) in taken {
-                self.upper_arena[child_idx] = ArenaSparseNode::Subtrie(subtrie);
-            }
-        }
-
-        if pruned > 0 {
-            compact_arena(&mut self.upper_arena, &mut self.root);
-        }
-
-        #[cfg(feature = "trie-debug")]
-        self.record_initial_state();
-
-        pruned
+    fn retain_witness_paths(&mut self, retained_paths: &[Nibbles]) -> usize {
+        self.prune_inner(retained_paths, true)
     }
 
     #[instrument(

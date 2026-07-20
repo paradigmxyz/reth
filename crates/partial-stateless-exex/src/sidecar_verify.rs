@@ -3,7 +3,9 @@ use crate::{
     sidecar_reexec::{verify_and_apply_provider_assisted_sidecar, SidecarReexecLimits},
     CacheConfig,
 };
-use partial_stateless::{last_n_blocks_cache_policy_id, network_cache::NetworkStateCache};
+use partial_stateless::{
+    last_n_blocks_cache_policy_id, network_cache::NetworkStateCache, PartialTrieNodeCache,
+};
 use reth_ethereum::EthPrimitives;
 use reth_evm::ConfigureEvm;
 use reth_primitives_traits::{AlloyBlockHeader, BlockTy, RecoveredBlock};
@@ -16,6 +18,7 @@ pub(crate) fn verify_live_sidecar<Evm>(
     state_provider: &dyn StateProvider,
     block: &RecoveredBlock<BlockTy<EthPrimitives>>,
     cache: &mut NetworkStateCache,
+    trie_cache: &mut PartialTrieNodeCache,
     config: &CacheConfig,
     sidecar_dir: &Path,
     limits: &SidecarReexecLimits,
@@ -55,6 +58,7 @@ where
         cache,
         &sidecar,
         limits,
+        trie_cache,
     )?;
 
     if !report.root_witness_completeness.trustless_root_ready {
@@ -66,6 +70,29 @@ where
             missing_storage_paths = report.root_witness_completeness.missing_storage_paths.len(),
             "Partial-state node trustless verification is not ready; current state_root check is provider-assisted"
         );
+    }
+
+    match report.trustless_state_root {
+        Some(root) if root == block.state_root() => info!(
+            target: "partial_stateless",
+            block = block_number,
+            trustless_state_root = ?root,
+            "Trustless state root VERIFIED (trie node cache + witness only)"
+        ),
+        Some(root) => warn!(
+            target: "partial_stateless",
+            block = block_number,
+            trustless_state_root = ?root,
+            expected = ?block.state_root(),
+            "Trustless state root MISMATCH — trie cache/witness stale or insufficient"
+        ),
+        None => info!(
+            target: "partial_stateless",
+            block = block_number,
+            trie_warm_nodes = trie_cache.warm_node_count(),
+            tracked_accounts = trie_cache.tracked_account_count(),
+            "Trustless state root unavailable — trie node cache not warm enough this block (blind path)"
+        ),
     }
 
     let stats = &report.cache_update;
