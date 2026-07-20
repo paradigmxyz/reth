@@ -136,6 +136,7 @@ use reth_evm::{
     OnStateHook, SpecFor,
 };
 use reth_execution_cache::{CacheFillMode, CacheStats, SavedCache};
+use reth_payload_builder::PayloadBuilderLease;
 use reth_payload_primitives::{
     BuiltPayload, BuiltPayloadExecutedBlock, InvalidPayloadAttributesError, NewPayloadError,
     PayloadTypes,
@@ -2156,6 +2157,11 @@ pub trait EngineValidator<
     /// This may also be called when a forkchoice update reaffirms the existing head.
     fn on_canonical_head_changed(&self, _hash: B256, _state: &EngineApiTreeState<N>) {}
 
+    /// Returns leases that must remain active for the lifetime of a payload builder job.
+    fn payload_builder_leases(&self) -> Vec<PayloadBuilderLease> {
+        Vec::new()
+    }
+
     /// Returns [`SavedCache`] for the given block hash.
     fn cache_for(&self, _block_hash: B256) -> Option<SavedCache>;
 
@@ -2302,6 +2308,13 @@ where
             }
         };
         txpool_prewarm.start(parent.hash(), evm_env, provider_builder)
+    }
+
+    fn payload_builder_leases(&self) -> Vec<PayloadBuilderLease> {
+        self.txpool_prewarm
+            .as_ref()
+            .map(|prewarm| vec![PayloadBuilderLease::new(prewarm.pause())])
+            .unwrap_or_default()
     }
 
     fn cache_for(&self, block_hash: B256) -> Option<SavedCache> {

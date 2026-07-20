@@ -3334,6 +3334,7 @@ where
             attributes,
             cache,
             trie_handle,
+            leases: self.payload_validator.payload_builder_leases(),
         });
 
         // Client software MUST respond to this method call in the following way:
