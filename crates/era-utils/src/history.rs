@@ -1,5 +1,7 @@
-use alloy_consensus::{BlockHeader, ReceiptWithBloom, RlpDecodableReceipt};
-use alloy_primitives::{BlockHash, BlockNumber, U256};
+use alloy_consensus::{
+    proofs::calculate_receipt_root, BlockHeader, ReceiptWithBloom, RlpDecodableReceipt, TxReceipt,
+};
+use alloy_primitives::{BlockHash, BlockNumber, Bloom, U256};
 use futures_util::{Stream, StreamExt};
 use reth_codecs::Compact;
 use reth_db_api::{
@@ -22,7 +24,9 @@ use reth_era::{
 use reth_era_downloader::EraMeta;
 use reth_etl::Collector;
 use reth_fs_util as fs;
-use reth_primitives_traits::{Block, BlockBody, FullBlockBody, FullBlockHeader, NodePrimitives};
+use reth_primitives_traits::{
+    Block, BlockBody, FullBlockBody, FullBlockHeader, NodePrimitives, Receipt,
+};
 use reth_provider::{
     providers::StaticFileProviderRWRefMut, BlockReader, BlockWriter, StaticFileProviderFactory,
     StaticFileSegment, StaticFileWriter,
@@ -237,6 +241,9 @@ where
 /// `Receipts` static file segment; a source file that carries no receipts for a block (only
 /// possible for `.ere` files, whose receipts are optional per spec) is then treated as an error.
 ///
+/// `is_receipt_verifiable` decides which blocks have their receipts checked against the header
+/// (pre-Byzantium receipts can't be recomputed here, so the caller gates them out).
+///
 /// Returns current block height.
 pub fn import<S, Downloader, Era, PF, B, BB, BH>(
     mut downloader: Downloader,
@@ -244,6 +251,7 @@ pub fn import<S, Downloader, Era, PF, B, BB, BH>(
     hash_collector: &mut Collector<BlockHash, BlockNumber>,
     to_block: Option<BlockNumber>,
     store_receipts: bool,
+    is_receipt_verifiable: &dyn Fn(BlockNumber) -> bool,
 ) -> eyre::Result<BlockNumber>
 where
     S: EraBlockReader<BH, BB, ReceiptOf<<PF as DatabaseProviderFactory>::ProviderRW>>,
@@ -262,7 +270,7 @@ where
             + StaticFileProviderFactory<Primitives: NodePrimitives<Block = B, BlockHeader = BH, BlockBody = BB>>
             + StageCheckpointWriter,
     > + StaticFileProviderFactory<Primitives = <<PF as DatabaseProviderFactory>::ProviderRW as NodePrimitivesProvider>::Primitives>,
-    ReceiptOf<<PF as DatabaseProviderFactory>::ProviderRW>: Compact,
+    ReceiptOf<<PF as DatabaseProviderFactory>::ProviderRW>: Compact + Receipt,
 {
     let (tx, rx) = mpsc::channel();
 
@@ -314,6 +322,7 @@ where
             hash_collector,
             (Bound::Included(height), end),
             headers_tip,
+            is_receipt_verifiable,
         )?;
 
         // Drop the receipts writer's lock before `provider.commit()`, which locks every static
@@ -382,6 +391,7 @@ pub fn process<S, P, B, BB, BH>(
     hash_collector: &mut Collector<BlockHash, BlockNumber>,
     block_numbers: impl RangeBounds<BlockNumber>,
     headers_tip: BlockNumber,
+    is_receipt_verifiable: &dyn Fn(BlockNumber) -> bool,
 ) -> eyre::Result<BlockNumber>
 where
     S: EraBlockReader<BH, BB, ReceiptOf<P>>,
@@ -396,7 +406,7 @@ where
         + BlockWriter<Block = B>
         + BlockBodyIndicesProvider,
     <P as NodePrimitivesProvider>::Primitives: NodePrimitives<BlockHeader = BH, BlockBody = BB>,
-    ReceiptOf<P>: Compact,
+    ReceiptOf<P>: Compact + Receipt,
 {
     let decode_receipts = receipts_writer.is_some();
     let iter = S::blocks(meta, decode_receipts)?
@@ -415,6 +425,7 @@ where
         hash_collector,
         block_numbers,
         headers_tip,
+        is_receipt_verifiable,
     )
 }
 
@@ -469,7 +480,8 @@ where
 /// header, body and receipts written.
 ///
 /// When `receipts_writer` is `Some`, every block must carry receipts, a block without them,
-/// possible for `.ere` files, whose receipts are optional per spec is an error.
+/// possible for `.ere` files, whose receipts are optional per spec is an error. Receipts of blocks
+/// for which `is_receipt_verifiable` returns `true` are checked against the header's commitments.
 ///
 /// Returns last block height.
 ///
@@ -485,6 +497,7 @@ pub fn process_iter<P, B, BB, BH>(
     hash_collector: &mut Collector<BlockHash, BlockNumber>,
     block_numbers: impl RangeBounds<BlockNumber>,
     headers_tip: BlockNumber,
+    is_receipt_verifiable: &dyn Fn(BlockNumber) -> bool,
 ) -> eyre::Result<BlockNumber>
 where
     B: Block<Header = BH, Body = BB>,
@@ -498,7 +511,7 @@ where
         + BlockWriter<Block = B>
         + BlockBodyIndicesProvider,
     <P as NodePrimitivesProvider>::Primitives: NodePrimitives<BlockHeader = BH, BlockBody = BB>,
-    ReceiptOf<P>: Compact,
+    ReceiptOf<P>: Compact + Receipt,
 {
     let mut last_header_number = match block_numbers.start_bound() {
         Bound::Included(&number) => number,
@@ -547,11 +560,42 @@ where
         }
 
         if let Some(receipts_writer) = receipts_writer.as_deref_mut() {
+            if is_receipt_verifiable(number) &&
+                let Some(receipts) = receipts.as_deref()
+            {
+                verify_receipts(&header, receipts)?;
+            }
             provider.write_block_receipts(receipts_writer, number, receipts)?;
         }
     }
 
     Ok(last_header_number)
+}
+
+/// Checks a block's decoded receipts against the commitments in its header by recomputing the
+/// receipts root and logs bloom. Callers gate this to blocks whose receipts are EIP-658;
+/// pre-Byzantium receipts carry a post-state root that can't be recomputed here.
+fn verify_receipts<BH, R>(header: &BH, receipts: &[R]) -> eyre::Result<()>
+where
+    BH: FullBlockHeader,
+    R: Receipt,
+{
+    let with_bloom = receipts.iter().map(TxReceipt::with_bloom_ref).collect::<Vec<_>>();
+    let receipts_root = calculate_receipt_root(&with_bloom);
+    let logs_bloom = with_bloom.iter().fold(Bloom::ZERO, |bloom, r| bloom | r.bloom_ref());
+
+    if receipts_root != header.receipts_root() {
+        eyre::bail!(
+            "receipts root mismatch for block {}: computed {receipts_root}, header has {}",
+            header.number(),
+            header.receipts_root(),
+        );
+    }
+    if logs_bloom != header.logs_bloom() {
+        eyre::bail!("logs bloom mismatch for block {}", header.number());
+    }
+
+    Ok(())
 }
 
 /// Lets a provider append one block's receipts to a `Receipts` static file writer, using itself
@@ -688,11 +732,11 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy_consensus::Header;
+    use alloy_consensus::{Header, TxType};
     use reth_db_common::init::init_genesis;
-    use reth_ethereum_primitives::{Block, BlockBody};
+    use reth_ethereum_primitives::{Block, BlockBody, Receipt};
     use reth_provider::{
-        test_utils::create_test_provider_factory, DatabaseProviderFactory,
+        test_utils::create_test_provider_factory, DatabaseProviderFactory, StageCheckpointReader,
         StaticFileProviderFactory, StaticFileSegment, StaticFileWriter,
     };
     use std::{cell::Cell, path::Path};
@@ -791,6 +835,7 @@ mod tests {
             &mut hash_collector,
             Some(1),
             false,
+            &|_| false,
         )
         .unwrap();
 
@@ -817,6 +862,7 @@ mod tests {
             &mut hash_collector,
             0..=1,
             0,
+            &|_| false,
         )
         .unwrap();
 
@@ -849,6 +895,7 @@ mod tests {
             &mut hash_collector,
             0..,
             0,
+            &|_| false,
         );
 
         assert!(result.is_err());
@@ -876,6 +923,7 @@ mod tests {
             &mut hash_collector,
             0..=1,
             0,
+            &|_| false,
         )
         .unwrap();
         receipts_writer.commit().unwrap();
@@ -914,6 +962,7 @@ mod tests {
             &mut hash_collector,
             0..,
             0,
+            &|_| false,
         );
 
         assert!(result.is_err());
@@ -943,8 +992,124 @@ mod tests {
             &mut hash_collector,
             0..,
             0,
+            &|_| false,
         );
 
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn save_stage_checkpoints_leaves_execution_unset() {
+        let pf = create_test_provider_factory();
+        init_genesis(&pf).unwrap();
+        let provider = pf.database_provider_rw().unwrap();
+
+        save_stage_checkpoints(&provider, 0, 10, 10, 10).unwrap();
+
+        assert_eq!(
+            provider.get_stage_checkpoint(StageId::Headers).unwrap().map(|c| c.block_number),
+            Some(10)
+        );
+        assert_eq!(
+            provider.get_stage_checkpoint(StageId::Bodies).unwrap().map(|c| c.block_number),
+            Some(10)
+        );
+        // Receipt import doesn't produce state, so it must not advance Execution.
+        assert_eq!(provider.get_stage_checkpoint(StageId::Execution).unwrap(), None);
+    }
+
+    #[test]
+    fn backfills_receipts_onto_existing_headers() {
+        let pf = create_test_provider_factory();
+        init_genesis(&pf).unwrap();
+        let static_file_provider = pf.static_file_provider();
+        let folder = tempdir().unwrap();
+        let mut hash_collector = Collector::new(4096, Some(folder.path().to_owned()));
+
+        // First pass: import headers and bodies only, no receipts.
+        {
+            let mut writer =
+                static_file_provider.latest_writer(StaticFileSegment::Headers).unwrap();
+            let provider = pf.database_provider_rw().unwrap();
+            let meta = TestMeta { marked: Cell::new(false) };
+            process::<TestEra, _, Block, _, _>(
+                &meta,
+                &mut writer,
+                None,
+                &provider,
+                &mut hash_collector,
+                0..=2,
+                0,
+                &|_| false,
+            )
+            .unwrap();
+            writer.commit().unwrap();
+            provider.commit().unwrap();
+        }
+        assert_eq!(
+            static_file_provider.get_highest_static_file_block(StaticFileSegment::Headers),
+            Some(2)
+        );
+        assert_eq!(
+            static_file_provider.get_highest_static_file_block(StaticFileSegment::Receipts),
+            None
+        );
+
+        // Second pass: backfill receipts for the already-imported headers (`headers_tip = 2`).
+        {
+            let mut writer =
+                static_file_provider.latest_writer(StaticFileSegment::Headers).unwrap();
+            let mut receipts_writer =
+                static_file_provider.latest_writer(StaticFileSegment::Receipts).unwrap();
+            let provider = pf.database_provider_rw().unwrap();
+            let meta = TestMeta { marked: Cell::new(false) };
+            process::<TestEraWithEmptyReceipts, _, Block, _, _>(
+                &meta,
+                &mut writer,
+                Some(&mut receipts_writer),
+                &provider,
+                &mut hash_collector,
+                0..,
+                2,
+                &|_| false,
+            )
+            .unwrap();
+            receipts_writer.commit().unwrap();
+            writer.commit().unwrap();
+            provider.commit().unwrap();
+        }
+
+        // Receipts now cover the previously header-only range, and headers weren't re-appended.
+        assert_eq!(
+            static_file_provider.get_highest_static_file_block(StaticFileSegment::Receipts),
+            Some(2)
+        );
+        assert_eq!(
+            static_file_provider.get_highest_static_file_block(StaticFileSegment::Headers),
+            Some(2)
+        );
+    }
+
+    #[test]
+    fn verify_receipts_rejects_tampered_contents() {
+        let receipts = vec![Receipt {
+            tx_type: TxType::Legacy,
+            success: true,
+            cumulative_gas_used: 21_000,
+            logs: vec![],
+        }];
+
+        // Commit the header to the receipts as decoded.
+        let with_bloom = receipts.iter().map(TxReceipt::with_bloom_ref).collect::<Vec<_>>();
+        let header = Header {
+            receipts_root: calculate_receipt_root(&with_bloom),
+            logs_bloom: with_bloom.iter().fold(Bloom::ZERO, |bloom, r| bloom | r.bloom_ref()),
+            ..Default::default()
+        };
+        verify_receipts(&header, &receipts).unwrap();
+
+        // Same receipt count, different contents: the recomputed root no longer matches.
+        let tampered = vec![Receipt { cumulative_gas_used: 42_000, ..receipts[0].clone() }];
+        assert!(verify_receipts(&header, &tampered).is_err());
     }
 }

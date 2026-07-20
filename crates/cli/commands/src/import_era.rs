@@ -110,6 +110,12 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> ImportEraC
         };
         let next_block = resume_block + 1;
 
+        // Pre-Byzantium receipts store a post-state root the node's receipt type can't represent,
+        // so their root/bloom can't be recomputed ie. only verify receipts from Byzantium onwards.
+        let chain_spec = self.env.chain.clone();
+        let is_receipt_verifiable =
+            move |number: u64| chain_spec.is_byzantium_active_at_block(number);
+
         if let Some(path) = self.import.path {
             let era_type = EraFileType::from_dir(&path)?.ok_or_else(|| {
                 eyre!(
@@ -129,6 +135,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> ImportEraC
                     &mut hash_collector,
                     self.to_block,
                     self.with_receipts,
+                    &is_receipt_verifiable,
                 )?,
                 EraFileType::Ere => era::import::<era::Ere, _, _, _, _, _, _>(
                     read_dir(path, next_block)?,
@@ -136,6 +143,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> ImportEraC
                     &mut hash_collector,
                     self.to_block,
                     self.with_receipts,
+                    &is_receipt_verifiable,
                 )?,
                 EraFileType::Era1 => era::import::<era::Era1, _, _, _, _, _, _>(
                     read_dir(path, next_block)?,
@@ -143,6 +151,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> ImportEraC
                     &mut hash_collector,
                     self.to_block,
                     self.with_receipts,
+                    &is_receipt_verifiable,
                 )?,
             };
         } else {
@@ -178,6 +187,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> ImportEraC
                     &mut hash_collector,
                     self.to_block,
                     self.with_receipts,
+                    &is_receipt_verifiable,
                 )?,
                 EraFileType::Era1 => era::import::<era::Era1, _, _, _, _, _, _>(
                     stream,
@@ -185,6 +195,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> ImportEraC
                     &mut hash_collector,
                     self.to_block,
                     self.with_receipts,
+                    &is_receipt_verifiable,
                 )?,
                 EraFileType::Era => era::import::<era::Era, _, _, _, _, _, _>(
                     stream,
@@ -192,6 +203,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> ImportEraC
                     &mut hash_collector,
                     self.to_block,
                     self.with_receipts,
+                    &is_receipt_verifiable,
                 )?,
             };
         }

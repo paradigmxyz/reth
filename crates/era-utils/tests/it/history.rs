@@ -44,7 +44,8 @@ async fn test_history_imports_from_fresh_state_successfully() {
 
     let expected_block_number = 8191;
     let actual_block_number =
-        import::<Era1, _, _, _, _, _, _>(stream, &pf, &mut hash_collector, None, false).unwrap();
+        import::<Era1, _, _, _, _, _, _>(stream, &pf, &mut hash_collector, None, false, &|_| false)
+            .unwrap();
 
     assert_eq!(actual_block_number, expected_block_number);
 }
@@ -67,7 +68,8 @@ async fn test_history_import_with_receipts() {
     let mut hash_collector = Collector::new(4096, Some(collector_dir.path().to_owned()));
 
     let imported_height =
-        import::<Era1, _, _, _, _, _, _>(stream, &pf, &mut hash_collector, None, true).unwrap();
+        import::<Era1, _, _, _, _, _, _>(stream, &pf, &mut hash_collector, None, true, &|_| false)
+            .unwrap();
     assert_eq!(imported_height, 8191);
 
     assert_eq!(
@@ -113,7 +115,8 @@ async fn test_roundtrip_export_after_import() {
 
     // Import blocks from one era1 file into database
     let last_imported_block_height =
-        import::<Era1, _, _, _, _, _, _>(stream, &pf, &mut hash_collector, None, false).unwrap();
+        import::<Era1, _, _, _, _, _, _>(stream, &pf, &mut hash_collector, None, false, &|_| false)
+            .unwrap();
 
     assert_eq!(last_imported_block_height, 8191);
     let provider_ref = pf.provider_rw().unwrap().0;
@@ -223,7 +226,8 @@ async fn test_ere_roundtrip_export_after_import() {
     let mut hash_collector = Collector::new(4096, Some(collector_dir.path().to_owned()));
 
     let imported_height =
-        import::<Era1, _, _, _, _, _, _>(stream, &pf, &mut hash_collector, None, false).unwrap();
+        import::<Era1, _, _, _, _, _, _>(stream, &pf, &mut hash_collector, None, false, &|_| false)
+            .unwrap();
     assert_eq!(imported_height, 8191);
 
     let provider_ref = pf.provider_rw().unwrap().0;
@@ -277,9 +281,15 @@ async fn test_ere_roundtrip_export_after_import() {
     // The exported files are returned in ascending block order, which is the order the importer
     // expects.
     let stream = futures_util::stream::iter(ere_files.into_iter().map(|p| Ok(FileMeta::new(p))));
-    let reimported_height =
-        import::<Ere, _, _, _, _, _, _>(stream, &reimport_pf, &mut reimport_collector, None, false)
-            .unwrap();
+    let reimported_height = import::<Ere, _, _, _, _, _, _>(
+        stream,
+        &reimport_pf,
+        &mut reimport_collector,
+        None,
+        false,
+        &|_| false,
+    )
+    .unwrap();
 
     assert_eq!(
         reimported_height, EXPORT_LAST_BLOCK,
