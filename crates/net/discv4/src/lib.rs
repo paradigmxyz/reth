@@ -635,7 +635,12 @@ impl Discv4Service {
             let mut builder = Enr::builder();
             {
                 let mut set_endpoint = |ip: IpAddr| {
-                    builder.ip(ip);
+                    // don't advertise an unspecified ip key (EIP-778 keys are optional), but keep
+                    // the port keys: `set_external_ip_addr` only sets the ip key, so NAT
+                    // resolution must find the ports already in place to complete the record
+                    if !ip.is_unspecified() {
+                        builder.ip(ip);
+                    }
                     if ip.is_ipv4() {
                         builder.udp4(local_node_record.udp_port);
                         builder.tcp4(local_node_record.tcp_port);
@@ -644,11 +649,7 @@ impl Discv4Service {
                         builder.tcp6(local_node_record.tcp_port);
                     }
                 };
-                // leave an unspecified address's keys unset (EIP-778 keys are optional) rather
-                // than advertise 0.0.0.0 next to a valid opposite-family endpoint
-                if !local_node_record.address.is_unspecified() {
-                    set_endpoint(local_node_record.address);
-                }
+                set_endpoint(local_node_record.address);
                 if let Some(ip) = config.secondary_advertised_ip.filter(|ip| !ip.is_unspecified()) {
                     set_endpoint(ip);
                 }
@@ -2662,6 +2663,35 @@ mod tests {
         assert_eq!(enr.ip6(), Some(ip6));
         assert_eq!(enr.udp6(), Some(service.local_node_record.udp_port));
         assert_eq!(enr.tcp6(), Some(service.local_node_record.tcp_port));
+    }
+
+    #[tokio::test]
+    async fn test_external_ip_completes_unspecified_enr_endpoint() {
+        let mut rng = rand_08::thread_rng();
+        let socket: SocketAddr = "127.0.0.1:0".parse().unwrap();
+        let (secret_key, pk) = secp256k1::SECP256K1.generate_keypair(&mut rng);
+        let local_enr = NodeRecord {
+            address: Ipv4Addr::UNSPECIFIED.into(),
+            tcp_port: 30303,
+            udp_port: 30303,
+            id: pk2id(&pk),
+        };
+        let (_discv4, mut service) =
+            Discv4::bind(socket, local_enr, secret_key, Default::default()).await.unwrap();
+
+        let udp_port = service.local_node_record.udp_port;
+        let enr = &service.local_eip_868_enr;
+        assert_eq!(enr.ip4(), None);
+        assert_eq!(enr.udp4(), Some(udp_port));
+        assert_eq!(enr.tcp4(), Some(30303));
+
+        let external_ip: Ipv4Addr = "1.2.3.4".parse().unwrap();
+        service.set_external_ip_addr(external_ip.into());
+
+        let enr = &service.local_eip_868_enr;
+        assert_eq!(enr.ip4(), Some(external_ip));
+        assert_eq!(enr.udp4(), Some(udp_port));
+        assert_eq!(enr.tcp4(), Some(30303));
     }
 
     #[tokio::test]
