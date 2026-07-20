@@ -64,16 +64,18 @@ impl HashedPostState {
                             !info.balance.is_zero() &&
                             account.storage.values().all(|slot| slot.original_value().is_zero())
                     });
-                let wipe_storage = account.was_destroyed() && !created_in_bundle;
                 let transiently_destroyed = created_in_bundle && account.info.is_none();
                 let hashed_storage = if transiently_destroyed {
                     None
                 } else {
-                    let mut storage = HashedStorage::from_plain_storage(
-                        account.status,
+                    let storage = HashedStorage::from_plain_storage(
+                        if created_in_bundle {
+                            AccountStatus::InMemoryChange
+                        } else {
+                            account.status
+                        },
                         account.storage.iter().map(|(slot, value)| (slot, &value.present_value)),
                     );
-                    storage.wiped = wipe_storage;
                     (!storage.is_empty()).then_some(storage)
                 };
 
