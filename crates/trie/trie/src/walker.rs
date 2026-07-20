@@ -119,15 +119,6 @@ impl<C: TrieCursor, K: AsRef<AddedRemovedKeys>> TrieWalker<C, K> {
         self.removed_keys.take().unwrap_or_default()
     }
 
-    /// Prints the current stack of trie nodes.
-    pub fn print_stack(&self) {
-        println!("====================== STACK ======================");
-        for node in &self.stack {
-            println!("{node:?}");
-        }
-        println!("====================== END STACK ======================\n");
-    }
-
     /// The current length of the removed keys.
     pub fn removed_keys_len(&self) -> usize {
         self.removed_keys.as_ref().map_or(0, |u| u.len())
