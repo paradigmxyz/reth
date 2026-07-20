@@ -239,7 +239,7 @@ where
                 provider,
                 &mut self.hash_collector,
                 last_header_number..=input.target(),
-                era::ImportParams {
+                era::ImportPolicy {
                     headers_tip: last_header_number,
                     is_receipt_verifiable: &|_| false,
                 },
