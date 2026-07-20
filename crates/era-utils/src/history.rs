@@ -302,6 +302,7 @@ where
     };
 
     let end = to_block.map_or(Bound::Unbounded, Bound::Included);
+    let params = ImportParams { headers_tip, is_receipt_verifiable };
 
     while let Some(meta) = rx.recv()? {
         let meta = meta?;
@@ -321,8 +322,7 @@ where
             &provider,
             hash_collector,
             (Bound::Included(height), end),
-            headers_tip,
-            is_receipt_verifiable,
+            params,
         )?;
 
         // Drop the receipts writer's lock before `provider.commit()`, which locks every static
@@ -379,6 +379,23 @@ where
     Ok(())
 }
 
+/// Per-block import policy for [`process`] and [`process_iter`].
+#[derive(Clone, Copy)]
+pub struct ImportParams<'a> {
+    /// Blocks at or below this are backfilled receipts-only; blocks above it are written in full.
+    pub headers_tip: BlockNumber,
+    /// Whether a block's receipts are verified against its header commitments.
+    pub is_receipt_verifiable: &'a dyn Fn(BlockNumber) -> bool,
+}
+
+impl std::fmt::Debug for ImportParams<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ImportParams")
+            .field("headers_tip", &self.headers_tip)
+            .finish_non_exhaustive()
+    }
+}
+
 /// Reads `meta` with the [`EraBlockReader`] `S`, appends its blocks within `block_numbers`, and
 /// marks `meta` processed if the file was fully consumed. Returns last block height.
 pub fn process<S, P, B, BB, BH>(
@@ -390,8 +407,7 @@ pub fn process<S, P, B, BB, BH>(
     provider: &P,
     hash_collector: &mut Collector<BlockHash, BlockNumber>,
     block_numbers: impl RangeBounds<BlockNumber>,
-    headers_tip: BlockNumber,
-    is_receipt_verifiable: &dyn Fn(BlockNumber) -> bool,
+    params: ImportParams<'_>,
 ) -> eyre::Result<BlockNumber>
 where
     S: EraBlockReader<BH, BB, ReceiptOf<P>>,
@@ -417,16 +433,7 @@ where
         }))
         .flatten();
 
-    process_iter(
-        iter,
-        writer,
-        receipts_writer,
-        provider,
-        hash_collector,
-        block_numbers,
-        headers_tip,
-        is_receipt_verifiable,
-    )
+    process_iter(iter, writer, receipts_writer, provider, hash_collector, block_numbers, params)
 }
 
 /// Extracts a `(header, body)` pair from [`BlockTuple`].
@@ -496,8 +503,7 @@ pub fn process_iter<P, B, BB, BH>(
     provider: &P,
     hash_collector: &mut Collector<BlockHash, BlockNumber>,
     block_numbers: impl RangeBounds<BlockNumber>,
-    headers_tip: BlockNumber,
-    is_receipt_verifiable: &dyn Fn(BlockNumber) -> bool,
+    params: ImportParams<'_>,
 ) -> eyre::Result<BlockNumber>
 where
     B: Block<Header = BH, Body = BB>,
@@ -552,7 +558,7 @@ where
 
         // Header and body are only written for new blocks, when backfilling receipts onto an
         // earlier import the block already has both persisted.
-        if number > headers_tip {
+        if number > params.headers_tip {
             let hash = header.hash_slow();
             writer.append_header(&header, &hash)?;
             provider.append_block_bodies(vec![(header.number(), Some(&body))])?;
@@ -560,7 +566,7 @@ where
         }
 
         if let Some(receipts_writer) = receipts_writer.as_deref_mut() {
-            if is_receipt_verifiable(number) &&
+            if (params.is_receipt_verifiable)(number) &&
                 let Some(receipts) = receipts.as_deref()
             {
                 verify_receipts(&header, receipts)?;
@@ -861,8 +867,7 @@ mod tests {
             &provider,
             &mut hash_collector,
             0..=1,
-            0,
-            &|_| false,
+            ImportParams { headers_tip: 0, is_receipt_verifiable: &|_| false },
         )
         .unwrap();
 
@@ -894,8 +899,7 @@ mod tests {
             &provider,
             &mut hash_collector,
             0..,
-            0,
-            &|_| false,
+            ImportParams { headers_tip: 0, is_receipt_verifiable: &|_| false },
         );
 
         assert!(result.is_err());
@@ -922,8 +926,7 @@ mod tests {
             &provider,
             &mut hash_collector,
             0..=1,
-            0,
-            &|_| false,
+            ImportParams { headers_tip: 0, is_receipt_verifiable: &|_| false },
         )
         .unwrap();
         receipts_writer.commit().unwrap();
@@ -961,8 +964,7 @@ mod tests {
             &provider,
             &mut hash_collector,
             0..,
-            0,
-            &|_| false,
+            ImportParams { headers_tip: 0, is_receipt_verifiable: &|_| false },
         );
 
         assert!(result.is_err());
@@ -991,8 +993,7 @@ mod tests {
             &provider,
             &mut hash_collector,
             0..,
-            0,
-            &|_| false,
+            ImportParams { headers_tip: 0, is_receipt_verifiable: &|_| false },
         );
 
         assert!(result.is_err());
@@ -1039,8 +1040,7 @@ mod tests {
                 &provider,
                 &mut hash_collector,
                 0..=2,
-                0,
-                &|_| false,
+                ImportParams { headers_tip: 0, is_receipt_verifiable: &|_| false },
             )
             .unwrap();
             writer.commit().unwrap();
@@ -1070,8 +1070,7 @@ mod tests {
                 &provider,
                 &mut hash_collector,
                 0..,
-                2,
-                &|_| false,
+                ImportParams { headers_tip: 2, is_receipt_verifiable: &|_| false },
             )
             .unwrap();
             receipts_writer.commit().unwrap();
