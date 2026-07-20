@@ -77,7 +77,7 @@ impl HashedPostState {
                 // An absent parent account is known transient. A nonzero-balance account with no
                 // nonce, code, or recorded original storage is the prefunded CREATE/CREATE2 case.
                 // Empty legacy accounts remain conservative because EIP-161 uses the same status.
-                let created_in_bundle = storage_wipe_mode ==
+                let created_and_destroyed_in_bundle = storage_wipe_mode ==
                     BundleStateStorageWipeMode::InferTransient &&
                     account.was_destroyed() &&
                     account.original_info.as_ref().is_none_or(|info| {
@@ -85,12 +85,13 @@ impl HashedPostState {
                             !info.balance.is_zero() &&
                             account.storage.values().all(|slot| slot.original_value().is_zero())
                     });
-                let transiently_destroyed = created_in_bundle && account.info.is_none();
+                let transiently_destroyed =
+                    created_and_destroyed_in_bundle && account.info.is_none();
                 let hashed_storage = if transiently_destroyed {
                     None
                 } else {
                     let storage = HashedStorage::from_plain_storage(
-                        if created_in_bundle {
+                        if created_and_destroyed_in_bundle {
                             AccountStatus::InMemoryChange
                         } else {
                             account.status
