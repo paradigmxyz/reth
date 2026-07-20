@@ -74,24 +74,9 @@ pub fn verify_and_restore(
     // to a finalized block (a deeper reorg cannot be rolled back post-restore).
     let cache = pkg.state.into_cache(account_policy, storage_policy);
 
-    // 3. The heart of the check: recompute `cache_root` over the restored
-    // contents and compare against the consensus commitment. Any tampered
-    // account/storage value or `last_accessed_block` diverges here, which is
-    // where trust in the peer is discharged.
-    let actual_root = cache.cache_root();
-    if actual_root != expected_anchor.cache_root {
-        return Err(BootstrapError::CacheRootMismatch {
-            expected: expected_anchor.cache_root,
-            actual: actual_root,
-        });
-    }
-
-    // 4. `cache_root` commits code entries by `code_hash` only, not by raw
-    // bytecode, so a peer could ship garbage bytes under a valid hash and pass
-    // step 3. Verify each preimage directly.
-    //
-    // NOTE: if `cache_root` is later changed to bind bytecode values, step 3
-    // already catches this and step 4 becomes redundant and can be removed.
+    // 3. Verify each bytecode preimage directly. The cache root also binds raw
+    // bytecode, but checking this invariant first provides the more specific
+    // error when bytes do not match their claimed code hash.
     for (code_hash, entry) in cache.codes() {
         let computed = keccak256(&entry.value);
         if computed != *code_hash {
@@ -100,6 +85,18 @@ pub fn verify_and_restore(
                 computed,
             });
         }
+    }
+
+    // 4. The heart of the check: recompute `cache_root` over the restored
+    // contents and compare against the consensus commitment. Any tampered
+    // account, storage, bytecode value, or access metadata diverges here, which
+    // is where trust in the peer is discharged.
+    let actual_root = cache.cache_root();
+    if actual_root != expected_anchor.cache_root {
+        return Err(BootstrapError::CacheRootMismatch {
+            expected: expected_anchor.cache_root,
+            actual: actual_root,
+        });
     }
 
     Ok(cache)

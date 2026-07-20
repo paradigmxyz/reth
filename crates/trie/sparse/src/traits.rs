@@ -269,6 +269,15 @@ pub trait SparseTrie: Sized + Debug + Send + Sync {
     /// The number of nodes converted to hash stubs.
     fn prune(&mut self, retained_leaves: &[Nibbles]) -> usize;
 
+    /// Prunes all subtrees that are not required to prove the retained lookup paths.
+    ///
+    /// Unlike [`Self::prune`], the retained paths do not need to resolve to existing leaves. If a
+    /// path proves non-existence by diverging inside a leaf or compressed extension, the terminal
+    /// proof node is retained while unrelated descendants are blinded.
+    ///
+    /// Must be called only after [`Self::root`] has computed the current node hashes.
+    fn retain_witness_paths(&mut self, retained_paths: &[Nibbles]) -> usize;
+
     /// Takes the debug recorder out of this trie, replacing it with an empty one.
     ///
     /// Returns the recorder containing all recorded mutations since the last reset.
@@ -478,6 +487,10 @@ mod configurable_sparse_trie {
             delegate!(self, prune, retained_leaves)
         }
 
+        fn retain_witness_paths(&mut self, retained_paths: &[Nibbles]) -> usize {
+            delegate!(self, retain_witness_paths, retained_paths)
+        }
+
         #[cfg(feature = "trie-debug")]
         fn take_debug_recorder(&mut self) -> TrieDebugRecorder {
             delegate!(self, take_debug_recorder)
@@ -503,3 +516,109 @@ mod configurable_sparse_trie {
 
 #[cfg(feature = "std")]
 pub use configurable_sparse_trie::ConfigurableSparseTrie;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{ArenaParallelSparseTrie, LeafLookup, ParallelSparseTrie};
+
+    fn key(prefix: &[u8]) -> B256 {
+        let mut bytes = [0u8; 32];
+        bytes[..prefix.len()].copy_from_slice(prefix);
+        B256::from(bytes)
+    }
+
+    fn trie_with_leaves<T: SparseTrie + Default>(keys: &[B256]) -> T {
+        let mut trie = T::default();
+        let mut updates = B256Map::default();
+        for (index, key) in keys.iter().enumerate() {
+            updates.insert(*key, LeafUpdate::Changed(vec![index as u8 + 1; 64]));
+        }
+        trie.update_leaves(&mut updates, |target, min_len| {
+            panic!("fresh trie unexpectedly requested proof target {target} at {min_len}")
+        })
+        .unwrap();
+        assert!(updates.is_empty());
+        trie
+    }
+
+    fn assert_extension_exclusion_is_retained<T: SparseTrie + Default>() {
+        // The first two leaves create a non-root extension at 0x1 with short key 0x23.
+        // The retained lookup enters the 0x1 child but diverges inside that extension at 0x8.
+        let leaf_a = key(&[0x12, 0x34]);
+        let leaf_b = key(&[0x12, 0x35]);
+        let unrelated = key(&[0x90]);
+        let missing = key(&[0x12, 0x80]);
+        let mut trie = trie_with_leaves::<T>(&[leaf_a, leaf_b, unrelated]);
+        let root_before = trie.root();
+
+        assert!(matches!(
+            trie.find_leaf(&Nibbles::unpack(missing), None),
+            Ok(LeafLookup::NonExistent)
+        ));
+        assert!(trie.retain_witness_paths(&[Nibbles::unpack(missing)]) > 0);
+        assert_eq!(trie.root(), root_before);
+        assert!(matches!(
+            trie.find_leaf(&Nibbles::unpack(missing), None),
+            Ok(LeafLookup::NonExistent)
+        ));
+        assert!(trie.find_leaf(&Nibbles::unpack(unrelated), None).is_err());
+    }
+
+    fn assert_leaf_and_branch_exclusions_are_retained<T: SparseTrie + Default>() {
+        let leaf_a = key(&[0x10]);
+        let leaf_b = key(&[0x90]);
+        let leaf_mismatch = key(&[0x11]);
+        let missing_branch = key(&[0x50]);
+
+        for missing in [leaf_mismatch, missing_branch] {
+            let mut trie = trie_with_leaves::<T>(&[leaf_a, leaf_b]);
+            let root_before = trie.root();
+            trie.retain_witness_paths(&[Nibbles::unpack(missing)]);
+            assert_eq!(trie.root(), root_before);
+            assert!(matches!(
+                trie.find_leaf(&Nibbles::unpack(missing), None),
+                Ok(LeafLookup::NonExistent)
+            ));
+        }
+
+        let mut trie = trie_with_leaves::<T>(&[leaf_a, leaf_b]);
+        let root_before = trie.root();
+        trie.retain_witness_paths(&[Nibbles::unpack(leaf_a)]);
+        assert_eq!(trie.root(), root_before);
+        assert!(matches!(trie.find_leaf(&Nibbles::unpack(leaf_a), None), Ok(LeafLookup::Exists)));
+    }
+
+    fn assert_shared_paths_follow_the_last_retained_lookup<T: SparseTrie + Default>() {
+        let leaf_a = key(&[0x12, 0x34]);
+        let leaf_b = key(&[0x12, 0x35]);
+        let unrelated = key(&[0x90]);
+        let path_a = Nibbles::unpack(leaf_a);
+        let path_b = Nibbles::unpack(leaf_b);
+        let mut trie = trie_with_leaves::<T>(&[leaf_a, leaf_b, unrelated]);
+        let root_before = trie.root();
+
+        trie.retain_witness_paths(&[path_a, path_b]);
+        assert!(matches!(trie.find_leaf(&path_a, None), Ok(LeafLookup::Exists)));
+        assert!(matches!(trie.find_leaf(&path_b, None), Ok(LeafLookup::Exists)));
+
+        trie.retain_witness_paths(&[path_a]);
+        assert!(matches!(trie.find_leaf(&path_a, None), Ok(LeafLookup::Exists)));
+        assert!(trie.find_leaf(&path_b, None).is_err());
+        assert_eq!(trie.root(), root_before);
+    }
+
+    #[test]
+    fn parallel_retains_inclusion_and_exclusion_witnesses() {
+        assert_extension_exclusion_is_retained::<ParallelSparseTrie>();
+        assert_leaf_and_branch_exclusions_are_retained::<ParallelSparseTrie>();
+        assert_shared_paths_follow_the_last_retained_lookup::<ParallelSparseTrie>();
+    }
+
+    #[test]
+    fn arena_retains_inclusion_and_exclusion_witnesses() {
+        assert_extension_exclusion_is_retained::<ArenaParallelSparseTrie>();
+        assert_leaf_and_branch_exclusions_are_retained::<ArenaParallelSparseTrie>();
+        assert_shared_paths_follow_the_last_retained_lookup::<ArenaParallelSparseTrie>();
+    }
+}

@@ -345,10 +345,7 @@ impl NetworkStateCache {
     /// Compute a deterministic key+value root over the current cache contents.
     ///
     /// The protocol root includes values that affect execution or eviction:
-    /// account/storage values and `last_accessed_block`. Code entries are rooted by
-    /// `code_hash` and `last_accessed_block`; `code_hash` is treated as the
-    /// bytecode commitment, so the root does not rescan raw bytecode. Bytecode
-    /// preimages must be checked against `code_hash` at cache/witness boundaries.
+    /// account values, storage values, bytecode values, and `last_accessed_block`.
     /// Local-only metadata such as `first_accessed_block` and `access_count` is
     /// excluded.
     pub fn cache_root(&self) -> B256 {
@@ -398,6 +395,8 @@ impl NetworkStateCache {
             let mut preimage = Vec::new();
             preimage.extend_from_slice(b"NetworkStateCacheLeaf/v1/code");
             preimage.extend_from_slice(code_hash.as_slice());
+            preimage.extend_from_slice(&(entry.value.len() as u64).to_be_bytes());
+            preimage.extend_from_slice(&entry.value);
             preimage.extend_from_slice(&entry.last_accessed_block.to_be_bytes());
             keccak256(preimage)
         }
@@ -765,11 +764,11 @@ mod tests {
     }
 
     #[test]
-    fn cache_root_treats_code_hash_as_bytecode_commitment() {
+    fn cache_root_binds_code_bytecode_value() {
         let code_hash = B256::repeat_byte(0x03);
 
-        // Deliberately use different bytes under the same key to pin root semantics:
-        // cache_root binds code_hash and access metadata, not raw bytecode bytes.
+        // Deliberately use different bytes under the same key to pin key+value
+        // root semantics for code entries.
         let mut codes_a = HashMap::new();
         codes_a.insert(
             code_hash,
@@ -808,7 +807,7 @@ mod tests {
             Box::new(LastNBlocksPolicy::new(10)),
         );
 
-        assert_eq!(cache_a.cache_root(), cache_b.cache_root());
+        assert_ne!(cache_a.cache_root(), cache_b.cache_root());
 
         let mut codes_c = HashMap::new();
         codes_c.insert(

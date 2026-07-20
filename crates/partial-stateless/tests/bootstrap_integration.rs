@@ -133,8 +133,8 @@ fn rejects_forged_bytecode_under_valid_hash() {
     let anchor = anchor_for(&cache);
     let mut pkg = CacheSnapshotPackage::from_cache(&cache, anchor);
 
-    // Keep the code_hash key but ship different bytes. cache_root commits the
-    // hash only, so step 3 passes and the preimage check is the sole defense.
+    // Keep the code_hash key but ship different bytes. The preimage check runs
+    // before the cache-root check so this reports the more specific error.
     pkg.state.codes[0].1.value = Bytes::from_static(&[0xde, 0xad, 0xbe, 0xef]);
 
     let (account_policy, storage_policy) = policies();

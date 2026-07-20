@@ -1,16 +1,16 @@
-use crate::CacheConfig;
 use alloy_primitives::{Address, Bytes, B256, U256};
 use eyre::{bail, eyre, Result};
 use partial_stateless::{
     accessed_state::BlockAccessedState,
-    check_next_cache_anchor, check_sidecar_context, check_sidecar_miss_targets,
-    network_cache::NetworkStateCache,
-    policy::LastNBlocksPolicy,
+    check_sidecar_context, check_sidecar_miss_targets,
+    network_cache::{NetworkStateCache, UpdateStats},
+    try_compute_trustless_state_root,
     witness_check::{
-        materialize_sidecar_witness_with_limits, root_witness_completeness_from_bundle,
+        materialize_sidecar_witness_with_limits, root_witness_completeness_from_bundle_with_cache,
         SidecarWitnessCheckLimits,
     },
-    CacheAnchor, PartialStatelessSidecar, RootWitnessCompletenessReport, StateTargetSet,
+    CacheAnchor, PartialStatelessSidecar, PartialTrieNodeCache, RootWitnessCompletenessReport,
+    StateTargetSet,
 };
 use reth_ethereum::EthPrimitives;
 use reth_evm::{execute::Executor, ConfigureEvm};
@@ -28,17 +28,20 @@ pub(crate) struct SidecarReexecReport {
     pub actual_accessed: BlockAccessedState,
     pub expected_miss: StateTargetSet,
     pub next_cache_anchor: CacheAnchor,
+    pub cache_update: UpdateStats,
     pub root_witness_completeness: RootWitnessCompletenessReport,
+    /// State root computed from the local sparse trie + parent-state miss proof.
+    pub trustless_state_root: Option<B256>,
 }
 
-pub(crate) fn check_provider_assisted_sidecar<Evm>(
+pub(crate) fn verify_and_apply_provider_assisted_sidecar<Evm>(
     evm_config: &Evm,
     full_provider: &dyn StateProvider,
     block: &RecoveredBlock<BlockTy<EthPrimitives>>,
-    prev_cache: &NetworkStateCache,
+    prev_cache: &mut NetworkStateCache,
     sidecar: &PartialStatelessSidecar,
-    config: &CacheConfig,
     limits: &SidecarReexecLimits,
+    trie_cache: &mut PartialTrieNodeCache,
 ) -> Result<SidecarReexecReport>
 where
     Evm: ConfigureEvm<Primitives = EthPrimitives>,
@@ -47,6 +50,8 @@ where
 
     let materialized = materialize_sidecar_witness_with_limits(sidecar, limits)
         .map_err(|err| eyre!("sidecar witness check failed: {err}"))?;
+    // Retained for trustless root computation before the other fields are moved into the provider.
+    let witness_multiproof = materialized.multiproof;
     let witness_provider = WitnessBackedStateProvider {
         cache: prev_cache,
         witness_accounts: materialized.accounts,
@@ -66,6 +71,24 @@ where
             actual_accessed = BlockAccessedState::from_simulated_state(statedb);
         })
         .map_err(|err| eyre!("partial sidecar re-execution failed: {err:?}"))?;
+    drop(db);
+
+    // Apply the block to a transactional sparse-trie snapshot. The original cache is left
+    // untouched until the consensus root and next cache anchor have both been checked.
+    let mut next_trie_cache = trie_cache.clone();
+    let trustless_state_root = try_compute_trustless_state_root(
+        witness_multiproof,
+        &mut next_trie_cache,
+        &execution_output.state,
+    )
+    .map_err(|err| eyre!("local sparse-trie transition failed: {err}"))?;
+    if trustless_state_root != block.state_root() {
+        bail!(
+            "local sparse-trie state root mismatch: expected {:?}, got {:?}",
+            block.state_root(),
+            trustless_state_root
+        );
+    }
 
     let hashed_post_state = full_provider.hashed_post_state(&execution_output.state);
     let (computed_state_root, _) = full_provider
@@ -79,27 +102,61 @@ where
         );
     }
 
+    let root_witness_completeness = root_witness_completeness_from_bundle_with_cache(
+        &execution_output.state,
+        &sidecar.cache_miss_targets,
+        trie_cache,
+    );
+
     let expected_miss = prev_cache.expected_miss_targets(&actual_accessed);
     check_sidecar_miss_targets(sidecar, &expected_miss)
         .map_err(|err| eyre!("cache-miss-only check failed: {err:?}"))?;
 
-    let mut next_cache = clone_cache(prev_cache, config);
-    next_cache.on_block_executed(sidecar.block_number, &actual_accessed);
-    let next_cache_anchor =
-        next_cache.cache_anchor(sidecar.block_number, sidecar.block_hash, sidecar.cache_policy_id);
-    check_next_cache_anchor(sidecar, &next_cache_anchor)
-        .map_err(|err| eyre!("next cache anchor mismatch: {err:?}"))?;
-
-    let root_witness_completeness =
-        root_witness_completeness_from_bundle(&execution_output.state, &sidecar.cache_miss_targets);
+    let (cache_update, next_cache_anchor) = apply_cache_transition_and_check(
+        prev_cache,
+        &actual_accessed,
+        sidecar.block_number,
+        sidecar.block_hash,
+        sidecar.cache_policy_id,
+        sidecar.next_cache_anchor,
+        trie_cache,
+        next_trie_cache,
+    )?;
 
     Ok(SidecarReexecReport {
         computed_state_root,
         actual_accessed,
         expected_miss,
         next_cache_anchor,
+        cache_update,
         root_witness_completeness,
+        trustless_state_root: Some(trustless_state_root),
     })
+}
+
+fn apply_cache_transition_and_check(
+    cache: &mut NetworkStateCache,
+    accessed: &BlockAccessedState,
+    block_number: u64,
+    block_hash: B256,
+    cache_policy_id: B256,
+    expected_next_anchor: CacheAnchor,
+    trie_cache: &mut PartialTrieNodeCache,
+    mut next_trie_cache: PartialTrieNodeCache,
+) -> Result<(UpdateStats, CacheAnchor)> {
+    let cache_update = cache.on_block_executed(block_number, accessed);
+    next_trie_cache.retain_from_value_cache(cache);
+    let next_cache_anchor = cache.cache_anchor(block_number, block_hash, cache_policy_id);
+    if next_cache_anchor != expected_next_anchor {
+        cache.rollback_block(block_number).map_err(|rollback_err| {
+            eyre!("next cache anchor mismatch; cache rollback also failed: {rollback_err}")
+        })?;
+        bail!(
+            "next cache anchor mismatch: expected {expected_next_anchor:?}, got {next_cache_anchor:?}"
+        );
+    }
+    *trie_cache = next_trie_cache;
+    Ok((cache_update, next_cache_anchor))
 }
 
 fn prefilter(
@@ -196,13 +253,47 @@ impl EvmStateProvider for WitnessBackedStateProvider<'_> {
     }
 }
 
-fn clone_cache(cache: &NetworkStateCache, config: &CacheConfig) -> NetworkStateCache {
-    NetworkStateCache::restore(
-        cache.accounts().clone(),
-        cache.storage().clone(),
-        cache.codes().clone(),
-        cache.current_block(),
-        Box::new(LastNBlocksPolicy::new(config.account_window)),
-        Box::new(LastNBlocksPolicy::new(config.storage_window)),
-    )
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use partial_stateless::policy::{AccountData, LastNBlocksPolicy};
+
+    #[test]
+    fn next_anchor_mismatch_rolls_back_cache_transition() {
+        let mut cache = NetworkStateCache::new(
+            Box::new(LastNBlocksPolicy::new(60)),
+            Box::new(LastNBlocksPolicy::new(30)),
+        );
+        cache.on_block_executed(99, &BlockAccessedState::default());
+        let root_before = cache.cache_root();
+        let mut trie_cache = PartialTrieNodeCache::new();
+        let trie_root_before = trie_cache.cache_root();
+        let address = Address::repeat_byte(0x11);
+        let mut accessed = BlockAccessedState::default();
+        accessed
+            .accounts
+            .insert(address, AccountData { nonce: 1, balance: U256::from(10), code_hash: None });
+
+        let _error = apply_cache_transition_and_check(
+            &mut cache,
+            &accessed,
+            100,
+            B256::repeat_byte(0x22),
+            B256::repeat_byte(0x33),
+            CacheAnchor {
+                block_number: 100,
+                block_hash: B256::repeat_byte(0x22),
+                cache_policy_id: B256::repeat_byte(0x33),
+                cache_root: B256::ZERO,
+            },
+            &mut trie_cache,
+            PartialTrieNodeCache::new(),
+        )
+        .expect_err("wrong next cache root must fail");
+
+        assert_eq!(cache.current_block(), 99);
+        assert_eq!(cache.cache_root(), root_before);
+        assert_eq!(trie_cache.cache_root(), trie_root_before);
+        assert!(!cache.contains_account(&address));
+    }
 }
