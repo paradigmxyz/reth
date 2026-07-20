@@ -27,6 +27,17 @@ where
         }
     }
 
+    fn execute_one_with_bal_building(
+        &mut self,
+        block: &RecoveredBlock<<Self::Primitives as NodePrimitives>::Block>,
+    ) -> Result<BlockExecutionResult<<Self::Primitives as NodePrimitives>::Receipt>, Self::Error>
+    {
+        match self {
+            Self::Left(a) => a.execute_one_with_bal_building(block),
+            Self::Right(b) => b.execute_one_with_bal_building(block),
+        }
+    }
+
     fn execute_one_with_state_hook<F>(
         &mut self,
         block: &RecoveredBlock<<Self::Primitives as NodePrimitives>::Block>,
