@@ -1375,6 +1375,17 @@ pub trait PoolTransaction:
         pooled.try_into_recovered().map(Self::from_pooled)
     }
 
+    /// Recovers and converts a pooled transaction using the provided sender recovery cache.
+    fn try_recover_with_cache(
+        pooled: Self::Pooled,
+        cache: &reth_evm::SenderRecoveryCache,
+    ) -> Result<Self, Self::Pooled> {
+        match cache.recover(&pooled) {
+            Ok(signer) => Ok(Self::from_pooled(Recovered::new_unchecked(pooled, signer))),
+            Err(_) => Err(pooled),
+        }
+    }
+
     /// Decodes and recovers a raw transaction into this pool transaction type.
     ///
     /// Implementations can override this to avoid constructing the pooled transaction as an
