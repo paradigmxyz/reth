@@ -7,7 +7,7 @@ use alloy_primitives::{
     Address, BlockNumber, Bloom, Log, B256, U256,
 };
 use reth_primitives_traits::{Account, Bytecode, Receipt, StorageEntry};
-use reth_trie_common::{BundleStateStorageWipeMode, HashedPostState, KeyHasher};
+use reth_trie_common::{HashedPostState, KeyHasher};
 use revm::{
     database::{states::BundleState, BundleAccount},
     state::AccountInfo,
@@ -210,15 +210,7 @@ impl<T> ExecutionOutcome<T> {
     /// Returns [`HashedPostState`] for this execution outcome.
     /// See [`HashedPostState::from_bundle_state`] for more info.
     pub fn hash_state_slow<KH: KeyHasher>(&self) -> HashedPostState {
-        self.hash_state_slow_with_mode::<KH>(BundleStateStorageWipeMode::InferTransient)
-    }
-
-    /// Returns [`HashedPostState`] for this execution outcome using the provided storage wipe mode.
-    pub fn hash_state_slow_with_mode<KH: KeyHasher>(
-        &self,
-        storage_wipe_mode: BundleStateStorageWipeMode,
-    ) -> HashedPostState {
-        HashedPostState::from_bundle_state_with_mode::<KH>(&self.bundle.state, storage_wipe_mode)
+        HashedPostState::from_bundle_state::<KH>(&self.bundle.state)
     }
 
     /// Transform block number to the index of block.
