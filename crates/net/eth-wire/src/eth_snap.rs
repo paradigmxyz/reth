@@ -258,6 +258,13 @@ mod tests {
         SharedCapabilities::try_new(local, peer).unwrap()
     }
 
+    /// Builds a hello advertising `eth` + `snap/2`.
+    fn eth_snap_hello() -> crate::HelloMessageWithProtocols {
+        let mut hello = eth_hello().0;
+        hello.try_add_protocol(Protocol::snap_2()).unwrap();
+        hello
+    }
+
     #[test]
     fn eth_snap_layout_accepts_eth_then_snap() {
         let caps = shared_caps(
@@ -391,10 +398,62 @@ mod tests {
         server.abort();
     }
 
-    /// Builds a hello advertising `eth` + `snap/2`.
-    fn eth_snap_hello() -> crate::HelloMessageWithProtocols {
-        let mut hello = eth_hello().0;
-        hello.try_add_protocol(Protocol::snap_2()).unwrap();
-        hello
+    /// End-to-end: message ids removed by snap/2 are rejected after capability negotiation rather
+    /// than being decoded as trie-node requests or responses.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn snap_two_rejects_removed_trie_node_messages_over_the_wire() {
+        reth_tracing::init_test_tracing();
+
+        for removed_snap_id in [0x06, 0x07] {
+            let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let local_addr = listener.local_addr().unwrap();
+            let (status, fork_filter) = eth_handshake();
+            let server_status = status;
+            let server_fork_filter = fork_filter.clone();
+
+            let server = tokio::spawn(async move {
+                let (incoming, _) = listener.accept().await.unwrap();
+                let stream = crate::PassthroughCodec::default().framed(incoming);
+                let (conn, _) =
+                    UnauthedP2PStream::new(stream).handshake(eth_snap_hello()).await.unwrap();
+                let (mut stream, _) = EthSnapStream::<_, EthNetworkPrimitives>::handshake(
+                    conn,
+                    server_status,
+                    server_fork_filter,
+                    Arc::new(EthHandshake::default()),
+                    MAX_MESSAGE_SIZE,
+                )
+                .await
+                .unwrap();
+
+                stream.next().await.expect("peer should send a frame").unwrap_err()
+            });
+
+            let conn = connect_passthrough(local_addr, eth_snap_hello()).await;
+            let (mut stream, _) = EthSnapStream::<_, EthNetworkPrimitives>::handshake(
+                conn,
+                status,
+                fork_filter,
+                Arc::new(EthHandshake::default()),
+                MAX_MESSAGE_SIZE,
+            )
+            .await
+            .unwrap();
+
+            let combined_id = stream.snap_offset as usize + removed_snap_id;
+            stream
+                .start_send_raw(RawCapabilityMessage::new(
+                    combined_id,
+                    Bytes::from_static(&[alloy_rlp::EMPTY_LIST_CODE]),
+                ))
+                .unwrap();
+            stream.flush().await.unwrap();
+
+            let error = server.await.unwrap();
+            assert!(
+                error.to_string().contains("invalid for snap"),
+                "unexpected error for removed snap id {removed_snap_id:#x}: {error}"
+            );
+        }
     }
 }
