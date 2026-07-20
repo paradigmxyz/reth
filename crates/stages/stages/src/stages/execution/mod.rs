@@ -23,7 +23,7 @@ use reth_stages_api::{
     UnwindInput, UnwindOutput,
 };
 use reth_static_file_types::StaticFileSegment;
-use reth_trie::KeccakKeyHasher;
+use reth_trie::{BundleStateStorageWipeMode, KeccakKeyHasher};
 use std::{
     cmp::{max, Ordering},
     collections::BTreeMap,
@@ -497,7 +497,11 @@ where
         provider.write_state(&state, OriginalValuesKnown::Yes, StateWriteConfig::default())?;
 
         if provider.cached_storage_settings().use_hashed_state() {
-            let hashed_state = state.hash_state_slow::<KeccakKeyHasher>();
+            // Execution batches can cross EIP-161, and legacy account storage can survive the
+            // activation block.
+            let hashed_state = state.hash_state_slow_with_mode::<KeccakKeyHasher>(
+                BundleStateStorageWipeMode::PreEip161,
+            );
             provider.write_hashed_state(&hashed_state.into_sorted())?;
         }
 
