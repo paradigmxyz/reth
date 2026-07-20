@@ -54,16 +54,30 @@ impl HashedPostState {
             .map(|(address, account)| {
                 let hashed_address = KH::hash_key(address);
                 let hashed_account = account.info.as_ref().map(Into::into);
-                let hashed_storage = HashedStorage::from_plain_storage(
-                    account.status,
-                    account.storage.iter().map(|(slot, value)| (slot, &value.present_value)),
-                );
+                // Bundle state does not retain REVM's transaction-local `CreatedLocal` flag.
+                // An absent parent account is known transient. A nonzero-balance account with no
+                // nonce, code, or recorded original storage is the prefunded CREATE/CREATE2 case.
+                // Empty legacy accounts remain conservative because EIP-161 uses the same status.
+                let created_in_bundle = account.was_destroyed() &&
+                    account.original_info.as_ref().is_none_or(|info| {
+                        info.has_no_code_and_nonce() &&
+                            !info.balance.is_zero() &&
+                            account.storage.values().all(|slot| slot.original_value().is_zero())
+                    });
+                let wipe_storage = account.was_destroyed() && !created_in_bundle;
+                let transiently_destroyed = created_in_bundle && account.info.is_none();
+                let hashed_storage = if transiently_destroyed {
+                    None
+                } else {
+                    let mut storage = HashedStorage::from_plain_storage(
+                        account.status,
+                        account.storage.iter().map(|(slot, value)| (slot, &value.present_value)),
+                    );
+                    storage.wiped = wipe_storage;
+                    (!storage.is_empty()).then_some(storage)
+                };
 
-                (
-                    hashed_address,
-                    hashed_account,
-                    (!hashed_storage.is_empty()).then_some(hashed_storage),
-                )
+                (hashed_address, hashed_account, hashed_storage)
             })
             .collect()
     }
@@ -911,6 +925,17 @@ mod tests {
         state::{AccountInfo, Bytecode},
     };
 
+    fn bundle_hashed_storage(account: &BundleAccount) -> Option<HashedStorage> {
+        let address = Address::ZERO;
+        let mut state =
+            HashedPostState::from_bundle_state::<KeccakKeyHasher>([(&address, account)]);
+        state.storages.remove(&keccak256(address))
+    }
+
+    fn changed_storage(original: U256, present: U256) -> StorageWithOriginalValues {
+        core::iter::once((U256::from(1), StorageSlot::new_changed(original, present))).collect()
+    }
+
     #[test]
     fn hashed_state_wiped_extension() {
         let hashed_address = B256::default();
@@ -1028,6 +1053,78 @@ mod tests {
             *hashed_state.accounts.get(&keccak256(address)).unwrap(),
             Some(account_info.into())
         );
+    }
+
+    #[test]
+    fn destroyed_new_account_does_not_wipe_storage() {
+        let account = BundleAccount::new(
+            None,
+            None,
+            changed_storage(U256::ZERO, U256::from(2)),
+            AccountStatus::Destroyed,
+        );
+
+        assert!(bundle_hashed_storage(&account).is_none());
+    }
+
+    #[test]
+    fn destroyed_prefunded_account_does_not_wipe_storage() {
+        let original_info = AccountInfo { balance: U256::from(1), ..Default::default() };
+        let account = BundleAccount::new(
+            Some(original_info),
+            None,
+            StorageWithOriginalValues::default(),
+            AccountStatus::Destroyed,
+        );
+
+        assert!(bundle_hashed_storage(&account).is_none());
+    }
+
+    #[test]
+    fn destroyed_accounts_with_possible_prior_storage_are_wiped() {
+        let existing_contract =
+            AccountInfo { code_hash: B256::repeat_byte(0x01), ..Default::default() };
+        let legacy_empty_account = AccountInfo::default();
+        let prefunded_account = AccountInfo { balance: U256::from(1), ..Default::default() };
+
+        for original_info in [existing_contract, legacy_empty_account, prefunded_account] {
+            let account = BundleAccount::new(
+                Some(original_info),
+                None,
+                changed_storage(U256::from(2), U256::ZERO),
+                AccountStatus::Destroyed,
+            );
+
+            assert!(bundle_hashed_storage(&account).unwrap().wiped);
+        }
+    }
+
+    #[test]
+    fn destroyed_recreated_accounts_preserve_storage() {
+        let value = U256::from(2);
+        let new_account = BundleAccount::new(
+            None,
+            Some(AccountInfo::default()),
+            changed_storage(U256::ZERO, value),
+            AccountStatus::DestroyedChanged,
+        );
+        let original_info =
+            AccountInfo { code_hash: B256::repeat_byte(0x01), ..Default::default() };
+        let existing_account = BundleAccount::new(
+            Some(original_info),
+            Some(AccountInfo::default()),
+            changed_storage(U256::ZERO, value),
+            AccountStatus::DestroyedChanged,
+        );
+
+        let new_storage = bundle_hashed_storage(&new_account).unwrap();
+        let existing_storage = bundle_hashed_storage(&existing_account).unwrap();
+        let hashed_slot = keccak256(B256::from(U256::from(1)));
+
+        assert!(!new_storage.wiped);
+        assert_eq!(new_storage.storage[&hashed_slot], value);
+        assert!(existing_storage.wiped);
+        assert_eq!(existing_storage.storage[&hashed_slot], value);
     }
 
     #[test]
