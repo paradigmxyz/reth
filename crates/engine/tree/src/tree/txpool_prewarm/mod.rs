@@ -47,8 +47,8 @@ where
     ) -> Self {
         let (control, commands) = Control::new();
         let publication = control.publication();
-        runtime.spawn_blocking_named("txpool-prewarm", {
-            move || worker::run(commands, publication, source, evm_config)
+        runtime.spawn_critical_os_thread("txpool-prewarm", "txpool prewarm worker", async move {
+            worker::Worker::new(commands, publication, source, evm_config).run()
         });
         Self { control }
     }

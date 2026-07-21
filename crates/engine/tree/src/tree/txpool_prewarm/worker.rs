@@ -23,463 +23,418 @@ const REFRESH_INTERVAL: Duration = Duration::from_millis(100);
 /// Delay while waiting for pool maintenance to advance to the state being warmed.
 const HEAD_POLL_INTERVAL: Duration = Duration::from_millis(10);
 
-pub(super) fn run<N, P, Evm>(
-    commands: Receiver<Command<Job<N, P, Evm>>>,
-    publication: Publication,
-    source: Arc<dyn Source<N>>,
-    evm_config: Evm,
-) where
-    N: NodePrimitives,
-    P: BlockReader + StateProviderFactory + StateReader + Clone + Send + Sync + 'static,
-    Evm: ConfigureEvm<Primitives = N> + 'static,
-{
-    // Dropping the control sender is the worker's normal shutdown signal.
-    let _ = run_until_disconnected(commands, publication, source, evm_config);
-}
-
-fn run_until_disconnected<N, P, Evm>(
-    commands: Receiver<Command<Job<N, P, Evm>>>,
-    publication: Publication,
-    source: Arc<dyn Source<N>>,
-    evm_config: Evm,
-) -> Result<(), ChannelDisconnected>
+/// The txpool prewarming worker.
+///
+/// A long-lived loop that speculatively executes the pool's best transactions on top of the
+/// current canonical state, recording every state read in a reusable [`Cache`]. Roughly every
+/// [`REFRESH_INTERVAL`] it publishes an immutable snapshot of that cache, which block validation
+/// and payload building use to seed their own caches.
+///
+/// The worker is driven by [`Command`]s: `Start` points it at a new parent state, and
+/// `Pause`/`Resume` bracket cache-sensitive work elsewhere. Commands are only applied between
+/// batches, never while an EVM or state provider is alive.
+pub(super) struct Worker<N, P, Evm>
 where
     N: NodePrimitives,
-    P: BlockReader + StateProviderFactory + StateReader + Clone + Send + Sync + 'static,
-    Evm: ConfigureEvm<Primitives = N> + 'static,
+    Evm: ConfigureEvm<Primitives = N>,
 {
-    let mut state = WorkerState::new();
-
-    loop {
-        drain_commands(&commands, &mut state)?;
-        let parent_hash = wait_for_runnable_job(&commands, &mut state)?;
-
-        if state.best_transactions_parent_hash != Some(parent_hash) {
-            let Some(opened) = source.best_transactions(parent_hash) else {
-                wait_for_command(&commands, &mut state, HEAD_POLL_INTERVAL)?;
-                continue
-            };
-            state.best_transactions = Some(opened);
-            state.best_transactions_parent_hash = Some(parent_hash);
-        }
-
-        if state.cache.parent_hash() != Some(parent_hash) {
-            state.cache.reset(parent_hash);
-            state.cache_dirty = false;
-            debug!(
-                target: "engine::tree::txpool_prewarm",
-                ?parent_hash,
-                "started txpool prewarming"
-            );
-        }
-
-        // `wait_for_runnable_job` returned this job's parent hash, and the branch above either
-        // retained or opened its matching transaction iterator. No command has been processed
-        // since, so both are still installed here.
-        let (_, job) = state.current_job.as_ref().unwrap();
-        let transactions = state.best_transactions.as_mut().unwrap();
-        let outcome =
-            prewarm_batch(&evm_config, parent_hash, job, &state.cache, transactions, &commands)?;
-
-        match outcome {
-            BatchOutcome::Completed { executed, end } => {
-                state.cache_dirty |= executed != 0;
-                match publish_if_dirty(&commands, &publication, &mut state)? {
-                    PublishOutcome::Interrupted => continue,
-                    PublishOutcome::Ready => {}
-                }
-
-                if end == BatchEnd::Empty {
-                    wait_for_command(&commands, &mut state, REFRESH_INTERVAL)?;
-                }
-            }
-            BatchOutcome::Interrupted { executed, command } => {
-                state.cache_dirty |= executed != 0;
-                state.apply_command(command);
-            }
-            BatchOutcome::ProviderUnavailable => {
-                match publish_if_dirty(&commands, &publication, &mut state)? {
-                    PublishOutcome::Interrupted => continue,
-                    PublishOutcome::Ready => {}
-                }
-                wait_for_command(&commands, &mut state, REFRESH_INTERVAL)?;
-            }
-        }
-    }
+    /// Control commands from the [`Handle`](super::Handle).
+    commands: Receiver<Command<Job<N, P, Evm>>>,
+    /// Shared slot the latest snapshot is published into.
+    publication: Publication,
+    /// The txpool view transactions are drawn from.
+    source: Arc<dyn Source<N>>,
+    /// Configures the EVM used for speculative execution.
+    evm_config: Evm,
+    /// The parent state to warm, from the most recent `Start` command.
+    job: Option<(B256, Job<N, P, Evm>)>,
+    /// Outstanding pauses; the worker only warms while this is zero.
+    pauses: u64,
+    /// Read-through cache filled by execution. Retained across heads so map capacity is reused;
+    /// [`Cache::reset`] re-keys it when the parent changes.
+    cache: Cache,
+    /// Live best-transactions iterator, tagged with the parent it was opened for.
+    transactions: Option<(B256, Transactions<N>)>,
 }
 
-fn prewarm_batch<N, P, Evm>(
-    evm_config: &Evm,
-    parent_hash: B256,
-    job: &Job<N, P, Evm>,
-    cache: &Cache,
-    transactions: &mut Transactions<N>,
-    commands: &Receiver<Command<Job<N, P, Evm>>>,
-) -> Result<BatchOutcome<Job<N, P, Evm>>, ChannelDisconnected>
+impl<N, P, Evm> Worker<N, P, Evm>
 where
     N: NodePrimitives,
     P: BlockReader + StateProviderFactory + StateReader + Clone,
     Evm: ConfigureEvm<Primitives = N>,
 {
-    match commands.try_recv() {
-        Ok(command) => return Ok(BatchOutcome::Interrupted { executed: 0, command }),
-        Err(TryRecvError::Disconnected) => return Err(ChannelDisconnected),
-        Err(TryRecvError::Empty) => {}
-    }
-
-    let state_provider = match job.provider_builder.build() {
-        Ok(provider) => provider,
-        Err(err) => {
-            trace!(
-                target: "engine::tree::txpool_prewarm",
-                %err,
-                ?parent_hash,
-                "failed to build txpool prewarming state provider"
-            );
-            return Ok(BatchOutcome::ProviderUnavailable)
-        }
-    };
-    let state_provider = cache.state_provider(state_provider);
-    let state_provider = StateProviderDatabase::new(state_provider);
-    let mut state = State::builder().with_database(state_provider).build();
-    let mut evm_env = job.evm_env.clone();
-    evm_env.cfg_env.disable_nonce_check = true;
-    evm_env.cfg_env.disable_balance_check = true;
-    let mut evm = evm_config.evm_with_env(&mut state, evm_env);
-
-    let deadline = Instant::now() + REFRESH_INTERVAL;
-    let mut executed = 0;
-    loop {
-        match commands.try_recv() {
-            Ok(command) => return Ok(BatchOutcome::Interrupted { executed, command }),
-            Err(TryRecvError::Disconnected) => return Err(ChannelDisconnected),
-            Err(TryRecvError::Empty) => {}
-        }
-
-        if Instant::now() >= deadline {
-            return Ok(BatchOutcome::Completed { executed, end: BatchEnd::Deadline })
-        }
-
-        let Some(transaction) = transactions.next() else {
-            return Ok(BatchOutcome::Completed { executed, end: BatchEnd::Empty })
-        };
-        if let Err(err) = evm.transact(transaction.transaction) {
-            trace!(
-                target: "engine::tree::txpool_prewarm",
-                %err,
-                tx_hash = ?transaction.hash,
-                sender = %transaction.sender,
-                "speculative txpool transaction execution failed"
-            );
-        }
-        executed += 1;
-    }
-}
-
-fn wait_for_runnable_job<J, N>(
-    commands: &Receiver<Command<J>>,
-    state: &mut WorkerState<J, N>,
-) -> Result<B256, ChannelDisconnected>
-where
-    N: NodePrimitives,
-{
-    loop {
-        if state.pause_count == 0 &&
-            let Some((parent_hash, _)) = state.current_job.as_ref()
-        {
-            return Ok(*parent_hash)
-        }
-
-        let command = commands.recv().map_err(|_| ChannelDisconnected)?;
-        state.apply_command(command);
-        drain_commands(commands, state)?;
-    }
-}
-
-fn wait_for_command<J, N>(
-    commands: &Receiver<Command<J>>,
-    state: &mut WorkerState<J, N>,
-    timeout: Duration,
-) -> Result<(), ChannelDisconnected>
-where
-    N: NodePrimitives,
-{
-    match commands.recv_timeout(timeout) {
-        Ok(command) => {
-            state.apply_command(command);
-            drain_commands(commands, state)?;
-            Ok(())
-        }
-        Err(RecvTimeoutError::Timeout) => Ok(()),
-        Err(RecvTimeoutError::Disconnected) => Err(ChannelDisconnected),
-    }
-}
-
-fn drain_commands<J, N>(
-    commands: &Receiver<Command<J>>,
-    state: &mut WorkerState<J, N>,
-) -> Result<DrainOutcome, ChannelDisconnected>
-where
-    N: NodePrimitives,
-{
-    let mut result = DrainOutcome::default();
-    loop {
-        match commands.try_recv() {
-            Ok(command) => {
-                if state.apply_command(command) == DrainOutcome::Interrupted {
-                    result = DrainOutcome::Interrupted;
-                }
-            }
-            Err(TryRecvError::Empty) => return Ok(result),
-            Err(TryRecvError::Disconnected) => return Err(ChannelDisconnected),
-        }
-    }
-}
-
-fn publish_if_dirty<J, N>(
-    commands: &Receiver<Command<J>>,
-    publication: &Publication,
-    state: &mut WorkerState<J, N>,
-) -> Result<PublishOutcome, ChannelDisconnected>
-where
-    N: NodePrimitives,
-{
-    if drain_commands(commands, state)? == DrainOutcome::Interrupted {
-        return Ok(PublishOutcome::Interrupted)
-    }
-    if !state.cache_dirty {
-        return Ok(PublishOutcome::Ready)
-    }
-
-    let snapshot = state.cache.snapshot();
-    if drain_commands(commands, state)? == DrainOutcome::Interrupted {
-        return Ok(PublishOutcome::Interrupted)
-    }
-
-    let parent_hash = snapshot.parent_hash();
-    let (accounts, storage, bytecodes) = snapshot.entry_counts();
-    *publication.write() = Some(snapshot);
-    state.cache_dirty = false;
-    debug!(
-        target: "engine::tree::txpool_prewarm",
-        ?parent_hash,
-        accounts,
-        storage,
-        bytecodes,
-        "published txpool prewarming snapshot"
-    );
-    Ok(PublishOutcome::Ready)
-}
-
-struct WorkerState<J, N>
-where
-    N: NodePrimitives,
-{
-    current_job: Option<(B256, J)>,
-    best_transactions: Option<Transactions<N>>,
-    best_transactions_parent_hash: Option<B256>,
-    pause_count: u64,
-    cache: Cache,
-    /// Whether the cache contains reads that have not yet been published.
-    cache_dirty: bool,
-}
-
-impl<J, N> WorkerState<J, N>
-where
-    N: NodePrimitives,
-{
-    fn new() -> Self {
+    pub(super) fn new(
+        commands: Receiver<Command<Job<N, P, Evm>>>,
+        publication: Publication,
+        source: Arc<dyn Source<N>>,
+        evm_config: Evm,
+    ) -> Self {
         Self {
-            current_job: None,
-            best_transactions: None,
-            best_transactions_parent_hash: None,
-            pause_count: 0,
+            commands,
+            publication,
+            source,
+            evm_config,
+            job: None,
+            pauses: 0,
             cache: Cache::default(),
-            cache_dirty: false,
+            transactions: None,
         }
     }
 
-    /// Applies `command` while no EVM or state provider is active.
-    ///
-    /// Returns whether the command interrupts a batch being considered for publication.
-    fn apply_command(&mut self, command: Command<J>) -> DrainOutcome {
-        match command {
-            Command::Start { parent_hash, job } => {
-                if self.best_transactions_parent_hash != Some(parent_hash) {
-                    self.best_transactions = None;
-                    self.best_transactions_parent_hash = None;
-                }
-                self.current_job = Some((parent_hash, job));
-                DrainOutcome::Interrupted
+    /// Runs until the control side is dropped, which is the worker's shutdown signal.
+    pub(super) fn run(mut self) {
+        let _ = self.run_until_disconnected();
+    }
+
+    fn run_until_disconnected(&mut self) -> Result<(), ChannelDisconnected> {
+        loop {
+            let parent_hash = self.wait_until_runnable()?;
+
+            // The pool tracks canonical heads on its own schedule; check back shortly if it is
+            // not tracking this parent yet.
+            if !self.open_transactions(parent_hash) {
+                self.idle(HEAD_POLL_INTERVAL)?;
+                continue
             }
+
+            if self.cache.parent_hash() != Some(parent_hash) {
+                self.cache.reset(parent_hash);
+                debug!(
+                    target: "engine::tree::txpool_prewarm",
+                    ?parent_hash,
+                    "started txpool prewarming"
+                );
+            }
+
+            let batch = self.warm_one_batch();
+
+            // A pending command may pause the worker or point it at a new parent: apply it (at
+            // the top of the loop) before spending time on publication.
+            if !self.commands.is_empty() {
+                continue
+            }
+            self.publish_snapshot_if_dirty();
+            if batch == BatchEnd::OutOfWork {
+                self.idle(REFRESH_INTERVAL)?;
+            }
+        }
+    }
+
+    /// Blocks until the worker holds a job and no pauses are outstanding, applying every command
+    /// that arrives in the meantime. Returns the parent hash to warm.
+    fn wait_until_runnable(&mut self) -> Result<B256, ChannelDisconnected> {
+        loop {
+            self.apply_pending_commands()?;
+
+            if self.pauses == 0 &&
+                let Some((parent_hash, _)) = self.job.as_ref()
+            {
+                return Ok(*parent_hash)
+            }
+
+            let command = self.commands.recv().map_err(|_| ChannelDisconnected)?;
+            self.apply(command);
+        }
+    }
+
+    /// Ensures the transaction iterator matches `parent_hash`, opening a fresh one when the head
+    /// changed. Returns `false` while the pool is not yet tracking that parent.
+    fn open_transactions(&mut self, parent_hash: B256) -> bool {
+        if self.transactions.as_ref().is_none_or(|(parent, _)| *parent != parent_hash) {
+            // Release the stale iterator before asking the pool for a new one.
+            self.transactions = None;
+            self.transactions = self
+                .source
+                .best_transactions(parent_hash)
+                .map(|transactions| (parent_hash, transactions));
+        }
+        self.transactions.is_some()
+    }
+
+    /// Speculatively executes pool transactions against the parent state for at most
+    /// [`REFRESH_INTERVAL`], filling the cache with every state read.
+    ///
+    /// Stops early once the pool has no transaction ready or a command arrives. Commands are
+    /// never consumed here: a pending command merely ends the batch and is applied by the main
+    /// loop after the EVM and state provider built here are dropped.
+    fn warm_one_batch(&mut self) -> BatchEnd {
+        let (_, job) = self.job.as_ref().expect("wait_until_runnable installed a job");
+        let (parent_hash, transactions) =
+            self.transactions.as_mut().expect("open_transactions installed an iterator");
+
+        // Building a state provider opens a database transaction; don't bother under a pending
+        // command.
+        if !self.commands.is_empty() {
+            return BatchEnd::MoreWork
+        }
+
+        let state_provider = match job.provider_builder.build() {
+            Ok(provider) => provider,
+            Err(err) => {
+                trace!(
+                    target: "engine::tree::txpool_prewarm",
+                    %err,
+                    ?parent_hash,
+                    "failed to build txpool prewarming state provider"
+                );
+                return BatchEnd::OutOfWork
+            }
+        };
+        let state_provider = StateProviderDatabase::new(self.cache.state_provider(state_provider));
+        let mut state = State::builder().with_database(state_provider).build();
+        let mut evm_env = job.evm_env.clone();
+        evm_env.cfg_env.disable_nonce_check = true;
+        evm_env.cfg_env.disable_balance_check = true;
+        let mut evm = self.evm_config.evm_with_env(&mut state, evm_env);
+
+        let deadline = Instant::now() + REFRESH_INTERVAL;
+        while self.commands.is_empty() && Instant::now() < deadline {
+            let Some(transaction) = transactions.next() else { return BatchEnd::OutOfWork };
+            if let Err(err) = evm.transact(transaction.transaction) {
+                trace!(
+                    target: "engine::tree::txpool_prewarm",
+                    %err,
+                    tx_hash = ?transaction.hash,
+                    sender = %transaction.sender,
+                    "speculative txpool transaction execution failed"
+                );
+            }
+        }
+        BatchEnd::MoreWork
+    }
+
+    /// Publishes a fresh snapshot if the cache gained reads since the last publication.
+    fn publish_snapshot_if_dirty(&self) {
+        if !self.cache.is_dirty() {
+            return
+        }
+
+        let snapshot = self.cache.snapshot();
+        let parent_hash = snapshot.parent_hash();
+        let (accounts, storage, bytecodes) = snapshot.entry_counts();
+        *self.publication.write() = Some(snapshot);
+        debug!(
+            target: "engine::tree::txpool_prewarm",
+            ?parent_hash,
+            accounts,
+            storage,
+            bytecodes,
+            "published txpool prewarming snapshot"
+        );
+    }
+
+    /// Rests until a command arrives (applying it) or `timeout` elapses, whichever comes first.
+    fn idle(&mut self, timeout: Duration) -> Result<(), ChannelDisconnected> {
+        match self.commands.recv_timeout(timeout) {
+            Ok(command) => {
+                self.apply(command);
+                Ok(())
+            }
+            Err(RecvTimeoutError::Timeout) => Ok(()),
+            Err(RecvTimeoutError::Disconnected) => Err(ChannelDisconnected),
+        }
+    }
+
+    /// Applies every command already sitting in the channel, without blocking.
+    fn apply_pending_commands(&mut self) -> Result<(), ChannelDisconnected> {
+        loop {
+            match self.commands.try_recv() {
+                Ok(command) => self.apply(command),
+                Err(TryRecvError::Empty) => return Ok(()),
+                Err(TryRecvError::Disconnected) => return Err(ChannelDisconnected),
+            }
+        }
+    }
+
+    /// Applies a single command.
+    ///
+    /// Only called while no EVM or state provider is alive, so acknowledging a pause here
+    /// guarantees the worker holds no execution resources.
+    fn apply(&mut self, command: Command<Job<N, P, Evm>>) {
+        match command {
+            Command::Start { parent_hash, job } => self.job = Some((parent_hash, job)),
             Command::Pause(acknowledge) => {
-                self.pause_count =
-                    self.pause_count.checked_add(1).expect("txpool prewarm pause count overflow");
+                self.pauses =
+                    self.pauses.checked_add(1).expect("txpool prewarm pause count overflow");
                 let _ = acknowledge.send(());
-                DrainOutcome::Interrupted
             }
             Command::Resume => {
-                self.pause_count = self
-                    .pause_count
+                self.pauses = self
+                    .pauses
                     .checked_sub(1)
                     .expect("txpool prewarm resumed without a matching pause");
-                DrainOutcome::Ready
             }
         }
     }
 }
 
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
-enum DrainOutcome {
-    #[default]
-    Ready,
-    Interrupted,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct ChannelDisconnected;
-
+/// Why a warming batch stopped.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum BatchEnd {
-    Deadline,
-    Empty,
+    /// The refresh deadline passed or a command interrupted the batch; more transactions may be
+    /// ready right away.
+    MoreWork,
+    /// Nothing to execute right now: the pool had no transaction ready, or no state provider
+    /// could be built.
+    OutOfWork,
 }
 
-enum BatchOutcome<J> {
-    Completed { executed: usize, end: BatchEnd },
-    Interrupted { executed: usize, command: Command<J> },
-    ProviderUnavailable,
-}
-
+/// The control channel closed: every sender is dropped and the worker shuts down.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum PublishOutcome {
-    Ready,
-    Interrupted,
-}
+struct ChannelDisconnected;
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crossbeam_channel::{bounded, unbounded};
+    use crate::tree::StateProviderBuilder;
+    use alloy_primitives::Address;
+    use crossbeam_channel::{bounded, unbounded, Sender};
     use parking_lot::RwLock;
     use reth_ethereum_primitives::EthPrimitives;
+    use reth_evm_ethereum::EthEvmConfig;
+    use reth_provider::test_utils::MockEthProvider;
+    use reth_revm::database::EvmStateProvider;
+    use std::sync::atomic::{AtomicUsize, Ordering};
 
-    type TestJob = u64;
+    type TestJob = Job<EthPrimitives, MockEthProvider, EthEvmConfig>;
+    type TestWorker = Worker<EthPrimitives, MockEthProvider, EthEvmConfig>;
 
-    fn state() -> WorkerState<TestJob, EthPrimitives> {
-        WorkerState::new()
+    /// A pool stub that counts how often an iterator is opened.
+    #[derive(Debug, Default)]
+    struct PoolStub(AtomicUsize);
+
+    impl Source<EthPrimitives> for PoolStub {
+        fn best_transactions(&self, _parent_hash: B256) -> Option<Transactions<EthPrimitives>> {
+            self.0.fetch_add(1, Ordering::Relaxed);
+            Some(Box::new(std::iter::empty()))
+        }
     }
 
-    fn publication() -> Publication {
-        Arc::new(RwLock::new(None))
+    fn worker() -> (Sender<Command<TestJob>>, Arc<PoolStub>, TestWorker) {
+        let (sender, commands) = unbounded();
+        let source = Arc::new(PoolStub::default());
+        let worker = Worker::new(
+            commands,
+            Arc::new(RwLock::new(None)),
+            source.clone(),
+            EthEvmConfig::mainnet(),
+        );
+        (sender, source, worker)
+    }
+
+    fn start(parent_hash: B256) -> Command<TestJob> {
+        Command::Start {
+            parent_hash,
+            job: Job {
+                evm_env: Default::default(),
+                provider_builder: StateProviderBuilder::new(
+                    MockEthProvider::default(),
+                    parent_hash,
+                    None,
+                ),
+            },
+        }
+    }
+
+    fn current_parent(worker: &TestWorker) -> Option<B256> {
+        worker.job.as_ref().map(|(parent_hash, _)| *parent_hash)
     }
 
     #[test]
     fn newest_job_wins() {
-        let (sender, receiver) = unbounded();
-        let mut state = state();
-        let first = B256::repeat_byte(0x01);
-        let second = B256::repeat_byte(0x02);
-        sender.send(Command::Start { parent_hash: first, job: 1 }).unwrap();
-        sender.send(Command::Start { parent_hash: second, job: 2 }).unwrap();
+        let (sender, _pool, mut worker) = worker();
+        sender.send(start(B256::repeat_byte(0x01))).unwrap();
+        sender.send(start(B256::repeat_byte(0x02))).unwrap();
 
-        let drained = drain_commands(&receiver, &mut state).unwrap();
-        assert_eq!(drained, DrainOutcome::Interrupted);
-        assert_eq!(state.current_job, Some((second, 2)));
+        worker.apply_pending_commands().unwrap();
+        assert_eq!(current_parent(&worker), Some(B256::repeat_byte(0x02)));
     }
 
     #[test]
     fn overlapping_pauses_resume_after_last_command() {
-        let (sender, receiver) = unbounded();
-        let mut state = state();
+        let (sender, _pool, mut worker) = worker();
         let (first_ack, first_acknowledged) = bounded(1);
         let (second_ack, second_acknowledged) = bounded(1);
         sender.send(Command::Pause(first_ack)).unwrap();
         sender.send(Command::Pause(second_ack)).unwrap();
 
-        drain_commands(&receiver, &mut state).unwrap();
+        worker.apply_pending_commands().unwrap();
         first_acknowledged.recv().unwrap();
         second_acknowledged.recv().unwrap();
-        assert_eq!(state.pause_count, 2);
+        assert_eq!(worker.pauses, 2);
 
         sender.send(Command::Resume).unwrap();
-        drain_commands(&receiver, &mut state).unwrap();
-        assert_eq!(state.pause_count, 1);
+        worker.apply_pending_commands().unwrap();
+        assert_eq!(worker.pauses, 1);
 
         sender.send(Command::Resume).unwrap();
-        drain_commands(&receiver, &mut state).unwrap();
-        assert_eq!(state.pause_count, 0);
+        worker.apply_pending_commands().unwrap();
+        assert_eq!(worker.pauses, 0);
     }
 
     #[test]
     fn start_while_paused_replaces_pending_job() {
-        let (sender, receiver) = unbounded();
-        let mut state = state();
+        let (sender, _pool, mut worker) = worker();
         let (acknowledge, acknowledged) = bounded(1);
         sender.send(Command::Pause(acknowledge)).unwrap();
-        sender.send(Command::Start { parent_hash: B256::repeat_byte(0x01), job: 1 }).unwrap();
-        sender.send(Command::Start { parent_hash: B256::repeat_byte(0x02), job: 2 }).unwrap();
+        sender.send(start(B256::repeat_byte(0x01))).unwrap();
+        sender.send(start(B256::repeat_byte(0x02))).unwrap();
 
-        drain_commands(&receiver, &mut state).unwrap();
+        worker.apply_pending_commands().unwrap();
         acknowledged.recv().unwrap();
-        assert_eq!(state.current_job, Some((B256::repeat_byte(0x02), 2)));
-        assert_eq!(state.pause_count, 1);
+        assert_eq!(current_parent(&worker), Some(B256::repeat_byte(0x02)));
+        assert_eq!(worker.pauses, 1);
     }
 
     #[test]
     fn runnable_wait_returns_current_parent() {
-        let (sender, receiver) = unbounded();
-        let mut state = state();
+        let (sender, _pool, mut worker) = worker();
         let parent_hash = B256::repeat_byte(0x01);
-        sender.send(Command::Start { parent_hash, job: 1 }).unwrap();
+        sender.send(start(parent_hash)).unwrap();
 
-        assert_eq!(wait_for_runnable_job(&receiver, &mut state), Ok(parent_hash));
+        assert_eq!(worker.wait_until_runnable(), Ok(parent_hash));
     }
 
     #[test]
-    fn dirty_cache_is_published_without_new_transactions() {
-        let (_sender, receiver) = unbounded();
-        let publication = publication();
-        let mut state = state();
-        let parent_hash = B256::repeat_byte(0x01);
-        state.cache.reset(parent_hash);
-        state.cache_dirty = true;
+    fn transactions_iterator_is_reused_per_parent() {
+        let (_sender, pool, mut worker) = worker();
+        let first = B256::repeat_byte(0x01);
+        let second = B256::repeat_byte(0x02);
 
+        assert!(worker.open_transactions(first));
+        assert!(worker.open_transactions(first));
+        assert_eq!(pool.0.load(Ordering::Relaxed), 1);
+
+        assert!(worker.open_transactions(second));
+        assert_eq!(pool.0.load(Ordering::Relaxed), 2);
+    }
+
+    #[test]
+    fn publishes_only_when_cache_gained_reads() {
+        let (_sender, _pool, mut worker) = worker();
+        let parent_hash = B256::repeat_byte(0x01);
+        worker.cache.reset(parent_hash);
+
+        worker.publish_snapshot_if_dirty();
+        assert!(worker.publication.read().is_none());
+
+        // A read-through miss is what marks the cache dirty.
+        let state_provider = MockEthProvider::default().latest().unwrap();
+        worker.cache.state_provider(state_provider).basic_account(&Address::ZERO).unwrap();
+
+        worker.publish_snapshot_if_dirty();
         assert_eq!(
-            publish_if_dirty(&receiver, &publication, &mut state),
-            Ok(PublishOutcome::Ready)
-        );
-        assert!(!state.cache_dirty);
-        assert_eq!(
-            publication.read().as_ref().map(|snapshot| snapshot.parent_hash()),
+            worker.publication.read().as_ref().map(|snapshot| snapshot.parent_hash()),
             Some(parent_hash)
         );
-    }
-
-    #[test]
-    fn new_job_suppresses_dirty_publication() {
-        let (sender, receiver) = unbounded();
-        let publication = publication();
-        let mut state = state();
-        let parent_hash = B256::repeat_byte(0x01);
-        state.cache.reset(parent_hash);
-        state.cache_dirty = true;
-        sender.send(Command::Start { parent_hash: B256::repeat_byte(0x02), job: 2 }).unwrap();
-
-        assert_eq!(
-            publish_if_dirty(&receiver, &publication, &mut state),
-            Ok(PublishOutcome::Interrupted)
-        );
-        assert!(state.cache_dirty);
-        assert!(publication.read().is_none());
+        assert!(!worker.cache.is_dirty());
     }
 
     #[test]
     fn disconnected_channel_is_explicit() {
-        let (sender, receiver) = unbounded();
-        let mut state = state();
+        let (sender, _pool, mut worker) = worker();
         drop(sender);
 
-        assert!(matches!(drain_commands(&receiver, &mut state), Err(ChannelDisconnected)));
+        assert!(matches!(worker.apply_pending_commands(), Err(ChannelDisconnected)));
     }
 }

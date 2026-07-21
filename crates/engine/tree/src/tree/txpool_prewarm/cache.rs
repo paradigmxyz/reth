@@ -28,6 +28,8 @@ struct CacheInner {
     accounts: AddressMap<Option<Account>>,
     storage: HashMap<(Address, StorageKey), StorageValue>,
     bytecodes: B256Map<Option<Bytecode>>,
+    /// Whether entries were added since the last [`Cache::snapshot`] or [`Cache::reset`].
+    dirty: bool,
 }
 
 impl Cache {
@@ -39,19 +41,27 @@ impl Cache {
         cache.accounts.clear();
         cache.storage.clear();
         cache.bytecodes.clear();
+        cache.dirty = false;
     }
 
-    /// Clones the current cache state into a [`Snapshot`].
+    /// Clones the current cache state into a [`Snapshot`] and marks the cache clean:
+    /// [`Self::is_dirty`] returns `false` until the next read-through insert.
     ///
     /// Must be preceded by a call to [`Self::reset`].
     pub(super) fn snapshot(&self) -> Snapshot {
-        let cache = self.inner.borrow();
+        let mut cache = self.inner.borrow_mut();
+        cache.dirty = false;
         Snapshot::from_parts(
             self.parent_hash.expect("cache is reset before snapshotting"),
             cache.accounts.clone(),
             cache.storage.clone(),
             cache.bytecodes.clone(),
         )
+    }
+
+    /// Whether the cache holds reads not yet captured by [`Self::snapshot`].
+    pub(super) fn is_dirty(&self) -> bool {
+        self.inner.borrow().dirty
     }
 
     pub(super) const fn parent_hash(&self) -> Option<B256> {
@@ -72,7 +82,9 @@ impl Cache {
         }
 
         let account = f()?;
-        self.inner.borrow_mut().accounts.insert(address, account);
+        let mut cache = self.inner.borrow_mut();
+        cache.accounts.insert(address, account);
+        cache.dirty = true;
         Ok(account)
     }
 
@@ -87,7 +99,9 @@ impl Cache {
         }
 
         let value = f()?;
-        self.inner.borrow_mut().storage.insert((address, key), value);
+        let mut cache = self.inner.borrow_mut();
+        cache.storage.insert((address, key), value);
+        cache.dirty = true;
         Ok(value)
     }
 
@@ -101,7 +115,9 @@ impl Cache {
         }
 
         let code = f()?;
-        self.inner.borrow_mut().bytecodes.insert(code_hash, code.clone());
+        let mut cache = self.inner.borrow_mut();
+        cache.bytecodes.insert(code_hash, code.clone());
+        cache.dirty = true;
         Ok(code)
     }
 }
@@ -142,5 +158,33 @@ impl EvmStateProvider for CacheStateProvider<'_> {
                 self.inner.storage(account, storage_key).map(Option::unwrap_or_default)
             })
             .map(|value| (!value.is_zero()).then_some(value))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn dirty_tracks_inserts_not_hits() {
+        let mut cache = Cache::default();
+        cache.reset(B256::repeat_byte(0x01));
+        assert!(!cache.is_dirty());
+
+        cache.get_or_try_insert_account_with(Address::ZERO, || Ok::<_, ()>(None)).unwrap();
+        assert!(cache.is_dirty());
+
+        cache.snapshot();
+        assert!(!cache.is_dirty());
+
+        // A cache hit adds nothing worth republishing.
+        cache.get_or_try_insert_account_with(Address::ZERO, || Ok::<_, ()>(None)).unwrap();
+        assert!(!cache.is_dirty());
+
+        cache
+            .get_or_try_insert_account_with(Address::repeat_byte(0x02), || Ok::<_, ()>(None))
+            .unwrap();
+        cache.reset(B256::repeat_byte(0x02));
+        assert!(!cache.is_dirty());
     }
 }
