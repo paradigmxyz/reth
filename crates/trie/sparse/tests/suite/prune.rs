@@ -19,15 +19,20 @@ fn changed_update(value: u64) -> LeafUpdate {
     LeafUpdate::Changed(encode_fixed_size(&U256::from(value)).to_vec())
 }
 
-fn assert_update_requests_min_len<T: SparseTrie>(trie: &mut T, key: B256, min_len: u8, value: u64) {
+fn assert_update_requests_parent<T: SparseTrie>(
+    trie: &mut T,
+    key: B256,
+    parent: ProofV2TargetParent,
+    value: u64,
+) {
     let mut leaf_updates = B256Map::from_iter([(key, changed_update(value))]);
     let mut targets = Vec::new();
-    trie.update_leaves(&mut leaf_updates, |key, min_len| {
-        targets.push((key, min_len));
+    trie.update_leaves(&mut leaf_updates, |key, parent| {
+        targets.push((key, parent));
     })
     .expect("update_leaves should succeed");
 
-    assert_eq!(targets, vec![(key, min_len)]);
+    assert_eq!(targets, vec![(key, parent)]);
     assert!(
         leaf_updates.contains_key(&key),
         "update should remain pending until proof is revealed"
@@ -101,7 +106,7 @@ pub(super) fn test_prune_keeps_upper_children_of_retained_branch<T: SparseTrie>(
 
     assert_eq!(trie.root(), root_before, "root must not change after prune");
     assert_eq!(pruned, 2, "protected branch children should be blinded, not removed");
-    assert_update_requests_min_len(&mut trie, protected_key_a, 2, 20);
+    assert_update_requests_parent(&mut trie, protected_key_a, ProofV2TargetParent::new(1), 20);
 }
 
 pub(super) fn test_prune_keeps_lower_children_of_retained_branch<T: SparseTrie>(
@@ -125,7 +130,7 @@ pub(super) fn test_prune_keeps_lower_children_of_retained_branch<T: SparseTrie>(
 
     assert_eq!(trie.root(), root_before, "root must not change after prune");
     assert_eq!(pruned, 2, "protected lower branch children should be blinded, not removed");
-    assert_update_requests_min_len(&mut trie, protected_key_a, 4, 20);
+    assert_update_requests_parent(&mut trie, protected_key_a, ProofV2TargetParent::new(3), 20);
 }
 
 pub(super) fn test_prune_protects_children_by_parent_base_path<T: SparseTrie>(new_trie: fn() -> T) {
