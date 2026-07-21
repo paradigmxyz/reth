@@ -32,7 +32,6 @@ use tokio_stream::wrappers::UnboundedReceiverStream;
 use tracing::{debug, debug_span, info, trace, warn, Span};
 
 type PayloadFuture<P> = Pin<Box<dyn Future<Output = Result<P, PayloadBuilderError>> + Send>>;
-type PayloadJobEntry<Job> = (Job, PayloadId, Span);
 type ResolvePayloadResult<P, Job> = (Option<PayloadFuture<P>>, Option<PayloadJobEntry<Job>>);
 
 /// A communication channel to the [`PayloadBuilderService`] that can retrieve payloads.
@@ -223,7 +222,7 @@ where
     /// All active payload jobs, each accompanied by its id and the caller's tracing span
     /// propagated across the channel so that poll and resolve work appears as children of the
     /// original Engine API request.
-    payload_jobs: Vec<(Gen::Job, PayloadId, Span)>,
+    payload_jobs: Vec<PayloadJobEntry<Gen::Job>>,
     /// Copy of the sender half, so new [`PayloadBuilderHandle`] can be created on demand.
     service_tx: mpsc::UnboundedSender<PayloadServiceCommand<T>>,
     /// Receiver half of the command channel.
@@ -293,7 +292,7 @@ where
 
     /// Returns true if the given payload is currently being built.
     fn contains_payload(&self, id: PayloadId) -> bool {
-        self.payload_jobs.iter().any(|(_, job_id, _)| *job_id == id)
+        self.payload_jobs.iter().any(|entry| entry.id == id)
     }
 
     /// Returns the best payload for the given identifier that has been built so far.
@@ -301,8 +300,8 @@ where
         let res = self
             .payload_jobs
             .iter()
-            .find(|(_, job_id, _)| *job_id == id)
-            .map(|(j, _, _)| j.best_payload().map(|p| p.into()));
+            .find(|entry| entry.id == id)
+            .map(|entry| entry.job.best_payload().map(|payload| payload.into()));
         if let Some(Ok(ref best)) = res {
             self.metrics.set_best_revenue(best.block().number(), f64::from(best.fees()));
         }
@@ -329,14 +328,18 @@ where
             return (Some(Box::pin(core::future::ready(Ok(payload.clone())))), None);
         }
 
-        let Some(job) = self.payload_jobs.iter().position(|(_, job_id, _)| *job_id == id) else {
+        let Some(job) = self.payload_jobs.iter().position(|entry| entry.id == id) else {
             return (None, None)
         };
-        let (fut, keep_alive) = self.payload_jobs[job].0.resolve_kind(kind);
-        let payload_timestamp = self.payload_jobs[job].0.payload_timestamp();
+        let (fut, keep_alive) = self.payload_jobs[job].job.resolve_kind(kind);
+        let payload_timestamp = self.payload_jobs[job].job.payload_timestamp();
 
-        let resolved_job =
+        let mut resolved_job =
             (keep_alive == KeepPayloadJobAlive::No).then(|| self.payload_jobs.swap_remove(job));
+        let leases = resolved_job
+            .as_mut()
+            .map(|entry| std::mem::take(&mut entry.leases))
+            .unwrap_or_default();
 
         // Since the fees will not be known until the payload future is resolved / awaited, we wrap
         // the future in a new future that will update the metrics.
@@ -345,6 +348,7 @@ where
         let cached_payload_tx = self.cached_payload_tx.clone();
 
         let fut = async move {
+            let _leases = leases;
             let res = fut.await;
             resolved_metrics.resolve_duration_seconds.record(start.elapsed());
             if let Ok(payload) = &res {
@@ -376,8 +380,8 @@ where
         let timestamp = self
             .payload_jobs
             .iter()
-            .find(|(_, job_id, _)| *job_id == id)
-            .map(|(j, _, _)| j.payload_timestamp());
+            .find(|entry| entry.id == id)
+            .map(|entry| entry.job.payload_timestamp());
 
         if timestamp.is_none() {
             trace!(target: "payload_builder", %id, "no matching payload job found to get timestamp for");
@@ -411,10 +415,11 @@ where
             // requests
             // we don't care about the order of the jobs, so we can just swap_remove them
             for idx in (0..this.payload_jobs.len()).rev() {
-                let (mut job, id, job_span) = this.payload_jobs.swap_remove(idx);
+                let PayloadJobEntry { mut job, id, span, leases } =
+                    this.payload_jobs.swap_remove(idx);
 
                 let poll_result = {
-                    let _entered = job_span.enter();
+                    let _entered = span.enter();
                     job.poll_unpin(cx)
                 };
 
@@ -429,7 +434,7 @@ where
                         this.metrics.set_active_jobs(this.payload_jobs.len());
                     }
                     Poll::Pending => {
-                        this.payload_jobs.push((job, id, job_span));
+                        this.payload_jobs.push(PayloadJobEntry { job, id, span, leases });
                     }
                 }
             }
@@ -440,7 +445,7 @@ where
             // drain all requests
             while let Poll::Ready(Some(cmd)) = this.command_rx.poll_next_unpin(cx) {
                 match cmd {
-                    PayloadServiceCommand::BuildNewPayload(input, job_span, tx) => {
+                    PayloadServiceCommand::BuildNewPayload(mut input, job_span, tx) => {
                         let id = input.payload_id();
                         let mut res = Ok(id);
                         let parent = input.parent_hash;
@@ -450,6 +455,7 @@ where
                         } else {
                             let start = Instant::now();
                             let attributes = input.attributes.clone();
+                            let leases = input.resources.take_leases();
                             let job_result = {
                                 let _entered = job_span.enter();
                                 this.generator.new_payload_job(*input, id)
@@ -461,7 +467,12 @@ where
                                     info!(target: "payload_builder", %id, %parent, "New payload job created");
                                     this.metrics.inc_initiated_jobs();
                                     new_job = true;
-                                    this.payload_jobs.push((job, id, job_span));
+                                    this.payload_jobs.push(PayloadJobEntry {
+                                        job,
+                                        id,
+                                        span: job_span,
+                                        leases,
+                                    });
                                     this.payload_events.send(Events::Attributes(attributes)).ok();
 
                                     // Clear stale cached payload for this id so
@@ -499,8 +510,8 @@ where
                         let (payload_fut, resolved_job) = this.resolve(id, strategy);
                         let _ = tx.send(payload_fut);
 
-                        if let Some((_job, id, _job_span)) = resolved_job {
-                            debug!(target: "payload_builder", %id, "terminated resolved job");
+                        if let Some(entry) = resolved_job {
+                            debug!(target: "payload_builder", id = %entry.id, "terminated resolved job");
                         }
                     }
                     PayloadServiceCommand::Subscribe(tx) => {
@@ -550,17 +561,141 @@ pub struct BuildNewPayload<T> {
     pub attributes: T,
     /// The parent hash of the new payload
     pub parent_hash: B256,
-    /// Optional execution cache to use for the payload.
-    ///
-    /// Only provided if `--engine.share-execution-cache-with-payload-builder` is enabled.
-    pub cache: Option<SavedCache>,
-    /// Optional handle to a background state-root task.
-    pub state_root_handle: Option<PayloadStateRootHandle>,
+    /// Resources loaned to the payload builder for this job.
+    pub resources: PayloadBuilderResources,
 }
 
 impl<T: PayloadAttributes> BuildNewPayload<T> {
     /// Returns the payload id for the new payload.
     pub fn payload_id(&self) -> PayloadId {
         self.attributes.payload_id(&self.parent_hash)
+    }
+}
+
+/// Resources loaned to a payload builder job by the engine.
+#[derive(Debug, Default)]
+pub struct PayloadBuilderResources {
+    /// Optional execution cache to use for the payload.
+    ///
+    /// Only provided if `--engine.share-execution-cache-with-payload-builder` is enabled.
+    execution_cache: Option<SavedCache>,
+    /// Optional handle to a background state-root task.
+    state_root_handle: Option<PayloadStateRootHandle>,
+    /// Lifecycle leases retained by the service while the payload job is active.
+    leases: Vec<PayloadBuilderLease>,
+}
+
+impl PayloadBuilderResources {
+    /// Creates a new payload builder resource bundle.
+    pub const fn new(
+        execution_cache: Option<SavedCache>,
+        state_root_handle: Option<PayloadStateRootHandle>,
+    ) -> Self {
+        Self { execution_cache, state_root_handle, leases: Vec::new() }
+    }
+
+    /// Adds a lease that remains active for the lifetime of the payload job.
+    pub fn with_lease(mut self, lease: PayloadBuilderLease) -> Self {
+        self.leases.push(lease);
+        self
+    }
+
+    /// Returns the loaned execution cache, if any.
+    pub const fn execution_cache(&self) -> Option<&SavedCache> {
+        self.execution_cache.as_ref()
+    }
+
+    /// Takes the loaned execution cache, if any.
+    pub const fn take_execution_cache(&mut self) -> Option<SavedCache> {
+        self.execution_cache.take()
+    }
+
+    /// Returns the loaned state-root task handle, if any.
+    pub const fn state_root_handle(&self) -> Option<&PayloadStateRootHandle> {
+        self.state_root_handle.as_ref()
+    }
+
+    /// Takes the loaned state-root task handle, if any.
+    pub const fn take_state_root_handle(&mut self) -> Option<PayloadStateRootHandle> {
+        self.state_root_handle.take()
+    }
+
+    /// Takes the lifecycle leases that the service must retain for this job.
+    fn take_leases(&mut self) -> Vec<PayloadBuilderLease> {
+        std::mem::take(&mut self.leases)
+    }
+}
+
+/// Keeps a loaned resource active for the lifetime of a payload job.
+pub struct PayloadBuilderLease {
+    _lease: Box<dyn Send>,
+}
+
+impl PayloadBuilderLease {
+    /// Wraps a lease that releases its resource when dropped.
+    pub fn new(lease: impl Send + 'static) -> Self {
+        Self { _lease: Box::new(lease) }
+    }
+}
+
+impl std::fmt::Debug for PayloadBuilderLease {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("PayloadBuilderLease").finish_non_exhaustive()
+    }
+}
+
+/// An active payload job and its service metadata.
+#[derive(Debug)]
+struct PayloadJobEntry<Job> {
+    job: Job,
+    id: PayloadId,
+    span: Span,
+    leases: Vec<PayloadBuilderLease>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::test_utils::test_payload_service;
+    use alloy_primitives::Address;
+    use reth_ethereum_engine_primitives::{EthEngineTypes, EthPayloadAttributes};
+    use std::sync::atomic::{AtomicBool, Ordering};
+
+    struct DropProbe(Arc<AtomicBool>);
+
+    impl Drop for DropProbe {
+        fn drop(&mut self) {
+            self.0.store(true, Ordering::Release);
+        }
+    }
+
+    #[test]
+    fn payload_builder_lease_is_held_until_resolve_finishes() {
+        tokio::runtime::Builder::new_current_thread().build().unwrap().block_on(async {
+            let (service, handle) = test_payload_service::<EthEngineTypes>();
+            let service = tokio::spawn(service);
+            let dropped = Arc::new(AtomicBool::new(false));
+            let lease = PayloadBuilderLease::new(DropProbe(Arc::clone(&dropped)));
+            let input = BuildNewPayload {
+                attributes: EthPayloadAttributes {
+                    timestamp: 1,
+                    prev_randao: B256::ZERO,
+                    suggested_fee_recipient: Address::ZERO,
+                    withdrawals: None,
+                    parent_beacon_block_root: None,
+                    slot_number: None,
+                    target_gas_limit: None,
+                },
+                parent_hash: B256::ZERO,
+                resources: PayloadBuilderResources::default().with_lease(lease),
+            };
+
+            let id = handle.send_new_payload(input).await.unwrap().unwrap();
+            assert!(!dropped.load(Ordering::Acquire));
+
+            handle.resolve_kind(id, PayloadKind::Earliest).await.unwrap().unwrap();
+            assert!(dropped.load(Ordering::Acquire));
+            service.abort();
+        });
     }
 }

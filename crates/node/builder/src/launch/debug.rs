@@ -323,6 +323,7 @@ where
 
             let dev_mining_mode =
                 mining_mode.unwrap_or_else(|| handle.node.config.dev_mining_mode(pool));
+            let finality_depth = config.dev.finality_depth;
             let payload_wait_time = config.dev.payload_wait_time;
             if let (Some(wait_time), Some(block_time)) = (payload_wait_time, config.dev.block_time)
             {
@@ -339,6 +340,7 @@ where
                     dev_mining_mode,
                     payload_builder_handle,
                 )
+                .with_finality_depth(finality_depth)
                 .with_payload_wait_time_opt(payload_wait_time)
                 .run()
                 .await

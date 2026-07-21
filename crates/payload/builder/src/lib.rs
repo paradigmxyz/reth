@@ -126,8 +126,8 @@ pub use alloy_rpc_types::engine::PayloadId;
 pub use reth_payload_builder_primitives::PayloadBuilderError;
 pub use reth_payload_primitives::PayloadKind;
 pub use service::{
-    BuildNewPayload, PayloadBuilderHandle, PayloadBuilderService, PayloadServiceCommand,
-    PayloadStore,
+    BuildNewPayload, PayloadBuilderHandle, PayloadBuilderLease, PayloadBuilderResources,
+    PayloadBuilderService, PayloadServiceCommand, PayloadStore,
 };
 pub use traits::{KeepPayloadJobAlive, PayloadJob, PayloadJobGenerator};
 
