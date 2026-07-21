@@ -240,19 +240,6 @@ pub trait ConfigureEvm: Clone + Debug + Send + Sync + Unpin {
         attributes: &Self::NextBlockEnvCtx,
     ) -> Result<EvmEnvFor<Self>, Self::Error>;
 
-    /// Returns a predicted next-block environment for txpool cache prewarming.
-    ///
-    /// Implementations should return `None` when they cannot derive a safe prediction without
-    /// consensus-layer payload attributes. The prediction only controls which parent-state reads
-    /// are warmed; speculative writes are never published.
-    fn txpool_prewarm_env(
-        &self,
-        _parent: &HeaderTy<Self::Primitives>,
-        _grandparent: &HeaderTy<Self::Primitives>,
-    ) -> Result<Option<EvmEnvFor<Self>>, Self::Error> {
-        Ok(None)
-    }
-
     /// Returns the configured [`BlockExecutorFactory::ExecutionCtx`] for a given block.
     fn context_for_block<'a>(
         &self,

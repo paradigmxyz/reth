@@ -182,9 +182,13 @@ where
         };
         let state_provider = StateProviderDatabase::new(self.cache.state_provider(state_provider));
         let mut state = State::builder().with_database(state_provider).build();
+        // The environment is the head block's own, not a predicted next-block one, and execution
+        // is out of context by design: transaction viability is the pool's business, so nonce,
+        // balance and (one-block-stale) basefee checks must not gate which state gets warmed.
         let mut evm_env = job.evm_env.clone();
         evm_env.cfg_env.disable_nonce_check = true;
         evm_env.cfg_env.disable_balance_check = true;
+        evm_env.cfg_env.disable_base_fee = true;
         let mut evm = self.evm_config.evm_with_env(&mut state, evm_env);
 
         let deadline = Instant::now() + REFRESH_INTERVAL;

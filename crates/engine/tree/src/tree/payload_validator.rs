@@ -1885,8 +1885,8 @@ where
     fn on_canonical_head_changed(&self, hash: B256, state: &EngineApiTreeState<N>) {
         let Some(txpool_prewarm) = self.txpool_prewarm.as_ref() else { return };
 
-        // Obtain the headers for both the new canonical head and its parent. Those will be used to
-        // create the txpool prewarm EVM environment as a parent and a grandparent respectively.
+        // Obtain the header of the new canonical head; pool transactions are warmed on top of
+        // its state.
         let parent = match self.sealed_header_by_hash(hash, state) {
             Ok(Some(header)) => header,
             Ok(None) => return,
@@ -1900,34 +1900,21 @@ where
                 return
             }
         };
-        let grandparent = match self.sealed_header_by_hash(parent.parent_hash(), state) {
-            Ok(Some(parent_parent)) => parent_parent,
-            Ok(None) => return,
+        // Warming reuses the head block's own environment rather than predicting the next
+        // block's: attribute-level accuracy (timestamp, basefee) doesn't matter for collecting
+        // state reads, and the worker disables the fee checks a stale basefee would trip.
+        let evm_env = match self.evm_config.evm_env(parent.header()) {
+            Ok(evm_env) => evm_env,
             Err(err) => {
                 trace!(
                     target: "engine::tree::txpool_prewarm",
                     %err,
                     block_hash = ?parent.hash(),
-                    parent_hash = ?parent.parent_hash(),
-                    "failed to fetch parent header for txpool prewarming"
+                    "failed to derive canonical txpool prewarming environment"
                 );
                 return
             }
         };
-        let evm_env =
-            match self.evm_config.txpool_prewarm_env(parent.header(), grandparent.header()) {
-                Ok(Some(evm_env)) => evm_env,
-                Ok(None) => return,
-                Err(err) => {
-                    trace!(
-                        target: "engine::tree::txpool_prewarm",
-                        %err,
-                        block_hash = ?parent.hash(),
-                        "failed to derive canonical txpool prewarming environment"
-                    );
-                    return
-                }
-            };
 
         let provider_builder = match self.state_provider_builder(parent.hash(), state) {
             Ok(Some(provider_builder)) => provider_builder,

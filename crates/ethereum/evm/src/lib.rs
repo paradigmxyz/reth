@@ -227,30 +227,6 @@ where
         ))
     }
 
-    fn txpool_prewarm_env(
-        &self,
-        parent: &Header,
-        grandparent: &Header,
-    ) -> Result<Option<EvmEnv>, Self::Error> {
-        let block_time = parent.timestamp.saturating_sub(grandparent.timestamp);
-        self.next_evm_env(
-            parent,
-            &NextBlockEnvAttributes {
-                timestamp: parent.timestamp.saturating_add(block_time),
-                suggested_fee_recipient: parent.beneficiary,
-                prev_randao: alloy_primitives::B256::ZERO,
-                gas_limit: parent.gas_limit,
-                parent_beacon_block_root: parent
-                    .parent_beacon_block_root
-                    .map(|_| Default::default()),
-                withdrawals: parent.withdrawals_root.map(|_| Default::default()),
-                extra_data: parent.extra_data.clone(),
-                slot_number: parent.slot_number.map(|slot| slot.saturating_add(1)),
-            },
-        )
-        .map(Some)
-    }
-
     fn context_for_block<'a>(
         &self,
         block: &'a SealedBlock<Block>,
@@ -417,20 +393,6 @@ mod tests {
         // Assert that the chain ID in the `cfg_env` is correctly set to the chain ID of the
         // ChainSpec
         assert_eq!(cfg_env.chain_id, chain_spec.chain().id());
-    }
-
-    #[test]
-    fn txpool_prewarm_env_uses_parent_block_time() {
-        let evm_config = EthEvmConfig::mainnet();
-        let grandparent = Header { timestamp: 1_000, ..Default::default() };
-        let parent = Header { timestamp: 1_007, ..Default::default() };
-
-        let env = evm_config
-            .txpool_prewarm_env(&parent, &grandparent)
-            .unwrap()
-            .expect("ethereum supports txpool prewarming");
-
-        assert_eq!(env.block_env.timestamp, U256::from(1_014));
     }
 
     #[test]
