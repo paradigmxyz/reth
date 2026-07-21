@@ -134,7 +134,7 @@ pub trait Evm {
     /// Runtime EVM type family.
     type EvmTypes: evm2::EvmTypes<Tx = Self::Transaction>;
     /// Transaction environment consumed by this EVM.
-    type Transaction: AlloyTransaction;
+    type Transaction;
 
     /// Executes a transaction without committing its state changes.
     fn transact(
@@ -186,7 +186,7 @@ pub trait Evm {
         S::Error: Debug;
 }
 
-impl<'a, T: evm2::EvmTypes<Tx: Typed2718 + AlloyTransaction>> Evm for evm2::Evm<'a, T> {
+impl<'a, T: evm2::EvmTypes<Tx: Typed2718>> Evm for evm2::Evm<'a, T> {
     type EvmTypes = T;
     type Transaction = T::Tx;
 

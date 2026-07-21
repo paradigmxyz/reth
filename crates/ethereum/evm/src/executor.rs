@@ -172,7 +172,7 @@ where
 impl<'a, T, R> BlockExecutor for EthBlockExecutor<'a, T, R>
 where
     T: EvmTypes,
-    T::Tx: Transaction + Typed2718,
+    T::Tx: Typed2718,
     T::TxResultExt: Send,
     R: ReceiptBuilder,
     R::Transaction: TxHashRef,
@@ -257,7 +257,7 @@ where
         let (transaction, tx) = transaction.into_parts();
         let tx_hash = *tx.tx().tx_hash();
         self.set_transaction_block_access_index();
-        let transaction_gas_limit = transaction.gas_limit();
+        let transaction_gas_limit = tx.tx().gas_limit();
         let block_gas_limit = self.evm.block_env().gas_limit.to::<u64>();
         let unavailable = if self.separate_block_gas {
             let regular_available = block_gas_limit.saturating_sub(self.block_regular_gas_used);
