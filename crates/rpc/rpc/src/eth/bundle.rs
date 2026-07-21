@@ -7,10 +7,10 @@ use alloy_rpc_types_mev::{EthCallBundle, EthCallBundleResponse, EthCallBundleTra
 use evm2::evm::DynDatabase;
 use jsonrpsee::core::RpcResult;
 use reth_chainspec::{ChainSpecProvider, EthChainSpec};
-use reth_evm::{ConfigureEvm, EvmEnv};
+use reth_evm::{ConfigureEvm, Evm, EvmEnv};
 use reth_rpc_eth_api::{
     helpers::{Call, EthTransactions, LoadPendingBlock},
-    EthCallBundleApiServer, FromEthApiError,
+    EthCallBundleApiServer, FromEthApiError, FromEvmError,
 };
 use reth_rpc_eth_types::{utils::recover_raw_transaction, EthApiError, RpcInvalidTransactionError};
 use reth_tasks::pool::BlockingTaskGuard;
@@ -145,9 +145,7 @@ where
 
                 let initial_coinbase = db
                     .get_account(&coinbase)
-                    .map_err(|code| {
-                        Eth::Error::from_eth_err(EthApiError::EvmCustom(db.error(code).to_string()))
-                    })?
+                    .map_err(|code| Eth::Error::from_eth_err(EthApiError::from(db.error(code))))?
                     .map(|acc| acc.balance)
                     .unwrap_or_default();
                 let mut coinbase_balance_before_tx = initial_coinbase;
@@ -158,6 +156,7 @@ where
 
                 let mut results = Vec::with_capacity(transactions.len());
                 let mut transactions = transactions.into_iter().peekable();
+                let mut evm = eth_api.evm_config().evm_with_env(&mut db, evm_env);
 
                 while let Some(tx) = transactions.next() {
                     let signer = tx.signer();
@@ -179,7 +178,8 @@ where
 
                     hasher.update(*tx.tx_hash());
                     let tx_env = eth_api.evm_config().tx_env(tx.clone());
-                    let result_and_state = eth_api.transact(&mut db, evm_env.clone(), tx_env)?;
+                    let result_and_state =
+                        evm.transact(&tx_env).map_err(Eth::Error::from_evm_err)?;
                     let result = result_and_state.result;
                     let state = result_and_state.pending_state;
 
@@ -230,9 +230,7 @@ where
                     // need to apply the state changes of this call before executing the
                     // next call
                     if transactions.peek().is_some() {
-                        // need to apply the state changes of this call before executing
-                        // the next call
-                        db.commit_source(&state);
+                        evm.commit_state(&state);
                     }
                 }
 

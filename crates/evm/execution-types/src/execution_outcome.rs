@@ -169,7 +169,7 @@ impl<T> ExecutionOutcome<T> {
         first_block: BlockNumber,
         requests: Vec<Requests>,
     ) -> Self {
-        let block_states = if block_reverts.len() <= 1 { vec![state.clone()] } else { Vec::new() };
+        let block_states = if receipts.len() == 1 { vec![state.clone()] } else { Vec::new() };
         Self::from_parts(state, block_states, block_reverts, receipts, first_block, requests)
     }
 
@@ -197,9 +197,7 @@ impl<T> ExecutionOutcome<T> {
         first_block: BlockNumber,
         requests: Vec<Requests>,
     ) -> Self {
-        // sort reverts by block number
-        let mut reverts = revert_init.into_iter().collect::<Vec<_>>();
-        reverts.sort_unstable_by_key(|a| a.0);
+        let mut reverts = revert_init;
 
         let mut accumulator = BlockStateAccumulator::new();
         for (address, (original, current, storage)) in state_init {
@@ -224,9 +222,11 @@ impl<T> ExecutionOutcome<T> {
             accumulator.bytecode(code_hash, &bytecode.into()).expect("infallible");
         }
 
-        let block_reverts = reverts
-            .into_iter()
-            .map(|(_, reverts)| BlockReverts {
+        let block_reverts = (0..receipts.len())
+            .map(|offset| {
+                reverts.remove(&first_block.saturating_add(offset as u64)).unwrap_or_default()
+            })
+            .map(|reverts| BlockReverts {
                 accounts: reverts
                     .iter()
                     .filter_map(|(address, (original, _))| {
@@ -473,21 +473,24 @@ impl<T> ExecutionOutcome<T> {
 
         // +1 is for number of blocks that we have as index is included.
         let new_len = index + 1;
+        let removed_blocks = self.receipts.len() - new_len;
+        let block_state_prefix = self.block_states.len().saturating_sub(self.receipts.len());
         // remove receipts
         self.receipts.truncate(new_len);
         // remove requests
         self.requests.truncate(new_len);
         // Revert last n reverts.
+        let revert_index = self.block_reverts.len().saturating_sub(removed_blocks);
         if self.block_states.is_empty() {
             let state = Self::revert_state(
                 self.state.inner(),
                 &self.block_reverts,
-                &self.block_reverts[new_len..],
+                &self.block_reverts[revert_index..],
             );
             self.state = state.into();
         }
-        self.block_reverts.truncate(new_len);
-        self.truncate_block_states(new_len);
+        self.block_reverts.truncate(revert_index);
+        self.truncate_block_states(block_state_prefix + new_len);
 
         true
     }
@@ -522,7 +525,6 @@ impl<T> ExecutionOutcome<T> {
             higher_state.requests = higher_state.requests.split_off(at_idx);
         }
         higher_state.block_reverts.drain(..at_idx.min(higher_state.block_reverts.len()));
-        higher_state.drop_first_block_states(at_idx);
         higher_state.first_block = at;
 
         (Some(lower_state), higher_state)
@@ -554,16 +556,23 @@ impl<T> ExecutionOutcome<T> {
         self.requests.extend(requests);
     }
 
+    /// Prepends state changes without overriding existing changes.
+    ///
+    /// Reverts, receipts, and requests are not updated.
+    pub fn prepend_state(&mut self, other: EvmState) {
+        if !self.block_states.is_empty() {
+            self.block_states.insert(0, other.clone());
+        }
+        let mut accumulator = BlockStateAccumulator::new();
+        state::extend_execution_state(&mut accumulator, &other);
+        state::extend_execution_state(&mut accumulator, self.state.inner());
+        self.state = accumulator.into();
+    }
+
     fn truncate_block_states(&mut self, new_len: usize) {
         if !self.block_states.is_empty() {
             self.block_states.truncate(new_len);
             self.state = Self::aggregate_block_states(&self.block_states).into();
-        }
-    }
-
-    fn drop_first_block_states(&mut self, n: usize) {
-        if !self.block_states.is_empty() {
-            self.block_states.drain(..n.min(self.block_states.len()));
         }
     }
 
@@ -663,7 +672,10 @@ impl<T> ExecutionOutcome<T> {
     }
 
     fn extend_block_states(&mut self, other: Vec<EvmState>, other_receipts_len: usize) {
-        if self.block_states.len() == self.receipts.len() && other.len() == other_receipts_len {
+        if !self.block_states.is_empty() &&
+            self.block_states.len() >= self.receipts.len() &&
+            other.len() == other_receipts_len
+        {
             self.block_states.extend(other);
         } else {
             self.block_states.clear();
@@ -763,7 +775,7 @@ fn account_info_to_reth(info: &AccountInfo) -> Account {
     Account { nonce: info.nonce, balance: info.balance, bytecode_hash }
 }
 
-#[cfg(test)]
+#[cfg(all(test, any(feature = "serde", feature = "serde-bincode-compat")))]
 fn multi_block_outcome_for_serde() -> ExecutionOutcome {
     let address = Address::repeat_byte(0x42);
     let mut block1 = BlockStateAccumulator::new();
@@ -821,7 +833,7 @@ fn multi_block_outcome_for_serde() -> ExecutionOutcome {
     ExecutionOutcome::from_block_states(10, [block1, block2], results)
 }
 
-#[cfg(test)]
+#[cfg(all(test, any(feature = "serde", feature = "serde-bincode-compat")))]
 fn assert_serde_preserves_block_operations(expected: ExecutionOutcome, actual: ExecutionOutcome) {
     assert_eq!(actual, expected);
 
@@ -1362,6 +1374,65 @@ mod tests {
         let account = higher.state.account_state(&address).unwrap();
         assert_eq!(account.original.as_ref().unwrap().balance, U256::ZERO);
         assert_eq!(account.current.as_ref().unwrap().balance, U256::from(2));
+    }
+
+    #[test]
+    fn split_then_revert_retains_prefix_original() {
+        let address = Address::repeat_byte(0x42);
+        let results = vec![BlockExecutionResult::default(); 3];
+        let outcome = ExecutionOutcome::<reth_ethereum_primitives::Receipt>::from_block_states(
+            1,
+            [
+                balance_state(address, 0, 1),
+                balance_state(address, 1, 2),
+                balance_state(address, 2, 0),
+            ],
+            results,
+        );
+
+        let (_, mut higher) = outcome.split_at(2);
+        assert!(higher.revert_to(2));
+        let account = higher.state.account_state(&address).unwrap();
+        assert_eq!(account.original.as_ref().unwrap().balance, U256::ZERO);
+        assert_eq!(account.current.as_ref().unwrap().balance, U256::from(2));
+    }
+
+    #[test]
+    fn prepend_state_preserves_newer_changes() {
+        let address = Address::repeat_byte(0x42);
+        let mut outcome = ExecutionOutcome::<reth_ethereum_primitives::Receipt>::from_block_states(
+            1,
+            [balance_state(address, 1, 2)],
+            vec![BlockExecutionResult::default()],
+        );
+
+        outcome.prepend_state(balance_state(address, 0, 1));
+
+        let account = outcome.state.account_state(&address).unwrap();
+        assert_eq!(account.original.as_ref().unwrap().balance, U256::ZERO);
+        assert_eq!(account.current.as_ref().unwrap().balance, U256::from(2));
+        assert_eq!(outcome.receipts.len(), 1);
+    }
+
+    #[test]
+    fn new_init_aligns_sparse_reverts() {
+        let address = Address::repeat_byte(0x42);
+        let original = Account { balance: U256::from(5), ..Default::default() };
+        let current = Account { balance: U256::from(7), ..Default::default() };
+        let state_init =
+            AddressMap::from_iter([(address, (Some(original), Some(current), B256Map::default()))]);
+        let revert = AddressMap::from_iter([(address, (Some(Some(original)), vec![]))]);
+        let mut outcome = ExecutionOutcome::<reth_ethereum_primitives::Receipt>::new_init(
+            state_init,
+            HashMap::from_iter([(2, revert)]),
+            [],
+            vec![vec![], vec![]],
+            1,
+            vec![],
+        );
+
+        assert!(outcome.revert_to(1));
+        assert!(outcome.state.account_state(&address).is_none());
     }
 
     #[test]

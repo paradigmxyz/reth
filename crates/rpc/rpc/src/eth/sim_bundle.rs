@@ -10,10 +10,13 @@ use alloy_rpc_types_mev::{
 };
 use evm2::evm::DynDatabase;
 use jsonrpsee::core::RpcResult;
-use reth_evm::{ConfigureEvm, EvmEnv};
+use reth_evm::{ConfigureEvm, Evm, EvmEnv};
 use reth_primitives_traits::Recovered;
 use reth_rpc_api::MevSimApiServer;
-use reth_rpc_eth_api::helpers::{block::LoadBlock, Call, EthTransactions};
+use reth_rpc_eth_api::{
+    helpers::{block::LoadBlock, Call, EthTransactions},
+    FromEvmError,
+};
 use reth_rpc_eth_types::{
     cache::db::apply_block_overrides, utils::recover_raw_transaction, EthApiError,
 };
@@ -305,7 +308,7 @@ where
 
                 let initial_coinbase_balance = db
                     .get_account(&coinbase)
-                    .map_err(|code| EthApiError::EvmCustom(db.error(code).to_string()))?
+                    .map_err(|code| EthApiError::from(db.error(code)))?
                     .map(|acc| acc.balance)
                     .unwrap_or_default();
 
@@ -316,6 +319,7 @@ where
                 let mut flat_logs: Vec<Vec<Log>> = Vec::new();
 
                 let mut log_index = 0;
+                let mut evm = eth_api.evm_config().evm_with_env(&mut db, evm_env);
 
                 for (tx_index, item) in flattened_bundle.iter().enumerate() {
                     // Check inclusion constraints
@@ -333,7 +337,8 @@ where
                     }
 
                     let tx_env = eth_api.evm_config().tx_env(item.tx.clone());
-                    let result_and_state = eth_api.transact(&mut db, evm_env.clone(), tx_env)?;
+                    let result_and_state =
+                        evm.transact(&tx_env).map_err(Eth::Error::from_evm_err)?;
                     let result = result_and_state.result;
                     let state = result_and_state.pending_state;
 
@@ -390,7 +395,7 @@ where
                     }
 
                     // Apply state changes
-                    db.commit_source(&state);
+                    evm.commit_state(&state);
                 }
 
                 let body_logs =

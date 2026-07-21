@@ -119,14 +119,8 @@ where
             let mut changes = Vec::with_capacity(storage.len());
             for (key, value) in storage {
                 let key = U256::from_be_bytes(key.0);
-                let original =
-                    db.get_storage(&address, &key).map_err(StateOverrideError::Database)?;
-                changes.push(StorageChange {
-                    address,
-                    key,
-                    original,
-                    current: U256::from_be_bytes(value.0),
-                });
+                let current = U256::from_be_bytes(value.0);
+                changes.push(StorageChange { address, key, original: !current, current });
             }
             if wipe_storage {
                 db.storage_wipe(address).expect("infallible state override update");

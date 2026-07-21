@@ -156,6 +156,12 @@ pub trait Evm {
     where
         I: evm2::Inspector<Self::EvmTypes>;
 
+    /// Commits detached transaction state into the accepted state overlay.
+    fn commit_state(&mut self, state: &evm2::PendingState);
+
+    /// Returns the accepted state overlay database.
+    fn accepted_db_mut(&mut self) -> &mut dyn DynDatabase;
+
     /// Sets the inspector used by subsequent transactions.
     fn set_inspector<I>(&mut self, inspector: I)
     where
@@ -216,6 +222,14 @@ impl<'a, T: evm2::EvmTypes<Tx: Typed2718 + AlloyTransaction>> Evm for evm2::Evm<
             Err(err) => TransactionResolution::HandlerError(err),
         };
         resolve_transaction(self, resolution)
+    }
+
+    fn commit_state(&mut self, state: &evm2::PendingState) {
+        self.commit_source(state);
+    }
+
+    fn accepted_db_mut(&mut self) -> &mut dyn DynDatabase {
+        self.overlay_db_mut()
     }
 
     fn set_inspector<I: evm2::Inspector<T> + 'a>(&mut self, inspector: I) {
@@ -333,6 +347,9 @@ pub trait BlockExecutor: Sized {
 
     /// Returns the underlying EVM mutably.
     fn evm_mut(&mut self) -> &mut Self::Evm;
+
+    /// Returns state changes accumulated by the executor so far.
+    fn execution_state(&self) -> EvmState;
 
     /// Sets a hook for streamed hashed state updates emitted during block execution.
     ///

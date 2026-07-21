@@ -189,7 +189,7 @@ impl InvalidTxError for EthInvalidTxError {
     }
 
     fn as_any(&self) -> &(dyn Any + 'static) {
-        self
+        &self.0
     }
 }
 

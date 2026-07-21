@@ -17,7 +17,9 @@ use alloy_rpc_types_eth::{
     state::{EvmOverrides, StateOverride},
     BlockId, Bundle, EthCallResponse, StateContext, TransactionInfo,
 };
-use evm2::evm::{CacheDB, OverrideBlockHashes, StateChangeSink, StateChangeSource};
+use evm2::evm::{
+    BlockStateAccumulator, CacheDB, OverrideBlockHashes, StateChangeSink, StateChangeSource,
+};
 use evm2_inspectors::{access_list::AccessListInspector, transfer::TransferInspector};
 use futures::Future;
 use reth_chainspec::{ChainSpecProvider, EthChainSpec, EthereumHardforks};
@@ -243,6 +245,7 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
                         .map_err(map_err)?
                     };
 
+                    db.commit_source(&result.execution_state);
                     let simulated_header = result.block.clone_sealed_header();
                     db.insert_block_hash(
                         &U256::from(simulated_header.number()),
@@ -356,6 +359,9 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
                         >>::into_parts(tx);
                         executor.execute_transaction(tx_env).map_err(Self::Error::from_eth_err)?;
                     }
+                    let state = executor.execution_state();
+                    drop(executor);
+                    db.commit_source(&state);
                 }
 
                 // transact all bundles
@@ -791,7 +797,9 @@ pub trait Call:
                 let tx_env = RpcNodeCore::evm_config(&this).tx_env(tx);
                 let res =
                     executor.evm_mut().transact(&tx_env).map_err(Self::Error::from_evm_err)?;
+                let state = executor.execution_state();
                 drop(executor);
+                db.commit_source(&state);
                 f(tx_info, res, db)
             })
             .await
@@ -818,6 +826,9 @@ pub trait Call:
         I: IntoIterator<Item = Recovered<&'a ProviderTx<Self::Provider>>>,
     {
         let mut index = 0;
+        let mut state = BlockStateAccumulator::new();
+        let mut evm =
+            self.evm_config().block_executor_factory().evm_with_database(&mut *db, evm_env);
         for tx in transactions {
             if *tx.tx_hash() == target_tx_hash {
                 // reached the target transaction
@@ -825,10 +836,13 @@ pub trait Call:
             }
 
             let tx_env = self.evm_config().tx_env(tx.cloned());
-            let result = self.transact(&mut *db, evm_env.clone(), tx_env)?;
-            result.pending_state.visit(db).expect("infallible state cache update");
+            let result = evm.transact(&tx_env).map_err(Self::Error::from_evm_err)?;
+            result.pending_state.visit(&mut state).expect("infallible state update");
+            evm.commit_state(&result.pending_state);
             index += 1;
         }
+        drop(evm);
+        state.visit(db).expect("infallible state cache update");
         Ok(index)
     }
 

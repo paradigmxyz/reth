@@ -10,7 +10,7 @@ pub use api::{AsEthApiError, FromEthApiError, FromEvmError, IntoEthApiError};
 use core::time::Duration;
 use evm2::{interpreter::InstrStop, registry::HandlerError};
 use evm2_inspectors::tracing::{DebugInspectorError, MuxError};
-use reth_errors::{BlockExecutionError, BlockValidationError, RethError};
+use reth_errors::{BlockExecutionError, BlockValidationError, ProviderError, RethError};
 use reth_primitives_traits::transaction::{error::InvalidTransactionError, signed::RecoveryError};
 use reth_rpc_convert::{CallFeesError, EthTxEnvError, TransactionConversionError};
 use reth_rpc_server_types::result::{
@@ -490,7 +490,11 @@ impl From<BlockExecutionError> for EthApiError {
         match error {
             BlockExecutionError::Validation(validation_error) => match validation_error {
                 BlockValidationError::InvalidTx { error, .. } => {
-                    if let Some(invalid_tx) =
+                    if let Some(invalid_tx) = error.as_any().downcast_ref::<HandlerError>() {
+                        Self::InvalidTransaction(RpcInvalidTransactionError::from(
+                            invalid_tx.clone(),
+                        ))
+                    } else if let Some(invalid_tx) =
                         error.as_any().downcast_ref::<InvalidTransactionError>()
                     {
                         Self::InvalidTransaction(RpcInvalidTransactionError::from(
@@ -524,6 +528,9 @@ impl From<BlockExecutionError> for EthApiError {
 
 impl From<evm2::AnyError> for EthApiError {
     fn from(error: evm2::AnyError) -> Self {
+        if let Some(error) = error.downcast_ref::<ProviderError>() {
+            return error.clone().into()
+        }
         Self::EvmCustom(error.to_string())
     }
 }
@@ -1095,6 +1102,23 @@ mod tests {
     use alloy_primitives::b256;
     use alloy_sol_types::{Revert, SolError};
 
+    #[derive(Debug)]
+    struct HandlerValidationError(HandlerError);
+
+    impl core::fmt::Display for HandlerValidationError {
+        fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+            self.0.fmt(f)
+        }
+    }
+
+    impl core::error::Error for HandlerValidationError {}
+
+    impl reth_evm::InvalidTxError for HandlerValidationError {
+        fn as_any(&self) -> &(dyn core::any::Any + 'static) {
+            &self.0
+        }
+    }
+
     #[test]
     fn timed_out_error() {
         let err = EthApiError::ExecutionTimedOut(Duration::from_secs(10));
@@ -1114,6 +1138,28 @@ mod tests {
                 cost: actual_cost,
                 balance: actual_balance,
             } if actual_cost == cost && actual_balance == balance
+        ));
+    }
+
+    #[test]
+    fn block_execution_handler_error_preserves_rpc_error() {
+        let cost = U256::from(2);
+        let balance = U256::from(1);
+        let error = BlockValidationError::InvalidTx {
+            hash: B256::ZERO,
+            error: Box::new(HandlerValidationError(HandlerError::InsufficientFunds {
+                cost,
+                balance,
+            })),
+        };
+        let error = EthApiError::from(BlockExecutionError::Validation(error));
+
+        assert!(matches!(
+            error,
+            EthApiError::InvalidTransaction(RpcInvalidTransactionError::InsufficientFunds {
+                cost: actual_cost,
+                balance: actual_balance,
+            }) if actual_cost == cost && actual_balance == balance
         ));
     }
 

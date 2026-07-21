@@ -9,11 +9,11 @@ use evm2_inspectors::tracing::{TracingInspector, TracingInspectorConfig};
 use futures::Future;
 use reth_errors::RethError;
 use reth_evm::{
-    execute::BlockExecutorFactory, ConfigureEvm, Database, Evm, EvmEnv, EvmEnvFor, EvmTypesFor,
-    TxEnvFor, TxResultWithStateFor,
+    execute::BlockExecutorFactory, BlockExecutor, ConfigureEvm, Database, Evm, EvmEnv, EvmEnvFor,
+    EvmTypesFor, TxEnvFor, TxResultWithStateFor,
 };
 use reth_primitives_traits::{BlockBody, Recovered, RecoveredBlock};
-use reth_rpc_eth_types::{EthApiError, StateCacheDb};
+use reth_rpc_eth_types::StateCacheDb;
 use reth_storage_api::{ProviderBlock, ProviderTx};
 use std::{mem, sync::Arc};
 
@@ -26,7 +26,7 @@ pub struct TracingCtx<'a, Tx, Insp, EvmTypes: evm2::EvmTypes> {
     /// Detached state changes for the transaction.
     pub state: &'a evm2::PendingState,
     /// Database pointing to the transaction pre-state.
-    pub db: &'a mut StateCacheDb,
+    pub db: &'a mut dyn evm2::evm::DynDatabase,
     /// Inspector used while executing the transaction.
     pub inspector: &'a mut Insp,
     fused_inspector: &'a Insp,
@@ -229,10 +229,16 @@ pub trait Trace: LoadState<Error: FromEvmError<Self::Evm>> + Call {
                 let mut results = Vec::new();
                 let mut inspector = inspector_setup();
                 let fused_inspector = inspector.clone();
+                let mut evm = this
+                    .evm_config()
+                    .block_executor_factory()
+                    .evm_with_database(&mut db, evm_env.clone());
 
                 for (idx, tx) in block.transactions_recovered().take(max_transactions).enumerate() {
                     let tx_env = this.evm_config().tx_env(tx.cloned());
-                    let result = this.inspect(&mut db, evm_env.clone(), &tx_env, &mut inspector)?;
+                    let result = evm
+                        .transact_with_inspector(&tx_env, &mut inspector)
+                        .map_err(Self::Error::from_evm_err)?;
                     let tx_info = TransactionInfo {
                         hash: Some(*tx.tx_hash()),
                         index: Some(idx as u64),
@@ -249,7 +255,7 @@ pub trait Trace: LoadState<Error: FromEvmError<Self::Evm>> + Call {
                             tx,
                             result,
                             state: &pending_state,
-                            db: &mut db,
+                            db: evm.accepted_db_mut(),
                             inspector: &mut inspector,
                             fused_inspector: &fused_inspector,
                             was_fused: &mut was_fused,
@@ -258,7 +264,7 @@ pub trait Trace: LoadState<Error: FromEvmError<Self::Evm>> + Call {
                     if !was_fused {
                         inspector.clone_from(&fused_inspector);
                     }
-                    db.commit_source(&pending_state);
+                    evm.commit_state(&pending_state);
                     results.push(item);
                 }
 
@@ -361,19 +367,16 @@ pub trait Trace: LoadState<Error: FromEvmError<Self::Evm>> + Call {
         &self,
         block: &RecoveredBlock<ProviderBlock<Self::Provider>>,
         db: &mut StateCacheDb,
-    ) -> Result<reth_evm::EvmState, Self::Error> {
-        let evm_env = self.evm_env_for_header(block.sealed_block().sealed_header())?;
-        let ctx = self
+    ) -> Result<evm2::evm::BlockStateAccumulator, Self::Error> {
+        let mut executor = self
             .evm_config()
-            .context_for_block(block.sealed_block())
+            .executor_for_block(&mut *db, block.sealed_block())
             .map_err(RethError::other)
             .map_err(Self::Error::from_eth_err)?;
-        let changes = self
-            .evm_config()
-            .pre_block_state_changes(&mut *db, evm_env, block.number(), ctx)
-            .map_err(|err| EthApiError::EvmCustom(err.to_string()))
-            .map_err(Self::Error::from_eth_err)?;
-        db.commit_source(&changes);
-        Ok(changes)
+        executor.apply_pre_execution_changes().map_err(Self::Error::from_eth_err)?;
+        let state = executor.execution_state();
+        drop(executor);
+        db.commit_source(&state);
+        Ok(state)
     }
 }

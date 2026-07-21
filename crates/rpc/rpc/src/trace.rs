@@ -110,7 +110,7 @@ where
                 let trace_res = inspector
                     .into_parity_builder()
                     .into_trace_results_with_state(&res, &trace_request.trace_types, &mut *db)
-                    .map_err(|code| EthApiError::EvmCustom(db.error(code).to_string()))
+                    .map_err(|code| EthApiError::from(db.error(code)))
                     .map_err(Eth::Error::from_eth_err)?;
                 Ok(trace_res)
             })
@@ -141,7 +141,7 @@ where
                     inspector
                         .into_parity_builder()
                         .into_trace_results_with_state(&res, &trace_types, &mut db)
-                        .map_err(|code| EthApiError::EvmCustom(db.error(code).to_string()))
+                        .map_err(|code| EthApiError::from(db.error(code)))
                         .map_err(Eth::Error::from_eth_err)
                 },
             )
@@ -180,7 +180,7 @@ where
                     let trace_res = inspector
                         .into_parity_builder()
                         .into_trace_results_with_state(&res, &trace_types, &mut db)
-                        .map_err(|code| EthApiError::EvmCustom(db.error(code).to_string()))
+                        .map_err(|code| EthApiError::from(db.error(code)))
                         .map_err(Eth::Error::from_eth_err)?;
 
                     results.push(trace_res);
@@ -209,7 +209,7 @@ where
                 let trace_res = inspector
                     .into_parity_builder()
                     .into_trace_results_with_state(&res, &trace_types, &mut db)
-                    .map_err(|code| EthApiError::EvmCustom(db.error(code).to_string()))
+                    .map_err(|code| EthApiError::from(db.error(code)))
                     .map_err(Eth::Error::from_eth_err)?;
                 Ok(trace_res)
             })
@@ -562,7 +562,7 @@ where
                     // nonce from pre-state
                     if let Some(ref mut state_diff) = full_trace.state_diff {
                         populate_state_diff(state_diff, ctx.db, ctx.state)
-                            .map_err(|code| EthApiError::EvmCustom(ctx.db.error(code).to_string()))
+                            .map_err(|code| EthApiError::from(ctx.db.error(code)))
                             .map_err(Eth::Error::from_eth_err)?;
                     }
 

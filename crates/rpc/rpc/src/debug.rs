@@ -535,7 +535,6 @@ where
                     .executor(&mut db)
                     .execute(&block)
                     .map_err(|err| EthApiError::Internal(err.into()))?;
-                db.commit_source(output.state.inner());
 
                 let mut codes = db
                     .cache
@@ -546,7 +545,10 @@ where
                     .collect::<Vec<_>>();
                 if mode.is_canonical() {
                     codes.sort_unstable();
+                } else {
+                    codes.extend(output.state.code().map(|(_, code)| code.original_bytes()));
                 }
+                db.commit_source(output.state.inner());
                 let mut hashed_state = HashedPostState::default();
                 let mut keys = Vec::new();
                 for (address, account) in &db.cache.accounts {
@@ -672,7 +674,9 @@ where
                     >>::into_parts(tx);
                     executor.execute_transaction(tx_env).map_err(Eth::Error::from_eth_err)?;
                 }
+                let state = executor.execution_state();
                 drop(executor);
+                db.commit_source(&state);
 
                 f(&mut db)
             })
@@ -684,7 +688,7 @@ where
     fn account(db: &mut StateCacheDb, address: Address) -> Result<Option<Account>, Eth::Error> {
         let account = db
             .get_account(&address)
-            .map_err(|code| EthApiError::EvmCustom(db.error(code).to_string()))
+            .map_err(|code| EthApiError::from(db.error(code)))
             .map_err(Eth::Error::from_eth_err)?;
         let Some(account) = account else { return Ok(None) };
 
@@ -705,19 +709,19 @@ where
     }
 
     /// Retrieves the account's balance, nonce, and code from the given state.
-    fn account_info(db: &mut StateCacheDb, address: Address) -> Result<AccountInfo, Eth::Error> {
-        let account = db
-            .get_account(&address)
-            .map_err(|code| EthApiError::EvmCustom(db.error(code).to_string()))
-            .map_err(Eth::Error::from_eth_err)?
-            .unwrap_or_default();
+    fn account_info<DB>(db: &mut DB, address: Address) -> Result<AccountInfo, Eth::Error>
+    where
+        DB: reth_evm::Database,
+        EthApiError: From<DB::Error>,
+    {
+        let account =
+            db.get_account(&address).map_err(Eth::Error::from_eth_err)?.unwrap_or_default();
         let code = if account.code_hash == KECCAK_EMPTY {
             Default::default()
         } else if let Some(code) = account.code {
             code.original_bytes()
         } else {
             db.get_code_by_hash(&account.code_hash)
-                .map_err(|code| EthApiError::EvmCustom(db.error(code).to_string()))
                 .map_err(Eth::Error::from_eth_err)?
                 .original_bytes()
         };
