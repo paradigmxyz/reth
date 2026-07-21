@@ -4,7 +4,7 @@ use crate::{ConfigureEvm, Database, DynDatabase, EvmEnv, TxEnvFor};
 use alloc::{boxed::Box, format, sync::Arc, vec::Vec};
 use alloy_consensus::{
     transaction::{Either, Recovered, Transaction as AlloyTransaction, TransactionEnvelope},
-    BlockHeader as _, Header, TxReceipt,
+    BlockHeader as _, Header,
 };
 use alloy_eip7928::{compute_block_access_list_hash, BlockAccessIndex, BlockAccessList};
 use alloy_eips::eip2718::{Typed2718, WithEncoded};
@@ -24,7 +24,8 @@ use reth_execution_types::{
 #[cfg(feature = "std")]
 use reth_primitives_traits::BlockTy;
 use reth_primitives_traits::{
-    Block, HeaderTy, NodePrimitives, ReceiptTy, RecoveredBlock, SealedHeader, TxTy,
+    Block, HeaderTy, NodePrimitives, ReceiptTy, RecoveredBlock, SealedHeader, SignedTransaction,
+    TxTy,
 };
 use reth_storage_api::StateProvider;
 use reth_trie_common::updates::TrieUpdates;
@@ -92,9 +93,9 @@ pub struct ReceiptBuilderCtx<TxType, TransactionResult> {
 #[auto_impl::auto_impl(&, Arc)]
 pub trait ReceiptBuilder {
     /// Consensus transaction type accepted by the executor.
-    type Transaction: TransactionEnvelope;
+    type Transaction: SignedTransaction + TransactionEnvelope<TxType: Send + 'static>;
     /// Receipt produced by this builder.
-    type Receipt: TxReceipt;
+    type Receipt: reth_primitives_traits::Receipt;
 
     /// Builds a receipt for the transaction execution result.
     fn build_receipt<T: evm2::EvmTypes>(

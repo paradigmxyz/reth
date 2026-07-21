@@ -37,9 +37,7 @@ use reth_trie_common::HashedPostState;
 #[expect(missing_debug_implementations)]
 pub struct EthBlockExecutor<'a, T = BaseEvmTypes, R = RethReceiptBuilder>
 where
-    T: EvmTypes,
-    T::Tx: Typed2718,
-    T::TxResultExt: Send,
+    T: EvmTypes<Tx: Typed2718, TxResultExt: Send>,
     R: ReceiptBuilder,
 {
     evm: Evm<'a, T>,
@@ -97,9 +95,7 @@ impl HashedStateMode {
 
 impl<'a, T, R> EthBlockExecutor<'a, T, R>
 where
-    T: EvmTypes,
-    T::Tx: Typed2718,
-    T::TxResultExt: Send,
+    T: EvmTypes<Tx: Typed2718, TxResultExt: Send>,
     R: ReceiptBuilder,
 {
     /// Creates a configured Ethereum block executor.
@@ -171,13 +167,8 @@ where
 
 impl<'a, T, R> BlockExecutor for EthBlockExecutor<'a, T, R>
 where
-    T: EvmTypes,
-    T::Tx: Typed2718,
-    T::TxResultExt: Send,
+    T: EvmTypes<Tx: Typed2718, TxResultExt: Send>,
     R: ReceiptBuilder,
-    R::Transaction: TxHashRef,
-    R::Receipt: alloy_consensus::TxReceipt<Log = alloy_primitives::Log>,
-    <R::Transaction as TransactionEnvelope>::TxType: Send + 'static,
 {
     type Transaction = R::Transaction;
     type Receipt = R::Receipt;
