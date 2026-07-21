@@ -7,10 +7,11 @@ use alloy_rpc_types_eth::{error::EthRpcErrorCode, request::TransactionInputError
 use alloy_sol_types::{ContractError, RevertReason};
 use alloy_transport::{RpcError, TransportErrorKind};
 pub use api::{AsEthApiError, FromEthApiError, FromEvmError, IntoEthApiError};
-use core::time::Duration;
+use core::{error::Error, time::Duration};
 use evm2::{interpreter::InstrStop, registry::HandlerError};
 use evm2_inspectors::tracing::{DebugInspectorError, MuxError};
 use reth_errors::{BlockExecutionError, BlockValidationError, ProviderError, RethError};
+use reth_evm::InternalBlockExecutionError;
 use reth_primitives_traits::transaction::{error::InvalidTransactionError, signed::RecoveryError};
 use reth_rpc_convert::{CallFeesError, EthTxEnvError, TransactionConversionError};
 use reth_rpc_server_types::result::{
@@ -520,6 +521,13 @@ impl From<BlockExecutionError> for EthApiError {
                 ))),
             },
             BlockExecutionError::Internal(internal_error) => {
+                let error: &(dyn Error + 'static) = match &internal_error {
+                    InternalBlockExecutionError::EVM { error, .. } |
+                    InternalBlockExecutionError::Other(error) => &**error,
+                };
+                if let Some(error) = find_provider_error(error) {
+                    return error.clone().into()
+                }
                 Self::Internal(RethError::Execution(BlockExecutionError::Internal(internal_error)))
             }
         }
@@ -528,10 +536,28 @@ impl From<BlockExecutionError> for EthApiError {
 
 impl From<evm2::AnyError> for EthApiError {
     fn from(error: evm2::AnyError) -> Self {
-        if let Some(error) = error.downcast_ref::<ProviderError>() {
+        if let Some(error) = find_provider_error(&error) {
             return error.clone().into()
         }
         Self::EvmCustom(error.to_string())
+    }
+}
+
+fn find_provider_error<'a>(mut error: &'a (dyn Error + 'static)) -> Option<&'a ProviderError> {
+    loop {
+        if let Some(error) = error.downcast_ref::<ProviderError>() {
+            return Some(error)
+        }
+        if let Some(mut error) = error.downcast_ref::<evm2::AnyError>() {
+            loop {
+                if let Some(provider_error) = error.downcast_ref::<ProviderError>() {
+                    return Some(provider_error)
+                }
+                let Some(nested) = error.downcast_ref::<evm2::AnyError>() else { break };
+                error = nested;
+            }
+        }
+        error = error.source()?;
     }
 }
 
@@ -1119,6 +1145,21 @@ mod tests {
         }
     }
 
+    #[derive(Debug)]
+    struct DatabaseExecutionError(evm2::AnyError);
+
+    impl core::fmt::Display for DatabaseExecutionError {
+        fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+            self.0.fmt(f)
+        }
+    }
+
+    impl core::error::Error for DatabaseExecutionError {
+        fn source(&self) -> Option<&(dyn core::error::Error + 'static)> {
+            Some(&self.0)
+        }
+    }
+
     #[test]
     fn timed_out_error() {
         let err = EthApiError::ExecutionTimedOut(Duration::from_secs(10));
@@ -1161,6 +1202,24 @@ mod tests {
                 balance: actual_balance,
             }) if actual_cost == cost && actual_balance == balance
         ));
+    }
+
+    #[test]
+    fn block_execution_database_error_preserves_provider_error() {
+        let provider_error = ProviderError::BlockExpired { requested: 1, earliest_available: 2 };
+        let error = evm2::AnyError::new(evm2::AnyError::new(provider_error));
+        let error = EthApiError::from(BlockExecutionError::other(error));
+
+        assert!(matches!(error, EthApiError::PrunedHistoryUnavailable));
+
+        let provider_error = ProviderError::BlockExpired { requested: 1, earliest_available: 2 };
+        let error = InternalBlockExecutionError::EVM {
+            hash: B256::ZERO,
+            error: Box::new(DatabaseExecutionError(evm2::AnyError::new(provider_error))),
+        };
+        let error = EthApiError::from(BlockExecutionError::Internal(error));
+
+        assert!(matches!(error, EthApiError::PrunedHistoryUnavailable));
     }
 
     #[test]

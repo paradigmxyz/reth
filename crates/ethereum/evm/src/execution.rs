@@ -84,7 +84,7 @@ sol! {
 
 /// Error returned by EVM-backed Ethereum execution.
 #[derive(Debug)]
-pub enum EthExecutionError<E = DynamicDatabaseError> {
+pub enum EthExecutionError<E = evm2::AnyError> {
     /// EVM rejected the transaction during validation.
     InvalidTx(EthInvalidTxError),
     /// EVM rejected or halted transaction execution before producing a Reth output.
@@ -109,24 +109,6 @@ pub enum EthExecutionError<E = DynamicDatabaseError> {
     /// Deposit request logs could not be decoded.
     DepositRequestDecode(String),
 }
-
-/// Database error returned through evm2's dynamic database interface.
-#[derive(Debug)]
-pub struct DynamicDatabaseError(String);
-
-impl DynamicDatabaseError {
-    fn new(error: impl core::fmt::Display) -> Self {
-        Self(error.to_string())
-    }
-}
-
-impl core::fmt::Display for DynamicDatabaseError {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        f.write_str(&self.0)
-    }
-}
-
-impl core::error::Error for DynamicDatabaseError {}
 
 impl<E> core::fmt::Display for EthExecutionError<E>
 where
@@ -157,7 +139,17 @@ where
     }
 }
 
-impl<E> core::error::Error for EthExecutionError<E> where E: core::error::Error + Send + 'static {}
+impl<E> core::error::Error for EthExecutionError<E>
+where
+    E: core::error::Error + Send + 'static,
+{
+    fn source(&self) -> Option<&(dyn core::error::Error + 'static)> {
+        match self {
+            Self::Database(error) => Some(error),
+            _ => None,
+        }
+    }
+}
 
 /// Ethereum transaction validation error returned by evm2 handlers.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -606,8 +598,8 @@ fn map_handler_error<T: EvmTypes>(evm: &mut Evm<'_, T>, err: HandlerError) -> Et
     }
 }
 
-fn take_database_error<T: EvmTypes>(evm: &mut Evm<'_, T>, code: ErrorCode) -> DynamicDatabaseError {
-    DynamicDatabaseError::new(evm.database_mut().error(code))
+fn take_database_error<T: EvmTypes>(evm: &mut Evm<'_, T>, code: ErrorCode) -> evm2::AnyError {
+    evm.database_mut().error(code)
 }
 
 struct RethStateSink<'a> {

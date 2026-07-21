@@ -9,7 +9,7 @@ use evm2::{
     bytecode::Bytecode,
     evm::{
         AccountChangeRef, AccountInfoRef, CacheDB, Database, Db, OverrideBlockHashes,
-        StateChangeSink, StorageChange,
+        StateChangeSink, StorageChange, Tee,
     },
 };
 use reth_errors::ProviderResult;
@@ -76,10 +76,11 @@ where
 pub fn apply_state_overrides<DB>(
     overrides: StateOverride,
     db: &mut DB,
-) -> Result<(), StateOverrideError<<DB as Database>::Error>>
+) -> Result<EvmState, StateOverrideError<<DB as Database>::Error>>
 where
     DB: Database + StateChangeSink<Error = core::convert::Infallible>,
 {
+    let mut state = EvmState::default();
     for (address, account_override) in overrides {
         let original = db.get_account(&address).map_err(StateOverrideError::Database)?;
         let mut account = original.clone().unwrap_or_default();
@@ -103,10 +104,11 @@ where
             (None, None) => (None, false),
         };
 
+        let mut sink = Tee::new(&mut *db, &mut state);
         if let Some(code) = &account.code {
-            db.bytecode(account.code_hash, code).expect("infallible state override update");
+            sink.bytecode(account.code_hash, code).expect("infallible state override update");
         }
-        db.account(AccountChangeRef {
+        sink.account(AccountChangeRef {
             address,
             original: original.as_ref().map(AccountInfoRef::from_info),
             current: Some(AccountInfoRef::from_info(&account)),
@@ -123,15 +125,15 @@ where
                 changes.push(StorageChange { address, key, original: !current, current });
             }
             if wipe_storage {
-                db.storage_wipe(address).expect("infallible state override update");
+                sink.storage_wipe(address).expect("infallible state override update");
             }
             for change in changes {
-                db.storage(change).expect("infallible state override update");
+                sink.storage(change).expect("infallible state override update");
             }
         }
     }
 
-    Ok(())
+    Ok(state)
 }
 
 /// Hack to get around 'higher-ranked lifetime error', see

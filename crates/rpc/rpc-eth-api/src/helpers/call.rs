@@ -120,6 +120,7 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
 
                 let call_gas_limit = this.call_gas_limit();
                 let mut remaining_call_gas_limit = (call_gas_limit > 0).then_some(call_gas_limit);
+                let mut simulation_state = BlockStateAccumulator::new();
 
                 for block in block_state_calls {
                     let SimBlock { block_overrides, state_overrides, calls } = block;
@@ -169,8 +170,9 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
                         apply_block_overrides(block_overrides, &mut db, &mut evm_env);
                     }
                     if let Some(ref state_overrides) = state_overrides {
-                        apply_state_overrides(state_overrides.clone(), &mut db)
+                        let state = apply_state_overrides(state_overrides.clone(), &mut db)
                             .map_err(Self::Error::from_eth_err)?;
+                        state.visit(&mut simulation_state).expect("infallible");
                     }
 
                     let chain_id = evm_env.chain_id();
@@ -210,6 +212,7 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
                         simulate::execute_transactions(
                             builder,
                             &state_provider,
+                            &mut simulation_state,
                             calls,
                             &mut remaining_call_gas_limit,
                             chain_id,
@@ -236,6 +239,7 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
                         simulate::execute_transactions(
                             builder,
                             &state_provider,
+                            &mut simulation_state,
                             calls,
                             &mut remaining_call_gas_limit,
                             chain_id,
