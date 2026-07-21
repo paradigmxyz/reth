@@ -980,7 +980,7 @@ Engine:
           [default: 7]
 
       --engine.persistence-backpressure-threshold <PERSISTENCE_BACKPRESSURE_THRESHOLD>
-          Configure the maximum canonical-minus-persisted gap before engine API processing stalls.
+          Configure the maximum number of blocks beyond the in-memory buffer target that may await persistence before engine API processing stalls.
 
           If omitted, this defaults to the larger of the default backpressure threshold and twice `--engine.persistence-threshold`.
 

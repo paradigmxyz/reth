@@ -6,7 +6,8 @@ use core::time::Duration;
 /// Triggers persistence when the number of canonical blocks in memory exceeds this threshold.
 pub const DEFAULT_PERSISTENCE_THRESHOLD: u64 = 7;
 
-/// Maximum canonical-minus-persisted gap before engine API processing is stalled.
+/// Maximum number of blocks beyond the in-memory buffer target awaiting persistence before engine
+/// API processing is stalled.
 pub const DEFAULT_PERSISTENCE_BACKPRESSURE_THRESHOLD: u64 = 16;
 
 /// How close to the canonical head we persist blocks.
@@ -88,7 +89,8 @@ pub struct TreeConfig {
     ///
     /// Note: this should be less than or equal to `persistence_threshold`.
     memory_block_buffer_target: u64,
-    /// Maximum canonical-minus-persisted gap before engine API processing is stalled.
+    /// Maximum number of blocks beyond the in-memory buffer target awaiting persistence before
+    /// engine API processing is stalled.
     persistence_backpressure_threshold: u64,
     /// Number of pending blocks that cannot be executed due to missing parent and
     /// are kept in cache.
