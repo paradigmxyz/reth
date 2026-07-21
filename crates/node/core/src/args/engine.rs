@@ -320,8 +320,11 @@ pub struct EngineArgs {
     pub persistence_backpressure_threshold: Option<u64>,
 
     /// Configure the target number of blocks to keep in memory.
-    #[arg(long = "engine.memory-block-buffer-target", default_value_t = DefaultEngineValues::get_global().memory_block_buffer_target)]
-    pub memory_block_buffer_target: u64,
+    ///
+    /// If omitted, this defaults to the lesser of `--engine.persistence-threshold` and the
+    /// configured default memory block buffer target.
+    #[arg(long = "engine.memory-block-buffer-target")]
+    pub memory_block_buffer_target: Option<u64>,
 
     /// Configure how many cache hits an invalid header can accumulate before it is evicted and
     /// reprocessed.
@@ -552,7 +555,7 @@ impl Default for EngineArgs {
         let DefaultEngineValues {
             persistence_threshold,
             persistence_backpressure_threshold: _,
-            memory_block_buffer_target,
+            memory_block_buffer_target: _,
             invalid_header_hit_eviction_threshold,
             state_cache_disabled,
             prewarming_disabled,
@@ -584,7 +587,7 @@ impl Default for EngineArgs {
         Self {
             persistence_threshold,
             persistence_backpressure_threshold: None,
-            memory_block_buffer_target,
+            memory_block_buffer_target: None,
             invalid_header_hit_eviction_threshold,
             state_root_task_compare_updates,
             legacy_state_root_task_enabled: false,
@@ -627,6 +630,14 @@ impl Default for EngineArgs {
 }
 
 impl EngineArgs {
+    /// Returns the effective memory block buffer target.
+    pub fn memory_block_buffer_target(&self) -> u64 {
+        self.memory_block_buffer_target.unwrap_or_else(|| {
+            self.persistence_threshold
+                .min(DefaultEngineValues::get_global().memory_block_buffer_target)
+        })
+    }
+
     /// Returns the effective persistence backpressure threshold.
     pub fn persistence_backpressure_threshold(&self) -> u64 {
         self.persistence_backpressure_threshold.unwrap_or_else(|| {
@@ -637,11 +648,18 @@ impl EngineArgs {
     /// Validates cross-field engine arguments.
     pub fn validate(&self) -> eyre::Result<()> {
         let persistence_backpressure_threshold = self.persistence_backpressure_threshold();
+        let memory_block_buffer_target = self.memory_block_buffer_target();
         ensure!(
             persistence_backpressure_threshold > self.persistence_threshold,
             "--engine.persistence-backpressure-threshold ({}) must be greater than --engine.persistence-threshold ({})",
             persistence_backpressure_threshold,
             self.persistence_threshold
+        );
+        ensure!(
+            memory_block_buffer_target <= self.persistence_threshold,
+            "--engine.memory-block-buffer-target ({}) must be less than or equal to --engine.persistence-threshold ({})",
+            memory_block_buffer_target,
+            self.persistence_threshold,
         );
         ensure!(
             self.bal_parallel_execution_disabled || !self.bal_parallel_state_root_disabled,
@@ -659,7 +677,7 @@ impl EngineArgs {
         let config = TreeConfig::default()
             .with_persistence_backpressure_threshold(self.persistence_backpressure_threshold())
             .with_persistence_threshold(self.persistence_threshold)
-            .with_memory_block_buffer_target(self.memory_block_buffer_target)
+            .with_memory_block_buffer_target(self.memory_block_buffer_target())
             .with_invalid_header_hit_eviction_threshold(self.invalid_header_hit_eviction_threshold)
             .without_state_cache(self.state_cache_disabled)
             .without_prewarming(self.prewarming_disabled)
@@ -714,7 +732,8 @@ mod tests {
         let args = CommandParser::<EngineArgs>::parse_from(["reth"]).args;
         assert_eq!(args, default_args);
         assert_eq!(args.persistence_threshold, 7);
-        assert_eq!(args.memory_block_buffer_target, 5);
+        assert_eq!(args.memory_block_buffer_target, None);
+        assert_eq!(args.memory_block_buffer_target(), 5);
         assert_eq!(
             args.persistence_backpressure_threshold(),
             DefaultEngineValues::get_global().persistence_backpressure_threshold
@@ -777,7 +796,7 @@ mod tests {
         let args = EngineArgs {
             persistence_threshold: 100,
             persistence_backpressure_threshold: Some(101),
-            memory_block_buffer_target: 50,
+            memory_block_buffer_target: Some(50),
             invalid_header_hit_eviction_threshold: 7,
             legacy_state_root_task_enabled: true,
             caching_and_prewarming_enabled: true,
@@ -875,6 +894,36 @@ mod tests {
         let err = args.validate().unwrap_err().to_string();
         assert!(err.contains("engine.persistence-backpressure-threshold"));
         assert!(err.contains("engine.persistence-threshold"));
+    }
+
+    #[test]
+    fn validate_memory_block_buffer_target() {
+        let args = EngineArgs {
+            persistence_threshold: 4,
+            memory_block_buffer_target: Some(4),
+            ..EngineArgs::default()
+        };
+        args.validate().unwrap();
+
+        let args = EngineArgs { memory_block_buffer_target: Some(5), ..args };
+        let err = args.validate().unwrap_err().to_string();
+        assert!(err.contains("engine.memory-block-buffer-target"));
+        assert!(err.contains("engine.persistence-threshold"));
+    }
+
+    #[test]
+    fn default_memory_block_buffer_target_is_bounded_by_persistence_threshold() {
+        let args = CommandParser::<EngineArgs>::parse_from([
+            "reth",
+            "--engine.persistence-threshold",
+            "4",
+        ])
+        .args;
+
+        assert_eq!(args.memory_block_buffer_target, None);
+        assert_eq!(args.memory_block_buffer_target(), 4);
+        assert_eq!(args.tree_config().memory_block_buffer_target(), 4);
+        args.validate().unwrap();
     }
 
     #[test]
