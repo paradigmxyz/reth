@@ -8,9 +8,11 @@ use alloy_sol_types::{ContractError, RevertReason};
 use alloy_transport::{RpcError, TransportErrorKind};
 pub use api::{AsEthApiError, FromEthApiError, FromEvmError, IntoEthApiError};
 use core::time::Duration;
+use evm2::{interpreter::InstrStop, registry::HandlerError};
+use evm2_inspectors::tracing::{DebugInspectorError, MuxError};
 use reth_errors::{BlockExecutionError, BlockValidationError, RethError};
 use reth_primitives_traits::transaction::{error::InvalidTransactionError, signed::RecoveryError};
-use reth_rpc_convert::TransactionConversionError;
+use reth_rpc_convert::{CallFeesError, EthTxEnvError, TransactionConversionError};
 use reth_rpc_server_types::result::{
     block_id_to_str, internal_rpc_err, invalid_params_rpc_err, rpc_err, rpc_error_with_code,
 };
@@ -20,16 +22,6 @@ use reth_transaction_pool::error::{
 };
 use std::convert::Infallible;
 use tokio::sync::oneshot::error::RecvError;
-
-#[cfg(any())]
-enum EvmDatabaseError<E> {
-    Bal(BalError),
-    Database(E),
-}
-
-#[cfg(any())]
-#[derive(Debug)]
-struct BalError;
 
 /// A trait to convert an error to an RPC error.
 pub trait ToRpcError: core::error::Error + Send + Sync + 'static {
@@ -179,6 +171,9 @@ pub enum EthApiError {
     /// Error encountered when converting a transaction type
     #[error(transparent)]
     TransactionConversionError(#[from] TransactionConversionError),
+    /// Error thrown when tracing with a muxTracer fails.
+    #[error(transparent)]
+    MuxTracerError(#[from] MuxError),
     /// Error thrown when waiting for transaction confirmation times out
     #[error(
         "Transaction {hash} was added to the mempool but wasn't confirmed within {duration:?}."
@@ -211,6 +206,41 @@ pub enum EthApiError {
     /// Any other error
     #[error("{0}")]
     Other(Box<dyn ToRpcError>),
+}
+
+/// Insufficient funds error.
+#[derive(Debug, thiserror::Error)]
+#[error("insufficient funds: cost {cost} > balance {balance}")]
+pub struct InsufficientFundsError {
+    /// Transaction cost.
+    pub cost: U256,
+    /// Account balance.
+    pub balance: U256,
+}
+
+/// Error type for call utilities.
+#[derive(Debug, thiserror::Error)]
+pub enum CallError<E> {
+    /// Database error.
+    #[error(transparent)]
+    Database(E),
+    /// Insufficient funds error.
+    #[error(transparent)]
+    InsufficientFunds(#[from] InsufficientFundsError),
+}
+
+/// Errors that can occur while applying state overrides.
+#[derive(Debug, thiserror::Error)]
+pub enum StateOverrideError<E> {
+    /// Invalid bytecode provided in an override.
+    #[error(transparent)]
+    InvalidBytecode(#[from] evm2::bytecode::BytecodeDecodeError),
+    /// Both state and state diff were provided for an account.
+    #[error("Both 'state' and 'stateDiff' fields are set for account {0}")]
+    BothStateAndStateDiff(Address),
+    /// Database error.
+    #[error(transparent)]
+    Database(E),
 }
 
 impl EthApiError {
@@ -250,6 +280,22 @@ impl EthApiError {
             Self::InvalidTransaction(e) => Some(e),
             _ => None,
         }
+    }
+
+    /// Converts the given [`StateOverrideError`] into a new [`EthApiError`] instance.
+    pub fn from_state_overrides_err<E>(err: StateOverrideError<E>) -> Self
+    where
+        E: Into<Self>,
+    {
+        err.into()
+    }
+
+    /// Converts the given [`CallError`] into a new [`EthApiError`] instance.
+    pub fn from_call_err<E>(err: CallError<E>) -> Self
+    where
+        E: Into<Self>,
+    {
+        err.into()
     }
 
     /// Converts this error into the rpc error object.
@@ -315,6 +361,7 @@ impl From<EthApiError> for jsonrpsee_types::error::ErrorObject<'static> {
             err @ EthApiError::TransactionInputError(_) => invalid_params_rpc_err(err.to_string()),
             EthApiError::PrunedHistoryUnavailable => rpc_error_with_code(4444, error.to_string()),
             EthApiError::Other(err) => err.to_rpc_error(),
+            EthApiError::MuxTracerError(msg) => internal_rpc_err(msg.to_string()),
             EthApiError::BatchTxRecvError(err) => internal_rpc_err(err.to_string()),
             EthApiError::BatchTxSendError => {
                 internal_rpc_err("Batch transaction sender channel closed".to_string())
@@ -336,23 +383,98 @@ impl From<EthApiError> for jsonrpsee_types::error::ErrorObject<'static> {
     }
 }
 
-#[cfg(any())]
-impl<E> From<EvmDatabaseError<E>> for EthApiError
+impl<E> From<CallError<E>> for EthApiError
 where
     E: Into<Self>,
 {
-    fn from(value: EvmDatabaseError<E>) -> Self {
+    fn from(value: CallError<E>) -> Self {
         match value {
-            EvmDatabaseError::Bal(err) => err.into(),
-            EvmDatabaseError::Database(err) => err.into(),
+            CallError::Database(err) => err.into(),
+            CallError::InsufficientFunds(err) => {
+                Self::InvalidTransaction(RpcInvalidTransactionError::InsufficientFunds {
+                    cost: err.cost,
+                    balance: err.balance,
+                })
+            }
         }
     }
 }
 
-#[cfg(any())]
-impl From<BalError> for EthApiError {
-    fn from(err: BalError) -> Self {
-        Self::EvmCustom(format!("bal error: {:?}", err))
+impl<E> From<StateOverrideError<E>> for EthApiError
+where
+    E: Into<Self>,
+{
+    fn from(value: StateOverrideError<E>) -> Self {
+        match value {
+            StateOverrideError::InvalidBytecode(err) => Self::InvalidBytecode(err.to_string()),
+            StateOverrideError::BothStateAndStateDiff(address) => {
+                Self::BothStateAndStateDiffInOverride(address)
+            }
+            StateOverrideError::Database(err) => err.into(),
+        }
+    }
+}
+
+impl From<EthTxEnvError> for EthApiError {
+    fn from(value: EthTxEnvError) -> Self {
+        match value {
+            EthTxEnvError::CallFees(CallFeesError::BlobTransactionMissingBlobHashes) => {
+                Self::InvalidTransaction(
+                    RpcInvalidTransactionError::BlobTransactionMissingBlobHashes,
+                )
+            }
+            EthTxEnvError::CallFees(CallFeesError::FeeCapTooLow) => {
+                Self::InvalidTransaction(RpcInvalidTransactionError::FeeCapTooLow)
+            }
+            EthTxEnvError::CallFees(CallFeesError::ConflictingFeeFieldsInRequest) => {
+                Self::ConflictingFeeFieldsInRequest
+            }
+            EthTxEnvError::CallFees(CallFeesError::TipAboveFeeCap) => {
+                Self::InvalidTransaction(RpcInvalidTransactionError::TipAboveFeeCap)
+            }
+            EthTxEnvError::CallFees(CallFeesError::TipVeryHigh) => {
+                Self::InvalidTransaction(RpcInvalidTransactionError::TipVeryHigh)
+            }
+            EthTxEnvError::Input(err) => Self::TransactionInputError(err),
+            EthTxEnvError::BlobTransactionIsCreate => {
+                Self::InvalidTransaction(RpcInvalidTransactionError::BlobTransactionIsCreate)
+            }
+            EthTxEnvError::AuthorizationListInvalidFields => {
+                Self::InvalidTransaction(RpcInvalidTransactionError::AuthorizationListInvalidFields)
+            }
+        }
+    }
+}
+
+#[cfg(feature = "js-tracer")]
+impl From<evm2_inspectors::tracing::js::JsInspectorError> for EthApiError {
+    fn from(error: evm2_inspectors::tracing::js::JsInspectorError) -> Self {
+        match error {
+            err @ evm2_inspectors::tracing::js::JsInspectorError::JsError(_) => {
+                Self::InternalJsTracerError(err.to_string())
+            }
+            err => Self::InvalidParams(err.to_string()),
+        }
+    }
+}
+
+impl From<DebugInspectorError> for EthApiError {
+    fn from(error: DebugInspectorError) -> Self {
+        match error {
+            DebugInspectorError::InvalidTracerConfig => Self::InvalidTracerConfig,
+            DebugInspectorError::UnsupportedTracer => Self::Unsupported("unsupported tracer"),
+            DebugInspectorError::JsTracerNotEnabled => {
+                Self::Unsupported("JS Tracer is not enabled")
+            }
+            DebugInspectorError::MuxInspector(err) => err.into(),
+            DebugInspectorError::Database(err) => {
+                Self::Internal(RethError::msg(format!("{err:?}")))
+            }
+            #[cfg(feature = "js-tracer")]
+            DebugInspectorError::JsInspector(err) => err.into(),
+            #[allow(unreachable_patterns)]
+            _ => Self::Unsupported("unsupported tracer error"),
+        }
     }
 }
 
@@ -385,6 +507,12 @@ impl From<BlockExecutionError> for EthApiError {
                         ))
                     }
                 }
+                BlockValidationError::Other(error) => match error.downcast::<HandlerError>() {
+                    Ok(error) => Self::InvalidTransaction((*error).into()),
+                    Err(error) => Self::Internal(RethError::Execution(
+                        BlockExecutionError::Validation(BlockValidationError::Other(error)),
+                    )),
+                },
                 _ => Self::Internal(RethError::Execution(BlockExecutionError::Validation(
                     validation_error,
                 ))),
@@ -393,6 +521,12 @@ impl From<BlockExecutionError> for EthApiError {
                 Self::Internal(RethError::Execution(BlockExecutionError::Internal(internal_error)))
             }
         }
+    }
+}
+
+impl From<evm2::AnyError> for EthApiError {
+    fn from(error: evm2::AnyError) -> Self {
+        Self::EvmCustom(error.to_string())
     }
 }
 
@@ -611,6 +745,19 @@ impl RpcInvalidTransactionError {
         Self::Other(Box::new(err))
     }
 
+    /// Converts the halt error.
+    pub fn halt(reason: InstrStop, gas_limit: u64) -> Self {
+        match reason {
+            InstrStop::OutOfGas | InstrStop::ReentrancySentryOOG => Self::BasicOutOfGas(gas_limit),
+            InstrStop::MemoryOOG => Self::MemoryOutOfGas(gas_limit),
+            InstrStop::MemoryLimitOOG => Self::MemoryLimitOutOfGas,
+            InstrStop::PrecompileOOG => Self::PrecompileOutOfGas(gas_limit),
+            InstrStop::InvalidOperandOOG => Self::InvalidOperandOutOfGas(gas_limit),
+            InstrStop::NonceOverflow => Self::NonceMaxValue,
+            err => Self::EvmHalt(format!("{err:?}")),
+        }
+    }
+
     /// Returns the rpc error code for this error.
     pub const fn error_code(&self) -> i32 {
         match self {
@@ -679,6 +826,42 @@ impl From<InvalidTransactionError> for RpcInvalidTransactionError {
             InvalidTransactionError::FeeCapTooLow => Self::FeeCapTooLow,
             InvalidTransactionError::SignerAccountHasBytecode => Self::SenderNoEOA,
             InvalidTransactionError::GasLimitTooHigh => Self::GasLimitTooHigh,
+        }
+    }
+}
+
+impl From<HandlerError> for RpcInvalidTransactionError {
+    fn from(err: HandlerError) -> Self {
+        match err {
+            HandlerError::InvalidNonce { expected, got } if got < expected => {
+                Self::NonceTooLow { tx: got, state: expected }
+            }
+            HandlerError::InvalidNonce { .. } => Self::NonceTooHigh,
+            HandlerError::InvalidChainId { .. } | HandlerError::MissingChainId => {
+                Self::InvalidChainId
+            }
+            HandlerError::IntrinsicGasTooLow { .. } => Self::GasTooLow,
+            HandlerError::InsufficientFunds | HandlerError::OutOfFunds => {
+                Self::InsufficientFundsForTransfer
+            }
+            HandlerError::RejectCallerWithCode => Self::SenderNoEOA,
+            HandlerError::NonceOverflow => Self::NonceMaxValue,
+            HandlerError::GasLimitMoreThanBlock { .. } |
+            HandlerError::TxGasLimitGreaterThanCap { .. } => Self::GasTooHigh,
+            HandlerError::CreateInitCodeSizeLimit { .. } => Self::MaxInitCodeSizeExceeded,
+            HandlerError::UnsupportedTransactionType(_) |
+            HandlerError::WrongTransactionType { .. } => Self::TxTypeNotSupported,
+            HandlerError::FeeCapLessThanBaseFee { .. } => Self::FeeCapTooLow,
+            HandlerError::EmptyAuthorizationList => Self::AuthorizationListInvalidFields,
+            HandlerError::BlobFeeCapLessThanBlobBaseFee { .. } => Self::BlobFeeCapTooLow,
+            HandlerError::EmptyBlobs => Self::BlobTransactionMissingBlobHashes,
+            HandlerError::TooManyBlobs { have, .. } => Self::TooManyBlobs { have },
+            HandlerError::BlobVersionNotSupported => Self::BlobHashVersionMismatch,
+            HandlerError::PriorityFeeGreaterThanMaxFee => Self::TipAboveFeeCap,
+            err => Self::other(rpc_error_with_code(
+                EthRpcErrorCode::TransactionRejected.code(),
+                err.to_string(),
+            )),
         }
     }
 }

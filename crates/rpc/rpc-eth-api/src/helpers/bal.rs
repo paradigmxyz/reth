@@ -5,7 +5,7 @@ use alloy_primitives::Bytes;
 use alloy_rpc_types_eth::BlockId;
 use reth_errors::RethError;
 use reth_evm::{
-    database::StateProviderDatabase, BlockExecutor, ConfigureEvm, ExecutableTxParts, TxEnvFor,
+    database::StateProviderDatabase, BlockExecutor, ConfigureEvm, ExecutableTxParts, TxFor,
 };
 use reth_primitives_traits::TxTy;
 use reth_rpc_eth_types::{error::FromEthApiError, EthApiError};
@@ -51,7 +51,7 @@ pub trait GetBlockAccessList: Trace + Call + LoadBlock + RpcNodeCoreExt {
                 executor.apply_pre_execution_changes().map_err(Self::Error::from_eth_err)?;
                 for block_tx in block.transactions_recovered() {
                     let (tx_env, _) = <_ as ExecutableTxParts<
-                        TxEnvFor<Self::Evm>,
+                        TxFor<Self::Evm>,
                         TxTy<Self::Primitives>,
                     >>::into_parts(block_tx);
                     executor.execute_transaction(tx_env).map_err(Self::Error::from_eth_err)?;

@@ -157,6 +157,27 @@ impl EvmTransactionValidationGasRules {
 
 /// Resolved EVM environment data needed by the EVM execution path.
 pub trait EvmEnv: Debug + Clone + Send + Sync + 'static {
+    /// Runtime EVM type family.
+    type EvmTypes: evm2::EvmTypes;
+
+    /// Returns the active EVM specification.
+    fn spec_id(&self) -> <Self::EvmTypes as evm2::EvmTypesHost>::SpecId;
+
+    /// Returns the active chain ID.
+    fn chain_id(&self) -> u64;
+
+    /// Returns the configured block environment.
+    fn block_env(&self) -> &evm2::env::BlockEnv<Self::EvmTypes>;
+
+    /// Returns the configured block environment mutably.
+    fn block_env_mut(&mut self) -> &mut evm2::env::BlockEnv<Self::EvmTypes>;
+
+    /// Returns the active EVM version.
+    fn version(&self) -> &evm2::Version;
+
+    /// Returns the active EVM version mutably.
+    fn version_mut(&mut self) -> &mut evm2::Version;
+
     /// Returns the block base fee resolved for this environment.
     fn block_base_fee(&self) -> u64;
 
@@ -215,6 +236,7 @@ pub trait ConfigureEvm: Clone + Debug + Send + Sync + Unpin {
     /// Configured block executor factory.
     type BlockExecutorFactory: crate::execute::BlockExecutorFactory<
         Primitives = Self::Primitives,
+        EvmTransaction: From<TxTy<Self::Primitives>>,
         Transaction: FromTxWithEncoded<TxTy<Self::Primitives>>,
     >;
 

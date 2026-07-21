@@ -3,24 +3,40 @@
 
 use super::SpawnBlocking;
 use crate::{EthApiTypes, FromEthApiError, FromEvmError, RpcNodeCore};
-use alloy_consensus::BlockHeader;
+use alloy_consensus::{BlockHeader, Transaction};
+use alloy_eips::eip7840::BlobParams;
 use alloy_primitives::B256;
 use alloy_rpc_types_eth::{BlockNumberOrTag, BlockOverrides};
 use futures::Future;
-use reth_errors::RethError;
-use reth_evm::{ConfigureEvm, EvmEnvFor, NextBlockEnvAttributes};
-use reth_primitives_traits::{HeaderTy, SealedHeader};
+use reth_chain_state::{BlockState, ExecutedBlock};
+use reth_chainspec::{ChainSpecProvider, EthChainSpec, EthereumHardforks};
+use reth_errors::{BlockExecutionError, BlockValidationError, ProviderError, RethError};
+use reth_evm::{
+    database::StateProviderDatabase,
+    execute::{BlockBuilder, BlockBuilderOutcome, BlockExecutionOutput},
+    ConfigureEvm, EvmEnv, EvmEnvFor, NextBlockEnvAttributes,
+};
+use reth_primitives_traits::{transaction::error::InvalidTransactionError, HeaderTy, SealedHeader};
 use reth_rpc_convert::RpcConvert;
 use reth_rpc_eth_types::{
     block::BlockAndReceipts, builder::config::PendingBlockKind, EthApiError, PendingBlock,
     PendingBlockEnv, PendingBlockEnvOrigin,
 };
 use reth_storage_api::{
-    BlockReader, BlockReaderIdExt, ProviderHeader, ProviderTx, StateProviderBox,
+    noop::NoopProvider, BlockReader, BlockReaderIdExt, ProviderHeader, ProviderTx,
+    StateProviderBox, StateProviderFactory,
 };
-use reth_transaction_pool::{PoolTransaction, TransactionPool};
-use std::sync::Arc;
+use reth_transaction_pool::{
+    error::InvalidPoolTransactionError, BestTransactions, BestTransactionsAttributes,
+    PoolTransaction, TransactionPool,
+};
+use reth_trie_common::ComputedTrieData;
+use std::{
+    sync::Arc,
+    time::{Duration, Instant},
+};
 use tokio::sync::Mutex;
+use tracing::debug;
 
 /// Loads a pending block from database.
 ///
@@ -96,7 +112,20 @@ pub trait LoadPendingBlock:
     where
         Self: SpawnBlocking,
     {
-        async move { Ok(None) }
+        async move {
+            let Some(pending_block) = self.pool_pending_block().await? else {
+                return Ok(None);
+            };
+
+            let latest_historical = self
+                .provider()
+                .history_by_block_hash(pending_block.block().parent_hash())
+                .map_err(Self::Error::from_eth_err)?;
+
+            let state = BlockState::from(pending_block);
+
+            Ok(Some(Box::new(state.state_provider(latest_historical)) as StateProviderBox))
+        }
     }
 
     /// Returns a mem-pool built pending block.
@@ -106,7 +135,18 @@ pub trait LoadPendingBlock:
     where
         Self: SpawnBlocking,
     {
-        async move { Ok(None) }
+        async move {
+            if self.pending_block_kind().is_none() {
+                return Ok(None);
+            }
+            let pending = self.pending_block_env_and_cfg()?;
+            let parent = match pending.origin {
+                PendingBlockEnvOrigin::ActualPending(..) => return Ok(None),
+                PendingBlockEnvOrigin::DerivedFromLatest(parent) => parent,
+            };
+
+            self.build_pool_pending_block(parent, pending.evm_env).await
+        }
     }
 
     /// Builds or returns a cached pending block from the transaction pool.
@@ -122,8 +162,44 @@ pub trait LoadPendingBlock:
         Self: SpawnBlocking,
     {
         async move {
-            let _ = (parent, evm_env);
-            Ok(None)
+            // we couldn't find the real pending block, so we need to build it ourselves
+            let mut lock = self.pending_block().lock().await;
+
+            let now = Instant::now();
+
+            // Is the pending block cached?
+            if let Some(pending_block) = lock.as_ref() {
+                // Is the cached block not expired and latest is its parent?
+                if evm_env.block_env().number.to::<u64>() == pending_block.block().number() &&
+                    parent.hash() == pending_block.block().parent_hash() &&
+                    now <= pending_block.expires_at
+                {
+                    return Ok(Some(pending_block.clone()));
+                }
+            }
+
+            let executed_block = match self
+                .spawn_blocking_io(move |this| {
+                    // we rebuild the block
+                    this.build_block(&parent)
+                })
+                .await
+            {
+                Ok(block) => block,
+                Err(err) => {
+                    debug!(target: "rpc", "Failed to build pending block: {:?}", err);
+                    return Ok(None)
+                }
+            };
+
+            let pending = PendingBlock::with_executed_block(
+                Instant::now() + Duration::from_secs(1),
+                executed_block,
+            );
+
+            *lock = Some(pending.clone());
+
+            Ok(Some(pending))
         }
     }
 
@@ -147,7 +223,10 @@ pub trait LoadPendingBlock:
                 PendingBlockEnvOrigin::ActualPending(block, receipts) => {
                     Some(BlockAndReceipts { block, receipts })
                 }
-                PendingBlockEnvOrigin::DerivedFromLatest(_) => None,
+                PendingBlockEnvOrigin::DerivedFromLatest(parent) => self
+                    .build_pool_pending_block(parent, pending.evm_env)
+                    .await?
+                    .map(PendingBlock::into_block_and_receipts),
             })
         }
     }
@@ -159,7 +238,6 @@ pub trait LoadPendingBlock:
     ///
     /// Withdrawals and any fork-specific behavior (such as EIP-4788 pre-block contract calls) are
     /// determined by the EVM environment and chain specification used during construction.
-    #[cfg(any())]
     fn build_block(
         &self,
         parent: &SealedHeader<ProviderHeader<Self::Provider>>,
@@ -174,23 +252,23 @@ pub trait LoadPendingBlock:
             .history_by_block_hash(parent.hash())
             .map_err(Self::Error::from_eth_err)?;
         let state = StateProviderDatabase::new(state_provider);
-        let mut db = State::builder().with_database(state).with_bundle_update().build();
 
         let mut builder = self
             .evm_config()
-            .builder_for_next_block(&mut db, parent, self.next_env_attributes(parent)?)
+            .builder_for_next_block(state, parent, self.next_env_attributes(parent)?)
             .map_err(RethError::other)
             .map_err(Self::Error::from_eth_err)?;
 
         builder.apply_pre_execution_changes().map_err(Self::Error::from_eth_err)?;
 
-        let block_gas_limit: u64 = builder.evm().block().gas_limit();
-        let is_amsterdam = self
+        let block_gas_limit = builder.evm_env().block_env().gas_limit.to::<u64>();
+        let is_amsterdam = builder.evm_env().uses_separate_block_gas();
+        let basefee = builder.evm_env().block_base_fee();
+        let blob_gasprice = self
             .provider()
             .chain_spec()
-            .is_amsterdam_active_at_timestamp(builder.evm().block().timestamp().saturating_to());
-        let basefee = builder.evm().block().basefee();
-        let blob_gasprice = builder.evm().block().blob_gasprice().map(|p| p as u64);
+            .is_cancun_active_at_timestamp(builder.evm_env().block_env().timestamp.to())
+            .then(|| builder.evm_env().block_blob_base_fee());
 
         let blob_params = self
             .provider()
@@ -201,7 +279,7 @@ pub trait LoadPendingBlock:
         let mut block_regular_gas_used = 0;
         let mut block_state_gas_used = 0;
         let mut sum_blob_gas_used = 0;
-        let tx_gas_limit_cap = builder.evm().cfg_env().tx_gas_limit_cap();
+        let tx_gas_limit_cap = builder.evm_env().regular_gas_limit_cap();
 
         // Only include transactions if not configured as Empty
         if !self.pending_block_kind().is_empty() {
@@ -286,48 +364,44 @@ pub trait LoadPendingBlock:
                     continue
                 }
 
-                let mut tx_regular_gas_used = 0;
-                let gas_output =
-                    match builder.execute_transaction_with_result_closure(tx, |result| {
-                        tx_regular_gas_used = result.result().result.gas().block_regular_gas_used();
-                    }) {
-                        Ok(gas_output) => gas_output,
-                        Err(BlockExecutionError::Validation(BlockValidationError::InvalidTx {
-                            error,
-                            ..
-                        })) => {
-                            if error.is_nonce_too_low() {
-                                // if the nonce is too low, we can skip this transaction
-                            } else {
-                                // if the transaction is invalid, we can skip it and all of its
-                                // descendants
-                                best_txs.mark_invalid(
-                                    &pool_tx,
-                                    InvalidPoolTransactionError::Consensus(
-                                        InvalidTransactionError::TxTypeNotSupported,
-                                    ),
-                                );
-                            }
-                            continue
-                        }
-                        Err(BlockExecutionError::Validation(
-                            BlockValidationError::TransactionGasLimitMoreThanAvailableBlockGas {
-                                transaction_gas_limit,
-                                block_available_gas,
-                            },
-                        )) => {
+                let gas_output = match builder.execute_transaction(tx) {
+                    Ok(gas_output) => gas_output,
+                    Err(BlockExecutionError::Validation(BlockValidationError::InvalidTx {
+                        error,
+                        ..
+                    })) => {
+                        if error.is_nonce_too_low() {
+                            // if the nonce is too low, we can skip this transaction
+                        } else {
+                            // if the transaction is invalid, we can skip it and all of its
+                            // descendants
                             best_txs.mark_invalid(
                                 &pool_tx,
-                                InvalidPoolTransactionError::ExceedsGasLimit(
-                                    transaction_gas_limit,
-                                    block_available_gas,
+                                InvalidPoolTransactionError::Consensus(
+                                    InvalidTransactionError::TxTypeNotSupported,
                                 ),
                             );
-                            continue
                         }
-                        // this is an error that we should treat as fatal for this attempt
-                        Err(err) => return Err(Self::Error::from_eth_err(err)),
-                    };
+                        continue
+                    }
+                    Err(BlockExecutionError::Validation(
+                        BlockValidationError::TransactionGasLimitMoreThanAvailableBlockGas {
+                            transaction_gas_limit,
+                            block_available_gas,
+                        },
+                    )) => {
+                        best_txs.mark_invalid(
+                            &pool_tx,
+                            InvalidPoolTransactionError::ExceedsGasLimit(
+                                transaction_gas_limit,
+                                block_available_gas,
+                            ),
+                        );
+                        continue
+                    }
+                    // this is an error that we should treat as fatal for this attempt
+                    Err(err) => return Err(Self::Error::from_eth_err(err)),
+                };
 
                 // add to the total blob gas used if the transaction successfully executed
                 if let Some(tx_blob_gas) = tx_blob_gas {
@@ -342,19 +416,22 @@ pub trait LoadPendingBlock:
                 // Track receipt gas and the Amsterdam block-capacity counter separately.
                 let gas_used = gas_output.tx_gas_used();
                 cumulative_tx_gas_used += gas_used;
-                block_regular_gas_used += tx_regular_gas_used;
+                block_regular_gas_used += gas_output.regular_gas_used();
                 block_state_gas_used += gas_output.state_gas_used();
             }
         }
 
-        let BlockBuilderOutcome { execution_result, block, hashed_state, trie_updates, .. } =
-            builder.finish(NoopProvider::default(), None).map_err(Self::Error::from_eth_err)?;
-
-        let block_number = block.number();
-        let execution_outcome = BlockExecutionOutput::new(
+        let BlockBuilderOutcome {
             execution_result,
-            legacy_bundle_to_execution_state(db.take_bundle(), block_number),
-        );
+            execution_state,
+            block,
+            hashed_state,
+            trie_updates,
+            ..
+        } = builder.finish(NoopProvider::default(), None).map_err(Self::Error::from_eth_err)?;
+
+        let execution_outcome =
+            BlockExecutionOutput { state: execution_state, result: execution_result };
 
         Ok(ExecutedBlock::new(
             block.into(),

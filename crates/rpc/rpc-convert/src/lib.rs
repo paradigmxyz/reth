@@ -10,11 +10,15 @@
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 #![cfg_attr(docsrs, feature(doc_cfg))]
 
+mod fees;
 mod rpc;
 pub mod transaction;
 
+pub use fees::{CallFees, CallFeesError};
 pub use rpc::*;
-pub use transaction::{RpcConvert, RpcConverter, TransactionConversionError};
+pub use transaction::{
+    EthTxEnvError, RpcConvert, RpcConverter, TransactionConversionError, TryIntoTxEnv,
+};
 
 // Re-export traits from reth-rpc-traits
 pub use reth_rpc_traits::{

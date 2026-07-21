@@ -12,12 +12,12 @@ use crate::{
     EthBlockExecutionCtx, EthEvmEnv, EthTxEnv, RethReceiptBuilder,
 };
 use alloc::{borrow::Cow, boxed::Box, sync::Arc, vec::Vec};
-use alloy_consensus::{Header, TxType};
+use alloy_consensus::{Header, Transaction, TxType};
 use alloy_eip7928::{BlockAccessIndex, BlockAccessList};
 use alloy_eips::{eip2718::Typed2718, eip4895::Withdrawal, eip7685::Requests};
 use alloy_primitives::{Address, B256};
 use evm2::{
-    ethereum::RecoveredTxEnvelope,
+    ethereum::TxEnvelope,
     evm::{Bal, BlockStateAccumulator, StateChangeSource},
     interpreter::Host,
     BaseEvmTypes, Evm, EvmTypes, TxResult, TxResultWithState,
@@ -34,7 +34,7 @@ use reth_trie_common::HashedPostState;
 #[expect(missing_debug_implementations)]
 pub struct EthBlockExecutor<'a, T = BaseEvmTypes>
 where
-    T: EvmTypes<Tx = RecoveredTxEnvelope>,
+    T: EvmTypes<Tx = TxEnvelope>,
     T::Tx: Typed2718,
     T::TxResultExt: Send,
 {
@@ -94,7 +94,7 @@ impl HashedStateMode {
 
 impl<'a, T> EthBlockExecutor<'a, T>
 where
-    T: EvmTypes<Tx = RecoveredTxEnvelope>,
+    T: EvmTypes<Tx = TxEnvelope>,
     T::Tx: Typed2718,
     T::TxResultExt: Send,
 {
@@ -228,7 +228,7 @@ where
 
 impl<'a, T> BlockExecutor for EthBlockExecutor<'a, T>
 where
-    T: EvmTypes<Tx = RecoveredTxEnvelope>,
+    T: EvmTypes<Tx = TxEnvelope>,
     T::Tx: Typed2718,
     T::TxResultExt: Send,
 {
@@ -433,7 +433,7 @@ where
 /// One block execution segment inside a merged big-block payload.
 pub struct EthBigBlockSegment<'a, T = BaseEvmTypes>
 where
-    T: EvmTypes<Tx = RecoveredTxEnvelope>,
+    T: EvmTypes<Tx = TxEnvelope>,
 {
     /// Transaction index at which this segment starts.
     pub start_tx: usize,
@@ -445,7 +445,7 @@ where
 
 impl<'a, T> Clone for EthBigBlockSegment<'a, T>
 where
-    T: EvmTypes<Tx = RecoveredTxEnvelope>,
+    T: EvmTypes<Tx = TxEnvelope>,
 {
     fn clone(&self) -> Self {
         Self { start_tx: self.start_tx, evm_env: self.evm_env.clone(), ctx: self.ctx.clone() }
@@ -454,7 +454,7 @@ where
 
 impl<'a, T> core::fmt::Debug for EthBigBlockSegment<'a, T>
 where
-    T: EvmTypes<Tx = RecoveredTxEnvelope>,
+    T: EvmTypes<Tx = TxEnvelope>,
     T::SpecId: core::fmt::Debug,
 {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
@@ -469,7 +469,7 @@ where
 /// Execution plan for a merged big-block payload.
 pub struct EthBigBlockPlan<'a, T = BaseEvmTypes>
 where
-    T: EvmTypes<Tx = RecoveredTxEnvelope>,
+    T: EvmTypes<Tx = TxEnvelope>,
 {
     /// Ordered execution segments.
     pub segments: Vec<EthBigBlockSegment<'a, T>>,
@@ -481,7 +481,7 @@ where
 
 impl<'a, T> Clone for EthBigBlockPlan<'a, T>
 where
-    T: EvmTypes<Tx = RecoveredTxEnvelope>,
+    T: EvmTypes<Tx = TxEnvelope>,
 {
     fn clone(&self) -> Self {
         Self {
@@ -494,7 +494,7 @@ where
 
 impl<'a, T> core::fmt::Debug for EthBigBlockPlan<'a, T>
 where
-    T: EvmTypes<Tx = RecoveredTxEnvelope>,
+    T: EvmTypes<Tx = TxEnvelope>,
     T::SpecId: core::fmt::Debug,
 {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
@@ -508,7 +508,7 @@ where
 
 impl<'a, T> EthBigBlockPlan<'a, T>
 where
-    T: EvmTypes<Tx = RecoveredTxEnvelope>,
+    T: EvmTypes<Tx = TxEnvelope>,
 {
     /// Creates a plan and adds hashes for the boundaries between segments.
     pub fn new(
@@ -556,7 +556,7 @@ struct FinishedBigBlockSegment {
 pub struct EthBigBlockExecutor<'a, C, F = crate::factory::RethEvmFactory>
 where
     F: EvmFactory,
-    F::Types: EvmTypes<Tx = RecoveredTxEnvelope>,
+    F::Types: EvmTypes<Tx = TxEnvelope>,
     <F::Types as evm2::EvmTypesHost>::Tx: Typed2718,
     <F::Types as evm2::EvmTypesHost>::TxResultExt: Send,
 {
@@ -579,7 +579,7 @@ impl<'a, C, F> EthBigBlockExecutor<'a, C, F>
 where
     C: EthereumHardforks,
     F: EvmFactory,
-    F::Types: EvmTypes<Tx = RecoveredTxEnvelope>,
+    F::Types: EvmTypes<Tx = TxEnvelope>,
     <F::Types as evm2::EvmTypesHost>::Tx: Typed2718,
     <F::Types as evm2::EvmTypesHost>::TxResultExt: Send,
 {
@@ -770,7 +770,7 @@ impl<'a, C, F> BlockExecutor for EthBigBlockExecutor<'a, C, F>
 where
     C: EthereumHardforks,
     F: EvmFactory,
-    F::Types: EvmTypes<Tx = RecoveredTxEnvelope>,
+    F::Types: EvmTypes<Tx = TxEnvelope>,
     <F::Types as evm2::EvmTypesHost>::Tx: Typed2718,
     <F::Types as evm2::EvmTypesHost>::TxResultExt: Send,
 {

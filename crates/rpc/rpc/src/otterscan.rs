@@ -11,19 +11,16 @@ use alloy_rpc_types_trace::{
     parity::{Action, CreateAction, CreateOutput, TraceOutput},
 };
 use async_trait::async_trait;
-use evm2::{interpreter::InstrStop, NoopInspector};
 use evm2_inspectors::{
-    tracing::TracingInspectorConfig,
+    tracing::{types::CallTraceNode, TracingInspectorConfig},
     transfer::{TransferInspector, TransferKind},
 };
-use jsonrpsee::core::RpcResult;
-use jsonrpsee_types::ErrorObjectOwned;
-use reth_evm::{BlockExecutorFactory, ConfigureEvm, TxEnvFor};
+use jsonrpsee::{core::RpcResult, types::ErrorObjectOwned};
 use reth_primitives_traits::TxTy;
 use reth_rpc_api::{EthApiServer, OtterscanServer};
 use reth_rpc_convert::RpcTxReq;
 use reth_rpc_eth_api::{
-    helpers::{EthTransactions, TraceEvmInstance, TraceExt, TraceTxEnvelope},
+    helpers::{EthTransactions, TraceExt},
     FullEthApiTypes, RpcBlock, RpcHeader, RpcReceipt, RpcTransaction,
 };
 use reth_rpc_eth_types::{utils::binary_search, EthApiError};
@@ -80,10 +77,6 @@ where
         > + EthTransactions
         + TraceExt
         + 'static,
-    Eth::Evm: ConfigureEvm,
-    <Eth::Evm as ConfigureEvm>::BlockExecutorFactory:
-        for<'a> BlockExecutorFactory<Evm<'a> = TraceEvmInstance<'a>>,
-    TxEnvFor<Eth::Evm>: AsRef<TraceTxEnvelope>,
 {
     /// Handler for `ots_getHeaderByNumber` and `erigon_getHeaderByNumber`
     async fn get_header_by_number(
@@ -138,13 +131,9 @@ where
     async fn get_transaction_error(&self, tx_hash: TxHash) -> RpcResult<Option<Bytes>> {
         let maybe_revert = self
             .eth
-            .spawn_trace_transaction_in_block_with_inspector(
-                tx_hash,
-                NoopInspector::default(),
-                |_tx_info, _inspector, res, _| {
-                    Ok((res.result.stop == InstrStop::Revert).then_some(res.result.output))
-                },
-            )
+            .spawn_replay_transaction(tx_hash, |_tx_info, res, _| {
+                Ok((!res.result.status && res.result.stop.is_revert()).then_some(res.result.output))
+            })
             .await
             .map(Option::flatten)
             .map_err(Into::into)?;
@@ -165,21 +154,18 @@ where
             .map(|traces| {
                 traces
                     .into_iter()
-                    .map(|node| {
-                        let trace = node.trace;
-                        TraceEntry {
-                            r#type: if trace.is_selfdestruct() {
-                                "SELFDESTRUCT".to_string()
-                            } else {
-                                trace.kind.to_string()
-                            },
-                            depth: trace.depth as u32,
-                            from: trace.caller,
-                            to: trace.address,
-                            value: Some(trace.value),
-                            input: trace.data,
-                            output: trace.output,
-                        }
+                    .map(|CallTraceNode { trace, .. }| TraceEntry {
+                        r#type: if trace.is_selfdestruct() {
+                            "SELFDESTRUCT".to_string()
+                        } else {
+                            trace.kind.to_string()
+                        },
+                        depth: trace.depth as u32,
+                        from: trace.caller,
+                        to: trace.address,
+                        value: Some(trace.value),
+                        input: trace.data,
+                        output: trace.output,
                     })
                     .collect::<Vec<_>>()
             });
@@ -330,7 +316,7 @@ where
     /// Handler for `ots_getContractCreator`
     async fn get_contract_creator(&self, address: Address) -> RpcResult<Option<ContractCreator>> {
         if !self.has_code(address, None).await? {
-            return Ok(None)
+            return Ok(None);
         }
 
         let num = binary_search::<_, _, ErrorObjectOwned>(

@@ -387,7 +387,7 @@ mod tests {
         executor.apply_pre_execution_changes().expect("serial pre-exec");
         for (index, tx) in txs.iter().cloned().enumerate() {
             executor
-                .execute_transaction(evm_config.tx_env(tx))
+                .execute_transaction(tx.into())
                 .unwrap_or_else(|err| panic!("serial tx {index} failed: {err:?}"));
         }
         let (output, bal) = executor.finish_with_block_access_list().expect("serial post-exec");

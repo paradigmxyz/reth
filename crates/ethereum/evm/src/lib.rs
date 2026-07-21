@@ -115,11 +115,37 @@ impl<T: evm2::EvmTypesHost> AsRef<evm2::env::BlockEnv<T>> for EthEvmEnv<T> {
     }
 }
 
-impl<T: evm2::EvmTypesHost> EvmEnv for EthEvmEnv<T>
+impl<T: evm2::EvmTypes> EvmEnv for EthEvmEnv<T>
 where
     T::SpecId: Debug + Send + Sync,
     T::BlockEnvExt: Send + Sync,
 {
+    type EvmTypes = T;
+
+    fn spec_id(&self) -> T::SpecId {
+        self.spec
+    }
+
+    fn chain_id(&self) -> u64 {
+        self.version.chain_id
+    }
+
+    fn block_env(&self) -> &evm2::env::BlockEnv<T> {
+        &self.block
+    }
+
+    fn block_env_mut(&mut self) -> &mut evm2::env::BlockEnv<T> {
+        &mut self.block
+    }
+
+    fn version(&self) -> &evm2::Version {
+        &self.version
+    }
+
+    fn version_mut(&mut self) -> &mut evm2::Version {
+        &mut self.version
+    }
+
     fn block_base_fee(&self) -> u64 {
         self.block.basefee.to()
     }
@@ -280,7 +306,7 @@ pub trait EthEvmEnvLike: EvmEnv {
     fn block(&self) -> Self::Block;
 }
 
-impl<T: evm2::EvmTypesHost> EthEvmEnvLike for EthEvmEnv<T>
+impl<T: evm2::EvmTypes> EthEvmEnvLike for EthEvmEnv<T>
 where
     T::SpecId: Debug + Send + Sync,
     T::BlockEnvExt: Send + Sync,

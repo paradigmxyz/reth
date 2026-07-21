@@ -1,10 +1,8 @@
 use alloy_consensus::{
     BlobTransactionValidationError, BlockHeader, EnvKzgSettings, Transaction, TxReceipt,
 };
-use alloy_eips::{
-    eip7685::RequestsOrHash,
-    eip7928::{bal::DecodedBal, compute_block_access_list_hash},
-};
+use alloy_eip7928::{bal::DecodedBal, compute_block_access_list_hash};
+use alloy_eips::eip7685::RequestsOrHash;
 use alloy_primitives::{map::AddressSet, Address, B256, U256};
 use alloy_rpc_types_beacon::relay::{
     BidTrace, BuilderBlockValidationRequest, BuilderBlockValidationRequestV2,
@@ -552,11 +550,9 @@ where
         + ChainSpecProvider<ChainSpec: EthereumHardforks>
         + StateProviderFactory
         + Clone
-        + Send
-        + Sync
         + 'static,
-    E: ConfigureEvm + Send + Sync + 'static,
-    T: PayloadTypes<ExecutionData = ExecutionData> + Send + Sync + 'static,
+    E: ConfigureEvm + 'static,
+    T: PayloadTypes<ExecutionData = ExecutionData>,
 {
     async fn validate_builder_submission_v1(
         &self,

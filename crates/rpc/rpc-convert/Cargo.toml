@@ -23,6 +23,7 @@ alloy-rpc-types-eth = { workspace = true, features = ["serde"] }
 alloy-consensus.workspace = true
 alloy-network.workspace = true
 alloy-json-rpc.workspace = true
+evm2.workspace = true
 
 # io
 jsonrpsee-types.workspace = true

@@ -42,8 +42,6 @@ impl CustomEnvelope {
 /// Payload for [`CustomEnvelope::ExecuteCode`].
 #[derive(Debug)]
 pub struct ExecuteCodeTx {
-    /// Recovered sender used as the message caller.
-    pub caller: Address,
     /// Message destination.
     pub target: Address,
     /// Code executed by the message.
@@ -68,7 +66,7 @@ pub fn execute_code(
         gas_limit: req.tx.gas_limit,
         destination: req.tx.target,
         code_address: req.tx.target,
-        caller: req.tx.caller,
+        caller: req.tx.signer(),
         ext: CustomMessageExt { is_system: false },
         ..Message::default()
     };

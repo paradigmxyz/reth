@@ -1916,9 +1916,20 @@ mod tests {
                 .first()
                 .map(|block| {
                     let senders = block.senders().expect("failed to recover senders");
+                    let original_accounts = in_memory_changesets
+                        .iter()
+                        .map(|(address, account, _)| (*address, *account))
+                        .collect::<AddressMap<_>>();
                     let state = execution_state_from_init(
                         in_memory_state.into_iter().map(|(address, (account, _))| {
-                            (address, (None, Some(account), BTreeMap::default()))
+                            (
+                                address,
+                                (
+                                    original_accounts.get(&address).copied(),
+                                    Some(account),
+                                    BTreeMap::default(),
+                                ),
+                            )
                         }),
                         [],
                     );

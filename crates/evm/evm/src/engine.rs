@@ -1,6 +1,6 @@
 use crate::{
     execute::{ExecutableTxFor, ExecutableTxParts, RecoveredTx},
-    ConfigureEvm, EvmEnvFor, ExecutionCtxFor, TxEnvFor,
+    ConfigureEvm, EvmEnvFor, ExecutionCtxFor, TxFor,
 };
 use alloy_consensus::transaction::Either;
 use rayon::prelude::*;
@@ -136,7 +136,7 @@ impl<T, Evm: ConfigureEvm> ExecutableTxIterator<Evm> for T
 where
     T: ExecutableTxTuple<Tx: ExecutableTxFor<Evm, Recovered: Send + Sync>>,
 {
-    type Recovered = <T::Tx as ExecutableTxParts<TxEnvFor<Evm>, TxTy<Evm::Primitives>>>::Recovered;
+    type Recovered = <T::Tx as ExecutableTxParts<TxFor<Evm>, TxTy<Evm::Primitives>>>::Recovered;
 }
 
 /// Wraps `Either<L, R>` to implement both [`IntoParallelIterator`] and [`IntoIterator`],

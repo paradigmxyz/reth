@@ -3,15 +3,12 @@ use alloy_eips::eip7594::BlobTransactionSidecarVariant;
 use alloy_network::eip2718::Decodable2718;
 use alloy_primitives::{Bytes, B256};
 use reth_chainspec::EthereumHardforks;
-use reth_evm::{BlockExecutorFactory, ConfigureEvm, EvmEnvFor, TxEnvFor};
 use reth_node_api::{BlockTy, FullNodeComponents};
 use reth_node_builder::{rpc::RpcRegistry, NodeTypes};
 use reth_provider::BlockReader;
 use reth_rpc_api::DebugApiServer;
 use reth_rpc_eth_api::{
-    helpers::{
-        EthApiSpec, EthTransactions, TraceBlockEnv, TraceEvmInstance, TraceExt, TraceTxEnvelope,
-    },
+    helpers::{EthApiSpec, EthTransactions, TraceExt},
     EthApiTypes,
 };
 
@@ -32,23 +29,7 @@ where
         let eth_api = self.inner.eth_api();
         eth_api.send_raw_transaction(raw_tx).await
     }
-}
 
-// TODO: Tighten these bounds once raw debug transaction lookup is split from trace/debug execution.
-// `envelope_by_hash` only needs raw transaction bytes, but `DebugApiServer` currently gates
-// `raw_transaction` behind the broader trace-capable EVM bounds.
-impl<Node, EthApi> RpcTestContext<Node, EthApi>
-where
-    Node: FullNodeComponents<Types: NodeTypes<ChainSpec: EthereumHardforks>>,
-    EthApi::Evm: ConfigureEvm,
-    EvmEnvFor<EthApi::Evm>: AsRef<TraceBlockEnv>,
-    <EthApi::Evm as ConfigureEvm>::BlockExecutorFactory:
-        for<'a> BlockExecutorFactory<Evm<'a> = TraceEvmInstance<'a>>,
-    TxEnvFor<EthApi::Evm>: AsRef<TraceTxEnvelope> + Clone,
-    EthApi: EthApiSpec<Provider: BlockReader<Block = BlockTy<Node::Types>>>
-        + EthTransactions
-        + TraceExt,
-{
     /// Retrieves a transaction envelope by its hash
     pub async fn envelope_by_hash(
         &self,

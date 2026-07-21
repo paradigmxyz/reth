@@ -310,7 +310,7 @@ pub trait LoadState:
         }
     }
 
-    /// Returns the EVM env for the given sealed header.
+    /// Returns the EVM environment for the given sealed header.
     fn evm_env_for_header(
         &self,
         header: &SealedHeaderFor<Self::Primitives>,
@@ -321,7 +321,7 @@ pub trait LoadState:
             .map_err(Self::Error::from_eth_err)
     }
 
-    /// Returns the EVM env for the requested [`BlockId`].
+    /// Returns the EVM environment for the requested [`BlockId`]
     ///
     /// If the [`BlockId`] this will return the [`BlockId`] of the block the env was configured
     /// for.
@@ -353,7 +353,8 @@ pub trait LoadState:
         }
     }
 
-    /// Returns the recovered block, EVM env, and state block id for the requested [`BlockId`].
+    /// Returns the recovered block, EVM environment, and state block id for the requested
+    /// [`BlockId`].
     ///
     /// For pending blocks, this preserves the state id returned by [`Self::evm_env_at`], which can
     /// be the pending tag for an actual pending block or the latest block hash when the pending env
