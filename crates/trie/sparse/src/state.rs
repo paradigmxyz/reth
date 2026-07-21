@@ -857,7 +857,6 @@ mod tests {
         };
 
         sparse.reveal_decoded_multiproof(multiproof.try_into().unwrap()).unwrap();
-        sparse.storage_root(&hot_account).unwrap();
         let trie_account = TrieAccount {
             storage_root: sparse.storage_root(&account).unwrap(),
             ..Default::default()
