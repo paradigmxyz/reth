@@ -651,11 +651,123 @@ fn remove_blocks_clears_pending_sparse_trie_prune_request() {
     let mut test_harness = TestHarness::new(MAINNET.clone());
     test_harness.tree.persistence_state.last_persisted_block =
         BlockNumHash { hash: B256::random(), number: 10 };
+    test_harness.tree.persistence_state.last_state_trie_persisted_block =
+        BlockNumHash { hash: B256::random(), number: 10 };
     test_harness.tree.state.set_pending_sparse_trie_prune(true);
 
-    test_harness.tree.remove_blocks(9);
+    test_harness.tree.remove_blocks(9).unwrap();
 
     assert!(!test_harness.tree.state.pending_sparse_trie_prune());
+}
+
+#[test]
+fn remove_blocks_replays_retained_partial_state_trie_blocks() {
+    const STATE_TRIE_TIP: usize = 132;
+    const FINISH_TIP: usize = 147;
+    const REORG_TIP: usize = 144;
+
+    let blocks: Vec<_> =
+        TestBlockBuilder::eth().get_executed_blocks(0..FINISH_TIP as u64 + 1).collect();
+    let mut test_harness = TestHarness::new(MAINNET.clone()).with_blocks(blocks.clone());
+    test_harness.tree.persistence_state.last_state_trie_persisted_block =
+        blocks[STATE_TRIE_TIP].recovered_block().num_hash();
+    test_harness.tree.persistence_state.last_persisted_block =
+        blocks[FINISH_TIP].recovered_block().num_hash();
+    test_harness.tree.state.set_pending_sparse_trie_prune(true);
+
+    test_harness.tree.remove_blocks(REORG_TIP as u64).unwrap();
+
+    let PersistenceAction::RemoveBlocksAbove(new_tip, replay_blocks, sender) =
+        test_harness.action_rx.recv().unwrap()
+    else {
+        panic!("expected remove-blocks persistence action")
+    };
+    assert_eq!(new_tip, REORG_TIP as u64);
+    assert_eq!(
+        replay_blocks.iter().map(|block| block.recovered_block().number()).collect::<Vec<_>>(),
+        ((STATE_TRIE_TIP + 1) as u64..=REORG_TIP as u64).collect::<Vec<_>>()
+    );
+    assert_eq!(replay_blocks, blocks[STATE_TRIE_TIP + 1..=REORG_TIP]);
+    assert_eq!(
+        test_harness.tree.persistence_state.current_action(),
+        Some(&CurrentPersistenceAction::RemovingBlocks { new_tip_num: REORG_TIP as u64 })
+    );
+    assert!(!test_harness.tree.state.pending_sparse_trie_prune());
+
+    // The replay fully materializes state/trie at the surviving tip. The blocks are retained
+    // until that result arrives, then can be dropped through the new state/trie frontier.
+    for block in &blocks[STATE_TRIE_TIP + 1..=REORG_TIP] {
+        assert!(test_harness
+            .tree
+            .canonical_in_memory_state
+            .state_by_number(block.recovered_block().number())
+            .is_some());
+    }
+    sender
+        .send(PersistenceResult {
+            last_block: Some(blocks[REORG_TIP].recovered_block().num_hash()),
+            last_state_trie_block: Some(REORG_TIP as u64),
+            commit_duration: None,
+        })
+        .unwrap();
+    assert!(test_harness.tree.try_poll_persistence().unwrap());
+
+    assert_eq!(
+        test_harness.tree.persistence_state.last_persisted_block,
+        blocks[REORG_TIP].recovered_block().num_hash()
+    );
+    assert_eq!(
+        test_harness.tree.persistence_state.last_state_trie_persisted_block,
+        blocks[REORG_TIP].recovered_block().num_hash()
+    );
+    for block in &blocks[..=REORG_TIP] {
+        assert!(test_harness
+            .tree
+            .state
+            .tree_state
+            .executed_block_by_hash(block.recovered_block().hash())
+            .is_none());
+        assert!(test_harness
+            .tree
+            .canonical_in_memory_state
+            .state_by_number(block.recovered_block().number())
+            .is_none());
+    }
+    for block in &blocks[REORG_TIP + 1..] {
+        assert!(test_harness
+            .tree
+            .state
+            .tree_state
+            .executed_block_by_hash(block.recovered_block().hash())
+            .is_some());
+        assert!(test_harness
+            .tree
+            .canonical_in_memory_state
+            .state_by_number(block.recovered_block().number())
+            .is_some());
+    }
+    assert!(test_harness.tree.state.pending_sparse_trie_prune());
+}
+
+#[test]
+fn remove_blocks_requires_complete_partial_state_trie_replay_range() {
+    const STATE_TRIE_TIP: u64 = 132;
+    const FINISH_TIP: u64 = 147;
+    const REORG_TIP: u64 = 144;
+
+    // Deliberately omit the first retained block at #133.
+    let blocks: Vec<_> =
+        TestBlockBuilder::eth().get_executed_blocks(STATE_TRIE_TIP + 2..FINISH_TIP + 1).collect();
+    let mut test_harness = TestHarness::new(MAINNET.clone()).with_blocks(blocks.clone());
+    test_harness.tree.persistence_state.last_state_trie_persisted_block =
+        BlockNumHash::new(STATE_TRIE_TIP, B256::random());
+    test_harness.tree.persistence_state.last_persisted_block =
+        blocks.last().unwrap().recovered_block().num_hash();
+
+    assert!(test_harness.tree.remove_blocks(REORG_TIP).is_err());
+
+    assert!(test_harness.action_rx.try_recv().is_err());
+    assert!(!test_harness.tree.persistence_state.in_progress());
 }
 
 #[test]

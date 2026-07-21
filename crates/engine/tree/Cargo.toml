@@ -87,6 +87,7 @@ reth-ethereum-engine-primitives.workspace = true
 reth-evm = { workspace = true, features = ["test-utils"] }
 reth-exex-types.workspace = true
 reth-network-p2p = { workspace = true, features = ["test-utils"] }
+reth-provider = { workspace = true, features = ["test-utils", "partial-persistence"] }
 reth-prune-types.workspace = true
 reth-stages = { workspace = true, features = ["test-utils"] }
 reth-static-file.workspace = true
