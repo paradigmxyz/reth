@@ -3,7 +3,7 @@
 use crate::{
     config::{custom_version, CustomConfigSelector, CustomTypes},
     opcode,
-    tx::{custom_registry, CustomEnvelope},
+    tx::custom_registry,
 };
 use alloy_primitives::{address, Address, Bytes};
 use evm2::{
@@ -91,7 +91,7 @@ impl EvmFactory for NodeEvmFactory {
 #[derive(Clone, Copy, Debug, Default)]
 pub struct CustomEvmFactory;
 
-impl EvmFactory<CustomEnvelope> for CustomEvmFactory {
+impl EvmFactory for CustomEvmFactory {
     type Types = CustomTypes;
     type SpecId = crate::config::CustomSpecId;
 

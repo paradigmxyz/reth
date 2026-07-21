@@ -3,7 +3,7 @@
 use crate::{ConfigureEvm, Database, DynDatabase, EvmEnv, TxEnvFor};
 use alloc::{boxed::Box, format, sync::Arc, vec::Vec};
 use alloy_consensus::{
-    transaction::{Either, Recovered, Transaction as AlloyTransaction},
+    transaction::{Either, Recovered, Transaction as AlloyTransaction, TransactionEnvelope},
     BlockHeader as _, Header, TxReceipt,
 };
 use alloy_eip7928::{compute_block_access_list_hash, BlockAccessIndex, BlockAccessList};
@@ -12,7 +12,7 @@ use alloy_primitives::{Address, B256};
 use core::fmt::Debug;
 #[cfg(feature = "std")]
 use evm2::evm::{CacheDB, Db};
-use evm2::{evm::BlockStateAccumulator, registry::HandlerError, ErrorCode};
+use evm2::{registry::HandlerError, ErrorCode};
 pub use reth_execution_errors::{
     BlockExecutionError, BlockValidationError, EvmError, InternalBlockExecutionError,
     InvalidTxError,
@@ -89,32 +89,21 @@ pub struct ReceiptBuilderCtx<TxType, TransactionResult> {
 }
 
 /// Builds chain-specific receipts from raw transaction execution results.
-pub trait ReceiptBuilder<TxType, TransactionResult> {
+#[auto_impl::auto_impl(&, Arc)]
+pub trait ReceiptBuilder {
+    /// Consensus transaction type accepted by the executor.
+    type Transaction: TransactionEnvelope;
     /// Receipt produced by this builder.
     type Receipt: TxReceipt;
 
     /// Builds a receipt for the transaction execution result.
-    fn build_receipt(&self, ctx: ReceiptBuilderCtx<TxType, TransactionResult>) -> Self::Receipt;
-
-    /// Builds a block execution output from already-built receipts and execution state.
-    fn build_block_output(
+    fn build_receipt<T: evm2::EvmTypes>(
         &self,
-        receipts: Vec<Self::Receipt>,
-        state: BlockStateAccumulator,
-        blob_gas_used: u64,
-    ) -> BlockExecutionOutput<Self::Receipt> {
-        let gas_used = receipts.last().map_or(0, TxReceipt::cumulative_gas_used);
-
-        BlockExecutionOutput::new(
-            BlockExecutionResult {
-                receipts,
-                requests: Default::default(),
-                gas_used,
-                blob_gas_used,
-            },
-            state,
-        )
-    }
+        ctx: ReceiptBuilderCtx<
+            <Self::Transaction as TransactionEnvelope>::TxType,
+            evm2::TxResult<T>,
+        >,
+    ) -> Self::Receipt;
 }
 
 /// Marks whether transaction changes should be committed into block executor state.
