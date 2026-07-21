@@ -17,8 +17,9 @@ pub use evm2_jit::{
 
 use crate::{
     executor::{EthBigBlockExecutor, EthBigBlockPlan, HashedStateMode},
-    EthBlockExecutionCtx, EthBlockExecutor, EthEvmEnv, EthPrimitives, EthTxEnv,
+    EthBlockExecutionCtx, EthBlockExecutor, EthEvmEnv,
 };
+use reth_ethereum_primitives::{Receipt, TransactionSigned};
 
 /// Factory used to construct an evm2-backed EVM.
 ///
@@ -158,11 +159,10 @@ where
     C: EthChainSpec<Header = Header> + EthereumHardforks,
     F: EvmFactory,
 {
-    type Primitives = EthPrimitives;
     type EvmFactory = F;
     type EvmTypes = F::Types;
-    type EvmTransaction = evm2::ethereum::TxEnvelope;
-    type Transaction = EthTxEnv;
+    type Transaction = TransactionSigned;
+    type Receipt = Receipt;
     type Evm<'a> = evm2::Evm<'a, F::Types>;
     type EvmEnv = EthEvmEnv<F::Types>;
     type ExecutionCtx<'a>
@@ -358,11 +358,10 @@ where
     C: EthChainSpec<Header = Header> + EthereumHardforks,
     F: EvmFactory,
 {
-    type Primitives = EthPrimitives;
     type EvmFactory = F;
     type EvmTypes = F::Types;
-    type EvmTransaction = evm2::ethereum::TxEnvelope;
-    type Transaction = EthTxEnv;
+    type Transaction = TransactionSigned;
+    type Receipt = Receipt;
     type Evm<'a> = evm2::Evm<'a, F::Types>;
     type EvmEnv = EthEvmEnv<F::Types>;
     type ExecutionCtx<'a>

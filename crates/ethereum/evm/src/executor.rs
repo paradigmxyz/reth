@@ -8,7 +8,7 @@ use crate::{
         transaction_blob_gas_used, BlockExecutionContext, BlockSystemCalls, EthExecutionError,
     },
     factory::{EthBlockExecutorFactory, EvmFactory},
-    EthBlockExecutionCtx, EthEvmEnv, EthTxEnv, RethReceiptBuilder,
+    EthBlockExecutionCtx, EthEvmEnv, RethReceiptBuilder,
 };
 use alloc::{boxed::Box, sync::Arc, vec::Vec};
 use alloy_consensus::{Header, Transaction, TxType};
@@ -22,10 +22,10 @@ use evm2::{
     BaseEvmTypes, Evm, EvmTypes, TxResult, TxResultWithState,
 };
 use reth_ethereum_forks::EthereumHardforks;
-use reth_ethereum_primitives::{EthPrimitives, Receipt};
+use reth_ethereum_primitives::{Receipt, TransactionSigned};
 use reth_evm::{
     BlockExecutionError, BlockExecutionOutput, BlockExecutor, BlockTransactionResult,
-    BlockValidationError, GasOutput, ReceiptBuilder, ReceiptBuilderCtx,
+    BlockValidationError, ExecutorTx, GasOutput, ReceiptBuilder, ReceiptBuilderCtx, RecoveredTx,
 };
 use reth_trie_common::HashedPostState;
 
@@ -166,9 +166,9 @@ where
     T::Tx: Typed2718,
     T::TxResultExt: Send,
 {
-    type Primitives = EthPrimitives;
+    type Transaction = TransactionSigned;
+    type Receipt = Receipt;
     type Evm = Evm<'a, T>;
-    type Transaction = EthTxEnv;
     type TransactionResultWithState = EthTransactionResultWithState<T>;
     type BlockAccessList = Bal;
 
@@ -238,10 +238,10 @@ where
 
     fn execute_transaction_without_commit(
         &mut self,
-        transaction: Self::Transaction,
+        transaction: impl ExecutorTx<Self>,
     ) -> Result<Self::TransactionResultWithState, BlockExecutionError> {
-        let tx_hash = transaction.tx_hash();
-        let transaction = transaction.into_envelope();
+        let (transaction, tx) = transaction.into_parts();
+        let tx_hash = *tx.tx().tx_hash();
         self.set_transaction_block_access_index();
         let transaction_gas_limit = transaction.gas_limit();
         let block_gas_limit = self.evm.block_env().gas_limit.to::<u64>();
@@ -712,9 +712,9 @@ where
     <F::Types as evm2::EvmTypesHost>::Tx: Typed2718,
     <F::Types as evm2::EvmTypesHost>::TxResultExt: Send,
 {
-    type Primitives = EthPrimitives;
+    type Transaction = TransactionSigned;
+    type Receipt = Receipt;
     type Evm = Evm<'a, F::Types>;
-    type Transaction = EthTxEnv;
     type TransactionResultWithState = EthTransactionResultWithState<F::Types>;
     type BlockAccessList = Bal;
 
@@ -788,7 +788,7 @@ where
 
     fn execute_transaction_without_commit(
         &mut self,
-        transaction: Self::Transaction,
+        transaction: impl ExecutorTx<Self>,
     ) -> Result<Self::TransactionResultWithState, BlockExecutionError> {
         self.initialize()?;
         self.inner.execute_transaction_without_commit(transaction)
@@ -951,7 +951,7 @@ mod tests {
         }
     }
 
-    fn transfer(from: Address, to: Address, nonce: u64) -> super::EthTxEnv {
+    fn transfer(from: Address, to: Address, nonce: u64) -> Recovered<TransactionSigned> {
         let tx = TransactionSigned::Legacy(
             TxLegacy {
                 chain_id: Some(1),
@@ -964,7 +964,7 @@ mod tests {
             }
             .into_signed(Signature::test_signature()),
         );
-        Recovered::new_unchecked(tx, from).into()
+        Recovered::new_unchecked(tx, from)
     }
 
     #[test]
