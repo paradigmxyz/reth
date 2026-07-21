@@ -18,7 +18,7 @@ use reth_trie::{
     updates::TrieUpdates, DecodedMultiProofV2, HashedPostState, TrieAccount, EMPTY_ROOT_HASH,
     TRIE_ACCOUNT_RLP_MAX_SIZE,
 };
-use reth_trie_common::{MultiProofTargetsV2, ProofV2Target};
+use reth_trie_common::{MultiProofTargetsV2, ProofV2Target, ProofV2TargetParent};
 use reth_trie_parallel::{
     error::StateRootTaskError,
     proof_task::{
@@ -85,11 +85,12 @@ pub(super) struct SparseTrieCacheTask<A = ArenaParallelSparseTrie, S = ArenaPara
     ///     to complete.
     pending_account_updates: B256Map<Option<Option<Account>>>,
     /// Cache of account proof targets that were already fetched/requested from the proof workers.
-    /// account -> lowest `min_len` requested.
-    fetched_account_targets: B256Map<u8>,
+    /// Account to the broadest requested parent context (an unknown parent sorts before every
+    /// known parent).
+    fetched_account_targets: B256Map<ProofV2TargetParent>,
     /// Cache of storage proof targets that have already been fetched/requested from the proof
-    /// workers. account -> slot -> lowest `min_len` requested.
-    fetched_storage_targets: B256Map<B256Map<u8>>,
+    /// workers. Account to slot to the broadest requested parent context.
+    fetched_storage_targets: B256Map<B256Map<ProofV2TargetParent>>,
     /// Reusable buffer for RLP encoding of accounts.
     account_rlp_buf: Vec<u8>,
     /// Whether the last state update has been received.
@@ -638,16 +639,16 @@ where
             let mut targets = Vec::new();
 
             let updates_len_before = updates.len();
-            trie.update_leaves(updates, |path, min_len| match fetched.entry(path) {
+            trie.update_leaves(updates, |path, parent| match fetched.entry(path) {
                 Entry::Occupied(mut entry) => {
-                    if min_len < *entry.get() {
-                        entry.insert(min_len);
-                        targets.push(ProofV2Target::new(path).with_min_len(min_len));
+                    if parent < *entry.get() {
+                        entry.insert(parent);
+                        targets.push(ProofV2Target::new(path).with_parent(parent));
                     }
                 }
                 Entry::Vacant(entry) => {
-                    entry.insert(min_len);
-                    targets.push(ProofV2Target::new(path).with_min_len(min_len));
+                    entry.insert(parent);
+                    targets.push(ProofV2Target::new(path).with_parent(parent));
                 }
             })?;
             let updates_len_after = updates.len();
@@ -681,19 +682,19 @@ where
 
         let updates_len_before = account_updates.len();
 
-        self.trie.trie_mut().update_leaves(account_updates, |target, min_len| {
+        self.trie.trie_mut().update_leaves(account_updates, |target, parent| {
             match self.fetched_account_targets.entry(target) {
                 Entry::Occupied(mut entry) => {
-                    if min_len < *entry.get() {
-                        entry.insert(min_len);
+                    if parent < *entry.get() {
+                        entry.insert(parent);
                         self.pending_targets
-                            .push_account_target(ProofV2Target::new(target).with_min_len(min_len));
+                            .push_account_target(ProofV2Target::new(target).with_parent(parent));
                     }
                 }
                 Entry::Vacant(entry) => {
-                    entry.insert(min_len);
+                    entry.insert(parent);
                     self.pending_targets
-                        .push_account_target(ProofV2Target::new(target).with_min_len(min_len));
+                        .push_account_target(ProofV2Target::new(target).with_parent(parent));
                 }
             }
         })?;
@@ -999,8 +1000,6 @@ pub(super) struct SparseTrieTaskMetrics {
     /// Number of storage leaf updates that required a new proof (cache misses).
     pub(super) sparse_trie_storage_cache_misses: Histogram,
 
-    /// Retained memory of the preserved sparse trie cache in bytes.
-    pub(super) sparse_trie_retained_memory_bytes: Gauge,
     /// Number of storage tries retained in the preserved sparse trie cache.
     pub(super) sparse_trie_retained_storage_tries: Gauge,
 }
@@ -1286,8 +1285,11 @@ mod tests {
         task.account_updates.insert(account, LeafUpdate::Touched);
         task.storage_updates.entry(account).or_default().insert(slot, LeafUpdate::Touched);
         task.pending_account_updates.insert(account, None);
-        task.fetched_account_targets.insert(account_target, 0);
-        task.fetched_storage_targets.entry(account).or_default().insert(storage_target, 12);
+        task.fetched_account_targets.insert(account_target, ProofV2TargetParent::NONE);
+        task.fetched_storage_targets
+            .entry(account)
+            .or_default()
+            .insert(storage_target, ProofV2TargetParent::new(11));
         task.in_flight_proof_batches = 1;
 
         assert!(task.ensure_not_stalled(false).is_ok());
