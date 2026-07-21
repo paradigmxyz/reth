@@ -708,7 +708,6 @@ impl DefaultStateRootStrategy {
                 trie_metrics
                     .into_trie_for_reuse_duration_histogram
                     .record(start.elapsed().as_secs_f64());
-                trie_metrics.sparse_trie_retained_memory_bytes.set(trie.memory_size() as f64);
                 trie_metrics
                     .sparse_trie_retained_storage_tries
                     .set(trie.retained_storage_tries_count() as f64);
