@@ -94,7 +94,8 @@ pub struct TriePrefixSets {
 /// sorted and unique keys produced by `freeze()`; it does not perform additional sorting or
 /// deduplication.
 ///
-/// [`PrefixSetMut::freeze`] guarantees that the resulting set is sorted and deduplicated.
+/// This guarantees that a `PrefixSet` constructed from a `PrefixSetMut` is always sorted and
+/// deduplicated.
 /// # Examples
 ///
 /// ```
@@ -192,15 +193,13 @@ impl PrefixSetMut {
     ///
     /// If not yet sorted, the elements will be sorted and deduplicated.
     pub fn freeze(mut self) -> PrefixSet {
-        if !self.all {
+        if self.all {
+            PrefixSet { index: 0, all: true, keys: Arc::new(Vec::new()) }
+        } else {
             self.keys.sort_unstable();
             self.keys.dedup();
             // Shrink after deduplication to release unused capacity.
             self.keys.shrink_to_fit();
-        }
-        if self.all {
-            PrefixSet { index: 0, all: true, keys: Arc::new(Vec::new()) }
-        } else {
             PrefixSet { index: 0, all: false, keys: Arc::new(self.keys) }
         }
     }
