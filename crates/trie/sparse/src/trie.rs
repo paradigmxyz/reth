@@ -404,19 +404,6 @@ impl SparseNode {
         self.set_state(state);
         self
     }
-
-    /// Returns the memory size of this node in bytes.
-    pub const fn memory_size(&self) -> usize {
-        match self {
-            Self::Empty => core::mem::size_of::<Self>(),
-            Self::Branch { .. } => {
-                core::mem::size_of::<Self>() + core::mem::size_of::<[B256; 16]>()
-            }
-            Self::Leaf { key, .. } | Self::Extension { key, .. } => {
-                core::mem::size_of::<Self>() + key.len()
-            }
-        }
-    }
 }
 
 /// Tracks the current state of a node in the trie, specifically regarding whether it's been updated

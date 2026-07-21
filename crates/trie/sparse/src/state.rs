@@ -488,40 +488,6 @@ where
         self.storage.clear();
     }
 
-    /// Returns a heuristic for the total in-memory size of this state trie in bytes.
-    ///
-    /// This aggregates the memory usage of the account trie, all revealed storage tries
-    /// (including cleared ones retained for allocation reuse), and auxiliary data structures.
-    pub fn memory_size(&self) -> usize {
-        let mut size = core::mem::size_of::<Self>();
-
-        size += match &self.state {
-            RevealableSparseTrie::Revealed(t) | RevealableSparseTrie::Blind(Some(t)) => {
-                t.memory_size()
-            }
-            RevealableSparseTrie::Blind(None) => 0,
-        };
-
-        for trie in self.storage.tries.values() {
-            size += match trie {
-                RevealableSparseTrie::Revealed(t) | RevealableSparseTrie::Blind(Some(t)) => {
-                    t.memory_size()
-                }
-                RevealableSparseTrie::Blind(None) => 0,
-            };
-        }
-        for trie in &self.storage.cleared_tries {
-            size += match trie {
-                RevealableSparseTrie::Revealed(t) | RevealableSparseTrie::Blind(Some(t)) => {
-                    t.memory_size()
-                }
-                RevealableSparseTrie::Blind(None) => 0,
-            };
-        }
-
-        size
-    }
-
     /// Returns the number of storage tries currently retained (active + cleared).
     pub fn retained_storage_tries_count(&self) -> usize {
         self.storage.tries.len() + self.storage.cleared_tries.len()
