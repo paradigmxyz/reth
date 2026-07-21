@@ -5,11 +5,7 @@ use reth_trie_common::{Nibbles, ProofV2Target};
 // revealed.
 #[inline]
 pub(crate) fn known_parent_prefix(target: &ProofV2Target) -> Option<Nibbles> {
-    target.parent_path_len.map(|parent_path_len| {
-        let mut prefix = target.key_nibbles;
-        prefix.truncate(parent_path_len as usize);
-        prefix
-    })
+    target.parent.path(target.key_nibbles)
 }
 
 // A helper function which returns the first path following a sub-trie in lexicographical order.
@@ -73,6 +69,7 @@ pub(crate) fn iter_sub_trie_targets(
 mod tests {
     use super::*;
     use alloy_primitives::B256;
+    use reth_trie_common::ProofV2TargetParent;
 
     #[test]
     fn test_iter_sub_trie_targets() {
@@ -114,8 +111,10 @@ mod tests {
             // Case 4: Multiple targets in different sub-tries
             (
                 vec![
-                    ProofV2Target::new(B256::repeat_byte(0x20)).with_parent_path_len(Some(1)),
-                    ProofV2Target::new(B256::repeat_byte(0x40)).with_parent_path_len(Some(1)),
+                    ProofV2Target::new(B256::repeat_byte(0x20))
+                        .with_parent(ProofV2TargetParent::new(1)),
+                    ProofV2Target::new(B256::repeat_byte(0x40))
+                        .with_parent(ProofV2TargetParent::new(1)),
                 ],
                 vec![
                     (
@@ -131,9 +130,12 @@ mod tests {
             // Case 5: Three targets, two in same sub-trie, one separate
             (
                 vec![
-                    ProofV2Target::new(B256::repeat_byte(0x20)).with_parent_path_len(Some(1)),
-                    ProofV2Target::new(B256::repeat_byte(0x2f)).with_parent_path_len(Some(1)),
-                    ProofV2Target::new(B256::repeat_byte(0x40)).with_parent_path_len(Some(1)),
+                    ProofV2Target::new(B256::repeat_byte(0x20))
+                        .with_parent(ProofV2TargetParent::new(1)),
+                    ProofV2Target::new(B256::repeat_byte(0x2f))
+                        .with_parent(ProofV2TargetParent::new(1)),
+                    ProofV2Target::new(B256::repeat_byte(0x40))
+                        .with_parent(ProofV2TargetParent::new(1)),
                 ],
                 vec![
                     (
@@ -152,8 +154,10 @@ mod tests {
             // Case 6: Targets with different parent paths in different sub-tries
             (
                 vec![
-                    ProofV2Target::new(B256::repeat_byte(0x20)).with_parent_path_len(Some(1)),
-                    ProofV2Target::new(B256::repeat_byte(0x2f)).with_parent_path_len(Some(2)),
+                    ProofV2Target::new(B256::repeat_byte(0x20))
+                        .with_parent(ProofV2TargetParent::new(1)),
+                    ProofV2Target::new(B256::repeat_byte(0x2f))
+                        .with_parent(ProofV2TargetParent::new(2)),
                 ],
                 vec![
                     (
@@ -169,11 +173,16 @@ mod tests {
             // Case 7: More complex chunking with nested sub-trie prefixes
             (
                 vec![
-                    ProofV2Target::new(B256::repeat_byte(0x20)).with_parent_path_len(Some(1)),
-                    ProofV2Target::new(B256::repeat_byte(0x2f)).with_parent_path_len(Some(3)),
-                    ProofV2Target::new(B256::repeat_byte(0x4c)).with_parent_path_len(Some(2)),
-                    ProofV2Target::new(B256::repeat_byte(0x4c)).with_parent_path_len(Some(3)),
-                    ProofV2Target::new(B256::repeat_byte(0x4e)).with_parent_path_len(Some(2)),
+                    ProofV2Target::new(B256::repeat_byte(0x20))
+                        .with_parent(ProofV2TargetParent::new(1)),
+                    ProofV2Target::new(B256::repeat_byte(0x2f))
+                        .with_parent(ProofV2TargetParent::new(3)),
+                    ProofV2Target::new(B256::repeat_byte(0x4c))
+                        .with_parent(ProofV2TargetParent::new(2)),
+                    ProofV2Target::new(B256::repeat_byte(0x4c))
+                        .with_parent(ProofV2TargetParent::new(3)),
+                    ProofV2Target::new(B256::repeat_byte(0x4e))
+                        .with_parent(ProofV2TargetParent::new(2)),
                 ],
                 vec![
                     (
@@ -201,8 +210,10 @@ mod tests {
             // Case 8: A root parent should result in a zero-length sub-trie prefix
             (
                 vec![
-                    ProofV2Target::new(B256::repeat_byte(0x20)).with_parent_path_len(Some(0)),
-                    ProofV2Target::new(B256::repeat_byte(0x40)).with_parent_path_len(Some(0)),
+                    ProofV2Target::new(B256::repeat_byte(0x20))
+                        .with_parent(ProofV2TargetParent::new(0)),
+                    ProofV2Target::new(B256::repeat_byte(0x40))
+                        .with_parent(ProofV2TargetParent::new(0)),
                 ],
                 vec![(
                     Some(""),
@@ -215,8 +226,10 @@ mod tests {
             // Case 9: Second target's sub-trie prefix is root
             (
                 vec![
-                    ProofV2Target::new(B256::repeat_byte(0x20)).with_parent_path_len(Some(1)),
-                    ProofV2Target::new(B256::repeat_byte(0x40)).with_parent_path_len(Some(0)),
+                    ProofV2Target::new(B256::repeat_byte(0x20))
+                        .with_parent(ProofV2TargetParent::new(1)),
+                    ProofV2Target::new(B256::repeat_byte(0x40))
+                        .with_parent(ProofV2TargetParent::new(0)),
                 ],
                 vec![
                     (
@@ -233,7 +246,8 @@ mod tests {
             (
                 vec![
                     ProofV2Target::new(B256::repeat_byte(0x20)),
-                    ProofV2Target::new(B256::repeat_byte(0x40)).with_parent_path_len(Some(0)),
+                    ProofV2Target::new(B256::repeat_byte(0x40))
+                        .with_parent(ProofV2TargetParent::new(0)),
                 ],
                 vec![
                     (

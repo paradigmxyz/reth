@@ -224,8 +224,8 @@ pub(super) fn test_incremental_reveal_and_update_with_retry<T: SparseTrie>(new_t
 
     // First update_leaves: covered keys are drained, blinded keys remain, callback fires.
     let mut targets: Vec<ProofV2Target> = Vec::new();
-    trie.update_leaves(&mut leaf_updates, |key, parent_path_len| {
-        targets.push(ProofV2Target::new(key).with_parent_path_len(parent_path_len));
+    trie.update_leaves(&mut leaf_updates, |key, parent| {
+        targets.push(ProofV2Target::new(key).with_parent(parent));
     })
     .expect("update_leaves should succeed");
 
@@ -238,8 +238,8 @@ pub(super) fn test_incremental_reveal_and_update_with_retry<T: SparseTrie>(new_t
 
     // Second update_leaves: now all paths are revealed, remaining keys should be drained.
     let mut targets2: Vec<ProofV2Target> = Vec::new();
-    trie.update_leaves(&mut leaf_updates, |key, parent_path_len| {
-        targets2.push(ProofV2Target::new(key).with_parent_path_len(parent_path_len));
+    trie.update_leaves(&mut leaf_updates, |key, parent| {
+        targets2.push(ProofV2Target::new(key).with_parent(parent));
     })
     .expect("update_leaves should succeed on retry");
 
@@ -423,8 +423,8 @@ pub(super) fn test_touched_prewarm_then_changed_update<T: SparseTrie>(new_trie: 
             .collect();
 
     let mut targets: Vec<ProofV2Target> = Vec::new();
-    trie.update_leaves(&mut leaf_updates, |key, parent_path_len| {
-        targets.push(ProofV2Target::new(key).with_parent_path_len(parent_path_len));
+    trie.update_leaves(&mut leaf_updates, |key, parent| {
+        targets.push(ProofV2Target::new(key).with_parent(parent));
     })
     .expect("update_leaves with Touched should succeed");
 
@@ -490,8 +490,8 @@ pub(super) fn test_touched_on_blinded_triggers_proof_then_changed_succeeds<T: Sp
     let mut leaf_updates: B256Map<LeafUpdate> = once((target_key, LeafUpdate::Touched)).collect();
 
     let mut targets: Vec<ProofV2Target> = Vec::new();
-    trie.update_leaves(&mut leaf_updates, |key, parent_path_len| {
-        targets.push(ProofV2Target::new(key).with_parent_path_len(parent_path_len));
+    trie.update_leaves(&mut leaf_updates, |key, parent| {
+        targets.push(ProofV2Target::new(key).with_parent(parent));
     })
     .expect("update_leaves with Touched should succeed");
 

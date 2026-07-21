@@ -217,10 +217,10 @@ where
             // for all targets which might match this node.
             //
             // For example, given a branch 0xabc, with children at 0, 1, and 2, and targets:
-            // - key: 0xabc0, parent_path_len: Some(1)
-            // - key: 0xabc1, parent_path_len: Some(0)
-            // - key: 0xabc2, parent_path_len: Some(3) <-- current
-            // - key: 0xabc3, parent_path_len: Some(2)
+            // - key: 0xabc0, parent path length: 1
+            // - key: 0xabc1, parent path length: 0
+            // - key: 0xabc2, parent path length: 3 <-- current
+            // - key: 0xabc3, parent path length: 2
             //
             // When the branch node at 0xabc is visited it will be after the targets has iterated
             // forward to 0xabc2 (because all children will have been visited already). At this
@@ -228,7 +228,7 @@ where
             // the other targets would, so we need to check those as well.
             if lower.key_nibbles.starts_with(path) {
                 let is_below_parent = |target: &ProofV2Target| {
-                    target.parent_path_len.is_none_or(|len| path.len() > len as usize)
+                    target.parent.path_len().is_none_or(|len| path.len() > len)
                 };
                 return !check_parent_path ||
                     (is_below_parent(lower) ||
@@ -1688,7 +1688,7 @@ where
 
         // Shortcut: check if storage is empty
         if self.hashed_cursor.is_storage_empty()? {
-            return Ok(if targets.iter().any(|target| target.parent_path_len.is_none()) {
+            return Ok(if targets.iter().any(|target| !target.parent.is_known()) {
                 vec![ProofTrieNodeV2 {
                     path: Nibbles::default(),
                     node: TrieNodeV2::EmptyRoot,
@@ -1928,7 +1928,9 @@ mod tests {
     use alloy_rlp::Decodable;
     use alloy_trie::proof::AddedRemovedKeys;
     use itertools::Itertools;
-    use reth_trie_common::{prefix_set::PrefixSetMut, ProofTrieNode, TrieNode, EMPTY_ROOT_HASH};
+    use reth_trie_common::{
+        prefix_set::PrefixSetMut, ProofTrieNode, ProofV2TargetParent, TrieNode, EMPTY_ROOT_HASH,
+    };
     use std::collections::BTreeMap;
 
     /// Converts legacy proofs to V2 proofs by combining extension nodes with their child branch
@@ -1954,7 +1956,7 @@ mod tests {
         node: &ProofTrieNodeV2,
         target: &ProofV2Target,
     ) -> Option<ProofTrieNodeV2> {
-        let Some(parent_path_len) = target.parent_path_len.map(usize::from) else {
+        let Some(parent_path_len) = target.parent.path_len() else {
             return target.key_nibbles.starts_with(&node.path).then(|| node.clone())
         };
 
@@ -2186,7 +2188,7 @@ mod tests {
             Some(harness.original_root())
         );
 
-        let target = ProofV2Target::new(slot_a).with_parent_path_len(Some(3));
+        let target = ProofV2Target::new(slot_a).with_parent(ProofV2TargetParent::new(3));
         let mut actual_targets = [target];
         let actual = calculator.storage_proof(hashed_address, &mut actual_targets).unwrap();
         let mut expected_targets = [target];
@@ -2234,8 +2236,13 @@ mod tests {
                         0u8..16u8,
                     )
                         .prop_map(|(key, encoded_parent_path_len)| {
-                            ProofV2Target::new(key)
-                                .with_parent_path_len(encoded_parent_path_len.checked_sub(1))
+                            let parent = encoded_parent_path_len.checked_sub(1).map_or(
+                                ProofV2TargetParent::NONE,
+                                |parent_path_len| {
+                                    ProofV2TargetParent::new(usize::from(parent_path_len))
+                                },
+                            );
+                            ProofV2Target::new(key).with_parent(parent)
                         }),
                     count,
                 )
@@ -2278,7 +2285,7 @@ mod tests {
         ]);
         let targets = [
             ProofV2Target::new(B256::ZERO),
-            ProofV2Target::new(slot_80).with_parent_path_len(Some(1)),
+            ProofV2Target::new(slot_80).with_parent(ProofV2TargetParent::new(1)),
         ];
 
         let harness = ProofTestHarness::new(storage);
@@ -2290,7 +2297,7 @@ mod tests {
         let slot = B256::right_padding_from(&[0xae, 0xd4, 0x09]);
         let slot_nibbles = Nibbles::unpack(slot);
         let harness = ProofTestHarness::new(BTreeMap::from([(slot, U256::from(1))]));
-        let mut targets = [ProofV2Target::new(slot).with_parent_path_len(Some(3))];
+        let mut targets = [ProofV2Target::new(slot).with_parent(ProofV2TargetParent::new(3))];
 
         let (proof, root) = harness.proof_v2(&mut targets);
 
@@ -2308,7 +2315,7 @@ mod tests {
         let slot = B256::repeat_byte(0xae);
         let slot_nibbles = Nibbles::unpack(slot);
         let harness = ProofTestHarness::new(BTreeMap::from([(slot, U256::from(1))]));
-        let mut targets = [ProofV2Target::new(slot).with_parent_path_len(Some(63))];
+        let mut targets = [ProofV2Target::new(slot).with_parent(ProofV2TargetParent::new(63))];
 
         let (proof, root) = harness.proof_v2(&mut targets);
 
@@ -2326,8 +2333,10 @@ mod tests {
         let slot = B256::right_padding_from(&[0x20]);
         let slot_nibbles = Nibbles::unpack(slot);
         let harness = ProofTestHarness::new(BTreeMap::from([(slot, U256::from(1))]));
-        let mut targets =
-            [ProofV2Target::new(slot), ProofV2Target::new(slot).with_parent_path_len(Some(0))];
+        let mut targets = [
+            ProofV2Target::new(slot),
+            ProofV2Target::new(slot).with_parent(ProofV2TargetParent::new(0)),
+        ];
 
         let (proof, root) = harness.proof_v2(&mut targets);
 
@@ -2354,7 +2363,7 @@ mod tests {
             (slot_a, U256::from(1)),
             (slot_b, U256::from(2)),
         ]));
-        let mut targets = [ProofV2Target::new(slot_a).with_parent_path_len(Some(3))];
+        let mut targets = [ProofV2Target::new(slot_a).with_parent(ProofV2TargetParent::new(3))];
 
         let (proof, root) = harness.proof_v2(&mut targets);
 
@@ -2378,7 +2387,7 @@ mod tests {
             (slot_a, U256::from(1)),
             (slot_b, U256::from(2)),
         ]));
-        let mut targets = [ProofV2Target::new(slot_a).with_parent_path_len(Some(3))];
+        let mut targets = [ProofV2Target::new(slot_a).with_parent(ProofV2TargetParent::new(3))];
 
         let (proof, root) = harness.proof_v2(&mut targets);
 
@@ -2394,12 +2403,13 @@ mod tests {
         let other_child_target = B256::right_padding_from(&[0xae, 0xd5]);
         let harness = ProofTestHarness::new(BTreeMap::from([(stored_slot, U256::from(1))]));
 
-        let mut same_child = [ProofV2Target::new(same_child_target).with_parent_path_len(Some(3))];
+        let mut same_child =
+            [ProofV2Target::new(same_child_target).with_parent(ProofV2TargetParent::new(3))];
         let (proof, _) = harness.proof_v2(&mut same_child);
         assert_eq!(proof.len(), 1, "divergent leaf proves absence below the same child");
 
         let mut other_child =
-            [ProofV2Target::new(other_child_target).with_parent_path_len(Some(3))];
+            [ProofV2Target::new(other_child_target).with_parent(ProofV2TargetParent::new(3))];
         let (proof, _) = harness.proof_v2(&mut other_child);
         assert!(proof.is_empty(), "a different direct child is unrelated to the target");
     }
@@ -2409,7 +2419,8 @@ mod tests {
         let harness = ProofTestHarness::new(BTreeMap::new());
         let slot = B256::ZERO;
 
-        let mut partial_target = [ProofV2Target::new(slot).with_parent_path_len(Some(0))];
+        let mut partial_target =
+            [ProofV2Target::new(slot).with_parent(ProofV2TargetParent::new(0))];
         let (partial_proof, partial_root) = harness.proof_v2(&mut partial_target);
         assert!(partial_proof.is_empty());
         assert!(partial_root.is_none());

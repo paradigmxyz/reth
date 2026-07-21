@@ -4,7 +4,9 @@ use crate::{
 use alloc::{borrow::Cow, boxed::Box};
 use alloy_primitives::{map::B256Map, B256};
 use reth_execution_errors::{SparseTrieErrorKind, SparseTrieResult};
-use reth_trie_common::{BranchNodeMasks, Nibbles, ProofTrieNodeV2, RlpNode, TrieMask, TrieNodeV2};
+use reth_trie_common::{
+    BranchNodeMasks, Nibbles, ProofTrieNodeV2, ProofV2TargetParent, RlpNode, TrieMask, TrieNodeV2,
+};
 
 /// A sparse trie that is either in a "blind" state (no nodes are revealed, root node hash is
 /// unknown) or in a "revealed" state (root node has been revealed and the trie can be updated).
@@ -223,7 +225,7 @@ impl<T: SparseTrieTrait + Default> RevealableSparseTrie<T> {
     /// Applies batch leaf updates to the sparse trie.
     ///
     /// For blind tries, all updates are kept in the map and proof targets are emitted
-    /// for every key (with `parent_path_len = None` since nothing is revealed).
+    /// for every key (with no known parent since nothing is revealed).
     ///
     /// For revealed tries, delegates to the inner implementation which will:
     /// - Apply updates where possible
@@ -232,13 +234,13 @@ impl<T: SparseTrieTrait + Default> RevealableSparseTrie<T> {
     pub fn update_leaves(
         &mut self,
         updates: &mut B256Map<LeafUpdate>,
-        mut proof_required_fn: impl FnMut(B256, Option<u8>),
+        mut proof_required_fn: impl FnMut(B256, ProofV2TargetParent),
     ) -> SparseTrieResult<()> {
         match self {
             Self::Blind(_) => {
                 // Nothing is revealed - emit proof targets for all keys without a known parent.
                 for key in updates.keys() {
-                    proof_required_fn(*key, None);
+                    proof_required_fn(*key, ProofV2TargetParent::NONE);
                 }
                 // All updates remain in the map for retry after proofs are fetched
                 Ok(())
