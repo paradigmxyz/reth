@@ -1482,11 +1482,8 @@ where
         );
 
         if txpool_prewarming {
-            validator =
-                validator.with_txpool_prewarming(txpool_prewarm::Source::<
-                    PrimitivesTy<Node::Types>,
-                    _,
-                >::new(ctx.node.pool().clone()));
+            validator = validator
+                .with_txpool_prewarming(txpool_prewarm::Source::new(ctx.node.pool().clone()));
         }
 
         Ok(validator)

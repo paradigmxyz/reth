@@ -9,23 +9,20 @@ use reth_primitives_traits::{NodePrimitives, TxTy};
 use reth_transaction_pool::{
     BestTransactions, BestTransactionsAttributes, PoolTransaction, TransactionPool,
 };
-use std::{fmt::Debug, marker::PhantomData};
+use std::fmt::Debug;
 
 /// [`TransactionPool`]-backed [`PrewarmSource`].
 #[derive(Debug)]
-pub(crate) struct Source<N: NodePrimitives, P> {
-    pool: P,
-    _marker: PhantomData<N>,
-}
+pub(crate) struct Source<P>(P);
 
-impl<N: NodePrimitives, P: TransactionPool> Source<N, P> {
+impl<P> Source<P> {
     /// Creates a new txpool prewarm source.
     pub(crate) const fn new(pool: P) -> Self {
-        Self { pool, _marker: PhantomData }
+        Self(pool)
     }
 }
 
-impl<N, P> PrewarmSource<N> for Source<N, P>
+impl<N, P> PrewarmSource<N> for Source<P>
 where
     N: NodePrimitives,
     P: TransactionPool<Transaction: PoolTransaction<Consensus = TxTy<N>>>
@@ -36,13 +33,13 @@ where
         + 'static,
 {
     fn best_transactions(&self, parent_hash: B256) -> Option<Transactions<N>> {
-        let block_info = self.pool.block_info();
+        let block_info = self.0.block_info();
         if block_info.last_seen_block_hash != parent_hash {
             return None
         }
 
         let mut best =
-            self.pool.best_transactions_with_attributes(BestTransactionsAttributes::new(
+            self.0.best_transactions_with_attributes(BestTransactionsAttributes::new(
                 block_info.pending_basefee,
                 block_info.pending_blob_fee.map(|fee| u64::try_from(fee).unwrap_or(u64::MAX)),
             ));
