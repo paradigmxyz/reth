@@ -535,13 +535,19 @@ where
             .saturating_sub(self.persistence_state.last_persisted_block.number)
     }
 
+    /// How many blocks beyond the configured in-memory buffer are awaiting persistence.
+    const fn persistence_backpressure_gap(&self) -> u64 {
+        self.persistence_gap().saturating_sub(self.config.memory_block_buffer_target())
+    }
+
     /// Returns `true` when the main loop should stop draining the tree input channel.
     ///
-    /// This is the case when persistence is already running and the gap between the canonical tip
-    /// and the last persisted block has reached the configured threshold.
+    /// This is the case when persistence is already running and the number of blocks beyond the
+    /// configured in-memory buffer has reached the configured threshold.
     const fn should_backpressure(&self) -> bool {
         self.persistence_state.in_progress() &&
-            self.persistence_gap() >= self.config.persistence_backpressure_threshold()
+            self.persistence_backpressure_gap() >=
+                self.config.persistence_backpressure_threshold()
     }
 
     /// Run the engine API handler.
@@ -553,18 +559,19 @@ where
             //
             // 1. Non-blocking poll for persistence completion. If the background flush already
             //    landed, absorb the result now so the gap calculation below is fresh.
-            // 2. Decide how to wait for the next event. When the canonical-to-persisted gap exceeds
-            //    the backpressure threshold we only block on the persistence receiver, leaving new
-            //    engine requests sitting in the unbounded upstream channel.
+            // 2. Decide how to wait for the next event. When the canonical-to-persisted gap beyond
+            //    the in-memory buffer reaches the backpressure threshold we only block on the
+            //    persistence receiver, leaving new engine requests sitting in the unbounded
+            //    upstream channel.
             // 3. Handle the event (engine message or persistence completion) and kick off a new
             //    persistence cycle if the threshold is met again.
             //
-            // The net effect: when the persistence gap exceeds the threshold, we stop
-            // processing incoming messages and let them queue in the channel. This is only a
-            // soft form of backpressure: it delays replies and, more importantly, prevents
-            // executing further blocks that would pile up in the persistence queue - where each
-            // block carries heavier state (eg. trie updates) than the raw payload sitting in the
-            // engine channel.
+            // The net effect: when the unbuffered persistence gap reaches the threshold, we stop
+            // processing incoming messages and let them queue in the channel. This is only a soft
+            // form of backpressure: it delays replies and, more importantly, prevents executing
+            // further blocks that would pile up in the persistence queue - where each block
+            // carries heavier state (eg. trie updates) than the raw payload sitting in the engine
+            // channel.
             //
             // Standard Ethereum CLs won't truly back off - the engine API has no
             // backpressure semantics, and CLs typically timeout after ≈8s and resend - so
@@ -751,6 +758,8 @@ where
         &mut self,
         payload: T::ExecutionData,
     ) -> Result<TreeOutcome<PayloadStatus>, InsertBlockFatalError> {
+        let _thread_resource_usage =
+            self.metrics.engine.new_payload.measure_thread_resource_usage();
         trace!(target: "engine::tree", "invoked new payload");
 
         // start timing for the new payload process
@@ -2091,7 +2100,7 @@ where
     }
 
     /// Returns true if the canonical chain length minus the last persisted
-    /// block is greater than or equal to the persistence threshold,
+    /// block is greater than the persistence threshold,
     /// backfill is not running, and no payload is currently being built.
     pub const fn should_persist(&self) -> bool {
         if self.building_payload {

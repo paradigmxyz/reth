@@ -8351,6 +8351,7 @@ dependencies = [
  "eyre",
  "futures",
  "indexmap 2.14.0",
+ "itertools 0.14.0",
  "metrics",
  "metrics-util",
  "moka",
@@ -9032,6 +9033,7 @@ name = "reth-metrics"
 version = "2.4.1"
 dependencies = [
  "futures",
+ "libc",
  "metrics",
  "metrics-derive",
  "reth-primitives-traits",

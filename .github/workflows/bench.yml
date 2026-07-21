@@ -859,8 +859,7 @@ jobs:
           fetch-depth: 0
           ref: ${{ steps.checkout-ref.outputs.ref }}
 
-      - name: Resolve job URL and update status
-        if: env.BENCH_COMMENT_ID
+      - name: Initialize run summary and update status
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         with:
           github-token: ${{ secrets.DEREK_PAT }}
@@ -873,7 +872,9 @@ jobs:
             const expectedJobName = 'bench-txgen';
             const job = jobs.jobs.find(j => j.name === expectedJobName);
             const jobUrl = job ? job.html_url : `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+            const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
             core.exportVariable('BENCH_JOB_URL', jobUrl);
+            core.exportVariable('BENCH_RUN_URL', runUrl);
 
             const blocks = process.env.BENCH_BLOCKS;
             const warmup = process.env.BENCH_WARMUP_BLOCKS;
@@ -910,15 +911,27 @@ jobs:
             const featureArgsVal = process.env.BENCH_FEATURE_ARGS || '';
             const featureArgsNote = featureArgsVal ? `, feature-args: \`${featureArgsVal}\`` : '';
             const blocksDesc = bigBlocks ? `${blocks} big blocks, ${warmup} warmup blocks` : `${blocks} blocks, ${warmup} warmup blocks`;
-            core.exportVariable('BENCH_CONFIG', `**Config:** ${blocksDesc}, baseline: \`${baseline}\`, feature: \`${feature}\`${modeNote}${samplyNote}${tracingChromeNote}${slackNote}${reorgNote}${balNote}${coresNote}${runPairsNote}${otlpNote}${metricsNote}${waitTimeNote}${blockTimeNote}${baselineArgsNote}${featureArgsNote}`);
+            const config = `**Config:** ${blocksDesc}, baseline: \`${baseline}\`, feature: \`${feature}\`${modeNote}${samplyNote}${tracingChromeNote}${slackNote}${reorgNote}${balNote}${coresNote}${runPairsNote}${otlpNote}${metricsNote}${waitTimeNote}${blockTimeNote}${baselineArgsNote}${featureArgsNote}`;
+            core.exportVariable('BENCH_CONFIG', config);
 
-            const { buildBody } = require('./.github/scripts/bench-update-status.js');
-            await github.rest.issues.updateComment({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              comment_id: parseInt(process.env.BENCH_COMMENT_ID),
-              body: buildBody('Building binaries...'),
-            });
+            const pr = process.env.BENCH_PR;
+            const metadata = pr
+              ? `**[PR #${pr}](${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/pull/${pr})** · triggered by @${process.env.BENCH_ACTOR}`
+              : `Triggered by @${process.env.BENCH_ACTOR}`;
+            await core.summary
+              .addHeading('⏳ Benchmark in progress')
+              .addRaw(`${metadata}\n\n${config}\n`)
+              .write();
+
+            if (process.env.BENCH_COMMENT_ID) {
+              const { buildBody } = require('./.github/scripts/bench-update-status.js');
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: parseInt(process.env.BENCH_COMMENT_ID),
+                body: buildBody('Building binaries...'),
+              });
+            }
 
       - uses: rui314/setup-mold@9c9c13bf4c3f1adef0cc596abc155580bcb04444 # v1
       - uses: dtolnay/rust-toolchain@stable
@@ -1791,8 +1804,8 @@ jobs:
               }
             } catch (e) {}
 
-            const jobUrl = process.env.BENCH_JOB_URL || `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
-            const body = `cc @${process.env.BENCH_ACTOR}\n\n✅ Benchmark complete! [View job](${jobUrl})\n\n${comment}`;
+            const runUrl = process.env.BENCH_RUN_URL || `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+            const body = `cc @${process.env.BENCH_ACTOR}\n\n✅ Benchmark complete! [View run](${runUrl})\n\n${comment}`;
             const ackCommentId = process.env.BENCH_COMMENT_ID;
 
             if (ackCommentId) {

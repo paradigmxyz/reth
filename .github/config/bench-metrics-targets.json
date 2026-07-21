@@ -15,6 +15,54 @@
   ],
   "histograms": [
     {
+      "query": "reth_consensus_engine_beacon_new_payload_thread_user_cpu_seconds",
+      "target": "decrease",
+      "floor_pct": 5.0,
+      "min_value_pct_total_latency": 0.0
+    },
+    {
+      "query": "reth_consensus_engine_beacon_new_payload_thread_system_cpu_seconds",
+      "target": "decrease",
+      "floor_pct": 5.0,
+      "min_value_pct_total_latency": 0.0
+    },
+    {
+      "query": "reth_consensus_engine_beacon_new_payload_thread_minor_page_faults",
+      "target": "decrease",
+      "floor_pct": 5.0,
+      "min_value_pct_total_latency": 0.0
+    },
+    {
+      "query": "reth_consensus_engine_beacon_new_payload_thread_major_page_faults",
+      "target": "decrease",
+      "floor_pct": 5.0,
+      "min_value_pct_total_latency": 0.0
+    },
+    {
+      "query": "reth_consensus_engine_beacon_new_payload_thread_voluntary_context_switches",
+      "target": "decrease",
+      "floor_pct": 5.0,
+      "min_value_pct_total_latency": 0.0
+    },
+    {
+      "query": "reth_consensus_engine_beacon_new_payload_thread_involuntary_context_switches",
+      "target": "decrease",
+      "floor_pct": 5.0,
+      "min_value_pct_total_latency": 0.0
+    },
+    {
+      "query": "reth_consensus_engine_beacon_new_payload_thread_block_input_operations",
+      "target": "decrease",
+      "floor_pct": 5.0,
+      "min_value_pct_total_latency": 0.0
+    },
+    {
+      "query": "reth_consensus_engine_beacon_new_payload_thread_block_output_operations",
+      "target": "decrease",
+      "floor_pct": 5.0,
+      "min_value_pct_total_latency": 0.0
+    },
+    {
       "query": "reth_sync_block_validation_state_root_histogram",
       "target": "decrease",
       "floor_pct": 5.0,
