@@ -1,10 +1,10 @@
 //! Txpool-driven state prewarming and immutable snapshot publication.
 
 mod cache;
-mod coordination;
+mod control;
 mod worker;
 
-use self::coordination::Coordinator;
+use self::control::Control;
 use crate::tree::{StateProviderBuilder, TxPoolPrewarmCacheSnapshot};
 use alloy_consensus::transaction::Recovered;
 use alloy_primitives::{Address, B256};
@@ -19,7 +19,7 @@ where
     N: NodePrimitives,
     Evm: ConfigureEvm<Primitives = N>,
 {
-    coordinator: Arc<Coordinator<Job<N, P, Evm>>>,
+    control: Arc<Control<Job<N, P, Evm>>>,
 }
 
 impl<N, P, Evm> Debug for Handle<N, P, Evm>
@@ -28,7 +28,7 @@ where
     Evm: ConfigureEvm<Primitives = N>,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Handle").field("coordinator", &self.coordinator).finish()
+        f.debug_struct("Handle").field("control", &self.control).finish()
     }
 }
 
@@ -45,12 +45,12 @@ where
         source: Arc<dyn Source<N>>,
         evm_config: Evm,
     ) -> Self {
-        let coordinator = Arc::new(Coordinator::new());
+        let (control, commands) = Control::new();
+        let publication = control.publication();
         runtime.spawn_blocking_named("txpool-prewarm", {
-            let coordinator = Arc::clone(&coordinator);
-            move || worker::run(coordinator, source, evm_config)
+            move || worker::run(commands, publication, source, evm_config)
         });
-        Self { coordinator }
+        Self { control }
     }
 
     /// Pauses speculative work.
@@ -58,13 +58,13 @@ where
     /// Returns a guard that will resume the worker when dropped. There could be multiple
     /// outstanding guards, in which case the worker will not resume until all guards are dropped.
     pub(crate) fn pause(&self) -> impl Drop + Send + 'static {
-        self.coordinator.pause()
+        self.control.pause()
     }
 
     /// Returns the latest fully published snapshot for `parent_hash`, or `None` if no snapshot is
     /// available for that hash.
     pub(crate) fn snapshot(&self, parent_hash: B256) -> Option<TxPoolPrewarmCacheSnapshot> {
-        self.coordinator.snapshot(parent_hash)
+        self.control.snapshot(parent_hash)
     }
 
     /// Starts continuous warming for the latest canonical head.
@@ -74,17 +74,7 @@ where
         evm_env: EvmEnvFor<Evm>,
         provider_builder: StateProviderBuilder<N, P>,
     ) {
-        self.coordinator.set_job(Job { parent_hash, evm_env, provider_builder });
-    }
-}
-
-impl<N, P, Evm> Drop for Handle<N, P, Evm>
-where
-    N: NodePrimitives,
-    Evm: ConfigureEvm<Primitives = N>,
-{
-    fn drop(&mut self) {
-        self.coordinator.shutdown();
+        self.control.start(Job { parent_hash, evm_env, provider_builder });
     }
 }
 

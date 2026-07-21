@@ -38,11 +38,10 @@ where
             return None
         }
 
-        let mut best =
-            self.0.best_transactions_with_attributes(BestTransactionsAttributes::new(
-                block_info.pending_basefee,
-                block_info.pending_blob_fee.map(|fee| u64::try_from(fee).unwrap_or(u64::MAX)),
-            ));
+        let mut best = self.0.best_transactions_with_attributes(BestTransactionsAttributes::new(
+            block_info.pending_basefee,
+            block_info.pending_blob_fee.map(|fee| u64::try_from(fee).unwrap_or(u64::MAX)),
+        ));
         best.allow_updates_out_of_order();
         best.skip_blobs();
 
