@@ -11,9 +11,6 @@ mod state;
 pub use state::*;
 
 #[cfg(feature = "std")]
-mod lfu;
-
-#[cfg(feature = "std")]
 mod trie;
 #[cfg(feature = "std")]
 pub use trie::*;
