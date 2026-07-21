@@ -3,7 +3,7 @@
 use crate::{ConfigureEvm, Database, DynDatabase, EvmEnv, TxEnvFor};
 use alloc::{boxed::Box, format, sync::Arc, vec::Vec};
 use alloy_consensus::{
-    transaction::{Either, Recovered, Transaction as AlloyTransaction, TransactionEnvelope},
+    transaction::{Either, Recovered, TransactionEnvelope},
     BlockHeader as _, Header,
 };
 use alloy_eip7928::{compute_block_access_list_hash, BlockAccessIndex, BlockAccessList};
@@ -425,7 +425,7 @@ pub trait BlockExecutorFactory {
     /// Additional EVM factory configuration owned by this executor factory.
     type EvmFactory;
     /// Runtime EVM type family.
-    type EvmTypes: evm2::EvmTypes<Tx: AlloyTransaction + Clone, TxResultExt: Send>;
+    type EvmTypes: evm2::EvmTypes<TxResultExt: Send>;
     /// Consensus transaction type consumed by executors from this factory.
     type Transaction: Debug + Clone + Send + Sync + 'static;
     /// Receipt type produced by executors from this factory.

@@ -1,10 +1,7 @@
 #[cfg(feature = "jit")]
 use alloc::string::String;
 use alloc::{boxed::Box, sync::Arc};
-use alloy_consensus::{
-    transaction::{TransactionEnvelope, TxHashRef},
-    Header,
-};
+use alloy_consensus::Header;
 use reth_chainspec::{ChainSpec, EthChainSpec, EthereumHardforks};
 #[cfg(feature = "std")]
 use reth_evm::precompile_cache::{CachedPrecompileProvider, PrecompileCacheMap};
@@ -382,13 +379,8 @@ where
     C: EthChainSpec<Header = Header> + EthereumHardforks,
     F: EvmFactory,
     R: ReceiptBuilder,
-    R::Transaction: TxHashRef + core::fmt::Debug + Clone + Send + Sync + 'static,
-    R::Receipt: alloy_consensus::TxReceipt<Log = alloy_primitives::Log>,
-    <R::Transaction as TransactionEnvelope>::TxType: Send + 'static,
-    <F::Types as evm2::EvmTypesHost>::Tx: alloy_consensus::Transaction
-        + alloy_eips::eip2718::Typed2718
-        + Clone
-        + From<R::Transaction>,
+
+    <F::Types as evm2::EvmTypesHost>::Tx: alloy_eips::eip2718::Typed2718,
 {
     type EvmFactory = F;
     type EvmTypes = F::Types;
