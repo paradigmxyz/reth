@@ -6,12 +6,11 @@ use alloy_consensus::{
 use alloy_eips::{eip4895::Withdrawals, merge::BEACON_NONCE};
 use alloy_primitives::{Bloom, B256};
 use reth_chainspec::{EthChainSpec, EthereumHardforks};
-use reth_ethereum_primitives::{Receipt, TransactionSigned};
 #[cfg(feature = "std")]
 use reth_evm::BlockAssembler;
 use reth_evm::{BlockAssemblerInput, BlockExecutionError, BlockExecutorFactory};
 use reth_execution_types::BlockExecutionResult;
-use reth_primitives_traits::logs_bloom as calculate_logs_bloom;
+use reth_primitives_traits::{logs_bloom as calculate_logs_bloom, Receipt, SignedTransaction};
 
 use crate::{EthBlockEnv, EthBlockExecutionCtx, EthEvmEnvLike};
 
@@ -44,12 +43,12 @@ impl<ChainSpec: EthChainSpec + EthereumHardforks> EthBlockAssembler<ChainSpec> {
         transactions_root: Option<B256>,
         receipts_root: Option<B256>,
         logs_bloom: Option<Bloom>,
-    ) -> Result<Block<TransactionSigned>, BlockExecutionError>
+    ) -> Result<Block<F::Transaction>, BlockExecutionError>
     where
         F: for<'a> BlockExecutorFactory<
-                Transaction = TransactionSigned,
-                Receipt = Receipt,
                 ExecutionCtx<'a> = EthBlockExecutionCtx<'a>,
+                Transaction: SignedTransaction,
+                Receipt: Receipt,
             > + 'static,
         F::EvmEnv: EthEvmEnvLike,
     {
@@ -141,14 +140,14 @@ impl<ChainSpec: EthChainSpec + EthereumHardforks> EthBlockAssembler<ChainSpec> {
 impl<F, ChainSpec> BlockAssembler<F> for EthBlockAssembler<ChainSpec>
 where
     F: for<'a> BlockExecutorFactory<
-            Transaction = TransactionSigned,
-            Receipt = Receipt,
+            Transaction: SignedTransaction,
+            Receipt: Receipt,
             ExecutionCtx<'a> = EthBlockExecutionCtx<'a>,
         > + 'static,
     F::EvmEnv: EthEvmEnvLike,
-    ChainSpec: EthChainSpec<Header = Header> + EthereumHardforks + 'static,
+    ChainSpec: EthChainSpec + EthereumHardforks + 'static,
 {
-    type Block = Block<TransactionSigned>;
+    type Block = Block<F::Transaction>;
 
     fn assemble_block(
         &self,
