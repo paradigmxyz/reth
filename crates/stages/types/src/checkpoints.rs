@@ -431,13 +431,58 @@ impl StageCheckpoint {
                 progress: entities,
                 ..
             }) => Some(entities),
-            StageUnitCheckpoint::MerkleChangeSets(_) => None,
+            StageUnitCheckpoint::MerkleChangeSets(_) | StageUnitCheckpoint::Finish(_) => None,
         }
     }
 }
 
 #[cfg(any(test, feature = "reth-codec"))]
 reth_codecs::impl_compression_for_compact!(StageCheckpoint);
+
+/// Saves the progress of the Finish stage.
+#[derive(Default, Debug, Copy, Clone, PartialEq, Eq)]
+#[cfg_attr(any(test, feature = "test-utils"), derive(arbitrary::Arbitrary))]
+#[cfg_attr(
+    all(any(test, feature = "reth-codec"), feature = "partial-persistence"),
+    derive(reth_codecs::Compact)
+)]
+#[cfg_attr(
+    all(any(test, feature = "reth-codec"), feature = "partial-persistence"),
+    reth_codecs::add_arbitrary_tests(compact)
+)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct FinishCheckpoint {
+    /// The highest block with a partially persisted state and trie.
+    pub partial_state_trie: Option<BlockNumber>,
+}
+
+impl FinishCheckpoint {
+    /// Returns the highest block with a partially persisted state and trie, if enabled.
+    pub const fn partial_state_trie(&self) -> Option<BlockNumber> {
+        #[cfg(feature = "partial-persistence")]
+        {
+            self.partial_state_trie
+        }
+        #[cfg(not(feature = "partial-persistence"))]
+        {
+            None
+        }
+    }
+}
+
+#[cfg(all(any(test, feature = "reth-codec"), not(feature = "partial-persistence")))]
+impl reth_codecs::Compact for FinishCheckpoint {
+    fn to_compact<B>(&self, _buf: &mut B) -> usize
+    where
+        B: bytes::BufMut + AsMut<[u8]>,
+    {
+        panic!("serializing FinishCheckpoint requires the `partial-persistence` feature")
+    }
+
+    fn from_compact(_buf: &[u8], _len: usize) -> (Self, &[u8]) {
+        panic!("deserializing FinishCheckpoint requires the `partial-persistence` feature")
+    }
+}
 
 // TODO(alexey): add a merkle checkpoint. Currently it's hard because [`MerkleCheckpoint`]
 //  is not a Copy type.
@@ -465,6 +510,12 @@ pub enum StageUnitCheckpoint {
     /// Note: This variant is only kept for backward compatibility with the Compact codec.
     /// The `MerkleChangeSets` stage has been removed.
     MerkleChangeSets(MerkleChangeSetsCheckpoint),
+    /// Saves the progress of the Finish stage.
+    #[cfg_attr(
+        all(any(test, feature = "test-utils"), not(feature = "partial-persistence")),
+        arbitrary(skip)
+    )]
+    Finish(FinishCheckpoint),
 }
 
 impl StageUnitCheckpoint {
@@ -573,6 +624,15 @@ stage_unit_checkpoints!(
         index_history_stage_checkpoint,
         /// Sets the stage checkpoint to index history.
         with_index_history_stage_checkpoint
+    ),
+    (
+        6,
+        Finish,
+        FinishCheckpoint,
+        /// Returns the finish stage checkpoint, if any.
+        finish_stage_checkpoint,
+        /// Sets the stage checkpoint to finish.
+        with_finish_stage_checkpoint
     )
 );
 
@@ -663,5 +723,41 @@ mod tests {
         let encoded = checkpoint.to_compact(&mut buf);
         let (decoded, _) = MerkleCheckpoint::from_compact(&buf, encoded);
         assert_eq!(decoded, checkpoint);
+    }
+
+    #[cfg(feature = "partial-persistence")]
+    #[test]
+    fn finish_checkpoint_roundtrip() {
+        let finish_checkpoint = FinishCheckpoint { partial_state_trie: Some(21) };
+        let checkpoint = StageCheckpoint::new(42).with_finish_stage_checkpoint(finish_checkpoint);
+
+        let mut buf = Vec::new();
+        let encoded = checkpoint.to_compact(&mut buf);
+        let (decoded, _) = StageCheckpoint::from_compact(&buf, encoded);
+
+        assert_eq!(decoded, checkpoint);
+        assert_eq!(decoded.finish_stage_checkpoint().unwrap().partial_state_trie(), Some(21));
+    }
+
+    #[cfg(not(feature = "partial-persistence"))]
+    #[test]
+    #[should_panic(
+        expected = "serializing FinishCheckpoint requires the `partial-persistence` feature"
+    )]
+    fn finish_checkpoint_serialization_requires_partial_persistence() {
+        let finish_checkpoint = FinishCheckpoint { partial_state_trie: Some(21) };
+        assert_eq!(finish_checkpoint.partial_state_trie(), None);
+
+        let checkpoint = StageCheckpoint::new(42).with_finish_stage_checkpoint(finish_checkpoint);
+        checkpoint.to_compact(&mut Vec::new());
+    }
+
+    #[cfg(not(feature = "partial-persistence"))]
+    #[test]
+    #[should_panic(
+        expected = "deserializing FinishCheckpoint requires the `partial-persistence` feature"
+    )]
+    fn finish_checkpoint_deserialization_requires_partial_persistence() {
+        let _ = FinishCheckpoint::from_compact(&[], 0);
     }
 }

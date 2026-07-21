@@ -30,7 +30,6 @@ use reth_payload_builder::PayloadServiceCommand;
 use reth_primitives_traits::Block as _;
 use reth_provider::{test_utils::MockEthProvider, BalStoreHandle, InMemoryBalStore, RawBal};
 use reth_tasks::spawn_os_thread;
-use reth_trie::{prefix_set::TriePrefixSetsMut, LazyTrieData};
 use reth_trie_common::ComputedTrieData;
 use std::{
     collections::BTreeMap,
@@ -42,23 +41,6 @@ use std::{
     time::Duration,
 };
 use tokio::sync::oneshot;
-
-fn with_changed_paths(
-    block: ExecutedBlock<EthPrimitives>,
-    changed_paths: TriePrefixSetsMut,
-) -> ExecutedBlock<EthPrimitives> {
-    let mut trie_data = block.trie_data();
-    trie_data.changed_paths = Some(Arc::new(changed_paths));
-    ExecutedBlock::with_deferred_trie_data(
-        block.recovered_block,
-        block.execution_output,
-        LazyTrieData::ready(trie_data),
-    )
-}
-
-fn with_empty_changed_paths(block: ExecutedBlock<EthPrimitives>) -> ExecutedBlock<EthPrimitives> {
-    with_changed_paths(block, TriePrefixSetsMut::default())
-}
 
 /// Mock engine validator for tests
 #[derive(Debug, Clone)]
@@ -629,7 +611,7 @@ fn on_new_persisted_block_queues_sparse_trie_prune_request() {
 }
 
 #[test]
-fn on_new_persisted_block_queues_sparse_trie_prune_when_changed_paths_unknown() {
+fn on_new_persisted_block_queues_sparse_trie_prune_with_in_memory_blocks() {
     let blocks: Vec<_> = TestBlockBuilder::eth().get_executed_blocks(1..4).collect();
     let mut test_harness = TestHarness::new(MAINNET.clone()).with_blocks(blocks.clone());
     test_harness
@@ -644,8 +626,7 @@ fn on_new_persisted_block_queues_sparse_trie_prune_when_changed_paths_unknown() 
 
 #[test]
 fn on_new_persisted_block_skips_sparse_trie_prune_when_state_root_task_disabled() {
-    let blocks: Vec<_> =
-        TestBlockBuilder::eth().get_executed_blocks(1..4).map(with_empty_changed_paths).collect();
+    let blocks: Vec<_> = TestBlockBuilder::eth().get_executed_blocks(1..4).collect();
     let configs = [
         TreeConfig::default().with_has_enough_parallelism(false),
         TreeConfig::default().with_has_enough_parallelism(true).with_state_root_fallback(true),
@@ -713,7 +694,7 @@ fn process_payload_attributes_shares_sparse_trie_during_validation_fallback() {
     let PayloadServiceCommand::BuildNewPayload(input, _, _) = command else {
         panic!("expected build new payload command")
     };
-    assert!(input.state_root_handle.is_some());
+    assert!(input.resources.state_root_handle().is_some());
 }
 
 #[tokio::test]
