@@ -26,6 +26,7 @@ reth-network.workspace = true
 reth-evm.workspace = true
 reth-evm-ethereum = { workspace = true, features = ["std"] }
 reth-rpc.workspace = true
+reth-rpc-engine-api.workspace = true
 reth-rpc-api.workspace = true
 reth-rpc-eth-api.workspace = true
 reth-rpc-builder.workspace = true
@@ -57,6 +58,7 @@ revm = { workspace = true, features = ["secp256k1", "blst", "c-kzg", "memory_lim
 # misc
 eyre.workspace = true
 ethereum_ssz.workspace = true
+ethereum_ssz_derive.workspace = true
 http-body-util.workspace = true
 serde.workspace = true
 serde_json.workspace = true

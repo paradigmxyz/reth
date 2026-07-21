@@ -26,6 +26,7 @@ pub mod receipt;
 pub mod signer;
 pub mod spec;
 pub mod state;
+pub mod subscriptions;
 pub mod trace;
 pub mod transaction;
 
@@ -39,6 +40,7 @@ pub use receipt::LoadReceipt;
 pub use signer::EthSigner;
 pub use spec::EthApiSpec;
 pub use state::{EthState, LoadState};
+pub use subscriptions::EthSubscriptions;
 pub use trace::Trace;
 pub use transaction::{EthTransactions, LoadTransaction};
 
@@ -63,6 +65,7 @@ pub trait FullEthApi:
     + EthState
     + EthCall
     + EthFees
+    + EthSubscriptions
     + Trace
     + LoadReceipt
     + GetBlockAccessList
@@ -77,6 +80,7 @@ impl<T> FullEthApi for T where
         + EthState
         + EthCall
         + EthFees
+        + EthSubscriptions
         + Trace
         + LoadReceipt
         + GetBlockAccessList
