@@ -18,7 +18,7 @@ use evm2::{precompiles::MovePrecompileError, EvmFeatures, TxResult};
 use jsonrpsee_types::{error::INTERNAL_ERROR_CODE, ErrorObject};
 use reth_evm::{
     execute::{BlockBuilder, BlockBuilderOutcome},
-    Database, Evm as RethEvm, EvmEnv,
+    BlockTransactionResult, Database, Evm as RethEvm, EvmEnv,
 };
 use reth_primitives_traits::{
     BlockBody as _, BlockTy, NodePrimitives, Recovered, RecoveredBlock, SealedHeader,
@@ -305,12 +305,7 @@ pub fn execute_transactions<S, T, EvmTypes>(
     converter: &T,
 ) -> Result<(BlockBuilderOutcome<S::Primitives>, Vec<TxResult<EvmTypes>>), EthApiError>
 where
-    S: BlockBuilder<
-        Executor: reth_evm::BlockExecutor<
-            Evm: RethEvm<EvmTypes = EvmTypes>,
-            TransactionResult = TxResult<EvmTypes>,
-        >,
-    >,
+    S: BlockBuilder<Executor: reth_evm::BlockExecutor<Evm: RethEvm<EvmTypes = EvmTypes>>>,
     T: RpcConvert<Primitives = S::Primitives>,
     EvmTypes: evm2::EvmTypes,
 {
@@ -375,9 +370,10 @@ where
         let tx = WithEncoded::new(Default::default(), tx);
 
         let mut tx_regular_gas_used = 0;
-        let gas_output = builder.execute_transaction_with_result_closure(tx, |result| {
-            tx_regular_gas_used = result.regular_gas_spent();
-            results.push(result.clone())
+        let gas_output = builder.execute_transaction_with_result_closure(tx, |output| {
+            let result = output.result();
+            tx_regular_gas_used = result.result.regular_gas_spent();
+            results.push(result.result.clone())
         })?;
 
         let gas_used = gas_output.tx_gas_used();
