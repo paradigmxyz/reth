@@ -875,7 +875,7 @@ mod tests {
             .entry(account)
             .or_default()
             .insert(Nibbles::unpack(slot));
-        sparse.prune(retained_paths.freeze_unchecked());
+        sparse.prune(retained_paths.freeze());
 
         assert!(matches!(
             sparse.state_trie_ref().unwrap().find_leaf(&account_path, None),
