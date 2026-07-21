@@ -929,6 +929,11 @@ fn test_backpressure_waits_for_persistence_before_reading_incoming() {
     assert_eq!(test_harness.tree.incoming.len(), 0);
 }
 
+#[test]
+fn changeset_cache_eviction_threshold_is_bounded_by_persisted_tip() {
+    assert_eq!(changeset_cache_eviction_threshold(130), 66);
+}
+
 #[tokio::test]
 async fn test_tree_state_on_new_head_reorg() {
     reth_tracing::init_test_tracing();
