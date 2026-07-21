@@ -984,7 +984,7 @@ Engine:
 
           To persist blocks as fast as the node receives them, set this value to zero. This will cause more frequent DB writes.
 
-          [default: 2]
+          [default: 7]
 
       --engine.persistence-backpressure-threshold <PERSISTENCE_BACKPRESSURE_THRESHOLD>
           Configure the maximum canonical-minus-persisted gap before engine API processing stalls.
@@ -996,7 +996,7 @@ Engine:
       --engine.memory-block-buffer-target <MEMORY_BLOCK_BUFFER_TARGET>
           Configure the target number of blocks to keep in memory
 
-          [default: 0]
+          [default: 5]
 
       --engine.invalid-header-cache-hit-eviction-threshold <INVALID_HEADER_HIT_EVICTION_THRESHOLD>
           Configure how many cache hits an invalid header can accumulate before it is evicted and reprocessed.
