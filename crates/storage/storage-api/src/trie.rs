@@ -11,7 +11,7 @@ use reth_trie_common::{
 /// A type that can compute the state root of a given post state.
 #[auto_impl::auto_impl(&, Box, Arc)]
 pub trait StateRootProvider {
-    /// Returns the state root of the `BundleState` on top of the current state.
+    /// Returns the state root of the execution state on top of the current state.
     ///
     /// # Note
     ///
