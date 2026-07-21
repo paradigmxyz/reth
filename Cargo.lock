@@ -9032,6 +9032,7 @@ name = "reth-metrics"
 version = "2.4.1"
 dependencies = [
  "futures",
+ "libc",
  "metrics",
  "metrics-derive",
  "reth-primitives-traits",
