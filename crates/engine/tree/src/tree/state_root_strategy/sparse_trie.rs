@@ -1005,8 +1005,6 @@ pub(super) struct SparseTrieTaskMetrics {
     /// Number of storage leaf updates that required a new proof (cache misses).
     pub(super) sparse_trie_storage_cache_misses: Histogram,
 
-    /// Retained memory of the preserved sparse trie cache in bytes.
-    pub(super) sparse_trie_retained_memory_bytes: Gauge,
     /// Number of storage tries retained in the preserved sparse trie cache.
     pub(super) sparse_trie_retained_storage_tries: Gauge,
 }
