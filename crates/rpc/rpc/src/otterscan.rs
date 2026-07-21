@@ -316,7 +316,7 @@ where
     /// Handler for `ots_getContractCreator`
     async fn get_contract_creator(&self, address: Address) -> RpcResult<Option<ContractCreator>> {
         if !self.has_code(address, None).await? {
-            return Ok(None);
+            return Ok(None)
         }
 
         let num = binary_search::<_, _, ErrorObjectOwned>(

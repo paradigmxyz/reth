@@ -126,7 +126,7 @@ fn infer_snapshot_block_from_db(source_datadir: &std::path::Path) -> Result<u64>
 
     eyre::bail!(
         "Could not infer --block from source DB (Finish checkpoint missing); pass --block manually"
-    );
+    )
 }
 
 /// Infers the snapshot block from the highest header static-file range.
