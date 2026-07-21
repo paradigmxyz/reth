@@ -590,12 +590,11 @@ async fn test_tree_persist_blocks() {
     let received_action =
         test_harness.action_rx.recv().expect("Failed to receive save blocks action");
     if let PersistenceAction::SaveBlocks(input, _) = received_action {
-        let expected_persist_len = blocks.len() - tree_config.memory_block_buffer_target() as usize;
-        let expected_blocks = &blocks[..expected_persist_len];
+        let expected_persist_len = blocks.len();
         assert_eq!(input.blocks().len(), expected_persist_len);
-        assert_eq!(input.blocks(), expected_blocks);
-        assert_eq!(input.persist_rest_blocks(), expected_blocks);
-        assert_eq!(input.state_trie_blocks(), expected_blocks);
+        assert_eq!(input.blocks(), blocks);
+        assert_eq!(input.persist_rest_blocks(), blocks);
+        assert_eq!(input.state_trie_blocks(), blocks);
         assert!(input.state_trie_masking_blocks().is_empty());
     } else {
         panic!("unexpected action received {received_action:?}");
@@ -868,9 +867,8 @@ fn test_backpressure_waits_for_persistence_before_reading_incoming() {
     test_harness.tree.config = test_harness
         .tree
         .config
-        .with_memory_block_buffer_target(0)
-        .with_persistence_threshold(1)
-        .with_persistence_backpressure_threshold(2);
+        .with_persistence_threshold(0)
+        .with_persistence_backpressure_threshold(1);
 
     let (persist_tx, persist_rx) = crossbeam_channel::bounded(1);
     let persisted = blocks.last().unwrap().recovered_block().num_hash();
@@ -929,27 +927,6 @@ fn test_backpressure_waits_for_persistence_before_reading_incoming() {
     };
     let _ = test_harness.tree.on_engine_message(message).unwrap();
     assert_eq!(test_harness.tree.incoming.len(), 0);
-}
-
-#[test]
-fn test_backpressure_excludes_in_memory_buffer() {
-    for (canonical_tip, expected_backpressure) in [(14_u64, false), (15, true)] {
-        let blocks: Vec<_> =
-            TestBlockBuilder::eth().get_executed_blocks(1..canonical_tip + 1).collect();
-        let mut test_harness = TestHarness::new(MAINNET.clone()).with_blocks(blocks.clone());
-        test_harness.tree.config = test_harness
-            .tree
-            .config
-            .with_persistence_threshold(0)
-            .with_memory_block_buffer_target(5)
-            .with_persistence_backpressure_threshold(10);
-
-        let (_persist_tx, persist_rx) = crossbeam_channel::bounded(1);
-        let persisted = blocks.last().unwrap().recovered_block().num_hash();
-        test_harness.tree.persistence_state.start_save(persisted, persist_rx);
-
-        assert_eq!(test_harness.tree.should_backpressure(), expected_backpressure);
-    }
 }
 
 #[tokio::test]
@@ -1328,10 +1305,8 @@ fn test_get_save_blocks_input_state_masking_keeps_full_eligible_backlog() {
         blocks[0].recovered_block().num_hash();
     test_harness.tree.persistence_state.last_persisted_block =
         blocks[3].recovered_block().num_hash();
-    test_harness.tree.config = TreeConfig::default()
-        .with_persistence_threshold(13)
-        .with_memory_block_buffer_target(0)
-        .with_num_state_masking_blocks(10);
+    test_harness.tree.config =
+        TreeConfig::default().with_persistence_threshold(13).with_num_state_masking_blocks(10);
 
     let input = test_harness.tree.get_save_blocks_input(PersistTarget::Threshold).unwrap();
 
@@ -1383,10 +1358,8 @@ fn test_get_save_blocks_input_steady_state_masking_has_catchup_overlap_and_maske
         blocks[5].recovered_block().num_hash();
     test_harness.tree.persistence_state.last_persisted_block =
         blocks[11].recovered_block().num_hash();
-    test_harness.tree.config = TreeConfig::default()
-        .with_persistence_threshold(11)
-        .with_memory_block_buffer_target(0)
-        .with_num_state_masking_blocks(6);
+    test_harness.tree.config =
+        TreeConfig::default().with_persistence_threshold(11).with_num_state_masking_blocks(6);
 
     let input = test_harness.tree.get_save_blocks_input(PersistTarget::Threshold).unwrap();
 
