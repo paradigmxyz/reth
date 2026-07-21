@@ -73,35 +73,6 @@ impl Overlay {
     }
 }
 
-/// Returns the highest blocks whose state/trie data and non-state/trie data are durably
-/// available in the database.
-pub(crate) fn database_state_frontiers<Provider>(
-    provider: &Provider,
-) -> ProviderResult<(BlockNumHash, BlockNumHash)>
-where
-    Provider: StageCheckpointReader + BlockNumReader,
-{
-    let checkpoint = provider
-        .get_stage_checkpoint(StageId::Finish)?
-        .ok_or_else(|| ProviderError::InsufficientChangesets { requested: 0, available: 0..=0 })?;
-    let state_trie_tip_number = checkpoint
-        .finish_stage_checkpoint()
-        .and_then(|finish| finish.partial_state_trie())
-        .unwrap_or(checkpoint.block_number);
-    let state_trie_tip_hash = provider
-        .convert_number(state_trie_tip_number.into())?
-        .ok_or_else(|| ProviderError::HeaderNotFound(state_trie_tip_number.into()))?;
-    let finish_tip_number = checkpoint.block_number;
-    let finish_tip_hash = provider
-        .convert_number(finish_tip_number.into())?
-        .ok_or_else(|| ProviderError::HeaderNotFound(finish_tip_number.into()))?;
-
-    Ok((
-        BlockNumHash::new(state_trie_tip_number, state_trie_tip_hash),
-        BlockNumHash::new(finish_tip_number, finish_tip_hash),
-    ))
-}
-
 /// Source of overlay data for [`OverlayStateProviderFactory`].
 #[derive(Debug, Clone)]
 pub(super) enum OverlaySource<N: NodePrimitives = EthPrimitives> {
@@ -746,6 +717,35 @@ where
             HashedPostStateCursorFactory::new(db_hashed_cursor_factory, &self.hashed_post_state);
         hashed_cursor_factory.hashed_storage_cursor(hashed_address)
     }
+}
+
+/// Returns the highest blocks whose state/trie data and non-state/trie data are durably
+/// available in the database.
+pub(crate) fn database_state_frontiers<Provider>(
+    provider: &Provider,
+) -> ProviderResult<(BlockNumHash, BlockNumHash)>
+where
+    Provider: StageCheckpointReader + BlockNumReader,
+{
+    let checkpoint = provider
+        .get_stage_checkpoint(StageId::Finish)?
+        .ok_or_else(|| ProviderError::InsufficientChangesets { requested: 0, available: 0..=0 })?;
+    let state_trie_tip_number = checkpoint
+        .finish_stage_checkpoint()
+        .and_then(|finish| finish.partial_state_trie())
+        .unwrap_or(checkpoint.block_number);
+    let state_trie_tip_hash = provider
+        .convert_number(state_trie_tip_number.into())?
+        .ok_or_else(|| ProviderError::HeaderNotFound(state_trie_tip_number.into()))?;
+    let finish_tip_number = checkpoint.block_number;
+    let finish_tip_hash = provider
+        .convert_number(finish_tip_number.into())?
+        .ok_or_else(|| ProviderError::HeaderNotFound(finish_tip_number.into()))?;
+
+    Ok((
+        BlockNumHash::new(state_trie_tip_number, state_trie_tip_hash),
+        BlockNumHash::new(finish_tip_number, finish_tip_hash),
+    ))
 }
 
 #[cfg(test)]
