@@ -92,7 +92,7 @@ where
         .ok_or_else(|| ProviderError::InsufficientChangesets { requested: 0, available: 0..=0 })?;
     let state_trie_tip_number = checkpoint
         .finish_stage_checkpoint()
-        .and_then(|finish| finish.partial_state_trie)
+        .and_then(|finish| finish.partial_state_trie())
         .unwrap_or(checkpoint.block_number);
     let state_trie_tip_hash = provider
         .convert_number(state_trie_tip_number.into())?

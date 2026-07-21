@@ -637,7 +637,7 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
         if let Some(checkpoint) = self.get_stage_checkpoint(StageId::Finish)? {
             let partial_state_trie = checkpoint
                 .finish_stage_checkpoint()
-                .and_then(|finish| finish.partial_state_trie)
+                .and_then(|finish| finish.partial_state_trie())
                 .unwrap_or(checkpoint.block_number);
             assert_eq!(
                 checkpoint.block_number,
@@ -3724,7 +3724,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
         Ok(self.get_stage_checkpoint(StageId::Finish)?.map(|checkpoint| {
             checkpoint
                 .finish_stage_checkpoint()
-                .and_then(|finish| finish.partial_state_trie)
+                .and_then(|finish| finish.partial_state_trie())
                 .unwrap_or(checkpoint.block_number)
         }))
     }

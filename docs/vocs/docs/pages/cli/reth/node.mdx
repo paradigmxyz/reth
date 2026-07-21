@@ -881,6 +881,13 @@ Dev testnet:
           Parses strings using [`humantime::parse_duration`]
           --dev.block-time 12s
 
+      --dev.finality-depth <FINALITY_DEPTH>
+          Number of confirmations required before a block is finalized.
+
+          A depth of `1` finalizes the canonical head immediately.
+
+          [default: 64]
+
       --dev.payload-wait-time <PAYLOAD_WAIT_TIME>
           Time to wait after initiating payload building before resolving.
 

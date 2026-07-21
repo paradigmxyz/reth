@@ -1346,7 +1346,7 @@ pub fn metrics_hooks<N: NodeTypesWithDB>(provider_factory: &ProviderFactory<N>) 
 
 fn partial_trie_unwind_target(finish_checkpoint: Option<StageCheckpoint>) -> Option<BlockNumber> {
     let finish_checkpoint = finish_checkpoint?;
-    let partial_state_trie = finish_checkpoint.finish_stage_checkpoint()?.partial_state_trie?;
+    let partial_state_trie = finish_checkpoint.finish_stage_checkpoint()?.partial_state_trie()?;
 
     (partial_state_trie != finish_checkpoint.block_number).then_some(partial_state_trie)
 }

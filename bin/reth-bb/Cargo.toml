@@ -74,6 +74,7 @@ default = [
     "otlp-logs",
     "reth-revm/portable",
     "js-tracer",
+    "partial-persistence",
 ]
 
 otlp = [
@@ -122,6 +123,8 @@ min-trace-logs = [
     "reth-node-core/min-trace-logs",
 ]
 trie-debug = ["reth-node-builder/trie-debug", "reth-node-core/trie-debug"]
+
+partial-persistence = ["reth-node-core/partial-persistence"]
 
 [[bin]]
 name = "reth-bb"

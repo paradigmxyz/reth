@@ -149,7 +149,7 @@ where
             provider_rw.get_stage_checkpoint(StageId::Finish)?.map(|checkpoint| {
                 checkpoint
                     .finish_stage_checkpoint()
-                    .and_then(|finish| finish.partial_state_trie)
+                    .and_then(|finish| finish.partial_state_trie())
                     .unwrap_or(checkpoint.block_number)
             });
         provider_rw.commit()?;
