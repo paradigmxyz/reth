@@ -41,7 +41,7 @@ where
 
     let Some(header) = response else {
         client.report_bad_message(peer_id);
-        eyre::bail!("Invalid number of headers received. Expected: 1. Received: 0");
+        eyre::bail!("Invalid number of headers received. Expected: 1. Received: 0")
     };
 
     let header = SealedHeader::seal_slow(header);
@@ -77,7 +77,7 @@ where
 
     let Some(body) = response else {
         client.report_bad_message(peer_id);
-        eyre::bail!("Invalid number of bodies received. Expected: 1. Received: 0");
+        eyre::bail!("Invalid number of bodies received. Expected: 1. Received: 0")
     };
 
     let block = SealedBlock::from_sealed_parts(header, body);

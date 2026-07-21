@@ -134,6 +134,12 @@ impl CommitChanges {
     }
 }
 
+/// A detached block transaction output containing its raw execution result.
+pub trait BlockTransactionResult<T: evm2::EvmTypes> {
+    /// Returns the raw transaction execution result.
+    fn result(&self) -> &evm2::TxResultWithState<T>;
+}
+
 /// A configured EVM instance.
 pub trait Evm {
     /// Runtime EVM type family.
@@ -333,14 +339,10 @@ pub trait BlockExecutor: Sized {
     type Evm: Evm;
     /// Transaction environment consumed by this executor.
     type Transaction: FromTxWithEncoded<TxTy<Self::Primitives>>;
-    /// Raw transaction execution result produced before receipt conversion.
-    type TransactionResult;
     /// Owned transaction execution result and detached state changes.
-    type TransactionResultWithState: Send;
+    type TransactionResultWithState: BlockTransactionResult<<Self::Evm as Evm>::EvmTypes> + Send;
     /// EVM-native block access list used for indexed reads.
     type BlockAccessList: Send + Sync;
-    /// Output returned after a transaction is committed.
-    type TransactionOutput: Default;
 
     /// Returns the underlying EVM.
     fn evm(&self) -> &Self::Evm;
@@ -378,13 +380,20 @@ pub trait BlockExecutor: Sized {
     /// Applies pre-execution block changes.
     fn apply_pre_execution_changes(&mut self) -> Result<(), BlockExecutionError>;
 
-    /// Executes a transaction, invokes `f` with the transaction result, and commits changes when
-    /// `f` returns [`CommitChanges::Yes`].
+    /// Executes a transaction, invokes `f` with the detached result and state changes, and commits
+    /// changes when `f` returns [`CommitChanges::Yes`].
     fn execute_transaction_with_commit_condition(
         &mut self,
         transaction: Self::Transaction,
-        f: impl FnOnce(&Self::TransactionResult) -> CommitChanges,
-    ) -> Result<Option<Self::TransactionOutput>, BlockExecutionError>;
+        f: impl FnOnce(&Self::TransactionResultWithState) -> CommitChanges,
+    ) -> Result<Option<GasOutput>, BlockExecutionError> {
+        let output = self.execute_transaction_without_commit(transaction)?;
+        if f(&output).should_commit() {
+            self.commit_transaction(output).map(Some)
+        } else {
+            Ok(None)
+        }
+    }
 
     /// Executes a transaction and detaches its state changes without committing them.
     fn execute_transaction_without_commit(
@@ -396,14 +405,15 @@ pub trait BlockExecutor: Sized {
     fn commit_transaction(
         &mut self,
         output: Self::TransactionResultWithState,
-    ) -> Result<Self::TransactionOutput, BlockExecutionError>;
+    ) -> Result<GasOutput, BlockExecutionError>;
 
-    /// Executes a transaction, invokes `f` with the transaction result, and commits changes.
+    /// Executes a transaction, invokes `f` with the detached result and state changes, and commits
+    /// changes.
     fn execute_transaction_with_result_closure(
         &mut self,
         transaction: Self::Transaction,
-        f: impl FnOnce(&Self::TransactionResult),
-    ) -> Result<Self::TransactionOutput, BlockExecutionError> {
+        f: impl FnOnce(&Self::TransactionResultWithState),
+    ) -> Result<GasOutput, BlockExecutionError> {
         self.execute_transaction_with_commit_condition(transaction, |result| {
             f(result);
             CommitChanges::Yes
@@ -415,7 +425,7 @@ pub trait BlockExecutor: Sized {
     fn execute_transaction(
         &mut self,
         transaction: Self::Transaction,
-    ) -> Result<Self::TransactionOutput, BlockExecutionError> {
+    ) -> Result<GasOutput, BlockExecutionError> {
         self.execute_transaction_with_result_closure(transaction, |_| {})
     }
 
@@ -464,8 +474,6 @@ pub trait BlockExecutorFactory {
         Primitives = Self::Primitives,
         Evm = Self::Evm<'a>,
         Transaction = Self::Transaction,
-        TransactionResult = evm2::TxResult<Self::EvmTypes>,
-        TransactionOutput = GasOutput,
     >
     where
         Self: 'a;
@@ -584,7 +592,7 @@ pub trait BlockBuilder: Sized {
     /// The primitive types used by the inner [`BlockExecutor`].
     type Primitives: NodePrimitives;
     /// Inner block executor.
-    type Executor: BlockExecutor<Primitives = Self::Primitives, TransactionOutput = GasOutput>;
+    type Executor: BlockExecutor<Primitives = Self::Primitives>;
     /// EVM environment used for block execution.
     type EvmEnv: EvmEnv;
 
@@ -594,19 +602,20 @@ pub trait BlockBuilder: Sized {
     /// Applies pre-execution block changes.
     fn apply_pre_execution_changes(&mut self) -> Result<(), BlockExecutionError>;
 
-    /// Executes a transaction and saves it for block assembly only if committed.
+    /// Executes a transaction, exposes its detached result and state changes to `f`, and saves it
+    /// for block assembly only if committed.
     fn execute_transaction_with_commit_condition(
         &mut self,
         tx: impl ExecutorTx<Self::Executor>,
-        f: impl FnOnce(&<Self::Executor as BlockExecutor>::TransactionResult) -> CommitChanges,
+        f: impl FnOnce(&<Self::Executor as BlockExecutor>::TransactionResultWithState) -> CommitChanges,
     ) -> Result<Option<GasOutput>, BlockExecutionError>;
 
-    /// Executes a transaction, invokes `f` with the transaction result, and saves it for block
-    /// assembly.
+    /// Executes a transaction, invokes `f` with the detached result and state changes, and saves it
+    /// for block assembly.
     fn execute_transaction_with_result_closure(
         &mut self,
         tx: impl ExecutorTx<Self::Executor>,
-        f: impl FnOnce(&<Self::Executor as BlockExecutor>::TransactionResult),
+        f: impl FnOnce(&<Self::Executor as BlockExecutor>::TransactionResultWithState),
     ) -> Result<GasOutput, BlockExecutionError> {
         self.execute_transaction_with_commit_condition(tx, |result| {
             f(result);
@@ -744,8 +753,6 @@ where
         Primitives = N,
         Evm: Evm<EvmTypes = F::EvmTypes>,
         Transaction = F::Transaction,
-        TransactionResult = evm2::TxResult<F::EvmTypes>,
-        TransactionOutput = GasOutput,
     >,
     Assembler: BlockAssembler<F, Block = N::Block>,
     N: NodePrimitives,
@@ -766,7 +773,7 @@ where
     fn execute_transaction_with_commit_condition(
         &mut self,
         tx: impl ExecutorTx<Self::Executor>,
-        f: impl FnOnce(&<Self::Executor as BlockExecutor>::TransactionResult) -> CommitChanges,
+        f: impl FnOnce(&<Self::Executor as BlockExecutor>::TransactionResultWithState) -> CommitChanges,
     ) -> Result<Option<GasOutput>, BlockExecutionError> {
         let (tx_env, tx) = tx.into_parts();
         if let Some(output) = self.executor.execute_transaction_with_commit_condition(tx_env, f)? {
