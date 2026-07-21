@@ -161,7 +161,7 @@ where
     let BuildArguments {
         mut cached_reads,
         execution_cache,
-        state_root_handle,
+        mut state_root_handle,
         config,
         cancel,
         best_payload,
@@ -222,8 +222,8 @@ where
     let mut total_fees = U256::ZERO;
 
     // If we have a state-root task, wire a state hook that streams per-tx state diffs.
-    if let Some(ref task) = state_root_handle {
-        builder.evm_mut().db_mut().set_state_hook(Some(Box::new(task.state_hook())));
+    if let Some(task) = state_root_handle.as_mut() {
+        builder.evm_mut().db_mut().set_state_hook(Some(Box::new(task.take_state_hook())));
     }
 
     builder.apply_pre_execution_changes().map_err(|err| {

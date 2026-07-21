@@ -2,8 +2,10 @@ use crate::{
     traits::{BlockSource, ReceiptProvider},
     AccountReader, BalProvider, BalStoreHandle, BlockHashReader, BlockIdReader, BlockNumReader,
     BlockReader, BlockReaderIdExt, ChainSpecProvider, ChangeSetReader, HeaderProvider,
-    PruneCheckpointReader, ReceiptProviderIdExt, StateProvider, StateProviderBox,
-    StateProviderFactory, StateReader, StateRootProvider, TransactionVariant, TransactionsProvider,
+    PruneCheckpointReader, RangeEnd, RangeResponse, RangeResult, ReceiptProviderIdExt,
+    StateProvider, StateProviderBox, StateProviderFactory, StateRangeProvider,
+    StateRangeProviderFactory, StateRangeView, StateReader, StateRootProvider, StorageRangeResult,
+    TransactionVariant, TransactionsProvider,
 };
 use alloy_consensus::{
     constants::EMPTY_ROOT_HASH,
@@ -43,10 +45,13 @@ use reth_trie::{
     MultiProofTargets, StorageMultiProof, StorageProof, TrieInput,
 };
 use std::{
-    collections::BTreeMap,
+    collections::{BTreeMap, VecDeque},
     fmt::Debug,
     ops::{RangeBounds, RangeInclusive},
-    sync::Arc,
+    sync::{
+        atomic::{AtomicBool, AtomicUsize, Ordering},
+        Arc,
+    },
 };
 use tokio::sync::broadcast;
 
@@ -70,9 +75,42 @@ pub struct MockEthProvider<T: NodePrimitives = EthPrimitives, ChainSpec = reth_c
     pub block_body_indices: Arc<Mutex<HashMap<BlockNumber, StoredBlockBodyIndices>>>,
     /// Local BAL store handle
     pub bal_store: BalStoreHandle,
+    /// Whether snap state reads should fail for handler error-path tests.
+    snap_state_reads_fail: Arc<AtomicBool>,
+    /// Whether a snap state range view is available.
+    snap_state_range_available: Arc<AtomicBool>,
+    /// Number of snap state range view resolutions.
+    snap_state_range_resolutions: Arc<AtomicUsize>,
+    /// Account range returned to snap handler tests.
+    snap_account_range: Arc<Mutex<MockAccountRange>>,
+    /// Storage roots returned to snap handler tests, keyed by hashed address.
+    snap_storage_roots: Arc<Mutex<B256Map<B256>>>,
+    /// Storage ranges returned to snap handler tests.
+    snap_storage_ranges: Arc<Mutex<VecDeque<MockStorageRangeOutcome>>>,
+    /// Storage range requests observed by snap handler tests.
+    snap_storage_range_requests: Arc<Mutex<Vec<MockStorageRangeRequest>>>,
+    /// Account proof returned to snap handler tests.
+    snap_account_proof: Arc<Mutex<Option<Vec<Bytes>>>>,
+    /// Storage proof returned to snap handler tests.
+    snap_storage_proof: Arc<Mutex<Option<Vec<Bytes>>>>,
     tx: TxMock,
     prune_modes: Arc<PruneModes>,
 }
+
+/// Optional mock account entries paired with why the range ended.
+type MockAccountRange = Option<(Vec<(B256, Account)>, RangeEnd)>;
+/// Outcome of a queued mock `storage_range` call.
+#[derive(Debug, Clone)]
+enum MockStorageRangeOutcome {
+    /// The provider fails this call (e.g. simulating a database error).
+    Error,
+    /// The requested account isn't present in the pinned state.
+    AccountMissing,
+    /// The account is present; these are its slots and why the range ended.
+    Found(Vec<(B256, U256)>, RangeEnd),
+}
+/// Hashed address, origin, limit, and byte budget of a mock storage range request.
+type MockStorageRangeRequest = (B256, B256, B256, usize);
 
 impl<T: NodePrimitives, ChainSpec> Clone for MockEthProvider<T, ChainSpec>
 where
@@ -88,6 +126,15 @@ where
             state_roots: self.state_roots.clone(),
             block_body_indices: self.block_body_indices.clone(),
             bal_store: self.bal_store.clone(),
+            snap_state_reads_fail: self.snap_state_reads_fail.clone(),
+            snap_state_range_available: self.snap_state_range_available.clone(),
+            snap_state_range_resolutions: self.snap_state_range_resolutions.clone(),
+            snap_account_range: self.snap_account_range.clone(),
+            snap_storage_roots: self.snap_storage_roots.clone(),
+            snap_storage_ranges: self.snap_storage_ranges.clone(),
+            snap_storage_range_requests: self.snap_storage_range_requests.clone(),
+            snap_account_proof: self.snap_account_proof.clone(),
+            snap_storage_proof: self.snap_storage_proof.clone(),
             tx: self.tx.clone(),
             prune_modes: self.prune_modes.clone(),
         }
@@ -106,6 +153,15 @@ impl<T: NodePrimitives> MockEthProvider<T, reth_chainspec::ChainSpec> {
             state_roots: Default::default(),
             block_body_indices: Default::default(),
             bal_store: Default::default(),
+            snap_state_reads_fail: Default::default(),
+            snap_state_range_available: Default::default(),
+            snap_state_range_resolutions: Default::default(),
+            snap_account_range: Default::default(),
+            snap_storage_roots: Default::default(),
+            snap_storage_ranges: Default::default(),
+            snap_storage_range_requests: Default::default(),
+            snap_account_proof: Default::default(),
+            snap_storage_proof: Default::default(),
             tx: Default::default(),
             prune_modes: Default::default(),
         }
@@ -113,6 +169,72 @@ impl<T: NodePrimitives> MockEthProvider<T, reth_chainspec::ChainSpec> {
 }
 
 impl<T: NodePrimitives, ChainSpec> MockEthProvider<T, ChainSpec> {
+    /// Makes snap state reads return provider errors when `fail` is true.
+    pub fn set_snap_state_reads_fail(&self, fail: bool) {
+        self.snap_state_reads_fail.store(fail, Ordering::Relaxed);
+    }
+
+    /// Sets the available account range returned to snap handler tests.
+    pub fn set_snap_account_range(&self, accounts: Vec<(B256, Account)>, end: RangeEnd) {
+        self.snap_state_range_available.store(true, Ordering::Relaxed);
+        *self.snap_account_range.lock() = Some((accounts, end));
+    }
+
+    /// Sets an account's storage root for snap handler tests.
+    pub fn set_snap_storage_root(&self, hashed_address: B256, storage_root: B256) {
+        self.snap_storage_roots.lock().insert(hashed_address, storage_root);
+    }
+
+    /// Adds an available storage range for the next snap handler call.
+    pub fn push_snap_storage_range(&self, slots: Vec<(B256, U256)>, end: RangeEnd) {
+        self.snap_state_range_available.store(true, Ordering::Relaxed);
+        self.snap_storage_ranges.lock().push_back(MockStorageRangeOutcome::Found(slots, end));
+    }
+
+    /// Marks the account for the next snap handler call as absent from the pinned state.
+    pub fn push_missing_snap_storage_account(&self) {
+        self.snap_state_range_available.store(true, Ordering::Relaxed);
+        self.snap_storage_ranges.lock().push_back(MockStorageRangeOutcome::AccountMissing);
+    }
+
+    /// Adds an unavailable storage range for the next snap handler call.
+    pub fn push_unavailable_snap_storage_range(&self) {
+        self.snap_state_range_available.store(true, Ordering::Relaxed);
+        self.snap_storage_ranges.lock().push_back(MockStorageRangeOutcome::Error);
+    }
+
+    /// Returns the number of queued storage ranges for snap handler tests.
+    pub fn snap_storage_ranges_remaining(&self) -> usize {
+        self.snap_storage_ranges.lock().len()
+    }
+
+    /// Returns the storage range requests observed by snap handler tests.
+    pub fn snap_storage_range_requests(&self) -> Vec<(B256, B256, B256, usize)> {
+        self.snap_storage_range_requests.lock().clone()
+    }
+
+    /// Returns the number of snap state range view resolutions.
+    pub fn snap_state_range_resolutions(&self) -> usize {
+        self.snap_state_range_resolutions.load(Ordering::Relaxed)
+    }
+
+    /// Sets the account proof returned to snap handler tests.
+    pub fn set_snap_account_proof(&self, proof: Option<Vec<Bytes>>) {
+        *self.snap_account_proof.lock() = proof;
+    }
+
+    /// Sets the storage proof returned to snap handler tests.
+    pub fn set_snap_storage_proof(&self, proof: Option<Vec<Bytes>>) {
+        *self.snap_storage_proof.lock() = proof;
+    }
+
+    fn ensure_snap_state_reads_succeed(&self) -> ProviderResult<()> {
+        if self.snap_state_reads_fail.load(Ordering::Relaxed) {
+            return Err(ProviderError::BestBlockNotFound)
+        }
+        Ok(())
+    }
+
     /// Add block to local block store
     pub fn add_block(&self, hash: B256, block: T::Block) {
         self.add_header(hash, block.header().clone());
@@ -190,6 +312,15 @@ impl<T: NodePrimitives, ChainSpec> MockEthProvider<T, ChainSpec> {
             state_roots: self.state_roots,
             block_body_indices: self.block_body_indices,
             bal_store: self.bal_store,
+            snap_state_reads_fail: self.snap_state_reads_fail,
+            snap_state_range_available: self.snap_state_range_available,
+            snap_state_range_resolutions: self.snap_state_range_resolutions,
+            snap_account_range: self.snap_account_range,
+            snap_storage_roots: self.snap_storage_roots,
+            snap_storage_ranges: self.snap_storage_ranges,
+            snap_storage_range_requests: self.snap_storage_range_requests,
+            snap_account_proof: self.snap_account_proof,
+            snap_storage_proof: self.snap_storage_proof,
             tx: self.tx,
             prune_modes: self.prune_modes,
         }
@@ -220,6 +351,82 @@ impl Default for MockEthProvider {
 impl<T: NodePrimitives, ChainSpec> BalProvider for MockEthProvider<T, ChainSpec> {
     fn bal_store(&self) -> &BalStoreHandle {
         &self.bal_store
+    }
+}
+
+impl<T, ChainSpec> StateRangeProviderFactory for MockEthProvider<T, ChainSpec>
+where
+    T: NodePrimitives,
+    T::Block: Clone,
+    ChainSpec: Send + Sync + 'static,
+{
+    fn state_range_provider(&self, _state_root: B256) -> ProviderResult<Option<StateRangeView>> {
+        self.snap_state_range_resolutions.fetch_add(1, Ordering::Relaxed);
+        self.ensure_snap_state_reads_succeed()?;
+        if !self.snap_state_range_available.load(Ordering::Relaxed) {
+            return Ok(None)
+        }
+        Ok(Some(Box::new(self.clone())))
+    }
+}
+
+impl<T: NodePrimitives, ChainSpec> StateRangeProvider for MockEthProvider<T, ChainSpec> {
+    fn account_range(
+        &self,
+        _start: B256,
+        _limit: B256,
+        _response_bytes: usize,
+    ) -> RangeResult<(B256, Account)> {
+        self.ensure_snap_state_reads_succeed()?;
+        let (items, end) =
+            self.snap_account_range.lock().clone().ok_or(ProviderError::BestBlockNotFound)?;
+        Ok(RangeResponse { items, end })
+    }
+
+    fn storage_root_by_hash(&self, hashed_address: B256) -> ProviderResult<B256> {
+        self.ensure_snap_state_reads_succeed()?;
+        self.snap_storage_roots
+            .lock()
+            .get(&hashed_address)
+            .copied()
+            .ok_or(ProviderError::BestBlockNotFound)
+    }
+
+    fn storage_range(
+        &self,
+        hashed_address: B256,
+        start: B256,
+        limit: B256,
+        response_bytes: usize,
+    ) -> StorageRangeResult {
+        self.ensure_snap_state_reads_succeed()?;
+        self.snap_storage_range_requests.lock().push((
+            hashed_address,
+            start,
+            limit,
+            response_bytes,
+        ));
+        let outcome =
+            self.snap_storage_ranges.lock().pop_front().ok_or(ProviderError::BestBlockNotFound)?;
+        match outcome {
+            MockStorageRangeOutcome::Error => Err(ProviderError::BestBlockNotFound),
+            MockStorageRangeOutcome::AccountMissing => Ok(None),
+            MockStorageRangeOutcome::Found(items, end) => Ok(Some(RangeResponse { items, end })),
+        }
+    }
+
+    fn account_range_proof(&self, _keys: &[B256]) -> ProviderResult<Vec<Bytes>> {
+        self.ensure_snap_state_reads_succeed()?;
+        self.snap_account_proof.lock().clone().ok_or(ProviderError::BestBlockNotFound)
+    }
+
+    fn storage_range_proof(
+        &self,
+        _hashed_address: B256,
+        _keys: &[B256],
+    ) -> ProviderResult<Vec<Bytes>> {
+        self.ensure_snap_state_reads_succeed()?;
+        self.snap_storage_proof.lock().clone().ok_or(ProviderError::BestBlockNotFound)
     }
 }
 
@@ -933,6 +1140,7 @@ impl<T: NodePrimitives, ChainSpec: EthChainSpec + Send + Sync + 'static> StatePr
     for MockEthProvider<T, ChainSpec>
 {
     fn latest(&self) -> ProviderResult<StateProviderBox> {
+        self.ensure_snap_state_reads_succeed()?;
         Ok(Box::new(self.clone()))
     }
 

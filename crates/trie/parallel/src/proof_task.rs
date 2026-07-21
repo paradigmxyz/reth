@@ -362,7 +362,7 @@ impl ProofWorkerHandle {
                     input.into_proof_result_sender();
 
                 let _ = result_tx.send(ProofResultMessage {
-                    result: Err(StateRootTaskError::Provider(error.clone())),
+                    result: Err(StateRootTaskError::ProofDispatch(error.clone())),
                     elapsed: start.elapsed(),
                     state,
                 });
@@ -434,7 +434,7 @@ where
 
         let span = debug_span!(
             target: "trie::proof_task",
-            "V2 Storage proof calculation",
+            "Storage proof calculation",
             n = %targets.len(),
         );
         let _span_guard = span.enter();
@@ -971,7 +971,7 @@ where
 
         let span = debug_span!(
             target: "trie::proof_task",
-            "Account V2 multiproof calculation",
+            "Account multiproof calculation",
             account_targets = account_targets.len(),
             storage_targets = storage_targets.values().map(|t| t.len()).sum::<usize>(),
         );

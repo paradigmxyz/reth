@@ -69,6 +69,14 @@ const PING_INTERVAL: Duration = Duration::from_secs(60);
 /// encoded data.
 const MAX_P2P_CAPACITY: usize = 2;
 
+/// Maximum size of the reusable compression scratch buffer in [`P2PStream`], covering the snappy
+/// worst case of typical broadcast messages (soft-capped around 128KiB).
+///
+/// Messages with a larger compressed worst case are compressed through a one-off allocation
+/// instead, so a single oversized message neither grows the scratch buffer for the connection's
+/// lifetime nor causes shrink/regrow churn, see [`compress_frame`].
+const MAX_COMPRESS_SCRATCH_SIZE: usize = 256 * 1024;
+
 /// An un-authenticated [`P2PStream`]. This is consumed and returns a [`P2PStream`] after the
 /// `Hello` handshake is completed.
 #[pin_project]
@@ -254,6 +262,13 @@ pub struct P2PStream<S> {
     /// The snappy encoder used for compressing outgoing messages
     encoder: snap::raw::Encoder,
 
+    /// Reusable scratch buffer for compressing outgoing messages, see [`compress_frame`].
+    ///
+    /// Grow-only and capped at [`MAX_COMPRESS_SCRATCH_SIZE`]; kept fully initialized, so
+    /// zero-initialization is only paid when the buffer grows and each message only copies out
+    /// the exact compressed size instead of zeroing a worst-case sized buffer per message.
+    compress_scratch: Vec<u8>,
+
     /// The snappy decoder used for decompressing incoming messages
     decoder: snap::raw::Decoder,
 
@@ -290,6 +305,7 @@ impl<S> P2PStream<S> {
         Self {
             inner,
             encoder: snap::raw::Encoder::new(),
+            compress_scratch: Vec::new(),
             decoder: snap::raw::Decoder::new(),
             pinger: Pinger::new(PING_INTERVAL, PING_TIMEOUT),
             shared_capabilities,
@@ -368,26 +384,20 @@ impl<S> DisconnectP2P for P2PStream<S> {
         let mut buf = Vec::with_capacity(disconnect.length());
         disconnect.encode(&mut buf);
 
-        let mut compressed = vec![0u8; 1 + snap::raw::max_compress_len(buf.len() - 1)];
-        let compressed_size =
-            self.encoder.compress(&buf[1..], &mut compressed[1..]).map_err(|err| {
-                debug!(
-                    %err,
-                    msg=%hex::encode(&buf[1..]),
-                    "error compressing disconnect"
-                );
-                err
-            })?;
-
-        // truncate the compressed buffer to the actual compressed size (plus one for the message
-        // id)
-        compressed.truncate(compressed_size + 1);
-
         // we do not add the capability offset because the disconnect message is a `p2p` reserved
         // message
-        compressed[0] = buf[0];
+        let compressed =
+            compress_frame(&mut self.encoder, &mut self.compress_scratch, buf[0], &buf[1..])
+                .map_err(|err| {
+                    debug!(
+                        %err,
+                        msg=%hex::encode(&buf[1..]),
+                        "error compressing disconnect"
+                    );
+                    err
+                })?;
 
-        self.outgoing_messages.push_back(compressed.into());
+        self.outgoing_messages.push_back(compressed);
         self.needs_control_flush = true;
         self.disconnecting = true;
         Ok(())
@@ -637,25 +647,23 @@ where
 
         let this = self.project();
 
-        let mut compressed = BytesMut::zeroed(1 + snap::raw::max_compress_len(item.len() - 1));
-        let compressed_size =
-            this.encoder.compress(&item[1..], &mut compressed[1..]).map_err(|err| {
-                debug!(
-                    %err,
-                    msg=%hex::encode(&item[1..]),
-                    "error compressing p2p message"
-                );
-                err
-            })?;
-
-        // truncate the compressed buffer to the actual compressed size (plus one for the message
-        // id)
-        compressed.truncate(compressed_size + 1);
-
         // all messages sent in this stream are subprotocol messages, so we need to switch the
         // message id based on the offset
-        compressed[0] = item[0] + MAX_RESERVED_MESSAGE_ID + 1;
-        this.outgoing_messages.push_back(compressed.freeze());
+        let compressed = compress_frame(
+            this.encoder,
+            this.compress_scratch,
+            item[0] + MAX_RESERVED_MESSAGE_ID + 1,
+            &item[1..],
+        )
+        .map_err(|err| {
+            debug!(
+                %err,
+                msg=%hex::encode(&item[1..]),
+                "error compressing p2p message"
+            );
+            err
+        })?;
+        this.outgoing_messages.push_back(compressed);
 
         Ok(())
     }
@@ -825,6 +833,36 @@ impl TryFrom<u8> for P2PMessageID {
             _ => Err(P2PStreamError::UnknownReservedMessageId(id)),
         }
     }
+}
+
+/// Snappy-compresses an id-prefixed `p2p` message payload into a frame carrying the given wire
+/// message id.
+///
+/// Frames whose worst-case compressed size fits within [`MAX_COMPRESS_SCRATCH_SIZE`] are
+/// compressed through the reusable `scratch` buffer and copied out at their exact size; larger
+/// frames use a one-off allocation, see [`MAX_COMPRESS_SCRATCH_SIZE`].
+fn compress_frame(
+    encoder: &mut snap::raw::Encoder,
+    scratch: &mut Vec<u8>,
+    wire_id: u8,
+    payload: &[u8],
+) -> Result<Bytes, snap::Error> {
+    let needed = 1 + snap::raw::max_compress_len(payload.len());
+
+    if needed > MAX_COMPRESS_SCRATCH_SIZE {
+        let mut compressed = vec![0u8; needed];
+        let compressed_size = encoder.compress(payload, &mut compressed[1..])?;
+        compressed[0] = wire_id;
+        compressed.truncate(compressed_size + 1);
+        return Ok(compressed.into())
+    }
+
+    if scratch.len() < needed {
+        scratch.resize(needed, 0);
+    }
+    let compressed_size = encoder.compress(payload, &mut scratch[1..])?;
+    scratch[0] = wire_id;
+    Ok(Bytes::copy_from_slice(&scratch[..compressed_size + 1]))
 }
 
 #[cfg(test)]

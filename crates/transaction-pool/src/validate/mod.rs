@@ -269,6 +269,17 @@ where
         }
     }
 
+    async fn validate_transactions_with_origin(
+        &self,
+        origin: TransactionOrigin,
+        transactions: impl IntoIterator<Item = Self::Transaction, IntoIter: Send> + Send,
+    ) -> Vec<TransactionValidationOutcome<Self::Transaction>> {
+        match self {
+            Self::Left(v) => v.validate_transactions_with_origin(origin, transactions).await,
+            Self::Right(v) => v.validate_transactions_with_origin(origin, transactions).await,
+        }
+    }
+
     fn on_new_head_block(&self, new_tip_block: &SealedBlock<Self::Block>) {
         match self {
             Self::Left(v) => v.on_new_head_block(new_tip_block),
