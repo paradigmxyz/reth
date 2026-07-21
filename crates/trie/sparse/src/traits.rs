@@ -196,12 +196,6 @@ pub trait SparseTrie: Sized + Debug + Send + Sync {
     /// during pruning. Larger values indicate larger tries that are more valuable to preserve.
     fn size_hint(&self) -> usize;
 
-    /// Returns a heuristic for the in-memory size of this trie in bytes.
-    ///
-    /// This is an approximation that accounts for the trie's nodes, values,
-    /// and auxiliary data structures.
-    fn memory_size(&self) -> usize;
-
     /// Prunes all subtrees that do not contain retained leaves.
     ///
     /// Each retained leaf is a full key path (usually 64 nibbles for hashed keys).

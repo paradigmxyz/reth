@@ -56,18 +56,6 @@ fn prefix_range(
     begin..end
 }
 
-/// Returns the per-slot byte size used by `SlotMap<_, T>`. `SlotMap` wraps each value in a
-/// `Slot<T>` containing the value union + a 4-byte version field, with struct alignment.
-const fn slotmap_slot_size<T>() -> usize {
-    // Slot<T> = { u: SlotUnion<T>, version: u32 }
-    // SlotUnion<T> = union { value: ManuallyDrop<T>, next_free: u32 }
-    // size = max(size_of::<T>(), 4) + 4, rounded up to align_of::<T>() (or 4)
-    let union_size = if core::mem::size_of::<T>() > 4 { core::mem::size_of::<T>() } else { 4 };
-    let raw = union_size + 4;
-    let align = if core::mem::align_of::<T>() > 4 { core::mem::align_of::<T>() } else { 4 };
-    (raw + align - 1) & !(align - 1)
-}
-
 /// Compacts an arena by BFS-copying all reachable nodes into a fresh `SlotMap`, dropping
 /// unreachable (pruned) slots. Parents are stored before children for cache-friendly top-down
 /// traversal.
@@ -162,9 +150,6 @@ struct ArenaSparseSubtrie {
     num_leaves: u64,
     /// Number of dirty (modified since last hash) leaves in this subtrie.
     num_dirty_leaves: u64,
-    /// Cached total memory footprint of this subtrie in bytes. Computed during prune;
-    /// starts at 0 before the first prune.
-    cached_memory_size: usize,
 }
 
 impl ArenaSparseSubtrie {
@@ -186,14 +171,7 @@ impl ArenaSparseSubtrie {
             required_proofs: Vec::new(),
             num_leaves: 0,
             num_dirty_leaves: 0,
-            cached_memory_size: 0,
         })
-    }
-
-    /// Returns the cached total memory footprint of this subtrie in bytes.
-    /// Accurate after prune; returns 0 before the first prune.
-    const fn memory_size(&self) -> usize {
-        self.cached_memory_size
     }
 
     /// Asserts that `num_leaves` and `num_dirty_leaves` match the actual counts in the arena.
@@ -239,7 +217,6 @@ impl ArenaSparseSubtrie {
             SlotMap::with_capacity(retained_upper_bound.unwrap_or(retained_lower_bound) * 2);
         let mut retained_leaves = retained_leaves.peekable();
         let mut new_num_leaves = 0u64;
-        let mut new_nodes_heap_size = 0usize;
 
         // Root is always retained.
         let root_node = self.arena.remove(self.root).expect("root exists");
@@ -252,7 +229,6 @@ impl ArenaSparseSubtrie {
             self.path,
             root_is_retained,
             &mut new_num_leaves,
-            &mut new_nodes_heap_size,
         ) {
             stack.push(frame);
         }
@@ -285,7 +261,6 @@ impl ArenaSparseSubtrie {
                     child_path,
                     child_is_retained,
                     &mut new_num_leaves,
-                    &mut new_nodes_heap_size,
                 ) {
                     stack.push(frame);
                 }
@@ -321,8 +296,6 @@ impl ArenaSparseSubtrie {
         self.num_dirty_leaves = 0;
         self.arena = new_arena;
         self.root = new_root;
-        self.cached_memory_size =
-            self.arena.capacity() * slotmap_slot_size::<ArenaSparseNode>() + new_nodes_heap_size;
 
         #[cfg(debug_assertions)]
         self.debug_assert_counters();
@@ -361,10 +334,7 @@ impl ArenaSparseSubtrie {
             node_path: Nibbles,
             branch_is_retained: bool,
             new_num_leaves: &mut u64,
-            new_nodes_heap_size: &mut usize,
         ) -> Option<CopyFrame> {
-            *new_nodes_heap_size += new_arena[new_idx].extra_heap_bytes();
-
             let ArenaSparseNode::Branch(b) = &new_arena[new_idx] else {
                 if matches!(&new_arena[new_idx], ArenaSparseNode::Leaf { .. }) {
                     *new_num_leaves += 1;
@@ -2668,29 +2638,6 @@ impl SparseTrie for ArenaParallelSparseTrie {
                 _ => 0,
             })
             .sum()
-    }
-
-    fn memory_size(&self) -> usize {
-        let slot_size = slotmap_slot_size::<ArenaSparseNode>();
-
-        // Upper arena: capacity × slot size.
-        let upper = self.upper_arena.capacity() * slot_size;
-
-        // Active subtries: cached total memory from last prune.
-        let subtrie_size: usize = self
-            .upper_arena
-            .iter()
-            .filter_map(|(_, node)| match node {
-                ArenaSparseNode::Subtrie(s) => Some(s.memory_size()),
-                _ => None,
-            })
-            .sum();
-
-        // RLP buffers.
-        let buffer_size = self.buffers.rlp_buf.capacity() +
-            self.buffers.rlp_node_buf.capacity() * core::mem::size_of::<RlpNode>();
-
-        upper + subtrie_size + buffer_size
     }
 
     #[instrument(

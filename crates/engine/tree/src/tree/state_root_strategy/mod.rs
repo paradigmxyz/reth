@@ -708,7 +708,6 @@ impl DefaultStateRootStrategy {
                 trie_metrics
                     .into_trie_for_reuse_duration_histogram
                     .record(start.elapsed().as_secs_f64());
-                trie_metrics.sparse_trie_retained_memory_bytes.set(trie.memory_size() as f64);
                 trie_metrics
                     .sparse_trie_retained_storage_tries
                     .set(trie.retained_storage_tries_count() as f64);
@@ -775,9 +774,21 @@ fn published_sparse_trie_anchor_hash<N: NodePrimitives>(
         return sparse_trie_anchor_hash
     }
 
-    pending_sparse_trie_prune_blocks
-        .and_then(|blocks| blocks.last().map(|block| block.recovered_block().parent_hash()))
-        .unwrap_or(sparse_trie_anchor_hash)
+    let Some(prune_blocks) = pending_sparse_trie_prune_blocks else {
+        return sparse_trie_anchor_hash
+    };
+    let Some(oldest_prune_block) = prune_blocks.last() else { return sparse_trie_anchor_hash };
+
+    // Prune blocks contain the complete in-memory parent chain from newest to oldest, with the
+    // oldest block's parent being the persisted tip. A fresh trie can be anchored to an in-memory
+    // block ahead of that tip. If that anchor is still in the prune range, publishing the
+    // persisted tip as the new anchor would expand the trie's claimed coverage backwards even
+    // though pruning cannot reveal those paths.
+    if prune_blocks.iter().any(|block| block.recovered_block().hash() == sparse_trie_anchor_hash) {
+        return sparse_trie_anchor_hash
+    }
+
+    oldest_prune_block.recovered_block().parent_hash()
 }
 
 impl<N, P, Evm> StateRootStrategy<N, P, Evm> for DefaultStateRootStrategy
@@ -1358,19 +1369,37 @@ mod tests {
     }
 
     #[test]
-    fn published_sparse_trie_anchor_uses_prune_anchor_for_reused_trie() {
-        let blocks: Vec<_> = TestBlockBuilder::eth().get_executed_blocks(1..3).collect();
-        let reused_anchor_hash = B256::with_last_byte(0xaa);
+    fn published_sparse_trie_anchor_advances_to_prune_anchor() {
+        let blocks: Vec<_> = TestBlockBuilder::eth().get_executed_blocks(1..5).collect();
+        let reused_anchor_hash = blocks[0].recovered_block().hash();
+        let expected_prune_anchor = blocks[1].recovered_block().hash();
+        let prune_blocks: Vec<_> = blocks.into_iter().skip(2).rev().collect();
 
         assert_eq!(
-            published_sparse_trie_anchor_hash(reused_anchor_hash, true, Some(&blocks)),
-            blocks.last().unwrap().recovered_block().parent_hash()
+            published_sparse_trie_anchor_hash(reused_anchor_hash, true, Some(&prune_blocks)),
+            expected_prune_anchor
+        );
+    }
+
+    #[test]
+    fn published_sparse_trie_anchor_does_not_move_backwards_when_anchor_is_in_prune_range() {
+        let blocks: Vec<_> = TestBlockBuilder::eth().get_executed_blocks(1..5).collect();
+        let reused_anchor_hash = blocks[2].recovered_block().hash();
+        let mut prune_blocks = blocks;
+        prune_blocks.reverse();
+        let prune_anchor = prune_blocks.last().unwrap().recovered_block().parent_hash();
+
+        assert_ne!(reused_anchor_hash, prune_anchor);
+        assert_eq!(
+            published_sparse_trie_anchor_hash(reused_anchor_hash, true, Some(&prune_blocks)),
+            reused_anchor_hash
         );
     }
 
     #[test]
     fn published_sparse_trie_anchor_keeps_parent_for_fresh_trie() {
-        let blocks: Vec<_> = TestBlockBuilder::eth().get_executed_blocks(1..3).collect();
+        let mut blocks: Vec<_> = TestBlockBuilder::eth().get_executed_blocks(1..3).collect();
+        blocks.reverse();
         let parent_hash = B256::with_last_byte(0xaa);
 
         assert_eq!(
