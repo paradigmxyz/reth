@@ -197,8 +197,21 @@ where
         self.inner.addresses()
     }
 
+    fn precompile_ids(&self) -> Vec<(Address, evm2::precompiles::PrecompileId)> {
+        self.inner.precompile_ids()
+    }
+
     fn contains(&self, address: &Address) -> bool {
         self.inner.contains(address)
+    }
+
+    fn move_precompiles(
+        &mut self,
+        moves: &[(Address, Address)],
+    ) -> Result<(), evm2::precompiles::MovePrecompileError> {
+        self.inner.move_precompiles(moves)?;
+        self.cache_map = Default::default();
+        Ok(())
     }
 
     fn execute(
@@ -346,6 +359,7 @@ mod tests {
             NoPrecompiles::default(),
         );
         let address = Address::with_last_byte(4);
+        assert!(provider.precompile_ids().iter().any(|(precompile, _)| *precompile == address));
         let message = Message {
             kind: MessageKind::Call,
             gas_limit: 30_000,
@@ -378,5 +392,15 @@ mod tests {
             .expect("cached identity precompile succeeds");
         assert_eq!(output.bytes(), b"cached-input");
         assert_eq!(hit_gas.spent(), 18);
+
+        let moved = Address::with_last_byte(0xf0);
+        provider.move_precompiles(&[(address, moved)]).unwrap();
+        assert!(!provider.contains(&address));
+        assert!(provider.contains(&moved));
+        assert!(provider
+            .cache_map
+            .cache_for_address(address)
+            .get(message.input.as_ref(), SpecId::OSAKA)
+            .is_none());
     }
 }

@@ -102,15 +102,11 @@ where
         let config = TracingInspectorConfig::from_parity_config(&trace_request.trace_types);
         let overrides =
             EvmOverrides::new(trace_request.state_overrides, trace_request.block_overrides);
+        let mut inspector = TracingInspector::new(config);
         let this = self.clone();
         self.eth_api()
             .spawn_with_call_at(trace_request.call, at, overrides, move |db, evm_env, tx_env| {
-                let (inspector, res) = this.eth_api().inspect(
-                    &mut *db,
-                    evm_env,
-                    &tx_env,
-                    TracingInspector::new(config),
-                )?;
+                let res = this.eth_api().inspect(&mut *db, evm_env, &tx_env, &mut inspector)?;
                 let trace_res = inspector
                     .into_parity_builder()
                     .into_trace_results_with_state(&res, &trace_request.trace_types, &mut *db)
@@ -178,12 +174,8 @@ where
                         Default::default(),
                     )?;
                     let config = TracingInspectorConfig::from_parity_config(&trace_types);
-                    let (inspector, res) = eth_api.inspect(
-                        &mut db,
-                        evm_env,
-                        &tx_env,
-                        TracingInspector::new(config),
-                    )?;
+                    let mut inspector = TracingInspector::new(config);
+                    let res = eth_api.inspect(&mut db, evm_env, &tx_env, &mut inspector)?;
 
                     let trace_res = inspector
                         .into_parity_builder()
@@ -196,7 +188,7 @@ where
                     // need to apply the state changes of this call before executing the
                     // next call
                     if calls.peek().is_some() {
-                        db.commit_source(&res.state_changes)
+                        db.commit_source(&res.pending_state)
                     }
                 }
 
@@ -442,7 +434,7 @@ where
                                 Some(block.clone()),
                                 None,
                                 TracingInspectorConfig::default_parity(),
-                                move |tx_info, ctx| {
+                                move |tx_info, mut ctx| {
                                     // Keep the block replay permit inside the spawned replay task.
                                     let _block_replay_permit = &permit;
                                     let mut traces = ctx
@@ -524,7 +516,7 @@ where
                 block_id,
                 Some(block.clone()),
                 TracingInspectorConfig::default_parity(),
-                |tx_info, ctx| {
+                |tx_info, mut ctx| {
                     let traces = ctx
                         .take_inspector()
                         .into_parity_builder()
@@ -560,19 +552,17 @@ where
                 block_id,
                 None,
                 TracingInspectorConfig::from_parity_config(&trace_types),
-                move |tx_info, ctx| {
-                    let result = ctx.result;
-                    let db = ctx.db;
+                move |tx_info, mut ctx| {
                     let mut full_trace = ctx
-                        .inspector
+                        .take_inspector()
                         .into_parity_builder()
-                        .into_trace_results(&result.result, &trace_types);
+                        .into_trace_results(&ctx.result, &trace_types);
 
                     // If statediffs were requested, populate them with the account balance and
                     // nonce from pre-state
                     if let Some(ref mut state_diff) = full_trace.state_diff {
-                        populate_state_diff(state_diff, db, &result.state_changes)
-                            .map_err(|code| EthApiError::EvmCustom(db.error(code).to_string()))
+                        populate_state_diff(state_diff, ctx.db, ctx.state)
+                            .map_err(|code| EthApiError::EvmCustom(ctx.db.error(code).to_string()))
                             .map_err(Eth::Error::from_eth_err)?;
                     }
 
@@ -640,7 +630,7 @@ where
                 block_id,
                 Some(block.clone()),
                 StorageInspector::default,
-                move |tx_info, ctx| {
+                move |tx_info, mut ctx| {
                     let unique_loads = ctx.inspector.unique_loads();
                     let warm_loads = ctx.inspector.warm_loads();
                     let trace = TransactionStorageAccess {

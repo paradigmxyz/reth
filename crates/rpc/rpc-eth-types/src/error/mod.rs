@@ -467,9 +467,7 @@ impl From<DebugInspectorError> for EthApiError {
                 Self::Unsupported("JS Tracer is not enabled")
             }
             DebugInspectorError::MuxInspector(err) => err.into(),
-            DebugInspectorError::Database(err) => {
-                Self::Internal(RethError::msg(format!("{err:?}")))
-            }
+            DebugInspectorError::Database(err) => Self::Internal(RethError::other(err)),
             #[cfg(feature = "js-tracer")]
             DebugInspectorError::JsInspector(err) => err.into(),
             #[allow(unreachable_patterns)]
@@ -841,9 +839,10 @@ impl From<HandlerError> for RpcInvalidTransactionError {
                 Self::InvalidChainId
             }
             HandlerError::IntrinsicGasTooLow { .. } => Self::GasTooLow,
-            HandlerError::InsufficientFunds | HandlerError::OutOfFunds => {
-                Self::InsufficientFundsForTransfer
+            HandlerError::InsufficientFunds { cost, balance } => {
+                Self::InsufficientFunds { cost, balance }
             }
+            HandlerError::OutOfFunds => Self::InsufficientFundsForTransfer,
             HandlerError::RejectCallerWithCode => Self::SenderNoEOA,
             HandlerError::NonceOverflow => Self::NonceMaxValue,
             HandlerError::GasLimitMoreThanBlock { .. } |
@@ -1100,6 +1099,22 @@ mod tests {
     fn timed_out_error() {
         let err = EthApiError::ExecutionTimedOut(Duration::from_secs(10));
         assert_eq!(err.to_string(), "execution aborted (timeout = 10s)");
+    }
+
+    #[test]
+    fn handler_insufficient_funds_preserves_cost_and_balance() {
+        let cost = U256::from(2);
+        let balance = U256::from(1);
+        let err =
+            RpcInvalidTransactionError::from(HandlerError::InsufficientFunds { cost, balance });
+
+        assert!(matches!(
+            err,
+            RpcInvalidTransactionError::InsufficientFunds {
+                cost: actual_cost,
+                balance: actual_balance,
+            } if actual_cost == cost && actual_balance == balance
+        ));
     }
 
     #[test]

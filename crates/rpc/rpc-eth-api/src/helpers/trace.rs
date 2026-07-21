@@ -9,34 +9,41 @@ use evm2_inspectors::tracing::{TracingInspector, TracingInspectorConfig};
 use futures::Future;
 use reth_errors::RethError;
 use reth_evm::{
-    execute::BlockExecutorFactory, ConfigureEvm, Database, Evm, EvmEnvFor, EvmTypesFor, TxEnvFor,
-    TxResultWithStateFor,
+    execute::BlockExecutorFactory, ConfigureEvm, Database, Evm, EvmEnv, EvmEnvFor, EvmTypesFor,
+    TxEnvFor, TxResultWithStateFor,
 };
-use reth_primitives_traits::{BlockBody, RecoveredBlock};
+use reth_primitives_traits::{BlockBody, Recovered, RecoveredBlock};
 use reth_rpc_eth_types::{EthApiError, StateCacheDb};
-use reth_storage_api::ProviderBlock;
-use std::sync::Arc;
+use reth_storage_api::{ProviderBlock, ProviderTx};
+use std::{mem, sync::Arc};
 
 /// Context passed to per-transaction trace callbacks.
-pub struct TracingCtx<'a, Insp, EvmTypes: evm2::EvmTypes> {
-    /// Execution result and detached state changes for the transaction.
-    pub result: evm2::TxResultWithState<EvmTypes>,
+pub struct TracingCtx<'a, Tx, Insp, EvmTypes: evm2::EvmTypes> {
+    /// Transaction being traced.
+    pub tx: Tx,
+    /// Execution result for the transaction.
+    pub result: evm2::TxResult<EvmTypes>,
+    /// Detached state changes for the transaction.
+    pub state: &'a evm2::PendingState,
     /// Database pointing to the transaction pre-state.
     pub db: &'a mut StateCacheDb,
     /// Inspector used while executing the transaction.
-    pub inspector: Insp,
+    pub inspector: &'a mut Insp,
+    fused_inspector: &'a Insp,
+    was_fused: &'a mut bool,
 }
 
-impl<Insp, EvmTypes: evm2::EvmTypes> core::fmt::Debug for TracingCtx<'_, Insp, EvmTypes> {
+impl<Tx, Insp, EvmTypes: evm2::EvmTypes> core::fmt::Debug for TracingCtx<'_, Tx, Insp, EvmTypes> {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         f.debug_struct("TracingCtx").finish_non_exhaustive()
     }
 }
 
-impl<Insp, EvmTypes: evm2::EvmTypes> TracingCtx<'_, Insp, EvmTypes> {
-    /// Consumes this context and returns the inspector.
-    pub fn take_inspector(self) -> Insp {
-        self.inspector
+impl<Tx, Insp: Clone, EvmTypes: evm2::EvmTypes> TracingCtx<'_, Tx, Insp, EvmTypes> {
+    /// Returns the inspector, leaving a pristine inspector for the next transaction.
+    pub fn take_inspector(&mut self) -> Insp {
+        *self.was_fused = true;
+        mem::replace(self.inspector, self.fused_inspector.clone())
     }
 }
 
@@ -48,11 +55,11 @@ pub trait Trace: LoadState<Error: FromEvmError<Self::Evm>> + Call {
         db: DB,
         evm_env: EvmEnvFor<Self::Evm>,
         tx_env: &TxEnvFor<Self::Evm>,
-        inspector: I,
-    ) -> Result<(I, TxResultWithStateFor<Self::Evm>), Self::Error>
+        inspector: &mut I,
+    ) -> Result<TxResultWithStateFor<Self::Evm>, Self::Error>
     where
         DB: Database,
-        I: evm2::Inspector<EvmTypesFor<Self::Evm>> + 'static,
+        I: evm2::Inspector<EvmTypesFor<Self::Evm>>,
     {
         let mut evm = self.evm_config().block_executor_factory().evm_with_database(db, evm_env);
         evm.transact_with_inspector(tx_env, inspector).map_err(Self::Error::from_evm_err)
@@ -75,8 +82,8 @@ pub trait Trace: LoadState<Error: FromEvmError<Self::Evm>> + Call {
             + 'static,
     {
         self.spawn_with_state_at_block(at, move |this, mut db| {
-            let (inspector, result) =
-                this.inspect(&mut db, evm_env, &tx_env, TracingInspector::new(config))?;
+            let mut inspector = TracingInspector::new(config);
+            let result = this.inspect(&mut db, evm_env, &tx_env, &mut inspector)?;
             f(inspector, result)
         })
     }
@@ -101,8 +108,8 @@ pub trait Trace: LoadState<Error: FromEvmError<Self::Evm>> + Call {
         R: Send + 'static,
     {
         self.spawn_with_state_at_block(at, move |this, mut db| {
-            let (inspector, result) =
-                this.inspect(&mut db, evm_env, &tx_env, TracingInspector::new(config))?;
+            let mut inspector = TracingInspector::new(config);
+            let result = this.inspect(&mut db, evm_env, &tx_env, &mut inspector)?;
             f(inspector, result, db)
         })
     }
@@ -133,7 +140,7 @@ pub trait Trace: LoadState<Error: FromEvmError<Self::Evm>> + Call {
     fn spawn_trace_transaction_in_block_with_inspector<Insp, F, R>(
         &self,
         hash: B256,
-        inspector: Insp,
+        mut inspector: Insp,
         f: F,
     ) -> impl Future<Output = Result<Option<R>, Self::Error>> + Send
     where
@@ -169,7 +176,7 @@ pub trait Trace: LoadState<Error: FromEvmError<Self::Evm>> + Call {
                 )?;
 
                 let tx_env = this.evm_config().tx_env(target_tx);
-                let (inspector, result) = this.inspect(&mut db, evm_env, &tx_env, inspector)?;
+                let result = this.inspect(&mut db, evm_env, &tx_env, &mut inspector)?;
                 f(tx_info, inspector, result, db)
             })
             .await
@@ -190,7 +197,7 @@ pub trait Trace: LoadState<Error: FromEvmError<Self::Evm>> + Call {
         Self: LoadBlock,
         F: Fn(
                 TransactionInfo,
-                TracingCtx<'_, Insp, EvmTypesFor<Self::Evm>>,
+                TracingCtx<'_, Recovered<&ProviderTx<Self::Provider>>, Insp, EvmTypesFor<Self::Evm>>,
             ) -> Result<R, Self::Error>
             + Send
             + 'static,
@@ -210,9 +217,9 @@ pub trait Trace: LoadState<Error: FromEvmError<Self::Evm>> + Call {
 
             self.spawn_with_state_at_block(block.parent_hash(), move |this, mut db| {
                 let block_hash = block.hash();
-                let block_number = block.number();
-                let block_timestamp = block.timestamp();
-                let base_fee = block.base_fee_per_gas();
+                let block_number = evm_env.block_env().number.saturating_to();
+                let block_timestamp = evm_env.block_env().timestamp.saturating_to();
+                let base_fee = Some(evm_env.block_base_fee());
 
                 this.apply_pre_execution_changes(&block, &mut db)?;
 
@@ -220,11 +227,12 @@ pub trait Trace: LoadState<Error: FromEvmError<Self::Evm>> + Call {
                     .map(|highest| highest as usize + 1)
                     .unwrap_or_else(|| block.body().transaction_count());
                 let mut results = Vec::new();
+                let mut inspector = inspector_setup();
+                let fused_inspector = inspector.clone();
 
                 for (idx, tx) in block.transactions_recovered().take(max_transactions).enumerate() {
                     let tx_env = this.evm_config().tx_env(tx.cloned());
-                    let (inspector, result) =
-                        this.inspect(&mut db, evm_env.clone(), &tx_env, inspector_setup())?;
+                    let result = this.inspect(&mut db, evm_env.clone(), &tx_env, &mut inspector)?;
                     let tx_info = TransactionInfo {
                         hash: Some(*tx.tx_hash()),
                         index: Some(idx as u64),
@@ -233,9 +241,24 @@ pub trait Trace: LoadState<Error: FromEvmError<Self::Evm>> + Call {
                         block_timestamp: Some(block_timestamp),
                         base_fee,
                     };
-                    let state_changes = result.state_changes.clone();
-                    let item = f(tx_info, TracingCtx { result, db: &mut db, inspector })?;
-                    db.commit_source(&state_changes);
+                    let evm2::TxResultWithState { result, pending_state, .. } = result;
+                    let mut was_fused = false;
+                    let item = f(
+                        tx_info,
+                        TracingCtx {
+                            tx,
+                            result,
+                            state: &pending_state,
+                            db: &mut db,
+                            inspector: &mut inspector,
+                            fused_inspector: &fused_inspector,
+                            was_fused: &mut was_fused,
+                        },
+                    )?;
+                    if !was_fused {
+                        inspector.clone_from(&fused_inspector);
+                    }
+                    db.commit_source(&pending_state);
                     results.push(item);
                 }
 
@@ -258,7 +281,12 @@ pub trait Trace: LoadState<Error: FromEvmError<Self::Evm>> + Call {
         Self: LoadBlock,
         F: Fn(
                 TransactionInfo,
-                TracingCtx<'_, TracingInspector, EvmTypesFor<Self::Evm>>,
+                TracingCtx<
+                    '_,
+                    Recovered<&ProviderTx<Self::Provider>>,
+                    TracingInspector,
+                    EvmTypesFor<Self::Evm>,
+                >,
             ) -> Result<R, Self::Error>
             + Send
             + 'static,
@@ -285,7 +313,12 @@ pub trait Trace: LoadState<Error: FromEvmError<Self::Evm>> + Call {
         Self: LoadBlock,
         F: Fn(
                 TransactionInfo,
-                TracingCtx<'_, TracingInspector, EvmTypesFor<Self::Evm>>,
+                TracingCtx<
+                    '_,
+                    Recovered<&ProviderTx<Self::Provider>>,
+                    TracingInspector,
+                    EvmTypesFor<Self::Evm>,
+                >,
             ) -> Result<R, Self::Error>
             + Send
             + 'static,
@@ -312,7 +345,7 @@ pub trait Trace: LoadState<Error: FromEvmError<Self::Evm>> + Call {
         Self: LoadBlock,
         F: Fn(
                 TransactionInfo,
-                TracingCtx<'_, Insp, EvmTypesFor<Self::Evm>>,
+                TracingCtx<'_, Recovered<&ProviderTx<Self::Provider>>, Insp, EvmTypesFor<Self::Evm>>,
             ) -> Result<R, Self::Error>
             + Send
             + 'static,

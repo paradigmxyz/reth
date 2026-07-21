@@ -477,6 +477,7 @@ async fn test_eth_config() -> eyre::Result<()> {
 
     assert_eq!(config.last.unwrap().activation_time, osaka_timestamp);
     assert_eq!(config.current.activation_time, prague_timestamp);
+    assert_eq!(config.current.precompiles.get("ID"), Some(&Address::with_last_byte(4)));
     assert_eq!(config.next.unwrap().activation_time, osaka_timestamp);
 
     Ok(())

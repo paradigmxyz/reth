@@ -335,7 +335,7 @@ where
                     let tx_env = eth_api.evm_config().tx_env(item.tx.clone());
                     let result_and_state = eth_api.transact(&mut db, evm_env.clone(), tx_env)?;
                     let result = result_and_state.result;
-                    let state = result_and_state.state_changes;
+                    let state = result_and_state.pending_state;
 
                     if !result.status && !item.can_revert {
                         return Err(EthApiError::InvalidParams(
@@ -349,9 +349,7 @@ where
 
                     // coinbase is always present in the result state
                     let coinbase_balance_after_tx = state
-                        .accounts
-                        .get(&coinbase)
-                        .and_then(|acc| acc.current.as_ref())
+                        .account_info(&coinbase)
                         .map(|acc| acc.balance)
                         .unwrap_or(coinbase_balance_before_tx);
 

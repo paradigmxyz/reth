@@ -7,7 +7,7 @@ use alloy_consensus::constants::KECCAK_EMPTY;
 use alloy_eips::eip7685::Requests;
 use alloy_primitives::{
     logs_bloom,
-    map::{AddressMap, B256Map, HashMap},
+    map::{AddressMap, AddressSet, B256Map, HashMap},
     Address, BlockNumber, Bloom, Log, B256, U256,
 };
 use evm2::evm::{
@@ -208,6 +208,8 @@ impl<T> ExecutionOutcome<T> {
                     address,
                     original: original.as_ref().map(account_info_ref_from_reth),
                     current: current.as_ref().map(account_info_ref_from_reth),
+                    created: false,
+                    selfdestructed: false,
                 })
                 .expect("infallible");
             for (slot, (original, current)) in storage {
@@ -476,6 +478,14 @@ impl<T> ExecutionOutcome<T> {
         // remove requests
         self.requests.truncate(new_len);
         // Revert last n reverts.
+        if self.block_states.is_empty() {
+            let state = Self::revert_state(
+                self.state.inner(),
+                &self.block_reverts,
+                &self.block_reverts[new_len..],
+            );
+            self.state = state.into();
+        }
         self.block_reverts.truncate(new_len);
         self.truncate_block_states(new_len);
 
@@ -554,8 +564,102 @@ impl<T> ExecutionOutcome<T> {
     fn drop_first_block_states(&mut self, n: usize) {
         if !self.block_states.is_empty() {
             self.block_states.drain(..n.min(self.block_states.len()));
-            self.state = Self::aggregate_block_states(&self.block_states).into();
         }
+    }
+
+    fn revert_state(
+        state: &EvmState,
+        all_reverts: &[BlockReverts],
+        removed_reverts: &[BlockReverts],
+    ) -> EvmState {
+        let mut accounts = state
+            .accounts()
+            .map(|(address, account)| (address, account.clone()))
+            .collect::<AddressMap<_>>();
+        let mut storage_wipes = state.storage_wipes().collect::<AddressSet>();
+        let mut storage = state
+            .storage()
+            .map(|(key, value)| ((key.address(), key.key()), *value))
+            .collect::<BTreeMap<_, _>>();
+
+        let mut account_originals = AddressMap::default();
+        let mut storage_originals = BTreeMap::new();
+        for reverts in all_reverts {
+            for (&address, account) in &reverts.accounts {
+                account_originals
+                    .entry(address)
+                    .or_insert_with(|| account.as_ref().map(RevertAccount::to_account_info));
+            }
+            for (&address, storage_reverts) in &reverts.storage {
+                for (&key, &value) in &storage_reverts.slots {
+                    storage_originals.entry((address, key)).or_insert(value);
+                }
+            }
+        }
+
+        for reverts in removed_reverts.iter().rev() {
+            for (&address, account) in &reverts.accounts {
+                let original = accounts
+                    .get(&address)
+                    .map(|account| account.original.clone())
+                    .unwrap_or_else(|| account_originals[&address].clone());
+                let current = account.as_ref().map(RevertAccount::to_account_info);
+                if original == current {
+                    accounts.remove(&address);
+                } else {
+                    accounts.insert(address, Tracked::from_parts(original, current));
+                }
+            }
+            for (&address, storage_reverts) in &reverts.storage {
+                if storage_reverts.wiped {
+                    if storage_reverts.previous_wipe {
+                        storage_wipes.insert(address);
+                    } else {
+                        storage_wipes.remove(&address);
+                    }
+                }
+                for (&key, &current) in &storage_reverts.slots {
+                    let original = storage
+                        .get(&(address, key))
+                        .map(|value| value.original)
+                        .unwrap_or_else(|| storage_originals[&(address, key)]);
+                    if (storage_wipes.contains(&address) && current.is_zero()) ||
+                        (!storage_wipes.contains(&address) && original == current)
+                    {
+                        storage.remove(&(address, key));
+                    } else {
+                        storage.insert((address, key), Tracked::from_parts(original, current));
+                    }
+                }
+            }
+        }
+
+        let mut reverted = BlockStateAccumulator::new();
+        for (&code_hash, code) in state.code() {
+            reverted.bytecode(code_hash, code).expect("infallible");
+        }
+        for address in storage_wipes {
+            reverted.storage_wipe(address).expect("infallible");
+        }
+        for ((address, key), value) in storage {
+            StateChangeSink::storage(
+                &mut reverted,
+                StorageChange { address, key, original: value.original, current: value.current },
+            )
+            .expect("infallible");
+        }
+        for (address, account) in accounts {
+            reverted
+                .account(AccountChangeRef {
+                    address,
+                    original: account.original.as_ref().map(AccountInfoRef::from_info),
+                    current: account.current.as_ref().map(AccountInfoRef::from_info),
+                    created: false,
+                    selfdestructed: false,
+                })
+                .expect("infallible");
+        }
+        reverted
     }
 
     fn extend_block_states(&mut self, other: Vec<EvmState>, other_receipts_len: usize) {
@@ -673,6 +777,8 @@ fn multi_block_outcome_for_serde() -> ExecutionOutcome {
                 code_hash: KECCAK_EMPTY,
                 code: None,
             }),
+            created: false,
+            selfdestructed: false,
         })
         .unwrap();
     StateChangeSink::storage(
@@ -697,6 +803,8 @@ fn multi_block_outcome_for_serde() -> ExecutionOutcome {
                 code_hash: KECCAK_EMPTY,
                 code: None,
             }),
+            created: false,
+            selfdestructed: false,
         })
         .unwrap();
     block2.storage_wipe(address).unwrap();
@@ -947,6 +1055,22 @@ mod tests {
         requests: Vec<Requests>,
     ) -> ExecutionOutcome<T> {
         ExecutionOutcome::new_empty(first_block).with_receipts(receipts).with_requests(requests)
+    }
+
+    fn balance_state(address: Address, original: u64, current: u64) -> EvmState {
+        let original = AccountInfo::default().with_balance(U256::from(original));
+        let current = AccountInfo::default().with_balance(U256::from(current));
+        let mut state = BlockStateAccumulator::new();
+        state
+            .account(AccountChangeRef {
+                address,
+                original: Some(AccountInfoRef::from_info(&original)),
+                current: Some(AccountInfoRef::from_info(&current)),
+                created: false,
+                selfdestructed: false,
+            })
+            .unwrap();
+        state
     }
 
     #[cfg(feature = "serde")]
@@ -1200,6 +1324,44 @@ mod tests {
         // Assert that the revert_to method returns false when attempting to revert to a block
         // number less than the initial block number.
         assert!(!exec_res.revert_to(10));
+    }
+
+    #[test]
+    fn revert_to_restores_state_loaded_with_reverts() {
+        let address = Address::repeat_byte(0x42);
+        let states = [balance_state(address, 0, 1), balance_state(address, 1, 2)];
+        let state = ExecutionOutcomeState::from_block_states(states);
+        let (state, _, block_reverts) = state.into_parts();
+        let mut outcome =
+            ExecutionOutcome::<reth_ethereum_primitives::Receipt>::from_state_and_reverts(
+                state,
+                block_reverts,
+                vec![vec![], vec![]],
+                1,
+                vec![],
+            );
+
+        assert!(outcome.revert_to(1));
+        assert_eq!(
+            outcome.state.account_state(&address).unwrap().current.as_ref().unwrap().balance,
+            U256::from(1)
+        );
+    }
+
+    #[test]
+    fn split_retains_full_state_in_higher_outcome() {
+        let address = Address::repeat_byte(0x42);
+        let results = vec![BlockExecutionResult::default(), BlockExecutionResult::default()];
+        let outcome = ExecutionOutcome::<reth_ethereum_primitives::Receipt>::from_block_states(
+            1,
+            [balance_state(address, 0, 1), balance_state(address, 1, 2)],
+            results,
+        );
+
+        let (_, higher) = outcome.split_at(2);
+        let account = higher.state.account_state(&address).unwrap();
+        assert_eq!(account.original.as_ref().unwrap().balance, U256::ZERO);
+        assert_eq!(account.current.as_ref().unwrap().balance, U256::from(2));
     }
 
     #[test]

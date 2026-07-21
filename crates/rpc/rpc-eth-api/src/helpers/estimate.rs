@@ -1,22 +1,22 @@
 //! Estimate gas needed implementation
 
-use super::{call::request_gas_price, Call, LoadPendingBlock};
+use super::{Call, LoadPendingBlock};
 use crate::{AsEthApiError, FromEthApiError, IntoEthApiError};
+use alloy_consensus::Transaction;
 use alloy_network::TransactionBuilder;
 use alloy_primitives::{TxKind, KECCAK256_EMPTY, U256};
 use alloy_rpc_types_eth::{state::EvmOverrides, BlockId};
-use evm2::{evm::DynDatabase, EvmFeatures, TxResult};
+use evm2::{EvmFeatures, TxResult};
 use futures::Future;
 use reth_chainspec::MIN_TRANSACTION_GAS;
-use reth_evm::{EvmEnv, EvmEnvFor};
+use reth_evm::{database::EvmStateProvider, Database, EvmEnv, EvmEnvFor};
 use reth_rpc_convert::{RpcConvert, RpcTxReq};
 use reth_rpc_eth_types::{
-    cache::db::{apply_block_overrides, apply_state_overrides, StateProviderTraitObjWrapper},
+    cache::db::{apply_block_overrides, apply_state_overrides},
     error::api::{FromEvmHalt, FromRevert},
     EthApiError, RpcInvalidTransactionError,
 };
 use reth_rpc_server_types::constants::gas_oracle::{CALL_STIPEND_GAS, ESTIMATE_GAS_ERROR_RATIO};
-use reth_storage_api::{StateProvider, StateProviderBox};
 use tracing::trace;
 
 /// Gas execution estimates
@@ -41,7 +41,7 @@ pub trait EstimateCall: Call {
         overrides: EvmOverrides,
     ) -> Result<U256, Self::Error>
     where
-        S: StateProvider + Send + 'static,
+        S: EvmStateProvider,
     {
         // Disabled because eth_estimateGas is sometimes used with eoa senders
         // See <https://github.com/paradigmxyz/reth/issues/1959>
@@ -64,9 +64,8 @@ pub trait EstimateCall: Call {
         let tx_request_gas_price = request.as_ref().gas_price();
 
         // Configure the evm env
-        let state: StateProviderBox = Box::new(state);
         let mut db = evm2::evm::CacheDB::new(evm2::evm::Db::new(
-            reth_evm::database::StateProviderDatabase::new(StateProviderTraitObjWrapper(state)),
+            reth_evm::database::StateProviderDatabase::new(state),
         ));
 
         // Apply any block overrides before deriving block-derived limits and the tx env so
@@ -97,9 +96,11 @@ pub trait EstimateCall: Call {
             .map(|tx_gas_limit| tx_gas_limit.min(max_gas_limit))
             .unwrap_or(max_gas_limit);
 
+        let tx_env = self.create_txn_env(&evm_env, request.clone(), &mut db)?;
+
         // Check if this is a basic transfer (no input data to account with no code)
-        let is_basic_transfer = if request.as_ref().input().is_none_or(|input| input.is_empty()) &&
-            let Some(TxKind::Call(to)) = request.as_ref().kind()
+        let is_basic_transfer = if tx_env.input().is_empty() &&
+            let TxKind::Call(to) = tx_env.kind()
         {
             match db.get_account(&to) {
                 Ok(Some(account)) => account.code_hash == KECCAK256_EMPTY,
@@ -109,12 +110,10 @@ pub trait EstimateCall: Call {
             false
         };
 
-        let tx_env = self.create_txn_env(&evm_env, request.clone(), &mut db)?;
-
         // Check funds of the sender (only useful to check if transaction gas price is more than 0).
         //
         // The caller allowance is check by doing `(account.balance - tx.value) / tx.gas_price`
-        if request_gas_price(request.as_ref(), evm_env.block_base_fee()) > 0 {
+        if tx_env.max_fee_per_gas() > 0 {
             let allowance = self.caller_gas_allowance(&mut db, &evm_env, &tx_env)?;
             highest_gas_limit = highest_gas_limit.min(allowance);
         }

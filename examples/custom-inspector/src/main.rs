@@ -78,10 +78,10 @@ fn main() {
                         let tx_env = node.evm_config.tx_env(tx.to_consensus());
 
                         let mut db = CacheDB::new(Db::new(StateProviderDatabase::new(state)));
-                        let result =
-                            eth_api.inspect(&mut db, evm_env, &tx_env, DummyInspector::default());
+                        let mut inspector = DummyInspector::default();
+                        let result = eth_api.inspect(&mut db, evm_env, &tx_env, &mut inspector);
 
-                        if let Ok((inspector, _)) = result {
+                        if result.is_ok() {
                             let hash = tx.hash();
                             println!(
                                 "Inspector result for transaction {}:\n{}",

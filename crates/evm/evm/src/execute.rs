@@ -151,10 +151,10 @@ pub trait Evm {
     fn transact_with_inspector<I>(
         &mut self,
         transaction: &Recovered<Self::Transaction>,
-        inspector: I,
-    ) -> Result<(I, evm2::TxResultWithState<Self::EvmTypes>), BlockExecutionError>
+        inspector: &mut I,
+    ) -> Result<evm2::TxResultWithState<Self::EvmTypes>, BlockExecutionError>
     where
-        I: evm2::Inspector<Self::EvmTypes> + 'static;
+        I: evm2::Inspector<Self::EvmTypes>;
 
     /// Sets the inspector used by subsequent transactions.
     fn set_inspector<I>(&mut self, inspector: I)
@@ -203,19 +203,19 @@ impl<'a, T: evm2::EvmTypes<Tx: Typed2718 + AlloyTransaction>> Evm for evm2::Evm<
         resolve_transaction(self, resolution)
     }
 
-    fn transact_with_inspector<I: evm2::Inspector<T> + 'a>(
+    fn transact_with_inspector<I: evm2::Inspector<T>>(
         &mut self,
         transaction: &Recovered<Self::Transaction>,
-        inspector: I,
-    ) -> Result<(I, evm2::TxResultWithState<T>), BlockExecutionError> {
-        // TODO(dani): use either `&mut Inspector` or `clear_inspector_as`.
-        evm2::Evm::set_inspector(self, inspector);
-        let resolution = transaction_resolution(evm2::Evm::transact(self, transaction));
-        let result = resolve_transaction(self, resolution);
-        let inspector = self.clear_inspector().expect("inspector was set before execution");
-        // SAFETY: the boxed inspector was created from `I` immediately above and was not replaced.
-        let inspector = unsafe { Box::from_raw(Box::into_raw(inspector).cast::<I>()) };
-        result.map(|result| (*inspector, result))
+        inspector: &mut I,
+    ) -> Result<evm2::TxResultWithState<T>, BlockExecutionError> {
+        let resolution = match evm2::Evm::transact_with_inspector(self, transaction, inspector) {
+            Ok(result) => match result.result.error_code {
+                Some(code) => TransactionResolution::DatabaseError(code),
+                None => TransactionResolution::Result(result),
+            },
+            Err(err) => TransactionResolution::HandlerError(err),
+        };
+        resolve_transaction(self, resolution)
     }
 
     fn set_inspector<I: evm2::Inspector<T> + 'a>(&mut self, inspector: I) {
@@ -244,11 +244,7 @@ impl<'a, T: evm2::EvmTypes<Tx: Typed2718 + AlloyTransaction>> Evm for evm2::Evm<
         &mut self,
         moves: impl IntoIterator<Item = (Address, Address)>,
     ) -> Result<(), evm2::precompiles::MovePrecompileError> {
-        // TODO(dani): precompiles_as_mut
-        let mut precompiles = evm2::Precompiles::<T>::base(self.spec_id());
-        precompiles.as_map_mut().move_precompiles(moves)?;
-        self.set_precompiles(precompiles);
-        Ok(())
+        self.precompiles_mut().move_precompiles(&moves.into_iter().collect::<Vec<_>>())
     }
 
     fn transact_and_discard<S>(

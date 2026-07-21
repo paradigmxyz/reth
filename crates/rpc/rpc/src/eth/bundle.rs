@@ -131,7 +131,7 @@ where
         evm_env.block_env_mut().gas_limit = U256::from(gas_limit.unwrap_or(call_gas_limit));
 
         if let Some(base_fee) = base_fee {
-            evm_env.block_env_mut().basefee = U256::from(base_fee);
+            evm_env.block_env_mut().basefee = U256::from(base_fee.try_into().unwrap_or(u64::MAX));
         }
 
         let state_block_number = evm_env.block_env().number;
@@ -181,7 +181,7 @@ where
                     let tx_env = eth_api.evm_config().tx_env(tx.clone());
                     let result_and_state = eth_api.transact(&mut db, evm_env.clone(), tx_env)?;
                     let result = result_and_state.result;
-                    let state = result_and_state.state_changes;
+                    let state = result_and_state.pending_state;
 
                     let gas_price = tx
                         .effective_tip_per_gas(basefee)
@@ -194,9 +194,7 @@ where
 
                     // coinbase is always present in the result state
                     coinbase_balance_after_tx = state
-                        .accounts
-                        .get(&coinbase)
-                        .and_then(|acc| acc.current.as_ref())
+                        .account_info(&coinbase)
                         .map(|acc| acc.balance)
                         .unwrap_or(coinbase_balance_before_tx);
                     let coinbase_diff =
