@@ -74,7 +74,7 @@ where
         evm_env: EvmEnvFor<Evm>,
         provider_builder: StateProviderBuilder<N, P>,
     ) {
-        self.control.start(Job { parent_hash, evm_env, provider_builder });
+        self.control.start(parent_hash, Job { evm_env, provider_builder });
     }
 }
 
@@ -107,7 +107,6 @@ pub trait Source<N: NodePrimitives>: Send + Sync + Debug {
 
 /// A request to warm txpool transactions against one fully validated parent state.
 struct Job<N: NodePrimitives, P, Evm: ConfigureEvm<Primitives = N>> {
-    parent_hash: B256,
     evm_env: EvmEnvFor<Evm>,
     provider_builder: StateProviderBuilder<N, P>,
 }

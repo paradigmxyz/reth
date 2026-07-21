@@ -35,8 +35,8 @@ impl<J> Control<J> {
         Arc::clone(&self.publication)
     }
 
-    pub(super) fn start(&self, job: J) {
-        let _ = self.commands.send(Command::Start(job));
+    pub(super) fn start(&self, parent_hash: B256, job: J) {
+        let _ = self.commands.send(Command::Start { parent_hash, job });
     }
 
     pub(super) fn pause(self: &Arc<Self>) -> PauseGuard<J> {
@@ -66,7 +66,7 @@ pub(super) type Publication = Arc<RwLock<Option<Snapshot>>>;
 /// Commands sent to the txpool prewarming worker.
 pub(super) enum Command<J> {
     /// Starts prewarming for a canonical head, replacing any previous job.
-    Start(J),
+    Start { parent_hash: B256, job: J },
     /// Pauses prewarming and acknowledges once the worker has released its active resources.
     Pause(Sender<()>),
     /// Releases one active pause.
@@ -147,9 +147,14 @@ mod tests {
     #[test]
     fn start_sends_job() {
         let (control, receiver) = control();
-        control.start(1);
+        let parent_hash = B256::repeat_byte(0x01);
+        control.start(parent_hash, 1);
 
-        assert!(matches!(receiver.try_recv(), Ok(Command::Start(1))));
+        assert!(matches!(
+            receiver.try_recv(),
+            Ok(Command::Start { parent_hash: received_parent, job: 1 })
+                if received_parent == parent_hash
+        ));
     }
 
     #[test]

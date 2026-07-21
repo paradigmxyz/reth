@@ -65,7 +65,7 @@ where
 
         if state.cache.parent_hash() != Some(parent_hash) {
             state.cache.reset(parent_hash);
-            state.unpublished_transactions = 0;
+            state.cache_dirty = false;
             debug!(
                 target: "engine::tree::txpool_prewarm",
                 ?parent_hash,
@@ -76,16 +76,17 @@ where
         // `wait_for_runnable_job` returned this job's parent hash, and the branch above either
         // retained or opened its matching transaction iterator. No command has been processed
         // since, so both are still installed here.
-        let job = state.current_job.as_ref().unwrap();
+        let (_, job) = state.current_job.as_ref().unwrap();
         let transactions = state.best_transactions.as_mut().unwrap();
-        let outcome = prewarm_batch(&evm_config, job, &state.cache, transactions, &commands)?;
+        let outcome =
+            prewarm_batch(&evm_config, parent_hash, job, &state.cache, transactions, &commands)?;
 
         match outcome {
             BatchOutcome::Completed { executed, end } => {
-                state.record_unpublished(executed);
+                state.cache_dirty |= executed != 0;
                 match publish_if_dirty(&commands, &publication, &mut state)? {
                     PublishOutcome::Interrupted => continue,
-                    PublishOutcome::Published | PublishOutcome::Unchanged => {}
+                    PublishOutcome::Ready => {}
                 }
 
                 if end == BatchEnd::Empty {
@@ -93,13 +94,13 @@ where
                 }
             }
             BatchOutcome::Interrupted { executed, command } => {
-                state.record_unpublished(executed);
+                state.cache_dirty |= executed != 0;
                 state.apply_command(command);
             }
             BatchOutcome::ProviderUnavailable => {
                 match publish_if_dirty(&commands, &publication, &mut state)? {
                     PublishOutcome::Interrupted => continue,
-                    PublishOutcome::Published | PublishOutcome::Unchanged => {}
+                    PublishOutcome::Ready => {}
                 }
                 wait_for_command(&commands, &mut state, REFRESH_INTERVAL)?;
             }
@@ -109,6 +110,7 @@ where
 
 fn prewarm_batch<N, P, Evm>(
     evm_config: &Evm,
+    parent_hash: B256,
     job: &Job<N, P, Evm>,
     cache: &Cache,
     transactions: &mut Transactions<N>,
@@ -131,7 +133,7 @@ where
             trace!(
                 target: "engine::tree::txpool_prewarm",
                 %err,
-                parent_hash = ?job.parent_hash,
+                ?parent_hash,
                 "failed to build txpool prewarming state provider"
             );
             return Ok(BatchOutcome::ProviderUnavailable)
@@ -179,14 +181,13 @@ fn wait_for_runnable_job<J, N>(
     state: &mut WorkerState<J, N>,
 ) -> Result<B256, ChannelDisconnected>
 where
-    J: JobParent,
     N: NodePrimitives,
 {
     loop {
         if state.pause_count == 0 &&
-            let Some(job) = state.current_job.as_ref()
+            let Some((parent_hash, _)) = state.current_job.as_ref()
         {
-            return Ok(job.parent_hash())
+            return Ok(*parent_hash)
         }
 
         let command = commands.recv().map_err(|_| ChannelDisconnected)?;
@@ -201,7 +202,6 @@ fn wait_for_command<J, N>(
     timeout: Duration,
 ) -> Result<(), ChannelDisconnected>
 where
-    J: JobParent,
     N: NodePrimitives,
 {
     match commands.recv_timeout(timeout) {
@@ -220,13 +220,16 @@ fn drain_commands<J, N>(
     state: &mut WorkerState<J, N>,
 ) -> Result<DrainOutcome, ChannelDisconnected>
 where
-    J: JobParent,
     N: NodePrimitives,
 {
     let mut result = DrainOutcome::default();
     loop {
         match commands.try_recv() {
-            Ok(command) => result.invalidated_batch |= state.apply_command(command),
+            Ok(command) => {
+                if state.apply_command(command) == DrainOutcome::Interrupted {
+                    result = DrainOutcome::Interrupted;
+                }
+            }
             Err(TryRecvError::Empty) => return Ok(result),
             Err(TryRecvError::Disconnected) => return Err(ChannelDisconnected),
         }
@@ -239,71 +242,50 @@ fn publish_if_dirty<J, N>(
     state: &mut WorkerState<J, N>,
 ) -> Result<PublishOutcome, ChannelDisconnected>
 where
-    J: JobParent,
     N: NodePrimitives,
 {
-    let drained = drain_commands(commands, state)?;
-    if drained.invalidated_batch {
+    if drain_commands(commands, state)? == DrainOutcome::Interrupted {
         return Ok(PublishOutcome::Interrupted)
     }
-    if state.unpublished_transactions == 0 {
-        return Ok(PublishOutcome::Unchanged)
+    if !state.cache_dirty {
+        return Ok(PublishOutcome::Ready)
     }
 
     let snapshot = state.cache.snapshot();
-    let drained = drain_commands(commands, state)?;
-    if drained.invalidated_batch {
+    if drain_commands(commands, state)? == DrainOutcome::Interrupted {
         return Ok(PublishOutcome::Interrupted)
     }
 
-    let transactions = state.unpublished_transactions;
     let parent_hash = snapshot.parent_hash();
     let (accounts, storage, bytecodes) = snapshot.entry_counts();
     *publication.write() = Some(snapshot);
-    state.unpublished_transactions = 0;
+    state.cache_dirty = false;
     debug!(
         target: "engine::tree::txpool_prewarm",
         ?parent_hash,
-        transactions,
         accounts,
         storage,
         bytecodes,
         "published txpool prewarming snapshot"
     );
-    Ok(PublishOutcome::Published)
-}
-
-trait JobParent {
-    fn parent_hash(&self) -> B256;
-}
-
-impl<N, P, Evm> JobParent for Job<N, P, Evm>
-where
-    N: NodePrimitives,
-    Evm: ConfigureEvm<Primitives = N>,
-{
-    fn parent_hash(&self) -> B256 {
-        self.parent_hash
-    }
+    Ok(PublishOutcome::Ready)
 }
 
 struct WorkerState<J, N>
 where
-    J: JobParent,
     N: NodePrimitives,
 {
-    current_job: Option<J>,
+    current_job: Option<(B256, J)>,
     best_transactions: Option<Transactions<N>>,
     best_transactions_parent_hash: Option<B256>,
     pause_count: u64,
     cache: Cache,
-    /// Number of transactions whose cache reads have not yet been published.
-    unpublished_transactions: usize,
+    /// Whether the cache contains reads that have not yet been published.
+    cache_dirty: bool,
 }
 
 impl<J, N> WorkerState<J, N>
 where
-    J: JobParent,
     N: NodePrimitives,
 {
     fn new() -> Self {
@@ -313,47 +295,45 @@ where
             best_transactions_parent_hash: None,
             pause_count: 0,
             cache: Cache::default(),
-            unpublished_transactions: 0,
+            cache_dirty: false,
         }
     }
 
     /// Applies `command` while no EVM or state provider is active.
     ///
-    /// Returns whether the command invalidates a batch being considered for publication.
-    fn apply_command(&mut self, command: Command<J>) -> bool {
+    /// Returns whether the command interrupts a batch being considered for publication.
+    fn apply_command(&mut self, command: Command<J>) -> DrainOutcome {
         match command {
-            Command::Start(job) => {
-                if self.best_transactions_parent_hash != Some(job.parent_hash()) {
+            Command::Start { parent_hash, job } => {
+                if self.best_transactions_parent_hash != Some(parent_hash) {
                     self.best_transactions = None;
                     self.best_transactions_parent_hash = None;
                 }
-                self.current_job = Some(job);
-                true
+                self.current_job = Some((parent_hash, job));
+                DrainOutcome::Interrupted
             }
             Command::Pause(acknowledge) => {
                 self.pause_count =
                     self.pause_count.checked_add(1).expect("txpool prewarm pause count overflow");
                 let _ = acknowledge.send(());
-                true
+                DrainOutcome::Interrupted
             }
             Command::Resume => {
                 self.pause_count = self
                     .pause_count
                     .checked_sub(1)
                     .expect("txpool prewarm resumed without a matching pause");
-                false
+                DrainOutcome::Ready
             }
         }
     }
-
-    const fn record_unpublished(&mut self, transactions: usize) {
-        self.unpublished_transactions = self.unpublished_transactions.saturating_add(transactions);
-    }
 }
 
-#[derive(Debug, Default)]
-struct DrainOutcome {
-    invalidated_batch: bool,
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+enum DrainOutcome {
+    #[default]
+    Ready,
+    Interrupted,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -373,8 +353,7 @@ enum BatchOutcome<J> {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum PublishOutcome {
-    Published,
-    Unchanged,
+    Ready,
     Interrupted,
 }
 
@@ -385,14 +364,7 @@ mod tests {
     use parking_lot::RwLock;
     use reth_ethereum_primitives::EthPrimitives;
 
-    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-    struct TestJob(B256);
-
-    impl JobParent for TestJob {
-        fn parent_hash(&self) -> B256 {
-            self.0
-        }
-    }
+    type TestJob = u64;
 
     fn state() -> WorkerState<TestJob, EthPrimitives> {
         WorkerState::new()
@@ -408,12 +380,12 @@ mod tests {
         let mut state = state();
         let first = B256::repeat_byte(0x01);
         let second = B256::repeat_byte(0x02);
-        sender.send(Command::Start(TestJob(first))).unwrap();
-        sender.send(Command::Start(TestJob(second))).unwrap();
+        sender.send(Command::Start { parent_hash: first, job: 1 }).unwrap();
+        sender.send(Command::Start { parent_hash: second, job: 2 }).unwrap();
 
         let drained = drain_commands(&receiver, &mut state).unwrap();
-        assert!(drained.invalidated_batch);
-        assert_eq!(state.current_job, Some(TestJob(second)));
+        assert_eq!(drained, DrainOutcome::Interrupted);
+        assert_eq!(state.current_job, Some((second, 2)));
     }
 
     #[test]
@@ -445,12 +417,12 @@ mod tests {
         let mut state = state();
         let (acknowledge, acknowledged) = bounded(1);
         sender.send(Command::Pause(acknowledge)).unwrap();
-        sender.send(Command::Start(TestJob(B256::repeat_byte(0x01)))).unwrap();
-        sender.send(Command::Start(TestJob(B256::repeat_byte(0x02)))).unwrap();
+        sender.send(Command::Start { parent_hash: B256::repeat_byte(0x01), job: 1 }).unwrap();
+        sender.send(Command::Start { parent_hash: B256::repeat_byte(0x02), job: 2 }).unwrap();
 
         drain_commands(&receiver, &mut state).unwrap();
         acknowledged.recv().unwrap();
-        assert_eq!(state.current_job, Some(TestJob(B256::repeat_byte(0x02))));
+        assert_eq!(state.current_job, Some((B256::repeat_byte(0x02), 2)));
         assert_eq!(state.pause_count, 1);
     }
 
@@ -459,7 +431,7 @@ mod tests {
         let (sender, receiver) = unbounded();
         let mut state = state();
         let parent_hash = B256::repeat_byte(0x01);
-        sender.send(Command::Start(TestJob(parent_hash))).unwrap();
+        sender.send(Command::Start { parent_hash, job: 1 }).unwrap();
 
         assert_eq!(wait_for_runnable_job(&receiver, &mut state), Ok(parent_hash));
     }
@@ -471,13 +443,13 @@ mod tests {
         let mut state = state();
         let parent_hash = B256::repeat_byte(0x01);
         state.cache.reset(parent_hash);
-        state.unpublished_transactions = 1;
+        state.cache_dirty = true;
 
         assert_eq!(
             publish_if_dirty(&receiver, &publication, &mut state),
-            Ok(PublishOutcome::Published)
+            Ok(PublishOutcome::Ready)
         );
-        assert_eq!(state.unpublished_transactions, 0);
+        assert!(!state.cache_dirty);
         assert_eq!(
             publication.read().as_ref().map(|snapshot| snapshot.parent_hash()),
             Some(parent_hash)
@@ -491,14 +463,14 @@ mod tests {
         let mut state = state();
         let parent_hash = B256::repeat_byte(0x01);
         state.cache.reset(parent_hash);
-        state.unpublished_transactions = 1;
-        sender.send(Command::Start(TestJob(B256::repeat_byte(0x02)))).unwrap();
+        state.cache_dirty = true;
+        sender.send(Command::Start { parent_hash: B256::repeat_byte(0x02), job: 2 }).unwrap();
 
         assert_eq!(
             publish_if_dirty(&receiver, &publication, &mut state),
             Ok(PublishOutcome::Interrupted)
         );
-        assert_eq!(state.unpublished_transactions, 1);
+        assert!(state.cache_dirty);
         assert!(publication.read().is_none());
     }
 
