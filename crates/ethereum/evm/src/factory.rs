@@ -30,6 +30,7 @@ pub trait EvmFactory<Tx = evm2::ethereum::TxEnvelope>:
     Clone + core::fmt::Debug + Send + Sync + Unpin + 'static
 where
     <Self::Types as evm2::EvmTypesHost>::BlockEnvExt: Send + Sync,
+    <Self::Types as evm2::EvmTypesHost>::EvmExt: Default,
     <Self::Types as evm2::EvmTypesHost>::TxResultExt: Send,
 {
     /// Runtime evm2 type family used by the EVM.
