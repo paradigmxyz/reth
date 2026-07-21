@@ -174,11 +174,11 @@ impl RecoveredTx<TransactionSigned> for ExecutableRecoveredTx {
     }
 }
 
-impl ExecutableTxParts<EthTxEnv, TransactionSigned> for ExecutableRecoveredTx {
+impl ExecutableTxParts<RecoveredTxEnvelope, TransactionSigned> for ExecutableRecoveredTx {
     type Recovered = Recovered<TransactionSigned>;
 
-    fn into_parts(self) -> (EthTxEnv, Self::Recovered) {
-        (self.tx_env, self.tx)
+    fn into_parts(self) -> (RecoveredTxEnvelope, Self::Recovered) {
+        (self.tx_env.into_envelope(), self.tx)
     }
 }
 

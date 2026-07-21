@@ -17,7 +17,9 @@ use alloc::string::String;
 use alloy_eips::eip4895::Withdrawals;
 use alloy_primitives::{Address, Bytes, B256};
 use core::{error::Error, fmt::Debug};
-use reth_primitives_traits::{BlockTy, HeaderTy, NodePrimitives, SealedBlock, SealedHeader, TxTy};
+use reth_primitives_traits::{
+    BlockTy, HeaderTy, NodePrimitives, ReceiptTy, SealedBlock, SealedHeader, TxTy,
+};
 
 pub use evm2::{
     debug_unreachable,
@@ -236,9 +238,9 @@ pub trait ConfigureEvm: Clone + Debug + Send + Sync + Unpin {
 
     /// Configured block executor factory.
     type BlockExecutorFactory: crate::execute::BlockExecutorFactory<
-        Primitives = Self::Primitives,
-        EvmTransaction: From<TxTy<Self::Primitives>>,
-        Transaction: FromTxWithEncoded<TxTy<Self::Primitives>>,
+        Transaction = TxTy<Self::Primitives>,
+        Receipt = ReceiptTy<Self::Primitives>,
+        EvmTypes: evm2::EvmTypes<Tx: From<TxTy<Self::Primitives>>>,
     >;
 
     /// Configured block assembler.

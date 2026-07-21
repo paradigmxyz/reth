@@ -6,7 +6,7 @@ use alloy_consensus::{
 use alloy_eips::{eip4895::Withdrawals, merge::BEACON_NONCE};
 use alloy_primitives::{Bloom, B256};
 use reth_chainspec::{EthChainSpec, EthereumHardforks};
-use reth_ethereum_primitives::TransactionSigned;
+use reth_ethereum_primitives::{Receipt, TransactionSigned};
 #[cfg(feature = "std")]
 use reth_evm::BlockAssembler;
 use reth_evm::{BlockAssemblerInput, BlockExecutionError, BlockExecutorFactory};
@@ -47,7 +47,8 @@ impl<ChainSpec: EthChainSpec + EthereumHardforks> EthBlockAssembler<ChainSpec> {
     ) -> Result<Block<TransactionSigned>, BlockExecutionError>
     where
         F: for<'a> BlockExecutorFactory<
-                Primitives = crate::EthPrimitives,
+                Transaction = TransactionSigned,
+                Receipt = Receipt,
                 ExecutionCtx<'a> = EthBlockExecutionCtx<'a>,
             > + 'static,
         F::EvmEnv: EthEvmEnvLike,
@@ -140,7 +141,8 @@ impl<ChainSpec: EthChainSpec + EthereumHardforks> EthBlockAssembler<ChainSpec> {
 impl<F, ChainSpec> BlockAssembler<F> for EthBlockAssembler<ChainSpec>
 where
     F: for<'a> BlockExecutorFactory<
-            Primitives = crate::EthPrimitives,
+            Transaction = TransactionSigned,
+            Receipt = Receipt,
             ExecutionCtx<'a> = EthBlockExecutionCtx<'a>,
         > + 'static,
     F::EvmEnv: EthEvmEnvLike,

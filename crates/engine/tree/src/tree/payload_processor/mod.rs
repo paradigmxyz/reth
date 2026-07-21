@@ -12,7 +12,7 @@ use prewarm::PrewarmMetrics;
 use rayon::prelude::*;
 use reth_evm::{
     ConfigureEvm, ConvertTx, ExecutableTxFor, ExecutableTxIterator, ExecutableTxParts,
-    ExecutableTxTuple, TxFor, WithTxEnv,
+    ExecutableTxTuple, TxEnvFor, WithTxEnv,
 };
 use reth_execution_types::EvmState;
 use reth_primitives_traits::{FastInstant as Instant, NodePrimitives};
@@ -45,7 +45,7 @@ pub mod receipt_root_task;
 pub const SMALL_BLOCK_TX_THRESHOLD: usize = 5;
 
 /// Type alias for [`PayloadHandle`] returned by payload processor spawn methods.
-type IteratorTx<Evm, I> = RecoveredTx<TxFor<Evm>, <I as ExecutableTxIterator<Evm>>::Recovered>;
+type IteratorTx<Evm, I> = RecoveredTx<TxEnvFor<Evm>, <I as ExecutableTxIterator<Evm>>::Recovered>;
 
 type IteratorPayloadHandle<Evm, I> = PayloadHandle<
     IteratorTx<Evm, I>,
@@ -54,10 +54,10 @@ type IteratorPayloadHandle<Evm, I> = PayloadHandle<
 >;
 
 type IteratorPrewarmTxReceiver<Evm, I> =
-    PrewarmTxReceiver<TxFor<Evm>, <I as ExecutableTxIterator<Evm>>::Recovered>;
+    PrewarmTxReceiver<TxEnvFor<Evm>, <I as ExecutableTxIterator<Evm>>::Recovered>;
 
 type IteratorExecuteTxReceiver<Evm, I> = ExecuteTxReceiver<
-    TxFor<Evm>,
+    TxEnvFor<Evm>,
     <I as ExecutableTxIterator<Evm>>::Recovered,
     <I as ExecutableTxTuple>::Error,
 >;

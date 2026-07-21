@@ -81,10 +81,9 @@ pub(super) fn spawn_worker<'scope, Evm, Tx, Err, DB, MakeDb>(
                 };
                 let tx = tx.map_err(|err| BalWorkerError::Transaction(Box::new(err)))?;
                 let signer = *tx.signer();
-                let (tx_env, _) = tx.into_parts();
                 executor.set_block_access_index(BlockAccessIndex::new(index as u64 + 1));
                 let result = executor
-                    .execute_transaction_without_commit(tx_env)
+                    .execute_transaction_without_commit(tx)
                     .map_err(BalWorkerError::Execution)?;
 
                 if result_tx.send(Ok(BalWorkerOutput { index, signer, result })).is_err() {

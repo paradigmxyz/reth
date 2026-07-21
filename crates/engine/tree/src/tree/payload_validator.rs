@@ -131,8 +131,8 @@ use reth_engine_primitives::{
 };
 use reth_errors::{BlockExecutionError, ProviderResult};
 use reth_evm::{
-    database::StateProviderDatabase, BlockExecutor, BlockExecutorFactory, ConfigureEvm, EvmEnvFor,
-    ExecutableTxFor, ExecutionCtxFor, RecoveredTx, TxFor,
+    database::StateProviderDatabase, BlockExecutor, BlockExecutorFactory, BlockExecutorFor,
+    ConfigureEvm, EvmEnvFor, ExecutableTxFor, ExecutionCtxFor,
 };
 use reth_execution_cache::{CacheFillMode, CacheStats, SavedCache};
 use reth_payload_primitives::{
@@ -1131,9 +1131,9 @@ where
     /// - Executing each transaction with timing metrics
     /// - Streaming receipts to the receipt root computation task
     /// - Collecting transaction senders for later use
-    fn execute_transactions<Tx, Err, Executor>(
+    fn execute_transactions<Tx, Err>(
         &self,
-        executor: &mut Executor,
+        executor: &mut BlockExecutorFor<'_, Evm>,
         transaction_count: usize,
         transactions: impl Iterator<Item = Result<Tx, Err>>,
         receipt_tx: &ReceiptRootSender<N>,
@@ -1142,7 +1142,6 @@ where
     where
         Tx: ExecutableTxFor<Evm>,
         Err: core::error::Error + Send + Sync + 'static,
-        Executor: BlockExecutor<Primitives = N, Transaction = TxFor<Evm>>,
     {
         let pre_exec_start = Instant::now();
         debug_span!(target: "engine::tree", "pre_execution").in_scope(|| {
@@ -1159,7 +1158,6 @@ where
             let Some(tx_result) = transactions.next() else { break };
             self.metrics.record_transaction_wait(wait_start.elapsed());
             let tx = tx_result.map_err(BlockExecutionError::other)?;
-            let (tx_env, tx) = tx.into_parts();
             senders.push(*tx.signer());
 
             let _enter = tracing::enabled!(target: "engine::tree", Level::TRACE).then(|| {
@@ -1175,7 +1173,7 @@ where
             }
 
             let tx_start = Instant::now();
-            executor.execute_transaction(tx_env).map_err(BlockExecutionError::other)?;
+            executor.execute_transaction(tx).map_err(BlockExecutionError::other)?;
             self.metrics.record_transaction_execution(tx_start.elapsed());
             executed_tx_index.store(senders.len(), Ordering::Relaxed);
 
