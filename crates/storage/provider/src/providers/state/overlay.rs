@@ -355,7 +355,7 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
                 } else {
                     manager
                         .anchor_for_parent(self.parent_hash, state_trie_tip_block.hash)
-                        .unwrap_or(self.parent_hash)
+                        .ok_or(ProviderError::BlockHashNotFound(self.parent_hash))?
                 }
             }
             _ => self.parent_hash,
@@ -975,6 +975,20 @@ mod tests {
             error.to_string().contains("is after partial state trie frontier"),
             "unexpected error: {error}"
         );
+    }
+
+    #[cfg(feature = "partial-persistence")]
+    #[test]
+    fn managed_overlay_errors_if_parent_is_not_persisted_or_managed_across_frontiers() {
+        let (factory, blocks) = setup_frontiers(1, 3);
+        let provider = factory.provider().unwrap();
+        let parent_hash = blocks[3].recovered_block().hash();
+        let error = OverlayBuilder::<EthPrimitives>::new(parent_hash, ChangesetCache::new())
+            .with_state_trie_overlay_manager(StateTrieOverlayManager::default())
+            .build_overlay(&provider)
+            .unwrap_err();
+
+        assert!(matches!(error, ProviderError::BlockHashNotFound(hash) if hash == parent_hash));
     }
 
     #[test]
