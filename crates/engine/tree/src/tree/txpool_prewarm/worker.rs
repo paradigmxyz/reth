@@ -114,7 +114,7 @@ where
                 continue
             }
             self.publish_snapshot_if_dirty();
-            if batch == BatchEnd::OutOfWork {
+            if batch == BatchEnd::Rest {
                 self.idle(REFRESH_INTERVAL)?;
             }
         }
@@ -165,7 +165,7 @@ where
         // Building a state provider opens a database transaction; don't bother under a pending
         // command.
         if !self.commands.is_empty() {
-            return BatchEnd::MoreWork
+            return BatchEnd::GoAgain
         }
 
         let state_provider = match job.provider_builder.build() {
@@ -177,7 +177,7 @@ where
                     ?parent_hash,
                     "failed to build txpool prewarming state provider"
                 );
-                return BatchEnd::OutOfWork
+                return BatchEnd::Rest
             }
         };
         let state_provider = StateProviderDatabase::new(self.cache.state_provider(state_provider));
@@ -189,7 +189,7 @@ where
 
         let deadline = Instant::now() + REFRESH_INTERVAL;
         while self.commands.is_empty() && Instant::now() < deadline {
-            let Some(transaction) = transactions.next() else { return BatchEnd::OutOfWork };
+            let Some(transaction) = transactions.next() else { return BatchEnd::Rest };
             if let Err(err) = evm.transact(transaction.transaction) {
                 trace!(
                     target: "engine::tree::txpool_prewarm",
@@ -200,7 +200,7 @@ where
                 );
             }
         }
-        BatchEnd::MoreWork
+        BatchEnd::GoAgain
     }
 
     /// Publishes a fresh snapshot if the cache gained reads since the last publication.
@@ -268,15 +268,15 @@ where
     }
 }
 
-/// Why a warming batch stopped.
+/// What to do after a warming batch.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum BatchEnd {
-    /// The refresh deadline passed or a command interrupted the batch; more transactions may be
-    /// ready right away.
-    MoreWork,
-    /// Nothing to execute right now: the pool had no transaction ready, or no state provider
+    /// Batch again right away: the refresh deadline passed or a command interrupted the batch
+    /// while transactions may still be ready.
+    GoAgain,
+    /// Idle until something changes: the pool had no transaction ready, or no state provider
     /// could be built.
-    OutOfWork,
+    Rest,
 }
 
 /// The control channel closed: every sender is dropped and the worker shuts down.
