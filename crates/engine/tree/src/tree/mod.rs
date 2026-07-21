@@ -539,6 +539,11 @@ where
         self.persistence_gap().saturating_sub(self.config.memory_block_buffer_target())
     }
 
+    /// How many blocks beyond the configured in-memory buffer are awaiting persistence.
+    const fn persistence_backpressure_gap(&self) -> u64 {
+        self.persistence_gap().saturating_sub(self.config.memory_block_buffer_target())
+    }
+
     /// Returns `true` when the main loop should stop draining the tree input channel.
     ///
     /// This is the case when persistence is already running and the number of blocks beyond the
