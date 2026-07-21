@@ -243,7 +243,7 @@ impl<DB, ChainSpec: EthChainSpec> NodeBuilder<DB, ChainSpec> {
     /// Preconfigure the builder with the context to launch the node.
     ///
     /// This provides the task executor and the data directory for the node.
-    pub fn with_launch_context(self, task_executor: TaskExecutor) -> WithLaunchContext<Self> {
+    pub const fn with_launch_context(self, task_executor: TaskExecutor) -> WithLaunchContext<Self> {
         WithLaunchContext { builder: self, task_executor }
     }
 
@@ -367,10 +367,7 @@ where
     where
         T: NodeTypesForProvider<ChainSpec = ChainSpec>,
     {
-        WithLaunchContext {
-            builder: self.builder.with_types(),
-            task_executor: self.task_executor.clone(),
-        }
+        WithLaunchContext { builder: self.builder.with_types(), task_executor: self.task_executor }
     }
 
     /// Configures the types of the node and the provider type that will be used by the node.
@@ -383,7 +380,7 @@ where
     {
         WithLaunchContext {
             builder: self.builder.with_types_and_provider(),
-            task_executor: self.task_executor.clone(),
+            task_executor: self.task_executor,
         }
     }
 
@@ -442,7 +439,7 @@ impl<T: FullNodeTypes> WithLaunchContext<NodeBuilderWithTypes<T>> {
     {
         WithLaunchContext {
             builder: self.builder.with_components(components_builder),
-            task_executor: self.task_executor.clone(),
+            task_executor: self.task_executor,
         }
     }
 }
@@ -463,7 +460,7 @@ where
     {
         WithLaunchContext {
             builder: self.builder.with_add_ons(add_ons),
-            task_executor: self.task_executor.clone(),
+            task_executor: self.task_executor,
         }
     }
 }
@@ -541,7 +538,7 @@ where
     {
         Self {
             builder: self.builder.on_component_initialized(hook),
-            task_executor: self.task_executor.clone(),
+            task_executor: self.task_executor,
         }
     }
 
@@ -552,10 +549,7 @@ where
             + Send
             + 'static,
     {
-        Self {
-            builder: self.builder.on_node_started(hook),
-            task_executor: self.task_executor.clone(),
-        }
+        Self { builder: self.builder.on_node_started(hook), task_executor: self.task_executor }
     }
 
     /// Modifies the addons with the given closure.
@@ -584,7 +578,7 @@ where
     where
         F: FnOnce(AO) -> AO,
     {
-        Self { builder: self.builder.map_add_ons(f), task_executor: self.task_executor.clone() }
+        Self { builder: self.builder.map_add_ons(f), task_executor: self.task_executor }
     }
 
     /// Sets the hook that is run once the rpc server is started.
@@ -597,10 +591,7 @@ where
             + Send
             + 'static,
     {
-        Self {
-            builder: self.builder.on_rpc_started(hook),
-            task_executor: self.task_executor.clone(),
-        }
+        Self { builder: self.builder.on_rpc_started(hook), task_executor: self.task_executor }
     }
 
     /// Sets the hook that is run to configure the rpc modules.
@@ -643,10 +634,7 @@ where
             + Send
             + 'static,
     {
-        Self {
-            builder: self.builder.extend_rpc_modules(hook),
-            task_executor: self.task_executor.clone(),
-        }
+        Self { builder: self.builder.extend_rpc_modules(hook), task_executor: self.task_executor }
     }
 
     /// Installs an `ExEx` (Execution Extension) in the node.
@@ -662,7 +650,7 @@ where
     {
         Self {
             builder: self.builder.install_exex(exex_id, exex),
-            task_executor: self.task_executor.clone(),
+            task_executor: self.task_executor,
         }
     }
 
@@ -801,7 +789,7 @@ impl<Node: FullNodeTypes> BuilderContext<Node> {
         &self.config_container.toml_config
     }
 
-    /// Returns the main executor of the node.
+    /// Returns the executor of the node.
     ///
     /// This can be used to execute async tasks or functions during the setup.
     pub const fn task_executor(&self) -> &TaskExecutor {

@@ -49,7 +49,7 @@ pub const DEFAULT_STATE_TRIE_OVERLAY_WORKER_THREADS: usize = 4;
 pub const DEFAULT_MAX_BLOCKING_TASKS: usize = 512;
 
 /// Default thread name prefix for the latency-sensitive tokio runtime.
-pub const DEFAULT_LATENCY_THREAD_NAME: &'static str = "tokio-latency";
+pub const DEFAULT_LATENCY_THREAD_NAME: &str = "tokio-latency";
 
 /// Configuration for the tokio runtime.
 #[derive(Debug, Clone)]
@@ -346,7 +346,7 @@ struct RuntimeInner {
     ///
     /// Used by attached latency runtimes to avoid duplicating rayon thread pools.
     #[cfg(feature = "rayon")]
-    pool_parent: Option<Arc<RuntimeInner>>,
+    pool_parent: Option<Arc<Self>>,
     /// Handle to the spawned [`TaskManager`] background task.
     /// The task monitors critical tasks for panics and fires the shutdown signal.
     /// Can be taken via [`Runtime::take_task_manager_handle`] to poll for panic errors.
@@ -466,8 +466,8 @@ impl Runtime {
     /// rayon pools (when the `rayon` feature is enabled).
     ///
     /// Only the main runtime should own a [`TaskManager`] handle. Attached runtimes must not
-    /// call [`Runtime::take_task_manager_handle`].
-    pub fn build_attached_tokio(&self, config: TokioConfig) -> Result<Runtime, RuntimeBuildError> {
+    /// call [`Self::take_task_manager_handle`].
+    pub fn build_attached_tokio(&self, config: TokioConfig) -> Result<Self, RuntimeBuildError> {
         let (owned_runtime, handle) = build_owned_tokio(&config)?;
         let parent = Arc::clone(&self.0);
 
@@ -530,7 +530,7 @@ impl Runtime {
             task_manager_handle: Mutex::new(None),
         };
 
-        Ok(Runtime(Arc::new(inner)))
+        Ok(Self(Arc::new(inner)))
     }
 }
 
