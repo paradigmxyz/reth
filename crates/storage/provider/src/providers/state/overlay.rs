@@ -121,14 +121,10 @@ pub(super) enum OverlaySource<N: NodePrimitives = EthPrimitives> {
         /// Hashed state overlay.
         state: Arc<HashedPostStateSorted>,
     },
-    /// Manager-backed overlay for in-memory state, with optional immediate overlay data.
+    /// Manager-backed overlay for in-memory state.
     Managed {
         /// Manager used to resolve in-memory parent state if the parent is not persisted.
         manager: StateTrieOverlayManager<N>,
-        /// Immediate hashed state overlay applied on top of any manager-produced overlay.
-        ///
-        /// This is populated by the `with_hashed_state_overlay` methods.
-        state: Arc<HashedPostStateSorted>,
     },
 }
 
@@ -182,10 +178,7 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
         mut self,
         state_trie_overlay_manager: StateTrieOverlayManager<N>,
     ) -> Self {
-        self.overlay_source = Some(OverlaySource::Managed {
-            manager: state_trie_overlay_manager,
-            state: Arc::new(HashedPostStateSorted::default()),
-        });
+        self.overlay_source = Some(OverlaySource::Managed { manager: state_trie_overlay_manager });
         self
     }
 
@@ -196,10 +189,8 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
     ) -> Self {
         if let Some(new_state) = hashed_state_overlay {
             match &mut self.overlay_source {
-                Some(
-                    OverlaySource::Managed { state, .. } | OverlaySource::Immediate { state, .. },
-                ) => *state = new_state,
-                None => {
+                Some(OverlaySource::Immediate { state, .. }) => *state = new_state,
+                Some(OverlaySource::Managed { .. }) | None => {
                     self.overlay_source = Some(OverlaySource::Immediate {
                         trie: Arc::new(TrieUpdatesSorted::default()),
                         state: new_state,
@@ -238,10 +229,10 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
     /// If no overlay exists, creates an immediate overlay with the given state.
     pub fn with_extended_hashed_state_overlay(mut self, other: HashedPostStateSorted) -> Self {
         match &mut self.overlay_source {
-            Some(OverlaySource::Immediate { state, .. } | OverlaySource::Managed { state, .. }) => {
+            Some(OverlaySource::Immediate { state, .. }) => {
                 Arc::make_mut(state).extend_ref_and_sort(&other);
             }
-            None => {
+            Some(OverlaySource::Managed { .. }) | None => {
                 self.overlay_source = Some(OverlaySource::Immediate {
                     trie: Arc::new(TrieUpdatesSorted::default()),
                     state: Arc::new(other),
@@ -257,25 +248,17 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
         anchor_hash: BlockHash,
     ) -> ProviderResult<(Arc<TrieUpdatesSorted>, Arc<HashedPostStateSorted>)> {
         match &self.overlay_source {
-            Some(OverlaySource::Managed { manager, state }) => {
-                let (trie, mut overlay_state) = if anchor_hash == self.parent_hash {
-                    (
+            Some(OverlaySource::Managed { manager }) => {
+                if anchor_hash == self.parent_hash {
+                    Ok((
                         Arc::new(TrieUpdatesSorted::default()),
                         Arc::new(HashedPostStateSorted::default()),
-                    )
+                    ))
                 } else {
                     manager
                         .overlay_for_parent(self.parent_hash, anchor_hash)
-                        .map_err(ProviderError::other)?
-                };
-
-                if overlay_state.is_empty() {
-                    overlay_state = Arc::clone(state);
-                } else if !state.is_empty() {
-                    Arc::make_mut(&mut overlay_state).extend_ref_and_sort(state);
+                        .map_err(ProviderError::other)
                 }
-
-                Ok((trie, overlay_state))
             }
             Some(OverlaySource::Immediate { trie, state }) => {
                 if anchor_hash != self.parent_hash {
@@ -302,7 +285,7 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
         let Some(anchor_hash) = self.reused_sparse_trie_anchor_hash else { return false };
 
         match &self.overlay_source {
-            Some(OverlaySource::Managed { manager, state }) if state.is_empty() => {
+            Some(OverlaySource::Managed { manager }) => {
                 manager.contains_hash(self.parent_hash, anchor_hash, state_trie_tip_hash) &&
                     manager.contains_hash(self.parent_hash, anchor_hash, finish_tip_hash)
             }
@@ -325,7 +308,7 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
         Provider: BlockNumReader + PruneCheckpointReader,
     {
         let overlay_anchor_hash = match &self.overlay_source {
-            Some(OverlaySource::Managed { manager, .. }) => manager
+            Some(OverlaySource::Managed { manager }) => manager
                 .anchor_for_parent(self.parent_hash, state_trie_tip_block.hash)
                 .unwrap_or(self.parent_hash),
             _ => self.parent_hash,
@@ -353,7 +336,7 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
         // The database is a hybrid view while the state/trie and Finish frontiers differ. A
         // manager overlay can use that view directly only when its anchor-to-parent path covers
         // both frontiers; otherwise the database must first be reverted to the overlay anchor.
-        if let Some(OverlaySource::Managed { manager, .. }) = &self.overlay_source &&
+        if let Some(OverlaySource::Managed { manager }) = &self.overlay_source &&
             manager.contains_hash(
                 self.parent_hash,
                 overlay_anchor_hash,
@@ -1025,23 +1008,7 @@ mod tests {
     }
 
     #[test]
-    fn extending_hashed_state_keeps_managed_overlay_source() {
-        let parent_hash = B256::with_last_byte(1);
-        let hashed_state = HashedPostState::default()
-            .with_accounts([(B256::with_last_byte(2), Some(Account::default()))])
-            .into_sorted();
-        let builder = OverlayBuilder::<EthPrimitives>::new(parent_hash, ChangesetCache::default())
-            .with_state_trie_overlay_manager(StateTrieOverlayManager::default())
-            .with_extended_hashed_state_overlay(hashed_state);
-
-        let Some(OverlaySource::Managed { state, .. }) = builder.overlay_source else {
-            panic!("expected managed overlay source")
-        };
-        assert_eq!(state.total_len(), 1);
-    }
-
-    #[test]
-    fn managed_overlay_skip_requires_both_frontiers_and_no_immediate_state() {
+    fn managed_overlay_skip_requires_both_frontiers() {
         let parent_hash = B256::with_last_byte(1);
         let builder = OverlayBuilder::<EthPrimitives>::new(parent_hash, ChangesetCache::default())
             .with_state_trie_overlay_manager(StateTrieOverlayManager::default());
@@ -1051,12 +1018,6 @@ mod tests {
         assert!(builder.should_skip_overlay_for_reused_sparse_trie(parent_hash, parent_hash));
         assert!(!builder
             .should_skip_overlay_for_reused_sparse_trie(B256::with_last_byte(3), parent_hash,));
-
-        let hashed_state = HashedPostState::default()
-            .with_accounts([(B256::with_last_byte(2), Some(Account::default()))])
-            .into_sorted();
-        let builder = builder.with_extended_hashed_state_overlay(hashed_state);
-        assert!(!builder.should_skip_overlay_for_reused_sparse_trie(parent_hash, parent_hash));
 
         let blocks = test_blocks();
         let manager = StateTrieOverlayManager::default();
