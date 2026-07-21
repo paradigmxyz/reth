@@ -3,15 +3,14 @@
 use crate::{
     execution::{
         base_block_reward, block_requests_from_receipts, commit_detached_transaction,
-        execute_transaction_with_commit_condition, execute_transaction_without_commit,
-        post_block_balance_state_changes, post_execution_system_call_state_changes,
-        pre_execution_system_call_state_changes, transaction_blob_gas_used, BlockExecutionContext,
-        BlockSystemCalls, EthExecutionError,
+        execute_transaction_without_commit, post_block_balance_state_changes,
+        post_execution_system_call_state_changes, pre_execution_system_call_state_changes,
+        transaction_blob_gas_used, BlockExecutionContext, BlockSystemCalls, EthExecutionError,
     },
     factory::{EthBlockExecutorFactory, EvmFactory},
     EthBlockExecutionCtx, EthEvmEnv, EthTxEnv, RethReceiptBuilder,
 };
-use alloc::{borrow::Cow, boxed::Box, sync::Arc, vec::Vec};
+use alloc::{boxed::Box, sync::Arc, vec::Vec};
 use alloy_consensus::{Header, Transaction, TxType};
 use alloy_eip7928::{BlockAccessIndex, BlockAccessList};
 use alloy_eips::{eip2718::Typed2718, eip4895::Withdrawal, eip7685::Requests};
@@ -25,8 +24,8 @@ use evm2::{
 use reth_ethereum_forks::EthereumHardforks;
 use reth_ethereum_primitives::{EthPrimitives, Receipt};
 use reth_evm::{
-    BlockExecutionError, BlockExecutionOutput, BlockExecutor, BlockValidationError, CommitChanges,
-    GasOutput, ReceiptBuilder, ReceiptBuilderCtx,
+    BlockExecutionError, BlockExecutionOutput, BlockExecutor, BlockTransactionResult,
+    BlockValidationError, GasOutput, ReceiptBuilder, ReceiptBuilderCtx,
 };
 use reth_trie_common::HashedPostState;
 
@@ -39,14 +38,9 @@ where
     T::TxResultExt: Send,
 {
     evm: Evm<'a, T>,
+    ctx: EthBlockExecutionCtx<'a>,
     spec_id: evm2::SpecId,
-    block_number: u64,
-    block_beneficiary: Address,
     base_block_reward: Option<u128>,
-    parent_hash: B256,
-    parent_beacon_block_root: Option<B256>,
-    ommers: &'a [Header],
-    withdrawals: Option<Cow<'a, [Withdrawal]>>,
     deposit_contract_address: Option<Address>,
     block_state: BlockStateAccumulator,
     hashed_state_mode: HashedStateMode,
@@ -55,8 +49,6 @@ where
     cumulative_gas_used: u64,
     block_regular_gas_used: u64,
     block_state_gas_used: u64,
-    block_gas_limit: u64,
-    tx_gas_limit_cap: u64,
     separate_block_gas: bool,
     blob_gas_used: u64,
     bal_index_offset: u64,
@@ -71,7 +63,12 @@ where
     result: TxResultWithState<T>,
     tx_type: TxType,
     blob_gas_used: u64,
-    tx_gas_limit: u64,
+}
+
+impl<T: EvmTypes> BlockTransactionResult<T> for EthTransactionResultWithState<T> {
+    fn result(&self) -> &TxResultWithState<T> {
+        &self.result
+    }
 }
 
 type HashedStateUpdateHook = Option<Box<dyn FnMut(HashedPostState) + Send>>;
@@ -101,7 +98,7 @@ where
     /// Creates a configured Ethereum block executor.
     pub(crate) fn new<C>(
         mut evm: Evm<'a, T>,
-        context: EthBlockExecutionCtx<'a>,
+        ctx: EthBlockExecutionCtx<'a>,
         chain_spec: &C,
         deposit_contract_address: Option<alloy_primitives::Address>,
         hashed_state_mode: HashedStateMode,
@@ -113,23 +110,14 @@ where
         // richer host spec ID that converts into it.
         #[allow(clippy::useless_conversion)]
         let spec_id = evm.spec_id().into();
-        let block = *evm.block_env();
-        let block_number = block.number.to::<u64>();
-        let block_beneficiary = block.beneficiary;
-        let block_gas_limit = block.gas_limit.to::<u64>();
-        let tx_gas_limit_cap = evm.version().tx_gas_limit_cap;
+        let block_number = evm.block_env().number.to::<u64>();
         let separate_block_gas = evm.version().feature(evm2::EvmFeatures::EIP8037);
 
         Self {
             evm,
+            ctx,
             spec_id,
-            block_number,
-            block_beneficiary,
             base_block_reward: base_block_reward(chain_spec, block_number),
-            parent_hash: context.parent_hash,
-            parent_beacon_block_root: context.parent_beacon_block_root,
-            ommers: context.ommers,
-            withdrawals: context.withdrawals,
             deposit_contract_address,
             block_state: BlockStateAccumulator::new(),
             hashed_state_mode,
@@ -138,8 +126,6 @@ where
             cumulative_gas_used: 0,
             block_regular_gas_used: 0,
             block_state_gas_used: 0,
-            block_gas_limit,
-            tx_gas_limit_cap,
             separate_block_gas,
             blob_gas_used: 0,
             bal_index_offset: 0,
@@ -159,58 +145,6 @@ where
             withdrawals,
             deposit_contract_address,
         }
-    }
-
-    fn record_transaction(
-        &mut self,
-        tx_type: TxType,
-        blob_gas_used: u64,
-        outcome: TxResult<T>,
-    ) -> GasOutput {
-        let tx_gas_used = outcome.tx_gas_used();
-        let regular_gas_used = outcome.regular_gas_spent();
-        let state_gas_used = outcome.state_gas_spent();
-        self.block_regular_gas_used = self.block_regular_gas_used.saturating_add(regular_gas_used);
-        self.block_state_gas_used = self.block_state_gas_used.saturating_add(state_gas_used);
-        self.cumulative_gas_used += tx_gas_used;
-        self.blob_gas_used += blob_gas_used;
-        self.receipts.push(RethReceiptBuilder.build_receipt(ReceiptBuilderCtx {
-            tx_type,
-            result: outcome,
-            cumulative_gas_used: self.cumulative_gas_used,
-        }));
-        GasOutput::new_with_regular(tx_gas_used, regular_gas_used, state_gas_used)
-    }
-
-    fn validate_transaction_gas_limit(
-        &self,
-        transaction_gas_limit: u64,
-    ) -> Result<(), BlockExecutionError> {
-        let unavailable = if self.separate_block_gas {
-            let regular_available =
-                self.block_gas_limit.saturating_sub(self.block_regular_gas_used);
-            let state_available = self.block_gas_limit.saturating_sub(self.block_state_gas_used);
-            let regular_limit = transaction_gas_limit.min(self.tx_gas_limit_cap);
-            if regular_limit > regular_available {
-                Some((regular_limit, regular_available))
-            } else if transaction_gas_limit > state_available {
-                Some((transaction_gas_limit, state_available))
-            } else {
-                None
-            }
-        } else {
-            let available = self.block_gas_limit.saturating_sub(self.cumulative_gas_used);
-            (transaction_gas_limit > available).then_some((transaction_gas_limit, available))
-        };
-
-        if let Some((transaction_gas_limit, block_available_gas)) = unavailable {
-            return Err(BlockValidationError::TransactionGasLimitMoreThanAvailableBlockGas {
-                transaction_gas_limit,
-                block_available_gas,
-            }
-            .into())
-        }
-        Ok(())
     }
 
     const fn block_access_list_builder_enabled(&self) -> bool {
@@ -235,10 +169,8 @@ where
     type Primitives = EthPrimitives;
     type Evm = Evm<'a, T>;
     type Transaction = EthTxEnv;
-    type TransactionResult = TxResult<T>;
     type TransactionResultWithState = EthTransactionResultWithState<T>;
     type BlockAccessList = Bal;
-    type TransactionOutput = GasOutput;
 
     fn evm(&self) -> &Self::Evm {
         &self.evm
@@ -286,48 +218,22 @@ where
     fn apply_pre_execution_changes(&mut self) -> Result<(), BlockExecutionError> {
         let context = Self::block_context(
             self.deposit_contract_address,
-            self.parent_hash,
-            self.parent_beacon_block_root,
-            self.ommers,
+            self.ctx.parent_hash,
+            self.ctx.parent_beacon_block_root,
+            self.ctx.ommers,
             None,
         );
+        let block_number = self.evm.block_env().number.to::<u64>();
         pre_execution_system_call_state_changes(
             &mut self.evm,
             &mut self.block_state,
             self.hashed_state_mode.stream(),
             &mut |state| emit_hashed_state(&mut self.hashed_state_update_hook, state),
             self.spec_id,
-            self.block_number,
+            block_number,
             context,
         )
         .map_err(Into::into)
-    }
-
-    fn execute_transaction_with_commit_condition(
-        &mut self,
-        transaction: Self::Transaction,
-        f: impl FnOnce(&Self::TransactionResult) -> CommitChanges,
-    ) -> Result<Option<Self::TransactionOutput>, BlockExecutionError> {
-        self.set_transaction_block_access_index();
-        let tx_hash = transaction.tx_hash();
-        let transaction = transaction.into_envelope();
-        self.validate_transaction_gas_limit(transaction.gas_limit())?;
-        let tx_blob_gas_used = transaction_blob_gas_used(&transaction);
-        let tx_type =
-            TxType::try_from(transaction.ty()).expect("transaction envelope has valid type");
-        let Some(outcome) = execute_transaction_with_commit_condition(
-            &mut self.evm,
-            &mut self.block_state,
-            self.hashed_state_mode.stream(),
-            &mut |state| emit_hashed_state(&mut self.hashed_state_update_hook, state),
-            &transaction,
-            f,
-        )
-        .map_err(|err| map_transaction_execution_error(err, tx_hash))?
-        else {
-            return Ok(None)
-        };
-        Ok(Some(self.record_transaction(tx_type, tx_blob_gas_used, outcome)))
     }
 
     fn execute_transaction_without_commit(
@@ -336,29 +242,64 @@ where
     ) -> Result<Self::TransactionResultWithState, BlockExecutionError> {
         let tx_hash = transaction.tx_hash();
         let transaction = transaction.into_envelope();
-        let tx_gas_limit = transaction.gas_limit();
+        self.set_transaction_block_access_index();
+        let transaction_gas_limit = transaction.gas_limit();
+        let block_gas_limit = self.evm.block_env().gas_limit.to::<u64>();
+        let unavailable = if self.separate_block_gas {
+            let regular_available = block_gas_limit.saturating_sub(self.block_regular_gas_used);
+            let state_available = block_gas_limit.saturating_sub(self.block_state_gas_used);
+            let regular_limit = transaction_gas_limit.min(self.evm.version().tx_gas_limit_cap);
+            if regular_limit > regular_available {
+                Some((regular_limit, regular_available))
+            } else if transaction_gas_limit > state_available {
+                Some((transaction_gas_limit, state_available))
+            } else {
+                None
+            }
+        } else {
+            let available = block_gas_limit.saturating_sub(self.cumulative_gas_used);
+            (transaction_gas_limit > available).then_some((transaction_gas_limit, available))
+        };
+        if let Some((transaction_gas_limit, block_available_gas)) = unavailable {
+            return Err(BlockValidationError::TransactionGasLimitMoreThanAvailableBlockGas {
+                transaction_gas_limit,
+                block_available_gas,
+            }
+            .into())
+        }
         let blob_gas_used = transaction_blob_gas_used(&transaction);
         let tx_type =
             TxType::try_from(transaction.ty()).expect("transaction envelope has valid type");
         let result = execute_transaction_without_commit(&mut self.evm, &transaction)
             .map_err(|err| map_transaction_execution_error(err, tx_hash))?;
-        Ok(EthTransactionResultWithState { result, tx_type, blob_gas_used, tx_gas_limit })
+        Ok(EthTransactionResultWithState { result, tx_type, blob_gas_used })
     }
 
     fn commit_transaction(
         &mut self,
         output: Self::TransactionResultWithState,
-    ) -> Result<Self::TransactionOutput, BlockExecutionError> {
-        self.validate_transaction_gas_limit(output.tx_gas_limit)?;
-        self.set_transaction_block_access_index();
+    ) -> Result<GasOutput, BlockExecutionError> {
+        let EthTransactionResultWithState { result, tx_type, blob_gas_used } = output;
         let outcome = commit_detached_transaction(
             &mut self.evm,
             &mut self.block_state,
             self.hashed_state_mode.stream(),
             &mut |state| emit_hashed_state(&mut self.hashed_state_update_hook, state),
-            output.result,
+            result,
         );
-        Ok(self.record_transaction(output.tx_type, output.blob_gas_used, outcome))
+        let tx_gas_used = outcome.tx_gas_used();
+        let regular_gas_used = outcome.regular_gas_spent();
+        let state_gas_used = outcome.state_gas_spent();
+        self.block_regular_gas_used = self.block_regular_gas_used.saturating_add(regular_gas_used);
+        self.block_state_gas_used = self.block_state_gas_used.saturating_add(state_gas_used);
+        self.cumulative_gas_used += tx_gas_used;
+        self.blob_gas_used += blob_gas_used;
+        self.receipts.push(RethReceiptBuilder.build_receipt(ReceiptBuilderCtx {
+            tx_type,
+            result: outcome,
+            cumulative_gas_used: self.cumulative_gas_used,
+        }));
+        Ok(GasOutput::new_with_regular(tx_gas_used, regular_gas_used, state_gas_used))
     }
 
     fn receipts(&self) -> &[Receipt] {
@@ -371,9 +312,9 @@ where
         self.set_transaction_block_access_index();
         let context = Self::block_context(
             self.deposit_contract_address,
-            self.parent_hash,
-            self.parent_beacon_block_root,
-            self.ommers,
+            self.ctx.parent_hash,
+            self.ctx.parent_beacon_block_root,
+            self.ctx.ommers,
             None,
         );
         let mut requests = block_requests_from_receipts(self.spec_id, context, &self.receipts)?;
@@ -388,22 +329,24 @@ where
         )
         .map_err(BlockExecutionError::from)?;
 
-        let withdrawals = self.withdrawals.clone();
+        let withdrawals = self.ctx.withdrawals.clone();
         let context = Self::block_context(
             self.deposit_contract_address,
-            self.parent_hash,
-            self.parent_beacon_block_root,
-            self.ommers,
+            self.ctx.parent_hash,
+            self.ctx.parent_beacon_block_root,
+            self.ctx.ommers,
             withdrawals.as_deref(),
         );
+        let block_number = self.evm.block_env().number.to::<u64>();
+        let block_beneficiary = self.evm.block_env().beneficiary;
         post_block_balance_state_changes(
             &mut self.evm,
             &mut self.block_state,
             self.hashed_state_mode.stream(),
             &mut |state| emit_hashed_state(&mut self.hashed_state_update_hook, state),
             self.base_block_reward,
-            self.block_number,
-            self.block_beneficiary,
+            block_number,
+            block_beneficiary,
             context.ommers,
             context.withdrawals,
         )
@@ -618,15 +561,8 @@ where
 
         let block_number = env.block.number.to::<u64>();
         self.inner.spec_id = env.spec.into();
-        self.inner.block_number = block_number;
-        self.inner.block_beneficiary = env.block.beneficiary;
         self.inner.base_block_reward = base_block_reward(self.chain_spec.as_ref(), block_number);
-        self.inner.parent_hash = segment.ctx.parent_hash;
-        self.inner.parent_beacon_block_root = segment.ctx.parent_beacon_block_root;
-        self.inner.ommers = segment.ctx.ommers;
-        self.inner.withdrawals = segment.ctx.withdrawals.clone();
-        self.inner.block_gas_limit = env.block.gas_limit.to::<u64>();
-        self.inner.tx_gas_limit_cap = env.version.tx_gas_limit_cap;
+        self.inner.ctx = segment.ctx.clone();
         self.inner.separate_block_gas = env.version.feature(evm2::EvmFeatures::EIP8037);
         self.inner.bal_index_offset = segment_idx as u64 * 2;
         self.inner.cumulative_gas_used = 0;
@@ -675,9 +611,9 @@ where
         self.inner.set_transaction_block_access_index();
         let context = EthBlockExecutor::<F::Types>::block_context(
             self.inner.deposit_contract_address,
-            self.inner.parent_hash,
-            self.inner.parent_beacon_block_root,
-            self.inner.ommers,
+            self.inner.ctx.parent_hash,
+            self.inner.ctx.parent_beacon_block_root,
+            self.inner.ctx.ommers,
             None,
         );
         let receipts = &self.inner.receipts[self.segment_receipt_start..];
@@ -693,22 +629,24 @@ where
         )
         .map_err(BlockExecutionError::from)?;
 
-        let withdrawals = self.inner.withdrawals.clone();
+        let withdrawals = self.inner.ctx.withdrawals.clone();
         let context = EthBlockExecutor::<F::Types>::block_context(
             self.inner.deposit_contract_address,
-            self.inner.parent_hash,
-            self.inner.parent_beacon_block_root,
-            self.inner.ommers,
+            self.inner.ctx.parent_hash,
+            self.inner.ctx.parent_beacon_block_root,
+            self.inner.ctx.ommers,
             withdrawals.as_deref(),
         );
+        let block_number = self.inner.evm.block_env().number.to::<u64>();
+        let block_beneficiary = self.inner.evm.block_env().beneficiary;
         post_block_balance_state_changes(
             &mut self.inner.evm,
             &mut self.inner.block_state,
             self.inner.hashed_state_mode.stream(),
             &mut |state| emit_hashed_state(&mut self.inner.hashed_state_update_hook, state),
             self.inner.base_block_reward,
-            self.inner.block_number,
-            self.inner.block_beneficiary,
+            block_number,
+            block_beneficiary,
             context.ommers,
             context.withdrawals,
         )
@@ -777,10 +715,8 @@ where
     type Primitives = EthPrimitives;
     type Evm = Evm<'a, F::Types>;
     type Transaction = EthTxEnv;
-    type TransactionResult = TxResult<F::Types>;
     type TransactionResultWithState = EthTransactionResultWithState<F::Types>;
     type BlockAccessList = Bal;
-    type TransactionOutput = GasOutput;
 
     fn evm(&self) -> &Self::Evm {
         self.inner.evm()
@@ -850,19 +786,6 @@ where
         Ok(())
     }
 
-    fn execute_transaction_with_commit_condition(
-        &mut self,
-        transaction: Self::Transaction,
-        f: impl FnOnce(&Self::TransactionResult) -> CommitChanges,
-    ) -> Result<Option<Self::TransactionOutput>, BlockExecutionError> {
-        self.initialize()?;
-        let output = self.inner.execute_transaction_with_commit_condition(transaction, f)?;
-        if output.is_some() {
-            self.after_committed_transaction()?;
-        }
-        Ok(output)
-    }
-
     fn execute_transaction_without_commit(
         &mut self,
         transaction: Self::Transaction,
@@ -874,7 +797,7 @@ where
     fn commit_transaction(
         &mut self,
         output: Self::TransactionResultWithState,
-    ) -> Result<Self::TransactionOutput, BlockExecutionError> {
+    ) -> Result<GasOutput, BlockExecutionError> {
         self.initialize()?;
         let output = self.inner.commit_transaction(output)?;
         self.after_committed_transaction()?;

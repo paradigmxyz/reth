@@ -57,9 +57,7 @@ use reth_ethereum_forks::EthereumHardforks;
 use reth_ethereum_primitives::Receipt;
 #[cfg(test)]
 use reth_ethereum_primitives::TransactionSigned;
-use reth_evm::{
-    BlockExecutionError, BlockValidationError, CommitChanges, EvmError, InvalidTxError,
-};
+use reth_evm::{BlockExecutionError, BlockValidationError, EvmError, InvalidTxError};
 #[cfg(test)]
 use reth_evm::{ReceiptBuilder, ReceiptBuilderCtx};
 #[cfg(test)]
@@ -708,60 +706,14 @@ pub(crate) fn execute_transaction<T: EvmTypes>(
 where
     T::Tx: Typed2718,
 {
-    execute_transaction_with_commit_condition(
+    let output = execute_transaction_without_commit(evm, transaction)?;
+    Ok(commit_detached_transaction(
         evm,
         block_state,
         stream_hashed_state,
         on_hashed_state_update,
-        transaction,
-        |_| CommitChanges::Yes,
-    )
-    .map(|outcome| outcome.expect("transaction is always committed"))
-}
-
-pub(crate) fn execute_transaction_with_commit_condition<T: EvmTypes>(
-    evm: &mut Evm<'_, T>,
-    block_state: &mut BlockStateAccumulator,
-    stream_hashed_state: bool,
-    on_hashed_state_update: &mut impl FnMut(HashedPostState),
-    transaction: &Recovered<T::Tx>,
-    should_commit: impl FnOnce(&TxResult<T>) -> CommitChanges,
-) -> Result<Option<TxResult<T>>, EthExecutionError>
-where
-    T::Tx: Typed2718,
-{
-    enum TransactionResolution<U: EvmTypes> {
-        Outcome(Option<TxResult<U>>),
-        DatabaseError(ErrorCode),
-        HandlerError(HandlerError),
-    }
-
-    let resolution = match evm.transact(transaction) {
-        Ok(executed) => {
-            if let Some(code) = executed.result().error_code {
-                let _ = executed.discard();
-                TransactionResolution::DatabaseError(code)
-            } else if !should_commit(executed.result()).should_commit() {
-                let _ = executed.discard();
-                TransactionResolution::<T>::Outcome(None)
-            } else {
-                let outcome = {
-                    let mut sink = RethStateSink::new(None, block_state, stream_hashed_state);
-                    let Ok(outcome) = executed.commit_with(&mut sink);
-                    sink.flush_streamed_hashed_state(on_hashed_state_update);
-                    outcome
-                };
-                TransactionResolution::<T>::Outcome(Some(outcome))
-            }
-        }
-        Err(err) => TransactionResolution::HandlerError(err),
-    };
-
-    match resolution {
-        TransactionResolution::Outcome(outcome) => Ok(outcome),
-        TransactionResolution::DatabaseError(code) => Err(map_db_error_code(evm, code)),
-        TransactionResolution::HandlerError(err) => Err(map_handler_error(evm, err)),
-    }
+        output,
+    ))
 }
 
 pub(crate) fn execute_transaction_without_commit<T: EvmTypes>(

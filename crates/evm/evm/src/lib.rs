@@ -41,10 +41,11 @@ mod aliases;
 pub use aliases::*;
 pub use execute::{
     BlockAssembler, BlockAssemblerInput, BlockBuilder, BlockBuilderOutcome, BlockExecutionError,
-    BlockExecutionOutput, BlockExecutor, BlockExecutorFactory, BlockValidationError, CommitChanges,
-    Evm, EvmError, ExecutableTxFor, ExecutableTxParts, Executor, ExecutorTx, FromRecoveredTx,
-    FromTxWithEncoded, GasOutput, InternalBlockExecutionError, IntoTxEnv, InvalidTxError,
-    ReceiptBuilder, ReceiptBuilderCtx, RecoveredTx, WithTxEnv,
+    BlockExecutionOutput, BlockExecutor, BlockExecutorFactory, BlockTransactionResult,
+    BlockValidationError, CommitChanges, Evm, EvmError, ExecutableTxFor, ExecutableTxParts,
+    Executor, ExecutorTx, FromRecoveredTx, FromTxWithEncoded, GasOutput,
+    InternalBlockExecutionError, IntoTxEnv, InvalidTxError, ReceiptBuilder, ReceiptBuilderCtx,
+    RecoveredTx, WithTxEnv,
 };
 pub use reth_execution_types::EvmState;
 
