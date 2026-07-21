@@ -1,6 +1,5 @@
 //! Txpool-driven state prewarming and immutable snapshot publication.
 
-mod cache;
 mod control;
 mod worker;
 
@@ -38,8 +37,8 @@ where
     P: BlockReader + StateProviderFactory + StateReader + Clone + Send + Sync + 'static,
     Evm: ConfigureEvm<Primitives = N> + 'static,
 {
-    /// Spawns the long-lived worker. Its mutable cache remains owned by this worker and is cleared
-    /// between heads without releasing map capacity.
+    /// Spawns the long-lived worker, which owns its mutable read cache and starts a fresh one for
+    /// each new head.
     pub(crate) fn spawn(
         runtime: &reth_tasks::Runtime,
         source: Arc<dyn Source<N>>,

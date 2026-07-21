@@ -101,12 +101,7 @@ mod tests {
     }
 
     fn snapshot(parent_hash: B256) -> Snapshot {
-        Snapshot::from_parts(
-            parent_hash,
-            Default::default(),
-            Default::default(),
-            Default::default(),
-        )
+        Snapshot::new(parent_hash, Default::default())
     }
 
     fn request_pause(

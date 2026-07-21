@@ -1,16 +1,15 @@
 use super::{
-    cache::Cache,
     control::{Command, Publication},
     Job, Source, Transactions,
 };
-use crate::tree::StateProviderDatabase;
+use crate::tree::{StateProviderDatabase, TxPoolPrewarmCacheSnapshot as Snapshot};
 use alloy_evm::Evm;
 use alloy_primitives::B256;
 use crossbeam_channel::{Receiver, RecvTimeoutError, TryRecvError};
 use reth_evm::ConfigureEvm;
 use reth_primitives_traits::NodePrimitives;
 use reth_provider::{BlockReader, StateProviderFactory, StateReader};
-use reth_revm::db::State;
+use reth_revm::{cached::CachedReads, db::State};
 use std::{
     sync::Arc,
     time::{Duration, Instant},
@@ -26,7 +25,7 @@ const HEAD_POLL_INTERVAL: Duration = Duration::from_millis(10);
 /// The txpool prewarming worker.
 ///
 /// A long-lived loop that speculatively executes the pool's best transactions on top of the
-/// current canonical state, recording every state read in a reusable [`Cache`]. Roughly every
+/// current canonical state, recording every state read in a [`CachedReads`]. Roughly every
 /// [`REFRESH_INTERVAL`] it publishes an immutable snapshot of that cache, which block validation
 /// and payload building use to seed their own caches.
 ///
@@ -50,9 +49,13 @@ where
     job: Option<(B256, Job<N, P, Evm>)>,
     /// Outstanding pauses; the worker only warms while this is zero.
     pauses: u64,
-    /// Read-through cache filled by execution. Retained across heads so map capacity is reused;
-    /// [`Cache::reset`] re-keys it when the parent changes.
-    cache: Cache,
+    /// Read-through cache filled by execution; replaced whenever the warmed parent changes.
+    cache: CachedReads,
+    /// Parent whose state the `cache` reads were collected against.
+    cache_parent: Option<B256>,
+    /// Cache entry counts as of the last publication. The cache only ever grows, so a change
+    /// means it holds unpublished reads.
+    published_entries: (usize, usize, usize),
     /// Live best-transactions iterator, tagged with the parent it was opened for.
     transactions: Option<(B256, Transactions<N>)>,
 }
@@ -76,7 +79,9 @@ where
             evm_config,
             job: None,
             pauses: 0,
-            cache: Cache::default(),
+            cache: CachedReads::default(),
+            cache_parent: None,
+            published_entries: (0, 0, 0),
             transactions: None,
         }
     }
@@ -97,8 +102,10 @@ where
                 continue
             }
 
-            if self.cache.parent_hash() != Some(parent_hash) {
-                self.cache.reset(parent_hash);
+            if self.cache_parent != Some(parent_hash) {
+                self.cache = CachedReads::default();
+                self.cache_parent = Some(parent_hash);
+                self.published_entries = (0, 0, 0);
                 debug!(
                     target: "engine::tree::txpool_prewarm",
                     ?parent_hash,
@@ -180,8 +187,9 @@ where
                 return BatchEnd::Rest
             }
         };
-        let state_provider = StateProviderDatabase::new(self.cache.state_provider(state_provider));
-        let mut state = State::builder().with_database(state_provider).build();
+        let mut state = State::builder()
+            .with_database(self.cache.as_db_mut(StateProviderDatabase::new(state_provider)))
+            .build();
         // The environment is the head block's own, not a predicted next-block one, and execution
         // is out of context by design: transaction viability is the pool's business, so nonce,
         // balance and (one-block-stale) basefee checks must not gate which state gets warmed.
@@ -208,15 +216,16 @@ where
     }
 
     /// Publishes a fresh snapshot if the cache gained reads since the last publication.
-    fn publish_snapshot_if_dirty(&self) {
-        if !self.cache.is_dirty() {
+    fn publish_snapshot_if_dirty(&mut self) {
+        let entries = entry_counts(&self.cache);
+        if entries == self.published_entries {
             return
         }
 
-        let snapshot = self.cache.snapshot();
-        let parent_hash = snapshot.parent_hash();
-        let (accounts, storage, bytecodes) = snapshot.entry_counts();
-        *self.publication.write() = Some(snapshot);
+        let parent_hash = self.cache_parent.expect("reads only accumulate after a cache reset");
+        *self.publication.write() = Some(Snapshot::new(parent_hash, Arc::new(self.cache.clone())));
+        self.published_entries = entries;
+        let (accounts, storage, bytecodes) = entries;
         debug!(
             target: "engine::tree::txpool_prewarm",
             ?parent_hash,
@@ -287,10 +296,19 @@ enum BatchEnd {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct ChannelDisconnected;
 
+/// Returns `(accounts, storage slots, bytecodes)` cached in `reads`.
+fn entry_counts(reads: &CachedReads) -> (usize, usize, usize) {
+    (
+        reads.accounts.len(),
+        reads.accounts.values().map(|account| account.storage.len()).sum(),
+        reads.contracts.len(),
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::{super::Transaction as PoolTransaction, *};
-    use crate::tree::{StateProviderBuilder, TxPoolPrewarmCacheSnapshot as Snapshot};
+    use crate::tree::StateProviderBuilder;
     use alloy_consensus::{transaction::Recovered, Signed, TxLegacy};
     use alloy_primitives::{Address, Signature, TxKind, U256};
     use crossbeam_channel::{bounded, unbounded, Sender};
