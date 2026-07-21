@@ -217,10 +217,10 @@ where
             // for all targets which might match this node.
             //
             // For example, given a branch 0xabc, with children at 0, 1, and 2, and targets:
-            // - key: 0xabc0, parent_path_len: Some(1)
-            // - key: 0xabc1, parent_path_len: Some(0)
-            // - key: 0xabc2, parent_path_len: Some(3) <-- current
-            // - key: 0xabc3, parent_path_len: Some(2)
+            // - key: 0xabc0, parent path length: 1
+            // - key: 0xabc1, parent path length: 0
+            // - key: 0xabc2, parent path length: 3 <-- current
+            // - key: 0xabc3, parent path length: 2
             //
             // When the branch node at 0xabc is visited it will be after the targets has iterated
             // forward to 0xabc2 (because all children will have been visited already). At this
@@ -228,7 +228,7 @@ where
             // the other targets would, so we need to check those as well.
             if lower.key_nibbles.starts_with(path) {
                 let is_below_parent = |target: &ProofV2Target| {
-                    target.parent_path_len.is_none_or(|len| path.len() > len as usize)
+                    target.parent.path_len().is_none_or(|len| path.len() > len)
                 };
                 return !check_parent_path ||
                     (is_below_parent(lower) ||
@@ -1303,7 +1303,7 @@ where
         target = TRACE_TARGET,
         level = "trace",
         skip_all,
-        fields(prefix=?sub_trie_targets.prefix),
+        fields(parent_prefix=?sub_trie_targets.parent_prefix),
     )]
     fn proof_subtrie<'a>(
         &mut self,
@@ -1312,6 +1312,7 @@ where
         hashed_cursor_state: &mut HashedCursorState<VE::DeferredEncoder>,
         sub_trie_targets: SubTrieTargets<'a>,
     ) -> Result<(), StateProofError> {
+        let sub_trie_prefix = sub_trie_targets.prefix();
         let sub_trie_upper_bound = sub_trie_targets.upper_bound();
 
         // Wrap targets into a `TargetsCursor`.  targets can be empty if we only want to calculate
@@ -1332,19 +1333,17 @@ where
         // `next_uncached_key_range`, which will be called in the loop below, expects the trie
         // cursor to have already been seeked. The trie cursor is forward-only, but exact sub-trie
         // chunks can overlap previous chunks, so reset it if this seek needs to move backwards.
-        if trie_cursor_state.needs_reset_before_seek(&sub_trie_targets.prefix) {
+        if trie_cursor_state.needs_reset_before_seek(&sub_trie_prefix) {
             trace!(target: TRACE_TARGET, "Resetting trie cursor before sub-trie");
             self.trie_cursor.reset();
             *trie_cursor_state = TrieCursorState::unseeked();
         }
 
         trace!(target: TRACE_TARGET, "Doing initial seek of trie cursor");
-        *trie_cursor_state = TrieCursorState::seeked(
-            sub_trie_targets.prefix,
-            self.trie_cursor_seek(sub_trie_targets.prefix)?,
-        );
+        *trie_cursor_state =
+            TrieCursorState::seeked(sub_trie_prefix, self.trie_cursor_seek(sub_trie_prefix)?);
 
-        if hashed_cursor_state.needs_reset_before_seek(&sub_trie_targets.prefix) {
+        if hashed_cursor_state.needs_reset_before_seek(&sub_trie_prefix) {
             trace!(target: TRACE_TARGET, "Resetting hashed cursor before sub-trie");
             self.hashed_cursor.reset();
             *hashed_cursor_state = HashedCursorState::unseeked();
@@ -1354,7 +1353,7 @@ where
         // visited, either via the hashed key cursor (`calculate_key_range`) or trie cursor
         // (`next_uncached_key_range`). If/when this becomes None then there are no further nodes
         // which could exist.
-        let mut uncalculated_lower_bound = Some(sub_trie_targets.prefix);
+        let mut uncalculated_lower_bound = Some(sub_trie_prefix);
 
         trace!(target: TRACE_TARGET, "Starting loop");
         loop {
@@ -1365,7 +1364,7 @@ where
             let Some((calc_lower_bound, calc_upper_bound)) = self.next_uncached_key_range(
                 &mut targets,
                 trie_cursor_state,
-                &sub_trie_targets.prefix,
+                &sub_trie_prefix,
                 sub_trie_upper_bound.as_ref(),
                 prev_uncalculated_lower_bound,
             )?
@@ -1387,7 +1386,7 @@ where
                 let msg = format!(
                     "next_uncached_key_range went backwards: calc_lower={calc_lower_bound:?} < \
                      prev_lower={prev_lower:?}, calc_upper={calc_upper_bound:?}, prefix={:?}",
-                    sub_trie_targets.prefix,
+                    sub_trie_prefix,
                 );
                 error!(target: TRACE_TARGET, "{msg}");
                 return Err(StateProofError::TrieInconsistency(msg));
@@ -1408,10 +1407,7 @@ where
             // If the hashed cursor is exhausted, or not within the range of the
             // sub-trie, then there are no more keys at all, meaning the trie couldn't possibly have
             // more data and we should complete computation.
-            if hashed_cursor_state
-                .path()
-                .is_none_or(|key| !key.starts_with(&sub_trie_targets.prefix))
-            {
+            if hashed_cursor_state.path().is_none_or(|key| !key.starts_with(&sub_trie_prefix)) {
                 break;
             }
 
@@ -1438,71 +1434,79 @@ where
         self.cached_branch_stack.clear();
 
         // We always pop the local root node off of the `child_stack` in order to empty it. If the
-        // caller already has the parent branch, compressed roots need to be rebased into a direct
-        // child of that parent before they can be revealed into the sparse trie.
+        // parent branch is already known, compressed roots need to be rebased into a direct child
+        // of that parent before they can be attached to it.
         trace!(
             target: TRACE_TARGET,
-            parent_path_len = ?sub_trie_targets.parent_path_len,
+            parent_prefix = ?sub_trie_targets.parent_prefix,
             child_stack_empty = self.child_stack.is_empty(),
             "Maybe retaining local root",
         );
-        match (sub_trie_targets.parent_path_len, self.child_stack.pop()) {
-            (None, None) => {
-                // If `child_stack` is empty it means there was no keys at all, retain an empty
-                // root node.
-                self.retained_proofs.push(ProofTrieNodeV2 {
-                    path: Nibbles::new(), // root path
-                    node: TrieNodeV2::EmptyRoot,
-                    masks: None,
-                });
+        // Either there was only a single leaf node placed on the child stack, or the final branch
+        // was popped off the branch stack and placed unencoded on the child stack. Either way the
+        // child stack will not have an RlpNode at this point.
+        let root_node = match self.child_stack.pop() {
+            Some(ProofTrieBranchChild::RlpNode(_)) => {
+                unreachable!("local root cannot be an encoded RLP node")
             }
-            (None, Some(root_node)) => {
-                // Encode and retain the root node.
+            root_node => root_node,
+        };
+
+        // A full-trie calculation always retains a root, using an empty root when traversal
+        // produced no root node.
+        let Some(parent_prefix) = sub_trie_targets.parent_prefix else {
+            let root_node = if let Some(root_node) = root_node {
                 self.rlp_encode_buf.clear();
-                let root_node =
-                    root_node.into_proof_trie_node(Nibbles::new(), &mut self.rlp_encode_buf)?;
-                self.retained_proofs.push(root_node);
-            }
-            (Some(_), None) => {
-                // An empty partial sub-trie has no node to attach below the known parent.
-            }
-            (Some(parent_path_len), Some(mut root_node)) => {
-                if matches!(&root_node, ProofTrieBranchChild::RlpNode(_)) {
-                    return Err(StateProofError::TrieInconsistency(
-                        "partial proof calculation produced an encoded local root".to_string(),
-                    ))
-                }
+                root_node.into_proof_trie_node(Nibbles::new(), &mut self.rlp_encode_buf)?
+            } else {
+                ProofTrieNodeV2::empty()
+            };
+            self.retained_proofs.push(root_node);
+            return Ok(())
+        };
 
-                let parent_path_len = parent_path_len as usize;
-                let root_short_key = *root_node.short_key();
-                if root_short_key.len() < parent_path_len {
-                    return Err(StateProofError::TrieInconsistency(format!(
-                        "local root short key {:?} is shorter than parent path length {}",
-                        root_short_key, parent_path_len,
-                    )))
-                }
+        // If there's no root node then the subtrie has no keys, return nothing.
+        let Some(mut root_node) = root_node else { return Ok(()) };
 
-                if root_short_key.len() > parent_path_len {
-                    // The parent branch edge is represented by the first nibble after the parent
-                    // path. Keep that nibble in the proof path and trim it from the node's short
-                    // key so the returned node is directly attachable below the parent.
-                    let child_path = root_short_key.slice_unchecked(0, parent_path_len + 1);
-                    if sub_trie_targets
-                        .targets
-                        .iter()
-                        .any(|target| target.key_nibbles.starts_with(&child_path))
-                    {
-                        root_node.trim_short_key_prefix(parent_path_len + 1);
-                        self.rlp_encode_buf.clear();
-                        let root_node =
-                            root_node.into_proof_trie_node(child_path, &mut self.rlp_encode_buf)?;
-                        self.retained_proofs.push(root_node);
-                    }
-                }
-                // If the short key is exactly the parent path, this local root reconstructed the
-                // already-revealed parent branch. Its targeted children were retained normally.
-            }
+        let root_short_key = *root_node.short_key();
+
+        // An exact match reconstructed the already-revealed parent; its targeted children were
+        // retained while that parent branch was popped.
+        if root_short_key == parent_prefix {
+            return Ok(())
         }
+
+        // At this point we have a "root" node which the calculator has based at 0x (empty path),
+        // but the subtrie targets indicate that there is a known parent branch at parent_prefix
+        // which this root should be rebased onto.
+
+        // The local root of a partial calculation must be at or below its known parent.
+        if !root_short_key.starts_with(&parent_prefix) {
+            return Err(StateProofError::TrieInconsistency(format!(
+                "local root short key {root_short_key:?} does not start with parent prefix \
+                 {parent_prefix:?}",
+            )))
+        }
+
+        // Keep the parent branch's child nibble in the proof path so the local root attaches
+        // directly below that parent.
+        let child_path_len = parent_prefix.len() + 1;
+        let child_path = root_short_key.slice_unchecked(0, child_path_len);
+
+        // It's possible that the local root lies on a child which is not targeted.
+        if !sub_trie_targets
+            .targets
+            .iter()
+            .any(|target| target.key_nibbles.starts_with(&child_path))
+        {
+            return Ok(())
+        }
+
+        // Retain the requested child with only the path below its parent edge in the short key.
+        root_node.trim_short_key_prefix(child_path_len);
+        self.rlp_encode_buf.clear();
+        let root_node = root_node.into_proof_trie_node(child_path, &mut self.rlp_encode_buf)?;
+        self.retained_proofs.push(root_node);
 
         Ok(())
     }
@@ -1618,11 +1622,7 @@ where
         let mut hashed_cursor_state = HashedCursorState::unseeked();
 
         static EMPTY_TARGETS: [ProofV2Target; 0] = [];
-        let sub_trie_targets = SubTrieTargets {
-            prefix: Nibbles::new(),
-            targets: &EMPTY_TARGETS,
-            parent_path_len: None,
-        };
+        let sub_trie_targets = SubTrieTargets { parent_prefix: None, targets: &EMPTY_TARGETS };
 
         if let Err(err) = self.proof_subtrie(
             value_encoder,
@@ -1688,7 +1688,7 @@ where
 
         // Shortcut: check if storage is empty
         if self.hashed_cursor.is_storage_empty()? {
-            return Ok(if targets.iter().any(|target| target.parent_path_len.is_none()) {
+            return Ok(if targets.iter().any(|target| !target.parent.is_known()) {
                 vec![ProofTrieNodeV2 {
                     path: Nibbles::default(),
                     node: TrieNodeV2::EmptyRoot,
@@ -1928,7 +1928,9 @@ mod tests {
     use alloy_rlp::Decodable;
     use alloy_trie::proof::AddedRemovedKeys;
     use itertools::Itertools;
-    use reth_trie_common::{prefix_set::PrefixSetMut, ProofTrieNode, TrieNode, EMPTY_ROOT_HASH};
+    use reth_trie_common::{
+        prefix_set::PrefixSetMut, ProofTrieNode, ProofV2TargetParent, TrieNode, EMPTY_ROOT_HASH,
+    };
     use std::collections::BTreeMap;
 
     /// Converts legacy proofs to V2 proofs by combining extension nodes with their child branch
@@ -1954,7 +1956,7 @@ mod tests {
         node: &ProofTrieNodeV2,
         target: &ProofV2Target,
     ) -> Option<ProofTrieNodeV2> {
-        let Some(parent_path_len) = target.parent_path_len.map(usize::from) else {
+        let Some(parent_path_len) = target.parent.path_len() else {
             return target.key_nibbles.starts_with(&node.path).then(|| node.clone())
         };
 
@@ -2186,7 +2188,7 @@ mod tests {
             Some(harness.original_root())
         );
 
-        let target = ProofV2Target::new(slot_a).with_parent_path_len(Some(3));
+        let target = ProofV2Target::new(slot_a).with_parent(ProofV2TargetParent::new(3));
         let mut actual_targets = [target];
         let actual = calculator.storage_proof(hashed_address, &mut actual_targets).unwrap();
         let mut expected_targets = [target];
@@ -2234,8 +2236,13 @@ mod tests {
                         0u8..16u8,
                     )
                         .prop_map(|(key, encoded_parent_path_len)| {
-                            ProofV2Target::new(key)
-                                .with_parent_path_len(encoded_parent_path_len.checked_sub(1))
+                            let parent = encoded_parent_path_len.checked_sub(1).map_or(
+                                ProofV2TargetParent::NONE,
+                                |parent_path_len| {
+                                    ProofV2TargetParent::new(usize::from(parent_path_len))
+                                },
+                            );
+                            ProofV2Target::new(key).with_parent(parent)
                         }),
                     count,
                 )
@@ -2278,7 +2285,7 @@ mod tests {
         ]);
         let targets = [
             ProofV2Target::new(B256::ZERO),
-            ProofV2Target::new(slot_80).with_parent_path_len(Some(1)),
+            ProofV2Target::new(slot_80).with_parent(ProofV2TargetParent::new(1)),
         ];
 
         let harness = ProofTestHarness::new(storage);
@@ -2290,7 +2297,7 @@ mod tests {
         let slot = B256::right_padding_from(&[0xae, 0xd4, 0x09]);
         let slot_nibbles = Nibbles::unpack(slot);
         let harness = ProofTestHarness::new(BTreeMap::from([(slot, U256::from(1))]));
-        let mut targets = [ProofV2Target::new(slot).with_parent_path_len(Some(3))];
+        let mut targets = [ProofV2Target::new(slot).with_parent(ProofV2TargetParent::new(3))];
 
         let (proof, root) = harness.proof_v2(&mut targets);
 
@@ -2308,7 +2315,7 @@ mod tests {
         let slot = B256::repeat_byte(0xae);
         let slot_nibbles = Nibbles::unpack(slot);
         let harness = ProofTestHarness::new(BTreeMap::from([(slot, U256::from(1))]));
-        let mut targets = [ProofV2Target::new(slot).with_parent_path_len(Some(63))];
+        let mut targets = [ProofV2Target::new(slot).with_parent(ProofV2TargetParent::new(63))];
 
         let (proof, root) = harness.proof_v2(&mut targets);
 
@@ -2326,8 +2333,10 @@ mod tests {
         let slot = B256::right_padding_from(&[0x20]);
         let slot_nibbles = Nibbles::unpack(slot);
         let harness = ProofTestHarness::new(BTreeMap::from([(slot, U256::from(1))]));
-        let mut targets =
-            [ProofV2Target::new(slot), ProofV2Target::new(slot).with_parent_path_len(Some(0))];
+        let mut targets = [
+            ProofV2Target::new(slot),
+            ProofV2Target::new(slot).with_parent(ProofV2TargetParent::new(0)),
+        ];
 
         let (proof, root) = harness.proof_v2(&mut targets);
 
@@ -2354,7 +2363,7 @@ mod tests {
             (slot_a, U256::from(1)),
             (slot_b, U256::from(2)),
         ]));
-        let mut targets = [ProofV2Target::new(slot_a).with_parent_path_len(Some(3))];
+        let mut targets = [ProofV2Target::new(slot_a).with_parent(ProofV2TargetParent::new(3))];
 
         let (proof, root) = harness.proof_v2(&mut targets);
 
@@ -2378,7 +2387,7 @@ mod tests {
             (slot_a, U256::from(1)),
             (slot_b, U256::from(2)),
         ]));
-        let mut targets = [ProofV2Target::new(slot_a).with_parent_path_len(Some(3))];
+        let mut targets = [ProofV2Target::new(slot_a).with_parent(ProofV2TargetParent::new(3))];
 
         let (proof, root) = harness.proof_v2(&mut targets);
 
@@ -2394,12 +2403,13 @@ mod tests {
         let other_child_target = B256::right_padding_from(&[0xae, 0xd5]);
         let harness = ProofTestHarness::new(BTreeMap::from([(stored_slot, U256::from(1))]));
 
-        let mut same_child = [ProofV2Target::new(same_child_target).with_parent_path_len(Some(3))];
+        let mut same_child =
+            [ProofV2Target::new(same_child_target).with_parent(ProofV2TargetParent::new(3))];
         let (proof, _) = harness.proof_v2(&mut same_child);
         assert_eq!(proof.len(), 1, "divergent leaf proves absence below the same child");
 
         let mut other_child =
-            [ProofV2Target::new(other_child_target).with_parent_path_len(Some(3))];
+            [ProofV2Target::new(other_child_target).with_parent(ProofV2TargetParent::new(3))];
         let (proof, _) = harness.proof_v2(&mut other_child);
         assert!(proof.is_empty(), "a different direct child is unrelated to the target");
     }
@@ -2409,7 +2419,8 @@ mod tests {
         let harness = ProofTestHarness::new(BTreeMap::new());
         let slot = B256::ZERO;
 
-        let mut partial_target = [ProofV2Target::new(slot).with_parent_path_len(Some(0))];
+        let mut partial_target =
+            [ProofV2Target::new(slot).with_parent(ProofV2TargetParent::new(0))];
         let (partial_proof, partial_root) = harness.proof_v2(&mut partial_target);
         assert!(partial_proof.is_empty());
         assert!(partial_root.is_none());
