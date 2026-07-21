@@ -650,11 +650,7 @@ impl HashedPostStateSorted {
         }
 
         // Large k: k-way merge.
-        let accounts = kway_merge_sorted(
-            items.iter().map(|item| item.as_ref().accounts.iter().map(|(key, value)| (key, value))),
-        )
-        .map(|(key, value)| (*key, *value))
-        .collect();
+        let accounts = kway_merge_sorted(items.iter().map(|i| i.as_ref().accounts.as_slice()));
 
         struct StorageAcc<'a> {
             wiped: bool,
@@ -687,14 +683,7 @@ impl HashedPostStateSorted {
         let storages = acc
             .into_iter()
             .map(|(addr, entry)| {
-                let storage_slots = kway_merge_sorted(
-                    entry
-                        .slices
-                        .into_iter()
-                        .map(|slice| slice.iter().map(|(key, value)| (key, value))),
-                )
-                .map(|(key, value)| (*key, *value))
-                .collect();
+                let storage_slots = kway_merge_sorted(entry.slices);
                 (addr, HashedStorageSorted { wiped: entry.wiped, storage_slots })
             })
             .collect();
@@ -773,13 +762,7 @@ impl HashedStorageSorted {
 
         let wipe_idx = updates.iter().position(|u| u.wiped);
         let relevant = wipe_idx.map_or(&updates[..], |idx| &updates[..=idx]);
-        let storage_slots = kway_merge_sorted(
-            relevant
-                .iter()
-                .map(|update| update.storage_slots.iter().map(|(key, value)| (key, value))),
-        )
-        .map(|(key, value)| (*key, *value))
-        .collect();
+        let storage_slots = kway_merge_sorted(relevant.iter().map(|u| u.storage_slots.as_slice()));
 
         Self { wiped: wipe_idx.is_some(), storage_slots }
     }

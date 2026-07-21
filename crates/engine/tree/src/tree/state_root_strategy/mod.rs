@@ -70,7 +70,6 @@ use reth_provider::{
 use reth_tasks::utils::increase_thread_priority;
 use reth_trie::{
     hashed_cursor::HashedCursorFactory,
-    kway_merge_sorted,
     prefix_set::{PrefixSet, TriePrefixSets},
     trie_cursor::TrieCursorFactory,
     updates::TrieUpdates,
@@ -799,14 +798,14 @@ fn sparse_trie_retained_paths<N: NodePrimitives>(
     let (account_prefix_set, storage_prefix_sets) = join(
         || {
             PrefixSet::from(
-                kway_merge_sorted(
-                    account_slices
-                        .into_iter()
-                        .map(|slice| slice.iter().map(|(address, _)| (*address, ()))),
-                )
-                .map(|(address, ())| address)
-                .merge(storage_addresses)
-                .dedup(),
+                account_slices
+                    .into_iter()
+                    .map(|slice| slice.iter().map(|(address, _)| address))
+                    .kmerge()
+                    .dedup()
+                    .copied()
+                    .merge(storage_addresses)
+                    .dedup(),
             )
         },
         || {
@@ -817,15 +816,15 @@ fn sparse_trie_retained_paths<N: NodePrimitives>(
                         PrefixSet::all_paths()
                     } else {
                         PrefixSet::from(
-                            kway_merge_sorted(
-                                entry
-                                    .first
-                                    .iter()
-                                    .copied()
-                                    .chain(entry.rest.iter().copied())
-                                    .map(|slice| slice.iter().map(|(slot, _)| (*slot, ()))),
-                            )
-                            .map(|(slot, ())| slot),
+                            entry
+                                .first
+                                .iter()
+                                .copied()
+                                .chain(entry.rest.iter().copied())
+                                .map(|slice| slice.iter().map(|(slot, _)| slot))
+                                .kmerge()
+                                .dedup()
+                                .copied(),
                         )
                     };
                     (*address, prefix_set)

@@ -82,7 +82,6 @@ pub mod added_removed_keys;
 
 /// Utilities used by other modules in this crate.
 mod utils;
-pub use utils::kway_merge_sorted;
 
 /// Bincode-compatible serde implementations for trie types.
 ///
