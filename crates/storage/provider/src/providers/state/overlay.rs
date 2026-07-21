@@ -224,24 +224,6 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
         self
     }
 
-    /// Extends the existing hashed state overlay with the given [`HashedPostStateSorted`].
-    ///
-    /// If no overlay exists, creates an immediate overlay with the given state.
-    pub fn with_extended_hashed_state_overlay(mut self, other: HashedPostStateSorted) -> Self {
-        match &mut self.overlay_source {
-            Some(OverlaySource::Immediate { state, .. }) => {
-                Arc::make_mut(state).extend_ref_and_sort(&other);
-            }
-            Some(OverlaySource::Managed { .. }) | None => {
-                self.overlay_source = Some(OverlaySource::Immediate {
-                    trie: Arc::new(TrieUpdatesSorted::default()),
-                    state: Arc::new(other),
-                });
-            }
-        }
-        self
-    }
-
     /// Resolves the effective overlay (trie updates, hashed state).
     fn resolve_overlays(
         &self,
@@ -591,13 +573,6 @@ impl<F, N: NodePrimitives> OverlayStateProviderFactory<F, N> {
     pub fn with_skip_overlay_for_reused_sparse_trie(mut self, anchor_hash: B256) -> Self {
         self.overlay_builder =
             self.overlay_builder.with_skip_overlay_for_reused_sparse_trie(anchor_hash);
-        self.overlay_cache = Default::default();
-        self
-    }
-
-    /// Extends the existing hashed state overlay with the given [`HashedPostStateSorted`].
-    pub fn with_extended_hashed_state_overlay(mut self, other: HashedPostStateSorted) -> Self {
-        self.overlay_builder = self.overlay_builder.with_extended_hashed_state_overlay(other);
         self.overlay_cache = Default::default();
         self
     }
