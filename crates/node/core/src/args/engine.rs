@@ -292,8 +292,7 @@ pub struct EngineArgs {
     #[arg(long = "engine.persistence-threshold", default_value_t = DefaultEngineValues::get_global().persistence_threshold)]
     pub persistence_threshold: u64,
 
-    /// Configure the maximum number of blocks beyond the in-memory buffer target that may await
-    /// persistence before engine API processing stalls.
+    /// Configure the maximum canonical-minus-persisted gap before engine API processing stalls.
     ///
     /// If omitted, this defaults to the larger of the default backpressure threshold and twice
     /// `--engine.persistence-threshold`.
@@ -682,8 +681,6 @@ mod tests {
         let default_args = EngineArgs::default();
         let args = CommandParser::<EngineArgs>::parse_from(["reth"]).args;
         assert_eq!(args, default_args);
-        assert_eq!(args.persistence_threshold, 7);
-        assert_eq!(args.memory_block_buffer_target, 5);
         assert_eq!(
             args.persistence_backpressure_threshold(),
             DefaultEngineValues::get_global().persistence_backpressure_threshold
