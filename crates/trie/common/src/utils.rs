@@ -6,7 +6,7 @@ use itertools::Itertools;
 ///
 /// Callers pass iterators in priority order (index 0 = highest priority), so the first
 /// iterator's value for a key takes precedence over later iterators.
-pub(crate) fn kway_merge_sorted<K, V, I, J>(iterators: I) -> impl Iterator<Item = (K, V)>
+pub fn kway_merge_sorted<K, V, I, J>(iterators: I) -> impl Iterator<Item = (K, V)>
 where
     K: Ord,
     I: IntoIterator<Item = J>,

@@ -59,21 +59,6 @@ impl TriePrefixSetsMut {
         }
     }
 
-    /// Returns a `TriePrefixSets` without sorting or deduplicating the contained prefix sets.
-    ///
-    /// The caller must ensure that every prefix set is already sorted and deduplicated.
-    pub fn freeze_unchecked(self) -> TriePrefixSets {
-        TriePrefixSets {
-            account_prefix_set: self.account_prefix_set.freeze_unchecked(),
-            storage_prefix_sets: self
-                .storage_prefix_sets
-                .into_iter()
-                .map(|(hashed_address, prefix_set)| (hashed_address, prefix_set.freeze_unchecked()))
-                .collect(),
-            destroyed_accounts: self.destroyed_accounts,
-        }
-    }
-
     /// Clears the prefix sets and destroyed accounts map.
     pub fn clear(&mut self) {
         self.destroyed_accounts.clear();
@@ -109,8 +94,8 @@ pub struct TriePrefixSets {
 /// sorted and unique keys produced by `freeze()`; it does not perform additional sorting or
 /// deduplication.
 ///
-/// [`PrefixSetMut::freeze`] guarantees that the resulting set is sorted and deduplicated.
-/// [`PrefixSetMut::freeze_unchecked`] instead relies on the caller to uphold that invariant.
+/// This guarantees that a `PrefixSet` constructed from a `PrefixSetMut` is always sorted and
+/// deduplicated.
 /// # Examples
 ///
 /// ```
@@ -208,22 +193,13 @@ impl PrefixSetMut {
     ///
     /// If not yet sorted, the elements will be sorted and deduplicated.
     pub fn freeze(mut self) -> PrefixSet {
-        if !self.all {
+        if self.all {
+            PrefixSet { index: 0, all: true, keys: Arc::new(Vec::new()) }
+        } else {
             self.keys.sort_unstable();
             self.keys.dedup();
             // Shrink after deduplication to release unused capacity.
             self.keys.shrink_to_fit();
-        }
-        self.freeze_unchecked()
-    }
-
-    /// Returns a `PrefixSet` without sorting or deduplicating its keys.
-    ///
-    /// The caller must ensure that the keys are already sorted and deduplicated.
-    pub fn freeze_unchecked(self) -> PrefixSet {
-        if self.all {
-            PrefixSet { index: 0, all: true, keys: Arc::new(Vec::new()) }
-        } else {
             PrefixSet { index: 0, all: false, keys: Arc::new(self.keys) }
         }
     }
@@ -273,6 +249,11 @@ where
 }
 
 impl PrefixSet {
+    /// Creates a prefix set that considers every path changed.
+    pub fn all_paths() -> Self {
+        Self { index: 0, all: true, keys: Arc::new(Vec::new()) }
+    }
+
     /// Returns `true` if any of the keys in the set has the given prefix
     ///
     /// # Note on Mutability
@@ -458,43 +439,6 @@ mod tests {
         assert!(!prefix_set.contains(&Nibbles::from_nibbles_unchecked([7, 8])));
         assert_eq!(prefix_set.keys.len(), 3); // Length should be 3 (excluding duplicate)
         assert_eq!(prefix_set.keys.capacity(), 3); // Capacity should be 3 after shrinking
-    }
-
-    #[test]
-    fn test_freeze_unchecked_preserves_capacity() {
-        let first = Nibbles::from_nibbles([1, 2, 3]);
-        let second = Nibbles::from_nibbles([1, 2, 4]);
-        let mut prefix_set_mut = PrefixSetMut::with_capacity(101);
-        prefix_set_mut.insert(second);
-        prefix_set_mut.insert(first);
-        prefix_set_mut.insert(second);
-
-        let prefix_set = prefix_set_mut.freeze_unchecked();
-
-        assert_eq!(prefix_set.slice(), &[second, first, second]);
-        assert_eq!(prefix_set.keys.capacity(), 101);
-    }
-
-    #[test]
-    fn test_trie_prefix_sets_freeze_unchecked() {
-        let account_path = Nibbles::from_nibbles([1, 2]);
-        let storage_path = Nibbles::from_nibbles([3, 4]);
-        let storage_account = B256::with_last_byte(1);
-        let destroyed_account = B256::with_last_byte(2);
-        let prefix_sets = TriePrefixSetsMut {
-            account_prefix_set: PrefixSetMut::from([account_path]),
-            storage_prefix_sets: B256Map::from_iter([(
-                storage_account,
-                PrefixSetMut::from([storage_path]),
-            )]),
-            destroyed_accounts: B256Set::from_iter([destroyed_account]),
-        };
-
-        let frozen = prefix_sets.freeze_unchecked();
-
-        assert_eq!(frozen.account_prefix_set.slice(), &[account_path]);
-        assert_eq!(frozen.storage_prefix_sets[&storage_account].slice(), &[storage_path]);
-        assert!(frozen.destroyed_accounts.contains(&destroyed_account));
     }
 
     #[test]

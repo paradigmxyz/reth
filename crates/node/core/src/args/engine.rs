@@ -7,10 +7,8 @@ use clap::{
 use eyre::ensure;
 use reth_cli_util::{parse_duration_from_secs_or_ms, parsers::format_duration_as_secs_or_ms};
 use reth_engine_primitives::{
-    default_persistence_backpressure_threshold, TreeConfig,
-    DEFAULT_INVALID_HEADER_HIT_EVICTION_THRESHOLD, DEFAULT_MULTIPROOF_TASK_CHUNK_SIZE,
-    DEFAULT_NUM_STATE_MASKING_BLOCKS, DEFAULT_SPARSE_TRIE_MAX_HOT_ACCOUNTS,
-    DEFAULT_SPARSE_TRIE_MAX_HOT_SLOTS,
+    TreeConfig, DEFAULT_INVALID_HEADER_HIT_EVICTION_THRESHOLD, DEFAULT_MULTIPROOF_TASK_CHUNK_SIZE,
+    DEFAULT_NUM_STATE_MASKING_BLOCKS, DEFAULT_PERSISTENCE_BACKPRESSURE_THRESHOLD,
 };
 use std::{sync::OnceLock, time::Duration};
 
@@ -28,7 +26,7 @@ static ENGINE_DEFAULTS: OnceLock<DefaultEngineValues> = OnceLock::new();
 #[derive(Debug, Clone)]
 pub struct DefaultEngineValues {
     persistence_threshold: u64,
-    persistence_backpressure_threshold: Option<u64>,
+    persistence_backpressure_threshold: u64,
     num_state_masking_blocks: u64,
     memory_block_buffer_target: u64,
     invalid_header_hit_eviction_threshold: u8,
@@ -48,8 +46,6 @@ pub struct DefaultEngineValues {
     account_worker_count: Option<usize>,
     prewarming_threads: Option<usize>,
     cache_metrics_disabled: bool,
-    sparse_trie_max_hot_slots: usize,
-    sparse_trie_max_hot_accounts: usize,
     slow_block_threshold: Option<Duration>,
     disable_sparse_trie_cache_pruning: bool,
     state_root_task_timeout: Option<String>,
@@ -77,20 +73,9 @@ impl DefaultEngineValues {
         self
     }
 
-    /// Get the default persistence backpressure threshold.
-    pub const fn persistence_backpressure_threshold(&self) -> u64 {
-        match self.persistence_backpressure_threshold {
-            Some(v) => v,
-            None => default_persistence_backpressure_threshold(
-                self.persistence_threshold,
-                self.memory_block_buffer_target,
-            ),
-        }
-    }
-
     /// Set the default persistence backpressure threshold
     pub const fn with_persistence_backpressure_threshold(mut self, v: u64) -> Self {
-        self.persistence_backpressure_threshold = Some(v);
+        self.persistence_backpressure_threshold = v;
         self
     }
 
@@ -211,18 +196,6 @@ impl DefaultEngineValues {
         self
     }
 
-    /// Set the LFU hot-slot capacity for sparse trie pruning by default
-    pub const fn with_sparse_trie_max_hot_slots(mut self, v: usize) -> Self {
-        self.sparse_trie_max_hot_slots = v;
-        self
-    }
-
-    /// Set the LFU hot-account capacity for sparse trie pruning by default
-    pub const fn with_sparse_trie_max_hot_accounts(mut self, v: usize) -> Self {
-        self.sparse_trie_max_hot_accounts = v;
-        self
-    }
-
     /// Set the default slow block threshold.
     pub const fn with_slow_block_threshold(mut self, v: Option<Duration>) -> Self {
         self.slow_block_threshold = v;
@@ -276,7 +249,7 @@ impl Default for DefaultEngineValues {
     fn default() -> Self {
         Self {
             persistence_threshold: DEFAULT_PERSISTENCE_THRESHOLD,
-            persistence_backpressure_threshold: None,
+            persistence_backpressure_threshold: DEFAULT_PERSISTENCE_BACKPRESSURE_THRESHOLD,
             num_state_masking_blocks: DEFAULT_NUM_STATE_MASKING_BLOCKS,
             memory_block_buffer_target: DEFAULT_MEMORY_BLOCK_BUFFER_TARGET,
             invalid_header_hit_eviction_threshold: DEFAULT_INVALID_HEADER_HIT_EVICTION_THRESHOLD,
@@ -296,8 +269,6 @@ impl Default for DefaultEngineValues {
             account_worker_count: None,
             prewarming_threads: None,
             cache_metrics_disabled: false,
-            sparse_trie_max_hot_slots: DEFAULT_SPARSE_TRIE_MAX_HOT_SLOTS,
-            sparse_trie_max_hot_accounts: DEFAULT_SPARSE_TRIE_MAX_HOT_ACCOUNTS,
             slow_block_threshold: None,
             disable_sparse_trie_cache_pruning: false,
             state_root_task_timeout: Some("4s".to_string()),
@@ -308,6 +279,12 @@ impl Default for DefaultEngineValues {
             bal_parallel_state_root_disabled: false,
         }
     }
+}
+
+fn default_persistence_backpressure_threshold(persistence_threshold: u64) -> u64 {
+    DefaultEngineValues::get_global()
+        .persistence_backpressure_threshold
+        .max(persistence_threshold.saturating_mul(2))
 }
 
 /// Parameters for configuring the engine driver.
@@ -323,11 +300,11 @@ pub struct EngineArgs {
     #[arg(long = "engine.persistence-threshold", default_value_t = DefaultEngineValues::get_global().persistence_threshold)]
     pub persistence_threshold: u64,
 
-    /// Configure the maximum canonical-minus-persisted gap before engine API processing stalls.
+    /// Configure the maximum number of blocks beyond the in-memory buffer target that may await
+    /// persistence before engine API processing stalls.
     ///
-    /// If omitted, this is derived from `--engine.persistence-threshold` and
-    /// `--engine.memory-block-buffer-target`, unless the process configured an explicit global
-    /// default.
+    /// If omitted, this defaults to the larger of the default backpressure threshold and twice
+    /// `--engine.persistence-threshold`.
     ///
     /// This value must be greater than `--engine.persistence-threshold`.
     #[arg(long = "engine.persistence-backpressure-threshold")]
@@ -456,14 +433,6 @@ pub struct EngineArgs {
     #[arg(long = "engine.disable-cache-metrics", default_value_t = DefaultEngineValues::get_global().cache_metrics_disabled)]
     pub cache_metrics_disabled: bool,
 
-    /// LFU hot-slot capacity: max storage slots retained across sparse trie prune cycles.
-    #[arg(long = "engine.sparse-trie-max-hot-slots", alias = "engine.sparse-trie-max-storage-tries", default_value_t = DefaultEngineValues::get_global().sparse_trie_max_hot_slots)]
-    pub sparse_trie_max_hot_slots: usize,
-
-    /// LFU hot-account capacity: max account addresses retained across sparse trie prune cycles.
-    #[arg(long = "engine.sparse-trie-max-hot-accounts", default_value_t = DefaultEngineValues::get_global().sparse_trie_max_hot_accounts)]
-    pub sparse_trie_max_hot_accounts: usize,
-
     /// Configure the slow block logging threshold in milliseconds.
     ///
     /// When set, blocks that take longer than this threshold to execute will be logged
@@ -590,8 +559,6 @@ impl Default for EngineArgs {
             account_worker_count,
             prewarming_threads,
             cache_metrics_disabled,
-            sparse_trie_max_hot_slots,
-            sparse_trie_max_hot_accounts,
             slow_block_threshold,
             disable_sparse_trie_cache_pruning,
             state_root_task_timeout,
@@ -628,8 +595,6 @@ impl Default for EngineArgs {
             account_worker_count,
             prewarming_threads,
             cache_metrics_disabled,
-            sparse_trie_max_hot_slots,
-            sparse_trie_max_hot_accounts,
             slow_block_threshold,
             disable_sparse_trie_cache_pruning,
             state_root_task_timeout: state_root_task_timeout
@@ -650,14 +615,9 @@ impl Default for EngineArgs {
 impl EngineArgs {
     /// Returns the effective persistence backpressure threshold.
     pub fn persistence_backpressure_threshold(&self) -> u64 {
-        self.persistence_backpressure_threshold
-            .or(DefaultEngineValues::get_global().persistence_backpressure_threshold)
-            .unwrap_or_else(|| {
-                default_persistence_backpressure_threshold(
-                    self.persistence_threshold,
-                    self.memory_block_buffer_target,
-                )
-            })
+        self.persistence_backpressure_threshold.unwrap_or_else(|| {
+            default_persistence_backpressure_threshold(self.persistence_threshold)
+        })
     }
 
     /// Validates cross-field engine arguments.
@@ -670,7 +630,8 @@ impl EngineArgs {
             self.persistence_threshold
         );
         ensure!(
-            self.num_state_masking_blocks + self.memory_block_buffer_target < self.persistence_threshold,
+            self.num_state_masking_blocks == 0 ||
+                self.num_state_masking_blocks + self.memory_block_buffer_target < self.persistence_threshold,
             "--engine.num-state-masking-blocks ({}) + --engine.memory-block-buffer-target ({}) must be less than --engine.persistence-threshold ({})",
             self.num_state_masking_blocks,
             self.memory_block_buffer_target,
@@ -692,8 +653,8 @@ impl EngineArgs {
         let config = TreeConfig::default()
             .with_persistence_backpressure_threshold(self.persistence_backpressure_threshold())
             .with_persistence_threshold(self.persistence_threshold)
-            .with_num_state_masking_blocks(self.num_state_masking_blocks)
             .with_memory_block_buffer_target(self.memory_block_buffer_target)
+            .with_num_state_masking_blocks(self.num_state_masking_blocks)
             .with_invalid_header_hit_eviction_threshold(self.invalid_header_hit_eviction_threshold)
             .without_state_cache(self.state_cache_disabled)
             .without_prewarming(self.prewarming_disabled)
@@ -709,8 +670,6 @@ impl EngineArgs {
             )
             .with_unwind_canonical_header(self.allow_unwind_canonical_header)
             .without_cache_metrics(self.cache_metrics_disabled)
-            .with_sparse_trie_max_hot_slots(self.sparse_trie_max_hot_slots)
-            .with_sparse_trie_max_hot_accounts(self.sparse_trie_max_hot_accounts)
             .with_slow_block_threshold(self.slow_block_threshold)
             .with_disable_sparse_trie_cache_pruning(self.disable_sparse_trie_cache_pruning)
             .with_state_root_task_timeout(self.state_root_task_timeout.filter(|d| !d.is_zero()))
@@ -747,9 +706,11 @@ mod tests {
         let default_args = EngineArgs::default();
         let args = CommandParser::<EngineArgs>::parse_from(["reth"]).args;
         assert_eq!(args, default_args);
+        assert_eq!(args.persistence_threshold, 7);
+        assert_eq!(args.memory_block_buffer_target, 5);
         assert_eq!(
             args.persistence_backpressure_threshold(),
-            DefaultEngineValues::get_global().persistence_backpressure_threshold()
+            DefaultEngineValues::get_global().persistence_backpressure_threshold
         );
     }
 
@@ -764,12 +725,12 @@ mod tests {
         ])
         .args;
 
-        assert_eq!(args.persistence_backpressure_threshold(), 300);
+        assert_eq!(args.persistence_backpressure_threshold(), 200);
 
         let tree_config = args.tree_config();
         assert_eq!(tree_config.persistence_threshold(), 100);
         assert_eq!(tree_config.memory_block_buffer_target(), 50);
-        assert_eq!(tree_config.persistence_backpressure_threshold(), 300);
+        assert_eq!(tree_config.persistence_backpressure_threshold(), 200);
     }
 
     #[test]
@@ -783,7 +744,7 @@ mod tests {
 
         assert_eq!(
             args.persistence_backpressure_threshold(),
-            DefaultEngineValues::get_global().persistence_backpressure_threshold()
+            DefaultEngineValues::get_global().persistence_backpressure_threshold
         );
     }
 
@@ -804,25 +765,6 @@ mod tests {
     }
 
     #[test]
-    fn default_engine_values_derive_backpressure_threshold() {
-        let defaults = DefaultEngineValues::default()
-            .with_persistence_threshold(10)
-            .with_memory_block_buffer_target(3);
-
-        assert_eq!(defaults.persistence_backpressure_threshold(), 26);
-    }
-
-    #[test]
-    fn explicit_backpressure_default_override_is_preserved() {
-        let defaults = DefaultEngineValues::default()
-            .with_persistence_backpressure_threshold(99)
-            .with_persistence_threshold(10)
-            .with_memory_block_buffer_target(3);
-
-        assert_eq!(defaults.persistence_backpressure_threshold(), 99);
-    }
-
-    #[test]
     fn engine_args_default_thresholds_match_expected_defaults() {
         let args = EngineArgs::default();
 
@@ -832,10 +774,7 @@ mod tests {
         assert_eq!(args.persistence_backpressure_threshold, None);
         assert_eq!(
             args.persistence_backpressure_threshold(),
-            default_persistence_backpressure_threshold(
-                args.persistence_threshold,
-                args.memory_block_buffer_target,
-            )
+            DEFAULT_PERSISTENCE_BACKPRESSURE_THRESHOLD
         );
     }
 
@@ -869,8 +808,6 @@ mod tests {
             account_worker_count: Some(8),
             prewarming_threads: Some(4),
             cache_metrics_disabled: true,
-            sparse_trie_max_hot_slots: 100,
-            sparse_trie_max_hot_accounts: 500,
             slow_block_threshold: None,
             disable_sparse_trie_cache_pruning: true,
             state_root_task_timeout: Some(Duration::from_secs(2)),
@@ -919,10 +856,6 @@ mod tests {
             "--engine.prewarming-threads",
             "4",
             "--engine.disable-cache-metrics",
-            "--engine.sparse-trie-max-hot-slots",
-            "100",
-            "--engine.sparse-trie-max-hot-accounts",
-            "500",
             "--engine.disable-sparse-trie-cache-pruning",
             "--engine.state-root-task-timeout",
             "2s",
@@ -941,6 +874,8 @@ mod tests {
             "reth",
             "--engine.persistence-threshold",
             "8",
+            "--engine.memory-block-buffer-target",
+            "0",
             "--engine.num-state-masking-blocks",
             "7",
         ])
@@ -987,6 +922,19 @@ mod tests {
         assert!(err.contains("engine.num-state-masking-blocks"));
         assert!(err.contains("engine.memory-block-buffer-target"));
         assert!(err.contains("engine.persistence-threshold"));
+    }
+
+    #[test]
+    fn validate_allows_zero_persistence_threshold_when_masking_is_disabled() {
+        let args = EngineArgs {
+            persistence_threshold: 0,
+            num_state_masking_blocks: 0,
+            memory_block_buffer_target: 0,
+            ..EngineArgs::default()
+        };
+
+        args.validate().unwrap();
+        assert_eq!(args.tree_config().persistence_threshold(), 0);
     }
 
     #[test]

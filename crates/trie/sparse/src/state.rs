@@ -1,9 +1,6 @@
 #[cfg(feature = "trie-debug")]
 use crate::debug_recorder::TrieDebugRecorder;
-use crate::{
-    lfu::BucketedLfu, traits::SparseTrie as SparseTrieTrait, ArenaParallelSparseTrie,
-    RevealableSparseTrie,
-};
+use crate::{traits::SparseTrie as SparseTrieTrait, ArenaParallelSparseTrie, RevealableSparseTrie};
 use alloc::vec::Vec;
 use alloy_primitives::{map::B256Map, B256};
 use either::Either;
@@ -43,10 +40,6 @@ pub struct SparseStateTrie<
     retain_updates: bool,
     /// Holds data that should be dropped after final state root is calculated.
     deferred_drops: DeferredDrops,
-    /// Global LFU tracker for hot `(address, slot)` storage entries.
-    hot_slots_lfu: BucketedLfu<HotSlotKey>,
-    /// Global LFU tracker for hot account entries.
-    hot_accounts_lfu: BucketedLfu<B256>,
     /// Metrics for the sparse state trie.
     #[cfg(feature = "metrics")]
     metrics: crate::metrics::SparseStateTrieMetrics,
@@ -63,8 +56,6 @@ where
             storage: Default::default(),
             retain_updates: false,
             deferred_drops: DeferredDrops::default(),
-            hot_slots_lfu: BucketedLfu::default(),
-            hot_accounts_lfu: BucketedLfu::default(),
             #[cfg(feature = "metrics")]
             metrics: Default::default(),
         }
@@ -88,25 +79,6 @@ impl<A, S> SparseStateTrie<A, S> {
     /// Set the retention of branch node updates and deletions.
     pub const fn with_updates(mut self, retain_updates: bool) -> Self {
         self.set_updates(retain_updates);
-        self
-    }
-
-    /// Seeds the hot account/storage LFU caches with their configured capacities.
-    ///
-    /// This must happen before the first `record_*_touch` call, otherwise touches are ignored while
-    /// the LFUs still have zero capacity.
-    pub fn set_hot_cache_capacities(&mut self, max_hot_slots: usize, max_hot_accounts: usize) {
-        self.hot_slots_lfu.decay_and_evict(max_hot_slots);
-        self.hot_accounts_lfu.decay_and_evict(max_hot_accounts);
-    }
-
-    /// Seeds the hot account/storage LFU caches with their configured capacities.
-    pub fn with_hot_cache_capacities(
-        mut self,
-        max_hot_slots: usize,
-        max_hot_accounts: usize,
-    ) -> Self {
-        self.set_hot_cache_capacities(max_hot_slots, max_hot_accounts);
         self
     }
 
@@ -200,18 +172,6 @@ where
         };
 
         trie.find_leaf(&path, None).is_ok()
-    }
-
-    /// Records a storage slot access/update in the global LFU tracker.
-    #[inline]
-    pub fn record_slot_touch(&mut self, account: B256, slot: B256) {
-        self.hot_slots_lfu.touch(HotSlotKey { address: account, slot });
-    }
-
-    /// Records an account access/update in the global LFU tracker.
-    #[inline]
-    pub fn record_account_touch(&mut self, account: B256) {
-        self.hot_accounts_lfu.touch(account);
     }
 
     /// Returns reference to bytes representing leaf value for the target account.
@@ -638,13 +598,6 @@ impl<S: SparseTrieTrait + Clone> StorageTries<S> {
     }
 }
 
-/// Key for identifying a storage slot in the global LFU cache.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-struct HotSlotKey {
-    address: B256,
-    slot: B256,
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -811,23 +764,6 @@ mod tests {
     }
 
     #[test]
-    fn seeded_hot_cache_capacities_record_first_cycle_touches() {
-        let account = b256!("0x1000000000000000000000000000000000000000000000000000000000000000");
-        let slot = b256!("0x2000000000000000000000000000000000000000000000000000000000000000");
-        let mut sparse = SparseStateTrie::<ArenaParallelSparseTrie>::default();
-
-        sparse.set_hot_cache_capacities(1, 1);
-        sparse.record_account_touch(account);
-        sparse.record_slot_touch(account, slot);
-
-        assert_eq!(sparse.hot_accounts_lfu.keys().copied().collect::<Vec<_>>(), vec![account]);
-        assert_eq!(
-            sparse.hot_slots_lfu.keys().copied().collect::<Vec<_>>(),
-            vec![HotSlotKey { address: account, slot }]
-        );
-    }
-
-    #[test]
     fn prune_keeps_retained_paths_overlay_account_and_storage() {
         let mut sparse = SparseStateTrie::<ArenaParallelSparseTrie>::default();
 
@@ -835,7 +771,6 @@ mod tests {
         let hot_account =
             b256!("0x1000000000000000000000000000000000000000000000000000000000000000");
         let slot = B256::ZERO;
-        let hot_slot = B256::ZERO;
         let account_path = leaf_key([0x0], 64);
         let storage_path = leaf_key([0x0], 64);
 
@@ -899,10 +834,6 @@ mod tests {
             LeafUpdate::Changed(alloy_rlp::encode(trie_account)),
         );
         sparse.root().unwrap();
-        sparse.set_hot_cache_capacities(1, 1);
-        sparse.record_account_touch(hot_account);
-        sparse.record_slot_touch(hot_account, hot_slot);
-
         let mut retained_paths = TriePrefixSetsMut::default();
         retained_paths.account_prefix_set.insert(Nibbles::unpack(account));
         retained_paths
@@ -910,7 +841,7 @@ mod tests {
             .entry(account)
             .or_default()
             .insert(Nibbles::unpack(slot));
-        sparse.prune(retained_paths.freeze_unchecked());
+        sparse.prune(retained_paths.freeze());
 
         assert!(matches!(
             sparse.state_trie_ref().unwrap().find_leaf(&account_path, None),
