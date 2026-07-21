@@ -11,7 +11,7 @@ use alloy_primitives::{Address, TxKind, U256};
 use alloy_rpc_types_eth::{request::TransactionInputError, TransactionInfo, TransactionRequest};
 use core::error;
 use dyn_clone::DynClone;
-use evm2::ethereum::RecoveredTxEnvelope;
+use evm2::ethereum::{RecoveredTxEnvelope, TxEnvelope};
 use reth_evm::{ConfigureEvm, EvmEnv, EvmEnvFor, TxEnvFor};
 use reth_primitives_traits::{
     BlockTy, HeaderTy, NodePrimitives, SealedBlock, SealedHeader, SealedHeaderFor, TransactionMeta,
@@ -433,46 +433,51 @@ fn transaction_request_to_evm2(
     let gas_price = gas_price.saturating_to();
     let max_priority_fee_per_gas = max_priority_fee_per_gas.unwrap_or_default().saturating_to();
 
-    Ok(match tx_type {
-        TxType::Legacy => RecoveredTxEnvelope::Legacy(Recovered::new_unchecked(
-            TxLegacy { chain_id: Some(chain_id), nonce, gas_price, gas_limit, to, value, input },
-            caller,
-        )),
-        TxType::Eip2930 => RecoveredTxEnvelope::Eip2930(Recovered::new_unchecked(
-            TxEip2930 { chain_id, nonce, gas_price, gas_limit, to, value, access_list, input },
-            caller,
-        )),
-        TxType::Eip1559 => RecoveredTxEnvelope::Eip1559(Recovered::new_unchecked(
-            TxEip1559 {
-                chain_id,
-                nonce,
-                gas_limit,
-                max_fee_per_gas: gas_price,
-                max_priority_fee_per_gas,
-                to,
-                value,
-                access_list,
-                input,
-            },
-            caller,
-        )),
-        TxType::Eip4844 => RecoveredTxEnvelope::Eip4844(Recovered::new_unchecked(
-            TxEip4844Variant::TxEip4844(TxEip4844 {
-                chain_id,
-                nonce,
-                gas_limit,
-                max_fee_per_gas: gas_price,
-                max_priority_fee_per_gas,
-                to: to.to().copied().ok_or(EthTxEnvError::BlobTransactionIsCreate)?,
-                value,
-                access_list,
-                blob_versioned_hashes: blob_versioned_hashes.unwrap_or_default(),
-                max_fee_per_blob_gas: max_fee_per_blob_gas.unwrap_or_default().saturating_to(),
-                input,
-            }),
-            caller,
-        )),
-        TxType::Eip7702 => RecoveredTxEnvelope::from(Recovered::new_unchecked(
+    let tx = match tx_type {
+        TxType::Legacy => TxEnvelope::Legacy(TxLegacy {
+            chain_id: Some(chain_id),
+            nonce,
+            gas_price,
+            gas_limit,
+            to,
+            value,
+            input,
+        }),
+        TxType::Eip2930 => TxEnvelope::Eip2930(TxEip2930 {
+            chain_id,
+            nonce,
+            gas_price,
+            gas_limit,
+            to,
+            value,
+            access_list,
+            input,
+        }),
+        TxType::Eip1559 => TxEnvelope::Eip1559(TxEip1559 {
+            chain_id,
+            nonce,
+            gas_limit,
+            max_fee_per_gas: gas_price,
+            max_priority_fee_per_gas,
+            to,
+            value,
+            access_list,
+            input,
+        }),
+        TxType::Eip4844 => TxEnvelope::Eip4844(TxEip4844Variant::TxEip4844(TxEip4844 {
+            chain_id,
+            nonce,
+            gas_limit,
+            max_fee_per_gas: gas_price,
+            max_priority_fee_per_gas,
+            to: to.to().copied().ok_or(EthTxEnvError::BlobTransactionIsCreate)?,
+            value,
+            access_list,
+            blob_versioned_hashes: blob_versioned_hashes.unwrap_or_default(),
+            max_fee_per_blob_gas: max_fee_per_blob_gas.unwrap_or_default().saturating_to(),
+            input,
+        })),
+        TxType::Eip7702 => TxEnvelope::Eip7702(
             TxEip7702 {
                 chain_id,
                 nonce,
@@ -484,10 +489,11 @@ fn transaction_request_to_evm2(
                 access_list,
                 authorization_list: authorization_list.unwrap_or_default(),
                 input,
-            },
-            caller,
-        )),
-    })
+            }
+            .into(),
+        ),
+    };
+    Ok(Recovered::new_unchecked(tx, caller))
 }
 
 /// Converts rpc transaction requests into transaction environment using a closure.

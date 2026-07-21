@@ -22,11 +22,11 @@ use crate::{
 
 /// Factory used to construct an evm2-backed EVM.
 ///
-/// The transaction type defaults to Ethereum's recovered envelope so the standard block
+/// The transaction type defaults to Ethereum's envelope so the standard block
 /// executor remains ergonomic. Custom-node integrations can select a different evm2 transaction
 /// type by implementing `EvmFactory<CustomTx>` and using that factory with their own executor and
 /// primitives.
-pub trait EvmFactory<Tx = evm2::ethereum::RecoveredTxEnvelope>:
+pub trait EvmFactory<Tx = evm2::ethereum::TxEnvelope>:
     Clone + core::fmt::Debug + Send + Sync + Unpin + 'static
 where
     <Self::Types as evm2::EvmTypesHost>::BlockEnvExt: Send + Sync,
@@ -160,7 +160,7 @@ where
     type Primitives = EthPrimitives;
     type EvmFactory = F;
     type EvmTypes = F::Types;
-    type EvmTransaction = evm2::ethereum::RecoveredTxEnvelope;
+    type EvmTransaction = evm2::ethereum::TxEnvelope;
     type Transaction = EthTxEnv;
     type Evm<'a> = evm2::Evm<'a, F::Types>;
     type EvmEnv = EthEvmEnv<F::Types>;
@@ -360,7 +360,7 @@ where
     type Primitives = EthPrimitives;
     type EvmFactory = F;
     type EvmTypes = F::Types;
-    type EvmTransaction = evm2::ethereum::RecoveredTxEnvelope;
+    type EvmTransaction = evm2::ethereum::TxEnvelope;
     type Transaction = EthTxEnv;
     type Evm<'a> = evm2::Evm<'a, F::Types>;
     type EvmEnv = EthEvmEnv<F::Types>;

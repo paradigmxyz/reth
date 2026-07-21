@@ -10,7 +10,7 @@ use alloy_rpc_types_engine::ExecutionData;
 use evm2::{env::BlockEnv, ethereum::RecoveredTxEnvelope, SpecId};
 use reth_chainspec::EthereumHardforks;
 use reth_ethereum_primitives::TransactionSigned;
-use reth_evm::{ExecutableTxParts, FromTxWithEncoded, RecoveredTx};
+use reth_evm::{ExecutableTxParts, FromRecoveredTx, FromTxWithEncoded, RecoveredTx};
 
 /// Map the latest active Ethereum hardfork at `timestamp` or `block_number` to a [`SpecId`].
 pub(crate) fn spec_id_by_timestamp_and_block_number<C>(
@@ -141,6 +141,12 @@ impl From<Recovered<TransactionSigned>> for EthTxEnv {
     }
 }
 
+impl FromRecoveredTx<TransactionSigned> for EthTxEnv {
+    fn from_recovered_tx(tx: Recovered<TransactionSigned>) -> Self {
+        tx.into()
+    }
+}
+
 impl FromTxWithEncoded<TransactionSigned> for EthTxEnv {}
 
 /// Recovered Ethereum transaction paired with its cached transaction environment.
@@ -178,7 +184,7 @@ impl ExecutableTxParts<EthTxEnv, TransactionSigned> for ExecutableRecoveredTx {
 
 /// Converts an owned recovered Reth Ethereum transaction into a recovered envelope.
 pub(crate) fn recovered_tx_envelope(tx: Recovered<TransactionSigned>) -> RecoveredTxEnvelope {
-    tx.into()
+    tx.convert()
 }
 
 #[cfg(test)]

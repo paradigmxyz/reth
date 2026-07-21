@@ -14,6 +14,7 @@
 #![allow(missing_docs, clippy::missing_const_for_fn)]
 #![warn(unused_crate_dependencies)]
 
+use alloy_consensus::transaction::Recovered;
 use alloy_eips::eip2718::Typed2718;
 use alloy_genesis::Genesis;
 use alloy_primitives::{Address, Bytes, U256};
@@ -108,12 +109,15 @@ fn custom_precompile() -> HandlerResult<()> {
         InMemoryDB::default(),
         factory.precompiles(spec),
     );
-    let result = evm.transact(&CustomEnvelope::ExecuteCode(ExecuteCodeTx {
-        caller: Address::ZERO,
-        target,
-        code: code.into(),
-        gas_limit: 100_000,
-    }))?;
+    let tx = Recovered::new_unchecked(
+        CustomEnvelope::ExecuteCode(ExecuteCodeTx {
+            target,
+            code: code.into(),
+            gas_limit: 100_000,
+        }),
+        Address::ZERO,
+    );
+    let result = evm.transact(&tx)?;
     let status = result.result().status;
     drop(result);
     assert!(status);
@@ -149,12 +153,20 @@ fn custom_transaction() -> HandlerResult<()> {
     let mut database = InMemoryDB::default();
     database.insert_account_info(&target, AccountInfo::default().with_nonce(1));
     let mut evm = custom_evm_with_database(database);
-    let tx = CustomEnvelope::ExecuteCode(ExecuteCodeTx {
-        caller: Address::ZERO,
-        target,
-        gas_limit: 100_000,
-        code: Bytes::from_static(&[opcode::CUSTOM_OPCODE, op::PUSH1, 0x01, op::SSTORE, op::STOP]),
-    });
+    let tx = Recovered::new_unchecked(
+        CustomEnvelope::ExecuteCode(ExecuteCodeTx {
+            target,
+            gas_limit: 100_000,
+            code: Bytes::from_static(&[
+                opcode::CUSTOM_OPCODE,
+                op::PUSH1,
+                0x01,
+                op::SSTORE,
+                op::STOP,
+            ]),
+        }),
+        Address::ZERO,
+    );
 
     let result = evm.transact(&tx)?.commit();
     assert!(result.status);
@@ -192,21 +204,23 @@ fn custom_wire_transaction() -> HandlerResult<()> {
     let recovered = recover_wire_transaction(decoded).unwrap();
     let caller = recovered.signer();
     let evm_tx = into_evm_transaction(recovered);
-    let CustomEnvelope::ExecuteCode(tx) = evm_tx;
-    assert_eq!(tx.caller, caller);
+    assert_eq!(evm_tx.signer(), caller);
+    let CustomEnvelope::ExecuteCode(tx) = evm_tx.inner();
     assert_eq!(tx.target, Address::from([0xcc; 20]));
     assert_eq!(tx.code, Bytes::from_static(&[op::STOP]));
     println!("custom wire transaction: type=0x{:02x} roundtrip=true", WireTx::tx_type());
     Ok(())
 }
 
-fn custom_opcode_tx(code: Bytes) -> CustomEnvelope {
-    CustomEnvelope::ExecuteCode(ExecuteCodeTx {
-        caller: Address::ZERO,
-        target: Address::from([0xcc; 20]),
-        code,
-        gas_limit: 100_000,
-    })
+fn custom_opcode_tx(code: Bytes) -> Recovered<CustomEnvelope> {
+    Recovered::new_unchecked(
+        CustomEnvelope::ExecuteCode(ExecuteCodeTx {
+            target: Address::from([0xcc; 20]),
+            code,
+            gas_limit: 100_000,
+        }),
+        Address::ZERO,
+    )
 }
 
 fn custom_evm() -> Evm<'static, CustomTypes> {

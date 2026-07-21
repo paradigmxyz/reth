@@ -3,7 +3,7 @@
 use crate::{ConfigureEvm, Database, DynDatabase, EvmEnv, TxFor};
 use alloc::{boxed::Box, format, sync::Arc, vec::Vec};
 use alloy_consensus::{
-    transaction::{Either, Recovered},
+    transaction::{Either, Recovered, Transaction as AlloyTransaction},
     BlockHeader as _, Header, TxReceipt,
 };
 use alloy_eip7928::{compute_block_access_list_hash, BlockAccessIndex, BlockAccessList};
@@ -139,18 +139,18 @@ pub trait Evm {
     /// Runtime EVM type family.
     type EvmTypes: evm2::EvmTypes<Tx = Self::Transaction>;
     /// Transaction environment consumed by this EVM.
-    type Transaction: evm2::ethereum::TransactionExt;
+    type Transaction: AlloyTransaction;
 
     /// Executes a transaction without committing its state changes.
     fn transact(
         &mut self,
-        transaction: &Self::Transaction,
+        transaction: &Recovered<Self::Transaction>,
     ) -> Result<evm2::TxResultWithState<Self::EvmTypes>, BlockExecutionError>;
 
     /// Executes a transaction with an inspector without committing its state changes.
     fn transact_with_inspector<I>(
         &mut self,
-        transaction: &Self::Transaction,
+        transaction: &Recovered<Self::Transaction>,
         inspector: I,
     ) -> Result<(I, evm2::TxResultWithState<Self::EvmTypes>), BlockExecutionError>
     where
@@ -183,7 +183,7 @@ pub trait Evm {
     /// `sink`.
     fn transact_and_discard<S>(
         &mut self,
-        transaction: &Self::Transaction,
+        transaction: &Recovered<Self::Transaction>,
         sink: &mut S,
     ) -> Result<(), BlockExecutionError>
     where
@@ -191,15 +191,13 @@ pub trait Evm {
         S::Error: Debug;
 }
 
-impl<'a, T: evm2::EvmTypes<Tx: Typed2718 + evm2::ethereum::TransactionExt>> Evm
-    for evm2::Evm<'a, T>
-{
+impl<'a, T: evm2::EvmTypes<Tx: Typed2718 + AlloyTransaction>> Evm for evm2::Evm<'a, T> {
     type EvmTypes = T;
     type Transaction = T::Tx;
 
     fn transact(
         &mut self,
-        transaction: &Self::Transaction,
+        transaction: &Recovered<Self::Transaction>,
     ) -> Result<evm2::TxResultWithState<T>, BlockExecutionError> {
         let resolution = transaction_resolution(evm2::Evm::transact(self, transaction));
         resolve_transaction(self, resolution)
@@ -207,7 +205,7 @@ impl<'a, T: evm2::EvmTypes<Tx: Typed2718 + evm2::ethereum::TransactionExt>> Evm
 
     fn transact_with_inspector<I: evm2::Inspector<T> + 'a>(
         &mut self,
-        transaction: &Self::Transaction,
+        transaction: &Recovered<Self::Transaction>,
         inspector: I,
     ) -> Result<(I, evm2::TxResultWithState<T>), BlockExecutionError> {
         // TODO(dani): use either `&mut Inspector` or `clear_inspector_as`.
@@ -255,7 +253,7 @@ impl<'a, T: evm2::EvmTypes<Tx: Typed2718 + evm2::ethereum::TransactionExt>> Evm
 
     fn transact_and_discard<S>(
         &mut self,
-        transaction: &Self::Transaction,
+        transaction: &Recovered<Self::Transaction>,
         sink: &mut S,
     ) -> Result<(), BlockExecutionError>
     where
@@ -437,7 +435,7 @@ pub trait BlockExecutorFactory {
     /// Transaction environment consumed by the configured EVM instance.
     type EvmTypes: evm2::EvmTypes<Tx = Self::EvmTransaction, TxResultExt: Send>;
     /// Transaction environment consumed by the configured EVM instance.
-    type EvmTransaction: evm2::ethereum::TransactionExt;
+    type EvmTransaction: AlloyTransaction;
     /// Transaction environment consumed by executors from this factory.
     type Transaction: Debug + Clone + Send + Sync + 'static;
     /// EVM instance consumed by executors from this factory.
@@ -1314,12 +1312,12 @@ pub trait FromRecoveredTx<T> {
     fn from_recovered_tx(tx: Recovered<T>) -> Self;
 }
 
-impl<T, TxEnv> FromRecoveredTx<T> for TxEnv
+impl<T, TxEnv> FromRecoveredTx<T> for Recovered<TxEnv>
 where
-    TxEnv: From<Recovered<T>>,
+    TxEnv: From<T>,
 {
     fn from_recovered_tx(tx: Recovered<T>) -> Self {
-        tx.into()
+        tx.convert()
     }
 }
 

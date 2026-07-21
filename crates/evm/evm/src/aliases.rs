@@ -1,6 +1,7 @@
 //! Helper aliases when working with [`ConfigureEvm`] and the traits in this crate.
 
 use crate::{execute::BlockExecutorFactory, ConfigureEvm};
+use alloy_consensus::transaction::Recovered;
 
 /// Helper to access the configured EVM factory state.
 pub type EvmFactoryFor<Evm> =
@@ -23,8 +24,9 @@ pub type EvmTypesFor<Evm> =
 pub type TxResultWithStateFor<Evm> = evm2::TxResultWithState<EvmTypesFor<Evm>>;
 
 /// Type alias for the configured transaction environment.
-pub type TxEnvFor<Evm> =
-    <<Evm as ConfigureEvm>::BlockExecutorFactory as BlockExecutorFactory>::EvmTransaction;
+pub type TxEnvFor<Evm> = Recovered<
+    <<Evm as ConfigureEvm>::BlockExecutorFactory as BlockExecutorFactory>::EvmTransaction,
+>;
 
 /// Type alias for the transaction consumed by the configured block executor.
 pub type TxFor<Evm> =

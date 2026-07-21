@@ -5,7 +5,10 @@ use super::{LoadBlock, LoadPendingBlock, LoadState, LoadTransaction, SpawnBlocki
 use crate::{
     helpers::estimate::EstimateCall, FromEvmError, FullEthApiTypes, RpcBlock, RpcNodeCore,
 };
-use alloy_consensus::{transaction::TxHashRef, BlockHeader};
+use alloy_consensus::{
+    transaction::{Transaction, TxHashRef},
+    BlockHeader,
+};
 use alloy_eips::{eip1559::calc_effective_gas_price, eip2930::AccessListResult};
 use alloy_network::TransactionBuilder;
 use alloy_primitives::{Bytes, B256, U256};
@@ -14,10 +17,7 @@ use alloy_rpc_types_eth::{
     state::{EvmOverrides, StateOverride},
     BlockId, Bundle, EthCallResponse, StateContext, TransactionInfo,
 };
-use evm2::{
-    ethereum::TransactionExt,
-    evm::{CacheDB, DynDatabase, StateChangeSink, StateChangeSource},
-};
+use evm2::evm::{CacheDB, DynDatabase, StateChangeSink, StateChangeSource};
 use evm2_inspectors::{access_list::AccessListInspector, transfer::TransferInspector};
 use futures::Future;
 use reth_chainspec::{ChainSpecProvider, EthChainSpec, EthereumHardforks};
@@ -565,7 +565,7 @@ pub trait Call:
         tx_env: &TxEnvFor<Self::Evm>,
     ) -> Result<u64, Self::Error> {
         let balance = db
-            .get_account(&tx_env.caller())
+            .get_account(&tx_env.signer())
             .map_err(Into::into)
             .map_err(Self::Error::from_eth_err)?
             .map(|account| account.balance)

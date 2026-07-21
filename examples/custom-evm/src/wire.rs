@@ -210,13 +210,17 @@ pub fn recover_wire_transaction(
 }
 
 /// Converts a recovered wire transaction into the evm2 transaction registry envelope.
-pub fn into_evm_transaction(transaction: Recovered<SignedCustomTransaction>) -> CustomEnvelope {
+pub fn into_evm_transaction(
+    transaction: Recovered<SignedCustomTransaction>,
+) -> Recovered<CustomEnvelope> {
     let (transaction, caller) = transaction.into_parts();
     let tx = transaction.strip_signature();
-    CustomEnvelope::ExecuteCode(ExecuteCodeTx {
+    Recovered::new_unchecked(
+        CustomEnvelope::ExecuteCode(ExecuteCodeTx {
+            target: tx.target,
+            code: tx.code,
+            gas_limit: tx.gas_limit,
+        }),
         caller,
-        target: tx.target,
-        code: tx.code,
-        gas_limit: tx.gas_limit,
-    })
+    )
 }

@@ -13,10 +13,12 @@ use alloc::{
     vec::Vec,
 };
 #[cfg(test)]
-use alloy_consensus::transaction::Recovered;
-#[cfg(test)]
 use alloy_consensus::TxType;
-use alloy_consensus::{constants::ETH_TO_WEI, transaction::Transaction, BlockHeader, Header};
+use alloy_consensus::{
+    constants::ETH_TO_WEI,
+    transaction::{Recovered, Transaction},
+    BlockHeader, Header,
+};
 use alloy_eips::{
     eip2718::Typed2718,
     eip4895::Withdrawal,
@@ -470,10 +472,7 @@ where
 }
 
 pub(crate) fn transaction_blob_gas_used(transaction: &RecoveredTxEnvelope) -> u64 {
-    transaction
-        .as_eip4844()
-        .map(|tx| tx.inner().blob_gas_used().unwrap_or_default())
-        .unwrap_or_default()
+    transaction.as_eip4844().map(|tx| tx.blob_gas_used().unwrap_or_default()).unwrap_or_default()
 }
 
 /// Hooks invoked while executing an Ethereum block.
@@ -704,7 +703,7 @@ pub(crate) fn execute_transaction<T: EvmTypes>(
     block_state: &mut BlockStateAccumulator,
     stream_hashed_state: bool,
     on_hashed_state_update: &mut impl FnMut(HashedPostState),
-    transaction: &T::Tx,
+    transaction: &Recovered<T::Tx>,
 ) -> Result<TxResult<T>, EthExecutionError>
 where
     T::Tx: Typed2718,
@@ -725,7 +724,7 @@ pub(crate) fn execute_transaction_with_commit_condition<T: EvmTypes>(
     block_state: &mut BlockStateAccumulator,
     stream_hashed_state: bool,
     on_hashed_state_update: &mut impl FnMut(HashedPostState),
-    transaction: &T::Tx,
+    transaction: &Recovered<T::Tx>,
     should_commit: impl FnOnce(&TxResult<T>) -> CommitChanges,
 ) -> Result<Option<TxResult<T>>, EthExecutionError>
 where
@@ -767,7 +766,7 @@ where
 
 pub(crate) fn execute_transaction_without_commit<T: EvmTypes>(
     evm: &mut Evm<'_, T>,
-    transaction: &T::Tx,
+    transaction: &Recovered<T::Tx>,
 ) -> Result<TxResultWithState<T>, EthExecutionError>
 where
     T::Tx: Typed2718,
