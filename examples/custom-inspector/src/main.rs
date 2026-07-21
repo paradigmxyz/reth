@@ -39,7 +39,7 @@ fn main() {
             // get an instance of the `eth_` API handler
             let eth_api = node.rpc_registry.eth_api().clone();
 
-            println!("Spawning inspect task!");
+            println!("Spawning trace task!");
 
             // Spawn an async block to listen for transactions.
             node.task_executor.spawn_task(async move {
@@ -51,6 +51,7 @@ fn main() {
                     if let Some(recipient) = tx.to() &&
                         args.is_match(&recipient)
                     {
+                        // convert the pool transaction
                         let call_request =
                             TransactionRequest::from_recovered_transaction(tx.to_consensus());
                         let inspect_api = eth_api.clone();
@@ -60,19 +61,26 @@ fn main() {
                                 BlockNumberOrTag::Latest.into(),
                                 EvmOverrides::default(),
                                 move |db, evm_env, tx_env| {
-                                    let mut inspector = DummyInspector::default();
-                                    inspect_api.inspect(db, evm_env, &tx_env, &mut inspector)?;
-                                    Ok(inspector)
+                                    let mut dummy_inspector = DummyInspector::default();
+                                    // execute the transaction on a blocking task and await the
+                                    // inspector result
+                                    inspect_api.inspect(
+                                        db,
+                                        evm_env,
+                                        &tx_env,
+                                        &mut dummy_inspector,
+                                    )?;
+                                    Ok(dummy_inspector)
                                 },
                             )
                             .await;
 
-                        if let Ok(inspector) = result {
+                        if let Ok(ret_val) = result {
                             let hash = tx.hash();
                             println!(
-                                "Inspector result for transaction {}:\n{}",
+                                "Inspector result for transaction {}: \n {}",
                                 hash,
-                                inspector.ret_val.join("\n")
+                                ret_val.ret_val.join("\n")
                             );
                         }
                     }
@@ -99,13 +107,17 @@ impl RethCliTxpoolExt {
     }
 }
 
-/// A dummy inspector that logs the opcodes and their corresponding program counter.
+/// A dummy inspector that logs the opcodes and their corresponding program counter for a
+/// transaction
 #[derive(Default, Debug, Clone)]
 struct DummyInspector {
     ret_val: Vec<String>,
 }
 
 impl Inspector<BaseEvmTypes> for DummyInspector {
+    /// This method is called at each step of the EVM execution.
+    /// It checks if the current opcode is valid and if so, it stores the opcode and its
+    /// corresponding program counter in the `ret_val` vector.
     fn step(&mut self, interp: &mut Interpreter<'_, '_, BaseEvmTypes>) {
         if let Some(opcode) = OpCode::new(interp.opcode()) {
             self.ret_val.push(format!("{}: {}", interp.pc(), opcode));
