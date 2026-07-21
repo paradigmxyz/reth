@@ -47,18 +47,17 @@ root.
 | [`witness`](./src/witness.rs) | turn a `MissResult` into `MultiProofTargets`, measure resulting proof size |
 | [`sidecar`](./src/sidecar.rs) | serializable witness sidecar format + benchmark manifest |
 | [`persistence`](./src/persistence.rs) | save/load the flat value cache; sparse-trie persistence is not implemented yet |
+| [`bootstrap`](./src/bootstrap.rs) | verify a flat-cache snapshot plus authenticated account/storage paths and restore both cache layers |
 | [`fixture`](./src/fixture.rs) | `AccessedStateFixture` — captured per-block access-sets for reproducible offline benchmarks |
 
 ## Persistence limitation
 
-Only the flat value cache is serialized. The sparse-trie snapshot and
-branch-aware undo state are not persisted. The ExEx therefore cold-resets both
-caches on restart, reorg, and revert so a value is never treated as a cache hit
-without its authenticated path. A builder can initialize its local caches from a
-full parent-state provider on the first unsynchronized block, but that local
-initialization does not publish a cache-coherent bootstrap sidecar. A sidecar-only
-verifier cannot cold-start or recover from a reset until the value and sparse-trie
-caches can be restored together or a protocol bootstrap mechanism is added.
+Only the flat value cache is written by the existing persistence helpers. The ExEx therefore
+still cold-resets both caches on restart, reorg, and revert so a value is never treated as a cache
+hit without its authenticated path. The library bootstrap API provides the portable alternative:
+a `CacheSnapshotPackage` combines flat values with a state multiproof, verifies them against a
+trusted cache anchor and canonical state root, and restores both cache layers atomically. Loading
+that package during ExEx startup or transporting it over the peer protocol is not wired yet.
 
 ## Per-block trie synchronization
 

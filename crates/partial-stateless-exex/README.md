@@ -43,9 +43,9 @@ or either cache anchor.
 Sparse-trie snapshots currently have no branch-aware undo representation. On
 `ChainReorged` and `ChainReverted`, both flat and trie caches are cold-reset so a
 flat value cannot outlive its authenticated path. A builder can initialize from
-the full provider while processing the new branch. A sidecar-only verifier cannot
-recover from that cold reset without a synchronized joint cache snapshot or a
-future bootstrap protocol.
+the full provider while processing the new branch. The library can verify and
+restore a synchronized joint cache snapshot, but this ExEx does not yet load that
+package during startup, so a sidecar-only verifier cannot recover from the reset.
 
 ## Run
 

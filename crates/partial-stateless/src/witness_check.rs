@@ -207,7 +207,7 @@ pub fn materialize_sidecar_witness_with_limits(
 /// legacy per-key extractor selects nodes by path prefix alone, so those nodes can appear as a
 /// redundant suffix of an otherwise valid account or storage proof. A suffix is discarded only
 /// when the remaining proof verifies against the authenticated root.
-fn verify_and_trim_redundant_suffixes(
+pub(crate) fn verify_and_trim_redundant_suffixes(
     mut account_proof: reth_trie_common::AccountProof,
     state_root: B256,
 ) -> std::result::Result<reth_trie_common::AccountProof, String> {
@@ -232,7 +232,7 @@ fn decode_multiproof(bytes: &[u8]) -> Result<MultiProof> {
     let serializable: SerializableMultiProof = bincode::deserialize(bytes).map_err(|err| {
         SidecarWitnessCheckError::Decode(format!("failed to decode sidecar multiproof: {err}"))
     })?;
-    Ok(serializable.to_multiproof())
+    serializable.try_to_multiproof().map_err(SidecarWitnessCheckError::Decode)
 }
 
 /// Converts a legacy decoded proof to V2, requesting a deeper proof target when an exclusion
@@ -323,7 +323,7 @@ fn decoded_proof_nodes_to_v2_or_request(
     Ok(result)
 }
 
-fn multiproof_to_v2_or_request(
+pub(crate) fn multiproof_to_v2_or_request(
     multiproof: MultiProof,
 ) -> std::result::Result<DecodedMultiProofV2, TrieTransitionError> {
     let decoded = DecodedMultiProof::try_from(multiproof).map_err(|err| {

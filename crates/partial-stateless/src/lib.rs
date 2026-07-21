@@ -23,7 +23,11 @@ pub mod sidecar;
 pub mod witness_check;
 
 pub use accessed_state::BlockAccessedState;
-pub use bootstrap::{verify_and_restore, BootstrapError, CacheSnapshotPackage};
+pub use bootstrap::{
+    bootstrap_proof_targets, build_snapshot_package, verify_and_restore,
+    verify_and_restore_with_limits, BootstrapError, BootstrapLimits, CacheSnapshotPackage,
+    RestoredBootstrapState,
+};
 pub use fixture::{load_fixtures, save_fixture, AccessedStateFixture, LoadedFixtures};
 pub use network_cache::{CachedEntry, NetworkStateCache};
 pub use participant::ParticipantCache;

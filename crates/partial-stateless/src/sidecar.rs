@@ -1,8 +1,12 @@
 use crate::witness::WitnessResult;
-use alloy_primitives::map::{B256Map, HashMap};
-use alloy_primitives::{keccak256, Address, Bytes, B256};
-use reth_trie_common::proof::ProofNodes;
-use reth_trie_common::{BranchNodeMasks, MultiProof, Nibbles, StorageMultiProof, TrieMask};
+use alloy_primitives::{
+    keccak256,
+    map::{B256Map, HashMap},
+    Address, Bytes, B256,
+};
+use reth_trie_common::{
+    proof::ProofNodes, BranchNodeMasks, MultiProof, Nibbles, StorageMultiProof, TrieMask,
+};
 use serde::{Deserialize, Serialize};
 
 /// Hashed / Raw target keys that were missed in the network state cache for a block.
@@ -406,7 +410,8 @@ impl RootWitnessCompletenessSummary {
     }
 }
 
-/// A serialized representation of a `StorageMultiProof` that can be easily serialized/deserialized with `serde`.
+/// A serialized representation of a `StorageMultiProof` that can be easily serialized/deserialized
+/// with `serde`.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct SerializableStorageMultiProof {
     pub root: B256,
@@ -414,7 +419,8 @@ pub struct SerializableStorageMultiProof {
     pub branch_node_masks: Vec<(Vec<u8>, u16, u16)>,
 }
 
-/// A serialized representation of a `MultiProof` that can be easily serialized/deserialized with `serde`.
+/// A serialized representation of a `MultiProof` that can be easily serialized/deserialized with
+/// `serde`.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct SerializableMultiProof {
     pub account_subtree: Vec<(Vec<u8>, Vec<u8>)>,
@@ -468,7 +474,36 @@ impl SerializableMultiProof {
         Self { account_subtree, branch_node_masks, storages }
     }
 
-    /// Convert `SerializableMultiProof` back into `MultiProof`.
+    /// Validate untrusted nibble paths before converting into the trie representation.
+    pub fn try_to_multiproof(&self) -> Result<MultiProof, String> {
+        fn check_path(label: &str, path: &[u8]) -> Result<(), String> {
+            if path.len() > 64 {
+                return Err(format!("{label} exceeds 64 nibbles: {}", path.len()))
+            }
+            if let Some(invalid) = path.iter().copied().find(|nibble| *nibble > 0x0f) {
+                return Err(format!("{label} contains invalid nibble {invalid:#x}"))
+            }
+            Ok(())
+        }
+
+        for (path, _) in &self.account_subtree {
+            check_path("account proof path", path)?;
+        }
+        for (path, _, _) in &self.branch_node_masks {
+            check_path("account branch-mask path", path)?;
+        }
+        for (_, storage) in &self.storages {
+            for (path, _) in &storage.subtree {
+                check_path("storage proof path", path)?;
+            }
+            for (path, _, _) in &storage.branch_node_masks {
+                check_path("storage branch-mask path", path)?;
+            }
+        }
+        Ok(self.to_multiproof())
+    }
+
+    /// Convert a trusted `SerializableMultiProof` back into `MultiProof`.
     pub fn to_multiproof(&self) -> MultiProof {
         let mut account_subtree_map: HashMap<Nibbles, Bytes> = HashMap::default();
         for (nibbles_bytes, node_bytes) in &self.account_subtree {

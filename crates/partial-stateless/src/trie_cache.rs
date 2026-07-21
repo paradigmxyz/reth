@@ -15,7 +15,7 @@ use alloy_primitives::{
     map::{B256Map, HashSet},
     Address, B256,
 };
-use reth_trie_common::Nibbles;
+use reth_trie_common::{DecodedMultiProofV2, Nibbles};
 use reth_trie_sparse::{RevealableSparseTrie, SparseStateTrie, SparseTrie};
 use std::fmt;
 
@@ -80,6 +80,33 @@ impl PartialTrieNodeCache {
             warm_storage: HashSet::default(),
             state_root: None,
         }
+    }
+
+    pub(crate) fn restore_from_decoded_multiproof(
+        multiproof: DecodedMultiProofV2,
+        expected_state_root: B256,
+        value_cache: &NetworkStateCache,
+    ) -> Result<Self, TrieCacheValidationError> {
+        let mut cache = Self::new();
+        cache
+            .sparse
+            .reveal_decoded_multiproof_v2(multiproof)
+            .map_err(|err| TrieCacheValidationError::ProofReveal(err.to_string()))?;
+        let actual_root = cache
+            .sparse
+            .root()
+            .map_err(|err| TrieCacheValidationError::RootComputation(err.to_string()))?;
+        drop(cache.sparse.take_deferred_drops());
+        if actual_root != expected_state_root {
+            return Err(TrieCacheValidationError::StateRootMismatch {
+                expected: expected_state_root,
+                actual: actual_root,
+            })
+        }
+        cache.state_root = Some(actual_root);
+        cache.retain_from_value_cache(value_cache);
+        cache.validate_against_value_cache(value_cache)?;
+        Ok(cache)
     }
 
     /// Returns the post-state root represented by the local sparse trie, when initialized.
@@ -339,6 +366,7 @@ pub struct TrieShapeMetrics {
 /// Invariant failure reported by [`PartialTrieNodeCache::validate_against_value_cache`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TrieCacheValidationError {
+    ProofReveal(String),
     AccountMembership { missing: usize, extra: usize },
     StorageMembership { missing: usize, extra: usize },
     MissingAccountPath(Address),
@@ -351,6 +379,7 @@ pub enum TrieCacheValidationError {
 impl fmt::Display for TrieCacheValidationError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::ProofReveal(error) => write!(f, "failed to reveal bootstrap proof: {error}"),
             Self::AccountMembership { missing, extra } => write!(
                 f,
                 "account membership differs from value cache: missing={missing}, extra={extra}"
