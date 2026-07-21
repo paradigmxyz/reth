@@ -3756,21 +3756,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "example-precompile-cache"
-version = "0.0.0"
-dependencies = [
- "alloy-evm",
- "alloy-genesis",
- "alloy-primitives",
- "eyre",
- "parking_lot",
- "reth-ethereum",
- "reth-tracing",
- "schnellru",
- "tokio",
-]
-
-[[package]]
 name = "example-rpc-db"
 version = "0.0.0"
 dependencies = [
