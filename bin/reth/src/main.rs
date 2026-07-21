@@ -32,6 +32,9 @@ fn main() {
 
     reth_cli_util::sigsegv_handler::install();
 
+    #[cfg(all(feature = "jemalloc", unix))]
+    reth_cli_util::allocator::disable_jemalloc_decay();
+
     // Enable backtraces unless a RUST_BACKTRACE value has already been explicitly provided.
     if std::env::var_os("RUST_BACKTRACE").is_none() {
         unsafe { std::env::set_var("RUST_BACKTRACE", "1") };

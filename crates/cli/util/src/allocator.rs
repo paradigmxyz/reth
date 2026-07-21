@@ -20,6 +20,35 @@ cfg_if::cfg_if! {
 #[cfg(all(feature = "jemalloc", unix))]
 pub use tikv_jemalloc_sys;
 
+/// Disables jemalloc arena decay so freed pages stay resident for reuse.
+///
+/// Payload processing allocates a burst of working memory every block; with default decay,
+/// arenas release those pages between blocks (`madvise`) and the next block pays a minor
+/// fault plus kernel page-zeroing to get them back — a measurable per-block kernel-time cost
+/// on the engine thread. Keeping dirty pages resident avoids that cycle; the retained
+/// footprint is bounded by each arena's high-water mark.
+///
+/// Call early in `main`, before worker threads spawn. A `malloc_conf` link-time override is
+/// not used because fat LTO can internalize the exported symbol, silently reverting to
+/// defaults; `mallctl` is unaffected by link options.
+#[cfg(all(feature = "jemalloc", unix))]
+pub fn disable_jemalloc_decay() {
+    /// `MALLCTL_ARENAS_ALL`: applies a per-arena control to all existing arenas.
+    const ARENAS_ALL: usize = 4096;
+    let never: isize = -1;
+    // Default for arenas created later, then retune arenas that already exist.
+    for name in [b"arenas.dirty_decay_ms\0".as_slice(), b"arenas.muzzy_decay_ms\0".as_slice()] {
+        // SAFETY: mallctl name is a valid NUL-terminated string and the value type
+        // (ssize_t) matches the control's documented type.
+        let _ = unsafe { tikv_jemalloc_ctl::raw::write(name, never) };
+    }
+    for suffix in ["dirty_decay_ms", "muzzy_decay_ms"] {
+        let name = format!("arena.{ARENAS_ALL}.{suffix}\0");
+        // SAFETY: as above.
+        let _ = unsafe { tikv_jemalloc_ctl::raw::write(name.as_bytes(), never) };
+    }
+}
+
 // This is to prevent clippy unused warnings when we do `--all-features`
 cfg_if::cfg_if! {
     if #[cfg(all(feature = "snmalloc", feature = "jemalloc", unix))] {
