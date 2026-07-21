@@ -346,9 +346,18 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
         let trie_updates_total_len;
         let hashed_state_updates_total_len;
         let anchor_hash = match &self.overlay_source {
-            Some(OverlaySource::Managed { manager }) => manager
-                .anchor_for_parent(self.parent_hash, state_trie_tip_block.hash)
-                .unwrap_or(self.parent_hash),
+            Some(OverlaySource::Managed { manager }) => {
+                let parent_is_persisted = provider
+                    .convert_hash_or_number(self.parent_hash.into())?
+                    .is_some_and(|parent_number| parent_number <= state_trie_tip_block.number);
+                if parent_is_persisted {
+                    self.parent_hash
+                } else {
+                    manager
+                        .anchor_for_parent(self.parent_hash, state_trie_tip_block.hash)
+                        .unwrap_or(self.parent_hash)
+                }
+            }
             _ => self.parent_hash,
         };
 
@@ -868,6 +877,26 @@ mod tests {
                     .collect::<Vec<_>>()
             );
         }
+    }
+
+    #[cfg(feature = "partial-persistence")]
+    #[test]
+    fn managed_overlay_uses_persisted_parent_even_if_retained() {
+        let (factory, blocks) = setup_frontiers(2, 3);
+        let manager = StateTrieOverlayManager::default();
+        manager.insert_block(blocks[1].clone());
+        let provider = factory.provider().unwrap();
+
+        let overlay = OverlayBuilder::<EthPrimitives>::new(
+            blocks[1].recovered_block().hash(),
+            ChangesetCache::new(),
+        )
+        .with_state_trie_overlay_manager(manager)
+        .build_overlay(&provider)
+        .unwrap();
+
+        assert!(overlay.hashed_post_state.is_empty());
+        assert!(overlay.trie_updates.is_empty());
     }
 
     #[cfg(feature = "partial-persistence")]
