@@ -1710,6 +1710,7 @@ mod tests {
         BlockInfo, CoinbaseTipOrdering, EthPooledTransaction, Pool, PoolConfig, PoolTransaction,
         SubPoolLimit, TransactionOrigin, TransactionValidationOutcome, U256,
     };
+    use alloy_consensus::Transaction as _;
     use alloy_eips::{eip4844::BlobTransactionSidecar, eip7594::BlobTransactionSidecarVariant};
     use alloy_primitives::{Address, TxHash};
     use std::{fs, path::PathBuf};
@@ -1729,7 +1730,11 @@ mod tests {
     }
 
     fn add_blob_transaction<S: BlobStore>(
-        pool: &Pool<OkValidator<EthPooledTransaction>, CoinbaseTipOrdering, S>,
+        pool: &Pool<
+            OkValidator<EthPooledTransaction>,
+            CoinbaseTipOrdering<EthPooledTransaction>,
+            S,
+        >,
     ) -> TxHash {
         let mut generator = TransactionGenerator::new(rand::rng());
         let transaction = generator.gen_eip4844_pooled();
