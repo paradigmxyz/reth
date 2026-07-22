@@ -51,7 +51,9 @@
 //! - Conversion from consensus to pooled always fails
 
 use crate::{
-    blobstore::{BlobCellAvailability, BlobStore, BlobStoreError},
+    blobstore::{
+        BlobCellAvailability, BlobCellAvailabilityHandle, BlobSidecar, BlobStore, BlobStoreError,
+    },
     error::{InvalidPoolTransactionError, PoolError, PoolResult, RawPoolTransactionError},
     pool::{
         state::SubPool, BestTransactionFilter, NewTransactionEvent, TransactionEvents,
@@ -76,7 +78,6 @@ use alloy_primitives::{
     Address, Bytes, TxHash, TxKind, B128, B256, U256,
 };
 use futures_util::{ready, Stream};
-use parking_lot::RwLock;
 use reth_eth_wire_types::HandleMempoolData;
 use reth_ethereum_primitives::{PooledTransactionVariant, TransactionSigned};
 use reth_execution_types::ChangedAccount;
@@ -1472,9 +1473,6 @@ pub trait EthPoolTransaction: PoolTransaction {
         None
     }
 
-    /// Updates the blob cell availability cached for this transaction.
-    fn set_blob_cell_availability(&self, _availability: Option<BlobCellAvailability>) {}
-
     /// A specialization for the EIP-4844 transaction type.
     /// Tries to reattach the blob sidecar to the transaction.
     ///
@@ -1532,9 +1530,8 @@ pub struct EthPooledTransaction<T = TransactionSigned> {
 
     /// Cached blob cell availability for this transaction.
     ///
-    /// Blob storage happens after the transaction is inserted into the pool, so this must support
-    /// updates through the shared transaction reference held by the pool.
-    blob_cell_availability: BlobCellAvailabilityCache,
+    /// This shares availability published by the blob sidecar after it is stored.
+    blob_cell_availability: BlobCellAvailabilityHandle,
 }
 
 impl<T: SignedTransaction> EthPooledTransaction<T> {
@@ -1543,6 +1540,7 @@ impl<T: SignedTransaction> EthPooledTransaction<T> {
     /// Caution: In case of blob transactions, this marks the blob sidecar as
     /// [`EthBlobTransactionSidecar::Missing`]
     pub fn new(transaction: Recovered<T>, encoded_length: usize) -> Self {
+        let blob_cell_availability = BlobCellAvailabilityHandle::default();
         let mut blob_sidecar = EthBlobTransactionSidecar::None;
 
         let gas_cost = U256::from(transaction.max_fee_per_gas())
@@ -1560,16 +1558,10 @@ impl<T: SignedTransaction> EthPooledTransaction<T> {
 
             // because the blob sidecar is not included in this transaction variant, mark it as
             // missing
-            blob_sidecar = EthBlobTransactionSidecar::Missing;
+            blob_sidecar = EthBlobTransactionSidecar::Missing(blob_cell_availability.clone());
         }
 
-        Self {
-            transaction,
-            cost,
-            encoded_length,
-            blob_sidecar,
-            blob_cell_availability: Default::default(),
-        }
+        Self { transaction, cost, encoded_length, blob_sidecar, blob_cell_availability }
     }
 
     /// Return the reference to the underlying transaction.
@@ -1577,14 +1569,17 @@ impl<T: SignedTransaction> EthPooledTransaction<T> {
         &self.transaction
     }
 
-    /// Returns the blob cell availability currently cached for this transaction.
-    pub fn blob_cell_availability(&self) -> Option<BlobCellAvailability> {
-        *self.blob_cell_availability.0.read()
+    /// Attaches a blob sidecar using this transaction's shared availability handle.
+    pub fn set_blob_sidecar(&mut self, sidecar: BlobTransactionSidecarVariant) {
+        self.blob_sidecar = EthBlobTransactionSidecar::Present(BlobSidecar::new(
+            sidecar,
+            self.blob_cell_availability.clone(),
+        ));
     }
 
-    /// Updates the blob cell availability cached for this transaction.
-    pub fn set_blob_cell_availability(&self, availability: Option<BlobCellAvailability>) {
-        *self.blob_cell_availability.0.write() = availability;
+    /// Returns the blob cell availability currently cached for this transaction.
+    pub fn blob_cell_availability(&self) -> Option<BlobCellAvailability> {
+        self.blob_cell_availability.get()
     }
 }
 
@@ -1619,7 +1614,7 @@ impl PoolTransaction for EthPooledTransaction {
                 let tx = TransactionSigned::from(tx);
                 let tx = Recovered::new_unchecked(tx, signer);
                 let mut pooled = Self::new(tx, encoded_length);
-                pooled.blob_sidecar = EthBlobTransactionSidecar::Present(blob);
+                pooled.set_blob_sidecar(blob);
                 pooled
             }
             tx => {
@@ -1746,7 +1741,10 @@ impl<T: alloy_consensus::Transaction> alloy_consensus::Transaction for EthPooled
 impl EthPoolTransaction for EthPooledTransaction {
     fn take_blob(&mut self) -> EthBlobTransactionSidecar {
         if self.is_eip4844() {
-            std::mem::replace(&mut self.blob_sidecar, EthBlobTransactionSidecar::Missing)
+            std::mem::replace(
+                &mut self.blob_sidecar,
+                EthBlobTransactionSidecar::Missing(self.blob_cell_availability.clone()),
+            )
         } else {
             EthBlobTransactionSidecar::None
         }
@@ -1754,10 +1752,6 @@ impl EthPoolTransaction for EthPooledTransaction {
 
     fn blob_cell_availability(&self) -> Option<BlobCellAvailability> {
         Self::blob_cell_availability(self)
-    }
-
-    fn set_blob_cell_availability(&self, availability: Option<BlobCellAvailability>) {
-        Self::set_blob_cell_availability(self, availability);
     }
 
     fn try_into_pooled_eip4844(
@@ -1794,23 +1788,6 @@ impl EthPoolTransaction for EthPooledTransaction {
     }
 }
 
-#[derive(Debug, Default)]
-struct BlobCellAvailabilityCache(RwLock<Option<BlobCellAvailability>>);
-
-impl Clone for BlobCellAvailabilityCache {
-    fn clone(&self) -> Self {
-        Self(RwLock::new(*self.0.read()))
-    }
-}
-
-impl PartialEq for BlobCellAvailabilityCache {
-    fn eq(&self, other: &Self) -> bool {
-        *self.0.read() == *other.0.read()
-    }
-}
-
-impl Eq for BlobCellAvailabilityCache {}
-
 /// Represents the blob sidecar of the [`EthPooledTransaction`].
 ///
 /// EIP-4844 blob transactions require additional data (blobs, commitments, proofs)
@@ -1827,7 +1804,7 @@ pub enum EthBlobTransactionSidecar {
     /// - The sidecar was extracted after the transaction was added to the pool
     /// - The transaction was re-injected after a reorg without its sidecar
     /// - The transaction was recovered from the consensus format (e.g., from a block)
-    Missing,
+    Missing(BlobCellAvailabilityHandle),
     /// The EIP-4844 transaction was received from the network with its complete sidecar.
     ///
     /// This sidecar contains:
@@ -1837,14 +1814,14 @@ pub enum EthBlobTransactionSidecar {
     ///
     /// The sidecar is required for validating the transaction but is not included
     /// in blocks (only the blob hashes are included in the consensus format).
-    Present(BlobTransactionSidecarVariant),
+    Present(BlobSidecar),
 }
 
 impl EthBlobTransactionSidecar {
     /// Returns the blob sidecar if it is present
     pub const fn maybe_sidecar(&self) -> Option<&BlobTransactionSidecarVariant> {
         match self {
-            Self::Present(sidecar) => Some(sidecar),
+            Self::Present(sidecar) => Some(sidecar.sidecar()),
             _ => None,
         }
     }
@@ -2109,7 +2086,7 @@ mod tests {
         // Check that the pooled transaction is created correctly
         assert_eq!(pooled_tx.transaction, transaction);
         assert_eq!(pooled_tx.encoded_length, 300);
-        assert_eq!(pooled_tx.blob_sidecar, EthBlobTransactionSidecar::Missing);
+        assert!(matches!(pooled_tx.blob_sidecar, EthBlobTransactionSidecar::Missing(_)));
         assert_eq!(pooled_tx.blob_cell_availability(), None);
         let expected_cost =
             U256::from(100) + U256::from(10 * 1000) + U256::from(5 * DATA_GAS_PER_BLOB);
@@ -2134,11 +2111,9 @@ mod tests {
 
         assert_eq!(pooled_tx.blob_cell_availability(), None);
 
-        pooled_tx.set_blob_cell_availability(Some(BlobCellAvailability::full()));
+        pooled_tx.blob_cell_availability.set(BlobCellAvailability::full()).unwrap();
         assert_eq!(pooled_tx.blob_cell_availability(), Some(BlobCellAvailability::full()));
-
-        pooled_tx.set_blob_cell_availability(None);
-        assert_eq!(pooled_tx.blob_cell_availability(), None);
+        assert!(pooled_tx.blob_cell_availability.set(BlobCellAvailability::default()).is_err());
     }
 
     #[test]

@@ -2,16 +2,15 @@
 
 use super::constants::DEFAULT_MAX_TX_INPUT_BYTES;
 use crate::{
-    blobstore::BlobStore,
+    blobstore::{BlobSidecar, BlobStore},
     error::{
         Eip4844PoolTransactionError, Eip7702PoolTransactionError, InvalidPoolTransactionError,
     },
     metrics::TxPoolValidationMetrics,
     traits::TransactionOrigin,
     validate::ValidTransaction,
-    Address, BlobTransactionSidecarVariant, EthBlobTransactionSidecar, EthPoolTransaction,
-    LocalTransactionConfig, TransactionValidationOutcome, TransactionValidationTaskExecutor,
-    TransactionValidator,
+    Address, EthBlobTransactionSidecar, EthPoolTransaction, LocalTransactionConfig,
+    TransactionValidationOutcome, TransactionValidationTaskExecutor, TransactionValidator,
 };
 
 use alloy_consensus::{
@@ -795,7 +794,7 @@ where
     pub fn validate_eip4844(
         &self,
         transaction: &mut Tx,
-    ) -> Result<Option<BlobTransactionSidecarVariant>, InvalidPoolTransactionError> {
+    ) -> Result<Option<BlobSidecar>, InvalidPoolTransactionError> {
         let mut maybe_blob_sidecar = None;
 
         // heavy blob tx validation
@@ -806,13 +805,15 @@ where
                     // this should not happen
                     return Err(InvalidTransactionError::TxTypeNotSupported.into())
                 }
-                EthBlobTransactionSidecar::Missing => {
+                EthBlobTransactionSidecar::Missing(availability) => {
                     // This can happen for re-injected blob transactions (on re-org), since the blob
                     // is stripped from the transaction and not included in a block.
                     // check if the blob is in the store, if it's included we previously validated
                     // it and inserted it
-                    if self.blob_store.contains(*transaction.hash()).is_ok_and(|c| c) {
-                        // validated transaction is already in the store
+                    if let Some(stored_availability) =
+                        self.blob_store.cell_availability(*transaction.hash()).ok().flatten()
+                    {
+                        let _ = availability.set(stored_availability);
                     } else {
                         return Err(InvalidPoolTransactionError::Eip4844(
                             Eip4844PoolTransactionError::MissingEip4844BlobSidecar,
@@ -826,19 +827,19 @@ where
                     if self.eip7594 {
                         // Standard Ethereum behavior
                         if self.fork_tracker.is_osaka_activated() {
-                            if sidecar.is_eip4844() {
+                            if sidecar.sidecar().is_eip4844() {
                                 return Err(InvalidPoolTransactionError::Eip4844(
                                     Eip4844PoolTransactionError::UnexpectedEip4844SidecarAfterOsaka,
                                 ))
                             }
-                        } else if sidecar.is_eip7594() && !self.allow_7594_sidecars() {
+                        } else if sidecar.sidecar().is_eip7594() && !self.allow_7594_sidecars() {
                             return Err(InvalidPoolTransactionError::Eip4844(
                                 Eip4844PoolTransactionError::UnexpectedEip7594SidecarBeforeOsaka,
                             ))
                         }
                     } else {
                         // EIP-7594 disabled: always reject v1 sidecars, accept v0
-                        if sidecar.is_eip7594() {
+                        if sidecar.sidecar().is_eip7594() {
                             return Err(InvalidPoolTransactionError::Eip4844(
                                 Eip4844PoolTransactionError::Eip7594SidecarDisallowed,
                             ))
@@ -846,7 +847,9 @@ where
                     }
 
                     // validate the blob
-                    if let Err(err) = transaction.validate_blob(&sidecar, self.kzg_settings.get()) {
+                    if let Err(err) =
+                        transaction.validate_blob(sidecar.sidecar(), self.kzg_settings.get())
+                    {
                         return Err(InvalidPoolTransactionError::Eip4844(
                             Eip4844PoolTransactionError::InvalidEip4844Blob(err),
                         ))
@@ -1505,13 +1508,18 @@ pub fn ensure_intrinsic_gas<T: EthPoolTransaction>(
 mod tests {
     use super::*;
     use crate::{
-        blobstore::InMemoryBlobStore, error::PoolErrorKind, test_utils::TransactionBuilder,
-        traits::PoolTransaction, CoinbaseTipOrdering, EthPooledTransaction, Pool, TransactionPool,
+        blobstore::{BlobCellAvailability, BlobSidecar, BlobStore, InMemoryBlobStore},
+        error::PoolErrorKind,
+        test_utils::TransactionBuilder,
+        traits::PoolTransaction,
+        CoinbaseTipOrdering, EthPooledTransaction, Pool, TransactionPool,
     };
     use alloy_consensus::Transaction;
     use alloy_eips::{
         eip2718::{Decodable2718, Encodable2718},
         eip2930::{AccessList, AccessListItem},
+        eip4844::BlobTransactionSidecar,
+        eip7594::BlobTransactionSidecarVariant,
     };
     use alloy_primitives::{hex, Address, B256, U256};
     use reth_ethereum_primitives::PooledTransactionVariant;
@@ -1576,6 +1584,28 @@ mod tests {
         let tx = pool.get(transaction.hash());
         let tx = tx.unwrap();
         assert_eq!(tx.transaction.blob_cell_availability(), None);
+    }
+
+    #[test]
+    fn missing_blob_sidecar_uses_stored_availability() {
+        let tx = TransactionBuilder::default().into_eip4844().try_into_recovered().unwrap();
+        let encoded_length = tx.encode_2718_len();
+        let mut transaction = EthPooledTransaction::new(tx, encoded_length);
+        let blob_store = InMemoryBlobStore::default();
+        blob_store
+            .insert(
+                *transaction.hash(),
+                BlobSidecar::from(BlobTransactionSidecarVariant::Eip4844(
+                    BlobTransactionSidecar::default(),
+                )),
+            )
+            .unwrap();
+        let validator =
+            EthTransactionValidatorBuilder::new(MockEthProvider::default(), test_evm_config())
+                .build(blob_store);
+
+        assert!(validator.validate_eip4844(&mut transaction).unwrap().is_none());
+        assert_eq!(transaction.blob_cell_availability(), Some(BlobCellAvailability::full()));
     }
 
     #[test]

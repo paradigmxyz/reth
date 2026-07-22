@@ -844,7 +844,7 @@ mod tests {
     use reth_provider::test_utils::{ExtendedAccount, MockEthProvider};
     use reth_storage_api::noop::NoopProvider;
     use reth_transaction_pool::blobstore::{
-        BlobCellAvailability, BlobStoreCleanupStat, BlobStoreError,
+        BlobCellAvailability, BlobSidecar, BlobStoreCleanupStat, BlobStoreError,
     };
     use std::sync::{
         atomic::{AtomicUsize, Ordering},
@@ -859,19 +859,16 @@ mod tests {
     }
 
     impl BlobStore for CountingBlobStore {
-        fn insert(
-            &self,
-            _tx: B256,
-            _data: BlobTransactionSidecarVariant,
-        ) -> Result<Option<BlobCellAvailability>, BlobStoreError> {
-            Ok(Some(BlobCellAvailability::full()))
+        fn insert(&self, _tx: B256, data: BlobSidecar) -> Result<(), BlobStoreError> {
+            let _ = data.availability().set(BlobCellAvailability::full());
+            Ok(())
         }
 
-        fn insert_all(
-            &self,
-            txs: Vec<(B256, BlobTransactionSidecarVariant)>,
-        ) -> Result<Vec<(B256, Option<BlobCellAvailability>)>, BlobStoreError> {
-            Ok(txs.into_iter().map(|(tx, _)| (tx, Some(BlobCellAvailability::full()))).collect())
+        fn insert_all(&self, txs: Vec<(B256, BlobSidecar)>) -> Result<(), BlobStoreError> {
+            for (_, data) in txs {
+                let _ = data.availability().set(BlobCellAvailability::full());
+            }
+            Ok(())
         }
 
         fn delete(&self, _tx: B256) -> Result<(), BlobStoreError> {

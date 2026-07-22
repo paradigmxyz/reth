@@ -1,4 +1,4 @@
-use crate::blobstore::{BlobCellAvailability, BlobStore, BlobStoreCleanupStat, BlobStoreError};
+use crate::blobstore::{BlobSidecar, BlobStore, BlobStoreCleanupStat, BlobStoreError};
 use alloy_eips::{
     eip4844::{BlobAndProofV1, BlobAndProofV2, BlobCellsAndProofsV1},
     eip7594::{BlobTransactionSidecarVariant, Cell},
@@ -12,19 +12,12 @@ use std::sync::Arc;
 pub struct NoopBlobStore;
 
 impl BlobStore for NoopBlobStore {
-    fn insert(
-        &self,
-        _tx: B256,
-        _data: BlobTransactionSidecarVariant,
-    ) -> Result<Option<BlobCellAvailability>, BlobStoreError> {
-        Ok(None)
+    fn insert(&self, _tx: B256, _data: BlobSidecar) -> Result<(), BlobStoreError> {
+        Ok(())
     }
 
-    fn insert_all(
-        &self,
-        txs: Vec<(B256, BlobTransactionSidecarVariant)>,
-    ) -> Result<Vec<(B256, Option<BlobCellAvailability>)>, BlobStoreError> {
-        Ok(txs.into_iter().map(|(tx, _)| (tx, None)).collect())
+    fn insert_all(&self, _txs: Vec<(B256, BlobSidecar)>) -> Result<(), BlobStoreError> {
+        Ok(())
     }
 
     fn delete(&self, _tx: B256) -> Result<(), BlobStoreError> {

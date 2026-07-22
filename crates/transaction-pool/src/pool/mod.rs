@@ -66,7 +66,7 @@
 //!    category (2.) and become pending.
 
 use crate::{
-    blobstore::{BlobCellAvailability, BlobStore},
+    blobstore::{BlobSidecar, BlobStore},
     error::{PoolError, PoolErrorKind, PoolResult},
     identifier::{SenderId, SenderIdentifiers, TransactionId},
     metrics::BlobStoreMetrics,
@@ -580,10 +580,7 @@ where
         pool: &mut RwLockWriteGuard<'_, TxPool<T>>,
         origin: TransactionOrigin,
         tx: TransactionValidationOutcome<T::Transaction>,
-    ) -> (PoolResult<AddedTransactionOutcome>, Option<AddedTransactionMeta<T::Transaction>>)
-    where
-        <V as TransactionValidator>::Transaction: EthPoolTransaction,
-    {
+    ) -> (PoolResult<AddedTransactionOutcome>, Option<AddedTransactionMeta<T::Transaction>>) {
         match tx {
             TransactionValidationOutcome::Valid {
                 balance,
@@ -643,10 +640,7 @@ where
         &self,
         origin: TransactionOrigin,
         tx: TransactionValidationOutcome<T::Transaction>,
-    ) -> PoolResult<TransactionEvents>
-    where
-        <V as TransactionValidator>::Transaction: EthPoolTransaction,
-    {
+    ) -> PoolResult<TransactionEvents> {
         let listener = {
             let mut listener = self.event_listener.write();
             let events = listener.subscribe(tx.tx_hash());
@@ -666,10 +660,7 @@ where
         &self,
         origin: TransactionOrigin,
         transactions: impl IntoIterator<Item = TransactionValidationOutcome<T::Transaction>>,
-    ) -> Vec<PoolResult<AddedTransactionOutcome>>
-    where
-        <V as TransactionValidator>::Transaction: EthPoolTransaction,
-    {
+    ) -> Vec<PoolResult<AddedTransactionOutcome>> {
         self.add_transactions_with_origins(transactions.into_iter().map(|tx| (origin, tx)))
     }
 
@@ -680,10 +671,7 @@ where
         transactions: impl IntoIterator<
             Item = (TransactionOrigin, TransactionValidationOutcome<T::Transaction>),
         >,
-    ) -> Vec<PoolResult<AddedTransactionOutcome>>
-    where
-        <V as TransactionValidator>::Transaction: EthPoolTransaction,
-    {
+    ) -> Vec<PoolResult<AddedTransactionOutcome>> {
         // Collect results and metadata while holding the pool write lock
         let (mut results, added_metas, discarded) = {
             let mut pool = self.pool.write();
@@ -753,16 +741,12 @@ where
     ///
     /// Performs blob storage operations and sends all notifications. This should be called
     /// after the pool write lock has been released to avoid blocking pool operations.
-    fn on_added_transaction(&self, meta: AddedTransactionMeta<T::Transaction>)
-    where
-        T::Transaction: EthPoolTransaction,
-    {
+    fn on_added_transaction(&self, meta: AddedTransactionMeta<T::Transaction>) {
         // Handle blob sidecar storage and notifications for EIP-4844 transactions
         if let Some(sidecar) = meta.blob_sidecar {
             let hash = *meta.added.hash();
-            self.on_new_blob_sidecar(&hash, &sidecar);
-            let availability = self.insert_blob(hash, sidecar);
-            meta.added.transaction().transaction.set_blob_cell_availability(availability);
+            self.on_new_blob_sidecar(&hash, sidecar.sidecar());
+            self.insert_blob(hash, sidecar);
         }
 
         // Delete replaced blob sidecar if any
@@ -1315,22 +1299,16 @@ where
     }
 
     /// Inserts a blob transaction into the blob store
-    fn insert_blob(
-        &self,
-        hash: TxHash,
-        blob: BlobTransactionSidecarVariant,
-    ) -> Option<BlobCellAvailability> {
+    fn insert_blob(&self, hash: TxHash, blob: BlobSidecar) {
         debug!(target: "txpool", "[{:?}] storing blob sidecar", hash);
         match self.blob_store.insert(hash, blob) {
-            Ok(availability) => {
+            Ok(()) => {
                 self.update_blob_store_metrics();
-                availability
             }
             Err(err) => {
                 warn!(target: "txpool", %err, "[{:?}] failed to insert blob", hash);
                 self.blob_store_metrics.blobstore_failed_inserts.increment(1);
                 self.update_blob_store_metrics();
-                None
             }
         }
     }
@@ -1388,7 +1366,7 @@ struct AddedTransactionMeta<T: PoolTransaction> {
     /// The transaction that was added to the pool
     added: AddedTransaction<T>,
     /// Optional blob sidecar for EIP-4844 transactions
-    blob_sidecar: Option<BlobTransactionSidecarVariant>,
+    blob_sidecar: Option<BlobSidecar>,
 }
 
 /// Tracks an added transaction and all graph changes caused by adding it.
@@ -1489,14 +1467,6 @@ pub enum AddedTransaction<T: PoolTransaction> {
 }
 
 impl<T: PoolTransaction> AddedTransaction<T> {
-    /// Returns the transaction that was added to the pool.
-    const fn transaction(&self) -> &Arc<ValidPoolTransaction<T>> {
-        match self {
-            Self::Pending(tx) => &tx.transaction,
-            Self::Parked { transaction, .. } => transaction,
-        }
-    }
-
     /// Returns whether the transaction has been added to the pending pool.
     pub const fn as_pending(&self) -> Option<&AddedPendingTransaction<T>> {
         match self {
@@ -1701,14 +1671,15 @@ impl<T: PoolTransaction> OnNewCanonicalStateOutcome<T> {
 mod tests {
     use crate::{
         blobstore::{
-            BlobCellAvailability, BlobStore, DiskFileBlobStore, DiskFileBlobStoreConfig,
-            InMemoryBlobStore,
+            BlobCellAvailability, BlobSidecar, BlobStore, DiskFileBlobStore,
+            DiskFileBlobStoreConfig, InMemoryBlobStore,
         },
         identifier::SenderId,
         test_utils::{MockTransaction, OkValidator, TestPoolBuilder, TransactionGenerator},
         validate::ValidTransaction,
-        BlockInfo, CoinbaseTipOrdering, EthPooledTransaction, Pool, PoolConfig, PoolTransaction,
-        SubPoolLimit, TransactionOrigin, TransactionValidationOutcome, U256,
+        BlockInfo, CoinbaseTipOrdering, EthBlobTransactionSidecar, EthPoolTransaction,
+        EthPooledTransaction, Pool, PoolConfig, PoolTransaction, SubPoolLimit, TransactionOrigin,
+        TransactionValidationOutcome, U256,
     };
     use alloy_consensus::Transaction as _;
     use alloy_eips::{eip4844::BlobTransactionSidecar, eip7594::BlobTransactionSidecarVariant};
@@ -1737,18 +1708,19 @@ mod tests {
         >,
     ) -> TxHash {
         let mut generator = TransactionGenerator::new(rand::rng());
-        let transaction = generator.gen_eip4844_pooled();
+        let mut transaction = generator.gen_eip4844_pooled();
+        transaction.set_blob_sidecar(test_blob_sidecar());
         let hash = *transaction.hash();
+        let EthBlobTransactionSidecar::Present(sidecar) = transaction.take_blob() else {
+            unreachable!("blob sidecar was just attached")
+        };
         let result = pool.pool.add_transactions(
             TransactionOrigin::External,
             [TransactionValidationOutcome::Valid {
                 balance: U256::MAX,
                 state_nonce: transaction.nonce(),
                 bytecode_hash: None,
-                transaction: ValidTransaction::ValidWithSidecar {
-                    transaction,
-                    sidecar: test_blob_sidecar(),
-                },
+                transaction: ValidTransaction::ValidWithSidecar { transaction, sidecar },
                 propagate: true,
                 authorities: None,
             }],
@@ -1822,7 +1794,7 @@ mod tests {
 
             // Insert the sidecar into the blob store if the current index is within the blob limit.
             if n < blob_limit.max_txs {
-                blob_store.insert(*tx.get_hash(), sidecar.clone()).unwrap();
+                blob_store.insert(*tx.get_hash(), sidecar.clone().into()).unwrap();
             }
 
             // Add the transaction to the pool with external origin and valid outcome.
@@ -1834,7 +1806,7 @@ mod tests {
                     bytecode_hash: None,
                     transaction: ValidTransaction::ValidWithSidecar {
                         transaction: tx,
-                        sidecar: sidecar.clone(),
+                        sidecar: BlobSidecar::from(sidecar.clone()),
                     },
                     propagate: true,
                     authorities: None,
