@@ -89,6 +89,20 @@ where
     Invalid,
 }
 
+impl<P, E> ExExNotificationsInner<P, E>
+where
+    E: ConfigureEvm,
+{
+    /// Returns the provider of the underlying stream.
+    fn provider(&self) -> &P {
+        match self {
+            Self::WithoutHead(n) => &n.provider,
+            Self::WithHead(n) => &n.provider,
+            Self::Invalid => unreachable!(),
+        }
+    }
+}
+
 impl<P, E> ExExNotifications<P, E>
 where
     E: ConfigureEvm,
@@ -120,12 +134,7 @@ where
     {
         // Resolve the current canonical head before tearing down the stream state, so a failed
         // lookup leaves the stream untouched.
-        let provider = match &self.inner {
-            ExExNotificationsInner::WithoutHead(n) => &n.provider,
-            ExExNotificationsInner::WithHead(n) => &n.provider,
-            ExExNotificationsInner::Invalid => unreachable!(),
-        };
-        let local_head: BlockNumHash = provider.chain_info()?.into();
+        let local_head: BlockNumHash = self.inner.provider().chain_info()?.into();
 
         let current = std::mem::replace(&mut self.inner, ExExNotificationsInner::Invalid);
         let (provider, evm_config, notifications, wal_handle, backfill_thresholds) = match current {
