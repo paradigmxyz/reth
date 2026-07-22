@@ -631,13 +631,6 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
             return Ok(())
         }
 
-        #[cfg(not(feature = "partial-persistence"))]
-        if input.new_partial_state_trie() < input.new_db_tip() {
-            return Err(ProviderError::other(std::io::Error::other(
-                "partial persistence requires the `partial-persistence` feature",
-            )))
-        }
-
         let (db_tip, partial_state_trie) = self
             .get_stage_checkpoint(StageId::Finish)?
             .map(|checkpoint| {
