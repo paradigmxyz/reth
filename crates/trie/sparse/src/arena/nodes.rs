@@ -18,6 +18,9 @@ pub(super) enum ArenaSparseNodeState {
     Cached {
         /// The cached RLP-encoded representation of the node.
         rlp_node: RlpNode,
+        /// The epoch when a leaf was most recently cached, or the oldest cached child epoch for a
+        /// branch.
+        epoch: u64,
     },
     /// The node has been modified and its RLP encoding needs recomputation.
     Dirty,
@@ -33,6 +36,14 @@ impl ArenaSparseNodeState {
     pub(super) const fn cached_rlp_node(&self) -> Option<&RlpNode> {
         match self {
             Self::Cached { rlp_node, .. } => Some(rlp_node),
+            _ => None,
+        }
+    }
+
+    /// Returns the epoch cached on the state, if there is one.
+    pub(super) const fn cached_epoch(&self) -> Option<u64> {
+        match self {
+            Self::Cached { epoch, .. } => Some(*epoch),
             _ => None,
         }
     }

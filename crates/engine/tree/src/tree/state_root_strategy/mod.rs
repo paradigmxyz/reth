@@ -87,6 +87,7 @@ pub use reth_trie_parallel::{
 #[cfg(feature = "trie-debug")]
 use reth_trie_sparse::debug_recorder::TrieDebugRecorder;
 use reth_trie_sparse::{ArenaParallelSparseTrie, RevealableSparseTrie, SparseStateTrie};
+use revm::context::Block as _;
 use std::{
     fmt,
     sync::{
@@ -519,6 +520,7 @@ impl DefaultStateRootStrategy {
         let StateRootTaskOptions {
             parent_hash,
             parent_state_root,
+            epoch,
             preserved_sparse_trie,
             transaction_count,
             config,
@@ -548,6 +550,7 @@ impl DefaultStateRootStrategy {
             SparseTrieTaskOptions {
                 parent_hash,
                 parent_state_root,
+                epoch,
                 preserved_sparse_trie,
                 chunk_size: config.multiproof_chunk_size(),
                 pending_sparse_trie_prune_blocks: if config.disable_sparse_trie_cache_pruning() {
@@ -583,6 +586,7 @@ impl DefaultStateRootStrategy {
         let SparseTrieTaskOptions {
             parent_hash,
             parent_state_root,
+            epoch,
             preserved_sparse_trie,
             chunk_size,
             pending_sparse_trie_prune_blocks,
@@ -651,6 +655,7 @@ impl DefaultStateRootStrategy {
                 trie_metrics.clone(),
                 sparse_state_trie,
                 parent_state_root,
+                epoch,
                 chunk_size,
             );
 
@@ -734,6 +739,7 @@ impl DefaultStateRootStrategy {
 struct SparseTrieTaskOptions<N: NodePrimitives> {
     parent_hash: B256,
     parent_state_root: B256,
+    epoch: u64,
     preserved_sparse_trie: Option<PreservedSparseTrie>,
     chunk_size: usize,
     /// `None` disables pruning. `Some(Vec::new())` prunes using only the current block's paths.
@@ -743,6 +749,7 @@ struct SparseTrieTaskOptions<N: NodePrimitives> {
 struct StateRootTaskOptions<'a, N: NodePrimitives> {
     parent_hash: B256,
     parent_state_root: B256,
+    epoch: u64,
     preserved_sparse_trie: Option<PreservedSparseTrie>,
     transaction_count: Option<usize>,
     config: &'a TreeConfig,
@@ -926,6 +933,7 @@ where
             StateRootTaskOptions {
                 parent_hash: env.parent_hash,
                 parent_state_root: env.parent_state_root,
+                epoch: env.evm_env.block_env.number().saturating_to(),
                 preserved_sparse_trie,
                 transaction_count: Some(env.transaction_count),
                 config,
@@ -1002,6 +1010,7 @@ where
                 StateRootTaskOptions {
                     parent_hash: ctx.parent_hash(),
                     parent_state_root,
+                    epoch: ctx.parent_header().number().saturating_add(1),
                     preserved_sparse_trie,
                     // Tx count unknown at FCU time (block built incrementally): full proof workers.
                     transaction_count: None,
@@ -1656,6 +1665,7 @@ mod tests {
             StateRootTaskOptions {
                 parent_hash: genesis_hash,
                 parent_state_root: env.parent_state_root,
+                epoch: 0,
                 preserved_sparse_trie: None,
                 transaction_count: Some(env.transaction_count),
                 config: &TreeConfig::default(),

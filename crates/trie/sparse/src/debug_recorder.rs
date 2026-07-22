@@ -64,9 +64,15 @@ pub enum RecordedOp {
         proof_targets: Vec<(B256, Option<usize>)>,
     },
     /// Records an `update_subtrie_hashes` call.
-    UpdateSubtrieHashes,
+    UpdateSubtrieHashes {
+        /// The epoch used to cache updated nodes.
+        epoch: u64,
+    },
     /// Records a `root()` call.
-    Root,
+    Root {
+        /// The epoch used to cache updated nodes.
+        epoch: u64,
+    },
     /// Records a `set_root` call with the root node that was set.
     SetRoot {
         /// The root trie node that was set.
@@ -105,6 +111,8 @@ pub enum NodeStateRecord {
     Cached {
         /// The cached RLP-encoded node, hex-encoded.
         rlp_node: String,
+        /// The epoch associated with this cached node.
+        epoch: u64,
     },
     /// The node has been modified and its RLP encoding needs recomputation.
     Dirty,
