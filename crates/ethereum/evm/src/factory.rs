@@ -16,26 +16,23 @@ pub use evm2_jit::{
 };
 
 use crate::{
-    executor::{EthBigBlockExecutor, EthBigBlockPlan, HashedStateMode},
-    EthBlockExecutionCtx, EthBlockExecutor, EthEvmEnv,
+    executor::{EthBigBlockExecutor, EthBigBlockPlan},
+    EthBlockExecutionCtx, EthBlockExecutor, EthEvmEnv, RethReceiptBuilder,
 };
 use reth_ethereum_primitives::{Receipt, TransactionSigned};
+use reth_evm::ReceiptBuilder;
 
 /// Factory used to construct an evm2-backed EVM.
 ///
-/// The transaction type defaults to Ethereum's envelope so the standard block
-/// executor remains ergonomic. Custom-node integrations can select a different evm2 transaction
-/// type by implementing `EvmFactory<CustomTx>` and using that factory with their own executor and
-/// primitives.
-pub trait EvmFactory<Tx = evm2::ethereum::TxEnvelope>:
-    Clone + core::fmt::Debug + Send + Sync + Unpin + 'static
+/// Custom-node integrations can select a different evm2 transaction type through [`Self::Types`].
+pub trait EvmFactory: Clone + core::fmt::Debug + Send + Sync + Unpin + 'static
 where
     <Self::Types as evm2::EvmTypesHost>::BlockEnvExt: Send + Sync,
     <Self::Types as evm2::EvmTypesHost>::EvmExt: Default,
     <Self::Types as evm2::EvmTypesHost>::TxResultExt: Send,
 {
     /// Runtime evm2 type family used by the EVM.
-    type Types: evm2::EvmTypes<Tx = Tx> + evm2::EvmTypesHost<SpecId = Self::SpecId>;
+    type Types: evm2::EvmTypes + evm2::EvmTypesHost<SpecId = Self::SpecId>;
 
     /// Runtime specification identifier used by the EVM type family.
     type SpecId: Copy
@@ -117,10 +114,12 @@ impl EvmFactory for () {
 
 /// Ethereum block executor factory.
 #[derive(Debug)]
-pub struct EthBlockExecutorFactory<C = ChainSpec, F = RethEvmFactory>
+pub struct EthBlockExecutorFactory<R = RethReceiptBuilder, C = ChainSpec, F = RethEvmFactory>
 where
     F: EvmFactory,
 {
+    /// Receipt builder.
+    receipt_builder: R,
     /// Chain specification.
     chain_spec: Arc<C>,
     /// Shared precompile cache.
@@ -139,17 +138,17 @@ pub struct EthBigBlockExecutorFactory<C = ChainSpec, F = RethEvmFactory>
 where
     F: EvmFactory,
 {
-    inner: EthBlockExecutorFactory<C, F>,
+    inner: EthBlockExecutorFactory<RethReceiptBuilder, C, F>,
 }
 
 impl<C, F: EvmFactory> EthBigBlockExecutorFactory<C, F> {
     /// Creates a big-block executor factory from the standard Ethereum factory.
-    pub const fn new(inner: EthBlockExecutorFactory<C, F>) -> Self {
+    pub const fn new(inner: EthBlockExecutorFactory<RethReceiptBuilder, C, F>) -> Self {
         Self { inner }
     }
 
     /// Returns the wrapped Ethereum executor factory.
-    pub const fn inner(&self) -> &EthBlockExecutorFactory<C, F> {
+    pub const fn inner(&self) -> &EthBlockExecutorFactory<RethReceiptBuilder, C, F> {
         &self.inner
     }
 }
@@ -158,6 +157,7 @@ impl<C, F> reth_evm::BlockExecutorFactory for EthBigBlockExecutorFactory<C, F>
 where
     C: EthChainSpec<Header = Header> + EthereumHardforks,
     F: EvmFactory,
+    F::Types: evm2::EvmTypes<Tx = evm2::ethereum::TxEnvelope>,
 {
     type EvmFactory = F;
     type EvmTypes = F::Types;
@@ -182,7 +182,12 @@ where
     where
         Self: 'a,
     {
-        let executor = self.inner.create_eth_executor(evm, ctx.segments[0].ctx.clone());
+        let executor = EthBlockExecutor::new(
+            evm,
+            ctx.segments[0].ctx.clone(),
+            self.inner.chain_spec().as_ref(),
+            self.inner.receipt_builder(),
+        );
         EthBigBlockExecutor::new(executor, &self.inner, self.inner.chain_spec().clone(), ctx)
     }
 
@@ -198,9 +203,10 @@ where
     }
 }
 
-impl<C, F: EvmFactory> Clone for EthBlockExecutorFactory<C, F> {
+impl<R: Clone, C, F: EvmFactory> Clone for EthBlockExecutorFactory<R, C, F> {
     fn clone(&self) -> Self {
         Self {
+            receipt_builder: self.receipt_builder.clone(),
             chain_spec: self.chain_spec.clone(),
             #[cfg(feature = "std")]
             precompile_cache_map: self.precompile_cache_map.clone(),
@@ -211,17 +217,29 @@ impl<C, F: EvmFactory> Clone for EthBlockExecutorFactory<C, F> {
     }
 }
 
-impl<C> EthBlockExecutorFactory<C> {
+impl<C> EthBlockExecutorFactory<RethReceiptBuilder, C> {
     /// Creates a new Ethereum block executor factory.
     pub fn new(chain_spec: Arc<C>) -> Self {
         Self::new_with_evm_factory(chain_spec, RethEvmFactory::default())
     }
 }
 
-impl<C, F: EvmFactory> EthBlockExecutorFactory<C, F> {
+impl<C, F: EvmFactory> EthBlockExecutorFactory<RethReceiptBuilder, C, F> {
     /// Creates a new Ethereum block executor factory with the given EVM factory configuration.
     pub fn new_with_evm_factory(chain_spec: Arc<C>, evm_factory: F) -> Self {
+        Self::new_with_receipt_builder(RethReceiptBuilder, chain_spec, evm_factory)
+    }
+}
+
+impl<R, C, F: EvmFactory> EthBlockExecutorFactory<R, C, F> {
+    /// Creates a new Ethereum block executor factory with the given receipt and EVM factories.
+    pub fn new_with_receipt_builder(
+        receipt_builder: R,
+        chain_spec: Arc<C>,
+        evm_factory: F,
+    ) -> Self {
         Self {
+            receipt_builder,
             chain_spec,
             #[cfg(feature = "std")]
             precompile_cache_map: PrecompileCacheMap::default(),
@@ -234,6 +252,11 @@ impl<C, F: EvmFactory> EthBlockExecutorFactory<C, F> {
     /// Returns the chain spec associated with this factory.
     pub const fn chain_spec(&self) -> &Arc<C> {
         &self.chain_spec
+    }
+
+    /// Returns the configured receipt builder.
+    pub const fn receipt_builder(&self) -> &R {
+        &self.receipt_builder
     }
 
     /// Returns the configured EVM factory state.
@@ -260,24 +283,6 @@ impl<C, F: EvmFactory> EthBlockExecutorFactory<C, F> {
             let _ = disabled;
             self
         }
-    }
-
-    /// Creates a configured Ethereum block executor.
-    pub(crate) fn create_eth_executor<'a>(
-        &'a self,
-        evm: evm2::Evm<'a, F::Types>,
-        ctx: EthBlockExecutionCtx<'a>,
-    ) -> EthBlockExecutor<'a, F::Types>
-    where
-        C: EthChainSpec<Header = Header> + EthereumHardforks,
-    {
-        EthBlockExecutor::new(
-            evm,
-            ctx,
-            self.chain_spec.as_ref(),
-            self.chain_spec.deposit_contract().map(|contract| contract.address),
-            HashedStateMode::OutputOnly,
-        )
     }
 
     /// Creates an EVM instance with the configured Ethereum execution environment.
@@ -353,15 +358,18 @@ impl<C, F: EvmFactory> EthBlockExecutorFactory<C, F> {
     }
 }
 
-impl<C, F> reth_evm::BlockExecutorFactory for EthBlockExecutorFactory<C, F>
+impl<R, C, F> reth_evm::BlockExecutorFactory for EthBlockExecutorFactory<R, C, F>
 where
     C: EthChainSpec<Header = Header> + EthereumHardforks,
     F: EvmFactory,
+    R: ReceiptBuilder,
+
+    <F::Types as evm2::EvmTypesHost>::Tx: alloy_eips::eip2718::Typed2718,
 {
     type EvmFactory = F;
     type EvmTypes = F::Types;
-    type Transaction = TransactionSigned;
-    type Receipt = Receipt;
+    type Transaction = R::Transaction;
+    type Receipt = R::Receipt;
     type Evm<'a> = evm2::Evm<'a, F::Types>;
     type EvmEnv = EthEvmEnv<F::Types>;
     type ExecutionCtx<'a>
@@ -369,7 +377,7 @@ where
     where
         Self: 'a;
     type Executor<'a>
-        = EthBlockExecutor<'a, F::Types>
+        = EthBlockExecutor<'a, F::Types, &'a R>
     where
         Self: 'a;
 
@@ -381,7 +389,7 @@ where
     where
         Self: 'a,
     {
-        self.create_eth_executor(evm, ctx)
+        EthBlockExecutor::new(evm, ctx, self.chain_spec.as_ref(), &self.receipt_builder)
     }
 
     fn evm_factory(&self) -> &Self::EvmFactory {

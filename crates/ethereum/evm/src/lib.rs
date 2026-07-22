@@ -402,7 +402,7 @@ where
     F: EvmFactory,
 {
     /// Inner Ethereum block executor factory.
-    pub executor_factory: EthBlockExecutorFactory<C, F>,
+    pub executor_factory: EthBlockExecutorFactory<RethReceiptBuilder, C, F>,
     /// Ethereum block assembler.
     pub block_assembler: EthBlockAssembler<C>,
 }
@@ -469,11 +469,15 @@ impl<ChainSpec, EvmF> ConfigureEvm for EthEvmConfig<ChainSpec, EvmF>
 where
     ChainSpec: EthChainSpec<Header = Header> + EthereumHardforks + Hardforks + 'static,
     EvmF: EvmFactory,
+    <EvmF::Types as evm2::EvmTypesHost>::Tx: alloy_consensus::Transaction
+        + alloy_eips::eip2718::Typed2718
+        + Clone
+        + From<reth_ethereum_primitives::TransactionSigned>,
 {
     type Primitives = EthPrimitives;
     type Error = Infallible;
     type NextBlockEnvCtx = NextBlockEnvAttributes;
-    type BlockExecutorFactory = EthBlockExecutorFactory<ChainSpec, EvmF>;
+    type BlockExecutorFactory = EthBlockExecutorFactory<RethReceiptBuilder, ChainSpec, EvmF>;
     #[cfg(feature = "std")]
     type BlockAssembler = EthBlockAssembler<ChainSpec>;
 
@@ -642,6 +646,7 @@ impl<ChainSpec, EvmF> ConfigureEngineEvm<ExecutionData> for EthEvmConfig<ChainSp
 where
     ChainSpec: EthChainSpec<Header = Header> + EthereumHardforks + Hardforks + 'static,
     EvmF: EvmFactory,
+    EvmF::Types: evm2::EvmTypes<Tx = evm2::ethereum::TxEnvelope>,
 {
     fn evm_env_for_payload(&self, payload: &ExecutionData) -> Result<EvmEnvFor<Self>, Self::Error> {
         let spec = spec_id_by_timestamp_and_block_number(

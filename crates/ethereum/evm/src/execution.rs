@@ -3,8 +3,6 @@
 #[cfg(test)]
 use crate::convert::recovered_tx_envelope;
 #[cfg(test)]
-use crate::executor::HashedStateMode;
-#[cfg(test)]
 use crate::RethReceiptBuilder;
 use alloc::{
     boxed::Box,
@@ -13,11 +11,11 @@ use alloc::{
     vec::Vec,
 };
 #[cfg(test)]
+use alloy_consensus::Transaction;
+#[cfg(test)]
 use alloy_consensus::TxType;
 use alloy_consensus::{
-    constants::ETH_TO_WEI,
-    transaction::{Recovered, Transaction},
-    BlockHeader, Header,
+    constants::ETH_TO_WEI, transaction::Recovered, BlockHeader, Header, TxReceipt,
 };
 use alloy_eips::{
     eip2718::Typed2718,
@@ -27,7 +25,7 @@ use alloy_eips::{
     eip7251::CONSOLIDATION_REQUEST_TYPE,
     eip7685::Requests,
 };
-use alloy_primitives::{map::AddressMap, Address, Bytes, B256, KECCAK256_EMPTY, U256};
+use alloy_primitives::{map::AddressMap, Address, Bytes, Log, B256, KECCAK256_EMPTY, U256};
 use alloy_sol_types::{sol, SolEvent};
 use core::{any::Any, convert::Infallible};
 #[cfg(test)]
@@ -36,7 +34,6 @@ use evm2::evm::Db;
 use evm2::Precompiles;
 use evm2::{
     bytecode::Bytecode as ExecutableBytecode,
-    ethereum::RecoveredTxEnvelope,
     evm::{
         AccountChange, AccountChangeRef, AccountInfo, BlockStateAccumulator, StateChangeSink,
         StateChangeSource, StateChanges, StorageChange, SystemTx, BEACON_ROOTS_ADDRESS,
@@ -49,20 +46,21 @@ use evm2::{
 #[cfg(test)]
 use evm2::{
     env::BlockEnv,
-    ethereum::ethereum_tx_registry,
+    ethereum::{ethereum_tx_registry, RecoveredTxEnvelope},
     evm::{precompile::PrecompileProvider, Database, DynDatabase},
     BaseEvmTypes, ExecutionConfig, Version,
 };
 use reth_ethereum_forks::EthereumHardforks;
+#[cfg(test)]
 use reth_ethereum_primitives::Receipt;
 #[cfg(test)]
 use reth_ethereum_primitives::TransactionSigned;
 use reth_evm::{BlockExecutionError, BlockValidationError, EvmError, InvalidTxError};
 #[cfg(test)]
 use reth_evm::{ReceiptBuilder, ReceiptBuilderCtx};
-#[cfg(test)]
-use reth_execution_types::BlockExecutionOutput;
 use reth_execution_types::HashedPostStateSink;
+#[cfg(test)]
+use reth_execution_types::{BlockExecutionOutput, BlockExecutionResult};
 use reth_trie_common::{HashedPostState, KeccakKeyHasher};
 
 const DEPOSIT_BYTES_SIZE: usize = 48 + 32 + 8 + 96 + 8;
@@ -351,7 +349,7 @@ where
     ) -> Result<BlockExecutionOutput<Receipt>, EthExecutionError> {
         match self.execute_fallible_envelopes::<Infallible, Infallible, _, _, _, _>(
             transactions.into_iter().map(recovered_tx_envelope).map(Ok::<_, Infallible>),
-            ExecutionHooks::new(|_| {}, ignore_receipt, |_| {}, HashedStateMode::OutputOnly),
+            ExecutionHooks::new(|_| {}, ignore_receipt, |_| {}, false),
         ) {
             Ok(output) => Ok(output),
             Err(PayloadExecutionError::Execution(err)) => Err(err),
@@ -384,7 +382,7 @@ where
             mut on_transaction_executed,
             mut on_receipt,
             mut on_hashed_state_update,
-            hashed_state_mode,
+            stream_hashed_state,
         } = hooks;
 
         let block_beneficiary = block_env.beneficiary;
@@ -402,7 +400,7 @@ where
         pre_execution_system_call_state_changes(
             &mut evm,
             &mut block_state,
-            hashed_state_mode.stream(),
+            stream_hashed_state,
             &mut on_hashed_state_update,
             spec_id,
             block_number,
@@ -420,7 +418,7 @@ where
             let outcome = execute_transaction(
                 &mut evm,
                 &mut block_state,
-                hashed_state_mode.stream(),
+                stream_hashed_state,
                 &mut on_hashed_state_update,
                 &transaction,
             )?;
@@ -440,7 +438,7 @@ where
         post_execution_system_call_state_changes(
             &mut evm,
             &mut block_state,
-            hashed_state_mode.stream(),
+            stream_hashed_state,
             &mut on_hashed_state_update,
             spec_id,
             context,
@@ -450,7 +448,7 @@ where
         post_block_balance_state_changes(
             &mut evm,
             &mut block_state,
-            hashed_state_mode.stream(),
+            stream_hashed_state,
             &mut on_hashed_state_update,
             base_block_reward_for_spec_id(spec_id),
             block_number,
@@ -459,16 +457,17 @@ where
             context.withdrawals,
         )?;
 
-        let mut output = <RethReceiptBuilder as ReceiptBuilder<
-            TxType,
-            TxResult<BaseEvmTypes>,
-        >>::build_block_output(&RethReceiptBuilder, receipts, block_state, blob_gas_used);
-        output.result.requests = requests;
+        let gas_used = receipts.last().map_or(0, TxReceipt::cumulative_gas_used);
+        let output = BlockExecutionOutput::new(
+            BlockExecutionResult { receipts, requests, gas_used, blob_gas_used },
+            block_state,
+        );
 
         Ok(output)
     }
 }
 
+#[cfg(test)]
 pub(crate) fn transaction_blob_gas_used(transaction: &RecoveredTxEnvelope) -> u64 {
     transaction.as_eip4844().map(|tx| tx.blob_gas_used().unwrap_or_default()).unwrap_or_default()
 }
@@ -479,7 +478,7 @@ pub(crate) struct ExecutionHooks<F, R, H> {
     on_transaction_executed: F,
     on_receipt: R,
     on_hashed_state_update: H,
-    hashed_state_mode: HashedStateMode,
+    stream_hashed_state: bool,
 }
 
 #[cfg(test)]
@@ -489,9 +488,9 @@ impl<F, R, H> ExecutionHooks<F, R, H> {
         on_transaction_executed: F,
         on_receipt: R,
         on_hashed_state_update: H,
-        hashed_state_mode: HashedStateMode,
+        stream_hashed_state: bool,
     ) -> Self {
-        Self { on_transaction_executed, on_receipt, on_hashed_state_update, hashed_state_mode }
+        Self { on_transaction_executed, on_receipt, on_hashed_state_update, stream_hashed_state }
     }
 }
 
@@ -828,11 +827,14 @@ pub(crate) fn pre_execution_system_call_state_changes<T: EvmTypes>(
     Ok(())
 }
 
-pub(crate) fn block_requests_from_receipts(
+pub(crate) fn block_requests_from_receipts<R>(
     spec_id: SpecId,
     context: BlockExecutionContext<'_>,
-    receipts: &[Receipt],
-) -> Result<Requests, EthExecutionError> {
+    receipts: &[R],
+) -> Result<Requests, EthExecutionError>
+where
+    R: TxReceipt<Log = Log>,
+{
     let mut requests = Requests::default();
     if context.system_calls.is_none() || !spec_id.enables(SpecId::PRAGUE) {
         return Ok(requests)
@@ -847,13 +849,16 @@ pub(crate) fn block_requests_from_receipts(
     Ok(requests)
 }
 
-fn parse_deposit_requests_from_receipts(
+fn parse_deposit_requests_from_receipts<R>(
     deposit_contract_address: Address,
-    receipts: &[Receipt],
-) -> Result<Vec<u8>, EthExecutionError> {
+    receipts: &[R],
+) -> Result<Vec<u8>, EthExecutionError>
+where
+    R: TxReceipt<Log = Log>,
+{
     let mut out = Vec::new();
     for receipt in receipts {
-        for log in &receipt.logs {
+        for log in receipt.logs() {
             if log.address != deposit_contract_address ||
                 log.topics().first() != Some(&DepositEvent::SIGNATURE_HASH)
             {
@@ -1264,12 +1269,7 @@ mod tests {
         )
         .execute_fallible_envelopes::<TestTxError, Infallible, _, _, _, _>(
             [Ok(recovered_tx_envelope(transaction)), Err(TestTxError)],
-            ExecutionHooks::new(
-                |count| executed = count,
-                ignore_receipt,
-                |_| {},
-                HashedStateMode::OutputOnly,
-            ),
+            ExecutionHooks::new(|count| executed = count, ignore_receipt, |_| {}, false),
         );
 
         assert_eq!(executed, 1);
@@ -1309,7 +1309,7 @@ mod tests {
                     Ok::<(), Infallible>(())
                 },
                 |_| {},
-                HashedStateMode::OutputOnly,
+                false,
             ),
         )
         .expect("EVM execution succeeds");
@@ -1326,7 +1326,7 @@ mod tests {
     }
 
     #[test]
-    fn streams_hashed_state_without_output_hashed_state() {
+    fn hashed_state_hook_streams_updates() {
         let caller = address!("0000000000000000000000000000000000000001");
         let target = address!("0000000000000000000000000000000000001000");
         let mut database = TestDatabase::default();
@@ -1350,7 +1350,7 @@ mod tests {
                 |_| {},
                 ignore_receipt,
                 |update| streamed_updates.push(update),
-                HashedStateMode::StreamOnly,
+                true,
             ),
         )
         .expect("EVM execution succeeds");
@@ -1360,7 +1360,7 @@ mod tests {
     }
 
     #[test]
-    fn output_only_hashed_state_does_not_stream_updates() {
+    fn disabled_hashed_state_stream_does_not_emit_updates() {
         let caller = address!("0000000000000000000000000000000000000001");
         let target = address!("0000000000000000000000000000000000001000");
         let mut database = TestDatabase::default();
@@ -1384,7 +1384,7 @@ mod tests {
                 |_| {},
                 ignore_receipt,
                 |update| streamed_updates.push(update),
-                HashedStateMode::OutputOnly,
+                false,
             ),
         )
         .expect("EVM execution succeeds");

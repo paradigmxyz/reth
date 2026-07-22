@@ -14,6 +14,7 @@ extern crate alloc;
 #[cfg(feature = "std")]
 use crate::execute::{BasicBlockBuilder, BasicBlockExecutor};
 use alloc::string::String;
+use alloy_consensus::Transaction;
 use alloy_eips::eip4895::Withdrawals;
 use alloy_primitives::{Address, Bytes, B256};
 use core::{error::Error, fmt::Debug};
@@ -240,7 +241,7 @@ pub trait ConfigureEvm: Clone + Debug + Send + Sync + Unpin {
     type BlockExecutorFactory: crate::execute::BlockExecutorFactory<
         Transaction = TxTy<Self::Primitives>,
         Receipt = ReceiptTy<Self::Primitives>,
-        EvmTypes: evm2::EvmTypes<Tx: From<TxTy<Self::Primitives>>>,
+        EvmTypes: evm2::EvmTypes<Tx: From<TxTy<Self::Primitives>> + Transaction + Clone>,
     >;
 
     /// Configured block assembler.

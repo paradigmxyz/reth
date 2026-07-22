@@ -5,13 +5,16 @@ use crate::{
         base_block_reward, block_requests_from_receipts, commit_detached_transaction,
         execute_transaction_without_commit, post_block_balance_state_changes,
         post_execution_system_call_state_changes, pre_execution_system_call_state_changes,
-        transaction_blob_gas_used, BlockExecutionContext, BlockSystemCalls, EthExecutionError,
+        BlockExecutionContext, BlockSystemCalls, EthExecutionError,
     },
     factory::{EthBlockExecutorFactory, EvmFactory},
     EthBlockExecutionCtx, EthEvmEnv, RethReceiptBuilder,
 };
 use alloc::{boxed::Box, sync::Arc, vec::Vec};
-use alloy_consensus::{Header, Transaction, TxType};
+use alloy_consensus::{
+    transaction::{TransactionEnvelope, TxHashRef},
+    Header, Transaction, TxType as EthTxType,
+};
 use alloy_eip7928::{BlockAccessIndex, BlockAccessList};
 use alloy_eips::{eip2718::Typed2718, eip4895::Withdrawal, eip7685::Requests};
 use alloy_primitives::{Address, B256};
@@ -19,33 +22,34 @@ use evm2::{
     ethereum::TxEnvelope,
     evm::{Bal, BlockStateAccumulator, StateChangeSource},
     interpreter::Host,
-    BaseEvmTypes, Evm, EvmTypes, TxResult, TxResultWithState,
+    BaseEvmTypes, Evm, EvmTypes, TxResultWithState,
 };
+use reth_chainspec::EthChainSpec;
 use reth_ethereum_forks::EthereumHardforks;
 use reth_ethereum_primitives::{Receipt, TransactionSigned};
 use reth_evm::{
     BlockExecutionError, BlockExecutionOutput, BlockExecutor, BlockTransactionResult,
     BlockValidationError, ExecutorTx, GasOutput, ReceiptBuilder, ReceiptBuilderCtx, RecoveredTx,
 };
+use reth_execution_types::BlockExecutionResult;
 use reth_trie_common::HashedPostState;
 
 /// Configured Ethereum block executor backed by evm2.
 #[expect(missing_debug_implementations)]
-pub struct EthBlockExecutor<'a, T = BaseEvmTypes>
+pub struct EthBlockExecutor<'a, T = BaseEvmTypes, R = RethReceiptBuilder>
 where
-    T: EvmTypes<Tx = TxEnvelope>,
-    T::Tx: Typed2718,
-    T::TxResultExt: Send,
+    T: EvmTypes<Tx: Typed2718, TxResultExt: Send>,
+    R: ReceiptBuilder,
 {
     evm: Evm<'a, T>,
     ctx: EthBlockExecutionCtx<'a>,
+    receipt_builder: R,
     spec_id: evm2::SpecId,
     base_block_reward: Option<u128>,
     deposit_contract_address: Option<Address>,
     block_state: BlockStateAccumulator,
-    hashed_state_mode: HashedStateMode,
     hashed_state_update_hook: HashedStateUpdateHook,
-    receipts: Vec<Receipt>,
+    receipts: Vec<R::Receipt>,
     cumulative_gas_used: u64,
     block_regular_gas_used: u64,
     block_state_gas_used: u64,
@@ -56,7 +60,7 @@ where
 
 /// Detached Ethereum transaction result with the metadata needed for canonical receipt commit.
 #[derive(Debug)]
-pub struct EthTransactionResultWithState<T = BaseEvmTypes>
+pub struct EthTransactionResultWithState<T = BaseEvmTypes, TxType = EthTxType>
 where
     T: EvmTypes,
 {
@@ -65,7 +69,7 @@ where
     blob_gas_used: u64,
 }
 
-impl<T: EvmTypes> BlockTransactionResult<T> for EthTransactionResultWithState<T> {
+impl<T: EvmTypes, TxType> BlockTransactionResult<T> for EthTransactionResultWithState<T, TxType> {
     fn result(&self) -> &TxResultWithState<T> {
         &self.result
     }
@@ -73,38 +77,20 @@ impl<T: EvmTypes> BlockTransactionResult<T> for EthTransactionResultWithState<T>
 
 type HashedStateUpdateHook = Option<Box<dyn FnMut(HashedPostState) + Send>>;
 
-/// Controls whether Ethereum execution streams trie-ready hashed post-state updates.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum HashedStateMode {
-    /// Do not stream hashed state updates.
-    OutputOnly,
-    /// Stream hashed state updates to the provided hook.
-    StreamOnly,
-}
-
-impl HashedStateMode {
-    /// Returns true if execution should stream hashed state updates.
-    pub(crate) const fn stream(self) -> bool {
-        matches!(self, Self::StreamOnly)
-    }
-}
-
-impl<'a, T> EthBlockExecutor<'a, T>
+impl<'a, T, R> EthBlockExecutor<'a, T, R>
 where
-    T: EvmTypes<Tx = TxEnvelope>,
-    T::Tx: Typed2718,
-    T::TxResultExt: Send,
+    T: EvmTypes<Tx: Typed2718, TxResultExt: Send>,
+    R: ReceiptBuilder,
 {
     /// Creates a configured Ethereum block executor.
-    pub(crate) fn new<C>(
+    pub fn new<C>(
         mut evm: Evm<'a, T>,
         ctx: EthBlockExecutionCtx<'a>,
         chain_spec: &C,
-        deposit_contract_address: Option<alloy_primitives::Address>,
-        hashed_state_mode: HashedStateMode,
+        receipt_builder: R,
     ) -> Self
     where
-        C: EthereumHardforks + ?Sized,
+        C: EthChainSpec + EthereumHardforks + ?Sized,
     {
         // The executor stores evm2's base spec ID, while custom type families may expose a
         // richer host spec ID that converts into it.
@@ -116,11 +102,13 @@ where
         Self {
             evm,
             ctx,
+            receipt_builder,
             spec_id,
             base_block_reward: base_block_reward(chain_spec, block_number),
-            deposit_contract_address,
+            deposit_contract_address: chain_spec
+                .deposit_contract()
+                .map(|contract| contract.address),
             block_state: BlockStateAccumulator::new(),
-            hashed_state_mode,
             hashed_state_update_hook: None,
             receipts: Vec::new(),
             cumulative_gas_used: 0,
@@ -152,24 +140,24 @@ where
     }
 
     #[inline]
-    fn set_transaction_block_access_index(&mut self) {
+    const fn set_transaction_block_access_index(&mut self) {
         if self.block_access_list_builder_enabled() {
             let index = self.receipts.len() as u64 + 1 + self.bal_index_offset;
-            self.set_block_access_index(BlockAccessIndex::new(index));
+            self.evm.state_mut().set_bal_index(BlockAccessIndex::new(index));
         }
     }
 }
 
-impl<'a, T> BlockExecutor for EthBlockExecutor<'a, T>
+impl<'a, T, R> BlockExecutor for EthBlockExecutor<'a, T, R>
 where
-    T: EvmTypes<Tx = TxEnvelope>,
-    T::Tx: Typed2718,
-    T::TxResultExt: Send,
+    T: EvmTypes<Tx: Typed2718, TxResultExt: Send>,
+    R: ReceiptBuilder,
 {
-    type Transaction = TransactionSigned;
-    type Receipt = Receipt;
+    type Transaction = R::Transaction;
+    type Receipt = R::Receipt;
     type Evm = Evm<'a, T>;
-    type TransactionResultWithState = EthTransactionResultWithState<T>;
+    type TransactionResultWithState =
+        EthTransactionResultWithState<T, <R::Transaction as TransactionEnvelope>::TxType>;
     type BlockAccessList = Bal;
 
     fn evm(&self) -> &Self::Evm {
@@ -181,10 +169,6 @@ where
     }
 
     fn set_state_hook(&mut self, hook: impl FnMut(HashedPostState) + Send + 'static) -> bool {
-        if self.hashed_state_mode == HashedStateMode::OutputOnly {
-            self.hashed_state_mode = HashedStateMode::StreamOnly;
-        }
-
         self.hashed_state_update_hook = Some(Box::new(hook));
         true
     }
@@ -224,10 +208,11 @@ where
             None,
         );
         let block_number = self.evm.block_env().number.to::<u64>();
+        let stream_hashed_state = self.hashed_state_update_hook.is_some();
         pre_execution_system_call_state_changes(
             &mut self.evm,
             &mut self.block_state,
-            self.hashed_state_mode.stream(),
+            stream_hashed_state,
             &mut |state| emit_hashed_state(&mut self.hashed_state_update_hook, state),
             self.spec_id,
             block_number,
@@ -243,7 +228,7 @@ where
         let (transaction, tx) = transaction.into_parts();
         let tx_hash = *tx.tx().tx_hash();
         self.set_transaction_block_access_index();
-        let transaction_gas_limit = transaction.gas_limit();
+        let transaction_gas_limit = tx.tx().gas_limit();
         let block_gas_limit = self.evm.block_env().gas_limit.to::<u64>();
         let unavailable = if self.separate_block_gas {
             let regular_available = block_gas_limit.saturating_sub(self.block_regular_gas_used);
@@ -267,9 +252,8 @@ where
             }
             .into())
         }
-        let blob_gas_used = transaction_blob_gas_used(&transaction);
-        let tx_type =
-            TxType::try_from(transaction.ty()).expect("transaction envelope has valid type");
+        let blob_gas_used = tx.tx().blob_gas_used().unwrap_or_default();
+        let tx_type = tx.tx().tx_type();
         let result = execute_transaction_without_commit(&mut self.evm, &transaction)
             .map_err(|err| map_transaction_execution_error(err, tx_hash))?;
         Ok(EthTransactionResultWithState { result, tx_type, blob_gas_used })
@@ -280,10 +264,11 @@ where
         output: Self::TransactionResultWithState,
     ) -> Result<GasOutput, BlockExecutionError> {
         let EthTransactionResultWithState { result, tx_type, blob_gas_used } = output;
+        let stream_hashed_state = self.hashed_state_update_hook.is_some();
         let outcome = commit_detached_transaction(
             &mut self.evm,
             &mut self.block_state,
-            self.hashed_state_mode.stream(),
+            stream_hashed_state,
             &mut |state| emit_hashed_state(&mut self.hashed_state_update_hook, state),
             result,
         );
@@ -294,7 +279,7 @@ where
         self.block_state_gas_used = self.block_state_gas_used.saturating_add(state_gas_used);
         self.cumulative_gas_used += tx_gas_used;
         self.blob_gas_used += blob_gas_used;
-        self.receipts.push(RethReceiptBuilder.build_receipt(ReceiptBuilderCtx {
+        self.receipts.push(self.receipt_builder.build_receipt(ReceiptBuilderCtx {
             tx_type,
             result: outcome,
             cumulative_gas_used: self.cumulative_gas_used,
@@ -302,13 +287,14 @@ where
         Ok(GasOutput::new_with_regular(tx_gas_used, regular_gas_used, state_gas_used))
     }
 
-    fn receipts(&self) -> &[Receipt] {
+    fn receipts(&self) -> &[Self::Receipt] {
         &self.receipts
     }
 
     fn finish_with_block_access_list(
         mut self,
-    ) -> Result<(BlockExecutionOutput<Receipt>, Option<BlockAccessList>), BlockExecutionError> {
+    ) -> Result<(BlockExecutionOutput<Self::Receipt>, Option<BlockAccessList>), BlockExecutionError>
+    {
         self.set_transaction_block_access_index();
         let context = Self::block_context(
             self.deposit_contract_address,
@@ -318,10 +304,11 @@ where
             None,
         );
         let mut requests = block_requests_from_receipts(self.spec_id, context, &self.receipts)?;
+        let stream_hashed_state = self.hashed_state_update_hook.is_some();
         post_execution_system_call_state_changes(
             &mut self.evm,
             &mut self.block_state,
-            self.hashed_state_mode.stream(),
+            stream_hashed_state,
             &mut |state| emit_hashed_state(&mut self.hashed_state_update_hook, state),
             self.spec_id,
             context,
@@ -342,7 +329,7 @@ where
         post_block_balance_state_changes(
             &mut self.evm,
             &mut self.block_state,
-            self.hashed_state_mode.stream(),
+            stream_hashed_state,
             &mut |state| emit_hashed_state(&mut self.hashed_state_update_hook, state),
             self.base_block_reward,
             block_number,
@@ -359,15 +346,15 @@ where
             self.block_regular_gas_used,
             self.block_state_gas_used,
         );
-        let mut output =
-            <RethReceiptBuilder as ReceiptBuilder<TxType, TxResult<T>>>::build_block_output(
-                &RethReceiptBuilder,
-                self.receipts,
-                self.block_state,
-                self.blob_gas_used,
-            );
-        output.result.gas_used = block_gas_used;
-        output.result.requests = requests;
+        let output = BlockExecutionOutput::new(
+            BlockExecutionResult {
+                receipts: self.receipts,
+                requests,
+                gas_used: block_gas_used,
+                blob_gas_used: self.blob_gas_used,
+            },
+            self.block_state,
+        );
 
         Ok((output, block_access_list))
     }
@@ -503,8 +490,8 @@ where
     <F::Types as evm2::EvmTypesHost>::Tx: Typed2718,
     <F::Types as evm2::EvmTypesHost>::TxResultExt: Send,
 {
-    inner: EthBlockExecutor<'a, F::Types>,
-    factory: &'a EthBlockExecutorFactory<C, F>,
+    inner: EthBlockExecutor<'a, F::Types, &'a RethReceiptBuilder>,
+    factory: &'a EthBlockExecutorFactory<RethReceiptBuilder, C, F>,
     chain_spec: Arc<C>,
     plan: EthBigBlockPlan<'a, F::Types>,
     next_segment: usize,
@@ -527,8 +514,8 @@ where
     <F::Types as evm2::EvmTypesHost>::TxResultExt: Send,
 {
     pub(crate) fn new(
-        inner: EthBlockExecutor<'a, F::Types>,
-        factory: &'a EthBlockExecutorFactory<C, F>,
+        inner: EthBlockExecutor<'a, F::Types, &'a RethReceiptBuilder>,
+        factory: &'a EthBlockExecutorFactory<RethReceiptBuilder, C, F>,
         chain_spec: Arc<C>,
         plan: EthBigBlockPlan<'a, F::Types>,
     ) -> Self {
@@ -618,10 +605,11 @@ where
         );
         let receipts = &self.inner.receipts[self.segment_receipt_start..];
         let mut requests = block_requests_from_receipts(self.inner.spec_id, context, receipts)?;
+        let stream_hashed_state = self.inner.hashed_state_update_hook.is_some();
         post_execution_system_call_state_changes(
             &mut self.inner.evm,
             &mut self.inner.block_state,
-            self.inner.hashed_state_mode.stream(),
+            stream_hashed_state,
             &mut |state| emit_hashed_state(&mut self.inner.hashed_state_update_hook, state),
             self.inner.spec_id,
             context,
@@ -642,7 +630,7 @@ where
         post_block_balance_state_changes(
             &mut self.inner.evm,
             &mut self.inner.block_state,
-            self.inner.hashed_state_mode.stream(),
+            stream_hashed_state,
             &mut |state| emit_hashed_state(&mut self.inner.hashed_state_update_hook, state),
             self.inner.base_block_reward,
             block_number,

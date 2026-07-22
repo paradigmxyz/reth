@@ -3,8 +3,8 @@
 use crate::{ConfigureEvm, Database, DynDatabase, EvmEnv, TxEnvFor};
 use alloc::{boxed::Box, format, sync::Arc, vec::Vec};
 use alloy_consensus::{
-    transaction::{Either, Recovered, Transaction as AlloyTransaction},
-    BlockHeader as _, Header, TxReceipt,
+    transaction::{Either, Recovered, TransactionEnvelope},
+    BlockHeader as _, Header,
 };
 use alloy_eip7928::{compute_block_access_list_hash, BlockAccessIndex, BlockAccessList};
 use alloy_eips::eip2718::{Typed2718, WithEncoded};
@@ -12,7 +12,7 @@ use alloy_primitives::{Address, B256};
 use core::fmt::Debug;
 #[cfg(feature = "std")]
 use evm2::evm::{CacheDB, Db};
-use evm2::{evm::BlockStateAccumulator, registry::HandlerError, ErrorCode};
+use evm2::{registry::HandlerError, ErrorCode};
 pub use reth_execution_errors::{
     BlockExecutionError, BlockValidationError, EvmError, InternalBlockExecutionError,
     InvalidTxError,
@@ -24,7 +24,8 @@ use reth_execution_types::{
 #[cfg(feature = "std")]
 use reth_primitives_traits::BlockTy;
 use reth_primitives_traits::{
-    Block, HeaderTy, NodePrimitives, ReceiptTy, RecoveredBlock, SealedHeader, TxTy,
+    Block, HeaderTy, NodePrimitives, ReceiptTy, RecoveredBlock, SealedHeader, SignedTransaction,
+    TxTy,
 };
 use reth_storage_api::StateProvider;
 use reth_trie_common::updates::TrieUpdates;
@@ -89,32 +90,21 @@ pub struct ReceiptBuilderCtx<TxType, TransactionResult> {
 }
 
 /// Builds chain-specific receipts from raw transaction execution results.
-pub trait ReceiptBuilder<TxType, TransactionResult> {
+#[auto_impl::auto_impl(&, Arc)]
+pub trait ReceiptBuilder {
+    /// Consensus transaction type accepted by the executor.
+    type Transaction: SignedTransaction + TransactionEnvelope<TxType: Send + 'static>;
     /// Receipt produced by this builder.
-    type Receipt: TxReceipt;
+    type Receipt: reth_primitives_traits::Receipt;
 
     /// Builds a receipt for the transaction execution result.
-    fn build_receipt(&self, ctx: ReceiptBuilderCtx<TxType, TransactionResult>) -> Self::Receipt;
-
-    /// Builds a block execution output from already-built receipts and execution state.
-    fn build_block_output(
+    fn build_receipt<T: evm2::EvmTypes>(
         &self,
-        receipts: Vec<Self::Receipt>,
-        state: BlockStateAccumulator,
-        blob_gas_used: u64,
-    ) -> BlockExecutionOutput<Self::Receipt> {
-        let gas_used = receipts.last().map_or(0, TxReceipt::cumulative_gas_used);
-
-        BlockExecutionOutput::new(
-            BlockExecutionResult {
-                receipts,
-                requests: Default::default(),
-                gas_used,
-                blob_gas_used,
-            },
-            state,
-        )
-    }
+        ctx: ReceiptBuilderCtx<
+            <Self::Transaction as TransactionEnvelope>::TxType,
+            evm2::TxResult<T>,
+        >,
+    ) -> Self::Receipt;
 }
 
 /// Marks whether transaction changes should be committed into block executor state.
@@ -145,7 +135,7 @@ pub trait Evm {
     /// Runtime EVM type family.
     type EvmTypes: evm2::EvmTypes<Tx = Self::Transaction>;
     /// Transaction environment consumed by this EVM.
-    type Transaction: AlloyTransaction;
+    type Transaction;
 
     /// Executes a transaction without committing its state changes.
     fn transact(
@@ -197,7 +187,7 @@ pub trait Evm {
         S::Error: Debug;
 }
 
-impl<'a, T: evm2::EvmTypes<Tx: Typed2718 + AlloyTransaction>> Evm for evm2::Evm<'a, T> {
+impl<'a, T: evm2::EvmTypes<Tx: Typed2718>> Evm for evm2::Evm<'a, T> {
     type EvmTypes = T;
     type Transaction = T::Tx;
 
@@ -435,7 +425,7 @@ pub trait BlockExecutorFactory {
     /// Additional EVM factory configuration owned by this executor factory.
     type EvmFactory;
     /// Runtime EVM type family.
-    type EvmTypes: evm2::EvmTypes<Tx: AlloyTransaction + Clone, TxResultExt: Send>;
+    type EvmTypes: evm2::EvmTypes<TxResultExt: Send>;
     /// Consensus transaction type consumed by executors from this factory.
     type Transaction: Debug + Clone + Send + Sync + 'static;
     /// Receipt type produced by executors from this factory.
