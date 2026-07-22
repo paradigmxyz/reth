@@ -229,25 +229,23 @@ where
         // the last time changes were polled, in other words the best block at last poll + 1
         let (start_block, kind) = {
             let mut filters = self.inner.active_filters.inner.lock().await;
-            let filter = filters.get_mut(&id).ok_or(EthFilterError::FilterNotFound(id))?;
+            let filter =
+                filters.get_mut(&id).ok_or_else(|| EthFilterError::FilterNotFound(id.clone()))?;
 
             if filter.block > best_number {
                 // no new blocks since the last poll
                 return Ok(FilterChanges::Empty)
             }
 
-            // update filter
-            // we fetch all changes from [filter.block..best_block], so we advance the filter's
-            // block to `best_block +1`, the next from which we should start fetching changes again
-            let mut block = best_number + 1;
-            std::mem::swap(&mut filter.block, &mut block);
+            // the client polled the filter, so it is considered alive even if collecting the
+            // changes below fails
             filter.last_poll_timestamp = Instant::now();
 
-            (block, filter.kind.clone())
+            (filter.block, filter.kind.clone())
         };
 
-        match kind {
-            FilterKind::PendingTransaction(filter) => Ok(filter.drain().await),
+        let changes = match kind {
+            FilterKind::PendingTransaction(filter) => filter.drain().await,
             FilterKind::Block => {
                 // Note: we need to fetch the block hashes from inclusive range
                 // [start_block..best_block]
@@ -256,7 +254,7 @@ where
                     self.provider().canonical_hashes_range(start_block, end_block).map_err(
                         |_| EthApiError::HeaderRangeNotFound(start_block.into(), end_block.into()),
                     )?;
-                Ok(FilterChanges::Hashes(block_hashes))
+                FilterChanges::Hashes(block_hashes)
             }
             FilterKind::Log(filter) => {
                 let (from_block_number, to_block_number) = match filter.block_option {
@@ -292,9 +290,21 @@ where
                         self.inner.query_limits,
                     )
                     .await?;
-                Ok(FilterChanges::Logs(logs))
+                FilterChanges::Logs(logs)
             }
+        };
+
+        // Only advance the cursor once the changes for [start_block..=best_number] have been
+        // collected: if the request fails or its future is dropped mid poll, the next poll
+        // retries the same range instead of silently skipping it.
+        // See <https://github.com/paradigmxyz/reth/issues/26303>
+        let mut filters = self.inner.active_filters.inner.lock().await;
+        if let Some(filter) = filters.get_mut(&id) {
+            // a concurrent poll may have already advanced the cursor based on a newer tip
+            filter.block = filter.block.max(best_number + 1);
         }
+
+        Ok(changes)
     }
 
     /// Returns an array of all logs matching filter with given id.
@@ -2003,5 +2013,45 @@ mod tests {
         // Each block hash should be the hash of its own header, not derived from any other header
         assert_eq!(logs[0].block_hash, Some(expected_hashes[0])); // block 100
         assert_eq!(logs[1].block_hash, Some(expected_hashes[2])); // block 102
+    }
+
+    #[tokio::test]
+    async fn test_filter_changes_error_keeps_cursor() {
+        let provider = MockEthProvider::default();
+        provider.add_header(
+            FixedBytes::random(),
+            alloy_consensus::Header { number: 1, ..Default::default() },
+        );
+
+        let eth_api = build_test_eth_api(provider.clone());
+        let eth_filter = EthFilter::new(
+            eth_api,
+            EthFilterConfig::default().max_blocks_per_filter(2),
+            Runtime::test(),
+        );
+
+        // install a log filter at best block 1, i.e. the cursor starts at block 1
+        let id = eth_filter.new_filter(Filter::default()).await.unwrap();
+
+        // advance the chain past the configured max block range
+        for number in 2..=5 {
+            provider.add_header(
+                FixedBytes::random(),
+                alloy_consensus::Header { number, ..Default::default() },
+            );
+        }
+
+        let err = eth_filter.filter_changes(id.clone()).await.unwrap_err();
+        assert!(matches!(err, EthFilterError::QueryExceedsMaxBlocks(2)));
+
+        // the failed poll must not advance the cursor, otherwise the range is skipped silently
+        {
+            let filters = eth_filter.inner.active_filters.inner.lock().await;
+            assert_eq!(filters.get(&id).unwrap().block, 1);
+        }
+
+        // polling again yields the same error instead of an empty response
+        let err = eth_filter.filter_changes(id).await.unwrap_err();
+        assert!(matches!(err, EthFilterError::QueryExceedsMaxBlocks(2)));
     }
 }
