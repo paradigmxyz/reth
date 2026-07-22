@@ -22,6 +22,7 @@ use reth_network_peers::{mainnet_nodes, pk2id, sepolia_nodes, PeerId, TrustedPee
 use reth_network_types::{PeersConfig, SessionsConfig};
 use reth_storage_api::{
     noop::NoopProvider, BalProvider, BlockNumReader, BlockReader, HeaderProvider,
+    StateProviderFactory, StateRangeProviderFactory,
 };
 use reth_tasks::Runtime;
 use secp256k1::SECP256K1;
@@ -84,7 +85,10 @@ pub struct NetworkConfig<C, N: NetworkPrimitives = EthNetworkPrimitives> {
     pub status: UnifiedStatus,
     /// Sets the hello message for the p2p handshake in `RLPx`
     pub hello_message: HelloMessageWithProtocols,
-    /// Additional protocols to announce and handle in `RLPx`
+    /// Additional `RLPx` sub-protocols to announce and handle alongside `eth`.
+    ///
+    /// Does not cover `snap/2`, which is supported natively (see
+    /// [`NetworkConfigBuilder::with_snap`]).
     pub extra_protocols: RlpxSubProtocols,
     /// Whether to disable transaction gossip
     pub tx_gossip_disabled: bool,
@@ -160,6 +164,8 @@ impl<C, N> NetworkConfig<C, N>
 where
     N: NetworkPrimitives,
     C: BalProvider
+        + StateProviderFactory
+        + StateRangeProviderFactory
         + BlockReader<Block = N::Block, Receipt = N::Receipt, Header = N::BlockHeader>
         + HeaderProvider
         + Clone
@@ -207,7 +213,8 @@ pub struct NetworkConfigBuilder<N: NetworkPrimitives = EthNetworkPrimitives> {
     executor: Runtime,
     /// Sets the hello message for the p2p handshake in `RLPx`
     hello_message: Option<HelloMessageWithProtocols>,
-    /// The executor to use for spawning tasks.
+    /// Additional `RLPx` sub-protocols to announce and handle alongside `eth`. Does not cover
+    /// `snap/2`, which is supported natively (see [`NetworkConfigBuilder::with_snap`]).
     extra_protocols: RlpxSubProtocols,
     /// Head used to start set for the fork filter and status.
     head: Option<Head>,
@@ -228,6 +235,8 @@ pub struct NetworkConfigBuilder<N: NetworkPrimitives = EthNetworkPrimitives> {
     required_block_hashes: Vec<BlockNumHash>,
     /// Optional network id
     network_id: Option<u64>,
+    /// Whether to advertise the `snap/2` satellite protocol (EIP-8189) in the handshake.
+    snap_enabled: bool,
 }
 
 impl NetworkConfigBuilder<EthNetworkPrimitives> {
@@ -271,6 +280,7 @@ impl<N: NetworkPrimitives> NetworkConfigBuilder<N> {
             eth_max_message_size: MAX_MESSAGE_SIZE,
             required_block_hashes: Vec::new(),
             network_id: None,
+            snap_enabled: false,
         }
     }
 
@@ -542,8 +552,18 @@ impl<N: NetworkPrimitives> NetworkConfigBuilder<N> {
     }
 
     /// Adds a new additional protocol to the `RLPx` sub-protocol list.
+    ///
+    /// Not for `snap/2`, which is supported natively (see [`Self::with_snap`]).
     pub fn add_rlpx_sub_protocol(mut self, protocol: impl IntoRlpxSubProtocol) -> Self {
         self.extra_protocols.push(protocol);
+        self
+    }
+
+    /// Toggles advertisement of the `snap/2` satellite protocol (EIP-8189).
+    ///
+    /// Default off: snap/2 is only negotiated with peers when explicitly enabled.
+    pub const fn with_snap(mut self, snap_enabled: bool) -> Self {
+        self.snap_enabled = snap_enabled;
         self
     }
 
@@ -647,6 +667,7 @@ impl<N: NetworkPrimitives> NetworkConfigBuilder<N> {
             eth_max_message_size,
             required_block_hashes,
             network_id,
+            snap_enabled,
         } = self;
 
         let head = head.unwrap_or_else(|| Head {
@@ -664,9 +685,13 @@ impl<N: NetworkPrimitives> NetworkConfigBuilder<N> {
         let advertised_ip = nat.clone().and_then(|nat| nat.as_external_ip(listener_addr.port()));
 
         discovery_v5_builder = discovery_v5_builder.map(|mut builder| {
+            let fork_id = chain_spec.fork_id(&head);
             if let Some(network_stack_id) = NetworkStackId::id(&chain_spec) {
-                let fork_id = chain_spec.fork_id(&head);
                 builder = builder.fork(network_stack_id, fork_id)
+            } else {
+                // Custom Ethereum chains are not recognized by `NetworkStackId::id`, but still
+                // use the `eth` key for fork-aware discovery. Preserve any explicit override.
+                builder = builder.fork_if_unset(NetworkStackId::ETH, fork_id)
             }
 
             if let Some(ip) = advertised_ip {
@@ -679,6 +704,7 @@ impl<N: NetworkPrimitives> NetworkConfigBuilder<N> {
         let mut hello_message =
             hello_message.unwrap_or_else(|| HelloMessage::builder(peer_id).build());
         hello_message.port = listener_addr.port();
+        hello_message = hello_message.with_snap(snap_enabled);
 
         // set the status
         let mut status = UnifiedStatus::spec_builder(&chain_spec, &head);
@@ -775,6 +801,34 @@ mod tests {
     }
 
     #[test]
+    fn test_snap_advertisement_default_off() {
+        // snap/2 must not be advertised unless explicitly enabled.
+        let config = builder().build(NoopProvider::default());
+        assert!(config.hello_message.protocols.iter().all(|p| p.cap.name != "snap"));
+    }
+
+    #[test]
+    fn test_snap_advertisement_when_enabled() {
+        let config = builder().with_snap(true).build(NoopProvider::default());
+        let snap_caps =
+            config.hello_message.protocols.iter().filter(|p| p.cap.name == "snap").count();
+        assert_eq!(snap_caps, 1);
+        assert_eq!(
+            config
+                .hello_message
+                .protocols
+                .iter()
+                .find(|p| p.cap.name == "snap")
+                .unwrap()
+                .cap
+                .version,
+            2
+        );
+        // eth is still advertised alongside snap.
+        assert!(config.hello_message.protocols.iter().any(|p| p.cap.name == "eth"));
+    }
+
+    #[test]
     fn test_network_dns_defaults() {
         let config = builder().build(NoopProvider::default());
 
@@ -864,6 +918,45 @@ mod tests {
         let advertised_fork_id = *local_enr
             .get_decodable::<Vec<ForkId>>(fork_key)
             .expect("should read 'odyssey'")
+            .expect("should decode fork id list")
+            .first()
+            .expect("should be non-empty");
+
+        assert_eq!(advertised_fork_id, fork_id);
+    }
+
+    #[test]
+    fn test_discv5_fork_id_custom_chain_id_fallback() {
+        const GENESIS_TIME: u64 = 151_515;
+
+        let genesis = Genesis::default().with_timestamp(GENESIS_TIME);
+
+        let chain_spec = ChainSpecBuilder::default()
+            .chain(Chain::from_id(3151908))
+            .genesis(genesis)
+            .with_fork(EthereumHardfork::Shanghai, ForkCondition::Timestamp(GENESIS_TIME))
+            .build();
+
+        let fork_id = chain_spec.fork_id(&Head {
+            hash: chain_spec.genesis_hash(),
+            number: 0,
+            timestamp: GENESIS_TIME,
+            difficulty: U256::ZERO,
+            total_difficulty: U256::ZERO,
+        });
+
+        let config = builder()
+            .discovery_v5(reth_discv5::Config::builder((Ipv4Addr::LOCALHOST, 30303).into()))
+            .build_with_noop_provider(Arc::new(chain_spec));
+
+        let (local_enr, _, _, _) = build_local_enr(
+            &config.secret_key,
+            &config.discovery_v5_config.expect("should build config"),
+        );
+
+        let advertised_fork_id = *local_enr
+            .get_decodable::<Vec<ForkId>>(NetworkStackId::ETH)
+            .expect("should read 'eth'")
             .expect("should decode fork id list")
             .first()
             .expect("should be non-empty");

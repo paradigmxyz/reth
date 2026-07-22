@@ -30,8 +30,7 @@ itertools = { workspace = true, features = ["use_alloc"] }
 nybbles = { workspace = true, features = ["rlp"] }
 
 # reth
-revm-database.workspace = true
-revm-state.workspace = true
+revm.workspace = true
 
 # `serde` feature
 serde = { workspace = true, optional = true }
@@ -65,7 +64,6 @@ bincode.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 serde_with.workspace = true
-revm-state.workspace = true
 
 [features]
 default = ["std"]
@@ -85,8 +83,7 @@ std = [
     "serde?/std",
     "serde_with?/std",
     "serde_json/std",
-    "revm-database/std",
-    "revm-state/std",
+    "revm/std",
     "reth-codecs?/std",
     "alloy-eips/std",
 ]
@@ -102,8 +99,7 @@ serde = [
     "alloy-rpc-types-eth?/serde",
     "reth-primitives-traits/serde",
     "reth-codecs?/serde",
-    "revm-database/serde",
-    "revm-state/serde",
+    "revm/serde",
     "alloy-eips/serde",
 ]
 reth-codec = ["dep:reth-codecs", "dep:bytes", "dep:arrayvec"]
@@ -135,5 +131,6 @@ arbitrary = [
     "reth-codecs/arbitrary",
     "alloy-rpc-types-eth?/arbitrary",
     "alloy-eips/arbitrary",
+    "revm/arbitrary",
 ]
 rayon = ["dep:rayon"]

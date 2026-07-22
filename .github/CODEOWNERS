@@ -1,11 +1,11 @@
 *                           @gakonst
-crates/chain-state/         @fgimenez @mattsse
+crates/chain-state/         @mattsse
 crates/chainspec/           @Rjected @joshieDo @mattsse
 crates/cli/                 @mattsse @Rjected
 crates/config/              @shekhirin @mattsse @Rjected 
 crates/consensus/           @mattsse @Rjected
-crates/e2e-test-utils/      @mattsse @Rjected @klkvr @fgimenez
-crates/engine/              @mattsse @Rjected @mediocregopher @yongkangc
+crates/e2e-test-utils/      @mattsse @Rjected @klkvr
+crates/engine/              @mattsse @Rjected @mediocregopher
 crates/era/                 @mattsse
 crates/era-downloader/      @mattsse
 crates/era-utils/           @mattsse
@@ -36,15 +36,15 @@ crates/storage/db/          @joshieDo
 crates/storage/errors/      @joshieDo
 crates/storage/libmdbx-rs/  @shekhirin
 crates/storage/nippy-jar/   @joshieDo @shekhirin
-crates/storage/provider/    @joshieDo @shekhirin @yongkangc
+crates/storage/provider/    @joshieDo @shekhirin
 crates/storage/storage-api/ @joshieDo
 crates/tasks/               @mattsse @DaniPopes
 crates/tokio-util/          @mattsse 
 crates/tracing/             @mattsse @shekhirin
 crates/tracing-otlp/        @mattsse @Rjected 
-crates/transaction-pool/    @mattsse @yongkangc
-crates/trie/                @Rjected @shekhirin @mediocregopher @yongkangc
+crates/transaction-pool/    @mattsse
+crates/trie/                @Rjected @shekhirin @mediocregopher
 bin/reth/                   @mattsse @shekhirin @Rjected 
-bin/reth-bench-compare/     @mediocregopher @shekhirin @yongkangc
+bin/reth-bench-compare/     @mediocregopher @shekhirin
 etc/                        @Rjected @shekhirin
 .github/                    @gakonst @DaniPopes

@@ -19,18 +19,18 @@ use alloy_rpc_types_engine::{
     ExecutionData, ExecutionPayloadSidecar, ExecutionPayloadV1, ForkchoiceState,
 };
 use assert_matches::assert_matches;
-use reth_chain_state::{
-    test_utils::TestBlockBuilder, BlockState, ComputedTrieData, StateTrieOverlayManager,
-};
+use reth_chain_state::{test_utils::TestBlockBuilder, BlockState, StateTrieOverlayManager};
 use reth_chainspec::{ChainSpec, HOLESKY, MAINNET};
 use reth_engine_primitives::{EngineApiValidator, ForkchoiceStatus, NoopInvalidBlockHook};
 use reth_ethereum_consensus::EthBeaconConsensus;
-use reth_ethereum_engine_primitives::EthEngineTypes;
+use reth_ethereum_engine_primitives::{EthEngineTypes, EthPayloadAttributes};
 use reth_ethereum_primitives::{Block, EthPrimitives};
 use reth_evm_ethereum::MockEvmConfig;
+use reth_payload_builder::PayloadServiceCommand;
 use reth_primitives_traits::Block as _;
 use reth_provider::{test_utils::MockEthProvider, BalStoreHandle, InMemoryBalStore, RawBal};
 use reth_tasks::spawn_os_thread;
+use reth_trie_common::ComputedTrieData;
 use std::{
     collections::BTreeMap,
     str::FromStr,
@@ -153,6 +153,7 @@ struct TestHarness {
         FromEngine<EngineApiRequest<EthEngineTypes, EthPrimitives>, Block>,
     >,
     from_tree_rx: UnboundedReceiver<EngineApiEvent>,
+    payload_command_rx: UnboundedReceiver<PayloadServiceCommand<EthEngineTypes>>,
     blocks: Vec<ExecutedBlock>,
     action_rx: Receiver<PersistenceAction>,
     block_builder: TestBlockBuilder,
@@ -161,9 +162,13 @@ struct TestHarness {
 
 impl TestHarness {
     fn new(chain_spec: Arc<ChainSpec>) -> Self {
+        Self::with_config(chain_spec, TreeConfig::default().with_has_enough_parallelism(true))
+    }
+
+    fn with_config(chain_spec: Arc<ChainSpec>, tree_config: TreeConfig) -> Self {
         use std::sync::mpsc::channel;
         let (action_tx, action_rx) = channel();
-        Self::with_persistence_channel(chain_spec, action_tx, action_rx)
+        Self::with_persistence_channel_and_config(chain_spec, action_tx, action_rx, tree_config)
     }
 
     #[expect(dead_code)]
@@ -177,6 +182,20 @@ impl TestHarness {
         action_tx: Sender<PersistenceAction>,
         action_rx: Receiver<PersistenceAction>,
     ) -> Self {
+        Self::with_persistence_channel_and_config(
+            chain_spec,
+            action_tx,
+            action_rx,
+            TreeConfig::default().with_has_enough_parallelism(true),
+        )
+    }
+
+    fn with_persistence_channel_and_config(
+        chain_spec: Arc<ChainSpec>,
+        action_tx: Sender<PersistenceAction>,
+        action_rx: Receiver<PersistenceAction>,
+        tree_config: TreeConfig,
+    ) -> Self {
         let persistence_handle = PersistenceHandle::new(action_tx);
 
         let consensus = Arc::new(EthBeaconConsensus::new(chain_spec.clone()));
@@ -186,9 +205,9 @@ impl TestHarness {
         let payload_validator = MockEngineValidator;
 
         let (from_tree_tx, from_tree_rx) = unbounded_channel();
-        let tree_config =
-            TreeConfig::default().with_legacy_state_root(false).with_has_enough_parallelism(true);
         let runtime = reth_tasks::Runtime::test();
+        let state_trie_overlays =
+            StateTrieOverlayManager::new(runtime.state_trie_overlay_worker_pool());
 
         let header = chain_spec.genesis_header().clone();
         let header = SealedHeader::seal_slow(header);
@@ -198,11 +217,11 @@ impl TestHarness {
             tree_config.invalid_header_hit_eviction_threshold(),
             header.num_hash(),
             EngineApiKind::Ethereum,
-            runtime.state_trie_overlay_worker_pool(),
+            state_trie_overlays.clone(),
         );
         let canonical_in_memory_state = CanonicalInMemoryState::with_head(header, None, None);
 
-        let (to_payload_service, _payload_command_rx) = unbounded_channel();
+        let (to_payload_service, payload_command_rx) = unbounded_channel();
         let payload_builder = PayloadBuilderHandle::new(to_payload_service);
 
         let evm_config = MockEvmConfig::default();
@@ -212,9 +231,10 @@ impl TestHarness {
             consensus.clone(),
             evm_config.clone(),
             payload_validator,
-            TreeConfig::default(),
+            tree_config.clone(),
             Box::new(NoopInvalidBlockHook::default()),
             changeset_cache.clone(),
+            state_trie_overlays,
             runtime.clone(),
         );
 
@@ -240,6 +260,7 @@ impl TestHarness {
             to_tree_tx: tree.incoming_tx.clone(),
             tree,
             from_tree_rx,
+            payload_command_rx,
             blocks: vec![],
             action_rx,
             block_builder,
@@ -421,6 +442,7 @@ impl ValidatorTestHarness {
             TreeConfig::default(),
             Box::new(NoopInvalidBlockHook::default()),
             changeset_cache,
+            StateTrieOverlayManager::default(),
             reth_tasks::Runtime::test(),
         );
 
@@ -454,7 +476,6 @@ impl ValidatorTestHarness {
         let ctx = TreeCtx::new(
             &mut self.harness.tree.state,
             &self.harness.tree.canonical_in_memory_state,
-            &mut self.harness.tree.pending_sparse_trie_prune,
         );
         let result = self.validator.validate_block(block, ctx);
         self.metrics.record_validation(result.is_ok());
@@ -586,7 +607,44 @@ fn on_new_persisted_block_queues_sparse_trie_prune_request() {
 
     test_harness.tree.on_new_persisted_block().unwrap();
 
-    assert!(test_harness.tree.pending_sparse_trie_prune.is_some());
+    assert!(test_harness.tree.state.pending_sparse_trie_prune());
+}
+
+#[test]
+fn on_new_persisted_block_queues_sparse_trie_prune_with_in_memory_blocks() {
+    let blocks: Vec<_> = TestBlockBuilder::eth().get_executed_blocks(1..4).collect();
+    let mut test_harness = TestHarness::new(MAINNET.clone()).with_blocks(blocks.clone());
+    test_harness
+        .tree
+        .persistence_state
+        .finish(blocks[0].recovered_block().hash(), blocks[0].recovered_block().number);
+
+    test_harness.tree.on_new_persisted_block().unwrap();
+
+    assert!(test_harness.tree.state.pending_sparse_trie_prune());
+}
+
+#[test]
+fn on_new_persisted_block_skips_sparse_trie_prune_when_state_root_task_disabled() {
+    let blocks: Vec<_> = TestBlockBuilder::eth().get_executed_blocks(1..4).collect();
+    let configs = [
+        TreeConfig::default().with_has_enough_parallelism(false),
+        TreeConfig::default().with_has_enough_parallelism(true).with_state_root_fallback(true),
+        TreeConfig::default().with_has_enough_parallelism(true).with_skip_state_root(true),
+    ];
+
+    for config in configs {
+        let mut test_harness = TestHarness::new(MAINNET.clone()).with_blocks(blocks.clone());
+        test_harness.tree.config = config;
+        test_harness
+            .tree
+            .persistence_state
+            .finish(blocks[0].recovered_block().hash(), blocks[0].recovered_block().number);
+
+        test_harness.tree.on_new_persisted_block().unwrap();
+
+        assert!(!test_harness.tree.state.pending_sparse_trie_prune());
+    }
 }
 
 #[test]
@@ -594,11 +652,49 @@ fn remove_blocks_clears_pending_sparse_trie_prune_request() {
     let mut test_harness = TestHarness::new(MAINNET.clone());
     test_harness.tree.persistence_state.last_persisted_block =
         BlockNumHash { hash: B256::random(), number: 10 };
-    test_harness.tree.pending_sparse_trie_prune = Some(Default::default());
+    test_harness.tree.state.set_pending_sparse_trie_prune(true);
 
     test_harness.tree.remove_blocks(9);
 
-    assert!(test_harness.tree.pending_sparse_trie_prune.is_none());
+    assert!(!test_harness.tree.state.pending_sparse_trie_prune());
+}
+
+#[test]
+fn process_payload_attributes_shares_sparse_trie_during_validation_fallback() {
+    let config = TreeConfig::default()
+        .with_has_enough_parallelism(true)
+        .with_state_root_fallback(true)
+        .with_share_sparse_trie_with_payload_builder(true);
+    let blocks: Vec<_> = TestBlockBuilder::eth().get_executed_blocks(1..2).collect();
+    let mut test_harness = TestHarness::with_config(MAINNET.clone(), config).with_blocks(blocks);
+    let head =
+        test_harness.blocks.last().unwrap().recovered_block().clone_sealed_header().clone_header();
+    let head_hash = test_harness.blocks.last().unwrap().recovered_block().hash();
+    let state = test_harness.fcu_state(head_hash);
+    test_harness.tree.state.set_pending_sparse_trie_prune(true);
+
+    let updated = test_harness.tree.process_payload_attributes(
+        EthPayloadAttributes {
+            timestamp: head.timestamp() + 1,
+            prev_randao: B256::ZERO,
+            suggested_fee_recipient: Default::default(),
+            withdrawals: None,
+            parent_beacon_block_root: None,
+            slot_number: None,
+            target_gas_limit: None,
+        },
+        &head,
+        state,
+    );
+
+    assert_eq!(updated.forkchoice_status(), ForkchoiceStatus::Valid);
+    assert!(!test_harness.tree.state.pending_sparse_trie_prune());
+
+    let command = test_harness.payload_command_rx.try_recv().unwrap();
+    let PayloadServiceCommand::BuildNewPayload(input, _, _) = command else {
+        panic!("expected build new payload command")
+    };
+    assert!(input.resources.state_root_handle().is_some());
 }
 
 #[tokio::test]
@@ -773,6 +869,7 @@ fn test_backpressure_waits_for_persistence_before_reading_incoming() {
         .tree
         .config
         .with_persistence_threshold(0)
+        .with_memory_block_buffer_target(0)
         .with_persistence_backpressure_threshold(1);
 
     let (persist_tx, persist_rx) = crossbeam_channel::bounded(1);
@@ -831,6 +928,27 @@ fn test_backpressure_waits_for_persistence_before_reading_incoming() {
     };
     let _ = test_harness.tree.on_engine_message(message).unwrap();
     assert_eq!(test_harness.tree.incoming.len(), 0);
+}
+
+#[test]
+fn test_backpressure_excludes_in_memory_buffer() {
+    for (canonical_tip, expected_backpressure) in [(14_u64, false), (15, true)] {
+        let blocks: Vec<_> =
+            TestBlockBuilder::eth().get_executed_blocks(1..canonical_tip + 1).collect();
+        let mut test_harness = TestHarness::new(MAINNET.clone()).with_blocks(blocks.clone());
+        test_harness.tree.config = test_harness
+            .tree
+            .config
+            .with_persistence_threshold(0)
+            .with_memory_block_buffer_target(5)
+            .with_persistence_backpressure_threshold(10);
+
+        let (_persist_tx, persist_rx) = crossbeam_channel::bounded(1);
+        let persisted = blocks.last().unwrap().recovered_block().num_hash();
+        test_harness.tree.persistence_state.start_save(persisted, persist_rx);
+
+        assert_eq!(test_harness.tree.should_backpressure(), expected_backpressure);
+    }
 }
 
 #[tokio::test]
@@ -1457,20 +1575,16 @@ fn test_on_new_payload_malformed_payload() {
     }
 }
 
-/// Test different `StateRootStrategy` paths: `StateRootTask` with empty/non-empty prefix sets,
-/// `Parallel`, `Synchronous`
+/// Test different state-root job paths: the sparse-trie job and the synchronous fallback.
 #[test]
 fn test_state_root_strategy_paths() {
     reth_tracing::init_test_tracing();
 
     let mut test_harness = TestHarness::new(MAINNET.clone());
 
-    // Test multiple scenarios to ensure different StateRootStrategy paths are taken:
-    // 1. `StateRootTask` with empty prefix_sets → uses payload_processor.spawn()
-    // 2. `StateRootTask` with non-empty prefix_sets → switches to `Parallel`, uses
-    //    spawn_cache_exclusive()
-    // 3. `Parallel` strategy → uses spawn_cache_exclusive()
-    // 4. `Synchronous` strategy → uses spawn_cache_exclusive()
+    // Test multiple scenarios to ensure different state-root job paths are taken:
+    // 1. The default strategy spawns the sparse-trie state-root task.
+    // 2. With state-root fallback enabled, the synchronous job computes the root directly.
 
     let s1 = include_str!("../../test-data/holesky/1.rlp");
     let data1 = Bytes::from_str(s1).unwrap();
@@ -1513,12 +1627,9 @@ fn test_state_root_strategy_paths() {
 
     assert!(outcome2.outcome.is_syncing(), "Second strategy path should work");
 
-    // This test passes if multiple StateRootStrategy scenarios work correctly,
-    // confirming that passing arguments directly doesn't break:
-    // - `StateRootTask` strategy with empty/non-empty prefix_sets
-    // - Dynamic strategy switching (StateRootTask → Parallel)
-    // - Parallel and Synchronous strategy paths
-    // - All parameter passing through the args struct
+    // This test passes if multiple state-root job scenarios work correctly:
+    // - the sparse-trie job
+    // - the synchronous job
 }
 
 // ================================================================================================
@@ -1527,7 +1638,7 @@ fn test_state_root_strategy_paths() {
 //
 // This test suite exercises `validate_block_with_state` across different scenarios including:
 // - Basic block validation with state root computation
-// - Strategy selection based on conditions (`StateRootTask`, `Parallel`, `Synchronous`)
+// - Strategy selection based on conditions (`StateRootTask`, `Synchronous`)
 // - Trie update retention and discard logic
 // - Error precedence handling (consensus vs execution errors)
 // - Different validation scenarios (valid, invalid consensus, invalid execution blocks)

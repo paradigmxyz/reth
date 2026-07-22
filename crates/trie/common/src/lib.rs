@@ -15,8 +15,8 @@ mod execution_witness;
 pub use execution_witness::ExecutionWitnessMode;
 
 /// Lazy initialization wrapper for trie data.
-mod lazy;
-pub use lazy::{LazyTrieData, SortedTrieData};
+mod trie_data;
+pub use trie_data::{ComputedTrieData, LazyTrieData, SortedTrieData};
 
 /// In-memory hashed state.
 mod hashed_state;
@@ -38,7 +38,9 @@ pub use account::TrieAccount;
 
 /// V2 proof targets and chunking.
 pub mod target_v2;
-pub use target_v2::{ChunkedMultiProofTargetsV2, MultiProofTargetsV2, ProofV2Target};
+pub use target_v2::{
+    ChunkedMultiProofTargetsV2, MultiProofTargetsV2, ProofV2Target, ProofV2TargetParent,
+};
 
 mod key;
 pub use key::{KeccakKeyHasher, KeyHasher};

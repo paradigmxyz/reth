@@ -731,14 +731,20 @@ where
             self.delete_discarded_blobs(discarded.iter());
             self.with_event_listener(|listener| listener.discarded_many(&discarded));
 
-            let discarded_hashes =
-                discarded.into_iter().map(|tx| *tx.hash()).collect::<HashSet<_>>();
+            // Linear search avoids allocating a hash set for small eviction batches.
+            const MAX_LINEAR_SEARCH_DISCARDS: usize = 4;
+            let discarded_hashes = (discarded.len() > MAX_LINEAR_SEARCH_DISCARDS)
+                .then(|| discarded.iter().map(|tx| *tx.hash()).collect::<HashSet<_>>());
+            let is_discarded = |hash: &TxHash| match &discarded_hashes {
+                Some(hashes) => hashes.contains(hash),
+                None => discarded.iter().any(|tx| tx.hash() == hash),
+            };
 
             // A newly added transaction may be immediately discarded, so we need to
             // adjust the result here
             for res in &mut results {
                 if let Ok(AddedTransactionOutcome { hash, .. }) = res &&
-                    discarded_hashes.contains(hash)
+                    is_discarded(hash)
                 {
                     *res = Err(PoolError::new(*hash, PoolErrorKind::DiscardedOnInsert))
                 }

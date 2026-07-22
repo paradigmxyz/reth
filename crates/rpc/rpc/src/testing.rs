@@ -17,7 +17,10 @@
 use alloy_consensus::{Header, Transaction};
 use alloy_eips::{eip1559::calculate_block_gas_limit, eip2718::Decodable2718};
 use alloy_evm::{Evm, RecoveredTx};
-use alloy_primitives::{map::HashSet, Address, Bytes, B256, U256};
+use alloy_primitives::{
+    map::{DefaultHashBuilder, HashSet},
+    Address, Bytes, B256, U256,
+};
 use alloy_rlp::Encodable;
 use alloy_rpc_types_engine::{ExecutionPayloadEnvelopeV5, ForkchoiceState, PayloadAttributes};
 use async_trait::async_trait;
@@ -41,7 +44,6 @@ use reth_rpc_eth_types::EthApiError;
 use reth_storage_api::{BlockReader, BlockReaderIdExt, HeaderProvider};
 use reth_transaction_pool::{BestTransactionsAttributes, PoolTransaction, TransactionPool};
 use revm::context::Block;
-use revm_primitives::map::DefaultHashBuilder;
 use std::sync::Arc;
 use tracing::debug;
 
@@ -278,8 +280,8 @@ where
     async fn build_block_v1(
         &self,
         request: TestingBuildBlockRequestV1,
+        use_pool_transactions: bool,
     ) -> Result<ExecutionPayloadEnvelopeV5, Eth::Error> {
-        let use_pool_transactions = request.transactions.is_empty();
         self.build_payload_v1(request, self.skip_invalid_transactions, use_pool_transactions)
             .await?
             .try_into_v5()
@@ -385,9 +387,19 @@ where
     /// work to the blocking pool to avoid stalling the async runtime.
     async fn build_block_v1(
         &self,
-        request: TestingBuildBlockRequestV1,
+        parent_block_hash: B256,
+        payload_attributes: PayloadAttributes,
+        transactions: Option<Vec<Bytes>>,
+        extra_data: Option<Bytes>,
     ) -> RpcResult<ExecutionPayloadEnvelopeV5> {
-        self.build_block_v1(request).await.map_err(Into::into)
+        let use_pool_transactions = transactions.is_none();
+        let request = TestingBuildBlockRequestV1 {
+            parent_block_hash,
+            payload_attributes,
+            transactions: transactions.unwrap_or_default(),
+            extra_data,
+        };
+        self.build_block_v1(request, use_pool_transactions).await.map_err(Into::into)
     }
 
     /// Handles `testing_commitBlockV1` by building on the current canonical head, then submitting

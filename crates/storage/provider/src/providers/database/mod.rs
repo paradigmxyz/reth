@@ -35,7 +35,7 @@ use reth_storage_api::{
 use reth_storage_errors::provider::ProviderResult;
 use reth_trie::HashedPostState;
 use reth_trie_db::ChangesetCache;
-use revm_database::BundleState;
+use revm::database::BundleState;
 use std::{
     ops::{RangeBounds, RangeInclusive},
     path::Path,
@@ -202,6 +202,11 @@ impl<N: NodeTypesWithDB> ProviderFactory<N> {
     pub fn with_changeset_cache(mut self, changeset_cache: ChangesetCache) -> Self {
         self.changeset_cache = changeset_cache;
         self
+    }
+
+    /// Returns the shared changeset cache.
+    pub(crate) fn changeset_cache(&self) -> ChangesetCache {
+        self.changeset_cache.clone()
     }
 
     /// Sets the minimum pruning distance for an existing [`ProviderFactory`].
