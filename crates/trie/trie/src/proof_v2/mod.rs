@@ -13,7 +13,7 @@ use crate::{
 };
 use alloy_primitives::{keccak256, B256, U256};
 use alloy_rlp::Encodable;
-use alloy_trie::{BranchNodeCompact, TrieMask};
+use alloy_trie::{BranchNodeCompact, TrieMask, EMPTY_ROOT_HASH};
 use reth_execution_errors::trie::StateProofError;
 use reth_trie_common::{
     prefix_set::PrefixSet, BranchNodeMasks, BranchNodeRef, BranchNodeV2, Nibbles, ProofTrieNodeV2,
@@ -1734,6 +1734,31 @@ where
         // Create a mutable storage value encoder
         let mut storage_value_encoder = StorageValueEncoder;
         self.root_node(&mut storage_value_encoder)
+    }
+
+    /// Calculates the storage trie root hash for `hashed_address`.
+    ///
+    /// If the trie cursor can prove that the current storage trie has no in-memory overlay updates
+    /// and the persisted root branch carries a cached root hash, this avoids rebuilding the root
+    /// node just to hash it again. Otherwise it falls back to the normal root-node calculation.
+    pub fn storage_root_hash(&mut self, hashed_address: B256) -> Result<B256, StateProofError> {
+        self.hashed_cursor.set_hashed_address(hashed_address);
+
+        if self.hashed_cursor.is_storage_empty()? {
+            return Ok(EMPTY_ROOT_HASH)
+        }
+
+        self.trie_cursor.set_hashed_address(hashed_address);
+        if self.prefix_set.is_empty()
+            && let Some(root_hash) = self.trie_cursor.root_hash_if_unchanged()?
+        {
+            return Ok(root_hash)
+        }
+
+        let mut storage_value_encoder = StorageValueEncoder;
+        let root_node = self.root_node(&mut storage_value_encoder)?;
+        self.compute_root_hash(&[root_node])?
+            .ok_or_else(|| StateProofError::TrieInconsistency("storage root node missing".into()))
     }
 }
 

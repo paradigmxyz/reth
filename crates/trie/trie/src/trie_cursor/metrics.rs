@@ -187,4 +187,12 @@ impl<'metrics, C: TrieStorageCursor> TrieStorageCursor for InstrumentedTrieCurso
     fn set_hashed_address(&mut self, hashed_address: B256) {
         self.cursor.set_hashed_address(hashed_address)
     }
+
+    fn root_hash_if_unchanged(&mut self) -> Result<Option<B256>, DatabaseError> {
+        let start = Instant::now();
+        self.metrics.seek_exact_count += 1;
+        let result = self.cursor.root_hash_if_unchanged();
+        self.metrics.total_duration += start.elapsed();
+        result
+    }
 }
