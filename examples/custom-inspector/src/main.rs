@@ -10,21 +10,20 @@
 
 #![warn(unused_crate_dependencies)]
 
+use alloy_eips::BlockNumberOrTag;
 use alloy_primitives::Address;
+use alloy_rpc_types_eth::{state::EvmOverrides, TransactionRequest};
 use clap::Parser;
 use evm2::{
-    evm::{CacheDB, Db},
     interpreter::{opcode::OpCode, Interpreter},
     BaseEvmTypes, Inspector,
 };
 use futures_util::StreamExt;
 use reth_ethereum::{
     cli::{chainspec::EthereumChainSpecParser, interface::Cli},
-    evm::primitives::{database::StateProviderDatabase, ConfigureEvm},
     node::{builder::NodeHandle, EthereumNode},
     pool::TransactionPool,
-    rpc::api::eth::helpers::Trace,
-    storage::{BlockReaderIdExt, StateProviderFactory},
+    rpc::api::eth::helpers::{Call, Trace},
 };
 
 fn main() {
@@ -40,7 +39,7 @@ fn main() {
             // get an instance of the `eth_` API handler
             let eth_api = node.rpc_registry.eth_api().clone();
 
-            println!("Spawning inspect task!");
+            println!("Spawning trace task!");
 
             // Spawn an async block to listen for transactions.
             node.task_executor.spawn_task(async move {
@@ -52,41 +51,36 @@ fn main() {
                     if let Some(recipient) = tx.to() &&
                         args.is_match(&recipient)
                     {
-                        let Some(header) = (match node.provider.latest_header() {
-                            Ok(header) => header,
-                            Err(err) => {
-                                eprintln!("failed to load latest header: {err}");
-                                continue;
-                            }
-                        }) else {
-                            eprintln!("latest header is unavailable");
-                            continue;
-                        };
+                        // convert the pool transaction
+                        let call_request =
+                            TransactionRequest::from_recovered_transaction(tx.to_consensus());
+                        let inspect_api = eth_api.clone();
+                        let result = eth_api
+                            .spawn_with_call_at(
+                                call_request,
+                                BlockNumberOrTag::Latest.into(),
+                                EvmOverrides::default(),
+                                move |db, evm_env, tx_env| {
+                                    let mut dummy_inspector = DummyInspector::default();
+                                    // execute the transaction on a blocking task and await the
+                                    // inspector result
+                                    inspect_api.inspect(
+                                        db,
+                                        evm_env,
+                                        &tx_env,
+                                        &mut dummy_inspector,
+                                    )?;
+                                    Ok(dummy_inspector)
+                                },
+                            )
+                            .await;
 
-                        let state = match node.provider.latest() {
-                            Ok(state) => state,
-                            Err(err) => {
-                                eprintln!("failed to load latest state: {err}");
-                                continue;
-                            }
-                        };
-
-                        let evm_env = match node.evm_config.evm_env(header.header()) {
-                            Ok(env) => env,
-                            Err(err) => match err {},
-                        };
-                        let tx_env = node.evm_config.tx_env(tx.to_consensus());
-
-                        let mut db = CacheDB::new(Db::new(StateProviderDatabase::new(state)));
-                        let result =
-                            eth_api.inspect(&mut db, evm_env, &tx_env, DummyInspector::default());
-
-                        if let Ok((inspector, _)) = result {
+                        if let Ok(ret_val) = result {
                             let hash = tx.hash();
                             println!(
-                                "Inspector result for transaction {}:\n{}",
+                                "Inspector result for transaction {}: \n {}",
                                 hash,
-                                inspector.ret_val.join("\n")
+                                ret_val.ret_val.join("\n")
                             );
                         }
                     }
@@ -113,15 +107,20 @@ impl RethCliTxpoolExt {
     }
 }
 
-/// A dummy inspector that logs the opcodes and their corresponding program counter.
+/// A dummy inspector that logs the opcodes and their corresponding program counter for a
+/// transaction
 #[derive(Default, Debug, Clone)]
 struct DummyInspector {
     ret_val: Vec<String>,
 }
 
 impl Inspector<BaseEvmTypes> for DummyInspector {
+    /// This method is called at each step of the EVM execution.
+    /// It checks if the current opcode is valid and if so, it stores the opcode and its
+    /// corresponding program counter in the `ret_val` vector.
     fn step(&mut self, interp: &mut Interpreter<'_, '_, BaseEvmTypes>) {
-        let opcode = OpCode::new_or_unknown(interp.opcode());
-        self.ret_val.push(format!("{}: {}", interp.pc(), opcode));
+        if let Some(opcode) = OpCode::new(interp.opcode()) {
+            self.ret_val.push(format!("{}: {}", interp.pc(), opcode));
+        }
     }
 }

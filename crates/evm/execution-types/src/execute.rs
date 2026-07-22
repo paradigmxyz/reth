@@ -283,6 +283,8 @@ mod tests {
                     code_hash,
                     code: Some(&bytecode),
                 }),
+                created: false,
+                selfdestructed: false,
             })
             .unwrap();
         state.storage_wipe(wiped_address).unwrap();
@@ -317,7 +319,13 @@ mod tests {
             AccountInfoRef { balance: U256::from(1), nonce: 1, code_hash: B256::ZERO, code: None };
         let mut state = BlockStateAccumulator::new();
         state
-            .account(AccountChangeRef { address, original: Some(original), current: None })
+            .account(AccountChangeRef {
+                address,
+                original: Some(original),
+                current: None,
+                created: false,
+                selfdestructed: false,
+            })
             .unwrap();
 
         let indexed = IndexedBlockState::new(state);

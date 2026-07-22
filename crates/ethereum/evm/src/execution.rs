@@ -35,8 +35,8 @@ use evm2::Precompiles;
 use evm2::{
     bytecode::Bytecode as ExecutableBytecode,
     evm::{
-        AccountChange, AccountChangeRef, AccountInfo, BlockStateAccumulator, StateChangeSink,
-        StateChangeSource, StateChanges, StorageChange, SystemTx, BEACON_ROOTS_ADDRESS,
+        AccountChangeRef, AccountInfo, AccountInfoRef, BlockStateAccumulator, StateChangeSink,
+        StateChangeSource, StorageChange, SystemTx, BEACON_ROOTS_ADDRESS,
         BUILDER_DEPOSIT_REQUEST_ADDRESS, BUILDER_EXIT_REQUEST_ADDRESS,
         CONSOLIDATION_REQUEST_ADDRESS, HISTORY_STORAGE_ADDRESS, WITHDRAWAL_REQUEST_ADDRESS,
     },
@@ -80,7 +80,7 @@ sol! {
 
 /// Error returned by EVM-backed Ethereum execution.
 #[derive(Debug)]
-pub enum EthExecutionError<E = DynamicDatabaseError> {
+pub enum EthExecutionError<E = evm2::AnyError> {
     /// EVM rejected the transaction during validation.
     InvalidTx(EthInvalidTxError),
     /// EVM rejected or halted transaction execution before producing a Reth output.
@@ -105,24 +105,6 @@ pub enum EthExecutionError<E = DynamicDatabaseError> {
     /// Deposit request logs could not be decoded.
     DepositRequestDecode(String),
 }
-
-/// Database error returned through evm2's dynamic database interface.
-#[derive(Debug)]
-pub struct DynamicDatabaseError(String);
-
-impl DynamicDatabaseError {
-    fn new(error: impl core::fmt::Display) -> Self {
-        Self(error.to_string())
-    }
-}
-
-impl core::fmt::Display for DynamicDatabaseError {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        f.write_str(&self.0)
-    }
-}
-
-impl core::error::Error for DynamicDatabaseError {}
 
 impl<E> core::fmt::Display for EthExecutionError<E>
 where
@@ -153,7 +135,17 @@ where
     }
 }
 
-impl<E> core::error::Error for EthExecutionError<E> where E: core::error::Error + Send + 'static {}
+impl<E> core::error::Error for EthExecutionError<E>
+where
+    E: core::error::Error + Send + 'static,
+{
+    fn source(&self) -> Option<&(dyn core::error::Error + 'static)> {
+        match self {
+            Self::Database(error) => Some(error),
+            _ => None,
+        }
+    }
+}
 
 /// Ethereum transaction validation error returned by evm2 handlers.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -185,7 +177,7 @@ impl InvalidTxError for EthInvalidTxError {
     }
 
     fn as_any(&self) -> &(dyn Any + 'static) {
-        self
+        &self.0
     }
 }
 
@@ -603,8 +595,8 @@ fn map_handler_error<T: EvmTypes>(evm: &mut Evm<'_, T>, err: HandlerError) -> Et
     }
 }
 
-fn take_database_error<T: EvmTypes>(evm: &mut Evm<'_, T>, code: ErrorCode) -> DynamicDatabaseError {
-    DynamicDatabaseError::new(evm.database_mut().error(code))
+fn take_database_error<T: EvmTypes>(evm: &mut Evm<'_, T>, code: ErrorCode) -> evm2::AnyError {
+    evm.database_mut().error(code)
 }
 
 struct RethStateSink<'a> {
@@ -754,9 +746,9 @@ pub(crate) fn commit_detached_transaction<T: EvmTypes>(
     on_hashed_state_update: &mut impl FnMut(HashedPostState),
     output: TxResultWithState<T>,
 ) -> TxResult<T> {
-    let state_changes = output.state_changes;
+    let state_changes = output.pending_state;
     if evm.state().bal_builder().is_some() {
-        evm.state_mut().overlay_db_mut().bal_context.commit_bal(&state_changes);
+        evm.state_mut().overlay_db_mut().bal_context.commit_pending(&state_changes);
     }
 
     let result = {
@@ -1001,10 +993,14 @@ fn commit_state_changes<T: EvmTypes>(
     block_state: &mut BlockStateAccumulator,
     stream_hashed_state: bool,
     on_hashed_state_update: &mut impl FnMut(HashedPostState),
-    changes: &StateChanges,
+    changes: &[(Address, Option<AccountInfo>, Option<AccountInfo>)],
 ) {
-    if evm.state().bal_builder().is_some() {
-        evm.state_mut().overlay_db_mut().bal_context.commit_bal(changes);
+    for (address, original, current) in changes {
+        evm.state_mut().overlay_db_mut().bal_context.commit_account_change(
+            *address,
+            original.as_ref(),
+            current.as_ref(),
+        );
     }
     let result = {
         let mut sink = RethStateSink::new(
@@ -1012,7 +1008,15 @@ fn commit_state_changes<T: EvmTypes>(
             block_state,
             stream_hashed_state,
         );
-        let result = changes.visit(&mut sink);
+        let result = changes.iter().try_for_each(|(address, original, current)| {
+            sink.account(AccountChangeRef {
+                address: *address,
+                original: original.as_ref().map(AccountInfoRef::from_info),
+                current: current.as_ref().map(AccountInfoRef::from_info),
+                created: false,
+                selfdestructed: false,
+            })
+        });
         if result.is_ok() {
             sink.flush_streamed_hashed_state(on_hashed_state_update);
         }
@@ -1056,7 +1060,7 @@ pub(crate) fn post_block_balance_state_changes<T: EvmTypes>(
         return Ok(());
     }
 
-    let mut changes = StateChanges::default();
+    let mut changes = Vec::new();
 
     for (address, increment) in balance_increments {
         let original =
@@ -1072,10 +1076,7 @@ pub(crate) fn post_block_balance_state_changes<T: EvmTypes>(
         if original == current {
             continue
         }
-        let mut change = AccountChange::default();
-        change.original = original;
-        change.current = current;
-        changes.accounts.insert(address, change);
+        changes.push((address, original, current));
     }
 
     commit_state_changes(evm, block_state, stream_hashed_state, on_hashed_state_update, &changes);

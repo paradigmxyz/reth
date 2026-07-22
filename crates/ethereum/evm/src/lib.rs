@@ -337,24 +337,6 @@ pub struct EthBlockExecutionCtx<'a> {
     pub slot_number: Option<u64>,
 }
 
-impl EthBlockExecutionCtx<'_> {
-    #[cfg_attr(not(feature = "std"), allow(dead_code))]
-    fn block_execution_context(
-        &self,
-        deposit_contract_address: Option<Address>,
-    ) -> crate::execution::BlockExecutionContext<'_> {
-        crate::execution::BlockExecutionContext {
-            system_calls: Some(crate::execution::BlockSystemCalls {
-                parent_hash: self.parent_hash,
-                parent_beacon_block_root: self.parent_beacon_block_root,
-            }),
-            ommers: Some(self.ommers),
-            withdrawals: self.withdrawals.as_deref(),
-            deposit_contract_address,
-        }
-    }
-}
-
 /// Helper type with backwards compatible methods to obtain Ethereum executor providers.
 #[doc(hidden)]
 pub mod execute {
@@ -608,36 +590,6 @@ where
             extra_data: attributes.extra_data,
             slot_number: attributes.slot_number,
         })
-    }
-
-    #[cfg(feature = "std")]
-    fn pre_block_state_changes<'a, DB>(
-        &self,
-        db: DB,
-        env: EvmEnvFor<Self>,
-        block_number: u64,
-        ctx: EthBlockExecutionCtx<'a>,
-    ) -> Result<reth_evm::EvmState, Box<dyn core::error::Error + Send + Sync>>
-    where
-        Self: 'a,
-        DB: evm2::evm::DynDatabase + 'a,
-    {
-        let spec_id = env.spec.into();
-        let mut evm = self.block_executor_factory().build_evm_with_env(db, env);
-        let mut block_state = evm2::evm::BlockStateAccumulator::new();
-        crate::execution::pre_execution_system_call_state_changes(
-            &mut evm,
-            &mut block_state,
-            false,
-            &mut |_| {},
-            spec_id,
-            block_number,
-            ctx.block_execution_context(
-                self.chain_spec().deposit_contract().map(|contract| contract.address),
-            ),
-        )
-        .map_err(|err| -> Box<dyn core::error::Error + Send + Sync> { Box::new(err) })?;
-        Ok(block_state)
     }
 }
 

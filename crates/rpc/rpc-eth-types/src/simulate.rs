@@ -14,10 +14,14 @@ use alloy_rpc_types_eth::{
     state::StateOverride,
     BlockId, BlockOverrides, BlockTransactionsKind,
 };
-use evm2::{precompiles::MovePrecompileError, EvmFeatures, TxResult};
+use evm2::{
+    evm::{BlockStateAccumulator, StateChangeSource},
+    precompiles::MovePrecompileError,
+    EvmFeatures, TxResult,
+};
 use jsonrpsee_types::{error::INTERNAL_ERROR_CODE, ErrorObject};
 use reth_evm::{
-    execute::{BlockBuilder, BlockBuilderOutcome},
+    execute::{BlockBuilder, BlockBuilderOutcome, BlockExecutionError},
     BlockTransactionResult, Database, Evm as RethEvm, EvmEnv,
 };
 use reth_primitives_traits::{
@@ -294,10 +298,11 @@ pub fn apply_precompile_overrides(
 /// geth's per-call `sanitizeCall` behavior.
 ///
 /// [`TransactionRequest`]: alloy_rpc_types_eth::TransactionRequest
-#[expect(clippy::type_complexity)]
+#[expect(clippy::type_complexity, clippy::too_many_arguments)]
 pub fn execute_transactions<S, T, EvmTypes>(
     mut builder: S,
     state_provider: impl StateProvider,
+    accumulated_state: &mut BlockStateAccumulator,
     calls: Vec<RpcTxReq<T::Network>>,
     remaining_call_gas_limit: &mut Option<u64>,
     chain_id: u64,
@@ -390,9 +395,22 @@ where
     }
 
     let result = if compute_state_root {
-        builder.finish(state_provider, None)?
+        let mut cumulative_hashed_state = None;
+        let mut result = builder.finish_with_state_root(&state_provider, |output| {
+            output.state.inner().visit(accumulated_state).expect("infallible");
+            let hashed_state = state_provider.hashed_post_state(accumulated_state);
+            let state_root = state_provider
+                .state_root_with_updates(hashed_state.clone())
+                .map_err(BlockExecutionError::other)?;
+            cumulative_hashed_state = Some(hashed_state);
+            Ok(Some(state_root))
+        })?;
+        result.hashed_state = cumulative_hashed_state.expect("state root was computed");
+        result
     } else {
-        builder.finish(NoopProvider::default(), None)?
+        let result = builder.finish(NoopProvider::default(), None)?;
+        result.execution_state.inner().visit(accumulated_state).expect("infallible");
+        result
     };
 
     Ok((result, results))

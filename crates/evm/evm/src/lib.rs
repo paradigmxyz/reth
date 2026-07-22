@@ -452,22 +452,6 @@ pub trait ConfigureEvm: Clone + Debug + Send + Sync + Unpin {
         let ctx = self.context_for_next_block(parent, attributes)?;
         Ok(self.create_block_builder(evm, evm_env, parent, ctx))
     }
-
-    /// Applies block-level state changes required before transaction execution.
-    #[cfg(feature = "std")]
-    fn pre_block_state_changes<'a, DB>(
-        &self,
-        _db: DB,
-        _evm_env: EvmEnvFor<Self>,
-        _block_number: u64,
-        _ctx: ExecutionCtxFor<'a, Self>,
-    ) -> Result<EvmState, Box<dyn Error + Send + Sync>>
-    where
-        Self: 'a,
-        DB: DynDatabase + 'a,
-    {
-        Ok(EvmState::default())
-    }
 }
 
 /// JIT backend controls exposed by an EVM configuration.

@@ -338,7 +338,7 @@ where
                 num.into(),
                 None,
                 TracingInspectorConfig::default_parity(),
-                |tx_info, ctx| {
+                |tx_info, mut ctx| {
                     Ok(ctx
                         .take_inspector()
                         .into_parity_builder()

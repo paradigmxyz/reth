@@ -7,7 +7,10 @@ use alloy_primitives::{Address, B256, U256};
 use alloy_rpc_types_eth::{state::StateOverride, BlockOverrides};
 use evm2::{
     bytecode::Bytecode,
-    evm::{CacheDB, Db, DynDatabase},
+    evm::{
+        AccountChangeRef, AccountInfoRef, CacheDB, Database, Db, OverrideBlockHashes,
+        StateChangeSink, StorageChange, Tee,
+    },
 };
 use reth_errors::ProviderResult;
 use reth_evm::{database::StateProviderDatabase, EvmEnv};
@@ -19,11 +22,10 @@ use reth_trie::{HashedPostState, HashedStorage, MultiProofTargets};
 pub type StateCacheDb = CacheDB<Db<StateProviderDatabase<StateProviderTraitObjWrapper>>>;
 
 /// Applies RPC block overrides to an evm2 environment and state cache.
-pub fn apply_block_overrides<DB>(
-    overrides: BlockOverrides,
-    db: &mut CacheDB<DB>,
-    evm_env: &mut impl EvmEnv,
-) {
+pub fn apply_block_overrides<DB>(overrides: BlockOverrides, db: &mut DB, evm_env: &mut impl EvmEnv)
+where
+    DB: OverrideBlockHashes,
+{
     let BlockOverrides {
         number,
         difficulty,
@@ -71,15 +73,17 @@ pub fn apply_block_overrides<DB>(
 }
 
 /// Applies RPC state overrides to an evm2 state cache.
-pub fn apply_state_overrides<DB: DynDatabase>(
+pub fn apply_state_overrides<DB>(
     overrides: StateOverride,
-    db: &mut CacheDB<DB>,
-) -> Result<(), StateOverrideError<evm2::AnyError>> {
+    db: &mut DB,
+) -> Result<EvmState, StateOverrideError<<DB as Database>::Error>>
+where
+    DB: Database + StateChangeSink<Error = core::convert::Infallible>,
+{
+    let mut state = EvmState::default();
     for (address, account_override) in overrides {
-        let mut account = db
-            .get_account(&address)
-            .map_err(|code| StateOverrideError::Database(db.error(code)))?
-            .unwrap_or_default();
+        let original = db.get_account(&address).map_err(StateOverrideError::Database)?;
+        let mut account = original.clone().unwrap_or_default();
 
         if let Some(nonce) = account_override.nonce {
             account.nonce = nonce;
@@ -93,29 +97,43 @@ pub fn apply_state_overrides<DB: DynDatabase>(
             account.balance = balance;
         }
 
-        let storage = match (account_override.state, account_override.state_diff) {
+        let (storage, wipe_storage) = match (account_override.state, account_override.state_diff) {
             (Some(_), Some(_)) => return Err(StateOverrideError::BothStateAndStateDiff(address)),
-            (Some(state), None) => {
-                db.cache.storage.entry(address).or_default().wipe();
-                Some(state)
-            }
-            (None, Some(state)) => Some(state),
-            (None, None) => None,
+            (Some(state), None) => (Some(state), true),
+            (None, Some(state)) => (Some(state), false),
+            (None, None) => (None, false),
         };
 
-        db.insert_account_info(&address, account);
+        let mut sink = Tee::new(&mut *db, &mut state);
+        if let Some(code) = &account.code {
+            sink.bytecode(account.code_hash, code).expect("infallible state override update");
+        }
+        sink.account(AccountChangeRef {
+            address,
+            original: original.as_ref().map(AccountInfoRef::from_info),
+            current: Some(AccountInfoRef::from_info(&account)),
+            created: original.is_none(),
+            selfdestructed: false,
+        })
+        .expect("infallible state override update");
+
         if let Some(storage) = storage {
+            let mut changes = Vec::with_capacity(storage.len());
             for (key, value) in storage {
-                db.insert_account_storage(
-                    &address,
-                    &U256::from_be_bytes(key.0),
-                    &U256::from_be_bytes(value.0),
-                );
+                let key = U256::from_be_bytes(key.0);
+                let current = U256::from_be_bytes(value.0);
+                changes.push(StorageChange { address, key, original: !current, current });
+            }
+            if wipe_storage {
+                sink.storage_wipe(address).expect("infallible state override update");
+            }
+            for change in changes {
+                sink.storage(change).expect("infallible state override update");
             }
         }
     }
 
-    Ok(())
+    Ok(state)
 }
 
 /// Hack to get around 'higher-ranked lifetime error', see

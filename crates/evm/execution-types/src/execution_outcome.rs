@@ -7,7 +7,7 @@ use alloy_consensus::constants::KECCAK_EMPTY;
 use alloy_eips::eip7685::Requests;
 use alloy_primitives::{
     logs_bloom,
-    map::{AddressMap, B256Map, HashMap},
+    map::{AddressMap, AddressSet, B256Map, HashMap},
     Address, BlockNumber, Bloom, Log, B256, U256,
 };
 use evm2::evm::{
@@ -113,6 +113,8 @@ pub struct ExecutionOutcome<T = reth_ethereum_primitives::Receipt> {
     block_states: Vec<EvmState>,
     /// Per-block reverts.
     block_reverts: Vec<BlockReverts>,
+    /// Revert context retained when this outcome is split.
+    revert_prefix: Vec<BlockReverts>,
     /// The collection of receipts.
     /// Outer vector stores receipts for each block sequentially.
     /// The inner vector stores receipts ordered by transaction number.
@@ -134,6 +136,7 @@ impl<T> Default for ExecutionOutcome<T> {
             state: Default::default(),
             block_states: Default::default(),
             block_reverts: Default::default(),
+            revert_prefix: Default::default(),
             receipts: Default::default(),
             first_block: Default::default(),
             requests: Default::default(),
@@ -158,7 +161,31 @@ impl<T> ExecutionOutcome<T> {
         first_block: BlockNumber,
         requests: Vec<Requests>,
     ) -> Self {
-        Self { state: state.into(), block_states, block_reverts, receipts, first_block, requests }
+        Self {
+            state: state.into(),
+            block_states,
+            block_reverts,
+            revert_prefix: Vec::new(),
+            receipts,
+            first_block,
+            requests,
+        }
+    }
+
+    #[cfg(any(feature = "serde", feature = "serde-bincode-compat"))]
+    fn from_serialized_parts(
+        state: EvmState,
+        block_states: Vec<EvmState>,
+        block_reverts: Vec<BlockReverts>,
+        revert_prefix: Vec<BlockReverts>,
+        receipts: Vec<Vec<T>>,
+        first_block: BlockNumber,
+        requests: Vec<Requests>,
+    ) -> Self {
+        let mut value =
+            Self::from_parts(state, block_states, block_reverts, receipts, first_block, requests);
+        value.revert_prefix = revert_prefix;
+        value
     }
 
     /// Creates a new `ExecutionOutcome` from aggregate execution state and per-block reverts.
@@ -169,7 +196,7 @@ impl<T> ExecutionOutcome<T> {
         first_block: BlockNumber,
         requests: Vec<Requests>,
     ) -> Self {
-        let block_states = if block_reverts.len() <= 1 { vec![state.clone()] } else { Vec::new() };
+        let block_states = if receipts.len() == 1 { vec![state.clone()] } else { Vec::new() };
         Self::from_parts(state, block_states, block_reverts, receipts, first_block, requests)
     }
 
@@ -197,9 +224,7 @@ impl<T> ExecutionOutcome<T> {
         first_block: BlockNumber,
         requests: Vec<Requests>,
     ) -> Self {
-        // sort reverts by block number
-        let mut reverts = revert_init.into_iter().collect::<Vec<_>>();
-        reverts.sort_unstable_by_key(|a| a.0);
+        let mut reverts = revert_init;
 
         let mut accumulator = BlockStateAccumulator::new();
         for (address, (original, current, storage)) in state_init {
@@ -208,6 +233,8 @@ impl<T> ExecutionOutcome<T> {
                     address,
                     original: original.as_ref().map(account_info_ref_from_reth),
                     current: current.as_ref().map(account_info_ref_from_reth),
+                    created: false,
+                    selfdestructed: false,
                 })
                 .expect("infallible");
             for (slot, (original, current)) in storage {
@@ -222,9 +249,11 @@ impl<T> ExecutionOutcome<T> {
             accumulator.bytecode(code_hash, &bytecode.into()).expect("infallible");
         }
 
-        let block_reverts = reverts
-            .into_iter()
-            .map(|(_, reverts)| BlockReverts {
+        let block_reverts = (0..receipts.len())
+            .map(|offset| {
+                reverts.remove(&first_block.saturating_add(offset as u64)).unwrap_or_default()
+            })
+            .map(|reverts| BlockReverts {
                 accounts: reverts
                     .iter()
                     .filter_map(|(address, (original, _))| {
@@ -256,6 +285,7 @@ impl<T> ExecutionOutcome<T> {
             state: output.state,
             block_states: vec![block_state],
             block_reverts: vec![block_reverts],
+            revert_prefix: Vec::new(),
             receipts: vec![output.result.receipts],
             first_block: block_number,
             requests: vec![output.result.requests],
@@ -471,13 +501,25 @@ impl<T> ExecutionOutcome<T> {
 
         // +1 is for number of blocks that we have as index is included.
         let new_len = index + 1;
+        let removed_blocks = self.receipts.len() - new_len;
+        let block_state_prefix = self.block_states.len().saturating_sub(self.receipts.len());
         // remove receipts
         self.receipts.truncate(new_len);
         // remove requests
         self.requests.truncate(new_len);
         // Revert last n reverts.
-        self.block_reverts.truncate(new_len);
-        self.truncate_block_states(new_len);
+        let revert_index = self.block_reverts.len().saturating_sub(removed_blocks);
+        if self.block_states.is_empty() {
+            let state = Self::revert_state(
+                self.state.inner(),
+                &self.revert_prefix,
+                &self.block_reverts,
+                &self.block_reverts[revert_index..],
+            );
+            self.state = state.into();
+        }
+        self.block_reverts.truncate(revert_index);
+        self.truncate_block_states(block_state_prefix + new_len);
 
         true
     }
@@ -511,8 +553,8 @@ impl<T> ExecutionOutcome<T> {
         if at_idx < higher_state.requests.len() {
             higher_state.requests = higher_state.requests.split_off(at_idx);
         }
-        higher_state.block_reverts.drain(..at_idx.min(higher_state.block_reverts.len()));
-        higher_state.drop_first_block_states(at_idx);
+        let revert_count = at_idx.min(higher_state.block_reverts.len());
+        higher_state.revert_prefix.extend(higher_state.block_reverts.drain(..revert_count));
         higher_state.first_block = at;
 
         (Some(lower_state), higher_state)
@@ -528,6 +570,7 @@ impl<T> ExecutionOutcome<T> {
             state: other_state,
             block_states: other_block_states,
             mut block_reverts,
+            revert_prefix: _,
             receipts,
             requests,
             ..
@@ -544,6 +587,19 @@ impl<T> ExecutionOutcome<T> {
         self.requests.extend(requests);
     }
 
+    /// Prepends state changes without overriding existing changes.
+    ///
+    /// Reverts, receipts, and requests are not updated.
+    pub fn prepend_state(&mut self, other: EvmState) {
+        if !self.block_states.is_empty() {
+            self.block_states.insert(0, other.clone());
+        }
+        let mut accumulator = BlockStateAccumulator::new();
+        state::extend_execution_state(&mut accumulator, &other);
+        state::extend_execution_state(&mut accumulator, self.state.inner());
+        self.state = accumulator.into();
+    }
+
     fn truncate_block_states(&mut self, new_len: usize) {
         if !self.block_states.is_empty() {
             self.block_states.truncate(new_len);
@@ -551,15 +607,107 @@ impl<T> ExecutionOutcome<T> {
         }
     }
 
-    fn drop_first_block_states(&mut self, n: usize) {
-        if !self.block_states.is_empty() {
-            self.block_states.drain(..n.min(self.block_states.len()));
-            self.state = Self::aggregate_block_states(&self.block_states).into();
+    fn revert_state(
+        state: &EvmState,
+        revert_prefix: &[BlockReverts],
+        all_reverts: &[BlockReverts],
+        removed_reverts: &[BlockReverts],
+    ) -> EvmState {
+        let mut accounts = state
+            .accounts()
+            .map(|(address, account)| (address, account.clone()))
+            .collect::<AddressMap<_>>();
+        let mut storage_wipes = state.storage_wipes().collect::<AddressSet>();
+        let mut storage = state
+            .storage()
+            .map(|(key, value)| ((key.address(), key.key()), *value))
+            .collect::<BTreeMap<_, _>>();
+
+        let mut account_originals = AddressMap::default();
+        let mut storage_originals = BTreeMap::new();
+        for reverts in revert_prefix.iter().chain(all_reverts) {
+            for (&address, account) in &reverts.accounts {
+                account_originals
+                    .entry(address)
+                    .or_insert_with(|| account.as_ref().map(RevertAccount::to_account_info));
+            }
+            for (&address, storage_reverts) in &reverts.storage {
+                for (&key, &value) in &storage_reverts.slots {
+                    storage_originals.entry((address, key)).or_insert(value);
+                }
+            }
         }
+
+        for reverts in removed_reverts.iter().rev() {
+            for (&address, account) in &reverts.accounts {
+                let original = accounts
+                    .get(&address)
+                    .map(|account| account.original.clone())
+                    .unwrap_or_else(|| account_originals[&address].clone());
+                let current = account.as_ref().map(RevertAccount::to_account_info);
+                if original == current {
+                    accounts.remove(&address);
+                } else {
+                    accounts.insert(address, Tracked::from_parts(original, current));
+                }
+            }
+            for (&address, storage_reverts) in &reverts.storage {
+                if storage_reverts.wiped {
+                    if storage_reverts.previous_wipe {
+                        storage_wipes.insert(address);
+                    } else {
+                        storage_wipes.remove(&address);
+                    }
+                }
+                for (&key, &current) in &storage_reverts.slots {
+                    let original = storage
+                        .get(&(address, key))
+                        .map(|value| value.original)
+                        .unwrap_or_else(|| storage_originals[&(address, key)]);
+                    if (storage_wipes.contains(&address) && current.is_zero()) ||
+                        (!storage_wipes.contains(&address) && original == current)
+                    {
+                        storage.remove(&(address, key));
+                    } else {
+                        storage.insert((address, key), Tracked::from_parts(original, current));
+                    }
+                }
+            }
+        }
+
+        let mut reverted = BlockStateAccumulator::new();
+        for (&code_hash, code) in state.code() {
+            reverted.bytecode(code_hash, code).expect("infallible");
+        }
+        for address in storage_wipes {
+            reverted.storage_wipe(address).expect("infallible");
+        }
+        for ((address, key), value) in storage {
+            StateChangeSink::storage(
+                &mut reverted,
+                StorageChange { address, key, original: value.original, current: value.current },
+            )
+            .expect("infallible");
+        }
+        for (address, account) in accounts {
+            reverted
+                .account(AccountChangeRef {
+                    address,
+                    original: account.original.as_ref().map(AccountInfoRef::from_info),
+                    current: account.current.as_ref().map(AccountInfoRef::from_info),
+                    created: false,
+                    selfdestructed: false,
+                })
+                .expect("infallible");
+        }
+        reverted
     }
 
     fn extend_block_states(&mut self, other: Vec<EvmState>, other_receipts_len: usize) {
-        if self.block_states.len() == self.receipts.len() && other.len() == other_receipts_len {
+        if !self.block_states.is_empty() &&
+            self.block_states.len() >= self.receipts.len() &&
+            other.len() == other_receipts_len
+        {
             self.block_states.extend(other);
         } else {
             self.block_states.clear();
@@ -659,7 +807,7 @@ fn account_info_to_reth(info: &AccountInfo) -> Account {
     Account { nonce: info.nonce, balance: info.balance, bytecode_hash }
 }
 
-#[cfg(test)]
+#[cfg(all(test, any(feature = "serde", feature = "serde-bincode-compat")))]
 fn multi_block_outcome_for_serde() -> ExecutionOutcome {
     let address = Address::repeat_byte(0x42);
     let mut block1 = BlockStateAccumulator::new();
@@ -673,6 +821,8 @@ fn multi_block_outcome_for_serde() -> ExecutionOutcome {
                 code_hash: KECCAK_EMPTY,
                 code: None,
             }),
+            created: false,
+            selfdestructed: false,
         })
         .unwrap();
     StateChangeSink::storage(
@@ -697,6 +847,8 @@ fn multi_block_outcome_for_serde() -> ExecutionOutcome {
                 code_hash: KECCAK_EMPTY,
                 code: None,
             }),
+            created: false,
+            selfdestructed: false,
         })
         .unwrap();
     block2.storage_wipe(address).unwrap();
@@ -713,7 +865,18 @@ fn multi_block_outcome_for_serde() -> ExecutionOutcome {
     ExecutionOutcome::from_block_states(10, [block1, block2], results)
 }
 
-#[cfg(test)]
+#[cfg(all(test, any(feature = "serde", feature = "serde-bincode-compat")))]
+fn receiptless_outcome_for_serde() -> ExecutionOutcome {
+    ExecutionOutcome::from_state_and_reverts(
+        EvmState::default(),
+        vec![BlockReverts::default()],
+        Vec::new(),
+        10,
+        Vec::new(),
+    )
+}
+
+#[cfg(all(test, any(feature = "serde", feature = "serde-bincode-compat")))]
 fn assert_serde_preserves_block_operations(expected: ExecutionOutcome, actual: ExecutionOutcome) {
     assert_eq!(actual, expected);
 
@@ -742,6 +905,7 @@ mod serde_impl {
         receipts: &'a Vec<Vec<T>>,
         first_block: BlockNumber,
         requests: &'a Vec<Requests>,
+        revert_prefix: &'a [BlockReverts],
     }
 
     #[derive(Deserialize)]
@@ -752,6 +916,8 @@ mod serde_impl {
         receipts: Vec<Vec<T>>,
         first_block: BlockNumber,
         requests: Vec<Requests>,
+        #[serde(default)]
+        revert_prefix: Vec<BlockReverts>,
     }
 
     impl<T> Serialize for ExecutionOutcome<T>
@@ -765,10 +931,11 @@ mod serde_impl {
             ExecutionOutcomeSerde {
                 state: self.state.inner(),
                 block_states: &self.block_states,
-                block_reverts: self.block_reverts(),
+                block_reverts: &self.block_reverts,
                 receipts: &self.receipts,
                 first_block: self.first_block,
                 requests: &self.requests,
+                revert_prefix: &self.revert_prefix,
             }
             .serialize(serializer)
         }
@@ -783,10 +950,11 @@ mod serde_impl {
             D: Deserializer<'de>,
         {
             let value = ExecutionOutcomeSerdeOwned::<T>::deserialize(deserializer)?;
-            Ok(Self::from_parts(
+            Ok(Self::from_serialized_parts(
                 value.state,
                 value.block_states,
                 value.block_reverts,
+                value.revert_prefix,
                 value.receipts,
                 value.first_block,
                 value.requests,
@@ -828,6 +996,8 @@ pub(super) mod serde_bincode_compat {
         first_block: BlockNumber,
         #[expect(clippy::owned_cow)]
         requests: Cow<'a, Vec<Requests>>,
+        #[serde(default)]
+        revert_prefix: Vec<super::BlockReverts>,
     }
 
     impl<'a, T> From<&'a super::ExecutionOutcome<T>> for ExecutionOutcome<'a>
@@ -848,6 +1018,7 @@ pub(super) mod serde_bincode_compat {
                     .collect(),
                 first_block: value.first_block,
                 requests: Cow::Borrowed(&value.requests),
+                revert_prefix: value.revert_prefix.clone(),
             }
         }
     }
@@ -857,10 +1028,11 @@ pub(super) mod serde_bincode_compat {
         T: Receipt,
     {
         fn from(value: ExecutionOutcome<'_>) -> Self {
-            Self::from_parts(
+            Self::from_serialized_parts(
                 value.state.into_owned(),
                 value.block_states,
                 value.block_reverts,
+                value.revert_prefix,
                 value
                     .receipts
                     .into_iter()
@@ -910,7 +1082,7 @@ pub(super) mod serde_bincode_compat {
     mod tests {
         use super::super::{
             assert_serde_preserves_block_operations, multi_block_outcome_for_serde,
-            serde_bincode_compat, ExecutionOutcome,
+            receiptless_outcome_for_serde, serde_bincode_compat, ExecutionOutcome,
         };
         use reth_ethereum_primitives::Receipt;
         use serde::{Deserialize, Serialize};
@@ -930,6 +1102,14 @@ pub(super) mod serde_bincode_compat {
             let encoded = bincode::serialize(&data).unwrap();
             let decoded = bincode::deserialize::<Data<Receipt>>(&encoded).unwrap();
             assert_serde_preserves_block_operations(data.data, decoded.data);
+
+            for expected in
+                [multi_block_outcome_for_serde().split_at(11).1, receiptless_outcome_for_serde()]
+            {
+                let encoded = bincode::serialize(&Data { data: expected.clone() }).unwrap();
+                let decoded = bincode::deserialize::<Data<Receipt>>(&encoded).unwrap();
+                assert_eq!(decoded.data, expected);
+            }
         }
     }
 }
@@ -949,6 +1129,22 @@ mod tests {
         ExecutionOutcome::new_empty(first_block).with_receipts(receipts).with_requests(requests)
     }
 
+    fn balance_state(address: Address, original: u64, current: u64) -> EvmState {
+        let original = AccountInfo::default().with_balance(U256::from(original));
+        let current = AccountInfo::default().with_balance(U256::from(current));
+        let mut state = BlockStateAccumulator::new();
+        state
+            .account(AccountChangeRef {
+                address,
+                original: Some(AccountInfoRef::from_info(&original)),
+                current: Some(AccountInfoRef::from_info(&current)),
+                created: false,
+                selfdestructed: false,
+            })
+            .unwrap();
+        state
+    }
+
     #[cfg(feature = "serde")]
     #[test]
     fn serde_roundtrip_preserves_multi_block_operations() {
@@ -957,6 +1153,14 @@ mod tests {
         let actual = bincode::deserialize(&encoded).unwrap();
 
         assert_serde_preserves_block_operations(expected, actual);
+
+        for expected in
+            [multi_block_outcome_for_serde().split_at(11).1, receiptless_outcome_for_serde()]
+        {
+            let encoded = bincode::serialize(&expected).unwrap();
+            let actual = bincode::deserialize::<ExecutionOutcome>(&encoded).unwrap();
+            assert_eq!(actual, expected);
+        }
     }
 
     #[test]
@@ -1200,6 +1404,150 @@ mod tests {
         // Assert that the revert_to method returns false when attempting to revert to a block
         // number less than the initial block number.
         assert!(!exec_res.revert_to(10));
+    }
+
+    #[test]
+    fn revert_to_restores_state_loaded_with_reverts() {
+        let address = Address::repeat_byte(0x42);
+        let states = [balance_state(address, 0, 1), balance_state(address, 1, 2)];
+        let state = ExecutionOutcomeState::from_block_states(states);
+        let (state, _, block_reverts) = state.into_parts();
+        let mut outcome =
+            ExecutionOutcome::<reth_ethereum_primitives::Receipt>::from_state_and_reverts(
+                state,
+                block_reverts,
+                vec![vec![], vec![]],
+                1,
+                vec![],
+            );
+
+        assert!(outcome.revert_to(1));
+        assert_eq!(
+            outcome.state.account_state(&address).unwrap().current.as_ref().unwrap().balance,
+            U256::from(1)
+        );
+    }
+
+    #[test]
+    fn split_retains_full_state_in_higher_outcome() {
+        let address = Address::repeat_byte(0x42);
+        let results = vec![BlockExecutionResult::default(), BlockExecutionResult::default()];
+        let outcome = ExecutionOutcome::<reth_ethereum_primitives::Receipt>::from_block_states(
+            1,
+            [balance_state(address, 0, 1), balance_state(address, 1, 2)],
+            results,
+        );
+
+        let (_, higher) = outcome.split_at(2);
+        let account = higher.state.account_state(&address).unwrap();
+        assert_eq!(account.original.as_ref().unwrap().balance, U256::ZERO);
+        assert_eq!(account.current.as_ref().unwrap().balance, U256::from(2));
+    }
+
+    #[test]
+    fn split_then_revert_retains_prefix_original() {
+        let address = Address::repeat_byte(0x42);
+        let results = vec![BlockExecutionResult::default(); 3];
+        let outcome = ExecutionOutcome::<reth_ethereum_primitives::Receipt>::from_block_states(
+            1,
+            [
+                balance_state(address, 0, 1),
+                balance_state(address, 1, 2),
+                balance_state(address, 2, 0),
+            ],
+            results,
+        );
+
+        let (_, mut higher) = outcome.split_at(2);
+        assert!(higher.revert_to(2));
+        let account = higher.state.account_state(&address).unwrap();
+        assert_eq!(account.original.as_ref().unwrap().balance, U256::ZERO);
+        assert_eq!(account.current.as_ref().unwrap().balance, U256::from(2));
+    }
+
+    #[test]
+    fn split_then_revert_retains_prefix_without_block_states() {
+        let address = Address::repeat_byte(0x42);
+        let key = U256::from(1);
+        let block_reverts = [10, 11, 12]
+            .map(|value| BlockReverts {
+                accounts: AddressMap::from_iter([(
+                    address,
+                    Some(RevertAccount {
+                        balance: U256::from(value),
+                        code_hash: KECCAK_EMPTY,
+                        ..Default::default()
+                    }),
+                )]),
+                storage: AddressMap::from_iter([(
+                    address,
+                    StorageReverts {
+                        slots: BTreeMap::from([(key, U256::from(value))]),
+                        ..Default::default()
+                    },
+                )]),
+            })
+            .to_vec();
+        let outcome = ExecutionOutcome::<reth_ethereum_primitives::Receipt>::from_state_and_reverts(
+            EvmState::default(),
+            block_reverts,
+            vec![vec![], vec![], vec![]],
+            1,
+            vec![],
+        );
+
+        let (_, mut higher) = outcome.split_at(2);
+        assert_eq!(higher.block_reverts().len(), 2);
+        assert!(higher.revert_to(2));
+
+        let account = higher.state.account_state(&address).unwrap();
+        assert_eq!(account.original.as_ref().unwrap().balance, U256::from(10));
+        assert_eq!(account.current.as_ref().unwrap().balance, U256::from(12));
+        let (_, storage) = higher
+            .execution_state_ref()
+            .storage()
+            .find(|(storage_key, _)| storage_key.address() == address && storage_key.key() == key)
+            .unwrap();
+        assert_eq!(storage.original, U256::from(10));
+        assert_eq!(storage.current, U256::from(12));
+    }
+
+    #[test]
+    fn prepend_state_preserves_newer_changes() {
+        let address = Address::repeat_byte(0x42);
+        let mut outcome = ExecutionOutcome::<reth_ethereum_primitives::Receipt>::from_block_states(
+            1,
+            [balance_state(address, 1, 2)],
+            vec![BlockExecutionResult::default()],
+        );
+
+        outcome.prepend_state(balance_state(address, 0, 1));
+
+        let account = outcome.state.account_state(&address).unwrap();
+        assert_eq!(account.original.as_ref().unwrap().balance, U256::ZERO);
+        assert_eq!(account.current.as_ref().unwrap().balance, U256::from(2));
+        assert_eq!(outcome.receipts.len(), 1);
+    }
+
+    #[test]
+    fn new_init_aligns_sparse_reverts() {
+        let address = Address::repeat_byte(0x42);
+        let original = Account { balance: U256::from(5), ..Default::default() };
+        let current = Account { balance: U256::from(7), ..Default::default() };
+        let state_init =
+            AddressMap::from_iter([(address, (Some(original), Some(current), B256Map::default()))]);
+        let revert = AddressMap::from_iter([(address, (Some(Some(original)), vec![]))]);
+        let mut outcome = ExecutionOutcome::<reth_ethereum_primitives::Receipt>::new_init(
+            state_init,
+            HashMap::from_iter([(2, revert)]),
+            [],
+            vec![vec![], vec![]],
+            1,
+            vec![],
+        );
+
+        assert!(outcome.revert_to(1));
+        assert!(outcome.state.account_state(&address).is_none());
     }
 
     #[test]

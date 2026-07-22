@@ -168,6 +168,10 @@ where
         &mut self.evm
     }
 
+    fn execution_state(&self) -> reth_execution_types::EvmState {
+        self.block_state.clone()
+    }
+
     fn set_state_hook(&mut self, hook: impl FnMut(HashedPostState) + Send + 'static) -> bool {
         self.hashed_state_update_hook = Some(Box::new(hook));
         true
@@ -712,6 +716,12 @@ where
 
     fn evm_mut(&mut self) -> &mut Self::Evm {
         self.inner.evm_mut()
+    }
+
+    fn execution_state(&self) -> reth_execution_types::EvmState {
+        let mut state = self.state.clone();
+        let Ok(()) = self.inner.block_state.visit(&mut state);
+        state
     }
 
     fn set_state_hook(&mut self, hook: impl FnMut(HashedPostState) + Send + 'static) -> bool {

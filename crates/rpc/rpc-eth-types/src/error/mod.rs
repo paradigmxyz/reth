@@ -7,10 +7,11 @@ use alloy_rpc_types_eth::{error::EthRpcErrorCode, request::TransactionInputError
 use alloy_sol_types::{ContractError, RevertReason};
 use alloy_transport::{RpcError, TransportErrorKind};
 pub use api::{AsEthApiError, FromEthApiError, FromEvmError, IntoEthApiError};
-use core::time::Duration;
+use core::{error::Error, time::Duration};
 use evm2::{interpreter::InstrStop, registry::HandlerError};
 use evm2_inspectors::tracing::{DebugInspectorError, MuxError};
-use reth_errors::{BlockExecutionError, BlockValidationError, RethError};
+use reth_errors::{BlockExecutionError, BlockValidationError, ProviderError, RethError};
+use reth_evm::InternalBlockExecutionError;
 use reth_primitives_traits::transaction::{error::InvalidTransactionError, signed::RecoveryError};
 use reth_rpc_convert::{CallFeesError, EthTxEnvError, TransactionConversionError};
 use reth_rpc_server_types::result::{
@@ -467,9 +468,7 @@ impl From<DebugInspectorError> for EthApiError {
                 Self::Unsupported("JS Tracer is not enabled")
             }
             DebugInspectorError::MuxInspector(err) => err.into(),
-            DebugInspectorError::Database(err) => {
-                Self::Internal(RethError::msg(format!("{err:?}")))
-            }
+            DebugInspectorError::Database(err) => Self::Internal(RethError::other(err)),
             #[cfg(feature = "js-tracer")]
             DebugInspectorError::JsInspector(err) => err.into(),
             #[allow(unreachable_patterns)]
@@ -492,7 +491,11 @@ impl From<BlockExecutionError> for EthApiError {
         match error {
             BlockExecutionError::Validation(validation_error) => match validation_error {
                 BlockValidationError::InvalidTx { error, .. } => {
-                    if let Some(invalid_tx) =
+                    if let Some(invalid_tx) = error.as_any().downcast_ref::<HandlerError>() {
+                        Self::InvalidTransaction(RpcInvalidTransactionError::from(
+                            invalid_tx.clone(),
+                        ))
+                    } else if let Some(invalid_tx) =
                         error.as_any().downcast_ref::<InvalidTransactionError>()
                     {
                         Self::InvalidTransaction(RpcInvalidTransactionError::from(
@@ -518,6 +521,13 @@ impl From<BlockExecutionError> for EthApiError {
                 ))),
             },
             BlockExecutionError::Internal(internal_error) => {
+                let error: &(dyn Error + 'static) = match &internal_error {
+                    InternalBlockExecutionError::EVM { error, .. } |
+                    InternalBlockExecutionError::Other(error) => &**error,
+                };
+                if let Some(error) = find_provider_error(error) {
+                    return error.clone().into()
+                }
                 Self::Internal(RethError::Execution(BlockExecutionError::Internal(internal_error)))
             }
         }
@@ -526,7 +536,28 @@ impl From<BlockExecutionError> for EthApiError {
 
 impl From<evm2::AnyError> for EthApiError {
     fn from(error: evm2::AnyError) -> Self {
+        if let Some(error) = find_provider_error(&error) {
+            return error.clone().into()
+        }
         Self::EvmCustom(error.to_string())
+    }
+}
+
+fn find_provider_error<'a>(mut error: &'a (dyn Error + 'static)) -> Option<&'a ProviderError> {
+    loop {
+        if let Some(error) = error.downcast_ref::<ProviderError>() {
+            return Some(error)
+        }
+        if let Some(mut error) = error.downcast_ref::<evm2::AnyError>() {
+            loop {
+                if let Some(provider_error) = error.downcast_ref::<ProviderError>() {
+                    return Some(provider_error)
+                }
+                let Some(nested) = error.downcast_ref::<evm2::AnyError>() else { break };
+                error = nested;
+            }
+        }
+        error = error.source()?;
     }
 }
 
@@ -841,9 +872,10 @@ impl From<HandlerError> for RpcInvalidTransactionError {
                 Self::InvalidChainId
             }
             HandlerError::IntrinsicGasTooLow { .. } => Self::GasTooLow,
-            HandlerError::InsufficientFunds | HandlerError::OutOfFunds => {
-                Self::InsufficientFundsForTransfer
+            HandlerError::InsufficientFunds { cost, balance } => {
+                Self::InsufficientFunds { cost, balance }
             }
+            HandlerError::OutOfFunds => Self::InsufficientFundsForTransfer,
             HandlerError::RejectCallerWithCode => Self::SenderNoEOA,
             HandlerError::NonceOverflow => Self::NonceMaxValue,
             HandlerError::GasLimitMoreThanBlock { .. } |
@@ -1096,10 +1128,98 @@ mod tests {
     use alloy_primitives::b256;
     use alloy_sol_types::{Revert, SolError};
 
+    #[derive(Debug)]
+    struct HandlerValidationError(HandlerError);
+
+    impl core::fmt::Display for HandlerValidationError {
+        fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+            self.0.fmt(f)
+        }
+    }
+
+    impl core::error::Error for HandlerValidationError {}
+
+    impl reth_evm::InvalidTxError for HandlerValidationError {
+        fn as_any(&self) -> &(dyn core::any::Any + 'static) {
+            &self.0
+        }
+    }
+
+    #[derive(Debug)]
+    struct DatabaseExecutionError(evm2::AnyError);
+
+    impl core::fmt::Display for DatabaseExecutionError {
+        fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+            self.0.fmt(f)
+        }
+    }
+
+    impl core::error::Error for DatabaseExecutionError {
+        fn source(&self) -> Option<&(dyn core::error::Error + 'static)> {
+            Some(&self.0)
+        }
+    }
+
     #[test]
     fn timed_out_error() {
         let err = EthApiError::ExecutionTimedOut(Duration::from_secs(10));
         assert_eq!(err.to_string(), "execution aborted (timeout = 10s)");
+    }
+
+    #[test]
+    fn handler_insufficient_funds_preserves_cost_and_balance() {
+        let cost = U256::from(2);
+        let balance = U256::from(1);
+        let err =
+            RpcInvalidTransactionError::from(HandlerError::InsufficientFunds { cost, balance });
+
+        assert!(matches!(
+            err,
+            RpcInvalidTransactionError::InsufficientFunds {
+                cost: actual_cost,
+                balance: actual_balance,
+            } if actual_cost == cost && actual_balance == balance
+        ));
+    }
+
+    #[test]
+    fn block_execution_handler_error_preserves_rpc_error() {
+        let cost = U256::from(2);
+        let balance = U256::from(1);
+        let error = BlockValidationError::InvalidTx {
+            hash: B256::ZERO,
+            error: Box::new(HandlerValidationError(HandlerError::InsufficientFunds {
+                cost,
+                balance,
+            })),
+        };
+        let error = EthApiError::from(BlockExecutionError::Validation(error));
+
+        assert!(matches!(
+            error,
+            EthApiError::InvalidTransaction(RpcInvalidTransactionError::InsufficientFunds {
+                cost: actual_cost,
+                balance: actual_balance,
+            }) if actual_cost == cost && actual_balance == balance
+        ));
+    }
+
+    #[test]
+    fn block_execution_database_error_preserves_provider_error() {
+        let provider_error = ProviderError::BlockExpired { requested: 1, earliest_available: 2 };
+        let error = evm2::AnyError::new(evm2::AnyError::new(provider_error));
+        let error = EthApiError::from(BlockExecutionError::other(error));
+
+        assert!(matches!(error, EthApiError::PrunedHistoryUnavailable));
+
+        let provider_error = ProviderError::BlockExpired { requested: 1, earliest_available: 2 };
+        let error = InternalBlockExecutionError::EVM {
+            hash: B256::ZERO,
+            error: Box::new(DatabaseExecutionError(evm2::AnyError::new(provider_error))),
+        };
+        let error = EthApiError::from(BlockExecutionError::Internal(error));
+
+        assert!(matches!(error, EthApiError::PrunedHistoryUnavailable));
     }
 
     #[test]
