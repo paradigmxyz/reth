@@ -41,8 +41,6 @@ pub struct StateRootComputeOutcome {
     pub state_root: B256,
     /// The trie updates.
     pub trie_updates: Arc<TrieUpdates>,
-    /// Hashed post state produced while computing the state root.
-    pub hashed_state: Arc<HashedPostState>,
     /// Debug recorders taken from the sparse tries, keyed by `None` for account trie
     /// and `Some(address)` for storage tries.
     #[cfg(feature = "trie-debug")]
@@ -686,7 +684,6 @@ mod tests {
             .send(Ok(StateRootComputeOutcome {
                 state_root: B256::repeat_byte(0x42),
                 trie_updates: Arc::new(TrieUpdates::default()),
-                hashed_state: Arc::new(HashedPostState::default()),
                 #[cfg(feature = "trie-debug")]
                 debug_recorders: Vec::new(),
             }))

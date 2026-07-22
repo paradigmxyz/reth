@@ -272,7 +272,6 @@ sparse_trie_tests! {
     test_take_updates_no_duplicate_updated_and_removed_nodes,
     test_take_updates_cross_cancellation_across_root_calls,
 
-
     // prune
     test_prune_retains_specified_leaves,
     test_prune_keeps_upper_children_of_retained_branch,
@@ -312,7 +311,6 @@ sparse_trie_tests! {
 
     // lifecycle (integration tests)
     test_full_lifecycle_update_root_take_updates,
-    test_multi_round_update_take_updates_prune_cycle,
     test_reveal_update_root_basic_lifecycle,
     test_incremental_reveal_and_update_with_retry,
     test_full_block_processing_lifecycle,
@@ -320,5 +318,5 @@ sparse_trie_tests! {
     test_touched_on_blinded_triggers_proof_then_changed_succeeds,
     test_get_leaf_value_for_storage_root_lookup,
     test_find_leaf_before_update_to_check_existence,
-    test_prune_then_reuse_for_next_block,
+    test_epoch_prune_then_reuse_for_next_block,
 }

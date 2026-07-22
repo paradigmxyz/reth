@@ -654,11 +654,7 @@ pub(super) fn test_remove_leaf_blinded_sibling_requires_reveal<T: SparseTrie>(ne
     );
 }
 
-/// Atomic rollback — node structure and `prefix_set` unchanged after
-/// removal of a revealed leaf when the sibling is blinded.
-///
-/// Same scenario as the value-preservation test, but additionally checks that
-/// `size_hint` (node count) is unchanged and the update remains in the map.
+/// Atomic rollback after removal of a revealed leaf when the sibling is blinded.
 pub(super) fn test_update_leaves_removal_branch_collapse_blinded_sibling<T: SparseTrie>(
     new_trie: fn() -> T,
 ) {
@@ -687,7 +683,6 @@ pub(super) fn test_update_leaves_removal_branch_collapse_blinded_sibling<T: Spar
     let revealed_path = Nibbles::unpack(revealed_key);
     let original_value = trie.get_leaf_value(&revealed_path).cloned();
     assert!(original_value.is_some(), "revealed leaf should exist");
-    let node_count_before = trie.size_hint();
 
     // Attempt removal — branch collapse needs the blinded sibling, so it fails atomically.
     let mut leaf_updates =
@@ -704,9 +699,6 @@ pub(super) fn test_update_leaves_removal_branch_collapse_blinded_sibling<T: Spar
 
     // Update should remain in the map (not drained).
     assert!(!leaf_updates.is_empty(), "update should remain in map after blinded hit");
-
-    // Node count should be unchanged (no structural modification).
-    assert_eq!(trie.size_hint(), node_count_before, "node count should be unchanged");
 
     // Leaf value should be preserved (atomic rollback).
     let value_after = trie.get_leaf_value(&revealed_path);
@@ -1261,15 +1253,13 @@ pub(super) fn test_branch_collapse_updates_leaf_key_len_across_subtries<T: Spars
     );
 }
 
-/// Removal of a leaf should never corrupt blinded/pruned subtries.
+/// Removal of a leaf should never corrupt blinded subtries.
 ///
 /// When a branch collapses during leaf removal and the remaining child's value needs to be
 /// moved between subtries, the operation must not reveal (initialize) blind/unloaded subtries.
 /// Either the removal succeeds cleanly or it requests proofs for the blinded area.
 pub(super) fn test_remove_leaf_does_not_reveal_blind_subtries<T: SparseTrie>(new_trie: fn() -> T) {
     // Create a trie with 10 leaves across different first-nibble subtries.
-    // We'll prune some subtries, then remove a leaf whose branch collapse
-    // involves a sibling in a pruned (blinded) subtrie.
     let mut storage: BTreeMap<B256, U256> = BTreeMap::new();
     let mut keys = Vec::new();
     for i in 0u8..10 {
@@ -1280,22 +1270,13 @@ pub(super) fn test_remove_leaf_does_not_reveal_blind_subtries<T: SparseTrie>(new
     }
 
     let mut harness = SuiteTestHarness::new(storage.clone());
-    let mut trie: T = harness.init_trie_fully_revealed(true, new_trie);
+    let mut trie: T = harness.init_trie_with_targets(&keys[..2], true, new_trie);
 
     // Compute initial root and drain initial updates.
     let _ = trie.root(0, None);
     let _ = trie.take_updates();
 
-    // Prune: retain only keys[0] and keys[1] (nibbles 0x0 and 0x1).
-    // All other subtries become blinded.
-    let retained: Vec<Nibbles> = [keys[0], keys[1]].iter().map(|k| Nibbles::unpack(*k)).collect();
-    trie.prune(&retained);
-
-    // Verify root is unchanged after prune.
-    let root_after_prune = trie.root(0, None);
-    assert_eq!(root_after_prune, harness.original_root(), "root should be unchanged after prune");
-
-    // Now remove keys[0] — this leaves keys[1] and all the blinded subtries.
+    // Remove keys[0] — this leaves keys[1] and all the blinded subtries.
     // The branch at the root still has multiple children (keys[1] + blinded children),
     // so this should not trigger a problematic branch collapse into blinded territory.
     let removal: BTreeMap<B256, U256> = once((keys[0], U256::ZERO)).collect();

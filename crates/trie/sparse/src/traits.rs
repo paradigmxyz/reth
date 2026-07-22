@@ -193,17 +193,10 @@ pub trait SparseTrie: Sized + Debug + Send + Sync {
     /// Note: All previously tracked changes to the trie are also removed.
     fn wipe(&mut self);
 
-    /// This clears all data structures in the sparse trie, keeping the backing data structures
-    /// allocated. An empty root node is inserted at the root.
-    ///
-    /// This is useful for reusing the trie without needing to reallocate memory.
+    /// Clears all data structures in the sparse trie and inserts an empty root node.
     fn clear(&mut self);
 
-    /// Returns a cheap O(1) size hint for the trie representing the count of revealed
-    /// (non-Hash) nodes.
-    ///
-    /// This is used as a heuristic for prioritizing which storage tries to keep
-    /// during pruning. Larger values indicate larger tries that are more valuable to preserve.
+    /// Returns a cheap O(1) count of revealed leaves.
     fn size_hint(&self) -> usize;
 
     /// Prunes all subtrees that do not contain retained leaves.

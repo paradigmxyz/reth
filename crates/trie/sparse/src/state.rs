@@ -360,15 +360,9 @@ where
         }
     }
 
-    /// Returns a storage sparse trie root if the trie has been revealed, optionally pruning nodes
-    /// cached before the strict epoch cutoff.
-    pub fn storage_root(
-        &mut self,
-        account: &B256,
-        epoch: u64,
-        prune_older_than: Option<u64>,
-    ) -> Option<B256> {
-        self.storage.tries.get_mut(account).and_then(|trie| trie.root(epoch, prune_older_than))
+    /// Returns a storage sparse trie root if the trie has been revealed.
+    pub fn storage_root(&mut self, account: &B256, epoch: u64) -> Option<B256> {
+        self.storage.tries.get_mut(account).and_then(|trie| trie.root(epoch, None))
     }
 
     /// Returns mutable reference to the revealed account sparse trie.
@@ -501,36 +495,33 @@ impl<S: SparseTrieTrait> StorageTries<S> {
     /// Updates every revealed storage-trie root when pruning and returns the tries whose entire
     /// materialized roots can be evicted after their pending updates are collected.
     fn update_roots(&mut self, epoch: u64, prune_older_than: Option<u64>) -> Vec<B256> {
-        if prune_older_than.is_none() {
-            return Vec::new()
-        }
+        let Some(prune_older_than) = prune_older_than else { return Vec::new() };
 
         use rayon::iter::{IntoParallelRefMutIterator, ParallelIterator};
 
         self.tries
             .par_iter_mut()
             .filter_map(|(address, trie)| {
-                trie.root(epoch, prune_older_than);
-                let root_is_prunable =
-                    trie.as_revealed_ref().is_some_and(SparseTrieTrait::root_is_prunable);
-                root_is_prunable.then_some(*address)
+                let trie = trie.as_revealed_mut()?;
+                trie.root(epoch, Some(prune_older_than));
+                trie.root_is_prunable().then_some(*address)
             })
             .collect()
     }
 
-    /// Evicts tries after their pending updates have been collected, retaining their allocations
-    /// in the reuse pool.
+    /// Evicts tries after their pending updates have been collected and places the cleared trie
+    /// objects in the reuse pool.
     fn evict_prunable(&mut self, addresses: Vec<B256>) {
         self.cleared_tries.reserve(addresses.len());
         for address in addresses {
-            if let Some(mut trie) = self.tries.remove(&address) {
-                #[cfg(feature = "trie-debug")]
-                if let Some(revealed) = trie.as_revealed_mut() {
-                    self.evicted_debug_recorders.push((address, revealed.take_debug_recorder()));
-                }
-                trie.clear();
-                self.cleared_tries.push(trie);
+            let mut trie =
+                self.tries.remove(&address).expect("prunable storage trie must still be present");
+            #[cfg(feature = "trie-debug")]
+            if let Some(revealed) = trie.as_revealed_mut() {
+                self.evicted_debug_recorders.push((address, revealed.take_debug_recorder()));
             }
+            trie.clear();
+            self.cleared_tries.push(trie);
         }
     }
 
@@ -879,8 +870,7 @@ mod tests {
                 |_, _| panic!("empty trie must not request proofs"),
             )
             .unwrap();
-        sparse.storage_root(&address, 10, None).unwrap();
-        sparse.storage_root(&address, 20, Some(11)).unwrap();
+        sparse.storage_root(&address, 10).unwrap();
 
         sparse.root_with_updates(21, Some(12)).unwrap();
 
@@ -892,36 +882,6 @@ mod tests {
             .take_debug_recorders()
             .into_iter()
             .any(|(recorded_address, _)| recorded_address == Some(address)));
-    }
-
-    #[test]
-    fn root_with_pruning_collects_empty_storage_updates_before_eviction() {
-        let address = B256::with_last_byte(1);
-        let slot = B256::with_last_byte(2);
-        let mut sparse = SparseStateTrie::<ArenaParallelSparseTrie>::default()
-            .with_accounts_trie(RevealableSparseTrie::revealed_empty());
-        sparse.insert_storage_trie(address, RevealableSparseTrie::revealed_empty());
-        let storage_trie = sparse.storage_trie_mut(&address).unwrap();
-        storage_trie.set_updates(true);
-        storage_trie
-            .update_leaves(
-                &mut B256Map::from_iter([(slot, LeafUpdate::Changed(vec![1]))]),
-                |_, _| panic!("empty trie must not request proofs"),
-            )
-            .unwrap();
-        sparse.storage_root(&address, 10, None).unwrap();
-
-        sparse.wipe_storage(address).unwrap();
-        let (_, updates) = sparse.root_with_updates(20, Some(11)).unwrap();
-
-        assert!(updates.storage_tries[&address].is_deleted);
-        assert!(sparse.storage.tries.contains_key(&address));
-        assert!(sparse.storage.cleared_tries.is_empty());
-
-        sparse.root_with_updates(21, Some(21)).unwrap();
-
-        assert!(!sparse.storage.tries.contains_key(&address));
-        assert_eq!(sparse.storage.cleared_tries.len(), 1);
     }
 
     #[test]
@@ -939,7 +899,7 @@ mod tests {
                 |_, _| panic!("empty trie must not request proofs"),
             )
             .unwrap();
-        sparse.storage_root(&address, 10, None).unwrap();
+        sparse.storage_root(&address, 10).unwrap();
 
         let mut deletion = B256Map::from_iter([(old_slot, LeafUpdate::Changed(Vec::new()))]);
         sparse
@@ -953,7 +913,6 @@ mod tests {
 
         assert!(sparse.storage.tries.contains_key(&address));
         assert!(sparse.storage.cleared_tries.is_empty());
-        assert_eq!(sparse.storage_root(&address, 20, None), Some(EMPTY_ROOT_HASH));
 
         let mut insertion = B256Map::from_iter([(new_slot, LeafUpdate::Changed(vec![2]))]);
         sparse
@@ -981,7 +940,7 @@ mod tests {
                 |_, _| panic!("empty trie must not request proofs"),
             )
             .unwrap();
-        sparse.storage_root(&address, 10, None).unwrap();
+        sparse.storage_root(&address, 10).unwrap();
 
         sparse
             .storage_trie_mut(&address)
@@ -1110,7 +1069,7 @@ mod tests {
             .update_leaves(&mut updates, |_, _| {})
             .unwrap();
         assert!(updates.is_empty());
-        trie_account_1.storage_root = sparse.storage_root(&address_1, 0, None).unwrap();
+        trie_account_1.storage_root = sparse.storage_root(&address_1, 0).unwrap();
         apply_account_update(
             &mut sparse,
             address_1,
@@ -1118,7 +1077,7 @@ mod tests {
         );
 
         sparse.wipe_storage(address_2).unwrap();
-        trie_account_2.storage_root = sparse.storage_root(&address_2, 0, None).unwrap();
+        trie_account_2.storage_root = sparse.storage_root(&address_2, 0).unwrap();
         apply_account_update(
             &mut sparse,
             address_2,

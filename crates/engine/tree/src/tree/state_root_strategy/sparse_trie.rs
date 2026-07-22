@@ -111,9 +111,9 @@ pub(super) struct SparseTrieCacheTask<A = ArenaParallelSparseTrie, S = ArenaPara
     pending_targets: PendingTargets,
     /// Proof batches dispatched to workers and not yet received.
     in_flight_proof_batches: usize,
-    /// Number of pending execution/prewarming updates received but not yet passed to
+    /// Whether execution/prewarming updates have been received but not yet passed to
     /// `update_leaves`.
-    pending_updates: usize,
+    updates_pending: bool,
     /// Combined final hashed state.
     ///
     /// Sparse trie task observes and hashes all state updates, allowing it to cheaply construct a
@@ -183,7 +183,7 @@ where
             storage_cache_misses: 0,
             pending_targets: Default::default(),
             in_flight_proof_batches: 0,
-            pending_updates: Default::default(),
+            updates_pending: false,
             final_hashed_state: Default::default(),
             metrics,
         }
@@ -266,7 +266,6 @@ where
         let mut total_idle_time = std::time::Duration::ZERO;
         let mut idle_start = Instant::now();
         let mut done = false;
-        let mut finalized_hashed_state = None;
 
         // Streaming phase: updates are still arriving. Ends when the finish marker is
         // processed. Only producers hold update senders, so the channel closing before the
@@ -284,10 +283,7 @@ where
                     let update = message.map_err(|_| StateRootTaskError::Other(
                         "updates channel disconnected before state root calculation".to_string(),
                     ))?;
-                    if let Some(hashed_state) = self.on_message(update) {
-                        finalized_hashed_state = Some(hashed_state);
-                    }
-                    self.pending_updates += 1;
+                    self.on_message(update);
                 }
                 recv(self.proof_result_rx) -> message => {
                     let wake = Instant::now();
@@ -366,9 +362,6 @@ where
         let debug_recorders = self.trie.take_debug_recorders();
 
         let end = Instant::now();
-        if self.prune_older_than.is_some() {
-            self.metrics.sparse_trie_prune_duration_histogram.record(end.duration_since(start));
-        }
         self.metrics.sparse_trie_final_update_duration_histogram.record(end.duration_since(start));
         self.metrics.sparse_trie_total_duration_histogram.record(end.duration_since(now));
 
@@ -376,16 +369,9 @@ where
         self.metrics.sparse_trie_account_cache_misses.record(self.account_cache_misses as f64);
         self.metrics.sparse_trie_storage_cache_hits.record(self.storage_cache_hits as f64);
         self.metrics.sparse_trie_storage_cache_misses.record(self.storage_cache_misses as f64);
-        self.account_cache_hits = 0;
-        self.account_cache_misses = 0;
-        self.storage_cache_hits = 0;
-        self.storage_cache_misses = 0;
-
         Ok(StateRootComputeOutcome {
             state_root,
             trie_updates: Arc::new(trie_updates),
-            hashed_state: finalized_hashed_state
-                .expect("finished state updates publish the hashed post state"),
             #[cfg(feature = "trie-debug")]
             debug_recorders,
         })
@@ -457,21 +443,20 @@ where
     }
 
     /// Processes a [`SparseTrieTaskMessage`] from the hashing task.
-    fn on_message(&mut self, message: SparseTrieTaskMessage) -> Option<Arc<HashedPostState>> {
+    fn on_message(&mut self, message: SparseTrieTaskMessage) {
         match message {
             SparseTrieTaskMessage::PrefetchProofs(targets) => {
                 self.on_prewarm_targets(targets);
-                None
+                self.updates_pending = true;
             }
             SparseTrieTaskMessage::HashedState(hashed_state) => {
                 self.on_hashed_state_update(hashed_state);
-                None
+                self.updates_pending = true;
             }
             SparseTrieTaskMessage::FinishedStateUpdates => {
                 let hashed_state = Arc::new(core::mem::take(&mut self.final_hashed_state));
-                let _ = self.final_hashed_state_tx.take().unwrap().send(Arc::clone(&hashed_state));
+                let _ = self.final_hashed_state_tx.take().unwrap().send(hashed_state);
                 self.finished_state_updates = true;
-                Some(hashed_state)
             }
         }
     }
@@ -574,12 +559,12 @@ where
     }
 
     fn process_new_updates(&mut self) -> SparseTrieResult<()> {
-        if self.pending_updates == 0 {
+        if !self.updates_pending {
             return Ok(());
         }
 
         let _span = debug_span!("process_new_updates").entered();
-        self.pending_updates = 0;
+        self.updates_pending = false;
 
         // Firstly apply all new storage and account updates to the tries.
         self.process_leaf_updates(true)?;
@@ -809,7 +794,7 @@ where
                         // If account has pending storage updates, it is still pending.
                         return true;
                     } else if let Some(account) = account.take() {
-                        let storage_root = self.trie.storage_root(addr, self.epoch, None).expect("updates are drained, storage trie should be revealed by now");
+                        let storage_root = self.trie.storage_root(addr, self.epoch).expect("updates are drained, storage trie should be revealed by now");
                         let encoded = encode_account_leaf_value(account, storage_root, account_rlp_buf);
                         self.account_updates.insert(*addr, LeafUpdate::Changed(encoded));
                         num_promoted += 1;
@@ -838,7 +823,7 @@ where
 
                     (account, storage_root)
                 } else {
-                    (trie_account.map(Into::into), self.trie.storage_root(addr, self.epoch, None).expect("account had storage updates that were applied to its trie, storage root must be revealed by now"))
+                    (trie_account.map(Into::into), self.trie.storage_root(addr, self.epoch).expect("account had storage updates that were applied to its trie, storage root must be revealed by now"))
                 };
 
                 let encoded = encode_account_leaf_value(account, storage_root, account_rlp_buf);
@@ -925,7 +910,7 @@ where
     fn ensure_not_stalled(&self, updates_queued: bool) -> Result<(), StateRootTaskError> {
         if self.finished_state_updates &&
             !updates_queued &&
-            self.pending_updates == 0 &&
+            !self.updates_pending &&
             self.pending_targets.is_empty() &&
             self.in_flight_proof_batches == 0 &&
             self.proof_result_rx.is_empty() &&
@@ -993,10 +978,6 @@ pub(super) struct SparseTrieTaskMetrics {
     pub(super) sparse_trie_final_update_duration_histogram: Histogram,
     /// Histogram of sparse trie total durations.
     pub(super) sparse_trie_total_duration_histogram: Histogram,
-    /// Time spent preparing the sparse trie for reuse after state root computation.
-    pub(super) into_trie_for_reuse_duration_histogram: Histogram,
-    /// Time spent calculating and epoch-pruning the final sparse trie root.
-    pub(super) sparse_trie_prune_duration_histogram: Histogram,
     /// Time spent waiting for preserved sparse trie cache to become available.
     pub(super) sparse_trie_cache_wait_duration_histogram: Histogram,
     /// Histogram for sparse trie task idle time in seconds (waiting for updates or proof

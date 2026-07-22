@@ -662,20 +662,22 @@ impl DefaultStateRootStrategy {
                 prune_older_than,
                 chunk_size,
             );
+            let published_anchor_hash = published_sparse_trie_anchor_hash(
+                sparse_trie_anchor_hash,
+                reused_preserved_sparse_trie,
+                pending_sparse_trie_prune_blocks.as_deref(),
+            );
+            // The cutoff and anchor are the only data needed during hashing; release the block
+            // outputs before the potentially long-running trie task.
+            drop(pending_sparse_trie_prune_blocks);
 
             let result = task.run();
-            let task_result = result.as_ref().ok().cloned();
 
             // Publish a handle before sending the result so the next block can inspect the
             // state root immediately while the trie is finalized for reuse below.
-            let pending_trie = if let Some(result) = &task_result {
-                let preserved_anchor_hash = published_sparse_trie_anchor_hash(
-                    sparse_trie_anchor_hash,
-                    reused_preserved_sparse_trie,
-                    pending_sparse_trie_prune_blocks.as_deref(),
-                );
+            let pending_trie = if let Ok(result) = &result {
                 let (preserved, completer) =
-                    PreservedSparseTrie::pending(result.state_root, preserved_anchor_hash);
+                    PreservedSparseTrie::pending(result.state_root, published_anchor_hash);
                 state_trie_overlays.store_sparse_trie(preserved);
                 Some(completer)
             } else {
@@ -703,14 +705,8 @@ impl DefaultStateRootStrategy {
             let _enter =
                 debug_span!(target: "engine::tree::payload_processor", "preserve").entered();
             let mut trie_to_drop = None;
-            let deferred = if task_result.is_some() {
-                let pending_trie =
-                    pending_trie.expect("pending trie is created for successful task result");
-                let start = Instant::now();
+            let deferred = if let Some(pending_trie) = pending_trie {
                 let (trie, deferred) = task.into_trie_for_reuse();
-                trie_metrics
-                    .into_trie_for_reuse_duration_histogram
-                    .record(start.elapsed().as_secs_f64());
                 trie_metrics
                     .sparse_trie_retained_storage_tries
                     .set(trie.retained_storage_tries_count() as f64);
@@ -1072,7 +1068,6 @@ where
         let StateRootComputeOutcome {
             state_root,
             trie_updates,
-            hashed_state: _hashed_state,
             #[cfg(feature = "trie-debug")]
             debug_recorders,
         } = outcome;
@@ -1314,17 +1309,10 @@ mod tests {
     use revm::state::{AccountInfo, AccountStatus, EvmState, EvmStorageSlot, TransactionId};
 
     #[test]
-    fn sparse_trie_prune_older_than_is_none_without_request() {
+    fn sparse_trie_prune_older_than_uses_requested_range() {
         assert_eq!(sparse_trie_prune_older_than::<EthPrimitives>(None, 10), None);
-    }
-
-    #[test]
-    fn sparse_trie_prune_older_than_uses_current_epoch_for_empty_range() {
         assert_eq!(sparse_trie_prune_older_than::<EthPrimitives>(Some(&[]), 10), Some(10));
-    }
 
-    #[test]
-    fn sparse_trie_prune_older_than_uses_oldest_block() {
         let mut blocks: Vec<_> = TestBlockBuilder::eth().get_executed_blocks(7..10).collect();
         blocks.reverse();
 

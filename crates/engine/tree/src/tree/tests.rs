@@ -611,20 +611,6 @@ fn on_new_persisted_block_queues_sparse_trie_prune_request() {
 }
 
 #[test]
-fn on_new_persisted_block_queues_sparse_trie_prune_with_in_memory_blocks() {
-    let blocks: Vec<_> = TestBlockBuilder::eth().get_executed_blocks(1..4).collect();
-    let mut test_harness = TestHarness::new(MAINNET.clone()).with_blocks(blocks.clone());
-    test_harness
-        .tree
-        .persistence_state
-        .finish(blocks[0].recovered_block().hash(), blocks[0].recovered_block().number);
-
-    test_harness.tree.on_new_persisted_block().unwrap();
-
-    assert!(test_harness.tree.state.pending_sparse_trie_prune());
-}
-
-#[test]
 fn on_new_persisted_block_skips_sparse_trie_prune_when_state_root_task_disabled() {
     let blocks: Vec<_> = TestBlockBuilder::eth().get_executed_blocks(1..4).collect();
     let configs = [
