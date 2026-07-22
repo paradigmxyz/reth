@@ -53,10 +53,14 @@ where
     AddOns: RethRpcAddOns<Node>,
 {
     /// Creates a new test node
-    pub async fn new(
+    pub async fn new<A>(
         node: FullNode<Node, AddOns>,
-        attributes_generator: impl Fn(u64) -> Payload::PayloadAttributes + Send + Sync + 'static,
-    ) -> eyre::Result<Self> {
+        attributes_generator: impl Fn(u64) -> A + Send + Sync + 'static,
+    ) -> eyre::Result<Self>
+    where
+        Payload::PayloadAttributes: From<A>,
+    {
+        let attributes_generator = move |timestamp| attributes_generator(timestamp).into();
         Ok(Self {
             inner: node.clone(),
             payload: PayloadTestContext::new(

@@ -306,8 +306,9 @@ use crate::{identifier::TransactionId, pool::PoolInner};
 use alloy_eips::{
     eip4844::{BlobAndProofV1, BlobAndProofV2, BlobCellsAndProofsV1},
     eip7594::BlobTransactionSidecarVariant,
+    Encodable2718, Typed2718,
 };
-use alloy_primitives::{map::AddressSet, Address, TxHash, B128, B256, U256};
+use alloy_primitives::{map::AddressSet, Address, Bytes, TxHash, B128, B256, U256};
 use aquamarine as _;
 use reth_chainspec::{ChainSpecProvider, EthereumHardforks};
 use reth_eth_wire_types::HandleMempoolData;
@@ -605,6 +606,24 @@ where
         best_transactions_attributes: BestTransactionsAttributes,
     ) -> Box<dyn BestTransactions<Item = Arc<ValidPoolTransaction<Self::Transaction>>>> {
         self.pool.best_transactions_with_attributes(best_transactions_attributes)
+    }
+
+    fn build_inclusion_list(&self, base_fee: u64, max_size: usize) -> Vec<Bytes> {
+        let mut inclusion_list = Vec::new();
+        for pool_transaction in
+            self.best_transactions_with_attributes(BestTransactionsAttributes::base_fee(base_fee))
+        {
+            let transaction = pool_transaction.to_consensus().into_inner();
+            if transaction.is_eip4844() {
+                continue
+            }
+
+            inclusion_list.push(Bytes::from(transaction.encoded_2718()));
+            if alloy_rlp::list_length::<Bytes, [u8]>(&inclusion_list) > max_size {
+                inclusion_list.pop();
+            }
+        }
+        inclusion_list
     }
 
     fn pending_transactions(&self) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>> {

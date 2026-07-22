@@ -99,6 +99,11 @@ pub trait PayloadAttributes:
     fn target_gas_limit(&self) -> Option<u64> {
         None
     }
+
+    /// Returns the EIP-7805 inclusion-list transactions supplied by the consensus layer.
+    fn inclusion_list_transactions(&self) -> Option<&[Bytes]> {
+        None
+    }
 }
 
 impl PayloadAttributes for EthPayloadAttributes {
@@ -191,6 +196,15 @@ pub fn payload_id(
     parent: &B256,
     attributes: &alloy_rpc_types_engine::PayloadAttributes,
 ) -> PayloadId {
+    payload_id_with_inclusion_list(parent, attributes, None)
+}
+
+/// Generates a payload id that also commits to EIP-7805 inclusion-list transactions.
+pub fn payload_id_with_inclusion_list(
+    parent: &B256,
+    attributes: &alloy_rpc_types_engine::PayloadAttributes,
+    inclusion_list_transactions: Option<&[Bytes]>,
+) -> PayloadId {
     use sha2::Digest;
     let mut hasher = sha2::Sha256::new();
     hasher.update(parent.as_slice());
@@ -213,6 +227,14 @@ pub fn payload_id(
 
     if let Some(target_gas_limit) = attributes.target_gas_limit {
         hasher.update(target_gas_limit.to_be_bytes());
+    }
+
+    if let Some(transactions) = inclusion_list_transactions {
+        hasher.update((transactions.len() as u64).to_be_bytes());
+        for transaction in transactions {
+            hasher.update((transaction.len() as u64).to_be_bytes());
+            hasher.update(transaction);
+        }
     }
 
     let out = hasher.finalize();

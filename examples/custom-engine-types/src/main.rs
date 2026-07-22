@@ -354,7 +354,7 @@ where
             config: PayloadConfig {
                 parent_header,
                 parent_block_info,
-                attributes: attributes.inner,
+                attributes: attributes.inner.into(),
                 payload_id,
             },
             cancel,
@@ -370,7 +370,7 @@ where
         self.inner.build_empty_payload(PayloadConfig {
             parent_header,
             parent_block_info,
-            attributes: attributes.inner,
+            attributes: attributes.inner.into(),
             payload_id,
         })
     }

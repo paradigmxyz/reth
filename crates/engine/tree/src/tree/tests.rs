@@ -70,7 +70,7 @@ impl EngineApiValidator<EthEngineTypes> for MockEngineValidator {
         _payload_or_attrs: reth_payload_primitives::PayloadOrAttributes<
             '_,
             alloy_rpc_types_engine::ExecutionData,
-            alloy_rpc_types_engine::PayloadAttributes,
+            EthPayloadAttributes,
         >,
     ) -> Result<(), reth_payload_primitives::EngineObjectValidationError> {
         // Mock implementation - always valid
@@ -80,11 +80,91 @@ impl EngineApiValidator<EthEngineTypes> for MockEngineValidator {
     fn ensure_well_formed_attributes(
         &self,
         _version: reth_payload_primitives::EngineApiMessageVersion,
-        _attributes: &alloy_rpc_types_engine::PayloadAttributes,
+        _attributes: &EthPayloadAttributes,
     ) -> Result<(), reth_payload_primitives::EngineObjectValidationError> {
         // Mock implementation - always valid
         Ok(())
     }
+}
+
+#[test]
+fn inclusion_list_validation_checks_gas_inclusion_and_post_state() {
+    use alloy_eips::eip2718::Encodable2718;
+    use reth_provider::test_utils::ExtendedAccount;
+    use reth_testing_utils::generators::{rng, sign_tx_with_random_key_pair};
+
+    let transaction = reth_ethereum_primitives::Transaction::Legacy(alloy_consensus::TxLegacy {
+        chain_id: Some(1),
+        nonce: 7,
+        gas_price: 1,
+        gas_limit: 21_000,
+        to: alloy_primitives::TxKind::Call(Default::default()),
+        value: U256::ZERO,
+        input: Bytes::new(),
+    });
+    let transaction = sign_tx_with_random_key_pair(&mut rng(), transaction);
+    let signer = transaction.try_recover().unwrap();
+    let raw_transaction = Bytes::from(transaction.encoded_2718());
+    let gas_limit = transaction.gas_limit();
+    let provider = MockEthProvider::default();
+    provider.add_account(signer, ExtendedAccount::new(transaction.nonce(), U256::MAX));
+    let state: StateProviderBox = Box::new(provider.clone());
+    let validation_metrics = metrics::EfExecutionMetrics::default();
+
+    let omitted = Block {
+        header: alloy_consensus::Header { gas_limit, ..Default::default() },
+        body: Default::default(),
+    }
+    .seal_slow();
+    let omitted = RecoveredBlock::new_sealed(omitted, Vec::new());
+    assert!(!validate_inclusion_list::<EthPrimitives>(
+        &omitted,
+        &state,
+        std::slice::from_ref(&raw_transaction),
+        &validation_metrics,
+    )
+    .unwrap());
+
+    provider.add_account(signer, ExtendedAccount::new(transaction.nonce() + 1, U256::MAX));
+    assert!(validate_inclusion_list::<EthPrimitives>(
+        &omitted,
+        &state,
+        std::slice::from_ref(&raw_transaction),
+        &validation_metrics,
+    )
+    .unwrap());
+
+    provider.add_account(signer, ExtendedAccount::new(transaction.nonce(), U256::MAX));
+    let full = Block {
+        header: alloy_consensus::Header { gas_limit, gas_used: 1, ..Default::default() },
+        body: Default::default(),
+    }
+    .seal_slow();
+    let full = RecoveredBlock::new_sealed(full, Vec::new());
+    assert!(validate_inclusion_list::<EthPrimitives>(
+        &full,
+        &state,
+        std::slice::from_ref(&raw_transaction),
+        &validation_metrics,
+    )
+    .unwrap());
+
+    let included = Block {
+        header: alloy_consensus::Header { gas_limit, ..Default::default() },
+        body: reth_ethereum_primitives::BlockBody {
+            transactions: vec![transaction],
+            ..Default::default()
+        },
+    }
+    .seal_slow();
+    let included = RecoveredBlock::new_sealed(included, vec![signer]);
+    assert!(validate_inclusion_list::<EthPrimitives>(
+        &included,
+        &state,
+        &[raw_transaction],
+        &validation_metrics,
+    )
+    .unwrap());
 }
 
 /// This is a test channel that allows you to `release` any value that is in the channel.
@@ -674,7 +754,7 @@ fn process_payload_attributes_shares_sparse_trie_during_validation_fallback() {
     test_harness.tree.state.set_pending_sparse_trie_prune(true);
 
     let updated = test_harness.tree.process_payload_attributes(
-        EthPayloadAttributes {
+        alloy_rpc_types_engine::PayloadAttributes {
             timestamp: head.timestamp() + 1,
             prev_randao: B256::ZERO,
             suggested_fee_recipient: Default::default(),
@@ -682,7 +762,8 @@ fn process_payload_attributes_shares_sparse_trie_during_validation_fallback() {
             parent_beacon_block_root: None,
             slot_number: None,
             target_gas_limit: None,
-        },
+        }
+        .into(),
         &head,
         state,
     );
@@ -851,6 +932,7 @@ async fn test_holesky_payload() {
                     payload: payload.clone().into(),
                     sidecar: ExecutionPayloadSidecar::none(),
                 },
+                inclusion_list_transactions: None,
                 tx,
             }
             .into(),

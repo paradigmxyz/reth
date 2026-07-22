@@ -18,15 +18,17 @@ use alloy_rpc_types_engine::{
 use async_trait::async_trait;
 use jsonrpsee_core::{server::RpcModule, RpcResult};
 use reth_chainspec::EthereumHardforks;
-use reth_engine_primitives::{ConsensusEngineHandle, EngineApiValidator, EngineTypes};
+use reth_engine_primitives::{
+    ConsensusEngineHandle, EngineApiValidator, EngineTypes, ExecutionPayload as _,
+};
 use reth_network_api::{CellCustody, NetworkInfo};
 use reth_payload_builder::PayloadStore;
 use reth_payload_primitives::{
     validate_payload_timestamp, EngineApiMessageVersion, MessageValidationKind,
     PayloadOrAttributes, PayloadTypes,
 };
-use reth_primitives_traits::{Block, BlockBody};
-use reth_rpc_api::{EngineApiServer, IntoEngineApiRpcModule};
+use reth_primitives_traits::{AlloyBlockHeader, Block, BlockBody};
+use reth_rpc_api::{EngineApiServer, ForkchoiceUpdatedV2, IntoEngineApiRpcModule, PayloadStatusV2};
 use reth_storage_api::{BalProvider, BlockReader, HeaderProvider, StateProviderFactory};
 use reth_tasks::Runtime;
 use reth_transaction_pool::TransactionPool;
@@ -45,6 +47,9 @@ const MAX_PAYLOAD_BODIES_LIMIT: u64 = 1024;
 
 /// The upper limit for blobs in `engine_getBlobsVx`.
 const MAX_BLOB_LIMIT: usize = 128;
+
+/// Maximum encoded size of one EIP-7805 inclusion list.
+const MAX_BYTES_PER_INCLUSION_LIST: usize = 8192;
 
 /// The Engine API implementation that grants the Consensus layer access to data and
 /// functions in the Execution layer that are crucial for the consensus process.
@@ -292,6 +297,61 @@ where
         Ok(res?)
     }
 
+    /// Handler for `engine_newPayloadV6` with EIP-7805 inclusion-list validation.
+    pub async fn new_payload_v6(
+        &self,
+        payload: PayloadT::ExecutionData,
+        inclusion_list_transactions: Vec<Bytes>,
+    ) -> EngineApiResult<PayloadStatusV2> {
+        let block_hash = payload.block_hash();
+        let payload_or_attrs = PayloadOrAttributes::<
+            '_,
+            PayloadT::ExecutionData,
+            PayloadT::PayloadAttributes,
+        >::from_execution_payload(&payload);
+        self.inner
+            .validator
+            .validate_version_specific_fields(EngineApiMessageVersion::V6, payload_or_attrs)?;
+
+        let payload_status = self
+            .inner
+            .beacon_consensus
+            .new_payload_with_inclusion_list(payload, inclusion_list_transactions)
+            .await?;
+        let inclusion_list_satisfied = if payload_status.is_valid() {
+            Some(self.inclusion_list_satisfied(block_hash).await?)
+        } else {
+            None
+        };
+
+        Ok(PayloadStatusV2::new(payload_status, inclusion_list_satisfied))
+    }
+
+    /// Metrics version of `new_payload_v6`.
+    pub async fn new_payload_v6_metered(
+        &self,
+        payload: PayloadT::ExecutionData,
+        inclusion_list_transactions: Vec<Bytes>,
+    ) -> EngineApiResult<PayloadStatusV2> {
+        let start = Instant::now();
+        let result = Self::new_payload_v6(self, payload, inclusion_list_transactions).await;
+        self.inner.metrics.latency.new_payload_v6.record(start.elapsed());
+        result
+    }
+
+    async fn inclusion_list_satisfied(&self, block_hash: B256) -> EngineApiResult<bool> {
+        self.inner
+            .beacon_consensus
+            .inclusion_list_status(block_hash)
+            .await
+            .map_err(|error| EngineApiError::Internal(Box::new(error)))?
+            .ok_or_else(|| {
+                EngineApiError::Internal(Box::new(std::io::Error::other(format!(
+                    "missing post-state for valid payload {block_hash}"
+                ))))
+            })
+    }
+
     /// Returns whether the engine accepts execution requests hash.
     pub fn accept_execution_requests_hash(&self) -> bool {
         self.inner.accept_execution_requests_hash
@@ -412,6 +472,67 @@ where
         let res = Self::fork_choice_updated_v4(self, state, payload_attrs, custody_columns).await;
         self.inner.metrics.latency.fork_choice_updated_v4.record(start.elapsed());
         res
+    }
+
+    /// Handles `engine_forkchoiceUpdatedV5` and reports EIP-7805 satisfaction for the head.
+    pub async fn fork_choice_updated_v5(
+        &self,
+        state: ForkchoiceState,
+        payload_attrs: Option<EngineT::PayloadAttributes>,
+        custody_columns: Option<B128>,
+    ) -> EngineApiResult<ForkchoiceUpdatedV2> {
+        if let Some(custody_columns) = custody_columns {
+            self.inner.cell_custody.set(custody_columns);
+        }
+        let response = self
+            .validate_and_execute_forkchoice(EngineApiMessageVersion::V5, state, payload_attrs)
+            .await?;
+        let inclusion_list_satisfied = if response.payload_status.is_valid() {
+            Some(self.inclusion_list_satisfied(state.head_block_hash).await?)
+        } else {
+            None
+        };
+
+        Ok(ForkchoiceUpdatedV2 {
+            payload_status: PayloadStatusV2::new(response.payload_status, inclusion_list_satisfied),
+            payload_id: response.payload_id,
+        })
+    }
+
+    /// Metrics version of `fork_choice_updated_v5`.
+    pub async fn fork_choice_updated_v5_metered(
+        &self,
+        state: ForkchoiceState,
+        payload_attrs: Option<EngineT::PayloadAttributes>,
+        custody_columns: Option<B128>,
+    ) -> EngineApiResult<ForkchoiceUpdatedV2> {
+        let start = Instant::now();
+        let result =
+            Self::fork_choice_updated_v5(self, state, payload_attrs, custody_columns).await;
+        self.inner.metrics.latency.fork_choice_updated_v5.record(start.elapsed());
+        result
+    }
+
+    /// Builds an EIP-7805 inclusion list for the child of `block_hash`.
+    pub fn get_inclusion_list_v1(&self, block_hash: B256) -> EngineApiResult<Vec<Bytes>> {
+        let header = self
+            .inner
+            .provider
+            .header(block_hash)
+            .map_err(|error| EngineApiError::Internal(Box::new(error)))?
+            .ok_or(EngineApiError::UnknownPayload)?;
+        Ok(self.inner.tx_pool.build_inclusion_list(
+            header.base_fee_per_gas().unwrap_or_default(),
+            MAX_BYTES_PER_INCLUSION_LIST,
+        ))
+    }
+
+    /// Metrics version of `get_inclusion_list_v1`.
+    pub fn get_inclusion_list_v1_metered(&self, block_hash: B256) -> EngineApiResult<Vec<Bytes>> {
+        let start = Instant::now();
+        let result = Self::get_inclusion_list_v1(self, block_hash);
+        self.inner.metrics.latency.get_inclusion_list_v1.record(start.elapsed());
+        result
     }
 
     /// Helper function for retrieving the build payload by id.
@@ -1265,6 +1386,31 @@ where
         Ok(self.new_payload_v5_metered(payload).await?)
     }
 
+    /// Handler for `engine_newPayloadV6`.
+    async fn new_payload_v6(
+        &self,
+        payload: ExecutionPayloadV4,
+        versioned_hashes: Vec<B256>,
+        parent_beacon_block_root: B256,
+        requests: RequestsOrHash,
+        inclusion_list_transactions: Vec<Bytes>,
+    ) -> RpcResult<PayloadStatusV2> {
+        trace!(target: "rpc::engine", "Serving engine_newPayloadV6");
+        if requests.is_hash() && !self.inner.accept_execution_requests_hash {
+            return Err(EngineApiError::UnexpectedRequestsHash.into());
+        }
+
+        let payload = ExecutionData {
+            payload: payload.into(),
+            sidecar: ExecutionPayloadSidecar::v4(
+                CancunPayloadFields { versioned_hashes, parent_beacon_block_root },
+                PraguePayloadFields { requests },
+            ),
+        };
+
+        Ok(self.new_payload_v6_metered(payload, inclusion_list_transactions).await?)
+    }
+
     /// Handler for `engine_forkchoiceUpdatedV1`
     /// See also <https://github.com/ethereum/execution-apis/blob/3d627c95a4d3510a8187dd02e0250ecb4331d27e/src/engine/paris.md#engine_forkchoiceupdatedv1>
     ///
@@ -1313,6 +1459,19 @@ where
         trace!(target: "rpc::engine", "Serving engine_forkchoiceUpdatedV4");
         Ok(self
             .fork_choice_updated_v4_metered(fork_choice_state, payload_attributes, custody_columns)
+            .await?)
+    }
+
+    /// Handler for `engine_forkchoiceUpdatedV5`.
+    async fn fork_choice_updated_v5(
+        &self,
+        fork_choice_state: ForkchoiceState,
+        payload_attributes: Option<EngineT::PayloadAttributes>,
+        custody_columns: Option<B128>,
+    ) -> RpcResult<ForkchoiceUpdatedV2> {
+        trace!(target: "rpc::engine", "Serving engine_forkchoiceUpdatedV5");
+        Ok(self
+            .fork_choice_updated_v5_metered(fork_choice_state, payload_attributes, custody_columns)
             .await?)
     }
 
@@ -1414,6 +1573,12 @@ where
     ) -> RpcResult<EngineT::ExecutionPayloadEnvelopeV6> {
         trace!(target: "rpc::engine", "Serving engine_getPayloadV6");
         Ok(self.get_payload_v6_metered(payload_id).await?)
+    }
+
+    /// Handler for `engine_getInclusionListV1`.
+    async fn get_inclusion_list_v1(&self, block_hash: B256) -> RpcResult<Vec<Bytes>> {
+        trace!(target: "rpc::engine", %block_hash, "Serving engine_getInclusionListV1");
+        Ok(self.get_inclusion_list_v1_metered(block_hash)?)
     }
 
     /// Handler for `engine_getPayloadBodiesByHashV1`
@@ -2097,7 +2262,12 @@ mod tests {
         let custody_columns = B128::from(0b1010u128);
 
         let api_task = tokio::spawn(async move {
-            api.fork_choice_updated_v4(state, Some(payload_attributes), Some(custody_columns)).await
+            api.fork_choice_updated_v4(
+                state,
+                Some(payload_attributes.into()),
+                Some(custody_columns),
+            )
+            .await
         });
 
         let request = tokio::time::timeout(std::time::Duration::from_secs(1), engine_rx.recv())
@@ -2152,7 +2322,7 @@ mod tests {
         };
 
         let api_task = tokio::spawn(async move {
-            api.fork_choice_updated_v3(state, Some(payload_attributes)).await
+            api.fork_choice_updated_v3(state, Some(payload_attributes.into())).await
         });
 
         let request =
@@ -2201,7 +2371,7 @@ mod tests {
         };
 
         let api_task = tokio::spawn(async move {
-            api.fork_choice_updated_v3(state, Some(payload_attributes)).await
+            api.fork_choice_updated_v3(state, Some(payload_attributes.into())).await
         });
 
         let request =

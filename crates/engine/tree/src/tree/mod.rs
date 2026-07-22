@@ -5,9 +5,15 @@ use crate::{
     persistence::PersistenceHandle,
     tree::{error::InsertPayloadError, payload_validator::TreeCtx},
 };
-use alloy_consensus::BlockHeader;
-use alloy_eips::{eip1898::BlockWithParent, merge::EPOCH_SLOTS, BlockNumHash, NumHash};
-use alloy_primitives::{map::B256Map, B256};
+use alloy_consensus::{BlockHeader, Transaction};
+use alloy_eips::{
+    eip1898::BlockWithParent, eip2718::Decodable2718, merge::EPOCH_SLOTS, BlockNumHash, NumHash,
+    Typed2718,
+};
+use alloy_primitives::{
+    map::{B256Map, B256Set},
+    Bytes, B256, U256,
+};
 use alloy_rpc_types_engine::{
     ForkchoiceState, PayloadStatus, PayloadStatusEnum, PayloadValidationError,
 };
@@ -26,7 +32,8 @@ use reth_evm::ConfigureEvm;
 use reth_payload_builder::{BuildNewPayload, PayloadBuilderHandle};
 use reth_payload_primitives::{BuiltPayload, NewPayloadError, PayloadAttributes, PayloadTypes};
 use reth_primitives_traits::{
-    FastInstant as Instant, NodePrimitives, RecoveredBlock, SealedBlock, SealedHeader,
+    BlockBody as _, FastInstant as Instant, NodePrimitives, RecoveredBlock, SealedBlock,
+    SealedHeader, SignedTransaction,
 };
 use reth_provider::{
     BalProvider, BlockExecutionOutput, BlockExecutionResult, BlockReader, ChangeSetReader,
@@ -135,6 +142,66 @@ where
     }
 }
 
+/// Checks whether every omitted EIP-7805 transaction is invalid against the block's post-state.
+fn validate_inclusion_list<N: NodePrimitives>(
+    block: &RecoveredBlock<N::Block>,
+    state: &StateProviderBox,
+    inclusion_list: &[Bytes],
+    metrics: &metrics::EfExecutionMetrics,
+) -> ProviderResult<bool> {
+    let included = block
+        .body()
+        .transactions_iter()
+        .map(SignedTransaction::recalculate_hash)
+        .collect::<B256Set>();
+    let available_gas = block.gas_limit().saturating_sub(block.gas_used());
+
+    for raw_transaction in inclusion_list {
+        let Ok(transaction) = N::SignedTx::decode_2718_exact(raw_transaction) else {
+            metrics.record_inclusion_list_transaction_excluded("invalid_encoding");
+            continue
+        };
+
+        if transaction.is_eip4844() {
+            metrics.record_inclusion_list_transaction_excluded("blob_tx");
+            continue
+        }
+        if included.contains(&transaction.recalculate_hash()) {
+            metrics.record_inclusion_list_transaction_included();
+            continue
+        }
+
+        if transaction.gas_limit() > available_gas {
+            metrics.record_inclusion_list_transaction_excluded("gas_limit_exceeded");
+            continue
+        }
+
+        let Ok(signer) = transaction.try_recover() else {
+            metrics.record_inclusion_list_transaction_excluded("invalid_signature");
+            continue
+        };
+        let account = state.basic_account(&signer)?.unwrap_or_default();
+        let maximum_gas_cost = U256::from(transaction.gas_limit())
+            .checked_mul(U256::from(transaction.max_fee_per_gas()))
+            .unwrap_or(U256::MAX);
+        let maximum_cost = maximum_gas_cost.checked_add(transaction.value()).unwrap_or(U256::MAX);
+
+        if account.nonce == transaction.nonce() && account.balance >= maximum_cost {
+            metrics.record_inclusion_list_transaction_excluded_unknown(1);
+            return Ok(false)
+        }
+
+        let reason = if account.nonce == transaction.nonce() {
+            "insufficient_balance"
+        } else {
+            "invalid_nonce"
+        };
+        metrics.record_inclusion_list_transaction_excluded(reason);
+    }
+
+    Ok(true)
+}
+
 /// Tracks the state of the engine api internals.
 ///
 /// This type is not shareable.
@@ -151,6 +218,10 @@ pub struct EngineApiTreeState<N: NodePrimitives> {
     /// Tracks the header of invalid payloads that were rejected by the engine because they're
     /// invalid.
     invalid_headers: InvalidHeaderCache,
+    /// Inclusion lists received with Bogota payloads, retained until the payload is executed.
+    inclusion_lists: B256Map<Vec<Bytes>>,
+    /// Cached EIP-7805 validation results for executed payloads.
+    inclusion_list_results: B256Map<bool>,
 }
 
 impl<N: NodePrimitives> EngineApiTreeState<N> {
@@ -171,6 +242,8 @@ impl<N: NodePrimitives> EngineApiTreeState<N> {
             tree_state: TreeState::new(canonical_block, engine_kind, state_trie_overlays),
             pending_sparse_trie_prune: false,
             forkchoice_state_tracker: ForkchoiceStateTracker::default(),
+            inclusion_lists: B256Map::default(),
+            inclusion_list_results: B256Map::default(),
         }
     }
 
@@ -1674,11 +1747,27 @@ where
                                     warn!(target: "engine::tree", ?state, elapsed=?start.elapsed(), "Failed to deliver forkchoiceUpdated response, receiver dropped (request cancelled): {err:?}");
                                 }
                             }
-                            BeaconEngineMessage::NewPayload { payload, tx } => {
+                            BeaconEngineMessage::NewPayload {
+                                payload,
+                                inclusion_list_transactions,
+                                tx,
+                            } => {
                                 let start = Instant::now();
                                 let gas_used = payload.gas_used();
                                 let num_hash = payload.num_hash();
+                                if let Some(inclusion_list_transactions) =
+                                    inclusion_list_transactions
+                                {
+                                    self.state.inclusion_list_results.remove(&payload.block_hash());
+                                    self.state
+                                        .inclusion_lists
+                                        .insert(payload.block_hash(), inclusion_list_transactions);
+                                }
                                 let mut output = self.on_new_payload(payload);
+                                if output.as_ref().is_ok_and(|out| out.outcome.is_invalid()) {
+                                    self.state.inclusion_lists.remove(&num_hash.hash);
+                                    self.state.inclusion_list_results.remove(&num_hash.hash);
+                                }
                                 self.metrics.engine.new_payload.update_response_metrics(
                                     start,
                                     &mut self.metrics.engine.forkchoice_updated.latest_finish_at,
@@ -1704,6 +1793,13 @@ where
 
                                 // handle the event if any
                                 self.on_maybe_tree_event(maybe_event)?;
+                            }
+                            BeaconEngineMessage::InclusionListStatus { block_hash, tx } => {
+                                let result =
+                                    self.inclusion_list_status(block_hash).map_err(Into::into);
+                                if tx.send(result).is_err() {
+                                    warn!(target: "engine::tree", %block_hash, "Failed to deliver inclusion-list status, receiver dropped");
+                                }
                             }
                             BeaconEngineMessage::RethNewPayload {
                                 payload,
@@ -3404,6 +3500,43 @@ where
 
         debug!(target: "engine::tree", %hash, "no canonical state found for block");
         Ok(None)
+    }
+
+    /// Returns the cached EIP-7805 result, computing it against post-state when necessary.
+    fn inclusion_list_status(&mut self, block_hash: B256) -> ProviderResult<Option<bool>> {
+        if let Some(result) = self.state.inclusion_list_results.get(&block_hash) {
+            return Ok(Some(*result))
+        }
+
+        let Some(inclusion_list) = self.state.inclusion_lists.get(&block_hash).cloned() else {
+            // A missing list is equivalent to an empty list for already-known payloads.
+            return Ok(Some(true))
+        };
+        let block = if let Some(block) = self.state.tree_state.executed_block_by_hash(block_hash) {
+            block.recovered_block().clone()
+        } else {
+            let Some(block) = self
+                .provider
+                .sealed_block_with_senders(block_hash.into(), TransactionVariant::WithHash)?
+            else {
+                return Ok(None)
+            };
+            block
+        };
+        let Some(provider_builder) = self.state_provider_builder(block_hash)? else {
+            return Ok(None)
+        };
+        let state = provider_builder.build()?;
+        let start = Instant::now();
+        let result = validate_inclusion_list::<N>(
+            &block,
+            &state,
+            &inclusion_list,
+            &self.metrics.ef_execution,
+        )?;
+        self.metrics.ef_execution.record_inclusion_list_block_validation_time(start.elapsed());
+        self.state.inclusion_list_results.insert(block_hash, result);
+        Ok(Some(result))
     }
 }
 

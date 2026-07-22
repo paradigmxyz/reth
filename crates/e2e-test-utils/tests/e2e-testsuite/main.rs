@@ -162,7 +162,8 @@ async fn test_testsuite_assert_mine_block() -> Result<()> {
                 parent_beacon_block_root: None,
                 slot_number: None,
                 target_gas_limit: None,
-            },
+            }
+            .into(),
         ));
 
     test.run::<EthereumNode>().await?;
@@ -372,7 +373,7 @@ async fn test_setup_builder_with_custom_tree_config() -> Result<()> {
     );
 
     let (nodes, _wallet) = E2ETestSetupBuilder::<EthereumNode, _>::new(1, chain_spec, |_| {
-        PayloadAttributes::default()
+        PayloadAttributes::default().into()
     })
     .with_tree_config_modifier(|config| {
         config.with_persistence_threshold(0).with_memory_block_buffer_target(5)

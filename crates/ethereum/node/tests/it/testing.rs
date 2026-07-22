@@ -1,12 +1,11 @@
 //! E2E tests for the testing RPC namespace.
 
 use alloy_primitives::{Address, Bytes, B256};
-use alloy_rpc_types_engine::ExecutionPayloadEnvelopeV4;
+use alloy_rpc_types_engine::{ExecutionPayloadEnvelopeV4, PayloadAttributes};
 use alloy_rpc_types_eth::BlockNumberOrTag;
 use jsonrpsee_core::client::ClientT;
 use reth_chainspec::{ChainSpecBuilder, MAINNET};
 use reth_db::test_utils::create_test_rw_db;
-use reth_ethereum_engine_primitives::EthPayloadAttributes;
 use reth_node_builder::{NodeBuilder, NodeConfig};
 use reth_node_core::{
     args::DatadirArgs,
@@ -53,7 +52,7 @@ async fn testing_rpc_build_block_works() -> eyre::Result<()> {
 
             let chain = ctx.config().chain.clone();
             let parent_block_hash = chain.genesis_hash();
-            let payload_attributes = EthPayloadAttributes {
+            let payload_attributes = PayloadAttributes {
                 timestamp: chain.genesis().timestamp + 1,
                 prev_randao: B256::ZERO,
                 suggested_fee_recipient: Address::ZERO,
@@ -133,7 +132,7 @@ async fn testing_rpc_commit_block_works() -> eyre::Result<()> {
 
             let chain = ctx.config().chain.clone();
             let timestamp = chain.genesis().timestamp + 1;
-            let payload_attributes = EthPayloadAttributes {
+            let payload_attributes = PayloadAttributes {
                 timestamp,
                 prev_randao: B256::ZERO,
                 suggested_fee_recipient: Address::ZERO,

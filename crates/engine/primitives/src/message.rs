@@ -241,6 +241,8 @@ pub enum BeaconEngineMessage<Payload: PayloadTypes> {
     NewPayload {
         /// The execution payload received by Engine API.
         payload: Payload::ExecutionData,
+        /// EIP-7805 inclusion list received with `engine_newPayloadV6`.
+        inclusion_list_transactions: Option<Vec<Bytes>>,
         /// The sender for returning payload status result.
         tx: oneshot::Sender<Result<PayloadStatus, BeaconOnNewPayloadError>>,
     },
@@ -270,6 +272,13 @@ pub enum BeaconEngineMessage<Payload: PayloadTypes> {
         payload_attrs: Option<Payload::PayloadAttributes>,
         /// The sender for returning forkchoice updated result.
         tx: oneshot::Sender<RethResult<OnForkChoiceUpdated>>,
+    },
+    /// Queries the EIP-7805 inclusion-list result for an executed block.
+    InclusionListStatus {
+        /// Block whose inclusion list should be checked.
+        block_hash: B256,
+        /// Sender for returning the cached or lazily-computed result.
+        tx: oneshot::Sender<RethResult<Option<bool>>>,
     },
 }
 
@@ -303,6 +312,9 @@ impl<Payload: PayloadTypes> Display for BeaconEngineMessage<Payload> {
                     payload_attrs.is_some()
                 )
             }
+            Self::InclusionListStatus { block_hash, .. } => {
+                write!(f, "InclusionListStatus({block_hash})")
+            }
         }
     }
 }
@@ -335,8 +347,34 @@ where
         payload: Payload::ExecutionData,
     ) -> Result<PayloadStatus, BeaconOnNewPayloadError> {
         let (tx, rx) = oneshot::channel();
-        let _ = self.to_engine.send(BeaconEngineMessage::NewPayload { payload, tx });
+        let _ = self.to_engine.send(BeaconEngineMessage::NewPayload {
+            payload,
+            inclusion_list_transactions: None,
+            tx,
+        });
         rx.await.map_err(|_| BeaconOnNewPayloadError::EngineUnavailable)?
+    }
+
+    /// Sends a Bogota payload and its EIP-7805 inclusion list to the engine.
+    pub async fn new_payload_with_inclusion_list(
+        &self,
+        payload: Payload::ExecutionData,
+        inclusion_list_transactions: Vec<Bytes>,
+    ) -> Result<PayloadStatus, BeaconOnNewPayloadError> {
+        let (tx, rx) = oneshot::channel();
+        let _ = self.to_engine.send(BeaconEngineMessage::NewPayload {
+            payload,
+            inclusion_list_transactions: Some(inclusion_list_transactions),
+            tx,
+        });
+        rx.await.map_err(|_| BeaconOnNewPayloadError::EngineUnavailable)?
+    }
+
+    /// Returns the EIP-7805 inclusion-list result for an executed block.
+    pub async fn inclusion_list_status(&self, block_hash: B256) -> RethResult<Option<bool>> {
+        let (tx, rx) = oneshot::channel();
+        let _ = self.to_engine.send(BeaconEngineMessage::InclusionListStatus { block_hash, tx });
+        rx.await.map_err(|_| reth_errors::RethError::msg("engine unavailable"))?
     }
 
     /// Sends a new payload message used by `reth_newPayload` endpoint.
