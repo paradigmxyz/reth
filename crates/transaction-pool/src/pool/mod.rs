@@ -1739,7 +1739,7 @@ mod tests {
         let mut generator = TransactionGenerator::new(rand::rng());
         let transaction = generator.gen_eip4844_pooled();
         let hash = *transaction.hash();
-        let result = pool.add_transactions(
+        let result = pool.pool.add_transactions(
             TransactionOrigin::External,
             [TransactionValidationOutcome::Valid {
                 balance: U256::MAX,
@@ -1768,7 +1768,7 @@ mod tests {
         let hash = add_blob_transaction(&pool);
 
         assert_eq!(
-            pool.get(&hash).unwrap().transaction.blob_cell_availability(),
+            pool.pool.get(&hash).unwrap().transaction.blob_cell_availability(),
             Some(BlobCellAvailability::full())
         );
     }
@@ -1790,7 +1790,7 @@ mod tests {
         );
         let hash = add_blob_transaction(&pool);
 
-        assert_eq!(pool.get(&hash).unwrap().transaction.blob_cell_availability(), None);
+        assert_eq!(pool.pool.get(&hash).unwrap().transaction.blob_cell_availability(), None);
     }
 
     #[test]
