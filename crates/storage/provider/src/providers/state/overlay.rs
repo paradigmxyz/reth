@@ -143,6 +143,7 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
         mut self,
         state_trie_overlay_manager: StateTrieOverlayManager<N>,
     ) -> Self {
+        self.changeset_cache.set_state_trie_overlay_manager(state_trie_overlay_manager.clone());
         self.overlay_source = Some(OverlaySource::Managed { manager: state_trie_overlay_manager });
         self
     }
@@ -917,6 +918,31 @@ mod tests {
             builder.reverts_required(&provider, state_trie_tip, finish_tip, anchor_hash).unwrap();
 
         assert_eq!(revert_blocks, Some(2..=3));
+    }
+
+    #[cfg(feature = "partial-persistence")]
+    #[test]
+    fn managed_overlay_registers_logical_tip_with_changeset_cache() {
+        let (factory, blocks) = setup_frontiers(1, 3);
+        let manager = StateTrieOverlayManager::default();
+        for block in &blocks[2..=3] {
+            manager.insert_block(ExecutedBlock::new(
+                Arc::clone(&block.recovered_block),
+                Arc::clone(&block.execution_output),
+                ComputedTrieData::default(),
+            ));
+        }
+
+        let overlay = OverlayBuilder::<EthPrimitives>::new(
+            blocks[1].recovered_block().hash(),
+            ChangesetCache::new(),
+        )
+        .with_state_trie_overlay_manager(manager)
+        .build_overlay(&factory.provider().unwrap())
+        .unwrap();
+
+        assert!(overlay.hashed_post_state.is_empty());
+        assert!(overlay.trie_updates.is_empty());
     }
 
     #[cfg(feature = "partial-persistence")]

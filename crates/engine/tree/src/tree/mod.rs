@@ -703,6 +703,11 @@ where
         runtime: reth_tasks::Runtime,
     ) -> Self {
         let (incoming_tx, incoming) = crossbeam_channel::unbounded();
+        // ProviderFactory and the persistence service hold clones of this cache. Registering the
+        // shared manager here lets their aggregate fallback reconstruct the logical Finish state
+        // while the durable state/trie frontier trails it.
+        changeset_cache
+            .set_state_trie_overlay_manager(state.tree_state.state_trie_overlays.clone());
 
         Self {
             provider,
