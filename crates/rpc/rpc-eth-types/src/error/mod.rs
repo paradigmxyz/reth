@@ -317,10 +317,16 @@ impl From<EthApiError> for jsonrpsee_types::error::ErrorObject<'static> {
                     error.to_string(),
                 )
             }
-            EthApiError::TracingBlockNotFound(id) => rpc_error_with_code(
-                jsonrpsee_types::error::CALL_EXECUTION_FAILED_CODE,
-                format!("block not found: {}", block_id_to_str(id)),
-            ),
+            EthApiError::TracingBlockNotFound(id) => {
+                let id = match id {
+                    BlockId::Hash(hash) => hash.block_hash.to_string(),
+                    BlockId::Number(number) => number.to_string(),
+                };
+                rpc_error_with_code(
+                    jsonrpsee_types::error::CALL_EXECUTION_FAILED_CODE,
+                    format!("block {id} not found"),
+                )
+            }
             EthApiError::HeaderNotFound(id) | EthApiError::ReceiptsNotFound(id) => {
                 rpc_error_with_code(
                     EthRpcErrorCode::ResourceNotFound.code(),
@@ -1175,15 +1181,21 @@ mod tests {
 
     #[test]
     fn tracing_lookup_errors_use_call_execution_failed_code() {
-        let errors = [
-            EthApiError::TracingTransactionNotFound,
-            EthApiError::TracingBlockNotFound(BlockId::number(1)),
-            EthApiError::GenesisNotTraceable,
+        let cases = [
+            (EthApiError::TracingTransactionNotFound, "transaction not found"),
+            (
+                EthApiError::TracingBlockNotFound(BlockId::hash(b256!(
+                    "0x0000000000000000000000000000000000000000000000000000000000000001"
+                ))),
+                "block 0x0000000000000000000000000000000000000000000000000000000000000001 not found",
+            ),
+            (EthApiError::GenesisNotTraceable, "genesis is not traceable"),
         ];
 
-        for error in errors {
+        for (error, message) in cases {
             let error: jsonrpsee_types::error::ErrorObject<'static> = error.into();
             assert_eq!(error.code(), -32000);
+            assert_eq!(error.message(), message);
         }
     }
 
