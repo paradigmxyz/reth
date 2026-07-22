@@ -1,4 +1,4 @@
-use super::overlay::{Overlay, OverlayBuilder, OverlaySource};
+use super::overlay::OverlayBuilder;
 use crate::{
     AccountReader, BlockHashReader, ChangeSetReader, EitherReader, HashedPostStateProvider,
     ProviderError, RocksDBProviderFactory, StateProvider, StateRootProvider,
@@ -287,7 +287,11 @@ where
         Ok(tip.saturating_sub(self.block_number) > limit)
     }
 
-    fn build_overlay(&self, input: TrieInputSorted) -> ProviderResult<TrieInputSorted>
+    fn build_overlay(
+        &self,
+        mut input: TrieInputSorted,
+        trie_changesets_required: bool,
+    ) -> ProviderResult<TrieInputSorted>
     where
         Provider:
             BlockHashReader + PruneCheckpointReader + StageCheckpointReader + StorageSettingsCache,
@@ -308,13 +312,13 @@ where
             .block_hash(target_block)?
             .ok_or_else(|| ProviderError::HeaderNotFound(target_block.into()))?;
 
-        let TrieInputSorted { nodes, state, prefix_sets } = input;
-        let overlay_builder = OverlayBuilder::<N>::new(anchor_hash, self.changeset_cache.clone())
-            .with_overlay_source(Some(OverlaySource::Immediate { trie: nodes, state }));
-        let Overlay { trie_updates, hashed_post_state } =
-            overlay_builder.build_overlay(self.provider)?;
+        OverlayBuilder::<N>::new(anchor_hash, self.changeset_cache.clone()).build_overlay(
+            self.provider,
+            &mut input,
+            trie_changesets_required,
+        )?;
 
-        Ok(TrieInputSorted::new(trie_updates, hashed_post_state, prefix_sets))
+        Ok(input)
     }
 
     /// Set the lowest block number at which the account history is available.
@@ -418,16 +422,17 @@ where
 {
     fn state_root(&self, hashed_state: HashedPostState) -> ProviderResult<B256> {
         reth_trie_db::with_adapter!(self.provider, |A| {
-            let input = self.build_overlay(TrieInputSorted::from_unsorted(
-                TrieInput::from_state(hashed_state),
-            ))?;
+            let input = self.build_overlay(
+                TrieInputSorted::from_unsorted(TrieInput::from_state(hashed_state)),
+                false,
+            )?;
             Ok(<DbStateRoot<'_, _, A>>::overlay_root_from_nodes(self.tx(), input)?)
         })
     }
 
     fn state_root_from_nodes(&self, input: TrieInput) -> ProviderResult<B256> {
         reth_trie_db::with_adapter!(self.provider, |A| {
-            let input = self.build_overlay(TrieInputSorted::from_unsorted(input))?;
+            let input = self.build_overlay(TrieInputSorted::from_unsorted(input), false)?;
             Ok(<DbStateRoot<'_, _, A>>::overlay_root_from_nodes(self.tx(), input)?)
         })
     }
@@ -437,9 +442,10 @@ where
         hashed_state: HashedPostState,
     ) -> ProviderResult<(B256, TrieUpdates)> {
         reth_trie_db::with_adapter!(self.provider, |A| {
-            let input = self.build_overlay(TrieInputSorted::from_unsorted(
-                TrieInput::from_state(hashed_state),
-            ))?;
+            let input = self.build_overlay(
+                TrieInputSorted::from_unsorted(TrieInput::from_state(hashed_state)),
+                true,
+            )?;
             Ok(<DbStateRoot<'_, _, A>>::overlay_root_from_nodes_with_updates(self.tx(), input)?)
         })
     }
@@ -449,7 +455,7 @@ where
         input: TrieInput,
     ) -> ProviderResult<(B256, TrieUpdates)> {
         reth_trie_db::with_adapter!(self.provider, |A| {
-            let input = self.build_overlay(TrieInputSorted::from_unsorted(input))?;
+            let input = self.build_overlay(TrieInputSorted::from_unsorted(input), true)?;
             Ok(<DbStateRoot<'_, _, A>>::overlay_root_from_nodes_with_updates(self.tx(), input)?)
         })
     }
@@ -474,12 +480,15 @@ where
         hashed_storage: HashedStorage,
     ) -> ProviderResult<B256> {
         reth_trie_db::with_adapter!(self.provider, |A| {
-            let input = self.build_overlay(TrieInputSorted::from_unsorted(
-                TrieInput::from_state(HashedPostState::from_hashed_storage(
-                    alloy_primitives::keccak256(address),
-                    hashed_storage,
+            let input = self.build_overlay(
+                TrieInputSorted::from_unsorted(TrieInput::from_state(
+                    HashedPostState::from_hashed_storage(
+                        alloy_primitives::keccak256(address),
+                        hashed_storage,
+                    ),
                 )),
-            ))?;
+                false,
+            )?;
             let hashed_storage = input
                 .state
                 .account_storages()
@@ -499,12 +508,15 @@ where
         hashed_storage: HashedStorage,
     ) -> ProviderResult<reth_trie::StorageProof> {
         reth_trie_db::with_adapter!(self.provider, |A| {
-            let input = self.build_overlay(TrieInputSorted::from_unsorted(
-                TrieInput::from_state(HashedPostState::from_hashed_storage(
-                    alloy_primitives::keccak256(address),
-                    hashed_storage,
+            let input = self.build_overlay(
+                TrieInputSorted::from_unsorted(TrieInput::from_state(
+                    HashedPostState::from_hashed_storage(
+                        alloy_primitives::keccak256(address),
+                        hashed_storage,
+                    ),
                 )),
-            ))?;
+                false,
+            )?;
             let hashed_storage = input
                 .state
                 .account_storages()
@@ -529,12 +541,15 @@ where
         hashed_storage: HashedStorage,
     ) -> ProviderResult<StorageMultiProof> {
         reth_trie_db::with_adapter!(self.provider, |A| {
-            let input = self.build_overlay(TrieInputSorted::from_unsorted(
-                TrieInput::from_state(HashedPostState::from_hashed_storage(
-                    alloy_primitives::keccak256(address),
-                    hashed_storage,
+            let input = self.build_overlay(
+                TrieInputSorted::from_unsorted(TrieInput::from_state(
+                    HashedPostState::from_hashed_storage(
+                        alloy_primitives::keccak256(address),
+                        hashed_storage,
+                    ),
                 )),
-            ))?;
+                false,
+            )?;
             let hashed_storage = input
                 .state
                 .account_storages()
@@ -575,7 +590,7 @@ where
     ) -> ProviderResult<AccountProof> {
         reth_trie_db::with_adapter!(self.provider, |A| {
             let TrieInputSorted { nodes, state, prefix_sets } =
-                self.build_overlay(TrieInputSorted::from_unsorted(input))?;
+                self.build_overlay(TrieInputSorted::from_unsorted(input), false)?;
             let input = TrieInput::new(
                 Arc::unwrap_or_clone(nodes).into(),
                 Arc::unwrap_or_clone(state).into(),
@@ -593,7 +608,7 @@ where
     ) -> ProviderResult<MultiProof> {
         reth_trie_db::with_adapter!(self.provider, |A| {
             let TrieInputSorted { nodes, state, prefix_sets } =
-                self.build_overlay(TrieInputSorted::from_unsorted(input))?;
+                self.build_overlay(TrieInputSorted::from_unsorted(input), false)?;
             let input = TrieInput::new(
                 Arc::unwrap_or_clone(nodes).into(),
                 Arc::unwrap_or_clone(state).into(),
@@ -612,7 +627,7 @@ where
     ) -> ProviderResult<Vec<Bytes>> {
         reth_trie_db::with_adapter!(self.provider, |A| {
             let TrieInputSorted { nodes, state, prefix_sets } =
-                self.build_overlay(TrieInputSorted::from_unsorted(input))?;
+                self.build_overlay(TrieInputSorted::from_unsorted(input), false)?;
             let witness = TrieWitness::new(
                 InMemoryTrieCursorFactory::new(
                     reth_trie_db::DatabaseTrieCursorFactory::<_, A>::new(self.tx()),
