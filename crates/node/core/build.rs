@@ -17,7 +17,8 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     let git_builder = Git2::builder().describe(false, true, None).dirty(true).sha(false).build();
 
-    emitter.add_instructions(&git_builder)?;
+    // Source archives do not contain a Git repository, but still need complete version metadata.
+    emitter.default_on_error().add_instructions(&git_builder)?;
 
     emitter.emit_and_set()?;
     let sha = env::var("VERGEN_GIT_SHA")?;

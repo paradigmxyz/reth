@@ -67,6 +67,8 @@
             llvm22.llvm.dev
           ];
           buildInputs = prev.buildInputs or [] ++ [
+            llvm22Pkgs.libffi
+            llvm22Pkgs.libxml2
             llvm22.llvm.lib
           ];
           LLVM_SYS_221_PREFIX = "${llvm22.llvm.dev}";
