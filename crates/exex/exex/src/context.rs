@@ -120,13 +120,9 @@ where
     }
 
     /// As [`set_notifications_with_head`](Self::set_notifications_with_head), but backfills up to
-    /// `local_head` rather than the head captured at launch.
-    pub fn set_notifications_with_head_and_local_head(
-        &mut self,
-        head: ExExHead,
-        local_head: BlockNumHash,
-    ) {
-        self.notifications.set_with_head_and_local_head(head, local_head);
+    /// the node's current canonical head rather than the head captured at launch.
+    pub fn catch_up_notifications_with_head(&mut self, head: ExExHead) -> eyre::Result<()> {
+        self.notifications.catch_up_with_head(head)
     }
 
     /// Sends an [`ExExEvent::FinishedHeight`] to the ExEx task manager letting it know that this
