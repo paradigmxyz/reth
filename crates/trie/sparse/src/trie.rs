@@ -174,12 +174,15 @@ impl<T: SparseTrieTrait> RevealableSparseTrie<T> {
     /// "dirty" nodes are nodes that need their hashes to be recomputed because one or more of their
     /// children's hashes have changed.
     ///
+    /// If `prune_older_than` is provided, old leaves and branches whose materialized children are
+    /// all old are pruned after their hashes are calculated.
+    ///
     /// # Returns
     ///
     /// - `Some(B256)` with the calculated root hash if the trie is revealed.
     /// - `None` if the trie is still blind.
-    pub fn root(&mut self, epoch: u64) -> Option<B256> {
-        Some(self.as_revealed_mut()?.root(epoch))
+    pub fn root(&mut self, epoch: u64, prune_older_than: Option<u64>) -> Option<B256> {
+        Some(self.as_revealed_mut()?.root(epoch, prune_older_than))
     }
 
     /// Returns true if the root node is cached and does not need any recomputation.
@@ -192,6 +195,7 @@ impl<T: SparseTrieTrait> RevealableSparseTrie<T> {
     /// This is useful for when you need both the root hash and information about
     /// what nodes were modified, which can be used to efficiently update
     /// an external database.
+    /// `prune_older_than` applies the same strict epoch pruning as [`Self::root`].
     ///
     /// # Returns
     ///
@@ -199,9 +203,13 @@ impl<T: SparseTrieTrait> RevealableSparseTrie<T> {
     ///  - The trie root hash (`B256`).
     ///  - A [`SparseTrieUpdates`] structure containing information about updated nodes.
     ///  - `None` if the trie is still blind.
-    pub fn root_with_updates(&mut self, epoch: u64) -> Option<(B256, SparseTrieUpdates)> {
+    pub fn root_with_updates(
+        &mut self,
+        epoch: u64,
+        prune_older_than: Option<u64>,
+    ) -> Option<(B256, SparseTrieUpdates)> {
         let revealed = self.as_revealed_mut()?;
-        Some((revealed.root(epoch), revealed.take_updates()))
+        Some((revealed.root(epoch, prune_older_than), revealed.take_updates()))
     }
 
     /// Clears this trie, setting it to a blind state.

@@ -101,15 +101,23 @@ pub trait SparseTrie: Sized + Debug + Send + Sync {
     /// Calculates and returns the root hash of the trie at the provided epoch.
     ///
     /// This processes any dirty or revealed nodes by updating their RLP encodings and caching them
-    /// at `epoch`, then returns the root hash.
+    /// at `epoch`, then returns the root hash. If `prune_older_than` is provided, leaves cached at
+    /// epochs strictly below it are pruned. A branch is pruned once all of its materialized
+    /// children are old enough to prune.
     ///
     /// # Returns
     ///
     /// The root hash of the trie.
-    fn root(&mut self, epoch: u64) -> B256;
+    fn root(&mut self, epoch: u64, prune_older_than: Option<u64>) -> B256;
 
     /// Returns true if the root node is cached and does not need any recomputation.
     fn is_root_cached(&self) -> bool;
+
+    /// Returns whether the most recent pruned root calculation found that the entire trie could
+    /// be evicted by its owner.
+    fn root_is_prunable(&self) -> bool {
+        false
+    }
 
     /// Recalculates and updates the RLP hashes of subtries deeper than a certain level. The level
     /// is defined in the implementation.

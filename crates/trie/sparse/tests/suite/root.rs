@@ -3,7 +3,7 @@ use super::*;
 /// Calling `root()` on a fresh, empty trie returns `EMPTY_ROOT_HASH`.
 pub(super) fn test_root_empty_trie<T: SparseTrie>(new_trie: fn() -> T) {
     let mut trie = (new_trie)();
-    assert_eq!(trie.root(0), EMPTY_ROOT_HASH, "empty trie should return EMPTY_ROOT_HASH");
+    assert_eq!(trie.root(0, None), EMPTY_ROOT_HASH, "empty trie should return EMPTY_ROOT_HASH");
 }
 
 /// Second `root()` call returns cached hash without recomputation.
@@ -23,12 +23,12 @@ pub(super) fn test_root_cached_returns_without_recomputation<T: SparseTrie>(new_
     let harness = SuiteTestHarness::new(storage);
     let mut trie: T = harness.init_trie_fully_revealed(true, new_trie);
 
-    let root1 = trie.root(0);
+    let root1 = trie.root(0, None);
     assert_eq!(root1, harness.original_root(), "first root should match reference");
 
     assert!(trie.is_root_cached(), "root should be cached after first computation");
 
-    let root2 = trie.root(0);
+    let root2 = trie.root(0, None);
     assert_eq!(root2, root1, "second root call should return the same cached hash");
 }
 
@@ -49,7 +49,7 @@ pub(super) fn test_root_after_single_leaf_update<T: SparseTrie>(new_trie: fn() -
     let harness = SuiteTestHarness::new(storage);
     let mut trie: T = harness.init_trie_fully_revealed(false, new_trie);
 
-    let original_root = trie.root(0);
+    let original_root = trie.root(0, None);
     assert_eq!(original_root, harness.original_root(), "initial root should match reference");
 
     // Modify key_b's value from 2 to 999.
@@ -57,7 +57,7 @@ pub(super) fn test_root_after_single_leaf_update<T: SparseTrie>(new_trie: fn() -
     let mut leaf_updates = SuiteTestHarness::leaf_updates(&changes);
     harness.reveal_and_update(&mut trie, &mut leaf_updates);
 
-    let new_root = trie.root(0);
+    let new_root = trie.root(0, None);
     assert_ne!(new_root, original_root, "root should change after leaf update");
 
     // Build a reference trie with the updated value and verify.
@@ -105,7 +105,7 @@ pub(super) fn test_root_deterministic_across_update_orders<T: SparseTrie>(new_tr
                 SuiteTestHarness::leaf_updates(&BTreeMap::from([(*key, *value)]));
             trie.update_leaves(&mut leaf_updates, |_, _| {}).expect("update_leaves should succeed");
         }
-        trie.root(0)
+        trie.root(0, None)
     };
 
     // Build trie B: insert keys in order 5,3,1,4,2.
@@ -117,7 +117,7 @@ pub(super) fn test_root_deterministic_across_update_orders<T: SparseTrie>(new_tr
                 SuiteTestHarness::leaf_updates(&BTreeMap::from([(*key, *value)]));
             trie.update_leaves(&mut leaf_updates, |_, _| {}).expect("update_leaves should succeed");
         }
-        trie.root(0)
+        trie.root(0, None)
     };
 
     assert_eq!(root_a, root_b, "root hash should be deterministic regardless of insert order");
@@ -142,9 +142,9 @@ pub(super) fn test_root_handles_small_root_node_without_hash<T: SparseTrie>(new_
 
     let mut trie: T = harness.init_trie_fully_revealed(false, new_trie);
 
-    let root1 = trie.root(0);
+    let root1 = trie.root(0, None);
     assert_eq!(root1, harness.original_root(), "first root() should match reference trie");
 
-    let root2 = trie.root(0);
+    let root2 = trie.root(0, None);
     assert_eq!(root2, root1, "second root() should return cached result without panic");
 }

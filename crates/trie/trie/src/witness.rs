@@ -251,7 +251,7 @@ where
 
             let storage_root =
                 if let Some(storage_trie) = sparse_trie.storage_trie_mut(&hashed_address) {
-                    storage_trie.root(0)
+                    storage_trie.root(0, None)
                 } else {
                     let record_root_node = !self.mode.is_canonical() ||
                         state

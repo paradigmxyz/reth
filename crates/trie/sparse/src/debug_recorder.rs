@@ -67,11 +67,15 @@ pub enum RecordedOp {
     UpdateSubtrieHashes {
         /// The epoch used to cache updated nodes.
         epoch: u64,
+        /// Nodes cached before this epoch are pruned, if provided.
+        prune_older_than: Option<u64>,
     },
     /// Records a `root()` call.
     Root {
         /// The epoch used to cache updated nodes.
         epoch: u64,
+        /// Nodes cached before this epoch are pruned, if provided.
+        prune_older_than: Option<u64>,
     },
     /// Records a `set_root` call with the root node that was set.
     SetRoot {

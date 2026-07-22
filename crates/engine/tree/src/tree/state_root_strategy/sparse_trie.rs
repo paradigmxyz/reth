@@ -52,6 +52,8 @@ pub(super) struct SparseTrieCacheTask<A = ArenaParallelSparseTrie, S = ArenaPara
     parent_state_root: B256,
     /// The epoch associated with nodes cached by this task.
     epoch: u64,
+    /// Prunes cached nodes older than this epoch during final root calculation.
+    prune_older_than: Option<u64>,
     /// Handle to the proof worker pools (storage and account).
     proof_worker_handle: ProofWorkerHandle,
 
@@ -140,6 +142,7 @@ where
         trie: SparseStateTrie<A, S>,
         parent_state_root: B256,
         epoch: u64,
+        prune_older_than: Option<u64>,
         chunk_size: usize,
     ) -> Self {
         let (proof_result_tx, proof_result_rx) = crossbeam_channel::unbounded();
@@ -162,6 +165,7 @@ where
             trie,
             parent_state_root,
             epoch,
+            prune_older_than,
             chunk_size,
             max_targets_for_chunking: DEFAULT_MAX_TARGETS_FOR_CHUNKING,
             account_updates: Default::default(),
@@ -337,25 +341,26 @@ where
         debug!(target: "engine::root", "All proofs processed, ending calculation");
 
         let start = Instant::now();
-        let (state_root, trie_updates) = match self.trie.root_with_updates(self.epoch) {
-            Ok(result) => result,
-            Err(err)
-                if matches!(
-                    err.kind(),
-                    SparseStateTrieErrorKind::Sparse(SparseTrieErrorKind::Blind)
-                ) =>
-            {
-                // A still-blind account trie means this block never changed state, so preserve
-                // the cached parent root instead of fetching and revealing
-                // the unchanged root node.
-                (self.parent_state_root, TrieUpdates::default())
-            }
-            Err(err) => {
-                return Err(StateRootTaskError::Other(format!(
-                    "could not calculate state root: {err:?}"
-                )))
-            }
-        };
+        let (state_root, trie_updates) =
+            match self.trie.root_with_updates(self.epoch, self.prune_older_than) {
+                Ok(result) => result,
+                Err(err)
+                    if matches!(
+                        err.kind(),
+                        SparseStateTrieErrorKind::Sparse(SparseTrieErrorKind::Blind)
+                    ) =>
+                {
+                    // A still-blind account trie means this block never changed state, so preserve
+                    // the cached parent root instead of fetching and revealing
+                    // the unchanged root node.
+                    (self.parent_state_root, TrieUpdates::default())
+                }
+                Err(err) => {
+                    return Err(StateRootTaskError::Other(format!(
+                        "could not calculate state root: {err:?}"
+                    )))
+                }
+            };
 
         #[cfg(feature = "trie-debug")]
         let debug_recorders = self.trie.take_debug_recorders();
@@ -766,7 +771,9 @@ where
             //   stay valid and map reallocation cannot occur;
             // - each pointer is consumed by at most one rayon task, so no aliasing mutable access.
             unsafe {
-                (*trie).root(epoch).expect("updates are drained, trie should be revealed by now")
+                (*trie)
+                    .root(epoch, None)
+                    .expect("updates are drained, trie should be revealed by now")
             };
         });
     }
@@ -799,7 +806,7 @@ where
                         // If account has pending storage updates, it is still pending.
                         return true;
                     } else if let Some(account) = account.take() {
-                        let storage_root = self.trie.storage_root(addr, self.epoch).expect("updates are drained, storage trie should be revealed by now");
+                        let storage_root = self.trie.storage_root(addr, self.epoch, None).expect("updates are drained, storage trie should be revealed by now");
                         let encoded = encode_account_leaf_value(account, storage_root, account_rlp_buf);
                         self.account_updates.insert(*addr, LeafUpdate::Changed(encoded));
                         num_promoted += 1;
@@ -828,7 +835,7 @@ where
 
                     (account, storage_root)
                 } else {
-                    (trie_account.map(Into::into), self.trie.storage_root(addr, self.epoch).expect("account had storage updates that were applied to its trie, storage root must be revealed by now"))
+                    (trie_account.map(Into::into), self.trie.storage_root(addr, self.epoch, None).expect("account had storage updates that were applied to its trie, storage root must be revealed by now"))
                 };
 
                 let encoded = encode_account_leaf_value(account, storage_root, account_rlp_buf);
@@ -1230,6 +1237,7 @@ mod tests {
             trie,
             parent_state_root,
             0,
+            None,
             1,
         );
 
@@ -1276,6 +1284,7 @@ mod tests {
             trie,
             B256::from([0x55; 32]),
             0,
+            None,
             1,
         );
 
@@ -1356,6 +1365,7 @@ mod tests {
             trie,
             B256::from([0x55; 32]),
             0,
+            None,
             1,
         );
 
@@ -1402,6 +1412,7 @@ mod tests {
             trie,
             B256::from([0x55; 32]),
             0,
+            None,
             1,
         );
 
