@@ -84,6 +84,9 @@ where
 {
     let downloader = BasicBlockDownloader::new(client, consensus.clone());
 
+    provider.set_state_trie_overlay_manager(state_trie_overlays.clone());
+    changeset_cache.set_state_trie_overlay_manager(state_trie_overlays.clone());
+
     let persistence_handle =
         PersistenceHandle::<N::Primitives>::spawn_service(provider, pruner, sync_metrics_tx);
 
