@@ -147,13 +147,6 @@ struct ResolvedComponents {
     preset: Option<SelectionPreset>,
 }
 
-struct ResolvedDownload {
-    manifest: SnapshotManifest,
-    selections: BTreeMap<SnapshotComponentType, ComponentSelection>,
-    preset: Option<SelectionPreset>,
-    planned: PlannedDownloads,
-}
-
 /// Global static download defaults
 static DOWNLOAD_DEFAULTS: OnceLock<DownloadDefaults> = OnceLock::new();
 
@@ -1039,6 +1032,13 @@ impl<C: ChainSpecParser> DownloadCommand<C> {
     pub const fn prints_plan_json(&self) -> bool {
         self.print_plan_json
     }
+}
+
+struct ResolvedDownload {
+    manifest: SnapshotManifest,
+    selections: BTreeMap<SnapshotComponentType, ComponentSelection>,
+    preset: Option<SelectionPreset>,
+    planned: PlannedDownloads,
 }
 
 const MAX_DOWNLOAD_RETRIES: u32 = 10;
