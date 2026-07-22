@@ -18,8 +18,8 @@ pub(super) enum ArenaSparseNodeState {
     Cached {
         /// The cached RLP-encoded representation of the node.
         rlp_node: RlpNode,
-        /// The epoch when a leaf was most recently cached, or the oldest cached child epoch for a
-        /// branch.
+        /// The epoch when a leaf was most recently cached, or the newest retained dependency for
+        /// a branch, including its own reveal or structural modification.
         epoch: u64,
     },
     /// The node has been modified and its RLP encoding needs recomputation.

@@ -1257,7 +1257,11 @@ impl ArenaParallelSparseTrie {
             );
 
             rlp_node_buf.clear();
-            let mut oldest_child_epoch = None;
+            let was_dirty =
+                matches!(arena[head_idx].branch_ref().state, ArenaSparseNodeState::Dirty);
+            // A deletion or reveal can make a branch uncached without giving any child the
+            // current epoch, so the branch's own transition participates in the maximum.
+            let mut newest_epoch = epoch;
             let state_mask = arena[head_idx].branch_ref().state_mask;
             for (child_idx, _nibble) in BranchChildIter::new(state_mask) {
                 let child_epoch = match &arena[head_idx].branch_ref().children[child_idx] {
@@ -1317,10 +1321,7 @@ impl ArenaParallelSparseTrie {
                     }
                 };
                 if let Some(child_epoch) = child_epoch {
-                    oldest_child_epoch = Some(
-                        oldest_child_epoch
-                            .map_or(child_epoch, |oldest: u64| oldest.min(child_epoch)),
-                    );
+                    newest_epoch = newest_epoch.max(child_epoch);
                 }
             }
 
@@ -1330,7 +1331,6 @@ impl ArenaParallelSparseTrie {
             let state_mask = b.state_mask;
             let prev_branch_masks = b.branch_masks;
             let new_branch_masks = Self::get_branch_masks(arena, b);
-            let was_dirty = matches!(b.state, ArenaSparseNodeState::Dirty);
 
             rlp_buf.clear();
             let rlp_node = BranchNodeRef::new(rlp_node_buf, state_mask).rlp(rlp_buf);
@@ -1352,10 +1352,8 @@ impl ArenaParallelSparseTrie {
             );
 
             let branch = arena[head_idx].branch_mut();
-            branch.state = ArenaSparseNodeState::Cached {
-                rlp_node: rlp_node.clone(),
-                epoch: oldest_child_epoch.unwrap_or(epoch),
-            };
+            branch.state =
+                ArenaSparseNodeState::Cached { rlp_node: rlp_node.clone(), epoch: newest_epoch };
             branch.branch_masks = new_branch_masks;
 
             // Record trie updates for dirty branches only.
@@ -1396,13 +1394,7 @@ impl ArenaParallelSparseTrie {
                 let epoch = state.cached_epoch().expect("leaf must be cached before pruning");
                 return (epoch < prune_older_than, 0)
             }
-            ArenaSparseNode::Branch(branch) => {
-                let epoch =
-                    branch.state.cached_epoch().expect("branch must be cached before pruning");
-                if epoch >= prune_older_than {
-                    return (false, 0)
-                }
-            }
+            ArenaSparseNode::Branch(_) => {}
             ArenaSparseNode::Subtrie(subtrie) => return (subtrie.root_prunable, 0),
             ArenaSparseNode::TakenSubtrie => {
                 unreachable!("taken subtrie must be restored before pruning")
@@ -1445,7 +1437,7 @@ impl ArenaParallelSparseTrie {
             arena.remove(child_idx).expect("pruned child must exist");
         }
 
-        let oldest_retained_epoch = arena[idx]
+        let newest_retained_epoch = arena[idx]
             .branch_ref()
             .children
             .iter()
@@ -1455,19 +1447,22 @@ impl ArenaParallelSparseTrie {
                 }
                 ArenaSparseNodeBranchChild::Blinded(_) => None,
             })
-            .min();
+            .max();
 
-        if let Some(oldest_retained_epoch) = oldest_retained_epoch {
+        if let Some(newest_retained_epoch) = newest_retained_epoch {
             let ArenaSparseNodeState::Cached { epoch, .. } = &mut arena[idx].branch_mut().state
             else {
                 unreachable!("branch must remain cached while pruning")
             };
-            *epoch = oldest_retained_epoch;
+            *epoch = (*epoch).max(newest_retained_epoch);
             (false, pruned_leaves)
         } else {
-            // Preserve the old branch epoch until the result reaches the arena-root caller or a
-            // parent replaces this node with a blinded child.
-            (true, pruned_leaves)
+            let epoch = arena[idx]
+                .branch_ref()
+                .state
+                .cached_epoch()
+                .expect("branch must remain cached while pruning");
+            (epoch < prune_older_than, pruned_leaves)
         }
     }
 
@@ -3386,7 +3381,7 @@ mod tests {
     }
 
     #[test]
-    fn branch_epoch_tracks_oldest_child() {
+    fn branch_epoch_tracks_newest_dependency() {
         let mut trie = ArenaParallelSparseTrie::default();
         let key = |first_byte| {
             let mut key = [0; 32];
@@ -3416,15 +3411,84 @@ mod tests {
 
         update(&mut trie, vec![(first_leaf, LeafUpdate::Changed(vec![4; 32]))]);
         trie.root(20, None);
-        assert_eq!(cached_epoch(&trie.upper_arena[trie.root]), 10);
+        assert_eq!(cached_epoch(&trie.upper_arena[trie.root]), 20);
 
         update(&mut trie, vec![(second_leaf, LeafUpdate::Changed(vec![5; 32]))]);
         trie.root(30, None);
-        assert_eq!(cached_epoch(&trie.upper_arena[trie.root]), 10);
+        assert_eq!(cached_epoch(&trie.upper_arena[trie.root]), 30);
 
         update(&mut trie, vec![(third_leaf, LeafUpdate::Changed(vec![6; 32]))]);
         trie.root(40, None);
-        assert_eq!(cached_epoch(&trie.upper_arena[trie.root]), 20);
+        assert_eq!(cached_epoch(&trie.upper_arena[trie.root]), 40);
+    }
+
+    #[test]
+    fn deletion_refreshes_branch_epoch_while_pruning_old_children() {
+        let mut trie = ArenaParallelSparseTrie::default();
+        let keys = [0x00, 0x10, 0x20].map(|first_byte| {
+            let mut key = [0; 32];
+            key[0] = first_byte;
+            B256::from(key)
+        });
+        update_leaves(
+            &mut trie,
+            keys.into_iter().enumerate().map(|(i, key)| (key, vec![i as u8 + 1; 32])),
+        );
+        trie.root(10, None);
+
+        // The deletion modifies the branch without creating a young surviving leaf.
+        update_leaves(&mut trie, [(keys[2], Vec::new())]);
+
+        let mut unpruned = trie.clone();
+        let expected_root = unpruned.root(20, None);
+        let root_idx = trie.root;
+
+        assert_eq!(trie.root(20, Some(15)), expected_root);
+        assert_eq!(trie.root, root_idx);
+        assert_eq!(cached_epoch(&trie.upper_arena[root_idx]), 20);
+        assert!(!trie.root_is_prunable());
+
+        let branch = trie.upper_arena[root_idx].branch_ref();
+        assert_eq!(branch.children.len(), 2);
+        assert!(branch.children.iter().all(ArenaSparseNodeBranchChild::is_blinded));
+        assert_eq!(trie.upper_arena.len(), 1);
+
+        assert_eq!(trie.root(21, Some(21)), expected_root);
+        assert!(trie.root_is_prunable());
+    }
+
+    #[test]
+    fn deletion_in_subtrie_retains_structural_epoch() {
+        let mut trie = ArenaParallelSparseTrie::default();
+        let key = |first_byte, second_byte| {
+            let mut key = [0; 32];
+            key[0] = first_byte;
+            key[1] = second_byte;
+            B256::from(key)
+        };
+        let old = [key(0x00, 0x00), key(0x00, 0x10), key(0x00, 0x20)];
+        let sibling = key(0x01, 0x00);
+        update_leaves(
+            &mut trie,
+            old.into_iter()
+                .chain([sibling])
+                .enumerate()
+                .map(|(i, key)| (key, vec![i as u8 + 1; 32])),
+        );
+        trie.root(10, None);
+        assert!(trie.upper_arena.values().any(|node| matches!(node, ArenaSparseNode::Subtrie(_))));
+        let mut unpruned = trie.clone();
+
+        update_leaves(&mut trie, [(old[2], Vec::new())]);
+        update_leaves(&mut unpruned, [(old[2], Vec::new())]);
+        assert_eq!(trie.root(20, Some(15)), unpruned.root(20, None));
+
+        // This path is known absent beneath the retained, structurally-modified branch. If that
+        // branch was blinded, applying the update would request a proof and panic in the helper.
+        let inserted = key(0x00, 0x30);
+        update_leaves(&mut trie, [(inserted, vec![5; 32])]);
+        update_leaves(&mut unpruned, [(inserted, vec![5; 32])]);
+        assert_eq!(trie.root(21, Some(15)), unpruned.root(21, None));
     }
 
     #[test]
@@ -3466,8 +3530,8 @@ mod tests {
             .children
             .iter()
             .all(ArenaSparseNodeBranchChild::is_blinded));
-        // The root retains the oldest pruned child epoch so repeated prune calls can still evict
-        // an independently-owned trie.
+        // The root retains its cached epoch so repeated prune calls can still evict an
+        // independently-owned trie.
         assert_eq!(cached_epoch(&trie.upper_arena[root_idx]), 10);
         assert!(trie.root_is_prunable());
         assert_eq!(trie.root(21, Some(12)), expected_root);
@@ -3649,6 +3713,11 @@ mod tests {
         trie.root(5, None);
         assert_eq!(cached_epoch(&trie.upper_arena[leaf]), 10);
         assert_eq!(cached_epoch(&trie.upper_arena[trie.root]), 10);
+
+        *trie.upper_arena[trie.root].state_mut() = ArenaSparseNodeState::Revealed;
+        trie.root(20, None);
+        assert_eq!(cached_epoch(&trie.upper_arena[leaf]), 10);
+        assert_eq!(cached_epoch(&trie.upper_arena[trie.root]), 20);
     }
 
     #[test]
