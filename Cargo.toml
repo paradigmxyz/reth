@@ -1,5 +1,5 @@
 [workspace.package]
-version = "2.3.0"
+version = "2.4.1"
 edition = "2024"
 rust-version = "1.96"
 license = "MIT OR Apache-2.0"
@@ -77,7 +77,6 @@ members = [
     "crates/payload/primitives/",
     "crates/payload/validator/",
     "crates/payload/util/",
-    "crates/prune/db",
     "crates/prune/prune",
     "crates/prune/types",
     "crates/rpc/ipc/",
@@ -88,7 +87,6 @@ members = [
     "crates/rpc/rpc-eth-types/",
     "crates/rpc/rpc-layer",
     "crates/rpc/rpc-server-types/",
-    "crates/rpc/rpc-testing-util/",
     "crates/rpc/rpc-e2e-tests/",
     "crates/rpc/rpc-convert/",
     "crates/rpc/rpc/",
@@ -143,7 +141,6 @@ members = [
     "examples/node-event-hooks/",
     "examples/polygon-p2p/",
     "examples/rpc-db/",
-    "examples/precompile-cache/",
     "examples/txpool-tracing/",
     "examples/custom-beacon-withdrawals",
     "testing/ef-tests/",
@@ -398,7 +395,6 @@ reth-prune = { path = "crates/prune/prune" }
 reth-prune-types = { path = "crates/prune/types", default-features = false }
 reth-rpc = { path = "crates/rpc/rpc" }
 reth-rpc-api = { path = "crates/rpc/rpc-api" }
-reth-rpc-api-testing-util = { path = "crates/rpc/rpc-testing-util" }
 reth-rpc-builder = { path = "crates/rpc/rpc-builder" }
 reth-rpc-e2e-tests = { path = "crates/rpc/rpc-e2e-tests" }
 reth-rpc-engine-api = { path = "crates/rpc/rpc-engine-api" }
@@ -435,9 +431,9 @@ evm2-jit = { git = "https://github.com/alloy-rs/evm2", rev = "eabff3f1760395ef0f
 evm2-macros = { git = "https://github.com/alloy-rs/evm2", rev = "eabff3f1760395ef0fdd5581f72552755f1e27f1" }
 
 # eth
-alloy-dyn-abi = "1.6.0"
-alloy-primitives = { version = "1.6.0", default-features = false, features = ["map-foldhash"] }
-alloy-sol-types = { version = "1.6.0", default-features = false }
+alloy-dyn-abi = "1.6.1"
+alloy-primitives = { version = "1.6.1", default-features = false, features = ["map-foldhash"] }
+alloy-sol-types = { version = "1.6.1", default-features = false }
 
 alloy-chains = { version = "0.2.33", default-features = false }
 alloy-eip2124 = { version = "0.2.0", default-features = false }

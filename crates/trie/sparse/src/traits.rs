@@ -10,7 +10,7 @@ use alloy_primitives::{
 use alloy_trie::BranchNodeCompact;
 use reth_execution_errors::SparseTrieResult;
 use reth_trie_common::{
-    prefix_set::PrefixSetMut, BranchNodeMasks, Nibbles, ProofTrieNodeV2, TrieNodeV2,
+    BranchNodeMasks, Nibbles, ProofTrieNodeV2, ProofV2TargetParent, TrieNodeV2,
 };
 
 #[cfg(feature = "trie-debug")]
@@ -76,9 +76,6 @@ pub trait SparseTrie: Sized + Debug + Send + Sync {
     ///
     /// * `retain_updates` - Whether to track updates
     fn set_updates(&mut self, retain_updates: bool);
-
-    /// Configures the trie to retain changed node base paths during hashing.
-    fn set_changed_paths(&mut self, retain_changed_paths: bool);
 
     /// Reveals one or more trie nodes if they have not been revealed before.
     ///
@@ -179,13 +176,6 @@ pub trait SparseTrie: Sized + Debug + Send + Sync {
     /// The accumulated updates, or an empty set if updates weren't being tracked.
     fn take_updates(&mut self) -> SparseTrieUpdates;
 
-    /// Consumes and returns the currently accumulated changed node base paths.
-    ///
-    /// Ancestor paths may be excluded when a descendant path is already present.
-    ///
-    /// Returns an empty set if changed paths weren't being tracked.
-    fn take_changed_paths(&mut self) -> PrefixSetMut;
-
     /// Removes all nodes and values from the trie, resetting it to a blank state
     /// with only an empty root node. This is used when a storage root is deleted.
     ///
@@ -207,12 +197,6 @@ pub trait SparseTrie: Sized + Debug + Send + Sync {
     /// This is used as a heuristic for prioritizing which storage tries to keep
     /// during pruning. Larger values indicate larger tries that are more valuable to preserve.
     fn size_hint(&self) -> usize;
-
-    /// Returns a heuristic for the in-memory size of this trie in bytes.
-    ///
-    /// This is an approximation that accounts for the trie's nodes, values,
-    /// and auxiliary data structures.
-    fn memory_size(&self) -> usize;
 
     /// Prunes all subtrees that do not contain retained leaves.
     ///
@@ -250,9 +234,10 @@ pub trait SparseTrie: Sized + Debug + Send + Sync {
     /// Once that proof is calculated and revealed via [`SparseTrie::reveal_nodes`], the same
     /// `updates` map can be reused to retry the update.
     ///
-    /// The callback receives `(key, min_len)` where `key` is the full 32-byte hashed key
-    /// (right-padded with zeros from the blinded path) and `min_len` is the minimum depth
-    /// at which proof nodes should be returned.
+    /// The callback receives `(key, parent)` where `key` is the full 32-byte hashed key
+    /// (right-padded with zeros from the blinded path) and `parent` identifies the revealed logical
+    /// parent branch. No known parent indicates that the trie is entirely blind and the proof
+    /// must include the root.
     ///
     /// The callback may be invoked multiple times for the same target across retry loops.
     /// Callers should deduplicate if needed.
@@ -261,7 +246,7 @@ pub trait SparseTrie: Sized + Debug + Send + Sync {
     fn update_leaves(
         &mut self,
         updates: &mut B256Map<LeafUpdate>,
-        proof_required_fn: impl FnMut(B256, u8),
+        proof_required_fn: impl FnMut(B256, ProofV2TargetParent),
     ) -> SparseTrieResult<()>;
 }
 

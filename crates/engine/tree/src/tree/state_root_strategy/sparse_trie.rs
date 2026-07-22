@@ -18,7 +18,7 @@ use reth_trie::{
     updates::TrieUpdates, DecodedMultiProofV2, HashedPostState, TrieAccount, EMPTY_ROOT_HASH,
     TRIE_ACCOUNT_RLP_MAX_SIZE,
 };
-use reth_trie_common::{MultiProofTargetsV2, ProofV2Target};
+use reth_trie_common::{MultiProofTargetsV2, ProofV2Target, ProofV2TargetParent};
 use reth_trie_parallel::{
     error::StateRootTaskError,
     proof_task::{
@@ -45,7 +45,7 @@ pub(super) struct SparseTrieCacheTask<A = ArenaParallelSparseTrie, S = ArenaPara
     /// work never drains, since the updates channel closing is a normal end of stream.
     cancel_rx: CrossbeamReceiver<()>,
     /// Sender half for the channel to send final hashed state to.
-    final_hashed_state_tx: Option<std::sync::mpsc::Sender<HashedPostState>>,
+    final_hashed_state_tx: Option<std::sync::mpsc::Sender<Arc<HashedPostState>>>,
     /// `SparseStateTrie` used for computing the state root.
     trie: SparseStateTrie<A, S>,
     /// The parent block's state root.
@@ -85,11 +85,12 @@ pub(super) struct SparseTrieCacheTask<A = ArenaParallelSparseTrie, S = ArenaPara
     ///     to complete.
     pending_account_updates: B256Map<Option<Option<Account>>>,
     /// Cache of account proof targets that were already fetched/requested from the proof workers.
-    /// account -> lowest `min_len` requested.
-    fetched_account_targets: B256Map<u8>,
+    /// Account to the broadest requested parent context (an unknown parent sorts before every
+    /// known parent).
+    fetched_account_targets: B256Map<ProofV2TargetParent>,
     /// Cache of storage proof targets that have already been fetched/requested from the proof
-    /// workers. account -> slot -> lowest `min_len` requested.
-    fetched_storage_targets: B256Map<B256Map<u8>>,
+    /// workers. Account to slot to the broadest requested parent context.
+    fetched_storage_targets: B256Map<B256Map<ProofV2TargetParent>>,
     /// Reusable buffer for RLP encoding of accounts.
     account_rlp_buf: Vec<u8>,
     /// Whether the last state update has been received.
@@ -131,7 +132,7 @@ where
         executor: &Runtime,
         updates: CrossbeamReceiver<StateRootMessage>,
         cancel_rx: CrossbeamReceiver<()>,
-        final_hashed_state_tx: std::sync::mpsc::Sender<HashedPostState>,
+        final_hashed_state_tx: std::sync::mpsc::Sender<Arc<HashedPostState>>,
         proof_worker_handle: ProofWorkerHandle,
         metrics: SparseTrieTaskMetrics,
         trie: SparseStateTrie<A, S>,
@@ -257,6 +258,7 @@ where
         let mut total_idle_time = std::time::Duration::ZERO;
         let mut idle_start = Instant::now();
         let mut done = false;
+        let mut finalized_hashed_state = None;
 
         // Streaming phase: updates are still arriving. Ends when the finish marker is
         // processed. Only producers hold update senders, so the channel closing before the
@@ -274,7 +276,9 @@ where
                     let update = message.map_err(|_| StateRootTaskError::Other(
                         "updates channel disconnected before state root calculation".to_string(),
                     ))?;
-                    self.on_message(update)?;
+                    if let Some(hashed_state) = self.on_message(update)? {
+                        finalized_hashed_state = Some(hashed_state);
+                    }
                     self.pending_updates += 1;
                 }
                 recv(self.proof_result_rx) -> message => {
@@ -351,7 +355,6 @@ where
 
         #[cfg(feature = "trie-debug")]
         let debug_recorders = self.trie.take_debug_recorders();
-        let changed_paths = Some(Arc::new(self.trie.take_changed_paths().unwrap_or_default()));
 
         let end = Instant::now();
         self.metrics.sparse_trie_final_update_duration_histogram.record(end.duration_since(start));
@@ -369,7 +372,8 @@ where
         Ok(StateRootComputeOutcome {
             state_root,
             trie_updates: Arc::new(trie_updates),
-            changed_paths,
+            hashed_state: finalized_hashed_state
+                .expect("finished state updates publish the hashed post state"),
             #[cfg(feature = "trie-debug")]
             debug_recorders,
         })
@@ -441,23 +445,26 @@ where
     }
 
     /// Processes a [`SparseTrieTaskMessage`] from the hashing task.
-    fn on_message(&mut self, message: SparseTrieTaskMessage) -> Result<(), StateRootTaskError> {
+    fn on_message(
+        &mut self,
+        message: SparseTrieTaskMessage,
+    ) -> Result<Option<Arc<HashedPostState>>, StateRootTaskError> {
         match message {
-            SparseTrieTaskMessage::PrefetchProofs(targets) => self.on_prewarm_targets(targets),
+            SparseTrieTaskMessage::PrefetchProofs(targets) => {
+                self.on_prewarm_targets(targets);
+                Ok(None)
+            }
             SparseTrieTaskMessage::HashedState(hashed_state) => {
                 self.on_hashed_state_update(hashed_state)?;
+                Ok(None)
             }
             SparseTrieTaskMessage::FinishedStateUpdates => {
-                let _ = self
-                    .final_hashed_state_tx
-                    .take()
-                    .unwrap()
-                    .send(core::mem::take(&mut self.final_hashed_state));
-                self.finished_state_updates = true
+                let hashed_state = Arc::new(core::mem::take(&mut self.final_hashed_state));
+                let _ = self.final_hashed_state_tx.take().unwrap().send(Arc::clone(&hashed_state));
+                self.finished_state_updates = true;
+                Ok(Some(hashed_state))
             }
         }
-
-        Ok(())
     }
 
     #[instrument(
@@ -512,8 +519,6 @@ where
                 let mut existing_updates = self.storage_updates.get_mut(&address);
 
                 for (&slot, &value) in &storage.storage {
-                    self.trie.record_slot_touch(address, slot);
-
                     let encoded = if value.is_zero() {
                         Vec::new()
                     } else {
@@ -538,8 +543,6 @@ where
         }
 
         for (&address, &account) in &hashed_state_update.accounts {
-            self.trie.record_account_touch(address);
-
             // Track account as touched.
             //
             // This might overwrite an existing update, which is fine, because storage root from it
@@ -648,16 +651,16 @@ where
             let mut targets = Vec::new();
 
             let updates_len_before = updates.len();
-            trie.update_leaves(updates, |path, min_len| match fetched.entry(path) {
+            trie.update_leaves(updates, |path, parent| match fetched.entry(path) {
                 Entry::Occupied(mut entry) => {
-                    if min_len < *entry.get() {
-                        entry.insert(min_len);
-                        targets.push(ProofV2Target::new(path).with_min_len(min_len));
+                    if parent < *entry.get() {
+                        entry.insert(parent);
+                        targets.push(ProofV2Target::new(path).with_parent(parent));
                     }
                 }
                 Entry::Vacant(entry) => {
-                    entry.insert(min_len);
-                    targets.push(ProofV2Target::new(path).with_min_len(min_len));
+                    entry.insert(parent);
+                    targets.push(ProofV2Target::new(path).with_parent(parent));
                 }
             })?;
             let updates_len_after = updates.len();
@@ -691,19 +694,19 @@ where
 
         let updates_len_before = account_updates.len();
 
-        self.trie.trie_mut().update_leaves(account_updates, |target, min_len| {
+        self.trie.trie_mut().update_leaves(account_updates, |target, parent| {
             match self.fetched_account_targets.entry(target) {
                 Entry::Occupied(mut entry) => {
-                    if min_len < *entry.get() {
-                        entry.insert(min_len);
+                    if parent < *entry.get() {
+                        entry.insert(parent);
                         self.pending_targets
-                            .push_account_target(ProofV2Target::new(target).with_min_len(min_len));
+                            .push_account_target(ProofV2Target::new(target).with_parent(parent));
                     }
                 }
                 Entry::Vacant(entry) => {
-                    entry.insert(min_len);
+                    entry.insert(parent);
                     self.pending_targets
-                        .push_account_target(ProofV2Target::new(target).with_min_len(min_len));
+                        .push_account_target(ProofV2Target::new(target).with_parent(parent));
                 }
             }
         })?;
@@ -991,6 +994,8 @@ pub(super) struct SparseTrieTaskMetrics {
     pub(super) sparse_trie_total_duration_histogram: Histogram,
     /// Time spent preparing the sparse trie for reuse after state root computation.
     pub(super) into_trie_for_reuse_duration_histogram: Histogram,
+    /// Time spent building the retention set and pruning the sparse trie.
+    pub(super) sparse_trie_prune_duration_histogram: Histogram,
     /// Time spent waiting for preserved sparse trie cache to become available.
     pub(super) sparse_trie_cache_wait_duration_histogram: Histogram,
     /// Histogram for sparse trie task idle time in seconds (waiting for updates or proof
@@ -1009,8 +1014,6 @@ pub(super) struct SparseTrieTaskMetrics {
     /// Number of storage leaf updates that required a new proof (cache misses).
     pub(super) sparse_trie_storage_cache_misses: Histogram,
 
-    /// Retained memory of the preserved sparse trie cache in bytes.
-    pub(super) sparse_trie_retained_memory_bytes: Gauge,
     /// Number of storage tries retained in the preserved sparse trie cache.
     pub(super) sparse_trie_retained_storage_tries: Gauge,
 }
@@ -1343,8 +1346,11 @@ mod tests {
         task.account_updates.insert(account, LeafUpdate::Touched);
         task.storage_updates.entry(account).or_default().insert(slot, LeafUpdate::Touched);
         task.pending_account_updates.insert(account, None);
-        task.fetched_account_targets.insert(account_target, 0);
-        task.fetched_storage_targets.entry(account).or_default().insert(storage_target, 12);
+        task.fetched_account_targets.insert(account_target, ProofV2TargetParent::NONE);
+        task.fetched_storage_targets
+            .entry(account)
+            .or_default()
+            .insert(storage_target, ProofV2TargetParent::new(11));
         task.in_flight_proof_batches = 1;
 
         assert!(task.ensure_not_stalled(false).is_ok());

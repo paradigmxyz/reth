@@ -167,7 +167,8 @@ where
         input: BuildNewPayload<Builder::Attributes>,
         id: PayloadId,
     ) -> Result<Self::Job, PayloadBuilderError> {
-        let parent_header = if input.parent_hash.is_zero() {
+        let BuildNewPayload { attributes, parent_hash, mut resources } = input;
+        let parent_header = if parent_hash.is_zero() {
             // Use latest header for genesis block case
             self.client
                 .latest_header()
@@ -176,16 +177,16 @@ where
         } else {
             // Fetch specific header by hash
             self.client
-                .sealed_header_by_hash(input.parent_hash)
+                .sealed_header_by_hash(parent_hash)
                 .map_err(PayloadBuilderError::from)?
-                .ok_or_else(|| PayloadBuilderError::MissingParentHeader(input.parent_hash))?
+                .ok_or_else(|| PayloadBuilderError::MissingParentHeader(parent_hash))?
         };
 
         let parent_hash = parent_header.hash();
         let cached_reads = self.maybe_pre_cached(parent_hash);
         let parent_block_info = self.maybe_parent_block_info(parent_hash);
 
-        let config = PayloadConfig::new(Arc::new(parent_header), input.attributes, id)
+        let config = PayloadConfig::new(Arc::new(parent_header), attributes, id)
             .with_parent_block_info(parent_block_info);
 
         let until = self.job_deadline(config.attributes.timestamp());
@@ -200,8 +201,8 @@ where
             best_payload: PayloadState::Missing,
             pending_block: None,
             cached_reads,
-            execution_cache: input.cache,
-            state_root_handle: input.state_root_handle,
+            execution_cache: resources.take_execution_cache(),
+            state_root_handle: resources.take_state_root_handle(),
             payload_task_guard: self.payload_task_guard.clone(),
             metrics: Default::default(),
             builder: self.builder.clone(),

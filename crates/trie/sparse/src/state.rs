@@ -1,15 +1,14 @@
 #[cfg(feature = "trie-debug")]
 use crate::debug_recorder::TrieDebugRecorder;
-use crate::{
-    lfu::BucketedLfu, traits::SparseTrie as SparseTrieTrait, ArenaParallelSparseTrie,
-    RevealableSparseTrie,
-};
+use crate::{traits::SparseTrie as SparseTrieTrait, ArenaParallelSparseTrie, RevealableSparseTrie};
 use alloc::{boxed::Box, vec::Vec};
 use alloy_primitives::{map::B256Map, B256};
 use either::Either;
 use reth_execution_errors::{SparseStateTrieResult, SparseTrieErrorKind};
+#[cfg(test)]
+use reth_trie_common::prefix_set::TriePrefixSetsMut;
 use reth_trie_common::{
-    prefix_set::{PrefixSet, PrefixSetMut, TriePrefixSets, TriePrefixSetsMut},
+    prefix_set::{PrefixSet, TriePrefixSets},
     updates::{StorageTrieUpdates, TrieUpdates},
     DecodedMultiProof, MultiProof, Nibbles, ProofTrieNodeV2,
 };
@@ -39,14 +38,8 @@ pub struct SparseStateTrie<
     storage: StorageTries<S>,
     /// Flag indicating whether trie updates should be retained.
     retain_updates: bool,
-    /// Flag indicating whether changed node base paths should be retained.
-    retain_changed_paths: bool,
     /// Holds data that should be dropped after final state root is calculated.
     deferred_drops: DeferredDrops,
-    /// Global LFU tracker for hot `(address, slot)` storage entries.
-    hot_slots_lfu: BucketedLfu<HotSlotKey>,
-    /// Global LFU tracker for hot account entries.
-    hot_accounts_lfu: BucketedLfu<B256>,
     /// Metrics for the sparse state trie.
     #[cfg(feature = "metrics")]
     metrics: crate::metrics::SparseStateTrieMetrics,
@@ -62,10 +55,7 @@ where
             state: Default::default(),
             storage: Default::default(),
             retain_updates: false,
-            retain_changed_paths: false,
             deferred_drops: DeferredDrops::default(),
-            hot_slots_lfu: BucketedLfu::default(),
-            hot_accounts_lfu: BucketedLfu::default(),
             #[cfg(feature = "metrics")]
             metrics: Default::default(),
         }
@@ -89,25 +79,6 @@ impl<A, S> SparseStateTrie<A, S> {
     /// Set the retention of branch node updates and deletions.
     pub const fn with_updates(mut self, retain_updates: bool) -> Self {
         self.set_updates(retain_updates);
-        self
-    }
-
-    /// Seeds the hot account/storage LFU caches with their configured capacities.
-    ///
-    /// This must happen before the first `record_*_touch` call, otherwise touches are ignored while
-    /// the LFUs still have zero capacity.
-    pub fn set_hot_cache_capacities(&mut self, max_hot_slots: usize, max_hot_accounts: usize) {
-        self.hot_slots_lfu.decay_and_evict(max_hot_slots);
-        self.hot_accounts_lfu.decay_and_evict(max_hot_accounts);
-    }
-
-    /// Seeds the hot account/storage LFU caches with their configured capacities.
-    pub fn with_hot_cache_capacities(
-        mut self,
-        max_hot_slots: usize,
-        max_hot_accounts: usize,
-    ) -> Self {
-        self.set_hot_cache_capacities(max_hot_slots, max_hot_accounts);
         self
     }
 
@@ -152,49 +123,6 @@ impl SparseStateTrie {
 }
 
 impl<A: SparseTrieTrait, S: SparseTrieTrait> SparseStateTrie<A, S> {
-    /// Set the retention of changed node base paths.
-    pub fn set_changed_paths(&mut self, retain_changed_paths: bool) {
-        self.retain_changed_paths = retain_changed_paths;
-        self.state.set_changed_paths(retain_changed_paths);
-        for trie in self.storage.tries.values_mut() {
-            trie.set_changed_paths(retain_changed_paths);
-        }
-        for trie in &mut self.storage.cleared_tries {
-            trie.set_changed_paths(retain_changed_paths);
-        }
-        self.storage.default_trie.set_changed_paths(retain_changed_paths);
-    }
-
-    /// Set the retention of changed node base paths.
-    pub fn with_changed_paths(mut self, retain_changed_paths: bool) -> Self {
-        self.set_changed_paths(retain_changed_paths);
-        self
-    }
-
-    /// Returns storage trie changed paths for tries that have been revealed.
-    fn storage_trie_changed_paths(&mut self) -> B256Map<PrefixSetMut> {
-        self.storage
-            .tries
-            .iter_mut()
-            .filter_map(|(address, trie)| {
-                let changed_paths = trie.take_changed_paths()?;
-                (!changed_paths.is_empty()).then_some((*address, changed_paths))
-            })
-            .collect()
-    }
-
-    /// Returns changed paths by taking them from the revealed sparse tries.
-    ///
-    /// Returns `None` if the accounts trie is not revealed.
-    pub fn take_changed_paths(&mut self) -> Option<TriePrefixSetsMut> {
-        let storage_prefix_sets = self.storage_trie_changed_paths();
-        self.state.take_changed_paths().map(|account_prefix_set| TriePrefixSetsMut {
-            account_prefix_set,
-            storage_prefix_sets,
-            destroyed_accounts: Default::default(),
-        })
-    }
-
     /// Takes all debug recorders from the account trie and all revealed storage tries.
     ///
     /// Returns a vec of `(Option<B256>, TrieDebugRecorder)` where `None` is the account trie
@@ -244,18 +172,6 @@ where
         };
 
         trie.find_leaf(&path, None).is_ok()
-    }
-
-    /// Records a storage slot access/update in the global LFU tracker.
-    #[inline]
-    pub fn record_slot_touch(&mut self, account: B256, slot: B256) {
-        self.hot_slots_lfu.touch(HotSlotKey { address: account, slot });
-    }
-
-    /// Records an account access/update in the global LFU tracker.
-    #[inline]
-    pub fn record_account_touch(&mut self, account: B256) {
-        self.hot_accounts_lfu.touch(account);
     }
 
     /// Returns reference to bytes representing leaf value for the target account.
@@ -369,19 +285,14 @@ where
         }
 
         let retain_updates = self.retain_updates;
-        let retain_changed_paths = self.retain_changed_paths;
 
         #[cfg(not(feature = "std"))]
         let results: Vec<_> = targets
             .into_iter()
             .map(|(_, target, mut nodes)| {
                 let result = match target {
-                    Either::Left(trie) => {
-                        trie.reveal_v2_proof_nodes(&mut nodes, retain_updates, retain_changed_paths)
-                    }
-                    Either::Right(trie) => {
-                        trie.reveal_v2_proof_nodes(&mut nodes, retain_updates, retain_changed_paths)
-                    }
+                    Either::Left(trie) => trie.reveal_v2_proof_nodes(&mut nodes, retain_updates),
+                    Either::Right(trie) => trie.reveal_v2_proof_nodes(&mut nodes, retain_updates),
                 };
                 (result, nodes)
             })
@@ -406,16 +317,12 @@ where
                     .entered();
 
                     let result = match target {
-                        Either::Left(trie) => trie.reveal_v2_proof_nodes(
-                            &mut nodes,
-                            retain_updates,
-                            retain_changed_paths,
-                        ),
-                        Either::Right(trie) => trie.reveal_v2_proof_nodes(
-                            &mut nodes,
-                            retain_updates,
-                            retain_changed_paths,
-                        ),
+                        Either::Left(trie) => {
+                            trie.reveal_v2_proof_nodes(&mut nodes, retain_updates)
+                        }
+                        Either::Right(trie) => {
+                            trie.reveal_v2_proof_nodes(&mut nodes, retain_updates)
+                        }
                     };
                     (result, nodes)
                 })
@@ -443,7 +350,6 @@ where
         } else {
             let mut trie = S::default();
             trie.set_updates(self.retain_updates);
-            trie.set_changed_paths(self.retain_changed_paths);
             trie.wipe();
             self.storage.tries.insert(address, RevealableSparseTrie::Revealed(Box::new(trie)));
         }
@@ -551,54 +457,13 @@ where
         self.storage.clear();
     }
 
-    /// Returns a heuristic for the total in-memory size of this state trie in bytes.
-    ///
-    /// This aggregates the memory usage of the account trie, all revealed storage tries
-    /// (including cleared ones retained for allocation reuse), and auxiliary data structures.
-    pub fn memory_size(&self) -> usize {
-        let mut size = core::mem::size_of::<Self>();
-
-        size += match &self.state {
-            RevealableSparseTrie::Revealed(t) | RevealableSparseTrie::Blind(Some(t)) => {
-                t.memory_size()
-            }
-            RevealableSparseTrie::Blind(None) => 0,
-        };
-
-        for trie in self.storage.tries.values() {
-            size += match trie {
-                RevealableSparseTrie::Revealed(t) | RevealableSparseTrie::Blind(Some(t)) => {
-                    t.memory_size()
-                }
-                RevealableSparseTrie::Blind(None) => 0,
-            };
-        }
-        for trie in &self.storage.cleared_tries {
-            size += match trie {
-                RevealableSparseTrie::Revealed(t) | RevealableSparseTrie::Blind(Some(t)) => {
-                    t.memory_size()
-                }
-                RevealableSparseTrie::Blind(None) => 0,
-            };
-        }
-
-        size
-    }
-
     /// Returns the number of storage tries currently retained (active + cleared).
     pub fn retained_storage_tries_count(&self) -> usize {
         self.storage.tries.len() + self.storage.cleared_tries.len()
     }
 
-    /// Prunes account/storage tries according to global LFU retention and retained paths.
-    ///
-    /// - Top LFU `(address, slot)` entries are retained up to `max_hot_slots`.
-    ///
-    /// - Top LFU `(address, slot)` entries are retained in storage tries.
-    /// - Account trie retains only paths for accounts tracked by the account LFU.
-    /// - Storage tries retain only paths needed for retained slots.
-    /// - Additional retained paths are unioned with LFU-selected paths.
-    /// - All other revealed paths are pruned to hash stubs or fully evicted.
+    /// Prunes account/storage tries according to the provided retained paths. All other revealed
+    /// paths are pruned to hash stubs or fully evicted.
     ///
     /// # Preconditions
     ///
@@ -610,24 +475,9 @@ where
         level = "debug",
         name = "SparseStateTrie::prune",
         target = "trie::sparse",
-        skip_all,
-        fields(%max_hot_slots, %max_hot_accounts)
+        skip_all
     )]
-    pub fn prune(
-        &mut self,
-        max_hot_slots: usize,
-        max_hot_accounts: usize,
-        mut retained_paths: TriePrefixSetsMut,
-    ) {
-        self.hot_slots_lfu.decay_and_evict(max_hot_slots);
-        self.hot_accounts_lfu.decay_and_evict(max_hot_accounts);
-        extend_retained_paths_from_lfus(
-            &mut retained_paths,
-            &self.hot_accounts_lfu,
-            &self.hot_slots_lfu,
-        );
-        let retained_paths = retained_paths.freeze();
-
+    pub fn prune(&mut self, retained_paths: TriePrefixSets) {
         let retained_accounts = retained_paths.account_prefix_set.len();
         let retained_storage_tries = retained_paths.storage_prefix_sets.len();
         let total_storage_tries_before = self.storage.tries.len();
@@ -669,24 +519,6 @@ where
     }
 }
 
-#[cfg(feature = "std")]
-fn extend_retained_paths_from_lfus(
-    retained_paths: &mut TriePrefixSetsMut,
-    hot_accounts: &BucketedLfu<B256>,
-    hot_slots: &BucketedLfu<HotSlotKey>,
-) {
-    retained_paths
-        .account_prefix_set
-        .extend_keys(hot_accounts.keys().map(|key| Nibbles::unpack(*key)));
-    for key in hot_slots.keys() {
-        retained_paths
-            .storage_prefix_sets
-            .entry(key.address)
-            .or_default()
-            .insert(Nibbles::unpack(key.slot));
-    }
-}
-
 /// The fields of [`SparseStateTrie`] related to storage tries. This is kept separate from the rest
 /// of [`SparseStateTrie`] to help enforce allocation re-use.
 #[derive(Debug, Default)]
@@ -701,7 +533,7 @@ struct StorageTries<S = ArenaParallelSparseTrie> {
 
 #[cfg(feature = "std")]
 impl<S: SparseTrieTrait> StorageTries<S> {
-    /// Prunes storage tries using LFU-retained slots.
+    /// Prunes storage tries using the provided retained slots.
     ///
     /// Tries without retained slots are evicted entirely. Tries with retained slots are pruned to
     /// those slots.
@@ -771,13 +603,6 @@ impl<S: SparseTrieTrait + Clone> StorageTries<S> {
             self.cleared_tries.pop().unwrap_or_else(|| self.default_trie.clone())
         })
     }
-}
-
-/// Key for identifying a storage slot in the global LFU cache.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-struct HotSlotKey {
-    address: B256,
-    slot: B256,
 }
 
 #[cfg(test)]
@@ -946,55 +771,6 @@ mod tests {
     }
 
     #[test]
-    fn seeded_hot_cache_capacities_preserve_first_cycle_touches() {
-        let account = b256!("0x1000000000000000000000000000000000000000000000000000000000000000");
-        let slot = b256!("0x2000000000000000000000000000000000000000000000000000000000000000");
-        let mut sparse = SparseStateTrie::<ArenaParallelSparseTrie>::default();
-
-        sparse.set_hot_cache_capacities(1, 1);
-        sparse.record_account_touch(account);
-        sparse.record_slot_touch(account, slot);
-        sparse.prune(1, 1, TriePrefixSetsMut::default());
-
-        assert_eq!(sparse.hot_accounts_lfu.keys().copied().collect::<Vec<_>>(), vec![account]);
-        assert_eq!(
-            sparse.hot_slots_lfu.keys().copied().collect::<Vec<_>>(),
-            vec![HotSlotKey { address: account, slot }]
-        );
-    }
-
-    #[test]
-    fn take_changed_paths_from_sparse_state_trie() {
-        let account = B256::with_last_byte(0x01);
-        let slot = B256::with_last_byte(0x02);
-        let mut sparse = SparseStateTrie::<ArenaParallelSparseTrie>::default();
-        sparse.set_accounts_trie(RevealableSparseTrie::revealed_empty());
-        sparse.insert_storage_trie(account, RevealableSparseTrie::revealed_empty());
-        sparse.set_changed_paths(true);
-
-        let mut account_updates =
-            B256Map::from_iter([(account, LeafUpdate::Changed(vec![0x01; 32]))]);
-        sparse.trie_mut().update_leaves(&mut account_updates, |_, _| {}).unwrap();
-        assert!(account_updates.is_empty());
-        let _ = sparse.root().unwrap();
-
-        let mut storage_updates = B256Map::from_iter([(slot, LeafUpdate::Changed(vec![0x02; 32]))]);
-        sparse
-            .storage_trie_mut(&account)
-            .unwrap()
-            .update_leaves(&mut storage_updates, |_, _| {})
-            .unwrap();
-        assert!(storage_updates.is_empty());
-        let _ = sparse.storage_root(&account).unwrap();
-
-        let changed_paths = sparse.take_changed_paths().unwrap();
-        assert!(changed_paths.account_prefix_set.iter().any(|path| *path == Nibbles::default()));
-        assert!(changed_paths.storage_prefix_sets[&account]
-            .iter()
-            .any(|path| *path == Nibbles::default()));
-    }
-
-    #[test]
     fn wipe_blind_storage_then_apply_slot_update() {
         let account = B256::with_last_byte(0x01);
         let slot = B256::with_last_byte(0x02);
@@ -1025,6 +801,8 @@ mod tests {
         let mut sparse = SparseStateTrie::<ArenaParallelSparseTrie>::default();
 
         let account = B256::ZERO;
+        let hot_account =
+            b256!("0x1000000000000000000000000000000000000000000000000000000000000000");
         let slot = B256::ZERO;
         let account_path = leaf_key([0x0], 64);
         let storage_path = leaf_key([0x0], 64);
@@ -1056,14 +834,24 @@ mod tests {
 
         let multiproof = MultiProof {
             account_subtree: subtree(),
-            storages: HashMap::from_iter([(
-                account,
-                StorageMultiProof {
-                    root: B256::ZERO,
-                    subtree: subtree(),
-                    branch_node_masks: Default::default(),
-                },
-            )]),
+            storages: HashMap::from_iter([
+                (
+                    account,
+                    StorageMultiProof {
+                        root: B256::ZERO,
+                        subtree: subtree(),
+                        branch_node_masks: Default::default(),
+                    },
+                ),
+                (
+                    hot_account,
+                    StorageMultiProof {
+                        root: B256::ZERO,
+                        subtree: subtree(),
+                        branch_node_masks: Default::default(),
+                    },
+                ),
+            ]),
             ..Default::default()
         };
 
@@ -1078,7 +866,6 @@ mod tests {
             LeafUpdate::Changed(alloy_rlp::encode(trie_account)),
         );
         sparse.root().unwrap();
-
         let mut retained_paths = TriePrefixSetsMut::default();
         retained_paths.account_prefix_set.insert(Nibbles::unpack(account));
         retained_paths
@@ -1086,7 +873,7 @@ mod tests {
             .entry(account)
             .or_default()
             .insert(Nibbles::unpack(slot));
-        sparse.prune(0, 0, retained_paths);
+        sparse.prune(retained_paths.freeze());
 
         assert!(matches!(
             sparse.state_trie_ref().unwrap().find_leaf(&account_path, None),
@@ -1096,6 +883,7 @@ mod tests {
             sparse.storage_trie_ref(&account).unwrap().find_leaf(&storage_path, None),
             Ok(LeafLookup::Exists)
         ));
+        assert!(sparse.storage_trie_ref(&hot_account).is_none());
     }
 
     #[test]
