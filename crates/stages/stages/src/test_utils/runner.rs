@@ -17,10 +17,13 @@ pub(crate) enum TestRunnerError {
     Provider(#[from] ProviderError),
 }
 
+/// The database provider type stages are run against in tests.
+pub(crate) type TestStageProvider =
+    DatabaseProvider<<TempDatabase<DatabaseEnv> as Database>::TXMut, MockNodeTypesWithDB>;
+
 /// A generic test runner for stages.
 pub(crate) trait StageTestRunner {
-    type S: Stage<DatabaseProvider<<TempDatabase<DatabaseEnv> as Database>::TXMut, MockNodeTypesWithDB>>
-        + 'static;
+    type S: Stage<TestStageProvider> + 'static;
 
     /// Return a reference to the database.
     fn db(&self) -> &TestStageDB;

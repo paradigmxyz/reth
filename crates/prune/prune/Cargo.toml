@@ -34,6 +34,7 @@ metrics.workspace = true
 alloy-primitives.workspace = true
 
 # misc
+auto_impl.workspace = true
 tracing.workspace = true
 thiserror.workspace = true
 itertools.workspace = true

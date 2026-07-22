@@ -175,11 +175,13 @@ impl Decode for PackedStoredNibblesSubKey {
 }
 
 impl Encode for PruneSegment {
-    type Encoded = [u8; 1];
+    // Built-in variants encode to a single byte holding the variant index.
+    // `PruneSegment::Custom` additionally appends its id, so the encoding is variable-length.
+    type Encoded = Vec<u8>;
 
     fn encode(self) -> Self::Encoded {
-        let mut buf = [0u8];
-        self.to_compact(&mut buf.as_mut());
+        let mut buf = Vec::with_capacity(2);
+        self.to_compact(&mut buf);
         buf
     }
 }
@@ -303,5 +305,28 @@ mod tests {
         validate_bitflag_backwards_compat!(StoredBlockBodyIndices, UnusedBits::Zero);
         validate_bitflag_backwards_compat!(StoredBlockWithdrawals, UnusedBits::Zero);
         validate_bitflag_backwards_compat!(StorageHashingCheckpoint, UnusedBits::NotZero);
+    }
+
+    // The `PruneCheckpoints` table key must be stable across releases: built-in segments encode
+    // to their single variant-index byte, custom segments append their id.
+    #[test]
+    fn test_prune_segment_key_backwards_compatibility() {
+        use super::*;
+        use reth_prune_types::PruneSegment;
+
+        for (segment, expected) in [
+            (PruneSegment::SenderRecovery, vec![0u8]),
+            (PruneSegment::TransactionLookup, vec![1]),
+            (PruneSegment::Receipts, vec![2]),
+            (PruneSegment::ContractLogs, vec![3]),
+            (PruneSegment::AccountHistory, vec![4]),
+            (PruneSegment::StorageHistory, vec![5]),
+            (PruneSegment::Bodies, vec![9]),
+            (PruneSegment::Custom(0), vec![10]),
+            (PruneSegment::Custom(42), vec![10, 42]),
+        ] {
+            assert_eq!(segment.encode(), expected, "key encoding changed for {segment:?}");
+            assert_eq!(PruneSegment::decode(&expected).unwrap(), segment);
+        }
     }
 }

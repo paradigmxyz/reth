@@ -325,11 +325,14 @@ impl<E: ConfigureEvm> OfflineStages<E> {
 impl<E, Provider> StageSet<Provider> for OfflineStages<E>
 where
     E: ConfigureEvm,
+    // `'static` is required to store the (empty) `dyn Segment<Provider>` custom segment list in
+    // the prune stages.
+    Provider: 'static,
     ExecutionStages<E>: StageSet<Provider>,
-    PruneSenderRecoveryStage: Stage<Provider>,
+    PruneSenderRecoveryStage<Provider>: Stage<Provider>,
     HashingStages: StageSet<Provider>,
     HistoryIndexingStages: StageSet<Provider>,
-    PruneStage: Stage<Provider>,
+    PruneStage<Provider>: Stage<Provider>,
 {
     fn builder(self) -> StageSetBuilder<Provider> {
         ExecutionStages::new(

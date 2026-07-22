@@ -111,6 +111,59 @@ fn test_eth_launcher_with_tokio_runtime() {
 }
 
 #[test]
+fn test_install_custom_prune_segment() {
+    use reth_prune::{
+        segments::{PruneInput, Segment},
+        PruneMode, PruneProgress, PrunePurpose, PruneSegment, PrunerError, SegmentOutput,
+        SegmentOutputCheckpoint,
+    };
+
+    /// A no-op prune segment as a downstream node would define it, generic over the provider.
+    #[derive(Debug)]
+    struct CustomSegment;
+
+    impl<Provider> Segment<Provider> for CustomSegment {
+        fn segment(&self) -> PruneSegment {
+            PruneSegment::Custom(0)
+        }
+
+        fn mode(&self) -> Option<PruneMode> {
+            Some(PruneMode::Distance(100_000))
+        }
+
+        fn purpose(&self) -> PrunePurpose {
+            PrunePurpose::User
+        }
+
+        fn prune(
+            &self,
+            _provider: &Provider,
+            input: PruneInput,
+        ) -> Result<SegmentOutput, PrunerError> {
+            Ok(SegmentOutput {
+                progress: PruneProgress::Finished,
+                pruned: 0,
+                checkpoint: Some(SegmentOutputCheckpoint {
+                    block_number: Some(input.to_block),
+                    tx_number: None,
+                }),
+            })
+        }
+    }
+
+    let config = NodeConfig::test();
+    let db = create_test_rw_db();
+    let _builder = NodeBuilder::new(config)
+        .with_database(db)
+        .with_types::<EthereumNode>()
+        .with_components(EthereumNode::components())
+        .with_add_ons(EthereumAddOns::default())
+        .install_prune_segment(CustomSegment)
+        .install_prune_segment_if(false, CustomSegment)
+        .check_launch();
+}
+
+#[test]
 fn test_node_setup() {
     let config = NodeConfig::test();
     let db = create_test_rw_db();
