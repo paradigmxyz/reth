@@ -8,6 +8,16 @@ pub(crate) fn known_parent_prefix(target: &ProofV2Target) -> Option<Nibbles> {
     target.parent.path(target.key_nibbles)
 }
 
+// Returns the concrete prefix to traverse for a target. If the parent is already known then the
+// traversal starts at its direct child; otherwise it starts at the trie root.
+#[inline]
+fn sub_trie_prefix(target: &ProofV2Target) -> Nibbles {
+    target
+        .parent
+        .path_len()
+        .map_or_else(Nibbles::new, |parent_len| target.key_nibbles.slice(0..parent_len + 1))
+}
+
 // A helper function which returns the first path following a sub-trie in lexicographical order.
 #[inline]
 fn sub_trie_upper_bound(sub_trie_prefix: &Nibbles) -> Option<Nibbles> {
@@ -17,6 +27,8 @@ fn sub_trie_upper_bound(sub_trie_prefix: &Nibbles) -> Option<Nibbles> {
 /// Describes a set of targets which all apply to a single sub-trie, ie a section of the overall
 /// trie whose nodes all share a prefix.
 pub(crate) struct SubTrieTargets<'a> {
+    /// The concrete prefix used to traverse this sub-trie.
+    pub(crate) prefix: Nibbles,
     /// The path of the already-revealed parent branch. `None` means the actual trie root is
     /// requested, while `Some(Nibbles::new())` means the root branch is already revealed.
     pub(crate) parent_prefix: Option<Nibbles>,
@@ -28,8 +40,8 @@ pub(crate) struct SubTrieTargets<'a> {
 impl<'a> SubTrieTargets<'a> {
     /// Returns the concrete prefix used to traverse this sub-trie.
     #[inline]
-    pub(crate) fn prefix(&self) -> Nibbles {
-        self.parent_prefix.unwrap_or_default()
+    pub(crate) const fn prefix(&self) -> Nibbles {
+        self.prefix
     }
 
     // A helper function which returns the first path following a sub-trie in lexicographical order.
@@ -44,24 +56,24 @@ impl<'a> SubTrieTargets<'a> {
 pub(crate) fn iter_sub_trie_targets(
     targets: &mut [ProofV2Target],
 ) -> impl Iterator<Item = SubTrieTargets<'_>> {
-    // Sort globally by parent context, then target key. `None` and `Some(Nibbles::new())` remain
-    // distinct despite both traversing from the root. This also leaves each resulting chunk
-    // ordered for the `ProofCalculator`.
+    // Sort globally by concrete sub-trie, then target key. `None` and a known root parent remain
+    // distinct: the former traverses from the root, while the latter traverses from one of the
+    // root's direct children. This also leaves each resulting chunk ordered for the
+    // `ProofCalculator`.
     targets.sort_unstable_by(|a, b| {
-        known_parent_prefix(a)
-            .cmp(&known_parent_prefix(b))
-            .then_with(|| a.key_nibbles.cmp(&b.key_nibbles))
+        sub_trie_prefix(a).cmp(&sub_trie_prefix(b)).then_with(|| a.key_nibbles.cmp(&b.key_nibbles))
     });
 
-    // Chunk targets by exact known-parent prefix. Prefixes nested below a previous prefix are still
-    // processed as their own sub-trie.
-    let target_chunks = targets
-        .chunk_by_mut(|current, next| known_parent_prefix(current) == known_parent_prefix(next));
+    // Chunk targets by exact concrete prefixes. Different children of the same known parent must
+    // be processed independently so traversal never consults the parent node.
+    let target_chunks =
+        targets.chunk_by_mut(|current, next| sub_trie_prefix(current) == sub_trie_prefix(next));
 
     // Map the chunks to the return type.
     target_chunks.map(move |targets| {
+        let prefix = sub_trie_prefix(&targets[0]);
         let parent_prefix = known_parent_prefix(&targets[0]);
-        SubTrieTargets { parent_prefix, targets }
+        SubTrieTargets { prefix, parent_prefix, targets }
     })
 }
 
@@ -82,7 +94,8 @@ mod tests {
         };
 
         // Test cases: (input_targets, expected_output)
-        // Expected output format: Vec<(known_parent_prefix_hex, Vec<key_hex>)>
+        // Expected output format:
+        // Vec<(known_parent_prefix_hex, sub_trie_prefix_hex, Vec<key_hex>)>
         let test_cases = vec![
             // Case 1: Empty targets
             (vec![], vec![]),
@@ -91,6 +104,7 @@ mod tests {
                 vec![ProofV2Target::new(B256::repeat_byte(0x20))],
                 vec![(
                     None,
+                    "",
                     vec!["2020202020202020202020202020202020202020202020202020202020202020"],
                 )],
             ),
@@ -102,6 +116,7 @@ mod tests {
                 ],
                 vec![(
                     None,
+                    "",
                     vec![
                         "2020202020202020202020202020202020202020202020202020202020202020",
                         "2121212121212121212121212121212121212121212121212121212121212121",
@@ -119,15 +134,17 @@ mod tests {
                 vec![
                     (
                         Some("2"),
+                        "20",
                         vec!["2020202020202020202020202020202020202020202020202020202020202020"],
                     ),
                     (
                         Some("4"),
+                        "40",
                         vec!["4040404040404040404040404040404040404040404040404040404040404040"],
                     ),
                 ],
             ),
-            // Case 5: Three targets, two in same sub-trie, one separate
+            // Case 5: Targets below different children of the same parent are separate
             (
                 vec![
                     ProofV2Target::new(B256::repeat_byte(0x20))
@@ -140,13 +157,17 @@ mod tests {
                 vec![
                     (
                         Some("2"),
-                        vec![
-                            "2020202020202020202020202020202020202020202020202020202020202020",
-                            "2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f",
-                        ],
+                        "20",
+                        vec!["2020202020202020202020202020202020202020202020202020202020202020"],
+                    ),
+                    (
+                        Some("2"),
+                        "2f",
+                        vec!["2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f"],
                     ),
                     (
                         Some("4"),
+                        "40",
                         vec!["4040404040404040404040404040404040404040404040404040404040404040"],
                     ),
                 ],
@@ -162,10 +183,12 @@ mod tests {
                 vec![
                     (
                         Some("2"),
+                        "20",
                         vec!["2020202020202020202020202020202020202020202020202020202020202020"],
                     ),
                     (
                         Some("2f"),
+                        "2f2",
                         vec!["2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f"],
                     ),
                 ],
@@ -187,27 +210,32 @@ mod tests {
                 vec![
                     (
                         Some("2"),
+                        "20",
                         vec!["2020202020202020202020202020202020202020202020202020202020202020"],
                     ),
                     (
                         Some("2f2"),
+                        "2f2f",
                         vec!["2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f"],
                     ),
                     (
                         Some("4c"),
+                        "4c4",
                         vec!["4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c"],
                     ),
                     (
                         Some("4c4"),
+                        "4c4c",
                         vec!["4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c"],
                     ),
                     (
                         Some("4e"),
+                        "4e4",
                         vec!["4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e"],
                     ),
                 ],
             ),
-            // Case 8: A root parent should result in a zero-length sub-trie prefix
+            // Case 8: A known root parent splits targets by the root's direct children
             (
                 vec![
                     ProofV2Target::new(B256::repeat_byte(0x20))
@@ -215,15 +243,20 @@ mod tests {
                     ProofV2Target::new(B256::repeat_byte(0x40))
                         .with_parent(ProofV2TargetParent::new(0)),
                 ],
-                vec![(
-                    Some(""),
-                    vec![
-                        "2020202020202020202020202020202020202020202020202020202020202020",
-                        "4040404040404040404040404040404040404040404040404040404040404040",
-                    ],
-                )],
+                vec![
+                    (
+                        Some(""),
+                        "2",
+                        vec!["2020202020202020202020202020202020202020202020202020202020202020"],
+                    ),
+                    (
+                        Some(""),
+                        "4",
+                        vec!["4040404040404040404040404040404040404040404040404040404040404040"],
+                    ),
+                ],
             ),
-            // Case 9: Second target's sub-trie prefix is root
+            // Case 9: Concrete sub-trie prefixes determine chunk order
             (
                 vec![
                     ProofV2Target::new(B256::repeat_byte(0x20))
@@ -233,12 +266,14 @@ mod tests {
                 ],
                 vec![
                     (
-                        Some(""),
-                        vec!["4040404040404040404040404040404040404040404040404040404040404040"],
+                        Some("2"),
+                        "20",
+                        vec!["2020202020202020202020202020202020202020202020202020202020202020"],
                     ),
                     (
-                        Some("2"),
-                        vec!["2020202020202020202020202020202020202020202020202020202020202020"],
+                        Some(""),
+                        "4",
+                        vec!["4040404040404040404040404040404040404040404040404040404040404040"],
                     ),
                 ],
             ),
@@ -252,10 +287,12 @@ mod tests {
                 vec![
                     (
                         None,
+                        "",
                         vec!["2020202020202020202020202020202020202020202020202020202020202020"],
                     ),
                     (
                         Some(""),
+                        "4",
                         vec!["4040404040404040404040404040404040404040404040404040404040404040"],
                     ),
                 ],
@@ -275,11 +312,11 @@ mod tests {
                 sub_tries.len()
             );
 
-            for (j, (sub_trie, (exp_parent_prefix_hex, exp_keys))) in
+            for (j, (sub_trie, (exp_parent_prefix_hex, exp_prefix_hex, exp_keys))) in
                 sub_tries.iter().zip(expected.iter()).enumerate()
             {
                 let exp_parent_prefix = exp_parent_prefix_hex.map(nibbles);
-                let exp_prefix = exp_parent_prefix.unwrap_or_default();
+                let exp_prefix = nibbles(exp_prefix_hex);
 
                 assert_eq!(
                     sub_trie.parent_prefix, exp_parent_prefix,
@@ -329,5 +366,23 @@ mod tests {
         assert_eq!(sub_tries.len(), 1);
         assert_eq!(sub_tries[0].targets[0].key(), B256::repeat_byte(0x20));
         assert_eq!(sub_tries[0].parent_prefix, None);
+    }
+
+    #[test]
+    fn test_iter_sub_trie_targets_groups_same_parent_child() {
+        let key_a = B256::right_padding_from(&[0x20, 0x10]);
+        let key_b = B256::right_padding_from(&[0x20, 0x00]);
+        let mut targets = [key_a, key_b]
+            .map(|key| ProofV2Target::new(key).with_parent(ProofV2TargetParent::new(1)));
+
+        let sub_tries = iter_sub_trie_targets(&mut targets).collect::<Vec<_>>();
+
+        assert_eq!(sub_tries.len(), 1);
+        assert_eq!(sub_tries[0].parent_prefix, Some(Nibbles::from_nibbles([0x2])));
+        assert_eq!(sub_tries[0].prefix(), Nibbles::from_nibbles([0x2, 0x0]));
+        assert_eq!(
+            sub_tries[0].targets.iter().map(ProofV2Target::key).collect::<Vec<_>>(),
+            [key_b, key_a]
+        );
     }
 }

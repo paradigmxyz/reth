@@ -1622,7 +1622,8 @@ where
         let mut hashed_cursor_state = HashedCursorState::unseeked();
 
         static EMPTY_TARGETS: [ProofV2Target; 0] = [];
-        let sub_trie_targets = SubTrieTargets { parent_prefix: None, targets: &EMPTY_TARGETS };
+        let sub_trie_targets =
+            SubTrieTargets { prefix: Nibbles::new(), parent_prefix: None, targets: &EMPTY_TARGETS };
 
         if let Err(err) = self.proof_subtrie(
             value_encoder,
@@ -2412,6 +2413,67 @@ mod tests {
             [ProofV2Target::new(other_child_target).with_parent(ProofV2TargetParent::new(3))];
         let (proof, _) = harness.proof_v2(&mut other_child);
         assert!(proof.is_empty(), "a different direct child is unrelated to the target");
+    }
+
+    #[test]
+    fn test_known_parent_targets_are_chunked_by_direct_child() {
+        let stored_slot_a = B256::right_padding_from(&[0xea, 0x53]);
+        let stored_slot_b = B256::right_padding_from(&[0xeb, 0x53]);
+        let target_a = B256::right_padding_from(&[0xea, 0x1f]);
+        let target_b = B256::right_padding_from(&[0xeb, 0x1f]);
+        let harness = ProofTestHarness::new(BTreeMap::from([
+            (stored_slot_a, U256::from(1)),
+            (stored_slot_b, U256::from(2)),
+        ]));
+        let mut targets = [target_a, target_b]
+            .map(|target| ProofV2Target::new(target).with_parent(ProofV2TargetParent::new(1)));
+
+        let (proof, root) = harness.proof_v2(&mut targets);
+
+        assert!(root.is_none());
+        assert_eq!(proof.len(), 2);
+        assert_eq!(proof[0].path, Nibbles::from_nibbles([0xe, 0xa]));
+        assert_eq!(proof[1].path, Nibbles::from_nibbles([0xe, 0xb]));
+    }
+
+    #[test]
+    fn test_known_parent_does_not_use_stale_parent_mask() {
+        let stored_slot_a = B256::right_padding_from(&[0xea, 0x53]);
+        let stored_slot = B256::right_padding_from(&[0xeb, 0x53]);
+        let stored_slot_c = B256::right_padding_from(&[0xec, 0x53]);
+        let target = B256::right_padding_from(&[0xeb, 0x1f]);
+        let stored_slot_nibbles = Nibbles::unpack(stored_slot);
+
+        // The known parent at `e` is supplied by the sparse trie and may be stale in the database
+        // when partial persistence masks that path. In particular, its state mask can omit the
+        // live `eb` child while hashed state already contains that child's leaf.
+        let stale_parent_mask = TrieMask::new((1 << 0xa) | (1 << 0xc));
+        let stale_parent = BranchNodeCompact::new(
+            stale_parent_mask,
+            TrieMask::new(0),
+            TrieMask::new(0),
+            Vec::new(),
+            None,
+        );
+        let storage_nodes = BTreeMap::from([(Nibbles::from_nibbles([0xe]), stale_parent)]);
+
+        let mut harness = TrieTestHarness::new(BTreeMap::from([
+            (stored_slot_a, U256::from(1)),
+            (stored_slot, U256::from(2)),
+            (stored_slot_c, U256::from(3)),
+        ]));
+        harness.set_trie_nodes(storage_nodes);
+
+        let mut targets = [ProofV2Target::new(target).with_parent(ProofV2TargetParent::new(1))];
+        let (proof, root) = harness.proof_v2(&mut targets);
+
+        assert!(root.is_none());
+        assert_eq!(proof.len(), 1);
+        assert_eq!(proof[0].path, stored_slot_nibbles.slice(0..2));
+        let TrieNodeV2::Leaf(leaf) = &proof[0].node else {
+            panic!("live direct child should be reconstructed as a leaf")
+        };
+        assert_eq!(leaf.key, stored_slot_nibbles.slice(2..));
     }
 
     #[test]

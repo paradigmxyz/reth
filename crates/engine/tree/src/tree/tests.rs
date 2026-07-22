@@ -980,6 +980,7 @@ fn test_backpressure_waits_for_persistence_before_reading_incoming() {
         .tree
         .config
         .with_persistence_threshold(0)
+        .with_memory_block_buffer_target(0)
         .with_persistence_backpressure_threshold(1);
 
     let (persist_tx, persist_rx) = crossbeam_channel::bounded(1);
@@ -1039,6 +1040,27 @@ fn test_backpressure_waits_for_persistence_before_reading_incoming() {
     };
     let _ = test_harness.tree.on_engine_message(message).unwrap();
     assert_eq!(test_harness.tree.incoming.len(), 0);
+}
+
+#[test]
+fn test_backpressure_excludes_in_memory_buffer() {
+    for (canonical_tip, expected_backpressure) in [(14_u64, false), (15, true)] {
+        let blocks: Vec<_> =
+            TestBlockBuilder::eth().get_executed_blocks(1..canonical_tip + 1).collect();
+        let mut test_harness = TestHarness::new(MAINNET.clone()).with_blocks(blocks.clone());
+        test_harness.tree.config = test_harness
+            .tree
+            .config
+            .with_persistence_threshold(0)
+            .with_memory_block_buffer_target(5)
+            .with_persistence_backpressure_threshold(10);
+
+        let (_persist_tx, persist_rx) = crossbeam_channel::bounded(1);
+        let persisted = blocks.last().unwrap().recovered_block().num_hash();
+        test_harness.tree.persistence_state.start_save(persisted, persist_rx);
+
+        assert_eq!(test_harness.tree.should_backpressure(), expected_backpressure);
+    }
 }
 
 #[tokio::test]
