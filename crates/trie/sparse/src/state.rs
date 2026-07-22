@@ -5,15 +5,10 @@ use alloc::vec::Vec;
 use alloy_primitives::{map::B256Map, B256};
 use either::Either;
 use reth_execution_errors::{SparseStateTrieResult, SparseTrieErrorKind};
-#[cfg(test)]
-use reth_trie_common::prefix_set::TriePrefixSetsMut;
 use reth_trie_common::{
-    prefix_set::{PrefixSet, TriePrefixSets},
     updates::{StorageTrieUpdates, TrieUpdates},
     DecodedMultiProof, MultiProof, Nibbles, ProofTrieNodeV2, EMPTY_ROOT_HASH,
 };
-#[cfg(feature = "std")]
-use tracing::debug;
 use tracing::instrument;
 
 /// Holds data that should be dropped after any locks are released.
@@ -485,62 +480,6 @@ where
     pub fn retained_storage_tries_count(&self) -> usize {
         self.storage.tries.len() + self.storage.cleared_tries.len()
     }
-
-    /// Prunes account/storage tries according to the provided retained paths. All other revealed
-    /// paths are pruned to hash stubs or fully evicted.
-    ///
-    /// # Preconditions
-    ///
-    /// All revealed account and storage tries must already have computed hashes via `root()`
-    /// / `storage_root()` for their current state. Pruning a dirty revealed trie is a hard
-    /// error and may panic.
-    #[cfg(feature = "std")]
-    #[instrument(
-        level = "debug",
-        name = "SparseStateTrie::prune",
-        target = "trie::sparse",
-        skip_all
-    )]
-    pub fn prune(&mut self, retained_paths: TriePrefixSets) {
-        let retained_accounts = retained_paths.account_prefix_set.len();
-        let retained_storage_tries = retained_paths.storage_prefix_sets.len();
-        let total_storage_tries_before = self.storage.tries.len();
-
-        let TriePrefixSets { account_prefix_set, storage_prefix_sets, .. } = retained_paths;
-
-        let parent_span = tracing::Span::current();
-        let account_parent_span = parent_span.clone();
-
-        // Prune account and storage tries in parallel using the same retained set.
-        let (account_nodes_pruned, storage_tries_evicted) = rayon::join(
-            || {
-                let hashed_address = Option::<B256>::None;
-                let _span = tracing::trace_span!(
-                    target: "trie::sparse",
-                    parent: &account_parent_span,
-                    "prune_trie",
-                    ?hashed_address,
-                )
-                .entered();
-
-                self.state
-                    .as_revealed_mut()
-                    .map(|trie| trie.prune(account_prefix_set.slice()))
-                    .unwrap_or(0)
-            },
-            || self.storage.prune_by_retained_slots(storage_prefix_sets, &parent_span),
-        );
-
-        debug!(
-            target: "trie::sparse",
-            retained_accounts,
-            retained_storage_tries,
-            account_nodes_pruned,
-            storage_tries_evicted,
-            storage_tries_after = total_storage_tries_before - storage_tries_evicted,
-            "SparseStateTrie::prune completed"
-        );
-    }
 }
 
 /// The fields of [`SparseStateTrie`] related to storage tries. This is kept separate from the rest
@@ -556,60 +495,6 @@ struct StorageTries<S = ArenaParallelSparseTrie> {
     /// Debug records taken from fully pruned tries before their allocations are recycled.
     #[cfg(feature = "trie-debug")]
     evicted_debug_recorders: Vec<(B256, TrieDebugRecorder)>,
-}
-
-#[cfg(feature = "std")]
-impl<S: SparseTrieTrait> StorageTries<S> {
-    /// Prunes storage tries using the provided retained slots.
-    ///
-    /// Tries without retained slots are evicted entirely. Tries with retained slots are pruned to
-    /// those slots.
-    fn prune_by_retained_slots(
-        &mut self,
-        retained_slots: B256Map<PrefixSet>,
-        parent_span: &tracing::Span,
-    ) -> usize {
-        // Parallel pass: prune retained tries and clear evicted ones in place.
-        {
-            use rayon::iter::{IntoParallelRefMutIterator, ParallelIterator};
-            self.tries.par_iter_mut().for_each(|(address, trie)| {
-                let hashed_address = Some(*address);
-                let _span = tracing::trace_span!(
-                    target: "trie::sparse",
-                    parent: parent_span,
-                    "prune_trie",
-                    ?hashed_address,
-                )
-                .entered();
-
-                if let Some(slots) = retained_slots.get(address) {
-                    if let Some(t) = trie.as_revealed_mut() {
-                        t.prune(slots.slice());
-                    }
-                } else {
-                    trie.clear();
-                }
-            });
-        }
-
-        // Cheap sequential drain: move already-cleared tries into the reuse pool.
-        let addresses_to_evict: Vec<B256> = self
-            .tries
-            .keys()
-            .filter(|address| !retained_slots.contains_key(*address))
-            .copied()
-            .collect();
-
-        let evicted = addresses_to_evict.len();
-        self.cleared_tries.reserve(evicted);
-        for address in &addresses_to_evict {
-            if let Some(trie) = self.tries.remove(address) {
-                self.cleared_tries.push(trie);
-            }
-        }
-
-        evicted
-    }
 }
 
 impl<S: SparseTrieTrait> StorageTries<S> {
@@ -833,96 +718,6 @@ mod tests {
             .unwrap()
             .get_leaf_value(&full_path_0)
             .is_none());
-    }
-
-    #[test]
-    fn prune_keeps_retained_paths_overlay_account_and_storage() {
-        let mut sparse = SparseStateTrie::<ArenaParallelSparseTrie>::default();
-
-        let account = B256::ZERO;
-        let hot_account =
-            b256!("0x1000000000000000000000000000000000000000000000000000000000000000");
-        let slot = B256::ZERO;
-        let account_path = leaf_key([0x0], 64);
-        let storage_path = leaf_key([0x0], 64);
-
-        let leaf_value = alloy_rlp::encode(TrieAccount::default());
-        let leaf_0 = alloy_rlp::encode(TrieNodeV2::Leaf(LeafNode::new(
-            leaf_key([], 63),
-            leaf_value.clone(),
-        )));
-        let leaf_1 =
-            alloy_rlp::encode(TrieNodeV2::Leaf(LeafNode::new(leaf_key([], 63), leaf_value)));
-
-        let subtree = || {
-            ProofNodes::from_iter([
-                (
-                    Nibbles::default(),
-                    alloy_rlp::encode(TrieNodeV2::Branch(BranchNodeV2 {
-                        key: Nibbles::default(),
-                        stack: vec![RlpNode::from_rlp(&leaf_0), RlpNode::from_rlp(&leaf_1)],
-                        state_mask: TrieMask::new(0b11),
-                        branch_rlp_node: None,
-                    }))
-                    .into(),
-                ),
-                (Nibbles::from_nibbles([0x0]), leaf_0.clone().into()),
-                (Nibbles::from_nibbles([0x1]), leaf_1.clone().into()),
-            ])
-        };
-
-        let multiproof = MultiProof {
-            account_subtree: subtree(),
-            storages: HashMap::from_iter([
-                (
-                    account,
-                    StorageMultiProof {
-                        root: B256::ZERO,
-                        subtree: subtree(),
-                        branch_node_masks: Default::default(),
-                    },
-                ),
-                (
-                    hot_account,
-                    StorageMultiProof {
-                        root: B256::ZERO,
-                        subtree: subtree(),
-                        branch_node_masks: Default::default(),
-                    },
-                ),
-            ]),
-            ..Default::default()
-        };
-
-        sparse.reveal_decoded_multiproof(multiproof.try_into().unwrap()).unwrap();
-        let trie_account = TrieAccount {
-            storage_root: sparse.storage_root(&account, 0, None).unwrap(),
-            ..Default::default()
-        };
-        apply_account_update(
-            &mut sparse,
-            account,
-            LeafUpdate::Changed(alloy_rlp::encode(trie_account)),
-        );
-        sparse.root(0, None).unwrap();
-        let mut retained_paths = TriePrefixSetsMut::default();
-        retained_paths.account_prefix_set.insert(Nibbles::unpack(account));
-        retained_paths
-            .storage_prefix_sets
-            .entry(account)
-            .or_default()
-            .insert(Nibbles::unpack(slot));
-        sparse.prune(retained_paths.freeze());
-
-        assert!(matches!(
-            sparse.state_trie_ref().unwrap().find_leaf(&account_path, None),
-            Ok(LeafLookup::Exists)
-        ));
-        assert!(matches!(
-            sparse.storage_trie_ref(&account).unwrap().find_leaf(&storage_path, None),
-            Ok(LeafLookup::Exists)
-        ));
-        assert!(sparse.storage_trie_ref(&hot_account).is_none());
     }
 
     #[test]
