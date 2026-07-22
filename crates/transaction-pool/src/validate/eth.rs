@@ -1600,9 +1600,11 @@ mod tests {
                 )),
             )
             .unwrap();
-        let validator =
-            EthTransactionValidatorBuilder::new(MockEthProvider::default(), test_evm_config())
-                .build(blob_store);
+        let validator = EthTransactionValidatorBuilder::new(
+            MockEthProvider::default().with_genesis_block(),
+            test_evm_config(),
+        )
+        .build(blob_store);
 
         assert!(validator.validate_eip4844(&mut transaction).unwrap().is_none());
         assert_eq!(transaction.blob_cell_availability(), Some(BlobCellAvailability::full()));
