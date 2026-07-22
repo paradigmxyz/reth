@@ -1,4 +1,47 @@
 use super::*;
+use alloy_trie::{nodes::BranchNode, TrieMask};
+use reth_trie_common::{BranchNodeV2, LeafNode, ProofTrieNodeV2, RlpNode};
+
+fn key_with_prefix(prefix: &[u8]) -> B256 {
+    let mut key = B256::ZERO;
+    for (idx, &nibble) in prefix.iter().enumerate() {
+        let byte = &mut key.0[idx / 2];
+        if idx % 2 == 0 {
+            *byte |= nibble << 4;
+        } else {
+            *byte |= nibble;
+        }
+    }
+    key
+}
+
+fn changed_update(value: u64) -> LeafUpdate {
+    LeafUpdate::Changed(encode_fixed_size(&U256::from(value)).to_vec())
+}
+
+fn assert_update_requests_parent<T: SparseTrie>(
+    trie: &mut T,
+    key: B256,
+    parent: ProofV2TargetParent,
+    value: u64,
+) {
+    let mut leaf_updates = B256Map::from_iter([(key, changed_update(value))]);
+    let mut targets = Vec::new();
+    trie.update_leaves(&mut leaf_updates, |key, parent| {
+        targets.push((key, parent));
+    })
+    .expect("update_leaves should succeed");
+
+    assert_eq!(targets, vec![(key, parent)]);
+    assert!(
+        leaf_updates.contains_key(&key),
+        "update should remain pending until proof is revealed"
+    );
+}
+
+fn rlp_node(node: TrieNodeV2) -> RlpNode {
+    RlpNode::from_rlp(&alloy_rlp::encode(node))
+}
 
 pub(super) fn test_prune_retains_specified_leaves<T: SparseTrie>(new_trie: fn() -> T) {
     let mut key_a = B256::ZERO;
@@ -42,18 +85,118 @@ pub(super) fn test_prune_retains_specified_leaves<T: SparseTrie>(new_trie: fn() 
     assert!(val_b.is_some(), "retained leaf B should be accessible after prune");
 }
 
+pub(super) fn test_prune_keeps_upper_children_of_retained_branch<T: SparseTrie>(
+    new_trie: fn() -> T,
+) {
+    let retained_key = key_with_prefix(&[0x0]);
+    let protected_key_a = key_with_prefix(&[0x1, 0x2]);
+    let protected_key_b = key_with_prefix(&[0x1, 0x3]);
+    let storage = BTreeMap::from([
+        (retained_key, U256::from(1)),
+        (protected_key_a, U256::from(2)),
+        (protected_key_b, U256::from(3)),
+    ]);
+
+    let harness = SuiteTestHarness::new(storage);
+    let mut trie: T = harness.init_trie_fully_revealed(false, new_trie);
+    let root_before = trie.root();
+
+    let retained = [Nibbles::unpack(retained_key)];
+    let pruned = trie.prune(&retained);
+
+    assert_eq!(trie.root(), root_before, "root must not change after prune");
+    assert_eq!(pruned, 2, "protected branch children should be blinded, not removed");
+    assert_update_requests_parent(&mut trie, protected_key_a, ProofV2TargetParent::new(1), 20);
+}
+
+pub(super) fn test_prune_keeps_lower_children_of_retained_branch<T: SparseTrie>(
+    new_trie: fn() -> T,
+) {
+    let retained_key = key_with_prefix(&[0x0, 0x0, 0x0]);
+    let protected_key_a = key_with_prefix(&[0x0, 0x0, 0x1, 0x2]);
+    let protected_key_b = key_with_prefix(&[0x0, 0x0, 0x1, 0x3]);
+    let storage = BTreeMap::from([
+        (retained_key, U256::from(1)),
+        (protected_key_a, U256::from(2)),
+        (protected_key_b, U256::from(3)),
+    ]);
+
+    let harness = SuiteTestHarness::new(storage);
+    let mut trie: T = harness.init_trie_fully_revealed(false, new_trie);
+    let root_before = trie.root();
+
+    let retained = [Nibbles::unpack(retained_key)];
+    let pruned = trie.prune(&retained);
+
+    assert_eq!(trie.root(), root_before, "root must not change after prune");
+    assert_eq!(pruned, 2, "protected lower branch children should be blinded, not removed");
+    assert_update_requests_parent(&mut trie, protected_key_a, ProofV2TargetParent::new(3), 20);
+}
+
+pub(super) fn test_prune_protects_children_by_parent_base_path<T: SparseTrie>(new_trie: fn() -> T) {
+    let protected_leaf_a = TrieNodeV2::Leaf(LeafNode::new(Nibbles::default(), vec![0x32]));
+    let protected_leaf_b = TrieNodeV2::Leaf(LeafNode::new(Nibbles::default(), vec![0x33]));
+
+    let protected_state_mask = TrieMask::new(0b1100);
+    let protected_stack =
+        vec![rlp_node(protected_leaf_a.clone()), rlp_node(protected_leaf_b.clone())];
+    let protected_branch_rlp = RlpNode::from_rlp(&alloy_rlp::encode(BranchNode::new(
+        protected_stack.clone(),
+        protected_state_mask,
+    )));
+    let retained_parent = TrieNodeV2::Branch(BranchNodeV2::new(
+        Nibbles::from_nibbles([0xa]),
+        protected_stack,
+        protected_state_mask,
+        Some(protected_branch_rlp),
+    ));
+    let root = TrieNodeV2::Branch(BranchNodeV2::new(
+        Nibbles::default(),
+        vec![rlp_node(retained_parent.clone())],
+        TrieMask::new(0b0001),
+        None,
+    ));
+
+    let mut trie = (new_trie)();
+    trie.set_root(root, None, false).expect("set_root should succeed");
+    trie.reveal_nodes(&mut [
+        ProofTrieNodeV2 { path: Nibbles::from_nibbles([0x0]), node: retained_parent, masks: None },
+        ProofTrieNodeV2 {
+            path: Nibbles::from_nibbles([0x0, 0xa, 0x2]),
+            node: protected_leaf_a,
+            masks: None,
+        },
+        ProofTrieNodeV2 {
+            path: Nibbles::from_nibbles([0x0, 0xa, 0x3]),
+            node: protected_leaf_b,
+            masks: None,
+        },
+    ])
+    .expect("reveal_nodes should succeed");
+
+    let root_before = trie.root();
+    let retained = [Nibbles::from_nibbles([0x0, 0x0])];
+    let pruned = trie.prune(&retained);
+
+    assert_eq!(pruned, 0);
+    assert_eq!(trie.root(), root_before, "root must not change after prune");
+}
+
 /// Pruning should reduce the node count.
 ///
-/// Build a trie with 10+ leaves spread across multiple subtries, fully reveal
+/// Build a trie with several root children that each contain grandchildren, fully reveal
 /// and compute root. Then prune retaining only 1 leaf. `size_hint()` must
 /// decrease and `prune` must return > 0.
 pub(super) fn test_prune_reduces_node_count<T: SparseTrie>(new_trie: fn() -> T) {
-    // Create 16 keys with different first nibbles to spread across subtries.
+    // Create 16 pairs with different first nibbles. Pruning keeps direct
+    // children of the retained root branch, so each child needs grandchildren that can be pruned.
     let keys: Vec<B256> = (0u8..16)
-        .map(|i| {
-            let mut k = B256::ZERO;
-            k.0[0] = (i + 1) << 4; // 0x10, 0x20, ..., 0x00 (wraps, but all distinct)
-            k
+        .flat_map(|i| {
+            [0u8, 1].map(move |child| {
+                let mut k = B256::ZERO;
+                k.0[0] = (i << 4) | child;
+                k
+            })
         })
         .collect();
 

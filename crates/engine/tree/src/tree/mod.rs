@@ -194,7 +194,7 @@ impl<N: NodePrimitives> EngineApiTreeState<N> {
     ///
     /// `None` means no prune request is pending. `Some(Vec::new())` means a prune was requested,
     /// but no in-memory parent-chain blocks were found for the parent hash; the sparse trie task
-    /// should still prune using the current block's changed paths.
+    /// should still prune using the current block's hashed post state.
     pub fn take_sparse_trie_prune_blocks(
         &mut self,
         parent_hash: B256,
@@ -535,13 +535,19 @@ where
             .saturating_sub(self.persistence_state.last_persisted_block.number)
     }
 
+    /// How many blocks beyond the configured in-memory buffer are awaiting persistence.
+    const fn persistence_backpressure_gap(&self) -> u64 {
+        self.persistence_gap().saturating_sub(self.config.memory_block_buffer_target())
+    }
+
     /// Returns `true` when the main loop should stop draining the tree input channel.
     ///
-    /// This is the case when persistence is already running and the gap between the canonical tip
-    /// and the last persisted block has reached the configured threshold.
+    /// This is the case when persistence is already running and the number of blocks beyond the
+    /// configured in-memory buffer has reached the configured threshold.
     const fn should_backpressure(&self) -> bool {
         self.persistence_state.in_progress() &&
-            self.persistence_gap() >= self.config.persistence_backpressure_threshold()
+            self.persistence_backpressure_gap() >=
+                self.config.persistence_backpressure_threshold()
     }
 
     /// Run the engine API handler.
@@ -553,18 +559,19 @@ where
             //
             // 1. Non-blocking poll for persistence completion. If the background flush already
             //    landed, absorb the result now so the gap calculation below is fresh.
-            // 2. Decide how to wait for the next event. When the canonical-to-persisted gap exceeds
-            //    the backpressure threshold we only block on the persistence receiver, leaving new
-            //    engine requests sitting in the unbounded upstream channel.
+            // 2. Decide how to wait for the next event. When the canonical-to-persisted gap beyond
+            //    the in-memory buffer reaches the backpressure threshold we only block on the
+            //    persistence receiver, leaving new engine requests sitting in the unbounded
+            //    upstream channel.
             // 3. Handle the event (engine message or persistence completion) and kick off a new
             //    persistence cycle if the threshold is met again.
             //
-            // The net effect: when the persistence gap exceeds the threshold, we stop
-            // processing incoming messages and let them queue in the channel. This is only a
-            // soft form of backpressure: it delays replies and, more importantly, prevents
-            // executing further blocks that would pile up in the persistence queue - where each
-            // block carries heavier state (eg. trie updates) than the raw payload sitting in the
-            // engine channel.
+            // The net effect: when the unbuffered persistence gap reaches the threshold, we stop
+            // processing incoming messages and let them queue in the channel. This is only a soft
+            // form of backpressure: it delays replies and, more importantly, prevents executing
+            // further blocks that would pile up in the persistence queue - where each block
+            // carries heavier state (eg. trie updates) than the raw payload sitting in the engine
+            // channel.
             //
             // Standard Ethereum CLs won't truly back off - the engine API has no
             // backpressure semantics, and CLs typically timeout after ≈8s and resend - so
@@ -751,6 +758,8 @@ where
         &mut self,
         payload: T::ExecutionData,
     ) -> Result<TreeOutcome<PayloadStatus>, InsertBlockFatalError> {
+        let _thread_resource_usage =
+            self.metrics.engine.new_payload.measure_thread_resource_usage();
         trace!(target: "engine::tree", "invoked new payload");
 
         // start timing for the new payload process
@@ -2091,7 +2100,7 @@ where
     }
 
     /// Returns true if the canonical chain length minus the last persisted
-    /// block is greater than or equal to the persistence threshold,
+    /// block is greater than the persistence threshold,
     /// backfill is not running, and no payload is currently being built.
     pub const fn should_persist(&self) -> bool {
         if self.building_payload {
@@ -3305,13 +3314,7 @@ where
         //    payloadAttributes is not null and the forkchoice state has been updated successfully.
         //    The build process is specified in the Payload building section.
 
-        let cache = if self.config.share_execution_cache_with_payload_builder() {
-            self.payload_validator.cache_for(state.head_block_hash)
-        } else {
-            None
-        };
-
-        let state_root_handle = self.payload_validator.payload_state_root_handle_for(
+        let resources = self.payload_validator.payload_builder_resources(
             state.head_block_hash,
             head,
             attributes.timestamp(),
@@ -3323,8 +3326,7 @@ where
         let pending_payload_id = self.payload_builder.send_new_payload(BuildNewPayload {
             parent_hash: state.head_block_hash,
             attributes,
-            cache,
-            state_root_handle,
+            resources,
         });
 
         // Client software MUST respond to this method call in the following way:

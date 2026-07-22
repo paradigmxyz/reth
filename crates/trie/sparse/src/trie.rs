@@ -5,8 +5,7 @@ use alloc::{borrow::Cow, boxed::Box};
 use alloy_primitives::{map::B256Map, B256};
 use reth_execution_errors::{SparseTrieErrorKind, SparseTrieResult};
 use reth_trie_common::{
-    prefix_set::PrefixSetMut, BranchNodeMasks, Nibbles, ProofTrieNodeV2, RlpNode, TrieMask,
-    TrieNodeV2,
+    BranchNodeMasks, Nibbles, ProofTrieNodeV2, ProofV2TargetParent, RlpNode, TrieMask, TrieNodeV2,
 };
 
 /// A sparse trie that is either in a "blind" state (no nodes are revealed, root node hash is
@@ -56,8 +55,7 @@ impl<T: SparseTrieTrait + Default> RevealableSparseTrie<T> {
     /// If the trie is blinded, its root node is replaced with `root`.
     ///
     /// The `masks` are used to determine how the node's children are stored.
-    /// The retention flags control whether trie updates and changed node base paths
-    /// should be tracked.
+    /// The retention flag controls whether trie updates should be tracked.
     ///
     /// # Returns
     ///
@@ -67,7 +65,6 @@ impl<T: SparseTrieTrait + Default> RevealableSparseTrie<T> {
         root: TrieNodeV2,
         masks: Option<BranchNodeMasks>,
         retain_updates: bool,
-        retain_changed_paths: bool,
     ) -> SparseTrieResult<&mut T> {
         // if `Blind`, we initialize the revealed trie with the given root node, using a
         // pre-allocated trie if available.
@@ -79,7 +76,6 @@ impl<T: SparseTrieTrait + Default> RevealableSparseTrie<T> {
             };
 
             revealed_trie.set_root(root, masks, retain_updates)?;
-            revealed_trie.set_changed_paths(retain_changed_paths);
             *self = Self::Revealed(revealed_trie);
         }
 
@@ -94,15 +90,9 @@ impl<T: SparseTrieTrait + Default> RevealableSparseTrie<T> {
         &mut self,
         nodes: &mut [ProofTrieNodeV2],
         retain_updates: bool,
-        retain_changed_paths: bool,
     ) -> SparseTrieResult<()> {
         let trie = if let Some(root_node) = nodes.iter().find(|n| n.path.is_empty()) {
-            self.reveal_root(
-                root_node.node.clone(),
-                root_node.masks,
-                retain_updates,
-                retain_changed_paths,
-            )?
+            self.reveal_root(root_node.node.clone(), root_node.masks, retain_updates)?
         } else {
             self.as_revealed_mut().ok_or(SparseTrieErrorKind::Blind)?
         };
@@ -214,23 +204,6 @@ impl<T: SparseTrieTrait> RevealableSparseTrie<T> {
         Some((revealed.root(), revealed.take_updates()))
     }
 
-    /// Configures a revealed or retained cleared trie to collect changed node base paths.
-    pub fn set_changed_paths(&mut self, retain_changed_paths: bool) {
-        match self {
-            Self::Revealed(trie) | Self::Blind(Some(trie)) => {
-                trie.set_changed_paths(retain_changed_paths);
-            }
-            Self::Blind(None) => {}
-        }
-    }
-
-    /// Takes changed node base paths from the revealed trie.
-    ///
-    /// Returns `None` if the trie is still blind.
-    pub fn take_changed_paths(&mut self) -> Option<PrefixSetMut> {
-        Some(self.as_revealed_mut()?.take_changed_paths())
-    }
-
     /// Clears this trie, setting it to a blind state.
     ///
     /// If this instance was revealed, or was itself a `Blind` with a pre-allocated
@@ -252,7 +225,7 @@ impl<T: SparseTrieTrait + Default> RevealableSparseTrie<T> {
     /// Applies batch leaf updates to the sparse trie.
     ///
     /// For blind tries, all updates are kept in the map and proof targets are emitted
-    /// for every key (with `min_len = 0` since nothing is revealed).
+    /// for every key (with no known parent since nothing is revealed).
     ///
     /// For revealed tries, delegates to the inner implementation which will:
     /// - Apply updates where possible
@@ -261,13 +234,13 @@ impl<T: SparseTrieTrait + Default> RevealableSparseTrie<T> {
     pub fn update_leaves(
         &mut self,
         updates: &mut B256Map<LeafUpdate>,
-        mut proof_required_fn: impl FnMut(B256, u8),
+        mut proof_required_fn: impl FnMut(B256, ProofV2TargetParent),
     ) -> SparseTrieResult<()> {
         match self {
             Self::Blind(_) => {
-                // Nothing is revealed - emit proof targets for all keys with min_len = 0
+                // Nothing is revealed - emit proof targets for all keys without a known parent.
                 for key in updates.keys() {
-                    proof_required_fn(*key, 0);
+                    proof_required_fn(*key, ProofV2TargetParent::NONE);
                 }
                 // All updates remain in the map for retry after proofs are fetched
                 Ok(())
@@ -432,19 +405,6 @@ impl SparseNode {
     pub fn with_state(mut self, state: SparseNodeState) -> Self {
         self.set_state(state);
         self
-    }
-
-    /// Returns the memory size of this node in bytes.
-    pub const fn memory_size(&self) -> usize {
-        match self {
-            Self::Empty => core::mem::size_of::<Self>(),
-            Self::Branch { .. } => {
-                core::mem::size_of::<Self>() + core::mem::size_of::<[B256; 16]>()
-            }
-            Self::Leaf { key, .. } | Self::Extension { key, .. } => {
-                core::mem::size_of::<Self>() + key.len()
-            }
-        }
     }
 }
 

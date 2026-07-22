@@ -5232,7 +5232,6 @@ mod tests {
                 }),
                 ComputedTrieData {
                     sorted: SortedTrieData::new(Arc::new(hashed_state), Default::default()),
-                    ..Default::default()
                 },
             );
             blocks.push(executed);

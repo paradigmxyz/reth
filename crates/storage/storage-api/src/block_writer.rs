@@ -78,7 +78,7 @@ pub trait BlockWriter {
     /// updates the post-state.
     ///
     /// Inserts the blocks into the database and updates the state with
-    /// provided `BundleState`. The database's trie state is _not_ updated.
+    /// provided execution state. The database's trie state is _not_ updated.
     ///
     /// # Parameters
     ///

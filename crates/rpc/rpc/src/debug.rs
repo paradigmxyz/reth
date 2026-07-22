@@ -781,6 +781,15 @@ where
         Ok(res.into())
     }
 
+    /// Handler for `debug_getRawBlockAccessList`
+    async fn raw_block_access_list(&self, block_id: BlockId) -> RpcResult<Bytes> {
+        self.eth_api()
+            .get_raw_block_access_list(block_id)
+            .await
+            .map_err(Into::into)?
+            .ok_or_else(|| EthApiError::HeaderNotFound(block_id).into())
+    }
+
     /// Handler for `debug_getRawTransaction`
     ///
     /// If this is a pooled EIP-4844 transaction, the blob sidecar is included.

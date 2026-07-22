@@ -182,6 +182,14 @@ impl ConfigBuilder {
         self
     }
 
+    /// Sets the fork ID kv-pair if none has already been configured.
+    pub const fn fork_if_unset(mut self, fork_key: &'static [u8], fork_id: ForkId) -> Self {
+        if self.fork.is_none() {
+            self.fork = Some((fork_key, fork_id));
+        }
+        self
+    }
+
     /// Sets the tcp socket to advertise in the local [`Enr`](discv5::enr::Enr). The IP address of
     /// this socket will overwrite the discovery address of the same IP version, if one is
     /// configured.
