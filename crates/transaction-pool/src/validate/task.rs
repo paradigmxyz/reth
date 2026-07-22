@@ -236,6 +236,26 @@ where
     type Transaction = <V as TransactionValidator>::Transaction;
     type Block = V::Block;
 
+    fn validate_stateless(
+        &self,
+        origin: TransactionOrigin,
+        transaction: &Self::Transaction,
+    ) -> Result<(), crate::error::InvalidPoolTransactionError> {
+        self.validator.validate_stateless(origin, transaction)
+    }
+
+    fn validate_stateful<S>(
+        &self,
+        origin: TransactionOrigin,
+        transaction: Self::Transaction,
+        state: &S,
+    ) -> TransactionValidationOutcome<Self::Transaction>
+    where
+        S: reth_storage_api::AccountReader + reth_storage_api::BytecodeReader + ?Sized,
+    {
+        self.validator.validate_stateful(origin, transaction, state)
+    }
+
     async fn validate_transaction(
         &self,
         origin: TransactionOrigin,
@@ -345,7 +365,7 @@ mod tests {
     use super::*;
     use crate::{
         test_utils::MockTransaction,
-        validate::{TransactionValidationOutcome, ValidTransaction},
+        validate::{TransactionValidationOutcome, ValidTransaction, NOOP_ACCOUNT_READER},
         TransactionOrigin,
     };
     use alloy_primitives::{Address, U256};
@@ -357,11 +377,23 @@ mod tests {
         type Transaction = MockTransaction;
         type Block = reth_ethereum_primitives::Block;
 
-        async fn validate_transaction(
+        fn validate_stateless(
+            &self,
+            _origin: TransactionOrigin,
+            _transaction: &Self::Transaction,
+        ) -> Result<(), crate::error::InvalidPoolTransactionError> {
+            Ok(())
+        }
+
+        fn validate_stateful<S>(
             &self,
             _origin: TransactionOrigin,
             transaction: Self::Transaction,
-        ) -> TransactionValidationOutcome<Self::Transaction> {
+            _state: &S,
+        ) -> TransactionValidationOutcome<Self::Transaction>
+        where
+            S: reth_storage_api::AccountReader + reth_storage_api::BytecodeReader + ?Sized,
+        {
             TransactionValidationOutcome::Valid {
                 balance: U256::ZERO,
                 state_nonce: 0,
@@ -370,6 +402,25 @@ mod tests {
                 propagate: false,
                 authorities: Some(Vec::<Address>::new()),
             }
+        }
+
+        async fn validate_transaction(
+            &self,
+            origin: TransactionOrigin,
+            transaction: Self::Transaction,
+        ) -> TransactionValidationOutcome<Self::Transaction> {
+            match self.validate_stateless(origin, &transaction) {
+                Err(err) => TransactionValidationOutcome::Invalid(transaction, err),
+                Ok(()) => self.validate_stateful(origin, transaction, &NOOP_ACCOUNT_READER),
+            }
+        }
+
+        async fn validate_transactions(
+            &self,
+            transactions: impl IntoIterator<Item = (TransactionOrigin, Self::Transaction), IntoIter: Send>
+                + Send,
+        ) -> Vec<TransactionValidationOutcome<Self::Transaction>> {
+            self.validate_transactions_with_state(transactions, &NOOP_ACCOUNT_READER)
         }
     }
 
@@ -403,6 +454,33 @@ mod tests {
     impl TransactionValidator for SameOriginBatchValidator {
         type Transaction = MockTransaction;
         type Block = reth_ethereum_primitives::Block;
+
+        fn validate_stateless(
+            &self,
+            _origin: TransactionOrigin,
+            _transaction: &Self::Transaction,
+        ) -> Result<(), crate::error::InvalidPoolTransactionError> {
+            Ok(())
+        }
+
+        fn validate_stateful<S>(
+            &self,
+            _origin: TransactionOrigin,
+            transaction: Self::Transaction,
+            _state: &S,
+        ) -> TransactionValidationOutcome<Self::Transaction>
+        where
+            S: reth_storage_api::AccountReader + reth_storage_api::BytecodeReader + ?Sized,
+        {
+            TransactionValidationOutcome::Valid {
+                balance: U256::ZERO,
+                state_nonce: 0,
+                bytecode_hash: None,
+                transaction: ValidTransaction::Valid(transaction),
+                propagate: false,
+                authorities: None,
+            }
+        }
 
         async fn validate_transaction(
             &self,
