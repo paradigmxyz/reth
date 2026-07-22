@@ -24,6 +24,7 @@ use evm2::{
     interpreter::Host,
     BaseEvmTypes, Evm, EvmTypes, TxResultWithState,
 };
+use reth_chainspec::EthChainSpec;
 use reth_ethereum_forks::EthereumHardforks;
 use reth_ethereum_primitives::{Receipt, TransactionSigned};
 use reth_evm::{
@@ -99,16 +100,14 @@ where
     R: ReceiptBuilder,
 {
     /// Creates a configured Ethereum block executor.
-    pub(crate) fn new<C>(
+    pub fn new<C>(
         mut evm: Evm<'a, T>,
         ctx: EthBlockExecutionCtx<'a>,
         chain_spec: &C,
-        deposit_contract_address: Option<alloy_primitives::Address>,
-        hashed_state_mode: HashedStateMode,
         receipt_builder: R,
     ) -> Self
     where
-        C: EthereumHardforks + ?Sized,
+        C: EthChainSpec + EthereumHardforks + ?Sized,
     {
         // The executor stores evm2's base spec ID, while custom type families may expose a
         // richer host spec ID that converts into it.
@@ -123,9 +122,11 @@ where
             receipt_builder,
             spec_id,
             base_block_reward: base_block_reward(chain_spec, block_number),
-            deposit_contract_address,
+            deposit_contract_address: chain_spec
+                .deposit_contract()
+                .map(|contract| contract.address),
             block_state: BlockStateAccumulator::new(),
-            hashed_state_mode,
+            hashed_state_mode: HashedStateMode::OutputOnly,
             hashed_state_update_hook: None,
             receipts: Vec::new(),
             cumulative_gas_used: 0,

@@ -16,7 +16,7 @@ pub use evm2_jit::{
 };
 
 use crate::{
-    executor::{EthBigBlockExecutor, EthBigBlockPlan, HashedStateMode},
+    executor::{EthBigBlockExecutor, EthBigBlockPlan},
     EthBlockExecutionCtx, EthBlockExecutor, EthEvmEnv, RethReceiptBuilder,
 };
 use reth_ethereum_primitives::{Receipt, TransactionSigned};
@@ -182,7 +182,12 @@ where
     where
         Self: 'a,
     {
-        let executor = self.inner.create_eth_executor(evm, ctx.segments[0].ctx.clone());
+        let executor = EthBlockExecutor::new(
+            evm,
+            ctx.segments[0].ctx.clone(),
+            self.inner.chain_spec().as_ref(),
+            self.inner.receipt_builder(),
+        );
         EthBigBlockExecutor::new(executor, &self.inner, self.inner.chain_spec().clone(), ctx)
     }
 
@@ -278,27 +283,6 @@ impl<R, C, F: EvmFactory> EthBlockExecutorFactory<R, C, F> {
             let _ = disabled;
             self
         }
-    }
-
-    /// Creates a configured Ethereum block executor.
-    pub(crate) fn create_eth_executor<'a>(
-        &'a self,
-        evm: evm2::Evm<'a, F::Types>,
-        ctx: EthBlockExecutionCtx<'a>,
-    ) -> EthBlockExecutor<'a, F::Types, &'a R>
-    where
-        C: EthChainSpec<Header = Header> + EthereumHardforks,
-        R: ReceiptBuilder,
-        <F::Types as evm2::EvmTypesHost>::Tx: alloy_eips::eip2718::Typed2718,
-    {
-        EthBlockExecutor::new(
-            evm,
-            ctx,
-            self.chain_spec.as_ref(),
-            self.chain_spec.deposit_contract().map(|contract| contract.address),
-            HashedStateMode::OutputOnly,
-            &self.receipt_builder,
-        )
     }
 
     /// Creates an EVM instance with the configured Ethereum execution environment.
@@ -405,7 +389,7 @@ where
     where
         Self: 'a,
     {
-        self.create_eth_executor(evm, ctx)
+        EthBlockExecutor::new(evm, ctx, self.chain_spec.as_ref(), &self.receipt_builder)
     }
 
     fn evm_factory(&self) -> &Self::EvmFactory {
