@@ -297,11 +297,17 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
             ))))
         }
 
-        // Check account history prune checkpoint to determine the earliest anchor that can be
+        // Check history prune checkpoints to determine the earliest anchor that can be
         // reconstructed. A checkpoint at block N means changesets starting at N + 1 are available,
-        // which is sufficient to reconstruct the state at N.
-        let prune_checkpoint = provider.get_prune_checkpoint(PruneSegment::AccountHistory)?;
-        let lower_bound = prune_checkpoint.and_then(|chk| chk.block_number).unwrap_or_default();
+        // which is sufficient to reconstruct the state at N. Both account and storage changesets
+        // are required, so the later checkpoint determines the lower bound.
+        let account_history = provider
+            .get_prune_checkpoint(PruneSegment::AccountHistory)?
+            .and_then(|checkpoint| checkpoint.block_number);
+        let storage_history = provider
+            .get_prune_checkpoint(PruneSegment::StorageHistory)?
+            .and_then(|checkpoint| checkpoint.block_number);
+        let lower_bound = account_history.max(storage_history).unwrap_or_default();
         let available_range = lower_bound..=finish_tip_block.number;
         if !available_range.contains(&anchor_number) {
             return Err(ProviderError::InsufficientChangesets {
@@ -949,6 +955,46 @@ mod tests {
             builder.reverts_required(&provider, state_trie_tip, finish_tip, anchor_hash).unwrap();
 
         assert_eq!(revert_blocks, Some(2..=3));
+    }
+
+    #[cfg(feature = "partial-persistence")]
+    #[test]
+    fn storage_history_checkpoint_limits_available_anchor() {
+        let (factory, blocks) = setup_frontiers(1, 3);
+        let provider_rw = factory.provider_rw().unwrap();
+        provider_rw
+            .save_prune_checkpoint(
+                PruneSegment::StorageHistory,
+                PruneCheckpoint {
+                    block_number: Some(blocks[2].block_number()),
+                    tx_number: None,
+                    prune_mode: PruneMode::Full,
+                },
+            )
+            .unwrap();
+        provider_rw.commit().unwrap();
+
+        let manager = StateTrieOverlayManager::default();
+        manager.insert_block(blocks[2].clone());
+        let provider = factory.provider().unwrap();
+        let builder = OverlayBuilder::<EthPrimitives>::new(
+            blocks[2].recovered_block().hash(),
+            ChangesetCache::new(),
+        )
+        .with_state_trie_overlay_manager(manager);
+        let (state_trie_tip, finish_tip) = database_state_frontiers(&provider).unwrap();
+        let anchor_hash = blocks[1].recovered_block().hash();
+        let error = builder
+            .reverts_required(&provider, state_trie_tip, finish_tip, anchor_hash)
+            .unwrap_err();
+
+        match error {
+            ProviderError::InsufficientChangesets { requested, available } => {
+                assert_eq!(requested, blocks[1].block_number());
+                assert_eq!(available, blocks[2].block_number()..=blocks[3].block_number());
+            }
+            error => panic!("unexpected error: {error}"),
+        }
     }
 
     #[cfg(feature = "partial-persistence")]
