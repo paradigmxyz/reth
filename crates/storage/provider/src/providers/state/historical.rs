@@ -4,7 +4,7 @@ use crate::{
     ProviderError, RocksDBProviderFactory, StateProvider, StateRootProvider,
 };
 use alloy_eips::merge::EPOCH_SLOTS;
-use alloy_primitives::{Address, BlockNumber, Bytes, StorageKey, StorageValue, B256};
+use alloy_primitives::{keccak256, Address, BlockNumber, Bytes, StorageKey, StorageValue, B256};
 use reth_db_api::{
     cursor::{DbCursorRO, DbDupCursorRO},
     table::Table,
@@ -258,8 +258,8 @@ where
                 .map(Some),
             HistoryInfo::InPlainState | HistoryInfo::MaybeInPlainState => {
                 if self.provider.cached_storage_settings().use_hashed_state() {
-                    let hashed_address = alloy_primitives::keccak256(address);
-                    let hashed_slot = alloy_primitives::keccak256(lookup_key);
+                    let hashed_address = keccak256(address);
+                    let hashed_slot = keccak256(lookup_key);
                     Ok(self
                         .tx()
                         .cursor_dup_read::<tables::HashedStorages>()?
@@ -377,7 +377,7 @@ where
             }
             HistoryInfo::InPlainState | HistoryInfo::MaybeInPlainState => {
                 if self.provider.cached_storage_settings().use_hashed_state() {
-                    let hashed_address = alloy_primitives::keccak256(address);
+                    let hashed_address = keccak256(address);
                     Ok(self.tx().get_by_encoded_key::<tables::HashedAccounts>(&hashed_address)?)
                 } else {
                     Ok(self.tx().get_by_encoded_key::<tables::PlainAccountState>(address)?)
@@ -482,17 +482,14 @@ where
         reth_trie_db::with_adapter!(self.provider, |A| {
             let input = self.build_overlay(
                 TrieInputSorted::from_unsorted(TrieInput::from_state(
-                    HashedPostState::from_hashed_storage(
-                        alloy_primitives::keccak256(address),
-                        hashed_storage,
-                    ),
+                    HashedPostState::from_hashed_storage(keccak256(address), hashed_storage),
                 )),
                 false,
             )?;
             let hashed_storage = input
                 .state
                 .account_storages()
-                .get(&alloy_primitives::keccak256(address))
+                .get(&keccak256(address))
                 .cloned()
                 .unwrap_or_default()
                 .into();
@@ -510,17 +507,14 @@ where
         reth_trie_db::with_adapter!(self.provider, |A| {
             let input = self.build_overlay(
                 TrieInputSorted::from_unsorted(TrieInput::from_state(
-                    HashedPostState::from_hashed_storage(
-                        alloy_primitives::keccak256(address),
-                        hashed_storage,
-                    ),
+                    HashedPostState::from_hashed_storage(keccak256(address), hashed_storage),
                 )),
                 false,
             )?;
             let hashed_storage = input
                 .state
                 .account_storages()
-                .get(&alloy_primitives::keccak256(address))
+                .get(&keccak256(address))
                 .cloned()
                 .unwrap_or_default()
                 .into();
@@ -543,17 +537,14 @@ where
         reth_trie_db::with_adapter!(self.provider, |A| {
             let input = self.build_overlay(
                 TrieInputSorted::from_unsorted(TrieInput::from_state(
-                    HashedPostState::from_hashed_storage(
-                        alloy_primitives::keccak256(address),
-                        hashed_storage,
-                    ),
+                    HashedPostState::from_hashed_storage(keccak256(address), hashed_storage),
                 )),
                 false,
             )?;
             let hashed_storage = input
                 .state
                 .account_storages()
-                .get(&alloy_primitives::keccak256(address))
+                .get(&keccak256(address))
                 .cloned()
                 .unwrap_or_default()
                 .into();
