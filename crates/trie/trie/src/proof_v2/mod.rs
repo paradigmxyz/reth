@@ -897,7 +897,7 @@ where
     fn try_pop_cached_branch(
         &mut self,
         trie_cursor_state: &mut TrieCursorState,
-        sub_trie_prefix: &Nibbles,
+        traversal_upper_bound: Option<&Nibbles>,
         uncalculated_lower_bound: &Option<Nibbles>,
     ) -> Result<PopCachedBranchOutcome, StateProofError> {
         // If the `uncalculated_lower_bound` is None it indicates that there can be no more
@@ -924,10 +924,8 @@ where
         // If the trie cursor is seeked to a branch whose leaves have already been processed
         // then we can't use it, instead we seek forward and try again.
         if trie_cursor_path < uncalculated_lower_bound {
-            *trie_cursor_state = TrieCursorState::seeked(
-                *uncalculated_lower_bound,
-                self.trie_cursor_seek(*uncalculated_lower_bound)?,
-            );
+            *trie_cursor_state =
+                TrieCursorState::seeked(self.trie_cursor_seek(*uncalculated_lower_bound)?);
 
             // Having just seeked forward we need to check if the cursor is now exhausted,
             // extracting the new path at the same time.
@@ -938,8 +936,9 @@ where
             };
         }
 
-        // If the trie cursor has exceeded the sub-trie then we consider it to be exhausted.
-        if !trie_cursor_path.starts_with(sub_trie_prefix) {
+        // If the trie cursor has reached the end of the traversal range then we consider cached
+        // data to be exhausted. The cursor itself remains positioned for reuse by a later range.
+        if traversal_upper_bound.is_some_and(|upper_bound| trie_cursor_path >= upper_bound) {
             return Ok(PopCachedBranchOutcome::Exhausted)
         }
 
@@ -1011,11 +1010,17 @@ where
         &mut self,
         targets: &mut Option<TargetsCursor<'a>>,
         trie_cursor_state: &mut TrieCursorState,
-        sub_trie_prefix: &Nibbles,
-        sub_trie_upper_bound: Option<&Nibbles>,
+        traversal_upper_bound: Option<&Nibbles>,
         mut uncalculated_lower_bound: Option<Nibbles>,
     ) -> Result<Option<(Nibbles, Option<Nibbles>)>, StateProofError> {
         loop {
+            if let (Some(lower_bound), Some(upper_bound)) =
+                (uncalculated_lower_bound.as_ref(), traversal_upper_bound) &&
+                lower_bound >= upper_bound
+            {
+                return Ok(None)
+            }
+
             // Pop the currently cached branch node.
             //
             // NOTE we pop off the `cached_branch_stack` because cloning the `BranchNodeCompact`
@@ -1023,7 +1028,7 @@ where
             // push the cached branch back onto the stack once done.
             let (cached_path, cached_branch) = match self.try_pop_cached_branch(
                 trie_cursor_state,
-                sub_trie_prefix,
+                traversal_upper_bound,
                 &uncalculated_lower_bound,
             )? {
                 PopCachedBranchOutcome::Popped(cached) => cached,
@@ -1034,7 +1039,7 @@ where
                     trace!(target: TRACE_TARGET, ?uncalculated_lower_bound, "Exhausted cached trie nodes");
                     if let Some(lower) = uncalculated_lower_bound {
                         self.commit_branches(targets, &lower)?;
-                        return Ok(Some((lower, sub_trie_upper_bound.copied())));
+                        return Ok(Some((lower, traversal_upper_bound.copied())));
                     }
                     return Ok(None)
                 }
@@ -1243,8 +1248,7 @@ where
             // trie cursor to the next cached node at-or-after `child_path`.
             if trie_cursor_state.path().is_some_and(|path| path < &child_path) {
                 trace!(target: TRACE_TARGET, ?child_path, "Seeking trie cursor to child path");
-                *trie_cursor_state =
-                    TrieCursorState::seeked(child_path, self.trie_cursor_seek(child_path)?);
+                *trie_cursor_state = TrieCursorState::seeked(self.trie_cursor_seek(child_path)?);
             }
 
             // If the next cached branch node is a child of `child_path` then we can assume it is
@@ -1303,7 +1307,11 @@ where
         target = TRACE_TARGET,
         level = "trace",
         skip_all,
-        fields(parent_prefix=?sub_trie_targets.parent_prefix),
+        fields(
+            parent_prefix=?sub_trie_targets.parent_prefix,
+            lower_bound=?sub_trie_targets.range.lower_bound(),
+            upper_bound=?sub_trie_targets.range.upper_bound(),
+        ),
     )]
     fn proof_subtrie<'a>(
         &mut self,
@@ -1312,8 +1320,9 @@ where
         hashed_cursor_state: &mut HashedCursorState<VE::DeferredEncoder>,
         sub_trie_targets: SubTrieTargets<'a>,
     ) -> Result<(), StateProofError> {
-        let sub_trie_prefix = sub_trie_targets.prefix();
-        let sub_trie_upper_bound = sub_trie_targets.upper_bound();
+        let traversal_range = sub_trie_targets.range();
+        let traversal_lower_bound = traversal_range.lower_bound();
+        let traversal_upper_bound = traversal_range.upper_bound();
 
         // Wrap targets into a `TargetsCursor`.  targets can be empty if we only want to calculate
         // the root, in which case we don't need a cursor.
@@ -1331,29 +1340,17 @@ where
         debug_assert!(self.child_stack.is_empty());
 
         // `next_uncached_key_range`, which will be called in the loop below, expects the trie
-        // cursor to have already been seeked. The trie cursor is forward-only, but exact sub-trie
-        // chunks can overlap previous chunks, so reset it if this seek needs to move backwards.
-        if trie_cursor_state.needs_reset_before_seek(&sub_trie_prefix) {
-            trace!(target: TRACE_TARGET, "Resetting trie cursor before sub-trie");
-            self.trie_cursor.reset();
-            *trie_cursor_state = TrieCursorState::unseeked();
-        }
-
+        // cursor to have already been seeked. Cursor resets for overlapping sub-tries are handled
+        // by `proof_inner`; disjoint sub-tries can safely continue from the existing cursor
+        // frontier.
         trace!(target: TRACE_TARGET, "Doing initial seek of trie cursor");
-        *trie_cursor_state =
-            TrieCursorState::seeked(sub_trie_prefix, self.trie_cursor_seek(sub_trie_prefix)?);
-
-        if hashed_cursor_state.needs_reset_before_seek(&sub_trie_prefix) {
-            trace!(target: TRACE_TARGET, "Resetting hashed cursor before sub-trie");
-            self.hashed_cursor.reset();
-            *hashed_cursor_state = HashedCursorState::unseeked();
-        }
+        *trie_cursor_state = TrieCursorState::seeked(self.trie_cursor_seek(traversal_lower_bound)?);
 
         // `uncalculated_lower_bound` tracks the lower bound of node paths which have yet to be
         // visited, either via the hashed key cursor (`calculate_key_range`) or trie cursor
         // (`next_uncached_key_range`). If/when this becomes None then there are no further nodes
         // which could exist.
-        let mut uncalculated_lower_bound = Some(sub_trie_prefix);
+        let mut uncalculated_lower_bound = Some(traversal_lower_bound);
 
         trace!(target: TRACE_TARGET, "Starting loop");
         loop {
@@ -1364,8 +1361,7 @@ where
             let Some((calc_lower_bound, calc_upper_bound)) = self.next_uncached_key_range(
                 &mut targets,
                 trie_cursor_state,
-                &sub_trie_prefix,
-                sub_trie_upper_bound.as_ref(),
+                traversal_upper_bound.as_ref(),
                 prev_uncalculated_lower_bound,
             )?
             else {
@@ -1385,8 +1381,8 @@ where
             {
                 let msg = format!(
                     "next_uncached_key_range went backwards: calc_lower={calc_lower_bound:?} < \
-                     prev_lower={prev_lower:?}, calc_upper={calc_upper_bound:?}, prefix={:?}",
-                    sub_trie_prefix,
+                     prev_lower={prev_lower:?}, calc_upper={calc_upper_bound:?}, range={:?}",
+                    traversal_range,
                 );
                 error!(target: TRACE_TARGET, "{msg}");
                 return Err(StateProofError::TrieInconsistency(msg));
@@ -1404,10 +1400,11 @@ where
             // Once outside `calculate_key_range`, `hashed_cursor_state` will be at the first key
             // after the range, or exhausted.
             //
-            // If the hashed cursor is exhausted, or not within the range of the
-            // sub-trie, then there are no more keys at all, meaning the trie couldn't possibly have
-            // more data and we should complete computation.
-            if hashed_cursor_state.path().is_none_or(|key| !key.starts_with(&sub_trie_prefix)) {
+            // If the hashed cursor is exhausted, or has reached the end of the traversal range,
+            // then there are no more keys which can contribute to these target children.
+            if hashed_cursor_state.path().is_none_or(|key| {
+                traversal_upper_bound.is_some_and(|upper_bound| key >= &upper_bound)
+            }) {
                 break;
             }
 
@@ -1538,10 +1535,27 @@ where
         // cursors are unseeked.
         let mut trie_cursor_state = TrieCursorState::unseeked();
         let mut hashed_cursor_state = HashedCursorState::unseeked();
+        let mut previous_traversal_range: Option<SubTrieRange> = None;
 
-        // Divide targets into chunks, each chunk corresponding to a different sub-trie within the
-        // overall trie, and handle all proofs within that sub-trie.
+        // Divide targets into bounded ranges, each corresponding to the direct children of one
+        // already-revealed parent, and handle all proofs within that range.
         for sub_trie_targets in iter_sub_trie_targets(targets) {
+            let traversal_range = sub_trie_targets.range();
+            if previous_traversal_range
+                .is_some_and(|previous| !previous.is_strictly_before(&traversal_range))
+            {
+                trace!(
+                    target: TRACE_TARGET,
+                    ?previous_traversal_range,
+                    ?traversal_range,
+                    "Resetting cursors before overlapping or backward traversal range",
+                );
+                self.trie_cursor.reset();
+                trie_cursor_state = TrieCursorState::unseeked();
+                self.hashed_cursor.reset();
+                hashed_cursor_state = HashedCursorState::unseeked();
+            }
+
             if let Err(err) = self.proof_subtrie(
                 value_encoder,
                 &mut trie_cursor_state,
@@ -1551,6 +1565,8 @@ where
                 self.clear_computation_state();
                 return Err(err);
             }
+
+            previous_traversal_range = Some(traversal_range);
         }
 
         trace!(
@@ -1622,8 +1638,11 @@ where
         let mut hashed_cursor_state = HashedCursorState::unseeked();
 
         static EMPTY_TARGETS: [ProofV2Target; 0] = [];
-        let sub_trie_targets =
-            SubTrieTargets { prefix: Nibbles::new(), parent_prefix: None, targets: &EMPTY_TARGETS };
+        let sub_trie_targets = SubTrieTargets {
+            range: SubTrieRange::new(Nibbles::new(), None),
+            parent_prefix: None,
+            targets: &EMPTY_TARGETS,
+        };
 
         if let Err(err) = self.proof_subtrie(
             value_encoder,
@@ -1797,8 +1816,8 @@ enum TrieCursorState {
     Available(Nibbles, BranchNodeCompact),
     /// Cursor is seeked to this path, but the node has been used.
     Taken(Nibbles),
-    /// Cursor has been exhausted after seeking from the given lower bound.
-    Exhausted(Nibbles),
+    /// Cursor has been exhausted.
+    Exhausted,
 }
 
 impl TrieCursorState {
@@ -1808,8 +1827,8 @@ impl TrieCursorState {
     }
 
     /// Creates a [`Self`] based on an entry returned from the cursor itself.
-    fn seeked(key: Nibbles, entry: Option<(Nibbles, BranchNodeCompact)>) -> Self {
-        entry.map_or(Self::Exhausted(key), |(path, node)| Self::Available(path, node))
+    fn seeked(entry: Option<(Nibbles, BranchNodeCompact)>) -> Self {
+        entry.map_or(Self::Exhausted, |(path, node)| Self::Available(path, node))
     }
 
     /// Returns the path the cursor is seeked to, or None if it's exhausted.
@@ -1821,16 +1840,7 @@ impl TrieCursorState {
         match self {
             Self::Unseeked => panic!("cursor is unseeked"),
             Self::Available(path, _) | Self::Taken(path) => Some(path),
-            Self::Exhausted(_) => None,
-        }
-    }
-
-    /// Returns true if seeking to `key` requires resetting the forward-only cursor.
-    fn needs_reset_before_seek(&self, key: &Nibbles) -> bool {
-        match self {
-            Self::Unseeked => false,
-            Self::Available(path, _) | Self::Taken(path) => path > key,
-            Self::Exhausted(exhausted_at) => exhausted_at > key,
+            Self::Exhausted => None,
         }
     }
 
@@ -1887,15 +1897,6 @@ impl<V> HashedCursorState<V> {
         }
     }
 
-    /// Returns true if seeking to `key` requires resetting the forward-only cursor.
-    fn needs_reset_before_seek(&self, key: &Nibbles) -> bool {
-        match self {
-            Self::Unseeked => false,
-            Self::Available(path, _) => path > key,
-            Self::Exhausted(exhausted_at) => exhausted_at > key,
-        }
-    }
-
     /// Takes the path and value from a [`Self::Available`]. Panics if not [`Self::Available`].
     fn take(&mut self) -> (Nibbles, V) {
         match core::mem::replace(self, Self::Unseeked) {
@@ -1920,19 +1921,104 @@ enum PopCachedBranchOutcome {
 mod tests {
     use super::*;
     use crate::{
-        hashed_cursor::{mock::MockHashedCursorFactory, HashedCursorFactory},
+        hashed_cursor::{
+            mock::{MockHashedCursor, MockHashedCursorFactory},
+            HashedCursorFactory,
+        },
+        mock::KeyVisitType,
         proof::StorageProof as LegacyStorageProof,
         test_utils::TrieTestHarness,
-        trie_cursor::{depth_first, TrieCursorFactory},
+        trie_cursor::{depth_first, mock::MockTrieCursor, TrieCursorFactory},
     };
     use alloy_primitives::map::B256Set;
     use alloy_rlp::Decodable;
     use alloy_trie::proof::AddedRemovedKeys;
     use itertools::Itertools;
+    use reth_storage_errors::db::DatabaseError;
     use reth_trie_common::{
         prefix_set::PrefixSetMut, ProofTrieNode, ProofV2TargetParent, TrieNode, EMPTY_ROOT_HASH,
     };
-    use std::collections::BTreeMap;
+    use std::{cell::Cell, collections::BTreeMap, rc::Rc, sync::Arc};
+
+    /// Cursor wrapper which counts explicit resets while forwarding all other operations.
+    #[derive(Debug)]
+    struct ResetCountingCursor<C> {
+        inner: C,
+        resets: Rc<Cell<usize>>,
+    }
+
+    impl<C> ResetCountingCursor<C> {
+        fn new(inner: C, resets: Rc<Cell<usize>>) -> Self {
+            Self { inner, resets }
+        }
+    }
+
+    impl<C: TrieCursor> TrieCursor for ResetCountingCursor<C> {
+        fn seek_exact(
+            &mut self,
+            key: Nibbles,
+        ) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
+            self.inner.seek_exact(key)
+        }
+
+        fn seek(
+            &mut self,
+            key: Nibbles,
+        ) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
+            self.inner.seek(key)
+        }
+
+        fn next(&mut self) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
+            self.inner.next()
+        }
+
+        fn current(&mut self) -> Result<Option<Nibbles>, DatabaseError> {
+            self.inner.current()
+        }
+
+        fn reset(&mut self) {
+            self.resets.set(self.resets.get() + 1);
+            self.inner.reset();
+        }
+    }
+
+    impl<C: HashedCursor> HashedCursor for ResetCountingCursor<C> {
+        type Value = C::Value;
+
+        fn seek(&mut self, key: B256) -> Result<Option<(B256, Self::Value)>, DatabaseError> {
+            self.inner.seek(key)
+        }
+
+        fn next(&mut self) -> Result<Option<(B256, Self::Value)>, DatabaseError> {
+            self.inner.next()
+        }
+
+        fn reset(&mut self) {
+            self.resets.set(self.resets.get() + 1);
+            self.inner.reset();
+        }
+    }
+
+    fn proof_inner_reset_counts(
+        values: impl IntoIterator<Item = (B256, U256)>,
+        targets: &mut [ProofV2Target],
+    ) -> (usize, usize) {
+        let trie_resets = Rc::new(Cell::new(0));
+        let hashed_resets = Rc::new(Cell::new(0));
+        let trie_cursor = ResetCountingCursor::new(
+            MockTrieCursor::new(Arc::default(), Arc::default()),
+            Rc::clone(&trie_resets),
+        );
+        let hashed_cursor = ResetCountingCursor::new(
+            MockHashedCursor::new(Arc::new(values.into_iter().collect()), Arc::default()),
+            Rc::clone(&hashed_resets),
+        );
+        let mut calculator =
+            ProofCalculator::<_, _, StorageValueEncoder>::new(trie_cursor, hashed_cursor);
+
+        calculator.proof_inner(&mut StorageValueEncoder, targets).unwrap();
+        (trie_resets.get(), hashed_resets.get())
+    }
 
     /// Converts legacy proofs to V2 proofs by combining extension nodes with their child branch
     /// nodes.
@@ -2416,7 +2502,7 @@ mod tests {
     }
 
     #[test]
-    fn test_known_parent_targets_are_chunked_by_direct_child() {
+    fn test_known_parent_sibling_span_retains_each_target_child() {
         let stored_slot_a = B256::right_padding_from(&[0xea, 0x53]);
         let stored_slot_b = B256::right_padding_from(&[0xeb, 0x53]);
         let target_a = B256::right_padding_from(&[0xea, 0x1f]);
@@ -2437,16 +2523,87 @@ mod tests {
     }
 
     #[test]
+    fn test_disjoint_ranges_reuse_cursors() {
+        let key_20 = B256::right_padding_from(&[0x20, 0x10]);
+        let key_40 = B256::right_padding_from(&[0x40, 0x10]);
+        let values = [key_20, key_40]
+            .into_iter()
+            .enumerate()
+            .map(|(index, key)| (key, U256::from(index + 1)));
+        let mut targets = [key_40, key_20]
+            .map(|key| ProofV2Target::new(key).with_parent(ProofV2TargetParent::new(1)));
+
+        let (trie_resets, hashed_resets) = proof_inner_reset_counts(values, &mut targets);
+
+        assert_eq!(trie_resets, 0);
+        assert_eq!(hashed_resets, 0);
+    }
+
+    #[test]
+    fn test_known_parent_sibling_span_uses_single_hashed_seek() {
+        let key_ea = B256::right_padding_from(&[0xea, 0x10]);
+        let key_eb = B256::right_padding_from(&[0xeb, 0x10]);
+        let key_ec = B256::right_padding_from(&[0xec, 0x10]);
+        let values = Arc::new(BTreeMap::from([
+            (key_ea, U256::from(1)),
+            (key_eb, U256::from(2)),
+            (key_ec, U256::from(3)),
+        ]));
+        let visited_keys = Arc::default();
+        let trie_cursor = MockTrieCursor::new(Arc::default(), Arc::default());
+        let hashed_cursor = MockHashedCursor::new(values, Arc::clone(&visited_keys));
+        let mut calculator =
+            ProofCalculator::<_, _, StorageValueEncoder>::new(trie_cursor, hashed_cursor);
+        let mut targets = [key_ea, key_ec]
+            .map(|key| ProofV2Target::new(key).with_parent(ProofV2TargetParent::new(1)));
+
+        let proof = calculator.proof_inner(&mut StorageValueEncoder, &mut targets).unwrap();
+
+        let seek_keys = visited_keys
+            .lock()
+            .iter()
+            .filter_map(|visit| match &visit.visit_type {
+                KeyVisitType::SeekNonExact(key) => Some(*key),
+                KeyVisitType::SeekExact(_) | KeyVisitType::Next => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(seek_keys, [B256::right_padding_from(&[0xea])]);
+        assert_eq!(
+            proof.iter().map(|node| node.path).collect::<Vec<_>>(),
+            [Nibbles::from_nibbles([0xe, 0xa]), Nibbles::from_nibbles([0xe, 0xc])]
+        );
+    }
+
+    #[test]
+    fn test_nested_range_within_sibling_span_resets_cursors() {
+        let key_20 = B256::right_padding_from(&[0x20, 0x10]);
+        let key_30 = B256::right_padding_from(&[0x30, 0x10]);
+        let key_40 = B256::right_padding_from(&[0x40, 0x10]);
+        let values = [(key_20, U256::from(1)), (key_30, U256::from(2)), (key_40, U256::from(3))];
+        let mut targets = [
+            ProofV2Target::new(key_20).with_parent(ProofV2TargetParent::new(0)),
+            ProofV2Target::new(key_40).with_parent(ProofV2TargetParent::new(0)),
+            ProofV2Target::new(key_30).with_parent(ProofV2TargetParent::new(1)),
+        ];
+
+        let (trie_resets, hashed_resets) = proof_inner_reset_counts(values, &mut targets);
+
+        assert_eq!(trie_resets, 1);
+        assert_eq!(hashed_resets, 1);
+    }
+
+    #[test]
     fn test_known_parent_does_not_use_stale_parent_mask() {
         let stored_slot_a = B256::right_padding_from(&[0xea, 0x53]);
-        let stored_slot = B256::right_padding_from(&[0xeb, 0x53]);
+        let stored_slot_b = B256::right_padding_from(&[0xeb, 0x53]);
         let stored_slot_c = B256::right_padding_from(&[0xec, 0x53]);
-        let target = B256::right_padding_from(&[0xeb, 0x1f]);
-        let stored_slot_nibbles = Nibbles::unpack(stored_slot);
+        let stored_slot_d = B256::right_padding_from(&[0xed, 0x53]);
+        let target_b = B256::right_padding_from(&[0xeb, 0x1f]);
+        let target_d = B256::right_padding_from(&[0xed, 0x1f]);
 
         // The known parent at `e` is supplied by the sparse trie and may be stale in the database
         // when partial persistence masks that path. In particular, its state mask can omit the
-        // live `eb` child while hashed state already contains that child's leaf.
+        // live `eb` and `ed` children while hashed state already contains their leaves.
         let stale_parent_mask = TrieMask::new((1 << 0xa) | (1 << 0xc));
         let stale_parent = BranchNodeCompact::new(
             stale_parent_mask,
@@ -2459,21 +2616,32 @@ mod tests {
 
         let mut harness = TrieTestHarness::new(BTreeMap::from([
             (stored_slot_a, U256::from(1)),
-            (stored_slot, U256::from(2)),
+            (stored_slot_b, U256::from(2)),
             (stored_slot_c, U256::from(3)),
+            (stored_slot_d, U256::from(4)),
         ]));
         harness.set_trie_nodes(storage_nodes);
+        let trie_cursor_factory = harness.trie_cursor_factory();
 
-        let mut targets = [ProofV2Target::new(target).with_parent(ProofV2TargetParent::new(1))];
+        let mut targets = [target_b, target_d]
+            .map(|target| ProofV2Target::new(target).with_parent(ProofV2TargetParent::new(1)));
         let (proof, root) = harness.proof_v2(&mut targets);
 
         assert!(root.is_none());
-        assert_eq!(proof.len(), 1);
-        assert_eq!(proof[0].path, stored_slot_nibbles.slice(0..2));
-        let TrieNodeV2::Leaf(leaf) = &proof[0].node else {
-            panic!("live direct child should be reconstructed as a leaf")
-        };
-        assert_eq!(leaf.key, stored_slot_nibbles.slice(2..));
+        assert_eq!(
+            proof.iter().map(|node| node.path).collect::<Vec<_>>(),
+            [Nibbles::from_nibbles([0xe, 0xb]), Nibbles::from_nibbles([0xe, 0xd])]
+        );
+
+        let visited_keys = trie_cursor_factory.visited_storage_keys(harness.hashed_address());
+        assert!(matches!(
+            visited_keys.first().map(|visit| &visit.visit_type),
+            Some(KeyVisitType::SeekNonExact(path))
+                if path == &Nibbles::from_nibbles([0xe, 0xb])
+        ));
+        assert!(visited_keys
+            .iter()
+            .all(|visit| visit.visited_key != Some(Nibbles::from_nibbles([0xe]))));
     }
 
     #[test]
