@@ -111,6 +111,30 @@ where
             )),
         }
     }
+
+    /// As [`set_with_head`](ExExNotificationsStream::set_with_head), but backfills up to
+    /// `local_head` rather than the head captured at construction. `local_head` must be a
+    /// canonical block the node has committed.
+    pub fn set_with_head_and_local_head(&mut self, exex_head: ExExHead, local_head: BlockNumHash) {
+        let current = std::mem::replace(&mut self.inner, ExExNotificationsInner::Invalid);
+        let (provider, evm_config, notifications, wal_handle) = match current {
+            ExExNotificationsInner::WithoutHead(n) => {
+                (n.provider, n.evm_config, n.notifications, n.wal_handle)
+            }
+            ExExNotificationsInner::WithHead(n) => {
+                (n.provider, n.evm_config, n.notifications, n.wal_handle)
+            }
+            ExExNotificationsInner::Invalid => unreachable!(),
+        };
+        self.inner = ExExNotificationsInner::WithHead(Box::new(ExExNotificationsWithHead::new(
+            local_head,
+            provider,
+            evm_config,
+            notifications,
+            wal_handle,
+            exex_head,
+        )));
+    }
 }
 
 impl<P, E> ExExNotificationsStream<E::Primitives> for ExExNotifications<P, E>
@@ -607,6 +631,79 @@ mod tests {
         );
 
         // Second notification is the actual notification that we sent before
+        assert_eq!(notifications.next().await.transpose()?, Some(notification));
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn set_with_head_and_local_head_backfills_to_the_supplied_local_head() -> eyre::Result<()>
+    {
+        let mut rng = generators::rng();
+
+        let temp_dir = tempfile::tempdir().unwrap();
+        let wal = Wal::new(temp_dir.path()).unwrap();
+
+        let provider_factory = create_test_provider_factory();
+        let genesis_hash = init_genesis(&provider_factory)?;
+        let genesis_block = provider_factory
+            .block(genesis_hash.into())?
+            .ok_or_else(|| eyre::eyre!("genesis block not found"))?;
+        let provider = BlockchainProvider::new(provider_factory.clone())?;
+
+        // The node advances to block 1 after the stream is constructed at genesis.
+        let node_head_block = random_block(
+            &mut rng,
+            genesis_block.number + 1,
+            BlockParams { parent: Some(genesis_hash), tx_count: Some(0), ..Default::default() },
+        )
+        .try_recover()?;
+        let local_head = node_head_block.num_hash();
+        let provider_rw = provider_factory.provider_rw()?;
+        provider_rw.insert_block(&node_head_block)?;
+        provider_rw.commit()?;
+
+        let exex_head =
+            ExExHead { block: BlockNumHash { number: genesis_block.number, hash: genesis_hash } };
+        let notification = ExExNotification::ChainCommitted {
+            new: Arc::new(Chain::new(
+                vec![random_block(
+                    &mut rng,
+                    local_head.number + 1,
+                    BlockParams { parent: Some(local_head.hash), ..Default::default() },
+                )
+                .try_recover()?],
+                Default::default(),
+                BTreeMap::new(),
+            )),
+        };
+        let (notifications_tx, notifications_rx) = mpsc::channel(1);
+        notifications_tx.send(notification.clone()).await?;
+
+        let evm_config = EthEvmConfig::mainnet();
+        // Construct with a stale head (genesis); the real head is block 1.
+        let mut notifications = ExExNotifications::new(
+            BlockNumHash { number: genesis_block.number, hash: genesis_hash },
+            provider.clone(),
+            evm_config.clone(),
+            notifications_rx,
+            wal.handle(),
+        );
+        notifications.set_with_head_and_local_head(exex_head, local_head);
+
+        // Backfill runs up to the supplied local head (block 1), which the stale
+        // construction-time head could not have reached.
+        assert_eq!(
+            notifications.next().await.transpose()?,
+            Some(ExExNotification::ChainCommitted {
+                new: Arc::new(
+                    BackfillJobFactory::new(evm_config, provider)
+                        .backfill(1..=1)
+                        .next()
+                        .ok_or_eyre("failed to backfill")??
+                )
+            })
+        );
         assert_eq!(notifications.next().await.transpose()?, Some(notification));
 
         Ok(())

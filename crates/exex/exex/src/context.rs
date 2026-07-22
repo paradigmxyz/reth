@@ -119,6 +119,16 @@ where
         self.notifications.set_with_head(head);
     }
 
+    /// As [`set_notifications_with_head`](Self::set_notifications_with_head), but backfills up to
+    /// `local_head` rather than the head captured at launch.
+    pub fn set_notifications_with_head_and_local_head(
+        &mut self,
+        head: ExExHead,
+        local_head: BlockNumHash,
+    ) {
+        self.notifications.set_with_head_and_local_head(head, local_head);
+    }
+
     /// Sends an [`ExExEvent::FinishedHeight`] to the ExEx task manager letting it know that this
     /// ExEx has processed the corresponding block.
     ///
