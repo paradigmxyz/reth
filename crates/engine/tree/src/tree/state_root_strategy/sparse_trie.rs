@@ -366,6 +366,9 @@ where
         let debug_recorders = self.trie.take_debug_recorders();
 
         let end = Instant::now();
+        if self.prune_older_than.is_some() {
+            self.metrics.sparse_trie_prune_duration_histogram.record(end.duration_since(start));
+        }
         self.metrics.sparse_trie_final_update_duration_histogram.record(end.duration_since(start));
         self.metrics.sparse_trie_total_duration_histogram.record(end.duration_since(now));
 
@@ -992,6 +995,8 @@ pub(super) struct SparseTrieTaskMetrics {
     pub(super) sparse_trie_total_duration_histogram: Histogram,
     /// Time spent preparing the sparse trie for reuse after state root computation.
     pub(super) into_trie_for_reuse_duration_histogram: Histogram,
+    /// Time spent calculating and epoch-pruning the final sparse trie root.
+    pub(super) sparse_trie_prune_duration_histogram: Histogram,
     /// Time spent waiting for preserved sparse trie cache to become available.
     pub(super) sparse_trie_cache_wait_duration_histogram: Histogram,
     /// Histogram for sparse trie task idle time in seconds (waiting for updates or proof
