@@ -24,6 +24,16 @@ fn sub_trie_upper_bound(sub_trie_prefix: &Nibbles) -> Option<Nibbles> {
     sub_trie_prefix.next_without_prefix()
 }
 
+/// Returns whether two lexicographically ordered sub-trie prefixes overlap.
+///
+/// Sub-trie ranges are either disjoint or nested, so ordered ranges overlap exactly when the next
+/// prefix is a descendant of the previous prefix. Equal prefixes are grouped before this check.
+#[inline]
+pub(crate) fn ordered_sub_tries_overlap(previous: &Nibbles, next: &Nibbles) -> bool {
+    debug_assert!(previous < next, "sub-trie prefixes must be strictly ordered");
+    next.starts_with(previous)
+}
+
 /// Describes a set of targets which all apply to a single sub-trie, ie a section of the overall
 /// trie whose nodes all share a prefix.
 pub(crate) struct SubTrieTargets<'a> {
