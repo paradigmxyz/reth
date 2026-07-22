@@ -297,14 +297,11 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
             ))))
         }
 
-        // Check account history prune checkpoint to determine the lower bound of available data.
-        // The prune checkpoint's block_number is the highest pruned block, so data is available
-        // starting from the next block.
+        // Check account history prune checkpoint to determine the earliest anchor that can be
+        // reconstructed. A checkpoint at block N means changesets starting at N + 1 are available,
+        // which is sufficient to reconstruct the state at N.
         let prune_checkpoint = provider.get_prune_checkpoint(PruneSegment::AccountHistory)?;
-        let lower_bound = prune_checkpoint
-            .and_then(|chk| chk.block_number)
-            .map(|block_number| block_number + 1)
-            .unwrap_or_default();
+        let lower_bound = prune_checkpoint.and_then(|chk| chk.block_number).unwrap_or_default();
         let available_range = lower_bound..=finish_tip_block.number;
         if !available_range.contains(&anchor_number) {
             return Err(ProviderError::InsufficientChangesets {
@@ -769,9 +766,11 @@ mod tests {
     use reth_chain_state::{test_utils::TestBlockBuilder, ExecutedBlock};
     use reth_primitives_traits::Account;
     #[cfg(feature = "partial-persistence")]
+    use reth_prune_types::{PruneCheckpoint, PruneMode};
+    #[cfg(feature = "partial-persistence")]
     use reth_stages_types::{FinishCheckpoint, StageCheckpoint};
     #[cfg(feature = "partial-persistence")]
-    use reth_storage_api::StageCheckpointWriter;
+    use reth_storage_api::{PruneCheckpointWriter, StageCheckpointWriter};
     use reth_trie::{BranchNodeCompact, ComputedTrieData, HashedPostState, HashedStorage, Nibbles};
 
     fn with_unique_trie_data(
@@ -903,6 +902,39 @@ mod tests {
     #[test]
     fn parent_inside_finish_gap_reverts_to_state_trie_frontier() {
         let (factory, blocks) = setup_frontiers(1, 3);
+        let manager = StateTrieOverlayManager::default();
+        manager.insert_block(blocks[2].clone());
+        let provider = factory.provider().unwrap();
+        let builder = OverlayBuilder::<EthPrimitives>::new(
+            blocks[2].recovered_block().hash(),
+            ChangesetCache::new(),
+        )
+        .with_state_trie_overlay_manager(manager);
+        let (state_trie_tip, finish_tip) = database_state_frontiers(&provider).unwrap();
+        let anchor_hash = blocks[1].recovered_block().hash();
+        let revert_blocks =
+            builder.reverts_required(&provider, state_trie_tip, finish_tip, anchor_hash).unwrap();
+
+        assert_eq!(revert_blocks, Some(2..=3));
+    }
+
+    #[cfg(feature = "partial-persistence")]
+    #[test]
+    fn anchor_at_prune_checkpoint_has_sufficient_changesets() {
+        let (factory, blocks) = setup_frontiers(1, 3);
+        let provider_rw = factory.provider_rw().unwrap();
+        provider_rw
+            .save_prune_checkpoint(
+                PruneSegment::AccountHistory,
+                PruneCheckpoint {
+                    block_number: Some(blocks[1].block_number()),
+                    tx_number: None,
+                    prune_mode: PruneMode::Full,
+                },
+            )
+            .unwrap();
+        provider_rw.commit().unwrap();
+
         let manager = StateTrieOverlayManager::default();
         manager.insert_block(blocks[2].clone());
         let provider = factory.provider().unwrap();
