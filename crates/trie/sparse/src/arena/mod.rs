@@ -167,7 +167,8 @@ impl ArenaSparseSubtrie {
     /// before use.
     fn new(record_updates: bool) -> Box<Self> {
         let mut arena = SlotMap::new();
-        let root = arena.insert(ArenaSparseNode::EmptyRoot);
+        let root =
+            arena.insert(ArenaSparseNode::EmptyRoot { state: ArenaSparseNodeState::Revealed });
         let buffers = ArenaTrieBuffers {
             updates: record_updates.then(SparseTrieUpdates::default),
             ..Default::default()
@@ -390,7 +391,7 @@ impl ArenaSparseSubtrie {
         trace!(target: TRACE_TARGET, "Subtrie update_leaves");
 
         debug_assert!(
-            !matches!(self.arena[self.root], ArenaSparseNode::EmptyRoot),
+            !matches!(self.arena[self.root], ArenaSparseNode::EmptyRoot { .. }),
             "subtrie root must not be EmptyRoot at start of update_leaves"
         );
 
@@ -465,7 +466,7 @@ impl ArenaSparseSubtrie {
         trace!(target: TRACE_TARGET, path = ?self.path, num_nodes = nodes.len(), "Subtrie reveal_nodes");
 
         debug_assert!(
-            !matches!(self.arena[self.root], ArenaSparseNode::EmptyRoot),
+            !matches!(self.arena[self.root], ArenaSparseNode::EmptyRoot { .. }),
             "subtrie root must not be EmptyRoot in reveal_nodes"
         );
 
@@ -711,12 +712,12 @@ impl ArenaParallelSparseTrie {
             path: Nibbles,
         ) -> Option<ProofTrieNodeRecord> {
             match &arena[idx] {
-                ArenaSparseNode::EmptyRoot => Some(ProofTrieNodeRecord {
+                ArenaSparseNode::EmptyRoot { state } => Some(ProofTrieNodeRecord {
                     path,
                     node: TrieNodeRecord(TrieNode::EmptyRoot),
                     masks: None,
                     short_key: None,
-                    state: None,
+                    state: Some(state_to_record(state)),
                 }),
                 ArenaSparseNode::Branch(b) => {
                     let stack = b
@@ -925,7 +926,7 @@ impl ArenaParallelSparseTrie {
             return;
         };
 
-        if !matches!(subtrie.arena[subtrie.root], ArenaSparseNode::EmptyRoot) {
+        if !matches!(subtrie.arena[subtrie.root], ArenaSparseNode::EmptyRoot { .. }) {
             return;
         }
 
@@ -1005,7 +1006,8 @@ impl ArenaParallelSparseTrie {
 
             if count == 0 {
                 if branch_idx == self.root {
-                    self.upper_arena[branch_idx] = ArenaSparseNode::EmptyRoot;
+                    self.upper_arena[branch_idx] =
+                        ArenaSparseNode::EmptyRoot { state: ArenaSparseNodeState::Dirty };
                     return;
                 }
                 // Remove the empty branch from its parent.
@@ -1047,7 +1049,7 @@ impl ArenaParallelSparseTrie {
             // Check if the remaining child is an empty subtrie that should also be removed.
             let is_empty_subtrie = matches!(
                 &self.upper_arena[child_idx],
-                ArenaSparseNode::Subtrie(s) if matches!(s.arena[s.root], ArenaSparseNode::EmptyRoot)
+                ArenaSparseNode::Subtrie(s) if matches!(s.arena[s.root], ArenaSparseNode::EmptyRoot { .. })
             );
 
             if is_empty_subtrie {
@@ -1199,11 +1201,23 @@ impl ArenaParallelSparseTrie {
 
         rlp_node_buf.clear();
 
-        // Step 1: Handle trivial roots that don't need the stack-based walk.
-        // EmptyRoot has no state to update. Leaves are encoded in place. Already-cached
-        // branches need no work. Only uncached branches enter the main loop below.
+        // Step 1: Handle trivial roots that don't need the stack-based walk. Empty roots and
+        // leaves are encoded in place. Already-cached branches need no work. Only uncached
+        // branches enter the main loop below.
+        if matches!(arena[root], ArenaSparseNode::EmptyRoot { .. }) {
+            let empty_root_rlp = RlpNode::word_rlp(&EMPTY_ROOT_HASH);
+            if let Some(rlp_node) =
+                arena[root].state_ref().and_then(ArenaSparseNodeState::cached_rlp_node)
+            {
+                debug_assert_eq!(rlp_node, &empty_root_rlp);
+                return rlp_node.clone()
+            }
+            *arena[root].state_mut() =
+                ArenaSparseNodeState::Cached { rlp_node: empty_root_rlp.clone(), epoch };
+            return empty_root_rlp
+        }
+
         match &arena[root] {
-            ArenaSparseNode::EmptyRoot => return RlpNode::word_rlp(&EMPTY_ROOT_HASH),
             ArenaSparseNode::Leaf { .. } => {
                 Self::encode_leaf(arena, root, rlp_buf, rlp_node_buf, epoch);
                 return rlp_node_buf.pop().expect("encode_leaf must push an RlpNode");
@@ -1214,7 +1228,9 @@ impl ArenaParallelSparseTrie {
                     return rlp_node;
                 }
             }
-            ArenaSparseNode::Subtrie(_) | ArenaSparseNode::TakenSubtrie => {
+            ArenaSparseNode::EmptyRoot { .. } |
+            ArenaSparseNode::Subtrie(_) |
+            ArenaSparseNode::TakenSubtrie => {
                 unreachable!("Subtrie/TakenSubtrie should not appear inside a subtrie's own arena");
             }
         }
@@ -1314,7 +1330,7 @@ impl ArenaParallelSparseTrie {
                                     _ => panic!("subtrie root must be a cached Branch or Leaf"),
                                 }
                             }
-                            ArenaSparseNode::TakenSubtrie | ArenaSparseNode::EmptyRoot => {
+                            ArenaSparseNode::TakenSubtrie | ArenaSparseNode::EmptyRoot { .. } => {
                                 unreachable!("Unexpected child {:?}", arena[child_idx]);
                             }
                         })
@@ -1389,7 +1405,10 @@ impl ArenaParallelSparseTrie {
     /// revealed children have been pruned. The caller always retains the arena root.
     fn prune_cached_nodes(arena: &mut NodeArena, idx: Index, prune_older_than: u64) -> (bool, u64) {
         match &arena[idx] {
-            ArenaSparseNode::EmptyRoot => return (false, 0),
+            ArenaSparseNode::EmptyRoot { state } => {
+                let epoch = state.cached_epoch().expect("empty root must be cached before pruning");
+                return (epoch < prune_older_than, 0)
+            }
             ArenaSparseNode::Leaf { state, .. } => {
                 let epoch = state.cached_epoch().expect("leaf must be cached before pruning");
                 return (epoch < prune_older_than, 0)
@@ -1476,7 +1495,7 @@ impl ArenaParallelSparseTrie {
     ) -> Option<&'a Vec<u8>> {
         loop {
             match &arena[current] {
-                ArenaSparseNode::EmptyRoot | ArenaSparseNode::TakenSubtrie => return None,
+                ArenaSparseNode::EmptyRoot { .. } | ArenaSparseNode::TakenSubtrie => return None,
                 ArenaSparseNode::Leaf { key, value, .. } => {
                     let remaining = full_path.slice(path_offset..);
                     return (remaining == *key).then_some(value);
@@ -1524,7 +1543,7 @@ impl ArenaParallelSparseTrie {
     ) -> Result<LeafLookup, LeafLookupError> {
         loop {
             match &arena[current] {
-                ArenaSparseNode::EmptyRoot | ArenaSparseNode::TakenSubtrie => {
+                ArenaSparseNode::EmptyRoot { .. } | ArenaSparseNode::TakenSubtrie => {
                     return Ok(LeafLookup::NonExistent);
                 }
                 ArenaSparseNode::Leaf { key, value, .. } => {
@@ -1903,7 +1922,8 @@ impl ArenaParallelSparseTrie {
                     // The leaf is the root — replace with EmptyRoot and reset the cursor
                     // so subsequent iterations can call seek normally.
                     arena.remove(head_idx);
-                    *root = arena.insert(ArenaSparseNode::EmptyRoot);
+                    *root = arena
+                        .insert(ArenaSparseNode::EmptyRoot { state: ArenaSparseNodeState::Dirty });
                     cursor.reset(arena, *root, head_path);
                     return (
                         RemoveLeafResult::Removed,
@@ -2374,7 +2394,8 @@ impl Drop for ArenaParallelSparseTrie {
 impl Default for ArenaParallelSparseTrie {
     fn default() -> Self {
         let mut upper_arena = SlotMap::new();
-        let root = upper_arena.insert(ArenaSparseNode::EmptyRoot);
+        let root = upper_arena
+            .insert(ArenaSparseNode::EmptyRoot { state: ArenaSparseNodeState::Revealed });
         Self {
             upper_arena,
             root,
@@ -2526,7 +2547,7 @@ impl SparseTrie for ArenaParallelSparseTrie {
         });
 
         debug_assert!(
-            matches!(self.upper_arena[self.root], ArenaSparseNode::EmptyRoot),
+            matches!(self.upper_arena[self.root], ArenaSparseNode::EmptyRoot { .. }),
             "set_root called on a trie that already has revealed nodes"
         );
 
@@ -2535,6 +2556,8 @@ impl SparseTrie for ArenaParallelSparseTrie {
         match root {
             TrieNodeV2::EmptyRoot => {
                 trace!(target: TRACE_TARGET, "Setting empty root");
+                self.upper_arena[self.root] =
+                    ArenaSparseNode::EmptyRoot { state: ArenaSparseNodeState::Revealed };
             }
             TrieNodeV2::Leaf(leaf) => {
                 trace!(target: TRACE_TARGET, key = ?leaf.key, "Setting leaf root");
@@ -2588,7 +2611,7 @@ impl SparseTrie for ArenaParallelSparseTrie {
             nodes: nodes.iter().map(ProofTrieNodeRecord::from_proof_trie_node_v2).collect(),
         });
 
-        if matches!(self.upper_arena[self.root], ArenaSparseNode::EmptyRoot) {
+        if matches!(self.upper_arena[self.root], ArenaSparseNode::EmptyRoot { .. }) {
             trace!(target: TRACE_TARGET, "Skipping reveal_nodes on empty root");
             return Ok(());
         }
@@ -2797,6 +2820,7 @@ impl SparseTrie for ArenaParallelSparseTrie {
     fn wipe(&mut self) {
         trace!(target: TRACE_TARGET, "Wiping arena trie");
         self.clear();
+        *self.upper_arena[self.root].state_mut() = ArenaSparseNodeState::Dirty;
         self.buffers.updates = self.buffers.updates.is_some().then(SparseTrieUpdates::wiped);
     }
 
@@ -2806,7 +2830,9 @@ impl SparseTrie for ArenaParallelSparseTrie {
         self.debug_recorder.reset();
 
         self.upper_arena = SlotMap::new();
-        self.root = self.upper_arena.insert(ArenaSparseNode::EmptyRoot);
+        self.root = self
+            .upper_arena
+            .insert(ArenaSparseNode::EmptyRoot { state: ArenaSparseNodeState::Revealed });
         self.root_prunable = false;
         self.buffers.clear();
     }
@@ -3280,7 +3306,7 @@ impl SparseTrie for ArenaParallelSparseTrie {
                                 let head_idx = cursor.head().expect("cursor is non-empty").index;
                                 !matches!(
                                     &self.upper_arena[head_idx],
-                                    ArenaSparseNode::Subtrie(s) if matches!(s.arena[s.root], ArenaSparseNode::EmptyRoot)
+                                    ArenaSparseNode::Subtrie(s) if matches!(s.arena[s.root], ArenaSparseNode::EmptyRoot { .. })
                                 )
                             },
                             "taken subtrie became EmptyRoot — should have been forced inline"

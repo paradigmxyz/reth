@@ -101,9 +101,9 @@ pub trait SparseTrie: Sized + Debug + Send + Sync {
     /// Calculates and returns the root hash of the trie at the provided epoch.
     ///
     /// This processes any dirty or revealed nodes by updating their RLP encodings and caching them
-    /// at `epoch`, then returns the root hash. If `prune_older_than` is provided, leaves cached at
-    /// epochs strictly below it are pruned. A branch is pruned once its own cached transition and
-    /// all of its materialized children are old enough to prune.
+    /// at `epoch`, then returns the root hash. If `prune_older_than` is provided, empty roots and
+    /// leaves cached at epochs strictly below it are prunable. A branch is pruned once its own
+    /// cached transition and all of its materialized children are old enough to prune.
     ///
     /// # Returns
     ///

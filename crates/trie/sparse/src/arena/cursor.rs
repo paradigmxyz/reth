@@ -137,7 +137,7 @@ impl ArenaCursor {
                 _ => None,
             });
             let child_is_empty_subtrie = arena.get(entry.index).is_some_and(|node| {
-                matches!(node, ArenaSparseNode::Subtrie(s) if matches!(s.arena[s.root], ArenaSparseNode::EmptyRoot))
+                matches!(node, ArenaSparseNode::Subtrie(s) if matches!(s.arena[s.root], ArenaSparseNode::EmptyRoot { .. }))
             });
             let child_is_dirty =
                 child_is_empty_subtrie || matches!(child_state, Some(ArenaSparseNodeState::Dirty));
@@ -317,7 +317,7 @@ impl ArenaCursor {
             let head_idx = head.index;
 
             let head_branch = match &arena[head_idx] {
-                ArenaSparseNode::EmptyRoot => {
+                ArenaSparseNode::EmptyRoot { .. } => {
                     return SeekResult::EmptyRoot;
                 }
                 ArenaSparseNode::Leaf { key, .. } => {

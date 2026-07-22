@@ -141,4 +141,10 @@ pub(super) fn test_set_root_with_empty_root<T: SparseTrie>(new_trie: fn() -> T) 
     let mut trie = (new_trie)();
     trie.set_root(TrieNodeV2::EmptyRoot, None, true).expect("set_root should succeed");
     assert_eq!(trie.root(0, None), EMPTY_ROOT_HASH);
+    assert_eq!(trie.root(0, Some(1)), EMPTY_ROOT_HASH);
+    assert!(trie.root_is_prunable());
+
+    trie.set_root(TrieNodeV2::EmptyRoot, None, true).expect("set_root should reset cached state");
+    assert_eq!(trie.root(10, Some(10)), EMPTY_ROOT_HASH);
+    assert!(!trie.root_is_prunable());
 }

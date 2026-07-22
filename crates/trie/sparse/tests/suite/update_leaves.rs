@@ -364,13 +364,22 @@ pub(super) fn test_remove_last_leaf_produces_empty_root<T: SparseTrie>(new_trie:
 
     let harness = SuiteTestHarness::new(base_storage);
     let mut trie: T = harness.init_trie_fully_revealed(false, new_trie);
+    trie.root(10, None);
 
     // Remove the only leaf.
     let mut leaf_updates = SuiteTestHarness::leaf_updates(&BTreeMap::from([(key, U256::ZERO)]));
     harness.reveal_and_update(&mut trie, &mut leaf_updates);
 
-    let root = trie.root(0, None);
+    let root = trie.root(20, Some(20));
     assert_eq!(root, EMPTY_ROOT_HASH, "removing the only leaf should produce EMPTY_ROOT_HASH");
+    assert!(trie.is_root_cached());
+    assert!(!trie.root_is_prunable(), "the epoch cutoff is strict");
+
+    assert_eq!(trie.root(21, Some(20)), EMPTY_ROOT_HASH);
+    assert!(!trie.root_is_prunable(), "re-hashing must preserve the cached empty-root epoch");
+
+    assert_eq!(trie.root(21, Some(21)), EMPTY_ROOT_HASH);
+    assert!(trie.root_is_prunable());
 }
 
 /// Build 6 leaves then remove one-by-one, verifying root at each

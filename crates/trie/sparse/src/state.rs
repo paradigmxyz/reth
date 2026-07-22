@@ -7,7 +7,7 @@ use either::Either;
 use reth_execution_errors::{SparseStateTrieResult, SparseTrieErrorKind};
 use reth_trie_common::{
     updates::{StorageTrieUpdates, TrieUpdates},
-    DecodedMultiProof, MultiProof, Nibbles, ProofTrieNodeV2, EMPTY_ROOT_HASH,
+    DecodedMultiProof, MultiProof, Nibbles, ProofTrieNodeV2,
 };
 use tracing::instrument;
 
@@ -510,10 +510,10 @@ impl<S: SparseTrieTrait> StorageTries<S> {
         self.tries
             .par_iter_mut()
             .filter_map(|(address, trie)| {
-                let root = trie.root(epoch, prune_older_than);
+                trie.root(epoch, prune_older_than);
                 let root_is_prunable =
                     trie.as_revealed_ref().is_some_and(SparseTrieTrait::root_is_prunable);
-                (root == Some(EMPTY_ROOT_HASH) || root_is_prunable).then_some(*address)
+                root_is_prunable.then_some(*address)
             })
             .collect()
     }
@@ -895,7 +895,7 @@ mod tests {
     }
 
     #[test]
-    fn root_with_pruning_evicts_empty_storage_trie_after_collecting_updates() {
+    fn root_with_pruning_collects_empty_storage_updates_before_eviction() {
         let address = B256::with_last_byte(1);
         let slot = B256::with_last_byte(2);
         let mut sparse = SparseStateTrie::<ArenaParallelSparseTrie>::default()
@@ -915,6 +915,88 @@ mod tests {
         let (_, updates) = sparse.root_with_updates(20, Some(11)).unwrap();
 
         assert!(updates.storage_tries[&address].is_deleted);
+        assert!(sparse.storage.tries.contains_key(&address));
+        assert!(sparse.storage.cleared_tries.is_empty());
+
+        sparse.root_with_updates(21, Some(21)).unwrap();
+
+        assert!(!sparse.storage.tries.contains_key(&address));
+        assert_eq!(sparse.storage.cleared_tries.len(), 1);
+    }
+
+    #[test]
+    fn root_with_pruning_retains_recently_emptied_storage_trie() {
+        let address = B256::with_last_byte(1);
+        let old_slot = B256::with_last_byte(2);
+        let new_slot = B256::with_last_byte(3);
+        let mut sparse = SparseStateTrie::<ArenaParallelSparseTrie>::default()
+            .with_accounts_trie(RevealableSparseTrie::revealed_empty());
+        sparse.insert_storage_trie(address, RevealableSparseTrie::revealed_empty());
+        let storage_trie = sparse.storage_trie_mut(&address).unwrap();
+        storage_trie
+            .update_leaves(
+                &mut B256Map::from_iter([(old_slot, LeafUpdate::Changed(vec![1]))]),
+                |_, _| panic!("empty trie must not request proofs"),
+            )
+            .unwrap();
+        sparse.storage_root(&address, 10, None).unwrap();
+
+        let mut deletion = B256Map::from_iter([(old_slot, LeafUpdate::Changed(Vec::new()))]);
+        sparse
+            .storage_trie_mut(&address)
+            .unwrap()
+            .update_leaves(&mut deletion, |_, _| panic!("revealed leaf must not request proofs"))
+            .unwrap();
+        assert!(deletion.is_empty());
+
+        sparse.root_with_updates(20, Some(20)).unwrap();
+
+        assert!(sparse.storage.tries.contains_key(&address));
+        assert!(sparse.storage.cleared_tries.is_empty());
+        assert_eq!(sparse.storage_root(&address, 20, None), Some(EMPTY_ROOT_HASH));
+
+        let mut insertion = B256Map::from_iter([(new_slot, LeafUpdate::Changed(vec![2]))]);
+        sparse
+            .storage_trie_mut(&address)
+            .unwrap()
+            .update_leaves(&mut insertion, |_, _| {
+                panic!("recently emptied trie must remain revealed")
+            })
+            .unwrap();
+        assert!(insertion.is_empty());
+    }
+
+    #[test]
+    fn root_with_pruning_evicts_old_empty_storage_trie() {
+        let address = B256::with_last_byte(1);
+        let slot = B256::with_last_byte(2);
+        let mut sparse = SparseStateTrie::<ArenaParallelSparseTrie>::default()
+            .with_accounts_trie(RevealableSparseTrie::revealed_empty());
+        sparse.insert_storage_trie(address, RevealableSparseTrie::revealed_empty());
+        sparse
+            .storage_trie_mut(&address)
+            .unwrap()
+            .update_leaves(
+                &mut B256Map::from_iter([(slot, LeafUpdate::Changed(vec![1]))]),
+                |_, _| panic!("empty trie must not request proofs"),
+            )
+            .unwrap();
+        sparse.storage_root(&address, 10, None).unwrap();
+
+        sparse
+            .storage_trie_mut(&address)
+            .unwrap()
+            .update_leaves(
+                &mut B256Map::from_iter([(slot, LeafUpdate::Changed(Vec::new()))]),
+                |_, _| panic!("revealed leaf must not request proofs"),
+            )
+            .unwrap();
+
+        sparse.root_with_updates(20, Some(20)).unwrap();
+        assert!(sparse.storage.tries.contains_key(&address));
+
+        sparse.root_with_updates(21, Some(21)).unwrap();
+
         assert!(!sparse.storage.tries.contains_key(&address));
         assert_eq!(sparse.storage.cleared_tries.len(), 1);
     }
