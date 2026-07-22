@@ -593,6 +593,7 @@ where
                 &self.runtime,
                 &self.state_trie_overlays,
                 &env,
+                &parent_block,
                 provider_builder.clone(),
                 overlay_factory,
                 &self.config,
