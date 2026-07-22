@@ -66,7 +66,8 @@
       "query": "reth_sync_block_validation_state_root_histogram",
       "target": "decrease",
       "floor_pct": 5.0,
-      "min_value_pct_total_latency": 5.0
+      "min_value_pct_total_latency": 5.0,
+      "unit": "seconds"
     },
     {
       "query": "reth_trie_proof_task_account_worker_idle_time_seconds",
@@ -90,7 +91,8 @@
       "query": "reth_tree_root_sparse_trie_prune_duration_histogram",
       "target": "decrease",
       "floor_pct": 5.0,
-      "min_value_pct_total_latency": 0.0
+      "min_value_pct_total_latency": 0.0,
+      "unit": "seconds"
     },
     {
       "query": "reth_tree_root_hashing_task_idle_time_seconds",
@@ -114,13 +116,15 @@
       "query": "reth_storage_providers_database_save_blocks_commit_mdbx",
       "target": "decrease",
       "floor_pct": 5.0,
-      "min_value_pct_total_latency": 13.6
+      "min_value_pct_total_latency": 13.6,
+      "unit": "seconds"
     },
     {
       "query": "reth_storage_providers_database_save_blocks_commit_rocksdb",
       "target": "decrease",
       "floor_pct": 2.5,
-      "min_value_pct_total_latency": 0.8
+      "min_value_pct_total_latency": 0.8,
+      "unit": "seconds"
     },
     {
       "query": "reth_storage_providers_database_save_blocks_mdbx",
@@ -133,19 +137,22 @@
       "query": "reth_storage_providers_database_save_blocks_rocksdb",
       "target": "decrease",
       "floor_pct": 2.5,
-      "min_value_pct_total_latency": 14.2
+      "min_value_pct_total_latency": 14.2,
+      "unit": "seconds"
     },
     {
       "query": "reth_storage_providers_database_save_blocks_sf",
       "target": "decrease",
       "floor_pct": 2.5,
-      "min_value_pct_total_latency": 5.4
+      "min_value_pct_total_latency": 5.4,
+      "unit": "seconds"
     },
     {
       "query": "reth_sync_block_validation_deferred_trie_compute_duration",
       "target": "decrease",
       "floor_pct": 2.5,
-      "min_value_pct_total_latency": 1.4
+      "min_value_pct_total_latency": 1.4,
+      "unit": "seconds"
     },
     {
       "query": "reth_executor_named_worker_queue_wait_duration_seconds",
