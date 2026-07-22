@@ -120,6 +120,7 @@ members = [
     "examples/bsc-p2p",
     "examples/custom-dev-node/",
     "examples/custom-state-root/",
+    "examples/custom-block-executor/",
     "examples/custom-engine-types/",
     "examples/custom-evm/",
     "examples/custom-hardforks/",

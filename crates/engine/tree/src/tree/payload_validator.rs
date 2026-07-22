@@ -19,7 +19,10 @@
 //!    streaming state-root job can provide a sink for prewarm and execution updates.
 //! 5. Execute the block. BAL payloads use the parallel BAL execute path only when state caching and
 //!    BAL parallel execution are enabled. Otherwise the regular executor still builds and validates
-//!    the BAL before post-execution consensus uses the decoded BAL hash.
+//!    the BAL before post-execution consensus uses the decoded BAL hash. Serial execution can be
+//!    overridden via [`CustomBlockExecutor`] installed on
+//!    [`BasicEngineValidator::with_custom_block_executor`]. Returning `None` from the hook falls
+//!    back to the default execution path.
 //! 6. Stop prewarming, terminate execution caching, spawn `hash-post-state`, await
 //!    `payload-convert` and `receipt-root`, then run post-execution consensus validation.
 //! 7. Resolve the state root by finishing the prepared job. The sparse-trie job falls back to
@@ -178,9 +181,11 @@ const MAX_EXPECTED_GAS_USAGE_MULTIPLIER: u64 = 2;
 /// Worker name for deferred trie data preparation.
 const DEFERRED_TRIE_WORKER_NAME: &str = "deferred-trie";
 
-type ReceiptRootSender<N> =
+/// Sender half of the incremental receipt root computation channel.
+pub type ReceiptRootSender<N> =
     crossbeam_channel::Sender<IndexedReceipt<<N as NodePrimitives>::Receipt>>;
-type ReceiptRootReceiver = tokio::sync::oneshot::Receiver<(B256, alloy_primitives::Bloom)>;
+/// Receiver for the receipt root computed during block execution.
+pub type ReceiptRootReceiver = tokio::sync::oneshot::Receiver<(B256, alloy_primitives::Bloom)>;
 
 /// Context providing access to tree state during validation.
 ///
@@ -295,6 +300,12 @@ where
     /// State-root strategy used to prepare per-block commitment tasks.
     #[debug(skip)]
     state_root_strategy: Arc<dyn StateRootStrategy<Evm::Primitives, P, Evm>>,
+    /// Optional hook to override serial block execution.
+    ///
+    /// When set, the hook is invoked on the non-BAL execution path. Returning `None` falls back
+    /// to the default [`Self::execute_block`] implementation.
+    #[debug(skip)]
+    custom_block_executor: Option<CustomBlockExecutor<Evm::Primitives, Evm>>,
 }
 
 impl<N, P, Evm, V> BasicEngineValidator<P, Evm, V>
@@ -358,6 +369,7 @@ where
             runtime,
             state_trie_overlays,
             state_root_strategy: Arc::new(DefaultStateRootStrategy::default()),
+            custom_block_executor: None,
         }
     }
 
@@ -368,6 +380,32 @@ where
     ) -> Self {
         self.state_root_strategy = state_root_strategy;
         self
+    }
+
+    /// Sets a custom block executor hook for the serial (non-BAL) execution path.
+    ///
+    /// The hook is called during [`Self::validate_block_with_state`]. If it returns `None`, the
+    /// validator falls back to the default execution path.
+    pub fn with_custom_block_executor(
+        mut self,
+        custom_block_executor: CustomBlockExecutor<N, Evm>,
+    ) -> Self {
+        self.custom_block_executor = Some(custom_block_executor);
+        self
+    }
+
+    /// Spawns a background receipt root computation task.
+    ///
+    /// Custom block executors that return [`CustomBlockExecutionOutput`] must send receipts to the
+    /// returned sender so that `receipt_root_rx` can be awaited downstream.
+    pub fn spawn_receipt_root_task(
+        &self,
+        receipts_len: usize,
+    ) -> (ReceiptRootSender<N>, ReceiptRootReceiver)
+    where
+        N: NodePrimitives,
+    {
+        self.spawn_receipt_root_task_inner(receipts_len)
     }
 
     /// Converts a [`BlockOrPayload`] to a recovered block.
@@ -699,7 +737,7 @@ where
         } else {
             let state_provider = make_state_provider(false);
             match state_provider {
-                Ok(state_provider) => self.execute_block(
+                Ok(state_provider) => self.execute_serial_block(
                     state_provider,
                     env,
                     &input,
@@ -956,6 +994,55 @@ where
         }
     }
 
+    /// Executes a block on the serial path, optionally delegating to a custom executor hook.
+    #[expect(clippy::type_complexity)]
+    fn execute_serial_block<S, Err, T>(
+        &mut self,
+        state_provider: S,
+        env: ExecutionEnv<Evm>,
+        input: &BlockOrPayload<T>,
+        handle: &mut PayloadHandle<impl ExecutableTxFor<Evm>, Err, N::Receipt>,
+        state_hook: Option<Box<dyn OnStateHook + 'static>>,
+    ) -> Result<
+        (
+            BlockExecutionOutput<N::Receipt>,
+            Vec<Address>,
+            ReceiptRootReceiver,
+            Option<BlockAccessList>,
+        ),
+        InsertBlockErrorKind,
+    >
+    where
+        S: StateProvider + Send,
+        Err: core::error::Error + Send + Sync + 'static,
+        V: PayloadValidator<T, Block = N::Block>,
+        T: PayloadTypes<BuiltPayload: BuiltPayload<Primitives = N>>,
+        Evm: ConfigureEngineEvm<T::ExecutionData, Primitives = N>,
+    {
+        if let Some(custom) = &self.custom_block_executor {
+            let spawn_receipt_root = |len: usize| self.spawn_receipt_root_task_inner(len);
+            let custom_input =
+                CustomBlockExecutorInput::new(&env, &state_provider, &spawn_receipt_root);
+            let execution_start = Instant::now();
+            if let Some(result) = custom(custom_input)? {
+                let execution_duration = execution_start.elapsed();
+                self.metrics.record_block_execution(&result.output, execution_duration);
+                self.metrics.record_block_execution_gas_bucket(
+                    result.output.result.gas_used,
+                    execution_duration,
+                );
+                return Ok((
+                    result.output,
+                    result.senders,
+                    result.receipt_root_rx,
+                    result.built_bal,
+                ));
+            }
+        }
+
+        self.execute_block(state_provider, env, input, handle, state_hook)
+    }
+
     /// Executes a block with the given state provider.
     ///
     /// This method orchestrates block execution:
@@ -1031,7 +1118,7 @@ where
         }
 
         let transaction_count = input.transaction_count();
-        let (receipt_tx, result_rx) = self.spawn_receipt_root_task(transaction_count);
+        let (receipt_tx, result_rx) = self.spawn_receipt_root_task_inner(transaction_count);
         let executed_tx_index = Arc::clone(handle.executed_tx_index());
         executor.evm_mut().db_mut().set_state_hook(state_hook);
 
@@ -1127,7 +1214,7 @@ where
     {
         debug!(target: "engine::tree::payload_validator", "Executing block via BAL path");
 
-        let (receipt_tx, result_rx) = self.spawn_receipt_root_task(env.transaction_count);
+        let (receipt_tx, result_rx) = self.spawn_receipt_root_task_inner(env.transaction_count);
         let input_bal = env.decoded_bal.ok_or_else(|| {
             InsertBlockErrorKind::Other("BAL execute path: no decoded BAL available".into())
         })?;
@@ -1164,7 +1251,7 @@ where
         Ok((output, senders, result_rx, Some(built_bal)))
     }
 
-    fn spawn_receipt_root_task(
+    fn spawn_receipt_root_task_inner(
         &self,
         receipts_len: usize,
     ) -> (ReceiptRootSender<N>, ReceiptRootReceiver) {
@@ -1995,5 +2082,135 @@ impl<T: PayloadTypes> BlockOrPayload<T> {
             Self::Payload(payload) => payload.gas_limit(),
             Self::Block(block) => block.gas_limit(),
         }
+    }
+}
+
+/// Output of a custom block execution hook.
+///
+/// Must match the return shape of [`BasicEngineValidator::execute_block`].
+///
+/// # Integration patterns
+///
+/// **Full cache hit** — when execution was completed earlier (e.g. via flashblocks), return the
+/// cached [`BlockExecutionOutput`] and a pre-resolved `receipt_root_rx` from a completed
+/// `tokio::sync::oneshot` channel.
+///
+/// **Incremental execution** — call [`CustomBlockExecutorInput::spawn_receipt_root_task`] and
+/// stream [`IndexedReceipt`]s to the sender while executing transactions, matching the default
+/// path in [`BasicEngineValidator::execute_block`].
+pub struct CustomBlockExecutionOutput<N: NodePrimitives> {
+    /// Block execution output.
+    pub output: BlockExecutionOutput<N::Receipt>,
+    /// Recovered transaction senders.
+    pub senders: Vec<Address>,
+    /// Receiver for the receipt root computed during execution.
+    pub receipt_root_rx: ReceiptRootReceiver,
+    /// Built block access list, if any.
+    pub built_bal: Option<BlockAccessList>,
+}
+
+impl<N: NodePrimitives> std::fmt::Debug for CustomBlockExecutionOutput<N> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("CustomBlockExecutionOutput")
+            .field("output", &self.output)
+            .field("senders", &self.senders)
+            .field("receipt_root_rx", &"<ReceiptRootReceiver>")
+            .field("built_bal", &self.built_bal.as_ref().map(|_| "<BlockAccessList>"))
+            .finish()
+    }
+}
+
+/// Input for [`CustomBlockExecutor`].
+///
+/// Transaction bodies are not included here. Integrators that need transaction-granular reuse
+/// (e.g. flashblocks) should key external caches by [`ExecutionEnv::hash`] and validate prefixes
+/// against the payload before returning [`CustomBlockExecutionOutput`].
+pub struct CustomBlockExecutorInput<'a, Evm: ConfigureEvm, N: NodePrimitives> {
+    /// Execution environment for the block.
+    pub env: &'a ExecutionEnv<Evm>,
+    /// State provider at the parent block.
+    pub state_provider: &'a dyn StateProvider,
+    receipt_root_spawner: &'a dyn Fn(usize) -> (ReceiptRootSender<N>, ReceiptRootReceiver),
+}
+
+impl<Evm: ConfigureEvm, N: NodePrimitives> std::fmt::Debug
+    for CustomBlockExecutorInput<'_, Evm, N>
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("CustomBlockExecutorInput")
+            .field("env", self.env)
+            .field("state_provider", &"<dyn StateProvider>")
+            .field("receipt_root_spawner", &"<Fn>")
+            .finish()
+    }
+}
+
+impl<'a, Evm: ConfigureEvm, N: NodePrimitives> CustomBlockExecutorInput<'a, Evm, N> {
+    /// Creates a new custom block executor input.
+    pub fn new(
+        env: &'a ExecutionEnv<Evm>,
+        state_provider: &'a dyn StateProvider,
+        receipt_root_spawner: &'a dyn Fn(usize) -> (ReceiptRootSender<N>, ReceiptRootReceiver),
+    ) -> Self {
+        Self { env, state_provider, receipt_root_spawner }
+    }
+
+    /// Spawns a background receipt root computation task.
+    ///
+    /// Custom executors that run transactions incrementally should send [`IndexedReceipt`]s to the
+    /// returned sender so that `receipt_root_rx` can be awaited downstream.
+    pub fn spawn_receipt_root_task(
+        &self,
+        receipts_len: usize,
+    ) -> (ReceiptRootSender<N>, ReceiptRootReceiver) {
+        (self.receipt_root_spawner)(receipts_len)
+    }
+}
+
+/// Custom block executor hook for the serial (non-BAL) execution path.
+///
+/// Return `Ok(None)` to fall back to the default execution path.
+pub type CustomBlockExecutor<N, Evm> = Arc<
+    dyn Fn(
+            CustomBlockExecutorInput<'_, Evm, N>,
+        ) -> Result<Option<CustomBlockExecutionOutput<N>>, InsertBlockErrorKind>
+        + Send
+        + Sync
+        + 'static,
+>;
+
+#[cfg(test)]
+mod custom_block_executor_tests {
+    use super::*;
+    use reth_ethereum_primitives::EthPrimitives;
+    use reth_evm_ethereum::MockEvmConfig;
+    use reth_revm::test_utils::StateProviderTest;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    #[test]
+    fn custom_block_executor_none_falls_back() {
+        let state = StateProviderTest::default();
+        let env = ExecutionEnv::<MockEvmConfig>::test_default();
+        let spawner = |_len: usize| {
+            let (receipt_tx, receipt_rx) = crossbeam_channel::unbounded();
+            let (result_tx, result_rx) = tokio::sync::oneshot::channel();
+            drop(receipt_rx);
+            drop(result_tx);
+            (receipt_tx, result_rx)
+        };
+        let calls = Arc::new(AtomicUsize::new(0));
+        let calls_clone = Arc::clone(&calls);
+        let executor: CustomBlockExecutor<EthPrimitives, MockEvmConfig> = Arc::new(move |input| {
+            calls_clone.fetch_add(1, Ordering::SeqCst);
+            assert_eq!(input.env.transaction_count, 0);
+            assert!(input.env.hash.is_zero());
+            let (_tx, _rx) = input.spawn_receipt_root_task(0);
+            Ok(None)
+        });
+
+        let input = CustomBlockExecutorInput::new(&env, &state, &spawner);
+        let result = executor(input);
+        assert!(result.unwrap().is_none());
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
     }
 }
