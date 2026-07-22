@@ -701,9 +701,13 @@ impl DefaultStateRootStrategy {
                 let start = Instant::now();
                 let (mut trie, deferred) = task.into_trie_for_reuse();
                 if let Some(prune_blocks) = pending_sparse_trie_prune_blocks {
+                    let prune_start = Instant::now();
                     let retained_paths =
                         sparse_trie_retained_paths(prune_blocks, result.hashed_state.as_ref());
                     trie.prune(retained_paths);
+                    trie_metrics
+                        .sparse_trie_prune_duration_histogram
+                        .record(prune_start.elapsed().as_secs_f64());
                 }
                 trie_metrics
                     .into_trie_for_reuse_duration_histogram
