@@ -118,6 +118,26 @@ impl FromStr for TrustedPeer {
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         use url::Url;
 
+        // ENRs are base64-encoded, not enode URLs, so decode them into a node record directly.
+        #[cfg(feature = "secp256k1")]
+        if s.starts_with("enr:") {
+            let enr = enr::Enr::<secp256k1::SecretKey>::from_str(s)
+                .map_err(NodeRecordParseError::InvalidUrl)?;
+            let mut record = NodeRecord::try_from(&enr)?;
+            if record.tcp_port == 0 {
+                // discovery-only ENR without a tcp key: dial the udp port instead of port 0,
+                // same fallback as `reth_discv5::Discv5::try_into_reachable`
+                record.tcp_port = record.udp_port;
+            }
+            return Ok(record.into());
+        }
+        #[cfg(not(feature = "secp256k1"))]
+        if s.starts_with("enr:") {
+            return Err(NodeRecordParseError::InvalidUrl(
+                "parsing ENRs requires the 'secp256k1' feature".to_string(),
+            ));
+        }
+
         // Parse the URL with enode prefix replaced with http.
         // The enode prefix causes the parser to use parse_opaque() on
         // the host str which only handles domains and ipv6, not ipv4.
@@ -273,6 +293,24 @@ mod tests {
             let node: TrustedPeer = serde_json::from_str(url).expect("couldn't deserialize");
             assert_eq!(node, expected);
         }
+    }
+
+    // <https://eips.ethereum.org/EIPS/eip-778>
+    #[cfg(feature = "secp256k1")]
+    #[test]
+    fn test_enr_parse() {
+        let enr = "enr:-IS4QHCYrYZbAKWCBRlAy5zzaDZXJBGkcnh4MHcBFZntXNFrdvJjX04jRzjzCBOonrkTfj499SZuOh8R33Ls8RRcy5wBgmlkgnY0gmlwhH8AAAGJc2VjcDI1NmsxoQPKY0yuDUmstAHYpMa2_oxVtw0RW_QAdpzBQA8yWM0xOIN1ZHCCdl8";
+        let node: TrustedPeer = enr.parse().unwrap();
+        assert_eq!(node.host, Host::<String>::Ipv4([127, 0, 0, 1].into()));
+        assert_eq!(node.udp_port, 30303);
+        // discovery-only ENR without a tcp key falls back to the udp port
+        assert_eq!(node.tcp_port, 30303);
+        assert_eq!(
+            node.id,
+            "0xca634cae0d49acb401d8a4c6b6fe8c55b70d115bf400769cc1400f3258cd31387574077f301b421bc84df7266c44e9e6d569fc56be00812904767bf5ccd1fc7f"
+                .parse::<PeerId>()
+                .unwrap()
+        );
     }
 
     #[tokio::test]
