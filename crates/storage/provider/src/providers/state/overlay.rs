@@ -886,6 +886,11 @@ mod tests {
         let (factory, blocks) = setup_frontiers(2, 3);
         let manager = StateTrieOverlayManager::default();
         manager.insert_block(blocks[1].clone());
+        manager.insert_block(ExecutedBlock::new(
+            Arc::clone(&blocks[3].recovered_block),
+            Arc::clone(&blocks[3].execution_output),
+            ComputedTrieData::default(),
+        ));
         let provider = factory.provider().unwrap();
 
         let overlay = OverlayBuilder::<EthPrimitives>::new(
