@@ -31,12 +31,11 @@ pub type StateProviderBox = Box<dyn StateProvider + Send + 'static>;
 
 /// Latest hybrid state read directly from the database together with its durable frontiers.
 ///
-/// The provider and both frontiers are read from the same database snapshot. State and trie data
-/// are fully durable through `state_trie_tip`, while non-state/trie block data is durable through
-/// `finish_tip`. Under partial persistence, the provider can also contain unmasked state and trie
-/// updates between those frontiers; it does not by itself expose the complete state at
-/// `finish_tip`. Callers must overlay the in-memory state for
-/// `state_trie_tip + 1..=finish_tip` to construct that state.
+/// The provider and both frontiers are read from the same database snapshot. Non-state/trie block
+/// data is durable through `finish_tip`. State/trie updates have been processed through
+/// `state_trie_tip`, but updates shadowed by the masking range can be absent from the database.
+/// Callers must overlay the in-memory state for `state_trie_tip + 1..=finish_tip` to construct the
+/// complete state at `finish_tip`.
 pub struct LatestDatabaseState {
     provider: StateProviderBox,
     state_trie_tip: BlockNumHash,
@@ -62,7 +61,7 @@ impl LatestDatabaseState {
         Self { provider, state_trie_tip, finish_tip }
     }
 
-    /// Returns the block through which state and trie data are durable.
+    /// Returns the block through which state and trie updates have been processed for persistence.
     pub const fn state_trie_tip(&self) -> BlockNumHash {
         self.state_trie_tip
     }

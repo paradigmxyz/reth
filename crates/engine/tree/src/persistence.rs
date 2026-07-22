@@ -264,13 +264,23 @@ where
         let first_block =
             input.persist_rest_blocks().first().map(|block| block.recovered_block().num_hash());
         let last_block = input.last_block();
-        let block_count = input.blocks().len();
+        let persist_block_count = input.persist_rest_blocks().len();
+        let state_trie_block_count = input.state_trie_blocks().len();
+        let mask_block_count = input.state_trie_masking_blocks().len();
         let last_state_trie_block = (!input.is_empty()).then_some(input.new_partial_state_trie());
 
         let pending_finalized = self.pending_finalized_block.take();
         let pending_safe = self.pending_safe_block.take();
 
-        debug!(target: "engine::persistence", ?block_count, first=?first_block, last=?last_block, "Saving range of blocks");
+        debug!(
+            target: "engine::persistence",
+            persist_block_count,
+            state_trie_block_count,
+            mask_block_count,
+            first = ?first_block,
+            last = ?last_block,
+            "Saving range of blocks"
+        );
 
         let start_time = Instant::now();
 
@@ -299,7 +309,7 @@ where
         }
 
         let elapsed = start_time.elapsed();
-        self.metrics.save_blocks_batch_size.record(block_count as f64);
+        self.metrics.save_blocks_batch_size.record(persist_block_count as f64);
         self.metrics.save_blocks_duration_seconds.record(elapsed);
 
         Ok(PersistenceResult { last_block, last_state_trie_block, commit_duration: Some(elapsed) })
@@ -750,10 +760,7 @@ mod tests {
         let provider = provider_factory.provider().unwrap();
         let checkpoint = provider.get_stage_checkpoint(StageId::Finish).unwrap().unwrap();
         assert_eq!(checkpoint.block_number, REORG_TIP as u64);
-        assert_eq!(
-            checkpoint.finish_stage_checkpoint().unwrap().partial_state_trie(),
-            Some(REORG_TIP as u64)
-        );
+        assert!(checkpoint.finish_stage_checkpoint().is_none());
         for block in &blocks[..=REORG_TIP] {
             assert_eq!(
                 provider.block_hash(block.recovered_block().number).unwrap(),

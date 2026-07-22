@@ -130,25 +130,6 @@ impl<N: NodePrimitives> SaveBlocksInput<N> {
         &self.blocks[..(self.new_partial_state_trie - self.prev_partial_state_trie) as usize]
     }
 
-    /// Returns previously masked blocks that have aged out of the window.
-    ///
-    /// Their block and execution data is already durable, so only their non-masked
-    /// hashed-state/trie updates need to catch up to disk.
-    pub fn state_trie_catchup_blocks(&self) -> &[ExecutedBlock<N>] {
-        let catchup_tip = self.prev_db_tip.min(self.new_partial_state_trie);
-        &self.blocks[..(catchup_tip - self.prev_partial_state_trie) as usize]
-    }
-
-    /// Returns newly persisted blocks before the new masking suffix.
-    ///
-    /// These blocks need both their ordinary data and their non-masked hashed-state/trie updates
-    /// written during this operation.
-    pub fn new_state_trie_blocks(&self) -> &[ExecutedBlock<N>] {
-        let start = self.prev_db_tip.min(self.new_partial_state_trie);
-        &self.blocks[(start - self.prev_partial_state_trie) as usize..
-            (self.new_partial_state_trie - self.prev_partial_state_trie) as usize]
-    }
-
     /// Returns the fixed suffix whose hashed-state/trie updates remain in memory.
     ///
     /// This suffix suppresses older updates to the same hashed keys and trie nodes. It is also the
@@ -186,22 +167,6 @@ mod tests {
         );
         assert_eq!(
             input
-                .state_trie_catchup_blocks()
-                .iter()
-                .map(|block| block.recovered_block().number())
-                .collect::<Vec<_>>(),
-            (6..=11).collect::<Vec<_>>()
-        );
-        assert_eq!(
-            input
-                .new_state_trie_blocks()
-                .iter()
-                .map(|block| block.recovered_block().number())
-                .collect::<Vec<_>>(),
-            (12..=16).collect::<Vec<_>>()
-        );
-        assert_eq!(
-            input
                 .state_trie_masking_blocks()
                 .iter()
                 .map(|block| block.recovered_block().number())
@@ -216,8 +181,7 @@ mod tests {
         let input = SaveBlocksInput::new(blocks, 15, 12, 16, 13);
 
         assert_eq!(input.persist_rest_blocks()[0].recovered_block().number(), 16);
-        assert_eq!(input.state_trie_catchup_blocks()[0].recovered_block().number(), 13);
-        assert!(input.new_state_trie_blocks().is_empty());
+        assert_eq!(input.state_trie_blocks()[0].recovered_block().number(), 13);
         assert_eq!(
             input
                 .state_trie_masking_blocks()

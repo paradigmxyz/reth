@@ -33,7 +33,8 @@ pub struct PersistenceState {
     ///
     /// This tracks the highest canonical block with durable block/static-file/plain-state data.
     pub(crate) last_persisted_block: BlockNumHash,
-    /// Hash and number of the highest block whose state/trie outputs are persisted.
+    /// Hash and number of the highest block whose state/trie outputs were processed for
+    /// persistence. Updates shadowed by the current masking suffix can still be absent from disk.
     pub(crate) last_state_trie_persisted_block: BlockNumHash,
     /// Receiver end of channel where the result of the persistence task will be
     /// sent when done. A None value means there's no persistence task in progress.

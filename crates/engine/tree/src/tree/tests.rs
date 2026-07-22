@@ -590,11 +590,11 @@ async fn test_tree_persist_blocks() {
     let received_action =
         test_harness.action_rx.recv().expect("Failed to receive save blocks action");
     if let PersistenceAction::SaveBlocks(input, _) = received_action {
-        let expected_persist_len = blocks.len();
+        let expected_persist_len = blocks.len() - tree_config.memory_block_buffer_target() as usize;
         assert_eq!(input.blocks().len(), expected_persist_len);
-        assert_eq!(input.blocks(), blocks);
-        assert_eq!(input.persist_rest_blocks(), blocks);
-        assert_eq!(input.state_trie_blocks(), blocks);
+        assert_eq!(input.blocks(), &blocks[..expected_persist_len]);
+        assert_eq!(input.persist_rest_blocks(), &blocks[..expected_persist_len]);
+        assert_eq!(input.state_trie_blocks(), &blocks[..expected_persist_len]);
         assert!(input.state_trie_masking_blocks().is_empty());
     } else {
         panic!("unexpected action received {received_action:?}");
@@ -1439,8 +1439,10 @@ fn test_get_save_blocks_input_state_masking_keeps_full_eligible_backlog() {
         blocks[0].recovered_block().num_hash();
     test_harness.tree.persistence_state.last_persisted_block =
         blocks[3].recovered_block().num_hash();
-    test_harness.tree.config =
-        TreeConfig::default().with_persistence_threshold(13).with_num_state_masking_blocks(10);
+    test_harness.tree.config = TreeConfig::default()
+        .with_persistence_threshold(13)
+        .with_memory_block_buffer_target(0)
+        .with_num_state_masking_blocks(10);
 
     let input = test_harness.tree.get_save_blocks_input(PersistTarget::Threshold).unwrap();
 
@@ -1492,8 +1494,10 @@ fn test_get_save_blocks_input_steady_state_masking_has_catchup_overlap_and_maske
         blocks[5].recovered_block().num_hash();
     test_harness.tree.persistence_state.last_persisted_block =
         blocks[11].recovered_block().num_hash();
-    test_harness.tree.config =
-        TreeConfig::default().with_persistence_threshold(11).with_num_state_masking_blocks(6);
+    test_harness.tree.config = TreeConfig::default()
+        .with_persistence_threshold(11)
+        .with_memory_block_buffer_target(0)
+        .with_num_state_masking_blocks(6);
 
     let input = test_harness.tree.get_save_blocks_input(PersistTarget::Threshold).unwrap();
 

@@ -589,15 +589,13 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
 
         let last_block_number =
             blocks.last().expect("checked non-empty").recovered_block().number();
-        let partial_state_trie = save_mode.with_state().then_some(last_block_number);
-        self.save_blocks_inner(
-            &blocks,
-            [&[], &blocks],
-            &[],
-            last_block_number,
-            partial_state_trie,
-            save_mode,
-        )
+
+        if save_mode.with_state() {
+            self.ensure_no_partial_state_trie_gap()?;
+        }
+
+        let state_trie_blocks = if save_mode.with_state() { blocks.as_slice() } else { &[] };
+        self.save_blocks_inner(&blocks, state_trie_blocks, &[], last_block_number, None, save_mode)
     }
 
     /// Advances the independent persistence frontiers described by [`SaveBlocksInput`].
@@ -607,11 +605,10 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
     /// new masking suffix out of the hashed-state/trie tables. Older updates overwritten anywhere
     /// in that suffix are filtered rather than written temporarily.
     ///
-    /// An empty masking suffix is valid. It means both frontiers advance together and this falls
-    /// back to the same unfiltered merge used by [`Self::save_blocks`]. Graceful shutdown uses
-    /// that case to leave the database fully flushed.
+    /// An empty masking suffix is valid and uses the same unfiltered merge as
+    /// [`Self::save_blocks`]. Graceful shutdown uses this case to leave the database fully flushed.
     ///
-    /// Static-file and RocksDB writes for newly persisted blocks continue to run in parallel with
+    /// Static-file and `RocksDB` writes for newly persisted blocks continue to run in parallel with
     /// MDBX writes. The previous frontiers are checked against the current Finish checkpoint
     /// before any data is written.
     #[instrument(
@@ -634,60 +631,81 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
             return Ok(())
         }
 
-        if let Some(checkpoint) = self.get_stage_checkpoint(StageId::Finish)? {
-            let partial_state_trie = checkpoint
-                .finish_stage_checkpoint()
-                .and_then(|finish| finish.partial_state_trie())
-                .unwrap_or(checkpoint.block_number);
-            assert_eq!(
-                checkpoint.block_number,
+        #[cfg(not(feature = "partial-persistence"))]
+        if input.new_partial_state_trie() < input.new_db_tip() {
+            return Err(ProviderError::other(std::io::Error::other(
+                "partial persistence requires the `partial-persistence` feature",
+            )))
+        }
+
+        let (db_tip, partial_state_trie) = self
+            .get_stage_checkpoint(StageId::Finish)?
+            .map(|checkpoint| {
+                let partial_state_trie = checkpoint
+                    .finish_stage_checkpoint()
+                    .and_then(|finish| finish.partial_state_trie())
+                    .unwrap_or(checkpoint.block_number);
+                (checkpoint.block_number, partial_state_trie)
+            })
+            .unwrap_or_default();
+
+        if db_tip != input.prev_db_tip() || partial_state_trie != input.prev_partial_state_trie() {
+            return Err(ProviderError::other(std::io::Error::other(format!(
+                "persistence frontiers do not match Finish checkpoint: expected database/state-trie tips #{}/{}, got #{}/{}",
                 input.prev_db_tip(),
-                "previous database tip does not match Finish checkpoint"
-            );
-            assert_eq!(
-                partial_state_trie,
                 input.prev_partial_state_trie(),
-                "previous state/trie tip does not match Finish checkpoint"
-            );
+                db_tip,
+                partial_state_trie,
+            ))))
         }
 
         self.save_blocks_inner(
             input.persist_rest_blocks(),
-            [input.state_trie_catchup_blocks(), input.new_state_trie_blocks()],
+            input.state_trie_blocks(),
             input.state_trie_masking_blocks(),
             input.new_db_tip(),
-            Some(input.new_partial_state_trie()),
+            (input.new_partial_state_trie() < input.new_db_tip())
+                .then_some(input.new_partial_state_trie()),
             SaveBlocksMode::Full,
         )
     }
 
-    /// Writes ordinary block data and up to two hashed-state/trie ranges in parallel backends.
-    ///
-    /// `state_trie_ranges` contains, in order, previously masked blocks that are catching up and
-    /// newly persisted blocks before the new mask. Keeping those naturally separate avoids the
-    /// performance regression of one larger k-way merge. When `state_trie_masking_blocks` is
-    /// empty, each range uses the ordinary `merge_batch` path without building or filtering a
-    /// mask.
+    /// Rejects full state/trie writes while the database still depends on an in-memory mask.
+    fn ensure_no_partial_state_trie_gap(&self) -> ProviderResult<()> {
+        let Some(checkpoint) = self.get_stage_checkpoint(StageId::Finish)? else { return Ok(()) };
+        let partial_state_trie = checkpoint
+            .finish_stage_checkpoint()
+            .and_then(|finish| finish.partial_state_trie())
+            .unwrap_or(checkpoint.block_number);
+
+        if partial_state_trie != checkpoint.block_number {
+            return Err(ProviderError::other(std::io::Error::other(format!(
+                "cannot append full state/trie data while Finish checkpoint has a partial persistence gap: database tip #{}, state/trie tip #{partial_state_trie}",
+                checkpoint.block_number,
+            ))))
+        }
+
+        Ok(())
+    }
+
     fn save_blocks_inner(
         &self,
         persist_rest_blocks: &[ExecutedBlock<N::Primitives>],
-        state_trie_ranges: [&[ExecutedBlock<N::Primitives>]; 2],
+        state_trie_blocks: &[ExecutedBlock<N::Primitives>],
         state_trie_masking_blocks: &[ExecutedBlock<N::Primitives>],
         last_block_number: BlockNumber,
         partial_state_trie: Option<BlockNumber>,
         save_mode: SaveBlocksMode,
     ) -> ProviderResult<()> {
-        if persist_rest_blocks.is_empty() && state_trie_ranges.iter().all(|range| range.is_empty())
-        {
+        if persist_rest_blocks.is_empty() && state_trie_blocks.is_empty() {
             debug!(target: "providers::db", "Attempted to write empty persistence ranges");
             return Ok(())
         }
 
         let total_start = Instant::now();
         let storage_settings = self.cached_storage_settings();
-        let state_trie_block_count =
-            state_trie_ranges.iter().map(|range| range.len()).sum::<usize>();
-        let block_count = (state_trie_block_count + state_trie_masking_blocks.len()) as u64;
+        let state_trie_block_count = state_trie_blocks.len();
+        let block_count = persist_rest_blocks.len() as u64;
 
         debug!(
             target: "providers::db",
@@ -864,80 +882,78 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
                 }
             }
 
-            // Keep catchup and newly durable blocks as separate merge batches. Large k-way merges
-            // regress when these ranges are combined, while the ordinary path remains unchanged
-            // when catchup and masking are both empty.
             if save_mode.with_state() && state_trie_block_count > 0 {
-                if state_trie_masking_blocks.is_empty() {
-                    for blocks in state_trie_ranges {
-                        if blocks.is_empty() {
-                            continue
-                        }
-
-                        let start = Instant::now();
-                        let merged_hashed_state = HashedPostStateSorted::merge_batch(
-                            blocks.iter().rev().map(|block| block.trie_data().sorted.hashed_state),
-                        );
-                        if !merged_hashed_state.is_empty() {
-                            self.write_hashed_state(&merged_hashed_state)?;
-                        }
-                        timings.write_hashed_state += start.elapsed();
-
-                        let start = Instant::now();
-                        let merged_trie = TrieUpdatesSorted::merge_batch(
-                            blocks.iter().rev().map(|block| block.trie_data().sorted.trie_updates),
-                        );
-                        if !merged_trie.is_empty() {
-                            self.write_trie_updates_sorted(&merged_trie)?;
-                        }
-                        timings.write_trie_updates += start.elapsed();
-                    }
+                let start = Instant::now();
+                let can_filter_hashed_state = !state_trie_masking_blocks.is_empty() &&
+                    state_trie_blocks.iter().chain(state_trie_masking_blocks).all(|block| {
+                        block
+                            .trie_data
+                            .get()
+                            .sorted
+                            .hashed_state
+                            .storages
+                            .values()
+                            .all(|storage| !storage.wiped)
+                    });
+                let merged_hashed_state = if can_filter_hashed_state {
+                    Arc::new(HashedPostStateSorted::disjointed_merge_batch(
+                        state_trie_blocks
+                            .iter()
+                            .map(|block| block.trie_data.get().sorted.hashed_state.as_ref())
+                            .collect(),
+                        state_trie_masking_blocks
+                            .iter()
+                            .map(|block| block.trie_data.get().sorted.hashed_state.as_ref())
+                            .collect(),
+                    ))
                 } else {
-                    let masking_trie_data = state_trie_masking_blocks
-                        .iter()
-                        .map(|block| block.trie_data())
-                        .collect::<Vec<_>>();
-
-                    for blocks in state_trie_ranges {
-                        if blocks.is_empty() {
-                            continue
-                        }
-
-                        let state_trie_data =
-                            blocks.iter().map(|block| block.trie_data()).collect::<Vec<_>>();
-                        let start = Instant::now();
-                        let merged_hashed_state = HashedPostStateSorted::disjointed_merge_batch(
-                            state_trie_data
-                                .iter()
-                                .map(|data| data.sorted.hashed_state.as_ref())
-                                .collect(),
-                            masking_trie_data
-                                .iter()
-                                .map(|data| data.sorted.hashed_state.as_ref())
-                                .collect(),
-                        );
-                        if !merged_hashed_state.is_empty() {
-                            self.write_hashed_state(&merged_hashed_state)?;
-                        }
-                        timings.write_hashed_state += start.elapsed();
-
-                        let start = Instant::now();
-                        let merged_trie = TrieUpdatesSorted::disjointed_merge_batch(
-                            state_trie_data
-                                .iter()
-                                .map(|data| data.sorted.trie_updates.as_ref())
-                                .collect(),
-                            masking_trie_data
-                                .iter()
-                                .map(|data| data.sorted.trie_updates.as_ref())
-                                .collect(),
-                        );
-                        if !merged_trie.is_empty() {
-                            self.write_trie_updates_sorted(&merged_trie)?;
-                        }
-                        timings.write_trie_updates += start.elapsed();
-                    }
+                    HashedPostStateSorted::merge_batch(
+                        state_trie_blocks
+                            .iter()
+                            .rev()
+                            .map(|block| Arc::clone(&block.trie_data.get().sorted.hashed_state)),
+                    )
+                };
+                if !merged_hashed_state.is_empty() {
+                    self.write_hashed_state(&merged_hashed_state)?;
                 }
+                timings.write_hashed_state += start.elapsed();
+
+                let start = Instant::now();
+                let can_filter_trie_updates = !state_trie_masking_blocks.is_empty() &&
+                    state_trie_blocks.iter().chain(state_trie_masking_blocks).all(|block| {
+                        block
+                            .trie_data
+                            .get()
+                            .sorted
+                            .trie_updates
+                            .storage_tries_ref()
+                            .values()
+                            .all(|storage_trie| !storage_trie.is_deleted)
+                    });
+                let merged_trie = if can_filter_trie_updates {
+                    Arc::new(TrieUpdatesSorted::disjointed_merge_batch(
+                        state_trie_blocks
+                            .iter()
+                            .map(|block| block.trie_data.get().sorted.trie_updates.as_ref())
+                            .collect(),
+                        state_trie_masking_blocks
+                            .iter()
+                            .map(|block| block.trie_data.get().sorted.trie_updates.as_ref())
+                            .collect(),
+                    ))
+                } else {
+                    TrieUpdatesSorted::merge_batch(
+                        state_trie_blocks
+                            .iter()
+                            .rev()
+                            .map(|block| Arc::clone(&block.trie_data.get().sorted.trie_updates)),
+                    )
+                };
+                if !merged_trie.is_empty() {
+                    self.write_trie_updates_sorted(&merged_trie)?;
+                }
+                timings.write_trie_updates += start.elapsed();
             }
 
             // Full mode: update history indices
@@ -952,13 +968,15 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
             // Update pipeline progress
             let start = Instant::now();
             self.update_pipeline_stages(last_block_number, false)?;
-            if let Some(partial_state_trie) = partial_state_trie {
-                self.save_stage_checkpoint(
-                    StageId::Finish,
-                    StageCheckpoint::new(last_block_number).with_finish_stage_checkpoint(
-                        FinishCheckpoint { partial_state_trie: Some(partial_state_trie) },
-                    ),
-                )?;
+            if save_mode.with_state() {
+                let checkpoint = match partial_state_trie {
+                    Some(partial_state_trie) => StageCheckpoint::new(last_block_number)
+                        .with_finish_stage_checkpoint(FinishCheckpoint {
+                            partial_state_trie: Some(partial_state_trie),
+                        }),
+                    None => StageCheckpoint::new(last_block_number),
+                };
+                self.save_stage_checkpoint(StageId::Finish, checkpoint)?;
             }
             timings.update_pipeline_stages = start.elapsed();
 
@@ -4199,9 +4217,12 @@ mod tests {
         map::{AddressMap, B256Map},
         U256,
     };
+    #[cfg(feature = "partial-persistence")]
     use reth_chain_state::{test_utils::TestBlockBuilder, ExecutedBlock};
     use reth_db_api::models::StorageSettings;
-    use reth_ethereum_primitives::{EthPrimitives, Receipt};
+    #[cfg(feature = "partial-persistence")]
+    use reth_ethereum_primitives::EthPrimitives;
+    use reth_ethereum_primitives::Receipt;
     use reth_execution_types::{AccountRevertInit, BlockExecutionOutput, BlockExecutionResult};
     use reth_primitives_traits::SealedBlock;
     use reth_storage_api::MetadataWriter;
@@ -4717,6 +4738,7 @@ mod tests {
         provider_rw.commit().unwrap();
     }
 
+    #[cfg(feature = "partial-persistence")]
     #[test]
     fn test_save_blocks_only_masks_trie_with_deferred_blocks() {
         use reth_trie::{
@@ -5030,6 +5052,56 @@ mod tests {
         assert!(in_memory_entries.is_empty());
     }
 
+    #[cfg(feature = "partial-persistence")]
+    #[test]
+    fn test_save_blocks_masking_falls_back_for_storage_wipes() {
+        use reth_trie::{
+            updates::{StorageTrieUpdatesSorted, TrieUpdatesSorted},
+            HashedPostStateSorted, HashedStorageSorted,
+        };
+
+        let factory = create_test_provider_factory();
+        let mut test_block_builder = TestBlockBuilder::eth().with_state();
+        let genesis = test_block_builder.get_executed_blocks(0..1).next().unwrap();
+        let blocks: Vec<_> = test_block_builder.get_executed_blocks(1..3).collect();
+
+        let provider_rw = factory.provider_rw().unwrap();
+        provider_rw.save_blocks(vec![genesis], SaveBlocksMode::Full).unwrap();
+        provider_rw.commit().unwrap();
+
+        let address = B256::with_last_byte(1);
+        let state = HashedPostStateSorted::new(
+            vec![],
+            B256Map::from_iter([(
+                address,
+                HashedStorageSorted { wiped: true, storage_slots: vec![] },
+            )]),
+        );
+        let trie = TrieUpdatesSorted::new(
+            vec![],
+            B256Map::from_iter([(
+                address,
+                StorageTrieUpdatesSorted { is_deleted: true, storage_nodes: vec![] },
+            )]),
+        );
+        let candidate = ExecutedBlock::new(
+            Arc::clone(&blocks[0].recovered_block),
+            Arc::clone(&blocks[0].execution_output),
+            ComputedTrieData::new(Arc::new(state), Arc::new(trie)),
+        );
+
+        let provider_rw = factory.provider_rw().unwrap();
+        let input = SaveBlocksInput::new(vec![candidate, blocks[1].clone()], 0, 0, 2, 1);
+        provider_rw.save_blocks_with_frontiers(&input).unwrap();
+        provider_rw.commit().unwrap();
+
+        let checkpoint =
+            factory.provider().unwrap().get_stage_checkpoint(StageId::Finish).unwrap().unwrap();
+        assert_eq!(checkpoint.block_number, 2);
+        assert_eq!(checkpoint.finish_stage_checkpoint().unwrap().partial_state_trie, Some(1));
+    }
+
+    #[cfg(feature = "partial-persistence")]
     #[test]
     fn test_save_blocks_partial_cycles_do_not_duplicate_static_file_writes() {
         let factory = create_test_provider_factory();
@@ -5052,6 +5124,12 @@ mod tests {
         let input = SaveBlocksInput::new(blocks[2..].to_vec(), 2, 2, 4, 2);
         provider_rw.save_blocks_with_frontiers(&input).unwrap();
         provider_rw.commit().unwrap();
+
+        let provider_rw = factory.provider_rw().unwrap();
+        let err =
+            provider_rw.save_blocks(vec![blocks[0].clone()], SaveBlocksMode::Full).unwrap_err();
+        assert!(err.to_string().contains("partial persistence gap"));
+        drop(provider_rw);
 
         let provider = factory.provider().unwrap();
         let finish_checkpoint = provider.get_stage_checkpoint(StageId::Finish).unwrap().unwrap();

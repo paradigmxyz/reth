@@ -19,7 +19,7 @@ pub(crate) struct PersistenceMetrics {
     pub(crate) remove_blocks_above_duration_seconds: Histogram,
     /// How long it took for blocks to be saved
     pub(crate) save_blocks_duration_seconds: Histogram,
-    /// How many blocks we persist at once.
+    /// How many blocks have their ordinary data persisted at once.
     pub(crate) save_blocks_batch_size: Histogram,
     /// How long it took for blocks to be pruned
     pub(crate) prune_before_duration_seconds: Histogram,

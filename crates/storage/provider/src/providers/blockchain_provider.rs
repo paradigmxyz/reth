@@ -1047,7 +1047,9 @@ mod tests {
     use reth_primitives_traits::{
         Account, Block as _, RecoveredBlock, SealedBlock, SignerRecoverable, StorageEntry,
     };
-    use reth_stages_types::{FinishCheckpoint, StageCheckpoint, StageId};
+    #[cfg(feature = "partial-persistence")]
+    use reth_stages_types::FinishCheckpoint;
+    use reth_stages_types::{StageCheckpoint, StageId};
     use reth_storage_api::{
         BlockBodyIndicesProvider, BlockHashReader, BlockIdReader, BlockNumReader, BlockReader,
         BlockReaderIdExt, BlockSource, ChangeSetReader, DBProvider, DatabaseProviderFactory,
@@ -2008,6 +2010,7 @@ mod tests {
         Ok(())
     }
 
+    #[cfg(feature = "partial-persistence")]
     #[test]
     fn test_latest_database_state() -> eyre::Result<()> {
         let mut rng = generators::rng();
