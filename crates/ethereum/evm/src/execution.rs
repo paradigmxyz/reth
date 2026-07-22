@@ -3,8 +3,6 @@
 #[cfg(test)]
 use crate::convert::recovered_tx_envelope;
 #[cfg(test)]
-use crate::executor::HashedStateMode;
-#[cfg(test)]
 use crate::RethReceiptBuilder;
 use alloc::{
     boxed::Box,
@@ -351,7 +349,7 @@ where
     ) -> Result<BlockExecutionOutput<Receipt>, EthExecutionError> {
         match self.execute_fallible_envelopes::<Infallible, Infallible, _, _, _, _>(
             transactions.into_iter().map(recovered_tx_envelope).map(Ok::<_, Infallible>),
-            ExecutionHooks::new(|_| {}, ignore_receipt, |_| {}, HashedStateMode::OutputOnly),
+            ExecutionHooks::new(|_| {}, ignore_receipt, |_| {}, false),
         ) {
             Ok(output) => Ok(output),
             Err(PayloadExecutionError::Execution(err)) => Err(err),
@@ -384,7 +382,7 @@ where
             mut on_transaction_executed,
             mut on_receipt,
             mut on_hashed_state_update,
-            hashed_state_mode,
+            stream_hashed_state,
         } = hooks;
 
         let block_beneficiary = block_env.beneficiary;
@@ -402,7 +400,7 @@ where
         pre_execution_system_call_state_changes(
             &mut evm,
             &mut block_state,
-            hashed_state_mode.stream(),
+            stream_hashed_state,
             &mut on_hashed_state_update,
             spec_id,
             block_number,
@@ -420,7 +418,7 @@ where
             let outcome = execute_transaction(
                 &mut evm,
                 &mut block_state,
-                hashed_state_mode.stream(),
+                stream_hashed_state,
                 &mut on_hashed_state_update,
                 &transaction,
             )?;
@@ -440,7 +438,7 @@ where
         post_execution_system_call_state_changes(
             &mut evm,
             &mut block_state,
-            hashed_state_mode.stream(),
+            stream_hashed_state,
             &mut on_hashed_state_update,
             spec_id,
             context,
@@ -450,7 +448,7 @@ where
         post_block_balance_state_changes(
             &mut evm,
             &mut block_state,
-            hashed_state_mode.stream(),
+            stream_hashed_state,
             &mut on_hashed_state_update,
             base_block_reward_for_spec_id(spec_id),
             block_number,
@@ -480,7 +478,7 @@ pub(crate) struct ExecutionHooks<F, R, H> {
     on_transaction_executed: F,
     on_receipt: R,
     on_hashed_state_update: H,
-    hashed_state_mode: HashedStateMode,
+    stream_hashed_state: bool,
 }
 
 #[cfg(test)]
@@ -490,9 +488,9 @@ impl<F, R, H> ExecutionHooks<F, R, H> {
         on_transaction_executed: F,
         on_receipt: R,
         on_hashed_state_update: H,
-        hashed_state_mode: HashedStateMode,
+        stream_hashed_state: bool,
     ) -> Self {
-        Self { on_transaction_executed, on_receipt, on_hashed_state_update, hashed_state_mode }
+        Self { on_transaction_executed, on_receipt, on_hashed_state_update, stream_hashed_state }
     }
 }
 
@@ -1271,12 +1269,7 @@ mod tests {
         )
         .execute_fallible_envelopes::<TestTxError, Infallible, _, _, _, _>(
             [Ok(recovered_tx_envelope(transaction)), Err(TestTxError)],
-            ExecutionHooks::new(
-                |count| executed = count,
-                ignore_receipt,
-                |_| {},
-                HashedStateMode::OutputOnly,
-            ),
+            ExecutionHooks::new(|count| executed = count, ignore_receipt, |_| {}, false),
         );
 
         assert_eq!(executed, 1);
@@ -1316,7 +1309,7 @@ mod tests {
                     Ok::<(), Infallible>(())
                 },
                 |_| {},
-                HashedStateMode::OutputOnly,
+                false,
             ),
         )
         .expect("EVM execution succeeds");
@@ -1333,7 +1326,7 @@ mod tests {
     }
 
     #[test]
-    fn streams_hashed_state_without_output_hashed_state() {
+    fn hashed_state_hook_streams_updates() {
         let caller = address!("0000000000000000000000000000000000000001");
         let target = address!("0000000000000000000000000000000000001000");
         let mut database = TestDatabase::default();
@@ -1357,7 +1350,7 @@ mod tests {
                 |_| {},
                 ignore_receipt,
                 |update| streamed_updates.push(update),
-                HashedStateMode::StreamOnly,
+                true,
             ),
         )
         .expect("EVM execution succeeds");
@@ -1367,7 +1360,7 @@ mod tests {
     }
 
     #[test]
-    fn output_only_hashed_state_does_not_stream_updates() {
+    fn disabled_hashed_state_stream_does_not_emit_updates() {
         let caller = address!("0000000000000000000000000000000000000001");
         let target = address!("0000000000000000000000000000000000001000");
         let mut database = TestDatabase::default();
@@ -1391,7 +1384,7 @@ mod tests {
                 |_| {},
                 ignore_receipt,
                 |update| streamed_updates.push(update),
-                HashedStateMode::OutputOnly,
+                false,
             ),
         )
         .expect("EVM execution succeeds");

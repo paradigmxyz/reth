@@ -48,7 +48,6 @@ where
     base_block_reward: Option<u128>,
     deposit_contract_address: Option<Address>,
     block_state: BlockStateAccumulator,
-    hashed_state_mode: HashedStateMode,
     hashed_state_update_hook: HashedStateUpdateHook,
     receipts: Vec<R::Receipt>,
     cumulative_gas_used: u64,
@@ -77,22 +76,6 @@ impl<T: EvmTypes, TxType> BlockTransactionResult<T> for EthTransactionResultWith
 }
 
 type HashedStateUpdateHook = Option<Box<dyn FnMut(HashedPostState) + Send>>;
-
-/// Controls whether Ethereum execution streams trie-ready hashed post-state updates.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum HashedStateMode {
-    /// Do not stream hashed state updates.
-    OutputOnly,
-    /// Stream hashed state updates to the provided hook.
-    StreamOnly,
-}
-
-impl HashedStateMode {
-    /// Returns true if execution should stream hashed state updates.
-    pub(crate) const fn stream(self) -> bool {
-        matches!(self, Self::StreamOnly)
-    }
-}
 
 impl<'a, T, R> EthBlockExecutor<'a, T, R>
 where
@@ -126,7 +109,6 @@ where
                 .deposit_contract()
                 .map(|contract| contract.address),
             block_state: BlockStateAccumulator::new(),
-            hashed_state_mode: HashedStateMode::OutputOnly,
             hashed_state_update_hook: None,
             receipts: Vec::new(),
             cumulative_gas_used: 0,
@@ -187,10 +169,6 @@ where
     }
 
     fn set_state_hook(&mut self, hook: impl FnMut(HashedPostState) + Send + 'static) -> bool {
-        if self.hashed_state_mode == HashedStateMode::OutputOnly {
-            self.hashed_state_mode = HashedStateMode::StreamOnly;
-        }
-
         self.hashed_state_update_hook = Some(Box::new(hook));
         true
     }
@@ -230,10 +208,11 @@ where
             None,
         );
         let block_number = self.evm.block_env().number.to::<u64>();
+        let stream_hashed_state = self.hashed_state_update_hook.is_some();
         pre_execution_system_call_state_changes(
             &mut self.evm,
             &mut self.block_state,
-            self.hashed_state_mode.stream(),
+            stream_hashed_state,
             &mut |state| emit_hashed_state(&mut self.hashed_state_update_hook, state),
             self.spec_id,
             block_number,
@@ -285,10 +264,11 @@ where
         output: Self::TransactionResultWithState,
     ) -> Result<GasOutput, BlockExecutionError> {
         let EthTransactionResultWithState { result, tx_type, blob_gas_used } = output;
+        let stream_hashed_state = self.hashed_state_update_hook.is_some();
         let outcome = commit_detached_transaction(
             &mut self.evm,
             &mut self.block_state,
-            self.hashed_state_mode.stream(),
+            stream_hashed_state,
             &mut |state| emit_hashed_state(&mut self.hashed_state_update_hook, state),
             result,
         );
@@ -324,10 +304,11 @@ where
             None,
         );
         let mut requests = block_requests_from_receipts(self.spec_id, context, &self.receipts)?;
+        let stream_hashed_state = self.hashed_state_update_hook.is_some();
         post_execution_system_call_state_changes(
             &mut self.evm,
             &mut self.block_state,
-            self.hashed_state_mode.stream(),
+            stream_hashed_state,
             &mut |state| emit_hashed_state(&mut self.hashed_state_update_hook, state),
             self.spec_id,
             context,
@@ -348,7 +329,7 @@ where
         post_block_balance_state_changes(
             &mut self.evm,
             &mut self.block_state,
-            self.hashed_state_mode.stream(),
+            stream_hashed_state,
             &mut |state| emit_hashed_state(&mut self.hashed_state_update_hook, state),
             self.base_block_reward,
             block_number,
@@ -624,10 +605,11 @@ where
         );
         let receipts = &self.inner.receipts[self.segment_receipt_start..];
         let mut requests = block_requests_from_receipts(self.inner.spec_id, context, receipts)?;
+        let stream_hashed_state = self.inner.hashed_state_update_hook.is_some();
         post_execution_system_call_state_changes(
             &mut self.inner.evm,
             &mut self.inner.block_state,
-            self.inner.hashed_state_mode.stream(),
+            stream_hashed_state,
             &mut |state| emit_hashed_state(&mut self.inner.hashed_state_update_hook, state),
             self.inner.spec_id,
             context,
@@ -648,7 +630,7 @@ where
         post_block_balance_state_changes(
             &mut self.inner.evm,
             &mut self.inner.block_state,
-            self.inner.hashed_state_mode.stream(),
+            stream_hashed_state,
             &mut |state| emit_hashed_state(&mut self.inner.hashed_state_update_hook, state),
             self.inner.base_block_reward,
             block_number,
