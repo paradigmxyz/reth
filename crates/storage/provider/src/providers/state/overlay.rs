@@ -20,7 +20,7 @@ use reth_trie::{
     hashed_cursor::{HashedCursorFactory, HashedPostStateCursorFactory},
     trie_cursor::{InMemoryTrieCursor, TrieCursor, TrieCursorFactory, TrieStorageCursor},
     updates::TrieUpdatesSorted,
-    HashedPostStateSorted,
+    HashedPostStateSorted, TrieInputSorted,
 };
 use reth_trie_db::{
     ChangesetCache, DatabaseAccountTrieCursor, DatabaseHashedCursorFactory,
@@ -50,27 +50,11 @@ pub(crate) struct OverlayStateProviderMetrics {
     hashed_state_size: Histogram,
     /// Overall duration of the [`OverlayStateProviderFactory::database_provider_ro`] call
     database_provider_ro_duration: Histogram,
-    /// Number of cache misses when fetching [`Overlay`]s from the overlay cache.
+    /// Number of cache misses when fetching [`TrieInputSorted`]s from the overlay cache.
     overlay_cache_misses: Counter,
     /// Number of managed overlay creations skipped because the reused sparse trie already covers
     /// the DB tip to parent range.
     sparse_trie_overlay_skips: Counter,
-}
-
-/// Contains all fields required to initialize an [`OverlayStateProvider`].
-#[derive(Debug, Clone)]
-pub(super) struct Overlay {
-    pub(super) trie_updates: Arc<TrieUpdatesSorted>,
-    pub(super) hashed_post_state: Arc<HashedPostStateSorted>,
-}
-
-impl Overlay {
-    fn empty() -> Self {
-        Self {
-            trie_updates: Arc::new(TrieUpdatesSorted::default()),
-            hashed_post_state: Arc::new(HashedPostStateSorted::default()),
-        }
-    }
 }
 
 /// Source of overlay data for [`OverlayStateProviderFactory`].
@@ -125,14 +109,6 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
             reused_sparse_trie_anchor_hash: None,
             metrics: OverlayStateProviderMetrics::default(),
         }
-    }
-
-    /// Set the overlay source.
-    ///
-    /// This overlay will be applied on top of any reverts.
-    pub(super) fn with_overlay_source(mut self, source: Option<OverlaySource<N>>) -> Self {
-        self.overlay_source = source;
-        self
     }
 
     /// Skips managed overlay construction when the sparse trie was reused and the DB tip is
@@ -335,7 +311,7 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
         Ok(Some(anchor_number + 1..=db_tip_block.number))
     }
 
-    /// Calculates a new [`Overlay`] given a transaction and the current db tip.
+    /// Calculates a new [`TrieInputSorted`] given a transaction and the current db tip.
     #[instrument(
         level = "debug",
         target = "providers::state::overlay",
@@ -346,7 +322,8 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
         &self,
         provider: &Provider,
         db_tip_block: BlockNumHash,
-    ) -> ProviderResult<Overlay>
+        trie_changesets_required: bool,
+    ) -> ProviderResult<TrieInputSorted>
     where
         Provider: ChangeSetReader
             + StorageChangeSetReader
@@ -383,14 +360,10 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
         let (trie_updates, hashed_post_state) = if let Some(revert_blocks) =
             self.reverts_required(provider, db_tip_block, anchor_hash)?
         {
-            debug!(
-                target: "providers::state::overlay",
-                ?revert_blocks,
-                "Collecting trie reverts for overlay state provider"
-            );
+            debug!(target: "providers::state::overlay", ?revert_blocks, "Collecting reverts");
 
-            // Collect trie reverts using changeset cache
-            let trie_reverts = {
+            // Collect trie reverts using changeset cache when intermediate nodes are required.
+            let trie_reverts = if trie_changesets_required {
                 let _guard =
                     debug_span!(target: "providers::state::overlay", "retrieving_trie_reverts")
                         .entered();
@@ -404,6 +377,9 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
 
                 retrieve_trie_reverts_duration = start.elapsed();
                 accumulated_reverts
+            } else {
+                retrieve_trie_reverts_duration = Duration::ZERO;
+                Arc::new(TrieUpdatesSorted::default())
             };
 
             // Collect state reverts
@@ -463,7 +439,7 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
 
                 self.metrics.sparse_trie_overlay_skips.increment(1);
 
-                return Ok(Overlay::empty())
+                return Ok(TrieInputSorted::default())
             }
 
             let (trie_updates, hashed_post_state) = self.resolve_overlays(db_tip_block.hash)?;
@@ -486,12 +462,23 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
         self.metrics.trie_updates_size.record(trie_updates_total_len as f64);
         self.metrics.hashed_state_size.record(hashed_state_updates_total_len as f64);
 
-        Ok(Overlay { trie_updates, hashed_post_state })
+        let prefix_sets = if trie_changesets_required {
+            Default::default()
+        } else {
+            hashed_post_state.construct_prefix_sets()
+        };
+
+        Ok(TrieInputSorted::new(trie_updates, hashed_post_state, prefix_sets))
     }
 
-    /// Builds the effective overlay for the given provider.
+    /// Builds the effective overlay for the given provider and prepends it to `input`.
     #[instrument(level = "debug", target = "providers::state::overlay", skip_all)]
-    pub(super) fn build_overlay<Provider>(&self, provider: &Provider) -> ProviderResult<Overlay>
+    pub(super) fn build_overlay<Provider>(
+        &self,
+        provider: &Provider,
+        input: &mut TrieInputSorted,
+        trie_changesets_required: bool,
+    ) -> ProviderResult<()>
     where
         Provider: StageCheckpointReader
             + PruneCheckpointReader
@@ -502,7 +489,23 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
             + StorageSettingsCache,
     {
         let db_tip_block = self.get_db_tip_block(provider)?;
-        self.calculate_overlay(provider, db_tip_block)
+        let mut overlay =
+            self.calculate_overlay(provider, db_tip_block, trie_changesets_required)?;
+
+        if overlay.nodes.is_empty() {
+            overlay.nodes = std::mem::take(&mut input.nodes);
+        } else if !input.nodes.is_empty() {
+            Arc::make_mut(&mut overlay.nodes).extend_ref_and_sort(&input.nodes);
+        }
+        if overlay.state.is_empty() {
+            overlay.state = std::mem::take(&mut input.state);
+        } else if !input.state.is_empty() {
+            Arc::make_mut(&mut overlay.state).extend_ref_and_sort(&input.state);
+        }
+        overlay.prefix_sets.extend(std::mem::take(&mut input.prefix_sets));
+        *input = overlay;
+
+        Ok(())
     }
 }
 
@@ -516,9 +519,10 @@ pub struct OverlayStateProviderFactory<F, N: NodePrimitives = EthPrimitives> {
     factory: F,
     /// Overlay builder containing the configuration and overlay calculation logic.
     overlay_builder: OverlayBuilder<N>,
-    /// A cache which maps `db_tip -> Overlay`. If the db tip changes during usage of the factory
-    /// then a new entry will get added to this, but in most cases only one entry is present.
-    overlay_cache: Arc<DashMap<BlockHash, Overlay>>,
+    /// A cache which maps `db_tip -> TrieInputSorted`. If the db tip changes during usage of the
+    /// factory then a new entry will get added to this, but in most cases only one entry is
+    /// present.
+    overlay_cache: Arc<DashMap<BlockHash, TrieInputSorted>>,
 }
 
 impl<F, N: NodePrimitives> OverlayStateProviderFactory<F, N> {
@@ -553,10 +557,10 @@ impl<F, N: NodePrimitives> OverlayStateProviderFactory<F, N> {
         self
     }
 
-    /// Fetches an [`Overlay`] from the cache based on the current db tip block. If there is no
-    /// cached value then this calculates the [`Overlay`] and populates the cache.
+    /// Fetches a [`TrieInputSorted`] from the cache based on the current db tip block. If there is
+    /// no cached value then this calculates the input and populates the cache.
     #[instrument(level = "debug", target = "providers::state::overlay", skip_all)]
-    fn get_overlay<Provider>(&self, provider: &Provider) -> ProviderResult<Overlay>
+    fn get_overlay<Provider>(&self, provider: &Provider) -> ProviderResult<TrieInputSorted>
     where
         Provider: StageCheckpointReader
             + PruneCheckpointReader
@@ -572,7 +576,8 @@ impl<F, N: NodePrimitives> OverlayStateProviderFactory<F, N> {
             dashmap::Entry::Occupied(entry) => entry.get().clone(),
             dashmap::Entry::Vacant(entry) => {
                 self.overlay_builder.metrics.overlay_cache_misses.increment(1);
-                let overlay = self.overlay_builder.build_overlay(provider)?;
+                let mut overlay = TrieInputSorted::default();
+                self.overlay_builder.build_overlay(provider, &mut overlay, true)?;
                 entry.insert(overlay.clone());
                 overlay
             }
@@ -609,11 +614,11 @@ where
             res
         };
 
-        let Overlay { trie_updates, hashed_post_state } = self.get_overlay(&provider)?;
+        let TrieInputSorted { nodes, state, .. } = self.get_overlay(&provider)?;
 
         let is_v2 = provider.cached_storage_settings().is_v2();
         self.overlay_builder.metrics.database_provider_ro_duration.record(overall_start.elapsed());
-        Ok(OverlayStateProvider::new(provider, trie_updates, hashed_post_state, is_v2))
+        Ok(OverlayStateProvider::new(provider, nodes, state, is_v2))
     }
 }
 
@@ -738,6 +743,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_utils::NoopProvider;
     use reth_primitives_traits::Account;
     use reth_trie::HashedPostState;
 
@@ -796,5 +802,27 @@ mod tests {
             .into_sorted();
         let builder = builder.with_extended_hashed_state_overlay(hashed_state);
         assert!(!builder.should_skip_overlay_for_reused_sparse_trie(parent_hash));
+    }
+
+    #[test]
+    fn calculate_overlay_uses_prefix_sets_without_trie_changesets() {
+        let parent_hash = B256::with_last_byte(1);
+        let hashed_state = HashedPostState::default()
+            .with_accounts([(B256::with_last_byte(2), Some(Account::default()))])
+            .into_sorted();
+        let provider = NoopProvider::default();
+        let db_tip_block = BlockNumHash::new(0, parent_hash);
+
+        let input = OverlayBuilder::<EthPrimitives>::new(parent_hash, ChangesetCache::default())
+            .with_hashed_state_overlay(Some(Arc::new(hashed_state.clone())))
+            .calculate_overlay(&provider, db_tip_block, false)
+            .unwrap();
+        assert_eq!(input.prefix_sets, hashed_state.construct_prefix_sets());
+
+        let input = OverlayBuilder::<EthPrimitives>::new(parent_hash, ChangesetCache::default())
+            .with_hashed_state_overlay(Some(Arc::new(hashed_state)))
+            .calculate_overlay(&provider, db_tip_block, true)
+            .unwrap();
+        assert!(input.prefix_sets.is_empty());
     }
 }
