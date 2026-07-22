@@ -1203,6 +1203,8 @@ mod tests {
                 address,
                 original: original.as_ref().map(account_info_ref),
                 current: None,
+                created: false,
+                selfdestructed: false,
             })
             .unwrap();
         accumulator.storage_wipe(address).unwrap();

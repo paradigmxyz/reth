@@ -233,7 +233,7 @@ pub trait Trace: LoadState<Error: FromEvmError<Self::Evm>> + Call {
                         block_timestamp: Some(block_timestamp),
                         base_fee,
                     };
-                    let state_changes = result.state_changes.clone();
+                    let state_changes = result.pending_state.clone();
                     let item = f(tx_info, TracingCtx { result, db: &mut db, inspector })?;
                     db.commit_source(&state_changes);
                     results.push(item);

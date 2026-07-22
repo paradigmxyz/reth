@@ -153,6 +153,8 @@ pub fn execution_state_from_init(
                 address,
                 original: original.as_ref().map(account_ref_to_info_ref),
                 current: current.as_ref().map(account_ref_to_info_ref),
+                created: false,
+                selfdestructed: false,
             })
             .expect("infallible");
         for (slot, (original, current)) in storage {
@@ -293,13 +295,14 @@ impl StateChangeSink for StateAndRevertsSink<'_> {
     }
 
     fn account(&mut self, change: AccountChangeRef<'_>) -> Result<(), Self::Error> {
-        let deletes_pre_aggregate_account = change.deleted() &&
+        let deletes_account = change.current.is_none();
+        let deletes_pre_aggregate_account = deletes_account &&
             self.accumulator
                 .accounts()
                 .find(|(address, _)| *address == change.address)
                 .is_none_or(|(_, account)| account.original.is_some());
         self.reverts.account(change)?;
-        if change.deleted() && !self.block_wipes.contains(&change.address) {
+        if deletes_account && !self.block_wipes.contains(&change.address) {
             self.record_storage_wipe(change.address)?;
         }
         self.accumulator.account(change)?;
@@ -508,6 +511,14 @@ mod tests {
     use evm2::evm::{AccountChangeRef, AccountInfoRef, StorageChange, Tee};
     use reth_trie_common::KeccakKeyHasher;
 
+    const fn account_change<'a>(
+        address: Address,
+        original: Option<AccountInfoRef<'a>>,
+        current: Option<AccountInfoRef<'a>>,
+    ) -> AccountChangeRef<'a> {
+        AccountChangeRef { address, original, current, created: false, selfdestructed: false }
+    }
+
     #[test]
     fn revert_account_normalizes_empty_code_hashes() {
         for code_hash in [B256::ZERO, KECCAK_EMPTY] {
@@ -526,9 +537,7 @@ mod tests {
         let original =
             AccountInfoRef { balance: U256::from(1), nonce: 1, code_hash: B256::ZERO, code: None };
         let mut source = BlockStateAccumulator::new();
-        source
-            .account(AccountChangeRef { address, original: Some(original), current: None })
-            .unwrap();
+        source.account(account_change(address, Some(original), None)).unwrap();
         let mut aggregate = BlockStateAccumulator::new();
 
         let reverts = extend_state_and_collect_reverts(&mut aggregate, &source);
@@ -543,13 +552,9 @@ mod tests {
         let account =
             AccountInfoRef { balance: U256::from(1), nonce: 1, code_hash: B256::ZERO, code: None };
         let mut creation = BlockStateAccumulator::new();
-        creation
-            .account(AccountChangeRef { address, original: None, current: Some(account) })
-            .unwrap();
+        creation.account(account_change(address, None, Some(account))).unwrap();
         let mut deletion = BlockStateAccumulator::new();
-        deletion
-            .account(AccountChangeRef { address, original: Some(account), current: None })
-            .unwrap();
+        deletion.account(account_change(address, Some(account), None)).unwrap();
         let mut aggregate = BlockStateAccumulator::new();
 
         extend_state_and_collect_reverts(&mut aggregate, &creation);
@@ -613,8 +618,7 @@ mod tests {
                 },
             )
             .unwrap();
-            tee.account(AccountChangeRef { address, original: Some(original), current: None })
-                .unwrap();
+            tee.account(account_change(address, Some(original), None)).unwrap();
         }
 
         let recomputed =
@@ -645,8 +649,7 @@ mod tests {
                 },
             )
             .unwrap();
-            tee.account(AccountChangeRef { address, original: None, current: Some(current) })
-                .unwrap();
+            tee.account(account_change(address, None, Some(current))).unwrap();
         }
 
         let recomputed =
@@ -666,8 +669,7 @@ mod tests {
         let mut sink = HashedPostStateSink::<KeccakKeyHasher>::default();
         {
             let mut tee = Tee::new(&mut accumulator, &mut sink);
-            tee.account(AccountChangeRef { address, original: None, current: Some(current) })
-                .unwrap();
+            tee.account(account_change(address, None, Some(current))).unwrap();
             StateChangeSink::storage(
                 &mut tee,
                 StorageChange {
@@ -700,14 +702,8 @@ mod tests {
         let mut sink = HashedPostStateSink::<KeccakKeyHasher>::default();
         {
             let mut tee = Tee::new(&mut accumulator, &mut sink);
-            tee.account(AccountChangeRef { address, original: None, current: Some(current) })
-                .unwrap();
-            tee.account(AccountChangeRef {
-                address,
-                original: Some(current),
-                current: Some(updated),
-            })
-            .unwrap();
+            tee.account(account_change(address, None, Some(current))).unwrap();
+            tee.account(account_change(address, Some(current), Some(updated))).unwrap();
             tee.storage_wipe(address).unwrap();
         }
 
@@ -730,8 +726,7 @@ mod tests {
         let mut sink = HashedPostStateSink::<KeccakKeyHasher>::default();
         {
             let mut tee = Tee::new(&mut accumulator, &mut sink);
-            tee.account(AccountChangeRef { address, original: Some(original), current: None })
-                .unwrap();
+            tee.account(account_change(address, Some(original), None)).unwrap();
             tee.storage_wipe(address).unwrap();
             StateChangeSink::storage(
                 &mut tee,
@@ -743,8 +738,7 @@ mod tests {
                 },
             )
             .unwrap();
-            tee.account(AccountChangeRef { address, original: None, current: Some(current) })
-                .unwrap();
+            tee.account(account_change(address, None, Some(current))).unwrap();
         }
 
         let recomputed =
