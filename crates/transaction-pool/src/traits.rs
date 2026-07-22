@@ -76,6 +76,7 @@ use alloy_primitives::{
     Address, Bytes, TxHash, TxKind, B128, B256, U256,
 };
 use futures_util::{ready, Stream};
+use parking_lot::RwLock;
 use reth_eth_wire_types::HandleMempoolData;
 use reth_ethereum_primitives::{PooledTransactionVariant, TransactionSigned};
 use reth_execution_types::ChangedAccount;
@@ -1472,7 +1473,7 @@ pub trait EthPoolTransaction: PoolTransaction {
     }
 
     /// Updates the blob cell availability cached for this transaction.
-    fn set_blob_cell_availability(&mut self, _availability: Option<BlobCellAvailability>) {}
+    fn set_blob_cell_availability(&self, _availability: Option<BlobCellAvailability>) {}
 
     /// A specialization for the EIP-4844 transaction type.
     /// Tries to reattach the blob sidecar to the transaction.
@@ -1530,7 +1531,10 @@ pub struct EthPooledTransaction<T = TransactionSigned> {
     pub blob_sidecar: EthBlobTransactionSidecar,
 
     /// Cached blob cell availability for this transaction.
-    pub blob_cell_availability: Option<BlobCellAvailability>,
+    ///
+    /// Blob storage happens after the transaction is inserted into the pool, so this must support
+    /// updates through the shared transaction reference held by the pool.
+    blob_cell_availability: BlobCellAvailabilityCache,
 }
 
 impl<T: SignedTransaction> EthPooledTransaction<T> {
@@ -1559,7 +1563,13 @@ impl<T: SignedTransaction> EthPooledTransaction<T> {
             blob_sidecar = EthBlobTransactionSidecar::Missing;
         }
 
-        Self { transaction, cost, encoded_length, blob_sidecar, blob_cell_availability: None }
+        Self {
+            transaction,
+            cost,
+            encoded_length,
+            blob_sidecar,
+            blob_cell_availability: Default::default(),
+        }
     }
 
     /// Return the reference to the underlying transaction.
@@ -1568,13 +1578,13 @@ impl<T: SignedTransaction> EthPooledTransaction<T> {
     }
 
     /// Returns the blob cell availability currently cached for this transaction.
-    pub const fn blob_cell_availability(&self) -> Option<BlobCellAvailability> {
-        self.blob_cell_availability
+    pub fn blob_cell_availability(&self) -> Option<BlobCellAvailability> {
+        *self.blob_cell_availability.0.read()
     }
 
     /// Updates the blob cell availability cached for this transaction.
-    pub const fn set_blob_cell_availability(&mut self, availability: Option<BlobCellAvailability>) {
-        self.blob_cell_availability = availability;
+    pub fn set_blob_cell_availability(&self, availability: Option<BlobCellAvailability>) {
+        *self.blob_cell_availability.0.write() = availability;
     }
 }
 
@@ -1746,7 +1756,7 @@ impl EthPoolTransaction for EthPooledTransaction {
         Self::blob_cell_availability(self)
     }
 
-    fn set_blob_cell_availability(&mut self, availability: Option<BlobCellAvailability>) {
+    fn set_blob_cell_availability(&self, availability: Option<BlobCellAvailability>) {
         Self::set_blob_cell_availability(self, availability);
     }
 
@@ -1783,6 +1793,23 @@ impl EthPoolTransaction for EthPooledTransaction {
         }
     }
 }
+
+#[derive(Debug, Default)]
+struct BlobCellAvailabilityCache(RwLock<Option<BlobCellAvailability>>);
+
+impl Clone for BlobCellAvailabilityCache {
+    fn clone(&self) -> Self {
+        Self(RwLock::new(*self.0.read()))
+    }
+}
+
+impl PartialEq for BlobCellAvailabilityCache {
+    fn eq(&self, other: &Self) -> bool {
+        *self.0.read() == *other.0.read()
+    }
+}
+
+impl Eq for BlobCellAvailabilityCache {}
 
 /// Represents the blob sidecar of the [`EthPooledTransaction`].
 ///
@@ -2103,7 +2130,7 @@ mod tests {
             .into_signed(Signature::test_signature()),
         );
         let transaction = Recovered::new_unchecked(tx, Default::default());
-        let mut pooled_tx = EthPooledTransaction::new(transaction, 300);
+        let pooled_tx = EthPooledTransaction::new(transaction, 300);
 
         assert_eq!(pooled_tx.blob_cell_availability(), None);
 

@@ -61,14 +61,6 @@ impl BlobCellAvailability {
 ///
 /// Note: this is Clone because it is expected to be wrapped in an Arc.
 pub trait BlobStore: fmt::Debug + Send + Sync + 'static {
-    /// Returns the availability that would be stored for this full sidecar.
-    fn availability_for_insert(
-        &self,
-        _data: &BlobTransactionSidecarVariant,
-    ) -> Option<BlobCellAvailability> {
-        Some(BlobCellAvailability::full())
-    }
-
     /// Inserts the blob sidecar into the store
     fn insert(
         &self,
