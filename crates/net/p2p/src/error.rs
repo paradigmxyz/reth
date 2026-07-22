@@ -154,9 +154,9 @@ pub enum DownloadError {
     /// Received a response to a request with unexpected start block
     #[display("headers response starts at unexpected block: {_0}")]
     HeadersResponseStartBlockMismatch(GotExpected<u64>),
-    /// Received headers with less than expected items.
-    #[display("received less headers than expected: {_0}")]
-    HeadersResponseTooShort(GotExpected<u64>),
+    /// Received more headers than requested.
+    #[display("received more headers than requested: {_0}")]
+    HeadersResponseTooLong(GotExpected<u64>),
 
     /* ==================== BODIES ERRORS ==================== */
     /// Block validation failed
