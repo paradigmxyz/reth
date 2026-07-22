@@ -87,6 +87,12 @@
       "min_value_pct_total_latency": 15.0
     },
     {
+      "query": "reth_tree_root_sparse_trie_prune_duration_histogram",
+      "target": "decrease",
+      "floor_pct": 5.0,
+      "min_value_pct_total_latency": 0.0
+    },
+    {
       "query": "reth_tree_root_hashing_task_idle_time_seconds",
       "target": "increase",
       "floor_pct": 5.0,
