@@ -33,7 +33,7 @@ impl<H: BlockHeader> EthResponseValidator for RequestResult<Vec<H>> {
             Ok(headers) => {
                 let request_length = headers.len() as u64;
 
-                if request_length <= 1 && request.limit != request_length {
+                if (request_length == 0 && request.limit > 0) || request_length > request.limit {
                     return true
                 }
 
@@ -231,6 +231,16 @@ mod tests {
         let request =
             HeadersRequest { start: 0u64.into(), limit: 1, direction: Default::default() };
         let headers: Vec<Header> = vec![];
+        assert!(Ok(headers).is_likely_bad_headers_response(&request));
+
+        let request =
+            HeadersRequest { start: 0u64.into(), limit: 2, direction: Default::default() };
+        let headers = vec![Header::default()];
+        assert!(!Ok(headers).is_likely_bad_headers_response(&request));
+
+        let request =
+            HeadersRequest { start: 0u64.into(), limit: 1, direction: Default::default() };
+        let headers = vec![Header::default(), Header::default()];
         assert!(Ok(headers).is_likely_bad_headers_response(&request));
     }
 }
