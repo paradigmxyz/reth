@@ -198,7 +198,7 @@ impl Default for HeadersConfig {
     fn default() -> Self {
         Self {
             commit_threshold: 10_000,
-            downloader_request_limit: 1_000,
+            downloader_request_limit: 512,
             downloader_max_concurrent_requests: 100,
             downloader_min_concurrent_requests: 5,
             downloader_max_buffered_responses: 100,
