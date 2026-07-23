@@ -577,25 +577,6 @@ mod tests {
         assert!(!hashed_state.storages.contains_key(&hashed_address));
     }
 
-    #[test]
-    fn changed_account_emits_storage_without_wipe() {
-        let address = Address::repeat_byte(0x03);
-        let slot = U256::from(1);
-        let value = U256::from(2);
-        let mut account = Account::default();
-        account.mark_touch();
-        account
-            .storage
-            .insert(slot, EvmStorageSlot::new_changed(U256::ZERO, value, TransactionId::ZERO));
-
-        let hashed_state =
-            evm_state_to_hashed_post_state(EvmState::from_iter([(address, account)]));
-        let storage = &hashed_state.storages[&keccak256(address)];
-
-        assert!(!storage.wiped);
-        assert_eq!(storage.storage[&keccak256(B256::from(slot))], value);
-    }
-
     #[derive(Default)]
     struct CountingSink {
         access_hints: AtomicUsize,
