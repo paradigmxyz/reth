@@ -472,7 +472,7 @@ impl<N: NodePrimitives> EngineApiTreeState<N> {
     ///
     /// `None` means no prune request is pending. `Some(Vec::new())` means a prune was requested,
     /// but no in-memory parent-chain blocks were found for the parent hash; the sparse trie task
-    /// should still prune using the current block's hashed post state.
+    /// should still prune nodes cached before the current block's epoch.
     pub fn take_sparse_trie_prune_blocks(
         &mut self,
         parent_hash: B256,

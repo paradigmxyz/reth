@@ -178,8 +178,8 @@ impl<T: SparseTrieTrait> RevealableSparseTrie<T> {
     ///
     /// - `Some(B256)` with the calculated root hash if the trie is revealed.
     /// - `None` if the trie is still blind.
-    pub fn root(&mut self) -> Option<B256> {
-        Some(self.as_revealed_mut()?.root())
+    pub fn root(&mut self, epoch: u64) -> Option<B256> {
+        Some(self.as_revealed_mut()?.root(epoch))
     }
 
     /// Returns true if the root node is cached and does not need any recomputation.
@@ -199,9 +199,9 @@ impl<T: SparseTrieTrait> RevealableSparseTrie<T> {
     ///  - The trie root hash (`B256`).
     ///  - A [`SparseTrieUpdates`] structure containing information about updated nodes.
     ///  - `None` if the trie is still blind.
-    pub fn root_with_updates(&mut self) -> Option<(B256, SparseTrieUpdates)> {
+    pub fn root_with_updates(&mut self, epoch: u64) -> Option<(B256, SparseTrieUpdates)> {
         let revealed = self.as_revealed_mut()?;
-        Some((revealed.root(), revealed.take_updates()))
+        Some((revealed.root(epoch), revealed.take_updates()))
     }
 
     /// Clears this trie, setting it to a blind state.

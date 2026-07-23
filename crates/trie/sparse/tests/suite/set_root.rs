@@ -15,7 +15,7 @@ pub(super) fn test_set_root_with_branch_node<T: SparseTrie>(new_trie: fn() -> T)
 
     let harness = SuiteTestHarness::new(storage);
     let mut trie: T = harness.init_trie_fully_revealed(true, new_trie);
-    let root = trie.root();
+    let root = trie.root(0);
     assert_eq!(root, harness.original_root());
 }
 
@@ -30,7 +30,7 @@ pub(super) fn test_set_root_with_leaf_node<T: SparseTrie>(new_trie: fn() -> T) {
     let root_node = harness.root_node();
     let mut trie = (new_trie)();
     trie.set_root(root_node.node, root_node.masks, true).expect("set_root should succeed");
-    let root = trie.root();
+    let root = trie.root(0);
     assert_eq!(root, harness.original_root());
 }
 
@@ -50,7 +50,7 @@ pub(super) fn test_set_root_with_extension_node<T: SparseTrie>(new_trie: fn() ->
 
     let harness = SuiteTestHarness::new(storage);
     let mut trie: T = harness.init_trie_fully_revealed(true, new_trie);
-    let root = trie.root();
+    let root = trie.root(0);
     assert_eq!(root, harness.original_root());
 }
 
@@ -74,7 +74,7 @@ pub(super) fn test_set_root_retains_updates_when_requested<T: SparseTrie>(new_tr
     let mut trie: T = harness.init_trie_fully_revealed(true, new_trie);
 
     // Compute root once so branch hashes are cached.
-    let _ = trie.root();
+    let _ = trie.root(0);
 
     // Add a new leaf under the same prefix so non-root branch nodes change.
     let mut new_key = B256::ZERO;
@@ -85,7 +85,7 @@ pub(super) fn test_set_root_retains_updates_when_requested<T: SparseTrie>(new_tr
     harness.reveal_and_update(&mut trie, &mut leaf_updates);
 
     // Compute root to finalize hashes and generate update actions.
-    let _ = trie.root();
+    let _ = trie.root(0);
 
     // take_updates should return non-empty updates.
     let updates = trie.take_updates();
@@ -122,7 +122,7 @@ pub(super) fn test_set_root_does_not_retain_updates_when_not_requested<T: Sparse
     let mut leaf_updates = SuiteTestHarness::leaf_updates(&changeset);
     harness.reveal_and_update(&mut trie, &mut leaf_updates);
 
-    let _ = trie.root();
+    let _ = trie.root(0);
 
     let updates = trie.take_updates();
     assert!(
@@ -140,5 +140,5 @@ pub(super) fn test_set_root_does_not_retain_updates_when_not_requested<T: Sparse
 pub(super) fn test_set_root_with_empty_root<T: SparseTrie>(new_trie: fn() -> T) {
     let mut trie = (new_trie)();
     trie.set_root(TrieNodeV2::EmptyRoot, None, true).expect("set_root should succeed");
-    assert_eq!(trie.root(), EMPTY_ROOT_HASH);
+    assert_eq!(trie.root(0), EMPTY_ROOT_HASH);
 }

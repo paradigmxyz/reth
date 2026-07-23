@@ -50,6 +50,8 @@ pub(super) struct SparseTrieCacheTask<A = ArenaParallelSparseTrie, S = ArenaPara
     trie: SparseStateTrie<A, S>,
     /// The parent block's state root.
     parent_state_root: B256,
+    /// The epoch assigned to nodes modified by this task.
+    epoch: u64,
     /// Handle to the proof worker pools (storage and account).
     proof_worker_handle: ProofWorkerHandle,
 
@@ -136,6 +138,7 @@ where
         metrics: SparseTrieTaskMetrics,
         trie: SparseStateTrie<A, S>,
         parent_state_root: B256,
+        epoch: u64,
         chunk_size: usize,
     ) -> Self {
         let (proof_result_tx, proof_result_rx) = crossbeam_channel::unbounded();
@@ -157,6 +160,7 @@ where
             final_hashed_state_tx: Some(final_hashed_state_tx),
             trie,
             parent_state_root,
+            epoch,
             chunk_size,
             max_targets_for_chunking: DEFAULT_MAX_TARGETS_FOR_CHUNKING,
             account_updates: Default::default(),
@@ -332,7 +336,7 @@ where
         debug!(target: "engine::root", "All proofs processed, ending calculation");
 
         let start = Instant::now();
-        let (state_root, trie_updates) = match self.trie.root_with_updates() {
+        let (state_root, trie_updates) = match self.trie.root_with_updates(self.epoch) {
             Ok(result) => result,
             Err(err)
                 if matches!(
@@ -428,7 +432,7 @@ where
             // If there's still no pending updates spend some time pre-computing the account
             // trie upper hashes
             if self.proof_result_rx.is_empty() {
-                self.trie.calculate_subtries();
+                self.trie.calculate_subtries(self.epoch);
             }
         } else if !updates_queued {
             // If we don't have any pending updates, apply them to the trie,
@@ -737,6 +741,7 @@ where
 
         let parent_span =
             debug_span!("compute_drained_storage_roots", n = tries_to_compute_roots.len());
+        let epoch = self.epoch;
         tries_to_compute_roots.into_par_iter().for_each(|(address, SendStorageTriePtr(trie))| {
             let span = if tracing::enabled!(tracing::Level::TRACE) {
                 debug_span!(
@@ -759,7 +764,9 @@ where
             // - we do not insert/remove entries between pointer collection and use, so pointers
             //   stay valid and map reallocation cannot occur;
             // - each pointer is consumed by at most one rayon task, so no aliasing mutable access.
-            unsafe { (*trie).root().expect("updates are drained, trie should be revealed by now") };
+            unsafe {
+                (*trie).root(epoch).expect("updates are drained, trie should be revealed by now")
+            };
         });
     }
 
@@ -791,7 +798,7 @@ where
                         // If account has pending storage updates, it is still pending.
                         return true;
                     } else if let Some(account) = account.take() {
-                        let storage_root = self.trie.storage_root(addr).expect("updates are drained, storage trie should be revealed by now");
+                        let storage_root = self.trie.storage_root(addr, self.epoch).expect("updates are drained, storage trie should be revealed by now");
                         let encoded = encode_account_leaf_value(account, storage_root, account_rlp_buf);
                         self.account_updates.insert(*addr, LeafUpdate::Changed(encoded));
                         num_promoted += 1;
@@ -820,7 +827,7 @@ where
 
                     (account, storage_root)
                 } else {
-                    (trie_account.map(Into::into), self.trie.storage_root(addr).expect("account had storage updates that were applied to its trie, storage root must be revealed by now"))
+                    (trie_account.map(Into::into), self.trie.storage_root(addr, self.epoch).expect("account had storage updates that were applied to its trie, storage root must be revealed by now"))
                 };
 
                 let encoded = encode_account_leaf_value(account, storage_root, account_rlp_buf);
@@ -984,7 +991,7 @@ pub(super) struct SparseTrieTaskMetrics {
     pub(super) sparse_trie_total_duration_histogram: Histogram,
     /// Time spent preparing the sparse trie for reuse after state root computation.
     pub(super) into_trie_for_reuse_duration_histogram: Histogram,
-    /// Time spent building the retention set and pruning the sparse trie.
+    /// Time spent pruning the sparse trie by node epoch.
     pub(super) sparse_trie_prune_duration_histogram: Histogram,
     /// Time spent waiting for preserved sparse trie cache to become available.
     pub(super) sparse_trie_cache_wait_duration_histogram: Histogram,
@@ -1230,6 +1237,7 @@ mod tests {
             SparseTrieTaskMetrics::default(),
             trie,
             parent_state_root,
+            0,
             1,
         );
 
@@ -1275,6 +1283,7 @@ mod tests {
             SparseTrieTaskMetrics::default(),
             trie,
             B256::from([0x55; 32]),
+            0,
             1,
         );
 
@@ -1354,6 +1363,7 @@ mod tests {
             SparseTrieTaskMetrics::default(),
             trie,
             B256::from([0x55; 32]),
+            0,
             1,
         );
 
@@ -1399,6 +1409,7 @@ mod tests {
             SparseTrieTaskMetrics::default(),
             trie,
             B256::from([0x55; 32]),
+            0,
             1,
         );
 

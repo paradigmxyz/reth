@@ -35,7 +35,7 @@ pub(super) fn test_take_updates_resets_after_take<T: SparseTrie>(new_trie: fn() 
     let mut trie: T = harness.init_trie_fully_revealed(true, new_trie);
 
     // Cache initial branch hashes.
-    let _ = trie.root();
+    let _ = trie.root(0);
 
     // Round 1: add a new leaf A under the shared prefix, root, take.
     let mut key_a = B256::ZERO;
@@ -44,7 +44,7 @@ pub(super) fn test_take_updates_resets_after_take<T: SparseTrie>(new_trie: fn() 
     let changeset_a: BTreeMap<B256, U256> = BTreeMap::from([(key_a, U256::from(999))]);
     let mut leaf_updates_a = SuiteTestHarness::leaf_updates(&changeset_a);
     harness.reveal_and_update(&mut trie, &mut leaf_updates_a);
-    let _ = trie.root();
+    let _ = trie.root(0);
     let updates1 = trie.take_updates();
 
     assert!(
@@ -67,7 +67,7 @@ pub(super) fn test_take_updates_resets_after_take<T: SparseTrie>(new_trie: fn() 
     let changeset_b: BTreeMap<B256, U256> = BTreeMap::from([(key_b, U256::from(888))]);
     let mut leaf_updates_b = SuiteTestHarness::leaf_updates(&changeset_b);
     harness.reveal_and_update(&mut trie, &mut leaf_updates_b);
-    let _ = trie.root();
+    let _ = trie.root(0);
     let updates2 = trie.take_updates();
 
     assert!(
@@ -129,7 +129,7 @@ pub(super) fn test_take_updates_contains_updated_and_removed_nodes<T: SparseTrie
     let mut trie: T = harness.init_trie_fully_revealed(true, new_trie);
 
     // Cache initial branch hashes.
-    let _ = trie.root();
+    let _ = trie.root(0);
 
     // Drain initial updates before the mutation under test.
     let _ = trie.take_updates();
@@ -155,7 +155,7 @@ pub(super) fn test_take_updates_contains_updated_and_removed_nodes<T: SparseTrie
     let mut leaf_updates = SuiteTestHarness::leaf_updates(&changeset);
     harness.reveal_and_update(&mut trie, &mut leaf_updates);
 
-    let _ = trie.root();
+    let _ = trie.root(0);
     let updates = trie.take_updates();
 
     // updated_nodes should contain at least the branch at [1,0] (modified group).
@@ -235,14 +235,14 @@ pub(super) fn test_take_updates_cross_cancellation_across_root_calls<T: SparseTr
     let mut trie: T = harness.init_trie_fully_revealed(true, new_trie);
 
     // Cache initial branch hashes.
-    let _ = trie.root();
+    let _ = trie.root(0);
 
     // Changeset 1: insert key_new_a and key_new_b.
     let changeset1: BTreeMap<B256, U256> =
         [(key_new_a, val), (key_new_b, val)].into_iter().collect();
     let mut leaf_updates = SuiteTestHarness::leaf_updates(&changeset1);
     harness.reveal_and_update(&mut trie, &mut leaf_updates);
-    let _ = trie.root();
+    let _ = trie.root(0);
 
     // Do NOT call take_updates() — updates accumulate across root() calls.
 
@@ -251,7 +251,7 @@ pub(super) fn test_take_updates_cross_cancellation_across_root_calls<T: SparseTr
         [(key_new_a, U256::ZERO), (key_new_b, U256::ZERO)].into_iter().collect();
     let mut leaf_updates = SuiteTestHarness::leaf_updates(&changeset2);
     harness.reveal_and_update(&mut trie, &mut leaf_updates);
-    let root_after_remove = trie.root();
+    let root_after_remove = trie.root(0);
 
     assert_eq!(
         harness.original_root(),
@@ -293,7 +293,7 @@ pub(super) fn test_take_updates_no_duplicate_updated_and_removed_nodes<T: Sparse
     let mut trie: T = harness.init_trie_fully_revealed(true, new_trie);
 
     // Cache initial hashes.
-    let _ = trie.root();
+    let _ = trie.root(0);
 
     // Step 1: Remove key_c — with only 3 keys under the root branch, removing one causes
     // structural changes (branch may collapse or lose a child).
@@ -312,7 +312,7 @@ pub(super) fn test_take_updates_no_duplicate_updated_and_removed_nodes<T: Sparse
     harness.reveal_and_update(&mut trie, &mut insert_updates);
 
     // Finalize and take updates.
-    let _ = trie.root();
+    let _ = trie.root(0);
     let updates = trie.take_updates();
 
     // The two sets must be mutually exclusive — no path in both.
