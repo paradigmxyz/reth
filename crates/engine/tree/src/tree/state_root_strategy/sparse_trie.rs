@@ -50,7 +50,7 @@ pub(super) struct SparseTrieCacheTask<A = ArenaParallelSparseTrie, S = ArenaPara
     trie: SparseStateTrie<A, S>,
     /// The parent block's state root.
     parent_state_root: B256,
-    /// The epoch associated with nodes cached by this task.
+    /// The epoch assigned to nodes modified by this task.
     epoch: u64,
     /// Handle to the proof worker pools (storage and account).
     proof_worker_handle: ProofWorkerHandle,

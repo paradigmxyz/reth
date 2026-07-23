@@ -100,8 +100,9 @@ pub trait SparseTrie: Sized + Debug + Send + Sync {
 
     /// Calculates and returns the root hash of the trie at the provided epoch.
     ///
-    /// This processes any dirty or revealed nodes by updating their RLP encodings and caching them
-    /// at `epoch`, then returns the root hash.
+    /// This processes dirty nodes by updating their RLP encodings and caching their newest
+    /// modification at `epoch`, then returns the root hash. Nodes materialized from the parent
+    /// state without being modified use epoch zero.
     ///
     /// # Returns
     ///

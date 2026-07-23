@@ -18,8 +18,9 @@ pub(super) enum ArenaSparseNodeState {
     Cached {
         /// The cached RLP-encoded representation of the node.
         rlp_node: RlpNode,
-        /// The epoch when an empty root or leaf was most recently cached, or the newest retained
-        /// dependency for a branch, including its own reveal or structural modification.
+        /// The newest tracked modification epoch for this node or its descendants.
+        ///
+        /// Nodes materialized from the parent state without being modified use epoch zero.
         epoch: u64,
     },
     /// The node has been modified and its RLP encoding needs recomputation.
@@ -36,14 +37,6 @@ impl ArenaSparseNodeState {
     pub(super) const fn cached_rlp_node(&self) -> Option<&RlpNode> {
         match self {
             Self::Cached { rlp_node, .. } => Some(rlp_node),
-            _ => None,
-        }
-    }
-
-    /// Returns the epoch cached on the state, if there is one.
-    pub(super) const fn cached_epoch(&self) -> Option<u64> {
-        match self {
-            Self::Cached { epoch, .. } => Some(*epoch),
             _ => None,
         }
     }
@@ -294,11 +287,9 @@ impl ArenaSparseNode {
     /// case where a branch's RLP is small enough to be embedded rather than hashed.
     pub(super) fn cached_hash(&self) -> B256 {
         let rlp_node = match self {
-            Self::EmptyRoot { state } |
-            Self::Branch(ArenaSparseNodeBranch { state, .. }) |
-            Self::Leaf { state, .. } => {
-                state.cached_rlp_node().expect("cached_hash called on non-Cached node: {self:?}")
-            }
+            Self::Branch(ArenaSparseNodeBranch { state, .. }) | Self::Leaf { state, .. } => state
+                .cached_rlp_node()
+                .expect("cached_hash called on non-Cached branch or leaf: {self:?}"),
             Self::Subtrie(s) => return s.arena[s.root].cached_hash(),
             _ => panic!("cached_hash called on {self:?}"),
         };
