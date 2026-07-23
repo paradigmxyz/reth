@@ -20,7 +20,10 @@ use reth_tasks::WorkerPool;
 use reth_trie::{updates::TrieUpdatesSorted, HashedPostStateSorted, TrieInputSorted};
 use std::{
     fmt,
-    sync::{Arc, OnceLock},
+    sync::{
+        atomic::{AtomicU64, Ordering},
+        Arc, OnceLock,
+    },
     time::Instant,
 };
 use tracing::{debug, trace};
@@ -33,6 +36,7 @@ use tracing::{debug, trace};
 pub struct StateTrieOverlayManager<N: NodePrimitives = EthPrimitives> {
     blocks: Arc<DashMap<B256, ExecutedBlock<N>>>,
     overlays: Arc<DashMap<OverlayCacheKey, OverlayCacheEntry>>,
+    removal_generation: Arc<AtomicU64>,
     preserved_sparse_trie: Arc<Mutex<Option<PreservedSparseTrie>>>,
     #[cfg(feature = "rayon")]
     worker_pool: Option<Arc<WorkerPool>>,
@@ -56,6 +60,7 @@ impl<N: NodePrimitives> Default for StateTrieOverlayManager<N> {
         Self {
             blocks: Default::default(),
             overlays: Default::default(),
+            removal_generation: Default::default(),
             preserved_sparse_trie: Default::default(),
             #[cfg(feature = "rayon")]
             worker_pool: None,
@@ -69,6 +74,7 @@ impl<N: NodePrimitives> std::fmt::Debug for StateTrieOverlayManager<N> {
         f.debug_struct("StateTrieOverlayManager")
             .field("blocks", &self.blocks.len())
             .field("overlays", &self.overlays.len())
+            .field("removal_generation", &self.removal_generation())
             .finish()
     }
 }
@@ -80,6 +86,7 @@ impl<N: NodePrimitives> StateTrieOverlayManager<N> {
         Self {
             blocks: Default::default(),
             overlays: Default::default(),
+            removal_generation: Default::default(),
             preserved_sparse_trie: Default::default(),
             worker_pool: Some(worker_pool),
             metrics: Default::default(),
@@ -160,6 +167,15 @@ impl<N: NodePrimitives> StateTrieOverlayManager<N> {
         );
     }
 
+    /// Returns the generation of the live block graph's removal view.
+    ///
+    /// The generation advances before every non-empty removal batch. Callers that combine this
+    /// manager with another snapshot can compare generations before and after their operation to
+    /// detect a concurrent removal.
+    pub fn removal_generation(&self) -> u64 {
+        self.removal_generation.load(Ordering::Acquire)
+    }
+
     /// Removes blocks from the live block graph and prunes cached overlays that can no longer be
     /// built from the remaining blocks.
     #[tracing::instrument(
@@ -174,6 +190,13 @@ impl<N: NodePrimitives> StateTrieOverlayManager<N> {
     )]
     pub fn remove_blocks(&self, hashes: impl IntoIterator<Item = B256>) {
         let span = tracing::Span::current();
+        let mut hashes = hashes.into_iter().peekable();
+
+        // Publish the new generation before mutating the graph so a reader either observes the new
+        // view up front or detects the change after completing work against the previous view.
+        if hashes.peek().is_some() {
+            self.removal_generation.fetch_add(1, Ordering::Release);
+        }
 
         // Remove blocks first, then prune overlays against the remaining block graph.
         let mut block_count = 0usize;
@@ -700,6 +723,22 @@ mod tests {
             ),
             Some(blocks[0].recovered_block().hash())
         );
+    }
+
+    #[test]
+    fn removal_generation_advances_for_non_empty_batches() {
+        let manager = StateTrieOverlayManager::<EthPrimitives>::default();
+        assert_eq!(manager.removal_generation(), 0);
+
+        manager.remove_blocks([]);
+        assert_eq!(manager.removal_generation(), 0);
+
+        manager.remove_blocks([B256::random(), B256::random()]);
+        assert_eq!(manager.removal_generation(), 1);
+
+        let cloned = manager.clone();
+        cloned.remove_blocks([B256::random()]);
+        assert_eq!(manager.removal_generation(), 2);
     }
 
     #[test]

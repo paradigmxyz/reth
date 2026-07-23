@@ -147,6 +147,14 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
         self
     }
 
+    /// Returns the current removal generation for a managed overlay source.
+    fn managed_removal_generation(&self) -> Option<u64> {
+        match &self.overlay_source {
+            Some(OverlaySource::Managed { manager }) => Some(manager.removal_generation()),
+            _ => None,
+        }
+    }
+
     /// Set the hashed state overlay.
     pub fn with_hashed_state_overlay(
         mut self,
@@ -516,11 +524,19 @@ pub struct OverlayStateProviderFactory<F, N: NodePrimitives = EthPrimitives> {
     factory: F,
     /// Overlay builder containing the configuration and overlay calculation logic.
     overlay_builder: OverlayBuilder<N>,
-    /// A cache which maps `(state_trie_tip, finish_tip) -> Overlay`.
+    /// A cache which maps durable frontiers and manager removal generation to an [`Overlay`].
     ///
-    /// Under partial persistence the overlay depends on both durable frontiers, so both hashes are
-    /// part of the cache key.
-    overlay_cache: Arc<DashMap<(BlockHash, BlockHash), Overlay>>,
+    /// Under partial persistence the overlay depends on both durable frontiers. Managed overlays
+    /// also depend on the manager view used alongside the database snapshot.
+    overlay_cache: Arc<DashMap<OverlayCacheKey, Overlay>>,
+}
+
+/// Identifies the database and manager views used to build an [`Overlay`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+struct OverlayCacheKey {
+    state_trie_tip: BlockHash,
+    finish_tip: BlockHash,
+    removal_generation: Option<u64>,
 }
 
 impl<F, N: NodePrimitives> OverlayStateProviderFactory<F, N> {
@@ -548,10 +564,25 @@ impl<F, N: NodePrimitives> OverlayStateProviderFactory<F, N> {
         self
     }
 
+    /// Removes cache entries built against an older managed overlay view.
+    fn prune_obsolete_cache_entries(&self, removal_generation: Option<u64>) {
+        let Some(current_generation) = removal_generation else { return };
+
+        // Preserve any newer-generation entry published concurrently so a stale attempt cannot
+        // evict current work.
+        self.overlay_cache.retain(|cached_key, _| {
+            cached_key.removal_generation.is_none_or(|generation| generation >= current_generation)
+        });
+    }
+
     /// Fetches an [`Overlay`] from the cache based on the current durable frontiers. If there is no
     /// cached value then this calculates the [`Overlay`] and populates the cache.
     #[instrument(level = "debug", target = "providers::state::overlay", skip_all)]
-    fn get_overlay<Provider>(&self, provider: &Provider) -> ProviderResult<Overlay>
+    fn get_overlay<Provider>(
+        &self,
+        provider: &Provider,
+        removal_generation: Option<u64>,
+    ) -> ProviderResult<Overlay>
     where
         Provider: StageCheckpointReader
             + PruneCheckpointReader
@@ -562,17 +593,23 @@ impl<F, N: NodePrimitives> OverlayStateProviderFactory<F, N> {
             + StorageSettingsCache,
     {
         let (state_trie_tip_block, finish_tip_block) = database_state_frontiers(provider)?;
+        let key = OverlayCacheKey {
+            state_trie_tip: state_trie_tip_block.hash,
+            finish_tip: finish_tip_block.hash,
+            removal_generation,
+        };
 
-        let overlay =
-            match self.overlay_cache.entry((state_trie_tip_block.hash, finish_tip_block.hash)) {
-                dashmap::Entry::Occupied(entry) => entry.get().clone(),
-                dashmap::Entry::Vacant(entry) => {
-                    self.overlay_builder.metrics.overlay_cache_misses.increment(1);
-                    let overlay = self.overlay_builder.build_overlay(provider)?;
-                    entry.insert(overlay.clone());
-                    overlay
-                }
-            };
+        self.prune_obsolete_cache_entries(removal_generation);
+
+        let overlay = match self.overlay_cache.entry(key) {
+            dashmap::Entry::Occupied(entry) => entry.get().clone(),
+            dashmap::Entry::Vacant(entry) => {
+                self.overlay_builder.metrics.overlay_cache_misses.increment(1);
+                let overlay = self.overlay_builder.build_overlay(provider)?;
+                entry.insert(overlay.clone());
+                overlay
+            }
+        };
 
         Ok(overlay)
     }
@@ -597,19 +634,52 @@ where
     fn database_provider_ro(&self) -> ProviderResult<OverlayStateProvider<F::Provider>> {
         let overall_start = Instant::now();
 
-        // Get a read-only provider
-        let provider = {
+        for attempt in 0..2 {
+            // Read the manager view before opening the database snapshot. Persistence commits
+            // before advancing this generation during a handoff, and any concurrent removal
+            // requires a fresh snapshot.
+            let removal_generation = self.overlay_builder.managed_removal_generation();
             let start = Instant::now();
-            let res = self.factory.database_provider_ro()?;
+            let provider = self.factory.database_provider_ro()?;
             self.overlay_builder.metrics.create_provider_duration.record(start.elapsed());
-            res
-        };
 
-        let Overlay { trie_updates, hashed_post_state } = self.get_overlay(&provider)?;
+            let overlay = self.get_overlay(&provider, removal_generation);
+            let current_generation = self.overlay_builder.managed_removal_generation();
+            if current_generation == removal_generation {
+                let Overlay { trie_updates, hashed_post_state } = overlay?;
 
-        let is_v2 = provider.cached_storage_settings().is_v2();
-        self.overlay_builder.metrics.database_provider_ro_duration.record(overall_start.elapsed());
-        Ok(OverlayStateProvider::new(provider, trie_updates, hashed_post_state, is_v2))
+                let is_v2 = provider.cached_storage_settings().is_v2();
+                self.overlay_builder
+                    .metrics
+                    .database_provider_ro_duration
+                    .record(overall_start.elapsed());
+                return Ok(OverlayStateProvider::new(
+                    provider,
+                    trie_updates,
+                    hashed_post_state,
+                    is_v2,
+                ))
+            }
+
+            // A successful build may already have populated the cache. Remove that stale entry
+            // before retrying or returning the bounded-retry error.
+            self.prune_obsolete_cache_entries(current_generation);
+            debug!(
+                target: "providers::state::overlay",
+                attempt,
+                ?removal_generation,
+                ?current_generation,
+                "discarding overlay provider after concurrent manager removal"
+            );
+
+            if attempt == 1 {
+                return Err(ProviderError::other(std::io::Error::other(
+                    "state trie overlay manager changed during both provider construction attempts",
+                )))
+            }
+        }
+
+        unreachable!("overlay provider construction loop always returns")
     }
 }
 
@@ -778,6 +848,61 @@ mod tests {
     #[cfg(feature = "partial-persistence")]
     use reth_storage_api::{PruneCheckpointWriter, StageCheckpointWriter};
     use reth_trie::{BranchNodeCompact, ComputedTrieData, HashedPostState, HashedStorage, Nibbles};
+    #[cfg(feature = "partial-persistence")]
+    use std::sync::{
+        atomic::{AtomicUsize, Ordering},
+        Mutex,
+    };
+
+    #[cfg(feature = "partial-persistence")]
+    type ProviderOpenHook<F> = Box<dyn FnMut(usize, &F) + Send>;
+
+    #[cfg(feature = "partial-persistence")]
+    #[derive(Clone)]
+    struct HookedProviderFactory<F> {
+        inner: F,
+        open_count: Arc<AtomicUsize>,
+        on_open: Arc<Mutex<ProviderOpenHook<F>>>,
+    }
+
+    #[cfg(feature = "partial-persistence")]
+    impl<F> HookedProviderFactory<F> {
+        fn new(inner: F, on_open: impl FnMut(usize, &F) + Send + 'static) -> Self {
+            Self {
+                inner,
+                open_count: Default::default(),
+                on_open: Arc::new(Mutex::new(Box::new(on_open))),
+            }
+        }
+
+        fn open_count(&self) -> usize {
+            self.open_count.load(Ordering::Relaxed)
+        }
+    }
+
+    #[cfg(feature = "partial-persistence")]
+    impl<F> DatabaseProviderFactory for HookedProviderFactory<F>
+    where
+        F: DatabaseProviderFactory,
+    {
+        type DB = F::DB;
+        type Provider = F::Provider;
+        type ProviderRW = F::ProviderRW;
+
+        fn database_provider_ro(&self) -> ProviderResult<Self::Provider> {
+            let provider = self.inner.database_provider_ro()?;
+            let open = self.open_count.fetch_add(1, Ordering::Relaxed);
+            (self.on_open.lock().expect("provider open hook mutex should not be poisoned"))(
+                open,
+                &self.inner,
+            );
+            Ok(provider)
+        }
+
+        fn database_provider_rw(&self) -> ProviderResult<Self::ProviderRW> {
+            self.inner.database_provider_rw()
+        }
+    }
 
     fn with_unique_trie_data(
         block: &ExecutedBlock<EthPrimitives>,
@@ -838,6 +963,24 @@ mod tests {
         provider_rw.commit().unwrap();
 
         (factory, blocks)
+    }
+
+    #[cfg(feature = "partial-persistence")]
+    fn persist_block_and_advance_frontiers(
+        factory: &ProviderFactory<MockNodeTypesWithDB>,
+        block: &ExecutedBlock<EthPrimitives>,
+    ) {
+        let provider_rw = factory.provider_rw().unwrap();
+        provider_rw.insert_block(block.recovered_block()).unwrap();
+        provider_rw
+            .save_stage_checkpoint(
+                StageId::Finish,
+                StageCheckpoint::new(block.block_number()).with_finish_stage_checkpoint(
+                    FinishCheckpoint { partial_state_trie: Some(block.block_number()) },
+                ),
+            )
+            .unwrap();
+        provider_rw.commit().unwrap();
     }
 
     #[cfg(feature = "partial-persistence")]
@@ -1015,7 +1158,9 @@ mod tests {
         );
 
         let provider = factory.provider().unwrap();
-        let first = overlay_factory.get_overlay(&provider).unwrap();
+        let first = overlay_factory
+            .get_overlay(&provider, overlay_factory.overlay_builder.managed_removal_generation())
+            .unwrap();
         assert_eq!(account_keys(&first), vec![B256::with_last_byte(3), B256::with_last_byte(4)]);
         drop(provider);
 
@@ -1031,10 +1176,127 @@ mod tests {
         provider_rw.commit().unwrap();
 
         let provider = factory.provider().unwrap();
-        let second = overlay_factory.get_overlay(&provider).unwrap();
+        let second = overlay_factory
+            .get_overlay(&provider, overlay_factory.overlay_builder.managed_removal_generation())
+            .unwrap();
         assert_eq!(account_keys(&second), vec![B256::with_last_byte(4)]);
         assert_eq!(account_node_paths(&second), vec![Nibbles::from_nibbles([4])]);
         assert_eq!(overlay_factory.overlay_cache.len(), 2);
+    }
+
+    #[cfg(feature = "partial-persistence")]
+    #[test]
+    fn retries_with_fresh_snapshot_after_manager_removal() {
+        let (factory, blocks) = setup_frontiers(1, 1);
+        let manager = StateTrieOverlayManager::default();
+        manager.insert_block(blocks[2].clone());
+
+        let block = blocks[2].clone();
+        let manager_for_hook = manager.clone();
+        let hooked_factory = HookedProviderFactory::new(factory, move |open, factory| {
+            if open == 0 {
+                persist_block_and_advance_frontiers(factory, &block);
+                manager_for_hook.remove_blocks([block.recovered_block().hash()]);
+            }
+        });
+        let overlay_factory = OverlayStateProviderFactory::new(
+            hooked_factory.clone(),
+            OverlayBuilder::<EthPrimitives>::new(
+                blocks[2].recovered_block().hash(),
+                ChangesetCache::new(),
+            )
+            .with_state_trie_overlay_manager(manager.clone()),
+        );
+
+        let provider = overlay_factory.database_provider_ro().unwrap();
+
+        assert_eq!(hooked_factory.open_count(), 2);
+        assert_eq!(manager.removal_generation(), 1);
+        assert!(provider.trie_updates.is_empty());
+        assert!(provider.hashed_post_state.is_empty());
+        assert_eq!(overlay_factory.overlay_cache.len(), 1);
+        assert!(overlay_factory
+            .overlay_cache
+            .iter()
+            .all(|entry| entry.key().removal_generation == Some(1)));
+    }
+
+    #[cfg(feature = "partial-persistence")]
+    #[test]
+    fn does_not_reuse_overlay_from_old_removal_generation() {
+        let (factory, blocks) = setup_frontiers(1, 1);
+        let manager = StateTrieOverlayManager::default();
+        manager.insert_block(blocks[2].clone());
+        let overlay_factory = OverlayStateProviderFactory::new(
+            factory.clone(),
+            OverlayBuilder::<EthPrimitives>::new(
+                blocks[2].recovered_block().hash(),
+                ChangesetCache::new(),
+            )
+            .with_state_trie_overlay_manager(manager.clone()),
+        );
+        let provider = factory.provider().unwrap();
+
+        let first = overlay_factory.get_overlay(&provider, Some(0)).unwrap();
+        assert_eq!(account_keys(&first), vec![B256::with_last_byte(3)]);
+        assert_eq!(overlay_factory.overlay_cache.len(), 1);
+
+        manager.remove_blocks([blocks[2].recovered_block().hash()]);
+        let error = overlay_factory.get_overlay(&provider, Some(1)).unwrap_err();
+
+        assert!(
+            matches!(error, ProviderError::BlockHashNotFound(hash) if hash == blocks[2].recovered_block().hash())
+        );
+        assert!(overlay_factory.overlay_cache.is_empty());
+    }
+
+    #[cfg(feature = "partial-persistence")]
+    #[test]
+    fn stable_unknown_parent_error_is_not_retried() {
+        let (factory, _) = setup_frontiers(1, 1);
+        let manager = StateTrieOverlayManager::default();
+        let hooked_factory = HookedProviderFactory::new(factory, |_, _| {});
+        let parent_hash = B256::random();
+        let overlay_factory = OverlayStateProviderFactory::new(
+            hooked_factory.clone(),
+            OverlayBuilder::<EthPrimitives>::new(parent_hash, ChangesetCache::new())
+                .with_state_trie_overlay_manager(manager),
+        );
+
+        let error = overlay_factory.database_provider_ro().unwrap_err();
+
+        assert!(matches!(error, ProviderError::BlockHashNotFound(hash) if hash == parent_hash));
+        assert_eq!(hooked_factory.open_count(), 1);
+    }
+
+    #[cfg(feature = "partial-persistence")]
+    #[test]
+    fn fails_after_two_concurrent_manager_removals() {
+        let (factory, blocks) = setup_frontiers(1, 1);
+        let manager = StateTrieOverlayManager::default();
+        let manager_for_hook = manager.clone();
+        let hooked_factory = HookedProviderFactory::new(factory, move |_, _| {
+            manager_for_hook.remove_blocks([B256::random()]);
+        });
+        let overlay_factory = OverlayStateProviderFactory::new(
+            hooked_factory.clone(),
+            OverlayBuilder::<EthPrimitives>::new(
+                blocks[1].recovered_block().hash(),
+                ChangesetCache::new(),
+            )
+            .with_state_trie_overlay_manager(manager),
+        );
+
+        let error = overlay_factory.database_provider_ro().unwrap_err();
+
+        assert!(
+            error
+                .to_string()
+                .contains("manager changed during both provider construction attempts"),
+            "unexpected error: {error}"
+        );
+        assert_eq!(hooked_factory.open_count(), 2);
+        assert!(overlay_factory.overlay_cache.is_empty());
     }
 
     #[cfg(feature = "partial-persistence")]
