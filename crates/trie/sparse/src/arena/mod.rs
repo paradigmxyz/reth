@@ -193,9 +193,8 @@ impl ArenaSparseSubtrie {
         let mut pruned_leaves = 0;
         loop {
             let result = cursor.next(&mut self.arena, |_, _| true);
-            match result {
-                NextResult::Done => break,
-                NextResult::NonBranch | NextResult::Branch => {}
+            if matches!(result, NextResult::Done) {
+                break
             }
 
             // The subtrie root is retained by the owning upper trie.
@@ -2597,9 +2596,8 @@ impl SparseTrie for ArenaParallelSparseTrie {
                 )
             });
 
-            match result {
-                NextResult::Done => break,
-                NextResult::NonBranch | NextResult::Branch => {}
+            if matches!(result, NextResult::Done) {
+                break
             }
 
             let head = cursor.head().expect("cursor is non-empty");
