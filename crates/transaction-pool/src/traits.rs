@@ -182,6 +182,26 @@ pub trait TransactionPool: Clone + Debug + Send + Sync {
 
     /// Adds the given _unvalidated_ transactions into the pool.
     ///
+    /// All transactions will use the same `origin`.
+    ///
+    /// This accepts an iterator so callers can stream transactions without first materializing a
+    /// transaction vector.
+    ///
+    /// Consumer: RPC
+    fn add_transactions_iter<I>(
+        &self,
+        origin: TransactionOrigin,
+        transactions: I,
+    ) -> impl Future<Output = Vec<PoolResult<AddedTransactionOutcome>>> + Send
+    where
+        I: IntoIterator<Item = Self::Transaction> + Send,
+        I::IntoIter: Send,
+    {
+        async move { self.add_transactions(origin, transactions.into_iter().collect()).await }
+    }
+
+    /// Adds the given _unvalidated_ transactions into the pool.
+    ///
     /// Each transaction is paired with its own [`TransactionOrigin`].
     ///
     /// Returns a list of results.
@@ -191,6 +211,29 @@ pub trait TransactionPool: Clone + Debug + Send + Sync {
         &self,
         transactions: Vec<(TransactionOrigin, Self::Transaction)>,
     ) -> impl Future<Output = Vec<PoolResult<AddedTransactionOutcome>>> + Send;
+
+    /// Adds the given _unvalidated_ transactions into the pool.
+    ///
+    /// Each transaction is paired with the origin at the same index in `origins`.
+    ///
+    /// This accepts an iterator so callers can stream transactions without first materializing a
+    /// vector of `(origin, transaction)` pairs.
+    ///
+    /// Consumer: RPC
+    fn add_transactions_with_origins_iter<'a, I>(
+        &'a self,
+        origins: &'a [TransactionOrigin],
+        transactions: I,
+    ) -> impl Future<Output = Vec<PoolResult<AddedTransactionOutcome>>> + Send + 'a
+    where
+        I: IntoIterator<Item = Self::Transaction> + Send + 'a,
+        I::IntoIter: Send,
+    {
+        async move {
+            self.add_transactions_with_origins(origins.iter().copied().zip(transactions).collect())
+                .await
+        }
+    }
 
     /// Submit a consensus transaction directly to the pool
     fn add_consensus_transaction(

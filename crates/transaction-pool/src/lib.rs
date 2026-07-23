@@ -507,7 +507,20 @@ where
         origin: TransactionOrigin,
         transactions: Vec<Self::Transaction>,
     ) -> Vec<PoolResult<AddedTransactionOutcome>> {
-        if transactions.is_empty() {
+        self.add_transactions_iter(origin, transactions).await
+    }
+
+    async fn add_transactions_iter<I>(
+        &self,
+        origin: TransactionOrigin,
+        transactions: I,
+    ) -> Vec<PoolResult<AddedTransactionOutcome>>
+    where
+        I: IntoIterator<Item = Self::Transaction> + Send,
+        I::IntoIter: Send,
+    {
+        let mut transactions = transactions.into_iter().peekable();
+        if transactions.peek().is_none() {
             return Vec::new()
         }
         let validated =
@@ -519,12 +532,32 @@ where
         &self,
         transactions: Vec<(TransactionOrigin, Self::Transaction)>,
     ) -> Vec<PoolResult<AddedTransactionOutcome>> {
-        if transactions.is_empty() {
+        let origins: Vec<_> = transactions.iter().map(|(origin, _)| *origin).collect();
+        self.add_transactions_with_origins_iter(
+            &origins,
+            transactions.into_iter().map(|(_, tx)| tx),
+        )
+        .await
+    }
+
+    async fn add_transactions_with_origins_iter<'a, I>(
+        &'a self,
+        origins: &'a [TransactionOrigin],
+        transactions: I,
+    ) -> Vec<PoolResult<AddedTransactionOutcome>>
+    where
+        I: IntoIterator<Item = Self::Transaction> + Send + 'a,
+        I::IntoIter: Send,
+    {
+        if origins.is_empty() {
             return Vec::new()
         }
-        let origins: Vec<_> = transactions.iter().map(|(origin, _)| *origin).collect();
-        let validated = self.pool.validator().validate_transactions(transactions).await;
-        self.pool.add_transactions_with_origins(origins.into_iter().zip(validated))
+        let validated = self
+            .pool
+            .validator()
+            .validate_transactions(origins.iter().copied().zip(transactions))
+            .await;
+        self.pool.add_transactions_with_origins(origins.iter().copied().zip(validated))
     }
 
     fn transaction_event_listener(&self, tx_hash: TxHash) -> Option<TransactionEvents> {
