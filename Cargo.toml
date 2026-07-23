@@ -427,7 +427,7 @@ reth-trie-sparse = { path = "crates/trie/sparse", default-features = false }
 reth-zstd-compressors = { version = "0.5.0", default-features = false }
 
 # revm
-revm = { version = "41.0.0", default-features = false }
+revm = { version = "42.0.1", default-features = false }
 revmc = { git = "https://github.com/paradigmxyz/revmc", branch = "main", default-features = false, features = ["llvm-prefer-static"] }
 revm-inspectors = "0.41.0"
 
@@ -689,3 +689,12 @@ vergen-git2 = "10.0.1"
 
 # networking
 ipnet = "2.11"
+
+[patch.crates-io]
+revm-inspectors = { git = "https://github.com/paradigmxyz/revm-inspectors", rev = "7d69f6f340d0dab378254004ab0474cfc3dd73f0" }
+alloy-evm = { git = "https://github.com/alloy-rs/evm", rev = "b7c43d468036a7cd9886b1d0f0115494bcec84c5" }
+reth-codecs = { git = "https://github.com/paradigmxyz/reth-core", rev = "dbcc4ae95b19316fd0187f2c20b9cb65dbb4f70e" }
+reth-codecs-derive = { git = "https://github.com/paradigmxyz/reth-core", rev = "dbcc4ae95b19316fd0187f2c20b9cb65dbb4f70e" }
+reth-primitives-traits = { git = "https://github.com/paradigmxyz/reth-core", rev = "dbcc4ae95b19316fd0187f2c20b9cb65dbb4f70e" }
+reth-rpc-traits = { git = "https://github.com/paradigmxyz/reth-core", rev = "dbcc4ae95b19316fd0187f2c20b9cb65dbb4f70e" }
+reth-zstd-compressors = { git = "https://github.com/paradigmxyz/reth-core", rev = "dbcc4ae95b19316fd0187f2c20b9cb65dbb4f70e" }
