@@ -2763,12 +2763,11 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
             return Ok(());
         }
 
-        // We are not removing block meta as it is used to get block changesets.
-        let block_bodies = self.block_body_indices_range(range.clone())?;
-
         // get transaction receipts
-        let from_transaction_num =
-            block_bodies.first().expect("already checked if there are blocks").first_tx_num();
+        let from_transaction_num = self
+            .block_body_indices(block)?
+            .map(|b| b.next_tx_num())
+            .ok_or(ProviderError::BlockBodyIndicesNotFound(block))?;
 
         let storage_range = BlockNumberAddress::range(range.clone());
         let storage_changeset = if self.cached_storage_settings().storage_v2 {
