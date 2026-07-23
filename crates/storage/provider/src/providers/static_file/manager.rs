@@ -4,7 +4,9 @@ use super::{
 };
 use crate::{
     changeset_walker::{StaticFileAccountChangesetWalker, StaticFileStorageChangesetWalker},
-    to_range, BlockHashReader, BlockNumReader, BlockReader, BlockSource, EitherWriter,
+    to_range,
+    writer::execution_state_to_plain_reverts,
+    BlockHashReader, BlockNumReader, BlockReader, BlockSource, EitherWriter,
     EitherWriterDestination, HeaderProvider, ReceiptProvider, StageCheckpointReader, StatsReader,
     TransactionVariant, TransactionsProvider, TransactionsProviderExt,
 };
@@ -520,13 +522,13 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
     ) -> ProviderResult<()> {
         for block in blocks {
             let block_number = block.recovered_block().number();
-            let reverts = block.execution_outcome().state.reverts.to_plain_state_reverts();
+            let reverts = execution_state_to_plain_reverts(&block.execution_outcome().state);
 
             let changeset: Vec<_> = reverts
                 .accounts
                 .into_iter()
                 .flatten()
-                .map(|(address, info)| AccountBeforeTx { address, info: info.map(Into::into) })
+                .map(|(address, info)| AccountBeforeTx { address, info })
                 .collect();
             w.append_account_changeset(changeset, block_number)?;
         }
@@ -541,7 +543,7 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
     ) -> ProviderResult<()> {
         for block in blocks {
             let block_number = block.recovered_block().number();
-            let reverts = block.execution_outcome().state.reverts.to_plain_state_reverts();
+            let reverts = execution_state_to_plain_reverts(&block.execution_outcome().state);
 
             let changeset: Vec<_> = reverts
                 .storage

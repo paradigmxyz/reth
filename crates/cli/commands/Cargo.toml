@@ -29,6 +29,7 @@ reth-era-downloader.workspace = true
 reth-era-utils.workspace = true
 reth-etl.workspace = true
 reth-evm.workspace = true
+reth-execution-types.workspace = true
 reth-exex.workspace = true
 reth-fs-util.workspace = true
 reth-net-nat.workspace = true
@@ -44,7 +45,6 @@ reth-ethereum-primitives = { workspace = true, optional = true }
 reth-provider.workspace = true
 reth-prune.workspace = true
 reth-prune-types.workspace = true
-reth-revm.workspace = true
 reth-stages.workspace = true
 reth-stages-types.workspace = true
 reth-static-file-types = { workspace = true, features = ["clap"] }

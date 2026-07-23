@@ -16,7 +16,6 @@
 
 use alloy_consensus::{Header, Transaction};
 use alloy_eips::{eip1559::calculate_block_gas_limit, eip2718::Decodable2718};
-use alloy_evm::{Evm, RecoveredTx};
 use alloy_primitives::{
     map::{DefaultHashBuilder, HashSet},
     Address, Bytes, B256, U256,
@@ -31,19 +30,21 @@ use reth_engine_primitives::ConsensusEngineHandle;
 use reth_errors::RethError;
 use reth_ethereum_engine_primitives::EthBuiltPayload;
 use reth_ethereum_primitives::EthPrimitives;
-use reth_evm::{execute::BlockBuilder, ConfigureEvm, NextBlockEnvAttributes};
+use reth_evm::{
+    database::StateProviderDatabase,
+    execute::{BlockBuilder, BlockExecutor},
+    ConfigureEvm, EvmEnv, NextBlockEnvAttributes,
+};
 use reth_payload_primitives::PayloadTypes;
 use reth_primitives_traits::{
     transaction::{recover::try_recover_signers, signed::RecoveryError},
     AlloyBlockHeader as BlockTrait, TxTy,
 };
-use reth_revm::{database::StateProviderDatabase, db::State};
 use reth_rpc_api::{TestingApiServer, TestingBuildBlockRequestV1};
 use reth_rpc_eth_api::{helpers::Call, FromEthApiError};
 use reth_rpc_eth_types::EthApiError;
 use reth_storage_api::{BlockReader, BlockReaderIdExt, HeaderProvider};
 use reth_transaction_pool::{BestTransactionsAttributes, PoolTransaction, TransactionPool};
-use revm::context::Block;
 use std::sync::Arc;
 use tracing::debug;
 
@@ -122,7 +123,10 @@ where
         let gas_limit_override = self.gas_limit_override;
         self.eth_api
             .spawn_with_state_at_block(request.parent_block_hash, move |eth_api, state| {
-                let state = state.database.0;
+                let state_provider = state.db.into_inner().into_inner().0;
+                let mut state = evm2::evm::CacheDB::new(evm2::evm::Db::new(
+                    StateProviderDatabase::new(&state_provider),
+                ));
                 let parent = eth_api
                     .provider()
                     .sealed_header_by_hash(request.parent_block_hash)?
@@ -133,14 +137,10 @@ where
                 let chain_spec = eth_api.provider().chain_spec();
                 let is_amsterdam = chain_spec
                     .is_amsterdam_active_at_timestamp(request.payload_attributes.timestamp);
+                let is_cancun =
+                    chain_spec.is_cancun_active_at_timestamp(request.payload_attributes.timestamp);
                 let is_osaka =
                     chain_spec.is_osaka_active_at_timestamp(request.payload_attributes.timestamp);
-                let mut db = State::builder()
-                    .with_bundle_update()
-                    .with_database(StateProviderDatabase::new(&state))
-                    .with_bal_builder_if(is_amsterdam)
-                    .build();
-
                 let withdrawals = request.payload_attributes.withdrawals.clone();
                 let withdrawals_rlp_length = withdrawals.as_ref().map(|w| w.length()).unwrap_or(0);
 
@@ -158,13 +158,16 @@ where
                 };
 
                 let mut builder = evm_config
-                    .builder_for_next_block(&mut db, &parent, env_attrs)
+                    .builder_for_next_block(&mut state, &parent, env_attrs)
                     .map_err(RethError::other)
                     .map_err(Eth::Error::from_eth_err)?;
+                if is_amsterdam {
+                    builder.executor_mut().enable_block_access_list_builder();
+                }
                 builder.apply_pre_execution_changes().map_err(Eth::Error::from_eth_err)?;
 
                 let mut total_fees = U256::ZERO;
-                let base_fee = builder.evm_mut().block().basefee();
+                let base_fee = builder.evm_env().block_base_fee();
 
                 let mut invalid_senders: HashSet<Address, DefaultHashBuilder> = HashSet::default();
                 let mut block_transactions_rlp_length = 0usize;
@@ -174,11 +177,7 @@ where
                     let mut best_txs = eth_api.pool().best_transactions_with_attributes(
                         BestTransactionsAttributes::new(
                             base_fee,
-                            builder
-                                .evm_mut()
-                                .block()
-                                .blob_gasprice()
-                                .map(|gasprice| gasprice as u64),
+                            is_cancun.then(|| builder.evm_env().block_blob_base_fee()),
                         ),
                     );
                     best_txs.no_updates();
@@ -201,7 +200,7 @@ where
                     }
 
                     // EIP-7934: Check estimated block size before adding transaction
-                    let tx_rlp_len = tx.tx().length();
+                    let tx_rlp_len = tx.inner().length();
                     if is_osaka {
                         // 1KB overhead for block header
                         let estimated_block_size = block_transactions_rlp_length +
@@ -259,7 +258,8 @@ where
                     block_transactions_rlp_length += tx_rlp_len;
                     total_fees += U256::from(tip) * U256::from(gas_used);
                 }
-                let outcome = builder.finish(&state, None).map_err(Eth::Error::from_eth_err)?;
+                let outcome =
+                    builder.finish(&state_provider, None).map_err(Eth::Error::from_eth_err)?;
 
                 let has_requests = outcome.block.requests_hash().is_some();
                 let requests = has_requests.then_some(outcome.execution_result.requests);

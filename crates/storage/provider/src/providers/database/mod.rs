@@ -21,6 +21,7 @@ use reth_chainspec::ChainInfo;
 use reth_db::{init_db, mdbx::DatabaseArguments, DatabaseEnv};
 use reth_db_api::{database::Database, models::StoredBlockBodyIndices};
 use reth_errors::{RethError, RethResult};
+use reth_execution_types::{hashed_post_state_from_execution_state, EvmState};
 use reth_node_types::{
     BlockTy, HeaderTy, NodeTypesWithDB, NodeTypesWithDBAdapter, ReceiptTy, TxTy,
 };
@@ -33,9 +34,8 @@ use reth_storage_api::{
     NodePrimitivesProvider, StorageSettings, StorageSettingsCache, TryIntoHistoricalStateProvider,
 };
 use reth_storage_errors::provider::ProviderResult;
-use reth_trie::HashedPostState;
+use reth_trie::{HashedPostState, KeccakKeyHasher};
 use reth_trie_db::ChangesetCache;
-use revm::database::BundleState;
 use std::{
     ops::{RangeBounds, RangeInclusive},
     path::Path,
@@ -52,7 +52,6 @@ pub use provider::{
 };
 
 use super::ProviderNodeTypes;
-use reth_trie::KeccakKeyHasher;
 
 mod builder;
 pub use builder::{ProviderFactoryBuilder, ReadOnlyConfig};
@@ -959,8 +958,8 @@ impl<N: ProviderNodeTypes> PruneCheckpointReader for ProviderFactory<N> {
 }
 
 impl<N: ProviderNodeTypes> HashedPostStateProvider for ProviderFactory<N> {
-    fn hashed_post_state(&self, bundle_state: &BundleState) -> HashedPostState {
-        HashedPostState::from_bundle_state::<KeccakKeyHasher>(bundle_state.state())
+    fn hashed_post_state(&self, state: &EvmState) -> HashedPostState {
+        hashed_post_state_from_execution_state::<KeccakKeyHasher>(state)
     }
 }
 

@@ -14,6 +14,10 @@ use alloy_primitives::{B256, U256};
 use futures_core::ready;
 use futures_util::FutureExt;
 use reth_chain_state::CanonStateNotification;
+use reth_evm::{
+    cached::{AccountInfo, CachedReads},
+    cancelled::CancelOnDrop,
+};
 use reth_execution_cache::SavedCache;
 use reth_payload_builder::{
     BuildNewPayload, KeepPayloadJobAlive, PayloadId, PayloadJob, PayloadJobGenerator,
@@ -21,7 +25,6 @@ use reth_payload_builder::{
 use reth_payload_builder_primitives::PayloadBuilderError;
 use reth_payload_primitives::{BuiltPayload, PayloadAttributes, PayloadKind};
 use reth_primitives_traits::{HeaderTy, NodePrimitives, SealedHeader};
-use reth_revm::{cached::CachedReads, cancelled::CancelOnDrop};
 use reth_storage_api::{BlockReaderIdExt, StateProviderFactory};
 use reth_tasks::Runtime;
 use reth_trie_parallel::state_root_task::PayloadStateRootHandle;
@@ -222,13 +225,22 @@ where
         // extract the state from the notification and put it into the cache
         let committed = new_state.committed();
         let new_execution_outcome = committed.execution_outcome();
-        for (addr, acc) in new_execution_outcome.bundle_accounts_iter() {
-            if let Some(info) = acc.info.clone() {
+        for (addr, acc) in new_execution_outcome.accounts_iter() {
+            if let Some(info) = acc.cloned() {
                 // we want pre cache existing accounts and their storage
                 // this only includes changed accounts and storage but is better than nothing
-                let storage =
-                    acc.storage.iter().map(|(key, slot)| (*key, slot.present_value)).collect();
-                cached.insert_account(addr, info, storage);
+                let storage = new_execution_outcome.storage_changes_for(addr).collect();
+                cached.insert_account(
+                    addr,
+                    AccountInfo {
+                        balance: info.balance,
+                        nonce: info.nonce,
+                        code_hash: info.code_hash,
+                        code: info.code,
+                        _non_exhaustive: (),
+                    },
+                    storage,
+                );
             }
         }
 

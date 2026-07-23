@@ -7,17 +7,18 @@ use crate::{
 use alloy_chains::Chain;
 use alloy_consensus::{transaction::TxHashRef, BlockHeader, Transaction as _};
 use alloy_eips::eip2718::WithEncoded;
-use alloy_evm::{block::TxResult, precompiles::PrecompilesMap};
 use alloy_network::{NetworkTransactionBuilder, TransactionBuilder};
+use alloy_primitives::{Address, Bytes, TxKind, U256};
 use alloy_rpc_types_eth::{
     simulate::{SimBlock, SimCallResult, SimulateError, SimulatedBlock},
     state::StateOverride,
     BlockId, BlockOverrides, BlockTransactionsKind,
 };
+use evm2::{precompiles::MovePrecompileError, EvmFeatures, TxResult};
 use jsonrpsee_types::{error::INTERNAL_ERROR_CODE, ErrorObject};
 use reth_evm::{
-    execute::{BlockBuilder, BlockBuilderOutcome, BlockExecutor},
-    Evm, HaltReasonFor,
+    execute::{BlockBuilder, BlockBuilderOutcome},
+    BlockTransactionResult, Database, Evm as RethEvm, EvmEnv,
 };
 use reth_primitives_traits::{
     BlockBody as _, BlockTy, NodePrimitives, Recovered, RecoveredBlock, SealedHeader,
@@ -25,12 +26,6 @@ use reth_primitives_traits::{
 use reth_rpc_convert::{RpcBlock, RpcConvert, RpcTxReq};
 use reth_rpc_server_types::result::{block_id_to_str, rpc_err};
 use reth_storage_api::{noop::NoopProvider, StateProvider};
-use revm::{
-    context::Block,
-    context_interface::result::ExecutionResult,
-    primitives::{Address, Bytes, TxKind, U256},
-    Database,
-};
 
 /// Fallback seconds added between simulated block timestamps when neither the user nor the chain
 /// hint provides a value.
@@ -260,7 +255,7 @@ where
 /// is cleared (precompile removed) and the precompile is installed at the destination address.
 pub fn apply_precompile_overrides(
     state_overrides: &StateOverride,
-    precompiles: &mut PrecompilesMap,
+    evm: &mut impl RethEvm,
 ) -> Result<(), EthSimulateError> {
     let moves: Vec<_> = state_overrides
         .iter()
@@ -268,27 +263,28 @@ pub fn apply_precompile_overrides(
             account_override.move_precompile_to.map(|dest| (*source, dest))
         })
         .collect();
+    if moves.is_empty() {
+        return Ok(())
+    }
 
     for (source, dest) in &moves {
         if source == dest {
-            if precompiles.get(source).is_none() {
+            if !evm.has_precompile(source) {
                 return Err(EthSimulateError::NotAPrecompile(*source))
             }
             return Err(EthSimulateError::MovePrecompileToSelf(*source))
         }
     }
 
-    precompiles.move_precompiles(moves).map_err(
-        |alloy_evm::precompiles::MovePrecompileError::NotAPrecompile(addr)| {
-            EthSimulateError::NotAPrecompile(addr)
-        },
-    )?;
+    evm.move_precompiles(moves).map_err(|MovePrecompileError::NotAPrecompile(addr)| {
+        EthSimulateError::NotAPrecompile(addr)
+    })?;
 
     Ok(())
 }
 
 /// Converts all [`TransactionRequest`]s into [`Recovered`] transactions and applies them to the
-/// given [`BlockExecutor`].
+/// given [`BlockBuilder`].
 ///
 /// Returns all executed transactions and the result of the execution.
 ///
@@ -299,7 +295,7 @@ pub fn apply_precompile_overrides(
 ///
 /// [`TransactionRequest`]: alloy_rpc_types_eth::TransactionRequest
 #[expect(clippy::type_complexity)]
-pub fn execute_transactions<S, T>(
+pub fn execute_transactions<S, T, EvmTypes>(
     mut builder: S,
     state_provider: impl StateProvider,
     calls: Vec<RpcTxReq<T::Network>>,
@@ -307,16 +303,11 @@ pub fn execute_transactions<S, T>(
     chain_id: u64,
     compute_state_root: bool,
     converter: &T,
-) -> Result<
-    (
-        BlockBuilderOutcome<S::Primitives>,
-        Vec<ExecutionResult<<<S::Executor as BlockExecutor>::Evm as Evm>::HaltReason>>,
-    ),
-    EthApiError,
->
+) -> Result<(BlockBuilderOutcome<S::Primitives>, Vec<TxResult<EvmTypes>>), EthApiError>
 where
-    S: BlockBuilder<Executor: BlockExecutor<Evm: Evm<DB: Database<Error: Into<EthApiError>>>>>,
+    S: BlockBuilder<Executor: reth_evm::BlockExecutor<Evm: RethEvm<EvmTypes = EvmTypes>>>,
     T: RpcConvert<Primitives = S::Primitives>,
+    EvmTypes: evm2::EvmTypes,
 {
     builder.apply_pre_execution_changes()?;
 
@@ -324,9 +315,9 @@ where
     let mut cumulative_tx_gas_used: u64 = 0;
     let mut block_regular_gas_used: u64 = 0;
     let mut block_state_gas_used: u64 = 0;
-    let block_gas_limit = builder.evm().block().gas_limit();
-    let is_amsterdam = builder.evm().cfg_env().enable_amsterdam_eip8037;
-    let tx_gas_limit_cap = builder.evm().cfg_env().tx_gas_limit_cap.unwrap_or(u64::MAX);
+    let block_gas_limit = builder.evm_env().block_env().gas_limit.to::<u64>();
+    let is_amsterdam = builder.evm_env().version().feature(EvmFeatures::EIP8037);
+    let tx_gas_limit_cap = builder.evm_env().version().tx_gas_limit_cap;
     for mut call in calls {
         let block_gas_remaining = if is_amsterdam {
             block_gas_limit
@@ -365,13 +356,13 @@ where
 
         // Resolve transaction, populate missing fields and enforce calls
         // correctness.
-        let tx = resolve_transaction(
+        let tx = resolve_transaction_with_evm(
             call,
             default_gas_limit,
-            builder.evm().block().basefee(),
+            builder.evm_env().block_base_fee(),
             chain_id,
-            builder.evm().cfg_env().disable_nonce_check,
-            builder.evm_mut().db_mut(),
+            !builder.evm_env().version().feature(EvmFeatures::NONCE_CHECK),
+            builder.evm_mut(),
             converter,
         )?;
         // Create transaction with an empty envelope.
@@ -379,9 +370,10 @@ where
         let tx = WithEncoded::new(Default::default(), tx);
 
         let mut tx_regular_gas_used = 0;
-        let gas_output = builder.execute_transaction_with_result_closure(tx, |result| {
-            tx_regular_gas_used = result.result().result.gas().block_regular_gas_used();
-            results.push(result.result().result.clone())
+        let gas_output = builder.execute_transaction_with_result_closure(tx, |output| {
+            let result = output.result();
+            tx_regular_gas_used = result.result.regular_gas_spent();
+            results.push(result.result.clone())
         })?;
 
         let gas_used = gas_output.tx_gas_used();
@@ -413,7 +405,7 @@ where
 ///
 /// [`TransactionRequest`]: alloy_rpc_types_eth::TransactionRequest
 pub fn resolve_transaction<DB: Database, Tx, T>(
-    mut tx: RpcTxReq<T::Network>,
+    tx: RpcTxReq<T::Network>,
     default_gas_limit: u64,
     block_base_fee_per_gas: u64,
     chain_id: u64,
@@ -424,6 +416,54 @@ pub fn resolve_transaction<DB: Database, Tx, T>(
 where
     DB::Error: Into<EthApiError>,
     T: RpcConvert<Primitives: NodePrimitives<SignedTx = Tx>>,
+{
+    resolve_transaction_with_account(
+        tx,
+        default_gas_limit,
+        block_base_fee_per_gas,
+        chain_id,
+        disable_nonce_check,
+        |address| db.get_account(address).map_err(Into::into),
+        converter,
+    )
+}
+
+fn resolve_transaction_with_evm<Tx, T, E>(
+    tx: RpcTxReq<T::Network>,
+    default_gas_limit: u64,
+    block_base_fee_per_gas: u64,
+    chain_id: u64,
+    disable_nonce_check: bool,
+    evm: &mut E,
+    converter: &T,
+) -> Result<Recovered<Tx>, EthApiError>
+where
+    T: RpcConvert<Primitives: NodePrimitives<SignedTx = Tx>>,
+    E: RethEvm,
+{
+    resolve_transaction_with_account(
+        tx,
+        default_gas_limit,
+        block_base_fee_per_gas,
+        chain_id,
+        disable_nonce_check,
+        |address| evm.account_info(address).map_err(Into::into),
+        converter,
+    )
+}
+
+fn resolve_transaction_with_account<Tx, T, F>(
+    mut tx: RpcTxReq<T::Network>,
+    default_gas_limit: u64,
+    block_base_fee_per_gas: u64,
+    chain_id: u64,
+    disable_nonce_check: bool,
+    mut account: F,
+    converter: &T,
+) -> Result<Recovered<Tx>, EthApiError>
+where
+    T: RpcConvert<Primitives: NodePrimitives<SignedTx = Tx>>,
+    F: FnMut(&Address) -> Result<Option<evm2::evm::AccountInfo>, EthApiError>,
 {
     // If we're missing any fields we try to fill nonce, gas and
     // gas price.
@@ -437,11 +477,9 @@ where
     };
 
     if tx.as_ref().nonce().is_none() {
-        tx.as_mut().set_nonce(
-            db.basic(from).map_err(Into::into)?.map(|acc| acc.nonce).unwrap_or_default(),
-        );
+        tx.as_mut().set_nonce(account(&from)?.map(|acc| acc.nonce).unwrap_or_default());
     }
-    // eth_simulateV1 validation-off mode behaves like eth_call; avoid revm's max-nonce guard.
+    // eth_simulateV1 validation-off mode behaves like eth_call; avoid the EVM's max-nonce guard.
     if disable_nonce_check && tx.as_ref().nonce() == Some(u64::MAX) {
         tx.as_mut().set_nonce(0);
     }
@@ -487,9 +525,9 @@ where
 }
 
 /// Handles outputs of the calls execution and builds a [`SimulatedBlock`].
-pub fn build_simulated_block<Err, T>(
+pub fn build_simulated_block<Err, T, EvmTypes>(
     block: RecoveredBlock<BlockTy<T::Primitives>>,
-    results: Vec<ExecutionResult<HaltReasonFor<T::Evm>>>,
+    results: Vec<TxResult<EvmTypes>>,
     txs_kind: BlockTransactionsKind,
     converter: &T,
 ) -> Result<SimulatedBlock<RpcBlock<T::Network>>, Err>
@@ -500,48 +538,22 @@ where
         + From<T::Error>
         + Into<jsonrpsee_types::ErrorObject<'static>>,
     T: RpcConvert,
+    EvmTypes: evm2::EvmTypes,
 {
     let mut calls: Vec<SimCallResult> = Vec::with_capacity(results.len());
 
     let mut log_index = 0;
     for (index, (result, tx)) in results.into_iter().zip(block.body().transactions()).enumerate() {
-        let call = match result {
-            ExecutionResult::Halt { reason, gas, .. } => {
-                let error = Err::from_evm_halt(reason, tx.gas_limit());
-                SimCallResult {
-                    return_data: Bytes::new(),
-                    error: Some(SimulateError {
-                        message: error.to_string(),
-                        code: SIMULATE_VM_ERROR_CODE,
-                        ..SimulateError::invalid_params()
-                    }),
-                    gas_used: gas.tx_gas_used(),
-                    max_used_gas: Some(gas.total_gas_spent().max(gas.floor_gas())),
-                    logs: Vec::new(),
-                    status: false,
-                }
-            }
-            ExecutionResult::Revert { output, gas, .. } => {
-                let error = Err::from_revert(output.clone());
-                SimCallResult {
-                    return_data: Bytes::new(),
-                    error: Some(SimulateError {
-                        message: error.to_string(),
-                        code: SIMULATE_REVERT_CODE,
-                        data: Some(output),
-                    }),
-                    gas_used: gas.tx_gas_used(),
-                    max_used_gas: Some(gas.total_gas_spent().max(gas.floor_gas())),
-                    status: false,
-                    logs: Vec::new(),
-                }
-            }
-            ExecutionResult::Success { output, gas, logs, .. } => SimCallResult {
-                return_data: output.into_data(),
+        let gas_used = result.tx_gas_used();
+        let max_used_gas = Some(result.total_gas_spent.max(result.floor_gas));
+        let call = if result.status {
+            SimCallResult {
+                return_data: result.output,
                 error: None,
-                gas_used: gas.tx_gas_used(),
-                max_used_gas: Some(gas.total_gas_spent().max(gas.floor_gas())),
-                logs: logs
+                gas_used,
+                max_used_gas,
+                logs: result
+                    .logs
                     .into_iter()
                     .map(|log| {
                         log_index += 1;
@@ -558,7 +570,35 @@ where
                     })
                     .collect(),
                 status: true,
-            },
+            }
+        } else if result.stop.is_revert() {
+            let error = Err::from_revert(result.output.clone());
+            SimCallResult {
+                return_data: Bytes::new(),
+                error: Some(SimulateError {
+                    message: error.to_string(),
+                    code: SIMULATE_REVERT_CODE,
+                    data: Some(result.output),
+                }),
+                gas_used,
+                max_used_gas,
+                status: false,
+                logs: Vec::new(),
+            }
+        } else {
+            let error = Err::from_evm_halt(result.stop, tx.gas_limit());
+            SimCallResult {
+                return_data: Bytes::new(),
+                error: Some(SimulateError {
+                    message: error.to_string(),
+                    code: SIMULATE_VM_ERROR_CODE,
+                    ..SimulateError::invalid_params()
+                }),
+                gas_used,
+                max_used_gas,
+                logs: Vec::new(),
+                status: false,
+            }
         };
 
         calls.push(call);
@@ -580,15 +620,26 @@ mod tests {
     use crate::{error::ToRpcError, EthApiError};
     use alloy_chains::Chain;
     use alloy_consensus::Header;
-    use alloy_evm::precompiles::PrecompilesMap;
     use alloy_primitives::{address, U256};
     use alloy_rpc_types_eth::{
         simulate::SimBlock,
         state::{AccountOverride, StateOverride},
         BlockOverrides, TransactionRequest,
     };
+    use evm2::{
+        ethereum::ethereum_tx_registry, evm::EmptyDB, BaseEvmTypes, Evm, Precompiles, SpecId,
+    };
     use reth_primitives_traits::SealedHeader;
-    use revm::precompile::Precompiles;
+
+    fn test_evm() -> Evm<'static, BaseEvmTypes> {
+        Evm::new(
+            SpecId::PRAGUE,
+            Default::default(),
+            ethereum_tx_registry(SpecId::PRAGUE),
+            EmptyDB::default(),
+            Precompiles::base(SpecId::PRAGUE),
+        )
+    }
 
     #[test]
     fn nonce_max_value_error_uses_internal_error_code() {
@@ -628,9 +679,9 @@ mod tests {
             address,
             AccountOverride { move_precompile_to: Some(address), ..Default::default() },
         );
-        let mut precompiles = PrecompilesMap::from_static(Precompiles::prague());
+        let mut evm = test_evm();
 
-        let err = apply_precompile_overrides(&state_overrides, &mut precompiles).unwrap_err();
+        let err = apply_precompile_overrides(&state_overrides, &mut evm).unwrap_err();
 
         assert!(matches!(err, EthSimulateError::NotAPrecompile(addr) if addr == address));
     }
@@ -643,9 +694,9 @@ mod tests {
             address,
             AccountOverride { move_precompile_to: Some(address), ..Default::default() },
         );
-        let mut precompiles = PrecompilesMap::from_static(Precompiles::prague());
+        let mut evm = test_evm();
 
-        let err = apply_precompile_overrides(&state_overrides, &mut precompiles).unwrap_err();
+        let err = apply_precompile_overrides(&state_overrides, &mut evm).unwrap_err();
 
         assert!(matches!(err, EthSimulateError::MovePrecompileToSelf(addr) if addr == address));
     }
@@ -659,12 +710,13 @@ mod tests {
             source,
             AccountOverride { move_precompile_to: Some(dest), ..Default::default() },
         );
-        let mut precompiles = PrecompilesMap::from_static(Precompiles::prague());
+        let mut evm = test_evm();
 
-        apply_precompile_overrides(&state_overrides, &mut precompiles).unwrap();
+        apply_precompile_overrides(&state_overrides, &mut evm).unwrap();
 
-        assert!(precompiles.get(&source).is_none());
-        assert!(precompiles.get(&dest).is_some());
+        let precompiles = evm.precompiles_as::<Precompiles>().unwrap().as_map();
+        assert!(!precompiles.contains(&source));
+        assert!(precompiles.contains(&dest));
     }
 
     #[test]

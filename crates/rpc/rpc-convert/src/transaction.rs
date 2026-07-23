@@ -1,13 +1,18 @@
 //! Compatibility functions for rpc `Transaction` type.
 use crate::{
-    RpcHeader, RpcReceipt, RpcTransaction, RpcTxReq, RpcTypes, SignableTxRequest, TryIntoTxEnv,
+    CallFees, RpcHeader, RpcReceipt, RpcTransaction, RpcTxReq, RpcTypes, SignableTxRequest,
 };
-use alloy_consensus::{error::ValueError, transaction::Recovered};
-use alloy_primitives::Address;
-use alloy_rpc_types_eth::TransactionInfo;
+use alloy_consensus::{
+    error::ValueError,
+    transaction::{Recovered, TxEip4844Variant},
+    TxEip1559, TxEip2930, TxEip4844, TxEip7702, TxLegacy, TxType,
+};
+use alloy_primitives::{Address, TxKind, U256};
+use alloy_rpc_types_eth::{request::TransactionInputError, TransactionInfo, TransactionRequest};
 use core::error;
 use dyn_clone::DynClone;
-use reth_evm::{BlockEnvFor, ConfigureEvm, EvmEnvFor, SpecFor, TxEnvFor};
+use evm2::ethereum::{RecoveredTxEnvelope, TxEnvelope};
+use reth_evm::{ConfigureEvm, EvmEnv, EvmEnvFor, TxEnvFor};
 use reth_primitives_traits::{
     BlockTy, HeaderTy, NodePrimitives, SealedBlock, SealedHeader, SealedHeaderFor, TransactionMeta,
     TxTy,
@@ -303,7 +308,7 @@ where
 ///
 /// The `TxEnvConverter` has two blanket implementations:
 /// * `()` assuming `TxReq` implements [`TryIntoTxEnv`] and is used as default for [`RpcConverter`].
-/// * `Fn(TxReq, &CfgEnv<Spec>, &BlockEnv) -> Result<TxEnv, E>` and can be applied using
+/// * `Fn(TxReq, &EvmEnvFor<Evm>) -> Result<TxEnv, E>` and can be applied using
 ///   [`RpcConverter::with_tx_env_converter`].
 ///
 /// One should prefer to implement [`TryIntoTxEnv`] for `TxReq` to get the `TxEnvConverter`
@@ -326,9 +331,46 @@ pub trait TxEnvConverter<TxReq, Evm: ConfigureEvm>:
     ) -> Result<TxEnvFor<Evm>, Self::Error>;
 }
 
+/// Converts a transaction request into an executable transaction environment.
+pub trait TryIntoTxEnv<T, EvmEnv> {
+    /// Error returned by the conversion.
+    type Err;
+
+    /// Performs the conversion.
+    fn try_into_tx_env(self, evm_env: &EvmEnv) -> Result<T, Self::Err>;
+}
+
+/// Ethereum transaction environment conversion error.
+#[derive(Debug, thiserror::Error)]
+pub enum EthTxEnvError {
+    /// Error while validating transaction fees.
+    #[error(transparent)]
+    CallFees(#[from] crate::CallFeesError),
+    /// Both data and input fields are set and differ.
+    #[error(transparent)]
+    Input(#[from] TransactionInputError),
+    /// Blob transaction has no call target.
+    #[error("blob transaction is a create transaction")]
+    BlobTransactionIsCreate,
+    /// EIP-7702 transaction has no call target.
+    #[error("EIP-7702 authorization list has invalid fields")]
+    AuthorizationListInvalidFields,
+}
+
+impl<Env> TryIntoTxEnv<RecoveredTxEnvelope, Env> for TransactionRequest
+where
+    Env: EvmEnv,
+{
+    type Err = EthTxEnvError;
+
+    fn try_into_tx_env(self, evm_env: &Env) -> Result<RecoveredTxEnvelope, Self::Err> {
+        transaction_request_to_evm2(self, evm_env)
+    }
+}
+
 impl<TxReq, Evm> TxEnvConverter<TxReq, Evm> for ()
 where
-    TxReq: TryIntoTxEnv<TxEnvFor<Evm>, SpecFor<Evm>, BlockEnvFor<Evm>>,
+    TxReq: TryIntoTxEnv<TxEnvFor<Evm>, EvmEnvFor<Evm>>,
     Evm: ConfigureEvm,
 {
     type Error = TxReq::Err;
@@ -340,6 +382,118 @@ where
     ) -> Result<TxEnvFor<Evm>, Self::Error> {
         tx_req.try_into_tx_env(evm_env)
     }
+}
+
+fn transaction_request_to_evm2(
+    request: TransactionRequest,
+    evm_env: &impl EvmEnv,
+) -> Result<RecoveredTxEnvelope, EthTxEnvError> {
+    if request.blob_versioned_hashes.as_ref().is_some_and(Vec::is_empty) {
+        return Err(crate::CallFeesError::BlobTransactionMissingBlobHashes.into())
+    }
+
+    let tx_type = request.minimal_tx_type();
+    let TransactionRequest {
+        from,
+        to,
+        gas_price,
+        max_fee_per_gas,
+        max_priority_fee_per_gas,
+        gas,
+        value,
+        input,
+        nonce,
+        access_list,
+        chain_id,
+        blob_versioned_hashes,
+        max_fee_per_blob_gas,
+        authorization_list,
+        transaction_type: _,
+        sidecar: _,
+    } = request;
+    let input = input.try_into_unique_input()?.unwrap_or_default();
+    let CallFees { max_priority_fee_per_gas, gas_price, max_fee_per_blob_gas } =
+        CallFees::ensure_fees(
+            gas_price.map(U256::from),
+            max_fee_per_gas.map(U256::from),
+            max_priority_fee_per_gas.map(U256::from),
+            U256::from(evm_env.block_base_fee()),
+            blob_versioned_hashes.as_deref(),
+            max_fee_per_blob_gas.map(U256::from),
+            Some(U256::from(evm_env.block_blob_base_fee())),
+        )?;
+
+    let caller = from.unwrap_or_default();
+    let to = to.unwrap_or(TxKind::Create);
+    let gas_limit = gas.unwrap_or_else(|| evm_env.block_env().gas_limit.saturating_to());
+    let nonce = nonce.unwrap_or_default();
+    let chain_id = chain_id.unwrap_or_else(|| evm_env.chain_id());
+    let value = value.unwrap_or_default();
+    let access_list = access_list.unwrap_or_default();
+    let gas_price = gas_price.saturating_to();
+    let max_priority_fee_per_gas = max_priority_fee_per_gas.unwrap_or_default().saturating_to();
+
+    let tx = match tx_type {
+        TxType::Legacy => TxEnvelope::Legacy(TxLegacy {
+            chain_id: Some(chain_id),
+            nonce,
+            gas_price,
+            gas_limit,
+            to,
+            value,
+            input,
+        }),
+        TxType::Eip2930 => TxEnvelope::Eip2930(TxEip2930 {
+            chain_id,
+            nonce,
+            gas_price,
+            gas_limit,
+            to,
+            value,
+            access_list,
+            input,
+        }),
+        TxType::Eip1559 => TxEnvelope::Eip1559(TxEip1559 {
+            chain_id,
+            nonce,
+            gas_limit,
+            max_fee_per_gas: gas_price,
+            max_priority_fee_per_gas,
+            to,
+            value,
+            access_list,
+            input,
+        }),
+        TxType::Eip4844 => TxEnvelope::Eip4844(TxEip4844Variant::TxEip4844(TxEip4844 {
+            chain_id,
+            nonce,
+            gas_limit,
+            max_fee_per_gas: gas_price,
+            max_priority_fee_per_gas,
+            to: to.to().copied().ok_or(EthTxEnvError::BlobTransactionIsCreate)?,
+            value,
+            access_list,
+            blob_versioned_hashes: blob_versioned_hashes.unwrap_or_default(),
+            max_fee_per_blob_gas: max_fee_per_blob_gas.unwrap_or_default().saturating_to(),
+            input,
+        })),
+        TxType::Eip7702 => TxEnvelope::Eip7702(
+            TxEip7702 {
+                chain_id,
+                nonce,
+                gas_limit,
+                max_fee_per_gas: gas_price,
+                max_priority_fee_per_gas,
+                to: to.to().copied().ok_or(EthTxEnvError::AuthorizationListInvalidFields)?,
+                value,
+                access_list,
+                authorization_list: authorization_list.unwrap_or_default(),
+                input,
+            }
+            .into(),
+        ),
+    };
+    Ok(Recovered::new_unchecked(tx, caller))
 }
 
 /// Converts rpc transaction requests into transaction environment using a closure.

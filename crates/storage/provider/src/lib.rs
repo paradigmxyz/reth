@@ -38,6 +38,8 @@ pub mod test_utils;
 pub mod either_writer;
 pub use either_writer::*;
 
+mod writer;
+
 mod bal;
 pub use bal::{BalConfig, InMemoryBalStore};
 
@@ -47,7 +49,7 @@ pub use reth_chain_state::{
 };
 pub use reth_execution_types::*;
 /// Re-export `OriginalValuesKnown`
-pub use revm::database::states::OriginalValuesKnown;
+pub use reth_storage_api::OriginalValuesKnown;
 // reexport traits to avoid breaking changes
 pub use reth_static_file_types as static_file;
 pub use reth_storage_api::{

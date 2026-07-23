@@ -11,6 +11,10 @@ use alloy_rpc_types_trace::{
     parity::{Action, CreateAction, CreateOutput, TraceOutput},
 };
 use async_trait::async_trait;
+use evm2_inspectors::{
+    tracing::{types::CallTraceNode, TracingInspectorConfig},
+    transfer::{TransferInspector, TransferKind},
+};
 use jsonrpsee::{core::RpcResult, types::ErrorObjectOwned};
 use reth_primitives_traits::TxTy;
 use reth_rpc_api::{EthApiServer, OtterscanServer};
@@ -21,11 +25,6 @@ use reth_rpc_eth_api::{
 };
 use reth_rpc_eth_types::{utils::binary_search, EthApiError};
 use reth_rpc_server_types::result::internal_rpc_err;
-use revm::context_interface::result::ExecutionResult;
-use revm_inspectors::{
-    tracing::{types::CallTraceNode, TracingInspectorConfig},
-    transfer::{TransferInspector, TransferKind},
-};
 
 const API_LEVEL: u64 = 8;
 
@@ -132,9 +131,8 @@ where
     async fn get_transaction_error(&self, tx_hash: TxHash) -> RpcResult<Option<Bytes>> {
         let maybe_revert = self
             .eth
-            .spawn_replay_transaction(tx_hash, |_tx_info, res, _| match res.result {
-                ExecutionResult::Revert { output, .. } => Ok(Some(output)),
-                _ => Ok(None),
+            .spawn_replay_transaction(tx_hash, |_tx_info, res, _| {
+                Ok((!res.result.status && res.result.stop.is_revert()).then_some(res.result.output))
             })
             .await
             .map(Option::flatten)
@@ -318,7 +316,7 @@ where
     /// Handler for `ots_getContractCreator`
     async fn get_contract_creator(&self, address: Address) -> RpcResult<Option<ContractCreator>> {
         if !self.has_code(address, None).await? {
-            return Ok(None);
+            return Ok(None)
         }
 
         let num = binary_search::<_, _, ErrorObjectOwned>(
@@ -340,7 +338,7 @@ where
                 num.into(),
                 None,
                 TracingInspectorConfig::default_parity(),
-                |tx_info, mut ctx| {
+                |tx_info, ctx| {
                     Ok(ctx
                         .take_inspector()
                         .into_parity_builder()

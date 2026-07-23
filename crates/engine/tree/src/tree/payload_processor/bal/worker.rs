@@ -1,25 +1,20 @@
 use super::BalExecutionError;
-use alloy_consensus::Transaction;
 use alloy_eip7928::BlockAccessIndex;
-use alloy_evm::{
-    block::{BlockExecutionError, BlockExecutor, BlockExecutorFactory},
-    Evm,
-};
 use alloy_primitives::Address;
 use crossbeam_channel::{Receiver, Sender};
-use reth_evm::{execute::ExecutableTxFor, ConfigureEvm, Database, EvmEnvFor, ExecutionCtxFor};
-use revm::{database::State, state::bal::Bal as RevmBal};
+use reth_errors::ConsensusError;
+use reth_evm::{
+    BlockExecutionError, BlockExecutor, BlockExecutorFactory, BlockExecutorFor, ConfigureEvm,
+    Database, EvmEnvFor, ExecutableTxFor, ExecutionCtxFor,
+};
 use std::sync::Arc;
 
 #[derive(Debug, thiserror::Error)]
 pub(super) enum BalWorkerError {
-    /// Worker state or provider setup failed.
     #[error("BAL worker setup failed: {0}")]
     Setup(#[source] BalExecutionError),
-    /// Transaction recovery or conversion failed before EVM execution.
     #[error("BAL worker transaction conversion failed: {0}")]
     Transaction(Box<dyn core::error::Error + Send + Sync + 'static>),
-    /// EVM transaction execution failed.
     #[error("BAL worker EVM execution failed: {0}")]
     Execution(BlockExecutionError),
 }
@@ -29,6 +24,11 @@ impl From<BalWorkerError> for BalExecutionError {
         match err {
             BalWorkerError::Setup(err) => err,
             BalWorkerError::Transaction(err) => Self::Other(err),
+            BalWorkerError::Execution(BlockExecutionError::Validation(
+                reth_evm::BlockValidationError::BlockAccessListNotCovered,
+            )) => Self::Consensus(ConsensusError::BlockAccessListInvalid(
+                "block access list does not cover transaction execution".to_string(),
+            )),
             BalWorkerError::Execution(err) => Self::Execution(err),
         }
     }
@@ -37,25 +37,24 @@ impl From<BalWorkerError> for BalExecutionError {
 pub(super) struct BalWorkerOutput<R> {
     pub(super) index: usize,
     pub(super) signer: Address,
-    pub(super) tx_gas_limit: u64,
     pub(super) result: R,
 }
 
-type WorkerExecutorResult<Cfg> =
-    <<Cfg as ConfigureEvm>::BlockExecutorFactory as BlockExecutorFactory>::TxExecutionResult;
+type WorkerExecutorResult<'a, Cfg> =
+    <BlockExecutorFor<'a, Cfg> as BlockExecutor>::TransactionResultWithState;
 
-type WorkerResultSender<Cfg> =
-    Sender<Result<BalWorkerOutput<WorkerExecutorResult<Cfg>>, BalWorkerError>>;
+type WorkerResultSender<'a, Cfg> =
+    Sender<Result<BalWorkerOutput<WorkerExecutorResult<'a, Cfg>>, BalWorkerError>>;
 
 #[expect(clippy::too_many_arguments)]
 pub(super) fn spawn_worker<'scope, Evm, Tx, Err, DB, MakeDb>(
     scope: &rayon::Scope<'scope>,
     tx_rx: Receiver<(usize, Result<Tx, Err>)>,
     abort_rx: Receiver<()>,
-    result_tx: WorkerResultSender<Evm>,
+    result_tx: WorkerResultSender<'scope, Evm>,
     evm_config: &'scope Evm,
     make_db: &'scope MakeDb,
-    received_bal_revm: Arc<RevmBal>,
+    received_bal: Arc<<BlockExecutorFor<'scope, Evm> as BlockExecutor>::BlockAccessList>,
     evm_env: EvmEnvFor<Evm>,
     ctx: ExecutionCtxFor<'scope, Evm>,
 ) where
@@ -67,16 +66,10 @@ pub(super) fn spawn_worker<'scope, Evm, Tx, Err, DB, MakeDb>(
 {
     scope.spawn(move |_| {
         let worker_result = (|| -> Result<(), BalWorkerError> {
-            // Create a database with fill_on_miss=true ensuring misses
-            // are inserted for the other workers.
             let database = make_db(true).map_err(BalWorkerError::Setup)?;
-            let mut worker_state = State::builder()
-                .with_database(database)
-                .with_bal(received_bal_revm)
-                .with_bundle_update()
-                .build();
-            let evm = evm_config.evm_with_env(&mut worker_state, evm_env);
-            let mut executor = evm_config.create_executor_with_state(evm, ctx.clone());
+            let evm = evm_config.evm_with_env(database, evm_env);
+            let mut executor = evm_config.block_executor_factory().create_executor(evm, ctx);
+            executor.set_block_access_list(received_bal);
 
             loop {
                 let (index, tx) = crossbeam_channel::select_biased! {
@@ -86,23 +79,17 @@ pub(super) fn spawn_worker<'scope, Evm, Tx, Err, DB, MakeDb>(
                         Err(_) => break,
                     },
                 };
-                let tx = tx.map_err(|e| BalWorkerError::Transaction(Box::new(e)))?;
+                let tx = tx.map_err(|err| BalWorkerError::Transaction(Box::new(err)))?;
                 let signer = *tx.signer();
-                let tx_gas_limit = tx.tx().gas_limit();
-
-                executor.evm_mut().db_mut().set_bal_index(BlockAccessIndex::new(index as u64 + 1));
+                executor.set_block_access_index(BlockAccessIndex::new(index as u64 + 1));
                 let result = executor
                     .execute_transaction_without_commit(tx)
                     .map_err(BalWorkerError::Execution)?;
 
-                if result_tx
-                    .send(Ok(BalWorkerOutput { index, signer, tx_gas_limit, result }))
-                    .is_err()
-                {
-                    break;
+                if result_tx.send(Ok(BalWorkerOutput { index, signer, result })).is_err() {
+                    break
                 }
             }
-
             Ok(())
         })();
 

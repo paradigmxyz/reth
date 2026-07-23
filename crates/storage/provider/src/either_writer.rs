@@ -613,8 +613,19 @@ where
         block_number: BlockNumber,
         mut changeset: Vec<AccountBeforeTx>,
     ) -> ProviderResult<()> {
-        // First sort the changesets
         changeset.par_sort_by_key(|a| a.address);
+        self.append_account_changeset_sorted(block_number, changeset)
+    }
+
+    /// Append account changeset for a block.
+    ///
+    /// Expects the changesets to already be sorted by address.
+    pub fn append_account_changeset_sorted(
+        &mut self,
+        block_number: BlockNumber,
+        changeset: Vec<AccountBeforeTx>,
+    ) -> ProviderResult<()> {
+        debug_assert!(changeset.windows(2).all(|w| w[0].address <= w[1].address));
         match self {
             Self::Database(cursor) => {
                 for change in changeset {
@@ -622,7 +633,7 @@ where
                 }
             }
             Self::StaticFile(writer) => {
-                writer.append_account_changeset(changeset, block_number)?;
+                writer.append_account_changeset_sorted(changeset, block_number)?;
             }
             Self::RocksDB(_) => return Err(ProviderError::UnsupportedProvider),
         }
@@ -644,7 +655,20 @@ where
         mut changeset: Vec<StorageBeforeTx>,
     ) -> ProviderResult<()> {
         changeset.par_sort_by_key(|change| (change.address, change.key));
+        self.append_storage_changeset_sorted(block_number, changeset)
+    }
 
+    /// Append storage changeset for a block.
+    ///
+    /// Expects the changesets to already be sorted by address and storage key.
+    pub fn append_storage_changeset_sorted(
+        &mut self,
+        block_number: BlockNumber,
+        changeset: Vec<StorageBeforeTx>,
+    ) -> ProviderResult<()> {
+        debug_assert!(changeset
+            .windows(2)
+            .all(|w| { (w[0].address, w[0].key) <= (w[1].address, w[1].key) }));
         match self {
             Self::Database(cursor) => {
                 for change in changeset {
@@ -656,7 +680,7 @@ where
                 }
             }
             Self::StaticFile(writer) => {
-                writer.append_storage_changeset(changeset, block_number)?;
+                writer.append_storage_changeset_sorted(changeset, block_number)?;
             }
             Self::RocksDB(_) => return Err(ProviderError::UnsupportedProvider),
         }

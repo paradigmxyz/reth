@@ -15,7 +15,7 @@ workspace = true
 # reth
 reth-chainspec.workspace = true
 reth-errors.workspace = true
-reth-execution-types.workspace = true
+reth-execution-types = { workspace = true, features = ["std"] }
 reth-metrics.workspace = true
 reth-ethereum-primitives.workspace = true
 reth-primitives-traits = { workspace = true, features = ["dashmap"] }
@@ -28,7 +28,6 @@ reth-trie.workspace = true
 alloy-eips.workspace = true
 alloy-primitives = { workspace = true, features = ["std"] }
 alloy-consensus.workspace = true
-revm.workspace = true
 
 # async
 tokio = { workspace = true, default-features = false, features = ["sync", "macros"] }
@@ -69,7 +68,6 @@ serde = [
     "reth-execution-types/serde",
     "reth-primitives-traits/serde",
     "reth-trie/serde",
-    "revm/serde",
     "reth-storage-api/serde",
 ]
 test-utils = [

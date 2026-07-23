@@ -8,14 +8,12 @@
 //! task runs lives in `reth-engine-tree` under `tree::state_root_strategy`.
 
 use crate::error::StateRootTaskError;
-use alloy_evm::block::OnStateHook;
-use alloy_primitives::{keccak256, map::B256Map, B256};
+use alloy_primitives::{map::B256Map, B256};
+use reth_execution_types::{hashed_post_state_from_execution_state, EvmState};
 use reth_trie::{
-    updates::TrieUpdates, HashedPostState, HashedStorage, MultiProofTargetsV2, ProofV2Target,
+    updates::TrieUpdates, HashedPostState, KeccakKeyHasher, MultiProofTargetsV2, ProofV2Target,
 };
-use revm::state::EvmState;
 use std::{fmt, sync::Arc};
-use tracing::trace;
 
 /// Messages used internally by the multi proof task.
 #[derive(Debug)]
@@ -445,9 +443,15 @@ impl fmt::Debug for StateRootUpdateHook {
     }
 }
 
-impl OnStateHook for StateRootUpdateHook {
-    fn on_state(&mut self, state: EvmState) {
+impl StateRootUpdateHook {
+    /// Emits an authoritative execution-state update.
+    pub fn on_state(&mut self, state: EvmState) {
         self.inner.on_state_update(state);
+    }
+
+    /// Emits an authoritative pre-hashed state update.
+    pub fn on_hashed_state_update(&mut self, state: HashedPostState) {
+        self.inner.on_hashed_state_update(state);
     }
 }
 
@@ -493,37 +497,7 @@ impl StateRootSink for SparseTrieStateRootSink {
 
 /// Converts [`EvmState`] to [`HashedPostState`] by keccak256-hashing addresses and storage slots.
 pub fn evm_state_to_hashed_post_state(update: EvmState) -> HashedPostState {
-    let mut hashed_state = HashedPostState::with_capacity(update.len());
-
-    for (address, account) in update {
-        if account.is_touched() {
-            let hashed_address = keccak256(address);
-            trace!(target: "trie::parallel::sparse", ?address, ?hashed_address, "Adding account to state update");
-
-            let destroyed = account.is_selfdestructed();
-            if account.info != account.original_info() {
-                let info = if destroyed { None } else { Some(account.info.into()) };
-                hashed_state.accounts.insert(hashed_address, info);
-            }
-
-            let mut changed_storage_iter = account
-                .storage
-                .into_iter()
-                .filter(|(_slot, value)| value.is_changed())
-                .map(|(slot, value)| (keccak256(B256::from(slot)), value.present_value))
-                .peekable();
-
-            if destroyed {
-                hashed_state.storages.insert(hashed_address, HashedStorage::new(true));
-            } else if changed_storage_iter.peek().is_some() {
-                hashed_state
-                    .storages
-                    .insert(hashed_address, HashedStorage::from_iter(false, changed_storage_iter));
-            }
-        }
-    }
-
-    hashed_state
+    hashed_post_state_from_execution_state::<KeccakKeyHasher>(&update)
 }
 
 #[cfg(test)]

@@ -5,20 +5,20 @@ use crate::block::CachedTransaction;
 use alloy_consensus::{transaction::TxHashRef, BlockHeader};
 use alloy_eip7928::bal::DecodedBal;
 use alloy_eips::BlockHashOrNumber;
-use alloy_primitives::{Address, TxHash, B256};
+use alloy_primitives::{TxHash, B256};
+use evm2::{
+    bytecode::Bytecode,
+    evm::{
+        AccountBal as EvmAccountBal, AccountInfoBal as EvmAccountInfoBal, Bal as EvmBal,
+        BalChanges as EvmBalChanges, BalCodeChange as EvmBalCodeChange,
+        StorageBal as EvmStorageBal,
+    },
+};
 use futures::{stream::FuturesOrdered, Stream, StreamExt};
 use reth_chain_state::CanonStateNotification;
 use reth_errors::{ProviderError, ProviderResult};
 use reth_execution_types::Chain;
 use reth_primitives_traits::{Block, BlockBody, InMemorySize, NodePrimitives, RecoveredBlock};
-use reth_revm::{
-    bytecode::Bytecode,
-    primitives::{StorageKey, StorageValue},
-    state::bal::{
-        AccountBal as RevmAccountBal, AccountInfoBal as RevmAccountInfoBal, Bal as RevmBal,
-        BalWrites as RevmBalWrites, StorageBal as RevmStorageBal,
-    },
-};
 use reth_storage_api::{BalProvider, BlockReader, TransactionVariant};
 use reth_tasks::Runtime;
 use schnellru::{ByLength, Limiter, LruMap};
@@ -60,8 +60,8 @@ type CachedParentBlocksResponseSender<B> = oneshot::Sender<Vec<Arc<RecoveredBloc
 /// The type that can send the response for a transaction hash lookup
 type TransactionHashResponseSender<B, R> = oneshot::Sender<Option<CachedTransaction<B, R>>>;
 
-/// The type that can send the response to a requested revm BAL.
-type BalResponseSender = oneshot::Sender<ProviderResult<Option<CachedRevmBal>>>;
+/// The type that can send the response to a requested EVM BAL.
+type BalResponseSender = oneshot::Sender<ProviderResult<Option<CachedBal>>>;
 
 type BlockLruCache<B, L> =
     MultiConsumerLruCache<B256, Arc<RecoveredBlock<B>>, L, BlockWithSendersResponseSender<B>>;
@@ -71,7 +71,7 @@ type ReceiptsLruCache<R, L> =
 
 type HeaderLruCache<H, L> = MultiConsumerLruCache<B256, H, L, HeaderResponseSender<H>>;
 
-type BalLruCache<L> = MultiConsumerLruCache<B256, CachedRevmBal, L, BalResponseSender>;
+type BalLruCache<L> = MultiConsumerLruCache<B256, CachedBal, L, BalResponseSender>;
 
 /// Provides async access to cached eth data
 ///
@@ -274,13 +274,13 @@ impl<N: NodePrimitives> EthStateCache<N> {
         rx.await.ok()?
     }
 
-    /// Requests the revm BAL for the block hash.
+    /// Requests the EVM BAL for the block hash.
     ///
     /// Returns `None` if the BAL does not exist.
     pub async fn get_bal(
         &self,
         block_hash: B256,
-    ) -> ProviderResult<Option<Arc<DecodedBal<Arc<RevmBal>>>>> {
+    ) -> ProviderResult<Option<Arc<DecodedBal<Arc<EvmBal>>>>> {
         let (response_tx, rx) = oneshot::channel();
         let _ = self.to_service.send(CacheAction::GetBal { block_hash, response_tx });
         rx.await
@@ -328,7 +328,7 @@ pub(crate) struct EthStateCacheService<
     LimitBlocks: Limiter<B256, Arc<RecoveredBlock<Provider::Block>>>,
     LimitReceipts: Limiter<B256, Arc<Vec<Provider::Receipt>>>,
     LimitHeaders: Limiter<B256, Provider::Header>,
-    LimitBals: Limiter<B256, CachedRevmBal>,
+    LimitBals: Limiter<B256, CachedBal>,
 {
     /// The type used to lookup data from disk
     provider: Provider,
@@ -341,7 +341,7 @@ pub(crate) struct EthStateCacheService<
     /// Headers are cached because they are required to populate the environment for execution
     /// (evm).
     headers_cache: HeaderLruCache<Provider::Header, LimitHeaders>,
-    /// The LRU cache for revm BALs grouped by the block hash.
+    /// The LRU cache for EVM BALs grouped by the block hash.
     bal_cache: BalLruCache<LimitBals>,
     /// Sender half of the action channel.
     action_tx: UnboundedSender<CacheAction<Provider::Block, Provider::Receipt>>,
@@ -412,7 +412,7 @@ where
         }
     }
 
-    fn on_new_bal(&mut self, block_hash: B256, res: ProviderResult<Option<CachedRevmBal>>) {
+    fn on_new_bal(&mut self, block_hash: B256, res: ProviderResult<Option<CachedBal>>) {
         if let Some(queued) = self.bal_cache.remove(&block_hash) {
             for tx in queued {
                 let _ = tx.send(res.clone());
@@ -459,7 +459,7 @@ where
         }
     }
 
-    fn on_reorg_bal(&mut self, block_hash: B256, res: ProviderResult<Option<CachedRevmBal>>) {
+    fn on_reorg_bal(&mut self, block_hash: B256, res: ProviderResult<Option<CachedBal>>) {
         if let Some(queued) = self.bal_cache.remove(&block_hash) {
             for tx in queued {
                 let _ = tx.send(res.clone());
@@ -617,8 +617,8 @@ where
                                     let _permit = rate_limiter.acquire().await;
                                     let res = provider
                                         .bal_store()
-                                        .revm_bal_by_hash(block_hash)
-                                        .map(|maybe_bal| maybe_bal.map(CachedRevmBal::new));
+                                        .evm_bal_by_hash(block_hash)
+                                        .map(|maybe_bal| maybe_bal.map(CachedBal::new));
                                     action_sender.send_bal(res);
                                 });
                             }
@@ -767,7 +767,7 @@ enum CacheAction<B: Block, R> {
     },
     BalResult {
         block_hash: B256,
-        res: ProviderResult<Option<CachedRevmBal>>,
+        res: ProviderResult<Option<CachedBal>>,
     },
     CacheNewCanonicalChain {
         chain_change: ChainChange<B, R>,
@@ -867,7 +867,7 @@ impl<R: Send + Sync, B: Block> ActionSender<B, R> {
         }
     }
 
-    fn send_bal(&mut self, bal: Result<Option<CachedRevmBal>, ProviderError>) {
+    fn send_bal(&mut self, bal: Result<Option<CachedBal>, ProviderError>) {
         if let Some(tx) = self.tx.take() {
             let _ = tx.send(CacheAction::BalResult { block_hash: self.blockhash, res: bal });
         }
@@ -924,67 +924,70 @@ pub async fn cache_new_blocks_task<St, N: NodePrimitives>(
     }
 }
 
-/// Cached decoded revm BAL.
+/// Cached decoded EVM BAL.
 #[derive(Clone, Debug)]
-pub(crate) struct CachedRevmBal(Arc<DecodedBal<Arc<RevmBal>>>);
+pub(crate) struct CachedBal(Arc<DecodedBal<Arc<EvmBal>>>);
 
-impl CachedRevmBal {
-    /// Creates a cached revm BAL from an owned decoded BAL.
+impl CachedBal {
+    /// Creates a cached EVM BAL from an owned decoded BAL.
     #[inline]
-    fn new(bal: DecodedBal<Arc<RevmBal>>) -> Self {
+    fn new(bal: DecodedBal<Arc<EvmBal>>) -> Self {
         Self(Arc::new(bal))
     }
 }
 
-impl InMemorySize for CachedRevmBal {
+impl InMemorySize for CachedBal {
     fn size(&self) -> usize {
-        core::mem::size_of::<Self>() + decoded_revm_bal_size(&self.0)
+        core::mem::size_of::<Self>() +
+            core::mem::size_of::<DecodedBal<Arc<EvmBal>>>() +
+            self.0.as_raw().len() +
+            evm_bal_size(self.0.as_bal())
     }
 }
 
-fn decoded_revm_bal_size(bal: &DecodedBal<Arc<RevmBal>>) -> usize {
-    core::mem::size_of::<DecodedBal<Arc<RevmBal>>>() +
-        bal.as_raw().len() +
-        revm_bal_size(bal.as_bal())
+fn evm_bal_size(bal: &EvmBal) -> usize {
+    core::mem::size_of::<EvmBal>() +
+        bal.accounts.capacity() *
+            core::mem::size_of::<(alloy_primitives::Address, EvmAccountBal)>() +
+        bal.accounts.values().map(evm_account_bal_heap_size).sum::<usize>()
 }
 
-fn revm_bal_size(bal: &Arc<RevmBal>) -> usize {
-    core::mem::size_of::<RevmBal>() +
-        bal.accounts.capacity() * core::mem::size_of::<(Address, RevmAccountBal)>() +
-        bal.accounts.values().map(revm_account_bal_heap_size).sum::<usize>()
+fn evm_account_bal_heap_size(account: &EvmAccountBal) -> usize {
+    evm_account_info_bal_heap_size(&account.account_info) +
+        evm_storage_bal_heap_size(&account.storage)
 }
 
-fn revm_account_bal_heap_size(account: &RevmAccountBal) -> usize {
-    revm_account_info_bal_heap_size(&account.account_info) +
-        revm_storage_bal_heap_size(&account.storage)
+fn evm_account_info_bal_heap_size(account_info: &EvmAccountInfoBal) -> usize {
+    evm_bal_changes_heap_size(&account_info.nonce, |_| 0) +
+        evm_bal_changes_heap_size(&account_info.balance, |_| 0) +
+        evm_bal_changes_heap_size(&account_info.code, evm_code_change_heap_size)
 }
 
-fn revm_account_info_bal_heap_size(account_info: &RevmAccountInfoBal) -> usize {
-    revm_bal_writes_heap_size(&account_info.nonce, |_| 0) +
-        revm_bal_writes_heap_size(&account_info.balance, |_| 0) +
-        revm_bal_writes_heap_size(&account_info.code, revm_code_write_heap_size)
-}
-
-fn revm_storage_bal_heap_size(storage: &RevmStorageBal) -> usize {
-    storage.storage.len() * core::mem::size_of::<(StorageKey, RevmBalWrites<StorageValue>)>() +
+fn evm_storage_bal_heap_size(storage: &EvmStorageBal) -> usize {
+    storage.storage.capacity() *
+        core::mem::size_of::<(alloy_primitives::U256, EvmBalChanges<alloy_eip7928::StorageChange>)>(
+        ) +
         storage
             .storage
             .values()
-            .map(|writes| revm_bal_writes_heap_size(writes, |_| 0))
+            .map(|changes| evm_bal_changes_heap_size(changes, |_| 0))
             .sum::<usize>()
 }
 
-fn revm_bal_writes_heap_size<T, F>(writes: &RevmBalWrites<T>, mut item_heap_size: F) -> usize
+fn evm_bal_changes_heap_size<T, F>(changes: &EvmBalChanges<T>, mut item_heap_size: F) -> usize
 where
-    T: PartialEq + Clone,
     F: FnMut(&T) -> usize,
 {
-    writes.writes.capacity() * core::mem::size_of::<(u64, T)>() +
-        writes.writes.iter().map(|(_, item)| item_heap_size(item)).sum::<usize>()
+    changes.changes.capacity() * core::mem::size_of::<T>() +
+        changes.changes.iter().map(&mut item_heap_size).sum::<usize>()
 }
 
-fn revm_code_write_heap_size((_, bytecode): &(B256, Bytecode)) -> usize {
-    bytecode.bytes_ref().len()
+fn evm_code_change_heap_size(change: &EvmBalCodeChange) -> usize {
+    bytecode_heap_size(&change.code.1)
+}
+
+fn bytecode_heap_size(bytecode: &Bytecode) -> usize {
+    bytecode.original_bytes().len()
 }
 
 #[cfg(test)]
@@ -993,7 +996,9 @@ mod tests {
     use alloy_consensus::{transaction::TransactionMeta, Header};
     use alloy_eip7928::BlockAccessIndex;
     use alloy_eips::{BlockHashOrNumber, NumHash};
-    use alloy_primitives::{Address, BlockHash, BlockNumber, Bytes, Signature, TxHash, TxNumber};
+    use alloy_primitives::{
+        Address, BlockHash, BlockNumber, Bytes, Signature, TxHash, TxNumber, U256,
+    };
     use core::ops::{RangeBounds, RangeInclusive};
     use reth_db_models::StoredBlockBodyIndices;
     use reth_ethereum_primitives::{
@@ -1023,8 +1028,8 @@ mod tests {
         service
     }
 
-    fn test_decoded_revm_bal() -> DecodedBal<Arc<RevmBal>> {
-        DecodedBal::new(Arc::new(RevmBal::default()), Bytes::from_static(&[0xc0]))
+    fn test_decoded_evm_bal() -> DecodedBal<Arc<EvmBal>> {
+        DecodedBal::new(Arc::new(EvmBal::default()), Bytes::from_static(&[0xc0]))
     }
 
     fn test_block() -> RecoveredBlock<Block> {
@@ -1093,7 +1098,7 @@ mod tests {
         let mut service = test_service();
         let block_hash = B256::repeat_byte(0x44);
 
-        assert!(service.bal_cache.insert(block_hash, CachedRevmBal::new(test_decoded_revm_bal())));
+        assert!(service.bal_cache.insert(block_hash, CachedBal::new(test_decoded_evm_bal())));
         assert!(service.bal_cache.get(&block_hash).is_some());
 
         service.on_reorg_bal(block_hash, Ok(None));
@@ -1106,7 +1111,7 @@ mod tests {
         let mut service = test_service();
         let block_hash = B256::repeat_byte(0x55);
         let (response_tx, mut response_rx) = oneshot::channel();
-        let bal = CachedRevmBal::new(test_decoded_revm_bal());
+        let bal = CachedBal::new(test_decoded_evm_bal());
 
         assert!(service.bal_cache.queue(block_hash, response_tx));
 
@@ -1118,36 +1123,37 @@ mod tests {
     }
 
     #[test]
-    fn cached_revm_bal_size_accounts_for_nested_allocations() {
-        let mut account = RevmAccountBal::default();
-        account.account_info.nonce.writes.push((BlockAccessIndex::new(1), 1));
+    fn cached_evm_bal_size_accounts_for_nested_allocations() {
+        let index = BlockAccessIndex::new(1);
+        let mut account = EvmAccountBal::default();
+        account.account_info.nonce.changes.push(alloy_eip7928::NonceChange::new(index, 1));
         account
             .account_info
             .balance
-            .writes
-            .push((BlockAccessIndex::new(2), StorageValue::from(1u64)));
-        account.account_info.code.writes.push((
-            BlockAccessIndex::new(3),
+            .changes
+            .push(alloy_eip7928::BalanceChange::new(index, U256::from(1)));
+        account.account_info.code.changes.push(EvmBalCodeChange::new(
+            index,
             (B256::repeat_byte(0xaa), Bytecode::new_raw(Bytes::from_static(&[0x60, 0x00]))),
         ));
         account.storage.storage.insert(
-            StorageKey::from(1u64),
-            RevmBalWrites::new(vec![(BlockAccessIndex::new(4), StorageValue::from(2u64))]),
+            U256::from(1),
+            EvmBalChanges::new(vec![alloy_eip7928::StorageChange::new(index, U256::from(2))]),
         );
 
-        let mut bal = RevmBal::default();
+        let mut bal = EvmBal::default();
         bal.accounts.insert(Address::ZERO, account);
 
         let raw = Bytes::from_static(&[0xc0, 0x01, 0x02]);
-        let previous_estimate = core::mem::size_of::<CachedRevmBal>() +
-            core::mem::size_of::<DecodedBal<Arc<RevmBal>>>() +
+        let top_level_estimate = core::mem::size_of::<CachedBal>() +
+            core::mem::size_of::<DecodedBal<Arc<EvmBal>>>() +
             raw.len() +
-            core::mem::size_of::<RevmBal>();
-        assert!(CachedRevmBal::new(DecodedBal::new(Arc::new(bal), raw)).size() > previous_estimate);
+            core::mem::size_of::<EvmBal>();
+        assert!(CachedBal::new(DecodedBal::new(Arc::new(bal), raw)).size() > top_level_estimate);
     }
 
     #[tokio::test]
-    async fn get_bal_uses_cached_revm_bal() {
+    async fn get_bal_uses_cached_evm_bal() {
         let fetches = Arc::new(AtomicUsize::default());
         let provider = TestBalProvider::new(fetches.clone());
         let cache = EthStateCache::<EthPrimitives>::spawn_with(
@@ -1230,12 +1236,12 @@ mod tests {
             Ok(block_hashes.iter().map(|_| None).collect())
         }
 
-        fn revm_bal_by_hash(
+        fn evm_bal_by_hash(
             &self,
             _block_hash: BlockHash,
-        ) -> ProviderResult<Option<DecodedBal<Arc<RevmBal>>>> {
+        ) -> ProviderResult<Option<DecodedBal<Arc<EvmBal>>>> {
             self.fetches.fetch_add(1, Ordering::SeqCst);
-            Ok(Some(test_decoded_revm_bal()))
+            Ok(Some(test_decoded_evm_bal()))
         }
 
         fn bal_stream(&self) -> reth_storage_api::BalNotificationStream {

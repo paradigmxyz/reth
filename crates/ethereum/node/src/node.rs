@@ -10,12 +10,13 @@ use reth_engine_primitives::EngineTypes;
 use reth_ethereum_consensus::EthBeaconConsensus;
 use reth_ethereum_engine_primitives::{EthBuiltPayload, EthPayloadAttributes};
 use reth_ethereum_primitives::{EthPrimitives, TransactionSigned};
-use reth_evm::{
-    eth::spec::EthExecutorSpec, ConfigureEvm, EvmFactory, EvmFactoryFor, NextBlockEnvAttributes,
-};
-use reth_evm_ethereum::factory::RethEvmFactory;
+use reth_evm::{ConfigureEvm, NextBlockEnvAttributes};
+#[cfg(not(feature = "jit"))]
+use reth_evm_ethereum::RethEvmFactory;
 #[cfg(feature = "jit")]
-use reth_evm_ethereum::factory::{JitBackend, JitMode, RevmcMetrics, RuntimeConfig, RuntimeTuning};
+use reth_evm_ethereum::{
+    JitBackend, JitMetrics, JitMode, RethEvmFactory, RuntimeConfig, RuntimeTuning,
+};
 use reth_network::{primitives::BasicNetworkPrimitives, NetworkHandle, PeersInfo};
 use reth_node_api::{
     AddOnsContext, FullNodeComponents, HeaderTy, NodeAddOns, NodePrimitives,
@@ -53,17 +54,26 @@ use reth_rpc_eth_api::{
 };
 use reth_rpc_eth_types::{error::FromEvmError, EthApiError};
 use reth_rpc_server_types::RethRpcModule;
+#[cfg(feature = "jit")]
+use reth_tracing::tracing::warn;
 use reth_tracing::tracing::{debug, info};
 use reth_transaction_pool::{
     blobstore::DiskFileBlobStore, EthTransactionPool, PoolPooledTx, PoolTransaction,
     TransactionPool, TransactionValidationTaskExecutor,
 };
-use revm::context::TxEnv;
 use std::{marker::PhantomData, sync::Arc, time::SystemTime};
 
 pub use crate::{payload::EthereumPayloadBuilder, EthereumEngineValidator};
+
+/// Handles the legacy JIT helper subcommand hook.
 #[cfg(feature = "jit")]
-pub use reth_evm_ethereum::factory::maybe_run_jit_helper;
+pub use reth_evm_ethereum::maybe_run_jit_helper;
+
+/// Handles the legacy JIT helper subcommand hook.
+#[cfg(not(feature = "jit"))]
+pub const fn maybe_run_jit_helper() -> eyre::Result<std::ops::ControlFlow<()>> {
+    Ok(std::ops::ControlFlow::Continue(()))
+}
 
 /// Type configuration for a regular Ethereum node.
 #[derive(Debug, Default, Clone, Copy)]
@@ -82,10 +92,7 @@ impl EthereumNode {
     >
     where
         Node: FullNodeTypes<
-            Types: NodeTypes<
-                ChainSpec: Hardforks + EthereumHardforks + EthExecutorSpec,
-                Primitives = EthPrimitives,
-            >,
+            Types: NodeTypes<ChainSpec: Hardforks + EthereumHardforks, Primitives = EthPrimitives>,
         >,
         <Node::Types as NodeTypes>::Payload:
             PayloadTypes<BuiltPayload = EthBuiltPayload, PayloadAttributes = EthPayloadAttributes>,
@@ -319,7 +326,6 @@ where
     EB: EngineApiBuilder<N>,
     EVB: EngineValidatorBuilder<N>,
     EthApiError: FromEvmError<N::Evm>,
-    EvmFactoryFor<N::Evm>: EvmFactory<Tx = TxEnv>,
     RpcMiddleware: RethRpcMiddleware,
     AuthHttpMiddleware: RethAuthHttpMiddleware<Identity>,
 {
@@ -397,7 +403,6 @@ where
     EB: EngineApiBuilder<N>,
     EVB: EngineValidatorBuilder<N>,
     EthApiError: FromEvmError<N::Evm>,
-    EvmFactoryFor<N::Evm>: EvmFactory<Tx = TxEnv>,
     RpcMiddleware: RethRpcMiddleware,
     AuthHttpMiddleware: RethAuthHttpMiddleware<Identity>,
 {
@@ -424,7 +429,6 @@ where
     EB: EngineApiBuilder<N>,
     EVB: EngineValidatorBuilder<N>,
     EthApiError: FromEvmError<N::Evm>,
-    EvmFactoryFor<N::Evm>: EvmFactory<Tx = TxEnv>,
     RpcMiddleware: Send,
     AuthHttpMiddleware: Send,
 {
@@ -484,54 +488,33 @@ fn jit_runtime_config(jit: &JitArgs) -> RuntimeConfig {
         jit_max_bytecode_len: jit.max_bytecode_len,
         jit_max_pending_jobs: jit.max_pending_jobs,
         jit_worker_count: jit.worker_count.unwrap_or(default_tuning.jit_worker_count),
-        jit_timeout: default_tuning.jit_timeout,
-        jit_helper_memory_limit_bytes: default_tuning.jit_helper_memory_limit_bytes,
-        jit_helper_cpu_count: default_tuning.jit_helper_cpu_count,
         resident_code_cache_bytes: jit.code_cache_bytes,
         idle_evict_duration: Some(jit.idle_evict_duration),
-
-        max_events_per_drain: default_tuning.max_events_per_drain,
-        event_drain_interval: default_tuning.event_drain_interval,
-        shutdown_timeout: default_tuning.shutdown_timeout,
-        jit_worker_queue_capacity: default_tuning.jit_worker_queue_capacity,
-        jit_opt_level: default_tuning.jit_opt_level,
-        aot_opt_level: default_tuning.aot_opt_level,
-        eviction_sweep_interval: default_tuning.eviction_sweep_interval,
-        compiler_recycle_threshold: default_tuning.compiler_recycle_threshold,
+        ..default_tuning
     };
 
-    let default_config = RuntimeConfig::default();
     RuntimeConfig {
         enabled: jit.enabled,
-        thread_name: default_config.thread_name,
-        store: default_config.store,
         tuning,
-        dump_dir: default_config.dump_dir,
         debug_assertions: jit.debug,
         blocking: jit.blocking,
-        single_error: default_config.single_error,
-        no_dedup: default_config.no_dedup,
-        no_dse: default_config.no_dse,
-        gas_params: default_config.gas_params,
-        aot: default_config.aot,
         jit_mode: JitMode::OutOfProcess,
-        jit_helper_path: default_config.jit_helper_path,
-        on_compilation: default_config.on_compilation,
+        ..RuntimeConfig::default()
     }
 }
 
-/// Builds an [`EthEvmConfig`] with revmc JIT from CLI [`JitArgs`].
+/// Builds an [`EthEvmConfig`] with evm2 JIT from CLI [`JitArgs`].
 ///
 /// This is the shared setup used by both [`EthereumExecutorBuilder`] and `reth re-execute`.
 ///
-/// Returns the evm config and metrics recorder if JIT starts enabled.
+/// Returns the EVM config and metrics recorder if JIT starts enabled.
 #[cfg(feature = "jit")]
 #[allow(clippy::type_complexity)]
 pub fn build_evm_config<C: EthereumHardforks>(
     chain_spec: Arc<C>,
     jit: &JitArgs,
     dump_dir: Option<std::path::PathBuf>,
-) -> eyre::Result<(EthEvmConfig<C, RethEvmFactory>, Option<Arc<RevmcMetrics>>)> {
+) -> eyre::Result<(EthEvmConfig<C, RethEvmFactory>, Option<Arc<JitMetrics>>)> {
     if !jit.enabled {
         let factory = RethEvmFactory::disabled();
         return Ok((EthEvmConfig::new_with_evm_factory(chain_spec, factory), None));
@@ -540,8 +523,8 @@ pub fn build_evm_config<C: EthereumHardforks>(
     let mut config = jit_runtime_config(jit);
     config.dump_dir = dump_dir;
 
-    let revmc_metrics = Arc::new(RevmcMetrics::default());
-    let compilation_metrics = revmc_metrics.clone();
+    let jit_metrics = Arc::new(JitMetrics::default());
+    let compilation_metrics = jit_metrics.clone();
     config.on_compilation = Some(Arc::new(move |event| {
         compilation_metrics.record_compilation(&event);
     }));
@@ -550,23 +533,22 @@ pub fn build_evm_config<C: EthereumHardforks>(
     let jit_mode = config.jit_mode;
     let backend = JitBackend::new(config)?;
 
-    reth_tracing::tracing::warn!(target: "reth::cli",
+    warn!(target: "reth::cli",
         hot_threshold = tuning.jit_hot_threshold,
         workers = tuning.jit_worker_count,
         mode = ?jit_mode,
         blocking = jit.blocking,
-        "Started experimental revmc JIT backend; this may cause instability",
+        "Started experimental evm2 JIT backend; this may cause instability",
     );
 
-    let factory = RethEvmFactory::new_with_metrics(backend, revmc_metrics.as_ref().clone());
+    let mut factory = RethEvmFactory::new_with_metrics(backend, jit_metrics.as_ref().clone());
+    factory.set_jit_support(true);
     let evm_config = EthEvmConfig::new_with_evm_factory(chain_spec, factory);
 
-    Ok((evm_config, Some(revmc_metrics)))
+    Ok((evm_config, Some(jit_metrics)))
 }
 
 /// Builds an [`EthEvmConfig`] from CLI [`JitArgs`].
-///
-/// This is the shared setup used by both [`EthereumExecutorBuilder`] and `reth re-execute`.
 ///
 /// Compiled without the `jit` feature: errors if JIT was requested via [`JitArgs`] and otherwise
 /// returns a plain interpreter-backed config.
@@ -582,23 +564,18 @@ pub fn build_evm_config<C: EthereumHardforks>(
             "JIT compilation was requested but this binary was compiled without the `jit` feature"
         );
     }
-    let factory = RethEvmFactory::default();
+    let factory = RethEvmFactory::disabled();
     Ok((EthEvmConfig::new_with_evm_factory(chain_spec, factory), None))
 }
 
 /// A regular ethereum evm and executor builder.
-///
-/// Uses [`RethEvmFactory`].
 #[derive(Debug, Default, Clone, Copy)]
 #[non_exhaustive]
 pub struct EthereumExecutorBuilder;
 
 impl<Types, Node> ExecutorBuilder<Node> for EthereumExecutorBuilder
 where
-    Types: NodeTypes<
-        ChainSpec: Hardforks + EthExecutorSpec + EthereumHardforks,
-        Primitives = EthPrimitives,
-    >,
+    Types: NodeTypes<ChainSpec: Hardforks + EthereumHardforks, Primitives = EthPrimitives>,
     Node: FullNodeTypes<Types = Types>,
 {
     type EVM = EthEvmConfig<Types::ChainSpec, RethEvmFactory>;
@@ -607,20 +584,20 @@ where
         let jit = &ctx.config().jit;
         let dump_dir = jit.debug.then(|| ctx.config().datadir().data_dir().join("jit"));
 
-        let (evm_config, revmc_metrics) = build_evm_config(ctx.chain_spec(), jit, dump_dir)?;
+        let (evm_config, jit_metrics) = build_evm_config(ctx.chain_spec(), jit, dump_dir)?;
 
         #[cfg(not(feature = "jit"))]
-        let _ = revmc_metrics;
+        let _ = jit_metrics;
 
         #[cfg(feature = "jit")]
-        if let Some(revmc_metrics) = revmc_metrics {
+        if let Some(jit_metrics) = jit_metrics {
             let metrics_backend = evm_config.executor_factory.evm_factory().backend().clone();
             ctx.task_executor().spawn_with_graceful_shutdown_signal(|shutdown| async move {
                 let mut shutdown = std::pin::pin!(shutdown);
                 loop {
                     tokio::select! {
                         _ = tokio::time::sleep(std::time::Duration::from_secs(5)) => {
-                            revmc_metrics.record(&metrics_backend.stats());
+                            jit_metrics.record(&metrics_backend.stats());
                         }
                         _ = &mut shutdown => break,
                     }

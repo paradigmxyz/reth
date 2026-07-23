@@ -1,34 +1,823 @@
 //! Traits for execution.
 
-use crate::{ConfigureEvm, Database, OnStateHook, TxEnvFor};
-use alloc::{boxed::Box, sync::Arc, vec::Vec};
-use alloy_consensus::{BlockHeader, Header};
-use alloy_eip7928::{compute_block_access_list_hash, BlockAccessList};
-use alloy_eips::eip2718::WithEncoded;
-pub use alloy_evm::block::{BlockExecutor, BlockExecutorFactory, GasOutput};
-use alloy_evm::{
-    block::{CommitChanges, ExecutableTxParts},
-    Evm, EvmEnv, EvmFactory, RecoveredTx, ToTxEnv,
+use crate::{ConfigureEvm, Database, DynDatabase, EvmEnv, TxEnvFor};
+use alloc::{boxed::Box, format, sync::Arc, vec::Vec};
+use alloy_consensus::{
+    transaction::{Either, Recovered, TransactionEnvelope},
+    BlockHeader as _, Header,
 };
+use alloy_eip7928::{compute_block_access_list_hash, BlockAccessIndex, BlockAccessList};
+use alloy_eips::eip2718::{Typed2718, WithEncoded};
 use alloy_primitives::{Address, B256};
+use core::fmt::Debug;
+#[cfg(feature = "std")]
+use evm2::evm::{CacheDB, Db};
+use evm2::{registry::HandlerError, ErrorCode};
 pub use reth_execution_errors::{
-    BlockExecutionError, BlockValidationError, InternalBlockExecutionError,
+    BlockExecutionError, BlockValidationError, EvmError, InternalBlockExecutionError,
+    InvalidTxError,
 };
-use reth_execution_types::BlockExecutionResult;
 pub use reth_execution_types::{BlockExecutionOutput, ExecutionOutcome};
+use reth_execution_types::{
+    BlockExecutionResult, EvmState, EvmStateChangeSink, ExecutionOutcomeState, HashedPostState,
+};
+#[cfg(feature = "std")]
+use reth_primitives_traits::BlockTy;
 use reth_primitives_traits::{
-    Block, HeaderTy, NodePrimitives, ReceiptTy, Recovered, RecoveredBlock, SealedHeader, TxTy,
+    Block, HeaderTy, NodePrimitives, ReceiptTy, RecoveredBlock, SealedHeader, SignedTransaction,
+    TxTy,
 };
 use reth_storage_api::StateProvider;
-pub use reth_storage_errors::provider::ProviderError;
-use reth_trie_common::{updates::TrieUpdates, HashedPostState};
-use revm::{
-    database::{states::bundle_state::BundleRetention, BundleState, State},
-    state::bal::Bal,
-};
+use reth_trie_common::updates::TrieUpdates;
 
-/// A type that knows how to execute a block. It is assumed to operate on a
-/// [`crate::Evm`] internally and use [`State`] as database.
+/// Gas used by a successfully executed transaction.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub struct GasOutput {
+    /// Gas used for receipt accounting.
+    tx_gas_used: u64,
+    /// Regular gas used for Amsterdam block-capacity accounting.
+    regular_gas_used: u64,
+    /// Gas used for state-capacity accounting.
+    state_gas_used: u64,
+}
+
+impl GasOutput {
+    /// Creates a new gas output.
+    pub const fn new(tx_gas_used: u64, state_gas_used: u64) -> Self {
+        Self { tx_gas_used, regular_gas_used: tx_gas_used, state_gas_used }
+    }
+
+    /// Creates a gas output with independent receipt, regular, and state gas accounting.
+    pub const fn new_with_regular(
+        tx_gas_used: u64,
+        regular_gas_used: u64,
+        state_gas_used: u64,
+    ) -> Self {
+        Self { tx_gas_used, regular_gas_used, state_gas_used }
+    }
+
+    /// Returns transaction gas used for receipt accounting.
+    pub const fn tx_gas_used(&self) -> u64 {
+        self.tx_gas_used
+    }
+
+    /// Returns regular gas used for Amsterdam block-capacity accounting.
+    pub const fn regular_gas_used(&self) -> u64 {
+        self.regular_gas_used
+    }
+
+    /// Returns state gas used for state-capacity accounting.
+    pub const fn state_gas_used(&self) -> u64 {
+        self.state_gas_used
+    }
+}
+
+impl From<u64> for GasOutput {
+    fn from(gas_used: u64) -> Self {
+        Self::new(gas_used, gas_used)
+    }
+}
+
+/// Context for building a transaction receipt from an execution result.
+#[derive(Debug, Clone)]
+pub struct ReceiptBuilderCtx<TxType, TransactionResult> {
+    /// Transaction type used by the receipt.
+    pub tx_type: TxType,
+    /// Raw transaction execution result.
+    pub result: TransactionResult,
+    /// Cumulative gas used by this transaction and all prior transactions in the block.
+    pub cumulative_gas_used: u64,
+}
+
+/// Builds chain-specific receipts from raw transaction execution results.
+#[auto_impl::auto_impl(&, Arc)]
+pub trait ReceiptBuilder {
+    /// Consensus transaction type accepted by the executor.
+    type Transaction: SignedTransaction + TransactionEnvelope<TxType: Send + 'static>;
+    /// Receipt produced by this builder.
+    type Receipt: reth_primitives_traits::Receipt;
+
+    /// Builds a receipt for the transaction execution result.
+    fn build_receipt<T: evm2::EvmTypes>(
+        &self,
+        ctx: ReceiptBuilderCtx<
+            <Self::Transaction as TransactionEnvelope>::TxType,
+            evm2::TxResult<T>,
+        >,
+    ) -> Self::Receipt;
+}
+
+/// Marks whether transaction changes should be committed into block executor state.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[must_use]
+pub enum CommitChanges {
+    /// Transaction changes should be committed.
+    Yes,
+    /// Transaction changes should not be committed.
+    No,
+}
+
+impl CommitChanges {
+    /// Returns `true` if transaction changes should be committed.
+    pub const fn should_commit(self) -> bool {
+        matches!(self, Self::Yes)
+    }
+}
+
+/// A detached block transaction output containing its raw execution result.
+pub trait BlockTransactionResult<T: evm2::EvmTypes> {
+    /// Returns the raw transaction execution result.
+    fn result(&self) -> &evm2::TxResultWithState<T>;
+}
+
+/// A configured EVM instance.
+pub trait Evm {
+    /// Runtime EVM type family.
+    type EvmTypes: evm2::EvmTypes<Tx = Self::Transaction>;
+    /// Transaction environment consumed by this EVM.
+    type Transaction;
+
+    /// Executes a transaction without committing its state changes.
+    fn transact(
+        &mut self,
+        transaction: &Recovered<Self::Transaction>,
+    ) -> Result<evm2::TxResultWithState<Self::EvmTypes>, BlockExecutionError>;
+
+    /// Executes a transaction with an inspector without committing its state changes.
+    fn transact_with_inspector<I>(
+        &mut self,
+        transaction: &Recovered<Self::Transaction>,
+        inspector: I,
+    ) -> Result<(I, evm2::TxResultWithState<Self::EvmTypes>), BlockExecutionError>
+    where
+        I: evm2::Inspector<Self::EvmTypes> + 'static;
+
+    /// Sets the inspector used by subsequent transactions.
+    fn set_inspector<I>(&mut self, inspector: I)
+    where
+        I: evm2::Inspector<Self::EvmTypes> + 'static;
+
+    /// Returns active precompile addresses and identifiers.
+    fn precompile_ids(&self) -> Vec<(Address, evm2::precompiles::PrecompileId)>;
+
+    /// Returns whether an address is an active precompile.
+    fn has_precompile(&self, address: &Address) -> bool;
+
+    /// Returns account information visible through the accepted state overlay.
+    fn account_info(
+        &mut self,
+        address: &Address,
+    ) -> Result<Option<evm2::evm::AccountInfo>, BlockExecutionError>;
+
+    /// Applies precompile address moves to the active precompile set.
+    fn move_precompiles(
+        &mut self,
+        moves: impl IntoIterator<Item = (Address, Address)>,
+    ) -> Result<(), evm2::precompiles::MovePrecompileError>;
+
+    /// Executes a transaction and discards its writes while streaming observed state changes into
+    /// `sink`.
+    fn transact_and_discard<S>(
+        &mut self,
+        transaction: &Recovered<Self::Transaction>,
+        sink: &mut S,
+    ) -> Result<(), BlockExecutionError>
+    where
+        S: EvmStateChangeSink,
+        S::Error: Debug;
+}
+
+impl<'a, T: evm2::EvmTypes<Tx: Typed2718>> Evm for evm2::Evm<'a, T> {
+    type EvmTypes = T;
+    type Transaction = T::Tx;
+
+    fn transact(
+        &mut self,
+        transaction: &Recovered<Self::Transaction>,
+    ) -> Result<evm2::TxResultWithState<T>, BlockExecutionError> {
+        let resolution = transaction_resolution(evm2::Evm::transact(self, transaction));
+        resolve_transaction(self, resolution)
+    }
+
+    fn transact_with_inspector<I: evm2::Inspector<T> + 'a>(
+        &mut self,
+        transaction: &Recovered<Self::Transaction>,
+        inspector: I,
+    ) -> Result<(I, evm2::TxResultWithState<T>), BlockExecutionError> {
+        // TODO(dani): use either `&mut Inspector` or `clear_inspector_as`.
+        evm2::Evm::set_inspector(self, inspector);
+        let resolution = transaction_resolution(evm2::Evm::transact(self, transaction));
+        let result = resolve_transaction(self, resolution);
+        let inspector = self.clear_inspector().expect("inspector was set before execution");
+        // SAFETY: the boxed inspector was created from `I` immediately above and was not replaced.
+        let inspector = unsafe { Box::from_raw(Box::into_raw(inspector).cast::<I>()) };
+        result.map(|result| (*inspector, result))
+    }
+
+    fn set_inspector<I: evm2::Inspector<T> + 'a>(&mut self, inspector: I) {
+        evm2::Evm::set_inspector(self, inspector);
+    }
+
+    fn precompile_ids(&self) -> Vec<(Address, evm2::precompiles::PrecompileId)> {
+        self.precompiles().precompile_ids()
+    }
+
+    fn has_precompile(&self, address: &Address) -> bool {
+        self.precompiles().contains(address)
+    }
+
+    fn account_info(
+        &mut self,
+        address: &Address,
+    ) -> Result<Option<evm2::evm::AccountInfo>, BlockExecutionError> {
+        match self.state_mut().account_info_untracked(address) {
+            Ok(account) => Ok(account),
+            Err(code) => Err(BlockExecutionError::other(self.database_mut().error(code))),
+        }
+    }
+
+    fn move_precompiles(
+        &mut self,
+        moves: impl IntoIterator<Item = (Address, Address)>,
+    ) -> Result<(), evm2::precompiles::MovePrecompileError> {
+        // TODO(dani): precompiles_as_mut
+        let mut precompiles = evm2::Precompiles::<T>::base(self.spec_id());
+        precompiles.as_map_mut().move_precompiles(moves)?;
+        self.set_precompiles(precompiles);
+        Ok(())
+    }
+
+    fn transact_and_discard<S>(
+        &mut self,
+        transaction: &Recovered<Self::Transaction>,
+        sink: &mut S,
+    ) -> Result<(), BlockExecutionError>
+    where
+        S: EvmStateChangeSink,
+        S::Error: Debug,
+    {
+        let executed = self.transact(transaction).map_err(|err| {
+            BlockExecutionError::msg(format!("discarded transaction execution failed: {err:?}"))
+        })?;
+
+        if let Some(code) = executed.result().error_code {
+            let _ = executed.discard();
+            return Err(BlockExecutionError::msg(format!(
+                "discarded transaction database error: {code:?}"
+            )))
+        }
+
+        executed.discard_with(sink).map(|_| ()).map_err(|err| {
+            BlockExecutionError::msg(format!("discarded state sink failed: {err:?}"))
+        })
+    }
+}
+
+enum TransactionResolution<T: evm2::EvmTypes> {
+    Result(evm2::TxResultWithState<T>),
+    DatabaseError(ErrorCode),
+    HandlerError(HandlerError),
+}
+
+fn transaction_resolution<T: evm2::EvmTypes>(
+    executed: Result<evm2::ExecutedTx<'_, '_, T>, HandlerError>,
+) -> TransactionResolution<T> {
+    match executed {
+        Ok(executed) => {
+            if let Some(code) = executed.result().error_code {
+                let _ = executed.discard();
+                TransactionResolution::DatabaseError(code)
+            } else {
+                TransactionResolution::Result(executed.detach())
+            }
+        }
+        Err(err) => TransactionResolution::HandlerError(err),
+    }
+}
+
+fn resolve_transaction<T: evm2::EvmTypes>(
+    evm: &mut evm2::Evm<'_, T>,
+    resolution: TransactionResolution<T>,
+) -> Result<evm2::TxResultWithState<T>, BlockExecutionError> {
+    match resolution {
+        TransactionResolution::Result(result) => Ok(result),
+        TransactionResolution::DatabaseError(code) |
+        TransactionResolution::HandlerError(HandlerError::Fatal(code)) => {
+            Err(BlockExecutionError::other(evm.database_mut().error(code)))
+        }
+        TransactionResolution::HandlerError(err) => {
+            Err(BlockValidationError::Other(Box::new(err)).into())
+        }
+    }
+}
+
+/// A configured block executor.
+pub trait BlockExecutor: Sized {
+    /// Consensus transaction type executed by this executor.
+    type Transaction;
+    /// Receipt type produced by this executor.
+    type Receipt;
+    /// EVM instance used by this executor.
+    type Evm: Evm;
+    /// Owned transaction execution result and detached state changes.
+    type TransactionResultWithState: BlockTransactionResult<<Self::Evm as Evm>::EvmTypes> + Send;
+    /// EVM-native block access list used for indexed reads.
+    type BlockAccessList: Send + Sync;
+
+    /// Returns the underlying EVM.
+    fn evm(&self) -> &Self::Evm;
+
+    /// Returns the underlying EVM mutably.
+    fn evm_mut(&mut self) -> &mut Self::Evm;
+
+    /// Sets a hook for streamed hashed state updates emitted during block execution.
+    ///
+    /// Returns `true` if the hook was installed.
+    fn set_state_hook(&mut self, _hook: impl FnMut(HashedPostState) + Send + 'static) -> bool {
+        false
+    }
+
+    /// Converts a canonical EIP-7928 block access list into the EVM-native representation.
+    fn convert_block_access_list(
+        block_access_list: &BlockAccessList,
+    ) -> Result<Self::BlockAccessList, BlockExecutionError>;
+
+    /// Attaches an EIP-7928 block access list for indexed state reads.
+    fn set_block_access_list(&mut self, block_access_list: Arc<Self::BlockAccessList>);
+
+    /// Sets the EIP-7928 block access index used by state reads and BAL construction.
+    fn set_block_access_index(&mut self, index: BlockAccessIndex);
+
+    /// Enables construction of an EIP-7928 block access list from committed state changes.
+    fn enable_block_access_list_builder(&mut self);
+
+    /// Takes the canonical EIP-7928 block access list built from committed state changes.
+    fn take_block_access_list(&mut self) -> Option<BlockAccessList>;
+
+    /// Applies pre-execution block changes.
+    fn apply_pre_execution_changes(&mut self) -> Result<(), BlockExecutionError>;
+
+    /// Executes a transaction, invokes `f` with the detached result and state changes, and commits
+    /// changes when `f` returns [`CommitChanges::Yes`].
+    fn execute_transaction_with_commit_condition(
+        &mut self,
+        transaction: impl ExecutorTx<Self>,
+        f: impl FnOnce(&Self::TransactionResultWithState) -> CommitChanges,
+    ) -> Result<Option<GasOutput>, BlockExecutionError> {
+        let output = self.execute_transaction_without_commit(transaction)?;
+        if f(&output).should_commit() {
+            self.commit_transaction(output).map(Some)
+        } else {
+            Ok(None)
+        }
+    }
+
+    /// Executes a transaction and detaches its state changes without committing them.
+    fn execute_transaction_without_commit(
+        &mut self,
+        transaction: impl ExecutorTx<Self>,
+    ) -> Result<Self::TransactionResultWithState, BlockExecutionError>;
+
+    /// Commits detached transaction state and records its receipt and gas accounting.
+    fn commit_transaction(
+        &mut self,
+        output: Self::TransactionResultWithState,
+    ) -> Result<GasOutput, BlockExecutionError>;
+
+    /// Executes a transaction, invokes `f` with the detached result and state changes, and commits
+    /// changes.
+    fn execute_transaction_with_result_closure(
+        &mut self,
+        transaction: impl ExecutorTx<Self>,
+        f: impl FnOnce(&Self::TransactionResultWithState),
+    ) -> Result<GasOutput, BlockExecutionError> {
+        self.execute_transaction_with_commit_condition(transaction, |result| {
+            f(result);
+            CommitChanges::Yes
+        })
+        .map(Option::unwrap_or_default)
+    }
+
+    /// Executes a transaction and commits changes.
+    fn execute_transaction(
+        &mut self,
+        transaction: impl ExecutorTx<Self>,
+    ) -> Result<GasOutput, BlockExecutionError> {
+        self.execute_transaction_with_result_closure(transaction, |_| {})
+    }
+
+    /// Returns receipts accumulated so far.
+    fn receipts(&self) -> &[Self::Receipt];
+
+    /// Finishes block execution and returns the output.
+    fn finish_with_block_access_list(
+        self,
+    ) -> Result<(BlockExecutionOutput<Self::Receipt>, Option<BlockAccessList>), BlockExecutionError>;
+
+    /// Finishes block execution and returns the output.
+    fn finish(self) -> Result<BlockExecutionOutput<Self::Receipt>, BlockExecutionError> {
+        self.finish_with_block_access_list().map(|(output, _)| output)
+    }
+}
+
+/// A type that creates configured block executors.
+pub trait BlockExecutorFactory {
+    /// Additional EVM factory configuration owned by this executor factory.
+    type EvmFactory;
+    /// Runtime EVM type family.
+    type EvmTypes: evm2::EvmTypes<TxResultExt: Send>;
+    /// Consensus transaction type consumed by executors from this factory.
+    type Transaction: Debug + Clone + Send + Sync + 'static;
+    /// Receipt type produced by executors from this factory.
+    type Receipt;
+    /// EVM instance consumed by executors from this factory.
+    type Evm<'a>: Evm<
+        EvmTypes = Self::EvmTypes,
+        Transaction = <Self::EvmTypes as evm2::EvmTypesHost>::Tx,
+    >;
+    /// EVM environment consumed by this factory.
+    type EvmEnv: EvmEnv<EvmTypes = Self::EvmTypes>;
+    /// Execution context for a block or payload.
+    type ExecutionCtx<'a>: Debug + Clone + Send
+    where
+        Self: 'a;
+    /// Block executor returned by this factory.
+    type Executor<'a>: BlockExecutor<
+        Transaction = Self::Transaction,
+        Receipt = Self::Receipt,
+        Evm = Self::Evm<'a>,
+    >
+    where
+        Self: 'a;
+
+    /// Creates a configured block executor.
+    fn create_executor<'a>(
+        &'a self,
+        evm: Self::Evm<'a>,
+        ctx: Self::ExecutionCtx<'a>,
+    ) -> Self::Executor<'a>
+    where
+        Self: 'a;
+
+    /// Returns the configured EVM factory state.
+    fn evm_factory(&self) -> &Self::EvmFactory;
+
+    /// Creates an EVM instance with the configured execution environment.
+    fn evm_with_env<'a, DB>(&self, db: DB, evm_env: Self::EvmEnv) -> Self::Evm<'a>
+    where
+        DB: DynDatabase + 'a;
+
+    /// Creates an EVM instance with the configured execution environment over a typed database.
+    #[cfg(feature = "std")]
+    fn evm_with_database<'a, DB>(&self, db: DB, evm_env: Self::EvmEnv) -> Self::Evm<'a>
+    where
+        DB: Database + 'a,
+    {
+        self.evm_with_env(Db::new(db), evm_env)
+    }
+}
+
+/// Input for block assembly.
+#[expect(missing_debug_implementations)]
+#[non_exhaustive]
+pub struct BlockAssemblerInput<'a, 'b, F: BlockExecutorFactory + 'a, H = Header> {
+    /// EVM environment used for block execution.
+    pub evm_env: F::EvmEnv,
+    /// Execution context used for block execution.
+    pub execution_ctx: F::ExecutionCtx<'a>,
+    /// Parent block header.
+    pub parent: &'a SealedHeader<H>,
+    /// Transactions that were executed in this block.
+    pub transactions: Vec<F::Transaction>,
+    /// Output of block execution.
+    pub output: &'b BlockExecutionResult<F::Receipt>,
+    /// Execution state after block execution.
+    pub execution_state: &'b EvmState,
+    /// Provider with access to state.
+    pub state_provider: &'b dyn StateProvider,
+    /// State root for the assembled block.
+    pub state_root: B256,
+    /// Block access list hash.
+    pub block_access_list_hash: Option<B256>,
+}
+
+impl<'a, 'b, F: BlockExecutorFactory + 'a, H> BlockAssemblerInput<'a, 'b, F, H> {
+    /// Creates a new [`BlockAssemblerInput`].
+    #[expect(clippy::too_many_arguments)]
+    pub const fn new(
+        evm_env: F::EvmEnv,
+        execution_ctx: F::ExecutionCtx<'a>,
+        parent: &'a SealedHeader<H>,
+        transactions: Vec<F::Transaction>,
+        output: &'b BlockExecutionResult<F::Receipt>,
+        execution_state: &'b EvmState,
+        state_provider: &'b dyn StateProvider,
+        state_root: B256,
+        block_access_list_hash: Option<B256>,
+    ) -> Self {
+        Self {
+            evm_env,
+            execution_ctx,
+            parent,
+            transactions,
+            output,
+            execution_state,
+            state_provider,
+            state_root,
+            block_access_list_hash,
+        }
+    }
+}
+
+/// A type that assembles a block from execution output.
+#[auto_impl::auto_impl(&, Arc)]
+pub trait BlockAssembler<F: BlockExecutorFactory> {
+    /// The block type produced by the assembler.
+    type Block: Block;
+
+    /// Builds a block. see [`BlockAssemblerInput`] documentation for more details.
+    fn assemble_block(
+        &self,
+        input: BlockAssemblerInput<'_, '_, F, <Self::Block as Block>::Header>,
+    ) -> Result<Self::Block, BlockExecutionError>;
+}
+
+/// Output of block building.
+#[derive(Debug, Clone)]
+pub struct BlockBuilderOutcome<N: NodePrimitives> {
+    /// Result of block execution.
+    pub execution_result: BlockExecutionResult<N::Receipt>,
+    /// Changed state produced by block execution.
+    pub execution_state: reth_execution_types::IndexedBlockState,
+    /// Hashed state after execution.
+    pub hashed_state: HashedPostState,
+    /// Trie updates collected during state-root calculation.
+    pub trie_updates: TrieUpdates,
+    /// The built block.
+    pub block: RecoveredBlock<N::Block>,
+    /// Block access list built during execution (EIP-7928, Amsterdam).
+    pub block_access_list: Option<BlockAccessList>,
+}
+
+/// A type that knows how to execute transactions and assemble a block.
+pub trait BlockBuilder: Sized {
+    /// The primitive types used by the inner [`BlockExecutor`].
+    type Primitives: NodePrimitives;
+    /// Inner block executor.
+    type Executor: BlockExecutor<
+        Transaction = TxTy<Self::Primitives>,
+        Receipt = ReceiptTy<Self::Primitives>,
+        Evm: Evm<Transaction: From<TxTy<Self::Primitives>>>,
+    >;
+    /// EVM environment used for block execution.
+    type EvmEnv: EvmEnv;
+
+    /// Returns the EVM environment used for block execution.
+    fn evm_env(&self) -> &Self::EvmEnv;
+
+    /// Applies pre-execution block changes.
+    fn apply_pre_execution_changes(&mut self) -> Result<(), BlockExecutionError>;
+
+    /// Executes a transaction, exposes its detached result and state changes to `f`, and saves it
+    /// for block assembly only if committed.
+    fn execute_transaction_with_commit_condition(
+        &mut self,
+        tx: impl ExecutorTx<Self::Executor>,
+        f: impl FnOnce(&<Self::Executor as BlockExecutor>::TransactionResultWithState) -> CommitChanges,
+    ) -> Result<Option<GasOutput>, BlockExecutionError>;
+
+    /// Executes a transaction, invokes `f` with the detached result and state changes, and saves it
+    /// for block assembly.
+    fn execute_transaction_with_result_closure(
+        &mut self,
+        tx: impl ExecutorTx<Self::Executor>,
+        f: impl FnOnce(&<Self::Executor as BlockExecutor>::TransactionResultWithState),
+    ) -> Result<GasOutput, BlockExecutionError> {
+        self.execute_transaction_with_commit_condition(tx, |result| {
+            f(result);
+            CommitChanges::Yes
+        })
+        .map(Option::unwrap_or_default)
+    }
+
+    /// Executes a transaction and saves it for block assembly.
+    fn execute_transaction(
+        &mut self,
+        tx: impl ExecutorTx<Self::Executor>,
+    ) -> Result<GasOutput, BlockExecutionError> {
+        self.execute_transaction_with_result_closure(tx, |_| ())
+    }
+
+    /// Completes block building.
+    fn finish(
+        self,
+        state_provider: impl StateProvider,
+        state_root_precomputed: Option<(B256, TrieUpdates)>,
+    ) -> Result<BlockBuilderOutcome<Self::Primitives>, BlockExecutionError> {
+        self.finish_with_state_root(state_provider, move |_| Ok(state_root_precomputed))
+    }
+
+    /// Completes block building, resolving an optional state root after execution is finalized.
+    fn finish_with_state_root(
+        self,
+        state_provider: impl StateProvider,
+        state_root: impl FnOnce(
+            &BlockExecutionOutput<ReceiptTy<Self::Primitives>>,
+        ) -> Result<Option<(B256, TrieUpdates)>, BlockExecutionError>,
+    ) -> Result<BlockBuilderOutcome<Self::Primitives>, BlockExecutionError>;
+
+    /// Sets a hook for streamed hashed state updates emitted while building a block.
+    ///
+    /// Returns `true` if the hook was installed.
+    fn set_state_hook(&mut self, _hook: impl FnMut(HashedPostState) + Send + 'static) -> bool {
+        false
+    }
+
+    /// Provides mutable access to the inner [`BlockExecutor`].
+    fn executor_mut(&mut self) -> &mut Self::Executor;
+
+    /// Provides access to the inner [`BlockExecutor`].
+    fn executor(&self) -> &Self::Executor;
+
+    /// Provides mutable access to the underlying EVM.
+    fn evm_mut(&mut self) -> &mut <Self::Executor as BlockExecutor>::Evm {
+        self.executor_mut().evm_mut()
+    }
+
+    /// Provides access to the underlying EVM.
+    fn evm(&self) -> &<Self::Executor as BlockExecutor>::Evm {
+        self.executor().evm()
+    }
+
+    /// Consumes the type and returns the underlying executor.
+    fn into_executor(self) -> Self::Executor;
+}
+
+/// A block builder backed by a configured [`BlockExecutor`].
+#[derive(Debug)]
+pub struct BasicBlockBuilder<'a, F, Executor, Assembler, N>
+where
+    F: BlockExecutorFactory + 'a,
+    N: NodePrimitives,
+{
+    /// The block executor used to execute transactions.
+    pub executor: Executor,
+    /// EVM environment used for execution.
+    pub evm_env: F::EvmEnv,
+    /// Transactions executed in this block.
+    pub transactions: Vec<Recovered<TxTy<N>>>,
+    /// Block execution context.
+    pub ctx: F::ExecutionCtx<'a>,
+    /// Parent block header.
+    pub parent: &'a SealedHeader<HeaderTy<N>>,
+    /// Block assembler.
+    pub assembler: &'a Assembler,
+}
+
+impl<'a, F, Assembler, N> BasicBlockBuilder<'a, F, F::Executor<'a>, Assembler, N>
+where
+    F: BlockExecutorFactory<Transaction = TxTy<N>, Receipt = ReceiptTy<N>> + 'a,
+    Assembler: BlockAssembler<F, Block = N::Block> + 'a,
+    N: NodePrimitives,
+{
+    /// Creates a block builder that accumulates final hashed state in the execution output.
+    pub fn new(
+        executor_factory: &'a F,
+        assembler: &'a Assembler,
+        evm: F::Evm<'a>,
+        evm_env: F::EvmEnv,
+        parent: &'a SealedHeader<HeaderTy<N>>,
+        ctx: F::ExecutionCtx<'a>,
+    ) -> Self {
+        Self {
+            executor: executor_factory.create_executor(evm, ctx.clone()),
+            evm_env,
+            transactions: Vec::new(),
+            ctx,
+            parent,
+            assembler,
+        }
+    }
+}
+
+/// Executable transaction consumed by a block executor.
+pub trait ExecutorTx<Executor: BlockExecutor>:
+    ExecutableTxParts<Recovered<<Executor::Evm as Evm>::Transaction>, Executor::Transaction>
+{
+}
+
+impl<T, Executor> ExecutorTx<Executor> for T
+where
+    Executor: BlockExecutor,
+    T: ExecutableTxParts<Recovered<<Executor::Evm as Evm>::Transaction>, Executor::Transaction>,
+{
+}
+
+impl<'a, F, Executor, Assembler, N> BlockBuilder
+    for BasicBlockBuilder<'a, F, Executor, Assembler, N>
+where
+    F: BlockExecutorFactory<Transaction = TxTy<N>, Receipt = ReceiptTy<N>>,
+    Executor: BlockExecutor<
+        Transaction = TxTy<N>,
+        Receipt = ReceiptTy<N>,
+        Evm: Evm<EvmTypes = F::EvmTypes>,
+    >,
+    Assembler: BlockAssembler<F, Block = N::Block>,
+    N: NodePrimitives,
+    TxTy<N>: Clone,
+    <<Executor as BlockExecutor>::Evm as Evm>::Transaction: From<TxTy<N>>,
+{
+    type Primitives = N;
+    type Executor = Executor;
+    type EvmEnv = F::EvmEnv;
+
+    fn evm_env(&self) -> &Self::EvmEnv {
+        &self.evm_env
+    }
+
+    fn apply_pre_execution_changes(&mut self) -> Result<(), BlockExecutionError> {
+        self.executor.apply_pre_execution_changes()
+    }
+
+    fn execute_transaction_with_commit_condition(
+        &mut self,
+        tx: impl ExecutorTx<Self::Executor>,
+        f: impl FnOnce(&<Self::Executor as BlockExecutor>::TransactionResultWithState) -> CommitChanges,
+    ) -> Result<Option<GasOutput>, BlockExecutionError> {
+        let (tx_env, tx) = tx.into_parts();
+        let tx = tx.to_recovered();
+        if let Some(output) =
+            self.executor.execute_transaction_with_commit_condition((tx_env, &tx), f)?
+        {
+            self.transactions.push(tx);
+            Ok(Some(output))
+        } else {
+            Ok(None)
+        }
+    }
+
+    fn finish_with_state_root(
+        self,
+        state_provider: impl StateProvider,
+        state_root: impl FnOnce(
+            &BlockExecutionOutput<ReceiptTy<Self::Primitives>>,
+        ) -> Result<Option<(B256, TrieUpdates)>, BlockExecutionError>,
+    ) -> Result<BlockBuilderOutcome<N>, BlockExecutionError> {
+        let Self { executor, evm_env, transactions, ctx, parent, assembler } = self;
+
+        let (output, block_access_list) = executor.finish_with_block_access_list()?;
+        let block_access_list_hash =
+            block_access_list.as_ref().map(|bal| compute_block_access_list_hash(bal.as_slice()));
+        let hashed_state = state_provider.hashed_post_state(output.state.inner());
+        let (state_root, trie_updates) = match state_root(&output)? {
+            Some(precomputed) => precomputed,
+            None => state_provider
+                .state_root_with_updates(hashed_state.clone())
+                .map_err(BlockExecutionError::other)?,
+        };
+        let (transactions, senders) = transactions.into_iter().map(|tx| tx.into_parts()).unzip();
+
+        let block = assembler.assemble_block(BlockAssemblerInput {
+            evm_env,
+            execution_ctx: ctx,
+            parent,
+            transactions,
+            output: &output.result,
+            execution_state: output.state.inner(),
+            state_provider: &state_provider,
+            state_root,
+            block_access_list_hash,
+        })?;
+        let block = RecoveredBlock::new_unhashed(block, senders);
+
+        Ok(BlockBuilderOutcome {
+            execution_result: output.result,
+            execution_state: output.state,
+            hashed_state,
+            trie_updates,
+            block,
+            block_access_list,
+        })
+    }
+
+    fn set_state_hook(&mut self, hook: impl FnMut(HashedPostState) + Send + 'static) -> bool {
+        self.executor.set_state_hook(hook)
+    }
+
+    fn executor_mut(&mut self) -> &mut Self::Executor {
+        &mut self.executor
+    }
+
+    fn executor(&self) -> &Self::Executor {
+        &self.executor
+    }
+
+    fn into_executor(self) -> Self::Executor {
+        self.executor
+    }
+}
+
+/// A type that knows how to execute blocks over a database.
 pub trait Executor<DB: Database>: Sized {
     /// The primitive types used by the executor.
     type Primitives: NodePrimitives;
@@ -41,34 +830,75 @@ pub trait Executor<DB: Database>: Sized {
         block: &RecoveredBlock<<Self::Primitives as NodePrimitives>::Block>,
     ) -> Result<BlockExecutionResult<<Self::Primitives as NodePrimitives>::Receipt>, Self::Error>;
 
-    /// Executes the EVM with the given input and accepts a state hook closure that is invoked with
-    /// the EVM state after execution.
+    /// Executes a single block and streams hashed state updates to the provided hook.
     fn execute_one_with_state_hook<F>(
         &mut self,
         block: &RecoveredBlock<<Self::Primitives as NodePrimitives>::Block>,
         state_hook: F,
     ) -> Result<BlockExecutionResult<<Self::Primitives as NodePrimitives>::Receipt>, Self::Error>
     where
-        F: OnStateHook + 'static;
+        F: FnMut(HashedPostState) + Send + 'static;
 
     /// Consumes the type and executes the block.
-    ///
-    /// # Note
-    /// Execution happens without any validation of the output.
-    ///
-    /// # Returns
-    /// The output of the block execution.
     fn execute(
         mut self,
         block: &RecoveredBlock<<Self::Primitives as NodePrimitives>::Block>,
     ) -> Result<BlockExecutionOutput<<Self::Primitives as NodePrimitives>::Receipt>, Self::Error>
     {
         let result = self.execute_one(block)?;
-        let mut state = self.into_state();
-        Ok(BlockExecutionOutput { state: state.take_bundle(), result })
+        let state = self.into_state();
+        Ok(BlockExecutionOutput::new(result, state.into_execution_state()))
     }
 
-    /// Executes multiple inputs in the batch, and returns an aggregated [`ExecutionOutcome`].
+    /// Consumes the type, executes the block, and streams hashed state updates to the provided
+    /// hook.
+    fn execute_with_state_hook<F>(
+        mut self,
+        block: &RecoveredBlock<<Self::Primitives as NodePrimitives>::Block>,
+        state_hook: F,
+    ) -> Result<BlockExecutionOutput<<Self::Primitives as NodePrimitives>::Receipt>, Self::Error>
+    where
+        F: FnMut(HashedPostState) + Send + 'static,
+    {
+        let result = self.execute_one_with_state_hook(block, state_hook)?;
+        let state = self.into_state();
+        Ok(BlockExecutionOutput::new(result, state.into_execution_state()))
+    }
+
+    /// Executes the block and invokes `f` with the accumulated execution state after execution.
+    fn execute_with_state_closure<F>(
+        mut self,
+        block: &RecoveredBlock<<Self::Primitives as NodePrimitives>::Block>,
+        mut f: F,
+    ) -> Result<BlockExecutionOutput<<Self::Primitives as NodePrimitives>::Receipt>, Self::Error>
+    where
+        F: FnMut(&ExecutionOutcomeState),
+    {
+        let result = self.execute_one(block)?;
+        let state = self.into_state();
+        f(&state);
+
+        Ok(BlockExecutionOutput::new(result, state.into_execution_state()))
+    }
+
+    /// Executes the block and always invokes `f` with the accumulated execution state, even when
+    /// execution fails.
+    fn execute_with_state_closure_always<F>(
+        mut self,
+        block: &RecoveredBlock<<Self::Primitives as NodePrimitives>::Block>,
+        mut f: F,
+    ) -> Result<BlockExecutionOutput<<Self::Primitives as NodePrimitives>::Receipt>, Self::Error>
+    where
+        F: FnMut(&ExecutionOutcomeState),
+    {
+        let result = self.execute_one(block);
+        let state = self.into_state();
+        f(&state);
+
+        Ok(BlockExecutionOutput::new(result?, state.into_execution_state()))
+    }
+
+    /// Executes multiple inputs in the batch and returns an aggregated [`ExecutionOutcome`].
     fn execute_batch<'a, I>(
         mut self,
         blocks: I,
@@ -89,502 +919,117 @@ pub trait Executor<DB: Database>: Sized {
 
         Ok(ExecutionOutcome::from_blocks(
             first_block.unwrap_or_default(),
-            self.into_state().take_bundle(),
+            self.into_state(),
             results,
         ))
     }
 
-    /// Executes the EVM with the given input and accepts a state closure that is invoked with
-    /// the EVM state after execution.
-    fn execute_with_state_closure<F>(
-        mut self,
-        block: &RecoveredBlock<<Self::Primitives as NodePrimitives>::Block>,
-        mut f: F,
-    ) -> Result<BlockExecutionOutput<<Self::Primitives as NodePrimitives>::Receipt>, Self::Error>
-    where
-        F: FnMut(&State<DB>),
-    {
-        let result = self.execute_one(block)?;
-        let mut state = self.into_state();
-        f(&state);
-        Ok(BlockExecutionOutput { state: state.take_bundle(), result })
-    }
-
-    /// Executes the EVM with the given input and accepts a state closure that is always invoked
-    /// with the EVM state after execution, even after failure.
-    fn execute_with_state_closure_always<F>(
-        mut self,
-        block: &RecoveredBlock<<Self::Primitives as NodePrimitives>::Block>,
-        mut f: F,
-    ) -> Result<BlockExecutionOutput<<Self::Primitives as NodePrimitives>::Receipt>, Self::Error>
-    where
-        F: FnMut(&State<DB>),
-    {
-        let result = self.execute_one(block);
-        let mut state = self.into_state();
-        f(&state);
-
-        Ok(BlockExecutionOutput { state: state.take_bundle(), result: result? })
-    }
-
-    /// Executes the EVM with the given input and accepts a state hook closure that is invoked with
-    /// the EVM state after execution.
-    fn execute_with_state_hook<F>(
-        mut self,
-        block: &RecoveredBlock<<Self::Primitives as NodePrimitives>::Block>,
-        state_hook: F,
-    ) -> Result<BlockExecutionOutput<<Self::Primitives as NodePrimitives>::Receipt>, Self::Error>
-    where
-        F: OnStateHook + 'static,
-    {
-        let result = self.execute_one_with_state_hook(block, state_hook)?;
-        let mut state = self.into_state();
-        Ok(BlockExecutionOutput { state: state.take_bundle(), result })
-    }
-
-    /// Consumes the executor and returns the [`State`] containing all state changes.
-    fn into_state(self) -> State<DB>;
-
     /// The size hint of the batch's tracked state size.
-    ///
-    /// This is used to optimize DB commits depending on the size of the state.
     fn size_hint(&self) -> usize;
 
-    /// Takes built [`BlockAccessList`] from executor.
+    /// Converts the executor into its accumulated batch state.
+    fn into_state(self) -> ExecutionOutcomeState;
+
+    /// Takes the canonical block access list from executor.
     fn take_bal(&mut self) -> Option<BlockAccessList>;
 }
 
-/// Input for block building. Consumed by [`BlockAssembler`].
-///
-/// This struct contains all the data needed by the [`BlockAssembler`] to create
-/// a complete block after transaction execution.
-///
-/// # Fields Overview
-///
-/// - `evm_env`: The EVM configuration used during execution (spec ID, block env, etc.)
-/// - `execution_ctx`: Additional context like withdrawals and ommers
-/// - `parent`: The parent block header this block builds on
-/// - `transactions`: All transactions that were successfully executed
-/// - `output`: Execution results including receipts and gas used
-/// - `bundle_state`: Accumulated state changes from all transactions
-/// - `state_provider`: Access to the current state for additional lookups
-/// - `state_root`: The calculated state root after all changes
-/// - `block_access_list_hash`: Block access list hash (EIP-7928, Amsterdam)
-///
-/// # Usage
-///
-/// This is typically created internally by [`BlockBuilder::finish`] after all
-/// transactions have been executed:
-///
-/// ```rust,ignore
-/// let input = BlockAssemblerInput {
-///     evm_env: builder.evm_env(),
-///     execution_ctx: builder.context(),
-///     parent: &parent_header,
-///     transactions: executed_transactions,
-///     output: &execution_result,
-///     bundle_state: &state_changes,
-///     state_provider: &state,
-///     state_root: calculated_root,
-///     block_access_list_hash: Some(calculated_bal_hash),
-/// };
-///
-/// let block = assembler.assemble_block(input)?;
-/// ```
-#[derive(derive_more::Debug)]
-#[non_exhaustive]
-pub struct BlockAssemblerInput<'a, 'b, F: BlockExecutorFactory, H = Header> {
-    /// Configuration of EVM used when executing the block.
-    ///
-    /// Contains context relevant to EVM such as [`revm::context::BlockEnv`].
-    pub evm_env:
-        EvmEnv<<F::EvmFactory as EvmFactory>::Spec, <F::EvmFactory as EvmFactory>::BlockEnv>,
-    /// [`BlockExecutorFactory::ExecutionCtx`] used to execute the block.
-    pub execution_ctx: F::ExecutionCtx<'a>,
-    /// Parent block header.
-    pub parent: &'a SealedHeader<H>,
-    /// Transactions that were executed in this block.
-    pub transactions: Vec<F::Transaction>,
-    /// Output of block execution.
-    pub output: &'b BlockExecutionResult<F::Receipt>,
-    /// [`BundleState`] after the block execution.
-    pub bundle_state: &'a BundleState,
-    /// Provider with access to state.
-    #[debug(skip)]
-    pub state_provider: &'b dyn StateProvider,
-    /// State root for this block.
-    pub state_root: B256,
-    /// Block access list hash (EIP-7928, Amsterdam).
-    pub block_access_list_hash: Option<B256>,
-}
-
-impl<'a, 'b, F: BlockExecutorFactory, H> BlockAssemblerInput<'a, 'b, F, H> {
-    /// Creates a new [`BlockAssemblerInput`].
-    #[expect(clippy::too_many_arguments)]
-    pub fn new(
-        evm_env: EvmEnv<
-            <F::EvmFactory as EvmFactory>::Spec,
-            <F::EvmFactory as EvmFactory>::BlockEnv,
-        >,
-        execution_ctx: F::ExecutionCtx<'a>,
-        parent: &'a SealedHeader<H>,
-        transactions: Vec<F::Transaction>,
-        output: &'b BlockExecutionResult<F::Receipt>,
-        bundle_state: &'a BundleState,
-        state_provider: &'b dyn StateProvider,
-        state_root: B256,
-        block_access_list_hash: Option<B256>,
-    ) -> Self {
-        Self {
-            evm_env,
-            execution_ctx,
-            parent,
-            transactions,
-            output,
-            bundle_state,
-            state_provider,
-            state_root,
-            block_access_list_hash,
-        }
-    }
-}
-
-/// A type that knows how to assemble a block from execution results.
-///
-/// The [`BlockAssembler`] is the final step in block production. After transactions
-/// have been executed by the [`BlockExecutor`], the assembler takes all the execution
-/// outputs and creates a properly formatted block.
-///
-/// # Responsibilities
-///
-/// The assembler is responsible for:
-/// - Setting the correct block header fields (gas used, receipts root, logs bloom, etc.)
-/// - Including the executed transactions in the correct order
-/// - Setting the state root from the post-execution state
-/// - Applying any chain-specific rules or adjustments
-///
-/// # Example Flow
-///
-/// ```rust,ignore
-/// // 1. Execute transactions and get results
-/// let execution_result = block_executor.finish()?;
-///
-/// // 2. Calculate state root from changes
-/// let state_root = state_provider.state_root(&bundle_state)?;
-///
-/// // 3. Assemble the final block
-/// let block = assembler.assemble_block(BlockAssemblerInput {
-///     evm_env,           // Environment used during execution
-///     execution_ctx,     // Context like withdrawals, ommers
-///     parent,            // Parent block header
-///     transactions,      // Executed transactions
-///     output,            // Execution results (receipts, gas)
-///     bundle_state,      // All state changes
-///     state_provider,    // For additional lookups if needed
-///     state_root,        // Computed state root
-/// })?;
-/// ```
-///
-/// # Relationship with Block Building
-///
-/// The assembler works together with:
-/// - `NextBlockEnvAttributes`: Provides the configuration for the new block
-/// - [`BlockExecutor`]: Executes transactions and produces results
-/// - [`BlockBuilder`]: Orchestrates the entire process and calls the assembler
-#[auto_impl::auto_impl(&, Arc)]
-pub trait BlockAssembler<F: BlockExecutorFactory> {
-    /// The block type produced by the assembler.
-    type Block: Block;
-
-    /// Builds a block. see [`BlockAssemblerInput`] documentation for more details.
-    fn assemble_block(
-        &self,
-        input: BlockAssemblerInput<'_, '_, F, <Self::Block as Block>::Header>,
-    ) -> Result<Self::Block, BlockExecutionError>;
-}
-
-/// Output of block building.
-#[derive(Debug, Clone)]
-pub struct BlockBuilderOutcome<N: NodePrimitives> {
-    /// Result of block execution.
-    pub execution_result: BlockExecutionResult<N::Receipt>,
-    /// Hashed state after execution.
-    pub hashed_state: HashedPostState,
-    /// Trie updates collected during state root calculation.
-    pub trie_updates: TrieUpdates,
-    /// The built block.
-    pub block: RecoveredBlock<N::Block>,
-    /// Block access list built during execution (EIP-7928, Amsterdam).
-    pub block_access_list: Option<BlockAccessList>,
-}
-
-/// A type that knows how to execute and build a block.
-///
-/// It wraps an inner [`BlockExecutor`] and provides a way to execute transactions and
-/// construct a block.
-///
-/// This is a helper to erase `BasicBlockBuilder` type.
-pub trait BlockBuilder {
-    /// The primitive types used by the inner [`BlockExecutor`].
-    type Primitives: NodePrimitives;
-    /// Inner [`BlockExecutor`].
-    type Executor: BlockExecutor<
-        Transaction = TxTy<Self::Primitives>,
-        Receipt = ReceiptTy<Self::Primitives>,
-    >;
-
-    /// Invokes [`BlockExecutor::apply_pre_execution_changes`].
-    fn apply_pre_execution_changes(&mut self) -> Result<(), BlockExecutionError>;
-
-    /// Invokes [`BlockExecutor::execute_transaction_with_commit_condition`] and saves the
-    /// transaction in internal state only if the transaction was committed.
-    fn execute_transaction_with_commit_condition(
-        &mut self,
-        tx: impl ExecutorTx<Self::Executor>,
-        f: impl FnOnce(&<Self::Executor as BlockExecutor>::Result) -> CommitChanges,
-    ) -> Result<Option<GasOutput>, BlockExecutionError>;
-
-    /// Invokes [`BlockExecutor::execute_transaction_with_result_closure`] and saves the
-    /// transaction in internal state.
-    fn execute_transaction_with_result_closure(
-        &mut self,
-        tx: impl ExecutorTx<Self::Executor>,
-        f: impl FnOnce(&<Self::Executor as BlockExecutor>::Result),
-    ) -> Result<GasOutput, BlockExecutionError> {
-        self.execute_transaction_with_commit_condition(tx, |res| {
-            f(res);
-            CommitChanges::Yes
-        })
-        .map(Option::unwrap_or_default)
-    }
-
-    /// Invokes [`BlockExecutor::execute_transaction`] and saves the transaction in
-    /// internal state.
-    fn execute_transaction(
-        &mut self,
-        tx: impl ExecutorTx<Self::Executor>,
-    ) -> Result<GasOutput, BlockExecutionError> {
-        self.execute_transaction_with_result_closure(tx, |_| ())
-    }
-
-    /// Completes the block building process and returns the [`BlockBuilderOutcome`].
-    ///
-    /// When `state_root_precomputed` is `None`, the state root is computed internally via
-    /// `state_root_with_updates()`. When `Some`, the provided root and trie updates are used
-    /// directly, skipping the expensive computation (e.g. when using the sparse trie pipeline).
-    fn finish(
-        self,
-        state_provider: impl StateProvider,
-        state_root_precomputed: Option<(B256, TrieUpdates)>,
-    ) -> Result<BlockBuilderOutcome<Self::Primitives>, BlockExecutionError>;
-
-    /// Provides mutable access to the inner [`BlockExecutor`].
-    fn executor_mut(&mut self) -> &mut Self::Executor;
-
-    /// Provides access to the inner [`BlockExecutor`].
-    fn executor(&self) -> &Self::Executor;
-
-    /// Helper to access inner [`BlockExecutor::Evm`] mutably.
-    fn evm_mut(&mut self) -> &mut <Self::Executor as BlockExecutor>::Evm {
-        self.executor_mut().evm_mut()
-    }
-
-    /// Helper to access inner [`BlockExecutor::Evm`].
-    fn evm(&self) -> &<Self::Executor as BlockExecutor>::Evm {
-        self.executor().evm()
-    }
-
-    /// Consumes the type and returns the underlying [`BlockExecutor`].
-    fn into_executor(self) -> Self::Executor;
-}
-
-/// A type that constructs a block from transactions and execution results.
-#[derive(Debug)]
-pub struct BasicBlockBuilder<'a, F, Executor, Builder, N: NodePrimitives>
-where
-    F: BlockExecutorFactory,
-{
-    /// The block executor used to execute transactions.
-    pub executor: Executor,
-    /// The transactions executed in this block.
-    pub transactions: Vec<Recovered<TxTy<N>>>,
-    /// The parent block execution context.
-    pub ctx: F::ExecutionCtx<'a>,
-    /// The sealed parent block header.
-    pub parent: &'a SealedHeader<HeaderTy<N>>,
-    /// The assembler used to build the block.
-    pub assembler: Builder,
-}
-
-/// Conversions for executable transactions.
-pub trait ExecutorTx<Executor: BlockExecutor> {
-    /// Converts the transaction into a tuple of [`TxEnvFor`] and [`Recovered`].
-    fn into_parts(self) -> (<Executor::Evm as Evm>::Tx, Recovered<Executor::Transaction>);
-}
-
-impl<Executor: BlockExecutor> ExecutorTx<Executor>
-    for WithEncoded<Recovered<Executor::Transaction>>
-{
-    fn into_parts(self) -> (<Executor::Evm as Evm>::Tx, Recovered<Executor::Transaction>) {
-        (self.to_tx_env(), self.1)
-    }
-}
-
-impl<Executor: BlockExecutor> ExecutorTx<Executor> for Recovered<Executor::Transaction> {
-    fn into_parts(self) -> (<Executor::Evm as Evm>::Tx, Self) {
-        (self.to_tx_env(), self)
-    }
-}
-
-impl<Executor: BlockExecutor> ExecutorTx<Executor>
-    for (<Executor::Evm as Evm>::Tx, Recovered<Executor::Transaction>)
-{
-    fn into_parts(self) -> (<Executor::Evm as Evm>::Tx, Recovered<Executor::Transaction>) {
-        self
-    }
-}
-
-impl<Executor> ExecutorTx<Executor>
-    for WithTxEnv<<Executor::Evm as Evm>::Tx, Recovered<Executor::Transaction>>
-where
-    Executor: BlockExecutor<Transaction: Clone>,
-{
-    fn into_parts(self) -> (<Executor::Evm as Evm>::Tx, Recovered<Executor::Transaction>) {
-        (self.tx_env, Arc::unwrap_or_clone(self.tx))
-    }
-}
-
-impl<'a, F, DB, Executor, Builder, N> BlockBuilder
-    for BasicBlockBuilder<'a, F, Executor, Builder, N>
-where
-    F: BlockExecutorFactory<Transaction = N::SignedTx, Receipt = N::Receipt>,
-    Executor: BlockExecutor<
-        Evm: Evm<
-            Spec = <F::EvmFactory as EvmFactory>::Spec,
-            HaltReason = <F::EvmFactory as EvmFactory>::HaltReason,
-            BlockEnv = <F::EvmFactory as EvmFactory>::BlockEnv,
-            DB = &'a mut State<DB>,
-        >,
-        Transaction = N::SignedTx,
-        Receipt = N::Receipt,
-    >,
-    DB: Database + 'a,
-    Builder: BlockAssembler<F, Block = N::Block>,
-    N: NodePrimitives,
-{
-    type Primitives = N;
-    type Executor = Executor;
-
-    fn apply_pre_execution_changes(&mut self) -> Result<(), BlockExecutionError> {
-        self.executor.apply_pre_execution_changes()?;
-        self.executor.evm_mut().db_mut().bump_bal_index();
-
-        Ok(())
-    }
-
-    fn execute_transaction_with_commit_condition(
-        &mut self,
-        tx: impl ExecutorTx<Self::Executor>,
-        f: impl FnOnce(&<Self::Executor as BlockExecutor>::Result) -> CommitChanges,
-    ) -> Result<Option<GasOutput>, BlockExecutionError> {
-        let (tx_env, tx) = tx.into_parts();
-        if let Some(gas_used) =
-            self.executor.execute_transaction_with_commit_condition((tx_env, &tx), f)?
-        {
-            self.transactions.push(tx);
-            self.executor.evm_mut().db_mut().bump_bal_index();
-            Ok(Some(gas_used))
-        } else {
-            Ok(None)
-        }
-    }
-
-    fn finish(
-        self,
-        state: impl StateProvider,
-        state_root_precomputed: Option<(B256, TrieUpdates)>,
-    ) -> Result<BlockBuilderOutcome<N>, BlockExecutionError> {
-        let (evm, result) = self.executor.finish()?;
-        let (db, evm_env) = evm.finish();
-
-        // merge all transitions into bundle state
-        db.merge_transitions(BundleRetention::Reverts);
-
-        let block_access_list = db.take_built_alloy_bal();
-        let block_access_list_hash =
-            block_access_list.as_ref().map(|bal| compute_block_access_list_hash(bal.as_slice()));
-
-        let hashed_state = state.hashed_post_state(&db.bundle_state);
-        let (state_root, trie_updates) = match state_root_precomputed {
-            Some(precomputed) => precomputed,
-            None => state
-                .state_root_with_updates(hashed_state.clone())
-                .map_err(BlockExecutionError::other)?,
-        };
-
-        let (transactions, senders) =
-            self.transactions.into_iter().map(|tx| tx.into_parts()).unzip();
-
-        let block = self.assembler.assemble_block(BlockAssemblerInput {
-            evm_env,
-            execution_ctx: self.ctx,
-            parent: self.parent,
-            transactions,
-            output: &result,
-            bundle_state: &db.bundle_state,
-            state_provider: &state,
-            state_root,
-            block_access_list_hash,
-        })?;
-
-        let block = RecoveredBlock::new_unhashed(block, senders);
-
-        Ok(BlockBuilderOutcome {
-            execution_result: result,
-            hashed_state,
-            trie_updates,
-            block,
-            block_access_list,
-        })
-    }
-
-    fn executor_mut(&mut self) -> &mut Self::Executor {
-        &mut self.executor
-    }
-
-    fn executor(&self) -> &Self::Executor {
-        &self.executor
-    }
-
-    fn into_executor(self) -> Self::Executor {
-        self.executor
-    }
-}
-
-/// A generic block executor that uses a [`BlockExecutor`] to
-/// execute blocks.
+/// Generic block executor backed by a [`ConfigureEvm`] implementation.
+#[cfg(feature = "std")]
 #[expect(missing_debug_implementations)]
-pub struct BasicBlockExecutor<F, DB> {
-    /// Block execution strategy.
-    pub(crate) strategy_factory: F,
-    /// Database.
-    pub(crate) db: State<DB>,
+pub struct BasicBlockExecutor<Evm, DB: Database> {
+    evm_config: Evm,
+    batch_database: CacheDB<Db<DB>>,
+    batch_state: ExecutionOutcomeState,
+    block_access_list: Option<BlockAccessList>,
 }
 
-impl<F, DB: Database> BasicBlockExecutor<F, DB> {
-    /// Creates a new `BasicBlockExecutor` with the given strategy.
-    pub fn new(strategy_factory: F, db: DB) -> Self {
-        let db = State::builder().with_database(db).with_bundle_update().build();
-        Self { strategy_factory, db }
+#[cfg(feature = "std")]
+impl<Evm, DB: Database> BasicBlockExecutor<Evm, DB> {
+    /// Creates a new generic block executor.
+    pub fn new(evm_config: Evm, database: DB) -> Self {
+        Self {
+            evm_config,
+            batch_database: CacheDB::new(Db::new(database)),
+            batch_state: ExecutionOutcomeState::default(),
+            block_access_list: None,
+        }
     }
 }
 
-impl<F, DB> Executor<DB> for BasicBlockExecutor<F, DB>
+#[cfg(feature = "std")]
+impl<Evm, DB> BasicBlockExecutor<Evm, DB>
 where
-    F: ConfigureEvm,
+    Evm: ConfigureEvm,
     DB: Database,
 {
-    type Primitives = F::Primitives;
+    fn merge_batch_output(
+        mut batch_state: ExecutionOutcomeState,
+        output: BlockExecutionOutput<ReceiptTy<Evm::Primitives>>,
+    ) -> BlockExecutionOutput<ReceiptTy<Evm::Primitives>> {
+        if batch_state.block_reverts().is_empty() {
+            return output
+        }
+
+        let result = output.result;
+        let state = output.state;
+        batch_state.push_block_state(state.into_inner());
+        BlockExecutionOutput::new(result, batch_state.into_execution_state())
+    }
+
+    #[expect(clippy::type_complexity)]
+    fn execute_block_with_database(
+        evm_config: &Evm,
+        block: &RecoveredBlock<BlockTy<Evm::Primitives>>,
+        database: impl DynDatabase,
+    ) -> Result<
+        (BlockExecutionOutput<ReceiptTy<Evm::Primitives>>, Option<BlockAccessList>),
+        BlockExecutionError,
+    > {
+        Self::execute_block_with_database_and_state_hook(evm_config, block, database, None)
+    }
+
+    #[expect(clippy::type_complexity)]
+    fn execute_block_with_database_and_state_hook(
+        evm_config: &Evm,
+        block: &RecoveredBlock<BlockTy<Evm::Primitives>>,
+        database: impl DynDatabase,
+        state_hook: Option<Box<dyn FnMut(HashedPostState) + Send>>,
+    ) -> Result<
+        (BlockExecutionOutput<ReceiptTy<Evm::Primitives>>, Option<BlockAccessList>),
+        BlockExecutionError,
+    > {
+        let evm_env = evm_config.evm_env(block.header()).map_err(BlockExecutionError::other)?;
+        let evm = evm_config.block_executor_factory().evm_with_env(database, evm_env);
+        let ctx = evm_config
+            .context_for_block(block.sealed_block())
+            .map_err(BlockExecutionError::other)?;
+        let mut executor = evm_config.block_executor_factory().create_executor(evm, ctx);
+        if block.header().block_access_list_hash().is_some() {
+            executor.enable_block_access_list_builder();
+        }
+        if let Some(hook) = state_hook &&
+            !executor.set_state_hook(hook)
+        {
+            return Err(BlockExecutionError::msg("block executor does not support state hooks"))
+        }
+
+        executor.apply_pre_execution_changes()?;
+        for transaction in block.transactions_recovered() {
+            executor.execute_transaction(transaction)?;
+        }
+        let (output, block_access_list) = executor.finish_with_block_access_list()?;
+        Ok((output, block_access_list))
+    }
+}
+
+#[cfg(feature = "std")]
+impl<Evm, DB> Executor<DB> for BasicBlockExecutor<Evm, DB>
+where
+    Evm: ConfigureEvm,
+    DB: Database,
+{
+    type Primitives = Evm::Primitives;
     type Error = BlockExecutionError;
 
     fn execute_one(
@@ -592,77 +1037,384 @@ where
         block: &RecoveredBlock<<Self::Primitives as NodePrimitives>::Block>,
     ) -> Result<BlockExecutionResult<<Self::Primitives as NodePrimitives>::Receipt>, Self::Error>
     {
-        let mut executor = self
-            .strategy_factory
-            .executor_for_block(&mut self.db, block)
-            .map_err(BlockExecutionError::other)?;
+        let (output, block_access_list) =
+            Self::execute_block_with_database(&self.evm_config, block, &mut self.batch_database)?;
+        self.block_access_list = block_access_list;
+        self.batch_database.commit_source(&output.state);
 
-        let has_bal = block.header().block_access_list_hash().is_some();
+        let block_state = output.state.into_inner();
+        self.batch_state.push_block_state(block_state);
 
-        if has_bal {
-            executor.evm_mut().db_mut().bal_state.bal_builder = Some(Bal::new());
-        } else {
-            executor.evm_mut().db_mut().bal_state.bal_builder = None;
-        }
-
-        executor.apply_pre_execution_changes()?;
-
-        if has_bal {
-            executor.evm_mut().db_mut().bump_bal_index();
-        }
-
-        for tx in block.transactions_recovered() {
-            executor.execute_transaction(tx)?;
-            if has_bal {
-                executor.evm_mut().db_mut().bump_bal_index();
-            }
-        }
-
-        let result = executor.apply_post_execution_changes()?;
-
-        self.db.merge_transitions(BundleRetention::Reverts);
-
-        Ok(result)
+        Ok(output.result)
     }
 
-    fn execute_one_with_state_hook<H>(
+    fn execute_one_with_state_hook<F>(
         &mut self,
         block: &RecoveredBlock<<Self::Primitives as NodePrimitives>::Block>,
-        state_hook: H,
+        state_hook: F,
     ) -> Result<BlockExecutionResult<<Self::Primitives as NodePrimitives>::Receipt>, Self::Error>
     where
-        H: OnStateHook + 'static,
+        F: FnMut(HashedPostState) + Send + 'static,
     {
-        let mut executor = self
-            .strategy_factory
-            .executor_for_block(&mut self.db, block)
-            .map_err(BlockExecutionError::other)?;
+        let (output, block_access_list) = Self::execute_block_with_database_and_state_hook(
+            &self.evm_config,
+            block,
+            &mut self.batch_database,
+            Some(Box::new(state_hook)),
+        )?;
+        self.block_access_list = block_access_list;
+        self.batch_database.commit_source(&output.state);
 
-        executor.evm_mut().db_mut().set_state_hook(Some(Box::new(state_hook)));
+        let block_state = output.state.into_inner();
+        self.batch_state.push_block_state(block_state);
 
-        let result = executor.execute_block(block.transactions_recovered());
-
-        self.db.set_state_hook(None);
-        self.db.merge_transitions(BundleRetention::Reverts);
-
-        result
+        Ok(output.result)
     }
 
-    fn into_state(self) -> State<DB> {
-        self.db
+    fn execute(
+        self,
+        block: &RecoveredBlock<<Self::Primitives as NodePrimitives>::Block>,
+    ) -> Result<BlockExecutionOutput<<Self::Primitives as NodePrimitives>::Receipt>, Self::Error>
+    {
+        let Self { evm_config, batch_database, batch_state, .. } = self;
+        let (output, _) = Self::execute_block_with_database(&evm_config, block, batch_database)?;
+        Ok(Self::merge_batch_output(batch_state, output))
+    }
+
+    fn execute_with_state_hook<F>(
+        self,
+        block: &RecoveredBlock<<Self::Primitives as NodePrimitives>::Block>,
+        state_hook: F,
+    ) -> Result<BlockExecutionOutput<<Self::Primitives as NodePrimitives>::Receipt>, Self::Error>
+    where
+        F: FnMut(HashedPostState) + Send + 'static,
+    {
+        let Self { evm_config, batch_database, batch_state, .. } = self;
+        let (output, _) = Self::execute_block_with_database_and_state_hook(
+            &evm_config,
+            block,
+            batch_database,
+            Some(Box::new(state_hook)),
+        )?;
+        Ok(Self::merge_batch_output(batch_state, output))
     }
 
     fn size_hint(&self) -> usize {
-        self.db.bundle_state.size_hint()
+        self.batch_state.size_hint()
+    }
+
+    fn into_state(self) -> ExecutionOutcomeState {
+        self.batch_state
     }
 
     fn take_bal(&mut self) -> Option<BlockAccessList> {
-        self.db.take_built_alloy_bal()
+        self.block_access_list.take()
     }
 }
 
-/// A helper trait marking a 'static type that can be converted into an [`ExecutableTxParts`] for
-/// block executor.
+/// Executor returned by configurations that do not support block execution in the active build.
+#[cfg(not(feature = "std"))]
+pub(crate) struct UnsupportedExecutor<N> {
+    _marker: core::marker::PhantomData<N>,
+}
+
+#[cfg(not(feature = "std"))]
+impl<N> Default for UnsupportedExecutor<N> {
+    fn default() -> Self {
+        Self { _marker: core::marker::PhantomData }
+    }
+}
+
+#[cfg(not(feature = "std"))]
+impl<N, DB> Executor<DB> for UnsupportedExecutor<N>
+where
+    N: NodePrimitives,
+    DB: Database,
+{
+    type Primitives = N;
+    type Error = BlockExecutionError;
+
+    fn execute_one(
+        &mut self,
+        _block: &RecoveredBlock<<Self::Primitives as NodePrimitives>::Block>,
+    ) -> Result<BlockExecutionResult<<Self::Primitives as NodePrimitives>::Receipt>, Self::Error>
+    {
+        Err(BlockExecutionError::msg("block execution is unsupported by this EVM configuration"))
+    }
+
+    fn execute(
+        self,
+        _block: &RecoveredBlock<<Self::Primitives as NodePrimitives>::Block>,
+    ) -> Result<BlockExecutionOutput<<Self::Primitives as NodePrimitives>::Receipt>, Self::Error>
+    {
+        Err(BlockExecutionError::msg("block execution is unsupported by this EVM configuration"))
+    }
+
+    fn execute_one_with_state_hook<F>(
+        &mut self,
+        _block: &RecoveredBlock<<Self::Primitives as NodePrimitives>::Block>,
+        _state_hook: F,
+    ) -> Result<BlockExecutionResult<<Self::Primitives as NodePrimitives>::Receipt>, Self::Error>
+    where
+        F: FnMut(HashedPostState) + Send + 'static,
+    {
+        Err(BlockExecutionError::msg("block execution is unsupported by this EVM configuration"))
+    }
+
+    fn execute_with_state_hook<F>(
+        self,
+        _block: &RecoveredBlock<<Self::Primitives as NodePrimitives>::Block>,
+        _state_hook: F,
+    ) -> Result<BlockExecutionOutput<<Self::Primitives as NodePrimitives>::Receipt>, Self::Error>
+    where
+        F: FnMut(HashedPostState) + Send + 'static,
+    {
+        Err(BlockExecutionError::msg("block execution is unsupported by this EVM configuration"))
+    }
+
+    fn execute_batch<'a, I>(
+        self,
+        _blocks: I,
+    ) -> Result<ExecutionOutcome<<Self::Primitives as NodePrimitives>::Receipt>, Self::Error>
+    where
+        I: IntoIterator<Item = &'a RecoveredBlock<<Self::Primitives as NodePrimitives>::Block>>,
+    {
+        Err(BlockExecutionError::msg("block execution is unsupported by this EVM configuration"))
+    }
+
+    fn size_hint(&self) -> usize {
+        0
+    }
+
+    fn into_state(self) -> ExecutionOutcomeState {
+        ExecutionOutcomeState::default()
+    }
+
+    fn take_bal(&mut self) -> Option<BlockAccessList> {
+        None
+    }
+}
+
+/// Helper trait to abstract over recovered transaction wrappers.
+#[auto_impl::auto_impl(&)]
+pub trait RecoveredTx<T> {
+    /// Returns the transaction.
+    fn tx(&self) -> &T;
+
+    /// Returns the signer of the transaction.
+    fn signer(&self) -> &Address;
+
+    /// Clones this accessor into an owned recovered transaction.
+    fn to_recovered(&self) -> Recovered<T>
+    where
+        T: Clone,
+    {
+        Recovered::new_unchecked(self.tx().clone(), *self.signer())
+    }
+}
+
+impl<T> RecoveredTx<T> for Recovered<&T> {
+    fn tx(&self) -> &T {
+        self.inner()
+    }
+
+    fn signer(&self) -> &Address {
+        self.signer_ref()
+    }
+}
+
+impl<T> RecoveredTx<T> for Recovered<Arc<T>> {
+    fn tx(&self) -> &T {
+        self.inner().as_ref()
+    }
+
+    fn signer(&self) -> &Address {
+        self.signer_ref()
+    }
+}
+
+impl<T> RecoveredTx<T> for Recovered<T> {
+    fn tx(&self) -> &T {
+        self.inner()
+    }
+
+    fn signer(&self) -> &Address {
+        self.signer_ref()
+    }
+}
+
+impl<Tx, T: RecoveredTx<Tx>> RecoveredTx<Tx> for WithEncoded<T> {
+    fn tx(&self) -> &Tx {
+        self.1.tx()
+    }
+
+    fn signer(&self) -> &Address {
+        self.1.signer()
+    }
+}
+
+impl<L, R, Tx> RecoveredTx<Tx> for Either<L, R>
+where
+    L: RecoveredTx<Tx>,
+    R: RecoveredTx<Tx>,
+{
+    fn tx(&self) -> &Tx {
+        match self {
+            Self::Left(l) => l.tx(),
+            Self::Right(r) => r.tx(),
+        }
+    }
+
+    fn signer(&self) -> &Address {
+        match self {
+            Self::Left(l) => l.signer(),
+            Self::Right(r) => r.signer(),
+        }
+    }
+}
+
+impl<Tx, T: RecoveredTx<Tx>> RecoveredTx<Tx> for Arc<T> {
+    fn tx(&self) -> &Tx {
+        (**self).tx()
+    }
+
+    fn signer(&self) -> &Address {
+        (**self).signer()
+    }
+}
+
+/// Helper trait to split an executable transaction into an EVM transaction environment and its
+/// recovered transaction accessor.
+pub trait ExecutableTxParts<TxEnv, T> {
+    /// The recovered transaction accessor type.
+    type Recovered: RecoveredTx<T>;
+
+    /// Converts the transaction into the executable transaction environment and recovered
+    /// transaction accessor.
+    fn into_parts(self) -> (TxEnv, Self::Recovered);
+}
+
+/// Converts a recovered transaction into the configured transaction environment.
+pub trait FromRecoveredTx<T> {
+    /// Converts a recovered transaction into the configured transaction environment.
+    fn from_recovered_tx(tx: Recovered<T>) -> Self;
+}
+
+impl<T, TxEnv> FromRecoveredTx<T> for Recovered<TxEnv>
+where
+    TxEnv: From<T>,
+{
+    fn from_recovered_tx(tx: Recovered<T>) -> Self {
+        tx.convert()
+    }
+}
+
+/// Converts a recovered transaction with its encoded bytes into the configured transaction
+/// environment.
+pub trait FromTxWithEncoded<T>: FromRecoveredTx<T> {
+    /// Converts a recovered transaction with its encoded bytes into the configured transaction
+    /// environment.
+    fn from_tx_with_encoded(tx: WithEncoded<Recovered<T>>) -> Self
+    where
+        Self: Sized,
+    {
+        Self::from_recovered_tx(tx.1)
+    }
+}
+
+impl<T, TxEnv> FromTxWithEncoded<T> for Recovered<TxEnv> where TxEnv: From<T> {}
+
+/// Converts transaction wrappers into the configured transaction environment.
+pub trait IntoTxEnv<TxEnv> {
+    /// Converts this transaction wrapper into the configured transaction environment.
+    fn into_tx_env(self) -> TxEnv;
+}
+
+impl<T, TxEnv> IntoTxEnv<TxEnv> for Recovered<T>
+where
+    TxEnv: FromRecoveredTx<T>,
+{
+    fn into_tx_env(self) -> TxEnv {
+        TxEnv::from_recovered_tx(self)
+    }
+}
+
+impl<T, TxEnv> IntoTxEnv<TxEnv> for WithEncoded<Recovered<T>>
+where
+    TxEnv: FromTxWithEncoded<T>,
+{
+    fn into_tx_env(self) -> TxEnv {
+        TxEnv::from_tx_with_encoded(self)
+    }
+}
+
+impl<T: Clone, TxEnv> ExecutableTxParts<TxEnv, T> for Recovered<T>
+where
+    TxEnv: FromRecoveredTx<T>,
+{
+    type Recovered = Self;
+
+    fn into_parts(self) -> (TxEnv, Self) {
+        (TxEnv::from_recovered_tx(self.clone()), self)
+    }
+}
+
+impl<T: Clone, TxEnv> ExecutableTxParts<TxEnv, T> for Recovered<&T>
+where
+    TxEnv: FromRecoveredTx<T>,
+{
+    type Recovered = Self;
+
+    fn into_parts(self) -> (TxEnv, Self) {
+        (TxEnv::from_recovered_tx(self.to_recovered()), self)
+    }
+}
+
+impl<T: Clone, TxEnv> ExecutableTxParts<TxEnv, T> for WithEncoded<Recovered<T>>
+where
+    TxEnv: FromTxWithEncoded<T>,
+{
+    type Recovered = Self;
+
+    fn into_parts(self) -> (TxEnv, Self) {
+        (TxEnv::from_tx_with_encoded(self.clone()), self)
+    }
+}
+
+impl<TxEnv, Tx, T> ExecutableTxParts<TxEnv, Tx> for (TxEnv, T)
+where
+    T: RecoveredTx<Tx>,
+{
+    type Recovered = T;
+
+    fn into_parts(self) -> (TxEnv, Self::Recovered) {
+        self
+    }
+}
+
+impl<L, R, TxEnv, T> ExecutableTxParts<TxEnv, T> for Either<L, R>
+where
+    L: ExecutableTxParts<TxEnv, T>,
+    R: ExecutableTxParts<TxEnv, T>,
+{
+    type Recovered = Either<L::Recovered, R::Recovered>;
+
+    fn into_parts(self) -> (TxEnv, Self::Recovered) {
+        match self {
+            Self::Left(l) => {
+                let (tx_env, recovered) = l.into_parts();
+                (tx_env, Either::Left(recovered))
+            }
+            Self::Right(r) => {
+                let (tx_env, recovered) = r.into_parts();
+                (tx_env, Either::Right(recovered))
+            }
+        }
+    }
+}
+
+/// A helper trait marking a type that can be converted into an [`ExecutableTxParts`] for block
+/// executor.
 pub trait ExecutableTxFor<Evm: ConfigureEvm>:
     ExecutableTxParts<TxEnvFor<Evm>, TxTy<Evm::Primitives>> + RecoveredTx<TxTy<Evm::Primitives>>
 {
@@ -718,71 +1470,5 @@ impl<TxEnv, T: RecoveredTx<Tx>, Tx> ExecutableTxParts<TxEnv, Tx> for WithTxEnv<T
 
     fn into_parts(self) -> (TxEnv, Self::Recovered) {
         (self.tx_env, self.tx)
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use core::marker::PhantomData;
-    use reth_ethereum_primitives::EthPrimitives;
-    use revm::database::{CacheDB, EmptyDB};
-
-    #[derive(Clone, Debug, Default)]
-    struct TestExecutorProvider;
-
-    impl TestExecutorProvider {
-        fn executor<DB>(&self, _db: DB) -> TestExecutor<DB>
-        where
-            DB: Database,
-        {
-            TestExecutor(PhantomData)
-        }
-    }
-
-    struct TestExecutor<DB>(PhantomData<DB>);
-
-    impl<DB: Database> Executor<DB> for TestExecutor<DB> {
-        type Primitives = EthPrimitives;
-        type Error = BlockExecutionError;
-
-        fn execute_one(
-            &mut self,
-            _block: &RecoveredBlock<<Self::Primitives as NodePrimitives>::Block>,
-        ) -> Result<BlockExecutionResult<<Self::Primitives as NodePrimitives>::Receipt>, Self::Error>
-        {
-            Err(BlockExecutionError::msg("execution unavailable for tests"))
-        }
-
-        fn execute_one_with_state_hook<F>(
-            &mut self,
-            _block: &RecoveredBlock<<Self::Primitives as NodePrimitives>::Block>,
-            _state_hook: F,
-        ) -> Result<BlockExecutionResult<<Self::Primitives as NodePrimitives>::Receipt>, Self::Error>
-        where
-            F: OnStateHook + 'static,
-        {
-            Err(BlockExecutionError::msg("execution unavailable for tests"))
-        }
-
-        fn into_state(self) -> State<DB> {
-            unreachable!()
-        }
-
-        fn size_hint(&self) -> usize {
-            0
-        }
-
-        fn take_bal(&mut self) -> Option<BlockAccessList> {
-            None
-        }
-    }
-
-    #[test]
-    fn test_provider() {
-        let provider = TestExecutorProvider;
-        let db = CacheDB::<EmptyDB>::default();
-        let executor = provider.executor(db);
-        let _ = executor.execute(&Default::default());
     }
 }

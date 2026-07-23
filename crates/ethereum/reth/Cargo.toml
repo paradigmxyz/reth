@@ -26,7 +26,6 @@ reth-node-core = { workspace = true, optional = true }
 reth-consensus = { workspace = true, optional = true }
 reth-consensus-common = { workspace = true, optional = true }
 reth-evm = { workspace = true, optional = true }
-reth-revm = { workspace = true, optional = true }
 reth-transaction-pool = { workspace = true, optional = true }
 reth-rpc = { workspace = true, optional = true }
 reth-rpc-api = { workspace = true, optional = true }
@@ -64,7 +63,6 @@ std = [
     "reth-storage-api?/std",
     "reth-evm?/std",
     "reth-evm-ethereum?/std",
-    "reth-revm?/std",
     "alloy-rpc-types-engine?/std",
     "reth-codecs?/std",
 ]
@@ -80,6 +78,14 @@ arbitrary = [
     "alloy-rpc-types-engine?/arbitrary",
     "reth-codecs?/arbitrary",
 ]
+asm-keccak = [
+    "reth-ethereum-cli?/asm-keccak",
+    "reth-node-ethereum?/asm-keccak",
+    "reth-node-core?/asm-keccak",
+    "reth-evm?/asm-keccak",
+    "reth-evm-ethereum?/asm-keccak",
+    "reth-storage-api?/asm-keccak",
+]
 keccak-cache-global = [
     "reth-node-ethereum?/keccak-cache-global",
     "reth-node-core?/keccak-cache-global",
@@ -90,7 +96,6 @@ test-utils = [
     "reth-db?/test-utils",
     "reth-ethereum-primitives/test-utils",
     "reth-evm?/test-utils",
-    "reth-revm?/test-utils",
     "reth-network?/test-utils",
     "reth-node-ethereum?/test-utils",
     "reth-primitives-traits/test-utils",
@@ -122,7 +127,7 @@ consensus = [
     "dep:reth-consensus-common",
     "dep:reth-ethereum-consensus",
 ]
-evm = ["dep:reth-evm", "dep:reth-evm-ethereum", "dep:reth-revm"]
+evm = ["dep:reth-evm", "dep:reth-evm-ethereum"]
 exex = ["provider", "dep:reth-exex"]
 node-api = ["dep:reth-node-api", "dep:reth-node-core"]
 node = [
@@ -178,12 +183,9 @@ otlp = [
     "reth-node-core?/otlp",
 ]
 portable = [
-    "reth-revm?/portable",
-]
-gmp = [
-    "reth-evm-ethereum?/gmp",
-    "reth-node-ethereum?/gmp",
-    "reth-revm?/gmp",
+    "reth-node-ethereum?/portable",
+    "reth-evm?/portable",
+    "reth-evm-ethereum?/portable",
 ]
 provider = ["storage-api", "tasks", "dep:reth-provider", "dep:reth-db", "dep:reth-codecs"]
 storage-api = ["dep:reth-storage-api"]

@@ -99,17 +99,15 @@ use crate::tree::{
     error::{InsertBlockError, InsertBlockErrorKind, InsertPayloadError},
     instrumented_state::{InstrumentedStateProvider, StateProviderMetrics, StateProviderStats},
     payload_processor::PayloadProcessor,
-    precompile_cache::{CachedPrecompile, CachedPrecompileMetrics, PrecompileCacheMap},
     types::{InsertPayloadResult, ValidationOutput},
     CacheWaitDurations, CachedStateProvider, EngineApiMetrics, EngineApiTreeState, ExecutionEnv,
-    PayloadHandle, StateProviderBuilder, StateProviderDatabase, TreeConfig, WaitForCaches,
+    PayloadHandle, StateProviderBuilder, TreeConfig, WaitForCaches,
 };
-use alloy_consensus::transaction::{Either, TxHashRef};
+use alloy_consensus::transaction::Either;
 use alloy_eip7928::{bal::DecodedBal, compute_block_access_list_hash, BlockAccessList};
 use alloy_eips::{eip1898::BlockWithParent, eip4895::Withdrawal, NumHash};
-use alloy_evm::Evm;
 use alloy_primitives::{
-    map::{AddressMap, B256Set},
+    map::{AddressSet, B256Set},
     B256,
 };
 use reth_tasks::LazyHandle;
@@ -133,8 +131,8 @@ use reth_engine_primitives::{
 };
 use reth_errors::{BlockExecutionError, ProviderResult};
 use reth_evm::{
-    block::BlockExecutor, execute::ExecutableTxFor, ConfigureEvm, EvmEnvFor, ExecutionCtxFor,
-    OnStateHook, SpecFor,
+    database::StateProviderDatabase, BlockExecutor, BlockExecutorFactory, BlockExecutorFor,
+    ConfigureEvm, EvmEnvFor, ExecutableTxFor, ExecutionCtxFor,
 };
 use reth_execution_cache::{CacheFillMode, CacheStats};
 use reth_payload_builder::{PayloadBuilderLease, PayloadBuilderResources};
@@ -153,10 +151,9 @@ use reth_provider::{
     StageCheckpointReader, StateProvider, StateProviderBox, StateProviderFactory, StateReader,
     StorageChangeSetReader, StorageSettingsCache,
 };
-use reth_revm::db::{states::bundle_state::BundleRetention, BundleAccount, State};
 use reth_trie::{
     hashed_cursor::HashedCursorFactory, trie_cursor::TrieCursorFactory, updates::TrieUpdates,
-    LazyTrieData,
+    HashedPostState, LazyTrieData,
 };
 use reth_trie_db::ChangesetCache;
 use std::{
@@ -275,10 +272,6 @@ where
     config: TreeConfig,
     /// Payload processor for transaction conversion, prewarming, and execution caching.
     payload_processor: PayloadProcessor<Evm>,
-    /// Precompile cache map.
-    precompile_cache_map: PrecompileCacheMap<SpecFor<Evm>>,
-    /// Precompile cache metrics.
-    precompile_cache_metrics: AddressMap<CachedPrecompileMetrics>,
     /// Hook to call when invalid blocks are encountered.
     #[debug(skip)]
     invalid_block_hook: Box<dyn InvalidBlockHook<Evm::Primitives>>,
@@ -336,20 +329,14 @@ where
         state_trie_overlays: StateTrieOverlayManager<N>,
         runtime: reth_tasks::Runtime,
     ) -> Self {
-        let precompile_cache_map = PrecompileCacheMap::default();
-        let payload_processor = PayloadProcessor::new(
-            runtime.clone(),
-            evm_config.clone(),
-            &config,
-            precompile_cache_map.clone(),
-        );
+        let evm_config =
+            evm_config.with_precompile_cache_disabled(config.precompile_cache_disabled());
+        let payload_processor = PayloadProcessor::new(runtime.clone(), evm_config.clone(), &config);
         Self {
             provider,
             consensus,
             evm_config,
             payload_processor,
-            precompile_cache_map,
-            precompile_cache_metrics: AddressMap::default(),
             config,
             invalid_block_hook,
             metrics: EngineApiMetrics::default(),
@@ -457,7 +444,7 @@ where
         )
     )]
     pub fn validate_block_with_state<T: PayloadTypes<BuiltPayload: BuiltPayload<Primitives = N>>>(
-        &mut self,
+        &self,
         input: BlockOrPayload<T>,
         mut ctx: TreeCtx<'_, N>,
     ) -> InsertPayloadResult<N>
@@ -743,7 +730,9 @@ where
                 if let Some(Ok(state)) = hashed_state_rx.as_mut().map(|rx| rx.recv()) {
                     state
                 } else {
-                    Arc::new(hashed_state_provider.hashed_post_state(&hashed_state_output.state))
+                    Arc::new(
+                        hashed_state_provider.hashed_post_state(hashed_state_output.state.inner()),
+                    )
                 }
             });
 
@@ -966,12 +955,12 @@ where
     #[instrument(level = "debug", target = "engine::tree::payload_validator", skip_all)]
     #[expect(clippy::type_complexity)]
     fn execute_block<S, Err, T>(
-        &mut self,
+        &self,
         state_provider: S,
         env: ExecutionEnv<Evm>,
         input: &BlockOrPayload<T>,
         handle: &mut PayloadHandle<impl ExecutableTxFor<Evm>, Err, N::Receipt>,
-        state_hook: Option<Box<dyn OnStateHook + 'static>>,
+        state_hook: Option<Box<dyn FnMut(HashedPostState) + Send + 'static>>,
     ) -> Result<
         (
             BlockExecutionOutput<N::Receipt>,
@@ -990,77 +979,40 @@ where
     {
         debug!(target: "engine::tree::payload_validator", "Executing block");
 
-        let has_bal = env.decoded_bal.is_some();
-        let mut db = debug_span!(target: "engine::tree", "build_state_db").in_scope(|| {
-            State::builder()
-                .with_database(StateProviderDatabase::new(state_provider))
-                .with_bundle_update()
-                .with_bal_builder_if(has_bal)
-                .build()
-        });
-
-        let (spec_id, mut executor) = {
-            let _span = debug_span!(target: "engine::tree", "create_evm").entered();
-            let spec_id = *env.evm_env.spec_id();
-            let evm_config = self.evm_config.clone().with_jit_support();
-            let evm = evm_config.evm_with_env(&mut db, env.evm_env);
-            let ctx = self
-                .execution_ctx_for(input)
-                .map_err(|e| InsertBlockErrorKind::Other(Box::new(e)))?;
-            let executor = self.evm_config.create_executor(evm, ctx);
-            (spec_id, executor)
-        };
-
-        if !self.config.precompile_cache_disabled() {
-            let _span = debug_span!(target: "engine::tree", "setup_precompile_cache").entered();
-            executor.evm_mut().precompiles_mut().map_cacheable_precompiles(
-                |address, precompile| {
-                    let metrics = self
-                        .precompile_cache_metrics
-                        .entry(*address)
-                        .or_insert_with(|| CachedPrecompileMetrics::new_with_address(*address))
-                        .clone();
-                    CachedPrecompile::wrap(
-                        precompile,
-                        self.precompile_cache_map.cache_for_address(*address),
-                        spec_id,
-                        Some(metrics),
-                    )
-                },
-            );
-        }
-
         let transaction_count = input.transaction_count();
         let (receipt_tx, result_rx) = self.spawn_receipt_root_task(transaction_count);
         let executed_tx_index = Arc::clone(handle.executed_tx_index());
-        executor.evm_mut().db_mut().set_state_hook(state_hook);
-
         let execution_start = Instant::now();
+        let evm_config = self.evm_config.clone().with_jit_support();
+        let execution_ctx = self.execution_ctx_for(input).map_err(BlockExecutionError::other)?;
 
-        // Execute all transactions and finalize
-        let (executor, senders) = self.execute_transactions(
-            executor,
-            transaction_count,
-            handle.iter_transactions(),
-            &receipt_tx,
-            &executed_tx_index,
-            has_bal,
-        )?;
+        let (output, senders, built_bal) = debug_span!(target: "engine::tree", "execute_block")
+            .in_scope(|| {
+                let db = StateProviderDatabase::new(state_provider);
+                let evm = evm_config.evm_with_env(db, env.evm_env);
+                let mut executor =
+                    evm_config.block_executor_factory().create_executor(evm, execution_ctx);
+                if env.decoded_bal.is_some() {
+                    executor.enable_block_access_list_builder();
+                }
+                if let Some(state_hook) = state_hook {
+                    executor.set_state_hook(state_hook);
+                }
+                let senders = self.execute_transactions(
+                    &mut executor,
+                    transaction_count,
+                    handle.iter_transactions(),
+                    &receipt_tx,
+                    &executed_tx_index,
+                )?;
+
+                let post_exec_start = Instant::now();
+                let (output, built_bal) =
+                    executor.finish_with_block_access_list().map_err(BlockExecutionError::other)?;
+                self.metrics.record_post_execution(post_exec_start.elapsed());
+                Ok::<_, BlockExecutionError>((output, senders, built_bal))
+            })?;
         drop(receipt_tx);
-
-        // Finish execution and get the result
-        let post_exec_start = Instant::now();
-        let (_evm, result) = debug_span!(target: "engine::tree", "BlockExecutor::finish")
-            .in_scope(|| executor.finish())
-            .map(|(evm, result)| (evm.into_db(), result))?;
-        self.metrics.record_post_execution(post_exec_start.elapsed());
-
-        // Merge transitions into bundle state
-        debug_span!(target: "engine::tree", "merge_transitions")
-            .in_scope(|| db.merge_transitions(BundleRetention::Reverts));
-
-        let built_bal = if has_bal { db.take_built_alloy_bal() } else { None };
-        let output = BlockExecutionOutput { result, state: db.take_bundle() };
 
         let execution_duration = execution_start.elapsed();
         self.metrics.record_block_execution(&output, execution_duration);
@@ -1184,56 +1136,34 @@ where
     /// - Executing each transaction with timing metrics
     /// - Streaming receipts to the receipt root computation task
     /// - Collecting transaction senders for later use
-    ///
-    /// Returns the executor (for finalization) and the collected senders.
-    fn execute_transactions<'a, E, Tx, InnerTx, Err, DB>(
+    fn execute_transactions<Tx, Err>(
         &self,
-        mut executor: E,
+        executor: &mut BlockExecutorFor<'_, Evm>,
         transaction_count: usize,
         transactions: impl Iterator<Item = Result<Tx, Err>>,
-        receipt_tx: &crossbeam_channel::Sender<IndexedReceipt<N::Receipt>>,
+        receipt_tx: &ReceiptRootSender<N>,
         executed_tx_index: &AtomicUsize,
-        has_bal: bool,
-    ) -> Result<(E, Vec<Address>), BlockExecutionError>
+    ) -> Result<Vec<Address>, BlockExecutionError>
     where
-        E: BlockExecutor<Receipt = N::Receipt, Evm: alloy_evm::Evm<DB = &'a mut State<DB>>>,
-        Tx: alloy_evm::block::ExecutableTx<E> + alloy_evm::RecoveredTx<InnerTx>,
-        InnerTx: TxHashRef,
-        DB: revm::Database + 'a,
+        Tx: ExecutableTxFor<Evm>,
         Err: core::error::Error + Send + Sync + 'static,
     {
-        let mut senders = Vec::with_capacity(transaction_count);
-
-        // Apply pre-execution changes (e.g., beacon root update)
         let pre_exec_start = Instant::now();
-        debug_span!(target: "engine::tree", "pre_execution")
-            .in_scope(|| executor.apply_pre_execution_changes())?;
+        debug_span!(target: "engine::tree", "pre_execution").in_scope(|| {
+            executor.apply_pre_execution_changes().map_err(BlockExecutionError::other)
+        })?;
         self.metrics.record_pre_execution(pre_exec_start.elapsed());
 
-        // Bump BAL index after pre-execution changes (EIP-7928: index 0 is pre-execution)
-        if has_bal {
-            executor.evm_mut().db_mut().bump_bal_index();
-        }
-
-        // Execute transactions
         let exec_span = debug_span!(target: "engine::tree", "execution").entered();
+        let mut senders = Vec::with_capacity(transaction_count);
         let mut transactions = transactions.into_iter();
-        // Some executors may execute transactions that do not append receipts during the
-        // main loop (e.g., system transactions whose receipts are added during finalization).
-        // In that case, invoking the callback on every transaction would resend the previous
-        // receipt with the same index and can panic the ordered root builder.
         let mut last_sent_len = 0usize;
         loop {
-            // Measure time spent waiting for next transaction from iterator
-            // (e.g., parallel signature recovery)
             let wait_start = Instant::now();
             let Some(tx_result) = transactions.next() else { break };
             self.metrics.record_transaction_wait(wait_start.elapsed());
-
             let tx = tx_result.map_err(BlockExecutionError::other)?;
-            let tx_signer = *<Tx as alloy_evm::RecoveredTx<InnerTx>>::signer(&tx);
-
-            senders.push(tx_signer);
+            senders.push(*tx.signer());
 
             let _enter = tracing::enabled!(target: "engine::tree", Level::TRACE).then(|| {
                 tracing::trace_span!(
@@ -1248,30 +1178,24 @@ where
             }
 
             let tx_start = Instant::now();
-            executor.execute_transaction(tx)?;
+            executor.execute_transaction(tx).map_err(BlockExecutionError::other)?;
             self.metrics.record_transaction_execution(tx_start.elapsed());
-
-            // advance the shared counter so prewarm workers skip already-executed txs
             executed_tx_index.store(senders.len(), Ordering::Relaxed);
 
             let current_len = executor.receipts().len();
             if current_len > last_sent_len {
                 last_sent_len = current_len;
-                // Send the latest receipt to the background task for incremental root computation.
                 if let Some(receipt) = executor.receipts().last() {
                     let tx_index = current_len - 1;
-                    let _ = receipt_tx.send(IndexedReceipt::new(tx_index, receipt.clone()));
+                    receipt_tx
+                        .send(IndexedReceipt::new(tx_index, receipt.clone()))
+                        .map_err(|_| BlockExecutionError::msg("receipt root task closed"))?;
                 }
-            }
-            // Bump BAL index after each transaction (EIP-7928)
-            if has_bal {
-                executor.evm_mut().db_mut().bump_bal_index();
             }
         }
 
         drop(exec_span);
-
-        Ok((executor, senders))
+        Ok(senders)
     }
 
     /// Validates the block after execution.
@@ -1560,50 +1484,54 @@ where
         let code_read = provider_stats.total_code_fetches();
         let code_bytes_read = provider_stats.total_code_fetched_bytes();
 
-        // Write stats from BundleState (final state changes)
-        let accounts_changed = output.state.state.len();
-        let accounts_deleted =
-            output.state.state.values().filter(|acc| acc.was_destroyed()).count();
-        let storage_slots_changed =
-            output.state.state.values().map(|account| account.storage.len()).sum::<usize>();
+        // Write stats from the final state changes.
+        let storage_wipes = output.state.storage_wipes().collect::<AddressSet>();
+        let accounts_changed = output.state.accounts().count();
+        let accounts_deleted = output
+            .state
+            .accounts()
+            .filter(|(address, acc)| acc.current.is_none() || storage_wipes.contains(address))
+            .count();
+        let storage_slots_changed = output.state.storage().count();
         let storage_slots_deleted = output
             .state
-            .state
-            .values()
-            .flat_map(|account| account.storage.values())
-            .filter(|slot| {
-                slot.present_value.is_zero() && !slot.previous_or_original_value.is_zero()
-            })
+            .storage()
+            .filter(|(_, slot)| slot.current.is_zero() && !slot.original.is_zero())
             .count();
 
-        // Helper: check if account represents a new contract deployment
-        let is_new_deployment = |acc: &BundleAccount| -> bool {
-            let has_code_now = acc.info.as_ref().is_some_and(|info| info.code_hash != KECCAK_EMPTY);
-            let had_no_code_before = acc
-                .original_info
-                .as_ref()
-                .map(|info| info.code_hash == KECCAK_EMPTY)
-                .unwrap_or(true);
-            has_code_now && had_no_code_before
-        };
-
-        let bytecodes_changed =
-            output.state.state.values().filter(|acc| is_new_deployment(acc)).count();
+        let bytecodes_changed = output
+            .state
+            .accounts()
+            .filter(|(_, acc)| {
+                let has_code_now =
+                    acc.current.as_ref().is_some_and(|info| info.code_hash != KECCAK_EMPTY);
+                let had_no_code_before = acc
+                    .original
+                    .as_ref()
+                    .map(|info| info.code_hash == KECCAK_EMPTY)
+                    .unwrap_or(true);
+                has_code_now && had_no_code_before
+            })
+            .count();
 
         // Unique new code hashes to count actual bytes persisted (deduplicated)
         let unique_new_code_hashes: B256Set = output
             .state
-            .state
-            .values()
-            .filter(|acc| is_new_deployment(acc))
-            .filter_map(|acc| acc.info.as_ref().map(|info| info.code_hash))
-            .collect();
-        let code_bytes_written: usize = unique_new_code_hashes
-            .iter()
-            .filter_map(|hash| {
-                output.state.contracts.get(hash).map(|bytecode| bytecode.original_bytes().len())
+            .accounts()
+            .filter(|(_, acc)| {
+                let has_code_now =
+                    acc.current.as_ref().is_some_and(|info| info.code_hash != KECCAK_EMPTY);
+                let had_no_code_before = acc
+                    .original
+                    .as_ref()
+                    .map(|info| info.code_hash == KECCAK_EMPTY)
+                    .unwrap_or(true);
+                has_code_now && had_no_code_before
             })
-            .sum();
+            .filter_map(|(_, acc)| acc.current.as_ref().map(|info| info.code_hash))
+            .collect();
+        let code_bytes_written: usize =
+            unique_new_code_hashes.iter().filter_map(|hash| output.bytecode_len(hash)).sum();
 
         // Total time spent fetching state during execution
         let state_read_duration = provider_stats.total_account_fetch_latency() +
@@ -1613,27 +1541,29 @@ where
         // EIP-7702 delegation tracking from bytecode changes
         // Count new EIP-7702 bytecodes as delegations set
         let eip7702_delegations_set =
-            output.state.contracts.values().filter(|bytecode| bytecode.is_eip7702()).count();
+            output.state.code().filter(|(_, bytecode)| bytecode.is_eip7702()).count();
         // Delegations cleared: accounts where bytecode changed FROM EIP-7702 TO empty
         // This detects when an EIP-7702 delegation is removed by setting code to empty
         // Note: Clearing a delegation does NOT destroy the account - it just empties the
         // bytecode
         let eip7702_delegations_cleared = output
             .state
-            .state
-            .values()
-            .filter(|acc| {
+            .accounts()
+            .filter(|(_, acc)| {
                 // Check if original bytecode was EIP-7702
                 let original_was_eip7702 = acc
-                    .original_info
+                    .original
                     .as_ref()
                     .and_then(|info| info.code.as_ref())
                     .map(|bytecode| bytecode.is_eip7702())
                     .unwrap_or(false);
 
                 // Check if current code is empty (delegation cleared)
-                let code_now_empty =
-                    acc.info.as_ref().map(|info| info.code_hash == KECCAK_EMPTY).unwrap_or(false);
+                let code_now_empty = acc
+                    .current
+                    .as_ref()
+                    .map(|info| info.code_hash == KECCAK_EMPTY)
+                    .unwrap_or(false);
 
                 original_was_eip7702 && code_now_empty
             })
@@ -1819,7 +1749,7 @@ where
     ) -> ProviderResult<ExecutedBlock<N>> {
         self.payload_processor.on_inserted_executed_block(
             block.recovered_block.block_with_parent(),
-            &block.execution_output.state,
+            block.execution_output.state.inner(),
         );
 
         Ok(self.spawn_deferred_trie_task(

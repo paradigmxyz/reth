@@ -6,17 +6,16 @@ use reth_chainspec::{ChainSpecProvider, EthereumHardforks};
 use reth_config::config::ExecutionConfig;
 use reth_consensus::FullConsensus;
 use reth_db::{static_file::HeaderMask, tables};
-use reth_evm::{execute::Executor, metrics::ExecutorMetrics, ConfigureEvm};
-use reth_execution_types::Chain;
+use reth_evm::{database::StateProviderDatabase, metrics::ExecutorMetrics, ConfigureEvm, Executor};
+use reth_execution_types::{Chain, ExecutionOutcome};
 use reth_exex::{ExExManagerHandle, ExExNotification, ExExNotificationSource};
 use reth_primitives_traits::{format_gas_throughput, BlockBody, NodePrimitives};
 use reth_provider::{
     providers::{StaticFileProvider, StaticFileWriter},
-    BlockHashReader, BlockReader, DBProvider, EitherWriter, ExecutionOutcome, HeaderProvider,
-    LatestStateProviderRef, OriginalValuesKnown, ProviderError, StateWriteConfig, StateWriter,
-    StaticFileProviderFactory, StatsReader, StoragePath, StorageSettingsCache, TransactionVariant,
+    BlockHashReader, BlockReader, DBProvider, EitherWriter, HeaderProvider, LatestStateProviderRef,
+    OriginalValuesKnown, ProviderError, StateWriteConfig, StateWriter, StaticFileProviderFactory,
+    StatsReader, StoragePath, StorageSettingsCache, TransactionVariant,
 };
-use reth_revm::database::StateProviderDatabase;
 use reth_stages_api::{
     BlockErrorKind, CheckpointBlockRange, EntitiesCheckpoint, ExecInput, ExecOutput,
     ExecutionCheckpoint, ExecutionStageThresholds, Stage, StageCheckpoint, StageError, StageId,
@@ -45,7 +44,7 @@ pub mod slot_preimages;
 ///
 /// Input tables:
 /// - [`tables::CanonicalHeaders`] get next block to execute.
-/// - [`tables::Headers`] get for revm environment variables.
+/// - [`tables::Headers`] get for EVM environment variables.
 /// - [`tables::BlockBodyIndices`] to get tx number
 /// - [`tables::Transactions`] to execute
 ///
@@ -408,11 +407,7 @@ where
 
         // prepare execution output for writing
         let time = Instant::now();
-        let mut state = ExecutionOutcome::from_blocks(
-            start_block,
-            executor.into_state().take_bundle(),
-            results,
-        );
+        let mut state = ExecutionOutcome::from_blocks(start_block, executor.into_state(), results);
         let write_preparation_duration = time.elapsed();
 
         // log the gas per second for the range we just executed
@@ -452,7 +447,7 @@ where
             // Iterate over all reverts and clear them if pruning is configured.
             for block_number in start_block..=max_block {
                 let Some(reverts) =
-                    state.bundle.reverts.get_mut((block_number - start_block) as usize)
+                    state.block_reverts_mut().get_mut((block_number - start_block) as usize)
                 else {
                     break
                 };

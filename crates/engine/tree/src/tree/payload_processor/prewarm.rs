@@ -13,25 +13,27 @@
 
 use super::{bal_prewarm_pool::BalPrewarmPool, StateRootHintStream, StateRootUpdateStream};
 use crate::tree::{
-    precompile_cache::{CachedPrecompile, PrecompileCacheMap},
     CachedStateCacheMetrics, CachedStateMetrics, CachedStateProvider, ExecutionEnv,
     PayloadExecutionCache, SavedCache, StateProviderBuilder,
 };
-use alloy_consensus::transaction::TxHashRef;
 use alloy_eip7928::bal::DecodedBal;
 use alloy_eips::eip4895::Withdrawal;
-use alloy_primitives::{keccak256, B256, U256};
+use alloy_primitives::{keccak256, Address, B256, U256};
+use core::convert::Infallible;
 use metrics::{Counter, Gauge, Histogram};
 use rayon::prelude::*;
-use reth_evm::{execute::ExecutableTxFor, ConfigureEvm, Evm, EvmFor, RecoveredTx, SpecFor};
+use reth_evm::{
+    database::StateProviderDatabase, ConfigureEvm, Evm as EvmInstance, EvmEnv, EvmFor,
+    ExecutableTxFor, RecoveredTx,
+};
+use reth_execution_types::{EvmStateChangeSink, ExecutionAccountChangeRef, ExecutionStorageChange};
 use reth_metrics::Metrics;
 use reth_primitives_traits::{Account, FastInstant as Instant, NodePrimitives};
 use reth_provider::{
     AccountReader, BlockExecutionOutput, BlockReader, StateProviderFactory, StateReader,
 };
-use reth_revm::database::StateProviderDatabase;
 use reth_tasks::{pool::WorkerPool, Runtime};
-use reth_trie_common::MultiProofTargetsV2;
+use reth_trie_common::{MultiProofTargetsV2, ProofV2Target};
 use std::sync::{
     atomic::{AtomicBool, AtomicUsize, Ordering},
     mpsc::{self, channel, Receiver, Sender},
@@ -226,15 +228,18 @@ where
 
             let start = Instant::now();
 
-            let (tx_env, tx) = tx.into_parts();
-            let res = match evm.transact(tx_env) {
-                Ok(res) => res,
+            let (_tx_env, tx) = tx.into_parts();
+            let tx_env = ctx.evm_config.tx_env(tx.to_recovered());
+            // Prewarm workers must not commit speculative writes into the reused worker EVM:
+            // task scheduling would otherwise make later prewarm reads observe non-canonical state.
+            let mut proof_targets = PrewarmProofTargetsSink::default();
+
+            match evm.transact_and_discard(&tx_env, &mut proof_targets) {
+                Ok(()) => {}
                 Err(err) => {
                     trace!(
                         target: "engine::tree::payload_processor::prewarm",
                         %err,
-                        tx_hash=%tx.tx().tx_hash(),
-                        sender=%tx.signer(),
                         "Error when executing prewarm transaction",
                     );
                     ctx.metrics.transaction_errors.increment(1);
@@ -248,7 +253,7 @@ where
             }
 
             if index > 0 {
-                let (targets, storage_targets) = MultiProofTargetsV2::from_state(res.state);
+                let (targets, storage_targets) = proof_targets.into_parts();
                 ctx.metrics.prefetch_storage_targets.record(storage_targets as f64);
                 if let Some(state_root_hint_stream) = state_root_hint_stream {
                     state_root_hint_stream.on_access_hint(targets.into());
@@ -293,9 +298,8 @@ where
                 let caches = saved_cache.cache().clone();
                 let new_cache = SavedCache::new(hash, caches);
 
-                // Insert state into cache while holding the lock
-                // Access the BundleState through the shared ExecutionOutcome
-                if new_cache.cache().insert_state(&execution_outcome.state).is_err() {
+                // Insert state into cache while holding the lock.
+                if new_cache.cache().insert_state(execution_outcome.state.inner()).is_err() {
                     // Clear the cache on error to prevent having a polluted cache
                     *cached = None;
                     debug!(target: "engine::caching", "cleared execution cache on update error");
@@ -542,10 +546,6 @@ where
     /// loop. Prewarm workers skip transactions with `index < counter` since those have already
     /// been executed.
     pub executed_tx_index: Arc<AtomicUsize>,
-    /// Whether the precompile cache is disabled.
-    pub precompile_cache_disabled: bool,
-    /// The precompile cache map.
-    pub precompile_cache_map: PrecompileCacheMap<SpecFor<Evm>>,
     /// Whether to disable BAL-driven parallel state root computation.
     /// Only valid when BAL parallel execution is also disabled.
     pub disable_bal_parallel_state_root: bool,
@@ -555,8 +555,7 @@ where
 
 /// Per-thread EVM state initialised by [`PrewarmContext::evm_for_ctx`] and stored in
 /// [`WorkerPool`] workers via [`Worker::get_or_init`](reth_tasks::pool::Worker::get_or_init).
-type PrewarmEvmState<Evm> =
-    Option<EvmFor<Evm, StateProviderDatabase<reth_provider::StateProviderBox>>>;
+type PrewarmEvmState<Evm> = Option<EvmFor<'static, Evm>>;
 
 impl<N, P, Evm> PrewarmContext<N, P, Evm>
 where
@@ -585,35 +584,10 @@ where
             state_provider = Box::new(CachedStateProvider::new_prewarm(state_provider, caches));
         }
 
-        let state_provider = StateProviderDatabase::new(state_provider);
+        let evm_env =
+            self.env.evm_env.clone().with_nonce_check_disabled().with_balance_check_disabled();
 
-        let mut evm_env = self.env.evm_env.clone();
-
-        // we must disable the nonce check so that we can execute the transaction even if the nonce
-        // doesn't match what's on chain.
-        evm_env.cfg_env.disable_nonce_check = true;
-
-        // disable the balance check so that transactions from senders who were funded by earlier
-        // transactions in the block can still be prewarmed
-        evm_env.cfg_env.disable_balance_check = true;
-
-        // create a new executor and disable nonce checks in the env
-        let spec_id = *evm_env.spec_id();
-        let mut evm = self.evm_config.evm_with_env(state_provider, evm_env);
-
-        if !self.precompile_cache_disabled {
-            // Only cache pure precompiles to avoid issues with stateful precompiles
-            evm.precompiles_mut().map_cacheable_precompiles(|address, precompile| {
-                CachedPrecompile::wrap(
-                    precompile,
-                    self.precompile_cache_map.cache_for_address(*address),
-                    spec_id,
-                    None, // No metrics for prewarm
-                )
-            });
-        }
-
-        Some(evm)
+        Some(self.evm_config.evm_with_env(StateProviderDatabase::new(state_provider), evm_env))
     }
 
     /// Returns `true` if prewarming should stop.
@@ -788,6 +762,44 @@ const fn bal_account_changes_state_root(
     account_fields: BalAccountStateFields,
 ) -> bool {
     !account_fields.is_empty() || !account_changes.storage_changes.is_empty()
+}
+
+#[derive(Debug, Default)]
+struct PrewarmProofTargetsSink {
+    targets: MultiProofTargetsV2,
+    storage_targets: usize,
+}
+
+impl PrewarmProofTargetsSink {
+    fn into_parts(self) -> (MultiProofTargetsV2, usize) {
+        (self.targets, self.storage_targets)
+    }
+
+    fn storage_targets_for_address(&mut self, address: Address) -> &mut Vec<ProofV2Target> {
+        self.targets.storage_targets.entry(keccak256(address)).or_default()
+    }
+}
+
+impl EvmStateChangeSink for PrewarmProofTargetsSink {
+    type Error = Infallible;
+
+    fn account(&mut self, change: ExecutionAccountChangeRef<'_>) -> Result<(), Self::Error> {
+        self.targets.account_targets.push(ProofV2Target::new(keccak256(change.address)));
+        Ok(())
+    }
+
+    fn storage_wipe(&mut self, address: Address) -> Result<(), Self::Error> {
+        self.targets.account_targets.push(ProofV2Target::new(keccak256(address)));
+        self.storage_targets_for_address(address);
+        Ok(())
+    }
+
+    fn storage(&mut self, change: ExecutionStorageChange) -> Result<(), Self::Error> {
+        self.storage_targets_for_address(change.address)
+            .push(ProofV2Target::new(keccak256(change.key.to_be_bytes::<32>())));
+        self.storage_targets += 1;
+        Ok(())
+    }
 }
 
 /// Returns [`MultiProofTargetsV2`] for withdrawal addresses.

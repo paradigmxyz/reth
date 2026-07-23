@@ -5,15 +5,14 @@ use alloy_eips::{
     eip7840::BlobParams,
     eip7910::{EthConfig, EthForkConfig, SystemContract},
 };
-use alloy_evm::precompiles::Precompile;
 use alloy_primitives::Address;
+use evm2::evm::EmptyDB;
 use jsonrpsee::{core::RpcResult, proc_macros::rpc};
 use reth_chainspec::{ChainSpecProvider, EthChainSpec, EthereumHardforks, Hardforks, Head};
 use reth_errors::{ProviderError, RethError};
-use reth_evm::{precompiles::PrecompilesMap, ConfigureEvm, Evm};
+use reth_evm::{ConfigureEvm, Evm};
 use reth_node_api::NodePrimitives;
 use reth_primitives_traits::header::HeaderMut;
-use reth_revm::db::EmptyDB;
 use reth_rpc_eth_types::EthApiError;
 use reth_storage_api::BlockReaderIdExt;
 use std::collections::BTreeMap;
@@ -169,14 +168,6 @@ where
     }
 }
 
-fn evm_to_precompiles_map(
-    evm: impl Evm<Precompiles = PrecompilesMap>,
-) -> BTreeMap<String, Address> {
-    let precompiles = evm.precompiles();
-    precompiles
-        .addresses()
-        .filter_map(|address| {
-            Some((precompiles.get(address)?.precompile_id().name().to_string(), *address))
-        })
-        .collect()
+fn evm_to_precompiles_map(evm: impl Evm) -> BTreeMap<String, Address> {
+    evm.precompile_ids().into_iter().map(|(address, id)| (id.name().to_string(), address)).collect()
 }

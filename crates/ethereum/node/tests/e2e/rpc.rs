@@ -328,7 +328,9 @@ async fn test_flashbots_validate_v6() -> eyre::Result<()> {
 
     for nonce in 0..3 {
         let _ = provider
-            .send_transaction(TransactionRequest::default().to(Address::ZERO).nonce(nonce))
+            .send_transaction(
+                TransactionRequest::default().to(Address::ZERO).nonce(nonce).gas_limit(21_000),
+            )
             .await?;
     }
 

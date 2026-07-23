@@ -1,5 +1,8 @@
 use super::metrics::{RocksDBMetrics, RocksDBOperation, ROCKSDB_TABLES};
-use crate::providers::{compute_history_rank, needs_prev_shard_check, HistoryInfo};
+use crate::{
+    providers::{compute_history_rank, needs_prev_shard_check, HistoryInfo},
+    writer::execution_state_to_plain_reverts,
+};
 use alloy_consensus::transaction::TxHashRef;
 use alloy_primitives::{
     map::{AddressMap, HashMap},
@@ -1404,7 +1407,7 @@ impl RocksDBProvider {
 
         for (block_idx, block) in blocks.iter().enumerate() {
             let block_number = ctx.first_block_number + block_idx as u64;
-            let reverts = block.execution_outcome().state.reverts.to_plain_state_reverts();
+            let reverts = execution_state_to_plain_reverts(&block.execution_outcome().state);
 
             // Iterate through account reverts - these are exactly the accounts that have
             // changesets written, ensuring history indices match changeset entries.
@@ -1436,7 +1439,7 @@ impl RocksDBProvider {
 
         for (block_idx, block) in blocks.iter().enumerate() {
             let block_number = ctx.first_block_number + block_idx as u64;
-            let reverts = block.execution_outcome().state.reverts.to_plain_state_reverts();
+            let reverts = execution_state_to_plain_reverts(&block.execution_outcome().state);
 
             // Iterate through storage reverts - these are exactly the slots that have
             // changesets written, ensuring history indices match changeset entries.

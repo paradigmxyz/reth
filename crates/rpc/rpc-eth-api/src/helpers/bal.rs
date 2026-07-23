@@ -4,11 +4,8 @@ use alloy_eip7928::{bal::DecodedBal, BlockAccessList};
 use alloy_primitives::Bytes;
 use alloy_rpc_types_eth::BlockId;
 use reth_errors::RethError;
-use reth_evm::{block::BlockExecutor, ConfigureEvm, Evm};
-use reth_revm::{database::StateProviderDatabase, State};
-use reth_rpc_eth_types::{
-    cache::db::StateProviderTraitObjWrapper, error::FromEthApiError, EthApiError,
-};
+use reth_evm::{database::StateProviderDatabase, BlockExecutor, ConfigureEvm};
+use reth_rpc_eth_types::{error::FromEthApiError, EthApiError};
 use reth_storage_api::StateProviderFactory;
 
 use crate::{
@@ -27,15 +24,13 @@ pub trait GetBlockAccessList: Trace + Call + LoadBlock + RpcNodeCoreExt {
             let Some(block) = self.recovered_block(block_id).await? else {
                 return Ok(None);
             };
-
             if let Some(cached_bal) =
                 self.cache().get_bal(block.hash()).await.map_err(Self::Error::from_eth_err)?
             {
-                let (bal, _) = DecodedBal::from_rlp_bytes(cached_bal.as_raw().clone())
+                let bal = decode_cached_block_access_list(cached_bal.as_ref())
                     .map_err(RethError::other)
-                    .map_err(Self::Error::from_eth_err)?
-                    .split();
-                return Ok(Some(Vec::from(bal)))
+                    .map_err(Self::Error::from_eth_err)?;
+                return Ok(Some(bal))
             }
 
             self.spawn_blocking_io(move |eth_api| {
@@ -43,32 +38,18 @@ pub trait GetBlockAccessList: Trace + Call + LoadBlock + RpcNodeCoreExt {
                     .provider()
                     .state_by_block_id(block.parent_hash().into())
                     .map_err(Self::Error::from_eth_err)?;
-
-                let mut db = State::builder()
-                    .with_database(StateProviderDatabase::new(StateProviderTraitObjWrapper(state)))
-                    .with_bal_builder()
-                    .build();
-
-                let block_txs = block.transactions_recovered();
+                let db = StateProviderDatabase::new(state.as_ref());
                 let mut executor = RpcNodeCore::evm_config(&eth_api)
-                    .executor_for_block(&mut db, block.sealed_block())
+                    .executor_for_block(db, block.sealed_block())
                     .map_err(RethError::other)
                     .map_err(Self::Error::from_eth_err)?;
-
+                executor.enable_block_access_list_builder();
                 executor.apply_pre_execution_changes().map_err(Self::Error::from_eth_err)?;
-                executor.evm_mut().db_mut().bump_bal_index();
-
-                // replay all transactions prior to the targeted transaction
-                for block_tx in block_txs {
+                for block_tx in block.transactions_recovered() {
                     executor.execute_transaction(block_tx).map_err(Self::Error::from_eth_err)?;
-                    executor.evm_mut().db_mut().bump_bal_index();
                 }
-
-                executor
-                    .apply_post_execution_changes()
-                    .map_err(|err| EthApiError::Internal(err.into()))?;
-
-                let bal = db.take_built_alloy_bal();
+                let (_, bal) =
+                    executor.finish_with_block_access_list().map_err(Self::Error::from_eth_err)?;
                 Ok(bal)
             })
             .await
@@ -85,7 +66,6 @@ pub trait GetBlockAccessList: Trace + Call + LoadBlock + RpcNodeCoreExt {
                 .recovered_block(block_id)
                 .await?
                 .ok_or_else(|| EthApiError::HeaderNotFound(block_id))?;
-
             if let Some(cached_bal) =
                 self.cache().get_bal(block.hash()).await.map_err(Self::Error::from_eth_err)?
             {
@@ -94,5 +74,40 @@ pub trait GetBlockAccessList: Trace + Call + LoadBlock + RpcNodeCoreExt {
 
             Ok(self.get_block_access_list(block_id).await?.map(|bal| alloy_rlp::encode(bal).into()))
         }
+    }
+}
+
+fn decode_cached_block_access_list<T>(
+    cached_bal: &DecodedBal<T>,
+) -> Result<BlockAccessList, alloy_rlp::Error> {
+    let (bal, _) = DecodedBal::from_rlp_bytes(cached_bal.as_raw().clone())?.split();
+    Ok(bal.into())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use alloy_eip7928::{bal::Bal, AccountChanges};
+    use alloy_primitives::Address;
+    use evm2::evm::Bal as EvmBal;
+    use std::sync::Arc;
+
+    #[test]
+    fn cached_response_decodes_preserved_raw_bal() {
+        let expected = vec![AccountChanges::new(Address::repeat_byte(0x11))];
+        let raw = alloy_rlp::encode(Bal::from(expected.clone())).into();
+        let cached = DecodedBal::new(Arc::new(EvmBal::default()), raw);
+
+        assert_eq!(decode_cached_block_access_list(&cached).unwrap(), expected);
+    }
+
+    #[test]
+    fn cached_response_rejects_malformed_raw_bal() {
+        let cached = DecodedBal::new(
+            Arc::new(EvmBal::default()),
+            Bytes::from_static(&[alloy_rlp::EMPTY_STRING_CODE]),
+        );
+
+        assert!(decode_cached_block_access_list(&cached).is_err());
     }
 }

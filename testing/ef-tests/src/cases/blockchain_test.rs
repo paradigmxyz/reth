@@ -11,16 +11,16 @@ use reth_consensus::{Consensus, HeaderValidator};
 use reth_db_common::init::{insert_genesis_hashes, insert_genesis_history, insert_genesis_state};
 use reth_ethereum_consensus::{validate_block_post_execution, EthBeaconConsensus};
 use reth_ethereum_primitives::Block;
-use reth_evm::{execute::Executor, ConfigureEvm};
+use reth_evm::{database::StateProviderDatabase, execute::Executor, ConfigureEvm};
 use reth_evm_ethereum::EthEvmConfig;
 use reth_primitives_traits::{ParallelBridgeBuffered, RecoveredBlock, SealedBlock};
 use reth_provider::{
+    hashed_post_state_from_execution_state,
     test_utils::create_test_provider_factory_with_chain_spec, BlockWriter, DatabaseProviderFactory,
     ExecutionOutcome, HistoryWriter, OriginalValuesKnown, StateWriteConfig, StateWriter,
     StaticFileProviderFactory, StaticFileSegment, StaticFileWriter, StorageSettingsCache,
 };
-use reth_revm::database::StateProviderDatabase;
-use reth_trie::{HashedPostState, KeccakKeyHasher, StateRoot};
+use reth_trie::{KeccakKeyHasher, StateRoot};
 use reth_trie_db::DatabaseStateRoot;
 use std::{
     collections::BTreeMap,
@@ -244,12 +244,10 @@ fn run_case(case: &BlockchainTest) -> Result<(), Error> {
 
         // Execute the block
         let state_provider = provider.latest();
-        let state_db = StateProviderDatabase(&state_provider);
-        let executor = executor_provider.batch_executor(state_db);
-
-        let output = executor
-            .execute(&(*block).clone())
-            .map_err(|err| Error::block_failed(block_number, err))?;
+        let database = StateProviderDatabase(&state_provider);
+        let output = executor_provider.executor(database).execute(block).map_err(|err| {
+            Error::block_failed(block_number, std::io::Error::other(err.to_string()))
+        })?;
 
         // Consensus checks after block execution
         validate_block_post_execution(block, &chain_spec, &output, None, None)
@@ -257,7 +255,7 @@ fn run_case(case: &BlockchainTest) -> Result<(), Error> {
 
         // Compute and check the post state root
         let hashed_state =
-            HashedPostState::from_bundle_state::<KeccakKeyHasher>(output.state.state());
+            hashed_post_state_from_execution_state::<KeccakKeyHasher>(output.state.inner());
         let sorted = hashed_state.clone_into_sorted();
         let (computed_state_root, _) = reth_trie_db::with_adapter!(provider, |A| {
             StateRoot::<reth_trie_db::DatabaseTrieCursorFactory<_, A>, _>::overlay_root_with_updates(
@@ -404,7 +402,7 @@ pub fn should_skip(path: &Path) -> bool {
         | "CALLBlake2f_MaxRounds.json"
         | "shiftCombinations.json"
 
-        // Skipped by revm as well: <https://github.com/bluealloy/revm/blob/be92e1db21f1c47b34c5a58cfbf019f6b97d7e4b/bins/revme/src/cmd/statetest/runner.rs#L115-L125>
+        // Skipped because this case is known to be invalid in the upstream state tests.
         | "RevertInCreateInInit_Paris.json"
         | "RevertInCreateInInit.json"
         | "dynamicAccountOverwriteEmpty.json"

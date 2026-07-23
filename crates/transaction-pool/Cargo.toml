@@ -18,13 +18,12 @@ reth-ethereum-primitives.workspace = true
 reth-chainspec.workspace = true
 reth-eth-wire-types.workspace = true
 reth-evm.workspace = true
-reth-evm-ethereum.workspace = true
+reth-evm-ethereum = { workspace = true, features = ["std"] }
 reth-primitives-traits.workspace = true
 reth-execution-types.workspace = true
 reth-fs-util.workspace = true
 reth-storage-api.workspace = true
 reth-tasks.workspace = true
-revm.workspace = true
 
 # ethereum
 alloy-eips = { workspace = true, features = ["kzg"] }
@@ -93,7 +92,6 @@ serde = [
     "reth-ethereum-primitives/serde",
     "reth-chain-state/serde",
     "reth-storage-api/serde",
-    "revm/serde",
     "reth-transaction-pool/serde",
 ]
 test-utils = [
@@ -124,7 +122,6 @@ arbitrary = [
     "reth-primitives-traits/arbitrary",
     "smallvec/arbitrary",
     "reth-ethereum-primitives/arbitrary",
-    "revm/arbitrary",
     "imbl/arbitrary",
     "reth-transaction-pool/arbitrary",
 ]

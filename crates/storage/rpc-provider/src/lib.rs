@@ -38,6 +38,7 @@ use reth_db_api::{
     models::StoredBlockBodyIndices,
 };
 use reth_errors::{ProviderError, ProviderResult};
+use reth_execution_types::{hashed_post_state_from_execution_state, EvmState};
 use reth_node_types::{
     Block, BlockBody, BlockTy, HeaderTy, NodeTypes, PrimitivesTy, ReceiptTy, TxTy,
 };
@@ -1316,8 +1317,8 @@ where
     N: Network,
     Node: NodeTypes,
 {
-    fn hashed_post_state(&self, bundle_state: &revm::database::BundleState) -> HashedPostState {
-        HashedPostState::from_bundle_state::<KeccakKeyHasher>(bundle_state.state())
+    fn hashed_post_state(&self, state: &EvmState) -> HashedPostState {
+        hashed_post_state_from_execution_state::<KeccakKeyHasher>(state)
     }
 }
 

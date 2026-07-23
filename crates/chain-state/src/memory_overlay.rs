@@ -2,6 +2,7 @@ use super::ExecutedBlock;
 use alloy_consensus::BlockHeader;
 use alloy_primitives::{keccak256, Address, BlockNumber, Bytes, StorageKey, StorageValue, B256};
 use reth_errors::ProviderResult;
+use reth_execution_types::EvmState;
 use reth_primitives_traits::{Account, Bytecode, NodePrimitives};
 use reth_storage_api::{
     AccountReader, BlockHashReader, BytecodeReader, HashedPostStateProvider, StateProofProvider,
@@ -11,7 +12,6 @@ use reth_trie::{
     updates::TrieUpdates, AccountProof, HashedPostState, HashedStorage, MultiProof,
     MultiProofTargets, StorageMultiProof, TrieInput,
 };
-use revm::database::BundleState;
 use std::{borrow::Cow, sync::OnceLock};
 
 /// A state provider that stores references to in-memory blocks along with their state as well as a
@@ -209,8 +209,8 @@ impl<N: NodePrimitives> StateProofProvider for MemoryOverlayStateProviderRef<'_,
 }
 
 impl<N: NodePrimitives> HashedPostStateProvider for MemoryOverlayStateProviderRef<'_, N> {
-    fn hashed_post_state(&self, bundle_state: &BundleState) -> HashedPostState {
-        self.historical.hashed_post_state(bundle_state)
+    fn hashed_post_state(&self, state: &EvmState) -> HashedPostState {
+        self.historical.hashed_post_state(state)
     }
 }
 

@@ -2,28 +2,24 @@
 
 use alloy_consensus::{transaction::TxHashRef, BlockHeader};
 use alloy_eips::BlockNumberOrTag;
-use alloy_evm::{env::BlockEnvironment, overrides::apply_block_overrides};
 use alloy_primitives::U256;
 use alloy_rpc_types_eth::{BlockId, Log};
 use alloy_rpc_types_mev::{
     BundleItem, Inclusion, MevSendBundle, Privacy, RefundConfig, SimBundleLogs, SimBundleOverrides,
     SimBundleResponse, Validity,
 };
+use evm2::evm::DynDatabase;
 use jsonrpsee::core::RpcResult;
-use reth_evm::{ConfigureEvm, Evm};
+use reth_evm::{ConfigureEvm, EvmEnv};
 use reth_primitives_traits::Recovered;
 use reth_rpc_api::MevSimApiServer;
-use reth_rpc_eth_api::{
-    helpers::{block::LoadBlock, Call, EthTransactions},
-    FromEthApiError, FromEvmError,
+use reth_rpc_eth_api::helpers::{block::LoadBlock, Call, EthTransactions};
+use reth_rpc_eth_types::{
+    cache::db::apply_block_overrides, utils::recover_raw_transaction, EthApiError,
 };
-use reth_rpc_eth_types::{utils::recover_raw_transaction, EthApiError};
 use reth_storage_api::ProviderTx;
 use reth_tasks::pool::BlockingTaskGuard;
 use reth_transaction_pool::{PoolPooledTx, PoolTransaction, TransactionPool};
-use revm::{
-    context::Block, context_interface::result::ResultAndState, DatabaseCommit, DatabaseRef,
-};
 use std::{sync::Arc, time::Duration};
 use tracing::trace;
 
@@ -301,14 +297,15 @@ where
             .spawn_with_state_at_block(current_block_id, move |_, mut db| {
                 // Setup environment
                 let current_block_number = current_block.number();
-                let coinbase = evm_env.block_env.beneficiary();
-                let basefee = evm_env.block_env.basefee();
+                let coinbase = evm_env.block_env().beneficiary;
+                let basefee = evm_env.block_base_fee();
 
                 // apply overrides
-                apply_block_overrides(block_overrides, &mut db, evm_env.block_env.inner_mut());
+                apply_block_overrides(block_overrides, &mut db, &mut evm_env);
 
-                let initial_coinbase_balance = DatabaseRef::basic_ref(&db, coinbase)
-                    .map_err(EthApiError::from_eth_err)?
+                let initial_coinbase_balance = db
+                    .get_account(&coinbase)
+                    .map_err(|code| EthApiError::EvmCustom(db.error(code).to_string()))?
                     .map(|acc| acc.balance)
                     .unwrap_or_default();
 
@@ -318,7 +315,6 @@ where
                 let mut refundable_value = U256::ZERO;
                 let mut flat_logs: Vec<Vec<Log>> = Vec::new();
 
-                let mut evm = eth_api.evm_config().evm_with_env(db, evm_env);
                 let mut log_index = 0;
 
                 for (tx_index, item) in flattened_bundle.iter().enumerate() {
@@ -336,11 +332,12 @@ where
                         .into());
                     }
 
-                    let ResultAndState { result, state } = evm
-                        .transact(eth_api.evm_config().tx_env(&item.tx))
-                        .map_err(Eth::Error::from_evm_err)?;
+                    let tx_env = eth_api.evm_config().tx_env(item.tx.clone());
+                    let result_and_state = eth_api.transact(&mut db, evm_env.clone(), tx_env)?;
+                    let result = result_and_state.result;
+                    let state = result_and_state.pending_state;
 
-                    if !result.is_success() && !item.can_revert {
+                    if !result.status && !item.can_revert {
                         return Err(EthApiError::InvalidParams(
                             EthSimBundleError::BundleTransactionFailed.to_string(),
                         )
@@ -350,9 +347,12 @@ where
                     let gas_used = result.tx_gas_used();
                     total_gas_used += gas_used;
 
-                    // coinbase is always present in the result state
-                    let coinbase_balance_after_tx =
-                        state.get(&coinbase).map(|acc| acc.info.balance).unwrap_or_default();
+                    db.commit_source(&state);
+                    let coinbase_balance_after_tx = db
+                        .get_account(&coinbase)
+                        .map_err(|code| EthApiError::EvmCustom(db.error(code).to_string()))?
+                        .map(|acc| acc.balance)
+                        .unwrap_or(coinbase_balance_before_tx);
 
                     let coinbase_diff =
                         coinbase_balance_after_tx.saturating_sub(coinbase_balance_before_tx);
@@ -370,7 +370,7 @@ where
                     // tree in execution order after simulation.
                     if logs {
                         let tx_logs: Vec<Log> = result
-                            .into_logs()
+                            .logs
                             .into_iter()
                             .map(|inner| {
                                 let full_log = Log {
@@ -389,9 +389,6 @@ where
                             .collect();
                         flat_logs.push(tx_logs);
                     }
-
-                    // Apply state changes
-                    evm.db_mut().commit(state);
                 }
 
                 let body_logs =

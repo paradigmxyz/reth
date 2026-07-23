@@ -7,10 +7,10 @@ use alloy_rpc_types_engine::{ForkchoiceState, PayloadAttributes};
 use eyre::{eyre, Result};
 use reth_chainspec::ChainSpec;
 use reth_ethereum_primitives::Block;
+use reth_execution_types::EvmState;
 use reth_network_p2p::sync::{NetworkSyncUpdater, SyncState};
 use reth_node_api::{EngineTypes, NodeTypes, PayloadTypes, TreeConfig};
 use reth_node_core::primitives::RecoveredBlock;
-use revm::state::EvmState;
 use std::{marker::PhantomData, path::Path, sync::Arc};
 use tokio::{
     sync::mpsc,

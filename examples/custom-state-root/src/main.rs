@@ -47,7 +47,7 @@ use reth_ethereum::{
     tasks::Runtime,
     EthPrimitives,
 };
-use reth_evm::{revm::context::Block as _, ConfigureEvm};
+use reth_evm::{ConfigureEvm, EvmEnv};
 use reth_primitives_traits::{NodePrimitives, RecoveredBlock};
 use reth_provider::{BlockExecutionOutput, ProviderResult};
 use reth_trie::updates::TrieUpdates;
@@ -72,7 +72,7 @@ where
         &self,
         ctx: StateRootJobContext<'_, N, P, Evm>,
     ) -> ProviderResult<PreparedStateRootJob<N>> {
-        let timestamp: u64 = ctx.env().evm_env.block_env.timestamp().saturating_to();
+        let timestamp: u64 = ctx.env().evm_env.block_env().timestamp.saturating_to();
         if timestamp < self.activation_timestamp {
             return self.default.prepare(ctx)
         }

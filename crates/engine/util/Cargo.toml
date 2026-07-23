@@ -19,15 +19,14 @@ reth-fs-util.workspace = true
 reth-engine-primitives = { workspace = true, features = ["std"] }
 reth-engine-tree.workspace = true
 reth-evm.workspace = true
-reth-revm.workspace = true
 reth-storage-api.workspace = true
 reth-payload-primitives.workspace = true
 
 # alloy
+alloy-consensus.workspace = true
 alloy-primitives.workspace = true
 alloy-rlp.workspace = true
 alloy-rpc-types-engine.workspace = true
-alloy-consensus.workspace = true
 
 # async
 tokio = { workspace = true, default-features = false }

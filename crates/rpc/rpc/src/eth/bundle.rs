@@ -2,23 +2,20 @@
 
 use alloy_consensus::{transaction::TxHashRef, EnvKzgSettings, Transaction as _};
 use alloy_eips::eip7840::BlobParams;
-use alloy_evm::env::BlockEnvironment;
 use alloy_primitives::{uint, Keccak256, U256};
 use alloy_rpc_types_mev::{EthCallBundle, EthCallBundleResponse, EthCallBundleTransactionResult};
+use evm2::evm::DynDatabase;
 use jsonrpsee::core::RpcResult;
 use reth_chainspec::{ChainSpecProvider, EthChainSpec};
-use reth_evm::{ConfigureEvm, Evm};
+use reth_evm::{ConfigureEvm, EvmEnv};
 use reth_rpc_eth_api::{
     helpers::{Call, EthTransactions, LoadPendingBlock},
-    EthCallBundleApiServer, FromEthApiError, FromEvmError,
+    EthCallBundleApiServer, FromEthApiError,
 };
 use reth_rpc_eth_types::{utils::recover_raw_transaction, EthApiError, RpcInvalidTransactionError};
 use reth_tasks::pool::BlockingTaskGuard;
 use reth_transaction_pool::{
     EthBlobTransactionSidecar, EthPoolTransaction, PoolPooledTx, PoolTransaction, TransactionPool,
-};
-use revm::{
-    context::Block, context_interface::result::ResultAndState, DatabaseCommit, DatabaseRef,
 };
 use std::sync::Arc;
 
@@ -97,18 +94,18 @@ where
         let (mut evm_env, at) = self.eth_api().evm_env_at(block_id).await?;
 
         if let Some(coinbase) = coinbase {
-            evm_env.block_env.inner_mut().beneficiary = coinbase;
+            evm_env.block_env_mut().beneficiary = coinbase;
         }
 
         // need to adjust the timestamp for the next block
         if let Some(timestamp) = timestamp {
-            evm_env.block_env.inner_mut().timestamp = U256::from(timestamp);
+            evm_env.block_env_mut().timestamp = U256::from(timestamp);
         } else {
-            evm_env.block_env.inner_mut().timestamp += uint!(12_U256);
+            evm_env.block_env_mut().timestamp += uint!(12_U256);
         }
 
         if let Some(difficulty) = difficulty {
-            evm_env.block_env.inner_mut().difficulty = U256::from(difficulty);
+            evm_env.block_env_mut().difficulty = U256::from(difficulty);
         }
 
         // Validate that the bundle does not contain more than MAX_BLOB_NUMBER_PER_BLOCK blob
@@ -119,7 +116,7 @@ where
                 .eth_api()
                 .provider()
                 .chain_spec()
-                .blob_params_at_timestamp(evm_env.block_env.timestamp().saturating_to())
+                .blob_params_at_timestamp(evm_env.block_env().timestamp.to())
                 .unwrap_or_else(BlobParams::cancun);
             if blob_gas_used > blob_params.max_blob_gas_per_block() {
                 return Err(EthApiError::InvalidParams(
@@ -131,24 +128,26 @@ where
         }
 
         // Apply gas limit: default to call gas limit unless user requests a smaller limit
-        evm_env.block_env.inner_mut().gas_limit = gas_limit.unwrap_or(call_gas_limit);
+        evm_env.block_env_mut().gas_limit = U256::from(gas_limit.unwrap_or(call_gas_limit));
 
         if let Some(base_fee) = base_fee {
-            evm_env.block_env.inner_mut().basefee = base_fee.try_into().unwrap_or(u64::MAX);
+            evm_env.block_env_mut().basefee = U256::from(base_fee);
         }
 
-        let state_block_number = evm_env.block_env.number();
+        let state_block_number = evm_env.block_env().number;
         // use the block number of the request
-        evm_env.block_env.inner_mut().number = U256::from(block_number);
+        evm_env.block_env_mut().number = U256::from(block_number);
 
         self.eth_api()
-            .spawn_with_state_at_block(at, move |eth_api, db| {
-                let coinbase = evm_env.block_env.beneficiary();
-                let basefee = evm_env.block_env.basefee();
+            .spawn_with_state_at_block(at, move |eth_api, mut db| {
+                let coinbase = evm_env.block_env().beneficiary;
+                let basefee = evm_env.block_base_fee();
 
                 let initial_coinbase = db
-                    .basic_ref(coinbase)
-                    .map_err(Eth::Error::from_eth_err)?
+                    .get_account(&coinbase)
+                    .map_err(|code| {
+                        Eth::Error::from_eth_err(EthApiError::EvmCustom(db.error(code).to_string()))
+                    })?
                     .map(|acc| acc.balance)
                     .unwrap_or_default();
                 let mut coinbase_balance_before_tx = initial_coinbase;
@@ -157,12 +156,8 @@ where
                 let mut total_gas_fees = U256::ZERO;
                 let mut hasher = Keccak256::new();
 
-                let mut evm = eth_api.evm_config().evm_with_env(db, evm_env);
-
                 let mut results = Vec::with_capacity(transactions.len());
-                let mut transactions = transactions.into_iter().peekable();
-
-                while let Some(tx) = transactions.next() {
+                for tx in transactions {
                     let signer = tx.signer();
                     let tx = {
                         let mut tx = <Eth::Pool as TransactionPool>::Transaction::from_pooled(tx);
@@ -181,9 +176,10 @@ where
                     };
 
                     hasher.update(*tx.tx_hash());
-                    let ResultAndState { result, state } = evm
-                        .transact(eth_api.evm_config().tx_env(&tx))
-                        .map_err(Eth::Error::from_evm_err)?;
+                    let tx_env = eth_api.evm_config().tx_env(tx.clone());
+                    let result_and_state = eth_api.transact(&mut db, evm_env.clone(), tx_env)?;
+                    let result = result_and_state.result;
+                    let state = result_and_state.pending_state;
 
                     let gas_price = tx
                         .effective_tip_per_gas(basefee)
@@ -194,9 +190,16 @@ where
                     let gas_fees = U256::from(gas_used) * U256::from(gas_price);
                     total_gas_fees += gas_fees;
 
-                    // coinbase is always present in the result state
-                    coinbase_balance_after_tx =
-                        state.get(&coinbase).map(|acc| acc.info.balance).unwrap_or_default();
+                    db.commit_source(&state);
+                    coinbase_balance_after_tx = db
+                        .get_account(&coinbase)
+                        .map_err(|code| {
+                            Eth::Error::from_eth_err(EthApiError::EvmCustom(
+                                db.error(code).to_string(),
+                            ))
+                        })?
+                        .map(|acc| acc.balance)
+                        .unwrap_or(coinbase_balance_before_tx);
                     let coinbase_diff =
                         coinbase_balance_after_tx.saturating_sub(coinbase_balance_before_tx);
                     let eth_sent_to_coinbase = coinbase_diff.saturating_sub(gas_fees);
@@ -205,11 +208,11 @@ where
                     coinbase_balance_before_tx = coinbase_balance_after_tx;
 
                     // set the return data for the response
-                    let (value, revert) = if result.is_success() {
-                        let value = result.into_output().unwrap_or_default();
+                    let (value, revert) = if result.status {
+                        let value = result.output;
                         (Some(value), None)
                     } else {
-                        let revert = result.into_output().unwrap_or_default();
+                        let revert = result.output;
                         (None, Some(revert))
                     };
 
@@ -220,20 +223,12 @@ where
                         gas_fees,
                         gas_price: U256::from(gas_price),
                         gas_used,
-                        to_address: tx.to(),
+                        to_address: tx.inner().to(),
                         tx_hash: *tx.tx_hash(),
                         value,
                         revert,
                     };
                     results.push(tx_res);
-
-                    // need to apply the state changes of this call before executing the
-                    // next call
-                    if transactions.peek().is_some() {
-                        // need to apply the state changes of this call before executing
-                        // the next call
-                        evm.db_mut().commit(state)
-                    }
                 }
 
                 // populate the response

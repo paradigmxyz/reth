@@ -3,8 +3,8 @@ use alloy_eip7928::bal::DecodedBal;
 pub use alloy_eip7928::bal::RawBal;
 use alloy_eips::NumHash;
 use alloy_primitives::{BlockHash, BlockNumber, Bytes};
+use evm2::evm::Bal as EvmBal;
 use reth_storage_errors::provider::ProviderResult;
-use revm::database::state::bal::Bal as RevmBal;
 
 /// Notification emitted when a new BAL is inserted into the store.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -86,15 +86,15 @@ pub trait BalStore: Send + Sync + 'static {
             .map_err(Into::into)
     }
 
-    /// Fetches the BAL for the given block hash in revm representation.
-    fn revm_bal_by_hash(
+    /// Fetches the BAL for the given block hash in the active EVM representation.
+    fn evm_bal_by_hash(
         &self,
         block_hash: BlockHash,
-    ) -> ProviderResult<Option<DecodedBal<Arc<RevmBal>>>> {
+    ) -> ProviderResult<Option<DecodedBal<Arc<EvmBal>>>> {
         self.get_decoded_by_hash(block_hash)?
             .map(|decoded| {
                 decoded.try_map(|bal| {
-                    RevmBal::try_from(Vec::from(bal))
+                    EvmBal::try_from(bal.as_slice())
                         .map(Arc::new)
                         .map_err(reth_storage_errors::provider::ProviderError::other)
                 })
@@ -226,13 +226,13 @@ impl BalStoreHandle {
         self.inner.get_decoded_by_hash(block_hash)
     }
 
-    /// Fetches the BAL for the given block hash in revm representation.
+    /// Fetches the BAL for the given block hash in the active EVM representation.
     #[inline]
-    pub fn revm_bal_by_hash(
+    pub fn evm_bal_by_hash(
         &self,
         block_hash: BlockHash,
-    ) -> ProviderResult<Option<DecodedBal<Arc<RevmBal>>>> {
-        self.inner.revm_bal_by_hash(block_hash)
+    ) -> ProviderResult<Option<DecodedBal<Arc<EvmBal>>>> {
+        self.inner.evm_bal_by_hash(block_hash)
     }
 
     /// Fetch BAL response entries for the given block hashes, stopping after the soft limit is
@@ -376,10 +376,7 @@ mod tests {
 
         assert_eq!(decoded.as_raw(), &raw_bal);
 
-        let revm_bal = store.revm_bal_by_hash(hash).unwrap().unwrap();
-
-        assert_eq!(revm_bal.as_raw(), &raw_bal);
-        assert!(revm_bal.as_bal().accounts.is_empty());
+        assert!(decoded.as_bal().is_empty());
     }
 
     #[test]

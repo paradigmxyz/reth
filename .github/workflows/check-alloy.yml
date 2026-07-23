@@ -10,10 +10,6 @@ on:
         description: 'Branch/rev for alloy-rs/alloy (leave empty to skip)'
         required: false
         type: string
-      alloy_evm_branch:
-        description: 'Branch/rev for alloy-rs/evm (alloy-evm, alloy-op-evm) (leave empty to skip)'
-        required: false
-        type: string
       op_alloy_branch:
         description: 'Branch/rev for alloy-rs/op-alloy (leave empty to skip)'
         required: false
@@ -48,15 +44,11 @@ jobs:
       - name: Apply alloy patches
         env:
           ALLOY_BRANCH: ${{ inputs.alloy_branch }}
-          ALLOY_EVM_BRANCH: ${{ inputs.alloy_evm_branch }}
           OP_ALLOY_BRANCH: ${{ inputs.op_alloy_branch }}
         run: |
           ARGS=""
           if [ -n "$ALLOY_BRANCH" ]; then
             ARGS="$ARGS --alloy $ALLOY_BRANCH"
-          fi
-          if [ -n "$ALLOY_EVM_BRANCH" ]; then
-            ARGS="$ARGS --evm $ALLOY_EVM_BRANCH"
           fi
           if [ -n "$OP_ALLOY_BRANCH" ]; then
             ARGS="$ARGS --op $OP_ALLOY_BRANCH"

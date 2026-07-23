@@ -974,7 +974,6 @@ impl<N: NodePrimitives<SignedTx: SignedTransaction>> NewCanonicalChain<N> {
 mod tests {
     use super::*;
     use crate::test_utils::TestBlockBuilder;
-    use alloy_eips::eip7685::Requests;
     use alloy_primitives::{Address, BlockNumber, Bytes, StorageKey, StorageValue};
     use rand::Rng;
     use reth_errors::ProviderResult;
@@ -1083,10 +1082,7 @@ mod tests {
     }
 
     impl HashedPostStateProvider for MockStateProvider {
-        fn hashed_post_state(
-            &self,
-            _bundle_state: &revm::database::BundleState,
-        ) -> HashedPostState {
+        fn hashed_post_state(&self, _state: &reth_execution_types::EvmState) -> HashedPostState {
             HashedPostState::default()
         }
     }
@@ -1536,12 +1532,9 @@ mod tests {
         expected_trie_data.insert(1, LazyTrieData::ready(block1.trie_data()));
 
         // Build expected execution outcome (first_block matches first block number)
-        let commit_execution_outcome = ExecutionOutcome {
-            receipts: vec![vec![], vec![]],
-            requests: vec![Requests::default(), Requests::default()],
-            first_block: 0,
-            ..Default::default()
-        };
+        let mut commit_execution_outcome =
+            ExecutionOutcome::single(0, block0.execution_outcome().clone());
+        commit_execution_outcome.push_block(1, block1.execution_outcome().clone());
 
         assert_eq!(
             chain_commit.to_chain_notification(),
@@ -1572,12 +1565,9 @@ mod tests {
 
         // Build expected execution outcome for reorg chains (first_block matches first block
         // number)
-        let reorg_execution_outcome = ExecutionOutcome {
-            receipts: vec![vec![], vec![]],
-            requests: vec![Requests::default(), Requests::default()],
-            first_block: 1,
-            ..Default::default()
-        };
+        let mut reorg_execution_outcome =
+            ExecutionOutcome::single(1, block1.execution_outcome().clone());
+        reorg_execution_outcome.push_block(2, block2.execution_outcome().clone());
 
         assert_eq!(
             chain_reorg.to_chain_notification(),

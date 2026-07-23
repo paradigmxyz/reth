@@ -30,7 +30,7 @@ use reth_chainspec::{ChainInfo, ChainSpecProvider, EthChainSpec, MAINNET};
 use reth_db_api::mock::{DatabaseMock, TxMock};
 use reth_db_models::{AccountBeforeTx, StoredBlockBodyIndices};
 use reth_ethereum_primitives::EthPrimitives;
-use reth_execution_types::ExecutionOutcome;
+use reth_execution_types::{EvmState, ExecutionOutcome};
 use reth_primitives_traits::{Account, Bytecode, NodePrimitives, RecoveredBlock, SealedHeader};
 #[cfg(feature = "db-api")]
 use reth_prune_types::PruneModes;
@@ -534,7 +534,7 @@ impl<C: Send + Sync, N: NodePrimitives> StateProofProvider for NoopProvider<C, N
 }
 
 impl<C: Send + Sync, N: NodePrimitives> HashedPostStateProvider for NoopProvider<C, N> {
-    fn hashed_post_state(&self, _bundle_state: &revm::database::BundleState) -> HashedPostState {
+    fn hashed_post_state(&self, _state: &EvmState) -> HashedPostState {
         HashedPostState::default()
     }
 }

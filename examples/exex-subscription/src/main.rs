@@ -113,18 +113,17 @@ async fn my_exex<Node: FullNodeComponents>(
                         let execution_outcome = new.execution_outcome();
 
                         for (address, senders) in subscriptions.iter_mut() {
-                            for change in &execution_outcome.bundle.state {
-                                if change.0 == address {
-                                    for (key, slot) in &change.1.storage {
-                                        let diff = StorageDiff {
-                                            address: *change.0,
-                                            key: *key,
-                                            old_value: slot.original_value(),
-                                            new_value: slot.present_value(),
-                                        };
-                                        // Send diff to all the active subscribers
-                                        senders.retain(|sender| sender.send(diff).is_ok());
-                                    }
+                            for (key, slot) in execution_outcome.execution_state_ref().storage() {
+                                let changed_address = key.address();
+                                if &changed_address == address {
+                                    let diff = StorageDiff {
+                                        address: changed_address,
+                                        key: key.key(),
+                                        old_value: slot.original,
+                                        new_value: slot.current,
+                                    };
+                                    // Send diff to all the active subscribers
+                                    senders.retain(|sender| sender.send(diff).is_ok());
                                 }
                             }
                         }

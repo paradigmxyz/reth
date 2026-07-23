@@ -22,7 +22,7 @@ use reth_engine_primitives::{
     ForkchoiceStateTracker, NewPayloadTimings, OnForkChoiceUpdated, SlowBlockInfo,
 };
 use reth_errors::{ConsensusError, ProviderResult};
-use reth_evm::ConfigureEvm;
+use reth_evm::{debug_unreachable, ConfigureEvm};
 use reth_payload_builder::{BuildNewPayload, PayloadBuilderHandle};
 use reth_payload_primitives::{BuiltPayload, NewPayloadError, PayloadAttributes, PayloadTypes};
 use reth_primitives_traits::{
@@ -34,12 +34,10 @@ use reth_provider::{
     StateProviderBox, StateProviderFactory, StateReader, StorageChangeSetReader,
     StorageSettingsCache, TransactionVariant,
 };
-use reth_revm::database::StateProviderDatabase;
 use reth_stages_api::ControlFlow;
 use reth_tasks::{spawn_os_thread, utils::increase_thread_priority};
 use reth_trie::ComputedTrieData;
 use reth_trie_db::ChangesetCache;
-use revm::interpreter::debug_unreachable;
 use state::TreeState;
 use std::{fmt::Debug, ops, sync::Arc, time::Duration};
 
@@ -2218,7 +2216,8 @@ where
             .provider
             .get_state(block.header().number())?
             .ok_or_else(|| ProviderError::StateForNumberNotFound(block.header().number()))?;
-        let hashed_state = self.provider.hashed_post_state(execution_output.state());
+        let block_state = execution_output.execution_state();
+        let hashed_state = self.provider.hashed_post_state(&block_state);
 
         debug!(
             target: "engine::tree",
@@ -2236,15 +2235,15 @@ where
         let sorted_trie_updates = Arc::new(trie_updates);
         let trie_data = ComputedTrieData::new(sorted_hashed_state, sorted_trie_updates);
 
-        let execution_output = Arc::new(BlockExecutionOutput {
-            state: execution_output.bundle,
-            result: BlockExecutionResult {
+        let execution_output = Arc::new(BlockExecutionOutput::new(
+            BlockExecutionResult {
                 receipts: execution_output.receipts.pop().unwrap_or_default(),
                 requests: execution_output.requests.pop().unwrap_or_default(),
                 gas_used: block.gas_used(),
                 blob_gas_used: block.blob_gas_used().unwrap_or_default(),
             },
-        });
+            block_state,
+        ));
 
         Ok(ExecutedBlock::new(
             Arc::new(RecoveredBlock::new_sealed(block, senders)),

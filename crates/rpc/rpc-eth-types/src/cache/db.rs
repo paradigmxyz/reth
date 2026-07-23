@@ -2,15 +2,121 @@
 //! <https://github.com/rust-lang/rust/issues/100013> in default implementation of
 //! `reth_rpc_eth_api::helpers::Call`.
 
+use crate::error::StateOverrideError;
 use alloy_primitives::{Address, B256, U256};
+use alloy_rpc_types_eth::{state::StateOverride, BlockOverrides};
+use evm2::{
+    bytecode::Bytecode,
+    evm::{CacheDB, Db, DynDatabase},
+};
 use reth_errors::ProviderResult;
-use reth_revm::database::StateProviderDatabase;
+use reth_evm::{database::StateProviderDatabase, EvmEnv};
+use reth_execution_types::EvmState;
 use reth_storage_api::{BytecodeReader, HashedPostStateProvider, StateProvider, StateProviderBox};
-use reth_trie::{HashedStorage, MultiProofTargets};
-use revm::database::{BundleState, State};
+use reth_trie::{HashedPostState, HashedStorage, MultiProofTargets};
 
-/// Helper alias type for the state's [`State`]
-pub type StateCacheDb = State<StateProviderDatabase<StateProviderTraitObjWrapper>>;
+/// Helper alias type for cached state access.
+pub type StateCacheDb = CacheDB<Db<StateProviderDatabase<StateProviderTraitObjWrapper>>>;
+
+/// Applies RPC block overrides to an evm2 environment and state cache.
+pub fn apply_block_overrides<DB>(
+    overrides: BlockOverrides,
+    db: &mut CacheDB<DB>,
+    evm_env: &mut impl EvmEnv,
+) {
+    let BlockOverrides {
+        number,
+        difficulty,
+        time,
+        gas_limit,
+        coinbase,
+        random,
+        base_fee,
+        blob_base_fee,
+        block_hash,
+        ..
+    } = overrides;
+
+    if let Some(block_hashes) = block_hash {
+        for (number, hash) in block_hashes {
+            db.insert_block_hash(&U256::from(number), &hash);
+        }
+    }
+
+    let block = evm_env.block_env_mut();
+    if let Some(number) = number {
+        block.number = number;
+    }
+    if let Some(difficulty) = difficulty {
+        block.difficulty = difficulty;
+    }
+    if let Some(time) = time {
+        block.timestamp = U256::from(time);
+    }
+    if let Some(gas_limit) = gas_limit {
+        block.gas_limit = U256::from(gas_limit);
+    }
+    if let Some(coinbase) = coinbase {
+        block.beneficiary = coinbase;
+    }
+    if let Some(random) = random {
+        block.prevrandao = U256::from_be_slice(random.as_slice());
+    }
+    if let Some(base_fee) = base_fee {
+        block.basefee = U256::from(base_fee);
+    }
+    if let Some(blob_base_fee) = blob_base_fee {
+        block.blob_basefee = U256::from(blob_base_fee);
+    }
+}
+
+/// Applies RPC state overrides to an evm2 state cache.
+pub fn apply_state_overrides<DB: DynDatabase>(
+    overrides: StateOverride,
+    db: &mut CacheDB<DB>,
+) -> Result<(), StateOverrideError<evm2::AnyError>> {
+    for (address, account_override) in overrides {
+        let mut account = db
+            .get_account(&address)
+            .map_err(|code| StateOverrideError::Database(db.error(code)))?
+            .unwrap_or_default();
+
+        if let Some(nonce) = account_override.nonce {
+            account.nonce = nonce;
+        }
+        if let Some(code) = account_override.code {
+            let code = Bytecode::new_raw_checked(code)?;
+            account.code_hash = code.hash_slow();
+            account.code = Some(code);
+        }
+        if let Some(balance) = account_override.balance {
+            account.balance = balance;
+        }
+
+        let storage = match (account_override.state, account_override.state_diff) {
+            (Some(_), Some(_)) => return Err(StateOverrideError::BothStateAndStateDiff(address)),
+            (Some(state), None) => {
+                db.cache.storage.entry(address).or_default().wipe();
+                Some(state)
+            }
+            (None, Some(state)) => Some(state),
+            (None, None) => None,
+        };
+
+        db.insert_account_info(&address, account);
+        if let Some(storage) = storage {
+            for (key, value) in storage {
+                db.insert_account_storage(
+                    &address,
+                    &U256::from_be_bytes(key.0),
+                    &U256::from_be_bytes(value.0),
+                );
+            }
+        }
+    }
+
+    Ok(())
+}
 
 /// Hack to get around 'higher-ranked lifetime error', see
 /// <https://github.com/rust-lang/rust/issues/100013>
@@ -141,8 +247,8 @@ impl reth_storage_api::BlockHashReader for StateProviderTraitObjWrapper {
 }
 
 impl HashedPostStateProvider for StateProviderTraitObjWrapper {
-    fn hashed_post_state(&self, bundle_state: &BundleState) -> reth_trie::HashedPostState {
-        self.0.hashed_post_state(bundle_state)
+    fn hashed_post_state(&self, state: &EvmState) -> HashedPostState {
+        self.0.hashed_post_state(state)
     }
 }
 

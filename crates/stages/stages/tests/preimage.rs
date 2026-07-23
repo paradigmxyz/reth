@@ -18,8 +18,9 @@ use reth_downloaders::{
     headers::reverse_headers::ReverseHeadersDownloaderBuilder,
 };
 use reth_ethereum_primitives::{Block, BlockBody, Transaction, TransactionSigned};
-use reth_evm::{execute::Executor, ConfigureEvm};
+use reth_evm::{database::StateProviderDatabase, execute::Executor, ConfigureEvm};
 use reth_evm_ethereum::EthEvmConfig;
+use reth_execution_types::hashed_post_state_from_execution_state;
 use reth_libmdbx::{Environment, EnvironmentFlags, Mode};
 use reth_network_p2p::{
     bodies::downloader::BodyDownloader,
@@ -35,16 +36,17 @@ use reth_provider::{
     DatabaseProviderFactory, HeaderProvider, OriginalValuesKnown, StateWriter, StoragePath,
 };
 use reth_prune_types::PruneModes;
-use reth_revm::database::StateProviderDatabase;
 use reth_stages::{
     sets::{ExecutionStages, HashingStages, OnlineStages},
     stages::FinishStage,
 };
 use reth_stages_api::{Pipeline, StageSet};
 use reth_static_file::StaticFileProducer;
-use reth_storage_api::{StorageChangeSetReader, StorageSettings, StorageSettingsCache};
+use reth_storage_api::{
+    StateWriteConfig, StorageChangeSetReader, StorageSettings, StorageSettingsCache,
+};
 use reth_testing_utils::generators::{self, generate_key, sign_tx_with_key_pair};
-use reth_trie::{HashedPostState, KeccakKeyHasher, StateRoot};
+use reth_trie::{KeccakKeyHasher, StateRoot};
 use reth_trie_db::DatabaseStateRoot;
 use std::{collections::BTreeMap, path::Path, sync::Arc};
 use tokio::sync::watch;
@@ -176,12 +178,12 @@ async fn test_pipeline_v2_single_batch_write_then_selfdestruct_changesets_plain_
 }
 
 /// Scenario coverage:
-/// 1. A slot appears only in intermediate reverts (not final bundle state).
+/// 1. A slot appears only in intermediate reverts (not final execution state).
 /// 2. A later block in the same execution batch wipes the account.
 /// 3. Wipe changesets still contain the required plain slot key/value.
 ///
 /// Covers the edge case where a slot appears in intermediate block reverts but not in the final
-/// bundle state, then gets wiped by a later selfdestruct in the same execution batch.
+/// execution state, then gets wiped by a later selfdestruct in the same execution batch.
 #[tokio::test(flavor = "multi_thread")]
 async fn test_pipeline_v2_single_batch_reverted_slot_then_selfdestruct_changesets_plain_slots(
 ) -> eyre::Result<()> {
@@ -952,16 +954,15 @@ fn execute_and_commit_block(
     };
 
     let gas_used = output.gas_used;
-    let hashed_state = HashedPostState::from_bundle_state::<KeccakKeyHasher>(output.state.state());
+    let hashed_state =
+        hashed_post_state_from_execution_state::<KeccakKeyHasher>(output.state.inner())
+            .into_sorted();
     type TestStateRoot<'a, TX, A> = StateRoot<
         reth_trie_db::DatabaseTrieCursorFactory<&'a TX, A>,
         reth_trie_db::DatabaseHashedCursorFactory<&'a TX>,
     >;
     let (state_root, _trie_updates) = reth_trie_db::with_adapter!(provider, |A| {
-        TestStateRoot::<_, A>::overlay_root_with_updates(
-            provider.tx_ref(),
-            &hashed_state.clone().into_sorted(),
-        )
+        TestStateRoot::<_, A>::overlay_root_with_updates(provider.tx_ref(), &hashed_state)
     })?;
 
     let receipts: Vec<_> = output.receipts.iter().map(|r| r.with_bloom_ref()).collect();
@@ -989,9 +990,17 @@ fn execute_and_commit_block(
         BlockBody { transactions, ommers: Vec::new(), withdrawals: None },
     );
 
-    let plain_state = output.state.to_plain_state(OriginalValuesKnown::Yes);
-    provider.write_state_changes(plain_state)?;
-    provider.write_hashed_state(&hashed_state.into_sorted())?;
+    let execution_outcome = reth_execution_types::ExecutionOutcome::single(block_num, output);
+    provider.write_state(
+        &execution_outcome,
+        OriginalValuesKnown::Yes,
+        StateWriteConfig {
+            write_receipts: false,
+            write_account_changesets: false,
+            write_storage_changesets: false,
+        },
+    )?;
+    provider.write_hashed_state(&hashed_state)?;
     provider.commit()?;
 
     Ok(block)
