@@ -204,8 +204,8 @@ pub trait SparseTrie: Sized + Debug + Send + Sync {
     ///
     /// # Preconditions
     ///
-    /// Must be called only after `root()` has computed hashes for the current trie state.
-    /// Calling `prune` on a dirty trie is a hard error and may panic.
+    /// The trie must not be dirty. An unmodified revealed root may be pruned because
+    /// proof-revealed descendants carry cached RLP nodes.
     ///
     /// # Returns
     ///

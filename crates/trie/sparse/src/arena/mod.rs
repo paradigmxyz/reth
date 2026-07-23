@@ -2570,12 +2570,12 @@ impl SparseTrie for ArenaParallelSparseTrie {
         fields(prune_before),
     )]
     fn prune(&mut self, prune_before: u64) -> usize {
+        assert!(self.root_epoch().is_some(), "prune cannot run on a dirty trie");
+
         // Only descend if the root is a branch; otherwise there are no subtries.
         if !matches!(&self.upper_arena[self.root], ArenaSparseNode::Branch(_)) {
             return 0;
         }
-
-        debug_assert!(self.is_root_cached(), "prune must run after hashing");
 
         let threshold = self.parallelism_thresholds.min_leaves_for_prune;
 

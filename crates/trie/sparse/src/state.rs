@@ -454,7 +454,7 @@ where
 
     /// Prunes account and storage trie nodes last modified before `prune_before`.
     ///
-    /// Storage tries whose cached roots predate the cutoff are fully evicted.
+    /// Storage tries whose root epochs predate the cutoff are fully evicted.
     ///
     /// # Preconditions
     ///
@@ -533,23 +533,14 @@ impl<S: SparseTrieTrait> StorageTries<S> {
                 )
                 .entered();
 
-                let evict = if let Some(revealed) = trie.as_revealed_mut() {
-                    let root_epoch = revealed
-                        .root_epoch()
-                        .expect("storage trie root must not be dirty during pruning");
-                    if root_epoch < prune_before {
-                        true
-                    } else {
-                        if revealed.is_root_cached() {
-                            revealed.prune(prune_before);
-                        }
-                        // An uncached root reaches here only at cutoff zero; it cannot be
-                        // traversed by `prune` until it has a cached RLP.
-                        false
+                let evict = trie.as_revealed_mut().is_none_or(|revealed| {
+                    let root_epoch =
+                        revealed.root_epoch().expect("storage trie root must not be dirty");
+                    if root_epoch >= prune_before {
+                        revealed.prune(prune_before);
                     }
-                } else {
-                    true
-                };
+                    root_epoch < prune_before
+                });
 
                 evict.then(|| {
                     trie.clear();
