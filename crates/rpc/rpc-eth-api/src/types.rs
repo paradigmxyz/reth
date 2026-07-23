@@ -42,6 +42,9 @@ pub type RpcReceipt<T> = <T as RpcTypes>::Receipt;
 /// Adapter for network specific header type.
 pub type RpcHeader<T> = <T as RpcTypes>::Header;
 
+/// Adapter for network specific log response type.
+pub type RpcLog<T> = <T as RpcTypes>::Log;
+
 /// Adapter for network specific error type.
 pub type RpcError<T> = <T as EthApiTypes>::Error;
 

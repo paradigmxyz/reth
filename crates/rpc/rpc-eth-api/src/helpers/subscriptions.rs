@@ -1,8 +1,8 @@
 //! Streams subscriptions providers for `eth_subscribe`.
 
-use crate::{EthApiTypes, RpcConvert, RpcNodeCore, RpcReceipt};
+use crate::{EthApiTypes, RpcConvert, RpcLog, RpcNodeCore, RpcReceipt};
 use alloy_consensus::{transaction::TxHashRef, BlockHeader, TxReceipt};
-use alloy_rpc_types_eth::{pubsub::TransactionReceiptsParams, Filter, Log};
+use alloy_rpc_types_eth::{pubsub::TransactionReceiptsParams, Filter};
 use futures::StreamExt;
 use reth_chain_state::CanonStateSubscriptions;
 use reth_primitives_traits::TransactionMeta;
@@ -17,21 +17,46 @@ pub trait EthSubscriptions:
     RpcNodeCore + EthApiTypes<RpcConvert: RpcConvert<Primitives = Self::Primitives>>
 {
     /// Returns a stream that yields matching logs from canonical chain updates.
-    fn log_stream(&self, filter: Filter) -> impl futures::Stream<Item = Log> + Send + Unpin {
-        self.provider()
-            .canonical_state_stream()
-            .map(move |canon_state| canon_state.block_receipts())
-            .flat_map(futures::stream::iter)
-            .flat_map(move |(block_receipts, removed)| {
-                let all_logs = logs_utils::matching_block_logs_with_tx_hashes(
-                    &filter,
-                    block_receipts.block,
-                    block_receipts.timestamp,
-                    block_receipts.tx_receipts.iter().map(|(tx, receipt)| (*tx, receipt)),
-                    removed,
-                );
-                futures::stream::iter(all_logs)
-            })
+    fn log_stream(
+        &self,
+        filter: Filter,
+    ) -> impl futures::Stream<Item = RpcLog<Self::NetworkTypes>> + Send + Unpin {
+        let converter = self.converter();
+        self.provider().canonical_state_stream().flat_map(move |canon_state| {
+            let reverted_chains = canon_state.reverted();
+            let committed_chain = canon_state.committed();
+            let reverted = reverted_chains.iter().flat_map(|chain| {
+                chain.blocks_and_receipts().map(|(block, receipts)| (block, receipts, true))
+            });
+            let committed = committed_chain
+                .blocks_and_receipts()
+                .map(|(block, receipts)| (block, receipts, false));
+            let mut all_logs = Vec::new();
+
+            for (block, receipts, removed) in reverted.chain(committed) {
+                let result = converter.log_context(block.sealed_block()).and_then(|context| {
+                    logs_utils::matching_block_logs_with_tx_hashes_fallible(
+                        &filter,
+                        block.num_hash(),
+                        block.timestamp(),
+                        block
+                            .transactions_recovered()
+                            .zip(receipts.iter())
+                            .map(|(tx, receipt)| (*tx.tx_hash(), receipt)),
+                        removed,
+                        |log| converter.convert_log(log, &context),
+                    )
+                });
+                match result {
+                    Ok(logs) => all_logs.extend(logs),
+                    Err(err) => {
+                        error!(target = "rpc", %err, "Failed to convert logs");
+                    }
+                }
+            }
+
+            futures::stream::iter(all_logs)
+        })
     }
 
     /// Returns a stream that yields new block headers from canonical chain updates.

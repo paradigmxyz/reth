@@ -7,8 +7,8 @@ use alloy_primitives::{Address, TxKind};
 use alloy_rpc_types_eth::{Log, TransactionReceipt};
 use reth_chainspec::EthChainSpec;
 use reth_ethereum_primitives::Receipt;
-use reth_primitives_traits::{NodePrimitives, TransactionMeta};
-use reth_rpc_convert::transaction::{ConvertReceiptInput, ReceiptConverter};
+use reth_primitives_traits::{NodePrimitives, SealedBlock, TransactionMeta};
+use reth_rpc_convert::transaction::{ConvertReceiptInput, LogConverter, ReceiptConverter};
 use std::sync::Arc;
 
 /// Builds an [`TransactionReceipt`] obtaining the inner receipt envelope from the given closure.
@@ -109,6 +109,25 @@ impl<ChainSpec> EthReceiptConverter<ChainSpec> {
     }
 }
 
+impl<N, ChainSpec, Builder> LogConverter<N> for EthReceiptConverter<ChainSpec, Builder>
+where
+    N: NodePrimitives,
+    ChainSpec: EthChainSpec + 'static,
+    Builder: 'static,
+{
+    type RpcLog = Log;
+    type Context = ();
+    type Error = EthApiError;
+
+    fn log_context(&self, _block: &SealedBlock<N::Block>) -> Result<Self::Context, Self::Error> {
+        Ok(())
+    }
+
+    fn convert_log(&self, log: Log, _context: &Self::Context) -> Result<Self::RpcLog, Self::Error> {
+        Ok(log)
+    }
+}
+
 impl<N, ChainSpec, Builder, Rpc> ReceiptConverter<N> for EthReceiptConverter<ChainSpec, Builder>
 where
     N: NodePrimitives,
@@ -116,11 +135,11 @@ where
     Builder: Fn(N::Receipt, usize, TransactionMeta) -> Rpc + 'static,
 {
     type RpcReceipt = TransactionReceipt<Rpc>;
-    type Error = EthApiError;
 
     fn convert_receipts(
         &self,
         inputs: Vec<ConvertReceiptInput<'_, N>>,
+        _context: &Self::Context,
     ) -> Result<Vec<Self::RpcReceipt>, Self::Error> {
         let mut receipts = Vec::with_capacity(inputs.len());
 

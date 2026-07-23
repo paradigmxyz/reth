@@ -25,8 +25,32 @@ where
     I: IntoIterator<Item = (TxHash, &'a R)>,
     R: TxReceipt<Log = alloy_primitives::Log> + 'a,
 {
+    matching_block_logs_with_tx_hashes_fallible(
+        filter,
+        block_num_hash,
+        block_timestamp,
+        tx_hashes_and_receipts,
+        removed,
+        Ok::<_, core::convert::Infallible>,
+    )
+    .unwrap()
+}
+
+/// Returns all matching logs after applying a fallible network-specific conversion.
+pub fn matching_block_logs_with_tx_hashes_fallible<'a, I, R, L, E>(
+    filter: &Filter,
+    block_num_hash: BlockNumHash,
+    block_timestamp: u64,
+    tx_hashes_and_receipts: I,
+    removed: bool,
+    mut convert: impl FnMut(Log) -> Result<L, E>,
+) -> Result<Vec<L>, E>
+where
+    I: IntoIterator<Item = (TxHash, &'a R)>,
+    R: TxReceipt<Log = alloy_primitives::Log> + 'a,
+{
     if !filter.matches_block(&block_num_hash) {
-        return vec![];
+        return Ok(vec![])
     }
 
     let mut all_logs = Vec::new();
@@ -48,12 +72,12 @@ where
                     removed,
                     block_timestamp: Some(block_timestamp),
                 };
-                all_logs.push(log);
+                all_logs.push(convert(log)?);
             }
             log_index += 1;
         }
     }
-    all_logs
+    Ok(all_logs)
 }
 
 /// Helper enum to fetch a transaction either from a block or from the provider.
