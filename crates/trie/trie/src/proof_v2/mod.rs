@@ -1875,12 +1875,12 @@ impl TrieCursorState {
         }
     }
 
-    /// Returns true if seeking to `path` requires resetting the forward-only cursor.
-    fn needs_reset_before_seek(&self, path: &Nibbles) -> bool {
+    /// Returns true if seeking to `key` requires resetting the forward-only cursor.
+    fn needs_reset_before_seek(&self, key: &Nibbles) -> bool {
         match self {
             Self::Unseeked => false,
-            Self::Available(current_path, _) | Self::Taken(current_path) => current_path > path,
-            Self::Exhausted(exhausted_at) => exhausted_at > path,
+            Self::Available(path, _) | Self::Taken(path) => path > key,
+            Self::Exhausted(exhausted_at) => exhausted_at > key,
         }
     }
 
