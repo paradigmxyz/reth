@@ -2712,6 +2712,10 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
         let mut hashed_storage_cursor =
             self.tx_ref().cursor_dup_write::<tables::HashedStorages>()?;
         for (hashed_address, storage) in sorted_storages {
+            if storage.is_wiped() && hashed_storage_cursor.seek_exact(*hashed_address)?.is_some() {
+                hashed_storage_cursor.delete_current_duplicates()?;
+            }
+
             for (hashed_slot, value) in storage.storage_slots_ref() {
                 let entry = StorageEntry { key: *hashed_slot, value: *value };
 
@@ -4378,6 +4382,7 @@ mod tests {
 
         // Create sorted storage trie updates
         let storage_trie1 = StorageTrieUpdatesSorted {
+            is_deleted: false,
             storage_nodes: vec![
                 (
                     Nibbles::from_nibbles([0x1, 0x0]),
@@ -4394,10 +4399,8 @@ mod tests {
         };
 
         let storage_trie2 = StorageTrieUpdatesSorted {
-            storage_nodes: vec![
-                (Nibbles::from_nibbles([0xa, 0xb]), None),
-                (Nibbles::from_nibbles([0xc, 0xd]), None),
-            ],
+            is_deleted: true, // Wipe all storage for this address
+            storage_nodes: vec![],
         };
 
         let mut storage_tries = B256Map::default();
@@ -4409,9 +4412,9 @@ mod tests {
         // Write the sorted trie updates
         let num_entries = provider_rw.write_trie_updates_sorted(&trie_updates).unwrap();
 
-        // We should have 2 account insertions + 1 account deletion + 1 storage insertion + 3
-        // storage deletions = 7
-        assert_eq!(num_entries, 7);
+        // We should have 2 account insertions + 1 account deletion + 1 storage insertion + 1
+        // storage deletion = 5
+        assert_eq!(num_entries, 5);
 
         // Verify account trie updates were written correctly
         let tx = provider_rw.tx_ref();
@@ -4458,13 +4461,13 @@ mod tests {
             "Remaining entry should be [0x1, 0x0]"
         );
 
-        // Check all storage nodes for address2 were removed
+        // Check storage for address2 was wiped
         let storage_entries2: Vec<_> = storage_cursor
             .walk_dup(Some(storage_address2), None)
             .unwrap()
             .collect::<Result<Vec<_>, _>>()
             .unwrap();
-        assert_eq!(storage_entries2.len(), 0, "Storage address2 should be empty");
+        assert_eq!(storage_entries2.len(), 0, "Storage address2 should be empty after wipe");
 
         provider_rw.commit().unwrap();
     }

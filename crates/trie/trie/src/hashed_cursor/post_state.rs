@@ -111,13 +111,22 @@ enum DbCursorState<V> {
     NeedsPosition,
     Positioned((B256, V)),
     Exhausted,
+    Wiped,
 }
 
 impl<V> DbCursorState<V> {
+    const fn new(cursor_wiped: bool) -> Self {
+        if cursor_wiped {
+            Self::Wiped
+        } else {
+            Self::NeedsPosition
+        }
+    }
+
     const fn entry(&self) -> Option<&(B256, V)> {
         match self {
             Self::Positioned(entry) => Some(entry),
-            Self::NeedsPosition | Self::Exhausted => None,
+            Self::NeedsPosition | Self::Exhausted | Self::Wiped => None,
         }
     }
 
@@ -159,10 +168,11 @@ where
         post_state: &'a HashedPostStateSorted,
         hashed_address: B256,
     ) -> Self {
-        let post_state_cursor = Self::get_storage_overlay(post_state, hashed_address);
+        let (post_state_cursor, cursor_wiped) =
+            Self::get_storage_overlay(post_state, hashed_address);
         Self {
             cursor,
-            db_cursor_state: DbCursorState::NeedsPosition,
+            db_cursor_state: DbCursorState::new(cursor_wiped),
             post_state_cursor,
             last_key: None,
             #[cfg(debug_assertions)]
@@ -171,15 +181,16 @@ where
         }
     }
 
-    /// Returns the storage overlay for `hashed_address`.
+    /// Returns the storage overlay for `hashed_address` and whether it was wiped.
     fn get_storage_overlay(
         post_state: &'a HashedPostStateSorted,
         hashed_address: B256,
-    ) -> ForwardInMemoryCursor<'a, B256, U256> {
+    ) -> (ForwardInMemoryCursor<'a, B256, U256>, bool) {
         let post_state_storage = post_state.storages.get(&hashed_address);
+        let cursor_wiped = post_state_storage.is_some_and(|u| u.is_wiped());
         let storage_slots = post_state_storage.map(|u| u.storage_slots_ref()).unwrap_or(&[]);
 
-        ForwardInMemoryCursor::new(storage_slots)
+        (ForwardInMemoryCursor::new(storage_slots), cursor_wiped)
     }
 }
 
@@ -188,6 +199,11 @@ where
     C: HashedCursor<Value = V::NonZero>,
     V: HashedPostStateCursorValue,
 {
+    /// Returns a mutable reference to the underlying cursor if it's not wiped, None otherwise.
+    fn get_cursor_mut(&mut self) -> Option<&mut C> {
+        (!matches!(self.db_cursor_state, DbCursorState::Wiped)).then_some(&mut self.cursor)
+    }
+
     /// Asserts that the next entry to be returned from the cursor is not previous to the last entry
     /// returned.
     fn set_last_key(&mut self, next_entry: &Option<(B256, V::NonZero)>) {
@@ -209,11 +225,11 @@ where
         let should_seek = match &self.db_cursor_state {
             DbCursorState::NeedsPosition => true,
             DbCursorState::Positioned((entry_key, _)) => entry_key < &key,
-            DbCursorState::Exhausted => false,
+            DbCursorState::Exhausted | DbCursorState::Wiped => false,
         };
 
         if should_seek {
-            let entry = self.cursor.seek(key)?;
+            let entry = self.get_cursor_mut().map(|c| c.seek(key)).transpose()?.flatten();
             self.db_cursor_state.set_entry(entry);
         }
 
@@ -229,7 +245,7 @@ where
 
         // Exhausted DB state is stable; only advance when the DB cursor is positioned at an entry.
         if matches!(self.db_cursor_state, DbCursorState::Positioned(_)) {
-            let entry = self.cursor.next()?;
+            let entry = self.get_cursor_mut().map(|c| c.next()).transpose()?.flatten();
             self.db_cursor_state.set_entry(entry);
         }
 
@@ -396,17 +412,23 @@ where
     /// This function should be called before attempting to call [`HashedCursor::seek`] or
     /// [`HashedCursor::next`].
     fn is_storage_empty(&mut self) -> Result<bool, DatabaseError> {
-        let is_empty = self.seek(B256::ZERO)?.is_none();
-        self.reset();
-        Ok(is_empty)
+        // Storage is not empty if it has non-zero slots.
+        if self.post_state_cursor.has_any(|(_, value)| !value.is_zero()) {
+            return Ok(false);
+        }
+
+        // If no non-zero slots in post state, check the database.
+        // Returns true if cursor is wiped.
+        self.get_cursor_mut().map_or(Ok(true), |c| c.is_storage_empty())
     }
 
     fn set_hashed_address(&mut self, hashed_address: B256) {
         self.reset();
         self.cursor.set_hashed_address(hashed_address);
-        self.post_state_cursor =
+        let (post_state_cursor, cursor_wiped) =
             HashedPostStateCursor::<C, U256>::get_storage_overlay(self.post_state, hashed_address);
-        self.db_cursor_state = DbCursorState::NeedsPosition;
+        self.post_state_cursor = post_state_cursor;
+        self.db_cursor_state = DbCursorState::new(cursor_wiped);
     }
 }
 
@@ -422,7 +444,7 @@ mod tests {
     }
 
     fn storage_post_state(storage_slots: Vec<(B256, U256)>) -> HashedPostStateSorted {
-        let storage_sorted = reth_trie_common::HashedStorageSorted { storage_slots };
+        let storage_sorted = reth_trie_common::HashedStorageSorted { storage_slots, wiped: false };
         let mut storages = alloy_primitives::map::B256Map::default();
         storages.insert(B256::ZERO, storage_sorted);
         HashedPostStateSorted::new(Vec::new(), storages)
@@ -608,6 +630,7 @@ mod tests {
                 let hashed_address = B256::ZERO;
                 let storage_sorted = reth_trie_common::HashedStorageSorted {
                     storage_slots: post_state_nodes,
+                    wiped: false,
                 };
                 let mut storages = alloy_primitives::map::B256Map::default();
                 storages.insert(hashed_address, storage_sorted);

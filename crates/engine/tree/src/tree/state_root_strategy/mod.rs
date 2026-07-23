@@ -758,6 +758,7 @@ fn sparse_trie_retained_paths<N: NodePrimitives>(
     current_hashed_state: &HashedPostState,
 ) -> TriePrefixSets {
     struct StorageAcc<'a> {
+        wiped: bool,
         first: Option<&'a [(B256, U256)]>,
         rest: Vec<&'a [(B256, U256)]>,
     }
@@ -774,10 +775,19 @@ fn sparse_trie_retained_paths<N: NodePrimitives>(
         account_slices.push(state.accounts.as_slice());
 
         for (address, storage) in &state.storages {
-            let entry = storage_acc
-                .entry(*address)
-                .or_insert_with(|| StorageAcc { first: None, rest: Vec::new() });
-            if entry.first.is_some() {
+            let entry = storage_acc.entry(*address).or_insert_with(|| StorageAcc {
+                wiped: false,
+                first: None,
+                rest: Vec::new(),
+            });
+            if entry.wiped {
+                continue
+            }
+            if storage.wiped {
+                entry.wiped = true;
+                entry.first = None;
+                entry.rest.clear();
+            } else if entry.first.is_some() {
                 entry.rest.push(storage.storage_slots.as_slice());
             } else {
                 entry.first = Some(storage.storage_slots.as_slice());
@@ -805,24 +815,32 @@ fn sparse_trie_retained_paths<N: NodePrimitives>(
             storage_acc
                 .par_iter()
                 .map(|(address, entry)| {
-                    let prefix_set = PrefixSet::from(
-                        entry
-                            .first
-                            .iter()
-                            .copied()
-                            .chain(entry.rest.iter().copied())
-                            .map(|slice| slice.iter().map(|(slot, _)| slot))
-                            .kmerge()
-                            .dedup()
-                            .copied(),
-                    );
+                    let prefix_set = if entry.wiped {
+                        PrefixSet::all_paths()
+                    } else {
+                        PrefixSet::from(
+                            entry
+                                .first
+                                .iter()
+                                .copied()
+                                .chain(entry.rest.iter().copied())
+                                .map(|slice| slice.iter().map(|(slot, _)| slot))
+                                .kmerge()
+                                .dedup()
+                                .copied(),
+                        )
+                    };
                     (*address, prefix_set)
                 })
                 .collect()
         },
     );
 
-    TriePrefixSets { account_prefix_set, storage_prefix_sets }
+    TriePrefixSets {
+        account_prefix_set,
+        storage_prefix_sets,
+        destroyed_accounts: Default::default(),
+    }
 }
 
 fn published_sparse_trie_anchor_hash<N: NodePrimitives>(
@@ -1397,7 +1415,7 @@ mod tests {
             .with_accounts([(B256::with_last_byte(account_path), Some(Account::default()))])
             .with_storages([(
                 B256::with_last_byte(account_path),
-                HashedStorage::from_iter([(B256::with_last_byte(storage_path), U256::ONE)]),
+                HashedStorage::from_iter(false, [(B256::with_last_byte(storage_path), U256::ONE)]),
             )])
     }
 
@@ -1435,7 +1453,7 @@ mod tests {
         let account = B256::with_last_byte(1);
         let destroyed = B256::with_last_byte(2);
         let storage_only = B256::with_last_byte(3);
-        let zeroed_storage = B256::with_last_byte(4);
+        let wiped_storage = B256::with_last_byte(4);
         let account_slot = B256::with_last_byte(10);
         let first_slot = B256::with_last_byte(11);
         let second_slot = B256::with_last_byte(12);
@@ -1444,25 +1462,25 @@ mod tests {
         let first = HashedPostState::default()
             .with_accounts([(account, Some(Account::default())), (destroyed, None)])
             .with_storages([
-                (account, HashedStorage::from_iter([(account_slot, U256::from(1))])),
+                (account, HashedStorage::from_iter(false, [(account_slot, U256::from(1))])),
                 (
                     storage_only,
-                    HashedStorage::from_iter([
-                        (first_slot, U256::from(1)),
-                        (third_slot, U256::from(3)),
-                    ]),
+                    HashedStorage::from_iter(
+                        false,
+                        [(first_slot, U256::from(1)), (third_slot, U256::from(3))],
+                    ),
                 ),
-                (zeroed_storage, HashedStorage::from_iter([(first_slot, U256::from(1))])),
+                (wiped_storage, HashedStorage::from_iter(false, [(first_slot, U256::from(1))])),
             ]);
         let second = HashedPostState::default().with_accounts([(account, None)]).with_storages([
             (
                 storage_only,
-                HashedStorage::from_iter([
-                    (second_slot, U256::from(2)),
-                    (third_slot, U256::from(30)),
-                ]),
+                HashedStorage::from_iter(
+                    false,
+                    [(second_slot, U256::from(2)), (third_slot, U256::from(30))],
+                ),
             ),
-            (zeroed_storage, HashedStorage::from_iter([(first_slot, U256::ZERO)])),
+            (wiped_storage, HashedStorage::from_iter(true, [])),
         ]);
         let blocks = TestBlockBuilder::eth()
             .get_executed_blocks(1..3)
@@ -1478,7 +1496,7 @@ mod tests {
                 Nibbles::unpack(account),
                 Nibbles::unpack(destroyed),
                 Nibbles::unpack(storage_only),
-                Nibbles::unpack(zeroed_storage),
+                Nibbles::unpack(wiped_storage),
             ]
         );
         assert_eq!(
@@ -1493,10 +1511,8 @@ mod tests {
             retained_paths.storage_prefix_sets[&account].slice(),
             &[Nibbles::unpack(account_slot)]
         );
-        assert_eq!(
-            retained_paths.storage_prefix_sets[&zeroed_storage].slice(),
-            &[Nibbles::unpack(first_slot)]
-        );
+        assert!(retained_paths.storage_prefix_sets[&wiped_storage].all());
+        assert!(retained_paths.destroyed_accounts.is_empty());
     }
 
     #[test]

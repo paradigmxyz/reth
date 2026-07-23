@@ -119,7 +119,8 @@ impl TrieTestHarness {
             prefix_set.insert(Nibbles::unpack(hashed_slot));
         }
 
-        let hashed_storage = HashedStorage::from_iter(changeset.iter().map(|(&k, &v)| (k, v)));
+        let hashed_storage =
+            HashedStorage::from_iter(false, changeset.iter().map(|(&k, &v)| (k, v)));
         let overlay = HashedPostStateSorted::new(
             Vec::new(),
             once((self.hashed_address(), hashed_storage.into_sorted())).collect(),
@@ -271,7 +272,12 @@ impl TrieTestHarness {
     ///
     /// A storage node is redundant if it exists in the starting set with the same value.
     /// A removed node is redundant if it was already absent from the starting set.
+    /// The `is_deleted` flag is cleared if it matches the starting value.
     pub fn minimize_trie_updates(&self, updates: &mut StorageTrieUpdates) {
+        if updates.is_deleted == self.storage_trie_updates.is_deleted {
+            updates.is_deleted = false;
+        }
+
         // StorageTrieUpdates::finalize can leave the same path in both storage_nodes
         // and removed_nodes. Per into_sorted, updated nodes take precedence over
         // removed ones. Record which paths had an update before minimization so we

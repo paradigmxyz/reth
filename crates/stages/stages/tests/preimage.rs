@@ -167,7 +167,8 @@ async fn test_pipeline_v2_prefunded_create2_selfdestruct_does_not_wipe_storage()
     let hashed_address = keccak256(scenario.child_contract);
 
     assert!(scenario.child_was_destroyed);
-    assert!(!scenario.hashed_state.storages.contains_key(&hashed_address));
+    let storage = scenario.hashed_state.storages.get(&hashed_address);
+    assert!(storage.is_none());
 
     let (pipeline_provider_factory, pipeline_genesis) =
         init_v2_pipeline_provider_factory(scenario.chain_spec)?;

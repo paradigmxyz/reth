@@ -281,6 +281,11 @@ where
         &mut self,
         updates: &StorageTrieUpdatesSorted,
     ) -> Result<usize, DatabaseError> {
+        // The storage trie for this account has to be deleted.
+        if updates.is_deleted() && self.cursor.seek_exact(self.hashed_address)?.is_some() {
+            self.cursor.delete_current_duplicates()?;
+        }
+
         let mut num_entries = 0;
         for (nibbles, maybe_updated) in updates.storage_nodes.iter().filter(|(n, _)| !n.is_empty())
         {

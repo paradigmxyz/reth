@@ -516,7 +516,7 @@ pub fn evm_state_to_hashed_post_state(update: EvmState) -> HashedPostState {
             if !destroyed && changed_storage_iter.peek().is_some() {
                 hashed_state
                     .storages
-                    .insert(hashed_address, HashedStorage::from_iter(changed_storage_iter));
+                    .insert(hashed_address, HashedStorage::from_iter(false, changed_storage_iter));
             }
         }
     }
@@ -578,7 +578,7 @@ mod tests {
     }
 
     #[test]
-    fn changed_account_emits_storage() {
+    fn changed_account_emits_storage_without_wipe() {
         let address = Address::repeat_byte(0x03);
         let slot = U256::from(1);
         let value = U256::from(2);
@@ -592,6 +592,7 @@ mod tests {
             evm_state_to_hashed_post_state(EvmState::from_iter([(address, account)]));
         let storage = &hashed_state.storages[&keccak256(address)];
 
+        assert!(!storage.wiped);
         assert_eq!(storage.storage[&keccak256(B256::from(slot))], value);
     }
 

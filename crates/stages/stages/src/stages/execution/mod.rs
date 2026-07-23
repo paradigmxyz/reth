@@ -873,9 +873,10 @@ mod tests {
 
         zero_destroyed_account_storage(&provider, &state, &mut hashed_state).unwrap();
 
-        let storage = &hashed_state.storages[&hashed_address].storage;
-        assert_eq!(storage[&retained_slot], retained_value);
-        assert_eq!(storage[&deleted_slot], U256::ZERO);
+        let storage = &hashed_state.storages[&hashed_address];
+        assert!(!storage.wiped);
+        assert_eq!(storage.storage[&retained_slot], retained_value);
+        assert_eq!(storage.storage[&deleted_slot], U256::ZERO);
         assert!(state.bundle.reverts.is_empty());
     }
 

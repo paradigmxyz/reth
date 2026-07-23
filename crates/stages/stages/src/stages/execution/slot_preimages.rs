@@ -1,4 +1,4 @@
-use alloy_primitives::{keccak256, map::HashSet, B256, U256};
+use alloy_primitives::{keccak256, map::HashSet, B256};
 use eyre::Context;
 use rayon::slice::ParallelSliceMut;
 use reth_db::tables;
@@ -124,8 +124,8 @@ impl SlotPreimagesReader {
 }
 
 /// Collects `keccak256(slot) → slot` preimage entries from the bundle state and stores
-/// them in the auxiliary preimage database, then adds recovered plain slots to wipe reverts for
-/// self-destructed accounts.
+/// them in the auxiliary preimage database, then rewrites wipe reverts for self-destructed
+/// accounts to use plain slot keys instead of relying on the hashed-storage DB walk.
 ///
 /// This eliminates the need for the changeset writer to read from `HashedStorages` during
 /// storage wipes, keeping all changeset keys in plain format.
@@ -198,14 +198,14 @@ pub(super) fn inject_plain_wipe_slots<P: DBProvider, R>(
     Ok(())
 }
 
-/// Looks up the plain-key preimage for a single hashed storage slot and inserts it into the account
-/// revert if not already present.
+/// Looks up the plain-key preimage for a single hashed storage slot and inserts it
+/// into the account revert if not already present.
 fn inject_preimage_entry(
     reader: &SlotPreimagesReader,
     revert: &mut reth_revm::revm::database::AccountRevert,
     address: alloy_primitives::Address,
     hashed_slot: B256,
-    value: U256,
+    value: alloy_primitives::U256,
 ) -> Result<(), StageError> {
     let plain_slot = reader.get(&hashed_slot).map_err(fatal)?.ok_or_else(|| {
         fatal(eyre::eyre!("missing slot preimage for {hashed_slot:?} (addr={address:?})"))
@@ -227,7 +227,6 @@ fn inject_preimage_entry(
             }
         })
         .or_insert(RevertToSlot::Some(value));
-
     Ok(())
 }
 

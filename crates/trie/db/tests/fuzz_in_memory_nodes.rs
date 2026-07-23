@@ -105,21 +105,12 @@ proptest! {
                 DbStorageRoot::<_, A>::from_tx_hashed(provider.tx_ref(), hashed_address).root_with_updates().unwrap();
 
             let mut storage = init_storage;
-            for (clear_storage, mut storage_update) in storage_updates {
-                let mut hashed_storage = if clear_storage {
-                    HashedStorage::from_iter(
-                        storage.keys().map(|hashed_slot| (*hashed_slot, U256::ZERO)),
-                    )
-                } else {
-                    HashedStorage::new()
-                };
-
+            for (is_deleted, mut storage_update) in storage_updates {
                 // Insert state updates into database
-                if clear_storage &&
-                    hashed_storage_cursor.seek_exact(hashed_address).unwrap().is_some()
-                {
+                if is_deleted && hashed_storage_cursor.seek_exact(hashed_address).unwrap().is_some() {
                     hashed_storage_cursor.delete_current_duplicates().unwrap();
                 }
+                let mut hashed_storage = HashedStorage::new(is_deleted);
                 for (hashed_slot, value) in storage_update.clone() {
                     hashed_storage_cursor
                         .upsert(hashed_address, &StorageEntry { key: hashed_slot, value })
@@ -143,7 +134,7 @@ proptest! {
                 storage_trie_nodes.extend(trie_updates);
 
                 // Verify the result
-                if clear_storage {
+                if is_deleted {
                     storage.clear();
                 }
                 storage.append(&mut storage_update);

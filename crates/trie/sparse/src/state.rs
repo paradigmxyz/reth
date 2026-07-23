@@ -410,6 +410,7 @@ where
                 let trie = trie.as_revealed_mut().unwrap();
                 let updates = trie.take_updates();
                 let updates = StorageTrieUpdates {
+                    is_deleted: updates.wiped,
                     storage_nodes: updates.updated_nodes,
                     removed_nodes: updates.removed_nodes,
                 };
@@ -474,7 +475,7 @@ where
         let retained_storage_tries = retained_paths.storage_prefix_sets.len();
         let total_storage_tries_before = self.storage.tries.len();
 
-        let TriePrefixSets { account_prefix_set, storage_prefix_sets } = retained_paths;
+        let TriePrefixSets { account_prefix_set, storage_prefix_sets, .. } = retained_paths;
 
         let parent_span = tracing::Span::current();
         let account_parent_span = parent_span.clone();
@@ -1111,13 +1112,24 @@ mod tests {
             sparse_updates,
             TrieUpdates {
                 account_nodes: HashMap::default(),
-                storage_tries: HashMap::from_iter([(
-                    b256!("0x1000000000000000000000000000000000000000000000000000000000000000"),
-                    StorageTrieUpdates {
-                        storage_nodes: HashMap::default(),
-                        removed_nodes: HashSet::from_iter([Nibbles::from_nibbles([0x1])])
-                    }
-                )]),
+                storage_tries: HashMap::from_iter([
+                    (
+                        b256!("0x1000000000000000000000000000000000000000000000000000000000000000"),
+                        StorageTrieUpdates {
+                            is_deleted: false,
+                            storage_nodes: HashMap::default(),
+                            removed_nodes: HashSet::from_iter([Nibbles::from_nibbles([0x1])])
+                        }
+                    ),
+                    (
+                        b256!("0x1100000000000000000000000000000000000000000000000000000000000000"),
+                        StorageTrieUpdates {
+                            is_deleted: true,
+                            storage_nodes: HashMap::default(),
+                            removed_nodes: HashSet::default()
+                        }
+                    )
+                ]),
                 removed_nodes: HashSet::default()
             }
         );

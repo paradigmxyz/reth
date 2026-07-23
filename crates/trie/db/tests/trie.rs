@@ -679,7 +679,7 @@ fn account_trie_around_extension_node_with_dbtrie() {
 }
 
 #[test]
-fn deleted_account_storage_emits_node_removals() {
+fn deleted_account_storage_emits_node_removals_without_deleted_flag() {
     let factory = create_test_provider_factory();
     let provider = factory.provider_rw().unwrap();
     let address = Address::with_last_byte(1);
@@ -719,6 +719,7 @@ fn deleted_account_storage_emits_node_removals() {
         storages: HashMap::from_iter([(
             hashed_address,
             HashedStorage::from_iter(
+                false,
                 hashed_storage.keys().map(|hashed_slot| (*hashed_slot, U256::ZERO)),
             ),
         )]),
@@ -740,6 +741,7 @@ fn deleted_account_storage_emits_node_removals() {
     });
     assert_eq!(root, EMPTY_ROOT_HASH);
     let storage_updates = updates.storage_tries_ref().get(&hashed_address).unwrap();
+    assert!(!storage_updates.is_deleted);
     assert!(!storage_updates.removed_nodes_ref().is_empty());
 }
 

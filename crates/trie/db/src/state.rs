@@ -339,7 +339,7 @@ impl DatabaseHashedPostState for HashedPostStateSorted {
             .into_iter()
             .map(|(address, mut slots)| {
                 slots.sort_unstable_by_key(|(slot, _)| *slot);
-                (address, HashedStorageSorted { storage_slots: slots })
+                (address, HashedStorageSorted { storage_slots: slots, wiped: false })
             })
             .collect();
 
@@ -393,7 +393,7 @@ mod tests {
         hashed_state.accounts.insert(B256::from(U256::from(2)), None);
         hashed_state.storages.insert(
             B256::from(U256::from(1)),
-            HashedStorage::from_iter([(B256::from(U256::from(3)), U256::from(30))]),
+            HashedStorage::from_iter(false, [(B256::from(U256::from(3)), U256::from(30))]),
         );
 
         let sorted = hashed_state.into_sorted();

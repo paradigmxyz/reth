@@ -291,7 +291,7 @@ sparse_trie_tests! {
     // wipe / clear
     test_wipe_resets_to_empty_root,
     test_clear_resets_trie_but_preserves_update_tracking,
-    test_wipe_resets_updates,
+    test_wipe_produces_wiped_updates,
     test_clear_then_reuse_trie,
 
     // get_leaf_value

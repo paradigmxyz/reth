@@ -397,7 +397,7 @@ where
 
         let removed_keys = account_node_iter.walker.take_removed_keys();
         let StateRootContext { mut trie_updates, hashed_entries_walked, .. } = storage_ctx;
-        trie_updates.finalize(hash_builder, removed_keys);
+        trie_updates.finalize(hash_builder, removed_keys, self.prefix_sets.destroyed_accounts);
 
         let stats = tracker.finish();
 

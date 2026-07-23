@@ -1088,6 +1088,7 @@ impl ArenaParallelSparseTrie {
     ) {
         if let Some(dst_updates) = dst.as_mut() {
             let src_updates = src.as_mut().expect("updates are enabled");
+            debug_assert!(!src_updates.wiped, "subtrie updates should never have wiped=true");
 
             // Source insertions cancel destination removals.
             for path in src_updates.updated_nodes.keys() {
@@ -2612,6 +2613,7 @@ impl SparseTrie for ArenaParallelSparseTrie {
     fn wipe(&mut self) {
         trace!(target: TRACE_TARGET, "Wiping arena trie");
         self.clear();
+        self.buffers.updates = self.buffers.updates.is_some().then(SparseTrieUpdates::wiped);
     }
 
     #[instrument(level = "trace", target = TRACE_TARGET, skip_all)]

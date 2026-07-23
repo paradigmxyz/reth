@@ -1,6 +1,6 @@
 use alloy_primitives::{keccak256, map::HashMap, BlockNumber, B256};
 use core::ops::RangeInclusive;
-use reth_db_api::models::BlockNumberAddress;
+use reth_db_api::models::{AccountBeforeTx, BlockNumberAddress};
 use reth_storage_api::{ChangeSetReader, DBProvider, StorageChangeSetReader};
 use reth_storage_errors::provider::ProviderError;
 use reth_trie::{
@@ -24,8 +24,7 @@ where
     // Get account changesets using the provider (handles static files + database)
     let account_changesets = provider.account_changesets_range(*range.start()..*range.end() + 1)?;
 
-    for (_, account) in account_changesets {
-        let address = account.address;
+    for (_, AccountBeforeTx { address, .. }) in account_changesets {
         let hashed_address = keccak256(address);
         account_prefix_set.insert(Nibbles::unpack(hashed_address));
     }
@@ -47,5 +46,6 @@ where
             .into_iter()
             .map(|(k, v)| (k, v.freeze()))
             .collect(),
+        destroyed_accounts: Default::default(),
     })
 }

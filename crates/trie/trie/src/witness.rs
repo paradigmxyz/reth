@@ -1,11 +1,15 @@
 use crate::{
-    hashed_cursor::HashedCursorFactory, prefix_set::TriePrefixSetsMut, proof::Proof, proof_v2,
-    trie_cursor::TrieCursorFactory, TRIE_ACCOUNT_RLP_MAX_SIZE,
+    hashed_cursor::{HashedCursor, HashedCursorFactory},
+    prefix_set::TriePrefixSetsMut,
+    proof::Proof,
+    proof_v2,
+    trie_cursor::TrieCursorFactory,
+    TRIE_ACCOUNT_RLP_MAX_SIZE,
 };
 use alloy_primitives::{
     keccak256,
     map::{B256Map, HashMap},
-    Bytes, B256,
+    Bytes, B256, U256,
 };
 use alloy_rlp::{Encodable, EMPTY_STRING_CODE};
 use alloy_trie::{nodes::BranchNodeRef, EMPTY_ROOT_HASH};
@@ -105,11 +109,18 @@ where
     /// # Arguments
     ///
     /// `state` - state transition containing both modified and touched accounts and storage slots.
-    pub fn compute(mut self, state: HashedPostState) -> Result<B256Map<Bytes>, TrieWitnessError> {
+    pub fn compute(
+        mut self,
+        mut state: HashedPostState,
+    ) -> Result<B256Map<Bytes>, TrieWitnessError> {
         let is_state_empty = state.is_empty();
         if is_state_empty && !self.always_include_root_node {
             return Ok(Default::default())
         }
+
+        // Expand wiped storages into explicit zero-value entries for every existing slot,
+        // so that downstream code can treat all storages uniformly.
+        self.expand_wiped_storages(&mut state)?;
 
         let proof_targets = if is_state_empty {
             MultiProofTargetsV2 {
@@ -365,8 +376,28 @@ where
         Ok(root_hash)
     }
 
+    /// Expand wiped storages into explicit zero-value entries for every existing slot in the
+    /// database. After this, all storages can be treated uniformly without special wiped handling.
+    fn expand_wiped_storages(&self, state: &mut HashedPostState) -> Result<(), StateProofError> {
+        for (hashed_address, storage) in &mut state.storages {
+            if !storage.wiped {
+                continue;
+            }
+            let mut storage_cursor =
+                self.hashed_cursor_factory.hashed_storage_cursor(*hashed_address)?;
+            let mut current_entry = storage_cursor.seek(B256::ZERO)?;
+            while let Some((hashed_slot, _)) = current_entry {
+                storage.storage.entry(hashed_slot).or_insert(U256::ZERO);
+                current_entry = storage_cursor.next()?;
+            }
+            storage.wiped = false;
+        }
+        Ok(())
+    }
+
     /// Retrieve proof targets for incoming hashed state.
-    /// Aggregates all accounts and slots present in the state.
+    /// Aggregates all accounts and slots present in the state. Wiped storages must have been
+    /// expanded via [`Self::expand_wiped_storages`] before calling this.
     fn get_proof_targets(state: &HashedPostState) -> MultiProofTargetsV2 {
         let mut targets = MultiProofTargetsV2::default();
         for &hashed_address in state.accounts.keys() {

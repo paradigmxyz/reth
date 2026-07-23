@@ -21,25 +21,21 @@ mod tests {
         test_utils::{state_root, storage_root_prehashed},
         HashedPostState, HashedStorage, StateRoot, StorageRoot, StorageRootProgress,
     };
-    use reth_trie_db::{
-        DatabaseStateRoot, DatabaseStorageRoot, LegacyKeyAdapter, PackedKeyAdapter,
+    use reth_trie_db::{DatabaseStateRoot, DatabaseStorageRoot, LegacyKeyAdapter, PackedKeyAdapter};
+    use revm::database::{
+        states::{
+            bundle_state::BundleRetention, changes::PlainStorageRevert, PlainStorageChangeset,
+        },
+        BundleState, OriginalValuesKnown, State,
     };
-    use revm::{
-        database::{
-            states::{
-                bundle_state::BundleRetention, changes::PlainStorageRevert, PlainStorageChangeset,
-            },
-            BundleState, OriginalValuesKnown, State,
-        },
-        database_interface::{DatabaseCommit, EmptyDB},
-        state::{
-            Account as RevmAccount, AccountInfo as RevmAccountInfo, AccountStatus, EvmStorageSlot,
-        },
+    use revm::database_interface::{DatabaseCommit, EmptyDB};
+    use revm::state::{
+        Account as RevmAccount, AccountInfo as RevmAccountInfo, AccountStatus, EvmStorageSlot,
     };
     use std::{collections::BTreeMap, str::FromStr};
 
     #[test]
-    fn zero_entries_are_removed() {
+    fn wiped_entries_are_removed() {
         let provider_factory = create_test_provider_factory();
 
         let addresses = (0..10).map(|_| Address::random()).collect::<Vec<_>>();
@@ -71,10 +67,7 @@ mod tests {
 
         let mut hashed_state = HashedPostState::default();
         hashed_state.accounts.insert(destroyed_address_hashed, None);
-        hashed_state.storages.insert(
-            destroyed_address_hashed,
-            HashedStorage::from_iter([(hashed_slot, U256::ZERO)]),
-        );
+        hashed_state.storages.insert(destroyed_address_hashed, HashedStorage::new(true));
 
         let provider_rw = provider_factory.provider_rw().unwrap();
         assert!(matches!(provider_rw.write_hashed_state(&hashed_state.into_sorted()), Ok(())));
@@ -145,9 +138,7 @@ mod tests {
         provider.write_state_changes(plain_state).expect("Could not write plain state to DB");
 
         assert_eq!(reverts.storage, [[]]);
-        provider
-            .write_state_reverts(reverts, 1, StateWriteConfig::default())
-            .expect("Could not write reverts to DB");
+        provider.write_state_reverts(reverts, 1, StateWriteConfig::default()).expect("Could not write reverts to DB");
 
         let reth_account_a = account_a.into();
         let reth_account_b = account_b.into();
@@ -213,9 +204,7 @@ mod tests {
             reverts.storage,
             [[PlainStorageRevert { address: address_b, wiped: true, storage_revert: vec![] }]]
         );
-        provider
-            .write_state_reverts(reverts, 2, StateWriteConfig::default())
-            .expect("Could not write reverts to DB");
+        provider.write_state_reverts(reverts, 2, StateWriteConfig::default()).expect("Could not write reverts to DB");
 
         // Check new plain state for account B
         assert_eq!(
@@ -1048,42 +1037,41 @@ mod tests {
         state.merge_transitions(BundleRetention::PlainState);
         assert_state_root(&state, &prestate, "changed nonce");
 
-        // create a new account
-        let new_address = Address::with_last_byte(11);
-        let new_account =
+        // recreate account 1
+        let account1_new =
             Account { nonce: 56, balance: U256::from(123), bytecode_hash: Some(B256::random()) };
-        prestate.insert(new_address, (new_account, BTreeMap::default()));
+        prestate.insert(address1, (account1_new, BTreeMap::default()));
         state.commit(HashMap::from_iter([(
-            new_address,
+            address1,
             RevmAccount {
                 status: AccountStatus::Touched | AccountStatus::Created,
-                info: new_account.into(),
+                info: account1_new.into(),
                 storage: HashMap::default(),
                 transaction_id: 0,
             },
         )]));
         state.merge_transitions(BundleRetention::PlainState);
-        assert_state_root(&state, &prestate, "created");
+        assert_state_root(&state, &prestate, "recreated");
 
-        // update storage for the new account
+        // update storage for account 1
         let slot20 = U256::from(20);
         let slot20_key = B256::from(slot20);
-        let new_account_slot20_value = U256::from(12345);
-        prestate.get_mut(&new_address).unwrap().1.insert(slot20_key, new_account_slot20_value);
+        let account1_slot20_value = U256::from(12345);
+        prestate.get_mut(&address1).unwrap().1.insert(slot20_key, account1_slot20_value);
         state.commit(HashMap::from_iter([(
-            new_address,
+            address1,
             RevmAccount {
                 status: AccountStatus::Touched | AccountStatus::Created,
-                info: new_account.into(),
+                info: account1_new.into(),
                 storage: HashMap::from_iter([(
                     slot20,
-                    EvmStorageSlot::new_changed(U256::ZERO, new_account_slot20_value, 0),
+                    EvmStorageSlot::new_changed(U256::ZERO, account1_slot20_value, 0),
                 )]),
                 transaction_id: 0,
             },
         )]));
         state.merge_transitions(BundleRetention::PlainState);
-        assert_state_root(&state, &prestate, "created changed storage");
+        assert_state_root(&state, &prestate, "recreated changed storage");
     }
 
     #[test]
@@ -1135,6 +1123,7 @@ mod tests {
 
         // insert initial account storage
         let init_storage = HashedStorage::from_iter(
+            false,
             [
                 "50000000000000000000000000000004253371b55351a08cb3267d4d265530b6",
                 "512428ed685fff57294d1a9cbb147b18ae5db9cf6ae4b312fa1946ba0561882e",
@@ -1156,7 +1145,7 @@ mod tests {
         else {
             panic!("no threshold for root");
         };
-        assert_eq!(storage_root, storage_root_prehashed(init_storage.storage.clone()));
+        assert_eq!(storage_root, storage_root_prehashed(init_storage.storage));
         assert!(!storage_updates.is_empty());
         provider_rw
             .write_storage_trie_updates_sorted(core::iter::once((
@@ -1167,14 +1156,13 @@ mod tests {
 
         // destroy the storage and re-create with new slots
         let updated_storage = HashedStorage::from_iter(
-            init_storage.storage.keys().copied().map(|slot| (slot, U256::ZERO)).chain(
-                [
-                    "00deb8486ad8edccfdedfc07109b3667b38a03a8009271aac250cce062d90917",
-                    "88d233b7380bb1bcdc866f6871c94685848f54cf0ee033b1480310b4ddb75fc9",
-                ]
-                .into_iter()
-                .map(|str| (B256::from_str(str).unwrap(), U256::from(1))),
-            ),
+            true,
+            [
+                "00deb8486ad8edccfdedfc07109b3667b38a03a8009271aac250cce062d90917",
+                "88d233b7380bb1bcdc866f6871c94685848f54cf0ee033b1480310b4ddb75fc9",
+            ]
+            .into_iter()
+            .map(|str| (B256::from_str(str).unwrap(), U256::from(1))),
         );
         let mut state = HashedPostState::default();
         state.storages.insert(hashed_address, updated_storage.clone());
@@ -1201,11 +1189,6 @@ mod tests {
             )
             .unwrap()
         };
-        assert_eq!(
-            storage_root,
-            storage_root_prehashed(
-                updated_storage.storage.into_iter().filter(|(_, value)| !value.is_zero())
-            )
-        );
+        assert_eq!(storage_root, storage_root_prehashed(updated_storage.storage));
     }
 }

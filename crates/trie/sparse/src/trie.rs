@@ -466,15 +466,24 @@ pub struct RlpNodeStackItem {
 }
 
 impl SparseTrieUpdates {
+    /// Create new wiped sparse trie updates.
+    pub fn wiped() -> Self {
+        Self { wiped: true, ..Default::default() }
+    }
+
     /// Clears the updates, but keeps the backing data structures allocated.
+    ///
+    /// Sets `wiped` to `false`.
     pub fn clear(&mut self) {
         self.updated_nodes.clear();
         self.removed_nodes.clear();
+        self.wiped = false;
     }
 
     /// Extends the updates with another set of updates.
     pub fn extend(&mut self, other: Self) {
         self.updated_nodes.extend(other.updated_nodes);
         self.removed_nodes.extend(other.removed_nodes);
+        self.wiped |= other.wiped;
     }
 }

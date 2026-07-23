@@ -260,6 +260,8 @@ pub struct SparseTrieUpdates {
     pub updated_nodes: HashMap<Nibbles, BranchNodeCompact>,
     /// Collection of removed intermediate nodes indexed by full path.
     pub removed_nodes: HashSet<Nibbles>,
+    /// Flag indicating whether the trie was wiped.
+    pub wiped: bool,
 }
 
 impl SparseTrieUpdates {
@@ -268,6 +270,7 @@ impl SparseTrieUpdates {
         Self {
             updated_nodes: HashMap::with_capacity_and_hasher(num_updated_nodes, Default::default()),
             removed_nodes: HashSet::with_capacity_and_hasher(num_removed_nodes, Default::default()),
+            wiped: false,
         }
     }
 }
