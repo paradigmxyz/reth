@@ -1168,10 +1168,6 @@ impl ArenaParallelSparseTrie {
         // leaves are encoded in place. Already-cached branches need no work. Only uncached
         // branches enter the main loop below.
         if let ArenaSparseNode::EmptyRoot { state } = &mut arena[root] {
-            if let ArenaSparseNodeState::Cached { rlp_node, .. } = state {
-                debug_assert_eq!(rlp_node, &RlpNode::word_rlp(&EMPTY_ROOT_HASH));
-                return rlp_node.clone()
-            }
             let empty_root_rlp = RlpNode::word_rlp(&EMPTY_ROOT_HASH);
             *state = ArenaSparseNodeState::Cached { rlp_node: empty_root_rlp.clone(), epoch };
             return empty_root_rlp
