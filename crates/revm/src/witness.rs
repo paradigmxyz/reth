@@ -1,6 +1,6 @@
 use alloc::vec::Vec;
 use alloy_primitives::{keccak256, Bytes, B256};
-use reth_trie::{ExecutionWitnessMode, HashedPostState, HashedStorage};
+use reth_trie::{ExecutionWitnessMode, HashedPostState};
 use revm::database::State;
 
 /// Tracks state changes during execution.
@@ -65,15 +65,14 @@ impl ExecutionWitnessRecord {
                 .accounts
                 .insert(hashed_address, account.account.as_ref().map(|a| (&a.info).into()));
 
-            let storage = self
-                .hashed_state
-                .storages
-                .entry(hashed_address)
-                .or_insert_with(|| HashedStorage::new(account.status.was_destroyed()));
-
             if let Some(account) = &account.account {
                 self.keys.push(address.to_vec().into());
 
+                if account.storage.is_empty() {
+                    continue;
+                }
+
+                let storage = self.hashed_state.storages.entry(hashed_address).or_default();
                 for (slot, value) in &account.storage {
                     let slot = B256::from(*slot);
                     let hashed_slot = keccak256(slot);

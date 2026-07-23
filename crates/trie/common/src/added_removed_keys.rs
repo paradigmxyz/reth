@@ -33,25 +33,20 @@ impl MultiAddedRemovedKeys {
 
     /// Updates the set of removed keys based on a [`HashedPostState`].
     ///
+    /// Accounts set to `None` are added to the account set and present accounts are removed.
     /// Storage keys set to [`alloy_primitives::U256::ZERO`] are added to the set for their
     /// respective account. Keys set to any other value are removed from their respective
     /// account.
     pub fn update_with_state(&mut self, update: &HashedPostState) {
-        for (hashed_address, storage) in &update.storages {
-            let account = update
-                .accounts
-                .get(hashed_address)
-                .map(|entry| entry.unwrap_or_default())
-                .unwrap_or_default();
-
-            if storage.wiped {
-                self.storages.remove(hashed_address);
-                if account.is_empty() {
-                    self.account.insert_removed(*hashed_address);
-                }
-                continue
+        for (hashed_address, account) in &update.accounts {
+            if account.is_none() {
+                self.account.insert_removed(*hashed_address);
+            } else {
+                self.account.remove_removed(hashed_address);
             }
+        }
 
+        for (hashed_address, storage) in &update.storages {
             let storage_removed_keys =
                 self.storages.entry(*hashed_address).or_insert_with(default_added_removed_keys);
 
@@ -61,10 +56,6 @@ impl MultiAddedRemovedKeys {
                 } else {
                     storage_removed_keys.remove_removed(key);
                 }
-            }
-
-            if !account.is_empty() {
-                self.account.remove_removed(hashed_address);
             }
         }
     }
@@ -129,32 +120,6 @@ mod tests {
     }
 
     #[test]
-    fn test_update_with_state_wiped_storage() {
-        let mut multi_keys = MultiAddedRemovedKeys::new();
-        let mut update = HashedPostState::default();
-
-        let addr = B256::random();
-        let slot1 = B256::random();
-
-        // First add some removed keys
-        let mut storage = HashedStorage::default();
-        storage.storage.insert(slot1, U256::ZERO);
-        update.storages.insert(addr, storage);
-        multi_keys.update_with_state(&update);
-        assert!(multi_keys.get_storage(&addr).is_some());
-
-        // Now wipe the storage
-        let mut update2 = HashedPostState::default();
-        let wiped_storage = HashedStorage::new(true);
-        update2.storages.insert(addr, wiped_storage);
-        multi_keys.update_with_state(&update2);
-
-        // Storage and account should be removed
-        assert!(multi_keys.get_storage(&addr).is_none());
-        assert!(multi_keys.get_accounts().is_removed(&addr));
-    }
-
-    #[test]
     fn test_update_with_state_account_tracking() {
         let mut multi_keys = MultiAddedRemovedKeys::new();
         let mut update = HashedPostState::default();
@@ -205,16 +170,21 @@ mod tests {
 
         // Account should not be marked as removed because it has balance
         assert!(!multi_keys.get_accounts().is_removed(&addr));
+    }
 
-        // Now wipe the storage
-        let mut update2 = HashedPostState::default();
-        let wiped_storage = HashedStorage::new(true);
-        update2.storages.insert(addr, wiped_storage);
-        update2.accounts.insert(addr, Some(account));
-        multi_keys.update_with_state(&update2);
+    #[test]
+    fn test_update_with_state_account_removal_and_recreation() {
+        let mut multi_keys = MultiAddedRemovedKeys::new();
+        let addr = B256::random();
 
-        // Storage should be None, but account should not be removed.
-        assert!(multi_keys.get_storage(&addr).is_none());
+        let mut removal = HashedPostState::default();
+        removal.accounts.insert(addr, None);
+        multi_keys.update_with_state(&removal);
+        assert!(multi_keys.get_accounts().is_removed(&addr));
+
+        let mut recreation = HashedPostState::default();
+        recreation.accounts.insert(addr, Some(Account::default()));
+        multi_keys.update_with_state(&recreation);
         assert!(!multi_keys.get_accounts().is_removed(&addr));
     }
 }

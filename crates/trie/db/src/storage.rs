@@ -36,7 +36,7 @@ pub fn hashed_storage_from_reverts_with_provider<P>(
 where
     P: StorageChangeSetReader + BlockNumReader,
 {
-    let mut storage = HashedStorage::new(false);
+    let mut storage = HashedStorage::new();
     let tip = provider.last_block_number()?;
 
     if from > tip {

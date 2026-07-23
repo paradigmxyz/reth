@@ -335,11 +335,69 @@ where
             }
         }
 
+        if retain_updates {
+            // Storage updates for accounts absent from the final state are not visited by the
+            // account iterator. Walk them separately so zero-valued slot updates produce ordinary
+            // storage trie node removals.
+            let mut hashed_addresses =
+                self.prefix_sets.storage_prefix_sets.keys().copied().collect::<Vec<_>>();
+            hashed_addresses.sort_unstable();
+
+            let mut account_cursor = self.hashed_cursor_factory.hashed_account_cursor()?;
+            for hashed_address in hashed_addresses {
+                if account_cursor
+                    .seek(hashed_address)?
+                    .is_some_and(|(address, _)| address == hashed_address)
+                {
+                    continue
+                }
+
+                if hashed_storage_cursor.is_none() {
+                    hashed_storage_cursor =
+                        Some(self.hashed_cursor_factory.hashed_storage_cursor(hashed_address)?);
+                }
+                if storage_trie_cursor.is_none() {
+                    storage_trie_cursor =
+                        Some(self.trie_cursor_factory.storage_trie_cursor(hashed_address)?);
+                }
+
+                let storage_result = StorageRoot::<T, H>::calculate_with_cursors(
+                    StorageRootCalculation {
+                        hashed_address,
+                        prefix_set: self
+                            .prefix_sets
+                            .storage_prefix_sets
+                            .get(&hashed_address)
+                            .cloned()
+                            .unwrap_or_default(),
+                        previous_state: None,
+                        threshold: u64::MAX,
+                        retain_updates: true,
+                    },
+                    storage_trie_cursor.as_mut().expect("storage trie cursor is initialized"),
+                    hashed_storage_cursor.as_mut().expect("hashed storage cursor is initialized"),
+                    #[cfg(feature = "metrics")]
+                    &self.metrics.storage_trie,
+                )?;
+
+                match storage_result {
+                    StorageRootProgress::Complete(_, storage_slots_walked, updates) => {
+                        storage_ctx.hashed_entries_walked += storage_slots_walked;
+                        storage_ctx.updated_storage_nodes += updates.len();
+                        storage_ctx.trie_updates.insert_storage_updates(hashed_address, updates);
+                    }
+                    StorageRootProgress::Progress(..) => {
+                        unreachable!("orphaned storage calculation has no threshold")
+                    }
+                }
+            }
+        }
+
         let root = hash_builder.root();
 
         let removed_keys = account_node_iter.walker.take_removed_keys();
         let StateRootContext { mut trie_updates, hashed_entries_walked, .. } = storage_ctx;
-        trie_updates.finalize(hash_builder, removed_keys, self.prefix_sets.destroyed_accounts);
+        trie_updates.finalize(hash_builder, removed_keys);
 
         let stats = tracker.finish();
 
@@ -736,13 +794,16 @@ where
         } = calculation;
         hashed_storage_cursor.set_hashed_address(hashed_address);
 
-        // short circuit on empty storage
-        if hashed_storage_cursor.is_storage_empty()? {
+        // Empty storage only needs to be walked when changed prefixes must produce trie updates.
+        if previous_state.is_none() &&
+            (!retain_updates || prefix_set.is_empty()) &&
+            hashed_storage_cursor.is_storage_empty()?
+        {
             Span::current().record("storage_root", format!("{EMPTY_ROOT_HASH:?}"));
             return Ok(StorageRootProgress::Complete(
                 EMPTY_ROOT_HASH,
                 0,
-                StorageTrieUpdates::deleted(),
+                StorageTrieUpdates::default(),
             ))
         }
 

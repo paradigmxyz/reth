@@ -375,7 +375,7 @@ mod tests {
         hash_builder.root();
 
         let mut trie_updates = TrieUpdates::default();
-        trie_updates.finalize(hash_builder, Default::default(), Default::default());
+        trie_updates.finalize(hash_builder, Default::default());
 
         trie_updates.account_nodes
     }

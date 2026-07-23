@@ -12,7 +12,7 @@ use reth_revm::{
 };
 use reth_rpc_api::DebugApiClient;
 use reth_tracing::tracing::warn;
-use reth_trie::{updates::TrieUpdates, HashedStorage};
+use reth_trie::updates::TrieUpdates;
 use revm::{
     bytecode::Bytecode,
     database::{
@@ -138,11 +138,12 @@ fn collect_execution_data(
 
         if let Some(account_data) = account.account {
             preimages.insert(hashed_address, alloy_rlp::encode(address).into());
-            let storage = hashed_state
-                .storages
-                .entry(hashed_address)
-                .or_insert_with(|| HashedStorage::new(account.status.was_destroyed()));
 
+            if account_data.storage.is_empty() {
+                continue;
+            }
+
+            let storage = hashed_state.storages.entry(hashed_address).or_default();
             for (slot, value) in account_data.storage {
                 let slot_bytes = B256::from(slot);
                 let hashed_slot = keccak256(slot_bytes);

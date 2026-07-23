@@ -1,6 +1,6 @@
 use crate::Nibbles;
 use alloc::{sync::Arc, vec::Vec};
-use alloy_primitives::map::{B256Map, B256Set};
+use alloy_primitives::map::B256Map;
 use core::ops::Range;
 
 /// Collection of mutable prefix sets.
@@ -11,16 +11,12 @@ pub struct TriePrefixSetsMut {
     /// A map containing storage changes with the hashed address as key and a set of storage key
     /// prefixes as the value.
     pub storage_prefix_sets: B256Map<PrefixSetMut>,
-    /// A set of hashed addresses of destroyed accounts.
-    pub destroyed_accounts: B256Set,
 }
 
 impl TriePrefixSetsMut {
     /// Returns `true` if all prefix sets are empty.
     pub fn is_empty(&self) -> bool {
-        self.account_prefix_set.is_empty() &&
-            self.storage_prefix_sets.is_empty() &&
-            self.destroyed_accounts.is_empty()
+        self.account_prefix_set.is_empty() && self.storage_prefix_sets.is_empty()
     }
 
     /// Extends prefix sets with contents of another prefix set.
@@ -29,7 +25,6 @@ impl TriePrefixSetsMut {
         for (hashed_address, prefix_set) in other.storage_prefix_sets {
             self.storage_prefix_sets.entry(hashed_address).or_default().extend(prefix_set);
         }
-        self.destroyed_accounts.extend(other.destroyed_accounts);
     }
 
     /// Extends prefix sets with contents of another prefix set by reference.
@@ -38,7 +33,6 @@ impl TriePrefixSetsMut {
         for (hashed_address, prefix_set) in &other.storage_prefix_sets {
             self.storage_prefix_sets.entry(*hashed_address).or_default().extend_ref(prefix_set);
         }
-        self.destroyed_accounts.extend(other.destroyed_accounts.iter().copied());
     }
 
     /// Returns a `TriePrefixSets` with the same elements as these sets.
@@ -52,13 +46,11 @@ impl TriePrefixSetsMut {
                 .into_iter()
                 .map(|(hashed_address, prefix_set)| (hashed_address, prefix_set.freeze()))
                 .collect(),
-            destroyed_accounts: self.destroyed_accounts,
         }
     }
 
-    /// Clears the prefix sets and destroyed accounts map.
+    /// Clears the prefix sets.
     pub fn clear(&mut self) {
-        self.destroyed_accounts.clear();
         self.storage_prefix_sets.clear();
         self.account_prefix_set.clear();
     }
@@ -72,8 +64,6 @@ pub struct TriePrefixSets {
     /// A map containing storage changes with the hashed address as key and a set of storage key
     /// prefixes as the value.
     pub storage_prefix_sets: B256Map<PrefixSet>,
-    /// A set of hashed addresses of destroyed accounts.
-    pub destroyed_accounts: B256Set,
 }
 
 /// A container for efficiently storing and checking for the presence of key prefixes.
@@ -409,14 +399,12 @@ mod tests {
         let account_path = Nibbles::from_nibbles([1, 2]);
         let storage_path = Nibbles::from_nibbles([3, 4]);
         let storage_account = B256::with_last_byte(1);
-        let destroyed_account = B256::with_last_byte(2);
         let other = TriePrefixSetsMut {
             account_prefix_set: PrefixSetMut::from([account_path]),
             storage_prefix_sets: B256Map::from_iter([(
                 storage_account,
                 PrefixSetMut::from([storage_path]),
             )]),
-            destroyed_accounts: B256Set::from_iter([destroyed_account]),
         };
 
         let mut prefix_sets = TriePrefixSetsMut::default();
@@ -425,7 +413,6 @@ mod tests {
         let frozen = prefix_sets.freeze();
         assert_eq!(frozen.account_prefix_set.slice(), &[account_path]);
         assert_eq!(frozen.storage_prefix_sets[&storage_account].slice(), &[storage_path]);
-        assert!(frozen.destroyed_accounts.contains(&destroyed_account));
         assert_eq!(other.account_prefix_set.len(), 1);
     }
 }

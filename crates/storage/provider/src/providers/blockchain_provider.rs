@@ -3228,9 +3228,7 @@ mod tests {
 
         let mut state_b = HashedPostState::default();
         state_b.accounts.insert(hashed_address, Some(account_b));
-        state_b
-            .storages
-            .insert(hashed_address, HashedStorage::from_iter(false, [(hashed_slot, value_b)]));
+        state_b.storages.insert(hashed_address, HashedStorage::from_iter([(hashed_slot, value_b)]));
 
         let state_b_root = factory.latest()?.state_root(state_b.clone())?;
         let mut later_block = random_block(

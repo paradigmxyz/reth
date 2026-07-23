@@ -501,7 +501,6 @@ pub fn evm_state_to_hashed_post_state(update: EvmState) -> HashedPostState {
             trace!(target: "trie::parallel::sparse", ?address, ?hashed_address, "Adding account to state update");
 
             let destroyed = account.is_selfdestructed();
-            let created_locally = account.is_created_locally();
             if account.info != account.original_info() {
                 let info = if destroyed { None } else { Some(account.info.into()) };
                 hashed_state.accounts.insert(hashed_address, info);
@@ -514,13 +513,10 @@ pub fn evm_state_to_hashed_post_state(update: EvmState) -> HashedPostState {
                 .map(|(slot, value)| (keccak256(B256::from(slot)), value.present_value))
                 .peekable();
 
-            // A same-transaction-created account has no prior storage update to clear.
-            if destroyed && !created_locally {
-                hashed_state.storages.insert(hashed_address, HashedStorage::new(true));
-            } else if !destroyed && changed_storage_iter.peek().is_some() {
+            if !destroyed && changed_storage_iter.peek().is_some() {
                 hashed_state
                     .storages
-                    .insert(hashed_address, HashedStorage::from_iter(false, changed_storage_iter));
+                    .insert(hashed_address, HashedStorage::from_iter(changed_storage_iter));
             }
         }
     }
@@ -539,7 +535,7 @@ mod tests {
     };
 
     #[test]
-    fn created_selfdestruct_does_not_wipe_storage() {
+    fn created_selfdestruct_does_not_emit_storage() {
         let address = Address::repeat_byte(0x01);
         let mut account = Account::default();
         account.mark_touch();
@@ -560,11 +556,14 @@ mod tests {
     }
 
     #[test]
-    fn existing_selfdestruct_wipes_storage() {
+    fn existing_selfdestruct_does_not_emit_storage() {
         let address = Address::repeat_byte(0x02);
         let mut account = Account::default();
+        account.info.nonce = 1;
+        account.set_current_info_as_original();
         account.mark_touch();
         assert!(account.mark_selfdestructed_locally());
+        account.selfdestruct();
         account.storage.insert(
             U256::from(1),
             EvmStorageSlot::new_changed(U256::ZERO, U256::from(2), TransactionId::ZERO),
@@ -572,14 +571,14 @@ mod tests {
 
         let hashed_state =
             evm_state_to_hashed_post_state(EvmState::from_iter([(address, account)]));
-        let storage = &hashed_state.storages[&keccak256(address)];
+        let hashed_address = keccak256(address);
 
-        assert!(storage.wiped);
-        assert!(storage.storage.is_empty());
+        assert_eq!(hashed_state.accounts.get(&hashed_address), Some(&None));
+        assert!(!hashed_state.storages.contains_key(&hashed_address));
     }
 
     #[test]
-    fn changed_account_emits_storage_without_wipe() {
+    fn changed_account_emits_storage() {
         let address = Address::repeat_byte(0x03);
         let slot = U256::from(1);
         let value = U256::from(2);
@@ -593,7 +592,6 @@ mod tests {
             evm_state_to_hashed_post_state(EvmState::from_iter([(address, account)]));
         let storage = &hashed_state.storages[&keccak256(address)];
 
-        assert!(!storage.wiped);
         assert_eq!(storage.storage[&keccak256(B256::from(slot))], value);
     }
 

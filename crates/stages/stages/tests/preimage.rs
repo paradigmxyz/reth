@@ -40,7 +40,7 @@ use reth_provider::{
     DatabaseProviderFactory, HeaderProvider, OriginalValuesKnown, StateWriter, StoragePath,
 };
 use reth_prune_types::PruneModes;
-use reth_revm::database::StateProviderDatabase;
+use reth_revm::{database::StateProviderDatabase, revm::database::BundleAccount};
 use reth_stages::{
     sets::{ExecutionStages, HashingStages, OnlineStages},
     stages::FinishStage,
@@ -1097,7 +1097,9 @@ fn execute_and_commit_block(
     };
 
     let gas_used = output.gas_used;
-    let hashed_state = HashedPostState::from_bundle_state::<KeccakKeyHasher>(output.state.state());
+    let mut hashed_state =
+        HashedPostState::from_bundle_state::<KeccakKeyHasher>(output.state.state());
+    zero_destroyed_account_storage(&provider, output.state.state(), &mut hashed_state)?;
     type TestStateRoot<'a, TX, A> = StateRoot<
         reth_trie_db::DatabaseTrieCursorFactory<&'a TX, A>,
         reth_trie_db::DatabaseHashedCursorFactory<&'a TX>,
@@ -1140,6 +1142,34 @@ fn execute_and_commit_block(
     provider.commit()?;
 
     Ok(block)
+}
+
+fn zero_destroyed_account_storage<'a, P>(
+    provider: &P,
+    state: impl IntoIterator<Item = (&'a Address, &'a BundleAccount)>,
+    hashed_state: &mut HashedPostState,
+) -> eyre::Result<()>
+where
+    P: DBProvider,
+{
+    let mut cursor = provider.tx_ref().cursor_dup_read::<tables::HashedStorages>()?;
+
+    for (address, account) in state {
+        if !account.was_destroyed() {
+            continue
+        }
+
+        let hashed_address = keccak256(address);
+        let Some((_, entry)) = cursor.seek_exact(hashed_address)? else { continue };
+
+        let storage = &mut hashed_state.storages.entry(hashed_address).or_default().storage;
+        storage.entry(entry.key).or_insert(U256::ZERO);
+        while let Some(entry) = cursor.next_dup_val()? {
+            storage.entry(entry.key).or_insert(U256::ZERO);
+        }
+    }
+
+    Ok(())
 }
 
 fn build_selfdestruct_chain_spec(

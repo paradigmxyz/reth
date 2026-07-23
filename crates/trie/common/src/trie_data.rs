@@ -374,7 +374,7 @@ mod tests {
             .with_accounts([(hashed_address, Some(Account::default()))])
             .with_storages([(
                 hashed_address,
-                HashedStorage::from_iter(false, [(hashed_slot, U256::from(1))]),
+                HashedStorage::from_iter([(hashed_slot, U256::from(1))]),
             )]);
 
         let (deferred, task) =

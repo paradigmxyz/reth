@@ -1129,7 +1129,7 @@ mod tests {
             address,
             Some(Account { balance: U256::from(100), nonce: 1, bytecode_hash: None }),
         );
-        let mut storage = reth_trie::HashedStorage::new(false);
+        let mut storage = reth_trie::HashedStorage::new();
         storage.storage.insert(slot, value);
         hashed_state.storages.insert(address, storage);
 

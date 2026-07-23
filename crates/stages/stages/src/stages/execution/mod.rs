@@ -1,11 +1,15 @@
 use crate::stages::MERKLE_STAGE_DEFAULT_INCREMENTAL_THRESHOLD;
 use alloy_consensus::BlockHeader;
-use alloy_primitives::BlockNumber;
+use alloy_primitives::{keccak256, BlockNumber, U256};
 use num_traits::Zero;
 use reth_chainspec::{ChainSpecProvider, EthereumHardforks};
 use reth_config::config::ExecutionConfig;
 use reth_consensus::FullConsensus;
 use reth_db::{static_file::HeaderMask, tables};
+use reth_db_api::{
+    cursor::{DbCursorRO, DbDupCursorRO},
+    transaction::DbTx,
+};
 use reth_evm::{execute::Executor, metrics::ExecutorMetrics, ConfigureEvm};
 use reth_execution_types::Chain;
 use reth_exex::{ExExManagerHandle, ExExNotification, ExExNotificationSource};
@@ -23,7 +27,7 @@ use reth_stages_api::{
     UnwindInput, UnwindOutput,
 };
 use reth_static_file_types::StaticFileSegment;
-use reth_trie::KeccakKeyHasher;
+use reth_trie::{HashedPostState, KeccakKeyHasher};
 use std::{
     cmp::{max, Ordering},
     collections::BTreeMap,
@@ -497,7 +501,8 @@ where
         provider.write_state(&state, OriginalValuesKnown::Yes, StateWriteConfig::default())?;
 
         if provider.cached_storage_settings().use_hashed_state() {
-            let hashed_state = state.hash_state_slow::<KeccakKeyHasher>();
+            let mut hashed_state = state.hash_state_slow::<KeccakKeyHasher>();
+            zero_destroyed_account_storage(provider, &state, &mut hashed_state)?;
             provider.write_hashed_state(&hashed_state.into_sorted())?;
         }
 
@@ -605,6 +610,35 @@ where
 
         Ok(())
     }
+}
+
+/// Materializes storage deletions for destroyed accounts as explicit zero-valued slot updates.
+///
+/// Final bundle values take precedence so that destroy-then-recreate transitions retain storage
+/// written by the recreated account.
+fn zero_destroyed_account_storage<P: DBProvider, R>(
+    provider: &P,
+    state: &ExecutionOutcome<R>,
+    hashed_state: &mut HashedPostState,
+) -> Result<(), StageError> {
+    let mut cursor = provider.tx_ref().cursor_dup_read::<tables::HashedStorages>()?;
+
+    for (address, account) in state.bundle.state() {
+        if !account.was_destroyed() {
+            continue
+        }
+
+        let hashed_address = keccak256(address);
+        let Some((_, entry)) = cursor.seek_exact(hashed_address)? else { continue };
+
+        let storage = &mut hashed_state.storages.entry(hashed_address).or_default().storage;
+        storage.entry(entry.key).or_insert(U256::ZERO);
+        while let Some(entry) = cursor.next_dup_val()? {
+            storage.entry(entry.key).or_insert(U256::ZERO);
+        }
+    }
+
+    Ok(())
 }
 
 fn reject_cancun_boundary_unwind<Provider>(
@@ -768,6 +802,7 @@ mod tests {
     };
     use reth_prune::PruneModes;
     use reth_prune_types::{PruneMode, ReceiptsLogPruneConfig};
+    use reth_revm::revm::database::{AccountStatus, BundleAccount};
     use reth_stages_api::StageUnitCheckpoint;
     use reth_testing_utils::generators;
     use std::collections::BTreeMap;
@@ -790,6 +825,58 @@ mod tests {
             MERKLE_STAGE_DEFAULT_REBUILD_THRESHOLD,
             ExExManagerHandle::empty(),
         )
+    }
+
+    #[test]
+    fn destroyed_storage_is_materialized_without_reverts() {
+        let factory = create_test_provider_factory();
+        let provider = factory.database_provider_rw().unwrap();
+        let address = Address::repeat_byte(0x11);
+        let hashed_address = keccak256(address);
+        let retained_slot = B256::repeat_byte(0x22);
+        let deleted_slot = B256::repeat_byte(0x33);
+        let retained_value = U256::from(1);
+
+        provider
+            .tx_ref()
+            .put::<tables::HashedStorages>(
+                hashed_address,
+                StorageEntry { key: retained_slot, value: U256::from(2) },
+            )
+            .unwrap();
+        provider
+            .tx_ref()
+            .put::<tables::HashedStorages>(
+                hashed_address,
+                StorageEntry { key: deleted_slot, value: U256::from(3) },
+            )
+            .unwrap();
+
+        let mut state = ExecutionOutcome::<()>::default();
+        state.bundle.state.insert(
+            address,
+            BundleAccount::new(
+                Some(Default::default()),
+                Some(Default::default()),
+                Default::default(),
+                AccountStatus::DestroyedChanged,
+            ),
+        );
+
+        let mut hashed_state = HashedPostState::default();
+        hashed_state
+            .storages
+            .entry(hashed_address)
+            .or_default()
+            .storage
+            .insert(retained_slot, retained_value);
+
+        zero_destroyed_account_storage(&provider, &state, &mut hashed_state).unwrap();
+
+        let storage = &hashed_state.storages[&hashed_address].storage;
+        assert_eq!(storage[&retained_slot], retained_value);
+        assert_eq!(storage[&deleted_slot], U256::ZERO);
+        assert!(state.bundle.reverts.is_empty());
     }
 
     #[test]

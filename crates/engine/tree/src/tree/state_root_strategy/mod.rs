@@ -1336,7 +1336,7 @@ mod tests {
             .with_accounts([(B256::with_last_byte(account_path), Some(Account::default()))])
             .with_storages([(
                 B256::with_last_byte(account_path),
-                HashedStorage::from_iter(false, [(B256::with_last_byte(storage_path), U256::ONE)]),
+                HashedStorage::from_iter([(B256::with_last_byte(storage_path), U256::ONE)]),
             )])
     }
 

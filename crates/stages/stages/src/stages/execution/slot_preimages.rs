@@ -10,10 +10,7 @@ use reth_libmdbx::{
     DatabaseFlags, Environment, EnvironmentFlags, Geometry, Mode, SyncMode, WriteFlags, RO,
 };
 use reth_provider::{DBProvider, ExecutionOutcome};
-use reth_revm::revm::database::{
-    states::{RevertToSlot, StorageSlot},
-    BundleAccount,
-};
+use reth_revm::revm::database::states::RevertToSlot;
 use reth_stages_api::StageError;
 use std::path::Path;
 use tracing::trace;
@@ -127,8 +124,8 @@ impl SlotPreimagesReader {
 }
 
 /// Collects `keccak256(slot) → slot` preimage entries from the bundle state and stores
-/// them in the auxiliary preimage database, then adds recovered plain slots to wipe reverts and
-/// the bundle changeset for self-destructed accounts.
+/// them in the auxiliary preimage database, then adds recovered plain slots to wipe reverts for
+/// self-destructed accounts.
 ///
 /// This eliminates the need for the changeset writer to read from `HashedStorages` during
 /// storage wipes, keeping all changeset keys in plain format.
@@ -177,9 +174,7 @@ pub(super) fn inject_plain_wipe_slots<P: DBProvider, R>(
     // Open a single RO transaction for all preimage lookups in this batch.
     let reader = preimages.reader().map_err(fatal)?;
 
-    let bundle = &mut state.bundle;
-    let mut inserted_slots = 0;
-    for block_reverts in bundle.reverts.iter_mut() {
+    for block_reverts in state.bundle.reverts.iter_mut() {
         for (address, revert) in block_reverts.iter_mut() {
             if !revert.wipe_storage {
                 continue;
@@ -192,42 +187,26 @@ pub(super) fn inject_plain_wipe_slots<P: DBProvider, R>(
             let mut cursor = provider.tx_ref().cursor_dup_read::<tables::HashedStorages>()?;
 
             if let Some((_, entry)) = cursor.seek_exact(hashed_address)? {
-                inserted_slots += usize::from(inject_preimage_entry(
-                    &reader,
-                    revert,
-                    bundle.state.get_mut(&addr),
-                    addr,
-                    entry.key,
-                    entry.value,
-                )?);
+                inject_preimage_entry(&reader, revert, addr, entry.key, entry.value)?;
                 while let Some(entry) = cursor.next_dup_val()? {
-                    inserted_slots += usize::from(inject_preimage_entry(
-                        &reader,
-                        revert,
-                        bundle.state.get_mut(&addr),
-                        addr,
-                        entry.key,
-                        entry.value,
-                    )?);
+                    inject_preimage_entry(&reader, revert, addr, entry.key, entry.value)?;
                 }
             }
         }
     }
-    bundle.state_size += inserted_slots;
 
     Ok(())
 }
 
 /// Looks up the plain-key preimage for a single hashed storage slot and inserts it into the account
-/// revert and bundle account if not already present. Returns whether the bundle account grew.
+/// revert if not already present.
 fn inject_preimage_entry(
     reader: &SlotPreimagesReader,
     revert: &mut reth_revm::revm::database::AccountRevert,
-    account: Option<&mut BundleAccount>,
     address: alloy_primitives::Address,
     hashed_slot: B256,
     value: U256,
-) -> Result<bool, StageError> {
+) -> Result<(), StageError> {
     let plain_slot = reader.get(&hashed_slot).map_err(fatal)?.ok_or_else(|| {
         fatal(eyre::eyre!("missing slot preimage for {hashed_slot:?} (addr={address:?})"))
     })?;
@@ -249,17 +228,7 @@ fn inject_preimage_entry(
         })
         .or_insert(RevertToSlot::Some(value));
 
-    Ok(account.is_some_and(|account| inject_bundle_account_slot(account, plain_key, value)))
-}
-
-fn inject_bundle_account_slot(account: &mut BundleAccount, plain_key: U256, value: U256) -> bool {
-    let len = account.storage.len();
-    account
-        .storage
-        .entry(plain_key)
-        .and_modify(|slot| slot.previous_or_original_value = value)
-        .or_insert_with(|| StorageSlot::new_changed(value, U256::ZERO));
-    account.storage.len() != len
+    Ok(())
 }
 
 #[inline]
@@ -268,33 +237,4 @@ where
     E: Into<Box<dyn std::error::Error + Send + Sync>>,
 {
     StageError::Fatal(err.into())
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use reth_revm::revm::database::AccountStatus;
-
-    #[test]
-    fn recovered_slots_preserve_present_values() {
-        let existing_key = U256::from(1);
-        let existing_value = U256::from(2);
-        let recovered_value = U256::from(3);
-        let mut account = BundleAccount::new(
-            None,
-            Default::default(),
-            std::iter::once((existing_key, StorageSlot::new_changed(U256::ZERO, existing_value)))
-                .collect(),
-            AccountStatus::DestroyedChanged,
-        );
-
-        assert!(!inject_bundle_account_slot(&mut account, existing_key, recovered_value));
-        assert_eq!(account.storage[&existing_key].original_value(), recovered_value);
-        assert_eq!(account.storage[&existing_key].present_value, existing_value);
-
-        let missing_key = U256::from(4);
-        assert!(inject_bundle_account_slot(&mut account, missing_key, recovered_value));
-        assert_eq!(account.storage[&missing_key].original_value(), recovered_value);
-        assert_eq!(account.storage[&missing_key].present_value, U256::ZERO);
-    }
 }

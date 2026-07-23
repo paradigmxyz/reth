@@ -305,10 +305,7 @@ where
             storage_nodes.push((*nibbles, node_value));
         }
 
-        storage_tries.insert(
-            *hashed_address,
-            StorageTrieUpdatesSorted { storage_nodes, is_deleted: storage_changeset.is_deleted },
-        );
+        storage_tries.insert(*hashed_address, StorageTrieUpdatesSorted { storage_nodes });
     }
 
     Ok(TrieUpdatesSorted::new(account_nodes, storage_tries))
@@ -1050,12 +1047,7 @@ mod tests {
         crate::with_adapter!(provider, |A| seed_tip_trie_tables::<_, A>(&*provider));
 
         let actual = compute_range_trie_changesets(&*provider, 1..=3, 3).unwrap();
-        let storage_revert = actual
-            .storage_tries_ref()
-            .get(&hashed_address)
-            .expect("created account storage trie should be deleted by range revert");
-        assert!(storage_revert.is_deleted());
-        assert!(storage_revert.storage_nodes_ref().is_empty());
+        assert!(!actual.storage_tries_ref().contains_key(&hashed_address));
 
         let cache = ChangesetCache::new();
         let from_cache_api = cache.get_or_compute_range(&*provider, 1..=3).unwrap();

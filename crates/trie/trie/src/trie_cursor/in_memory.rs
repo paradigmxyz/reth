@@ -74,22 +74,13 @@ enum DbCursorState {
     NeedsPosition,
     Positioned((Nibbles, BranchNodeCompact)),
     Exhausted,
-    Wiped,
 }
 
 impl DbCursorState {
-    const fn new(cursor_wiped: bool) -> Self {
-        if cursor_wiped {
-            Self::Wiped
-        } else {
-            Self::NeedsPosition
-        }
-    }
-
     const fn entry(&self) -> Option<&(Nibbles, BranchNodeCompact)> {
         match self {
             Self::Positioned(entry) => Some(entry),
-            Self::NeedsPosition | Self::Exhausted | Self::Wiped => None,
+            Self::NeedsPosition | Self::Exhausted => None,
         }
     }
 
@@ -123,11 +114,10 @@ impl<'a, C: TrieCursor> InMemoryTrieCursor<'a, C> {
         trie_updates: &'a TrieUpdatesSorted,
         hashed_address: B256,
     ) -> Self {
-        let (in_memory_cursor, cursor_wiped) =
-            Self::get_storage_overlay(trie_updates, hashed_address);
+        let in_memory_cursor = Self::get_storage_overlay(trie_updates, hashed_address);
         Self {
             cursor,
-            db_cursor_state: DbCursorState::new(cursor_wiped),
+            db_cursor_state: DbCursorState::NeedsPosition,
             in_memory_cursor,
             last_key: None,
             #[cfg(debug_assertions)]
@@ -136,21 +126,15 @@ impl<'a, C: TrieCursor> InMemoryTrieCursor<'a, C> {
         }
     }
 
-    /// Returns the storage overlay for `hashed_address` and whether it was deleted.
+    /// Returns the storage overlay for `hashed_address`.
     fn get_storage_overlay(
         trie_updates: &'a TrieUpdatesSorted,
         hashed_address: B256,
-    ) -> (ForwardInMemoryCursor<'a, Nibbles, Option<BranchNodeCompact>>, bool) {
+    ) -> ForwardInMemoryCursor<'a, Nibbles, Option<BranchNodeCompact>> {
         let storage_trie_updates = trie_updates.storage_tries_ref().get(&hashed_address);
-        let cursor_wiped = storage_trie_updates.is_some_and(|u| u.is_deleted());
         let storage_nodes = storage_trie_updates.map(|u| u.storage_nodes_ref()).unwrap_or(&[]);
 
-        (ForwardInMemoryCursor::new(storage_nodes), cursor_wiped)
-    }
-
-    /// Returns a mutable reference to the underlying cursor if it's not wiped, None otherwise.
-    fn get_cursor_mut(&mut self) -> Option<&mut C> {
-        (!matches!(self.db_cursor_state, DbCursorState::Wiped)).then_some(&mut self.cursor)
+        ForwardInMemoryCursor::new(storage_nodes)
     }
 
     /// Asserts that the next entry to be returned from the cursor is not previous to the last entry
@@ -174,11 +158,11 @@ impl<'a, C: TrieCursor> InMemoryTrieCursor<'a, C> {
         let should_seek = match &self.db_cursor_state {
             DbCursorState::NeedsPosition => true,
             DbCursorState::Positioned((entry_key, _)) => entry_key < &key,
-            DbCursorState::Exhausted | DbCursorState::Wiped => false,
+            DbCursorState::Exhausted => false,
         };
 
         if should_seek {
-            let entry = self.get_cursor_mut().map(|c| c.seek(key)).transpose()?.flatten();
+            let entry = self.cursor.seek(key)?;
             self.db_cursor_state.set_entry(entry);
         }
 
@@ -193,10 +177,10 @@ impl<'a, C: TrieCursor> InMemoryTrieCursor<'a, C> {
             debug_assert!(!matches!(self.db_cursor_state, DbCursorState::NeedsPosition));
         }
 
-        // Exhausted and wiped states are stable; only advance if the DB cursor currently points to
-        // an entry.
+        // An exhausted state is stable; only advance if the DB cursor currently points to an
+        // entry.
         if matches!(self.db_cursor_state, DbCursorState::Positioned(_)) {
-            let entry = self.get_cursor_mut().map(|c| c.next()).transpose()?.flatten();
+            let entry = self.cursor.next()?;
             self.db_cursor_state.set_entry(entry);
         }
 
@@ -364,7 +348,7 @@ impl<C: TrieCursor> TrieCursor for InMemoryTrieCursor<'_, C> {
     fn current(&mut self) -> Result<Option<Nibbles>, DatabaseError> {
         match &self.last_key {
             Some(key) => Ok(Some(*key)),
-            None => Ok(self.get_cursor_mut().map(|c| c.current()).transpose()?.flatten()),
+            None => self.cursor.current(),
         }
     }
 
@@ -385,10 +369,8 @@ impl<C: TrieStorageCursor> TrieStorageCursor for InMemoryTrieCursor<'_, C> {
     fn set_hashed_address(&mut self, hashed_address: B256) {
         self.reset();
         self.cursor.set_hashed_address(hashed_address);
-        let (in_memory_cursor, cursor_wiped) =
-            Self::get_storage_overlay(self.trie_updates, hashed_address);
-        self.in_memory_cursor = in_memory_cursor;
-        self.db_cursor_state = DbCursorState::new(cursor_wiped);
+        self.in_memory_cursor = Self::get_storage_overlay(self.trie_updates, hashed_address);
+        self.db_cursor_state = DbCursorState::NeedsPosition;
     }
 }
 
@@ -805,12 +787,11 @@ mod tests {
     }
 
     #[test]
-    fn test_all_storage_slots_deleted_not_wiped_exact_keys() {
+    fn test_all_storage_slots_deleted_exact_keys() {
         use tracing::debug;
         reth_tracing::init_test_tracing();
 
         // This test reproduces an edge case where:
-        // - cursor is not None (not wiped)
         // - All in-memory entries are deletions (None values)
         // - Database has corresponding entries
         // - Expected: NO leaves should be returned (all deleted)
