@@ -56,13 +56,7 @@ impl HashedPostState {
                 let hashed_account = account.info.as_ref().map(Into::into);
                 let hashed_storage = HashedStorage::from_plain_storage(
                     account.status,
-                    account
-                        .storage
-                        .iter()
-                        .filter(|(_, value)| {
-                            account.info.is_some() || value.present_value.is_zero()
-                        })
-                        .map(|(slot, value)| (slot, &value.present_value)),
+                    account.storage.iter().map(|(slot, value)| (slot, &value.present_value)),
                 );
 
                 (
@@ -1045,18 +1039,6 @@ mod tests {
             *hashed_state.accounts.get(&keccak256(address)).unwrap(),
             Some(account_info.into())
         );
-    }
-
-    #[test]
-    fn destroyed_account_drops_nonzero_storage() {
-        let account = BundleAccount::new(
-            None,
-            None,
-            changed_storage(U256::ZERO, U256::from(2)),
-            AccountStatus::Destroyed,
-        );
-
-        assert!(bundle_hashed_storage(&account).is_none());
     }
 
     #[test]
