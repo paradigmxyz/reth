@@ -913,8 +913,32 @@ pub mod serde_bincode_compat {
     use crate::{BranchNodeCompact, Nibbles};
     use alloc::borrow::Cow;
     use alloy_primitives::map::{B256Map, HashMap, HashSet};
-    use serde::{Deserialize, Deserializer, Serialize, Serializer};
+    use serde::{de::Error as _, Deserialize, Deserializer, Serialize, Serializer};
     use serde_with::{DeserializeAs, SerializeAs};
+
+    #[derive(Debug)]
+    struct LegacyMarker;
+
+    impl Serialize for LegacyMarker {
+        fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+        where
+            S: Serializer,
+        {
+            false.serialize(serializer)
+        }
+    }
+
+    impl<'de> Deserialize<'de> for LegacyMarker {
+        fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+        where
+            D: Deserializer<'de>,
+        {
+            if bool::deserialize(deserializer)? {
+                return Err(D::Error::custom("legacy storage trie deletion marker is unsupported"))
+            }
+            Ok(Self)
+        }
+    }
 
     /// Bincode-compatible [`super::TrieUpdates`] serde implementation.
     ///
@@ -998,7 +1022,7 @@ pub mod serde_bincode_compat {
     #[derive(Debug, Serialize, Deserialize)]
     pub struct StorageTrieUpdates<'a> {
         // Retains the positional field written by older bincode and ExEx WAL payloads.
-        _legacy_marker: bool,
+        _legacy_marker: LegacyMarker,
         storage_nodes: Cow<'a, HashMap<Nibbles, BranchNodeCompact>>,
         removed_nodes: Cow<'a, HashSet<Nibbles>>,
     }
@@ -1006,7 +1030,7 @@ pub mod serde_bincode_compat {
     impl<'a> From<&'a super::StorageTrieUpdates> for StorageTrieUpdates<'a> {
         fn from(value: &'a super::StorageTrieUpdates) -> Self {
             Self {
-                _legacy_marker: false,
+                _legacy_marker: LegacyMarker,
                 storage_nodes: Cow::Borrowed(&value.storage_nodes),
                 removed_nodes: Cow::Borrowed(&value.removed_nodes),
             }
@@ -1125,13 +1149,16 @@ pub mod serde_bincode_compat {
     #[derive(Debug, Serialize, Deserialize)]
     pub struct StorageTrieUpdatesSorted<'a> {
         // Retains the positional field written by older bincode and ExEx WAL payloads.
-        _legacy_marker: bool,
+        _legacy_marker: LegacyMarker,
         storage_nodes: Cow<'a, [(Nibbles, Option<BranchNodeCompact>)]>,
     }
 
     impl<'a> From<&'a super::StorageTrieUpdatesSorted> for StorageTrieUpdatesSorted<'a> {
         fn from(value: &'a super::StorageTrieUpdatesSorted) -> Self {
-            Self { _legacy_marker: false, storage_nodes: Cow::Borrowed(&value.storage_nodes) }
+            Self {
+                _legacy_marker: LegacyMarker,
+                storage_nodes: Cow::Borrowed(&value.storage_nodes),
+            }
         }
     }
 
@@ -1172,7 +1199,7 @@ pub mod serde_bincode_compat {
             BranchNodeCompact, Nibbles,
         };
         use alloy_primitives::{
-            map::{HashMap, HashSet},
+            map::{B256Map, HashMap, HashSet},
             B256,
         };
         use serde::{Deserialize, Serialize};
@@ -1233,11 +1260,14 @@ pub mod serde_bincode_compat {
             )]);
             let removed_nodes = HashSet::from_iter([Nibbles::from_nibbles_unchecked([0x02])]);
             let encoded =
-                bincode::serialize(&((true, storage_nodes.clone(), removed_nodes.clone()),))
+                bincode::serialize(&((false, storage_nodes.clone(), removed_nodes.clone()),))
                     .unwrap();
             let decoded: Data = bincode::deserialize(&encoded).unwrap();
             assert_eq!(decoded.trie_updates.storage_nodes, storage_nodes);
             assert_eq!(decoded.trie_updates.removed_nodes, removed_nodes);
+
+            let encoded = bincode::serialize(&((true, storage_nodes, removed_nodes),)).unwrap();
+            assert!(bincode::deserialize::<Data>(&encoded).is_err());
 
             data.trie_updates
                 .removed_nodes
@@ -1290,6 +1320,17 @@ pub mod serde_bincode_compat {
             let encoded = bincode::serialize(&data).unwrap();
             let decoded: Data = bincode::deserialize(&encoded).unwrap();
             assert_eq!(decoded, data);
+
+            let legacy_storage_tries = B256Map::from_iter([(
+                B256::default(),
+                (true, Vec::<(Nibbles, Option<BranchNodeCompact>)>::new()),
+            )]);
+            let encoded = bincode::serialize(&((
+                Vec::<(Nibbles, Option<BranchNodeCompact>)>::new(),
+                legacy_storage_tries,
+            ),))
+            .unwrap();
+            assert!(bincode::deserialize::<Data>(&encoded).is_err());
         }
 
         #[test]
@@ -1323,9 +1364,12 @@ pub mod serde_bincode_compat {
 
             let storage_nodes =
                 vec![(Nibbles::from_nibbles_unchecked([0x01]), Some(BranchNodeCompact::default()))];
-            let encoded = bincode::serialize(&((true, storage_nodes.clone()),)).unwrap();
+            let encoded = bincode::serialize(&((false, storage_nodes.clone()),)).unwrap();
             let decoded: Data = bincode::deserialize(&encoded).unwrap();
             assert_eq!(decoded.trie_updates.storage_nodes, storage_nodes);
+
+            let encoded = bincode::serialize(&((true, storage_nodes),)).unwrap();
+            assert!(bincode::deserialize::<Data>(&encoded).is_err());
         }
     }
 }

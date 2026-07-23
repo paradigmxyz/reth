@@ -1,6 +1,6 @@
 use crate::Nibbles;
 use alloc::{sync::Arc, vec::Vec};
-use alloy_primitives::map::B256Map;
+use alloy_primitives::{map::B256Map, B256};
 use core::ops::Range;
 
 /// Collection of mutable prefix sets.
@@ -211,6 +211,30 @@ pub struct PrefixSet {
     keys: Arc<Vec<Nibbles>>,
 }
 
+impl<I> From<I> for PrefixSet
+where
+    I: Iterator<Item = B256>,
+{
+    fn from(keys: I) -> Self {
+        let (lower_bound, upper_bound) = keys.size_hint();
+        let mut unpacked = Vec::with_capacity(upper_bound.unwrap_or(lower_bound));
+        let mut previous = None;
+
+        for key in keys {
+            debug_assert!(
+                previous.is_none_or(|previous| previous <= key),
+                "prefix set keys must be sorted"
+            );
+            if previous != Some(key) {
+                unpacked.push(Nibbles::unpack(key));
+            }
+            previous = Some(key);
+        }
+
+        Self { index: 0, all: false, keys: Arc::new(unpacked) }
+    }
+}
+
 impl PrefixSet {
     /// Returns `true` if any of the keys in the set has the given prefix
     ///
@@ -333,6 +357,31 @@ mod tests {
         assert!(prefix_set.contains(&Nibbles::from_nibbles_unchecked([4, 5])));
         assert!(!prefix_set.contains(&Nibbles::from_nibbles_unchecked([7, 8])));
         assert_eq!(prefix_set.len(), 3); // Length should be 3 (excluding duplicate)
+    }
+
+    #[test]
+    fn test_from_sorted_b256_iterator() {
+        let first = B256::with_last_byte(1);
+        let second = B256::with_last_byte(2);
+        let prefix_set = PrefixSet::from([first, second].into_iter());
+
+        assert_eq!(prefix_set.slice(), &[Nibbles::unpack(first), Nibbles::unpack(second)]);
+    }
+
+    #[test]
+    fn test_from_sorted_b256_iterator_with_duplicates() {
+        let first = B256::with_last_byte(1);
+        let second = B256::with_last_byte(2);
+        let prefix_set = PrefixSet::from([first, first, second].into_iter());
+
+        assert_eq!(prefix_set.slice(), &[Nibbles::unpack(first), Nibbles::unpack(second)]);
+    }
+
+    #[cfg(debug_assertions)]
+    #[test]
+    #[should_panic(expected = "prefix set keys must be sorted")]
+    fn test_from_unsorted_b256_iterator() {
+        let _: PrefixSet = [B256::with_last_byte(2), B256::with_last_byte(1)].into_iter().into();
     }
 
     #[test]

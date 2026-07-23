@@ -135,6 +135,15 @@ pub enum EthApiError {
     /// Thrown when a requested transaction is not found
     #[error("transaction not found")]
     TransactionNotFound,
+    /// Thrown when a transaction requested by a tracing method is not found
+    #[error("transaction not found")]
+    TracingTransactionNotFound,
+    /// Thrown when a block requested by a tracing method is not found
+    #[error("block not found")]
+    TracingBlockNotFound(BlockId),
+    /// Thrown when a tracing method is called for the genesis block
+    #[error("genesis is not traceable")]
+    GenesisNotTraceable,
     /// Some feature is unsupported
     #[error("unsupported")]
     Unsupported(&'static str),
@@ -301,6 +310,22 @@ impl From<EthApiError> for jsonrpsee_types::error::ErrorObject<'static> {
             EthApiError::EvmCustom(_) => internal_rpc_err(error.to_string()),
             EthApiError::UnknownBlockOrTxIndex | EthApiError::TransactionNotFound => {
                 rpc_error_with_code(EthRpcErrorCode::ResourceNotFound.code(), error.to_string())
+            }
+            EthApiError::TracingTransactionNotFound | EthApiError::GenesisNotTraceable => {
+                rpc_error_with_code(
+                    jsonrpsee_types::error::CALL_EXECUTION_FAILED_CODE,
+                    error.to_string(),
+                )
+            }
+            EthApiError::TracingBlockNotFound(id) => {
+                let id = match id {
+                    BlockId::Hash(hash) => hash.block_hash.to_string(),
+                    BlockId::Number(number) => number.to_string(),
+                };
+                rpc_error_with_code(
+                    jsonrpsee_types::error::CALL_EXECUTION_FAILED_CODE,
+                    format!("block {id} not found"),
+                )
             }
             EthApiError::HeaderNotFound(id) | EthApiError::ReceiptsNotFound(id) => {
                 rpc_error_with_code(
@@ -1152,6 +1177,26 @@ mod tests {
     fn timed_out_error() {
         let err = EthApiError::ExecutionTimedOut(Duration::from_secs(10));
         assert_eq!(err.to_string(), "execution aborted (timeout = 10s)");
+    }
+
+    #[test]
+    fn tracing_lookup_errors_use_call_execution_failed_code() {
+        let cases = [
+            (EthApiError::TracingTransactionNotFound, "transaction not found"),
+            (
+                EthApiError::TracingBlockNotFound(BlockId::hash(b256!(
+                    "0x0000000000000000000000000000000000000000000000000000000000000001"
+                ))),
+                "block 0x0000000000000000000000000000000000000000000000000000000000000001 not found",
+            ),
+            (EthApiError::GenesisNotTraceable, "genesis is not traceable"),
+        ];
+
+        for (error, message) in cases {
+            let error: jsonrpsee_types::error::ErrorObject<'static> = error.into();
+            assert_eq!(error.code(), -32000);
+            assert_eq!(error.message(), message);
+        }
     }
 
     #[test]

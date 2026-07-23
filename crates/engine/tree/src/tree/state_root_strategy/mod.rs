@@ -52,8 +52,10 @@ use crate::tree::{
     metrics::BlockValidationMetrics, EngineApiTreeState, ExecutionEnv, StateProviderBuilder,
     TreeConfig,
 };
-use alloy_primitives::B256;
+use alloy_primitives::{map::B256Map, B256, U256};
 use crossbeam_channel::Receiver as CrossbeamReceiver;
+use itertools::Itertools;
+use rayon::{join, prelude::*};
 use reth_chain_state::{ExecutedBlock, PreservedSparseTrie, StateTrieOverlayManager};
 use reth_errors::ProviderResult;
 use reth_evm::{ConfigureEvm, OnStateHook};
@@ -67,8 +69,11 @@ use reth_provider::{
 };
 use reth_tasks::utils::increase_thread_priority;
 use reth_trie::{
-    hashed_cursor::HashedCursorFactory, prefix_set::TriePrefixSetsMut,
-    trie_cursor::TrieCursorFactory, updates::TrieUpdates, HashedPostState,
+    hashed_cursor::HashedCursorFactory,
+    prefix_set::{PrefixSet, TriePrefixSets},
+    trie_cursor::TrieCursorFactory,
+    updates::TrieUpdates,
+    HashedPostState,
 };
 use reth_trie_parallel::proof_task::{ProofTaskCtx, ProofWorkerHandle};
 pub use reth_trie_parallel::{
@@ -550,8 +555,6 @@ impl DefaultStateRootStrategy {
                 } else {
                     pending_sparse_trie_prune_blocks
                 },
-                max_hot_slots: config.sparse_trie_max_hot_slots(),
-                max_hot_accounts: config.sparse_trie_max_hot_accounts(),
             },
         );
 
@@ -583,8 +586,6 @@ impl DefaultStateRootStrategy {
             preserved_sparse_trie,
             chunk_size,
             pending_sparse_trie_prune_blocks,
-            max_hot_slots,
-            max_hot_accounts,
         } = options;
         let state_trie_overlays = state_trie_overlays.clone();
         let trie_metrics = self.metrics.clone();
@@ -616,7 +617,7 @@ impl DefaultStateRootStrategy {
 
             let mut sparse_trie_anchor_hash = parent_hash;
             let mut reused_preserved_sparse_trie = false;
-            let mut sparse_state_trie = match preserved_sparse_trie {
+            let sparse_state_trie = match preserved_sparse_trie {
                 Some(preserved) => {
                     let start = Instant::now();
                     let preserved_anchor_hash = preserved.anchor_hash();
@@ -641,8 +642,6 @@ impl DefaultStateRootStrategy {
                 }
                 None => new_sparse_state_trie(),
             };
-            sparse_state_trie.set_hot_cache_capacities(max_hot_slots, max_hot_accounts);
-
             let mut task = SparseTrieCacheTask::new_with_trie(
                 &executor,
                 from_multi_proof,
@@ -701,14 +700,17 @@ impl DefaultStateRootStrategy {
                 let start = Instant::now();
                 let (mut trie, deferred) = task.into_trie_for_reuse();
                 if let Some(prune_blocks) = pending_sparse_trie_prune_blocks {
+                    let prune_start = Instant::now();
                     let retained_paths =
                         sparse_trie_retained_paths(prune_blocks, result.hashed_state.as_ref());
-                    trie.prune(max_hot_slots, max_hot_accounts, retained_paths);
+                    trie.prune(retained_paths);
+                    trie_metrics
+                        .sparse_trie_prune_duration_histogram
+                        .record(prune_start.elapsed().as_secs_f64());
                 }
                 trie_metrics
                     .into_trie_for_reuse_duration_histogram
                     .record(start.elapsed().as_secs_f64());
-                trie_metrics.sparse_trie_retained_memory_bytes.set(trie.memory_size() as f64);
                 trie_metrics
                     .sparse_trie_retained_storage_tries
                     .set(trie.retained_storage_tries_count() as f64);
@@ -740,8 +742,6 @@ struct SparseTrieTaskOptions<N: NodePrimitives> {
     chunk_size: usize,
     /// `None` disables pruning. `Some(Vec::new())` prunes using only the current block's paths.
     pending_sparse_trie_prune_blocks: Option<Vec<ExecutedBlock<N>>>,
-    max_hot_slots: usize,
-    max_hot_accounts: usize,
 }
 
 struct StateRootTaskOptions<'a, N: NodePrimitives> {
@@ -756,14 +756,73 @@ struct StateRootTaskOptions<'a, N: NodePrimitives> {
 fn sparse_trie_retained_paths<N: NodePrimitives>(
     prune_blocks: Vec<ExecutedBlock<N>>,
     current_hashed_state: &HashedPostState,
-) -> TriePrefixSetsMut {
-    let mut retained_paths = TriePrefixSetsMut::default();
-    for block in prune_blocks {
-        let trie_data = block.trie_data();
-        retained_paths.extend(trie_data.sorted.hashed_state.construct_prefix_sets());
+) -> TriePrefixSets {
+    struct StorageAcc<'a> {
+        first: Option<&'a [(B256, U256)]>,
+        rest: Vec<&'a [(B256, U256)]>,
     }
-    retained_paths.extend(current_hashed_state.construct_prefix_sets());
-    retained_paths
+
+    let current_hashed_state = current_hashed_state.clone_into_sorted();
+    let mut account_slices = Vec::with_capacity(prune_blocks.len() + 1);
+    let mut storage_acc = B256Map::<StorageAcc<'_>>::default();
+
+    for state in prune_blocks
+        .iter()
+        .map(|block| block.trie_data.get().sorted.hashed_state.as_ref())
+        .chain(core::iter::once(&current_hashed_state))
+    {
+        account_slices.push(state.accounts.as_slice());
+
+        for (address, storage) in &state.storages {
+            let entry = storage_acc
+                .entry(*address)
+                .or_insert_with(|| StorageAcc { first: None, rest: Vec::new() });
+            if entry.first.is_some() {
+                entry.rest.push(storage.storage_slots.as_slice());
+            } else {
+                entry.first = Some(storage.storage_slots.as_slice());
+            }
+        }
+    }
+
+    let mut storage_addresses = storage_acc.keys().copied().collect::<Vec<_>>();
+    storage_addresses.sort_unstable();
+
+    let (account_prefix_set, storage_prefix_sets) = join(
+        || {
+            PrefixSet::from(
+                account_slices
+                    .into_iter()
+                    .map(|slice| slice.iter().map(|(address, _)| address))
+                    .kmerge()
+                    .dedup()
+                    .copied()
+                    .merge(storage_addresses)
+                    .dedup(),
+            )
+        },
+        || {
+            storage_acc
+                .par_iter()
+                .map(|(address, entry)| {
+                    let prefix_set = PrefixSet::from(
+                        entry
+                            .first
+                            .iter()
+                            .copied()
+                            .chain(entry.rest.iter().copied())
+                            .map(|slice| slice.iter().map(|(slot, _)| slot))
+                            .kmerge()
+                            .dedup()
+                            .copied(),
+                    );
+                    (*address, prefix_set)
+                })
+                .collect()
+        },
+    );
+
+    TriePrefixSets { account_prefix_set, storage_prefix_sets }
 }
 
 fn published_sparse_trie_anchor_hash<N: NodePrimitives>(
@@ -1314,7 +1373,9 @@ mod tests {
         HashingWriter,
     };
     use reth_testing_utils::generators;
-    use reth_trie::{test_utils::state_root, HashedPostState, HashedStorage, LazyTrieData};
+    use reth_trie::{
+        test_utils::state_root, HashedPostState, HashedStorage, LazyTrieData, Nibbles,
+    };
     use reth_trie_db::ChangesetCache;
     use revm::state::{AccountInfo, AccountStatus, EvmState, EvmStorageSlot, TransactionId};
 
@@ -1349,7 +1410,7 @@ mod tests {
             .collect();
         let current_hashed_state = trie_hashed_state(0x05, 0x06);
 
-        let retained_paths = sparse_trie_retained_paths(blocks, &current_hashed_state).freeze();
+        let retained_paths = sparse_trie_retained_paths(blocks, &current_hashed_state);
 
         assert_eq!(retained_paths.account_prefix_set.len(), 3);
         assert_eq!(retained_paths.storage_prefix_sets.len(), 3);
@@ -1363,10 +1424,79 @@ mod tests {
             .collect();
         let current_hashed_state = trie_hashed_state(0x03, 0x04);
 
-        let retained_paths = sparse_trie_retained_paths(blocks, &current_hashed_state).freeze();
+        let retained_paths = sparse_trie_retained_paths(blocks, &current_hashed_state);
 
         assert_eq!(retained_paths.account_prefix_set.len(), 2);
         assert_eq!(retained_paths.storage_prefix_sets.len(), 2);
+    }
+
+    #[test]
+    fn sparse_trie_retained_paths_merges_sorted_paths_directly() {
+        let account = B256::with_last_byte(1);
+        let destroyed = B256::with_last_byte(2);
+        let storage_only = B256::with_last_byte(3);
+        let zeroed_storage = B256::with_last_byte(4);
+        let account_slot = B256::with_last_byte(10);
+        let first_slot = B256::with_last_byte(11);
+        let second_slot = B256::with_last_byte(12);
+        let third_slot = B256::with_last_byte(13);
+
+        let first = HashedPostState::default()
+            .with_accounts([(account, Some(Account::default())), (destroyed, None)])
+            .with_storages([
+                (account, HashedStorage::from_iter([(account_slot, U256::from(1))])),
+                (
+                    storage_only,
+                    HashedStorage::from_iter([
+                        (first_slot, U256::from(1)),
+                        (third_slot, U256::from(3)),
+                    ]),
+                ),
+                (zeroed_storage, HashedStorage::from_iter([(first_slot, U256::from(1))])),
+            ]);
+        let second = HashedPostState::default().with_accounts([(account, None)]).with_storages([
+            (
+                storage_only,
+                HashedStorage::from_iter([
+                    (second_slot, U256::from(2)),
+                    (third_slot, U256::from(30)),
+                ]),
+            ),
+            (zeroed_storage, HashedStorage::from_iter([(first_slot, U256::ZERO)])),
+        ]);
+        let blocks = TestBlockBuilder::eth()
+            .get_executed_blocks(1..3)
+            .zip([first, second])
+            .map(|(block, hashed_state)| with_hashed_state(block, hashed_state))
+            .collect();
+
+        let retained_paths = sparse_trie_retained_paths(blocks, &HashedPostState::default());
+
+        assert_eq!(
+            retained_paths.account_prefix_set.slice(),
+            &[
+                Nibbles::unpack(account),
+                Nibbles::unpack(destroyed),
+                Nibbles::unpack(storage_only),
+                Nibbles::unpack(zeroed_storage),
+            ]
+        );
+        assert_eq!(
+            retained_paths.storage_prefix_sets[&storage_only].slice(),
+            &[
+                Nibbles::unpack(first_slot),
+                Nibbles::unpack(second_slot),
+                Nibbles::unpack(third_slot),
+            ]
+        );
+        assert_eq!(
+            retained_paths.storage_prefix_sets[&account].slice(),
+            &[Nibbles::unpack(account_slot)]
+        );
+        assert_eq!(
+            retained_paths.storage_prefix_sets[&zeroed_storage].slice(),
+            &[Nibbles::unpack(first_slot)]
+        );
     }
 
     #[test]

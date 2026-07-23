@@ -1633,8 +1633,32 @@ pub mod serde_bincode_compat {
     use super::Account;
     use alloc::borrow::Cow;
     use alloy_primitives::{map::B256Map, B256, U256};
-    use serde::{Deserialize, Deserializer, Serialize, Serializer};
+    use serde::{de::Error as _, Deserialize, Deserializer, Serialize, Serializer};
     use serde_with::{DeserializeAs, SerializeAs};
+
+    #[derive(Debug)]
+    struct LegacyMarker;
+
+    impl Serialize for LegacyMarker {
+        fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+        where
+            S: Serializer,
+        {
+            false.serialize(serializer)
+        }
+    }
+
+    impl<'de> Deserialize<'de> for LegacyMarker {
+        fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+        where
+            D: Deserializer<'de>,
+        {
+            if bool::deserialize(deserializer)? {
+                return Err(D::Error::custom("legacy hashed storage wipe marker is unsupported"))
+            }
+            Ok(Self)
+        }
+    }
 
     /// Bincode-compatible [`super::HashedPostState`] serde implementation.
     ///
@@ -1714,13 +1738,13 @@ pub mod serde_bincode_compat {
     #[derive(Debug, Serialize, Deserialize)]
     pub struct HashedStorage<'a> {
         // Retains the positional field written by older bincode and ExEx WAL payloads.
-        _legacy_marker: bool,
+        _legacy_marker: LegacyMarker,
         storage: Cow<'a, B256Map<U256>>,
     }
 
     impl<'a> From<&'a super::HashedStorage> for HashedStorage<'a> {
         fn from(value: &'a super::HashedStorage) -> Self {
-            Self { _legacy_marker: false, storage: Cow::Borrowed(&value.storage) }
+            Self { _legacy_marker: LegacyMarker, storage: Cow::Borrowed(&value.storage) }
         }
     }
 
@@ -1827,12 +1851,15 @@ pub mod serde_bincode_compat {
     pub struct HashedStorageSorted<'a> {
         storage_slots: Cow<'a, [(B256, U256)]>,
         // Retains the positional field written by older bincode and ExEx WAL payloads.
-        _legacy_marker: bool,
+        _legacy_marker: LegacyMarker,
     }
 
     impl<'a> From<&'a super::HashedStorageSorted> for HashedStorageSorted<'a> {
         fn from(value: &'a super::HashedStorageSorted) -> Self {
-            Self { storage_slots: Cow::Borrowed(&value.storage_slots), _legacy_marker: false }
+            Self {
+                storage_slots: Cow::Borrowed(&value.storage_slots),
+                _legacy_marker: LegacyMarker,
+            }
         }
     }
 
@@ -1921,9 +1948,12 @@ pub mod serde_bincode_compat {
             assert_eq!(decoded, data);
 
             let storage = B256Map::from_iter([(B256::random(), U256::from(2))]);
-            let encoded = bincode::serialize(&((true, storage.clone()),)).unwrap();
+            let encoded = bincode::serialize(&((false, storage.clone()),)).unwrap();
             let decoded: Data = bincode::deserialize(&encoded).unwrap();
             assert_eq!(decoded.hashed_storage.storage, storage);
+
+            let encoded = bincode::serialize(&((true, storage),)).unwrap();
+            assert!(bincode::deserialize::<Data>(&encoded).is_err());
         }
 
         #[test]
@@ -1955,6 +1985,13 @@ pub mod serde_bincode_compat {
             let encoded = bincode::serialize(&data).unwrap();
             let decoded: Data = bincode::deserialize(&encoded).unwrap();
             assert_eq!(decoded, data);
+
+            let legacy_storages =
+                B256Map::from_iter([(B256::random(), (Vec::<(B256, U256)>::new(), true))]);
+            let encoded =
+                bincode::serialize(&((Vec::<(B256, Option<Account>)>::new(), legacy_storages),))
+                    .unwrap();
+            assert!(bincode::deserialize::<Data>(&encoded).is_err());
         }
 
         #[test]
@@ -1978,9 +2015,12 @@ pub mod serde_bincode_compat {
             assert_eq!(decoded, data);
 
             let storage_slots = vec![(B256::random(), U256::from(2))];
-            let encoded = bincode::serialize(&((storage_slots.clone(), true),)).unwrap();
+            let encoded = bincode::serialize(&((storage_slots.clone(), false),)).unwrap();
             let decoded: Data = bincode::deserialize(&encoded).unwrap();
             assert_eq!(decoded.hashed_storage.storage_slots, storage_slots);
+
+            let encoded = bincode::serialize(&((storage_slots, true),)).unwrap();
+            assert!(bincode::deserialize::<Data>(&encoded).is_err());
         }
     }
 }
