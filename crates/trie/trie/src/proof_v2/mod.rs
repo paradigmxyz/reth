@@ -1343,15 +1343,13 @@ where
 
         // `next_uncached_key_range`, which will be called in the loop below, expects the trie
         // cursor to have already been positioned. Cursor resets for overlapping sub-tries are
-        // handled by `proof_inner`, so a buffered entry at-or-after this disjoint range remains the
-        // first unconsumed entry. Exhaustion is similarly stable across forward-only ranges.
-        if trie_cursor_state.needs_seek_to(&traversal_lower_bound) {
-            trace!(target: TRACE_TARGET, "Doing initial seek of trie cursor");
-            *trie_cursor_state = TrieCursorState::seeked(
-                traversal_lower_bound,
-                self.trie_cursor_seek(traversal_lower_bound)?,
-            );
-        }
+        // handled by `proof_inner`; disjoint sub-tries can seek forward from the existing cursor
+        // frontier.
+        trace!(target: TRACE_TARGET, "Doing initial seek of trie cursor");
+        *trie_cursor_state = TrieCursorState::seeked(
+            traversal_lower_bound,
+            self.trie_cursor_seek(traversal_lower_bound)?,
+        );
 
         // `uncalculated_lower_bound` tracks the lower bound of node paths which have yet to be
         // visited, either via the hashed key cursor (`calculate_key_range`) or trie cursor
@@ -1863,15 +1861,6 @@ impl TrieCursorState {
             Self::Unseeked => panic!("cursor is unseeked"),
             Self::Available(path, _) | Self::Taken(path) => Some(path),
             Self::Exhausted(_) => None,
-        }
-    }
-
-    /// Returns true if the cursor must seek to be usable for a range starting at `path`.
-    fn needs_seek_to(&self, path: &Nibbles) -> bool {
-        match self {
-            Self::Unseeked | Self::Taken(_) => true,
-            Self::Available(current_path, _) => current_path < path,
-            Self::Exhausted(_) => false,
         }
     }
 
