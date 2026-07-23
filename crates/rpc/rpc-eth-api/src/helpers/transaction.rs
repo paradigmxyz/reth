@@ -29,7 +29,7 @@ use reth_rpc_eth_types::{
     FillTransaction, SignError, TransactionSource,
 };
 use reth_storage_api::{
-    BlockNumReader, BlockReaderIdExt, ProviderBlock, ProviderReceipt, ProviderTx, ReceiptProvider,
+    BlockNumReader, BlockReaderIdExt, ProviderBlock, ProviderReceipt, ProviderTx,
     TransactionsProvider,
 };
 use reth_transaction_pool::{
@@ -184,6 +184,21 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
         LoadTransaction::transaction_by_hash(self, hash)
     }
 
+    /// Returns the RPC transaction response for the given hash.
+    fn transaction_by_hash_response(
+        &self,
+        hash: B256,
+    ) -> impl Future<Output = Result<Option<RpcTransaction<Self::NetworkTypes>>, Self::Error>> + Send
+    {
+        async move {
+            LoadTransaction::transaction_by_hash(self, hash)
+                .await?
+                .map(|tx| tx.into_transaction(self.converter()))
+                .transpose()
+                .map_err(Self::Error::from)
+        }
+    }
+
     /// Returns all transactions from the local pending pool.
     fn pending_transactions(&self) -> Result<Vec<RpcTransaction<Self::NetworkTypes>>, Self::Error> {
         self.pool()
@@ -271,9 +286,10 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
     {
         async move {
             match self.load_transaction_and_receipt(hash).await? {
-                Some((tx, meta, receipt, all_receipts)) => {
-                    self.build_transaction_receipt(tx, meta, receipt, all_receipts).await.map(Some)
-                }
+                Some((tx, meta, receipt, all_receipts, block)) => self
+                    .build_transaction_receipt(tx, meta, receipt, all_receipts, block)
+                    .await
+                    .map(Some),
                 None => Ok(None),
             }
         }
@@ -292,7 +308,8 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
                 Recovered<ProviderTx<Self::Provider>>,
                 TransactionMeta,
                 ProviderReceipt<Self::Provider>,
-                Option<Arc<Vec<ProviderReceipt<Self::Provider>>>>,
+                Arc<Vec<ProviderReceipt<Self::Provider>>>,
+                Arc<RecoveredBlock<ProviderBlock<Self::Provider>>>,
             )>,
             Self::Error,
         >,
@@ -310,7 +327,7 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
                 if let Some(all_receipts) = cached.receipts.clone() &&
                     let Some(receipt) = all_receipts.get(cached.tx_index).cloned()
                 {
-                    return Ok(Some((tx, meta, receipt, Some(all_receipts))));
+                    return Ok(Some((tx, meta, receipt, all_receipts, cached.block.clone())));
                 }
 
                 // Block still cached but receipts evicted — fetch via cache since
@@ -323,27 +340,44 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
                     .map_err(Self::Error::from_eth_err)? &&
                     let Some(receipt) = receipts.get(cached.tx_index).cloned()
                 {
-                    return Ok(Some((tx, meta, receipt, Some(receipts))));
+                    return Ok(Some((tx, meta, receipt, receipts, cached.block.clone())));
                 }
             }
 
-            // Full cache miss — fetch both from provider.
-            self.spawn_blocking_io(move |this| {
-                let provider = this.provider();
-                let Some((tx, meta)) = provider
-                    .transaction_by_hash_with_meta(hash)
-                    .map_err(Self::Error::from_eth_err)?
-                else {
-                    return Ok(None);
-                };
+            // Full cache miss — locate the transaction, then fetch its block and receipts together.
+            let Some((tx, meta)) = self
+                .spawn_blocking_io(move |this| {
+                    let provider = this.provider();
+                    let Some((tx, meta)) = provider
+                        .transaction_by_hash_with_meta(hash)
+                        .map_err(Self::Error::from_eth_err)?
+                    else {
+                        return Ok(None);
+                    };
 
-                let tx = tx.try_into_recovered_unchecked().map_err(Self::Error::from_eth_err)?;
+                    let tx =
+                        tx.try_into_recovered_unchecked().map_err(Self::Error::from_eth_err)?;
+                    Ok(Some((tx, meta)))
+                })
+                .await?
+            else {
+                return Ok(None);
+            };
 
-                let receipt = provider.receipt_by_hash(hash).map_err(Self::Error::from_eth_err)?;
+            let (block, receipts) = self
+                .cache()
+                .get_block_and_receipts(meta.block_hash)
+                .await
+                .map_err(Self::Error::from_eth_err)?
+                .ok_or_else(|| {
+                    Self::Error::from_eth_err(EthApiError::HeaderNotFound(meta.block_hash.into()))
+                })?;
+            let receipt = receipts
+                .get(meta.index as usize)
+                .cloned()
+                .ok_or_else(|| Self::Error::from_eth_err(EthApiError::UnknownBlockOrTxIndex))?;
 
-                Ok(receipt.map(|receipt| (tx, meta, receipt, None)))
-            })
-            .await
+            Ok(Some((tx, meta, receipt, receipts, block)))
         }
     }
 

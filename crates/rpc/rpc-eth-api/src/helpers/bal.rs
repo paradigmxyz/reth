@@ -35,7 +35,7 @@ pub trait GetBlockAccessList: Trace + Call + LoadBlock + RpcNodeCoreExt {
                     .map_err(RethError::other)
                     .map_err(Self::Error::from_eth_err)?
                     .split();
-                return Ok(Some(Vec::from(bal)))
+                return Ok(Some(Vec::from(bal)));
             }
 
             self.spawn_blocking_io(move |eth_api| {
@@ -89,7 +89,7 @@ pub trait GetBlockAccessList: Trace + Call + LoadBlock + RpcNodeCoreExt {
             if let Some(cached_bal) =
                 self.cache().get_bal(block.hash()).await.map_err(Self::Error::from_eth_err)?
             {
-                return Ok(Some(cached_bal.as_raw().clone()))
+                return Ok(Some(cached_bal.as_raw().clone()));
             }
 
             Ok(self.get_block_access_list(block_id).await?.map(|bal| alloy_rlp::encode(bal).into()))
