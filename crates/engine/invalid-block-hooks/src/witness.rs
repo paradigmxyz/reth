@@ -141,7 +141,7 @@ fn collect_execution_data(
             let storage = hashed_state
                 .storages
                 .entry(hashed_address)
-                .or_insert_with(|| HashedStorage::new(false));
+                .or_insert_with(|| HashedStorage::new(account.status.was_destroyed()));
 
             for (slot, value) in account_data.storage {
                 let slot_bytes = B256::from(slot);

@@ -69,7 +69,7 @@ impl ExecutionWitnessRecord {
                 .hashed_state
                 .storages
                 .entry(hashed_address)
-                .or_insert_with(|| HashedStorage::new(false));
+                .or_insert_with(|| HashedStorage::new(account.status.was_destroyed()));
 
             if let Some(account) = &account.account {
                 self.keys.push(address.to_vec().into());
