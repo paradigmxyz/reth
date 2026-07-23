@@ -60,7 +60,7 @@ use reth_chain_state::{ExecutedBlock, PreservedSparseTrie, StateTrieOverlayManag
 use reth_errors::ProviderResult;
 use reth_evm::{ConfigureEvm, OnStateHook};
 use reth_primitives_traits::{
-    AlloyBlockHeader, FastInstant as Instant, NodePrimitives, RecoveredBlock,
+    AlloyBlockHeader, FastInstant as Instant, NodePrimitives, RecoveredBlock, SealedHeader,
 };
 use reth_provider::{
     providers::OverlayStateProviderFactory, BlockExecutionOutput, BlockReader,
@@ -245,6 +245,7 @@ where
     executor: &'a reth_tasks::Runtime,
     state_trie_overlays: &'a StateTrieOverlayManager<N>,
     env: &'a ExecutionEnv<Evm>,
+    parent_header: &'a SealedHeader<N::BlockHeader>,
     provider_builder: StateProviderBuilder<N, P>,
     overlay_factory: OverlayStateProviderFactory<P, N>,
     config: &'a TreeConfig,
@@ -276,6 +277,7 @@ where
         executor: &'a reth_tasks::Runtime,
         state_trie_overlays: &'a StateTrieOverlayManager<N>,
         env: &'a ExecutionEnv<Evm>,
+        parent_header: &'a SealedHeader<N::BlockHeader>,
         provider_builder: StateProviderBuilder<N, P>,
         overlay_factory: OverlayStateProviderFactory<P, N>,
         config: &'a TreeConfig,
@@ -286,6 +288,7 @@ where
             executor,
             state_trie_overlays,
             env,
+            parent_header,
             provider_builder,
             overlay_factory,
             config,
@@ -297,6 +300,11 @@ where
     /// Returns the execution environment for the block.
     pub const fn env(&self) -> &ExecutionEnv<Evm> {
         self.env
+    }
+
+    /// Returns the sealed parent block header.
+    pub const fn parent_header(&self) -> &SealedHeader<N::BlockHeader> {
+        self.parent_header
     }
 
     /// Returns the task runtime used by state-root work.
@@ -517,8 +525,7 @@ impl DefaultStateRootStrategy {
             + 'static,
     {
         let StateRootTaskOptions {
-            parent_hash,
-            parent_state_root,
+            parent_header,
             preserved_sparse_trie,
             transaction_count,
             config,
@@ -536,6 +543,7 @@ impl DefaultStateRootStrategy {
 
         let (state_root_tx, state_root_rx) = mpsc::channel();
         let (hashed_state_tx, hashed_state_rx) = mpsc::channel();
+        let parent_state_root = parent_header.state_root();
 
         self.spawn_sparse_trie_task(
             executor,
@@ -546,8 +554,7 @@ impl DefaultStateRootStrategy {
             from_multi_proof,
             cancel_rx,
             SparseTrieTaskOptions {
-                parent_hash,
-                parent_state_root,
+                parent_header,
                 preserved_sparse_trie,
                 chunk_size: config.multiproof_chunk_size(),
                 pending_sparse_trie_prune_blocks: if config.disable_sparse_trie_cache_pruning() {
@@ -581,8 +588,7 @@ impl DefaultStateRootStrategy {
         options: SparseTrieTaskOptions<N>,
     ) {
         let SparseTrieTaskOptions {
-            parent_hash,
-            parent_state_root,
+            parent_header,
             preserved_sparse_trie,
             chunk_size,
             pending_sparse_trie_prune_blocks,
@@ -594,6 +600,10 @@ impl DefaultStateRootStrategy {
         let parent_span = Span::current();
         executor.clone().spawn_blocking_named("sparse-trie", move || {
             reth_tasks::once!(increase_thread_priority);
+
+            let parent_hash = parent_header.hash();
+            let parent_state_root = parent_header.state_root();
+            let epoch = parent_header.number().saturating_add(1);
 
             let _enter = debug_span!(
                 target: "engine::tree::payload_processor",
@@ -651,6 +661,7 @@ impl DefaultStateRootStrategy {
                 trie_metrics.clone(),
                 sparse_state_trie,
                 parent_state_root,
+                epoch,
                 chunk_size,
             );
 
@@ -736,8 +747,7 @@ impl DefaultStateRootStrategy {
 }
 
 struct SparseTrieTaskOptions<N: NodePrimitives> {
-    parent_hash: B256,
-    parent_state_root: B256,
+    parent_header: SealedHeader<N::BlockHeader>,
     preserved_sparse_trie: Option<PreservedSparseTrie>,
     chunk_size: usize,
     /// `None` disables pruning. `Some(Vec::new())` prunes using only the current block's paths.
@@ -745,8 +755,7 @@ struct SparseTrieTaskOptions<N: NodePrimitives> {
 }
 
 struct StateRootTaskOptions<'a, N: NodePrimitives> {
-    parent_hash: B256,
-    parent_state_root: B256,
+    parent_header: SealedHeader<N::BlockHeader>,
     preserved_sparse_trie: Option<PreservedSparseTrie>,
     transaction_count: Option<usize>,
     config: &'a TreeConfig,
@@ -905,6 +914,7 @@ where
             executor,
             state_trie_overlays,
             env,
+            parent_header,
             provider_builder,
             overlay_factory,
             config,
@@ -928,8 +938,7 @@ where
             state_trie_overlays,
             overlay_factory.clone(),
             StateRootTaskOptions {
-                parent_hash: env.parent_hash,
-                parent_state_root: env.parent_state_root,
+                parent_header: parent_header.clone(),
                 preserved_sparse_trie,
                 transaction_count: Some(env.transaction_count),
                 config,
@@ -988,6 +997,7 @@ where
 
         let pending_sparse_trie_prune_blocks = ctx.take_sparse_trie_prune_blocks();
         let parent_state_root = ctx.parent_state_root();
+        let parent_header = SealedHeader::new(ctx.parent_header().clone(), ctx.parent_hash());
         let preserved_sparse_trie = ctx.state_trie_overlays.take_sparse_trie();
         let overlay_factory = if let Some(anchor_hash) = preserved_sparse_trie
             .as_ref()
@@ -1004,8 +1014,7 @@ where
                 ctx.state_trie_overlays,
                 overlay_factory,
                 StateRootTaskOptions {
-                    parent_hash: ctx.parent_hash(),
-                    parent_state_root,
+                    parent_header,
                     preserved_sparse_trie,
                     // Tx count unknown at FCU time (block built incrementally): full proof workers.
                     transaction_count: None,
@@ -1658,8 +1667,7 @@ mod tests {
                 OverlayBuilder::<EthPrimitives>::new(genesis_hash, ChangesetCache::new()),
             ),
             StateRootTaskOptions {
-                parent_hash: genesis_hash,
-                parent_state_root: env.parent_state_root,
+                parent_header: SealedHeader::new(Default::default(), genesis_hash),
                 preserved_sparse_trie: None,
                 transaction_count: Some(env.transaction_count),
                 config: &TreeConfig::default(),

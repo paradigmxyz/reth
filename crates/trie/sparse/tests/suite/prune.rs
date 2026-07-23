@@ -67,14 +67,14 @@ pub(super) fn test_prune_retains_specified_leaves<T: SparseTrie>(new_trie: fn() 
     let mut trie: T = harness.init_trie_fully_revealed(false, new_trie);
 
     // Compute root before prune.
-    let hash1 = trie.root();
+    let hash1 = trie.root(0);
 
     // Retain leaves A and B, prune the rest.
     let retained = [Nibbles::unpack(key_a), Nibbles::unpack(key_b)];
     trie.prune(&retained);
 
     // Root must be unchanged after prune.
-    let hash2 = trie.root();
+    let hash2 = trie.root(0);
     assert_eq!(hash1, hash2, "root hash should be unchanged after prune");
 
     // Retained leaves must still be accessible.
@@ -99,12 +99,12 @@ pub(super) fn test_prune_keeps_upper_children_of_retained_branch<T: SparseTrie>(
 
     let harness = SuiteTestHarness::new(storage);
     let mut trie: T = harness.init_trie_fully_revealed(false, new_trie);
-    let root_before = trie.root();
+    let root_before = trie.root(0);
 
     let retained = [Nibbles::unpack(retained_key)];
     let pruned = trie.prune(&retained);
 
-    assert_eq!(trie.root(), root_before, "root must not change after prune");
+    assert_eq!(trie.root(0), root_before, "root must not change after prune");
     assert_eq!(pruned, 2, "protected branch children should be blinded, not removed");
     assert_update_requests_parent(&mut trie, protected_key_a, ProofV2TargetParent::new(1), 20);
 }
@@ -123,12 +123,12 @@ pub(super) fn test_prune_keeps_lower_children_of_retained_branch<T: SparseTrie>(
 
     let harness = SuiteTestHarness::new(storage);
     let mut trie: T = harness.init_trie_fully_revealed(false, new_trie);
-    let root_before = trie.root();
+    let root_before = trie.root(0);
 
     let retained = [Nibbles::unpack(retained_key)];
     let pruned = trie.prune(&retained);
 
-    assert_eq!(trie.root(), root_before, "root must not change after prune");
+    assert_eq!(trie.root(0), root_before, "root must not change after prune");
     assert_eq!(pruned, 2, "protected lower branch children should be blinded, not removed");
     assert_update_requests_parent(&mut trie, protected_key_a, ProofV2TargetParent::new(3), 20);
 }
@@ -174,12 +174,12 @@ pub(super) fn test_prune_protects_children_by_parent_base_path<T: SparseTrie>(ne
     ])
     .expect("reveal_nodes should succeed");
 
-    let root_before = trie.root();
+    let root_before = trie.root(0);
     let retained = [Nibbles::from_nibbles([0x0, 0x0])];
     let pruned = trie.prune(&retained);
 
     assert_eq!(pruned, 0);
-    assert_eq!(trie.root(), root_before, "root must not change after prune");
+    assert_eq!(trie.root(0), root_before, "root must not change after prune");
 }
 
 /// Pruning should reduce the node count.
@@ -207,7 +207,7 @@ pub(super) fn test_prune_reduces_node_count<T: SparseTrie>(new_trie: fn() -> T) 
     let mut trie: T = harness.init_trie_fully_revealed(false, new_trie);
 
     // Compute root to cache hashes (required for pruning).
-    let _root = trie.root();
+    let _root = trie.root(0);
 
     let size_before = trie.size_hint();
 
@@ -241,14 +241,14 @@ pub(super) fn test_prune_empty_retained_set<T: SparseTrie>(new_trie: fn() -> T) 
     let harness = SuiteTestHarness::new(storage);
     let mut trie: T = harness.init_trie_fully_revealed(false, new_trie);
 
-    let hash_before = trie.root();
+    let hash_before = trie.root(0);
 
     let size_before = trie.size_hint();
 
     // Prune with empty retained set — maximum pruning.
     let pruned_count = trie.prune(&[]);
 
-    let hash_after = trie.root();
+    let hash_after = trie.root(0);
     let size_after = trie.size_hint();
 
     assert_eq!(hash_before, hash_after, "root hash should be unchanged after prune");
@@ -286,7 +286,7 @@ pub(super) fn test_prune_requires_computed_hashes<T: SparseTrie>(new_trie: fn() 
     // Compare against pruning after root() is called (clean state).
     // With dirty nodes, pruning is limited because dirty subtrees lack cached hashes.
     let mut trie_clean: T = harness.init_trie_fully_revealed(false, new_trie);
-    trie_clean.root();
+    trie_clean.root(0);
     let clean_pruned = trie_clean.prune(&retained);
 
     assert!(
@@ -310,7 +310,7 @@ pub(super) fn test_prune_then_update_and_recompute_root<T: SparseTrie>(new_trie:
     let harness = SuiteTestHarness::new(storage.clone());
     let mut trie: T = harness.init_trie_fully_revealed(false, new_trie);
 
-    trie.root();
+    trie.root(0);
 
     let retained = vec![Nibbles::unpack(keys[0]), Nibbles::unpack(keys[1])];
     trie.prune(&retained);
@@ -320,7 +320,7 @@ pub(super) fn test_prune_then_update_and_recompute_root<T: SparseTrie>(new_trie:
     leaf_updates.insert(keys[0], LeafUpdate::Changed(encode_fixed_size(&new_value).to_vec()));
     harness.reveal_and_update(&mut trie, &mut leaf_updates);
 
-    let root_after = trie.root();
+    let root_after = trie.root(0);
 
     let mut expected_storage = storage;
     expected_storage.insert(keys[0], new_value);
@@ -345,7 +345,7 @@ pub(super) fn test_prune_then_reveal_pruned_subtree<T: SparseTrie>(new_trie: fn(
     let harness = SuiteTestHarness::new(storage.clone());
     let mut trie: T = harness.init_trie_fully_revealed(false, new_trie);
 
-    trie.root();
+    trie.root(0);
 
     let retained = vec![Nibbles::unpack(keys[0])];
     trie.prune(&retained);
@@ -355,7 +355,7 @@ pub(super) fn test_prune_then_reveal_pruned_subtree<T: SparseTrie>(new_trie: fn(
     leaf_updates.insert(keys[2], LeafUpdate::Changed(encode_fixed_size(&new_value).to_vec()));
     harness.reveal_and_update(&mut trie, &mut leaf_updates);
 
-    let root_after = trie.root();
+    let root_after = trie.root(0);
 
     let mut expected_storage = storage;
     expected_storage.insert(keys[2], new_value);
@@ -393,9 +393,9 @@ pub(super) fn test_prune_mixed_embedded_and_hashed_nodes<T: SparseTrie>(new_trie
     })
     .expect("update_leaves should succeed");
 
-    let root_before = trie.root();
+    let root_before = trie.root(0);
     trie.prune(&[]);
-    let root_after = trie.root();
+    let root_after = trie.root(0);
 
     assert_eq!(root_before, root_after, "root hash must be preserved after pruning mixed trie");
 }
@@ -416,12 +416,12 @@ pub(super) fn test_prune_then_update_no_panic<T: SparseTrie>(new_trie: fn() -> T
     let harness = SuiteTestHarness::new(storage.clone());
     let mut trie: T = harness.init_trie_fully_revealed(false, new_trie);
 
-    let root_before_prune = trie.root();
+    let root_before_prune = trie.root(0);
 
     // Prune everything.
     trie.prune(&[]);
 
-    let hash1 = trie.root();
+    let hash1 = trie.root(0);
     assert_eq!(hash1, root_before_prune, "root after prune must equal root before prune");
 
     // Insert a brand-new key not previously in the trie.
@@ -434,7 +434,7 @@ pub(super) fn test_prune_then_update_no_panic<T: SparseTrie>(new_trie: fn() -> T
     // The update will hit blinded nodes — the reveal_and_update loop supplies proofs.
     harness.reveal_and_update(&mut trie, &mut leaf_updates);
 
-    let hash2 = trie.root();
+    let hash2 = trie.root(0);
     assert_ne!(hash2, hash1, "root should change after inserting a new leaf");
 }
 
@@ -447,7 +447,7 @@ pub(super) fn test_prune_only_descends_into_branch_root<T: SparseTrie>(new_trie:
     let harness = SuiteTestHarness::new(storage);
     let mut trie: T = harness.init_trie_fully_revealed(false, new_trie);
 
-    let _root = trie.root();
+    let _root = trie.root(0);
     let pruned = trie.prune(&[]);
     assert_eq!(pruned, 0, "non-branch root should not prune any nodes");
 
@@ -480,7 +480,7 @@ pub(super) fn test_prune_handles_small_subtrie_root_nodes<T: SparseTrie>(new_tri
     let harness = SuiteTestHarness::new(storage);
     let mut trie: T = harness.init_trie_fully_revealed(false, new_trie);
 
-    let root_before = trie.root();
+    let root_before = trie.root(0);
     assert_eq!(root_before, harness.original_root());
 
     // Prune retaining only the small-subtrie leaf — the large subtrie should
@@ -488,6 +488,6 @@ pub(super) fn test_prune_handles_small_subtrie_root_nodes<T: SparseTrie>(new_tri
     let retained = vec![Nibbles::unpack(small_key)];
     trie.prune(&retained);
 
-    let root_after = trie.root();
+    let root_after = trie.root(0);
     assert_eq!(root_after, root_before, "root must not change after prune");
 }

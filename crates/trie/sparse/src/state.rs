@@ -353,15 +353,15 @@ where
     ///
     /// If the trie has not been revealed, this function does nothing.
     #[instrument(level = "debug", target = "trie::sparse", skip_all)]
-    pub fn calculate_subtries(&mut self) {
+    pub fn calculate_subtries(&mut self, epoch: u64) {
         if let RevealableSparseTrie::Revealed(trie) = &mut self.state {
-            trie.update_subtrie_hashes();
+            trie.update_subtrie_hashes(epoch);
         }
     }
 
     /// Returns storage sparse trie root if the trie has been revealed.
-    pub fn storage_root(&mut self, account: &B256) -> Option<B256> {
-        self.storage.tries.get_mut(account).and_then(|trie| trie.root())
+    pub fn storage_root(&mut self, account: &B256, epoch: u64) -> Option<B256> {
+        self.storage.tries.get_mut(account).and_then(|trie| trie.root(epoch))
     }
 
     /// Returns mutable reference to the revealed account sparse trie.
@@ -370,19 +370,19 @@ where
     }
 
     /// Returns sparse trie root.
-    pub fn root(&mut self) -> SparseStateTrieResult<B256> {
+    pub fn root(&mut self, epoch: u64) -> SparseStateTrieResult<B256> {
         // record revealed node metrics
         #[cfg(feature = "metrics")]
         self.metrics.record();
 
-        Ok(self.revealed_trie_mut()?.root())
+        Ok(self.revealed_trie_mut()?.root(epoch))
     }
 
     /// Returns sparse trie root and trie updates.
     ///
     /// Returns an error if the account trie is still blind.
     #[instrument(level = "debug", target = "trie::sparse", skip_all)]
-    pub fn root_with_updates(&mut self) -> SparseStateTrieResult<(B256, TrieUpdates)> {
+    pub fn root_with_updates(&mut self, epoch: u64) -> SparseStateTrieResult<(B256, TrieUpdates)> {
         // record revealed node metrics
         #[cfg(feature = "metrics")]
         self.metrics.record();
@@ -390,7 +390,7 @@ where
         let storage_tries = self.storage_trie_updates();
         let revealed = self.revealed_trie_mut()?;
 
-        let (root, updates) = (revealed.root(), revealed.take_updates());
+        let (root, updates) = (revealed.root(epoch), revealed.take_updates());
         let updates = TrieUpdates {
             account_nodes: updates.updated_nodes,
             removed_nodes: updates.removed_nodes,
@@ -824,7 +824,7 @@ mod tests {
 
         sparse.reveal_decoded_multiproof(multiproof.try_into().unwrap()).unwrap();
         let trie_account = TrieAccount {
-            storage_root: sparse.storage_root(&account).unwrap(),
+            storage_root: sparse.storage_root(&account, 0).unwrap(),
             ..Default::default()
         };
         apply_account_update(
@@ -832,7 +832,7 @@ mod tests {
             account,
             LeafUpdate::Changed(alloy_rlp::encode(trie_account)),
         );
-        sparse.root().unwrap();
+        sparse.root(0).unwrap();
         let mut retained_paths = TriePrefixSetsMut::default();
         retained_paths.account_prefix_set.insert(Nibbles::unpack(account));
         retained_paths
@@ -975,7 +975,7 @@ mod tests {
     fn root_on_blind_trie_returns_blind_error() {
         let mut sparse = SparseStateTrie::<ArenaParallelSparseTrie>::default();
 
-        let err = sparse.root().unwrap_err();
+        let err = sparse.root(0).unwrap_err();
 
         assert!(matches!(err.kind(), SparseStateTrieErrorKind::Sparse(SparseTrieErrorKind::Blind)));
     }
@@ -1069,7 +1069,7 @@ mod tests {
             )
             .unwrap();
 
-        assert_eq!(sparse.root().unwrap(), root);
+        assert_eq!(sparse.root(0).unwrap(), root);
 
         let address_3 = b256!("0x2000000000000000000000000000000000000000000000000000000000000000");
         let account_3 = Account { nonce: account_1.nonce + 1, ..account_1 };
@@ -1089,7 +1089,7 @@ mod tests {
             .update_leaves(&mut updates, |_, _| {})
             .unwrap();
         assert!(updates.is_empty());
-        trie_account_1.storage_root = sparse.storage_root(&address_1).unwrap();
+        trie_account_1.storage_root = sparse.storage_root(&address_1, 0).unwrap();
         apply_account_update(
             &mut sparse,
             address_1,
@@ -1097,14 +1097,14 @@ mod tests {
         );
 
         sparse.wipe_storage(address_2).unwrap();
-        trie_account_2.storage_root = sparse.storage_root(&address_2).unwrap();
+        trie_account_2.storage_root = sparse.storage_root(&address_2, 0).unwrap();
         apply_account_update(
             &mut sparse,
             address_2,
             LeafUpdate::Changed(alloy_rlp::encode(trie_account_2)),
         );
 
-        sparse.root().unwrap();
+        sparse.root(0).unwrap();
 
         let sparse_updates = sparse.take_trie_updates().unwrap();
         // TODO(alexey): assert against real state root calculation updates

@@ -98,15 +98,15 @@ pub trait SparseTrie: Sized + Debug + Send + Sync {
     /// each node with [`TrieNodeV2::EmptyRoot`] to avoid cloning.
     fn reveal_nodes(&mut self, nodes: &mut [ProofTrieNodeV2]) -> SparseTrieResult<()>;
 
-    /// Calculates and returns the root hash of the trie.
+    /// Calculates and returns the root hash of the trie at the provided epoch.
     ///
-    /// This processes any dirty nodes by updating their RLP encodings
-    /// and returns the root hash.
+    /// This processes any dirty or revealed nodes by updating their RLP encodings and caching them
+    /// at `epoch`, then returns the root hash.
     ///
     /// # Returns
     ///
     /// The root hash of the trie.
-    fn root(&mut self) -> B256;
+    fn root(&mut self, epoch: u64) -> B256;
 
     /// Returns true if the root node is cached and does not need any recomputation.
     fn is_root_cached(&self) -> bool;
@@ -116,7 +116,7 @@ pub trait SparseTrie: Sized + Debug + Send + Sync {
     ///
     /// The root node is considered to be at level 0. This method is useful for optimizing
     /// hash recalculations after localized changes to the trie structure.
-    fn update_subtrie_hashes(&mut self);
+    fn update_subtrie_hashes(&mut self, epoch: u64);
 
     /// Retrieves a reference to the leaf value at the specified path.
     ///

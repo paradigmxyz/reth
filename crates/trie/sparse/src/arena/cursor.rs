@@ -130,18 +130,16 @@ impl ArenaCursor {
         }
 
         if let Some(parent) = self.stack.last() {
-            let child_is_dirty = arena.get(entry.index).is_some_and(|node| match node {
-                ArenaSparseNode::Branch(b) => matches!(b.state, ArenaSparseNodeState::Dirty),
-                ArenaSparseNode::Leaf { state, .. } => matches!(state, ArenaSparseNodeState::Dirty),
-                ArenaSparseNode::Subtrie(s) => {
-                    let root = &s.arena[s.root];
-                    matches!(root, ArenaSparseNode::EmptyRoot) ||
-                        matches!(root.state_ref(), Some(ArenaSparseNodeState::Dirty))
-                }
-                _ => false,
-            });
+            let child_state = arena.get(entry.index).and_then(ArenaSparseNode::state_ref);
+            let child_is_dirty = matches!(child_state, Some(ArenaSparseNodeState::Dirty));
+            let child_is_revealed = matches!(child_state, Some(ArenaSparseNodeState::Revealed));
             if child_is_dirty {
                 *arena[parent.index].state_mut() = ArenaSparseNodeState::Dirty;
+            } else if child_is_revealed {
+                let parent_state = arena[parent.index].state_mut();
+                if !matches!(parent_state, ArenaSparseNodeState::Dirty) {
+                    *parent_state = ArenaSparseNodeState::Revealed;
+                }
             }
         }
 
@@ -310,7 +308,7 @@ impl ArenaCursor {
             let head_idx = head.index;
 
             let head_branch = match &arena[head_idx] {
-                ArenaSparseNode::EmptyRoot => {
+                ArenaSparseNode::EmptyRoot { .. } => {
                     return SeekResult::EmptyRoot;
                 }
                 ArenaSparseNode::Leaf { key, .. } => {

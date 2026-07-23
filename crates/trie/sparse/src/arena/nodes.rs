@@ -18,6 +18,9 @@ pub(super) enum ArenaSparseNodeState {
     Cached {
         /// The cached RLP-encoded representation of the node.
         rlp_node: RlpNode,
+        /// The epoch when an empty root or leaf was most recently cached, or the newest retained
+        /// dependency for a branch, including its own reveal or structural modification.
+        epoch: u64,
     },
     /// The node has been modified and its RLP encoding needs recomputation.
     Dirty,
@@ -33,6 +36,14 @@ impl ArenaSparseNodeState {
     pub(super) const fn cached_rlp_node(&self) -> Option<&RlpNode> {
         match self {
             Self::Cached { rlp_node, .. } => Some(rlp_node),
+            _ => None,
+        }
+    }
+
+    /// Returns the epoch cached on the state, if there is one.
+    pub(super) const fn cached_epoch(&self) -> Option<u64> {
+        match self {
+            Self::Cached { epoch, .. } => Some(*epoch),
             _ => None,
         }
     }
@@ -155,7 +166,10 @@ impl ArenaSparseNodeBranch {
 #[derive(Debug, Clone, AsRefStr)]
 pub(super) enum ArenaSparseNode {
     /// Indicates a trie with no nodes.
-    EmptyRoot,
+    EmptyRoot {
+        /// Cached or dirty state of this node. Its cached RLP is always the empty root hash.
+        state: ArenaSparseNodeState,
+    },
     /// A branch node with up to 16 children.
     Branch(ArenaSparseNodeBranch),
     /// A leaf node containing a value.
@@ -174,26 +188,27 @@ pub(super) enum ArenaSparseNode {
 }
 
 impl ArenaSparseNode {
-    /// Returns the state of a Branch, Leaf, or Subtrie root node, or `None` for other types.
+    /// Returns the state of an `EmptyRoot`, `Branch`, `Leaf`, or `Subtrie` root node, or `None` for
+    /// other types.
     pub(super) fn state_ref(&self) -> Option<&ArenaSparseNodeState> {
         match self {
+            Self::EmptyRoot { state } | Self::Leaf { state, .. } => Some(state),
             Self::Branch(b) => Some(&b.state),
-            Self::Leaf { state, .. } => Some(state),
             Self::Subtrie(s) => s.arena[s.root].state_ref(),
             _ => None,
         }
     }
 
-    /// Returns a mutable reference to the state of a Branch or Leaf node.
+    /// Returns a mutable reference to the state of an `EmptyRoot`, `Branch`, or `Leaf` node.
     ///
     /// # Panics
     ///
-    /// Panics if called on a non-Branch/Leaf node.
+    /// Panics if called on a non-EmptyRoot/Branch/Leaf node.
     pub(super) fn state_mut(&mut self) -> &mut ArenaSparseNodeState {
         match self {
+            Self::EmptyRoot { state } | Self::Leaf { state, .. } => state,
             Self::Branch(b) => &mut b.state,
-            Self::Leaf { state, .. } => state,
-            _ => panic!("state_mut called on non-Branch/Leaf node"),
+            _ => panic!("state_mut called on non-EmptyRoot/Branch/Leaf node"),
         }
     }
 
@@ -279,9 +294,11 @@ impl ArenaSparseNode {
     /// case where a branch's RLP is small enough to be embedded rather than hashed.
     pub(super) fn cached_hash(&self) -> B256 {
         let rlp_node = match self {
-            Self::Branch(ArenaSparseNodeBranch { state, .. }) | Self::Leaf { state, .. } => state
-                .cached_rlp_node()
-                .expect("cached_hash called on non-Cached branch or leaf: {self:?}"),
+            Self::EmptyRoot { state } |
+            Self::Branch(ArenaSparseNodeBranch { state, .. }) |
+            Self::Leaf { state, .. } => {
+                state.cached_rlp_node().expect("cached_hash called on non-Cached node: {self:?}")
+            }
             Self::Subtrie(s) => return s.arena[s.root].cached_hash(),
             _ => panic!("cached_hash called on {self:?}"),
         };
@@ -299,7 +316,7 @@ impl ArenaSparseNode {
     pub(super) fn from_proof_node(proof_node: ProofTrieNodeV2) -> Self {
         let ProofTrieNodeV2 { node, masks, .. } = proof_node;
         match node {
-            TrieNodeV2::EmptyRoot => Self::EmptyRoot,
+            TrieNodeV2::EmptyRoot => Self::EmptyRoot { state: ArenaSparseNodeState::Revealed },
             TrieNodeV2::Leaf(leaf) => Self::Leaf {
                 state: ArenaSparseNodeState::Revealed,
                 key: leaf.key,
