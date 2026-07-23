@@ -156,8 +156,9 @@ async fn test_pipeline_v2_selfdestruct_changesets_use_plain_slots() -> eyre::Res
     Ok(())
 }
 
-/// A contract created with CREATE2 and selfdestructed during initialization has no prior storage
-/// to wipe.
+/// Prefunding ensures the CREATE2 target has original account state, while its init code performs
+/// no `SSTORE`. This verifies that destruction alone does not create an otherwise-empty
+/// [`reth_trie::HashedStorage`] solely to carry `wiped = true`.
 #[tokio::test(flavor = "multi_thread")]
 async fn test_pipeline_v2_prefunded_create2_selfdestruct_does_not_wipe_storage() -> eyre::Result<()>
 {
