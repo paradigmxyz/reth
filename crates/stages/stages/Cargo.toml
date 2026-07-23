@@ -47,6 +47,7 @@ reth-testing-utils = { workspace = true, optional = true }
 
 alloy-primitives.workspace = true
 alloy-consensus.workspace = true
+alloy-eip7928.workspace = true
 alloy-rlp.workspace = true
 
 # async

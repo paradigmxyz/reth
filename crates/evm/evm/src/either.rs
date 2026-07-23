@@ -6,6 +6,8 @@ use crate::{execute::Executor, Database, OnStateHook};
 pub use futures_util::future::Either;
 use reth_execution_types::{BlockExecutionOutput, BlockExecutionResult};
 use reth_primitives_traits::{NodePrimitives, RecoveredBlock};
+use reth_storage_api::StorageRootProvider;
+use reth_storage_errors::provider::ProviderError;
 
 impl<A, B, DB> Executor<DB> for Either<A, B>
 where
@@ -84,6 +86,19 @@ where
         match self {
             Self::Left(a) => a.take_bal(),
             Self::Right(b) => b.take_bal(),
+        }
+    }
+
+    fn take_bal_with_storage_roots<P>(
+        &mut self,
+        storage_root_provider: &P,
+    ) -> Result<Option<alloy_eip7928::BlockAccessList>, ProviderError>
+    where
+        P: StorageRootProvider + ?Sized,
+    {
+        match self {
+            Self::Left(a) => a.take_bal_with_storage_roots(storage_root_provider),
+            Self::Right(b) => b.take_bal_with_storage_roots(storage_root_provider),
         }
     }
 }
