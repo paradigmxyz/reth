@@ -645,11 +645,9 @@ pub(super) fn test_remove_leaf_blinded_sibling_requires_reveal<T: SparseTrie>(ne
     );
 }
 
-/// Atomic rollback — node structure and `prefix_set` unchanged after
-/// removal of a revealed leaf when the sibling is blinded.
+/// Atomic rollback preserves a revealed leaf when its sibling is blinded.
 ///
-/// Same scenario as the value-preservation test, but additionally checks that
-/// `size_hint` (node count) is unchanged and the update remains in the map.
+/// The update remains pending until the sibling can be revealed.
 pub(super) fn test_update_leaves_removal_branch_collapse_blinded_sibling<T: SparseTrie>(
     new_trie: fn() -> T,
 ) {
@@ -678,7 +676,6 @@ pub(super) fn test_update_leaves_removal_branch_collapse_blinded_sibling<T: Spar
     let revealed_path = Nibbles::unpack(revealed_key);
     let original_value = trie.get_leaf_value(&revealed_path).cloned();
     assert!(original_value.is_some(), "revealed leaf should exist");
-    let node_count_before = trie.size_hint();
 
     // Attempt removal — branch collapse needs the blinded sibling, so it fails atomically.
     let mut leaf_updates =
@@ -695,9 +692,6 @@ pub(super) fn test_update_leaves_removal_branch_collapse_blinded_sibling<T: Spar
 
     // Update should remain in the map (not drained).
     assert!(!leaf_updates.is_empty(), "update should remain in map after blinded hit");
-
-    // Node count should be unchanged (no structural modification).
-    assert_eq!(trie.size_hint(), node_count_before, "node count should be unchanged");
 
     // Leaf value should be preserved (atomic rollback).
     let value_after = trie.get_leaf_value(&revealed_path);

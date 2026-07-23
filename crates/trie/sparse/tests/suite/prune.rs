@@ -125,16 +125,10 @@ pub(super) fn test_prune_reduces_node_count<T: SparseTrie>(new_trie: fn() -> T) 
     // Compute root to cache hashes (required for pruning).
     let root_before = trie.root(0);
 
-    let size_before = trie.size_hint();
     let pruned_count = trie.prune(1);
-    let size_after = trie.size_hint();
 
     assert_eq!(trie.root(1), root_before, "root hash should be unchanged after prune");
     assert!(pruned_count > 0, "prune should convert at least one node to a stub");
-    assert!(
-        size_after < size_before,
-        "size_hint should decrease after prune: before={size_before}, after={size_after}"
-    );
 }
 
 pub(super) fn test_prune_then_update_and_recompute_root<T: SparseTrie>(new_trie: fn() -> T) {

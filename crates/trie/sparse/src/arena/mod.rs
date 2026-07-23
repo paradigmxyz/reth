@@ -2551,17 +2551,6 @@ impl SparseTrie for ArenaParallelSparseTrie {
         self.buffers.clear();
     }
 
-    fn size_hint(&self) -> usize {
-        self.upper_arena
-            .iter()
-            .map(|(_, node)| match node {
-                ArenaSparseNode::Subtrie(s) => s.num_leaves as usize,
-                ArenaSparseNode::Leaf { .. } => 1,
-                _ => 0,
-            })
-            .sum()
-    }
-
     #[instrument(
         level = "trace",
         target = TRACE_TARGET,

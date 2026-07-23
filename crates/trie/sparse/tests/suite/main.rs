@@ -15,7 +15,6 @@
 //! - [`wipe_clear`]: Tests for `wipe` and `clear`
 //! - [`get_leaf_value`]: Tests for `get_leaf_value`
 //! - [`find_leaf`]: Tests for `find_leaf`
-//! - [`size_hint`]: Tests for `size_hint`
 //! - [`lifecycle`]: Integration tests exercising multiple methods together
 
 use alloy_primitives::{map::B256Map, B256, U256};
@@ -33,7 +32,6 @@ mod prune;
 mod reveal_nodes;
 mod root;
 mod set_root;
-mod size_hint;
 mod take_updates;
 mod update_leaves;
 mod wipe_clear;
@@ -196,7 +194,6 @@ use prune::*;
 use reveal_nodes::*;
 use root::*;
 use set_root::*;
-use size_hint::*;
 use take_updates::*;
 use update_leaves::*;
 use wipe_clear::*;
@@ -302,9 +299,6 @@ sparse_trie_tests! {
     test_find_leaf_nonexistent_branch_divergence,
     test_find_leaf_nonexistent_extension_divergence,
     test_find_leaf_nonexistent_leaf_divergence,
-
-    // size_hint
-    test_size_hint_reflects_leaf_count,
 
     // lifecycle (integration tests)
     test_full_lifecycle_update_root_take_updates,

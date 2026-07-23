@@ -197,9 +197,6 @@ pub trait SparseTrie: Sized + Debug + Send + Sync {
     /// This is useful for reusing the trie without needing to reallocate memory.
     fn clear(&mut self);
 
-    /// Returns a cheap O(1) count of revealed leaves.
-    fn size_hint(&self) -> usize;
-
     /// Collapses nodes last modified before `prune_before` into hash stubs.
     ///
     /// # Preconditions
