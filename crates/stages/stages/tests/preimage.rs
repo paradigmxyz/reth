@@ -12,6 +12,11 @@ use reth_chainspec::{
 };
 use reth_config::config::StageConfig;
 use reth_consensus::noop::NoopConsensus;
+use reth_db::tables;
+use reth_db_api::{
+    cursor::{DbCursorRO, DbDupCursorRO},
+    transaction::DbTx,
+};
 use reth_db_common::init::{init_genesis, init_genesis_with_settings};
 use reth_downloaders::{
     bodies::bodies::BodiesDownloaderBuilder, file_client::FileClient,
@@ -57,17 +62,18 @@ const TEST_CREATE2_SALT: B256 = B256::with_last_byte(0x42);
 
 /// Scenario coverage:
 /// 1. Cross-batch pre-Cancun wipe writes plain slot keys into storage changesets.
-/// 2. Preimage DB exists and is usable across multiple stage executions.
-/// 3. Post-Cancun execution removes the preimage DB directory.
+/// 2. The destroyed account's hashed storage is removed.
+/// 3. Preimage DB exists and is usable across multiple stage executions.
+/// 4. Post-Cancun execution removes the preimage DB directory.
 ///
 /// Verifies v2 selfdestruct handling across a pre-/post-Cancun boundary.
 ///
 /// Test flow:
 /// 1. Run block 1 (pre-Cancun) and assert the `preimage/` MDBX directory exists and contains
 ///    `keccak(slot) -> slot` rows for the two written storage slots.
-/// 2. Run block 2 (pre-Cancun selfdestruct) and assert storage changesets for the destroyed account
-///    contain exactly those two slots as **plain** keys with the expected prior values (`0x2a`,
-///    `0x99`).
+/// 2. Run block 2 (pre-Cancun selfdestruct) and assert the account's hashed storage is empty and
+///    its storage changesets contain exactly those two slots as **plain** keys with the expected
+///    prior values (`0x2a`, `0x99`).
 /// 3. Run block 3 (post-Cancun) and assert `preimage/` is removed, since this auxiliary DB is no
 ///    longer needed after Cancun semantics are active.
 #[tokio::test(flavor = "multi_thread")]
@@ -100,6 +106,14 @@ async fn test_pipeline_v2_selfdestruct_changesets_use_plain_slots() -> eyre::Res
     let expected_slots = scenario.expected_slots;
     assert!(preimage_path.exists(), "preimage dir should exist after first pre-Cancun run");
     assert_preimage_rows(&preimage_path, &expected_slots)?;
+    assert_hashed_storage_entries(
+        &provider,
+        scenario.selfdestruct_contract,
+        &[
+            (B256::with_last_byte(0x01), U256::from(0x2a)),
+            (B256::with_last_byte(0x02), U256::from(0x99)),
+        ],
+    )?;
 
     let local_head =
         pipeline_provider_factory.sealed_header(1)?.expect("block 1 header should exist");
@@ -121,6 +135,7 @@ async fn test_pipeline_v2_selfdestruct_changesets_use_plain_slots() -> eyre::Res
     assert!(preimage_path.exists(), "preimage dir should still exist after second pre-Cancun run");
     assert_preimage_rows(&preimage_path, &expected_slots)?;
     assert_destroyed_changeset_entries(&provider, scenario.selfdestruct_contract)?;
+    assert_hashed_storage_entries(&provider, scenario.selfdestruct_contract, &[])?;
 
     let third_local_head =
         pipeline_provider_factory.sealed_header(2)?.expect("block 2 header should exist");
@@ -137,6 +152,39 @@ async fn test_pipeline_v2_selfdestruct_changesets_use_plain_slots() -> eyre::Res
     let provider = pipeline_provider_factory.provider()?;
     assert_eq!(provider.last_block_number()?, 3, "pipeline should sync block 3");
     assert!(!preimage_path.exists(), "preimage dir should be removed after post-Cancun execution");
+
+    Ok(())
+}
+
+/// A contract created with CREATE2 and selfdestructed during initialization has no prior storage
+/// to wipe.
+#[tokio::test(flavor = "multi_thread")]
+async fn test_pipeline_v2_prefunded_create2_selfdestruct_does_not_wipe_storage() -> eyre::Result<()>
+{
+    reth_tracing::init_test_tracing();
+
+    let scenario = setup_create2_selfdestruct_scenario()?;
+    let hashed_address = keccak256(scenario.child_contract);
+
+    assert!(scenario.child_was_destroyed);
+    assert!(!scenario.hashed_state.storages.contains_key(&hashed_address));
+
+    let (pipeline_provider_factory, pipeline_genesis) =
+        init_v2_pipeline_provider_factory(scenario.chain_spec)?;
+    run_pipeline_range(
+        pipeline_provider_factory.clone(),
+        create_file_client_from_blocks(vec![scenario.block]),
+        pipeline_genesis,
+        1..=1,
+        1,
+    )
+    .await?;
+
+    let provider = pipeline_provider_factory.provider()?;
+    assert_eq!(provider.last_block_number()?, 1, "pipeline should sync block 1");
+    assert!(provider.tx_ref().get::<tables::HashedAccounts>(hashed_address)?.is_none());
+    assert_hashed_storage_entries(&provider, scenario.child_contract, &[])?;
+    assert_destroyed_changeset_entries_in_block(&provider, 1, scenario.child_contract, &[])?;
 
     Ok(())
 }
@@ -340,6 +388,14 @@ struct SelfdestructScenario {
     expected_slots: [B256; 2],
 }
 
+struct Create2SelfdestructScenario {
+    chain_spec: Arc<reth_chainspec::ChainSpec>,
+    block: SealedBlock<Block>,
+    child_contract: Address,
+    child_was_destroyed: bool,
+    hashed_state: HashedPostState,
+}
+
 fn setup_selfdestruct_scenario() -> eyre::Result<SelfdestructScenario> {
     let mut rng = generators::rng();
     let key_pair = generate_key(&mut rng);
@@ -426,6 +482,95 @@ fn setup_selfdestruct_scenario() -> eyre::Result<SelfdestructScenario> {
         blocks,
         selfdestruct_contract,
         expected_slots: expected_destroyed_slots(),
+    })
+}
+
+fn setup_create2_selfdestruct_scenario() -> eyre::Result<Create2SelfdestructScenario> {
+    let mut rng = generators::rng();
+    let key_pair = generate_key(&mut rng);
+    let signer_address = public_key_to_address(key_pair.public_key());
+    let factory_contract = Address::new([0xaa; 20]);
+    let child_init = CREATE2_SELFDESTRUCT_INIT_CODE;
+    let child_contract = create2_address(factory_contract, TEST_CREATE2_SALT, &child_init);
+    let chain_spec = Arc::new(
+        ChainSpecBuilder::default()
+            .chain(MAINNET.chain)
+            .genesis(Genesis {
+                alloc: [
+                    (
+                        signer_address,
+                        GenesisAccount {
+                            balance: U256::from(ETH_TO_WEI) * U256::from(1000),
+                            ..Default::default()
+                        },
+                    ),
+                    (
+                        factory_contract,
+                        GenesisAccount {
+                            code: Some(CREATE2_FACTORY_RUNTIME_CODE),
+                            ..Default::default()
+                        },
+                    ),
+                    (child_contract, GenesisAccount { balance: U256::ONE, ..Default::default() }),
+                ]
+                .into(),
+                ..MAINNET.genesis.clone()
+            })
+            .shanghai_activated()
+            .with_fork(EthereumHardfork::Cancun, ForkCondition::Timestamp(30))
+            .build(),
+    );
+
+    let provider_factory = create_test_provider_factory_with_chain_spec(chain_spec.clone());
+    init_genesis(&provider_factory)?;
+    let genesis = provider_factory.sealed_header(0)?.expect("genesis should exist");
+    let evm_config = EthEvmConfig::new(chain_spec.clone());
+    let tx = sign_tx_with_key_pair(
+        key_pair,
+        Transaction::Eip1559(TxEip1559 {
+            chain_id: chain_spec.chain.id(),
+            nonce: 0,
+            gas_limit: 400_000,
+            max_fee_per_gas: INITIAL_BASE_FEE as u128,
+            max_priority_fee_per_gas: 0,
+            to: TxKind::Call(factory_contract),
+            input: child_init,
+            ..Default::default()
+        }),
+    );
+
+    let preview_block = RecoveredBlock::new_unhashed(
+        Block::new(
+            build_execution_header(genesis.hash(), 1, 12),
+            BlockBody { transactions: vec![tx.clone()], ommers: Vec::new(), withdrawals: None },
+        ),
+        vec![signer_address],
+    );
+    let output = {
+        let provider = provider_factory.database_provider_rw()?;
+        let state_provider = provider.latest();
+        let db = StateProviderDatabase::new(&*state_provider);
+        evm_config.batch_executor(db).execute(&preview_block)?
+    };
+    let child_was_destroyed =
+        output.state.account(&child_contract).is_some_and(|account| account.was_destroyed());
+    let hashed_state = HashedPostState::from_bundle_state::<KeccakKeyHasher>(output.state.state());
+    let block = execute_and_commit_block(
+        &provider_factory,
+        &evm_config,
+        signer_address,
+        genesis.hash(),
+        1,
+        12,
+        vec![tx],
+    )?;
+
+    Ok(Create2SelfdestructScenario {
+        chain_spec,
+        block,
+        child_contract,
+        child_was_destroyed,
+        hashed_state,
     })
 }
 
@@ -1101,6 +1246,32 @@ where
     Ok(())
 }
 
+fn assert_hashed_storage_entries<P>(
+    provider: &P,
+    address: Address,
+    expected: &[(B256, U256)],
+) -> eyre::Result<()>
+where
+    P: DBProvider,
+{
+    let mut cursor = provider.tx_ref().cursor_dup_read::<tables::HashedStorages>()?;
+    let mut actual = Vec::new();
+    if let Some((_, entry)) = cursor.seek_exact(keccak256(address))? {
+        actual.push((entry.key, entry.value));
+        while let Some(entry) = cursor.next_dup_val()? {
+            actual.push((entry.key, entry.value));
+        }
+    }
+    actual.sort_unstable_by_key(|(slot, _)| *slot);
+
+    let mut expected =
+        expected.iter().map(|(slot, value)| (keccak256(*slot), *value)).collect::<Vec<_>>();
+    expected.sort_unstable_by_key(|(slot, _)| *slot);
+
+    assert_eq!(actual, expected, "unexpected hashed storage for account {address}");
+    Ok(())
+}
+
 fn create_file_client_from_blocks(blocks: Vec<SealedBlock<Block>>) -> Arc<FileClient<Block>> {
     Arc::new(FileClient::from_blocks(blocks))
 }
@@ -1247,6 +1418,12 @@ const WRITE_RESTORE_THEN_SELFDESTRUCT_RUNTIME_CODE: Bytes = bytes!(
     "6007600355" // SSTORE(3, 0x07)
     "737777777777777777777777777777777777777777" // PUSH20 beneficiary
     "ff00" // SELFDESTRUCT; STOP
+);
+
+/// CREATE2 init code that selfdestructs before returning runtime bytecode.
+const CREATE2_SELFDESTRUCT_INIT_CODE: Bytes = bytes!(
+    "737777777777777777777777777777777777777777" // PUSH20 beneficiary
+    "ff" // SELFDESTRUCT
 );
 
 /// Converts contract runtime bytecode into init code that returns the runtime.
