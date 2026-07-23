@@ -796,6 +796,14 @@ impl<Node: FullNodeTypes> BuilderContext<Node> {
         &self.executor
     }
 
+    /// Returns the RPC/latency executor of the node.
+    ///
+    /// When a latency runtime is configured, this is the dedicated tokio runtime for the
+    /// sendRaw path. Otherwise, this is the same as [`Self::task_executor`].
+    pub fn rpc_task_executor(&self) -> TaskExecutor {
+        self.config_container.latency_runtime.clone().unwrap_or_else(|| self.executor.clone())
+    }
+
     /// Returns the chain spec of the node.
     pub fn chain_spec(&self) -> Arc<<Node::Types as NodeTypes>::ChainSpec> {
         self.provider().chain_spec()

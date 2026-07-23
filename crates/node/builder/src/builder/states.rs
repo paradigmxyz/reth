@@ -82,7 +82,7 @@ impl<T: FullNodeTypes> fmt::Debug for NodeTypesAdapter<T> {
 pub struct NodeAdapter<T: FullNodeTypes, C: NodeComponents<T> = ComponentsFor<T>> {
     /// The components of the node.
     pub components: C,
-    /// The task executor for the node.
+    /// The main task executor for the node.
     pub task_executor: TaskExecutor,
     /// The provider of the node.
     pub provider: T::Provider,

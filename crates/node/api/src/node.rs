@@ -109,6 +109,8 @@ pub struct AddOnsContext<'a, N: FullNodeComponents> {
     pub node: N,
     /// Node configuration.
     pub config: &'a NodeConfig<<N::Types as NodeTypes>::ChainSpec>,
+    /// RPC/latency task executor when a dedicated runtime is configured.
+    pub rpc_task_executor: TaskExecutor,
     /// Handle to the beacon consensus engine.
     pub beacon_engine_handle: ConsensusEngineHandle<<N::Types as NodeTypes>::Payload>,
     /// Notification channel for engine API events

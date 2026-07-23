@@ -15,7 +15,7 @@ use reth_payload_builder::PayloadBuilderHandle;
 use reth_provider::ChainSpecProvider;
 use reth_rpc_api::EngineApiClient;
 use reth_rpc_builder::{auth::AuthServerHandle, RpcServerHandle};
-use reth_tasks::TaskExecutor;
+use reth_tasks::{Runtime, TaskExecutor};
 use std::{
     fmt::Debug,
     marker::PhantomData,
@@ -128,6 +128,8 @@ pub struct FullNode<Node: FullNodeComponents, AddOns: NodeAddOns<Node>> {
     pub data_dir: ChainPath<DataDirPath>,
     /// The handle to launched add-ons
     pub add_ons_handle: AddOns::Handle,
+    /// Keeps the optional latency-sensitive tokio runtime alive for the node's lifetime.
+    pub latency_runtime: Option<Runtime>,
 }
 
 impl<Node: FullNodeComponents, AddOns: NodeAddOns<Node>> Clone for FullNode<Node, AddOns> {
@@ -142,6 +144,7 @@ impl<Node: FullNodeComponents, AddOns: NodeAddOns<Node>> Clone for FullNode<Node
             config: self.config.clone(),
             data_dir: self.data_dir.clone(),
             add_ons_handle: self.add_ons_handle.clone(),
+            latency_runtime: self.latency_runtime.clone(),
         }
     }
 }
