@@ -1,6 +1,9 @@
-use alloy_consensus::BlockHeader;
-use alloy_primitives::{BlockHash, BlockNumber, U256};
+use alloy_consensus::{
+    proofs::calculate_receipt_root, BlockHeader, ReceiptWithBloom, RlpDecodableReceipt, TxReceipt,
+};
+use alloy_primitives::{BlockHash, BlockNumber, Bloom, U256};
 use futures_util::{Stream, StreamExt};
+use reth_codecs::Compact;
 use reth_db_api::{
     cursor::{DbCursorRO, DbCursorRW},
     table::Value,
@@ -13,12 +16,17 @@ use reth_era::{
     e2s::error::E2sError,
     era::{file::EraReader, types::consensus::CompressedSignedBeaconBlock},
     era1::{file::Era1Reader, types::execution::BlockTuple},
-    ere::{file::EreReader, types::execution::BlockTuple as EreBlockTuple},
+    ere::{
+        file::EreReader,
+        types::execution::{try_receipt_from_slim, BlockTuple as EreBlockTuple},
+    },
 };
 use reth_era_downloader::EraMeta;
 use reth_etl::Collector;
 use reth_fs_util as fs;
-use reth_primitives_traits::{Block, BlockBody, FullBlockBody, FullBlockHeader, NodePrimitives};
+use reth_primitives_traits::{
+    Block, BlockBody, FullBlockBody, FullBlockHeader, NodePrimitives, Receipt,
+};
 use reth_provider::{
     providers::StaticFileProviderRWRefMut, BlockReader, BlockWriter, StaticFileProviderFactory,
     StaticFileSegment, StaticFileWriter,
@@ -27,49 +35,66 @@ use reth_stages_types::{
     CheckpointBlockRange, EntitiesCheckpoint, HeadersCheckpoint, StageCheckpoint, StageId,
 };
 use reth_storage_api::{
-    errors::ProviderResult, DBProvider, DatabaseProviderFactory, NodePrimitivesProvider,
+    errors::{ProviderError, ProviderResult},
+    BlockBodyIndicesProvider, DBProvider, DatabaseProviderFactory, NodePrimitivesProvider,
     StageCheckpointWriter,
 };
 use std::{collections::Bound, error::Error, ops::RangeBounds, sync::mpsc};
 use tracing::info;
 
-/// Reads execution `(header, body)` pairs out of an ERA file.
+/// A decoded ERA block: header, body, and optionally its receipts.
+type EraBlock<BH, BB, R> = (BH, BB, Option<Vec<R>>);
+
+/// The receipt type of the node primitives behind provider `P`.
+type ReceiptOf<P> = <<P as NodePrimitivesProvider>::Primitives as NodePrimitives>::Receipt;
+
+/// Reads execution `(header, body, receipts)` tuples out of an ERA file.
+///
+/// `receipts` is `None` when `decode_receipts` is `false`, or the file has none (`.era` never
+/// does; `.ere` receipts are optional). `decode_receipts = false` skips decoding entirely.
 ///
 /// Per-format seam of the import pipeline.
-pub trait EraBlockReader<BH, BB> {
+pub trait EraBlockReader<BH, BB, R> {
     /// Opens the ERA file at `meta` and iterates its execution blocks.
     fn blocks<M: EraMeta + ?Sized>(
         meta: &M,
-    ) -> eyre::Result<impl Iterator<Item = eyre::Result<(BH, BB)>>>;
+        decode_receipts: bool,
+    ) -> eyre::Result<impl Iterator<Item = eyre::Result<EraBlock<BH, BB, R>>>>;
 }
 
 /// [`EraBlockReader`] for `.era1` files.
 #[derive(Debug)]
 pub struct Era1;
 
-impl<BH, BB> EraBlockReader<BH, BB> for Era1
+impl<BH, BB, R> EraBlockReader<BH, BB, R> for Era1
 where
     BH: FullBlockHeader + Value,
     BB: FullBlockBody<OmmerHeader = BH>,
+    R: RlpDecodableReceipt,
 {
     fn blocks<M: EraMeta + ?Sized>(
         meta: &M,
-    ) -> eyre::Result<impl Iterator<Item = eyre::Result<(BH, BB)>>> {
+        decode_receipts: bool,
+    ) -> eyre::Result<impl Iterator<Item = eyre::Result<EraBlock<BH, BB, R>>>> {
         let reader: Era1Reader<std::fs::File> = open(meta)?;
-        Ok(reader.iter().map(decode::<BH, BB, E2sError>))
+        Ok(reader
+            .iter()
+            .map(move |block| decode_with_receipts::<BH, BB, R, E2sError>(block, decode_receipts)))
     }
 }
 
-impl<BH, BB> EraBlockReader<BH, BB> for Ere
+impl<BH, BB, R> EraBlockReader<BH, BB, R> for Ere
 where
     BH: FullBlockHeader + Value,
     BB: FullBlockBody<OmmerHeader = BH>,
+    R: 'static,
 {
     fn blocks<M: EraMeta + ?Sized>(
         meta: &M,
-    ) -> eyre::Result<impl Iterator<Item = eyre::Result<(BH, BB)>>> {
+        decode_receipts: bool,
+    ) -> eyre::Result<impl Iterator<Item = eyre::Result<EraBlock<BH, BB, R>>>> {
         let reader: EreReader<std::fs::File> = open(meta)?;
-        Ok(reader.iter().map(Self::decode))
+        Ok(reader.iter().map(move |block| Self::decode_with_receipts(block, decode_receipts)))
     }
 }
 
@@ -78,8 +103,9 @@ where
 pub struct Ere;
 
 impl Ere {
-    /// Extracts a pair of [`FullBlockHeader`] and [`FullBlockBody`] from an ERE block tuple, whose
-    /// header and body are RLP-compressed.
+    /// Extracts a `(header, body)` pair from an ERE block tuple, whose header and body are
+    /// RLP-compressed. Ignores any receipts entry; callers that need receipts should use
+    /// [`decode_with_receipts`](Self::decode_with_receipts).
     pub fn decode<BH, BB, E>(block: Result<EreBlockTuple, E>) -> eyre::Result<(BH, BB)>
     where
         BH: FullBlockHeader + Value,
@@ -91,6 +117,43 @@ impl Ere {
         let body: BB = block.body.decode()?;
         Ok((header, body))
     }
+
+    /// Like [`decode`](Self::decode), but also extracts receipts when `decode_receipts` is `true`.
+    /// `receipts` is `None` if `decode_receipts` is `false`, or if the block tuple carries no
+    /// receipts entry (`.ere` receipts are optional per spec).
+    pub fn decode_with_receipts<BH, BB, R, E>(
+        block: Result<EreBlockTuple, E>,
+        decode_receipts: bool,
+    ) -> eyre::Result<EraBlock<BH, BB, R>>
+    where
+        BH: FullBlockHeader + Value,
+        BB: FullBlockBody<OmmerHeader = BH>,
+        R: 'static,
+        E: From<E2sError> + Error + Send + Sync + 'static,
+    {
+        let block = block?;
+        let header: BH = block.header.decode()?;
+        let body: BB = block.body.decode()?;
+        let receipts = decode_receipts
+            .then(|| block.receipts.as_ref().map(|r| r.decode_receipts()))
+            .flatten()
+            .transpose()?
+            .map(|slim| {
+                slim.into_iter()
+                    .map(|receipt| {
+                        try_receipt_from_slim(receipt).ok_or_else(|| {
+                            eyre::eyre!(
+                                "`.ere` receipts import is not supported for this node's \
+                                 receipt type"
+                            )
+                        })
+                    })
+                    .collect::<eyre::Result<Vec<R>>>()
+            })
+            .transpose()?;
+
+        Ok((header, body, receipts))
+    }
 }
 
 /// [`EraBlockReader`] for consensus-layer `.era` files.
@@ -98,21 +161,28 @@ impl Ere {
 /// `.era` files store consensus `SignedBeaconBlock`s. Post-merge
 /// blocks embed an execution payload; this source SSZ-decodes each beacon block, extracts that
 /// payload, and converts it into an execution `(header, body)` pair. Pre-merge slots carry no
-/// payload and are skipped.
+/// payload and are skipped. `.era` files carry no receipt data at all, so this source always
+/// yields `None` for receipts.
 #[derive(Debug)]
 pub struct Era;
 
-impl<BH, BB> EraBlockReader<BH, BB> for Era
+impl<BH, BB, R> EraBlockReader<BH, BB, R> for Era
 where
     BH: FullBlockHeader,
     BB: FullBlockBody,
 {
+    /// `.era` files carry no receipt data, so `decode_receipts` has no effect.
     fn blocks<M: EraMeta + ?Sized>(
         meta: &M,
-    ) -> eyre::Result<impl Iterator<Item = eyre::Result<(BH, BB)>>> {
+        _decode_receipts: bool,
+    ) -> eyre::Result<impl Iterator<Item = eyre::Result<EraBlock<BH, BB, R>>>> {
         let reader: EraReader<std::fs::File> = open(meta)?;
         let mut buf = Vec::new();
-        Ok(reader.iter().filter_map(move |block| Self::decode(block, &mut buf).transpose()))
+        Ok(reader.iter().filter_map(move |block| {
+            Self::decode(block, &mut buf)
+                .map(|opt| opt.map(|(header, body)| (header, body, None)))
+                .transpose()
+        }))
     }
 }
 
@@ -167,15 +237,24 @@ where
 /// When `to_block` is set, the import stops after reaching that block height; otherwise it
 /// continues until the source has no more files.
 ///
+/// When `store_receipts` is set, each block's receipts are also decoded and appended to the
+/// `Receipts` static file segment; a source file that carries no receipts for a block (only
+/// possible for `.ere` files, whose receipts are optional per spec) is then treated as an error.
+///
+/// `is_receipt_verifiable` decides which blocks have their receipts checked against the header
+/// (pre-Byzantium receipts can't be recomputed here, so the caller gates them out).
+///
 /// Returns current block height.
 pub fn import<S, Downloader, Era, PF, B, BB, BH>(
     mut downloader: Downloader,
     provider_factory: &PF,
     hash_collector: &mut Collector<BlockHash, BlockNumber>,
     to_block: Option<BlockNumber>,
+    store_receipts: bool,
+    is_receipt_verifiable: &dyn Fn(BlockNumber) -> bool,
 ) -> eyre::Result<BlockNumber>
 where
-    S: EraBlockReader<BH, BB>,
+    S: EraBlockReader<BH, BB, ReceiptOf<<PF as DatabaseProviderFactory>::ProviderRW>>,
     B: Block<Header = BH, Body = BB>,
     BH: FullBlockHeader + Value,
     BB: FullBlockBody<
@@ -187,9 +266,11 @@ where
     PF: DatabaseProviderFactory<
         ProviderRW: BlockWriter<Block = B>
             + DBProvider
+            + BlockBodyIndicesProvider
             + StaticFileProviderFactory<Primitives: NodePrimitives<Block = B, BlockHeader = BH, BlockBody = BB>>
             + StageCheckpointWriter,
     > + StaticFileProviderFactory<Primitives = <<PF as DatabaseProviderFactory>::ProviderRW as NodePrimitivesProvider>::Primitives>,
+    ReceiptOf<<PF as DatabaseProviderFactory>::ProviderRW>: Compact + Receipt,
 {
     let (tx, rx) = mpsc::channel();
 
@@ -205,24 +286,48 @@ where
 
     // Consistency check of expected headers in static files vs DB is done on provider::sync_gap
     // when poll_execute_ready is polled.
-    let mut height = static_file_provider
+    let headers_tip = static_file_provider
         .get_highest_static_file_block(StaticFileSegment::Headers)
         .unwrap_or_default();
 
+    // When backfilling receipts, resume from the receipts tip so blocks whose headers were already
+    // imported still get their receipts; only blocks above `headers_tip` are written in full.
+    let mut height = if store_receipts {
+        let receipts_tip = static_file_provider
+            .get_highest_static_file_block(StaticFileSegment::Receipts)
+            .unwrap_or_default();
+        headers_tip.min(receipts_tip)
+    } else {
+        headers_tip
+    };
+
     let end = to_block.map_or(Bound::Unbounded, Bound::Included);
+    let policy = ImportPolicy { headers_tip, is_receipt_verifiable };
 
     while let Some(meta) = rx.recv()? {
         let meta = meta?;
         let from = height;
         let provider = provider_factory.database_provider_rw()?;
 
+        // Headers and receipts are separate static file segments, each with its own writer, only
+        // open the receipts one when `--with-receipts` was requested.
+        let mut receipts_writer = store_receipts
+            .then(|| static_file_provider.latest_writer(StaticFileSegment::Receipts))
+            .transpose()?;
+
         height = process::<S, _, _, _, _>(
             &meta,
             &mut static_file_provider.latest_writer(StaticFileSegment::Headers)?,
+            receipts_writer.as_mut(),
             &provider,
             hash_collector,
             (Bound::Included(height), end),
+            policy,
         )?;
+
+        // Drop the receipts writer's lock before `provider.commit()`, which locks every static
+        // file segment (including receipts) via `has_unwind_queued`.
+        drop(receipts_writer);
 
         save_stage_checkpoints(&provider, from, height, height, height)?;
 
@@ -246,9 +351,9 @@ where
 
 /// Saves progress of ERA import into stages sync.
 ///
-/// Since the ERA import does the same work as `HeaderStage` and `BodyStage`, it needs to inform
-/// these stages that this work has already been done. Otherwise, there might be some conflict with
-/// database integrity.
+/// Only marks `Headers`/`Bodies` done, never `Execution`: unlike this import, execution also
+/// produces state, which imported receipts alone don't. `ExecutionStage::ensure_consistency`
+/// prunes any imported receipts back before a real sync re-executes the range.
 pub fn save_stage_checkpoints<P>(
     provider: P,
     from: BlockNumber,
@@ -279,22 +384,31 @@ where
 pub fn process<S, P, B, BB, BH>(
     meta: &(impl EraMeta + ?Sized),
     writer: &mut StaticFileProviderRWRefMut<'_, <P as NodePrimitivesProvider>::Primitives>,
+    receipts_writer: Option<
+        &mut StaticFileProviderRWRefMut<'_, <P as NodePrimitivesProvider>::Primitives>,
+    >,
     provider: &P,
     hash_collector: &mut Collector<BlockHash, BlockNumber>,
     block_numbers: impl RangeBounds<BlockNumber>,
+    policy: ImportPolicy<'_>,
 ) -> eyre::Result<BlockNumber>
 where
-    S: EraBlockReader<BH, BB>,
+    S: EraBlockReader<BH, BB, ReceiptOf<P>>,
     B: Block<Header = BH, Body = BB>,
     BH: FullBlockHeader + Value,
     BB: FullBlockBody<
         Transaction = <<P as NodePrimitivesProvider>::Primitives as NodePrimitives>::SignedTx,
         OmmerHeader = BH,
     >,
-    P: DBProvider<Tx: DbTxMut> + NodePrimitivesProvider + BlockWriter<Block = B>,
+    P: DBProvider<Tx: DbTxMut>
+        + NodePrimitivesProvider
+        + BlockWriter<Block = B>
+        + BlockBodyIndicesProvider,
     <P as NodePrimitivesProvider>::Primitives: NodePrimitives<BlockHeader = BH, BlockBody = BB>,
+    ReceiptOf<P>: Compact + Receipt,
 {
-    let iter = S::blocks(meta)?
+    let decode_receipts = receipts_writer.is_some();
+    let iter = S::blocks(meta, decode_receipts)?
         .map(Some)
         .chain(std::iter::once_with(|| match meta.mark_as_processed() {
             Ok(()) => None,
@@ -302,10 +416,28 @@ where
         }))
         .flatten();
 
-    process_iter(iter, writer, provider, hash_collector, block_numbers)
+    process_iter(iter, writer, receipts_writer, provider, hash_collector, block_numbers, policy)
 }
 
-/// Extracts a pair of [`FullBlockHeader`] and [`FullBlockBody`] from [`BlockTuple`].
+/// Per-block import policy for [`process`] and [`process_iter`].
+#[derive(Clone, Copy)]
+pub struct ImportPolicy<'a> {
+    /// Blocks at or below this are backfilled receipts-only; blocks above it are written in full.
+    pub headers_tip: BlockNumber,
+    /// Whether a block's receipts are verified against its header commitments.
+    pub is_receipt_verifiable: &'a dyn Fn(BlockNumber) -> bool,
+}
+
+impl std::fmt::Debug for ImportPolicy<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // `is_receipt_verifiable` is a `dyn Fn` and can't be formatted.
+        f.debug_struct("ImportPolicy")
+            .field("headers_tip", &self.headers_tip)
+            .finish_non_exhaustive()
+    }
+}
+
+/// Extracts a `(header, body)` pair from [`BlockTuple`].
 pub fn decode<BH, BB, E>(block: Result<BlockTuple, E>) -> eyre::Result<(BH, BB)>
 where
     BH: FullBlockHeader + Value,
@@ -315,27 +447,64 @@ where
     let block = block?;
     let header: BH = block.header.decode()?;
     let body: BB = block.body.decode()?;
-
     Ok((header, body))
 }
 
-/// Extracts block headers and bodies from `iter` and appends them using `writer` and `provider`.
+/// Like [`decode`], but also extracts receipts when `decode_receipts` is `true`. `receipts` is
+/// `Some` whenever `decode_receipts` is `true`: `era1`'s `CompressedReceipts` entry is mandatory
+/// per spec, so (unlike `.ere`) it is never `None` just because the file omits it.
+pub fn decode_with_receipts<BH, BB, R, E>(
+    block: Result<BlockTuple, E>,
+    decode_receipts: bool,
+) -> eyre::Result<EraBlock<BH, BB, R>>
+where
+    BH: FullBlockHeader + Value,
+    BB: FullBlockBody<OmmerHeader = BH>,
+    R: RlpDecodableReceipt,
+    E: From<E2sError> + Error + Send + Sync + 'static,
+{
+    let block = block?;
+    let header: BH = block.header.decode()?;
+    let body: BB = block.body.decode()?;
+    let receipts = decode_receipts
+        .then(|| -> eyre::Result<_> {
+            let receipts: Vec<ReceiptWithBloom<R>> = block.receipts.decode()?;
+            Ok(receipts.into_iter().map(|with_bloom| with_bloom.receipt).collect())
+        })
+        .transpose()?;
+
+    Ok((header, body, receipts))
+}
+
+/// Extracts block headers, bodies and (optionally) receipts from `iter` and appends them using
+/// `writer`, `receipts_writer` and `provider`.
 ///
 /// Collects hash to height using `hash_collector`.
 ///
 /// Skips all blocks below the [`start_bound`] of `block_numbers` and stops when reaching past the
 /// [`end_bound`] or the end of the file.
 ///
+/// Blocks at or below `headers_tip` only have their receipts backfilled; blocks above it get
+/// header, body and receipts written.
+///
+/// When `receipts_writer` is `Some`, every block must carry receipts, a block without them,
+/// possible for `.ere` files, whose receipts are optional per spec is an error. Receipts of blocks
+/// for which `is_receipt_verifiable` returns `true` are checked against the header's commitments.
+///
 /// Returns last block height.
 ///
 /// [`start_bound`]: RangeBounds::start_bound
 /// [`end_bound`]: RangeBounds::end_bound
 pub fn process_iter<P, B, BB, BH>(
-    mut iter: impl Iterator<Item = eyre::Result<(BH, BB)>>,
+    mut iter: impl Iterator<Item = eyre::Result<EraBlock<BH, BB, ReceiptOf<P>>>>,
     writer: &mut StaticFileProviderRWRefMut<'_, <P as NodePrimitivesProvider>::Primitives>,
+    mut receipts_writer: Option<
+        &mut StaticFileProviderRWRefMut<'_, <P as NodePrimitivesProvider>::Primitives>,
+    >,
     provider: &P,
     hash_collector: &mut Collector<BlockHash, BlockNumber>,
     block_numbers: impl RangeBounds<BlockNumber>,
+    policy: ImportPolicy<'_>,
 ) -> eyre::Result<BlockNumber>
 where
     B: Block<Header = BH, Body = BB>,
@@ -344,8 +513,12 @@ where
         Transaction = <<P as NodePrimitivesProvider>::Primitives as NodePrimitives>::SignedTx,
         OmmerHeader = BH,
     >,
-    P: DBProvider<Tx: DbTxMut> + NodePrimitivesProvider + BlockWriter<Block = B>,
+    P: DBProvider<Tx: DbTxMut>
+        + NodePrimitivesProvider
+        + BlockWriter<Block = B>
+        + BlockBodyIndicesProvider,
     <P as NodePrimitivesProvider>::Primitives: NodePrimitives<BlockHeader = BH, BlockBody = BB>,
+    ReceiptOf<P>: Compact + Receipt,
 {
     let mut last_header_number = match block_numbers.start_bound() {
         Bound::Included(&number) => number,
@@ -359,7 +532,7 @@ where
     };
 
     for block in &mut iter {
-        let (header, body) = block?;
+        let (header, body, receipts) = block?;
         let number = header.number();
 
         if number <= last_header_number {
@@ -382,19 +555,110 @@ where
             );
         }
 
-        let hash = header.hash_slow();
         last_header_number = number;
 
-        // Append to Headers segment
-        writer.append_header(&header, &hash)?;
+        // Header and body are only written for new blocks, when backfilling receipts onto an
+        // earlier import the block already has both persisted.
+        if number > policy.headers_tip {
+            let hash = header.hash_slow();
+            writer.append_header(&header, &hash)?;
+            provider.append_block_bodies(vec![(header.number(), Some(&body))])?;
+            hash_collector.insert(hash, number)?;
+        }
 
-        // Write bodies to database.
-        provider.append_block_bodies(vec![(header.number(), Some(&body))])?;
-
-        hash_collector.insert(hash, number)?;
+        if let Some(receipts_writer) = receipts_writer.as_deref_mut() {
+            if (policy.is_receipt_verifiable)(number) &&
+                let Some(receipts) = receipts.as_deref()
+            {
+                verify_receipts(&header, receipts)?;
+            }
+            provider.write_block_receipts(receipts_writer, number, receipts)?;
+        }
     }
 
     Ok(last_header_number)
+}
+
+/// Checks a block's decoded receipts against the commitments in its header by recomputing the
+/// receipts root and logs bloom. Callers gate this to blocks whose receipts are EIP-658;
+/// pre-Byzantium receipts carry a post-state root that can't be recomputed here.
+fn verify_receipts<BH, R>(header: &BH, receipts: &[R]) -> eyre::Result<()>
+where
+    BH: FullBlockHeader,
+    R: Receipt,
+{
+    let with_bloom = receipts.iter().map(TxReceipt::with_bloom_ref).collect::<Vec<_>>();
+    let receipts_root = calculate_receipt_root(&with_bloom);
+    let logs_bloom = with_bloom.iter().fold(Bloom::ZERO, |bloom, r| bloom | r.bloom_ref());
+
+    if receipts_root != header.receipts_root() {
+        eyre::bail!(
+            "receipts root mismatch for block {}: computed {receipts_root}, header has {}",
+            header.number(),
+            header.receipts_root(),
+        );
+    }
+    if logs_bloom != header.logs_bloom() {
+        eyre::bail!("logs bloom mismatch for block {}", header.number());
+    }
+
+    Ok(())
+}
+
+/// Lets a provider append one block's receipts to a `Receipts` static file writer, using itself
+/// to look up the block's transaction range.
+trait BlockReceiptsWriterExt: BlockBodyIndicesProvider {
+    /// Appends `receipts` for block `number` to `receipts_writer`.
+    ///
+    /// Errors if the block has no receipts, or if the receipt count doesn't match the block's
+    /// transaction count.
+    fn write_block_receipts<N: NodePrimitives>(
+        &self,
+        receipts_writer: &mut StaticFileProviderRWRefMut<'_, N>,
+        number: BlockNumber,
+        receipts: Option<Vec<N::Receipt>>,
+    ) -> eyre::Result<()>
+    where
+        N::Receipt: Compact;
+}
+
+impl<P: BlockBodyIndicesProvider> BlockReceiptsWriterExt for P {
+    fn write_block_receipts<N: NodePrimitives>(
+        &self,
+        receipts_writer: &mut StaticFileProviderRWRefMut<'_, N>,
+        number: BlockNumber,
+        receipts: Option<Vec<N::Receipt>>,
+    ) -> eyre::Result<()>
+    where
+        N::Receipt: Compact,
+    {
+        let Some(block_receipts) = receipts else {
+            eyre::bail!(
+                "block {number} has no receipts in the imported ERA file; drop --with-receipts, \
+                 or import files that carry receipts for every block (`.era1` always includes \
+                 them; `.ere` receipts are optional per spec)"
+            );
+        };
+
+        let indices = self
+            .block_body_indices(number)?
+            .ok_or_else(|| eyre::eyre!("missing block body indices for block {number}"))?;
+
+        if block_receipts.len() as u64 != indices.tx_count {
+            eyre::bail!(
+                "receipt count mismatch for block {number}: {} receipt(s) for {} transaction(s)",
+                block_receipts.len(),
+                indices.tx_count,
+            );
+        }
+
+        receipts_writer.increment_block(number)?;
+        receipts_writer.append_receipts(
+            (indices.first_tx_num..).zip(block_receipts.iter()).map(Ok::<_, ProviderError>),
+        )?;
+
+        Ok(())
+    }
 }
 
 /// Dumps the contents of `hash_collector` into [`tables::HeaderNumbers`].
@@ -475,11 +739,11 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy_consensus::Header;
+    use alloy_consensus::{Header, TxType};
     use reth_db_common::init::init_genesis;
-    use reth_ethereum_primitives::{Block, BlockBody};
+    use reth_ethereum_primitives::{Block, BlockBody, Receipt};
     use reth_provider::{
-        test_utils::create_test_provider_factory, DatabaseProviderFactory,
+        test_utils::create_test_provider_factory, DatabaseProviderFactory, StageCheckpointReader,
         StaticFileProviderFactory, StaticFileSegment, StaticFileWriter,
     };
     use std::{cell::Cell, path::Path};
@@ -487,13 +751,58 @@ mod tests {
 
     struct TestEra;
 
-    impl EraBlockReader<Header, BlockBody> for TestEra {
+    impl<R> EraBlockReader<Header, BlockBody, R> for TestEra {
         fn blocks<M: EraMeta + ?Sized>(
             _meta: &M,
-        ) -> eyre::Result<impl Iterator<Item = eyre::Result<(Header, BlockBody)>>> {
-            Ok([1, 2]
-                .into_iter()
-                .map(|number| Ok((Header { number, ..Default::default() }, BlockBody::default()))))
+            _decode_receipts: bool,
+        ) -> eyre::Result<impl Iterator<Item = eyre::Result<(Header, BlockBody, Option<Vec<R>>)>>>
+        {
+            Ok([1, 2].into_iter().map(|number| {
+                Ok((Header { number, ..Default::default() }, BlockBody::default(), None))
+            }))
+        }
+    }
+
+    /// Like [`TestEra`], but yields `Some(vec![])` receipts for each (transaction-less) block.
+    struct TestEraWithEmptyReceipts;
+
+    impl<R> EraBlockReader<Header, BlockBody, R> for TestEraWithEmptyReceipts {
+        fn blocks<M: EraMeta + ?Sized>(
+            _meta: &M,
+            _decode_receipts: bool,
+        ) -> eyre::Result<impl Iterator<Item = eyre::Result<(Header, BlockBody, Option<Vec<R>>)>>>
+        {
+            Ok([1, 2].into_iter().map(|number| {
+                Ok((Header { number, ..Default::default() }, BlockBody::default(), Some(vec![])))
+            }))
+        }
+    }
+
+    /// Like [`TestEra`], but yields a single receipt for a transaction-less block, provoking a
+    /// receipt/transaction count mismatch.
+    struct TestEraWithMismatchedReceipts;
+
+    impl EraBlockReader<Header, BlockBody, reth_ethereum_primitives::Receipt>
+        for TestEraWithMismatchedReceipts
+    {
+        fn blocks<M: EraMeta + ?Sized>(
+            _meta: &M,
+            _decode_receipts: bool,
+        ) -> eyre::Result<
+            impl Iterator<
+                Item = eyre::Result<EraBlock<Header, BlockBody, reth_ethereum_primitives::Receipt>>,
+            >,
+        > {
+            Ok(std::iter::once(Ok((
+                Header { number: 1, ..Default::default() },
+                BlockBody::default(),
+                Some(vec![reth_ethereum_primitives::Receipt {
+                    tx_type: alloy_consensus::TxType::Legacy,
+                    success: true,
+                    cumulative_gas_used: 0,
+                    logs: vec![],
+                }]),
+            ))))
         }
     }
 
@@ -527,9 +836,15 @@ mod tests {
             Ok(TestMeta { marked: Cell::new(false) }),
         ]);
 
-        let height =
-            import::<TestEra, _, _, _, Block, _, _>(stream, &pf, &mut hash_collector, Some(1))
-                .unwrap();
+        let height = import::<TestEra, _, _, _, Block, _, _>(
+            stream,
+            &pf,
+            &mut hash_collector,
+            Some(1),
+            false,
+            &|_| false,
+        )
+        .unwrap();
 
         assert_eq!(height, 1);
     }
@@ -549,9 +864,11 @@ mod tests {
         let height = process::<TestEra, _, Block, _, _>(
             &meta,
             &mut writer,
+            None,
             &provider,
             &mut hash_collector,
             0..=1,
+            ImportPolicy { headers_tip: 0, is_receipt_verifiable: &|_| false },
         )
         .unwrap();
 
@@ -572,18 +889,229 @@ mod tests {
 
         // Genesis DB sits at height 0, but the first block is 5: a gap that must be rejected
         // rather than appended (as a pre-merge `.era` import would otherwise produce).
-        let blocks = [5u64, 6]
-            .into_iter()
-            .map(|number| Ok((Header { number, ..Default::default() }, BlockBody::default())));
+        let blocks = [5u64, 6].into_iter().map(|number| {
+            Ok((Header { number, ..Default::default() }, BlockBody::default(), None))
+        });
 
         let result = process_iter::<_, Block, _, _>(
             blocks,
             &mut writer,
+            None,
             &provider,
             &mut hash_collector,
             0..,
+            ImportPolicy { headers_tip: 0, is_receipt_verifiable: &|_| false },
         );
 
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn process_writes_receipts_when_requested() {
+        let pf = create_test_provider_factory();
+        init_genesis(&pf).unwrap();
+
+        let static_file_provider = pf.static_file_provider();
+        let mut writer = static_file_provider.latest_writer(StaticFileSegment::Headers).unwrap();
+        let mut receipts_writer =
+            static_file_provider.latest_writer(StaticFileSegment::Receipts).unwrap();
+        let provider = pf.database_provider_rw().unwrap();
+        let folder = tempdir().unwrap();
+        let mut hash_collector = Collector::new(4096, Some(folder.path().to_owned()));
+        let meta = TestMeta { marked: Cell::new(false) };
+
+        let height = process::<TestEraWithEmptyReceipts, _, Block, _, _>(
+            &meta,
+            &mut writer,
+            Some(&mut receipts_writer),
+            &provider,
+            &mut hash_collector,
+            0..=1,
+            ImportPolicy { headers_tip: 0, is_receipt_verifiable: &|_| false },
+        )
+        .unwrap();
+        receipts_writer.commit().unwrap();
+
+        assert_eq!(height, 1);
+        assert_eq!(
+            static_file_provider.get_highest_static_file_block(StaticFileSegment::Receipts),
+            Some(1)
+        );
+    }
+
+    #[test]
+    fn process_iter_errors_when_receipts_missing() {
+        let pf = create_test_provider_factory();
+        init_genesis(&pf).unwrap();
+
+        let static_file_provider = pf.static_file_provider();
+        let mut writer = static_file_provider.latest_writer(StaticFileSegment::Headers).unwrap();
+        let mut receipts_writer =
+            static_file_provider.latest_writer(StaticFileSegment::Receipts).unwrap();
+        let provider = pf.database_provider_rw().unwrap();
+        let folder = tempdir().unwrap();
+        let mut hash_collector = Collector::new(4096, Some(folder.path().to_owned()));
+
+        // `TestEra` never yields receipts; requesting them must fail rather than silently import
+        // headers/bodies without them.
+        let blocks: Vec<
+            eyre::Result<EraBlock<Header, BlockBody, reth_ethereum_primitives::Receipt>>,
+        > = vec![Ok((Header { number: 1, ..Default::default() }, BlockBody::default(), None))];
+
+        let result = process_iter::<_, Block, _, _>(
+            blocks.into_iter(),
+            &mut writer,
+            Some(&mut receipts_writer),
+            &provider,
+            &mut hash_collector,
+            0..,
+            ImportPolicy { headers_tip: 0, is_receipt_verifiable: &|_| false },
+        );
+
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn process_errors_on_receipt_count_mismatch() {
+        let pf = create_test_provider_factory();
+        init_genesis(&pf).unwrap();
+
+        let static_file_provider = pf.static_file_provider();
+        let mut writer = static_file_provider.latest_writer(StaticFileSegment::Headers).unwrap();
+        let mut receipts_writer =
+            static_file_provider.latest_writer(StaticFileSegment::Receipts).unwrap();
+        let provider = pf.database_provider_rw().unwrap();
+        let folder = tempdir().unwrap();
+        let mut hash_collector = Collector::new(4096, Some(folder.path().to_owned()));
+        let meta = TestMeta { marked: Cell::new(false) };
+
+        // One receipt for a transaction-less body: a count mismatch that must be rejected rather
+        // than silently misaligning the Receipts static file against Transactions.
+        let result = process::<TestEraWithMismatchedReceipts, _, Block, _, _>(
+            &meta,
+            &mut writer,
+            Some(&mut receipts_writer),
+            &provider,
+            &mut hash_collector,
+            0..,
+            ImportPolicy { headers_tip: 0, is_receipt_verifiable: &|_| false },
+        );
+
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn save_stage_checkpoints_leaves_execution_unset() {
+        let pf = create_test_provider_factory();
+        init_genesis(&pf).unwrap();
+        let provider = pf.database_provider_rw().unwrap();
+
+        let execution_before = provider.get_stage_checkpoint(StageId::Execution).unwrap();
+        save_stage_checkpoints(&provider, 0, 10, 10, 10).unwrap();
+
+        assert_eq!(
+            provider.get_stage_checkpoint(StageId::Headers).unwrap().map(|c| c.block_number),
+            Some(10)
+        );
+        assert_eq!(
+            provider.get_stage_checkpoint(StageId::Bodies).unwrap().map(|c| c.block_number),
+            Some(10)
+        );
+        // Receipt import doesn't produce state, so it must not advance Execution.
+        assert_eq!(provider.get_stage_checkpoint(StageId::Execution).unwrap(), execution_before);
+    }
+
+    #[test]
+    fn backfills_receipts_onto_existing_headers() {
+        let pf = create_test_provider_factory();
+        init_genesis(&pf).unwrap();
+        let static_file_provider = pf.static_file_provider();
+        let folder = tempdir().unwrap();
+        let mut hash_collector = Collector::new(4096, Some(folder.path().to_owned()));
+
+        // First pass: import headers and bodies only, no receipts.
+        {
+            let mut writer =
+                static_file_provider.latest_writer(StaticFileSegment::Headers).unwrap();
+            let provider = pf.database_provider_rw().unwrap();
+            let meta = TestMeta { marked: Cell::new(false) };
+            process::<TestEra, _, Block, _, _>(
+                &meta,
+                &mut writer,
+                None,
+                &provider,
+                &mut hash_collector,
+                0..=2,
+                ImportPolicy { headers_tip: 0, is_receipt_verifiable: &|_| false },
+            )
+            .unwrap();
+            writer.commit().unwrap();
+            provider.commit().unwrap();
+        }
+        assert_eq!(
+            static_file_provider.get_highest_static_file_block(StaticFileSegment::Headers),
+            Some(2)
+        );
+        // Receipts still only cover genesis; blocks 1 and 2 have headers but no receipts yet.
+        assert_eq!(
+            static_file_provider.get_highest_static_file_block(StaticFileSegment::Receipts),
+            Some(0)
+        );
+
+        // Second pass: backfill receipts for the already-imported headers (`headers_tip = 2`).
+        {
+            let mut writer =
+                static_file_provider.latest_writer(StaticFileSegment::Headers).unwrap();
+            let mut receipts_writer =
+                static_file_provider.latest_writer(StaticFileSegment::Receipts).unwrap();
+            let provider = pf.database_provider_rw().unwrap();
+            let meta = TestMeta { marked: Cell::new(false) };
+            process::<TestEraWithEmptyReceipts, _, Block, _, _>(
+                &meta,
+                &mut writer,
+                Some(&mut receipts_writer),
+                &provider,
+                &mut hash_collector,
+                0..,
+                ImportPolicy { headers_tip: 2, is_receipt_verifiable: &|_| false },
+            )
+            .unwrap();
+            receipts_writer.commit().unwrap();
+            writer.commit().unwrap();
+            provider.commit().unwrap();
+        }
+
+        // Receipts now cover the previously header-only range, and headers weren't re-appended.
+        assert_eq!(
+            static_file_provider.get_highest_static_file_block(StaticFileSegment::Receipts),
+            Some(2)
+        );
+        assert_eq!(
+            static_file_provider.get_highest_static_file_block(StaticFileSegment::Headers),
+            Some(2)
+        );
+    }
+
+    #[test]
+    fn verify_receipts_rejects_tampered_contents() {
+        let receipts = vec![Receipt {
+            tx_type: TxType::Legacy,
+            success: true,
+            cumulative_gas_used: 21_000,
+            logs: vec![],
+        }];
+
+        // Commit the header to the receipts as decoded.
+        let with_bloom = receipts.iter().map(TxReceipt::with_bloom_ref).collect::<Vec<_>>();
+        let header = Header {
+            receipts_root: calculate_receipt_root(&with_bloom),
+            logs_bloom: with_bloom.iter().fold(Bloom::ZERO, |bloom, r| bloom | r.bloom_ref()),
+            ..Default::default()
+        };
+        verify_receipts(&header, &receipts).unwrap();
+
+        // Same receipt count, different contents: the recomputed root no longer matches.
+        let tampered = vec![Receipt { cumulative_gas_used: 42_000, ..receipts[0].clone() }];
+        assert!(verify_receipts(&header, &tampered).is_err());
     }
 }

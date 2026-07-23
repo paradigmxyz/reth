@@ -180,7 +180,10 @@ impl<
         ) -> eyre::Result<()>,
     ) -> eyre::Result<()>
     where
-        N: CliNodeTypes<Primitives: NodePrimitives<BlockHeader: HeaderMut>, ChainSpec: Hardforks>,
+        N: CliNodeTypes<
+            Primitives: NodePrimitives<BlockHeader: HeaderMut, Receipt: 'static>,
+            ChainSpec: Hardforks,
+        >,
         C: ChainSpecParser<ChainSpec = N::ChainSpec>,
     {
         self.configure().run_with_components(components, launcher)
@@ -228,7 +231,10 @@ impl<
         ) -> eyre::Result<()>,
     ) -> eyre::Result<()>
     where
-        N: CliNodeTypes<Primitives: NodePrimitives<BlockHeader: HeaderMut>, ChainSpec: Hardforks>,
+        N: CliNodeTypes<
+            Primitives: NodePrimitives<BlockHeader: HeaderMut, Receipt: 'static>,
+            ChainSpec: Hardforks,
+        >,
         C: ChainSpecParser<ChainSpec = N::ChainSpec>,
     {
         let mut app = self.configure();

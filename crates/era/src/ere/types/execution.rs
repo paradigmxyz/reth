@@ -21,6 +21,7 @@ use alloy_consensus::{Block, BlockBody, Eip658Value, Header, TxType};
 use alloy_primitives::{Log, B256, U256};
 use alloy_rlp::{Decodable, Encodable, RlpDecodable, RlpEncodable};
 use sha2::{Digest, Sha256};
+use std::any::Any;
 
 // ERE-specific constants
 /// `CompressedHeader` record type
@@ -258,6 +259,26 @@ pub struct SlimReceipt {
     pub cumulative_gas_used: u64,
     /// Logs emitted by the transaction.
     pub logs: Vec<Log>,
+}
+
+impl From<SlimReceipt> for reth_ethereum_primitives::Receipt {
+    fn from(receipt: SlimReceipt) -> Self {
+        Self {
+            tx_type: receipt.tx_type,
+            success: receipt.status.coerce_status(),
+            cumulative_gas_used: receipt.cumulative_gas_used,
+            logs: receipt.logs,
+        }
+    }
+}
+
+/// Converts a decoded `.ere` slim receipt into a node's receipt type, if supported.
+///
+/// Downcasts instead of requiring `R: From<SlimReceipt>`, so node types other than
+/// [`reth_ethereum_primitives::Receipt`] aren't forced to implement a conversion they'll never use.
+pub fn try_receipt_from_slim<R: 'static>(receipt: SlimReceipt) -> Option<R> {
+    let receipt: reth_ethereum_primitives::Receipt = receipt.into();
+    (Box::new(receipt) as Box<dyn Any>).downcast::<R>().ok().map(|r| *r)
 }
 
 /// Proof type discriminant used inside the Proof entry's RLP envelope.

@@ -20,6 +20,9 @@ alloy-rlp = { workspace = true, features = ["derive"] }
 alloy-rpc-types-beacon = { workspace = true, features = ["ssz"] }
 alloy-rpc-types-engine = { workspace = true, features = ["ssz"] }
 
+# reth
+reth-ethereum-primitives.workspace = true
+
 # compression and decompression
 snap.workspace = true
 
@@ -33,7 +36,6 @@ eyre.workspace = true
 rand.workspace = true
 reqwest.workspace = true
 reth-era-downloader.workspace = true
-reth-ethereum-primitives.workspace = true
 tempfile.workspace = true
 tokio = { workspace = true, features = ["sync", "macros", "time", "rt-multi-thread"] }
 test-case.workspace = true
