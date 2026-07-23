@@ -346,7 +346,11 @@ pub struct EngineArgs {
     pub prewarming_disabled: bool,
 
     /// Enable best-effort txpool transaction prewarming between payloads.
-    #[arg(long = "engine.txpool-prewarming", default_value_t = DefaultEngineValues::get_global().txpool_prewarming_enabled)]
+    #[arg(
+        long = "engine.txpool-prewarming",
+        default_value_t = DefaultEngineValues::get_global().txpool_prewarming_enabled,
+        conflicts_with = "state_cache_disabled"
+    )]
     pub txpool_prewarming_enabled: bool,
 
     /// CAUTION: This CLI flag has no effect anymore. The parallel sparse trie is always enabled.
