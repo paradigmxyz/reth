@@ -1309,8 +1309,8 @@ where
         skip_all,
         fields(
             parent_prefix=?sub_trie_targets.parent_prefix,
-            lower_bound=?sub_trie_targets.range.lower_bound(),
-            upper_bound=?sub_trie_targets.range.upper_bound(),
+            lower_bound=?sub_trie_targets.lower_bound,
+            upper_bound=?sub_trie_targets.upper_bound,
         ),
     )]
     fn proof_subtrie<'a>(
@@ -1320,9 +1320,8 @@ where
         hashed_cursor_state: &mut HashedCursorState<VE::DeferredEncoder>,
         sub_trie_targets: SubTrieTargets<'a>,
     ) -> Result<(), StateProofError> {
-        let traversal_range = sub_trie_targets.range();
-        let traversal_lower_bound = traversal_range.lower_bound();
-        let traversal_upper_bound = traversal_range.upper_bound();
+        let traversal_lower_bound = sub_trie_targets.lower_bound;
+        let traversal_upper_bound = sub_trie_targets.upper_bound;
 
         // Wrap targets into a `TargetsCursor`.  targets can be empty if we only want to calculate
         // the root, in which case we don't need a cursor.
@@ -1395,8 +1394,9 @@ where
             {
                 let msg = format!(
                     "next_uncached_key_range went backwards: calc_lower={calc_lower_bound:?} < \
-                     prev_lower={prev_lower:?}, calc_upper={calc_upper_bound:?}, range={:?}",
-                    traversal_range,
+                     prev_lower={prev_lower:?}, calc_upper={calc_upper_bound:?}, \
+                     lower_bound={traversal_lower_bound:?}, \
+                     upper_bound={traversal_upper_bound:?}",
                 );
                 error!(target: TRACE_TARGET, "{msg}");
                 return Err(StateProofError::TrieInconsistency(msg));
@@ -1549,19 +1549,21 @@ where
         // cursors are unseeked.
         let mut trie_cursor_state = TrieCursorState::unseeked();
         let mut hashed_cursor_state = HashedCursorState::unseeked();
-        let mut previous_traversal_range: Option<SubTrieRange> = None;
+        let mut previous_traversal_bounds: Option<(Nibbles, Option<Nibbles>)> = None;
 
         // Divide targets into bounded ranges, each corresponding to the direct children of one
         // already-revealed parent, and handle all proofs within that range.
         for sub_trie_targets in iter_sub_trie_targets(targets) {
-            let traversal_range = sub_trie_targets.range();
-            if previous_traversal_range
-                .is_some_and(|previous| !previous.is_strictly_before(&traversal_range))
-            {
+            let traversal_lower_bound = sub_trie_targets.lower_bound;
+            let traversal_upper_bound = sub_trie_targets.upper_bound;
+            if previous_traversal_bounds.is_some_and(|(_, previous_upper_bound)| {
+                previous_upper_bound.is_none_or(|upper_bound| upper_bound > traversal_lower_bound)
+            }) {
                 trace!(
                     target: TRACE_TARGET,
-                    ?previous_traversal_range,
-                    ?traversal_range,
+                    ?previous_traversal_bounds,
+                    ?traversal_lower_bound,
+                    ?traversal_upper_bound,
                     "Resetting cursors before overlapping or backward traversal range",
                 );
                 self.trie_cursor.reset();
@@ -1580,7 +1582,7 @@ where
                 return Err(err);
             }
 
-            previous_traversal_range = Some(traversal_range);
+            previous_traversal_bounds = Some((traversal_lower_bound, traversal_upper_bound));
         }
 
         trace!(
@@ -1653,7 +1655,8 @@ where
 
         static EMPTY_TARGETS: [ProofV2Target; 0] = [];
         let sub_trie_targets = SubTrieTargets {
-            range: SubTrieRange::new(Nibbles::new(), None),
+            lower_bound: Nibbles::new(),
+            upper_bound: None,
             parent_prefix: None,
             targets: &EMPTY_TARGETS,
         };

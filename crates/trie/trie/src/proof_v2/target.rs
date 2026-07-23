@@ -18,61 +18,20 @@ fn target_child_prefix(target: &ProofV2Target) -> Nibbles {
         .map_or_else(Nibbles::new, |parent_len| target.key_nibbles.slice(0..parent_len + 1))
 }
 
-/// A half-open range of trie paths traversed for a group of proof targets.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct SubTrieRange {
-    /// The first path in the range.
-    lower_bound: Nibbles,
-    /// The first path after the range, or `None` if the range extends through the end of the trie.
-    upper_bound: Option<Nibbles>,
-}
-
-impl SubTrieRange {
-    /// Creates a new traversal range.
-    #[inline]
-    pub(crate) const fn new(lower_bound: Nibbles, upper_bound: Option<Nibbles>) -> Self {
-        Self { lower_bound, upper_bound }
-    }
-
-    /// Returns the first path in the range.
-    #[inline]
-    pub(crate) const fn lower_bound(&self) -> Nibbles {
-        self.lower_bound
-    }
-
-    /// Returns the first path after the range.
-    #[inline]
-    pub(crate) const fn upper_bound(&self) -> Option<Nibbles> {
-        self.upper_bound
-    }
-
-    /// Returns whether `next` starts at or after this range ends, so forward-only cursors can be
-    /// reused without resetting.
-    #[inline]
-    pub(crate) fn is_strictly_before(&self, next: &Self) -> bool {
-        self.upper_bound.is_some_and(|upper_bound| upper_bound <= next.lower_bound)
-    }
-}
-
 /// Describes targets with the same already-revealed parent and the bounded range traversed to
 /// calculate their direct children.
 pub(crate) struct SubTrieTargets<'a> {
-    /// The range traversed for these targets.
-    pub(crate) range: SubTrieRange,
+    /// The first path traversed for these targets.
+    pub(crate) lower_bound: Nibbles,
+    /// The first path after the traversal range, or `None` if it extends through the end of the
+    /// trie.
+    pub(crate) upper_bound: Option<Nibbles>,
     /// The path of the already-revealed parent branch. `None` means the actual trie root is
     /// requested, while `Some(Nibbles::new())` means the root branch is already revealed.
     pub(crate) parent_prefix: Option<Nibbles>,
     /// The targets belonging to this sub-trie. These will be sorted by their `key` field,
     /// lexicographically.
     pub(crate) targets: &'a [ProofV2Target],
-}
-
-impl<'a> SubTrieTargets<'a> {
-    /// Returns the range traversed for these targets.
-    #[inline]
-    pub(crate) const fn range(&self) -> SubTrieRange {
-        self.range
-    }
 }
 
 /// Given a set of [`ProofV2Target`]s, returns an iterator over those same [`ProofV2Target`]s
@@ -97,11 +56,7 @@ pub(crate) fn iter_sub_trie_targets(
             let lower_bound = target_child_prefix(&targets[0]);
             let upper_bound = target_child_prefix(targets.last().expect("chunk is non-empty"))
                 .next_without_prefix();
-            SubTrieTargets {
-                range: SubTrieRange::new(lower_bound, upper_bound),
-                parent_prefix,
-                targets,
-            }
+            SubTrieTargets { lower_bound, upper_bound, parent_prefix, targets }
         })
 }
 
@@ -370,18 +325,14 @@ mod tests {
                     test_case, j
                 );
                 assert_eq!(
-                    sub_trie.range().lower_bound(),
-                    exp_lower_bound,
+                    sub_trie.lower_bound, exp_lower_bound,
                     "Test case {} sub-trie {}: lower bound mismatch",
-                    test_case,
-                    j
+                    test_case, j
                 );
                 assert_eq!(
-                    sub_trie.range().upper_bound(),
-                    exp_upper_bound,
+                    sub_trie.upper_bound, exp_upper_bound,
                     "Test case {} sub-trie {}: upper bound mismatch",
-                    test_case,
-                    j
+                    test_case, j
                 );
                 assert_eq!(
                     sub_trie.targets.len(),
@@ -433,11 +384,8 @@ mod tests {
         assert_eq!(sub_tries.len(), 1);
         assert_eq!(sub_tries[0].parent_prefix, Some(Nibbles::from_nibbles([0x2])));
         assert_eq!(
-            sub_tries[0].range(),
-            SubTrieRange::new(
-                Nibbles::from_nibbles([0x2, 0x0]),
-                Some(Nibbles::from_nibbles([0x2, 0x1])),
-            )
+            (sub_tries[0].lower_bound, sub_tries[0].upper_bound),
+            (Nibbles::from_nibbles([0x2, 0x0]), Some(Nibbles::from_nibbles([0x2, 0x1])),)
         );
         assert_eq!(
             sub_tries[0].targets.iter().map(ProofV2Target::key).collect::<Vec<_>>(),
@@ -458,14 +406,14 @@ mod tests {
 
         assert_eq!(sub_tries.len(), 2);
         assert_eq!(sub_tries[0].parent_prefix, Some(Nibbles::new()));
-        assert_eq!(sub_tries[0].range(), SubTrieRange::new(Nibbles::from_nibbles([0xf]), None));
+        assert_eq!(
+            (sub_tries[0].lower_bound, sub_tries[0].upper_bound),
+            (Nibbles::from_nibbles([0xf]), None)
+        );
         assert_eq!(sub_tries[1].parent_prefix, Some(Nibbles::from_nibbles([0x2])));
         assert_eq!(
-            sub_tries[1].range(),
-            SubTrieRange::new(
-                Nibbles::from_nibbles([0x2, 0xf]),
-                Some(Nibbles::from_nibbles([0x3])),
-            )
+            (sub_tries[1].lower_bound, sub_tries[1].upper_bound),
+            (Nibbles::from_nibbles([0x2, 0xf]), Some(Nibbles::from_nibbles([0x3])),)
         );
     }
 }
