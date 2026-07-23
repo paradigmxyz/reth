@@ -40,6 +40,14 @@ impl ArenaSparseNodeState {
             _ => None,
         }
     }
+
+    /// Returns the cached epoch, if this node is cached.
+    pub(super) const fn cached_epoch(&self) -> Option<u64> {
+        match self {
+            Self::Cached { epoch, .. } => Some(*epoch),
+            _ => None,
+        }
+    }
 }
 
 /// Represents a reference from a branch node to one of its children.

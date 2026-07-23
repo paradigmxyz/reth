@@ -985,7 +985,7 @@ pub(super) struct SparseTrieTaskMetrics {
     pub(super) sparse_trie_total_duration_histogram: Histogram,
     /// Time spent preparing the sparse trie for reuse after state root computation.
     pub(super) into_trie_for_reuse_duration_histogram: Histogram,
-    /// Time spent building the retention set and pruning the sparse trie.
+    /// Time spent pruning the sparse trie by node epoch.
     pub(super) sparse_trie_prune_duration_histogram: Histogram,
     /// Time spent waiting for preserved sparse trie cache to become available.
     pub(super) sparse_trie_cache_wait_duration_histogram: Histogram,

@@ -112,6 +112,11 @@ pub trait SparseTrie: Sized + Debug + Send + Sync {
     /// Returns true if the root node is cached and does not need any recomputation.
     fn is_root_cached(&self) -> bool;
 
+    /// Returns the root's modification epoch when it is clean, or `None` when it is dirty.
+    ///
+    /// An unmodified revealed root has epoch zero.
+    fn root_epoch(&self) -> Option<u64>;
+
     /// Recalculates and updates the RLP hashes of subtries deeper than a certain level. The level
     /// is defined in the implementation.
     ///
@@ -192,30 +197,20 @@ pub trait SparseTrie: Sized + Debug + Send + Sync {
     /// This is useful for reusing the trie without needing to reallocate memory.
     fn clear(&mut self);
 
-    /// Returns a cheap O(1) size hint for the trie representing the count of revealed
-    /// (non-Hash) nodes.
-    ///
-    /// This is used as a heuristic for prioritizing which storage tries to keep
-    /// during pruning. Larger values indicate larger tries that are more valuable to preserve.
+    /// Returns a cheap O(1) count of revealed leaves.
     fn size_hint(&self) -> usize;
 
-    /// Prunes all subtrees that do not contain retained leaves.
-    ///
-    /// Each retained leaf is a full key path (usually 64 nibbles for hashed keys).
-    /// Any revealed subtree that is not a prefix of at least one retained key is collapsed into
-    /// hash stubs when hashes are available.
+    /// Collapses nodes last modified before `prune_before` into hash stubs.
     ///
     /// # Preconditions
     ///
     /// Must be called only after `root()` has computed hashes for the current trie state.
     /// Calling `prune` on a dirty trie is a hard error and may panic.
     ///
-    /// `retained_leaves` must be sorted lexicographically.
-    ///
     /// # Returns
     ///
     /// The number of nodes converted to hash stubs.
-    fn prune(&mut self, retained_leaves: &[Nibbles]) -> usize;
+    fn prune(&mut self, prune_before: u64) -> usize;
 
     /// Takes the debug recorder out of this trie, replacing it with an empty one.
     ///

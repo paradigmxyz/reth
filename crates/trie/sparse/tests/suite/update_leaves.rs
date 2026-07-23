@@ -1248,15 +1248,13 @@ pub(super) fn test_branch_collapse_updates_leaf_key_len_across_subtries<T: Spars
     );
 }
 
-/// Removal of a leaf should never corrupt blinded/pruned subtries.
+/// Removal of a leaf should never corrupt blinded subtries.
 ///
 /// When a branch collapses during leaf removal and the remaining child's value needs to be
 /// moved between subtries, the operation must not reveal (initialize) blind/unloaded subtries.
 /// Either the removal succeeds cleanly or it requests proofs for the blinded area.
 pub(super) fn test_remove_leaf_does_not_reveal_blind_subtries<T: SparseTrie>(new_trie: fn() -> T) {
     // Create a trie with 10 leaves across different first-nibble subtries.
-    // We'll prune some subtries, then remove a leaf whose branch collapse
-    // involves a sibling in a pruned (blinded) subtrie.
     let mut storage: BTreeMap<B256, U256> = BTreeMap::new();
     let mut keys = Vec::new();
     for i in 0u8..10 {
@@ -1267,22 +1265,13 @@ pub(super) fn test_remove_leaf_does_not_reveal_blind_subtries<T: SparseTrie>(new
     }
 
     let mut harness = SuiteTestHarness::new(storage.clone());
-    let mut trie: T = harness.init_trie_fully_revealed(true, new_trie);
+    let mut trie: T = harness.init_trie_with_targets(&keys[..2], true, new_trie);
 
     // Compute initial root and drain initial updates.
     let _ = trie.root(0);
     let _ = trie.take_updates();
 
-    // Prune: retain only keys[0] and keys[1] (nibbles 0x0 and 0x1).
-    // All other subtries become blinded.
-    let retained: Vec<Nibbles> = [keys[0], keys[1]].iter().map(|k| Nibbles::unpack(*k)).collect();
-    trie.prune(&retained);
-
-    // Verify root is unchanged after prune.
-    let root_after_prune = trie.root(0);
-    assert_eq!(root_after_prune, harness.original_root(), "root should be unchanged after prune");
-
-    // Now remove keys[0] — this leaves keys[1] and all the blinded subtries.
+    // Remove keys[0] — this leaves keys[1] and all the blinded subtries.
     // The branch at the root still has multiple children (keys[1] + blinded children),
     // so this should not trigger a problematic branch collapse into blinded territory.
     let removal: BTreeMap<B256, U256> = once((keys[0], U256::ZERO)).collect();
@@ -1302,12 +1291,12 @@ pub(super) fn test_remove_leaf_does_not_reveal_blind_subtries<T: SparseTrie>(new
     let find_result = trie.find_leaf(&removed_nibbles, None).expect("find_leaf should succeed");
     assert_eq!(find_result, LeafLookup::NonExistent, "removed leaf should not be found");
 
-    // Verify that the retained leaf (keys[1]) is still accessible.
-    let retained_nibbles = Nibbles::unpack(keys[1]);
-    let find_result = trie.find_leaf(&retained_nibbles, None).expect("find_leaf should succeed");
-    assert_eq!(find_result, LeafLookup::Exists, "retained leaf should still be findable");
+    // Verify that the other revealed leaf (keys[1]) is still accessible.
+    let remaining_nibbles = Nibbles::unpack(keys[1]);
+    let find_result = trie.find_leaf(&remaining_nibbles, None).expect("find_leaf should succeed");
+    assert_eq!(find_result, LeafLookup::Exists, "remaining leaf should still be findable");
 
-    // Now update the retained leaf to verify the trie is in a consistent state.
+    // Now update the remaining leaf to verify the trie is in a consistent state.
     let modification: BTreeMap<B256, U256> = once((keys[1], U256::from(999))).collect();
     harness.apply_changeset(modification.clone());
     let mut mod_updates = SuiteTestHarness::leaf_updates(&modification);
@@ -1317,7 +1306,7 @@ pub(super) fn test_remove_leaf_does_not_reveal_blind_subtries<T: SparseTrie>(new
     assert_eq!(
         root_after_mod,
         harness.original_root(),
-        "root after modifying retained leaf should match reference"
+        "root after modifying remaining leaf should match reference"
     );
 }
 

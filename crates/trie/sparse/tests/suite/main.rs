@@ -22,7 +22,7 @@ use alloy_primitives::{map::B256Map, B256, U256};
 use alloy_rlp::{encode_fixed_size, Decodable};
 use alloy_trie::EMPTY_ROOT_HASH;
 use reth_trie::test_utils::TrieTestHarness;
-use reth_trie_common::{Nibbles, ProofV2Target, ProofV2TargetParent, TrieNodeV2};
+use reth_trie_common::{Nibbles, ProofV2Target, TrieNodeV2};
 use reth_trie_sparse::{LeafLookup, LeafLookupError, LeafUpdate, SparseTrie};
 use std::{collections::BTreeMap, iter::once};
 
@@ -274,13 +274,9 @@ sparse_trie_tests! {
 
 
     // prune
-    test_prune_retains_specified_leaves,
-    test_prune_keeps_upper_children_of_retained_branch,
-    test_prune_keeps_lower_children_of_retained_branch,
-    test_prune_protects_children_by_parent_base_path,
+    test_prune_retains_recent_leaves,
+    test_prune_retains_structurally_modified_branch,
     test_prune_reduces_node_count,
-    test_prune_empty_retained_set,
-    test_prune_requires_computed_hashes,
     test_prune_then_update_and_recompute_root,
     test_prune_then_reveal_pruned_subtree,
     test_prune_mixed_embedded_and_hashed_nodes,
@@ -312,7 +308,6 @@ sparse_trie_tests! {
 
     // lifecycle (integration tests)
     test_full_lifecycle_update_root_take_updates,
-    test_multi_round_update_take_updates_prune_cycle,
     test_reveal_update_root_basic_lifecycle,
     test_incremental_reveal_and_update_with_retry,
     test_full_block_processing_lifecycle,
