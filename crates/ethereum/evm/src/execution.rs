@@ -35,8 +35,8 @@ use evm2::Precompiles;
 use evm2::{
     bytecode::Bytecode as ExecutableBytecode,
     evm::{
-        AccountChange, AccountChangeRef, AccountInfo, BlockStateAccumulator, StateChangeSink,
-        StateChangeSource, StateChanges, StorageChange, SystemTx, BEACON_ROOTS_ADDRESS,
+        AccountChangeRef, AccountInfo, AccountInfoRef, BlockStateAccumulator, StateChangeSink,
+        StateChangeSource, StorageChange, SystemTx, BEACON_ROOTS_ADDRESS,
         BUILDER_DEPOSIT_REQUEST_ADDRESS, BUILDER_EXIT_REQUEST_ADDRESS,
         CONSOLIDATION_REQUEST_ADDRESS, HISTORY_STORAGE_ADDRESS, WITHDRAWAL_REQUEST_ADDRESS,
     },
@@ -754,18 +754,14 @@ pub(crate) fn commit_detached_transaction<T: EvmTypes>(
     on_hashed_state_update: &mut impl FnMut(HashedPostState),
     output: TxResultWithState<T>,
 ) -> TxResult<T> {
-    let state_changes = output.state_changes;
-    if evm.state().bal_builder().is_some() {
-        evm.state_mut().overlay_db_mut().bal_context.commit_bal(&state_changes);
-    }
+    let TxResultWithState { result, pending_state, .. } = output;
 
-    let result = {
+    {
         let mut sink = RethStateSink::new(None, block_state, stream_hashed_state);
-        let Ok(()) = state_changes.visit(&mut sink);
+        let Ok(()) = pending_state.visit(&mut sink);
         sink.flush_streamed_hashed_state(on_hashed_state_update);
-        output.result
-    };
-    evm.state_mut().commit_source(&state_changes);
+    }
+    evm.overlay_db_mut().commit_pending(&pending_state);
     result
 }
 
@@ -1001,10 +997,14 @@ fn commit_state_changes<T: EvmTypes>(
     block_state: &mut BlockStateAccumulator,
     stream_hashed_state: bool,
     on_hashed_state_update: &mut impl FnMut(HashedPostState),
-    changes: &StateChanges,
+    changes: &[(Address, Option<AccountInfo>, Option<AccountInfo>)],
 ) {
-    if evm.state().bal_builder().is_some() {
-        evm.state_mut().overlay_db_mut().bal_context.commit_bal(changes);
+    for (address, original, current) in changes {
+        evm.overlay_db_mut().bal_context.commit_account_change(
+            *address,
+            original.as_ref(),
+            current.as_ref(),
+        );
     }
     let result = {
         let mut sink = RethStateSink::new(
@@ -1012,7 +1012,15 @@ fn commit_state_changes<T: EvmTypes>(
             block_state,
             stream_hashed_state,
         );
-        let result = changes.visit(&mut sink);
+        let result = changes.iter().try_for_each(|(address, original, current)| {
+            sink.account(AccountChangeRef {
+                address: *address,
+                original: original.as_ref().map(account_info_ref),
+                current: current.as_ref().map(account_info_ref),
+                created: false,
+                selfdestructed: false,
+            })
+        });
         if result.is_ok() {
             sink.flush_streamed_hashed_state(on_hashed_state_update);
         }
@@ -1056,7 +1064,7 @@ pub(crate) fn post_block_balance_state_changes<T: EvmTypes>(
         return Ok(());
     }
 
-    let mut changes = StateChanges::default();
+    let mut changes = Vec::new();
 
     for (address, increment) in balance_increments {
         let original =
@@ -1072,15 +1080,21 @@ pub(crate) fn post_block_balance_state_changes<T: EvmTypes>(
         if original == current {
             continue
         }
-        let mut change = AccountChange::default();
-        change.original = original;
-        change.current = current;
-        changes.accounts.insert(address, change);
+        changes.push((address, original, current));
     }
 
     commit_state_changes(evm, block_state, stream_hashed_state, on_hashed_state_update, &changes);
 
     Ok(())
+}
+
+const fn account_info_ref(info: &AccountInfo) -> AccountInfoRef<'_> {
+    AccountInfoRef {
+        balance: info.balance,
+        nonce: info.nonce,
+        code_hash: info.code_hash,
+        code: info.code.as_ref(),
+    }
 }
 
 pub(crate) fn base_block_reward<C>(chain_spec: &C, block_number: u64) -> Option<u128>

@@ -150,7 +150,7 @@ where
                         inspector.fuse().map_err(Eth::Error::from_eth_err)?;
                         // need to apply the state changes of this transaction before executing the
                         // next transaction
-                        db.commit_source(&res.state_changes)
+                        db.commit_source(&res.pending_state)
                     }
                 }
 
@@ -438,7 +438,7 @@ where
                     for tx in transactions {
                         let tx_env = eth_api.evm_config().tx_env(tx.cloned());
                         let res = eth_api.transact(&mut db, evm_env.clone(), tx_env)?;
-                        db.commit_source(&res.state_changes);
+                        db.commit_source(&res.pending_state);
                     }
                 }
 
@@ -472,7 +472,7 @@ where
                         // If there is no transactions, but more bundles, commit to the database too
                         if transactions.peek().is_some() || bundles.peek().is_some() {
                             inspector.fuse().map_err(Eth::Error::from_eth_err)?;
-                            db.commit_source(&res.state_changes);
+                            db.commit_source(&res.pending_state);
                         }
                         results.push(trace);
                     }
@@ -667,7 +667,7 @@ where
                 for tx in block.transactions_recovered().take(tx_index + 1) {
                     let tx_env = eth_api.evm_config().tx_env(tx.cloned());
                     let result = eth_api.transact(&mut db, evm_env.clone(), tx_env)?;
-                    db.commit_source(&result.state_changes);
+                    db.commit_source(&result.pending_state);
                 }
 
                 f(&mut db)
@@ -773,10 +773,10 @@ where
                     let tx_env = eth_api.evm_config().tx_env(tx.cloned());
                     let result = eth_api.transact(&mut db, evm_env.clone(), tx_env)?;
                     result
-                        .state_changes
+                        .pending_state
                         .visit(&mut state)
                         .expect("state accumulator is infallible");
-                    db.commit_source(&result.state_changes);
+                    db.commit_source(&result.pending_state);
                     let hashed_state = db.db.inner().hashed_post_state(&state);
                     let root =
                         db.db.inner().state_root(hashed_state).map_err(Eth::Error::from_eth_err)?;

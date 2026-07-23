@@ -196,7 +196,7 @@ where
                     // need to apply the state changes of this call before executing the
                     // next call
                     if calls.peek().is_some() {
-                        db.commit_source(&res.state_changes)
+                        db.commit_source(&res.pending_state)
                     }
                 }
 
@@ -571,7 +571,7 @@ where
                     // If statediffs were requested, populate them with the account balance and
                     // nonce from pre-state
                     if let Some(ref mut state_diff) = full_trace.state_diff {
-                        populate_state_diff(state_diff, db, &result.state_changes)
+                        populate_state_diff(state_diff, db, &result.pending_state)
                             .map_err(|code| EthApiError::EvmCustom(db.error(code).to_string()))
                             .map_err(Eth::Error::from_eth_err)?;
                     }

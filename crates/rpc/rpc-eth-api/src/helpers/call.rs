@@ -357,7 +357,7 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
                     for tx in block.transactions_recovered().take(num_txs) {
                         let tx_env = this.evm_config().tx_env(tx.cloned());
                         let result = this.transact(&mut db, evm_env.clone(), tx_env)?;
-                        db.commit_source(&result.state_changes);
+                        db.commit_source(&result.pending_state);
                     }
                 }
 
@@ -413,7 +413,7 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
 
                         // Commit state changes after each transaction to allow subsequent calls to
                         // see the updates
-                        db.commit_source(&res.state_changes);
+                        db.commit_source(&res.pending_state);
                     }
 
                     all_results.push(bundle_results);
@@ -795,7 +795,7 @@ pub trait Call:
                     }
                     let tx_env = this.evm_config().tx_env(block_tx.cloned());
                     let result = this.transact(&mut db, evm_env.clone(), tx_env)?;
-                    db.commit_source(&result.state_changes);
+                    db.commit_source(&result.pending_state);
                 }
 
                 let tx_env = RpcNodeCore::evm_config(&this).tx_env(tx);
@@ -834,7 +834,7 @@ pub trait Call:
 
             let tx_env = self.evm_config().tx_env(tx.cloned());
             let result = self.transact(&mut *db, evm_env.clone(), tx_env)?;
-            result.state_changes.visit(db).expect("infallible state cache update");
+            result.pending_state.visit(db).expect("infallible state cache update");
             index += 1;
         }
         Ok(index)

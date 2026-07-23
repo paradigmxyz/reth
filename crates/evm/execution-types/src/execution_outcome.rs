@@ -208,6 +208,8 @@ impl<T> ExecutionOutcome<T> {
                     address,
                     original: original.as_ref().map(account_info_ref_from_reth),
                     current: current.as_ref().map(account_info_ref_from_reth),
+                    created: false,
+                    selfdestructed: false,
                 })
                 .expect("infallible");
             for (slot, (original, current)) in storage {
@@ -673,6 +675,8 @@ fn multi_block_outcome_for_serde() -> ExecutionOutcome {
                 code_hash: KECCAK_EMPTY,
                 code: None,
             }),
+            created: false,
+            selfdestructed: false,
         })
         .unwrap();
     StateChangeSink::storage(
@@ -697,6 +701,8 @@ fn multi_block_outcome_for_serde() -> ExecutionOutcome {
                 code_hash: KECCAK_EMPTY,
                 code: None,
             }),
+            created: false,
+            selfdestructed: false,
         })
         .unwrap();
     block2.storage_wipe(address).unwrap();

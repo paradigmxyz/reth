@@ -157,9 +157,7 @@ where
                 let mut hasher = Keccak256::new();
 
                 let mut results = Vec::with_capacity(transactions.len());
-                let mut transactions = transactions.into_iter().peekable();
-
-                while let Some(tx) = transactions.next() {
+                for tx in transactions {
                     let signer = tx.signer();
                     let tx = {
                         let mut tx = <Eth::Pool as TransactionPool>::Transaction::from_pooled(tx);
@@ -181,7 +179,7 @@ where
                     let tx_env = eth_api.evm_config().tx_env(tx.clone());
                     let result_and_state = eth_api.transact(&mut db, evm_env.clone(), tx_env)?;
                     let result = result_and_state.result;
-                    let state = result_and_state.state_changes;
+                    let state = result_and_state.pending_state;
 
                     let gas_price = tx
                         .effective_tip_per_gas(basefee)
@@ -192,11 +190,14 @@ where
                     let gas_fees = U256::from(gas_used) * U256::from(gas_price);
                     total_gas_fees += gas_fees;
 
-                    // coinbase is always present in the result state
-                    coinbase_balance_after_tx = state
-                        .accounts
-                        .get(&coinbase)
-                        .and_then(|acc| acc.current.as_ref())
+                    db.commit_source(&state);
+                    coinbase_balance_after_tx = db
+                        .get_account(&coinbase)
+                        .map_err(|code| {
+                            Eth::Error::from_eth_err(EthApiError::EvmCustom(
+                                db.error(code).to_string(),
+                            ))
+                        })?
                         .map(|acc| acc.balance)
                         .unwrap_or(coinbase_balance_before_tx);
                     let coinbase_diff =
@@ -228,14 +229,6 @@ where
                         revert,
                     };
                     results.push(tx_res);
-
-                    // need to apply the state changes of this call before executing the
-                    // next call
-                    if transactions.peek().is_some() {
-                        // need to apply the state changes of this call before executing
-                        // the next call
-                        db.commit_source(&state);
-                    }
                 }
 
                 // populate the response
