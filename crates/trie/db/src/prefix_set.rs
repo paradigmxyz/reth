@@ -1,6 +1,15 @@
-use alloy_primitives::{keccak256, map::HashMap, BlockNumber, B256};
+use alloy_primitives::{
+    keccak256,
+    map::{HashMap, HashSet},
+    BlockNumber, B256,
+};
 use core::ops::RangeInclusive;
-use reth_db_api::models::{AccountBeforeTx, BlockNumberAddress};
+use reth_db_api::{
+    cursor::DbCursorRO,
+    models::{AccountBeforeTx, BlockNumberAddress},
+    tables,
+    transaction::DbTx,
+};
 use reth_storage_api::{ChangeSetReader, DBProvider, StorageChangeSetReader};
 use reth_storage_errors::provider::ProviderError;
 use reth_trie::{
@@ -17,16 +26,26 @@ pub fn load_prefix_sets_with_provider<Provider>(
 where
     Provider: ChangeSetReader + StorageChangeSetReader + DBProvider,
 {
+    let tx = provider.tx_ref();
+
     // Initialize prefix sets.
     let mut account_prefix_set = PrefixSetMut::default();
     let mut storage_prefix_sets = HashMap::<B256, PrefixSetMut>::default();
+    let mut destroyed_accounts = HashSet::default();
 
     // Get account changesets using the provider (handles static files + database)
     let account_changesets = provider.account_changesets_range(*range.start()..*range.end() + 1)?;
 
+    // We still need direct access to HashedAccounts table
+    let mut account_hashed_state_cursor = tx.cursor_read::<tables::HashedAccounts>()?;
+
     for (_, AccountBeforeTx { address, .. }) in account_changesets {
         let hashed_address = keccak256(address);
         account_prefix_set.insert(Nibbles::unpack(hashed_address));
+
+        if account_hashed_state_cursor.seek_exact(hashed_address)?.is_none() {
+            destroyed_accounts.insert(hashed_address);
+        }
     }
 
     // Walk storage changesets using the provider (handles static files + database)
@@ -46,6 +65,6 @@ where
             .into_iter()
             .map(|(k, v)| (k, v.freeze()))
             .collect(),
-        destroyed_accounts: Default::default(),
+        destroyed_accounts,
     })
 }

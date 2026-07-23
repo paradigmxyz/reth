@@ -9,7 +9,7 @@ use crate::{
 use alloc::{borrow::Cow, vec::Vec};
 use alloy_primitives::{
     keccak256,
-    map::{hash_map, B256Map, HashMap},
+    map::{hash_map, B256Map, HashMap, HashSet},
     Address, B256, U256,
 };
 use itertools::Itertools;
@@ -111,8 +111,13 @@ impl HashedPostState {
     pub fn construct_prefix_sets(&self) -> TriePrefixSetsMut {
         // Populate account prefix set.
         let mut account_prefix_set = PrefixSetMut::with_capacity(self.accounts.len());
-        for hashed_address in self.accounts.keys() {
+        let mut destroyed_accounts = HashSet::default();
+        for (hashed_address, account) in &self.accounts {
             account_prefix_set.insert(Nibbles::unpack(hashed_address));
+
+            if account.is_none() {
+                destroyed_accounts.insert(*hashed_address);
+            }
         }
 
         // Populate storage prefix sets.
@@ -123,11 +128,7 @@ impl HashedPostState {
             storage_prefix_sets.insert(*hashed_address, hashed_storage.construct_prefix_set());
         }
 
-        TriePrefixSetsMut {
-            account_prefix_set,
-            storage_prefix_sets,
-            destroyed_accounts: Default::default(),
-        }
+        TriePrefixSetsMut { account_prefix_set, storage_prefix_sets, destroyed_accounts }
     }
 
     /// Create multiproof targets for this state.
@@ -563,8 +564,12 @@ impl HashedPostStateSorted {
     /// post state.
     pub fn construct_prefix_sets(&self) -> TriePrefixSetsMut {
         let mut account_prefix_set = PrefixSetMut::with_capacity(self.accounts.len());
-        for (hashed_address, _) in &self.accounts {
+        let mut destroyed_accounts = HashSet::default();
+        for (hashed_address, account) in &self.accounts {
             account_prefix_set.insert(Nibbles::unpack(hashed_address));
+            if account.is_none() {
+                destroyed_accounts.insert(*hashed_address);
+            }
         }
 
         let mut storage_prefix_sets =
@@ -590,11 +595,7 @@ impl HashedPostStateSorted {
             storage_prefix_sets.insert(*hashed_address, prefix_set);
         }
 
-        TriePrefixSetsMut {
-            account_prefix_set,
-            storage_prefix_sets,
-            destroyed_accounts: Default::default(),
-        }
+        TriePrefixSetsMut { account_prefix_set, storage_prefix_sets, destroyed_accounts }
     }
 
     /// Extends this state with contents of another sorted state.
@@ -910,7 +911,7 @@ impl Iterator for ChunkedHashedPostState {
 mod tests {
     use super::*;
     use crate::KeccakKeyHasher;
-    use alloy_primitives::{map::HashSet, Bytes};
+    use alloy_primitives::Bytes;
     use revm::{
         database::{states::StorageSlot, StorageWithOriginalValues},
         state::{AccountInfo, Bytecode},

@@ -19,13 +19,12 @@ use reth_provider::{
 };
 use reth_storage_api::StorageSettingsCache;
 use reth_trie::{
-    hashed_cursor::HashedPostStateCursorFactory,
     prefix_set::{PrefixSetMut, TriePrefixSets},
     test_utils::{state_root, state_root_prehashed, storage_root, storage_root_prehashed},
     triehash::KeccakHasher,
     updates::StorageTrieUpdates,
-    BranchNodeCompact, HashBuilder, HashedPostState, HashedStorage, IntermediateStateRootState,
-    Nibbles, StateRoot, StateRootProgress, StorageRoot, TrieMask,
+    BranchNodeCompact, HashBuilder, IntermediateStateRootState, Nibbles, StateRoot,
+    StateRootProgress, StorageRoot, TrieMask,
 };
 use reth_trie_db::{
     DatabaseHashedCursorFactory, DatabaseStateRoot, DatabaseStorageRoot, DatabaseTrieCursorFactory,
@@ -676,73 +675,6 @@ fn account_trie_around_extension_node_with_dbtrie() {
         })
         .collect();
     assert_trie_updates(&account_updates);
-}
-
-#[test]
-fn deleted_account_storage_emits_node_removals_without_deleted_flag() {
-    let factory = create_test_provider_factory();
-    let provider = factory.provider_rw().unwrap();
-    let address = Address::with_last_byte(1);
-    let hashed_address = keccak256(address);
-    let hashed_storage = [
-        hex!("30af561000000000000000000000000000000000000000000000000000000000"),
-        hex!("30af569000000000000000000000000000000000000000000000000000000000"),
-        hex!("30af650000000000000000000000000000000000000000000000000000000000"),
-        hex!("30af6f0000000000000000000000000000000000000000000000000000000000"),
-        hex!("30af8f0000000000000000000000000000000000000000000000000000000000"),
-        hex!("3100000000000000000000000000000000000000000000000000000000000000"),
-    ]
-    .into_iter()
-    .map(|key| (B256::new(key), U256::ONE))
-    .collect::<BTreeMap<_, _>>();
-    provider
-        .tx_ref()
-        .put::<tables::HashedAccounts>(hashed_address, Account { nonce: 1, ..Default::default() })
-        .unwrap();
-    for (key, value) in &hashed_storage {
-        provider
-            .tx_ref()
-            .put::<tables::HashedStorages>(
-                hashed_address,
-                StorageEntry { key: *key, value: *value },
-            )
-            .unwrap();
-    }
-
-    let (_, initial_updates) = reth_trie_db::with_adapter!(provider, |A| {
-        DbStateRoot::<_, A>::from_tx(provider.tx_ref()).root_with_updates().unwrap()
-    });
-    provider.write_trie_updates(initial_updates).unwrap();
-
-    let post_state = HashedPostState {
-        accounts: HashMap::from_iter([(hashed_address, None)]),
-        storages: HashMap::from_iter([(
-            hashed_address,
-            HashedStorage::from_iter(
-                false,
-                hashed_storage.keys().map(|hashed_slot| (*hashed_slot, U256::ZERO)),
-            ),
-        )]),
-    }
-    .into_sorted();
-    let prefix_sets = post_state.construct_prefix_sets().freeze();
-
-    let (root, updates) = reth_trie_db::with_adapter!(provider, |A| {
-        StateRoot::new(
-            DatabaseTrieCursorFactory::<_, A>::new(provider.tx_ref()),
-            HashedPostStateCursorFactory::new(
-                DatabaseHashedCursorFactory::new(provider.tx_ref()),
-                &post_state,
-            ),
-        )
-        .with_prefix_sets(prefix_sets)
-        .root_with_updates()
-        .unwrap()
-    });
-    assert_eq!(root, EMPTY_ROOT_HASH);
-    let storage_updates = updates.storage_tries_ref().get(&hashed_address).unwrap();
-    assert!(!storage_updates.is_deleted);
-    assert!(!storage_updates.removed_nodes_ref().is_empty());
 }
 
 proptest! {
