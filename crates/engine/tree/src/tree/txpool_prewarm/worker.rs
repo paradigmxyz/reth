@@ -261,15 +261,14 @@ where
 
     /// Applies a single command.
     ///
-    /// Only called while no EVM or state provider is alive, so acknowledging a pause here
-    /// guarantees the worker holds no execution resources.
+    /// Only called while no EVM or state provider is alive, so a paused worker holds no
+    /// execution resources.
     fn apply(&mut self, command: Command<Job<N, P, Evm>>) {
         match command {
             Command::Start { parent_hash, job } => self.job = Some((parent_hash, job)),
-            Command::Pause(acknowledge) => {
+            Command::Pause => {
                 self.pauses =
                     self.pauses.checked_add(1).expect("txpool prewarm pause count overflow");
-                let _ = acknowledge.send(());
             }
             Command::Resume => {
                 self.pauses = self
@@ -311,7 +310,7 @@ mod tests {
     use crate::tree::StateProviderBuilder;
     use alloy_consensus::{transaction::Recovered, Signed, TxLegacy};
     use alloy_primitives::{Address, Signature, TxKind, U256};
-    use crossbeam_channel::{bounded, unbounded, Sender};
+    use crossbeam_channel::{unbounded, Sender};
     use parking_lot::{Mutex, RwLock};
     use reth_ethereum_primitives::{EthPrimitives, TransactionSigned};
     use reth_evm_ethereum::EthEvmConfig;
@@ -372,12 +371,12 @@ mod tests {
             self.commands.send(Command::Start { parent_hash, job }).unwrap();
         }
 
-        /// Pauses the worker and waits for the acknowledgement. Once this returns the worker is
-        /// quiescent until [`Self::resume`].
+        /// Pauses the worker, as [`Handle::pause`](super::super::Handle) does. Fire-and-forget
+        /// is still deterministic: the worker never publishes work it performs after the pause
+        /// is queued until [`Self::resume`], because publication is skipped while a command is
+        /// pending and a consumed pause blocks the loop.
         fn pause(&self) {
-            let (acknowledge, acknowledged) = bounded(1);
-            self.commands.send(Command::Pause(acknowledge)).unwrap();
-            acknowledged.recv_timeout(WAIT_LIMIT).expect("pause was not acknowledged");
+            self.commands.send(Command::Pause).unwrap();
         }
 
         fn resume(&self) {

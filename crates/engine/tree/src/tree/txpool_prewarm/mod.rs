@@ -56,6 +56,10 @@ where
     ///
     /// Returns a guard that will resume the worker when dropped. There could be multiple
     /// outstanding guards, in which case the worker will not resume until all guards are dropped.
+    ///
+    /// Pausing is asynchronous and never blocks the caller: the worker observes it between
+    /// transactions, so speculative work may overlap the guard's scope by at most one
+    /// transaction.
     pub(crate) fn pause(&self) -> impl Drop + Send + 'static {
         self.control.pause()
     }

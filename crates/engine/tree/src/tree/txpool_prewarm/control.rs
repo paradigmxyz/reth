@@ -1,6 +1,6 @@
 use crate::tree::TxPoolPrewarmCacheSnapshot as Snapshot;
 use alloy_primitives::B256;
-use crossbeam_channel::{bounded, unbounded, Receiver, Sender};
+use crossbeam_channel::{unbounded, Receiver, Sender};
 use parking_lot::RwLock;
 use std::{
     fmt::Debug,
@@ -40,15 +40,11 @@ impl<J> Control<J> {
     }
 
     pub(super) fn pause(self: &Arc<Self>) -> PauseGuard<J> {
-        let (acknowledge, acknowledged) = bounded(1);
-        let mut guard = PauseGuard { control: Arc::downgrade(self), armed: false };
-        if self.commands.send(Command::Pause(acknowledge)).is_ok() {
-            // Arm before waiting so unwinding the caller still releases a pause that the worker
-            // may already have observed.
-            guard.armed = true;
-            let _ = acknowledged.recv();
-        }
-        guard
+        // Fire-and-forget: the worker never interrupts a transaction mid-execution, so waiting
+        // for it to observe the pause would only add that execution time to the caller's
+        // latency without reducing the overlap.
+        let _ = self.commands.send(Command::Pause);
+        PauseGuard { control: Arc::downgrade(self) }
     }
 
     pub(super) fn snapshot(&self, parent_hash: B256) -> Option<Snapshot> {
@@ -67,23 +63,22 @@ pub(super) type Publication = Arc<RwLock<Option<Snapshot>>>;
 pub(super) enum Command<J> {
     /// Starts prewarming for a canonical head, replacing any previous job.
     Start { parent_hash: B256, job: J },
-    /// Pauses prewarming and acknowledges once the worker has released its active resources.
-    Pause(Sender<()>),
+    /// Pauses prewarming until a matching [`Resume`](Self::Resume).
+    Pause,
     /// Releases one active pause.
     Resume,
 }
 
-/// Keeps txpool prewarming paused until the cache-sensitive work is complete.
+/// One outstanding pause, released when dropped.
 pub(super) struct PauseGuard<J> {
     control: Weak<Control<J>>,
-    armed: bool,
 }
 
 impl<J> Drop for PauseGuard<J> {
     fn drop(&mut self) {
-        if self.armed &&
-            let Some(control) = self.control.upgrade()
-        {
+        // If the pause was never delivered the channel is disconnected, and this send fails
+        // just the same, so the worker can never see an unmatched resume.
+        if let Some(control) = self.control.upgrade() {
             let _ = control.commands.send(Command::Resume);
         }
     }
@@ -92,7 +87,6 @@ impl<J> Drop for PauseGuard<J> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::{sync::mpsc, thread, time::Duration};
 
     type TestControl = Control<u64>;
 
@@ -102,28 +96,6 @@ mod tests {
 
     fn snapshot(parent_hash: B256) -> Snapshot {
         Snapshot::new(parent_hash, Default::default())
-    }
-
-    fn request_pause(
-        control: Arc<TestControl>,
-        receiver: &Receiver<Command<u64>>,
-    ) -> PauseGuard<u64> {
-        let (guard_tx, guard_rx) = mpsc::channel();
-        let waiter = thread::spawn(move || {
-            guard_tx.send(control.pause()).expect("pause guard receiver dropped");
-        });
-
-        let command =
-            receiver.recv_timeout(Duration::from_secs(1)).expect("pause command was not received");
-        let Command::Pause(acknowledge) = command else { panic!("expected pause command") };
-        assert!(guard_rx.try_recv().is_err());
-        acknowledge.send(()).expect("pause waiter dropped");
-
-        let guard = guard_rx
-            .recv_timeout(Duration::from_secs(1))
-            .expect("pause did not finish after acknowledgement");
-        waiter.join().expect("pause waiter panicked");
-        guard
     }
 
     #[test]
@@ -153,9 +125,11 @@ mod tests {
     }
 
     #[test]
-    fn pause_waits_for_acknowledgement_and_resumes_on_drop() {
+    fn pause_queues_without_waiting_and_resumes_on_drop() {
         let (control, receiver) = control();
-        let guard = request_pause(Arc::clone(&control), &receiver);
+        // Nothing reads the channel, so this returning at all proves pause does not block.
+        let guard = control.pause();
+        assert!(matches!(receiver.try_recv(), Ok(Command::Pause)));
 
         drop(guard);
         assert!(matches!(receiver.try_recv(), Ok(Command::Resume)));
@@ -163,9 +137,9 @@ mod tests {
 
     #[test]
     fn pause_guard_does_not_retain_control() {
-        let (control, receiver) = control();
+        let (control, _receiver) = control();
         let weak_control = Arc::downgrade(&control);
-        let guard = request_pause(Arc::clone(&control), &receiver);
+        let guard = control.pause();
 
         drop(control);
         assert!(weak_control.upgrade().is_none());
@@ -175,8 +149,10 @@ mod tests {
     #[test]
     fn overlapping_pause_guards_send_matching_resumes() {
         let (control, receiver) = control();
-        let first = request_pause(Arc::clone(&control), &receiver);
-        let second = request_pause(Arc::clone(&control), &receiver);
+        let first = control.pause();
+        let second = control.pause();
+        assert!(matches!(receiver.try_recv(), Ok(Command::Pause)));
+        assert!(matches!(receiver.try_recv(), Ok(Command::Pause)));
 
         drop(first);
         assert!(matches!(receiver.try_recv(), Ok(Command::Resume)));
