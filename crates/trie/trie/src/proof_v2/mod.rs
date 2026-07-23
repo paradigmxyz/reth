@@ -1340,11 +1340,25 @@ where
         debug_assert!(self.child_stack.is_empty());
 
         // `next_uncached_key_range`, which will be called in the loop below, expects the trie
-        // cursor to have already been seeked. Cursor resets for overlapping sub-tries are handled
-        // by `proof_inner`; disjoint sub-tries can safely continue from the existing cursor
-        // frontier.
-        trace!(target: TRACE_TARGET, "Doing initial seek of trie cursor");
-        *trie_cursor_state = TrieCursorState::seeked(self.trie_cursor_seek(traversal_lower_bound)?);
+        // cursor to have already been positioned. Cursor resets for overlapping sub-tries are
+        // handled by `proof_inner`, so a buffered entry at-or-after this disjoint range remains the
+        // first unconsumed entry. Exhaustion is similarly stable across forward-only ranges.
+        let needs_seek = match trie_cursor_state {
+            TrieCursorState::Unseeked | TrieCursorState::Taken(_) => true,
+            TrieCursorState::Available(path, _) => *path < traversal_lower_bound,
+            TrieCursorState::Exhausted => false,
+        };
+        if needs_seek {
+            trace!(target: TRACE_TARGET, "Doing initial seek of trie cursor");
+            *trie_cursor_state =
+                TrieCursorState::seeked(self.trie_cursor_seek(traversal_lower_bound)?);
+        } else {
+            trace!(
+                target: TRACE_TARGET,
+                current=?trie_cursor_state.path(),
+                "Reusing trie cursor position",
+            );
+        }
 
         // `uncalculated_lower_bound` tracks the lower bound of node paths which have yet to be
         // visited, either via the hashed key cursor (`calculate_key_range`) or trie cursor
@@ -1925,7 +1939,7 @@ mod tests {
             mock::{MockHashedCursor, MockHashedCursorFactory},
             HashedCursorFactory,
         },
-        mock::KeyVisitType,
+        mock::{KeyVisit, KeyVisitType},
         proof::StorageProof as LegacyStorageProof,
         test_utils::TrieTestHarness,
         trie_cursor::{depth_first, mock::MockTrieCursor, TrieCursorFactory},
@@ -2018,6 +2032,22 @@ mod tests {
 
         calculator.proof_inner(&mut StorageValueEncoder, targets).unwrap();
         (trie_resets.get(), hashed_resets.get())
+    }
+
+    fn proof_inner_trie_visits(
+        trie_nodes: BTreeMap<Nibbles, BranchNodeCompact>,
+        values: impl IntoIterator<Item = (B256, U256)>,
+        targets: &mut [ProofV2Target],
+    ) -> Vec<KeyVisit<Nibbles>> {
+        let visited_keys = Arc::default();
+        let trie_cursor = MockTrieCursor::new(Arc::new(trie_nodes), Arc::clone(&visited_keys));
+        let hashed_cursor =
+            MockHashedCursor::new(Arc::new(values.into_iter().collect()), Arc::default());
+        let mut calculator =
+            ProofCalculator::<_, _, StorageValueEncoder>::new(trie_cursor, hashed_cursor);
+
+        calculator.proof_inner(&mut StorageValueEncoder, targets).unwrap();
+        visited_keys.lock().clone()
     }
 
     /// Converts legacy proofs to V2 proofs by combining extension nodes with their child branch
@@ -2537,6 +2567,83 @@ mod tests {
 
         assert_eq!(trie_resets, 0);
         assert_eq!(hashed_resets, 0);
+    }
+
+    #[test]
+    fn test_disjoint_ranges_reuse_available_trie_entry() {
+        let key_20 = B256::right_padding_from(&[0x20, 0x10]);
+        let key_40 = B256::right_padding_from(&[0x40, 0x10]);
+        let values = [(key_20, U256::from(1)), (key_40, U256::from(2))];
+        let mut targets = [key_20, key_40]
+            .map(|key| ProofV2Target::new(key).with_parent(ProofV2TargetParent::new(1)));
+        let buffered_path = Nibbles::from_nibbles([0x6]);
+
+        let visits = proof_inner_trie_visits(
+            BTreeMap::from([(buffered_path, BranchNodeCompact::default())]),
+            values,
+            &mut targets,
+        );
+
+        assert_eq!(
+            visits,
+            [KeyVisit {
+                visit_type: KeyVisitType::SeekNonExact(Nibbles::from_nibbles([0x2, 0x0])),
+                visited_key: Some(buffered_path),
+            }]
+        );
+    }
+
+    #[test]
+    fn test_disjoint_ranges_reuse_exhausted_trie_cursor() {
+        let key_20 = B256::right_padding_from(&[0x20, 0x10]);
+        let key_40 = B256::right_padding_from(&[0x40, 0x10]);
+        let values = [(key_20, U256::from(1)), (key_40, U256::from(2))];
+        let mut targets = [key_20, key_40]
+            .map(|key| ProofV2Target::new(key).with_parent(ProofV2TargetParent::new(1)));
+
+        let visits = proof_inner_trie_visits(BTreeMap::new(), values, &mut targets);
+
+        assert_eq!(
+            visits,
+            [KeyVisit {
+                visit_type: KeyVisitType::SeekNonExact(Nibbles::from_nibbles([0x2, 0x0])),
+                visited_key: None,
+            }]
+        );
+    }
+
+    #[test]
+    fn test_disjoint_ranges_seek_past_available_trie_entry() {
+        let key_20 = B256::right_padding_from(&[0x20, 0x10]);
+        let key_40 = B256::right_padding_from(&[0x40, 0x10]);
+        let values = [(key_20, U256::from(1)), (key_40, U256::from(2))];
+        let mut targets = [key_20, key_40]
+            .map(|key| ProofV2Target::new(key).with_parent(ProofV2TargetParent::new(1)));
+        let gap_path = Nibbles::from_nibbles([0x3]);
+        let buffered_path = Nibbles::from_nibbles([0x6]);
+
+        let visits = proof_inner_trie_visits(
+            BTreeMap::from([
+                (gap_path, BranchNodeCompact::default()),
+                (buffered_path, BranchNodeCompact::default()),
+            ]),
+            values,
+            &mut targets,
+        );
+
+        assert_eq!(
+            visits,
+            [
+                KeyVisit {
+                    visit_type: KeyVisitType::SeekNonExact(Nibbles::from_nibbles([0x2, 0x0])),
+                    visited_key: Some(gap_path),
+                },
+                KeyVisit {
+                    visit_type: KeyVisitType::SeekNonExact(Nibbles::from_nibbles([0x4, 0x0])),
+                    visited_key: Some(buffered_path),
+                },
+            ]
+        );
     }
 
     #[test]
