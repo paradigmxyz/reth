@@ -667,9 +667,6 @@ impl DefaultStateRootStrategy {
                 reused_preserved_sparse_trie,
                 pending_sparse_trie_prune_blocks.as_deref(),
             );
-            // The cutoff and anchor are the only data needed during hashing; release the block
-            // outputs before the potentially long-running trie task.
-            drop(pending_sparse_trie_prune_blocks);
 
             let result = task.run();
 

@@ -111,9 +111,9 @@ pub(super) struct SparseTrieCacheTask<A = ArenaParallelSparseTrie, S = ArenaPara
     pending_targets: PendingTargets,
     /// Proof batches dispatched to workers and not yet received.
     in_flight_proof_batches: usize,
-    /// Whether execution/prewarming updates have been received but not yet passed to
+    /// Number of pending execution/prewarming updates received but not yet passed to
     /// `update_leaves`.
-    updates_pending: bool,
+    pending_updates: usize,
     /// Combined final hashed state.
     ///
     /// Sparse trie task observes and hashes all state updates, allowing it to cheaply construct a
@@ -183,7 +183,7 @@ where
             storage_cache_misses: 0,
             pending_targets: Default::default(),
             in_flight_proof_batches: 0,
-            updates_pending: false,
+            pending_updates: Default::default(),
             final_hashed_state: Default::default(),
             metrics,
         }
@@ -284,6 +284,7 @@ where
                         "updates channel disconnected before state root calculation".to_string(),
                     ))?;
                     self.on_message(update);
+                    self.pending_updates += 1;
                 }
                 recv(self.proof_result_rx) -> message => {
                     let wake = Instant::now();
@@ -447,11 +448,9 @@ where
         match message {
             SparseTrieTaskMessage::PrefetchProofs(targets) => {
                 self.on_prewarm_targets(targets);
-                self.updates_pending = true;
             }
             SparseTrieTaskMessage::HashedState(hashed_state) => {
                 self.on_hashed_state_update(hashed_state);
-                self.updates_pending = true;
             }
             SparseTrieTaskMessage::FinishedStateUpdates => {
                 let hashed_state = Arc::new(core::mem::take(&mut self.final_hashed_state));
@@ -559,12 +558,12 @@ where
     }
 
     fn process_new_updates(&mut self) -> SparseTrieResult<()> {
-        if !self.updates_pending {
+        if self.pending_updates == 0 {
             return Ok(());
         }
 
         let _span = debug_span!("process_new_updates").entered();
-        self.updates_pending = false;
+        self.pending_updates = 0;
 
         // Firstly apply all new storage and account updates to the tries.
         self.process_leaf_updates(true)?;
@@ -910,7 +909,7 @@ where
     fn ensure_not_stalled(&self, updates_queued: bool) -> Result<(), StateRootTaskError> {
         if self.finished_state_updates &&
             !updates_queued &&
-            !self.updates_pending &&
+            self.pending_updates == 0 &&
             self.pending_targets.is_empty() &&
             self.in_flight_proof_batches == 0 &&
             self.proof_result_rx.is_empty() &&
