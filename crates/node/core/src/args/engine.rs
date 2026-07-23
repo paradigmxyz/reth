@@ -741,6 +741,18 @@ mod tests {
     }
 
     #[test]
+    fn txpool_prewarming_conflicts_with_disabled_state_cache() {
+        let Err(error) = CommandParser::<EngineArgs>::try_parse_from([
+            "reth",
+            "--engine.txpool-prewarming",
+            "--engine.disable-state-cache",
+        ]) else {
+            panic!("conflicting flags must be rejected")
+        };
+        assert_eq!(error.kind(), clap::error::ErrorKind::ArgumentConflict);
+    }
+
+    #[test]
     fn default_backpressure_threshold_uses_parsed_persistence_args() {
         let args = CommandParser::<EngineArgs>::parse_from([
             "reth",
@@ -802,7 +814,8 @@ mod tests {
             caching_and_prewarming_enabled: true,
             state_cache_disabled: true,
             prewarming_disabled: true,
-            txpool_prewarming_enabled: true,
+            // conflicts with --engine.disable-state-cache, covered by its own test below
+            txpool_prewarming_enabled: false,
             parallel_sparse_trie_enabled: true,
             parallel_sparse_trie_disabled: false,
             state_provider_metrics: true,
@@ -846,7 +859,6 @@ mod tests {
             "--engine.legacy-state-root",
             "--engine.disable-state-cache",
             "--engine.disable-prewarming",
-            "--engine.txpool-prewarming",
             "--engine.state-provider-metrics",
             "--engine.cross-block-cache-size",
             "256",
