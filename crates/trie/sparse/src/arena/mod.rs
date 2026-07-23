@@ -175,7 +175,8 @@ impl ArenaSparseSubtrie {
         );
     }
 
-    /// Collapses nodes last modified before `prune_before` into hash stubs and compacts the arena.
+    /// Collapses nodes last modified before `prune_before` into hash stubs while copying retained
+    /// nodes into a compacted arena.
     ///
     /// Expects that all nodes have computed hashes (i.e. `prune` is called after hashing).
     fn prune(&mut self, prune_before: u64) -> usize {
@@ -193,52 +194,136 @@ impl ArenaSparseSubtrie {
 
         debug_assert_eq!(self.num_dirty_leaves, 0, "prune must run after hashing");
 
-        let mut cursor = mem::take(&mut self.buffers.cursor);
-        cursor.reset(&self.arena, self.root, self.path);
+        if prune_before == 0 {
+            return 0;
+        }
 
-        let mut pruned = 0;
-        let mut pruned_leaves = 0;
-        loop {
-            let result = cursor.next(&mut self.arena, |_, _, _| true);
-            if matches!(result, NextResult::Done) {
-                break
-            }
+        let old_count = self.arena.len();
+        // Do not reserve the old arena's size: discarded nodes should release their capacity.
+        let mut new_arena = SlotMap::new();
+        let mut new_num_leaves = 0u64;
 
-            // The subtrie root is retained by the owning upper trie.
-            if cursor.depth() == 0 {
+        // The subtrie root is retained by the owning upper trie.
+        let root_node = self.arena.remove(self.root).expect("root exists");
+        let new_root = new_arena.insert(root_node);
+        let mut stack = Vec::new();
+        if let Some(frame) =
+            prepare_retained_node(&new_arena, new_root, self.path, &mut new_num_leaves)
+        {
+            stack.push(frame);
+        }
+
+        while let Some(frame) = stack.last_mut() {
+            let Some((child_pos, nibble, old_child_idx)) = frame.next_revealed_child(&new_arena)
+            else {
+                stack.pop();
                 continue;
-            }
+            };
 
-            let head = cursor.head().expect("cursor is non-empty");
-            let head_idx = head.index;
-            let node_epoch = self.arena[head_idx]
+            let parent_new_idx = frame.new_idx;
+            let mut child_path = frame.branch_logical_path;
+            child_path.push(nibble);
+
+            let child_epoch = self.arena[old_child_idx]
                 .state_ref()
                 .and_then(ArenaSparseNodeState::cached_epoch)
                 .expect("prune must run after hashing");
-            if node_epoch >= prune_before {
-                continue;
+
+            if child_epoch >= prune_before {
+                let child_node = self.arena.remove(old_child_idx).expect("child exists");
+                let new_child_idx = new_arena.insert(child_node);
+                if let Some(frame) = prepare_retained_node(
+                    &new_arena,
+                    new_child_idx,
+                    child_path,
+                    &mut new_num_leaves,
+                ) {
+                    stack.push(frame);
+                }
+                let ArenaSparseNode::Branch(b) = &mut new_arena[parent_new_idx] else {
+                    unreachable!()
+                };
+                b.children[child_pos] = ArenaSparseNodeBranchChild::Revealed(new_child_idx);
+            } else {
+                let node = &self.arena[old_child_idx];
+                let rlp_node = node
+                    .state_ref()
+                    .and_then(ArenaSparseNodeState::cached_rlp_node)
+                    .cloned()
+                    .expect("prune must run after hashing");
+                trace!(
+                    target: TRACE_TARGET,
+                    path = ?child_path,
+                    variant = %AsRef::<str>::as_ref(node),
+                    cached_rlp_node = ?rlp_node,
+                    "pruning node",
+                );
+                let ArenaSparseNode::Branch(b) = &mut new_arena[parent_new_idx] else {
+                    unreachable!()
+                };
+                b.children[child_pos] = ArenaSparseNodeBranchChild::Blinded(rlp_node);
             }
-
-            pruned_leaves += matches!(&self.arena[head_idx], ArenaSparseNode::Leaf { .. }) as u64;
-            ArenaParallelSparseTrie::remove_pruned_node(
-                &mut self.arena,
-                &cursor,
-                head_idx,
-                head.path.last(),
-            );
-            pruned += 1;
         }
 
-        self.buffers.cursor = cursor;
-        self.num_leaves -= pruned_leaves;
-
-        if pruned > 0 {
-            compact_arena(&mut self.arena, &mut self.root);
-        }
+        let pruned = old_count - new_arena.len();
+        self.num_leaves = new_num_leaves;
+        self.num_dirty_leaves = 0;
+        self.arena = new_arena;
+        self.root = new_root;
 
         #[cfg(debug_assertions)]
         self.debug_assert_counters();
-        pruned
+        return pruned;
+
+        struct CopyFrame {
+            new_idx: Index,
+            branch_logical_path: Nibbles,
+            state_mask: TrieMask,
+            remaining_child_mask: TrieMask,
+        }
+
+        impl CopyFrame {
+            fn next_revealed_child(&mut self, new_arena: &NodeArena) -> Option<(usize, u8, Index)> {
+                let ArenaSparseNode::Branch(b) = &new_arena[self.new_idx] else { unreachable!() };
+
+                loop {
+                    let nibble = self.remaining_child_mask.first_set_bit_index()?;
+                    self.remaining_child_mask.unset_bit(nibble);
+                    let child_idx = BranchChildIdx::new(self.state_mask, nibble)
+                        .expect("remaining_child_mask must be a subset of state_mask");
+
+                    if let ArenaSparseNodeBranchChild::Revealed(old_idx) = b.children[child_idx] {
+                        return Some((child_idx.get(), nibble, old_idx))
+                    }
+                }
+            }
+        }
+
+        /// Prepares a retained node for copying, returning a stack frame when the node has children
+        /// to walk.
+        fn prepare_retained_node(
+            new_arena: &NodeArena,
+            new_idx: Index,
+            node_path: Nibbles,
+            new_num_leaves: &mut u64,
+        ) -> Option<CopyFrame> {
+            let ArenaSparseNode::Branch(b) = &new_arena[new_idx] else {
+                if matches!(&new_arena[new_idx], ArenaSparseNode::Leaf { .. }) {
+                    *new_num_leaves += 1;
+                }
+                return None;
+            };
+
+            let mut branch_logical_path = node_path;
+            branch_logical_path.extend(&b.short_key);
+
+            Some(CopyFrame {
+                new_idx,
+                branch_logical_path,
+                state_mask: b.state_mask,
+                remaining_child_mask: b.state_mask,
+            })
+        }
     }
 
     /// Applies leaf updates within this subtrie. Uses the same walk-down-with-cursor pattern as
