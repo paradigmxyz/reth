@@ -10,9 +10,10 @@ use crate::{
     traits::{BestTransactionsAttributes, GetPooledTransactionLimit, NewBlobSidecar},
     validate::ValidTransaction,
     AddedTransactionOutcome, AllPoolTransactions, AllTransactionsEvents, BestTransactions,
-    BlockInfo, EthPoolTransaction, EthPooledTransaction, NewTransactionEvent, PoolResult, PoolSize,
-    PoolTransaction, PropagatedTransactions, TransactionEvents, TransactionOrigin, TransactionPool,
-    TransactionValidationOutcome, TransactionValidator, ValidPoolTransaction,
+    BlockInfo, EthBlobTransactionSidecar, EthPoolTransaction, EthPooledTransaction,
+    NewTransactionEvent, PoolResult, PoolSize, PoolTransaction, PropagatedTransactions,
+    TransactionEvents, TransactionOrigin, TransactionPool, TransactionValidationOutcome,
+    TransactionValidator, ValidPoolTransaction,
 };
 use alloy_eips::{
     eip1559::ETHEREUM_BLOCK_GAS_LIMIT_30M,
@@ -431,7 +432,10 @@ impl<T: EthPoolTransaction> TransactionValidator for MockTransactionValidator<T>
                 InvalidPoolTransactionError::Underpriced,
             );
         }
-        let maybe_sidecar = transaction.take_blob().maybe_sidecar().cloned();
+        let maybe_sidecar = match transaction.take_blob() {
+            EthBlobTransactionSidecar::Present(sidecar) => Some(sidecar),
+            _ => None,
+        };
         // we return `balance: U256::MAX` to simulate a valid transaction which will never go into
         // overdraft
         TransactionValidationOutcome::Valid {

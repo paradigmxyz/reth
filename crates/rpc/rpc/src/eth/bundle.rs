@@ -168,13 +168,12 @@ where
                         let mut tx = <Eth::Pool as TransactionPool>::Transaction::from_pooled(tx);
 
                         if let EthBlobTransactionSidecar::Present(sidecar) = tx.take_blob() {
-                            tx.validate_blob(&sidecar, EnvKzgSettings::Default.get()).map_err(
-                                |e| {
+                            tx.validate_blob(sidecar.sidecar(), EnvKzgSettings::Default.get())
+                                .map_err(|e| {
                                     Eth::Error::from_eth_err(EthApiError::InvalidParams(
                                         e.to_string(),
                                     ))
-                                },
-                            )?;
+                                })?;
                         }
 
                         tx.into_consensus()

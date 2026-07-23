@@ -1,6 +1,9 @@
 //! A simple diskstore for blobs
 
-use crate::blobstore::{BlobStore, BlobStoreCleanupStat, BlobStoreError, BlobStoreSize};
+use crate::blobstore::{
+    BlobCellAvailability, BlobSidecar, BlobStore, BlobStoreCleanupStat, BlobStoreError,
+    BlobStoreSize,
+};
 use alloy_eips::{
     eip4844::{BlobAndProofV1, BlobAndProofV2, BlobCellsAndProofsV1},
     eip7594::{BlobCellMask, BlobTransactionSidecarVariant, Cell},
@@ -210,18 +213,31 @@ impl DiskFileBlobStore {
 }
 
 impl BlobStore for DiskFileBlobStore {
-    fn insert(&self, tx: B256, data: BlobTransactionSidecarVariant) -> Result<(), BlobStoreError> {
-        self.inner.insert_one(tx, data)
+    fn insert(&self, tx: B256, data: BlobSidecar) -> Result<(), BlobStoreError> {
+        let (data, availability) = data.into_parts();
+        self.inner.insert_one(tx, data)?;
+        let _ = availability.set(BlobCellAvailability::full());
+        Ok(())
     }
 
-    fn insert_all(
-        &self,
-        txs: Vec<(B256, BlobTransactionSidecarVariant)>,
-    ) -> Result<(), BlobStoreError> {
+    fn insert_all(&self, txs: Vec<(B256, BlobSidecar)>) -> Result<(), BlobStoreError> {
         if txs.is_empty() {
             return Ok(())
         }
-        self.inner.insert_many(txs)
+        let mut availability_handles = Vec::with_capacity(txs.len());
+        let txs = txs
+            .into_iter()
+            .map(|(tx, data)| {
+                let (data, availability) = data.into_parts();
+                availability_handles.push(availability);
+                (tx, data)
+            })
+            .collect();
+        self.inner.insert_many(txs)?;
+        for availability in availability_handles {
+            let _ = availability.set(BlobCellAvailability::full());
+        }
+        Ok(())
     }
 
     fn delete(&self, tx: B256) -> Result<(), BlobStoreError> {
@@ -865,6 +881,12 @@ mod tests {
             .collect()
     }
 
+    fn wrapped_blobs(
+        blobs: Vec<(TxHash, BlobTransactionSidecarVariant)>,
+    ) -> Vec<(TxHash, BlobSidecar)> {
+        blobs.into_iter().map(|(tx, blob)| (tx, blob.into())).collect()
+    }
+
     fn eip7594_single_blob_sidecar() -> (BlobTransactionSidecarVariant, B256, BlobAndProofV2) {
         let blob = Blob::default();
         let commitment = Bytes48::default();
@@ -885,7 +907,7 @@ mod tests {
 
         let blobs = rng_blobs(10);
         let all_hashes = blobs.iter().map(|(tx, _)| *tx).collect::<Vec<_>>();
-        store.insert_all(blobs.clone()).unwrap();
+        store.insert_all(wrapped_blobs(blobs.clone())).unwrap();
 
         // all cached
         for (tx, blob) in &blobs {
@@ -922,7 +944,7 @@ mod tests {
         let (store, _dir) = tmp_store();
 
         let (tx, blob) = rng_blobs(1).into_iter().next().unwrap();
-        store.insert(tx, blob.clone()).unwrap();
+        store.insert(tx, blob.clone().into()).unwrap();
 
         assert!(store.is_cached(&tx));
         let retrieved_blob = store.get(tx).unwrap().map(Arc::unwrap_or_clone).unwrap();
@@ -934,7 +956,7 @@ mod tests {
         let (store, _dir) = tmp_store();
 
         let (tx, blob) = rng_blobs(1).into_iter().next().unwrap();
-        store.insert(tx, blob).unwrap();
+        store.insert(tx, blob.into()).unwrap();
         assert!(store.is_cached(&tx));
 
         store.delete(tx).unwrap();
@@ -958,7 +980,7 @@ mod tests {
 
         let blobs = rng_blobs(5);
         let txs = blobs.iter().map(|(tx, _)| *tx).collect::<Vec<_>>();
-        store.insert_all(blobs.clone()).unwrap();
+        store.insert_all(wrapped_blobs(blobs.clone())).unwrap();
 
         for (tx, _) in &blobs {
             assert!(store.is_cached(tx));
@@ -986,7 +1008,7 @@ mod tests {
 
         let blobs = rng_blobs(3);
         let txs = blobs.iter().map(|(tx, _)| *tx).collect::<Vec<_>>();
-        store.insert_all(blobs.clone()).unwrap();
+        store.insert_all(wrapped_blobs(blobs.clone())).unwrap();
 
         let retrieved_blobs = store.get_all(txs.clone()).unwrap();
         for (tx, blob) in retrieved_blobs {
@@ -1003,7 +1025,7 @@ mod tests {
 
         let blobs = rng_blobs(3);
         let txs = blobs.iter().map(|(tx, _)| *tx).collect::<Vec<_>>();
-        store.insert_all(blobs.clone()).unwrap();
+        store.insert_all(wrapped_blobs(blobs.clone())).unwrap();
 
         let retrieved_blobs = store.get_exact(txs).unwrap();
         for (retrieved_blob, (_, original_blob)) in retrieved_blobs.into_iter().zip(blobs) {
@@ -1017,7 +1039,7 @@ mod tests {
 
         let blobs = rng_blobs(2);
         let txs = blobs.iter().map(|(tx, _)| *tx).collect::<Vec<_>>();
-        store.insert_all(blobs).unwrap();
+        store.insert_all(wrapped_blobs(blobs)).unwrap();
 
         // Try to get a blob that was never inserted
         let missing_tx = TxHash::random();
@@ -1031,7 +1053,7 @@ mod tests {
         assert_eq!(store.data_size_hint(), Some(0));
 
         let blobs = rng_blobs(2);
-        store.insert_all(blobs).unwrap();
+        store.insert_all(wrapped_blobs(blobs)).unwrap();
         assert!(store.data_size_hint().unwrap() > 0);
     }
 
@@ -1041,7 +1063,7 @@ mod tests {
 
         let blobs = rng_blobs(3);
         let txs = blobs.iter().map(|(tx, _)| *tx).collect::<Vec<_>>();
-        store.insert_all(blobs).unwrap();
+        store.insert_all(wrapped_blobs(blobs)).unwrap();
 
         store.delete_all(txs).unwrap();
         let stat = store.cleanup();
@@ -1054,7 +1076,7 @@ mod tests {
         let (store, _dir) = tmp_store();
 
         let (sidecar, versioned_hash, expected) = eip7594_single_blob_sidecar();
-        store.insert(TxHash::random(), sidecar).unwrap();
+        store.insert(TxHash::random(), sidecar.into()).unwrap();
 
         assert_ne!(versioned_hash, B256::ZERO);
 
@@ -1071,7 +1093,7 @@ mod tests {
         let (store, _dir) = tmp_store();
 
         let (sidecar, versioned_hash, _) = eip7594_single_blob_sidecar();
-        store.insert(TxHash::random(), sidecar).unwrap();
+        store.insert(TxHash::random(), sidecar.into()).unwrap();
 
         let request = vec![B256::ZERO, versioned_hash, versioned_hash];
         assert_eq!(store.has_versioned_hashes(&request).unwrap(), vec![false, true, true]);
@@ -1082,7 +1104,7 @@ mod tests {
         let (store, _dir) = tmp_store();
 
         let (sidecar, versioned_hash, _) = eip7594_single_blob_sidecar();
-        store.insert(TxHash::random(), sidecar).unwrap();
+        store.insert(TxHash::random(), sidecar.into()).unwrap();
 
         let indices_bitarray = B128::from((1u128 << 0) | (1u128 << 7));
         let request = vec![versioned_hash, B256::ZERO];
@@ -1103,7 +1125,7 @@ mod tests {
         let (store, _dir) = tmp_store();
 
         let (sidecar, versioned_hash, expected) = eip7594_single_blob_sidecar();
-        store.insert(TxHash::random(), sidecar).unwrap();
+        store.insert(TxHash::random(), sidecar.into()).unwrap();
         store.clear_cache();
 
         let v3 = store.get_by_versioned_hashes_v3(&[versioned_hash]).unwrap();
@@ -1115,7 +1137,7 @@ mod tests {
         let (store, _dir) = tmp_store();
 
         let (sidecar, versioned_hash, _) = eip7594_single_blob_sidecar();
-        store.insert(TxHash::random(), sidecar).unwrap();
+        store.insert(TxHash::random(), sidecar.into()).unwrap();
         store.clear_cache();
 
         assert_eq!(store.has_versioned_hashes(&[versioned_hash]).unwrap(), vec![true]);
@@ -1127,7 +1149,7 @@ mod tests {
 
         let tx_hash = TxHash::random();
         let (sidecar, versioned_hash, _) = eip7594_single_blob_sidecar();
-        store.insert(tx_hash, sidecar).unwrap();
+        store.insert(tx_hash, sidecar.into()).unwrap();
         store.clear_cache();
 
         store.delete(tx_hash).unwrap();
@@ -1141,7 +1163,7 @@ mod tests {
         let (store, _dir) = tmp_store();
 
         let (sidecar, versioned_hash, _) = eip7594_single_blob_sidecar();
-        store.insert(TxHash::random(), sidecar).unwrap();
+        store.insert(TxHash::random(), sidecar.into()).unwrap();
         store.clear_cache();
 
         let v4 = store.get_by_versioned_hashes_v4(&[versioned_hash], B128::from(1u128)).unwrap();
@@ -1156,7 +1178,7 @@ mod tests {
 
         let tx_hash = TxHash::random();
         let (sidecar, versioned_hash, _) = eip7594_single_blob_sidecar();
-        store.insert(tx_hash, sidecar).unwrap();
+        store.insert(tx_hash, sidecar.into()).unwrap();
 
         let indices_bitarray = B128::from((1u128 << 0) | (1u128 << 7));
         let expected = store
@@ -1181,7 +1203,7 @@ mod tests {
 
         let blobs = rng_blobs(5);
         let all_hashes: Vec<_> = blobs.iter().map(|(tx, _)| *tx).collect();
-        store.insert_all(blobs).unwrap();
+        store.insert_all(wrapped_blobs(blobs)).unwrap();
         store.clear_cache();
 
         // Schedule blobs for deletion

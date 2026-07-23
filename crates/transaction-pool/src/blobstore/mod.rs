@@ -13,7 +13,7 @@ use std::{
     fmt,
     sync::{
         atomic::{AtomicUsize, Ordering},
-        Arc,
+        Arc, OnceLock,
     },
 };
 pub use tracker::{BlobStoreCanonTracker, BlobStoreUpdates};
@@ -24,6 +24,90 @@ mod mem;
 mod noop;
 mod tracker;
 
+/// Blob cell availability stored for a transaction.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
+#[repr(transparent)]
+pub struct BlobCellAvailability(B128);
+
+impl BlobCellAvailability {
+    /// Full availability for all blob cells in a stored full sidecar.
+    pub const FULL: Self = Self(B128::new([0xff; 16]));
+
+    /// Creates a new availability mask from the raw cell bitmask.
+    pub const fn new(mask: B128) -> Self {
+        Self(mask)
+    }
+
+    /// Returns full availability for all blob cells.
+    pub const fn full() -> Self {
+        Self::FULL
+    }
+
+    /// Returns the raw cell bitmask.
+    pub const fn mask(self) -> B128 {
+        self.0
+    }
+
+    /// Returns true if all blob cells are available.
+    pub fn is_full(self) -> bool {
+        self == Self::FULL
+    }
+}
+
+/// Shared publication handle for a blob sidecar's cell availability.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct BlobCellAvailabilityHandle(Arc<OnceLock<BlobCellAvailability>>);
+
+impl BlobCellAvailabilityHandle {
+    /// Returns the published availability, if the sidecar has been stored.
+    pub fn get(&self) -> Option<BlobCellAvailability> {
+        self.0.get().copied()
+    }
+
+    /// Publishes the stored availability.
+    pub fn set(&self, availability: BlobCellAvailability) -> Result<(), BlobCellAvailability> {
+        self.0.set(availability)
+    }
+}
+
+/// A blob sidecar paired with the handle used to publish its stored cell availability.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BlobSidecar {
+    sidecar: BlobTransactionSidecarVariant,
+    availability: BlobCellAvailabilityHandle,
+}
+
+impl BlobSidecar {
+    /// Creates a sidecar that publishes availability through the given handle.
+    pub const fn new(
+        sidecar: BlobTransactionSidecarVariant,
+        availability: BlobCellAvailabilityHandle,
+    ) -> Self {
+        Self { sidecar, availability }
+    }
+
+    /// Returns the wrapped sidecar.
+    pub const fn sidecar(&self) -> &BlobTransactionSidecarVariant {
+        &self.sidecar
+    }
+
+    /// Returns the shared availability handle.
+    pub const fn availability(&self) -> &BlobCellAvailabilityHandle {
+        &self.availability
+    }
+
+    /// Consumes the wrapper and returns the sidecar and publication handle.
+    pub fn into_parts(self) -> (BlobTransactionSidecarVariant, BlobCellAvailabilityHandle) {
+        (self.sidecar, self.availability)
+    }
+}
+
+impl From<BlobTransactionSidecarVariant> for BlobSidecar {
+    fn from(sidecar: BlobTransactionSidecarVariant) -> Self {
+        Self::new(sidecar, Default::default())
+    }
+}
+
 /// A blob store that can be used to store blob data of EIP4844 transactions.
 ///
 /// This type is responsible for keeping track of blob data until it is no longer needed (after
@@ -32,13 +116,10 @@ mod tracker;
 /// Note: this is Clone because it is expected to be wrapped in an Arc.
 pub trait BlobStore: fmt::Debug + Send + Sync + 'static {
     /// Inserts the blob sidecar into the store
-    fn insert(&self, tx: B256, data: BlobTransactionSidecarVariant) -> Result<(), BlobStoreError>;
+    fn insert(&self, tx: B256, data: BlobSidecar) -> Result<(), BlobStoreError>;
 
     /// Inserts multiple blob sidecars into the store
-    fn insert_all(
-        &self,
-        txs: Vec<(B256, BlobTransactionSidecarVariant)>,
-    ) -> Result<(), BlobStoreError>;
+    fn insert_all(&self, txs: Vec<(B256, BlobSidecar)>) -> Result<(), BlobStoreError>;
 
     /// Deletes the blob sidecar from the store
     fn delete(&self, tx: B256) -> Result<(), BlobStoreError>;
@@ -58,6 +139,14 @@ pub trait BlobStore: fmt::Debug + Send + Sync + 'static {
 
     /// Checks if the given transaction hash is in the blob store.
     fn contains(&self, tx: B256) -> Result<bool, BlobStoreError>;
+
+    /// Returns the stored cell availability for the transaction.
+    ///
+    /// Full-sidecar stores can use this default. Sparse stores should override it with their exact
+    /// stored mask.
+    fn cell_availability(&self, tx: B256) -> Result<Option<BlobCellAvailability>, BlobStoreError> {
+        self.contains(tx).map(|contains| contains.then_some(BlobCellAvailability::full()))
+    }
 
     /// Retrieves all decoded blob data for the given transaction hashes.
     ///
