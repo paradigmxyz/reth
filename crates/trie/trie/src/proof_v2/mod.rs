@@ -1342,21 +1342,10 @@ where
         // cursor to have already been positioned. Cursor resets for overlapping sub-tries are
         // handled by `proof_inner`, so a buffered entry at-or-after this disjoint range remains the
         // first unconsumed entry. Exhaustion is similarly stable across forward-only ranges.
-        let needs_seek = match trie_cursor_state {
-            TrieCursorState::Unseeked | TrieCursorState::Taken(_) => true,
-            TrieCursorState::Available(path, _) => *path < traversal_lower_bound,
-            TrieCursorState::Exhausted => false,
-        };
-        if needs_seek {
+        if trie_cursor_state.needs_seek_to(&traversal_lower_bound) {
             trace!(target: TRACE_TARGET, "Doing initial seek of trie cursor");
             *trie_cursor_state =
                 TrieCursorState::seeked(self.trie_cursor_seek(traversal_lower_bound)?);
-        } else {
-            trace!(
-                target: TRACE_TARGET,
-                current=?trie_cursor_state.path(),
-                "Reusing trie cursor position",
-            );
         }
 
         // `uncalculated_lower_bound` tracks the lower bound of node paths which have yet to be
@@ -1858,6 +1847,15 @@ impl TrieCursorState {
             Self::Unseeked => panic!("cursor is unseeked"),
             Self::Available(path, _) | Self::Taken(path) => Some(path),
             Self::Exhausted => None,
+        }
+    }
+
+    /// Returns true if the cursor must seek to be usable for a range starting at `path`.
+    fn needs_seek_to(&self, path: &Nibbles) -> bool {
+        match self {
+            Self::Unseeked | Self::Taken(_) => true,
+            Self::Available(current_path, _) => current_path < path,
+            Self::Exhausted => false,
         }
     }
 
