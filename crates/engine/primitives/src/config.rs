@@ -218,7 +218,7 @@ impl Default for TreeConfig {
             always_compare_trie_updates: false,
             disable_state_cache: false,
             disable_prewarming: false,
-            txpool_prewarming: true,
+            txpool_prewarming: false,
             state_provider_metrics: false,
             cross_block_cache_size: DEFAULT_CROSS_BLOCK_CACHE_SIZE,
             has_enough_parallelism: has_enough_parallelism(),
@@ -291,7 +291,7 @@ impl TreeConfig {
             always_compare_trie_updates,
             disable_state_cache,
             disable_prewarming,
-            txpool_prewarming: true,
+            txpool_prewarming: false,
             state_provider_metrics,
             cross_block_cache_size,
             has_enough_parallelism,
@@ -513,12 +513,6 @@ impl TreeConfig {
     /// Enables or disables txpool transaction prewarming.
     pub const fn with_txpool_prewarming(mut self, enabled: bool) -> Self {
         self.txpool_prewarming = enabled;
-        self
-    }
-
-    /// Setter for whether to disable txpool transaction prewarming.
-    pub const fn without_txpool_prewarming(mut self, disabled: bool) -> Self {
-        self.txpool_prewarming = !disabled;
         self
     }
 
@@ -764,9 +758,9 @@ mod tests {
     use super::TreeConfig;
 
     #[test]
-    fn txpool_prewarming_is_enabled_by_default_and_can_be_disabled() {
-        assert!(TreeConfig::default().txpool_prewarming());
-        assert!(!TreeConfig::default().without_txpool_prewarming(true).txpool_prewarming());
+    fn txpool_prewarming_is_disabled_by_default_and_can_be_enabled() {
+        assert!(!TreeConfig::default().txpool_prewarming());
+        assert!(TreeConfig::default().with_txpool_prewarming(true).txpool_prewarming());
     }
 
     #[test]
