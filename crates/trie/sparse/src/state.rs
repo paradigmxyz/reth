@@ -534,6 +534,7 @@ impl<S: SparseTrieTrait> StorageTries<S> {
                 .entered();
 
                 let evict = trie.as_revealed_mut().is_none_or(|revealed| {
+                    // Avoid traversing and compacting a trie that will be immediately evicted.
                     let root_epoch =
                         revealed.root_epoch().expect("storage trie root must not be dirty");
                     if root_epoch >= prune_before {
