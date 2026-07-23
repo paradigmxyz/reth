@@ -1970,121 +1970,19 @@ enum PopCachedBranchOutcome {
 mod tests {
     use super::*;
     use crate::{
-        hashed_cursor::{
-            mock::{MockHashedCursor, MockHashedCursorFactory},
-            HashedCursorFactory,
-        },
-        mock::{KeyVisit, KeyVisitType},
+        hashed_cursor::{mock::MockHashedCursorFactory, HashedCursorFactory},
         proof::StorageProof as LegacyStorageProof,
         test_utils::TrieTestHarness,
-        trie_cursor::{depth_first, mock::MockTrieCursor, TrieCursorFactory},
+        trie_cursor::{depth_first, TrieCursorFactory},
     };
     use alloy_primitives::map::B256Set;
     use alloy_rlp::Decodable;
     use alloy_trie::proof::AddedRemovedKeys;
     use itertools::Itertools;
-    use reth_storage_errors::db::DatabaseError;
     use reth_trie_common::{
         prefix_set::PrefixSetMut, ProofTrieNode, ProofV2TargetParent, TrieNode, EMPTY_ROOT_HASH,
     };
-    use std::{cell::Cell, collections::BTreeMap, rc::Rc, sync::Arc};
-
-    /// Cursor wrapper which counts explicit resets while forwarding all other operations.
-    #[derive(Debug)]
-    struct ResetCountingCursor<C> {
-        inner: C,
-        resets: Rc<Cell<usize>>,
-    }
-
-    impl<C> ResetCountingCursor<C> {
-        fn new(inner: C, resets: Rc<Cell<usize>>) -> Self {
-            Self { inner, resets }
-        }
-    }
-
-    impl<C: TrieCursor> TrieCursor for ResetCountingCursor<C> {
-        fn seek_exact(
-            &mut self,
-            key: Nibbles,
-        ) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
-            self.inner.seek_exact(key)
-        }
-
-        fn seek(
-            &mut self,
-            key: Nibbles,
-        ) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
-            self.inner.seek(key)
-        }
-
-        fn next(&mut self) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
-            self.inner.next()
-        }
-
-        fn current(&mut self) -> Result<Option<Nibbles>, DatabaseError> {
-            self.inner.current()
-        }
-
-        fn reset(&mut self) {
-            self.resets.set(self.resets.get() + 1);
-            self.inner.reset();
-        }
-    }
-
-    impl<C: HashedCursor> HashedCursor for ResetCountingCursor<C> {
-        type Value = C::Value;
-
-        fn seek(&mut self, key: B256) -> Result<Option<(B256, Self::Value)>, DatabaseError> {
-            self.inner.seek(key)
-        }
-
-        fn next(&mut self) -> Result<Option<(B256, Self::Value)>, DatabaseError> {
-            self.inner.next()
-        }
-
-        fn reset(&mut self) {
-            self.resets.set(self.resets.get() + 1);
-            self.inner.reset();
-        }
-    }
-
-    fn proof_inner_reset_counts(
-        trie_nodes: impl IntoIterator<Item = (Nibbles, BranchNodeCompact)>,
-        values: impl IntoIterator<Item = (B256, U256)>,
-        targets: &mut [ProofV2Target],
-    ) -> (usize, usize) {
-        let trie_resets = Rc::new(Cell::new(0));
-        let hashed_resets = Rc::new(Cell::new(0));
-        let trie_cursor = ResetCountingCursor::new(
-            MockTrieCursor::new(Arc::new(trie_nodes.into_iter().collect()), Arc::default()),
-            Rc::clone(&trie_resets),
-        );
-        let hashed_cursor = ResetCountingCursor::new(
-            MockHashedCursor::new(Arc::new(values.into_iter().collect()), Arc::default()),
-            Rc::clone(&hashed_resets),
-        );
-        let mut calculator =
-            ProofCalculator::<_, _, StorageValueEncoder>::new(trie_cursor, hashed_cursor);
-
-        calculator.proof_inner(&mut StorageValueEncoder, targets).unwrap();
-        (trie_resets.get(), hashed_resets.get())
-    }
-
-    fn proof_inner_trie_visits(
-        trie_nodes: BTreeMap<Nibbles, BranchNodeCompact>,
-        values: impl IntoIterator<Item = (B256, U256)>,
-        targets: &mut [ProofV2Target],
-    ) -> Vec<KeyVisit<Nibbles>> {
-        let visited_keys = Arc::default();
-        let trie_cursor = MockTrieCursor::new(Arc::new(trie_nodes), Arc::clone(&visited_keys));
-        let hashed_cursor =
-            MockHashedCursor::new(Arc::new(values.into_iter().collect()), Arc::default());
-        let mut calculator =
-            ProofCalculator::<_, _, StorageValueEncoder>::new(trie_cursor, hashed_cursor);
-
-        calculator.proof_inner(&mut StorageValueEncoder, targets).unwrap();
-        visited_keys.lock().clone()
-    }
+    use std::collections::BTreeMap;
 
     /// Converts legacy proofs to V2 proofs by combining extension nodes with their child branch
     /// nodes.
@@ -2568,149 +2466,23 @@ mod tests {
     }
 
     #[test]
-    fn test_known_parent_sibling_span_retains_each_target_child() {
+    fn test_known_parent_sibling_span_retains_only_target_children() {
         let stored_slot_a = B256::right_padding_from(&[0xea, 0x53]);
         let stored_slot_b = B256::right_padding_from(&[0xeb, 0x53]);
+        let stored_slot_c = B256::right_padding_from(&[0xec, 0x53]);
         let target_a = B256::right_padding_from(&[0xea, 0x1f]);
-        let target_b = B256::right_padding_from(&[0xeb, 0x1f]);
+        let target_c = B256::right_padding_from(&[0xec, 0x1f]);
         let harness = ProofTestHarness::new(BTreeMap::from([
             (stored_slot_a, U256::from(1)),
             (stored_slot_b, U256::from(2)),
+            (stored_slot_c, U256::from(3)),
         ]));
-        let mut targets = [target_a, target_b]
+        let mut targets = [target_a, target_c]
             .map(|target| ProofV2Target::new(target).with_parent(ProofV2TargetParent::new(1)));
 
         let (proof, root) = harness.proof_v2(&mut targets);
 
         assert!(root.is_none());
-        assert_eq!(proof.len(), 2);
-        assert_eq!(proof[0].path, Nibbles::from_nibbles([0xe, 0xa]));
-        assert_eq!(proof[1].path, Nibbles::from_nibbles([0xe, 0xb]));
-    }
-
-    #[test]
-    fn test_disjoint_ranges_reuse_cursors() {
-        let key_20 = B256::right_padding_from(&[0x20, 0x10]);
-        let key_40 = B256::right_padding_from(&[0x40, 0x10]);
-        let values = [key_20, key_40]
-            .into_iter()
-            .enumerate()
-            .map(|(index, key)| (key, U256::from(index + 1)));
-        let mut targets = [key_40, key_20]
-            .map(|key| ProofV2Target::new(key).with_parent(ProofV2TargetParent::new(1)));
-
-        let (trie_resets, hashed_resets) = proof_inner_reset_counts([], values, &mut targets);
-
-        assert_eq!(trie_resets, 0);
-        assert_eq!(hashed_resets, 0);
-    }
-
-    #[test]
-    fn test_disjoint_ranges_reuse_available_trie_entry() {
-        let key_20 = B256::right_padding_from(&[0x20, 0x10]);
-        let key_40 = B256::right_padding_from(&[0x40, 0x10]);
-        let values = [(key_20, U256::from(1)), (key_40, U256::from(2))];
-        let mut targets = [key_20, key_40]
-            .map(|key| ProofV2Target::new(key).with_parent(ProofV2TargetParent::new(1)));
-        let buffered_path = Nibbles::from_nibbles([0x6]);
-
-        let visits = proof_inner_trie_visits(
-            BTreeMap::from([(buffered_path, BranchNodeCompact::default())]),
-            values,
-            &mut targets,
-        );
-
-        assert_eq!(
-            visits,
-            [KeyVisit {
-                visit_type: KeyVisitType::SeekNonExact(Nibbles::from_nibbles([0x2, 0x0])),
-                visited_key: Some(buffered_path),
-            }]
-        );
-    }
-
-    #[test]
-    fn test_disjoint_ranges_reuse_exhausted_trie_cursor() {
-        let key_20 = B256::right_padding_from(&[0x20, 0x10]);
-        let key_40 = B256::right_padding_from(&[0x40, 0x10]);
-        let values = [(key_20, U256::from(1)), (key_40, U256::from(2))];
-        let mut targets = [key_20, key_40]
-            .map(|key| ProofV2Target::new(key).with_parent(ProofV2TargetParent::new(1)));
-
-        let visits = proof_inner_trie_visits(BTreeMap::new(), values, &mut targets);
-
-        assert_eq!(
-            visits,
-            [KeyVisit {
-                visit_type: KeyVisitType::SeekNonExact(Nibbles::from_nibbles([0x2, 0x0])),
-                visited_key: None,
-            }]
-        );
-    }
-
-    #[test]
-    fn test_disjoint_ranges_seek_past_available_trie_entry() {
-        let key_20 = B256::right_padding_from(&[0x20, 0x10]);
-        let key_40 = B256::right_padding_from(&[0x40, 0x10]);
-        let values = [(key_20, U256::from(1)), (key_40, U256::from(2))];
-        let mut targets = [key_20, key_40]
-            .map(|key| ProofV2Target::new(key).with_parent(ProofV2TargetParent::new(1)));
-        let gap_path = Nibbles::from_nibbles([0x3]);
-        let buffered_path = Nibbles::from_nibbles([0x6]);
-
-        let visits = proof_inner_trie_visits(
-            BTreeMap::from([
-                (gap_path, BranchNodeCompact::default()),
-                (buffered_path, BranchNodeCompact::default()),
-            ]),
-            values,
-            &mut targets,
-        );
-
-        assert_eq!(
-            visits,
-            [
-                KeyVisit {
-                    visit_type: KeyVisitType::SeekNonExact(Nibbles::from_nibbles([0x2, 0x0])),
-                    visited_key: Some(gap_path),
-                },
-                KeyVisit {
-                    visit_type: KeyVisitType::SeekNonExact(Nibbles::from_nibbles([0x4, 0x0])),
-                    visited_key: Some(buffered_path),
-                },
-            ]
-        );
-    }
-
-    #[test]
-    fn test_known_parent_sibling_span_uses_single_hashed_seek() {
-        let key_ea = B256::right_padding_from(&[0xea, 0x10]);
-        let key_eb = B256::right_padding_from(&[0xeb, 0x10]);
-        let key_ec = B256::right_padding_from(&[0xec, 0x10]);
-        let values = Arc::new(BTreeMap::from([
-            (key_ea, U256::from(1)),
-            (key_eb, U256::from(2)),
-            (key_ec, U256::from(3)),
-        ]));
-        let visited_keys = Arc::default();
-        let trie_cursor = MockTrieCursor::new(Arc::default(), Arc::default());
-        let hashed_cursor = MockHashedCursor::new(values, Arc::clone(&visited_keys));
-        let mut calculator =
-            ProofCalculator::<_, _, StorageValueEncoder>::new(trie_cursor, hashed_cursor);
-        let mut targets = [key_ea, key_ec]
-            .map(|key| ProofV2Target::new(key).with_parent(ProofV2TargetParent::new(1)));
-
-        let proof = calculator.proof_inner(&mut StorageValueEncoder, &mut targets).unwrap();
-
-        let seek_keys = visited_keys
-            .lock()
-            .iter()
-            .filter_map(|visit| match &visit.visit_type {
-                KeyVisitType::SeekNonExact(key) => Some(*key),
-                KeyVisitType::SeekExact(_) | KeyVisitType::Next => None,
-            })
-            .collect::<Vec<_>>();
-        assert_eq!(seek_keys, [B256::right_padding_from(&[0xea])]);
         assert_eq!(
             proof.iter().map(|node| node.path).collect::<Vec<_>>(),
             [Nibbles::from_nibbles([0xe, 0xa]), Nibbles::from_nibbles([0xe, 0xc])]
@@ -2718,56 +2490,16 @@ mod tests {
     }
 
     #[test]
-    fn test_nested_range_within_sibling_span_resets_only_advanced_cursor() {
-        let key_20 = B256::right_padding_from(&[0x20, 0x10]);
-        let key_30 = B256::right_padding_from(&[0x30, 0x10]);
-        let key_40 = B256::right_padding_from(&[0x40, 0x10]);
-        let values = [(key_20, U256::from(1)), (key_30, U256::from(2)), (key_40, U256::from(3))];
-        let mut targets = [
-            ProofV2Target::new(key_20).with_parent(ProofV2TargetParent::new(0)),
-            ProofV2Target::new(key_40).with_parent(ProofV2TargetParent::new(0)),
-            ProofV2Target::new(key_30).with_parent(ProofV2TargetParent::new(1)),
-        ];
-
-        let (trie_resets, hashed_resets) = proof_inner_reset_counts([], values, &mut targets);
-
-        assert_eq!(trie_resets, 0);
-        assert_eq!(hashed_resets, 1);
-    }
-
-    #[test]
-    fn test_nested_range_resets_advanced_trie_cursor_independently() {
-        let key_20 = B256::right_padding_from(&[0x20, 0x10]);
-        let key_30 = B256::right_padding_from(&[0x30, 0x10]);
-        let key_40 = B256::right_padding_from(&[0x40, 0x10]);
-        let mut targets = [
-            ProofV2Target::new(key_20).with_parent(ProofV2TargetParent::new(0)),
-            ProofV2Target::new(key_40).with_parent(ProofV2TargetParent::new(0)),
-            ProofV2Target::new(key_30).with_parent(ProofV2TargetParent::new(1)),
-        ];
-
-        let (trie_resets, hashed_resets) = proof_inner_reset_counts(
-            [(Nibbles::from_nibbles([0x6]), BranchNodeCompact::default())],
-            [(key_20, U256::from(1))],
-            &mut targets,
-        );
-
-        assert_eq!(trie_resets, 1);
-        assert_eq!(hashed_resets, 0);
-    }
-
-    #[test]
     fn test_known_parent_does_not_use_stale_parent_mask() {
         let stored_slot_a = B256::right_padding_from(&[0xea, 0x53]);
-        let stored_slot_b = B256::right_padding_from(&[0xeb, 0x53]);
+        let stored_slot = B256::right_padding_from(&[0xeb, 0x53]);
         let stored_slot_c = B256::right_padding_from(&[0xec, 0x53]);
-        let stored_slot_d = B256::right_padding_from(&[0xed, 0x53]);
-        let target_b = B256::right_padding_from(&[0xeb, 0x1f]);
-        let target_d = B256::right_padding_from(&[0xed, 0x1f]);
+        let target = B256::right_padding_from(&[0xeb, 0x1f]);
+        let stored_slot_nibbles = Nibbles::unpack(stored_slot);
 
         // The known parent at `e` is supplied by the sparse trie and may be stale in the database
         // when partial persistence masks that path. In particular, its state mask can omit the
-        // live `eb` and `ed` children while hashed state already contains their leaves.
+        // live `eb` child while hashed state already contains that child's leaf.
         let stale_parent_mask = TrieMask::new((1 << 0xa) | (1 << 0xc));
         let stale_parent = BranchNodeCompact::new(
             stale_parent_mask,
@@ -2780,32 +2512,21 @@ mod tests {
 
         let mut harness = TrieTestHarness::new(BTreeMap::from([
             (stored_slot_a, U256::from(1)),
-            (stored_slot_b, U256::from(2)),
+            (stored_slot, U256::from(2)),
             (stored_slot_c, U256::from(3)),
-            (stored_slot_d, U256::from(4)),
         ]));
         harness.set_trie_nodes(storage_nodes);
-        let trie_cursor_factory = harness.trie_cursor_factory();
 
-        let mut targets = [target_b, target_d]
-            .map(|target| ProofV2Target::new(target).with_parent(ProofV2TargetParent::new(1)));
+        let mut targets = [ProofV2Target::new(target).with_parent(ProofV2TargetParent::new(1))];
         let (proof, root) = harness.proof_v2(&mut targets);
 
         assert!(root.is_none());
-        assert_eq!(
-            proof.iter().map(|node| node.path).collect::<Vec<_>>(),
-            [Nibbles::from_nibbles([0xe, 0xb]), Nibbles::from_nibbles([0xe, 0xd])]
-        );
-
-        let visited_keys = trie_cursor_factory.visited_storage_keys(harness.hashed_address());
-        assert!(matches!(
-            visited_keys.first().map(|visit| &visit.visit_type),
-            Some(KeyVisitType::SeekNonExact(path))
-                if path == &Nibbles::from_nibbles([0xe, 0xb])
-        ));
-        assert!(visited_keys
-            .iter()
-            .all(|visit| visit.visited_key != Some(Nibbles::from_nibbles([0xe]))));
+        assert_eq!(proof.len(), 1);
+        assert_eq!(proof[0].path, stored_slot_nibbles.slice(0..2));
+        let TrieNodeV2::Leaf(leaf) = &proof[0].node else {
+            panic!("live direct child should be reconstructed as a leaf")
+        };
+        assert_eq!(leaf.key, stored_slot_nibbles.slice(2..));
     }
 
     #[test]

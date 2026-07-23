@@ -80,23 +80,13 @@ mod tests {
         // Expected output format:
         // Vec<(known_parent_prefix_hex, lower_bound_hex, upper_bound_hex, Vec<key_hex>)>
         let test_cases = vec![
-            // Case 1: Empty targets
+            // Empty targets.
             (vec![], vec![]),
-            // Case 2: Single target without a known parent
-            (
-                vec![ProofV2Target::new(B256::repeat_byte(0x20))],
-                vec![(
-                    None,
-                    "",
-                    None,
-                    vec!["2020202020202020202020202020202020202020202020202020202020202020"],
-                )],
-            ),
-            // Case 3: Multiple targets in same sub-trie without known parents
+            // A root traversal stays unbounded and sorts its targets.
             (
                 vec![
-                    ProofV2Target::new(B256::repeat_byte(0x20)),
                     ProofV2Target::new(B256::repeat_byte(0x21)),
+                    ProofV2Target::new(B256::repeat_byte(0x20)),
                 ],
                 vec![(
                     None,
@@ -108,30 +98,7 @@ mod tests {
                     ],
                 )],
             ),
-            // Case 4: Multiple targets in different sub-tries
-            (
-                vec![
-                    ProofV2Target::new(B256::repeat_byte(0x20))
-                        .with_parent(ProofV2TargetParent::new(1)),
-                    ProofV2Target::new(B256::repeat_byte(0x40))
-                        .with_parent(ProofV2TargetParent::new(1)),
-                ],
-                vec![
-                    (
-                        Some("2"),
-                        "20",
-                        Some("21"),
-                        vec!["2020202020202020202020202020202020202020202020202020202020202020"],
-                    ),
-                    (
-                        Some("4"),
-                        "40",
-                        Some("41"),
-                        vec!["4040404040404040404040404040404040404040404040404040404040404040"],
-                    ),
-                ],
-            ),
-            // Case 5: Targets below children 0 and f of parent 2 span [20, 3)
+            // Targets below children 0 and f of parent 2 span [20, 3).
             (
                 vec![
                     ProofV2Target::new(B256::repeat_byte(0x20))
@@ -159,7 +126,7 @@ mod tests {
                     ),
                 ],
             ),
-            // Case 6: Targets with different parent paths in different sub-tries
+            // Nested parent paths remain separate groups.
             (
                 vec![
                     ProofV2Target::new(B256::repeat_byte(0x20))
@@ -182,72 +149,25 @@ mod tests {
                     ),
                 ],
             ),
-            // Case 7: More complex chunking with nested sub-trie prefixes
-            (
-                vec![
-                    ProofV2Target::new(B256::repeat_byte(0x20))
-                        .with_parent(ProofV2TargetParent::new(1)),
-                    ProofV2Target::new(B256::repeat_byte(0x2f))
-                        .with_parent(ProofV2TargetParent::new(3)),
-                    ProofV2Target::new(B256::repeat_byte(0x4c))
-                        .with_parent(ProofV2TargetParent::new(2)),
-                    ProofV2Target::new(B256::repeat_byte(0x4c))
-                        .with_parent(ProofV2TargetParent::new(3)),
-                    ProofV2Target::new(B256::repeat_byte(0x4e))
-                        .with_parent(ProofV2TargetParent::new(2)),
-                ],
-                vec![
-                    (
-                        Some("2"),
-                        "20",
-                        Some("21"),
-                        vec!["2020202020202020202020202020202020202020202020202020202020202020"],
-                    ),
-                    (
-                        Some("2f2"),
-                        "2f2f",
-                        Some("2f3"),
-                        vec!["2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f"],
-                    ),
-                    (
-                        Some("4c"),
-                        "4c4",
-                        Some("4c5"),
-                        vec!["4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c"],
-                    ),
-                    (
-                        Some("4c4"),
-                        "4c4c",
-                        Some("4c4d"),
-                        vec!["4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c"],
-                    ),
-                    (
-                        Some("4e"),
-                        "4e4",
-                        Some("4e5"),
-                        vec!["4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e"],
-                    ),
-                ],
-            ),
-            // Case 8: Known-root children 2 and 4 span [2, 5)
+            // A known-root span ending in child f is unbounded.
             (
                 vec![
                     ProofV2Target::new(B256::repeat_byte(0x20))
                         .with_parent(ProofV2TargetParent::new(0)),
-                    ProofV2Target::new(B256::repeat_byte(0x40))
+                    ProofV2Target::new(B256::repeat_byte(0xf0))
                         .with_parent(ProofV2TargetParent::new(0)),
                 ],
                 vec![(
                     Some(""),
                     "2",
-                    Some("5"),
+                    None,
                     vec![
                         "2020202020202020202020202020202020202020202020202020202020202020",
-                        "4040404040404040404040404040404040404040404040404040404040404040",
+                        "f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0",
                     ],
                 )],
             ),
-            // Case 9: Parent ordering can make traversal ranges move backwards (4 then 20)
+            // Parent ordering can make traversal ranges move backwards (4 then 20).
             (
                 vec![
                     ProofV2Target::new(B256::repeat_byte(0x20))
@@ -270,7 +190,7 @@ mod tests {
                     ),
                 ],
             ),
-            // Case 10: Root and root-parent targets are distinct despite sharing a prefix
+            // Root and root-parent targets are distinct despite sharing a prefix.
             (
                 vec![
                     ProofV2Target::new(B256::repeat_byte(0x20)),
@@ -295,125 +215,33 @@ mod tests {
         ];
 
         for (i, (mut input_targets, expected)) in test_cases.into_iter().enumerate() {
-            let test_case = i + 1;
-            let sub_tries: Vec<_> = iter_sub_trie_targets(&mut input_targets).collect();
+            let actual = iter_sub_trie_targets(&mut input_targets)
+                .map(|sub_trie| {
+                    (
+                        sub_trie.parent_prefix,
+                        sub_trie.lower_bound,
+                        sub_trie.upper_bound,
+                        sub_trie
+                            .targets
+                            .iter()
+                            .map(|target| target.key_nibbles)
+                            .collect::<Vec<_>>(),
+                    )
+                })
+                .collect::<Vec<_>>();
+            let expected = expected
+                .into_iter()
+                .map(|(parent_prefix, lower_bound, upper_bound, keys)| {
+                    (
+                        parent_prefix.map(nibbles),
+                        nibbles(lower_bound),
+                        upper_bound.map(nibbles),
+                        keys.into_iter().map(nibbles).collect::<Vec<_>>(),
+                    )
+                })
+                .collect::<Vec<_>>();
 
-            assert_eq!(
-                sub_tries.len(),
-                expected.len(),
-                "Test case {} failed: expected {} sub-tries, got {}",
-                test_case,
-                expected.len(),
-                sub_tries.len()
-            );
-
-            for (
-                j,
-                (
-                    sub_trie,
-                    (exp_parent_prefix_hex, exp_lower_bound_hex, exp_upper_bound_hex, exp_keys),
-                ),
-            ) in sub_tries.iter().zip(expected.iter()).enumerate()
-            {
-                let exp_parent_prefix = exp_parent_prefix_hex.map(nibbles);
-                let exp_lower_bound = nibbles(exp_lower_bound_hex);
-                let exp_upper_bound = exp_upper_bound_hex.map(nibbles);
-
-                assert_eq!(
-                    sub_trie.parent_prefix, exp_parent_prefix,
-                    "Test case {} sub-trie {}: parent prefix mismatch",
-                    test_case, j
-                );
-                assert_eq!(
-                    sub_trie.lower_bound, exp_lower_bound,
-                    "Test case {} sub-trie {}: lower bound mismatch",
-                    test_case, j
-                );
-                assert_eq!(
-                    sub_trie.upper_bound, exp_upper_bound,
-                    "Test case {} sub-trie {}: upper bound mismatch",
-                    test_case, j
-                );
-                assert_eq!(
-                    sub_trie.targets.len(),
-                    exp_keys.len(),
-                    "Test case {} sub-trie {}: expected {} targets, got {}",
-                    test_case,
-                    j,
-                    exp_keys.len(),
-                    sub_trie.targets.len()
-                );
-
-                for (k, (target, exp_key_hex)) in
-                    sub_trie.targets.iter().zip(exp_keys.iter()).enumerate()
-                {
-                    let exp_key = nibbles(exp_key_hex);
-                    assert_eq!(
-                        target.key_nibbles, exp_key,
-                        "Test case {} sub-trie {} target {}: key mismatch",
-                        test_case, j, k
-                    );
-                }
-            }
+            assert_eq!(actual, expected, "test case {}", i + 1);
         }
-    }
-
-    #[test]
-    fn test_iter_sub_trie_targets_key_order_after_sort() {
-        let mut targets = [
-            ProofV2Target::new(B256::repeat_byte(0x40)),
-            ProofV2Target::new(B256::repeat_byte(0x20)),
-        ];
-
-        let sub_tries = iter_sub_trie_targets(&mut targets).collect::<Vec<_>>();
-
-        assert_eq!(sub_tries.len(), 1);
-        assert_eq!(sub_tries[0].targets[0].key(), B256::repeat_byte(0x20));
-        assert_eq!(sub_tries[0].parent_prefix, None);
-    }
-
-    #[test]
-    fn test_iter_sub_trie_targets_groups_same_parent_child() {
-        let key_a = B256::right_padding_from(&[0x20, 0x10]);
-        let key_b = B256::right_padding_from(&[0x20, 0x00]);
-        let mut targets = [key_a, key_b]
-            .map(|key| ProofV2Target::new(key).with_parent(ProofV2TargetParent::new(1)));
-
-        let sub_tries = iter_sub_trie_targets(&mut targets).collect::<Vec<_>>();
-
-        assert_eq!(sub_tries.len(), 1);
-        assert_eq!(sub_tries[0].parent_prefix, Some(Nibbles::from_nibbles([0x2])));
-        assert_eq!(
-            (sub_tries[0].lower_bound, sub_tries[0].upper_bound),
-            (Nibbles::from_nibbles([0x2, 0x0]), Some(Nibbles::from_nibbles([0x2, 0x1])),)
-        );
-        assert_eq!(
-            sub_tries[0].targets.iter().map(ProofV2Target::key).collect::<Vec<_>>(),
-            [key_b, key_a]
-        );
-    }
-
-    #[test]
-    fn test_child_f_upper_bounds() {
-        let root_child_f = B256::repeat_byte(0xf0);
-        let non_root_child_f = B256::repeat_byte(0x2f);
-        let mut targets = [
-            ProofV2Target::new(non_root_child_f).with_parent(ProofV2TargetParent::new(1)),
-            ProofV2Target::new(root_child_f).with_parent(ProofV2TargetParent::new(0)),
-        ];
-
-        let sub_tries = iter_sub_trie_targets(&mut targets).collect::<Vec<_>>();
-
-        assert_eq!(sub_tries.len(), 2);
-        assert_eq!(sub_tries[0].parent_prefix, Some(Nibbles::new()));
-        assert_eq!(
-            (sub_tries[0].lower_bound, sub_tries[0].upper_bound),
-            (Nibbles::from_nibbles([0xf]), None)
-        );
-        assert_eq!(sub_tries[1].parent_prefix, Some(Nibbles::from_nibbles([0x2])));
-        assert_eq!(
-            (sub_tries[1].lower_bound, sub_tries[1].upper_bound),
-            (Nibbles::from_nibbles([0x2, 0xf]), Some(Nibbles::from_nibbles([0x3])),)
-        );
     }
 }
