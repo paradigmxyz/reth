@@ -54,9 +54,12 @@ impl HashedPostState {
             .map(|(address, account)| {
                 let hashed_address = KH::hash_key(address);
                 let hashed_account = account.info.as_ref().map(Into::into);
-                let hashed_storage = HashedStorage::from_plain_storage(
-                    account.status,
-                    account.storage.iter().map(|(slot, value)| (slot, &value.present_value)),
+                let hashed_storage = HashedStorage::from_iter(
+                    false,
+                    account
+                        .storage
+                        .iter()
+                        .map(|(slot, value)| (keccak256(B256::from(*slot)), value.present_value)),
                 );
 
                 (
@@ -445,11 +448,11 @@ impl HashedStorage {
 
     /// Create new hashed storage from account status and plain storage.
     pub fn from_plain_storage<'a>(
-        _status: AccountStatus,
+        status: AccountStatus,
         storage: impl IntoIterator<Item = (&'a U256, &'a U256)>,
     ) -> Self {
         Self::from_iter(
-            false,
+            status.was_destroyed(),
             storage.into_iter().map(|(key, value)| (keccak256(B256::from(*key)), *value)),
         )
     }
