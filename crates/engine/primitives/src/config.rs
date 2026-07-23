@@ -4,13 +4,14 @@ use alloy_eips::merge::EPOCH_SLOTS;
 use core::time::Duration;
 
 /// Triggers persistence when the number of canonical blocks in memory exceeds this threshold.
-pub const DEFAULT_PERSISTENCE_THRESHOLD: u64 = 2;
+pub const DEFAULT_PERSISTENCE_THRESHOLD: u64 = 7;
 
-/// Maximum canonical-minus-persisted gap before engine API processing is stalled.
+/// Maximum number of blocks beyond the in-memory buffer target awaiting persistence before engine
+/// API processing is stalled.
 pub const DEFAULT_PERSISTENCE_BACKPRESSURE_THRESHOLD: u64 = 16;
 
 /// How close to the canonical head we persist blocks.
-pub const DEFAULT_MEMORY_BLOCK_BUFFER_TARGET: u64 = 0;
+pub const DEFAULT_MEMORY_BLOCK_BUFFER_TARGET: u64 = 5;
 
 /// The size of proof targets chunk to spawn in one multiproof calculation.
 pub const DEFAULT_MULTIPROOF_TASK_CHUNK_SIZE: usize = 5;
@@ -31,16 +32,6 @@ pub const DEFAULT_RESERVED_CPU_CORES: usize = 1;
 /// Nodes at this depth and below are converted to hash stubs to reduce memory.
 /// Depth 4 means we keep roughly 16^4 = 65536 potential branch paths at most.
 pub const DEFAULT_SPARSE_TRIE_PRUNE_DEPTH: usize = 4;
-
-/// Default LFU hot-slot capacity for sparse trie pruning.
-///
-/// Limits the number of `(address, slot)` pairs retained across prune cycles.
-pub const DEFAULT_SPARSE_TRIE_MAX_HOT_SLOTS: usize = 1500;
-
-/// Default LFU hot-account capacity for sparse trie pruning.
-///
-/// Limits the number of account addresses retained across prune cycles.
-pub const DEFAULT_SPARSE_TRIE_MAX_HOT_ACCOUNTS: usize = 1000;
 
 /// Default timeout for the state root task before spawning a sequential fallback.
 pub const DEFAULT_STATE_ROOT_TASK_TIMEOUT: Duration = Duration::from_secs(1);
@@ -98,7 +89,8 @@ pub struct TreeConfig {
     ///
     /// Note: this should be less than or equal to `persistence_threshold`.
     memory_block_buffer_target: u64,
-    /// Maximum canonical-minus-persisted gap before engine API processing is stalled.
+    /// Maximum number of blocks beyond the in-memory buffer target awaiting persistence before
+    /// engine API processing is stalled.
     persistence_backpressure_threshold: u64,
     /// Number of pending blocks that cannot be executed due to missing parent and
     /// are kept in cache.
@@ -166,10 +158,6 @@ pub struct TreeConfig {
     disable_cache_metrics: bool,
     /// Depth for sparse trie pruning after state root computation.
     sparse_trie_prune_depth: usize,
-    /// LFU hot-slot capacity: max `(address, slot)` pairs retained across prune cycles.
-    sparse_trie_max_hot_slots: usize,
-    /// LFU hot-account capacity: max account addresses retained across prune cycles.
-    sparse_trie_max_hot_accounts: usize,
     /// When set, blocks whose total processing time (execution + state reads + state root +
     /// DB commit) exceeds this duration trigger a structured `warn!` log with detailed timing,
     /// state-operation counts, and cache hit-rate metrics. `Duration::ZERO` logs every block.
@@ -242,8 +230,6 @@ impl Default for TreeConfig {
             allow_unwind_canonical_header: false,
             disable_cache_metrics: false,
             sparse_trie_prune_depth: DEFAULT_SPARSE_TRIE_PRUNE_DEPTH,
-            sparse_trie_max_hot_slots: DEFAULT_SPARSE_TRIE_MAX_HOT_SLOTS,
-            sparse_trie_max_hot_accounts: DEFAULT_SPARSE_TRIE_MAX_HOT_ACCOUNTS,
             slow_block_threshold: None,
             disable_sparse_trie_cache_pruning: false,
             state_root_task_timeout: Some(DEFAULT_STATE_ROOT_TASK_TIMEOUT),
@@ -285,8 +271,6 @@ impl TreeConfig {
         allow_unwind_canonical_header: bool,
         disable_cache_metrics: bool,
         sparse_trie_prune_depth: usize,
-        sparse_trie_max_hot_slots: usize,
-        sparse_trie_max_hot_accounts: usize,
         slow_block_threshold: Option<Duration>,
         state_root_task_timeout: Option<Duration>,
         share_execution_cache_with_payload_builder: bool,
@@ -319,8 +303,6 @@ impl TreeConfig {
             allow_unwind_canonical_header,
             disable_cache_metrics,
             sparse_trie_prune_depth,
-            sparse_trie_max_hot_slots,
-            sparse_trie_max_hot_accounts,
             slow_block_threshold,
             disable_sparse_trie_cache_pruning: false,
             state_root_task_timeout,
@@ -630,28 +612,6 @@ impl TreeConfig {
     /// Setter for sparse trie prune depth.
     pub const fn with_sparse_trie_prune_depth(mut self, depth: usize) -> Self {
         self.sparse_trie_prune_depth = depth;
-        self
-    }
-
-    /// Returns the LFU hot-slot capacity for sparse trie pruning.
-    pub const fn sparse_trie_max_hot_slots(&self) -> usize {
-        self.sparse_trie_max_hot_slots
-    }
-
-    /// Setter for LFU hot-slot capacity.
-    pub const fn with_sparse_trie_max_hot_slots(mut self, max_hot_slots: usize) -> Self {
-        self.sparse_trie_max_hot_slots = max_hot_slots;
-        self
-    }
-
-    /// Returns the LFU hot-account capacity for sparse trie pruning.
-    pub const fn sparse_trie_max_hot_accounts(&self) -> usize {
-        self.sparse_trie_max_hot_accounts
-    }
-
-    /// Setter for LFU hot-account capacity.
-    pub const fn with_sparse_trie_max_hot_accounts(mut self, max_hot_accounts: usize) -> Self {
-        self.sparse_trie_max_hot_accounts = max_hot_accounts;
         self
     }
 

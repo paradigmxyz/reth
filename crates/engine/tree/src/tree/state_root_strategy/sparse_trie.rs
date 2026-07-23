@@ -505,8 +505,6 @@ where
                 let mut existing_updates = self.storage_updates.get_mut(&address);
 
                 for (&slot, &value) in &storage.storage {
-                    self.trie.record_slot_touch(address, slot);
-
                     let encoded = if value.is_zero() {
                         Vec::new()
                     } else {
@@ -531,8 +529,6 @@ where
         }
 
         for (&address, &account) in &hashed_state_update.accounts {
-            self.trie.record_account_touch(address);
-
             // Track account as touched.
             //
             // This might overwrite an existing update, which is fine, because storage root from it
@@ -982,6 +978,8 @@ pub(super) struct SparseTrieTaskMetrics {
     pub(super) sparse_trie_total_duration_histogram: Histogram,
     /// Time spent preparing the sparse trie for reuse after state root computation.
     pub(super) into_trie_for_reuse_duration_histogram: Histogram,
+    /// Time spent building the retention set and pruning the sparse trie.
+    pub(super) sparse_trie_prune_duration_histogram: Histogram,
     /// Time spent waiting for preserved sparse trie cache to become available.
     pub(super) sparse_trie_cache_wait_duration_histogram: Histogram,
     /// Histogram for sparse trie task idle time in seconds (waiting for updates or proof
