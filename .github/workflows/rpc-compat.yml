@@ -15,7 +15,7 @@ concurrency:
 
 jobs:
   test:
-    runs-on: ${{ github.repository == 'paradigmxyz/reth' && 'depot-ubuntu-latest-4' || 'ubuntu-latest' }}
+    runs-on: ${{ (github.repository == 'paradigmxyz/reth' || github.repository == 'paradigmxyz/reth-oss') && 'depot-ubuntu-latest-4' || 'ubuntu-latest' }}
     timeout-minutes: 90
     permissions:
       contents: read
