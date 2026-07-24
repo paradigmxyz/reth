@@ -14,7 +14,9 @@ use reth_node_core::{
     dirs::{DataDirPath, MaybePlatformPath},
 };
 use reth_node_ethereum::{node::EthereumAddOns, EthereumNode};
-use reth_provider::{CanonChainTracker, HeaderProvider};
+use reth_provider::{
+    CanonChainTracker, ChainStateBlockReader, DatabaseProviderFactory, HeaderProvider,
+};
 use reth_rpc_api::TestingBuildBlockRequestV1;
 use reth_rpc_server_types::{RethRpcModule, RpcModuleSelection};
 use reth_tasks::Runtime;
@@ -204,6 +206,10 @@ async fn debug_set_head_allows_committing_new_blocks() -> eyre::Result<()> {
                         discarded_latest.get("hash").and_then(Value::as_str),
                         Some(discarded_tip_hash.as_str())
                     );
+                    let discarded_tip = provider
+                        .sealed_header(DEFAULT_PERSISTENCE_THRESHOLD + 1)?
+                        .expect("discarded tip should be available");
+                    provider.set_safe(discarded_tip);
 
                     let finalized = provider
                         .sealed_header(1)?
@@ -238,6 +244,7 @@ async fn debug_set_head_allows_committing_new_blocks() -> eyre::Result<()> {
                         discarded_block.is_null(),
                         "persisted blocks above the reset head must be removed before returning"
                     );
+                    assert_eq!(provider.database_provider_ro()?.last_safe_block_number()?, Some(1));
 
                     // The next committed block must extend the rewound head, not the discarded tip.
                     let mut replacement_payload_attributes = payload_attributes;

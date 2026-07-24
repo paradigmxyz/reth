@@ -96,7 +96,17 @@ where
         while let Ok(action) = self.incoming.recv() {
             match action {
                 PersistenceAction::RemoveBlocksAbove(new_tip_num, sender) => {
-                    let last_block = self.on_remove_blocks_above(new_tip_num)?;
+                    let last_block = self.on_remove_blocks_above(new_tip_num, None)?;
+                    // send new sync metrics based on removed blocks
+                    let _ =
+                        self.sync_metrics_tx.send(MetricEvent::SyncHeight { height: new_tip_num });
+                    let _ = sender.send(PersistenceResult { last_block, commit_duration: None });
+                }
+                PersistenceAction::DebugRemoveBlocksAbove { new_tip_num, safe_block, sender } => {
+                    let last_block = self.on_remove_blocks_above(new_tip_num, safe_block)?;
+                    if safe_block.is_some() {
+                        self.pending_safe_block = safe_block;
+                    }
                     // send new sync metrics based on removed blocks
                     let _ =
                         self.sync_metrics_tx.send(MetricEvent::SyncHeight { height: new_tip_num });
@@ -131,6 +141,7 @@ where
     fn on_remove_blocks_above(
         &self,
         new_tip_num: u64,
+        safe_block: Option<u64>,
     ) -> Result<Option<BlockNumHash>, PersistenceError> {
         debug!(target: "engine::persistence", ?new_tip_num, "Removing blocks");
         let start_time = Instant::now();
@@ -138,6 +149,9 @@ where
 
         let new_tip_hash = provider_rw.block_hash(new_tip_num)?;
         provider_rw.remove_block_and_execution_above(new_tip_num)?;
+        if let Some(safe_block) = safe_block {
+            provider_rw.save_safe_block_number(safe_block)?;
+        }
         provider_rw.commit()?;
 
         debug!(target: "engine::persistence", ?new_tip_num, ?new_tip_hash, "Removed blocks from disk");
@@ -244,6 +258,16 @@ pub enum PersistenceAction<N: NodePrimitives = EthPrimitives> {
     /// This will first update checkpoints from the database, then remove actual block data from
     /// static files.
     RemoveBlocksAbove(u64, CrossbeamSender<PersistenceResult>),
+
+    /// Removes block data above the debug head and updates the safe marker in the same commit.
+    DebugRemoveBlocksAbove {
+        /// The tip above which blocks are removed.
+        new_tip_num: u64,
+        /// The safe marker to persist with the removal.
+        safe_block: Option<u64>,
+        /// Receives the persistence result.
+        sender: CrossbeamSender<PersistenceResult>,
+    },
 
     /// Update the persisted finalized block on disk
     SaveFinalizedBlock(u64),
@@ -360,6 +384,20 @@ impl<T: NodePrimitives> PersistenceHandle<T> {
         tx: CrossbeamSender<PersistenceResult>,
     ) -> Result<(), SendError<PersistenceAction<T>>> {
         self.send_action(PersistenceAction::RemoveBlocksAbove(block_num, tx))
+    }
+
+    /// Removes blocks above the debug head and persists the supplied safe marker atomically.
+    pub fn debug_remove_blocks_above(
+        &self,
+        block_num: u64,
+        safe_block: Option<u64>,
+        tx: CrossbeamSender<PersistenceResult>,
+    ) -> Result<(), SendError<PersistenceAction<T>>> {
+        self.send_action(PersistenceAction::DebugRemoveBlocksAbove {
+            new_tip_num: block_num,
+            safe_block,
+            sender: tx,
+        })
     }
 }
 

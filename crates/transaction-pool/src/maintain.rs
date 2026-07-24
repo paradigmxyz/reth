@@ -24,7 +24,7 @@ use reth_chainspec::{ChainSpecProvider, EthChainSpec, EthereumHardforks};
 use reth_execution_types::ChangedAccount;
 use reth_fs_util::FsPathError;
 use reth_primitives_traits::{
-    transaction::signed::SignedTransaction, NodePrimitives, SealedHeader,
+    transaction::signed::SignedTransaction, Block as _, NodePrimitives, SealedBlock, SealedHeader,
 };
 use reth_storage_api::{errors::provider::ProviderError, BlockReaderIdExt, StateProviderFactory};
 use reth_tasks::Runtime;
@@ -105,7 +105,7 @@ pub fn maintain_transaction_pool_future<N, Client, P, St>(
 where
     N: NodePrimitives,
     Client: StateProviderFactory
-        + BlockReaderIdExt<Header = N::BlockHeader>
+        + BlockReaderIdExt<Block = N::Block, Header = N::BlockHeader>
         + ChainSpecProvider<ChainSpec: EthChainSpec<Header = N::BlockHeader> + EthereumHardforks>
         + Clone
         + 'static,
@@ -131,7 +131,7 @@ pub async fn maintain_transaction_pool<N, Client, P, St>(
 ) where
     N: NodePrimitives,
     Client: StateProviderFactory
-        + BlockReaderIdExt<Header = N::BlockHeader>
+        + BlockReaderIdExt<Block = N::Block, Header = N::BlockHeader>
         + ChainSpecProvider<ChainSpec: EthChainSpec<Header = N::BlockHeader> + EthereumHardforks>
         + Clone
         + 'static,
@@ -321,13 +321,32 @@ pub async fn maintain_transaction_pool<N, Client, P, St>(
             CanonStateNotification::Reorg { old, new } => {
                 let (old_blocks, old_state) = old.inner();
                 let (new_blocks, new_state) = new.inner();
-                let new_tip = new_blocks.tip();
-                let new_first = new_blocks.first();
                 let old_first = old_blocks.first();
+                let reverted_tip = if new.is_empty() {
+                    let hash = old_first.parent_hash();
+                    match client.block_by_hash(hash) {
+                        Ok(Some(block)) => Some(block.seal_unchecked(hash)),
+                        Ok(None) => {
+                            warn!(target: "txpool", %hash, "reverted canonical tip not found");
+                            maintained_state = MaintainedPoolState::Drifted;
+                            continue
+                        }
+                        Err(err) => {
+                            warn!(target: "txpool", %hash, %err, "failed to load reverted canonical tip");
+                            maintained_state = MaintainedPoolState::Drifted;
+                            continue
+                        }
+                    }
+                } else {
+                    None
+                };
+                let new_tip: &SealedBlock<N::Block> =
+                    reverted_tip.as_ref().unwrap_or_else(|| new_blocks.tip().sealed_block());
 
                 // check if the reorg is not canonical with the pool's block
                 if !(old_first.parent_hash() == pool_info.last_seen_block_hash ||
-                    new_first.parent_hash() == pool_info.last_seen_block_hash)
+                    (!new.is_empty() &&
+                        new_blocks.first().parent_hash() == pool_info.last_seen_block_hash))
                 {
                     // the new block points to a higher block than the oldest block in the old chain
                     maintained_state = MaintainedPoolState::Drifted;
@@ -414,7 +433,7 @@ pub async fn maintain_transaction_pool<N, Client, P, St>(
 
                 // update the pool first
                 let update = CanonicalStateUpdate {
-                    new_tip: new_tip.sealed_block(),
+                    new_tip,
                     pending_block_base_fee,
                     pending_block_blob_fee,
                     changed_accounts,
