@@ -18,7 +18,7 @@ pub struct ProofTaskTrieMetrics {
     account_worker_idle_time_seconds: Histogram,
     /// Histogram for `Dispatched` deferred encoder variant count.
     deferred_encoder_dispatched: Histogram,
-    /// Histogram for `FromCache` deferred encoder variant count.
+    /// Histogram for legacy storage-root cache hit count.
     deferred_encoder_from_cache: Histogram,
     /// Histogram for `Sync` deferred encoder variant count.
     deferred_encoder_sync: Histogram,
