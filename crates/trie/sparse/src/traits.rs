@@ -16,6 +16,33 @@ use reth_trie_common::{
 #[cfg(feature = "trie-debug")]
 use crate::debug_recorder::TrieDebugRecorder;
 
+/// Modification epoch assigned to cached sparse trie nodes.
+///
+/// Epochs must increase monotonically. Nodes materialized from the parent state without being
+/// modified use [`Self::UNMODIFIED`].
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub struct TrieNodeEpoch(u64);
+
+impl TrieNodeEpoch {
+    /// Epoch assigned to nodes materialized from the parent state without being modified.
+    pub const UNMODIFIED: Self = Self(0);
+
+    /// Creates a new node modification epoch.
+    pub const fn new(epoch: u64) -> Self {
+        Self(epoch)
+    }
+
+    /// Returns the inner epoch.
+    pub const fn get(self) -> u64 {
+        self.0
+    }
+
+    /// Returns whether a node with this epoch should be pruned at the provided cutoff.
+    pub const fn should_prune(self, prune_before: Self) -> bool {
+        self.0 < prune_before.0
+    }
+}
+
 /// Describes an update to a leaf in the sparse trie.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum LeafUpdate {
@@ -98,25 +125,28 @@ pub trait SparseTrie: Sized + Debug + Send + Sync {
     /// each node with [`TrieNodeV2::EmptyRoot`] to avoid cloning.
     fn reveal_nodes(&mut self, nodes: &mut [ProofTrieNodeV2]) -> SparseTrieResult<()>;
 
-    /// Calculates and returns the root hash of the trie.
+    /// Calculates and returns the root hash of the trie at the provided epoch.
     ///
-    /// This processes any dirty nodes by updating their RLP encodings
-    /// and returns the root hash.
+    /// This processes dirty nodes by updating their RLP encodings and caching their newest
+    /// modification at `new_epoch`, then returns the root hash.
     ///
     /// # Returns
     ///
     /// The root hash of the trie.
-    fn root(&mut self) -> B256;
+    fn root(&mut self, new_epoch: TrieNodeEpoch) -> B256;
 
     /// Returns true if the root node is cached and does not need any recomputation.
     fn is_root_cached(&self) -> bool;
+
+    /// Returns the root's modification epoch when it is clean, or `None` when it is dirty.
+    fn root_epoch(&self) -> Option<TrieNodeEpoch>;
 
     /// Recalculates and updates the RLP hashes of subtries deeper than a certain level. The level
     /// is defined in the implementation.
     ///
     /// The root node is considered to be at level 0. This method is useful for optimizing
     /// hash recalculations after localized changes to the trie structure.
-    fn update_subtrie_hashes(&mut self);
+    fn update_subtrie_hashes(&mut self, new_epoch: TrieNodeEpoch);
 
     /// Retrieves a reference to the leaf value at the specified path.
     ///
@@ -191,30 +221,17 @@ pub trait SparseTrie: Sized + Debug + Send + Sync {
     /// This is useful for reusing the trie without needing to reallocate memory.
     fn clear(&mut self);
 
-    /// Returns a cheap O(1) size hint for the trie representing the count of revealed
-    /// (non-Hash) nodes.
-    ///
-    /// This is used as a heuristic for prioritizing which storage tries to keep
-    /// during pruning. Larger values indicate larger tries that are more valuable to preserve.
-    fn size_hint(&self) -> usize;
-
-    /// Prunes all subtrees that do not contain retained leaves.
-    ///
-    /// Each retained leaf is a full key path (usually 64 nibbles for hashed keys).
-    /// Any revealed subtree that is not a prefix of at least one retained key is collapsed into
-    /// hash stubs when hashes are available.
+    /// Collapses nodes last modified before `prune_before` into hash stubs.
     ///
     /// # Preconditions
     ///
-    /// Must be called only after `root()` has computed hashes for the current trie state.
-    /// Calling `prune` on a dirty trie is a hard error and may panic.
-    ///
-    /// `retained_leaves` must be sorted lexicographically.
+    /// The trie must not be dirty. An unmodified revealed root may be pruned because
+    /// proof-revealed descendants carry cached RLP nodes.
     ///
     /// # Returns
     ///
     /// The number of nodes converted to hash stubs.
-    fn prune(&mut self, retained_leaves: &[Nibbles]) -> usize;
+    fn prune(&mut self, prune_before: TrieNodeEpoch) -> usize;
 
     /// Takes the debug recorder out of this trie, replacing it with an empty one.
     ///
