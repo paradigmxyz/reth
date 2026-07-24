@@ -286,8 +286,8 @@ impl<N: NetworkPrimitives> TransactionsHandle<N> {
 pub struct TransactionsManager<Pool, N: NetworkPrimitives = EthNetworkPrimitives> {
     /// Access to the transaction pool.
     pool: Pool,
-    /// Cache of recovered transaction senders shared with payload prewarming.
-    sender_recovery_cache: SenderRecoveryCache,
+    /// Cache of recovered transaction senders shared with payload execution, if enabled.
+    sender_recovery_cache: Option<SenderRecoveryCache>,
     /// Network access.
     network: NetworkHandle<N>,
     /// Subscriptions to all network related events.
@@ -403,7 +403,7 @@ impl<Pool: TransactionPool, N: NetworkPrimitives> TransactionsManager<Pool, N> {
 
         Self {
             pool,
-            sender_recovery_cache: SenderRecoveryCache::default(),
+            sender_recovery_cache: None,
             network,
             network_events,
             transaction_fetcher,
@@ -430,7 +430,7 @@ impl<Pool: TransactionPool, N: NetworkPrimitives> TransactionsManager<Pool, N> {
 
     /// Uses the provided sender recovery cache.
     pub fn with_sender_recovery_cache(mut self, cache: SenderRecoveryCache) -> Self {
-        self.sender_recovery_cache = cache;
+        self.sender_recovery_cache = Some(cache);
         self
     }
 
@@ -1464,8 +1464,13 @@ where
 
         let txs_len = transactions.len();
 
-        let recover =
-            |tx| match Pool::Transaction::try_recover_with_cache(tx, &self.sender_recovery_cache) {
+        let recover = |tx| {
+            let recovered = if let Some(cache) = &self.sender_recovery_cache {
+                Pool::Transaction::try_recover_with_cache(tx, cache)
+            } else {
+                Pool::Transaction::try_recover(tx)
+            };
+            match recovered {
                 Ok(tx) => Some(tx),
                 Err(badtx) => {
                     trace!(target: "net::tx",
@@ -1476,7 +1481,8 @@ where
                     );
                     None
                 }
-            };
+            }
+        };
 
         let new_txs = transactions.into_par_iter().filter_map(recover).collect::<Vec<_>>();
 

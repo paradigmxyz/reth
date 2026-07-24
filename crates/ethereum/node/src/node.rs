@@ -607,8 +607,10 @@ where
         let jit = &ctx.config().jit;
         let dump_dir = jit.debug.then(|| ctx.config().datadir().data_dir().join("jit"));
 
-        let (evm_config, revmc_metrics) = build_evm_config(ctx.chain_spec(), jit, dump_dir)?;
-        let evm_config = evm_config.with_sender_recovery_cache(ctx.sender_recovery_cache().clone());
+        let (mut evm_config, revmc_metrics) = build_evm_config(ctx.chain_spec(), jit, dump_dir)?;
+        if let Some(cache) = ctx.sender_recovery_cache() {
+            evm_config = evm_config.with_sender_recovery_cache(cache.clone());
+        }
 
         #[cfg(not(feature = "jit"))]
         let _ = revmc_metrics;
