@@ -4,7 +4,7 @@ use crate::{
 };
 use clap::Subcommand;
 use eyre::{eyre, Result};
-use reth_chainspec::{ChainSpec, EthChainSpec, Hardforks};
+use reth_chainspec::{BaseFeeParams, BaseFeeParamsKind, ChainSpec, EthChainSpec, Hardforks};
 use reth_cli::chainspec::ChainSpecParser;
 use reth_cli_commands::{
     common::{CliComponentsBuilder, CliNodeTypes, HeaderMut},
@@ -14,6 +14,7 @@ use reth_cli_runner::CliRunner;
 use reth_db::DatabaseEnv;
 use reth_node_api::NodePrimitives;
 use reth_node_builder::{NodeBuilder, WithLaunchContext};
+use reth_node_core::args::DevArgs;
 use reth_node_ethereum::{consensus::EthBeaconConsensus, EthereumNode};
 use reth_node_metrics::recorder::install_prometheus_recorder;
 use reth_rpc_server_types::RpcModuleValidator;
@@ -65,10 +66,14 @@ where
     ///
     /// This accepts a closure that is used to launch the node via the
     /// [`NodeCommand`](reth_cli_commands::node::NodeCommand).
-    pub fn run(self, launcher: impl Launcher<C, Ext>) -> Result<()>
+    pub fn run(mut self, launcher: impl Launcher<C, Ext>) -> Result<()>
     where
         C: ChainSpecParser<ChainSpec = ChainSpec>,
     {
+        if let Commands::Node(command) = &mut self.cli.command {
+            apply_dev_chain_spec_overrides(&mut command.dev, &mut command.chain);
+        }
+
         let jit_args = match &self.cli.command {
             Commands::ReExecute(cmd) => cmd.jit.clone(),
             _ => Default::default(),
@@ -227,6 +232,44 @@ pub trait ExtendedCommand {
     fn execute(self, runner: CliRunner) -> Result<()>;
 }
 
+/// Applies dev-mode overrides to the chain spec before the node is built.
+///
+/// With a bare `--dev.constant-base-fee`, base fee adjustment is disabled by setting the
+/// EIP-1559 max change denominator to zero: `alloy_eips::eip1559::calc_next_block_base_fee`
+/// then returns the parent's base fee unchanged. With an explicit value
+/// (`--dev.constant-base-fee=<WEI>`), the base fee of every mined block is pinned to that
+/// value via [`BaseFeeParamsKind::TestingOverride`]. The payload builder, consensus
+/// validation and the transaction pool all derive the next base fee from the chain spec, so
+/// locally mined blocks stay self-consistent either way.
+///
+/// The flag is taken out of `dev` once applied: entry points that never call this (e.g. the
+/// `run_with_components` family) leave it set, which the dev-mode launcher detects to warn
+/// that the flag was ignored.
+fn apply_dev_chain_spec_overrides(dev: &mut DevArgs, chain: &mut Arc<ChainSpec>) {
+    if !dev.dev {
+        return;
+    }
+    // The chain's own elasticity is preserved in both arms: it still feeds consumers that
+    // read the adjustment params directly, such as gas limit validation at the London
+    // transition block.
+    let elasticity = chain.base_fee_params_at_timestamp(u64::MAX).elasticity_multiplier;
+    match dev.constant_base_fee.take() {
+        // freeze at the parent (i.e. chain tip) value
+        Some(None) => {
+            Arc::make_mut(chain).base_fee_params =
+                BaseFeeParamsKind::Constant(BaseFeeParams::new(0, elasticity));
+        }
+        // pin to an explicit value
+        Some(Some(base_fee)) => {
+            Arc::make_mut(chain).base_fee_params = BaseFeeParamsKind::TestingOverride {
+                base_fee,
+                params: BaseFeeParams::new(0, elasticity),
+            };
+        }
+        None => {}
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -257,6 +300,72 @@ mod tests {
             app.set_runner(runner);
             assert!(app.runner.is_some());
         }
+    }
+
+    #[test]
+    fn dev_constant_base_fee_freezes_base_fee() {
+        let cli = Cli::<EthereumChainSpecParser, NoArgs>::try_parse_from([
+            "reth",
+            "node",
+            "--chain",
+            "dev",
+            "--dev",
+            "--dev.constant-base-fee",
+        ])
+        .unwrap();
+        let Commands::Node(mut command) = cli.command else { panic!("expected node command") };
+
+        let parent = command.chain.genesis_header().clone();
+        let parent_base_fee = parent.base_fee_per_gas.unwrap();
+
+        // sanity: with default params the base fee of an empty parent block decreases
+        let next = command.chain.next_block_base_fee(&parent, parent.timestamp + 1).unwrap();
+        assert!(next < parent_base_fee);
+
+        apply_dev_chain_spec_overrides(&mut command.dev, &mut command.chain);
+        let next = command.chain.next_block_base_fee(&parent, parent.timestamp + 1).unwrap();
+        assert_eq!(next, parent_base_fee);
+        // consumed once applied so unapplied uses can be detected
+        assert!(command.dev.constant_base_fee.is_none());
+    }
+
+    #[test]
+    fn dev_constant_base_fee_pins_base_fee() {
+        let cli = Cli::<EthereumChainSpecParser, NoArgs>::try_parse_from([
+            "reth",
+            "node",
+            "--chain",
+            "dev",
+            "--dev",
+            "--dev.constant-base-fee=7",
+        ])
+        .unwrap();
+        let Commands::Node(mut command) = cli.command else { panic!("expected node command") };
+
+        let parent = command.chain.genesis_header().clone();
+        assert_ne!(parent.base_fee_per_gas, Some(7));
+
+        let elasticity_before =
+            command.chain.base_fee_params_at_timestamp(u64::MAX).elasticity_multiplier;
+        apply_dev_chain_spec_overrides(&mut command.dev, &mut command.chain);
+        let next = command.chain.next_block_base_fee(&parent, parent.timestamp + 1).unwrap();
+        assert_eq!(next, 7);
+        // the chain's elasticity survives the override, and the reported params freeze the
+        // base fee for consumers that bypass `ChainSpec::next_block_base_fee`
+        let params = command.chain.base_fee_params_at_timestamp(u64::MAX);
+        assert_eq!(params.elasticity_multiplier, elasticity_before);
+        assert_eq!(params.max_change_denominator, 0);
+    }
+
+    #[test]
+    fn dev_overrides_noop_without_flag() {
+        let cli = Cli::<EthereumChainSpecParser, NoArgs>::try_parse_from(["reth", "node", "--dev"])
+            .unwrap();
+        let Commands::Node(mut command) = cli.command else { panic!("expected node command") };
+
+        let params_before = command.chain.base_fee_params_at_timestamp(u64::MAX);
+        apply_dev_chain_spec_overrides(&mut command.dev, &mut command.chain);
+        assert_eq!(command.chain.base_fee_params_at_timestamp(u64::MAX), params_before);
     }
 
     #[test]
