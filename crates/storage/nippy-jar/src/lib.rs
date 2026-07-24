@@ -837,6 +837,31 @@ mod tests {
         }
     }
 
+    #[test]
+    fn test_stale_cursor_errors_after_prune() {
+        let (col1, col2) = test_data(None);
+        let num_columns = 2;
+        let file_path = tempfile::NamedTempFile::new().unwrap();
+
+        append_two_rows(num_columns, file_path.path(), &col1, &col2);
+
+        // Load the jar and open a data reader before pruning, as a concurrent reader would.
+        let stale_jar = NippyJar::load_without_header(file_path.path()).unwrap();
+        let stale_reader = std::sync::Arc::new(stale_jar.open_data_reader().unwrap());
+
+        // Prune the second row through a separate writer.
+        let nippy = NippyJar::load_without_header(file_path.path()).unwrap();
+        let mut writer = NippyJarWriter::new(nippy).unwrap();
+        writer.prune_rows(1).unwrap();
+
+        // The stale cursor still considers the pruned row in bounds, and its offsets now
+        // read as the trailing data-size entry followed by zeroes past the truncated end of
+        // the offsets file: an inverted range that must error instead of panicking when
+        // slicing the data mmap.
+        let mut cursor = NippyJarCursor::with_reader(&stale_jar, stale_reader).unwrap();
+        assert!(matches!(cursor.row_by_number(1), Err(NippyJarError::InvalidOffsetRange { .. })));
+    }
+
     fn test_append_consistency_partial_commit(
         file_path: &Path,
         col1: &[Vec<u8>],
