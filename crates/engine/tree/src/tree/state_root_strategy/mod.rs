@@ -52,7 +52,7 @@ use crate::tree::{
     metrics::BlockValidationMetrics, EngineApiTreeState, ExecutionEnv, StateProviderBuilder,
     TreeConfig,
 };
-use alloy_primitives::{map::B256Map, B256, U256};
+use alloy_primitives::{keccak256, map::B256Map, B256, U256};
 use crossbeam_channel::Receiver as CrossbeamReceiver;
 use itertools::Itertools;
 use rayon::{join, prelude::*};
@@ -67,9 +67,10 @@ use reth_provider::{
     DatabaseProviderFactory, DatabaseProviderROFactory, HashedPostStateProvider, ProviderError,
     StateProviderFactory, StateReader, StateRootProvider,
 };
+use reth_revm::db::BundleState;
 use reth_tasks::utils::increase_thread_priority;
 use reth_trie::{
-    hashed_cursor::HashedCursorFactory,
+    hashed_cursor::{extend_hashed_post_state_with_storage_zeros, HashedCursorFactory},
     prefix_set::{PrefixSet, TriePrefixSets},
     trie_cursor::TrieCursorFactory,
     updates::TrieUpdates,
@@ -471,6 +472,26 @@ impl StateRootJobOutcome {
 /// Receiver for the raced serial state-root fallback: root, trie updates, and the hashed
 /// post state the fallback recomputed.
 type SerialFallbackRx = mpsc::Receiver<ProviderResult<(B256, TrieUpdates, Arc<HashedPostState>)>>;
+
+fn fallback_hashed_post_state(
+    provider: &impl HashedPostStateProvider,
+    cursor_factory: &impl HashedCursorFactory,
+    bundle_state: &BundleState,
+) -> ProviderResult<HashedPostState> {
+    let destroyed_accounts = bundle_state
+        .state()
+        .iter()
+        .filter(|(_, account)| account.was_destroyed())
+        .map(|(address, _)| keccak256(address))
+        .collect::<Vec<_>>();
+    let mut hashed_state = provider.hashed_post_state(bundle_state);
+    extend_hashed_post_state_with_storage_zeros(
+        cursor_factory,
+        destroyed_accounts,
+        &mut hashed_state,
+    )?;
+    Ok(hashed_state)
+}
 
 /// Default state-root strategy used by engine-tree validation.
 ///
@@ -912,6 +933,7 @@ where
             state: _,
         } = ctx;
 
+        let fallback_overlay_factory = overlay_factory.clone();
         let preserved_sparse_trie = state_trie_overlays.take_sparse_trie();
         let overlay_factory = if let Some(anchor_hash) = preserved_sparse_trie
             .as_ref()
@@ -956,6 +978,7 @@ where
                 handle,
                 provider_builder,
                 overlay_factory,
+                fallback_overlay_factory,
                 executor: executor.clone(),
                 timeout: config.state_root_task_timeout(),
                 compare_trie_updates: config.always_compare_trie_updates(),
@@ -1067,7 +1090,11 @@ where
 struct SparseTrieStateRootJob<N: NodePrimitives, P> {
     handle: StateRootHandle,
     provider_builder: StateProviderBuilder<N, P>,
+    /// Overlay tailored to the sparse trie task, which may skip state already covered by a reused
+    /// trie.
     overlay_factory: OverlayStateProviderFactory<P, N>,
+    /// Complete parent-state overlay used to recover storage slots during serial fallback.
+    fallback_overlay_factory: OverlayStateProviderFactory<P, N>,
     executor: reth_tasks::Runtime,
     timeout: Option<Duration>,
     compare_trie_updates: bool,
@@ -1088,13 +1115,19 @@ where
     fn serial_fallback(
         executor: &reth_tasks::Runtime,
         provider_builder: StateProviderBuilder<N, P>,
+        overlay_factory: OverlayStateProviderFactory<P, N>,
         output: Arc<BlockExecutionOutput<N::Receipt>>,
     ) -> ProviderResult<SerialFallbackRx> {
         let provider = provider_builder.build()?;
         let (fallback_tx, fallback_rx) = mpsc::channel();
         executor.spawn_blocking_named("serial-root", move || {
             let result = (|| {
-                let hashed_state = Arc::new(provider.hashed_post_state(&output.state));
+                let cursor_factory = overlay_factory.database_provider_ro()?;
+                let hashed_state = Arc::new(fallback_hashed_post_state(
+                    &provider,
+                    &cursor_factory,
+                    &output.state,
+                )?);
                 let (root, updates) =
                     provider.state_root_with_updates(hashed_state.as_ref().clone())?;
                 Ok((root, updates, hashed_state))
@@ -1114,7 +1147,9 @@ where
         output: &BlockExecutionOutput<N::Receipt>,
     ) -> ProviderResult<StateRootJobOutcome> {
         let provider = self.provider_builder.clone().build()?;
-        let hashed_state = Arc::new(provider.hashed_post_state(&output.state));
+        let cursor_factory = self.fallback_overlay_factory.database_provider_ro()?;
+        let hashed_state =
+            Arc::new(fallback_hashed_post_state(&provider, &cursor_factory, &output.state)?);
         let (state_root, trie_updates) =
             provider.state_root_with_updates(hashed_state.as_ref().clone())?;
         self.metrics.state_root_task_fallback_success_total.increment(1);
@@ -1220,6 +1255,7 @@ where
                 Self::serial_fallback(
                     &self.executor,
                     self.provider_builder.clone(),
+                    self.fallback_overlay_factory.clone(),
                     output.clone(),
                 )?
             }
@@ -1229,6 +1265,7 @@ where
                 Self::serial_fallback(
                     &self.executor,
                     self.provider_builder.clone(),
+                    self.fallback_overlay_factory.clone(),
                     output.clone(),
                 )?
             }
@@ -1237,6 +1274,7 @@ where
                 Self::serial_fallback(
                     &self.executor,
                     self.provider_builder.clone(),
+                    self.fallback_overlay_factory.clone(),
                     output.clone(),
                 )?
             }
@@ -1376,7 +1414,10 @@ fn write_trie_debug_recorders(block_number: u64, recorders: &[(Option<B256>, Tri
 mod tests {
     use super::*;
     use alloy_consensus::constants::KECCAK_EMPTY;
-    use alloy_primitives::{map::HashMap, Address, U256};
+    use alloy_primitives::{
+        map::{B256Map, HashMap},
+        Address, U256,
+    };
     use rand::Rng;
     use reth_chain_state::{test_utils::TestBlockBuilder, StateTrieOverlayManager};
     use reth_chainspec::ChainSpec;
@@ -1392,10 +1433,15 @@ mod tests {
     };
     use reth_testing_utils::generators;
     use reth_trie::{
-        test_utils::state_root, HashedPostState, HashedStorage, LazyTrieData, Nibbles,
+        hashed_cursor::mock::MockHashedCursorFactory, test_utils::state_root, HashedPostState,
+        HashedStorage, KeccakKeyHasher, LazyTrieData, Nibbles,
     };
     use reth_trie_db::ChangesetCache;
-    use revm::state::{AccountInfo, AccountStatus, EvmState, EvmStorageSlot, TransactionId};
+    use revm::{
+        database::{states::StorageSlot, AccountStatus as BundleAccountStatus, BundleAccount},
+        state::{AccountInfo, AccountStatus, EvmState, EvmStorageSlot, TransactionId},
+    };
+    use std::collections::BTreeMap;
 
     fn with_hashed_state(
         block: ExecutedBlock<EthPrimitives>,
@@ -1417,6 +1463,86 @@ mod tests {
                 B256::with_last_byte(account_path),
                 HashedStorage::from_iter(false, [(B256::with_last_byte(storage_path), U256::ONE)]),
             )])
+    }
+
+    struct BundleHashedPostStateProvider;
+
+    impl HashedPostStateProvider for BundleHashedPostStateProvider {
+        fn hashed_post_state(&self, bundle_state: &BundleState) -> HashedPostState {
+            HashedPostState::from_bundle_state::<KeccakKeyHasher>(bundle_state.state())
+        }
+    }
+
+    #[test]
+    fn fallback_hashed_state_expands_destroyed_storage() {
+        let destroyed_address = Address::repeat_byte(0x11);
+        let recreated_address = Address::repeat_byte(0x22);
+        let transient_address = Address::repeat_byte(0x33);
+        let destroyed_hash = keccak256(destroyed_address);
+        let recreated_hash = keccak256(recreated_address);
+        let transient_hash = keccak256(transient_address);
+        let destroyed_slot = B256::repeat_byte(0x44);
+        let rewritten_slot = U256::from(1);
+        let stale_slot = B256::repeat_byte(0x55);
+        let hashed_rewritten_slot = keccak256(B256::from(rewritten_slot));
+        let rewritten_value = U256::from(4);
+        let cursor_factory = MockHashedCursorFactory::new(
+            BTreeMap::new(),
+            B256Map::from_iter([
+                (destroyed_hash, BTreeMap::from_iter([(destroyed_slot, U256::from(1))])),
+                (
+                    recreated_hash,
+                    BTreeMap::from_iter([
+                        (hashed_rewritten_slot, U256::from(2)),
+                        (stale_slot, U256::from(3)),
+                    ]),
+                ),
+                (transient_hash, BTreeMap::new()),
+            ]),
+        );
+        let existing_info = AccountInfo { nonce: 1, ..Default::default() };
+        let mut bundle_state = BundleState::default();
+        bundle_state.state.insert(
+            destroyed_address,
+            BundleAccount::new(
+                Some(existing_info.clone()),
+                None,
+                HashMap::default(),
+                BundleAccountStatus::Destroyed,
+            ),
+        );
+        bundle_state.state.insert(
+            recreated_address,
+            BundleAccount::new(
+                Some(existing_info),
+                Some(AccountInfo::default()),
+                HashMap::from_iter([(
+                    rewritten_slot,
+                    StorageSlot::new_changed(U256::from(2), rewritten_value),
+                )]),
+                BundleAccountStatus::DestroyedChanged,
+            ),
+        );
+        bundle_state.state.insert(
+            transient_address,
+            BundleAccount::new(None, None, HashMap::default(), BundleAccountStatus::Destroyed),
+        );
+
+        let hashed_state = fallback_hashed_post_state(
+            &BundleHashedPostStateProvider,
+            &cursor_factory,
+            &bundle_state,
+        )
+        .unwrap();
+
+        let destroyed_storage = &hashed_state.storages[&destroyed_hash];
+        assert!(!destroyed_storage.wiped);
+        assert_eq!(destroyed_storage.storage[&destroyed_slot], U256::ZERO);
+        let recreated_storage = &hashed_state.storages[&recreated_hash];
+        assert!(!recreated_storage.wiped);
+        assert_eq!(recreated_storage.storage[&hashed_rewritten_slot], rewritten_value);
+        assert_eq!(recreated_storage.storage[&stale_slot], U256::ZERO);
+        assert!(!hashed_state.storages.contains_key(&transient_hash));
     }
 
     #[test]
