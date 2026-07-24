@@ -431,6 +431,21 @@ where
     ) -> Self {
         let (incoming_tx, incoming) = crossbeam_channel::unbounded();
 
+        // Seed the block-height gauges from the restored in-memory state. These are
+        // otherwise only updated when their value next changes, so after a restart
+        // they would read 0 until the next forkchoice update advances them.
+        let metrics = EngineApiMetrics::default();
+        metrics
+            .tree
+            .canonical_chain_height
+            .set(canonical_in_memory_state.get_canonical_block_number() as f64);
+        if let Some(safe) = canonical_in_memory_state.get_safe_num_hash() {
+            metrics.tree.safe_block_height.set(safe.number as f64);
+        }
+        if let Some(finalized) = canonical_in_memory_state.get_finalized_num_hash() {
+            metrics.tree.finalized_block_height.set(finalized.number as f64);
+        }
+
         Self {
             provider,
             consensus,
@@ -444,7 +459,7 @@ where
             canonical_in_memory_state,
             payload_builder,
             config,
-            metrics: Default::default(),
+            metrics,
             incoming_tx,
             engine_kind,
             evm_config,
