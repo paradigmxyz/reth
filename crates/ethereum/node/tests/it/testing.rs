@@ -6,6 +6,7 @@ use alloy_rpc_types_eth::BlockNumberOrTag;
 use jsonrpsee_core::client::ClientT;
 use reth_chainspec::{ChainSpecBuilder, MAINNET};
 use reth_db::test_utils::create_test_rw_db;
+use reth_engine_primitives::DEFAULT_PERSISTENCE_THRESHOLD;
 use reth_ethereum_engine_primitives::EthPayloadAttributes;
 use reth_node_builder::{NodeBuilder, NodeConfig};
 use reth_node_core::{
@@ -174,31 +175,34 @@ async fn debug_set_head_allows_committing_new_blocks() -> eyre::Result<()> {
                         .expect("block transactions")
                         .is_empty());
 
-                    let mut next_payload_attributes = payload_attributes.clone();
-                    next_payload_attributes.timestamp += 12;
-                    next_payload_attributes.slot_number = Some(next_payload_attributes.timestamp);
-                    let next_block_hash: B256 = client
-                        .request(
-                            "testing_commitBlockV1",
-                            (
-                                next_payload_attributes,
-                                Option::<Vec<Bytes>>::None,
-                                Option::<Bytes>::None,
-                            ),
-                        )
-                        .await?;
-                    let next_latest: Value = client
+                    // Cross the default persistence threshold so the reset exercises both the
+                    // in-memory and on-disk canonical chain.
+                    let mut discarded_tip_hash = block_hash;
+                    for block_number in 2..=DEFAULT_PERSISTENCE_THRESHOLD + 1 {
+                        let mut next_payload_attributes = payload_attributes.clone();
+                        next_payload_attributes.timestamp += (block_number - 1) * 12;
+                        next_payload_attributes.slot_number =
+                            Some(next_payload_attributes.timestamp);
+                        discarded_tip_hash = client
+                            .request(
+                                "testing_commitBlockV1",
+                                (
+                                    next_payload_attributes,
+                                    Option::<Vec<Bytes>>::None,
+                                    Option::<Bytes>::None,
+                                ),
+                            )
+                            .await?;
+                    }
+
+                    let discarded_latest: Value = client
                         .request("eth_getBlockByNumber", (BlockNumberOrTag::Latest, false))
                         .await?;
-                    let next_block_hash = next_block_hash.to_string();
+                    let discarded_tip_hash = discarded_tip_hash.to_string();
                     let block_hash = block_hash.to_string();
                     assert_eq!(
-                        next_latest.get("hash").and_then(Value::as_str),
-                        Some(next_block_hash.as_str())
-                    );
-                    assert_eq!(
-                        next_latest.get("parentHash").and_then(Value::as_str),
-                        Some(block_hash.as_str())
+                        discarded_latest.get("hash").and_then(Value::as_str),
+                        Some(discarded_tip_hash.as_str())
                     );
 
                     let finalized = provider
@@ -216,7 +220,7 @@ async fn debug_set_head_allows_committing_new_blocks() -> eyre::Result<()> {
                         .await?;
                     assert_eq!(
                         unchanged_latest.get("hash").and_then(Value::as_str),
-                        Some(next_block_hash.as_str())
+                        Some(discarded_tip_hash.as_str())
                     );
 
                     let _: () = client.request("debug_setHead", (U64::from(1),)).await?;
@@ -227,10 +231,18 @@ async fn debug_set_head_allows_committing_new_blocks() -> eyre::Result<()> {
                         rewound_latest.get("hash").and_then(Value::as_str),
                         Some(block_hash.as_str())
                     );
+                    let discarded_block: Value = client
+                        .request("eth_getBlockByNumber", (BlockNumberOrTag::Number(2), false))
+                        .await?;
+                    assert!(
+                        discarded_block.is_null(),
+                        "persisted blocks above the reset head must be removed before returning"
+                    );
 
                     // The next committed block must extend the rewound head, not the discarded tip.
                     let mut replacement_payload_attributes = payload_attributes;
-                    replacement_payload_attributes.timestamp += 24;
+                    replacement_payload_attributes.timestamp +=
+                        (DEFAULT_PERSISTENCE_THRESHOLD + 2) * 12;
                     replacement_payload_attributes.slot_number =
                         Some(replacement_payload_attributes.timestamp);
                     let replacement_extra_data = Bytes::from_static(b"reth-after-reset");
@@ -248,7 +260,7 @@ async fn debug_set_head_allows_committing_new_blocks() -> eyre::Result<()> {
                         .request("eth_getBlockByNumber", (BlockNumberOrTag::Latest, false))
                         .await?;
                     let replacement_block_hash = replacement_block_hash.to_string();
-                    assert_ne!(replacement_block_hash, next_block_hash);
+                    assert_ne!(replacement_block_hash, discarded_tip_hash);
                     assert_eq!(
                         replacement_latest.get("hash").and_then(Value::as_str),
                         Some(replacement_block_hash.as_str())

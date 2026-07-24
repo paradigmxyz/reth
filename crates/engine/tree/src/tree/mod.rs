@@ -7,7 +7,7 @@ use crate::{
 };
 use alloy_consensus::BlockHeader;
 use alloy_eips::{eip1898::BlockWithParent, merge::EPOCH_SLOTS, BlockNumHash, NumHash};
-use alloy_primitives::{map::B256Map, B256};
+use alloy_primitives::{map::B256Map, BlockNumber, B256};
 use alloy_rpc_types_engine::{
     ForkchoiceState, PayloadStatus, PayloadStatusEnum, PayloadValidationError,
 };
@@ -1051,6 +1051,18 @@ where
             return Err(DebugSetHeadError::Syncing)
         }
 
+        let current_head = self.state.tree_state.current_canonical_head;
+        if block_number > current_head.number {
+            return Err(DebugSetHeadError::AboveHead {
+                target: block_number,
+                current: current_head.number,
+            })
+        }
+
+        if block_number == current_head.number {
+            return Ok(())
+        }
+
         let canonical_header = self
             .provider
             .sealed_header(block_number)
@@ -1066,11 +1078,26 @@ where
             })
         }
 
-        // Ensure the historical execution data is available before mutating either head tracker.
-        self.canonical_block_by_hash(canonical_header.hash())
+        // Finish any in-flight write before collecting the reverted chain. This also ensures the
+        // rewind cannot race a persistence result that advances the on-disk canonical tip.
+        self.wait_for_debug_persistence()?;
+
+        let old = self
+            .collect_debug_reverted_blocks(block_number, current_head.number)
             .map_err(DebugSetHeadError::internal)?;
-        self.update_latest_block_to_canonical_ancestor(&canonical_header)
-            .map_err(DebugSetHeadError::internal)?;
+        let new = vec![self
+            .debug_canonical_block_by_number(block_number)
+            .map_err(DebugSetHeadError::internal)?];
+
+        // Remove the persisted part of the discarded chain before notifying canonical-state
+        // subscribers so their subsequent provider reads observe the reset head. Persistence
+        // completion verifies the disk tip against this tracker, so move it first while the engine
+        // task remains serialized inside this debug request.
+        self.state.tree_state.set_canonical_head(canonical_header.num_hash());
+        self.remove_blocks(block_number);
+        self.wait_for_debug_persistence()?;
+
+        self.on_canonical_chain_update(NewCanonicalChain::Reorg { new, old });
 
         if let Some(safe) = self.canonical_in_memory_state.get_safe_num_hash() &&
             safe.number > block_number
@@ -1080,6 +1107,73 @@ where
             self.metrics.tree.safe_block_height.set(block_number as f64);
         }
 
+        Ok(())
+    }
+
+    /// Collects the canonical blocks reverted by `debug_setHead`, including blocks already
+    /// persisted to disk.
+    fn collect_debug_reverted_blocks(
+        &self,
+        target: BlockNumber,
+        current: BlockNumber,
+    ) -> ProviderResult<Vec<ExecutedBlock<N>>> {
+        let mut old = Vec::with_capacity(current.saturating_sub(target) as usize);
+        for number in target + 1..=current {
+            old.push(self.debug_canonical_block_by_number(number)?);
+        }
+        Ok(old)
+    }
+
+    /// Returns an executed canonical block by number for `debug_setHead`.
+    fn debug_canonical_block_by_number(
+        &self,
+        number: BlockNumber,
+    ) -> ProviderResult<ExecutedBlock<N>> {
+        if let Some(block) = self.canonical_in_memory_state.state_by_number(number) {
+            return Ok(block.block_ref().clone())
+        }
+
+        let (block, senders) = self
+            .provider
+            .sealed_block_with_senders(number.into(), TransactionVariant::WithHash)?
+            .ok_or_else(|| ProviderError::HeaderNotFound(number.into()))?
+            .split_sealed();
+        let mut execution_output = self
+            .provider
+            .get_state(number)?
+            .ok_or(ProviderError::StateForNumberNotFound(number))?;
+        let hashed_state = self.provider.hashed_post_state(execution_output.state());
+        let db_provider = self.provider.database_provider_ro()?;
+        let trie_updates =
+            reth_trie_db::compute_block_trie_updates(&self.changeset_cache, &db_provider, number)?;
+        let trie_data =
+            ComputedTrieData::new(Arc::new(hashed_state.into_sorted()), Arc::new(trie_updates));
+        let execution_output = Arc::new(BlockExecutionOutput {
+            state: execution_output.bundle,
+            result: BlockExecutionResult {
+                receipts: execution_output.receipts.pop().unwrap_or_default(),
+                requests: execution_output.requests.pop().unwrap_or_default(),
+                gas_used: block.gas_used(),
+                blob_gas_used: block.blob_gas_used().unwrap_or_default(),
+            },
+        });
+
+        Ok(ExecutedBlock::new(
+            Arc::new(RecoveredBlock::new_sealed(block, senders)),
+            execution_output,
+            trie_data,
+        ))
+    }
+
+    /// Waits for persistence work that must be serialized with `debug_setHead`.
+    fn wait_for_debug_persistence(&mut self) -> Result<(), DebugSetHeadError> {
+        while let Some((rx, start_time, _action)) = self.persistence_state.rx.take() {
+            let result = rx
+                .recv()
+                .map_err(|_| DebugSetHeadError::internal(AdvancePersistenceError::ChannelClosed))?;
+            self.on_persistence_complete(result, start_time)
+                .map_err(DebugSetHeadError::internal)?;
+        }
         Ok(())
     }
 

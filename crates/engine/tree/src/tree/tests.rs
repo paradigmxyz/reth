@@ -19,7 +19,9 @@ use alloy_rpc_types_engine::{
     ExecutionData, ExecutionPayloadSidecar, ExecutionPayloadV1, ForkchoiceState,
 };
 use assert_matches::assert_matches;
-use reth_chain_state::{test_utils::TestBlockBuilder, BlockState, StateTrieOverlayManager};
+use reth_chain_state::{
+    test_utils::TestBlockBuilder, BlockState, CanonStateNotification, StateTrieOverlayManager,
+};
 use reth_chainspec::{ChainSpec, HOLESKY, MAINNET};
 use reth_engine_primitives::{
     DebugSetHeadError, EngineApiValidator, ForkchoiceStatus, NoopInvalidBlockHook,
@@ -1409,6 +1411,7 @@ async fn test_debug_set_head_rewinds_to_finalized_block() {
     let safe = blocks[2].recovered_block().clone_sealed_header();
     test_harness.tree.canonical_in_memory_state.set_finalized(target.clone());
     test_harness.tree.canonical_in_memory_state.set_safe(safe);
+    let mut notifications = test_harness.tree.canonical_in_memory_state.subscribe_canon_state();
 
     test_harness.debug_set_head(target.number).await.unwrap();
 
@@ -1421,6 +1424,15 @@ async fn test_debug_set_head_rewinds_to_finalized_block() {
     assert_eq!(
         test_harness.tree.canonical_in_memory_state.get_safe_num_hash(),
         Some(target.num_hash())
+    );
+
+    let CanonStateNotification::Reorg { old, new } = notifications.try_recv().unwrap() else {
+        panic!("debug_setHead should emit a canonical reorg notification")
+    };
+    assert_eq!(new.blocks().keys().copied().collect::<Vec<_>>(), vec![target.number]);
+    assert_eq!(
+        old.blocks().keys().copied().collect::<Vec<_>>(),
+        (target.number + 1..=blocks.last().unwrap().recovered_block().number()).collect::<Vec<_>>()
     );
 }
 
@@ -1454,6 +1466,25 @@ async fn test_debug_set_head_rejects_block_below_finalized() {
     assert_eq!(
         test_harness.tree.canonical_in_memory_state.get_safe_num_hash(),
         Some(safe.num_hash())
+    );
+}
+
+#[tokio::test]
+async fn test_debug_set_head_rejects_block_above_current_head() {
+    let chain_spec = MAINNET.clone();
+    let mut test_block_builder = TestBlockBuilder::eth().with_chain_spec((*chain_spec).clone());
+    let blocks: Vec<_> = test_block_builder.get_executed_blocks(1..4).collect();
+    let mut test_harness = TestHarness::new(chain_spec).with_blocks(blocks.clone());
+    let current = blocks[1].recovered_block().num_hash();
+    let requested = blocks[2].recovered_block().number();
+    test_harness.tree.state.tree_state.set_canonical_head(current);
+
+    let err = test_harness.debug_set_head(requested).await.unwrap_err();
+
+    assert_matches!(
+        err,
+        DebugSetHeadError::AboveHead { target, current: current_number }
+            if target == requested && current_number == current.number
     );
 }
 

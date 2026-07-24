@@ -23,7 +23,8 @@ where
                     if let Err(err) = engine_handle.debug_set_head(number).await {
                         return Err(match err {
                             DebugSetHeadError::BlockNotFound(_) |
-                            DebugSetHeadError::Finalized { .. } => {
+                            DebugSetHeadError::Finalized { .. } |
+                            DebugSetHeadError::AboveHead { .. } => {
                                 invalid_params_rpc_err(err.to_string())
                             }
                             DebugSetHeadError::EngineUnavailable |

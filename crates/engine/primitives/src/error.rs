@@ -66,6 +66,14 @@ pub enum DebugSetHeadError {
         /// The current finalized block number.
         finalized: BlockNumber,
     },
+    /// The requested block is above the current canonical head.
+    #[error("cannot set head to block {target} above current head {current}")]
+    AboveHead {
+        /// The requested block number.
+        target: BlockNumber,
+        /// The current canonical head number.
+        current: BlockNumber,
+    },
     /// The pipeline is actively syncing and owns canonical chain progress.
     #[error("cannot set head while pipeline sync is active")]
     Syncing,
