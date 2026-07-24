@@ -421,6 +421,13 @@ impl<C: Send + Sync, N: NodePrimitives> ChangeSetReader for NoopProvider<C, N> {
     ) -> ProviderResult<Vec<(BlockNumber, AccountBeforeTx)>> {
         Ok(Vec::default())
     }
+
+    fn count_account_changesets_in_range(
+        &self,
+        _range: impl core::ops::RangeBounds<BlockNumber>,
+    ) -> ProviderResult<u64> {
+        Ok(0)
+    }
 }
 
 #[cfg(feature = "db-api")]
@@ -450,6 +457,13 @@ impl<C: Send + Sync, N: NodePrimitives> StorageChangeSetReader for NoopProvider<
         Vec<(reth_db_api::models::BlockNumberAddress, reth_primitives_traits::StorageEntry)>,
     > {
         Ok(Vec::default())
+    }
+
+    fn count_storage_changesets_in_range(
+        &self,
+        _range: impl core::ops::RangeBounds<BlockNumber>,
+    ) -> ProviderResult<u64> {
+        Ok(0)
     }
 }
 

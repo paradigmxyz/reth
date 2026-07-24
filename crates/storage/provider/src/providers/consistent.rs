@@ -1341,6 +1341,13 @@ impl<N: ProviderNodeTypes> StorageChangeSetReader for ConsistentProvider<N> {
 
         Ok(changesets)
     }
+
+    fn count_storage_changesets_in_range(
+        &self,
+        range: impl RangeBounds<BlockNumber>,
+    ) -> ProviderResult<u64> {
+        Ok(self.storage_changesets_range(range)?.len() as u64)
+    }
 }
 
 impl<N: ProviderNodeTypes> ChangeSetReader for ConsistentProvider<N> {
@@ -1488,6 +1495,13 @@ impl<N: ProviderNodeTypes> ChangeSetReader for ConsistentProvider<N> {
         changesets.sort_by_key(|(block_num, _)| *block_num);
 
         Ok(changesets)
+    }
+
+    fn count_account_changesets_in_range(
+        &self,
+        range: impl core::ops::RangeBounds<BlockNumber>,
+    ) -> ProviderResult<u64> {
+        Ok(self.account_changesets_range(range)?.len() as u64)
     }
 }
 

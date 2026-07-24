@@ -136,7 +136,11 @@ impl StageConfig {
     /// The highest threshold (in number of blocks) for switching between incremental and full
     /// calculations across `MerkleStage`, `AccountHashingStage` and `StorageHashingStage`. This is
     /// required to figure out if can prune or not changesets on subsequent pipeline runs during
-    /// `ExecutionStage`
+    /// `ExecutionStage`.
+    ///
+    /// Uses the merkle **block** incremental cap (`incremental_threshold`), not
+    /// `incremental_change_threshold`, because execution pruning depends on block windows for
+    /// changeset availability.
     pub fn execution_external_clean_threshold(&self) -> u64 {
         self.merkle
             .incremental_threshold
@@ -345,26 +349,45 @@ impl Default for HashingConfig {
 }
 
 /// Merkle stage configuration.
+///
+/// Rebuild vs incremental and incremental chunk sizing use **changeset entry counts** as the
+/// primary signal (`rebuild_change_threshold`, `incremental_change_threshold`). The block fields
+/// (`rebuild_threshold`, `incremental_threshold`) act as safety caps.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "serde", serde(default))]
 pub struct MerkleConfig {
-    /// The number of blocks we will run the incremental root method for when we are catching up on
-    /// the merkle stage for a large number of blocks.
+    /// Maximum account + storage changeset rows per incremental chunk.
     ///
-    /// When we are catching up for a large number of blocks, we can only run the incremental root
-    /// for a limited number of blocks, otherwise the incremental root method may cause the node to
-    /// OOM. This number determines how many blocks in a row we will run the incremental root
-    /// method for.
+    /// Primary limit on incremental trie updates. The stage also caps each chunk by
+    /// `incremental_threshold` blocks.
+    pub incremental_change_threshold: u64,
+    /// Maximum total account + storage changeset rows in the sync range before switching to a
+    /// full trie rebuild.
+    ///
+    /// Primary rebuild trigger. The stage also forces rebuild when the block gap exceeds
+    /// `rebuild_threshold`.
+    pub rebuild_change_threshold: u64,
+    /// Maximum blocks per incremental chunk (safety cap).
+    ///
+    /// When catching up over many blocks, incremental root building is bounded so each chunk stays
+    /// within memory limits even when changeset volume is low.
     pub incremental_threshold: u64,
-    /// The threshold (in number of blocks) for switching from incremental trie building of changes
-    /// to whole rebuild.
+    /// Maximum block gap before forcing a full trie rebuild (safety cap).
+    ///
+    /// Fast path: skip changeset counting when the gap is obviously too large for incremental
+    /// updates. Also used by [`StageConfig::execution_external_clean_threshold`].
     pub rebuild_threshold: u64,
 }
 
 impl Default for MerkleConfig {
     fn default() -> Self {
-        Self { incremental_threshold: 7_000, rebuild_threshold: 100_000 }
+        Self {
+            incremental_change_threshold: 10_000_000,
+            rebuild_change_threshold: 100_000_000,
+            incremental_threshold: 7_000,
+            rebuild_threshold: 100_000,
+        }
     }
 }
 
@@ -638,7 +661,7 @@ where
 
 #[cfg(all(test, feature = "serde"))]
 mod tests {
-    use super::{Config, EXTENSION};
+    use super::{Config, MerkleConfig, EXTENSION};
     use crate::PruneConfig;
     use alloy_primitives::Address;
     use reth_network_peers::TrustedPeer;
@@ -1108,6 +1131,19 @@ transaction_lookup = 'full'
 receipts = { distance = 16384 }
 #";
         let _conf: Config = toml::from_str(s).unwrap();
+    }
+
+    #[test]
+    fn test_merkle_config_defaults_for_missing_change_thresholds() {
+        let s = r#"
+incremental_threshold = 7000
+rebuild_threshold = 100000
+"#;
+        let merkle: MerkleConfig = toml::from_str(s).unwrap();
+        assert_eq!(merkle.incremental_threshold, 7_000);
+        assert_eq!(merkle.rebuild_threshold, 100_000);
+        assert_eq!(merkle.incremental_change_threshold, 10_000_000);
+        assert_eq!(merkle.rebuild_change_threshold, 100_000_000);
     }
 
     #[test]
