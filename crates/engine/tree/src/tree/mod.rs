@@ -30,9 +30,9 @@ use reth_primitives_traits::{
 };
 use reth_provider::{
     BalProvider, BlockExecutionOutput, BlockExecutionResult, BlockReader, ChangeSetReader,
-    DatabaseProviderFactory, HashedPostStateProvider, ProviderError, StageCheckpointReader,
-    StateProviderBox, StateProviderFactory, StateReader, StorageChangeSetReader,
-    StorageSettingsCache, TransactionVariant,
+    DatabaseProviderFactory, HashedPostStateProvider, ProviderError, SaveBlocksInput,
+    StageCheckpointReader, StateProviderBox, StateProviderFactory, StateReader,
+    StorageChangeSetReader, StorageSettingsCache, TransactionVariant,
 };
 use reth_revm::database::StateProviderDatabase;
 use reth_stages_api::ControlFlow;
@@ -108,21 +108,21 @@ const CHANGESET_CACHE_RETENTION_BLOCKS: u64 = 64;
 pub struct StateProviderBuilder<N: NodePrimitives, P> {
     /// The provider factory used to create providers.
     provider_factory: P,
-    /// The historical block hash to fetch state from.
-    historical: B256,
-    /// The blocks that form the chain from historical to target and are in memory.
+    /// The persisted block hash on which the in-memory blocks are anchored.
+    anchor: B256,
+    /// The blocks that form the chain from the anchor to target and are in memory.
     overlay: Option<Vec<ExecutedBlock<N>>>,
 }
 
 impl<N: NodePrimitives, P> StateProviderBuilder<N, P> {
-    /// Creates a new state provider from the provider factory, historical block hash and optional
+    /// Creates a new state provider from the provider factory, persisted anchor hash and optional
     /// overlaid blocks.
     pub const fn new(
         provider_factory: P,
-        historical: B256,
+        anchor: B256,
         overlay: Option<Vec<ExecutedBlock<N>>>,
     ) -> Self {
-        Self { provider_factory, historical, overlay }
+        Self { provider_factory, anchor, overlay }
     }
 }
 
@@ -132,11 +132,289 @@ where
 {
     /// Creates a new state provider from this builder.
     pub fn build(&self) -> ProviderResult<StateProviderBox> {
-        let mut provider = self.provider_factory.state_by_block_hash(self.historical)?;
-        if let Some(overlay) = self.overlay.clone() {
-            provider = Box::new(MemoryOverlayStateProvider::new(provider, overlay))
+        let Some(mut overlay) = self.overlay.clone() else {
+            return self.provider_factory.state_by_block_hash(self.anchor)
+        };
+
+        // Under partial persistence, the database exposes a hybrid latest view: state/trie data
+        // is durable through the partial-state-trie frontier while the Finish frontier can be
+        // newer. That view is a valid base only if this in-memory chain covers both frontiers.
+        // Keep every block after the state/trie frontier, including blocks through Finish, so
+        // masked state is still supplied by the in-memory provider.
+        if let Some(latest) = self.provider_factory.latest_database_state()? {
+            let state_trie_tip = latest.state_trie_tip();
+            let finish_tip = latest.finish_tip();
+            if let Some(overlay_len) = latest_database_overlay_len(
+                self.anchor,
+                overlay.len(),
+                state_trie_tip,
+                finish_tip,
+                overlay.iter().map(|block| block.recovered_block().num_hash()),
+            ) {
+                overlay.truncate(overlay_len);
+                let mut provider = latest.into_provider();
+                if !overlay.is_empty() {
+                    provider = Box::new(MemoryOverlayStateProvider::new(provider, overlay));
+                }
+                return Ok(provider)
+            }
         }
+
+        let mut provider = self.provider_factory.state_by_block_hash(self.anchor)?;
+        provider = Box::new(MemoryOverlayStateProvider::new(provider, overlay));
         Ok(provider)
+    }
+}
+
+/// Returns the number of newest in-memory blocks that must be overlaid on the latest database
+/// state when the captured chain covers both durable frontiers.
+///
+/// The anchor is treated as the virtual element immediately after the oldest in-memory block.
+/// Because `overlay` uses newest-to-oldest positions, Finish must occur at or before the state/trie
+/// frontier. The returned position excludes the state/trie frontier itself and thus retains exactly
+/// the blocks after it.
+fn latest_database_overlay_len(
+    anchor_hash: B256,
+    overlay_len: usize,
+    state_trie_tip: BlockNumHash,
+    finish_tip: BlockNumHash,
+    overlay: impl IntoIterator<Item = BlockNumHash>,
+) -> Option<usize> {
+    if state_trie_tip.number > finish_tip.number {
+        return None
+    }
+
+    let mut state_trie_position = (state_trie_tip.hash == anchor_hash).then_some(overlay_len);
+    let mut finish_position = (finish_tip.hash == anchor_hash).then_some(overlay_len);
+    for (position, block) in overlay.into_iter().enumerate() {
+        if block == state_trie_tip {
+            state_trie_position = Some(position);
+        }
+        if block == finish_tip {
+            finish_position = Some(position);
+        }
+        if state_trie_position.is_some() && finish_position.is_some() {
+            break
+        }
+    }
+
+    let state_trie_position = state_trie_position?;
+    (finish_position? <= state_trie_position).then_some(state_trie_position)
+}
+
+#[cfg(test)]
+mod state_provider_builder_tests {
+    use super::*;
+    use alloy_primitives::{keccak256, Address, U256};
+    use reth_chain_state::test_utils::TestBlockBuilder;
+    use reth_ethereum_primitives::EthPrimitives;
+    use reth_primitives_traits::Account;
+    use reth_provider::{
+        providers::BlockchainProvider, test_utils::create_test_provider_factory,
+        PruneCheckpointWriter, SaveBlocksMode, StateWriter, StorageSettings,
+    };
+    use reth_prune::{PruneCheckpoint, PruneMode, PruneSegment};
+    use reth_trie::{HashedPostStateSorted, HashedStorageSorted};
+    use revm::{database::BundleState, state::AccountInfo};
+
+    fn hash(number: u8) -> B256 {
+        B256::with_last_byte(number)
+    }
+
+    #[test]
+    fn latest_database_overlay_covers_partial_gap_and_newer_blocks() {
+        // Newest to oldest: the latest DB is at #6, state/trie data is durable through #4, and
+        // the provider must retain all of #5..=#7 rather than only the blocks after Finish.
+        let blocks = [
+            BlockNumHash::new(7, hash(7)),
+            BlockNumHash::new(6, hash(6)),
+            BlockNumHash::new(5, hash(5)),
+            BlockNumHash::new(4, hash(4)),
+            BlockNumHash::new(3, hash(3)),
+        ];
+
+        assert_eq!(
+            latest_database_overlay_len(hash(2), blocks.len(), blocks[3], blocks[1], blocks,),
+            Some(3)
+        );
+    }
+
+    #[test]
+    fn latest_database_overlay_uses_anchor_as_partial_frontier() {
+        let blocks = [
+            BlockNumHash::new(5, hash(5)),
+            BlockNumHash::new(4, hash(4)),
+            BlockNumHash::new(3, hash(3)),
+        ];
+
+        assert_eq!(
+            latest_database_overlay_len(
+                hash(2),
+                blocks.len(),
+                BlockNumHash::new(2, hash(2)),
+                blocks[1],
+                blocks,
+            ),
+            Some(blocks.len())
+        );
+    }
+
+    #[test]
+    fn latest_database_overlay_without_partial_gap_keeps_only_newer_blocks() {
+        let blocks = [
+            BlockNumHash::new(7, hash(7)),
+            BlockNumHash::new(6, hash(6)),
+            BlockNumHash::new(5, hash(5)),
+        ];
+
+        assert_eq!(
+            latest_database_overlay_len(hash(4), blocks.len(), blocks[1], blocks[1], blocks),
+            Some(1)
+        );
+    }
+
+    #[test]
+    fn latest_database_overlay_rejects_uncovered_finish() {
+        let blocks = [
+            BlockNumHash::new(5, hash(5)),
+            BlockNumHash::new(4, hash(4)),
+            BlockNumHash::new(3, hash(3)),
+        ];
+
+        assert_eq!(
+            latest_database_overlay_len(
+                hash(2),
+                blocks.len(),
+                blocks[1],
+                BlockNumHash::new(6, hash(6)),
+                blocks,
+            ),
+            None
+        );
+    }
+
+    #[test]
+    fn latest_database_overlay_rejects_frontiers_in_wrong_order() {
+        let blocks = [
+            BlockNumHash::new(6, hash(6)),
+            BlockNumHash::new(5, hash(5)),
+            BlockNumHash::new(4, hash(4)),
+        ];
+
+        assert_eq!(
+            latest_database_overlay_len(hash(3), blocks.len(), blocks[0], blocks[1], blocks,),
+            None
+        );
+    }
+
+    #[test]
+    fn state_provider_uses_latest_database_with_partial_gap() -> eyre::Result<()> {
+        let factory = create_test_provider_factory();
+        factory.set_storage_settings_cache(StorageSettings::v2());
+        let mut block_builder = TestBlockBuilder::eth().with_state();
+        let mut blocks = block_builder.get_executed_blocks(0..4).collect::<Vec<_>>();
+
+        // Add state changed only by block 2, which is inside the partial-state-trie-to-Finish gap.
+        // Block 3 intentionally leaves these keys alone, so these assertions distinguish an
+        // S+1..=P overlay from an incorrect Finish+1..=P overlay.
+        let masked_address = Address::with_last_byte(0xaa);
+        let masked_account = Account { nonce: 7, balance: U256::from(700), ..Default::default() };
+        let masked_slot_number = U256::from(0x33);
+        let masked_slot = B256::from(masked_slot_number);
+        let masked_value = U256::from(0x44);
+        let masked_state = BundleState::builder(2..=2)
+            .state_present_account_info(masked_address, AccountInfo::from(masked_account))
+            .revert_account_info(2, masked_address, Some(None))
+            .state_storage(
+                masked_address,
+                alloy_primitives::map::HashMap::from_iter([(
+                    masked_slot_number,
+                    (U256::ZERO, masked_value),
+                )]),
+            )
+            .revert_storage(2, masked_address, vec![(masked_slot_number, U256::ZERO)])
+            .build();
+        let mut block_two_output = (*blocks[2].execution_output).clone();
+        block_two_output.state.extend(masked_state);
+        blocks[2].execution_output = Arc::new(block_two_output);
+
+        // Keep state that is never touched by the in-memory suffix in the database. These reads
+        // must fall through the memory overlay into the raw latest database provider.
+        let database_address = Address::with_last_byte(0xdb);
+        let database_account =
+            Account { nonce: 42, balance: U256::from(1_000), ..Default::default() };
+        let database_slot = B256::with_last_byte(0x11);
+        let database_value = U256::from(0x22);
+        let hashed_address = keccak256(database_address);
+        let database_state = HashedPostStateSorted::new(
+            vec![(hashed_address, Some(database_account))],
+            B256Map::from_iter([(
+                hashed_address,
+                HashedStorageSorted {
+                    storage_slots: vec![(keccak256(database_slot), database_value)],
+                    wiped: false,
+                },
+            )]),
+        );
+
+        let provider_rw = factory.provider_rw()?;
+        provider_rw.save_blocks(vec![blocks[0].clone()], SaveBlocksMode::Full)?;
+        provider_rw.write_hashed_state(&database_state)?;
+        provider_rw.commit()?;
+
+        // Advance Finish through block 2 while leaving the full state/trie frontier at block 0.
+        // Blocks 1 and 2 are therefore part of the in-memory masking suffix.
+        let provider_rw = factory.provider_rw()?;
+        provider_rw.save_blocks_with_frontiers(&SaveBlocksInput::new(
+            blocks[1..=2].to_vec(),
+            0,
+            0,
+            2,
+            0,
+        ))?;
+
+        // Make historical reads at the block-0 anchor unusable. If StateProviderBuilder invokes
+        // the historical fallback, the database-only assertions below fail with StateAtBlockPruned.
+        let pruned_history =
+            PruneCheckpoint { block_number: Some(1), tx_number: None, prune_mode: PruneMode::Full };
+        provider_rw.save_prune_checkpoint(PruneSegment::AccountHistory, pruned_history)?;
+        provider_rw.save_prune_checkpoint(PruneSegment::StorageHistory, pruned_history)?;
+        provider_rw.commit()?;
+
+        let provider = BlockchainProvider::new(factory)?;
+        let overlay = blocks[1..].iter().rev().cloned().collect::<Vec<_>>();
+        let state = StateProviderBuilder::<EthPrimitives, _>::new(
+            provider,
+            blocks[0].recovered_block().hash(),
+            Some(overlay),
+        )
+        .build()?;
+
+        // The newest block in memory supplies state after Finish.
+        let overlay_address = block_builder.signer;
+        assert_eq!(
+            state.basic_account(&overlay_address)?,
+            blocks[3].execution_output.account(&overlay_address).expect("account changed")
+        );
+        let overlay_storage_address = Address::new([0xaa; 20]);
+        let overlay_slot = B256::from(U256::from(1));
+        assert_eq!(
+            state.storage(overlay_storage_address, overlay_slot)?,
+            blocks[3]
+                .execution_output
+                .storage(&overlay_storage_address, overlay_slot.into())
+                .map(Some)
+                .expect("storage changed")
+        );
+
+        // Block 2 supplies state inside the masking gap, even though block 3 is newer.
+        assert_eq!(state.basic_account(&masked_address)?, Some(masked_account));
+        assert_eq!(state.storage(masked_address, masked_slot)?, Some(masked_value));
+
+        assert_eq!(state.basic_account(&database_address)?, Some(database_account));
+        assert_eq!(state.storage(database_address, database_slot)?, Some(database_value));
+
+        Ok(())
     }
 }
 
@@ -430,6 +708,11 @@ where
         runtime: reth_tasks::Runtime,
     ) -> Self {
         let (incoming_tx, incoming) = crossbeam_channel::unbounded();
+        // ProviderFactory and the persistence service hold clones of this cache. Registering the
+        // shared manager here lets their aggregate fallback reconstruct the logical Finish state
+        // while the durable state/trie frontier trails it.
+        changeset_cache
+            .set_state_trie_overlay_manager(state.tree_state.state_trie_overlays.clone());
 
         Self {
             provider,
@@ -481,6 +764,7 @@ where
 
         let persistence_state = PersistenceState {
             last_persisted_block: BlockNumHash::new(best_block_number, header.hash()),
+            last_state_trie_persisted_block: BlockNumHash::new(best_block_number, header.hash()),
             rx: None,
         };
 
@@ -1409,35 +1693,66 @@ where
 
     /// Helper method to remove blocks and set the persistence state. This ensures we keep track of
     /// the current persistence action while we're removing blocks.
-    fn remove_blocks(&mut self, new_tip_num: u64) {
+    fn remove_blocks(&mut self, new_tip_num: u64) -> ProviderResult<()> {
         debug!(target: "engine::tree", ?new_tip_num, last_persisted_block_number=?self.persistence_state.last_persisted_block.number, "Removing blocks using persistence task");
         if new_tip_num < self.persistence_state.last_persisted_block.number {
             debug!(target: "engine::tree", ?new_tip_num, "Starting remove blocks job");
+            let state_trie_blocks = self.remove_blocks_state_trie_replay_blocks(new_tip_num)?;
             self.state.set_pending_sparse_trie_prune(false);
             let (tx, rx) = crossbeam_channel::bounded(1);
-            let _ = self.persistence.remove_blocks_above(new_tip_num, tx);
+            let _ = self.persistence.remove_blocks_above(new_tip_num, state_trie_blocks, tx);
             self.persistence_state.start_remove(new_tip_num, rx);
         }
+        Ok(())
+    }
+
+    /// Returns canonical in-memory blocks used to replay state/trie after an on-disk reorg first
+    /// rewinds all data to the current state/trie frontier.
+    fn remove_blocks_state_trie_replay_blocks(
+        &self,
+        new_tip_num: u64,
+    ) -> ProviderResult<Vec<ExecutedBlock<N>>> {
+        let state_trie_tip = self.persistence_state.last_state_trie_persisted_block.number;
+        if new_tip_num <= state_trie_tip {
+            return Ok(Vec::new())
+        }
+
+        let mut blocks = Vec::with_capacity((new_tip_num - state_trie_tip) as usize);
+        for block_number in state_trie_tip + 1..=new_tip_num {
+            let Some(block_state) = self.canonical_in_memory_state.state_by_number(block_number)
+            else {
+                return Err(ProviderError::other(std::io::Error::other(format!(
+                    "missing canonical in-memory block #{block_number} needed to replay state/trie from #{state_trie_tip} through #{new_tip_num}",
+                ))))
+            };
+            blocks.push(block_state.block());
+        }
+
+        Ok(blocks)
     }
 
     /// Helper method to save blocks and set the persistence state. This ensures we keep track of
     /// the current persistence action while we're saving blocks.
-    fn persist_blocks(&mut self, blocks_to_persist: Vec<ExecutedBlock<N>>) {
-        if blocks_to_persist.is_empty() {
+    fn persist_blocks(&mut self, input: SaveBlocksInput<N>) {
+        if input.is_empty() {
             debug!(target: "engine::tree", "Returned empty set of blocks to persist");
             return
         }
 
-        // NOTE: checked non-empty above
-        let highest_num_hash = blocks_to_persist
-            .iter()
-            .max_by_key(|block| block.recovered_block().number())
-            .map(|b| b.recovered_block().num_hash())
-            .expect("Checked non-empty persisting blocks");
+        let highest_num_hash = input.last_block().expect("checked non-empty persisting blocks");
 
-        debug!(target: "engine::tree", count=blocks_to_persist.len(), blocks = ?blocks_to_persist.iter().map(|block| block.recovered_block().num_hash()).collect::<Vec<_>>(), "Persisting blocks");
+        debug!(
+            target: "engine::tree",
+            count = input.blocks().len(),
+            prev_db_tip = input.prev_db_tip(),
+            prev_partial_state_trie = input.prev_partial_state_trie(),
+            new_db_tip = input.new_db_tip(),
+            new_partial_state_trie = input.new_partial_state_trie(),
+            blocks = ?input.blocks().iter().map(|block| block.recovered_block().num_hash()).collect::<Vec<_>>(),
+            "Persisting blocks"
+        );
         let (tx, rx) = crossbeam_channel::bounded(1);
-        let _ = self.persistence.save_blocks(blocks_to_persist, tx);
+        let _ = self.persistence.save_blocks(input, tx);
 
         self.persistence_state.start_save(highest_num_hash, rx);
     }
@@ -1449,11 +1764,10 @@ where
     fn advance_persistence(&mut self) -> Result<(), AdvancePersistenceError> {
         if !self.persistence_state.in_progress() {
             if let Some(new_tip_num) = self.find_disk_reorg()? {
-                self.remove_blocks(new_tip_num)
+                self.remove_blocks(new_tip_num)?
             } else if self.should_persist() {
-                let blocks_to_persist =
-                    self.get_canonical_blocks_to_persist(PersistTarget::Threshold)?;
-                self.persist_blocks(blocks_to_persist);
+                let input = self.get_save_blocks_input(PersistTarget::Threshold)?;
+                self.persist_blocks(input);
             }
         }
 
@@ -1484,15 +1798,15 @@ where
                 self.on_persistence_complete(result, start_time)?;
             }
 
-            let blocks_to_persist = self.get_canonical_blocks_to_persist(PersistTarget::Head)?;
+            let input = self.get_save_blocks_input(PersistTarget::Head)?;
 
-            if blocks_to_persist.is_empty() {
+            if input.is_empty() {
                 debug!(target: "engine::tree", "persistence complete, signaling termination");
                 return Ok(())
             }
 
-            debug!(target: "engine::tree", count = blocks_to_persist.len(), "persisting remaining blocks before shutdown");
-            self.persist_blocks(blocks_to_persist);
+            debug!(target: "engine::tree", count = input.blocks().len(), "persisting remaining blocks before shutdown");
+            self.persist_blocks(input);
         }
     }
 
@@ -1539,8 +1853,19 @@ where
             return Ok(())
         };
 
-        debug!(target: "engine::tree", ?last_persisted_block_hash, ?last_persisted_block_number, elapsed=?start_time.elapsed(), "Finished persisting, calling finish");
-        self.persistence_state.finish(last_persisted_block_hash, last_persisted_block_number);
+        let last_persisted_block =
+            BlockNumHash::new(last_persisted_block_number, last_persisted_block_hash);
+        let last_state_trie_persisted_block = self
+            .last_state_trie_persisted_block(last_persisted_block, result.last_state_trie_block)?;
+
+        debug!(
+            target: "engine::tree",
+            ?last_persisted_block,
+            ?last_state_trie_persisted_block,
+            elapsed=?start_time.elapsed(),
+            "Finished persisting, calling finish"
+        );
+        self.persistence_state.finish(last_persisted_block, last_state_trie_persisted_block);
 
         // Evict trie changesets for blocks below the eviction threshold.
         // Keep at least CHANGESET_CACHE_RETENTION_BLOCKS from the persisted tip, and also respect
@@ -1564,11 +1889,39 @@ where
         );
         self.changeset_cache.evict(eviction_threshold);
 
-        self.on_new_persisted_block()?;
+        self.on_new_persisted_block(last_state_trie_persisted_block)?;
 
         self.purge_timing_stats(last_persisted_block_number, commit_duration);
 
         Ok(())
+    }
+
+    /// Returns the highest block that can be dropped from memory after persistence completes.
+    fn last_state_trie_persisted_block(
+        &self,
+        last_block: BlockNumHash,
+        last_state_trie_block: Option<u64>,
+    ) -> ProviderResult<BlockNumHash> {
+        let Some(last_state_trie_block) = last_state_trie_block else { return Ok(last_block) };
+        debug_assert!(
+            last_state_trie_block <= last_block.number,
+            "state/trie frontier cannot exceed the last persisted block"
+        );
+        if last_state_trie_block >= last_block.number {
+            return Ok(last_block)
+        }
+
+        let hash = self
+            .canonical_in_memory_state
+            .hash_by_number(last_state_trie_block)
+            .map(Ok)
+            .unwrap_or_else(|| {
+                self.provider
+                    .block_hash(last_state_trie_block)?
+                    .ok_or_else(|| ProviderError::HeaderNotFound(last_state_trie_block.into()))
+            })?;
+
+        Ok(BlockNumHash::new(last_state_trie_block, hash))
     }
 
     /// Handles a message from the engine.
@@ -1893,7 +2246,7 @@ where
             // update the tracked chain height, after backfill sync both the canonical height and
             // persisted height are the same
             self.state.tree_state.set_canonical_head(new_head.num_hash());
-            self.persistence_state.finish(new_head.hash(), new_head.number());
+            self.persistence_state.finish(new_head.num_hash(), new_head.num_hash());
 
             // update the tracked canonical head
             self.canonical_in_memory_state.set_canonical_head(new_head);
@@ -2129,75 +2482,96 @@ where
             self.config.persistence_threshold()
     }
 
-    /// Returns a batch of consecutive canonical blocks to persist in the range
-    /// `(last_persisted_number .. target]`. The expected order is oldest -> newest.
-    fn get_canonical_blocks_to_persist(
+    /// Returns the blocks and frontiers for the next persistence cycle.
+    fn get_save_blocks_input(
         &self,
         target: PersistTarget,
-    ) -> Result<Vec<ExecutedBlock<N>>, AdvancePersistenceError> {
+    ) -> Result<SaveBlocksInput<N>, AdvancePersistenceError> {
         // We will calculate the state root using the database, so we need to be sure there are no
         // changes
         debug_assert!(!self.persistence_state.in_progress());
 
-        let mut blocks_to_persist = Vec::new();
+        let mut blocks = Vec::new();
         let mut current_hash = self.state.tree_state.canonical_block_hash();
-        let last_persisted_number = self.persistence_state.last_persisted_block.number;
+        let prev_partial_state_trie = self.persistence_state.last_state_trie_persisted_block.number;
+        let prev_db_tip = self.persistence_state.last_persisted_block.number;
         let canonical_head_number = self.state.tree_state.canonical_block_number();
 
-        let target_number = match target {
+        let new_db_tip = match target {
             PersistTarget::Head => canonical_head_number,
-            PersistTarget::Threshold => {
-                canonical_head_number.saturating_sub(self.config.memory_block_buffer_target())
-            }
+            PersistTarget::Threshold => canonical_head_number
+                .saturating_sub(self.config.memory_block_buffer_target())
+                .max(prev_db_tip),
+        };
+        debug_assert!(new_db_tip >= prev_db_tip, "database reorg must be handled before saving");
+
+        let new_partial_state_trie = match target {
+            // Graceful shutdown leaves the database fully consistent at the canonical head.
+            PersistTarget::Head => new_db_tip,
+            PersistTarget::Threshold => new_db_tip
+                .saturating_sub(self.config.num_state_masking_blocks())
+                .max(prev_partial_state_trie),
         };
 
         debug!(
             target: "engine::tree",
             ?current_hash,
-            ?last_persisted_number,
+            ?prev_partial_state_trie,
+            ?prev_db_tip,
             ?canonical_head_number,
-            ?target_number,
-            "Returning canonical blocks to persist"
+            ?new_partial_state_trie,
+            ?new_db_tip,
+            target = ?target,
+            "Returning save input"
         );
         while let Some(block) = self.state.tree_state.blocks_by_hash.get(&current_hash) {
-            if block.recovered_block().number() <= last_persisted_number {
+            if block.recovered_block().number() <= prev_partial_state_trie {
                 break;
             }
 
-            if block.recovered_block().number() <= target_number {
-                blocks_to_persist.push(block.clone());
+            if block.recovered_block().number() <= new_db_tip {
+                blocks.push(block.clone());
             }
 
             current_hash = block.recovered_block().parent_hash();
         }
 
         // Reverse the order so that the oldest block comes first
-        blocks_to_persist.reverse();
+        blocks.reverse();
 
-        Ok(blocks_to_persist)
+        Ok(SaveBlocksInput::new(
+            blocks,
+            prev_db_tip,
+            prev_partial_state_trie,
+            new_db_tip,
+            new_partial_state_trie,
+        ))
     }
 
-    /// This clears the blocks from the in-memory tree state that have been persisted to the
-    /// database.
+    /// This clears the blocks from the in-memory tree state that no longer need to stay resident
+    /// after persistence completes.
     ///
-    /// This also updates the canonical in-memory state to reflect the newest persisted block
-    /// height.
+    /// This also updates the canonical in-memory state to reflect the newest persisted block tip,
+    /// even if trie persistence only advanced through an earlier block.
     ///
     /// Assumes that `finish` has been called on the `persistence_state` at least once
-    fn on_new_persisted_block(&mut self) -> ProviderResult<()> {
+    fn on_new_persisted_block(
+        &mut self,
+        in_memory_persisted_block: BlockNumHash,
+    ) -> ProviderResult<()> {
         // If we have an on-disk reorg, we need to handle it first before touching the in-memory
         // state.
         if let Some(remove_above) = self.find_disk_reorg()? {
-            self.remove_blocks(remove_above);
+            self.remove_blocks(remove_above)?;
             return Ok(())
         }
 
         let finalized = self.state.forkchoice_state_tracker.last_valid_finalized();
-        self.remove_before(self.persistence_state.last_persisted_block, finalized)?;
-        self.canonical_in_memory_state.remove_persisted_blocks(BlockNumHash {
-            number: self.persistence_state.last_persisted_block.number,
-            hash: self.persistence_state.last_persisted_block.hash,
-        });
+        self.remove_before(in_memory_persisted_block, finalized)?;
+        self.canonical_in_memory_state.remove_persisted_blocks_until(
+            self.persistence_state.last_persisted_block,
+            in_memory_persisted_block.number,
+        );
         self.state.set_pending_sparse_trie_prune(self.should_prune_sparse_trie());
         Ok(())
     }
@@ -3397,14 +3771,10 @@ where
     where
         P: BlockReader + StateProviderFactory + StateReader + Clone,
     {
-        if let Some((historical, blocks)) = self.state.tree_state.blocks_by_hash(hash) {
-            debug!(target: "engine::tree", %hash, %historical, "found canonical state for block in memory, creating provider builder");
+        if let Some((anchor, blocks)) = self.state.tree_state.blocks_by_hash(hash) {
+            debug!(target: "engine::tree", %hash, %anchor, "found canonical state for block in memory, creating provider builder");
             // the block leads back to the canonical chain
-            return Ok(Some(StateProviderBuilder::new(
-                self.provider.clone(),
-                historical,
-                Some(blocks),
-            )))
+            return Ok(Some(StateProviderBuilder::new(self.provider.clone(), anchor, Some(blocks))))
         }
 
         // Check if the block is persisted

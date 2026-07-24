@@ -14,15 +14,15 @@ use reth_trie::{
 use revm::database::BundleState;
 use std::{borrow::Cow, sync::OnceLock};
 
-/// A state provider that stores references to in-memory blocks along with their state as well as a
-/// reference of the historical state provider for fallback lookups.
+/// A state provider that stores references to in-memory blocks along with their state and a base
+/// state provider for fallback lookups.
 #[expect(missing_debug_implementations)]
 pub struct MemoryOverlayStateProviderRef<
     'a,
     N: NodePrimitives = reth_ethereum_primitives::EthPrimitives,
 > {
-    /// Historical state provider for state lookups that are not found in memory blocks.
-    pub(crate) historical: Box<dyn StateProvider + 'a>,
+    /// Base state provider for state lookups that are not found in memory blocks.
+    pub(crate) base: Box<dyn StateProvider + 'a>,
     /// The collection of executed parent blocks. Expected order is newest to oldest.
     pub(crate) in_memory: Cow<'a, [ExecutedBlock<N>]>,
     /// Lazy-loaded in-memory trie data.
@@ -35,10 +35,9 @@ impl<'a, N: NodePrimitives> MemoryOverlayStateProviderRef<'a, N> {
     /// ## Arguments
     ///
     /// - `in_memory` - the collection of executed ancestor blocks in reverse.
-    /// - `historical` - a historical state provider for the latest ancestor block stored in the
-    ///   database.
-    pub fn new(historical: Box<dyn StateProvider + 'a>, in_memory: Vec<ExecutedBlock<N>>) -> Self {
-        Self { historical, in_memory: Cow::Owned(in_memory), trie_input: OnceLock::new() }
+    /// - `base` - a state provider for the database state on which `in_memory` is overlaid.
+    pub fn new(base: Box<dyn StateProvider + 'a>, in_memory: Vec<ExecutedBlock<N>>) -> Self {
+        Self { base, in_memory: Cow::Owned(in_memory), trie_input: OnceLock::new() }
     }
 
     /// Turn this state provider into a state provider
@@ -76,7 +75,7 @@ impl<N: NodePrimitives> BlockHashReader for MemoryOverlayStateProviderRef<'_, N>
             }
         }
 
-        self.historical.block_hash(number)
+        self.base.block_hash(number)
     }
 
     fn canonical_hashes_range(
@@ -103,7 +102,7 @@ impl<N: NodePrimitives> BlockHashReader for MemoryOverlayStateProviderRef<'_, N>
         in_memory_hashes.reverse();
 
         let mut hashes =
-            self.historical.canonical_hashes_range(start, earliest_block_number.unwrap_or(end))?;
+            self.base.canonical_hashes_range(start, earliest_block_number.unwrap_or(end))?;
         hashes.append(&mut in_memory_hashes);
         Ok(hashes)
     }
@@ -117,7 +116,7 @@ impl<N: NodePrimitives> AccountReader for MemoryOverlayStateProviderRef<'_, N> {
             }
         }
 
-        self.historical.basic_account(address)
+        self.base.basic_account(address)
     }
 }
 
@@ -128,7 +127,7 @@ impl<N: NodePrimitives> StateRootProvider for MemoryOverlayStateProviderRef<'_, 
 
     fn state_root_from_nodes(&self, mut input: TrieInput) -> ProviderResult<B256> {
         input.prepend_self(self.trie_input().clone());
-        self.historical.state_root_from_nodes(input)
+        self.base.state_root_from_nodes(input)
     }
 
     fn state_root_with_updates(
@@ -143,7 +142,7 @@ impl<N: NodePrimitives> StateRootProvider for MemoryOverlayStateProviderRef<'_, 
         mut input: TrieInput,
     ) -> ProviderResult<(B256, TrieUpdates)> {
         input.prepend_self(self.trie_input().clone());
-        self.historical.state_root_from_nodes_with_updates(input)
+        self.base.state_root_from_nodes_with_updates(input)
     }
 }
 
@@ -151,7 +150,7 @@ impl<N: NodePrimitives> StorageRootProvider for MemoryOverlayStateProviderRef<'_
     // TODO: Currently this does not reuse available in-memory trie nodes.
     fn storage_root(&self, address: Address, storage: HashedStorage) -> ProviderResult<B256> {
         let merged = self.merged_hashed_storage(address, storage);
-        self.historical.storage_root(address, merged)
+        self.base.storage_root(address, merged)
     }
 
     // TODO: Currently this does not reuse available in-memory trie nodes.
@@ -162,7 +161,7 @@ impl<N: NodePrimitives> StorageRootProvider for MemoryOverlayStateProviderRef<'_
         storage: HashedStorage,
     ) -> ProviderResult<reth_trie::StorageProof> {
         let merged = self.merged_hashed_storage(address, storage);
-        self.historical.storage_proof(address, slot, merged)
+        self.base.storage_proof(address, slot, merged)
     }
 
     // TODO: Currently this does not reuse available in-memory trie nodes.
@@ -173,7 +172,7 @@ impl<N: NodePrimitives> StorageRootProvider for MemoryOverlayStateProviderRef<'_
         storage: HashedStorage,
     ) -> ProviderResult<StorageMultiProof> {
         let merged = self.merged_hashed_storage(address, storage);
-        self.historical.storage_multiproof(address, slots, merged)
+        self.base.storage_multiproof(address, slots, merged)
     }
 }
 
@@ -185,7 +184,7 @@ impl<N: NodePrimitives> StateProofProvider for MemoryOverlayStateProviderRef<'_,
         slots: &[B256],
     ) -> ProviderResult<AccountProof> {
         input.prepend_self(self.trie_input().clone());
-        self.historical.proof(input, address, slots)
+        self.base.proof(input, address, slots)
     }
 
     fn multiproof(
@@ -194,7 +193,7 @@ impl<N: NodePrimitives> StateProofProvider for MemoryOverlayStateProviderRef<'_,
         targets: MultiProofTargets,
     ) -> ProviderResult<MultiProof> {
         input.prepend_self(self.trie_input().clone());
-        self.historical.multiproof(input, targets)
+        self.base.multiproof(input, targets)
     }
 
     fn witness(
@@ -204,13 +203,13 @@ impl<N: NodePrimitives> StateProofProvider for MemoryOverlayStateProviderRef<'_,
         mode: reth_trie::ExecutionWitnessMode,
     ) -> ProviderResult<Vec<Bytes>> {
         input.prepend_self(self.trie_input().clone());
-        self.historical.witness(input, target, mode)
+        self.base.witness(input, target, mode)
     }
 }
 
 impl<N: NodePrimitives> HashedPostStateProvider for MemoryOverlayStateProviderRef<'_, N> {
     fn hashed_post_state(&self, bundle_state: &BundleState) -> HashedPostState {
-        self.historical.hashed_post_state(bundle_state)
+        self.base.hashed_post_state(bundle_state)
     }
 }
 
@@ -226,7 +225,7 @@ impl<N: NodePrimitives> StateProvider for MemoryOverlayStateProviderRef<'_, N> {
             }
         }
 
-        self.historical.storage(address, storage_key)
+        self.base.storage(address, storage_key)
     }
 }
 
@@ -238,16 +237,16 @@ impl<N: NodePrimitives> BytecodeReader for MemoryOverlayStateProviderRef<'_, N> 
             }
         }
 
-        self.historical.bytecode_by_hash(code_hash)
+        self.base.bytecode_by_hash(code_hash)
     }
 }
 
-/// An owned state provider that stores references to in-memory blocks along with their state as
-/// well as a reference of the historical state provider for fallback lookups.
+/// An owned state provider that stores references to in-memory blocks along with their state and a
+/// base state provider for fallback lookups.
 #[expect(missing_debug_implementations)]
 pub struct MemoryOverlayStateProvider<N: NodePrimitives = reth_ethereum_primitives::EthPrimitives> {
-    /// Historical state provider for state lookups that are not found in memory blocks.
-    pub(crate) historical: StateProviderBox,
+    /// Base state provider for state lookups that are not found in memory blocks.
+    pub(crate) base: StateProviderBox,
     /// The collection of executed parent blocks. Expected order is newest to oldest.
     pub(crate) in_memory: Vec<ExecutedBlock<N>>,
     /// Lazy-loaded in-memory trie data.
@@ -260,17 +259,16 @@ impl<N: NodePrimitives> MemoryOverlayStateProvider<N> {
     /// ## Arguments
     ///
     /// - `in_memory` - the collection of executed ancestor blocks in reverse.
-    /// - `historical` - a historical state provider for the latest ancestor block stored in the
-    ///   database.
-    pub fn new(historical: StateProviderBox, in_memory: Vec<ExecutedBlock<N>>) -> Self {
-        Self { historical, in_memory, trie_input: OnceLock::new() }
+    /// - `base` - a state provider for the database state on which `in_memory` is overlaid.
+    pub fn new(base: StateProviderBox, in_memory: Vec<ExecutedBlock<N>>) -> Self {
+        Self { base, in_memory, trie_input: OnceLock::new() }
     }
 
     /// Returns a new provider that takes the `TX` as reference
     #[inline(always)]
     fn as_ref(&self) -> MemoryOverlayStateProviderRef<'_, N> {
         MemoryOverlayStateProviderRef {
-            historical: Box::new(self.historical.as_ref()),
+            base: Box::new(self.base.as_ref()),
             in_memory: Cow::Borrowed(&self.in_memory),
             trie_input: self.trie_input.clone(),
         }

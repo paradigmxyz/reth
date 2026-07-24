@@ -4,7 +4,7 @@ use super::{
 };
 use alloc::boxed::Box;
 use alloy_consensus::constants::KECCAK_EMPTY;
-use alloy_eips::{BlockId, BlockNumberOrTag};
+use alloy_eips::{BlockId, BlockNumHash, BlockNumberOrTag};
 use alloy_primitives::{Address, BlockHash, BlockNumber, StorageKey, StorageValue, B256, U256};
 use auto_impl::auto_impl;
 use reth_execution_types::ExecutionOutcome;
@@ -28,6 +28,54 @@ pub trait StateReader: Send {
 
 /// Type alias of boxed [`StateProvider`].
 pub type StateProviderBox = Box<dyn StateProvider + Send + 'static>;
+
+/// Latest hybrid state read directly from the database together with its durable frontiers.
+///
+/// The provider and both frontiers are read from the same database snapshot. Non-state/trie block
+/// data is durable through `finish_tip`. State/trie updates have been processed through
+/// `state_trie_tip`, but updates shadowed by the masking range can be absent from the database.
+/// Callers must overlay the in-memory state for `state_trie_tip + 1..=finish_tip` to construct the
+/// complete state at `finish_tip`.
+pub struct LatestDatabaseState {
+    provider: StateProviderBox,
+    state_trie_tip: BlockNumHash,
+    finish_tip: BlockNumHash,
+}
+
+impl core::fmt::Debug for LatestDatabaseState {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("LatestDatabaseState")
+            .field("state_trie_tip", &self.state_trie_tip)
+            .field("finish_tip", &self.finish_tip)
+            .finish_non_exhaustive()
+    }
+}
+
+impl LatestDatabaseState {
+    /// Creates a new latest database state snapshot.
+    pub const fn new(
+        provider: StateProviderBox,
+        state_trie_tip: BlockNumHash,
+        finish_tip: BlockNumHash,
+    ) -> Self {
+        Self { provider, state_trie_tip, finish_tip }
+    }
+
+    /// Returns the block through which state and trie updates have been processed for persistence.
+    pub const fn state_trie_tip(&self) -> BlockNumHash {
+        self.state_trie_tip
+    }
+
+    /// Returns the block through which non-state/trie data are durable.
+    pub const fn finish_tip(&self) -> BlockNumHash {
+        self.finish_tip
+    }
+
+    /// Returns the latest hybrid database state provider.
+    pub fn into_provider(self) -> StateProviderBox {
+        self.provider
+    }
+}
 
 /// An abstraction for a type that provides state data.
 #[auto_impl(&, Arc, Box)]
@@ -144,6 +192,16 @@ pub trait TryIntoHistoricalStateProvider {
 pub trait StateProviderFactory: BlockIdReader + Send {
     /// Storage provider for latest block.
     fn latest(&self) -> ProviderResult<StateProviderBox>;
+
+    /// Storage provider for the latest hybrid state read directly from the database.
+    ///
+    /// Implementations that support this must return a provider and durable frontiers read from
+    /// the same database snapshot. The returned provider must not include any in-memory canonical
+    /// state maintained by the factory. See [`LatestDatabaseState`] for the overlay required under
+    /// partial persistence.
+    fn latest_database_state(&self) -> ProviderResult<Option<LatestDatabaseState>> {
+        Ok(None)
+    }
 
     /// Returns a [`StateProvider`] indexed by the given [`BlockId`].
     ///

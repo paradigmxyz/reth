@@ -10567,6 +10567,7 @@ dependencies = [
  "parking_lot",
  "proptest",
  "proptest-arbitrary-interop",
+ "reth-chain-state",
  "reth-chainspec",
  "reth-db",
  "reth-db-api",

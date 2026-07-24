@@ -203,7 +203,7 @@ async fn test_rocksdb_transaction_queries() -> Result<()> {
     let signer = wallets[0].clone();
     let client = nodes[0].rpc_client().expect("RPC client should be available");
 
-    let raw_tx = TransactionTestContext::transfer_tx_bytes(chain_id, signer).await;
+    let raw_tx = TransactionTestContext::transfer_tx_bytes(chain_id, signer.clone()).await;
     let tx_hash = nodes[0].rpc.inject_tx(raw_tx).await?;
 
     // Wait for tx to enter pending pool before mining
@@ -211,6 +211,14 @@ async fn test_rocksdb_transaction_queries() -> Result<()> {
 
     let payload = nodes[0].advance_block().await?;
     assert_eq!(payload.block().number(), 1);
+
+    let flush_tx =
+        TransactionTestContext::transfer_tx_bytes_with_nonce(chain_id, signer.clone(), 1).await;
+    let flush_tx_hash = nodes[0].rpc.inject_tx(flush_tx).await?;
+    wait_for_pending_tx(&client, flush_tx_hash).await;
+
+    let flush_payload = nodes[0].advance_block().await?;
+    assert_eq!(flush_payload.block().number(), 2);
 
     // Query each transaction by hash
     let tx: Option<Transaction> = client.request("eth_getTransactionByHash", [tx_hash]).await?;
@@ -287,6 +295,14 @@ async fn test_rocksdb_multi_tx_same_block() -> Result<()> {
     // Mine one block containing all 3 txs
     let payload = nodes[0].advance_block().await?;
     assert_eq!(payload.block().number(), 1);
+
+    let flush_tx =
+        TransactionTestContext::transfer_tx_bytes_with_nonce(chain_id, signer.clone(), 3).await;
+    let flush_tx_hash = nodes[0].rpc.inject_tx(flush_tx).await?;
+    wait_for_pending_tx(&client, flush_tx_hash).await;
+
+    let flush_payload = nodes[0].advance_block().await?;
+    assert_eq!(flush_payload.block().number(), 2);
 
     // Verify block contains all 3 txs
     let block: Option<alloy_rpc_types_eth::Block> =
@@ -426,7 +442,7 @@ async fn test_rocksdb_pending_tx_not_in_storage() -> Result<()> {
     let signer = wallets[0].clone();
 
     // Inject tx but do NOT mine
-    let raw_tx = TransactionTestContext::transfer_tx_bytes(chain_id, signer).await;
+    let raw_tx = TransactionTestContext::transfer_tx_bytes(chain_id, signer.clone()).await;
     let tx_hash = nodes[0].rpc.inject_tx(raw_tx).await?;
 
     // Verify tx is in pending pool via RPC
@@ -450,6 +466,14 @@ async fn test_rocksdb_pending_tx_not_in_storage() -> Result<()> {
     // Now mine the block
     let payload = nodes[0].advance_block().await?;
     assert_eq!(payload.block().number(), 1);
+
+    let flush_tx =
+        TransactionTestContext::transfer_tx_bytes_with_nonce(chain_id, signer.clone(), 1).await;
+    let flush_tx_hash = nodes[0].rpc.inject_tx(flush_tx).await?;
+    wait_for_pending_tx(&client, flush_tx_hash).await;
+
+    let flush_payload = nodes[0].advance_block().await?;
+    assert_eq!(flush_payload.block().number(), 2);
 
     // Poll until tx appears in RocksDB
     let tx_number = poll_tx_in_rocksdb(&nodes[0].inner.provider, tx_hash).await;
@@ -506,10 +530,6 @@ async fn test_rocksdb_reorg_unwind() -> Result<()> {
     let block1_hash = payload1.block().hash();
     assert_eq!(payload1.block().number(), 1);
 
-    // Poll until tx1 appears in RocksDB (ensures persistence happened)
-    let tx_number1 = poll_tx_in_rocksdb(&nodes[0].inner.provider, tx_hash1).await;
-    assert_eq!(tx_number1, 0, "First tx should have tx_number 0");
-
     // Mine block 2 with transaction from signer1 (nonce 1)
     let raw_tx2 =
         TransactionTestContext::transfer_tx_bytes_with_nonce(chain_id, signer1.clone(), 1).await;
@@ -518,6 +538,10 @@ async fn test_rocksdb_reorg_unwind() -> Result<()> {
 
     let payload2 = nodes[0].advance_block().await?;
     assert_eq!(payload2.block().number(), 2);
+
+    // The second block triggers the first persistence cycle, which flushes both block 1 and 2.
+    let tx_number1 = poll_tx_in_rocksdb(&nodes[0].inner.provider, tx_hash1).await;
+    assert_eq!(tx_number1, 0, "First tx should have tx_number 0");
 
     // Poll until tx2 appears in RocksDB
     let tx_number2 = poll_tx_in_rocksdb(&nodes[0].inner.provider, tx_hash2).await;
@@ -532,6 +556,14 @@ async fn test_rocksdb_reorg_unwind() -> Result<()> {
     let payload3 = nodes[0].advance_block().await?;
     assert_eq!(payload3.block().number(), 3);
 
+    let flush_tx =
+        TransactionTestContext::transfer_tx_bytes_with_nonce(chain_id, signer1.clone(), 3).await;
+    let flush_tx_hash = nodes[0].rpc.inject_tx(flush_tx).await?;
+    wait_for_pending_tx(&client, flush_tx_hash).await;
+
+    let flush_payload = nodes[0].advance_block().await?;
+    assert_eq!(flush_payload.block().number(), 4);
+
     // Poll until tx3 appears in RocksDB
     let tx_number3 = poll_tx_in_rocksdb(&nodes[0].inner.provider, tx_hash3).await;
     assert_eq!(tx_number3, 2, "Third tx should have tx_number 2");
@@ -543,7 +575,7 @@ async fn test_rocksdb_reorg_unwind() -> Result<()> {
     let alt_tx_hash = nodes[0].rpc.inject_tx(raw_alt_tx).await?;
     wait_for_pending_tx(&client, alt_tx_hash).await;
 
-    // Build an alternate payload (this builds on top of the current head, i.e., block 3)
+    // Build an alternate payload on top of the current flushed head.
     // But we want to reorg back to block 1, so we'll use the payload and then FCU to it
     let alt_payload = nodes[0].new_payload().await?;
     let alt_block_hash = nodes[0].submit_payload(alt_payload.clone()).await?;
@@ -561,8 +593,8 @@ async fn test_rocksdb_reorg_unwind() -> Result<()> {
     let latest: Option<alloy_rpc_types_eth::Block> =
         client.request("eth_getBlockByNumber", ("latest", false)).await?;
     let latest = latest.expect("Latest block should exist");
-    // The alt block is at height 4 (on top of block 3)
-    assert!(latest.header.number >= 3, "Should be at height >= 3 after operation");
+    // The alt block is built on top of the flushed canonical head.
+    assert!(latest.header.number >= 4, "Should be at height >= 4 after operation");
 
     // tx1 from block 1 should still be there
     let tx1: Option<Transaction> = client.request("eth_getTransactionByHash", [tx_hash1]).await?;
@@ -634,8 +666,6 @@ async fn test_rocksdb_historical_account_queries() -> Result<()> {
 
     let payload1 = nodes[0].advance_block().await?;
     assert_eq!(payload1.block().number(), 1);
-    poll_tx_in_rocksdb(&nodes[0].inner.provider, tx_hash1).await;
-
     // Record state after block 1
     let balance_at_1: U256 = client.request("eth_getBalance", (sender, "0x1")).await?;
     let nonce_at_1: U256 = client.request("eth_getTransactionCount", (sender, "0x1")).await?;
@@ -650,8 +680,6 @@ async fn test_rocksdb_historical_account_queries() -> Result<()> {
 
     let payload2 = nodes[0].advance_block().await?;
     assert_eq!(payload2.block().number(), 2);
-    poll_tx_in_rocksdb(&nodes[0].inner.provider, tx_hash2).await;
-
     let balance_at_2: U256 = client.request("eth_getBalance", (sender, "0x2")).await?;
     let nonce_at_2: U256 = client.request("eth_getTransactionCount", (sender, "0x2")).await?;
     assert!(balance_at_2 < balance_at_1, "Balance should decrease further after second tx");
@@ -665,18 +693,14 @@ async fn test_rocksdb_historical_account_queries() -> Result<()> {
 
     let payload3 = nodes[0].advance_block().await?;
     assert_eq!(payload3.block().number(), 3);
-    poll_tx_in_rocksdb(&nodes[0].inner.provider, tx_hash3).await;
-
     let balance_at_3: U256 = client.request("eth_getBalance", (sender, "0x3")).await?;
     let nonce_at_3: U256 = client.request("eth_getTransactionCount", (sender, "0x3")).await?;
     assert!(balance_at_3 < balance_at_2, "Balance should decrease further after third tx");
     assert_eq!(nonce_at_3, U256::from(3), "Nonce should be 3 after third tx");
 
     // Mine additional blocks to push blocks 1-3 out of the in-memory overlay.
-    // With persistence_threshold=0 and memory_block_buffer_target=0, each new block
-    // triggers persistence up to `head` followed by in-memory eviction. Mining several
-    // more blocks ensures the engine loop has completed at least one full
-    // persist-then-evict cycle covering blocks 1-3.
+    // With a persistence threshold of 1, every second block triggers a flush, so a few extra
+    // blocks are enough to durably persist and evict the earlier history we want to query.
     // Each block needs a transaction because the payload builder requires non-empty payloads.
     for nonce in 3..8u64 {
         let raw_tx =
@@ -686,6 +710,7 @@ async fn test_rocksdb_historical_account_queries() -> Result<()> {
         wait_for_pending_tx(&client, tx_hash).await;
         nodes[0].advance_block().await?;
     }
+    poll_tx_in_rocksdb(&nodes[0].inner.provider, tx_hash3).await;
     // Allow the engine loop to process the persistence completions
     tokio::time::sleep(Duration::from_millis(500)).await;
 
@@ -929,10 +954,6 @@ async fn test_rocksdb_storage_history_pruning() -> Result<()> {
 
     let payload1 = nodes[0].advance_block().await?;
     assert_eq!(payload1.block().number(), 1);
-    poll_tx_in_rocksdb(&nodes[0].inner.provider, deploy_hash).await;
-
-    // Let the persistence cycle complete before the next block (same cadence as the loop below)
-    tokio::time::sleep(Duration::from_millis(300)).await;
 
     // Get the deployed contract address from the receipt
     let receipt: Option<TransactionReceipt> =
@@ -981,6 +1002,10 @@ async fn test_rocksdb_storage_history_pruning() -> Result<()> {
         let payload = nodes[0].advance_block().await?;
         assert_eq!(payload.block().number(), block_num);
         last_tx_hash = tx_hash;
+
+        if nonce == 1 {
+            poll_tx_in_rocksdb(&nodes[0].inner.provider, deploy_hash).await;
+        }
 
         // Let the persistence cycle complete before the next block
         tokio::time::sleep(Duration::from_millis(300)).await;

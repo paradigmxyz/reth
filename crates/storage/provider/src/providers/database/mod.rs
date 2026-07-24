@@ -17,6 +17,7 @@ use alloy_primitives::{Address, BlockHash, BlockNumber, TxHash, TxNumber, B256};
 use core::fmt;
 use notify::{RecommendedWatcher, RecursiveMode, Watcher};
 use parking_lot::RwLock;
+use reth_chain_state::StateTrieOverlayManager;
 use reth_chainspec::ChainInfo;
 use reth_db::{init_db, mdbx::DatabaseArguments, DatabaseEnv};
 use reth_db_api::{database::Database, models::StoredBlockBodyIndices};
@@ -50,6 +51,9 @@ mod provider;
 pub use provider::{
     CommitOrder, DatabaseProvider, DatabaseProviderRO, DatabaseProviderRW, SaveBlocksMode,
 };
+
+mod save_blocks;
+pub use save_blocks::SaveBlocksInput;
 
 use super::ProviderNodeTypes;
 use reth_trie::KeccakKeyHasher;
@@ -207,6 +211,12 @@ impl<N: NodeTypesWithDB> ProviderFactory<N> {
     /// Returns the shared changeset cache.
     pub(crate) fn changeset_cache(&self) -> ChangesetCache {
         self.changeset_cache.clone()
+    }
+
+    /// Sets the manager used by the shared changeset cache to reconstruct a partially persisted
+    /// logical database tip.
+    pub fn set_state_trie_overlay_manager(&self, manager: StateTrieOverlayManager<N::Primitives>) {
+        self.changeset_cache.set_state_trie_overlay_manager(manager);
     }
 
     /// Sets the minimum pruning distance for an existing [`ProviderFactory`].

@@ -69,16 +69,17 @@ use reth_node_metrics::{
 };
 use reth_provider::{
     providers::{NodeTypesForProvider, ProviderNodeTypes, RocksDBProvider, StaticFileProvider},
-    BalConfig, BalStoreHandle, BlockHashReader, BlockNumReader, InMemoryBalStore, ProviderError,
-    ProviderFactory, ProviderResult, RocksDBProviderFactory, StageCheckpointReader,
-    StaticFileProviderBuilder, StaticFileProviderFactory, StorageSettingsCache,
+    BalConfig, BalStoreHandle, BlockHashReader, BlockNumReader, DatabaseProviderFactory,
+    InMemoryBalStore, ProviderError, ProviderFactory, ProviderResult, RocksDBProviderFactory,
+    StageCheckpointReader, StaticFileProviderBuilder, StaticFileProviderFactory,
+    StorageSettingsCache,
 };
 use reth_prune::{PruneMode, PruneModes, PrunerBuilder};
 use reth_rpc_builder::config::RethRpcServerConfig;
 use reth_rpc_layer::JwtSecret;
 use reth_stages::{
     sets::DefaultStages, stages::EraImportSource, MetricEvent, PipelineBuilder, PipelineTarget,
-    StageId, StageSet,
+    StageCheckpoint, StageId, StageSet,
 };
 use reth_static_file::{blocks_per_file_for_prune_distance, StaticFileProducer, StaticFileSegment};
 use reth_tasks::TaskExecutor;
@@ -544,19 +545,26 @@ where
         // the unwind targets for each storage layer if inconsistencies are
         // found.
         let (rocksdb_unwind, static_file_unwind) = factory.check_consistency()?;
+        let partial_trie_unwind = partial_trie_unwind_target(
+            factory.database_provider_ro()?.get_stage_checkpoint(StageId::Finish)?,
+        );
 
         // Take the minimum block number to ensure all storage layers are consistent.
-        let unwind_target = [rocksdb_unwind, static_file_unwind].into_iter().flatten().min();
+        let unwind_target =
+            [rocksdb_unwind, static_file_unwind, partial_trie_unwind].into_iter().flatten().min();
 
         if let Some(unwind_block) = unwind_target {
+            let inconsistency_source = [
+                rocksdb_unwind.map(|_| "RocksDB"),
+                static_file_unwind.map(|_| "static file"),
+                partial_trie_unwind.map(|_| "partial state trie"),
+            ]
+            .into_iter()
+            .flatten()
+            .collect::<Vec<_>>()
+            .join(" and ");
             // Highly unlikely to happen, and given its destructive nature, it's better to panic
             // instead. Unwinding to 0 would leave MDBX with a huge free list size.
-            let inconsistency_source = match (rocksdb_unwind, static_file_unwind) {
-                (Some(_), Some(_)) => "RocksDB and static file",
-                (Some(_), None) => "RocksDB",
-                (None, Some(_)) => "static file",
-                (None, None) => unreachable!(),
-            };
             assert_ne!(
                 unwind_block, 0,
                 "A {} inconsistency was found that would trigger an unwind to block 0",
@@ -1336,11 +1344,19 @@ pub fn metrics_hooks<N: NodeTypesWithDB>(provider_factory: &ProviderFactory<N>) 
         .build()
 }
 
+fn partial_trie_unwind_target(finish_checkpoint: Option<StageCheckpoint>) -> Option<BlockNumber> {
+    let finish_checkpoint = finish_checkpoint?;
+    let partial_state_trie = finish_checkpoint.finish_stage_checkpoint()?.partial_state_trie()?;
+
+    (partial_state_trie != finish_checkpoint.block_number).then_some(partial_state_trie)
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{LaunchContext, NodeConfig};
+    use super::{partial_trie_unwind_target, LaunchContext, NodeConfig};
     use reth_config::Config;
     use reth_node_core::args::PruningArgs;
+    use reth_stages::{FinishCheckpoint, StageCheckpoint};
 
     const EXTENSION: &str = "toml";
 
@@ -1391,5 +1407,25 @@ mod tests {
 
             assert_eq!(reth_config, loaded_config);
         })
+    }
+
+    #[test]
+    fn partial_trie_unwind_target_uses_partial_finish_checkpoint() {
+        let finish_checkpoint = StageCheckpoint::new(42)
+            .with_finish_stage_checkpoint(FinishCheckpoint { partial_state_trie: Some(21) });
+
+        assert_eq!(partial_trie_unwind_target(Some(finish_checkpoint)), Some(21));
+    }
+
+    #[test]
+    fn partial_trie_unwind_target_ignores_matching_or_missing_partial_checkpoint() {
+        let matching_finish_checkpoint = StageCheckpoint::new(42)
+            .with_finish_stage_checkpoint(FinishCheckpoint { partial_state_trie: Some(42) });
+        let missing_partial_finish_checkpoint = StageCheckpoint::new(42)
+            .with_finish_stage_checkpoint(FinishCheckpoint { partial_state_trie: None });
+
+        assert_eq!(partial_trie_unwind_target(Some(matching_finish_checkpoint)), None);
+        assert_eq!(partial_trie_unwind_target(Some(missing_partial_finish_checkpoint)), None);
+        assert_eq!(partial_trie_unwind_target(None), None);
     }
 }

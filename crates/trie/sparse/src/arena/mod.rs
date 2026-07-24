@@ -181,6 +181,13 @@ impl ArenaSparseSubtrie {
     fn prune(&mut self, prune_before: TrieNodeEpoch) -> usize {
         // Only branches can have pruneable children.
         if !matches!(&self.arena[self.root], ArenaSparseNode::Branch(_)) {
+            trace!(
+                target: TRACE_TARGET,
+                trie = "lower",
+                subtrie_path = ?self.path,
+                root_variant = %AsRef::<str>::as_ref(&self.arena[self.root]),
+                "Skipping lower sparse trie prune because root is not a branch"
+            );
             return 0;
         }
 
@@ -719,7 +726,7 @@ impl ArenaParallelSparseTrie {
             }
 
             loop {
-                match cursor.next(arena, |_, node| {
+                match cursor.next(arena, |_, _, node| {
                     matches!(node, ArenaSparseNode::Branch(_) | ArenaSparseNode::Leaf { .. })
                 }) {
                     NextResult::Done => break,
@@ -1160,7 +1167,7 @@ impl ArenaParallelSparseTrie {
         // are descended into; all other children (leaves, cached branches, blinded, subtries)
         // are encoded when their parent branch is popped.
         loop {
-            let result = cursor.next(&mut *arena, |_, node| {
+            let result = cursor.next(&mut *arena, |_, _, node| {
                 matches!(
                     node,
                     ArenaSparseNode::Branch(b) if matches!(b.state, ArenaSparseNodeState::Dirty)
@@ -2013,7 +2020,7 @@ impl ArenaParallelSparseTrie {
         cursor.reset(&self.upper_arena, self.root, Nibbles::default());
 
         loop {
-            let result = cursor.next(&mut self.upper_arena, |_, _| true);
+            let result = cursor.next(&mut self.upper_arena, |_, _, _| true);
             match result {
                 NextResult::Done => break,
                 NextResult::NonBranch | NextResult::Branch => {
@@ -2561,11 +2568,12 @@ impl SparseTrie for ArenaParallelSparseTrie {
         self.buffers.cursor.reset(&self.upper_arena, self.root, Nibbles::default());
 
         loop {
-            let result = self.buffers.cursor.next(&mut self.upper_arena, |_, child| match child {
-                ArenaSparseNode::Branch(_) | ArenaSparseNode::Subtrie(_) => !child.is_cached(),
-                ArenaSparseNode::TakenSubtrie => true,
-                _ => false,
-            });
+            let result =
+                self.buffers.cursor.next(&mut self.upper_arena, |_, _, child| match child {
+                    ArenaSparseNode::Branch(_) | ArenaSparseNode::Subtrie(_) => !child.is_cached(),
+                    ArenaSparseNode::TakenSubtrie => true,
+                    _ => false,
+                });
 
             match result {
                 NextResult::Done => break,
@@ -2653,10 +2661,25 @@ impl SparseTrie for ArenaParallelSparseTrie {
 
         // Only descend if the root is a branch; otherwise there are no subtries.
         if !matches!(&self.upper_arena[self.root], ArenaSparseNode::Branch(_)) {
+            trace!(
+                target: TRACE_TARGET,
+                trie = "upper",
+                root_variant = %AsRef::<str>::as_ref(&self.upper_arena[self.root]),
+                "Skipping upper sparse trie prune because root is not a branch"
+            );
             return 0;
         }
 
         let threshold = self.parallelism_thresholds.min_leaves_for_prune;
+        let old_upper_nodes = self.upper_arena.len();
+        trace!(
+            target: TRACE_TARGET,
+            trie = "upper",
+            old_nodes = old_upper_nodes,
+            prune_before = prune_before.get(),
+            threshold,
+            "Starting upper sparse trie prune"
+        );
 
         let mut cursor = mem::take(&mut self.buffers.cursor);
         cursor.reset(&self.upper_arena, self.root, Nibbles::default());
@@ -2667,7 +2690,7 @@ impl SparseTrie for ArenaParallelSparseTrie {
         let mut pruned = 0;
 
         loop {
-            let result = cursor.next(&mut self.upper_arena, |_, child| {
+            let result = cursor.next(&mut self.upper_arena, |_, _, child| {
                 matches!(
                     child,
                     ArenaSparseNode::Branch(_) |
@@ -2699,6 +2722,17 @@ impl SparseTrie for ArenaParallelSparseTrie {
                         continue;
                     }
 
+                    trace!(
+                        target: TRACE_TARGET,
+                        trie = "upper",
+                        path = ?head_path,
+                        child_nibble = ?head_path.last(),
+                        variant = %AsRef::<str>::as_ref(&self.upper_arena[head_idx]),
+                        node_epoch = node_epoch.get(),
+                        prune_before = prune_before.get(),
+                        reason = "node_epoch_before_cutoff",
+                        "Pruning upper trie node"
+                    );
                     Self::remove_pruned_node(
                         &mut self.upper_arena,
                         &cursor,
@@ -2729,6 +2763,19 @@ impl SparseTrie for ArenaParallelSparseTrie {
                         unreachable!()
                     };
                     if subtrie.num_leaves >= threshold {
+                        trace!(
+                            target: TRACE_TARGET,
+                            trie = "upper",
+                            path = ?head_path,
+                            subtrie_path = ?subtrie.path,
+                            subtrie_num_leaves = subtrie.num_leaves,
+                            root_epoch = root_epoch.get(),
+                            prune_before = prune_before.get(),
+                            threshold,
+                            mode = "deferred_parallel",
+                            reason = "subtrie_root_epoch_at_or_after_cutoff",
+                            "Taking lower trie for deferred prune"
+                        );
                         let ArenaSparseNode::Subtrie(subtrie) = mem::replace(
                             &mut self.upper_arena[head_idx],
                             ArenaSparseNode::TakenSubtrie,
@@ -2787,6 +2834,15 @@ impl SparseTrie for ArenaParallelSparseTrie {
 
         #[cfg(feature = "trie-debug")]
         self.record_initial_state();
+
+        trace!(
+            target: TRACE_TARGET,
+            trie = "upper",
+            old_nodes = old_upper_nodes,
+            new_nodes = self.upper_arena.len(),
+            pruned,
+            "Completed upper sparse trie prune"
+        );
 
         pruned
     }

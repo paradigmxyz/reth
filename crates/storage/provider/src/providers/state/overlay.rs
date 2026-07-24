@@ -143,6 +143,7 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
         mut self,
         state_trie_overlay_manager: StateTrieOverlayManager<N>,
     ) -> Self {
+        self.changeset_cache.set_state_trie_overlay_manager(state_trie_overlay_manager.clone());
         self.overlay_source = Some(OverlaySource::Managed { manager: state_trie_overlay_manager });
         self
     }
@@ -266,7 +267,6 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
                 "overlay anchor {anchor_hash} is not on the durable finish chain at block {anchor_number} (found {canonical_anchor_hash})",
             ))))
         }
-
         // With no partial-persistence gap, a parent at the Finish tip is already exposed by the
         // database without an overlay or reverts.
         if state_trie_tip_block.hash == finish_tip_block.hash &&
@@ -890,6 +890,11 @@ mod tests {
         let (factory, blocks) = setup_frontiers(2, 3);
         let manager = StateTrieOverlayManager::default();
         manager.insert_block(blocks[1].clone());
+        manager.insert_block(ExecutedBlock::new(
+            Arc::clone(&blocks[3].recovered_block),
+            Arc::clone(&blocks[3].execution_output),
+            ComputedTrieData::default(),
+        ));
         let provider = factory.provider().unwrap();
 
         let overlay = OverlayBuilder::<EthPrimitives>::new(
@@ -922,6 +927,31 @@ mod tests {
             builder.reverts_required(&provider, state_trie_tip, finish_tip, anchor_hash).unwrap();
 
         assert_eq!(revert_blocks, Some(2..=3));
+    }
+
+    #[cfg(feature = "partial-persistence")]
+    #[test]
+    fn managed_overlay_registers_logical_tip_with_changeset_cache() {
+        let (factory, blocks) = setup_frontiers(1, 3);
+        let manager = StateTrieOverlayManager::default();
+        for block in &blocks[2..=3] {
+            manager.insert_block(ExecutedBlock::new(
+                Arc::clone(&block.recovered_block),
+                Arc::clone(&block.execution_output),
+                ComputedTrieData::default(),
+            ));
+        }
+
+        let overlay = OverlayBuilder::<EthPrimitives>::new(
+            blocks[1].recovered_block().hash(),
+            ChangesetCache::new(),
+        )
+        .with_state_trie_overlay_manager(manager)
+        .build_overlay(&factory.provider().unwrap())
+        .unwrap();
+
+        assert!(overlay.hashed_post_state.is_empty());
+        assert!(overlay.trie_updates.is_empty());
     }
 
     #[cfg(feature = "partial-persistence")]
