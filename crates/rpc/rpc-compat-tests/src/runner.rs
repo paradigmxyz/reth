@@ -144,6 +144,7 @@ async fn execute_test(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn execute_exchange(
     client: &reqwest::Client,
     url: &str,
