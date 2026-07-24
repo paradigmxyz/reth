@@ -2075,21 +2075,19 @@ impl<'a> RocksDBBatch<'a> {
         let mut updated = false;
         let mut last_remaining: Option<(K, BlockNumberList)> = None;
 
-        for (key, block_list) in shards {
+        for (key, mut block_list) in shards {
             if !is_sentinel(&key) && get_highest(&key) <= to_block {
                 delete_shard(self, key)?;
                 deleted = true;
             } else {
-                let original_len = block_list.len();
-                let filtered =
-                    BlockNumberList::new_pre_sorted(block_list.iter().filter(|&b| b > to_block));
+                let removed = block_list.remove_up_to(to_block);
 
-                if filtered.is_empty() {
+                if block_list.is_empty() {
                     delete_shard(self, key)?;
                     deleted = true;
-                } else if filtered.len() < original_len {
-                    put_shard(self, key.clone(), &filtered)?;
-                    last_remaining = Some((key, filtered));
+                } else if removed > 0 {
+                    put_shard(self, key.clone(), &block_list)?;
+                    last_remaining = Some((key, block_list));
                     updated = true;
                 } else {
                     last_remaining = Some((key, block_list));
@@ -2199,6 +2197,7 @@ impl<'a> RocksDBBatch<'a> {
 
             // Collect all shards for this address using raw prefix comparison
             let mut shards = Vec::new();
+            let mut deleted_full_shard = false;
             while iter.valid() {
                 let Some(key_bytes) = iter.key() else { break };
 
@@ -2212,6 +2211,13 @@ impl<'a> RocksDBBatch<'a> {
                 let key = ShardedKey::<Address>::decode(key_bytes)
                     .map_err(|_| ProviderError::Database(DatabaseError::Decode))?;
 
+                if key.highest_block_number != u64::MAX && key.highest_block_number <= *to_block {
+                    self.delete::<tables::AccountsHistory>(key)?;
+                    deleted_full_shard = true;
+                    iter.next();
+                    continue;
+                }
+
                 let Some(value_bytes) = iter.value() else { break };
                 let value = BlockNumberList::decompress(value_bytes)
                     .map_err(|_| ProviderError::Database(DatabaseError::Decode))?;
@@ -2220,7 +2226,7 @@ impl<'a> RocksDBBatch<'a> {
                 iter.next();
             }
 
-            match self.prune_history_shards_inner(
+            let outcome = self.prune_history_shards_inner(
                 shards,
                 *to_block,
                 |key| key.highest_block_number,
@@ -2228,7 +2234,9 @@ impl<'a> RocksDBBatch<'a> {
                 |batch, key| batch.delete::<tables::AccountsHistory>(key),
                 |batch, key, value| batch.put::<tables::AccountsHistory>(key, value),
                 || ShardedKey::new(*address, u64::MAX),
-            )? {
+            )?;
+
+            match if deleted_full_shard { PruneShardOutcome::Deleted } else { outcome } {
                 PruneShardOutcome::Deleted => outcomes.deleted += 1,
                 PruneShardOutcome::Updated => outcomes.updated += 1,
                 PruneShardOutcome::Unchanged => outcomes.unchanged += 1,
@@ -2326,6 +2334,7 @@ impl<'a> RocksDBBatch<'a> {
 
             // Collect all shards for this (address, storage_key) pair using prefix comparison
             let mut shards = Vec::new();
+            let mut deleted_full_shard = false;
             while iter.valid() {
                 let Some(key_bytes) = iter.key() else { break };
 
@@ -2339,6 +2348,15 @@ impl<'a> RocksDBBatch<'a> {
                 let key = StorageShardedKey::decode(key_bytes)
                     .map_err(|_| ProviderError::Database(DatabaseError::Decode))?;
 
+                if key.sharded_key.highest_block_number != u64::MAX &&
+                    key.sharded_key.highest_block_number <= *to_block
+                {
+                    self.delete::<tables::StoragesHistory>(key)?;
+                    deleted_full_shard = true;
+                    iter.next();
+                    continue;
+                }
+
                 let Some(value_bytes) = iter.value() else { break };
                 let value = BlockNumberList::decompress(value_bytes)
                     .map_err(|_| ProviderError::Database(DatabaseError::Decode))?;
@@ -2348,7 +2366,7 @@ impl<'a> RocksDBBatch<'a> {
             }
 
             // Use existing prune_history_shards_inner logic
-            match self.prune_history_shards_inner(
+            let outcome = self.prune_history_shards_inner(
                 shards,
                 *to_block,
                 |key| key.sharded_key.highest_block_number,
@@ -2356,7 +2374,9 @@ impl<'a> RocksDBBatch<'a> {
                 |batch, key| batch.delete::<tables::StoragesHistory>(key),
                 |batch, key, value| batch.put::<tables::StoragesHistory>(key, value),
                 || StorageShardedKey::last(*address, *storage_key),
-            )? {
+            )?;
+
+            match if deleted_full_shard { PruneShardOutcome::Deleted } else { outcome } {
                 PruneShardOutcome::Deleted => outcomes.deleted += 1,
                 PruneShardOutcome::Updated => outcomes.updated += 1,
                 PruneShardOutcome::Unchanged => outcomes.unchanged += 1,
@@ -4321,6 +4341,60 @@ mod tests {
 
         let shards3 = provider.account_history_shards(addr3).unwrap();
         assert_eq!(shards3[0].1.iter().collect::<Vec<_>>(), vec![40]);
+    }
+
+    #[test]
+    fn test_prune_history_batch_deletes_full_shards_without_touching_sentinel() {
+        let temp_dir = TempDir::new().unwrap();
+        let provider = RocksDBBuilder::new(temp_dir.path()).with_default_tables().build().unwrap();
+
+        let addr = Address::from([0x42; 20]);
+        let slot = B256::from([0x24; 32]);
+
+        let mut batch = provider.batch();
+        batch
+            .put::<tables::AccountsHistory>(
+                ShardedKey::new(addr, 20),
+                &BlockNumberList::new_pre_sorted([10, 20]),
+            )
+            .unwrap();
+        batch
+            .put::<tables::AccountsHistory>(
+                ShardedKey::new(addr, u64::MAX),
+                &BlockNumberList::new_pre_sorted([30, 40]),
+            )
+            .unwrap();
+        batch
+            .put::<tables::StoragesHistory>(
+                StorageShardedKey::new(addr, slot, 20),
+                &BlockNumberList::new_pre_sorted([10, 20]),
+            )
+            .unwrap();
+        batch
+            .put::<tables::StoragesHistory>(
+                StorageShardedKey::last(addr, slot),
+                &BlockNumberList::new_pre_sorted([30, 40]),
+            )
+            .unwrap();
+        batch.commit().unwrap();
+
+        let mut batch = provider.batch();
+        let account_outcomes = batch.prune_account_history_batch(&[(addr, 20)]).unwrap();
+        let storage_outcomes = batch.prune_storage_history_batch(&[((addr, slot), 20)]).unwrap();
+        batch.commit().unwrap();
+
+        assert_eq!(account_outcomes.deleted, 1);
+        assert_eq!(storage_outcomes.deleted, 1);
+
+        let account_shards = provider.account_history_shards(addr).unwrap();
+        assert_eq!(account_shards.len(), 1);
+        assert_eq!(account_shards[0].0.highest_block_number, u64::MAX);
+        assert_eq!(account_shards[0].1.iter().collect::<Vec<_>>(), vec![30, 40]);
+
+        let storage_shards = provider.storage_history_shards(addr, slot).unwrap();
+        assert_eq!(storage_shards.len(), 1);
+        assert_eq!(storage_shards[0].0.sharded_key.highest_block_number, u64::MAX);
+        assert_eq!(storage_shards[0].1.iter().collect::<Vec<_>>(), vec![30, 40]);
     }
 
     #[test]

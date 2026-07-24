@@ -68,6 +68,11 @@ impl IntegerList {
         self.0.clear();
     }
 
+    /// Removes every value in the inclusive range `..=to`.
+    pub fn remove_up_to(&mut self, to: u64) -> u64 {
+        self.0.remove_range(..=to)
+    }
+
     /// Serializes an [`IntegerList`] into a sequence of bytes.
     pub fn to_bytes(&self) -> Vec<u8> {
         let mut vec = Vec::with_capacity(self.0.serialized_size());
