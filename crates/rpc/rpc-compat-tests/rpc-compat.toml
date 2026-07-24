@@ -1,0 +1,29 @@
+[fixture]
+repository = "ethereum/execution-apis"
+revision = "main"
+track_latest = true
+github_token_env = "GITHUB_TOKEN"
+cache_dir = "../../../.cache/rpc-compat"
+tests_dir = "tests"
+
+[run]
+include = ["*"]
+exclude = []
+skip = []
+ignore = []
+expected_failures = [
+    "debug_getRawBlock/get-invalid-number",
+    "debug_getRawTransaction/get-invalid-hash",
+    "debug_getRawReceipts/get-invalid-number",
+    "debug_getRawHeader/get-invalid-number",
+    "debug_getRawReceipts/get-block-n",
+    "eth_getStorageAt/get-storage-invalid-key-too-large",
+    "eth_getStorageAt/get-storage-invalid-key",
+    "eth_getTransactionReceipt/get-legacy-contract",
+    "eth_getTransactionReceipt/get-legacy-input",
+    "eth_getTransactionReceipt/get-legacy-receipt",
+]
+timeout_secs = 5
+fail_fast = false
+report_json = "../../../target/rpc-compat/report.json"
+report_junit = "../../../target/rpc-compat/junit.xml"

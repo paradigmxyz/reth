@@ -32,6 +32,8 @@ where
     pub engine: AuthServerHandle,
     /// Beacon consensus engine handle for direct interaction with the consensus engine
     pub beacon_engine_handle: Option<ConsensusEngineHandle<Payload>>,
+    /// URL of the regular JSON-RPC HTTP endpoint.
+    rpc_url: Url,
     /// Alloy provider for interacting with the node
     provider: Arc<dyn Provider + Send + Sync>,
 }
@@ -42,9 +44,9 @@ where
 {
     /// Instantiates a new [`NodeClient`] with the given handles and RPC URL
     pub fn new(rpc: HttpClient, engine: AuthServerHandle, url: Url) -> Self {
-        let provider =
-            Arc::new(ProviderBuilder::new().connect_http(url)) as Arc<dyn Provider + Send + Sync>;
-        Self { rpc, engine, beacon_engine_handle: None, provider }
+        let provider = Arc::new(ProviderBuilder::new().connect_http(url.clone()))
+            as Arc<dyn Provider + Send + Sync>;
+        Self { rpc, engine, beacon_engine_handle: None, rpc_url: url, provider }
     }
 
     /// Instantiates a new [`NodeClient`] with the given handles, RPC URL, and beacon engine handle
@@ -54,9 +56,20 @@ where
         url: Url,
         beacon_engine_handle: ConsensusEngineHandle<Payload>,
     ) -> Self {
-        let provider =
-            Arc::new(ProviderBuilder::new().connect_http(url)) as Arc<dyn Provider + Send + Sync>;
-        Self { rpc, engine, beacon_engine_handle: Some(beacon_engine_handle), provider }
+        let provider = Arc::new(ProviderBuilder::new().connect_http(url.clone()))
+            as Arc<dyn Provider + Send + Sync>;
+        Self {
+            rpc,
+            engine,
+            beacon_engine_handle: Some(beacon_engine_handle),
+            rpc_url: url,
+            provider,
+        }
+    }
+
+    /// Returns the URL of the regular JSON-RPC HTTP endpoint.
+    pub const fn rpc_url(&self) -> &Url {
+        &self.rpc_url
     }
 
     /// Get a block by number using the alloy provider
@@ -85,6 +98,7 @@ where
             .field("rpc", &self.rpc)
             .field("engine", &self.engine)
             .field("beacon_engine_handle", &self.beacon_engine_handle.is_some())
+            .field("rpc_url", &self.rpc_url)
             .field("provider", &"<Provider>")
             .finish()
     }
