@@ -2676,7 +2676,7 @@ impl SparseTrie for ArenaParallelSparseTrie {
             target: TRACE_TARGET,
             trie = "upper",
             old_nodes = old_upper_nodes,
-            prune_before,
+            prune_before = prune_before.get(),
             threshold,
             "Starting upper sparse trie prune"
         );
@@ -2728,8 +2728,8 @@ impl SparseTrie for ArenaParallelSparseTrie {
                         path = ?head_path,
                         child_nibble = ?head_path.last(),
                         variant = %AsRef::<str>::as_ref(&self.upper_arena[head_idx]),
-                        node_epoch,
-                        prune_before,
+                        node_epoch = node_epoch.get(),
+                        prune_before = prune_before.get(),
                         reason = "node_epoch_before_cutoff",
                         "Pruning upper trie node"
                     );
@@ -2769,8 +2769,8 @@ impl SparseTrie for ArenaParallelSparseTrie {
                             path = ?head_path,
                             subtrie_path = ?subtrie.path,
                             subtrie_num_leaves = subtrie.num_leaves,
-                            root_epoch,
-                            prune_before,
+                            root_epoch = root_epoch.get(),
+                            prune_before = prune_before.get(),
                             threshold,
                             mode = "deferred_parallel",
                             reason = "subtrie_root_epoch_at_or_after_cutoff",
