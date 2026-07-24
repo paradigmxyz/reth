@@ -8,7 +8,7 @@ use reth_rpc_compat_tests::{
     case::discover,
     config::{Config, RunAdditions},
     fixture,
-    report::{unexpected_results, UnexpectedKind},
+    report::{report_summary, UnexpectedKind},
     schema::SchemaCatalog,
 };
 use std::{
@@ -36,7 +36,7 @@ enum Command {
     Check(RunArgs),
     /// Launch embedded Reth and run selected tests.
     Run(RunArgs),
-    /// List only unexpected test IDs from a completed JSON report.
+    /// Summarize a completed JSON report and list unexpected test IDs.
     ListUnexpected(ListUnexpectedArgs),
 }
 
@@ -103,6 +103,9 @@ struct ListUnexpectedArgs {
     /// Emit one collapsible `GitHub` Actions log group per unexpected result.
     #[arg(long)]
     github_groups: bool,
+    /// Return a failing exit status when the report contains unexpected results.
+    #[arg(long)]
+    fail_on_unexpected: bool,
 }
 
 #[derive(Debug, Clone, Copy, ValueEnum)]
@@ -170,19 +173,36 @@ async fn main() -> Result<()> {
 }
 
 fn print_unexpected(args: ListUnexpectedArgs) -> Result<()> {
-    let results = unexpected_results(&args.report)?;
+    let summary = report_summary(&args.report)?;
+    let results = &summary.unexpected;
     let color = match args.color {
         OutputColor::Auto => io::stdout().is_terminal() || std::env::var_os("CI").is_some(),
         OutputColor::Always => true,
         OutputColor::Never => false,
     };
     let (bold, reset) = if color { ("\x1b[1m", "\x1b[0m") } else { ("", "") };
+    println!("{bold}RPC compatibility summary:{reset}");
+    println!("  fixture: {}", summary.fixture_revision);
+    println!(
+        "  tests: {} selected, {} run, {} skipped",
+        summary.selected, summary.executed, summary.skipped
+    );
+    println!(
+        "  outcomes: {} passed, {} failed, {} expected failures, {} unexpected passes, {} ignored",
+        summary.passed,
+        summary.failed,
+        summary.expected_failures,
+        summary.unexpected_passes,
+        summary.ignored
+    );
+    println!("  duration: {}.{:03}s", summary.duration_ms / 1000, summary.duration_ms % 1000);
+    println!();
     println!("{bold}Unexpected failures:{reset}");
     if results.is_empty() {
         let green = if color { "\x1b[32m" } else { "" };
         println!("  {green}none{reset}");
     } else {
-        for result in &results {
+        for result in results {
             let color = if color {
                 match result.kind {
                     UnexpectedKind::Failure => "\x1b[31m",
@@ -196,14 +216,24 @@ fn print_unexpected(args: ListUnexpectedArgs) -> Result<()> {
     }
     if args.github_groups {
         for result in results {
-            println!("::group::Failed: {}", result.id);
-            if let Some(detail) = result.detail {
+            let label = match result.kind {
+                UnexpectedKind::Failure => "Failed",
+                UnexpectedKind::UnexpectedPass => "Unexpected pass",
+            };
+            println!("::group::{label}: {}", result.id);
+            if let Some(detail) = &result.detail {
                 println!("{detail}");
             } else {
                 println!("expected failure passed unexpectedly");
             }
             println!("::endgroup::");
         }
+    }
+    if args.fail_on_unexpected && !results.is_empty() {
+        return Err(eyre::eyre!(
+            "compatibility report contains {} unexpected result(s)",
+            results.len()
+        ))
     }
     Ok(())
 }
