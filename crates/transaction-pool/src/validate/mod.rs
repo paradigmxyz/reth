@@ -366,6 +366,12 @@ impl<T: PoolTransaction> ValidPoolTransaction<T> {
         self.transaction.cost()
     }
 
+    /// Returns the extra balance the sender must have on top of [`Self::cost`] to afford this
+    /// transaction (e.g. OP Stack L1 data fee + operator fee). Defaults to zero.
+    pub fn extra_balance_cost(&self) -> U256 {
+        self.transaction.extra_balance_cost()
+    }
+
     /// Returns the EIP-4844 max blob fee the caller is willing to pay.
     ///
     /// For non-EIP-4844 transactions, this returns [None].
