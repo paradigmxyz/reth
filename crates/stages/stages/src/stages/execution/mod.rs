@@ -1,11 +1,15 @@
 use crate::stages::MERKLE_STAGE_DEFAULT_INCREMENTAL_THRESHOLD;
 use alloy_consensus::BlockHeader;
-use alloy_primitives::{keccak256, BlockNumber};
+use alloy_primitives::{keccak256, BlockNumber, U256};
 use num_traits::Zero;
 use reth_chainspec::{ChainSpecProvider, EthereumHardforks};
 use reth_config::config::ExecutionConfig;
 use reth_consensus::FullConsensus;
 use reth_db::{static_file::HeaderMask, tables};
+use reth_db_api::{
+    cursor::{DbCursorRO, DbDupCursorRO},
+    transaction::DbTx,
+};
 use reth_evm::{execute::Executor, metrics::ExecutorMetrics, ConfigureEvm};
 use reth_execution_types::Chain;
 use reth_exex::{ExExManagerHandle, ExExNotification, ExExNotificationSource};
@@ -23,10 +27,7 @@ use reth_stages_api::{
     UnwindInput, UnwindOutput,
 };
 use reth_static_file_types::StaticFileSegment;
-use reth_trie::{
-    hashed_cursor::extend_hashed_post_state_with_storage_zeros, HashedPostState, KeccakKeyHasher,
-};
-use reth_trie_db::DatabaseHashedCursorFactory;
+use reth_trie::{HashedPostState, KeccakKeyHasher};
 use std::{
     cmp::{max, Ordering},
     collections::BTreeMap,
@@ -620,17 +621,24 @@ fn zero_destroyed_account_storage<P: DBProvider, R>(
     state: &ExecutionOutcome<R>,
     hashed_state: &mut HashedPostState,
 ) -> Result<(), StageError> {
-    extend_hashed_post_state_with_storage_zeros(
-        &DatabaseHashedCursorFactory::new(provider.tx_ref()),
-        state
-            .bundle
-            .state()
-            .iter()
-            .filter(|(_, account)| account.was_destroyed())
-            .map(|(address, _)| keccak256(address)),
-        hashed_state,
-    )
-    .map_err(Into::into)
+    let mut cursor = provider.tx_ref().cursor_dup_read::<tables::HashedStorages>()?;
+
+    for (address, account) in state.bundle.state() {
+        if !account.was_destroyed() {
+            continue
+        }
+
+        let hashed_address = keccak256(address);
+        let Some((_, entry)) = cursor.seek_exact(hashed_address)? else { continue };
+
+        let storage = &mut hashed_state.storages.entry(hashed_address).or_default().storage;
+        storage.entry(entry.key).or_insert(U256::ZERO);
+        while let Some(entry) = cursor.next_dup_val()? {
+            storage.entry(entry.key).or_insert(U256::ZERO);
+        }
+    }
+
+    Ok(())
 }
 
 fn reject_cancun_boundary_unwind<Provider>(
