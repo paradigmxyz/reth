@@ -204,7 +204,7 @@ fn print_unexpected(args: ListUnexpectedArgs) -> Result<()> {
     if results.is_empty() {
         let green = if color { "\x1b[32m" } else { "" };
         println!("  {green}none{reset}");
-    } else {
+    } else if !args.github_groups {
         for result in results {
             let color = if color {
                 match result.kind {
