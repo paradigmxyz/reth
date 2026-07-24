@@ -51,6 +51,7 @@ serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true
 serde_yaml.workspace = true
 sha2.workspace = true
+similar.workspace = true
 tar.workspace = true
 tempfile.workspace = true
 toml.workspace = true

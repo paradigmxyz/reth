@@ -100,6 +100,9 @@ struct ListUnexpectedArgs {
     /// Control colored output.
     #[arg(long, value_enum, default_value = "auto")]
     color: OutputColor,
+    /// Emit one collapsible `GitHub` Actions log group per unexpected result.
+    #[arg(long)]
+    github_groups: bool,
 }
 
 #[derive(Debug, Clone, Copy, ValueEnum)]
@@ -158,7 +161,7 @@ async fn main() -> Result<()> {
             #[cfg(not(feature = "embedded"))]
             {
                 let _ = args;
-                return Err(eyre::eyre!("the run command requires the `embedded` feature"))
+                return Err(eyre::eyre!("the run command requires the `embedded` feature"));
             }
         }
         Command::ListUnexpected(args) => print_unexpected(args)?,
@@ -179,7 +182,7 @@ fn print_unexpected(args: ListUnexpectedArgs) -> Result<()> {
         let green = if color { "\x1b[32m" } else { "" };
         println!("  {green}none{reset}");
     } else {
-        for result in results {
+        for result in &results {
             let color = if color {
                 match result.kind {
                     UnexpectedKind::Failure => "\x1b[31m",
@@ -189,6 +192,17 @@ fn print_unexpected(args: ListUnexpectedArgs) -> Result<()> {
                 ""
             };
             println!("  {color}{}{reset}", result.id);
+        }
+    }
+    if args.github_groups {
+        for result in results {
+            println!("::group::Failed: {}", result.id);
+            if let Some(detail) = result.detail {
+                println!("{detail}");
+            } else {
+                println!("expected failure passed unexpectedly");
+            }
+            println!("::endgroup::");
         }
     }
     Ok(())
@@ -233,7 +247,7 @@ fn parse_choice(value: &str) -> Result<(String, String), String> {
     let (name, option) =
         value.split_once('=').ok_or_else(|| "choice must use NAME=OPTION".to_string())?;
     if name.is_empty() || option.is_empty() {
-        return Err("choice name and option must not be empty".to_string())
+        return Err("choice name and option must not be empty".to_string());
     }
     Ok((name.to_string(), option.to_string()))
 }

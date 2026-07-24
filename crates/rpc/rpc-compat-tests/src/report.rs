@@ -11,6 +11,8 @@ pub struct UnexpectedResult {
     pub id: String,
     /// Why the result is unexpected.
     pub kind: UnexpectedKind,
+    /// Full mismatch detail, when available.
+    pub detail: Option<String>,
 }
 
 /// Classification of an unexpected result.
@@ -41,7 +43,7 @@ fn parse(contents: &str) -> Result<Vec<UnexpectedResult>> {
                 "xpass" => UnexpectedKind::UnexpectedPass,
                 _ => return None,
             };
-            Some(UnexpectedResult { id: result.id, kind })
+            Some(UnexpectedResult { id: result.id, kind, detail: result.detail })
         })
         .collect())
 }
@@ -55,6 +57,7 @@ struct Report {
 struct ReportResult {
     id: String,
     outcome: String,
+    detail: Option<String>,
 }
 
 #[cfg(test)]
@@ -66,10 +69,10 @@ mod tests {
         let results = parse(
             r#"{
                 "results": [
-                    {"id": "eth_ok/test", "outcome": "pass"},
-                    {"id": "eth_bad/test", "outcome": "fail"},
-                    {"id": "eth_fixed/test", "outcome": "xpass"},
-                    {"id": "eth_known/test", "outcome": "xfail"}
+                    {"id": "eth_ok/test", "outcome": "pass", "detail": null},
+                    {"id": "eth_bad/test", "outcome": "fail", "detail": "a clean diff"},
+                    {"id": "eth_fixed/test", "outcome": "xpass", "detail": null},
+                    {"id": "eth_known/test", "outcome": "xfail", "detail": "known"}
                 ]
             }"#,
         )
@@ -78,10 +81,15 @@ mod tests {
         assert_eq!(
             results,
             vec![
-                UnexpectedResult { id: "eth_bad/test".to_string(), kind: UnexpectedKind::Failure },
+                UnexpectedResult {
+                    id: "eth_bad/test".to_string(),
+                    kind: UnexpectedKind::Failure,
+                    detail: Some("a clean diff".to_string()),
+                },
                 UnexpectedResult {
                     id: "eth_fixed/test".to_string(),
                     kind: UnexpectedKind::UnexpectedPass,
+                    detail: None,
                 },
             ]
         );

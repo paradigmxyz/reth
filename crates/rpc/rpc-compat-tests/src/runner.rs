@@ -52,7 +52,7 @@ impl<Engine: EngineTypes> Action<Engine> for RunRpcCompatTests {
             for test in tests {
                 if self.config.skipped(&test.id) {
                     results.push(TestResult::new(&test, Outcome::Skip, 0, None));
-                    continue
+                    continue;
                 }
                 let test_started = Instant::now();
                 let result =
@@ -80,7 +80,7 @@ impl<Engine: EngineTypes> Action<Engine> for RunRpcCompatTests {
                 info!(test = %test.id, ?outcome, "RPC compatibility result");
                 results.push(TestResult::new(&test, outcome, elapsed, detail));
                 if self.config.fail_fast && outcome.unexpected() {
-                    break
+                    break;
                 }
             }
 
@@ -164,15 +164,16 @@ async fn execute_exchange(
     } else {
         vec![exchange.expected.clone()]
     };
-    matcher::compare(&actual, &expected, test.spec_only, method, schemas).wrap_err_with(|| {
-        format!(
-            "{} exchange {}\nrequest: {}\nactual: {}",
+    match matcher::compare(&actual, &expected, test.spec_only, method, schemas) {
+        Ok(()) => Ok(()),
+        Err(error) => Err(eyre!(
+            "{} exchange {}\n>>  {}\n<<  {}\n{error:#}",
             test.id,
             index + 1,
             exchange.request_raw,
             body
-        )
-    })
+        )),
+    }
 }
 
 /// Applies the fixture's initial forkchoice state.
