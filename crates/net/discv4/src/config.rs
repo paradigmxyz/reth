@@ -10,6 +10,7 @@ use reth_net_nat::{NatResolver, ResolveNatInterval};
 use reth_network_peers::NodeRecord;
 use std::{
     collections::{HashMap, HashSet},
+    net::IpAddr,
     time::Duration,
 };
 
@@ -62,6 +63,10 @@ pub struct Discv4Config {
     pub additional_eip868_rlp_pairs: HashMap<Vec<u8>, Bytes>,
     /// If configured, try to resolve public ip
     pub external_ip_resolver: Option<NatResolver>,
+    /// External IP of the opposite family to the local [`NodeRecord`] address, advertised in the
+    /// local EIP-868 ENR next to it (`ip` + `ip6`). Serving that family requires a secondary
+    /// socket of that family (shared-port mode).
+    pub secondary_advertised_ip: Option<IpAddr>,
     /// If configured and a `external_ip_resolver` is configured, try to resolve the external ip
     /// using this interval.
     pub resolve_external_ip_interval: Option<Duration>,
@@ -134,6 +139,7 @@ impl Default for Discv4Config {
             enforce_expiration_timestamps: true,
             additional_eip868_rlp_pairs: Default::default(),
             external_ip_resolver: Some(Default::default()),
+            secondary_advertised_ip: None,
             // By default retry public IP using a 5min interval
             resolve_external_ip_interval: Some(Duration::from_secs(60 * 5)),
         }
@@ -295,6 +301,12 @@ impl Discv4ConfigBuilder {
     /// Configures if and how the external IP of the node should be resolved.
     pub fn external_ip_resolver(&mut self, external_ip_resolver: Option<NatResolver>) -> &mut Self {
         self.config.external_ip_resolver = external_ip_resolver;
+        self
+    }
+
+    /// Sets the secondary-family external IP advertised in the local EIP-868 ENR.
+    pub const fn secondary_advertised_ip(&mut self, ip: IpAddr) -> &mut Self {
+        self.config.secondary_advertised_ip = Some(ip);
         self
     }
 
