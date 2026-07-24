@@ -44,6 +44,8 @@ pub use aliases::*;
 mod engine;
 #[cfg(feature = "std")]
 pub use engine::{ConfigureEngineEvm, ConvertTx, ExecutableTxIterator, ExecutableTxTuple};
+mod sender_recovery;
+pub use sender_recovery::SenderRecoveryCache;
 
 #[cfg(feature = "metrics")]
 pub mod metrics;
