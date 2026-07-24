@@ -32,6 +32,7 @@ pub struct DefaultEngineValues {
     state_cache_disabled: bool,
     prewarming_disabled: bool,
     txpool_prewarming_enabled: bool,
+    sender_recovery_cache_enabled: bool,
     state_provider_metrics: bool,
     cross_block_cache_size: usize,
     state_root_task_compare_updates: bool,
@@ -106,6 +107,12 @@ impl DefaultEngineValues {
     /// Set whether to enable txpool prewarming by default
     pub const fn with_txpool_prewarming_enabled(mut self, v: bool) -> Self {
         self.txpool_prewarming_enabled = v;
+        self
+    }
+
+    /// Set whether to enable sender recovery caching by default
+    pub const fn with_sender_recovery_cache_enabled(mut self, v: bool) -> Self {
+        self.sender_recovery_cache_enabled = v;
         self
     }
 
@@ -255,6 +262,7 @@ impl Default for DefaultEngineValues {
             state_cache_disabled: false,
             prewarming_disabled: false,
             txpool_prewarming_enabled: false,
+            sender_recovery_cache_enabled: false,
             state_provider_metrics: false,
             cross_block_cache_size: DEFAULT_CROSS_BLOCK_CACHE_SIZE_MB,
             state_root_task_compare_updates: false,
@@ -352,6 +360,15 @@ pub struct EngineArgs {
         default_value_t = DefaultEngineValues::get_global().txpool_prewarming_enabled
     )]
     pub txpool_prewarming_enabled: bool,
+
+    /// Enable caching recovered transaction senders across transaction ingress and payload
+    /// execution.
+    #[arg(
+        long = "engine.sender-recovery-cache",
+        env = "RETH_ENGINE_SENDER_RECOVERY_CACHE",
+        default_value_t = DefaultEngineValues::get_global().sender_recovery_cache_enabled
+    )]
+    pub sender_recovery_cache_enabled: bool,
 
     /// CAUTION: This CLI flag has no effect anymore. The parallel sparse trie is always enabled.
     #[deprecated]
@@ -551,6 +568,7 @@ impl Default for EngineArgs {
             state_cache_disabled,
             prewarming_disabled,
             txpool_prewarming_enabled,
+            sender_recovery_cache_enabled,
             state_provider_metrics,
             cross_block_cache_size,
             state_root_task_compare_updates,
@@ -585,6 +603,7 @@ impl Default for EngineArgs {
             state_cache_disabled,
             prewarming_disabled,
             txpool_prewarming_enabled,
+            sender_recovery_cache_enabled,
             parallel_sparse_trie_enabled: true,
             parallel_sparse_trie_disabled: false,
             state_provider_metrics,
@@ -808,6 +827,17 @@ mod tests {
     }
 
     #[test]
+    fn sender_recovery_cache_is_disabled_by_default_and_can_be_enabled() {
+        let args = CommandParser::<EngineArgs>::parse_from(["reth"]).args;
+        assert!(!args.sender_recovery_cache_enabled);
+
+        let args =
+            CommandParser::<EngineArgs>::parse_from(["reth", "--engine.sender-recovery-cache"])
+                .args;
+        assert!(args.sender_recovery_cache_enabled);
+    }
+
+    #[test]
     #[allow(deprecated)]
     fn engine_args() {
         let args = EngineArgs {
@@ -821,6 +851,7 @@ mod tests {
             prewarming_disabled: true,
             // conflicts with --engine.disable-state-cache, covered by its own test below
             txpool_prewarming_enabled: false,
+            sender_recovery_cache_enabled: true,
             parallel_sparse_trie_enabled: true,
             parallel_sparse_trie_disabled: false,
             state_provider_metrics: true,
@@ -864,6 +895,7 @@ mod tests {
             "--engine.legacy-state-root",
             "--engine.disable-state-cache",
             "--engine.disable-prewarming",
+            "--engine.sender-recovery-cache",
             "--engine.state-provider-metrics",
             "--engine.cross-block-cache-size",
             "256",

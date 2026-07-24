@@ -87,8 +87,8 @@ pub struct EthEvmConfig<C = ChainSpec, EvmFactory = EthEvmFactory> {
     pub executor_factory: EthBlockExecutorFactory<RethReceiptBuilder, Arc<C>, EvmFactory>,
     /// Ethereum block assembler.
     pub block_assembler: EthBlockAssembler<C>,
-    /// Cache of recovered transaction senders.
-    pub sender_recovery_cache: SenderRecoveryCache,
+    /// Cache of recovered transaction senders, if enabled.
+    pub sender_recovery_cache: Option<SenderRecoveryCache>,
 }
 
 impl EthEvmConfig {
@@ -115,7 +115,7 @@ impl<ChainSpec, EvmFactory> EthEvmConfig<ChainSpec, EvmFactory> {
     pub fn new_with_evm_factory(chain_spec: Arc<ChainSpec>, evm_factory: EvmFactory) -> Self {
         Self {
             block_assembler: EthBlockAssembler::new(chain_spec.clone()),
-            sender_recovery_cache: SenderRecoveryCache::default(),
+            sender_recovery_cache: None,
             executor_factory: EthBlockExecutorFactory::new(
                 RethReceiptBuilder::default(),
                 chain_spec,
@@ -131,7 +131,7 @@ impl<ChainSpec, EvmFactory> EthEvmConfig<ChainSpec, EvmFactory> {
 
     /// Uses the provided sender recovery cache.
     pub fn with_sender_recovery_cache(mut self, cache: SenderRecoveryCache) -> Self {
-        self.sender_recovery_cache = cache;
+        self.sender_recovery_cache = Some(cache);
         self
     }
 }
@@ -358,7 +358,12 @@ where
         let convert = move |tx: Bytes| {
             let tx =
                 TxTy::<Self::Primitives>::decode_2718_exact(tx.as_ref()).map_err(AnyError::new)?;
-            let signer = sender_recovery_cache.recover(&tx).map_err(AnyError::new)?;
+            let signer = if let Some(cache) = &sender_recovery_cache {
+                cache.recover(&tx)
+            } else {
+                tx.try_recover()
+            }
+            .map_err(AnyError::new)?;
             Ok::<_, AnyError>(tx.with_signer(signer))
         };
 

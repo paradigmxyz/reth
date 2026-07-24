@@ -751,8 +751,8 @@ pub struct BuilderContext<Node: FullNodeTypes> {
     pub(crate) executor: TaskExecutor,
     /// Config container
     pub(crate) config_container: WithConfigs<<Node::Types as NodeTypes>::ChainSpec>,
-    /// Cache of recovered transaction senders shared by node components.
-    sender_recovery_cache: reth_evm::SenderRecoveryCache,
+    /// Cache of recovered transaction senders shared by node components, if enabled.
+    sender_recovery_cache: Option<reth_evm::SenderRecoveryCache>,
 }
 
 impl<Node: FullNodeTypes> BuilderContext<Node> {
@@ -763,13 +763,12 @@ impl<Node: FullNodeTypes> BuilderContext<Node> {
         executor: TaskExecutor,
         config_container: WithConfigs<<Node::Types as NodeTypes>::ChainSpec>,
     ) -> Self {
-        Self {
-            head,
-            provider,
-            executor,
-            config_container,
-            sender_recovery_cache: reth_evm::SenderRecoveryCache::default(),
-        }
+        let sender_recovery_cache = config_container
+            .config
+            .engine
+            .sender_recovery_cache_enabled
+            .then(reth_evm::SenderRecoveryCache::default);
+        Self { head, provider, executor, config_container, sender_recovery_cache }
     }
 
     /// Returns the configured provider to interact with the blockchain.
@@ -804,9 +803,9 @@ impl<Node: FullNodeTypes> BuilderContext<Node> {
         &self.executor
     }
 
-    /// Returns the sender recovery cache shared by node components.
-    pub const fn sender_recovery_cache(&self) -> &reth_evm::SenderRecoveryCache {
-        &self.sender_recovery_cache
+    /// Returns the sender recovery cache shared by node components, if enabled.
+    pub const fn sender_recovery_cache(&self) -> Option<&reth_evm::SenderRecoveryCache> {
+        self.sender_recovery_cache.as_ref()
     }
 
     /// Returns the chain spec of the node.
@@ -934,7 +933,11 @@ impl<Node: FullNodeTypes> BuilderContext<Node> {
                 announcement_policy,
             )
             .map_transactions(|transactions| {
-                transactions.with_sender_recovery_cache(self.sender_recovery_cache.clone())
+                if let Some(cache) = self.sender_recovery_cache.clone() {
+                    transactions.with_sender_recovery_cache(cache)
+                } else {
+                    transactions
+                }
             })
             .request_handler_with_blob_store(self.provider().clone(), pool.blob_store())
             .split_with_handle();
