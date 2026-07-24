@@ -25,6 +25,8 @@ use alloy_eips::{
     eip7251::CONSOLIDATION_REQUEST_TYPE,
     eip7685::Requests,
 };
+#[cfg(test)]
+use alloy_primitives::keccak256;
 use alloy_primitives::{map::AddressMap, Address, Bytes, Log, B256, KECCAK256_EMPTY, U256};
 use alloy_sol_types::{sol, SolEvent};
 use core::{any::Any, convert::Infallible};
@@ -51,6 +53,8 @@ use evm2::{
     BaseEvmTypes, ExecutionConfig, Version,
 };
 use reth_ethereum_forks::EthereumHardforks;
+#[cfg(test)]
+use reth_ethereum_primitives::eip7997::{FACTORY_ADDRESS, FACTORY_CODE};
 #[cfg(test)]
 use reth_ethereum_primitives::Receipt;
 #[cfg(test)]
@@ -1147,7 +1151,7 @@ const fn empty_account() -> AccountInfo {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloc::collections::BTreeMap;
+    use alloc::{collections::BTreeMap, vec::Vec};
     use alloy_consensus::{SignableTransaction, TxLegacy};
     use alloy_eips::{
         eip2935::{HISTORY_SERVE_WINDOW, HISTORY_STORAGE_CODE},
@@ -1200,6 +1204,16 @@ mod tests {
             ),
             caller,
         )
+    }
+
+    fn create2_address(deployer: Address, salt: &[u8; 32], init_code: &Bytes) -> Address {
+        let mut input = Vec::with_capacity(1 + 20 + 32 + 32);
+        input.push(0xff);
+        input.extend_from_slice(deployer.as_slice());
+        input.extend_from_slice(salt);
+        input.extend_from_slice(keccak256(init_code).as_slice());
+        let hash = keccak256(input);
+        Address::from_slice(&hash.as_slice()[12..])
     }
 
     #[derive(Default)]
@@ -1260,6 +1274,70 @@ mod tests {
             output.account_state(&target).unwrap().current.as_ref().unwrap().balance,
             U256::from(1)
         );
+    }
+
+    #[test]
+    fn executes_eip7997_factory() {
+        let caller = address!("0000000000000000000000000000000000000001");
+        let salt = [0x42; 32];
+        let init_code = Bytes::from_static(&[
+            op::PUSH1,
+            0,
+            op::PUSH1,
+            0,
+            op::MSTORE8,
+            op::PUSH1,
+            1,
+            op::PUSH1,
+            0,
+            op::RETURN,
+        ]);
+        let target = create2_address(FACTORY_ADDRESS, &salt, &init_code);
+        let input = Bytes::from([salt.as_slice(), init_code.as_ref()].concat());
+
+        let mut database = TestDatabase::default();
+        database.accounts.insert(
+            caller,
+            AccountInfo::default().with_nonce(1).with_balance(U256::from(ETH_TO_WEI)),
+        );
+        database.accounts.insert(
+            FACTORY_ADDRESS,
+            AccountInfo::default().with_nonce(1).with_code(Bytecode::new_raw(FACTORY_CODE)),
+        );
+
+        let transaction = Recovered::new_unchecked(
+            TransactionSigned::Legacy(
+                TxLegacy {
+                    nonce: 1,
+                    gas_price: 1,
+                    gas_limit: 1_000_000,
+                    to: TxKind::Call(FACTORY_ADDRESS),
+                    input,
+                    ..Default::default()
+                }
+                .into_signed(Signature::test_signature()),
+            ),
+            caller,
+        );
+
+        let output = execute_block(
+            SpecId::AMSTERDAM,
+            BlockEnv { gas_limit: U256::from(2_000_000), ..Default::default() },
+            database,
+            1,
+            [transaction],
+        )
+        .expect("factory transaction succeeds");
+
+        assert!(output.result.receipts[0].success);
+        let factory = output.account_state(&FACTORY_ADDRESS).unwrap().current.as_ref().unwrap();
+        assert_eq!(factory.balance, U256::ZERO);
+        assert_eq!(factory.code_hash, keccak256(FACTORY_CODE.as_ref()));
+        assert_eq!(factory.nonce, 2);
+
+        let account = output.account_state(&target).unwrap().current.as_ref().unwrap();
+        assert_eq!(account.nonce, 1);
+        assert_eq!(output.bytecode(&account.code_hash).unwrap().original_bytes().as_ref(), &[0]);
     }
 
     #[test]

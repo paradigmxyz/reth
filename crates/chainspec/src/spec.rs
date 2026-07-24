@@ -29,7 +29,7 @@ use alloy_eips::{
     eip1559::INITIAL_BASE_FEE, eip7685::EMPTY_REQUESTS_HASH, eip7840::BlobParams,
     eip7892::BlobScheduleBlobParams, eip7928::EMPTY_BLOCK_ACCESS_LIST_HASH,
 };
-use alloy_genesis::{ChainConfig, Genesis};
+use alloy_genesis::{ChainConfig, Genesis, GenesisAccount};
 use alloy_primitives::{address, b256, Address, BlockNumber, B256, U256};
 use alloy_trie::root::state_root_ref_unhashed;
 use core::fmt::Debug;
@@ -38,6 +38,7 @@ use reth_ethereum_forks::{
     ChainHardforks, DisplayHardforks, EthereumHardfork, EthereumHardforks, ForkCondition,
     ForkFilter, ForkFilterKey, ForkHash, ForkId, Hardfork, Hardforks, Head, DEV_HARDFORKS,
 };
+use reth_ethereum_primitives::eip7997::{FACTORY_ADDRESS, FACTORY_CODE};
 use reth_network_peers::{holesky_nodes, hoodi_nodes, mainnet_nodes, sepolia_nodes, NodeRecord};
 use reth_primitives_traits::{sync::LazyLock, BlockHeader, SealedHeader};
 
@@ -108,6 +109,18 @@ pub fn make_genesis_header(genesis: &Genesis, hardforks: &ChainHardforks) -> Hea
         slot_number,
         ..Default::default()
     }
+}
+
+/// Adds the EIP-7997 deterministic factory account to a genesis allocation.
+///
+/// EIP-7997 is state-based: the factory is ordinary contract code and is not installed by a
+/// generic fork-boundary system call. Callers constructing a chain whose initial state includes
+/// the factory should invoke this before computing the genesis header or state root.
+pub fn add_eip7997_factory(genesis: &mut Genesis) {
+    genesis.alloc.insert(
+        FACTORY_ADDRESS,
+        GenesisAccount::default().with_nonce(Some(1)).with_code(Some(FACTORY_CODE)),
+    );
 }
 
 /// The Ethereum mainnet spec
@@ -2713,6 +2726,17 @@ Post-merge hard forks (timestamp based):
         let deserialized_genesis: Genesis = serde_json::from_str(&serialized_genesis).unwrap();
 
         assert_eq!(genesis, deserialized_genesis);
+    }
+
+    #[test]
+    fn adds_eip7997_factory_to_genesis() {
+        let mut genesis = Genesis::default();
+        add_eip7997_factory(&mut genesis);
+
+        let account = genesis.alloc.get(&FACTORY_ADDRESS).expect("factory account");
+        assert_eq!(account.nonce, Some(1));
+        assert_eq!(account.balance, U256::ZERO);
+        assert_eq!(account.code.as_ref(), Some(&FACTORY_CODE));
     }
 
     #[test]

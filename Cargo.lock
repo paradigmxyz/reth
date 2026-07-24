@@ -8092,6 +8092,7 @@ dependencies = [
  "auto_impl",
  "derive_more",
  "reth-ethereum-forks",
+ "reth-ethereum-primitives",
  "reth-network-peers",
  "reth-primitives-traits",
  "serde_json",
