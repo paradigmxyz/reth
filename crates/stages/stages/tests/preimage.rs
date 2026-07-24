@@ -40,7 +40,7 @@ use reth_provider::{
     DatabaseProviderFactory, HeaderProvider, OriginalValuesKnown, StateWriter, StoragePath,
 };
 use reth_prune_types::PruneModes;
-use reth_revm::{database::StateProviderDatabase, revm::database::BundleAccount};
+use reth_revm::database::StateProviderDatabase;
 use reth_stages::{
     sets::{ExecutionStages, HashingStages, OnlineStages},
     stages::FinishStage,
@@ -49,8 +49,11 @@ use reth_stages_api::{Pipeline, StageSet};
 use reth_static_file::StaticFileProducer;
 use reth_storage_api::{StorageChangeSetReader, StorageSettings, StorageSettingsCache};
 use reth_testing_utils::generators::{self, generate_key, sign_tx_with_key_pair};
-use reth_trie::{HashedPostState, KeccakKeyHasher, StateRoot};
-use reth_trie_db::DatabaseStateRoot;
+use reth_trie::{
+    hashed_cursor::extend_hashed_post_state_with_storage_zeros, HashedPostState, KeccakKeyHasher,
+    StateRoot,
+};
+use reth_trie_db::{DatabaseHashedCursorFactory, DatabaseStateRoot};
 use std::{collections::BTreeMap, path::Path, sync::Arc};
 use tokio::sync::watch;
 
@@ -1101,7 +1104,16 @@ fn execute_and_commit_block(
     let gas_used = output.gas_used;
     let mut hashed_state =
         HashedPostState::from_bundle_state::<KeccakKeyHasher>(output.state.state());
-    zero_destroyed_account_storage(&provider, output.state.state(), &mut hashed_state)?;
+    extend_hashed_post_state_with_storage_zeros(
+        &DatabaseHashedCursorFactory::new(provider.tx_ref()),
+        output
+            .state
+            .state()
+            .iter()
+            .filter(|(_, account)| account.was_destroyed())
+            .map(|(address, _)| keccak256(address)),
+        &mut hashed_state,
+    )?;
     type TestStateRoot<'a, TX, A> = StateRoot<
         reth_trie_db::DatabaseTrieCursorFactory<&'a TX, A>,
         reth_trie_db::DatabaseHashedCursorFactory<&'a TX>,
@@ -1144,34 +1156,6 @@ fn execute_and_commit_block(
     provider.commit()?;
 
     Ok(block)
-}
-
-fn zero_destroyed_account_storage<'a, P>(
-    provider: &P,
-    state: impl IntoIterator<Item = (&'a Address, &'a BundleAccount)>,
-    hashed_state: &mut HashedPostState,
-) -> eyre::Result<()>
-where
-    P: DBProvider,
-{
-    let mut cursor = provider.tx_ref().cursor_dup_read::<tables::HashedStorages>()?;
-
-    for (address, account) in state {
-        if !account.was_destroyed() {
-            continue
-        }
-
-        let hashed_address = keccak256(address);
-        let Some((_, entry)) = cursor.seek_exact(hashed_address)? else { continue };
-
-        let storage = &mut hashed_state.storages.entry(hashed_address).or_default().storage;
-        storage.entry(entry.key).or_insert(U256::ZERO);
-        while let Some(entry) = cursor.next_dup_val()? {
-            storage.entry(entry.key).or_insert(U256::ZERO);
-        }
-    }
-
-    Ok(())
 }
 
 fn build_selfdestruct_chain_spec(

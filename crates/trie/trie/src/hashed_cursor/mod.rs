@@ -86,8 +86,11 @@ pub fn extend_hashed_post_state_with_storage_zeros(
     hashed_addresses: impl IntoIterator<Item = B256>,
     state: &mut HashedPostState,
 ) -> Result<(), DatabaseError> {
-    for hashed_address in hashed_addresses {
-        let mut cursor = cursor_factory.hashed_storage_cursor(hashed_address)?;
+    let mut hashed_addresses = hashed_addresses.into_iter();
+    let Some(mut hashed_address) = hashed_addresses.next() else { return Ok(()) };
+    let mut cursor = cursor_factory.hashed_storage_cursor(hashed_address)?;
+
+    loop {
         let mut entry = cursor.seek(B256::ZERO)?;
         while let Some((hashed_slot, _)) = entry {
             state
@@ -99,6 +102,10 @@ pub fn extend_hashed_post_state_with_storage_zeros(
                 .or_insert(U256::ZERO);
             entry = cursor.next()?;
         }
+
+        let Some(next_hashed_address) = hashed_addresses.next() else { break };
+        hashed_address = next_hashed_address;
+        cursor.set_hashed_address(hashed_address);
     }
 
     Ok(())
