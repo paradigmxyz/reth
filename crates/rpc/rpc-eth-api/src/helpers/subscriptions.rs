@@ -4,10 +4,12 @@ use crate::{EthApiTypes, RpcConvert, RpcNodeCore, RpcReceipt};
 use alloy_consensus::{transaction::TxHashRef, BlockHeader, TxReceipt};
 use alloy_rpc_types_eth::{pubsub::TransactionReceiptsParams, Filter, Log};
 use futures::StreamExt;
+use jsonrpsee_types::ErrorObject;
 use reth_chain_state::CanonStateSubscriptions;
 use reth_primitives_traits::TransactionMeta;
 use reth_rpc_convert::{transaction::ConvertReceiptInput, RpcHeader};
 use reth_rpc_eth_types::logs_utils;
+use reth_rpc_server_types::result::invalid_params_rpc_err;
 use tracing::error;
 
 /// Provides streams subscriptions for `eth_subscribe`.
@@ -17,8 +19,21 @@ pub trait EthSubscriptions:
     RpcNodeCore + EthApiTypes<RpcConvert: RpcConvert<Primitives = Self::Primitives>>
 {
     /// Returns a stream that yields matching logs from canonical chain updates.
-    fn log_stream(&self, filter: Filter) -> impl futures::Stream<Item = Log> + Send + Unpin {
-        self.provider()
+    fn log_stream(
+        &self,
+        filter: Filter,
+    ) -> Result<impl futures::Stream<Item = Log> + Send + Unpin, ErrorObject<'static>> {
+        let (from_block, to_block) = filter.block_option.as_range();
+        if from_block.is_some_and(|block| block.is_pending()) ||
+            to_block.is_some_and(|block| block.is_pending())
+        {
+            return Err(invalid_params_rpc_err(
+                "pending block filters are not supported for logs subscriptions",
+            ));
+        }
+
+        Ok(self
+            .provider()
             .canonical_state_stream()
             .map(move |canon_state| canon_state.block_receipts())
             .flat_map(futures::stream::iter)
@@ -31,7 +46,7 @@ pub trait EthSubscriptions:
                     removed,
                 );
                 futures::stream::iter(all_logs)
-            })
+            }))
     }
 
     /// Returns a stream that yields new block headers from canonical chain updates.

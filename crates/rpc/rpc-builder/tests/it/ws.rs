@@ -2,7 +2,10 @@
 //! `WebSocket` subscription tests for `eth_subscribe` / `eth_unsubscribe`
 
 use crate::utils::{launch_ws, test_rpc_builder};
-use jsonrpsee::core::client::{Subscription, SubscriptionClientT};
+use jsonrpsee::{
+    core::client::{Error, Subscription, SubscriptionClientT},
+    types::error::ErrorCode,
+};
 use reth_rpc_server_types::RpcModuleSelection;
 use reth_tokio_util::EventSender;
 use serde_json::Value;
@@ -101,6 +104,37 @@ async fn test_eth_subscribe_invalid_kind_rejected() {
         .await;
 
     assert!(result.is_err(), "invalid subscription kind must be rejected");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_eth_subscribe_logs_pending_block_filter_rejected() {
+    reth_tracing::init_test_tracing();
+
+    let handle = launch_ws_eth().await;
+    let client = handle.ws_client().await.unwrap();
+
+    let cases = [
+        serde_json::json!({"fromBlock": "pending"}),
+        serde_json::json!({"toBlock": "pending"}),
+        serde_json::json!({"fromBlock": "pending", "toBlock": "pending"}),
+    ];
+
+    for filter in cases {
+        let err = client
+            .subscribe::<Value, _>(
+                "eth_subscribe",
+                jsonrpsee::rpc_params!["logs", filter],
+                "eth_unsubscribe",
+            )
+            .await
+            .unwrap_err();
+
+        let Error::Call(err) = err else {
+            panic!("pending logs filter returned unexpected error: {err}")
+        };
+        assert_eq!(err.code(), ErrorCode::InvalidParams.code());
+        assert_eq!(err.message(), "pending block filters are not supported for logs subscriptions");
+    }
 }
 
 #[tokio::test(flavor = "multi_thread")]
