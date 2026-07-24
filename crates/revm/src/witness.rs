@@ -71,9 +71,11 @@ impl ExecutionWitnessRecord {
                 .entry(hashed_address)
                 .or_insert_with(|| HashedStorage::new(account.status.was_destroyed()));
 
-            if let Some(account) = &account.account {
-                self.keys.push(address.to_vec().into());
+            // Emitted for every accessed account, including ones that end execution
+            // non-existing, since their hashed address is a proof target above.
+            self.keys.push(address.to_vec().into());
 
+            if let Some(account) = &account.account {
                 for (slot, value) in &account.storage {
                     let slot = B256::from(*slot);
                     let hashed_slot = keccak256(slot);
@@ -133,5 +135,56 @@ impl ExecutionWitnessRecord {
             .collect();
 
         Ok(exec_witness)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use alloy_primitives::{address, Address, U256};
+    use revm::{
+        database::{states::CacheAccount, EmptyDB},
+        state::AccountInfo,
+    };
+
+    fn has_key(keys: &[Bytes], address: Address) -> bool {
+        keys.iter().any(|key| key.as_ref() == address.as_slice())
+    }
+
+    #[test]
+    fn keys_include_accessed_nonexisting_accounts() {
+        let existing = address!("0x0000000000000000000000000000000000000001");
+        // accessed, ended non-existing
+        let gone = address!("0x0000000000000000000000000000000000000002");
+        // accessed, never existed
+        let empty = address!("0x0000000000000000000000000000000000000003");
+
+        let mut state = State::builder().with_database(EmptyDB::default()).build();
+        state.cache.accounts.insert(
+            existing,
+            CacheAccount::new_loaded(
+                AccountInfo { balance: U256::from(1u64), ..Default::default() },
+                Default::default(),
+            ),
+        );
+        state.cache.accounts.insert(gone, CacheAccount::new_loaded_not_existing());
+        state.cache.accounts.insert(empty, CacheAccount::new_loaded_not_existing());
+
+        let rec = ExecutionWitnessRecord::from_executed_state(&state, ExecutionWitnessMode::Legacy);
+
+        assert!(has_key(&rec.keys, existing), "no address preimage for an existing account");
+        assert!(
+            has_key(&rec.keys, gone),
+            "no address preimage for an account that ended execution non-existing"
+        );
+        assert!(
+            has_key(&rec.keys, empty),
+            "no address preimage for an account that was accessed but never existed"
+        );
+        assert_eq!(
+            rec.keys.len(),
+            3,
+            "expected exactly one preimage per account and no storage slot keys"
+        );
     }
 }
