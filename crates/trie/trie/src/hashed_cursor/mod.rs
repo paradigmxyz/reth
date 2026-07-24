@@ -1,7 +1,6 @@
 use alloy_primitives::{B256, U256};
 use reth_primitives_traits::Account;
 use reth_storage_errors::db::DatabaseError;
-use reth_trie_common::HashedPostState;
 
 /// Implementation of hashed state cursor traits for the post state.
 mod post_state;
@@ -75,31 +74,4 @@ pub trait HashedStorageCursor: HashedCursor {
     ///
     /// After calling this method, the subsequent operation MUST be a [`HashedCursor::seek`] call.
     fn set_hashed_address(&mut self, hashed_address: B256);
-}
-
-/// Inserts explicit zero-valued updates for every existing storage slot of the provided accounts.
-///
-/// Existing post-state values take precedence so that storage written after an account is
-/// destroyed is retained.
-pub fn extend_hashed_post_state_with_storage_zeros(
-    cursor_factory: &impl HashedCursorFactory,
-    hashed_addresses: impl IntoIterator<Item = B256>,
-    state: &mut HashedPostState,
-) -> Result<(), DatabaseError> {
-    for hashed_address in hashed_addresses {
-        let mut cursor = cursor_factory.hashed_storage_cursor(hashed_address)?;
-        let mut entry = cursor.seek(B256::ZERO)?;
-        while let Some((hashed_slot, _)) = entry {
-            state
-                .storages
-                .entry(hashed_address)
-                .or_default()
-                .storage
-                .entry(hashed_slot)
-                .or_insert(U256::ZERO);
-            entry = cursor.next()?;
-        }
-    }
-
-    Ok(())
 }
