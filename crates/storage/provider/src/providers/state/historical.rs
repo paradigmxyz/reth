@@ -23,7 +23,7 @@ use reth_trie::{
     hashed_cursor::HashedPostStateCursorFactory,
     proof::{Proof, StorageProof},
     trie_cursor::InMemoryTrieCursorFactory,
-    updates::TrieUpdates,
+    updates::{StorageTrieUpdatesSorted, TrieUpdates},
     witness::TrieWitness,
     AccountProof, ExecutionWitnessMode, HashedPostState, HashedStorage, KeccakKeyHasher,
     MultiProof, MultiProofTargets, StateRoot, StorageMultiProof, StorageRoot, TrieInput,
@@ -346,6 +346,37 @@ where
     }
 }
 
+impl<Provider, N> HistoricalStateProviderRef<'_, Provider, N>
+where
+    Provider: DBProvider
+        + ChangeSetReader
+        + StorageChangeSetReader
+        + BlockNumReader
+        + BlockHashReader
+        + PruneCheckpointReader
+        + StageCheckpointReader
+        + StorageSettingsCache
+        + NodePrimitivesProvider<Primitives = N>,
+    N: NodePrimitives,
+{
+    fn build_storage_overlay_input(
+        &self,
+        address: Address,
+        hashed_storage: HashedStorage,
+        storage_nodes: Option<&StorageTrieUpdatesSorted>,
+    ) -> ProviderResult<TrieInputSorted> {
+        let hashed_address = alloy_primitives::keccak256(address);
+        let mut input = TrieInput::from_state(HashedPostState::from_hashed_storage(
+            hashed_address,
+            hashed_storage,
+        ));
+        if let Some(storage_nodes) = storage_nodes {
+            input.nodes.insert_storage_updates(hashed_address, storage_nodes.clone().into());
+        }
+        self.build_overlay(TrieInputSorted::from_unsorted(input))
+    }
+}
+
 impl<Provider, N> AccountReader for HistoricalStateProviderRef<'_, Provider, N>
 where
     Provider: DBProvider
@@ -473,22 +504,57 @@ where
         address: Address,
         hashed_storage: HashedStorage,
     ) -> ProviderResult<B256> {
+        let hashed_address = alloy_primitives::keccak256(address);
         reth_trie_db::with_adapter!(self.provider, |A| {
-            let input = self.build_overlay(TrieInputSorted::from_unsorted(
-                TrieInput::from_state(HashedPostState::from_hashed_storage(
-                    alloy_primitives::keccak256(address),
-                    hashed_storage,
-                )),
-            ))?;
+            let input = self.build_storage_overlay_input(address, hashed_storage, None)?;
             let hashed_storage = input
                 .state
                 .account_storages()
-                .get(&alloy_primitives::keccak256(address))
+                .get(&hashed_address)
                 .cloned()
                 .unwrap_or_default()
                 .into();
-            <DbStorageRoot<'_, _, A>>::overlay_root(self.tx(), address, hashed_storage)
-                .map_err(|err| ProviderError::Database(err.into()))
+            if let Some(nodes) = input.nodes.storage_tries_ref().get(&hashed_address) {
+                <DbStorageRoot<'_, _, A>>::overlay_root_from_nodes(
+                    self.tx(),
+                    address,
+                    hashed_storage,
+                    nodes,
+                )
+            } else {
+                <DbStorageRoot<'_, _, A>>::overlay_root(self.tx(), address, hashed_storage)
+            }
+            .map_err(|err| ProviderError::Database(err.into()))
+        })
+    }
+
+    fn storage_root_from_nodes(
+        &self,
+        address: Address,
+        hashed_storage: HashedStorage,
+        nodes: &StorageTrieUpdatesSorted,
+    ) -> ProviderResult<B256> {
+        let hashed_address = alloy_primitives::keccak256(address);
+        reth_trie_db::with_adapter!(self.provider, |A| {
+            let input = self.build_storage_overlay_input(address, hashed_storage, Some(nodes))?;
+            let hashed_storage = input
+                .state
+                .account_storages()
+                .get(&hashed_address)
+                .cloned()
+                .unwrap_or_default()
+                .into();
+            if let Some(nodes) = input.nodes.storage_tries_ref().get(&hashed_address) {
+                <DbStorageRoot<'_, _, A>>::overlay_root_from_nodes(
+                    self.tx(),
+                    address,
+                    hashed_storage,
+                    nodes,
+                )
+            } else {
+                <DbStorageRoot<'_, _, A>>::overlay_root(self.tx(), address, hashed_storage)
+            }
+            .map_err(|err| ProviderError::Database(err.into()))
         })
     }
 
@@ -498,26 +564,69 @@ where
         slot: B256,
         hashed_storage: HashedStorage,
     ) -> ProviderResult<reth_trie::StorageProof> {
+        let hashed_address = alloy_primitives::keccak256(address);
         reth_trie_db::with_adapter!(self.provider, |A| {
-            let input = self.build_overlay(TrieInputSorted::from_unsorted(
-                TrieInput::from_state(HashedPostState::from_hashed_storage(
-                    alloy_primitives::keccak256(address),
-                    hashed_storage,
-                )),
-            ))?;
+            let input = self.build_storage_overlay_input(address, hashed_storage, None)?;
             let hashed_storage = input
                 .state
                 .account_storages()
-                .get(&alloy_primitives::keccak256(address))
+                .get(&hashed_address)
                 .cloned()
                 .unwrap_or_default()
                 .into();
-            <DbStorageProof<'_, _, A>>::overlay_storage_proof(
-                self.tx(),
-                address,
-                slot,
-                hashed_storage,
-            )
+            if let Some(nodes) = input.nodes.storage_tries_ref().get(&hashed_address) {
+                <DbStorageProof<'_, _, A>>::overlay_storage_proof_from_nodes(
+                    self.tx(),
+                    address,
+                    slot,
+                    hashed_storage,
+                    nodes,
+                )
+            } else {
+                <DbStorageProof<'_, _, A>>::overlay_storage_proof(
+                    self.tx(),
+                    address,
+                    slot,
+                    hashed_storage,
+                )
+            }
+            .map_err(ProviderError::from)
+        })
+    }
+
+    fn storage_proof_from_nodes(
+        &self,
+        address: Address,
+        slot: B256,
+        hashed_storage: HashedStorage,
+        nodes: &StorageTrieUpdatesSorted,
+    ) -> ProviderResult<reth_trie::StorageProof> {
+        let hashed_address = alloy_primitives::keccak256(address);
+        reth_trie_db::with_adapter!(self.provider, |A| {
+            let input = self.build_storage_overlay_input(address, hashed_storage, Some(nodes))?;
+            let hashed_storage = input
+                .state
+                .account_storages()
+                .get(&hashed_address)
+                .cloned()
+                .unwrap_or_default()
+                .into();
+            if let Some(nodes) = input.nodes.storage_tries_ref().get(&hashed_address) {
+                <DbStorageProof<'_, _, A>>::overlay_storage_proof_from_nodes(
+                    self.tx(),
+                    address,
+                    slot,
+                    hashed_storage,
+                    nodes,
+                )
+            } else {
+                <DbStorageProof<'_, _, A>>::overlay_storage_proof(
+                    self.tx(),
+                    address,
+                    slot,
+                    hashed_storage,
+                )
+            }
             .map_err(ProviderError::from)
         })
     }
@@ -528,26 +637,69 @@ where
         slots: &[B256],
         hashed_storage: HashedStorage,
     ) -> ProviderResult<StorageMultiProof> {
+        let hashed_address = alloy_primitives::keccak256(address);
         reth_trie_db::with_adapter!(self.provider, |A| {
-            let input = self.build_overlay(TrieInputSorted::from_unsorted(
-                TrieInput::from_state(HashedPostState::from_hashed_storage(
-                    alloy_primitives::keccak256(address),
-                    hashed_storage,
-                )),
-            ))?;
+            let input = self.build_storage_overlay_input(address, hashed_storage, None)?;
             let hashed_storage = input
                 .state
                 .account_storages()
-                .get(&alloy_primitives::keccak256(address))
+                .get(&hashed_address)
                 .cloned()
                 .unwrap_or_default()
                 .into();
-            <DbStorageProof<'_, _, A>>::overlay_storage_multiproof(
-                self.tx(),
-                address,
-                slots,
-                hashed_storage,
-            )
+            if let Some(nodes) = input.nodes.storage_tries_ref().get(&hashed_address) {
+                <DbStorageProof<'_, _, A>>::overlay_storage_multiproof_from_nodes(
+                    self.tx(),
+                    address,
+                    slots,
+                    hashed_storage,
+                    nodes,
+                )
+            } else {
+                <DbStorageProof<'_, _, A>>::overlay_storage_multiproof(
+                    self.tx(),
+                    address,
+                    slots,
+                    hashed_storage,
+                )
+            }
+            .map_err(ProviderError::from)
+        })
+    }
+
+    fn storage_multiproof_from_nodes(
+        &self,
+        address: Address,
+        slots: &[B256],
+        hashed_storage: HashedStorage,
+        nodes: &StorageTrieUpdatesSorted,
+    ) -> ProviderResult<StorageMultiProof> {
+        let hashed_address = alloy_primitives::keccak256(address);
+        reth_trie_db::with_adapter!(self.provider, |A| {
+            let input = self.build_storage_overlay_input(address, hashed_storage, Some(nodes))?;
+            let hashed_storage = input
+                .state
+                .account_storages()
+                .get(&hashed_address)
+                .cloned()
+                .unwrap_or_default()
+                .into();
+            if let Some(nodes) = input.nodes.storage_tries_ref().get(&hashed_address) {
+                <DbStorageProof<'_, _, A>>::overlay_storage_multiproof_from_nodes(
+                    self.tx(),
+                    address,
+                    slots,
+                    hashed_storage,
+                    nodes,
+                )
+            } else {
+                <DbStorageProof<'_, _, A>>::overlay_storage_multiproof(
+                    self.tx(),
+                    address,
+                    slots,
+                    hashed_storage,
+                )
+            }
             .map_err(ProviderError::from)
         })
     }
