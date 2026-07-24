@@ -32,7 +32,7 @@ mod tests {
     use revm::state::{
         Account as RevmAccount, AccountInfo as RevmAccountInfo, AccountStatus, EvmStorageSlot,
     };
-    use std::{collections::BTreeMap, str::FromStr};
+    use std::{collections::BTreeMap, str::FromStr, sync::Arc};
 
     #[test]
     fn wiped_entries_are_removed() {
@@ -856,7 +856,7 @@ mod tests {
     fn revert_to_indices() {
         let base: ExecutionOutcome = ExecutionOutcome {
             bundle: BundleState::default(),
-            receipts: vec![vec![Receipt::default(); 2]; 7],
+            receipts: (0..7).map(|_| Arc::new(vec![Receipt::default(); 2])).collect(),
             first_block: 10,
             requests: Vec::new(),
         };
@@ -1095,7 +1095,7 @@ mod tests {
 
         let mut test: ExecutionOutcome = ExecutionOutcome {
             bundle: present_state,
-            receipts: vec![vec![Receipt::default(); 2]; 1],
+            receipts: vec![Arc::new(vec![Receipt::default(); 2])],
             first_block: 2,
             requests: Vec::new(),
         };

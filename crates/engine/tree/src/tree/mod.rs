@@ -2251,7 +2251,11 @@ where
         let execution_output = Arc::new(BlockExecutionOutput {
             state: execution_output.bundle,
             result: BlockExecutionResult {
-                receipts: execution_output.receipts.pop().unwrap_or_default(),
+                receipts: execution_output
+                    .receipts
+                    .pop()
+                    .map(Arc::unwrap_or_clone)
+                    .unwrap_or_default(),
                 requests: execution_output.requests.pop().unwrap_or_default(),
                 gas_used: block.gas_used(),
                 blob_gas_used: block.blob_gas_used().unwrap_or_default(),

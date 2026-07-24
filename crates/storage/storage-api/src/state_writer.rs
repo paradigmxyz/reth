@@ -1,4 +1,3 @@
-use alloc::vec::Vec;
 use alloy_consensus::transaction::Either;
 use alloy_primitives::BlockNumber;
 use reth_execution_types::{BlockExecutionOutput, ExecutionOutcome};
@@ -66,12 +65,12 @@ impl<'a, R> WriteStateInput<'a, R> {
     }
 
     /// Returns an iterator over receipt sets for each block.
-    pub fn receipts(&self) -> impl Iterator<Item = &Vec<R>> {
+    pub fn receipts(&self) -> impl Iterator<Item = &[R]> {
         match self {
             Self::Single { outcome, .. } => {
-                Either::Left(core::iter::once(&outcome.result.receipts))
+                Either::Left(core::iter::once(outcome.result.receipts.as_slice()))
             }
-            Self::Multiple(outcome) => Either::Right(outcome.receipts.iter()),
+            Self::Multiple(outcome) => Either::Right(outcome.receipts.iter().map(|r| r.as_slice())),
         }
     }
 }
