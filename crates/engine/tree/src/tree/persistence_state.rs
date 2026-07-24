@@ -47,11 +47,6 @@ impl PersistenceState {
         self.rx.is_some()
     }
 
-    /// Returns `true` if a block removal operation is in progress.
-    pub(crate) const fn is_removing_blocks(&self) -> bool {
-        matches!(self.rx.as_ref(), Some((_, _, CurrentPersistenceAction::RemovingBlocks { .. })))
-    }
-
     /// Sets the state for a block removal operation.
     pub(crate) fn start_remove(
         &mut self,

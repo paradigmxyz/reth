@@ -548,14 +548,12 @@ where
 
     /// Returns `true` when the main loop should stop draining the tree input channel.
     ///
-    /// Block removals always require backpressure because processing new blocks concurrently can
-    /// request state that is being unwound. Block saves apply backpressure once the number of
-    /// blocks beyond the configured in-memory buffer reaches the configured threshold.
+    /// This is the case when persistence is already running and the number of blocks beyond the
+    /// configured in-memory buffer has reached the configured threshold.
     const fn should_backpressure(&self) -> bool {
-        self.persistence_state.is_removing_blocks() ||
-            (self.persistence_state.in_progress() &&
-                self.persistence_backpressure_gap() >=
-                    self.config.persistence_backpressure_threshold())
+        self.persistence_state.in_progress() &&
+            self.persistence_backpressure_gap() >=
+                self.config.persistence_backpressure_threshold()
     }
 
     /// Run the engine API handler.
@@ -1088,7 +1086,7 @@ where
     /// Handles chain unwind scenarios by collecting blocks to remove and performing an unwind back
     /// to the canonical header
     fn handle_canonical_chain_unwind(
-        &mut self,
+        &self,
         current_head_number: u64,
         canonical_header: &SealedHeader<N::BlockHeader>,
     ) -> ProviderResult<()> {
@@ -1141,7 +1139,7 @@ where
 
     /// Applies the canonical ancestor block via a reorg operation.
     fn apply_canonical_ancestor_via_reorg(
-        &mut self,
+        &self,
         canonical_header: &SealedHeader<N::BlockHeader>,
         old_blocks: Vec<ExecutedBlock<N>>,
     ) -> ProviderResult<()> {
@@ -1150,12 +1148,6 @@ where
 
         // Load the canonical ancestor's block
         let executed_block = self.canonical_block_by_hash(new_head_hash)?;
-
-        // Persisted state above the new head will be removed. Clear blocks whose state-provider
-        // overlays may still be anchored to that state before accepting more engine input.
-        self.state.set_pending_sparse_trie_prune(false);
-        self.state.tree_state.reset(canonical_header.num_hash());
-
         // Perform the reorg to properly handle the unwind
         self.canonical_in_memory_state
             .update_chain(NewCanonicalChain::Reorg { new: vec![executed_block], old: old_blocks });

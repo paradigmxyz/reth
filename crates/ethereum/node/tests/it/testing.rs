@@ -25,8 +25,7 @@ use tokio::sync::oneshot;
 #[tokio::test(flavor = "multi_thread")]
 async fn testing_rpc_build_block_works() -> eyre::Result<()> {
     let runtime = Runtime::test();
-    let mut rpc_args =
-        reth_node_core::args::RpcServerArgs::default().with_unused_ports().with_http();
+    let mut rpc_args = reth_node_core::args::RpcServerArgs::default().with_http();
     rpc_args.http_api = Some(RpcModuleSelection::from_iter([RethRpcModule::Testing]));
     let tempdir = tempdir().expect("temp datadir");
     let datadir_args = DatadirArgs {
@@ -36,10 +35,7 @@ async fn testing_rpc_build_block_works() -> eyre::Result<()> {
         rocksdb_path: Some(tempdir.path().join("rocksdb")),
         pprof_dumps_path: Some(tempdir.path().join("pprof")),
     };
-    let config = NodeConfig::test()
-        .with_disabled_discovery()
-        .with_datadir_args(datadir_args)
-        .with_rpc(rpc_args);
+    let config = NodeConfig::test().with_datadir_args(datadir_args).with_rpc(rpc_args);
     let db = create_test_rw_db();
 
     let (tx, rx): (
@@ -100,8 +96,7 @@ async fn testing_rpc_build_block_works() -> eyre::Result<()> {
 #[tokio::test(flavor = "multi_thread")]
 async fn testing_rpc_commit_block_works() -> eyre::Result<()> {
     let runtime = Runtime::test();
-    let mut rpc_args =
-        reth_node_core::args::RpcServerArgs::default().with_unused_ports().with_http();
+    let mut rpc_args = reth_node_core::args::RpcServerArgs::default().with_http();
     rpc_args.http_api = Some(RpcModuleSelection::from_iter([
         RethRpcModule::Debug,
         RethRpcModule::Eth,
@@ -123,7 +118,6 @@ async fn testing_rpc_commit_block_works() -> eyre::Result<()> {
             .build(),
     );
     let config = NodeConfig::test()
-        .with_disabled_discovery()
         .with_chain(chain_spec)
         .with_datadir_args(datadir_args)
         .with_rpc(rpc_args);
