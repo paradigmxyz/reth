@@ -5,9 +5,9 @@ use super::{
 use alloc::{boxed::Box, vec::Vec};
 use alloy_primitives::{keccak256, B256};
 use alloy_trie::{BranchNodeCompact, TrieMask};
-use core::mem;
 use reth_trie_common::{BranchNodeMasks, Nibbles, ProofTrieNodeV2, RlpNode, TrieNodeV2};
 use smallvec::SmallVec;
+use strum::AsRefStr;
 
 /// Tracks whether a node's RLP encoding is cached or needs recomputation.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -18,9 +18,6 @@ pub(super) enum ArenaSparseNodeState {
     Cached {
         /// The cached RLP-encoded representation of the node.
         rlp_node: RlpNode,
-        /// Whether this node was dirty when its RLP was cached. This is a one-shot marker
-        /// consumed while retaining changed paths during parent branch encoding.
-        was_dirty: bool,
     },
     /// The node has been modified and its RLP encoding needs recomputation.
     Dirty,
@@ -37,14 +34,6 @@ impl ArenaSparseNodeState {
         match self {
             Self::Cached { rlp_node, .. } => Some(rlp_node),
             _ => None,
-        }
-    }
-
-    /// Returns and clears whether this node was dirty when its RLP was cached.
-    pub(super) fn take_cached_was_dirty(&mut self) -> bool {
-        match self {
-            Self::Cached { was_dirty, .. } => mem::take(was_dirty),
-            _ => false,
         }
     }
 }
@@ -163,7 +152,7 @@ impl ArenaSparseNodeBranch {
 }
 
 /// A node in the arena-based sparse trie.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, AsRefStr)]
 pub(super) enum ArenaSparseNode {
     /// Indicates a trie with no nodes.
     EmptyRoot,
@@ -332,17 +321,6 @@ impl ArenaSparseNode {
             TrieNodeV2::Extension(_) => {
                 panic!("Extension nodes should be merged into branches by TrieNodeV2")
             }
-        }
-    }
-
-    /// Returns the heap bytes owned by this node beyond its inline `SlotMap` slot.
-    pub(super) fn extra_heap_bytes(&self) -> usize {
-        match self {
-            Self::Leaf { value, .. } => value.capacity(),
-            Self::Branch(b) if b.children.spilled() => {
-                b.children.capacity() * core::mem::size_of::<ArenaSparseNodeBranchChild>()
-            }
-            _ => 0,
         }
     }
 }

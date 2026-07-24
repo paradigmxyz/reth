@@ -1,5 +1,5 @@
 [workspace.package]
-version = "2.3.0"
+version = "2.4.1"
 edition = "2024"
 rust-version = "1.95"
 license = "MIT OR Apache-2.0"
@@ -77,7 +77,6 @@ members = [
     "crates/payload/primitives/",
     "crates/payload/validator/",
     "crates/payload/util/",
-    "crates/prune/db",
     "crates/prune/prune",
     "crates/prune/types",
     "crates/revm/",
@@ -89,7 +88,6 @@ members = [
     "crates/rpc/rpc-eth-types/",
     "crates/rpc/rpc-layer",
     "crates/rpc/rpc-server-types/",
-    "crates/rpc/rpc-testing-util/",
     "crates/rpc/rpc-e2e-tests/",
     "crates/rpc/rpc-convert/",
     "crates/rpc/rpc/",
@@ -144,7 +142,6 @@ members = [
     "examples/node-event-hooks/",
     "examples/polygon-p2p/",
     "examples/rpc-db/",
-    "examples/precompile-cache/",
     "examples/txpool-tracing/",
     "examples/custom-beacon-withdrawals",
     "testing/ef-tests/",
@@ -400,7 +397,6 @@ reth-prune-types = { path = "crates/prune/types", default-features = false }
 reth-revm = { path = "crates/revm", default-features = false }
 reth-rpc = { path = "crates/rpc/rpc" }
 reth-rpc-api = { path = "crates/rpc/rpc-api" }
-reth-rpc-api-testing-util = { path = "crates/rpc/rpc-testing-util" }
 reth-rpc-builder = { path = "crates/rpc/rpc-builder" }
 reth-rpc-e2e-tests = { path = "crates/rpc/rpc-e2e-tests" }
 reth-rpc-engine-api = { path = "crates/rpc/rpc-engine-api" }
@@ -436,9 +432,9 @@ revmc = { git = "https://github.com/paradigmxyz/revmc", branch = "main", default
 revm-inspectors = "0.41.0"
 
 # eth
-alloy-dyn-abi = "1.6.0"
-alloy-primitives = { version = "1.6.0", default-features = false, features = ["map-foldhash"] }
-alloy-sol-types = { version = "1.6.0", default-features = false }
+alloy-dyn-abi = "1.6.1"
+alloy-primitives = { version = "1.6.1", default-features = false, features = ["map-foldhash"] }
+alloy-sol-types = { version = "1.6.1", default-features = false }
 
 alloy-chains = { version = "0.2.33", default-features = false }
 alloy-eip2124 = { version = "0.2.0", default-features = false }
@@ -598,7 +594,7 @@ secp256k1 = { version = "0.30", default-features = false, features = ["global-co
 rand_08 = { package = "rand", version = "0.8" }
 
 # for eip-4844
-c-kzg = "2.1.5"
+c-kzg = "2.1.8"
 
 # config
 toml = "0.9"
@@ -643,7 +639,6 @@ aes = "0.8.1"
 ahash = "0.8"
 anyhow = "1.0"
 bindgen = { version = "0.72", default-features = false }
-block-padding = "0.3"
 cc = "1.2.62"
 cipher = "0.4.3"
 comfy-table = "7.0"

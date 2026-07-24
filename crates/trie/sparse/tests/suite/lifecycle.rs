@@ -64,14 +64,18 @@ pub(super) fn test_full_lifecycle_update_root_take_updates<T: SparseTrie>(new_tr
 /// Multiple rounds of (update → root → `take_updates`), followed by a prune, simulating block
 /// processing.
 pub(super) fn test_multi_round_update_take_updates_prune_cycle<T: SparseTrie>(new_trie: fn() -> T) {
-    // Build a trie with 10 leaves.
+    // Build a trie with 10 primary leaves, each with a sibling under the same root child.
     let mut storage: BTreeMap<B256, U256> = BTreeMap::new();
     let mut keys = Vec::new();
     for i in 0u8..10 {
         let mut key = B256::ZERO;
-        key.0[0] = i * 16; // nibble prefixes: 0x0, 0x1, 0x2, ... 0x9
+        key.0[0] = i << 4; // nibble prefixes: 0x0, 0x1, 0x2, ... 0x9
         storage.insert(key, U256::from(i as u64 + 1));
         keys.push(key);
+
+        let mut sibling = B256::ZERO;
+        sibling.0[0] = (i << 4) | 1;
+        storage.insert(sibling, U256::from(i as u64 + 100));
     }
 
     let mut harness = SuiteTestHarness::new(storage.clone());
@@ -220,8 +224,8 @@ pub(super) fn test_incremental_reveal_and_update_with_retry<T: SparseTrie>(new_t
 
     // First update_leaves: covered keys are drained, blinded keys remain, callback fires.
     let mut targets: Vec<ProofV2Target> = Vec::new();
-    trie.update_leaves(&mut leaf_updates, |key, min_len| {
-        targets.push(ProofV2Target::new(key).with_min_len(min_len));
+    trie.update_leaves(&mut leaf_updates, |key, parent| {
+        targets.push(ProofV2Target::new(key).with_parent(parent));
     })
     .expect("update_leaves should succeed");
 
@@ -234,8 +238,8 @@ pub(super) fn test_incremental_reveal_and_update_with_retry<T: SparseTrie>(new_t
 
     // Second update_leaves: now all paths are revealed, remaining keys should be drained.
     let mut targets2: Vec<ProofV2Target> = Vec::new();
-    trie.update_leaves(&mut leaf_updates, |key, min_len| {
-        targets2.push(ProofV2Target::new(key).with_min_len(min_len));
+    trie.update_leaves(&mut leaf_updates, |key, parent| {
+        targets2.push(ProofV2Target::new(key).with_parent(parent));
     })
     .expect("update_leaves should succeed on retry");
 
@@ -419,8 +423,8 @@ pub(super) fn test_touched_prewarm_then_changed_update<T: SparseTrie>(new_trie: 
             .collect();
 
     let mut targets: Vec<ProofV2Target> = Vec::new();
-    trie.update_leaves(&mut leaf_updates, |key, min_len| {
-        targets.push(ProofV2Target::new(key).with_min_len(min_len));
+    trie.update_leaves(&mut leaf_updates, |key, parent| {
+        targets.push(ProofV2Target::new(key).with_parent(parent));
     })
     .expect("update_leaves with Touched should succeed");
 
@@ -486,8 +490,8 @@ pub(super) fn test_touched_on_blinded_triggers_proof_then_changed_succeeds<T: Sp
     let mut leaf_updates: B256Map<LeafUpdate> = once((target_key, LeafUpdate::Touched)).collect();
 
     let mut targets: Vec<ProofV2Target> = Vec::new();
-    trie.update_leaves(&mut leaf_updates, |key, min_len| {
-        targets.push(ProofV2Target::new(key).with_min_len(min_len));
+    trie.update_leaves(&mut leaf_updates, |key, parent| {
+        targets.push(ProofV2Target::new(key).with_parent(parent));
     })
     .expect("update_leaves with Touched should succeed");
 

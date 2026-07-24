@@ -3,7 +3,7 @@
 use crate::{
     cache::LruCache,
     discovery::Discovery,
-    fetch::{BlockResponseOutcome, FetchAction, StateFetcher},
+    fetch::{BlockResponseOutcome, FetchAction, NewPeerInfo, StateFetcher},
     message::{BlockRequest, NewBlockMessage, PeerResponse, PeerResponseResult},
     peers::{PeerAction, PeersManager},
     session::BlockRangeInfo,
@@ -147,15 +147,17 @@ impl<N: NetworkPrimitives> NetworkState<N> {
     ///
     /// Returns `Ok` if the session is valid, returns an `Err` if the session is not accepted and
     /// should be rejected.
-    pub(crate) fn on_session_activated(
-        &mut self,
-        peer: PeerId,
-        capabilities: Arc<Capabilities>,
-        status: Arc<UnifiedStatus>,
-        request_tx: PeerRequestSender<PeerRequest<N>>,
-        timeout: Arc<AtomicU64>,
-        range_info: Option<BlockRangeInfo>,
-    ) {
+    pub(crate) fn on_session_activated(&mut self, activation: SessionActivation<N>) {
+        let SessionActivation {
+            peer,
+            capabilities,
+            status,
+            request_tx,
+            timeout,
+            range_info,
+            supports_snap,
+        } = activation;
+
         debug_assert!(!self.active_peers.contains_key(&peer), "Already connected; not possible");
 
         // Use the block number from the peer's status (eth/69+) if available,
@@ -163,14 +165,15 @@ impl<N: NetworkPrimitives> NetworkState<N> {
         let block_number = status.latest_block.unwrap_or_else(|| {
             self.client.block_number(status.blockhash).ok().flatten().unwrap_or_default()
         });
-        self.state_fetcher.new_active_peer(
-            peer,
-            status.blockhash,
-            block_number,
-            Arc::clone(&capabilities),
+        self.state_fetcher.new_active_peer(NewPeerInfo {
+            peer_id: peer,
+            best_hash: status.blockhash,
+            best_number: block_number,
+            capabilities: Arc::clone(&capabilities),
             timeout,
             range_info,
-        );
+            supports_snap,
+        });
 
         self.active_peers.insert(
             peer,
@@ -443,6 +446,12 @@ impl<N: NetworkPrimitives> NetworkState<N> {
                         (request, response)
                     }
                 }
+                BlockRequest::GetSnap(request) => {
+                    let (response, rx) = oneshot::channel();
+                    let request = PeerRequest::GetSnap { request: *request, response };
+                    let response = PeerResponse::Snap { response: rx };
+                    (request, response)
+                }
             };
             let _ = peer.request_tx.to_session_tx.try_send(request);
             peer.pending_response = Some(response);
@@ -498,6 +507,7 @@ impl<N: NetworkPrimitives> NetworkState<N> {
             PeerResponseResult::BlockAccessLists(res) => {
                 self.state_fetcher.on_block_access_lists_response(peer, res)
             }
+            PeerResponseResult::Snap(res) => self.state_fetcher.on_snap_response(peer, res),
             _ => None,
         };
 
@@ -604,6 +614,25 @@ pub(crate) struct ActivePeer<N: NetworkPrimitives> {
     pub(crate) blocks: LruCache<B256>,
 }
 
+/// Everything [`NetworkState::on_session_activated`] needs to register a newly established
+/// session.
+pub(crate) struct SessionActivation<N: NetworkPrimitives> {
+    /// The remote peer's identifier.
+    pub(crate) peer: PeerId,
+    /// The capabilities the peer announced.
+    pub(crate) capabilities: Arc<Capabilities>,
+    /// The `Status` message the peer sent during the `eth` handshake.
+    pub(crate) status: Arc<UnifiedStatus>,
+    /// A communication channel directly to the session task.
+    pub(crate) request_tx: PeerRequestSender<PeerRequest<N>>,
+    /// The maximum time the session waits for a response from the peer.
+    pub(crate) timeout: Arc<AtomicU64>,
+    /// The range info for the peer.
+    pub(crate) range_info: Option<BlockRangeInfo>,
+    /// Whether the connection negotiated `snap/2` and can serve [`PeerRequest::GetSnap`].
+    pub(crate) supports_snap: bool,
+}
+
 /// Message variants triggered by the [`NetworkState`]
 #[derive(Debug)]
 pub(crate) enum StateAction<N: NetworkPrimitives> {
@@ -650,7 +679,7 @@ mod tests {
         discovery::Discovery,
         fetch::StateFetcher,
         peers::PeersManager,
-        state::{BlockNumReader, NetworkState},
+        state::{BlockNumReader, NetworkState, SessionActivation},
         PeerRequest,
     };
     use alloy_consensus::Header;
@@ -697,14 +726,15 @@ mod tests {
         let (tx, session_rx) = mpsc::channel(1);
         let peer_tx = PeerRequestSender::new(peer_id, tx);
 
-        state.on_session_activated(
-            peer_id,
-            capabilities(),
-            Arc::default(),
-            peer_tx,
-            Arc::new(AtomicU64::new(1)),
-            None,
-        );
+        state.on_session_activated(SessionActivation {
+            peer: peer_id,
+            capabilities: capabilities(),
+            status: Arc::default(),
+            request_tx: peer_tx,
+            timeout: Arc::new(AtomicU64::new(1)),
+            range_info: None,
+            supports_snap: false,
+        });
 
         assert!(state.active_peers.contains_key(&peer_id));
 

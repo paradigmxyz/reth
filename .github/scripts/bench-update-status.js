@@ -2,7 +2,7 @@
 //
 // Reads from environment:
 //   BENCH_COMMENT_ID  – GitHub comment ID to update
-//   BENCH_JOB_URL     – URL to the Actions job page
+//   BENCH_RUN_URL     – URL to the Actions run summary
 //   BENCH_CONFIG      – Config line (blocks, warmup, refs)
 //   BENCH_ACTOR       – User who triggered the benchmark
 //
@@ -11,7 +11,7 @@
 //   await s({github, context, status: 'Building baseline binary...'});
 
 function buildBody(status) {
-  return `cc @${process.env.BENCH_ACTOR}\n\n🚀 Benchmark started! [View job](${process.env.BENCH_JOB_URL})\n\n⏳ **Status:** ${status}\n\n${process.env.BENCH_CONFIG}`;
+  return `cc @${process.env.BENCH_ACTOR}\n\n🚀 Benchmark started! [View run](${process.env.BENCH_RUN_URL})\n\n⏳ **Status:** ${status}\n\n${process.env.BENCH_CONFIG}`;
 }
 
 async function updateStatus({ github, context, status }) {

@@ -519,6 +519,7 @@ fn jit_runtime_config(jit: &JitArgs) -> RuntimeConfig {
         dump_dir: default_config.dump_dir,
         debug_assertions: jit.debug,
         blocking: jit.blocking,
+        single_error: default_config.single_error,
         no_dedup: default_config.no_dedup,
         no_dse: default_config.no_dse,
         gas_params: default_config.gas_params,

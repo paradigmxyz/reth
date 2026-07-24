@@ -4,13 +4,14 @@ use alloy_eips::merge::EPOCH_SLOTS;
 use core::time::Duration;
 
 /// Triggers persistence when the number of canonical blocks in memory exceeds this threshold.
-pub const DEFAULT_PERSISTENCE_THRESHOLD: u64 = 2;
+pub const DEFAULT_PERSISTENCE_THRESHOLD: u64 = 7;
 
-/// Maximum canonical-minus-persisted gap before engine API processing is stalled.
+/// Maximum number of blocks beyond the in-memory buffer target awaiting persistence before engine
+/// API processing is stalled.
 pub const DEFAULT_PERSISTENCE_BACKPRESSURE_THRESHOLD: u64 = 16;
 
 /// How close to the canonical head we persist blocks.
-pub const DEFAULT_MEMORY_BLOCK_BUFFER_TARGET: u64 = 0;
+pub const DEFAULT_MEMORY_BLOCK_BUFFER_TARGET: u64 = 5;
 
 /// The size of proof targets chunk to spawn in one multiproof calculation.
 pub const DEFAULT_MULTIPROOF_TASK_CHUNK_SIZE: usize = 5;
@@ -31,16 +32,6 @@ pub const DEFAULT_RESERVED_CPU_CORES: usize = 1;
 /// Nodes at this depth and below are converted to hash stubs to reduce memory.
 /// Depth 4 means we keep roughly 16^4 = 65536 potential branch paths at most.
 pub const DEFAULT_SPARSE_TRIE_PRUNE_DEPTH: usize = 4;
-
-/// Default LFU hot-slot capacity for sparse trie pruning.
-///
-/// Limits the number of `(address, slot)` pairs retained across prune cycles.
-pub const DEFAULT_SPARSE_TRIE_MAX_HOT_SLOTS: usize = 1500;
-
-/// Default LFU hot-account capacity for sparse trie pruning.
-///
-/// Limits the number of account addresses retained across prune cycles.
-pub const DEFAULT_SPARSE_TRIE_MAX_HOT_ACCOUNTS: usize = 1000;
 
 /// Default timeout for the state root task before spawning a sequential fallback.
 pub const DEFAULT_STATE_ROOT_TASK_TIMEOUT: Duration = Duration::from_secs(1);
@@ -98,7 +89,8 @@ pub struct TreeConfig {
     ///
     /// Note: this should be less than or equal to `persistence_threshold`.
     memory_block_buffer_target: u64,
-    /// Maximum canonical-minus-persisted gap before engine API processing is stalled.
+    /// Maximum number of blocks beyond the in-memory buffer target awaiting persistence before
+    /// engine API processing is stalled.
     persistence_backpressure_threshold: u64,
     /// Number of pending blocks that cannot be executed due to missing parent and
     /// are kept in cache.
@@ -122,6 +114,8 @@ pub struct TreeConfig {
     disable_state_cache: bool,
     /// Whether to disable parallel prewarming.
     disable_prewarming: bool,
+    /// Whether txpool-driven prewarming between payloads is enabled.
+    txpool_prewarming: bool,
     /// Whether to enable state provider metrics.
     state_provider_metrics: bool,
     /// Cross-block cache size in bytes.
@@ -164,10 +158,6 @@ pub struct TreeConfig {
     disable_cache_metrics: bool,
     /// Depth for sparse trie pruning after state root computation.
     sparse_trie_prune_depth: usize,
-    /// LFU hot-slot capacity: max `(address, slot)` pairs retained across prune cycles.
-    sparse_trie_max_hot_slots: usize,
-    /// LFU hot-account capacity: max account addresses retained across prune cycles.
-    sparse_trie_max_hot_accounts: usize,
     /// When set, blocks whose total processing time (execution + state reads + state root +
     /// DB commit) exceeds this duration trigger a structured `warn!` log with detailed timing,
     /// state-operation counts, and cache hit-rate metrics. `Duration::ZERO` logs every block.
@@ -228,6 +218,7 @@ impl Default for TreeConfig {
             always_compare_trie_updates: false,
             disable_state_cache: false,
             disable_prewarming: false,
+            txpool_prewarming: false,
             state_provider_metrics: false,
             cross_block_cache_size: DEFAULT_CROSS_BLOCK_CACHE_SIZE,
             has_enough_parallelism: has_enough_parallelism(),
@@ -239,8 +230,6 @@ impl Default for TreeConfig {
             allow_unwind_canonical_header: false,
             disable_cache_metrics: false,
             sparse_trie_prune_depth: DEFAULT_SPARSE_TRIE_PRUNE_DEPTH,
-            sparse_trie_max_hot_slots: DEFAULT_SPARSE_TRIE_MAX_HOT_SLOTS,
-            sparse_trie_max_hot_accounts: DEFAULT_SPARSE_TRIE_MAX_HOT_ACCOUNTS,
             slow_block_threshold: None,
             disable_sparse_trie_cache_pruning: false,
             state_root_task_timeout: Some(DEFAULT_STATE_ROOT_TASK_TIMEOUT),
@@ -282,8 +271,6 @@ impl TreeConfig {
         allow_unwind_canonical_header: bool,
         disable_cache_metrics: bool,
         sparse_trie_prune_depth: usize,
-        sparse_trie_max_hot_slots: usize,
-        sparse_trie_max_hot_accounts: usize,
         slow_block_threshold: Option<Duration>,
         state_root_task_timeout: Option<Duration>,
         share_execution_cache_with_payload_builder: bool,
@@ -304,6 +291,7 @@ impl TreeConfig {
             always_compare_trie_updates,
             disable_state_cache,
             disable_prewarming,
+            txpool_prewarming: false,
             state_provider_metrics,
             cross_block_cache_size,
             has_enough_parallelism,
@@ -315,8 +303,6 @@ impl TreeConfig {
             allow_unwind_canonical_header,
             disable_cache_metrics,
             sparse_trie_prune_depth,
-            sparse_trie_max_hot_slots,
-            sparse_trie_max_hot_accounts,
             slow_block_threshold,
             disable_sparse_trie_cache_pruning: false,
             state_root_task_timeout,
@@ -398,6 +384,11 @@ impl TreeConfig {
     /// Returns whether or not parallel prewarming is disabled.
     pub const fn disable_prewarming(&self) -> bool {
         self.disable_prewarming
+    }
+
+    /// Returns whether txpool prewarming is enabled.
+    pub const fn txpool_prewarming(&self) -> bool {
+        self.txpool_prewarming
     }
 
     /// Returns whether to always compare trie updates from the state root task to the trie updates
@@ -519,6 +510,12 @@ impl TreeConfig {
         self
     }
 
+    /// Enables or disables txpool transaction prewarming.
+    pub const fn with_txpool_prewarming(mut self, enabled: bool) -> Self {
+        self.txpool_prewarming = enabled;
+        self
+    }
+
     /// Setter for whether to always compare trie updates from the state root task to the trie
     /// updates from the regular state root calculation.
     pub const fn with_always_compare_trie_updates(
@@ -541,12 +538,17 @@ impl TreeConfig {
         self
     }
 
-    /// Whether or not to use the state root task.
+    /// Returns whether the host has enough parallelism to run the state root task.
+    pub const fn has_enough_parallelism(&self) -> bool {
+        self.has_enough_parallelism
+    }
+
+    /// Returns whether engine validation should use the state root task.
     ///
     /// The state root task requires at least 5 parallel threads, see
     /// [`has_enough_parallelism`].
     pub const fn use_state_root_task(&self) -> bool {
-        self.has_enough_parallelism
+        !self.skip_state_root && !self.state_root_fallback && self.has_enough_parallelism
     }
 
     /// Setter for state provider metrics.
@@ -604,28 +606,6 @@ impl TreeConfig {
     /// Setter for sparse trie prune depth.
     pub const fn with_sparse_trie_prune_depth(mut self, depth: usize) -> Self {
         self.sparse_trie_prune_depth = depth;
-        self
-    }
-
-    /// Returns the LFU hot-slot capacity for sparse trie pruning.
-    pub const fn sparse_trie_max_hot_slots(&self) -> usize {
-        self.sparse_trie_max_hot_slots
-    }
-
-    /// Setter for LFU hot-slot capacity.
-    pub const fn with_sparse_trie_max_hot_slots(mut self, max_hot_slots: usize) -> Self {
-        self.sparse_trie_max_hot_slots = max_hot_slots;
-        self
-    }
-
-    /// Returns the LFU hot-account capacity for sparse trie pruning.
-    pub const fn sparse_trie_max_hot_accounts(&self) -> usize {
-        self.sparse_trie_max_hot_accounts
-    }
-
-    /// Setter for LFU hot-account capacity.
-    pub const fn with_sparse_trie_max_hot_accounts(mut self, max_hot_accounts: usize) -> Self {
-        self.sparse_trie_max_hot_accounts = max_hot_accounts;
         self
     }
 
@@ -776,6 +756,26 @@ impl TreeConfig {
 #[cfg(test)]
 mod tests {
     use super::TreeConfig;
+
+    #[test]
+    fn txpool_prewarming_is_disabled_by_default_and_can_be_enabled() {
+        assert!(!TreeConfig::default().txpool_prewarming());
+        assert!(TreeConfig::default().with_txpool_prewarming(true).txpool_prewarming());
+    }
+
+    #[test]
+    fn state_root_task_requires_parallelism_without_overrides() {
+        assert!(TreeConfig::default().with_has_enough_parallelism(true).use_state_root_task());
+        assert!(!TreeConfig::default().with_has_enough_parallelism(false).use_state_root_task());
+        assert!(!TreeConfig::default()
+            .with_has_enough_parallelism(true)
+            .with_state_root_fallback(true)
+            .use_state_root_task());
+        assert!(!TreeConfig::default()
+            .with_has_enough_parallelism(true)
+            .with_skip_state_root(true)
+            .use_state_root_task());
+    }
 
     #[test]
     #[should_panic(

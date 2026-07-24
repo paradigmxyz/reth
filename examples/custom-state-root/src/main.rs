@@ -24,11 +24,10 @@ use alloy_genesis::Genesis;
 use alloy_primitives::B256;
 use reth_chain_state::StateTrieOverlayManager;
 use reth_engine_tree::tree::{
-    payload_processor::multiproof::{PayloadStateRootHandle, StateRootStreams},
-    payload_validator::LazyHashedPostState,
     state_root_strategy::{
-        DefaultStateRootStrategy, PayloadStateRootJobContext, PreparedStateRootJob, StateRootJob,
-        StateRootJobContext, StateRootJobOutcome, StateRootStrategy,
+        DefaultStateRootStrategy, LazyHashedPostState, PayloadStateRootHandle,
+        PayloadStateRootJobContext, PreparedStateRootJob, StateRootJob, StateRootJobContext,
+        StateRootJobOutcome, StateRootStrategy,
     },
     BasicEngineValidator, TreeConfig,
 };
@@ -77,12 +76,12 @@ where
         if timestamp < self.activation_timestamp {
             return self.default.prepare(ctx)
         }
-        Ok(PreparedStateRootJob::new(Box::new(ZeroStateRootJob), StateRootStreams::empty(), None))
+        Ok(PreparedStateRootJob::new(Box::new(ZeroStateRootJob), None))
     }
 
     fn prepare_payload_builder(
         &self,
-        ctx: PayloadStateRootJobContext<'_, N, P, Evm>,
+        ctx: PayloadStateRootJobContext<'_, N, P>,
     ) -> ProviderResult<Option<PayloadStateRootHandle>> {
         if ctx.timestamp() < self.activation_timestamp {
             return self.default.prepare_payload_builder(ctx)
@@ -187,7 +186,7 @@ async fn main() -> eyre::Result<()> {
                     // Zero roots from genesis on. Set this to a fork timestamp to keep the
                     // default state-root machinery for earlier blocks.
                     activation_timestamp: 0,
-                    default: DefaultStateRootStrategy,
+                    default: DefaultStateRootStrategy::default(),
                 }),
             },
             Default::default(),

@@ -1,4 +1,5 @@
 //! Execution cache implementation for block processing.
+use crate::TxPoolPrewarmCacheSnapshot;
 use alloy_primitives::{
     map::{DefaultHashBuilder, FbBuildHasher},
     Address, StorageKey, StorageValue, B256,
@@ -92,8 +93,9 @@ type FixedCache<K, V, H = DefaultHashBuilder> = fixed_cache::Cache<K, V, H, Epoc
 /// already caches reads during the block, and the shared cache is updated after the block from the
 /// final [`BundleState`]. See also [`ExecutionCache::insert_state`].
 ///
-/// Normal cache hit/miss metrics are recorded when [`CachedStateMetrics`] is provided. Slow-block
-/// [`CacheStats`] are controlled separately by [`Self::new_with_mode`].
+/// Execution-cache and txpool-snapshot hit/miss metrics are recorded separately when
+/// [`CachedStateMetrics`] is provided. Slow-block [`CacheStats`] are controlled separately by
+/// [`Self::new_with_mode`].
 #[derive(Debug)]
 pub struct CachedStateProvider<S> {
     /// The state provider
@@ -102,11 +104,17 @@ pub struct CachedStateProvider<S> {
     /// The caches used for the provider
     caches: ExecutionCache,
 
+    /// Optional immutable txpool-prewarm snapshot consulted before the regular execution cache.
+    txpool_snapshot: Option<TxPoolPrewarmCacheSnapshot>,
+
     /// Metrics for the cached state provider.
     metrics: Option<CachedStateMetrics>,
 
-    /// Provider-local hit/miss counters flushed when the provider is dropped.
-    metric_counts: CacheMetricCounts,
+    /// Provider-local execution-cache hit/miss counters flushed when the provider is dropped.
+    execution_metric_counts: CacheMetricCounts,
+
+    /// Provider-local txpool-cache hit/miss counters flushed when the provider is dropped.
+    txpool_metric_counts: CacheMetricCounts,
 
     /// Whether cache misses should populate the shared execution cache.
     fill_mode: CacheFillMode,
@@ -146,11 +154,19 @@ impl<S> CachedStateProvider<S> {
         Self {
             state_provider,
             caches,
+            txpool_snapshot: None,
             metrics,
-            metric_counts: CacheMetricCounts::new(),
+            execution_metric_counts: CacheMetricCounts::new(),
+            txpool_metric_counts: CacheMetricCounts::new(),
             fill_mode,
             cache_stats,
         }
+    }
+
+    /// Adds an immutable txpool-prewarm snapshot as the first cache lookup tier.
+    pub fn with_txpool_snapshot(mut self, snapshot: Option<TxPoolPrewarmCacheSnapshot>) -> Self {
+        self.txpool_snapshot = snapshot;
+        self
     }
 
     fn record_account_hit(&self) {
@@ -195,21 +211,72 @@ impl<S> CachedStateProvider<S> {
         }
     }
 
+    fn record_txpool_account_hit(&self) {
+        self.record_txpool_metric(CacheMetricKind::AccountHit);
+        if let Some(stats) = &self.cache_stats {
+            stats.record_txpool_snapshot_account_hit();
+        }
+    }
+
+    fn record_txpool_account_miss(&self) {
+        self.record_txpool_metric(CacheMetricKind::AccountMiss);
+        if let Some(stats) = &self.cache_stats {
+            stats.record_txpool_snapshot_account_miss();
+        }
+    }
+
+    fn record_txpool_storage_hit(&self) {
+        self.record_txpool_metric(CacheMetricKind::StorageHit);
+        if let Some(stats) = &self.cache_stats {
+            stats.record_txpool_snapshot_storage_hit();
+        }
+    }
+
+    fn record_txpool_storage_miss(&self) {
+        self.record_txpool_metric(CacheMetricKind::StorageMiss);
+        if let Some(stats) = &self.cache_stats {
+            stats.record_txpool_snapshot_storage_miss();
+        }
+    }
+
+    fn record_txpool_code_hit(&self) {
+        self.record_txpool_metric(CacheMetricKind::CodeHit);
+        if let Some(stats) = &self.cache_stats {
+            stats.record_txpool_snapshot_code_hit();
+        }
+    }
+
+    fn record_txpool_code_miss(&self) {
+        self.record_txpool_metric(CacheMetricKind::CodeMiss);
+        if let Some(stats) = &self.cache_stats {
+            stats.record_txpool_snapshot_code_miss();
+        }
+    }
+
     #[inline]
     fn record_metric(&self, kind: CacheMetricKind) {
         if self.metrics.is_some() {
-            self.metric_counts.record(kind);
+            self.execution_metric_counts.record(kind);
+        }
+    }
+
+    #[inline]
+    fn record_txpool_metric(&self, kind: CacheMetricKind) {
+        if self.metrics.is_some() {
+            self.txpool_metric_counts.record(kind);
         }
     }
 
     fn flush_buffered_metrics(&self) {
-        let counts = self.metric_counts.take();
-        if counts.is_empty() {
+        let execution_counts = self.execution_metric_counts.take();
+        let txpool_counts = self.txpool_metric_counts.take();
+        if execution_counts.is_empty() && txpool_counts.is_empty() {
             return;
         }
 
         if let Some(metrics) = &self.metrics {
-            metrics.record_access_counts(counts);
+            metrics.record_access_counts(execution_counts);
+            metrics.record_txpool_access_counts(txpool_counts);
         }
     }
 
@@ -343,7 +410,7 @@ impl fmt::Display for CachedStateMetricsSource {
     }
 }
 
-/// Metrics for the cached state provider, showing hits / misses for each cache
+/// Metrics for the cached state provider, showing hits and misses for each cache tier.
 #[derive(Metrics, Clone)]
 #[metrics(scope = "sync.caching")]
 pub struct CachedStateMetrics {
@@ -353,23 +420,41 @@ pub struct CachedStateMetrics {
     /// Duration of execution cache creation in seconds
     execution_cache_creation_duration_seconds: Histogram,
 
-    /// Code cache hits
+    /// Execution-cache code hits
     code_cache_hits: Gauge,
 
-    /// Code cache misses
+    /// Execution-cache code misses
     code_cache_misses: Gauge,
 
-    /// Storage cache hits
+    /// Execution-cache storage hits
     storage_cache_hits: Gauge,
 
-    /// Storage cache misses
+    /// Execution-cache storage misses
     storage_cache_misses: Gauge,
 
-    /// Account cache hits
+    /// Execution-cache account hits
     account_cache_hits: Gauge,
 
-    /// Account cache misses
+    /// Execution-cache account misses
     account_cache_misses: Gauge,
+
+    /// Txpool-prewarm snapshot code hits
+    txpool_snapshot_code_hits: Gauge,
+
+    /// Txpool-prewarm snapshot code misses
+    txpool_snapshot_code_misses: Gauge,
+
+    /// Txpool-prewarm snapshot storage hits
+    txpool_snapshot_storage_hits: Gauge,
+
+    /// Txpool-prewarm snapshot storage misses
+    txpool_snapshot_storage_misses: Gauge,
+
+    /// Txpool-prewarm snapshot account hits
+    txpool_snapshot_account_hits: Gauge,
+
+    /// Txpool-prewarm snapshot account misses
+    txpool_snapshot_account_misses: Gauge,
 }
 
 /// Metrics for shared execution cache state.
@@ -418,6 +503,18 @@ impl CachedStateMetrics {
         // account cache
         self.account_cache_hits.set(0);
         self.account_cache_misses.set(0);
+
+        // txpool-prewarm code cache
+        self.txpool_snapshot_code_hits.set(0);
+        self.txpool_snapshot_code_misses.set(0);
+
+        // txpool-prewarm storage cache
+        self.txpool_snapshot_storage_hits.set(0);
+        self.txpool_snapshot_storage_misses.set(0);
+
+        // txpool-prewarm account cache
+        self.txpool_snapshot_account_hits.set(0);
+        self.txpool_snapshot_account_misses.set(0);
     }
 
     /// Returns a new zeroed-out instance of [`CachedStateMetrics`] with a `source` label
@@ -460,6 +557,46 @@ impl CachedStateMetrics {
         }
     }
 
+    fn record_txpool_access(&self, kind: CacheMetricKind, count: u64) {
+        match kind {
+            CacheMetricKind::AccountHit => {
+                self.txpool_snapshot_account_hits.increment(count as f64)
+            }
+            CacheMetricKind::AccountMiss => {
+                self.txpool_snapshot_account_misses.increment(count as f64)
+            }
+            CacheMetricKind::StorageHit => {
+                self.txpool_snapshot_storage_hits.increment(count as f64)
+            }
+            CacheMetricKind::StorageMiss => {
+                self.txpool_snapshot_storage_misses.increment(count as f64)
+            }
+            CacheMetricKind::CodeHit => self.txpool_snapshot_code_hits.increment(count as f64),
+            CacheMetricKind::CodeMiss => self.txpool_snapshot_code_misses.increment(count as f64),
+        }
+    }
+
+    fn record_txpool_access_counts(&self, counts: CacheMetricSnapshot) {
+        if counts.account_hits != 0 {
+            self.record_txpool_access(CacheMetricKind::AccountHit, counts.account_hits);
+        }
+        if counts.account_misses != 0 {
+            self.record_txpool_access(CacheMetricKind::AccountMiss, counts.account_misses);
+        }
+        if counts.storage_hits != 0 {
+            self.record_txpool_access(CacheMetricKind::StorageHit, counts.storage_hits);
+        }
+        if counts.storage_misses != 0 {
+            self.record_txpool_access(CacheMetricKind::StorageMiss, counts.storage_misses);
+        }
+        if counts.code_hits != 0 {
+            self.record_txpool_access(CacheMetricKind::CodeHit, counts.code_hits);
+        }
+        if counts.code_misses != 0 {
+            self.record_txpool_access(CacheMetricKind::CodeMiss, counts.code_misses);
+        }
+    }
+
     /// Records a new execution cache creation with its duration.
     pub fn record_cache_creation(&self, duration: Duration) {
         self.execution_cache_created_total.increment(1);
@@ -470,18 +607,30 @@ impl CachedStateMetrics {
 /// Cache hit/miss statistics for detailed block logging.
 #[derive(Debug, Default)]
 pub struct CacheStats {
-    /// Account cache hits
+    /// Execution-cache account hits
     account_hits: AtomicUsize,
-    /// Account cache misses
+    /// Execution-cache account misses
     account_misses: AtomicUsize,
-    /// Storage cache hits
+    /// Execution-cache storage hits
     storage_hits: AtomicUsize,
-    /// Storage cache misses
+    /// Execution-cache storage misses
     storage_misses: AtomicUsize,
-    /// Code cache hits
+    /// Execution-cache code hits
     code_hits: AtomicUsize,
-    /// Code cache misses
+    /// Execution-cache code misses
     code_misses: AtomicUsize,
+    /// Txpool-prewarm snapshot account hits
+    txpool_snapshot_account_hits: AtomicUsize,
+    /// Txpool-prewarm snapshot account misses
+    txpool_snapshot_account_misses: AtomicUsize,
+    /// Txpool-prewarm snapshot storage hits
+    txpool_snapshot_storage_hits: AtomicUsize,
+    /// Txpool-prewarm snapshot storage misses
+    txpool_snapshot_storage_misses: AtomicUsize,
+    /// Txpool-prewarm snapshot code hits
+    txpool_snapshot_code_hits: AtomicUsize,
+    /// Txpool-prewarm snapshot code misses
+    txpool_snapshot_code_misses: AtomicUsize,
 }
 
 impl CacheStats {
@@ -543,6 +692,66 @@ impl CacheStats {
     /// Returns the number of code cache misses.
     pub fn code_misses(&self) -> usize {
         self.code_misses.load(Ordering::Relaxed)
+    }
+
+    /// Records a txpool-prewarm snapshot account hit.
+    pub fn record_txpool_snapshot_account_hit(&self) {
+        self.txpool_snapshot_account_hits.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Records a txpool-prewarm snapshot account miss.
+    pub fn record_txpool_snapshot_account_miss(&self) {
+        self.txpool_snapshot_account_misses.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Returns the number of txpool-prewarm snapshot account hits.
+    pub fn txpool_snapshot_account_hits(&self) -> usize {
+        self.txpool_snapshot_account_hits.load(Ordering::Relaxed)
+    }
+
+    /// Returns the number of txpool-prewarm snapshot account misses.
+    pub fn txpool_snapshot_account_misses(&self) -> usize {
+        self.txpool_snapshot_account_misses.load(Ordering::Relaxed)
+    }
+
+    /// Records a txpool-prewarm snapshot storage hit.
+    pub fn record_txpool_snapshot_storage_hit(&self) {
+        self.txpool_snapshot_storage_hits.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Records a txpool-prewarm snapshot storage miss.
+    pub fn record_txpool_snapshot_storage_miss(&self) {
+        self.txpool_snapshot_storage_misses.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Returns the number of txpool-prewarm snapshot storage hits.
+    pub fn txpool_snapshot_storage_hits(&self) -> usize {
+        self.txpool_snapshot_storage_hits.load(Ordering::Relaxed)
+    }
+
+    /// Returns the number of txpool-prewarm snapshot storage misses.
+    pub fn txpool_snapshot_storage_misses(&self) -> usize {
+        self.txpool_snapshot_storage_misses.load(Ordering::Relaxed)
+    }
+
+    /// Records a txpool-prewarm snapshot code hit.
+    pub fn record_txpool_snapshot_code_hit(&self) {
+        self.txpool_snapshot_code_hits.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Records a txpool-prewarm snapshot code miss.
+    pub fn record_txpool_snapshot_code_miss(&self) {
+        self.txpool_snapshot_code_misses.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Returns the number of txpool-prewarm snapshot code hits.
+    pub fn txpool_snapshot_code_hits(&self) -> usize {
+        self.txpool_snapshot_code_hits.load(Ordering::Relaxed)
+    }
+
+    /// Returns the number of txpool-prewarm snapshot code misses.
+    pub fn txpool_snapshot_code_misses(&self) -> usize {
+        self.txpool_snapshot_code_misses.load(Ordering::Relaxed)
     }
 }
 
@@ -637,6 +846,14 @@ impl<K: PartialEq, V> StatsHandler<K, V> for CacheStatsHandler {
 
 impl<S: AccountReader> AccountReader for CachedStateProvider<S> {
     fn basic_account(&self, address: &Address) -> ProviderResult<Option<Account>> {
+        if let Some(snapshot) = &self.txpool_snapshot {
+            if let Some(account) = snapshot.account(address) {
+                self.record_txpool_account_hit();
+                return Ok(account)
+            }
+            self.record_txpool_account_miss();
+        }
+
         if self.should_fill_on_miss() {
             match self.caches.get_or_try_insert_account_with(*address, || {
                 self.state_provider.basic_account(address)
@@ -675,6 +892,14 @@ impl<S: StateProvider> StateProvider for CachedStateProvider<S> {
         account: Address,
         storage_key: StorageKey,
     ) -> ProviderResult<Option<StorageValue>> {
+        if let Some(snapshot) = &self.txpool_snapshot {
+            if let Some(value) = snapshot.storage(account, storage_key) {
+                self.record_txpool_storage_hit();
+                return Ok(nonzero_storage_value(value))
+            }
+            self.record_txpool_storage_miss();
+        }
+
         if self.should_fill_on_miss() {
             match self.caches.get_or_try_insert_storage_with(account, storage_key, || {
                 self.state_provider.storage(account, storage_key).map(Option::unwrap_or_default)
@@ -700,6 +925,14 @@ impl<S: StateProvider> StateProvider for CachedStateProvider<S> {
 
 impl<S: BytecodeReader> BytecodeReader for CachedStateProvider<S> {
     fn bytecode_by_hash(&self, code_hash: &B256) -> ProviderResult<Option<Bytecode>> {
+        if let Some(snapshot) = &self.txpool_snapshot {
+            if let Some(code) = snapshot.bytecode(code_hash) {
+                self.record_txpool_code_hit();
+                return Ok(code)
+            }
+            self.record_txpool_code_miss();
+        }
+
         if self.should_fill_on_miss() {
             match self.caches.get_or_try_insert_code_with(*code_hash, || {
                 self.state_provider.bytecode_by_hash(code_hash)

@@ -28,7 +28,7 @@ reth-primitives-traits = { workspace = true, features = ["rayon", "dashmap"] }
 reth-ethereum-primitives.workspace = true
 reth-provider.workspace = true
 reth-prune.workspace = true
-reth-revm = { workspace = true, features = ["optional-balance-check"] }
+reth-revm = { workspace = true, features = ["optional-balance-check", "optional-no-base-fee"] }
 reth-stages-api.workspace = true
 reth-tasks = { workspace = true, features = ["rayon"] }
 reth-trie-parallel.workspace = true
@@ -50,6 +50,7 @@ revm.workspace = true
 
 # common
 futures.workspace = true
+parking_lot.workspace = true
 thiserror.workspace = true
 tokio = { workspace = true, features = ["rt", "rt-multi-thread", "sync", "macros"] }
 moka = { workspace = true, features = ["sync"] }
@@ -60,6 +61,7 @@ reth-metrics = { workspace = true, features = ["common"] }
 
 # misc
 indexmap.workspace = true
+itertools.workspace = true
 schnellru.workspace = true
 rayon.workspace = true
 tracing.workspace = true

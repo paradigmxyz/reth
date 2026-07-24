@@ -337,6 +337,15 @@ impl NodeState {
                     cache.code.hits = stats.code_cache_hits,
                     cache.code.misses = stats.code_cache_misses,
                     cache.code.hit_rate = format!("{:.2}", hit_rate(stats.code_cache_hits, stats.code_cache_misses)),
+                    cache.txpool_snapshot.account.hits = stats.txpool_snapshot_account_hits,
+                    cache.txpool_snapshot.account.misses = stats.txpool_snapshot_account_misses,
+                    cache.txpool_snapshot.account.hit_rate = format!("{:.2}", hit_rate(stats.txpool_snapshot_account_hits, stats.txpool_snapshot_account_misses)),
+                    cache.txpool_snapshot.storage.hits = stats.txpool_snapshot_storage_hits,
+                    cache.txpool_snapshot.storage.misses = stats.txpool_snapshot_storage_misses,
+                    cache.txpool_snapshot.storage.hit_rate = format!("{:.2}", hit_rate(stats.txpool_snapshot_storage_hits, stats.txpool_snapshot_storage_misses)),
+                    cache.txpool_snapshot.code.hits = stats.txpool_snapshot_code_hits,
+                    cache.txpool_snapshot.code.misses = stats.txpool_snapshot_code_misses,
+                    cache.txpool_snapshot.code.hit_rate = format!("{:.2}", hit_rate(stats.txpool_snapshot_code_hits, stats.txpool_snapshot_code_misses)),
                 );
             }
         }
