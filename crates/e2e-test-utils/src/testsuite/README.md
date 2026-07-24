@@ -449,22 +449,35 @@ let action = SendNewPayloads::new()
 #### RPC Compatibility Actions
 
 ##### `RunRpcCompatTests`
-Runs a resolved fixture selection over the embedded node's raw HTTP endpoint. Most callers should
-use the `reth-rpc-compat` CLI or `run_embedded`; the action is public for custom test sequences.
+Runs RPC compatibility tests from execution-apis test data.
 
 ```rust
-use reth_rpc_compat_tests::runner::RunRpcCompatTests;
+use reth_rpc_e2e_tests::rpc_compat::RunRpcCompatTests;
 
-let action = RunRpcCompatTests::new(fixture, resolved_run_config, schema_catalog);
+// Test specific RPC methods
+let action = RunRpcCompatTests::new(
+    vec!["eth_getLogs".to_string(), "eth_syncing".to_string()],
+    test_data_path,
+);
+
+// With fail-fast option
+let action = RunRpcCompatTests::new(methods, test_data_path)
+    .with_fail_fast(true);
 ```
 
-##### `InitializeFixture`
+##### `InitializeFromExecutionApis`
 Initializes the chain from execution-apis test data.
 
 ```rust
-use reth_rpc_compat_tests::runner::InitializeFixture;
+use reth_rpc_e2e_tests::rpc_compat::InitializeFromExecutionApis;
 
-let action = InitializeFixture::new("path/to/headfcu.json");
+// With default paths
+let action = InitializeFromExecutionApis::new();
+
+// With custom paths
+let action = InitializeFromExecutionApis::new()
+    .with_chain_rlp("path/to/chain.rlp")
+    .with_fcu_json("path/to/headfcu.json");
 ```
 
 #### Custom FCU Actions
@@ -729,13 +742,37 @@ async fn test_engine_api() -> eyre::Result<()> {
 
 #### RPC Compatibility Test
 
-```console
-cargo run -p reth-rpc-compat-tests --bin reth-rpc-compat -- fetch
-cargo run -p reth-rpc-compat-tests --bin reth-rpc-compat -- run --offline
-```
+```rust
+use reth_e2e_test_utils::testsuite::{
+    actions::{MakeCanonical, UpdateBlockInfo},
+    setup::{NetworkSetup, Setup},
+    TestBuilder,
+};
+use reth_rpc_e2e_tests::rpc_compat::{InitializeFromExecutionApis, RunRpcCompatTests};
 
-See `crates/rpc/rpc-compat-tests/README.md` for fixture overrides, filters, profiles, choices,
-expected failures, ignored tests, and report options.
+#[tokio::test]
+async fn test_rpc_compatibility() -> eyre::Result<()> {
+    let test_data_path = "path/to/execution-apis/tests";
+    
+    let setup = Setup::default()
+        .with_chain_spec(chain_spec)
+        .with_network(NetworkSetup::single_node());
+
+    let test = TestBuilder::new()
+        .with_setup_and_import(setup, "path/to/chain.rlp")
+        .with_action(UpdateBlockInfo::default())
+        .with_action(InitializeFromExecutionApis::new()
+            .with_fcu_json("path/to/headfcu.json"))
+        .with_action(MakeCanonical::new())
+        .with_action(RunRpcCompatTests::new(
+            vec!["eth_getLogs".to_string()],
+            test_data_path,
+        ));
+
+    test.run::<EthereumNode>().await?;
+    Ok(())
+}
+```
 
 ### Best Practices
 

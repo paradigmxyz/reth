@@ -10073,6 +10073,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "reth-rpc-e2e-tests"
+version = "2.4.1"
+dependencies = [
+ "alloy-genesis",
+ "alloy-rpc-types-engine",
+ "eyre",
+ "futures-util",
+ "jsonrpsee",
+ "reth-chainspec",
+ "reth-e2e-test-utils",
+ "reth-node-api",
+ "reth-node-ethereum",
+ "reth-rpc-api",
+ "reth-tracing",
+ "serde_json",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "reth-rpc-engine-api"
 version = "2.4.1"
 dependencies = [
