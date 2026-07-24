@@ -150,8 +150,10 @@ impl<T: PayloadTypes> PayloadBuilderHandle<T> {
     /// # Cancellation safety
     ///
     /// The future returned by this method is not cancellation-safe. This method sends the resolve
-    /// command before returning the future, so dropping the returned future drops the response
-    /// receiver and cancels the job identified by `id`.
+    /// command before returning the future. If the returned future is dropped before the service
+    /// has processed the command, the command is ignored and the payload job is kept alive, so
+    /// the same payload id can be resolved again. If it is dropped after the service has started
+    /// resolving, the response receiver is dropped and the job identified by `id` is cancelled.
     pub fn resolve_kind(
         &self,
         id: PayloadId,
@@ -507,11 +509,23 @@ where
                         let _ = tx.send(timestamp);
                     }
                     PayloadServiceCommand::Resolve(id, strategy, tx) => {
-                        let (payload_fut, resolved_job) = this.resolve(id, strategy);
-                        let _ = tx.send(payload_fut);
+                        // If the caller dropped the request before the command was processed,
+                        // resolving would consume the job without any way to deliver or cache
+                        // the payload, and a retry of the advertised payload id would fail.
+                        // Skip resolution so the job and any in-progress build are kept for a
+                        // retry, see <https://github.com/paradigmxyz/reth/issues/26302>
+                        if tx.is_closed() {
+                            debug!(
+                                target: "payload_builder", %id,
+                                "resolve request already dropped, keeping payload job"
+                            );
+                        } else {
+                            let (payload_fut, resolved_job) = this.resolve(id, strategy);
+                            let _ = tx.send(payload_fut);
 
-                        if let Some(entry) = resolved_job {
-                            debug!(target: "payload_builder", id = %entry.id, "terminated resolved job");
+                            if let Some(entry) = resolved_job {
+                                debug!(target: "payload_builder", id = %entry.id, "terminated resolved job");
+                            }
                         }
                     }
                     PayloadServiceCommand::Subscribe(tx) => {
@@ -657,9 +671,12 @@ struct PayloadJobEntry<Job> {
 mod tests {
     use super::*;
     use crate::test_utils::test_payload_service;
-    use alloy_primitives::Address;
-    use reth_ethereum_engine_primitives::{EthEngineTypes, EthPayloadAttributes};
-    use std::sync::atomic::{AtomicBool, Ordering};
+    use alloy_consensus::Block;
+    use alloy_primitives::{Address, U256};
+    use futures_util::future::BoxFuture;
+    use reth_ethereum_engine_primitives::{EthBuiltPayload, EthEngineTypes, EthPayloadAttributes};
+    use reth_primitives_traits::{Block as _, RecoveredBlock};
+    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
     struct DropProbe(Arc<AtomicBool>);
 
@@ -697,5 +714,138 @@ mod tests {
             assert!(dropped.load(Ordering::Acquire));
             service.abort();
         });
+    }
+
+    #[derive(Clone, Debug)]
+    struct MockPayloadJobGenerator {
+        resolve_calls: Arc<AtomicUsize>,
+    }
+
+    impl PayloadJobGenerator for MockPayloadJobGenerator {
+        type Job = MockPayloadJob;
+
+        fn new_payload_job(
+            &self,
+            input: BuildNewPayload<EthPayloadAttributes>,
+            _id: PayloadId,
+        ) -> Result<Self::Job, PayloadBuilderError> {
+            Ok(MockPayloadJob { attr: input.attributes, resolve_calls: self.resolve_calls.clone() })
+        }
+    }
+
+    #[derive(Debug)]
+    struct MockPayloadJob {
+        attr: EthPayloadAttributes,
+        resolve_calls: Arc<AtomicUsize>,
+    }
+
+    impl Future for MockPayloadJob {
+        type Output = Result<(), PayloadBuilderError>;
+
+        fn poll(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<Self::Output> {
+            Poll::Pending
+        }
+    }
+
+    impl PayloadJob for MockPayloadJob {
+        type PayloadAttributes = EthPayloadAttributes;
+        type ResolvePayloadFuture =
+            BoxFuture<'static, Result<EthBuiltPayload, PayloadBuilderError>>;
+        type BuiltPayload = EthBuiltPayload;
+
+        fn best_payload(&self) -> Result<EthBuiltPayload, PayloadBuilderError> {
+            Ok(test_payload())
+        }
+
+        fn payload_attributes(&self) -> Result<EthPayloadAttributes, PayloadBuilderError> {
+            Ok(self.attr.clone())
+        }
+
+        fn payload_timestamp(&self) -> Result<u64, PayloadBuilderError> {
+            Ok(self.attr.timestamp)
+        }
+
+        fn resolve_kind(
+            &mut self,
+            _kind: PayloadKind,
+        ) -> (Self::ResolvePayloadFuture, KeepPayloadJobAlive) {
+            self.resolve_calls.fetch_add(1, Ordering::SeqCst);
+            (Box::pin(futures_util::future::ready(Ok(test_payload()))), KeepPayloadJobAlive::No)
+        }
+    }
+
+    fn test_payload_attributes() -> EthPayloadAttributes {
+        EthPayloadAttributes {
+            timestamp: 1,
+            prev_randao: B256::ZERO,
+            suggested_fee_recipient: Address::ZERO,
+            withdrawals: Some(vec![]),
+            parent_beacon_block_root: Some(B256::ZERO),
+            slot_number: None,
+            target_gas_limit: None,
+        }
+    }
+
+    fn test_payload() -> EthBuiltPayload {
+        EthBuiltPayload::new(
+            Arc::new(RecoveredBlock::new_sealed(Block::<_>::default().seal_slow(), vec![])),
+            U256::ZERO,
+            None,
+            None,
+        )
+    }
+
+    /// A resolve request whose caller went away before the service processed the command must
+    /// not consume the payload job: a retry for the same advertised payload id resolves
+    /// normally.
+    ///
+    /// Regression test for the unsent-receiver window of
+    /// <https://github.com/paradigmxyz/reth/issues/26302>.
+    #[test]
+    fn dropped_resolve_request_keeps_payload_job_for_retry() {
+        let resolve_calls = Arc::new(AtomicUsize::new(0));
+        let generator = MockPayloadJobGenerator { resolve_calls: resolve_calls.clone() };
+        let chain_events = futures_util::stream::empty::<CanonStateNotification>();
+        let (mut service, handle) =
+            PayloadBuilderService::<_, _, EthEngineTypes>::new(generator, chain_events);
+
+        let mut cx = Context::from_waker(futures_util::task::noop_waker_ref());
+        let parent_hash = B256::ZERO;
+        let attributes = test_payload_attributes();
+        let payload_id = attributes.payload_id(&parent_hash);
+
+        let mut new_payload = Box::pin(handle.send_new_payload(BuildNewPayload {
+            attributes,
+            parent_hash,
+            resources: PayloadBuilderResources::default(),
+        }));
+
+        assert!(Pin::new(&mut service).poll(&mut cx).is_pending());
+        match new_payload.as_mut().poll(&mut cx) {
+            Poll::Ready(Ok(Ok(returned_id))) => assert_eq!(returned_id, payload_id),
+            other => panic!("payload id should be returned for the build command: {other:?}"),
+        }
+
+        assert!(Pin::new(&mut service).poll(&mut cx).is_pending());
+        assert_eq!(service.payload_jobs.len(), 1);
+
+        // the caller drops the resolve request before the service processes the command
+        drop(handle.resolve_kind(payload_id, PayloadKind::Earliest));
+        assert!(Pin::new(&mut service).poll(&mut cx).is_pending());
+
+        // the command is skipped: the job was neither resolved nor consumed
+        assert_eq!(resolve_calls.load(Ordering::SeqCst), 0);
+        assert_eq!(service.payload_jobs.len(), 1);
+
+        // a retry for the same payload id resolves normally
+        let mut retry = Box::pin(handle.resolve_kind(payload_id, PayloadKind::Earliest));
+        assert!(Pin::new(&mut service).poll(&mut cx).is_pending());
+        match retry.as_mut().poll(&mut cx) {
+            Poll::Ready(Some(Ok(_payload))) => {}
+            other => panic!("retry should resolve the kept payload job: {other:?}"),
+        }
+
+        assert_eq!(resolve_calls.load(Ordering::SeqCst), 1);
+        assert!(service.payload_jobs.is_empty());
     }
 }
