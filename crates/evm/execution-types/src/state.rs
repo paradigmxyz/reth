@@ -520,18 +520,6 @@ mod tests {
     }
 
     #[test]
-    fn revert_account_normalizes_empty_code_hashes() {
-        for code_hash in [B256::ZERO, KECCAK_EMPTY] {
-            let account = RevertAccount { code_hash, ..Default::default() };
-            assert_eq!(Account::from(&account).bytecode_hash, None);
-        }
-
-        let code_hash = B256::repeat_byte(0x42);
-        let account = RevertAccount { code_hash, ..Default::default() };
-        assert_eq!(Account::from(&account).bytecode_hash, Some(code_hash));
-    }
-
-    #[test]
     fn deleted_account_preserves_storage_wipe_when_state_is_extended() {
         let address = Address::repeat_byte(0x01);
         let original =

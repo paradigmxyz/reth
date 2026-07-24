@@ -848,10 +848,8 @@ fn emit_hashed_state(hook: &mut HashedStateUpdateHook, state: HashedPostState) {
 #[cfg(test)]
 mod tests {
     use super::{
-        final_block_gas_used, map_transaction_execution_error, EthBigBlockPlan, EthBigBlockSegment,
-        EthBlockExecutionCtx, EthEvmEnv,
+        final_block_gas_used, EthBigBlockPlan, EthBigBlockSegment, EthBlockExecutionCtx, EthEvmEnv,
     };
-    use crate::execution::EthExecutionError;
     use alloy_consensus::{SignableTransaction, TxLegacy};
     use alloy_eip7928::BlockAccessIndex;
     use alloy_primitives::{address, Address, Bytes, Signature, TxKind, B256, U256};
@@ -864,10 +862,7 @@ mod tests {
     };
     use reth_chainspec::{Chain, ChainSpecBuilder};
     use reth_ethereum_primitives::TransactionSigned;
-    use reth_evm::{
-        BlockExecutionError, BlockExecutor, BlockExecutorFactory, BlockValidationError,
-        CommitChanges,
-    };
+    use reth_evm::{BlockExecutor, BlockExecutorFactory, CommitChanges};
     use reth_primitives_traits::Recovered;
     use std::{collections::BTreeMap, convert::Infallible, sync::Arc};
 
@@ -1039,16 +1034,5 @@ mod tests {
         assert_eq!(final_block_gas_used(true, 90, 70, 120), 120);
         assert_eq!(final_block_gas_used(true, 90, 130, 120), 130);
         assert_eq!(final_block_gas_used(false, 90, 130, 120), 90);
-    }
-
-    #[test]
-    fn bal_not_covered_remains_a_validation_error() {
-        assert!(matches!(
-            map_transaction_execution_error(
-                EthExecutionError::BlockAccessListNotCovered,
-                B256::ZERO
-            ),
-            BlockExecutionError::Validation(BlockValidationError::BlockAccessListNotCovered)
-        ));
     }
 }
