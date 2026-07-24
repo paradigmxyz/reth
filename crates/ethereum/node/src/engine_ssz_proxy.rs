@@ -58,52 +58,86 @@ const MAX_PAYLOAD_BYTES: u64 = 64 * 1024 * 1024;
 
 type EthEngineApi<Provider, Pool, Validator, ChainSpec> =
     EngineApi<Provider, EthEngineTypes, Pool, Validator, ChainSpec>;
-type SharedEthEngineApi<Provider, Pool, Validator, ChainSpec> =
-    Arc<RwLock<Option<EthEngineApi<Provider, Pool, Validator, ChainSpec>>>>;
+type SharedEngineApi<Api> = Arc<RwLock<Option<Api>>>;
 
-/// Shared handle used by [`EngineSszProxyLayer`].
-pub struct EngineSszProxyHandle<ChainSpec, Provider = (), Pool = (), Validator = ()> {
-    engine_api: SharedEthEngineApi<Provider, Pool, Validator, ChainSpec>,
+/// API surface required by the SSZ Engine API proxy.
+pub trait EngineSszApi: Clone + Send + Sync + 'static {
+    /// Returns the Engine API identity response.
+    fn identity(&self) -> HttpResponse;
+
+    /// Handles a new payload request.
+    fn new_payload(
+        &self,
+        fork: EngineSszFork,
+        body: Bytes,
+    ) -> impl Future<Output = HttpResponse> + Send;
+
+    /// Handles a getPayload request.
+    fn get_payload(
+        &self,
+        fork: EngineSszFork,
+        payload_id: PayloadId,
+    ) -> impl Future<Output = HttpResponse> + Send;
+
+    /// Handles a forkchoice update request.
+    fn forkchoice_updated(
+        &self,
+        fork: EngineSszFork,
+        body: Bytes,
+    ) -> impl Future<Output = HttpResponse> + Send;
+
+    /// Handles a getPayloadBodiesByHash request.
+    fn get_payload_bodies_by_hash(
+        &self,
+        fork: EngineSszFork,
+        body: Bytes,
+    ) -> impl Future<Output = HttpResponse> + Send;
+
+    /// Handles a getPayloadBodiesByRange request.
+    fn get_payload_bodies_by_range(
+        &self,
+        fork: EngineSszFork,
+        start: u64,
+        count: u64,
+    ) -> impl Future<Output = HttpResponse> + Send;
+
+    /// Handles a getBlobs request.
+    fn get_blobs(&self, version: u8, body: Bytes) -> impl Future<Output = HttpResponse> + Send;
 }
 
-impl<C, Provider, Pool, Validator> Clone for EngineSszProxyHandle<C, Provider, Pool, Validator> {
+/// Shared handle used by [`EngineSszProxyLayer`].
+pub struct EngineSszProxyHandle<Api = ()> {
+    engine_api: SharedEngineApi<Api>,
+}
+
+impl<Api> Clone for EngineSszProxyHandle<Api> {
     fn clone(&self) -> Self {
         Self { engine_api: self.engine_api.clone() }
     }
 }
 
-impl<C, Provider, Pool, Validator> std::fmt::Debug
-    for EngineSszProxyHandle<C, Provider, Pool, Validator>
-{
+impl<Api> std::fmt::Debug for EngineSszProxyHandle<Api> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("EngineSszProxyHandle").finish_non_exhaustive()
     }
 }
 
-impl<ChainSpec, Provider, Pool, Validator>
-    EngineSszProxyHandle<ChainSpec, Provider, Pool, Validator>
-{
+impl<Api> EngineSszProxyHandle<Api> {
     fn new() -> Self {
         Self { engine_api: Default::default() }
     }
 
-    fn with_engine_api(engine_api: EthEngineApi<Provider, Pool, Validator, ChainSpec>) -> Self {
+    fn with_engine_api(engine_api: Api) -> Self {
         Self { engine_api: Arc::new(RwLock::new(Some(engine_api))) }
     }
 
     /// Sets the Engine API implementation used by the proxy.
-    pub async fn set_engine_api(
-        &self,
-        engine_api: EthEngineApi<Provider, Pool, Validator, ChainSpec>,
-    ) {
+    pub async fn set_engine_api(&self, engine_api: Api) {
         *self.engine_api.write().await = Some(engine_api);
     }
 
     /// Sets the Engine API implementation during synchronous launch wiring.
-    pub fn set_engine_api_sync(
-        &self,
-        engine_api: EthEngineApi<Provider, Pool, Validator, ChainSpec>,
-    ) {
+    pub fn set_engine_api_sync(&self, engine_api: Api) {
         *self
             .engine_api
             .try_write()
@@ -111,43 +145,35 @@ impl<ChainSpec, Provider, Pool, Validator>
     }
 }
 
-impl<ChainSpec, Provider, Pool, Validator>
-    EngineSszProxyHandle<ChainSpec, Provider, Pool, Validator>
-{
+impl<Api: Clone> EngineSszProxyHandle<Api> {
     /// Returns the Engine API implementation used by the proxy.
-    pub async fn engine_api(&self) -> Option<EthEngineApi<Provider, Pool, Validator, ChainSpec>> {
+    pub async fn engine_api(&self) -> Option<Api> {
         self.engine_api.read().await.clone()
     }
 }
 
 /// A tower layer that intercepts SSZ Engine API routes under `/engine/v1`.
 #[derive(Clone, Debug)]
-pub struct EngineSszProxyLayer<ChainSpec, Provider = (), Pool = (), Validator = ()> {
-    handle: EngineSszProxyHandle<ChainSpec, Provider, Pool, Validator>,
+pub struct EngineSszProxyLayer<Api = ()> {
+    handle: EngineSszProxyHandle<Api>,
 }
 
-impl<ChainSpec, Provider, Pool, Validator>
-    EngineSszProxyLayer<ChainSpec, Provider, Pool, Validator>
-{
+impl<Api> EngineSszProxyLayer<Api> {
     /// Creates a new proxy layer and a handle for setting the engine after node launch.
-    pub fn new() -> (Self, EngineSszProxyHandle<ChainSpec, Provider, Pool, Validator>) {
+    pub fn new() -> (Self, EngineSszProxyHandle<Api>) {
         let handle = EngineSszProxyHandle::new();
         (Self { handle: handle.clone() }, handle)
     }
 
     /// Creates a new proxy layer with an Engine API implementation.
-    pub fn with_engine_api(
-        engine_api: EthEngineApi<Provider, Pool, Validator, ChainSpec>,
-    ) -> (Self, EngineSszProxyHandle<ChainSpec, Provider, Pool, Validator>) {
+    pub fn with_engine_api(engine_api: Api) -> (Self, EngineSszProxyHandle<Api>) {
         let handle = EngineSszProxyHandle::with_engine_api(engine_api);
         (Self { handle: handle.clone() }, handle)
     }
 }
 
-impl<S, ChainSpec, Provider, Pool, Validator> Layer<S>
-    for EngineSszProxyLayer<ChainSpec, Provider, Pool, Validator>
-{
-    type Service = EngineSszProxyService<S, ChainSpec, Provider, Pool, Validator>;
+impl<S, Api> Layer<S> for EngineSszProxyLayer<Api> {
+    type Service = EngineSszProxyService<S, Api>;
 
     fn layer(&self, inner: S) -> Self::Service {
         EngineSszProxyService { inner, handle: self.handle.clone() }
@@ -156,20 +182,16 @@ impl<S, ChainSpec, Provider, Pool, Validator> Layer<S>
 
 /// The service produced by [`EngineSszProxyLayer`].
 #[derive(Clone, Debug)]
-pub struct EngineSszProxyService<S, ChainSpec, Provider = (), Pool = (), Validator = ()> {
+pub struct EngineSszProxyService<S, Api = ()> {
     inner: S,
-    handle: EngineSszProxyHandle<ChainSpec, Provider, Pool, Validator>,
+    handle: EngineSszProxyHandle<Api>,
 }
 
-impl<S, ChainSpec, Provider, Pool, Validator> Service<HttpRequest>
-    for EngineSszProxyService<S, ChainSpec, Provider, Pool, Validator>
+impl<S, Api> Service<HttpRequest> for EngineSszProxyService<S, Api>
 where
     S: Service<HttpRequest, Response = HttpResponse, Error = BoxError> + Send + Clone,
     S::Future: Send + 'static,
-    Provider: HeaderProvider + BlockReader + StateProviderFactory + BalProvider + 'static,
-    Pool: TransactionPool + 'static,
-    Validator: EngineApiValidator<EthEngineTypes>,
-    ChainSpec: EthereumHardforks + Send + Sync + 'static,
+    Api: EngineSszApi,
 {
     type Response = HttpResponse;
     type Error = BoxError;
@@ -190,15 +212,12 @@ where
     }
 }
 
-async fn handle_engine_ssz_request<ChainSpec, Provider, Pool, Validator>(
-    handle: EngineSszProxyHandle<ChainSpec, Provider, Pool, Validator>,
+async fn handle_engine_ssz_request<Api>(
+    handle: EngineSszProxyHandle<Api>,
     request: HttpRequest,
 ) -> HttpResponse
 where
-    Provider: HeaderProvider + BlockReader + StateProviderFactory + BalProvider + 'static,
-    Pool: TransactionPool + 'static,
-    Validator: EngineApiValidator<EthEngineTypes>,
-    ChainSpec: EthereumHardforks + Send + Sync + 'static,
+    Api: EngineSszApi,
 {
     let method = request.method().as_str().to_owned();
     let path = request.uri().path().to_owned();
@@ -220,7 +239,7 @@ where
             let Some(engine_api) = handle.engine_api().await else {
                 return text_response(STATUS_SERVICE_UNAVAILABLE, "engine api unavailable")
             };
-            handle_identity(engine_api)
+            engine_api.identity()
         }
         EngineSszEndpoint::NewPayload => {
             if method != "POST" {
@@ -235,7 +254,7 @@ where
             let Some(engine_api) = handle.engine_api().await else {
                 return text_response(STATUS_SERVICE_UNAVAILABLE, "engine api unavailable")
             };
-            handle_new_payload(engine_api, fork, &body).await
+            engine_api.new_payload(fork, body.into()).await
         }
         EngineSszEndpoint::GetPayload(payload_id) => {
             if method != "GET" {
@@ -250,7 +269,7 @@ where
             let Some(engine_api) = handle.engine_api().await else {
                 return text_response(STATUS_SERVICE_UNAVAILABLE, "engine api unavailable")
             };
-            handle_get_payload(engine_api, fork, payload_id).await
+            engine_api.get_payload(fork, payload_id).await
         }
         EngineSszEndpoint::Forkchoice => {
             if method != "POST" {
@@ -265,7 +284,7 @@ where
             let Some(engine_api) = handle.engine_api().await else {
                 return text_response(STATUS_SERVICE_UNAVAILABLE, "engine api unavailable")
             };
-            handle_forkchoice_updated(engine_api, fork, &body).await
+            engine_api.forkchoice_updated(fork, body.into()).await
         }
         EngineSszEndpoint::Blobs(version) => {
             if method != "POST" {
@@ -277,7 +296,7 @@ where
             let Some(engine_api) = handle.engine_api().await else {
                 return text_response(STATUS_SERVICE_UNAVAILABLE, "engine api unavailable")
             };
-            handle_get_blobs(engine_api, version, &body).await
+            engine_api.get_blobs(version, body.into()).await
         }
     }
 }
@@ -322,13 +341,20 @@ enum EngineSszEndpoint {
     Blobs(u8),
 }
 
+/// Fork selector used by SSZ Engine API request handling.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum EngineSszFork {
+pub enum EngineSszFork {
+    /// Paris fork.
     Paris,
+    /// Shanghai fork.
     Shanghai,
+    /// Cancun fork.
     Cancun,
+    /// Prague fork.
     Prague,
+    /// Osaka fork.
     Osaka,
+    /// Amsterdam fork.
     Amsterdam,
 }
 
@@ -588,6 +614,68 @@ where
             }
         }
         _ => text_response(STATUS_NOT_FOUND, "unsupported blobs endpoint version"),
+    }
+}
+
+impl<Provider, Pool, Validator, ChainSpec> EngineSszApi
+    for EthEngineApi<Provider, Pool, Validator, ChainSpec>
+where
+    Provider: HeaderProvider + BlockReader + StateProviderFactory + BalProvider + 'static,
+    Pool: TransactionPool + 'static,
+    Validator: EngineApiValidator<EthEngineTypes>,
+    ChainSpec: EthereumHardforks + Send + Sync + 'static,
+{
+    fn identity(&self) -> HttpResponse {
+        handle_identity(self.clone())
+    }
+
+    fn new_payload(
+        &self,
+        fork: EngineSszFork,
+        body: Bytes,
+    ) -> impl Future<Output = HttpResponse> + Send {
+        let engine_api = self.clone();
+        async move { handle_new_payload(engine_api, fork, body.as_ref()).await }
+    }
+
+    fn get_payload(
+        &self,
+        fork: EngineSszFork,
+        payload_id: PayloadId,
+    ) -> impl Future<Output = HttpResponse> + Send {
+        let engine_api = self.clone();
+        async move { handle_get_payload(engine_api, fork, payload_id).await }
+    }
+
+    fn forkchoice_updated(
+        &self,
+        fork: EngineSszFork,
+        body: Bytes,
+    ) -> impl Future<Output = HttpResponse> + Send {
+        let engine_api = self.clone();
+        async move { handle_forkchoice_updated(engine_api, fork, body.as_ref()).await }
+    }
+
+    fn get_payload_bodies_by_hash(
+        &self,
+        _fork: EngineSszFork,
+        _body: Bytes,
+    ) -> impl Future<Output = HttpResponse> + Send {
+        async { text_response(STATUS_NOT_FOUND, "getPayloadBodiesByHash not implemented") }
+    }
+
+    fn get_payload_bodies_by_range(
+        &self,
+        _fork: EngineSszFork,
+        _start: u64,
+        _count: u64,
+    ) -> impl Future<Output = HttpResponse> + Send {
+        async { text_response(STATUS_NOT_FOUND, "getPayloadBodiesByRange not implemented") }
+    }
+
+    fn get_blobs(&self, version: u8, body: Bytes) -> impl Future<Output = HttpResponse> + Send {
+        let engine_api = self.clone();
+        async move { handle_get_blobs(engine_api, version, body.as_ref()).await }
     }
 }
 
