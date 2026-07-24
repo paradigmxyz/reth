@@ -232,6 +232,16 @@ fn print_unexpected(args: ListUnexpectedArgs) -> Result<()> {
             println!("::endgroup::");
         }
     }
+    println!();
+    println!("{bold}Passed tests:{reset}");
+    if summary.passed_tests.is_empty() {
+        println!("  none");
+    } else {
+        let green = if color { "\x1b[32m" } else { "" };
+        for id in &summary.passed_tests {
+            println!("  {green}{id}{reset}");
+        }
+    }
     if args.fail_on_unexpected && !results.is_empty() {
         return Err(eyre::eyre!(
             "compatibility report contains {} unexpected result(s)",

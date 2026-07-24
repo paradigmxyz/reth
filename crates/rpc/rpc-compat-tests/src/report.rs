@@ -17,6 +17,8 @@ pub struct ReportSummary {
     pub executed: usize,
     /// Number of ordinary passing tests.
     pub passed: usize,
+    /// Canonical IDs of ordinary passing tests.
+    pub passed_tests: Vec<String>,
     /// Number of unexpected failing tests.
     pub failed: usize,
     /// Number of expected failures.
@@ -72,6 +74,7 @@ fn summarize(contents: &str) -> Result<ReportSummary> {
         selected: report.results.len(),
         executed: 0,
         passed: 0,
+        passed_tests: Vec::new(),
         failed: 0,
         expected_failures: 0,
         unexpected_passes: 0,
@@ -81,7 +84,10 @@ fn summarize(contents: &str) -> Result<ReportSummary> {
     };
     for result in report.results {
         match result.outcome.as_str() {
-            "pass" => summary.passed += 1,
+            "pass" => {
+                summary.passed += 1;
+                summary.passed_tests.push(result.id);
+            }
             "fail" => {
                 summary.failed += 1;
                 summary.unexpected.push(UnexpectedResult {
@@ -149,6 +155,7 @@ mod tests {
         assert_eq!(summary.selected, 6);
         assert_eq!(summary.executed, 5);
         assert_eq!(summary.passed, 1);
+        assert_eq!(summary.passed_tests, ["eth_ok/test"]);
         assert_eq!(summary.failed, 1);
         assert_eq!(summary.expected_failures, 1);
         assert_eq!(summary.unexpected_passes, 1);
