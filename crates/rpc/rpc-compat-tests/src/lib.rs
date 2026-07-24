@@ -3,7 +3,7 @@
 #[cfg(feature = "embedded")]
 use alloy_genesis::Genesis;
 #[cfg(feature = "embedded")]
-use eyre::{Context, Result};
+use eyre::{eyre, Context, Result};
 #[cfg(feature = "embedded")]
 use reth_chainspec::ChainSpec;
 #[cfg(feature = "embedded")]
@@ -12,6 +12,8 @@ use reth_e2e_test_utils::testsuite::{
     setup::{NetworkSetup, Setup},
     TestBuilder,
 };
+#[cfg(feature = "embedded")]
+use reth_node_core::args::DefaultRpcServerArgs;
 #[cfg(feature = "embedded")]
 use reth_node_ethereum::{EthEngineTypes, EthereumNode};
 #[cfg(feature = "embedded")]
@@ -32,6 +34,10 @@ pub async fn run_embedded(
     fixture: fixture::Fixture,
     config: config::ResolvedRunConfig,
 ) -> Result<()> {
+    DefaultRpcServerArgs::default()
+        .with_rpc_compute_state_root_for_eth_simulate(true)
+        .try_init()
+        .map_err(|_| eyre!("RPC server defaults were initialized before the compatibility runner"))?;
     let genesis_path = fixture.tests.join("genesis.json");
     let genesis: Genesis = serde_json::from_str(&fs::read_to_string(&genesis_path)?)
         .wrap_err_with(|| format!("failed to parse {}", genesis_path.display()))?;

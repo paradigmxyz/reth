@@ -10037,6 +10037,7 @@ dependencies = [
  "reth-chainspec",
  "reth-e2e-test-utils",
  "reth-node-api",
+ "reth-node-core",
  "reth-node-ethereum",
  "reth-rpc-api",
  "reth-tracing",

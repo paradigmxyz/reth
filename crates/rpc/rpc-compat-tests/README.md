@@ -6,7 +6,8 @@ node without Hive, Docker, or Go.
 The default configuration resolves `ethereum/execution-apis/main` on every online fetch and caches
 the fixture by its exact commit SHA. If that SHA is already cached it is reused without downloading
 the archive again. The runner imports `chain.rlp`, applies `headfcu.json`, executes every selected
-`.io` conversation over raw HTTP, and writes JSON and JUnit reports.
+`.io` conversation over raw HTTP, and writes JSON and JUnit reports. Its embedded node computes
+state roots for `eth_simulateV1` responses.
 
 ```console
 cargo run -p reth-rpc-compat-tests --bin reth-rpc-compat -- fetch
@@ -53,7 +54,9 @@ default = "fixture"
 "eth_getTransactionReceipt/get-legacy-receipt" = ["responses/legacy-receipt.json"]
 ```
 
-Unless `--fail-fast` is explicitly selected, every test and every exchange is executed. All JSON
-path mismatches are collected and written to the terminal, JSON report, and JUnit report before the
-process returns a failing status for unexpected failures. Set `github_token_env` in `[fixture]` to
-the name of an API-token environment variable when authenticated GitHub revision lookup is desired.
+Unless `--fail-fast` is explicitly selected, every test and every exchange is executed. All response
+mismatches are collected and written to the terminal, JSON report, and JUnit report before the
+process returns a failing status for unexpected failures. The dedicated `rpc-compat` workflow owns
+end-to-end execution; the crate is not registered as a normal `e2e_testsuite` target. Set
+`github_token_env` in `[fixture]` to the name of an API-token environment variable when authenticated
+GitHub revision lookup is desired.

@@ -20,6 +20,7 @@ embedded = [
     "dep:reth-chainspec",
     "dep:reth-e2e-test-utils",
     "dep:reth-node-api",
+    "dep:reth-node-core",
     "dep:reth-node-ethereum",
     "dep:reth-rpc-api",
     "dep:reth-tracing",
@@ -31,6 +32,7 @@ reth-e2e-test-utils = { workspace = true, optional = true }
 reth-rpc-api = { workspace = true, features = ["client"], optional = true }
 reth-chainspec = { workspace = true, optional = true }
 reth-node-ethereum = { workspace = true, optional = true }
+reth-node-core = { workspace = true, optional = true }
 reth-tracing = { workspace = true, optional = true }
 
 # ethereum
@@ -60,11 +62,6 @@ walkdir.workspace = true
 
 # required for the Action trait
 reth-node-api = { workspace = true, optional = true }
-
-[[test]]
-name = "e2e_testsuite"
-path = "tests/e2e-testsuite/main.rs"
-required-features = ["embedded"]
 
 [[bin]]
 name = "reth-rpc-compat"
