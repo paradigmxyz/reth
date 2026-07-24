@@ -94,7 +94,7 @@ async fn testing_rpc_build_block_works() -> eyre::Result<()> {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn testing_rpc_commit_block_works() -> eyre::Result<()> {
+async fn debug_set_head_allows_committing_new_blocks() -> eyre::Result<()> {
     let runtime = Runtime::test();
     let mut rpc_args = reth_node_core::args::RpcServerArgs::default().with_http();
     rpc_args.http_api = Some(RpcModuleSelection::from_iter([
@@ -226,6 +226,44 @@ async fn testing_rpc_commit_block_works() -> eyre::Result<()> {
                     assert_eq!(
                         rewound_latest.get("hash").and_then(Value::as_str),
                         Some(block_hash.as_str())
+                    );
+
+                    // The next committed block must extend the rewound head, not the discarded tip.
+                    let mut replacement_payload_attributes = payload_attributes;
+                    replacement_payload_attributes.timestamp += 24;
+                    replacement_payload_attributes.slot_number =
+                        Some(replacement_payload_attributes.timestamp);
+                    let replacement_extra_data = Bytes::from_static(b"reth-after-reset");
+                    let replacement_block_hash: B256 = client
+                        .request(
+                            "testing_commitBlockV1",
+                            (
+                                replacement_payload_attributes,
+                                Option::<Vec<Bytes>>::None,
+                                Some(replacement_extra_data.clone()),
+                            ),
+                        )
+                        .await?;
+                    let replacement_latest: Value = client
+                        .request("eth_getBlockByNumber", (BlockNumberOrTag::Latest, false))
+                        .await?;
+                    let replacement_block_hash = replacement_block_hash.to_string();
+                    assert_ne!(replacement_block_hash, next_block_hash);
+                    assert_eq!(
+                        replacement_latest.get("hash").and_then(Value::as_str),
+                        Some(replacement_block_hash.as_str())
+                    );
+                    assert_eq!(
+                        replacement_latest.get("parentHash").and_then(Value::as_str),
+                        Some(block_hash.as_str())
+                    );
+                    assert_eq!(
+                        replacement_latest.get("number").and_then(Value::as_str),
+                        Some("0x2")
+                    );
+                    assert_eq!(
+                        replacement_latest.get("extraData"),
+                        Some(&serde_json::to_value(replacement_extra_data)?)
                     );
                     Ok(())
                 }
