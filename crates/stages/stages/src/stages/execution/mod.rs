@@ -23,7 +23,8 @@ use reth_stages_api::{
     UnwindInput, UnwindOutput,
 };
 use reth_static_file_types::StaticFileSegment;
-use reth_trie::KeccakKeyHasher;
+use reth_trie::{hashed_cursor::zero_destroyed_account_storage, KeccakKeyHasher};
+use reth_trie_db::DatabaseHashedCursorFactory;
 use std::{
     cmp::{max, Ordering},
     collections::BTreeMap,
@@ -497,7 +498,12 @@ where
         provider.write_state(&state, OriginalValuesKnown::Yes, StateWriteConfig::default())?;
 
         if provider.cached_storage_settings().use_hashed_state() {
-            let hashed_state = state.hash_state_slow::<KeccakKeyHasher>();
+            let mut hashed_state = state.hash_state_slow::<KeccakKeyHasher>();
+            zero_destroyed_account_storage(
+                &DatabaseHashedCursorFactory::new(provider.tx_ref()),
+                state.bundle.state(),
+                &mut hashed_state,
+            )?;
             provider.write_hashed_state(&hashed_state.into_sorted())?;
         }
 
@@ -768,8 +774,10 @@ mod tests {
     };
     use reth_prune::PruneModes;
     use reth_prune_types::{PruneMode, ReceiptsLogPruneConfig};
+    use reth_revm::revm::database::{AccountStatus, BundleAccount};
     use reth_stages_api::StageUnitCheckpoint;
     use reth_testing_utils::generators;
+    use reth_trie::HashedPostState;
     use std::collections::BTreeMap;
 
     fn stage() -> ExecutionStage<EthEvmConfig> {
@@ -790,6 +798,64 @@ mod tests {
             MERKLE_STAGE_DEFAULT_REBUILD_THRESHOLD,
             ExExManagerHandle::empty(),
         )
+    }
+
+    #[test]
+    fn destroyed_storage_is_materialized_without_reverts() {
+        let factory = create_test_provider_factory();
+        let provider = factory.database_provider_rw().unwrap();
+        let address = Address::repeat_byte(0x11);
+        let hashed_address = keccak256(address);
+        let retained_slot = B256::repeat_byte(0x22);
+        let deleted_slot = B256::repeat_byte(0x33);
+        let retained_value = U256::from(1);
+
+        provider
+            .tx_ref()
+            .put::<tables::HashedStorages>(
+                hashed_address,
+                StorageEntry { key: retained_slot, value: U256::from(2) },
+            )
+            .unwrap();
+        provider
+            .tx_ref()
+            .put::<tables::HashedStorages>(
+                hashed_address,
+                StorageEntry { key: deleted_slot, value: U256::from(3) },
+            )
+            .unwrap();
+
+        let mut state = ExecutionOutcome::<()>::default();
+        state.bundle.state.insert(
+            address,
+            BundleAccount::new(
+                Some(Default::default()),
+                Some(Default::default()),
+                Default::default(),
+                AccountStatus::DestroyedChanged,
+            ),
+        );
+
+        let mut hashed_state = HashedPostState::default();
+        hashed_state
+            .storages
+            .entry(hashed_address)
+            .or_default()
+            .storage
+            .insert(retained_slot, retained_value);
+
+        zero_destroyed_account_storage(
+            &DatabaseHashedCursorFactory::new(provider.tx_ref()),
+            state.bundle.state(),
+            &mut hashed_state,
+        )
+        .unwrap();
+
+        let storage = &hashed_state.storages[&hashed_address];
+        assert!(!storage.wiped);
+        assert_eq!(storage.storage[&retained_slot], retained_value);
+        assert_eq!(storage.storage[&deleted_slot], U256::ZERO);
+        assert!(state.bundle.reverts.is_empty());
     }
 
     #[test]

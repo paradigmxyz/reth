@@ -513,9 +513,7 @@ pub fn evm_state_to_hashed_post_state(update: EvmState) -> HashedPostState {
                 .map(|(slot, value)| (keccak256(B256::from(slot)), value.present_value))
                 .peekable();
 
-            if destroyed {
-                hashed_state.storages.insert(hashed_address, HashedStorage::new(true));
-            } else if changed_storage_iter.peek().is_some() {
+            if !destroyed && changed_storage_iter.peek().is_some() {
                 hashed_state
                     .storages
                     .insert(hashed_address, HashedStorage::from_iter(false, changed_storage_iter));
@@ -529,10 +527,55 @@ pub fn evm_state_to_hashed_post_state(update: EvmState) -> HashedPostState {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloy_primitives::{Address, U256};
+    use revm::state::{Account, EvmStorageSlot, TransactionId};
     use std::{
         sync::atomic::{AtomicUsize, Ordering},
         time::Duration,
     };
+
+    #[test]
+    fn created_selfdestruct_does_not_emit_storage() {
+        let address = Address::repeat_byte(0x01);
+        let mut account = Account::default();
+        account.mark_touch();
+        assert!(account.mark_created_locally());
+        assert!(account.mark_selfdestructed_locally());
+        account.info.nonce = 1;
+        account.storage.insert(
+            U256::from(1),
+            EvmStorageSlot::new_changed(U256::ZERO, U256::from(2), TransactionId::ZERO),
+        );
+
+        let hashed_state =
+            evm_state_to_hashed_post_state(EvmState::from_iter([(address, account)]));
+        let hashed_address = keccak256(address);
+
+        assert_eq!(hashed_state.accounts.get(&hashed_address), Some(&None));
+        assert!(!hashed_state.storages.contains_key(&hashed_address));
+    }
+
+    #[test]
+    fn existing_selfdestruct_does_not_emit_storage() {
+        let address = Address::repeat_byte(0x02);
+        let mut account = Account::default();
+        account.info.nonce = 1;
+        account.set_current_info_as_original();
+        account.mark_touch();
+        assert!(account.mark_selfdestructed_locally());
+        account.selfdestruct();
+        account.storage.insert(
+            U256::from(1),
+            EvmStorageSlot::new_changed(U256::ZERO, U256::from(2), TransactionId::ZERO),
+        );
+
+        let hashed_state =
+            evm_state_to_hashed_post_state(EvmState::from_iter([(address, account)]));
+        let hashed_address = keccak256(address);
+
+        assert_eq!(hashed_state.accounts.get(&hashed_address), Some(&None));
+        assert!(!hashed_state.storages.contains_key(&hashed_address));
+    }
 
     #[derive(Default)]
     struct CountingSink {
