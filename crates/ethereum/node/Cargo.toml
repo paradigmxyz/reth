@@ -34,14 +34,18 @@ reth-rpc-server-types.workspace = true
 reth-node-api.workspace = true
 reth-node-core.workspace = true
 reth-chainspec.workspace = true
-reth-revm = { workspace = true, features = ["std"] }
+reth-revm = { workspace = true, features = ["std", "witness"] }
 reth-rpc-eth-types.workspace = true
 reth-engine-local.workspace = true
 reth-engine-primitives = { workspace = true, features = ["std"] }
 reth-payload-primitives.workspace = true
+reth-storage-api.workspace = true
+reth-tasks.workspace = true
+reth-trie-common.workspace = true
 # ethereum
 alloy-consensus.workspace = true
 alloy-eips.workspace = true
+alloy-rlp.workspace = true
 alloy-primitives.workspace = true
 jsonrpsee.workspace = true
 alloy-network.workspace = true
@@ -126,4 +130,5 @@ test-utils = [
     "reth-evm-ethereum/test-utils",
     "reth-stages-types/test-utils",
     "reth-tasks/test-utils",
+    "reth-trie-common/test-utils",
 ]
