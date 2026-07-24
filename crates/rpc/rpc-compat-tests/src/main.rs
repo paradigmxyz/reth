@@ -72,6 +72,9 @@ struct RunArgs {
     /// Add an expected-failure pattern.
     #[arg(long = "xfail")]
     expected_failures: Vec<String>,
+    /// Add a failure expected only when JSON-RPC error `data` is compared.
+    #[arg(long = "xfail-when-error-data-checked")]
+    expected_failures_when_error_data_checked: Vec<String>,
     /// Enable a named profile.
     #[arg(long)]
     profile: Vec<String>,
@@ -265,6 +268,9 @@ fn resolve_run(
         skip: args.skip.clone(),
         ignore: args.ignore.clone(),
         expected_failures: args.expected_failures.clone(),
+        expected_failures_when_error_data_checked: args
+            .expected_failures_when_error_data_checked
+            .clone(),
         fail_fast: args.fail_fast,
         timeout_secs: args.timeout_secs,
         report_json: args.report_json.clone(),

@@ -39,6 +39,10 @@ JSON-RPC error objects; result objects and error codes remain strict. `speconly`
 successful results against OpenRPC schemas. The schema catalog is built in Rust directly from the
 resolved execution-apis sources when `openrpc.json` is not present.
 
+Tests that fail only under strict error-data comparison belong in
+`expected_failures_when_error_data_checked`. They are treated as ordinary tests when
+`ignore_error_data = true`, avoiding unexpected-pass results.
+
 Configuration lives in `rpc-compat.toml`. A non-empty profile or CLI include list replaces the
 previous include selection; exclusion and outcome controls are additive. Profiles can also override
 the expected response for exact test IDs with alternative `.io`/JSON files. Choices group mutually

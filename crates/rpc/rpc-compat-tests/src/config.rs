@@ -78,6 +78,9 @@ impl Config {
         resolved.skip.extend(additions.skip.iter().cloned());
         resolved.ignore.extend(additions.ignore.iter().cloned());
         resolved.expected_failures.extend(additions.expected_failures.iter().cloned());
+        resolved
+            .expected_failures_when_error_data_checked
+            .extend(additions.expected_failures_when_error_data_checked.iter().cloned());
         if additions.fail_fast {
             resolved.fail_fast = true;
         }
@@ -148,6 +151,8 @@ pub struct RunConfig {
     pub ignore: Vec<String>,
     /// Tests expected to fail. Unexpected passes fail the run.
     pub expected_failures: Vec<String>,
+    /// Tests expected to fail only when JSON-RPC error `data` is compared.
+    pub expected_failures_when_error_data_checked: Vec<String>,
     /// Profiles enabled by default.
     pub profiles: Vec<String>,
     /// Per-request timeout.
@@ -170,6 +175,7 @@ impl Default for RunConfig {
             skip: Vec::new(),
             ignore: Vec::new(),
             expected_failures: Vec::new(),
+            expected_failures_when_error_data_checked: Vec::new(),
             profiles: Vec::new(),
             timeout_secs: 5,
             fail_fast: false,
@@ -194,6 +200,8 @@ pub struct Profile {
     pub ignore: Vec<String>,
     /// Additional expected failures.
     pub expected_failures: Vec<String>,
+    /// Additional failures expected only when JSON-RPC error `data` is compared.
+    pub expected_failures_when_error_data_checked: Vec<String>,
     /// Alternative `.io` or JSON response files keyed by canonical test ID.
     pub responses: BTreeMap<String, Vec<PathBuf>>,
 }
@@ -221,6 +229,8 @@ pub struct RunAdditions {
     pub ignore: Vec<String>,
     /// Additional expected failures.
     pub expected_failures: Vec<String>,
+    /// Additional failures expected only when JSON-RPC error `data` is compared.
+    pub expected_failures_when_error_data_checked: Vec<String>,
     /// Enable fail-fast.
     pub fail_fast: bool,
     /// Override timeout.
@@ -244,6 +254,8 @@ pub struct ResolvedRunConfig {
     pub ignore: Vec<String>,
     /// Expected-failure patterns.
     pub expected_failures: Vec<String>,
+    /// Patterns expected to fail only when JSON-RPC error `data` is compared.
+    pub expected_failures_when_error_data_checked: Vec<String>,
     /// Alternative response files keyed by canonical test ID.
     pub responses: BTreeMap<String, Vec<PathBuf>>,
     /// Applied named choices.
@@ -268,6 +280,9 @@ impl ResolvedRunConfig {
             skip: run.skip.clone(),
             ignore: run.ignore.clone(),
             expected_failures: run.expected_failures.clone(),
+            expected_failures_when_error_data_checked: run
+                .expected_failures_when_error_data_checked
+                .clone(),
             responses: BTreeMap::new(),
             selections: BTreeMap::new(),
             timeout_secs: run.timeout_secs,
@@ -286,6 +301,8 @@ impl ResolvedRunConfig {
         self.skip.extend(profile.skip.iter().cloned());
         self.ignore.extend(profile.ignore.iter().cloned());
         self.expected_failures.extend(profile.expected_failures.iter().cloned());
+        self.expected_failures_when_error_data_checked
+            .extend(profile.expected_failures_when_error_data_checked.iter().cloned());
         for (test, paths) in &profile.responses {
             self.responses
                 .entry(test.clone())
@@ -312,7 +329,9 @@ impl ResolvedRunConfig {
 
     /// Returns true when a test is expected to fail.
     pub fn expected_failure(&self, id: &str) -> bool {
-        matches_any(&self.expected_failures, id)
+        matches_any(&self.expected_failures, id) ||
+            !self.ignore_error_data &&
+                matches_any(&self.expected_failures_when_error_data_checked, id)
     }
 
     /// Validates that exact policy entries refer to discovered tests.
@@ -322,6 +341,10 @@ impl ResolvedRunConfig {
             ("skip", &self.skip),
             ("ignore", &self.ignore),
             ("expected failure", &self.expected_failures),
+            (
+                "error-data-dependent expected failure",
+                &self.expected_failures_when_error_data_checked,
+            ),
         ] {
             for pattern in patterns {
                 if !contains_wildcard(pattern) && !ids.contains(pattern.as_str()) {
@@ -373,11 +396,23 @@ mod tests {
     }
 
     #[test]
-    fn resolves_error_data_matching_policy() {
-        let config: Config = toml::from_str("[run]\nignore_error_data = true").unwrap();
-        let resolved = config
+    fn resolves_error_data_dependent_expected_failures() {
+        let strict: Config = toml::from_str(
+            "[run]\nexpected_failures_when_error_data_checked = [\"eth_test/case\"]",
+        )
+        .unwrap();
+        let strict = strict
             .resolve_run(Path::new("."), &[], &BTreeMap::new(), &RunAdditions::default())
             .unwrap();
-        assert!(resolved.ignore_error_data);
+        assert!(strict.expected_failure("eth_test/case"));
+
+        let ignored: Config = toml::from_str(
+            "[run]\nignore_error_data = true\nexpected_failures_when_error_data_checked = [\"eth_test/case\"]",
+        )
+        .unwrap();
+        let ignored = ignored
+            .resolve_run(Path::new("."), &[], &BTreeMap::new(), &RunAdditions::default())
+            .unwrap();
+        assert!(!ignored.expected_failure("eth_test/case"));
     }
 }
