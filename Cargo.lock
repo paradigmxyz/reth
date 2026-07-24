@@ -3833,6 +3833,17 @@ dependencies = [
 [[package]]
 name = "example-custom-beacon-withdrawals"
 version = "0.0.0"
+dependencies = [
+ "alloy-consensus",
+ "alloy-eips",
+ "alloy-primitives",
+ "alloy-sol-types",
+ "evm2",
+ "eyre",
+ "reth-ethereum",
+ "reth-execution-types",
+ "reth-trie-common",
+]
 
 [[package]]
 name = "example-custom-dev-node"

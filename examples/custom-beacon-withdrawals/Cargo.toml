@@ -6,8 +6,14 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
-# This example is parked in `src/main.rs`. Uncomment these dependencies when resuming its port.
-# reth-ethereum = { workspace = true, features = ["node", "node-api", "evm", "cli"] }
-# alloy-sol-types.workspace = true
-# alloy-eips.workspace = true
-# eyre.workspace = true
+reth-ethereum = { workspace = true, features = ["node", "node-api", "evm", "cli"] }
+
+alloy-consensus.workspace = true
+alloy-primitives.workspace = true
+alloy-sol-types.workspace = true
+alloy-eips.workspace = true
+evm2.workspace = true
+
+eyre.workspace = true
+reth-execution-types.workspace = true
+reth-trie-common.workspace = true
