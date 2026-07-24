@@ -39,6 +39,7 @@ use reth_node_core::args::JitArgs;
 use reth_payload_primitives::PayloadTypes;
 use reth_provider::{providers::ProviderFactoryBuilder, EthStorage};
 use reth_rpc::{
+    debug_set_head_rpc_module,
     eth::core::{EthApiFor, EthRpcConverterFor},
     TestingApi, ValidationApi,
 };
@@ -344,6 +345,7 @@ where
         let testing_skip_invalid_transactions = ctx.config.rpc.testing_skip_invalid_transactions;
         let testing_gas_limit_override = ctx.config.rpc.testing_gas_limit;
         let testing_desired_gas_limit = ctx.config.builder.gas_limit_for(ctx.config.chain.chain());
+        let debug_engine_handle = ctx.beacon_engine_handle.clone();
         let testing_engine_handle = ctx.beacon_engine_handle.clone();
 
         self.inner
@@ -356,6 +358,11 @@ where
                 container
                     .modules
                     .merge_if_module_configured(RethRpcModule::Eth, eth_config.into_rpc())?;
+
+                container.modules.add_or_replace_if_module_configured(
+                    RethRpcModule::Debug,
+                    debug_set_head_rpc_module(debug_engine_handle.clone()),
+                )?;
 
                 // testing_buildBlockV1: only wire when the hidden testing module is explicitly
                 // requested on any transport. Default stays disabled to honor security guidance.

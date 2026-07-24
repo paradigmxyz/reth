@@ -19,9 +19,13 @@ use alloy_rpc_types_engine::{
     ExecutionData, ExecutionPayloadSidecar, ExecutionPayloadV1, ForkchoiceState,
 };
 use assert_matches::assert_matches;
-use reth_chain_state::{test_utils::TestBlockBuilder, BlockState, StateTrieOverlayManager};
+use reth_chain_state::{
+    test_utils::TestBlockBuilder, BlockState, CanonStateNotification, StateTrieOverlayManager,
+};
 use reth_chainspec::{ChainSpec, HOLESKY, MAINNET};
-use reth_engine_primitives::{EngineApiValidator, ForkchoiceStatus, NoopInvalidBlockHook};
+use reth_engine_primitives::{
+    DebugSetHeadError, EngineApiValidator, ForkchoiceStatus, NoopInvalidBlockHook,
+};
 use reth_ethereum_consensus::EthBeaconConsensus;
 use reth_ethereum_engine_primitives::{EthEngineTypes, EthPayloadAttributes};
 use reth_ethereum_primitives::{Block, EthPrimitives};
@@ -352,6 +356,17 @@ impl TestHarness {
             ForkchoiceStatus::Syncing => assert!(response.payload_status.is_syncing()),
             ForkchoiceStatus::Invalid => assert!(response.payload_status.is_invalid()),
         }
+    }
+
+    async fn debug_set_head(&mut self, block_number: u64) -> Result<(), DebugSetHeadError> {
+        let (tx, rx) = oneshot::channel();
+        let _ = self
+            .tree
+            .on_engine_message(FromEngine::Request(
+                BeaconEngineMessage::DebugSetHead { block_number, tx }.into(),
+            ))
+            .unwrap();
+        rx.await.unwrap()
     }
 
     async fn check_fcu(&mut self, block_hash: B256, fcu_status: impl Into<ForkchoiceStatus>) {
@@ -1381,6 +1396,116 @@ async fn test_fcu_with_canonical_ancestor_updates_latest_block() {
         test_harness.tree.canonical_in_memory_state.get_canonical_head().hash(),
         ancestor_block.hash(),
         "In-memory state: Latest block hash should be updated to canonical ancestor"
+    );
+}
+
+#[tokio::test]
+async fn test_debug_set_head_rewinds_to_finalized_block() {
+    let chain_spec = MAINNET.clone();
+    let mut test_harness = TestHarness::new(chain_spec.clone());
+    let mut test_block_builder = TestBlockBuilder::eth().with_chain_spec((*chain_spec).clone());
+    let blocks: Vec<_> = test_block_builder.get_executed_blocks(1..5).collect();
+    test_harness = test_harness.with_blocks(blocks.clone());
+
+    let target = blocks[1].recovered_block().clone_sealed_header();
+    let safe = blocks[2].recovered_block().clone_sealed_header();
+    test_harness.tree.canonical_in_memory_state.set_finalized(target.clone());
+    test_harness.tree.canonical_in_memory_state.set_safe(safe);
+    let mut notifications = test_harness.tree.canonical_in_memory_state.subscribe_canon_state();
+
+    test_harness.debug_set_head(target.number).await.unwrap();
+
+    assert_eq!(test_harness.tree.state.tree_state.current_canonical_head, target.num_hash());
+    assert_eq!(test_harness.tree.canonical_in_memory_state.get_canonical_head(), target);
+    assert_eq!(
+        test_harness.tree.canonical_in_memory_state.get_finalized_num_hash(),
+        Some(target.num_hash())
+    );
+    assert_eq!(
+        test_harness.tree.canonical_in_memory_state.get_safe_num_hash(),
+        Some(target.num_hash())
+    );
+
+    let CanonStateNotification::Reorg { old, new } = notifications.try_recv().unwrap() else {
+        panic!("debug_setHead should emit a canonical reorg notification")
+    };
+    assert!(new.is_empty(), "debug_setHead should emit a pure revert");
+    assert_eq!(
+        old.blocks().keys().copied().collect::<Vec<_>>(),
+        (target.number + 1..=blocks.last().unwrap().recovered_block().number()).collect::<Vec<_>>()
+    );
+}
+
+#[tokio::test]
+async fn test_debug_set_head_rejects_block_below_finalized() {
+    let chain_spec = MAINNET.clone();
+    let mut test_harness = TestHarness::new(chain_spec.clone());
+    let mut test_block_builder = TestBlockBuilder::eth().with_chain_spec((*chain_spec).clone());
+    let blocks: Vec<_> = test_block_builder.get_executed_blocks(1..5).collect();
+    test_harness = test_harness.with_blocks(blocks.clone());
+
+    let requested = blocks[0].recovered_block();
+    let finalized = blocks[1].recovered_block().clone_sealed_header();
+    let safe = blocks[2].recovered_block().clone_sealed_header();
+    let current = blocks[3].recovered_block().clone_sealed_header();
+    test_harness.tree.canonical_in_memory_state.set_finalized(finalized.clone());
+    test_harness.tree.canonical_in_memory_state.set_safe(safe.clone());
+
+    let err = test_harness.debug_set_head(requested.number).await.unwrap_err();
+    assert_matches!(
+        err,
+        DebugSetHeadError::Finalized { target, finalized: finalized_number }
+            if target == requested.number && finalized_number == finalized.number
+    );
+    assert_eq!(test_harness.tree.state.tree_state.current_canonical_head, current.num_hash());
+    assert_eq!(test_harness.tree.canonical_in_memory_state.get_canonical_head(), current);
+    assert_eq!(
+        test_harness.tree.canonical_in_memory_state.get_finalized_num_hash(),
+        Some(finalized.num_hash())
+    );
+    assert_eq!(
+        test_harness.tree.canonical_in_memory_state.get_safe_num_hash(),
+        Some(safe.num_hash())
+    );
+}
+
+#[tokio::test]
+async fn test_debug_set_head_keeps_heads_on_persistence_enqueue_failure() {
+    let chain_spec = MAINNET.clone();
+    let mut test_block_builder = TestBlockBuilder::eth().with_chain_spec((*chain_spec).clone());
+    let blocks: Vec<_> = test_block_builder.get_executed_blocks(1..5).collect();
+    let mut test_harness = TestHarness::new(chain_spec).with_blocks(blocks.clone());
+    let current = blocks.last().unwrap().recovered_block().clone_sealed_header();
+    let requested = blocks[1].recovered_block().number();
+    test_harness.tree.persistence_state.last_persisted_block = current.num_hash();
+
+    let (_replacement_tx, replacement_rx) = std::sync::mpsc::channel();
+    let action_rx = std::mem::replace(&mut test_harness.action_rx, replacement_rx);
+    drop(action_rx);
+
+    let err = test_harness.debug_set_head(requested).await.unwrap_err();
+
+    assert_matches!(err, DebugSetHeadError::Internal(_));
+    assert_eq!(test_harness.tree.state.tree_state.current_canonical_head, current.num_hash());
+    assert_eq!(test_harness.tree.canonical_in_memory_state.get_canonical_head(), current);
+}
+
+#[tokio::test]
+async fn test_debug_set_head_rejects_block_above_current_head() {
+    let chain_spec = MAINNET.clone();
+    let mut test_block_builder = TestBlockBuilder::eth().with_chain_spec((*chain_spec).clone());
+    let blocks: Vec<_> = test_block_builder.get_executed_blocks(1..4).collect();
+    let mut test_harness = TestHarness::new(chain_spec).with_blocks(blocks.clone());
+    let current = blocks[1].recovered_block().num_hash();
+    let requested = blocks[2].recovered_block().number();
+    test_harness.tree.state.tree_state.set_canonical_head(current);
+
+    let err = test_harness.debug_set_head(requested).await.unwrap_err();
+
+    assert_matches!(
+        err,
+        DebugSetHeadError::AboveHead { target, current: current_number }
+            if target == requested && current_number == current.number
     );
 }
 

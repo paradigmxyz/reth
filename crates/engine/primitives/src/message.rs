@@ -1,5 +1,6 @@
 use crate::{
-    error::BeaconForkChoiceUpdateError, BeaconOnNewPayloadError, ExecutionPayload, ForkchoiceStatus,
+    error::BeaconForkChoiceUpdateError, BeaconOnNewPayloadError, DebugSetHeadError,
+    ExecutionPayload, ForkchoiceStatus,
 };
 use alloy_eips::eip4895::Withdrawal;
 use alloy_primitives::{Bytes, B256};
@@ -271,6 +272,13 @@ pub enum BeaconEngineMessage<Payload: PayloadTypes> {
         /// The sender for returning forkchoice updated result.
         tx: oneshot::Sender<RethResult<OnForkChoiceUpdated>>,
     },
+    /// Message to set the local canonical head for the debug API.
+    DebugSetHead {
+        /// The canonical block number to set as the local head.
+        block_number: u64,
+        /// The sender for returning the update result.
+        tx: oneshot::Sender<Result<(), DebugSetHeadError>>,
+    },
 }
 
 impl<Payload: PayloadTypes> Display for BeaconEngineMessage<Payload> {
@@ -302,6 +310,9 @@ impl<Payload: PayloadTypes> Display for BeaconEngineMessage<Payload> {
                     "ForkchoiceUpdated {{ state: {state:?}, has_payload_attributes: {} }}",
                     payload_attrs.is_some()
                 )
+            }
+            Self::DebugSetHead { block_number, .. } => {
+                write!(f, "DebugSetHead {{ block_number: {block_number} }}")
             }
         }
     }
@@ -376,6 +387,15 @@ where
             .await?
             .map_err(BeaconForkChoiceUpdateError::internal)?
             .await?)
+    }
+
+    /// Sets the local canonical head to the requested canonical block number.
+    pub async fn debug_set_head(&self, block_number: u64) -> Result<(), DebugSetHeadError> {
+        let (tx, rx) = oneshot::channel();
+        self.to_engine
+            .send(BeaconEngineMessage::DebugSetHead { block_number, tx })
+            .map_err(|_| DebugSetHeadError::EngineUnavailable)?;
+        rx.await.map_err(|_| DebugSetHeadError::EngineUnavailable)?
     }
 
     /// Sends a forkchoice update message to the beacon consensus engine and returns the receiver to

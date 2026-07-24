@@ -221,6 +221,11 @@ where
 
         // extract the state from the notification and put it into the cache
         let committed = new_state.committed();
+        if committed.is_empty() {
+            self.pre_cached = None;
+            self.pre_cached_parent_block_info = None;
+            return
+        }
         let new_execution_outcome = committed.execution_outcome();
         for (addr, acc) in new_execution_outcome.bundle_accounts_iter() {
             if let Some(info) = acc.info.clone() {

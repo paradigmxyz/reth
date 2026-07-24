@@ -65,8 +65,26 @@ impl<P: NodePrimitives> From<CanonStateNotification<P>> for ExExNotification<P> 
     fn from(notification: CanonStateNotification<P>) -> Self {
         match notification {
             CanonStateNotification::Commit { new } => Self::ChainCommitted { new },
+            CanonStateNotification::Reorg { old, new } if new.is_empty() => {
+                Self::ChainReverted { old }
+            }
             CanonStateNotification::Reorg { old, new } => Self::ChainReorged { old, new },
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use reth_ethereum_primitives::EthPrimitives;
+
+    #[test]
+    fn converts_empty_reorg_to_revert() {
+        let old = Arc::new(Chain::<EthPrimitives>::default());
+        let notification =
+            CanonStateNotification::Reorg { old: old.clone(), new: Arc::new(Chain::default()) };
+
+        assert_eq!(ExExNotification::from(notification), ExExNotification::ChainReverted { old });
     }
 }
 

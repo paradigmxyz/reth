@@ -1,11 +1,12 @@
 //! E2E tests for the testing RPC namespace.
 
-use alloy_primitives::{Address, Bytes, B256};
+use alloy_primitives::{Address, Bytes, B256, U64};
 use alloy_rpc_types_engine::ExecutionPayloadEnvelopeV4;
 use alloy_rpc_types_eth::BlockNumberOrTag;
 use jsonrpsee_core::client::ClientT;
 use reth_chainspec::{ChainSpecBuilder, MAINNET};
 use reth_db::test_utils::create_test_rw_db;
+use reth_engine_primitives::DEFAULT_PERSISTENCE_THRESHOLD;
 use reth_ethereum_engine_primitives::EthPayloadAttributes;
 use reth_node_builder::{NodeBuilder, NodeConfig};
 use reth_node_core::{
@@ -13,6 +14,9 @@ use reth_node_core::{
     dirs::{DataDirPath, MaybePlatformPath},
 };
 use reth_node_ethereum::{node::EthereumAddOns, EthereumNode};
+use reth_provider::{
+    CanonChainTracker, ChainStateBlockReader, DatabaseProviderFactory, HeaderProvider,
+};
 use reth_rpc_api::TestingBuildBlockRequestV1;
 use reth_rpc_server_types::{RethRpcModule, RpcModuleSelection};
 use reth_tasks::Runtime;
@@ -93,11 +97,14 @@ async fn testing_rpc_build_block_works() -> eyre::Result<()> {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn testing_rpc_commit_block_works() -> eyre::Result<()> {
+async fn debug_set_head_allows_committing_new_blocks() -> eyre::Result<()> {
     let runtime = Runtime::test();
     let mut rpc_args = reth_node_core::args::RpcServerArgs::default().with_http();
-    rpc_args.http_api =
-        Some(RpcModuleSelection::from_iter([RethRpcModule::Eth, RethRpcModule::Testing]));
+    rpc_args.http_api = Some(RpcModuleSelection::from_iter([
+        RethRpcModule::Debug,
+        RethRpcModule::Eth,
+        RethRpcModule::Testing,
+    ]));
     let tempdir = tempdir().expect("temp datadir");
     let datadir_args = DatadirArgs {
         datadir: MaybePlatformPath::<DataDirPath>::from_str(tempdir.path().to_str().unwrap())
@@ -132,6 +139,7 @@ async fn testing_rpc_commit_block_works() -> eyre::Result<()> {
             let Some(client) = handles.rpc.http_client() else { return Ok(()) };
 
             let chain = ctx.config().chain.clone();
+            let provider = ctx.provider().clone();
             let timestamp = chain.genesis().timestamp + 1;
             let payload_attributes = EthPayloadAttributes {
                 timestamp,
@@ -169,31 +177,112 @@ async fn testing_rpc_commit_block_works() -> eyre::Result<()> {
                         .expect("block transactions")
                         .is_empty());
 
-                    let mut next_payload_attributes = payload_attributes.clone();
-                    next_payload_attributes.timestamp += 12;
-                    next_payload_attributes.slot_number = Some(next_payload_attributes.timestamp);
-                    let next_block_hash: B256 = client
+                    // Cross the default persistence threshold so the reset exercises both the
+                    // in-memory and on-disk canonical chain.
+                    let mut discarded_tip_hash = block_hash;
+                    for block_number in 2..=DEFAULT_PERSISTENCE_THRESHOLD + 1 {
+                        let mut next_payload_attributes = payload_attributes.clone();
+                        next_payload_attributes.timestamp += (block_number - 1) * 12;
+                        next_payload_attributes.slot_number =
+                            Some(next_payload_attributes.timestamp);
+                        discarded_tip_hash = client
+                            .request(
+                                "testing_commitBlockV1",
+                                (
+                                    next_payload_attributes,
+                                    Option::<Vec<Bytes>>::None,
+                                    Option::<Bytes>::None,
+                                ),
+                            )
+                            .await?;
+                    }
+
+                    let discarded_latest: Value = client
+                        .request("eth_getBlockByNumber", (BlockNumberOrTag::Latest, false))
+                        .await?;
+                    let discarded_tip_hash = discarded_tip_hash.to_string();
+                    let block_hash = block_hash.to_string();
+                    assert_eq!(
+                        discarded_latest.get("hash").and_then(Value::as_str),
+                        Some(discarded_tip_hash.as_str())
+                    );
+                    let discarded_tip = provider
+                        .sealed_header(DEFAULT_PERSISTENCE_THRESHOLD + 1)?
+                        .expect("discarded tip should be available");
+                    provider.set_safe(discarded_tip);
+
+                    let finalized = provider
+                        .sealed_header(1)?
+                        .expect("committed block should be available as finalized boundary");
+                    provider.set_finalized(finalized);
+
+                    let err = client
+                        .request::<(), _>("debug_setHead", (U64::from(0),))
+                        .await
+                        .expect_err("cannot rewind below finalized block");
+                    assert!(err.to_string().contains("below finalized block 1"));
+                    let unchanged_latest: Value = client
+                        .request("eth_getBlockByNumber", (BlockNumberOrTag::Latest, false))
+                        .await?;
+                    assert_eq!(
+                        unchanged_latest.get("hash").and_then(Value::as_str),
+                        Some(discarded_tip_hash.as_str())
+                    );
+
+                    let _: () = client.request("debug_setHead", (U64::from(1),)).await?;
+                    let rewound_latest: Value = client
+                        .request("eth_getBlockByNumber", (BlockNumberOrTag::Latest, false))
+                        .await?;
+                    assert_eq!(
+                        rewound_latest.get("hash").and_then(Value::as_str),
+                        Some(block_hash.as_str())
+                    );
+                    let discarded_block: Value = client
+                        .request("eth_getBlockByNumber", (BlockNumberOrTag::Number(2), false))
+                        .await?;
+                    assert!(
+                        discarded_block.is_null(),
+                        "persisted blocks above the reset head must be removed before returning"
+                    );
+                    assert_eq!(provider.database_provider_ro()?.last_safe_block_number()?, Some(1));
+
+                    // The next committed block must extend the rewound head, not the discarded tip.
+                    let mut replacement_payload_attributes = payload_attributes;
+                    replacement_payload_attributes.timestamp +=
+                        (DEFAULT_PERSISTENCE_THRESHOLD + 2) * 12;
+                    replacement_payload_attributes.slot_number =
+                        Some(replacement_payload_attributes.timestamp);
+                    let replacement_extra_data = Bytes::from_static(b"reth-after-reset");
+                    let replacement_block_hash: B256 = client
                         .request(
                             "testing_commitBlockV1",
                             (
-                                next_payload_attributes,
+                                replacement_payload_attributes,
                                 Option::<Vec<Bytes>>::None,
-                                Option::<Bytes>::None,
+                                Some(replacement_extra_data.clone()),
                             ),
                         )
                         .await?;
-                    let next_latest: Value = client
+                    let replacement_latest: Value = client
                         .request("eth_getBlockByNumber", (BlockNumberOrTag::Latest, false))
                         .await?;
-                    let next_block_hash = next_block_hash.to_string();
-                    let block_hash = block_hash.to_string();
+                    let replacement_block_hash = replacement_block_hash.to_string();
+                    assert_ne!(replacement_block_hash, discarded_tip_hash);
                     assert_eq!(
-                        next_latest.get("hash").and_then(Value::as_str),
-                        Some(next_block_hash.as_str())
+                        replacement_latest.get("hash").and_then(Value::as_str),
+                        Some(replacement_block_hash.as_str())
                     );
                     assert_eq!(
-                        next_latest.get("parentHash").and_then(Value::as_str),
+                        replacement_latest.get("parentHash").and_then(Value::as_str),
                         Some(block_hash.as_str())
+                    );
+                    assert_eq!(
+                        replacement_latest.get("number").and_then(Value::as_str),
+                        Some("0x2")
+                    );
+                    assert_eq!(
+                        replacement_latest.get("extraData"),
+                        Some(&serde_json::to_value(replacement_extra_data)?)
                     );
                     Ok(())
                 }
