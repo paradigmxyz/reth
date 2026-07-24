@@ -18,7 +18,7 @@ use reth_trie_common::{
     DecodedMultiProofV2, ExecutionWitnessMode, HashedPostState, MultiProofTargetsV2, ProofV2Target,
     TrieNodeV2,
 };
-use reth_trie_sparse::{LeafUpdate, SparseStateTrie, SparseTrie as _};
+use reth_trie_sparse::{LeafUpdate, SparseStateTrie, SparseTrie as _, TrieNodeEpoch};
 
 /// State transition witness for the trie.
 #[derive(Debug)]
@@ -251,7 +251,7 @@ where
 
             let storage_root =
                 if let Some(storage_trie) = sparse_trie.storage_trie_mut(&hashed_address) {
-                    storage_trie.root(0)
+                    storage_trie.root(TrieNodeEpoch::UNMODIFIED)
                 } else {
                     let record_root_node = !self.mode.is_canonical() ||
                         state

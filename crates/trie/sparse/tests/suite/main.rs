@@ -22,7 +22,7 @@ use alloy_rlp::{encode_fixed_size, Decodable};
 use alloy_trie::EMPTY_ROOT_HASH;
 use reth_trie::test_utils::TrieTestHarness;
 use reth_trie_common::{Nibbles, ProofV2Target, TrieNodeV2};
-use reth_trie_sparse::{LeafLookup, LeafLookupError, LeafUpdate, SparseTrie};
+use reth_trie_sparse::{LeafLookup, LeafLookupError, LeafUpdate, SparseTrie, TrieNodeEpoch};
 use std::{collections::BTreeMap, iter::once};
 
 mod find_leaf;
@@ -35,6 +35,10 @@ mod set_root;
 mod take_updates;
 mod update_leaves;
 mod wipe_clear;
+
+const fn epoch(value: u64) -> TrieNodeEpoch {
+    TrieNodeEpoch::new(value)
+}
 
 // ---------------------------------------------------------------------------
 // Test harness

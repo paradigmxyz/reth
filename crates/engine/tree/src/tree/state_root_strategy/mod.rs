@@ -81,7 +81,9 @@ pub use reth_trie_parallel::{
 };
 #[cfg(feature = "trie-debug")]
 use reth_trie_sparse::debug_recorder::TrieDebugRecorder;
-use reth_trie_sparse::{ArenaParallelSparseTrie, RevealableSparseTrie, SparseStateTrie};
+use reth_trie_sparse::{
+    ArenaParallelSparseTrie, RevealableSparseTrie, SparseStateTrie, TrieNodeEpoch,
+};
 use std::{
     fmt,
     sync::{
@@ -598,9 +600,9 @@ impl DefaultStateRootStrategy {
 
             let parent_hash = parent_header.hash();
             let parent_state_root = parent_header.state_root();
-            let epoch = parent_header.number().saturating_add(1);
+            let new_epoch = TrieNodeEpoch::new(parent_header.number().saturating_add(1));
             let prune_before =
-                sparse_trie_prune_before(pending_sparse_trie_prune_blocks.as_deref(), epoch);
+                sparse_trie_prune_before(pending_sparse_trie_prune_blocks.as_deref(), new_epoch);
 
             let _enter = debug_span!(
                 target: "engine::tree::payload_processor",
@@ -658,7 +660,7 @@ impl DefaultStateRootStrategy {
                 trie_metrics.clone(),
                 sparse_state_trie,
                 parent_state_root,
-                epoch,
+                new_epoch,
                 chunk_size,
             );
 
@@ -759,12 +761,15 @@ struct StateRootTaskOptions<'a, N: NodePrimitives> {
 
 fn sparse_trie_prune_before<N: NodePrimitives>(
     pending_sparse_trie_prune_blocks: Option<&[ExecutedBlock<N>]>,
-    epoch: u64,
-) -> Option<u64> {
+    new_epoch: TrieNodeEpoch,
+) -> Option<TrieNodeEpoch> {
     // The parent chain is ordered newest to oldest. An empty chain means the block being
     // calculated is the only in-memory block whose trie nodes need to be retained.
-    pending_sparse_trie_prune_blocks
-        .map(|blocks| blocks.last().map_or(epoch, |block| block.recovered_block().number()))
+    match pending_sparse_trie_prune_blocks {
+        None => None,
+        Some([]) => Some(new_epoch),
+        Some([.., oldest]) => Some(TrieNodeEpoch::new(oldest.recovered_block().number())),
+    }
 }
 
 fn published_sparse_trie_anchor_hash<N: NodePrimitives>(
@@ -1321,13 +1326,17 @@ mod tests {
 
     #[test]
     fn sparse_trie_prune_before_uses_requested_range() {
-        assert_eq!(sparse_trie_prune_before::<EthPrimitives>(None, 10), None);
-        assert_eq!(sparse_trie_prune_before::<EthPrimitives>(Some(&[]), 10), Some(10));
+        let new_epoch = TrieNodeEpoch::new(10);
+        assert_eq!(sparse_trie_prune_before::<EthPrimitives>(None, new_epoch), None);
+        assert_eq!(
+            sparse_trie_prune_before::<EthPrimitives>(Some(&[]), new_epoch),
+            Some(new_epoch)
+        );
 
         let mut blocks: Vec<_> = TestBlockBuilder::eth().get_executed_blocks(7..10).collect();
         blocks.reverse();
 
-        assert_eq!(sparse_trie_prune_before(Some(&blocks), 10), Some(7));
+        assert_eq!(sparse_trie_prune_before(Some(&blocks), new_epoch), Some(TrieNodeEpoch::new(7)));
     }
 
     #[test]

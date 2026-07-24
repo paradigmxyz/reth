@@ -20,12 +20,12 @@ pub(super) fn test_reveal_nodes_empty_slice<T: SparseTrie>(new_trie: fn() -> T) 
     let mut trie = (new_trie)();
     trie.set_root(root_node.node, root_node.masks, true).expect("set_root should succeed");
 
-    let root_before = trie.root(0);
+    let root_before = trie.root(epoch(0));
 
     // Call reveal_nodes with an empty slice — should be a no-op.
     trie.reveal_nodes(&mut []).expect("reveal_nodes with empty slice should succeed");
 
-    let root_after = trie.root(0);
+    let root_after = trie.root(epoch(0));
     assert_eq!(root_before, root_after, "root should be unchanged after empty reveal_nodes");
 }
 
@@ -47,7 +47,7 @@ pub(super) fn test_reveal_nodes_single_leaf<T: SparseTrie>(new_trie: fn() -> T) 
 
     // Set root and reveal only one leaf's proof.
     let mut trie: T = harness.init_trie_with_targets(&[key_a], true, new_trie);
-    let root = trie.root(0);
+    let root = trie.root(epoch(0));
     assert_eq!(root, harness.original_root());
 }
 
@@ -69,7 +69,7 @@ pub(super) fn test_reveal_nodes_idempotent<T: SparseTrie>(new_trie: fn() -> T) {
 
     // First reveal: set root and reveal all proof nodes.
     let mut trie: T = harness.init_trie_fully_revealed(true, new_trie);
-    let root_first = trie.root(0);
+    let root_first = trie.root(epoch(0));
     assert_eq!(root_first, harness.original_root());
 
     // Second reveal: reveal the same proof nodes again.
@@ -78,7 +78,7 @@ pub(super) fn test_reveal_nodes_idempotent<T: SparseTrie>(new_trie: fn() -> T) {
     let (mut proof_nodes, _) = harness.proof_v2(&mut targets);
     trie.reveal_nodes(&mut proof_nodes).expect("second reveal_nodes should succeed");
 
-    let root_second = trie.root(0);
+    let root_second = trie.root(epoch(0));
     assert_eq!(root_first, root_second, "root should be unchanged after double reveal");
 }
 
@@ -104,7 +104,7 @@ pub(super) fn test_reveal_nodes_with_branch_masks<T: SparseTrie>(new_trie: fn() 
     let mut trie: T = harness.init_trie_fully_revealed(true, new_trie);
 
     // Compute root to cache initial branch hashes.
-    let _ = trie.root(0);
+    let _ = trie.root(epoch(0));
 
     // Add a new leaf under the same prefix so non-root branch nodes change.
     let mut new_key = B256::ZERO;
@@ -114,7 +114,7 @@ pub(super) fn test_reveal_nodes_with_branch_masks<T: SparseTrie>(new_trie: fn() 
     let mut leaf_updates = SuiteTestHarness::leaf_updates(&changeset);
     harness.reveal_and_update(&mut trie, &mut leaf_updates);
 
-    let _ = trie.root(0);
+    let _ = trie.root(epoch(0));
 
     // Updates should reflect which branch nodes were updated vs removed,
     // guided by the masks stored during reveal_nodes.
@@ -152,7 +152,7 @@ pub(super) fn test_reveal_nodes_skips_on_empty_root<T: SparseTrie>(new_trie: fn(
 
     // Trie should still be empty.
     assert_eq!(
-        trie.root(0),
+        trie.root(epoch(0)),
         EMPTY_ROOT_HASH,
         "root should remain EMPTY_ROOT_HASH after reveal on empty root"
     );
@@ -204,7 +204,7 @@ pub(super) fn test_reveal_nodes_filters_unreachable_boundary_leaves<T: SparseTri
     trie.reveal_nodes(&mut proof_a).expect("reveal group A should succeed");
 
     // Verify root is correct with partial reveal.
-    let root_after_a = trie.root(0);
+    let root_after_a = trie.root(epoch(0));
     assert_eq!(root_after_a, harness.original_root(), "root after group A reveal should match");
 
     // Now generate proofs for group B keys and reveal them as extra nodes.
@@ -215,7 +215,7 @@ pub(super) fn test_reveal_nodes_filters_unreachable_boundary_leaves<T: SparseTri
     trie.reveal_nodes(&mut proof_b).expect("reveal extra group B nodes should succeed");
 
     // Root must still be correct — extra reveals should not corrupt state.
-    let root_after_b = trie.root(0);
+    let root_after_b = trie.root(epoch(0));
     assert_eq!(
         root_after_b,
         harness.original_root(),
@@ -228,7 +228,7 @@ pub(super) fn test_reveal_nodes_filters_unreachable_boundary_leaves<T: SparseTri
     let (mut proof_all, _) = harness.proof_v2(&mut targets_all);
     trie.reveal_nodes(&mut proof_all).expect("reveal all nodes should succeed");
 
-    let root_after_all = trie.root(0);
+    let root_after_all = trie.root(epoch(0));
     assert_eq!(
         root_after_all,
         harness.original_root(),
@@ -267,7 +267,7 @@ pub(super) fn test_reveal_insert_reveal_preserves_branch_state<T: SparseTrie>(ne
     trie.reveal_nodes(&mut proof_nodes).expect("reveal stale proof for key_c should succeed");
 
     // Root must match a reference trie with all 3 keys.
-    let root = trie.root(0);
+    let root = trie.root(epoch(0));
     let expected_storage =
         BTreeMap::from([(key_a, U256::from(1)), (key_b, insert_value), (key_c, U256::from(3))]);
     let expected_harness = SuiteTestHarness::new(expected_storage);
@@ -322,7 +322,7 @@ pub(super) fn test_remove_then_reveal_does_not_overwrite_collapsed_node<T: Spars
     trie.reveal_nodes(&mut stale_proof).expect("revealing stale proof should succeed");
 
     // Root must match a reference trie with only key_b and key_c.
-    let root = trie.root(0);
+    let root = trie.root(epoch(0));
     let expected_storage = BTreeMap::from([(key_b, U256::from(2)), (key_c, U256::from(3))]);
     let expected_harness = SuiteTestHarness::new(expected_storage);
     assert_eq!(
@@ -377,7 +377,7 @@ pub(super) fn test_insert_then_reveal_does_not_overwrite_branch<T: SparseTrie>(
     trie.reveal_nodes(&mut stale_proof).expect("revealing stale proof should succeed");
 
     // Root must match a reference trie with all 3 keys.
-    let root = trie.root(0);
+    let root = trie.root(epoch(0));
     let expected_storage =
         BTreeMap::from([(key_a, U256::from(1)), (key_b, U256::from(2)), (key_c, insert_value)]);
     let expected_harness = SuiteTestHarness::new(expected_storage);

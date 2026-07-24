@@ -16,6 +16,33 @@ use reth_trie_common::{
 #[cfg(feature = "trie-debug")]
 use crate::debug_recorder::TrieDebugRecorder;
 
+/// Modification epoch assigned to cached sparse trie nodes.
+///
+/// Epochs must increase monotonically. Nodes materialized from the parent state without being
+/// modified use [`Self::UNMODIFIED`].
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub struct TrieNodeEpoch(u64);
+
+impl TrieNodeEpoch {
+    /// Epoch assigned to nodes materialized from the parent state without being modified.
+    pub const UNMODIFIED: Self = Self(0);
+
+    /// Creates a new node modification epoch.
+    pub const fn new(epoch: u64) -> Self {
+        Self(epoch)
+    }
+
+    /// Returns the inner epoch.
+    pub const fn get(self) -> u64 {
+        self.0
+    }
+
+    /// Returns whether a node with this epoch should be pruned at the provided cutoff.
+    pub const fn should_prune(self, prune_before: Self) -> bool {
+        self.0 < prune_before.0
+    }
+}
+
 /// Describes an update to a leaf in the sparse trie.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum LeafUpdate {
@@ -101,28 +128,25 @@ pub trait SparseTrie: Sized + Debug + Send + Sync {
     /// Calculates and returns the root hash of the trie at the provided epoch.
     ///
     /// This processes dirty nodes by updating their RLP encodings and caching their newest
-    /// modification at `epoch`, then returns the root hash. Nodes materialized from the parent
-    /// state without being modified use epoch zero.
+    /// modification at `new_epoch`, then returns the root hash.
     ///
     /// # Returns
     ///
     /// The root hash of the trie.
-    fn root(&mut self, epoch: u64) -> B256;
+    fn root(&mut self, new_epoch: TrieNodeEpoch) -> B256;
 
     /// Returns true if the root node is cached and does not need any recomputation.
     fn is_root_cached(&self) -> bool;
 
     /// Returns the root's modification epoch when it is clean, or `None` when it is dirty.
-    ///
-    /// An unmodified revealed root has epoch zero.
-    fn root_epoch(&self) -> Option<u64>;
+    fn root_epoch(&self) -> Option<TrieNodeEpoch>;
 
     /// Recalculates and updates the RLP hashes of subtries deeper than a certain level. The level
     /// is defined in the implementation.
     ///
     /// The root node is considered to be at level 0. This method is useful for optimizing
     /// hash recalculations after localized changes to the trie structure.
-    fn update_subtrie_hashes(&mut self, epoch: u64);
+    fn update_subtrie_hashes(&mut self, new_epoch: TrieNodeEpoch);
 
     /// Retrieves a reference to the leaf value at the specified path.
     ///
@@ -207,7 +231,7 @@ pub trait SparseTrie: Sized + Debug + Send + Sync {
     /// # Returns
     ///
     /// The number of nodes converted to hash stubs.
-    fn prune(&mut self, prune_before: u64) -> usize;
+    fn prune(&mut self, prune_before: TrieNodeEpoch) -> usize;
 
     /// Takes the debug recorder out of this trie, replacing it with an empty one.
     ///
