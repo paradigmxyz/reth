@@ -57,7 +57,7 @@ jobs:
           rm -f target/rpc-compat/report.json
           cargo run --locked -p reth-rpc-compat-tests --bin reth-rpc-compat --features embedded -- run --offline ||
             test -f target/rpc-compat/report.json
-      - name: List unexpected failures
+      - name: Parse test result
         if: always()
         run: cargo run --locked -p reth-rpc-compat-tests --bin reth-rpc-compat --no-default-features -- list-unexpected --color always --github-groups --fail-on-unexpected
       - name: Upload reports
