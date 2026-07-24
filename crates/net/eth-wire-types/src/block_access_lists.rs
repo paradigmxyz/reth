@@ -147,6 +147,7 @@ mod tests {
                     BlockAccessIndex::new(1),
                     Bytes::from(vec![0x60, seed, 0x61, seed.wrapping_add(1), 0x56]),
                 )],
+                storage_root: None,
             },
             AccountChanges {
                 address: Address::from([seed.wrapping_add(9); 20]),
@@ -161,6 +162,7 @@ mod tests {
                     BlockAccessIndex::new(2),
                     Bytes::from(vec![0x5f, 0x5f, 0xf3]),
                 )],
+                storage_root: None,
             },
         ]
     }

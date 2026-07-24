@@ -1,12 +1,17 @@
 use crate::stages::MERKLE_STAGE_DEFAULT_INCREMENTAL_THRESHOLD;
 use alloy_consensus::BlockHeader;
+use alloy_eip7928::compute_block_access_list_hash;
 use alloy_primitives::BlockNumber;
 use num_traits::Zero;
 use reth_chainspec::{ChainSpecProvider, EthereumHardforks};
 use reth_config::config::ExecutionConfig;
 use reth_consensus::FullConsensus;
 use reth_db::{static_file::HeaderMask, tables};
-use reth_evm::{execute::Executor, metrics::ExecutorMetrics, ConfigureEvm};
+use reth_evm::{
+    execute::{BlockExecutionError, Executor},
+    metrics::ExecutorMetrics,
+    ConfigureEvm,
+};
 use reth_execution_types::Chain;
 use reth_exex::{ExExManagerHandle, ExExNotification, ExExNotificationSource};
 use reth_primitives_traits::{format_gas_throughput, BlockBody, NodePrimitives};
@@ -358,10 +363,27 @@ where
                     error: BlockErrorKind::Execution(error),
                 })
             })?;
+            let is_bogota_active =
+                provider.chain_spec().is_bogota_active_at_timestamp(block.timestamp());
+            let bal = if is_bogota_active {
+                executor
+                    .take_bal_with_storage_roots(&LatestStateProviderRef::new(provider))
+                    .map_err(|error| StageError::Block {
+                        block: Box::new(block.block_with_parent()),
+                        error: BlockErrorKind::Execution(BlockExecutionError::other(error)),
+                    })?
+            } else {
+                executor.take_bal()
+            };
+            let block_access_list_hash =
+                bal.as_ref().map(|bal| compute_block_access_list_hash(bal));
 
-            if let Err(err) =
-                self.consensus.validate_block_post_execution(&block, &result, None, None)
-            {
+            if let Err(err) = self.consensus.validate_block_post_execution(
+                &block,
+                &result,
+                None,
+                block_access_list_hash,
+            ) {
                 return Err(StageError::Block {
                     block: Box::new(block.block_with_parent()),
                     error: BlockErrorKind::Validation(err),
