@@ -1,6 +1,6 @@
 //! Command-line interface for the Rust-native Reth RPC compatibility runner.
 
-use clap::{Args, Parser, Subcommand};
+use clap::{Args, Parser, Subcommand, ValueEnum};
 use eyre::Result;
 #[cfg(feature = "embedded")]
 use reth_rpc_compat_tests::run_embedded;
@@ -8,9 +8,14 @@ use reth_rpc_compat_tests::{
     case::discover,
     config::{Config, RunAdditions},
     fixture,
+    report::{unexpected_results, UnexpectedKind},
     schema::SchemaCatalog,
 };
-use std::{collections::BTreeMap, path::PathBuf};
+use std::{
+    collections::BTreeMap,
+    io::{self, IsTerminal},
+    path::PathBuf,
+};
 
 #[derive(Debug, Parser)]
 #[command(about = "Run execution-apis RPC compatibility fixtures against embedded Reth")]
@@ -31,6 +36,8 @@ enum Command {
     Check(RunArgs),
     /// Launch embedded Reth and run selected tests.
     Run(RunArgs),
+    /// List only unexpected test IDs from a completed JSON report.
+    ListUnexpected(ListUnexpectedArgs),
 }
 
 #[derive(Debug, Clone, Args)]
@@ -85,6 +92,23 @@ struct RunArgs {
     report_junit: Option<PathBuf>,
 }
 
+#[derive(Debug, Clone, Args)]
+struct ListUnexpectedArgs {
+    /// JSON compatibility report to read.
+    #[arg(long, default_value = "target/rpc-compat/report.json")]
+    report: PathBuf,
+    /// Control colored output.
+    #[arg(long, value_enum, default_value = "auto")]
+    color: OutputColor,
+}
+
+#[derive(Debug, Clone, Copy, ValueEnum)]
+enum OutputColor {
+    Auto,
+    Always,
+    Never,
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     #[cfg(feature = "embedded")]
@@ -136,6 +160,35 @@ async fn main() -> Result<()> {
                 let _ = args;
                 return Err(eyre::eyre!("the run command requires the `embedded` feature"))
             }
+        }
+        Command::ListUnexpected(args) => print_unexpected(args)?,
+    }
+    Ok(())
+}
+
+fn print_unexpected(args: ListUnexpectedArgs) -> Result<()> {
+    let results = unexpected_results(&args.report)?;
+    let color = match args.color {
+        OutputColor::Auto => io::stdout().is_terminal() || std::env::var_os("CI").is_some(),
+        OutputColor::Always => true,
+        OutputColor::Never => false,
+    };
+    let (bold, reset) = if color { ("\x1b[1m", "\x1b[0m") } else { ("", "") };
+    println!("{bold}Unexpected failures:{reset}");
+    if results.is_empty() {
+        let green = if color { "\x1b[32m" } else { "" };
+        println!("  {green}none{reset}");
+    } else {
+        for result in results {
+            let color = if color {
+                match result.kind {
+                    UnexpectedKind::Failure => "\x1b[31m",
+                    UnexpectedKind::UnexpectedPass => "\x1b[33m",
+                }
+            } else {
+                ""
+            };
+            println!("  {color}{}{reset}", result.id);
         }
     }
     Ok(())

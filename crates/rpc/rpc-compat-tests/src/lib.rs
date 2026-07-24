@@ -21,6 +21,7 @@ pub mod case;
 pub mod config;
 pub mod fixture;
 pub mod matcher;
+pub mod report;
 #[cfg(feature = "embedded")]
 pub mod runner;
 pub mod schema;

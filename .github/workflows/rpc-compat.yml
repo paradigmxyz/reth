@@ -53,6 +53,9 @@ jobs:
         run: cargo run --locked -p reth-rpc-compat-tests --bin reth-rpc-compat --no-default-features -- check --offline
       - name: Run RPC compatibility suite
         run: cargo run --locked -p reth-rpc-compat-tests --bin reth-rpc-compat --features embedded -- run --offline
+      - name: List unexpected failures
+        if: always()
+        run: cargo run --locked -p reth-rpc-compat-tests --bin reth-rpc-compat --no-default-features -- list-unexpected --color always
       - name: Upload reports
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
