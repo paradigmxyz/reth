@@ -11,22 +11,8 @@ include = ["*"]
 exclude = []
 skip = []
 ignore = []
-expected_failures = [
-    "debug_getRawTransaction/get-invalid-hash",
-    "debug_getRawReceipts/get-block-n",
-    "eth_getBlockReceipts/get-block-receipts-by-hash",
-    "eth_getBlockReceipts/get-block-receipts-n",
-    "eth_getStorageAt/get-storage-invalid-key-too-large",
-    "eth_getTransactionReceipt/get-legacy-contract",
-    "eth_getTransactionReceipt/get-legacy-input",
-    "eth_getTransactionReceipt/get-legacy-receipt",
-]
-expected_failures_when_error_data_checked = [
-    "debug_getRawBlock/get-invalid-number",
-    "debug_getRawHeader/get-invalid-number",
-    "debug_getRawReceipts/get-invalid-number",
-    "eth_getStorageAt/get-storage-invalid-key",
-]
+expected_failures = []
+expected_failures_when_error_data_checked = []
 timeout_secs = 5
 fail_fast = false
 ignore_error_data = true
