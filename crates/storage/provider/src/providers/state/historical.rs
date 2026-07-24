@@ -15,8 +15,8 @@ use reth_db_api::{
 use reth_primitives_traits::{Account, Bytecode, NodePrimitives};
 use reth_storage_api::{
     BlockNumReader, BytecodeReader, DBProvider, NodePrimitivesProvider, PruneCheckpointReader,
-    StageCheckpointReader, StateProofProvider, StorageChangeSetReader, StorageRootProvider,
-    StorageSettingsCache,
+    StageCheckpointReader, StateProofProvider, StateProviderStorageCursor, StorageChangeSetReader,
+    StorageRootProvider, StorageSettingsCache,
 };
 use reth_storage_errors::provider::ProviderResult;
 use reth_trie::{
@@ -52,6 +52,76 @@ type DbProof<'a, TX, A> = Proof<
     reth_trie_db::DatabaseTrieCursorFactory<&'a TX, A>,
     reth_trie_db::DatabaseHashedCursorFactory<&'a TX>,
 >;
+
+enum HistoricalPlainStateStorageCursor<Hashed, Plain> {
+    Hashed(Hashed),
+    Plain(Plain),
+}
+
+struct HistoricalStorageCursor<'a, Provider, N, Hashed, Plain>
+where
+    Provider: NodePrimitivesProvider<Primitives = N>,
+    N: NodePrimitives,
+{
+    provider: &'a HistoricalStateProviderRef<'a, Provider, N>,
+    plain_state_cursor: HistoricalPlainStateStorageCursor<Hashed, Plain>,
+}
+
+impl<Provider, N, Hashed, Plain> StateProviderStorageCursor
+    for HistoricalStorageCursor<'_, Provider, N, Hashed, Plain>
+where
+    Provider: DBProvider
+        + BlockNumReader
+        + ChangeSetReader
+        + StorageChangeSetReader
+        + PruneCheckpointReader
+        + StageCheckpointReader
+        + StorageSettingsCache
+        + RocksDBProviderFactory
+        + NodePrimitivesProvider<Primitives = N>,
+    N: NodePrimitives,
+    Hashed: DbDupCursorRO<tables::HashedStorages>,
+    Plain: DbDupCursorRO<tables::PlainStorageState>,
+{
+    fn storage(
+        &mut self,
+        address: Address,
+        lookup_key: StorageKey,
+    ) -> ProviderResult<Option<StorageValue>> {
+        match self.provider.storage_history_lookup(address, lookup_key)? {
+            HistoryInfo::NotYetWritten => Ok(None),
+            HistoryInfo::InChangeset(changeset_block_number) => self
+                .provider
+                .provider
+                .get_storage_before_block(changeset_block_number, address, lookup_key)?
+                .ok_or_else(|| ProviderError::StorageChangesetNotFound {
+                    block_number: changeset_block_number,
+                    address,
+                    storage_key: Box::new(lookup_key),
+                })
+                .map(|entry| entry.value)
+                .map(Some),
+            HistoryInfo::InPlainState | HistoryInfo::MaybeInPlainState => {
+                match &mut self.plain_state_cursor {
+                    HistoricalPlainStateStorageCursor::Hashed(cursor) => {
+                        let hashed_address = alloy_primitives::keccak256(address);
+                        let hashed_slot = alloy_primitives::keccak256(lookup_key);
+                        Ok(cursor
+                            .seek_by_key_subkey(hashed_address, hashed_slot)?
+                            .filter(|entry| entry.key == hashed_slot)
+                            .map(|entry| entry.value)
+                            .or(Some(StorageValue::ZERO)))
+                    }
+                    HistoricalPlainStateStorageCursor::Plain(cursor) => Ok(cursor
+                        .seek_by_key_subkey(address, lookup_key)?
+                        .filter(|entry| entry.key == lookup_key)
+                        .map(|entry| entry.value)
+                        .or(Some(StorageValue::ZERO))),
+                }
+            }
+        }
+    }
+}
 
 /// Result of a history lookup for an account or storage slot.
 ///
@@ -669,6 +739,20 @@ where
         storage_key: StorageKey,
     ) -> ProviderResult<Option<StorageValue>> {
         self.storage_by_lookup_key(address, storage_key)
+    }
+
+    fn storage_cursor(&self) -> ProviderResult<Box<dyn StateProviderStorageCursor + '_>> {
+        let plain_state_cursor = if self.provider.cached_storage_settings().use_hashed_state() {
+            HistoricalPlainStateStorageCursor::Hashed(
+                self.tx().cursor_dup_read::<tables::HashedStorages>()?,
+            )
+        } else {
+            HistoricalPlainStateStorageCursor::Plain(
+                self.tx().cursor_dup_read::<tables::PlainStorageState>()?,
+            )
+        };
+
+        Ok(Box::new(HistoricalStorageCursor { provider: self, plain_state_cursor }))
     }
 }
 

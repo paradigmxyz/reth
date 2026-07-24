@@ -557,7 +557,7 @@ where
                     .map_err(|err| EthApiError::Internal(err.into()))?;
 
                 Ok(witness_record
-                    .into_execution_witness(&db.database.0, eth_api.provider(), block_number, mode)
+                    .into_execution_witness(&db.database.db, eth_api.provider(), block_number, mode)
                     .map_err(EthApiError::from)?)
             })
             .await

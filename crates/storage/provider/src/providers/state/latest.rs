@@ -5,7 +5,8 @@ use alloy_primitives::{Address, BlockNumber, Bytes, StorageKey, StorageValue, B2
 use reth_db_api::{cursor::DbDupCursorRO, tables, transaction::DbTx};
 use reth_primitives_traits::{Account, Bytecode};
 use reth_storage_api::{
-    BytecodeReader, DBProvider, StateProofProvider, StorageRootProvider, StorageSettingsCache,
+    BytecodeReader, DBProvider, StateProofProvider, StateProviderStorageCursor,
+    StorageRootProvider, StorageSettingsCache,
 };
 use reth_storage_errors::provider::{ProviderError, ProviderResult};
 use reth_trie::{
@@ -37,6 +38,51 @@ type DbProof<'a, TX, A> = Proof<
     reth_trie_db::DatabaseTrieCursorFactory<&'a TX, A>,
     reth_trie_db::DatabaseHashedCursorFactory<&'a TX>,
 >;
+
+struct LatestHashedStorageCursor<C> {
+    cursor: C,
+}
+
+impl<C> StateProviderStorageCursor for LatestHashedStorageCursor<C>
+where
+    C: DbDupCursorRO<tables::HashedStorages>,
+{
+    fn storage(
+        &mut self,
+        account: Address,
+        storage_key: StorageKey,
+    ) -> ProviderResult<Option<StorageValue>> {
+        let hashed_address = alloy_primitives::keccak256(account);
+        let hashed_slot = alloy_primitives::keccak256(storage_key);
+        Ok(self
+            .cursor
+            .seek_by_key_subkey(hashed_address, hashed_slot)?
+            .filter(|entry| entry.key == hashed_slot)
+            .map(|entry| entry.value))
+    }
+}
+
+struct LatestPlainStorageCursor<C> {
+    cursor: C,
+}
+
+impl<C> StateProviderStorageCursor for LatestPlainStorageCursor<C>
+where
+    C: DbDupCursorRO<tables::PlainStorageState>,
+{
+    fn storage(
+        &mut self,
+        account: Address,
+        storage_key: StorageKey,
+    ) -> ProviderResult<Option<StorageValue>> {
+        Ok(self
+            .cursor
+            .seek_by_key_subkey(account, storage_key)?
+            .filter(|entry| entry.key == storage_key)
+            .map(|entry| entry.value))
+    }
+}
+
 /// State provider over latest state that takes tx reference.
 ///
 /// Wraps a [`DBProvider`] to get access to database.
@@ -279,6 +325,18 @@ impl<Provider: DBProvider + BlockHashReader + StorageSettingsCache> StateProvide
                 return Ok(Some(entry.value));
             }
             Ok(None)
+        }
+    }
+
+    fn storage_cursor(&self) -> ProviderResult<Box<dyn StateProviderStorageCursor + '_>> {
+        if self.0.cached_storage_settings().use_hashed_state() {
+            Ok(Box::new(LatestHashedStorageCursor {
+                cursor: self.tx().cursor_dup_read::<tables::HashedStorages>()?,
+            }))
+        } else {
+            Ok(Box::new(LatestPlainStorageCursor {
+                cursor: self.tx().cursor_dup_read::<tables::PlainStorageState>()?,
+            }))
         }
     }
 }
