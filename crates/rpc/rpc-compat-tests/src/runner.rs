@@ -122,8 +122,17 @@ async fn execute_test(
         .transpose()?;
     let mut failures = Vec::new();
     for (index, exchange) in test.exchanges.iter().enumerate() {
-        if let Err(error) =
-            execute_exchange(client, url, test, index, exchange, variants.as_deref(), schemas).await
+        if let Err(error) = execute_exchange(
+            client,
+            url,
+            test,
+            index,
+            exchange,
+            variants.as_deref(),
+            config.ignore_error_data,
+            schemas,
+        )
+        .await
         {
             failures.push(format!("{error:#}"));
         }
@@ -142,6 +151,7 @@ async fn execute_exchange(
     index: usize,
     exchange: &crate::case::RpcExchange,
     variants: Option<&[Vec<Value>]>,
+    ignore_error_data: bool,
     schemas: &SchemaCatalog,
 ) -> Result<()> {
     let method = exchange.request["method"]
@@ -164,7 +174,7 @@ async fn execute_exchange(
     } else {
         vec![exchange.expected.clone()]
     };
-    match matcher::compare(&actual, &expected, test.spec_only, method, schemas) {
+    match matcher::compare(&actual, &expected, test.spec_only, ignore_error_data, method, schemas) {
         Ok(()) => Ok(()),
         Err(error) => Err(eyre!(
             "{} exchange {}\n>>  {}\n<<  {}\n{error:#}",

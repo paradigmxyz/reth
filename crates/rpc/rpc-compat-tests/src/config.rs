@@ -154,6 +154,8 @@ pub struct RunConfig {
     pub timeout_secs: u64,
     /// Stops after the first unexpected result.
     pub fail_fast: bool,
+    /// Ignore the `data` field in matching JSON-RPC error objects.
+    pub ignore_error_data: bool,
     /// Optional JSON report path.
     pub report_json: Option<PathBuf>,
     /// Optional `JUnit` XML report path.
@@ -171,6 +173,7 @@ impl Default for RunConfig {
             profiles: Vec::new(),
             timeout_secs: 5,
             fail_fast: false,
+            ignore_error_data: false,
             report_json: None,
             report_junit: None,
         }
@@ -249,6 +252,8 @@ pub struct ResolvedRunConfig {
     pub timeout_secs: u64,
     /// Whether to stop on the first unexpected result.
     pub fail_fast: bool,
+    /// Whether to ignore the `data` field in matching JSON-RPC error objects.
+    pub ignore_error_data: bool,
     /// JSON report path.
     pub report_json: Option<PathBuf>,
     /// `JUnit` report path.
@@ -267,6 +272,7 @@ impl ResolvedRunConfig {
             selections: BTreeMap::new(),
             timeout_secs: run.timeout_secs,
             fail_fast: run.fail_fast,
+            ignore_error_data: run.ignore_error_data,
             report_json: run.report_json.as_ref().map(|path| base.join(path)),
             report_junit: run.report_junit.as_ref().map(|path| base.join(path)),
         }
@@ -364,5 +370,14 @@ mod tests {
         assert!(wildcard_match("eth_getBlockBy*", "eth_getBlockByHash/get-latest"));
         assert!(wildcard_match("*/get-invalid-?", "eth_call/get-invalid-1"));
         assert!(!wildcard_match("debug_*", "eth_call/simple"));
+    }
+
+    #[test]
+    fn resolves_error_data_matching_policy() {
+        let config: Config = toml::from_str("[run]\nignore_error_data = true").unwrap();
+        let resolved = config
+            .resolve_run(Path::new("."), &[], &BTreeMap::new(), &RunAdditions::default())
+            .unwrap();
+        assert!(resolved.ignore_error_data);
     }
 }

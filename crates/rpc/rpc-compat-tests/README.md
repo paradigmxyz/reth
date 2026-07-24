@@ -34,9 +34,10 @@ reth-rpc-compat run --profile archive --choice receipts=either \
 ```
 
 Normal fixtures use strict JSON comparison with Hive-compatible number handling and error-message
-redaction. `speconly` fixtures validate successful results against OpenRPC schemas. The schema
-catalog is built in Rust directly from the resolved execution-apis sources when `openrpc.json` is not
-present.
+redaction. Set `ignore_error_data = true` under `[run]` to also ignore only the `data` field of
+JSON-RPC error objects; result objects and error codes remain strict. `speconly` fixtures validate
+successful results against OpenRPC schemas. The schema catalog is built in Rust directly from the
+resolved execution-apis sources when `openrpc.json` is not present.
 
 Configuration lives in `rpc-compat.toml`. A non-empty profile or CLI include list replaces the
 previous include selection; exclusion and outcome controls are additive. Profiles can also override

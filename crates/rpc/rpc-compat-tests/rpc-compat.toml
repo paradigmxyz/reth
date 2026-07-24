@@ -25,5 +25,6 @@ expected_failures = [
 ]
 timeout_secs = 5
 fail_fast = false
+ignore_error_data = true
 report_json = "../../../target/rpc-compat/report.json"
 report_junit = "../../../target/rpc-compat/junit.xml"
