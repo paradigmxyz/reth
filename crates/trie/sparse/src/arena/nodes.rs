@@ -9,6 +9,8 @@ use reth_trie_common::{BranchNodeMasks, Nibbles, ProofTrieNodeV2, RlpNode, TrieN
 use smallvec::SmallVec;
 use strum::AsRefStr;
 
+use crate::TrieNodeEpoch;
+
 /// Tracks whether a node's RLP encoding is cached or needs recomputation.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) enum ArenaSparseNodeState {
@@ -19,9 +21,7 @@ pub(super) enum ArenaSparseNodeState {
         /// The cached RLP-encoded representation of the node.
         rlp_node: RlpNode,
         /// The newest tracked modification epoch for this node or its descendants.
-        ///
-        /// Nodes materialized from the parent state without being modified use epoch zero.
-        epoch: u64,
+        epoch: TrieNodeEpoch,
     },
     /// The node has been modified and its RLP encoding needs recomputation.
     Dirty,
@@ -42,7 +42,7 @@ impl ArenaSparseNodeState {
     }
 
     /// Returns the cached epoch, if this node is cached.
-    pub(super) const fn cached_epoch(&self) -> Option<u64> {
+    pub(super) const fn cached_epoch(&self) -> Option<TrieNodeEpoch> {
         match self {
             Self::Cached { epoch, .. } => Some(*epoch),
             _ => None,
