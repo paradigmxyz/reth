@@ -133,6 +133,8 @@ pub struct TreeConfig {
     disable_state_cache: bool,
     /// Whether to disable parallel prewarming.
     disable_prewarming: bool,
+    /// Whether txpool-driven prewarming between payloads is enabled.
+    txpool_prewarming: bool,
     /// Whether to enable state provider metrics.
     state_provider_metrics: bool,
     /// Cross-block cache size in bytes.
@@ -241,6 +243,7 @@ impl Default for TreeConfig {
             always_compare_trie_updates: false,
             disable_state_cache: false,
             disable_prewarming: false,
+            txpool_prewarming: false,
             state_provider_metrics: false,
             cross_block_cache_size: DEFAULT_CROSS_BLOCK_CACHE_SIZE,
             has_enough_parallelism: has_enough_parallelism(),
@@ -320,6 +323,7 @@ impl TreeConfig {
             always_compare_trie_updates,
             disable_state_cache,
             disable_prewarming,
+            txpool_prewarming: false,
             state_provider_metrics,
             cross_block_cache_size,
             has_enough_parallelism,
@@ -417,6 +421,11 @@ impl TreeConfig {
     /// Returns whether or not parallel prewarming is disabled.
     pub const fn disable_prewarming(&self) -> bool {
         self.disable_prewarming
+    }
+
+    /// Returns whether txpool prewarming is enabled.
+    pub const fn txpool_prewarming(&self) -> bool {
+        self.txpool_prewarming
     }
 
     /// Returns whether to always compare trie updates from the state root task to the trie updates
@@ -556,6 +565,12 @@ impl TreeConfig {
     /// Setter for whether to disable parallel prewarming.
     pub const fn without_prewarming(mut self, disable_prewarming: bool) -> Self {
         self.disable_prewarming = disable_prewarming;
+        self
+    }
+
+    /// Enables or disables txpool transaction prewarming.
+    pub const fn with_txpool_prewarming(mut self, enabled: bool) -> Self {
+        self.txpool_prewarming = enabled;
         self
     }
 
@@ -814,6 +829,12 @@ mod tests {
             config.persistence_backpressure_threshold(),
             DEFAULT_PERSISTENCE_BACKPRESSURE_THRESHOLD
         );
+    }
+
+    #[test]
+    fn txpool_prewarming_is_disabled_by_default_and_can_be_enabled() {
+        assert!(!TreeConfig::default().txpool_prewarming());
+        assert!(TreeConfig::default().with_txpool_prewarming(true).txpool_prewarming());
     }
 
     #[test]
