@@ -41,6 +41,14 @@ use tokio::{
 use tokio_stream::wrappers::UnboundedReceiverStream;
 use tracing::{trace, warn};
 
+/// Minimum time an active session must have stayed up before a subsequent connection failure is
+/// treated as transient. A drop after a session this stable resets the peer's severe backoff
+/// counter instead of advancing it toward eviction, so a node that keeps successfully syncing
+/// between brief network partitions ("blinks") never accumulates enough severe backoffs to evict
+/// its peer. Without this, an isolated node with a single reachable peer loses its only block
+/// source after `max_backoff_count` unrelated blinks and stalls, since discovery cannot re-add it.
+const STABLE_SESSION_MIN_UPTIME: Duration = Duration::from_secs(30);
+
 /// Maintains the state of _all_ the peers known to the network.
 ///
 /// This is supposed to be owned by the network itself, but can be reached via the [`PeersHandle`].
@@ -747,6 +755,8 @@ impl PeersManager {
         } else {
             let mut backoff_until = None;
             let mut remove_peer = false;
+            // captured before the mutable borrow below so the last-peer removal guard can read it
+            let total_peers = self.peers.len();
 
             if let Some(peer) = self.peers.get_mut(peer_id) {
                 if let Some(kind) = err.should_backoff() {
@@ -760,8 +770,17 @@ impl PeersManager {
                         backoff_until = Some(std::time::Instant::now() + backoff);
                         trace!(target: "net::peers", ?peer_id, ?backoff, "backing off trusted peer");
                     } else {
-                        // Increment peer.backoff_counter
-                        if kind.is_severe() {
+                        // A peer that held a stable session before this failure is not a
+                        // persistently bad peer: a transient drop (e.g. a brief network partition)
+                        // must not accumulate toward permanent eviction. Reset the counter so an
+                        // isolated single-peer node doesn't evict its only block source after a run
+                        // of unrelated blinks. Otherwise increment on severe failures as before.
+                        if peer.connected_for_at_least(
+                            std::time::Instant::now(),
+                            STABLE_SESSION_MIN_UPTIME,
+                        ) {
+                            peer.severe_backoff_counter = 0;
+                        } else if kind.is_severe() {
                             peer.severe_backoff_counter =
                                 peer.severe_backoff_counter.saturating_add(1);
                         }
@@ -787,17 +806,23 @@ impl PeersManager {
 
                 if peer.severe_backoff_counter > self.max_backoff_count &&
                     !peer.is_trusted() &&
-                    !peer.is_static()
+                    !peer.is_static() &&
+                    total_peers > 1
                 {
                     // mark peer for removal if it has been backoff too many times and is _not_
-                    // trusted or static
+                    // trusted or static.
+                    //
+                    // We never remove the *last* known peer this way: on an isolated node whose
+                    // discovery is firewalled, a removed peer can never be re-added, so evicting
+                    // the sole block source permanently stalls sync. Keeping it (backed off, but
+                    // still dialable) lets `fill_outbound_slots` retry once the link recovers.
                     remove_peer = true;
                 }
             }
 
             // remove peer if it has been marked for removal
             if remove_peer {
-                trace!(target: "net", ?peer_id, "removed peer after exceeding backoff counter");
+                warn!(target: "net::peers", ?peer_id, max_backoff_count=self.max_backoff_count, "removed peer after exceeding severe backoff counter");
                 let (peer_id, _) = self.peers.remove_entry(peer_id).expect("peer must exist");
                 self.queued_actions.push_back(PeerAction::PeerRemoved(peer_id));
             } else if let Some(backoff_until) = backoff_until {
@@ -1511,7 +1536,7 @@ mod tests {
     use reth_network_api::Direction;
     use reth_network_peers::{NodeRecord, PeerId, TrustedPeer};
     use reth_network_types::{
-        peers::reputation::DEFAULT_REPUTATION, BackoffKind, Peer, ReputationChangeKind,
+        peers::reputation::DEFAULT_REPUTATION, BackoffKind, Peer, PeerKind, ReputationChangeKind,
     };
     use std::{
         future::{poll_fn, Future},
@@ -1954,6 +1979,18 @@ mod tests {
         let config = PeersConfig::test();
         let mut peers = PeersManager::new(config.clone());
         peers.add_peer(peer, PeerAddr::from_tcp(socket_addr), None);
+
+        // a second, already-connected peer so the target isn't the last one in the set; the last
+        // remaining peer is never evicted via the backoff path (see the last-peer guard).
+        let filler = PeerId::random();
+        let mut filler_peer = Peer::with_kind(
+            PeerAddr::from_tcp(SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 1, 3)), 8009)),
+            PeerKind::Basic,
+        );
+        filler_peer.state = PeerConnectionState::Out;
+        peers.peers.insert(filler, filler_peer);
+        peers.connection_info.inc_out();
+
         let peer_struct = peers.peers.get_mut(&peer).unwrap();
 
         // Simulate a peer that was already backed off once
@@ -2000,6 +2037,71 @@ mod tests {
         .await;
 
         assert!(!peers.peers.contains_key(&peer));
+    }
+
+    // A peer that held a stable session before a transient drop (a network "blink") must have its
+    // severe backoff counter reset rather than advanced toward eviction. Regression for isolated
+    // single-peer nodes that stalled after repeated blinks evicted their only block source.
+    #[tokio::test]
+    async fn test_stable_session_resets_severe_backoff_counter() {
+        let peer = PeerId::random();
+        let socket_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 1, 2)), 8008);
+        let config = PeersConfig::test();
+        let mut peers = PeersManager::new(config.clone());
+        peers.add_peer(peer, PeerAddr::from_tcp(socket_addr), None);
+
+        // a second peer so removal is otherwise possible; this isolates the reset from the
+        // last-peer guard.
+        let filler = PeerId::random();
+        peers.peers.insert(
+            filler,
+            Peer::with_kind(
+                PeerAddr::from_tcp(SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 1, 3)), 8009)),
+                PeerKind::Basic,
+            ),
+        );
+
+        let peer_struct = peers.peers.get_mut(&peer).unwrap();
+        // already past the eviction threshold, but with a stable session behind it
+        peer_struct.severe_backoff_counter = config.max_backoff_count + 1;
+        peer_struct.connected_at = Some(std::time::Instant::now() - STABLE_SESSION_MIN_UPTIME * 2);
+
+        // an active session drop with a severe (Medium) transient io error
+        peers.on_active_session_dropped(
+            &socket_addr,
+            &peer,
+            &io::Error::new(io::ErrorKind::TimedOut, "blink").into(),
+        );
+
+        let peer_struct = peers.peers.get(&peer).expect("stable peer must be retained");
+        assert_eq!(peer_struct.severe_backoff_counter, 0);
+    }
+
+    // The last remaining peer must never be evicted via the backoff path: on an isolated node
+    // whose discovery is firewalled, a removed peer can never be re-added, so evicting the sole
+    // block source permanently stalls sync.
+    #[tokio::test]
+    async fn test_last_peer_not_removed_on_max_backoff() {
+        let peer = PeerId::random();
+        let socket_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 1, 2)), 8008);
+        let config = PeersConfig::test();
+        let mut peers = PeersManager::new(config.clone());
+        peers.add_peer(peer, PeerAddr::from_tcp(socket_addr), None);
+
+        // sole peer, already at the eviction threshold, with no prior stable session
+        peers.peers.get_mut(&peer).unwrap().severe_backoff_counter = config.max_backoff_count;
+
+        peers.on_outgoing_pending_session_dropped(
+            &socket_addr,
+            &peer,
+            &PendingSessionHandshakeError::Eth(
+                io::Error::new(io::ErrorKind::ConnectionRefused, "peer unreachable").into(),
+            ),
+        );
+
+        // retained (backed off), not removed, even though the counter crossed the threshold
+        let peer_struct = peers.peers.get(&peer).expect("the last peer must never be evicted");
+        assert!(peer_struct.severe_backoff_counter > config.max_backoff_count);
     }
 
     #[tokio::test]
