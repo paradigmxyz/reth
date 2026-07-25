@@ -1271,7 +1271,9 @@ where
             return Vec::new()
         }
         let pool = self.get_pool_data();
-        txs.iter().filter_map(|tx| pool.get(tx).filter(|tx| tx.propagate)).collect()
+        txs.iter()
+            .filter_map(|tx| pool.get(tx).map(|tx| Arc::clone(&tx)).filter(|tx| tx.propagate))
+            .collect()
     }
 
     /// Notify about propagated transactions.
