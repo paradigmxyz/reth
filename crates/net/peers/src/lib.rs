@@ -157,22 +157,15 @@ impl AnyNode {
     }
 
     /// Returns the full node record if available.
+    ///
+    /// An ENR that advertises no tcp port has no RLPx endpoint, so it does not yield a record.
     #[cfg(feature = "secp256k1")]
     pub fn node_record(&self) -> Option<NodeRecord> {
         match self {
             Self::NodeRecord(record) => Some(*record),
             Self::Enr(enr) => {
-                let node_record = NodeRecord {
-                    address: enr
-                        .ip4()
-                        .map(core::net::IpAddr::from)
-                        .or_else(|| enr.ip6().map(core::net::IpAddr::from))?,
-                    tcp_port: enr.tcp4().or_else(|| enr.tcp6())?,
-                    udp_port: enr.udp4().or_else(|| enr.udp6())?,
-                    id: pk2id(&enr.public_key()),
-                }
-                .into_ipv4_mapped();
-                Some(node_record)
+                let node_record = NodeRecord::try_from(enr).ok()?;
+                (node_record.tcp_port != 0).then_some(node_record)
             }
             Self::PeerId(_) | Self::TrustedPeer(_) => None,
         }

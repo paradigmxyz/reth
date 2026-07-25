@@ -212,23 +212,39 @@ impl TryFrom<Enr<secp256k1::SecretKey>> for NodeRecord {
 impl TryFrom<&Enr<secp256k1::SecretKey>> for NodeRecord {
     type Error = NodeRecordParseError;
 
+    /// Endpoint keys are read from a single address family, because mixing them yields an address
+    /// and a port that don't belong together. A family that also advertises a tcp port wins, since
+    /// a record without one has no RLPx endpoint (port 0) even though it stays dialable for
+    /// discovery.
     fn try_from(enr: &Enr<secp256k1::SecretKey>) -> Result<Self, Self::Error> {
-        let Some(address) = enr.ip4().map(IpAddr::from).or_else(|| enr.ip6().map(IpAddr::from))
-        else {
-            return Err(NodeRecordParseError::InvalidUrl("ip missing".to_string()))
-        };
-
-        let Some(udp_port) = enr.udp4().or_else(|| enr.udp6()) else {
-            return Err(NodeRecordParseError::InvalidUrl("udp port missing".to_string()))
-        };
-
-        // A discovery-only ENR (e.g. a devp2p bootnode) omits the tcp key; treat that as no RLPx
-        // (port 0) rather than rejecting the record.
-        let tcp_port = enr.tcp4().or_else(|| enr.tcp6()).unwrap_or(0);
-
         let id = crate::pk2id(&enr.public_key());
+        let endpoint = |ip: IpAddr, udp_port, tcp_port: Option<u16>| Self {
+            address: ip,
+            udp_port,
+            tcp_port: tcp_port.unwrap_or(0),
+            id,
+        };
 
-        Ok(Self { address, tcp_port, udp_port, id }.into_ipv4_mapped())
+        let v4 = enr
+            .ip4()
+            .zip(enr.udp4())
+            .map(|(ip, udp_port)| endpoint(ip.into(), udp_port, enr.tcp4()));
+        let v6 = enr
+            .ip6()
+            .zip(enr.udp6())
+            .map(|(ip, udp_port)| endpoint(ip.into(), udp_port, enr.tcp6()));
+
+        let has_rlpx = |record: &Self| record.tcp_port != 0;
+        v4.filter(has_rlpx)
+            .or_else(|| v6.filter(has_rlpx))
+            .or(v4)
+            .or(v6)
+            .map(Self::into_ipv4_mapped)
+            .ok_or_else(|| {
+                NodeRecordParseError::InvalidUrl(
+                    "no ip and udp port for a single address family".to_string(),
+                )
+            })
     }
 }
 
@@ -238,6 +254,48 @@ mod tests {
     use alloy_rlp::Decodable;
     use rand::{rng, Rng, RngCore};
     use std::net::Ipv6Addr;
+
+    #[cfg(feature = "secp256k1")]
+    #[test]
+    fn test_enr_endpoint_single_family() {
+        let key = secp256k1::SecretKey::new(&mut rand_08::thread_rng());
+        let enr = enr::Enr::builder()
+            .ip4("10.0.0.1".parse().unwrap())
+            .udp4(30301)
+            .ip6("::1".parse().unwrap())
+            .udp6(30401)
+            .tcp6(30403)
+            .build(&key)
+            .unwrap();
+
+        let record = NodeRecord::try_from(&enr).unwrap();
+        assert_eq!(record.address, "::1".parse::<IpAddr>().unwrap());
+        assert_eq!(record.udp_port, 30401);
+        assert_eq!(record.tcp_port, 30403);
+
+        let enr = enr::Enr::builder()
+            .ip4("10.0.0.1".parse().unwrap())
+            .udp4(30301)
+            .tcp4(30303)
+            .ip6("::1".parse().unwrap())
+            .udp6(30401)
+            .tcp6(30403)
+            .build(&key)
+            .unwrap();
+
+        let record = NodeRecord::try_from(&enr).unwrap();
+        assert_eq!(record.address, "10.0.0.1".parse::<IpAddr>().unwrap());
+        assert_eq!(record.udp_port, 30301);
+        assert_eq!(record.tcp_port, 30303);
+
+        let enr = enr::Enr::builder().ip6("::1".parse().unwrap()).udp6(30401).build(&key).unwrap();
+        let record = NodeRecord::try_from(&enr).unwrap();
+        assert_eq!(record.address, "::1".parse::<IpAddr>().unwrap());
+        assert_eq!(record.udp_port, 30401);
+
+        let enr = enr::Enr::builder().ip4("10.0.0.1".parse().unwrap()).build(&key).unwrap();
+        assert!(NodeRecord::try_from(&enr).is_err());
+    }
 
     #[test]
     fn test_mapped_ipv6() {
