@@ -122,7 +122,7 @@ where
         let gas_limit_override = self.gas_limit_override;
         self.eth_api
             .spawn_with_state_at_block(request.parent_block_hash, move |eth_api, state| {
-                let state = state.database.0;
+                let state = state.database.db;
                 let parent = eth_api
                     .provider()
                     .sealed_header_by_hash(request.parent_block_hash)?

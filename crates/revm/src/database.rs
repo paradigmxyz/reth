@@ -2,7 +2,9 @@ use crate::primitives::alloy_primitives::{BlockNumber, StorageKey, StorageValue}
 use alloy_primitives::{Address, B256, U256};
 use core::ops::{Deref, DerefMut};
 use reth_primitives_traits::Account;
-use reth_storage_api::{AccountReader, BlockHashReader, BytecodeReader, StateProvider};
+use reth_storage_api::{
+    AccountReader, BlockHashReader, BytecodeReader, StateProvider, StateProviderStorageCursor,
+};
 use reth_storage_errors::provider::{ProviderError, ProviderResult};
 use revm::{bytecode::Bytecode, state::AccountInfo, Database, DatabaseRef};
 
@@ -31,6 +33,9 @@ pub trait EvmStateProvider {
         account: Address,
         storage_key: StorageKey,
     ) -> ProviderResult<Option<StorageValue>>;
+
+    /// Returns a cursor for repeated storage lookups.
+    fn storage_cursor(&self) -> ProviderResult<Box<dyn StateProviderStorageCursor + '_>>;
 }
 
 // Blanket implementation of EvmStateProvider for any type that implements StateProvider.
@@ -57,22 +62,40 @@ impl<T: StateProvider> EvmStateProvider for T {
     ) -> ProviderResult<Option<StorageValue>> {
         <T as StateProvider>::storage(self, account, storage_key)
     }
+
+    fn storage_cursor(&self) -> ProviderResult<Box<dyn StateProviderStorageCursor + '_>> {
+        <T as StateProvider>::storage_cursor(self)
+    }
 }
 
 /// A [Database] and [`DatabaseRef`] implementation that uses [`EvmStateProvider`] as the underlying
 /// data source.
-#[derive(Clone)]
-pub struct StateProviderDatabase<DB>(pub DB);
+pub struct StateProviderDatabase<DB> {
+    storage_cursor: Option<Box<dyn StateProviderStorageCursor + 'static>>,
+    /// The underlying state provider.
+    pub db: DB,
+}
+
+impl<DB: Clone> Clone for StateProviderDatabase<DB> {
+    fn clone(&self) -> Self {
+        Self::new(self.db.clone())
+    }
+}
+
+// SAFETY: the cached cursor is created and used through `Database::storage`, which requires
+// `&mut self`. Execution workers do not move an active database between threads while it is being
+// accessed.
+unsafe impl<DB: Send> Send for StateProviderDatabase<DB> {}
 
 impl<DB> StateProviderDatabase<DB> {
     /// Create new State with generic `StateProvider`.
     pub const fn new(db: DB) -> Self {
-        Self(db)
+        Self { storage_cursor: None, db }
     }
 
     /// Consume State and return inner `StateProvider`.
     pub fn into_inner(self) -> DB {
-        self.0
+        self.db
     }
 }
 
@@ -92,13 +115,13 @@ impl<DB> Deref for StateProviderDatabase<DB> {
     type Target = DB;
 
     fn deref(&self) -> &Self::Target {
-        &self.0
+        &self.db
     }
 }
 
 impl<DB> DerefMut for StateProviderDatabase<DB> {
     fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.0
+        &mut self.db
     }
 }
 
@@ -124,7 +147,25 @@ impl<DB: EvmStateProvider> Database for StateProviderDatabase<DB> {
     ///
     /// Returns `Ok` with the storage value, or the default value if not found.
     fn storage(&mut self, address: Address, index: U256) -> Result<U256, Self::Error> {
-        self.storage_ref(address, index)
+        let storage_key = B256::new(index.to_be_bytes());
+        if self.storage_cursor.is_none() {
+            let cursor = self.db.storage_cursor()?;
+            // SAFETY: `storage_cursor` is declared before `db`, so it is dropped first. The cursor
+            // never outlives this `StateProviderDatabase`, and `db` is not moved while the cursor is
+            // cached because `storage` requires `&mut self`.
+            self.storage_cursor = Some(unsafe {
+                core::mem::transmute::<
+                    Box<dyn StateProviderStorageCursor + '_>,
+                    Box<dyn StateProviderStorageCursor + 'static>,
+                >(cursor)
+            });
+        }
+        Ok(self
+            .storage_cursor
+            .as_mut()
+            .expect("cursor initialized")
+            .storage(address, storage_key)?
+            .unwrap_or_default())
     }
 
     /// Retrieves the block hash for a given block number.
@@ -158,7 +199,7 @@ impl<DB: EvmStateProvider> DatabaseRef for StateProviderDatabase<DB> {
     ///
     /// Returns `Ok` with the storage value, or the default value if not found.
     fn storage_ref(&self, address: Address, index: U256) -> Result<U256, Self::Error> {
-        Ok(self.0.storage(address, B256::new(index.to_be_bytes()))?.unwrap_or_default())
+        Ok(self.db.storage(address, B256::new(index.to_be_bytes()))?.unwrap_or_default())
     }
 
     /// Retrieves the block hash for a given block number.
@@ -166,7 +207,7 @@ impl<DB: EvmStateProvider> DatabaseRef for StateProviderDatabase<DB> {
     /// Returns `Ok` with the block hash if found, or the default hash otherwise.
     fn block_hash_ref(&self, number: u64) -> Result<B256, Self::Error> {
         // Get the block hash or default hash with an attempt to convert U256 block number to u64
-        Ok(self.0.block_hash(number)?.unwrap_or_default())
+        Ok(self.db.block_hash(number)?.unwrap_or_default())
     }
 }
 
