@@ -43,7 +43,7 @@
 //!
 //! Returning empty trie updates in the outcome means the trie tables are no longer maintained:
 //! `eth_getProof` and anything else that reads the stored trie will not work for new blocks.
-//! Sparse-trie cache pruning derives retained paths from each block's hashed post state.
+//! Sparse-trie cache pruning uses node epochs to retain the in-memory block range.
 
 mod sparse_trie;
 
@@ -52,15 +52,13 @@ use crate::tree::{
     metrics::BlockValidationMetrics, EngineApiTreeState, ExecutionEnv, StateProviderBuilder,
     TreeConfig,
 };
-use alloy_primitives::{map::B256Map, B256, U256};
+use alloy_primitives::B256;
 use crossbeam_channel::Receiver as CrossbeamReceiver;
-use itertools::Itertools;
-use rayon::{join, prelude::*};
 use reth_chain_state::{ExecutedBlock, PreservedSparseTrie, StateTrieOverlayManager};
 use reth_errors::ProviderResult;
 use reth_evm::{ConfigureEvm, OnStateHook};
 use reth_primitives_traits::{
-    AlloyBlockHeader, FastInstant as Instant, NodePrimitives, RecoveredBlock,
+    AlloyBlockHeader, FastInstant as Instant, NodePrimitives, RecoveredBlock, SealedHeader,
 };
 use reth_provider::{
     providers::OverlayStateProviderFactory, BlockExecutionOutput, BlockReader,
@@ -69,10 +67,7 @@ use reth_provider::{
 };
 use reth_tasks::utils::increase_thread_priority;
 use reth_trie::{
-    hashed_cursor::HashedCursorFactory,
-    prefix_set::{PrefixSet, TriePrefixSets},
-    trie_cursor::TrieCursorFactory,
-    updates::TrieUpdates,
+    hashed_cursor::HashedCursorFactory, trie_cursor::TrieCursorFactory, updates::TrieUpdates,
     HashedPostState,
 };
 use reth_trie_parallel::proof_task::{ProofTaskCtx, ProofWorkerHandle};
@@ -86,7 +81,9 @@ pub use reth_trie_parallel::{
 };
 #[cfg(feature = "trie-debug")]
 use reth_trie_sparse::debug_recorder::TrieDebugRecorder;
-use reth_trie_sparse::{ArenaParallelSparseTrie, RevealableSparseTrie, SparseStateTrie};
+use reth_trie_sparse::{
+    ArenaParallelSparseTrie, RevealableSparseTrie, SparseStateTrie, TrieNodeEpoch,
+};
 use std::{
     fmt,
     sync::{
@@ -245,6 +242,7 @@ where
     executor: &'a reth_tasks::Runtime,
     state_trie_overlays: &'a StateTrieOverlayManager<N>,
     env: &'a ExecutionEnv<Evm>,
+    parent_header: &'a SealedHeader<N::BlockHeader>,
     provider_builder: StateProviderBuilder<N, P>,
     overlay_factory: OverlayStateProviderFactory<P, N>,
     config: &'a TreeConfig,
@@ -276,6 +274,7 @@ where
         executor: &'a reth_tasks::Runtime,
         state_trie_overlays: &'a StateTrieOverlayManager<N>,
         env: &'a ExecutionEnv<Evm>,
+        parent_header: &'a SealedHeader<N::BlockHeader>,
         provider_builder: StateProviderBuilder<N, P>,
         overlay_factory: OverlayStateProviderFactory<P, N>,
         config: &'a TreeConfig,
@@ -286,6 +285,7 @@ where
             executor,
             state_trie_overlays,
             env,
+            parent_header,
             provider_builder,
             overlay_factory,
             config,
@@ -297,6 +297,11 @@ where
     /// Returns the execution environment for the block.
     pub const fn env(&self) -> &ExecutionEnv<Evm> {
         self.env
+    }
+
+    /// Returns the sealed parent block header.
+    pub const fn parent_header(&self) -> &SealedHeader<N::BlockHeader> {
+        self.parent_header
     }
 
     /// Returns the task runtime used by state-root work.
@@ -517,8 +522,7 @@ impl DefaultStateRootStrategy {
             + 'static,
     {
         let StateRootTaskOptions {
-            parent_hash,
-            parent_state_root,
+            parent_header,
             preserved_sparse_trie,
             transaction_count,
             config,
@@ -536,6 +540,7 @@ impl DefaultStateRootStrategy {
 
         let (state_root_tx, state_root_rx) = mpsc::channel();
         let (hashed_state_tx, hashed_state_rx) = mpsc::channel();
+        let parent_state_root = parent_header.state_root();
 
         self.spawn_sparse_trie_task(
             executor,
@@ -546,8 +551,7 @@ impl DefaultStateRootStrategy {
             from_multi_proof,
             cancel_rx,
             SparseTrieTaskOptions {
-                parent_hash,
-                parent_state_root,
+                parent_header,
                 preserved_sparse_trie,
                 chunk_size: config.multiproof_chunk_size(),
                 pending_sparse_trie_prune_blocks: if config.disable_sparse_trie_cache_pruning() {
@@ -581,8 +585,7 @@ impl DefaultStateRootStrategy {
         options: SparseTrieTaskOptions<N>,
     ) {
         let SparseTrieTaskOptions {
-            parent_hash,
-            parent_state_root,
+            parent_header,
             preserved_sparse_trie,
             chunk_size,
             pending_sparse_trie_prune_blocks,
@@ -594,6 +597,12 @@ impl DefaultStateRootStrategy {
         let parent_span = Span::current();
         executor.clone().spawn_blocking_named("sparse-trie", move || {
             reth_tasks::once!(increase_thread_priority);
+
+            let parent_hash = parent_header.hash();
+            let parent_state_root = parent_header.state_root();
+            let new_epoch = TrieNodeEpoch::new(parent_header.number().saturating_add(1));
+            let prune_before =
+                sparse_trie_prune_before(pending_sparse_trie_prune_blocks.as_deref(), new_epoch);
 
             let _enter = debug_span!(
                 target: "engine::tree::payload_processor",
@@ -651,6 +660,7 @@ impl DefaultStateRootStrategy {
                 trie_metrics.clone(),
                 sparse_state_trie,
                 parent_state_root,
+                new_epoch,
                 chunk_size,
             );
 
@@ -694,16 +704,14 @@ impl DefaultStateRootStrategy {
             let _enter =
                 debug_span!(target: "engine::tree::payload_processor", "preserve").entered();
             let mut trie_to_drop = None;
-            let deferred = if let Some(result) = task_result {
+            let deferred = if task_result.is_some() {
                 let pending_trie =
                     pending_trie.expect("pending trie is created for successful task result");
                 let start = Instant::now();
                 let (mut trie, deferred) = task.into_trie_for_reuse();
-                if let Some(prune_blocks) = pending_sparse_trie_prune_blocks {
+                if let Some(prune_before) = prune_before {
                     let prune_start = Instant::now();
-                    let retained_paths =
-                        sparse_trie_retained_paths(prune_blocks, result.hashed_state.as_ref());
-                    trie.prune(retained_paths);
+                    trie.prune(prune_before);
                     trie_metrics
                         .sparse_trie_prune_duration_histogram
                         .record(prune_start.elapsed().as_secs_f64());
@@ -736,110 +744,31 @@ impl DefaultStateRootStrategy {
 }
 
 struct SparseTrieTaskOptions<N: NodePrimitives> {
-    parent_hash: B256,
-    parent_state_root: B256,
+    parent_header: SealedHeader<N::BlockHeader>,
     preserved_sparse_trie: Option<PreservedSparseTrie>,
     chunk_size: usize,
-    /// `None` disables pruning. `Some(Vec::new())` prunes using only the current block's paths.
+    /// `None` disables pruning. `Some(Vec::new())` prunes nodes older than the current block.
     pending_sparse_trie_prune_blocks: Option<Vec<ExecutedBlock<N>>>,
 }
 
 struct StateRootTaskOptions<'a, N: NodePrimitives> {
-    parent_hash: B256,
-    parent_state_root: B256,
+    parent_header: SealedHeader<N::BlockHeader>,
     preserved_sparse_trie: Option<PreservedSparseTrie>,
     transaction_count: Option<usize>,
     config: &'a TreeConfig,
     pending_sparse_trie_prune_blocks: Option<Vec<ExecutedBlock<N>>>,
 }
 
-fn sparse_trie_retained_paths<N: NodePrimitives>(
-    prune_blocks: Vec<ExecutedBlock<N>>,
-    current_hashed_state: &HashedPostState,
-) -> TriePrefixSets {
-    struct StorageAcc<'a> {
-        wiped: bool,
-        first: Option<&'a [(B256, U256)]>,
-        rest: Vec<&'a [(B256, U256)]>,
-    }
-
-    let current_hashed_state = current_hashed_state.clone_into_sorted();
-    let mut account_slices = Vec::with_capacity(prune_blocks.len() + 1);
-    let mut storage_acc = B256Map::<StorageAcc<'_>>::default();
-
-    for state in prune_blocks
-        .iter()
-        .map(|block| block.trie_data.get().sorted.hashed_state.as_ref())
-        .chain(core::iter::once(&current_hashed_state))
-    {
-        account_slices.push(state.accounts.as_slice());
-
-        for (address, storage) in &state.storages {
-            let entry = storage_acc.entry(*address).or_insert_with(|| StorageAcc {
-                wiped: false,
-                first: None,
-                rest: Vec::new(),
-            });
-            if entry.wiped {
-                continue
-            }
-            if storage.wiped {
-                entry.wiped = true;
-                entry.first = None;
-                entry.rest.clear();
-            } else if entry.first.is_some() {
-                entry.rest.push(storage.storage_slots.as_slice());
-            } else {
-                entry.first = Some(storage.storage_slots.as_slice());
-            }
-        }
-    }
-
-    let mut storage_addresses = storage_acc.keys().copied().collect::<Vec<_>>();
-    storage_addresses.sort_unstable();
-
-    let (account_prefix_set, storage_prefix_sets) = join(
-        || {
-            PrefixSet::from(
-                account_slices
-                    .into_iter()
-                    .map(|slice| slice.iter().map(|(address, _)| address))
-                    .kmerge()
-                    .dedup()
-                    .copied()
-                    .merge(storage_addresses)
-                    .dedup(),
-            )
-        },
-        || {
-            storage_acc
-                .par_iter()
-                .map(|(address, entry)| {
-                    let prefix_set = if entry.wiped {
-                        PrefixSet::all_paths()
-                    } else {
-                        PrefixSet::from(
-                            entry
-                                .first
-                                .iter()
-                                .copied()
-                                .chain(entry.rest.iter().copied())
-                                .map(|slice| slice.iter().map(|(slot, _)| slot))
-                                .kmerge()
-                                .dedup()
-                                .copied(),
-                        )
-                    };
-                    (*address, prefix_set)
-                })
-                .collect()
-        },
-    );
-
-    TriePrefixSets {
-        account_prefix_set,
-        storage_prefix_sets,
-        destroyed_accounts: Default::default(),
+fn sparse_trie_prune_before<N: NodePrimitives>(
+    pending_sparse_trie_prune_blocks: Option<&[ExecutedBlock<N>]>,
+    new_epoch: TrieNodeEpoch,
+) -> Option<TrieNodeEpoch> {
+    // The parent chain is ordered newest to oldest. An empty chain means the block being
+    // calculated is the only in-memory block whose trie nodes need to be retained.
+    match pending_sparse_trie_prune_blocks {
+        None => None,
+        Some([]) => Some(new_epoch),
+        Some([.., oldest]) => Some(TrieNodeEpoch::new(oldest.recovered_block().number())),
     }
 }
 
@@ -905,6 +834,7 @@ where
             executor,
             state_trie_overlays,
             env,
+            parent_header,
             provider_builder,
             overlay_factory,
             config,
@@ -928,8 +858,7 @@ where
             state_trie_overlays,
             overlay_factory.clone(),
             StateRootTaskOptions {
-                parent_hash: env.parent_hash,
-                parent_state_root: env.parent_state_root,
+                parent_header: parent_header.clone(),
                 preserved_sparse_trie,
                 transaction_count: Some(env.transaction_count),
                 config,
@@ -988,6 +917,7 @@ where
 
         let pending_sparse_trie_prune_blocks = ctx.take_sparse_trie_prune_blocks();
         let parent_state_root = ctx.parent_state_root();
+        let parent_header = SealedHeader::new(ctx.parent_header().clone(), ctx.parent_hash());
         let preserved_sparse_trie = ctx.state_trie_overlays.take_sparse_trie();
         let overlay_factory = if let Some(anchor_hash) = preserved_sparse_trie
             .as_ref()
@@ -1004,8 +934,7 @@ where
                 ctx.state_trie_overlays,
                 overlay_factory,
                 StateRootTaskOptions {
-                    parent_hash: ctx.parent_hash(),
-                    parent_state_root,
+                    parent_header,
                     preserved_sparse_trie,
                     // Tx count unknown at FCU time (block built incrementally): full proof workers.
                     transaction_count: None,
@@ -1391,128 +1320,23 @@ mod tests {
         HashingWriter,
     };
     use reth_testing_utils::generators;
-    use reth_trie::{
-        test_utils::state_root, HashedPostState, HashedStorage, LazyTrieData, Nibbles,
-    };
+    use reth_trie::test_utils::state_root;
     use reth_trie_db::ChangesetCache;
     use revm::state::{AccountInfo, AccountStatus, EvmState, EvmStorageSlot, TransactionId};
 
-    fn with_hashed_state(
-        block: ExecutedBlock<EthPrimitives>,
-        hashed_state: HashedPostState,
-    ) -> ExecutedBlock<EthPrimitives> {
-        let mut trie_data = block.trie_data();
-        trie_data.sorted.hashed_state = Arc::new(hashed_state.into_sorted());
-        ExecutedBlock::with_deferred_trie_data(
-            block.recovered_block,
-            block.execution_output,
-            LazyTrieData::ready(trie_data),
-        )
-    }
-
-    fn trie_hashed_state(account_path: u8, storage_path: u8) -> HashedPostState {
-        HashedPostState::default()
-            .with_accounts([(B256::with_last_byte(account_path), Some(Account::default()))])
-            .with_storages([(
-                B256::with_last_byte(account_path),
-                HashedStorage::from_iter(false, [(B256::with_last_byte(storage_path), U256::ONE)]),
-            )])
-    }
-
     #[test]
-    fn sparse_trie_retained_paths_merges_prune_blocks_with_current_block() {
-        let blocks: Vec<_> = TestBlockBuilder::eth()
-            .get_executed_blocks(1..3)
-            .zip([trie_hashed_state(0x01, 0x02), trie_hashed_state(0x03, 0x04)])
-            .map(|(block, hashed_state)| with_hashed_state(block, hashed_state))
-            .collect();
-        let current_hashed_state = trie_hashed_state(0x05, 0x06);
-
-        let retained_paths = sparse_trie_retained_paths(blocks, &current_hashed_state);
-
-        assert_eq!(retained_paths.account_prefix_set.len(), 3);
-        assert_eq!(retained_paths.storage_prefix_sets.len(), 3);
-    }
-
-    #[test]
-    fn sparse_trie_retained_paths_uses_hashed_state() {
-        let blocks: Vec<_> = TestBlockBuilder::eth()
-            .get_executed_blocks(1..2)
-            .map(|block| with_hashed_state(block, trie_hashed_state(0x01, 0x02)))
-            .collect();
-        let current_hashed_state = trie_hashed_state(0x03, 0x04);
-
-        let retained_paths = sparse_trie_retained_paths(blocks, &current_hashed_state);
-
-        assert_eq!(retained_paths.account_prefix_set.len(), 2);
-        assert_eq!(retained_paths.storage_prefix_sets.len(), 2);
-    }
-
-    #[test]
-    fn sparse_trie_retained_paths_merges_sorted_paths_directly() {
-        let account = B256::with_last_byte(1);
-        let destroyed = B256::with_last_byte(2);
-        let storage_only = B256::with_last_byte(3);
-        let wiped_storage = B256::with_last_byte(4);
-        let account_slot = B256::with_last_byte(10);
-        let first_slot = B256::with_last_byte(11);
-        let second_slot = B256::with_last_byte(12);
-        let third_slot = B256::with_last_byte(13);
-
-        let first = HashedPostState::default()
-            .with_accounts([(account, Some(Account::default())), (destroyed, None)])
-            .with_storages([
-                (account, HashedStorage::from_iter(false, [(account_slot, U256::from(1))])),
-                (
-                    storage_only,
-                    HashedStorage::from_iter(
-                        false,
-                        [(first_slot, U256::from(1)), (third_slot, U256::from(3))],
-                    ),
-                ),
-                (wiped_storage, HashedStorage::from_iter(false, [(first_slot, U256::from(1))])),
-            ]);
-        let second = HashedPostState::default().with_accounts([(account, None)]).with_storages([
-            (
-                storage_only,
-                HashedStorage::from_iter(
-                    false,
-                    [(second_slot, U256::from(2)), (third_slot, U256::from(30))],
-                ),
-            ),
-            (wiped_storage, HashedStorage::from_iter(true, [])),
-        ]);
-        let blocks = TestBlockBuilder::eth()
-            .get_executed_blocks(1..3)
-            .zip([first, second])
-            .map(|(block, hashed_state)| with_hashed_state(block, hashed_state))
-            .collect();
-
-        let retained_paths = sparse_trie_retained_paths(blocks, &HashedPostState::default());
-
+    fn sparse_trie_prune_before_uses_requested_range() {
+        let new_epoch = TrieNodeEpoch::new(10);
+        assert_eq!(sparse_trie_prune_before::<EthPrimitives>(None, new_epoch), None);
         assert_eq!(
-            retained_paths.account_prefix_set.slice(),
-            &[
-                Nibbles::unpack(account),
-                Nibbles::unpack(destroyed),
-                Nibbles::unpack(storage_only),
-                Nibbles::unpack(wiped_storage),
-            ]
+            sparse_trie_prune_before::<EthPrimitives>(Some(&[]), new_epoch),
+            Some(new_epoch)
         );
-        assert_eq!(
-            retained_paths.storage_prefix_sets[&storage_only].slice(),
-            &[
-                Nibbles::unpack(first_slot),
-                Nibbles::unpack(second_slot),
-                Nibbles::unpack(third_slot),
-            ]
-        );
-        assert_eq!(
-            retained_paths.storage_prefix_sets[&account].slice(),
-            &[Nibbles::unpack(account_slot)]
-        );
-        assert!(retained_paths.storage_prefix_sets[&wiped_storage].all());
-        assert!(retained_paths.destroyed_accounts.is_empty());
+
+        let mut blocks: Vec<_> = TestBlockBuilder::eth().get_executed_blocks(7..10).collect();
+        blocks.reverse();
+
+        assert_eq!(sparse_trie_prune_before(Some(&blocks), new_epoch), Some(TrieNodeEpoch::new(7)));
     }
 
     #[test]
@@ -1658,8 +1482,7 @@ mod tests {
                 OverlayBuilder::<EthPrimitives>::new(genesis_hash, ChangesetCache::new()),
             ),
             StateRootTaskOptions {
-                parent_hash: genesis_hash,
-                parent_state_root: env.parent_state_root,
+                parent_header: SealedHeader::new(Default::default(), genesis_hash),
                 preserved_sparse_trie: None,
                 transaction_count: Some(env.transaction_count),
                 config: &TreeConfig::default(),

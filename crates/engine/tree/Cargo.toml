@@ -61,7 +61,6 @@ reth-metrics = { workspace = true, features = ["common"] }
 
 # misc
 indexmap.workspace = true
-itertools.workspace = true
 schnellru.workspace = true
 rayon.workspace = true
 tracing.workspace = true

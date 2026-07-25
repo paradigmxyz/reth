@@ -348,8 +348,8 @@ pub struct EngineArgs {
     /// Enable best-effort txpool transaction prewarming between payloads.
     #[arg(
         long = "engine.txpool-prewarming",
-        default_value_t = DefaultEngineValues::get_global().txpool_prewarming_enabled,
-        conflicts_with = "state_cache_disabled"
+        env = "RETH_ENGINE_TXPOOL_PREWARMING",
+        default_value_t = DefaultEngineValues::get_global().txpool_prewarming_enabled
     )]
     pub txpool_prewarming_enabled: bool,
 
@@ -651,6 +651,10 @@ impl EngineArgs {
             self.persistence_threshold,
         );
         ensure!(
+            !self.state_cache_disabled || !self.txpool_prewarming_enabled,
+            "--engine.txpool-prewarming conflicts with --engine.disable-state-cache"
+        );
+        ensure!(
             self.bal_parallel_execution_disabled || !self.bal_parallel_state_root_disabled,
             "--engine.disable-bal-parallel-state-root requires --engine.disable-bal-parallel-execution because BAL parallel execution depends on BAL prewarm state-root updates"
         );
@@ -741,15 +745,16 @@ mod tests {
     }
 
     #[test]
-    fn txpool_prewarming_conflicts_with_disabled_state_cache() {
-        let Err(error) = CommandParser::<EngineArgs>::try_parse_from([
-            "reth",
-            "--engine.txpool-prewarming",
-            "--engine.disable-state-cache",
-        ]) else {
-            panic!("conflicting flags must be rejected")
+    fn validate_rejects_txpool_prewarming_with_disabled_state_cache() {
+        let args = EngineArgs {
+            state_cache_disabled: true,
+            txpool_prewarming_enabled: true,
+            ..EngineArgs::default()
         };
-        assert_eq!(error.kind(), clap::error::ErrorKind::ArgumentConflict);
+
+        let err = args.validate().unwrap_err().to_string();
+        assert!(err.contains("engine.txpool-prewarming"));
+        assert!(err.contains("engine.disable-state-cache"));
     }
 
     #[test]
