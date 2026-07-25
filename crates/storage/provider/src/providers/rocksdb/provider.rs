@@ -488,6 +488,25 @@ impl RocksDBProviderInner {
         }
     }
 
+    /// Gets multiple values from the same column family.
+    fn multi_get_cf(
+        &self,
+        cf: &rocksdb::ColumnFamily,
+        keys: &[Vec<u8>],
+        sorted_input: bool,
+    ) -> Vec<Result<Option<Vec<u8>>, rocksdb::Error>> {
+        match self {
+            Self::ReadWrite { db, .. } => {
+                db.multi_get_cf(keys.iter().map(|key| (cf, key.as_slice())))
+            }
+            Self::Secondary { db, .. } => db
+                .batched_multi_get_cf(cf, keys.iter().map(Vec::as_slice), sorted_input)
+                .into_iter()
+                .map(|result| result.map(|value| value.map(|value| value.to_vec())))
+                .collect(),
+        }
+    }
+
     /// Puts a value into a column family.
     fn put_cf(
         &self,
@@ -860,6 +879,36 @@ impl RocksDBProvider {
             })?;
 
             Ok(result.and_then(|value| T::Value::decompress(&value).ok()))
+        })
+    }
+
+    /// Gets multiple values from the specified table.
+    fn get_many<T: Table>(
+        &self,
+        keys: impl IntoIterator<Item = T::Key>,
+        sorted_input: bool,
+    ) -> ProviderResult<Vec<Option<T::Value>>> {
+        let encoded_keys =
+            keys.into_iter().map(|key| key.encode().as_ref().to_vec()).collect::<Vec<_>>();
+        if encoded_keys.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        self.execute_with_operation_metric(RocksDBOperation::Get, T::NAME, |this| {
+            let cf = this.get_cf_handle::<T>()?;
+            this.0
+                .multi_get_cf(cf, &encoded_keys, sorted_input)
+                .into_iter()
+                .map(|result| {
+                    let result = result.map_err(|e| {
+                        ProviderError::Database(DatabaseError::Read(DatabaseErrorInfo {
+                            message: e.to_string().into(),
+                            code: -1,
+                        }))
+                    })?;
+                    Ok(result.and_then(|value| T::Value::decompress(&value).ok()))
+                })
+                .collect()
         })
     }
 
@@ -1416,8 +1465,23 @@ impl RocksDBProvider {
         }
 
         // Write account history using proper shard append logic
-        for (address, indices) in account_history {
-            batch.append_account_history_shard(address, indices)?;
+        let account_history_entries = account_history
+            .into_iter()
+            .map(|(address, indices)| (ShardedKey::new(address, u64::MAX), address, indices))
+            .collect::<Vec<_>>();
+        let last_shards = self.get_many::<tables::AccountsHistory>(
+            account_history_entries.iter().map(|(last_key, _, _)| last_key.clone()),
+            true,
+        )?;
+
+        for ((_, address, indices), last_shard_opt) in
+            account_history_entries.into_iter().zip(last_shards)
+        {
+            for (key, shard) in
+                Self::account_history_shards_to_put(address, last_shard_opt, indices)?
+            {
+                batch.put::<tables::AccountsHistory>(key, &shard)?;
+            }
         }
         ctx.pending_batches.lock().push(batch.into_inner());
         Ok(())
@@ -1453,10 +1517,27 @@ impl RocksDBProvider {
             }
         }
 
-        let shard_puts = storage_history
+        let storage_history_entries = storage_history
+            .into_iter()
+            .map(|((address, storage_key), indices)| {
+                (StorageShardedKey::last(address, storage_key), address, storage_key, indices)
+            })
+            .collect::<Vec<_>>();
+        let last_shards = self.get_many::<tables::StoragesHistory>(
+            storage_history_entries.iter().map(|(last_key, _, _, _)| last_key.clone()),
+            true,
+        )?;
+
+        let shard_puts = storage_history_entries
             .into_par_iter()
-            .map(|((address, slot), indices)| {
-                self.storage_history_shards_to_put(address, slot, indices)
+            .zip(last_shards.into_par_iter())
+            .map(|((_, address, storage_key, indices), last_shard_opt)| {
+                Self::storage_history_shards_to_put_from_last(
+                    address,
+                    storage_key,
+                    last_shard_opt,
+                    indices,
+                )
             })
             .collect::<ProviderResult<Vec<_>>>()?;
 
@@ -1470,12 +1551,67 @@ impl RocksDBProvider {
         Ok(())
     }
 
+    /// Prepares account history shard writes by appending indices to the provided last shard.
+    fn account_history_shards_to_put(
+        address: Address,
+        last_shard_opt: Option<BlockNumberList>,
+        indices: Vec<u64>,
+    ) -> ProviderResult<Vec<(ShardedKey<Address>, BlockNumberList)>> {
+        if indices.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        debug_assert!(
+            indices.windows(2).all(|w| w[0] < w[1]),
+            "indices must be strictly increasing: {:?}",
+            indices
+        );
+
+        let last_key = ShardedKey::new(address, u64::MAX);
+        let mut last_shard = last_shard_opt.unwrap_or_else(BlockNumberList::empty);
+
+        last_shard.append(indices).map_err(ProviderError::other)?;
+
+        if last_shard.len() <= NUM_OF_INDICES_IN_SHARD as u64 {
+            return Ok(vec![(last_key, last_shard)]);
+        }
+
+        let chunks = last_shard.iter().chunks(NUM_OF_INDICES_IN_SHARD);
+        let mut chunks_peekable = chunks.into_iter().peekable();
+        let mut shards = Vec::new();
+
+        while let Some(chunk) = chunks_peekable.next() {
+            let shard = BlockNumberList::new_pre_sorted(chunk);
+            let highest_block_number = if chunks_peekable.peek().is_some() {
+                shard.iter().next_back().expect("`chunks` does not return empty list")
+            } else {
+                u64::MAX
+            };
+
+            shards.push((ShardedKey::new(address, highest_block_number), shard));
+        }
+
+        Ok(shards)
+    }
+
     /// Prepares storage history shard writes by reading the current last shard and appending
     /// indices.
     fn storage_history_shards_to_put(
         &self,
         address: Address,
         storage_key: B256,
+        indices: Vec<u64>,
+    ) -> ProviderResult<Vec<(StorageShardedKey, BlockNumberList)>> {
+        let last_key = StorageShardedKey::last(address, storage_key);
+        let last_shard_opt = self.get::<tables::StoragesHistory>(last_key)?;
+        Self::storage_history_shards_to_put_from_last(address, storage_key, last_shard_opt, indices)
+    }
+
+    /// Prepares storage history shard writes by appending indices to the provided last shard.
+    fn storage_history_shards_to_put_from_last(
+        address: Address,
+        storage_key: B256,
+        last_shard_opt: Option<BlockNumberList>,
         indices: Vec<u64>,
     ) -> ProviderResult<Vec<(StorageShardedKey, BlockNumberList)>> {
         if indices.is_empty() {
@@ -1489,7 +1625,6 @@ impl RocksDBProvider {
         );
 
         let last_key = StorageShardedKey::last(address, storage_key);
-        let last_shard_opt = self.get::<tables::StoragesHistory>(last_key.clone())?;
         let mut last_shard = last_shard_opt.unwrap_or_else(BlockNumberList::empty);
 
         last_shard.append(indices).map_err(ProviderError::other)?;
@@ -3286,6 +3421,26 @@ mod tests {
 
         assert_eq!(completed_shard.len(), limit as u64, "completed shard should be full");
         assert_eq!(sentinel_shard.len(), 1, "sentinel shard should have 1 element");
+    }
+
+    #[test]
+    fn test_account_history_shards_to_put_uses_prefetched_last_shard() {
+        let address = Address::from([0x44; 20]);
+        let limit = NUM_OF_INDICES_IN_SHARD;
+        let last_shard = IntegerList::new(0..limit as u64).unwrap();
+
+        let shards = RocksDBProvider::account_history_shards_to_put(
+            address,
+            Some(last_shard),
+            vec![limit as u64],
+        )
+        .unwrap();
+
+        assert_eq!(shards.len(), 2);
+        assert_eq!(shards[0].0, ShardedKey::new(address, (limit - 1) as u64));
+        assert_eq!(shards[0].1.len(), limit as u64);
+        assert_eq!(shards[1].0, ShardedKey::new(address, u64::MAX));
+        assert_eq!(shards[1].1.iter().collect::<Vec<_>>(), vec![limit as u64]);
     }
 
     #[test]
