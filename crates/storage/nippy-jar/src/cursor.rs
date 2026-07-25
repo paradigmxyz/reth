@@ -161,6 +161,20 @@ impl<'a, H: NippyJarHeader> NippyJarCursor<'a, H> {
             value_offset..next_value_offset
         };
 
+        // The row bounds check above is against the jar's row count, which can be stale: a
+        // concurrent prune may have truncated the offsets file, in which case offsets of
+        // removed rows read as the trailing data-size entry or as zeroes past the new end
+        // of file. Validate the range before slicing the data mmap, which would panic.
+        if column_offset_range.start > column_offset_range.end ||
+            column_offset_range.end > self.reader.size()
+        {
+            return Err(NippyJarError::InvalidOffsetRange {
+                start: column_offset_range.start,
+                end: column_offset_range.end,
+                size: self.reader.size(),
+            })
+        }
+
         if let Some(compression) = self.jar.compressor() {
             let from = self.internal_buffer.len();
             match compression {
