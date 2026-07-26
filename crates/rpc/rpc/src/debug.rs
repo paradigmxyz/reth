@@ -2,7 +2,7 @@ use alloy_consensus::{constants::KECCAK_EMPTY, transaction::TxHashRef, BlockHead
 use alloy_eips::{eip2718::Encodable2718, BlockId, BlockNumberOrTag};
 use alloy_evm::{env::BlockEnvironment, Evm};
 use alloy_genesis::ChainConfig;
-use alloy_primitives::{hex::decode, uint, Address, Bytes, B256, U64};
+use alloy_primitives::{hex::decode, uint, Address, Bytes, B256, U256, U64};
 use alloy_rlp::{Decodable, Encodable};
 use alloy_rpc_types::BlockTransactionsKind;
 use alloy_rpc_types_debug::ExecutionWitness;
@@ -33,9 +33,9 @@ use reth_rpc_eth_api::{
 use reth_rpc_eth_types::{EthApiError, StateCacheDb};
 use reth_rpc_server_types::{result::internal_rpc_err, ToRpcResult};
 use reth_storage_api::{
-    BlockIdReader, BlockReaderIdExt, HashedPostStateProvider, HeaderProvider, ProviderBlock,
-    ReceiptProviderIdExt, StateProviderFactory, StateRootProvider, StorageRootProvider,
-    TransactionVariant,
+    BlockHashReader, BlockIdReader, BlockReaderIdExt, HashedPostStateProvider, HeaderProvider,
+    ProviderBlock, ReceiptProviderIdExt, StateProviderFactory, StateRootProvider,
+    StorageRootProvider, TransactionVariant,
 };
 use reth_tasks::{pool::BlockingTaskGuard, Runtime};
 use reth_transaction_pool::TransactionPool;
@@ -873,10 +873,40 @@ where
     /// Handler for `debug_traceChain`
     async fn debug_trace_chain(
         &self,
-        _start_exclusive: BlockNumberOrTag,
-        _end_inclusive: BlockNumberOrTag,
+        start_exclusive: BlockNumberOrTag,
+        end_inclusive: BlockNumberOrTag,
     ) -> RpcResult<Vec<BlockTraceResult>> {
-        Err(internal_rpc_err("unimplemented"))
+        let _permit = self.acquire_trace_permit().await;
+
+        let start = self
+            .provider()
+            .convert_block_number(start_exclusive)
+            .to_rpc_result()?
+            .ok_or(EthApiError::HeaderNotFound(BlockId::Number(start_exclusive)))?;
+        let end = self
+            .provider()
+            .convert_block_number(end_inclusive)
+            .to_rpc_result()?
+            .ok_or(EthApiError::HeaderNotFound(BlockId::Number(end_inclusive)))?;
+
+        // Trace every block in the range `(start, end]` (start excluded, end included).
+        // The range is empty when `start >= end`, matching geth.
+        let mut results = Vec::new();
+        for number in (start + 1)..=end {
+            let block_id = BlockId::Number(number.into());
+            let hash = self
+                .provider()
+                .block_hash(number)
+                .to_rpc_result()?
+                .ok_or(EthApiError::HeaderNotFound(block_id))?;
+            let traces =
+                Self::debug_trace_block(self, block_id, GethDebugTracingOptions::default())
+                    .await
+                    .map_err(Into::into)?;
+            results.push(BlockTraceResult { block: U256::from(number), hash, traces });
+        }
+
+        Ok(results)
     }
 
     /// Handler for `debug_traceBlock`
