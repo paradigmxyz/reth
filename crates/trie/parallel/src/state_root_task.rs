@@ -501,8 +501,17 @@ pub fn evm_state_to_hashed_post_state(update: EvmState) -> HashedPostState {
             trace!(target: "trie::parallel::sparse", ?address, ?hashed_address, "Adding account to state update");
 
             let destroyed = account.is_selfdestructed();
-            if account.info != account.original_info() {
-                let info = if destroyed { None } else { Some(account.info.into()) };
+            let explicitly_created = account.is_created();
+            let info_changed = account.info != account.original_info();
+            if destroyed || explicitly_created || info_changed {
+                // Match revm-database transition ordering: creation materializes the account
+                // before the EIP-161 empty-account check, while a non-created account that
+                // becomes empty is deleted.
+                let info = if destroyed || (!explicitly_created && account.is_empty()) {
+                    None
+                } else {
+                    Some(account.info.into())
+                };
                 hashed_state.accounts.insert(hashed_address, info);
             }
 
@@ -529,10 +538,88 @@ pub fn evm_state_to_hashed_post_state(update: EvmState) -> HashedPostState {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloy_primitives::{Address, U256};
+    use revm::state::Account;
     use std::{
         sync::atomic::{AtomicUsize, Ordering},
         time::Duration,
     };
+
+    #[test]
+    fn created_empty_account_is_included() {
+        let account = Account::default().with_touched_mark().with_created_mark();
+        let mut state = EvmState::default();
+        state.insert(Address::ZERO, account);
+
+        let hashed_state = evm_state_to_hashed_post_state(state);
+
+        assert!(matches!(hashed_state.accounts.get(&keccak256(Address::ZERO)), Some(Some(_))));
+    }
+
+    #[test]
+    fn locally_created_empty_account_is_included() {
+        let mut account = Account::default().with_touched_mark();
+        account.mark_created_locally();
+        let mut state = EvmState::default();
+        state.insert(Address::ZERO, account);
+
+        let hashed_state = evm_state_to_hashed_post_state(state);
+
+        assert!(matches!(hashed_state.accounts.get(&keccak256(Address::ZERO)), Some(Some(_))));
+    }
+
+    #[test]
+    fn created_non_empty_account_is_included() {
+        let mut account = Account::default().with_touched_mark().with_created_mark();
+        account.info.balance = U256::from(1);
+        let mut state = EvmState::default();
+        state.insert(Address::ZERO, account);
+
+        let hashed_state = evm_state_to_hashed_post_state(state);
+
+        assert!(matches!(
+            hashed_state.accounts.get(&keccak256(Address::ZERO)),
+            Some(Some(account)) if account.balance == U256::from(1)
+        ));
+    }
+
+    #[test]
+    fn emptied_account_is_deleted() {
+        let mut account = Account::default().with_touched_mark();
+        account.original_info_mut().balance = U256::from(1);
+        let mut state = EvmState::default();
+        state.insert(Address::ZERO, account);
+
+        let hashed_state = evm_state_to_hashed_post_state(state);
+
+        assert!(matches!(hashed_state.accounts.get(&keccak256(Address::ZERO)), Some(None)));
+    }
+
+    #[test]
+    fn selfdestruct_takes_precedence_over_creation() {
+        let account =
+            Account::default().with_touched_mark().with_created_mark().with_selfdestruct_mark();
+        let mut state = EvmState::default();
+        state.insert(Address::ZERO, account);
+
+        let hashed_state = evm_state_to_hashed_post_state(state);
+        let hashed_address = keccak256(Address::ZERO);
+
+        assert!(matches!(hashed_state.accounts.get(&hashed_address), Some(None)));
+        assert!(hashed_state.storages[&hashed_address].wiped);
+    }
+
+    #[test]
+    fn unchanged_touched_account_is_omitted() {
+        let account = Account::default().with_touched_mark();
+        let mut state = EvmState::default();
+        state.insert(Address::ZERO, account);
+
+        let hashed_state = evm_state_to_hashed_post_state(state);
+
+        assert!(hashed_state.accounts.is_empty());
+        assert!(hashed_state.storages.is_empty());
+    }
 
     #[derive(Default)]
     struct CountingSink {

@@ -1430,7 +1430,13 @@ mod tests {
 
         let factory = create_test_provider_factory_with_chain_spec(Arc::new(ChainSpec::default()));
         let genesis_hash = init_genesis(&factory).unwrap();
-        let state_updates = create_mock_state_updates(10, 10);
+        let mut state_updates = create_mock_state_updates(10, 10);
+        let mut created_empty_update = EvmState::default();
+        created_empty_update.insert(
+            Address::with_last_byte(0xff),
+            revm::state::Account::default().with_touched_mark().with_created_mark(),
+        );
+        state_updates.push(created_empty_update);
         let mut accumulated_state: HashMap<Address, (Account, HashMap<B256, U256>)> =
             HashMap::default();
 

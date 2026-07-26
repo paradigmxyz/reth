@@ -1051,12 +1051,15 @@ fn encode_account_leaf_value(
     storage_root: B256,
     account_rlp_buf: &mut Vec<u8>,
 ) -> Vec<u8> {
-    if account.is_none_or(|account| account.is_empty()) && storage_root == EMPTY_ROOT_HASH {
+    // Account existence is explicit in `HashedPostState`: `None` deletes the leaf, while
+    // `Some`, including an empty account, writes it. EIP-161 normalization happens when the
+    // execution state is converted into hashed post state.
+    let Some(account) = account else {
         return Vec::new();
-    }
+    };
 
     account_rlp_buf.clear();
-    account.unwrap_or_default().into_trie_account(storage_root).encode(account_rlp_buf);
+    account.into_trie_account(storage_root).encode(account_rlp_buf);
     account_rlp_buf.clone()
 }
 
@@ -1172,13 +1175,27 @@ mod tests {
     }
 
     #[test]
-    fn test_encode_account_leaf_value_empty_account_and_empty_root_is_empty() {
+    fn test_encode_account_leaf_value_deleted_account_is_empty() {
         let mut account_rlp_buf = vec![0xAB];
         let encoded = encode_account_leaf_value(None, EMPTY_ROOT_HASH, &mut account_rlp_buf);
 
         assert!(encoded.is_empty());
         // Early return should not touch the caller's buffer.
         assert_eq!(account_rlp_buf, vec![0xAB]);
+    }
+
+    #[test]
+    fn test_encode_account_leaf_value_empty_account_is_rlp() {
+        let mut account_rlp_buf = vec![0xAB];
+        let encoded = encode_account_leaf_value(
+            Some(Account::default()),
+            EMPTY_ROOT_HASH,
+            &mut account_rlp_buf,
+        );
+        let decoded = TrieAccount::decode(&mut &encoded[..]).expect("valid account RLP");
+
+        assert_eq!(decoded, TrieAccount::default());
+        assert_eq!(account_rlp_buf, encoded);
     }
 
     #[test]
