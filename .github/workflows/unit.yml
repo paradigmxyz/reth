@@ -41,7 +41,12 @@ jobs:
           persist-credentials: false
       - uses: rui314/setup-mold@9c9c13bf4c3f1adef0cc596abc155580bcb04444 # v1
       - run: .github/scripts/install_llvm.sh ubuntu
-      - uses: dtolnay/rust-toolchain@stable
+      # Pinned nightly for -Z panic-abort-tests; compiling the test graph with
+      # aborting panics skips unwinding landing-pad codegen, which measurably
+      # reduces test build times and test binary sizes.
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: nightly-2026-07-12
       - uses: mozilla-actions/sccache-action@9e7fa8a12102821edf02ca5dbea1acd0f89a2696 # v0.0.10
       - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
         with:
@@ -58,10 +63,20 @@ jobs:
         run: |
           cargo nextest run \
             --no-fail-fast \
+            -Z panic-abort-tests \
+            --config 'profile.test.panic="abort"' \
             --features "${{ matrix.features }}" --locked \
             ${{ matrix.exclude_args }} --workspace \
-            --exclude ef-tests --no-tests=warn \
+            --exclude ef-tests --exclude reth-tasks --no-tests=warn \
             -E "!kind(test) and not binary(e2e_testsuite)"
+      - name: Run reth-tasks tests
+        # reth-tasks tests unwinding panic recovery (catch_unwind), which is
+        # incompatible with aborting panics; run it with the default unwind profile.
+        run: |
+          cargo nextest run \
+            --no-fail-fast --locked --no-tests=warn \
+            -p reth-tasks \
+            -E "!kind(test)"
 
   state:
     name: Ethereum state tests
