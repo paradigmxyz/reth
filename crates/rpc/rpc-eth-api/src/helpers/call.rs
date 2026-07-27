@@ -144,11 +144,16 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
                     // Always disable EIP-3607
                     evm_env.cfg_env.disable_eip3607 = true;
 
+                    // EIP-7825's transaction gas cap is only active with Amsterdam's
+                    // regular/state-gas accounting.
+                    if !evm_env.cfg_env.is_amsterdam_eip8037_enabled() {
+                        evm_env.cfg_env.tx_gas_limit_cap = Some(u64::MAX);
+                    }
+
                     if !validation {
                         // If not explicitly required, we disable nonce check <https://github.com/paradigmxyz/reth/issues/16108>
                         evm_env.cfg_env.disable_nonce_check = true;
                         evm_env.cfg_env.disable_base_fee = true;
-                        evm_env.cfg_env.tx_gas_limit_cap = Some(u64::MAX);
                         evm_env.block_env.inner_mut().basefee = 0;
                     }
 
