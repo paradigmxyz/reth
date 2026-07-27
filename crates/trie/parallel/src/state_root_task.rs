@@ -619,6 +619,7 @@ mod tests {
     /// A hook dropped by a panic unwind must not finish the stream: the updates are
     /// incomplete, and a finish marker would make the task compute a root from them.
     #[test]
+    #[cfg_attr(panic = "abort", ignore = "asserts drop-during-unwind behavior")]
     fn hook_dropped_during_panic_does_not_finish_stream() {
         let sink = Arc::new(CountingSink::default());
         let hook = StateRootUpdateStream::new(sink.clone()).into_state_hook();
