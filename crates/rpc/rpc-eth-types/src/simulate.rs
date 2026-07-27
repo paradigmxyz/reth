@@ -335,7 +335,10 @@ where
         } else {
             block_gas_limit.saturating_sub(cumulative_tx_gas_used)
         };
-        let mut default_gas_limit = block_gas_remaining;
+        // The default gas limit must satisfy both the block gas limit and the fork-specific
+        // transaction gas cap. Otherwise a call without an explicit `gas` field can be rejected
+        // as `GasTooHigh` before validation reaches the error the simulation is meant to report.
+        let mut default_gas_limit = block_gas_remaining.min(tx_gas_limit_cap);
 
         if let Some(gas_limit) = call.as_ref().gas_limit() {
             let exceeds_gas_limit = if is_amsterdam {
