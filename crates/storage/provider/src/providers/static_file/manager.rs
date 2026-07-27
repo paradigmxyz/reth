@@ -1316,11 +1316,13 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
             span.record("initial_highest_block", initial_highest_block);
             span.record("highest_block", highest_block);
 
-            // Only applies to block-based static files. (Headers)
+            // Only applies to block-based static files (Headers).
             //
             // The updated `highest_block` may have decreased if we healed from a pruning
-            // interruption.
-            if initial_highest_block != highest_block {
+            // interruption. Tx- and change-based segments recover via the tx-index loop /
+            // changeset invariant checks below; setting an unwind here for those segments
+            // races with that healing and can force unnecessary pipeline unwinds.
+            if segment.is_block_based() && initial_highest_block != highest_block {
                 info!(
                     target: "reth::providers::static_file",
                     unwind_target = highest_block,
@@ -3022,6 +3024,22 @@ mod tests {
     use reth_static_file_types::{SegmentRangeInclusive, StaticFileSegment};
 
     use crate::{providers::StaticFileProvider, StaticFileProviderBuilder};
+
+    #[test]
+    fn post_heal_unwind_only_for_block_based_segments() {
+        // Headers are the only block-based segment; tip shrink after heal must unwind.
+        assert!(StaticFileSegment::Headers.is_block_based());
+        // Tx- and change-based segments recover via later invariant checks instead.
+        for segment in [
+            StaticFileSegment::Transactions,
+            StaticFileSegment::Receipts,
+            StaticFileSegment::TransactionSenders,
+            StaticFileSegment::AccountChangeSets,
+            StaticFileSegment::StorageChangeSets,
+        ] {
+            assert!(!segment.is_block_based(), "{segment:?} must not trigger post-heal unwind");
+        }
+    }
 
     #[test]
     fn test_find_fixed_range_with_block_index() -> eyre::Result<()> {
