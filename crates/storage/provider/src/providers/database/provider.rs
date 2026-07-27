@@ -68,11 +68,12 @@ use reth_storage_api::{
     TryIntoHistoricalStateProvider, WriteStateInput,
 };
 use reth_storage_errors::provider::{ProviderResult, StaticFileWriterError};
+use reth_storage_overlay::ChangesetCache;
 use reth_trie::{
     updates::{StorageTrieUpdatesSorted, TrieUpdatesSorted},
     ComputedTrieData, HashedPostStateSorted,
 };
-use reth_trie_db::{ChangesetCache, DatabaseStorageTrieCursor, TrieTableAdapter};
+use reth_trie_db::{DatabaseStorageTrieCursor, TrieTableAdapter};
 use smallvec::SmallVec;
 use std::{
     cmp::Ordering,
