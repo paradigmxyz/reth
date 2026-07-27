@@ -139,6 +139,8 @@ jobs:
       - name: Build Reth
         env:
           CC: clang
+          # jit is not a default feature; keep release artifacts JIT-capable
+          FEATURES: jit
         run: |
           if [ "${{ matrix.configs.native }}" = "true" ]; then
             make PROFILE=${{ matrix.configs.profile }} EXTRA_RUSTFLAGS="${{ matrix.configs.rustflags }}" ${{ matrix.build.command }}-native-${{ matrix.configs.target }}
