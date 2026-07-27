@@ -65,11 +65,12 @@ use reth_storage_api::{
     StoragePath, StorageSettingsCache, TryIntoHistoricalStateProvider, WriteStateInput,
 };
 use reth_storage_errors::provider::{ProviderResult, StaticFileWriterError};
+use reth_storage_overlay::ChangesetCache;
 use reth_trie::{
     updates::{StorageTrieUpdatesSorted, TrieUpdatesSorted},
     ComputedTrieData, HashedPostStateSorted,
 };
-use reth_trie_db::{ChangesetCache, DatabaseStorageTrieCursor, TrieTableAdapter};
+use reth_trie_db::{DatabaseStorageTrieCursor, TrieTableAdapter};
 use revm::database::states::{
     PlainStateReverts, PlainStorageChangeset, PlainStorageRevert, StateChangeset,
 };

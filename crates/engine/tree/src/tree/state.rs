@@ -6,8 +6,9 @@ use alloy_primitives::{
     map::{B256Map, B256Set},
     BlockNumber, B256,
 };
-use reth_chain_state::{EthPrimitives, ExecutedBlock, StateTrieOverlayManager};
+use reth_chain_state::{EthPrimitives, ExecutedBlock};
 use reth_primitives_traits::{AlloyBlockHeader, NodePrimitives, SealedHeader};
+use reth_storage_overlay::OverlayManager;
 use std::{
     collections::{btree_map, hash_map, BTreeMap, VecDeque},
     ops::Bound,
@@ -39,7 +40,7 @@ pub struct TreeState<N: NodePrimitives = EthPrimitives> {
     /// The engine API variant of this handler
     pub(crate) engine_kind: EngineApiKind,
     /// Flattened state trie overlays for in-memory blocks.
-    pub(crate) state_trie_overlays: StateTrieOverlayManager<N>,
+    pub(crate) state_trie_overlays: OverlayManager<N>,
 }
 
 impl<N: NodePrimitives> TreeState<N> {
@@ -47,7 +48,7 @@ impl<N: NodePrimitives> TreeState<N> {
     pub fn new(
         current_canonical_head: BlockNumHash,
         engine_kind: EngineApiKind,
-        state_trie_overlays: StateTrieOverlayManager<N>,
+        state_trie_overlays: OverlayManager<N>,
     ) -> Self {
         Self {
             blocks_by_hash: B256Map::default(),
@@ -400,7 +401,7 @@ mod tests {
         let mut tree_state = TreeState::new(
             BlockNumHash::default(),
             EngineApiKind::Ethereum,
-            StateTrieOverlayManager::default(),
+            OverlayManager::default(),
         );
         let blocks: Vec<_> = TestBlockBuilder::eth().get_executed_blocks(1..4).collect();
 
@@ -427,7 +428,7 @@ mod tests {
         let mut tree_state = TreeState::new(
             BlockNumHash::default(),
             EngineApiKind::Ethereum,
-            StateTrieOverlayManager::default(),
+            OverlayManager::default(),
         );
         let blocks: Vec<_> = TestBlockBuilder::eth().get_executed_blocks(1..4).collect();
 
@@ -457,7 +458,7 @@ mod tests {
         let mut tree_state = TreeState::new(
             BlockNumHash::default(),
             EngineApiKind::Ethereum,
-            StateTrieOverlayManager::default(),
+            OverlayManager::default(),
         );
         let mut test_block_builder = TestBlockBuilder::eth();
         let blocks: Vec<_> = test_block_builder.get_executed_blocks(1..6).collect();
@@ -498,11 +499,8 @@ mod tests {
     #[tokio::test]
     async fn test_tree_state_remove_before() {
         let start_num_hash = BlockNumHash::default();
-        let mut tree_state = TreeState::new(
-            start_num_hash,
-            EngineApiKind::Ethereum,
-            StateTrieOverlayManager::default(),
-        );
+        let mut tree_state =
+            TreeState::new(start_num_hash, EngineApiKind::Ethereum, OverlayManager::default());
         let blocks: Vec<_> = TestBlockBuilder::eth().get_executed_blocks(1..6).collect();
 
         for block in &blocks {
@@ -552,11 +550,8 @@ mod tests {
     #[tokio::test]
     async fn test_tree_state_remove_before_finalized() {
         let start_num_hash = BlockNumHash::default();
-        let mut tree_state = TreeState::new(
-            start_num_hash,
-            EngineApiKind::Ethereum,
-            StateTrieOverlayManager::default(),
-        );
+        let mut tree_state =
+            TreeState::new(start_num_hash, EngineApiKind::Ethereum, OverlayManager::default());
         let blocks: Vec<_> = TestBlockBuilder::eth().get_executed_blocks(1..6).collect();
 
         for block in &blocks {
@@ -606,11 +601,8 @@ mod tests {
     #[tokio::test]
     async fn test_tree_state_remove_before_lower_finalized() {
         let start_num_hash = BlockNumHash::default();
-        let mut tree_state = TreeState::new(
-            start_num_hash,
-            EngineApiKind::Ethereum,
-            StateTrieOverlayManager::default(),
-        );
+        let mut tree_state =
+            TreeState::new(start_num_hash, EngineApiKind::Ethereum, OverlayManager::default());
         let blocks: Vec<_> = TestBlockBuilder::eth().get_executed_blocks(1..6).collect();
 
         for block in &blocks {
