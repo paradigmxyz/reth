@@ -10,7 +10,7 @@ pub use reth_rpc_builder::{
     middleware::{RethAuthHttpMiddleware, RethRpcMiddleware},
     Identity, Stack,
 };
-pub use reth_trie_db::ChangesetCache;
+use reth_storage_overlay::{ChangesetCache, StateTrieOverlayManager};
 
 use crate::{
     invalid_block_hook::InvalidBlockHookExt, txpool_prewarm, ConfigureEngineEvm,
@@ -20,7 +20,7 @@ use alloy_rpc_types::engine::ClientVersionV1;
 use alloy_rpc_types_engine::ExecutionData;
 use jsonrpsee::RpcModule;
 use parking_lot::Mutex;
-use reth_chain_state::{CanonStateSubscriptions, StateTrieOverlayManager};
+use reth_chain_state::CanonStateSubscriptions;
 use reth_chainspec::{ChainSpecProvider, EthChainSpec, EthereumHardforks, Hardforks};
 use reth_node_api::{
     AddOnsContext, BlockTy, EngineApiValidator, EngineTypes, FullNodeComponents, FullNodeTypes,

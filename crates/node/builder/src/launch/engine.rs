@@ -11,7 +11,6 @@ use crate::{
 };
 use alloy_consensus::BlockHeader;
 use futures::{stream::FusedStream, stream_select, FutureExt, StreamExt};
-use reth_chain_state::StateTrieOverlayManager;
 use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_db::{database_metrics::DatabaseMetrics, Database};
 use reth_engine_tree::{
@@ -38,10 +37,10 @@ use reth_provider::{
     providers::{BlockchainProvider, NodeTypesForProvider},
     BlockNumReader, StorageSettingsCache,
 };
+use reth_storage_overlay::{ChangesetCache, StateTrieOverlayManager};
 use reth_tasks::TaskExecutor;
 use reth_tokio_util::EventSender;
 use reth_tracing::tracing::{debug, error, info};
-use reth_trie_db::ChangesetCache;
 use std::{future::Future, pin::Pin, sync::Arc};
 use tokio::sync::{mpsc::unbounded_channel, oneshot};
 use tokio_stream::wrappers::UnboundedReceiverStream;

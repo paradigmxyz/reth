@@ -1113,11 +1113,10 @@ mod tests {
     use super::*;
     use alloy_primitives::{keccak256, Address, B256, U256};
     use reth_provider::{
-        providers::{OverlayBuilder, OverlayStateProviderFactory},
-        test_utils::create_test_provider_factory,
+        providers::OverlayStateProviderFactory, test_utils::create_test_provider_factory,
         ChainSpecProvider,
     };
-    use reth_trie_db::ChangesetCache;
+    use reth_storage_overlay::{ChangesetCache, OverlayBuilder};
     use reth_trie_parallel::proof_task::ProofTaskCtx;
     use reth_trie_sparse::ArenaParallelSparseTrie;
 

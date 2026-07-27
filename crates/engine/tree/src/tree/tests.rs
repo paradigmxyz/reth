@@ -7,7 +7,7 @@ use crate::{
         PersistTarget, TreeConfig,
     },
 };
-use reth_trie_db::ChangesetCache;
+use reth_storage_overlay::{ChangesetCache, StateTrieOverlayManager};
 
 use alloy_eips::eip1898::BlockWithParent;
 use alloy_primitives::{
@@ -19,7 +19,7 @@ use alloy_rpc_types_engine::{
     ExecutionData, ExecutionPayloadSidecar, ExecutionPayloadV1, ForkchoiceState,
 };
 use assert_matches::assert_matches;
-use reth_chain_state::{test_utils::TestBlockBuilder, BlockState, StateTrieOverlayManager};
+use reth_chain_state::{test_utils::TestBlockBuilder, BlockState};
 use reth_chainspec::{ChainSpec, HOLESKY, MAINNET};
 use reth_engine_primitives::{EngineApiValidator, ForkchoiceStatus, NoopInvalidBlockHook};
 use reth_ethereum_consensus::EthBeaconConsensus;

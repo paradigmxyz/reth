@@ -14,7 +14,7 @@ use alloy_rpc_types_engine::{
 use error::{InsertBlockError, InsertBlockFatalError, InsertBlockValidationError};
 use reth_chain_state::{
     CanonicalInMemoryState, ExecutedBlock, ExecutionTimingStats, MemoryOverlayStateProvider,
-    NewCanonicalChain, StateTrieOverlayManager,
+    NewCanonicalChain,
 };
 use reth_consensus::{Consensus, FullConsensus};
 use reth_engine_primitives::{
@@ -36,9 +36,9 @@ use reth_provider::{
 };
 use reth_revm::database::StateProviderDatabase;
 use reth_stages_api::ControlFlow;
+use reth_storage_overlay::{ChangesetCache, StateTrieOverlayManager};
 use reth_tasks::{spawn_os_thread, utils::increase_thread_priority};
 use reth_trie::ComputedTrieData;
-use reth_trie_db::ChangesetCache;
 use revm::interpreter::debug_unreachable;
 use state::TreeState;
 use std::{fmt::Debug, ops, sync::Arc, time::Duration};
@@ -2238,7 +2238,7 @@ where
             "computing block trie updates",
         );
         let db_provider = self.provider.database_provider_ro()?;
-        let trie_updates = reth_trie_db::compute_block_trie_updates(
+        let trie_updates = reth_storage_overlay::compute_block_trie_updates(
             &self.changeset_cache,
             &db_provider,
             block.number(),

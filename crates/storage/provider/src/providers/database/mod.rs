@@ -33,8 +33,8 @@ use reth_storage_api::{
     NodePrimitivesProvider, StorageSettings, StorageSettingsCache, TryIntoHistoricalStateProvider,
 };
 use reth_storage_errors::provider::ProviderResult;
+use reth_storage_overlay::ChangesetCache;
 use reth_trie::HashedPostState;
-use reth_trie_db::ChangesetCache;
 use revm::database::BundleState;
 use std::{
     ops::{RangeBounds, RangeInclusive},

@@ -6,8 +6,9 @@ use alloy_primitives::{
     map::{B256Map, B256Set},
     BlockNumber, B256,
 };
-use reth_chain_state::{EthPrimitives, ExecutedBlock, StateTrieOverlayManager};
+use reth_chain_state::{EthPrimitives, ExecutedBlock};
 use reth_primitives_traits::{AlloyBlockHeader, NodePrimitives, SealedHeader};
+use reth_storage_overlay::StateTrieOverlayManager;
 use std::{
     collections::{btree_map, hash_map, BTreeMap, VecDeque},
     ops::Bound,

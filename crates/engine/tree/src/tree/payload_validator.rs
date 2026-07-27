@@ -125,9 +125,7 @@ use crate::tree::{
 };
 use alloy_consensus::constants::KECCAK_EMPTY;
 use alloy_primitives::Address;
-use reth_chain_state::{
-    CanonicalInMemoryState, ExecutedBlock, ExecutionTimingStats, StateTrieOverlayManager,
-};
+use reth_chain_state::{CanonicalInMemoryState, ExecutedBlock, ExecutionTimingStats};
 use reth_consensus::{ConsensusError, FullConsensus, ReceiptRootBloom};
 use reth_engine_primitives::{
     ConfigureEngineEvm, ExecutableTxIterator, ExecutionPayload, InvalidBlockHook, PayloadValidator,
@@ -148,18 +146,17 @@ use reth_primitives_traits::{
     RecoveredBlock, SealedBlock, SealedHeader, SignerRecoverable,
 };
 use reth_provider::{
-    providers::{OverlayBuilder, OverlayStateProviderFactory},
-    BlockExecutionOutput, BlockNumReader, BlockReader, ChangeSetReader, DatabaseProviderFactory,
-    DatabaseProviderROFactory, HashedPostStateProvider, ProviderError, PruneCheckpointReader,
-    StageCheckpointReader, StateProvider, StateProviderBox, StateProviderFactory, StateReader,
-    StorageChangeSetReader, StorageSettingsCache,
+    providers::OverlayStateProviderFactory, BlockExecutionOutput, BlockNumReader, BlockReader,
+    ChangeSetReader, DatabaseProviderFactory, DatabaseProviderROFactory, HashedPostStateProvider,
+    ProviderError, PruneCheckpointReader, StageCheckpointReader, StateProvider, StateProviderBox,
+    StateProviderFactory, StateReader, StorageChangeSetReader, StorageSettingsCache,
 };
 use reth_revm::db::{states::bundle_state::BundleRetention, BundleAccount, State};
+use reth_storage_overlay::{ChangesetCache, OverlayBuilder, StateTrieOverlayManager};
 use reth_trie::{
     hashed_cursor::HashedCursorFactory, trie_cursor::TrieCursorFactory, updates::TrieUpdates,
     LazyTrieData,
 };
-use reth_trie_db::ChangesetCache;
 use std::{
     sync::{
         atomic::{AtomicUsize, Ordering},

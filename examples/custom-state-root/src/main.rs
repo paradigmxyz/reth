@@ -22,7 +22,6 @@ use std::sync::Arc;
 
 use alloy_genesis::Genesis;
 use alloy_primitives::B256;
-use reth_chain_state::StateTrieOverlayManager;
 use reth_engine_tree::tree::{
     state_root_strategy::{
         DefaultStateRootStrategy, LazyHashedPostState, PayloadStateRootHandle,
@@ -36,8 +35,8 @@ use reth_ethereum::{
     node::{
         builder::{
             rpc::{
-                BasicEngineApiBuilder, BasicEngineValidatorBuilder, ChangesetCache,
-                EngineValidatorBuilder, Identity, RpcAddOns,
+                BasicEngineApiBuilder, BasicEngineValidatorBuilder, EngineValidatorBuilder,
+                Identity, RpcAddOns,
             },
             FullNodeComponents, NodeBuilder, NodeHandle,
         },
@@ -50,6 +49,7 @@ use reth_ethereum::{
 use reth_evm::{revm::context::Block as _, ConfigureEvm};
 use reth_primitives_traits::{NodePrimitives, RecoveredBlock};
 use reth_provider::{BlockExecutionOutput, ProviderResult};
+use reth_storage_overlay::{ChangesetCache, StateTrieOverlayManager};
 use reth_trie::updates::TrieUpdates;
 
 /// Strategy that returns `B256::ZERO` as the state root from an activation timestamp on, and
