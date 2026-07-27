@@ -1,15 +1,20 @@
 use super::{
     control::{Command, Publication},
-    Job, Source, Transactions,
+    Job, NextBlock, Source, Transactions,
 };
 use crate::tree::{StateProviderDatabase, TxPoolPrewarmCacheSnapshot as Snapshot};
-use alloy_evm::Evm;
-use alloy_primitives::B256;
+use alloy_eips::{
+    eip2935::HISTORY_STORAGE_ADDRESS,
+    eip4788::{BEACON_ROOTS_ADDRESS, SYSTEM_ADDRESS},
+};
+use alloy_evm::{env::BlockEnvironment, Database, Evm};
+use alloy_primitives::{Address, B256, U256};
 use crossbeam_channel::{Receiver, RecvTimeoutError, TryRecvError};
-use reth_evm::ConfigureEvm;
+use reth_evm::{ConfigureEvm, EvmEnvFor};
 use reth_primitives_traits::NodePrimitives;
 use reth_provider::{BlockReader, StateProviderFactory, StateReader};
 use reth_revm::{cached::CachedReads, db::State};
+use revm::primitives::hardfork::SpecId;
 use std::{
     sync::Arc,
     time::{Duration, Instant},
@@ -56,6 +61,9 @@ where
     /// Cache entry counts as of the last publication. The cache only ever grows, so a change
     /// means it holds unpublished reads.
     published_entries: (usize, usize, usize),
+    /// Whether the next block's pre-block system calls were already warmed for `cache_parent`.
+    /// They read a fixed handful of slots, so warming them once per parent is enough.
+    pre_execution_warmed: bool,
     /// Live best-transactions iterator, tagged with the parent it was opened for.
     transactions: Option<(B256, Transactions<N>)>,
 }
@@ -82,6 +90,7 @@ where
             cache: CachedReads::default(),
             cache_parent: None,
             published_entries: (0, 0, 0),
+            pre_execution_warmed: false,
             transactions: None,
         }
     }
@@ -106,6 +115,7 @@ where
                 self.cache = CachedReads::default();
                 self.cache_parent = Some(parent_hash);
                 self.published_entries = (0, 0, 0);
+                self.pre_execution_warmed = false;
                 debug!(
                     target: "engine::tree::txpool_prewarm",
                     ?parent_hash,
@@ -158,8 +168,9 @@ where
         self.transactions.is_some()
     }
 
-    /// Speculatively executes pool transactions against the parent state for at most
-    /// [`REFRESH_INTERVAL`], filling the cache with every state read.
+    /// Warms the next block's pre-block system calls, then speculatively executes pool
+    /// transactions against the parent state for at most [`REFRESH_INTERVAL`], filling the cache
+    /// with every state read.
     ///
     /// Stops early once the pool has no transaction ready or a command arrives. Commands are
     /// never consumed here: a pending command merely ends the batch and is applied by the main
@@ -190,6 +201,18 @@ where
         let mut state = State::builder()
             .with_database(self.cache.as_db_mut(StateProviderDatabase::new(state_provider)))
             .build();
+
+        if !self.pre_execution_warmed {
+            warm_pre_execution(
+                &self.evm_config,
+                &mut state,
+                job.evm_env.clone(),
+                job.next_block,
+                *parent_hash,
+            );
+            self.pre_execution_warmed = true;
+        }
+
         // The environment is the head block's own, not a predicted next-block one, and execution
         // is out of context by design: transaction viability is the pool's business, so nonce,
         // balance and (one-block-stale) basefee checks must not gate which state gets warmed.
@@ -295,6 +318,63 @@ enum BatchEnd {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct ChannelDisconnected;
 
+/// Warms the state that the next block's pre-block system calls will touch: the [EIP-4788] beacon
+/// roots contract and the [EIP-2935] blockhash history contract, along with the ring buffer slots
+/// each of them overwrites. Every post-Prague block starts with these two calls, and the slots
+/// they hit were last written a full ring buffer ago, so they are reliably cold.
+///
+/// Both ring buffers are indexed by the *executing* block's own number and timestamp, so the calls
+/// run against `next_block` rather than the head's environment. As everywhere else in this worker,
+/// the resulting state changes are dropped and only the reads are kept.
+///
+/// [EIP-4788]: https://eips.ethereum.org/EIPS/eip-4788
+/// [EIP-2935]: https://eips.ethereum.org/EIPS/eip-2935
+fn warm_pre_execution<Evm, DB>(
+    evm_config: &Evm,
+    state: &mut State<DB>,
+    mut evm_env: EvmEnvFor<Evm>,
+    next_block: NextBlock,
+    parent_hash: B256,
+) where
+    Evm: ConfigureEvm,
+    DB: Database,
+{
+    // Warming is one block ahead of the head, so a fork that activates on the very next block is
+    // missed. That costs a single block's worth of warming at each fork boundary.
+    let spec: SpecId = (*evm_env.spec_id()).into();
+    if !spec.is_enabled_in(SpecId::CANCUN) {
+        return
+    }
+
+    let block_env = evm_env.block_env.inner_mut();
+    block_env.number = U256::from(next_block.number);
+    block_env.timestamp = U256::from(next_block.timestamp);
+    let mut evm = evm_config.evm_with_env(state, evm_env);
+
+    // The beacon roots contract stores the parent beacon block root at `timestamp % 8191`. Only
+    // the payload carries the root itself, but the contract writes it without reading it back, so
+    // a zero root warms exactly the slots the real call will.
+    transact_system_call(&mut evm, BEACON_ROOTS_ADDRESS, B256::ZERO);
+
+    if spec.is_enabled_in(SpecId::PRAGUE) {
+        // The history contract stores the parent hash at `(number - 1) % 8191`; here both the slot
+        // and the value written are already known exactly.
+        transact_system_call(&mut evm, HISTORY_STORAGE_ADDRESS, parent_hash);
+    }
+}
+
+/// Runs one pre-block system call, discarding its outcome.
+fn transact_system_call(evm: &mut impl Evm, contract: Address, data: B256) {
+    if let Err(err) = evm.transact_system_call(SYSTEM_ADDRESS, contract, data.0.into()) {
+        trace!(
+            target: "engine::tree::txpool_prewarm",
+            %err,
+            ?contract,
+            "speculative system call failed"
+        );
+    }
+}
+
 /// Returns `(accounts, storage slots, bytecodes)` cached in `reads`.
 fn entry_counts(reads: &CachedReads) -> (usize, usize, usize) {
     (
@@ -309,12 +389,16 @@ mod tests {
     use super::{super::Transaction as PoolTransaction, *};
     use crate::tree::StateProviderBuilder;
     use alloy_consensus::{transaction::Recovered, Signed, TxLegacy};
-    use alloy_primitives::{Address, Signature, TxKind, U256};
+    use alloy_eips::{
+        eip2935::{HISTORY_SERVE_WINDOW, HISTORY_STORAGE_CODE},
+        eip4788::BEACON_ROOTS_CODE,
+    };
+    use alloy_primitives::{Signature, TxKind};
     use crossbeam_channel::{unbounded, Sender};
     use parking_lot::{Mutex, RwLock};
     use reth_ethereum_primitives::{EthPrimitives, TransactionSigned};
     use reth_evm_ethereum::EthEvmConfig;
-    use reth_provider::test_utils::MockEthProvider;
+    use reth_provider::test_utils::{ExtendedAccount, MockEthProvider};
     use std::{
         collections::{HashMap, VecDeque},
         sync::atomic::{AtomicUsize, Ordering},
@@ -325,6 +409,10 @@ mod tests {
     const WAIT_LIMIT: Duration = Duration::from_secs(5);
     const POLL_INTERVAL: Duration = Duration::from_millis(2);
 
+    /// The block every harness warms for. Both values are arbitrary but must be far enough into
+    /// the chain that the ring buffer slots they map to are distinct.
+    const NEXT_BLOCK: NextBlock = NextBlock { number: 12_345, timestamp: 1_700_000_000 };
+
     type TestJob = Job<EthPrimitives, MockEthProvider, EthEvmConfig>;
 
     /// Drives a live worker thread through its public seams only: commands in, the publication
@@ -333,6 +421,7 @@ mod tests {
         commands: Sender<Command<TestJob>>,
         publication: Publication,
         pool: Arc<ScriptedPool>,
+        provider: MockEthProvider,
         worker: Option<JoinHandle<()>>,
     }
 
@@ -346,7 +435,13 @@ mod tests {
                 let source: Arc<dyn Source<EthPrimitives>> = pool.clone();
                 move || Worker::new(receiver, publication, source, EthEvmConfig::mainnet()).run()
             });
-            Self { commands, publication, pool, worker: Some(worker) }
+            Self {
+                commands,
+                publication,
+                pool,
+                provider: MockEthProvider::default(),
+                worker: Some(worker),
+            }
         }
 
         /// Drops the control channel and waits for the worker thread to exit.
@@ -362,8 +457,9 @@ mod tests {
         fn start(&self, parent_hash: B256) {
             let job = Job {
                 evm_env: Default::default(),
+                next_block: NEXT_BLOCK,
                 provider_builder: StateProviderBuilder::new(
-                    MockEthProvider::default(),
+                    self.provider.clone(),
                     parent_hash,
                     None,
                 ),
@@ -491,6 +587,41 @@ mod tests {
         let snapshot = harness.published_for(parent_hash);
         let (accounts, _, _) = snapshot.entry_counts();
         assert!(accounts >= 1, "speculative execution should cache account reads");
+    }
+
+    #[test]
+    fn warms_the_next_blocks_pre_block_system_calls() {
+        // Both ring buffers hold `HISTORY_SERVE_WINDOW` entries; EIP-4788 uses two of them, one
+        // for the timestamp and one for the root.
+        const WINDOW: u64 = HISTORY_SERVE_WINDOW as u64;
+
+        let harness = Harness::spawn();
+        let parent_hash = B256::repeat_byte(0x01);
+        harness.provider.extend_accounts([
+            (
+                BEACON_ROOTS_ADDRESS,
+                ExtendedAccount::new(1, U256::ZERO).with_bytecode(BEACON_ROOTS_CODE.clone()),
+            ),
+            (
+                HISTORY_STORAGE_ADDRESS,
+                ExtendedAccount::new(1, U256::ZERO).with_bytecode(HISTORY_STORAGE_CODE.clone()),
+            ),
+        ]);
+        harness.start(parent_hash);
+        harness.pool.push(parent_hash, transfer(0xB0));
+
+        let snapshot = harness.published_for(parent_hash);
+        let slot = |index: u64| B256::from(U256::from(index));
+        let beacon_root_index = NEXT_BLOCK.timestamp % WINDOW;
+        assert_eq!(
+            (
+                snapshot.storage(BEACON_ROOTS_ADDRESS, slot(beacon_root_index)),
+                snapshot.storage(BEACON_ROOTS_ADDRESS, slot(beacon_root_index + WINDOW)),
+                snapshot.storage(HISTORY_STORAGE_ADDRESS, slot((NEXT_BLOCK.number - 1) % WINDOW)),
+            ),
+            (Some(U256::ZERO), Some(U256::ZERO), Some(U256::ZERO)),
+            "both system contracts should have their overwritten ring buffer slots warmed"
+        );
     }
 
     #[test]
