@@ -277,6 +277,7 @@ where
 
 #[cfg(test)]
 mod tests {
+    #[cfg(feature = "partial-persistence")]
     use super::*;
     #[cfg(feature = "partial-persistence")]
     use crate::{
