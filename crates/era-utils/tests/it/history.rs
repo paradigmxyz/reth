@@ -50,8 +50,11 @@ async fn test_history_imports_from_fresh_state_successfully() {
     assert_eq!(actual_block_number, expected_block_number);
 }
 
-/// Importing a real `.era1` file with `--with-receipts`-style `store_receipts = true` must
-/// decode and persist its (always-present) receipts to the `Receipts` static file segment.
+/// Importing a real `.era1` file with `store_receipts = true` must advance the `Receipts` static
+/// file segment alongside the headers.
+///
+/// Mainnet's first transaction is in block 46147, so every block in the first era1 file is
+/// transaction-less: this exercises the writer plumbing, not receipt decoding.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_history_import_with_receipts() {
     let url = Url::from_str(ITHACA_ERA_INDEX_URL).unwrap();

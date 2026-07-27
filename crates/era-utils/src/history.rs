@@ -776,16 +776,16 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy_consensus::{Header, Receipt as RlpReceipt, ReceiptWithBloom, TxType};
-    use alloy_primitives::B256;
+    use alloy_consensus::{Header, Receipt as RlpReceipt, ReceiptWithBloom, TxLegacy, TxType};
+    use alloy_primitives::{Signature, B256};
     use reth_db_common::init::init_genesis;
     use reth_era::era1::types::execution::{
         CompressedBody, CompressedHeader, CompressedReceipts, TotalDifficulty,
     };
-    use reth_ethereum_primitives::{Block, BlockBody, Receipt};
+    use reth_ethereum_primitives::{Block, BlockBody, Receipt, TransactionSigned};
     use reth_provider::{
-        test_utils::create_test_provider_factory, DatabaseProviderFactory, StageCheckpointReader,
-        StaticFileProviderFactory, StaticFileSegment, StaticFileWriter,
+        test_utils::create_test_provider_factory, DatabaseProviderFactory, ReceiptProvider,
+        StageCheckpointReader, StaticFileProviderFactory, StaticFileSegment, StaticFileWriter,
     };
     use std::{cell::Cell, path::Path};
     use tempfile::tempdir;
@@ -795,10 +795,34 @@ mod tests {
         let header = Header { number, ..Default::default() };
         BlockTuple::new(
             CompressedHeader::from_rlp(&alloy_rlp::encode(&header)).unwrap(),
-            CompressedBody::from_rlp(&alloy_rlp::encode(&BlockBody::default())).unwrap(),
+            CompressedBody::from_rlp(&alloy_rlp::encode(BlockBody::default())).unwrap(),
             CompressedReceipts::from_rlp(&alloy_rlp::encode(&receipts)).unwrap(),
             TotalDifficulty::new(U256::ZERO),
         )
+    }
+
+    /// Builds a block with one transaction, its receipt, and a header committing to that receipt.
+    fn block_with_one_receipt(number: u64) -> (Header, BlockBody, Receipt) {
+        let tx = TransactionSigned::new_unhashed(
+            TxLegacy::default().into(),
+            Signature::test_signature(),
+        );
+        let receipt = Receipt {
+            tx_type: TxType::Legacy,
+            success: true,
+            cumulative_gas_used: 21_000,
+            logs: vec![],
+        };
+
+        let with_bloom = vec![TxReceipt::with_bloom_ref(&receipt)];
+        let header = Header {
+            number,
+            receipts_root: calculate_receipt_root(&with_bloom),
+            logs_bloom: with_bloom.iter().fold(Bloom::ZERO, |bloom, r| bloom | r.bloom_ref()),
+            ..Default::default()
+        };
+
+        (header, BlockBody { transactions: vec![tx], ..Default::default() }, receipt)
     }
 
     /// Wraps `status` in a legacy `.era1` receipt envelope.
@@ -1156,6 +1180,72 @@ mod tests {
             static_file_provider.get_highest_static_file_block(StaticFileSegment::Headers),
             Some(2)
         );
+    }
+
+    #[test]
+    fn process_iter_persists_verified_receipts() {
+        let pf = create_test_provider_factory();
+        init_genesis(&pf).unwrap();
+        let static_file_provider = pf.static_file_provider();
+        let folder = tempdir().unwrap();
+        let mut hash_collector = Collector::new(4096, Some(folder.path().to_owned()));
+
+        let (header, body, receipt) = block_with_one_receipt(1);
+        let provider = pf.database_provider_rw().unwrap();
+        {
+            let mut writer =
+                static_file_provider.latest_writer(StaticFileSegment::Headers).unwrap();
+            let mut receipts_writer =
+                static_file_provider.latest_writer(StaticFileSegment::Receipts).unwrap();
+
+            process_iter::<_, Block, _, _>(
+                std::iter::once(Ok((header, body, Some(vec![receipt.clone()])))),
+                &mut writer,
+                Some(&mut receipts_writer),
+                &provider,
+                &mut hash_collector,
+                0..,
+                ImportPolicy { headers_tip: 0, is_receipt_verifiable: &|_| true },
+            )
+            .unwrap();
+
+            receipts_writer.commit().unwrap();
+            writer.commit().unwrap();
+        }
+        provider.commit().unwrap();
+
+        let provider = pf.provider().unwrap();
+        assert_eq!(provider.receipts_by_block(1.into()).unwrap(), Some(vec![receipt]));
+    }
+
+    #[test]
+    fn process_iter_rejects_receipts_the_header_does_not_commit_to() {
+        let pf = create_test_provider_factory();
+        init_genesis(&pf).unwrap();
+        let static_file_provider = pf.static_file_provider();
+        let folder = tempdir().unwrap();
+        let mut hash_collector = Collector::new(4096, Some(folder.path().to_owned()));
+
+        // Right receipt count, wrong contents: only the recomputed root catches this.
+        let (header, body, receipt) = block_with_one_receipt(1);
+        let tampered = Receipt { cumulative_gas_used: 42_000, ..receipt };
+
+        let provider = pf.database_provider_rw().unwrap();
+        let mut writer = static_file_provider.latest_writer(StaticFileSegment::Headers).unwrap();
+        let mut receipts_writer =
+            static_file_provider.latest_writer(StaticFileSegment::Receipts).unwrap();
+
+        let result = process_iter::<_, Block, _, _>(
+            std::iter::once(Ok((header, body, Some(vec![tampered])))),
+            &mut writer,
+            Some(&mut receipts_writer),
+            &provider,
+            &mut hash_collector,
+            0..,
+            ImportPolicy { headers_tip: 0, is_receipt_verifiable: &|_| true },
+        );
+
+        assert!(result.is_err());
     }
 
     #[test]
