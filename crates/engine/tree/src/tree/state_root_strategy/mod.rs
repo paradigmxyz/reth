@@ -41,6 +41,14 @@
 //! blocks where the default behavior is wanted, for example before a fork activates. See
 //! `examples/custom-state-root` for the wiring.
 //!
+//! # Empty accounts
+//!
+//! The sparse-trie path treats an account with zero nonce, zero balance, empty bytecode, and an
+//! empty storage root as absent from the account trie. This relies on the post-Merge invariant
+//! established by EIP-7523 (<https://eips.ethereum.org/EIPS/eip-7523>): post-Merge state cannot
+//! contain empty accounts. A custom strategy that replays pre-Merge blocks through the Engine API
+//! must route those blocks to a state-root implementation that supports historical empty accounts.
+//!
 //! Returning empty trie updates in the outcome means the trie tables are no longer maintained:
 //! `eth_getProof` and anything else that reads the stored trie will not work for new blocks.
 //! Sparse-trie cache pruning uses node epochs to retain the in-memory block range.
