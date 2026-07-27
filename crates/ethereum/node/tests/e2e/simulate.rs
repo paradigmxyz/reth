@@ -123,10 +123,10 @@ async fn assert_validation_uses_remaining_gas(
         .max_priority_fee_per_gas(0)
         .nonce(0)
         // Create an empty contract so Amsterdam exercises the state-gas reservoir.
-        .input(bytes!("0x60006000f3"));
+        .input(bytes!("0x60006000f3").into());
     let sim_block = SimBlock::default()
         .with_block_overrides(BlockOverrides {
-            gas_limit: Some(U256::from(30_000_000u64)),
+            gas_limit: Some(30_000_000),
             base_fee: Some(U256::ZERO),
             ..Default::default()
         })
