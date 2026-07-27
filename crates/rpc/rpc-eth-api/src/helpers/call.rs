@@ -41,7 +41,7 @@ use reth_rpc_eth_types::{
 use reth_storage_api::{BlockIdReader, ProviderTx, StateProviderBox};
 use revm::{
     context::Block,
-    context_interface::{result::ResultAndState, Transaction},
+    context_interface::{result::ResultAndState, Cfg, Transaction},
     Database, DatabaseCommit,
 };
 use revm_inspectors::{access_list::AccessListInspector, transfer::TransferInspector};
