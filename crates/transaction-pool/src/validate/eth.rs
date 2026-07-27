@@ -1586,7 +1586,6 @@ mod tests {
         assert_eq!(tx.transaction.blob_cell_availability(), None);
     }
 
-    #[test]
     fn assert_missing_blob_sidecar_uses_stored_availability(
         sidecar: BlobTransactionSidecarVariant,
         expected: BlobCellAvailability,
