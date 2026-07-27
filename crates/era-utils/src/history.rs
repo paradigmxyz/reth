@@ -36,8 +36,8 @@ use reth_stages_types::{
 };
 use reth_storage_api::{
     errors::{ProviderError, ProviderResult},
-    BlockBodyIndicesProvider, DBProvider, DatabaseProviderFactory, NodePrimitivesProvider,
-    StageCheckpointWriter,
+    BlockBodyIndicesProvider, BlockHashReader, DBProvider, DatabaseProviderFactory,
+    NodePrimitivesProvider, StageCheckpointWriter,
 };
 use std::{collections::Bound, error::Error, ops::RangeBounds, sync::mpsc};
 use tracing::info;
@@ -267,6 +267,7 @@ where
         ProviderRW: BlockWriter<Block = B>
             + DBProvider
             + BlockBodyIndicesProvider
+            + BlockHashReader
             + StaticFileProviderFactory<Primitives: NodePrimitives<Block = B, BlockHeader = BH, BlockBody = BB>>
             + StageCheckpointWriter,
     > + StaticFileProviderFactory<Primitives = <<PF as DatabaseProviderFactory>::ProviderRW as NodePrimitivesProvider>::Primitives>,
@@ -406,7 +407,8 @@ where
     P: DBProvider<Tx: DbTxMut>
         + NodePrimitivesProvider
         + BlockWriter<Block = B>
-        + BlockBodyIndicesProvider,
+        + BlockBodyIndicesProvider
+        + BlockHashReader,
     <P as NodePrimitivesProvider>::Primitives: NodePrimitives<BlockHeader = BH, BlockBody = BB>,
     ReceiptOf<P>: Compact + Receipt,
 {
@@ -556,7 +558,8 @@ where
     P: DBProvider<Tx: DbTxMut>
         + NodePrimitivesProvider
         + BlockWriter<Block = B>
-        + BlockBodyIndicesProvider,
+        + BlockBodyIndicesProvider
+        + BlockHashReader,
     <P as NodePrimitivesProvider>::Primitives: NodePrimitives<BlockHeader = BH, BlockBody = BB>,
     ReceiptOf<P>: Compact + Receipt,
 {
@@ -604,6 +607,13 @@ where
             writer.append_header(&header, &hash)?;
             provider.append_block_bodies(vec![(header.number(), Some(&body))])?;
             hash_collector.insert(hash, number)?;
+        } else if provider.block_hash(number)? != Some(header.hash_slow()) {
+            // Receipts are verified against the source header, so it must be the block already
+            // persisted at this height, not merely a self-consistent one.
+            eyre::bail!(
+                "block {number} in this ERA file does not match the block already imported at \
+                 that height"
+            );
         }
 
         if let Some(receipts_writer) = receipts_writer.as_deref_mut() {
@@ -1345,6 +1355,56 @@ mod tests {
 
         assert_eq!(header.number, 46_147);
         assert!(receipts.is_none());
+    }
+
+    #[test]
+    fn backfill_rejects_a_header_that_differs_from_the_persisted_one() {
+        let pf = create_test_provider_factory();
+        init_genesis(&pf).unwrap();
+        let static_file_provider = pf.static_file_provider();
+        let folder = tempdir().unwrap();
+        let mut hash_collector = Collector::new(4096, Some(folder.path().to_owned()));
+
+        let provider = pf.database_provider_rw().unwrap();
+        {
+            let mut writer =
+                static_file_provider.latest_writer(StaticFileSegment::Headers).unwrap();
+            let meta = TestMeta { marked: Cell::new(false) };
+            process::<TestEra, _, Block, _, _>(
+                &meta,
+                &mut writer,
+                None,
+                &provider,
+                &mut hash_collector,
+                0..=2,
+                ImportPolicy { headers_tip: 0, is_receipt_verifiable: &|_| false },
+            )
+            .unwrap();
+            writer.commit().unwrap();
+        }
+        provider.commit().unwrap();
+
+        // Same height and receipt count as the persisted block, but a different header.
+        let provider = pf.database_provider_rw().unwrap();
+        let mut writer = static_file_provider.latest_writer(StaticFileSegment::Headers).unwrap();
+        let mut receipts_writer =
+            static_file_provider.latest_writer(StaticFileSegment::Receipts).unwrap();
+
+        let result = process_iter::<_, Block, _, _>(
+            std::iter::once(Ok((
+                Header { number: 1, gas_limit: 42, ..Default::default() },
+                BlockBody::default(),
+                Some(vec![]),
+            ))),
+            &mut writer,
+            Some(&mut receipts_writer),
+            &provider,
+            &mut hash_collector,
+            0..,
+            ImportPolicy { headers_tip: 2, is_receipt_verifiable: &|_| false },
+        );
+
+        assert!(result.is_err());
     }
 
     #[test]
