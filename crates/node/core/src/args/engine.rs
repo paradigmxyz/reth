@@ -31,6 +31,7 @@ pub struct DefaultEngineValues {
     invalid_header_hit_eviction_threshold: u8,
     state_cache_disabled: bool,
     prewarming_disabled: bool,
+    txpool_prewarming_enabled: bool,
     state_provider_metrics: bool,
     cross_block_cache_size: usize,
     state_root_task_compare_updates: bool,
@@ -99,6 +100,12 @@ impl DefaultEngineValues {
     /// Set whether to disable prewarming by default
     pub const fn with_prewarming_disabled(mut self, v: bool) -> Self {
         self.prewarming_disabled = v;
+        self
+    }
+
+    /// Set whether to enable txpool prewarming by default
+    pub const fn with_txpool_prewarming_enabled(mut self, v: bool) -> Self {
+        self.txpool_prewarming_enabled = v;
         self
     }
 
@@ -247,6 +254,7 @@ impl Default for DefaultEngineValues {
             invalid_header_hit_eviction_threshold: DEFAULT_INVALID_HEADER_HIT_EVICTION_THRESHOLD,
             state_cache_disabled: false,
             prewarming_disabled: false,
+            txpool_prewarming_enabled: false,
             state_provider_metrics: false,
             cross_block_cache_size: DEFAULT_CROSS_BLOCK_CACHE_SIZE_MB,
             state_root_task_compare_updates: false,
@@ -336,6 +344,14 @@ pub struct EngineArgs {
     /// Disable parallel prewarming
     #[arg(long = "engine.disable-prewarming", alias = "engine.disable-caching-and-prewarming", default_value_t = DefaultEngineValues::get_global().prewarming_disabled)]
     pub prewarming_disabled: bool,
+
+    /// Enable best-effort txpool transaction prewarming between payloads.
+    #[arg(
+        long = "engine.txpool-prewarming",
+        env = "RETH_ENGINE_TXPOOL_PREWARMING",
+        default_value_t = DefaultEngineValues::get_global().txpool_prewarming_enabled
+    )]
+    pub txpool_prewarming_enabled: bool,
 
     /// CAUTION: This CLI flag has no effect anymore. The parallel sparse trie is always enabled.
     #[deprecated]
@@ -534,6 +550,7 @@ impl Default for EngineArgs {
             invalid_header_hit_eviction_threshold,
             state_cache_disabled,
             prewarming_disabled,
+            txpool_prewarming_enabled,
             state_provider_metrics,
             cross_block_cache_size,
             state_root_task_compare_updates,
@@ -567,6 +584,7 @@ impl Default for EngineArgs {
             caching_and_prewarming_enabled: true,
             state_cache_disabled,
             prewarming_disabled,
+            txpool_prewarming_enabled,
             parallel_sparse_trie_enabled: true,
             parallel_sparse_trie_disabled: false,
             state_provider_metrics,
@@ -633,6 +651,10 @@ impl EngineArgs {
             self.persistence_threshold,
         );
         ensure!(
+            !self.state_cache_disabled || !self.txpool_prewarming_enabled,
+            "--engine.txpool-prewarming conflicts with --engine.disable-state-cache"
+        );
+        ensure!(
             self.bal_parallel_execution_disabled || !self.bal_parallel_state_root_disabled,
             "--engine.disable-bal-parallel-state-root requires --engine.disable-bal-parallel-execution because BAL parallel execution depends on BAL prewarm state-root updates"
         );
@@ -652,6 +674,7 @@ impl EngineArgs {
             .with_invalid_header_hit_eviction_threshold(self.invalid_header_hit_eviction_threshold)
             .without_state_cache(self.state_cache_disabled)
             .without_prewarming(self.prewarming_disabled)
+            .with_txpool_prewarming(self.txpool_prewarming_enabled)
             .with_state_provider_metrics(self.state_provider_metrics)
             .with_always_compare_trie_updates(self.state_root_task_compare_updates)
             .with_cross_block_cache_size(self.cross_block_cache_size * 1024 * 1024)
@@ -707,6 +730,31 @@ mod tests {
             args.persistence_backpressure_threshold(),
             DefaultEngineValues::get_global().persistence_backpressure_threshold
         );
+    }
+
+    #[test]
+    fn txpool_prewarming_is_disabled_by_default_and_can_be_enabled() {
+        let args = CommandParser::<EngineArgs>::parse_from(["reth"]).args;
+        assert!(!args.txpool_prewarming_enabled);
+        assert!(!args.tree_config().txpool_prewarming());
+
+        let args =
+            CommandParser::<EngineArgs>::parse_from(["reth", "--engine.txpool-prewarming"]).args;
+        assert!(args.txpool_prewarming_enabled);
+        assert!(args.tree_config().txpool_prewarming());
+    }
+
+    #[test]
+    fn validate_rejects_txpool_prewarming_with_disabled_state_cache() {
+        let args = EngineArgs {
+            state_cache_disabled: true,
+            txpool_prewarming_enabled: true,
+            ..EngineArgs::default()
+        };
+
+        let err = args.validate().unwrap_err().to_string();
+        assert!(err.contains("engine.txpool-prewarming"));
+        assert!(err.contains("engine.disable-state-cache"));
     }
 
     #[test]
@@ -771,6 +819,8 @@ mod tests {
             caching_and_prewarming_enabled: true,
             state_cache_disabled: true,
             prewarming_disabled: true,
+            // conflicts with --engine.disable-state-cache, covered by its own test below
+            txpool_prewarming_enabled: false,
             parallel_sparse_trie_enabled: true,
             parallel_sparse_trie_disabled: false,
             state_provider_metrics: true,

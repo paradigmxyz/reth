@@ -413,7 +413,7 @@ where
             let provider_builder = ctx.provider.clone();
             let build = Arc::new(move || provider_builder.build());
 
-            pool.begin_block(build, caches);
+            pool.begin_block(build, caches, ctx.env.txpool_snapshot.clone());
             for account in prefetch_bal.as_bal() {
                 pool.warm_account(account.address);
                 for change in &account.storage_changes {
@@ -582,7 +582,10 @@ where
         // Use the caches to create a new provider with caching
         if let Some(saved_cache) = &self.saved_cache {
             let caches = saved_cache.cache().clone();
-            state_provider = Box::new(CachedStateProvider::new_prewarm(state_provider, caches));
+            state_provider = Box::new(
+                CachedStateProvider::new_prewarm(state_provider, caches)
+                    .with_txpool_snapshot(self.env.txpool_snapshot.clone()),
+            );
         }
 
         let state_provider = StateProviderDatabase::new(state_provider);
@@ -699,7 +702,10 @@ where
                     match (self.disable_bal_batch_io, &self.saved_cache) {
                         (false, Some(saved)) => {
                             let caches = saved.cache().clone();
-                            Box::new(CachedStateProvider::new_prewarm(inner, caches))
+                            Box::new(
+                                CachedStateProvider::new_prewarm(inner, caches)
+                                    .with_txpool_snapshot(self.env.txpool_snapshot.clone()),
+                            )
                         }
                         _ => Box::new(inner),
                     };

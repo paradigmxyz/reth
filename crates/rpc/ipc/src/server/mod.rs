@@ -461,7 +461,7 @@ fn process_connection<RpcMiddleware, HttpMiddleware>(
     >,
     <<HttpMiddleware as Layer<TowerServiceNoHttp<RpcMiddleware>>>::Service as Service<String>>::Future:
     Send + Unpin,
- {
+{
     let ProcessConnection {
         http_middleware,
         rpc_middleware,

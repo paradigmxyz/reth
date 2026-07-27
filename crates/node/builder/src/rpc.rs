@@ -13,8 +13,8 @@ pub use reth_rpc_builder::{
 pub use reth_trie_db::ChangesetCache;
 
 use crate::{
-    invalid_block_hook::InvalidBlockHookExt, ConfigureEngineEvm, ConsensusEngineEvent,
-    ConsensusEngineHandle,
+    invalid_block_hook::InvalidBlockHookExt, txpool_prewarm, ConfigureEngineEvm,
+    ConsensusEngineEvent, ConsensusEngineHandle,
 };
 use alloy_rpc_types::engine::ClientVersionV1;
 use alloy_rpc_types_engine::ExecutionData;
@@ -1468,7 +1468,8 @@ where
         let data_dir = ctx.config.datadir.clone().resolve_datadir(ctx.config.chain.chain());
         let invalid_block_hook = ctx.create_invalid_block_hook(&data_dir).await?;
 
-        Ok(BasicEngineValidator::new(
+        let txpool_prewarming = tree_config.txpool_prewarming();
+        let mut validator = BasicEngineValidator::new(
             ctx.node.provider().clone(),
             std::sync::Arc::new(ctx.node.consensus().clone()),
             ctx.node.evm_config().clone(),
@@ -1478,7 +1479,14 @@ where
             changeset_cache,
             state_trie_overlays,
             ctx.node.task_executor().clone(),
-        ))
+        );
+
+        if txpool_prewarming {
+            validator = validator
+                .with_txpool_prewarming(txpool_prewarm::Source::new(ctx.node.pool().clone()));
+        }
+
+        Ok(validator)
     }
 }
 
