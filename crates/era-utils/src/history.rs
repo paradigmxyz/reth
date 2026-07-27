@@ -329,7 +329,10 @@ where
         // file segment (including receipts) via `has_unwind_queued`.
         drop(receipts_writer);
 
-        save_stage_checkpoints(&provider, from, height, height, height)?;
+        // A receipts-only backfill trails `headers_tip`; the checkpoints must not regress below
+        // the headers already in static files.
+        let checkpoint = height.max(headers_tip);
+        save_stage_checkpoints(&provider, from, checkpoint, checkpoint, checkpoint)?;
 
         provider.commit()?;
 
@@ -931,6 +934,58 @@ mod tests {
         .unwrap();
 
         assert_eq!(height, 1);
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn backfill_does_not_move_header_checkpoints_backwards() {
+        let pf = create_test_provider_factory();
+        init_genesis(&pf).unwrap();
+        let static_file_provider = pf.static_file_provider();
+        let folder = tempdir().unwrap();
+        let mut hash_collector = Collector::new(4096, Some(folder.path().to_owned()));
+
+        // Import headers and bodies for blocks 1 and 2 first.
+        let provider = pf.database_provider_rw().unwrap();
+        {
+            let mut writer =
+                static_file_provider.latest_writer(StaticFileSegment::Headers).unwrap();
+            let meta = TestMeta { marked: Cell::new(false) };
+            process::<TestEra, _, Block, _, _>(
+                &meta,
+                &mut writer,
+                None,
+                &provider,
+                &mut hash_collector,
+                0..=2,
+                ImportPolicy { headers_tip: 0, is_receipt_verifiable: &|_| false },
+            )
+            .unwrap();
+            writer.commit().unwrap();
+        }
+        save_stage_checkpoints(&provider, 0, 2, 2, 2).unwrap();
+        provider.commit().unwrap();
+
+        // Backfill receipts, stopping at block 1 while the headers already reach 2.
+        let stream = futures_util::stream::iter(vec![Ok(TestMeta { marked: Cell::new(false) })]);
+        let height = import::<TestEraWithEmptyReceipts, _, _, _, Block, _, _>(
+            stream,
+            &pf,
+            &mut hash_collector,
+            Some(1),
+            true,
+            &|_| false,
+        )
+        .unwrap();
+
+        assert_eq!(height, 1);
+        let provider = pf.database_provider_rw().unwrap();
+        for stage in [StageId::Headers, StageId::Bodies] {
+            assert_eq!(
+                provider.get_stage_checkpoint(stage).unwrap().map(|c| c.block_number),
+                Some(2),
+                "{stage} checkpoint must not regress below the headers already in static files"
+            );
+        }
     }
 
     #[test]
