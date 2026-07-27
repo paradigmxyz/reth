@@ -18,7 +18,7 @@ use tracing::error;
 pub trait EthSubscriptions:
     RpcNodeCore + EthApiTypes<RpcConvert: RpcConvert<Primitives = Self::Primitives>>
 {
-    /// Returns a stream that yields matching logs from canonical chain updates.
+    /// Returns a stream that yields matching logs.
     fn log_stream(
         &self,
         filter: Filter,
@@ -32,8 +32,15 @@ pub trait EthSubscriptions:
             ));
         }
 
-        Ok(self
-            .provider()
+        Ok(self.canonical_log_stream(filter))
+    }
+
+    /// Returns a stream that yields matching logs from canonical chain updates.
+    fn canonical_log_stream(
+        &self,
+        filter: Filter,
+    ) -> impl futures::Stream<Item = Log> + Send + Unpin {
+        self.provider()
             .canonical_state_stream()
             .map(move |canon_state| canon_state.block_receipts())
             .flat_map(futures::stream::iter)
@@ -46,7 +53,7 @@ pub trait EthSubscriptions:
                     removed,
                 );
                 futures::stream::iter(all_logs)
-            }))
+            })
     }
 
     /// Returns a stream that yields new block headers from canonical chain updates.

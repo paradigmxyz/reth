@@ -246,9 +246,11 @@ where
 /// Returns the logs filter from the subscription params.
 fn logs_filter(params: Option<Params>) -> Result<Filter, ErrorObject<'static>> {
     match params {
+        None | Some(Params::None) => Ok(Default::default()),
         Some(Params::Logs(filter)) => Ok(*filter),
-        Some(Params::Bool(_)) => Err(invalid_params_rpc_err("Invalid params for logs")),
-        _ => Ok(Default::default()),
+        Some(Params::Bool(_) | Params::TransactionReceipts(_)) => {
+            Err(invalid_params_rpc_err("Invalid params for logs"))
+        }
     }
 }
 
