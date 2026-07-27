@@ -35,7 +35,14 @@ pub fn iter_static_files(path: &Path) -> Result<SortedStaticFiles, NippyJarError
             let Some((segment, _)) =
                 StaticFileSegment::parse_filename(&entry.file_name().to_string_lossy())
         {
-            let jar = NippyJar::<SegmentHeader>::load(&entry.path())?;
+            let path = entry.path();
+            // Finish an interrupted jar delete: config gone, satellites still on disk.
+            if !path.with_extension(reth_nippy_jar::CONFIG_FILE_EXTENSION).exists() {
+                NippyJar::<SegmentHeader>::cleanup_orphaned_files(&path)?;
+                continue
+            }
+
+            let jar = NippyJar::<SegmentHeader>::load(&path)?;
 
             if let Some(block_range) = jar.user_header().block_range() {
                 static_files
