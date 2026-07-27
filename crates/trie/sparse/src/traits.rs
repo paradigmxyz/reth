@@ -9,7 +9,9 @@ use alloy_primitives::{
 };
 use alloy_trie::BranchNodeCompact;
 use reth_execution_errors::SparseTrieResult;
-use reth_trie_common::{BranchNodeMasks, Nibbles, ProofTrieNodeV2, TrieNodeV2};
+use reth_trie_common::{
+    BranchNodeMasks, Nibbles, ProofTrieNodeV2, ProofV2TargetParent, TrieNodeV2,
+};
 
 #[cfg(feature = "trie-debug")]
 use crate::debug_recorder::TrieDebugRecorder;
@@ -196,12 +198,6 @@ pub trait SparseTrie: Sized + Debug + Send + Sync {
     /// during pruning. Larger values indicate larger tries that are more valuable to preserve.
     fn size_hint(&self) -> usize;
 
-    /// Returns a heuristic for the in-memory size of this trie in bytes.
-    ///
-    /// This is an approximation that accounts for the trie's nodes, values,
-    /// and auxiliary data structures.
-    fn memory_size(&self) -> usize;
-
     /// Prunes all subtrees that do not contain retained leaves.
     ///
     /// Each retained leaf is a full key path (usually 64 nibbles for hashed keys).
@@ -238,9 +234,10 @@ pub trait SparseTrie: Sized + Debug + Send + Sync {
     /// Once that proof is calculated and revealed via [`SparseTrie::reveal_nodes`], the same
     /// `updates` map can be reused to retry the update.
     ///
-    /// The callback receives `(key, min_len)` where `key` is the full 32-byte hashed key
-    /// (right-padded with zeros from the blinded path) and `min_len` is the minimum depth
-    /// at which proof nodes should be returned.
+    /// The callback receives `(key, parent)` where `key` is the full 32-byte hashed key
+    /// (right-padded with zeros from the blinded path) and `parent` identifies the revealed logical
+    /// parent branch. No known parent indicates that the trie is entirely blind and the proof
+    /// must include the root.
     ///
     /// The callback may be invoked multiple times for the same target across retry loops.
     /// Callers should deduplicate if needed.
@@ -249,7 +246,7 @@ pub trait SparseTrie: Sized + Debug + Send + Sync {
     fn update_leaves(
         &mut self,
         updates: &mut B256Map<LeafUpdate>,
-        proof_required_fn: impl FnMut(B256, u8),
+        proof_required_fn: impl FnMut(B256, ProofV2TargetParent),
     ) -> SparseTrieResult<()>;
 }
 

@@ -448,7 +448,7 @@ impl<N: NetworkPrimitives> NetworkState<N> {
                 }
                 BlockRequest::GetSnap(request) => {
                     let (response, rx) = oneshot::channel();
-                    let request = PeerRequest::GetSnap { request, response };
+                    let request = PeerRequest::GetSnap { request: *request, response };
                     let response = PeerResponse::Snap { response: rx };
                     (request, response)
                 }

@@ -1,9 +1,10 @@
 //! clap [Args](clap::Args) for Dev testnet configuration
 
-use std::time::Duration;
+use std::{num::NonZeroUsize, time::Duration};
 
 use clap::Args;
 use humantime::parse_duration;
+use reth_engine_local::DEFAULT_FINALITY_DEPTH;
 
 const DEFAULT_MNEMONIC: &str = "test test test test test test test test test test test junk";
 
@@ -42,6 +43,17 @@ pub struct DevArgs {
     )]
     pub block_time: Option<Duration>,
 
+    /// Number of confirmations required before a block is finalized.
+    ///
+    /// A depth of `1` finalizes the canonical head immediately.
+    #[arg(
+        long = "dev.finality-depth",
+        help_heading = "Dev testnet",
+        default_value_t = DEFAULT_FINALITY_DEPTH,
+        verbatim_doc_comment
+    )]
+    pub finality_depth: NonZeroUsize,
+
     /// Time to wait after initiating payload building before resolving.
     ///
     /// Introduces a sleep between `fork_choice_updated` and `resolve_kind` in the
@@ -76,6 +88,7 @@ impl Default for DevArgs {
             dev: false,
             block_max_transactions: None,
             block_time: None,
+            finality_depth: DEFAULT_FINALITY_DEPTH,
             payload_wait_time: None,
             dev_mnemonic: DEFAULT_MNEMONIC.to_string(),
         }
@@ -103,6 +116,7 @@ mod tests {
                 dev: false,
                 block_max_transactions: None,
                 block_time: None,
+                finality_depth: DEFAULT_FINALITY_DEPTH,
                 payload_wait_time: None,
                 dev_mnemonic: DEFAULT_MNEMONIC.to_string(),
             }
@@ -115,6 +129,7 @@ mod tests {
                 dev: true,
                 block_max_transactions: None,
                 block_time: None,
+                finality_depth: DEFAULT_FINALITY_DEPTH,
                 payload_wait_time: None,
                 dev_mnemonic: DEFAULT_MNEMONIC.to_string(),
             }
@@ -127,6 +142,7 @@ mod tests {
                 dev: true,
                 block_max_transactions: None,
                 block_time: None,
+                finality_depth: DEFAULT_FINALITY_DEPTH,
                 payload_wait_time: None,
                 dev_mnemonic: DEFAULT_MNEMONIC.to_string(),
             }
@@ -145,6 +161,7 @@ mod tests {
                 dev: true,
                 block_max_transactions: Some(2),
                 block_time: None,
+                finality_depth: DEFAULT_FINALITY_DEPTH,
                 payload_wait_time: None,
                 dev_mnemonic: DEFAULT_MNEMONIC.to_string(),
             }
@@ -158,10 +175,27 @@ mod tests {
                 dev: true,
                 block_max_transactions: None,
                 block_time: Some(std::time::Duration::from_secs(1)),
+                finality_depth: DEFAULT_FINALITY_DEPTH,
                 payload_wait_time: None,
                 dev_mnemonic: DEFAULT_MNEMONIC.to_string(),
             }
         );
+
+        let args =
+            CommandParser::<DevArgs>::parse_from(["reth", "--dev", "--dev.finality-depth", "1"])
+                .args;
+        assert_eq!(args.finality_depth, NonZeroUsize::new(1).unwrap());
+    }
+
+    #[test]
+    fn test_rejects_zero_finality_depth() {
+        assert!(CommandParser::<DevArgs>::try_parse_from([
+            "reth",
+            "--dev",
+            "--dev.finality-depth",
+            "0",
+        ])
+        .is_err());
     }
 
     #[test]

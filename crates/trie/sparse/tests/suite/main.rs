@@ -22,7 +22,7 @@ use alloy_primitives::{map::B256Map, B256, U256};
 use alloy_rlp::{encode_fixed_size, Decodable};
 use alloy_trie::EMPTY_ROOT_HASH;
 use reth_trie::test_utils::TrieTestHarness;
-use reth_trie_common::{Nibbles, ProofV2Target, TrieNodeV2};
+use reth_trie_common::{Nibbles, ProofV2Target, ProofV2TargetParent, TrieNodeV2};
 use reth_trie_sparse::{LeafLookup, LeafLookupError, LeafUpdate, SparseTrie};
 use std::{collections::BTreeMap, iter::once};
 
@@ -96,8 +96,8 @@ impl SuiteTestHarness {
     ) {
         loop {
             let mut targets: Vec<ProofV2Target> = Vec::new();
-            trie.update_leaves(leaf_updates, |key, min_len| {
-                targets.push(ProofV2Target::new(key).with_min_len(min_len));
+            trie.update_leaves(leaf_updates, |key, parent| {
+                targets.push(ProofV2Target::new(key).with_parent(parent));
             })
             .expect("update_leaves should succeed");
 

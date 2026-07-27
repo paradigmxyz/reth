@@ -347,7 +347,7 @@ impl<N: NetworkPrimitives> StateFetcher<N> {
             DownloadRequest::GetSnap { request, response, .. } => {
                 let inflight = Request { request: (), response };
                 self.inflight_snap_requests.insert(peer_id, inflight);
-                BlockRequest::GetSnap(request)
+                BlockRequest::GetSnap(Box::new(request))
             }
         }
     }

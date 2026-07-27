@@ -508,8 +508,9 @@ where
     /// Serves a `GetAccountRange` request via [`StateRangeProviderFactory`].
     ///
     /// Fails the request if a storage root or proof becomes unavailable after the range lookup.
-    /// Always proves the boundary between `starting_hash` and the last returned account, per
-    /// snap/2's boundary-proof requirement.
+    /// Proves the boundary between `starting_hash` and the last returned account, per snap/2's
+    /// boundary-proof requirement, unless the range is a zero-origin range that exhausted the
+    /// trie, in which case no proof is needed.
     fn get_account_range_response(
         &self,
         req: GetAccountRangeMessage,
@@ -524,10 +525,15 @@ where
         let Some(state) = self.client.state_range_provider(req.root_hash)? else {
             return Ok(empty)
         };
-        let RangeResponse { items: accounts, .. } =
+        let RangeResponse { items: accounts, end } =
             state.account_range(req.starting_hash, req.limit_hash, response_bytes)?;
 
-        let boundary_keys = boundary_proof_keys(req.starting_hash, accounts.last());
+        let proof = if req.starting_hash == B256::ZERO && end == RangeEnd::Exhausted {
+            Vec::new()
+        } else {
+            let boundary_keys = boundary_proof_keys(req.starting_hash, accounts.last());
+            state.account_range_proof(&boundary_keys)?
+        };
 
         let mut account_data = Vec::with_capacity(accounts.len());
         for (hash, account) in accounts {
@@ -535,8 +541,6 @@ where
             account_data
                 .push(AccountData { hash, body: slim_account_body(&account, storage_root) });
         }
-
-        let proof = state.account_range_proof(&boundary_keys)?;
 
         Ok(AccountRangeMessage { request_id: req.request_id, accounts: account_data, proof })
     }
@@ -559,18 +563,26 @@ where
         let Some(state) = self.client.state_range_provider(req.root_hash)? else {
             return Ok(empty)
         };
-        let mut slots = Vec::new();
+        let mut slots: Vec<Vec<StorageData>> = Vec::new();
         let mut proof = Vec::new();
         let mut remaining_bytes = (req.response_bytes as usize).min(SOFT_RESPONSE_LIMIT);
 
         for (i, &hashed_address) in
             req.account_hashes.iter().take(MAX_STORAGE_RANGE_ACCOUNTS_SERVE).enumerate()
         {
-            if remaining_bytes == 0 {
+            // Keeps traversing storage-empty accounts under a zero budget so a real slot still
+            // gets served; worst case is a lookup per account, bounded by the take() above.
+            if remaining_bytes == 0 && slots.iter().any(|range| !range.is_empty()) {
                 break
             }
-            let origin = if i == 0 { req.starting_hash } else { B256::ZERO };
-            let limit = if i == 0 { req.limit_hash } else { B256::repeat_byte(0xff) };
+            let (origin, limit) = if i == 0 {
+                (
+                    req.starting_hash.unwrap_or(B256::ZERO),
+                    req.limit_hash.unwrap_or(B256::repeat_byte(0xff)),
+                )
+            } else {
+                (B256::ZERO, B256::repeat_byte(0xff))
+            };
             let Some(RangeResponse { items: account_slots, end }) =
                 state.storage_range(hashed_address, origin, limit, remaining_bytes)?
             else {
@@ -615,12 +627,16 @@ fn boundary_proof_keys<T>(origin: B256, last: Option<&(B256, T)>) -> Vec<B256> {
 
 /// Like the consensus trie account, but the code hash and storage root are empty byte strings
 /// rather than [`KECCAK_EMPTY`]/[`EMPTY_ROOT_HASH`] when the account has no code/storage, to
-/// avoid transferring the same 32 bytes for every EOA.
+/// avoid transferring the same 32 bytes for every EOA. Borrowed to encode without allocating.
 #[derive(RlpEncodable)]
 struct SlimAccountBody<'a> {
+    /// The account's nonce.
     nonce: u64,
+    /// The account's balance.
     balance: U256,
+    /// Empty when the account has no storage.
     storage_root: &'a [u8],
+    /// Empty when the account has no code.
     code_hash: &'a [u8],
 }
 
@@ -1002,8 +1018,8 @@ mod tests {
             request_id: 2,
             root_hash: B256::ZERO,
             account_hashes: vec![B256::ZERO],
-            starting_hash: B256::ZERO,
-            limit_hash: B256::repeat_byte(0xff),
+            starting_hash: B256::ZERO.into(),
+            limit_hash: B256::repeat_byte(0xff).into(),
             response_bytes: SOFT_RESPONSE_LIMIT as u64,
         }),
         SnapResponse::StorageRanges(StorageRangesMessage {
@@ -1094,8 +1110,8 @@ mod tests {
                 request_id: 2,
                 root_hash: B256::ZERO,
                 account_hashes,
-                starting_hash: B256::ZERO,
-                limit_hash: B256::repeat_byte(0xff),
+                starting_hash: B256::ZERO.into(),
+                limit_hash: B256::repeat_byte(0xff).into(),
                 response_bytes: SOFT_RESPONSE_LIMIT as u64,
             })
         };
@@ -1141,7 +1157,9 @@ mod tests {
                 ),
                 (second_hash, Account { nonce: 3, balance: U256::from(4), bytecode_hash: None }),
             ],
-            RangeEnd::Exhausted,
+            // A hash-limit stop (not an exhausted trie) so a boundary proof is still expected,
+            // matching the mocked `proof` below.
+            RangeEnd::HashLimit,
         );
         provider.set_snap_storage_root(first_hash, storage_root);
         provider.set_snap_storage_root(second_hash, EMPTY_ROOT_HASH);
@@ -1182,6 +1200,42 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn snap_account_range_response_skips_proof_for_exhausted_zero_origin_range() {
+        let provider = MockEthProvider::default();
+        let hash = B256::repeat_byte(0x01);
+        provider.set_snap_account_range(
+            vec![(hash, Account { nonce: 1, balance: U256::from(2), bytecode_hash: None })],
+            RangeEnd::Exhausted,
+        );
+        provider.set_snap_storage_root(hash, EMPTY_ROOT_HASH);
+        // A non-empty mocked proof: if the skip-proof optimization regressed to "never skip",
+        // this wrongly-included proof would surface in the response and fail the assertion below.
+        provider.set_snap_account_proof(Some(vec![Bytes::from_static(&[0xaa])]));
+
+        let handler = snap_handler(provider.clone());
+        let (response, rx) = oneshot::channel();
+        handler.on_snap_request(
+            PeerId::default(),
+            SnapProtocolMessage::GetAccountRange(GetAccountRangeMessage {
+                request_id: 1,
+                root_hash: B256::ZERO,
+                starting_hash: B256::ZERO,
+                limit_hash: B256::repeat_byte(0xff),
+                response_bytes: SOFT_RESPONSE_LIMIT as u64,
+            }),
+            response,
+        );
+
+        let Ok(SnapResponse::AccountRange(AccountRangeMessage { accounts, proof, .. })) =
+            rx.await.unwrap()
+        else {
+            panic!("expected an account range response");
+        };
+        assert_eq!(accounts.len(), 1);
+        assert!(proof.is_empty(), "a zero-origin, exhausted range must not carry a boundary proof");
+    }
+
+    #[tokio::test]
     async fn snap_storage_range_response_encodes_values_and_proof() {
         let provider = MockEthProvider::default();
         let first_hash = B256::repeat_byte(0x01);
@@ -1202,8 +1256,8 @@ mod tests {
                 request_id: 2,
                 root_hash: B256::ZERO,
                 account_hashes: vec![B256::repeat_byte(0x03)],
-                starting_hash: origin,
-                limit_hash: B256::repeat_byte(0xff),
+                starting_hash: origin.into(),
+                limit_hash: B256::repeat_byte(0xff).into(),
                 response_bytes: SOFT_RESPONSE_LIMIT as u64,
             }),
             response,
@@ -1242,8 +1296,8 @@ mod tests {
                 request_id: 3,
                 root_hash: B256::ZERO,
                 account_hashes: vec![first_account, second_account],
-                starting_hash: origin,
-                limit_hash: limit,
+                starting_hash: origin.into(),
+                limit_hash: limit.into(),
                 response_bytes: 1_000,
             }),
             response,
@@ -1318,8 +1372,8 @@ mod tests {
                 request_id: 4,
                 root_hash: B256::ZERO,
                 account_hashes: vec![B256::ZERO; MAX_STORAGE_RANGE_ACCOUNTS_SERVE + 1],
-                starting_hash: B256::ZERO,
-                limit_hash: B256::repeat_byte(0xff),
+                starting_hash: B256::ZERO.into(),
+                limit_hash: B256::repeat_byte(0xff).into(),
                 response_bytes: SOFT_RESPONSE_LIMIT as u64,
             }),
             response,
@@ -1355,8 +1409,8 @@ mod tests {
                 request_id: 5,
                 root_hash: B256::ZERO,
                 account_hashes: vec![B256::repeat_byte(0x03)],
-                starting_hash: B256::ZERO,
-                limit_hash: B256::repeat_byte(0x20),
+                starting_hash: B256::ZERO.into(),
+                limit_hash: B256::repeat_byte(0x20).into(),
                 response_bytes: SOFT_RESPONSE_LIMIT as u64,
             }),
             response,
@@ -1391,8 +1445,8 @@ mod tests {
                 request_id: 6,
                 root_hash: B256::ZERO,
                 account_hashes: vec![missing_account, valid_account],
-                starting_hash: B256::ZERO,
-                limit_hash: B256::repeat_byte(0xff),
+                starting_hash: B256::ZERO.into(),
+                limit_hash: B256::repeat_byte(0xff).into(),
                 response_bytes: SOFT_RESPONSE_LIMIT as u64,
             }),
             response,
