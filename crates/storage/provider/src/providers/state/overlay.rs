@@ -275,31 +275,21 @@ where
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "partial-persistence"))]
 mod tests {
-    #[cfg(feature = "partial-persistence")]
     use super::*;
-    #[cfg(feature = "partial-persistence")]
     use crate::{
         test_utils::{create_test_provider_factory, MockNodeTypesWithDB},
         BlockWriter, ProviderFactory,
     };
-    #[cfg(feature = "partial-persistence")]
     use alloy_primitives::U256;
-    #[cfg(feature = "partial-persistence")]
     use reth_chain_state::{test_utils::TestBlockBuilder, ExecutedBlock};
-    #[cfg(feature = "partial-persistence")]
     use reth_primitives_traits::Account;
-    #[cfg(feature = "partial-persistence")]
     use reth_stages_types::{FinishCheckpoint, StageCheckpoint, StageId};
-    #[cfg(feature = "partial-persistence")]
     use reth_storage_api::StageCheckpointWriter;
-    #[cfg(feature = "partial-persistence")]
     use reth_storage_overlay::{ChangesetCache, OverlayManager};
-    #[cfg(feature = "partial-persistence")]
     use reth_trie::{BranchNodeCompact, ComputedTrieData, HashedPostState, HashedStorage, Nibbles};
 
-    #[cfg(feature = "partial-persistence")]
     fn with_unique_trie_data(
         block: &ExecutedBlock<EthPrimitives>,
         id: u8,
@@ -328,7 +318,6 @@ mod tests {
         )
     }
 
-    #[cfg(feature = "partial-persistence")]
     fn test_blocks() -> Vec<ExecutedBlock<EthPrimitives>> {
         TestBlockBuilder::eth()
             .get_executed_blocks(0..5)
@@ -337,7 +326,6 @@ mod tests {
             .collect()
     }
 
-    #[cfg(feature = "partial-persistence")]
     fn setup_frontiers(
         state_trie_tip_index: usize,
         finish_tip_index: usize,
@@ -362,17 +350,14 @@ mod tests {
         (factory, blocks)
     }
 
-    #[cfg(feature = "partial-persistence")]
     fn account_keys(overlay: &Overlay) -> Vec<B256> {
         overlay.hashed_post_state.accounts.iter().map(|(key, _)| *key).collect()
     }
 
-    #[cfg(feature = "partial-persistence")]
     fn account_node_paths(overlay: &Overlay) -> Vec<Nibbles> {
         overlay.trie_updates.account_nodes_ref().iter().map(|(path, _)| *path).collect()
     }
 
-    #[cfg(feature = "partial-persistence")]
     #[test]
     fn overlay_cache_is_keyed_by_both_durable_frontiers() {
         let (factory, blocks) = setup_frontiers(1, 3);
