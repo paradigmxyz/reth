@@ -30,6 +30,9 @@ mod tracker;
 pub struct BlobCellAvailability(B128);
 
 impl BlobCellAvailability {
+    /// Empty availability for sidecars that do not contain cells.
+    pub const EMPTY: Self = Self(B128::new([0; 16]));
+
     /// Full availability for all blob cells in a stored full sidecar.
     pub const FULL: Self = Self(B128::new([0xff; 16]));
 
@@ -38,9 +41,23 @@ impl BlobCellAvailability {
         Self(mask)
     }
 
+    /// Returns empty availability.
+    pub const fn empty() -> Self {
+        Self::EMPTY
+    }
+
     /// Returns full availability for all blob cells.
     pub const fn full() -> Self {
         Self::FULL
+    }
+
+    /// Returns the cell availability provided by the sidecar variant.
+    pub const fn for_sidecar(sidecar: &BlobTransactionSidecarVariant) -> Self {
+        if sidecar.is_eip7594() {
+            Self::FULL
+        } else {
+            Self::EMPTY
+        }
     }
 
     /// Returns the raw cell bitmask.
@@ -145,7 +162,7 @@ pub trait BlobStore: fmt::Debug + Send + Sync + 'static {
     /// Full-sidecar stores can use this default. Sparse stores should override it with their exact
     /// stored mask.
     fn cell_availability(&self, tx: B256) -> Result<Option<BlobCellAvailability>, BlobStoreError> {
-        self.contains(tx).map(|contains| contains.then_some(BlobCellAvailability::full()))
+        self.get(tx).map(|sidecar| sidecar.as_deref().map(BlobCellAvailability::for_sidecar))
     }
 
     /// Retrieves all decoded blob data for the given transaction hashes.

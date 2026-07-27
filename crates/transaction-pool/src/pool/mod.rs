@@ -1682,7 +1682,10 @@ mod tests {
         TransactionValidationOutcome, U256,
     };
     use alloy_consensus::Transaction as _;
-    use alloy_eips::{eip4844::BlobTransactionSidecar, eip7594::BlobTransactionSidecarVariant};
+    use alloy_eips::{
+        eip4844::BlobTransactionSidecar,
+        eip7594::{BlobTransactionSidecarEip7594, BlobTransactionSidecarVariant},
+    };
     use alloy_primitives::{Address, TxHash};
     use std::{fs, path::PathBuf};
 
@@ -1706,10 +1709,11 @@ mod tests {
             CoinbaseTipOrdering<EthPooledTransaction>,
             S,
         >,
+        sidecar: BlobTransactionSidecarVariant,
     ) -> TxHash {
         let mut generator = TransactionGenerator::new(rand::rng());
         let mut transaction = generator.gen_eip4844_pooled();
-        transaction.set_blob_sidecar(test_blob_sidecar());
+        transaction.set_blob_sidecar(sidecar);
         let hash = *transaction.hash();
         let EthBlobTransactionSidecar::Present(sidecar) = transaction.take_blob() else {
             unreachable!("blob sidecar was just attached")
@@ -1730,14 +1734,33 @@ mod tests {
     }
 
     #[test]
-    fn successful_blob_insert_sets_cell_availability() {
+    fn successful_eip4844_blob_insert_sets_empty_cell_availability() {
         let pool = Pool::new(
             OkValidator::default(),
             CoinbaseTipOrdering::default(),
             InMemoryBlobStore::default(),
             PoolConfig::default(),
         );
-        let hash = add_blob_transaction(&pool);
+        let hash = add_blob_transaction(&pool, test_blob_sidecar());
+
+        assert_eq!(
+            pool.pool.get(&hash).unwrap().transaction.blob_cell_availability(),
+            Some(BlobCellAvailability::empty())
+        );
+    }
+
+    #[test]
+    fn successful_eip7594_blob_insert_sets_full_cell_availability() {
+        let pool = Pool::new(
+            OkValidator::default(),
+            CoinbaseTipOrdering::default(),
+            InMemoryBlobStore::default(),
+            PoolConfig::default(),
+        );
+        let hash = add_blob_transaction(
+            &pool,
+            BlobTransactionSidecarVariant::Eip7594(BlobTransactionSidecarEip7594::default()),
+        );
 
         assert_eq!(
             pool.pool.get(&hash).unwrap().transaction.blob_cell_availability(),
@@ -1760,7 +1783,7 @@ mod tests {
             blob_store,
             PoolConfig::default(),
         );
-        let hash = add_blob_transaction(&pool);
+        let hash = add_blob_transaction(&pool, test_blob_sidecar());
 
         assert_eq!(pool.pool.get(&hash).unwrap().transaction.blob_cell_availability(), None);
     }

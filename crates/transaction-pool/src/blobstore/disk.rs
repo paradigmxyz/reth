@@ -215,8 +215,9 @@ impl DiskFileBlobStore {
 impl BlobStore for DiskFileBlobStore {
     fn insert(&self, tx: B256, data: BlobSidecar) -> Result<(), BlobStoreError> {
         let (data, availability) = data.into_parts();
+        let stored_availability = BlobCellAvailability::for_sidecar(&data);
         self.inner.insert_one(tx, data)?;
-        let _ = availability.set(BlobCellAvailability::full());
+        let _ = availability.set(stored_availability);
         Ok(())
     }
 
@@ -229,13 +230,14 @@ impl BlobStore for DiskFileBlobStore {
             .into_iter()
             .map(|(tx, data)| {
                 let (data, availability) = data.into_parts();
-                availability_handles.push(availability);
+                let stored_availability = BlobCellAvailability::for_sidecar(&data);
+                availability_handles.push((availability, stored_availability));
                 (tx, data)
             })
             .collect();
         self.inner.insert_many(txs)?;
-        for availability in availability_handles {
-            let _ = availability.set(BlobCellAvailability::full());
+        for (availability, stored_availability) in availability_handles {
+            let _ = availability.set(stored_availability);
         }
         Ok(())
     }
@@ -949,6 +951,41 @@ mod tests {
         assert!(store.is_cached(&tx));
         let retrieved_blob = store.get(tx).unwrap().map(Arc::unwrap_or_clone).unwrap();
         assert_eq!(retrieved_blob, blob);
+    }
+
+    #[test]
+    fn disk_insert_publishes_availability_for_sidecar_variant() {
+        let (store, _dir) = tmp_store();
+        let sidecars = [
+            (rng_blobs(1).pop().unwrap().1, BlobCellAvailability::empty()),
+            (eip7594_single_blob_sidecar().0, BlobCellAvailability::full()),
+        ];
+
+        for (sidecar, expected) in sidecars {
+            let tx = TxHash::random();
+            let sidecar = BlobSidecar::from(sidecar);
+            let availability = sidecar.availability().clone();
+            store.insert(tx, sidecar).unwrap();
+
+            assert_eq!(availability.get(), Some(expected));
+            assert_eq!(store.cell_availability(tx).unwrap(), Some(expected));
+        }
+    }
+
+    #[test]
+    fn disk_insert_all_publishes_availability_for_sidecar_variant() {
+        let (store, _dir) = tmp_store();
+        let tx_a = TxHash::random();
+        let tx_b = TxHash::random();
+        let sidecar_a = BlobSidecar::from(rng_blobs(1).pop().unwrap().1);
+        let sidecar_b = BlobSidecar::from(eip7594_single_blob_sidecar().0);
+        let availability_a = sidecar_a.availability().clone();
+        let availability_b = sidecar_b.availability().clone();
+
+        store.insert_all(vec![(tx_a, sidecar_a), (tx_b, sidecar_b)]).unwrap();
+
+        assert_eq!(availability_a.get(), Some(BlobCellAvailability::empty()));
+        assert_eq!(availability_b.get(), Some(BlobCellAvailability::full()));
     }
 
     #[test]

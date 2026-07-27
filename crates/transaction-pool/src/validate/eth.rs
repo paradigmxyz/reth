@@ -1519,7 +1519,7 @@ mod tests {
         eip2718::{Decodable2718, Encodable2718},
         eip2930::{AccessList, AccessListItem},
         eip4844::BlobTransactionSidecar,
-        eip7594::BlobTransactionSidecarVariant,
+        eip7594::{BlobTransactionSidecarEip7594, BlobTransactionSidecarVariant},
     };
     use alloy_primitives::{hex, Address, B256, U256};
     use reth_ethereum_primitives::PooledTransactionVariant;
@@ -1587,19 +1587,15 @@ mod tests {
     }
 
     #[test]
-    fn missing_blob_sidecar_uses_stored_availability() {
+    fn assert_missing_blob_sidecar_uses_stored_availability(
+        sidecar: BlobTransactionSidecarVariant,
+        expected: BlobCellAvailability,
+    ) {
         let tx = TransactionBuilder::default().into_eip4844().try_into_recovered().unwrap();
         let encoded_length = tx.encode_2718_len();
         let mut transaction = EthPooledTransaction::new(tx, encoded_length);
         let blob_store = InMemoryBlobStore::default();
-        blob_store
-            .insert(
-                *transaction.hash(),
-                BlobSidecar::from(BlobTransactionSidecarVariant::Eip4844(
-                    BlobTransactionSidecar::default(),
-                )),
-            )
-            .unwrap();
+        blob_store.insert(*transaction.hash(), BlobSidecar::from(sidecar)).unwrap();
         let validator = EthTransactionValidatorBuilder::new(
             MockEthProvider::default().with_genesis_block(),
             test_evm_config(),
@@ -1607,7 +1603,23 @@ mod tests {
         .build(blob_store);
 
         assert!(validator.validate_eip4844(&mut transaction).unwrap().is_none());
-        assert_eq!(transaction.blob_cell_availability(), Some(BlobCellAvailability::full()));
+        assert_eq!(transaction.blob_cell_availability(), Some(expected));
+    }
+
+    #[test]
+    fn missing_eip4844_sidecar_uses_empty_stored_availability() {
+        assert_missing_blob_sidecar_uses_stored_availability(
+            BlobTransactionSidecarVariant::Eip4844(BlobTransactionSidecar::default()),
+            BlobCellAvailability::empty(),
+        );
+    }
+
+    #[test]
+    fn missing_eip7594_sidecar_uses_full_stored_availability() {
+        assert_missing_blob_sidecar_uses_stored_availability(
+            BlobTransactionSidecarVariant::Eip7594(BlobTransactionSidecarEip7594::default()),
+            BlobCellAvailability::full(),
+        );
     }
 
     #[test]

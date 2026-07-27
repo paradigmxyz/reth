@@ -1543,7 +1543,7 @@ pub struct EthPooledTransaction<T = TransactionSigned> {
     /// Cached blob cell availability for this transaction.
     ///
     /// This shares availability published by the blob sidecar after it is stored.
-    blob_cell_availability: BlobCellAvailabilityHandle,
+    blob_cell_availability: Option<BlobCellAvailabilityHandle>,
 }
 
 impl<T: SignedTransaction> EthPooledTransaction<T> {
@@ -1552,7 +1552,7 @@ impl<T: SignedTransaction> EthPooledTransaction<T> {
     /// Caution: In case of blob transactions, this marks the blob sidecar as
     /// [`EthBlobTransactionSidecar::Missing`]
     pub fn new(transaction: Recovered<T>, encoded_length: usize) -> Self {
-        let blob_cell_availability = BlobCellAvailabilityHandle::default();
+        let mut blob_cell_availability = None;
         let mut blob_sidecar = EthBlobTransactionSidecar::None;
 
         let gas_cost = U256::from(transaction.max_fee_per_gas())
@@ -1570,7 +1570,9 @@ impl<T: SignedTransaction> EthPooledTransaction<T> {
 
             // because the blob sidecar is not included in this transaction variant, mark it as
             // missing
-            blob_sidecar = EthBlobTransactionSidecar::Missing(blob_cell_availability.clone());
+            let availability = BlobCellAvailabilityHandle::default();
+            blob_sidecar = EthBlobTransactionSidecar::Missing(availability.clone());
+            blob_cell_availability = Some(availability);
         }
 
         Self { transaction, cost, encoded_length, blob_sidecar, blob_cell_availability }
@@ -1583,15 +1585,18 @@ impl<T: SignedTransaction> EthPooledTransaction<T> {
 
     /// Attaches a blob sidecar using this transaction's shared availability handle.
     pub fn set_blob_sidecar(&mut self, sidecar: BlobTransactionSidecarVariant) {
-        self.blob_sidecar = EthBlobTransactionSidecar::Present(BlobSidecar::new(
-            sidecar,
-            self.blob_cell_availability.clone(),
-        ));
+        let availability = self
+            .blob_cell_availability
+            .as_ref()
+            .expect("blob transactions have an availability handle")
+            .clone();
+        self.blob_sidecar =
+            EthBlobTransactionSidecar::Present(BlobSidecar::new(sidecar, availability));
     }
 
     /// Returns the blob cell availability currently cached for this transaction.
     pub fn blob_cell_availability(&self) -> Option<BlobCellAvailability> {
-        self.blob_cell_availability.get()
+        self.blob_cell_availability.as_ref().and_then(BlobCellAvailabilityHandle::get)
     }
 }
 
@@ -1753,9 +1758,14 @@ impl<T: alloy_consensus::Transaction> alloy_consensus::Transaction for EthPooled
 impl EthPoolTransaction for EthPooledTransaction {
     fn take_blob(&mut self) -> EthBlobTransactionSidecar {
         if self.is_eip4844() {
+            let availability = self
+                .blob_cell_availability
+                .as_ref()
+                .expect("blob transactions have an availability handle")
+                .clone();
             std::mem::replace(
                 &mut self.blob_sidecar,
-                EthBlobTransactionSidecar::Missing(self.blob_cell_availability.clone()),
+                EthBlobTransactionSidecar::Missing(availability),
             )
         } else {
             EthBlobTransactionSidecar::None
@@ -2028,6 +2038,7 @@ mod tests {
         assert_eq!(pooled_tx.transaction, transaction);
         assert_eq!(pooled_tx.encoded_length, 200);
         assert_eq!(pooled_tx.blob_sidecar, EthBlobTransactionSidecar::None);
+        assert!(pooled_tx.blob_cell_availability.is_none());
         assert_eq!(pooled_tx.blob_cell_availability(), None);
         assert_eq!(pooled_tx.cost, U256::from(100) + U256::from(10 * 1000));
     }
@@ -2051,6 +2062,7 @@ mod tests {
         assert_eq!(pooled_tx.transaction, transaction);
         assert_eq!(pooled_tx.encoded_length, 200);
         assert_eq!(pooled_tx.blob_sidecar, EthBlobTransactionSidecar::None);
+        assert!(pooled_tx.blob_cell_availability.is_none());
         assert_eq!(pooled_tx.blob_cell_availability(), None);
         assert_eq!(pooled_tx.cost, expected_cost);
     }
@@ -2074,6 +2086,7 @@ mod tests {
         assert_eq!(pooled_tx.transaction, transaction);
         assert_eq!(pooled_tx.encoded_length, 200);
         assert_eq!(pooled_tx.blob_sidecar, EthBlobTransactionSidecar::None);
+        assert!(pooled_tx.blob_cell_availability.is_none());
         assert_eq!(pooled_tx.blob_cell_availability(), None);
         assert_eq!(pooled_tx.cost, U256::from(100) + U256::from(10 * 1000));
     }
@@ -2099,6 +2112,7 @@ mod tests {
         assert_eq!(pooled_tx.transaction, transaction);
         assert_eq!(pooled_tx.encoded_length, 300);
         assert!(matches!(pooled_tx.blob_sidecar, EthBlobTransactionSidecar::Missing(_)));
+        assert!(pooled_tx.blob_cell_availability.is_some());
         assert_eq!(pooled_tx.blob_cell_availability(), None);
         let expected_cost =
             U256::from(100) + U256::from(10 * 1000) + U256::from(5 * DATA_GAS_PER_BLOB);
@@ -2123,9 +2137,10 @@ mod tests {
 
         assert_eq!(pooled_tx.blob_cell_availability(), None);
 
-        pooled_tx.blob_cell_availability.set(BlobCellAvailability::full()).unwrap();
+        let availability = pooled_tx.blob_cell_availability.as_ref().unwrap();
+        availability.set(BlobCellAvailability::full()).unwrap();
         assert_eq!(pooled_tx.blob_cell_availability(), Some(BlobCellAvailability::full()));
-        assert!(pooled_tx.blob_cell_availability.set(BlobCellAvailability::default()).is_err());
+        assert!(availability.set(BlobCellAvailability::default()).is_err());
     }
 
     #[test]
@@ -2147,6 +2162,7 @@ mod tests {
         assert_eq!(pooled_tx.transaction, transaction);
         assert_eq!(pooled_tx.encoded_length, 200);
         assert_eq!(pooled_tx.blob_sidecar, EthBlobTransactionSidecar::None);
+        assert!(pooled_tx.blob_cell_availability.is_none());
         assert_eq!(pooled_tx.blob_cell_availability(), None);
         assert_eq!(pooled_tx.cost, U256::from(100) + U256::from(10 * 1000));
     }

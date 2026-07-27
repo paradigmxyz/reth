@@ -100,10 +100,11 @@ impl PartialEq for InMemoryBlobStoreInner {
 impl BlobStore for InMemoryBlobStore {
     fn insert(&self, tx: B256, data: BlobSidecar) -> Result<(), BlobStoreError> {
         let (data, availability) = data.into_parts();
+        let stored_availability = BlobCellAvailability::for_sidecar(&data);
         let mut store = self.inner.store.write();
         self.inner.size_tracker.add_size(insert_size(&mut store, tx, data));
         self.inner.size_tracker.update_len(store.len());
-        let _ = availability.set(BlobCellAvailability::full());
+        let _ = availability.set(stored_availability);
         Ok(())
     }
 
@@ -116,14 +117,15 @@ impl BlobStore for InMemoryBlobStore {
         let mut availability_handles = Vec::with_capacity(txs.len());
         for (tx, data) in txs {
             let (data, availability) = data.into_parts();
+            let stored_availability = BlobCellAvailability::for_sidecar(&data);
             let add = insert_size(&mut store, tx, data);
             total_add += add;
-            availability_handles.push(availability);
+            availability_handles.push((availability, stored_availability));
         }
         self.inner.size_tracker.add_size(total_add);
         self.inner.size_tracker.update_len(store.len());
-        for availability in availability_handles {
-            let _ = availability.set(BlobCellAvailability::full());
+        for (availability, stored_availability) in availability_handles {
+            let _ = availability.set(stored_availability);
         }
         Ok(())
     }
@@ -352,6 +354,25 @@ mod tests {
     }
 
     #[test]
+    fn mem_insert_publishes_availability_for_sidecar_variant() {
+        let store = InMemoryBlobStore::default();
+        let sidecars = [
+            (eip4844_single_blob_sidecar().0, BlobCellAvailability::empty()),
+            (eip7594_single_blob_sidecar().0, BlobCellAvailability::full()),
+        ];
+
+        for (sidecar, expected) in sidecars {
+            let tx = B256::random();
+            let sidecar = BlobSidecar::from(sidecar);
+            let availability = sidecar.availability().clone();
+            store.insert(tx, sidecar).unwrap();
+
+            assert_eq!(availability.get(), Some(expected));
+            assert_eq!(store.cell_availability(tx).unwrap(), Some(expected));
+        }
+    }
+
+    #[test]
     fn mem_get_blobs_v3_returns_partial_results() {
         let store = InMemoryBlobStore::default();
 
@@ -372,19 +393,18 @@ mod tests {
     }
 
     #[test]
-    fn mem_insert_all_returns_full_availability_for_full_sidecars() {
+    fn mem_insert_all_publishes_availability_for_sidecar_variant() {
         let store = InMemoryBlobStore::default();
-        let (sidecar, _, _) = eip7594_single_blob_sidecar();
         let tx_a = B256::random();
         let tx_b = B256::random();
 
-        let sidecar_a = BlobSidecar::from(sidecar.clone());
-        let sidecar_b = BlobSidecar::from(sidecar);
+        let sidecar_a = BlobSidecar::from(eip4844_single_blob_sidecar().0);
+        let sidecar_b = BlobSidecar::from(eip7594_single_blob_sidecar().0);
         let availability_a = sidecar_a.availability().clone();
         let availability_b = sidecar_b.availability().clone();
         store.insert_all(vec![(tx_a, sidecar_a), (tx_b, sidecar_b)]).unwrap();
 
-        assert_eq!(availability_a.get(), Some(BlobCellAvailability::full()));
+        assert_eq!(availability_a.get(), Some(BlobCellAvailability::empty()));
         assert_eq!(availability_b.get(), Some(BlobCellAvailability::full()));
     }
 

@@ -860,13 +860,15 @@ mod tests {
 
     impl BlobStore for CountingBlobStore {
         fn insert(&self, _tx: B256, data: BlobSidecar) -> Result<(), BlobStoreError> {
-            let _ = data.availability().set(BlobCellAvailability::full());
+            let availability = BlobCellAvailability::for_sidecar(data.sidecar());
+            let _ = data.availability().set(availability);
             Ok(())
         }
 
         fn insert_all(&self, txs: Vec<(B256, BlobSidecar)>) -> Result<(), BlobStoreError> {
             for (_, data) in txs {
-                let _ = data.availability().set(BlobCellAvailability::full());
+                let availability = BlobCellAvailability::for_sidecar(data.sidecar());
+                let _ = data.availability().set(availability);
             }
             Ok(())
         }
