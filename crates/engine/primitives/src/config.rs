@@ -6,16 +6,8 @@ use core::time::Duration;
 /// Triggers persistence when the number of canonical blocks in memory exceeds this threshold.
 pub const DEFAULT_PERSISTENCE_THRESHOLD: u64 = 200;
 
-/// Maximum number of blocks beyond the in-memory buffer target awaiting persistence before engine
-/// API processing is stalled.
-pub const DEFAULT_PERSISTENCE_BACKPRESSURE_THRESHOLD: u64 = 400;
-
 /// Triggers persistence when the number of hashed post state changes reaches this threshold.
 pub const DEFAULT_PERSISTENCE_STATE_CHANGES_THRESHOLD: usize = 180_000;
-
-/// Maximum number of hashed post state changes awaiting persistence before engine API processing
-/// is stalled.
-pub const DEFAULT_PERSISTENCE_STATE_CHANGES_BACKPRESSURE_THRESHOLD: usize = 360_000;
 
 /// How close to the canonical head we persist blocks.
 pub const DEFAULT_MEMORY_BLOCK_BUFFER_TARGET: u64 = 5;
@@ -227,21 +219,23 @@ pub struct TreeConfig {
 
 impl Default for TreeConfig {
     fn default() -> Self {
+        let persistence_backpressure_threshold = DEFAULT_PERSISTENCE_THRESHOLD.saturating_mul(2);
+        let persistence_state_changes_backpressure_threshold =
+            DEFAULT_PERSISTENCE_STATE_CHANGES_THRESHOLD.saturating_mul(2);
         assert_backpressure_threshold_invariant(
             DEFAULT_PERSISTENCE_THRESHOLD,
-            DEFAULT_PERSISTENCE_BACKPRESSURE_THRESHOLD,
+            persistence_backpressure_threshold,
         );
         assert_state_changes_backpressure_threshold_invariant(
             DEFAULT_PERSISTENCE_STATE_CHANGES_THRESHOLD,
-            DEFAULT_PERSISTENCE_STATE_CHANGES_BACKPRESSURE_THRESHOLD,
+            persistence_state_changes_backpressure_threshold,
         );
         Self {
             persistence_threshold: DEFAULT_PERSISTENCE_THRESHOLD,
             persistence_state_changes_threshold: DEFAULT_PERSISTENCE_STATE_CHANGES_THRESHOLD,
             memory_block_buffer_target: DEFAULT_MEMORY_BLOCK_BUFFER_TARGET,
-            persistence_backpressure_threshold: DEFAULT_PERSISTENCE_BACKPRESSURE_THRESHOLD,
-            persistence_state_changes_backpressure_threshold:
-                DEFAULT_PERSISTENCE_STATE_CHANGES_BACKPRESSURE_THRESHOLD,
+            persistence_backpressure_threshold,
+            persistence_state_changes_backpressure_threshold,
             block_buffer_limit: DEFAULT_BLOCK_BUFFER_LIMIT,
             max_invalid_header_cache_length: DEFAULT_MAX_INVALID_HEADER_CACHE_LENGTH,
             invalid_header_hit_eviction_threshold: DEFAULT_INVALID_HEADER_HIT_EVICTION_THRESHOLD,
@@ -307,21 +301,22 @@ impl TreeConfig {
         share_execution_cache_with_payload_builder: bool,
         share_sparse_trie_with_payload_builder: bool,
     ) -> Self {
+        let persistence_state_changes_backpressure_threshold =
+            DEFAULT_PERSISTENCE_STATE_CHANGES_THRESHOLD.saturating_mul(2);
         assert_backpressure_threshold_invariant(
             persistence_threshold,
             persistence_backpressure_threshold,
         );
         assert_state_changes_backpressure_threshold_invariant(
             DEFAULT_PERSISTENCE_STATE_CHANGES_THRESHOLD,
-            DEFAULT_PERSISTENCE_STATE_CHANGES_BACKPRESSURE_THRESHOLD,
+            persistence_state_changes_backpressure_threshold,
         );
         Self {
             persistence_threshold,
             persistence_state_changes_threshold: DEFAULT_PERSISTENCE_STATE_CHANGES_THRESHOLD,
             memory_block_buffer_target,
             persistence_backpressure_threshold,
-            persistence_state_changes_backpressure_threshold:
-                DEFAULT_PERSISTENCE_STATE_CHANGES_BACKPRESSURE_THRESHOLD,
+            persistence_state_changes_backpressure_threshold,
             block_buffer_limit,
             max_invalid_header_cache_length,
             invalid_header_hit_eviction_threshold,
@@ -862,26 +857,21 @@ impl TreeConfig {
 #[cfg(test)]
 mod tests {
     use super::{
-        TreeConfig, DEFAULT_PERSISTENCE_BACKPRESSURE_THRESHOLD,
-        DEFAULT_PERSISTENCE_STATE_CHANGES_BACKPRESSURE_THRESHOLD,
-        DEFAULT_PERSISTENCE_STATE_CHANGES_THRESHOLD, DEFAULT_PERSISTENCE_THRESHOLD,
+        TreeConfig, DEFAULT_PERSISTENCE_STATE_CHANGES_THRESHOLD, DEFAULT_PERSISTENCE_THRESHOLD,
     };
 
     #[test]
     fn persistence_threshold_defaults() {
         let config = TreeConfig::default();
         assert_eq!(config.persistence_threshold(), DEFAULT_PERSISTENCE_THRESHOLD);
-        assert_eq!(
-            config.persistence_backpressure_threshold(),
-            DEFAULT_PERSISTENCE_BACKPRESSURE_THRESHOLD
-        );
+        assert_eq!(config.persistence_backpressure_threshold(), DEFAULT_PERSISTENCE_THRESHOLD * 2);
         assert_eq!(
             config.persistence_state_changes_threshold(),
             DEFAULT_PERSISTENCE_STATE_CHANGES_THRESHOLD
         );
         assert_eq!(
             config.persistence_state_changes_backpressure_threshold(),
-            DEFAULT_PERSISTENCE_STATE_CHANGES_BACKPRESSURE_THRESHOLD
+            DEFAULT_PERSISTENCE_STATE_CHANGES_THRESHOLD * 2
         );
     }
 
