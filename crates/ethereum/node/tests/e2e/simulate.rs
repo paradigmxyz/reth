@@ -1,12 +1,13 @@
-use crate::utils::eth_payload_attributes;
+use crate::utils::{eth_payload_attributes, eth_payload_attributes_amsterdam};
 use alloy_primitives::{bytes, Address, U256};
 use alloy_provider::{network::EthereumWallet, Provider, ProviderBuilder};
+use alloy_rpc_types_engine::PayloadAttributes;
 use alloy_rpc_types_eth::{
     simulate::{SimBlock, SimulatePayload, SimulatedBlock},
     state::{AccountOverride, StateOverride, StateOverridesBuilder},
     BlockOverrides, TransactionRequest, TransactionTrait as _,
 };
-use reth_chainspec::{ChainSpecBuilder, MAINNET};
+use reth_chainspec::{ChainSpec, ChainSpecBuilder, MAINNET};
 use reth_e2e_test_utils::setup_engine;
 use reth_node_ethereum::EthereumNode;
 use std::sync::Arc;
@@ -97,6 +98,80 @@ async fn test_simulate_v1_no_fields_call_defaults_to_remaining_block_gas() -> ey
     assert_eq!(txs[1].gas_limit(), expected_remaining_gas);
 
     Ok(())
+}
+
+async fn assert_validation_uses_remaining_gas(
+    chain_spec: Arc<ChainSpec>,
+    payload_attributes: fn(u64) -> PayloadAttributes,
+) -> eyre::Result<()> {
+    reth_tracing::init_test_tracing();
+
+    let (mut nodes, wallet) =
+        setup_engine::<EthereumNode>(1, chain_spec, false, Default::default(), payload_attributes)
+            .await?;
+    let node = nodes.pop().unwrap();
+    let provider = ProviderBuilder::new()
+        .wallet(EthereumWallet::new(wallet.wallet_gen().swap_remove(0)))
+        .connect_http(node.rpc_url());
+
+    let from: Address = "0xc000000000000000000000000000000000000000".parse()?;
+    let state_overrides =
+        StateOverridesBuilder::default().with_balance(from, U256::from(1_000_000_000u64)).build();
+    let tx = TransactionRequest::default()
+        .from(from)
+        .max_fee_per_gas(0)
+        .max_priority_fee_per_gas(0)
+        .nonce(0)
+        // Create an empty contract so Amsterdam exercises the state-gas reservoir.
+        .input(bytes!("0x60006000f3"));
+    let sim_block = SimBlock::default()
+        .with_block_overrides(BlockOverrides {
+            gas_limit: Some(U256::from(30_000_000u64)),
+            base_fee: Some(U256::ZERO),
+            ..Default::default()
+        })
+        .with_state_overrides(state_overrides)
+        .call(tx);
+    let payload =
+        SimulatePayload::default().with_validation().with_full_transactions().extend(sim_block);
+
+    let result: Vec<SimulatedBlock> =
+        provider.raw_request("eth_simulateV1".into(), (&payload, "latest")).await?;
+
+    assert_eq!(result.len(), 1);
+    assert_eq!(result[0].calls.len(), 1);
+    assert!(result[0].calls[0].status);
+    let txs = result[0].inner.transactions.as_transactions().expect("expected full transactions");
+    assert_eq!(txs.len(), 1);
+    assert_eq!(txs[0].gas_limit(), 30_000_000);
+    assert!(txs[0].gas_limit() > (1 << 24));
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_simulate_v1_validation_omitted_gas_uses_remaining_gas_osaka() -> eyre::Result<()> {
+    let chain_spec = Arc::new(
+        ChainSpecBuilder::default()
+            .chain(MAINNET.chain)
+            .genesis(serde_json::from_str(include_str!("../assets/genesis.json")).unwrap())
+            .osaka_activated()
+            .build(),
+    );
+    assert_validation_uses_remaining_gas(chain_spec, eth_payload_attributes).await
+}
+
+#[tokio::test]
+async fn test_simulate_v1_validation_omitted_gas_uses_remaining_gas_amsterdam() -> eyre::Result<()>
+{
+    let chain_spec = Arc::new(
+        ChainSpecBuilder::default()
+            .chain(MAINNET.chain)
+            .genesis(serde_json::from_str(include_str!("../assets/genesis.json")).unwrap())
+            .amsterdam_activated()
+            .build(),
+    );
+    assert_validation_uses_remaining_gas(chain_spec, eth_payload_attributes_amsterdam).await
 }
 
 #[tokio::test]
