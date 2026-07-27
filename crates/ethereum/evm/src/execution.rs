@@ -1,5 +1,7 @@
 //! EVM-backed Ethereum execution helpers.
 
+use crate::dao_fork;
+
 #[cfg(test)]
 use crate::convert::recovered_tx_envelope;
 #[cfg(test)]
@@ -455,6 +457,7 @@ where
             stream_hashed_state,
             &mut on_hashed_state_update,
             base_block_reward_for_spec_id(spec_id),
+            false,
             block_number,
             block_beneficiary,
             context.ommers,
@@ -1043,6 +1046,7 @@ pub(crate) fn post_block_balance_state_changes<T: EvmTypes>(
     stream_hashed_state: bool,
     on_hashed_state_update: &mut impl FnMut(HashedPostState),
     base_block_reward: Option<u128>,
+    dao_fork_transition: bool,
     block_number: u64,
     block_beneficiary: Address,
     ommers: Option<&[Header]>,
@@ -1064,11 +1068,33 @@ pub(crate) fn post_block_balance_state_changes<T: EvmTypes>(
         *balance_increments.entry(withdrawal.address).or_default() += withdrawal.amount_wei();
     }
 
+    let mut changes = Vec::new();
+
+    if dao_fork_transition {
+        let mut drained_balance = U256::ZERO;
+        for address in dao_fork::DAO_HARDFORK_ACCOUNTS {
+            let original =
+                evm.read_account_info(&address).map_err(|code| map_db_error_code(evm, code))?;
+            let Some(original) = original else { continue };
+            if original.balance.is_zero() {
+                continue
+            }
+
+            drained_balance = drained_balance.saturating_add(original.balance);
+            let mut current = original.clone();
+            current.balance = U256::ZERO;
+            changes.push((address, Some(original), Some(current)));
+        }
+
+        if !drained_balance.is_zero() {
+            *balance_increments.entry(dao_fork::DAO_HARDFORK_BENEFICIARY).or_default() +=
+                drained_balance;
+        }
+    }
+
     if balance_increments.is_empty() {
         return Ok(());
     }
-
-    let mut changes = Vec::new();
 
     for (address, increment) in balance_increments {
         let original =

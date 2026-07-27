@@ -25,7 +25,7 @@ use evm2::{
     BaseEvmTypes, Evm, EvmTypes, TxResultWithState,
 };
 use reth_chainspec::EthChainSpec;
-use reth_ethereum_forks::EthereumHardforks;
+use reth_ethereum_forks::{EthereumHardfork, EthereumHardforks};
 use reth_ethereum_primitives::{Receipt, TransactionSigned};
 use reth_evm::{
     BlockExecutionError, BlockExecutionOutput, BlockExecutor, BlockTransactionResult,
@@ -46,6 +46,7 @@ where
     receipt_builder: R,
     spec_id: evm2::SpecId,
     base_block_reward: Option<u128>,
+    dao_fork_transition: bool,
     deposit_contract_address: Option<Address>,
     block_state: BlockStateAccumulator,
     hashed_state_update_hook: HashedStateUpdateHook,
@@ -98,6 +99,9 @@ where
         let spec_id = evm.spec_id().into();
         let block_number = evm.block_env().number.to::<u64>();
         let separate_block_gas = evm.version().feature(evm2::EvmFeatures::EIP8037);
+        let dao_fork_transition = chain_spec
+            .ethereum_fork_activation(EthereumHardfork::Dao)
+            .transitions_at_block(block_number);
 
         Self {
             evm,
@@ -105,6 +109,7 @@ where
             receipt_builder,
             spec_id,
             base_block_reward: base_block_reward(chain_spec, block_number),
+            dao_fork_transition,
             deposit_contract_address: chain_spec
                 .deposit_contract()
                 .map(|contract| contract.address),
@@ -332,6 +337,7 @@ where
             stream_hashed_state,
             &mut |state| emit_hashed_state(&mut self.hashed_state_update_hook, state),
             self.base_block_reward,
+            self.dao_fork_transition,
             block_number,
             block_beneficiary,
             context.ommers,
@@ -549,6 +555,10 @@ where
         let block_number = env.block.number.to::<u64>();
         self.inner.spec_id = env.spec.into();
         self.inner.base_block_reward = base_block_reward(self.chain_spec.as_ref(), block_number);
+        self.inner.dao_fork_transition = self
+            .chain_spec
+            .ethereum_fork_activation(EthereumHardfork::Dao)
+            .transitions_at_block(block_number);
         self.inner.ctx = segment.ctx.clone();
         self.inner.separate_block_gas = env.version.feature(evm2::EvmFeatures::EIP8037);
         self.inner.bal_index_offset = segment_idx as u64 * 2;
@@ -633,6 +643,7 @@ where
             stream_hashed_state,
             &mut |state| emit_hashed_state(&mut self.inner.hashed_state_update_hook, state),
             self.inner.base_block_reward,
+            self.inner.dao_fork_transition,
             block_number,
             block_beneficiary,
             context.ommers,
@@ -860,7 +871,7 @@ mod tests {
         interpreter::Word,
         SpecId,
     };
-    use reth_chainspec::{Chain, ChainSpecBuilder};
+    use reth_chainspec::{Chain, ChainSpecBuilder, EthereumHardfork, ForkCondition};
     use reth_ethereum_primitives::TransactionSigned;
     use reth_evm::{BlockExecutor, BlockExecutorFactory, CommitChanges};
     use reth_primitives_traits::Recovered;
@@ -992,6 +1003,44 @@ mod tests {
         assert_eq!(output.result.gas_used, 42_000);
         assert_eq!(output.account(&first_target).unwrap().unwrap().balance, U256::from(1));
         assert_eq!(output.account(&second_target).unwrap().unwrap().balance, U256::from(1));
+    }
+
+    #[test]
+    fn executor_applies_dao_fork_balance_transfer() {
+        let dao_account = address!("d4fe7bc31cedb7bfb8a345f31e668033056b2728");
+        let beneficiary = address!("bf4ed7b27f1d666546e30d74d50d173d20bca754");
+        let mut database = TestDatabase::default();
+        database.accounts.insert(dao_account, AccountInfo::default().with_balance(U256::from(7)));
+
+        let chain_spec = ChainSpecBuilder::mainnet()
+            .with_fork(EthereumHardfork::Dao, ForkCondition::Block(1))
+            .build();
+        let factory = super::super::factory::EthBlockExecutorFactory::new(Arc::new(chain_spec));
+        let env = EthEvmEnv::new(
+            SpecId::FRONTIER,
+            BlockEnv { number: U256::from(1), gas_limit: U256::from(30_000), ..Default::default() },
+            1,
+        );
+        let evm = factory.evm_with_env(Db::new(database), env);
+        let mut executor = factory.create_executor(
+            evm,
+            EthBlockExecutionCtx {
+                tx_count_hint: Some(0),
+                parent_hash: B256::ZERO,
+                parent_beacon_block_root: None,
+                ommers: &[],
+                withdrawals: None,
+                extra_data: Bytes::new(),
+                slot_number: None,
+            },
+        );
+
+        executor.apply_pre_execution_changes().expect("DAO block pre-execution succeeds");
+        let (output, _) =
+            executor.finish_with_block_access_list().expect("DAO block post-execution succeeds");
+
+        assert_eq!(output.account(&dao_account).unwrap().unwrap().balance, U256::ZERO);
+        assert_eq!(output.account(&beneficiary).unwrap().unwrap().balance, U256::from(7));
     }
 
     #[test]

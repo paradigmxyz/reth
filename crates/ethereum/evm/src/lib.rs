@@ -367,6 +367,8 @@ pub mod execute {
 mod build;
 pub use build::EthBlockAssembler;
 
+mod dao_fork;
+
 mod executor;
 pub use executor::{EthBigBlockExecutor, EthBigBlockPlan, EthBigBlockSegment, EthBlockExecutor};
 
