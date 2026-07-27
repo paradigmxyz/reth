@@ -83,9 +83,10 @@ use reth_trie_parallel::proof_task::{ProofResultMessage, ProofTaskCtx, ProofWork
 pub use reth_trie_parallel::{
     error::StateRootTaskError,
     state_root_task::{
-        evm_state_to_hashed_post_state, PayloadStateRootHandle, StateAccessHint,
-        StateRootComputeOutcome, StateRootHandle, StateRootHintStream, StateRootMessage,
-        StateRootSink, StateRootTaskCancelGuard, StateRootUpdateHook, StateRootUpdateStream,
+        evm_state_to_hashed_post_state, evm_state_to_hashed_post_state_with_created_empty_accounts,
+        PayloadStateRootHandle, StateAccessHint, StateRootComputeOutcome, StateRootHandle,
+        StateRootHintStream, StateRootMessage, StateRootSink, StateRootTaskCancelGuard,
+        StateRootUpdateHook, StateRootUpdateStream,
     },
 };
 #[cfg(feature = "trie-debug")]
@@ -496,11 +497,18 @@ type SerialFallbackRx = mpsc::Receiver<ProviderResult<(B256, TrieUpdates, Arc<Ha
 #[derive(Default)]
 pub struct DefaultStateRootStrategy {
     metrics: SparseTrieTaskMetrics,
+    /// Whether explicitly created empty accounts are preserved by the sparse state-root task.
+    ///
+    /// Disabled by default for Ethereum. Custom EVMs that permit created empty accounts can opt
+    /// in through [`Self::with_allow_create_empty_account`].
+    allow_create_empty_account: bool,
 }
 
 impl fmt::Debug for DefaultStateRootStrategy {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("DefaultStateRootStrategy").finish_non_exhaustive()
+        f.debug_struct("DefaultStateRootStrategy")
+            .field("allow_create_empty_account", &self.allow_create_empty_account)
+            .finish_non_exhaustive()
     }
 }
 
@@ -508,6 +516,15 @@ impl DefaultStateRootStrategy {
     /// Transaction count threshold below which proof workers are halved, since fewer transactions
     /// produce fewer state changes and most workers would be idle overhead.
     const SMALL_BLOCK_PROOF_WORKER_TX_THRESHOLD: usize = 30;
+
+    /// Configures whether the sparse state-root task preserves explicitly created empty accounts.
+    ///
+    /// Ethereum callers should leave this disabled. It exists for custom EVMs whose state
+    /// transition intentionally permits created empty accounts.
+    pub const fn with_allow_create_empty_account(mut self, allow: bool) -> Self {
+        self.allow_create_empty_account = allow;
+        self
+    }
 
     /// Spawns the default state-root computation pipeline.
     ///
@@ -573,6 +590,7 @@ impl DefaultStateRootStrategy {
                 } else {
                     pending_sparse_trie_prune_blocks
                 },
+                allow_create_empty_account: self.allow_create_empty_account,
             },
         );
 
@@ -605,6 +623,7 @@ impl DefaultStateRootStrategy {
             preserved_sparse_trie,
             chunk_size,
             pending_sparse_trie_prune_blocks,
+            allow_create_empty_account,
         } = options;
         let overlay_manager = overlay_manager.clone();
         let trie_metrics = self.metrics.clone();
@@ -680,6 +699,7 @@ impl DefaultStateRootStrategy {
                 parent_state_root,
                 new_epoch,
                 chunk_size,
+                allow_create_empty_account,
             );
 
             let result = task.run();
@@ -767,6 +787,7 @@ struct SparseTrieTaskOptions<N: NodePrimitives> {
     chunk_size: usize,
     /// `None` disables pruning. `Some(Vec::new())` prunes nodes older than the current block.
     pending_sparse_trie_prune_blocks: Option<Vec<ExecutedBlock<N>>>,
+    allow_create_empty_account: bool,
 }
 
 struct StateRootTaskOptions<'a, N: NodePrimitives> {
@@ -1442,13 +1463,14 @@ mod tests {
         updates
     }
 
-    #[test]
-    fn state_root_task_matches_serial_root() {
+    fn assert_state_root_task_matches_serial_root(
+        state_updates: Vec<EvmState>,
+        allow_create_empty_account: bool,
+    ) {
         reth_tracing::init_test_tracing();
 
         let factory = create_test_provider_factory_with_chain_spec(Arc::new(ChainSpec::default()));
         let genesis_hash = init_genesis(&factory).unwrap();
-        let state_updates = create_mock_state_updates(10, 10);
         let mut accumulated_state: HashMap<Address, (Account, HashMap<B256, U256>)> =
             HashMap::default();
 
@@ -1492,21 +1514,23 @@ mod tests {
         let env: ExecutionEnv<EthEvmConfig> = ExecutionEnv::test_default();
         let runtime = reth_tasks::Runtime::test();
         let overlay_manager = OverlayManager::<EthPrimitives>::default();
-        let mut state_root_handle = DefaultStateRootStrategy::default().spawn_state_root(
-            &runtime,
-            &overlay_manager,
-            OverlayStateProviderFactory::new(
-                provider_factory,
-                overlay_manager.overlay_builder(genesis_hash),
-            ),
-            StateRootTaskOptions {
-                parent_header: SealedHeader::new(Default::default(), genesis_hash),
-                preserved_sparse_trie: None,
-                transaction_count: Some(env.transaction_count),
-                config: &TreeConfig::default(),
-                pending_sparse_trie_prune_blocks: None,
-            },
-        );
+        let mut state_root_handle = DefaultStateRootStrategy::default()
+            .with_allow_create_empty_account(allow_create_empty_account)
+            .spawn_state_root(
+                &runtime,
+                &overlay_manager,
+                OverlayStateProviderFactory::new(
+                    provider_factory,
+                    overlay_manager.overlay_builder(genesis_hash),
+                ),
+                StateRootTaskOptions {
+                    parent_header: SealedHeader::new(Default::default(), genesis_hash),
+                    preserved_sparse_trie: None,
+                    transaction_count: Some(env.transaction_count),
+                    config: &TreeConfig::default(),
+                    pending_sparse_trie_prune_blocks: None,
+                },
+            );
 
         let mut state_hook = state_root_handle.take_execution_hook();
         for update in state_updates {
@@ -1517,5 +1541,23 @@ mod tests {
         let root_from_task = state_root_handle.state_root().expect("task failed").state_root;
         let root_from_regular = state_root(accumulated_state);
         assert_eq!(root_from_task, root_from_regular);
+    }
+
+    #[test]
+    fn state_root_task_matches_serial_root() {
+        assert_state_root_task_matches_serial_root(create_mock_state_updates(10, 10), false);
+    }
+
+    #[test]
+    fn state_root_task_preserves_created_empty_account_when_allowed() {
+        let mut state_updates = create_mock_state_updates(10, 10);
+        let mut created_empty_update = EvmState::default();
+        created_empty_update.insert(
+            Address::with_last_byte(0xff),
+            revm::state::Account::default().with_touched_mark().with_created_mark(),
+        );
+        state_updates.push(created_empty_update);
+
+        assert_state_root_task_matches_serial_root(state_updates, true);
     }
 }
