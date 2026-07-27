@@ -74,6 +74,12 @@ WORKDIR /app
 # Binary name for entrypoint
 ARG BINARY=reth
 
+# Runtime defaults
+ARG RETH_ENGINE_TXPOOL_PREWARMING=false
+ENV RETH_ENGINE_TXPOOL_PREWARMING=$RETH_ENGINE_TXPOOL_PREWARMING
+ARG RETH_ENGINE_SENDER_RECOVERY_CACHE=false
+ENV RETH_ENGINE_SENDER_RECOVERY_CACHE=$RETH_ENGINE_SENDER_RECOVERY_CACHE
+
 # Install runtime dependencies
 RUN apt-get update && \
     apt-get install -y --no-install-recommends ca-certificates && \
