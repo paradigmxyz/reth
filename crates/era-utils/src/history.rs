@@ -1,5 +1,5 @@
 use alloy_consensus::{
-    proofs::calculate_receipt_root, BlockHeader, ReceiptWithBloom, RlpDecodableReceipt, TxReceipt,
+    proofs::calculate_receipt_root, BlockHeader, Eip658Value, ReceiptEnvelope, TxReceipt,
 };
 use alloy_primitives::{BlockHash, BlockNumber, Bloom, U256};
 use futures_util::{Stream, StreamExt};
@@ -18,7 +18,7 @@ use reth_era::{
     era1::{file::Era1Reader, types::execution::BlockTuple},
     ere::{
         file::EreReader,
-        types::execution::{try_receipt_from_slim, BlockTuple as EreBlockTuple},
+        types::execution::{try_receipt_from_slim, BlockTuple as EreBlockTuple, SlimReceipt},
     },
 };
 use reth_era_downloader::EraMeta;
@@ -70,7 +70,7 @@ impl<BH, BB, R> EraBlockReader<BH, BB, R> for Era1
 where
     BH: FullBlockHeader + Value,
     BB: FullBlockBody<OmmerHeader = BH>,
-    R: RlpDecodableReceipt,
+    R: 'static,
 {
     fn blocks<M: EraMeta + ?Sized>(
         meta: &M,
@@ -460,20 +460,57 @@ pub fn decode_with_receipts<BH, BB, R, E>(
 where
     BH: FullBlockHeader + Value,
     BB: FullBlockBody<OmmerHeader = BH>,
-    R: RlpDecodableReceipt,
+    R: 'static,
     E: From<E2sError> + Error + Send + Sync + 'static,
 {
     let block = block?;
     let header: BH = block.header.decode()?;
     let body: BB = block.body.decode()?;
+    let number = header.number();
     let receipts = decode_receipts
         .then(|| -> eyre::Result<_> {
-            let receipts: Vec<ReceiptWithBloom<R>> = block.receipts.decode()?;
-            Ok(receipts.into_iter().map(|with_bloom| with_bloom.receipt).collect())
+            // `Eip658Value` also covers the pre-Byzantium post-state root, which the node's
+            // boolean status can't decode.
+            let receipts: Vec<ReceiptEnvelope> = block.receipts.decode()?;
+            receipts
+                .into_iter()
+                .map(|envelope| receipt_from_envelope(number, envelope))
+                .collect::<eyre::Result<Vec<R>>>()
         })
         .transpose()?;
 
     Ok((header, body, receipts))
+}
+
+/// Converts an `.era1` receipt into the node's receipt type.
+///
+/// Pre-Byzantium receipts carry a post-state root instead of a status, which a boolean-only receipt
+/// type can't represent.
+fn receipt_from_envelope<R: 'static>(
+    number: BlockNumber,
+    envelope: ReceiptEnvelope,
+) -> eyre::Result<R> {
+    let tx_type = envelope.tx_type();
+    let receipt = envelope.into_receipt();
+
+    if matches!(receipt.status, Eip658Value::PostState(_)) {
+        eyre::bail!(
+            "block {number} has pre-Byzantium receipts, which commit to a post-state root rather \
+             than a success status and so cannot be represented by this node's receipt type; \
+             receipt import is only supported from Byzantium onwards"
+        );
+    }
+
+    // Reuses the `.ere` conversion, which takes the same four fields.
+    try_receipt_from_slim(SlimReceipt {
+        tx_type,
+        status: receipt.status,
+        cumulative_gas_used: receipt.cumulative_gas_used,
+        logs: receipt.logs,
+    })
+    .ok_or_else(|| {
+        eyre::eyre!("`.era1` receipts import is not supported for this node's receipt type")
+    })
 }
 
 /// Extracts block headers, bodies and (optionally) receipts from `iter` and appends them using
@@ -739,8 +776,12 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy_consensus::{Header, TxType};
+    use alloy_consensus::{Header, Receipt as RlpReceipt, ReceiptWithBloom, TxType};
+    use alloy_primitives::B256;
     use reth_db_common::init::init_genesis;
+    use reth_era::era1::types::execution::{
+        CompressedBody, CompressedHeader, CompressedReceipts, TotalDifficulty,
+    };
     use reth_ethereum_primitives::{Block, BlockBody, Receipt};
     use reth_provider::{
         test_utils::create_test_provider_factory, DatabaseProviderFactory, StageCheckpointReader,
@@ -748,6 +789,25 @@ mod tests {
     };
     use std::{cell::Cell, path::Path};
     use tempfile::tempdir;
+
+    /// Builds an `.era1` block tuple for a transaction-less block carrying `receipts`.
+    fn era1_block_tuple(number: u64, receipts: Vec<ReceiptEnvelope>) -> BlockTuple {
+        let header = Header { number, ..Default::default() };
+        BlockTuple::new(
+            CompressedHeader::from_rlp(&alloy_rlp::encode(&header)).unwrap(),
+            CompressedBody::from_rlp(&alloy_rlp::encode(&BlockBody::default())).unwrap(),
+            CompressedReceipts::from_rlp(&alloy_rlp::encode(&receipts)).unwrap(),
+            TotalDifficulty::new(U256::ZERO),
+        )
+    }
+
+    /// Wraps `status` in a legacy `.era1` receipt envelope.
+    fn era1_receipt(status: Eip658Value) -> ReceiptEnvelope {
+        ReceiptEnvelope::Legacy(ReceiptWithBloom::new(
+            RlpReceipt { status, cumulative_gas_used: 21_000, logs: vec![] },
+            Bloom::ZERO,
+        ))
+    }
 
     struct TestEra;
 
@@ -1096,6 +1156,50 @@ mod tests {
             static_file_provider.get_highest_static_file_block(StaticFileSegment::Headers),
             Some(2)
         );
+    }
+
+    #[test]
+    fn decodes_post_byzantium_era1_receipts() {
+        let tuple = era1_block_tuple(4_370_000, vec![era1_receipt(Eip658Value::Eip658(true))]);
+
+        let (_, _, receipts) =
+            decode_with_receipts::<Header, BlockBody, Receipt, E2sError>(Ok(tuple), true).unwrap();
+
+        let receipts = receipts.unwrap();
+        assert_eq!(receipts.len(), 1);
+        assert!(receipts[0].success);
+        assert_eq!(receipts[0].cumulative_gas_used, 21_000);
+    }
+
+    #[test]
+    fn rejects_pre_byzantium_era1_receipts() {
+        // Mainnet's first transaction: its receipt commits to a post-state root.
+        let tuple = era1_block_tuple(
+            46_147,
+            vec![era1_receipt(Eip658Value::PostState(B256::repeat_byte(1)))],
+        );
+
+        let err = decode_with_receipts::<Header, BlockBody, Receipt, E2sError>(Ok(tuple), true)
+            .unwrap_err()
+            .to_string();
+
+        assert!(err.contains("pre-Byzantium"), "unexpected error: {err}");
+        assert!(err.contains("46147"), "error should name the offending block: {err}");
+    }
+
+    #[test]
+    fn skips_pre_byzantium_receipts_when_not_requested() {
+        // A header-only import of the same file must stay unaffected.
+        let tuple = era1_block_tuple(
+            46_147,
+            vec![era1_receipt(Eip658Value::PostState(B256::repeat_byte(1)))],
+        );
+
+        let (header, _, receipts) =
+            decode_with_receipts::<Header, BlockBody, Receipt, E2sError>(Ok(tuple), false).unwrap();
+
+        assert_eq!(header.number, 46_147);
+        assert!(receipts.is_none());
     }
 
     #[test]
