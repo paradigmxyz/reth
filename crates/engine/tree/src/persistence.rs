@@ -167,20 +167,6 @@ where
                 .into())
             }
 
-            for (index, block) in state_trie_blocks.iter().enumerate() {
-                let expected_number = state_trie_tip + index as u64 + 1;
-                let num_hash = block.recovered_block().num_hash();
-                let expected_hash = provider_rw
-                    .block_hash(expected_number)?
-                    .ok_or_else(|| ProviderError::HeaderNotFound(expected_number.into()))?;
-                if num_hash.number != expected_number || num_hash.hash != expected_hash {
-                    return Err(ProviderError::other(std::io::Error::other(format!(
-                        "in-memory state/trie replay block {num_hash:?} does not match persisted canonical block #{expected_number} ({expected_hash})",
-                    )))
-                    .into())
-                }
-            }
-
             debug!(
                 target: "engine::persistence",
                 ?state_trie_tip,
