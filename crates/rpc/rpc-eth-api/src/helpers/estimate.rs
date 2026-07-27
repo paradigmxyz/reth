@@ -8,7 +8,7 @@ use alloy_rpc_types_eth::{state::EvmOverrides, BlockId};
 use evm2::{evm::DynDatabase, EvmFeatures, TxResult};
 use futures::Future;
 use reth_chainspec::MIN_TRANSACTION_GAS;
-use reth_evm::{EvmEnv, EvmEnvFor};
+use reth_evm::{EvmEnv, EvmEnvFor, EvmTypesFor};
 use reth_rpc_convert::{RpcConvert, RpcTxReq};
 use reth_rpc_eth_types::{
     cache::db::{apply_block_overrides, apply_state_overrides, StateProviderTraitObjWrapper},
@@ -147,7 +147,10 @@ pub trait EstimateCall: Call {
                     (tx_request_gas_limit.is_some() || tx_request_gas_price.is_some()) =>
             {
                 let retry = execute(max_gas_limit)?;
-                return map_out_of_gas_result::<Self::Error, _>(retry, highest_gas_limit)
+                return map_out_of_gas_result::<Self::Error, EvmTypesFor<Self::Evm>>(
+                    retry,
+                    highest_gas_limit,
+                )
             }
             Err(err) if err.is_gas_too_low() => {
                 // This failed because the configured gas cost of the tx was lower than what
@@ -170,7 +173,10 @@ pub trait EstimateCall: Call {
             // again with the block's gas limit to check if revert is gas related or not
             return if tx_request_gas_limit.is_some() || tx_request_gas_price.is_some() {
                 let retry = execute(max_gas_limit)?;
-                map_out_of_gas_result::<Self::Error, _>(retry, highest_gas_limit)
+                map_out_of_gas_result::<Self::Error, EvmTypesFor<Self::Evm>>(
+                    retry,
+                    highest_gas_limit,
+                )
             } else {
                 // the transaction did revert
                 Err(Self::Error::from_revert(res.output))
@@ -205,7 +211,7 @@ pub trait EstimateCall: Call {
             // Update the gas used based on the new result.
             gas_used = res.tx_gas_used();
             // Update the gas limit estimates (highest and lowest) based on the execution result.
-            update_estimated_gas_range(
+            update_estimated_gas_range::<EvmTypesFor<Self::Evm>>(
                 res,
                 optimistic_gas_limit,
                 &mut highest_gas_limit,
@@ -245,7 +251,7 @@ pub trait EstimateCall: Call {
                 // Handle other cases, including successful transactions.
                 ethres => {
                     // Update the estimated gas range based on the execution result.
-                    update_estimated_gas_range(
+                    update_estimated_gas_range::<EvmTypesFor<Self::Evm>>(
                         ethres?,
                         mid_gas_limit,
                         &mut highest_gas_limit,

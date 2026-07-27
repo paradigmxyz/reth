@@ -50,7 +50,7 @@ where
 
     /// Converts the standard Ethereum block environment into the factory's block environment.
     fn block_env(&self, block: evm2::env::BlockEnv) -> evm2::env::BlockEnv<Self::Types> {
-        evm2::env::BlockEnv {
+        evm2::env::BlockEnv::<Self::Types> {
             number: block.number,
             beneficiary: block.beneficiary,
             timestamp: block.timestamp,

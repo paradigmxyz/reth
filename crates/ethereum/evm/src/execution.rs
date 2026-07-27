@@ -762,14 +762,29 @@ pub(crate) fn commit_detached_transaction<T: EvmTypes>(
     output: TxResultWithState<T>,
 ) -> TxResult<T> {
     let TxResultWithState { result, pending_state, .. } = output;
+    commit_pending_state(
+        evm,
+        block_state,
+        stream_hashed_state,
+        on_hashed_state_update,
+        &pending_state,
+    );
+    result
+}
 
+pub(crate) fn commit_pending_state<T: EvmTypes>(
+    evm: &mut Evm<'_, T>,
+    block_state: &mut BlockStateAccumulator,
+    stream_hashed_state: bool,
+    on_hashed_state_update: &mut impl FnMut(HashedPostState),
+    pending_state: &evm2::evm::PendingState,
+) {
     {
         let mut sink = RethStateSink::new(None, block_state, stream_hashed_state);
         let Ok(()) = pending_state.visit(&mut sink);
         sink.flush_streamed_hashed_state(on_hashed_state_update);
     }
-    evm.overlay_db_mut().commit_pending(&pending_state);
-    result
+    evm.overlay_db_mut().commit_pending(pending_state);
 }
 
 fn map_db_error_code<T: EvmTypes>(evm: &mut Evm<'_, T>, code: ErrorCode) -> EthExecutionError {

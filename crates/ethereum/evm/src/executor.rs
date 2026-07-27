@@ -3,7 +3,7 @@
 use crate::{
     execution::{
         base_block_reward, block_requests_from_receipts, commit_detached_transaction,
-        execute_transaction_without_commit, post_block_balance_state_changes,
+        commit_pending_state, execute_transaction_without_commit, post_block_balance_state_changes,
         post_execution_system_call_state_changes, pre_execution_system_call_state_changes,
         BlockExecutionContext, BlockSystemCalls, EthExecutionError,
     },
@@ -76,6 +76,18 @@ impl<T: EvmTypes, TxType> BlockTransactionResult<T> for EthTransactionResultWith
     }
 }
 
+impl<T: EvmTypes, TxType> EthTransactionResultWithState<T, TxType> {
+    /// Creates a detached transaction result with its receipt metadata.
+    pub const fn new(result: TxResultWithState<T>, tx_type: TxType, blob_gas_used: u64) -> Self {
+        Self { result, tx_type, blob_gas_used }
+    }
+
+    /// Returns the detached EVM transaction result.
+    pub const fn result(&self) -> &TxResultWithState<T> {
+        &self.result
+    }
+}
+
 type HashedStateUpdateHook = Option<Box<dyn FnMut(HashedPostState) + Send>>;
 
 impl<'a, T, R> EthBlockExecutor<'a, T, R>
@@ -142,6 +154,28 @@ where
 
     const fn block_access_list_builder_enabled(&self) -> bool {
         self.evm.state().bal_builder().is_some()
+    }
+
+    /// Returns the block execution context.
+    pub const fn context(&self) -> &EthBlockExecutionCtx<'a> {
+        &self.ctx
+    }
+
+    /// Returns the accumulated block state.
+    pub const fn block_state(&self) -> &BlockStateAccumulator {
+        &self.block_state
+    }
+
+    /// Commits detached state without recording a transaction receipt or gas usage.
+    pub fn commit_pending_state(&mut self, state: &evm2::evm::PendingState) {
+        let stream_hashed_state = self.hashed_state_update_hook.is_some();
+        commit_pending_state(
+            &mut self.evm,
+            &mut self.block_state,
+            stream_hashed_state,
+            &mut |state| emit_hashed_state(&mut self.hashed_state_update_hook, state),
+            state,
+        );
     }
 
     #[inline]
@@ -261,7 +295,7 @@ where
         let tx_type = tx.tx().tx_type();
         let result = execute_transaction_without_commit(&mut self.evm, &transaction)
             .map_err(|err| map_transaction_execution_error(err, tx_hash))?;
-        Ok(EthTransactionResultWithState { result, tx_type, blob_gas_used })
+        Ok(EthTransactionResultWithState::new(result, tx_type, blob_gas_used))
     }
 
     fn commit_transaction(
@@ -284,7 +318,7 @@ where
         self.block_state_gas_used = self.block_state_gas_used.saturating_add(state_gas_used);
         self.cumulative_gas_used += tx_gas_used;
         self.blob_gas_used += blob_gas_used;
-        self.receipts.push(self.receipt_builder.build_receipt(ReceiptBuilderCtx {
+        self.receipts.push(self.receipt_builder.build_receipt::<T>(ReceiptBuilderCtx {
             tx_type,
             result: outcome,
             cumulative_gas_used: self.cumulative_gas_used,

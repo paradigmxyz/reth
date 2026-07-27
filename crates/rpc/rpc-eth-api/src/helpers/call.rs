@@ -249,12 +249,13 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
                     );
                     parent = simulated_header;
 
-                    let block = simulate::build_simulated_block::<Self::Error, _, _>(
-                        result.block,
-                        results,
-                        return_full_transactions.into(),
-                        this.converter(),
-                    )?;
+                    let block =
+                        simulate::build_simulated_block::<Self::Error, _, EvmTypesFor<Self::Evm>>(
+                            result.block,
+                            results,
+                            return_full_transactions.into(),
+                            this.converter(),
+                        )?;
 
                     blocks.push(block);
                 }
@@ -277,7 +278,7 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
             let res =
                 self.transact_call_at(request, block_number.unwrap_or_default(), overrides).await?;
 
-            Self::Error::ensure_success(res.result)
+            Self::Error::ensure_success::<EvmTypesFor<Self::Evm>>(res.result)
         }
     }
 
@@ -398,7 +399,7 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
                             },
                         )?;
 
-                        match Self::Error::ensure_success(res.result) {
+                        match Self::Error::ensure_success::<EvmTypesFor<Self::Evm>>(res.result) {
                             Ok(output) => {
                                 bundle_results
                                     .push(EthCallResponse { value: Some(output), error: None });
@@ -514,7 +515,7 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
                 this.transact_with_inspector(&mut db, evm_env.clone(), tx_env, inspector)?;
             let access_list = inspector.into_access_list();
             let gas_used = result.result.tx_gas_used();
-            if let Err(err) = Self::Error::ensure_success(result.result) {
+            if let Err(err) = Self::Error::ensure_success::<EvmTypesFor<Self::Evm>>(result.result) {
                 return Ok(AccessListResult {
                     access_list,
                     gas_used: U256::from(gas_used),
@@ -527,7 +528,9 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
             let tx_env = this.create_txn_env(&evm_env, request, &mut db)?;
             let result = this.transact(&mut db, evm_env, tx_env)?;
             let gas_used = result.result.tx_gas_used();
-            let error = Self::Error::ensure_success(result.result).err().map(|e| e.to_string());
+            let error = Self::Error::ensure_success::<EvmTypesFor<Self::Evm>>(result.result)
+                .err()
+                .map(|e| e.to_string());
 
             Ok(AccessListResult { access_list, gas_used: U256::from(gas_used), error })
         })

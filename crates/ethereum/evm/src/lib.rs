@@ -263,7 +263,7 @@ pub trait EthBlockEnv: Copy {
     fn slot_number(&self) -> u64;
 }
 
-impl<T: evm2::EvmTypesHost> EthBlockEnv for evm2::env::BlockEnv<T> {
+impl<E: Copy> EthBlockEnv for evm2::env::BlockEnvExt<E> {
     fn number(&self) -> u64 {
         self.number.to()
     }
@@ -370,7 +370,10 @@ pub use build::EthBlockAssembler;
 mod dao_fork;
 
 mod executor;
-pub use executor::{EthBigBlockExecutor, EthBigBlockPlan, EthBigBlockSegment, EthBlockExecutor};
+pub use executor::{
+    EthBigBlockExecutor, EthBigBlockPlan, EthBigBlockSegment, EthBlockExecutor,
+    EthTransactionResultWithState,
+};
 
 /// Ethereum block executor and EVM factory implementations.
 pub mod factory;

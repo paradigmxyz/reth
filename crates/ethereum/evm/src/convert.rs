@@ -7,7 +7,11 @@ use alloy_consensus::{
 use alloy_eips::eip7840::BlobParams;
 use alloy_primitives::{Address, BlockNumber, BlockTimestamp, B256, U256};
 use alloy_rpc_types_engine::ExecutionData;
-use evm2::{env::BlockEnv, ethereum::RecoveredTxEnvelope, SpecId};
+use evm2::{
+    env::{BlockEnv, BlockEnvExt},
+    ethereum::RecoveredTxEnvelope,
+    SpecId,
+};
 use reth_chainspec::EthereumHardforks;
 use reth_ethereum_primitives::TransactionSigned;
 use reth_evm::{ExecutableTxParts, FromRecoveredTx, FromTxWithEncoded, RecoveredTx};
@@ -68,7 +72,7 @@ pub(crate) fn block_env_with_blob_params<H: BlockHeader>(
     header: &H,
     blob_params: Option<BlobParams>,
 ) -> BlockEnv {
-    BlockEnv {
+    BlockEnvExt {
         number: U256::from(header.number()),
         beneficiary: header.beneficiary(),
         timestamp: U256::from(header.timestamp()),
@@ -93,7 +97,7 @@ pub(crate) fn payload_block_env(
     blob_params: Option<BlobParams>,
 ) -> BlockEnv {
     let payload = &payload.payload;
-    BlockEnv {
+    BlockEnvExt {
         number: U256::from(payload.block_number()),
         beneficiary: payload.fee_recipient(),
         timestamp: U256::from(payload.timestamp()),
