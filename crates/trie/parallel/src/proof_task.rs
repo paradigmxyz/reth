@@ -1173,10 +1173,10 @@ mod tests {
         let chain_spec = Arc::new(ChainSpec::default());
         let anchor_hash = chain_spec.genesis_hash();
         let provider_factory = create_test_provider_factory_with_chain_spec(chain_spec);
-        let changeset_cache = reth_trie_db::ChangesetCache::new();
+        let changeset_cache = reth_storage_overlay::ChangesetCache::new();
         let factory = reth_provider::providers::OverlayStateProviderFactory::new(
             provider_factory,
-            reth_provider::providers::OverlayBuilder::<reth_ethereum_primitives::EthPrimitives>::new(
+            reth_storage_overlay::OverlayBuilder::<reth_ethereum_primitives::EthPrimitives>::new(
                 anchor_hash,
                 changeset_cache,
             ),

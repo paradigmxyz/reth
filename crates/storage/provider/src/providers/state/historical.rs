@@ -1,4 +1,3 @@
-use super::overlay::{Overlay, OverlayBuilder, OverlaySource};
 use crate::{
     AccountReader, BlockHashReader, ChangeSetReader, EitherReader, HashedPostStateProvider,
     ProviderError, RocksDBProviderFactory, StateProvider, StateRootProvider,
@@ -19,6 +18,7 @@ use reth_storage_api::{
     StorageSettingsCache,
 };
 use reth_storage_errors::provider::ProviderResult;
+use reth_storage_overlay::{ChangesetCache, Overlay, OverlayBuilder, OverlaySource};
 use reth_trie::{
     hashed_cursor::HashedPostStateCursorFactory,
     proof::{Proof, StorageProof},
@@ -29,9 +29,7 @@ use reth_trie::{
     MultiProof, MultiProofTargets, StateRoot, StorageMultiProof, StorageRoot, TrieInput,
     TrieInputSorted,
 };
-use reth_trie_db::{
-    ChangesetCache, DatabaseProof, DatabaseStateRoot, DatabaseStorageProof, DatabaseStorageRoot,
-};
+use reth_trie_db::{DatabaseProof, DatabaseStateRoot, DatabaseStorageProof, DatabaseStorageRoot};
 
 use std::{fmt::Debug, marker::PhantomData, sync::Arc};
 
@@ -1043,7 +1041,7 @@ mod tests {
         StorageChangeSetReader, StorageSettingsCache,
     };
     use reth_storage_errors::provider::ProviderError;
-    use reth_trie_db::ChangesetCache;
+    use reth_storage_overlay::ChangesetCache;
 
     const ADDRESS: Address = address!("0x0000000000000000000000000000000000000001");
     const HIGHER_ADDRESS: Address = address!("0x0000000000000000000000000000000000000005");
