@@ -17,6 +17,9 @@
 mod cached_state;
 pub use cached_state::*;
 
+mod txpool;
+pub use txpool::*;
+
 use alloy_primitives::B256;
 use metrics::{Counter, Histogram};
 use parking_lot::Mutex;

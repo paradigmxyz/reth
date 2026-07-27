@@ -88,11 +88,16 @@ reth-network-p2p = { workspace = true, features = ["test-utils"] }
 reth-network-types = { workspace = true, features = ["test-utils"] }
 
 reth-provider = { workspace = true, features = ["test-utils"] }
+reth-stages-types.workspace = true
+reth-testing-utils.workspace = true
 reth-tracing.workspace = true
+reth-trie.workspace = true
 reth-transaction-pool = { workspace = true, features = ["test-utils"] }
 
 # alloy deps for testing against nodes
+alloy-eip7928.workspace = true
 alloy-genesis.workspace = true
+alloy-trie.workspace = true
 
 # misc
 test-case.workspace = true
@@ -110,6 +115,7 @@ serde = [
     "alloy-consensus/serde",
     "alloy-eips/serde",
     "alloy-primitives/serde",
+    "alloy-trie/serde",
     "discv5/serde",
     "parking_lot/serde",
     "rand/serde",
@@ -124,6 +130,9 @@ serde = [
     "rand_08/serde",
     "reth-storage-api/serde",
     "reth-network-types/serde",
+    "reth-stages-types/serde",
+    "reth-trie/serde",
+    "alloy-eip7928/serde",
 ]
 test-utils = [
     "reth-transaction-pool/test-utils",
@@ -139,4 +148,6 @@ test-utils = [
     "dep:reth-evm-ethereum",
     "reth-evm-ethereum?/test-utils",
     "reth-tasks/test-utils",
+    "reth-stages-types/test-utils",
+    "reth-trie/test-utils",
 ]

@@ -1119,6 +1119,14 @@ pub trait BestTransactions: Iterator + Send {
     /// listen to pool updates.
     fn no_updates(&mut self);
 
+    /// Allows newly received transactions to be yielded even if their priority is higher than a
+    /// transaction that was already yielded.
+    ///
+    /// This is useful for long-lived consumers that prefer seeing every update over preserving
+    /// decreasing priority order. The default implementation leaves the iterator's ordering
+    /// behavior unchanged. Implementations must still preserve transaction dependency ordering.
+    fn allow_updates_out_of_order(&mut self) {}
+
     /// Convenience function for [`Self::no_updates`] that returns the iterator again.
     fn without_updates(mut self) -> Self
     where
@@ -1178,6 +1186,10 @@ where
 
     fn no_updates(&mut self) {
         (**self).no_updates();
+    }
+
+    fn allow_updates_out_of_order(&mut self) {
+        (**self).allow_updates_out_of_order();
     }
 
     fn skip_blobs(&mut self) {

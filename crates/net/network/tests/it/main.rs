@@ -5,6 +5,7 @@ mod connect;
 mod multiplex;
 mod requests;
 mod session;
+mod snap;
 mod startup;
 mod transaction_hash_fetching;
 mod txgossip;

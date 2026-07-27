@@ -81,13 +81,13 @@ use reth_stages::{
     StageId, StageSet,
 };
 use reth_static_file::{blocks_per_file_for_prune_distance, StaticFileProducer, StaticFileSegment};
+use reth_storage_overlay::ChangesetCache;
 use reth_tasks::TaskExecutor;
 use reth_tracing::{
     throttle,
     tracing::{debug, error, info, warn},
 };
 use reth_transaction_pool::TransactionPool;
-use reth_trie_db::ChangesetCache;
 use std::{num::NonZeroUsize, sync::Arc, thread::available_parallelism, time::Duration};
 use tokio::sync::{
     mpsc::{unbounded_channel, UnboundedSender},

@@ -18,7 +18,7 @@ use reth_trie::{
     updates::TrieUpdates, DecodedMultiProofV2, HashedPostState, TrieAccount, EMPTY_ROOT_HASH,
     TRIE_ACCOUNT_RLP_MAX_SIZE,
 };
-use reth_trie_common::{MultiProofTargetsV2, ProofV2Target};
+use reth_trie_common::{MultiProofTargetsV2, ProofV2Target, ProofV2TargetParent};
 use reth_trie_parallel::{
     error::StateRootTaskError,
     proof_task::{
@@ -28,7 +28,7 @@ use reth_trie_parallel::{
 use reth_trie_sparse::{
     errors::{SparseStateTrieErrorKind, SparseTrieErrorKind, SparseTrieResult},
     ArenaParallelSparseTrie, DeferredDrops, LeafUpdate, RevealableSparseTrie, SparseStateTrie,
-    SparseTrie,
+    SparseTrie, TrieNodeEpoch,
 };
 use tracing::{debug, debug_span, error, instrument, trace_span};
 
@@ -50,6 +50,8 @@ pub(super) struct SparseTrieCacheTask<A = ArenaParallelSparseTrie, S = ArenaPara
     trie: SparseStateTrie<A, S>,
     /// The parent block's state root.
     parent_state_root: B256,
+    /// The new epoch assigned to nodes modified by this task.
+    new_epoch: TrieNodeEpoch,
     /// Handle to the proof worker pools (storage and account).
     proof_worker_handle: ProofWorkerHandle,
 
@@ -85,11 +87,12 @@ pub(super) struct SparseTrieCacheTask<A = ArenaParallelSparseTrie, S = ArenaPara
     ///     to complete.
     pending_account_updates: B256Map<Option<Option<Account>>>,
     /// Cache of account proof targets that were already fetched/requested from the proof workers.
-    /// account -> lowest `min_len` requested.
-    fetched_account_targets: B256Map<u8>,
+    /// Account to the broadest requested parent context (an unknown parent sorts before every
+    /// known parent).
+    fetched_account_targets: B256Map<ProofV2TargetParent>,
     /// Cache of storage proof targets that have already been fetched/requested from the proof
-    /// workers. account -> slot -> lowest `min_len` requested.
-    fetched_storage_targets: B256Map<B256Map<u8>>,
+    /// workers. Account to slot to the broadest requested parent context.
+    fetched_storage_targets: B256Map<B256Map<ProofV2TargetParent>>,
     /// Reusable buffer for RLP encoding of accounts.
     account_rlp_buf: Vec<u8>,
     /// Whether the last state update has been received.
@@ -136,6 +139,7 @@ where
         metrics: SparseTrieTaskMetrics,
         trie: SparseStateTrie<A, S>,
         parent_state_root: B256,
+        new_epoch: TrieNodeEpoch,
         chunk_size: usize,
     ) -> Self {
         let (proof_result_tx, proof_result_rx) = crossbeam_channel::unbounded();
@@ -157,6 +161,7 @@ where
             final_hashed_state_tx: Some(final_hashed_state_tx),
             trie,
             parent_state_root,
+            new_epoch,
             chunk_size,
             max_targets_for_chunking: DEFAULT_MAX_TARGETS_FOR_CHUNKING,
             account_updates: Default::default(),
@@ -332,7 +337,7 @@ where
         debug!(target: "engine::root", "All proofs processed, ending calculation");
 
         let start = Instant::now();
-        let (state_root, trie_updates) = match self.trie.root_with_updates() {
+        let (state_root, trie_updates) = match self.trie.root_with_updates(self.new_epoch) {
             Ok(result) => result,
             Err(err)
                 if matches!(
@@ -428,7 +433,7 @@ where
             // If there's still no pending updates spend some time pre-computing the account
             // trie upper hashes
             if self.proof_result_rx.is_empty() {
-                self.trie.calculate_subtries();
+                self.trie.calculate_subtries(self.new_epoch);
             }
         } else if !updates_queued {
             // If we don't have any pending updates, apply them to the trie,
@@ -504,8 +509,6 @@ where
                 let mut existing_updates = self.storage_updates.get_mut(&address);
 
                 for (&slot, &value) in &storage.storage {
-                    self.trie.record_slot_touch(address, slot);
-
                     let encoded = if value.is_zero() {
                         Vec::new()
                     } else {
@@ -530,8 +533,6 @@ where
         }
 
         for (&address, &account) in &hashed_state_update.accounts {
-            self.trie.record_account_touch(address);
-
             // Track account as touched.
             //
             // This might overwrite an existing update, which is fine, because storage root from it
@@ -638,16 +639,16 @@ where
             let mut targets = Vec::new();
 
             let updates_len_before = updates.len();
-            trie.update_leaves(updates, |path, min_len| match fetched.entry(path) {
+            trie.update_leaves(updates, |path, parent| match fetched.entry(path) {
                 Entry::Occupied(mut entry) => {
-                    if min_len < *entry.get() {
-                        entry.insert(min_len);
-                        targets.push(ProofV2Target::new(path).with_min_len(min_len));
+                    if parent < *entry.get() {
+                        entry.insert(parent);
+                        targets.push(ProofV2Target::new(path).with_parent(parent));
                     }
                 }
                 Entry::Vacant(entry) => {
-                    entry.insert(min_len);
-                    targets.push(ProofV2Target::new(path).with_min_len(min_len));
+                    entry.insert(parent);
+                    targets.push(ProofV2Target::new(path).with_parent(parent));
                 }
             })?;
             let updates_len_after = updates.len();
@@ -681,19 +682,19 @@ where
 
         let updates_len_before = account_updates.len();
 
-        self.trie.trie_mut().update_leaves(account_updates, |target, min_len| {
+        self.trie.trie_mut().update_leaves(account_updates, |target, parent| {
             match self.fetched_account_targets.entry(target) {
                 Entry::Occupied(mut entry) => {
-                    if min_len < *entry.get() {
-                        entry.insert(min_len);
+                    if parent < *entry.get() {
+                        entry.insert(parent);
                         self.pending_targets
-                            .push_account_target(ProofV2Target::new(target).with_min_len(min_len));
+                            .push_account_target(ProofV2Target::new(target).with_parent(parent));
                     }
                 }
                 Entry::Vacant(entry) => {
-                    entry.insert(min_len);
+                    entry.insert(parent);
                     self.pending_targets
-                        .push_account_target(ProofV2Target::new(target).with_min_len(min_len));
+                        .push_account_target(ProofV2Target::new(target).with_parent(parent));
                 }
             }
         })?;
@@ -741,6 +742,7 @@ where
 
         let parent_span =
             debug_span!("compute_drained_storage_roots", n = tries_to_compute_roots.len());
+        let new_epoch = self.new_epoch;
         tries_to_compute_roots.into_par_iter().for_each(|(address, SendStorageTriePtr(trie))| {
             let span = if tracing::enabled!(tracing::Level::TRACE) {
                 debug_span!(
@@ -763,7 +765,11 @@ where
             // - we do not insert/remove entries between pointer collection and use, so pointers
             //   stay valid and map reallocation cannot occur;
             // - each pointer is consumed by at most one rayon task, so no aliasing mutable access.
-            unsafe { (*trie).root().expect("updates are drained, trie should be revealed by now") };
+            unsafe {
+                (*trie)
+                    .root(new_epoch)
+                    .expect("updates are drained, trie should be revealed by now")
+            };
         });
     }
 
@@ -795,7 +801,7 @@ where
                         // If account has pending storage updates, it is still pending.
                         return true;
                     } else if let Some(account) = account.take() {
-                        let storage_root = self.trie.storage_root(addr).expect("updates are drained, storage trie should be revealed by now");
+                        let storage_root = self.trie.storage_root(addr, self.new_epoch).expect("updates are drained, storage trie should be revealed by now");
                         let encoded = encode_account_leaf_value(account, storage_root, account_rlp_buf);
                         self.account_updates.insert(*addr, LeafUpdate::Changed(encoded));
                         num_promoted += 1;
@@ -824,7 +830,7 @@ where
 
                     (account, storage_root)
                 } else {
-                    (trie_account.map(Into::into), self.trie.storage_root(addr).expect("account had storage updates that were applied to its trie, storage root must be revealed by now"))
+                    (trie_account.map(Into::into), self.trie.storage_root(addr, self.new_epoch).expect("account had storage updates that were applied to its trie, storage root must be revealed by now"))
                 };
 
                 let encoded = encode_account_leaf_value(account, storage_root, account_rlp_buf);
@@ -981,6 +987,8 @@ pub(super) struct SparseTrieTaskMetrics {
     pub(super) sparse_trie_total_duration_histogram: Histogram,
     /// Time spent preparing the sparse trie for reuse after state root computation.
     pub(super) into_trie_for_reuse_duration_histogram: Histogram,
+    /// Time spent pruning the sparse trie by node epoch.
+    pub(super) sparse_trie_prune_duration_histogram: Histogram,
     /// Time spent waiting for preserved sparse trie cache to become available.
     pub(super) sparse_trie_cache_wait_duration_histogram: Histogram,
     /// Histogram for sparse trie task idle time in seconds (waiting for updates or proof
@@ -999,8 +1007,6 @@ pub(super) struct SparseTrieTaskMetrics {
     /// Number of storage leaf updates that required a new proof (cache misses).
     pub(super) sparse_trie_storage_cache_misses: Histogram,
 
-    /// Retained memory of the preserved sparse trie cache in bytes.
-    pub(super) sparse_trie_retained_memory_bytes: Gauge,
     /// Number of storage tries retained in the preserved sparse trie cache.
     pub(super) sparse_trie_retained_storage_tries: Gauge,
 }
@@ -1107,11 +1113,10 @@ mod tests {
     use super::*;
     use alloy_primitives::{keccak256, Address, B256, U256};
     use reth_provider::{
-        providers::{OverlayBuilder, OverlayStateProviderFactory},
-        test_utils::create_test_provider_factory,
+        providers::OverlayStateProviderFactory, test_utils::create_test_provider_factory,
         ChainSpecProvider,
     };
-    use reth_trie_db::ChangesetCache;
+    use reth_storage_overlay::{ChangesetCache, OverlayBuilder};
     use reth_trie_parallel::proof_task::ProofTaskCtx;
     use reth_trie_sparse::ArenaParallelSparseTrie;
 
@@ -1227,6 +1232,7 @@ mod tests {
             SparseTrieTaskMetrics::default(),
             trie,
             parent_state_root,
+            TrieNodeEpoch::UNMODIFIED,
             1,
         );
 
@@ -1272,6 +1278,7 @@ mod tests {
             SparseTrieTaskMetrics::default(),
             trie,
             B256::from([0x55; 32]),
+            TrieNodeEpoch::UNMODIFIED,
             1,
         );
 
@@ -1286,8 +1293,11 @@ mod tests {
         task.account_updates.insert(account, LeafUpdate::Touched);
         task.storage_updates.entry(account).or_default().insert(slot, LeafUpdate::Touched);
         task.pending_account_updates.insert(account, None);
-        task.fetched_account_targets.insert(account_target, 0);
-        task.fetched_storage_targets.entry(account).or_default().insert(storage_target, 12);
+        task.fetched_account_targets.insert(account_target, ProofV2TargetParent::NONE);
+        task.fetched_storage_targets
+            .entry(account)
+            .or_default()
+            .insert(storage_target, ProofV2TargetParent::new(11));
         task.in_flight_proof_batches = 1;
 
         assert!(task.ensure_not_stalled(false).is_ok());
@@ -1348,6 +1358,7 @@ mod tests {
             SparseTrieTaskMetrics::default(),
             trie,
             B256::from([0x55; 32]),
+            TrieNodeEpoch::UNMODIFIED,
             1,
         );
 
@@ -1393,6 +1404,7 @@ mod tests {
             SparseTrieTaskMetrics::default(),
             trie,
             B256::from([0x55; 32]),
+            TrieNodeEpoch::UNMODIFIED,
             1,
         );
 

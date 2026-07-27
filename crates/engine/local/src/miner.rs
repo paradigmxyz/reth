@@ -14,6 +14,7 @@ use std::{
     collections::VecDeque,
     fmt,
     future::Future,
+    num::NonZeroUsize,
     pin::Pin,
     task::{Context, Poll},
     time::Duration,
@@ -21,6 +22,9 @@ use std::{
 use tokio::time::Interval;
 use tokio_stream::wrappers::ReceiverStream;
 use tracing::error;
+
+/// Default number of confirmations required before a block is finalized in dev mode.
+pub const DEFAULT_FINALITY_DEPTH: NonZeroUsize = NonZeroUsize::new(64).unwrap();
 
 /// A mining mode for the local dev engine.
 pub enum MiningMode<Pool: TransactionPool + Unpin> {
@@ -141,6 +145,8 @@ pub struct LocalMiner<T: PayloadTypes, B, Pool: TransactionPool + Unpin> {
     last_header: SealedHeaderFor<<T::BuiltPayload as BuiltPayload>::Primitives>,
     /// Stores latest mined blocks.
     last_block_hashes: VecDeque<B256>,
+    /// Number of confirmations required before a block is finalized.
+    finality_depth: NonZeroUsize,
     /// Optional sleep duration between initiating payload building and resolving.
     ///
     /// When set, the miner sleeps after `fork_choice_updated` before calling
@@ -174,9 +180,16 @@ where
             mode,
             payload_builder,
             last_block_hashes: VecDeque::from([last_header.hash()]),
+            finality_depth: DEFAULT_FINALITY_DEPTH,
             last_header,
             payload_wait_time: None,
         }
+    }
+
+    /// Sets the number of confirmations required before a block is finalized.
+    pub const fn with_finality_depth(mut self, finality_depth: NonZeroUsize) -> Self {
+        self.finality_depth = finality_depth;
+        self
     }
 
     /// Sets the payload wait time, if any.
@@ -208,16 +221,14 @@ where
 
     /// Returns current forkchoice state.
     fn forkchoice_state(&self) -> ForkchoiceState {
+        let finality_depth = self.finality_depth.get();
         ForkchoiceState {
-            head_block_hash: *self.last_block_hashes.back().expect("at least 1 block exists"),
-            safe_block_hash: *self
-                .last_block_hashes
-                .get(self.last_block_hashes.len().saturating_sub(32))
-                .expect("at least 1 block exists"),
-            finalized_block_hash: *self
-                .last_block_hashes
-                .get(self.last_block_hashes.len().saturating_sub(64))
-                .expect("at least 1 block exists"),
+            head_block_hash: block_hash_at_depth(&self.last_block_hashes, 1),
+            safe_block_hash: block_hash_at_depth(
+                &self.last_block_hashes,
+                finality_depth.div_ceil(2),
+            ),
+            finalized_block_hash: block_hash_at_depth(&self.last_block_hashes, finality_depth),
         }
     }
 
@@ -269,11 +280,30 @@ where
 
         self.last_block_hashes.push_back(header.hash());
         self.last_header = header;
-        // ensure we keep at most 64 blocks
-        if self.last_block_hashes.len() > 64 {
+        // Ensure we retain only the hashes needed to calculate the finalized block.
+        if self.last_block_hashes.len() > self.finality_depth.get() {
             self.last_block_hashes.pop_front();
         }
 
         Ok(())
+    }
+}
+
+fn block_hash_at_depth(block_hashes: &VecDeque<B256>, depth: usize) -> B256 {
+    *block_hashes.get(block_hashes.len().saturating_sub(depth)).expect("at least 1 block exists")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn block_hash_at_configured_depth() {
+        let block_hashes = (0..64).map(B256::with_last_byte).collect();
+
+        assert_eq!(block_hash_at_depth(&block_hashes, 1), B256::with_last_byte(63));
+        assert_eq!(block_hash_at_depth(&block_hashes, 32), B256::with_last_byte(32));
+        assert_eq!(block_hash_at_depth(&block_hashes, 64), B256::with_last_byte(0));
+        assert_eq!(block_hash_at_depth(&block_hashes, 128), B256::with_last_byte(0));
     }
 }

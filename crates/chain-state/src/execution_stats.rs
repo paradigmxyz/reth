@@ -54,16 +54,28 @@ pub struct ExecutionTimingStats {
     pub eip7702_delegations_set: usize,
     /// Number of EIP-7702 delegations cleared
     pub eip7702_delegations_cleared: usize,
-    /// Account cache hits
+    /// Execution-cache account hits
     pub account_cache_hits: usize,
-    /// Account cache misses
+    /// Execution-cache account misses
     pub account_cache_misses: usize,
-    /// Storage cache hits
+    /// Execution-cache storage hits
     pub storage_cache_hits: usize,
-    /// Storage cache misses
+    /// Execution-cache storage misses
     pub storage_cache_misses: usize,
-    /// Code cache hits
+    /// Execution-cache code hits
     pub code_cache_hits: usize,
-    /// Code cache misses
+    /// Execution-cache code misses
     pub code_cache_misses: usize,
+    /// Txpool-prewarm snapshot account hits
+    pub txpool_snapshot_account_hits: usize,
+    /// Txpool-prewarm snapshot account misses
+    pub txpool_snapshot_account_misses: usize,
+    /// Txpool-prewarm snapshot storage hits
+    pub txpool_snapshot_storage_hits: usize,
+    /// Txpool-prewarm snapshot storage misses
+    pub txpool_snapshot_storage_misses: usize,
+    /// Txpool-prewarm snapshot code hits
+    pub txpool_snapshot_code_hits: usize,
+    /// Txpool-prewarm snapshot code misses
+    pub txpool_snapshot_code_misses: usize,
 }

@@ -14,7 +14,7 @@ use alloy_rpc_types_engine::{
 use error::{InsertBlockError, InsertBlockFatalError, InsertBlockValidationError};
 use reth_chain_state::{
     CanonicalInMemoryState, ExecutedBlock, ExecutionTimingStats, MemoryOverlayStateProvider,
-    NewCanonicalChain, StateTrieOverlayManager,
+    NewCanonicalChain,
 };
 use reth_consensus::{Consensus, FullConsensus};
 use reth_engine_primitives::{
@@ -36,9 +36,9 @@ use reth_provider::{
 };
 use reth_revm::database::StateProviderDatabase;
 use reth_stages_api::ControlFlow;
+use reth_storage_overlay::{ChangesetCache, OverlayManager};
 use reth_tasks::{spawn_os_thread, utils::increase_thread_priority};
 use reth_trie::ComputedTrieData;
-use reth_trie_db::ChangesetCache;
 use revm::interpreter::debug_unreachable;
 use state::TreeState;
 use std::{fmt::Debug, ops, sync::Arc, time::Duration};
@@ -63,6 +63,7 @@ pub mod state_root_strategy;
 #[cfg(test)]
 mod tests;
 mod trie_updates;
+mod txpool_prewarm;
 pub mod types;
 
 use crate::{persistence::PersistenceResult, tree::error::AdvancePersistenceError};
@@ -75,7 +76,11 @@ pub use persistence_state::PersistenceState;
 pub use reth_engine_primitives::TreeConfig;
 pub use reth_execution_cache::{
     CachedStateCacheMetrics, CachedStateMetrics, CachedStateMetricsSource, CachedStateProvider,
-    ExecutionCache, PayloadExecutionCache, SavedCache,
+    ExecutionCache, PayloadExecutionCache, SavedCache, TxPoolPrewarmCacheSnapshot,
+};
+pub use txpool_prewarm::{
+    Source as TxPoolPrewarmSource, Transaction as TxPoolPrewarmTransaction,
+    Transactions as TxPoolPrewarmTransactions,
 };
 pub use types::{ExecutionEnv, ValidationOutcome, ValidationOutput};
 
@@ -160,7 +165,7 @@ impl<N: NodePrimitives> EngineApiTreeState<N> {
         invalid_header_hit_eviction_threshold: u8,
         canonical_block: BlockNumHash,
         engine_kind: EngineApiKind,
-        state_trie_overlays: StateTrieOverlayManager<N>,
+        state_trie_overlays: OverlayManager<N>,
     ) -> Self {
         Self {
             invalid_headers: InvalidHeaderCache::new(
@@ -194,7 +199,7 @@ impl<N: NodePrimitives> EngineApiTreeState<N> {
     ///
     /// `None` means no prune request is pending. `Some(Vec::new())` means a prune was requested,
     /// but no in-memory parent-chain blocks were found for the parent hash; the sparse trie task
-    /// should still prune using the current block's hashed post state.
+    /// should still prune nodes cached before the current block's epoch.
     pub fn take_sparse_trie_prune_blocks(
         &mut self,
         parent_hash: B256,
@@ -463,7 +468,7 @@ where
         persistence: PersistenceHandle<N>,
         payload_builder: PayloadBuilderHandle<T>,
         canonical_in_memory_state: CanonicalInMemoryState<N>,
-        state_trie_overlays: StateTrieOverlayManager<N>,
+        state_trie_overlays: OverlayManager<N>,
         config: TreeConfig,
         kind: EngineApiKind,
         evm_config: C,
@@ -535,13 +540,19 @@ where
             .saturating_sub(self.persistence_state.last_persisted_block.number)
     }
 
+    /// How many blocks beyond the configured in-memory buffer are awaiting persistence.
+    const fn persistence_backpressure_gap(&self) -> u64 {
+        self.persistence_gap().saturating_sub(self.config.memory_block_buffer_target())
+    }
+
     /// Returns `true` when the main loop should stop draining the tree input channel.
     ///
-    /// This is the case when persistence is already running and the gap between the canonical tip
-    /// and the last persisted block has reached the configured threshold.
+    /// This is the case when persistence is already running and the number of blocks beyond the
+    /// configured in-memory buffer has reached the configured threshold.
     const fn should_backpressure(&self) -> bool {
         self.persistence_state.in_progress() &&
-            self.persistence_gap() >= self.config.persistence_backpressure_threshold()
+            self.persistence_backpressure_gap() >=
+                self.config.persistence_backpressure_threshold()
     }
 
     /// Run the engine API handler.
@@ -553,18 +564,19 @@ where
             //
             // 1. Non-blocking poll for persistence completion. If the background flush already
             //    landed, absorb the result now so the gap calculation below is fresh.
-            // 2. Decide how to wait for the next event. When the canonical-to-persisted gap exceeds
-            //    the backpressure threshold we only block on the persistence receiver, leaving new
-            //    engine requests sitting in the unbounded upstream channel.
+            // 2. Decide how to wait for the next event. When the canonical-to-persisted gap beyond
+            //    the in-memory buffer reaches the backpressure threshold we only block on the
+            //    persistence receiver, leaving new engine requests sitting in the unbounded
+            //    upstream channel.
             // 3. Handle the event (engine message or persistence completion) and kick off a new
             //    persistence cycle if the threshold is met again.
             //
-            // The net effect: when the persistence gap exceeds the threshold, we stop
-            // processing incoming messages and let them queue in the channel. This is only a
-            // soft form of backpressure: it delays replies and, more importantly, prevents
-            // executing further blocks that would pile up in the persistence queue - where each
-            // block carries heavier state (eg. trie updates) than the raw payload sitting in the
-            // engine channel.
+            // The net effect: when the unbuffered persistence gap reaches the threshold, we stop
+            // processing incoming messages and let them queue in the channel. This is only a soft
+            // form of backpressure: it delays replies and, more importantly, prevents executing
+            // further blocks that would pile up in the persistence queue - where each block
+            // carries heavier state (eg. trie updates) than the raw payload sitting in the engine
+            // channel.
             //
             // Standard Ethereum CLs won't truly back off - the engine API has no
             // backpressure semantics, and CLs typically timeout after ≈8s and resend - so
@@ -751,6 +763,8 @@ where
         &mut self,
         payload: T::ExecutionData,
     ) -> Result<TreeOutcome<PayloadStatus>, InsertBlockFatalError> {
+        let _thread_resource_usage =
+            self.metrics.engine.new_payload.measure_thread_resource_usage();
         trace!(target: "engine::tree", "invoked new payload");
 
         // start timing for the new payload process
@@ -1259,6 +1273,8 @@ where
             // safe or finalized hashes are invalid
             return Ok(Some(TreeOutcome::new(outcome)));
         }
+
+        self.payload_validator.on_canonical_head_changed(state.head_block_hash, &self.state);
 
         // Process payload attributes if the head is already canonical
         if let Some(attr) = attrs {
@@ -1773,7 +1789,12 @@ where
                                         BeaconOnNewPayloadError::Internal(Box::new(e))
                                     }))
                                 {
-                                    error!(target: "engine::tree", payload=?num_hash, elapsed=?start.elapsed(), "Failed to send event: {err:?}");
+                                    error!(
+                                        target: "engine::tree",
+                                        payload=?num_hash,
+                                        elapsed=?latency,
+                                        "Failed to send event: {err:?}"
+                                    );
                                     self.metrics
                                         .engine
                                         .failed_new_payload_response_deliveries
@@ -2091,7 +2112,7 @@ where
     }
 
     /// Returns true if the canonical chain length minus the last persisted
-    /// block is greater than or equal to the persistence threshold,
+    /// block is greater than the persistence threshold,
     /// backfill is not running, and no payload is currently being built.
     pub const fn should_persist(&self) -> bool {
         if self.building_payload {
@@ -2217,7 +2238,7 @@ where
             "computing block trie updates",
         );
         let db_provider = self.provider.database_provider_ro()?;
-        let trie_updates = reth_trie_db::compute_block_trie_updates(
+        let trie_updates = reth_storage_overlay::compute_block_trie_updates(
             &self.changeset_cache,
             &db_provider,
             block.number(),
@@ -2719,6 +2740,7 @@ where
         // update the tracked in-memory state with the new chain
         self.canonical_in_memory_state.update_chain(chain_update);
         self.canonical_in_memory_state.set_canonical_head(tip.clone());
+        self.payload_validator.on_canonical_head_changed(tip.hash(), &self.state);
 
         // Update metrics based on new tip
         self.metrics.tree.canonical_chain_height.set(tip.number() as f64);
@@ -3305,13 +3327,7 @@ where
         //    payloadAttributes is not null and the forkchoice state has been updated successfully.
         //    The build process is specified in the Payload building section.
 
-        let cache = if self.config.share_execution_cache_with_payload_builder() {
-            self.payload_validator.cache_for(state.head_block_hash)
-        } else {
-            None
-        };
-
-        let state_root_handle = self.payload_validator.payload_state_root_handle_for(
+        let resources = self.payload_validator.payload_builder_resources(
             state.head_block_hash,
             head,
             attributes.timestamp(),
@@ -3323,8 +3339,7 @@ where
         let pending_payload_id = self.payload_builder.send_new_payload(BuildNewPayload {
             parent_hash: state.head_block_hash,
             attributes,
-            cache,
-            state_root_handle,
+            resources,
         });
 
         // Client software MUST respond to this method call in the following way:

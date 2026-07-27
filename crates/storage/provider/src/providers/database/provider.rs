@@ -65,11 +65,12 @@ use reth_storage_api::{
     StoragePath, StorageSettingsCache, TryIntoHistoricalStateProvider, WriteStateInput,
 };
 use reth_storage_errors::provider::{ProviderResult, StaticFileWriterError};
+use reth_storage_overlay::ChangesetCache;
 use reth_trie::{
     updates::{StorageTrieUpdatesSorted, TrieUpdatesSorted},
     ComputedTrieData, HashedPostStateSorted,
 };
-use reth_trie_db::{ChangesetCache, DatabaseStorageTrieCursor, TrieTableAdapter};
+use reth_trie_db::{DatabaseStorageTrieCursor, TrieTableAdapter};
 use revm::database::states::{
     PlainStateReverts, PlainStorageChangeset, PlainStorageRevert, StateChangeset,
 };
@@ -2739,8 +2740,8 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
     ///
     /// The latest state will be unwound
     ///
-    /// 1. Iterate over the [`BlockBodyIndices`][tables::BlockBodyIndices] table to get all the
-    ///    transaction ids.
+    /// 1. Read the retained block's [`BlockBodyIndices`][tables::BlockBodyIndices] entry to get the
+    ///    first transaction id to remove.
     /// 2. Iterate over the [`StorageChangeSets`][tables::StorageChangeSets] table and the
     ///    [`AccountChangeSets`][tables::AccountChangeSets] tables in reverse order to reconstruct
     ///    the changesets.
@@ -2763,12 +2764,11 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
             return Ok(());
         }
 
-        // We are not removing block meta as it is used to get block changesets.
-        let block_bodies = self.block_body_indices_range(range.clone())?;
-
         // get transaction receipts
-        let from_transaction_num =
-            block_bodies.first().expect("already checked if there are blocks").first_tx_num();
+        let from_transaction_num = self
+            .block_body_indices(block)?
+            .map(|b| b.next_tx_num())
+            .ok_or(ProviderError::BlockBodyIndicesNotFound(block))?;
 
         let storage_range = BlockNumberAddress::range(range.clone());
         let storage_changeset = if self.cached_storage_settings().storage_v2 {

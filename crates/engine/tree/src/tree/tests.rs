@@ -7,7 +7,7 @@ use crate::{
         PersistTarget, TreeConfig,
     },
 };
-use reth_trie_db::ChangesetCache;
+use reth_storage_overlay::{ChangesetCache, OverlayManager};
 
 use alloy_eips::eip1898::BlockWithParent;
 use alloy_primitives::{
@@ -19,7 +19,7 @@ use alloy_rpc_types_engine::{
     ExecutionData, ExecutionPayloadSidecar, ExecutionPayloadV1, ForkchoiceState,
 };
 use assert_matches::assert_matches;
-use reth_chain_state::{test_utils::TestBlockBuilder, BlockState, StateTrieOverlayManager};
+use reth_chain_state::{test_utils::TestBlockBuilder, BlockState};
 use reth_chainspec::{ChainSpec, HOLESKY, MAINNET};
 use reth_engine_primitives::{EngineApiValidator, ForkchoiceStatus, NoopInvalidBlockHook};
 use reth_ethereum_consensus::EthBeaconConsensus;
@@ -206,8 +206,7 @@ impl TestHarness {
 
         let (from_tree_tx, from_tree_rx) = unbounded_channel();
         let runtime = reth_tasks::Runtime::test();
-        let state_trie_overlays =
-            StateTrieOverlayManager::new(runtime.state_trie_overlay_worker_pool());
+        let state_trie_overlays = OverlayManager::new(runtime.state_trie_overlay_worker_pool());
 
         let header = chain_spec.genesis_header().clone();
         let header = SealedHeader::seal_slow(header);
@@ -288,7 +287,7 @@ impl TestHarness {
             parent_hash = hash;
         }
 
-        let state_trie_overlays = StateTrieOverlayManager::default();
+        let state_trie_overlays = OverlayManager::default();
         for block in &blocks {
             state_trie_overlays.insert_block(block.clone());
         }
@@ -442,7 +441,7 @@ impl ValidatorTestHarness {
             TreeConfig::default(),
             Box::new(NoopInvalidBlockHook::default()),
             changeset_cache,
-            StateTrieOverlayManager::default(),
+            OverlayManager::default(),
             reth_tasks::Runtime::test(),
         );
 
@@ -694,7 +693,7 @@ fn process_payload_attributes_shares_sparse_trie_during_validation_fallback() {
     let PayloadServiceCommand::BuildNewPayload(input, _, _) = command else {
         panic!("expected build new payload command")
     };
-    assert!(input.state_root_handle.is_some());
+    assert!(input.resources.state_root_handle().is_some());
 }
 
 #[tokio::test]
@@ -869,6 +868,7 @@ fn test_backpressure_waits_for_persistence_before_reading_incoming() {
         .tree
         .config
         .with_persistence_threshold(0)
+        .with_memory_block_buffer_target(0)
         .with_persistence_backpressure_threshold(1);
 
     let (persist_tx, persist_rx) = crossbeam_channel::bounded(1);
@@ -927,6 +927,27 @@ fn test_backpressure_waits_for_persistence_before_reading_incoming() {
     };
     let _ = test_harness.tree.on_engine_message(message).unwrap();
     assert_eq!(test_harness.tree.incoming.len(), 0);
+}
+
+#[test]
+fn test_backpressure_excludes_in_memory_buffer() {
+    for (canonical_tip, expected_backpressure) in [(14_u64, false), (15, true)] {
+        let blocks: Vec<_> =
+            TestBlockBuilder::eth().get_executed_blocks(1..canonical_tip + 1).collect();
+        let mut test_harness = TestHarness::new(MAINNET.clone()).with_blocks(blocks.clone());
+        test_harness.tree.config = test_harness
+            .tree
+            .config
+            .with_persistence_threshold(0)
+            .with_memory_block_buffer_target(5)
+            .with_persistence_backpressure_threshold(10);
+
+        let (_persist_tx, persist_rx) = crossbeam_channel::bounded(1);
+        let persisted = blocks.last().unwrap().recovered_block().num_hash();
+        test_harness.tree.persistence_state.start_save(persisted, persist_rx);
+
+        assert_eq!(test_harness.tree.should_backpressure(), expected_backpressure);
+    }
 }
 
 #[tokio::test]

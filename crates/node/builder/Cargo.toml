@@ -49,11 +49,11 @@ reth-rpc-eth-types.workspace = true
 reth-rpc-layer.workspace = true
 reth-stages.workspace = true
 reth-static-file.workspace = true
+reth-storage-overlay = { workspace = true, features = ["rayon"] }
 reth-tasks = { workspace = true, features = ["rayon"] }
 reth-tokio-util.workspace = true
 reth-tracing = { workspace = true, features = ["std"] }
 reth-transaction-pool.workspace = true
-reth-trie-db = { workspace = true, features = ["metrics"] }
 reth-basic-payload-builder.workspace = true
 reth-node-ethstats.workspace = true
 
@@ -115,7 +115,6 @@ test-utils = [
     "reth-db-api/test-utils",
     "reth-provider/test-utils",
     "reth-transaction-pool/test-utils",
-    "reth-trie-db/test-utils",
     "reth-evm-ethereum/test-utils",
     "reth-node-ethereum/test-utils",
     "reth-primitives-traits/test-utils",
