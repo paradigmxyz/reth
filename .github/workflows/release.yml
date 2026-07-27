@@ -103,7 +103,10 @@ jobs:
             os: macos-14
             profile: maxperf
             allow_fail: false
-            rustflags: ""
+            # Link with Rust's bundled Mach-O LLD to enable safe identical-code-folding,
+            # which reduces binary size. Apple's system linker does not support ICF.
+            # The `$(rustc ...)` substitution is expanded by the shell in the build step.
+            rustflags: "-C link-arg=--ld-path=$(rustc --print sysroot)/lib/rustlib/aarch64-apple-darwin/bin/gcc-ld/ld64.lld -C link-arg=-Wl,--icf=safe"
         build:
           - command: build
             binary: reth
