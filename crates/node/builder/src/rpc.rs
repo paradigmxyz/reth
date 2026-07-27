@@ -10,7 +10,7 @@ pub use reth_rpc_builder::{
     middleware::{RethAuthHttpMiddleware, RethRpcMiddleware},
     Identity, Stack,
 };
-pub use reth_trie_db::ChangesetCache;
+use reth_storage_overlay::{ChangesetCache, OverlayManager};
 
 use crate::{
     invalid_block_hook::InvalidBlockHookExt, txpool_prewarm, ConfigureEngineEvm,
@@ -20,7 +20,7 @@ use alloy_rpc_types::engine::ClientVersionV1;
 use alloy_rpc_types_engine::ExecutionData;
 use jsonrpsee::RpcModule;
 use parking_lot::Mutex;
-use reth_chain_state::{CanonStateSubscriptions, StateTrieOverlayManager};
+use reth_chain_state::CanonStateSubscriptions;
 use reth_chainspec::{ChainSpecProvider, EthChainSpec, EthereumHardforks, Hardforks};
 use reth_node_api::{
     AddOnsContext, BlockTy, EngineApiValidator, EngineTypes, FullNodeComponents, FullNodeTypes,
@@ -1413,7 +1413,7 @@ pub trait EngineValidatorBuilder<Node: FullNodeComponents>: Send + Sync + Clone 
         ctx: &AddOnsContext<'_, Node>,
         tree_config: TreeConfig,
         changeset_cache: ChangesetCache,
-        state_trie_overlays: StateTrieOverlayManager<PrimitivesTy<Node::Types>>,
+        state_trie_overlays: OverlayManager<PrimitivesTy<Node::Types>>,
     ) -> impl Future<Output = eyre::Result<Self::EngineValidator>> + Send;
 }
 
@@ -1462,7 +1462,7 @@ where
         ctx: &AddOnsContext<'_, Node>,
         tree_config: TreeConfig,
         changeset_cache: ChangesetCache,
-        state_trie_overlays: StateTrieOverlayManager<PrimitivesTy<Node::Types>>,
+        state_trie_overlays: OverlayManager<PrimitivesTy<Node::Types>>,
     ) -> eyre::Result<Self::EngineValidator> {
         let validator = self.payload_validator_builder.build(ctx).await?;
         let data_dir = ctx.config.datadir.clone().resolve_datadir(ctx.config.chain.chain());
