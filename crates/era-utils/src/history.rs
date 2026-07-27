@@ -1031,21 +1031,25 @@ mod tests {
 
         // First pass: import headers and bodies only, no receipts.
         {
-            let mut writer =
-                static_file_provider.latest_writer(StaticFileSegment::Headers).unwrap();
             let provider = pf.database_provider_rw().unwrap();
-            let meta = TestMeta { marked: Cell::new(false) };
-            process::<TestEra, _, Block, _, _>(
-                &meta,
-                &mut writer,
-                None,
-                &provider,
-                &mut hash_collector,
-                0..=2,
-                ImportPolicy { headers_tip: 0, is_receipt_verifiable: &|_| false },
-            )
-            .unwrap();
-            writer.commit().unwrap();
+            // The writer holds the Headers segment lock, which `provider.commit()` also takes when
+            // it finalizes every segment, so it must be released first.
+            {
+                let mut writer =
+                    static_file_provider.latest_writer(StaticFileSegment::Headers).unwrap();
+                let meta = TestMeta { marked: Cell::new(false) };
+                process::<TestEra, _, Block, _, _>(
+                    &meta,
+                    &mut writer,
+                    None,
+                    &provider,
+                    &mut hash_collector,
+                    0..=2,
+                    ImportPolicy { headers_tip: 0, is_receipt_verifiable: &|_| false },
+                )
+                .unwrap();
+                writer.commit().unwrap();
+            }
             provider.commit().unwrap();
         }
         assert_eq!(
@@ -1060,24 +1064,26 @@ mod tests {
 
         // Second pass: backfill receipts for the already-imported headers (`headers_tip = 2`).
         {
-            let mut writer =
-                static_file_provider.latest_writer(StaticFileSegment::Headers).unwrap();
-            let mut receipts_writer =
-                static_file_provider.latest_writer(StaticFileSegment::Receipts).unwrap();
             let provider = pf.database_provider_rw().unwrap();
-            let meta = TestMeta { marked: Cell::new(false) };
-            process::<TestEraWithEmptyReceipts, _, Block, _, _>(
-                &meta,
-                &mut writer,
-                Some(&mut receipts_writer),
-                &provider,
-                &mut hash_collector,
-                0..,
-                ImportPolicy { headers_tip: 2, is_receipt_verifiable: &|_| false },
-            )
-            .unwrap();
-            receipts_writer.commit().unwrap();
-            writer.commit().unwrap();
+            {
+                let mut writer =
+                    static_file_provider.latest_writer(StaticFileSegment::Headers).unwrap();
+                let mut receipts_writer =
+                    static_file_provider.latest_writer(StaticFileSegment::Receipts).unwrap();
+                let meta = TestMeta { marked: Cell::new(false) };
+                process::<TestEraWithEmptyReceipts, _, Block, _, _>(
+                    &meta,
+                    &mut writer,
+                    Some(&mut receipts_writer),
+                    &provider,
+                    &mut hash_collector,
+                    0..,
+                    ImportPolicy { headers_tip: 2, is_receipt_verifiable: &|_| false },
+                )
+                .unwrap();
+                receipts_writer.commit().unwrap();
+                writer.commit().unwrap();
+            }
             provider.commit().unwrap();
         }
 
