@@ -73,6 +73,8 @@ pub struct MockEthProvider<T: NodePrimitives = EthPrimitives, ChainSpec = reth_c
     pub state_roots: Arc<Mutex<Vec<B256>>>,
     /// Local block body indices store
     pub block_body_indices: Arc<Mutex<HashMap<BlockNumber, StoredBlockBodyIndices>>>,
+    /// Local stage checkpoint store
+    stage_checkpoints: Arc<Mutex<HashMap<StageId, StageCheckpoint>>>,
     /// Local BAL store handle
     pub bal_store: BalStoreHandle,
     /// Whether snap state reads should fail for handler error-path tests.
@@ -125,6 +127,7 @@ where
             chain_spec: self.chain_spec.clone(),
             state_roots: self.state_roots.clone(),
             block_body_indices: self.block_body_indices.clone(),
+            stage_checkpoints: self.stage_checkpoints.clone(),
             bal_store: self.bal_store.clone(),
             snap_state_reads_fail: self.snap_state_reads_fail.clone(),
             snap_state_range_available: self.snap_state_range_available.clone(),
@@ -152,6 +155,7 @@ impl<T: NodePrimitives> MockEthProvider<T, reth_chainspec::ChainSpec> {
             chain_spec: Arc::new(reth_chainspec::ChainSpecBuilder::mainnet().build()),
             state_roots: Default::default(),
             block_body_indices: Default::default(),
+            stage_checkpoints: Default::default(),
             bal_store: Default::default(),
             snap_state_reads_fail: Default::default(),
             snap_state_range_available: Default::default(),
@@ -296,6 +300,11 @@ impl<T: NodePrimitives, ChainSpec> MockEthProvider<T, ChainSpec> {
         self.block_body_indices.lock().insert(block_number, indices);
     }
 
+    /// Sets a stage checkpoint.
+    pub fn set_stage_checkpoint(&self, stage_id: StageId, checkpoint: StageCheckpoint) {
+        self.stage_checkpoints.lock().insert(stage_id, checkpoint);
+    }
+
     /// Add state root to local state root store
     pub fn add_state_root(&self, state_root: B256) {
         self.state_roots.lock().push(state_root);
@@ -311,6 +320,7 @@ impl<T: NodePrimitives, ChainSpec> MockEthProvider<T, ChainSpec> {
             chain_spec: Arc::new(chain_spec),
             state_roots: self.state_roots,
             block_body_indices: self.block_body_indices,
+            stage_checkpoints: self.stage_checkpoints,
             bal_store: self.bal_store,
             snap_state_reads_fail: self.snap_state_reads_fail,
             snap_state_range_available: self.snap_state_range_available,
@@ -963,8 +973,8 @@ impl<T: NodePrimitives, ChainSpec: Send + Sync> AccountReader for MockEthProvide
 impl<T: NodePrimitives, ChainSpec: Send + Sync> StageCheckpointReader
     for MockEthProvider<T, ChainSpec>
 {
-    fn get_stage_checkpoint(&self, _id: StageId) -> ProviderResult<Option<StageCheckpoint>> {
-        Ok(None)
+    fn get_stage_checkpoint(&self, id: StageId) -> ProviderResult<Option<StageCheckpoint>> {
+        Ok(self.stage_checkpoints.lock().get(&id).copied())
     }
 
     fn get_stage_checkpoint_progress(&self, _id: StageId) -> ProviderResult<Option<Vec<u8>>> {
@@ -972,7 +982,12 @@ impl<T: NodePrimitives, ChainSpec: Send + Sync> StageCheckpointReader
     }
 
     fn get_all_checkpoints(&self) -> ProviderResult<Vec<(String, StageCheckpoint)>> {
-        Ok(vec![])
+        Ok(self
+            .stage_checkpoints
+            .lock()
+            .iter()
+            .map(|(id, checkpoint)| (id.to_string(), *checkpoint))
+            .collect())
     }
 }
 

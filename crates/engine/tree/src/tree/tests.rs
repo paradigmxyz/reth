@@ -29,6 +29,7 @@ use reth_evm_ethereum::MockEvmConfig;
 use reth_payload_builder::PayloadServiceCommand;
 use reth_primitives_traits::Block as _;
 use reth_provider::{test_utils::MockEthProvider, BalStoreHandle, InMemoryBalStore, RawBal};
+use reth_stages_api::{FinishCheckpoint, StageCheckpoint, StageId};
 use reth_tasks::spawn_os_thread;
 use reth_trie_common::ComputedTrieData;
 use std::{
@@ -652,6 +653,7 @@ fn remove_blocks_clears_pending_sparse_trie_prune_request() {
     let mut test_harness = TestHarness::new(MAINNET.clone());
     test_harness.tree.persistence_state.last_persisted_block =
         BlockNumHash { hash: B256::random(), number: 10 };
+    test_harness.provider.set_stage_checkpoint(StageId::Finish, StageCheckpoint::new(10));
     test_harness.tree.state.set_pending_sparse_trie_prune(true);
 
     test_harness.tree.remove_blocks(9).unwrap();
@@ -670,12 +672,15 @@ fn remove_blocks_replays_retained_partial_state_trie_blocks() {
     let mut test_harness = TestHarness::new(MAINNET.clone()).with_blocks(blocks.clone());
     test_harness.tree.persistence_state.last_persisted_block =
         blocks[FINISH_TIP].recovered_block().num_hash();
+    test_harness.provider.set_stage_checkpoint(
+        StageId::Finish,
+        StageCheckpoint::new(FINISH_TIP as u64).with_finish_stage_checkpoint(FinishCheckpoint {
+            partial_state_trie: Some(STATE_TRIE_TIP as u64),
+        }),
+    );
     test_harness.tree.state.set_pending_sparse_trie_prune(true);
 
-    test_harness
-        .tree
-        .remove_blocks_with_state_trie_tip(REORG_TIP as u64, STATE_TRIE_TIP as u64)
-        .unwrap();
+    test_harness.tree.remove_blocks(REORG_TIP as u64).unwrap();
 
     let PersistenceAction::RemoveBlocksAbove(new_tip, replay_blocks, sender) =
         test_harness.action_rx.recv().unwrap()
@@ -754,14 +759,33 @@ fn remove_blocks_requires_complete_partial_state_trie_replay_range() {
     let mut test_harness = TestHarness::new(MAINNET.clone()).with_blocks(blocks.clone());
     test_harness.tree.persistence_state.last_persisted_block =
         blocks.last().unwrap().recovered_block().num_hash();
+    test_harness.provider.set_stage_checkpoint(
+        StageId::Finish,
+        StageCheckpoint::new(FINISH_TIP).with_finish_stage_checkpoint(FinishCheckpoint {
+            partial_state_trie: Some(STATE_TRIE_TIP),
+        }),
+    );
 
-    assert!(test_harness
-        .tree
-        .remove_blocks_with_state_trie_tip(REORG_TIP, STATE_TRIE_TIP)
-        .is_err());
+    assert!(test_harness.tree.remove_blocks(REORG_TIP).is_err());
 
     assert!(test_harness.action_rx.try_recv().is_err());
     assert!(!test_harness.tree.persistence_state.in_progress());
+}
+
+#[test]
+fn remove_blocks_requires_finish_checkpoint() {
+    let mut test_harness = TestHarness::new(MAINNET.clone());
+    test_harness.tree.persistence_state.last_persisted_block =
+        BlockNumHash { hash: B256::random(), number: 10 };
+    test_harness.tree.state.set_pending_sparse_trie_prune(true);
+
+    assert!(matches!(
+        test_harness.tree.remove_blocks(9),
+        Err(ProviderError::InsufficientChangesets { .. })
+    ));
+    assert!(test_harness.action_rx.try_recv().is_err());
+    assert!(!test_harness.tree.persistence_state.in_progress());
+    assert!(test_harness.tree.state.pending_sparse_trie_prune());
 }
 
 #[test]

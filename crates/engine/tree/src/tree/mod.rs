@@ -1415,36 +1415,22 @@ where
             return Ok(())
         }
 
-        let state_trie_tip = self
-            .provider
-            .get_stage_checkpoint(StageId::Finish)?
-            .map(|checkpoint| {
-                checkpoint
-                    .finish_stage_checkpoint()
-                    .and_then(|finish| finish.partial_state_trie())
-                    .unwrap_or(checkpoint.block_number)
-            })
-            .unwrap_or(self.persistence_state.last_persisted_block.number);
-        self.remove_blocks_with_state_trie_tip(new_tip_num, state_trie_tip)
-    }
+        let checkpoint = self.provider.get_stage_checkpoint(StageId::Finish)?.ok_or_else(|| {
+            ProviderError::InsufficientChangesets { requested: new_tip_num, available: 0..=0 }
+        })?;
+        let state_trie_tip = checkpoint
+            .finish_stage_checkpoint()
+            .and_then(|finish| finish.partial_state_trie())
+            .unwrap_or(checkpoint.block_number);
 
-    /// Removes persisted blocks after collecting any retained state/trie suffix that must be
-    /// replayed at the surviving tip.
-    fn remove_blocks_with_state_trie_tip(
-        &mut self,
-        new_tip_num: u64,
-        state_trie_tip: u64,
-    ) -> ProviderResult<()> {
         debug!(target: "engine::tree", ?new_tip_num, last_persisted_block_number=?self.persistence_state.last_persisted_block.number, "Removing blocks using persistence task");
-        if new_tip_num < self.persistence_state.last_persisted_block.number {
-            debug!(target: "engine::tree", ?new_tip_num, "Starting remove blocks job");
-            let state_trie_blocks =
-                self.remove_blocks_state_trie_replay_blocks(new_tip_num, state_trie_tip)?;
-            self.state.set_pending_sparse_trie_prune(false);
-            let (tx, rx) = crossbeam_channel::bounded(1);
-            let _ = self.persistence.remove_blocks_above(new_tip_num, state_trie_blocks, tx);
-            self.persistence_state.start_remove(new_tip_num, rx);
-        }
+        debug!(target: "engine::tree", ?new_tip_num, "Starting remove blocks job");
+        let state_trie_blocks =
+            self.remove_blocks_state_trie_replay_blocks(new_tip_num, state_trie_tip)?;
+        self.state.set_pending_sparse_trie_prune(false);
+        let (tx, rx) = crossbeam_channel::bounded(1);
+        let _ = self.persistence.remove_blocks_above(new_tip_num, state_trie_blocks, tx);
+        self.persistence_state.start_remove(new_tip_num, rx);
         Ok(())
     }
 
