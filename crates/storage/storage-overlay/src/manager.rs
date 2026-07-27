@@ -1,7 +1,7 @@
 //! Flattened state trie overlays for in-memory blocks.
 //!
 //! Payload validation needs a view of the state trie as of an in-memory parent block even when that
-//! parent has not been persisted yet. [`StateTrieOverlayManager`] tracks those in-memory blocks and
+//! parent has not been persisted yet. [`OverlayManager`] tracks those in-memory blocks and
 //! builds reusable flattened state trie overlays on demand.
 
 use alloy_primitives::B256;
@@ -31,7 +31,7 @@ use tracing::{debug, trace};
 /// The manager owns the in-memory block graph and a cache of flattened state trie overlays keyed by
 /// `(anchor_hash, tip_hash)`.
 #[derive(Clone)]
-pub struct StateTrieOverlayManager<N: NodePrimitives = EthPrimitives> {
+pub struct OverlayManager<N: NodePrimitives = EthPrimitives> {
     blocks: Arc<DashMap<B256, ExecutedBlock<N>>>,
     overlays: Arc<DashMap<OverlayCacheKey, OverlayCacheEntry>>,
     preserved_sparse_trie: Arc<Mutex<Option<PreservedSparseTrie>>>,
@@ -52,7 +52,7 @@ struct StateTrieOverlayMetrics {
     overlay_cache_fills: Counter,
 }
 
-impl<N: NodePrimitives> Default for StateTrieOverlayManager<N> {
+impl<N: NodePrimitives> Default for OverlayManager<N> {
     fn default() -> Self {
         Self {
             blocks: Default::default(),
@@ -65,17 +65,17 @@ impl<N: NodePrimitives> Default for StateTrieOverlayManager<N> {
     }
 }
 
-impl<N: NodePrimitives> std::fmt::Debug for StateTrieOverlayManager<N> {
+impl<N: NodePrimitives> std::fmt::Debug for OverlayManager<N> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("StateTrieOverlayManager")
+        f.debug_struct("OverlayManager")
             .field("blocks", &self.blocks.len())
             .field("overlays", &self.overlays.len())
             .finish()
     }
 }
 
-impl<N: NodePrimitives> StateTrieOverlayManager<N> {
-    /// Create a new [`StateTrieOverlayManager`] backed by the given worker pool.
+impl<N: NodePrimitives> OverlayManager<N> {
+    /// Create a new [`OverlayManager`] backed by the given worker pool.
     #[cfg(feature = "rayon")]
     pub fn new(worker_pool: Arc<WorkerPool>) -> Self {
         Self {
@@ -648,7 +648,7 @@ mod tests {
 
     #[test]
     fn errors_for_unknown_parent() {
-        let manager = StateTrieOverlayManager::<EthPrimitives>::default();
+        let manager = OverlayManager::<EthPrimitives>::default();
         let parent = B256::random();
         let anchor = B256::random();
 
@@ -660,7 +660,7 @@ mod tests {
 
     #[test]
     fn builds_managed_overlay_for_inserted_blocks() {
-        let manager = StateTrieOverlayManager::default();
+        let manager = OverlayManager::default();
         let blocks = test_blocks();
         for block in &blocks {
             manager.insert_block(block.clone());
@@ -683,7 +683,7 @@ mod tests {
 
     #[test]
     fn returns_anchor_for_in_memory_parent() {
-        let manager = StateTrieOverlayManager::default();
+        let manager = OverlayManager::default();
         let blocks = test_blocks();
         for block in &blocks {
             manager.insert_block(block.clone());
@@ -706,7 +706,7 @@ mod tests {
 
     #[test]
     fn prefers_anchor_in_parent_chain() {
-        let manager = StateTrieOverlayManager::default();
+        let manager = OverlayManager::default();
         let blocks = test_blocks();
         for block in &blocks {
             manager.insert_block(block.clone());
@@ -721,7 +721,7 @@ mod tests {
 
     #[test]
     fn contains_hash_detects_hashes_from_anchor_to_parent() {
-        let manager = StateTrieOverlayManager::default();
+        let manager = OverlayManager::default();
         let blocks = test_blocks();
         for block in &blocks {
             manager.insert_block(block.clone());
@@ -743,7 +743,7 @@ mod tests {
 
     #[test]
     fn contains_hash_rejects_hash_before_anchor() {
-        let manager = StateTrieOverlayManager::default();
+        let manager = OverlayManager::default();
         let blocks = test_blocks();
         for block in &blocks {
             manager.insert_block(block.clone());
@@ -760,7 +760,7 @@ mod tests {
 
     #[test]
     fn contains_hash_rejects_unknown_anchor() {
-        let manager = StateTrieOverlayManager::default();
+        let manager = OverlayManager::default();
         let blocks = test_blocks();
         for block in &blocks {
             manager.insert_block(block.clone());
@@ -774,7 +774,7 @@ mod tests {
 
     #[test]
     fn taking_sparse_trie_removes_it() {
-        let manager = StateTrieOverlayManager::<EthPrimitives>::default();
+        let manager = OverlayManager::<EthPrimitives>::default();
         let state_root = B256::with_last_byte(1);
         let other_state_root = B256::with_last_byte(2);
         let anchor_hash = B256::with_last_byte(3);
@@ -794,7 +794,7 @@ mod tests {
 
     #[test]
     fn required_lookup_waits_for_in_progress_overlay() {
-        let manager = StateTrieOverlayManager::<EthPrimitives>::default();
+        let manager = OverlayManager::<EthPrimitives>::default();
         let key = OverlayCacheKey {
             anchor_hash: B256::with_last_byte(1),
             tip_hash: B256::with_last_byte(2),
@@ -822,7 +822,7 @@ mod tests {
 
     #[test]
     fn prunes_cached_overlays_after_removing_blocks() {
-        let manager = StateTrieOverlayManager::default();
+        let manager = OverlayManager::default();
         let blocks = test_blocks();
         for block in &blocks {
             manager.insert_block(block.clone());

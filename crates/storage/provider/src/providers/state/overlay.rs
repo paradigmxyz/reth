@@ -294,7 +294,7 @@ mod tests {
     #[cfg(feature = "partial-persistence")]
     use reth_storage_api::StageCheckpointWriter;
     #[cfg(feature = "partial-persistence")]
-    use reth_storage_overlay::{ChangesetCache, StateTrieOverlayManager};
+    use reth_storage_overlay::{ChangesetCache, OverlayManager};
     #[cfg(feature = "partial-persistence")]
     use reth_trie::{BranchNodeCompact, ComputedTrieData, HashedPostState, HashedStorage, Nibbles};
 
@@ -375,7 +375,7 @@ mod tests {
     #[test]
     fn overlay_cache_is_keyed_by_both_durable_frontiers() {
         let (factory, blocks) = setup_frontiers(1, 3);
-        let manager = StateTrieOverlayManager::default();
+        let manager = OverlayManager::default();
         for block in &blocks[2..=3] {
             manager.insert_block(block.clone());
         }
@@ -385,7 +385,7 @@ mod tests {
                 blocks[3].recovered_block().hash(),
                 ChangesetCache::new(),
             )
-            .with_state_trie_overlay_manager(manager),
+            .with_overlay_manager(manager),
         );
 
         let provider = factory.provider().unwrap();

@@ -37,7 +37,7 @@ use reth_provider::{
     providers::{BlockchainProvider, NodeTypesForProvider},
     BlockNumReader, StorageSettingsCache,
 };
-use reth_storage_overlay::{ChangesetCache, StateTrieOverlayManager};
+use reth_storage_overlay::{ChangesetCache, OverlayManager};
 use reth_tasks::TaskExecutor;
 use reth_tokio_util::EventSender;
 use reth_tracing::tracing::{debug, error, info};
@@ -204,7 +204,7 @@ impl EngineNodeLauncher {
         };
         let validator_builder = add_ons.engine_validator_builder();
         let state_trie_overlays =
-            StateTrieOverlayManager::new(ctx.task_executor().state_trie_overlay_worker_pool());
+            OverlayManager::new(ctx.task_executor().state_trie_overlay_worker_pool());
 
         // Build the engine validator with all required components
         let engine_validator = validator_builder

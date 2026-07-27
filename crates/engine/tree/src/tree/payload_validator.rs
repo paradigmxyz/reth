@@ -152,7 +152,7 @@ use reth_provider::{
     StateProviderFactory, StateReader, StorageChangeSetReader, StorageSettingsCache,
 };
 use reth_revm::db::{states::bundle_state::BundleRetention, BundleAccount, State};
-use reth_storage_overlay::{ChangesetCache, OverlayBuilder, StateTrieOverlayManager};
+use reth_storage_overlay::{ChangesetCache, OverlayBuilder, OverlayManager};
 use reth_trie::{
     hashed_cursor::HashedCursorFactory, trie_cursor::TrieCursorFactory, updates::TrieUpdates,
     LazyTrieData,
@@ -289,7 +289,7 @@ where
     /// Task runtime for spawning parallel work.
     runtime: reth_tasks::Runtime,
     /// Shared state trie in-memory overlay data.
-    state_trie_overlays: StateTrieOverlayManager<Evm::Primitives>,
+    state_trie_overlays: OverlayManager<Evm::Primitives>,
     /// State-root strategy used to prepare per-block commitment tasks.
     #[debug(skip)]
     state_root_strategy: Arc<dyn StateRootStrategy<Evm::Primitives, P, Evm>>,
@@ -338,7 +338,7 @@ where
         config: TreeConfig,
         invalid_block_hook: Box<dyn InvalidBlockHook<N>>,
         changeset_cache: ChangesetCache,
-        state_trie_overlays: StateTrieOverlayManager<N>,
+        state_trie_overlays: OverlayManager<N>,
         runtime: reth_tasks::Runtime,
     ) -> Self {
         let precompile_cache_map = PrecompileCacheMap::default();
@@ -1456,7 +1456,7 @@ where
         changeset_cache: ChangesetCache,
     ) -> OverlayBuilder<N> {
         OverlayBuilder::new(parent_hash, changeset_cache)
-            .with_state_trie_overlay_manager(state.tree_state.state_trie_overlays.clone())
+            .with_overlay_manager(state.tree_state.state_trie_overlays.clone())
     }
 
     /// Prepares the optional payload-builder state-root handle through the installed

@@ -49,7 +49,7 @@ use reth_ethereum::{
 use reth_evm::{revm::context::Block as _, ConfigureEvm};
 use reth_primitives_traits::{NodePrimitives, RecoveredBlock};
 use reth_provider::{BlockExecutionOutput, ProviderResult};
-use reth_storage_overlay::{ChangesetCache, StateTrieOverlayManager};
+use reth_storage_overlay::{ChangesetCache, OverlayManager};
 use reth_trie::updates::TrieUpdates;
 
 /// Strategy that returns `B256::ZERO` as the state root from an activation timestamp on, and
@@ -149,7 +149,7 @@ where
         ctx: &reth_ethereum::node::builder::AddOnsContext<'_, N>,
         tree_config: TreeConfig,
         changeset_cache: ChangesetCache,
-        state_trie_overlays: StateTrieOverlayManager<EthPrimitives>,
+        state_trie_overlays: OverlayManager<EthPrimitives>,
     ) -> eyre::Result<Self::EngineValidator> {
         let validator = self
             .inner
