@@ -278,6 +278,7 @@ impl TreeConfig {
         persistence_threshold: u64,
         memory_block_buffer_target: u64,
         persistence_backpressure_threshold: u64,
+        persistence_state_changes_backpressure_threshold: usize,
         block_buffer_limit: u32,
         max_invalid_header_cache_length: u32,
         invalid_header_hit_eviction_threshold: u8,
@@ -301,8 +302,6 @@ impl TreeConfig {
         share_execution_cache_with_payload_builder: bool,
         share_sparse_trie_with_payload_builder: bool,
     ) -> Self {
-        let persistence_state_changes_backpressure_threshold =
-            DEFAULT_PERSISTENCE_STATE_CHANGES_THRESHOLD.saturating_mul(2);
         assert_backpressure_threshold_invariant(
             persistence_threshold,
             persistence_backpressure_threshold,
