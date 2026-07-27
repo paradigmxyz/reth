@@ -35,7 +35,7 @@ use reth_provider::{
     StorageSettingsCache, TransactionVariant,
 };
 use reth_revm::database::StateProviderDatabase;
-use reth_stages_api::ControlFlow;
+use reth_stages_api::{ControlFlow, StageId};
 use reth_tasks::{spawn_os_thread, utils::increase_thread_priority};
 use reth_trie::ComputedTrieData;
 use reth_trie_db::ChangesetCache;
@@ -400,6 +400,7 @@ where
         + StateReader<Receipt = N::Receipt>
         + HashedPostStateProvider
         + BalProvider
+        + StageCheckpointReader
         + Clone
         + 'static,
     P::Provider: BlockReader<Block = N::Block, Header = N::BlockHeader>
@@ -1409,15 +1410,67 @@ where
 
     /// Helper method to remove blocks and set the persistence state. This ensures we keep track of
     /// the current persistence action while we're removing blocks.
-    fn remove_blocks(&mut self, new_tip_num: u64) {
+    fn remove_blocks(&mut self, new_tip_num: u64) -> ProviderResult<()> {
+        if new_tip_num >= self.persistence_state.last_persisted_block.number {
+            return Ok(())
+        }
+
+        let state_trie_tip = self
+            .provider
+            .get_stage_checkpoint(StageId::Finish)?
+            .map(|checkpoint| {
+                checkpoint
+                    .finish_stage_checkpoint()
+                    .and_then(|finish| finish.partial_state_trie())
+                    .unwrap_or(checkpoint.block_number)
+            })
+            .unwrap_or(self.persistence_state.last_persisted_block.number);
+        self.remove_blocks_with_state_trie_tip(new_tip_num, state_trie_tip)
+    }
+
+    /// Removes persisted blocks after collecting any retained state/trie suffix that must be
+    /// replayed at the surviving tip.
+    fn remove_blocks_with_state_trie_tip(
+        &mut self,
+        new_tip_num: u64,
+        state_trie_tip: u64,
+    ) -> ProviderResult<()> {
         debug!(target: "engine::tree", ?new_tip_num, last_persisted_block_number=?self.persistence_state.last_persisted_block.number, "Removing blocks using persistence task");
         if new_tip_num < self.persistence_state.last_persisted_block.number {
             debug!(target: "engine::tree", ?new_tip_num, "Starting remove blocks job");
+            let state_trie_blocks =
+                self.remove_blocks_state_trie_replay_blocks(new_tip_num, state_trie_tip)?;
             self.state.set_pending_sparse_trie_prune(false);
             let (tx, rx) = crossbeam_channel::bounded(1);
-            let _ = self.persistence.remove_blocks_above(new_tip_num, tx);
+            let _ = self.persistence.remove_blocks_above(new_tip_num, state_trie_blocks, tx);
             self.persistence_state.start_remove(new_tip_num, rx);
         }
+        Ok(())
+    }
+
+    /// Returns canonical in-memory blocks used to replay state/trie after an on-disk reorg first
+    /// rewinds all data to the current state/trie frontier.
+    fn remove_blocks_state_trie_replay_blocks(
+        &self,
+        new_tip_num: u64,
+        state_trie_tip: u64,
+    ) -> ProviderResult<Vec<ExecutedBlock<N>>> {
+        if new_tip_num <= state_trie_tip {
+            return Ok(Vec::new())
+        }
+
+        let mut blocks = Vec::with_capacity((new_tip_num - state_trie_tip) as usize);
+        for block_number in state_trie_tip + 1..=new_tip_num {
+            let Some(block_state) = self.canonical_in_memory_state.state_by_number(block_number)
+            else {
+                return Err(ProviderError::other(std::io::Error::other(format!(
+                    "missing canonical in-memory block #{block_number} needed to replay state/trie from #{state_trie_tip} through #{new_tip_num}",
+                ))))
+            };
+            blocks.push(block_state.block());
+        }
+
+        Ok(blocks)
     }
 
     /// Helper method to save blocks and set the persistence state. This ensures we keep track of
@@ -1449,7 +1502,7 @@ where
     fn advance_persistence(&mut self) -> Result<(), AdvancePersistenceError> {
         if !self.persistence_state.in_progress() {
             if let Some(new_tip_num) = self.find_disk_reorg()? {
-                self.remove_blocks(new_tip_num)
+                self.remove_blocks(new_tip_num)?
             } else if self.should_persist() {
                 let blocks_to_persist =
                     self.get_canonical_blocks_to_persist(PersistTarget::Threshold)?;
@@ -2188,7 +2241,7 @@ where
         // If we have an on-disk reorg, we need to handle it first before touching the in-memory
         // state.
         if let Some(remove_above) = self.find_disk_reorg()? {
-            self.remove_blocks(remove_above);
+            self.remove_blocks(remove_above)?;
             return Ok(())
         }
 
