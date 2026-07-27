@@ -530,8 +530,9 @@ fn receipt_from_envelope<R: 'static>(
 /// header, body and receipts written.
 ///
 /// When `receipts_writer` is `Some`, every block must carry receipts, a block without them,
-/// possible for `.ere` files, whose receipts are optional per spec is an error. Receipts of blocks
-/// for which `is_receipt_verifiable` returns `true` are checked against the header's commitments.
+/// possible for `.ere` files, whose receipts are optional per spec is an error. Receipts are
+/// checked against the header's logs bloom, and against its receipts root when
+/// `is_receipt_verifiable` returns `true`.
 ///
 /// Returns last block height.
 ///
@@ -617,10 +618,8 @@ where
         }
 
         if let Some(receipts_writer) = receipts_writer.as_deref_mut() {
-            if (policy.is_receipt_verifiable)(number) &&
-                let Some(receipts) = receipts.as_deref()
-            {
-                verify_receipts(&header, receipts)?;
+            if let Some(receipts) = receipts.as_deref() {
+                verify_receipts(&header, receipts, (policy.is_receipt_verifiable)(number))?;
             }
             provider.write_block_receipts(receipts_writer, number, receipts)?;
         }
@@ -629,27 +628,31 @@ where
     Ok(last_header_number)
 }
 
-/// Checks a block's decoded receipts against the commitments in its header by recomputing the
-/// receipts root and logs bloom. Callers gate this to blocks whose receipts are EIP-658;
-/// pre-Byzantium receipts carry a post-state root that can't be recomputed here.
-fn verify_receipts<BH, R>(header: &BH, receipts: &[R]) -> eyre::Result<()>
+/// Checks a block's receipts against its header.
+///
+/// The bloom is always checked, the root only when `check_root` is set, as pre-Byzantium receipts
+/// can't be recomputed here.
+fn verify_receipts<BH, R>(header: &BH, receipts: &[R], check_root: bool) -> eyre::Result<()>
 where
     BH: FullBlockHeader,
     R: Receipt,
 {
     let with_bloom = receipts.iter().map(TxReceipt::with_bloom_ref).collect::<Vec<_>>();
-    let receipts_root = calculate_receipt_root(&with_bloom);
     let logs_bloom = with_bloom.iter().fold(Bloom::ZERO, |bloom, r| bloom | r.bloom_ref());
 
-    if receipts_root != header.receipts_root() {
-        eyre::bail!(
-            "receipts root mismatch for block {}: computed {receipts_root}, header has {}",
-            header.number(),
-            header.receipts_root(),
-        );
-    }
     if logs_bloom != header.logs_bloom() {
         eyre::bail!("logs bloom mismatch for block {}", header.number());
+    }
+
+    if check_root {
+        let receipts_root = calculate_receipt_root(&with_bloom);
+        if receipts_root != header.receipts_root() {
+            eyre::bail!(
+                "receipts root mismatch for block {}: computed {receipts_root}, header has {}",
+                header.number(),
+                header.receipts_root(),
+            );
+        }
     }
 
     Ok(())
@@ -790,7 +793,7 @@ where
 mod tests {
     use super::*;
     use alloy_consensus::{Header, Receipt as RlpReceipt, ReceiptWithBloom, TxLegacy, TxType};
-    use alloy_primitives::{Signature, B256};
+    use alloy_primitives::{Address, Bytes, Log, Signature, B256};
     use reth_db_common::init::init_genesis;
     use reth_era::era1::types::execution::{
         CompressedBody, CompressedHeader, CompressedReceipts, TotalDifficulty,
@@ -1423,10 +1426,27 @@ mod tests {
             logs_bloom: with_bloom.iter().fold(Bloom::ZERO, |bloom, r| bloom | r.bloom_ref()),
             ..Default::default()
         };
-        verify_receipts(&header, &receipts).unwrap();
+        verify_receipts(&header, &receipts, true).unwrap();
 
         // Same receipt count, different contents: the recomputed root no longer matches.
         let tampered = vec![Receipt { cumulative_gas_used: 42_000, ..receipts[0].clone() }];
-        assert!(verify_receipts(&header, &tampered).is_err());
+        assert!(verify_receipts(&header, &tampered, true).is_err());
+    }
+
+    #[test]
+    fn verify_receipts_checks_the_bloom_even_without_the_root() {
+        let receipts = vec![Receipt {
+            tx_type: TxType::Legacy,
+            success: true,
+            cumulative_gas_used: 21_000,
+            logs: vec![Log::new_unchecked(
+                Address::ZERO,
+                vec![B256::repeat_byte(1)],
+                Bytes::default(),
+            )],
+        }];
+
+        // The header commits to no logs at all, so the bloom cannot match.
+        assert!(verify_receipts(&Header::default(), &receipts, false).is_err());
     }
 }
