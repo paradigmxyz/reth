@@ -665,7 +665,7 @@ fn remove_blocks_clears_pending_sparse_trie_prune_request() {
 }
 
 #[test]
-fn remove_blocks_sends_all_in_memory_blocks_to_persistence() {
+fn remove_blocks_retains_partial_state_trie_suffix_in_memory() {
     const STATE_TRIE_TIP: usize = 132;
     const FINISH_TIP: usize = 147;
     const REORG_TIP: usize = 144;
@@ -681,26 +681,20 @@ fn remove_blocks_sends_all_in_memory_blocks_to_persistence() {
 
     test_harness.tree.remove_blocks(REORG_TIP as u64);
 
-    let PersistenceAction::RemoveBlocksAbove(new_tip, in_memory_blocks, sender) =
+    let PersistenceAction::RemoveBlocksAbove(new_tip, sender) =
         test_harness.action_rx.recv().unwrap()
     else {
         panic!("expected remove-blocks persistence action")
     };
     assert_eq!(new_tip, REORG_TIP as u64);
     assert_eq!(
-        in_memory_blocks.iter().map(|block| block.recovered_block().number()).collect::<Vec<_>>(),
-        (0..=FINISH_TIP as u64).collect::<Vec<_>>()
-    );
-    assert_eq!(in_memory_blocks, blocks);
-    assert_eq!(
         test_harness.tree.persistence_state.current_action(),
         Some(&CurrentPersistenceAction::RemovingBlocks { new_tip_num: REORG_TIP as u64 })
     );
     assert!(!test_harness.tree.state.pending_sparse_trie_prune());
 
-    // Persistence selects the replay suffix and fully materializes state/trie at the surviving
-    // tip. The blocks are retained until that result arrives, then can be dropped through the new
-    // state/trie frontier.
+    // Removal only unwinds blocks above the surviving tip, so the suffix after the unchanged
+    // state/trie frontier remains in memory.
     for block in &blocks[STATE_TRIE_TIP + 1..=REORG_TIP] {
         assert!(test_harness
             .tree
@@ -711,7 +705,7 @@ fn remove_blocks_sends_all_in_memory_blocks_to_persistence() {
     sender
         .send(PersistenceResult {
             last_block: Some(blocks[REORG_TIP].recovered_block().num_hash()),
-            last_state_trie_block: Some(REORG_TIP as u64),
+            last_state_trie_block: Some(STATE_TRIE_TIP as u64),
             commit_duration: None,
         })
         .unwrap();
@@ -723,9 +717,9 @@ fn remove_blocks_sends_all_in_memory_blocks_to_persistence() {
     );
     assert_eq!(
         test_harness.tree.persistence_state.last_state_trie_persisted_block,
-        blocks[REORG_TIP].recovered_block().num_hash()
+        blocks[STATE_TRIE_TIP].recovered_block().num_hash()
     );
-    for block in &blocks[..=REORG_TIP] {
+    for block in &blocks[..=STATE_TRIE_TIP] {
         assert!(test_harness
             .tree
             .state
@@ -738,7 +732,7 @@ fn remove_blocks_sends_all_in_memory_blocks_to_persistence() {
             .state_by_number(block.recovered_block().number())
             .is_none());
     }
-    for block in &blocks[REORG_TIP + 1..] {
+    for block in &blocks[STATE_TRIE_TIP + 1..] {
         assert!(test_harness
             .tree
             .state

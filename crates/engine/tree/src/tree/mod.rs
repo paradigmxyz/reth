@@ -1700,15 +1700,9 @@ where
 
         debug!(target: "engine::tree", ?new_tip_num, last_persisted_block_number=?self.persistence_state.last_persisted_block.number, "Removing blocks using persistence task");
         debug!(target: "engine::tree", ?new_tip_num, "Starting remove blocks job");
-        let mut in_memory_blocks = self
-            .canonical_in_memory_state
-            .canonical_chain()
-            .map(|block_state| block_state.block())
-            .collect::<Vec<_>>();
-        in_memory_blocks.reverse();
         self.state.set_pending_sparse_trie_prune(false);
         let (tx, rx) = crossbeam_channel::bounded(1);
-        let _ = self.persistence.remove_blocks_above(new_tip_num, in_memory_blocks, tx);
+        let _ = self.persistence.remove_blocks_above(new_tip_num, tx);
         self.persistence_state.start_remove(new_tip_num, rx);
     }
 

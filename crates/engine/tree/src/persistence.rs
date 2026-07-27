@@ -1,7 +1,6 @@
 use crate::metrics::PersistenceMetrics;
 use alloy_eips::BlockNumHash;
 use crossbeam_channel::Sender as CrossbeamSender;
-use reth_chain_state::ExecutedBlock;
 use reth_errors::ProviderError;
 use reth_ethereum_primitives::EthPrimitives;
 use reth_primitives_traits::{FastInstant as Instant, NodePrimitives};
@@ -102,8 +101,8 @@ where
         // If the receiver errors then senders have disconnected, so the loop should then end.
         while let Ok(action) = self.incoming.recv() {
             match action {
-                PersistenceAction::RemoveBlocksAbove(new_tip_num, in_memory_blocks, sender) => {
-                    let result = self.on_remove_blocks_above(new_tip_num, in_memory_blocks)?;
+                PersistenceAction::RemoveBlocksAbove(new_tip_num, sender) => {
+                    let result = self.on_remove_blocks_above(new_tip_num)?;
                     // send new sync metrics based on removed blocks
                     let _ =
                         self.sync_metrics_tx.send(MetricEvent::SyncHeight { height: new_tip_num });
@@ -138,7 +137,6 @@ where
     fn on_remove_blocks_above(
         &self,
         new_tip_num: u64,
-        in_memory_blocks: Vec<ExecutedBlock<N::Primitives>>,
     ) -> Result<PersistenceResult, PersistenceError> {
         debug!(target: "engine::persistence", ?new_tip_num, "Removing blocks");
         let start_time = Instant::now();
@@ -147,70 +145,6 @@ where
         let new_tip_hash = provider_rw
             .block_hash(new_tip_num)?
             .ok_or_else(|| ProviderError::HeaderNotFound(new_tip_num.into()))?;
-        let checkpoint = provider_rw.get_stage_checkpoint(StageId::Finish)?.ok_or_else(|| {
-            ProviderError::InsufficientChangesets { requested: new_tip_num, available: 0..=0 }
-        })?;
-        let state_trie_tip = checkpoint
-            .finish_stage_checkpoint()
-            .and_then(|finish| finish.partial_state_trie())
-            .unwrap_or(checkpoint.block_number);
-
-        if new_tip_num > state_trie_tip {
-            let state_trie_blocks = in_memory_blocks
-                .into_iter()
-                .filter(|block| {
-                    let block_number = block.recovered_block().num_hash().number;
-                    block_number > state_trie_tip && block_number <= new_tip_num
-                })
-                .collect::<Vec<_>>();
-            let expected_len = new_tip_num.saturating_sub(state_trie_tip) as usize;
-            if state_trie_blocks.len() != expected_len {
-                return Err(ProviderError::other(std::io::Error::other(format!(
-                    "expected {expected_len} in-memory blocks for state/trie replay from #{} through #{new_tip_num}, got {}",
-                    state_trie_tip + 1,
-                    state_trie_blocks.len(),
-                )))
-                .into())
-            }
-
-            debug!(
-                target: "engine::persistence",
-                ?state_trie_tip,
-                replay_tip = ?new_tip_num,
-                replay_block_count = state_trie_blocks.len(),
-                "Rewinding to state/trie frontier before replaying retained blocks"
-            );
-
-            // First normalize the partially persisted database to its state/trie frontier. The
-            // unwind must commit before replay because static-file pruning is applied at commit.
-            provider_rw.remove_block_and_execution_above(state_trie_tip)?;
-            provider_rw.commit()?;
-
-            let provider_rw = self.provider.database_provider_rw()?;
-            provider_rw.save_blocks_with_frontiers(&SaveBlocksInput::new(
-                state_trie_blocks,
-                state_trie_tip,
-                state_trie_tip,
-                new_tip_num,
-                new_tip_num,
-            ))?;
-            let last_state_trie_block =
-                provider_rw.get_stage_checkpoint(StageId::Finish)?.map(|checkpoint| {
-                    checkpoint
-                        .finish_stage_checkpoint()
-                        .and_then(|finish| finish.partial_state_trie())
-                        .unwrap_or(checkpoint.block_number)
-                });
-            provider_rw.commit()?;
-
-            debug!(target: "engine::persistence", ?new_tip_num, ?new_tip_hash, "Removed blocks from disk");
-            self.metrics.remove_blocks_above_duration_seconds.record(start_time.elapsed());
-            return Ok(PersistenceResult {
-                last_block: Some(BlockNumHash { hash: new_tip_hash, number: new_tip_num }),
-                last_state_trie_block,
-                commit_duration: None,
-            })
-        }
 
         provider_rw.remove_block_and_execution_above(new_tip_num)?;
         let last_state_trie_block =
@@ -344,15 +278,12 @@ pub enum PersistenceAction<N: NodePrimitives = EthPrimitives> {
 
     /// Removes block data above the given block number from the database.
     ///
-    /// The supplied blocks are all canonical blocks currently held in memory, ordered by
-    /// increasing block number. Persistence selects the range after the current state/trie
-    /// frontier through the new tip. If that frontier lags behind the new tip, persistence first
-    /// rewinds to the frontier and then replays the selected blocks so the resulting database is
-    /// fully materialized at the new tip.
+    /// This only unwinds blocks above the new tip, even if the state/trie frontier lags behind it.
+    /// The returned state/trie frontier lets the caller retain the surviving suffix in memory.
     ///
     /// This will first update checkpoints from the database, then remove actual block data from
     /// static files.
-    RemoveBlocksAbove(u64, Vec<ExecutedBlock<N>>, CrossbeamSender<PersistenceResult>),
+    RemoveBlocksAbove(u64, CrossbeamSender<PersistenceResult>),
 
     /// Update the persisted finalized block on disk
     SaveFinalizedBlock(u64),
@@ -460,19 +391,14 @@ impl<T: NodePrimitives> PersistenceHandle<T> {
     /// Tells the persistence service to remove blocks above a certain block number. The removed
     /// blocks are returned by the service.
     ///
-    /// `in_memory_blocks` contains all canonical blocks currently held in memory, ordered by
-    /// increasing block number. Persistence selects any blocks needed to replay state/trie after
-    /// the database is rewound.
-    ///
     /// When the operation completes, the new tip hash is returned in the receiver end of the sender
     /// argument.
     pub fn remove_blocks_above(
         &self,
         block_num: u64,
-        in_memory_blocks: Vec<ExecutedBlock<T>>,
         tx: CrossbeamSender<PersistenceResult>,
     ) -> Result<(), SendError<PersistenceAction<T>>> {
-        self.send_action(PersistenceAction::RemoveBlocksAbove(block_num, in_memory_blocks, tx))
+        self.send_action(PersistenceAction::RemoveBlocksAbove(block_num, tx))
     }
 }
 
@@ -510,12 +436,10 @@ mod tests {
         test_utils::{create_test_provider_factory, MockNodeTypes},
         AccountReader, BalConfig, BalNotificationStream, BalStore, BalStoreHandle,
         ChainSpecProvider, HeaderProvider, InMemoryBalStore, ProviderError, ProviderResult, RawBal,
-        SaveBlocksMode, StageCheckpointWriter, StorageSettingsCache,
-        TryIntoHistoricalStateProvider,
+        SaveBlocksMode, StorageSettingsCache, TryIntoHistoricalStateProvider,
     };
     use reth_prune::Pruner;
     use reth_prune_types::PruneMode;
-    use reth_stages_api::{FinishCheckpoint, StageCheckpoint};
     use tokio::sync::mpsc::unbounded_channel;
 
     fn default_persistence_handle() -> PersistenceHandle<EthPrimitives> {
@@ -714,7 +638,7 @@ mod tests {
     }
 
     #[test]
-    fn test_remove_blocks_above_replays_partial_state_trie_gap() {
+    fn test_remove_blocks_above_preserves_partial_state_trie_gap() {
         const STATE_TRIE_TIP: usize = 132;
         const FINISH_TIP: usize = 147;
         const REORG_TIP: usize = 144;
@@ -759,19 +683,22 @@ mod tests {
 
         let handle = persistence_handle(provider_factory.clone());
         let (tx, rx) = crossbeam_channel::bounded(1);
-        handle.remove_blocks_above(REORG_TIP as u64, blocks.clone(), tx).unwrap();
+        handle.remove_blocks_above(REORG_TIP as u64, tx).unwrap();
         let result = rx
             .recv_timeout(std::time::Duration::from_secs(10))
             .expect("remove-blocks persistence timed out");
 
         assert_eq!(result.last_block, Some(blocks[REORG_TIP].recovered_block().num_hash()));
-        assert_eq!(result.last_state_trie_block, Some(REORG_TIP as u64));
+        assert_eq!(result.last_state_trie_block, Some(STATE_TRIE_TIP as u64));
         drop(handle);
 
         let provider = provider_factory.provider().unwrap();
         let checkpoint = provider.get_stage_checkpoint(StageId::Finish).unwrap().unwrap();
         assert_eq!(checkpoint.block_number, REORG_TIP as u64);
-        assert!(checkpoint.finish_stage_checkpoint().is_none());
+        assert_eq!(
+            checkpoint.finish_stage_checkpoint().unwrap().partial_state_trie(),
+            Some(STATE_TRIE_TIP as u64)
+        );
         for block in &blocks[..=REORG_TIP] {
             assert_eq!(
                 provider.block_hash(block.recovered_block().number).unwrap(),
@@ -781,7 +708,6 @@ mod tests {
         for block_number in REORG_TIP as u64 + 1..=FINISH_TIP as u64 {
             assert!(provider.block_hash(block_number).unwrap().is_none());
         }
-
         let total_transactions = blocks[..=REORG_TIP]
             .iter()
             .map(|block| block.recovered_block().body().transactions.len() as u64)
@@ -813,55 +739,17 @@ mod tests {
         let mut block_builder = TestBlockBuilder::eth().with_state();
         let blocks = block_builder.get_executed_blocks(0..TIP + 1).collect::<Vec<_>>();
         let provider_rw = provider_factory.database_provider_rw().unwrap();
-        provider_rw.save_blocks(blocks.clone(), SaveBlocksMode::Full).unwrap();
+        provider_rw.save_blocks(blocks, SaveBlocksMode::Full).unwrap();
         provider_rw
             .tx_ref()
             .delete::<tables::StageCheckpoints>(StageId::Finish.to_string(), None)
             .unwrap();
         provider_rw.commit().unwrap();
 
-        let error =
-            persistence_service(provider_factory).on_remove_blocks_above(TIP, blocks).unwrap_err();
+        let error = persistence_service(provider_factory).on_remove_blocks_above(TIP).unwrap_err();
         assert!(matches!(
             error,
-            PersistenceError::ProviderError(ProviderError::InsufficientChangesets {
-                requested: TIP,
-                ..
-            })
-        ));
-    }
-
-    #[test]
-    fn test_remove_blocks_above_requires_complete_state_trie_replay_range() {
-        const STATE_TRIE_TIP: usize = 1;
-        const FINISH_TIP: usize = 4;
-        const REORG_TIP: usize = 3;
-
-        let provider_factory = create_test_provider_factory();
-        let mut block_builder = TestBlockBuilder::eth().with_state();
-        let blocks =
-            block_builder.get_executed_blocks(0..FINISH_TIP as u64 + 1).collect::<Vec<_>>();
-        let provider_rw = provider_factory.database_provider_rw().unwrap();
-        provider_rw.save_blocks(blocks.clone(), SaveBlocksMode::Full).unwrap();
-        provider_rw
-            .save_stage_checkpoint(
-                StageId::Finish,
-                StageCheckpoint::new(FINISH_TIP as u64).with_finish_stage_checkpoint(
-                    FinishCheckpoint { partial_state_trie: Some(STATE_TRIE_TIP as u64) },
-                ),
-            )
-            .unwrap();
-        provider_rw.commit().unwrap();
-
-        let incomplete_blocks = blocks
-            .into_iter()
-            .filter(|block| block.recovered_block().num_hash().number != STATE_TRIE_TIP as u64 + 1)
-            .collect();
-        let error = persistence_service(provider_factory)
-            .on_remove_blocks_above(REORG_TIP as u64, incomplete_blocks)
-            .unwrap_err();
-        assert!(error.to_string().contains(
-            "expected 2 in-memory blocks for state/trie replay from #2 through #3, got 1"
+            PersistenceError::ProviderError(ProviderError::InsufficientChangesets { .. })
         ));
     }
 
