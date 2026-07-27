@@ -1539,6 +1539,7 @@ where
             Ok(state) => state,
             Err(handle) => handle.get().clone(),
         };
+        let hashed_post_state_total_len = hashed_state.total_len();
         let (deferred_trie_data, deferred_trie_task) =
             LazyTrieData::pending(hashed_state, trie_output);
         let block_validation_metrics = self.metrics.block_validation.clone();
@@ -1573,7 +1574,12 @@ where
         // Spawn task that computes trie data asynchronously.
         self.runtime.spawn_blocking_named(DEFERRED_TRIE_WORKER_NAME, compute_trie_input_task);
 
-        ExecutedBlock::with_deferred_trie_data(block, execution_outcome, deferred_trie_data)
+        ExecutedBlock::with_deferred_trie_data(
+            block,
+            execution_outcome,
+            hashed_post_state_total_len,
+            deferred_trie_data,
+        )
     }
 
     fn calculate_timing_stats(

@@ -545,14 +545,43 @@ where
         self.persistence_gap().saturating_sub(self.config.memory_block_buffer_target())
     }
 
+    /// Returns the total number of hashed post state changes in canonical blocks that are
+    /// eligible for persistence, excluding the configured in-memory block buffer.
+    fn persistence_state_changes(&self) -> usize {
+        let last_persisted_block = self.persistence_state.last_persisted_block.number;
+        let target_block = self
+            .state
+            .tree_state
+            .canonical_block_number()
+            .saturating_sub(self.config.memory_block_buffer_target());
+        let mut current_hash = self.state.tree_state.canonical_block_hash();
+        let mut state_changes = 0usize;
+
+        while let Some(block) = self.state.tree_state.blocks_by_hash.get(&current_hash) {
+            if block.block_number() <= last_persisted_block {
+                break
+            }
+
+            if block.block_number() <= target_block {
+                state_changes = state_changes.saturating_add(block.hashed_post_state_total_len);
+            }
+            current_hash = block.recovered_block().parent_hash();
+        }
+
+        state_changes
+    }
+
     /// Returns `true` when the main loop should stop draining the tree input channel.
     ///
-    /// This is the case when persistence is already running and the number of blocks beyond the
-    /// configured in-memory buffer has reached the configured threshold.
-    const fn should_backpressure(&self) -> bool {
+    /// This is the case when persistence is already running and either the number of blocks or
+    /// hashed post state changes beyond the configured in-memory buffer has reached its configured
+    /// threshold.
+    fn should_backpressure(&self) -> bool {
         self.persistence_state.in_progress() &&
-            self.persistence_backpressure_gap() >=
-                self.config.persistence_backpressure_threshold()
+            (self.persistence_backpressure_gap() >=
+                self.config.persistence_backpressure_threshold() ||
+                self.persistence_state_changes() >=
+                    self.config.persistence_state_changes_backpressure_threshold())
     }
 
     /// Run the engine API handler.
@@ -2111,10 +2140,10 @@ where
         );
     }
 
-    /// Returns true if the canonical chain length minus the last persisted
-    /// block is greater than the persistence threshold,
-    /// backfill is not running, and no payload is currently being built.
-    pub const fn should_persist(&self) -> bool {
+    /// Returns true if the canonical chain length exceeds its persistence threshold or the hashed
+    /// post state changes reach theirs, backfill is not running, and no payload is currently being
+    /// built.
+    pub fn should_persist(&self) -> bool {
         if self.building_payload {
             return false
         }
@@ -2124,9 +2153,8 @@ where
             return false
         }
 
-        let min_block = self.persistence_state.last_persisted_block.number;
-        self.state.tree_state.canonical_block_number().saturating_sub(min_block) >
-            self.config.persistence_threshold()
+        self.persistence_gap() > self.config.persistence_threshold() ||
+            self.persistence_state_changes() >= self.config.persistence_state_changes_threshold()
     }
 
     /// Returns a batch of consecutive canonical blocks to persist in the range

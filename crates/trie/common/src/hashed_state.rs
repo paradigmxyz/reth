@@ -99,6 +99,12 @@ impl HashedPostState {
         self.accounts.is_empty() && self.storages.is_empty()
     }
 
+    /// Returns the total number of updates including all accounts and storage updates.
+    pub fn total_len(&self) -> usize {
+        self.accounts.len() +
+            self.storages.values().map(|storage| storage.storage.len()).sum::<usize>()
+    }
+
     /// Construct [`TriePrefixSetsMut`] from hashed post state.
     /// The prefix sets contain the hashed account and storage keys that have been changed in the
     /// post state.
@@ -910,6 +916,30 @@ mod tests {
         database::{states::StorageSlot, StorageWithOriginalValues},
         state::{AccountInfo, Bytecode},
     };
+
+    #[test]
+    fn total_len_counts_accounts_and_storage_updates() {
+        let state = HashedPostState::default()
+            .with_accounts([
+                (B256::with_last_byte(1), Some(Account::default())),
+                (B256::with_last_byte(2), None),
+            ])
+            .with_storages([
+                (
+                    B256::with_last_byte(3),
+                    HashedStorage::from_iter(
+                        false,
+                        [
+                            (B256::with_last_byte(4), U256::from(1)),
+                            (B256::with_last_byte(5), U256::from(2)),
+                        ],
+                    ),
+                ),
+                (B256::with_last_byte(6), HashedStorage::new(true)),
+            ]);
+
+        assert_eq!(state.total_len(), 4);
+    }
 
     #[test]
     fn hashed_state_wiped_extension() {

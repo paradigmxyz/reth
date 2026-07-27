@@ -528,7 +528,7 @@ impl TestBlockFactory {
 
 #[test]
 fn test_tree_persist_block_batch() {
-    let tree_config = TreeConfig::default();
+    let tree_config = TreeConfig::default().with_persistence_thresholds(7, 16);
     let chain_spec = MAINNET.clone();
     let mut test_block_builder = TestBlockBuilder::eth().with_chain_spec((*chain_spec).clone());
 
@@ -537,7 +537,8 @@ fn test_tree_persist_block_batch() {
     let blocks: Vec<_> = test_block_builder
         .get_executed_blocks(1..tree_config.persistence_threshold() + 2)
         .collect();
-    let mut test_harness = TestHarness::new(chain_spec).with_blocks(blocks);
+    let mut test_harness =
+        TestHarness::with_config(chain_spec, tree_config.clone()).with_blocks(blocks);
 
     let mut blocks = vec![];
     for idx in 0..tree_config.max_execute_block_batch_size() * 2 {
@@ -568,7 +569,7 @@ fn test_tree_persist_block_batch() {
 
 #[tokio::test]
 async fn test_tree_persist_blocks() {
-    let tree_config = TreeConfig::default();
+    let tree_config = TreeConfig::default().with_persistence_thresholds(7, 16);
     let chain_spec = MAINNET.clone();
     let mut test_block_builder = TestBlockBuilder::eth().with_chain_spec((*chain_spec).clone());
 
@@ -577,7 +578,8 @@ async fn test_tree_persist_blocks() {
     let blocks: Vec<_> = test_block_builder
         .get_executed_blocks(1..tree_config.persistence_threshold() + 2)
         .collect();
-    let test_harness = TestHarness::new(chain_spec).with_blocks(blocks.clone());
+    let test_harness =
+        TestHarness::with_config(chain_spec, tree_config.clone()).with_blocks(blocks.clone());
     spawn_os_thread("engine", || test_harness.tree.run());
 
     // send a message to the tree to enter the main loop.
@@ -949,6 +951,82 @@ fn test_backpressure_excludes_in_memory_buffer() {
 
         assert_eq!(test_harness.tree.should_backpressure(), expected_backpressure);
     }
+}
+
+#[test]
+fn state_changes_persistence_excludes_memory_buffer_and_forks() {
+    let mut test_block_builder = TestBlockBuilder::eth();
+    let mut blocks: Vec<_> = test_block_builder.get_executed_blocks(1..8).collect();
+    blocks[5].hashed_post_state_total_len = 10;
+    blocks[6].hashed_post_state_total_len = 10;
+
+    let config = TreeConfig::default()
+        .with_persistence_thresholds(100, 200)
+        .with_memory_block_buffer_target(2)
+        .with_persistence_state_changes_thresholds(10, 20);
+    let mut test_harness =
+        TestHarness::with_config(MAINNET.clone(), config).with_blocks(blocks.clone());
+
+    assert_eq!(test_harness.tree.persistence_state_changes(), 0);
+    assert!(!test_harness.tree.should_persist());
+
+    let mut fork =
+        test_block_builder.get_executed_block_with_number(6, blocks[4].recovered_block().hash());
+    fork.hashed_post_state_total_len = usize::MAX;
+    test_harness.tree.state.tree_state.insert_executed(fork);
+    assert_eq!(test_harness.tree.persistence_state_changes(), 0);
+
+    let eligible_hash = blocks[4].recovered_block().hash();
+    test_harness
+        .tree
+        .state
+        .tree_state
+        .blocks_by_hash
+        .get_mut(&eligible_hash)
+        .unwrap()
+        .hashed_post_state_total_len = 10;
+
+    assert_eq!(test_harness.tree.persistence_state_changes(), 10);
+    assert!(test_harness.tree.should_persist());
+
+    test_harness.tree.persistence_state.last_persisted_block =
+        blocks[4].recovered_block().num_hash();
+    assert_eq!(test_harness.tree.persistence_state_changes(), 0);
+    assert!(!test_harness.tree.should_persist());
+}
+
+#[test]
+fn state_changes_backpressure_excludes_in_memory_buffer() {
+    let mut blocks: Vec<_> = TestBlockBuilder::eth().get_executed_blocks(1..8).collect();
+    blocks[5].hashed_post_state_total_len = 20;
+    blocks[6].hashed_post_state_total_len = 20;
+
+    let config = TreeConfig::default()
+        .with_persistence_thresholds(100, 200)
+        .with_memory_block_buffer_target(2)
+        .with_persistence_state_changes_thresholds(10, 20);
+    let mut test_harness =
+        TestHarness::with_config(MAINNET.clone(), config).with_blocks(blocks.clone());
+
+    let (_persist_tx, persist_rx) = crossbeam_channel::bounded(1);
+    let persisted = blocks.last().unwrap().recovered_block().num_hash();
+    test_harness.tree.persistence_state.start_save(persisted, persist_rx);
+
+    assert_eq!(test_harness.tree.persistence_state_changes(), 0);
+    assert!(!test_harness.tree.should_backpressure());
+
+    let eligible_hash = blocks[4].recovered_block().hash();
+    test_harness
+        .tree
+        .state
+        .tree_state
+        .blocks_by_hash
+        .get_mut(&eligible_hash)
+        .unwrap()
+        .hashed_post_state_total_len = 20;
+
+    assert_eq!(test_harness.tree.persistence_state_changes(), 20);
+    assert!(test_harness.tree.should_backpressure());
 }
 
 #[tokio::test]

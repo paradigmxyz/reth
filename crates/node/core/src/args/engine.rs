@@ -8,7 +8,7 @@ use eyre::ensure;
 use reth_cli_util::{parse_duration_from_secs_or_ms, parsers::format_duration_as_secs_or_ms};
 use reth_engine_primitives::{
     TreeConfig, DEFAULT_INVALID_HEADER_HIT_EVICTION_THRESHOLD, DEFAULT_MULTIPROOF_TASK_CHUNK_SIZE,
-    DEFAULT_PERSISTENCE_BACKPRESSURE_THRESHOLD,
+    DEFAULT_PERSISTENCE_BACKPRESSURE_THRESHOLD, DEFAULT_PERSISTENCE_STATE_CHANGES_THRESHOLD,
 };
 use std::{sync::OnceLock, time::Duration};
 
@@ -26,6 +26,7 @@ static ENGINE_DEFAULTS: OnceLock<DefaultEngineValues> = OnceLock::new();
 #[derive(Debug, Clone)]
 pub struct DefaultEngineValues {
     persistence_threshold: u64,
+    persistence_state_changes_threshold: usize,
     persistence_backpressure_threshold: u64,
     memory_block_buffer_target: u64,
     invalid_header_hit_eviction_threshold: u8,
@@ -70,6 +71,12 @@ impl DefaultEngineValues {
     /// Set the default persistence threshold
     pub const fn with_persistence_threshold(mut self, v: u64) -> Self {
         self.persistence_threshold = v;
+        self
+    }
+
+    /// Set the default persistence state changes threshold
+    pub const fn with_persistence_state_changes_threshold(mut self, v: usize) -> Self {
+        self.persistence_state_changes_threshold = v;
         self
     }
 
@@ -249,6 +256,7 @@ impl Default for DefaultEngineValues {
     fn default() -> Self {
         Self {
             persistence_threshold: DEFAULT_PERSISTENCE_THRESHOLD,
+            persistence_state_changes_threshold: DEFAULT_PERSISTENCE_STATE_CHANGES_THRESHOLD,
             persistence_backpressure_threshold: DEFAULT_PERSISTENCE_BACKPRESSURE_THRESHOLD,
             memory_block_buffer_target: DEFAULT_MEMORY_BLOCK_BUFFER_TARGET,
             invalid_header_hit_eviction_threshold: DEFAULT_INVALID_HEADER_HIT_EVICTION_THRESHOLD,
@@ -300,6 +308,13 @@ pub struct EngineArgs {
     #[arg(long = "engine.persistence-threshold", default_value_t = DefaultEngineValues::get_global().persistence_threshold)]
     pub persistence_threshold: u64,
 
+    /// Configure the hashed post state changes threshold for persistence.
+    ///
+    /// This counts account and storage updates in canonical blocks beyond the configured
+    /// in-memory buffer.
+    #[arg(long = "engine.persistence-state-changes-threshold", default_value_t = DefaultEngineValues::get_global().persistence_state_changes_threshold)]
+    pub persistence_state_changes_threshold: usize,
+
     /// Configure the maximum number of blocks beyond the in-memory buffer target that may await
     /// persistence before engine API processing stalls.
     ///
@@ -309,6 +324,15 @@ pub struct EngineArgs {
     /// This value must be greater than `--engine.persistence-threshold`.
     #[arg(long = "engine.persistence-backpressure-threshold")]
     pub persistence_backpressure_threshold: Option<u64>,
+
+    /// Configure the maximum number of hashed post state changes that may await persistence
+    /// before engine API processing stalls.
+    ///
+    /// If omitted, this defaults to twice `--engine.persistence-state-changes-threshold`.
+    ///
+    /// This value must be greater than `--engine.persistence-state-changes-threshold`.
+    #[arg(long = "engine.persistence-state-changes-backpressure-threshold")]
+    pub persistence_state_changes_backpressure_threshold: Option<usize>,
 
     /// Configure the target number of blocks to keep in memory.
     ///
@@ -545,6 +569,7 @@ impl Default for EngineArgs {
     fn default() -> Self {
         let DefaultEngineValues {
             persistence_threshold,
+            persistence_state_changes_threshold,
             persistence_backpressure_threshold: _,
             memory_block_buffer_target: _,
             invalid_header_hit_eviction_threshold,
@@ -576,7 +601,9 @@ impl Default for EngineArgs {
         } = DefaultEngineValues::get_global().clone();
         Self {
             persistence_threshold,
+            persistence_state_changes_threshold,
             persistence_backpressure_threshold: None,
+            persistence_state_changes_backpressure_threshold: None,
             memory_block_buffer_target: None,
             invalid_header_hit_eviction_threshold,
             state_root_task_compare_updates,
@@ -634,15 +661,34 @@ impl EngineArgs {
         })
     }
 
+    /// Returns the effective persistence state changes backpressure threshold.
+    pub fn persistence_state_changes_backpressure_threshold(&self) -> usize {
+        self.persistence_state_changes_backpressure_threshold
+            .unwrap_or_else(|| self.persistence_state_changes_threshold.saturating_mul(2))
+    }
+
     /// Validates cross-field engine arguments.
     pub fn validate(&self) -> eyre::Result<()> {
         let persistence_backpressure_threshold = self.persistence_backpressure_threshold();
+        let persistence_state_changes_backpressure_threshold =
+            self.persistence_state_changes_backpressure_threshold();
         let memory_block_buffer_target = self.memory_block_buffer_target();
         ensure!(
             persistence_backpressure_threshold > self.persistence_threshold,
             "--engine.persistence-backpressure-threshold ({}) must be greater than --engine.persistence-threshold ({})",
             persistence_backpressure_threshold,
             self.persistence_threshold
+        );
+        ensure!(
+            self.persistence_state_changes_threshold > 0,
+            "--engine.persistence-state-changes-threshold must be greater than zero"
+        );
+        ensure!(
+            persistence_state_changes_backpressure_threshold >
+                self.persistence_state_changes_threshold,
+            "--engine.persistence-state-changes-backpressure-threshold ({}) must be greater than --engine.persistence-state-changes-threshold ({})",
+            persistence_state_changes_backpressure_threshold,
+            self.persistence_state_changes_threshold
         );
         ensure!(
             memory_block_buffer_target <= self.persistence_threshold,
@@ -668,8 +714,14 @@ impl EngineArgs {
             tracing::warn!(target: "reth::cli", "--engine.legacy-state-root has no effect anymore, use --engine.state-root-fallback to force synchronous state root computation");
         }
         let config = TreeConfig::default()
-            .with_persistence_backpressure_threshold(self.persistence_backpressure_threshold())
-            .with_persistence_threshold(self.persistence_threshold)
+            .with_persistence_thresholds(
+                self.persistence_threshold,
+                self.persistence_backpressure_threshold(),
+            )
+            .with_persistence_state_changes_thresholds(
+                self.persistence_state_changes_threshold,
+                self.persistence_state_changes_backpressure_threshold(),
+            )
             .with_memory_block_buffer_target(self.memory_block_buffer_target())
             .with_invalid_header_hit_eviction_threshold(self.invalid_header_hit_eviction_threshold)
             .without_state_cache(self.state_cache_disabled)
@@ -723,12 +775,20 @@ mod tests {
         let default_args = EngineArgs::default();
         let args = CommandParser::<EngineArgs>::parse_from(["reth"]).args;
         assert_eq!(args, default_args);
-        assert_eq!(args.persistence_threshold, 7);
+        assert_eq!(args.persistence_threshold, 200);
+        assert_eq!(
+            args.persistence_state_changes_threshold,
+            DEFAULT_PERSISTENCE_STATE_CHANGES_THRESHOLD
+        );
         assert_eq!(args.memory_block_buffer_target, None);
         assert_eq!(args.memory_block_buffer_target(), 5);
         assert_eq!(
             args.persistence_backpressure_threshold(),
             DefaultEngineValues::get_global().persistence_backpressure_threshold
+        );
+        assert_eq!(
+            args.persistence_state_changes_backpressure_threshold(),
+            DEFAULT_PERSISTENCE_STATE_CHANGES_THRESHOLD * 2
         );
     }
 
@@ -762,18 +822,18 @@ mod tests {
         let args = CommandParser::<EngineArgs>::parse_from([
             "reth",
             "--engine.persistence-threshold",
-            "100",
+            "300",
             "--engine.memory-block-buffer-target",
             "50",
         ])
         .args;
 
-        assert_eq!(args.persistence_backpressure_threshold(), 200);
+        assert_eq!(args.persistence_backpressure_threshold(), 600);
 
         let tree_config = args.tree_config();
-        assert_eq!(tree_config.persistence_threshold(), 100);
+        assert_eq!(tree_config.persistence_threshold(), 300);
         assert_eq!(tree_config.memory_block_buffer_target(), 50);
-        assert_eq!(tree_config.persistence_backpressure_threshold(), 200);
+        assert_eq!(tree_config.persistence_backpressure_threshold(), 600);
     }
 
     #[test]
@@ -808,11 +868,43 @@ mod tests {
     }
 
     #[test]
+    fn state_changes_backpressure_threshold_uses_runtime_persistence_threshold() {
+        let args = CommandParser::<EngineArgs>::parse_from([
+            "reth",
+            "--engine.persistence-state-changes-threshold",
+            "12000",
+        ])
+        .args;
+
+        assert_eq!(args.persistence_state_changes_backpressure_threshold(), 24_000);
+
+        let tree_config = args.tree_config();
+        assert_eq!(tree_config.persistence_state_changes_threshold(), 12_000);
+        assert_eq!(tree_config.persistence_state_changes_backpressure_threshold(), 24_000);
+    }
+
+    #[test]
+    fn explicit_state_changes_backpressure_threshold_overrides_runtime_default() {
+        let args = CommandParser::<EngineArgs>::parse_from([
+            "reth",
+            "--engine.persistence-state-changes-threshold",
+            "12000",
+            "--engine.persistence-state-changes-backpressure-threshold",
+            "24001",
+        ])
+        .args;
+
+        assert_eq!(args.persistence_state_changes_backpressure_threshold(), 24_001);
+    }
+
+    #[test]
     #[allow(deprecated)]
     fn engine_args() {
         let args = EngineArgs {
             persistence_threshold: 100,
+            persistence_state_changes_threshold: 12_000,
             persistence_backpressure_threshold: Some(101),
+            persistence_state_changes_backpressure_threshold: Some(24_001),
             memory_block_buffer_target: Some(50),
             invalid_header_hit_eviction_threshold: 7,
             legacy_state_root_task_enabled: true,
@@ -857,6 +949,10 @@ mod tests {
             "100",
             "--engine.persistence-backpressure-threshold",
             "101",
+            "--engine.persistence-state-changes-threshold",
+            "12000",
+            "--engine.persistence-state-changes-backpressure-threshold",
+            "24001",
             "--engine.memory-block-buffer-target",
             "50",
             "--engine.invalid-header-cache-hit-eviction-threshold",
@@ -907,6 +1003,27 @@ mod tests {
         let err = args.validate().unwrap_err().to_string();
         assert!(err.contains("engine.persistence-backpressure-threshold"));
         assert!(err.contains("engine.persistence-threshold"));
+    }
+
+    #[test]
+    fn validate_rejects_invalid_state_changes_backpressure_threshold() {
+        let args = EngineArgs {
+            persistence_state_changes_threshold: 10,
+            persistence_state_changes_backpressure_threshold: Some(10),
+            ..EngineArgs::default()
+        };
+
+        let err = args.validate().unwrap_err().to_string();
+        assert!(err.contains("engine.persistence-state-changes-backpressure-threshold"));
+        assert!(err.contains("engine.persistence-state-changes-threshold"));
+    }
+
+    #[test]
+    fn validate_rejects_zero_state_changes_threshold() {
+        let args = EngineArgs { persistence_state_changes_threshold: 0, ..EngineArgs::default() };
+
+        let err = args.validate().unwrap_err().to_string();
+        assert!(err.contains("engine.persistence-state-changes-threshold"));
     }
 
     #[test]

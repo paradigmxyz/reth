@@ -754,6 +754,8 @@ pub struct ExecutedBlock<N: NodePrimitives = EthPrimitives> {
     pub recovered_block: Arc<RecoveredBlock<N::Block>>,
     /// Block's execution outcome.
     pub execution_output: Arc<BlockExecutionOutput<N::Receipt>>,
+    /// Total number of account and storage updates in the hashed post state.
+    pub hashed_post_state_total_len: usize,
     /// Deferred trie data produced by execution.
     ///
     /// This allows deferring the computation of the trie data which can be expensive.
@@ -774,6 +776,7 @@ impl<N: NodePrimitives> Default for ExecutedBlock<N> {
                 },
                 state: Default::default(),
             }),
+            hashed_post_state_total_len: 0,
             trie_data: LazyTrieData::ready(ComputedTrieData::default()),
         }
     }
@@ -797,7 +800,13 @@ impl<N: NodePrimitives> ExecutedBlock<N> {
         execution_output: Arc<BlockExecutionOutput<N::Receipt>>,
         trie_data: ComputedTrieData,
     ) -> Self {
-        Self { recovered_block, execution_output, trie_data: LazyTrieData::ready(trie_data) }
+        let hashed_post_state_total_len = trie_data.sorted.hashed_state.total_len();
+        Self {
+            recovered_block,
+            execution_output,
+            hashed_post_state_total_len,
+            trie_data: LazyTrieData::ready(trie_data),
+        }
     }
 
     /// Create a new [`ExecutedBlock`] with deferred trie data.
@@ -816,9 +825,10 @@ impl<N: NodePrimitives> ExecutedBlock<N> {
     pub const fn with_deferred_trie_data(
         recovered_block: Arc<RecoveredBlock<N::Block>>,
         execution_output: Arc<BlockExecutionOutput<N::Receipt>>,
+        hashed_post_state_total_len: usize,
         trie_data: LazyTrieData,
     ) -> Self {
-        Self { recovered_block, execution_output, trie_data }
+        Self { recovered_block, execution_output, hashed_post_state_total_len, trie_data }
     }
 
     /// Returns a reference to an inner [`SealedBlock`]
@@ -1239,6 +1249,16 @@ mod tests {
         assert_eq!(state.hash(), block.recovered_block().hash());
         assert_eq!(state.number(), number);
         assert_eq!(state.state_root(), block.recovered_block().state_root);
+    }
+
+    #[test]
+    fn executed_block_tracks_hashed_post_state_total_len() {
+        let mut test_block_builder: TestBlockBuilder<EthPrimitives> =
+            TestBlockBuilder::default().with_state();
+        let block = test_block_builder.get_executed_block_with_number(1, B256::random());
+
+        assert_ne!(block.hashed_post_state_total_len, 0);
+        assert_eq!(block.hashed_post_state_total_len, block.hashed_state().total_len());
     }
 
     #[test]
