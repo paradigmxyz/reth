@@ -1046,6 +1046,11 @@ fn dispatch_with_chunking<T, I>(
 }
 
 /// RLP-encodes the account as a [`TrieAccount`] leaf value, or returns empty for deletions.
+///
+/// `Some(Account::default())` with an empty storage root is encoded as a deletion. This is valid
+/// for post-Merge state because EIP-7523 (<https://eips.ethereum.org/EIPS/eip-7523>) prohibits
+/// empty accounts. Do not use this encoding rule when replaying historical pre-Merge state, where
+/// an empty account and a missing account can have different trie representations.
 fn encode_account_leaf_value(
     account: Option<Account>,
     storage_root: B256,
@@ -1171,9 +1176,23 @@ mod tests {
     }
 
     #[test]
-    fn test_encode_account_leaf_value_empty_account_and_empty_root_is_empty() {
+    fn test_encode_account_leaf_value_deletion_and_empty_root_is_empty() {
         let mut account_rlp_buf = vec![0xAB];
         let encoded = encode_account_leaf_value(None, EMPTY_ROOT_HASH, &mut account_rlp_buf);
+
+        assert!(encoded.is_empty());
+        // Early return should not touch the caller's buffer.
+        assert_eq!(account_rlp_buf, vec![0xAB]);
+    }
+
+    #[test]
+    fn test_encode_account_leaf_value_empty_account_and_empty_root_is_empty() {
+        let mut account_rlp_buf = vec![0xAB];
+        let encoded = encode_account_leaf_value(
+            Some(Account::default()),
+            EMPTY_ROOT_HASH,
+            &mut account_rlp_buf,
+        );
 
         assert!(encoded.is_empty());
         // Early return should not touch the caller's buffer.
