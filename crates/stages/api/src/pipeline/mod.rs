@@ -223,6 +223,17 @@ impl<N: ProviderNodeTypes> Pipeline<N> {
     pub async fn run_loop(&mut self) -> Result<ControlFlow, PipelineError> {
         self.move_to_static_files()?;
 
+        // Seed the execution tip tracker from the database so that ConsistentProvider
+        // has an accurate view even on restart or after a previous sync run.
+        {
+            let provider = self.provider_factory.database_provider_ro()?;
+            let execution_tip = provider
+                .get_stage_checkpoint(StageId::Execution)?
+                .map(|c| c.block_number)
+                .unwrap_or_default();
+            self.provider_factory.set_execution_tip(execution_tip);
+        }
+
         let mut previous_stage = None;
         for stage_index in 0..self.stages.len() {
             let stage = &self.stages[stage_index];
@@ -412,6 +423,11 @@ impl<N: ProviderNodeTypes> Pipeline<N> {
 
                         provider_rw.commit()?;
 
+                        // Update the in-memory execution tip after unwind
+                        if stage_id == StageId::Execution {
+                            self.provider_factory.set_execution_tip(checkpoint.block_number);
+                        }
+
                         stage.post_unwind_commit()?;
 
                         provider_rw = self.provider_factory.unwind_provider_rw()?;
@@ -504,6 +520,13 @@ impl<N: ProviderNodeTypes> Pipeline<N> {
 
                     // Invoke stage post commit hook.
                     self.stage(stage_index).post_execute_commit()?;
+
+                    // Update the in-memory execution tip so that ConsistentProvider
+                    // can detect when plain state is ahead of the Finish checkpoint
+                    // without reading stage checkpoints from the database.
+                    if stage_id == StageId::Execution {
+                        self.provider_factory.set_execution_tip(checkpoint.block_number);
+                    }
 
                     // Notify event listeners and update metrics.
                     self.event_sender.notify(PipelineEvent::Ran {
