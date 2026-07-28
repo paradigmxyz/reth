@@ -552,16 +552,21 @@ where
             .spawn_with_state_at_block(block.parent_hash(), move |eth_api, mut db| {
                 let block_executor = eth_api.evm_config().executor(&mut db);
 
-                let mut witness_record = ExecutionWitnessRecord::default();
-
+                let mut witness = None;
                 let _ = block_executor
                     .execute_with_state_closure(&block, |statedb: &State<_>| {
-                        witness_record.record_executed_state(statedb, mode);
+                        witness =
+                            Some(ExecutionWitnessRecord::new(statedb).into_execution_witness(
+                                &statedb.database.database.0,
+                                eth_api.provider(),
+                                block_number,
+                                mode,
+                            ));
                     })
                     .map_err(|err| EthApiError::Internal(err.into()))?;
 
-                Ok(witness_record
-                    .into_execution_witness(&db.database.0, eth_api.provider(), block_number, mode)
+                Ok(witness
+                    .expect("state closure is called after successful execution")
                     .map_err(EthApiError::from)?)
             })
             .await
