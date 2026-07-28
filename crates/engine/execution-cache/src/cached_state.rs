@@ -887,6 +887,14 @@ fn nonzero_storage_value(value: StorageValue) -> Option<StorageValue> {
 }
 
 impl<S: StateProvider> StateProvider for CachedStateProvider<S> {
+    fn extend_hashed_post_state_with_storage_zeros(
+        &self,
+        bundle_state: &reth_revm::db::BundleState,
+        hashed_state: &mut HashedPostState,
+    ) -> ProviderResult<()> {
+        self.state_provider.extend_hashed_post_state_with_storage_zeros(bundle_state, hashed_state)
+    }
+
     fn storage(
         &self,
         account: Address,

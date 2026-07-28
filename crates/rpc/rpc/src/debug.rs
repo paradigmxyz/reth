@@ -33,8 +33,8 @@ use reth_rpc_eth_api::{
 use reth_rpc_eth_types::{EthApiError, StateCacheDb};
 use reth_rpc_server_types::{result::internal_rpc_err, ToRpcResult};
 use reth_storage_api::{
-    BlockIdReader, BlockReaderIdExt, HashedPostStateProvider, HeaderProvider, ProviderBlock,
-    ReceiptProviderIdExt, StateProviderFactory, StateRootProvider, StorageRootProvider,
+    BlockIdReader, BlockReaderIdExt, HeaderProvider, ProviderBlock, ReceiptProviderIdExt,
+    StateProvider, StateProviderFactory, StateRootProvider, StorageRootProvider,
     TransactionVariant,
 };
 use reth_tasks::{pool::BlockingTaskGuard, Runtime};
@@ -44,7 +44,7 @@ use reth_trie_common::{
     HashedStorage,
 };
 use revm::{
-    database::{states::bundle_state::BundleRetention, AccountStatus},
+    database::{states::bundle_state::BundleRetention, AccountStatus, BundleState},
     Database, DatabaseCommit,
 };
 use revm_inspectors::tracing::{DebugInspector, TransactionContext};
@@ -749,7 +749,9 @@ where
                     // Merge transitions into cumulative bundle_state
                     db.merge_transitions(BundleRetention::PlainState);
                     // Compute state root from the accumulated state changes
-                    let hashed_state = db.database.hashed_post_state(&db.bundle_state);
+                    let hashed_state =
+                        hashed_post_state_with_storage_zeros(&db.database.0, &db.bundle_state)
+                            .map_err(Eth::Error::from_eth_err)?;
                     let root =
                         db.database.state_root(hashed_state).map_err(Eth::Error::from_eth_err)?;
                     roots.push(root);
@@ -1288,6 +1290,15 @@ impl<B: BlockTrait> Default for BadBlockStore<B> {
     }
 }
 
+fn hashed_post_state_with_storage_zeros(
+    provider: &(impl StateProvider + ?Sized),
+    bundle_state: &BundleState,
+) -> ProviderResult<HashedPostState> {
+    let mut hashed_state = provider.hashed_post_state(bundle_state);
+    provider.extend_hashed_post_state_with_storage_zeros(bundle_state, &mut hashed_state)?;
+    Ok(hashed_state)
+}
+
 fn account_storage_root(
     provider: &(impl StorageRootProvider + ?Sized),
     address: Address,
@@ -1312,6 +1323,10 @@ mod tests {
     use reth_db_api::{tables, transaction::DbTxMut};
     use reth_primitives_traits::StorageEntry;
     use reth_provider::test_utils::create_test_provider_factory;
+    use revm::{
+        database::{states::StorageSlot, BundleAccount},
+        state::AccountInfo as RevmAccountInfo,
+    };
 
     #[test]
     fn account_storage_root_handles_destroyed_and_changed_accounts() {
@@ -1357,5 +1372,49 @@ mod tests {
             changed_root,
             storage_root_unsorted([(old_slot, old_value), (new_slot, new_value)])
         );
+    }
+
+    #[test]
+    fn hashed_post_state_zeroes_destroyed_account_parent_storage() {
+        let factory = create_test_provider_factory();
+        let address = Address::with_last_byte(1);
+        let old_slot = U256::from(1);
+        let new_slot = U256::from(2);
+        let old_value = U256::from(10);
+        let new_value = U256::from(20);
+        let hashed_address = keccak256(address);
+        let hashed_old_slot = keccak256(B256::from(old_slot));
+        let hashed_new_slot = keccak256(B256::from(new_slot));
+
+        let provider_rw = factory.provider_rw().unwrap();
+        provider_rw
+            .tx_ref()
+            .put::<tables::HashedStorages>(
+                hashed_address,
+                StorageEntry { key: hashed_old_slot, value: old_value },
+            )
+            .unwrap();
+        provider_rw.commit().unwrap();
+
+        let mut bundle_state = BundleState::default();
+        bundle_state.state.insert(
+            address,
+            BundleAccount::new(
+                Some(RevmAccountInfo::default()),
+                Some(RevmAccountInfo::default()),
+                std::iter::once((new_slot, StorageSlot::new_changed(U256::ZERO, new_value)))
+                    .collect(),
+                AccountStatus::DestroyedChanged,
+            ),
+        );
+
+        let provider = factory.latest().unwrap();
+        let hashed_state =
+            hashed_post_state_with_storage_zeros(provider.as_ref(), &bundle_state).unwrap();
+        let storage = &hashed_state.storages[&hashed_address];
+
+        assert!(!storage.wiped);
+        assert_eq!(storage.storage[&hashed_old_slot], U256::ZERO);
+        assert_eq!(storage.storage[&hashed_new_slot], new_value);
     }
 }

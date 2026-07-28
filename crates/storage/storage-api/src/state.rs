@@ -9,7 +9,7 @@ use alloy_primitives::{Address, BlockHash, BlockNumber, StorageKey, StorageValue
 use auto_impl::auto_impl;
 use reth_execution_types::ExecutionOutcome;
 use reth_primitives_traits::Bytecode;
-use reth_storage_errors::provider::ProviderResult;
+use reth_storage_errors::provider::{ProviderError, ProviderResult};
 use reth_trie_common::HashedPostState;
 use revm::database::BundleState;
 
@@ -40,6 +40,27 @@ pub trait StateProvider:
     + StateProofProvider
     + HashedPostStateProvider
 {
+    /// Extends the hashed post-state with zero-valued updates for parent storage of accounts that
+    /// were destroyed but remain in the post-state.
+    ///
+    /// Existing storage updates take precedence, and implementations must not set the storage
+    /// wiped flag.
+    fn extend_hashed_post_state_with_storage_zeros(
+        &self,
+        bundle_state: &BundleState,
+        _hashed_state: &mut HashedPostState,
+    ) -> ProviderResult<()> {
+        if bundle_state
+            .state()
+            .values()
+            .any(|account| account.was_destroyed() && account.info.is_some())
+        {
+            Err(ProviderError::UnsupportedProvider)
+        } else {
+            Ok(())
+        }
+    }
+
     /// Get storage of given account.
     fn storage(
         &self,

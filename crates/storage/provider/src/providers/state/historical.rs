@@ -20,7 +20,7 @@ use reth_storage_api::{
 use reth_storage_errors::provider::ProviderResult;
 use reth_storage_overlay::{ChangesetCache, Overlay, OverlayBuilder, OverlaySource};
 use reth_trie::{
-    hashed_cursor::HashedPostStateCursorFactory,
+    hashed_cursor::{zero_destroyed_account_storage, HashedPostStateCursorFactory},
     proof::{Proof, StorageProof},
     trie_cursor::InMemoryTrieCursorFactory,
     updates::TrieUpdates,
@@ -660,6 +660,34 @@ where
         + NodePrimitivesProvider<Primitives = N>,
     N: NodePrimitives,
 {
+    fn extend_hashed_post_state_with_storage_zeros(
+        &self,
+        bundle_state: &revm::database::BundleState,
+        hashed_state: &mut HashedPostState,
+    ) -> ProviderResult<()> {
+        if !bundle_state
+            .state()
+            .values()
+            .any(|account| account.was_destroyed() && account.info.is_some())
+        {
+            return Ok(())
+        }
+
+        let historical = self.build_overlay(TrieInputSorted::default())?.state;
+        zero_destroyed_account_storage(
+            &HashedPostStateCursorFactory::new(
+                reth_trie_db::DatabaseHashedCursorFactory::new(self.tx()),
+                historical.as_ref(),
+            ),
+            bundle_state
+                .state()
+                .iter()
+                .filter(|(_, account)| account.was_destroyed() && account.info.is_some()),
+            hashed_state,
+        )
+        .map_err(Into::into)
+    }
+
     /// Expects a plain (unhashed) storage key slot.
     fn storage(
         &self,
@@ -1445,6 +1473,81 @@ mod tests {
             HistoricalStateProviderRef::new(&db, 1000, ChangesetCache::new()).storage(HIGHER_ADDRESS, STORAGE),
             Ok(Some(v)) if v == U256::from(1000)
         ));
+    }
+
+    #[test]
+    fn destroyed_storage_zeros_use_historical_state() {
+        use crate::BlockWriter;
+        use alloy_primitives::{keccak256, map::HashMap};
+        use reth_execution_types::ExecutionOutcome;
+        use reth_stages_types::{StageCheckpoint, StageId};
+        use reth_storage_api::{HashedPostStateProvider, StageCheckpointWriter};
+        use reth_testing_utils::generators::{self, random_block_range, BlockRangeParams};
+        use revm::{
+            database::{AccountStatus, BundleAccount, BundleState},
+            state::AccountInfo,
+        };
+
+        let factory = create_test_provider_factory();
+        let slot = U256::from(1);
+        let old_value = U256::from(2);
+        let account = AccountInfo::default();
+        let blocks = random_block_range(
+            &mut generators::rng(),
+            0..=1,
+            BlockRangeParams { parent: Some(B256::ZERO), tx_count: 0..1, ..Default::default() },
+        );
+        let mut reverts = vec![Vec::new(); 2];
+        reverts[1] = vec![(ADDRESS, None, vec![(slot, old_value)])];
+        let bundle = BundleState::new(
+            [(
+                ADDRESS,
+                Some(account.clone()),
+                Some(account.clone()),
+                HashMap::from_iter([(slot, (old_value, U256::ZERO))]),
+            )],
+            reverts,
+            [],
+        );
+
+        let provider_rw = factory.provider_rw().unwrap();
+        provider_rw
+            .append_blocks_with_state(
+                blocks
+                    .into_iter()
+                    .map(|block| block.try_recover().expect("failed to seal block with senders"))
+                    .collect(),
+                &ExecutionOutcome { bundle, first_block: 0, ..Default::default() },
+                Default::default(),
+            )
+            .unwrap();
+        provider_rw.save_stage_checkpoint(StageId::Finish, StageCheckpoint::new(1)).unwrap();
+        provider_rw.commit().unwrap();
+
+        let db = factory.provider().unwrap();
+        let hashed_address = keccak256(ADDRESS);
+        assert!(db.tx_ref().get::<tables::HashedStorages>(hashed_address).unwrap().is_none());
+
+        let mut destroyed_bundle = BundleState::default();
+        destroyed_bundle.state.insert(
+            ADDRESS,
+            BundleAccount::new(
+                Some(account.clone()),
+                Some(account),
+                Default::default(),
+                AccountStatus::DestroyedChanged,
+            ),
+        );
+        let provider = HistoricalStateProviderRef::new(&db, 1, ChangesetCache::new());
+        let mut hashed_state = provider.hashed_post_state(&destroyed_bundle);
+        provider
+            .extend_hashed_post_state_with_storage_zeros(&destroyed_bundle, &mut hashed_state)
+            .unwrap();
+
+        assert_eq!(
+            hashed_state.storages[&hashed_address].storage[&keccak256(B256::from(slot))],
+            U256::ZERO
+        );
     }
 
     #[test]

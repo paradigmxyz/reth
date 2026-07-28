@@ -9,7 +9,7 @@ use reth_storage_api::{
 };
 use reth_storage_errors::provider::{ProviderError, ProviderResult};
 use reth_trie::{
-    hashed_cursor::HashedPostStateCursorFactory,
+    hashed_cursor::{zero_destroyed_account_storage, HashedPostStateCursorFactory},
     proof::{Proof, StorageProof},
     trie_cursor::InMemoryTrieCursorFactory,
     updates::TrieUpdates,
@@ -260,6 +260,22 @@ impl<Provider: DBProvider> HashedPostStateProvider for LatestStateProviderRef<'_
 impl<Provider: DBProvider + BlockHashReader + StorageSettingsCache> StateProvider
     for LatestStateProviderRef<'_, Provider>
 {
+    fn extend_hashed_post_state_with_storage_zeros(
+        &self,
+        bundle_state: &revm::database::BundleState,
+        hashed_state: &mut HashedPostState,
+    ) -> ProviderResult<()> {
+        zero_destroyed_account_storage(
+            &reth_trie_db::DatabaseHashedCursorFactory::new(self.tx()),
+            bundle_state
+                .state()
+                .iter()
+                .filter(|(_, account)| account.was_destroyed() && account.info.is_some()),
+            hashed_state,
+        )
+        .map_err(Into::into)
+    }
+
     /// Get storage by plain (unhashed) storage key slot.
     fn storage(
         &self,

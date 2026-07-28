@@ -1,6 +1,8 @@
 use super::ExecutedBlock;
 use alloy_consensus::BlockHeader;
-use alloy_primitives::{keccak256, Address, BlockNumber, Bytes, StorageKey, StorageValue, B256};
+use alloy_primitives::{
+    keccak256, Address, BlockNumber, Bytes, StorageKey, StorageValue, B256, U256,
+};
 use reth_errors::ProviderResult;
 use reth_primitives_traits::{Account, Bytecode, NodePrimitives};
 use reth_storage_api::{
@@ -215,6 +217,31 @@ impl<N: NodePrimitives> HashedPostStateProvider for MemoryOverlayStateProviderRe
 }
 
 impl<N: NodePrimitives> StateProvider for MemoryOverlayStateProviderRef<'_, N> {
+    fn extend_hashed_post_state_with_storage_zeros(
+        &self,
+        bundle_state: &BundleState,
+        hashed_state: &mut HashedPostState,
+    ) -> ProviderResult<()> {
+        self.historical.extend_hashed_post_state_with_storage_zeros(bundle_state, hashed_state)?;
+
+        for (address, account) in bundle_state.state() {
+            if !account.was_destroyed() || account.info.is_none() {
+                continue
+            }
+
+            let hashed_address = keccak256(address);
+            let Some(parent_storage) = self.trie_input().state.storages.get(&hashed_address) else {
+                continue
+            };
+            let storage = &mut hashed_state.storages.entry(hashed_address).or_default().storage;
+            for hashed_slot in parent_storage.storage.keys() {
+                storage.entry(*hashed_slot).or_insert(U256::ZERO);
+            }
+        }
+
+        Ok(())
+    }
+
     fn storage(
         &self,
         address: Address,
@@ -284,3 +311,64 @@ impl<N: NodePrimitives> MemoryOverlayStateProvider<N> {
 
 // Delegates all provider impls to [`MemoryOverlayStateProviderRef`]
 reth_storage_api::macros::delegate_provider_impls!(MemoryOverlayStateProvider<N> where [N: NodePrimitives]);
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use reth_ethereum_primitives::EthPrimitives;
+    use reth_storage_api::noop::NoopProvider;
+    use reth_trie::{ComputedTrieData, KeccakKeyHasher, LazyTrieData, SortedTrieData};
+    use revm::database::{states::StorageSlot, AccountStatus, BundleAccount};
+    use std::sync::Arc;
+
+    #[test]
+    fn destroyed_account_zeroes_in_memory_parent_storage() {
+        let address = Address::with_last_byte(1);
+        let parent_slot = U256::from(1);
+        let new_slot = U256::from(2);
+        let parent_value = U256::from(10);
+        let new_value = U256::from(20);
+        let hashed_address = keccak256(address);
+        let hashed_parent_slot = keccak256(B256::from(parent_slot));
+        let hashed_new_slot = keccak256(B256::from(new_slot));
+
+        let parent_hashed_state = HashedPostState::default().with_storages([(
+            hashed_address,
+            HashedStorage::from_iter(false, [(hashed_parent_slot, parent_value)]),
+        )]);
+        let parent = ExecutedBlock::<EthPrimitives> {
+            trie_data: LazyTrieData::ready(ComputedTrieData {
+                sorted: SortedTrieData {
+                    hashed_state: Arc::new(parent_hashed_state.into_sorted()),
+                    ..Default::default()
+                },
+            }),
+            ..Default::default()
+        };
+        let provider =
+            MemoryOverlayStateProviderRef::new(Box::new(NoopProvider::default()), vec![parent]);
+
+        let mut bundle_state = BundleState::default();
+        bundle_state.state.insert(
+            address,
+            BundleAccount::new(
+                Some(Default::default()),
+                Some(Default::default()),
+                std::iter::once((new_slot, StorageSlot::new_changed(U256::ZERO, new_value)))
+                    .collect(),
+                AccountStatus::DestroyedChanged,
+            ),
+        );
+        let mut hashed_state =
+            HashedPostState::from_bundle_state::<KeccakKeyHasher>(bundle_state.state());
+
+        provider
+            .extend_hashed_post_state_with_storage_zeros(&bundle_state, &mut hashed_state)
+            .unwrap();
+
+        let storage = &hashed_state.storages[&hashed_address];
+        assert!(!storage.wiped);
+        assert_eq!(storage.storage[&hashed_parent_slot], U256::ZERO);
+        assert_eq!(storage.storage[&hashed_new_slot], new_value);
+    }
+}

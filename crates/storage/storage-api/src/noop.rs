@@ -551,6 +551,14 @@ impl<C: Send + Sync, N: NodePrimitives> StateReader for NoopProvider<C, N> {
 }
 
 impl<C: Send + Sync, N: NodePrimitives> StateProvider for NoopProvider<C, N> {
+    fn extend_hashed_post_state_with_storage_zeros(
+        &self,
+        _bundle_state: &revm::database::BundleState,
+        _hashed_state: &mut HashedPostState,
+    ) -> ProviderResult<()> {
+        Ok(())
+    }
+
     fn storage(
         &self,
         _account: Address,
