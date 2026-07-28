@@ -116,6 +116,13 @@ impl<N: NodePrimitives> SaveBlocksInput<N> {
             .num_hash()
     }
 
+    /// Returns the first newly persisted block.
+    pub fn first_persist_rest_block(&self) -> &ExecutedBlock<N> {
+        self.persist_rest_blocks()
+            .first()
+            .expect("constructor ensures a non-empty persistence range")
+    }
+
     /// Returns newly persisted blocks whose block, execution, and history data should be written.
     pub fn persist_rest_blocks(&self) -> &[ExecutedBlock<N>] {
         &self.blocks[(self.prev_db_tip - self.prev_partial_state_trie) as usize..]
@@ -178,7 +185,7 @@ mod tests {
         let blocks = TestBlockBuilder::eth().get_executed_blocks(13..17).collect();
         let input = SaveBlocksInput::new(blocks, 15, 12, 16, 13);
 
-        assert_eq!(input.persist_rest_blocks()[0].recovered_block().number(), 16);
+        assert_eq!(input.first_persist_rest_block().recovered_block().number(), 16);
         assert_eq!(input.state_trie_blocks()[0].recovered_block().number(), 13);
         assert_eq!(
             input
