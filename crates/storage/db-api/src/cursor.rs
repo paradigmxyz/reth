@@ -4,7 +4,7 @@ use std::{
 };
 
 use crate::{
-    common::{IterPairResult, PairResult, ValueOnlyResult},
+    common::{IterPairResult, KeyOnlyResult, PairResult, ValueOnlyResult},
     table::{DupSort, Table, TableRow},
     DatabaseError,
 };
@@ -17,11 +17,29 @@ pub trait DbCursorRO<T: Table> {
     /// Seeks to the KV pair exactly at `key`.
     fn seek_exact(&mut self, key: T::Key) -> PairResult<T>;
 
+    /// Seeks to the KV pair exactly at `key`, returning only the decoded key.
+    ///
+    /// The value is not decoded and can be retrieved later using [`DbCursorRO::current`].
+    fn seek_exact_key(&mut self, key: T::Key) -> KeyOnlyResult<T>;
+
     /// Seeks to the KV pair whose key is greater than or equal to `key`.
     fn seek(&mut self, key: T::Key) -> PairResult<T>;
 
+    /// Seeks to the KV pair whose key is greater than or equal to `key`, returning only the decoded
+    /// key.
+    ///
+    /// The value is not decoded and can be retrieved later using [`DbCursorRO::current`].
+    fn seek_key(&mut self, key: T::Key) -> KeyOnlyResult<T>;
+
     /// Position the cursor at the next KV pair, returning it.
     fn next(&mut self) -> PairResult<T>;
+
+    /// Position the cursor at the next KV pair, returning only the decoded key.
+    ///
+    /// For dup tables, this can return the same key for the next duplicate value.
+    ///
+    /// The value is not decoded and can be retrieved later using [`DbCursorRO::current`].
+    fn next_key(&mut self) -> KeyOnlyResult<T>;
 
     /// Position the cursor at the previous KV pair, returning it.
     fn prev(&mut self) -> PairResult<T>;

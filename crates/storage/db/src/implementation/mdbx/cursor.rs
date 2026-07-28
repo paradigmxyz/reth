@@ -6,7 +6,7 @@ use crate::{
     DatabaseError,
 };
 use reth_db_api::{
-    common::{PairResult, ValueOnlyResult},
+    common::{KeyOnlyResult, PairResult, ValueOnlyResult},
     cursor::{
         DbCursorRO, DbCursorRW, DbDupCursorRO, DbDupCursorRW, DupWalker, RangeWalker,
         ReverseWalker, Walker,
@@ -74,6 +74,23 @@ where
     res.map_err(|e| DatabaseError::Read(e.into()))?.map(decoder::<T>).transpose()
 }
 
+/// Decodes a key from the database, ignoring its value.
+#[expect(clippy::type_complexity)]
+pub fn decode_key<T>(
+    res: Result<Option<(Cow<'_, [u8]>, ())>, impl Into<DatabaseErrorInfo>>,
+) -> KeyOnlyResult<T>
+where
+    T: Table,
+    T::Key: Decode,
+{
+    res.map_err(|e| DatabaseError::Read(e.into()))?
+        .map(|(key, ())| match key {
+            Cow::Borrowed(key) => Decode::decode(key),
+            Cow::Owned(key) => Decode::decode_owned(key),
+        })
+        .transpose()
+}
+
 /// Some types don't support compression (eg. B256), and we don't want to be copying them to the
 /// allocated buffer when we can just use their reference.
 macro_rules! compress_to_buf_or_ref {
@@ -97,12 +114,24 @@ impl<K: TransactionKind, T: Table> DbCursorRO<T> for Cursor<K, T> {
         decode::<T>(self.inner.set_key(key.encode().as_ref()))
     }
 
+    fn seek_exact_key(&mut self, key: <T as Table>::Key) -> KeyOnlyResult<T> {
+        decode_key::<T>(self.inner.set_key::<Cow<'_, [u8]>, ()>(key.encode().as_ref()))
+    }
+
     fn seek(&mut self, key: <T as Table>::Key) -> PairResult<T> {
         decode::<T>(self.inner.set_range(key.encode().as_ref()))
     }
 
+    fn seek_key(&mut self, key: <T as Table>::Key) -> KeyOnlyResult<T> {
+        decode_key::<T>(self.inner.set_range::<Cow<'_, [u8]>, ()>(key.encode().as_ref()))
+    }
+
     fn next(&mut self) -> PairResult<T> {
         decode::<T>(self.inner.next())
+    }
+
+    fn next_key(&mut self) -> KeyOnlyResult<T> {
+        decode_key::<T>(self.inner.next::<Cow<'_, [u8]>, ()>())
     }
 
     fn prev(&mut self) -> PairResult<T> {

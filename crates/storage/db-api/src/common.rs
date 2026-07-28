@@ -15,5 +15,8 @@ pub type PairResult<T> = Result<Option<KeyValue<T>>, DatabaseError>;
 /// not there is another entry.
 pub type IterPairResult<T> = Option<Result<KeyValue<T>, DatabaseError>>;
 
+/// A key only result for table `T`.
+pub type KeyOnlyResult<T> = Result<Option<<T as Table>::Key>, DatabaseError>;
+
 /// A value only result for table `T`.
 pub type ValueOnlyResult<T> = Result<Option<<T as Table>::Value>, DatabaseError>;

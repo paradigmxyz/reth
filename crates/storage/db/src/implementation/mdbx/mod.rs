@@ -680,6 +680,7 @@ mod tests {
     use crate::{
         tables::{
             AccountsHistory, CanonicalHeaders, Headers, PlainAccountState, PlainStorageState,
+            RawKey, RawTable, RawValue, TransactionHashNumbers,
         },
         test_utils::*,
         AccountChangeSets,
@@ -1126,6 +1127,84 @@ mod tests {
         let exact = cursor.seek_exact(missing_key).unwrap();
         assert_eq!(exact, None);
         assert!(cursor.current().unwrap().is_none());
+    }
+
+    #[test]
+    fn db_cursor_key_only_navigation() {
+        let (_tempdir, db) = create_test_db(DatabaseEnvKind::RW);
+        let values = [1, 3, 5].map(B256::with_last_byte);
+
+        let tx = db.tx_mut().expect(ERROR_INIT_TX);
+        for (key, value) in [1, 3, 5].into_iter().zip(values) {
+            tx.put::<CanonicalHeaders>(key, value).expect(ERROR_PUT);
+        }
+        tx.commit().expect(ERROR_COMMIT);
+
+        let tx = db.tx().expect(ERROR_INIT_TX);
+        let mut cursor = tx.cursor_read::<CanonicalHeaders>().unwrap();
+
+        assert_eq!(cursor.seek_exact_key(1).unwrap(), Some(1));
+        assert_eq!(cursor.current().unwrap(), Some((1, values[0])));
+
+        assert_eq!(cursor.next_key().unwrap(), Some(3));
+        assert_eq!(cursor.current().unwrap(), Some((3, values[1])));
+
+        assert_eq!(cursor.seek_key(2).unwrap(), Some(3));
+        assert_eq!(cursor.current().unwrap(), Some((3, values[1])));
+
+        assert!(cursor.seek_exact_key(2).unwrap().is_none());
+
+        assert_eq!(cursor.seek_exact_key(5).unwrap(), Some(5));
+        assert_eq!(cursor.current().unwrap(), Some((5, values[2])));
+        assert!(cursor.next_key().unwrap().is_none());
+
+        assert!(cursor.seek_key(6).unwrap().is_none());
+    }
+
+    #[test]
+    fn db_cursor_key_only_navigation_defers_value_decoding() {
+        let (_tempdir, db) = create_test_db(DatabaseEnvKind::RW);
+        let keys = [1, 3, 5].map(B256::with_last_byte);
+
+        let tx = db.tx_mut().expect(ERROR_INIT_TX);
+        for key in &keys {
+            tx.put::<RawTable<TransactionHashNumbers>>(
+                RawKey::new(*key),
+                RawValue::from_vec(vec![0]),
+            )
+            .expect(ERROR_PUT);
+        }
+        tx.commit().expect(ERROR_COMMIT);
+
+        let tx = db.tx().expect(ERROR_INIT_TX);
+        let mut cursor = tx.cursor_read::<TransactionHashNumbers>().unwrap();
+
+        assert_eq!(cursor.seek_exact_key(keys[0]).unwrap(), Some(keys[0]));
+        assert_eq!(cursor.next_key().unwrap(), Some(keys[1]));
+        assert_eq!(cursor.seek_key(B256::with_last_byte(4)).unwrap(), Some(keys[2]));
+        assert!(cursor.current().is_err());
+    }
+
+    #[test]
+    fn db_cursor_key_only_navigation_on_rw_dupsort_cursor() {
+        let (_tempdir, db) = create_test_db(DatabaseEnvKind::RW);
+        let tx = db.tx_mut().expect(ERROR_INIT_TX);
+        let key = Address::random();
+        let entries = [1, 2]
+            .map(|byte| StorageEntry { key: B256::with_last_byte(byte), value: U256::from(byte) });
+        let mut cursor = tx.cursor_dup_write::<PlainStorageState>().unwrap();
+
+        for entry in &entries {
+            cursor.upsert(key, entry).expect(ERROR_UPSERT);
+        }
+
+        assert_eq!(cursor.seek_exact_key(key).unwrap(), Some(key));
+        assert_eq!(cursor.current().unwrap(), Some((key, entries[0])));
+
+        assert_eq!(cursor.next_key().unwrap(), Some(key));
+        assert_eq!(cursor.current().unwrap(), Some((key, entries[1])));
+
+        assert!(cursor.next_key().unwrap().is_none());
     }
 
     #[test]

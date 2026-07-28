@@ -4,7 +4,7 @@
 //! are no-ops that return default values without persisting data.
 
 use crate::{
-    common::{IterPairResult, PairResult, ValueOnlyResult},
+    common::{IterPairResult, KeyOnlyResult, PairResult, ValueOnlyResult},
     cursor::{
         DbCursorRO, DbCursorRW, DbDupCursorRO, DbDupCursorRW, DupWalker, RangeWalker,
         ReverseWalker, Walker,
@@ -222,15 +222,33 @@ impl<T: Table> DbCursorRO<T> for CursorMock {
         Ok(None)
     }
 
+    /// Seeks to an exact key match, returning only the key.
+    /// **Mock behavior**: Always returns `None`.
+    fn seek_exact_key(&mut self, _key: T::Key) -> KeyOnlyResult<T> {
+        Ok(None)
+    }
+
     /// Seeks to the first key greater than or equal to the given key.
     /// **Mock behavior**: Always returns `None`.
     fn seek(&mut self, _key: T::Key) -> PairResult<T> {
         Ok(None)
     }
 
+    /// Seeks to the first key greater than or equal to the given key, returning only the key.
+    /// **Mock behavior**: Always returns `None`.
+    fn seek_key(&mut self, _key: T::Key) -> KeyOnlyResult<T> {
+        Ok(None)
+    }
+
     /// Moves to the next entry.
     /// **Mock behavior**: Always returns `None`.
     fn next(&mut self) -> PairResult<T> {
+        Ok(None)
+    }
+
+    /// Moves to the next entry, returning only the key.
+    /// **Mock behavior**: Always returns `None`.
+    fn next_key(&mut self) -> KeyOnlyResult<T> {
         Ok(None)
     }
 
