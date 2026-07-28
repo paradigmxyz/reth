@@ -176,8 +176,7 @@ where
         &mut self,
         input: SaveBlocksInput<N::Primitives>,
     ) -> Result<PersistenceResult, PersistenceError> {
-        let first_block =
-            input.persist_rest_blocks().first().map(|block| block.recovered_block().num_hash());
+        let first_block = input.persist_rest_blocks()[0].recovered_block().num_hash();
         let last_block = input.last_block();
         let persist_block_count = input.persist_rest_blocks().len();
         let state_trie_block_count = input.state_trie_blocks().len();
