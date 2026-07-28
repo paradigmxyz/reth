@@ -14,12 +14,12 @@ mod tests {
     use reth_execution_types::ExecutionOutcome;
     use reth_primitives_traits::{Account, StorageEntry};
     use reth_storage_api::{
-        DatabaseProviderFactory, HashedPostStateProvider, StateWriteConfig, StateWriter,
-        StorageSettingsCache,
+        DatabaseProviderFactory, StateWriteConfig, StateWriter, StorageSettingsCache,
     };
     use reth_trie::{
         test_utils::{state_root, storage_root_prehashed},
-        HashedPostState, HashedStorage, StateRoot, StorageRoot, StorageRootProgress,
+        HashedPostState, HashedStorage, KeccakKeyHasher, StateRoot, StorageRoot,
+        StorageRootProgress,
     };
     use reth_trie_db::{DatabaseStateRoot, DatabaseStorageRoot, LegacyKeyAdapter, PackedKeyAdapter};
     use revm::database::{
@@ -929,13 +929,19 @@ mod tests {
             let overlay_root = if is_v2 {
                 TestStateRoot::<_, PackedKeyAdapter>::overlay_root(
                     tx,
-                    &provider_factory.hashed_post_state(&state.bundle_state).into_sorted(),
+                    &HashedPostState::from_bundle_state::<KeccakKeyHasher>(
+                        state.bundle_state.state(),
+                    )
+                    .into_sorted(),
                 )
                 .unwrap()
             } else {
                 TestStateRoot::<_, LegacyKeyAdapter>::overlay_root(
                     tx,
-                    &provider_factory.hashed_post_state(&state.bundle_state).into_sorted(),
+                    &HashedPostState::from_bundle_state::<KeccakKeyHasher>(
+                        state.bundle_state.state(),
+                    )
+                    .into_sorted(),
                 )
                 .unwrap()
             };

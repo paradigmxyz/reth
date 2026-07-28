@@ -33,8 +33,8 @@ use reth_rpc_eth_api::{
 use reth_rpc_eth_types::{EthApiError, StateCacheDb};
 use reth_rpc_server_types::{result::internal_rpc_err, ToRpcResult};
 use reth_storage_api::{
-    BlockIdReader, BlockReaderIdExt, HeaderProvider, ProviderBlock, ReceiptProviderIdExt,
-    StateProvider, StateProviderFactory, StateRootProvider, StorageRootProvider,
+    BlockIdReader, BlockReaderIdExt, HashedPostStateProvider, HeaderProvider, ProviderBlock,
+    ReceiptProviderIdExt, StateProviderFactory, StateRootProvider, StorageRootProvider,
     TransactionVariant,
 };
 use reth_tasks::{pool::BlockingTaskGuard, Runtime};
@@ -44,7 +44,7 @@ use reth_trie_common::{
     HashedStorage,
 };
 use revm::{
-    database::{states::bundle_state::BundleRetention, AccountStatus, BundleState},
+    database::{states::bundle_state::BundleRetention, AccountStatus},
     Database, DatabaseCommit,
 };
 use revm_inspectors::tracing::{DebugInspector, TransactionContext};
@@ -749,9 +749,10 @@ where
                     // Merge transitions into cumulative bundle_state
                     db.merge_transitions(BundleRetention::PlainState);
                     // Compute state root from the accumulated state changes
-                    let hashed_state =
-                        hashed_post_state_with_storage_zeros(&db.database.0, &db.bundle_state)
-                            .map_err(Eth::Error::from_eth_err)?;
+                    let hashed_state = db
+                        .database
+                        .hashed_post_state(&db.bundle_state)
+                        .map_err(Eth::Error::from_eth_err)?;
                     let root =
                         db.database.state_root(hashed_state).map_err(Eth::Error::from_eth_err)?;
                     roots.push(root);
@@ -1290,15 +1291,6 @@ impl<B: BlockTrait> Default for BadBlockStore<B> {
     }
 }
 
-fn hashed_post_state_with_storage_zeros(
-    provider: &(impl StateProvider + ?Sized),
-    bundle_state: &BundleState,
-) -> ProviderResult<HashedPostState> {
-    let mut hashed_state = provider.hashed_post_state(bundle_state);
-    provider.extend_hashed_post_state_with_storage_zeros(bundle_state, &mut hashed_state)?;
-    Ok(hashed_state)
-}
-
 fn account_storage_root(
     provider: &(impl StorageRootProvider + ?Sized),
     address: Address,
@@ -1324,7 +1316,7 @@ mod tests {
     use reth_primitives_traits::StorageEntry;
     use reth_provider::test_utils::create_test_provider_factory;
     use revm::{
-        database::{states::StorageSlot, BundleAccount},
+        database::{states::StorageSlot, BundleAccount, BundleState},
         state::AccountInfo as RevmAccountInfo,
     };
 
@@ -1409,8 +1401,7 @@ mod tests {
         );
 
         let provider = factory.latest().unwrap();
-        let hashed_state =
-            hashed_post_state_with_storage_zeros(provider.as_ref(), &bundle_state).unwrap();
+        let hashed_state = provider.hashed_post_state(&bundle_state).unwrap();
         let storage = &hashed_state.storages[&hashed_address];
 
         assert!(!storage.wiped);

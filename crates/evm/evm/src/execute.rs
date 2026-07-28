@@ -21,7 +21,7 @@ use reth_primitives_traits::{
 };
 use reth_storage_api::StateProvider;
 pub use reth_storage_errors::provider::ProviderError;
-use reth_trie_common::{updates::TrieUpdates, HashedPostState};
+use reth_trie_common::{updates::TrieUpdates, HashedPostState, KeccakKeyHasher};
 use revm::{
     database::{states::bundle_state::BundleRetention, BundleState, State},
     state::bal::Bal,
@@ -514,7 +514,8 @@ where
         let block_access_list_hash =
             block_access_list.as_ref().map(|bal| compute_block_access_list_hash(bal.as_slice()));
 
-        let hashed_state = state.hashed_post_state(&db.bundle_state);
+        let hashed_state =
+            HashedPostState::from_bundle_state::<KeccakKeyHasher>(db.bundle_state.state());
         let (state_root, trie_updates) = match state_root_precomputed {
             Some(precomputed) => precomputed,
             None => state

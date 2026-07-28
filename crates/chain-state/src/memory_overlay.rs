@@ -211,18 +211,8 @@ impl<N: NodePrimitives> StateProofProvider for MemoryOverlayStateProviderRef<'_,
 }
 
 impl<N: NodePrimitives> HashedPostStateProvider for MemoryOverlayStateProviderRef<'_, N> {
-    fn hashed_post_state(&self, bundle_state: &BundleState) -> HashedPostState {
-        self.historical.hashed_post_state(bundle_state)
-    }
-}
-
-impl<N: NodePrimitives> StateProvider for MemoryOverlayStateProviderRef<'_, N> {
-    fn extend_hashed_post_state_with_storage_zeros(
-        &self,
-        bundle_state: &BundleState,
-        hashed_state: &mut HashedPostState,
-    ) -> ProviderResult<()> {
-        self.historical.extend_hashed_post_state_with_storage_zeros(bundle_state, hashed_state)?;
+    fn hashed_post_state(&self, bundle_state: &BundleState) -> ProviderResult<HashedPostState> {
+        let mut hashed_state = self.historical.hashed_post_state(bundle_state)?;
 
         for (address, account) in bundle_state.state() {
             if !account.was_destroyed() || account.info.is_none() {
@@ -239,9 +229,11 @@ impl<N: NodePrimitives> StateProvider for MemoryOverlayStateProviderRef<'_, N> {
             }
         }
 
-        Ok(())
+        Ok(hashed_state)
     }
+}
 
+impl<N: NodePrimitives> StateProvider for MemoryOverlayStateProviderRef<'_, N> {
     fn storage(
         &self,
         address: Address,
@@ -317,7 +309,7 @@ mod tests {
     use super::*;
     use reth_ethereum_primitives::EthPrimitives;
     use reth_storage_api::noop::NoopProvider;
-    use reth_trie::{ComputedTrieData, KeccakKeyHasher, LazyTrieData, SortedTrieData};
+    use reth_trie::{ComputedTrieData, LazyTrieData, SortedTrieData};
     use revm::database::{states::StorageSlot, AccountStatus, BundleAccount};
     use std::sync::Arc;
 
@@ -359,12 +351,7 @@ mod tests {
                 AccountStatus::DestroyedChanged,
             ),
         );
-        let mut hashed_state =
-            HashedPostState::from_bundle_state::<KeccakKeyHasher>(bundle_state.state());
-
-        provider
-            .extend_hashed_post_state_with_storage_zeros(&bundle_state, &mut hashed_state)
-            .unwrap();
+        let hashed_state = provider.hashed_post_state(&bundle_state).unwrap();
 
         let storage = &hashed_state.storages[&hashed_address];
         assert!(!storage.wiped);

@@ -40,7 +40,6 @@ macro_rules! delegate_provider_impls {
                 fn canonical_hashes_range(&self, start: alloy_primitives::BlockNumber, end: alloy_primitives::BlockNumber) -> reth_storage_api::errors::provider::ProviderResult<Vec<alloy_primitives::B256>>;
             }
             StateProvider $(where [$($generics)*])? {
-                fn extend_hashed_post_state_with_storage_zeros(&self, bundle_state: &revm::database::BundleState, hashed_state: &mut reth_trie::HashedPostState) -> reth_storage_api::errors::provider::ProviderResult<()>;
                 fn storage(&self, account: alloy_primitives::Address, storage_key: alloy_primitives::StorageKey) -> reth_storage_api::errors::provider::ProviderResult<Option<alloy_primitives::StorageValue>>;
             }
             BytecodeReader $(where [$($generics)*])? {
@@ -63,7 +62,7 @@ macro_rules! delegate_provider_impls {
                 fn witness(&self, input: reth_trie::TrieInput, target: reth_trie::HashedPostState, mode: reth_trie::ExecutionWitnessMode) -> reth_storage_api::errors::provider::ProviderResult<Vec<alloy_primitives::Bytes>>;
             }
             HashedPostStateProvider $(where [$($generics)*])? {
-                fn hashed_post_state(&self, bundle_state: &revm::database::BundleState) -> reth_trie::HashedPostState;
+                fn hashed_post_state(&self, bundle_state: &revm::database::BundleState) -> reth_storage_api::errors::provider::ProviderResult<reth_trie::HashedPostState>;
             }
         );
     }

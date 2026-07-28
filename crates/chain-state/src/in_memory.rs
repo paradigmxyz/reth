@@ -1086,8 +1086,8 @@ mod tests {
         fn hashed_post_state(
             &self,
             _bundle_state: &revm::database::BundleState,
-        ) -> HashedPostState {
-            HashedPostState::default()
+        ) -> ProviderResult<HashedPostState> {
+            Ok(HashedPostState::default())
         }
     }
 

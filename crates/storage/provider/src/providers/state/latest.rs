@@ -252,30 +252,27 @@ impl<Provider: DBProvider + StorageSettingsCache> StateProofProvider
 }
 
 impl<Provider: DBProvider> HashedPostStateProvider for LatestStateProviderRef<'_, Provider> {
-    fn hashed_post_state(&self, bundle_state: &revm::database::BundleState) -> HashedPostState {
-        HashedPostState::from_bundle_state::<KeccakKeyHasher>(bundle_state.state())
-    }
-}
-
-impl<Provider: DBProvider + BlockHashReader + StorageSettingsCache> StateProvider
-    for LatestStateProviderRef<'_, Provider>
-{
-    fn extend_hashed_post_state_with_storage_zeros(
+    fn hashed_post_state(
         &self,
         bundle_state: &revm::database::BundleState,
-        hashed_state: &mut HashedPostState,
-    ) -> ProviderResult<()> {
+    ) -> ProviderResult<HashedPostState> {
+        let mut hashed_state =
+            HashedPostState::from_bundle_state::<KeccakKeyHasher>(bundle_state.state());
         zero_destroyed_account_storage(
             &reth_trie_db::DatabaseHashedCursorFactory::new(self.tx()),
             bundle_state
                 .state()
                 .iter()
                 .filter(|(_, account)| account.was_destroyed() && account.info.is_some()),
-            hashed_state,
-        )
-        .map_err(Into::into)
+            &mut hashed_state,
+        )?;
+        Ok(hashed_state)
     }
+}
 
+impl<Provider: DBProvider + BlockHashReader + StorageSettingsCache> StateProvider
+    for LatestStateProviderRef<'_, Provider>
+{
     /// Get storage by plain (unhashed) storage key slot.
     fn storage(
         &self,

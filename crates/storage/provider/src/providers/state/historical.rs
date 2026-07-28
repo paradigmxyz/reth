@@ -638,11 +638,44 @@ where
 
 impl<Provider, N> HashedPostStateProvider for HistoricalStateProviderRef<'_, Provider, N>
 where
-    Provider: NodePrimitivesProvider<Primitives = N>,
+    Provider: DBProvider
+        + ChangeSetReader
+        + StorageChangeSetReader
+        + BlockNumReader
+        + BlockHashReader
+        + PruneCheckpointReader
+        + StageCheckpointReader
+        + StorageSettingsCache
+        + NodePrimitivesProvider<Primitives = N>,
     N: NodePrimitives,
 {
-    fn hashed_post_state(&self, bundle_state: &revm::database::BundleState) -> HashedPostState {
-        HashedPostState::from_bundle_state::<KeccakKeyHasher>(bundle_state.state())
+    fn hashed_post_state(
+        &self,
+        bundle_state: &revm::database::BundleState,
+    ) -> ProviderResult<HashedPostState> {
+        let mut hashed_state =
+            HashedPostState::from_bundle_state::<KeccakKeyHasher>(bundle_state.state());
+        if !bundle_state
+            .state()
+            .values()
+            .any(|account| account.was_destroyed() && account.info.is_some())
+        {
+            return Ok(hashed_state)
+        }
+
+        let historical = self.build_overlay(TrieInputSorted::default())?.state;
+        zero_destroyed_account_storage(
+            &HashedPostStateCursorFactory::new(
+                reth_trie_db::DatabaseHashedCursorFactory::new(self.tx()),
+                historical.as_ref(),
+            ),
+            bundle_state
+                .state()
+                .iter()
+                .filter(|(_, account)| account.was_destroyed() && account.info.is_some()),
+            &mut hashed_state,
+        )?;
+        Ok(hashed_state)
     }
 }
 
@@ -660,34 +693,6 @@ where
         + NodePrimitivesProvider<Primitives = N>,
     N: NodePrimitives,
 {
-    fn extend_hashed_post_state_with_storage_zeros(
-        &self,
-        bundle_state: &revm::database::BundleState,
-        hashed_state: &mut HashedPostState,
-    ) -> ProviderResult<()> {
-        if !bundle_state
-            .state()
-            .values()
-            .any(|account| account.was_destroyed() && account.info.is_some())
-        {
-            return Ok(())
-        }
-
-        let historical = self.build_overlay(TrieInputSorted::default())?.state;
-        zero_destroyed_account_storage(
-            &HashedPostStateCursorFactory::new(
-                reth_trie_db::DatabaseHashedCursorFactory::new(self.tx()),
-                historical.as_ref(),
-            ),
-            bundle_state
-                .state()
-                .iter()
-                .filter(|(_, account)| account.was_destroyed() && account.info.is_some()),
-            hashed_state,
-        )
-        .map_err(Into::into)
-    }
-
     /// Expects a plain (unhashed) storage key slot.
     fn storage(
         &self,
@@ -1539,10 +1544,7 @@ mod tests {
             ),
         );
         let provider = HistoricalStateProviderRef::new(&db, 1, ChangesetCache::new());
-        let mut hashed_state = provider.hashed_post_state(&destroyed_bundle);
-        provider
-            .extend_hashed_post_state_with_storage_zeros(&destroyed_bundle, &mut hashed_state)
-            .unwrap();
+        let hashed_state = provider.hashed_post_state(&destroyed_bundle).unwrap();
 
         assert_eq!(
             hashed_state.storages[&hashed_address].storage[&keccak256(B256::from(slot))],

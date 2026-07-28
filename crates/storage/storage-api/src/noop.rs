@@ -39,7 +39,7 @@ use reth_stages_types::{StageCheckpoint, StageId};
 use reth_storage_errors::provider::{ProviderError, ProviderResult};
 use reth_trie_common::{
     updates::TrieUpdates, AccountProof, ExecutionWitnessMode, HashedPostState, HashedStorage,
-    MultiProof, MultiProofTargets, StorageMultiProof, StorageProof, TrieInput,
+    KeccakKeyHasher, MultiProof, MultiProofTargets, StorageMultiProof, StorageProof, TrieInput,
 };
 
 /// Supports various api interfaces for testing purposes.
@@ -534,8 +534,11 @@ impl<C: Send + Sync, N: NodePrimitives> StateProofProvider for NoopProvider<C, N
 }
 
 impl<C: Send + Sync, N: NodePrimitives> HashedPostStateProvider for NoopProvider<C, N> {
-    fn hashed_post_state(&self, _bundle_state: &revm::database::BundleState) -> HashedPostState {
-        HashedPostState::default()
+    fn hashed_post_state(
+        &self,
+        bundle_state: &revm::database::BundleState,
+    ) -> ProviderResult<HashedPostState> {
+        Ok(HashedPostState::from_bundle_state::<KeccakKeyHasher>(bundle_state.state()))
     }
 }
 
@@ -551,14 +554,6 @@ impl<C: Send + Sync, N: NodePrimitives> StateReader for NoopProvider<C, N> {
 }
 
 impl<C: Send + Sync, N: NodePrimitives> StateProvider for NoopProvider<C, N> {
-    fn extend_hashed_post_state_with_storage_zeros(
-        &self,
-        _bundle_state: &revm::database::BundleState,
-        _hashed_state: &mut HashedPostState,
-    ) -> ProviderResult<()> {
-        Ok(())
-    }
-
     fn storage(
         &self,
         _account: Address,

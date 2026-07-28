@@ -141,20 +141,15 @@ impl reth_storage_api::BlockHashReader for StateProviderTraitObjWrapper {
 }
 
 impl HashedPostStateProvider for StateProviderTraitObjWrapper {
-    fn hashed_post_state(&self, bundle_state: &BundleState) -> reth_trie::HashedPostState {
+    fn hashed_post_state(
+        &self,
+        bundle_state: &BundleState,
+    ) -> ProviderResult<reth_trie::HashedPostState> {
         self.0.hashed_post_state(bundle_state)
     }
 }
 
 impl StateProvider for StateProviderTraitObjWrapper {
-    fn extend_hashed_post_state_with_storage_zeros(
-        &self,
-        bundle_state: &BundleState,
-        hashed_state: &mut reth_trie::HashedPostState,
-    ) -> reth_errors::ProviderResult<()> {
-        self.0.extend_hashed_post_state_with_storage_zeros(bundle_state, hashed_state)
-    }
-
     fn storage(
         &self,
         account: Address,

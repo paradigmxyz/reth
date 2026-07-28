@@ -168,14 +168,6 @@ impl<S: AccountReader> AccountReader for InstrumentedStateProvider<S> {
 }
 
 impl<S: StateProvider> StateProvider for InstrumentedStateProvider<S> {
-    fn extend_hashed_post_state_with_storage_zeros(
-        &self,
-        bundle_state: &reth_revm::db::BundleState,
-        hashed_state: &mut HashedPostState,
-    ) -> ProviderResult<()> {
-        self.state_provider.extend_hashed_post_state_with_storage_zeros(bundle_state, hashed_state)
-    }
-
     fn storage(
         &self,
         account: Address,
@@ -305,7 +297,10 @@ impl<S: BlockHashReader> BlockHashReader for InstrumentedStateProvider<S> {
 }
 
 impl<S: HashedPostStateProvider> HashedPostStateProvider for InstrumentedStateProvider<S> {
-    fn hashed_post_state(&self, bundle_state: &reth_revm::db::BundleState) -> HashedPostState {
+    fn hashed_post_state(
+        &self,
+        bundle_state: &reth_revm::db::BundleState,
+    ) -> ProviderResult<HashedPostState> {
         self.state_provider.hashed_post_state(bundle_state)
     }
 }
