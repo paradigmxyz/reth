@@ -2,7 +2,7 @@ use alloy_consensus::{constants::KECCAK_EMPTY, transaction::TxHashRef, BlockHead
 use alloy_eips::{eip2718::Encodable2718, BlockId, BlockNumberOrTag};
 use alloy_evm::{env::BlockEnvironment, Evm};
 use alloy_genesis::ChainConfig;
-use alloy_primitives::{hex::decode, keccak256, uint, Address, Bytes, B256, U64};
+use alloy_primitives::{hex::decode, uint, Address, Bytes, B256, U64};
 use alloy_rlp::{Decodable, Encodable};
 use alloy_rpc_types::BlockTransactionsKind;
 use alloy_rpc_types_debug::ExecutionWitness;
@@ -656,16 +656,7 @@ where
             .get(&address)
             .and_then(|account| {
                 account.account.as_ref().map(|plain_account| {
-                    (
-                        HashedStorage::from_iter(
-                            false,
-                            plain_account
-                                .storage
-                                .iter()
-                                .map(|(key, value)| (keccak256(B256::from(*key)), *value)),
-                        ),
-                        account.status,
-                    )
+                    (HashedStorage::from_plain_storage(&plain_account.storage), account.status)
                 })
             })
             .unwrap_or_default();
@@ -1316,7 +1307,7 @@ fn account_storage_root(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy_primitives::U256;
+    use alloy_primitives::{keccak256, U256};
     use reth_db_api::{tables, transaction::DbTxMut};
     use reth_primitives_traits::StorageEntry;
     use reth_provider::test_utils::create_test_provider_factory;
@@ -1347,7 +1338,7 @@ mod tests {
 
         let provider = factory.latest().unwrap();
         let cached_storage =
-            HashedStorage::from_iter(false, [(new_slot, new_value), (zero_slot, U256::ZERO)]);
+            HashedStorage::from_iter([(new_slot, new_value), (zero_slot, U256::ZERO)]);
 
         let destroyed_root = account_storage_root(
             provider.as_ref(),

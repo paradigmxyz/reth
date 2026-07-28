@@ -174,7 +174,7 @@ mod tests {
         let provider = ExpandedStateProvider(
             HashedPostState::default().with_accounts([(hashed_address, None)]).with_storages([(
                 hashed_address,
-                HashedStorage::from_iter(false, [(hashed_slot, U256::ZERO)]),
+                HashedStorage::from_iter([(hashed_slot, U256::ZERO)]),
             )]),
         );
 

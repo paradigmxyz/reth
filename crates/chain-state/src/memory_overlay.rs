@@ -326,7 +326,7 @@ mod tests {
 
         let parent_hashed_state = HashedPostState::default().with_storages([(
             hashed_address,
-            HashedStorage::from_iter(false, [(hashed_parent_slot, parent_value)]),
+            HashedStorage::from_iter([(hashed_parent_slot, parent_value)]),
         )]);
         let parent = ExecutedBlock::<EthPrimitives> {
             trie_data: LazyTrieData::ready(ComputedTrieData {
