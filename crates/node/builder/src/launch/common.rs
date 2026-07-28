@@ -168,15 +168,14 @@ impl LaunchContext {
 
         Self::save_pruning_config(&mut toml_config, config, &config_path)?;
 
-        info!(target: "reth::cli", path = ?config_path, "Configuration loaded");
-
         // Update the config with the command line arguments. Only override when the CLI flag is
         // set, so the TOML value is preserved when the flag is not passed.
         toml_config.peers.trusted_nodes_only |= config.network.trusted_only;
 
         // Merge static file CLI arguments with config file, giving priority to CLI
-        toml_config.static_files =
-            config.static_files.merge_with_config(toml_config.static_files, config.pruning.minimal);
+        Self::save_static_files_config(&mut toml_config, config, &config_path)?;
+
+        info!(target: "reth::cli", path = ?config_path, "Configuration loaded");
 
         Ok(toml_config)
     }
@@ -204,6 +203,27 @@ impl LaunchContext {
 
         if should_save {
             info!(target: "reth::cli", "Saving prune config to toml file");
+            reth_config.save(config_path.as_ref())?;
+        }
+
+        Ok(())
+    }
+
+    /// Save static files config to the toml file if custom static file CLI arguments are provided.
+    fn save_static_files_config<ChainSpec>(
+        reth_config: &mut reth_config::Config,
+        config: &NodeConfig<ChainSpec>,
+        config_path: impl AsRef<std::path::Path>,
+    ) -> eyre::Result<()>
+    where
+        ChainSpec: EthChainSpec + reth_chainspec::EthereumHardforks,
+    {
+        let static_files_config =
+            config.static_files.merge_with_config(reth_config.static_files, config.pruning.minimal);
+
+        if reth_config.static_files != static_files_config {
+            reth_config.static_files = static_files_config;
+            info!(target: "reth::cli", "Saving static files config to toml file");
             reth_config.save(config_path.as_ref())?;
         }
 
@@ -1339,8 +1359,11 @@ pub fn metrics_hooks<N: NodeTypesWithDB>(provider_factory: &ProviderFactory<N>) 
 #[cfg(test)]
 mod tests {
     use super::{LaunchContext, NodeConfig};
-    use reth_config::Config;
-    use reth_node_core::args::PruningArgs;
+    use reth_config::{
+        config::{BlocksPerFileConfig, StaticFilesConfig},
+        Config,
+    };
+    use reth_node_core::args::{PruningArgs, StaticFilesArgs};
 
     const EXTENSION: &str = "toml";
 
@@ -1390,6 +1413,34 @@ mod tests {
             let loaded_config = Config::from_path(config_path).unwrap();
 
             assert_eq!(reth_config, loaded_config);
+        })
+    }
+
+    #[test]
+    fn test_save_static_files_config() {
+        with_tempdir("static-files-store-test", |config_path| {
+            let mut reth_config = Config::default();
+            let node_config = NodeConfig {
+                static_files: StaticFilesArgs {
+                    blocks_per_file_headers: Some(50_000),
+                    ..Default::default()
+                },
+                ..NodeConfig::test()
+            };
+
+            LaunchContext::save_static_files_config(&mut reth_config, &node_config, config_path)
+                .unwrap();
+
+            let loaded_config = Config::from_path(config_path).unwrap();
+            let expected = StaticFilesConfig {
+                blocks_per_file: BlocksPerFileConfig {
+                    headers: Some(50_000),
+                    ..Default::default()
+                },
+            };
+
+            assert_eq!(reth_config.static_files, expected);
+            assert_eq!(loaded_config.static_files, expected);
         })
     }
 }
