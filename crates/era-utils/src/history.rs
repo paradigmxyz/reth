@@ -27,8 +27,8 @@ use reth_primitives_traits::{
     Block, BlockBody, FullBlockBody, FullBlockHeader, NodePrimitives, Receipt,
 };
 use reth_provider::{
-    providers::StaticFileProviderRWRefMut, BlockReader, BlockWriter, StaticFileProviderFactory,
-    StaticFileSegment, StaticFileWriter,
+    providers::StaticFileProviderRWRefMut, BlockReader, BlockWriter, EitherWriter,
+    EitherWriterDestination, StaticFileProviderFactory, StaticFileSegment, StaticFileWriter,
 };
 use reth_stages_types::{
     CheckpointBlockRange, EntitiesCheckpoint, HeadersCheckpoint, StageCheckpoint, StageId,
@@ -36,7 +36,7 @@ use reth_stages_types::{
 use reth_storage_api::{
     errors::{ProviderError, ProviderResult},
     BlockBodyIndicesProvider, BlockHashReader, DBProvider, DatabaseProviderFactory,
-    NodePrimitivesProvider, StageCheckpointReader, StageCheckpointWriter,
+    NodePrimitivesProvider, StageCheckpointReader, StageCheckpointWriter, StorageSettingsCache,
 };
 use std::{collections::Bound, error::Error, ops::RangeBounds, sync::mpsc};
 use tracing::info;
@@ -259,7 +259,8 @@ where
             + BlockHashReader
             + StaticFileProviderFactory<Primitives: NodePrimitives<Block = B, BlockHeader = BH, BlockBody = BB>>
             + StageCheckpointReader
-            + StageCheckpointWriter,
+            + StageCheckpointWriter
+            + StorageSettingsCache,
     > + StaticFileProviderFactory<Primitives = <<PF as DatabaseProviderFactory>::ProviderRW as NodePrimitivesProvider>::Primitives>,
     ReceiptOf<<PF as DatabaseProviderFactory>::ProviderRW>: Compact + Receipt,
 {
@@ -297,6 +298,20 @@ where
     let receipts_target = store_receipts
         .then(|| -> eyre::Result<_> {
             let provider = provider_factory.database_provider_rw()?;
+
+            // Writing the segment under a config that routes receipts to the database would leave
+            // two sources and keep data the prune config wants dropped.
+            if !matches!(
+                EitherWriter::receipts_destination(&provider),
+                EitherWriterDestination::StaticFile
+            ) {
+                eyre::bail!(
+                    "receipt import writes the Receipts static file segment, but this node's \
+                     prune configuration keeps receipts elsewhere. Remove the receipt pruning \
+                     configuration, or import without receipts"
+                );
+            }
+
             let target = provider
                 .get_stage_checkpoint(StageId::Execution)?
                 .map(|checkpoint| checkpoint.block_number)
@@ -854,6 +869,7 @@ mod tests {
         test_utils::create_test_provider_factory, DatabaseProviderFactory, ReceiptProvider,
         StageCheckpointReader, StaticFileProviderFactory, StaticFileSegment, StaticFileWriter,
     };
+    use reth_prune_types::{PruneMode, PruneModes, ReceiptsLogPruneConfig};
     use std::{cell::Cell, path::Path};
     use tempfile::tempdir;
 
@@ -1092,6 +1108,36 @@ mod tests {
             &pf,
             &mut hash_collector,
             Some(1),
+            true,
+            &|_| true,
+        );
+
+        assert!(result.is_err());
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn receipt_import_rejects_a_prune_config_that_bypasses_static_files() {
+        let prune_modes = PruneModes {
+            receipts_log_filter: ReceiptsLogPruneConfig(
+                std::iter::once((Address::ZERO, PruneMode::Full)).collect(),
+            ),
+            ..Default::default()
+        };
+        let pf = create_test_provider_factory().with_prune_modes(prune_modes);
+        init_genesis(&pf).unwrap();
+        let folder = tempdir().unwrap();
+        let mut hash_collector = Collector::new(4096, Some(folder.path().to_owned()));
+
+        let provider = pf.database_provider_rw().unwrap();
+        provider.save_stage_checkpoint(StageId::Execution, StageCheckpoint::new(2)).unwrap();
+        provider.commit().unwrap();
+
+        let stream = futures_util::stream::iter(vec![Ok(TestMeta { marked: Cell::new(false) })]);
+        let result = import::<TestEraWithEmptyReceipts, _, _, _, Block, _, _>(
+            stream,
+            &pf,
+            &mut hash_collector,
+            None,
             true,
             &|_| true,
         );
