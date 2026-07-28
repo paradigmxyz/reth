@@ -627,11 +627,6 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
         &self,
         input: &SaveBlocksInput<N::Primitives>,
     ) -> ProviderResult<()> {
-        if input.is_empty() {
-            debug!(target: "providers::db", "Attempted to write empty persistence ranges");
-            return Ok(())
-        }
-
         let (db_tip, partial_state_trie) = self
             .get_stage_checkpoint(StageId::Finish)?
             .map(|checkpoint| {

@@ -2300,7 +2300,7 @@ mod forkchoice_updated_tests {
                 }
                 sender
                     .send(PersistenceResult {
-                        last_block: input.last_block(),
+                        last_block: Some(input.last_block()),
                         commit_duration: Some(Duration::ZERO),
                     })
                     .unwrap();
