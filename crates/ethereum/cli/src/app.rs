@@ -100,10 +100,7 @@ where
         ) -> Result<()>,
     ) -> Result<()>
     where
-        N: CliNodeTypes<
-            Primitives: NodePrimitives<BlockHeader: HeaderMut, Receipt: 'static>,
-            ChainSpec: Hardforks,
-        >,
+        N: CliNodeTypes<Primitives: NodePrimitives<BlockHeader: HeaderMut>, ChainSpec: Hardforks>,
         C: ChainSpecParser<ChainSpec = N::ChainSpec>,
     {
         let runner = match self.runner.take() {
@@ -174,10 +171,7 @@ where
     C: ChainSpecParser<ChainSpec = N::ChainSpec>,
     Ext: clap::Args + fmt::Debug,
     Rpc: RpcModuleValidator,
-    N: CliNodeTypes<
-        Primitives: NodePrimitives<BlockHeader: HeaderMut, Receipt: 'static>,
-        ChainSpec: Hardforks,
-    >,
+    N: CliNodeTypes<Primitives: NodePrimitives<BlockHeader: HeaderMut>, ChainSpec: Hardforks>,
     SubCmd: ExtendedCommand + Subcommand + fmt::Debug,
 {
     let rt = runner.runtime();

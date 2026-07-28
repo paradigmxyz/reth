@@ -17,11 +17,10 @@ use crate::{
     },
     e2s::{error::E2sError, types::Entry},
 };
-use alloy_consensus::{Block, BlockBody, Eip658Value, Header, TxType};
+use alloy_consensus::{Block, BlockBody, Eip658Value, Header, Receipt, ReceiptEnvelope, TxType};
 use alloy_primitives::{Log, B256, U256};
 use alloy_rlp::{Decodable, Encodable, RlpDecodable, RlpEncodable};
 use sha2::{Digest, Sha256};
-use std::any::Any;
 
 // ERE-specific constants
 /// `CompressedHeader` record type
@@ -261,24 +260,14 @@ pub struct SlimReceipt {
     pub logs: Vec<Log>,
 }
 
-impl From<SlimReceipt> for reth_ethereum_primitives::Receipt {
+impl From<SlimReceipt> for ReceiptEnvelope {
+    /// Restores the bloom that the slim form omits, recomputing it from the logs.
     fn from(receipt: SlimReceipt) -> Self {
-        Self {
-            tx_type: receipt.tx_type,
-            success: receipt.status.coerce_status(),
-            cumulative_gas_used: receipt.cumulative_gas_used,
-            logs: receipt.logs,
-        }
-    }
-}
+        let SlimReceipt { tx_type, status, cumulative_gas_used, logs } = receipt;
+        let receipt = Receipt { status, cumulative_gas_used, logs };
 
-/// Converts a decoded `.ere` slim receipt into a node's receipt type, if supported.
-///
-/// Downcasts instead of requiring `R: From<SlimReceipt>`, so node types other than
-/// [`reth_ethereum_primitives::Receipt`] aren't forced to implement a conversion they'll never use.
-pub fn try_receipt_from_slim<R: 'static>(receipt: SlimReceipt) -> Option<R> {
-    let receipt: reth_ethereum_primitives::Receipt = receipt.into();
-    (Box::new(receipt) as Box<dyn Any>).downcast::<R>().ok().map(|r| *r)
+        Self::from_typed(tx_type, receipt.with_bloom())
+    }
 }
 
 /// Proof type discriminant used inside the Proof entry's RLP envelope.

@@ -12,7 +12,6 @@ use reth_era_utils as era;
 use reth_etl::Collector;
 use reth_fs_util as fs;
 use reth_node_core::version::version_metadata;
-use reth_primitives_traits::NodePrimitives;
 use reth_provider::StaticFileProviderFactory;
 use reth_static_file_types::StaticFileSegment;
 use std::{path::PathBuf, sync::Arc};
@@ -84,7 +83,6 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> ImportEraC
     pub async fn execute<N>(self, runtime: reth_tasks::Runtime) -> eyre::Result<()>
     where
         N: CliNodeTypes<ChainSpec = C::ChainSpec>,
-        <N::Primitives as NodePrimitives>::Receipt: 'static,
     {
         info!(target: "reth::cli", "reth {} starting", version_metadata().short_version);
 

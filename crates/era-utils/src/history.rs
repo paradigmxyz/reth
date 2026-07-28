@@ -1,7 +1,9 @@
 use alloy_consensus::{
-    proofs::calculate_receipt_root, BlockHeader, Eip658Value, ReceiptEnvelope, TxReceipt,
+    proofs::calculate_receipt_root, BlockHeader, Eip658Value, ReceiptEnvelope, ReceiptWithBloom,
+    RlpDecodableReceipt, TxReceipt,
 };
 use alloy_primitives::{BlockHash, BlockNumber, Bloom, U256};
+use alloy_rlp::Decodable;
 use futures_util::{Stream, StreamExt};
 use reth_codecs::Compact;
 use reth_db_api::{
@@ -16,10 +18,7 @@ use reth_era::{
     e2s::error::E2sError,
     era::{file::EraReader, types::consensus::CompressedSignedBeaconBlock},
     era1::{file::Era1Reader, types::execution::BlockTuple},
-    ere::{
-        file::EreReader,
-        types::execution::{try_receipt_from_slim, BlockTuple as EreBlockTuple, SlimReceipt},
-    },
+    ere::{file::EreReader, types::execution::BlockTuple as EreBlockTuple},
 };
 use reth_era_downloader::EraMeta;
 use reth_etl::Collector;
@@ -70,7 +69,7 @@ impl<BH, BB, R> EraBlockReader<BH, BB, R> for Era1
 where
     BH: FullBlockHeader + Value,
     BB: FullBlockBody<OmmerHeader = BH>,
-    R: 'static,
+    R: RlpDecodableReceipt,
 {
     fn blocks<M: EraMeta + ?Sized>(
         meta: &M,
@@ -87,7 +86,7 @@ impl<BH, BB, R> EraBlockReader<BH, BB, R> for Ere
 where
     BH: FullBlockHeader + Value,
     BB: FullBlockBody<OmmerHeader = BH>,
-    R: 'static,
+    R: RlpDecodableReceipt,
 {
     fn blocks<M: EraMeta + ?Sized>(
         meta: &M,
@@ -128,28 +127,18 @@ impl Ere {
     where
         BH: FullBlockHeader + Value,
         BB: FullBlockBody<OmmerHeader = BH>,
-        R: 'static,
+        R: RlpDecodableReceipt,
         E: From<E2sError> + Error + Send + Sync + 'static,
     {
         let block = block?;
         let header: BH = block.header.decode()?;
         let body: BB = block.body.decode()?;
+        let number = header.number();
         let receipts = decode_receipts
             .then(|| block.receipts.as_ref().map(|r| r.decode_receipts()))
             .flatten()
             .transpose()?
-            .map(|slim| {
-                slim.into_iter()
-                    .map(|receipt| {
-                        try_receipt_from_slim(receipt).ok_or_else(|| {
-                            eyre::eyre!(
-                                "`.ere` receipts import is not supported for this node's \
-                                 receipt type"
-                            )
-                        })
-                    })
-                    .collect::<eyre::Result<Vec<R>>>()
-            })
+            .map(|slim| receipts_from_envelopes(number, slim.into_iter().map(Into::into).collect()))
             .transpose()?;
 
         Ok((header, body, receipts))
@@ -465,7 +454,7 @@ pub fn decode_with_receipts<BH, BB, R, E>(
 where
     BH: FullBlockHeader + Value,
     BB: FullBlockBody<OmmerHeader = BH>,
-    R: 'static,
+    R: RlpDecodableReceipt,
     E: From<E2sError> + Error + Send + Sync + 'static,
 {
     let block = block?;
@@ -474,48 +463,49 @@ where
     let number = header.number();
     let receipts = decode_receipts
         .then(|| -> eyre::Result<_> {
-            // `Eip658Value` also covers the pre-Byzantium post-state root, which the node's
-            // boolean status can't decode.
-            let receipts: Vec<ReceiptEnvelope> = block.receipts.decode()?;
-            receipts
-                .into_iter()
-                .map(|envelope| receipt_from_envelope(number, envelope))
-                .collect::<eyre::Result<Vec<R>>>()
+            match block.receipts.decode::<Vec<ReceiptWithBloom<R>>>() {
+                Ok(receipts) => {
+                    Ok(receipts.into_iter().map(|with_bloom| with_bloom.receipt).collect())
+                }
+                // A status field holding a post-state root doesn't fit the node's receipt type, so
+                // re-read the entry to tell that apart from a genuinely malformed one.
+                Err(err) => match block.receipts.decode::<Vec<ReceiptEnvelope>>() {
+                    Ok(envelopes) => receipts_from_envelopes(number, envelopes),
+                    Err(_) => Err(err.into()),
+                },
+            }
         })
         .transpose()?;
 
     Ok((header, body, receipts))
 }
 
-/// Converts an `.era1` receipt into the node's receipt type.
+/// Converts decoded ERA receipts into the node's receipt type.
 ///
-/// Pre-Byzantium receipts carry a post-state root instead of a status, which a boolean-only receipt
-/// type can't represent.
-fn receipt_from_envelope<R: 'static>(
+/// Rebuilds them through their canonical encoding, the only construction path every node receipt
+/// type supports. Receipts predating Byzantium are rejected: they commit to a post-state root
+/// rather than a success status, and nothing else in the file records whether the transaction
+/// succeeded, so no node receipt type can represent them.
+fn receipts_from_envelopes<R: RlpDecodableReceipt>(
     number: BlockNumber,
-    envelope: ReceiptEnvelope,
-) -> eyre::Result<R> {
-    let tx_type = envelope.tx_type();
-    let receipt = envelope.into_receipt();
-
-    if matches!(receipt.status, Eip658Value::PostState(_)) {
-        eyre::bail!(
-            "block {number} has pre-Byzantium receipts, which commit to a post-state root rather \
-             than a success status and so cannot be represented by this node's receipt type; \
-             receipt import is only supported from Byzantium onwards"
-        );
+    envelopes: Vec<ReceiptEnvelope>,
+) -> eyre::Result<Vec<R>> {
+    for envelope in &envelopes {
+        if matches!(envelope.status_or_post_state(), Eip658Value::PostState(_)) {
+            eyre::bail!(
+                "block {number} has pre-Byzantium receipts, which commit to a post-state root \
+                 rather than a success status and so cannot be represented by this node's receipt \
+                 type. Receipt import is only supported from Byzantium onwards"
+            );
+        }
     }
 
-    // Reuses the `.ere` conversion, which takes the same four fields.
-    try_receipt_from_slim(SlimReceipt {
-        tx_type,
-        status: receipt.status,
-        cumulative_gas_used: receipt.cumulative_gas_used,
-        logs: receipt.logs,
-    })
-    .ok_or_else(|| {
-        eyre::eyre!("`.era1` receipts import is not supported for this node's receipt type")
-    })
+    let encoded = alloy_rlp::encode(&envelopes);
+
+    Ok(Vec::<ReceiptWithBloom<R>>::decode(&mut encoded.as_slice())?
+        .into_iter()
+        .map(|with_bloom| with_bloom.receipt)
+        .collect())
 }
 
 /// Extracts block headers, bodies and (optionally) receipts from `iter` and appends them using
