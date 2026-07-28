@@ -69,17 +69,6 @@ impl<F, N: NodePrimitives> OverlayStateProviderFactory<F, N> {
         }
     }
 
-    /// Sets an immediate hashed-state and trie-updates overlay.
-    pub fn with_immediate_state_trie_overlay(
-        mut self,
-        state: Arc<HashedPostStateSorted>,
-        trie: Arc<TrieUpdatesSorted>,
-    ) -> Self {
-        self.overlay_builder = self.overlay_builder.with_immediate_state_trie_overlay(state, trie);
-        self.overlay_cache = Default::default();
-        self
-    }
-
     /// Skips managed overlay construction when this factory is used by a task that reused a sparse
     /// trie covering both durable frontiers through the parent.
     pub fn with_skip_overlay_for_reused_sparse_trie(mut self, anchor_hash: B256) -> Self {
