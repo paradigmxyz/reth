@@ -768,8 +768,10 @@ where
                     state.merge_transitions(BundleRetention::PlainState);
                     // Compute state root from the accumulated state changes
                     let hashed_state = state.database.hashed_post_state(&state.bundle_state);
-                    let root =
-                        state.database.state_root(hashed_state).map_err(Eth::Error::from_eth_err)?;
+                    let root = state
+                        .database
+                        .state_root(hashed_state)
+                        .map_err(Eth::Error::from_eth_err)?;
                     roots.push(root);
                 }
 
