@@ -2,7 +2,7 @@ use alloy_consensus::{constants::KECCAK_EMPTY, transaction::TxHashRef, BlockHead
 use alloy_eips::{eip2718::Encodable2718, BlockId, BlockNumberOrTag};
 use alloy_evm::{env::BlockEnvironment, Evm};
 use alloy_genesis::ChainConfig;
-use alloy_primitives::{hex::decode, uint, Address, Bytes, B256, U64};
+use alloy_primitives::{hex::decode, keccak256, uint, Address, Bytes, B256, U64};
 use alloy_rlp::{Decodable, Encodable};
 use alloy_rpc_types::BlockTransactionsKind;
 use alloy_rpc_types_debug::ExecutionWitness;
@@ -18,7 +18,7 @@ use jsonrpsee::core::RpcResult;
 use parking_lot::RwLock;
 use reth_chainspec::{ChainSpecProvider, EthChainSpec, EthereumHardforks};
 use reth_engine_primitives::ConsensusEngineEvent;
-use reth_errors::RethError;
+use reth_errors::{ProviderResult, RethError};
 use reth_evm::{block::BlockExecutor, execute::Executor, ConfigureEvm, EvmEnvFor};
 use reth_primitives_traits::{
     Block as BlockTrait, BlockBody, BlockTy, ReceiptWithBloom, RecoveredBlock,
@@ -40,9 +40,13 @@ use reth_storage_api::{
 use reth_tasks::{pool::BlockingTaskGuard, Runtime};
 use reth_transaction_pool::TransactionPool;
 use reth_trie_common::{
-    updates::TrieUpdates, ExecutionWitnessMode, HashedPostState, HashedStorage,
+    root::storage_root_unsorted, updates::TrieUpdates, ExecutionWitnessMode, HashedPostState,
+    HashedStorage,
 };
-use revm::{database::states::bundle_state::BundleRetention, Database, DatabaseCommit};
+use revm::{
+    database::{states::bundle_state::BundleRetention, AccountStatus},
+    Database, DatabaseCommit,
+};
 use revm_inspectors::tracing::{DebugInspector, TransactionContext};
 use serde::{Deserialize, Serialize};
 use std::{collections::VecDeque, sync::Arc};
@@ -641,18 +645,27 @@ where
         let balance = account.balance;
         let nonce = account.nonce;
         let code_hash = account.code_hash;
-        let hashed_storage = db
+        let (hashed_storage, status) = db
             .cache
             .accounts
             .get(&address)
             .and_then(|account| {
                 account.account.as_ref().map(|plain_account| {
-                    HashedStorage::from_plain_storage(account.status, plain_account.storage.iter())
+                    (
+                        HashedStorage::from_iter(
+                            false,
+                            plain_account
+                                .storage
+                                .iter()
+                                .map(|(key, value)| (keccak256(B256::from(*key)), *value)),
+                        ),
+                        account.status,
+                    )
                 })
             })
             .unwrap_or_default();
-        let storage_root =
-            db.database.storage_root(address, hashed_storage).map_err(Eth::Error::from_eth_err)?;
+        let storage_root = account_storage_root(&db.database.0, address, hashed_storage, status)
+            .map_err(Eth::Error::from_eth_err)?;
 
         Ok(Some(Account { balance, nonce, code_hash, storage_root }))
     }
@@ -1272,5 +1285,77 @@ impl<B: BlockTrait> BadBlockStore<B> {
 impl<B: BlockTrait> Default for BadBlockStore<B> {
     fn default() -> Self {
         Self::new(64)
+    }
+}
+
+fn account_storage_root(
+    provider: &(impl StorageRootProvider + ?Sized),
+    address: Address,
+    hashed_storage: HashedStorage,
+    status: AccountStatus,
+) -> ProviderResult<B256> {
+    if status.was_destroyed() {
+        // Destruction makes every slot not present in the cache zero, so the cache contains the
+        // complete storage trie for the account's new incarnation.
+        return Ok(storage_root_unsorted(
+            hashed_storage.storage.into_iter().filter(|(_, value)| !value.is_zero()),
+        ))
+    }
+
+    provider.storage_root(address, hashed_storage)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use alloy_primitives::U256;
+    use reth_db_api::{tables, transaction::DbTxMut};
+    use reth_primitives_traits::StorageEntry;
+    use reth_provider::test_utils::create_test_provider_factory;
+
+    #[test]
+    fn account_storage_root_handles_destroyed_and_changed_accounts() {
+        let factory = create_test_provider_factory();
+        let address = Address::with_last_byte(1);
+        let old_slot = keccak256(B256::from(U256::from(1)));
+        let new_slot = keccak256(B256::from(U256::from(2)));
+        let zero_slot = keccak256(B256::from(U256::from(3)));
+        let old_value = U256::from(10);
+        let new_value = U256::from(20);
+
+        let provider_rw = factory.provider_rw().unwrap();
+        provider_rw
+            .tx_ref()
+            .put::<tables::HashedStorages>(
+                keccak256(address),
+                StorageEntry { key: old_slot, value: old_value },
+            )
+            .unwrap();
+        provider_rw.commit().unwrap();
+
+        let provider = factory.latest().unwrap();
+        let cached_storage =
+            HashedStorage::from_iter(false, [(new_slot, new_value), (zero_slot, U256::ZERO)]);
+
+        let destroyed_root = account_storage_root(
+            provider.as_ref(),
+            address,
+            cached_storage.clone(),
+            AccountStatus::DestroyedChanged,
+        )
+        .unwrap();
+        assert_eq!(destroyed_root, storage_root_unsorted([(new_slot, new_value)]));
+
+        let changed_root = account_storage_root(
+            provider.as_ref(),
+            address,
+            cached_storage,
+            AccountStatus::Changed,
+        )
+        .unwrap();
+        assert_eq!(
+            changed_root,
+            storage_root_unsorted([(old_slot, old_value), (new_slot, new_value)])
+        );
     }
 }
