@@ -184,21 +184,6 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
         LoadTransaction::transaction_by_hash(self, hash)
     }
 
-    /// Returns the RPC transaction response for the given hash.
-    fn transaction_by_hash_response(
-        &self,
-        hash: B256,
-    ) -> impl Future<Output = Result<Option<RpcTransaction<Self::NetworkTypes>>, Self::Error>> + Send
-    {
-        async move {
-            LoadTransaction::transaction_by_hash(self, hash)
-                .await?
-                .map(|tx| tx.into_transaction(self.converter()))
-                .transpose()
-                .map_err(Self::Error::from)
-        }
-    }
-
     /// Returns all transactions from the local pending pool.
     fn pending_transactions(&self) -> Result<Vec<RpcTransaction<Self::NetworkTypes>>, Self::Error> {
         self.pool()
