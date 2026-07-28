@@ -640,15 +640,15 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
         partial_state_trie: Option<BlockNumber>,
         save_mode: SaveBlocksMode,
     ) -> ProviderResult<()> {
-        if persist_rest_blocks.is_empty() && state_trie_blocks.is_empty() {
-            debug!(target: "providers::db", "Attempted to write empty persistence ranges");
-            return Ok(())
-        }
-
         let total_start = Instant::now();
         let storage_settings = self.cached_storage_settings();
         let state_trie_block_count = state_trie_blocks.len();
         let block_count = persist_rest_blocks.len() as u64;
+        let first_persist_rest_block_number = persist_rest_blocks
+            .first()
+            .expect("save_blocks_inner requires at least one block to persist")
+            .recovered_block()
+            .number();
 
         debug!(
             target: "providers::db",
@@ -657,54 +657,33 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
             mask_block_count = state_trie_masking_blocks.len(),
             "Writing blocks and execution data to storage"
         );
-        let tx_nums: SmallVec<[TxNumber; 4]> = if persist_rest_blocks.is_empty() {
-            SmallVec::new()
-        } else {
-            let first_tx_num = self
-                .tx
-                .cursor_read::<tables::TransactionBlocks>()?
-                .last()?
-                .map(|(n, _)| n + 1)
-                .unwrap_or_default();
+        let first_tx_num = self
+            .tx
+            .cursor_read::<tables::TransactionBlocks>()?
+            .last()?
+            .map(|(n, _)| n + 1)
+            .unwrap_or_default();
 
-            let mut nums = SmallVec::with_capacity(persist_rest_blocks.len());
-            let mut current = first_tx_num;
-            for block in persist_rest_blocks {
-                nums.push(current);
-                current += block.recovered_block().body().transaction_count() as u64;
-            }
-            nums
-        };
+        let mut tx_nums = SmallVec::<[TxNumber; 4]>::with_capacity(persist_rest_blocks.len());
+        let mut current_tx_num = first_tx_num;
+        for block in persist_rest_blocks {
+            tx_nums.push(current_tx_num);
+            current_tx_num += block.recovered_block().body().transaction_count() as u64;
+        }
 
         let mut timings =
             metrics::SaveBlocksTimings { batch_size: block_count, ..Default::default() };
 
-        let has_persist_rest_blocks = !persist_rest_blocks.is_empty();
-        let rocksdb_enabled = has_persist_rest_blocks && storage_settings.storage_v2;
-        let first_persist_rest_block_number =
-            persist_rest_blocks.first().map(|block| block.recovered_block().number());
-        let sf_ctx = if let Some(first_persist_rest_block_number) = first_persist_rest_block_number
-        {
-            Some(self.static_file_write_ctx(
-                save_mode,
-                first_persist_rest_block_number,
-                last_block_number,
-            )?)
-        } else {
-            None
+        let sf_ctx = self.static_file_write_ctx(
+            save_mode,
+            first_persist_rest_block_number,
+            last_block_number,
+        )?;
+        let state_write_config = StateWriteConfig {
+            write_receipts: !sf_ctx.write_receipts,
+            write_account_changesets: !sf_ctx.write_account_changesets,
+            write_storage_changesets: !sf_ctx.write_storage_changesets,
         };
-        let state_write_config = sf_ctx.as_ref().map_or(
-            StateWriteConfig {
-                write_receipts: true,
-                write_account_changesets: true,
-                write_storage_changesets: true,
-            },
-            |sf_ctx| StateWriteConfig {
-                write_receipts: !sf_ctx.write_receipts,
-                write_account_changesets: !sf_ctx.write_account_changesets,
-                write_storage_changesets: !sf_ctx.write_storage_changesets,
-            },
-        );
 
         let mut sf_result = None;
         let mut rocksdb_result = None;
@@ -715,57 +694,51 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
         // and RocksDB write spans appear as children of save_blocks in traces.
         let span = tracing::Span::current();
         runtime.storage_pool().in_place_scope(|s| {
-            if has_persist_rest_blocks {
-                let sf_provider = &self.static_file_provider;
-                let first_persist_rest_block_number =
-                    first_persist_rest_block_number.expect("checked persist_rest blocks");
-                let sf_ctx = sf_ctx.expect("checked persist_rest blocks");
-                let sf_span = span.clone();
-                let sf_tx_nums = tx_nums.clone();
-                let sf_result = &mut sf_result;
+            let sf_provider = &self.static_file_provider;
+            let sf_span = span.clone();
+            let sf_tx_nums = tx_nums.clone();
+            let sf_result = &mut sf_result;
 
-                // SF writes
+            // SF writes
+            s.spawn(move |_| {
+                let _guard = sf_span.enter();
+                let start = Instant::now();
+                *sf_result = Some(
+                    sf_provider
+                        .write_blocks_data(persist_rest_blocks, &sf_tx_nums, sf_ctx, runtime)
+                        .map(|()| start.elapsed()),
+                );
+            });
+
+            // RocksDB writes
+            if storage_settings.storage_v2 {
+                let rocksdb_provider = self.rocksdb_provider.clone();
+                let rocksdb_ctx =
+                    self.rocksdb_write_ctx(first_persist_rest_block_number, storage_settings);
+                let rocksdb_span = span.clone();
+                let rocksdb_tx_nums = tx_nums.clone();
+                let rocksdb_result = &mut rocksdb_result;
                 s.spawn(move |_| {
-                    let _guard = sf_span.enter();
+                    let _guard = rocksdb_span.enter();
                     let start = Instant::now();
-                    *sf_result = Some(
-                        sf_provider
-                            .write_blocks_data(persist_rest_blocks, &sf_tx_nums, sf_ctx, runtime)
+                    *rocksdb_result = Some(
+                        rocksdb_provider
+                            .write_blocks_data(
+                                persist_rest_blocks,
+                                &rocksdb_tx_nums,
+                                rocksdb_ctx,
+                                runtime,
+                            )
                             .map(|()| start.elapsed()),
                     );
                 });
-
-                // RocksDB writes
-                if rocksdb_enabled {
-                    let rocksdb_provider = self.rocksdb_provider.clone();
-                    let rocksdb_ctx =
-                        self.rocksdb_write_ctx(first_persist_rest_block_number, storage_settings);
-                    let rocksdb_span = span.clone();
-                    let rocksdb_tx_nums = tx_nums.clone();
-                    let rocksdb_result = &mut rocksdb_result;
-                    s.spawn(move |_| {
-                        let _guard = rocksdb_span.enter();
-                        let start = Instant::now();
-                        *rocksdb_result = Some(
-                            rocksdb_provider
-                                .write_blocks_data(
-                                    persist_rest_blocks,
-                                    &rocksdb_tx_nums,
-                                    rocksdb_ctx,
-                                    runtime,
-                                )
-                                .map(|()| start.elapsed()),
-                        );
-                    });
-                }
             }
 
             // MDBX writes
             let mdbx_start = Instant::now();
 
             // Collect all transaction hashes across all blocks, sort them, and write in batch
-            if has_persist_rest_blocks &&
-                !storage_settings.storage_v2 &&
+            if !storage_settings.storage_v2 &&
                 self.prune_modes.transaction_lookup.is_none_or(|m| !m.is_full())
             {
                 let start = Instant::now();
@@ -898,10 +871,8 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
             }
 
             // Full mode: update history indices
-            if save_mode.with_state() && has_persist_rest_blocks {
+            if save_mode.with_state() {
                 let start = Instant::now();
-                let first_persist_rest_block_number =
-                    persist_rest_blocks.first().unwrap().recovered_block().number();
                 self.update_history_indices(first_persist_rest_block_number..=last_block_number)?;
                 timings.update_history_indices = start.elapsed();
             }
@@ -927,16 +898,14 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
         })?;
 
         // Collect results from spawned tasks.
-        if has_persist_rest_blocks {
-            timings.sf = sf_result.ok_or(StaticFileWriterError::ThreadPanic("static file"))??;
+        timings.sf = sf_result.ok_or(StaticFileWriterError::ThreadPanic("static file"))??;
 
-            if rocksdb_enabled {
-                timings.rocksdb = rocksdb_result.ok_or_else(|| {
-                    ProviderError::Database(reth_db_api::DatabaseError::Other(
-                        "RocksDB thread panicked".into(),
-                    ))
-                })??;
-            }
+        if storage_settings.storage_v2 {
+            timings.rocksdb = rocksdb_result.ok_or_else(|| {
+                ProviderError::Database(reth_db_api::DatabaseError::Other(
+                    "RocksDB thread panicked".into(),
+                ))
+            })??;
         }
 
         timings.total = total_start.elapsed();
