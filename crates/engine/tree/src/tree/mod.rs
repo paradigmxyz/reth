@@ -36,7 +36,7 @@ use reth_provider::{
 };
 use reth_revm::database::StateProviderDatabase;
 use reth_stages_api::ControlFlow;
-use reth_storage_overlay::{ChangesetCache, OverlayManager};
+use reth_storage_overlay::OverlayManager;
 use reth_tasks::{spawn_os_thread, utils::increase_thread_priority};
 use reth_trie::ComputedTrieData;
 use revm::interpreter::debug_unreachable;
@@ -99,7 +99,7 @@ pub(crate) const MIN_BLOCKS_FOR_PIPELINE_RUN: u64 = EPOCH_SLOTS;
 
 /// The minimum number of blocks to retain in the changeset cache after eviction.
 ///
-/// This ensures that recent trie changesets are kept in memory for potential reorgs,
+/// This ensures that recent changesets are kept in memory for potential reorgs,
 /// even when the finalized block is not set (e.g., on L2s like Optimism).
 const CHANGESET_CACHE_RETENTION_BLOCKS: u64 = 64;
 
@@ -165,7 +165,7 @@ impl<N: NodePrimitives> EngineApiTreeState<N> {
         invalid_header_hit_eviction_threshold: u8,
         canonical_block: BlockNumHash,
         engine_kind: EngineApiKind,
-        state_trie_overlays: OverlayManager<N>,
+        overlay_manager: OverlayManager<N>,
     ) -> Self {
         Self {
             invalid_headers: InvalidHeaderCache::new(
@@ -173,7 +173,7 @@ impl<N: NodePrimitives> EngineApiTreeState<N> {
                 invalid_header_hit_eviction_threshold,
             ),
             buffer: BlockBuffer::new(block_buffer_limit),
-            tree_state: TreeState::new(canonical_block, engine_kind, state_trie_overlays),
+            tree_state: TreeState::new(canonical_block, engine_kind, overlay_manager),
             pending_sparse_trie_prune: false,
             forkchoice_state_tracker: ForkchoiceStateTracker::default(),
         }
@@ -349,8 +349,6 @@ where
     engine_kind: EngineApiKind,
     /// The EVM configuration.
     evm_config: C,
-    /// Changeset cache for in-memory trie changesets
-    changeset_cache: ChangesetCache,
     /// Timing statistics for executed blocks, keyed by block hash.
     /// Stored here (not in `ExecutedBlock`) to avoid leaking observability concerns into the block
     /// type. Entries are removed when blocks are persisted or invalidated.
@@ -384,7 +382,6 @@ where
             .field("metrics", &self.metrics)
             .field("engine_kind", &self.engine_kind)
             .field("evm_config", &self.evm_config)
-            .field("changeset_cache", &self.changeset_cache)
             .field("execution_timing_stats", &self.execution_timing_stats.len())
             .field("runtime", &self.runtime)
             .finish()
@@ -426,7 +423,6 @@ where
         config: TreeConfig,
         engine_kind: EngineApiKind,
         evm_config: C,
-        changeset_cache: ChangesetCache,
         runtime: reth_tasks::Runtime,
     ) -> Self {
         let (incoming_tx, incoming) = crossbeam_channel::unbounded();
@@ -448,7 +444,6 @@ where
             incoming_tx,
             engine_kind,
             evm_config,
-            changeset_cache,
             execution_timing_stats: B256Map::default(),
             building_payload: false,
             runtime,
@@ -468,11 +463,10 @@ where
         persistence: PersistenceHandle<N>,
         payload_builder: PayloadBuilderHandle<T>,
         canonical_in_memory_state: CanonicalInMemoryState<N>,
-        state_trie_overlays: OverlayManager<N>,
+        overlay_manager: OverlayManager<N>,
         config: TreeConfig,
         kind: EngineApiKind,
         evm_config: C,
-        changeset_cache: ChangesetCache,
         runtime: reth_tasks::Runtime,
     ) -> (Sender<FromEngine<EngineApiRequest<T, N>, N::Block>>, UnboundedReceiver<EngineApiEvent<N>>)
     {
@@ -491,7 +485,7 @@ where
             config.invalid_header_hit_eviction_threshold(),
             header.num_hash(),
             kind,
-            state_trie_overlays,
+            overlay_manager,
         );
 
         let task = Self::new(
@@ -507,7 +501,6 @@ where
             config,
             kind,
             evm_config,
-            changeset_cache,
             runtime,
         );
         let incoming = task.incoming_tx.clone();
@@ -1542,7 +1535,7 @@ where
         debug!(target: "engine::tree", ?last_persisted_block_hash, ?last_persisted_block_number, elapsed=?start_time.elapsed(), "Finished persisting, calling finish");
         self.persistence_state.finish(last_persisted_block_hash, last_persisted_block_number);
 
-        // Evict trie changesets for blocks below the eviction threshold.
+        // Evict cached changesets for blocks below the eviction threshold.
         // Keep at least CHANGESET_CACHE_RETENTION_BLOCKS from the persisted tip, and also respect
         // the finalized block if set.
         let min_threshold =
@@ -1562,7 +1555,7 @@ where
             eviction_threshold,
             "Evicting changesets below threshold"
         );
-        self.changeset_cache.evict(eviction_threshold);
+        self.state.tree_state.overlay_manager.evict_cached_changesets(eviction_threshold);
 
         self.on_new_persisted_block()?;
 
@@ -2238,11 +2231,11 @@ where
             "computing block trie updates",
         );
         let db_provider = self.provider.database_provider_ro()?;
-        let trie_updates = reth_storage_overlay::compute_block_trie_updates(
-            &self.changeset_cache,
-            &db_provider,
-            block.number(),
-        )?;
+        let trie_updates = self
+            .state
+            .tree_state
+            .overlay_manager
+            .compute_block_trie_updates(&db_provider, block.number())?;
 
         let sorted_hashed_state = Arc::new(hashed_state.into_sorted());
         let sorted_trie_updates = Arc::new(trie_updates);
