@@ -152,7 +152,7 @@ use reth_provider::{
     StateProviderFactory, StateReader, StorageChangeSetReader, StorageSettingsCache,
 };
 use reth_revm::db::{states::bundle_state::BundleRetention, BundleAccount, State};
-use reth_storage_overlay::{OverlayBuilder, OverlayManager};
+use reth_storage_overlay::OverlayManager;
 use reth_trie::{
     hashed_cursor::HashedCursorFactory, trie_cursor::TrieCursorFactory, updates::TrieUpdates,
     LazyTrieData,
@@ -597,7 +597,8 @@ where
 
         // Create overlay factory for state-root tasks that need multiproofs.
         let provider_factory = self.provider.clone();
-        let overlay_builder = Self::overlay_builder_for_parent(parent_hash, ctx.state());
+        let overlay_builder =
+            ctx.state().tree_state.state_trie_overlays.overlay_builder(parent_hash);
         let overlay_factory = OverlayStateProviderFactory::new(provider_factory, overlay_builder);
 
         let parallel_bal_execution = ensure_ok!(self.bal_path_eligible(env.decoded_bal.as_deref()));
@@ -1441,14 +1442,6 @@ where
         self.invalid_block_hook.on_invalid_block(parent_header, block, output, trie_updates);
     }
 
-    /// Returns an overlay builder configured for a payload parent.
-    fn overlay_builder_for_parent(
-        parent_hash: B256,
-        state: &EngineApiTreeState<N>,
-    ) -> OverlayBuilder<N> {
-        state.tree_state.state_trie_overlays.overlay_builder(parent_hash)
-    }
-
     /// Prepares the optional payload-builder state-root handle through the installed
     /// [`StateRootStrategy`].
     fn payload_state_root_handle_for(
@@ -1473,7 +1466,7 @@ where
         };
         let overlay_factory = OverlayStateProviderFactory::new(
             self.provider.clone(),
-            Self::overlay_builder_for_parent(parent_hash, state),
+            state.tree_state.state_trie_overlays.overlay_builder(parent_hash),
         );
 
         match self.state_root_strategy.prepare_payload_builder(PayloadStateRootJobContext::new(
