@@ -244,30 +244,46 @@ where
 
                 eth_api.apply_pre_execution_changes(&block, &mut db)?;
 
-                // replay all transactions prior to the targeted transaction
-                let index = eth_api.replay_transactions_until(
-                    &mut db,
-                    evm_env.clone(),
-                    block_txs,
-                    *tx.tx_hash(),
-                )?;
+                let target_hash = *tx.tx_hash();
+                // the EVM takes `evm_env`, but the block env is still needed for the trace result
+                let block_env = evm_env.block_env.clone();
+
+                let inspector = DebugInspector::new(opts).map_err(Eth::Error::from_eth_err)?;
+                // Prefix and target on one EVM, so the target sees the block-scoped state the
+                // prefix built.
+                let mut evm =
+                    eth_api.evm_config().evm_with_env_and_inspector(&mut db, evm_env, inspector);
+
+                // replay all transactions prior to the targeted transaction, without tracing them
+                evm.disable_inspector();
+                let mut index = 0;
+                for prior_tx in block_txs {
+                    if *prior_tx.tx_hash() == target_hash {
+                        // reached the target transaction
+                        break
+                    }
+                    let prior_tx_env = eth_api.evm_config().tx_env(prior_tx);
+                    evm.transact_commit(prior_tx_env).map_err(Eth::Error::from_evm_err)?;
+                    index += 1;
+                }
+                evm.enable_inspector();
 
                 let tx_env = eth_api.evm_config().tx_env(&tx);
+                let res = evm.transact(tx_env.clone()).map_err(Eth::Error::from_evm_err)?;
 
-                let mut inspector = DebugInspector::new(opts).map_err(Eth::Error::from_eth_err)?;
-                let res =
-                    eth_api.inspect(&mut db, evm_env.clone(), tx_env.clone(), &mut inspector)?;
+                // split the EVM so the inspector and the database can be borrowed at once
+                let (evm_db, inspector, _) = evm.components_mut();
                 let trace = inspector
                     .get_result(
                         Some(TransactionContext {
                             block_hash: Some(block_hash),
                             tx_index: Some(index),
-                            tx_hash: Some(*tx.tx_hash()),
+                            tx_hash: Some(target_hash),
                         }),
                         &tx_env,
-                        &evm_env.block_env,
+                        &block_env,
                         &res,
-                        &mut db,
+                        evm_db,
                     )
                     .map_err(Eth::Error::from_eth_err)?;
 
