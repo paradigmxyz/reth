@@ -30,9 +30,9 @@ use reth_primitives_traits::{
 };
 use reth_provider::{
     BalProvider, BlockExecutionOutput, BlockExecutionResult, BlockReader, ChangeSetReader,
-    DatabaseProviderFactory, HashedPostStateProvider, ProviderError, StageCheckpointReader,
-    StateProviderBox, StateProviderFactory, StateReader, StorageChangeSetReader,
-    StorageSettingsCache, TransactionVariant,
+    DatabaseProviderFactory, HashedPostStateProvider, ProviderError, SaveBlocksInput,
+    StageCheckpointReader, StateProviderBox, StateProviderFactory, StateReader,
+    StorageChangeSetReader, StorageSettingsCache, TransactionVariant,
 };
 use reth_revm::database::StateProviderDatabase;
 use reth_stages_api::ControlFlow;
@@ -1434,10 +1434,18 @@ where
             .max_by_key(|block| block.recovered_block().number())
             .map(|b| b.recovered_block().num_hash())
             .expect("Checked non-empty persisting blocks");
+        let previous_tip = self.persistence_state.last_persisted_block.number;
+        let input = SaveBlocksInput::new(
+            blocks_to_persist,
+            previous_tip,
+            previous_tip,
+            highest_num_hash.number,
+            highest_num_hash.number,
+        );
 
-        debug!(target: "engine::tree", count=blocks_to_persist.len(), blocks = ?blocks_to_persist.iter().map(|block| block.recovered_block().num_hash()).collect::<Vec<_>>(), "Persisting blocks");
+        debug!(target: "engine::tree", count=input.blocks().len(), blocks = ?input.blocks().iter().map(|block| block.recovered_block().num_hash()).collect::<Vec<_>>(), "Persisting blocks");
         let (tx, rx) = crossbeam_channel::bounded(1);
-        let _ = self.persistence.save_blocks(blocks_to_persist, tx);
+        let _ = self.persistence.save_blocks(input, tx);
 
         self.persistence_state.start_save(highest_num_hash, rx);
     }

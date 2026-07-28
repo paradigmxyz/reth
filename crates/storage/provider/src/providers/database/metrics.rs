@@ -89,7 +89,7 @@ pub struct DatabaseProviderMetrics {
     save_blocks_update_history_indices: Histogram,
     /// Duration of `update_pipeline_stages` in `save_blocks`
     save_blocks_update_pipeline_stages: Histogram,
-    /// Number of blocks per `save_blocks` call
+    /// Number of newly persisted ordinary blocks per `save_blocks` call
     save_blocks_batch_size: Histogram,
     /// Duration of MDBX commit in `save_blocks`
     save_blocks_commit_mdbx: Histogram,
@@ -117,7 +117,7 @@ pub struct DatabaseProviderMetrics {
     save_blocks_update_history_indices_last: Gauge,
     /// Last duration of `update_pipeline_stages` in `save_blocks`
     save_blocks_update_pipeline_stages_last: Gauge,
-    /// Last number of blocks per `save_blocks` call
+    /// Last number of newly persisted ordinary blocks per `save_blocks` call
     save_blocks_batch_size_last: Gauge,
     /// Last duration of MDBX commit in `save_blocks`
     save_blocks_commit_mdbx_last: Gauge,

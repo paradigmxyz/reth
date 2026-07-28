@@ -1,13 +1,12 @@
 use crate::metrics::PersistenceMetrics;
 use alloy_eips::BlockNumHash;
 use crossbeam_channel::Sender as CrossbeamSender;
-use reth_chain_state::ExecutedBlock;
 use reth_errors::ProviderError;
 use reth_ethereum_primitives::EthPrimitives;
 use reth_primitives_traits::{FastInstant as Instant, NodePrimitives};
 use reth_provider::{
     providers::ProviderNodeTypes, BalProvider, BlockExecutionWriter, BlockHashReader,
-    ChainStateBlockWriter, DBProvider, DatabaseProviderFactory, ProviderFactory, SaveBlocksMode,
+    ChainStateBlockWriter, DBProvider, DatabaseProviderFactory, ProviderFactory, SaveBlocksInput,
 };
 use reth_prune::{PrunerError, PrunerWithFactory};
 use reth_stages_api::{MetricEvent, MetricEventsSender};
@@ -145,35 +144,55 @@ where
         Ok(new_tip_hash.map(|hash| BlockNumHash { hash, number: new_tip_num }))
     }
 
-    #[instrument(level = "debug", target = "engine::persistence", skip_all, fields(block_count = blocks.len()))]
+    #[instrument(
+        level = "debug",
+        target = "engine::persistence",
+        skip_all,
+        fields(
+            block_count = input.blocks().len(),
+            persist_block_count = input.persist_rest_blocks().len(),
+            state_trie_block_count = input.state_trie_blocks().len(),
+        )
+    )]
     fn on_save_blocks(
         &mut self,
-        blocks: Vec<ExecutedBlock<N::Primitives>>,
+        input: SaveBlocksInput<N::Primitives>,
     ) -> Result<PersistenceResult, PersistenceError> {
-        let first_block = blocks.first().map(|b| b.recovered_block.num_hash());
-        let last_block = blocks.last().map(|b| b.recovered_block.num_hash());
-        let block_count = blocks.len();
+        let first_block =
+            input.persist_rest_blocks().first().map(|block| block.recovered_block().num_hash());
+        let last_block = input.last_block();
+        let persist_block_count = input.persist_rest_blocks().len();
+        let state_trie_block_count = input.state_trie_blocks().len();
+        let mask_block_count = input.state_trie_masking_blocks().len();
 
         let pending_finalized = self.pending_finalized_block.take();
         let pending_safe = self.pending_safe_block.take();
 
-        debug!(target: "engine::persistence", ?block_count, first=?first_block, last=?last_block, "Saving range of blocks");
+        debug!(
+            target: "engine::persistence",
+            persist_block_count,
+            state_trie_block_count,
+            mask_block_count,
+            first = ?first_block,
+            last = ?last_block,
+            "Saving range of blocks"
+        );
 
         let start_time = Instant::now();
 
-        if let Some(last) = last_block {
+        if let Some(last_block) = last_block {
             let provider_rw = self.provider.database_provider_rw()?;
-            provider_rw.save_blocks(blocks, SaveBlocksMode::Full)?;
+            provider_rw.save_blocks_with_frontiers(&input)?;
 
             if let Some(finalized) = pending_finalized {
-                provider_rw.save_finalized_block_number(finalized.min(last.number))?;
-                if finalized > last.number {
+                provider_rw.save_finalized_block_number(finalized.min(last_block.number))?;
+                if finalized > last_block.number {
                     self.pending_finalized_block = Some(finalized);
                 }
             }
             if let Some(safe) = pending_safe {
-                provider_rw.save_safe_block_number(safe.min(last.number))?;
-                if safe > last.number {
+                provider_rw.save_safe_block_number(safe.min(last_block.number))?;
+                if safe > last_block.number {
                     self.pending_safe_block = Some(safe);
                 }
             }
@@ -186,7 +205,7 @@ where
         }
 
         let elapsed = start_time.elapsed();
-        self.metrics.save_blocks_batch_size.record(block_count as f64);
+        self.metrics.save_blocks_batch_size.record(persist_block_count as f64);
         self.metrics.save_blocks_duration_seconds.record(elapsed);
 
         Ok(PersistenceResult { last_block, commit_duration: Some(elapsed) })
@@ -232,12 +251,8 @@ pub enum PersistenceError {
 /// A signal to the persistence service that part of the tree state can be persisted.
 #[derive(Debug)]
 pub enum PersistenceAction<N: NodePrimitives = EthPrimitives> {
-    /// The section of tree state that should be persisted. These blocks are expected in order of
-    /// increasing block number.
-    ///
-    /// First, header, transaction, and receipt-related data should be written to static files.
-    /// Then the execution history-related data will be written to the database.
-    SaveBlocks(Vec<ExecutedBlock<N>>, CrossbeamSender<PersistenceResult>),
+    /// Advances the block-data and state/trie persistence frontiers described by the input.
+    SaveBlocks(SaveBlocksInput<N>, CrossbeamSender<PersistenceResult>),
 
     /// Removes block data above the given block number from the database.
     ///
@@ -311,8 +326,7 @@ impl<T: NodePrimitives> PersistenceHandle<T> {
         self.sender.send(action)
     }
 
-    /// Tells the persistence service to save a certain list of finalized blocks. The blocks are
-    /// assumed to be ordered by block number.
+    /// Tells the persistence service to advance its block-data and state/trie frontiers.
     ///
     /// This returns the latest hash that has been saved, allowing removal of that block and any
     /// previous blocks from in-memory data structures. This value is returned in the receiver end
@@ -321,10 +335,10 @@ impl<T: NodePrimitives> PersistenceHandle<T> {
     /// If there are no blocks to persist, then `None` is sent in the sender.
     pub fn save_blocks(
         &self,
-        blocks: Vec<ExecutedBlock<T>>,
+        input: SaveBlocksInput<T>,
         tx: CrossbeamSender<PersistenceResult>,
     ) -> Result<(), SendError<PersistenceAction<T>>> {
-        self.send_action(PersistenceAction::SaveBlocks(blocks, tx))
+        self.send_action(PersistenceAction::SaveBlocks(input, tx))
     }
 
     /// Queues the finalized block number to be persisted on disk.
@@ -389,14 +403,14 @@ mod tests {
     use super::*;
     use alloy_eips::NumHash;
     use alloy_primitives::{BlockHash, BlockNumber, Bytes, B256, U256};
-    use reth_chain_state::test_utils::TestBlockBuilder;
+    use reth_chain_state::{test_utils::TestBlockBuilder, ExecutedBlock};
     use reth_exex_types::FinishedExExHeight;
     use reth_provider::{
         providers::{ProviderFactoryBuilder, ReadOnlyConfig},
         test_utils::{create_test_provider_factory, MockNodeTypes},
         AccountReader, BalConfig, BalNotificationStream, BalStore, BalStoreHandle,
         ChainSpecProvider, HeaderProvider, InMemoryBalStore, ProviderError, ProviderResult, RawBal,
-        StorageSettingsCache, TryIntoHistoricalStateProvider,
+        SaveBlocksMode, StorageSettingsCache, TryIntoHistoricalStateProvider,
     };
     use reth_prune::Pruner;
     use reth_prune_types::PruneMode;
@@ -404,6 +418,10 @@ mod tests {
 
     fn default_persistence_handle() -> PersistenceHandle<EthPrimitives> {
         let provider = create_test_provider_factory();
+        let genesis = TestBlockBuilder::eth().get_executed_blocks(0..1).next().unwrap();
+        let provider_rw = provider.database_provider_rw().unwrap();
+        provider_rw.save_blocks(vec![genesis], SaveBlocksMode::Full).unwrap();
+        provider_rw.commit().unwrap();
 
         let (_finished_exex_height_tx, finished_exex_height_rx) =
             tokio::sync::watch::channel(FinishedExExHeight::NoExExs);
@@ -413,6 +431,17 @@ mod tests {
 
         let (sync_metrics_tx, _sync_metrics_rx) = unbounded_channel();
         PersistenceHandle::<EthPrimitives>::spawn_service(provider, pruner, sync_metrics_tx)
+    }
+
+    fn full_save_input(
+        blocks: Vec<ExecutedBlock<EthPrimitives>>,
+    ) -> SaveBlocksInput<EthPrimitives> {
+        let prev_tip = blocks
+            .first()
+            .map(|block| block.recovered_block().number.saturating_sub(1))
+            .unwrap_or_default();
+        let new_tip = blocks.last().map(|block| block.recovered_block().number).unwrap_or(prev_tip);
+        SaveBlocksInput::new(blocks, prev_tip, prev_tip, new_tip, new_tip)
     }
 
     #[test]
@@ -492,7 +521,7 @@ mod tests {
         reth_tracing::init_test_tracing();
         let handle = default_persistence_handle();
 
-        let blocks = vec![];
+        let blocks = full_save_input(vec![]);
         let (tx, rx) = crossbeam_channel::bounded(1);
 
         handle.save_blocks(blocks, tx).unwrap();
@@ -505,13 +534,13 @@ mod tests {
     fn test_save_blocks_single_block() {
         reth_tracing::init_test_tracing();
         let handle = default_persistence_handle();
-        let block_number = 0;
+        let block_number = 1;
         let mut test_block_builder = TestBlockBuilder::eth();
         let executed =
             test_block_builder.get_executed_block_with_number(block_number, B256::random());
         let block_hash = executed.recovered_block().hash();
 
-        let blocks = vec![executed];
+        let blocks = full_save_input(vec![executed]);
         let (tx, rx) = crossbeam_channel::bounded(1);
 
         handle.save_blocks(blocks, tx).unwrap();
@@ -527,11 +556,11 @@ mod tests {
         let handle = default_persistence_handle();
 
         let mut test_block_builder = TestBlockBuilder::eth();
-        let blocks = test_block_builder.get_executed_blocks(0..5).collect::<Vec<_>>();
+        let blocks = test_block_builder.get_executed_blocks(1..6).collect::<Vec<_>>();
         let last_hash = blocks.last().unwrap().recovered_block().hash();
         let (tx, rx) = crossbeam_channel::bounded(1);
 
-        handle.save_blocks(blocks, tx).unwrap();
+        handle.save_blocks(full_save_input(blocks), tx).unwrap();
         let result = rx.recv().unwrap();
         assert_eq!(last_hash, result.last_block.unwrap().hash);
     }
@@ -541,14 +570,14 @@ mod tests {
         reth_tracing::init_test_tracing();
         let handle = default_persistence_handle();
 
-        let ranges = [0..1, 1..2, 2..4, 4..5];
+        let ranges = [1..2, 2..3, 3..5, 5..6];
         let mut test_block_builder = TestBlockBuilder::eth();
         for range in ranges {
             let blocks = test_block_builder.get_executed_blocks(range).collect::<Vec<_>>();
             let last_hash = blocks.last().unwrap().recovered_block().hash();
             let (tx, rx) = crossbeam_channel::bounded(1);
 
-            handle.save_blocks(blocks, tx).unwrap();
+            handle.save_blocks(full_save_input(blocks), tx).unwrap();
 
             let result = rx.recv().unwrap();
             assert_eq!(last_hash, result.last_block.unwrap().hash);
