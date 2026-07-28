@@ -14,12 +14,12 @@ mod tests {
     use reth_execution_types::ExecutionOutcome;
     use reth_primitives_traits::{Account, StorageEntry};
     use reth_storage_api::{
-        DatabaseProviderFactory, StateWriteConfig, StateWriter, StorageSettingsCache,
+        DatabaseProviderFactory, HashedPostStateProvider, StateWriteConfig, StateWriter,
+        StorageSettingsCache,
     };
     use reth_trie::{
         test_utils::{state_root, storage_root_prehashed},
-        HashedPostState, HashedStorage, KeccakKeyHasher, StateRoot, StorageRoot,
-        StorageRootProgress,
+        HashedPostState, HashedStorage, StateRoot, StorageRoot, StorageRootProgress,
     };
     use reth_trie_db::{DatabaseStateRoot, DatabaseStorageRoot, LegacyKeyAdapter, PackedKeyAdapter};
     use revm::database::{
@@ -929,19 +929,21 @@ mod tests {
             let overlay_root = if is_v2 {
                 TestStateRoot::<_, PackedKeyAdapter>::overlay_root(
                     tx,
-                    &HashedPostState::from_bundle_state::<KeccakKeyHasher>(
-                        state.bundle_state.state(),
-                    )
-                    .into_sorted(),
+                    &provider_rw
+                        .latest()
+                        .hashed_post_state(&state.bundle_state)
+                        .unwrap()
+                        .into_sorted(),
                 )
                 .unwrap()
             } else {
                 TestStateRoot::<_, LegacyKeyAdapter>::overlay_root(
                     tx,
-                    &HashedPostState::from_bundle_state::<KeccakKeyHasher>(
-                        state.bundle_state.state(),
-                    )
-                    .into_sorted(),
+                    &provider_rw
+                        .latest()
+                        .hashed_post_state(&state.bundle_state)
+                        .unwrap()
+                        .into_sorted(),
                 )
                 .unwrap()
             };

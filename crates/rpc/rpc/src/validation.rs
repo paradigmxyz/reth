@@ -37,9 +37,8 @@ use reth_primitives_traits::{
 use reth_revm::{cached::CachedReads, database::StateProviderDatabase};
 use reth_rpc_api::BlockSubmissionValidationApiServer;
 use reth_rpc_server_types::result::{internal_rpc_err, invalid_params_rpc_err};
-use reth_storage_api::{BlockReaderIdExt, StateProviderFactory};
+use reth_storage_api::{BlockReaderIdExt, HashedPostStateProvider, StateProviderFactory};
 use reth_tasks::Runtime;
-use reth_trie_common::{HashedPostState, KeccakKeyHasher};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::sync::Arc;
@@ -230,8 +229,7 @@ where
 
         self.ensure_payment(&block, &output, &message)?;
 
-        let hashed_state =
-            HashedPostState::from_bundle_state::<KeccakKeyHasher>(output.state.state());
+        let hashed_state = state_provider.hashed_post_state(&output.state)?;
         let state_root = state_provider.state_root(hashed_state)?;
 
         if state_root != block.header().state_root() {

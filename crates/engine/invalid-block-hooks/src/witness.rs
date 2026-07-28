@@ -12,7 +12,7 @@ use reth_revm::{
 };
 use reth_rpc_api::DebugApiClient;
 use reth_tracing::tracing::warn;
-use reth_trie::{updates::TrieUpdates, HashedPostState, HashedStorage, KeccakKeyHasher};
+use reth_trie::{updates::TrieUpdates, HashedStorage};
 use revm::{
     bytecode::Bytecode,
     database::{
@@ -121,8 +121,7 @@ fn collect_execution_data(
     let bundle_state = db.take_bundle();
     let mut codes = BTreeMap::new();
     let mut preimages = BTreeMap::new();
-    let mut hashed_state =
-        HashedPostState::from_bundle_state::<KeccakKeyHasher>(bundle_state.state());
+    let mut hashed_state = db.database.hashed_post_state(&bundle_state)?;
 
     // Collect codes
     db.cache.contracts.values().chain(bundle_state.contracts.values()).for_each(|code| {
@@ -309,8 +308,7 @@ where
         block_prefix: &str,
     ) -> eyre::Result<()> {
         let state_provider = self.provider.state_by_block_hash(parent_header.hash())?;
-        let hashed_state =
-            HashedPostState::from_bundle_state::<KeccakKeyHasher>(bundle_state.state());
+        let hashed_state = state_provider.hashed_post_state(bundle_state)?;
         let (re_executed_root, trie_output) =
             state_provider.state_root_with_updates(hashed_state)?;
 
