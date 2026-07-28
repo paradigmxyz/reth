@@ -93,7 +93,7 @@ impl EngineNodeLauncher {
         let NodeHooks { on_component_initialized, on_node_started, .. } = hooks;
 
         // Create the overlay manager that will be shared across the provider and engine.
-        let state_trie_overlays = OverlayManager::<N::Primitives>::new(
+        let overlay_manager = OverlayManager::<N::Primitives>::new(
             ctx.task_executor.state_trie_overlay_worker_pool(),
         );
         let disabled_stages = N::disabled_stages();
@@ -111,7 +111,7 @@ impl EngineNodeLauncher {
             .with_adjusted_configs()
             // Create the provider factory with the shared overlay manager
             .with_provider_factory::<_, <CB::Components as NodeComponents<T>>::Evm>(
-                state_trie_overlays.clone(),
+                overlay_manager.clone(),
                 rocksdb_provider,
                 disabled_stages,
             )
@@ -209,15 +209,11 @@ impl EngineNodeLauncher {
         // Build the engine validator with all required components
         let engine_validator = validator_builder
             .clone()
-            .build_tree_validator(
-                &add_ons_ctx,
-                engine_tree_config.clone(),
-                state_trie_overlays.clone(),
-            )
+            .build_tree_validator(&add_ons_ctx, engine_tree_config.clone(), overlay_manager.clone())
             .await?;
 
         // Create the consensus engine stream with optional reorg
-        let reorg_state_trie_overlays = state_trie_overlays.clone();
+        let reorg_overlay_manager = overlay_manager.clone();
         let consensus_engine_stream = UnboundedReceiverStream::from(consensus_engine_rx)
             .maybe_skip_fcu(node_config.debug.skip_fcu)
             .maybe_skip_new_payload(node_config.debug.skip_new_payload)
@@ -229,7 +225,7 @@ impl EngineNodeLauncher {
                         .build_tree_validator(
                             &add_ons_ctx,
                             engine_tree_config.clone(),
-                            reorg_state_trie_overlays.clone(),
+                            reorg_overlay_manager.clone(),
                         )
                         .await
                 },
@@ -260,7 +256,7 @@ impl EngineNodeLauncher {
             pruner,
             ctx.components().payload_builder_handle().clone(),
             engine_validator,
-            state_trie_overlays,
+            overlay_manager,
             engine_tree_config,
             ctx.sync_metrics_tx(),
             ctx.components().evm_config().clone(),
