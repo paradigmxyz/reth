@@ -33,11 +33,12 @@ pub struct ImportEraCommand<C: ChainSpecParser> {
     #[arg(long, value_name = "TO_BLOCK", verbatim_doc_comment)]
     to_block: Option<u64>,
 
-    /// Repair the `Receipts` static file segment of an already-executed range.
+    /// Backfill the `Receipts` static file segment from its tip up to the Execution checkpoint.
     ///
-    /// Receipts must cover the Execution checkpoint exactly, so this cannot bootstrap a fresh
-    /// database: above the checkpoint they are pruned on the next node start, below it the node
-    /// cannot start. Byzantium onwards only, from `.era1` or `.ere` files that carry receipts.
+    /// Only a missing tail is detected and repaired, never a gap inside the existing segment. The
+    /// backfill must reach the checkpoint exactly, so this cannot bootstrap a fresh database:
+    /// above the checkpoint receipts are pruned on the next node start, below it the node cannot
+    /// start. Byzantium onwards only, from `.era1` or `.ere` files that carry receipts.
     #[arg(long, verbatim_doc_comment)]
     with_receipts: bool,
 }

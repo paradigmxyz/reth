@@ -226,9 +226,10 @@ where
 /// When `to_block` is set, the import stops after reaching that block height; otherwise it
 /// continues until the source has no more files.
 ///
-/// `store_receipts` imports up to the `Execution` checkpoint and errors unless it covers that
-/// range exactly: receipts above the checkpoint are pruned on the next node start, and receipts
-/// below it leave the node unable to start.
+/// `store_receipts` backfills the `Receipts` segment from its tip up to the `Execution`
+/// checkpoint, which it must reach exactly: receipts above the checkpoint are pruned on the next
+/// node start, and receipts below it leave the node unable to start. Only a missing tail is
+/// detected, never a gap inside the existing segment.
 ///
 /// `is_receipt_verifiable` decides which blocks have their receipts checked against the header,
 /// as pre-Byzantium receipts can't be recomputed here.
