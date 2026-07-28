@@ -76,7 +76,7 @@ async fn test_history_import_with_receipts() {
         &mut hash_collector,
         None,
         false,
-        &|_| false,
+        &|_| true,
     )
     .unwrap();
     assert_eq!(imported_height, expected_height);
@@ -97,7 +97,7 @@ async fn test_history_import_with_receipts() {
         &mut hash_collector,
         None,
         true,
-        &|_| false,
+        &|_| true,
     )
     .unwrap();
     assert_eq!(repaired_height, expected_height);
@@ -317,7 +317,7 @@ async fn test_ere_roundtrip_export_after_import() {
         &mut reimport_collector,
         None,
         false,
-        &|_| false,
+        &|_| true,
     )
     .unwrap();
 

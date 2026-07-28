@@ -324,6 +324,17 @@ where
                      --to-block or set it to {target}"
                 );
             }
+            // Such a repair can never complete, so fail before committing the empty blocks that
+            // precede the first pre-Byzantium receipt.
+            if !is_receipt_verifiable(height + 1) {
+                eyre::bail!(
+                    "receipt repair would start at block {}, which predates Byzantium. Those \
+                     receipts commit to a post-state root this node's receipt type cannot \
+                     represent, so the Receipts segment has to already cover the pre-Byzantium \
+                     range",
+                    height + 1,
+                );
+            }
 
             Ok(target)
         })
@@ -1027,7 +1038,7 @@ mod tests {
             &mut hash_collector,
             None,
             true,
-            &|_| false,
+            &|_| true,
         )
         .unwrap();
 
@@ -1057,7 +1068,7 @@ mod tests {
             &mut hash_collector,
             None,
             true,
-            &|_| false,
+            &|_| true,
         );
 
         assert!(result.is_err());
@@ -1082,7 +1093,32 @@ mod tests {
             &mut hash_collector,
             Some(1),
             true,
-            &|_| false,
+            &|_| true,
+        );
+
+        assert!(result.is_err());
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn receipt_import_rejects_a_repair_starting_before_byzantium() {
+        let pf = create_test_provider_factory();
+        init_genesis(&pf).unwrap();
+        let folder = tempdir().unwrap();
+        let mut hash_collector = Collector::new(4096, Some(folder.path().to_owned()));
+
+        let provider = pf.database_provider_rw().unwrap();
+        provider.save_stage_checkpoint(StageId::Execution, StageCheckpoint::new(2)).unwrap();
+        provider.commit().unwrap();
+
+        // Receipts resume at block 1, before this chain's Byzantium activation at block 2.
+        let stream = futures_util::stream::iter(vec![Ok(TestMeta { marked: Cell::new(false) })]);
+        let result = import::<TestEraWithEmptyReceipts, _, _, _, Block, _, _>(
+            stream,
+            &pf,
+            &mut hash_collector,
+            None,
+            true,
+            &|number| number >= 2,
         );
 
         assert!(result.is_err());
@@ -1107,7 +1143,7 @@ mod tests {
             &mut hash_collector,
             None,
             true,
-            &|_| false,
+            &|_| true,
         );
 
         assert!(result.is_err());
