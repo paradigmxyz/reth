@@ -454,6 +454,24 @@ mod tests {
         SaveBlocksInput::new(blocks, prev_tip, prev_tip, new_tip, new_tip)
     }
 
+    /// Seeds block zero separately because [`SaveBlocksInput`] only advances an existing tip.
+    fn save_genesis<T>(provider: &T, genesis: &ExecutedBlock<EthPrimitives>) -> ProviderResult<()>
+    where
+        T: BlockExecutionWriter<
+            Block = reth_ethereum_primitives::Block,
+            Receipt = reth_ethereum_primitives::Receipt,
+        >,
+    {
+        assert_eq!(genesis.recovered_block().number, 0);
+        let execution_outcome =
+            reth_execution_types::ExecutionOutcome::single(0, genesis.execution_outcome().clone());
+        provider.append_blocks_with_state(
+            vec![genesis.recovered_block().clone()],
+            &execution_outcome,
+            genesis.hashed_state().as_ref().clone(),
+        )
+    }
+
     fn persistence_service<N>(provider: ProviderFactory<N>) -> PersistenceService<N>
     where
         N: ProviderNodeTypes<Primitives = EthPrimitives>,
@@ -613,12 +631,24 @@ mod tests {
         let signer = block_builder.signer;
         let blocks: Vec<_> = block_builder.get_executed_blocks(0..FINISH_TIP as u64 + 1).collect();
         let provider_rw = provider_factory.database_provider_rw().unwrap();
-        provider_rw.save_blocks(blocks[..=STATE_TRIE_TIP].to_vec(), SaveBlocksMode::Full).unwrap();
+        save_genesis(&provider_rw, &blocks[0]).unwrap();
         provider_rw.commit().unwrap();
 
         let provider_rw = provider_factory.database_provider_rw().unwrap();
         provider_rw
-            .save_blocks_with_frontiers(&SaveBlocksInput::new(
+            .save_blocks(&SaveBlocksInput::new(
+                blocks[1..=STATE_TRIE_TIP].to_vec(),
+                0,
+                0,
+                STATE_TRIE_TIP as u64,
+                STATE_TRIE_TIP as u64,
+            ))
+            .unwrap();
+        provider_rw.commit().unwrap();
+
+        let provider_rw = provider_factory.database_provider_rw().unwrap();
+        provider_rw
+            .save_blocks(&SaveBlocksInput::new(
                 blocks[STATE_TRIE_TIP + 1..=FINISH_TIP].to_vec(),
                 STATE_TRIE_TIP as u64,
                 STATE_TRIE_TIP as u64,
@@ -701,7 +731,13 @@ mod tests {
         let mut block_builder = TestBlockBuilder::eth().with_state();
         let blocks = block_builder.get_executed_blocks(0..TIP + 1).collect::<Vec<_>>();
         let provider_rw = provider_factory.database_provider_rw().unwrap();
-        provider_rw.save_blocks(blocks, SaveBlocksMode::Full).unwrap();
+        save_genesis(&provider_rw, &blocks[0]).unwrap();
+        provider_rw.commit().unwrap();
+
+        let provider_rw = provider_factory.database_provider_rw().unwrap();
+        provider_rw
+            .save_blocks(&SaveBlocksInput::new(blocks[1..].to_vec(), 0, 0, TIP, TIP))
+            .unwrap();
         provider_rw
             .tx_ref()
             .delete::<tables::StageCheckpoints>(StageId::Finish.to_string(), None)

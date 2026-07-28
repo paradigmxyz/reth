@@ -210,8 +210,8 @@ mod state_provider_builder_tests {
     use reth_ethereum_primitives::EthPrimitives;
     use reth_primitives_traits::Account;
     use reth_provider::{
-        providers::BlockchainProvider, test_utils::create_test_provider_factory,
-        PruneCheckpointWriter, SaveBlocksMode, StateWriter, StorageSettings,
+        providers::BlockchainProvider, test_utils::create_test_provider_factory, BlockWriter,
+        PruneCheckpointWriter, StateWriter, StorageSettings,
     };
     use reth_prune::{PruneCheckpoint, PruneMode, PruneSegment};
     use reth_trie::{HashedPostStateSorted, HashedStorageSorted};
@@ -358,20 +358,18 @@ mod state_provider_builder_tests {
         );
 
         let provider_rw = factory.provider_rw()?;
-        provider_rw.save_blocks(vec![blocks[0].clone()], SaveBlocksMode::Full)?;
+        provider_rw.append_blocks_with_state(
+            vec![blocks[0].recovered_block().clone()],
+            &(blocks[0].execution_outcome().clone(), 0).into(),
+            blocks[0].hashed_state().as_ref().clone(),
+        )?;
         provider_rw.write_hashed_state(&database_state)?;
         provider_rw.commit()?;
 
         // Advance Finish through block 2 while leaving the full state/trie frontier at block 0.
         // Blocks 1 and 2 are therefore part of the in-memory masking suffix.
         let provider_rw = factory.provider_rw()?;
-        provider_rw.save_blocks_with_frontiers(&SaveBlocksInput::new(
-            blocks[1..=2].to_vec(),
-            0,
-            0,
-            2,
-            0,
-        ))?;
+        provider_rw.save_blocks(&SaveBlocksInput::new(blocks[1..=2].to_vec(), 0, 0, 2, 0))?;
 
         // Make historical reads at the block-0 anchor unusable. If StateProviderBuilder invokes
         // the historical fallback, the database-only assertions below fail with StateAtBlockPruned.
@@ -1755,16 +1753,38 @@ where
                 debug!(target: "engine::tree", ?action, "waiting for in-flight persistence");
                 let result = rx.recv().map_err(|_| AdvancePersistenceError::ChannelClosed)?;
                 self.on_persistence_complete(result, start_time)?;
+                continue
+            }
+
+            if let Some(new_tip_num) = self.find_disk_reorg()? {
+                self.remove_blocks(new_tip_num);
+                continue
+            }
+
+            let canonical_head_number = self.state.tree_state.canonical_block_number();
+            if self.persistence_state.last_persisted_block.number == canonical_head_number {
+                let state_trie_tip = self.persistence_state.last_state_trie_persisted_block.number;
+                if state_trie_tip == canonical_head_number {
+                    debug!(target: "engine::tree", "persistence complete, signaling termination");
+                    return Ok(())
+                }
+
+                assert!(
+                    state_trie_tip < canonical_head_number,
+                    "state/trie persistence cannot be ahead of the database tip"
+                );
+                debug!(
+                    target: "engine::tree",
+                    ?state_trie_tip,
+                    ?canonical_head_number,
+                    "rewinding partial persistence before final shutdown save"
+                );
+                self.remove_blocks(state_trie_tip);
+                continue
             }
 
             let input = self.get_save_blocks_input(PersistTarget::Head)?;
-
-            if input.is_empty() {
-                debug!(target: "engine::tree", "persistence complete, signaling termination");
-                return Ok(())
-            }
-
-            debug!(target: "engine::tree", count = input.blocks().len(), "persisting remaining blocks before shutdown");
+            debug!(target: "engine::tree", count = input.persist_rest_blocks().len(), "persisting remaining blocks before shutdown");
             self.persist_blocks(input);
         }
     }
@@ -2436,9 +2456,24 @@ where
             return false
         }
 
-        let min_block = self.persistence_state.last_persisted_block.number;
-        self.state.tree_state.canonical_block_number().saturating_sub(min_block) >
-            self.config.persistence_threshold()
+        let prev_db_tip = self.persistence_state.last_persisted_block.number;
+        let canonical_head_number = self.state.tree_state.canonical_block_number();
+        canonical_head_number.saturating_sub(prev_db_tip) > self.config.persistence_threshold() &&
+            canonical_head_number.saturating_sub(self.effective_memory_block_buffer_target()) >
+                prev_db_tip
+    }
+
+    /// Returns the in-memory block buffer used for threshold persistence.
+    ///
+    /// A masking suffix requires at least one unpersisted block so a later shutdown can advance
+    /// the database and fully flush state/trie data in the same persistence operation.
+    const fn effective_memory_block_buffer_target(&self) -> u64 {
+        let configured_target = self.config.memory_block_buffer_target();
+        if self.config.num_state_masking_blocks() > 0 && configured_target == 0 {
+            1
+        } else {
+            configured_target
+        }
     }
 
     /// Returns the blocks and frontiers for the next persistence cycle.
@@ -2459,10 +2494,10 @@ where
         let new_db_tip = match target {
             PersistTarget::Head => canonical_head_number,
             PersistTarget::Threshold => canonical_head_number
-                .saturating_sub(self.config.memory_block_buffer_target())
+                .saturating_sub(self.effective_memory_block_buffer_target())
                 .max(prev_db_tip),
         };
-        debug_assert!(new_db_tip >= prev_db_tip, "database reorg must be handled before saving");
+        debug_assert!(new_db_tip > prev_db_tip, "database tip must advance when saving");
 
         let new_partial_state_trie = match target {
             // Graceful shutdown leaves the database fully consistent at the canonical head.
