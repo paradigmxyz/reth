@@ -6,10 +6,10 @@ use crate::{
     to_range,
     traits::{BlockSource, ReceiptProvider},
     BalProvider, BalStoreHandle, BlockHashReader, BlockNumReader, BlockReader, ChainSpecProvider,
-    DatabaseProviderFactory, EitherWriterDestination, HashedPostStateProvider, HeaderProvider,
-    HeaderSyncGapProvider, InMemoryBalStore, MetadataProvider, ProviderError,
-    PruneCheckpointReader, RocksDBProviderFactory, StageCheckpointReader, StateProviderBox,
-    StaticFileProviderFactory, StaticFileWriter, TransactionVariant, TransactionsProvider,
+    DatabaseProviderFactory, EitherWriterDestination, HeaderProvider, HeaderSyncGapProvider,
+    InMemoryBalStore, MetadataProvider, ProviderError, PruneCheckpointReader,
+    RocksDBProviderFactory, StageCheckpointReader, StateProviderBox, StaticFileProviderFactory,
+    StaticFileWriter, TransactionVariant, TransactionsProvider,
 };
 use alloy_consensus::transaction::TransactionMeta;
 use alloy_eips::BlockHashOrNumber;
@@ -34,8 +34,6 @@ use reth_storage_api::{
 };
 use reth_storage_errors::provider::ProviderResult;
 use reth_storage_overlay::ChangesetCache;
-use reth_trie::HashedPostState;
-use revm::database::BundleState;
 use std::{
     ops::{RangeBounds, RangeInclusive},
     path::Path,
@@ -52,8 +50,6 @@ pub use provider::{
 };
 
 use super::ProviderNodeTypes;
-use reth_trie::KeccakKeyHasher;
-
 mod builder;
 pub use builder::{ProviderFactoryBuilder, ReadOnlyConfig};
 
@@ -955,19 +951,6 @@ impl<N: ProviderNodeTypes> PruneCheckpointReader for ProviderFactory<N> {
 
     fn get_prune_checkpoints(&self) -> ProviderResult<Vec<(PruneSegment, PruneCheckpoint)>> {
         self.provider()?.get_prune_checkpoints()
-    }
-}
-
-impl<N: ProviderNodeTypes> HashedPostStateProvider for ProviderFactory<N> {
-    fn hashed_post_state(&self, bundle_state: &BundleState) -> ProviderResult<HashedPostState> {
-        if bundle_state
-            .state()
-            .values()
-            .any(|account| account.was_destroyed() && account.info.is_some())
-        {
-            return Err(ProviderError::UnsupportedProvider)
-        }
-        Ok(HashedPostState::from_bundle_state::<KeccakKeyHasher>(bundle_state.state()))
     }
 }
 

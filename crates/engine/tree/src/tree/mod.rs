@@ -398,7 +398,6 @@ where
         + BlockReader<Block = N::Block, Header = N::BlockHeader>
         + StateProviderFactory
         + StateReader<Receipt = N::Receipt>
-        + HashedPostStateProvider
         + BalProvider
         + Clone
         + 'static,
@@ -2230,7 +2229,10 @@ where
             .provider
             .get_state(block.header().number())?
             .ok_or_else(|| ProviderError::StateForNumberNotFound(block.header().number()))?;
-        let hashed_state = self.provider.hashed_post_state(execution_output.state())?;
+        let hashed_state = self
+            .provider
+            .state_by_block_hash(block.parent_hash())?
+            .hashed_post_state(execution_output.state())?;
 
         debug!(
             target: "engine::tree",
