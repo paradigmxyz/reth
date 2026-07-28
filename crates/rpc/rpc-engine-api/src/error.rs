@@ -20,9 +20,13 @@ pub const UNSUPPORTED_FORK_CODE: i32 = -38005;
 pub const UNKNOWN_PAYLOAD_CODE: i32 = -38001;
 /// Request too large error code.
 pub const REQUEST_TOO_LARGE_CODE: i32 = -38004;
+/// Requested forkchoice reorg exceeds the configured depth limit.
+pub const TOO_DEEP_REORG_CODE: i32 = -38006;
 
 /// Error message for the request too large error.
 const REQUEST_TOO_LARGE_MESSAGE: &str = "Too large request";
+/// Error message for a forkchoice reorg that exceeds the configured depth limit.
+const TOO_DEEP_REORG_MESSAGE: &str = "Too deep reorg";
 
 /// Error returned by [`EngineApi`][crate::EngineApi]
 ///
@@ -205,6 +209,13 @@ impl From<EngineApiError> for jsonrpsee_types::error::ErrorObject<'static> {
                         );
                     }
                 },
+                BeaconForkChoiceUpdateError::TooDeepReorg => {
+                    jsonrpsee_types::error::ErrorObject::owned(
+                        TOO_DEEP_REORG_CODE,
+                        TOO_DEEP_REORG_MESSAGE,
+                        None::<()>,
+                    )
+                }
                 BeaconForkChoiceUpdateError::EngineUnavailable |
                 BeaconForkChoiceUpdateError::Internal(_) => {
                     jsonrpsee_types::error::ErrorObject::owned(
@@ -277,6 +288,12 @@ mod tests {
             EngineApiError::ForkChoiceUpdate(BeaconForkChoiceUpdateError::ForkchoiceUpdateError(
                 ForkchoiceUpdateError::UpdatedInvalidPayloadAttributes,
             )),
+        );
+
+        ensure_engine_rpc_error(
+            TOO_DEEP_REORG_CODE,
+            TOO_DEEP_REORG_MESSAGE,
+            EngineApiError::ForkChoiceUpdate(BeaconForkChoiceUpdateError::TooDeepReorg),
         );
 
         ensure_engine_rpc_error(

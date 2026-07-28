@@ -33,6 +33,9 @@ pub enum BeaconForkChoiceUpdateError {
     /// Thrown when a forkchoice update resulted in an error.
     #[error("forkchoice update error: {0}")]
     ForkchoiceUpdateError(#[from] ForkchoiceUpdateError),
+    /// Thrown when the requested canonical chain reorg exceeds the configured depth limit.
+    #[error("too deep reorg")]
+    TooDeepReorg,
     /// Thrown when the engine task is unavailable/stopped.
     #[error("beacon consensus engine task stopped")]
     EngineUnavailable,

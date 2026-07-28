@@ -7,8 +7,8 @@ use clap::{
 use eyre::ensure;
 use reth_cli_util::{parse_duration_from_secs_or_ms, parsers::format_duration_as_secs_or_ms};
 use reth_engine_primitives::{
-    TreeConfig, DEFAULT_INVALID_HEADER_HIT_EVICTION_THRESHOLD, DEFAULT_MULTIPROOF_TASK_CHUNK_SIZE,
-    DEFAULT_PERSISTENCE_BACKPRESSURE_THRESHOLD,
+    TreeConfig, DEFAULT_INVALID_HEADER_HIT_EVICTION_THRESHOLD, DEFAULT_MAX_REORG_DEPTH,
+    DEFAULT_MULTIPROOF_TASK_CHUNK_SIZE, DEFAULT_PERSISTENCE_BACKPRESSURE_THRESHOLD,
 };
 use std::{sync::OnceLock, time::Duration};
 
@@ -43,6 +43,7 @@ pub struct DefaultEngineValues {
     state_root_fallback: bool,
     always_process_payload_attributes_on_canonical_head: bool,
     allow_unwind_canonical_header: bool,
+    max_reorg_depth: u64,
     storage_worker_count: Option<usize>,
     account_worker_count: Option<usize>,
     prewarming_threads: Option<usize>,
@@ -179,6 +180,12 @@ impl DefaultEngineValues {
         self
     }
 
+    /// Set the maximum canonical chain reorg depth
+    pub const fn with_max_reorg_depth(mut self, v: u64) -> Self {
+        self.max_reorg_depth = v;
+        self
+    }
+
     /// Set the default storage worker count
     pub const fn with_storage_worker_count(mut self, v: Option<usize>) -> Self {
         self.storage_worker_count = v;
@@ -273,6 +280,7 @@ impl Default for DefaultEngineValues {
             state_root_fallback: false,
             always_process_payload_attributes_on_canonical_head: false,
             allow_unwind_canonical_header: false,
+            max_reorg_depth: DEFAULT_MAX_REORG_DEPTH,
             storage_worker_count: None,
             account_worker_count: None,
             prewarming_threads: None,
@@ -437,6 +445,10 @@ pub struct EngineArgs {
     #[arg(long = "engine.allow-unwind-canonical-header", default_value_t = DefaultEngineValues::get_global().allow_unwind_canonical_header)]
     pub allow_unwind_canonical_header: bool,
 
+    /// Maximum canonical chain reorg depth. Set to zero to disable the limit.
+    #[arg(long = "engine.max-reorg-depth", default_value_t = DefaultEngineValues::get_global().max_reorg_depth)]
+    pub max_reorg_depth: u64,
+
     /// Configure the number of storage proof workers in the Tokio blocking pool.
     /// If not specified, defaults to 2x available parallelism.
     #[arg(long = "engine.storage-worker-count", default_value = Resettable::from(DefaultEngineValues::get_global().storage_worker_count.map(|v| v.to_string().into())))]
@@ -579,6 +591,7 @@ impl Default for EngineArgs {
             state_root_fallback,
             always_process_payload_attributes_on_canonical_head,
             allow_unwind_canonical_header,
+            max_reorg_depth,
             storage_worker_count,
             account_worker_count,
             prewarming_threads,
@@ -616,6 +629,7 @@ impl Default for EngineArgs {
             state_root_fallback,
             always_process_payload_attributes_on_canonical_head,
             allow_unwind_canonical_header,
+            max_reorg_depth,
             storage_worker_count,
             account_worker_count,
             prewarming_threads,
@@ -705,6 +719,7 @@ impl EngineArgs {
                 self.always_process_payload_attributes_on_canonical_head,
             )
             .with_unwind_canonical_header(self.allow_unwind_canonical_header)
+            .with_max_reorg_depth(self.max_reorg_depth)
             .without_cache_metrics(self.cache_metrics_disabled)
             .with_slow_block_threshold(self.slow_block_threshold)
             .with_disable_sparse_trie_cache_pruning(self.disable_sparse_trie_cache_pruning)
@@ -865,6 +880,7 @@ mod tests {
             state_root_fallback: true,
             always_process_payload_attributes_on_canonical_head: true,
             allow_unwind_canonical_header: true,
+            max_reorg_depth: 5,
             storage_worker_count: Some(16),
             account_worker_count: Some(8),
             prewarming_threads: Some(4),
@@ -909,6 +925,8 @@ mod tests {
             "--engine.state-root-fallback",
             "--engine.always-process-payload-attributes-on-canonical-head",
             "--engine.allow-unwind-canonical-header",
+            "--engine.max-reorg-depth",
+            "5",
             "--engine.storage-worker-count",
             "16",
             "--engine.account-worker-count",

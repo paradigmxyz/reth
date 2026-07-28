@@ -36,6 +36,11 @@ pub const DEFAULT_SPARSE_TRIE_PRUNE_DEPTH: usize = 4;
 /// Default timeout for the state root task before spawning a sequential fallback.
 pub const DEFAULT_STATE_ROOT_TASK_TIMEOUT: Duration = Duration::from_secs(1);
 
+/// Default maximum depth for canonical chain reorgs requested through forkchoice updates.
+///
+/// This matches Geth's default. A value of zero disables the limit.
+pub const DEFAULT_MAX_REORG_DEPTH: u64 = 32;
+
 const DEFAULT_BLOCK_BUFFER_LIMIT: u32 = EPOCH_SLOTS as u32 * 2;
 const DEFAULT_MAX_INVALID_HEADER_CACHE_LENGTH: u32 = 256;
 const DEFAULT_MAX_EXECUTE_BLOCK_BATCH_SIZE: usize = 4;
@@ -154,6 +159,8 @@ pub struct TreeConfig {
     always_process_payload_attributes_on_canonical_head: bool,
     /// Whether to unwind canonical header to ancestor during forkchoice updates.
     allow_unwind_canonical_header: bool,
+    /// Maximum canonical chain reorg depth. A value of zero disables the limit.
+    max_reorg_depth: u64,
     /// Whether to disable cache metrics recording (can be expensive with large cached state).
     disable_cache_metrics: bool,
     /// Depth for sparse trie pruning after state root computation.
@@ -228,6 +235,7 @@ impl Default for TreeConfig {
             state_root_fallback: false,
             always_process_payload_attributes_on_canonical_head: false,
             allow_unwind_canonical_header: false,
+            max_reorg_depth: DEFAULT_MAX_REORG_DEPTH,
             disable_cache_metrics: false,
             sparse_trie_prune_depth: DEFAULT_SPARSE_TRIE_PRUNE_DEPTH,
             slow_block_threshold: None,
@@ -301,6 +309,7 @@ impl TreeConfig {
             state_root_fallback,
             always_process_payload_attributes_on_canonical_head,
             allow_unwind_canonical_header,
+            max_reorg_depth: DEFAULT_MAX_REORG_DEPTH,
             disable_cache_metrics,
             sparse_trie_prune_depth,
             slow_block_threshold,
@@ -431,6 +440,13 @@ impl TreeConfig {
     /// Returns true if canonical header should be unwound to ancestor during forkchoice updates.
     pub const fn unwind_canonical_header(&self) -> bool {
         self.allow_unwind_canonical_header
+    }
+
+    /// Returns the maximum canonical chain reorg depth.
+    ///
+    /// A value of zero disables the limit.
+    pub const fn max_reorg_depth(&self) -> u64 {
+        self.max_reorg_depth
     }
 
     /// Setter for persistence threshold.
@@ -584,6 +600,14 @@ impl TreeConfig {
     /// Setter for whether to unwind canonical header to ancestor during forkchoice updates.
     pub const fn with_unwind_canonical_header(mut self, unwind_canonical_header: bool) -> Self {
         self.allow_unwind_canonical_header = unwind_canonical_header;
+        self
+    }
+
+    /// Sets the maximum canonical chain reorg depth.
+    ///
+    /// A value of zero disables the limit.
+    pub const fn with_max_reorg_depth(mut self, max_reorg_depth: u64) -> Self {
+        self.max_reorg_depth = max_reorg_depth;
         self
     }
 

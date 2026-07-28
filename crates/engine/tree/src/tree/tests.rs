@@ -17,11 +17,14 @@ use alloy_primitives::{
 use alloy_rlp::Decodable;
 use alloy_rpc_types_engine::{
     ExecutionData, ExecutionPayloadSidecar, ExecutionPayloadV1, ForkchoiceState,
+    ForkchoiceUpdateError,
 };
 use assert_matches::assert_matches;
 use reth_chain_state::{test_utils::TestBlockBuilder, BlockState};
 use reth_chainspec::{ChainSpec, HOLESKY, MAINNET};
-use reth_engine_primitives::{EngineApiValidator, ForkchoiceStatus, NoopInvalidBlockHook};
+use reth_engine_primitives::{
+    BeaconForkChoiceUpdateError, EngineApiValidator, ForkchoiceStatus, NoopInvalidBlockHook,
+};
 use reth_ethereum_consensus::EthBeaconConsensus;
 use reth_ethereum_engine_primitives::{EthEngineTypes, EthPayloadAttributes};
 use reth_ethereum_primitives::{Block, EthPrimitives};
@@ -1304,18 +1307,11 @@ async fn test_engine_tree_live_sync_transition_required_blocks_requested() {
 
 #[tokio::test]
 async fn test_fcu_with_canonical_ancestor_updates_latest_block() {
-    // Test for issue where FCU with canonical ancestor doesn't update Latest block state
-    // This was causing "nonce too low" errors when discard_reorged_transactions is enabled
-
     reth_tracing::init_test_tracing();
     let chain_spec = MAINNET.clone();
 
-    // Create test harness
-    let mut test_harness = TestHarness::new(chain_spec.clone());
-
-    // Set engine kind to OpStack and enable unwind_canonical_header to ensure the fix is triggered
-    test_harness.tree.engine_kind = EngineApiKind::OpStack;
-    test_harness.tree.config = test_harness.tree.config.clone().with_unwind_canonical_header(true);
+    let config = TreeConfig::default().with_has_enough_parallelism(true).with_max_reorg_depth(2);
+    let mut test_harness = TestHarness::with_config(chain_spec.clone(), config);
     let mut test_block_builder = TestBlockBuilder::eth().with_chain_spec((*chain_spec).clone());
 
     // Create a chain of blocks
@@ -1334,6 +1330,8 @@ async fn test_fcu_with_canonical_ancestor_updates_latest_block() {
 
     // Now perform FCU to a canonical ancestor (block 2)
     let ancestor_block = blocks[1].recovered_block().clone(); // Block 2 (0-indexed as blocks[1])
+    let mut canonical_state_notifications =
+        test_harness.tree.canonical_in_memory_state.subscribe_canon_state();
 
     // Send FCU to the canonical ancestor
     let (tx, rx) = oneshot::channel();
@@ -1381,6 +1379,198 @@ async fn test_fcu_with_canonical_ancestor_updates_latest_block() {
         ancestor_block.hash(),
         "In-memory state: Latest block hash should be updated to canonical ancestor"
     );
+
+    let notification = canonical_state_notifications.recv().await.unwrap();
+    assert!(notification.reverted().is_some());
+}
+
+#[tokio::test]
+async fn test_opstack_fcu_with_canonical_ancestor_keeps_existing_behavior() {
+    let chain_spec = MAINNET.clone();
+    let config = TreeConfig::default()
+        .with_has_enough_parallelism(true)
+        .with_unwind_canonical_header(true)
+        .with_max_reorg_depth(1);
+    let mut test_harness = TestHarness::with_config(chain_spec.clone(), config);
+    let mut test_block_builder = TestBlockBuilder::eth().with_chain_spec((*chain_spec).clone());
+    let blocks: Vec<_> = test_block_builder.get_executed_blocks(1..5).collect();
+    test_harness = test_harness.with_blocks(blocks.clone());
+    test_harness.tree.engine_kind = EngineApiKind::OpStack;
+
+    let ancestor = blocks[0].recovered_block();
+    let outcome = test_harness
+        .tree
+        .on_forkchoice_updated(
+            ForkchoiceState {
+                head_block_hash: ancestor.hash(),
+                safe_block_hash: B256::ZERO,
+                finalized_block_hash: B256::ZERO,
+            },
+            None,
+        )
+        .unwrap()
+        .outcome
+        .await
+        .unwrap();
+
+    assert!(outcome.payload_status.is_valid());
+    assert_eq!(test_harness.tree.state.tree_state.canonical_block_hash(), ancestor.hash());
+    assert_eq!(
+        test_harness.tree.canonical_in_memory_state.get_canonical_head().hash(),
+        ancestor.hash()
+    );
+}
+
+#[tokio::test]
+async fn test_fcu_with_finalized_canonical_ancestor_is_noop() {
+    let chain_spec = MAINNET.clone();
+    let mut test_harness = TestHarness::new(chain_spec.clone());
+    let mut test_block_builder = TestBlockBuilder::eth().with_chain_spec((*chain_spec).clone());
+    let blocks: Vec<_> = test_block_builder.get_executed_blocks(1..5).collect();
+    test_harness = test_harness.with_blocks(blocks.clone());
+
+    let current_head = blocks[3].recovered_block();
+    let finalized = blocks[1].recovered_block();
+    let ancestor = blocks[0].recovered_block();
+    test_harness.tree.canonical_in_memory_state.set_finalized(finalized.clone_sealed_header());
+    for head in [finalized, ancestor] {
+        let payload_attributes = EthPayloadAttributes {
+            timestamp: head.timestamp() + 1,
+            prev_randao: B256::ZERO,
+            suggested_fee_recipient: Default::default(),
+            withdrawals: None,
+            parent_beacon_block_root: None,
+            slot_number: None,
+            target_gas_limit: None,
+        };
+
+        let outcome = test_harness
+            .tree
+            .on_forkchoice_updated(
+                ForkchoiceState {
+                    head_block_hash: head.hash(),
+                    safe_block_hash: head.hash(),
+                    finalized_block_hash: head.hash(),
+                },
+                Some(payload_attributes),
+            )
+            .unwrap()
+            .outcome
+            .await
+            .unwrap();
+
+        assert!(outcome.payload_status.is_valid());
+        assert!(outcome.payload_id.is_none());
+    }
+
+    assert_eq!(test_harness.tree.state.tree_state.canonical_block_hash(), current_head.hash());
+    assert_eq!(
+        test_harness.tree.canonical_in_memory_state.get_finalized_num_hash(),
+        Some(finalized.num_hash())
+    );
+    assert!(test_harness.payload_command_rx.try_recv().is_err());
+}
+
+#[tokio::test]
+async fn test_fcu_rejects_reorg_beyond_depth_limit_atomically() {
+    let chain_spec = MAINNET.clone();
+    let config = TreeConfig::default().with_has_enough_parallelism(true).with_max_reorg_depth(2);
+    let mut test_harness = TestHarness::with_config(chain_spec.clone(), config);
+    let mut test_block_builder = TestBlockBuilder::eth().with_chain_spec((*chain_spec).clone());
+    let blocks: Vec<_> = test_block_builder.get_executed_blocks(1..5).collect();
+    test_harness = test_harness.with_blocks(blocks.clone());
+
+    let current_head = blocks[3].recovered_block();
+    let ancestor = blocks[0].recovered_block();
+    let state = ForkchoiceState {
+        head_block_hash: ancestor.hash(),
+        safe_block_hash: B256::ZERO,
+        finalized_block_hash: B256::ZERO,
+    };
+    let err =
+        test_harness.tree.on_forkchoice_updated(state, None).unwrap().outcome.await.unwrap_err();
+
+    assert_matches!(err, BeaconForkChoiceUpdateError::TooDeepReorg);
+    assert_eq!(test_harness.tree.state.tree_state.canonical_block_hash(), current_head.hash());
+    assert_eq!(
+        test_harness.tree.canonical_in_memory_state.get_canonical_head().hash(),
+        current_head.hash()
+    );
+
+    test_harness.tree.config = test_harness.tree.config.clone().with_max_reorg_depth(0);
+    let outcome =
+        test_harness.tree.on_forkchoice_updated(state, None).unwrap().outcome.await.unwrap();
+    assert!(outcome.payload_status.is_valid());
+    assert_eq!(test_harness.tree.state.tree_state.canonical_block_hash(), ancestor.hash());
+}
+
+#[tokio::test]
+async fn test_fcu_rejects_inconsistent_ancestor_state_atomically() {
+    let chain_spec = MAINNET.clone();
+    let config = TreeConfig::default().with_has_enough_parallelism(true).with_max_reorg_depth(1);
+    let mut test_harness = TestHarness::with_config(chain_spec.clone(), config);
+    let mut test_block_builder = TestBlockBuilder::eth().with_chain_spec((*chain_spec).clone());
+    let blocks: Vec<_> = test_block_builder.get_executed_blocks(1..5).collect();
+    test_harness = test_harness.with_blocks(blocks.clone());
+
+    let current_head = blocks[3].recovered_block();
+    let ancestor = blocks[1].recovered_block();
+    let marker = blocks[2].recovered_block().hash();
+    for (safe_block_hash, finalized_block_hash) in [(marker, B256::ZERO), (B256::ZERO, marker)] {
+        let err = test_harness
+            .tree
+            .on_forkchoice_updated(
+                ForkchoiceState {
+                    head_block_hash: ancestor.hash(),
+                    safe_block_hash,
+                    finalized_block_hash,
+                },
+                None,
+            )
+            .unwrap()
+            .outcome
+            .await
+            .unwrap_err();
+
+        assert_matches!(
+            err,
+            BeaconForkChoiceUpdateError::ForkchoiceUpdateError(ForkchoiceUpdateError::InvalidState)
+        );
+    }
+
+    assert_eq!(test_harness.tree.state.tree_state.canonical_block_hash(), current_head.hash());
+    assert_eq!(
+        test_harness.tree.canonical_in_memory_state.get_canonical_head().hash(),
+        current_head.hash()
+    );
+}
+
+#[test]
+fn test_find_canonical_header_verifies_provider_header() {
+    let chain_spec = MAINNET.clone();
+    let mut test_harness = TestHarness::new(chain_spec.clone());
+    let mut test_block_builder = TestBlockBuilder::eth().with_chain_spec((*chain_spec).clone());
+    let blocks: Vec<_> = test_block_builder.get_executed_blocks(1..4).collect();
+    test_harness = test_harness.with_blocks(blocks.clone());
+
+    let canonical = blocks[1].recovered_block();
+    let persisted_only = TestHarness::new(chain_spec).with_blocks(blocks.clone());
+    persisted_only.tree.canonical_in_memory_state.clear_state();
+    assert_eq!(
+        persisted_only.tree.find_canonical_header(canonical.hash()).unwrap(),
+        Some(canonical.clone_sealed_header())
+    );
+
+    let mut stale_header = canonical.clone_sealed_header().clone_header();
+    stale_header.extra_data = Bytes::from_static(b"stale");
+    let stale_header = SealedHeader::seal_slow(stale_header);
+    test_harness.provider.add_header(stale_header.hash(), stale_header.clone_header());
+
+    assert_eq!(
+        test_harness.tree.find_canonical_header(canonical.hash()).unwrap(),
+        Some(canonical.clone_sealed_header())
+    );
+    assert!(test_harness.tree.find_canonical_header(stale_header.hash()).unwrap().is_none());
 }
 
 /// Test that verifies the happy path where a new payload extends the canonical chain

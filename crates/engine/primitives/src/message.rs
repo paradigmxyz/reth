@@ -4,8 +4,8 @@ use crate::{
 use alloy_eips::eip4895::Withdrawal;
 use alloy_primitives::{Bytes, B256};
 use alloy_rpc_types_engine::{
-    ExecutionData, ForkChoiceUpdateResult, ForkchoiceState, ForkchoiceUpdateError,
-    ForkchoiceUpdated, PayloadId, PayloadStatus, PayloadStatusEnum,
+    ExecutionData, ForkchoiceState, ForkchoiceUpdateError, ForkchoiceUpdated, PayloadId,
+    PayloadStatus, PayloadStatusEnum,
 };
 use core::{
     fmt::{self, Display},
@@ -19,6 +19,8 @@ use reth_payload_builder_primitives::PayloadBuilderError;
 use reth_payload_primitives::PayloadTypes;
 use std::time::{Duration, Instant};
 use tokio::sync::{mpsc::UnboundedSender, oneshot};
+
+type ForkChoiceUpdateResult = Result<ForkchoiceUpdated, BeaconForkChoiceUpdateError>;
 
 /// Type alias for backwards compat
 #[deprecated(note = "Use ConsensusEngineHandle instead")]
@@ -79,7 +81,20 @@ impl OnForkChoiceUpdated {
     pub fn invalid_state() -> Self {
         Self {
             forkchoice_status: ForkchoiceStatus::Invalid,
-            fut: Either::Left(futures::future::ready(Err(ForkchoiceUpdateError::InvalidState))),
+            fut: Either::Left(futures::future::ready(Err(
+                ForkchoiceUpdateError::InvalidState.into()
+            ))),
+        }
+    }
+
+    /// Creates a new instance of `OnForkChoiceUpdated` if the requested reorg exceeds the
+    /// configured depth limit.
+    pub fn too_deep_reorg() -> Self {
+        Self {
+            forkchoice_status: ForkchoiceStatus::Invalid,
+            fut: Either::Left(futures::future::ready(Err(
+                BeaconForkChoiceUpdateError::TooDeepReorg,
+            ))),
         }
     }
 
@@ -90,7 +105,7 @@ impl OnForkChoiceUpdated {
             // This is valid because this is only reachable if the state and payload is valid
             forkchoice_status: ForkchoiceStatus::Valid,
             fut: Either::Left(futures::future::ready(Err(
-                ForkchoiceUpdateError::UpdatedInvalidPayloadAttributes,
+                ForkchoiceUpdateError::UpdatedInvalidPayloadAttributes.into(),
             ))),
         }
     }
@@ -139,7 +154,7 @@ impl Future for PendingPayloadId {
             })),
             Err(_) | Ok(Err(_)) => {
                 // failed to initiate a payload build job
-                Poll::Ready(Err(ForkchoiceUpdateError::UpdatedInvalidPayloadAttributes))
+                Poll::Ready(Err(ForkchoiceUpdateError::UpdatedInvalidPayloadAttributes.into()))
             }
         }
     }
@@ -370,12 +385,11 @@ where
         state: ForkchoiceState,
         payload_attrs: Option<Payload::PayloadAttributes>,
     ) -> Result<ForkchoiceUpdated, BeaconForkChoiceUpdateError> {
-        Ok(self
-            .send_fork_choice_updated(state, payload_attrs)
+        self.send_fork_choice_updated(state, payload_attrs)
             .map_err(|_| BeaconForkChoiceUpdateError::EngineUnavailable)
             .await?
             .map_err(BeaconForkChoiceUpdateError::internal)?
-            .await?)
+            .await
     }
 
     /// Sends a forkchoice update message to the beacon consensus engine and returns the receiver to

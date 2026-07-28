@@ -1059,6 +1059,11 @@ Engine:
       --engine.allow-unwind-canonical-header
           Allow unwinding canonical header to ancestor during forkchoice updates. See `TreeConfig::unwind_canonical_header` for more details
 
+      --engine.max-reorg-depth <MAX_REORG_DEPTH>
+          Maximum canonical chain reorg depth. Set to zero to disable the limit
+
+          [default: 32]
+
       --engine.storage-worker-count <STORAGE_WORKER_COUNT>
           Configure the number of storage proof workers in the Tokio blocking pool. If not specified, defaults to 2x available parallelism
 
