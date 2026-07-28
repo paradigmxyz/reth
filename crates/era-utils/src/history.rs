@@ -285,13 +285,11 @@ where
 
     // When backfilling receipts, resume from the receipts tip so blocks whose headers were already
     // imported still get their receipts; only blocks above `headers_tip` are written in full.
-    let mut height = if store_receipts {
-        let receipts_tip = static_file_provider
-            .get_highest_static_file_block(StaticFileSegment::Receipts)
-            .unwrap_or_default();
-        headers_tip.min(receipts_tip)
-    } else {
-        headers_tip
+    let receipts_tip = store_receipts
+        .then(|| static_file_provider.get_highest_static_file_block(StaticFileSegment::Receipts));
+    let mut height = match receipts_tip {
+        Some(tip) => headers_tip.min(tip.unwrap_or_default()),
+        None => headers_tip,
     };
 
     // Only the executed range can hold receipts durably, so the repair has to land exactly on the
@@ -355,6 +353,14 @@ where
             Ok(target)
         })
         .transpose()?;
+
+    // A segment that doesn't exist yet starts at genesis, which holds no receipts of its own. The
+    // backfill resumes at block 1, so seed that entry or the writer rejects the first append.
+    if matches!(receipts_tip, Some(None)) {
+        let mut writer = static_file_provider.latest_writer(StaticFileSegment::Receipts)?;
+        writer.increment_block(0)?;
+        writer.commit()?;
+    }
 
     let to_block = receipts_target.or(to_block);
     let end = to_block.map_or(Bound::Unbounded, Bound::Included);
@@ -1114,6 +1120,69 @@ mod tests {
         );
 
         assert!(result.is_err());
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn receipt_import_backfills_a_completely_absent_segment() {
+        // No genesis, so the Receipts segment does not exist at all.
+        let pf = create_test_provider_factory();
+        let static_file_provider = pf.static_file_provider();
+        let folder = tempdir().unwrap();
+        let mut hash_collector = Collector::new(4096, Some(folder.path().to_owned()));
+
+        // Stand in for the genesis entries `init_genesis` would write to every segment, leaving
+        // only `Receipts` absent.
+        {
+            let mut writer =
+                static_file_provider.latest_writer(StaticFileSegment::Transactions).unwrap();
+            writer.increment_block(0).unwrap();
+            writer.commit().unwrap();
+        }
+
+        let provider = pf.database_provider_rw().unwrap();
+        {
+            let mut writer =
+                static_file_provider.latest_writer(StaticFileSegment::Headers).unwrap();
+            let genesis = Header::default();
+            writer.append_header(&genesis, &genesis.hash_slow()).unwrap();
+
+            let meta = TestMeta { marked: Cell::new(false) };
+            process::<TestEra, _, Block, _, _>(
+                &meta,
+                &mut writer,
+                None,
+                &provider,
+                &mut hash_collector,
+                0..=2,
+                ImportPolicy { headers_tip: 0, is_receipt_verifiable: &|_| true },
+            )
+            .unwrap();
+            writer.commit().unwrap();
+        }
+        provider.save_stage_checkpoint(StageId::Execution, StageCheckpoint::new(2)).unwrap();
+        provider.commit().unwrap();
+
+        assert_eq!(
+            static_file_provider.get_highest_static_file_block(StaticFileSegment::Receipts),
+            None
+        );
+
+        let stream = futures_util::stream::iter(vec![Ok(TestMeta { marked: Cell::new(false) })]);
+        let height = import::<TestEraWithEmptyReceipts, _, _, _, Block, _, _>(
+            stream,
+            &pf,
+            &mut hash_collector,
+            None,
+            true,
+            &|_| true,
+        )
+        .unwrap();
+
+        assert_eq!(height, 2);
+        assert_eq!(
+            static_file_provider.get_highest_static_file_block(StaticFileSegment::Receipts),
+            Some(2)
+        );
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
