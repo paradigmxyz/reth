@@ -1694,16 +1694,14 @@ where
     /// Helper method to remove blocks and set the persistence state. This ensures we keep track of
     /// the current persistence action while we're removing blocks.
     fn remove_blocks(&mut self, new_tip_num: u64) {
-        if new_tip_num >= self.persistence_state.last_persisted_block.number {
-            return
-        }
-
         debug!(target: "engine::tree", ?new_tip_num, last_persisted_block_number=?self.persistence_state.last_persisted_block.number, "Removing blocks using persistence task");
-        debug!(target: "engine::tree", ?new_tip_num, "Starting remove blocks job");
-        self.state.set_pending_sparse_trie_prune(false);
-        let (tx, rx) = crossbeam_channel::bounded(1);
-        let _ = self.persistence.remove_blocks_above(new_tip_num, tx);
-        self.persistence_state.start_remove(new_tip_num, rx);
+        if new_tip_num < self.persistence_state.last_persisted_block.number {
+            debug!(target: "engine::tree", ?new_tip_num, "Starting remove blocks job");
+            self.state.set_pending_sparse_trie_prune(false);
+            let (tx, rx) = crossbeam_channel::bounded(1);
+            let _ = self.persistence.remove_blocks_above(new_tip_num, tx);
+            self.persistence_state.start_remove(new_tip_num, rx);
+        }
     }
 
     /// Helper method to save blocks and set the persistence state. This ensures we keep track of

@@ -140,12 +140,9 @@ where
     ) -> Result<PersistenceResult, PersistenceError> {
         debug!(target: "engine::persistence", ?new_tip_num, "Removing blocks");
         let start_time = Instant::now();
-        let provider_rw = self.provider.unwind_provider_rw()?;
+        let provider_rw = self.provider.database_provider_rw()?;
 
-        let new_tip_hash = provider_rw
-            .block_hash(new_tip_num)?
-            .ok_or_else(|| ProviderError::HeaderNotFound(new_tip_num.into()))?;
-
+        let new_tip_hash = provider_rw.block_hash(new_tip_num)?;
         provider_rw.remove_block_and_execution_above(new_tip_num)?;
         let last_state_trie_block =
             provider_rw.get_stage_checkpoint(StageId::Finish)?.map(|checkpoint| {
@@ -159,7 +156,7 @@ where
         debug!(target: "engine::persistence", ?new_tip_num, ?new_tip_hash, "Removed blocks from disk");
         self.metrics.remove_blocks_above_duration_seconds.record(start_time.elapsed());
         Ok(PersistenceResult {
-            last_block: Some(BlockNumHash { hash: new_tip_hash, number: new_tip_num }),
+            last_block: new_tip_hash.map(|hash| BlockNumHash { hash, number: new_tip_num }),
             last_state_trie_block,
             commit_duration: None,
         })
