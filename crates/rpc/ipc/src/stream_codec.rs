@@ -47,11 +47,25 @@ impl Default for Separator {
     }
 }
 
+/// Scan state persisted across `decode()` calls when the incoming separator is
+/// `Separator::Empty`, so bytes already examined by a previous call are not
+/// rescanned. Reset via `ScanState::default()` after every emitted frame.
+#[derive(Debug, Default)]
+struct ScanState {
+    depth: i32,
+    in_str: bool,
+    is_escaped: bool,
+    start_idx: usize,
+    whitespaces: usize,
+    cursor: usize,
+}
+
 /// Stream codec for streaming protocols (ipc, tcp)
 #[derive(Debug, Default)]
 pub struct StreamCodec {
     incoming_separator: Separator,
     outgoing_separator: Separator,
+    scan: ScanState,
 }
 
 impl StreamCodec {
@@ -62,7 +76,18 @@ impl StreamCodec {
 
     /// New custom stream codec
     pub const fn new(incoming_separator: Separator, outgoing_separator: Separator) -> Self {
-        Self { incoming_separator, outgoing_separator }
+        Self {
+            incoming_separator,
+            outgoing_separator,
+            scan: ScanState {
+                depth: 0,
+                in_str: false,
+                is_escaped: false,
+                start_idx: 0,
+                whitespaces: 0,
+                cursor: 0,
+            },
+        }
     }
 }
 
@@ -89,36 +114,45 @@ impl tokio_util::codec::Decoder for StreamCodec {
                 Ok(None)
             }
         } else {
-            let mut depth = 0;
-            let mut in_str = false;
-            let mut is_escaped = false;
-            let mut start_idx = 0;
-            let mut whitespaces = 0;
+            // Empty-separator branch: scan state is carried across calls on
+            // `self.scan`, so bytes already examined by a previous decode()
+            // call are not rescanned. Completion check is byte-identical to
+            // the previous local-variable version.
+            while self.scan.cursor < buf.len() {
+                let idx = self.scan.cursor;
+                let byte = buf[idx];
 
-            for idx in 0..buf.as_ref().len() {
-                let byte = buf.as_ref()[idx];
-
-                if (byte == b'{' || byte == b'[') && !in_str {
-                    if depth == 0 {
-                        start_idx = idx;
+                if (byte == b'{' || byte == b'[') && !self.scan.in_str {
+                    if self.scan.depth == 0 {
+                        self.scan.start_idx = idx;
                     }
-                    depth += 1;
-                } else if (byte == b'}' || byte == b']') && !in_str {
-                    depth -= 1;
-                } else if byte == b'"' && !is_escaped {
-                    in_str = !in_str;
+                    self.scan.depth += 1;
+                } else if (byte == b'}' || byte == b']') && !self.scan.in_str {
+                    self.scan.depth -= 1;
+                } else if byte == b'"' && !self.scan.is_escaped {
+                    self.scan.in_str = !self.scan.in_str;
                 } else if is_whitespace(byte) {
-                    whitespaces += 1;
+                    self.scan.whitespaces += 1;
                 }
-                is_escaped = byte == b'\\' && !is_escaped && in_str;
+                self.scan.is_escaped = byte == b'\\' && !self.scan.is_escaped && self.scan.in_str;
 
-                if depth == 0 && idx != start_idx && idx - start_idx + 1 > whitespaces {
-                    if start_idx > 0 {
-                        buf.advance(start_idx);
+                if self.scan.depth == 0
+                    && idx != self.scan.start_idx
+                    && idx - self.scan.start_idx + 1 > self.scan.whitespaces
+                {
+                    let start = self.scan.start_idx;
+                    let end = idx + 1;
+                    // Reset scan state before mutating buf; byte indices in
+                    // self.scan become stale after buf.advance/split_to.
+                    self.scan = ScanState::default();
+                    if start > 0 {
+                        buf.advance(start);
                     }
-                    let bts = buf.split_to(idx + 1 - start_idx);
+                    let bts = buf.split_to(end - start);
                     return Ok(String::from_utf8(bts.into()).ok())
                 }
+
+                self.scan.cursor += 1;
             }
             Ok(None)
         }
@@ -142,6 +176,7 @@ impl tokio_util::codec::Encoder<String> for StreamCodec {
 mod tests {
     use super::*;
     use bytes::BufMut;
+    use rand::{rngs::StdRng, RngCore, SeedableRng};
     use tokio_util::codec::Decoder;
 
     #[test]
@@ -311,5 +346,339 @@ mod tests {
         let parsed: Result<Obj, _> = serde_json::from_str(json);
         assert!(parsed.is_ok(), "serde_json should accept whitespace-wrapped JSON");
         assert_eq!(parsed.unwrap(), Obj { key: "value".into() });
+    }
+
+    // State-carry regression tests: exercise the failure modes a byte-boundary
+    // chunk split would expose in a non-state-carrying implementation, and
+    // reset invariants a state-carrying implementation might break.
+
+    /// Multiple messages pipelined into one buffer, decoded in a single call each.
+    #[test]
+    fn pipelined_messages_single_call() {
+        let mut buf = BytesMut::with_capacity(256);
+        buf.put_slice(br#"{"a":1}{"b":2}{"c":3}"#);
+        let mut codec = StreamCodec::stream_incoming();
+
+        assert_eq!(codec.decode(&mut buf).unwrap().unwrap(), r#"{"a":1}"#);
+        assert_eq!(codec.decode(&mut buf).unwrap().unwrap(), r#"{"b":2}"#);
+        assert_eq!(codec.decode(&mut buf).unwrap().unwrap(), r#"{"c":3}"#);
+        assert!(codec.decode(&mut buf).unwrap().is_none());
+        assert!(buf.is_empty());
+    }
+
+    /// Pipelined messages fed one byte at a time — the chunk schedule the
+    /// state-carry rewrite was written for.
+    #[test]
+    fn pipelined_messages_byte_by_byte() {
+        let payload = br#"{"a":1}{"b":2}{"c":3}"#;
+        let mut buf = BytesMut::with_capacity(256);
+        let mut codec = StreamCodec::stream_incoming();
+        let mut decoded = Vec::new();
+
+        for byte in payload {
+            buf.put_u8(*byte);
+            while let Some(m) = codec.decode(&mut buf).unwrap() {
+                decoded.push(m);
+            }
+        }
+
+        assert_eq!(decoded, vec![r#"{"a":1}"#, r#"{"b":2}"#, r#"{"c":3}"#]);
+        assert!(buf.is_empty());
+    }
+
+    /// Escape sequence split across a chunk boundary. Without `is_escaped`
+    /// carrying across calls, the second decode would treat the trailing
+    /// backslash as opening a new escape and mis-frame the message.
+    #[test]
+    fn escape_split_across_chunk_boundary() {
+        let mut codec = StreamCodec::stream_incoming();
+        let mut buf = BytesMut::with_capacity(64);
+
+        buf.put_slice(br#"{"a":"\"#);
+        assert!(codec.decode(&mut buf).unwrap().is_none());
+
+        buf.put_slice(br#"\"}"#);
+        let msg = codec.decode(&mut buf).unwrap().unwrap();
+        assert_eq!(msg, r#"{"a":"\\"}"#);
+    }
+
+    /// Depth transition 0 → +1 → 0 spanning two `decode()` calls must still
+    /// trigger completion exactly once.
+    #[test]
+    fn depth_split_across_chunk_boundary() {
+        let mut codec = StreamCodec::stream_incoming();
+        let mut buf = BytesMut::with_capacity(64);
+
+        buf.put_u8(b'{');
+        assert!(codec.decode(&mut buf).unwrap().is_none());
+        buf.put_u8(b'}');
+        assert_eq!(codec.decode(&mut buf).unwrap().unwrap(), "{}");
+    }
+
+    /// Prefix garbage that drives depth negative before the first opener must
+    /// not permanently poison the codec — behavior on such input matches the
+    /// pre-state-carry version (emit a bogus frame, keep progressing).
+    #[test]
+    fn leading_close_bracket_does_not_poison() {
+        let mut codec = StreamCodec::stream_incoming();
+        let mut buf = BytesMut::with_capacity(8);
+        buf.put_slice(b"]{");
+        assert_eq!(codec.decode(&mut buf).unwrap(), Some("]{".to_string()));
+    }
+
+    /// After a successful frame, scan state must fully reset so subsequent
+    /// decodes on the same buffer work normally.
+    #[test]
+    fn state_reset_after_completion() {
+        let mut codec = StreamCodec::stream_incoming();
+        let mut buf = BytesMut::with_capacity(64);
+        buf.put_slice(br#"   {"a":"has spaces"}{"b":2}   "#);
+
+        assert_eq!(codec.decode(&mut buf).unwrap().unwrap(), r#"{"a":"has spaces"}"#);
+        assert_eq!(codec.decode(&mut buf).unwrap().unwrap(), r#"{"b":2}"#);
+        assert!(codec.decode(&mut buf).unwrap().is_none());
+    }
+
+    /// Byte-separator branch is untouched by the state-carry rewrite; verify
+    /// it still tolerates one-byte-at-a-time feeds.
+    #[test]
+    fn byte_separator_split_at_every_byte() {
+        let payload = b"first line\nsecond line\nthird line\n";
+        let mut codec = StreamCodec::default();
+        let mut buf = BytesMut::with_capacity(64);
+        let mut got = Vec::new();
+
+        for byte in payload {
+            buf.put_u8(*byte);
+            while let Some(m) = codec.decode(&mut buf).unwrap() {
+                got.push(m);
+            }
+        }
+
+        assert_eq!(got, vec!["first line", "second line", "third line"]);
+    }
+
+    // Differential fuzz: feed the same bytes through the state-carry codec and
+    // a byte-identical replica of the pre-patch Separator::Empty decode loop,
+    // with identical chunk boundaries, and assert both produce the same
+    // sequence of decode results. Guards the state-carry rewrite against
+    // subtle divergences on inputs outside the targeted regression tests.
+
+    /// Byte-identical snapshot of the pre-patch `Separator::Empty` decode branch.
+    /// Used only as a differential reference in tests.
+    #[derive(Default)]
+    struct UpstreamReplica;
+
+    impl Decoder for UpstreamReplica {
+        type Item = String;
+        type Error = io::Error;
+
+        fn decode(&mut self, buf: &mut BytesMut) -> io::Result<Option<Self::Item>> {
+            let mut depth = 0i32;
+            let mut in_str = false;
+            let mut is_escaped = false;
+            let mut start_idx = 0usize;
+            let mut whitespaces = 0usize;
+
+            for idx in 0..buf.as_ref().len() {
+                let byte = buf.as_ref()[idx];
+
+                if (byte == b'{' || byte == b'[') && !in_str {
+                    if depth == 0 {
+                        start_idx = idx;
+                    }
+                    depth += 1;
+                } else if (byte == b'}' || byte == b']') && !in_str {
+                    depth -= 1;
+                } else if byte == b'"' && !is_escaped {
+                    in_str = !in_str;
+                } else if is_whitespace(byte) {
+                    whitespaces += 1;
+                }
+                is_escaped = byte == b'\\' && !is_escaped && in_str;
+
+                if depth == 0 && idx != start_idx && idx - start_idx + 1 > whitespaces {
+                    if start_idx > 0 {
+                        buf.advance(start_idx);
+                    }
+                    let bts = buf.split_to(idx + 1 - start_idx);
+                    return Ok(String::from_utf8(bts.into()).ok())
+                }
+            }
+            Ok(None)
+        }
+    }
+
+    /// Feed the same bytes to both codecs with the same chunk boundaries;
+    /// return the sequences of decode results from each.
+    fn drain_both(bytes: &[u8], chunks: &[usize]) -> (Vec<Option<String>>, Vec<Option<String>>) {
+        let mut ours = StreamCodec::stream_incoming();
+        let mut theirs = UpstreamReplica;
+
+        let mut buf_ours = BytesMut::with_capacity(bytes.len() + 16);
+        let mut buf_theirs = BytesMut::with_capacity(bytes.len() + 16);
+        let mut out_ours = Vec::new();
+        let mut out_theirs = Vec::new();
+
+        let mut cur = 0usize;
+        for &c in chunks {
+            let end = (cur + c.max(1)).min(bytes.len());
+            if cur == end {
+                break;
+            }
+            buf_ours.put_slice(&bytes[cur..end]);
+            buf_theirs.put_slice(&bytes[cur..end]);
+            loop {
+                let a = ours.decode(&mut buf_ours).unwrap();
+                let b = theirs.decode(&mut buf_theirs).unwrap();
+                out_ours.push(a.clone());
+                out_theirs.push(b.clone());
+                if a.is_none() && b.is_none() {
+                    break;
+                }
+            }
+            cur = end;
+        }
+        if cur < bytes.len() {
+            buf_ours.put_slice(&bytes[cur..]);
+            buf_theirs.put_slice(&bytes[cur..]);
+            loop {
+                let a = ours.decode(&mut buf_ours).unwrap();
+                let b = theirs.decode(&mut buf_theirs).unwrap();
+                out_ours.push(a.clone());
+                out_theirs.push(b.clone());
+                if a.is_none() && b.is_none() {
+                    break;
+                }
+            }
+        }
+
+        (out_ours, out_theirs)
+    }
+
+    /// Curated adversarial inputs × several chunk schedules.
+    #[test]
+    fn differential_curated_corpus() {
+        let inputs: &[&[u8]] = &[
+            b"",
+            b"{}",
+            b"[]",
+            b"{}{}",
+            br#"{"a":1}"#,
+            br#"{"a":1}{"b":2}"#,
+            b"   {}   ",
+            b"   { }   ",
+            b"   {\n}\n   ",
+            br#"{"a":"\""}"#,
+            br#"{"a":"\\"}"#,
+            br#"{"a":"\\\""}"#,
+            b"]{}",
+            b"}{}",
+            b"]{}{}",
+            b"}{}{}",
+            b"][{}",
+            b"abc",
+            b"a",
+            b"\n\n\n",
+            br#"{"\":1}"#,
+            br#"{"escaped":"line\nline"}"#,
+            b"{[]}",
+            b"[{}]",
+            b"[{},{},{}]",
+        ];
+        let chunk_variants: &[&[usize]] =
+            &[&[usize::MAX], &[1], &[2], &[3], &[5], &[7], &[1, 3, 2, 7, 1, 4]];
+
+        for input in inputs {
+            for chunks in chunk_variants {
+                let (ours, theirs) = drain_both(input, chunks);
+                assert_eq!(
+                    ours,
+                    theirs,
+                    "differential mismatch on {:?} with chunks {:?}",
+                    std::str::from_utf8(input).unwrap_or("<non-utf8>"),
+                    chunks
+                );
+            }
+        }
+    }
+
+    /// Randomized byte sequences × random chunk schedules, alphabet biased
+    /// toward JSON structural bytes to maximize state-machine coverage.
+    #[test]
+    fn differential_random_bytes() {
+        const SEQUENCES: usize = 200;
+        const SCHEDULES: usize = 5;
+        const MAX_LEN: usize = 128;
+
+        let mut rng = StdRng::seed_from_u64(0x00CC_2259_C0DE_C0DE);
+        let alphabet: &[u8] = b"{}[]\":,\\ \n \t a1{}[]\"";
+
+        for seq in 0..SEQUENCES {
+            let len = 1 + (rng.next_u32() as usize % MAX_LEN);
+            let mut bytes = Vec::with_capacity(len);
+            for _ in 0..len {
+                let b = alphabet[rng.next_u32() as usize % alphabet.len()];
+                bytes.push(b);
+            }
+            for sched in 0..SCHEDULES {
+                let mut chunks = Vec::new();
+                let mut remaining = len;
+                while remaining > 0 {
+                    let c = 1 + (rng.next_u32() as usize % remaining.min(16));
+                    chunks.push(c);
+                    remaining -= c;
+                }
+                let (ours, theirs) = drain_both(&bytes, &chunks);
+                assert_eq!(
+                    ours, theirs,
+                    "differential mismatch on seq={} sched={} bytes={:?}",
+                    seq, sched, bytes
+                );
+            }
+        }
+    }
+
+    /// Randomly-chunked well-formed JSON-RPC envelopes — the production shape
+    /// this rewrite exists to fix.
+    #[test]
+    fn differential_random_wellformed_json_rpc() {
+        let mut rng = StdRng::seed_from_u64(0x00DE_C0DE_C002_2259);
+        for _ in 0..20 {
+            let str_len = 500 + (rng.next_u32() as usize % 4096);
+            let filler: String = (0..str_len)
+                .map(|_| {
+                    let b = rng.next_u32() as u8 & 0x7F;
+                    // Keep printable, avoid quotes and backslashes so the
+                    // string body stays trivially well-formed.
+                    if b < 0x20 || b == b'"' || b == b'\\' {
+                        b'a'
+                    } else {
+                        b
+                    }
+                })
+                .map(|b| b as char)
+                .collect();
+            let msg = format!(
+                r#"{{"jsonrpc":"2.0","method":"engine_test","params":["{}"],"id":1}}"#,
+                filler
+            );
+            let bytes = msg.as_bytes();
+
+            let mut chunks = Vec::new();
+            let mut remaining = bytes.len();
+            while remaining > 0 {
+                let c = 1 + (rng.next_u32() as usize % remaining.min(64));
+                chunks.push(c);
+                remaining -= c;
+            }
+
+            let (ours, theirs) = drain_both(bytes, &chunks);
+            assert_eq!(ours, theirs, "differential mismatch on well-formed JSON-RPC");
+            assert!(
+                ours.iter().any(|o| o.is_some()),
+                "well-formed message should decode to at least one frame"
+            );
+        }
     }
 }
