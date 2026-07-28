@@ -128,7 +128,7 @@ pub struct HistoricalStateProviderRef<
 {
     /// Database provider
     provider: &'b Provider,
-    /// Manager for state trie overlays and trie changesets.
+    /// Manager for state trie overlays and cached changesets.
     overlay_manager: OverlayManager<N>,
     /// Block number is main index for the history state of accounts and storages.
     block_number: BlockNumber,
@@ -680,7 +680,7 @@ where
 pub struct HistoricalStateProvider<Provider: NodePrimitivesProvider> {
     /// Database provider.
     provider: Provider,
-    /// Manager for state trie overlays and trie changesets.
+    /// Manager for state trie overlays and cached changesets.
     overlay_manager: OverlayManager<Provider::Primitives>,
     /// State at the block number is the main indexer of the state.
     block_number: BlockNumber,

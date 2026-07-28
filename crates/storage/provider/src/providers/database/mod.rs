@@ -89,7 +89,7 @@ pub struct ProviderFactory<N: NodeTypesWithDB> {
     storage_settings: Arc<RwLock<StorageSettings>>,
     /// `RocksDB` provider
     rocksdb_provider: RocksDBProvider,
-    /// Manager for state trie overlays and trie changesets.
+    /// Manager for state trie overlays and cached changesets.
     overlay_manager: OverlayManager<N::Primitives>,
     /// Store for block access lists.
     bal_store: BalStoreHandle,

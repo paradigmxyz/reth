@@ -65,7 +65,7 @@ pub struct OverlayBuilder<N: NodePrimitives = EthPrimitives> {
     parent_hash: B256,
     /// Optional overlay source.
     overlay_source: Option<OverlaySource>,
-    /// Manager used for trie changesets and in-memory parent state.
+    /// Manager used for cached changesets and in-memory parent state.
     overlay_manager: OverlayManager<N>,
     /// Anchor hash of the reused sparse trie, if this task reused one.
     reused_sparse_trie_anchor_hash: Option<B256>,
@@ -215,7 +215,7 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
                 let start = Instant::now();
                 let accumulated_reverts = self
                     .overlay_manager
-                    .get_or_compute_trie_changesets_range(provider, revert_blocks.clone())?;
+                    .get_or_compute_cached_changesets_range(provider, revert_blocks.clone())?;
                 retrieve_trie_reverts_duration = start.elapsed();
                 accumulated_reverts
             };

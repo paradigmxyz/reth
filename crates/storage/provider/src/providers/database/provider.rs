@@ -200,7 +200,7 @@ pub struct DatabaseProvider<TX, N: NodeTypes> {
     storage_settings: Arc<RwLock<StorageSettings>>,
     /// `RocksDB` provider
     rocksdb_provider: RocksDBProvider,
-    /// Manager for state trie overlays and trie changesets.
+    /// Manager for state trie overlays and cached changesets.
     overlay_manager: OverlayManager<N::Primitives>,
     /// Task runtime for spawning parallel I/O work.
     runtime: reth_tasks::Runtime,
@@ -877,8 +877,9 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
                 available: 0..=0,
             })?;
 
-        let trie_revert =
-            self.overlay_manager.get_or_compute_trie_changesets_range(self, from..=db_tip_block)?;
+        let trie_revert = self
+            .overlay_manager
+            .get_or_compute_cached_changesets_range(self, from..=db_tip_block)?;
         self.write_trie_updates_sorted(&trie_revert)?;
 
         Ok(())

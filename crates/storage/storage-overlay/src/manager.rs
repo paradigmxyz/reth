@@ -34,8 +34,8 @@ use tracing::{debug, trace};
 
 /// Manages flattened state trie overlays for in-memory blocks.
 ///
-/// The manager owns the in-memory block graph, trie changeset cache, and a cache of flattened state
-/// trie overlays keyed by `(anchor_hash, tip_hash)`.
+/// The manager owns the in-memory block graph, changeset cache, and a cache of flattened state trie
+/// overlays keyed by `(anchor_hash, tip_hash)`.
 #[derive(Clone)]
 pub struct OverlayManager<N: NodePrimitives = EthPrimitives> {
     blocks: Arc<DashMap<B256, ExecutedBlock<N>>>,
@@ -101,8 +101,8 @@ impl<N: NodePrimitives> OverlayManager<N> {
         OverlayBuilder::new(parent_hash, self.clone())
     }
 
-    /// Gets or computes trie changesets for an inclusive block range.
-    pub fn get_or_compute_trie_changesets_range<P>(
+    /// Gets or computes cached changesets for an inclusive block range.
+    pub fn get_or_compute_cached_changesets_range<P>(
         &self,
         provider: &P,
         range: RangeInclusive<BlockNumber>,
@@ -117,8 +117,8 @@ impl<N: NodePrimitives> OverlayManager<N> {
         self.changeset_cache.get_or_compute_range(provider, range)
     }
 
-    /// Evicts trie changesets for blocks below `up_to_block`.
-    pub fn evict_trie_changesets(&self, up_to_block: BlockNumber) {
+    /// Evicts cached changesets for blocks below `up_to_block`.
+    pub fn evict_cached_changesets(&self, up_to_block: BlockNumber) {
         self.changeset_cache.evict(up_to_block);
     }
 
