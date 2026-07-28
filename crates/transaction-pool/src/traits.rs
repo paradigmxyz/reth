@@ -1485,6 +1485,11 @@ pub trait EthPoolTransaction: PoolTransaction {
         None
     }
 
+    /// Returns the shared blob cell availability handle, if this is a blob transaction.
+    fn blob_cell_availability_handle(&self) -> Option<&BlobCellAvailabilityHandle> {
+        None
+    }
+
     /// A specialization for the EIP-4844 transaction type.
     /// Tries to reattach the blob sidecar to the transaction.
     ///
@@ -1570,9 +1575,8 @@ impl<T: SignedTransaction> EthPooledTransaction<T> {
 
             // because the blob sidecar is not included in this transaction variant, mark it as
             // missing
-            let availability = BlobCellAvailabilityHandle::default();
-            blob_sidecar = EthBlobTransactionSidecar::Missing(availability.clone());
-            blob_cell_availability = Some(availability);
+            blob_sidecar = EthBlobTransactionSidecar::Missing;
+            blob_cell_availability = Some(BlobCellAvailabilityHandle::default());
         }
 
         Self { transaction, cost, encoded_length, blob_sidecar, blob_cell_availability }
@@ -1758,15 +1762,7 @@ impl<T: alloy_consensus::Transaction> alloy_consensus::Transaction for EthPooled
 impl EthPoolTransaction for EthPooledTransaction {
     fn take_blob(&mut self) -> EthBlobTransactionSidecar {
         if self.is_eip4844() {
-            let availability = self
-                .blob_cell_availability
-                .as_ref()
-                .expect("blob transactions have an availability handle")
-                .clone();
-            std::mem::replace(
-                &mut self.blob_sidecar,
-                EthBlobTransactionSidecar::Missing(availability),
-            )
+            std::mem::replace(&mut self.blob_sidecar, EthBlobTransactionSidecar::Missing)
         } else {
             EthBlobTransactionSidecar::None
         }
@@ -1774,6 +1770,10 @@ impl EthPoolTransaction for EthPooledTransaction {
 
     fn blob_cell_availability(&self) -> Option<BlobCellAvailability> {
         Self::blob_cell_availability(self)
+    }
+
+    fn blob_cell_availability_handle(&self) -> Option<&BlobCellAvailabilityHandle> {
+        self.blob_cell_availability.as_ref()
     }
 
     fn try_into_pooled_eip4844(
@@ -1826,7 +1826,7 @@ pub enum EthBlobTransactionSidecar {
     /// - The sidecar was extracted after the transaction was added to the pool
     /// - The transaction was re-injected after a reorg without its sidecar
     /// - The transaction was recovered from the consensus format (e.g., from a block)
-    Missing(BlobCellAvailabilityHandle),
+    Missing,
     /// The EIP-4844 transaction was received from the network with its complete sidecar.
     ///
     /// This sidecar contains:
@@ -2111,7 +2111,7 @@ mod tests {
         // Check that the pooled transaction is created correctly
         assert_eq!(pooled_tx.transaction, transaction);
         assert_eq!(pooled_tx.encoded_length, 300);
-        assert!(matches!(pooled_tx.blob_sidecar, EthBlobTransactionSidecar::Missing(_)));
+        assert_eq!(pooled_tx.blob_sidecar, EthBlobTransactionSidecar::Missing);
         assert!(pooled_tx.blob_cell_availability.is_some());
         assert_eq!(pooled_tx.blob_cell_availability(), None);
         let expected_cost =

@@ -805,7 +805,7 @@ where
                     // this should not happen
                     return Err(InvalidTransactionError::TxTypeNotSupported.into())
                 }
-                EthBlobTransactionSidecar::Missing(availability) => {
+                EthBlobTransactionSidecar::Missing => {
                     // This can happen for re-injected blob transactions (on re-org), since the blob
                     // is stripped from the transaction and not included in a block.
                     // check if the blob is in the store, if it's included we previously validated
@@ -813,7 +813,9 @@ where
                     if let Some(stored_availability) =
                         self.blob_store.cell_availability(*transaction.hash()).ok().flatten()
                     {
-                        let _ = availability.set(stored_availability);
+                        if let Some(availability) = transaction.blob_cell_availability_handle() {
+                            let _ = availability.set(stored_availability);
+                        }
                     } else {
                         return Err(InvalidPoolTransactionError::Eip4844(
                             Eip4844PoolTransactionError::MissingEip4844BlobSidecar,
