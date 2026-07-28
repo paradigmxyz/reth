@@ -728,18 +728,21 @@ where
                 eth_api.apply_pre_execution_changes(&block, &mut db)?;
 
                 let mut roots = Vec::with_capacity(block.body().transactions().len());
+                // One EVM for the whole block; the state is reached through it from here on.
+                let mut evm = eth_api.evm_config().evm_with_env(&mut db, evm_env);
                 for tx in block.transactions_recovered() {
                     let tx_env = eth_api.evm_config().tx_env(tx);
-                    {
-                        let mut evm = eth_api.evm_config().evm_with_env(&mut db, evm_env.clone());
-                        evm.transact_commit(tx_env).map_err(Eth::Error::from_evm_err)?;
-                    }
+                    evm.transact_commit(tx_env).map_err(Eth::Error::from_evm_err)?;
+
+                    // bind once: two `evm.db_mut()` calls in one expression would be two
+                    // simultaneous mutable borrows of the EVM
+                    let state = evm.db_mut();
                     // Merge transitions into cumulative bundle_state
-                    db.merge_transitions(BundleRetention::PlainState);
+                    state.merge_transitions(BundleRetention::PlainState);
                     // Compute state root from the accumulated state changes
-                    let hashed_state = db.database.hashed_post_state(&db.bundle_state);
+                    let hashed_state = state.database.hashed_post_state(&state.bundle_state);
                     let root =
-                        db.database.state_root(hashed_state).map_err(Eth::Error::from_eth_err)?;
+                        state.database.state_root(hashed_state).map_err(Eth::Error::from_eth_err)?;
                     roots.push(root);
                 }
 
