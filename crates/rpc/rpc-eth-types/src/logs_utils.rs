@@ -26,7 +26,7 @@ where
     R: TxReceipt<Log = alloy_primitives::Log> + 'a,
 {
     if !filter.matches_block(&block_num_hash) {
-        return vec![]
+        return vec![];
     }
 
     let mut all_logs = Vec::new();
