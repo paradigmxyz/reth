@@ -1623,6 +1623,56 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread")]
+    async fn test_debug_trace_block_fuses_inspector_between_transactions() {
+        let f = fixture(3);
+
+        let results =
+            f.api.debug_trace_block(f.block_hash.into(), Default::default()).await.unwrap();
+
+        let logs = |i: usize| {
+            let TraceResult::Success { result, .. } = &results[i] else { panic!() };
+            let GethTrace::Default(frame) = result else { panic!() };
+            frame.struct_logs.len()
+        };
+        // transaction 0 calls WRITER and runs opcodes; the rest are bare transfers that run none.
+        // Without fusing the shared inspector between transactions, transaction 0's steps would
+        // still be in the later traces.
+        assert!(logs(0) > 0);
+        assert_eq!(logs(1), 0);
+        assert_eq!(logs(2), 0);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_debug_trace_call_many_replays_prefix_on_one_evm() {
+        // a prefix shorter than the block, so the replay is not skipped in favour of the
+        // committed post-block state
+        let f = fixture(4);
+
+        let bundles = vec![Bundle { transactions: vec![Default::default()], block_override: None }];
+        let context = StateContext {
+            block_number: Some(f.block_hash.into()),
+            transaction_index: Some(alloy_rpc_types_eth::TransactionIndex::Index(3)),
+        };
+        f.api.debug_trace_call_many(bundles, Some(context), None).await.unwrap();
+
+        // one EVM for the pre-execution changes, one for the three prefix transactions, one for
+        // the bundle's call
+        assert_eq!(f.observations.take_evms_created(), 3);
+
+        // the prefix shares the block-start value; the bundle call gets its own EVM and
+        // re-loads from mid-block state — the known gap for simulated calls, not an accident.
+        assert_eq!(
+            f.observations.take_values(),
+            vec![
+                block_start_value(),
+                block_start_value(),
+                block_start_value(),
+                U256::from(WRITTEN_VALUE),
+            ]
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
     async fn test_intermediate_roots_sees_block_start_context() {
         let f = fixture(3);
 
