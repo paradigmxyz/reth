@@ -124,6 +124,9 @@ impl<'a, DB> ExecutionWitnessRecord<'a, DB> {
             }
         }
 
+        // The execution cache does not contain untouched slots of a destroyed account. The
+        // provider expands them into explicit zero writes from the parent state; extending it last
+        // also ensures the bundle's final values override those collected from the cache.
         hashed_state.extend(state_provider.hashed_post_state(&self.state.bundle_state)?);
         Ok((hashed_state, keys))
     }
