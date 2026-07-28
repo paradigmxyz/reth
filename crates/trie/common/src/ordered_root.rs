@@ -263,7 +263,7 @@ mod tests {
         use super::*;
         use alloy_consensus::{
             proofs::{calculate_receipt_root, calculate_transaction_root},
-            EthereumReceipt, ReceiptWithBloom, Signed, TxLegacy,
+            ReceiptEnvelope, Signed, TxLegacy,
         };
         use alloy_eips::eip2718::Encodable2718;
         use alloy_primitives::Signature;
@@ -303,7 +303,7 @@ mod tests {
             #[test]
             fn arbitrary_receipts_match_alloy_consensus_root(
                 receipts in proptest::collection::vec(
-                    arb::<ReceiptWithBloom<EthereumReceipt>>(),
+                    arb::<ReceiptEnvelope>(),
                     0..1024,
                 ),
             ) {
