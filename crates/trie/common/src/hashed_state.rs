@@ -54,9 +54,12 @@ impl HashedPostState {
             .map(|(address, account)| {
                 let hashed_address = KH::hash_key(address);
                 let hashed_account = account.info.as_ref().map(Into::into);
-                let hashed_storage = HashedStorage::from_plain_storage(
-                    account.status,
-                    account.storage.iter().map(|(slot, value)| (slot, &value.present_value)),
+                let hashed_storage = HashedStorage::from_iter(
+                    false,
+                    account
+                        .storage
+                        .iter()
+                        .map(|(slot, value)| (keccak256(B256::from(*slot)), value.present_value)),
                 );
 
                 (
@@ -911,6 +914,17 @@ mod tests {
         state::{AccountInfo, Bytecode},
     };
 
+    fn bundle_hashed_storage(account: &BundleAccount) -> Option<HashedStorage> {
+        let address = Address::ZERO;
+        let mut state =
+            HashedPostState::from_bundle_state::<KeccakKeyHasher>([(&address, account)]);
+        state.storages.remove(&keccak256(address))
+    }
+
+    fn changed_storage(original: U256, present: U256) -> StorageWithOriginalValues {
+        core::iter::once((U256::from(1), StorageSlot::new_changed(original, present))).collect()
+    }
+
     #[test]
     fn hashed_state_wiped_extension() {
         let hashed_address = B256::default();
@@ -1028,6 +1042,71 @@ mod tests {
             *hashed_state.accounts.get(&keccak256(address)).unwrap(),
             Some(account_info.into())
         );
+    }
+
+    #[test]
+    fn destroyed_prefunded_account_without_storage_emits_no_storage() {
+        let original_info = AccountInfo { balance: U256::from(1), ..Default::default() };
+        let account = BundleAccount::new(
+            Some(original_info),
+            None,
+            StorageWithOriginalValues::default(),
+            AccountStatus::Destroyed,
+        );
+
+        assert!(bundle_hashed_storage(&account).is_none());
+    }
+
+    #[test]
+    fn destroyed_accounts_emit_zero_storage_changes_without_wipe() {
+        let existing_contract =
+            AccountInfo { code_hash: B256::repeat_byte(0x01), ..Default::default() };
+        let legacy_empty_account = AccountInfo::default();
+        let prefunded_account = AccountInfo { balance: U256::from(1), ..Default::default() };
+
+        for original_info in
+            [Some(existing_contract), Some(legacy_empty_account), Some(prefunded_account), None]
+        {
+            let account = BundleAccount::new(
+                original_info,
+                None,
+                changed_storage(U256::from(2), U256::ZERO),
+                AccountStatus::Destroyed,
+            );
+
+            let storage = bundle_hashed_storage(&account).unwrap();
+            let hashed_slot = keccak256(B256::from(U256::from(1)));
+            assert!(!storage.wiped);
+            assert_eq!(storage.storage[&hashed_slot], U256::ZERO);
+        }
+    }
+
+    #[test]
+    fn destroyed_recreated_accounts_preserve_storage_without_wipe() {
+        let value = U256::from(2);
+        let new_account = BundleAccount::new(
+            None,
+            Some(AccountInfo::default()),
+            changed_storage(U256::ZERO, value),
+            AccountStatus::DestroyedChanged,
+        );
+        let original_info =
+            AccountInfo { code_hash: B256::repeat_byte(0x01), ..Default::default() };
+        let existing_account = BundleAccount::new(
+            Some(original_info),
+            Some(AccountInfo::default()),
+            changed_storage(U256::ZERO, value),
+            AccountStatus::DestroyedChanged,
+        );
+
+        let new_storage = bundle_hashed_storage(&new_account).unwrap();
+        let existing_storage = bundle_hashed_storage(&existing_account).unwrap();
+        let hashed_slot = keccak256(B256::from(U256::from(1)));
+
+        assert!(!new_storage.wiped);
+        assert!(!existing_storage.wiped);
+        assert_eq!(new_storage.storage[&hashed_slot], value);
+        assert_eq!(existing_storage.storage[&hashed_slot], value);
     }
 
     #[test]
