@@ -211,10 +211,8 @@ impl<C: TrieCursor, K: AsRef<AddedRemovedKeys>> TrieWalker<C, K> {
                 "Checked for only non-removed child",
             );
 
-            let branch_path_matches_prefix_set = self
-                .walk_all_changed_branch_children
-                .then(|| node.position().is_child())
-                .unwrap_or(false) &&
+            let branch_path_matches_prefix_set = self.walk_all_changed_branch_children &&
+                node.position().is_child() &&
                 self.changes.contains(&node.key);
 
             !self.changes.contains(node.full_key()) &&

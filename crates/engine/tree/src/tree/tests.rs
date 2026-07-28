@@ -7,7 +7,7 @@ use crate::{
         PersistTarget, TreeConfig,
     },
 };
-use reth_trie_db::ChangesetCache;
+use reth_storage_overlay::{ChangesetCache, OverlayManager};
 
 use alloy_eips::eip1898::BlockWithParent;
 use alloy_primitives::{
@@ -19,7 +19,7 @@ use alloy_rpc_types_engine::{
     ExecutionData, ExecutionPayloadSidecar, ExecutionPayloadV1, ForkchoiceState,
 };
 use assert_matches::assert_matches;
-use reth_chain_state::{test_utils::TestBlockBuilder, BlockState, StateTrieOverlayManager};
+use reth_chain_state::{test_utils::TestBlockBuilder, BlockState};
 use reth_chainspec::{ChainSpec, HOLESKY, MAINNET};
 use reth_engine_primitives::{EngineApiValidator, ForkchoiceStatus, NoopInvalidBlockHook};
 use reth_ethereum_consensus::EthBeaconConsensus;
@@ -206,8 +206,7 @@ impl TestHarness {
 
         let (from_tree_tx, from_tree_rx) = unbounded_channel();
         let runtime = reth_tasks::Runtime::test();
-        let state_trie_overlays =
-            StateTrieOverlayManager::new(runtime.state_trie_overlay_worker_pool());
+        let state_trie_overlays = OverlayManager::new(runtime.state_trie_overlay_worker_pool());
 
         let header = chain_spec.genesis_header().clone();
         let header = SealedHeader::seal_slow(header);
@@ -296,7 +295,7 @@ impl TestHarness {
             parent_state = Some(block_state);
         }
 
-        let state_trie_overlays = StateTrieOverlayManager::default();
+        let state_trie_overlays = OverlayManager::default();
         for block in &blocks {
             state_trie_overlays.insert_block(block.clone());
         }
@@ -450,7 +449,7 @@ impl ValidatorTestHarness {
             TreeConfig::default(),
             Box::new(NoopInvalidBlockHook::default()),
             changeset_cache,
-            StateTrieOverlayManager::default(),
+            OverlayManager::default(),
             reth_tasks::Runtime::test(),
         );
 

@@ -11,45 +11,6 @@ use tracing::debug;
 /// Type alias for the sparse trie type used in preservation.
 pub type SparseTrie = SparseStateTrie;
 
-/// Current state of the sparse trie owned by the overlay manager.
-#[allow(clippy::large_enum_variant)]
-#[derive(Debug, Default)]
-pub(crate) enum PreservedSparseTrieState {
-    /// No sparse trie has been preserved yet.
-    #[default]
-    Empty,
-    /// A sparse trie is available for reuse.
-    Available(PreservedSparseTrie),
-    /// A sparse trie has been taken by a state-root task.
-    InUse,
-}
-
-impl PreservedSparseTrieState {
-    /// Takes the available preserved sparse trie, marking it as in use.
-    pub(crate) fn take(&mut self) -> Option<PreservedSparseTrie> {
-        match core::mem::take(self) {
-            Self::Available(trie) => {
-                *self = Self::InUse;
-                Some(trie)
-            }
-            state => {
-                *self = state;
-                None
-            }
-        }
-    }
-
-    /// Stores an available preserved trie.
-    pub(crate) fn store(&mut self, trie: PreservedSparseTrie) {
-        *self = Self::Available(trie);
-    }
-
-    /// Clears the sparse trie state.
-    pub(crate) fn clear(&mut self) {
-        *self = Self::Empty;
-    }
-}
-
 /// A preserved sparse trie that can be reused across payload validations.
 pub struct PreservedSparseTrie {
     /// The preserved sparse state trie, or a handle to wait for it.

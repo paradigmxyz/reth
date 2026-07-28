@@ -1,8 +1,7 @@
 use crate::{
     providers::{
-        state::overlay::database_state_frontiers, ConsistentProvider, LatestStateProvider,
-        OverlayBuilder, OverlayStateProvider, OverlayStateProviderFactory, ProviderNodeTypes,
-        RocksDBProvider, StaticFileProvider, StaticFileProviderRWRefMut,
+        ConsistentProvider, LatestStateProvider, OverlayStateProvider, OverlayStateProviderFactory,
+        ProviderNodeTypes, RocksDBProvider, StaticFileProvider, StaticFileProviderRWRefMut,
     },
     AccountReader, BalProvider, BalStoreHandle, BlockHashReader, BlockIdReader, BlockNumReader,
     BlockReader, BlockReaderIdExt, BlockSource, CanonChainTracker, CanonStateNotifications,
@@ -36,6 +35,7 @@ use reth_storage_api::{
     StorageRangeResult,
 };
 use reth_storage_errors::provider::ProviderResult;
+use reth_storage_overlay::{database_state_frontiers, OverlayBuilder};
 use reth_trie::{
     hashed_cursor::{HashedCursor, HashedCursorFactory},
     metrics::TrieRootMetrics,

@@ -24,6 +24,7 @@ reth-discv4.workspace = true
 reth-discv5.workspace = true
 reth-dns-discovery.workspace = true
 reth-ethereum-forks.workspace = true
+reth-evm.workspace = true
 reth-eth-wire.workspace = true
 reth-eth-wire-types.workspace = true
 reth-ecies.workspace = true
@@ -150,4 +151,5 @@ test-utils = [
     "reth-tasks/test-utils",
     "reth-stages-types/test-utils",
     "reth-trie/test-utils",
+    "reth-evm/test-utils",
 ]

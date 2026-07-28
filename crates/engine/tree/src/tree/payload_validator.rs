@@ -125,9 +125,7 @@ use crate::tree::{
 };
 use alloy_consensus::constants::KECCAK_EMPTY;
 use alloy_primitives::Address;
-use reth_chain_state::{
-    CanonicalInMemoryState, ExecutedBlock, ExecutionTimingStats, StateTrieOverlayManager,
-};
+use reth_chain_state::{CanonicalInMemoryState, ExecutedBlock, ExecutionTimingStats};
 use reth_consensus::{ConsensusError, FullConsensus, ReceiptRootBloom};
 use reth_engine_primitives::{
     ConfigureEngineEvm, ExecutableTxIterator, ExecutionPayload, InvalidBlockHook, PayloadValidator,
@@ -148,18 +146,17 @@ use reth_primitives_traits::{
     RecoveredBlock, SealedBlock, SealedHeader, SignerRecoverable,
 };
 use reth_provider::{
-    providers::{OverlayBuilder, OverlayStateProviderFactory},
-    BlockExecutionOutput, BlockNumReader, BlockReader, ChangeSetReader, DatabaseProviderFactory,
-    DatabaseProviderROFactory, HashedPostStateProvider, ProviderError, PruneCheckpointReader,
-    StageCheckpointReader, StateProvider, StateProviderBox, StateProviderFactory, StateReader,
-    StorageChangeSetReader, StorageSettingsCache,
+    providers::OverlayStateProviderFactory, BlockExecutionOutput, BlockNumReader, BlockReader,
+    ChangeSetReader, DatabaseProviderFactory, DatabaseProviderROFactory, HashedPostStateProvider,
+    ProviderError, PruneCheckpointReader, StageCheckpointReader, StateProvider, StateProviderBox,
+    StateProviderFactory, StateReader, StorageChangeSetReader, StorageSettingsCache,
 };
 use reth_revm::db::{states::bundle_state::BundleRetention, BundleAccount, State};
+use reth_storage_overlay::{ChangesetCache, OverlayBuilder, OverlayManager};
 use reth_trie::{
     hashed_cursor::HashedCursorFactory, trie_cursor::TrieCursorFactory, updates::TrieUpdates,
     LazyTrieData,
 };
-use reth_trie_db::ChangesetCache;
 use std::{
     sync::{
         atomic::{AtomicUsize, Ordering},
@@ -292,7 +289,7 @@ where
     /// Task runtime for spawning parallel work.
     runtime: reth_tasks::Runtime,
     /// Shared state trie in-memory overlay data.
-    state_trie_overlays: StateTrieOverlayManager<Evm::Primitives>,
+    state_trie_overlays: OverlayManager<Evm::Primitives>,
     /// State-root strategy used to prepare per-block commitment tasks.
     #[debug(skip)]
     state_root_strategy: Arc<dyn StateRootStrategy<Evm::Primitives, P, Evm>>,
@@ -341,7 +338,7 @@ where
         config: TreeConfig,
         invalid_block_hook: Box<dyn InvalidBlockHook<N>>,
         changeset_cache: ChangesetCache,
-        state_trie_overlays: StateTrieOverlayManager<N>,
+        state_trie_overlays: OverlayManager<N>,
         runtime: reth_tasks::Runtime,
     ) -> Self {
         let precompile_cache_map = PrecompileCacheMap::default();
@@ -1455,7 +1452,7 @@ where
         changeset_cache: ChangesetCache,
     ) -> OverlayBuilder<N> {
         OverlayBuilder::new(parent_hash, changeset_cache)
-            .with_state_trie_overlay_manager(state.tree_state.state_trie_overlays.clone())
+            .with_overlay_manager(state.tree_state.state_trie_overlays.clone())
     }
 
     /// Prepares the optional payload-builder state-root handle through the installed

@@ -425,7 +425,7 @@ mod tests {
     use super::*;
     use alloy_eips::NumHash;
     use alloy_primitives::{BlockHash, BlockNumber, Bytes, B256, U256};
-    use reth_chain_state::{test_utils::TestBlockBuilder, ExecutedBlock, StateTrieOverlayManager};
+    use reth_chain_state::{test_utils::TestBlockBuilder, ExecutedBlock};
     use reth_db::{tables, transaction::DbTxMut};
     use reth_exex_types::FinishedExExHeight;
     use reth_provider::{
@@ -437,6 +437,7 @@ mod tests {
     };
     use reth_prune::Pruner;
     use reth_prune_types::PruneMode;
+    use reth_storage_overlay::OverlayManager;
     use tokio::sync::mpsc::unbounded_channel;
 
     fn default_persistence_handle() -> PersistenceHandle<EthPrimitives> {
@@ -672,7 +673,7 @@ mod tests {
             state_trie_transactions
         );
 
-        let state_trie_overlays = StateTrieOverlayManager::default();
+        let state_trie_overlays = OverlayManager::default();
         for block in &blocks[STATE_TRIE_TIP + 1..=FINISH_TIP] {
             state_trie_overlays.insert_block(block.clone());
         }

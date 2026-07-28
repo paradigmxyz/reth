@@ -1,0 +1,1584 @@
+//! Trie changeset caching utilities.
+//!
+//! This module provides functionality to compute trie changesets for a given block,
+//! which represent the old trie node values before the block was processed.
+//!
+//! It also provides an efficient in-memory cache for these changesets, which is essential for:
+//! - **Reorg support**: Quickly access changesets to revert blocks during chain reorganizations
+//! - **Memory efficiency**: Explicit eviction releases persisted changesets
+
+use crate::OverlayManager;
+use alloy_primitives::{map::B256Map, BlockNumber, B256};
+use parking_lot::RwLock;
+use reth_metrics::{
+    metrics::{Counter, Gauge},
+    Metrics,
+};
+use reth_primitives_traits::{FastInstant as Instant, NodePrimitives};
+use reth_stages_types::StageId;
+use reth_storage_api::{
+    BlockNumReader, ChangeSetReader, DBProvider, StageCheckpointReader, StorageChangeSetReader,
+    StorageSettingsCache,
+};
+use reth_storage_errors::provider::{ProviderError, ProviderResult};
+use reth_trie::{
+    trie_cursor::{InMemoryTrieCursorFactory, TrieCursor, TrieCursorFactory},
+    TrieInputSorted,
+};
+use reth_trie_common::updates::{StorageTrieUpdatesSorted, TrieUpdatesSorted};
+use reth_trie_db::{DatabaseTrieCursorFactory, TrieTableAdapter};
+use std::{
+    collections::{BTreeMap, HashMap},
+    fmt,
+    ops::RangeInclusive,
+    sync::{Arc, OnceLock},
+};
+use tracing::{debug, warn};
+
+#[cfg(test)]
+use reth_trie::changesets::compute_trie_changesets;
+#[cfg(test)]
+use reth_trie_db::{DatabaseHashedCursorFactory, DatabaseStateRoot};
+
+/// Computes block trie updates using the changeset cache.
+///
+/// # Algorithm
+///
+/// For block N:
+/// 1. Get cumulative trie reverts from block N+1 to db tip using the cache
+/// 2. Create an overlay cursor factory with these reverts (representing trie state after block N)
+/// 3. Walk through account trie changesets for block N
+/// 4. For each changed path, look up the current value using the overlay cursor
+/// 5. Walk through storage trie changesets for block N
+/// 6. For each changed path, look up the current value using the overlay cursor
+/// 7. Return the collected trie updates
+///
+/// # Arguments
+///
+/// * `cache` - Handle to the changeset cache for retrieving trie reverts
+/// * `provider` - Database provider for accessing changesets and block data
+/// * `block_number` - Block number to compute trie updates for
+///
+/// # Returns
+///
+/// Trie updates representing the state of trie nodes after the block was processed
+///
+/// # Errors
+///
+/// Returns error if:
+/// - Block number exceeds database tip
+/// - Database access fails
+/// - Cache retrieval fails
+pub fn compute_block_trie_updates<Provider>(
+    cache: &ChangesetCache,
+    provider: &Provider,
+    block_number: BlockNumber,
+) -> ProviderResult<TrieUpdatesSorted>
+where
+    Provider: DBProvider
+        + ChangeSetReader
+        + StorageChangeSetReader
+        + BlockNumReader
+        + StageCheckpointReader
+        + StorageSettingsCache,
+{
+    reth_trie_db::with_adapter!(provider, |A| {
+        compute_block_trie_updates_inner::<_, A>(cache, provider, block_number)
+    })
+}
+
+fn compute_block_trie_updates_inner<Provider, A>(
+    cache: &ChangesetCache,
+    provider: &Provider,
+    block_number: BlockNumber,
+) -> ProviderResult<TrieUpdatesSorted>
+where
+    Provider: DBProvider
+        + ChangeSetReader
+        + StorageChangeSetReader
+        + BlockNumReader
+        + StageCheckpointReader
+        + StorageSettingsCache,
+    A: TrieTableAdapter,
+{
+    let tx = provider.tx_ref();
+
+    let db_tip_block = provider.best_block_number()?;
+    let tip_input = cache.logical_tip_input(provider, db_tip_block)?.unwrap_or_default();
+
+    // Step 1: Get the trie changesets for the target block from cache
+    let changesets = cache.get_or_compute(provider, block_number)?;
+
+    // Step 2: Get the trie reverts for the state after the target block using the cache
+    let reverts = cache.get_or_compute_range(provider, (block_number + 1)..=db_tip_block)?;
+
+    // Step 3: Create an InMemoryTrieCursorFactory with the reverts
+    // This gives us the trie state as it was after the target block was processed
+    let db_cursor_factory = DatabaseTrieCursorFactory::<_, A>::new(tx);
+    let tip_cursor_factory =
+        InMemoryTrieCursorFactory::new(db_cursor_factory, tip_input.nodes.as_ref());
+    let cursor_factory = InMemoryTrieCursorFactory::new(tip_cursor_factory, &reverts);
+
+    // Step 4: Collect all account trie nodes that changed in the target block
+    let account_nodes_ref = changesets.account_nodes_ref();
+    let mut account_nodes = Vec::with_capacity(account_nodes_ref.len());
+    let mut account_cursor = cursor_factory.account_trie_cursor()?;
+
+    // Iterate over the account nodes from the changesets
+    for (nibbles, _old_node) in account_nodes_ref {
+        // Look up the current value of this trie node using the overlay cursor
+        let node_value = account_cursor.seek_exact(*nibbles)?.map(|(_, node)| node);
+        account_nodes.push((*nibbles, node_value));
+    }
+
+    // Step 5: Collect all storage trie nodes that changed in the target block
+    let mut storage_tries = B256Map::default();
+
+    // Iterate over the storage tries from the changesets
+    for (hashed_address, storage_changeset) in changesets.storage_tries_ref() {
+        let mut storage_cursor = cursor_factory.storage_trie_cursor(*hashed_address)?;
+        let storage_nodes_ref = storage_changeset.storage_nodes_ref();
+        let mut storage_nodes = Vec::with_capacity(storage_nodes_ref.len());
+
+        // Iterate over the storage nodes for this account
+        for (nibbles, _old_node) in storage_nodes_ref {
+            // Look up the current value of this storage trie node
+            let node_value = storage_cursor.seek_exact(*nibbles)?.map(|(_, node)| node);
+            storage_nodes.push((*nibbles, node_value));
+        }
+
+        storage_tries.insert(
+            *hashed_address,
+            StorageTrieUpdatesSorted { storage_nodes, is_deleted: storage_changeset.is_deleted },
+        );
+    }
+
+    Ok(TrieUpdatesSorted::new(account_nodes, storage_tries))
+}
+
+/// Thread-safe changeset cache.
+///
+/// This type wraps a shared, mutable reference to the cache inner.
+/// The `RwLock` enables concurrent reads while ensuring exclusive access for writes.
+#[derive(Debug, Clone)]
+pub struct ChangesetCache {
+    inner: Arc<RwLock<ChangesetCacheInner>>,
+    state_trie_overlay: Arc<OnceLock<Arc<dyn StateTrieOverlayResolver>>>,
+}
+
+trait StateTrieOverlayResolver: fmt::Debug + Send + Sync {
+    fn overlay_for_parent(
+        &self,
+        parent_hash: B256,
+        anchor_hash: B256,
+    ) -> ProviderResult<TrieInputSorted>;
+}
+
+impl<N: NodePrimitives> StateTrieOverlayResolver for OverlayManager<N> {
+    fn overlay_for_parent(
+        &self,
+        parent_hash: B256,
+        anchor_hash: B256,
+    ) -> ProviderResult<TrieInputSorted> {
+        let (nodes, state) =
+            self.overlay_for_parent(parent_hash, anchor_hash).map_err(ProviderError::other)?;
+        Ok(TrieInputSorted::new(nodes, state, Default::default()))
+    }
+}
+
+impl Default for ChangesetCache {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl ChangesetCache {
+    /// Creates a new cache.
+    ///
+    /// The cache has no capacity limit and relies on explicit eviction
+    /// via the `evict()` method to manage memory usage.
+    pub fn new() -> Self {
+        Self {
+            inner: Arc::new(RwLock::new(ChangesetCacheInner::new())),
+            state_trie_overlay: Arc::new(OnceLock::new()),
+        }
+    }
+
+    /// Sets the manager used to reconstruct the logical database tip when trie persistence trails
+    /// the Finish checkpoint.
+    pub fn set_state_trie_overlay_manager<N: NodePrimitives>(&self, manager: OverlayManager<N>) {
+        self.state_trie_overlay.get_or_init(|| Arc::new(manager));
+    }
+
+    /// Retrieves changesets for a block.
+    ///
+    /// Returns `None` if the block is not in the cache (either evicted or never computed).
+    /// Updates hit/miss metrics accordingly.
+    pub fn get(
+        &self,
+        block_hash: B256,
+        block_number: BlockNumber,
+    ) -> Option<Arc<TrieUpdatesSorted>> {
+        self.inner.read().get(&ChangesetRangeKey::single(block_number, block_hash))
+    }
+
+    /// Evicts changesets for blocks below the given block number.
+    ///
+    /// This should be called after blocks are persisted to the database to free
+    /// memory for changesets that are no longer needed in the cache.
+    ///
+    /// # Arguments
+    ///
+    /// * `up_to_block` - Evict blocks with number < this value. Blocks with number >= this value
+    ///   are retained.
+    pub fn evict(&self, up_to_block: BlockNumber) {
+        self.inner.write().evict(up_to_block)
+    }
+
+    /// Gets changesets from cache, or computes them on-the-fly if missing.
+    ///
+    /// This is the primary API for retrieving changesets. It checks the cache first, then falls
+    /// back to computing from database state if missing.
+    ///
+    /// # Arguments
+    ///
+    /// * `block_number` - Block number (for cache insertion and logging)
+    /// * `provider` - Database provider for DB access
+    ///
+    /// # Returns
+    ///
+    /// Changesets for the block, either from cache or computed on-the-fly.
+    pub fn get_or_compute<P>(
+        &self,
+        provider: &P,
+        block_number: BlockNumber,
+    ) -> ProviderResult<Arc<TrieUpdatesSorted>>
+    where
+        P: DBProvider
+            + ChangeSetReader
+            + StorageChangeSetReader
+            + BlockNumReader
+            + StageCheckpointReader
+            + StorageSettingsCache,
+    {
+        self.get_or_compute_range(provider, block_number..=block_number)
+    }
+
+    /// Gets or computes trie reverts for a range of blocks.
+    ///
+    /// If all blocks in the range are cached, this method retrieves and accumulates those
+    /// per-block trie changesets (reverts) in reverse order (newest to oldest), so that older
+    /// values take precedence when there are conflicts.
+    ///
+    /// If any block is missing from cache, this falls back to one aggregate database computation
+    /// for the whole range. The aggregate result restores the trie to the state before the range
+    /// and is inserted into the range cache.
+    ///
+    /// # Arguments
+    ///
+    /// * `provider` - Database provider for DB access and block lookups
+    /// * `range` - Block range to accumulate reverts for (inclusive)
+    ///
+    /// # Returns
+    ///
+    /// Accumulated trie reverts for all blocks in the specified range
+    ///
+    /// # Errors
+    ///
+    /// Returns error if:
+    /// - Any block in the range is beyond the database tip
+    /// - Database access fails
+    /// - Block hash lookup fails
+    /// - Changeset computation fails
+    pub fn get_or_compute_range<P>(
+        &self,
+        provider: &P,
+        range: RangeInclusive<BlockNumber>,
+    ) -> ProviderResult<Arc<TrieUpdatesSorted>>
+    where
+        P: DBProvider
+            + ChangeSetReader
+            + StorageChangeSetReader
+            + BlockNumReader
+            + StageCheckpointReader
+            + StorageSettingsCache,
+    {
+        let db_tip_block = provider.best_block_number()?;
+
+        let start_block = *range.start();
+        let end_block = *range.end();
+
+        // If range end is beyond the tip, return an error
+        if end_block > db_tip_block {
+            return Err(ProviderError::InsufficientChangesets {
+                requested: end_block,
+                available: 0..=db_tip_block,
+            });
+        }
+
+        let timer = Instant::now();
+
+        debug!(
+            target: "trie::changeset_cache",
+            start_block,
+            end_block,
+            db_tip_block,
+            "Starting get_or_compute_range"
+        );
+
+        if start_block > end_block {
+            debug!(
+                target: "trie::changeset_cache",
+                start_block,
+                end_block,
+                "Empty changeset range requested"
+            );
+            return Ok(Arc::new(TrieUpdatesSorted::default()))
+        }
+
+        let end_block_hash = provider.block_hash(end_block)?.ok_or_else(|| {
+            ProviderError::other(std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                format!("block hash not found for block number {}", end_block),
+            ))
+        })?;
+        let range_key = ChangesetRangeKey::new(start_block, end_block, end_block_hash);
+
+        if let Some(accumulated_reverts) = self.inner.read().get(&range_key) {
+            let elapsed = timer.elapsed();
+
+            debug!(
+                target: "trie::changeset_cache",
+                ?elapsed,
+                start_block,
+                end_block,
+                ?end_block_hash,
+                num_blocks = end_block.saturating_sub(start_block).saturating_add(1),
+                "Changeset cache HIT for block range"
+            );
+
+            return Ok(accumulated_reverts)
+        }
+
+        let mut cached_reverts =
+            Vec::with_capacity(end_block.saturating_sub(start_block).saturating_add(1) as usize);
+        let mut all_cached = true;
+
+        for block_number in range.rev() {
+            // Get the block hash for this block number
+            let block_hash = if block_number == end_block {
+                end_block_hash
+            } else {
+                provider.block_hash(block_number)?.ok_or_else(|| {
+                    ProviderError::other(std::io::Error::new(
+                        std::io::ErrorKind::NotFound,
+                        format!("block hash not found for block number {}", block_number),
+                    ))
+                })?
+            };
+
+            debug!(
+                target: "trie::changeset_cache",
+                block_number,
+                ?block_hash,
+                "Looked up block hash for block number in range"
+            );
+
+            let block_key = ChangesetRangeKey::single(block_number, block_hash);
+            if let Some(changesets) = self.inner.read().get(&block_key) {
+                cached_reverts.push(changesets);
+            } else {
+                all_cached = false;
+                break
+            }
+        }
+
+        if all_cached {
+            // `merge_slice` gives precedence to earlier items, so pass reverts oldest-to-newest.
+            cached_reverts.reverse();
+            let accumulated_reverts = Arc::new(TrieUpdatesSorted::merge_slice(&cached_reverts));
+            let elapsed = timer.elapsed();
+
+            let num_account_nodes = accumulated_reverts.account_nodes_ref().len();
+            let num_storage_tries = accumulated_reverts.storage_tries_ref().len();
+
+            debug!(
+                target: "trie::changeset_cache",
+                ?elapsed,
+                start_block,
+                end_block,
+                num_blocks = end_block.saturating_sub(start_block).saturating_add(1),
+                num_account_nodes,
+                num_storage_tries,
+                "Finished accumulating cached trie reverts for block range"
+            );
+
+            self.inner.write().insert(range_key, Arc::clone(&accumulated_reverts));
+            return Ok(accumulated_reverts)
+        }
+
+        warn!(
+            target: "trie::changeset_cache",
+            start_block,
+            end_block,
+            "Changeset cache MISS in range, falling back to aggregate DB-based computation"
+        );
+
+        let tip_input = self.logical_tip_input(provider, db_tip_block)?;
+        let empty_tip_input = TrieInputSorted::default();
+        let accumulated_reverts = Arc::new(reth_trie_db::compute_range_trie_changesets_with_tip(
+            provider,
+            start_block..=end_block,
+            db_tip_block,
+            tip_input.as_ref().unwrap_or(&empty_tip_input),
+        )?);
+
+        let elapsed = timer.elapsed();
+
+        let num_account_nodes = accumulated_reverts.account_nodes_ref().len();
+        let num_storage_tries = accumulated_reverts.storage_tries_ref().len();
+
+        debug!(
+            target: "trie::changeset_cache",
+            ?elapsed,
+            start_block,
+            end_block,
+            ?end_block_hash,
+            num_blocks = end_block.saturating_sub(start_block).saturating_add(1),
+            num_account_nodes,
+            num_storage_tries,
+            "Finished accumulating trie reverts for block range"
+        );
+
+        self.inner.write().insert(range_key, Arc::clone(&accumulated_reverts));
+
+        Ok(accumulated_reverts)
+    }
+
+    fn logical_tip_input<P>(
+        &self,
+        provider: &P,
+        db_tip_block: BlockNumber,
+    ) -> ProviderResult<Option<TrieInputSorted>>
+    where
+        P: BlockNumReader + StageCheckpointReader,
+    {
+        let Some(finish) = provider.get_stage_checkpoint(StageId::Finish)? else { return Ok(None) };
+        let state_trie_tip = finish
+            .finish_stage_checkpoint()
+            .and_then(|checkpoint| checkpoint.partial_state_trie())
+            .unwrap_or(finish.block_number);
+
+        if state_trie_tip > finish.block_number {
+            return Err(ProviderError::other(std::io::Error::other(format!(
+                "partial state trie frontier #{state_trie_tip} is ahead of Finish #{}",
+                finish.block_number,
+            ))))
+        }
+        if state_trie_tip == finish.block_number {
+            return Ok(None)
+        }
+        if finish.block_number != db_tip_block {
+            return Err(ProviderError::other(std::io::Error::other(format!(
+                "Finish checkpoint #{} does not match database tip #{db_tip_block}",
+                finish.block_number,
+            ))))
+        }
+
+        let state_trie_tip_hash = provider
+            .block_hash(state_trie_tip)?
+            .ok_or_else(|| ProviderError::HeaderNotFound(state_trie_tip.into()))?;
+        let finish_tip_hash = provider
+            .block_hash(finish.block_number)?
+            .ok_or_else(|| ProviderError::HeaderNotFound(finish.block_number.into()))?;
+        let resolver = self.state_trie_overlay.get().cloned().ok_or_else(|| {
+            ProviderError::other(std::io::Error::other(format!(
+                "changeset cache requires a state trie overlay manager for partial persistence gap #{}..=#{}",
+                state_trie_tip.saturating_add(1),
+                finish.block_number,
+            )))
+        })?;
+
+        resolver.overlay_for_parent(finish_tip_hash, state_trie_tip_hash).map(Some)
+    }
+}
+
+/// Cache key for one contiguous range of canonical trie changesets.
+///
+/// The end block hash disambiguates canonical rewrites where the same block numbers later refer to
+/// a different chain. For a single block, `start_block == end_block` and `end_block_hash` is that
+/// block's hash.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+struct ChangesetRangeKey {
+    start_block: BlockNumber,
+    end_block: BlockNumber,
+    end_block_hash: B256,
+}
+
+impl ChangesetRangeKey {
+    const fn new(start_block: BlockNumber, end_block: BlockNumber, end_block_hash: B256) -> Self {
+        Self { start_block, end_block, end_block_hash }
+    }
+
+    const fn single(block_number: BlockNumber, block_hash: B256) -> Self {
+        Self::new(block_number, block_number, block_hash)
+    }
+}
+
+/// In-memory cache for trie changesets with explicit eviction policy.
+///
+/// Holds changesets for blocks or block ranges that have been validated but not yet persisted.
+/// Keyed by canonical block range. Eviction is controlled
+/// explicitly by the engine API tree handler when persistence completes.
+///
+/// ## Eviction Policy
+///
+/// Unlike traditional caches with automatic eviction, this cache requires explicit
+/// eviction calls. The engine API tree handler calls `evict(block_number)` after
+/// blocks are persisted to the database, ensuring changesets remain available
+/// until their corresponding blocks are safely on disk.
+///
+/// ## Metrics
+///
+/// The cache maintains several metrics for observability:
+/// - `hits`: Number of successful cache lookups
+/// - `misses`: Number of failed cache lookups
+/// - `evictions`: Number of blocks evicted
+/// - `size`: Current number of cached blocks
+#[derive(Debug)]
+struct ChangesetCacheInner {
+    /// Cache entries keyed by inclusive block range plus the range's canonical end hash.
+    entries: HashMap<ChangesetRangeKey, Arc<TrieUpdatesSorted>>,
+
+    /// Range start block to cache keys mapping for eviction.
+    range_starts: BTreeMap<BlockNumber, Vec<ChangesetRangeKey>>,
+
+    /// Metrics for monitoring cache behavior
+    metrics: ChangesetCacheMetrics,
+}
+
+/// Metrics for the changeset cache.
+///
+/// These metrics provide visibility into cache performance and help identify
+/// potential issues like high miss rates.
+#[derive(Metrics, Clone)]
+#[metrics(scope = "trie.changeset_cache")]
+struct ChangesetCacheMetrics {
+    /// Cache hit counter
+    hits: Counter,
+
+    /// Cache miss counter
+    misses: Counter,
+
+    /// Eviction counter
+    evictions: Counter,
+
+    /// Current cache size (number of entries)
+    size: Gauge,
+}
+
+impl Default for ChangesetCacheInner {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl ChangesetCacheInner {
+    /// Creates a new empty changeset cache.
+    ///
+    /// The cache has no capacity limit and relies on explicit eviction
+    /// via the `evict()` method to manage memory usage.
+    fn new() -> Self {
+        Self { entries: HashMap::new(), range_starts: BTreeMap::new(), metrics: Default::default() }
+    }
+
+    fn get(&self, key: &ChangesetRangeKey) -> Option<Arc<TrieUpdatesSorted>> {
+        match self.entries.get(key) {
+            Some(changesets) => {
+                self.metrics.hits.increment(1);
+                Some(Arc::clone(changesets))
+            }
+            None => {
+                self.metrics.misses.increment(1);
+                None
+            }
+        }
+    }
+
+    fn insert(&mut self, key: ChangesetRangeKey, changesets: Arc<TrieUpdatesSorted>) {
+        debug!(
+            target: "trie::changeset_cache",
+            ?key,
+            cache_size_before = self.entries.len(),
+            "Inserting changeset into cache"
+        );
+
+        let is_new_entry = self.entries.insert(key, changesets).is_none();
+
+        if is_new_entry {
+            self.range_starts.entry(key.start_block).or_default().push(key);
+        }
+
+        // Update size metric
+        self.metrics.size.set(self.entries.len() as f64);
+
+        debug!(
+            target: "trie::changeset_cache",
+            ?key,
+            cache_size_after = self.entries.len(),
+            "Changeset inserted into cache"
+        );
+    }
+
+    fn evict(&mut self, up_to_block: BlockNumber) {
+        debug!(
+            target: "trie::changeset_cache",
+            up_to_block,
+            cache_size_before = self.entries.len(),
+            "Starting cache eviction"
+        );
+
+        // Find all block numbers that should be evicted (< up_to_block)
+        let range_starts_to_evict: Vec<u64> =
+            self.range_starts.range(..up_to_block).map(|(num, _)| *num).collect();
+
+        // Remove entries for each block number below threshold
+        let mut evicted_count = 0;
+
+        for start_block in &range_starts_to_evict {
+            if let Some(keys) = self.range_starts.remove(start_block) {
+                debug!(
+                    target: "trie::changeset_cache",
+                    start_block,
+                    num_ranges = keys.len(),
+                    "Evicting ranges from cache"
+                );
+                for key in keys {
+                    if self.entries.remove(&key).is_some() {
+                        evicted_count += 1;
+                    }
+                }
+            }
+        }
+
+        debug!(
+            target: "trie::changeset_cache",
+            up_to_block,
+            evicted_count,
+            cache_size_after = self.entries.len(),
+            "Finished cache eviction"
+        );
+
+        // Update metrics if we evicted anything
+        if evicted_count > 0 {
+            self.metrics.evictions.increment(evicted_count as u64);
+            self.metrics.size.set(self.entries.len() as f64);
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use alloy_consensus::Header;
+    use alloy_primitives::{
+        keccak256,
+        map::{B256Map, HashMap},
+        Address, U256,
+    };
+    #[cfg(feature = "partial-persistence")]
+    use reth_chain_state::{test_utils::TestBlockBuilder, ExecutedBlock};
+    #[cfg(feature = "partial-persistence")]
+    use reth_db::models::StorageSettings;
+    use reth_db::{
+        models::{AccountBeforeTx, BlockNumberAddress},
+        tables,
+        transaction::DbTxMut,
+    };
+    use reth_primitives_traits::{Account, StorageEntry};
+    use reth_provider::{
+        test_utils::create_test_provider_factory, StaticFileProviderFactory, StaticFileSegment,
+        StaticFileWriter,
+    };
+    #[cfg(feature = "partial-persistence")]
+    use reth_provider::{test_utils::MockNodeTypesWithDB, ProviderFactory};
+    #[cfg(feature = "partial-persistence")]
+    use reth_stages_types::FinishCheckpoint;
+    use reth_stages_types::{StageCheckpoint, StageId};
+    use reth_storage_api::{StageCheckpointWriter, TrieWriter};
+    use reth_trie::{
+        verify::{Output as VerifyOutput, Verifier},
+        BranchNodeCompact, Nibbles, StateRoot,
+    };
+    #[cfg(feature = "partial-persistence")]
+    use reth_trie::{ComputedTrieData, HashedPostStateSorted};
+
+    // Helper function to create empty TrieUpdatesSorted for testing
+    fn create_test_changesets() -> Arc<TrieUpdatesSorted> {
+        Arc::new(TrieUpdatesSorted::new(vec![], B256Map::default()))
+    }
+
+    fn insert_test_changesets(
+        cache: &mut ChangesetCacheInner,
+        block_hash: B256,
+        block_number: BlockNumber,
+        changesets: Arc<TrieUpdatesSorted>,
+    ) {
+        cache.insert(ChangesetRangeKey::single(block_number, block_hash), changesets);
+    }
+
+    fn get_test_changesets(
+        cache: &ChangesetCacheInner,
+        block_hash: B256,
+        block_number: BlockNumber,
+    ) -> Option<Arc<TrieUpdatesSorted>> {
+        cache.get(&ChangesetRangeKey::single(block_number, block_hash))
+    }
+
+    fn test_account(balance: u64) -> Account {
+        Account { balance: U256::from(balance), ..Default::default() }
+    }
+
+    fn test_storage(slot: u64, value: u64) -> StorageEntry {
+        StorageEntry { key: B256::from(U256::from(slot)), value: U256::from(value) }
+    }
+
+    fn storage_slots_with_shared_hashed_prefix() -> (B256, B256, B256) {
+        let mut slots_by_prefix: HashMap<u8, (B256, B256)> = HashMap::default();
+        let mut next_slot = 0u64;
+
+        let (left, left_hash, right) = loop {
+            let slot = B256::from(U256::from(next_slot));
+            next_slot += 1;
+            let hash = keccak256(slot);
+
+            if let Some((previous_slot, previous_hash)) = slots_by_prefix.get(&hash[0]) &&
+                previous_hash[1] != hash[1]
+            {
+                break (*previous_slot, *previous_hash, slot)
+            }
+            slots_by_prefix.insert(hash[0], (slot, hash));
+        };
+
+        let outside = loop {
+            let slot = B256::from(U256::from(next_slot));
+            next_slot += 1;
+            if keccak256(slot)[0] >> 4 != left_hash[0] >> 4 {
+                break slot
+            }
+        };
+
+        (left, right, outside)
+    }
+
+    fn seed_headers(
+        factory: &impl StaticFileProviderFactory<
+            Primitives: reth_primitives_traits::NodePrimitives<BlockHeader = Header>,
+        >,
+        end_block: BlockNumber,
+    ) {
+        let static_file_provider = factory.static_file_provider();
+        let mut header_writer =
+            static_file_provider.latest_writer(StaticFileSegment::Headers).unwrap();
+        for block_number in 0..=end_block {
+            let header = Header { number: block_number, ..Default::default() };
+            header_writer
+                .append_header(&header, &B256::with_last_byte(block_number as u8))
+                .unwrap();
+        }
+        header_writer.commit().unwrap();
+    }
+
+    fn legacy_compute_range_trie_changesets<Provider>(
+        provider: &Provider,
+        range: RangeInclusive<BlockNumber>,
+    ) -> TrieUpdatesSorted
+    where
+        Provider: DBProvider
+            + ChangeSetReader
+            + StorageChangeSetReader
+            + BlockNumReader
+            + StorageSettingsCache,
+    {
+        let mut accumulated_reverts = TrieUpdatesSorted::default();
+        for block_number in range.rev() {
+            let changesets = legacy_compute_block_trie_changesets(provider, block_number);
+            accumulated_reverts.extend_ref_and_sort(&changesets);
+        }
+        accumulated_reverts
+    }
+
+    fn legacy_compute_block_trie_changesets<Provider>(
+        provider: &Provider,
+        block_number: BlockNumber,
+    ) -> TrieUpdatesSorted
+    where
+        Provider: DBProvider
+            + ChangeSetReader
+            + StorageChangeSetReader
+            + BlockNumReader
+            + StorageSettingsCache,
+    {
+        reth_trie_db::with_adapter!(provider, |A| {
+            legacy_compute_block_trie_changesets_inner::<_, A>(provider, block_number)
+        })
+    }
+
+    fn legacy_compute_block_trie_changesets_inner<Provider, A>(
+        provider: &Provider,
+        block_number: BlockNumber,
+    ) -> TrieUpdatesSorted
+    where
+        Provider: DBProvider
+            + ChangeSetReader
+            + StorageChangeSetReader
+            + BlockNumReader
+            + StorageSettingsCache,
+        A: TrieTableAdapter,
+    {
+        let individual_state_revert =
+            reth_trie_db::from_reverts_auto(provider, block_number..=block_number).unwrap();
+        let cumulative_state_revert =
+            reth_trie_db::from_reverts_auto(provider, (block_number + 1)..).unwrap();
+
+        let mut cumulative_state_revert_prev = cumulative_state_revert.clone();
+        cumulative_state_revert_prev.extend_ref_and_sort(&individual_state_revert);
+
+        type DbStateRoot<'a, TX, A> =
+            StateRoot<DatabaseTrieCursorFactory<&'a TX, A>, DatabaseHashedCursorFactory<&'a TX>>;
+
+        let input_prev = TrieInputSorted::new(
+            Arc::default(),
+            Arc::new(cumulative_state_revert_prev.clone()),
+            cumulative_state_revert_prev.construct_prefix_sets(),
+        );
+        let cumulative_trie_updates_prev =
+            DbStateRoot::<_, A>::overlay_root_from_nodes_with_updates(
+                provider.tx_ref(),
+                input_prev,
+            )
+            .unwrap()
+            .1
+            .into_sorted();
+
+        let input = TrieInputSorted::new(
+            Arc::new(cumulative_trie_updates_prev.clone()),
+            Arc::new(cumulative_state_revert),
+            individual_state_revert.construct_prefix_sets(),
+        );
+        let trie_updates =
+            DbStateRoot::<_, A>::overlay_root_from_nodes_with_updates(provider.tx_ref(), input)
+                .unwrap()
+                .1
+                .into_sorted();
+
+        let db_cursor_factory = DatabaseTrieCursorFactory::<_, A>::new(provider.tx_ref());
+        let overlay_factory =
+            InMemoryTrieCursorFactory::new(db_cursor_factory, &cumulative_trie_updates_prev);
+
+        compute_trie_changesets(&overlay_factory, &trie_updates).unwrap()
+    }
+
+    fn seed_tip_trie_tables<Provider, A>(provider: &Provider)
+    where
+        Provider: DBProvider + TrieWriter,
+        A: TrieTableAdapter,
+    {
+        type DbStateRoot<'a, TX, A> =
+            StateRoot<DatabaseTrieCursorFactory<&'a TX, A>, DatabaseHashedCursorFactory<&'a TX>>;
+
+        let (_, trie_updates) =
+            DbStateRoot::<_, A>::from_tx(provider.tx_ref()).root_with_updates().unwrap();
+        provider.write_trie_updates(trie_updates).unwrap();
+    }
+
+    #[cfg(feature = "partial-persistence")]
+    type TestProviderFactory = ProviderFactory<MockNodeTypesWithDB>;
+
+    #[cfg(feature = "partial-persistence")]
+    struct LogicalTipFixture {
+        hybrid_factory: TestProviderFactory,
+        reference_factory: TestProviderFactory,
+        manager: OverlayManager,
+        tip_input: TrieInputSorted,
+    }
+
+    #[cfg(feature = "partial-persistence")]
+    fn accounts_with_shared_hashed_prefix() -> [(Address, B256); 3] {
+        let mut accounts_by_prefix: HashMap<u8, Vec<(Address, B256)>> = HashMap::default();
+        for last_byte in 0..=u8::MAX {
+            let address = Address::with_last_byte(last_byte);
+            let hashed_address = keccak256(address);
+            let accounts = accounts_by_prefix.entry(hashed_address[0] >> 4).or_default();
+            accounts.push((address, hashed_address));
+            if accounts.len() == 3 {
+                return [accounts[0], accounts[1], accounts[2]]
+            }
+        }
+        unreachable!("256 addresses must contain three with the same hashed nibble")
+    }
+
+    #[cfg(feature = "partial-persistence")]
+    fn seed_logical_tip_headers(factory: &TestProviderFactory, blocks: &[ExecutedBlock]) {
+        let static_file_provider = factory.static_file_provider();
+        let mut header_writer =
+            static_file_provider.latest_writer(StaticFileSegment::Headers).unwrap();
+        for block in blocks {
+            header_writer
+                .append_header(block.recovered_block().header(), &block.recovered_block().hash())
+                .unwrap();
+        }
+        header_writer.commit().unwrap();
+    }
+
+    #[cfg(feature = "partial-persistence")]
+    fn seed_logical_tip_changesets(
+        factory: &TestProviderFactory,
+        accounts: &[(Address, B256, Account)],
+    ) {
+        let static_file_provider = factory.static_file_provider();
+        let mut account_writer =
+            static_file_provider.latest_writer(StaticFileSegment::AccountChangeSets).unwrap();
+        account_writer.append_account_changeset(vec![], 0).unwrap();
+        for (block_number, (address, _, _)) in (1..).zip(accounts) {
+            account_writer
+                .append_account_changeset(
+                    vec![AccountBeforeTx { address: *address, info: None }],
+                    block_number,
+                )
+                .unwrap();
+        }
+        account_writer.commit().unwrap();
+
+        let mut storage_writer =
+            static_file_provider.latest_writer(StaticFileSegment::StorageChangeSets).unwrap();
+        for block_number in 0..=accounts.len() as u64 {
+            storage_writer.append_storage_changeset(vec![], block_number).unwrap();
+        }
+        storage_writer.commit().unwrap();
+    }
+
+    /// Builds the same logical Finish state as a partial database plus manager overlay and as a
+    /// fully materialized reference database.
+    #[cfg(feature = "partial-persistence")]
+    fn logical_tip_fixture() -> LogicalTipFixture {
+        let hybrid_factory = create_test_provider_factory();
+        let reference_factory = create_test_provider_factory();
+        hybrid_factory.set_storage_settings_cache(StorageSettings::v2());
+        reference_factory.set_storage_settings_cache(StorageSettings::v2());
+
+        let raw_blocks = TestBlockBuilder::eth().get_executed_blocks(0..4).collect::<Vec<_>>();
+        seed_logical_tip_headers(&hybrid_factory, &raw_blocks);
+        seed_logical_tip_headers(&reference_factory, &raw_blocks);
+
+        let accounts = accounts_with_shared_hashed_prefix()
+            .into_iter()
+            .enumerate()
+            .map(|(index, (address, hashed_address))| {
+                (address, hashed_address, test_account(index as u64 + 1))
+            })
+            .collect::<Vec<_>>();
+        seed_logical_tip_changesets(&hybrid_factory, &accounts);
+        seed_logical_tip_changesets(&reference_factory, &accounts);
+
+        let hybrid_provider = hybrid_factory.provider_rw().unwrap();
+        let manager = OverlayManager::default();
+        let mut tip_state = HashedPostStateSorted::default();
+        let mut tip_nodes = TrieUpdatesSorted::default();
+        for (index, (_, hashed_address, account)) in accounts.iter().enumerate() {
+            let block_state = HashedPostStateSorted::new(
+                vec![(*hashed_address, Some(*account))],
+                B256Map::default(),
+            );
+            tip_state.extend_ref_and_sort(&block_state);
+            let block_input = TrieInputSorted::new(
+                Arc::new(tip_nodes.clone()),
+                Arc::new(tip_state.clone()),
+                block_state.construct_prefix_sets(),
+            );
+            let (_, block_nodes) = reth_trie_db::with_adapter!(hybrid_provider, |A| {
+                type DbStateRoot<'a, TX, A> = StateRoot<
+                    DatabaseTrieCursorFactory<&'a TX, A>,
+                    DatabaseHashedCursorFactory<&'a TX>,
+                >;
+                DbStateRoot::<_, A>::overlay_root_from_nodes_with_updates(
+                    hybrid_provider.tx_ref(),
+                    block_input,
+                )
+            })
+            .unwrap();
+            let block_nodes = block_nodes.into_sorted();
+            tip_nodes.extend_ref_and_sort(&block_nodes);
+
+            let raw_block = &raw_blocks[index + 1];
+            manager.insert_block(ExecutedBlock::new(
+                Arc::clone(&raw_block.recovered_block),
+                Arc::clone(&raw_block.execution_output),
+                ComputedTrieData::new(Arc::new(block_state), Arc::new(block_nodes)),
+            ));
+        }
+        hybrid_provider
+            .save_stage_checkpoint(
+                StageId::Finish,
+                StageCheckpoint::new(3)
+                    .with_finish_stage_checkpoint(FinishCheckpoint { partial_state_trie: Some(0) }),
+            )
+            .unwrap();
+        hybrid_provider.commit().unwrap();
+
+        let reference_provider = reference_factory.provider_rw().unwrap();
+        for (_, hashed_address, account) in &accounts {
+            reference_provider
+                .tx_ref()
+                .put::<tables::HashedAccounts>(*hashed_address, *account)
+                .unwrap();
+        }
+        reference_provider.save_stage_checkpoint(StageId::Finish, StageCheckpoint::new(3)).unwrap();
+        reth_trie_db::with_adapter!(reference_provider, |A| {
+            seed_tip_trie_tables::<_, A>(&*reference_provider)
+        });
+        reference_provider.commit().unwrap();
+
+        LogicalTipFixture {
+            hybrid_factory,
+            reference_factory,
+            manager,
+            tip_input: TrieInputSorted::new(
+                Arc::new(tip_nodes),
+                Arc::new(tip_state),
+                Default::default(),
+            ),
+        }
+    }
+
+    #[cfg(feature = "partial-persistence")]
+    #[test]
+    fn logical_tip_input_reverts_tip_ended_range_from_hybrid_database() {
+        let fixture = logical_tip_fixture();
+        let hybrid_provider = fixture.hybrid_factory.provider().unwrap();
+        let reference_provider = fixture.reference_factory.provider().unwrap();
+
+        let actual = reth_trie_db::compute_range_trie_changesets_with_tip(
+            &hybrid_provider,
+            3..=3,
+            3,
+            &fixture.tip_input,
+        )
+        .unwrap();
+        let expected =
+            reth_trie_db::compute_range_trie_changesets(&reference_provider, 3..=3, 3).unwrap();
+
+        assert!(!expected.is_empty());
+        assert_eq!(actual, expected);
+    }
+
+    #[cfg(feature = "partial-persistence")]
+    #[test]
+    fn logical_tip_input_is_preserved_through_tail_revert() {
+        let fixture = logical_tip_fixture();
+        let hybrid_provider = fixture.hybrid_factory.provider().unwrap();
+        let reference_provider = fixture.reference_factory.provider().unwrap();
+
+        let actual = reth_trie_db::compute_range_trie_changesets_with_tip(
+            &hybrid_provider,
+            2..=2,
+            3,
+            &fixture.tip_input,
+        )
+        .unwrap();
+        let expected =
+            reth_trie_db::compute_range_trie_changesets(&reference_provider, 2..=2, 3).unwrap();
+
+        assert!(!expected.is_empty());
+        assert_eq!(actual, expected);
+    }
+
+    #[cfg(feature = "partial-persistence")]
+    #[test]
+    fn cache_miss_uses_managed_logical_tip() {
+        let fixture = logical_tip_fixture();
+        let hybrid_provider = fixture.hybrid_factory.provider().unwrap();
+        let reference_provider = fixture.reference_factory.provider().unwrap();
+        let cache = ChangesetCache::new();
+        cache.set_state_trie_overlay_manager(fixture.manager);
+
+        let actual = cache.get_or_compute_range(&hybrid_provider, 2..=3).unwrap();
+        let expected =
+            reth_trie_db::compute_range_trie_changesets(&reference_provider, 2..=3, 3).unwrap();
+
+        assert!(!expected.is_empty());
+        assert_eq!(*actual, expected);
+        assert_eq!(cache.inner.read().entries.len(), 1);
+    }
+
+    #[cfg(feature = "partial-persistence")]
+    #[test]
+    fn cache_miss_rejects_partial_tip_without_manager() {
+        let fixture = logical_tip_fixture();
+        let provider = fixture.hybrid_factory.provider().unwrap();
+        let cache = ChangesetCache::new();
+
+        let error = cache.get_or_compute_range(&provider, 2..=3).unwrap_err();
+
+        assert!(
+            error.to_string().contains("requires a state trie overlay manager"),
+            "unexpected error: {error}"
+        );
+    }
+
+    #[test]
+    fn database_fallback_revert_walks_unchanged_storage_branch_children() {
+        let factory = create_test_provider_factory();
+        seed_headers(&factory, 1);
+
+        let provider = factory.provider_rw().unwrap();
+        let address = Address::with_last_byte(1);
+        let hashed_address = keccak256(address);
+        let (removed_slot, surviving_slot, outside_slot) =
+            storage_slots_with_shared_hashed_prefix();
+        let removed_entry = StorageEntry { key: keccak256(removed_slot), value: U256::from(1) };
+
+        provider.tx_ref().put::<tables::HashedAccounts>(hashed_address, test_account(1)).unwrap();
+        for (slot, value) in [(removed_slot, 1), (surviving_slot, 2), (outside_slot, 3)] {
+            provider
+                .tx_ref()
+                .put::<tables::HashedStorages>(
+                    hashed_address,
+                    StorageEntry { key: keccak256(slot), value: U256::from(value) },
+                )
+                .unwrap();
+        }
+        provider
+            .tx_ref()
+            .put::<tables::StorageChangeSets>(
+                BlockNumberAddress((1, address)),
+                StorageEntry { key: removed_slot, value: U256::ZERO },
+            )
+            .unwrap();
+        provider.save_stage_checkpoint(StageId::Finish, StageCheckpoint::new(1)).unwrap();
+        reth_trie_db::with_adapter!(provider, |A| seed_tip_trie_tables::<_, A>(&*provider));
+
+        let cache = ChangesetCache::new();
+        let trie_revert = cache.get_or_compute_range(&*provider, 1..=1).unwrap();
+
+        provider
+            .tx_ref()
+            .delete::<tables::HashedStorages>(hashed_address, Some(removed_entry))
+            .unwrap();
+        provider.write_trie_updates_sorted(trie_revert.as_ref()).unwrap();
+
+        let inconsistencies = reth_trie_db::with_adapter!(provider, |A| {
+            let trie_cursor_factory = DatabaseTrieCursorFactory::<_, A>::new(provider.tx_ref());
+            let hashed_cursor_factory = DatabaseHashedCursorFactory::new(provider.tx_ref());
+            Verifier::new(&trie_cursor_factory, hashed_cursor_factory)
+                .unwrap()
+                .filter_map(|output| match output.unwrap() {
+                    VerifyOutput::Progress(_) => None,
+                    output => Some(output),
+                })
+                .collect::<Vec<_>>()
+        });
+        assert!(inconsistencies.is_empty(), "trie inconsistencies: {inconsistencies:#?}");
+    }
+
+    #[test]
+    fn cached_range_merge_keeps_oldest_revert_values() {
+        let factory = create_test_provider_factory();
+        seed_headers(&factory, 2);
+
+        let provider = factory.provider_rw().unwrap();
+        provider.save_stage_checkpoint(StageId::Finish, StageCheckpoint::new(2)).unwrap();
+
+        let cache = ChangesetCache::new();
+        let path = Nibbles::from_nibbles([0x1, 0x2]);
+        let older_node = BranchNodeCompact::new(0b0001, 0, 0, vec![], None);
+        let newer_node = BranchNodeCompact::new(0b0010, 0, 0, vec![], None);
+
+        {
+            let mut cache = cache.inner.write();
+            insert_test_changesets(
+                &mut cache,
+                B256::with_last_byte(1),
+                1,
+                Arc::new(TrieUpdatesSorted::new(
+                    vec![(path, Some(older_node.clone()))],
+                    B256Map::default(),
+                )),
+            );
+            insert_test_changesets(
+                &mut cache,
+                B256::with_last_byte(2),
+                2,
+                Arc::new(TrieUpdatesSorted::new(
+                    vec![(path, Some(newer_node))],
+                    B256Map::default(),
+                )),
+            );
+        }
+
+        let accumulated = cache.get_or_compute_range(&*provider, 1..=2).unwrap();
+        assert_eq!(accumulated.account_nodes_ref(), &[(path, Some(older_node))]);
+    }
+
+    #[test]
+    fn aggregate_range_reverts_to_pre_range_state() {
+        let factory = create_test_provider_factory();
+        seed_headers(&factory, 3);
+
+        let provider = factory.provider_rw().unwrap();
+        let address = Address::with_last_byte(1);
+        let hashed_address = keccak256(address);
+        let slot1 = B256::from(U256::from(1));
+        let slot2 = B256::from(U256::from(2));
+        let account1 = test_account(10);
+        let account2 = test_account(20);
+        let account3 = test_account(30);
+
+        provider.tx_ref().put::<tables::HashedAccounts>(hashed_address, account3).unwrap();
+        provider
+            .tx_ref()
+            .put::<tables::HashedStorages>(
+                hashed_address,
+                StorageEntry { key: keccak256(slot1), value: U256::from(25) },
+            )
+            .unwrap();
+        provider
+            .tx_ref()
+            .put::<tables::HashedStorages>(
+                hashed_address,
+                StorageEntry { key: keccak256(slot2), value: U256::from(20) },
+            )
+            .unwrap();
+
+        provider
+            .tx_ref()
+            .put::<tables::AccountChangeSets>(1, AccountBeforeTx { address, info: None })
+            .unwrap();
+        provider
+            .tx_ref()
+            .put::<tables::AccountChangeSets>(2, AccountBeforeTx { address, info: Some(account1) })
+            .unwrap();
+        provider
+            .tx_ref()
+            .put::<tables::AccountChangeSets>(3, AccountBeforeTx { address, info: Some(account2) })
+            .unwrap();
+
+        provider
+            .tx_ref()
+            .put::<tables::StorageChangeSets>(BlockNumberAddress((1, address)), test_storage(1, 0))
+            .unwrap();
+        provider
+            .tx_ref()
+            .put::<tables::StorageChangeSets>(BlockNumberAddress((1, address)), test_storage(2, 0))
+            .unwrap();
+        provider
+            .tx_ref()
+            .put::<tables::StorageChangeSets>(
+                BlockNumberAddress((2, address)),
+                StorageEntry { key: slot1, value: U256::from(10) },
+            )
+            .unwrap();
+        provider
+            .tx_ref()
+            .put::<tables::StorageChangeSets>(
+                BlockNumberAddress((3, address)),
+                StorageEntry { key: slot1, value: U256::from(15) },
+            )
+            .unwrap();
+
+        provider.save_stage_checkpoint(StageId::Finish, StageCheckpoint::new(3)).unwrap();
+        reth_trie_db::with_adapter!(provider, |A| seed_tip_trie_tables::<_, A>(&*provider));
+
+        let actual = reth_trie_db::compute_range_trie_changesets(&*provider, 1..=3, 3).unwrap();
+        let storage_revert = actual
+            .storage_tries_ref()
+            .get(&hashed_address)
+            .expect("created account storage trie should be deleted by range revert");
+        assert!(storage_revert.is_deleted());
+        assert!(storage_revert.storage_nodes_ref().is_empty());
+
+        let cache = ChangesetCache::new();
+        let from_cache_api = cache.get_or_compute_range(&*provider, 1..=3).unwrap();
+        assert_eq!(*from_cache_api, actual);
+        assert_eq!(cache.inner.read().entries.len(), 1);
+
+        let block_changesets = cache.get_or_compute(&*provider, 2).unwrap();
+        assert_eq!(*block_changesets, legacy_compute_block_trie_changesets(&*provider, 2));
+        assert_eq!(cache.inner.read().entries.len(), 2);
+    }
+
+    #[test]
+    fn aggregate_range_matches_legacy_per_block_merge_with_storage_wipe() {
+        let factory = create_test_provider_factory();
+        seed_headers(&factory, 3);
+
+        let provider = factory.provider_rw().unwrap();
+        let address = Address::with_last_byte(1);
+        let slot1 = B256::from(U256::from(1));
+        let slot2 = B256::from(U256::from(2));
+        let account1 = test_account(10);
+        let account2 = test_account(20);
+
+        provider
+            .tx_ref()
+            .put::<tables::AccountChangeSets>(1, AccountBeforeTx { address, info: None })
+            .unwrap();
+        provider
+            .tx_ref()
+            .put::<tables::AccountChangeSets>(2, AccountBeforeTx { address, info: Some(account1) })
+            .unwrap();
+        provider
+            .tx_ref()
+            .put::<tables::AccountChangeSets>(3, AccountBeforeTx { address, info: Some(account2) })
+            .unwrap();
+
+        provider
+            .tx_ref()
+            .put::<tables::StorageChangeSets>(BlockNumberAddress((1, address)), test_storage(1, 0))
+            .unwrap();
+        provider
+            .tx_ref()
+            .put::<tables::StorageChangeSets>(BlockNumberAddress((1, address)), test_storage(2, 0))
+            .unwrap();
+        provider
+            .tx_ref()
+            .put::<tables::StorageChangeSets>(
+                BlockNumberAddress((2, address)),
+                StorageEntry { key: slot1, value: U256::from(10) },
+            )
+            .unwrap();
+        provider
+            .tx_ref()
+            .put::<tables::StorageChangeSets>(
+                BlockNumberAddress((3, address)),
+                StorageEntry { key: slot1, value: U256::from(15) },
+            )
+            .unwrap();
+        provider
+            .tx_ref()
+            .put::<tables::StorageChangeSets>(
+                BlockNumberAddress((3, address)),
+                StorageEntry { key: slot2, value: U256::from(20) },
+            )
+            .unwrap();
+
+        provider.save_stage_checkpoint(StageId::Finish, StageCheckpoint::new(3)).unwrap();
+        reth_trie_db::with_adapter!(provider, |A| seed_tip_trie_tables::<_, A>(&*provider));
+
+        let expected = legacy_compute_range_trie_changesets(&*provider, 2..=3);
+        let actual = reth_trie_db::compute_range_trie_changesets(&*provider, 2..=3, 3).unwrap();
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn test_insert_and_retrieve_single_entry() {
+        let mut cache = ChangesetCacheInner::new();
+        let hash = B256::random();
+        let changesets = create_test_changesets();
+
+        insert_test_changesets(&mut cache, hash, 100, Arc::clone(&changesets));
+
+        // Should be able to retrieve it
+        let retrieved = get_test_changesets(&cache, hash, 100);
+        assert!(retrieved.is_some());
+        assert_eq!(cache.entries.len(), 1);
+    }
+
+    #[test]
+    fn test_insert_multiple_entries() {
+        let mut cache = ChangesetCacheInner::new();
+
+        // Insert 10 blocks
+        let mut hashes = Vec::new();
+        for i in 0..10 {
+            let hash = B256::random();
+            insert_test_changesets(&mut cache, hash, 100 + i, create_test_changesets());
+            hashes.push((100 + i, hash));
+        }
+
+        // Should be able to retrieve all
+        assert_eq!(cache.entries.len(), 10);
+        for (block_number, hash) in hashes {
+            assert!(get_test_changesets(&cache, hash, block_number).is_some());
+        }
+    }
+
+    #[test]
+    fn test_eviction_when_explicitly_called() {
+        let mut cache = ChangesetCacheInner::new();
+
+        // Insert 15 blocks (0-14)
+        let mut hashes = Vec::new();
+        for i in 0..15 {
+            let hash = B256::random();
+            insert_test_changesets(&mut cache, hash, i, create_test_changesets());
+            hashes.push((i, hash));
+        }
+
+        // All blocks should be present (no automatic eviction)
+        assert_eq!(cache.entries.len(), 15);
+
+        // Explicitly evict blocks < 4
+        cache.evict(4);
+
+        // Blocks 0-3 should be evicted
+        assert_eq!(cache.entries.len(), 11); // blocks 4-14 = 11 blocks
+
+        // Verify blocks 0-3 are evicted
+        for i in 0..4 {
+            assert!(
+                get_test_changesets(&cache, hashes[i as usize].1, i).is_none(),
+                "Block {} should be evicted",
+                i
+            );
+        }
+
+        // Verify blocks 4-14 are still present
+        for i in 4..15 {
+            assert!(
+                get_test_changesets(&cache, hashes[i as usize].1, i).is_some(),
+                "Block {} should be present",
+                i
+            );
+        }
+    }
+
+    #[test]
+    fn test_eviction_with_persistence_watermark() {
+        let mut cache = ChangesetCacheInner::new();
+
+        // Insert blocks 100-165
+        let mut hashes = HashMap::new();
+        for i in 100..=165 {
+            let hash = B256::random();
+            insert_test_changesets(&mut cache, hash, i, create_test_changesets());
+            hashes.insert(i, hash);
+        }
+
+        // All blocks should be present (no automatic eviction)
+        assert_eq!(cache.entries.len(), 66);
+
+        // Simulate persistence up to block 164, with 64-block retention window
+        // Eviction threshold = 164 - 64 = 100
+        cache.evict(100);
+
+        // Blocks 100-165 should remain (66 blocks)
+        assert_eq!(cache.entries.len(), 66);
+
+        // Simulate persistence up to block 165
+        // Eviction threshold = 165 - 64 = 101
+        cache.evict(101);
+
+        // Blocks 101-165 should remain (65 blocks)
+        assert_eq!(cache.entries.len(), 65);
+        assert!(get_test_changesets(&cache, hashes[&100], 100).is_none());
+        assert!(get_test_changesets(&cache, hashes[&101], 101).is_some());
+    }
+
+    #[test]
+    fn test_out_of_order_inserts_with_explicit_eviction() {
+        let mut cache = ChangesetCacheInner::new();
+
+        // Insert blocks in random order
+        let hash_10 = B256::random();
+        insert_test_changesets(&mut cache, hash_10, 10, create_test_changesets());
+
+        let hash_5 = B256::random();
+        insert_test_changesets(&mut cache, hash_5, 5, create_test_changesets());
+
+        let hash_15 = B256::random();
+        insert_test_changesets(&mut cache, hash_15, 15, create_test_changesets());
+
+        let hash_3 = B256::random();
+        insert_test_changesets(&mut cache, hash_3, 3, create_test_changesets());
+
+        // All blocks should be present (no automatic eviction)
+        assert_eq!(cache.entries.len(), 4);
+
+        // Explicitly evict blocks < 5
+        cache.evict(5);
+
+        assert!(get_test_changesets(&cache, hash_3, 3).is_none(), "Block 3 should be evicted");
+        assert!(get_test_changesets(&cache, hash_5, 5).is_some(), "Block 5 should be present");
+        assert!(get_test_changesets(&cache, hash_10, 10).is_some(), "Block 10 should be present");
+        assert!(get_test_changesets(&cache, hash_15, 15).is_some(), "Block 15 should be present");
+    }
+
+    #[test]
+    fn test_multiple_blocks_same_number() {
+        let mut cache = ChangesetCacheInner::new();
+
+        // Insert multiple blocks with same number (side chains)
+        let hash_1a = B256::random();
+        let hash_1b = B256::random();
+        insert_test_changesets(&mut cache, hash_1a, 100, create_test_changesets());
+        insert_test_changesets(&mut cache, hash_1b, 100, create_test_changesets());
+
+        // Both should be retrievable
+        assert!(get_test_changesets(&cache, hash_1a, 100).is_some());
+        assert!(get_test_changesets(&cache, hash_1b, 100).is_some());
+        assert_eq!(cache.entries.len(), 2);
+    }
+
+    #[test]
+    fn test_ranges_with_same_numbers_and_different_end_hashes_are_distinct() {
+        let mut cache = ChangesetCacheInner::new();
+        let path = Nibbles::from_nibbles_unchecked([0x01]);
+        let hash_a = B256::with_last_byte(1);
+        let hash_b = B256::with_last_byte(2);
+        let key_a = ChangesetRangeKey::new(10, 20, hash_a);
+        let key_b = ChangesetRangeKey::new(10, 20, hash_b);
+        let changesets_a = Arc::new(TrieUpdatesSorted::new(
+            vec![(path, Some(BranchNodeCompact::new(0b0001, 0, 0, vec![], None)))],
+            B256Map::default(),
+        ));
+        let changesets_b = Arc::new(TrieUpdatesSorted::new(
+            vec![(path, Some(BranchNodeCompact::new(0b0010, 0, 0, vec![], None)))],
+            B256Map::default(),
+        ));
+
+        cache.insert(key_a, Arc::clone(&changesets_a));
+        cache.insert(key_b, Arc::clone(&changesets_b));
+
+        assert_eq!(cache.entries.len(), 2);
+        assert_eq!(
+            cache.get(&key_a).unwrap().account_nodes_ref(),
+            changesets_a.account_nodes_ref()
+        );
+        assert_eq!(
+            cache.get(&key_b).unwrap().account_nodes_ref(),
+            changesets_b.account_nodes_ref()
+        );
+
+        cache.evict(11);
+        assert!(cache.get(&key_a).is_none());
+        assert!(cache.get(&key_b).is_none());
+    }
+
+    #[test]
+    fn test_eviction_removes_all_side_chains() {
+        let mut cache = ChangesetCacheInner::new();
+
+        // Insert multiple blocks at same height (side chains)
+        let hash_10a = B256::random();
+        let hash_10b = B256::random();
+        let hash_10c = B256::random();
+        insert_test_changesets(&mut cache, hash_10a, 10, create_test_changesets());
+        insert_test_changesets(&mut cache, hash_10b, 10, create_test_changesets());
+        insert_test_changesets(&mut cache, hash_10c, 10, create_test_changesets());
+
+        let hash_20 = B256::random();
+        insert_test_changesets(&mut cache, hash_20, 20, create_test_changesets());
+
+        assert_eq!(cache.entries.len(), 4);
+
+        // Evict blocks < 15 - should remove all three side chains at height 10
+        cache.evict(15);
+
+        assert_eq!(cache.entries.len(), 1);
+        assert!(get_test_changesets(&cache, hash_10a, 10).is_none());
+        assert!(get_test_changesets(&cache, hash_10b, 10).is_none());
+        assert!(get_test_changesets(&cache, hash_10c, 10).is_none());
+        assert!(get_test_changesets(&cache, hash_20, 20).is_some());
+    }
+}

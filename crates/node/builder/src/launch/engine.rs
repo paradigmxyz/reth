@@ -11,7 +11,6 @@ use crate::{
 };
 use alloy_consensus::BlockHeader;
 use futures::{stream::FusedStream, stream_select, FutureExt, StreamExt};
-use reth_chain_state::StateTrieOverlayManager;
 use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_db::{database_metrics::DatabaseMetrics, Database};
 use reth_engine_tree::{
@@ -38,10 +37,10 @@ use reth_provider::{
     providers::{BlockchainProvider, NodeTypesForProvider},
     BlockNumReader, StorageSettingsCache,
 };
+use reth_storage_overlay::{ChangesetCache, OverlayManager};
 use reth_tasks::TaskExecutor;
 use reth_tokio_util::EventSender;
 use reth_tracing::tracing::{debug, error, info};
-use reth_trie_db::ChangesetCache;
 use std::{future::Future, pin::Pin, sync::Arc};
 use tokio::sync::{mpsc::unbounded_channel, oneshot};
 use tokio_stream::wrappers::UnboundedReceiverStream;
@@ -205,7 +204,7 @@ impl EngineNodeLauncher {
         };
         let validator_builder = add_ons.engine_validator_builder();
         let state_trie_overlays =
-            StateTrieOverlayManager::new(ctx.task_executor().state_trie_overlay_worker_pool());
+            OverlayManager::new(ctx.task_executor().state_trie_overlay_worker_pool());
 
         // Build the engine validator with all required components
         let engine_validator = validator_builder

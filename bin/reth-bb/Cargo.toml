@@ -122,7 +122,12 @@ min-trace-logs = [
     "reth-ethereum-cli/min-trace-logs",
     "reth-node-core/min-trace-logs",
 ]
-trie-debug = ["reth-node-builder/trie-debug", "reth-node-core/trie-debug"]
+trie-debug = [
+    "reth-node-builder/trie-debug",
+    "reth-node-core/trie-debug",
+    "reth-engine-primitives/trie-debug",
+    "reth-engine-tree/trie-debug",
+]
 
 partial-persistence = ["reth-node-core/partial-persistence"]
 

@@ -17,7 +17,6 @@ use alloy_primitives::{Address, BlockHash, BlockNumber, TxHash, TxNumber, B256};
 use core::fmt;
 use notify::{RecommendedWatcher, RecursiveMode, Watcher};
 use parking_lot::RwLock;
-use reth_chain_state::StateTrieOverlayManager;
 use reth_chainspec::ChainInfo;
 use reth_db::{init_db, mdbx::DatabaseArguments, DatabaseEnv};
 use reth_db_api::{database::Database, models::StoredBlockBodyIndices};
@@ -34,8 +33,8 @@ use reth_storage_api::{
     NodePrimitivesProvider, StorageSettings, StorageSettingsCache, TryIntoHistoricalStateProvider,
 };
 use reth_storage_errors::provider::ProviderResult;
+use reth_storage_overlay::{ChangesetCache, OverlayManager};
 use reth_trie::HashedPostState;
-use reth_trie_db::ChangesetCache;
 use revm::database::BundleState;
 use std::{
     ops::{RangeBounds, RangeInclusive},
@@ -215,7 +214,7 @@ impl<N: NodeTypesWithDB> ProviderFactory<N> {
 
     /// Sets the manager used by the shared changeset cache to reconstruct a partially persisted
     /// logical database tip.
-    pub fn set_state_trie_overlay_manager(&self, manager: StateTrieOverlayManager<N::Primitives>) {
+    pub fn set_state_trie_overlay_manager(&self, manager: OverlayManager<N::Primitives>) {
         self.changeset_cache.set_state_trie_overlay_manager(manager);
     }
 
