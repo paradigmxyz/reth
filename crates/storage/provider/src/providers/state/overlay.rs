@@ -127,6 +127,9 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
     ///
     /// This overlay will be applied on top of any reverts.
     pub(super) fn with_overlay_source(mut self, source: Option<OverlaySource<N>>) -> Self {
+        if let Some(OverlaySource::Managed { manager }) = &source {
+            self.changeset_cache.set_state_trie_overlay_manager(manager.clone());
+        }
         self.overlay_source = source;
         self
     }
@@ -140,12 +143,12 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
 
     /// Set the state trie overlay manager used to resolve in-memory parent state.
     pub fn with_state_trie_overlay_manager(
-        mut self,
+        self,
         state_trie_overlay_manager: StateTrieOverlayManager<N>,
     ) -> Self {
-        self.changeset_cache.set_state_trie_overlay_manager(state_trie_overlay_manager.clone());
-        self.overlay_source = Some(OverlaySource::Managed { manager: state_trie_overlay_manager });
-        self
+        self.with_overlay_source(Some(OverlaySource::Managed {
+            manager: state_trie_overlay_manager,
+        }))
     }
 
     /// Set the hashed state overlay.

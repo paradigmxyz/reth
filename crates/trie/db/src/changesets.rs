@@ -699,7 +699,7 @@ impl ChangesetCache {
         let resolver = self.state_trie_overlay.get().cloned().ok_or_else(|| {
             ProviderError::other(std::io::Error::other(format!(
                 "changeset cache requires a state trie overlay manager for partial persistence gap #{}..=#{}",
-                state_trie_tip + 1,
+                state_trie_tip.saturating_add(1),
                 finish.block_number,
             )))
         })?;

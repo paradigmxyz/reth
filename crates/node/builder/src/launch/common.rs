@@ -547,7 +547,7 @@ where
         let (rocksdb_unwind, static_file_unwind) = factory.check_consistency()?;
         let partial_trie_unwind = partial_trie_unwind_target(
             factory.database_provider_ro()?.get_stage_checkpoint(StageId::Finish)?,
-        );
+        )?;
 
         // Take the minimum block number to ensure all storage layers are consistent.
         let unwind_target =
@@ -563,12 +563,13 @@ where
             .flatten()
             .collect::<Vec<_>>()
             .join(" and ");
-            // Highly unlikely to happen, and given its destructive nature, it's better to panic
-            // instead. Unwinding to 0 would leave MDBX with a huge free list size.
-            assert_ne!(
-                unwind_block, 0,
-                "A {} inconsistency was found that would trigger an unwind to block 0",
-                inconsistency_source
+            // A partial frontier at genesis is valid while the first masking window is in memory,
+            // so losing that window requires unwinding to genesis. Keep rejecting block-zero
+            // targets caused only by cross-store inconsistency because that can leave MDBX with a
+            // huge free list.
+            assert!(
+                unwind_block != 0 || partial_trie_unwind == Some(0),
+                "A {inconsistency_source} inconsistency was found that would trigger an unwind to block 0"
             );
 
             let unwind_target = PipelineTarget::Unwind(unwind_block);
@@ -1344,11 +1345,24 @@ pub fn metrics_hooks<N: NodeTypesWithDB>(provider_factory: &ProviderFactory<N>) 
         .build()
 }
 
-fn partial_trie_unwind_target(finish_checkpoint: Option<StageCheckpoint>) -> Option<BlockNumber> {
-    let finish_checkpoint = finish_checkpoint?;
-    let partial_state_trie = finish_checkpoint.finish_stage_checkpoint()?.partial_state_trie()?;
+fn partial_trie_unwind_target(
+    finish_checkpoint: Option<StageCheckpoint>,
+) -> ProviderResult<Option<BlockNumber>> {
+    let Some(finish_checkpoint) = finish_checkpoint else { return Ok(None) };
+    let Some(partial_state_trie) =
+        finish_checkpoint.finish_stage_checkpoint().and_then(|finish| finish.partial_state_trie())
+    else {
+        return Ok(None)
+    };
 
-    (partial_state_trie != finish_checkpoint.block_number).then_some(partial_state_trie)
+    if partial_state_trie > finish_checkpoint.block_number {
+        return Err(ProviderError::other(std::io::Error::other(format!(
+            "partial state trie frontier #{partial_state_trie} is ahead of Finish #{}",
+            finish_checkpoint.block_number,
+        ))))
+    }
+
+    Ok((partial_state_trie < finish_checkpoint.block_number).then_some(partial_state_trie))
 }
 
 #[cfg(test)]
@@ -1413,19 +1427,42 @@ mod tests {
     fn partial_trie_unwind_target_uses_partial_finish_checkpoint() {
         let finish_checkpoint = StageCheckpoint::new(42)
             .with_finish_stage_checkpoint(FinishCheckpoint { partial_state_trie: Some(21) });
+        let expected = finish_checkpoint.finish_stage_checkpoint().unwrap().partial_state_trie();
 
-        assert_eq!(partial_trie_unwind_target(Some(finish_checkpoint)), Some(21));
+        assert_eq!(partial_trie_unwind_target(Some(finish_checkpoint)).unwrap(), expected);
+
+        let genesis_checkpoint = StageCheckpoint::new(42)
+            .with_finish_stage_checkpoint(FinishCheckpoint { partial_state_trie: Some(0) });
+        let expected = genesis_checkpoint.finish_stage_checkpoint().unwrap().partial_state_trie();
+
+        assert_eq!(partial_trie_unwind_target(Some(genesis_checkpoint)).unwrap(), expected);
     }
 
     #[test]
-    fn partial_trie_unwind_target_ignores_matching_or_missing_partial_checkpoint() {
+    fn partial_trie_unwind_target_ignores_non_lagging_or_missing_partial_checkpoint() {
         let matching_finish_checkpoint = StageCheckpoint::new(42)
             .with_finish_stage_checkpoint(FinishCheckpoint { partial_state_trie: Some(42) });
+        let ahead_finish_checkpoint = StageCheckpoint::new(42)
+            .with_finish_stage_checkpoint(FinishCheckpoint { partial_state_trie: Some(43) });
         let missing_partial_finish_checkpoint = StageCheckpoint::new(42)
             .with_finish_stage_checkpoint(FinishCheckpoint { partial_state_trie: None });
 
-        assert_eq!(partial_trie_unwind_target(Some(matching_finish_checkpoint)), None);
-        assert_eq!(partial_trie_unwind_target(Some(missing_partial_finish_checkpoint)), None);
-        assert_eq!(partial_trie_unwind_target(None), None);
+        assert_eq!(partial_trie_unwind_target(Some(matching_finish_checkpoint)).unwrap(), None);
+        assert_eq!(
+            partial_trie_unwind_target(Some(missing_partial_finish_checkpoint)).unwrap(),
+            None
+        );
+        assert_eq!(partial_trie_unwind_target(None).unwrap(), None);
+
+        let partial_frontier = ahead_finish_checkpoint
+            .finish_stage_checkpoint()
+            .and_then(|finish| finish.partial_state_trie());
+        let result = partial_trie_unwind_target(Some(ahead_finish_checkpoint));
+        if partial_frontier.is_some() {
+            let error = result.unwrap_err();
+            assert!(error.to_string().contains("ahead of Finish"), "unexpected error: {error}");
+        } else {
+            assert_eq!(result.unwrap(), None);
+        }
     }
 }
