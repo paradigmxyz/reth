@@ -192,18 +192,6 @@ dyn_clone::clone_trait_object!(
     RpcConvert<Primitives = Primitives, Network = Network, Error = Error, Evm = Evm>
 );
 
-/// Type-erased RPC converter.
-pub type BoxedRpcConverter<Primitives, Network, Error, Evm> =
-    Box<dyn RpcConvert<Primitives = Primitives, Network = Network, Error = Error, Evm = Evm>>;
-
-/// Type-erased form of an RPC converter.
-pub type ErasedRpcConverter<T> = BoxedRpcConverter<
-    <T as RpcConvert>::Primitives,
-    <T as RpcConvert>::Network,
-    <T as RpcConvert>::Error,
-    <T as RpcConvert>::Evm,
->;
-
 /// Converts `Tx` into `RpcTx`
 ///
 /// Where:
@@ -616,7 +604,16 @@ impl<Network, Evm, Receipt, Header, Map, SimTx, RpcTx, TxEnv>
     }
 
     /// Converts `self` into a boxed converter.
-    pub fn erased(self) -> ErasedRpcConverter<Self>
+    pub fn erased(
+        self,
+    ) -> Box<
+        dyn RpcConvert<
+            Primitives = <Self as RpcConvert>::Primitives,
+            Network = <Self as RpcConvert>::Network,
+            Error = <Self as RpcConvert>::Error,
+            Evm = <Self as RpcConvert>::Evm,
+        >,
+    >
     where
         Self: RpcConvert,
     {

@@ -498,12 +498,23 @@ where
     ) -> Result<Vec<RpcLog<Eth::NetworkTypes>>, EthFilterError> {
         match filter.block_option {
             FilterBlockOption::AtBlockHash(block_hash) => {
-                let Some((block, receipts)) =
-                    self.eth_cache().get_block_and_receipts(block_hash).await?
+                // First try to get cached block and receipts, as it's likely they're already cached
+                let Some((receipts, maybe_block)) =
+                    self.eth_cache().get_receipts_and_maybe_block(block_hash).await?
                 else {
                     return Err(ProviderError::HeaderNotFound(block_hash.into()).into())
                 };
-                let block_number = block.number();
+
+                // Read number and timestamp from cached block or provider header
+                let (block_number, block_timestamp) = if let Some(block) = &maybe_block {
+                    (block.header().number(), block.header().timestamp())
+                } else {
+                    let header = self
+                        .provider()
+                        .header_by_hash_or_number(block_hash.into())?
+                        .ok_or_else(|| ProviderError::HeaderNotFound(block_hash.into()))?;
+                    (header.number(), header.timestamp())
+                };
 
                 // Check if the block has been pruned (EIP-4444)
                 let earliest_block = self.provider().earliest_block_number()?;
@@ -516,14 +527,29 @@ where
                 let mut all_logs = Vec::new();
                 append_matching_block_logs(
                     &mut all_logs,
-                    ProviderOrBlock::<Eth::Provider>::Block(block.clone()),
+                    maybe_block
+                        .clone()
+                        .map(ProviderOrBlock::Block)
+                        .unwrap_or_else(|| ProviderOrBlock::Provider(self.provider())),
                     &filter,
                     block_num_hash,
                     &receipts,
                     false,
-                    block.timestamp(),
+                    block_timestamp,
                 )?;
 
+                if all_logs.is_empty() {
+                    return Ok(Vec::new())
+                }
+
+                let block = if let Some(block) = maybe_block {
+                    block
+                } else {
+                    self.eth_cache()
+                        .get_recovered_block(block_hash)
+                        .await?
+                        .ok_or_else(|| ProviderError::HeaderNotFound(block_hash.into()))?
+                };
                 self.convert_logs(all_logs, block.sealed_block())
             }
             FilterBlockOption::Range { from_block, to_block } => {

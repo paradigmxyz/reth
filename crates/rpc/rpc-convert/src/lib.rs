@@ -14,10 +14,7 @@ mod rpc;
 pub mod transaction;
 
 pub use rpc::*;
-pub use transaction::{
-    BoxedRpcConverter, ErasedRpcConverter, ReceiptConverter, RpcConvert, RpcConverter,
-    TransactionConversionError,
-};
+pub use transaction::{RpcConvert, RpcConverter, TransactionConversionError};
 
 pub use alloy_evm::rpc::{CallFees, CallFeesError, EthTxEnvError, TryIntoTxEnv};
 
