@@ -13,7 +13,6 @@ use crate::{
     tree::{EngineApiTreeHandler, EngineValidator, TreeConfig, WaitForCaches},
 };
 use futures::Stream;
-use reth_chain_state::StateTrieOverlayManager;
 use reth_consensus::FullConsensus;
 use reth_engine_primitives::BeaconEngineMessage;
 use reth_evm::ConfigureEvm;
@@ -26,8 +25,8 @@ use reth_provider::{
 };
 use reth_prune::PrunerWithFactory;
 use reth_stages_api::{MetricEventsSender, Pipeline};
+use reth_storage_overlay::OverlayManager;
 use reth_tasks::Runtime;
-use reth_trie_db::ChangesetCache;
 use std::sync::Arc;
 
 /// Builds the engine [`ChainOrchestrator`] that drives the chain forward.
@@ -61,11 +60,10 @@ pub fn build_engine_orchestrator<N, Client, S, V, C>(
     pruner: PrunerWithFactory<ProviderFactory<N>>,
     payload_builder: PayloadBuilderHandle<N::Payload>,
     payload_validator: V,
-    state_trie_overlays: StateTrieOverlayManager<N::Primitives>,
+    overlay_manager: OverlayManager<N::Primitives>,
     tree_config: TreeConfig,
     sync_metrics_tx: MetricEventsSender,
     evm_config: C,
-    changeset_cache: ChangesetCache,
     runtime: Runtime,
 ) -> ChainOrchestrator<
     EngineHandler<
@@ -96,11 +94,10 @@ where
         persistence_handle,
         payload_builder,
         canonical_in_memory_state,
-        state_trie_overlays,
+        overlay_manager,
         tree_config,
         engine_kind,
         evm_config,
-        changeset_cache,
         runtime,
     );
 
