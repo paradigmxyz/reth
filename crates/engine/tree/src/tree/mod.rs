@@ -36,7 +36,7 @@ use reth_provider::{
 };
 use reth_revm::database::StateProviderDatabase;
 use reth_stages_api::ControlFlow;
-use reth_storage_overlay::{ChangesetCache, OverlayManager};
+use reth_storage_overlay::OverlayManager;
 use reth_tasks::{spawn_os_thread, utils::increase_thread_priority};
 use reth_trie::ComputedTrieData;
 use revm::interpreter::debug_unreachable;
@@ -349,8 +349,6 @@ where
     engine_kind: EngineApiKind,
     /// The EVM configuration.
     evm_config: C,
-    /// Changeset cache for in-memory trie changesets
-    changeset_cache: ChangesetCache,
     /// Timing statistics for executed blocks, keyed by block hash.
     /// Stored here (not in `ExecutedBlock`) to avoid leaking observability concerns into the block
     /// type. Entries are removed when blocks are persisted or invalidated.
@@ -384,7 +382,6 @@ where
             .field("metrics", &self.metrics)
             .field("engine_kind", &self.engine_kind)
             .field("evm_config", &self.evm_config)
-            .field("changeset_cache", &self.changeset_cache)
             .field("execution_timing_stats", &self.execution_timing_stats.len())
             .field("runtime", &self.runtime)
             .finish()
@@ -426,7 +423,6 @@ where
         config: TreeConfig,
         engine_kind: EngineApiKind,
         evm_config: C,
-        changeset_cache: ChangesetCache,
         runtime: reth_tasks::Runtime,
     ) -> Self {
         let (incoming_tx, incoming) = crossbeam_channel::unbounded();
@@ -448,7 +444,6 @@ where
             incoming_tx,
             engine_kind,
             evm_config,
-            changeset_cache,
             execution_timing_stats: B256Map::default(),
             building_payload: false,
             runtime,
@@ -472,7 +467,6 @@ where
         config: TreeConfig,
         kind: EngineApiKind,
         evm_config: C,
-        changeset_cache: ChangesetCache,
         runtime: reth_tasks::Runtime,
     ) -> (Sender<FromEngine<EngineApiRequest<T, N>, N::Block>>, UnboundedReceiver<EngineApiEvent<N>>)
     {
@@ -507,7 +501,6 @@ where
             config,
             kind,
             evm_config,
-            changeset_cache,
             runtime,
         );
         let incoming = task.incoming_tx.clone();
@@ -1562,7 +1555,7 @@ where
             eviction_threshold,
             "Evicting changesets below threshold"
         );
-        self.changeset_cache.evict(eviction_threshold);
+        self.state.tree_state.state_trie_overlays.evict_trie_changesets(eviction_threshold);
 
         self.on_new_persisted_block()?;
 
@@ -2238,11 +2231,11 @@ where
             "computing block trie updates",
         );
         let db_provider = self.provider.database_provider_ro()?;
-        let trie_updates = reth_storage_overlay::compute_block_trie_updates(
-            &self.changeset_cache,
-            &db_provider,
-            block.number(),
-        )?;
+        let trie_updates = self
+            .state
+            .tree_state
+            .state_trie_overlays
+            .compute_block_trie_updates(&db_provider, block.number())?;
 
         let sorted_hashed_state = Arc::new(hashed_state.into_sorted());
         let sorted_trie_updates = Arc::new(trie_updates);

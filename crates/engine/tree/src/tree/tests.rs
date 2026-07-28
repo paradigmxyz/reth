@@ -7,7 +7,7 @@ use crate::{
         PersistTarget, TreeConfig,
     },
 };
-use reth_storage_overlay::{ChangesetCache, OverlayManager};
+use reth_storage_overlay::OverlayManager;
 
 use alloy_eips::eip1898::BlockWithParent;
 use alloy_primitives::{
@@ -224,7 +224,6 @@ impl TestHarness {
         let payload_builder = PayloadBuilderHandle::new(to_payload_service);
 
         let evm_config = MockEvmConfig::default();
-        let changeset_cache = ChangesetCache::new();
         let engine_validator = BasicEngineValidator::new(
             provider.clone(),
             consensus.clone(),
@@ -232,7 +231,6 @@ impl TestHarness {
             payload_validator,
             tree_config.clone(),
             Box::new(NoopInvalidBlockHook::default()),
-            changeset_cache.clone(),
             state_trie_overlays,
             runtime.clone(),
         );
@@ -250,7 +248,6 @@ impl TestHarness {
             tree_config,
             EngineApiKind::Ethereum,
             evm_config,
-            changeset_cache,
             runtime,
         );
 
@@ -287,7 +284,7 @@ impl TestHarness {
             parent_hash = hash;
         }
 
-        let state_trie_overlays = OverlayManager::default();
+        let state_trie_overlays = self.tree.state.tree_state.state_trie_overlays.clone();
         for block in &blocks {
             state_trie_overlays.insert_block(block.clone());
         }
@@ -431,7 +428,7 @@ impl ValidatorTestHarness {
         let provider = harness.provider.clone();
         let payload_validator = MockEngineValidator;
         let evm_config = MockEvmConfig::default();
-        let changeset_cache = ChangesetCache::new();
+        let state_trie_overlays = harness.tree.state.tree_state.state_trie_overlays.clone();
 
         let validator = BasicEngineValidator::new(
             provider,
@@ -440,8 +437,7 @@ impl ValidatorTestHarness {
             payload_validator,
             TreeConfig::default(),
             Box::new(NoopInvalidBlockHook::default()),
-            changeset_cache,
-            OverlayManager::default(),
+            state_trie_overlays,
             reth_tasks::Runtime::test(),
         );
 

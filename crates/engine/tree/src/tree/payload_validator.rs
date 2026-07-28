@@ -152,7 +152,7 @@ use reth_provider::{
     StateProviderFactory, StateReader, StorageChangeSetReader, StorageSettingsCache,
 };
 use reth_revm::db::{states::bundle_state::BundleRetention, BundleAccount, State};
-use reth_storage_overlay::{ChangesetCache, OverlayBuilder, OverlayManager};
+use reth_storage_overlay::{OverlayBuilder, OverlayManager};
 use reth_trie::{
     hashed_cursor::HashedCursorFactory, trie_cursor::TrieCursorFactory, updates::TrieUpdates,
     LazyTrieData,
@@ -284,8 +284,6 @@ where
     metrics: EngineApiMetrics,
     /// Validator for the payload.
     validator: V,
-    /// Changeset cache for in-memory trie changesets
-    changeset_cache: ChangesetCache,
     /// Task runtime for spawning parallel work.
     runtime: reth_tasks::Runtime,
     /// Shared state trie in-memory overlay data.
@@ -337,7 +335,6 @@ where
         validator: V,
         config: TreeConfig,
         invalid_block_hook: Box<dyn InvalidBlockHook<N>>,
-        changeset_cache: ChangesetCache,
         state_trie_overlays: OverlayManager<N>,
         runtime: reth_tasks::Runtime,
     ) -> Self {
@@ -359,7 +356,6 @@ where
             invalid_block_hook,
             metrics: EngineApiMetrics::default(),
             validator,
-            changeset_cache,
             runtime,
             state_trie_overlays,
             state_root_strategy: Arc::new(DefaultStateRootStrategy::default()),
@@ -601,11 +597,7 @@ where
 
         // Create overlay factory for state-root tasks that need multiproofs.
         let provider_factory = self.provider.clone();
-        let overlay_builder = Self::overlay_builder_for_parent(
-            parent_hash,
-            ctx.state(),
-            self.changeset_cache.clone(),
-        );
+        let overlay_builder = Self::overlay_builder_for_parent(parent_hash, ctx.state());
         let overlay_factory = OverlayStateProviderFactory::new(provider_factory, overlay_builder);
 
         let parallel_bal_execution = ensure_ok!(self.bal_path_eligible(env.decoded_bal.as_deref()));
@@ -1453,10 +1445,8 @@ where
     fn overlay_builder_for_parent(
         parent_hash: B256,
         state: &EngineApiTreeState<N>,
-        changeset_cache: ChangesetCache,
     ) -> OverlayBuilder<N> {
-        OverlayBuilder::new(parent_hash, changeset_cache)
-            .with_overlay_manager(state.tree_state.state_trie_overlays.clone())
+        state.tree_state.state_trie_overlays.overlay_builder(parent_hash)
     }
 
     /// Prepares the optional payload-builder state-root handle through the installed
@@ -1483,7 +1473,7 @@ where
         };
         let overlay_factory = OverlayStateProviderFactory::new(
             self.provider.clone(),
-            Self::overlay_builder_for_parent(parent_hash, state, self.changeset_cache.clone()),
+            Self::overlay_builder_for_parent(parent_hash, state),
         );
 
         match self.state_root_strategy.prepare_payload_builder(PayloadStateRootJobContext::new(

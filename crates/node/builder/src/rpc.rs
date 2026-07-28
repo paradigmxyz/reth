@@ -10,7 +10,7 @@ pub use reth_rpc_builder::{
     middleware::{RethAuthHttpMiddleware, RethRpcMiddleware},
     Identity, Stack,
 };
-use reth_storage_overlay::{ChangesetCache, OverlayManager};
+use reth_storage_overlay::OverlayManager;
 
 use crate::{
     invalid_block_hook::InvalidBlockHookExt, txpool_prewarm, ConfigureEngineEvm,
@@ -1412,7 +1412,6 @@ pub trait EngineValidatorBuilder<Node: FullNodeComponents>: Send + Sync + Clone 
         self,
         ctx: &AddOnsContext<'_, Node>,
         tree_config: TreeConfig,
-        changeset_cache: ChangesetCache,
         state_trie_overlays: OverlayManager<PrimitivesTy<Node::Types>>,
     ) -> impl Future<Output = eyre::Result<Self::EngineValidator>> + Send;
 }
@@ -1461,7 +1460,6 @@ where
         self,
         ctx: &AddOnsContext<'_, Node>,
         tree_config: TreeConfig,
-        changeset_cache: ChangesetCache,
         state_trie_overlays: OverlayManager<PrimitivesTy<Node::Types>>,
     ) -> eyre::Result<Self::EngineValidator> {
         let validator = self.payload_validator_builder.build(ctx).await?;
@@ -1476,7 +1474,6 @@ where
             validator,
             tree_config,
             invalid_block_hook,
-            changeset_cache,
             state_trie_overlays,
             ctx.node.task_executor().clone(),
         );

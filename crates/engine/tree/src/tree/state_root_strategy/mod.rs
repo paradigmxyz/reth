@@ -1328,7 +1328,7 @@ mod tests {
         test_utils::create_test_provider_factory_with_chain_spec,
         HashingWriter,
     };
-    use reth_storage_overlay::{ChangesetCache, OverlayBuilder, OverlayManager};
+    use reth_storage_overlay::OverlayManager;
     use reth_testing_utils::generators;
     use reth_trie::test_utils::state_root;
     use revm::state::{AccountInfo, AccountStatus, EvmState, EvmStorageSlot, TransactionId};
@@ -1488,7 +1488,7 @@ mod tests {
             &state_trie_overlays,
             OverlayStateProviderFactory::new(
                 provider_factory,
-                OverlayBuilder::<EthPrimitives>::new(genesis_hash, ChangesetCache::new()),
+                state_trie_overlays.overlay_builder(genesis_hash),
             ),
             StateRootTaskOptions {
                 parent_header: SealedHeader::new(Default::default(), genesis_hash),

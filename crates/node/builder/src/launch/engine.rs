@@ -37,7 +37,7 @@ use reth_provider::{
     providers::{BlockchainProvider, NodeTypesForProvider},
     BlockNumReader, StorageSettingsCache,
 };
-use reth_storage_overlay::{ChangesetCache, OverlayManager};
+use reth_storage_overlay::OverlayManager;
 use reth_tasks::TaskExecutor;
 use reth_tokio_util::EventSender;
 use reth_tracing::tracing::{debug, error, info};
@@ -92,8 +92,10 @@ impl EngineNodeLauncher {
         } = target;
         let NodeHooks { on_component_initialized, on_node_started, .. } = hooks;
 
-        // Create changeset cache that will be shared across the engine
-        let changeset_cache = ChangesetCache::new();
+        // Create the overlay manager that will be shared across the provider and engine.
+        let state_trie_overlays = OverlayManager::<N::Primitives>::new(
+            ctx.task_executor.state_trie_overlay_worker_pool(),
+        );
         let disabled_stages = N::disabled_stages();
 
         // setup the launch context
@@ -107,9 +109,9 @@ impl EngineNodeLauncher {
             .attach(database.clone())
             // ensure certain settings take effect
             .with_adjusted_configs()
-            // Create the provider factory with changeset cache
+            // Create the provider factory with the shared overlay manager
             .with_provider_factory::<_, <CB::Components as NodeComponents<T>>::Evm>(
-                changeset_cache.clone(),
+                state_trie_overlays.clone(),
                 rocksdb_provider,
                 disabled_stages,
             )
@@ -203,8 +205,6 @@ impl EngineNodeLauncher {
             engine_events: event_sender.clone(),
         };
         let validator_builder = add_ons.engine_validator_builder();
-        let state_trie_overlays =
-            OverlayManager::new(ctx.task_executor().state_trie_overlay_worker_pool());
 
         // Build the engine validator with all required components
         let engine_validator = validator_builder
@@ -212,7 +212,6 @@ impl EngineNodeLauncher {
             .build_tree_validator(
                 &add_ons_ctx,
                 engine_tree_config.clone(),
-                changeset_cache.clone(),
                 state_trie_overlays.clone(),
             )
             .await?;
@@ -230,7 +229,6 @@ impl EngineNodeLauncher {
                         .build_tree_validator(
                             &add_ons_ctx,
                             engine_tree_config.clone(),
-                            changeset_cache.clone(),
                             reorg_state_trie_overlays.clone(),
                         )
                         .await
@@ -266,7 +264,6 @@ impl EngineNodeLauncher {
             engine_tree_config,
             ctx.sync_metrics_tx(),
             ctx.components().evm_config().clone(),
-            changeset_cache,
             ctx.task_executor().clone(),
         );
 

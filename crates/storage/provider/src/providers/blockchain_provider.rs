@@ -35,7 +35,6 @@ use reth_storage_api::{
     StorageRangeResult,
 };
 use reth_storage_errors::provider::ProviderResult;
-use reth_storage_overlay::OverlayBuilder;
 use reth_trie::{
     hashed_cursor::{HashedCursor, HashedCursorFactory},
     metrics::TrieRootMetrics,
@@ -187,12 +186,11 @@ impl<N: ProviderNodeTypes> BlockchainProvider<N> {
         // via changesets, then the merged in-memory delta applies on top.
         let overlay_factory = OverlayStateProviderFactory::new(
             self.database.clone(),
-            OverlayBuilder::<N::Primitives>::new(
-                matched.anchor().hash,
-                self.database.changeset_cache(),
-            )
-            .with_hashed_state_overlay(Some(merged.state))
-            .with_trie_updates_overlay(Some(merged.nodes)),
+            self.database
+                .overlay_manager()
+                .overlay_builder(matched.anchor().hash)
+                .with_hashed_state_overlay(Some(merged.state))
+                .with_trie_updates_overlay(Some(merged.nodes)),
         );
         reth_storage_api::DatabaseProviderROFactory::database_provider_ro(&overlay_factory)
             .map(Some)
@@ -220,7 +218,7 @@ impl<N: ProviderNodeTypes> BlockchainProvider<N> {
         let Some(block_hash) = block_hash else { return Ok(None) };
         let overlay_factory = OverlayStateProviderFactory::new(
             self.database.clone(),
-            OverlayBuilder::<N::Primitives>::new(block_hash, self.database.changeset_cache()),
+            self.database.overlay_manager().overlay_builder(block_hash),
         );
         reth_storage_api::DatabaseProviderROFactory::database_provider_ro(&overlay_factory)
             .map(Some)

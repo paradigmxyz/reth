@@ -287,7 +287,7 @@ mod tests {
     use reth_primitives_traits::Account;
     use reth_stages_types::{FinishCheckpoint, StageCheckpoint, StageId};
     use reth_storage_api::StageCheckpointWriter;
-    use reth_storage_overlay::{ChangesetCache, OverlayManager};
+    use reth_storage_overlay::OverlayManager;
     use reth_trie::{BranchNodeCompact, ComputedTrieData, HashedPostState, HashedStorage, Nibbles};
 
     fn with_unique_trie_data(
@@ -367,11 +367,7 @@ mod tests {
         }
         let overlay_factory = OverlayStateProviderFactory::new(
             factory.clone(),
-            OverlayBuilder::<EthPrimitives>::new(
-                blocks[3].recovered_block().hash(),
-                ChangesetCache::new(),
-            )
-            .with_overlay_manager(manager),
+            manager.overlay_builder(blocks[3].recovered_block().hash()),
         );
 
         let provider = factory.provider().unwrap();
