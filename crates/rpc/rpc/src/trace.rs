@@ -161,6 +161,8 @@ where
                 let mut calls = calls.into_iter().peekable();
 
                 while let Some((call, trace_types)) = calls.next() {
+                    // Each call needs its own env and an EVM's env cannot be replaced, so every
+                    // call gets a fresh EVM — one with block-scoped state re-initializes it.
                     let (evm_env, tx_env) = eth_api.prepare_call_env(
                         evm_env.clone(),
                         call,

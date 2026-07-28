@@ -396,6 +396,10 @@ where
                 )?;
 
                 // 3. now execute the trace call on this state
+                //
+                // The call cannot share the replay EVM: `prepare_call_env` produces a different
+                // env and an EVM's env cannot be replaced. So an EVM with block-scoped state
+                // initializes it here from mid-block state.
                 let (evm_env, tx_env) =
                     eth_api.prepare_call_env(evm_env, call, &mut db, overrides)?;
 
