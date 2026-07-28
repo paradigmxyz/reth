@@ -18,7 +18,7 @@ use jsonrpsee::core::RpcResult;
 use parking_lot::RwLock;
 use reth_chainspec::{ChainSpecProvider, EthChainSpec, EthereumHardforks};
 use reth_engine_primitives::ConsensusEngineEvent;
-use reth_errors::{ProviderResult, RethError};
+use reth_errors::RethError;
 use reth_evm::{block::BlockExecutor, execute::Executor, ConfigureEvm, EvmEnvFor};
 use reth_primitives_traits::{
     Block as BlockTrait, BlockBody, BlockTy, ReceiptWithBloom, RecoveredBlock,
@@ -43,10 +43,7 @@ use reth_trie_common::{
     root::storage_root_unsorted, updates::TrieUpdates, ExecutionWitnessMode, HashedPostState,
     HashedStorage,
 };
-use revm::{
-    database::{states::bundle_state::BundleRetention, AccountStatus},
-    Database, DatabaseCommit,
-};
+use revm::{database::states::bundle_state::BundleRetention, Database, DatabaseCommit};
 use revm_inspectors::tracing::{DebugInspector, TransactionContext};
 use serde::{Deserialize, Serialize};
 use std::{collections::VecDeque, sync::Arc};
@@ -660,8 +657,15 @@ where
                 })
             })
             .unwrap_or_default();
-        let storage_root = account_storage_root(&db.database.0, address, hashed_storage, status)
-            .map_err(Eth::Error::from_eth_err)?;
+        let storage_root = if status.was_destroyed() {
+            // Destruction makes every slot not present in the cache zero, so the cache contains the
+            // complete storage trie for the account's new incarnation.
+            storage_root_unsorted(
+                hashed_storage.storage.into_iter().filter(|(_, value)| !value.is_zero()),
+            )
+        } else {
+            db.database.storage_root(address, hashed_storage).map_err(Eth::Error::from_eth_err)?
+        };
 
         Ok(Some(Account { balance, nonce, code_hash, storage_root }))
     }
@@ -1287,23 +1291,6 @@ impl<B: BlockTrait> Default for BadBlockStore<B> {
     }
 }
 
-fn account_storage_root(
-    provider: &(impl StorageRootProvider + ?Sized),
-    address: Address,
-    hashed_storage: HashedStorage,
-    status: AccountStatus,
-) -> ProviderResult<B256> {
-    if status.was_destroyed() {
-        // Destruction makes every slot not present in the cache zero, so the cache contains the
-        // complete storage trie for the account's new incarnation.
-        return Ok(storage_root_unsorted(
-            hashed_storage.storage.into_iter().filter(|(_, value)| !value.is_zero()),
-        ))
-    }
-
-    provider.storage_root(address, hashed_storage)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1312,55 +1299,9 @@ mod tests {
     use reth_primitives_traits::StorageEntry;
     use reth_provider::test_utils::create_test_provider_factory;
     use revm::{
-        database::{states::StorageSlot, BundleAccount, BundleState},
+        database::{states::StorageSlot, AccountStatus, BundleAccount, BundleState},
         state::AccountInfo as RevmAccountInfo,
     };
-
-    #[test]
-    fn account_storage_root_handles_destroyed_and_changed_accounts() {
-        let factory = create_test_provider_factory();
-        let address = Address::with_last_byte(1);
-        let old_slot = keccak256(B256::from(U256::from(1)));
-        let new_slot = keccak256(B256::from(U256::from(2)));
-        let zero_slot = keccak256(B256::from(U256::from(3)));
-        let old_value = U256::from(10);
-        let new_value = U256::from(20);
-
-        let provider_rw = factory.provider_rw().unwrap();
-        provider_rw
-            .tx_ref()
-            .put::<tables::HashedStorages>(
-                keccak256(address),
-                StorageEntry { key: old_slot, value: old_value },
-            )
-            .unwrap();
-        provider_rw.commit().unwrap();
-
-        let provider = factory.latest().unwrap();
-        let cached_storage =
-            HashedStorage::from_iter([(new_slot, new_value), (zero_slot, U256::ZERO)]);
-
-        let destroyed_root = account_storage_root(
-            provider.as_ref(),
-            address,
-            cached_storage.clone(),
-            AccountStatus::DestroyedChanged,
-        )
-        .unwrap();
-        assert_eq!(destroyed_root, storage_root_unsorted([(new_slot, new_value)]));
-
-        let changed_root = account_storage_root(
-            provider.as_ref(),
-            address,
-            cached_storage,
-            AccountStatus::Changed,
-        )
-        .unwrap();
-        assert_eq!(
-            changed_root,
-            storage_root_unsorted([(old_slot, old_value), (new_slot, new_value)])
-        );
-    }
 
     #[test]
     fn hashed_post_state_zeroes_destroyed_account_parent_storage() {
