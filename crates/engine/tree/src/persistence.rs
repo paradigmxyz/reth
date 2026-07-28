@@ -200,7 +200,7 @@ where
         let start_time = Instant::now();
 
         let provider_rw = self.provider.database_provider_rw()?;
-        provider_rw.save_blocks_with_frontiers(&input)?;
+        provider_rw.save_blocks(&input)?;
 
         if let Some(finalized) = pending_finalized {
             provider_rw.save_finalized_block_number(finalized.min(last_block.number))?;
@@ -355,8 +355,6 @@ impl<T: NodePrimitives> PersistenceHandle<T> {
     /// This returns the latest hash that has been saved, allowing removal of that block and any
     /// previous blocks from in-memory data structures. This value is returned in the receiver end
     /// of the sender argument.
-    ///
-    /// If there are no blocks to persist, then `None` is sent in the sender.
     pub fn save_blocks(
         &self,
         input: SaveBlocksInput<T>,
@@ -429,13 +427,14 @@ mod tests {
     use alloy_primitives::{BlockHash, BlockNumber, Bytes, B256, U256};
     use reth_chain_state::{test_utils::TestBlockBuilder, ExecutedBlock};
     use reth_db::{tables, transaction::DbTxMut};
+    use reth_db_common::init::init_genesis;
     use reth_exex_types::FinishedExExHeight;
     use reth_provider::{
         providers::{ProviderFactoryBuilder, ReadOnlyConfig},
         test_utils::{create_test_provider_factory, MockNodeTypes},
         AccountReader, BalConfig, BalNotificationStream, BalStore, BalStoreHandle,
         ChainSpecProvider, HeaderProvider, InMemoryBalStore, ProviderError, ProviderResult, RawBal,
-        SaveBlocksMode, StorageSettingsCache, TryIntoHistoricalStateProvider,
+        StorageSettingsCache, TryIntoHistoricalStateProvider,
     };
     use reth_prune::Pruner;
     use reth_prune_types::PruneMode;
@@ -444,10 +443,7 @@ mod tests {
 
     fn default_persistence_handle() -> PersistenceHandle<EthPrimitives> {
         let provider = create_test_provider_factory();
-        let genesis = TestBlockBuilder::eth().get_executed_blocks(0..1).next().unwrap();
-        let provider_rw = provider.database_provider_rw().unwrap();
-        provider_rw.save_blocks(vec![genesis], SaveBlocksMode::Full).unwrap();
-        provider_rw.commit().unwrap();
+        init_genesis(&provider).unwrap();
 
         persistence_handle(provider)
     }
@@ -807,29 +803,37 @@ mod tests {
             .expect("failed to open read-only provider factory");
         secondary.set_storage_settings_cache(reth_provider::StorageSettings::v2());
 
-        // --- Phase 1: Write blocks 0..3 via the primary ---
+        // --- Phase 1: Write blocks 1 and 2 via the primary ---
+        let genesis_hash = init_genesis(&provider_factory).unwrap();
         let mut test_block_builder = TestBlockBuilder::eth().with_state();
         let signer = test_block_builder.signer;
-        let blocks_a: Vec<_> = test_block_builder.get_executed_blocks(0..3).collect();
-        let hash_a1 = blocks_a[1].recovered_block().hash();
-        let hash_a2 = blocks_a[2].recovered_block().hash();
-
-        // Compute expected signer state after each block from tx counts.
-        let single_cost = TestBlockBuilder::<EthPrimitives>::single_tx_cost();
         let initial_balance = U256::from(10).pow(U256::from(18));
-        let txs_in_block0 = blocks_a[0].recovered_block().body().transactions.len() as u64;
-        let txs_in_block1 = blocks_a[1].recovered_block().body().transactions.len() as u64;
+        let block_a1 = loop {
+            let block = test_block_builder.get_executed_block_with_number(1, genesis_hash);
+            if !block.recovered_block().body().transactions.is_empty() {
+                break block
+            }
+        };
+        let hash_a1 = block_a1.recovered_block().hash();
+        let block_a2 = loop {
+            let block = test_block_builder.get_executed_block_with_number(2, hash_a1);
+            if !block.recovered_block().body().transactions.is_empty() {
+                break block
+            }
+        };
+        let hash_a2 = block_a2.recovered_block().hash();
 
-        let balance_after_block0 = initial_balance - single_cost * U256::from(txs_in_block0);
-        let nonce_after_block0 = txs_in_block0;
-        let balance_after_block1 = balance_after_block0 - single_cost * U256::from(txs_in_block1);
-        let nonce_after_block1 = nonce_after_block0 + txs_in_block1;
+        // Compute expected signer state after block 1 from its transaction count.
+        let single_cost = TestBlockBuilder::<EthPrimitives>::single_tx_cost();
+        let txs_in_block1 = block_a1.recovered_block().body().transactions.len() as u64;
 
-        {
-            let provider_rw = provider_factory.database_provider_rw().unwrap();
-            provider_rw.save_blocks(blocks_a, SaveBlocksMode::Full).unwrap();
-            provider_rw.commit().unwrap();
-        }
+        let balance_after_block1 = initial_balance - single_cost * U256::from(txs_in_block1);
+        let nonce_after_block1 = txs_in_block1;
+
+        let provider_rw = provider_factory.database_provider_rw().unwrap();
+        let input = SaveBlocksInput::new(vec![block_a1, block_a2], 0, 0, 2, 2);
+        provider_rw.save_blocks(&input).unwrap();
+        provider_rw.commit().unwrap();
 
         // Secondary catches up and sees all 3 blocks.
         // Hold this provider (and its MDBX RO tx) across the reorg to test snapshot isolation.
@@ -884,9 +888,8 @@ mod tests {
             provider_rw.commit().unwrap();
 
             let provider_rw = pf.database_provider_rw().unwrap();
-            provider_rw
-                .save_blocks(std::slice::from_ref(&block_b2).to_vec(), SaveBlocksMode::Full)
-                .unwrap();
+            let input = SaveBlocksInput::new(vec![block_b2], 1, 1, 2, 2);
+            provider_rw.save_blocks(&input).unwrap();
             provider_rw.commit().unwrap();
         });
 

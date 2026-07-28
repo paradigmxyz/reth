@@ -165,21 +165,19 @@ impl<DB: Database, N: NodeTypes> From<DatabaseProviderRW<DB, N>>
     }
 }
 
-/// Mode for [`DatabaseProvider::save_blocks`].
+/// Controls which parts of an executed block are written by
+/// [`DatabaseProvider::save_blocks_inner`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum SaveBlocksMode {
-    /// Full mode: write block structure + receipts + state + trie.
-    /// Used by engine/production code.
+enum SaveBlocksMode {
+    /// Writes block structure, receipts, state, and trie data.
     Full,
-    /// Blocks only: write block structure (headers, txs, senders, indices).
-    /// Receipts/state/trie are skipped - they may come later via separate calls.
-    /// Used by `insert_block`.
+    /// Writes only block structure; receipts, state, and trie data are skipped.
     BlocksOnly,
 }
 
 impl SaveBlocksMode {
     /// Returns `true` if this is [`SaveBlocksMode::Full`].
-    pub const fn with_state(self) -> bool {
+    const fn with_state(self) -> bool {
         matches!(self, Self::Full)
     }
 }
@@ -573,32 +571,6 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
         }
     }
 
-    /// Writes executed blocks and state to storage.
-    ///
-    /// Use [`SaveBlocksMode::Full`] for production (includes receipts, state, trie).
-    /// Use [`SaveBlocksMode::BlocksOnly`] for block structure only (used by `insert_block`).
-    #[instrument(level = "debug", target = "providers::db", skip_all, fields(block_count = blocks.len()))]
-    pub fn save_blocks(
-        &self,
-        blocks: Vec<ExecutedBlock<N::Primitives>>,
-        save_mode: SaveBlocksMode,
-    ) -> ProviderResult<()> {
-        if blocks.is_empty() {
-            debug!(target: "providers::db", "Attempted to write empty block range");
-            return Ok(())
-        }
-
-        let last_block_number =
-            blocks.last().expect("checked non-empty").recovered_block().number();
-
-        if save_mode.with_state() {
-            self.ensure_no_partial_state_trie_gap()?;
-        }
-
-        let state_trie_blocks = if save_mode.with_state() { blocks.as_slice() } else { &[] };
-        self.save_blocks_inner(&blocks, state_trie_blocks, &[], last_block_number, None, save_mode)
-    }
-
     /// Advances the independent persistence frontiers described by [`SaveBlocksInput`].
     ///
     /// This is the engine persistence path. It writes ordinary data for newly persisted blocks,
@@ -606,12 +578,15 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
     /// new masking suffix out of the hashed-state/trie tables. Older updates overwritten anywhere
     /// in that suffix are filtered rather than written temporarily.
     ///
-    /// An empty masking suffix is valid and uses the same unfiltered merge as
-    /// [`Self::save_blocks`]. Graceful shutdown uses this case to leave the database fully flushed.
+    /// An empty masking suffix is valid and uses the ordinary unfiltered merge. Graceful shutdown
+    /// uses this case to leave the database fully flushed.
     ///
     /// Static-file and `RocksDB` writes for newly persisted blocks continue to run in parallel with
     /// MDBX writes. The previous frontiers are checked against the current Finish checkpoint
     /// before any data is written.
+    ///
+    /// Storage must already be initialized through genesis because [`SaveBlocksInput`] always
+    /// advances an existing database frontier.
     #[instrument(
         level = "debug",
         target = "providers::db",
@@ -623,10 +598,7 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
             mask_block_count = input.state_trie_masking_blocks().len(),
         )
     )]
-    pub fn save_blocks_with_frontiers(
-        &self,
-        input: &SaveBlocksInput<N::Primitives>,
-    ) -> ProviderResult<()> {
+    pub fn save_blocks(&self, input: &SaveBlocksInput<N::Primitives>) -> ProviderResult<()> {
         let (db_tip, partial_state_trie) = self
             .get_stage_checkpoint(StageId::Finish)?
             .map(|checkpoint| {
@@ -657,24 +629,6 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
                 .then_some(input.new_partial_state_trie()),
             SaveBlocksMode::Full,
         )
-    }
-
-    /// Rejects full state/trie writes while the database still depends on an in-memory mask.
-    fn ensure_no_partial_state_trie_gap(&self) -> ProviderResult<()> {
-        let Some(checkpoint) = self.get_stage_checkpoint(StageId::Finish)? else { return Ok(()) };
-        let partial_state_trie = checkpoint
-            .finish_stage_checkpoint()
-            .and_then(|finish| finish.partial_state_trie())
-            .unwrap_or(checkpoint.block_number);
-
-        if partial_state_trie != checkpoint.block_number {
-            return Err(ProviderError::other(std::io::Error::other(format!(
-                "cannot append full state/trie data while Finish checkpoint has a partial persistence gap: database tip #{}, state/trie tip #{partial_state_trie}",
-                checkpoint.block_number,
-            ))))
-        }
-
-        Ok(())
     }
 
     fn save_blocks_inner(
@@ -3776,8 +3730,14 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> BlockWriter
             ComputedTrieData::default(),
         );
 
-        // Delegate to save_blocks with BlocksOnly mode (skips receipts/state/trie)
-        self.save_blocks(vec![executed_block], SaveBlocksMode::BlocksOnly)?;
+        self.save_blocks_inner(
+            std::slice::from_ref(&executed_block),
+            &[],
+            &[],
+            block_number,
+            None,
+            SaveBlocksMode::BlocksOnly,
+        )?;
 
         // Return the body indices
         self.block_body_indices(block_number)?
@@ -4218,6 +4178,27 @@ mod tests {
         sync::{mpsc, Arc},
         time::Duration,
     };
+
+    /// Seeds block zero through the writer core because [`SaveBlocksInput`] only describes
+    /// advancing an existing persistence frontier.
+    fn save_genesis<TX, N>(
+        provider: &DatabaseProvider<TX, N>,
+        genesis: &ExecutedBlock<N::Primitives>,
+    ) -> ProviderResult<()>
+    where
+        TX: DbTx + DbTxMut + 'static,
+        N: NodeTypesForProvider,
+    {
+        assert_eq!(genesis.recovered_block().number(), 0);
+        provider.save_blocks_inner(
+            std::slice::from_ref(genesis),
+            std::slice::from_ref(genesis),
+            &[],
+            0,
+            None,
+            SaveBlocksMode::Full,
+        )
+    }
 
     #[test]
     fn test_receipts_by_block_range_empty_range() {
@@ -4728,18 +4709,6 @@ mod tests {
             BranchNodeCompact, HashedPostStateSorted, HashedStorageSorted,
         };
 
-        fn empty_execution_output() -> BlockExecutionOutput<Receipt> {
-            BlockExecutionOutput {
-                result: BlockExecutionResult {
-                    receipts: vec![],
-                    requests: Default::default(),
-                    gas_used: 0,
-                    blob_gas_used: 0,
-                },
-                state: Default::default(),
-            }
-        }
-
         fn branch(mask: u16) -> BranchNodeCompact {
             BranchNodeCompact::new(mask, 0, 0, vec![], None)
         }
@@ -4754,16 +4723,22 @@ mod tests {
             ),
             Default::default(),
         );
-        let genesis_executed = ExecutedBlock::new(
+        let genesis_executed: ExecutedBlock<EthPrimitives> = ExecutedBlock::new(
             Arc::new(genesis.try_recover().unwrap()),
-            Arc::new(empty_execution_output()),
+            Arc::new(BlockExecutionOutput {
+                result: BlockExecutionResult {
+                    receipts: vec![],
+                    requests: Default::default(),
+                    gas_used: 0,
+                    blob_gas_used: 0,
+                },
+                state: Default::default(),
+            }),
             ComputedTrieData::default(),
         );
 
         let provider_rw = factory.provider_rw().unwrap();
-        provider_rw
-            .save_blocks(std::slice::from_ref(&genesis_executed).to_vec(), SaveBlocksMode::Full)
-            .unwrap();
+        save_genesis(&provider_rw, &genesis_executed).unwrap();
         provider_rw.commit().unwrap();
 
         let kept_account = B256::with_last_byte(0x11);
@@ -4946,7 +4921,7 @@ mod tests {
 
         let provider_rw = factory.provider_rw().unwrap();
         let input = SaveBlocksInput::new(vec![full_persist_block, deferred_trie_block], 0, 0, 2, 1);
-        provider_rw.save_blocks_with_frontiers(&input).unwrap();
+        provider_rw.save_blocks(&input).unwrap();
         provider_rw.commit().unwrap();
 
         let provider = factory.provider().unwrap();
@@ -5048,7 +5023,7 @@ mod tests {
         let blocks: Vec<_> = test_block_builder.get_executed_blocks(1..3).collect();
 
         let provider_rw = factory.provider_rw().unwrap();
-        provider_rw.save_blocks(vec![genesis], SaveBlocksMode::Full).unwrap();
+        save_genesis(&provider_rw, &genesis).unwrap();
         provider_rw.commit().unwrap();
 
         let address = B256::with_last_byte(1);
@@ -5074,7 +5049,7 @@ mod tests {
 
         let provider_rw = factory.provider_rw().unwrap();
         let input = SaveBlocksInput::new(vec![candidate, blocks[1].clone()], 0, 0, 2, 1);
-        provider_rw.save_blocks_with_frontiers(&input).unwrap();
+        provider_rw.save_blocks(&input).unwrap();
         provider_rw.commit().unwrap();
 
         let checkpoint =
@@ -5093,24 +5068,23 @@ mod tests {
         let blocks: Vec<_> = test_block_builder.get_executed_blocks(1..5).collect();
 
         let provider_rw = factory.provider_rw().unwrap();
-        provider_rw
-            .save_blocks(std::slice::from_ref(&genesis).to_vec(), SaveBlocksMode::Full)
-            .unwrap();
+        save_genesis(&provider_rw, &genesis).unwrap();
         provider_rw.commit().unwrap();
 
         let provider_rw = factory.provider_rw().unwrap();
-        provider_rw.save_blocks(blocks[..2].to_vec(), SaveBlocksMode::Full).unwrap();
+        let input = SaveBlocksInput::new(blocks[..2].to_vec(), 0, 0, 2, 2);
+        provider_rw.save_blocks(&input).unwrap();
         provider_rw.commit().unwrap();
 
         let provider_rw = factory.provider_rw().unwrap();
         let input = SaveBlocksInput::new(blocks[2..].to_vec(), 2, 2, 4, 2);
-        provider_rw.save_blocks_with_frontiers(&input).unwrap();
+        provider_rw.save_blocks(&input).unwrap();
         provider_rw.commit().unwrap();
 
         let provider_rw = factory.provider_rw().unwrap();
-        let err =
-            provider_rw.save_blocks(vec![blocks[0].clone()], SaveBlocksMode::Full).unwrap_err();
-        assert!(err.to_string().contains("partial persistence gap"));
+        let stale_input = SaveBlocksInput::new(vec![blocks[0].clone()], 0, 0, 1, 1);
+        let err = provider_rw.save_blocks(&stale_input).unwrap_err();
+        assert!(err.to_string().contains("persistence frontiers do not match Finish checkpoint"));
         drop(provider_rw);
 
         let provider = factory.provider().unwrap();
@@ -5704,7 +5678,7 @@ mod tests {
             Default::default(),
         );
 
-        let genesis_executed = ExecutedBlock::new(
+        let genesis_executed: ExecutedBlock = ExecutedBlock::new(
             Arc::new(genesis.try_recover().unwrap()),
             Arc::new(BlockExecutionOutput {
                 result: BlockExecutionResult {
@@ -5718,9 +5692,7 @@ mod tests {
             ComputedTrieData::default(),
         );
         let provider_rw = factory.provider_rw().unwrap();
-        provider_rw
-            .save_blocks(std::slice::from_ref(&genesis_executed).to_vec(), SaveBlocksMode::Full)
-            .unwrap();
+        save_genesis(&provider_rw, &genesis_executed).unwrap();
         provider_rw.commit().unwrap();
 
         let mut blocks: Vec<ExecutedBlock> = Vec::new();
@@ -5794,7 +5766,8 @@ mod tests {
         }
 
         let provider_rw = factory.provider_rw().unwrap();
-        provider_rw.save_blocks(blocks, SaveBlocksMode::Full).unwrap();
+        let input = SaveBlocksInput::new(blocks, 0, 0, num_blocks, num_blocks);
+        provider_rw.save_blocks(&input).unwrap();
         provider_rw.commit().unwrap();
 
         let provider = factory.provider().unwrap();
