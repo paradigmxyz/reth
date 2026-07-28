@@ -45,8 +45,8 @@ impl<N: NodePrimitives> SaveBlocksInput<N> {
     ///
     /// # Panics
     ///
-    /// Panics if either frontier moves backwards, the state/trie frontier exceeds the database
-    /// frontier, or `blocks` is not the exact contiguous range
+    /// Panics if the database frontier does not advance, the state/trie frontier moves backwards
+    /// or exceeds the database frontier, or `blocks` is not the exact contiguous range
     /// `(prev_partial_state_trie, new_db_tip]`.
     pub fn new(
         blocks: Vec<ExecutedBlock<N>>,
@@ -59,7 +59,7 @@ impl<N: NodePrimitives> SaveBlocksInput<N> {
             prev_partial_state_trie <= prev_db_tip,
             "previous state/trie tip must not exceed previous database tip"
         );
-        assert!(prev_db_tip <= new_db_tip, "database tip must not move backwards");
+        assert!(prev_db_tip < new_db_tip, "database tip must advance");
         assert!(
             prev_partial_state_trie <= new_partial_state_trie,
             "state/trie tip must not move backwards"
@@ -108,14 +108,12 @@ impl<N: NodePrimitives> SaveBlocksInput<N> {
     }
 
     /// Returns the block at the new Finish checkpoint.
-    pub fn last_block(&self) -> Option<BlockNumHash> {
-        self.blocks.last().map(|block| block.recovered_block().num_hash())
-    }
-
-    /// Returns `true` if neither persistence frontier advances.
-    pub const fn is_empty(&self) -> bool {
-        self.prev_db_tip == self.new_db_tip &&
-            self.prev_partial_state_trie == self.new_partial_state_trie
+    pub fn last_block(&self) -> BlockNumHash {
+        self.blocks
+            .last()
+            .expect("constructor ensures a non-empty block range")
+            .recovered_block()
+            .num_hash()
     }
 
     /// Returns newly persisted blocks whose block, execution, and history data should be written.
@@ -190,5 +188,12 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec![14, 15, 16]
         );
+    }
+
+    #[test]
+    #[should_panic(expected = "database tip must advance")]
+    fn requires_database_tip_to_advance() {
+        let blocks = TestBlockBuilder::eth().get_executed_blocks(1..2).collect();
+        let _ = SaveBlocksInput::new(blocks, 1, 0, 1, 1);
     }
 }

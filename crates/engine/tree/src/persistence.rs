@@ -182,7 +182,7 @@ where
         let persist_block_count = input.persist_rest_blocks().len();
         let state_trie_block_count = input.state_trie_blocks().len();
         let mask_block_count = input.state_trie_masking_blocks().len();
-        let last_state_trie_block = (!input.is_empty()).then_some(input.new_partial_state_trie());
+        let last_state_trie_block = Some(input.new_partial_state_trie());
 
         let pending_finalized = self.pending_finalized_block.take();
         let pending_safe = self.pending_safe_block.take();
@@ -199,35 +199,37 @@ where
 
         let start_time = Instant::now();
 
-        if let Some(last_block) = last_block {
-            let provider_rw = self.provider.database_provider_rw()?;
-            provider_rw.save_blocks_with_frontiers(&input)?;
+        let provider_rw = self.provider.database_provider_rw()?;
+        provider_rw.save_blocks_with_frontiers(&input)?;
 
-            if let Some(finalized) = pending_finalized {
-                provider_rw.save_finalized_block_number(finalized.min(last_block.number))?;
-                if finalized > last_block.number {
-                    self.pending_finalized_block = Some(finalized);
-                }
+        if let Some(finalized) = pending_finalized {
+            provider_rw.save_finalized_block_number(finalized.min(last_block.number))?;
+            if finalized > last_block.number {
+                self.pending_finalized_block = Some(finalized);
             }
-            if let Some(safe) = pending_safe {
-                provider_rw.save_safe_block_number(safe.min(last_block.number))?;
-                if safe > last_block.number {
-                    self.pending_safe_block = Some(safe);
-                }
-            }
-
-            provider_rw.commit()?;
-            let _ = self.provider.bal_store().flush().inspect_err(|err| {
-                warn!(target: "engine::persistence", last=?last_block, ?err, "Failed to flush BAL store");
-            });
-            debug!(target: "engine::persistence", first=?first_block, last=?last_block, "Saved range of blocks");
         }
+        if let Some(safe) = pending_safe {
+            provider_rw.save_safe_block_number(safe.min(last_block.number))?;
+            if safe > last_block.number {
+                self.pending_safe_block = Some(safe);
+            }
+        }
+
+        provider_rw.commit()?;
+        let _ = self.provider.bal_store().flush().inspect_err(|err| {
+            warn!(target: "engine::persistence", last=?last_block, ?err, "Failed to flush BAL store");
+        });
+        debug!(target: "engine::persistence", first=?first_block, last=?last_block, "Saved range of blocks");
 
         let elapsed = start_time.elapsed();
         self.metrics.save_blocks_batch_size.record(persist_block_count as f64);
         self.metrics.save_blocks_duration_seconds.record(elapsed);
 
-        Ok(PersistenceResult { last_block, last_state_trie_block, commit_duration: Some(elapsed) })
+        Ok(PersistenceResult {
+            last_block: Some(last_block),
+            last_state_trie_block,
+            commit_duration: Some(elapsed),
+        })
     }
 
     fn maybe_run_pruner(&mut self, block_number: u64) -> Result<(), PersistenceError> {
@@ -470,8 +472,9 @@ mod tests {
         let prev_tip = blocks
             .first()
             .map(|block| block.recovered_block().number.saturating_sub(1))
-            .unwrap_or_default();
-        let new_tip = blocks.last().map(|block| block.recovered_block().number).unwrap_or(prev_tip);
+            .expect("save input must not be empty");
+        let new_tip =
+            blocks.last().map(|block| block.recovered_block().number).expect("checked non-empty");
         SaveBlocksInput::new(blocks, prev_tip, prev_tip, new_tip, new_tip)
     }
 
@@ -558,21 +561,6 @@ mod tests {
         fn bal_stream(&self) -> BalNotificationStream {
             BalStoreHandle::noop().bal_stream()
         }
-    }
-
-    #[test]
-    fn test_save_blocks_empty() {
-        reth_tracing::init_test_tracing();
-        let handle = default_persistence_handle();
-
-        let blocks = full_save_input(vec![]);
-        let (tx, rx) = crossbeam_channel::bounded(1);
-
-        handle.save_blocks(blocks, tx).unwrap();
-
-        let result = rx.recv().unwrap();
-        assert!(result.last_block.is_none());
-        assert!(result.last_state_trie_block.is_none());
     }
 
     #[test]

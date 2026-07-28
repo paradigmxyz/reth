@@ -2744,14 +2744,11 @@ mod forkchoice_updated_tests {
                 action_rx.recv_timeout(std::time::Duration::from_millis(100))
             {
                 let last_block = saved_blocks.last_block();
-                if let Some(last) = last_block {
-                    last_persisted_number = last.number;
-                }
+                last_persisted_number = last_block.number;
                 sender
                     .send(PersistenceResult {
-                        last_block,
-                        last_state_trie_block: (!saved_blocks.is_empty())
-                            .then_some(saved_blocks.new_partial_state_trie()),
+                        last_block: Some(last_block),
+                        last_state_trie_block: Some(saved_blocks.new_partial_state_trie()),
                         commit_duration: Some(Duration::ZERO),
                     })
                     .unwrap();
