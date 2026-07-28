@@ -47,9 +47,7 @@ use std::{
 use tracing::{info, instrument, trace, warn};
 
 mod provider;
-pub use provider::{
-    CommitOrder, DatabaseProvider, DatabaseProviderRO, DatabaseProviderRW, SaveBlocksMode,
-};
+pub use provider::{CommitOrder, DatabaseProvider, DatabaseProviderRO, DatabaseProviderRW};
 
 mod save_blocks;
 pub use save_blocks::SaveBlocksInput;
