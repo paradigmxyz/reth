@@ -123,29 +123,36 @@ where
 
                 eth_api.apply_pre_execution_changes(&block, &mut db)?;
 
+                let block_hash = block.hash();
+                // the EVM takes `evm_env`, but the block env is still needed per trace result
+                let block_env = evm_env.block_env.clone();
+
+                let inspector = DebugInspector::new(opts).map_err(Eth::Error::from_eth_err)?;
+                // One EVM for the whole block, as the block executor and the `trace_*` API do:
+                // an EVM's block-scoped state must stay initialized from the block's start state.
+                let mut evm =
+                    eth_api.evm_config().evm_with_env_and_inspector(&mut db, evm_env, inspector);
+
                 let mut transactions = block.transactions_recovered().enumerate().peekable();
-                let mut inspector = DebugInspector::new(opts).map_err(Eth::Error::from_eth_err)?;
                 while let Some((index, tx)) = transactions.next() {
                     let tx_hash = *tx.tx_hash();
                     let tx_env = eth_api.evm_config().tx_env(tx);
 
-                    let res = eth_api.inspect(
-                        &mut db,
-                        evm_env.clone(),
-                        tx_env.clone(),
-                        &mut inspector,
-                    )?;
+                    let res = evm.transact(tx_env.clone()).map_err(Eth::Error::from_evm_err)?;
+
+                    // split the EVM so the inspector and the database can be borrowed at once
+                    let (evm_db, inspector, _) = evm.components_mut();
                     let result = inspector
                         .get_result(
                             Some(TransactionContext {
-                                block_hash: Some(block.hash()),
+                                block_hash: Some(block_hash),
                                 tx_hash: Some(tx_hash),
                                 tx_index: Some(index),
                             }),
                             &tx_env,
-                            &evm_env.block_env,
+                            &block_env,
                             &res,
-                            &mut db,
+                            evm_db,
                         )
                         .map_err(Eth::Error::from_eth_err)?;
 
@@ -154,7 +161,7 @@ where
                         inspector.fuse().map_err(Eth::Error::from_eth_err)?;
                         // need to apply the state changes of this transaction before executing the
                         // next transaction
-                        db.commit(res.state)
+                        evm_db.commit(res.state)
                     }
                 }
 
