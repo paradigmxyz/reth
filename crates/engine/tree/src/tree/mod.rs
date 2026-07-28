@@ -430,6 +430,8 @@ where
         runtime: reth_tasks::Runtime,
     ) -> Self {
         let (incoming_tx, incoming) = crossbeam_channel::unbounded();
+        changeset_cache
+            .set_state_trie_overlay_manager(state.tree_state.state_trie_overlays.clone());
 
         Self {
             provider,

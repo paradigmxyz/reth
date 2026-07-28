@@ -92,6 +92,9 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
     ///
     /// This overlay will be applied on top of any reverts.
     pub fn with_overlay_source(mut self, source: Option<OverlaySource<N>>) -> Self {
+        if let Some(OverlaySource::Managed { manager }) = &source {
+            self.changeset_cache.set_state_trie_overlay_manager(manager.clone());
+        }
         self.overlay_source = source;
         self
     }
@@ -104,9 +107,8 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
     }
 
     /// Set the overlay manager used to resolve in-memory parent state.
-    pub fn with_overlay_manager(mut self, overlay_manager: OverlayManager<N>) -> Self {
-        self.overlay_source = Some(OverlaySource::Managed { manager: overlay_manager });
-        self
+    pub fn with_overlay_manager(self, overlay_manager: OverlayManager<N>) -> Self {
+        self.with_overlay_source(Some(OverlaySource::Managed { manager: overlay_manager }))
     }
 
     /// Set the hashed state overlay.
@@ -632,9 +634,12 @@ mod tests {
     #[cfg(feature = "partial-persistence")]
     #[test]
     fn managed_overlay_uses_persisted_parent_even_if_retained() {
-        let (factory, blocks) = setup_frontiers(2, 3);
+        // Keep the Finish state fully materialized; this test exercises persisted-parent
+        // selection, while partial-gap cache fallback has dedicated coherent-state fixtures.
+        let (factory, blocks) = setup_frontiers(3, 3);
         let manager = OverlayManager::default();
         manager.insert_block(blocks[1].clone());
+        manager.insert_block(blocks[3].clone());
         let provider = factory.provider().unwrap();
 
         let overlay = OverlayBuilder::<EthPrimitives>::new(
@@ -660,7 +665,7 @@ mod tests {
             blocks[2].recovered_block().hash(),
             ChangesetCache::new(),
         )
-        .with_overlay_manager(manager);
+        .with_overlay_source(Some(OverlaySource::Managed { manager }));
         let (state_trie_tip, finish_tip) = database_state_frontiers(&provider).unwrap();
         let anchor_hash = blocks[1].recovered_block().hash();
         let revert_blocks =

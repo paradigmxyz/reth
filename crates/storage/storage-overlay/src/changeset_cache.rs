@@ -7,29 +7,36 @@
 //! - **Reorg support**: Quickly access changesets to revert blocks during chain reorganizations
 //! - **Memory efficiency**: Explicit eviction releases persisted changesets
 
+use crate::OverlayManager;
 use alloy_primitives::{map::B256Map, BlockNumber, B256};
 use parking_lot::RwLock;
 use reth_metrics::{
     metrics::{Counter, Gauge},
     Metrics,
 };
-use reth_primitives_traits::FastInstant as Instant;
+use reth_primitives_traits::{FastInstant as Instant, NodePrimitives};
+use reth_stages_types::StageId;
 use reth_storage_api::{
-    BlockNumReader, ChangeSetReader, DBProvider, StorageChangeSetReader, StorageSettingsCache,
+    BlockNumReader, ChangeSetReader, DBProvider, StageCheckpointReader, StorageChangeSetReader,
+    StorageSettingsCache,
 };
 use reth_storage_errors::provider::{ProviderError, ProviderResult};
-use reth_trie::trie_cursor::{InMemoryTrieCursorFactory, TrieCursor, TrieCursorFactory};
+use reth_trie::{
+    trie_cursor::{InMemoryTrieCursorFactory, TrieCursor, TrieCursorFactory},
+    TrieInputSorted,
+};
 use reth_trie_common::updates::{StorageTrieUpdatesSorted, TrieUpdatesSorted};
 use reth_trie_db::{DatabaseTrieCursorFactory, TrieTableAdapter};
 use std::{
     collections::{BTreeMap, HashMap},
+    fmt,
     ops::RangeInclusive,
-    sync::Arc,
+    sync::{Arc, OnceLock},
 };
 use tracing::{debug, warn};
 
 #[cfg(test)]
-use reth_trie::{changesets::compute_trie_changesets, TrieInputSorted};
+use reth_trie::changesets::compute_trie_changesets;
 #[cfg(test)]
 use reth_trie_db::{DatabaseHashedCursorFactory, DatabaseStateRoot};
 
@@ -72,6 +79,7 @@ where
         + ChangeSetReader
         + StorageChangeSetReader
         + BlockNumReader
+        + StageCheckpointReader
         + StorageSettingsCache,
 {
     reth_trie_db::with_adapter!(provider, |A| {
@@ -89,12 +97,14 @@ where
         + ChangeSetReader
         + StorageChangeSetReader
         + BlockNumReader
+        + StageCheckpointReader
         + StorageSettingsCache,
     A: TrieTableAdapter,
 {
     let tx = provider.tx_ref();
 
     let db_tip_block = provider.best_block_number()?;
+    let tip_input = cache.logical_tip_input(provider, db_tip_block)?.unwrap_or_default();
 
     // Step 1: Get the trie changesets for the target block from cache
     let changesets = cache.get_or_compute(provider, block_number)?;
@@ -105,7 +115,9 @@ where
     // Step 3: Create an InMemoryTrieCursorFactory with the reverts
     // This gives us the trie state as it was after the target block was processed
     let db_cursor_factory = DatabaseTrieCursorFactory::<_, A>::new(tx);
-    let cursor_factory = InMemoryTrieCursorFactory::new(db_cursor_factory, &reverts);
+    let tip_cursor_factory =
+        InMemoryTrieCursorFactory::new(db_cursor_factory, tip_input.nodes.as_ref());
+    let cursor_factory = InMemoryTrieCursorFactory::new(tip_cursor_factory, &reverts);
 
     // Step 4: Collect all account trie nodes that changed in the target block
     let account_nodes_ref = changesets.account_nodes_ref();
@@ -151,6 +163,27 @@ where
 #[derive(Debug, Clone)]
 pub struct ChangesetCache {
     inner: Arc<RwLock<ChangesetCacheInner>>,
+    state_trie_overlay: Arc<OnceLock<Arc<dyn StateTrieOverlayResolver>>>,
+}
+
+trait StateTrieOverlayResolver: fmt::Debug + Send + Sync {
+    fn overlay_for_parent(
+        &self,
+        parent_hash: B256,
+        anchor_hash: B256,
+    ) -> ProviderResult<TrieInputSorted>;
+}
+
+impl<N: NodePrimitives> StateTrieOverlayResolver for OverlayManager<N> {
+    fn overlay_for_parent(
+        &self,
+        parent_hash: B256,
+        anchor_hash: B256,
+    ) -> ProviderResult<TrieInputSorted> {
+        let (nodes, state) =
+            self.overlay_for_parent(parent_hash, anchor_hash).map_err(ProviderError::other)?;
+        Ok(TrieInputSorted::new(nodes, state, Default::default()))
+    }
 }
 
 impl Default for ChangesetCache {
@@ -165,7 +198,16 @@ impl ChangesetCache {
     /// The cache has no capacity limit and relies on explicit eviction
     /// via the `evict()` method to manage memory usage.
     pub fn new() -> Self {
-        Self { inner: Arc::new(RwLock::new(ChangesetCacheInner::new())) }
+        Self {
+            inner: Arc::new(RwLock::new(ChangesetCacheInner::new())),
+            state_trie_overlay: Arc::new(OnceLock::new()),
+        }
+    }
+
+    /// Sets the manager used to reconstruct the logical database tip when trie persistence trails
+    /// the Finish checkpoint.
+    pub fn set_state_trie_overlay_manager<N: NodePrimitives>(&self, manager: OverlayManager<N>) {
+        self.state_trie_overlay.get_or_init(|| Arc::new(manager));
     }
 
     /// Retrieves changesets for a block.
@@ -216,6 +258,7 @@ impl ChangesetCache {
             + ChangeSetReader
             + StorageChangeSetReader
             + BlockNumReader
+            + StageCheckpointReader
             + StorageSettingsCache,
     {
         self.get_or_compute_range(provider, block_number..=block_number)
@@ -257,6 +300,7 @@ impl ChangesetCache {
             + ChangeSetReader
             + StorageChangeSetReader
             + BlockNumReader
+            + StageCheckpointReader
             + StorageSettingsCache,
     {
         let db_tip_block = provider.best_block_number()?;
@@ -380,10 +424,13 @@ impl ChangesetCache {
             "Changeset cache MISS in range, falling back to aggregate DB-based computation"
         );
 
-        let accumulated_reverts = Arc::new(reth_trie_db::compute_range_trie_changesets(
+        let tip_input = self.logical_tip_input(provider, db_tip_block)?;
+        let empty_tip_input = TrieInputSorted::default();
+        let accumulated_reverts = Arc::new(reth_trie_db::compute_range_trie_changesets_with_tip(
             provider,
             start_block..=end_block,
             db_tip_block,
+            tip_input.as_ref().unwrap_or(&empty_tip_input),
         )?);
 
         let elapsed = timer.elapsed();
@@ -406,6 +453,53 @@ impl ChangesetCache {
         self.inner.write().insert(range_key, Arc::clone(&accumulated_reverts));
 
         Ok(accumulated_reverts)
+    }
+
+    fn logical_tip_input<P>(
+        &self,
+        provider: &P,
+        db_tip_block: BlockNumber,
+    ) -> ProviderResult<Option<TrieInputSorted>>
+    where
+        P: BlockNumReader + StageCheckpointReader,
+    {
+        let Some(finish) = provider.get_stage_checkpoint(StageId::Finish)? else { return Ok(None) };
+        let state_trie_tip = finish
+            .finish_stage_checkpoint()
+            .and_then(|checkpoint| checkpoint.partial_state_trie())
+            .unwrap_or(finish.block_number);
+
+        if state_trie_tip > finish.block_number {
+            return Err(ProviderError::other(std::io::Error::other(format!(
+                "partial state trie frontier #{state_trie_tip} is ahead of Finish #{}",
+                finish.block_number,
+            ))))
+        }
+        if state_trie_tip == finish.block_number {
+            return Ok(None)
+        }
+        if finish.block_number != db_tip_block {
+            return Err(ProviderError::other(std::io::Error::other(format!(
+                "Finish checkpoint #{} does not match database tip #{db_tip_block}",
+                finish.block_number,
+            ))))
+        }
+
+        let state_trie_tip_hash = provider
+            .block_hash(state_trie_tip)?
+            .ok_or_else(|| ProviderError::HeaderNotFound(state_trie_tip.into()))?;
+        let finish_tip_hash = provider
+            .block_hash(finish.block_number)?
+            .ok_or_else(|| ProviderError::HeaderNotFound(finish.block_number.into()))?;
+        let resolver = self.state_trie_overlay.get().cloned().ok_or_else(|| {
+            ProviderError::other(std::io::Error::other(format!(
+                "changeset cache requires a state trie overlay manager for partial persistence gap #{}..=#{}",
+                state_trie_tip.saturating_add(1),
+                finish.block_number,
+            )))
+        })?;
+
+        resolver.overlay_for_parent(finish_tip_hash, state_trie_tip_hash).map(Some)
     }
 }
 
@@ -592,6 +686,10 @@ mod tests {
         map::{B256Map, HashMap},
         Address, U256,
     };
+    #[cfg(feature = "partial-persistence")]
+    use reth_chain_state::{test_utils::TestBlockBuilder, ExecutedBlock};
+    #[cfg(feature = "partial-persistence")]
+    use reth_db::models::StorageSettings;
     use reth_db::{
         models::{AccountBeforeTx, BlockNumberAddress},
         tables,
@@ -602,9 +700,18 @@ mod tests {
         test_utils::create_test_provider_factory, StaticFileProviderFactory, StaticFileSegment,
         StaticFileWriter,
     };
+    #[cfg(feature = "partial-persistence")]
+    use reth_provider::{test_utils::MockNodeTypesWithDB, ProviderFactory};
+    #[cfg(feature = "partial-persistence")]
+    use reth_stages_types::FinishCheckpoint;
     use reth_stages_types::{StageCheckpoint, StageId};
     use reth_storage_api::{StageCheckpointWriter, TrieWriter};
-    use reth_trie::{BranchNodeCompact, Nibbles, StateRoot};
+    use reth_trie::{
+        verify::{Output as VerifyOutput, Verifier},
+        BranchNodeCompact, Nibbles, StateRoot,
+    };
+    #[cfg(feature = "partial-persistence")]
+    use reth_trie::{ComputedTrieData, HashedPostStateSorted};
 
     // Helper function to create empty TrieUpdatesSorted for testing
     fn create_test_changesets() -> Arc<TrieUpdatesSorted> {
@@ -634,6 +741,34 @@ mod tests {
 
     fn test_storage(slot: u64, value: u64) -> StorageEntry {
         StorageEntry { key: B256::from(U256::from(slot)), value: U256::from(value) }
+    }
+
+    fn storage_slots_with_shared_hashed_prefix() -> (B256, B256, B256) {
+        let mut slots_by_prefix: HashMap<u8, (B256, B256)> = HashMap::default();
+        let mut next_slot = 0u64;
+
+        let (left, left_hash, right) = loop {
+            let slot = B256::from(U256::from(next_slot));
+            next_slot += 1;
+            let hash = keccak256(slot);
+
+            if let Some((previous_slot, previous_hash)) = slots_by_prefix.get(&hash[0]) &&
+                previous_hash[1] != hash[1]
+            {
+                break (*previous_slot, *previous_hash, slot)
+            }
+            slots_by_prefix.insert(hash[0], (slot, hash));
+        };
+
+        let outside = loop {
+            let slot = B256::from(U256::from(next_slot));
+            next_slot += 1;
+            if keccak256(slot)[0] >> 4 != left_hash[0] >> 4 {
+                break slot
+            }
+        };
+
+        (left, right, outside)
     }
 
     fn seed_headers(
@@ -755,6 +890,295 @@ mod tests {
         let (_, trie_updates) =
             DbStateRoot::<_, A>::from_tx(provider.tx_ref()).root_with_updates().unwrap();
         provider.write_trie_updates(trie_updates).unwrap();
+    }
+
+    #[cfg(feature = "partial-persistence")]
+    type TestProviderFactory = ProviderFactory<MockNodeTypesWithDB>;
+
+    #[cfg(feature = "partial-persistence")]
+    struct LogicalTipFixture {
+        hybrid_factory: TestProviderFactory,
+        reference_factory: TestProviderFactory,
+        manager: OverlayManager,
+        tip_input: TrieInputSorted,
+    }
+
+    #[cfg(feature = "partial-persistence")]
+    fn accounts_with_shared_hashed_prefix() -> [(Address, B256); 3] {
+        let mut accounts_by_prefix: HashMap<u8, Vec<(Address, B256)>> = HashMap::default();
+        for last_byte in 0..=u8::MAX {
+            let address = Address::with_last_byte(last_byte);
+            let hashed_address = keccak256(address);
+            let accounts = accounts_by_prefix.entry(hashed_address[0] >> 4).or_default();
+            accounts.push((address, hashed_address));
+            if accounts.len() == 3 {
+                return [accounts[0], accounts[1], accounts[2]]
+            }
+        }
+        unreachable!("256 addresses must contain three with the same hashed nibble")
+    }
+
+    #[cfg(feature = "partial-persistence")]
+    fn seed_logical_tip_headers(factory: &TestProviderFactory, blocks: &[ExecutedBlock]) {
+        let static_file_provider = factory.static_file_provider();
+        let mut header_writer =
+            static_file_provider.latest_writer(StaticFileSegment::Headers).unwrap();
+        for block in blocks {
+            header_writer
+                .append_header(block.recovered_block().header(), &block.recovered_block().hash())
+                .unwrap();
+        }
+        header_writer.commit().unwrap();
+    }
+
+    #[cfg(feature = "partial-persistence")]
+    fn seed_logical_tip_changesets(
+        factory: &TestProviderFactory,
+        accounts: &[(Address, B256, Account)],
+    ) {
+        let static_file_provider = factory.static_file_provider();
+        let mut account_writer =
+            static_file_provider.latest_writer(StaticFileSegment::AccountChangeSets).unwrap();
+        account_writer.append_account_changeset(vec![], 0).unwrap();
+        for (block_number, (address, _, _)) in (1..).zip(accounts) {
+            account_writer
+                .append_account_changeset(
+                    vec![AccountBeforeTx { address: *address, info: None }],
+                    block_number,
+                )
+                .unwrap();
+        }
+        account_writer.commit().unwrap();
+
+        let mut storage_writer =
+            static_file_provider.latest_writer(StaticFileSegment::StorageChangeSets).unwrap();
+        for block_number in 0..=accounts.len() as u64 {
+            storage_writer.append_storage_changeset(vec![], block_number).unwrap();
+        }
+        storage_writer.commit().unwrap();
+    }
+
+    /// Builds the same logical Finish state as a partial database plus manager overlay and as a
+    /// fully materialized reference database.
+    #[cfg(feature = "partial-persistence")]
+    fn logical_tip_fixture() -> LogicalTipFixture {
+        let hybrid_factory = create_test_provider_factory();
+        let reference_factory = create_test_provider_factory();
+        hybrid_factory.set_storage_settings_cache(StorageSettings::v2());
+        reference_factory.set_storage_settings_cache(StorageSettings::v2());
+
+        let raw_blocks = TestBlockBuilder::eth().get_executed_blocks(0..4).collect::<Vec<_>>();
+        seed_logical_tip_headers(&hybrid_factory, &raw_blocks);
+        seed_logical_tip_headers(&reference_factory, &raw_blocks);
+
+        let accounts = accounts_with_shared_hashed_prefix()
+            .into_iter()
+            .enumerate()
+            .map(|(index, (address, hashed_address))| {
+                (address, hashed_address, test_account(index as u64 + 1))
+            })
+            .collect::<Vec<_>>();
+        seed_logical_tip_changesets(&hybrid_factory, &accounts);
+        seed_logical_tip_changesets(&reference_factory, &accounts);
+
+        let hybrid_provider = hybrid_factory.provider_rw().unwrap();
+        let manager = OverlayManager::default();
+        let mut tip_state = HashedPostStateSorted::default();
+        let mut tip_nodes = TrieUpdatesSorted::default();
+        for (index, (_, hashed_address, account)) in accounts.iter().enumerate() {
+            let block_state = HashedPostStateSorted::new(
+                vec![(*hashed_address, Some(*account))],
+                B256Map::default(),
+            );
+            tip_state.extend_ref_and_sort(&block_state);
+            let block_input = TrieInputSorted::new(
+                Arc::new(tip_nodes.clone()),
+                Arc::new(tip_state.clone()),
+                block_state.construct_prefix_sets(),
+            );
+            let (_, block_nodes) = reth_trie_db::with_adapter!(hybrid_provider, |A| {
+                type DbStateRoot<'a, TX, A> = StateRoot<
+                    DatabaseTrieCursorFactory<&'a TX, A>,
+                    DatabaseHashedCursorFactory<&'a TX>,
+                >;
+                DbStateRoot::<_, A>::overlay_root_from_nodes_with_updates(
+                    hybrid_provider.tx_ref(),
+                    block_input,
+                )
+            })
+            .unwrap();
+            let block_nodes = block_nodes.into_sorted();
+            tip_nodes.extend_ref_and_sort(&block_nodes);
+
+            let raw_block = &raw_blocks[index + 1];
+            manager.insert_block(ExecutedBlock::new(
+                Arc::clone(&raw_block.recovered_block),
+                Arc::clone(&raw_block.execution_output),
+                ComputedTrieData::new(Arc::new(block_state), Arc::new(block_nodes)),
+            ));
+        }
+        hybrid_provider
+            .save_stage_checkpoint(
+                StageId::Finish,
+                StageCheckpoint::new(3)
+                    .with_finish_stage_checkpoint(FinishCheckpoint { partial_state_trie: Some(0) }),
+            )
+            .unwrap();
+        hybrid_provider.commit().unwrap();
+
+        let reference_provider = reference_factory.provider_rw().unwrap();
+        for (_, hashed_address, account) in &accounts {
+            reference_provider
+                .tx_ref()
+                .put::<tables::HashedAccounts>(*hashed_address, *account)
+                .unwrap();
+        }
+        reference_provider.save_stage_checkpoint(StageId::Finish, StageCheckpoint::new(3)).unwrap();
+        reth_trie_db::with_adapter!(reference_provider, |A| {
+            seed_tip_trie_tables::<_, A>(&*reference_provider)
+        });
+        reference_provider.commit().unwrap();
+
+        LogicalTipFixture {
+            hybrid_factory,
+            reference_factory,
+            manager,
+            tip_input: TrieInputSorted::new(
+                Arc::new(tip_nodes),
+                Arc::new(tip_state),
+                Default::default(),
+            ),
+        }
+    }
+
+    #[cfg(feature = "partial-persistence")]
+    #[test]
+    fn logical_tip_input_reverts_tip_ended_range_from_hybrid_database() {
+        let fixture = logical_tip_fixture();
+        let hybrid_provider = fixture.hybrid_factory.provider().unwrap();
+        let reference_provider = fixture.reference_factory.provider().unwrap();
+
+        let actual = reth_trie_db::compute_range_trie_changesets_with_tip(
+            &hybrid_provider,
+            3..=3,
+            3,
+            &fixture.tip_input,
+        )
+        .unwrap();
+        let expected =
+            reth_trie_db::compute_range_trie_changesets(&reference_provider, 3..=3, 3).unwrap();
+
+        assert!(!expected.is_empty());
+        assert_eq!(actual, expected);
+    }
+
+    #[cfg(feature = "partial-persistence")]
+    #[test]
+    fn logical_tip_input_is_preserved_through_tail_revert() {
+        let fixture = logical_tip_fixture();
+        let hybrid_provider = fixture.hybrid_factory.provider().unwrap();
+        let reference_provider = fixture.reference_factory.provider().unwrap();
+
+        let actual = reth_trie_db::compute_range_trie_changesets_with_tip(
+            &hybrid_provider,
+            2..=2,
+            3,
+            &fixture.tip_input,
+        )
+        .unwrap();
+        let expected =
+            reth_trie_db::compute_range_trie_changesets(&reference_provider, 2..=2, 3).unwrap();
+
+        assert!(!expected.is_empty());
+        assert_eq!(actual, expected);
+    }
+
+    #[cfg(feature = "partial-persistence")]
+    #[test]
+    fn cache_miss_uses_managed_logical_tip() {
+        let fixture = logical_tip_fixture();
+        let hybrid_provider = fixture.hybrid_factory.provider().unwrap();
+        let reference_provider = fixture.reference_factory.provider().unwrap();
+        let cache = ChangesetCache::new();
+        cache.set_state_trie_overlay_manager(fixture.manager);
+
+        let actual = cache.get_or_compute_range(&hybrid_provider, 2..=3).unwrap();
+        let expected =
+            reth_trie_db::compute_range_trie_changesets(&reference_provider, 2..=3, 3).unwrap();
+
+        assert!(!expected.is_empty());
+        assert_eq!(*actual, expected);
+        assert_eq!(cache.inner.read().entries.len(), 1);
+    }
+
+    #[cfg(feature = "partial-persistence")]
+    #[test]
+    fn cache_miss_rejects_partial_tip_without_manager() {
+        let fixture = logical_tip_fixture();
+        let provider = fixture.hybrid_factory.provider().unwrap();
+        let cache = ChangesetCache::new();
+
+        let error = cache.get_or_compute_range(&provider, 2..=3).unwrap_err();
+
+        assert!(
+            error.to_string().contains("requires a state trie overlay manager"),
+            "unexpected error: {error}"
+        );
+    }
+
+    #[test]
+    fn database_fallback_revert_walks_unchanged_storage_branch_children() {
+        let factory = create_test_provider_factory();
+        seed_headers(&factory, 1);
+
+        let provider = factory.provider_rw().unwrap();
+        let address = Address::with_last_byte(1);
+        let hashed_address = keccak256(address);
+        let (removed_slot, surviving_slot, outside_slot) =
+            storage_slots_with_shared_hashed_prefix();
+        let removed_entry = StorageEntry { key: keccak256(removed_slot), value: U256::from(1) };
+
+        provider.tx_ref().put::<tables::HashedAccounts>(hashed_address, test_account(1)).unwrap();
+        for (slot, value) in [(removed_slot, 1), (surviving_slot, 2), (outside_slot, 3)] {
+            provider
+                .tx_ref()
+                .put::<tables::HashedStorages>(
+                    hashed_address,
+                    StorageEntry { key: keccak256(slot), value: U256::from(value) },
+                )
+                .unwrap();
+        }
+        provider
+            .tx_ref()
+            .put::<tables::StorageChangeSets>(
+                BlockNumberAddress((1, address)),
+                StorageEntry { key: removed_slot, value: U256::ZERO },
+            )
+            .unwrap();
+        provider.save_stage_checkpoint(StageId::Finish, StageCheckpoint::new(1)).unwrap();
+        reth_trie_db::with_adapter!(provider, |A| seed_tip_trie_tables::<_, A>(&*provider));
+
+        let cache = ChangesetCache::new();
+        let trie_revert = cache.get_or_compute_range(&*provider, 1..=1).unwrap();
+
+        provider
+            .tx_ref()
+            .delete::<tables::HashedStorages>(hashed_address, Some(removed_entry))
+            .unwrap();
+        provider.write_trie_updates_sorted(trie_revert.as_ref()).unwrap();
+
+        let inconsistencies = reth_trie_db::with_adapter!(provider, |A| {
+            let trie_cursor_factory = DatabaseTrieCursorFactory::<_, A>::new(provider.tx_ref());
+            let hashed_cursor_factory = DatabaseHashedCursorFactory::new(provider.tx_ref());
+            Verifier::new(&trie_cursor_factory, hashed_cursor_factory)
+                .unwrap()
+                .filter_map(|output| match output.unwrap() {
+                    VerifyOutput::Progress(_) => None,
+                    output => Some(output),
+                })
+                .collect::<Vec<_>>()
+        });
+        assert!(inconsistencies.is_empty(), "trie inconsistencies: {inconsistencies:#?}");
     }
 
     #[test]

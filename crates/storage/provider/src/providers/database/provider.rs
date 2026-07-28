@@ -2313,6 +2313,33 @@ impl<TX: DbTxMut, N: NodeTypes> StageCheckpointWriter for DatabaseProvider<TX, N
     }
 }
 
+impl<TX: DbTxMut + DbTx, N: NodeTypes> DatabaseProvider<TX, N> {
+    /// Updates pipeline checkpoints after an unwind, retaining an explicitly lagging partial
+    /// state trie frontier.
+    fn update_pipeline_stages_after_unwind(&self, block_number: BlockNumber) -> ProviderResult<()> {
+        let partial_state_trie = self
+            .get_stage_checkpoint(StageId::Finish)?
+            .and_then(|checkpoint| checkpoint.finish_stage_checkpoint())
+            .and_then(|checkpoint| checkpoint.partial_state_trie())
+            .filter(|&partial_state_trie| partial_state_trie < block_number);
+
+        self.update_pipeline_stages(block_number, true)?;
+
+        if let Some(partial_state_trie) = partial_state_trie {
+            self.save_stage_checkpoint(
+                StageId::Finish,
+                StageCheckpoint::new(block_number).with_finish_stage_checkpoint(
+                    reth_stages_types::FinishCheckpoint {
+                        partial_state_trie: Some(partial_state_trie),
+                    },
+                ),
+            )?;
+        }
+
+        Ok(())
+    }
+}
+
 impl<TX: DbTx + 'static, N: NodeTypes> StorageReader for DatabaseProvider<TX, N> {
     fn plain_state_storages(
         &self,
@@ -3481,7 +3508,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> BlockExecutionWriter
         self.remove_blocks_above(block)?;
 
         // Update pipeline progress
-        self.update_pipeline_stages(block, true)?;
+        self.update_pipeline_stages_after_unwind(block)?;
 
         Ok(Chain::new(blocks, execution_state, BTreeMap::new()))
     }
@@ -3497,7 +3524,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> BlockExecutionWriter
         self.remove_blocks_above(block)?;
 
         // Update pipeline progress
-        self.update_pipeline_stages(block, true)?;
+        self.update_pipeline_stages_after_unwind(block)?;
 
         Ok(())
     }
@@ -3957,6 +3984,8 @@ mod tests {
         map::{AddressMap, B256Map},
         U256,
     };
+    #[cfg(feature = "partial-persistence")]
+    use reth_chain_state::test_utils::TestBlockBuilder;
     use reth_chain_state::ExecutedBlock;
     use reth_db_api::models::StorageSettings;
     use reth_ethereum_primitives::Receipt;
@@ -3968,6 +3997,10 @@ mod tests {
         HashedPostState, KeccakKeyHasher, Nibbles, SortedTrieData, StoredNibbles,
         StoredNibblesSubKey,
     };
+    #[cfg(feature = "partial-persistence")]
+    use reth_trie::{StateRoot, TrieInputSorted};
+    #[cfg(feature = "partial-persistence")]
+    use reth_trie_db::{DatabaseHashedCursorFactory, DatabaseStateRoot, DatabaseTrieCursorFactory};
     use revm::{database::BundleState, state::AccountInfo};
     use std::{sync::mpsc, time::Duration};
 
@@ -4006,6 +4039,213 @@ mod tests {
 
         done_rx.recv_timeout(Duration::from_secs(1)).unwrap().unwrap();
         handle.join().unwrap();
+    }
+
+    #[cfg(feature = "partial-persistence")]
+    fn assert_partial_state_trie_after_checkpoint_unwind(
+        partial_state_trie: BlockNumber,
+        new_tip: BlockNumber,
+        expected_partial_state_trie: Option<BlockNumber>,
+    ) {
+        let factory = create_test_provider_factory();
+        let provider_rw = factory.provider_rw().unwrap();
+        provider_rw
+            .save_stage_checkpoint(
+                StageId::Finish,
+                StageCheckpoint::new(5).with_finish_stage_checkpoint(
+                    reth_stages_types::FinishCheckpoint {
+                        partial_state_trie: Some(partial_state_trie),
+                    },
+                ),
+            )
+            .unwrap();
+        provider_rw.update_pipeline_stages_after_unwind(new_tip).unwrap();
+        provider_rw.commit().unwrap();
+
+        let checkpoint =
+            factory.provider().unwrap().get_stage_checkpoint(StageId::Finish).unwrap().unwrap();
+        assert_eq!(checkpoint.block_number, new_tip);
+        assert_eq!(
+            checkpoint
+                .finish_stage_checkpoint()
+                .and_then(|checkpoint| checkpoint.partial_state_trie()),
+            expected_partial_state_trie,
+        );
+        assert_eq!(
+            checkpoint.finish_stage_checkpoint().is_some(),
+            expected_partial_state_trie.is_some(),
+        );
+    }
+
+    #[cfg(feature = "partial-persistence")]
+    #[test]
+    fn checkpoint_unwind_preserves_lagging_partial_state_trie() {
+        assert_partial_state_trie_after_checkpoint_unwind(3, 4, Some(3));
+    }
+
+    #[cfg(feature = "partial-persistence")]
+    #[test]
+    fn checkpoint_unwind_clears_non_lagging_partial_state_trie() {
+        assert_partial_state_trie_after_checkpoint_unwind(4, 4, None);
+        assert_partial_state_trie_after_checkpoint_unwind(5, 4, None);
+    }
+
+    #[cfg(feature = "partial-persistence")]
+    #[test]
+    fn block_execution_unwind_cache_miss_preserves_partial_state_trie() {
+        let base_factory = create_test_provider_factory();
+        base_factory.set_storage_settings_cache(StorageSettings::v2());
+        let initial_account = AccountInfo::from_balance(U256::from(10).pow(U256::from(18)));
+        let mut parent_hash = B256::ZERO;
+        let mut blocks = Vec::new();
+        for block_number in 0..4 {
+            let mut block_builder = TestBlockBuilder::eth().with_state();
+            if block_number > 0 {
+                block_builder
+                    .post_block_state
+                    .insert(parent_hash, (initial_account.clone(), U256::from(block_number)));
+            }
+            let block = block_builder.get_executed_block_with_number(block_number, parent_hash);
+            parent_hash = block.recovered_block().hash();
+            blocks.push(block);
+        }
+
+        let provider_rw = base_factory.provider_rw().unwrap();
+        provider_rw.save_blocks(blocks.clone(), SaveBlocksMode::Full).unwrap();
+        provider_rw.commit().unwrap();
+
+        // `TestBlockBuilder` supplies hashed state but no trie nodes, so materialize the full tip
+        // before rewinding it to the partial frontier.
+        let provider_rw = base_factory.provider_rw().unwrap();
+        reth_trie_db::with_adapter!(provider_rw, |A| {
+            type DbStateRoot<'a, TX, A> = StateRoot<
+                DatabaseTrieCursorFactory<&'a TX, A>,
+                DatabaseHashedCursorFactory<&'a TX>,
+            >;
+            let (_, trie_updates) =
+                DbStateRoot::<_, A>::from_tx(provider_rw.tx_ref()).root_with_updates().unwrap();
+            provider_rw.write_trie_updates(trie_updates).unwrap();
+        });
+        provider_rw.commit().unwrap();
+
+        // Retain block/plain-state data through Finish while restoring hashed state and trie to
+        // block zero, matching a lagging partial-persistence frontier.
+        let provider_rw = base_factory.provider_rw().unwrap();
+        provider_rw.unwind_trie_state_from(1).unwrap();
+        provider_rw
+            .save_stage_checkpoint(
+                StageId::Finish,
+                StageCheckpoint::new(3).with_finish_stage_checkpoint(
+                    reth_stages_types::FinishCheckpoint { partial_state_trie: Some(0) },
+                ),
+            )
+            .unwrap();
+        provider_rw.commit().unwrap();
+
+        // Populate the same per-block state/trie overlays held by the live engine.
+        let manager =
+            reth_storage_overlay::OverlayManager::<reth_ethereum_primitives::EthPrimitives>::default(
+            );
+        let provider = base_factory.provider().unwrap();
+        let mut tip_state = HashedPostStateSorted::default();
+        let mut tip_nodes = TrieUpdatesSorted::default();
+        for block in &blocks[1..] {
+            let block_state = block.trie_data().sorted.hashed_state.as_ref().clone();
+            tip_state.extend_ref_and_sort(&block_state);
+            let block_input = TrieInputSorted::new(
+                Arc::new(tip_nodes.clone()),
+                Arc::new(tip_state.clone()),
+                block_state.construct_prefix_sets(),
+            );
+            let (_, block_nodes) = reth_trie_db::with_adapter!(provider, |A| {
+                type DbStateRoot<'a, TX, A> = StateRoot<
+                    DatabaseTrieCursorFactory<&'a TX, A>,
+                    DatabaseHashedCursorFactory<&'a TX>,
+                >;
+                DbStateRoot::<_, A>::overlay_root_from_nodes_with_updates(
+                    provider.tx_ref(),
+                    block_input,
+                )
+            })
+            .unwrap();
+            let block_nodes = block_nodes.into_sorted();
+            tip_nodes.extend_ref_and_sort(&block_nodes);
+            manager.insert_block(ExecutedBlock::new(
+                Arc::clone(&block.recovered_block),
+                Arc::clone(&block.execution_output),
+                ComputedTrieData::new(Arc::new(block_state), Arc::new(block_nodes)),
+            ));
+        }
+        drop(provider);
+
+        // Replace the cache used for the initial frontier rewind so this direct unwind must take
+        // the aggregate cache-miss path and reconstruct Finish from the manager.
+        let changeset_cache = ChangesetCache::new();
+        changeset_cache.set_state_trie_overlay_manager(manager.clone());
+        let factory = base_factory.with_changeset_cache(changeset_cache);
+        let provider_rw = factory.provider_rw().unwrap();
+        provider_rw.remove_block_and_execution_above(2).unwrap();
+        provider_rw.commit().unwrap();
+
+        let provider = factory.provider().unwrap();
+        let checkpoint = provider.get_stage_checkpoint(StageId::Finish).unwrap().unwrap();
+        assert_eq!(checkpoint.block_number, 2);
+        assert_eq!(
+            checkpoint
+                .finish_stage_checkpoint()
+                .and_then(|checkpoint| checkpoint.partial_state_trie()),
+            Some(0)
+        );
+        assert_eq!(provider.block_hash(2).unwrap(), Some(blocks[2].recovered_block().hash()));
+        assert!(provider.block_hash(3).unwrap().is_none());
+
+        manager.remove_blocks([blocks[3].recovered_block().hash()]);
+        let (logical_tip_nodes, logical_tip_state) = manager
+            .overlay_for_parent(
+                blocks[2].recovered_block().hash(),
+                blocks[0].recovered_block().hash(),
+            )
+            .unwrap();
+        let logical_tip_prefix_sets = logical_tip_state.construct_prefix_sets();
+        let logical_tip_input =
+            TrieInputSorted::new(logical_tip_nodes, logical_tip_state, logical_tip_prefix_sets);
+        let actual_root = reth_trie_db::with_adapter!(provider, |A| {
+            type DbStateRoot<'a, TX, A> = StateRoot<
+                DatabaseTrieCursorFactory<&'a TX, A>,
+                DatabaseHashedCursorFactory<&'a TX>,
+            >;
+            DbStateRoot::<_, A>::overlay_root_from_nodes_with_updates(
+                provider.tx_ref(),
+                logical_tip_input,
+            )
+            .unwrap()
+            .0
+        });
+
+        let reference_factory = create_test_provider_factory();
+        reference_factory.set_storage_settings_cache(StorageSettings::v2());
+        let reference_provider = reference_factory.provider_rw().unwrap();
+        reference_provider.save_blocks(blocks[..=2].to_vec(), SaveBlocksMode::Full).unwrap();
+        reth_trie_db::with_adapter!(reference_provider, |A| {
+            type DbStateRoot<'a, TX, A> = StateRoot<
+                DatabaseTrieCursorFactory<&'a TX, A>,
+                DatabaseHashedCursorFactory<&'a TX>,
+            >;
+            let (_, trie_updates) = DbStateRoot::<_, A>::from_tx(reference_provider.tx_ref())
+                .root_with_updates()
+                .unwrap();
+            reference_provider.write_trie_updates(trie_updates).unwrap();
+        });
+        reference_provider.commit().unwrap();
+        let reference_provider = reference_factory.provider().unwrap();
+        let expected_root = reth_trie_db::with_adapter!(reference_provider, |A| {
+            type DbStateRoot<'a, TX, A> = StateRoot<
+                DatabaseTrieCursorFactory<&'a TX, A>,
+                DatabaseHashedCursorFactory<&'a TX>,
+            >;
+            DbStateRoot::<_, A>::from_tx(reference_provider.tx_ref()).root().unwrap()
+        });
+        assert_eq!(actual_root, expected_root);
     }
 
     #[test]

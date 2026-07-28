@@ -3,15 +3,16 @@
 //! This module reconstructs trie changesets from database state. The resulting changesets contain
 //! the old trie node values needed to revert a block or contiguous range of blocks.
 
-use crate::{
-    DatabaseHashedCursorFactory, DatabaseStateRoot, DatabaseTrieCursorFactory, TrieTableAdapter,
-};
+use crate::{DatabaseHashedCursorFactory, DatabaseTrieCursorFactory, TrieTableAdapter};
 use alloy_primitives::BlockNumber;
 use reth_storage_api::{
     BlockNumReader, ChangeSetReader, DBProvider, StorageChangeSetReader, StorageSettingsCache,
 };
 use reth_storage_errors::provider::ProviderError;
-use reth_trie::TrieInputSorted;
+use reth_trie::{
+    hashed_cursor::HashedPostStateCursorFactory, trie_cursor::InMemoryTrieCursorFactory, StateRoot,
+    TrieInputSorted,
+};
 use reth_trie_common::updates::TrieUpdatesSorted;
 use std::{ops::RangeInclusive, sync::Arc};
 use tracing::debug;
@@ -37,11 +38,13 @@ where
         + StorageSettingsCache,
 {
     let db_tip_block = provider.best_block_number()?;
+    let tip_input = TrieInputSorted::default();
     crate::with_adapter!(provider, |A| {
         compute_range_trie_changesets_inner::<_, A>(
             provider,
             block_number..=block_number,
             db_tip_block,
+            &tip_input,
         )
     })
 }
@@ -67,8 +70,40 @@ where
         + BlockNumReader
         + StorageSettingsCache,
 {
+    compute_range_trie_changesets_with_tip(
+        provider,
+        range,
+        db_tip_block,
+        &TrieInputSorted::default(),
+    )
+}
+
+/// Computes aggregate trie changesets for an inclusive block range against a logical tip overlay.
+///
+/// `tip_input` contains trie and hashed-state updates between the durable trie frontier and
+/// `db_tip_block`. The returned changesets therefore restore the logical trie from the state after
+/// `range.end()` to the state before `range.start()`, even if trie persistence trails the database
+/// tip.
+///
+/// # Errors
+///
+/// Returns an error if the range exceeds `db_tip_block`, database access fails, or state root
+/// computation fails.
+pub fn compute_range_trie_changesets_with_tip<Provider>(
+    provider: &Provider,
+    range: RangeInclusive<BlockNumber>,
+    db_tip_block: BlockNumber,
+    tip_input: &TrieInputSorted,
+) -> Result<TrieUpdatesSorted, ProviderError>
+where
+    Provider: DBProvider
+        + ChangeSetReader
+        + StorageChangeSetReader
+        + BlockNumReader
+        + StorageSettingsCache,
+{
     crate::with_adapter!(provider, |A| {
-        compute_range_trie_changesets_inner::<_, A>(provider, range, db_tip_block)
+        compute_range_trie_changesets_inner::<_, A>(provider, range, db_tip_block, tip_input)
     })
 }
 
@@ -76,6 +111,7 @@ fn compute_range_trie_changesets_inner<Provider, A>(
     provider: &Provider,
     range: RangeInclusive<BlockNumber>,
     db_tip_block: BlockNumber,
+    tip_input: &TrieInputSorted,
 ) -> Result<TrieUpdatesSorted, ProviderError>
 where
     Provider: DBProvider
@@ -111,11 +147,6 @@ where
     let range_state_revert = crate::state::from_reverts_auto(provider, range)?;
     let range_prefix_sets = range_state_revert.construct_prefix_sets();
 
-    type DbStateRoot<'a, TX, A> = reth_trie::StateRoot<
-        DatabaseTrieCursorFactory<&'a TX, A>,
-        DatabaseHashedCursorFactory<&'a TX>,
-    >;
-
     let (range_nodes, range_state) = if end_block == db_tip_block {
         debug!(
             target: "trie::changesets",
@@ -140,13 +171,8 @@ where
             Arc::new(tail_state_revert.clone()),
             tail_state_revert.construct_prefix_sets(),
         );
-        let tail_trie_revert = DbStateRoot::<_, A>::overlay_root_from_nodes_with_updates(
-            provider.tx_ref(),
-            tail_input,
-        )
-        .map_err(ProviderError::other)?
-        .1
-        .into_sorted();
+        let tail_trie_revert =
+            compute_revert_trie_updates::<_, A>(provider, tip_input, tail_input)?;
 
         // Overlay the post-range trie and compute the trie revert to the pre-range state.
         let mut pre_range_state_revert = tail_state_revert;
@@ -156,11 +182,7 @@ where
     };
 
     let range_input = TrieInputSorted::new(range_nodes, range_state, range_prefix_sets);
-    let range_trie_revert =
-        DbStateRoot::<_, A>::overlay_root_from_nodes_with_updates(provider.tx_ref(), range_input)
-            .map_err(ProviderError::other)?
-            .1
-            .into_sorted();
+    let range_trie_revert = compute_revert_trie_updates::<_, A>(provider, tip_input, range_input)?;
 
     debug!(
         target: "trie::changesets",
@@ -172,4 +194,39 @@ where
     );
 
     Ok(range_trie_revert)
+}
+
+/// Computes trie updates that restore a pre-range state from the supplied reverts.
+fn compute_revert_trie_updates<Provider, A>(
+    provider: &Provider,
+    tip_input: &TrieInputSorted,
+    input: TrieInputSorted,
+) -> Result<TrieUpdatesSorted, ProviderError>
+where
+    Provider: DBProvider,
+    A: TrieTableAdapter,
+{
+    StateRoot::new(
+        InMemoryTrieCursorFactory::new(
+            InMemoryTrieCursorFactory::new(
+                DatabaseTrieCursorFactory::<_, A>::new(provider.tx_ref()),
+                tip_input.nodes.as_ref(),
+            ),
+            input.nodes.as_ref(),
+        ),
+        HashedPostStateCursorFactory::new(
+            HashedPostStateCursorFactory::new(
+                DatabaseHashedCursorFactory::new(provider.tx_ref()),
+                tip_input.state.as_ref(),
+            ),
+            input.state.as_ref(),
+        ),
+    )
+    .with_prefix_sets(input.prefix_sets.freeze())
+    // Revert prefix sets identify changed branches, but not necessarily every child needed to
+    // encode the restored branch after a collapse or expansion.
+    .with_walk_all_changed_branch_children(true)
+    .root_with_updates()
+    .map(|(_, updates)| updates.into_sorted())
+    .map_err(ProviderError::other)
 }
