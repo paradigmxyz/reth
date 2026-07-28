@@ -594,11 +594,12 @@ async fn test_tree_persist_blocks() {
         test_harness.action_rx.recv().expect("Failed to receive save blocks action");
     if let PersistenceAction::SaveBlocks(input, _) = received_action {
         let expected_persist_len = blocks.len() - tree_config.memory_block_buffer_target() as usize;
-        assert_eq!(input.blocks().len(), expected_persist_len);
-        assert_eq!(input.blocks(), &blocks[..expected_persist_len]);
+        assert_eq!(input.persist_rest_blocks().len(), expected_persist_len);
         assert_eq!(input.persist_rest_blocks(), &blocks[..expected_persist_len]);
         assert_eq!(input.state_trie_blocks(), &blocks[..expected_persist_len]);
         assert!(input.state_trie_masking_blocks().is_empty());
+        assert_eq!(input.prev_db_tip(), input.prev_partial_state_trie());
+        assert_eq!(input.new_db_tip(), input.new_partial_state_trie());
     } else {
         panic!("unexpected action received {received_action:?}");
     }
@@ -2743,11 +2744,11 @@ mod forkchoice_updated_tests {
             if let Ok(PersistenceAction::SaveBlocks(saved_blocks, sender)) =
                 action_rx.recv_timeout(std::time::Duration::from_millis(100))
             {
-                let last_block = saved_blocks.last_block();
-                last_persisted_number = last_block.number;
+                let last = saved_blocks.last_block();
+                last_persisted_number = last.number;
                 sender
                     .send(PersistenceResult {
-                        last_block: Some(last_block),
+                        last_block: Some(last),
                         last_state_trie_block: Some(saved_blocks.new_partial_state_trie()),
                         commit_duration: Some(Duration::ZERO),
                     })

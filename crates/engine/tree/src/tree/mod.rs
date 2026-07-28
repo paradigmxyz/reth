@@ -1707,23 +1707,9 @@ where
     /// Helper method to save blocks and set the persistence state. This ensures we keep track of
     /// the current persistence action while we're saving blocks.
     fn persist_blocks(&mut self, input: SaveBlocksInput<N>) {
-        if input.is_empty() {
-            debug!(target: "engine::tree", "Returned empty set of blocks to persist");
-            return
-        }
+        let highest_num_hash = input.last_block();
+        debug!(target: "engine::tree", count=input.persist_rest_blocks().len(), blocks = ?input.persist_rest_blocks().iter().map(|block| block.recovered_block().num_hash()).collect::<Vec<_>>(), "Persisting blocks");
 
-        let highest_num_hash = input.last_block().expect("checked non-empty persisting blocks");
-
-        debug!(
-            target: "engine::tree",
-            count = input.blocks().len(),
-            prev_db_tip = input.prev_db_tip(),
-            prev_partial_state_trie = input.prev_partial_state_trie(),
-            new_db_tip = input.new_db_tip(),
-            new_partial_state_trie = input.new_partial_state_trie(),
-            blocks = ?input.blocks().iter().map(|block| block.recovered_block().num_hash()).collect::<Vec<_>>(),
-            "Persisting blocks"
-        );
         let (tx, rx) = crossbeam_channel::bounded(1);
         let _ = self.persistence.save_blocks(input, tx);
 

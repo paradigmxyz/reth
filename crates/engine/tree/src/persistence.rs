@@ -162,39 +162,20 @@ where
         })
     }
 
-    #[instrument(
-        level = "debug",
-        target = "engine::persistence",
-        skip_all,
-        fields(
-            block_count = input.blocks().len(),
-            persist_block_count = input.persist_rest_blocks().len(),
-            state_trie_block_count = input.state_trie_blocks().len(),
-        )
-    )]
+    #[instrument(level = "debug", target = "engine::persistence", skip_all, fields(block_count = input.persist_rest_blocks().len()))]
     fn on_save_blocks(
         &mut self,
         input: SaveBlocksInput<N::Primitives>,
     ) -> Result<PersistenceResult, PersistenceError> {
         let first_block = input.first_persist_rest_block().recovered_block().num_hash();
         let last_block = input.last_block();
-        let persist_block_count = input.persist_rest_blocks().len();
-        let state_trie_block_count = input.state_trie_blocks().len();
-        let mask_block_count = input.state_trie_masking_blocks().len();
+        let block_count = input.persist_rest_blocks().len();
         let last_state_trie_block = Some(input.new_partial_state_trie());
 
         let pending_finalized = self.pending_finalized_block.take();
         let pending_safe = self.pending_safe_block.take();
 
-        debug!(
-            target: "engine::persistence",
-            persist_block_count,
-            state_trie_block_count,
-            mask_block_count,
-            first = ?first_block,
-            last = ?last_block,
-            "Saving range of blocks"
-        );
+        debug!(target: "engine::persistence", ?block_count, first=?first_block, last=?last_block, "Saving range of blocks");
 
         let start_time = Instant::now();
 
@@ -221,7 +202,7 @@ where
         debug!(target: "engine::persistence", first=?first_block, last=?last_block, "Saved range of blocks");
 
         let elapsed = start_time.elapsed();
-        self.metrics.save_blocks_batch_size.record(persist_block_count as f64);
+        self.metrics.save_blocks_batch_size.record(block_count as f64);
         self.metrics.save_blocks_duration_seconds.record(elapsed);
 
         Ok(PersistenceResult {
@@ -807,19 +788,9 @@ mod tests {
         let mut test_block_builder = TestBlockBuilder::eth().with_state();
         let signer = test_block_builder.signer;
         let initial_balance = U256::from(10).pow(U256::from(18));
-        let block_a1 = loop {
-            let block = test_block_builder.get_executed_block_with_number(1, genesis_hash);
-            if !block.recovered_block().body().transactions.is_empty() {
-                break block
-            }
-        };
+        let block_a1 = test_block_builder.get_executed_block_with_number(1, genesis_hash);
         let hash_a1 = block_a1.recovered_block().hash();
-        let block_a2 = loop {
-            let block = test_block_builder.get_executed_block_with_number(2, hash_a1);
-            if !block.recovered_block().body().transactions.is_empty() {
-                break block
-            }
-        };
+        let block_a2 = test_block_builder.get_executed_block_with_number(2, hash_a1);
         let hash_a2 = block_a2.recovered_block().hash();
 
         // Compute expected signer state after block 1 from its transaction count.
