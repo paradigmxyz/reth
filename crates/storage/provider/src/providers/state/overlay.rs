@@ -69,12 +69,13 @@ impl<F, N: NodePrimitives> OverlayStateProviderFactory<F, N> {
         }
     }
 
-    /// Set the hashed state overlay.
-    pub fn with_hashed_state_overlay(
+    /// Sets an immediate hashed-state and trie-updates overlay.
+    pub fn with_immediate_state_trie_overlay(
         mut self,
-        hashed_state_overlay: Option<Arc<HashedPostStateSorted>>,
+        state: Arc<HashedPostStateSorted>,
+        trie: Arc<TrieUpdatesSorted>,
     ) -> Self {
-        self.overlay_builder = self.overlay_builder.with_hashed_state_overlay(hashed_state_overlay);
+        self.overlay_builder = self.overlay_builder.with_immediate_state_trie_overlay(state, trie);
         self.overlay_cache = Default::default();
         self
     }

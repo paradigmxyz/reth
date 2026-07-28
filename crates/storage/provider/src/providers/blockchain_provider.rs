@@ -189,8 +189,7 @@ impl<N: ProviderNodeTypes> BlockchainProvider<N> {
             self.database
                 .overlay_manager()
                 .overlay_builder(matched.anchor().hash)
-                .with_hashed_state_overlay(Some(merged.state))
-                .with_trie_updates_overlay(Some(merged.nodes)),
+                .with_immediate_state_trie_overlay(merged.state, merged.nodes),
         );
         reth_storage_api::DatabaseProviderROFactory::database_provider_ro(&overlay_factory)
             .map(Some)

@@ -100,41 +100,13 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
         self
     }
 
-    /// Set the hashed state overlay.
-    pub fn with_hashed_state_overlay(
+    /// Sets an immediate hashed-state and trie-updates overlay.
+    pub fn with_immediate_state_trie_overlay(
         mut self,
-        hashed_state_overlay: Option<Arc<HashedPostStateSorted>>,
+        state: Arc<HashedPostStateSorted>,
+        trie: Arc<TrieUpdatesSorted>,
     ) -> Self {
-        if let Some(new_state) = hashed_state_overlay {
-            match &mut self.overlay_source {
-                Some(OverlaySource::Immediate { state, .. }) => *state = new_state,
-                Some(OverlaySource::Managed) | None => {
-                    self.overlay_source = Some(OverlaySource::Immediate {
-                        trie: Arc::new(TrieUpdatesSorted::default()),
-                        state: new_state,
-                    });
-                }
-            }
-        }
-        self
-    }
-
-    /// Set the trie updates overlay.
-    pub fn with_trie_updates_overlay(
-        mut self,
-        trie_updates_overlay: Option<Arc<TrieUpdatesSorted>>,
-    ) -> Self {
-        if let Some(trie) = trie_updates_overlay {
-            match &mut self.overlay_source {
-                Some(OverlaySource::Immediate { trie: existing, .. }) => *existing = trie,
-                Some(OverlaySource::Managed) | None => {
-                    self.overlay_source = Some(OverlaySource::Immediate {
-                        trie,
-                        state: Arc::new(HashedPostStateSorted::default()),
-                    });
-                }
-            }
-        }
+        self.overlay_source = Some(OverlaySource::Immediate { trie, state });
         self
     }
 
