@@ -50,6 +50,7 @@ impl Environment {
             txn_dp_limit: None,
             spill_max_denominator: None,
             spill_min_denominator: None,
+            merge_threshold_16dot16_percent: None,
             geometry: None,
             log_level: None,
             kind: Default::default(),
@@ -618,6 +619,7 @@ pub struct EnvironmentBuilder {
     txn_dp_limit: Option<u64>,
     spill_max_denominator: Option<u64>,
     spill_min_denominator: Option<u64>,
+    merge_threshold_16dot16_percent: Option<u64>,
     geometry: Option<Geometry<(Option<usize>, Option<usize>)>>,
     log_level: Option<ffi::MDBX_log_level_t>,
     kind: EnvironmentKind,
@@ -691,6 +693,10 @@ impl EnvironmentBuilder {
                     (ffi::MDBX_opt_txn_dp_limit, self.txn_dp_limit),
                     (ffi::MDBX_opt_spill_max_denominator, self.spill_max_denominator),
                     (ffi::MDBX_opt_spill_min_denominator, self.spill_min_denominator),
+                    (
+                        ffi::MDBX_opt_merge_threshold_16dot16_percent,
+                        self.merge_threshold_16dot16_percent,
+                    ),
                 ] {
                     if let Some(v) = v {
                         mdbx_result(ffi::mdbx_env_set_option(env, opt, v))?;
@@ -870,6 +876,11 @@ impl EnvironmentBuilder {
 
     pub fn set_spill_min_denominator(&mut self, v: u8) -> &mut Self {
         self.spill_min_denominator = Some(v.into());
+        self
+    }
+
+    pub fn set_merge_threshold_16dot16_percent(&mut self, v: u16) -> &mut Self {
+        self.merge_threshold_16dot16_percent = Some(v.into());
         self
     }
 
