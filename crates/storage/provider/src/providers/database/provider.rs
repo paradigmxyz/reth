@@ -3730,26 +3730,22 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> BlockExecutionWriter
 }
 
 impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> DatabaseProvider<TX, N> {
-    fn trie_persisted_tip_block_number(&self) -> ProviderResult<Option<BlockNumber>> {
-        Ok(self.get_stage_checkpoint(StageId::Finish)?.map(|checkpoint| {
-            checkpoint
-                .finish_stage_checkpoint()
-                .and_then(|finish| finish.partial_state_trie())
-                .unwrap_or(checkpoint.block_number)
-        }))
-    }
-
     fn update_finish_checkpoint_after_remove(&self, block: BlockNumber) -> ProviderResult<()> {
         let partial_state_trie = self
-            .trie_persisted_tip_block_number()?
-            .map(|trie_persisted_tip| trie_persisted_tip.min(block));
+            .get_stage_checkpoint(StageId::Finish)?
+            .and_then(|checkpoint| checkpoint.finish_stage_checkpoint())
+            .and_then(|finish| finish.partial_state_trie())
+            .filter(|partial_state_trie| *partial_state_trie < block);
 
         self.update_pipeline_stages(block, true)?;
-        self.save_stage_checkpoint(
-            StageId::Finish,
-            StageCheckpoint::new(block)
-                .with_finish_stage_checkpoint(FinishCheckpoint { partial_state_trie }),
-        )?;
+        if let Some(partial_state_trie) = partial_state_trie {
+            self.save_stage_checkpoint(
+                StageId::Finish,
+                StageCheckpoint::new(block).with_finish_stage_checkpoint(FinishCheckpoint {
+                    partial_state_trie: Some(partial_state_trie),
+                }),
+            )?;
+        }
 
         Ok(())
     }
