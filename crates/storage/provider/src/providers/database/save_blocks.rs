@@ -26,7 +26,9 @@ use reth_primitives_traits::NodePrimitives;
 /// is the work partial persistence avoids: only the newest value needs to be applied later when
 /// the masking block leaves memory. If both new frontiers are equal, the masking suffix is empty
 /// and hashed state/trie are fully flushed through `new_db_tip`.
-#[derive(Debug, Clone)]
+///
+/// Genesis must already be initialized because this input only advances an existing database tip.
+#[derive(Debug)]
 pub struct SaveBlocksInput<N: NodePrimitives = EthPrimitives> {
     blocks: Vec<ExecutedBlock<N>>,
     prev_db_tip: BlockNumber,
@@ -75,16 +77,14 @@ impl<N: NodePrimitives> SaveBlocksInput<N> {
             expected_len,
             "blocks must cover (prev_partial_state_trie, new_db_tip]"
         );
-        debug_assert!(blocks.iter().enumerate().all(|(index, block)| {
-            block.recovered_block().number() == prev_partial_state_trie + index as u64 + 1
-        }));
+        assert!(
+            blocks.iter().enumerate().all(|(index, block)| {
+                block.recovered_block().number() == prev_partial_state_trie + index as u64 + 1
+            }),
+            "blocks must cover (prev_partial_state_trie, new_db_tip]"
+        );
 
         Self { blocks, prev_db_tip, prev_partial_state_trie, new_db_tip, new_partial_state_trie }
-    }
-
-    /// Returns the canonical blocks needed to advance either frontier or construct the mask.
-    pub fn blocks(&self) -> &[ExecutedBlock<N>] {
-        &self.blocks
     }
 
     /// Returns the previous Finish checkpoint block number.
@@ -202,5 +202,12 @@ mod tests {
     fn requires_database_tip_to_advance() {
         let blocks = TestBlockBuilder::eth().get_executed_blocks(1..2).collect();
         let _ = SaveBlocksInput::new(blocks, 1, 0, 1, 1);
+    }
+
+    #[test]
+    #[should_panic(expected = "blocks must cover (prev_partial_state_trie, new_db_tip]")]
+    fn requires_contiguous_blocks() {
+        let blocks = TestBlockBuilder::eth().get_executed_blocks(2..4).collect();
+        let _ = SaveBlocksInput::new(blocks, 0, 0, 2, 2);
     }
 }
