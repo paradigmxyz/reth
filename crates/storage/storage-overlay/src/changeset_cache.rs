@@ -62,7 +62,7 @@ use reth_trie_db::{DatabaseHashedCursorFactory, DatabaseStateRoot};
 /// - Block number exceeds database tip
 /// - Database access fails
 /// - Cache retrieval fails
-pub fn compute_block_trie_updates<Provider>(
+pub(crate) fn compute_block_trie_updates<Provider>(
     cache: &ChangesetCache,
     provider: &Provider,
     block_number: BlockNumber,
@@ -149,7 +149,7 @@ where
 /// This type wraps a shared, mutable reference to the cache inner.
 /// The `RwLock` enables concurrent reads while ensuring exclusive access for writes.
 #[derive(Debug, Clone)]
-pub struct ChangesetCache {
+pub(crate) struct ChangesetCache {
     inner: Arc<RwLock<ChangesetCacheInner>>,
 }
 
@@ -164,20 +164,8 @@ impl ChangesetCache {
     ///
     /// The cache has no capacity limit and relies on explicit eviction
     /// via the `evict()` method to manage memory usage.
-    pub fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self { inner: Arc::new(RwLock::new(ChangesetCacheInner::new())) }
-    }
-
-    /// Retrieves changesets for a block.
-    ///
-    /// Returns `None` if the block is not in the cache (either evicted or never computed).
-    /// Updates hit/miss metrics accordingly.
-    pub fn get(
-        &self,
-        block_hash: B256,
-        block_number: BlockNumber,
-    ) -> Option<Arc<TrieUpdatesSorted>> {
-        self.inner.read().get(&ChangesetRangeKey::single(block_number, block_hash))
     }
 
     /// Evicts changesets for blocks below the given block number.
@@ -189,7 +177,7 @@ impl ChangesetCache {
     ///
     /// * `up_to_block` - Evict blocks with number < this value. Blocks with number >= this value
     ///   are retained.
-    pub fn evict(&self, up_to_block: BlockNumber) {
+    pub(crate) fn evict(&self, up_to_block: BlockNumber) {
         self.inner.write().evict(up_to_block)
     }
 
@@ -206,7 +194,7 @@ impl ChangesetCache {
     /// # Returns
     ///
     /// Changesets for the block, either from cache or computed on-the-fly.
-    pub fn get_or_compute<P>(
+    pub(crate) fn get_or_compute<P>(
         &self,
         provider: &P,
         block_number: BlockNumber,
@@ -247,7 +235,7 @@ impl ChangesetCache {
     /// - Database access fails
     /// - Block hash lookup fails
     /// - Changeset computation fails
-    pub fn get_or_compute_range<P>(
+    pub(crate) fn get_or_compute_range<P>(
         &self,
         provider: &P,
         range: RangeInclusive<BlockNumber>,

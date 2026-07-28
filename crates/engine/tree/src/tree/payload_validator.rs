@@ -148,7 +148,7 @@ use reth_provider::{
     ProviderError, PruneCheckpointReader, StageCheckpointReader, StateProvider, StateProviderBox,
     StateProviderFactory, StateReader, StorageChangeSetReader, StorageSettingsCache,
 };
-use reth_storage_overlay::{ChangesetCache, OverlayBuilder, OverlayManager};
+use reth_storage_overlay::OverlayManager;
 use reth_trie::{
     hashed_cursor::HashedCursorFactory, trie_cursor::TrieCursorFactory, updates::TrieUpdates,
     HashedPostState, LazyTrieData,
@@ -276,12 +276,10 @@ where
     metrics: EngineApiMetrics,
     /// Validator for the payload.
     validator: V,
-    /// Changeset cache for in-memory trie changesets
-    changeset_cache: ChangesetCache,
     /// Task runtime for spawning parallel work.
     runtime: reth_tasks::Runtime,
-    /// Shared state trie in-memory overlay data.
-    state_trie_overlays: OverlayManager<Evm::Primitives>,
+    /// Shared overlay manager.
+    overlay_manager: OverlayManager<Evm::Primitives>,
     /// State-root strategy used to prepare per-block commitment tasks.
     #[debug(skip)]
     state_root_strategy: Arc<dyn StateRootStrategy<Evm::Primitives, P, Evm>>,
@@ -322,8 +320,7 @@ where
         validator: V,
         config: TreeConfig,
         invalid_block_hook: Box<dyn InvalidBlockHook<N>>,
-        changeset_cache: ChangesetCache,
-        state_trie_overlays: OverlayManager<N>,
+        overlay_manager: OverlayManager<N>,
         runtime: reth_tasks::Runtime,
     ) -> Self {
         let evm_config =
@@ -338,9 +335,8 @@ where
             invalid_block_hook,
             metrics: EngineApiMetrics::default(),
             validator,
-            changeset_cache,
             runtime,
-            state_trie_overlays,
+            overlay_manager,
             state_root_strategy: Arc::new(DefaultStateRootStrategy::default()),
         }
     }
@@ -562,11 +558,7 @@ where
 
         // Create overlay factory for state-root tasks that need multiproofs.
         let provider_factory = self.provider.clone();
-        let overlay_builder = Self::overlay_builder_for_parent(
-            parent_hash,
-            ctx.state(),
-            self.changeset_cache.clone(),
-        );
+        let overlay_builder = ctx.state().tree_state.overlay_manager.overlay_builder(parent_hash);
         let overlay_factory = OverlayStateProviderFactory::new(provider_factory, overlay_builder);
 
         let parallel_bal_execution = ensure_ok!(self.bal_path_eligible(env.decoded_bal.as_deref()));
@@ -575,7 +567,7 @@ where
         let mut state_root_job =
             ensure_ok!(self.state_root_strategy.prepare(StateRootJobContext::new(
                 &self.runtime,
-                &self.state_trie_overlays,
+                &self.overlay_manager,
                 &env,
                 provider_builder.clone(),
                 overlay_factory,
@@ -1343,16 +1335,6 @@ where
         self.invalid_block_hook.on_invalid_block(parent_header, block, output, trie_updates);
     }
 
-    /// Returns an overlay builder configured for a payload parent.
-    fn overlay_builder_for_parent(
-        parent_hash: B256,
-        state: &EngineApiTreeState<N>,
-        changeset_cache: ChangesetCache,
-    ) -> OverlayBuilder<N> {
-        OverlayBuilder::new(parent_hash, changeset_cache)
-            .with_overlay_manager(state.tree_state.state_trie_overlays.clone())
-    }
-
     /// Prepares the optional payload-builder state-root handle through the installed
     /// [`StateRootStrategy`].
     fn payload_state_root_handle_for(
@@ -1377,12 +1359,12 @@ where
         };
         let overlay_factory = OverlayStateProviderFactory::new(
             self.provider.clone(),
-            Self::overlay_builder_for_parent(parent_hash, state, self.changeset_cache.clone()),
+            state.tree_state.overlay_manager.overlay_builder(parent_hash),
         );
 
         match self.state_root_strategy.prepare_payload_builder(PayloadStateRootJobContext::new(
             &self.runtime,
-            &self.state_trie_overlays,
+            &self.overlay_manager,
             parent_hash,
             parent_header,
             timestamp,
@@ -1784,7 +1766,7 @@ where
         debug!(target: "engine::tree::payload_validator", "Waiting for execution cache and sparse trie locks");
 
         let execution_cache = self.payload_processor.execution_cache();
-        let state_trie_overlays = self.state_trie_overlays.clone();
+        let overlay_manager = self.overlay_manager.clone();
         let (execution_tx, execution_rx) = std::sync::mpsc::channel();
         let (sparse_trie_tx, sparse_trie_rx) = std::sync::mpsc::channel();
 
@@ -1792,7 +1774,7 @@ where
             let _ = execution_tx.send(execution_cache.wait_for_availability());
         });
         self.runtime.spawn_blocking_named("wait-sparse-tri", move || {
-            let _ = sparse_trie_tx.send(state_trie_overlays.wait_for_sparse_trie_availability());
+            let _ = sparse_trie_tx.send(overlay_manager.wait_for_sparse_trie_availability());
         });
 
         let execution_cache =

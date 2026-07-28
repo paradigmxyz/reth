@@ -136,7 +136,7 @@ where
     N: NodePrimitives,
 {
     executor: &'a reth_tasks::Runtime,
-    state_trie_overlays: &'a OverlayManager<N>,
+    overlay_manager: &'a OverlayManager<N>,
     parent_hash: B256,
     parent_header: &'a N::BlockHeader,
     timestamp: u64,
@@ -168,7 +168,7 @@ where
     #[expect(clippy::too_many_arguments)]
     pub(crate) const fn new(
         executor: &'a reth_tasks::Runtime,
-        state_trie_overlays: &'a OverlayManager<N>,
+        overlay_manager: &'a OverlayManager<N>,
         parent_hash: B256,
         parent_header: &'a N::BlockHeader,
         timestamp: u64,
@@ -179,7 +179,7 @@ where
     ) -> Self {
         Self {
             executor,
-            state_trie_overlays,
+            overlay_manager,
             parent_hash,
             parent_header,
             timestamp,
@@ -244,7 +244,7 @@ where
     Evm: ConfigureEvm<Primitives = N>,
 {
     executor: &'a reth_tasks::Runtime,
-    state_trie_overlays: &'a OverlayManager<N>,
+    overlay_manager: &'a OverlayManager<N>,
     env: &'a ExecutionEnv<Evm>,
     provider_builder: StateProviderBuilder<N, P>,
     overlay_factory: OverlayStateProviderFactory<P, N>,
@@ -275,7 +275,7 @@ where
     #[expect(clippy::too_many_arguments)]
     pub(crate) const fn new(
         executor: &'a reth_tasks::Runtime,
-        state_trie_overlays: &'a OverlayManager<N>,
+        overlay_manager: &'a OverlayManager<N>,
         env: &'a ExecutionEnv<Evm>,
         provider_builder: StateProviderBuilder<N, P>,
         overlay_factory: OverlayStateProviderFactory<P, N>,
@@ -285,7 +285,7 @@ where
     ) -> Self {
         Self {
             executor,
-            state_trie_overlays,
+            overlay_manager,
             env,
             provider_builder,
             overlay_factory,
@@ -510,7 +510,7 @@ impl DefaultStateRootStrategy {
     fn spawn_state_root<N, F>(
         &self,
         executor: &reth_tasks::Runtime,
-        state_trie_overlays: &OverlayManager<N>,
+        overlay_manager: &OverlayManager<N>,
         multiproof_provider_factory: F,
         options: StateRootTaskOptions<'_, N>,
     ) -> StateRootHandle
@@ -545,7 +545,7 @@ impl DefaultStateRootStrategy {
 
         self.spawn_sparse_trie_task(
             executor,
-            state_trie_overlays,
+            overlay_manager,
             proof_handle,
             state_root_tx,
             hashed_state_tx,
@@ -578,7 +578,7 @@ impl DefaultStateRootStrategy {
     fn spawn_sparse_trie_task<N: NodePrimitives>(
         &self,
         executor: &reth_tasks::Runtime,
-        state_trie_overlays: &OverlayManager<N>,
+        overlay_manager: &OverlayManager<N>,
         proof_worker_handle: ProofWorkerHandle,
         state_root_tx: mpsc::Sender<Result<StateRootComputeOutcome, StateRootTaskError>>,
         hashed_state_tx: mpsc::Sender<Arc<HashedPostState>>,
@@ -593,7 +593,7 @@ impl DefaultStateRootStrategy {
             chunk_size,
             pending_sparse_trie_prune_blocks,
         } = options;
-        let state_trie_overlays = state_trie_overlays.clone();
+        let overlay_manager = overlay_manager.clone();
         let trie_metrics = self.metrics.clone();
         let executor = executor.clone();
 
@@ -673,10 +673,10 @@ impl DefaultStateRootStrategy {
                 );
                 let (preserved, completer) =
                     PreservedSparseTrie::pending(result.state_root, preserved_anchor_hash);
-                state_trie_overlays.store_sparse_trie(preserved);
+                overlay_manager.store_sparse_trie(preserved);
                 Some(completer)
             } else {
-                state_trie_overlays.clear_sparse_trie();
+                overlay_manager.clear_sparse_trie();
                 None
             };
 
@@ -903,7 +903,7 @@ where
         let pending_sparse_trie_prune_blocks = ctx.take_sparse_trie_prune_blocks();
         let StateRootJobContext {
             executor,
-            state_trie_overlays,
+            overlay_manager,
             env,
             provider_builder,
             overlay_factory,
@@ -912,7 +912,7 @@ where
             state: _,
         } = ctx;
 
-        let preserved_sparse_trie = state_trie_overlays.take_sparse_trie();
+        let preserved_sparse_trie = overlay_manager.take_sparse_trie();
         let overlay_factory = if let Some(anchor_hash) = preserved_sparse_trie
             .as_ref()
             .filter(|trie| trie.state_root() == env.parent_state_root)
@@ -925,7 +925,7 @@ where
 
         let mut handle = self.spawn_state_root(
             executor,
-            state_trie_overlays,
+            overlay_manager,
             overlay_factory.clone(),
             StateRootTaskOptions {
                 parent_hash: env.parent_hash,
@@ -988,7 +988,7 @@ where
 
         let pending_sparse_trie_prune_blocks = ctx.take_sparse_trie_prune_blocks();
         let parent_state_root = ctx.parent_state_root();
-        let preserved_sparse_trie = ctx.state_trie_overlays.take_sparse_trie();
+        let preserved_sparse_trie = ctx.overlay_manager.take_sparse_trie();
         let overlay_factory = if let Some(anchor_hash) = preserved_sparse_trie
             .as_ref()
             .filter(|trie| trie.state_root() == parent_state_root)
@@ -1001,7 +1001,7 @@ where
         Ok(Some(
             self.spawn_state_root(
                 ctx.executor,
-                ctx.state_trie_overlays,
+                ctx.overlay_manager,
                 overlay_factory,
                 StateRootTaskOptions {
                     parent_hash: ctx.parent_hash(),
@@ -1390,7 +1390,7 @@ mod tests {
         test_utils::create_test_provider_factory_with_chain_spec,
         HashingWriter,
     };
-    use reth_storage_overlay::{ChangesetCache, OverlayBuilder, OverlayManager};
+    use reth_storage_overlay::OverlayManager;
     use reth_testing_utils::generators;
     use reth_trie::{
         test_utils::state_root, HashedPostState, HashedStorage, LazyTrieData, Nibbles,
@@ -1659,13 +1659,13 @@ mod tests {
         let provider_factory = BlockchainProvider::new(factory).unwrap();
         let env: ExecutionEnv<EthEvmConfig> = ExecutionEnv::test_default();
         let runtime = reth_tasks::Runtime::test();
-        let state_trie_overlays = OverlayManager::<EthPrimitives>::default();
+        let overlay_manager = OverlayManager::<EthPrimitives>::default();
         let mut state_root_handle = DefaultStateRootStrategy::default().spawn_state_root(
             &runtime,
-            &state_trie_overlays,
+            &overlay_manager,
             OverlayStateProviderFactory::new(
                 provider_factory,
-                OverlayBuilder::<EthPrimitives>::new(genesis_hash, ChangesetCache::new()),
+                overlay_manager.overlay_builder(genesis_hash),
             ),
             StateRootTaskOptions {
                 parent_hash: genesis_hash,
