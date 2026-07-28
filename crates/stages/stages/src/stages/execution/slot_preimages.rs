@@ -6,7 +6,7 @@ use reth_db_api::{
     cursor::{DbCursorRO, DbDupCursorRO},
     transaction::DbTx,
 };
-use reth_execution_types::StorageReverts;
+use reth_execution_types::{RevertToSlot, StorageReverts};
 use reth_libmdbx::{
     DatabaseFlags, Environment, EnvironmentFlags, Geometry, Mode, SyncMode, WriteFlags, RO,
 };
@@ -211,7 +211,15 @@ fn inject_preimage_entry(
 
     // Convert B256 plain slot to U256 StorageKey for the revert map.
     let plain_key = alloy_primitives::U256::from_be_bytes(plain_slot.0);
-    revert.slots.entry(plain_key).or_insert(value);
+    revert
+        .slots
+        .entry(plain_key)
+        .and_modify(|slot| {
+            if matches!(slot, RevertToSlot::Destroyed) {
+                *slot = RevertToSlot::Some(value);
+            }
+        })
+        .or_insert(RevertToSlot::Some(value));
     Ok(())
 }
 

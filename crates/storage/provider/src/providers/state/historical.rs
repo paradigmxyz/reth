@@ -886,7 +886,7 @@ mod tests {
         BlockNumberList,
     };
     use reth_execution_types::{
-        execution_state_from_init, BlockReverts, RevertAccount, StorageReverts,
+        execution_state_from_init, BlockReverts, RevertAccount, RevertToSlot, StorageReverts,
     };
     use reth_primitives_traits::{Account, StorageEntry};
     use reth_storage_api::{
@@ -923,7 +923,10 @@ mod tests {
                 storage.insert(
                     address,
                     StorageReverts {
-                        slots: storage_revert.into_iter().collect(),
+                        slots: storage_revert
+                            .into_iter()
+                            .map(|(slot, value)| (slot, RevertToSlot::Some(value)))
+                            .collect(),
                         ..Default::default()
                     },
                 );

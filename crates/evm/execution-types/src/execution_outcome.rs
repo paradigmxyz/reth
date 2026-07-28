@@ -1,6 +1,6 @@
 use crate::{
     hashed_post_state_from_state_source, state, BlockExecutionOutput, BlockExecutionResult,
-    BlockReverts, EvmState, IndexedBlockState, RevertAccount, StorageReverts,
+    BlockReverts, EvmState, IndexedBlockState, RevertAccount, RevertToSlot, StorageReverts,
 };
 use alloc::{collections::BTreeMap, vec, vec::Vec};
 use alloy_consensus::constants::KECCAK_EMPTY;
@@ -238,7 +238,9 @@ impl<T> ExecutionOutcome<T> {
                     .filter_map(|(address, (_, storage))| {
                         let slots = storage
                             .into_iter()
-                            .map(|entry| (U256::from_be_bytes(entry.key.0), entry.value))
+                            .map(|entry| {
+                                (U256::from_be_bytes(entry.key.0), RevertToSlot::Some(entry.value))
+                            })
                             .collect::<BTreeMap<_, _>>();
                         (!slots.is_empty())
                             .then_some((address, StorageReverts { slots, ..Default::default() }))

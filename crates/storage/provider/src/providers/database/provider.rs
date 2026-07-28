@@ -3841,7 +3841,8 @@ mod tests {
     use reth_ethereum_primitives::Receipt;
     use reth_execution_types::{
         execution_state_from_init, hashed_post_state_from_execution_state, AccountRevertInit,
-        BlockExecutionOutput, BlockExecutionResult, BlockReverts, EvmState, StorageReverts,
+        BlockExecutionOutput, BlockExecutionResult, BlockReverts, EvmState, RevertToSlot,
+        StorageReverts,
     };
     use reth_primitives_traits::SealedBlock;
     use reth_storage_api::MetadataWriter;
@@ -3863,7 +3864,7 @@ mod tests {
                     StorageReverts {
                         slots: storage
                             .into_iter()
-                            .map(|(slot, (original, _))| (slot, original))
+                            .map(|(slot, (original, _))| (slot, RevertToSlot::Some(original)))
                             .collect(),
                         ..Default::default()
                     },

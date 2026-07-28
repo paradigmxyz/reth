@@ -61,8 +61,11 @@ where
                     storage_revert: storage
                         .slots
                         .iter()
-                        .filter(|(_, value)| !storage.wiped || !value.is_zero())
-                        .map(|(key, value)| (*key, RevertToSlot::Some(*value)))
+                        .filter(|(_, value)| {
+                            !storage.wiped ||
+                                !matches!(**value, RevertToSlot::Some(value) if value.is_zero())
+                        })
+                        .map(|(key, value)| (*key, *value))
                         .collect(),
                 })
                 .collect(),
@@ -583,7 +586,9 @@ impl EvmStateChangeSink for PlainRevertsSink {
 mod tests {
     use super::*;
     use alloy_primitives::{map::AddressMap, Bytes, B256, U256};
-    use reth_execution_types::{execution_state_from_init, BlockReverts, EvmState, StorageReverts};
+    use reth_execution_types::{
+        execution_state_from_init, BlockReverts, EvmState, RevertToSlot, StorageReverts,
+    };
     use reth_primitives_traits::{Account, Bytecode};
 
     #[test]
@@ -598,7 +603,7 @@ mod tests {
                 StorageReverts {
                     wiped: true,
                     previous_wipe: true,
-                    slots: BTreeMap::from([(slot, value)]),
+                    slots: BTreeMap::from([(slot, RevertToSlot::Some(value))]),
                 },
             )]),
             ..Default::default()

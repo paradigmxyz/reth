@@ -340,13 +340,13 @@ mod tests {
         );
         let mut evm = Evm::<BaseEvmTypes>::new(
             SpecId::OSAKA,
-            BlockEnv::default(),
+            BlockEnv::<BaseEvmTypes>::default(),
             TxRegistry::new(),
             InMemoryDB::default(),
             NoPrecompiles::default(),
         );
         let address = Address::with_last_byte(4);
-        let message = Message {
+        let message = Message::<BaseEvmTypes> {
             kind: MessageKind::Call,
             gas_limit: 30_000,
             destination: address,

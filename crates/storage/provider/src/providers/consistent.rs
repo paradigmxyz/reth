@@ -1515,7 +1515,7 @@ mod tests {
     use reth_ethereum_primitives::Block;
     use reth_execution_types::{
         execution_state_from_init, BlockExecutionOutput, BlockExecutionResult, BlockReverts,
-        EvmState, ExecutionOutcome, RevertAccount, StorageReverts,
+        EvmState, ExecutionOutcome, RevertAccount, RevertToSlot, StorageReverts,
     };
     use reth_primitives_traits::{Account, RecoveredBlock, SealedBlock};
     use reth_storage_api::{BlockReader, BlockSource, ChangeSetReader, StateReader};
@@ -1583,7 +1583,10 @@ mod tests {
                 storage.insert(
                     address,
                     StorageReverts {
-                        slots: storage_revert.into_iter().collect(),
+                        slots: storage_revert
+                            .into_iter()
+                            .map(|(slot, value)| (slot, RevertToSlot::Some(value)))
+                            .collect(),
                         ..Default::default()
                     },
                 );

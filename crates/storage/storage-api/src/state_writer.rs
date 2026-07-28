@@ -1,6 +1,7 @@
 use alloc::vec::Vec;
 use alloy_consensus::transaction::Either;
 use alloy_primitives::{Address, BlockNumber, B256, U256};
+pub use reth_execution_types::RevertToSlot;
 use reth_execution_types::{BlockExecutionOutput, ExecutionOutcome};
 use reth_primitives_traits::{Account, Bytecode};
 use reth_storage_errors::provider::ProviderResult;
@@ -107,31 +108,6 @@ pub struct PlainStorageChangeset {
     pub wipe_storage: bool,
     /// Storage key value pairs.
     pub storage: Vec<(U256, U256)>,
-}
-
-/// Storage revert value.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum RevertToSlot {
-    /// Revert the slot to the previous value.
-    Some(U256),
-    /// Revert the slot to the value loaded from wiped storage.
-    Destroyed,
-}
-
-impl RevertToSlot {
-    /// Returns the previous value represented by this revert.
-    pub const fn to_previous_value(self) -> U256 {
-        match self {
-            Self::Some(value) => value,
-            Self::Destroyed => U256::ZERO,
-        }
-    }
-}
-
-impl Default for RevertToSlot {
-    fn default() -> Self {
-        Self::Some(U256::ZERO)
-    }
 }
 
 /// Plain storage revert.

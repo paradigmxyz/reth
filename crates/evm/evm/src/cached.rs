@@ -17,7 +17,7 @@ pub struct CachedReads {
     /// Created contracts.
     pub contracts: B256Map<Bytecode>,
     /// Block hash mapped to the block number.
-    pub block_hashes: HashMap<u64, Option<B256>>,
+    pub block_hashes: HashMap<u64, B256>,
 }
 
 // === impl CachedReads ===
@@ -157,7 +157,7 @@ where
         Ok(value)
     }
 
-    fn get_block_hash(&mut self, number: &Word) -> Result<Option<B256>, Self::Error> {
+    fn get_block_hash(&mut self, number: &Word) -> Result<B256, Self::Error> {
         let number = u256_to_u64_saturating(*number);
         if let Some(hash) = self.cached.borrow().block_hashes.get(&number) {
             return Ok(*hash)
@@ -205,7 +205,7 @@ mod tests {
         account: Option<AccountInfo>,
         code: Bytecode,
         storage: Word,
-        block_hash: Option<B256>,
+        block_hash: B256,
         reads: Rc<ReadCounts>,
     }
 
@@ -246,7 +246,7 @@ mod tests {
             Ok(self.storage)
         }
 
-        fn get_block_hash(&mut self, _number: &Word) -> Result<Option<B256>, Self::Error> {
+        fn get_block_hash(&mut self, _number: &Word) -> Result<B256, Self::Error> {
             self.reads.block_hashes.set(self.reads.block_hashes.get() + 1);
             Ok(self.block_hash)
         }
@@ -263,7 +263,7 @@ mod tests {
             let mut cache = CachedReads::default();
             cache.accounts.insert(address1, CachedAccount::new(Some(AccountInfo::default())));
             cache.contracts.insert(hash1, Bytecode::default());
-            cache.block_hashes.insert(1, Some(hash1));
+            cache.block_hashes.insert(1, hash1);
             cache
         };
 
@@ -271,7 +271,7 @@ mod tests {
             let mut cache = CachedReads::default();
             cache.accounts.insert(address2, CachedAccount::new(Some(AccountInfo::default())));
             cache.contracts.insert(hash2, Bytecode::default());
-            cache.block_hashes.insert(2, Some(hash2));
+            cache.block_hashes.insert(2, hash2);
             cache
         };
 
@@ -284,8 +284,8 @@ mod tests {
         assert!(primary.accounts.contains_key(&address2));
         assert!(primary.contracts.contains_key(&hash1));
         assert!(primary.contracts.contains_key(&hash2));
-        assert_eq!(primary.block_hashes.get(&1), Some(&Some(hash1)));
-        assert_eq!(primary.block_hashes.get(&2), Some(&Some(hash2)));
+        assert_eq!(primary.block_hashes.get(&1), Some(&hash1));
+        assert_eq!(primary.block_hashes.get(&2), Some(&hash2));
     }
 
     #[test]
@@ -306,7 +306,7 @@ mod tests {
             }),
             code: Bytecode::new_raw([0x00].as_slice().into()),
             storage: value,
-            block_hash: Some(block_hash),
+            block_hash,
             reads: reads.clone(),
         };
 
@@ -319,8 +319,8 @@ mod tests {
         assert_eq!(db.get_code_by_hash(&code_hash).unwrap().original_bytes().as_ref(), [0x00]);
         assert_eq!(db.get_storage(&address, &key).unwrap(), value);
         assert_eq!(db.get_storage(&address, &key).unwrap(), value);
-        assert_eq!(db.get_block_hash(&U256::from(1)).unwrap(), Some(block_hash));
-        assert_eq!(db.get_block_hash(&U256::from(1)).unwrap(), Some(block_hash));
+        assert_eq!(db.get_block_hash(&U256::from(1)).unwrap(), block_hash);
+        assert_eq!(db.get_block_hash(&U256::from(1)).unwrap(), block_hash);
 
         assert_eq!(reads.accounts.get(), 1);
         assert_eq!(reads.code.get(), 1);
@@ -330,6 +330,6 @@ mod tests {
         db.sync(&mut cached);
         assert!(cached.accounts.contains_key(&address));
         assert!(cached.contracts.contains_key(&code_hash));
-        assert_eq!(cached.block_hashes.get(&1), Some(&Some(block_hash)));
+        assert_eq!(cached.block_hashes.get(&1), Some(&block_hash));
     }
 }

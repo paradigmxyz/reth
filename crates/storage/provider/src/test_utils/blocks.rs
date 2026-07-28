@@ -11,7 +11,8 @@ use alloy_primitives::Signature;
 use reth_db_api::{database::Database, models::StoredBlockBodyIndices, tables};
 use reth_ethereum_primitives::{BlockBody, Receipt, Transaction, TransactionSigned, TxType};
 use reth_execution_types::{
-    execution_state_from_init, BlockReverts, ExecutionAccountInfo, RevertAccount, StorageReverts,
+    execution_state_from_init, BlockReverts, ExecutionAccountInfo, RevertAccount, RevertToSlot,
+    StorageReverts,
 };
 use reth_node_types::NodeTypes;
 use reth_primitives_traits::{Account, RecoveredBlock, SealedBlock, SealedHeader};
@@ -297,7 +298,7 @@ fn block2(
             StorageReverts {
                 wiped: false,
                 previous_wipe: false,
-                slots: BTreeMap::from_iter([(slot, U256::from(10))]),
+                slots: BTreeMap::from_iter([(slot, RevertToSlot::Some(U256::from(10)))]),
             },
         )]),
     }];
@@ -448,7 +449,7 @@ fn block4(
                 previous_wipe: false,
                 slots: slot_range
                     .clone()
-                    .map(|slot| (U256::from(slot), U256::from(slot)))
+                    .map(|slot| (U256::from(slot), RevertToSlot::Some(U256::from(slot))))
                     .collect(),
             },
         );
@@ -538,7 +539,7 @@ fn block5(
                     previous_wipe: false,
                     slots: slot_range
                         .clone()
-                        .map(|slot| (U256::from(slot), U256::from(slot * 2)))
+                        .map(|slot| (U256::from(slot), RevertToSlot::Some(U256::from(slot * 2))))
                         .collect(),
                 },
             );

@@ -1,5 +1,7 @@
 //! State provider database adapter used by EVM execution.
 
+#[cfg(feature = "std")]
+use alloy_eips::BlockHashOrNumber;
 use alloy_primitives::{Address, BlockNumber, B256, U256};
 use core::ops::{Deref, DerefMut};
 #[cfg(feature = "std")]
@@ -117,8 +119,11 @@ where
         Ok(self.0.storage(*address, B256::new(key.to_be_bytes()))?.unwrap_or_default())
     }
 
-    fn get_block_hash(&mut self, number: &Word) -> Result<Option<B256>, Self::Error> {
-        self.0.block_hash(u256_to_u64_saturating(*number))
+    fn get_block_hash(&mut self, number: &Word) -> Result<B256, Self::Error> {
+        let number = u256_to_u64_saturating(*number);
+        self.0
+            .block_hash(number)?
+            .ok_or(ProviderError::HeaderNotFound(BlockHashOrNumber::Number(number)))
     }
 }
 

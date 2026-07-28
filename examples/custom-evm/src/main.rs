@@ -104,7 +104,10 @@ fn custom_precompile() -> HandlerResult<()> {
     let mut evm = Evm::<CustomTypes>::new_with_execution_config(
         factory.execution_config(spec, factory.version(spec.into(), 1)),
         spec,
-        BlockEnv { ext: CustomBlockEnvExt { l1_block_number: 42 }, ..custom_block_env() },
+        BlockEnv::<CustomTypes> {
+            ext: CustomBlockEnvExt { l1_block_number: 42 },
+            ..custom_block_env()
+        },
         factory.tx_registry(spec),
         InMemoryDB::default(),
         factory.precompiles(spec),
@@ -234,7 +237,10 @@ fn custom_evm_with_database(database: InMemoryDB) -> Evm<'static, CustomTypes> {
     Evm::<CustomTypes>::new_with_execution_config(
         factory.execution_config(spec, version),
         spec,
-        BlockEnv { ext: CustomBlockEnvExt { l1_block_number: 42 }, ..BlockEnv::default() },
+        BlockEnv::<CustomTypes> {
+            ext: CustomBlockEnvExt { l1_block_number: 42 },
+            ..BlockEnv::<CustomTypes>::default()
+        },
         factory.tx_registry(spec),
         database,
         factory.precompiles(spec),
@@ -248,7 +254,7 @@ fn mainnet_evm() -> Evm<'static, CustomTypes> {
     Evm::<CustomTypes>::new_with_execution_config(
         factory.execution_config(spec, version),
         spec,
-        BlockEnv::default(),
+        BlockEnv::<CustomTypes>::default(),
         factory.tx_registry(spec),
         InMemoryDB::default(),
         NoPrecompiles::default(),

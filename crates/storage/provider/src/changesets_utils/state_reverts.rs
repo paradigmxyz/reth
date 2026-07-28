@@ -149,14 +149,14 @@ mod tests {
     fn test_storage_reverts_iter_interleaved() {
         // Create sample data for interleaved reverts and wiped entries.
         let reverts = vec![
-            (B256::from_slice(&[8; 32]), RevertToSlot::Some(U256::from(70))),
+            (B256::from_slice(&[8; 32]), RevertToSlot::Destroyed),
             (B256::from_slice(&[9; 32]), RevertToSlot::Some(U256::from(80))),
             // Some higher key than wiped
             (B256::from_slice(&[15; 32]), RevertToSlot::Some(U256::from(90))),
         ];
 
         let wiped = vec![
-            (B256::from_slice(&[8; 32]), U256::from(75)), // Same key as revert
+            (B256::from_slice(&[8; 32]), U256::from(75)), // Same key as destroyed revert
             (B256::from_slice(&[10; 32]), U256::from(85)), // Wiped with new key
         ];
 
@@ -170,7 +170,8 @@ mod tests {
         assert_eq!(
             results,
             vec![
-                (B256::from_slice(&[8; 32]), U256::from(70)), // Revert takes priority.
+                (B256::from_slice(&[8; 32]), U256::from(75)), /* Destroyed resolves from wiped
+                                                               * state. */
                 (B256::from_slice(&[9; 32]), U256::from(80)), // Only revert present.
                 (B256::from_slice(&[10; 32]), U256::from(85)), // Wiped entry.
                 (B256::from_slice(&[15; 32]), U256::from(90)), // Greater revert entry

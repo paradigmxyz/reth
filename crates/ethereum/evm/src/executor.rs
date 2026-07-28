@@ -903,7 +903,7 @@ mod tests {
         env::BlockEnv,
         evm::{AccountInfo, Database, Db},
         interpreter::Word,
-        SpecId,
+        BaseEvmTypes, SpecId,
     };
     use reth_chainspec::{Chain, ChainSpecBuilder, EthereumHardfork, ForkCondition};
     use reth_ethereum_primitives::TransactionSigned;
@@ -916,7 +916,8 @@ mod tests {
         block_number: u64,
         parent_hash: B256,
     ) -> EthBigBlockSegment<'static> {
-        let block = BlockEnv { number: U256::from(block_number), ..Default::default() };
+        let block =
+            BlockEnv::<BaseEvmTypes> { number: U256::from(block_number), ..Default::default() };
         EthBigBlockSegment {
             start_tx,
             evm_env: EthEvmEnv { block, ..EthEvmEnv::default() },
@@ -974,8 +975,8 @@ mod tests {
             Ok(Word::ZERO)
         }
 
-        fn get_block_hash(&mut self, _number: &Word) -> Result<Option<B256>, Self::Error> {
-            Ok(None)
+        fn get_block_hash(&mut self, _number: &Word) -> Result<B256, Self::Error> {
+            Ok(B256::ZERO)
         }
     }
 
@@ -1052,7 +1053,11 @@ mod tests {
         let factory = super::super::factory::EthBlockExecutorFactory::new(Arc::new(chain_spec));
         let env = EthEvmEnv::new(
             SpecId::FRONTIER,
-            BlockEnv { number: U256::from(1), gas_limit: U256::from(30_000), ..Default::default() },
+            BlockEnv::<BaseEvmTypes> {
+                number: U256::from(1),
+                gas_limit: U256::from(30_000),
+                ..Default::default()
+            },
             1,
         );
         let evm = factory.evm_with_env(Db::new(database), env);

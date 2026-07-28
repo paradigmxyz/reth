@@ -13,7 +13,7 @@ use reth_cli::chainspec::ChainSpecParser;
 use reth_cli_util::cancellation::CancellationToken;
 use reth_consensus::FullConsensus;
 use reth_evm::{database::StateProviderDatabase, execute::Executor, ConfigureEvm};
-use reth_execution_types::BlockReverts;
+use reth_execution_types::{BlockReverts, RevertToSlot};
 use reth_node_core::args::JitArgs;
 use reth_primitives_traits::{format_gas_throughput, Account, BlockBody, GotExpected};
 use reth_provider::{
@@ -413,16 +413,19 @@ where
         for (addr, revert) in &block_reverts.storage {
             // Verify storage slots — remove matched changeset entries as we go
             let mut cs_slots = cs_storage.get_mut(addr);
-            for (slot_key, prev) in &revert.slots {
+            for (slot_key, revert_slot) in &revert.slots {
                 let b256_key = B256::from(*slot_key);
                 let cs_value = cs_slots.as_mut().and_then(|s| s.remove(&b256_key));
-                match cs_value {
-                    Some(cs_value) => eyre::ensure!(
+                match (revert_slot, cs_value) {
+                    // A recreated account never loaded the pre-block value for this slot. The
+                    // storage writer resolves it from the wiped database state instead.
+                    (RevertToSlot::Destroyed, _) => {}
+                    (RevertToSlot::Some(prev), Some(cs_value)) => eyre::ensure!(
                         *prev == cs_value,
                         "Block {block_number}: {addr} slot {b256_key} mismatch: \
                          revert={prev} cs={cs_value}",
                     ),
-                    None => eyre::ensure!(
+                    (RevertToSlot::Some(_), None) => eyre::ensure!(
                         revert.wiped,
                         "Block {block_number}: {addr} slot {b256_key} in reverts but not in changeset",
                     ),

@@ -49,11 +49,13 @@ use evm2::{
 };
 #[cfg(test)]
 use evm2::{
-    env::BlockEnv,
+    env::BlockEnv as EvmBlockEnv,
     ethereum::{ethereum_tx_registry, RecoveredTxEnvelope},
     evm::{precompile::PrecompileProvider, Database, DynDatabase},
     BaseEvmTypes, ExecutionConfig, Version,
 };
+#[cfg(test)]
+type BlockEnv = EvmBlockEnv<BaseEvmTypes>;
 use reth_ethereum_forks::EthereumHardforks;
 #[cfg(test)]
 use reth_ethereum_primitives::eip7997::{FACTORY_ADDRESS, FACTORY_CODE};
@@ -430,7 +432,7 @@ where
             )?;
             cumulative_gas_used += outcome.tx_gas_used();
             blob_gas_used += tx_blob_gas_used;
-            let receipt = RethReceiptBuilder.build_receipt(ReceiptBuilderCtx {
+            let receipt = RethReceiptBuilder.build_receipt::<BaseEvmTypes>(ReceiptBuilderCtx {
                 tx_type,
                 result: outcome,
                 cumulative_gas_used,
@@ -1021,13 +1023,6 @@ fn commit_state_changes<T: EvmTypes>(
     on_hashed_state_update: &mut impl FnMut(HashedPostState),
     changes: &[(Address, Option<AccountInfo>, Option<AccountInfo>)],
 ) {
-    for (address, original, current) in changes {
-        evm.overlay_db_mut().bal_context.commit_account_change(
-            *address,
-            original.as_ref(),
-            current.as_ref(),
-        );
-    }
     let result = {
         let mut sink = RethStateSink::new(
             Some(evm.overlay_db_mut() as &mut dyn StateChangeSink<Error = Infallible>),
@@ -1278,8 +1273,8 @@ mod tests {
             Ok(self.storage.get(&(*address, *key)).copied().unwrap_or_default())
         }
 
-        fn get_block_hash(&mut self, _number: &Word) -> Result<Option<B256>, Self::Error> {
-            Ok(None)
+        fn get_block_hash(&mut self, _number: &Word) -> Result<B256, Self::Error> {
+            Ok(B256::ZERO)
         }
     }
 

@@ -114,7 +114,38 @@ pub struct StorageReverts {
     /// Whether earlier aggregate state had already marked this account storage as wiped.
     pub previous_wipe: bool,
     /// Original storage slots before the block changed them.
-    pub slots: alloc::collections::BTreeMap<U256, U256>,
+    pub slots: alloc::collections::BTreeMap<U256, RevertToSlot>,
+}
+
+/// Storage revert value.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub enum RevertToSlot {
+    /// Revert the slot to the previous value observed by the transaction.
+    Some(U256),
+    /// The slot belonged to storage that was destroyed during the block.
+    ///
+    /// The transaction-local original value is not reliable in this case because the account may
+    /// have been recreated at the same address and the slot may never have loaded its pre-block
+    /// value. Storage writers resolve this marker from the pre-wipe database state.
+    Destroyed,
+}
+
+impl Default for RevertToSlot {
+    fn default() -> Self {
+        Self::Some(U256::ZERO)
+    }
+}
+
+impl RevertToSlot {
+    /// Returns the previous value represented by this revert when no wiped database value is
+    /// available.
+    pub const fn to_previous_value(self) -> U256 {
+        match self {
+            Self::Some(value) => value,
+            Self::Destroyed => U256::ZERO,
+        }
+    }
 }
 
 /// Returns the hashed post-state represented by an execution state.
@@ -280,7 +311,7 @@ impl StateAndRevertsSink<'_> {
             revert.wiped = true;
             revert.previous_wipe = previous_wipe;
             for (key, value) in prior_slots {
-                revert.slots.entry(key).or_insert(value);
+                revert.slots.entry(key).or_insert(RevertToSlot::Some(value));
             }
         }
         self.accumulator.storage_wipe(address)
@@ -385,13 +416,13 @@ impl StateChangeSink for BlockRevertsSink {
     }
 
     fn storage(&mut self, change: StorageChange) -> Result<(), Self::Error> {
-        self.reverts
-            .storage
-            .entry(change.address)
-            .or_default()
-            .slots
-            .entry(change.key)
-            .or_insert(change.original);
+        let revert = self.reverts.storage.entry(change.address).or_default();
+        let previous = if revert.wiped {
+            RevertToSlot::Destroyed
+        } else {
+            RevertToSlot::Some(change.original)
+        };
+        revert.slots.entry(change.key).or_insert(previous);
         Ok(())
     }
 }
@@ -532,6 +563,28 @@ mod tests {
 
         assert_eq!(aggregate.storage_wipes().collect::<Vec<_>>(), [address]);
         assert!(reverts.storage.get(&address).is_some_and(|storage| storage.wiped));
+    }
+
+    #[test]
+    fn storage_written_after_wipe_is_marked_destroyed() {
+        let address = Address::repeat_byte(0x04);
+        let key = U256::from(1);
+        let mut source = BlockStateAccumulator::new();
+        source.storage_wipe(address).unwrap();
+        StateChangeSink::storage(
+            &mut source,
+            StorageChange { address, key, original: U256::ZERO, current: U256::from(1) },
+        )
+        .unwrap();
+
+        let mut aggregate = BlockStateAccumulator::new();
+        let reverts = extend_state_and_collect_reverts(&mut aggregate, &source);
+
+        assert_eq!(
+            reverts.storage[&address].slots[&key],
+            RevertToSlot::Destroyed,
+            "a post-wipe write must not use the recreated account's zero as the block revert"
+        );
     }
 
     #[test]

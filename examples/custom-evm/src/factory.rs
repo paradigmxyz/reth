@@ -141,5 +141,5 @@ pub const fn node_opcode_config() -> OpcodeConfig<BaseEvmTypes> {
 
 /// Returns a default block environment with the custom type family.
 pub fn custom_block_env() -> BlockEnv<CustomTypes> {
-    BlockEnv::default()
+    BlockEnv::<CustomTypes>::default()
 }

@@ -1035,7 +1035,7 @@ mod tests {
     use reth_ethereum_primitives::{Block, Receipt};
     use reth_execution_types::{
         execution_state_from_init, BlockExecutionOutput, BlockExecutionResult, BlockReverts, Chain,
-        ExecutionOutcome, RevertAccount, StorageReverts,
+        ExecutionOutcome, RevertAccount, RevertToSlot, StorageReverts,
     };
     use reth_primitives_traits::{
         Account, Block as _, RecoveredBlock, SealedBlock, SignerRecoverable, StorageEntry,
@@ -3284,7 +3284,10 @@ mod tests {
         let mut later_revert_storage = AddressMap::default();
         later_revert_storage.insert(
             address,
-            StorageReverts { slots: [(slot, value_a)].into_iter().collect(), ..Default::default() },
+            StorageReverts {
+                slots: [(slot, RevertToSlot::Some(value_a))].into_iter().collect(),
+                ..Default::default()
+            },
         );
         let later_execution = ExecutionOutcome::from_state_and_reverts(
             later_state,
