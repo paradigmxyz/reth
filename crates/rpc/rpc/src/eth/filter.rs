@@ -4,7 +4,7 @@ use alloy_consensus::{transaction::TxHashRef, BlockHeader};
 use alloy_eips::BlockNumberOrTag;
 use alloy_primitives::{Sealable, TxHash};
 use alloy_rpc_types_eth::{
-    BlockNumHash, Filter, FilterBlockOption, FilterChanges, FilterId, PendingTransactionFilterKind,
+    BlockNumHash, Filter, FilterBlockOption, FilterId, PendingTransactionFilterKind,
 };
 use async_trait::async_trait;
 use futures::{
@@ -23,6 +23,7 @@ use reth_rpc_eth_api::{
 };
 use reth_rpc_eth_types::{
     logs_utils, EthApiError, EthFilterConfig, EthStateCache, EthSubscriptionIdProvider,
+    FilterChanges,
 };
 use reth_rpc_server_types::{result::rpc_error_with_code, ToRpcResult};
 use reth_storage_api::{

@@ -17,6 +17,7 @@ pub mod cache;
 pub mod capabilities;
 pub mod error;
 pub mod fee_history;
+pub mod filter;
 pub mod gas_oracle;
 pub mod id_provider;
 pub mod logs_utils;
@@ -37,6 +38,7 @@ pub use cache::{
 pub use capabilities::{EthCapabilities, EthCapabilitiesHead, EthCapabilitiesResource};
 pub use error::{EthApiError, EthResult, RevertError, RpcInvalidTransactionError, SignError};
 pub use fee_history::{FeeHistoryCache, FeeHistoryCacheConfig, FeeHistoryEntry};
+pub use filter::FilterChanges;
 pub use gas_oracle::{
     GasCap, GasPriceOracle, GasPriceOracleConfig, GasPriceOracleResult, RPC_DEFAULT_GAS_CAP,
 };

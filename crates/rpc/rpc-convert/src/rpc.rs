@@ -26,7 +26,8 @@ where
 {
     type Header = T::HeaderResponse;
     type Receipt = T::ReceiptResponse;
-    type Log = T::LogResponse;
+    // Default network implementations to Ethereum logs until Alloy exposes a log response type.
+    type Log = alloy_rpc_types_eth::Log;
     type TransactionResponse = T::TransactionResponse;
     type TransactionRequest = T::TransactionRequest;
 }
