@@ -697,16 +697,13 @@ impl HashedPostStateSorted {
     /// Account keys are masked at the top level, while storage entries are masked at the slot
     /// level. For duplicate keys in the batch, later items take precedence over earlier ones. An
     /// overlapping entry is retained if any mask value is equal to the merged batch value. The
-    /// order of the mask does not matter. An empty mask uses the ordinary batch merge path.
+    /// order of the mask does not matter.
     ///
     /// # Panics
     ///
-    /// Panics if the mask is non-empty and any batch or mask entry wipes an entire storage.
-    pub fn disjointed_merge_batch<'a>(mut batch: Vec<&'a Self>, mask: Vec<&'a Self>) -> Self {
-        if mask.is_empty() {
-            batch.reverse();
-            return Self::merge_slice(&batch)
-        }
+    /// Panics if the mask is empty or any batch or mask entry wipes an entire storage.
+    pub fn disjointed_merge_batch<'a>(batch: &[&'a Self], mask: &[&'a Self]) -> Self {
+        assert!(!mask.is_empty(), "disjointed merge requires a non-empty mask");
 
         let account_count = batch.iter().map(|item| item.accounts.len()).sum();
         let mut accounts = Vec::with_capacity(account_count);
@@ -1674,8 +1671,8 @@ mod tests {
         );
 
         let result = HashedPostStateSorted::disjointed_merge_batch(
-            vec![&older, &newer],
-            vec![&remove_b, &remove_a],
+            &[&older, &newer],
+            &[&remove_b, &remove_a],
         );
 
         assert_eq!(result.accounts, vec![(kept_account, Some(account(2)))]);
@@ -1690,25 +1687,10 @@ mod tests {
     }
 
     #[test]
-    fn test_hashed_post_state_sorted_disjointed_merge_batch_empty_mask_uses_regular_merge() {
-        let address = B256::with_last_byte(1);
-        let storage = B256::with_last_byte(2);
-        let older = HashedPostStateSorted::new(
-            vec![(address, Some(Account { nonce: 1, ..Default::default() }))],
-            B256Map::default(),
-        );
-        let newer = HashedPostStateSorted::new(
-            vec![(address, Some(Account { nonce: 2, ..Default::default() }))],
-            B256Map::from_iter([(
-                storage,
-                HashedStorageSorted { wiped: true, ..Default::default() },
-            )]),
-        );
-        let expected = HashedPostStateSorted::merge_batch(vec![newer.clone(), older.clone()]);
-
-        let result = HashedPostStateSorted::disjointed_merge_batch(vec![&older, &newer], vec![]);
-
-        assert_eq!(result, expected);
+    #[should_panic(expected = "disjointed merge requires a non-empty mask")]
+    fn test_hashed_post_state_sorted_disjointed_merge_batch_requires_non_empty_mask() {
+        let batch = HashedPostStateSorted::default();
+        let _ = HashedPostStateSorted::disjointed_merge_batch(&[&batch], &[]);
     }
 
     #[test]
@@ -1732,8 +1714,7 @@ mod tests {
         let remove =
             HashedPostStateSorted::new(vec![(overlapping_account, None)], B256Map::default());
 
-        let result =
-            HashedPostStateSorted::disjointed_merge_batch(vec![&older, &newer], vec![&remove]);
+        let result = HashedPostStateSorted::disjointed_merge_batch(&[&older, &newer], &[&remove]);
 
         assert!(result.accounts.is_empty());
     }
@@ -1791,12 +1772,12 @@ mod tests {
         let equal_mask = batch.clone();
 
         let result = HashedPostStateSorted::disjointed_merge_batch(
-            vec![&batch],
-            vec![&different_mask, &equal_mask],
+            &[&batch],
+            &[&different_mask, &equal_mask],
         );
         let reversed = HashedPostStateSorted::disjointed_merge_batch(
-            vec![&batch],
-            vec![&equal_mask, &different_mask],
+            &[&batch],
+            &[&equal_mask, &different_mask],
         );
 
         assert_eq!(result, batch);
@@ -1823,7 +1804,7 @@ mod tests {
             )]),
         );
 
-        let result = HashedPostStateSorted::disjointed_merge_batch(vec![&batch], vec![&mask]);
+        let result = HashedPostStateSorted::disjointed_merge_batch(&[&batch], &[&mask]);
 
         assert_eq!(
             result.storages.get(&storage),
