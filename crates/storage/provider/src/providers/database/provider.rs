@@ -885,16 +885,15 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
                             .all(|storage| !storage.wiped)
                     });
                 let merged_hashed_state = if can_filter_hashed_state {
-                    Arc::new(HashedPostStateSorted::disjointed_merge_batch(
-                        state_trie_blocks
-                            .iter()
-                            .map(|block| block.trie_data.get().sorted.hashed_state.as_ref())
-                            .collect(),
-                        state_trie_masking_blocks
-                            .iter()
-                            .map(|block| block.trie_data.get().sorted.hashed_state.as_ref())
-                            .collect(),
-                    ))
+                    let batch = state_trie_blocks
+                        .iter()
+                        .map(|block| block.trie_data.get().sorted.hashed_state.as_ref())
+                        .collect::<Vec<_>>();
+                    let mask = state_trie_masking_blocks
+                        .iter()
+                        .map(|block| block.trie_data.get().sorted.hashed_state.as_ref())
+                        .collect::<Vec<_>>();
+                    Arc::new(HashedPostStateSorted::disjointed_merge_batch(&batch, &mask))
                 } else {
                     HashedPostStateSorted::merge_batch(
                         state_trie_blocks
@@ -921,16 +920,15 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
                             .all(|storage_trie| !storage_trie.is_deleted)
                     });
                 let merged_trie = if can_filter_trie_updates {
-                    Arc::new(TrieUpdatesSorted::disjointed_merge_batch(
-                        state_trie_blocks
-                            .iter()
-                            .map(|block| block.trie_data.get().sorted.trie_updates.as_ref())
-                            .collect(),
-                        state_trie_masking_blocks
-                            .iter()
-                            .map(|block| block.trie_data.get().sorted.trie_updates.as_ref())
-                            .collect(),
-                    ))
+                    let batch = state_trie_blocks
+                        .iter()
+                        .map(|block| block.trie_data.get().sorted.trie_updates.as_ref())
+                        .collect::<Vec<_>>();
+                    let mask = state_trie_masking_blocks
+                        .iter()
+                        .map(|block| block.trie_data.get().sorted.trie_updates.as_ref())
+                        .collect::<Vec<_>>();
+                    Arc::new(TrieUpdatesSorted::disjointed_merge_batch(&batch, &mask))
                 } else {
                     TrieUpdatesSorted::merge_batch(
                         state_trie_blocks
