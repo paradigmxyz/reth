@@ -18,5 +18,8 @@ pub type IterPairResult<T> = Option<Result<KeyValue<T>, DatabaseError>>;
 /// A key only result for table `T`.
 pub type KeyOnlyResult<T> = Result<Option<<T as Table>::Key>, DatabaseError>;
 
+/// A subkey only result for `DupSort` table `T`.
+pub type SubKeyOnlyResult<T> = Result<Option<<T as DupSort>::SubKey>, DatabaseError>;
+
 /// A value only result for table `T`.
 pub type ValueOnlyResult<T> = Result<Option<<T as Table>::Value>, DatabaseError>;

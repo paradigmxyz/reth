@@ -4,8 +4,8 @@ use std::{
 };
 
 use crate::{
-    common::{IterPairResult, KeyOnlyResult, PairResult, ValueOnlyResult},
-    table::{DupSort, Table, TableRow},
+    common::{IterPairResult, KeyOnlyResult, PairResult, SubKeyOnlyResult, ValueOnlyResult},
+    table::{DupSort, DupSortSubKey, Table, TableRow},
     DatabaseError,
 };
 
@@ -86,6 +86,14 @@ pub trait DbDupCursorRO<T: DupSort> {
     /// Positions the cursor at the next KV pair of the table, returning it.
     fn next_dup(&mut self) -> PairResult<T>;
 
+    /// Positions the cursor at the next duplicate value, returning only its decoded subkey.
+    ///
+    /// The remaining value payload is not decoded and can be retrieved later using
+    /// [`DbCursorRO::current`].
+    fn next_dup_key(&mut self) -> SubKeyOnlyResult<T>
+    where
+        T::SubKey: DupSortSubKey;
+
     /// Positions the cursor at the last duplicate value of the current key.
     fn last_dup(&mut self) -> ValueOnlyResult<T>;
 
@@ -102,6 +110,20 @@ pub trait DbDupCursorRO<T: DupSort> {
     /// The position of the cursor might not correspond to the key/subkey pair if the entry does not
     /// exist.
     fn seek_by_key_subkey(&mut self, key: T::Key, subkey: T::SubKey) -> ValueOnlyResult<T>;
+
+    /// Positions the cursor at the entry greater than or equal to the provided key/subkey pair,
+    /// returning only the decoded subkey.
+    ///
+    /// The remaining value payload is not decoded and can be retrieved later using
+    /// [`DbCursorRO::current`].
+    ///
+    /// # Note
+    ///
+    /// The position of the cursor might not correspond to the key/subkey pair if the entry does not
+    /// exist.
+    fn seek_by_key_subkey_key(&mut self, key: T::Key, subkey: T::SubKey) -> SubKeyOnlyResult<T>
+    where
+        T::SubKey: DupSortSubKey;
 
     /// Get an iterator that walks through the dup table.
     ///

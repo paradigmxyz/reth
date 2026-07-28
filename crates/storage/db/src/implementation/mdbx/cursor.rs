@@ -6,12 +6,12 @@ use crate::{
     DatabaseError,
 };
 use reth_db_api::{
-    common::{KeyOnlyResult, PairResult, ValueOnlyResult},
+    common::{KeyOnlyResult, PairResult, SubKeyOnlyResult, ValueOnlyResult},
     cursor::{
         DbCursorRO, DbCursorRW, DbDupCursorRO, DbDupCursorRW, DupWalker, RangeWalker,
         ReverseWalker, Walker,
     },
-    table::{Compress, Decode, Decompress, DupSort, Encode, IntoVec, Table},
+    table::{Compress, Decode, Decompress, DupSort, DupSortSubKey, Encode, IntoVec, Table},
 };
 use reth_libmdbx::{Error as MDBXError, TransactionKind, WriteFlags, RO, RW};
 use reth_storage_errors::db::{DatabaseErrorInfo, DatabaseWriteError, DatabaseWriteOperation};
@@ -88,6 +88,19 @@ where
             Cow::Borrowed(key) => Decode::decode(key),
             Cow::Owned(key) => Decode::decode_owned(key),
         })
+        .transpose()
+}
+
+/// Decodes a `DupSort` subkey from the prefix of a database value.
+pub fn decode_subkey<T>(
+    res: Result<Option<Cow<'_, [u8]>>, impl Into<DatabaseErrorInfo>>,
+) -> SubKeyOnlyResult<T>
+where
+    T: DupSort,
+    T::SubKey: DupSortSubKey,
+{
+    res.map_err(|e| DatabaseError::Read(e.into()))?
+        .map(|value| T::SubKey::decode_prefix(value.as_ref()))
         .transpose()
 }
 
@@ -197,6 +210,15 @@ impl<K: TransactionKind, T: DupSort> DbDupCursorRO<T> for Cursor<K, T> {
         decode::<T>(self.inner.next_dup())
     }
 
+    fn next_dup_key(&mut self) -> SubKeyOnlyResult<T>
+    where
+        T::SubKey: DupSortSubKey,
+    {
+        decode_subkey::<T>(
+            self.inner.next_dup::<(), Cow<'_, [u8]>>().map(|entry| entry.map(|((), value)| value)),
+        )
+    }
+
     /// Returns the last `value` of the current duplicate `key`.
     fn last_dup(&mut self) -> ValueOnlyResult<T> {
         self.inner
@@ -230,6 +252,19 @@ impl<K: TransactionKind, T: DupSort> DbDupCursorRO<T> for Cursor<K, T> {
             .map_err(|e| DatabaseError::Read(e.into()))?
             .map(decode_one::<T>)
             .transpose()
+    }
+
+    fn seek_by_key_subkey_key(
+        &mut self,
+        key: <T as Table>::Key,
+        subkey: <T as DupSort>::SubKey,
+    ) -> SubKeyOnlyResult<T>
+    where
+        T::SubKey: DupSortSubKey,
+    {
+        decode_subkey::<T>(
+            self.inner.get_both_range(key.encode().as_ref(), subkey.encode().as_ref()),
+        )
     }
 
     /// Depending on its arguments, returns an iterator starting at:

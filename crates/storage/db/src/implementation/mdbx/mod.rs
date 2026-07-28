@@ -680,7 +680,7 @@ mod tests {
     use crate::{
         tables::{
             AccountsHistory, CanonicalHeaders, Headers, PlainAccountState, PlainStorageState,
-            RawKey, RawTable, RawValue, TransactionHashNumbers,
+            RawDupSort, RawKey, RawTable, RawValue, TransactionHashNumbers,
         },
         test_utils::*,
         AccountChangeSets,
@@ -1205,6 +1205,82 @@ mod tests {
         assert_eq!(cursor.current().unwrap(), Some((key, entries[1])));
 
         assert!(cursor.next_key().unwrap().is_none());
+    }
+
+    #[test]
+    fn db_dup_cursor_subkey_only_navigation() {
+        let (_tempdir, db) = create_test_db(DatabaseEnvKind::RW);
+        let tx = db.tx_mut().expect(ERROR_INIT_TX);
+        let key = Address::with_last_byte(1);
+        let entries = [1, 3, 5]
+            .map(|byte| StorageEntry { key: B256::with_last_byte(byte), value: U256::from(byte) });
+        let mut cursor = tx.cursor_dup_write::<PlainStorageState>().unwrap();
+
+        for entry in &entries {
+            cursor.upsert(key, entry).expect(ERROR_UPSERT);
+        }
+
+        assert_eq!(
+            cursor.seek_by_key_subkey_key(key, B256::with_last_byte(2)).unwrap(),
+            Some(entries[1].key)
+        );
+        assert_eq!(cursor.current().unwrap(), Some((key, entries[1])));
+
+        assert_eq!(cursor.next_dup_key().unwrap(), Some(entries[2].key));
+        assert_eq!(cursor.current().unwrap(), Some((key, entries[2])));
+        assert!(cursor.next_dup_key().unwrap().is_none());
+
+        assert!(cursor
+            .seek_by_key_subkey_key(Address::with_last_byte(2), B256::ZERO)
+            .unwrap()
+            .is_none());
+    }
+
+    #[test]
+    fn db_dup_cursor_address_subkey_only_navigation() {
+        let (_tempdir, db) = create_test_db(DatabaseEnvKind::RW);
+        let tx = db.tx_mut().expect(ERROR_INIT_TX);
+        let block = 1;
+        let entries = [1, 3, 5]
+            .map(|byte| AccountBeforeTx { address: Address::with_last_byte(byte), info: None });
+        let mut cursor = tx.cursor_dup_write::<AccountChangeSets>().unwrap();
+
+        for entry in &entries {
+            cursor.upsert(block, entry).expect(ERROR_UPSERT);
+        }
+
+        assert_eq!(
+            cursor.seek_by_key_subkey_key(block, Address::with_last_byte(2)).unwrap(),
+            Some(entries[1].address)
+        );
+        assert_eq!(cursor.current().unwrap(), Some((block, entries[1].clone())));
+        assert_eq!(cursor.next_dup_key().unwrap(), Some(entries[2].address));
+        assert_eq!(cursor.current().unwrap(), Some((block, entries[2].clone())));
+    }
+
+    #[test]
+    fn db_dup_cursor_subkey_only_navigation_defers_value_decoding() {
+        let (_tempdir, db) = create_test_db(DatabaseEnvKind::RW);
+        let tx = db.tx_mut().expect(ERROR_INIT_TX);
+        let key = Address::with_last_byte(1);
+        let subkeys = [B256::with_last_byte(1), B256::with_last_byte(3)];
+        let mut cursor = tx.cursor_dup_write::<RawDupSort<PlainStorageState>>().unwrap();
+        for subkey in subkeys {
+            let mut malformed_value = subkey.to_vec();
+            // `StorageEntry` values contain at most 32 payload bytes. This oversized payload would
+            // panic if either key-only operation attempted to decode the full value.
+            malformed_value.extend_from_slice(&[0xff; 100]);
+            cursor
+                .upsert(RawKey::new(key), &RawValue::from_vec(malformed_value))
+                .expect(ERROR_UPSERT);
+        }
+        drop(cursor);
+        tx.commit().expect(ERROR_COMMIT);
+
+        let tx = db.tx().expect(ERROR_INIT_TX);
+        let mut cursor = tx.cursor_dup_read::<PlainStorageState>().unwrap();
+        assert_eq!(cursor.seek_by_key_subkey_key(key, subkeys[0]).unwrap(), Some(subkeys[0]));
+        assert_eq!(cursor.next_dup_key().unwrap(), Some(subkeys[1]));
     }
 
     #[test]

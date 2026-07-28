@@ -63,6 +63,39 @@ pub trait Key: Encode + Decode + Ord + Clone + Serialize + for<'a> Deserialize<'
 
 impl<T> Key for T where T: Encode + Decode + Ord + Clone + Serialize + for<'a> Deserialize<'a> {}
 
+/// A database key that can be decoded from the prefix of a `DupSort` value.
+///
+/// `DupSort` values encode their subkey as a prefix followed by the remaining value payload. This
+/// trait decodes only that prefix without decoding the payload.
+pub trait DupSortSubKey: Key {
+    /// Decodes the subkey prefix from an encoded `DupSort` value.
+    fn decode_prefix(value: &[u8]) -> Result<Self, DatabaseError>;
+}
+
+/// An encoded key representation with a statically known byte length.
+pub trait FixedLengthEncoding {
+    /// The encoded length in bytes.
+    ///
+    /// This must equal the length returned by [`AsRef::as_ref`] for every value of the encoded
+    /// type.
+    const LENGTH: usize;
+}
+
+impl<const N: usize> FixedLengthEncoding for [u8; N] {
+    const LENGTH: usize = N;
+}
+
+impl<T> DupSortSubKey for T
+where
+    T: Key,
+    T::Encoded: FixedLengthEncoding,
+{
+    fn decode_prefix(value: &[u8]) -> Result<Self, DatabaseError> {
+        let length = <T::Encoded as FixedLengthEncoding>::LENGTH;
+        Self::decode(value.get(..length).ok_or(DatabaseError::Decode)?)
+    }
+}
+
 /// Generic trait that enforces the database value to implement [`Compress`] and [`Decompress`].
 pub trait Value: Compress + Decompress + Serialize {}
 

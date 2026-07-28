@@ -1,5 +1,7 @@
 use crate::{
-    table::{Compress, Decode, Decompress, DupSort, Encode, IntoVec, Key, Table, Value},
+    table::{
+        Compress, Decode, Decompress, DupSort, DupSortSubKey, Encode, IntoVec, Key, Table, Value,
+    },
     DatabaseError,
 };
 use reth_codecs::DecompressError;
@@ -107,6 +109,12 @@ impl<K: Key> Decode for RawKey<K> {
 
     fn decode_owned(value: Vec<u8>) -> Result<Self, DatabaseError> {
         Ok(Self { key: value, _phantom: std::marker::PhantomData })
+    }
+}
+
+impl<K: DupSortSubKey> DupSortSubKey for RawKey<K> {
+    fn decode_prefix(value: &[u8]) -> Result<Self, DatabaseError> {
+        Ok(Self::new(K::decode_prefix(value)?))
     }
 }
 

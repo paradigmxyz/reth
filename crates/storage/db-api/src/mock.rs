@@ -4,14 +4,14 @@
 //! are no-ops that return default values without persisting data.
 
 use crate::{
-    common::{IterPairResult, KeyOnlyResult, PairResult, ValueOnlyResult},
+    common::{IterPairResult, KeyOnlyResult, PairResult, SubKeyOnlyResult, ValueOnlyResult},
     cursor::{
         DbCursorRO, DbCursorRW, DbDupCursorRO, DbDupCursorRW, DupWalker, RangeWalker,
         ReverseWalker, Walker,
     },
     database::Database,
     database_metrics::DatabaseMetrics,
-    table::{DupSort, Encode, Table, TableImporter},
+    table::{DupSort, DupSortSubKey, Encode, Table, TableImporter},
     transaction::{DbTx, DbTxMut},
     DatabaseError,
 };
@@ -326,6 +326,15 @@ impl<T: DupSort> DbDupCursorRO<T> for CursorMock {
         Ok(None)
     }
 
+    /// Moves to the next duplicate entry, returning only the subkey.
+    /// **Mock behavior**: Always returns `None`.
+    fn next_dup_key(&mut self) -> SubKeyOnlyResult<T>
+    where
+        T::SubKey: DupSortSubKey,
+    {
+        Ok(None)
+    }
+
     /// Moves to the previous duplicate entry.
     /// **Mock behavior**: Always returns `None`.
     fn prev_dup(&mut self) -> PairResult<T> {
@@ -357,6 +366,19 @@ impl<T: DupSort> DbDupCursorRO<T> for CursorMock {
         _key: <T as Table>::Key,
         _subkey: <T as DupSort>::SubKey,
     ) -> ValueOnlyResult<T> {
+        Ok(None)
+    }
+
+    /// Seeks to a specific key-subkey combination, returning only the subkey.
+    /// **Mock behavior**: Always returns `None`.
+    fn seek_by_key_subkey_key(
+        &mut self,
+        _key: <T as Table>::Key,
+        _subkey: <T as DupSort>::SubKey,
+    ) -> SubKeyOnlyResult<T>
+    where
+        T::SubKey: DupSortSubKey,
+    {
         Ok(None)
     }
 

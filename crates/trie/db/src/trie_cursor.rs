@@ -1,7 +1,7 @@
 use alloy_primitives::B256;
 use reth_db_api::{
     cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO, DbDupCursorRW},
-    table::{DupSort, Key, Table, Value},
+    table::{DupSort, DupSortSubKey, Key, Table, Value},
     tables::{self, PackedAccountsTrie, PackedStoragesTrie},
     transaction::DbTx,
     DatabaseError,
@@ -25,7 +25,7 @@ pub trait TrieKeyAdapter: Clone + Send + Sync + 'static {
 
     /// The subkey type for storage trie `DupSort` lookups
     /// (e.g., `StoredNibblesSubKey` or `PackedStoredNibblesSubKey`).
-    type StorageSubKey: Key + From<Nibbles> + Clone + PartialEq;
+    type StorageSubKey: Key + DupSortSubKey + From<Nibbles> + Clone + PartialEq;
 
     /// The storage trie entry type that pairs a subkey with a `BranchNodeCompact`.
     type StorageValue: Value + StorageTrieEntryLike<SubKey = Self::StorageSubKey>;
@@ -204,12 +204,58 @@ where
 
 /// A cursor over the account trie.
 #[derive(Debug)]
-pub struct DatabaseAccountTrieCursor<C, A: TrieKeyAdapter>(C, PhantomData<A>);
+pub struct DatabaseAccountTrieCursor<C, A: TrieKeyAdapter> {
+    cursor: C,
+    current_key: Option<Nibbles>,
+    _adapter: PhantomData<A>,
+}
 
 impl<C, A: TrieKeyAdapter> DatabaseAccountTrieCursor<C, A> {
     /// Create a new account trie cursor.
     pub const fn new(cursor: C) -> Self {
-        Self(cursor, PhantomData)
+        Self { cursor, current_key: None, _adapter: PhantomData }
+    }
+}
+
+impl<C, A> DatabaseAccountTrieCursor<C, A>
+where
+    A: TrieTableAdapter,
+    C: DbCursorRO<A::AccountTrieTable>,
+{
+    /// Advances from the current key to the first key greater than or equal to `target`.
+    fn advance_to(&mut self, target: Nibbles) -> Result<Option<Nibbles>, DatabaseError> {
+        let Some(mut current_key) = self.current_key else { return Ok(None) };
+
+        while current_key < target {
+            let next_key = match self.cursor.next_key() {
+                Ok(next_key) => next_key,
+                Err(error) => {
+                    self.current_key = None;
+                    return Err(error)
+                }
+            };
+            let Some(next_key) = next_key else {
+                self.current_key = None;
+                return Ok(None)
+            };
+            current_key = A::account_key_to_nibbles(&next_key);
+            self.current_key = Some(current_key);
+        }
+
+        Ok(Some(current_key))
+    }
+
+    /// Returns and tracks the entry at the underlying cursor's current position.
+    fn current_entry(&mut self) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
+        let entry = match self.cursor.current() {
+            Ok(entry) => entry.map(|(key, value)| (A::account_key_to_nibbles(&key), value)),
+            Err(error) => {
+                self.current_key = None;
+                return Err(error)
+            }
+        };
+        self.current_key = entry.as_ref().map(|(key, _)| *key);
+        Ok(entry)
     }
 }
 
@@ -222,32 +268,50 @@ where
         &mut self,
         key: Nibbles,
     ) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
-        Ok(self
-            .0
+        if self.current_key.is_some_and(|current_key| key.starts_with(&current_key)) {
+            return if self.advance_to(key)? == Some(key) { self.current_entry() } else { Ok(None) }
+        }
+
+        self.current_key = None;
+        let entry = self
+            .cursor
             .seek_exact(A::AccountKey::from(key))?
-            .map(|value| (A::account_key_to_nibbles(&value.0), value.1)))
+            .map(|(key, value)| (A::account_key_to_nibbles(&key), value));
+        self.current_key = entry.as_ref().map(|(key, _)| *key);
+        Ok(entry)
     }
 
     fn seek(
         &mut self,
         key: Nibbles,
     ) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
-        Ok(self
-            .0
+        if self.current_key.is_some_and(|current_key| key.starts_with(&current_key)) {
+            return if self.advance_to(key)?.is_some() { self.current_entry() } else { Ok(None) }
+        }
+
+        self.current_key = None;
+        let entry = self
+            .cursor
             .seek(A::AccountKey::from(key))?
-            .map(|value| (A::account_key_to_nibbles(&value.0), value.1)))
+            .map(|(key, value)| (A::account_key_to_nibbles(&key), value));
+        self.current_key = entry.as_ref().map(|(key, _)| *key);
+        Ok(entry)
     }
 
     fn next(&mut self) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
-        Ok(self.0.next()?.map(|value| (A::account_key_to_nibbles(&value.0), value.1)))
+        self.current_key = None;
+        let entry =
+            self.cursor.next()?.map(|(key, value)| (A::account_key_to_nibbles(&key), value));
+        self.current_key = entry.as_ref().map(|(key, _)| *key);
+        Ok(entry)
     }
 
     fn current(&mut self) -> Result<Option<Nibbles>, DatabaseError> {
-        Ok(self.0.current()?.map(|(k, _)| A::account_key_to_nibbles(&k)))
+        Ok(self.current_entry()?.map(|(key, _)| key))
     }
 
     fn reset(&mut self) {
-        // No-op for database cursors
+        self.current_key = None;
     }
 }
 
@@ -255,16 +319,69 @@ where
 #[derive(Debug)]
 pub struct DatabaseStorageTrieCursor<C, A: TrieKeyAdapter> {
     /// The underlying cursor.
-    pub cursor: C,
+    cursor: C,
     /// Hashed address used for cursor positioning.
     hashed_address: B256,
+    /// The subkey at the underlying cursor's current position.
+    current_key: Option<Nibbles>,
     _adapter: PhantomData<A>,
 }
 
 impl<C, A: TrieKeyAdapter> DatabaseStorageTrieCursor<C, A> {
     /// Create a new storage trie cursor.
     pub const fn new(cursor: C, hashed_address: B256) -> Self {
-        Self { cursor, hashed_address, _adapter: PhantomData }
+        Self { cursor, hashed_address, current_key: None, _adapter: PhantomData }
+    }
+
+    /// Consumes the trie cursor and returns the underlying database cursor.
+    pub fn into_inner(self) -> C {
+        self.cursor
+    }
+}
+
+impl<C, A> DatabaseStorageTrieCursor<C, A>
+where
+    A: TrieTableAdapter,
+    C: DbCursorRO<A::StorageTrieTable> + DbDupCursorRO<A::StorageTrieTable>,
+{
+    /// Advances from the current subkey to the first subkey greater than or equal to `target`.
+    fn advance_to(&mut self, target: Nibbles) -> Result<Option<Nibbles>, DatabaseError> {
+        let Some(mut current_key) = self.current_key else { return Ok(None) };
+
+        while current_key < target {
+            let next_key = match self.cursor.next_dup_key() {
+                Ok(next_key) => next_key,
+                Err(error) => {
+                    self.current_key = None;
+                    return Err(error)
+                }
+            };
+            let Some(next_key) = next_key else {
+                self.current_key = None;
+                return Ok(None)
+            };
+            current_key = A::subkey_to_nibbles(&next_key);
+            self.current_key = Some(current_key);
+        }
+
+        Ok(Some(current_key))
+    }
+
+    /// Returns and tracks the entry at the underlying cursor's current position.
+    fn current_entry(&mut self) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
+        let entry = match self.cursor.current() {
+            Ok(Some((key, value))) if key == self.hashed_address => {
+                let (subkey, node) = value.into_parts();
+                Some((A::subkey_to_nibbles(&subkey), node))
+            }
+            Ok(_) => None,
+            Err(error) => {
+                self.current_key = None;
+                return Err(error)
+            }
+        };
+        self.current_key = entry.as_ref().map(|(key, _)| *key);
+        Ok(entry)
     }
 }
 
@@ -281,6 +398,8 @@ where
         &mut self,
         updates: &StorageTrieUpdatesSorted,
     ) -> Result<usize, DatabaseError> {
+        self.current_key = None;
+
         // The storage trie for this account has to be deleted.
         if updates.is_deleted() && self.cursor.seek_exact(self.hashed_address)?.is_some() {
             self.cursor.delete_current_duplicates()?;
@@ -321,42 +440,58 @@ where
         &mut self,
         key: Nibbles,
     ) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
-        let subkey = A::StorageSubKey::from(key);
-        Ok(self
+        if self.current_key.is_some_and(|current_key| key.starts_with(&current_key)) {
+            return if self.advance_to(key)? == Some(key) { self.current_entry() } else { Ok(None) }
+        }
+
+        self.current_key = None;
+        let entry = self
             .cursor
-            .seek_by_key_subkey(self.hashed_address, subkey.clone())?
-            .filter(|e| *e.nibbles() == subkey)
+            .seek_by_key_subkey(self.hashed_address, A::StorageSubKey::from(key))?
             .map(|value| {
                 let (subkey, node) = value.into_parts();
                 (A::subkey_to_nibbles(&subkey), node)
-            }))
+            });
+        self.current_key = entry.as_ref().map(|(key, _)| *key);
+        Ok(entry.filter(|(found_key, _)| *found_key == key))
     }
 
     fn seek(
         &mut self,
         key: Nibbles,
     ) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
-        Ok(self.cursor.seek_by_key_subkey(self.hashed_address, A::StorageSubKey::from(key))?.map(
-            |value| {
+        if self.current_key.is_some_and(|current_key| key.starts_with(&current_key)) {
+            return if self.advance_to(key)?.is_some() { self.current_entry() } else { Ok(None) }
+        }
+
+        self.current_key = None;
+        let entry = self
+            .cursor
+            .seek_by_key_subkey(self.hashed_address, A::StorageSubKey::from(key))?
+            .map(|value| {
                 let (subkey, node) = value.into_parts();
                 (A::subkey_to_nibbles(&subkey), node)
-            },
-        ))
+            });
+        self.current_key = entry.as_ref().map(|(key, _)| *key);
+        Ok(entry)
     }
 
     fn next(&mut self) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
-        Ok(self.cursor.next_dup()?.map(|(_, value)| {
+        self.current_key = None;
+        let entry = self.cursor.next_dup()?.map(|(_, value)| {
             let (subkey, node) = value.into_parts();
             (A::subkey_to_nibbles(&subkey), node)
-        }))
+        });
+        self.current_key = entry.as_ref().map(|(key, _)| *key);
+        Ok(entry)
     }
 
     fn current(&mut self) -> Result<Option<Nibbles>, DatabaseError> {
-        Ok(self.cursor.current()?.map(|(_, v)| A::subkey_to_nibbles(v.nibbles())))
+        Ok(self.current_entry()?.map(|(key, _)| key))
     }
 
     fn reset(&mut self) {
-        // No-op for database cursors
+        self.current_key = None;
     }
 }
 
@@ -367,6 +502,7 @@ where
 {
     fn set_hashed_address(&mut self, hashed_address: B256) {
         self.hashed_address = hashed_address;
+        self.current_key = None;
     }
 }
 
@@ -374,8 +510,438 @@ where
 mod tests {
     use super::*;
     use alloy_primitives::hex_literal::hex;
-    use reth_db_api::{cursor::DbCursorRW, transaction::DbTxMut};
+    use reth_db_api::{
+        common::{KeyOnlyResult, PairResult, SubKeyOnlyResult, ValueOnlyResult},
+        cursor::{DbCursorRW, DupWalker, RangeWalker, ReverseWalker, Walker},
+        transaction::DbTxMut,
+    };
     use reth_provider::test_utils::create_test_provider_factory;
+    use std::ops::{Bound, RangeBounds};
+
+    #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+    struct CursorCalls {
+        seek_exact: usize,
+        seek: usize,
+        next: usize,
+        next_key: usize,
+        next_dup: usize,
+        next_dup_key: usize,
+        seek_by_key_subkey: usize,
+        current: usize,
+    }
+
+    struct RecordingCursor<C> {
+        inner: C,
+        calls: CursorCalls,
+    }
+
+    impl<C> RecordingCursor<C> {
+        const fn new(inner: C) -> Self {
+            Self {
+                inner,
+                calls: CursorCalls {
+                    seek_exact: 0,
+                    seek: 0,
+                    next: 0,
+                    next_key: 0,
+                    next_dup: 0,
+                    next_dup_key: 0,
+                    seek_by_key_subkey: 0,
+                    current: 0,
+                },
+            }
+        }
+    }
+
+    impl<T, C> DbDupCursorRO<T> for RecordingCursor<C>
+    where
+        T: DupSort,
+        C: DbDupCursorRO<T>,
+    {
+        fn prev_dup(&mut self) -> PairResult<T> {
+            self.inner.prev_dup()
+        }
+
+        fn next_dup(&mut self) -> PairResult<T> {
+            self.calls.next_dup += 1;
+            self.inner.next_dup()
+        }
+
+        fn next_dup_key(&mut self) -> SubKeyOnlyResult<T>
+        where
+            T::SubKey: DupSortSubKey,
+        {
+            self.calls.next_dup_key += 1;
+            self.inner.next_dup_key()
+        }
+
+        fn last_dup(&mut self) -> ValueOnlyResult<T> {
+            self.inner.last_dup()
+        }
+
+        fn next_no_dup(&mut self) -> PairResult<T> {
+            self.inner.next_no_dup()
+        }
+
+        fn next_dup_val(&mut self) -> ValueOnlyResult<T> {
+            self.inner.next_dup_val()
+        }
+
+        fn seek_by_key_subkey(&mut self, key: T::Key, subkey: T::SubKey) -> ValueOnlyResult<T> {
+            self.calls.seek_by_key_subkey += 1;
+            self.inner.seek_by_key_subkey(key, subkey)
+        }
+
+        fn seek_by_key_subkey_key(&mut self, key: T::Key, subkey: T::SubKey) -> SubKeyOnlyResult<T>
+        where
+            T::SubKey: DupSortSubKey,
+        {
+            self.inner.seek_by_key_subkey_key(key, subkey)
+        }
+
+        fn walk_dup(
+            &mut self,
+            _key: Option<T::Key>,
+            _subkey: Option<T::SubKey>,
+        ) -> Result<DupWalker<'_, T, Self>, DatabaseError> {
+            unreachable!("unused by prefix seek tests")
+        }
+    }
+
+    impl<T, C> DbCursorRO<T> for RecordingCursor<C>
+    where
+        T: Table,
+        C: DbCursorRO<T>,
+    {
+        fn first(&mut self) -> PairResult<T> {
+            self.inner.first()
+        }
+
+        fn seek_exact(&mut self, key: T::Key) -> PairResult<T> {
+            self.calls.seek_exact += 1;
+            self.inner.seek_exact(key)
+        }
+
+        fn seek_exact_key(&mut self, key: T::Key) -> KeyOnlyResult<T> {
+            self.inner.seek_exact_key(key)
+        }
+
+        fn seek(&mut self, key: T::Key) -> PairResult<T> {
+            self.calls.seek += 1;
+            self.inner.seek(key)
+        }
+
+        fn seek_key(&mut self, key: T::Key) -> KeyOnlyResult<T> {
+            self.inner.seek_key(key)
+        }
+
+        fn next(&mut self) -> PairResult<T> {
+            self.calls.next += 1;
+            self.inner.next()
+        }
+
+        fn next_key(&mut self) -> KeyOnlyResult<T> {
+            self.calls.next_key += 1;
+            self.inner.next_key()
+        }
+
+        fn prev(&mut self) -> PairResult<T> {
+            self.inner.prev()
+        }
+
+        fn last(&mut self) -> PairResult<T> {
+            self.inner.last()
+        }
+
+        fn current(&mut self) -> PairResult<T> {
+            self.calls.current += 1;
+            self.inner.current()
+        }
+
+        fn walk(
+            &mut self,
+            start_key: Option<T::Key>,
+        ) -> Result<Walker<'_, T, Self>, DatabaseError> {
+            let start =
+                if let Some(start_key) = start_key { self.seek(start_key) } else { self.first() }
+                    .transpose();
+            Ok(Walker::new(self, start))
+        }
+
+        fn walk_range(
+            &mut self,
+            range: impl RangeBounds<T::Key>,
+        ) -> Result<RangeWalker<'_, T, Self>, DatabaseError> {
+            let start = match range.start_bound().cloned() {
+                Bound::Included(key) => self.seek(key),
+                Bound::Excluded(_) => {
+                    unreachable!("Rust doesn't allow excluded starting bounds")
+                }
+                Bound::Unbounded => self.first(),
+            }
+            .transpose();
+            Ok(RangeWalker::new(self, start, range.end_bound().cloned()))
+        }
+
+        fn walk_back(
+            &mut self,
+            start_key: Option<T::Key>,
+        ) -> Result<ReverseWalker<'_, T, Self>, DatabaseError> {
+            let start =
+                if let Some(start_key) = start_key { self.seek(start_key) } else { self.last() }
+                    .transpose();
+            Ok(ReverseWalker::new(self, start))
+        }
+    }
+
+    fn take_calls<C, A: TrieKeyAdapter>(
+        cursor: &mut DatabaseAccountTrieCursor<RecordingCursor<C>, A>,
+    ) -> CursorCalls {
+        std::mem::take(&mut cursor.cursor.calls)
+    }
+
+    fn take_storage_calls<C, A: TrieKeyAdapter>(
+        cursor: &mut DatabaseStorageTrieCursor<RecordingCursor<C>, A>,
+    ) -> CursorCalls {
+        std::mem::take(&mut cursor.cursor.calls)
+    }
+
+    fn assert_account_trie_prefix_seek<A: TrieTableAdapter>() {
+        let factory = create_test_provider_factory();
+        let provider = factory.provider_rw().unwrap();
+        let paths = [
+            Nibbles::from_nibbles([0x1]),
+            Nibbles::from_nibbles([0x1, 0x1]),
+            Nibbles::from_nibbles([0x1, 0x3]),
+            Nibbles::from_nibbles([0x1, 0x4]),
+        ];
+        let nodes = [1, 2, 4, 8].map(|mask| BranchNodeCompact::new(mask, mask, 0, vec![], None));
+
+        {
+            let mut cursor = provider.tx_ref().cursor_write::<A::AccountTrieTable>().unwrap();
+            for (path, node) in paths.into_iter().zip(&nodes) {
+                cursor.upsert(A::AccountKey::from(path), node).unwrap();
+            }
+        }
+
+        let db_cursor = provider.tx_ref().cursor_read::<A::AccountTrieTable>().unwrap();
+        let mut cursor = DatabaseAccountTrieCursor::<_, A>::new(RecordingCursor::new(db_cursor));
+
+        assert_eq!(cursor.seek(paths[0]).unwrap().map(|(key, _)| key), Some(paths[0]));
+        take_calls(&mut cursor);
+
+        let between = Nibbles::from_nibbles([0x1, 0x2]);
+        assert_eq!(cursor.seek(between).unwrap(), Some((paths[2], nodes[2].clone())));
+        assert_eq!(
+            take_calls(&mut cursor),
+            CursorCalls { next_key: 2, current: 1, ..Default::default() }
+        );
+
+        assert_eq!(cursor.seek_exact(paths[0]).unwrap().map(|(key, _)| key), Some(paths[0]));
+        assert_eq!(take_calls(&mut cursor), CursorCalls { seek_exact: 1, ..Default::default() });
+
+        assert_eq!(cursor.seek_exact(paths[2]).unwrap(), Some((paths[2], nodes[2].clone())));
+        assert_eq!(
+            take_calls(&mut cursor),
+            CursorCalls { next_key: 2, current: 1, ..Default::default() }
+        );
+
+        assert_eq!(cursor.seek(paths[0]).unwrap().map(|(key, _)| key), Some(paths[0]));
+        assert_eq!(take_calls(&mut cursor), CursorCalls { seek: 1, ..Default::default() });
+
+        assert_eq!(cursor.seek(paths[0]).unwrap().map(|(key, _)| key), Some(paths[0]));
+        assert_eq!(take_calls(&mut cursor), CursorCalls { current: 1, ..Default::default() });
+
+        assert_eq!(cursor.seek_exact(between).unwrap(), None);
+        assert_eq!(take_calls(&mut cursor), CursorCalls { next_key: 2, ..Default::default() });
+        assert_eq!(cursor.current().unwrap(), Some(paths[2]));
+        take_calls(&mut cursor);
+
+        assert_eq!(cursor.seek_exact(paths[0]).unwrap().map(|(key, _)| key), Some(paths[0]));
+        take_calls(&mut cursor);
+        let after_descendants = Nibbles::from_nibbles([0x1, 0xf]);
+        assert_eq!(cursor.seek_exact(after_descendants).unwrap(), None);
+        assert_eq!(take_calls(&mut cursor), CursorCalls { next_key: 4, ..Default::default() });
+
+        assert_eq!(cursor.seek(paths[0]).unwrap().map(|(key, _)| key), Some(paths[0]));
+        take_calls(&mut cursor);
+        assert_eq!(cursor.next().unwrap(), Some((paths[1], nodes[1].clone())));
+        assert_eq!(take_calls(&mut cursor), CursorCalls { next: 1, ..Default::default() });
+        assert_eq!(cursor.seek(paths[1]).unwrap(), Some((paths[1], nodes[1].clone())));
+        assert_eq!(take_calls(&mut cursor), CursorCalls { current: 1, ..Default::default() });
+
+        assert_eq!(cursor.seek(paths[3]).unwrap(), Some((paths[3], nodes[3].clone())));
+        take_calls(&mut cursor);
+        let after_last = Nibbles::from_nibbles([0x1, 0x4, 0xf]);
+        assert_eq!(cursor.seek(after_last).unwrap(), None);
+        assert_eq!(take_calls(&mut cursor), CursorCalls { next_key: 1, ..Default::default() });
+
+        assert_eq!(cursor.seek(paths[0]).unwrap().map(|(key, _)| key), Some(paths[0]));
+        cursor.reset();
+        take_calls(&mut cursor);
+        assert_eq!(cursor.seek(between).unwrap().map(|(key, _)| key), Some(paths[2]));
+        assert_eq!(take_calls(&mut cursor), CursorCalls { seek: 1, ..Default::default() });
+    }
+
+    #[test]
+    fn test_account_trie_prefix_seek_legacy() {
+        assert_account_trie_prefix_seek::<LegacyKeyAdapter>();
+    }
+
+    #[test]
+    fn test_account_trie_prefix_seek_packed() {
+        assert_account_trie_prefix_seek::<PackedKeyAdapter>();
+    }
+
+    fn assert_storage_trie_prefix_seek<A: TrieTableAdapter>() {
+        let factory = create_test_provider_factory();
+        let provider = factory.provider_rw().unwrap();
+        let hashed_address = B256::with_last_byte(1);
+        let next_hashed_address = B256::with_last_byte(2);
+        let paths = [
+            Nibbles::from_nibbles([0x1]),
+            Nibbles::from_nibbles([0x1, 0x1]),
+            Nibbles::from_nibbles([0x1, 0x3]),
+            Nibbles::from_nibbles([0x1, 0x4]),
+        ];
+        let nodes = [1, 2, 4, 8].map(|mask| BranchNodeCompact::new(mask, mask, 0, vec![], None));
+        let next_node = BranchNodeCompact::new(16, 16, 0, vec![], None);
+
+        {
+            let mut cursor = provider.tx_ref().cursor_dup_write::<A::StorageTrieTable>().unwrap();
+            for (path, node) in paths.into_iter().zip(&nodes) {
+                cursor
+                    .upsert(
+                        hashed_address,
+                        &A::StorageValue::new(A::StorageSubKey::from(path), node.clone()),
+                    )
+                    .unwrap();
+            }
+            cursor
+                .upsert(
+                    next_hashed_address,
+                    &A::StorageValue::new(A::StorageSubKey::from(paths[0]), next_node.clone()),
+                )
+                .unwrap();
+        }
+
+        let db_cursor = provider.tx_ref().cursor_dup_read::<A::StorageTrieTable>().unwrap();
+        let mut cursor =
+            DatabaseStorageTrieCursor::<_, A>::new(RecordingCursor::new(db_cursor), hashed_address);
+
+        assert_eq!(cursor.seek(paths[0]).unwrap(), Some((paths[0], nodes[0].clone())));
+        take_storage_calls(&mut cursor);
+
+        let between = Nibbles::from_nibbles([0x1, 0x2]);
+        assert_eq!(cursor.seek(between).unwrap(), Some((paths[2], nodes[2].clone())));
+        assert_eq!(
+            take_storage_calls(&mut cursor),
+            CursorCalls { next_dup_key: 2, current: 1, ..Default::default() }
+        );
+
+        assert_eq!(cursor.seek_exact(paths[0]).unwrap(), Some((paths[0], nodes[0].clone())));
+        assert_eq!(
+            take_storage_calls(&mut cursor),
+            CursorCalls { seek_by_key_subkey: 1, ..Default::default() }
+        );
+
+        assert_eq!(cursor.seek_exact(paths[2]).unwrap(), Some((paths[2], nodes[2].clone())));
+        assert_eq!(
+            take_storage_calls(&mut cursor),
+            CursorCalls { next_dup_key: 2, current: 1, ..Default::default() }
+        );
+
+        assert_eq!(cursor.seek(paths[0]).unwrap(), Some((paths[0], nodes[0].clone())));
+        assert_eq!(
+            take_storage_calls(&mut cursor),
+            CursorCalls { seek_by_key_subkey: 1, ..Default::default() }
+        );
+
+        assert_eq!(cursor.seek(paths[0]).unwrap(), Some((paths[0], nodes[0].clone())));
+        assert_eq!(
+            take_storage_calls(&mut cursor),
+            CursorCalls { current: 1, ..Default::default() }
+        );
+
+        assert_eq!(cursor.seek_exact(between).unwrap(), None);
+        assert_eq!(
+            take_storage_calls(&mut cursor),
+            CursorCalls { next_dup_key: 2, ..Default::default() }
+        );
+        assert_eq!(cursor.current().unwrap(), Some(paths[2]));
+        take_storage_calls(&mut cursor);
+
+        cursor.reset();
+        assert_eq!(cursor.seek_exact(between).unwrap(), None);
+        assert_eq!(
+            take_storage_calls(&mut cursor),
+            CursorCalls { seek_by_key_subkey: 1, ..Default::default() }
+        );
+        let after_overshoot = Nibbles::from_nibbles([0x1, 0x3, 0x0]);
+        assert_eq!(cursor.seek_exact(after_overshoot).unwrap(), None);
+        assert_eq!(
+            take_storage_calls(&mut cursor),
+            CursorCalls { next_dup_key: 1, ..Default::default() }
+        );
+
+        assert_eq!(cursor.seek_exact(paths[0]).unwrap(), Some((paths[0], nodes[0].clone())));
+        take_storage_calls(&mut cursor);
+        let after_descendants = Nibbles::from_nibbles([0x1, 0xf]);
+        assert_eq!(cursor.seek_exact(after_descendants).unwrap(), None);
+        assert_eq!(
+            take_storage_calls(&mut cursor),
+            CursorCalls { next_dup_key: 4, ..Default::default() }
+        );
+
+        assert_eq!(cursor.seek(paths[0]).unwrap(), Some((paths[0], nodes[0].clone())));
+        take_storage_calls(&mut cursor);
+        assert_eq!(cursor.next().unwrap(), Some((paths[1], nodes[1].clone())));
+        assert_eq!(
+            take_storage_calls(&mut cursor),
+            CursorCalls { next_dup: 1, ..Default::default() }
+        );
+        assert_eq!(cursor.seek(paths[1]).unwrap(), Some((paths[1], nodes[1].clone())));
+        assert_eq!(
+            take_storage_calls(&mut cursor),
+            CursorCalls { current: 1, ..Default::default() }
+        );
+
+        assert_eq!(cursor.seek(paths[3]).unwrap(), Some((paths[3], nodes[3].clone())));
+        take_storage_calls(&mut cursor);
+        let after_last = Nibbles::from_nibbles([0x1, 0x4, 0xf]);
+        assert_eq!(cursor.seek(after_last).unwrap(), None);
+        assert_eq!(
+            take_storage_calls(&mut cursor),
+            CursorCalls { next_dup_key: 1, ..Default::default() }
+        );
+
+        assert_eq!(cursor.seek(paths[0]).unwrap(), Some((paths[0], nodes[0].clone())));
+        cursor.reset();
+        take_storage_calls(&mut cursor);
+        assert_eq!(cursor.seek(between).unwrap(), Some((paths[2], nodes[2].clone())));
+        assert_eq!(
+            take_storage_calls(&mut cursor),
+            CursorCalls { seek_by_key_subkey: 1, ..Default::default() }
+        );
+
+        cursor.set_hashed_address(next_hashed_address);
+        take_storage_calls(&mut cursor);
+        assert_eq!(cursor.seek(paths[0]).unwrap(), Some((paths[0], next_node)));
+        assert_eq!(
+            take_storage_calls(&mut cursor),
+            CursorCalls { seek_by_key_subkey: 1, ..Default::default() }
+        );
+    }
+
+    #[test]
+    fn test_storage_trie_prefix_seek_legacy() {
+        assert_storage_trie_prefix_seek::<LegacyKeyAdapter>();
+    }
+
+    #[test]
+    fn test_storage_trie_prefix_seek_packed() {
+        assert_storage_trie_prefix_seek::<PackedKeyAdapter>();
+    }
 
     #[test]
     fn test_account_trie_order() {

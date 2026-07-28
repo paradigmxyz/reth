@@ -250,6 +250,43 @@ add_wrapper_struct!((ClientVersion, CompactClientVersion));
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+    use crate::table::DupSortSubKey;
+
+    #[test]
+    fn dup_sort_subkeys_decode_checked_prefixes() {
+        let address = Address::with_last_byte(1);
+        let mut address_value = address.encode().to_vec();
+        address_value.extend_from_slice(&[0xaa; 4]);
+        assert_eq!(<Address as DupSortSubKey>::decode_prefix(&address_value).unwrap(), address);
+        assert!(<Address as DupSortSubKey>::decode_prefix(&address_value[..19]).is_err());
+
+        let hash = B256::with_last_byte(2);
+        let mut hash_value = hash.encode().to_vec();
+        hash_value.extend_from_slice(&[0xbb; 4]);
+        assert_eq!(<B256 as DupSortSubKey>::decode_prefix(&hash_value).unwrap(), hash);
+        assert!(<B256 as DupSortSubKey>::decode_prefix(&hash_value[..31]).is_err());
+
+        let stored = StoredNibblesSubKey::from(Nibbles::from_nibbles([1, 2, 3]));
+        let mut stored_value = stored.clone().encode().to_vec();
+        stored_value.extend_from_slice(&[0xcc; 4]);
+        assert_eq!(
+            <StoredNibblesSubKey as DupSortSubKey>::decode_prefix(&stored_value).unwrap(),
+            stored
+        );
+        assert!(<StoredNibblesSubKey as DupSortSubKey>::decode_prefix(&stored_value[..64]).is_err());
+
+        let packed = PackedStoredNibblesSubKey::from(Nibbles::from_nibbles([4, 5, 6]));
+        let mut packed_value = packed.clone().encode().to_vec();
+        packed_value.extend_from_slice(&[0xdd; 4]);
+        assert_eq!(
+            <PackedStoredNibblesSubKey as DupSortSubKey>::decode_prefix(&packed_value).unwrap(),
+            packed
+        );
+        assert!(<PackedStoredNibblesSubKey as DupSortSubKey>::decode_prefix(&packed_value[..32])
+            .is_err());
+    }
+
     // each value in the database has an extra field named flags that encodes metadata about other
     // fields in the value, e.g. offset and length.
     //
