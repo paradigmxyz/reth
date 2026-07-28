@@ -372,7 +372,7 @@ async fn test_engine_ssz_proxy_can_mine_block() -> eyre::Result<()> {
         capabilities,
         serde_json::json!({
             "supported_forks": ["paris", "shanghai", "cancun", "prague", "osaka", "amsterdam"],
-            "fork_scoped_endpoints": ["payloads", "forkchoice", "bodies"],
+            "fork_scoped_endpoints": ["payloads", "payloads/witness", "forkchoice", "bodies"],
             "independently_versioned": {
                 "blobs": ["v1", "v2", "v3", "v4"],
             },
