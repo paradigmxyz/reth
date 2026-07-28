@@ -1307,3 +1307,328 @@ impl<B: BlockTrait> Default for BadBlockStore<B> {
         Self::new(64)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{EthApi, EthApiBuilder};
+    use alloy_consensus::{BlockBody, Header, TxLegacy};
+    use alloy_evm::{
+        eth::EthEvmContext, precompiles::PrecompilesMap, Database, EthEvm, EvmEnv, EvmFactory,
+    };
+    use alloy_network::Ethereum;
+    use alloy_primitives::{address, Signature, TxKind, U256};
+    use reth_chainspec::ChainSpec;
+    use reth_ethereum_primitives::{EthPrimitives, Transaction, TransactionSigned};
+    use reth_evm_ethereum::EthEvmConfig;
+    use reth_network_api::noop::NoopNetwork;
+    use reth_provider::test_utils::{ExtendedAccount, MockEthProvider};
+    use reth_rpc_convert::RpcConverter;
+    use reth_rpc_eth_api::node::RpcNodeCoreAdapter;
+    use reth_rpc_eth_types::receipt::EthReceiptConverter;
+    use reth_transaction_pool::test_utils::{testing_pool, TestPool};
+    use revm::{
+        context::{
+            result::{EVMError, HaltReason, ResultAndState},
+            BlockEnv, CfgEnv, DBErrorMarker, TxEnv,
+        },
+        inspector::NoOpInspector,
+        primitives::hardfork::SpecId,
+        Inspector,
+    };
+    use std::sync::{
+        atomic::{AtomicUsize, Ordering},
+        Mutex,
+    };
+
+    /// Contract that overwrites [`OBSERVED_SLOT`], called by the block's first transaction.
+    const WRITER: Address = address!("00000000000000000000000000000000000000aa");
+    /// Storage slot [`StatefulEthEvm`] loads its block-scoped value from.
+    const OBSERVED_SLOT: U256 = U256::ZERO;
+    /// Value seeded into [`OBSERVED_SLOT`] before the block runs.
+    const BLOCK_START_VALUE: u64 = 1;
+    /// Value [`WRITER`] stores into [`OBSERVED_SLOT`]: `PUSH1 2 PUSH1 0 SSTORE STOP`.
+    const WRITTEN_VALUE: u64 = 2;
+
+    /// What the block's transactions observed, and how many EVMs were built to run them.
+    #[derive(Debug, Default, Clone)]
+    struct EvmObservations {
+        values: Arc<Mutex<Vec<U256>>>,
+        evms_created: Arc<AtomicUsize>,
+    }
+
+    impl EvmObservations {
+        fn take_values(&self) -> Vec<U256> {
+            std::mem::take(&mut *self.values.lock().unwrap())
+        }
+
+        fn take_evms_created(&self) -> usize {
+            self.evms_created.swap(0, Ordering::Relaxed)
+        }
+    }
+
+    /// An [`EthEvm`] carrying block-scoped state: a value loaded from state on the first
+    /// transaction it runs and stamped with the block number, reloaded only when that number
+    /// changes.
+    ///
+    /// This is what a fresh EVM per transaction breaks: each new instance re-loads the value
+    /// from whatever mid-block state it was handed.
+    struct StatefulEthEvm<DB: Database, I> {
+        inner: EthEvm<DB, I, PrecompilesMap>,
+        cached: Option<(U256, U256)>,
+        observations: EvmObservations,
+    }
+
+    impl<DB, I> Evm for StatefulEthEvm<DB, I>
+    where
+        DB: Database,
+        I: Inspector<EthEvmContext<DB>>,
+    {
+        type DB = DB;
+        type Tx = TxEnv;
+        type Error = EVMError<DB::Error>;
+        type HaltReason = HaltReason;
+        type Spec = SpecId;
+        type BlockEnv = BlockEnv;
+        type Precompiles = PrecompilesMap;
+        type Inspector = I;
+
+        fn transact_raw(
+            &mut self,
+            tx: Self::Tx,
+        ) -> Result<ResultAndState<Self::HaltReason>, Self::Error> {
+            // capture the block number before borrowing the database mutably
+            let block_number = self.inner.block().number;
+            if self.cached.map(|(number, _)| number) != Some(block_number) {
+                let value = self
+                    .inner
+                    .db_mut()
+                    .storage(WRITER, OBSERVED_SLOT)
+                    .map_err(EVMError::Database)?;
+                self.cached = Some((block_number, value));
+            }
+            self.observations.values.lock().unwrap().push(self.cached.expect("just loaded").1);
+            self.inner.transact_raw(tx)
+        }
+
+        /// Delegates without seeding the cache: pre-execution system calls must not stand in for
+        /// the block's first transaction.
+        fn transact_system_call(
+            &mut self,
+            caller: Address,
+            contract: Address,
+            data: Bytes,
+        ) -> Result<ResultAndState<Self::HaltReason>, Self::Error> {
+            self.inner.transact_system_call(caller, contract, data)
+        }
+
+        fn block(&self) -> &Self::BlockEnv {
+            self.inner.block()
+        }
+
+        fn cfg_env(&self) -> &CfgEnv<Self::Spec> {
+            self.inner.cfg_env()
+        }
+
+        fn chain_id(&self) -> u64 {
+            self.inner.chain_id()
+        }
+
+        fn finish(self) -> (Self::DB, EvmEnv<Self::Spec, Self::BlockEnv>) {
+            self.inner.finish()
+        }
+
+        fn set_inspector_enabled(&mut self, enabled: bool) {
+            self.inner.set_inspector_enabled(enabled)
+        }
+
+        fn components(&self) -> (&Self::DB, &Self::Inspector, &Self::Precompiles) {
+            self.inner.components()
+        }
+
+        fn components_mut(
+            &mut self,
+        ) -> (&mut Self::DB, &mut Self::Inspector, &mut Self::Precompiles) {
+            self.inner.components_mut()
+        }
+    }
+
+    /// Builds [`StatefulEthEvm`]s and counts how many it has built.
+    #[derive(Debug, Default, Clone)]
+    struct StatefulEvmFactory {
+        observations: EvmObservations,
+    }
+
+    impl EvmFactory for StatefulEvmFactory {
+        type Evm<DB: Database, I: Inspector<EthEvmContext<DB>>> = StatefulEthEvm<DB, I>;
+        type Context<DB: Database> = EthEvmContext<DB>;
+        type Tx = TxEnv;
+        type Error<DBError: DBErrorMarker> = EVMError<DBError>;
+        type HaltReason = HaltReason;
+        type Spec = SpecId;
+        type BlockEnv = BlockEnv;
+        type Precompiles = PrecompilesMap;
+
+        fn create_evm<DB: Database>(&self, db: DB, input: EvmEnv) -> Self::Evm<DB, NoOpInspector> {
+            self.observations.evms_created.fetch_add(1, Ordering::Relaxed);
+            StatefulEthEvm {
+                inner: alloy_evm::EthEvmFactory::default().create_evm(db, input),
+                cached: None,
+                observations: self.observations.clone(),
+            }
+        }
+
+        fn create_evm_with_inspector<DB: Database, I: Inspector<Self::Context<DB>>>(
+            &self,
+            db: DB,
+            input: EvmEnv,
+            inspector: I,
+        ) -> Self::Evm<DB, I> {
+            self.observations.evms_created.fetch_add(1, Ordering::Relaxed);
+            StatefulEthEvm {
+                inner: alloy_evm::EthEvmFactory::default()
+                    .create_evm_with_inspector(db, input, inspector),
+                cached: None,
+                observations: self.observations.clone(),
+            }
+        }
+    }
+
+    type StatefulEvmConfig = EthEvmConfig<ChainSpec, StatefulEvmFactory>;
+    type StatefulEthApi = EthApi<
+        RpcNodeCoreAdapter<MockEthProvider, TestPool, NoopNetwork, StatefulEvmConfig>,
+        // the default `EthRpcConverter` pins `EthEvmConfig`'s default factory
+        RpcConverter<Ethereum, StatefulEvmConfig, EthReceiptConverter<ChainSpec>>,
+    >;
+
+    /// A block whose transactions all read the same block-scoped value, the first of which
+    /// rewrites it.
+    ///
+    /// Note the observation assertions cannot tell whether the prefix transactions were
+    /// committed: once the first one caches the value, the rest report it either way. Committing
+    /// is pinned by [`test_debug_trace_call_many_replays_prefix_on_one_evm`], whose bundle call
+    /// runs on its own EVM and so observes the written value.
+    struct Fixture {
+        api: DebugApi<StatefulEthApi>,
+        observations: EvmObservations,
+        block_hash: B256,
+        tx_hashes: Vec<B256>,
+    }
+
+    /// Builds a `tx_count`-transaction block at height 1. Transaction 0 calls [`WRITER`], which
+    /// overwrites [`OBSERVED_SLOT`]; the rest are bare transfers, distinguished by gas limit so
+    /// each recovers to a different (empty, nonce-zero) sender.
+    fn fixture(tx_count: usize) -> Fixture {
+        let provider = MockEthProvider::default().with_recovered_blocks();
+
+        // WRITER holds the block-start value and rewrites it when called
+        provider.add_account(
+            WRITER,
+            ExtendedAccount::new(0, U256::ZERO)
+                // PUSH1 WRITTEN_VALUE, PUSH1 0, SSTORE, STOP
+                .with_bytecode(Bytes::from(vec![0x60, WRITTEN_VALUE as u8, 0x60, 0x00, 0x55, 0x00]))
+                .extend_storage([(B256::ZERO, U256::from(BLOCK_START_VALUE))]),
+        );
+
+        let transactions: Vec<_> = (0..tx_count)
+            .map(|i| {
+                let (to, gas_limit) = if i == 0 {
+                    (TxKind::Call(WRITER), 100_000)
+                } else {
+                    // distinct gas limits give distinct signing hashes, hence distinct senders
+                    (TxKind::Call(Address::ZERO), 21_000 + i as u64)
+                };
+                TransactionSigned::new_unhashed(
+                    Transaction::Legacy(TxLegacy {
+                        gas_limit,
+                        gas_price: 0,
+                        to,
+                        ..Default::default()
+                    }),
+                    Signature::test_signature(),
+                )
+            })
+            .collect();
+        let tx_hashes = transactions.iter().map(|tx| *tx.tx_hash()).collect();
+
+        let parent = Header { number: 0, gas_limit: 30_000_000, ..Default::default() };
+        let parent_hash = parent.hash_slow();
+        let block = reth_ethereum_primitives::Block {
+            header: Header { number: 1, parent_hash, gas_limit: 30_000_000, ..Default::default() },
+            body: BlockBody { transactions, ..Default::default() },
+        };
+        let block_hash = block.header.hash_slow();
+        provider.add_header(parent_hash, parent);
+        provider.add_block(block_hash, block);
+
+        let observations = EvmObservations::default();
+        let evm_config = EthEvmConfig::new_with_evm_factory(
+            provider.chain_spec(),
+            StatefulEvmFactory { observations: observations.clone() },
+        );
+        let eth_api =
+            EthApiBuilder::new(provider, testing_pool(), NoopNetwork::default(), evm_config)
+                .build();
+        let api = DebugApi::new(
+            eth_api,
+            BlockingTaskGuard::new(1),
+            &Runtime::test(),
+            futures::stream::empty::<ConsensusEngineEvent<EthPrimitives>>(),
+        );
+
+        // discard whatever setup cost, so each test measures only its own call
+        observations.take_values();
+        observations.take_evms_created();
+
+        Fixture { api, observations, block_hash, tx_hashes }
+    }
+
+    /// The value every transaction should observe: the one in state before the block ran.
+    fn block_start_value() -> U256 {
+        U256::from(BLOCK_START_VALUE)
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_debug_trace_block_sees_block_start_context() {
+        let f = fixture(3);
+
+        let results =
+            f.api.debug_trace_block(f.block_hash.into(), Default::default()).await.unwrap();
+
+        // guards a vacuous fixture: a reverted transaction 0 would never overwrite the value
+        assert_eq!(results.len(), 3);
+        for result in &results {
+            let TraceResult::Success { result, .. } = result else { panic!("{result:?}") };
+            let GethTrace::Default(frame) = result else { panic!("{result:?}") };
+            assert!(!frame.failed, "{frame:?}");
+        }
+
+        // every transaction of the block settles at the value read before the block ran, even
+        // though transaction 0 overwrote it
+        assert_eq!(f.observations.take_values(), vec![block_start_value(); 3]);
+        // one EVM for the pre-execution changes, one for the block's transactions
+        assert_eq!(f.observations.take_evms_created(), 2);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_debug_trace_transaction_sees_block_start_context() {
+        let f = fixture(3);
+
+        // target index 2, so the prefix contains the transaction that overwrote the value
+        f.api.debug_trace_transaction(f.tx_hashes[2], Default::default()).await.unwrap();
+
+        // the two prefix transactions plus the target
+        assert_eq!(f.observations.take_values(), vec![block_start_value(); 3]);
+        assert_eq!(f.observations.take_evms_created(), 2);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_intermediate_roots_sees_block_start_context() {
+        let f = fixture(3);
+
+        f.api.intermediate_roots(f.block_hash).await.unwrap();
+
+        assert_eq!(f.observations.take_values(), vec![block_start_value(); 3]);
+        assert_eq!(f.observations.take_evms_created(), 2);
+    }
+}
