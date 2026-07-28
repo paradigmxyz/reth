@@ -260,10 +260,7 @@ impl<Provider: DBProvider> HashedPostStateProvider for LatestStateProviderRef<'_
             HashedPostState::from_bundle_state::<KeccakKeyHasher>(bundle_state.state());
         zero_destroyed_account_storage(
             &reth_trie_db::DatabaseHashedCursorFactory::new(self.tx()),
-            bundle_state
-                .state()
-                .iter()
-                .filter(|(_, account)| account.was_destroyed() && account.info.is_some()),
+            bundle_state.state(),
             &mut hashed_state,
         )?;
         Ok(hashed_state)

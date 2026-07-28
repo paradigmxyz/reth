@@ -99,6 +99,9 @@ impl<T: AccountReader + BytecodeReader> AccountInfoReader for T {}
 pub trait HashedPostStateProvider {
     /// Returns the [`HashedPostState`] of the provided [`BundleState`], materializing zero-valued
     /// updates for parent storage of accounts that were destroyed but remain in the post-state.
+    ///
+    /// Providers backed by an exact parent-state view also materialize terminally destroyed
+    /// accounts so the result can be persisted without storage wipe markers.
     fn hashed_post_state(&self, bundle_state: &BundleState) -> ProviderResult<HashedPostState>;
 }
 

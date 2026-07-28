@@ -215,7 +215,7 @@ impl<N: NodePrimitives> HashedPostStateProvider for MemoryOverlayStateProviderRe
         let mut hashed_state = self.historical.hashed_post_state(bundle_state)?;
 
         for (address, account) in bundle_state.state() {
-            if !account.was_destroyed() || account.info.is_none() {
+            if !account.was_destroyed() {
                 continue
             }
 
@@ -340,22 +340,27 @@ mod tests {
         let provider =
             MemoryOverlayStateProviderRef::new(Box::new(NoopProvider::default()), vec![parent]);
 
-        let mut bundle_state = BundleState::default();
-        bundle_state.state.insert(
-            address,
-            BundleAccount::new(
-                Some(Default::default()),
-                Some(Default::default()),
-                std::iter::once((new_slot, StorageSlot::new_changed(U256::ZERO, new_value)))
-                    .collect(),
-                AccountStatus::DestroyedChanged,
-            ),
-        );
-        let hashed_state = provider.hashed_post_state(&bundle_state).unwrap();
+        for (info, status) in [
+            (Some(Default::default()), AccountStatus::DestroyedChanged),
+            (None, AccountStatus::Destroyed),
+        ] {
+            let mut bundle_state = BundleState::default();
+            bundle_state.state.insert(
+                address,
+                BundleAccount::new(
+                    Some(Default::default()),
+                    info,
+                    std::iter::once((new_slot, StorageSlot::new_changed(U256::ZERO, new_value)))
+                        .collect(),
+                    status,
+                ),
+            );
+            let hashed_state = provider.hashed_post_state(&bundle_state).unwrap();
 
-        let storage = &hashed_state.storages[&hashed_address];
-        assert!(!storage.wiped);
-        assert_eq!(storage.storage[&hashed_parent_slot], U256::ZERO);
-        assert_eq!(storage.storage[&hashed_new_slot], new_value);
+            let storage = &hashed_state.storages[&hashed_address];
+            assert!(!storage.wiped);
+            assert_eq!(storage.storage[&hashed_parent_slot], U256::ZERO);
+            assert_eq!(storage.storage[&hashed_new_slot], new_value);
+        }
     }
 }

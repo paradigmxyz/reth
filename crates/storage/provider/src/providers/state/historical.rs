@@ -655,11 +655,7 @@ where
     ) -> ProviderResult<HashedPostState> {
         let mut hashed_state =
             HashedPostState::from_bundle_state::<KeccakKeyHasher>(bundle_state.state());
-        if !bundle_state
-            .state()
-            .values()
-            .any(|account| account.was_destroyed() && account.info.is_some())
-        {
+        if !bundle_state.state().values().any(|account| account.was_destroyed()) {
             return Ok(hashed_state)
         }
 
@@ -669,10 +665,7 @@ where
                 reth_trie_db::DatabaseHashedCursorFactory::new(self.tx()),
                 historical.as_ref(),
             ),
-            bundle_state
-                .state()
-                .iter()
-                .filter(|(_, account)| account.was_destroyed() && account.info.is_some()),
+            bundle_state.state(),
             &mut hashed_state,
         )?;
         Ok(hashed_state)
@@ -1536,12 +1529,7 @@ mod tests {
         let mut destroyed_bundle = BundleState::default();
         destroyed_bundle.state.insert(
             ADDRESS,
-            BundleAccount::new(
-                Some(account.clone()),
-                Some(account),
-                Default::default(),
-                AccountStatus::DestroyedChanged,
-            ),
+            BundleAccount::new(Some(account), None, Default::default(), AccountStatus::Destroyed),
         );
         let provider = HistoricalStateProviderRef::new(&db, 1, ChangesetCache::new());
         let hashed_state = provider.hashed_post_state(&destroyed_bundle).unwrap();
