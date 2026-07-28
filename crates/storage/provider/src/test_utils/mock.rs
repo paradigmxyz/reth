@@ -93,6 +93,8 @@ pub struct MockEthProvider<T: NodePrimitives = EthPrimitives, ChainSpec = reth_c
     snap_account_proof: Arc<Mutex<Option<Vec<Bytes>>>>,
     /// Storage proof returned to snap handler tests.
     snap_storage_proof: Arc<Mutex<Option<Vec<Bytes>>>>,
+    /// Whether recovered block lookups resolve against the local block store.
+    recover_block_senders: Arc<AtomicBool>,
     tx: TxMock,
     prune_modes: Arc<PruneModes>,
 }
@@ -135,6 +137,7 @@ where
             snap_storage_range_requests: self.snap_storage_range_requests.clone(),
             snap_account_proof: self.snap_account_proof.clone(),
             snap_storage_proof: self.snap_storage_proof.clone(),
+            recover_block_senders: self.recover_block_senders.clone(),
             tx: self.tx.clone(),
             prune_modes: self.prune_modes.clone(),
         }
@@ -162,6 +165,7 @@ impl<T: NodePrimitives> MockEthProvider<T, reth_chainspec::ChainSpec> {
             snap_storage_range_requests: Default::default(),
             snap_account_proof: Default::default(),
             snap_storage_proof: Default::default(),
+            recover_block_senders: Default::default(),
             tx: Default::default(),
             prune_modes: Default::default(),
         }
@@ -169,6 +173,20 @@ impl<T: NodePrimitives> MockEthProvider<T, reth_chainspec::ChainSpec> {
 }
 
 impl<T: NodePrimitives, ChainSpec> MockEthProvider<T, ChainSpec> {
+    /// Serves [`BlockReader::recovered_block`] and
+    /// [`BlockReader::sealed_block_with_senders`] from the local block store by recovering
+    /// signers, instead of always reporting a miss.
+    ///
+    /// Off by default: these are general provider methods, so resolving them changes which code
+    /// path every consumer that populates `blocks` takes.
+    ///
+    /// Like the rest of this mock's state the flag is shared with clones, including ones taken
+    /// before this call. That is what lets a provider handed to a builder stay in sync.
+    pub fn with_recovered_blocks(self) -> Self {
+        self.recover_block_senders.store(true, Ordering::Relaxed);
+        self
+    }
+
     /// Makes snap state reads return provider errors when `fail` is true.
     pub fn set_snap_state_reads_fail(&self, fail: bool) {
         self.snap_state_reads_fail.store(fail, Ordering::Relaxed);
@@ -321,6 +339,7 @@ impl<T: NodePrimitives, ChainSpec> MockEthProvider<T, ChainSpec> {
             snap_storage_range_requests: self.snap_storage_range_requests,
             snap_account_proof: self.snap_account_proof,
             snap_storage_proof: self.snap_storage_proof,
+            recover_block_senders: self.recover_block_senders,
             tx: self.tx,
             prune_modes: self.prune_modes,
         }
@@ -881,18 +900,28 @@ impl<T: NodePrimitives, ChainSpec: EthChainSpec + Send + Sync + 'static> BlockRe
 
     fn recovered_block(
         &self,
-        _id: BlockHashOrNumber,
+        id: BlockHashOrNumber,
         _transaction_kind: TransactionVariant,
     ) -> ProviderResult<Option<RecoveredBlock<Self::Block>>> {
-        Ok(None)
+        if !self.recover_block_senders.load(Ordering::Relaxed) {
+            return Ok(None)
+        }
+        let Some(block) = self.block(id)? else { return Ok(None) };
+        let senders = block.body().recover_signers()?;
+        Ok(Some(match id {
+            // blocks are keyed by hash here, and tests often insert them under a synthetic hash,
+            // so keep the lookup key rather than recomputing it from the header
+            BlockHashOrNumber::Hash(hash) => RecoveredBlock::new(block, senders, hash),
+            BlockHashOrNumber::Number(_) => RecoveredBlock::new_unhashed(block, senders),
+        }))
     }
 
     fn sealed_block_with_senders(
         &self,
-        _id: BlockHashOrNumber,
-        _transaction_kind: TransactionVariant,
+        id: BlockHashOrNumber,
+        transaction_kind: TransactionVariant,
     ) -> ProviderResult<Option<RecoveredBlock<Self::Block>>> {
-        Ok(None)
+        self.recovered_block(id, transaction_kind)
     }
 
     fn block_range(&self, range: RangeInclusive<BlockNumber>) -> ProviderResult<Vec<Self::Block>> {
