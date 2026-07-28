@@ -33,11 +33,11 @@ pub struct ImportEraCommand<C: ChainSpecParser> {
     #[arg(long, value_name = "TO_BLOCK", verbatim_doc_comment)]
     to_block: Option<u64>,
 
-    /// Also import receipts, writing them to the `Receipts` static file segment.
+    /// Repair the `Receipts` static file segment of an already-executed range.
     ///
-    /// Off by default. Only `.era1` and `.ere` files may carry receipts (`.era1` always
-    /// includes them; `.ere` receipts are optional per spec); passing this flag with plain
-    /// `.era` files, or with `.ere` files that omit receipts, is an error.
+    /// Receipts must cover the Execution checkpoint exactly, so this cannot bootstrap a fresh
+    /// database: above the checkpoint they are pruned on the next node start, below it the node
+    /// cannot start. Byzantium onwards only, from `.era1` or `.ere` files that carry receipts.
     #[arg(long, verbatim_doc_comment)]
     with_receipts: bool,
 }

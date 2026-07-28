@@ -36,7 +36,7 @@ use reth_stages_types::{
 use reth_storage_api::{
     errors::{ProviderError, ProviderResult},
     BlockBodyIndicesProvider, BlockHashReader, DBProvider, DatabaseProviderFactory,
-    NodePrimitivesProvider, StageCheckpointWriter,
+    NodePrimitivesProvider, StageCheckpointReader, StageCheckpointWriter,
 };
 use std::{collections::Bound, error::Error, ops::RangeBounds, sync::mpsc};
 use tracing::info;
@@ -226,12 +226,12 @@ where
 /// When `to_block` is set, the import stops after reaching that block height; otherwise it
 /// continues until the source has no more files.
 ///
-/// When `store_receipts` is set, each block's receipts are also decoded and appended to the
-/// `Receipts` static file segment; a source file that carries no receipts for a block (only
-/// possible for `.ere` files, whose receipts are optional per spec) is then treated as an error.
+/// `store_receipts` imports up to the `Execution` checkpoint and errors unless it covers that
+/// range exactly: receipts above the checkpoint are pruned on the next node start, and receipts
+/// below it leave the node unable to start.
 ///
-/// `is_receipt_verifiable` decides which blocks have their receipts checked against the header
-/// (pre-Byzantium receipts can't be recomputed here, so the caller gates them out).
+/// `is_receipt_verifiable` decides which blocks have their receipts checked against the header,
+/// as pre-Byzantium receipts can't be recomputed here.
 ///
 /// Returns current block height.
 pub fn import<S, Downloader, Era, PF, B, BB, BH>(
@@ -258,6 +258,7 @@ where
             + BlockBodyIndicesProvider
             + BlockHashReader
             + StaticFileProviderFactory<Primitives: NodePrimitives<Block = B, BlockHeader = BH, BlockBody = BB>>
+            + StageCheckpointReader
             + StageCheckpointWriter,
     > + StaticFileProviderFactory<Primitives = <<PF as DatabaseProviderFactory>::ProviderRW as NodePrimitivesProvider>::Primitives>,
     ReceiptOf<<PF as DatabaseProviderFactory>::ProviderRW>: Compact + Receipt,
@@ -291,6 +292,44 @@ where
         headers_tip
     };
 
+    // Only the executed range can hold receipts durably, so the repair has to land exactly on the
+    // Execution checkpoint.
+    let receipts_target = store_receipts
+        .then(|| -> eyre::Result<_> {
+            let provider = provider_factory.database_provider_rw()?;
+            let target = provider
+                .get_stage_checkpoint(StageId::Execution)?
+                .map(|checkpoint| checkpoint.block_number)
+                .unwrap_or_default();
+
+            if target == 0 {
+                eyre::bail!(
+                    "receipt import repairs the receipt static files of an already-executed \
+                     range, but this database has executed no blocks. Sync the node first, or \
+                     import without receipts"
+                );
+            }
+            if height >= target {
+                eyre::bail!(
+                    "receipts already cover the executed range up to block {target}, nothing to \
+                     repair"
+                );
+            }
+            if let Some(to_block) = to_block &&
+                to_block != target
+            {
+                eyre::bail!(
+                    "--to-block {to_block} does not match the Execution checkpoint {target}. A \
+                     receipt repair must cover the executed range exactly, so either drop \
+                     --to-block or set it to {target}"
+                );
+            }
+
+            Ok(target)
+        })
+        .transpose()?;
+
+    let to_block = receipts_target.or(to_block);
     let end = to_block.map_or(Bound::Unbounded, Bound::Included);
     let policy = ImportPolicy { headers_tip, is_receipt_verifiable };
 
@@ -339,14 +378,25 @@ where
 
     provider.commit()?;
 
+    // A repair that stops short leaves the receipts behind the executed range, which the Execution
+    // stage reports as missing static file data on the next node start.
+    if let Some(target) = receipts_target &&
+        height < target
+    {
+        eyre::bail!(
+            "receipt repair reached block {height} but the executed range ends at {target}. The \
+             source ran out of files, re-run with the files covering blocks {}..={target}",
+            height + 1,
+        );
+    }
+
     Ok(height)
 }
 
 /// Saves progress of ERA import into stages sync.
 ///
-/// Only marks `Headers`/`Bodies` done, never `Execution`: unlike this import, execution also
-/// produces state, which imported receipts alone don't. `ExecutionStage::ensure_consistency`
-/// prunes any imported receipts back before a real sync re-executes the range.
+/// Never marks `Execution` done: this import writes no state, so moving that checkpoint would let
+/// a node start from blocks whose accounts and storage were never written.
 pub fn save_stage_checkpoints<P>(
     provider: P,
     from: BlockNumber,
@@ -966,15 +1016,16 @@ mod tests {
             writer.commit().unwrap();
         }
         save_stage_checkpoints(&provider, 0, 2, 2, 2).unwrap();
+        // Only block 1 was executed, so the repair ends below the headers already in static files.
+        provider.save_stage_checkpoint(StageId::Execution, StageCheckpoint::new(1)).unwrap();
         provider.commit().unwrap();
 
-        // Backfill receipts, stopping at block 1 while the headers already reach 2.
         let stream = futures_util::stream::iter(vec![Ok(TestMeta { marked: Cell::new(false) })]);
         let height = import::<TestEraWithEmptyReceipts, _, _, _, Block, _, _>(
             stream,
             &pf,
             &mut hash_collector,
-            Some(1),
+            None,
             true,
             &|_| false,
         )
@@ -989,6 +1040,77 @@ mod tests {
                 "{stage} checkpoint must not regress below the headers already in static files"
             );
         }
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn receipt_import_requires_an_executed_range() {
+        let pf = create_test_provider_factory();
+        init_genesis(&pf).unwrap();
+        let folder = tempdir().unwrap();
+        let mut hash_collector = Collector::new(4096, Some(folder.path().to_owned()));
+
+        // Nothing executed, so there is no range whose receipts could survive a node start.
+        let stream = futures_util::stream::iter(vec![Ok(TestMeta { marked: Cell::new(false) })]);
+        let result = import::<TestEraWithEmptyReceipts, _, _, _, Block, _, _>(
+            stream,
+            &pf,
+            &mut hash_collector,
+            None,
+            true,
+            &|_| false,
+        );
+
+        assert!(result.is_err());
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn receipt_import_rejects_a_to_block_off_the_execution_checkpoint() {
+        let pf = create_test_provider_factory();
+        init_genesis(&pf).unwrap();
+        let folder = tempdir().unwrap();
+        let mut hash_collector = Collector::new(4096, Some(folder.path().to_owned()));
+
+        let provider = pf.database_provider_rw().unwrap();
+        provider.save_stage_checkpoint(StageId::Execution, StageCheckpoint::new(2)).unwrap();
+        provider.commit().unwrap();
+
+        // Stopping at 1 would leave the receipts behind the executed range.
+        let stream = futures_util::stream::iter(vec![Ok(TestMeta { marked: Cell::new(false) })]);
+        let result = import::<TestEraWithEmptyReceipts, _, _, _, Block, _, _>(
+            stream,
+            &pf,
+            &mut hash_collector,
+            Some(1),
+            true,
+            &|_| false,
+        );
+
+        assert!(result.is_err());
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn receipt_import_errors_when_the_source_stops_short() {
+        let pf = create_test_provider_factory();
+        init_genesis(&pf).unwrap();
+        let folder = tempdir().unwrap();
+        let mut hash_collector = Collector::new(4096, Some(folder.path().to_owned()));
+
+        let provider = pf.database_provider_rw().unwrap();
+        provider.save_stage_checkpoint(StageId::Execution, StageCheckpoint::new(10)).unwrap();
+        provider.commit().unwrap();
+
+        // The source only carries blocks 1 and 2, far short of the executed range.
+        let stream = futures_util::stream::iter(vec![Ok(TestMeta { marked: Cell::new(false) })]);
+        let result = import::<TestEraWithEmptyReceipts, _, _, _, Block, _, _>(
+            stream,
+            &pf,
+            &mut hash_collector,
+            None,
+            true,
+            &|_| false,
+        );
+
+        assert!(result.is_err());
     }
 
     #[test]

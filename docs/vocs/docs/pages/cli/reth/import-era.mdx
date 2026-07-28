@@ -149,11 +149,11 @@ Storage:
           import ends. By default all available blocks are imported.
 
       --with-receipts
-          Also import receipts, writing them to the `Receipts` static file segment.
+          Repair the `Receipts` static file segment of an already-executed range.
 
-          Off by default. Only `.era1` and `.ere` files may carry receipts (`.era1` always
-          includes them; `.ere` receipts are optional per spec); passing this flag with plain
-          `.era` files, or with `.ere` files that omit receipts, is an error.
+          Receipts must cover the Execution checkpoint exactly, so this cannot bootstrap a fresh
+          database: above the checkpoint they are pruned on the next node start, below it the node
+          cannot start. Byzantium onwards only, from `.era1` or `.ere` files that carry receipts.
 
 Logging:
       --log.stdout.format <FORMAT>

@@ -8,9 +8,10 @@ use reth_etl::Collector;
 use reth_fs_util as fs;
 use reth_primitives_traits::Block as _;
 use reth_provider::{
-    test_utils::create_test_provider_factory, BlockNumReader, BlockReader, ReceiptProvider,
-    StaticFileProviderFactory,
+    test_utils::create_test_provider_factory, BlockNumReader, BlockReader, DBProvider,
+    DatabaseProviderFactory, ReceiptProvider, StageCheckpointWriter, StaticFileProviderFactory,
 };
+use reth_stages_types::{StageCheckpoint, StageId};
 use reth_static_file_types::StaticFileSegment;
 use std::str::FromStr;
 use tempfile::tempdir;
@@ -50,19 +51,14 @@ async fn test_history_imports_from_fresh_state_successfully() {
     assert_eq!(actual_block_number, expected_block_number);
 }
 
-/// Importing a real `.era1` file with `store_receipts = true` must advance the `Receipts` static
-/// file segment alongside the headers.
+/// Repairing the `Receipts` segment of an executed range from a real `.era1` file.
 ///
 /// Mainnet's first transaction is in block 46147, so every block in the first era1 file is
 /// transaction-less: this exercises the writer plumbing, not receipt decoding.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_history_import_with_receipts() {
     let url = Url::from_str(ITHACA_ERA_INDEX_URL).unwrap();
-
-    let folder = tempdir().unwrap();
-    let client = EraClient::new(ClientWithFakeIndex(Client::new()), url, folder.path());
-    let config = EraStreamConfig::default().with_max_files(1).with_max_concurrent_downloads(1);
-    let stream = EraStream::new(client, config);
+    let expected_height = 8191;
 
     let pf = create_test_provider_factory();
     init_genesis(&pf).unwrap();
@@ -70,15 +66,46 @@ async fn test_history_import_with_receipts() {
     let collector_dir = tempdir().unwrap();
     let mut hash_collector = Collector::new(4096, Some(collector_dir.path().to_owned()));
 
-    let imported_height =
-        import::<Era1, _, _, _, _, _, _>(stream, &pf, &mut hash_collector, None, true, &|_| false)
-            .unwrap();
-    assert_eq!(imported_height, 8191);
+    // Headers and bodies first, standing in for a node that has synced and executed this range.
+    let folder = tempdir().unwrap();
+    let client = EraClient::new(ClientWithFakeIndex(Client::new()), url.clone(), folder.path());
+    let config = EraStreamConfig::default().with_max_files(1).with_max_concurrent_downloads(1);
+    let imported_height = import::<Era1, _, _, _, _, _, _>(
+        EraStream::new(client, config),
+        &pf,
+        &mut hash_collector,
+        None,
+        false,
+        &|_| false,
+    )
+    .unwrap();
+    assert_eq!(imported_height, expected_height);
+
+    let provider = pf.database_provider_rw().unwrap();
+    provider
+        .save_stage_checkpoint(StageId::Execution, StageCheckpoint::new(expected_height))
+        .unwrap();
+    provider.commit().unwrap();
+
+    // Receipts are then repaired over the executed range.
+    let folder = tempdir().unwrap();
+    let client = EraClient::new(ClientWithFakeIndex(Client::new()), url, folder.path());
+    let config = EraStreamConfig::default().with_max_files(1).with_max_concurrent_downloads(1);
+    let repaired_height = import::<Era1, _, _, _, _, _, _>(
+        EraStream::new(client, config),
+        &pf,
+        &mut hash_collector,
+        None,
+        true,
+        &|_| false,
+    )
+    .unwrap();
+    assert_eq!(repaired_height, expected_height);
 
     assert_eq!(
         pf.static_file_provider().get_highest_static_file_block(StaticFileSegment::Receipts),
-        Some(imported_height),
-        "receipts static file should cover every imported block"
+        Some(expected_height),
+        "receipts static file should cover the executed range"
     );
 
     let provider = pf.provider().unwrap();
