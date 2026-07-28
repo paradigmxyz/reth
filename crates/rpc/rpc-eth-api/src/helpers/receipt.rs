@@ -34,7 +34,7 @@ pub trait LoadReceipt:
 
             Ok(self
                 .converter()
-                .convert_receipts_with_block(
+                .convert_receipts(
                     vec![ConvertReceiptInput {
                         tx: tx.as_recovered_ref(),
                         gas_used: receipt.cumulative_gas_used() - gas_used,

@@ -34,19 +34,17 @@ pub trait EthSubscriptions:
             let mut all_logs = Vec::new();
 
             for (block, receipts, removed) in reverted.chain(committed) {
-                let result = converter.log_context(block.sealed_block()).and_then(|context| {
-                    logs_utils::matching_block_logs_with_tx_hashes_fallible(
-                        &filter,
-                        block.num_hash(),
-                        block.timestamp(),
-                        block
-                            .transactions_recovered()
-                            .zip(receipts.iter())
-                            .map(|(tx, receipt)| (*tx.tx_hash(), receipt)),
-                        removed,
-                        |log| converter.convert_log(log, &context),
-                    )
-                });
+                let logs = logs_utils::matching_block_logs_with_tx_hashes(
+                    &filter,
+                    block.num_hash(),
+                    block.timestamp(),
+                    block
+                        .transactions_recovered()
+                        .zip(receipts.iter())
+                        .map(|(tx, receipt)| (*tx.tx_hash(), receipt)),
+                    removed,
+                );
+                let result = converter.convert_logs(logs, block.sealed_block());
                 match result {
                     Ok(logs) => all_logs.extend(logs),
                     Err(err) => {
@@ -142,7 +140,7 @@ pub trait EthSubscriptions:
                         return None;
                     }
 
-                    match converter.convert_receipts_with_block(inputs, block.sealed_block()) {
+                    match converter.convert_receipts(inputs, block.sealed_block()) {
                         Ok(rpc_receipts) => Some(rpc_receipts),
                         Err(err) => {
                             error!(target = "rpc", %err, "Failed to convert receipts");

@@ -4,7 +4,7 @@ use alloy_consensus::{transaction::TxHashRef, BlockHeader};
 use alloy_eips::BlockNumberOrTag;
 use alloy_primitives::{Sealable, TxHash};
 use alloy_rpc_types_eth::{
-    BlockNumHash, Filter, FilterBlockOption, FilterId, PendingTransactionFilterKind,
+    BlockNumHash, Filter, FilterBlockOption, FilterId, Log, PendingTransactionFilterKind,
 };
 use async_trait::async_trait;
 use futures::{
@@ -15,7 +15,7 @@ use futures::{
 use itertools::Itertools;
 use jsonrpsee::{core::RpcResult, server::IdProvider};
 use reth_errors::ProviderError;
-use reth_primitives_traits::{BlockBody, NodePrimitives, SealedBlock, SealedHeader};
+use reth_primitives_traits::{BlockBody, BlockTy, NodePrimitives, SealedBlock, SealedHeader};
 use reth_rpc_eth_api::{
     helpers::{EthBlocks, LoadReceipt},
     EngineEthFilter, EthApiTypes, EthFilterApiServer, FullEthApiTypes, QueryLimits, RpcConvert,
@@ -503,6 +503,18 @@ where
         self.eth_api.cache()
     }
 
+    /// Converts filtered logs using metadata from their block.
+    fn convert_logs(
+        &self,
+        logs: Vec<Log>,
+        block: &SealedBlock<BlockTy<Eth::Primitives>>,
+    ) -> Result<Vec<RpcLog<Eth::NetworkTypes>>, EthFilterError> {
+        self.eth_api.converter().convert_logs(logs, block).map_err(|err| {
+            let err = <Eth::Error as From<<Eth::RpcConvert as RpcConvert>::Error>>::from(err);
+            EthFilterError::Rpc(err.into())
+        })
+    }
+
     /// Loads a historical block and its receipts without filling the recent-state cache.
     fn historical_block_and_receipts(
         &self,
@@ -551,14 +563,7 @@ where
                 }
 
                 let block_num_hash = BlockNumHash::new(block_number, block_hash);
-                let context =
-                    self.eth_api.converter().log_context(block.sealed_block()).map_err(|err| {
-                        let err = <Eth::Error as From<
-                            <<Eth as EthApiTypes>::RpcConvert as RpcConvert>::Error,
-                        >>::from(err);
-                        EthFilterError::Rpc(err.into())
-                    })?;
-                let all_logs = logs_utils::matching_block_logs_with_tx_hashes_fallible(
+                let logs = logs_utils::matching_block_logs_with_tx_hashes(
                     &filter,
                     block_num_hash,
                     block.timestamp(),
@@ -569,16 +574,9 @@ where
                         .zip(receipts.iter())
                         .map(|(tx, receipt)| (*tx.tx_hash(), receipt)),
                     false,
-                    |log| self.eth_api.converter().convert_log(log, &context),
-                )
-                .map_err(|err| {
-                    let err = <Eth::Error as From<
-                        <<Eth as EthApiTypes>::RpcConvert as RpcConvert>::Error,
-                    >>::from(err);
-                    EthFilterError::Rpc(err.into())
-                })?;
+                );
 
-                Ok(all_logs)
+                self.convert_logs(logs, block.sealed_block())
             }
             FilterBlockOption::Range { from_block, to_block } => {
                 // Handle special case where from block is pending
@@ -601,17 +599,7 @@ where
                         if pending_block.block.number() > info.best_number {
                             // only consider the pending block if it is ahead of the chain
                             let block_num_hash = pending_block.block.num_hash();
-                            let context = self
-                                .eth_api
-                                .converter()
-                                .log_context(pending_block.block.sealed_block())
-                                .map_err(|err| {
-                                    let err = <Eth::Error as From<
-                                        <<Eth as EthApiTypes>::RpcConvert as RpcConvert>::Error,
-                                    >>::from(err);
-                                    EthFilterError::Rpc(err.into())
-                                })?;
-                            let all_logs = logs_utils::matching_block_logs_with_tx_hashes_fallible(
+                            let logs = logs_utils::matching_block_logs_with_tx_hashes(
                                 &filter,
                                 block_num_hash,
                                 pending_block.block.timestamp(),
@@ -623,15 +611,8 @@ where
                                     .zip(pending_block.receipts.iter())
                                     .map(|(tx, receipt)| (*tx.tx_hash(), receipt)),
                                 false,
-                                |log| self.eth_api.converter().convert_log(log, &context),
-                            )
-                            .map_err(|err| {
-                                let err = <Eth::Error as From<
-                                    <<Eth as EthApiTypes>::RpcConvert as RpcConvert>::Error,
-                                >>::from(err);
-                                EthFilterError::Rpc(err.into())
-                            })?;
-                            return Ok(all_logs);
+                            );
+                            return self.convert_logs(logs, pending_block.block.sealed_block());
                         }
                     }
                 }
@@ -804,13 +785,7 @@ where
         // iterate through the range mode to get receipts and blocks
         while let Some(ReceiptBlockResult { receipts, block }) = range_mode.next().await? {
             let num_hash = block.num_hash();
-            let context = self.eth_api.converter().log_context(&block).map_err(|err| {
-                let err = <Eth::Error as From<
-                    <<Eth as EthApiTypes>::RpcConvert as RpcConvert>::Error,
-                >>::from(err);
-                EthFilterError::Rpc(err.into())
-            })?;
-            let logs = logs_utils::matching_block_logs_with_tx_hashes_fallible(
+            let logs = logs_utils::matching_block_logs_with_tx_hashes(
                 filter,
                 num_hash,
                 block.timestamp(),
@@ -821,14 +796,8 @@ where
                     .zip(receipts.iter())
                     .map(|(tx, receipt)| (*tx.tx_hash(), receipt)),
                 false,
-                |log| self.eth_api.converter().convert_log(log, &context),
-            )
-            .map_err(|err| {
-                let err = <Eth::Error as From<
-                    <<Eth as EthApiTypes>::RpcConvert as RpcConvert>::Error,
-                >>::from(err);
-                EthFilterError::Rpc(err.into())
-            })?;
+            );
+            let logs = self.convert_logs(logs, &block)?;
             all_logs.extend(logs);
 
             // size check but only if range is multiple blocks, so we always return all

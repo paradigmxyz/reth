@@ -31,35 +31,31 @@ pub struct ConvertReceiptInput<'a, N: NodePrimitives> {
     pub meta: TransactionMeta,
 }
 
-/// A type that knows how to convert logs using metadata derived from their block.
-pub trait LogConverter<N: NodePrimitives>: Debug + 'static {
-    /// RPC representation.
-    type RpcLog;
+/// A type that knows how to convert primitive receipts to RPC representations.
+pub trait ReceiptConverter<N: NodePrimitives>: Debug + 'static {
+    /// RPC receipt representation.
+    type RpcReceipt;
 
-    /// Block-level conversion context.
-    type Context;
+    /// RPC log representation.
+    type RpcLog;
 
     /// Error that may occur during conversion.
     type Error;
 
-    /// Derives conversion context for a block.
-    fn log_context(&self, block: &SealedBlock<N::Block>) -> Result<Self::Context, Self::Error>;
+    /// Converts RPC logs using metadata from their block.
+    ///
+    /// Implementations must preserve the number and order of the input logs.
+    fn convert_logs(
+        &self,
+        logs: Vec<Log>,
+        block: &SealedBlock<N::Block>,
+    ) -> Result<Vec<Self::RpcLog>, Self::Error>;
 
-    /// Converts a log using its block-level context.
-    fn convert_log(&self, log: Log, context: &Self::Context) -> Result<Self::RpcLog, Self::Error>;
-}
-
-/// A type that knows how to convert primitive receipts to RPC representations.
-pub trait ReceiptConverter<N: NodePrimitives>: LogConverter<N> {
-    /// RPC representation.
-    type RpcReceipt;
-
-    /// Converts a set of primitive receipts to RPC representations. It is guaranteed that all
-    /// receipts are from the same block.
+    /// Converts primitive receipts from `block` to RPC representations.
     fn convert_receipts(
         &self,
         receipts: Vec<ConvertReceiptInput<'_, N>>,
-        context: &Self::Context,
+        block: &SealedBlock<N::Block>,
     ) -> Result<Vec<Self::RpcReceipt>, Self::Error>;
 }
 
@@ -167,27 +163,17 @@ pub trait RpcConvert: Send + Sync + Unpin + Debug + DynClone + 'static {
         evm_env: &EvmEnvFor<Self::Evm>,
     ) -> Result<TxEnvFor<Self::Evm>, Self::Error>;
 
-    /// Derives log conversion context for a block.
-    fn log_context(
-        &self,
-        block: &SealedBlock<BlockTy<Self::Primitives>>,
-    ) -> Result<<Self as RpcConvert>::LogContext, Self::Error>;
-
-    /// Block-level log conversion context.
-    type LogContext;
-
-    /// Converts a log using block-level context.
-    fn convert_log(
-        &self,
-        log: Log,
-        context: &Self::LogContext,
-    ) -> Result<RpcLog<Self::Network>, Self::Error>;
-
-    /// Converts a set of primitive receipts to RPC representations. It is guaranteed that all
-    /// receipts are from the same block.
+    /// Converts RPC logs using metadata from their block.
     ///
-    /// Also accepts the corresponding block in case the receipt requires additional metadata.
-    fn convert_receipts_with_block(
+    /// Implementations must preserve the number and order of the input logs.
+    fn convert_logs(
+        &self,
+        logs: Vec<Log>,
+        block: &SealedBlock<BlockTy<Self::Primitives>>,
+    ) -> Result<Vec<RpcLog<Self::Network>>, Self::Error>;
+
+    /// Converts primitive receipts from `block` to RPC representations.
+    fn convert_receipts(
         &self,
         receipts: Vec<ConvertReceiptInput<'_, Self::Primitives>>,
         block: &SealedBlock<BlockTy<Self::Primitives>>,
@@ -202,20 +188,13 @@ pub trait RpcConvert: Send + Sync + Unpin + Debug + DynClone + 'static {
 }
 
 dyn_clone::clone_trait_object!(
-    <Primitives, Network, Error, Evm, LogContext>
-    RpcConvert<Primitives = Primitives, Network = Network, Error = Error, Evm = Evm, LogContext = LogContext>
+    <Primitives, Network, Error, Evm>
+    RpcConvert<Primitives = Primitives, Network = Network, Error = Error, Evm = Evm>
 );
 
 /// Type-erased RPC converter.
-pub type BoxedRpcConverter<Primitives, Network, Error, Evm, LogContext> = Box<
-    dyn RpcConvert<
-        Primitives = Primitives,
-        Network = Network,
-        Error = Error,
-        Evm = Evm,
-        LogContext = LogContext,
-    >,
->;
+pub type BoxedRpcConverter<Primitives, Network, Error, Evm> =
+    Box<dyn RpcConvert<Primitives = Primitives, Network = Network, Error = Error, Evm = Evm>>;
 
 /// Type-erased form of an RPC converter.
 pub type ErasedRpcConverter<T> = BoxedRpcConverter<
@@ -223,7 +202,6 @@ pub type ErasedRpcConverter<T> = BoxedRpcConverter<
     <T as RpcConvert>::Network,
     <T as RpcConvert>::Error,
     <T as RpcConvert>::Evm,
-    <T as RpcConvert>::LogContext,
 >;
 
 /// Converts `Tx` into `RpcTx`
@@ -731,7 +709,6 @@ where
     type Evm = Evm;
     type Network = Network;
     type Error = Receipt::Error;
-    type LogContext = Receipt::Context;
 
     fn fill(
         &self,
@@ -762,28 +739,20 @@ where
         self.tx_env_converter.convert_tx_env(request, evm_env).map_err(Into::into)
     }
 
-    fn log_context(
+    fn convert_logs(
         &self,
+        logs: Vec<Log>,
         block: &SealedBlock<BlockTy<Self::Primitives>>,
-    ) -> Result<Self::LogContext, Self::Error> {
-        self.receipt_converter.log_context(block)
+    ) -> Result<Vec<RpcLog<Self::Network>>, Self::Error> {
+        self.receipt_converter.convert_logs(logs, block)
     }
 
-    fn convert_log(
-        &self,
-        log: Log,
-        context: &Self::LogContext,
-    ) -> Result<RpcLog<Self::Network>, Self::Error> {
-        self.receipt_converter.convert_log(log, context)
-    }
-
-    fn convert_receipts_with_block(
+    fn convert_receipts(
         &self,
         receipts: Vec<ConvertReceiptInput<'_, Self::Primitives>>,
         block: &SealedBlock<BlockTy<Self::Primitives>>,
     ) -> Result<Vec<RpcReceipt<Self::Network>>, Self::Error> {
-        let context = self.log_context(block)?;
-        self.receipt_converter.convert_receipts(receipts, &context)
+        self.receipt_converter.convert_receipts(receipts, block)
     }
 
     fn convert_header(
