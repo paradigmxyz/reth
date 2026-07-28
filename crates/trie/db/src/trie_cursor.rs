@@ -368,6 +368,12 @@ where
     fn set_hashed_address(&mut self, hashed_address: B256) {
         self.hashed_address = hashed_address;
     }
+
+    fn root_hash_if_unchanged(&mut self) -> Result<Option<B256>, DatabaseError> {
+        Ok(self
+            .seek_exact(Nibbles::default())?
+            .and_then(|(_, node)| node.root_hash))
+    }
 }
 
 #[cfg(test)]
