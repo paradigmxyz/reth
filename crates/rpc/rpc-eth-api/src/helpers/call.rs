@@ -22,7 +22,7 @@ use reth_chainspec::{ChainSpecProvider, EthChainSpec, EthereumHardforks};
 use reth_errors::{ProviderError, RethError};
 use reth_evm::{
     block::BlockExecutor, env::BlockEnvironment, execute::BlockBuilder, ConfigureEvm, Evm,
-    EvmEnvFor, HaltReasonFor, InspectorFor, TransactionEnvMut, TxEnvFor,
+    EvmEnvFor, EvmFor, HaltReasonFor, InspectorFor, TransactionEnvMut, TxEnvFor,
 };
 use reth_node_api::BlockBody;
 use reth_primitives_traits::Recovered;
@@ -791,6 +791,27 @@ pub trait Call:
         I: IntoIterator<Item = Recovered<&'a ProviderTx<Self::Provider>>>,
     {
         let mut evm = self.evm_config().evm_with_env(db, evm_env);
+        self.replay_transactions_until_with_evm(&mut evm, transactions, target_tx_hash)
+    }
+
+    /// Replays all the transactions until the target transaction is found, on the given EVM.
+    ///
+    /// Unlike [`Self::replay_transactions_until`], which builds an EVM and discards it, this uses
+    /// an EVM the caller holds, so the target transaction can run on the same one.
+    ///
+    /// Note: This assumes the target transaction is in the given iterator.
+    /// Returns the index of the target transaction in the given iterator.
+    fn replay_transactions_until_with_evm<'a, DB, I, Txs>(
+        &self,
+        evm: &mut EvmFor<Self::Evm, DB, I>,
+        transactions: Txs,
+        target_tx_hash: B256,
+    ) -> Result<usize, Self::Error>
+    where
+        DB: Database<Error = EvmDatabaseError<ProviderError>> + DatabaseCommit + core::fmt::Debug,
+        I: InspectorFor<Self::Evm, DB>,
+        Txs: IntoIterator<Item = Recovered<&'a ProviderTx<Self::Provider>>>,
+    {
         let mut index = 0;
         for tx in transactions {
             if *tx.tx_hash() == target_tx_hash {

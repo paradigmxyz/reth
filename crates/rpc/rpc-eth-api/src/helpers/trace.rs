@@ -181,11 +181,29 @@ pub trait Trace: LoadState<Error: FromEvmError<Self::Evm>> + Call {
 
                 this.apply_pre_execution_changes(&block, &mut db)?;
 
-                // replay all transactions prior to the targeted transaction
-                this.replay_transactions_until(&mut db, evm_env.clone(), block_txs, *tx.tx_hash())?;
-
+                // `tx_env` consumes `tx`, so take the hash first
+                let target_hash = *tx.tx_hash();
                 let tx_env = this.evm_config().tx_env(tx);
-                let res = this.inspect(&mut db, evm_env, tx_env, &mut inspector)?;
+
+                // The EVM borrows both the database and the inspector, and the callback takes
+                // them by value, so it is scoped to end those borrows before `f` runs.
+                let res = {
+                    // Prefix and target on one EVM, so the target sees the block-scoped state
+                    // the prefix built.
+                    let mut evm = this.evm_config().evm_with_env_and_inspector(
+                        &mut db,
+                        evm_env,
+                        &mut inspector,
+                    );
+
+                    // replay all transactions prior to the targeted transaction, without tracing
+                    evm.disable_inspector();
+                    this.replay_transactions_until_with_evm(&mut evm, block_txs, target_hash)?;
+                    evm.enable_inspector();
+
+                    evm.transact(tx_env).map_err(Self::Error::from_evm_err)?
+                };
+
                 f(tx_info, inspector, res, db)
             })
             .await

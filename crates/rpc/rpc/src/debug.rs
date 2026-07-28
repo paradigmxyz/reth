@@ -263,16 +263,8 @@ where
 
                 // replay all transactions prior to the targeted transaction, without tracing them
                 evm.disable_inspector();
-                let mut index = 0;
-                for prior_tx in block_txs {
-                    if *prior_tx.tx_hash() == target_hash {
-                        // reached the target transaction
-                        break
-                    }
-                    let prior_tx_env = eth_api.evm_config().tx_env(prior_tx);
-                    evm.transact_commit(prior_tx_env).map_err(Eth::Error::from_evm_err)?;
-                    index += 1;
-                }
+                let index =
+                    eth_api.replay_transactions_until_with_evm(&mut evm, block_txs, target_hash)?;
                 evm.enable_inspector();
 
                 let tx_env = eth_api.evm_config().tx_env(&tx);
@@ -1325,7 +1317,7 @@ mod tests {
     use reth_network_api::noop::NoopNetwork;
     use reth_provider::test_utils::{ExtendedAccount, MockEthProvider};
     use reth_rpc_convert::RpcConverter;
-    use reth_rpc_eth_api::node::RpcNodeCoreAdapter;
+    use reth_rpc_eth_api::{helpers::Trace, node::RpcNodeCoreAdapter};
     use reth_rpc_eth_types::receipt::EthReceiptConverter;
     use reth_transaction_pool::test_utils::{testing_pool, TestPool};
     use revm::{
@@ -1337,6 +1329,7 @@ mod tests {
         primitives::hardfork::SpecId,
         Inspector,
     };
+    use revm_inspectors::tracing::TracingInspectorConfig;
     use std::sync::{
         atomic::{AtomicUsize, Ordering},
         Mutex,
@@ -1645,6 +1638,29 @@ mod tests {
         assert_eq!(selectors(0).len(), 1);
         assert!(selectors(1).is_empty(), "{:?}", selectors(1));
         assert!(selectors(2).is_empty(), "{:?}", selectors(2));
+    }
+
+    /// Covers `Trace::spawn_trace_transaction_in_block_with_inspector`, which backs
+    /// `trace_transaction`, `trace_get`, `trace_replayTransaction` and the `ots_*` trace
+    /// endpoints. It lives here because the fixture above is private to this module.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_trace_transaction_in_block_sees_block_start_context() {
+        let f = fixture(3);
+
+        f.api
+            .eth_api()
+            .spawn_trace_transaction_in_block(
+                f.tx_hashes[2],
+                TracingInspectorConfig::default_parity(),
+                |_, _, _, _| Ok(()),
+            )
+            .await
+            .unwrap()
+            .expect("transaction should be found");
+
+        // the two prefix transactions plus the target, all on one EVM
+        assert_eq!(f.observations.take_values(), vec![block_start_value(); 3]);
+        assert_eq!(f.observations.take_evms_created(), 2);
     }
 
     #[tokio::test(flavor = "multi_thread")]
