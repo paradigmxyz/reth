@@ -206,7 +206,7 @@ impl TestHarness {
 
         let (from_tree_tx, from_tree_rx) = unbounded_channel();
         let runtime = reth_tasks::Runtime::test();
-        let state_trie_overlays = OverlayManager::new(runtime.state_trie_overlay_worker_pool());
+        let overlay_manager = OverlayManager::new(runtime.state_trie_overlay_worker_pool());
 
         let header = chain_spec.genesis_header().clone();
         let header = SealedHeader::seal_slow(header);
@@ -216,7 +216,7 @@ impl TestHarness {
             tree_config.invalid_header_hit_eviction_threshold(),
             header.num_hash(),
             EngineApiKind::Ethereum,
-            state_trie_overlays.clone(),
+            overlay_manager.clone(),
         );
         let canonical_in_memory_state = CanonicalInMemoryState::with_head(header, None, None);
 
@@ -231,7 +231,7 @@ impl TestHarness {
             payload_validator,
             tree_config.clone(),
             Box::new(NoopInvalidBlockHook::default()),
-            state_trie_overlays,
+            overlay_manager,
             runtime.clone(),
         );
 
@@ -284,9 +284,9 @@ impl TestHarness {
             parent_hash = hash;
         }
 
-        let state_trie_overlays = self.tree.state.tree_state.state_trie_overlays.clone();
+        let overlay_manager = self.tree.state.tree_state.overlay_manager.clone();
         for block in &blocks {
-            state_trie_overlays.insert_block(block.clone());
+            overlay_manager.insert_block(block.clone());
         }
 
         self.tree.state.tree_state = TreeState {
@@ -295,7 +295,7 @@ impl TestHarness {
             current_canonical_head: blocks.last().unwrap().recovered_block().num_hash(),
             parent_to_child,
             engine_kind: EngineApiKind::Ethereum,
-            state_trie_overlays,
+            overlay_manager,
         };
 
         let last_executed_block = blocks.last().unwrap().clone();
@@ -428,7 +428,7 @@ impl ValidatorTestHarness {
         let provider = harness.provider.clone();
         let payload_validator = MockEngineValidator;
         let evm_config = MockEvmConfig::default();
-        let state_trie_overlays = harness.tree.state.tree_state.state_trie_overlays.clone();
+        let overlay_manager = harness.tree.state.tree_state.overlay_manager.clone();
 
         let validator = BasicEngineValidator::new(
             provider,
@@ -437,7 +437,7 @@ impl ValidatorTestHarness {
             payload_validator,
             TreeConfig::default(),
             Box::new(NoopInvalidBlockHook::default()),
-            state_trie_overlays,
+            overlay_manager,
             reth_tasks::Runtime::test(),
         );
 

@@ -165,7 +165,7 @@ impl<N: NodePrimitives> EngineApiTreeState<N> {
         invalid_header_hit_eviction_threshold: u8,
         canonical_block: BlockNumHash,
         engine_kind: EngineApiKind,
-        state_trie_overlays: OverlayManager<N>,
+        overlay_manager: OverlayManager<N>,
     ) -> Self {
         Self {
             invalid_headers: InvalidHeaderCache::new(
@@ -173,7 +173,7 @@ impl<N: NodePrimitives> EngineApiTreeState<N> {
                 invalid_header_hit_eviction_threshold,
             ),
             buffer: BlockBuffer::new(block_buffer_limit),
-            tree_state: TreeState::new(canonical_block, engine_kind, state_trie_overlays),
+            tree_state: TreeState::new(canonical_block, engine_kind, overlay_manager),
             pending_sparse_trie_prune: false,
             forkchoice_state_tracker: ForkchoiceStateTracker::default(),
         }
@@ -463,7 +463,7 @@ where
         persistence: PersistenceHandle<N>,
         payload_builder: PayloadBuilderHandle<T>,
         canonical_in_memory_state: CanonicalInMemoryState<N>,
-        state_trie_overlays: OverlayManager<N>,
+        overlay_manager: OverlayManager<N>,
         config: TreeConfig,
         kind: EngineApiKind,
         evm_config: C,
@@ -485,7 +485,7 @@ where
             config.invalid_header_hit_eviction_threshold(),
             header.num_hash(),
             kind,
-            state_trie_overlays,
+            overlay_manager,
         );
 
         let task = Self::new(
@@ -1555,7 +1555,7 @@ where
             eviction_threshold,
             "Evicting changesets below threshold"
         );
-        self.state.tree_state.state_trie_overlays.evict_cached_changesets(eviction_threshold);
+        self.state.tree_state.overlay_manager.evict_cached_changesets(eviction_threshold);
 
         self.on_new_persisted_block()?;
 
@@ -2234,7 +2234,7 @@ where
         let trie_updates = self
             .state
             .tree_state
-            .state_trie_overlays
+            .overlay_manager
             .compute_block_trie_updates(&db_provider, block.number())?;
 
         let sorted_hashed_state = Arc::new(hashed_state.into_sorted());
