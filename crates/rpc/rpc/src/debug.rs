@@ -1318,6 +1318,7 @@ mod tests {
     };
     use alloy_network::Ethereum;
     use alloy_primitives::{address, Signature, TxKind, U256};
+    use alloy_rpc_types_trace::geth::GethDebugBuiltInTracerType;
     use reth_chainspec::ChainSpec;
     use reth_ethereum_primitives::{EthPrimitives, Transaction, TransactionSigned};
     use reth_evm_ethereum::EthEvmConfig;
@@ -1349,6 +1350,8 @@ mod tests {
     const BLOCK_START_VALUE: u64 = 1;
     /// Value [`WRITER`] stores into [`OBSERVED_SLOT`]: `PUSH1 2 PUSH1 0 SSTORE STOP`.
     const WRITTEN_VALUE: u64 = 2;
+    /// Call selector the block's first transaction sends to [`WRITER`].
+    const SELECTOR: [u8; 4] = [0x11, 0x22, 0x33, 0x44];
 
     /// What the block's transactions observed, and how many EVMs were built to run them.
     #[derive(Debug, Default, Clone)]
@@ -1532,17 +1535,19 @@ mod tests {
 
         let transactions: Vec<_> = (0..tx_count)
             .map(|i| {
-                let (to, gas_limit) = if i == 0 {
-                    (TxKind::Call(WRITER), 100_000)
+                let (to, gas_limit, input) = if i == 0 {
+                    // the selector is what the 4byte tracer records; WRITER ignores calldata
+                    (TxKind::Call(WRITER), 100_000, Bytes::from_static(&SELECTOR))
                 } else {
                     // distinct gas limits give distinct signing hashes, hence distinct senders
-                    (TxKind::Call(Address::ZERO), 21_000 + i as u64)
+                    (TxKind::Call(Address::ZERO), 21_000 + i as u64, Bytes::new())
                 };
                 TransactionSigned::new_unhashed(
                     Transaction::Legacy(TxLegacy {
                         gas_limit,
                         gas_price: 0,
                         to,
+                        input,
                         ..Default::default()
                     }),
                     Signature::test_signature(),
@@ -1626,20 +1631,20 @@ mod tests {
     async fn test_debug_trace_block_fuses_inspector_between_transactions() {
         let f = fixture(3);
 
-        let results =
-            f.api.debug_trace_block(f.block_hash.into(), Default::default()).await.unwrap();
+        // the 4byte tracer accumulates a selector map, so without fusing between transactions
+        // transaction 0's selector leaks into the later traces. The struct logger does not.
+        let opts = GethDebugTracingOptions::new_tracer(GethDebugBuiltInTracerType::FourByteTracer);
+        let results = f.api.debug_trace_block(f.block_hash.into(), opts).await.unwrap();
 
-        let logs = |i: usize| {
+        let selectors = |i: usize| {
             let TraceResult::Success { result, .. } = &results[i] else { panic!() };
-            let GethTrace::Default(frame) = result else { panic!() };
-            frame.struct_logs.len()
+            let GethTrace::FourByteTracer(frame) = result else { panic!("{result:?}") };
+            frame.0.clone()
         };
-        // transaction 0 calls WRITER and runs opcodes; the rest are bare transfers that run none.
-        // Without fusing the shared inspector between transactions, transaction 0's steps would
-        // still be in the later traces.
-        assert!(logs(0) > 0);
-        assert_eq!(logs(1), 0);
-        assert_eq!(logs(2), 0);
+        // only transaction 0 sends calldata
+        assert_eq!(selectors(0).len(), 1);
+        assert!(selectors(1).is_empty(), "{:?}", selectors(1));
+        assert!(selectors(2).is_empty(), "{:?}", selectors(2));
     }
 
     #[tokio::test(flavor = "multi_thread")]
