@@ -691,3 +691,36 @@ vergen-git2 = "10.0.1"
 
 # networking
 ipnet = "2.11"
+
+[patch.crates-io]
+alloy-consensus = { git = "https://github.com/klkvr/alloy", rev = "94fa15d7c90d57f7b235b00b92d390fc172905bc" }
+alloy-consensus-any = { git = "https://github.com/klkvr/alloy", rev = "94fa15d7c90d57f7b235b00b92d390fc172905bc" }
+alloy-contract = { git = "https://github.com/klkvr/alloy", rev = "94fa15d7c90d57f7b235b00b92d390fc172905bc" }
+alloy-eips = { git = "https://github.com/klkvr/alloy", rev = "94fa15d7c90d57f7b235b00b92d390fc172905bc" }
+alloy-genesis = { git = "https://github.com/klkvr/alloy", rev = "94fa15d7c90d57f7b235b00b92d390fc172905bc" }
+alloy-json-rpc = { git = "https://github.com/klkvr/alloy", rev = "94fa15d7c90d57f7b235b00b92d390fc172905bc" }
+alloy-network = { git = "https://github.com/klkvr/alloy", rev = "94fa15d7c90d57f7b235b00b92d390fc172905bc" }
+alloy-network-primitives = { git = "https://github.com/klkvr/alloy", rev = "94fa15d7c90d57f7b235b00b92d390fc172905bc" }
+alloy-node-bindings = { git = "https://github.com/klkvr/alloy", rev = "94fa15d7c90d57f7b235b00b92d390fc172905bc" }
+alloy-provider = { git = "https://github.com/klkvr/alloy", rev = "94fa15d7c90d57f7b235b00b92d390fc172905bc" }
+alloy-pubsub = { git = "https://github.com/klkvr/alloy", rev = "94fa15d7c90d57f7b235b00b92d390fc172905bc" }
+alloy-rpc-client = { git = "https://github.com/klkvr/alloy", rev = "94fa15d7c90d57f7b235b00b92d390fc172905bc" }
+alloy-rpc-types = { git = "https://github.com/klkvr/alloy", rev = "94fa15d7c90d57f7b235b00b92d390fc172905bc" }
+alloy-rpc-types-admin = { git = "https://github.com/klkvr/alloy", rev = "94fa15d7c90d57f7b235b00b92d390fc172905bc" }
+alloy-rpc-types-anvil = { git = "https://github.com/klkvr/alloy", rev = "94fa15d7c90d57f7b235b00b92d390fc172905bc" }
+alloy-rpc-types-any = { git = "https://github.com/klkvr/alloy", rev = "94fa15d7c90d57f7b235b00b92d390fc172905bc" }
+alloy-rpc-types-beacon = { git = "https://github.com/klkvr/alloy", rev = "94fa15d7c90d57f7b235b00b92d390fc172905bc" }
+alloy-rpc-types-debug = { git = "https://github.com/klkvr/alloy", rev = "94fa15d7c90d57f7b235b00b92d390fc172905bc" }
+alloy-rpc-types-engine = { git = "https://github.com/klkvr/alloy", rev = "94fa15d7c90d57f7b235b00b92d390fc172905bc" }
+alloy-rpc-types-eth = { git = "https://github.com/klkvr/alloy", rev = "94fa15d7c90d57f7b235b00b92d390fc172905bc" }
+alloy-rpc-types-mev = { git = "https://github.com/klkvr/alloy", rev = "94fa15d7c90d57f7b235b00b92d390fc172905bc" }
+alloy-rpc-types-trace = { git = "https://github.com/klkvr/alloy", rev = "94fa15d7c90d57f7b235b00b92d390fc172905bc" }
+alloy-rpc-types-txpool = { git = "https://github.com/klkvr/alloy", rev = "94fa15d7c90d57f7b235b00b92d390fc172905bc" }
+alloy-serde = { git = "https://github.com/klkvr/alloy", rev = "94fa15d7c90d57f7b235b00b92d390fc172905bc" }
+alloy-signer = { git = "https://github.com/klkvr/alloy", rev = "94fa15d7c90d57f7b235b00b92d390fc172905bc" }
+alloy-signer-local = { git = "https://github.com/klkvr/alloy", rev = "94fa15d7c90d57f7b235b00b92d390fc172905bc" }
+alloy-transport = { git = "https://github.com/klkvr/alloy", rev = "94fa15d7c90d57f7b235b00b92d390fc172905bc" }
+alloy-transport-http = { git = "https://github.com/klkvr/alloy", rev = "94fa15d7c90d57f7b235b00b92d390fc172905bc" }
+alloy-transport-ipc = { git = "https://github.com/klkvr/alloy", rev = "94fa15d7c90d57f7b235b00b92d390fc172905bc" }
+alloy-transport-ws = { git = "https://github.com/klkvr/alloy", rev = "94fa15d7c90d57f7b235b00b92d390fc172905bc" }
+alloy-tx-macros = { git = "https://github.com/klkvr/alloy", rev = "94fa15d7c90d57f7b235b00b92d390fc172905bc" }
