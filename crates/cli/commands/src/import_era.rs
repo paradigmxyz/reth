@@ -108,8 +108,8 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> ImportEraC
         };
         let next_block = resume_block + 1;
 
-        // Pre-Byzantium receipts store a post-state root the node's receipt type can't represent,
-        // so their root/bloom can't be recomputed ie. only verify receipts from Byzantium onwards.
+        // Pre-Byzantium receipts commit to a post-state root, so their receipts root can't be
+        // recomputed from what the node stores. The logs bloom is checked on every fork.
         let chain_spec = self.env.chain.clone();
         let is_receipt_verifiable =
             move |number: u64| chain_spec.is_byzantium_active_at_block(number);
