@@ -74,7 +74,6 @@ use reth_trie_db::{DatabaseStorageTrieCursor, TrieTableAdapter};
 use revm::database::states::{
     PlainStateReverts, PlainStorageChangeset, PlainStorageRevert, StateChangeset,
 };
-use smallvec::SmallVec;
 use std::{
     cmp::Ordering,
     collections::{BTreeMap, BTreeSet},
@@ -647,7 +646,7 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
                 .map(|(n, _)| n + 1)
                 .unwrap_or_default();
 
-            let mut nums = SmallVec::<[TxNumber; 4]>::with_capacity(non_trie_blocks.len());
+            let mut nums = Vec::with_capacity(non_trie_blocks.len());
             let mut current = first_tx_num;
             for block in non_trie_blocks {
                 nums.push(current);
