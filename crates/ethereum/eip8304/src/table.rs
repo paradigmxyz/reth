@@ -27,6 +27,15 @@ impl IndexTable {
     /// 2. Pad to next power of two with zero hashes
     /// 3. Build binary Merkle tree bottom-up (SHA256(left ++ right))
     /// 4. mix_in_length: SHA256(merkle_root ++ uint256_le(entry_count))
+    ///
+    /// The EIP defines the root over `List[Hash32, entry_count]`, i.e. the SSZ list
+    /// limit equals the entry count. Padding to `next_power_of_two(entry_count)`
+    /// therefore is the correct chunk count for the merkleization (each `Hash32` is
+    /// exactly one 32-byte chunk).
+    ///
+    /// The EIP does not define an empty-table root; `B256::ZERO` is a local
+    /// convention. In practice level-0 tables always carry the delayed parent block
+    /// entry, so a table is empty only at genesis.
     pub fn compute_root(&self) -> B256 {
         let count = self.entries.len();
         if count == 0 {

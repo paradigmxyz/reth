@@ -30,13 +30,13 @@ impl IndexTableStore {
     /// Returns a list of (first_block, table_size) pairs for tables whose
     /// generation deadline falls at this block.
     pub fn tables_to_generate_at(&self, block_number: u64) -> Vec<(u64, u64)> {
+        if block_number < self.fork_activation_block {
+            return Vec::new();
+        }
+
         let mut result = Vec::new();
 
         for &table_size in &TABLE_SIZES {
-            if block_number < self.fork_activation_block {
-                break;
-            }
-
             let delay = table_size / 4;
             if block_number < delay {
                 continue;

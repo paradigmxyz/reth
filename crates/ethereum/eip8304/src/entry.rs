@@ -84,56 +84,6 @@ impl IndexEntry {
         Self { entry_type, search_content: topic, block_number, tx_index, log_index }
     }
 
-    /// Build sorted index entries from a block's transactions and receipts.
-    ///
-    /// `tx_hashes` provides the transaction hash for each transaction.
-    /// `receipt_logs` provides the logs for each receipt, where each log yields
-    /// (address, topics iterator).
-    pub fn build_from_block(
-        block_number: u64,
-        tx_hashes: &[B256],
-        receipt_logs: &[Vec<(Address, Vec<B256>)>],
-    ) -> Vec<Self> {
-        let mut entries = Vec::new();
-        let mut cumulative_log_count = 0u32;
-
-        for (tx_idx, (tx_hash, logs)) in tx_hashes.iter().zip(receipt_logs.iter()).enumerate() {
-            entries.push(Self::transaction_entry(
-                block_number,
-                tx_idx as u32,
-                *tx_hash,
-                cumulative_log_count,
-            ));
-
-            for (log_idx, (address, topics)) in logs.iter().enumerate() {
-                entries.push(Self::log_address_entry(
-                    block_number,
-                    tx_idx as u32,
-                    log_idx as u32,
-                    *address,
-                ));
-
-                for (topic_idx, topic) in topics.iter().enumerate() {
-                    if topic_idx > 3 {
-                        break;
-                    }
-                    entries.push(Self::log_topic_entry(
-                        block_number,
-                        tx_idx as u32,
-                        log_idx as u32,
-                        topic_idx as u8,
-                        *topic,
-                    ));
-                }
-            }
-
-            cumulative_log_count += logs.len() as u32;
-        }
-
-        entries.sort();
-        entries
-    }
-
     /// Binary encode the entry in big-endian format for lexicographic ordering.
     ///
     /// Block:       2 + 32 + 8 = 42 bytes
