@@ -868,6 +868,7 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
             // Update pipeline progress
             let start = Instant::now();
             self.update_pipeline_stages(last_non_trie_block_number, false)?;
+            #[cfg(feature = "partial-persistence")]
             if save_mode.with_state() {
                 let current_trie_persisted_tip =
                     self.get_stage_checkpoint(StageId::Finish)?.map(|checkpoint| {
@@ -3660,11 +3661,13 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
     }
 
     fn update_finish_checkpoint_after_remove(&self, block: BlockNumber) -> ProviderResult<()> {
+        #[cfg(feature = "partial-persistence")]
         let partial_state_trie = self
             .trie_persisted_tip_block_number()?
             .map(|trie_persisted_tip| trie_persisted_tip.min(block));
 
         self.update_pipeline_stages(block, true)?;
+        #[cfg(feature = "partial-persistence")]
         self.save_stage_checkpoint(
             StageId::Finish,
             StageCheckpoint::new(block)
