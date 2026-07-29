@@ -278,7 +278,7 @@ where
 
             provider_rw.commit()?;
             let _ = self.provider.bal_store().flush().inspect_err(|err| {
-                warn!(target: "engine::persistence", last=?last_block, ?err, "Failed to flush BAL store");
+                warn!(target: "engine::persistence", last=?non_trie_persisted_tip, ?err, "Failed to flush BAL store");
             });
             debug!(target: "engine::persistence", first=?first_block, last=?non_trie_persisted_tip, "Saved range of blocks");
         }
