@@ -437,5 +437,31 @@ mod tests {
         assert_eq!(record.address, "::1".parse::<IpAddr>().unwrap());
         assert_eq!(record.udp_port, 30401);
         assert_eq!(record.tcp_port, 30403);
+
+        // IPv6-only record with the RLPx port only under the generic `tcp` key, the shape geth
+        // publishes: the generic entry applies to the IPv6 endpoint.
+        let mut builder = Enr::builder();
+        builder.ip6("::1".parse().unwrap()).udp6(30401).tcp4(30303);
+        let enr = builder.build(&sk).unwrap();
+        let record = NodeRecord::try_from(&enr).unwrap();
+
+        assert_eq!(record.address, "::1".parse::<IpAddr>().unwrap());
+        assert_eq!(record.udp_port, 30401);
+        assert_eq!(record.tcp_port, 30303);
+
+        // A full dual-stack record resolves to the IPv4 endpoint.
+        let mut builder = Enr::builder();
+        builder.ip4("10.0.0.1".parse().unwrap()).udp4(30301).tcp4(30303);
+        builder.ip6("::1".parse().unwrap()).udp6(30401).tcp6(30403);
+        let enr = builder.build(&sk).unwrap();
+        let record = NodeRecord::try_from(&enr).unwrap();
+
+        assert_eq!(record.address, "10.0.0.1".parse::<IpAddr>().unwrap());
+        assert_eq!(record.udp_port, 30301);
+        assert_eq!(record.tcp_port, 30303);
+
+        // No udp port in any family is rejected.
+        let enr = Enr::builder().ip4("10.0.0.1".parse().unwrap()).tcp4(30303).build(&sk).unwrap();
+        assert!(NodeRecord::try_from(&enr).is_err());
     }
 }
