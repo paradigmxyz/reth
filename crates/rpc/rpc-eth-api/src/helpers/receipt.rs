@@ -6,12 +6,12 @@ use std::sync::Arc;
 use crate::{EthApiTypes, RpcNodeCoreExt, RpcReceipt};
 use alloy_consensus::{transaction::TransactionMeta, TxReceipt};
 use futures::Future;
-use reth_primitives_traits::Recovered;
+use reth_primitives_traits::{Recovered, RecoveredBlock};
 use reth_rpc_convert::{transaction::ConvertReceiptInput, RpcConvert};
 use reth_rpc_eth_types::{
     error::FromEthApiError, utils::calculate_gas_used_and_next_log_index, EthApiError,
 };
-use reth_storage_api::{ProviderReceipt, ProviderTx};
+use reth_storage_api::{ProviderBlock, ProviderReceipt, ProviderTx};
 
 /// Assembles transaction receipt data w.r.t to network.
 ///
@@ -28,15 +28,19 @@ pub trait LoadReceipt:
         meta: TransactionMeta,
         receipt: ProviderReceipt<Self::Provider>,
         all_receipts: Option<Arc<Vec<ProviderReceipt<Self::Provider>>>>,
+        block: Option<Arc<RecoveredBlock<ProviderBlock<Self::Provider>>>>,
     ) -> impl Future<Output = Result<RpcReceipt<Self::NetworkTypes>, Self::Error>> + Send {
         async move {
             let hash = meta.block_hash;
-            let block = self
-                .cache()
-                .get_recovered_block(hash)
-                .await
-                .map_err(Self::Error::from_eth_err)?
-                .ok_or(EthApiError::HeaderNotFound(hash.into()))?;
+            let block = match block {
+                Some(block) => block,
+                None => self
+                    .cache()
+                    .get_recovered_block(hash)
+                    .await
+                    .map_err(Self::Error::from_eth_err)?
+                    .ok_or(EthApiError::HeaderNotFound(hash.into()))?,
+            };
             // Use pre-fetched receipts if available, otherwise fetch from cache.
             let all_receipts = match all_receipts {
                 Some(receipts) => receipts,
