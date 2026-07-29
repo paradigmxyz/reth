@@ -161,19 +161,7 @@ impl AnyNode {
     pub fn node_record(&self) -> Option<NodeRecord> {
         match self {
             Self::NodeRecord(record) => Some(*record),
-            Self::Enr(enr) => {
-                let node_record = NodeRecord {
-                    address: enr
-                        .ip4()
-                        .map(core::net::IpAddr::from)
-                        .or_else(|| enr.ip6().map(core::net::IpAddr::from))?,
-                    tcp_port: enr.tcp4().or_else(|| enr.tcp6())?,
-                    udp_port: enr.udp4().or_else(|| enr.udp6())?,
-                    id: pk2id(&enr.public_key()),
-                }
-                .into_ipv4_mapped();
-                Some(node_record)
-            }
+            Self::Enr(enr) => NodeRecord::try_from(enr).ok(),
             Self::PeerId(_) | Self::TrustedPeer(_) => None,
         }
     }
