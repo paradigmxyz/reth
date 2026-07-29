@@ -4,8 +4,7 @@ use alloy_consensus::BlockHeader;
 use alloy_eips::BlockNumberOrTag;
 use alloy_primitives::{Sealable, TxHash};
 use alloy_rpc_types_eth::{
-    BlockNumHash, Filter, FilterBlockOption, FilterChanges, FilterId, Log,
-    PendingTransactionFilterKind,
+    BlockNumHash, Filter, FilterBlockOption, FilterChanges, FilterId, PendingTransactionFilterKind,
 };
 use async_trait::async_trait;
 use futures::{
@@ -16,7 +15,7 @@ use futures::{
 use itertools::Itertools;
 use jsonrpsee::{core::RpcResult, server::IdProvider};
 use reth_errors::ProviderError;
-use reth_primitives_traits::{BlockTy, NodePrimitives, SealedBlock, SealedHeader};
+use reth_primitives_traits::{NodePrimitives, SealedHeader};
 use reth_rpc_eth_api::{
     helpers::{EthBlocks, LoadReceipt},
     EngineEthFilter, EthApiTypes, EthFilterApiServer, FullEthApiTypes, QueryLimits, RpcConvert,
@@ -478,18 +477,6 @@ where
         self.eth_api.cache()
     }
 
-    /// Converts filtered logs using metadata from their block.
-    fn convert_logs(
-        &self,
-        logs: Vec<Log>,
-        block: &SealedBlock<BlockTy<Eth::Primitives>>,
-    ) -> Result<Vec<RpcLog<Eth::NetworkTypes>>, EthFilterError> {
-        self.eth_api.converter().convert_logs(logs, block).map_err(|err| {
-            let err = <Eth::Error as From<<Eth::RpcConvert as RpcConvert>::Error>>::from(err);
-            EthFilterError::Rpc(err.into())
-        })
-    }
-
     /// Returns logs matching given filter object.
     async fn logs_for_filter(
         self: Arc<Self>,
@@ -525,10 +512,10 @@ where
                 let block_num_hash = BlockNumHash::new(block_number, block_hash);
 
                 let mut all_logs = Vec::new();
-                append_matching_block_logs(
+                append_matching_block_logs::<_, _, EthFilterError>(
                     &mut all_logs,
+                    self.eth_api.converter(),
                     maybe_block
-                        .clone()
                         .map(ProviderOrBlock::Block)
                         .unwrap_or_else(|| ProviderOrBlock::Provider(self.provider())),
                     &filter,
@@ -537,20 +524,7 @@ where
                     false,
                     block_timestamp,
                 )?;
-
-                if all_logs.is_empty() {
-                    return Ok(Vec::new())
-                }
-
-                let block = if let Some(block) = maybe_block {
-                    block
-                } else {
-                    self.eth_cache()
-                        .get_recovered_block(block_hash)
-                        .await?
-                        .ok_or_else(|| ProviderError::HeaderNotFound(block_hash.into()))?
-                };
-                self.convert_logs(all_logs, block.sealed_block())
+                Ok(all_logs)
             }
             FilterBlockOption::Range { from_block, to_block } => {
                 // Handle special case where from block is pending
@@ -575,18 +549,17 @@ where
                             let mut all_logs = Vec::new();
                             let timestamp = pending_block.block.timestamp();
                             let block_num_hash = pending_block.block.num_hash();
-                            append_matching_block_logs(
+                            append_matching_block_logs::<_, _, EthFilterError>(
                                 &mut all_logs,
-                                ProviderOrBlock::<Eth::Provider>::Block(
-                                    pending_block.block.clone(),
-                                ),
+                                self.eth_api.converter(),
+                                ProviderOrBlock::<Eth::Provider>::Block(pending_block.block),
                                 &filter,
                                 block_num_hash,
                                 &pending_block.receipts,
                                 false, // removed = false for pending blocks
                                 timestamp,
                             )?;
-                            return self.convert_logs(all_logs, pending_block.block.sealed_block());
+                            return Ok(all_logs)
                         }
                     }
                 }
@@ -760,11 +733,10 @@ where
             range_mode.next().await?
         {
             let num_hash = header.num_hash();
-            let mut logs = Vec::new();
-            append_matching_block_logs(
-                &mut logs,
+            append_matching_block_logs::<_, _, EthFilterError>(
+                &mut all_logs,
+                self.eth_api.converter(),
                 recovered_block
-                    .clone()
                     .map(ProviderOrBlock::Block)
                     .unwrap_or_else(|| ProviderOrBlock::Provider(self.provider())),
                 filter,
@@ -773,21 +745,6 @@ where
                 false,
                 header.timestamp(),
             )?;
-
-            if logs.is_empty() {
-                continue
-            }
-
-            let logs = if let Some(block) = recovered_block {
-                self.convert_logs(logs, block.sealed_block())?
-            } else {
-                let block = self
-                    .provider()
-                    .block_by_hash(num_hash.hash)?
-                    .ok_or(ProviderError::BlockBodyIndicesNotFound(num_hash.number))?;
-                self.convert_logs(logs, &SealedBlock::new_unchecked(block, num_hash.hash))?
-            };
-            all_logs.extend(logs);
 
             // size check but only if range is multiple blocks, so we always return all
             // logs of a single block
@@ -1063,6 +1020,12 @@ impl From<EthFilterError> for jsonrpsee::types::error::ErrorObject<'static> {
 impl From<ProviderError> for EthFilterError {
     fn from(err: ProviderError) -> Self {
         Self::EthAPIError(err.into())
+    }
+}
+
+impl From<jsonrpsee::types::ErrorObject<'static>> for EthFilterError {
+    fn from(err: jsonrpsee::types::ErrorObject<'static>) -> Self {
+        Self::Rpc(err)
     }
 }
 
