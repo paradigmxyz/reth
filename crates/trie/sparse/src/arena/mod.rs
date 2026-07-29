@@ -1340,7 +1340,7 @@ impl ArenaParallelSparseTrie {
                 NextResult::Branch | NextResult::NonBranch => {
                     let idx = cursor.head().expect("cursor is non-empty").index;
                     let rlp_node = match &mut arena[idx] {
-                        ArenaSparseNode::EmptyRoot => {
+                        ArenaSparseNode::EmptyRoot { .. } => {
                             Self::record_witness_node(witness, &[0x80]);
                             RlpNode::word_rlp(&EMPTY_ROOT_HASH)
                         }
