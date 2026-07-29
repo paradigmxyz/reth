@@ -45,7 +45,7 @@ use reth_network::{
     },
     HelloMessageWithProtocols, NetworkConfigBuilder, NetworkPrimitives,
 };
-use reth_network_peers::{mainnet_nodes, AnyNode, TrustedPeer};
+use reth_network_peers::{mainnet_nodes, TrustedPeer};
 use reth_tasks::Runtime;
 use secp256k1::SecretKey;
 use std::str::FromStr;
@@ -245,7 +245,7 @@ pub struct NetworkArgs {
     /// Comma separated enode URLs or ENRs of trusted peers for P2P connections.
     ///
     /// --trusted-peers enode://abcd@192.168.0.1:30303
-    #[arg(long, value_delimiter = ',', value_parser = parse_peer)]
+    #[arg(long, value_delimiter = ',')]
     pub trusted_peers: Vec<TrustedPeer>,
 
     /// Connect to or accept from trusted peers only
@@ -255,7 +255,7 @@ pub struct NetworkArgs {
     /// Comma separated enode URLs or ENRs for P2P discovery bootstrap.
     ///
     /// Will fall back to a network-specific default if not specified.
-    #[arg(long, value_delimiter = ',', value_parser = parse_peer)]
+    #[arg(long, value_delimiter = ',')]
     pub bootnodes: Option<Vec<TrustedPeer>>,
 
     /// Amount of DNS resolution requests retries to perform when peering.
@@ -1144,34 +1144,6 @@ impl Default for DiscoveryArgs {
     }
 }
 
-/// Parse an `enode://` URL or a base64 encoded `enr:` record into a [`TrustedPeer`].
-///
-/// A discovery-only ENR omits the tcp key, in which case the udp port is used for the `RLPx` dial
-/// guess, the same fallback as [`reth_discv5::Discv5::try_into_reachable`].
-fn parse_peer(s: &str) -> Result<TrustedPeer, String> {
-    let unprefixed = !s.starts_with("enode://") && !s.starts_with("enr:");
-    let node = AnyNode::from_str(s).map_err(|err| {
-        if unprefixed {
-            "expected an enode:// URL or a base64 encoded enr: record".to_string()
-        } else {
-            err
-        }
-    })?;
-
-    match node {
-        AnyNode::TrustedPeer(peer) => Ok(peer),
-        AnyNode::NodeRecord(record) => Ok(record.into()),
-        AnyNode::Enr(enr) => {
-            let mut record = NodeRecord::try_from(&enr).map_err(|err| err.to_string())?;
-            if record.tcp_port == 0 {
-                record.tcp_port = record.udp_port;
-            }
-            Ok(record.into())
-        }
-        AnyNode::PeerId(_) => Err("no ip address and port specified".to_string()),
-    }
-}
-
 /// Parse a block number=hash pair or just a hash into `BlockNumHash`
 fn parse_block_num_hash(s: &str) -> Result<BlockNumHash, String> {
     if let Some((num_str, hash_str)) = s.split_once('=') {
@@ -1191,7 +1163,7 @@ mod tests {
     use clap::Parser;
     use reth_chainspec::MAINNET;
     use reth_config::Config;
-    use reth_network_peers::{NodeRecord, PeerId};
+    use reth_network_peers::NodeRecord;
     use secp256k1::SecretKey;
     use std::{
         fs,
@@ -1257,33 +1229,9 @@ mod tests {
     fn parse_enr_bootnode_args() {
         let enr = "enr:-IS4QHCYrYZbAKWCBRlAy5zzaDZXJBGkcnh4MHcBFZntXNFrdvJjX04jRzjzCBOonrkTfj499SZuOh8R33Ls8RRcy5wBgmlkgnY0gmlwhH8AAAGJc2VjcDI1NmsxoQPKY0yuDUmstAHYpMa2_oxVtw0RW_QAdpzBQA8yWM0xOIN1ZHCCdl8";
         let args = CommandParser::<NetworkArgs>::parse_from(["reth", "--bootnodes", enr]).args;
-
-        let resolved = args.resolved_bootnodes().unwrap();
-        assert_eq!(resolved.len(), 1);
-        assert_eq!(resolved[0].address, "127.0.0.1".parse::<std::net::IpAddr>().unwrap());
-        assert_eq!(resolved[0].udp_port, 30303);
-        assert_eq!(resolved[0].tcp_port, 30303);
-        assert_eq!(
-            resolved[0].id,
-            "0xca634cae0d49acb401d8a4c6b6fe8c55b70d115bf400769cc1400f3258cd31387574077f301b421bc84df7266c44e9e6d569fc56be00812904767bf5ccd1fc7f"
-                .parse::<PeerId>()
-                .unwrap()
-        );
-
-        let args = CommandParser::<NetworkArgs>::parse_from(["reth", "--trusted-peers", enr]).args;
-        assert_eq!(args.trusted_peers, vec![TrustedPeer::from(resolved[0])]);
-    }
-
-    #[test]
-    fn parse_peer_rejects_unknown_format() {
-        let err = parse_peer("127.0.0.1:30303").unwrap_err();
-        assert_eq!(err, "expected an enode:// URL or a base64 encoded enr: record");
-
-        assert!(parse_peer("enr:garbage").is_err());
-        assert!(parse_peer(
-            "enode://d860a01f9722d78051619d1e2351aba3f43f943f6f00718d1b9baa4101932a1f5011f16bb2b1bb35db20d6fe28fa0bf09636d26a87d31de9ec6203eeedb1f666"
-        )
-        .is_err());
+        let trusted =
+            CommandParser::<NetworkArgs>::parse_from(["reth", "--trusted-peers", enr]).args;
+        assert_eq!(args.bootnodes, Some(trusted.trusted_peers));
     }
 
     #[test]
