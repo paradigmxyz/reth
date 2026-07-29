@@ -19,7 +19,7 @@ use reth_evm::{
 use reth_primitives_traits::{FastInstant as Instant, NodePrimitives};
 use reth_provider::{BlockExecutionOutput, BlockReader, StateProviderFactory, StateReader};
 use reth_revm::db::BundleState;
-use reth_tasks::Runtime;
+use reth_tasks::{pool::WorkerPool, Runtime};
 pub use reth_trie_parallel::{
     error::StateRootTaskError,
     state_root_task::{
@@ -45,6 +45,9 @@ pub mod receipt_root_task;
 /// Blocks with fewer transactions than this skip prewarming, since the fixed overhead of spawning
 /// prewarm workers exceeds the execution time saved.
 pub const SMALL_BLOCK_TX_THRESHOLD: usize = 5;
+
+/// Initial number of workers used for speculative storage-read discovery.
+const DEFAULT_SPECULATIVE_PREWARM_THREADS: usize = 1;
 
 /// Type alias for [`PayloadHandle`] returned by payload processor spawn methods.
 type IteratorTx<Evm, I> = RecoveredTx<TxEnvFor<Evm>, <I as ExecutableTxIterator<Evm>>::Recovered>;
@@ -107,6 +110,10 @@ where
     /// Dedicated blocking pool for warming the BAL read-set, created lazily on the first BAL block
     /// (see [`Self::bal_prewarm_pool`]). Its threads exit when the processor is dropped.
     bal_prewarm_pool: OnceLock<Arc<bal_prewarm_pool::BalPrewarmPool>>,
+    /// CPU pool for speculative storage-read discovery.
+    speculative_prewarm_pool: OnceLock<Arc<WorkerPool>>,
+    /// I/O pool that fetches storage discovered by speculative execution.
+    speculative_prewarm_io_pool: OnceLock<Arc<bal_prewarm_pool::BalPrewarmPool>>,
 }
 
 impl<Evm> PayloadProcessor<Evm>
@@ -136,6 +143,8 @@ where
             disable_bal_parallel_state_root: config.disable_bal_parallel_state_root(),
             disable_bal_batch_io: config.disable_bal_batch_io(),
             bal_prewarm_pool: OnceLock::new(),
+            speculative_prewarm_pool: OnceLock::new(),
+            speculative_prewarm_io_pool: OnceLock::new(),
         }
     }
 
@@ -145,6 +154,30 @@ where
         self.bal_prewarm_pool
             .get_or_init(|| {
                 bal_prewarm_pool::BalPrewarmPool::new(bal_prewarm_pool::DEFAULT_BAL_PREWARM_THREADS)
+            })
+            .clone()
+    }
+
+    /// Returns the CPU-only speculative execution pool.
+    fn speculative_prewarm_pool(&self) -> Arc<WorkerPool> {
+        self.speculative_prewarm_pool
+            .get_or_init(|| {
+                Arc::new(WorkerPool::new(
+                    DEFAULT_SPECULATIVE_PREWARM_THREADS,
+                    "speculative-prewarm",
+                ))
+            })
+            .clone()
+    }
+
+    /// Returns the pool that fetches storage discovered by speculative execution.
+    fn speculative_prewarm_io_pool(&self) -> Arc<bal_prewarm_pool::BalPrewarmPool> {
+        self.speculative_prewarm_io_pool
+            .get_or_init(|| {
+                bal_prewarm_pool::BalPrewarmPool::new_named(
+                    bal_prewarm_pool::DEFAULT_BAL_PREWARM_THREADS,
+                    "speculative-prewarm-io",
+                )
             })
             .clone()
     }
@@ -352,7 +385,12 @@ where
         } else {
             PrewarmMode::Transactions { pending: transactions, hints: hint_stream }
         };
+        let transaction_prewarming = matches!(&mode, PrewarmMode::Transactions { .. });
         let saved_cache = self.disable_state_cache.not().then(|| self.cache_for(env.parent_hash));
+        let speculative_prewarm_pool = (transaction_prewarming && saved_cache.is_some())
+            .then(|| self.speculative_prewarm_pool());
+        let speculative_prewarm_io_pool = (transaction_prewarming && saved_cache.is_some())
+            .then(|| self.speculative_prewarm_io_pool());
 
         let executed_tx_index = Arc::new(AtomicUsize::new(0));
         // configure prewarming
@@ -362,6 +400,8 @@ where
             saved_cache: saved_cache.clone(),
             provider: provider_builder,
             bal_prewarm_pool: parallel_bal_execution.then(|| self.bal_prewarm_pool()),
+            speculative_prewarm_pool,
+            speculative_prewarm_io_pool,
             metrics: PrewarmMetrics::default(),
             cache_metrics: self.cache_metrics.clone(),
             cache_state_metrics: self.cache_state_metrics.clone(),

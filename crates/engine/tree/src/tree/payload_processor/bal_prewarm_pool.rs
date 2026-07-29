@@ -52,6 +52,11 @@ impl BalPrewarmPool {
     /// Spawns `num_threads` long-lived blocking worker threads. Owned by the
     /// [`PayloadProcessor`](super::PayloadProcessor); the threads exit when the pool is dropped.
     pub(crate) fn new(num_threads: usize) -> Arc<Self> {
+        Self::new_named(num_threads, "bal-prewarm")
+    }
+
+    /// Spawns a named pool of long-lived blocking worker threads.
+    pub(crate) fn new_named(num_threads: usize, thread_name: &'static str) -> Arc<Self> {
         let mut workers = Vec::with_capacity(num_threads);
         let mut handles = Vec::with_capacity(num_threads);
         for i in 0..num_threads {
@@ -59,12 +64,17 @@ impl BalPrewarmPool {
             workers.push(tx);
             handles.push(
                 std::thread::Builder::new()
-                    .name(format!("bal-prewarm-{i:03}"))
+                    .name(format!("{thread_name}-{i:03}"))
                     .spawn(move || prewarm_loop(rx))
                     .expect("spawn bal-prewarm thread"),
             );
         }
-        trace!(target: "engine::tree::bal_prewarm_pool", num_threads, "BalPrewarmPool spawned");
+        trace!(
+            target: "engine::tree::bal_prewarm_pool",
+            num_threads,
+            thread_name,
+            "BalPrewarmPool spawned"
+        );
         Arc::new(Self { workers, next: AtomicUsize::new(0), _handles: handles })
     }
 

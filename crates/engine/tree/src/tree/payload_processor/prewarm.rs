@@ -29,7 +29,7 @@ use reth_primitives_traits::{Account, FastInstant as Instant, NodePrimitives};
 use reth_provider::{
     AccountReader, BlockExecutionOutput, BlockReader, StateProviderFactory, StateReader,
 };
-use reth_revm::database::StateProviderDatabase;
+use reth_revm::{database::StateProviderDatabase, speculative::SpeculativeDatabase};
 use reth_tasks::{pool::WorkerPool, Runtime};
 use reth_trie_common::MultiProofTargetsV2;
 use std::sync::{
@@ -126,7 +126,7 @@ where
         actions_tx: Sender<PrewarmTaskEvent<N::Receipt>>,
         state_root_hint_stream: Option<StateRootHintStream>,
     ) where
-        Tx: ExecutableTxFor<Evm> + Send + 'static,
+        Tx: ExecutableTxFor<Evm> + Clone + Send + 'static,
     {
         let executor = self.executor.clone();
         let ctx = self.ctx.clone();
@@ -142,6 +142,21 @@ where
 
             let ctx = &ctx;
             let pool = executor.prewarming_pool();
+            let speculative_pool = ctx.speculative_prewarm_pool.as_ref();
+            let speculative_io_pool = ctx.speculative_prewarm_io_pool.as_ref();
+            let (speculative_done_tx, speculative_done_rx) = mpsc::channel();
+            let mut speculative_tx_count = 0usize;
+
+            if let (Some(io_pool), Some(saved_cache)) =
+                (speculative_io_pool, ctx.saved_cache.as_ref())
+            {
+                let provider_builder = ctx.provider.clone();
+                io_pool.begin_block(
+                    Arc::new(move || provider_builder.build()),
+                    saved_cache.cache().clone(),
+                    ctx.env.txpool_snapshot.clone(),
+                );
+            }
 
             let mut tx_count = 0usize;
             let state_root_hint_stream = state_root_hint_stream.as_ref();
@@ -165,6 +180,17 @@ where
                     }
 
                     tx_count += 1;
+                    if let Some(speculative_pool) = speculative_pool {
+                        speculative_tx_count += 1;
+                        let speculative_ctx = (*ctx).clone();
+                        let speculative_tx = tx.clone();
+                        let speculative_done_tx = speculative_done_tx.clone();
+                        speculative_pool.spawn(move || {
+                            let _done = NotifyOnDrop(Some(speculative_done_tx));
+                            Self::speculative_transact_worker(&speculative_ctx, speculative_tx);
+                        });
+                    }
+
                     let parent_span = Span::current();
                     s.spawn(move |_| {
                         let _enter = trace_span!(
@@ -188,11 +214,46 @@ where
                 }
             });
 
+            for _ in 0..speculative_tx_count {
+                if speculative_done_rx.recv().is_err() {
+                    break;
+                }
+            }
+            if let Some(io_pool) = speculative_io_pool {
+                io_pool.end_block();
+            }
+            if let Some(speculative_pool) = speculative_pool {
+                speculative_pool.clear();
+            }
+
             // All tasks are done — clear per-thread EVM state for the next block.
             pool.clear();
 
             let _ = actions_tx
                 .send(PrewarmTaskEvent::FinishedTxExecution { executed_transactions: tx_count });
+        });
+    }
+
+    /// Runs one transaction on the speculative CPU pool and queues its storage reads for I/O.
+    fn speculative_transact_worker<Tx>(ctx: &PrewarmContext<N, P, Evm>, tx: Tx)
+    where
+        Tx: ExecutableTxFor<Evm>,
+    {
+        WorkerPool::with_worker_mut(|worker| {
+            let Some(evm) = worker
+                .get_or_init::<SpeculativePrewarmEvmState<Evm>>(|| ctx.speculative_evm_for_ctx())
+                .as_mut()
+            else {
+                return;
+            };
+
+            let (tx_env, _) = tx.into_parts();
+            let _ = evm.transact(tx_env);
+            let requests = evm.db_mut().take_storage_requests();
+            let Some(io_pool) = ctx.speculative_prewarm_io_pool.as_ref() else { return };
+            for (address, slot) in requests {
+                io_pool.warm_storage(address, B256::new(slot.to_be_bytes()));
+            }
         });
     }
 
@@ -450,7 +511,7 @@ where
     )]
     pub fn run<Tx>(self, mode: PrewarmMode<Tx>, actions_tx: Sender<PrewarmTaskEvent<N::Receipt>>)
     where
-        Tx: ExecutableTxFor<Evm> + Send + 'static,
+        Tx: ExecutableTxFor<Evm> + Clone + Send + 'static,
     {
         // Spawn execution tasks based on mode. The state-root capabilities arrive inside the
         // mode and move into the spawned producers, so they die with the producers instead of
@@ -529,6 +590,10 @@ where
     /// Dedicated blocking pool for warming the BAL read-set. `Some` only on the BAL parallel
     /// execution path; the pool is owned by the [`PayloadProcessor`](super::PayloadProcessor).
     pub(crate) bal_prewarm_pool: Option<Arc<BalPrewarmPool>>,
+    /// Dedicated CPU pool for speculative storage-read discovery.
+    pub(crate) speculative_prewarm_pool: Option<Arc<WorkerPool>>,
+    /// Dedicated I/O pool that fetches speculative storage requests into the cache.
+    pub(crate) speculative_prewarm_io_pool: Option<Arc<BalPrewarmPool>>,
     /// The metrics for the prewarm task.
     pub metrics: PrewarmMetrics,
     /// Metrics for the execution cache.
@@ -558,6 +623,11 @@ where
 type PrewarmEvmState<Evm> =
     Option<EvmFor<Evm, StateProviderDatabase<reth_provider::StateProviderBox>>>;
 
+/// Per-thread EVM state for the independent speculative storage-discovery pool.
+type SpeculativePrewarmEvmState<Evm> = Option<
+    EvmFor<Evm, SpeculativeDatabase<StateProviderDatabase<reth_provider::StateProviderBox>>>,
+>;
+
 impl<N, P, Evm> PrewarmContext<N, P, Evm>
 where
     N: NodePrimitives,
@@ -567,27 +637,7 @@ where
     /// Creates a per-thread EVM for prewarming.
     #[instrument(level = "debug", target = "engine::tree::payload_processor::prewarm", skip_all)]
     fn evm_for_ctx(&self) -> PrewarmEvmState<Evm> {
-        let mut state_provider = match self.provider.build() {
-            Ok(provider) => provider,
-            Err(err) => {
-                trace!(
-                    target: "engine::tree::payload_processor::prewarm",
-                    %err,
-                    "Failed to build state provider in prewarm thread"
-                );
-                return None
-            }
-        };
-
-        // Use the caches to create a new provider with caching
-        if let Some(saved_cache) = &self.saved_cache {
-            let caches = saved_cache.cache().clone();
-            state_provider = Box::new(
-                CachedStateProvider::new_prewarm(state_provider, caches)
-                    .with_txpool_snapshot(self.env.txpool_snapshot.clone()),
-            );
-        }
-
+        let state_provider = self.state_provider_for_prewarm()?;
         let state_provider = StateProviderDatabase::new(state_provider);
 
         let mut evm_env = self.env.evm_env.clone();
@@ -617,6 +667,55 @@ where
         }
 
         Some(evm)
+    }
+
+    /// Creates an EVM for the independent speculative storage-discovery pool.
+    fn speculative_evm_for_ctx(&self) -> SpeculativePrewarmEvmState<Evm> {
+        let state_provider = self.state_provider_for_prewarm()?;
+        let state_provider = SpeculativeDatabase::new(StateProviderDatabase::new(state_provider));
+        let mut evm_env = self.env.evm_env.clone();
+        evm_env.cfg_env.disable_nonce_check = true;
+        evm_env.cfg_env.disable_balance_check = true;
+
+        let spec_id = *evm_env.spec_id();
+        let mut evm = self.evm_config.evm_with_env(state_provider, evm_env);
+        if !self.precompile_cache_disabled {
+            evm.precompiles_mut().map_cacheable_precompiles(|address, precompile| {
+                CachedPrecompile::wrap(
+                    precompile,
+                    self.precompile_cache_map.cache_for_address(*address),
+                    spec_id,
+                    None,
+                )
+            });
+        }
+
+        Some(evm)
+    }
+
+    /// Builds a cache-filling state provider for either prewarming lane.
+    fn state_provider_for_prewarm(&self) -> Option<reth_provider::StateProviderBox> {
+        let mut state_provider = match self.provider.build() {
+            Ok(provider) => provider,
+            Err(err) => {
+                trace!(
+                    target: "engine::tree::payload_processor::prewarm",
+                    %err,
+                    "Failed to build state provider in prewarm thread"
+                );
+                return None
+            }
+        };
+
+        if let Some(saved_cache) = &self.saved_cache {
+            let caches = saved_cache.cache().clone();
+            state_provider = Box::new(
+                CachedStateProvider::new_prewarm(state_provider, caches)
+                    .with_txpool_snapshot(self.env.txpool_snapshot.clone()),
+            );
+        }
+
+        Some(state_provider)
     }
 
     /// Returns `true` if prewarming should stop.
@@ -893,6 +992,17 @@ pub enum PrewarmTaskEvent<R> {
         /// Number of transactions executed
         executed_transactions: usize,
     },
+}
+
+/// Sends a completion notification even if a speculative worker unwinds.
+struct NotifyOnDrop(Option<Sender<()>>);
+
+impl Drop for NotifyOnDrop {
+    fn drop(&mut self) {
+        if let Some(sender) = self.0.take() {
+            let _ = sender.send(());
+        }
+    }
 }
 
 /// Metrics for transactions prewarming.
