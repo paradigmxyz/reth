@@ -1528,18 +1528,12 @@ where
         self.metrics.engine.persistence_duration.record(start_time.elapsed());
 
         let commit_duration = result.commit_duration;
-        let Some(BlockNumHash {
-            hash: last_persisted_block_hash,
-            number: last_persisted_block_number,
-        }) = result.last_block
-        else {
+        let Some(last_persisted_block) = result.last_block else {
             // if this happened, then we persisted no blocks because we sent an empty vec of blocks
             warn!(target: "engine::tree", "Persistence task completed but did not persist any blocks");
             return Ok(())
         };
-
-        let last_persisted_block =
-            BlockNumHash::new(last_persisted_block_number, last_persisted_block_hash);
+        let last_persisted_block_number = last_persisted_block.number;
         let last_state_trie_persisted_block =
             result.last_state_trie_block.unwrap_or(last_persisted_block);
         debug_assert!(
