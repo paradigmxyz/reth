@@ -604,7 +604,7 @@ fn on_new_persisted_block_queues_sparse_trie_prune_request() {
     let persisted = blocks[0].recovered_block().num_hash();
     test_harness.tree.persistence_state.finish(persisted, persisted);
 
-    test_harness.tree.on_new_persisted_block(persisted).unwrap();
+    test_harness.tree.on_new_persisted_block().unwrap();
 
     assert!(test_harness.tree.state.pending_sparse_trie_prune());
 }
@@ -616,7 +616,7 @@ fn on_new_persisted_block_queues_sparse_trie_prune_with_in_memory_blocks() {
     let persisted = blocks[0].recovered_block().num_hash();
     test_harness.tree.persistence_state.finish(persisted, persisted);
 
-    test_harness.tree.on_new_persisted_block(persisted).unwrap();
+    test_harness.tree.on_new_persisted_block().unwrap();
 
     assert!(test_harness.tree.state.pending_sparse_trie_prune());
 }
@@ -636,7 +636,7 @@ fn on_new_persisted_block_skips_sparse_trie_prune_when_state_root_task_disabled(
         let persisted = blocks[0].recovered_block().num_hash();
         test_harness.tree.persistence_state.finish(persisted, persisted);
 
-        test_harness.tree.on_new_persisted_block(persisted).unwrap();
+        test_harness.tree.on_new_persisted_block().unwrap();
 
         assert!(!test_harness.tree.state.pending_sparse_trie_prune());
     }

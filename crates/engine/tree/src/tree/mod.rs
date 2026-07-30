@@ -1566,7 +1566,7 @@ where
         );
         self.state.tree_state.overlay_manager.evict_cached_changesets(eviction_threshold);
 
-        self.on_new_persisted_block(last_state_trie_persisted_block)?;
+        self.on_new_persisted_block()?;
 
         self.purge_timing_stats(last_persisted_block_number, commit_duration);
 
@@ -2218,10 +2218,9 @@ where
     /// height.
     ///
     /// Assumes that `finish` has been called on the `persistence_state` at least once
-    fn on_new_persisted_block(
-        &mut self,
-        in_memory_persisted_block: BlockNumHash,
-    ) -> ProviderResult<()> {
+    fn on_new_persisted_block(&mut self) -> ProviderResult<()> {
+        let in_memory_persisted_block = self.persistence_state.last_state_trie_persisted_block;
+
         // If we have an on-disk reorg, we need to handle it first before touching the in-memory
         // state.
         if let Some(remove_above) = self.find_disk_reorg()? {
