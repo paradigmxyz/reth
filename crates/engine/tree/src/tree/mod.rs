@@ -1467,6 +1467,9 @@ where
                 continue
             }
 
+            // Persistence can finish against a branch that the in-memory canonical chain has
+            // reorged away from. Unwind that stale disk branch before building a head-targeted
+            // save.
             if let Some(new_tip_num) = self.find_disk_reorg()? {
                 self.remove_blocks(new_tip_num);
                 continue
