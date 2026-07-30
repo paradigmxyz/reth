@@ -390,7 +390,7 @@ pub enum DnsDiscoveryEvent {
 /// Converts an [Enr] into a [`NodeRecord`]
 fn convert_enr_node_record(enr: &Enr<SecretKey>) -> Option<DnsNodeRecordUpdate> {
     // DNS discovery yields RLPx dial targets, so records without a tcp endpoint are skipped.
-    let node_record = NodeRecord::try_from(enr).ok().filter(|record| record.tcp_port != 0)?;
+    let node_record = NodeRecord::try_from(enr).ok().filter(NodeRecord::has_rlpx_endpoint)?;
 
     let fork_id =
         enr.get_decodable::<EnrForkIdEntry>(b"eth").transpose().ok().flatten().map(Into::into);
