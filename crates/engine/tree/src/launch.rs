@@ -25,7 +25,7 @@ use reth_provider::{
 };
 use reth_prune::PrunerWithFactory;
 use reth_stages_api::{MetricEventsSender, Pipeline};
-use reth_storage_overlay::{ChangesetCache, OverlayManager};
+use reth_storage_overlay::OverlayManager;
 use reth_tasks::Runtime;
 use std::sync::Arc;
 
@@ -60,11 +60,10 @@ pub fn build_engine_orchestrator<N, Client, S, V, C>(
     pruner: PrunerWithFactory<ProviderFactory<N>>,
     payload_builder: PayloadBuilderHandle<N::Payload>,
     payload_validator: V,
-    state_trie_overlays: OverlayManager<N::Primitives>,
+    overlay_manager: OverlayManager<N::Primitives>,
     tree_config: TreeConfig,
     sync_metrics_tx: MetricEventsSender,
     evm_config: C,
-    changeset_cache: ChangesetCache,
     runtime: Runtime,
 ) -> ChainOrchestrator<
     EngineHandler<
@@ -83,9 +82,6 @@ where
 {
     let downloader = BasicBlockDownloader::new(client, consensus.clone());
 
-    provider.set_state_trie_overlay_manager(state_trie_overlays.clone());
-    changeset_cache.set_state_trie_overlay_manager(state_trie_overlays.clone());
-
     let persistence_handle =
         PersistenceHandle::<N::Primitives>::spawn_service(provider, pruner, sync_metrics_tx);
 
@@ -98,11 +94,10 @@ where
         persistence_handle,
         payload_builder,
         canonical_in_memory_state,
-        state_trie_overlays,
+        overlay_manager,
         tree_config,
         engine_kind,
         evm_config,
-        changeset_cache,
         runtime,
     );
 

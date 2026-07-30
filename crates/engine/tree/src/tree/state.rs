@@ -39,8 +39,8 @@ pub struct TreeState<N: NodePrimitives = EthPrimitives> {
     pub(crate) current_canonical_head: BlockNumHash,
     /// The engine API variant of this handler
     pub(crate) engine_kind: EngineApiKind,
-    /// Flattened state trie overlays for in-memory blocks.
-    pub(crate) state_trie_overlays: OverlayManager<N>,
+    /// Manages state trie overlays for in-memory blocks.
+    pub(crate) overlay_manager: OverlayManager<N>,
 }
 
 impl<N: NodePrimitives> TreeState<N> {
@@ -48,7 +48,7 @@ impl<N: NodePrimitives> TreeState<N> {
     pub fn new(
         current_canonical_head: BlockNumHash,
         engine_kind: EngineApiKind,
-        state_trie_overlays: OverlayManager<N>,
+        overlay_manager: OverlayManager<N>,
     ) -> Self {
         Self {
             blocks_by_hash: B256Map::default(),
@@ -56,7 +56,7 @@ impl<N: NodePrimitives> TreeState<N> {
             current_canonical_head,
             parent_to_child: B256Map::default(),
             engine_kind,
-            state_trie_overlays,
+            overlay_manager,
         }
     }
 
@@ -65,7 +65,7 @@ impl<N: NodePrimitives> TreeState<N> {
         let engine_kind = self.engine_kind;
         let removed_hashes = self.blocks_by_hash.keys().copied().collect::<Vec<_>>();
         if !removed_hashes.is_empty() {
-            self.state_trie_overlays.remove_blocks(removed_hashes);
+            self.overlay_manager.remove_blocks(removed_hashes);
         }
         self.blocks_by_hash.clear();
         self.blocks_by_number.clear();
@@ -127,7 +127,7 @@ impl<N: NodePrimitives> TreeState<N> {
         self.blocks_by_number.entry(block_number).or_default().push(executed);
 
         self.parent_to_child.entry(parent_hash).or_default().insert(hash);
-        self.state_trie_overlays.insert_block(overlay_block);
+        self.overlay_manager.insert_block(overlay_block);
     }
 
     /// Remove single executed block by its hash.
@@ -322,7 +322,7 @@ impl<N: NodePrimitives> TreeState<N> {
         }
 
         if !removed_hashes.is_empty() {
-            self.state_trie_overlays.remove_blocks(removed_hashes);
+            self.overlay_manager.remove_blocks(removed_hashes);
         }
     }
 

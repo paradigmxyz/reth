@@ -624,7 +624,9 @@ mod tests {
         const REORG_TIP: usize = 144;
 
         reth_tracing::init_test_tracing();
-        let provider_factory = create_test_provider_factory();
+        let state_trie_overlays = OverlayManager::default();
+        let provider_factory =
+            create_test_provider_factory().with_overlay_manager(state_trie_overlays.clone());
         provider_factory.set_storage_settings_cache(reth_provider::StorageSettings::v2());
 
         let mut block_builder = TestBlockBuilder::eth().with_state();
@@ -667,11 +669,9 @@ mod tests {
             state_trie_transactions
         );
 
-        let state_trie_overlays = OverlayManager::default();
         for block in &blocks[STATE_TRIE_TIP + 1..=FINISH_TIP] {
             state_trie_overlays.insert_block(block.clone());
         }
-        provider_factory.set_state_trie_overlay_manager(state_trie_overlays);
 
         let handle = persistence_handle(provider_factory.clone());
         let (tx, rx) = crossbeam_channel::bounded(1);

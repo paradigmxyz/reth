@@ -4,9 +4,11 @@
 //! parent has not been persisted yet. [`OverlayManager`] tracks those in-memory blocks and
 //! builds reusable flattened state trie overlays on demand.
 
-use alloy_primitives::B256;
+use crate::{changeset_cache::compute_block_trie_updates, ChangesetCache, OverlayBuilder};
+use alloy_primitives::{BlockNumber, B256};
 use parking_lot::Mutex;
 use reth_chain_state::{ExecutedBlock, PreservedSparseTrie};
+use reth_errors::ProviderResult;
 use reth_ethereum_primitives::EthPrimitives;
 use reth_metrics::{
     metrics::{Counter, Histogram},
@@ -16,11 +18,16 @@ use reth_primitives_traits::{
     dashmap::{mapref::entry::Entry, DashMap},
     AlloyBlockHeader, FastInstant, NodePrimitives,
 };
+use reth_storage_api::{
+    BlockNumReader, ChangeSetReader, DBProvider, StageCheckpointReader, StorageChangeSetReader,
+    StorageSettingsCache,
+};
 #[cfg(feature = "rayon")]
 use reth_tasks::WorkerPool;
 use reth_trie::{updates::TrieUpdatesSorted, HashedPostStateSorted, TrieInputSorted};
 use std::{
     fmt,
+    ops::RangeInclusive,
     sync::{Arc, OnceLock},
     time::Instant,
 };
@@ -28,12 +35,13 @@ use tracing::{debug, trace};
 
 /// Manages flattened state trie overlays for in-memory blocks.
 ///
-/// The manager owns the in-memory block graph and a cache of flattened state trie overlays keyed by
-/// `(anchor_hash, tip_hash)`.
+/// The manager owns the in-memory block graph, changeset cache, and a cache of flattened state trie
+/// overlays keyed by `(anchor_hash, tip_hash)`.
 #[derive(Clone)]
 pub struct OverlayManager<N: NodePrimitives = EthPrimitives> {
     blocks: Arc<DashMap<B256, ExecutedBlock<N>>>,
     overlays: Arc<DashMap<OverlayCacheKey, OverlayCacheEntry>>,
+    changeset_cache: ChangesetCache,
     preserved_sparse_trie: Arc<Mutex<PreservedSparseTrieState>>,
     #[cfg(feature = "rayon")]
     worker_pool: Option<Arc<WorkerPool>>,
@@ -96,6 +104,7 @@ impl<N: NodePrimitives> Default for OverlayManager<N> {
         Self {
             blocks: Default::default(),
             overlays: Default::default(),
+            changeset_cache: Default::default(),
             preserved_sparse_trie: Default::default(),
             #[cfg(feature = "rayon")]
             worker_pool: None,
@@ -120,10 +129,55 @@ impl<N: NodePrimitives> OverlayManager<N> {
         Self {
             blocks: Default::default(),
             overlays: Default::default(),
+            changeset_cache: Default::default(),
             preserved_sparse_trie: Default::default(),
             worker_pool: Some(worker_pool),
             metrics: Default::default(),
         }
+    }
+
+    /// Creates an overlay builder for `parent_hash`.
+    pub fn overlay_builder(&self, parent_hash: B256) -> OverlayBuilder<N> {
+        OverlayBuilder::new(parent_hash, self.clone())
+    }
+
+    /// Gets or computes cached changesets for an inclusive block range.
+    pub fn get_or_compute_cached_changesets_range<P>(
+        &self,
+        provider: &P,
+        range: RangeInclusive<BlockNumber>,
+    ) -> ProviderResult<Arc<TrieUpdatesSorted>>
+    where
+        P: DBProvider
+            + ChangeSetReader
+            + StorageChangeSetReader
+            + BlockNumReader
+            + StageCheckpointReader
+            + StorageSettingsCache,
+    {
+        self.changeset_cache.get_or_compute_range_with_resolver(provider, range, Some(self))
+    }
+
+    /// Evicts cached changesets for blocks below `up_to_block`.
+    pub fn evict_cached_changesets(&self, up_to_block: BlockNumber) {
+        self.changeset_cache.evict(up_to_block);
+    }
+
+    /// Computes the trie updates produced by `block_number`.
+    pub fn compute_block_trie_updates<P>(
+        &self,
+        provider: &P,
+        block_number: BlockNumber,
+    ) -> ProviderResult<TrieUpdatesSorted>
+    where
+        P: DBProvider
+            + ChangeSetReader
+            + StorageChangeSetReader
+            + BlockNumReader
+            + StageCheckpointReader
+            + StorageSettingsCache,
+    {
+        compute_block_trie_updates(&self.changeset_cache, Some(self), provider, block_number)
     }
 
     /// Takes the preserved sparse trie if present, marking it as in use.

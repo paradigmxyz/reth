@@ -31,7 +31,7 @@ use std::{
     collections::{BTreeMap, HashMap},
     fmt,
     ops::RangeInclusive,
-    sync::{Arc, OnceLock},
+    sync::Arc,
 };
 use tracing::{debug, warn};
 
@@ -69,8 +69,9 @@ use reth_trie_db::{DatabaseHashedCursorFactory, DatabaseStateRoot};
 /// - Block number exceeds database tip
 /// - Database access fails
 /// - Cache retrieval fails
-pub fn compute_block_trie_updates<Provider>(
+pub(crate) fn compute_block_trie_updates<Provider>(
     cache: &ChangesetCache,
+    resolver: Option<&dyn StateTrieOverlayResolver>,
     provider: &Provider,
     block_number: BlockNumber,
 ) -> ProviderResult<TrieUpdatesSorted>
@@ -83,12 +84,13 @@ where
         + StorageSettingsCache,
 {
     reth_trie_db::with_adapter!(provider, |A| {
-        compute_block_trie_updates_inner::<_, A>(cache, provider, block_number)
+        compute_block_trie_updates_inner::<_, A>(cache, resolver, provider, block_number)
     })
 }
 
 fn compute_block_trie_updates_inner<Provider, A>(
     cache: &ChangesetCache,
+    resolver: Option<&dyn StateTrieOverlayResolver>,
     provider: &Provider,
     block_number: BlockNumber,
 ) -> ProviderResult<TrieUpdatesSorted>
@@ -104,13 +106,21 @@ where
     let tx = provider.tx_ref();
 
     let db_tip_block = provider.best_block_number()?;
-    let tip_input = cache.logical_tip_input(provider, db_tip_block)?.unwrap_or_default();
+    let tip_input = cache.logical_tip_input(provider, db_tip_block, resolver)?.unwrap_or_default();
 
     // Step 1: Get the trie changesets for the target block from cache
-    let changesets = cache.get_or_compute(provider, block_number)?;
+    let changesets = cache.get_or_compute_range_with_resolver(
+        provider,
+        block_number..=block_number,
+        resolver,
+    )?;
 
     // Step 2: Get the trie reverts for the state after the target block using the cache
-    let reverts = cache.get_or_compute_range(provider, (block_number + 1)..=db_tip_block)?;
+    let reverts = cache.get_or_compute_range_with_resolver(
+        provider,
+        (block_number + 1)..=db_tip_block,
+        resolver,
+    )?;
 
     // Step 3: Create an InMemoryTrieCursorFactory with the reverts
     // This gives us the trie state as it was after the target block was processed
@@ -161,12 +171,11 @@ where
 /// This type wraps a shared, mutable reference to the cache inner.
 /// The `RwLock` enables concurrent reads while ensuring exclusive access for writes.
 #[derive(Debug, Clone)]
-pub struct ChangesetCache {
+pub(crate) struct ChangesetCache {
     inner: Arc<RwLock<ChangesetCacheInner>>,
-    state_trie_overlay: Arc<OnceLock<Arc<dyn StateTrieOverlayResolver>>>,
 }
 
-trait StateTrieOverlayResolver: fmt::Debug + Send + Sync {
+pub(crate) trait StateTrieOverlayResolver: fmt::Debug + Send + Sync {
     fn overlay_for_parent(
         &self,
         parent_hash: B256,
@@ -197,29 +206,8 @@ impl ChangesetCache {
     ///
     /// The cache has no capacity limit and relies on explicit eviction
     /// via the `evict()` method to manage memory usage.
-    pub fn new() -> Self {
-        Self {
-            inner: Arc::new(RwLock::new(ChangesetCacheInner::new())),
-            state_trie_overlay: Arc::new(OnceLock::new()),
-        }
-    }
-
-    /// Sets the manager used to reconstruct the logical database tip when trie persistence trails
-    /// the Finish checkpoint.
-    pub fn set_state_trie_overlay_manager<N: NodePrimitives>(&self, manager: OverlayManager<N>) {
-        self.state_trie_overlay.get_or_init(|| Arc::new(manager));
-    }
-
-    /// Retrieves changesets for a block.
-    ///
-    /// Returns `None` if the block is not in the cache (either evicted or never computed).
-    /// Updates hit/miss metrics accordingly.
-    pub fn get(
-        &self,
-        block_hash: B256,
-        block_number: BlockNumber,
-    ) -> Option<Arc<TrieUpdatesSorted>> {
-        self.inner.read().get(&ChangesetRangeKey::single(block_number, block_hash))
+    pub(crate) fn new() -> Self {
+        Self { inner: Arc::new(RwLock::new(ChangesetCacheInner::new())) }
     }
 
     /// Evicts changesets for blocks below the given block number.
@@ -231,7 +219,7 @@ impl ChangesetCache {
     ///
     /// * `up_to_block` - Evict blocks with number < this value. Blocks with number >= this value
     ///   are retained.
-    pub fn evict(&self, up_to_block: BlockNumber) {
+    pub(crate) fn evict(&self, up_to_block: BlockNumber) {
         self.inner.write().evict(up_to_block)
     }
 
@@ -248,7 +236,8 @@ impl ChangesetCache {
     /// # Returns
     ///
     /// Changesets for the block, either from cache or computed on-the-fly.
-    pub fn get_or_compute<P>(
+    #[cfg(test)]
+    pub(crate) fn get_or_compute<P>(
         &self,
         provider: &P,
         block_number: BlockNumber,
@@ -261,7 +250,7 @@ impl ChangesetCache {
             + StageCheckpointReader
             + StorageSettingsCache,
     {
-        self.get_or_compute_range(provider, block_number..=block_number)
+        self.get_or_compute_range_with_resolver(provider, block_number..=block_number, None)
     }
 
     /// Gets or computes trie reverts for a range of blocks.
@@ -290,10 +279,28 @@ impl ChangesetCache {
     /// - Database access fails
     /// - Block hash lookup fails
     /// - Changeset computation fails
-    pub fn get_or_compute_range<P>(
+    #[cfg(test)]
+    pub(crate) fn get_or_compute_range<P>(
         &self,
         provider: &P,
         range: RangeInclusive<BlockNumber>,
+    ) -> ProviderResult<Arc<TrieUpdatesSorted>>
+    where
+        P: DBProvider
+            + ChangeSetReader
+            + StorageChangeSetReader
+            + BlockNumReader
+            + StageCheckpointReader
+            + StorageSettingsCache,
+    {
+        self.get_or_compute_range_with_resolver(provider, range, None)
+    }
+
+    pub(crate) fn get_or_compute_range_with_resolver<P>(
+        &self,
+        provider: &P,
+        range: RangeInclusive<BlockNumber>,
+        resolver: Option<&dyn StateTrieOverlayResolver>,
     ) -> ProviderResult<Arc<TrieUpdatesSorted>>
     where
         P: DBProvider
@@ -424,7 +431,7 @@ impl ChangesetCache {
             "Changeset cache MISS in range, falling back to aggregate DB-based computation"
         );
 
-        let tip_input = self.logical_tip_input(provider, db_tip_block)?;
+        let tip_input = self.logical_tip_input(provider, db_tip_block, resolver)?;
         let empty_tip_input = TrieInputSorted::default();
         let accumulated_reverts = Arc::new(reth_trie_db::compute_range_trie_changesets_with_tip(
             provider,
@@ -459,6 +466,7 @@ impl ChangesetCache {
         &self,
         provider: &P,
         db_tip_block: BlockNumber,
+        resolver: Option<&dyn StateTrieOverlayResolver>,
     ) -> ProviderResult<Option<TrieInputSorted>>
     where
         P: BlockNumReader + StageCheckpointReader,
@@ -491,7 +499,7 @@ impl ChangesetCache {
         let finish_tip_hash = provider
             .block_hash(finish.block_number)?
             .ok_or_else(|| ProviderError::HeaderNotFound(finish.block_number.into()))?;
-        let resolver = self.state_trie_overlay.get().cloned().ok_or_else(|| {
+        let resolver = resolver.ok_or_else(|| {
             ProviderError::other(std::io::Error::other(format!(
                 "changeset cache requires a state trie overlay manager for partial persistence gap #{}..=#{}",
                 state_trie_tip.saturating_add(1),
@@ -1099,16 +1107,16 @@ mod tests {
         let fixture = logical_tip_fixture();
         let hybrid_provider = fixture.hybrid_factory.provider().unwrap();
         let reference_provider = fixture.reference_factory.provider().unwrap();
-        let cache = ChangesetCache::new();
-        cache.set_state_trie_overlay_manager(fixture.manager);
 
-        let actual = cache.get_or_compute_range(&hybrid_provider, 2..=3).unwrap();
+        let actual = fixture
+            .manager
+            .get_or_compute_cached_changesets_range(&hybrid_provider, 2..=3)
+            .unwrap();
         let expected =
             reth_trie_db::compute_range_trie_changesets(&reference_provider, 2..=3, 3).unwrap();
 
         assert!(!expected.is_empty());
         assert_eq!(*actual, expected);
-        assert_eq!(cache.inner.read().entries.len(), 1);
     }
 
     #[cfg(feature = "partial-persistence")]

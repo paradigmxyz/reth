@@ -1127,7 +1127,7 @@ mod tests {
         providers::OverlayStateProviderFactory, test_utils::create_test_provider_factory,
         ChainSpecProvider,
     };
-    use reth_storage_overlay::{ChangesetCache, OverlayBuilder};
+    use reth_storage_overlay::OverlayManager;
     use reth_trie_parallel::proof_task::ProofTaskCtx;
     use reth_trie_sparse::ArenaParallelSparseTrie;
 
@@ -1231,10 +1231,8 @@ mod tests {
         let anchor_hash = provider_factory.chain_spec().genesis_hash();
         let overlay_factory = OverlayStateProviderFactory::new(
             provider_factory,
-            OverlayBuilder::<reth_chain_state::EthPrimitives>::new(
-                anchor_hash,
-                ChangesetCache::new(),
-            ),
+            OverlayManager::<reth_chain_state::EthPrimitives>::default()
+                .overlay_builder(anchor_hash),
         );
         let proof_worker_handle =
             ProofWorkerHandle::new(&runtime, ProofTaskCtx::new(overlay_factory), false);
@@ -1278,10 +1276,8 @@ mod tests {
         let anchor_hash = provider_factory.chain_spec().genesis_hash();
         let overlay_factory = OverlayStateProviderFactory::new(
             provider_factory,
-            OverlayBuilder::<reth_chain_state::EthPrimitives>::new(
-                anchor_hash,
-                ChangesetCache::new(),
-            ),
+            OverlayManager::<reth_chain_state::EthPrimitives>::default()
+                .overlay_builder(anchor_hash),
         );
         let proof_worker_handle =
             ProofWorkerHandle::new(&runtime, ProofTaskCtx::new(overlay_factory), false);
@@ -1358,10 +1354,8 @@ mod tests {
         let anchor_hash = provider_factory.chain_spec().genesis_hash();
         let overlay_factory = OverlayStateProviderFactory::new(
             provider_factory,
-            OverlayBuilder::<reth_chain_state::EthPrimitives>::new(
-                anchor_hash,
-                ChangesetCache::new(),
-            ),
+            OverlayManager::<reth_chain_state::EthPrimitives>::default()
+                .overlay_builder(anchor_hash),
         );
         let proof_worker_handle =
             ProofWorkerHandle::new(&runtime, ProofTaskCtx::new(overlay_factory), false);
@@ -1404,10 +1398,8 @@ mod tests {
         let anchor_hash = provider_factory.chain_spec().genesis_hash();
         let overlay_factory = OverlayStateProviderFactory::new(
             provider_factory,
-            OverlayBuilder::<reth_chain_state::EthPrimitives>::new(
-                anchor_hash,
-                ChangesetCache::new(),
-            ),
+            OverlayManager::<reth_chain_state::EthPrimitives>::default()
+                .overlay_builder(anchor_hash),
         );
         let proof_worker_handle =
             ProofWorkerHandle::new(&runtime, ProofTaskCtx::new(overlay_factory), false);
