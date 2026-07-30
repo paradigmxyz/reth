@@ -1,4 +1,4 @@
-use crate::{ChangesetCache, OverlayManager};
+use crate::OverlayManager;
 use alloy_eips::BlockNumHash;
 use alloy_primitives::{BlockHash, BlockNumber, B256};
 use metrics::{Counter, Histogram};
@@ -40,7 +40,7 @@ impl Overlay {
 
 /// Source of data to apply on top of the durable database state.
 #[derive(Debug, Clone)]
-pub enum OverlaySource<N: NodePrimitives = EthPrimitives> {
+pub enum OverlaySource {
     /// Immediate overlay with already-computed data.
     Immediate {
         /// Trie updates overlay.
@@ -52,24 +52,21 @@ pub enum OverlaySource<N: NodePrimitives = EthPrimitives> {
         state: Arc<HashedPostStateSorted>,
     },
     /// Manager-backed overlay for in-memory state.
-    Managed {
-        /// Manager used to resolve in-memory parent state if the parent is not persisted.
-        manager: OverlayManager<N>,
-    },
+    Managed,
 }
 
 /// Builder for calculating trie and hashed-state overlays.
 ///
-/// This stores the overlay configuration and the logic for resolving overlays and collecting
-/// reverts. It is independent from any provider factory or overlay cache.
+/// This stores the overlay manager, overlay configuration, and the logic for resolving overlays
+/// and collecting reverts.
 #[derive(Debug, Clone)]
 pub struct OverlayBuilder<N: NodePrimitives = EthPrimitives> {
     /// Parent hash requested by the caller.
     parent_hash: B256,
     /// Optional overlay source.
-    overlay_source: Option<OverlaySource<N>>,
-    /// Changeset cache handle for retrieving trie changesets.
-    changeset_cache: ChangesetCache,
+    overlay_source: Option<OverlaySource>,
+    /// Manager used for cached changesets and in-memory parent state.
+    overlay_manager: OverlayManager<N>,
     /// Anchor hash of the reused sparse trie, if this task reused one.
     reused_sparse_trie_anchor_hash: Option<B256>,
     /// Metrics for overlay construction.
@@ -77,12 +74,12 @@ pub struct OverlayBuilder<N: NodePrimitives = EthPrimitives> {
 }
 
 impl<N: NodePrimitives> OverlayBuilder<N> {
-    /// Create a new overlay builder.
-    pub fn new(parent_hash: B256, changeset_cache: ChangesetCache) -> Self {
+    /// Create a new manager-backed overlay builder.
+    pub(crate) fn new(parent_hash: B256, overlay_manager: OverlayManager<N>) -> Self {
         Self {
             parent_hash,
-            overlay_source: None,
-            changeset_cache,
+            overlay_source: Some(OverlaySource::Managed),
+            overlay_manager,
             reused_sparse_trie_anchor_hash: None,
             metrics: OverlayBuilderMetrics::default(),
         }
@@ -91,7 +88,7 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
     /// Set the overlay source.
     ///
     /// This overlay will be applied on top of any reverts.
-    pub fn with_overlay_source(mut self, source: Option<OverlaySource<N>>) -> Self {
+    pub fn with_overlay_source(mut self, source: Option<OverlaySource>) -> Self {
         self.overlay_source = source;
         self
     }
@@ -103,51 +100,13 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
         self
     }
 
-    /// Set the overlay manager used to resolve in-memory parent state.
-    pub fn with_overlay_manager(mut self, overlay_manager: OverlayManager<N>) -> Self {
-        self.overlay_source = Some(OverlaySource::Managed { manager: overlay_manager });
-        self
-    }
-
-    /// Set the hashed state overlay.
-    pub fn with_hashed_state_overlay(
+    /// Sets an immediate hashed-state and trie-updates overlay.
+    pub fn with_immediate_state_trie_overlay(
         mut self,
-        hashed_state_overlay: Option<Arc<HashedPostStateSorted>>,
+        state: Arc<HashedPostStateSorted>,
+        trie: Arc<TrieUpdatesSorted>,
     ) -> Self {
-        if let Some(new_state) = hashed_state_overlay {
-            match &mut self.overlay_source {
-                Some(OverlaySource::Immediate { state, .. }) => *state = new_state,
-                Some(OverlaySource::Managed { .. }) | None => {
-                    self.overlay_source = Some(OverlaySource::Immediate {
-                        trie: Arc::new(TrieUpdatesSorted::default()),
-                        state: new_state,
-                    });
-                }
-            }
-        }
-        self
-    }
-
-    /// Set the trie updates overlay.
-    ///
-    /// Only applies to an immediate overlay: a managed overlay's trie updates are resolved from
-    /// its manager instead.
-    pub fn with_trie_updates_overlay(
-        mut self,
-        trie_updates_overlay: Option<Arc<TrieUpdatesSorted>>,
-    ) -> Self {
-        if let Some(trie) = trie_updates_overlay {
-            match &mut self.overlay_source {
-                Some(OverlaySource::Immediate { trie: existing, .. }) => *existing = trie,
-                Some(OverlaySource::Managed { .. }) => {}
-                None => {
-                    self.overlay_source = Some(OverlaySource::Immediate {
-                        trie,
-                        state: Arc::new(HashedPostStateSorted::default()),
-                    });
-                }
-            }
-        }
+        self.overlay_source = Some(OverlaySource::Immediate { trie, state });
         self
     }
 
@@ -196,14 +155,14 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
         let trie_updates_total_len;
         let hashed_state_updates_total_len;
         let anchor_hash = match &self.overlay_source {
-            Some(OverlaySource::Managed { manager }) => {
+            Some(OverlaySource::Managed) => {
                 let parent_is_persisted = provider
                     .convert_hash_or_number(self.parent_hash.into())?
                     .is_some_and(|parent_number| parent_number <= state_trie_tip_block.number);
                 if parent_is_persisted {
                     self.parent_hash
                 } else {
-                    manager
+                    self.overlay_manager
                         .anchor_for_parent(self.parent_hash, state_trie_tip_block.hash)
                         .ok_or(ProviderError::BlockHashNotFound(self.parent_hash))?
                 }
@@ -226,8 +185,9 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
                 let _guard =
                     debug_span!(target: "storage::overlay", "retrieving_trie_reverts").entered();
                 let start = Instant::now();
-                let accumulated_reverts =
-                    self.changeset_cache.get_or_compute_range(provider, revert_blocks.clone())?;
+                let accumulated_reverts = self
+                    .overlay_manager
+                    .get_or_compute_cached_changesets_range(provider, revert_blocks.clone())?;
                 retrieve_trie_reverts_duration = start.elapsed();
                 accumulated_reverts
             };
@@ -334,14 +294,14 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
         anchor_hash: BlockHash,
     ) -> ProviderResult<(Arc<TrieUpdatesSorted>, Arc<HashedPostStateSorted>)> {
         match &self.overlay_source {
-            Some(OverlaySource::Managed { manager }) => {
+            Some(OverlaySource::Managed) => {
                 if anchor_hash == self.parent_hash {
                     Ok((
                         Arc::new(TrieUpdatesSorted::default()),
                         Arc::new(HashedPostStateSorted::default()),
                     ))
                 } else {
-                    manager
+                    self.overlay_manager
                         .overlay_for_parent(self.parent_hash, anchor_hash)
                         .map_err(ProviderError::other)
                 }
@@ -371,9 +331,16 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
         let Some(anchor_hash) = self.reused_sparse_trie_anchor_hash else { return false };
 
         match &self.overlay_source {
-            Some(OverlaySource::Managed { manager }) => {
-                manager.contains_hash(self.parent_hash, anchor_hash, state_trie_tip_hash) &&
-                    manager.contains_hash(self.parent_hash, anchor_hash, finish_tip_hash)
+            Some(OverlaySource::Managed) => {
+                self.overlay_manager.contains_hash(
+                    self.parent_hash,
+                    anchor_hash,
+                    state_trie_tip_hash,
+                ) && self.overlay_manager.contains_hash(
+                    self.parent_hash,
+                    anchor_hash,
+                    finish_tip_hash,
+                )
             }
             _ => false,
         }
@@ -417,9 +384,17 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
         // The database is a hybrid view while the state/trie and Finish frontiers differ. A
         // manager overlay can use that view directly only when its anchor-to-parent path covers
         // both frontiers; otherwise the database must first be reverted to the overlay anchor.
-        if let Some(OverlaySource::Managed { manager }) = &self.overlay_source &&
-            manager.contains_hash(self.parent_hash, anchor_hash, state_trie_tip_block.hash) &&
-            manager.contains_hash(self.parent_hash, anchor_hash, finish_tip_block.hash)
+        if matches!(&self.overlay_source, Some(OverlaySource::Managed)) &&
+            self.overlay_manager.contains_hash(
+                self.parent_hash,
+                anchor_hash,
+                state_trie_tip_block.hash,
+            ) &&
+            self.overlay_manager.contains_hash(
+                self.parent_hash,
+                anchor_hash,
+                finish_tip_block.hash,
+            )
         {
             return Ok(None)
         }
@@ -606,13 +581,10 @@ mod tests {
         let provider = factory.provider().unwrap();
 
         for (parent_index, expected_ids) in [(3, vec![3, 4]), (4, vec![3, 4, 5])] {
-            let overlay = OverlayBuilder::<EthPrimitives>::new(
-                blocks[parent_index].recovered_block().hash(),
-                ChangesetCache::new(),
-            )
-            .with_overlay_manager(manager.clone())
-            .build_overlay(&provider)
-            .unwrap();
+            let overlay = manager
+                .overlay_builder(blocks[parent_index].recovered_block().hash())
+                .build_overlay(&provider)
+                .unwrap();
 
             assert_eq!(
                 account_keys(&overlay),
@@ -637,13 +609,10 @@ mod tests {
         manager.insert_block(blocks[1].clone());
         let provider = factory.provider().unwrap();
 
-        let overlay = OverlayBuilder::<EthPrimitives>::new(
-            blocks[1].recovered_block().hash(),
-            ChangesetCache::new(),
-        )
-        .with_overlay_manager(manager)
-        .build_overlay(&provider)
-        .unwrap();
+        let overlay = manager
+            .overlay_builder(blocks[1].recovered_block().hash())
+            .build_overlay(&provider)
+            .unwrap();
 
         assert!(overlay.hashed_post_state.is_empty());
         assert!(overlay.trie_updates.is_empty());
@@ -656,11 +625,7 @@ mod tests {
         let manager = OverlayManager::default();
         manager.insert_block(blocks[2].clone());
         let provider = factory.provider().unwrap();
-        let builder = OverlayBuilder::<EthPrimitives>::new(
-            blocks[2].recovered_block().hash(),
-            ChangesetCache::new(),
-        )
-        .with_overlay_manager(manager);
+        let builder = manager.overlay_builder(blocks[2].recovered_block().hash());
         let (state_trie_tip, finish_tip) = database_state_frontiers(&provider).unwrap();
         let anchor_hash = blocks[1].recovered_block().hash();
         let revert_blocks =
@@ -689,11 +654,7 @@ mod tests {
         let manager = OverlayManager::default();
         manager.insert_block(blocks[2].clone());
         let provider = factory.provider().unwrap();
-        let builder = OverlayBuilder::<EthPrimitives>::new(
-            blocks[2].recovered_block().hash(),
-            ChangesetCache::new(),
-        )
-        .with_overlay_manager(manager);
+        let builder = manager.overlay_builder(blocks[2].recovered_block().hash());
         let (state_trie_tip, finish_tip) = database_state_frontiers(&provider).unwrap();
         let anchor_hash = blocks[1].recovered_block().hash();
         let revert_blocks =
@@ -722,11 +683,7 @@ mod tests {
         let manager = OverlayManager::default();
         manager.insert_block(blocks[2].clone());
         let provider = factory.provider().unwrap();
-        let builder = OverlayBuilder::<EthPrimitives>::new(
-            blocks[2].recovered_block().hash(),
-            ChangesetCache::new(),
-        )
-        .with_overlay_manager(manager);
+        let builder = manager.overlay_builder(blocks[2].recovered_block().hash());
         let (state_trie_tip, finish_tip) = database_state_frontiers(&provider).unwrap();
         let anchor_hash = blocks[1].recovered_block().hash();
         let error = builder
@@ -747,12 +704,11 @@ mod tests {
     fn overlay_after_state_trie_frontier_requires_managed_coverage() {
         let (factory, blocks) = setup_frontiers(1, 3);
         let provider = factory.provider().unwrap();
-        let error = OverlayBuilder::<EthPrimitives>::new(
-            blocks[3].recovered_block().hash(),
-            ChangesetCache::new(),
-        )
-        .build_overlay(&provider)
-        .unwrap_err();
+        let error = OverlayManager::<EthPrimitives>::default()
+            .overlay_builder(blocks[3].recovered_block().hash())
+            .with_overlay_source(None)
+            .build_overlay(&provider)
+            .unwrap_err();
 
         assert!(
             error.to_string().contains("is after partial state trie frontier"),
@@ -766,8 +722,8 @@ mod tests {
         let (factory, blocks) = setup_frontiers(1, 3);
         let provider = factory.provider().unwrap();
         let parent_hash = blocks[3].recovered_block().hash();
-        let error = OverlayBuilder::<EthPrimitives>::new(parent_hash, ChangesetCache::new())
-            .with_overlay_manager(OverlayManager::default())
+        let error = OverlayManager::<EthPrimitives>::default()
+            .overlay_builder(parent_hash)
             .build_overlay(&provider)
             .unwrap_err();
 
@@ -777,8 +733,7 @@ mod tests {
     #[test]
     fn managed_overlay_skips_manager_for_persisted_parent() {
         let parent_hash = B256::with_last_byte(1);
-        let builder = OverlayBuilder::<EthPrimitives>::new(parent_hash, ChangesetCache::default())
-            .with_overlay_manager(OverlayManager::default());
+        let builder = OverlayManager::<EthPrimitives>::default().overlay_builder(parent_hash);
 
         let (trie, state) = builder.resolve_overlays(parent_hash).unwrap();
         assert!(trie.is_empty());
@@ -789,8 +744,7 @@ mod tests {
     fn managed_overlay_errors_if_parent_is_not_persisted_or_managed() {
         let parent_hash = B256::with_last_byte(1);
         let anchor_hash = B256::with_last_byte(2);
-        let builder = OverlayBuilder::<EthPrimitives>::new(parent_hash, ChangesetCache::default())
-            .with_overlay_manager(OverlayManager::default());
+        let builder = OverlayManager::<EthPrimitives>::default().overlay_builder(parent_hash);
 
         let err = builder.resolve_overlays(anchor_hash).unwrap_err();
 
@@ -800,8 +754,7 @@ mod tests {
     #[test]
     fn managed_overlay_skip_requires_both_frontiers() {
         let parent_hash = B256::with_last_byte(1);
-        let builder = OverlayBuilder::<EthPrimitives>::new(parent_hash, ChangesetCache::default())
-            .with_overlay_manager(OverlayManager::default());
+        let builder = OverlayManager::<EthPrimitives>::default().overlay_builder(parent_hash);
         assert!(!builder.should_skip_overlay_for_reused_sparse_trie(parent_hash, parent_hash));
 
         let builder = builder.with_skip_overlay_for_reused_sparse_trie(parent_hash);
@@ -814,12 +767,9 @@ mod tests {
         for block in &blocks[2..=4] {
             manager.insert_block(block.clone());
         }
-        let builder = OverlayBuilder::<EthPrimitives>::new(
-            blocks[4].recovered_block().hash(),
-            ChangesetCache::default(),
-        )
-        .with_overlay_manager(manager)
-        .with_skip_overlay_for_reused_sparse_trie(blocks[1].recovered_block().hash());
+        let builder = manager
+            .overlay_builder(blocks[4].recovered_block().hash())
+            .with_skip_overlay_for_reused_sparse_trie(blocks[1].recovered_block().hash());
         assert!(builder.should_skip_overlay_for_reused_sparse_trie(
             blocks[1].recovered_block().hash(),
             blocks[3].recovered_block().hash(),

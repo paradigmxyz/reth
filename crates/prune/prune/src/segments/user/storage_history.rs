@@ -127,13 +127,19 @@ impl StorageHistory {
 
         let walker = provider.static_file_provider().walk_storage_changeset_range(range);
         for result in walker {
-            if limiter.is_limit_reached() {
-                done = false;
-                break;
-            }
             let (block_address, entry) = result?;
             let block_number = block_address.block_number();
             let address = block_address.address();
+            // The walk itself deletes nothing, so an interrupted block cannot be resumed: giving
+            // up the budget inside block N reports checkpoint N-1 and the next run rereads the
+            // same entries, forever. Stop on block boundaries only, overshooting the budget by at
+            // most the rest of one block.
+            if limiter.is_limit_reached() &&
+                last_changeset_pruned_block.is_some_and(|last| last != block_number)
+            {
+                done = false;
+                break;
+            }
             highest_deleted_storages.insert((address, entry.key), block_number);
             last_changeset_pruned_block = Some(block_number);
             pruned_changesets += 1;
@@ -212,9 +218,19 @@ impl StorageHistory {
             )?;
         trace!(target: "pruner", deleted = %pruned_changesets, %done, "Pruned storage history (changesets)");
 
+        // The table walk can stop in the middle of a block, so the interrupted block has to be
+        // pruned again on the next run.
+        let last_pruned_block = last_changeset_pruned_block.map(|block_number| {
+            if done {
+                block_number
+            } else {
+                block_number.saturating_sub(1)
+            }
+        });
+
         let result = HistoryPruneResult {
             highest_deleted: highest_deleted_storages,
-            last_pruned_block: last_changeset_pruned_block,
+            last_pruned_block,
             pruned_count: pruned_changesets,
             done,
         };
@@ -264,13 +280,19 @@ impl StorageHistory {
         // pair to determine which history shard entries need pruning.
         let walker = provider.static_file_provider().walk_storage_changeset_range(range);
         for result in walker {
-            if limiter.is_limit_reached() {
-                done = false;
-                break;
-            }
             let (block_address, entry) = result?;
             let block_number = block_address.block_number();
             let address = block_address.address();
+            // Static file changesets are not deleted here, so an interrupted block cannot be
+            // resumed: giving up the budget inside block N reports checkpoint N-1 and the next run
+            // rereads the same entries, forever. Stop on block boundaries only, overshooting the
+            // budget by at most the rest of one block.
+            if limiter.is_limit_reached() &&
+                last_changeset_pruned_block.is_some_and(|last| last != block_number)
+            {
+                done = false;
+                break;
+            }
             highest_deleted_storages.insert((address, entry.key), block_number);
             last_changeset_pruned_block = Some(block_number);
             changesets_processed += 1;
@@ -279,9 +301,7 @@ impl StorageHistory {
 
         trace!(target: "pruner", processed = %changesets_processed, %done, "Scanned storage changesets from static files");
 
-        let last_changeset_pruned_block = last_changeset_pruned_block
-            .map(|block_number| if done { block_number } else { block_number.saturating_sub(1) })
-            .unwrap_or(range_end);
+        let last_changeset_pruned_block = last_changeset_pruned_block.unwrap_or(range_end);
 
         // Prune RocksDB history shards for affected storage slots
         let mut deleted_shards = 0usize;
@@ -771,5 +791,117 @@ mod tests {
                 }
             }
         }
+    }
+
+    /// A block holding at least a whole run's budget of changesets must not stall pruning: the
+    /// walk deletes no changesets, so a checkpoint rewound below such a block would make every
+    /// later run reread it and never advance.
+    #[test]
+    fn dense_block_advances_rocksdb_checkpoint() {
+        use alloy_primitives::U256;
+        use reth_db_api::models::storage_sharded_key::StorageShardedKey;
+        use reth_primitives_traits::StorageEntry;
+        use reth_provider::RocksDBProviderFactory;
+        use reth_storage_api::StorageSettings;
+
+        let db = TestStageDB::default();
+        let mut rng = generators::rng();
+
+        let blocks = random_block_range(
+            &mut rng,
+            0..=20,
+            BlockRangeParams { parent: Some(B256::ZERO), tx_count: 0..1, ..Default::default() },
+        );
+        db.insert_blocks(blocks.iter(), StorageKind::Database(None)).expect("insert blocks");
+
+        // Two storage changesets per block, so a budget of two makes every block "dense".
+        const ENTRIES_PER_BLOCK: usize = 2;
+        let (address, account) = random_eoa_accounts(&mut rng, 1).into_iter().next().unwrap();
+        let keys = [B256::with_last_byte(1), B256::with_last_byte(2)];
+        let changesets = (0..=20)
+            .map(|_| {
+                vec![(
+                    address,
+                    account,
+                    keys.iter()
+                        .map(|key| StorageEntry { key: *key, value: U256::from(1) })
+                        .collect(),
+                )]
+            })
+            .collect::<Vec<_>>();
+        db.insert_changesets_to_static_files(changesets, None)
+            .expect("insert changesets to static files");
+
+        {
+            let rocksdb = db.factory.rocksdb_provider();
+            let mut batch = rocksdb.batch();
+            for key in keys {
+                batch
+                    .put::<tables::StoragesHistory>(
+                        StorageShardedKey::last(address, key),
+                        &BlockNumberList::new_pre_sorted(0..=20),
+                    )
+                    .expect("insert storage history shard");
+            }
+            batch.commit().expect("commit rocksdb batch");
+        }
+
+        let to_block = 15u64;
+        let prune_mode = PruneMode::Before(to_block);
+        let segment = StorageHistory::new(prune_mode);
+
+        // Start from a checkpoint in the middle so a rewind can't be masked by block 0.
+        let mut checkpoint = PruneCheckpoint { block_number: Some(4), tx_number: None, prune_mode };
+
+        let run_prune = |checkpoint: PruneCheckpoint, limit: usize| {
+            let input = PruneInput {
+                previous_checkpoint: Some(checkpoint),
+                to_block,
+                limiter: PruneLimiter::default().set_deleted_entries_limit(limit),
+            };
+
+            let provider = db.factory.database_provider_rw().unwrap();
+            provider.set_storage_settings_cache(StorageSettings::v2());
+            let result = segment.prune(&provider, input).unwrap();
+            segment
+                .save_checkpoint(
+                    &provider,
+                    result.checkpoint.unwrap().as_prune_checkpoint(prune_mode),
+                )
+                .unwrap();
+            provider.commit().expect("commit");
+
+            let checkpoint = db
+                .factory
+                .provider()
+                .unwrap()
+                .get_prune_checkpoint(PruneSegment::StorageHistory)
+                .unwrap()
+                .unwrap();
+            (result, checkpoint)
+        };
+
+        // The RocksDB path does not halve the limit, so this budget is exactly one dense block.
+        for _ in 0..3 {
+            let previous = checkpoint.block_number;
+            let (result, next) = run_prune(checkpoint, ENTRIES_PER_BLOCK);
+            checkpoint = next;
+
+            assert!(
+                !result.progress.is_finished(),
+                "the range is longer than one run's budget allows"
+            );
+            assert!(
+                checkpoint.block_number > previous,
+                "checkpoint must advance past the dense block, got {:?} after {previous:?}",
+                checkpoint.block_number
+            );
+        }
+        assert_eq!(checkpoint.block_number, Some(7), "one dense block cleared per run");
+
+        // With enough budget the remainder of the range completes in one run.
+        let (result, checkpoint) = run_prune(checkpoint, 1000);
+        assert!(result.progress.is_finished());
+        assert_eq!(checkpoint.block_number, Some(to_block));
     }
 }
