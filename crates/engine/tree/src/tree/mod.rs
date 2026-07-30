@@ -1528,14 +1528,9 @@ where
         self.metrics.engine.persistence_duration.record(start_time.elapsed());
 
         let commit_duration = result.commit_duration;
-        let Some(last_persisted_block) = result.last_block else {
-            // if this happened, then we persisted no blocks because we sent an empty vec of blocks
-            warn!(target: "engine::tree", "Persistence task completed but did not persist any blocks");
-            return Ok(())
-        };
+        let last_persisted_block = result.last_block;
         let last_persisted_block_number = last_persisted_block.number;
-        let last_state_trie_persisted_block =
-            result.last_state_trie_block.unwrap_or(last_persisted_block);
+        let last_state_trie_persisted_block = result.last_state_trie_block;
         debug_assert!(
             last_state_trie_persisted_block.number <= last_persisted_block.number,
             "state/trie frontier cannot exceed the last persisted block"

@@ -895,8 +895,8 @@ fn test_backpressure_waits_for_persistence_before_reading_incoming() {
         std::thread::sleep(Duration::from_millis(10));
         persist_tx
             .send(PersistenceResult {
-                last_block: Some(persisted),
-                last_state_trie_block: Some(persisted),
+                last_block: persisted,
+                last_state_trie_block: persisted,
                 commit_duration: Some(Duration::ZERO),
             })
             .unwrap();
@@ -1014,8 +1014,8 @@ async fn test_tree_state_on_new_head_reorg() {
     // send the response so we can advance again
     sender
         .send(PersistenceResult {
-            last_block: Some(blocks[1].recovered_block().num_hash()),
-            last_state_trie_block: Some(blocks[1].recovered_block().num_hash()),
+            last_block: blocks[1].recovered_block().num_hash(),
+            last_state_trie_block: blocks[1].recovered_block().num_hash(),
             commit_duration: Some(Duration::ZERO),
         })
         .unwrap();
@@ -1269,8 +1269,8 @@ fn test_on_persistence_complete_retains_state_masking_blocks() {
         .tree
         .on_persistence_complete(
             PersistenceResult {
-                last_block: Some(persisted_tip),
-                last_state_trie_block: Some(state_trie_tip),
+                last_block: persisted_tip,
+                last_state_trie_block: state_trie_tip,
                 commit_duration: Some(Duration::ZERO),
             },
             Instant::now(),
@@ -2396,8 +2396,8 @@ mod forkchoice_updated_tests {
                 last_persisted_number = last.number;
                 sender
                     .send(PersistenceResult {
-                        last_block: Some(last),
-                        last_state_trie_block: Some(last),
+                        last_block: last,
+                        last_state_trie_block: last,
                         commit_duration: Some(Duration::ZERO),
                     })
                     .unwrap();

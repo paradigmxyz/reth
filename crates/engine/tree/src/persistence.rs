@@ -25,10 +25,10 @@ use tracing::{debug, error, instrument, warn};
 /// Unified result of any persistence operation.
 #[derive(Debug)]
 pub struct PersistenceResult {
-    /// The highest block whose non-state/trie outputs are persisted, if any.
-    pub last_block: Option<BlockNumHash>,
-    /// The state/trie persistence frontier, if known.
-    pub last_state_trie_block: Option<BlockNumHash>,
+    /// The highest block whose non-state/trie outputs are persisted.
+    pub last_block: BlockNumHash,
+    /// The state/trie persistence frontier.
+    pub last_state_trie_block: BlockNumHash,
     /// The commit duration, only available for save-blocks operations.
     pub commit_duration: Option<Duration>,
 }
@@ -105,17 +105,15 @@ where
                 }
                 PersistenceAction::SaveBlocks(blocks, sender) => {
                     let result = self.on_save_blocks(blocks)?;
-                    let result_number = result.last_block.map(|b| b.number);
+                    let result_number = result.last_block.number;
 
                     let _ = sender.send(result);
 
-                    if let Some(block_number) = result_number {
-                        // send new sync metrics based on saved blocks
-                        let _ = self
-                            .sync_metrics_tx
-                            .send(MetricEvent::SyncHeight { height: block_number });
-                        self.maybe_run_pruner(block_number)?;
-                    }
+                    // send new sync metrics based on saved blocks
+                    let _ = self
+                        .sync_metrics_tx
+                        .send(MetricEvent::SyncHeight { height: result_number });
+                    self.maybe_run_pruner(result_number)?;
                 }
                 PersistenceAction::SaveFinalizedBlock(finalized_block) => {
                     self.pending_finalized_block = Some(finalized_block);
@@ -137,21 +135,19 @@ where
         let start_time = Instant::now();
         let provider_rw = self.provider.database_provider_rw()?;
 
-        let new_tip_hash = provider_rw.block_hash(new_tip_num)?;
+        let new_tip_hash = provider_rw
+            .block_hash(new_tip_num)?
+            .ok_or_else(|| ProviderError::HeaderNotFound(new_tip_num.into()))?;
         let frontiers = provider_rw.remove_block_and_execution_above(new_tip_num)?;
-        let last_block = new_tip_hash.map(|hash| BlockNumHash { hash, number: frontiers.db_tip });
-        let last_state_trie_block = match last_block {
-            Some(last_block) if frontiers.partial_state_trie == last_block.number => {
-                Some(last_block)
-            }
-            Some(_) => {
-                let hash =
-                    provider_rw.block_hash(frontiers.partial_state_trie)?.ok_or_else(|| {
-                        ProviderError::HeaderNotFound(frontiers.partial_state_trie.into())
-                    })?;
-                Some(BlockNumHash::new(frontiers.partial_state_trie, hash))
-            }
-            None => None,
+        debug_assert_eq!(frontiers.db_tip, new_tip_num);
+        let last_block = BlockNumHash::new(new_tip_num, new_tip_hash);
+        let last_state_trie_block = if frontiers.partial_state_trie == new_tip_num {
+            last_block
+        } else {
+            let hash = provider_rw.block_hash(frontiers.partial_state_trie)?.ok_or_else(|| {
+                ProviderError::HeaderNotFound(frontiers.partial_state_trie.into())
+            })?;
+            BlockNumHash::new(frontiers.partial_state_trie, hash)
         };
         provider_rw.commit()?;
 
@@ -214,11 +210,7 @@ where
         self.metrics.save_blocks_batch_size.record(block_count as f64);
         self.metrics.save_blocks_duration_seconds.record(elapsed);
 
-        Ok(PersistenceResult {
-            last_block: Some(last_block),
-            last_state_trie_block: Some(last_state_trie_block),
-            commit_duration: Some(elapsed),
-        })
+        Ok(PersistenceResult { last_block, last_state_trie_block, commit_duration: Some(elapsed) })
     }
 
     fn maybe_run_pruner(&mut self, block_number: u64) -> Result<(), PersistenceError> {
@@ -502,6 +494,25 @@ mod tests {
         service.maybe_run_pruner(2).unwrap();
     }
 
+    #[test]
+    fn test_remove_blocks_above_requires_tip_header() {
+        let provider = create_test_provider_factory();
+        init_genesis(&provider).unwrap();
+
+        let (_finished_exex_height_tx, finished_exex_height_rx) =
+            tokio::sync::watch::channel(FinishedExExHeight::NoExExs);
+        let pruner =
+            Pruner::new_with_factory(provider.clone(), vec![], 5, 0, None, finished_exex_height_rx);
+        let (_db_service_tx, db_service_rx) = std::sync::mpsc::channel();
+        let (sync_metrics_tx, _sync_metrics_rx) = unbounded_channel();
+        let service = PersistenceService::new(provider, db_service_rx, pruner, sync_metrics_tx);
+
+        assert!(matches!(
+            service.on_remove_blocks_above(1),
+            Err(PersistenceError::ProviderError(ProviderError::HeaderNotFound(_)))
+        ));
+    }
+
     #[derive(Debug)]
     struct FailingPruneBalStore;
 
@@ -539,10 +550,10 @@ mod tests {
         handle.save_blocks(blocks, tx).unwrap();
 
         let result = rx.recv_timeout(std::time::Duration::from_secs(10)).expect("test timed out");
-        let last_block = result.last_block.unwrap();
+        let last_block = result.last_block;
 
         assert_eq!(block_hash, last_block.hash);
-        assert_eq!(result.last_state_trie_block, Some(last_block));
+        assert_eq!(result.last_state_trie_block, last_block);
     }
 
     #[test]
@@ -557,7 +568,7 @@ mod tests {
 
         handle.save_blocks(full_save_input(blocks), tx).unwrap();
         let result = rx.recv().unwrap();
-        assert_eq!(last_hash, result.last_block.unwrap().hash);
+        assert_eq!(last_hash, result.last_block.hash);
     }
 
     #[test]
@@ -575,7 +586,7 @@ mod tests {
             handle.save_blocks(full_save_input(blocks), tx).unwrap();
 
             let result = rx.recv().unwrap();
-            assert_eq!(last_hash, result.last_block.unwrap().hash);
+            assert_eq!(last_hash, result.last_block.hash);
         }
     }
 
