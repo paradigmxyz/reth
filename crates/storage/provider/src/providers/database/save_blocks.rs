@@ -16,7 +16,8 @@ use reth_primitives_traits::NodePrimitives;
 /// `blocks` contains every canonical block in `(prev_partial_state_trie, new_db_tip]`, ordered from
 /// oldest to newest. The four frontiers derive the ranges written during this operation:
 ///
-/// - `(prev_db_tip, new_db_tip]`: persist block, execution, and history data;
+/// - `(prev_db_tip, new_db_tip]`: persist block, execution, and history data, if the database
+///   frontier advances;
 /// - `(prev_partial_state_trie, new_partial_state_trie]`: consider hashed-state/trie updates for
 ///   persistence; and
 /// - `(new_partial_state_trie, new_db_tip]`: retain as the masking suffix and do not persist its
@@ -41,14 +42,14 @@ impl<N: NodePrimitives> SaveBlocksInput<N> {
     /// Creates an input that advances the existing frontiers to `new_db_tip` and
     /// `new_partial_state_trie`.
     ///
-    /// `new_partial_state_trie` may remain behind `prev_db_tip`. This occurs while a masking
-    /// window is first growing: new block data advances without forcing all previously masked
-    /// hashed-state/trie updates to disk.
+    /// Either frontier may advance independently. `new_partial_state_trie` may remain behind
+    /// `prev_db_tip` while a masking window grows, and `new_db_tip` may remain unchanged while the
+    /// state/trie frontier catches up.
     ///
     /// # Panics
     ///
-    /// Panics if the database frontier does not advance, the state/trie frontier moves backwards
-    /// or exceeds the database frontier, or `blocks` is not the exact contiguous range
+    /// Panics if either frontier moves backwards, neither frontier advances, the state/trie
+    /// frontier exceeds the database frontier, or `blocks` is not the exact contiguous range
     /// `(prev_partial_state_trie, new_db_tip]`.
     pub fn new(
         blocks: Vec<ExecutedBlock<N>>,
@@ -61,10 +62,14 @@ impl<N: NodePrimitives> SaveBlocksInput<N> {
             prev_partial_state_trie <= prev_db_tip,
             "previous state/trie tip must not exceed previous database tip"
         );
-        assert!(prev_db_tip < new_db_tip, "database tip must advance");
+        assert!(prev_db_tip <= new_db_tip, "database tip must not move backwards");
         assert!(
             prev_partial_state_trie <= new_partial_state_trie,
             "state/trie tip must not move backwards"
+        );
+        assert!(
+            prev_db_tip < new_db_tip || prev_partial_state_trie < new_partial_state_trie,
+            "at least one persistence frontier must advance"
         );
         assert!(
             new_partial_state_trie <= new_db_tip,
@@ -116,11 +121,9 @@ impl<N: NodePrimitives> SaveBlocksInput<N> {
             .num_hash()
     }
 
-    /// Returns the first newly persisted block.
-    pub fn first_persist_rest_block(&self) -> &ExecutedBlock<N> {
-        self.persist_rest_blocks()
-            .first()
-            .expect("constructor ensures a non-empty persistence range")
+    /// Returns the first block whose block, execution, and history data will be persisted.
+    pub fn first_persist_rest_block(&self) -> Option<&ExecutedBlock<N>> {
+        self.persist_rest_blocks().first()
     }
 
     /// Returns newly persisted blocks whose block, execution, and history data should be written.
@@ -185,7 +188,7 @@ mod tests {
         let blocks = TestBlockBuilder::eth().get_executed_blocks(13..17).collect();
         let input = SaveBlocksInput::new(blocks, 15, 12, 16, 13);
 
-        assert_eq!(input.first_persist_rest_block().recovered_block().number(), 16);
+        assert_eq!(input.first_persist_rest_block().unwrap().recovered_block().number(), 16);
         assert_eq!(input.state_trie_blocks()[0].recovered_block().number(), 13);
         assert_eq!(
             input
@@ -198,10 +201,20 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "database tip must advance")]
-    fn requires_database_tip_to_advance() {
+    fn advances_only_state_trie_frontier() {
         let blocks = TestBlockBuilder::eth().get_executed_blocks(1..2).collect();
-        let _ = SaveBlocksInput::new(blocks, 1, 0, 1, 1);
+        let input = SaveBlocksInput::new(blocks, 1, 0, 1, 1);
+
+        assert!(input.persist_rest_blocks().is_empty());
+        assert!(input.first_persist_rest_block().is_none());
+        assert_eq!(input.state_trie_blocks()[0].recovered_block().number(), 1);
+        assert!(input.state_trie_masking_blocks().is_empty());
+    }
+
+    #[test]
+    #[should_panic(expected = "at least one persistence frontier must advance")]
+    fn requires_a_frontier_to_advance() {
+        let _ = SaveBlocksInput::<EthPrimitives>::new(vec![], 1, 1, 1, 1);
     }
 
     #[test]
