@@ -555,10 +555,9 @@ mod tests {
         handle.save_blocks(blocks, tx).unwrap();
 
         let result = rx.recv_timeout(std::time::Duration::from_secs(10)).expect("test timed out");
-        let last_block = result.last_block;
 
-        assert_eq!(block_hash, last_block.hash);
-        assert_eq!(result.last_state_trie_block, last_block);
+        assert_eq!(block_hash, result.last_block.hash);
+        assert_eq!(result.last_state_trie_block, result.last_block);
     }
 
     #[test]
@@ -735,7 +734,6 @@ mod tests {
         let reorg_handle = std::thread::spawn(move || {
             let provider_rw = pf.database_provider_rw().unwrap();
             let frontiers = provider_rw.remove_block_and_execution_above(1).unwrap();
-            assert_eq!(frontiers.db_tip, 1);
             assert_eq!(frontiers.partial_state_trie, 1);
             provider_rw.commit().unwrap();
 

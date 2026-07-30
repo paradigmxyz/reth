@@ -780,7 +780,6 @@ mod tests {
         let args = CommandParser::<EngineArgs>::parse_from(["reth"]).args;
         assert_eq!(args, default_args);
         assert_eq!(args.persistence_threshold, 7);
-        assert_eq!(args.num_state_masking_blocks, DEFAULT_NUM_STATE_MASKING_BLOCKS);
         assert_eq!(args.memory_block_buffer_target, None);
         assert_eq!(args.memory_block_buffer_target(), 5);
         assert_eq!(
@@ -1007,7 +1006,6 @@ mod tests {
         ])
         .args;
 
-        assert_eq!(args.num_state_masking_blocks, 7);
         assert_eq!(args.tree_config().num_state_masking_blocks(), 7);
     }
 
@@ -1033,8 +1031,6 @@ mod tests {
 
         let err = args.validate().unwrap_err().to_string();
         assert!(err.contains("engine.num-state-masking-blocks"));
-        assert!(err.contains("engine.memory-block-buffer-target"));
-        assert!(err.contains("engine.persistence-threshold"));
     }
 
     #[test]

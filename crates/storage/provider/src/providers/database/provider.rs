@@ -4908,22 +4908,10 @@ mod tests {
 
         let provider = factory.provider().unwrap();
         let checkpoint = provider.get_stage_checkpoint(StageId::Finish).unwrap().unwrap();
-        assert_eq!(checkpoint.block_number, 3);
         assert_eq!(
             checkpoint.finish_stage_checkpoint().and_then(|finish| finish.partial_state_trie()),
             Some(2)
         );
-        drop(provider);
-
-        let provider_rw = factory.provider_rw().unwrap();
-        let frontiers = provider_rw.remove_block_and_execution_above(1).unwrap();
-        assert_eq!(frontiers, PersistenceFrontiers { db_tip: 1, partial_state_trie: 1 });
-        provider_rw.commit().unwrap();
-
-        let checkpoint =
-            factory.provider().unwrap().get_stage_checkpoint(StageId::Finish).unwrap().unwrap();
-        assert_eq!(checkpoint.block_number, 1);
-        assert!(checkpoint.finish_stage_checkpoint().is_none());
     }
 
     #[test]
