@@ -104,9 +104,9 @@ where
                     let _ = sender.send(result);
                 }
                 PersistenceAction::SaveBlocks(input, sender) => {
-                    let db_tip_advanced = input.prev_db_tip() < input.new_db_tip();
+                    let new_db_tip = input.new_db_tip();
+                    let db_tip_advanced = input.prev_db_tip() < new_db_tip;
                     let result = self.on_save_blocks(input)?;
-                    let result_number = result.last_block.number;
 
                     let _ = sender.send(result);
 
@@ -114,8 +114,8 @@ where
                         // send new sync metrics based on saved blocks
                         let _ = self
                             .sync_metrics_tx
-                            .send(MetricEvent::SyncHeight { height: result_number });
-                        self.maybe_run_pruner(result_number)?;
+                            .send(MetricEvent::SyncHeight { height: new_db_tip });
+                        self.maybe_run_pruner(new_db_tip)?;
                     }
                 }
                 PersistenceAction::SaveFinalizedBlock(finalized_block) => {
