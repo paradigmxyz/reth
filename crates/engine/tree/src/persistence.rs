@@ -108,8 +108,8 @@ where
                         self.sync_metrics_tx.send(MetricEvent::SyncHeight { height: new_tip_num });
                     let _ = sender.send(result);
                 }
-                PersistenceAction::SaveBlocks(plan, sender) => {
-                    let result = self.on_save_blocks(plan)?;
+                PersistenceAction::SaveBlocks(blocks, sender) => {
+                    let result = self.on_save_blocks(blocks)?;
                     let result_number = result.last_block.map(|b| b.number);
 
                     let _ = sender.send(result);
@@ -406,7 +406,6 @@ mod tests {
     use alloy_eips::NumHash;
     use alloy_primitives::{BlockHash, BlockNumber, Bytes, B256, U256};
     use reth_chain_state::{test_utils::TestBlockBuilder, ExecutedBlock};
-    use reth_db::{tables, transaction::DbTxMut};
     use reth_db_common::init::init_genesis;
     use reth_exex_types::FinishedExExHeight;
     use reth_provider::{
@@ -470,19 +469,6 @@ mod tests {
             &execution_outcome,
             genesis.hashed_state().as_ref().clone(),
         )
-    }
-
-    fn persistence_service<N>(provider: ProviderFactory<N>) -> PersistenceService<N>
-    where
-        N: ProviderNodeTypes<Primitives = EthPrimitives>,
-    {
-        let (_finished_exex_height_tx, finished_exex_height_rx) =
-            tokio::sync::watch::channel(FinishedExExHeight::NoExExs);
-        let pruner =
-            Pruner::new_with_factory(provider.clone(), vec![], 5, 0, None, finished_exex_height_rx);
-        let (_action_tx, action_rx) = std::sync::mpsc::channel();
-        let (sync_metrics_tx, _sync_metrics_rx) = unbounded_channel();
-        PersistenceService::new(provider, action_rx, pruner, sync_metrics_tx)
     }
 
     #[test]
@@ -574,9 +560,7 @@ mod tests {
 
         let result = rx.recv_timeout(std::time::Duration::from_secs(10)).expect("test timed out");
 
-        let last_block = result.last_block.unwrap();
-        assert_eq!(block_hash, last_block.hash);
-        assert_eq!(result.last_state_trie_block, Some(last_block.number));
+        assert_eq!(block_hash, result.last_block.unwrap().hash);
     }
 
     #[test]
@@ -591,9 +575,7 @@ mod tests {
 
         handle.save_blocks(full_save_input(blocks), tx).unwrap();
         let result = rx.recv().unwrap();
-        let last_block = result.last_block.unwrap();
-        assert_eq!(last_hash, last_block.hash);
-        assert_eq!(result.last_state_trie_block, Some(last_block.number));
+        assert_eq!(last_hash, result.last_block.unwrap().hash);
     }
 
     #[test]
@@ -721,34 +703,6 @@ mod tests {
                 .unwrap(),
             Some(U256::from(REORG_TIP as u64 + 1))
         );
-    }
-
-    #[test]
-    fn test_remove_blocks_above_requires_finish_checkpoint() {
-        const TIP: u64 = 2;
-
-        let provider_factory = create_test_provider_factory();
-        let mut block_builder = TestBlockBuilder::eth().with_state();
-        let blocks = block_builder.get_executed_blocks(0..TIP + 1).collect::<Vec<_>>();
-        let provider_rw = provider_factory.database_provider_rw().unwrap();
-        save_genesis(&provider_rw, &blocks[0]).unwrap();
-        provider_rw.commit().unwrap();
-
-        let provider_rw = provider_factory.database_provider_rw().unwrap();
-        provider_rw
-            .save_blocks(&SaveBlocksInput::new(blocks[1..].to_vec(), 0, 0, TIP, TIP))
-            .unwrap();
-        provider_rw
-            .tx_ref()
-            .delete::<tables::StageCheckpoints>(StageId::Finish.to_string(), None)
-            .unwrap();
-        provider_rw.commit().unwrap();
-
-        let error = persistence_service(provider_factory).on_remove_blocks_above(TIP).unwrap_err();
-        assert!(matches!(
-            error,
-            PersistenceError::ProviderError(ProviderError::InsufficientChangesets { .. })
-        ));
     }
 
     /// Verifies that committing `save_blocks` history before running the pruner

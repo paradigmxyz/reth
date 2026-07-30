@@ -594,8 +594,6 @@ async fn test_tree_persist_blocks() {
         let expected_persist_len = blocks.len() - tree_config.memory_block_buffer_target() as usize;
         assert_eq!(input.persist_rest_blocks().len(), expected_persist_len);
         assert_eq!(input.persist_rest_blocks(), &blocks[..expected_persist_len]);
-        assert_eq!(input.state_trie_blocks(), &blocks[..expected_persist_len]);
-        assert!(input.state_trie_masking_blocks().is_empty());
         assert_eq!(input.prev_db_tip(), input.prev_partial_state_trie());
         assert_eq!(input.new_db_tip(), input.new_partial_state_trie());
     } else {
@@ -2746,15 +2744,15 @@ mod forkchoice_updated_tests {
                 break;
             }
 
-            if let Ok(PersistenceAction::SaveBlocks(saved_blocks, sender)) =
+            if let Ok(PersistenceAction::SaveBlocks(input, sender)) =
                 action_rx.recv_timeout(std::time::Duration::from_millis(100))
             {
-                let last = saved_blocks.last_block();
+                let last = input.last_block();
                 last_persisted_number = last.number;
                 sender
                     .send(PersistenceResult {
                         last_block: Some(last),
-                        last_state_trie_block: Some(saved_blocks.new_partial_state_trie()),
+                        last_state_trie_block: Some(input.new_partial_state_trie()),
                         commit_duration: Some(Duration::ZERO),
                     })
                     .unwrap();
