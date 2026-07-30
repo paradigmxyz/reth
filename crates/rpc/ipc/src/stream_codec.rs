@@ -47,19 +47,6 @@ impl Default for Separator {
     }
 }
 
-/// Scan state persisted across `decode()` calls when the incoming separator is
-/// `Separator::Empty`, so bytes already examined by a previous call are not
-/// rescanned. Reset via `ScanState::default()` after every emitted frame.
-#[derive(Debug, Default)]
-struct ScanState {
-    depth: i32,
-    in_str: bool,
-    is_escaped: bool,
-    start_idx: usize,
-    whitespaces: usize,
-    cursor: usize,
-}
-
 /// Stream codec for streaming protocols (ipc, tcp)
 #[derive(Debug, Default)]
 pub struct StreamCodec {
@@ -89,6 +76,19 @@ impl StreamCodec {
             },
         }
     }
+}
+
+/// Scan state persisted across `decode()` calls when the incoming separator is
+/// `Separator::Empty`, so bytes already examined by a previous call are not
+/// rescanned. Reset via `ScanState::default()` after every emitted frame.
+#[derive(Debug, Default)]
+struct ScanState {
+    depth: i32,
+    in_str: bool,
+    is_escaped: bool,
+    start_idx: usize,
+    whitespaces: usize,
+    cursor: usize,
 }
 
 #[inline]
@@ -136,9 +136,9 @@ impl tokio_util::codec::Decoder for StreamCodec {
                 }
                 self.scan.is_escaped = byte == b'\\' && !self.scan.is_escaped && self.scan.in_str;
 
-                if self.scan.depth == 0
-                    && idx != self.scan.start_idx
-                    && idx - self.scan.start_idx + 1 > self.scan.whitespaces
+                if self.scan.depth == 0 &&
+                    idx != self.scan.start_idx &&
+                    idx - self.scan.start_idx + 1 > self.scan.whitespaces
                 {
                     let start = self.scan.start_idx;
                     let end = idx + 1;
@@ -522,7 +522,7 @@ mod tests {
 
         let mut cur = 0usize;
         for &c in chunks {
-            let end = (cur + c.max(1)).min(bytes.len());
+            let end = cur.saturating_add(c.max(1)).min(bytes.len());
             if cur == end {
                 break;
             }
