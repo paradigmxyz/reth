@@ -288,7 +288,9 @@ where
     let receipts_tip = store_receipts
         .then(|| static_file_provider.get_highest_static_file_block(StaticFileSegment::Receipts));
     let mut height = match receipts_tip {
-        Some(tip) => headers_tip.min(tip.unwrap_or_default()),
+        Some(tip) => headers_tip.min(
+            tip.unwrap_or(static_file_provider.genesis_block_number()),
+        ),
         None => headers_tip,
     };
 
