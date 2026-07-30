@@ -616,38 +616,49 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
     ) -> ProviderResult<()> {
         let total_start = Instant::now();
         let block_count = blocks.len() as u64;
-        let first_number = blocks.first().unwrap().recovered_block().number();
-        let last_block_number = blocks.last().unwrap().recovered_block().number();
+        // With no new block data, the masking suffix still ends at the database tip. If the
+        // masking suffix is empty, the state/trie range ends there instead.
+        let last_block_number = blocks
+            .last()
+            .or_else(|| state_trie_masking_blocks.last())
+            .or_else(|| state_trie_blocks.last())
+            .expect("at least one persistence range must be non-empty")
+            .recovered_block()
+            .number();
+        let first_number = blocks.first().map(|block| block.recovered_block().number());
 
         debug!(target: "providers::db", block_count, "Writing blocks and execution data to storage");
 
         // Compute tx_nums upfront (both threads need these)
-        let first_tx_num = self
-            .tx
-            .cursor_read::<tables::TransactionBlocks>()?
-            .last()?
-            .map(|(n, _)| n + 1)
-            .unwrap_or_default();
-
-        let tx_nums: SmallVec<[TxNumber; 4]> = {
-            let mut nums = SmallVec::with_capacity(blocks.len());
+        let mut tx_nums: SmallVec<[TxNumber; 4]> = SmallVec::with_capacity(blocks.len());
+        if !blocks.is_empty() {
+            let first_tx_num = self
+                .tx
+                .cursor_read::<tables::TransactionBlocks>()?
+                .last()?
+                .map(|(n, _)| n + 1)
+                .unwrap_or_default();
             let mut current = first_tx_num;
             for block in blocks {
-                nums.push(current);
+                tx_nums.push(current);
                 current += block.recovered_block().body().transaction_count() as u64;
             }
-            nums
-        };
+        }
 
         let mut timings =
             metrics::SaveBlocksTimings { batch_size: block_count, ..Default::default() };
 
         // avoid capturing &self.tx in scope below.
         let sf_provider = &self.static_file_provider;
-        let sf_ctx = self.static_file_write_ctx(save_mode, first_number, last_block_number)?;
-        let rocksdb_provider = self.rocksdb_provider.clone();
-        let rocksdb_ctx = self.rocksdb_write_ctx(first_number);
-        let rocksdb_enabled = rocksdb_ctx.storage_settings.storage_v2;
+        let rocksdb_provider = &self.rocksdb_provider;
+        let sf_ctx = first_number
+            .map(|first_number| {
+                self.static_file_write_ctx(save_mode, first_number, last_block_number)
+            })
+            .transpose()?;
+        let rocksdb_ctx = first_number.map(|first_number| self.rocksdb_write_ctx(first_number));
+        let rocksdb_enabled =
+            rocksdb_ctx.as_ref().is_some_and(|ctx| ctx.storage_settings.storage_v2);
 
         let mut sf_result = None;
         let mut rocksdb_result = None;
@@ -659,21 +670,27 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
         let span = tracing::Span::current();
         runtime.storage_pool().in_place_scope(|s| {
             // SF writes
-            s.spawn(|_| {
-                let _guard = span.enter();
-                let start = Instant::now();
-                sf_result = Some(
-                    sf_provider
-                        .write_blocks_data(blocks, &tx_nums, sf_ctx, runtime)
-                        .map(|()| start.elapsed()),
-                );
-            });
+            if sf_ctx.is_some() {
+                s.spawn(|_| {
+                    let _guard = span.enter();
+                    let start = Instant::now();
+                    let sf_ctx =
+                        sf_ctx.expect("static file context exists when blocks are persisted");
+                    sf_result = Some(
+                        sf_provider
+                            .write_blocks_data(blocks, &tx_nums, sf_ctx, runtime)
+                            .map(|()| start.elapsed()),
+                    );
+                });
+            }
 
             // RocksDB writes
             if rocksdb_enabled {
                 s.spawn(|_| {
                     let _guard = span.enter();
                     let start = Instant::now();
+                    let rocksdb_ctx =
+                        rocksdb_ctx.clone().expect("RocksDB context exists when enabled");
                     rocksdb_result = Some(
                         rocksdb_provider
                             .write_blocks_data(blocks, &tx_nums, rocksdb_ctx, runtime)
@@ -686,7 +703,8 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
             let mdbx_start = Instant::now();
 
             // Collect all transaction hashes across all blocks, sort them, and write in batch
-            if !self.cached_storage_settings().storage_v2 &&
+            if !blocks.is_empty() &&
+                !self.cached_storage_settings().storage_v2 &&
                 self.prune_modes.transaction_lookup.is_none_or(|m| !m.is_full())
             {
                 let start = Instant::now();
@@ -728,6 +746,8 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
 
                 if save_mode.with_state() {
                     let execution_output = block.execution_outcome();
+                    let sf_ctx =
+                        sf_ctx.expect("static file context exists when blocks are persisted");
 
                     // Write state and changesets to the database.
                     // Must be written after blocks because of the receipt lookup.
@@ -785,7 +805,9 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
             }
 
             // Full mode: update history indices
-            if save_mode.with_state() {
+            if save_mode.with_state() &&
+                let Some(first_number) = first_number
+            {
                 let start = Instant::now();
                 self.update_history_indices(first_number..=last_block_number)?;
                 timings.update_history_indices = start.elapsed();
@@ -793,7 +815,9 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
 
             // Update pipeline progress
             let start = Instant::now();
-            self.update_pipeline_stages(last_block_number, false)?;
+            if !blocks.is_empty() {
+                self.update_pipeline_stages(last_block_number, false)?;
+            }
             if save_mode.with_state() {
                 let checkpoint = match partial_state_trie {
                     Some(partial_state_trie) => StageCheckpoint::new(last_block_number)
@@ -812,7 +836,9 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
         })?;
 
         // Collect results from spawned tasks
-        timings.sf = sf_result.ok_or(StaticFileWriterError::ThreadPanic("static file"))??;
+        if !blocks.is_empty() {
+            timings.sf = sf_result.ok_or(StaticFileWriterError::ThreadPanic("static file"))??;
+        }
 
         if rocksdb_enabled {
             timings.rocksdb = rocksdb_result.ok_or_else(|| {
@@ -825,7 +851,9 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
         timings.total = total_start.elapsed();
 
         self.metrics.record_save_blocks(&timings);
-        debug!(target: "providers::db", range = ?first_number..=last_block_number, "Appended block data");
+        if let Some(first_number) = first_number {
+            debug!(target: "providers::db", range = ?first_number..=last_block_number, "Appended block data");
+        }
 
         Ok(())
     }
@@ -4574,7 +4602,20 @@ mod tests {
         );
 
         let provider_rw = factory.provider_rw().unwrap();
-        let input = SaveBlocksInput::new(vec![full_persist_block, deferred_trie_block], 0, 0, 2, 1);
+        let input = SaveBlocksInput::new(
+            vec![full_persist_block.clone(), deferred_trie_block.clone()],
+            0,
+            0,
+            2,
+            0,
+        );
+        provider_rw.save_blocks(&input).unwrap();
+        provider_rw.commit().unwrap();
+
+        let provider_rw = factory.provider_rw().unwrap();
+        let input =
+            SaveBlocksInput::new(vec![full_persist_block, deferred_trie_block.clone()], 2, 0, 2, 1);
+        assert!(input.persist_rest_blocks().is_empty());
         provider_rw.save_blocks(&input).unwrap();
         provider_rw.commit().unwrap();
 
@@ -4621,6 +4662,46 @@ mod tests {
             .collect::<Result<Vec<_>, _>>()
             .unwrap();
         assert!(masked_entries.is_empty());
+
+        drop(storage_trie);
+        drop(account_trie);
+        drop(hashed_storages);
+        drop(hashed_accounts);
+        drop(provider);
+
+        let provider_rw = factory.provider_rw().unwrap();
+        let input = SaveBlocksInput::new(vec![deferred_trie_block], 2, 1, 2, 2);
+        assert!(input.persist_rest_blocks().is_empty());
+        provider_rw.save_blocks(&input).unwrap();
+        provider_rw.commit().unwrap();
+
+        let provider = factory.provider().unwrap();
+        let finish_checkpoint = provider.get_stage_checkpoint(StageId::Finish).unwrap().unwrap();
+        assert_eq!(finish_checkpoint.block_number, 2);
+        assert!(finish_checkpoint.finish_stage_checkpoint().is_none());
+
+        let mut hashed_accounts =
+            provider.tx_ref().cursor_read::<tables::HashedAccounts>().unwrap();
+        let (_, account) = hashed_accounts.seek_exact(masked_account).unwrap().unwrap();
+        assert_eq!(account.nonce, 3);
+
+        let mut hashed_storages =
+            provider.tx_ref().cursor_dup_read::<tables::HashedStorages>().unwrap();
+        let storage =
+            hashed_storages.seek_by_key_subkey(masked_storage, masked_slot).unwrap().unwrap();
+        assert_eq!(storage.value, U256::from(4));
+
+        let mut account_trie = provider.tx_ref().cursor_read::<tables::AccountsTrie>().unwrap();
+        assert!(account_trie.seek_exact(StoredNibbles(masked_account_node)).unwrap().is_some());
+
+        let mut storage_trie = provider.tx_ref().cursor_dup_read::<tables::StoragesTrie>().unwrap();
+        let masked_entries: Vec<_> = storage_trie
+            .walk_dup(Some(masked_storage), None)
+            .unwrap()
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
+        assert_eq!(masked_entries.len(), 1);
+        assert_eq!(masked_entries[0].1.nibbles.0, masked_storage_node);
     }
 
     #[cfg(feature = "partial-persistence")]
