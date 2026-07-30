@@ -165,12 +165,14 @@ impl<DB: Database, N: NodeTypes> From<DatabaseProviderRW<DB, N>>
     }
 }
 
-/// Mode for [`DatabaseProvider::save_blocks_inner`].
+/// Mode for database persistence writes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum SaveBlocksMode {
     /// Full mode: write block structure + receipts + state + trie.
     /// Used by engine/production code.
     Full,
+    /// State/trie only: advance the partial state/trie frontier without rewriting block data.
+    StateTrieOnly,
     /// Blocks only: write block structure (headers, txs, senders, indices).
     /// Receipts/state/trie are skipped - they may come later via separate calls.
     /// Used by `insert_block`.
@@ -179,7 +181,7 @@ enum SaveBlocksMode {
 
 impl SaveBlocksMode {
     /// Returns `true` if this is [`SaveBlocksMode::Full`].
-    const fn with_state(self) -> bool {
+    const fn is_full(self) -> bool {
         matches!(self, Self::Full)
     }
 }
@@ -541,11 +543,11 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
         Ok(StaticFileWriteCtx {
             write_senders: EitherWriterDestination::senders(self).is_static_file() &&
                 self.prune_modes.sender_recovery.is_none_or(|m| !m.is_full()),
-            write_receipts: save_mode.with_state() &&
+            write_receipts: save_mode.is_full() &&
                 EitherWriter::receipts_destination(self).is_static_file(),
-            write_account_changesets: save_mode.with_state() &&
+            write_account_changesets: save_mode.is_full() &&
                 EitherWriterDestination::account_changesets(self).is_static_file(),
-            write_storage_changesets: save_mode.with_state() &&
+            write_storage_changesets: save_mode.is_full() &&
                 EitherWriterDestination::storage_changesets(self).is_static_file(),
             tip,
             receipts_prune_mode: self.prune_modes.receipts,
@@ -573,7 +575,15 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
     ///
     /// Ordinary block data and hashed-state/trie updates advance independently according to the
     /// ranges derived by the input.
-    #[instrument(level = "debug", target = "providers::db", skip_all, fields(block_count = input.persist_rest_blocks().len()))]
+    #[instrument(
+        level = "debug",
+        target = "providers::db",
+        skip_all,
+        fields(
+            block_count = input.persist_rest_blocks().len(),
+            state_trie_block_count = input.state_trie_blocks().len()
+        )
+    )]
     pub fn save_blocks(&self, input: &SaveBlocksInput<N::Primitives>) -> ProviderResult<()> {
         let (db_tip, partial_state_trie) = self
             .get_stage_checkpoint(StageId::Finish)?
@@ -596,14 +606,122 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
             ))))
         }
 
-        self.save_blocks_inner(
-            input.persist_rest_blocks(),
+        let partial_state_trie = (input.new_partial_state_trie() < input.new_db_tip())
+            .then_some(input.new_partial_state_trie());
+        let save_mode = if input.prev_db_tip() == input.new_db_tip() {
+            SaveBlocksMode::StateTrieOnly
+        } else {
+            SaveBlocksMode::Full
+        };
+        match save_mode {
+            SaveBlocksMode::StateTrieOnly => self.save_state_trie_only(input, partial_state_trie),
+            SaveBlocksMode::Full => self.save_blocks_inner(
+                input.persist_rest_blocks(),
+                input.state_trie_blocks(),
+                input.state_trie_masking_blocks(),
+                partial_state_trie,
+                SaveBlocksMode::Full,
+            ),
+            SaveBlocksMode::BlocksOnly => unreachable!("save_blocks always writes state"),
+        }
+    }
+
+    /// Advances only the state/trie frontier while leaving already-persisted block data untouched.
+    fn save_state_trie_only(
+        &self,
+        input: &SaveBlocksInput<N::Primitives>,
+        partial_state_trie: Option<BlockNumber>,
+    ) -> ProviderResult<()> {
+        debug_assert_eq!(input.prev_db_tip(), input.new_db_tip());
+        debug_assert!(input.persist_rest_blocks().is_empty());
+        debug_assert!(!input.state_trie_blocks().is_empty());
+
+        let total_start = Instant::now();
+        let mdbx_start = Instant::now();
+        let mut timings = metrics::SaveBlocksTimings::default();
+
+        self.write_state_trie_updates(
             input.state_trie_blocks(),
             input.state_trie_masking_blocks(),
-            (input.new_partial_state_trie() < input.new_db_tip())
-                .then_some(input.new_partial_state_trie()),
-            SaveBlocksMode::Full,
-        )
+            &mut timings,
+        )?;
+
+        let start = Instant::now();
+        self.save_finish_checkpoint(input.new_db_tip(), partial_state_trie)?;
+        timings.update_pipeline_stages = start.elapsed();
+        timings.mdbx = mdbx_start.elapsed();
+        timings.total = total_start.elapsed();
+
+        self.metrics.record_save_blocks(&timings);
+        debug!(
+            target: "providers::db",
+            db_tip = input.new_db_tip(),
+            state_trie_tip = input.new_partial_state_trie(),
+            "Advanced state/trie persistence frontier"
+        );
+
+        Ok(())
+    }
+
+    /// Writes merged hashed-state and trie updates for the advancing state/trie range.
+    fn write_state_trie_updates(
+        &self,
+        state_trie_blocks: &[ExecutedBlock<N::Primitives>],
+        state_trie_masking_blocks: &[ExecutedBlock<N::Primitives>],
+        timings: &mut metrics::SaveBlocksTimings,
+    ) -> ProviderResult<()> {
+        if state_trie_blocks.is_empty() {
+            return Ok(())
+        }
+
+        let start = Instant::now();
+        let batch = state_trie_blocks
+            .iter()
+            .map(|block| block.trie_data.get().sorted.hashed_state.as_ref())
+            .collect::<Vec<_>>();
+        let mask = state_trie_masking_blocks
+            .iter()
+            .map(|block| block.trie_data.get().sorted.hashed_state.as_ref())
+            .collect::<Vec<_>>();
+        let merged_hashed_state = HashedPostStateSorted::disjointed_merge_batch(&batch, &mask);
+        if !merged_hashed_state.is_empty() {
+            self.write_hashed_state(&merged_hashed_state)?;
+        }
+        timings.write_hashed_state += start.elapsed();
+
+        let start = Instant::now();
+        let batch = state_trie_blocks
+            .iter()
+            .map(|block| block.trie_data.get().sorted.trie_updates.as_ref())
+            .collect::<Vec<_>>();
+        let mask = state_trie_masking_blocks
+            .iter()
+            .map(|block| block.trie_data.get().sorted.trie_updates.as_ref())
+            .collect::<Vec<_>>();
+        let merged_trie = TrieUpdatesSorted::disjointed_merge_batch(&batch, &mask);
+        if !merged_trie.is_empty() {
+            self.write_trie_updates_sorted(&merged_trie)?;
+        }
+        timings.write_trie_updates += start.elapsed();
+
+        Ok(())
+    }
+
+    /// Updates the Finish checkpoint with the independent database and state/trie frontiers.
+    fn save_finish_checkpoint(
+        &self,
+        db_tip: BlockNumber,
+        partial_state_trie: Option<BlockNumber>,
+    ) -> ProviderResult<()> {
+        let checkpoint = match partial_state_trie {
+            Some(partial_state_trie) => {
+                StageCheckpoint::new(db_tip).with_finish_stage_checkpoint(FinishCheckpoint {
+                    partial_state_trie: Some(partial_state_trie),
+                })
+            }
+            None => StageCheckpoint::new(db_tip),
+        };
+        self.save_stage_checkpoint(StageId::Finish, checkpoint)
     }
 
     fn save_blocks_inner(
@@ -726,7 +844,7 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
                 self.insert_block_mdbx_only(recovered_block, tx_nums[i])?;
                 timings.insert_block += start.elapsed();
 
-                if save_mode.with_state() {
+                if save_mode.is_full() {
                     let execution_output = block.execution_outcome();
 
                     // Write state and changesets to the database.
@@ -751,41 +869,16 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
 
             // Write all hashed state and trie updates in single batches.
             // This reduces cursor open/close overhead from N calls to 1.
-            if save_mode.with_state() && !state_trie_blocks.is_empty() {
-                let start = Instant::now();
-                let batch = state_trie_blocks
-                    .iter()
-                    .map(|block| block.trie_data.get().sorted.hashed_state.as_ref())
-                    .collect::<Vec<_>>();
-                let mask = state_trie_masking_blocks
-                    .iter()
-                    .map(|block| block.trie_data.get().sorted.hashed_state.as_ref())
-                    .collect::<Vec<_>>();
-                let merged_hashed_state =
-                    HashedPostStateSorted::disjointed_merge_batch(&batch, &mask);
-                if !merged_hashed_state.is_empty() {
-                    self.write_hashed_state(&merged_hashed_state)?;
-                }
-                timings.write_hashed_state += start.elapsed();
-
-                let start = Instant::now();
-                let batch = state_trie_blocks
-                    .iter()
-                    .map(|block| block.trie_data.get().sorted.trie_updates.as_ref())
-                    .collect::<Vec<_>>();
-                let mask = state_trie_masking_blocks
-                    .iter()
-                    .map(|block| block.trie_data.get().sorted.trie_updates.as_ref())
-                    .collect::<Vec<_>>();
-                let merged_trie = TrieUpdatesSorted::disjointed_merge_batch(&batch, &mask);
-                if !merged_trie.is_empty() {
-                    self.write_trie_updates_sorted(&merged_trie)?;
-                }
-                timings.write_trie_updates += start.elapsed();
+            if save_mode.is_full() {
+                self.write_state_trie_updates(
+                    state_trie_blocks,
+                    state_trie_masking_blocks,
+                    &mut timings,
+                )?;
             }
 
             // Full mode: update history indices
-            if save_mode.with_state() {
+            if save_mode.is_full() {
                 let start = Instant::now();
                 self.update_history_indices(first_number..=last_block_number)?;
                 timings.update_history_indices = start.elapsed();
@@ -794,15 +887,8 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
             // Update pipeline progress
             let start = Instant::now();
             self.update_pipeline_stages(last_block_number, false)?;
-            if save_mode.with_state() {
-                let checkpoint = match partial_state_trie {
-                    Some(partial_state_trie) => StageCheckpoint::new(last_block_number)
-                        .with_finish_stage_checkpoint(FinishCheckpoint {
-                            partial_state_trie: Some(partial_state_trie),
-                        }),
-                    None => StageCheckpoint::new(last_block_number),
-                };
-                self.save_stage_checkpoint(StageId::Finish, checkpoint)?;
+            if save_mode.is_full() {
+                self.save_finish_checkpoint(last_block_number, partial_state_trie)?;
             }
             timings.update_pipeline_stages = start.elapsed();
 
@@ -4704,7 +4790,8 @@ mod tests {
         );
 
         let provider_rw = factory.provider_rw().unwrap();
-        let input = SaveBlocksInput::new(vec![full_persist_block, deferred_trie_block], 0, 0, 2, 1);
+        let input =
+            SaveBlocksInput::new(vec![full_persist_block, deferred_trie_block.clone()], 0, 0, 2, 1);
         provider_rw.save_blocks(&input).unwrap();
         provider_rw.commit().unwrap();
 
@@ -4751,6 +4838,37 @@ mod tests {
             .collect::<Result<Vec<_>, _>>()
             .unwrap();
         assert!(masked_entries.is_empty());
+
+        drop(storage_trie);
+        drop(account_trie);
+        drop(hashed_storages);
+        drop(hashed_accounts);
+        drop(provider);
+
+        let provider_rw = factory.provider_rw().unwrap();
+        let input = SaveBlocksInput::new(vec![deferred_trie_block], 2, 1, 2, 2);
+        assert!(input.persist_rest_blocks().is_empty());
+        provider_rw.save_blocks(&input).unwrap();
+        provider_rw.commit().unwrap();
+
+        let provider = factory.provider().unwrap();
+        let finish_checkpoint = provider.get_stage_checkpoint(StageId::Finish).unwrap().unwrap();
+        assert_eq!(finish_checkpoint.block_number, 2);
+        assert!(finish_checkpoint.finish_stage_checkpoint().is_none());
+
+        let mut hashed_accounts =
+            provider.tx_ref().cursor_read::<tables::HashedAccounts>().unwrap();
+        let (_, account) = hashed_accounts.seek_exact(masked_account).unwrap().unwrap();
+        assert_eq!(account.nonce, 3);
+
+        let mut hashed_storages =
+            provider.tx_ref().cursor_dup_read::<tables::HashedStorages>().unwrap();
+        let storage =
+            hashed_storages.seek_by_key_subkey(masked_storage, masked_slot).unwrap().unwrap();
+        assert_eq!(storage.value, U256::from(4));
+
+        let mut account_trie = provider.tx_ref().cursor_read::<tables::AccountsTrie>().unwrap();
+        assert!(account_trie.seek_exact(StoredNibbles(masked_account_node)).unwrap().is_some());
     }
 
     #[cfg(feature = "partial-persistence")]
@@ -4791,6 +4909,28 @@ mod tests {
         );
 
         let static_files = factory.static_file_provider();
+        assert_eq!(static_files.get_highest_static_file_block(StaticFileSegment::Headers), Some(4));
+        assert_eq!(
+            static_files.get_highest_static_file_block(StaticFileSegment::Transactions),
+            Some(4)
+        );
+        assert_eq!(
+            static_files.get_highest_static_file_block(StaticFileSegment::Receipts),
+            Some(4)
+        );
+
+        drop(provider);
+
+        let provider_rw = factory.provider_rw().unwrap();
+        let input = SaveBlocksInput::new(blocks[2..].to_vec(), 4, 2, 4, 4);
+        assert!(input.persist_rest_blocks().is_empty());
+        provider_rw.save_blocks(&input).unwrap();
+        provider_rw.commit().unwrap();
+
+        let checkpoint =
+            factory.provider().unwrap().get_stage_checkpoint(StageId::Finish).unwrap().unwrap();
+        assert_eq!(checkpoint.block_number, 4);
+        assert!(checkpoint.finish_stage_checkpoint().is_none());
         assert_eq!(static_files.get_highest_static_file_block(StaticFileSegment::Headers), Some(4));
         assert_eq!(
             static_files.get_highest_static_file_block(StaticFileSegment::Transactions),
