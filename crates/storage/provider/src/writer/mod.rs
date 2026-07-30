@@ -22,14 +22,14 @@ mod tests {
         HashedPostState, HashedStorage, StateRoot, StorageRoot, StorageRootProgress,
     };
     use reth_trie_db::{DatabaseStateRoot, DatabaseStorageRoot, LegacyKeyAdapter, PackedKeyAdapter};
-    use revm_database::{
+    use revm::database::{
         states::{
             bundle_state::BundleRetention, changes::PlainStorageRevert, PlainStorageChangeset,
         },
         BundleState, OriginalValuesKnown, State,
     };
-    use revm_database_interface::{DatabaseCommit, EmptyDB};
-    use revm_state::{
+    use revm::database_interface::{DatabaseCommit, EmptyDB};
+    use revm::state::{
         Account as RevmAccount, AccountInfo as RevmAccountInfo, AccountStatus, EvmStorageSlot,
     };
     use std::{collections::BTreeMap, str::FromStr};

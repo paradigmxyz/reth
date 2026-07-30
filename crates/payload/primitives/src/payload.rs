@@ -189,6 +189,14 @@ where
             Self::PayloadAttributes(attributes) => attributes.slot_number(),
         }
     }
+
+    /// Returns `target_gas_limit` from payload attributes.
+    pub fn target_gas_limit(&self) -> Option<u64> {
+        match self {
+            Self::ExecutionPayload(_) => None,
+            Self::PayloadAttributes(attributes) => attributes.target_gas_limit(),
+        }
+    }
 }
 
 impl<'a, Payload, AttributesType> From<&'a AttributesType>

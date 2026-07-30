@@ -13,6 +13,7 @@ use reth_primitives_traits::{
 ///
 /// - Compares the receipts root in the block header to the block body
 /// - Compares the gas used in the block header to the actual gas usage after execution
+/// - Compares the computed Block Access List Hash to the value in the header if Amsterdam is active
 ///
 /// If `receipt_root_bloom` is provided, the pre-computed receipt root and logs bloom are used
 /// instead of computing them from the receipts.
@@ -21,6 +22,31 @@ pub fn validate_block_post_execution<B, R, ChainSpec>(
     chain_spec: &ChainSpec,
     result: &BlockExecutionResult<R>,
     receipt_root_bloom: Option<(B256, Bloom)>,
+    block_access_list_hash: Option<B256>,
+) -> Result<(), ConsensusError>
+where
+    B: Block,
+    R: Receipt,
+    ChainSpec: EthereumHardforks,
+{
+    validate_block_post_execution_with_bal_hashes(
+        block,
+        chain_spec,
+        result,
+        receipt_root_bloom,
+        block_access_list_hash,
+        false,
+    )
+}
+
+/// Validate a block with regard to execution results, optionally allowing pre-Amsterdam BAL hashes.
+pub(crate) fn validate_block_post_execution_with_bal_hashes<B, R, ChainSpec>(
+    block: &RecoveredBlock<B>,
+    chain_spec: &ChainSpec,
+    result: &BlockExecutionResult<R>,
+    receipt_root_bloom: Option<(B256, Bloom)>,
+    block_access_list_hash: Option<B256>,
+    allow_bal_hashes: bool,
 ) -> Result<(), ConsensusError>
 where
     B: Block,
@@ -75,6 +101,23 @@ where
         if requests_hash != header_requests_hash {
             return Err(ConsensusError::BodyRequestsHashDiff(
                 GotExpected::new(requests_hash, header_requests_hash).into(),
+            ))
+        }
+    }
+
+    // Validate that the header block access list hash matches the calculated block access list hash
+    let is_allowed_pre_amsterdam_bal_hash = allow_bal_hashes &&
+        !chain_spec.is_amsterdam_active_at_timestamp(block.header().timestamp()) &&
+        block.header().block_access_list_hash().is_some();
+
+    if (chain_spec.is_amsterdam_active_at_timestamp(block.header().timestamp()) ||
+        is_allowed_pre_amsterdam_bal_hash) &&
+        let Some(block_access_list_hash) = block_access_list_hash
+    {
+        let block_bal_hash = block.header().block_access_list_hash().unwrap_or_default();
+        if block_access_list_hash != block_bal_hash {
+            return Err(ConsensusError::BlockAccessListHashMismatch(
+                GotExpected::new(block_access_list_hash, block_bal_hash).into(),
             ))
         }
     }

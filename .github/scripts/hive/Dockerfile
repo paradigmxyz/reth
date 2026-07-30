@@ -7,7 +7,7 @@ FROM lukemathwalker/cargo-chef:latest-rust-1 AS chef
 WORKDIR /app
 
 # Install system dependencies
-RUN apt-get update && apt-get install -y libclang-dev pkg-config
+RUN apt-get update && apt-get install -y libclang-dev m4 pkg-config
 
 # 
 # We prepare the build plan
@@ -56,6 +56,8 @@ ARG CARGO_BIN
 
 COPY --from=builder /app/target/hivetests/$CARGO_BIN /usr/local/bin/reth
 COPY LICENSE-* ./
+COPY LICENSES ./LICENSES
+COPY README.md ./README.md
 
 EXPOSE 30303 30303/udp 9001 8545 8546
 ENV RUST_LOG=debug

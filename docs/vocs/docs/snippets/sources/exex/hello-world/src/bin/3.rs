@@ -2,7 +2,7 @@ use futures_util::TryStreamExt;
 use reth::{api::FullNodeComponents, builder::NodeTypes, primitives::EthPrimitives};
 use reth_exex::{ExExContext, ExExEvent, ExExNotification};
 use reth_node_ethereum::EthereumNode;
-use reth_tracing::tracing::info;
+use reth_tracing::tracing::{info, warn};
 
 async fn my_exex<Node: FullNodeComponents<Types: NodeTypes<Primitives = EthPrimitives>>>(
     mut ctx: ExExContext<Node>,
@@ -21,7 +21,12 @@ async fn my_exex<Node: FullNodeComponents<Types: NodeTypes<Primitives = EthPrimi
         };
 
         if let Some(committed_chain) = notification.committed_chain() {
-            ctx.events.send(ExExEvent::FinishedHeight(committed_chain.tip().num_hash()))?;
+            if let Err(err) =
+                ctx.events.send(ExExEvent::FinishedHeight(committed_chain.tip().num_hash()))
+            {
+                warn!(%err, "ExEx event channel closed");
+                break;
+            }
         }
     }
 

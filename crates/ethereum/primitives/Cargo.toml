@@ -47,6 +47,7 @@ std = [
     "alloy-consensus/std",
     "alloy-primitives/std",
     "reth-primitives-traits/std",
+    "reth-primitives-traits/quanta",
     "serde?/std",
     "alloy-eips/std",
     "alloy-rpc-types-eth?/std",

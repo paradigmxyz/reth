@@ -1104,6 +1104,8 @@ pub struct RpcServerConfig<RpcMiddleware = Identity> {
     ipc_endpoint: Option<String>,
     /// JWT secret for authentication
     jwt_secret: Option<JwtSecret>,
+    /// Whether RPC request metrics are enabled.
+    rpc_metrics_enabled: bool,
     /// Configurable RPC middleware
     rpc_middleware: RpcMiddleware,
 }
@@ -1124,6 +1126,7 @@ impl Default for RpcServerConfig<Identity> {
             ipc_server_config: None,
             ipc_endpoint: None,
             jwt_secret: None,
+            rpc_metrics_enabled: true,
             rpc_middleware: Default::default(),
         }
     }
@@ -1188,8 +1191,15 @@ impl<RpcMiddleware> RpcServerConfig<RpcMiddleware> {
             ipc_server_config: self.ipc_server_config,
             ipc_endpoint: self.ipc_endpoint,
             jwt_secret: self.jwt_secret,
+            rpc_metrics_enabled: self.rpc_metrics_enabled,
             rpc_middleware,
         }
+    }
+
+    /// Configures whether the built-in RPC request metrics layer is enabled.
+    pub const fn with_rpc_metrics_enabled(mut self, enabled: bool) -> Self {
+        self.rpc_metrics_enabled = enabled;
+        self
     }
 
     /// Configure the cors domains for http _and_ ws
@@ -1308,6 +1318,11 @@ impl<RpcMiddleware> RpcServerConfig<RpcMiddleware> {
         self.ipc_endpoint.clone()
     }
 
+    /// Returns whether the built-in RPC request metrics layer is enabled.
+    pub const fn rpc_metrics_enabled(&self) -> bool {
+        self.rpc_metrics_enabled
+    }
+
     /// Creates the [`CorsLayer`] if any
     fn maybe_cors_layer(cors: Option<String>) -> Result<Option<CorsLayer>, CorsDomainError> {
         cors.as_deref().map(cors::create_cors_layer).transpose()
@@ -1351,13 +1366,19 @@ impl<RpcMiddleware> RpcServerConfig<RpcMiddleware> {
             constants::DEFAULT_WS_RPC_PORT,
         )));
 
-        let metrics = modules.ipc.as_ref().map(RpcRequestMetrics::ipc).unwrap_or_default();
+        let rpc_metrics_enabled = self.rpc_metrics_enabled;
         let ipc_path =
             self.ipc_endpoint.clone().unwrap_or_else(|| constants::DEFAULT_IPC_ENDPOINT.into());
 
         if let Some(builder) = self.ipc_server_config {
             let ipc = builder
-                .set_rpc_middleware(IpcRpcServiceBuilder::new().layer(metrics))
+                .set_rpc_middleware(
+                    IpcRpcServiceBuilder::new().option_layer(
+                        rpc_metrics_enabled
+                            .then(|| modules.ipc.as_ref().map(RpcRequestMetrics::ipc))
+                            .flatten(),
+                    ),
+                )
                 .build(ipc_path);
             ipc_handle = Some(ipc.start(modules.ipc.clone().expect("ipc server error")).await?);
         }
@@ -1397,13 +1418,16 @@ impl<RpcMiddleware> RpcServerConfig<RpcMiddleware> {
                     )
                     .set_rpc_middleware(
                         RpcServiceBuilder::default()
-                            .layer(
-                                modules
-                                    .http
-                                    .as_ref()
-                                    .or(modules.ws.as_ref())
-                                    .map(RpcRequestMetrics::same_port)
-                                    .unwrap_or_default(),
+                            .option_layer(
+                                rpc_metrics_enabled
+                                    .then(|| {
+                                        modules
+                                            .http
+                                            .as_ref()
+                                            .or(modules.ws.as_ref())
+                                            .map(RpcRequestMetrics::same_port)
+                                    })
+                                    .flatten(),
                             )
                             .layer(self.rpc_middleware.clone()),
                     )
@@ -1448,7 +1472,11 @@ impl<RpcMiddleware> RpcServerConfig<RpcMiddleware> {
                 )
                 .set_rpc_middleware(
                     RpcServiceBuilder::default()
-                        .layer(modules.ws.as_ref().map(RpcRequestMetrics::ws).unwrap_or_default())
+                        .option_layer(
+                            rpc_metrics_enabled
+                                .then(|| modules.ws.as_ref().map(RpcRequestMetrics::ws))
+                                .flatten(),
+                        )
                         .layer(self.rpc_middleware.clone()),
                 )
                 .build(ws_socket_addr)
@@ -1474,8 +1502,10 @@ impl<RpcMiddleware> RpcServerConfig<RpcMiddleware> {
                 )
                 .set_rpc_middleware(
                     RpcServiceBuilder::default()
-                        .layer(
-                            modules.http.as_ref().map(RpcRequestMetrics::http).unwrap_or_default(),
+                        .option_layer(
+                            rpc_metrics_enabled
+                                .then(|| modules.http.as_ref().map(RpcRequestMetrics::http))
+                                .flatten(),
                         )
                         .layer(self.rpc_middleware.clone()),
                 )

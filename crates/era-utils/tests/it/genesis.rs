@@ -1,5 +1,5 @@
 use reth_db_common::init::init_genesis;
-use reth_era_utils::{export, ExportConfig};
+use reth_era_utils::{export, Era1, ExportConfig};
 use reth_fs_util as fs;
 use reth_provider::{test_utils::create_test_provider_factory, BlockReader};
 use tempfile::tempdir;
@@ -16,7 +16,7 @@ fn test_export_with_genesis_only() {
     let export_config = ExportConfig { dir: export_dir.path().to_owned(), ..Default::default() };
 
     let exported_files =
-        export(&provider_factory.provider_rw().unwrap().0, &export_config).unwrap();
+        export::<Era1, _>(&provider_factory.provider_rw().unwrap().0, &export_config).unwrap();
 
     assert_eq!(exported_files.len(), 1, "Should export exactly one file");
 

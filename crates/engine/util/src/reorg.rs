@@ -1,6 +1,7 @@
 //! Stream wrapper that simulates reorgs.
 
 use alloy_consensus::{BlockHeader, Transaction};
+use alloy_primitives::Bytes;
 use alloy_rpc_types_engine::{ForkchoiceState, PayloadStatus};
 use futures::{stream::FuturesUnordered, Stream, StreamExt, TryFutureExt};
 use itertools::Either;
@@ -158,7 +159,7 @@ where
                     // forkchoice state. We will rely on CL to reorg us back to canonical chain.
                     // TODO: This is an expensive blocking operation, ideally it's spawned as a task
                     // so that the stream could yield the control back.
-                    let reorg_block = match create_reorg_head(
+                    let (reorg_block, encoded_bal) = match create_reorg_head(
                         this.provider,
                         this.evm_config,
                         this.payload_validator,
@@ -194,7 +195,7 @@ where
                         BeaconEngineMessage::NewPayload { payload, tx },
                         // Reorg payload
                         BeaconEngineMessage::NewPayload {
-                            payload: T::block_to_payload(reorg_block),
+                            payload: T::block_to_payload(reorg_block, encoded_bal),
                             tx: reorg_payload_tx,
                         },
                         // Reorg forkchoice state
@@ -222,13 +223,14 @@ where
     }
 }
 
+#[allow(clippy::type_complexity)]
 fn create_reorg_head<Provider, Evm, T, Validator>(
     provider: &Provider,
     evm_config: &Evm,
     payload_validator: &Validator,
     mut depth: usize,
     next_payload: T::ExecutionData,
-) -> RethResult<SealedBlock<BlockTy<Evm::Primitives>>>
+) -> RethResult<(SealedBlock<BlockTy<Evm::Primitives>>, Option<Bytes>)>
 where
     Provider: BlockReader<Header = HeaderTy<Evm::Primitives>, Block = BlockTy<Evm::Primitives>>
         + StateProviderFactory
@@ -265,10 +267,12 @@ where
     debug!(target: "engine::stream::reorg", number = reorg_target.header().number(), hash = %previous_hash, "Selected reorg target");
 
     // Configure state
+    let has_bal = reorg_target.header().block_access_list_hash().is_some();
     let state_provider = provider.state_by_block_hash(reorg_target.header().parent_hash())?;
     let mut state = State::builder()
         .with_database_ref(StateProviderDatabase::new(&state_provider))
         .with_bundle_update()
+        .with_bal_builder_if(has_bal)
         .build();
 
     let ctx = evm_config.context_for_block(&reorg_target).map_err(RethError::other)?;
@@ -302,7 +306,10 @@ where
         cumulative_gas_used += gas_used;
     }
 
-    let BlockBuilderOutcome { block, .. } = builder.finish(&state_provider, None)?;
+    let BlockBuilderOutcome { block, block_access_list, .. } =
+        builder.finish(&state_provider, None)?;
 
-    Ok(block.into_sealed_block())
+    let encoded_bal: Option<Bytes> = block_access_list.map(|bal| alloy_rlp::encode(&bal).into());
+
+    Ok((block.into_sealed_block(), encoded_bal))
 }

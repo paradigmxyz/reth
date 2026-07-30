@@ -48,7 +48,7 @@ impl<'a> StaticFileCursor<'a> {
                 None => Ok(None),
             },
         }
-        .map_or(None, |v| v);
+        .unwrap_or(None);
 
         Ok(row)
     }

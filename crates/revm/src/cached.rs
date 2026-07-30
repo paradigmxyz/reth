@@ -41,6 +41,14 @@ pub struct CachedReads {
 // === impl CachedReads ===
 
 impl CachedReads {
+    /// Creates a new [`CachedReads`] with capacity for account entries.
+    pub fn with_account_capacity(capacity: usize) -> Self {
+        Self {
+            accounts: AddressMap::with_capacity_and_hasher(capacity, Default::default()),
+            ..Default::default()
+        }
+    }
+
     /// Gets a [`DatabaseRef`] that will cache reads from the given database.
     pub const fn as_db<DB>(&mut self, db: DB) -> CachedReadsDBRef<'_, DB> {
         self.as_db_mut(db).into_db()

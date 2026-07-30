@@ -549,6 +549,15 @@ impl DatabaseEnv {
         self
     }
 
+    /// Enables metrics on the database if requested.
+    pub fn with_metrics_if(self, enabled: bool) -> Self {
+        if enabled {
+            self.with_metrics()
+        } else {
+            self
+        }
+    }
+
     /// Creates all the tables defined in [`Tables`], if necessary.
     ///
     /// This keeps tracks of the created table handles and stores them for better efficiency.

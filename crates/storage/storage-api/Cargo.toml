@@ -22,17 +22,24 @@ reth-prune-types.workspace = true
 reth-stages-types.workspace = true
 reth-storage-errors.workspace = true
 reth-trie-common.workspace = true
-revm-database.workspace = true
+revm.workspace = true
 reth-ethereum-primitives.workspace = true
 
 # ethereum
 alloy-eips.workspace = true
+alloy-eip7928.workspace = true
 alloy-primitives.workspace = true
 alloy-consensus.workspace = true
 alloy-rpc-types-engine.workspace = true
 
 auto_impl.workspace = true
 serde_json = { workspace = true, optional = true }
+reth-tokio-util = { workspace = true, optional = true }
+
+[dev-dependencies]
+alloy-primitives = { workspace = true, features = ["getrandom"] }
+tokio = { workspace = true, features = ["macros", "rt"] }
+tokio-stream.workspace = true
 
 [features]
 default = ["std"]
@@ -44,7 +51,7 @@ std = [
     "alloy-rpc-types-engine/std",
     "reth-primitives-traits/std",
     "reth-stages-types/std",
-    "revm-database/std",
+    "revm/std",
     "reth-ethereum-primitives/std",
     "reth-execution-types/std",
     "reth-prune-types/std",
@@ -52,6 +59,8 @@ std = [
     "reth-db-models/std",
     "reth-trie-common/std",
     "serde_json?/std",
+    "dep:reth-tokio-util",
+    "alloy-eip7928/std",
 ]
 
 db-api = [
@@ -67,11 +76,12 @@ serde = [
     "reth-prune-types/serde",
     "reth-stages-types/serde",
     "reth-trie-common/serde",
-    "revm-database/serde",
+    "revm/serde",
     "alloy-eips/serde",
     "alloy-primitives/serde",
     "alloy-consensus/serde",
     "alloy-rpc-types-engine/serde",
+    "alloy-eip7928/serde",
 ]
 
 serde-bincode-compat = [

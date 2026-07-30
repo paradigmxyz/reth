@@ -27,6 +27,14 @@ pub trait AdminApi {
     #[method(name = "removeTrustedPeer")]
     fn remove_trusted_peer(&self, record: AnyNode) -> RpcResult<bool>;
 
+    /// Bans a remote node and disconnects an active non-trusted session if one exists.
+    #[method(name = "banPeer")]
+    fn ban_peer(&self, record: AnyNode) -> RpcResult<bool>;
+
+    /// Unbans a remote node.
+    #[method(name = "unbanPeer")]
+    fn unban_peer(&self, record: AnyNode) -> RpcResult<bool>;
+
     /// The peers administrative property can be queried for all the information known about the
     /// connected remote nodes at the networking granularity. These include general information
     /// about the nodes themselves as participants of the devp2p P2P overlay protocol, as well as

@@ -1,5 +1,6 @@
 //! A lazily-resolved handle to a value computed on a background thread.
 
+use parking_lot::Mutex;
 use std::sync::{Arc, OnceLock};
 use tokio::sync::oneshot;
 
@@ -19,7 +20,7 @@ pub struct LazyHandle<T> {
 
 struct LazyHandleInner<T> {
     /// Pending receiver, taken on first access.
-    rx: std::sync::Mutex<Option<oneshot::Receiver<T>>>,
+    rx: Mutex<Option<oneshot::Receiver<T>>>,
     /// Cached result after the first successful receive.
     value: OnceLock<T>,
 }
@@ -28,17 +29,13 @@ impl<T: Send + 'static> LazyHandle<T> {
     /// Creates a new handle from a background task receiver.
     pub(crate) fn new(rx: oneshot::Receiver<T>) -> Self {
         Self {
-            inner: Arc::new(LazyHandleInner {
-                rx: std::sync::Mutex::new(Some(rx)),
-                value: OnceLock::new(),
-            }),
+            inner: Arc::new(LazyHandleInner { rx: Mutex::new(Some(rx)), value: OnceLock::new() }),
         }
     }
 
     /// Creates a handle that is already resolved with the given value.
     pub fn ready(value: T) -> Self {
-        let inner =
-            LazyHandleInner { rx: std::sync::Mutex::new(None), value: OnceLock::from(value) };
+        let inner = LazyHandleInner { rx: Mutex::new(None), value: OnceLock::from(value) };
         Self { inner: Arc::new(inner) }
     }
 
@@ -56,7 +53,6 @@ impl<T: Send + 'static> LazyHandle<T> {
                 .inner
                 .rx
                 .lock()
-                .expect("lock poisoned")
                 .take()
                 .expect("LazyHandle receiver already taken without value being set");
             rx.blocking_recv().expect("LazyHandle task dropped without producing a value")

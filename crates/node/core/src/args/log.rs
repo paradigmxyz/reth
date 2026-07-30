@@ -3,10 +3,10 @@
 use crate::dirs::{LogsDir, PlatformPath};
 use clap::{ArgAction, Args, ValueEnum};
 use reth_tracing::{
-    tracing_subscriber::filter::Directive, FileInfo, FileWorkerGuard, LayerInfo, Layers, LogFormat,
-    RethTracer, Tracer,
+    tracing_subscriber::filter::Directive, FileInfo, LayerInfo, Layers, LogFormat, RethTracer,
+    Tracer, TracingGuards,
 };
-use std::{fmt, fmt::Display, sync::OnceLock};
+use std::{fmt, fmt::Display, path::PathBuf, sync::OnceLock};
 use tracing::{level_filters::LevelFilter, Level};
 
 /// Constant to convert megabytes to bytes
@@ -83,6 +83,30 @@ pub struct LogArgs {
     )]
     pub samply_filter: String,
 
+    /// Emit traces to a Chrome trace JSON file. Only useful when profiling.
+    #[arg(long = "log.tracing-chrome", global = true, hide = true, default_value_t = DefaultLogArgs::get_global().tracing_chrome)]
+    pub tracing_chrome: bool,
+
+    /// The path to write Chrome trace JSON to.
+    #[arg(
+        long = "log.tracing-chrome.file",
+        value_name = "PATH",
+        global = true,
+        default_value = "trace.json",
+        hide = true
+    )]
+    pub tracing_chrome_file: PathBuf,
+
+    /// The filter to use for traces emitted to Chrome trace JSON.
+    #[arg(
+        long = "log.tracing-chrome.filter",
+        value_name = "FILTER",
+        global = true,
+        default_value_t = DefaultLogArgs::get_global().tracing_chrome_filter.clone(),
+        hide = true
+    )]
+    pub tracing_chrome_filter: String,
+
     /// Emit traces to tracy. Only useful when profiling.
     #[arg(long = "log.tracy", global = true, hide = true, default_value_t = DefaultLogArgs::get_global().tracy)]
     pub tracy: bool,
@@ -157,26 +181,26 @@ impl LogArgs {
 
     /// Initializes tracing with the configured options from cli args.
     ///
-    /// Returns the file worker guard if a file worker was configured.
-    pub fn init_tracing(&self) -> eyre::Result<Option<FileWorkerGuard>> {
+    /// Returns guards for tracing layers that need to stay alive.
+    pub fn init_tracing(&self) -> eyre::Result<TracingGuards> {
         self.init_tracing_with_layers(Layers::new(), false)
     }
 
     /// Initializes tracing with the configured options from cli args.
     ///
     /// When `enable_reload` is true, a global log handle is installed that allows changing
-    /// log levels at runtime via RPC methods like `debug_verbosity` and `debug_vmodule`.
+    /// log levels at runtime.
     ///
     /// # Arguments
     /// * `layers` - Pre-configured layers to include
     /// * `enable_reload` - If true, enables runtime log level changes
     ///
-    /// Returns the file worker guard if a file worker was configured.
+    /// Returns guards for tracing layers that need to stay alive.
     pub fn init_tracing_with_layers(
         &self,
         layers: Layers,
         enable_reload: bool,
-    ) -> eyre::Result<Option<FileWorkerGuard>> {
+    ) -> eyre::Result<TracingGuards> {
         let mut tracer = RethTracer::new();
 
         let stdout = self.layer_info(self.log_stdout_format, self.log_stdout_filter.clone(), true);
@@ -195,6 +219,12 @@ impl LogArgs {
         if self.samply {
             let config = self.layer_info(LogFormat::Terminal, self.samply_filter.clone(), false);
             tracer = tracer.with_samply(config);
+        }
+
+        if self.tracing_chrome {
+            let config =
+                self.layer_info(LogFormat::Terminal, self.tracing_chrome_filter.clone(), false);
+            tracer = tracer.with_chrome(config, self.tracing_chrome_file.clone());
         }
 
         if self.tracy {
@@ -228,6 +258,8 @@ pub struct DefaultLogArgs {
     journald_filter: String,
     samply: bool,
     samply_filter: String,
+    tracing_chrome: bool,
+    tracing_chrome_filter: String,
     tracy: bool,
     tracy_filter: String,
     color: ColorMode,
@@ -304,6 +336,18 @@ impl DefaultLogArgs {
         self
     }
 
+    /// Set whether Chrome trace JSON tracing is enabled by default.
+    pub const fn with_tracing_chrome(mut self, v: bool) -> Self {
+        self.tracing_chrome = v;
+        self
+    }
+
+    /// Set the default Chrome trace JSON filter.
+    pub fn with_tracing_chrome_filter(mut self, v: String) -> Self {
+        self.tracing_chrome_filter = v;
+        self
+    }
+
     /// Set whether tracy tracing is enabled by default.
     pub const fn with_tracy(mut self, v: bool) -> Self {
         self.tracy = v;
@@ -336,6 +380,8 @@ impl Default for DefaultLogArgs {
             journald_filter: "error".to_string(),
             samply: false,
             samply_filter: PROFILER_TRACING_FILTER.to_string(),
+            tracing_chrome: false,
+            tracing_chrome_filter: PROFILER_TRACING_FILTER.to_string(),
             tracy: false,
             tracy_filter: PROFILER_TRACING_FILTER.to_string(),
             color: ColorMode::Always,

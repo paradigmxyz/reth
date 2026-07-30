@@ -7,12 +7,14 @@
 //! computed root.
 
 use alloy_eips::Encodable2718;
-use alloy_primitives::{Bloom, B256};
+use alloy_primitives::{map::HashMap, Bloom, B256};
 use crossbeam_channel::Receiver;
 use reth_primitives_traits::Receipt;
 use reth_trie_common::ordered_root::OrderedTrieRootEncodedBuilder;
 use tokio::sync::oneshot;
 use tracing::debug_span;
+
+const RECEIPT_ENCODE_BUF_INITIAL_CAPACITY: usize = 512;
 
 /// Receipt with index, ready to be sent to the background task for encoding and trie building.
 #[derive(Debug, Clone)]
@@ -65,7 +67,9 @@ impl<R: Receipt> ReceiptRootTaskHandle<R> {
     ///
     /// * `receipts_len` - The total number of receipts expected. This is needed to correctly order
     ///   the trie keys according to RLP encoding rules.
-    pub fn run(self, receipts_len: usize) {
+    pub fn run(self, receipts_len: impl Into<Option<usize>>) {
+        let receipts_len = receipts_len.into();
+
         let _span = debug_span!(
             target: "engine::tree::payload_processor",
             "receipt_root",
@@ -73,49 +77,57 @@ impl<R: Receipt> ReceiptRootTaskHandle<R> {
         )
         .entered();
 
-        let mut builder = OrderedTrieRootEncodedBuilder::new(receipts_len);
+        let mut builder = OrderedTrieRootEncodedBuilder::new();
         let mut aggregated_bloom = Bloom::ZERO;
-        let mut encode_buf = Vec::new();
-        let mut received_count = 0usize;
+        let mut encode_buf = Vec::with_capacity(RECEIPT_ENCODE_BUF_INITIAL_CAPACITY);
+        let mut next = 0usize;
+        let mut pending = HashMap::new();
 
-        for indexed_receipt in self.receipt_rx {
-            let receipt_with_bloom = indexed_receipt.receipt.with_bloom_ref();
+        let mut push = |receipt: R| {
+            let receipt_with_bloom = receipt.with_bloom_ref();
 
             encode_buf.clear();
             receipt_with_bloom.encode_2718(&mut encode_buf);
 
             aggregated_bloom |= *receipt_with_bloom.bloom_ref();
-            match builder.push(indexed_receipt.index, &encode_buf) {
-                Ok(()) => {
-                    received_count += 1;
+            builder.push_next(&encode_buf);
+        };
+
+        for indexed_receipt in self.receipt_rx {
+            if indexed_receipt.index == next {
+                push(indexed_receipt.receipt);
+                next += 1;
+
+                while let Some(receipt) = pending.remove(&next) {
+                    push(receipt);
+                    next += 1;
                 }
-                Err(err) => {
-                    // If a duplicate or out-of-bounds index is streamed, skip it and
-                    // fall back to computing the receipt root from the full receipts
-                    // vector later.
-                    tracing::error!(
-                        target: "engine::tree::payload_processor",
-                        index = indexed_receipt.index,
-                        ?err,
-                        "Receipt root task received invalid receipt index, skipping"
-                    );
-                }
+            } else {
+                pending.insert(indexed_receipt.index, indexed_receipt.receipt);
             }
         }
 
-        let Ok(root) = builder.finalize() else {
-            // Finalize fails if we didn't receive exactly `receipts_len` receipts. This can
-            // happen if execution was aborted early (e.g., invalid transaction encountered).
-            // We return without sending a result, allowing the caller to handle the abort.
+        if receipts_len.is_some_and(|len| len != next) {
             tracing::error!(
                 target: "engine::tree::payload_processor",
                 expected = receipts_len,
-                received = received_count,
+                received = next,
                 "Receipt root task received incomplete receipts, execution likely aborted"
             );
             return;
-        };
-        let _ = self.result_tx.send((root, aggregated_bloom));
+        }
+
+        if !pending.is_empty() {
+            tracing::error!(
+                target: "engine::tree::payload_processor",
+                received = next,
+                pending = pending.len(),
+                "Receipt root task received gapped receipts"
+            );
+            return;
+        }
+
+        let _ = self.result_tx.send((builder.finalize(), aggregated_bloom));
     }
 }
 

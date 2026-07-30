@@ -2,7 +2,7 @@
 
 use crate::{
     CanonStateNotification, CanonStateNotificationSender, CanonStateNotifications,
-    ChainInfoTracker, ComputedTrieData, DeferredTrieData, MemoryOverlayStateProvider,
+    ChainInfoTracker, MemoryOverlayStateProvider,
 };
 use alloy_consensus::{transaction::TransactionMeta, BlockHeader};
 use alloy_eips::{BlockHashOrNumber, BlockNumHash};
@@ -18,8 +18,7 @@ use reth_primitives_traits::{
 };
 use reth_storage_api::StateProviderBox;
 use reth_trie::{
-    updates::TrieUpdatesSorted, HashedPostStateSorted, LazyTrieData, SortedTrieData,
-    TrieInputSorted,
+    updates::TrieUpdatesSorted, ComputedTrieData, HashedPostStateSorted, LazyTrieData,
 };
 use std::{collections::BTreeMap, sync::Arc, time::Instant};
 use tokio::sync::{broadcast, watch};
@@ -759,7 +758,7 @@ pub struct ExecutedBlock<N: NodePrimitives = EthPrimitives> {
     ///
     /// This allows deferring the computation of the trie data which can be expensive.
     /// The data can be populated asynchronously after the block was validated.
-    pub trie_data: DeferredTrieData,
+    pub trie_data: LazyTrieData,
 }
 
 impl<N: NodePrimitives> Default for ExecutedBlock<N> {
@@ -775,7 +774,7 @@ impl<N: NodePrimitives> Default for ExecutedBlock<N> {
                 },
                 state: Default::default(),
             }),
-            trie_data: DeferredTrieData::ready(ComputedTrieData::default()),
+            trie_data: LazyTrieData::ready(ComputedTrieData::default()),
         }
     }
 }
@@ -798,7 +797,7 @@ impl<N: NodePrimitives> ExecutedBlock<N> {
         execution_output: Arc<BlockExecutionOutput<N::Receipt>>,
         trie_data: ComputedTrieData,
     ) -> Self {
-        Self { recovered_block, execution_output, trie_data: DeferredTrieData::ready(trie_data) }
+        Self { recovered_block, execution_output, trie_data: LazyTrieData::ready(trie_data) }
     }
 
     /// Create a new [`ExecutedBlock`] with deferred trie data.
@@ -806,19 +805,18 @@ impl<N: NodePrimitives> ExecutedBlock<N> {
     /// This is useful if the trie data is populated somewhere else, e.g. asynchronously
     /// after the block was validated.
     ///
-    /// The [`DeferredTrieData`] handle allows expensive trie operations (sorting hashed state,
-    /// sorting trie updates, and building the accumulated trie input overlay) to be performed
-    /// outside the critical validation path. This can improve latency for time-sensitive
-    /// operations like block validation.
+    /// The [`LazyTrieData`] handle allows expensive trie operations (sorting hashed state and
+    /// trie updates) to be performed outside the critical validation path by a background task.
+    /// This can improve latency for time-sensitive operations like block validation.
     ///
-    /// If the data hasn't been populated when [`Self::trie_data()`] is called, computation
-    /// occurs synchronously from stored inputs, so there is no blocking or deadlock risk.
+    /// If the data hasn't been populated when [`Self::trie_data()`] is called, the caller waits
+    /// for the background task to publish it.
     ///
     /// Use [`Self::new()`] instead when trie data is already computed and available immediately.
     pub const fn with_deferred_trie_data(
         recovered_block: Arc<RecoveredBlock<N::Block>>,
         execution_output: Arc<BlockExecutionOutput<N::Receipt>>,
-        trie_data: DeferredTrieData,
+        trie_data: LazyTrieData,
     ) -> Self {
         Self { recovered_block, execution_output, trie_data }
     }
@@ -841,55 +839,40 @@ impl<N: NodePrimitives> ExecutedBlock<N> {
         &self.execution_output
     }
 
-    /// Returns the trie data, computing it synchronously if not already cached.
+    /// Returns the trie data, waiting for the background task if not already cached.
     ///
     /// Uses `OnceLock::get_or_init` internally:
     /// - If already computed: returns cached result immediately
-    /// - If not computed: first caller computes, others wait for that result
+    /// - If not computed: first caller waits for the publishing task, others wait for that result
     #[inline]
     #[tracing::instrument(level = "debug", target = "engine::tree", name = "trie_data", skip_all)]
     pub fn trie_data(&self) -> ComputedTrieData {
-        self.trie_data.wait_cloned()
+        self.trie_data.get().clone()
     }
 
     /// Returns a clone of the deferred trie data handle.
     ///
     /// A handle is a lightweight reference that can be passed to descendants without
-    /// forcing trie data to be computed immediately. The actual work runs when
-    /// `wait_cloned()` is called by a consumer (e.g. when merging overlays).
+    /// forcing trie data to be observed immediately. The actual work runs in the background task.
     #[inline]
-    pub fn trie_data_handle(&self) -> DeferredTrieData {
+    pub fn trie_data_handle(&self) -> LazyTrieData {
         self.trie_data.clone()
     }
 
     /// Returns the hashed state result of the execution outcome.
     ///
-    /// May compute trie data synchronously if the deferred task hasn't completed.
+    /// May wait for trie data if the deferred task hasn't completed.
     #[inline]
     pub fn hashed_state(&self) -> Arc<HashedPostStateSorted> {
-        self.trie_data().hashed_state
+        self.trie_data().sorted.hashed_state
     }
 
     /// Returns the trie updates resulting from the execution outcome.
     ///
-    /// May compute trie data synchronously if the deferred task hasn't completed.
+    /// May wait for trie data if the deferred task hasn't completed.
     #[inline]
     pub fn trie_updates(&self) -> Arc<TrieUpdatesSorted> {
-        self.trie_data().trie_updates
-    }
-
-    /// Returns the trie input anchored to the persisted ancestor.
-    ///
-    /// May compute trie data synchronously if the deferred task hasn't completed.
-    #[inline]
-    pub fn trie_input(&self) -> Option<Arc<TrieInputSorted>> {
-        self.trie_data().trie_input().cloned()
-    }
-
-    /// Returns the anchor hash of the trie input, if present.
-    #[inline]
-    pub fn anchor_hash(&self) -> Option<B256> {
-        self.trie_data().anchor_hash()
+        self.trie_data().sorted.trie_updates
     }
 
     /// Returns a [`BlockNumber`] of the block.
@@ -951,36 +934,22 @@ impl<N: NodePrimitives<SignedTx: SignedTransaction>> NewCanonicalChain<N> {
         match blocks {
             [] => Chain::default(),
             [first, rest @ ..] => {
-                let trie_data_handle = first.trie_data_handle();
                 let mut chain = Chain::from_block(
-                    first.recovered_block().clone(),
+                    Arc::clone(&first.recovered_block),
                     ExecutionOutcome::from((
                         first.execution_outcome().clone(),
                         first.block_number(),
                     )),
-                    LazyTrieData::deferred(move || {
-                        let trie_data = trie_data_handle.wait_cloned();
-                        SortedTrieData {
-                            hashed_state: trie_data.hashed_state,
-                            trie_updates: trie_data.trie_updates,
-                        }
-                    }),
+                    first.trie_data_handle(),
                 );
                 for exec in rest {
-                    let trie_data_handle = exec.trie_data_handle();
                     chain.append_block(
-                        exec.recovered_block().clone(),
+                        Arc::clone(&exec.recovered_block),
                         ExecutionOutcome::from((
                             exec.execution_outcome().clone(),
                             exec.block_number(),
                         )),
-                        LazyTrieData::deferred(move || {
-                            let trie_data = trie_data_handle.wait_cloned();
-                            SortedTrieData {
-                                hashed_state: trie_data.hashed_state,
-                                trie_updates: trie_data.trie_updates,
-                            }
-                        }),
+                        exec.trie_data_handle(),
                     );
                 }
                 chain
@@ -1114,7 +1083,10 @@ mod tests {
     }
 
     impl HashedPostStateProvider for MockStateProvider {
-        fn hashed_post_state(&self, _bundle_state: &revm_database::BundleState) -> HashedPostState {
+        fn hashed_post_state(
+            &self,
+            _bundle_state: &revm::database::BundleState,
+        ) -> HashedPostState {
             HashedPostState::default()
         }
     }
@@ -1560,10 +1532,8 @@ mod tests {
 
         // Build expected trie data map
         let mut expected_trie_data = BTreeMap::new();
-        expected_trie_data
-            .insert(0, LazyTrieData::ready(block0.hashed_state(), block0.trie_updates()));
-        expected_trie_data
-            .insert(1, LazyTrieData::ready(block1.hashed_state(), block1.trie_updates()));
+        expected_trie_data.insert(0, LazyTrieData::ready(block0.trie_data()));
+        expected_trie_data.insert(1, LazyTrieData::ready(block1.trie_data()));
 
         // Build expected execution outcome (first_block matches first block number)
         let commit_execution_outcome = ExecutionOutcome {
@@ -1592,15 +1562,13 @@ mod tests {
 
         // Build expected trie data for old chain
         let mut old_trie_data = BTreeMap::new();
-        old_trie_data.insert(1, LazyTrieData::ready(block1.hashed_state(), block1.trie_updates()));
-        old_trie_data.insert(2, LazyTrieData::ready(block2.hashed_state(), block2.trie_updates()));
+        old_trie_data.insert(1, LazyTrieData::ready(block1.trie_data()));
+        old_trie_data.insert(2, LazyTrieData::ready(block2.trie_data()));
 
         // Build expected trie data for new chain
         let mut new_trie_data = BTreeMap::new();
-        new_trie_data
-            .insert(1, LazyTrieData::ready(block1a.hashed_state(), block1a.trie_updates()));
-        new_trie_data
-            .insert(2, LazyTrieData::ready(block2a.hashed_state(), block2a.trie_updates()));
+        new_trie_data.insert(1, LazyTrieData::ready(block1a.trie_data()));
+        new_trie_data.insert(2, LazyTrieData::ready(block2a.trie_data()));
 
         // Build expected execution outcome for reorg chains (first_block matches first block
         // number)

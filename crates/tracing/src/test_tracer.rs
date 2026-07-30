@@ -1,7 +1,6 @@
-use tracing_appender::non_blocking::WorkerGuard;
 use tracing_subscriber::EnvFilter;
 
-use crate::{Layers, Tracer};
+use crate::{Layers, Tracer, TracingGuards};
 
 ///  Initializes a tracing subscriber for tests.
 ///
@@ -15,11 +14,11 @@ use crate::{Layers, Tracer};
 pub struct TestTracer;
 
 impl Tracer for TestTracer {
-    fn init_with_layers(self, _layers: Layers) -> eyre::Result<Option<WorkerGuard>> {
+    fn init_with_layers(self, _layers: Layers) -> eyre::Result<TracingGuards> {
         let _ = tracing_subscriber::fmt()
             .with_env_filter(EnvFilter::from_default_env())
             .with_writer(std::io::stderr)
             .try_init();
-        Ok(None)
+        Ok(TracingGuards::default())
     }
 }

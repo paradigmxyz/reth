@@ -1,4 +1,5 @@
 use crate::download::{
+    download_command,
     manifest::{ComponentSelection, SnapshotComponentType, SnapshotManifest},
     DownloadProgress, SelectionPreset,
 };
@@ -199,9 +200,7 @@ impl SelectorApp {
     }
 
     fn select_all(&mut self) {
-        for sel in &mut self.selections {
-            *sel = ComponentSelection::All;
-        }
+        self.selections.fill(ComponentSelection::All);
         self.preset = Some(SelectionPreset::Archive);
     }
 
@@ -368,7 +367,7 @@ fn render(f: &mut Frame<'_>, app: &mut SelectorApp) {
     };
     let header = Paragraph::new(format!(" Select snapshot components to download{}", block_info))
         .style(Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD))
-        .block(Block::default().borders(Borders::ALL).title("reth download"));
+        .block(Block::default().borders(Borders::ALL).title(download_command()));
     f.render_widget(header, chunks[0]);
 
     // Component list

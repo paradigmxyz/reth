@@ -309,11 +309,7 @@ where
     /// Submits a payload to the engine.
     pub async fn submit_payload(&self, payload: Payload::BuiltPayload) -> eyre::Result<B256> {
         let block_hash = payload.block().hash();
-        self.inner
-            .add_ons_handle
-            .beacon_engine_handle
-            .new_payload(Payload::block_to_payload(payload.block().clone()))
-            .await?;
+        self.inner.add_ons_handle.beacon_engine_handle.new_payload(payload.into()).await?;
 
         Ok(block_hash)
     }
@@ -362,7 +358,7 @@ where
             self.rpc_client().ok_or_else(|| eyre::eyre!("HTTP RPC client not available"))?;
 
         let res: ExecutionPayloadEnvelopeV5 =
-            client.request("testing_buildBlockV1", [request]).await?;
+            client.request("testing_buildBlockV1", request.into_params()).await?;
         eyre::Ok(res)
     }
 }

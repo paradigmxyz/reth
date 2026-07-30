@@ -1,5 +1,5 @@
 //! Tests downloading files and streaming their filenames
-use crate::StubClient;
+use crate::{StubClient, ERE_ETHPANDAOPS_URL};
 use futures_util::StreamExt;
 use reqwest::Url;
 use reth_era_downloader::{EraClient, EraStream, EraStreamConfig};
@@ -30,6 +30,28 @@ async fn test_streaming_files_after_fetching_file_list(url: &str) {
     let expected_file = folder.join("mainnet-00001-a5364e9a.era1").into_boxed_path();
     let actual_file = stream.next().await.unwrap().unwrap();
 
+    assert_eq!(actual_file.as_ref(), expected_file.as_ref());
+}
+
+#[test_case(ERE_ETHPANDAOPS_URL; "ethpandaops")]
+#[tokio::test]
+async fn test_streaming_ere_files_after_fetching_file_list(url: &str) {
+    let base_url = Url::from_str(url).unwrap();
+    let folder = tempdir().unwrap();
+    let folder = folder.path();
+    let client = EraClient::new(StubClient, base_url, folder);
+
+    let mut stream = EraStream::new(
+        client,
+        EraStreamConfig::default().with_max_files(2).with_max_concurrent_downloads(1),
+    );
+
+    let expected_file = folder.join("mainnet-00000-a6860fef.erae").into_boxed_path();
+    let actual_file = stream.next().await.unwrap().unwrap();
+    assert_eq!(actual_file.as_ref(), expected_file.as_ref());
+
+    let expected_file = folder.join("mainnet-00001-05c64fc4.erae").into_boxed_path();
+    let actual_file = stream.next().await.unwrap().unwrap();
     assert_eq!(actual_file.as_ref(), expected_file.as_ref());
 }
 

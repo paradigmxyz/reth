@@ -63,7 +63,7 @@ pub fn buffer_hash_to_tx_fetcher(
     match tx_fetcher.hashes_fetch_inflight_and_pending_fetch.get_or_insert(hash, || {
         TxFetchMetadata::new(
             retries,
-            LruCache::new(DEFAULT_MAX_COUNT_FALLBACK_PEERS as u32),
+            LruCache::with_hasher(DEFAULT_MAX_COUNT_FALLBACK_PEERS as u32, Default::default()),
             tx_encoded_length,
         )
     }) {

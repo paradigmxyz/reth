@@ -9,9 +9,9 @@ use reth_eth_wire_types::BlockAccessLists;
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum BalRequirement {
     /// Keep waiting until an eth/71-capable peer is available.
-    #[default]
     Mandatory,
     /// Return early if no connected peer can serve BALs.
+    #[default]
     Optional,
 }
 
@@ -26,7 +26,7 @@ pub trait BlockAccessListsClient: DownloadClient {
         self.get_block_access_lists_with_priority_and_requirement(
             hashes,
             Priority::Normal,
-            BalRequirement::Mandatory,
+            BalRequirement::default(),
         )
     }
 
@@ -52,7 +52,7 @@ pub trait BlockAccessListsClient: DownloadClient {
         self.get_block_access_lists_with_priority_and_requirement(
             hashes,
             priority,
-            BalRequirement::Mandatory,
+            BalRequirement::default(),
         )
     }
 

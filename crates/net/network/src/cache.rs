@@ -11,17 +11,27 @@ use std::{fmt, hash::Hash};
 ///
 /// If the length exceeds the set capacity, the oldest element will be removed
 /// In the limit, for each element inserted the oldest existing element will be removed.
-pub struct LruCache<T: Hash + Eq + fmt::Debug> {
+pub struct LruCache<T: Hash + Eq + fmt::Debug, S = DefaultHashBuilder>
+where
+    S: BuildHasher,
+{
     limit: u32,
-    inner: LruMap<T, ()>,
+    inner: LruMap<T, (), ByLength, S>,
 }
 
 impl<T: Hash + Eq + fmt::Debug> LruCache<T> {
     /// Creates a new [`LruCache`] using the given limit
     pub fn new(limit: u32) -> Self {
+        Self::with_hasher(limit, Default::default())
+    }
+}
+
+impl<T: Hash + Eq + fmt::Debug, S: BuildHasher> LruCache<T, S> {
+    /// Creates a new [`LruCache`] using the given limit and hash builder.
+    pub const fn with_hasher(limit: u32, hash_builder: S) -> Self {
         // limit of lru map is one element more, so can give eviction feedback, which isn't
         // supported by LruMap
-        Self { inner: LruMap::new(limit + 1), limit }
+        Self { inner: LruMap::with_hasher(limit + 1, hash_builder), limit }
     }
 
     /// Insert an element into the set.
@@ -105,9 +115,10 @@ impl<T: Hash + Eq + fmt::Debug> LruCache<T> {
     }
 }
 
-impl<T> Extend<T> for LruCache<T>
+impl<T, S> Extend<T> for LruCache<T, S>
 where
     T: Eq + Hash + fmt::Debug,
+    S: BuildHasher,
 {
     fn extend<I: IntoIterator<Item = T>>(&mut self, iter: I) {
         for item in iter {
@@ -116,9 +127,10 @@ where
     }
 }
 
-impl<T> fmt::Debug for LruCache<T>
+impl<T, S> fmt::Debug for LruCache<T, S>
 where
     T: fmt::Debug + Hash + Eq,
+    S: BuildHasher,
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let mut debug_struct = f.debug_struct("LruCache");
@@ -173,7 +185,18 @@ where
 {
     /// Returns a new cache with default limiter and hash builder.
     pub fn new(max_length: u32) -> Self {
-        Self(schnellru::LruMap::with_hasher(ByLength::new(max_length), Default::default()))
+        Self::with_hasher(max_length, Default::default())
+    }
+}
+
+impl<K, V, S> LruMap<K, V, ByLength, S>
+where
+    K: Hash + PartialEq,
+    S: BuildHasher,
+{
+    /// Returns a new cache with default limiter and the given hash builder.
+    pub const fn with_hasher(max_length: u32, hash_builder: S) -> Self {
+        Self(schnellru::LruMap::with_hasher(ByLength::new(max_length), hash_builder))
     }
 }
 

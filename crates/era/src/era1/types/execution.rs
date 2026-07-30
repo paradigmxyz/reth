@@ -530,7 +530,7 @@ impl Accumulator {
         // Binary Merkle tree bottom-up (capacity is always a power of two)
         while leaves.len() > 1 {
             let mut next_level = Vec::with_capacity(leaves.len() / 2);
-            for pair in leaves.chunks_exact(2) {
+            for pair in leaves.as_chunks::<2>().0 {
                 let mut data = [0u8; 64];
                 data[..32].copy_from_slice(&pair[0]);
                 data[32..].copy_from_slice(&pair[1]);
@@ -588,6 +588,14 @@ impl BlockTuple {
         total_difficulty: TotalDifficulty,
     ) -> Self {
         Self { header, body, receipts, total_difficulty }
+    }
+
+    /// Total serialized size of the tuple's four records (each an e2store [`Entry`]) on disk.
+    pub fn size(&self) -> usize {
+        self.header.to_entry().size() +
+            self.body.to_entry().size() +
+            self.receipts.to_entry().size() +
+            self.total_difficulty.to_entry().size()
     }
 
     /// Convert to an `alloy_consensus::Block`

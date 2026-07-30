@@ -58,6 +58,7 @@ pub use block_access_lists::client::{BalRequirement, BlockAccessListsClient};
 pub use bodies::client::BodiesClient;
 pub use headers::client::HeadersClient;
 pub use receipts::client::ReceiptsClient;
+pub use reth_eth_wire_types::BlockAccessLists;
 use reth_primitives_traits::Block;
 
 /// Helper trait that unifies network behaviour needed for fetching entire blocks.

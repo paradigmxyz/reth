@@ -54,6 +54,10 @@ pub(crate) enum LookupError {
     #[error("request timed out")]
     /// Indicates a timeout occurred during the request.
     RequestTimedOut,
+    /// Entry hash mismatch error.
+    #[error("entry content does not match hash {0}")]
+    /// Indicates that resolved TXT content does not match the requested hash label.
+    HashMismatch(String),
     /// Entry not found error.
     #[error("entry not found")]
     /// Indicates the requested entry was not found.

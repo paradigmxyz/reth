@@ -24,7 +24,9 @@ impl Command {
         } else {
             let path = match self.config.as_ref() {
                 Some(path) => path,
-                None => bail!("No config file provided. Use --config <FILE> or pass --default"),
+                None => {
+                    bail!("No config file provided. Use --config <FILE> or pass --default");
+                }
             };
             if !path.exists() {
                 bail!("Config file does not exist: {}", path.display());

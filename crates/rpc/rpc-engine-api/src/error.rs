@@ -195,6 +195,15 @@ impl From<EngineApiError> for jsonrpsee_types::error::ErrorObject<'static> {
                             None::<()>,
                         )
                     }
+                    // Map future alloy forkchoice errors as internal until handled.
+                    #[allow(unreachable_patterns, clippy::needless_return)]
+                    _ => {
+                        return jsonrpsee_types::error::ErrorObject::owned(
+                            INTERNAL_ERROR_CODE,
+                            SERVER_ERROR_MSG,
+                            Some(ErrorData::new(error)),
+                        );
+                    }
                 },
                 BeaconForkChoiceUpdateError::EngineUnavailable |
                 BeaconForkChoiceUpdateError::Internal(_) => {

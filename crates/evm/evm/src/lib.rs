@@ -18,9 +18,12 @@
 extern crate alloc;
 
 use crate::execute::{BasicBlockBuilder, Executor};
-use alloc::vec::Vec;
+use alloc::{string::String, vec::Vec};
 use alloy_eips::eip4895::Withdrawals;
-use alloy_evm::{block::BlockExecutorFactory, precompiles::PrecompilesMap};
+use alloy_evm::{
+    block::{BlockExecutorFactory, BlockExecutorFor},
+    precompiles::PrecompilesMap,
+};
 use alloy_primitives::{Address, Bytes, B256};
 use core::{error::Error, fmt::Debug};
 use execute::{BasicBlockExecutor, BlockAssembler, BlockBuilder};
@@ -41,6 +44,8 @@ pub use aliases::*;
 mod engine;
 #[cfg(feature = "std")]
 pub use engine::{ConfigureEngineEvm, ConvertTx, ExecutableTxIterator, ExecutableTxTuple};
+mod sender_recovery;
+pub use sender_recovery::SenderRecoveryCache;
 
 #[cfg(feature = "metrics")]
 pub mod metrics;
@@ -261,6 +266,34 @@ pub trait ConfigureEvm: Clone + Debug + Send + Sync + Unpin {
         self.block_executor_factory().evm_factory()
     }
 
+    /// Returns a config with JIT support enabled for subsequently created EVMs, if supported.
+    ///
+    /// This is one of three gates required before an EVM can execute JIT-compiled code: the binary
+    /// must be built with the `jit` feature, runtime compilation must be enabled by `--jit` or the
+    /// `reth_jit` RPC method, and this local support flag must be enabled for the config that
+    /// creates the EVM.
+    #[auto_impl(keep_default_for(&, Arc))]
+    fn with_jit_support_enabled(self, _enabled: bool) -> Self
+    where
+        Self: Sized,
+    {
+        self
+    }
+
+    /// Returns a config with local JIT support enabled for subsequently created EVMs, if supported.
+    #[auto_impl(keep_default_for(&, Arc))]
+    fn with_jit_support(self) -> Self
+    where
+        Self: Sized,
+    {
+        self.with_jit_support_enabled(true)
+    }
+
+    /// Returns the JIT backend, if supported.
+    fn jit_backend(&self) -> Option<&dyn JitBackend> {
+        None
+    }
+
     /// Returns a new EVM with the given database configured with the given environment settings,
     /// including the spec id and transaction environment.
     ///
@@ -313,6 +346,19 @@ pub trait ConfigureEvm: Clone + Debug + Send + Sync + Unpin {
     where
         DB: Database,
         I: InspectorFor<Self, &'a mut State<DB>> + 'a,
+    {
+        self.block_executor_factory().create_executor(evm, ctx)
+    }
+
+    /// Creates a strategy with a DB state borrow that can be shorter than the execution context.
+    fn create_executor_with_state<'a, 'db, DB, I>(
+        &'a self,
+        evm: EvmFor<Self, &'db mut State<DB>, I>,
+        ctx: <Self::BlockExecutorFactory as BlockExecutorFactory>::ExecutionCtx<'a>,
+    ) -> BlockExecutorFor<'a, Self::BlockExecutorFactory, &'db mut State<DB>, I>
+    where
+        DB: Database,
+        I: InspectorFor<Self, &'db mut State<DB>>,
     {
         self.block_executor_factory().create_executor(evm, ctx)
     }
@@ -442,6 +488,21 @@ pub trait ConfigureEvm: Clone + Debug + Send + Sync + Unpin {
     ) -> impl Executor<DB, Primitives = Self::Primitives, Error = BlockExecutionError> {
         BasicBlockExecutor::new(self, db)
     }
+}
+
+/// JIT backend controls exposed by an EVM configuration.
+pub trait JitBackend: Send + Sync {
+    /// Enables or disables JIT compilation.
+    fn set_enabled(&self, enabled: bool) -> Result<(), String>;
+
+    /// Pauses JIT helper execution while keeping queueing and resident compiled code available.
+    fn pause(&self);
+
+    /// Resumes background JIT work.
+    fn resume(&self);
+
+    /// Clears JIT runtime state.
+    fn clear(&self);
 }
 
 /// Represents additional attributes required to configure the next block.

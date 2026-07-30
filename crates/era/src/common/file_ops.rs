@@ -3,7 +3,7 @@
 use crate::e2s::{error::E2sError, types::Version};
 use std::{
     fs::File,
-    io::{Read, Seek, Write},
+    io::{self, Read, Seek, Write},
     path::Path,
 };
 
@@ -114,6 +114,8 @@ pub trait FileReader: StreamReader<File> {
     }
 }
 
+impl<T: StreamReader<File>> FileReader for T {}
+
 /// [`StreamWriter`] for writing era-format files
 pub trait StreamWriter<W: Write>: Sized {
     /// The file type this writer handles
@@ -172,26 +174,50 @@ pub enum EraFileType {
     /// Execution layer ERA1 file, `.era1`
     /// Contains execution blocks pre-merge
     Era1,
+    /// Execution layer ERE file, `.ere`
+    /// Contains execution blocks for both pre-merge and post-merge
+    Ere,
 }
 
 impl EraFileType {
-    /// Get the file extension for this type, dot included
+    /// All file types. No extension is a suffix of another, so `from_filename`'s suffix match is
+    /// order-independent.
+    const ALL: [Self; 3] = [Self::Era, Self::Era1, Self::Ere];
+
+    /// Get the canonical file extension for this type, dot included.
+    ///
+    /// Used when writing files. For recognizing downloaded files, which may use an alternate
+    /// extension, see [`extensions`](Self::extensions).
     pub const fn extension(&self) -> &'static str {
         match self {
             Self::Era => ".era",
             Self::Era1 => ".era1",
+            Self::Ere => ".ere",
         }
+    }
+
+    /// All file extensions this type may be published with, dot included, ordered longest-first.
+    ///
+    /// `ere` files are served as either `.erae` (current ethPandaOps naming) or `.ere`. The
+    /// longest-first order matters for substring scans so `.ere` never matches inside `.erae`.
+    pub const fn extensions(&self) -> &'static [&'static str] {
+        match self {
+            Self::Era => &[".era"],
+            Self::Era1 => &[".era1"],
+            Self::Ere => &[".erae", ".ere"],
+        }
+    }
+
+    /// Whether files of this type are published with a `checksums.txt` for verification.
+    ///
+    /// Execution-layer files (`era1`, `ere`) ship checksums; consensus-layer `era` files do not.
+    pub const fn has_checksums(&self) -> bool {
+        matches!(self, Self::Era1 | Self::Ere)
     }
 
     /// Detect file type from a filename
     pub fn from_filename(filename: &str) -> Option<Self> {
-        if filename.ends_with(".era") {
-            Some(Self::Era)
-        } else if filename.ends_with(".era1") {
-            Some(Self::Era1)
-        } else {
-            None
-        }
+        Self::ALL.into_iter().find(|ty| ty.extensions().iter().any(|ext| filename.ends_with(ext)))
     }
 
     /// Generate era file name.
@@ -210,26 +236,53 @@ impl EraFileType {
         era_count: u64,
     ) -> String {
         let hash = format_hash(hash);
-
-        if include_era_count {
-            format!(
-                "{}-{:05}-{:05}-{}{}",
-                network_name,
-                era_number,
-                era_count,
-                hash,
-                self.extension()
-            )
-        } else {
-            format!("{}-{:05}-{}{}", network_name, era_number, hash, self.extension())
-        }
+        // Custom exports insert an `-<era-count>` segment between the era number and the hash.
+        let era_count = if include_era_count { format!("-{era_count:05}") } else { String::new() };
+        format!("{network_name}-{era_number:05}{era_count}-{hash}{}", self.extension())
     }
 
-    /// Detect file type from URL
-    /// By default, it assumes `Era` type
+    /// Detects the ERA file type from the files in `dir`.
+    ///
+    /// Returns the single recognized type, `None` if the directory has no ERA files, or an error if
+    /// it mixes formats.
+    pub fn from_dir(dir: impl AsRef<Path>) -> io::Result<Option<Self>> {
+        let mut found: Option<Self> = None;
+        for entry in std::fs::read_dir(dir)? {
+            if let Some(name) = entry?.file_name().to_str() &&
+                let Some(era_type) = Self::from_filename(name)
+            {
+                match found {
+                    Some(existing) if existing != era_type => {
+                        return Err(io::Error::new(
+                            io::ErrorKind::InvalidInput,
+                            format!(
+                                "directory mixes ERA formats ({} and {}); import one at a time",
+                                existing.extension(),
+                                era_type.extension(),
+                            ),
+                        ));
+                    }
+                    _ => found = Some(era_type),
+                }
+            }
+        }
+
+        Ok(found)
+    }
+
+    /// Detect file type from a URL, defaulting to `Era`.
+    ///
+    /// Resolves by file extension when the URL names a file; otherwise falls back to the `era1`
+    /// host/path substring.
     pub fn from_url(url: &str) -> Self {
+        let file_url = url.split(['?', '#']).next().unwrap_or(url);
+        if let Some(ty) = Self::from_filename(file_url) {
+            return ty;
+        }
         if url.contains("era1") {
             Self::Era1
+        } else if url.contains("erae") {
+            Self::Ere
         } else {
             Self::Era
         }
@@ -241,5 +294,91 @@ pub fn format_hash(hash: Option<[u8; 4]>) -> String {
     match hash {
         Some(h) => format!("{:02x}{:02x}{:02x}{:02x}", h[0], h[1], h[2], h[3]),
         None => "00000000".to_string(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_from_url_detection() {
+        // A URL that names a file resolves by its extension, regardless of the rest of the path.
+        assert_eq!(
+            EraFileType::from_url("https://host/mainnet-00000-abcd1234.ere"),
+            EraFileType::Ere
+        );
+        assert_eq!(
+            EraFileType::from_url("https://host/mainnet-00000-abcd1234.era1"),
+            EraFileType::Era1
+        );
+        assert_eq!(
+            EraFileType::from_url("https://host/mainnet-00000-abcd1234.era"),
+            EraFileType::Era
+        );
+
+        // An ERE file under a path/mirror containing `era1` still resolves by its `.ere` extension.
+        assert_eq!(
+            EraFileType::from_url("https://host/era1/mainnet-00000-abcd1234.ere"),
+            EraFileType::Ere
+        );
+
+        // Directory/index endpoints have no file extension and fall back to the host/path
+        // substring.
+        assert_eq!(EraFileType::from_url("https://mainnet.era1.nimbus.team/"), EraFileType::Era1);
+        assert_eq!(EraFileType::from_url("https://era.ithaca.xyz/"), EraFileType::Era);
+        assert_eq!(
+            EraFileType::from_url("https://data.ethpandaops.io/erae/mainnet/"),
+            EraFileType::Ere
+        );
+    }
+
+    #[test]
+    fn test_from_filename_detection() {
+        assert_eq!(
+            EraFileType::from_filename("mainnet-00000-abcd1234.era"),
+            Some(EraFileType::Era)
+        );
+        assert_eq!(
+            EraFileType::from_filename("mainnet-00000-abcd1234.era1"),
+            Some(EraFileType::Era1)
+        );
+        assert_eq!(
+            EraFileType::from_filename("mainnet-00000-abcd1234.ere"),
+            Some(EraFileType::Ere)
+        );
+        // The alternate `.erae` extension also resolves to `Ere`.
+        assert_eq!(
+            EraFileType::from_filename("mainnet-00000-abcd1234.erae"),
+            Some(EraFileType::Ere)
+        );
+        // Profile postfixes don't change extension detection.
+        assert_eq!(
+            EraFileType::from_filename("mainnet-00000-abcd1234-noproofs.ere"),
+            Some(EraFileType::Ere)
+        );
+        assert_eq!(
+            EraFileType::from_filename("mainnet-00000-abcd1234-noproofs.erae"),
+            Some(EraFileType::Ere)
+        );
+        assert_eq!(EraFileType::from_filename("mainnet-00000-abcd1234.txt"), None);
+    }
+
+    #[test]
+    fn from_dir_detects_single_format() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("mainnet-00000-aaaaaaaa.era1"), b"x").unwrap();
+        std::fs::write(dir.path().join("mainnet-00001-bbbbbbbb.era1"), b"x").unwrap();
+
+        assert_eq!(EraFileType::from_dir(dir.path()).unwrap(), Some(EraFileType::Era1));
+    }
+
+    #[test]
+    fn from_dir_errors_on_mixed_formats() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("mainnet-00000-aaaaaaaa.era1"), b"x").unwrap();
+        std::fs::write(dir.path().join("mainnet-00000-bbbbbbbb.era"), b"x").unwrap();
+
+        assert!(EraFileType::from_dir(dir.path()).is_err());
     }
 }

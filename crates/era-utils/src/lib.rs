@@ -1,19 +1,14 @@
-//! Utilities to store history from downloaded ERA files with storage-api
-//!  and export it to recreate era1 files.
+//! Moves block history between ERA files ([`reth_era`]) and node storage ([`reth_storage_api`]).
 //!
-//! The import is downloaded using [`reth_era_downloader`] and parsed using [`reth_era`].
+//! Each ERA format plugs into a shared pipeline through a per-format seam ([`EraBlockReader`]).
 
 mod history;
 
-/// Export block history data from the database to recreate era1 files.
 mod export;
 
-/// Export history from storage-api between 2 blocks
-/// with parameters defined in [`ExportConfig`].
-pub use export::{export, ExportConfig};
+pub use export::{export, EraBlockWriter, ExportBlock, ExportConfig};
 
-/// Imports history from ERA files.
 pub use history::{
     build_index, calculate_td_by_number, decode, import, open, process, process_iter,
-    save_stage_checkpoints, ProcessIter,
+    save_stage_checkpoints, Era, Era1, EraBlockReader, Ere,
 };

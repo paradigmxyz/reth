@@ -2,7 +2,6 @@ use crate::segments::{
     user::ReceiptsByLogs, AccountHistory, Bodies, Segment, SenderRecovery, StorageHistory,
     TransactionLookup, UserReceipts,
 };
-use alloy_eips::eip2718::Encodable2718;
 use reth_db_api::{table::Value, transaction::DbTxMut};
 use reth_primitives_traits::NodePrimitives;
 use reth_provider::{
@@ -52,7 +51,7 @@ where
         > + DBProvider<Tx: DbTxMut>
         + PruneCheckpointWriter
         + PruneCheckpointReader
-        + BlockReader<Transaction: Encodable2718>
+        + BlockReader
         + ChainStateBlockReader
         + StorageSettingsCache
         + ChangeSetReader

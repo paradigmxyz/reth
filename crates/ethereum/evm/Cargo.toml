@@ -28,6 +28,10 @@ alloy-evm.workspace = true
 alloy-consensus.workspace = true
 alloy-rpc-types-engine.workspace = true
 
+metrics = { workspace = true, optional = true }
+reth-metrics = { workspace = true, optional = true }
+revmc = { workspace = true, features = ["alloy-evm"], optional = true }
+
 [dev-dependencies]
 reth-testing-utils.workspace = true
 reth-evm = { workspace = true, features = ["test-utils"] }
@@ -53,6 +57,13 @@ std = [
     "alloy-rpc-types-engine/std",
     "reth-storage-errors/std",
 ]
+jit = [
+    "std",
+    "dep:revmc",
+    "dep:metrics",
+    "dep:reth-metrics",
+]
+gmp = ["revm/gmp"]
 test-utils = [
     "std",
     "reth-chainspec/test-utils",

@@ -1,6 +1,6 @@
 #![allow(missing_docs)]
 
-use std::process::Command;
+use std::{fs, path::Path, process::Command};
 
 const RETH: &str = env!("CARGO_BIN_EXE_reth");
 
@@ -38,6 +38,23 @@ fn spawn_dev() -> (alloy_node_bindings::RethInstance, tempfile::TempDir) {
 
     // Return the TempDir alongside the instance so it lives as long as the node.
     (instance, datadir)
+}
+
+fn create_tar_zst_snapshot(path: &Path) {
+    let file = fs::File::create(path).expect("failed to create snapshot archive");
+    let encoder = zstd::Encoder::new(file, 0).expect("failed to create zstd encoder");
+    let mut archive = tar::Builder::new(encoder);
+
+    let contents = b"new snapshot data";
+    let mut header = tar::Header::new_gnu();
+    header.set_path("db/new.snapshot").expect("failed to set archive path");
+    header.set_size(contents.len() as u64);
+    header.set_mode(0o644);
+    header.set_cksum();
+    archive.append(&header, contents.as_slice()).expect("failed to append archive file");
+
+    let encoder = archive.into_inner().expect("failed to finish tar archive");
+    encoder.finish().expect("failed to finish zstd archive");
 }
 
 // ── Original tests (from PR #22069) ──────────────────────────────────────────
@@ -165,6 +182,57 @@ fn prune_help() {
 fn download_help() {
     let stdout = reth_ok(&["download", "--help"]);
     assert!(stdout.contains("--chain"), "stdout: {stdout}");
+    assert!(stdout.contains("--force"), "stdout: {stdout}");
+}
+
+#[test]
+fn download_force_removes_only_snapshot_paths() {
+    let tempdir = tempfile::tempdir().expect("failed to create temp dir");
+    let datadir = tempdir.path().join("datadir");
+    let archive_path = tempdir.path().join("snapshot.tar.zst");
+
+    fs::create_dir_all(datadir.join("db")).expect("failed to create old db dir");
+    fs::create_dir_all(datadir.join("rocksdb")).expect("failed to create old rocksdb dir");
+    fs::create_dir_all(datadir.join("static_files")).expect("failed to create old static dir");
+    fs::create_dir_all(datadir.join("custom-dir")).expect("failed to create custom dir");
+    fs::write(datadir.join("db/old.mdbx"), b"old db").expect("failed to write old db file");
+    fs::write(datadir.join("rocksdb/old"), b"old rocksdb").expect("failed to write old rocksdb");
+    fs::write(datadir.join("static_files/old"), b"old static")
+        .expect("failed to write old static file");
+    fs::write(datadir.join("reth.toml"), b"old config").expect("failed to write old config");
+    fs::write(datadir.join("discovery-secret"), b"secret").expect("failed to write secret");
+    fs::write(datadir.join("known-peers.json"), br#"["peer"]"#)
+        .expect("failed to write known peers");
+    fs::write(datadir.join("custom-file"), b"custom").expect("failed to write custom file");
+    fs::write(datadir.join("custom-dir/file"), b"custom dir")
+        .expect("failed to write custom dir file");
+    create_tar_zst_snapshot(&archive_path);
+
+    let datadir_arg = datadir.to_str().expect("datadir should be utf8");
+    let archive_url = format!("file://{}", archive_path.display());
+    reth_ok(&["download", "--datadir", datadir_arg, "--url", &archive_url, "--force"]);
+
+    assert_eq!(
+        fs::read(datadir.join("db/new.snapshot")).expect("missing extracted snapshot file"),
+        b"new snapshot data"
+    );
+    assert!(!datadir.join("db/old.mdbx").exists(), "old db file should be removed");
+    assert!(!datadir.join("rocksdb/old").exists(), "old rocksdb file should be removed");
+    assert!(!datadir.join("static_files/old").exists(), "old static file should be removed");
+    assert!(!datadir.join("reth.toml").exists(), "old config file should be removed");
+    assert_eq!(
+        fs::read(datadir.join("discovery-secret")).expect("missing preserved discovery secret"),
+        b"secret"
+    );
+    assert_eq!(
+        fs::read(datadir.join("known-peers.json")).expect("missing preserved known peers"),
+        br#"["peer"]"#
+    );
+    assert_eq!(fs::read(datadir.join("custom-file")).expect("missing custom file"), b"custom");
+    assert_eq!(
+        fs::read(datadir.join("custom-dir/file")).expect("missing custom dir file"),
+        b"custom dir"
+    );
 }
 
 #[test]

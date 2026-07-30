@@ -2,7 +2,8 @@
 
 use crate::Nibbles;
 use alloc::vec::Vec;
-use alloy_primitives::{map::B256Map, B256};
+use alloy_primitives::{keccak256, map::B256Map, B256};
+use revm::state::EvmState;
 
 /// Target describes a proof target. For every proof target given, a proof calculator will calculate
 /// and return all nodes whose path is a prefix of the target's `key_nibbles`.
@@ -10,8 +11,8 @@ use alloy_primitives::{map::B256Map, B256};
 pub struct ProofV2Target {
     /// The key of the proof target, as nibbles.
     pub key_nibbles: Nibbles,
-    /// The minimum length of a node's path for it to be retained.
-    pub min_len: u8,
+    /// The known-parent context for this target.
+    pub parent: ProofV2TargetParent,
 }
 
 impl ProofV2Target {
@@ -20,7 +21,7 @@ impl ProofV2Target {
     pub fn new(key: B256) -> Self {
         // SAFETY: key is a B256 and so is exactly 32-bytes.
         let key_nibbles = unsafe { Nibbles::unpack_unchecked(key.as_slice()) };
-        Self { key_nibbles, min_len: 0 }
+        Self { key_nibbles, parent: ProofV2TargetParent::NONE }
     }
 
     /// Returns the key the target was initialized with.
@@ -28,14 +29,9 @@ impl ProofV2Target {
         B256::from_slice(&self.key_nibbles.pack())
     }
 
-    /// Only match trie nodes whose path is at least this long.
-    ///
-    /// # Panics
-    ///
-    /// This method panics if `min_len` is greater than 64.
-    pub fn with_min_len(mut self, min_len: u8) -> Self {
-        debug_assert!(min_len <= 64);
-        self.min_len = min_len;
+    /// Sets the already-revealed parent branch of this target.
+    pub const fn with_parent(mut self, parent: ProofV2TargetParent) -> Self {
+        self.parent = parent;
         self
     }
 }
@@ -43,6 +39,53 @@ impl ProofV2Target {
 impl From<B256> for ProofV2Target {
     fn from(key: B256) -> Self {
         Self::new(key)
+    }
+}
+
+/// The already-revealed parent branch of a [`ProofV2Target`].
+///
+/// [`Self::NONE`] indicates that no parent is known and the proof must include the actual trie
+/// root. A known parent at path length `n` makes the proof start at its direct child at length
+/// `n + 1`. In particular, a known parent at path length zero means the root branch is already
+/// revealed, so the proof starts at one of its direct children. Known parent path lengths are
+/// always less than 64.
+///
+/// Parent contexts are ordered from broadest to narrowest: [`Self::NONE`] precedes every known
+/// parent, and known parents are ordered by path length.
+#[derive(Debug, Default, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub struct ProofV2TargetParent(Option<u8>);
+
+impl ProofV2TargetParent {
+    /// No parent branch is known, so the proof must include the actual trie root.
+    pub const NONE: Self = Self(None);
+
+    /// Returns a known parent branch with the given logical path length.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `path_len` is greater than or equal to 64.
+    pub const fn new(path_len: usize) -> Self {
+        assert!(path_len < 64, "parent path length must be less than 64");
+        Self(Some(path_len as u8))
+    }
+
+    /// Returns `true` if the parent branch is already known.
+    pub const fn is_known(self) -> bool {
+        self.0.is_some()
+    }
+
+    /// Returns the logical path length of the known parent branch, if any.
+    pub const fn path_len(self) -> Option<usize> {
+        match self.0 {
+            Some(path_len) => Some(path_len as usize),
+            None => None,
+        }
+    }
+
+    /// Returns the path of the known parent branch for the target path, if any.
+    pub fn path(self, mut target_path: Nibbles) -> Option<Nibbles> {
+        target_path.truncate(self.path_len()?);
+        Some(target_path)
     }
 }
 
@@ -72,14 +115,59 @@ impl MultiProofTargetsV2 {
     pub fn chunks(self, chunk_size: usize) -> impl Iterator<Item = Self> {
         ChunkedMultiProofTargetsV2::new(self, chunk_size)
     }
+
+    /// Returns a set of [`MultiProofTargetsV2`] and the total amount of storage targets, based on
+    /// the given state.
+    pub fn from_state(state: EvmState) -> (Self, usize) {
+        let mut targets = Self::default();
+        targets.account_targets.reserve(state.len());
+        targets.storage_targets.reserve(state.len());
+        let mut storage_target_count = 0;
+        for (addr, account) in state {
+            // if the account was not touched, or if the account was selfdestructed, do not
+            // fetch proofs for it
+            //
+            // Since selfdestruct can only happen in the same transaction, we can skip
+            // prefetching proofs for selfdestructed accounts
+            //
+            // See: https://eips.ethereum.org/EIPS/eip-6780
+            if !account.is_touched() || account.is_selfdestructed() {
+                continue
+            }
+
+            let hashed_address = keccak256(addr);
+
+            if account.info != account.original_info() {
+                targets.account_targets.push(hashed_address.into());
+            }
+
+            let mut storage_slots = Vec::with_capacity(account.storage.len());
+            for (key, slot) in account.storage {
+                // do nothing if unchanged
+                if !slot.is_changed() {
+                    continue
+                }
+
+                let hashed_slot = keccak256(B256::new(key.to_be_bytes()));
+                storage_slots.push(ProofV2Target::from(hashed_slot));
+            }
+
+            storage_target_count += storage_slots.len();
+            if !storage_slots.is_empty() {
+                targets.storage_targets.insert(hashed_address, storage_slots);
+            }
+        }
+
+        (targets, storage_target_count)
+    }
 }
 
 /// An iterator that yields chunks of V2 proof targets of at most `size` account and storage
 /// targets.
 ///
-/// Unlike legacy chunking, V2 preserves account targets exactly as they were (with their `min_len`
-/// metadata). Account targets must appear in a chunk. Storage targets for those accounts are
-/// chunked together, but if they exceed the chunk size, subsequent chunks contain only the
+/// Unlike legacy chunking, V2 preserves account targets exactly as they were (including their
+/// parent metadata). Account targets must appear in a chunk. Storage targets for those accounts
+/// are chunked together, but if they exceed the chunk size, subsequent chunks contain only the
 /// remaining storage targets without repeating the account target.
 #[derive(Debug)]
 pub struct ChunkedMultiProofTargetsV2 {

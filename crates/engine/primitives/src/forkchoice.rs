@@ -21,7 +21,8 @@ impl ForkchoiceStateTracker {
     /// `sync_target` to `None`, since we're now fully synced.
     pub const fn set_latest(&mut self, state: ForkchoiceState, status: ForkchoiceStatus) {
         if status.is_valid() {
-            self.set_valid(state);
+            self.last_syncing = None;
+            self.last_valid = Some(state);
         } else if status.is_syncing() {
             self.last_syncing = Some(state);
         }
@@ -30,11 +31,24 @@ impl ForkchoiceStateTracker {
         self.latest = Some(received);
     }
 
-    const fn set_valid(&mut self, state: ForkchoiceState) {
-        // we no longer need to sync to this state.
+    /// Promotes a previously tracked syncing forkchoice state to valid, without overwriting a
+    /// newer `latest` state.
+    ///
+    /// This is used when a `Syncing` FCU's head finally becomes canonical via the downloaded-block
+    /// flow, so the safe/finalized anchors of that FCU can be applied. Unlike
+    /// [`Self::set_latest`], this preserves a newer `latest` (e.g. an `Invalid` FCU received
+    /// after the syncing one) and only flips `latest` to `Valid` when it still refers to the same
+    /// syncing FCU being promoted.
+    pub fn promote_sync_target_to_valid(&mut self, state: ForkchoiceState) {
         self.last_syncing = None;
-
         self.last_valid = Some(state);
+
+        if let Some(received) = self.latest.as_mut() &&
+            received.state == state &&
+            received.status.is_syncing()
+        {
+            received.status = ForkchoiceStatus::Valid;
+        }
     }
 
     /// Returns the [`ForkchoiceStatus`] of the latest received FCU.

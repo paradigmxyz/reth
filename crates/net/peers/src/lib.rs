@@ -18,9 +18,9 @@
 //! signed, versioned record that includes the information from a [`NodeRecord`] along with
 //! additional metadata. This is the data structure returned from discovery v5 queries.
 //!
-//! When we need to deserialize an identifier that could be any of these three types ([`PeerId`],
-//! [`NodeRecord`], and [`Enr`]), we use the [`AnyNode`] type, which is an enum over the three
-//! types. [`AnyNode`] is used in reth's `admin_addTrustedPeer` RPC method.
+//! When we need to deserialize an identifier that could be a [`PeerId`], [`NodeRecord`], [`Enr`],
+//! or [`TrustedPeer`], we use the [`AnyNode`] type. [`AnyNode`] is used in reth's
+//! `admin_addTrustedPeer` RPC method.
 //!
 //! The __final__ type is the [`TrustedPeer`] type, which is similar to a [`NodeRecord`] but may
 //! include a domain name instead of a direct IP address. It includes a `resolve` method, which can
@@ -34,8 +34,8 @@
 //! - [`NodeRecord`]: A more complete representation of a peer, including IP address and ports.
 //! - [`Enr`]: An Ethereum Node Record, which is a signed, versioned record that includes additional
 //!   metadata. Useful when interacting with discovery v5, or when custom metadata is required.
-//! - [`AnyNode`]: An enum over [`PeerId`], [`NodeRecord`], and [`Enr`], useful in deserialization
-//!   when the type of the node record is not known.
+//! - [`AnyNode`]: An enum over [`PeerId`], [`NodeRecord`], [`Enr`], and [`TrustedPeer`], useful in
+//!   deserialization when the type of the node record is not known.
 //! - [`TrustedPeer`]: A [`NodeRecord`] with an optional domain name, which can be resolved to a
 //!   [`NodeRecord`]. Useful for adding trusted peers at startup, whose IP address may not be
 //!   static.
@@ -121,37 +121,57 @@ pub enum AnyNode {
     Enr(Enr<secp256k1::SecretKey>),
     /// An incomplete "enode" with only a peer id
     PeerId(PeerId),
+    /// An "enode:" peer whose host may be a domain name instead of an IP address
+    TrustedPeer(TrustedPeer),
 }
 
 impl AnyNode {
     /// Returns the peer id of the node.
+    #[cfg(not(feature = "secp256k1"))]
+    pub const fn peer_id(&self) -> PeerId {
+        match self {
+            Self::NodeRecord(record) => record.id,
+            Self::PeerId(peer_id) => *peer_id,
+            Self::TrustedPeer(peer) => peer.id,
+        }
+    }
+
+    /// Returns the peer id of the node.
+    #[cfg(feature = "secp256k1")]
     pub fn peer_id(&self) -> PeerId {
         match self {
             Self::NodeRecord(record) => record.id,
-            #[cfg(feature = "secp256k1")]
             Self::Enr(enr) => pk2id(&enr.public_key()),
             Self::PeerId(peer_id) => *peer_id,
+            Self::TrustedPeer(peer) => peer.id,
         }
     }
 
     /// Returns the full node record if available.
+    #[cfg(not(feature = "secp256k1"))]
+    pub const fn node_record(&self) -> Option<NodeRecord> {
+        match self {
+            Self::NodeRecord(record) => Some(*record),
+            Self::PeerId(_) | Self::TrustedPeer(_) => None,
+        }
+    }
+
+    /// Returns the full node record if available.
+    ///
+    /// An ENR that advertises no tcp port has no `RLPx` endpoint, so it does not yield a record.
+    #[cfg(feature = "secp256k1")]
     pub fn node_record(&self) -> Option<NodeRecord> {
         match self {
             Self::NodeRecord(record) => Some(*record),
-            #[cfg(feature = "secp256k1")]
-            Self::Enr(enr) => {
-                let node_record = NodeRecord {
-                    address: enr
-                        .ip4()
-                        .map(core::net::IpAddr::from)
-                        .or_else(|| enr.ip6().map(core::net::IpAddr::from))?,
-                    tcp_port: enr.tcp4().or_else(|| enr.tcp6())?,
-                    udp_port: enr.udp4().or_else(|| enr.udp6())?,
-                    id: pk2id(&enr.public_key()),
-                }
-                .into_ipv4_mapped();
-                Some(node_record)
-            }
+            Self::Enr(enr) => NodeRecord::try_from(enr).ok().filter(NodeRecord::has_rlpx_endpoint),
+            Self::PeerId(_) | Self::TrustedPeer(_) => None,
+        }
+    }
+
+    /// Returns the [`TrustedPeer`] if this is a `TrustedPeer` variant.
+    pub const fn trusted_peer(&self) -> Option<&TrustedPeer> {
+        match self {
+            Self::TrustedPeer(peer) => Some(peer),
             _ => None,
         }
     }
@@ -178,7 +198,11 @@ impl FromStr for AnyNode {
             if let Ok(record) = NodeRecord::from_str(s) {
                 return Ok(Self::NodeRecord(record))
             }
-            // incomplete enode
+            // NodeRecord parsing rejects domain hosts, but trusted peers may use DNS names.
+            if let Ok(trusted) = TrustedPeer::from_str(s) {
+                return Ok(Self::TrustedPeer(trusted))
+            }
+            // incomplete enode with only a peer id
             if let Ok(peer_id) = PeerId::from_str(rem) {
                 return Ok(Self::PeerId(peer_id))
             }
@@ -201,6 +225,7 @@ impl core::fmt::Display for AnyNode {
             Self::PeerId(peer_id) => {
                 write!(f, "enode://{}", alloy_primitives::hex::encode(peer_id.as_slice()))
             }
+            Self::TrustedPeer(peer) => write!(f, "{peer}"),
         }
     }
 }
@@ -321,6 +346,22 @@ mod tests {
                 .parse::<PeerId>()
                 .unwrap()
         );
+        // The spec vector is discovery-only (no tcp key), so it has no RLPx endpoint.
+        assert!(node.node_record().is_none());
+        assert_eq!(node.to_string(), url);
+    }
+
+    #[test]
+    fn test_trusted_peer_parse_hostname() {
+        let url = "enode://6f8a80d14311c39f35f516fa664deaaaa13e85b2f7493f37f6144d86991ec012937307647bd3b9a82abe2974e1407241d54947bbb39763a4cac9f77166ad92a0@my-node.example.com:30303";
+        let node: AnyNode = url.parse().unwrap();
+        assert!(matches!(node, AnyNode::TrustedPeer(_)));
+        assert_eq!(
+            node.peer_id(),
+            "6f8a80d14311c39f35f516fa664deaaaa13e85b2f7493f37f6144d86991ec012937307647bd3b9a82abe2974e1407241d54947bbb39763a4cac9f77166ad92a0".parse::<PeerId>().unwrap()
+        );
+        assert!(node.node_record().is_none());
+        assert!(node.trusted_peer().is_some());
         assert_eq!(node.to_string(), url);
     }
 

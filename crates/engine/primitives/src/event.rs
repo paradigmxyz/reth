@@ -1,7 +1,7 @@
 //! Events emitted by the beacon consensus engine.
 
 use crate::ForkchoiceStatus;
-use alloc::boxed::Box;
+use alloc::{boxed::Box, string::String};
 use alloy_consensus::BlockHeader;
 use alloy_eips::BlockNumHash;
 use alloy_rpc_types_engine::ForkchoiceState;
@@ -31,7 +31,12 @@ pub enum ConsensusEngineEvent<N: NodePrimitives = EthPrimitives> {
     /// A canonical chain was committed, and the elapsed time committing the data
     CanonicalChainCommitted(Box<SealedHeader<N::BlockHeader>>, Duration),
     /// The consensus engine processed an invalid block.
-    InvalidBlock(Box<SealedBlock<N::Block>>),
+    InvalidBlock {
+        /// The invalid block.
+        block: Box<SealedBlock<N::Block>>,
+        /// The validation error that caused the block to be rejected.
+        error: String,
+    },
     /// A slow block was detected after persistence, with its timing statistics.
     SlowBlock(SlowBlockInfo),
 }
@@ -69,8 +74,8 @@ where
             Self::CanonicalChainCommitted(block, duration) => {
                 write!(f, "CanonicalChainCommitted({:?}, {duration:?})", block.num_hash())
             }
-            Self::InvalidBlock(block) => {
-                write!(f, "InvalidBlock({:?})", block.num_hash())
+            Self::InvalidBlock { block, error } => {
+                write!(f, "InvalidBlock({:?}, {error})", block.num_hash())
             }
             Self::BlockReceived(num_hash) => {
                 write!(f, "BlockReceived({num_hash:?})")

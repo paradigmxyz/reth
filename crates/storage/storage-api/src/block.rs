@@ -6,7 +6,7 @@ use alloc::{sync::Arc, vec::Vec};
 use alloy_eips::{BlockHashOrNumber, BlockId, BlockNumberOrTag};
 use alloy_primitives::{BlockNumber, TxNumber, B256};
 use core::ops::RangeInclusive;
-use reth_primitives_traits::{RecoveredBlock, SealedHeader};
+use reth_primitives_traits::{Block as _, RecoveredBlock, SealedHeader, SealedOrRecoveredBlock};
 use reth_storage_errors::provider::ProviderResult;
 
 /// A helper enum that represents the origin of the requested block.
@@ -71,6 +71,24 @@ pub trait BlockReader:
         hash: B256,
         source: BlockSource,
     ) -> ProviderResult<Option<Self::Block>>;
+
+    /// Tries to find a sealed or recovered block in the given block source.
+    ///
+    /// This allows providers with in-memory recovered blocks to return a shared recovered block
+    /// without cloning the entire block body.
+    ///
+    /// Note: this only operates on the hash because the number might be ambiguous.
+    ///
+    /// Returns `None` if block is not found.
+    fn find_sealed_or_recovered_block(
+        &self,
+        hash: B256,
+        source: BlockSource,
+    ) -> ProviderResult<Option<SealedOrRecoveredBlock<Self::Block>>> {
+        self.find_block_by_hash(hash, source).map(|block| {
+            block.map(|block| SealedOrRecoveredBlock::sealed(block.seal_unchecked(hash)))
+        })
+    }
 
     /// Returns the block with given id from the database.
     ///
@@ -158,6 +176,13 @@ impl<T: BlockReader + Send + Sync> BlockReader for Arc<T> {
     ) -> ProviderResult<Option<Self::Block>> {
         T::find_block_by_hash(self, hash, source)
     }
+    fn find_sealed_or_recovered_block(
+        &self,
+        hash: B256,
+        source: BlockSource,
+    ) -> ProviderResult<Option<SealedOrRecoveredBlock<Self::Block>>> {
+        T::find_sealed_or_recovered_block(self, hash, source)
+    }
     fn block(&self, id: BlockHashOrNumber) -> ProviderResult<Option<Self::Block>> {
         T::block(self, id)
     }
@@ -218,6 +243,13 @@ impl<T: BlockReader + Send + Sync> BlockReader for &T {
         source: BlockSource,
     ) -> ProviderResult<Option<Self::Block>> {
         T::find_block_by_hash(self, hash, source)
+    }
+    fn find_sealed_or_recovered_block(
+        &self,
+        hash: B256,
+        source: BlockSource,
+    ) -> ProviderResult<Option<SealedOrRecoveredBlock<Self::Block>>> {
+        T::find_sealed_or_recovered_block(self, hash, source)
     }
     fn block(&self, id: BlockHashOrNumber) -> ProviderResult<Option<Self::Block>> {
         T::block(self, id)

@@ -1,4 +1,3 @@
-use alloy_eips::eip2718::Encodable2718;
 use alloy_genesis::Genesis;
 use alloy_primitives::{b256, hex, Address};
 use futures::StreamExt;
@@ -7,19 +6,24 @@ use reth_node_api::{BlockBody, FullNodeComponents};
 use reth_node_builder::{rpc::RethRpcAddOns, FullNode, NodeBuilder, NodeConfig, NodeHandle};
 use reth_node_core::args::DevArgs;
 use reth_node_ethereum::{node::EthereumAddOns, EthereumNode};
-use reth_provider::{providers::BlockchainProvider, CanonStateSubscriptions};
+use reth_primitives_traits::transaction::TxHashRef;
+use reth_provider::{
+    providers::BlockchainProvider, BlockIdReader, BlockNumReader, CanonStateSubscriptions,
+};
 use reth_rpc_eth_api::{helpers::EthTransactions, EthApiServer};
 use reth_tasks::Runtime;
-use std::sync::Arc;
+use std::{num::NonZeroUsize, sync::Arc};
 
 #[tokio::test]
 async fn can_run_dev_node() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
     let runtime = Runtime::test();
 
-    let node_config = NodeConfig::test()
-        .with_chain(custom_chain())
-        .with_dev(DevArgs { dev: true, ..Default::default() });
+    let node_config = NodeConfig::test().with_chain(custom_chain()).with_dev(DevArgs {
+        dev: true,
+        finality_depth: NonZeroUsize::new(1).unwrap(),
+        ..Default::default()
+    });
     let NodeHandle { node, .. } = NodeBuilder::new(node_config.clone())
         .testing_node(runtime.clone())
         .with_types_and_provider::<EthereumNode, BlockchainProvider<_>>()
@@ -29,6 +33,10 @@ async fn can_run_dev_node() -> eyre::Result<()> {
         .await?;
 
     assert_chain_advances(&node).await;
+
+    let chain_info = node.provider.chain_info()?;
+    assert_eq!(node.provider.safe_block_num_hash()?, Some(chain_info.into()));
+    assert_eq!(node.provider.finalized_block_num_hash()?, Some(chain_info.into()));
 
     Ok(())
 }
@@ -99,7 +107,7 @@ where
     let head = notifications.next().await.unwrap();
 
     let tx = &head.tip().body().transactions()[0];
-    assert_eq!(tx.trie_hash(), hash);
+    assert_eq!(*tx.tx_hash(), hash);
     println!("mined transaction: {hash}");
 }
 

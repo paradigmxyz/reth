@@ -57,6 +57,9 @@ pub trait RethRpcServerConfig {
     /// Creates the [`RpcServerConfig`] from cli args.
     fn rpc_server_config(&self) -> RpcServerConfig;
 
+    /// Returns whether built-in RPC request metrics are enabled.
+    fn rpc_metrics_enabled(&self) -> bool;
+
     /// Creates the [`AuthServerConfig`] from cli args.
     fn auth_server_config(&self, jwt_secret: JwtSecret) -> Result<AuthServerConfig, RpcError>;
 
@@ -101,6 +104,7 @@ impl RethRpcServerConfig for RpcServerArgs {
             .eth_proof_window(self.rpc_eth_proof_window)
             .rpc_gas_cap(self.rpc_gas_cap)
             .rpc_max_simulate_blocks(self.rpc_max_simulate_blocks)
+            .compute_state_root_for_eth_simulate(self.rpc_compute_state_root_for_eth_simulate)
             .state_cache(self.state_cache_config())
             .gpo_config(self.gas_price_oracle_config())
             .proof_permits(self.rpc_proof_permits)
@@ -122,6 +126,7 @@ impl RethRpcServerConfig for RpcServerArgs {
             max_blocks: self.rpc_state_cache.max_blocks,
             max_receipts: self.rpc_state_cache.max_receipts,
             max_headers: self.rpc_state_cache.max_headers,
+            max_bals: self.rpc_state_cache.max_bals,
             max_concurrent_db_requests: self.rpc_state_cache.max_concurrent_db_requests,
             max_cached_tx_hashes: self.rpc_state_cache.max_cached_tx_hashes,
         }
@@ -184,7 +189,9 @@ impl RethRpcServerConfig for RpcServerArgs {
     }
 
     fn rpc_server_config(&self) -> RpcServerConfig {
-        let mut config = RpcServerConfig::default().with_jwt_secret(self.rpc_secret_key());
+        let mut config = RpcServerConfig::default()
+            .with_jwt_secret(self.rpc_secret_key())
+            .with_rpc_metrics_enabled(self.rpc_metrics_enabled());
 
         if self.http_api.is_some() && !self.http {
             warn!(
@@ -224,6 +231,10 @@ impl RethRpcServerConfig for RpcServerArgs {
         }
 
         config
+    }
+
+    fn rpc_metrics_enabled(&self) -> bool {
+        !self.rpc_disable_metrics
     }
 
     fn auth_server_config(&self, jwt_secret: JwtSecret) -> Result<AuthServerConfig, RpcError> {
@@ -369,6 +380,15 @@ mod tests {
             SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::new(127, 0, 0, 1), 8888))
         );
         assert_eq!(config.ipc_endpoint().unwrap(), constants::DEFAULT_IPC_ENDPOINT);
+        assert!(config.rpc_metrics_enabled());
+    }
+
+    #[test]
+    fn test_rpc_server_config_disable_metrics() {
+        let args =
+            CommandParser::<RpcServerArgs>::parse_from(["reth", "--rpc.disable-metrics"]).args;
+        let config = args.rpc_server_config();
+        assert!(!config.rpc_metrics_enabled());
     }
 
     #[test]

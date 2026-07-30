@@ -13,6 +13,7 @@ exclude.workspace = true
 # alloy
 alloy-consensus.workspace = true
 alloy-primitives.workspace = true
+alloy-rlp.workspace = true
 
 # reth
 reth-db-api.workspace = true
@@ -38,6 +39,7 @@ tracing.workspace = true
 reth-provider.workspace = true
 reth-provider.features = ["test-utils"]
 reth-db-common.workspace = true
+reth-ethereum-primitives.workspace = true
 
 # async
 tokio-util.workspace = true

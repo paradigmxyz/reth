@@ -11,7 +11,7 @@ use reth_trie::{
     updates::TrieUpdates, AccountProof, HashedPostState, HashedStorage, MultiProof,
     MultiProofTargets, StorageMultiProof, TrieInput,
 };
-use revm_database::BundleState;
+use revm::database::BundleState;
 use std::{borrow::Cow, sync::OnceLock};
 
 /// A state provider that stores references to in-memory blocks along with their state as well as a
@@ -53,8 +53,8 @@ impl<'a, N: NodePrimitives> MemoryOverlayStateProviderRef<'a, N> {
             // Iterate from oldest to newest
             for block in self.in_memory.iter().rev() {
                 let data = block.trie_data();
-                input.nodes.extend_from_sorted(&data.trie_updates);
-                input.state.extend_from_sorted(&data.hashed_state);
+                input.nodes.extend_from_sorted(&data.sorted.trie_updates);
+                input.state.extend_from_sorted(&data.sorted.hashed_state);
             }
             input
         })

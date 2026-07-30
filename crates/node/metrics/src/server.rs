@@ -3,6 +3,7 @@ use crate::{
     hooks::{Hook, Hooks},
     process::register_process_metrics,
     recorder::install_prometheus_recorder,
+    storage::StorageSettingsInfo,
     version::VersionInfo,
 };
 use bytes::Bytes;
@@ -22,6 +23,7 @@ pub struct MetricServerConfig {
     listen_addr: SocketAddr,
     version_info: VersionInfo,
     chain_spec_info: ChainSpecInfo,
+    storage_settings_info: Option<StorageSettingsInfo>,
     task_executor: TaskExecutor,
     hooks: Hooks,
     push_gateway_url: Option<String>,
@@ -45,10 +47,17 @@ impl MetricServerConfig {
             task_executor,
             version_info,
             chain_spec_info,
+            storage_settings_info: None,
             push_gateway_url: None,
             push_gateway_interval: Duration::from_secs(5),
             pprof_dump_dir,
         }
+    }
+
+    /// Set the storage settings information to expose over prometheus.
+    pub fn with_storage_settings_info(mut self, info: StorageSettingsInfo) -> Self {
+        self.storage_settings_info = Some(info);
+        self
     }
 
     /// Set the gateway URL and interval for pushing metrics
@@ -79,6 +88,7 @@ impl MetricServer {
             task_executor,
             version_info,
             chain_spec_info,
+            storage_settings_info,
             push_gateway_url,
             push_gateway_interval,
             pprof_dump_dir,
@@ -114,6 +124,9 @@ impl MetricServer {
 
         version_info.register_version_metrics();
         chain_spec_info.register_chain_spec_metrics();
+        if let Some(storage_settings_info) = storage_settings_info {
+            storage_settings_info.register_storage_settings_metrics();
+        }
         register_process_metrics();
 
         Ok(())
@@ -132,6 +145,7 @@ impl MetricServer {
 
         tracing::info!(target: "reth::cli", "Starting metrics endpoint at {}", listener.local_addr().unwrap());
 
+        let executor = task_executor.clone();
         task_executor.spawn_with_graceful_shutdown_signal(async move |mut signal| loop {
             let io = tokio::select! {
                 _ = &mut signal => break,
@@ -149,12 +163,15 @@ impl MetricServer {
             let handle = install_prometheus_recorder();
             let hook = hook.clone();
             let pprof_dump_dir = pprof_dump_dir.clone();
+            let executor = executor.clone();
             let service = tower::service_fn(move |req: Request<_>| {
                 let hook = hook.clone();
                 let pprof_dump_dir = pprof_dump_dir.clone();
+                let executor = executor.clone();
                 async move {
                     let response =
-                        handle_request(req.uri().path(), &*hook, handle, &pprof_dump_dir).await;
+                        handle_request(req.uri().path(), hook, executor, handle, &pprof_dump_dir)
+                            .await;
                     Ok::<_, Infallible>(response)
                 }
             });
@@ -181,6 +198,7 @@ impl MetricServer {
         let client = Client::builder()
             .build()
             .wrap_err("Could not create HTTP client to push metrics to gateway")?;
+        let executor = task_executor.clone();
         task_executor.spawn_with_graceful_shutdown_signal(async move |mut signal| {
             tracing::info!(url = %url, interval = ?interval, "Starting task to push metrics to gateway");
             let handle = install_prometheus_recorder();
@@ -191,8 +209,18 @@ impl MetricServer {
                         break;
                     }
                     _ = tokio::time::sleep(interval) => {
-                        hooks.iter().for_each(|hook| hook());
-                        let metrics = handle.handle().render();
+                        let hooks = hooks.clone();
+                        let metrics_handle = handle.handle().clone();
+                        let metrics = match executor.spawn_blocking(move || {
+                            hooks.iter().for_each(|hook| hook());
+                            metrics_handle.render()
+                        }).await {
+                            Ok(metrics) => metrics,
+                            Err(err) => {
+                                tracing::warn!(%err, "Failed to collect metrics for gateway");
+                                continue;
+                            }
+                        };
                         match client.put(&url).header("Content-Type", "text/plain").body(metrics).send().await {
                             Ok(response) => {
                                 if !response.status().is_success() {
@@ -314,9 +342,10 @@ fn describe_io_stats() {
 #[cfg(not(target_os = "linux"))]
 const fn describe_io_stats() {}
 
-async fn handle_request(
+async fn handle_request<F: Hook>(
     path: &str,
-    hook: impl Fn(),
+    hook: Arc<F>,
+    executor: TaskExecutor,
     handle: &crate::recorder::PrometheusRecorder,
     pprof_dump_dir: &PathBuf,
 ) -> Response<Full<Bytes>> {
@@ -324,8 +353,23 @@ async fn handle_request(
         "/debug/pprof/heap" => handle_pprof_heap(pprof_dump_dir),
         "/debug/tokio/dump" => handle_tokio_dump().await,
         _ => {
-            hook();
-            let metrics = handle.handle().render();
+            let metrics_handle = handle.handle().clone();
+            let metrics = match executor
+                .spawn_blocking(move || {
+                    hook();
+                    metrics_handle.render()
+                })
+                .await
+            {
+                Ok(metrics) => metrics,
+                Err(err) => {
+                    let mut response = Response::new(Full::new(Bytes::from(format!(
+                        "Failed to collect metrics: {err}"
+                    ))));
+                    *response.status_mut() = StatusCode::INTERNAL_SERVER_ERROR;
+                    return response;
+                }
+            };
             let mut response = Response::new(Full::new(Bytes::from(metrics)));
             response.headers_mut().insert(CONTENT_TYPE, HeaderValue::from_static("text/plain"));
             response
@@ -462,6 +506,11 @@ mod tests {
         install_prometheus_recorder();
 
         let chain_spec_info = ChainSpecInfo { name: "test".to_string() };
+        let storage_settings_info = StorageSettingsInfo {
+            storage_v2: true,
+            pruning_mode: "archive",
+            prune_config: r#"{"block_interval":5}"#.to_string(),
+        };
         let version_info = VersionInfo {
             version: "test",
             build_timestamp: "test",
@@ -483,7 +532,8 @@ mod tests {
             runtime.clone(),
             hooks,
             std::env::temp_dir(),
-        );
+        )
+        .with_storage_settings_info(storage_settings_info);
 
         MetricServer::new(config).serve().await.unwrap();
 
@@ -497,6 +547,10 @@ mod tests {
         assert!(body.contains("reth_process_cpu_seconds_total"));
         assert!(body.contains("reth_process_start_time_seconds"));
         assert!(body.contains("process_cli_args"), "expected process_cli_args metric in output");
+        assert!(body.contains("reth_storage_settings"), "expected storage settings metric");
+        assert!(body.contains("storage_v2=\"true\""), "expected storage v2 label");
+        assert!(body.contains("pruning_mode=\"archive\""), "expected pruning mode label");
+        assert!(body.contains("prune_config="), "expected prune config label");
 
         // Make sure the runtime is dropped after the test runs.
         drop(runtime);

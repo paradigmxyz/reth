@@ -17,21 +17,35 @@ reth-tracing-otlp = { workspace = true, optional = true }
 
 # obs
 tracing.workspace = true
-tracing-subscriber = { workspace = true, features = ["env-filter", "fmt", "ansi", "json"] }
-tracing-appender.workspace = true
-tracing-journald.workspace = true
-tracing-logfmt.workspace = true
-tracing-samply.workspace = true
+tracing-subscriber = { workspace = true, features = ["env-filter", "fmt", "ansi", "json"], optional = true }
+tracing-appender = { workspace = true, optional = true }
+tracing-chrome = { workspace = true, optional = true }
+tracing-journald = { workspace = true, optional = true }
+tracing-logfmt = { workspace = true, optional = true }
+tracing-samply = { workspace = true, optional = true }
 tracing-tracy = { workspace = true, optional = true }
 tracy-client = { workspace = true, optional = true }
 
 # misc
-clap = { workspace = true, features = ["derive"] }
-eyre.workspace = true
-rolling-file.workspace = true
+clap = { workspace = true, features = ["derive"], optional = true }
+eyre = { workspace = true, optional = true }
+rolling-file = { workspace = true, optional = true }
 
 [features]
-default = ["otlp"]
+default = ["std", "otlp"]
+std = [
+    "tracing-subscriber",
+    "tracing-appender",
+    "tracing-chrome",
+    "tracing-journald",
+    "tracing-logfmt",
+    "tracing-samply",
+    "clap",
+    "eyre",
+    "rolling-file",
+    "tracing/std",
+    "tracing-subscriber?/std",
+]
 otlp = ["reth-tracing-otlp"]
 otlp-logs = ["reth-tracing-otlp/otlp-logs"]
 tracy = ["tracing-tracy", "tracy-client"]

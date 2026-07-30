@@ -7,16 +7,12 @@
 use crate::{
     errors::{EthHandshakeError, EthStreamError},
     handshake::EthereumEthHandshake,
-    message::{
-        EthBroadcastMessage, ProtocolBroadcastMessage, MAX_MESSAGE_SIZE,
-        TX_MEMORY_BUDGET_MULTIPLIER,
-    },
+    message::{EthBroadcastMessage, MAX_MESSAGE_SIZE, TX_MEMORY_BUDGET_MULTIPLIER},
     p2pstream::HANDSHAKE_TIMEOUT,
     CanDisconnect, DisconnectReason, EthMessage, EthNetworkPrimitives, EthVersion, ProtocolMessage,
     UnifiedStatus,
 };
 use alloy_primitives::bytes::{Bytes, BytesMut};
-use alloy_rlp::Encodable;
 use futures::{ready, Sink, SinkExt};
 use pin_project::pin_project;
 use reth_eth_wire_types::{EthMessageID, NetworkPrimitives, RawCapabilityMessage};
@@ -272,20 +268,13 @@ where
         &mut self,
         item: EthBroadcastMessage<N>,
     ) -> Result<(), EthStreamError> {
-        self.inner.start_send_unpin(Bytes::from(alloy_rlp::encode(
-            ProtocolBroadcastMessage::from(item),
-        )))?;
-
+        self.inner.start_send_unpin(item.encoded())?;
         Ok(())
     }
 
     /// Sends a raw capability message directly over the stream
     pub fn start_send_raw(&mut self, msg: RawCapabilityMessage) -> Result<(), EthStreamError> {
-        let mut bytes = Vec::with_capacity(msg.payload.len() + 1);
-        msg.id.encode(&mut bytes);
-        bytes.extend_from_slice(&msg.payload);
-
-        self.inner.start_send_unpin(bytes.into())?;
+        self.inner.start_send_unpin(msg.encoded())?;
         Ok(())
     }
 }

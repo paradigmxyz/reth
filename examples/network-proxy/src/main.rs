@@ -93,6 +93,8 @@ async fn main() -> eyre::Result<()> {
                         IncomingEthRequest::GetReceipts69 { .. } => {}
                         IncomingEthRequest::GetReceipts70 { .. } => {}
                         IncomingEthRequest::GetBlockAccessLists { .. } => {}
+                        IncomingEthRequest::GetCells { .. } => {}
+                        IncomingEthRequest::GetSnap { .. } => {}
                     }
              }
              transaction_message = transactions_rx.recv() => {
