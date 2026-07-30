@@ -1365,6 +1365,14 @@ mod tests {
     }
 
     #[test]
+    fn discovery_defaults_use_same_port() {
+        let defaults = DefaultDiscoveryArgs::default();
+
+        assert_eq!(defaults.discv5_port, Some(defaults.port));
+        assert_eq!(defaults.discv5_port_ipv6, Some(defaults.port));
+    }
+
+    #[test]
     fn net_if_uses_resolved_addr_for_default_discovery_addr() {
         let args =
             CommandParser::<NetworkArgs>::parse_from(["reth", "--net-if.experimental", "en0"]).args;

@@ -15,9 +15,9 @@ This section provides essential information about the ports used by the system, 
 
 ## Discovery v5 Port
 
--   **Port:** `9200`
+-   **Port:** `30303`
 -   **Protocol:** UDP
--   **Purpose:** Used for discv5 peer discovery protocol. This is enabled by default and can be disabled with `--disable-discv5-discovery`. It operates independently from the legacy discv4 discovery on port 30303.
+-   **Purpose:** Used for discv5 peer discovery protocol. This is enabled by default and can be disabled with `--disable-discv5-discovery`. It shares the UDP port with the legacy discv4 discovery by default.
 -   **Exposure Recommendation:** This port should be exposed to allow peer discovery.
 
 ## Metrics Port
