@@ -30,16 +30,16 @@ use reth_primitives_traits::{
 };
 use reth_provider::{
     BalProvider, BlockExecutionOutput, BlockExecutionResult, BlockReader, ChangeSetReader,
-    DatabaseProviderFactory, HashedPostStateProvider, ProviderError, SaveBlocksInput,
-    StageCheckpointReader, StateProviderBox, StateProviderFactory, StateReader,
-    StorageChangeSetReader, StorageSettingsCache, TransactionVariant,
+    DatabaseProviderFactory, ProviderError, SaveBlocksInput, StageCheckpointReader,
+    StateProviderBox, StateProviderFactory, StateReader, StorageChangeSetReader,
+    StorageSettingsCache, TransactionVariant,
 };
 use reth_revm::database::StateProviderDatabase;
 use reth_stages_api::ControlFlow;
 use reth_storage_overlay::OverlayManager;
 use reth_tasks::{spawn_os_thread, utils::increase_thread_priority};
-use reth_trie::ComputedTrieData;
-use revm::interpreter::debug_unreachable;
+use reth_trie::{ComputedTrieData, HashedPostState, KeccakKeyHasher};
+use revm::{database::AccountStatus, interpreter::debug_unreachable};
 use state::TreeState;
 use std::{fmt::Debug, ops, sync::Arc, time::Duration};
 
@@ -2231,10 +2231,18 @@ where
             .provider
             .get_state(block.header().number())?
             .ok_or_else(|| ProviderError::StateForNumberNotFound(block.header().number()))?;
-        let hashed_state = self
-            .provider
-            .state_by_block_hash(block.parent_hash())?
-            .hashed_post_state(execution_output.state())?;
+        let bundle_state = execution_output.state();
+        debug_assert!(
+            bundle_state.state().values().all(|account| account.status == AccountStatus::Changed),
+            "changeset-reconstructed accounts must not retain created or destroyed statuses"
+        );
+        // `get_state` reconstructs this bundle from persisted changesets. Storage wipes are already
+        // represented as explicit slot updates, and all accounts are marked `Changed`, so there are
+        // no created or destroyed statuses for `HashedPostStateProvider::hashed_post_state` to use
+        // when recovering parent-storage slots. Hash directly to avoid resolving a redundant parent
+        // provider.
+        let hashed_state =
+            HashedPostState::from_bundle_state::<KeccakKeyHasher>(bundle_state.state());
 
         debug!(
             target: "engine::tree",
