@@ -753,67 +753,31 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
             // This reduces cursor open/close overhead from N calls to 1.
             if save_mode.with_state() && !state_trie_blocks.is_empty() {
                 let start = Instant::now();
-                let can_filter_hashed_state =
-                    state_trie_blocks.iter().chain(state_trie_masking_blocks).all(|block| {
-                        block
-                            .trie_data
-                            .get()
-                            .sorted
-                            .hashed_state
-                            .storages
-                            .values()
-                            .all(|storage| !storage.wiped)
-                    });
-                let merged_hashed_state = if can_filter_hashed_state {
-                    let batch = state_trie_blocks
-                        .iter()
-                        .map(|block| block.trie_data.get().sorted.hashed_state.as_ref())
-                        .collect::<Vec<_>>();
-                    let mask = state_trie_masking_blocks
-                        .iter()
-                        .map(|block| block.trie_data.get().sorted.hashed_state.as_ref())
-                        .collect::<Vec<_>>();
-                    Arc::new(HashedPostStateSorted::disjointed_merge_batch(&batch, &mask))
-                } else {
-                    HashedPostStateSorted::merge_batch(
-                        state_trie_blocks
-                            .iter()
-                            .rev()
-                            .map(|block| block.trie_data().sorted.hashed_state),
-                    )
-                };
+                let batch = state_trie_blocks
+                    .iter()
+                    .map(|block| block.trie_data.get().sorted.hashed_state.as_ref())
+                    .collect::<Vec<_>>();
+                let mask = state_trie_masking_blocks
+                    .iter()
+                    .map(|block| block.trie_data.get().sorted.hashed_state.as_ref())
+                    .collect::<Vec<_>>();
+                let merged_hashed_state =
+                    HashedPostStateSorted::disjointed_merge_batch(&batch, &mask);
                 if !merged_hashed_state.is_empty() {
                     self.write_hashed_state(&merged_hashed_state)?;
                 }
                 timings.write_hashed_state += start.elapsed();
 
                 let start = Instant::now();
-                let can_filter_trie_updates =
-                    state_trie_blocks.iter().chain(state_trie_masking_blocks).all(|block| {
-                        block
-                            .trie_data
-                            .get()
-                            .sorted
-                            .trie_updates
-                            .storage_tries_ref()
-                            .values()
-                            .all(|storage_trie| !storage_trie.is_deleted)
-                    });
-                let merged_trie = if can_filter_trie_updates {
-                    let batch = state_trie_blocks
-                        .iter()
-                        .map(|block| block.trie_data.get().sorted.trie_updates.as_ref())
-                        .collect::<Vec<_>>();
-                    let mask = state_trie_masking_blocks
-                        .iter()
-                        .map(|block| block.trie_data.get().sorted.trie_updates.as_ref())
-                        .collect::<Vec<_>>();
-                    Arc::new(TrieUpdatesSorted::disjointed_merge_batch(&batch, &mask))
-                } else {
-                    TrieUpdatesSorted::merge_batch(
-                        state_trie_blocks.iter().rev().map(|block| block.trie_updates()),
-                    )
-                };
+                let batch = state_trie_blocks
+                    .iter()
+                    .map(|block| block.trie_data.get().sorted.trie_updates.as_ref())
+                    .collect::<Vec<_>>();
+                let mask = state_trie_masking_blocks
+                    .iter()
+                    .map(|block| block.trie_data.get().sorted.trie_updates.as_ref())
+                    .collect::<Vec<_>>();
+                let merged_trie = TrieUpdatesSorted::disjointed_merge_batch(&batch, &mask);
                 if !merged_trie.is_empty() {
                     self.write_trie_updates_sorted(&merged_trie)?;
                 }
@@ -4754,55 +4718,6 @@ mod tests {
             .collect::<Result<Vec<_>, _>>()
             .unwrap();
         assert!(masked_entries.is_empty());
-    }
-
-    #[cfg(feature = "partial-persistence")]
-    #[test]
-    fn test_save_blocks_masking_falls_back_for_storage_wipes() {
-        use reth_trie::{
-            updates::{StorageTrieUpdatesSorted, TrieUpdatesSorted},
-            HashedPostStateSorted, HashedStorageSorted,
-        };
-
-        let factory = create_test_provider_factory();
-        let mut test_block_builder = TestBlockBuilder::eth().with_state();
-        let genesis = test_block_builder.get_executed_blocks(0..1).next().unwrap();
-        let blocks: Vec<_> = test_block_builder.get_executed_blocks(1..3).collect();
-
-        let provider_rw = factory.provider_rw().unwrap();
-        save_genesis(&provider_rw, &genesis).unwrap();
-        provider_rw.commit().unwrap();
-
-        let address = B256::with_last_byte(1);
-        let state = HashedPostStateSorted::new(
-            vec![],
-            B256Map::from_iter([(
-                address,
-                HashedStorageSorted { wiped: true, storage_slots: vec![] },
-            )]),
-        );
-        let trie = TrieUpdatesSorted::new(
-            vec![],
-            B256Map::from_iter([(
-                address,
-                StorageTrieUpdatesSorted { is_deleted: true, storage_nodes: vec![] },
-            )]),
-        );
-        let candidate = ExecutedBlock::new(
-            Arc::clone(&blocks[0].recovered_block),
-            Arc::clone(&blocks[0].execution_output),
-            ComputedTrieData::new(Arc::new(state), Arc::new(trie)),
-        );
-
-        let provider_rw = factory.provider_rw().unwrap();
-        let input = SaveBlocksInput::new(vec![candidate, blocks[1].clone()], 0, 0, 2, 1);
-        provider_rw.save_blocks(&input).unwrap();
-        provider_rw.commit().unwrap();
-
-        let checkpoint =
-            factory.provider().unwrap().get_stage_checkpoint(StageId::Finish).unwrap().unwrap();
-        assert_eq!(checkpoint.block_number, 2);
-        assert_eq!(checkpoint.finish_stage_checkpoint().unwrap().partial_state_trie, Some(1));
     }
 
     #[cfg(feature = "partial-persistence")]
