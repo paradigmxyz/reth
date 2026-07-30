@@ -648,7 +648,11 @@ where
     ) -> ProviderResult<HashedPostState> {
         let mut hashed_state =
             HashedPostState::from_bundle_state::<KeccakKeyHasher>(bundle_state.state());
-        if !bundle_state.state().values().any(|account| account.was_destroyed()) {
+        if !bundle_state
+            .state()
+            .values()
+            .any(|account| account.was_destroyed() && account.original_info.is_some())
+        {
             return Ok(hashed_state)
         }
 
@@ -1537,6 +1541,25 @@ mod tests {
             hashed_state.storages[&hashed_address].storage[&keccak256(B256::from(slot))],
             U256::ZERO
         );
+    }
+
+    #[test]
+    fn newly_created_destroyed_account_skips_historical_overlay() {
+        use reth_storage_api::HashedPostStateProvider;
+        use revm::database::{AccountStatus, BundleAccount, BundleState};
+
+        let factory = create_test_provider_factory();
+        let db = factory.provider().unwrap();
+        let mut bundle = BundleState::default();
+        bundle.state.insert(
+            ADDRESS,
+            BundleAccount::new(None, None, Default::default(), AccountStatus::Destroyed),
+        );
+
+        let provider = HistoricalStateProviderRef::new(&db, 1, OverlayManager::default());
+        let hashed_state = provider.hashed_post_state(&bundle).unwrap();
+
+        assert!(hashed_state.storages.is_empty());
     }
 
     #[test]
