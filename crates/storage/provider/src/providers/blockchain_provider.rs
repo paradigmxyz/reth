@@ -154,10 +154,22 @@ impl<N: ProviderNodeTypes> BlockchainProvider<N> {
     fn block_state_provider(
         &self,
         state: &BlockState<N::Primitives>,
-    ) -> ProviderResult<MemoryOverlayStateProvider<N::Primitives>> {
+    ) -> ProviderResult<StateProviderBox> {
         let anchor_hash = state.anchor().hash;
+        let mut overlay = state.chain().map(|state| state.block()).collect::<Vec<_>>();
+        if let Some(latest) = self.latest_database_state()? &&
+            let Some(overlay_len) = latest.overlay_len(
+                anchor_hash,
+                overlay.len(),
+                overlay.iter().map(|block| block.recovered_block().num_hash()),
+            )
+        {
+            overlay.truncate(overlay_len);
+            return Ok(Box::new(MemoryOverlayStateProvider::new(latest.into_provider(), overlay)))
+        }
+
         let latest_historical = self.database.history_by_block_hash(anchor_hash)?;
-        Ok(state.state_provider(latest_historical))
+        Ok(Box::new(MemoryOverlayStateProvider::new(latest_historical, overlay)))
     }
 
     /// Returns a cursor-backed state view for a state root still only in canonical in-memory
@@ -736,7 +748,7 @@ impl<N: ProviderNodeTypes> StateProviderFactory for BlockchainProvider<N> {
         // use latest state provider if the head state exists
         if let Some(state) = self.canonical_in_memory_state.head_state() {
             trace!(target: "providers::blockchain", "Using head state for latest state provider");
-            Ok(self.block_state_provider(&state)?.boxed())
+            self.block_state_provider(&state)
         } else {
             trace!(target: "providers::blockchain", "Using database state for latest state provider");
             self.database.latest()
@@ -822,7 +834,7 @@ impl<N: ProviderNodeTypes> StateProviderFactory for BlockchainProvider<N> {
 
         if let Some(pending) = self.canonical_in_memory_state.pending_state() {
             // we have a pending block
-            return Ok(Box::new(self.block_state_provider(&pending)?));
+            return self.block_state_provider(&pending);
         }
 
         // fallback to latest state if the pending block is not available
@@ -833,14 +845,14 @@ impl<N: ProviderNodeTypes> StateProviderFactory for BlockchainProvider<N> {
         if let Some(pending) = self.canonical_in_memory_state.pending_state() &&
             pending.hash() == block_hash
         {
-            return Ok(Some(Box::new(self.block_state_provider(&pending)?)));
+            return Ok(Some(self.block_state_provider(&pending)?));
         }
         Ok(None)
     }
 
     fn maybe_pending(&self) -> ProviderResult<Option<StateProviderBox>> {
         if let Some(pending) = self.canonical_in_memory_state.pending_state() {
-            return Ok(Some(Box::new(self.block_state_provider(&pending)?)))
+            return Ok(Some(self.block_state_provider(&pending)?))
         }
 
         Ok(None)
