@@ -117,6 +117,14 @@ impl NodeRecord {
     pub const fn udp_addr(&self) -> SocketAddr {
         SocketAddr::new(self.address, self.udp_port)
     }
+
+    /// Returns `true` if this record advertises an `RLPx` endpoint, i.e. a non-zero tcp port.
+    ///
+    /// Discovery-only records, such as ENRs without a tcp key, convert with a tcp port of 0.
+    #[must_use]
+    pub const fn has_rlpx_endpoint(&self) -> bool {
+        self.tcp_port != 0
+    }
 }
 
 impl fmt::Display for NodeRecord {
