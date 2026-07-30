@@ -630,23 +630,20 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
         debug!(target: "providers::db", block_count, "Writing blocks and execution data to storage");
 
         // Compute tx_nums upfront (both threads need these)
-        let tx_nums: SmallVec<[TxNumber; 4]> = if first_number.is_some() {
+        let mut tx_nums: SmallVec<[TxNumber; 4]> = SmallVec::with_capacity(blocks.len());
+        if !blocks.is_empty() {
             let first_tx_num = self
                 .tx
                 .cursor_read::<tables::TransactionBlocks>()?
                 .last()?
                 .map(|(n, _)| n + 1)
                 .unwrap_or_default();
-            let mut nums = SmallVec::with_capacity(blocks.len());
             let mut current = first_tx_num;
             for block in blocks {
-                nums.push(current);
+                tx_nums.push(current);
                 current += block.recovered_block().body().transaction_count() as u64;
             }
-            nums
-        } else {
-            SmallVec::new()
-        };
+        }
 
         let mut timings =
             metrics::SaveBlocksTimings { batch_size: block_count, ..Default::default() };
@@ -706,7 +703,7 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
             let mdbx_start = Instant::now();
 
             // Collect all transaction hashes across all blocks, sort them, and write in batch
-            if first_number.is_some() &&
+            if !blocks.is_empty() &&
                 !self.cached_storage_settings().storage_v2 &&
                 self.prune_modes.transaction_lookup.is_none_or(|m| !m.is_full())
             {
@@ -818,7 +815,7 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
 
             // Update pipeline progress
             let start = Instant::now();
-            if first_number.is_some() {
+            if !blocks.is_empty() {
                 self.update_pipeline_stages(last_block_number, false)?;
             }
             if save_mode.with_state() {
@@ -839,7 +836,7 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
         })?;
 
         // Collect results from spawned tasks
-        if first_number.is_some() {
+        if !blocks.is_empty() {
             timings.sf = sf_result.ok_or(StaticFileWriterError::ThreadPanic("static file"))??;
         }
 
