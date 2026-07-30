@@ -534,8 +534,7 @@ async fn test_sparse_trie_reuse_across_blocks() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
 
     // Use the state-root task with pruning enabled.
-    let tree_config =
-        TreeConfig::default().with_sparse_trie_prune_depth(2).with_sparse_trie_max_hot_slots(100);
+    let tree_config = TreeConfig::default().with_sparse_trie_prune_depth(2);
 
     let (mut nodes, _wallet) = setup_engine::<EthereumNode>(
         1,

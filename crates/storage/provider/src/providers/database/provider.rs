@@ -65,11 +65,12 @@ use reth_storage_api::{
     StoragePath, StorageSettingsCache, TryIntoHistoricalStateProvider, WriteStateInput,
 };
 use reth_storage_errors::provider::{ProviderResult, StaticFileWriterError};
+use reth_storage_overlay::OverlayManager;
 use reth_trie::{
     updates::{StorageTrieUpdatesSorted, TrieUpdatesSorted},
     ComputedTrieData, HashedPostStateSorted,
 };
-use reth_trie_db::{ChangesetCache, DatabaseStorageTrieCursor, TrieTableAdapter};
+use reth_trie_db::{DatabaseStorageTrieCursor, TrieTableAdapter};
 use revm::database::states::{
     PlainStateReverts, PlainStorageChangeset, PlainStorageRevert, StateChangeset,
 };
@@ -199,8 +200,8 @@ pub struct DatabaseProvider<TX, N: NodeTypes> {
     storage_settings: Arc<RwLock<StorageSettings>>,
     /// `RocksDB` provider
     rocksdb_provider: RocksDBProvider,
-    /// Changeset cache for trie unwinding
-    changeset_cache: ChangesetCache,
+    /// Manager for state trie overlays and cached changesets.
+    overlay_manager: OverlayManager<N::Primitives>,
     /// Task runtime for spawning parallel I/O work.
     runtime: reth_tasks::Runtime,
     /// Path to the database directory.
@@ -227,7 +228,7 @@ impl<TX: Debug, N: NodeTypes> Debug for DatabaseProvider<TX, N> {
             .field("storage", &self.storage)
             .field("storage_settings", &self.storage_settings)
             .field("rocksdb_provider", &self.rocksdb_provider)
-            .field("changeset_cache", &self.changeset_cache)
+            .field("overlay_manager", &self.overlay_manager)
             .field("runtime", &self.runtime)
             .field("pending_rocksdb_batches", &"<pending batches>")
             .field("commit_order", &self.commit_order)
@@ -326,7 +327,7 @@ impl<TX: DbTx + 'static, N: NodeTypes> DatabaseProvider<TX, N> {
             self.get_prune_checkpoint(PruneSegment::StorageHistory)?;
 
         let mut state_provider =
-            HistoricalStateProviderRef::new(self, block_number, self.changeset_cache.clone());
+            HistoricalStateProviderRef::new(self, block_number, self.overlay_manager.clone());
         // If we pruned account or storage history, we can't return state on every historical block.
         // Instead, we should cap it at the latest prune checkpoint for corresponding prune segment.
         if let Some(prune_checkpoint_block_number) =
@@ -413,7 +414,7 @@ impl<TX: DbTxMut, N: NodeTypes> DatabaseProvider<TX, N> {
         storage: Arc<N::Storage>,
         storage_settings: Arc<RwLock<StorageSettings>>,
         rocksdb_provider: RocksDBProvider,
-        changeset_cache: ChangesetCache,
+        overlay_manager: OverlayManager<N::Primitives>,
         runtime: reth_tasks::Runtime,
         db_path: PathBuf,
         commit_order: CommitOrder,
@@ -427,7 +428,7 @@ impl<TX: DbTxMut, N: NodeTypes> DatabaseProvider<TX, N> {
             storage,
             storage_settings,
             rocksdb_provider,
-            changeset_cache,
+            overlay_manager,
             runtime,
             db_path,
             pending_rocksdb_batches: Default::default(),
@@ -448,7 +449,7 @@ impl<TX: DbTxMut, N: NodeTypes> DatabaseProvider<TX, N> {
         storage: Arc<N::Storage>,
         storage_settings: Arc<RwLock<StorageSettings>>,
         rocksdb_provider: RocksDBProvider,
-        changeset_cache: ChangesetCache,
+        overlay_manager: OverlayManager<N::Primitives>,
         runtime: reth_tasks::Runtime,
         db_path: PathBuf,
         metrics: Arc<DatabaseProviderMetrics>,
@@ -461,7 +462,7 @@ impl<TX: DbTxMut, N: NodeTypes> DatabaseProvider<TX, N> {
             storage,
             storage_settings,
             rocksdb_provider,
-            changeset_cache,
+            overlay_manager,
             runtime,
             db_path,
             CommitOrder::Normal,
@@ -479,7 +480,7 @@ impl<TX: DbTxMut, N: NodeTypes> DatabaseProvider<TX, N> {
         storage: Arc<N::Storage>,
         storage_settings: Arc<RwLock<StorageSettings>>,
         rocksdb_provider: RocksDBProvider,
-        changeset_cache: ChangesetCache,
+        overlay_manager: OverlayManager<N::Primitives>,
         runtime: reth_tasks::Runtime,
         db_path: PathBuf,
         metrics: Arc<DatabaseProviderMetrics>,
@@ -492,7 +493,7 @@ impl<TX: DbTxMut, N: NodeTypes> DatabaseProvider<TX, N> {
             storage,
             storage_settings,
             rocksdb_provider,
-            changeset_cache,
+            overlay_manager,
             runtime,
             db_path,
             CommitOrder::Unwind,
@@ -876,7 +877,9 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
                 available: 0..=0,
             })?;
 
-        let trie_revert = self.changeset_cache.get_or_compute_range(self, from..=db_tip_block)?;
+        let trie_revert = self
+            .overlay_manager
+            .get_or_compute_cached_changesets_range(self, from..=db_tip_block)?;
         self.write_trie_updates_sorted(&trie_revert)?;
 
         Ok(())
@@ -947,9 +950,9 @@ impl<TX: DbTx + 'static, N: NodeTypes> TryIntoHistoricalStateProvider for Databa
             self.get_prune_checkpoint(PruneSegment::AccountHistory)?;
         let storage_history_prune_checkpoint =
             self.get_prune_checkpoint(PruneSegment::StorageHistory)?;
-        let changeset_cache = self.changeset_cache.clone();
+        let overlay_manager = self.overlay_manager.clone();
 
-        let mut state_provider = HistoricalStateProvider::new(self, block_number, changeset_cache);
+        let mut state_provider = HistoricalStateProvider::new(self, block_number, overlay_manager);
 
         // If we pruned account or storage history, we can't return state on every historical block.
         // Instead, we should cap it at the latest prune checkpoint for corresponding prune segment.
@@ -1046,7 +1049,7 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> DatabaseProvider<TX, N> {
         storage: Arc<N::Storage>,
         storage_settings: Arc<RwLock<StorageSettings>>,
         rocksdb_provider: RocksDBProvider,
-        changeset_cache: ChangesetCache,
+        overlay_manager: OverlayManager<N::Primitives>,
         runtime: reth_tasks::Runtime,
         db_path: PathBuf,
         metrics: Arc<DatabaseProviderMetrics>,
@@ -1059,7 +1062,7 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> DatabaseProvider<TX, N> {
             storage,
             storage_settings,
             rocksdb_provider,
-            changeset_cache,
+            overlay_manager,
             runtime,
             db_path,
             pending_rocksdb_batches: Default::default(),
@@ -2739,8 +2742,8 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
     ///
     /// The latest state will be unwound
     ///
-    /// 1. Iterate over the [`BlockBodyIndices`][tables::BlockBodyIndices] table to get all the
-    ///    transaction ids.
+    /// 1. Read the retained block's [`BlockBodyIndices`][tables::BlockBodyIndices] entry to get the
+    ///    first transaction id to remove.
     /// 2. Iterate over the [`StorageChangeSets`][tables::StorageChangeSets] table and the
     ///    [`AccountChangeSets`][tables::AccountChangeSets] tables in reverse order to reconstruct
     ///    the changesets.
@@ -2763,12 +2766,11 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
             return Ok(());
         }
 
-        // We are not removing block meta as it is used to get block changesets.
-        let block_bodies = self.block_body_indices_range(range.clone())?;
-
         // get transaction receipts
-        let from_transaction_num =
-            block_bodies.first().expect("already checked if there are blocks").first_tx_num();
+        let from_transaction_num = self
+            .block_body_indices(block)?
+            .map(|b| b.next_tx_num())
+            .ok_or(ProviderError::BlockBodyIndicesNotFound(block))?;
 
         let storage_range = BlockNumberAddress::range(range.clone());
         let storage_changeset = if self.cached_storage_settings().storage_v2 {
@@ -5009,7 +5011,7 @@ mod tests {
         assert_eq!(account_cs[0].address, address);
 
         let historical_value =
-            HistoricalStateProviderRef::new(&*provider_rw, 0, ChangesetCache::new())
+            HistoricalStateProviderRef::new(&*provider_rw, 0, OverlayManager::default())
                 .storage(address, slot_key)
                 .unwrap();
         assert_eq!(historical_value, None);

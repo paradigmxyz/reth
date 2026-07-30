@@ -100,6 +100,7 @@ use crate::tree::{
     instrumented_state::{InstrumentedStateProvider, StateProviderMetrics, StateProviderStats},
     payload_processor::PayloadProcessor,
     precompile_cache::{CachedPrecompile, CachedPrecompileMetrics, PrecompileCacheMap},
+    txpool_prewarm,
     types::{InsertPayloadResult, ValidationOutput},
     CacheWaitDurations, CachedStateProvider, EngineApiMetrics, EngineApiTreeState, ExecutionEnv,
     PayloadHandle, StateProviderBuilder, StateProviderDatabase, TreeConfig, WaitForCaches,
@@ -124,9 +125,7 @@ use crate::tree::{
 };
 use alloy_consensus::constants::KECCAK_EMPTY;
 use alloy_primitives::Address;
-use reth_chain_state::{
-    CanonicalInMemoryState, ExecutedBlock, ExecutionTimingStats, StateTrieOverlayManager,
-};
+use reth_chain_state::{CanonicalInMemoryState, ExecutedBlock, ExecutionTimingStats};
 use reth_consensus::{ConsensusError, FullConsensus, ReceiptRootBloom};
 use reth_engine_primitives::{
     ConfigureEngineEvm, ExecutableTxIterator, ExecutionPayload, InvalidBlockHook, PayloadValidator,
@@ -136,7 +135,8 @@ use reth_evm::{
     block::BlockExecutor, execute::ExecutableTxFor, ConfigureEvm, EvmEnvFor, ExecutionCtxFor,
     OnStateHook, SpecFor,
 };
-use reth_execution_cache::{CacheFillMode, CacheStats, SavedCache};
+use reth_execution_cache::{CacheFillMode, CacheStats};
+use reth_payload_builder::{PayloadBuilderLease, PayloadBuilderResources};
 use reth_payload_primitives::{
     BuiltPayload, BuiltPayloadExecutedBlock, InvalidPayloadAttributesError, NewPayloadError,
     PayloadTypes,
@@ -146,18 +146,17 @@ use reth_primitives_traits::{
     RecoveredBlock, SealedBlock, SealedHeader, SignerRecoverable,
 };
 use reth_provider::{
-    providers::{OverlayBuilder, OverlayStateProviderFactory},
-    BlockExecutionOutput, BlockNumReader, BlockReader, ChangeSetReader, DatabaseProviderFactory,
-    DatabaseProviderROFactory, HashedPostStateProvider, ProviderError, PruneCheckpointReader,
-    StageCheckpointReader, StateProvider, StateProviderBox, StateProviderFactory, StateReader,
-    StorageChangeSetReader, StorageSettingsCache,
+    providers::OverlayStateProviderFactory, BlockExecutionOutput, BlockNumReader, BlockReader,
+    ChangeSetReader, DatabaseProviderFactory, DatabaseProviderROFactory, HashedPostStateProvider,
+    ProviderError, PruneCheckpointReader, StageCheckpointReader, StateProvider, StateProviderBox,
+    StateProviderFactory, StateReader, StorageChangeSetReader, StorageSettingsCache,
 };
 use reth_revm::db::{states::bundle_state::BundleRetention, BundleAccount, State};
+use reth_storage_overlay::OverlayManager;
 use reth_trie::{
     hashed_cursor::HashedCursorFactory, trie_cursor::TrieCursorFactory, updates::TrieUpdates,
     LazyTrieData,
 };
-use reth_trie_db::ChangesetCache;
 use std::{
     sync::{
         atomic::{AtomicUsize, Ordering},
@@ -285,15 +284,18 @@ where
     metrics: EngineApiMetrics,
     /// Validator for the payload.
     validator: V,
-    /// Changeset cache for in-memory trie changesets
-    changeset_cache: ChangesetCache,
     /// Task runtime for spawning parallel work.
     runtime: reth_tasks::Runtime,
-    /// Shared state trie in-memory overlay data.
-    state_trie_overlays: StateTrieOverlayManager<Evm::Primitives>,
+    /// Shared overlay manager.
+    overlay_manager: OverlayManager<Evm::Primitives>,
     /// State-root strategy used to prepare per-block commitment tasks.
     #[debug(skip)]
     state_root_strategy: Arc<dyn StateRootStrategy<Evm::Primitives, P, Evm>>,
+    /// Persistent txpool prewarming worker and its latest immutable snapshot.
+    ///
+    /// None if txpool prewarming is disabled.
+    #[debug(skip)]
+    txpool_prewarm: Option<txpool_prewarm::Handle<Evm::Primitives, P, Evm>>,
 }
 
 impl<N, P, Evm, V> BasicEngineValidator<P, Evm, V>
@@ -314,6 +316,8 @@ where
         + StateReader
         + HashedPostStateProvider
         + Clone
+        + Send
+        + Sync
         + 'static,
     OverlayStateProviderFactory<P, N>: DatabaseProviderROFactory<Provider: TrieCursorFactory + HashedCursorFactory>
         + Clone
@@ -331,8 +335,7 @@ where
         validator: V,
         config: TreeConfig,
         invalid_block_hook: Box<dyn InvalidBlockHook<N>>,
-        changeset_cache: ChangesetCache,
-        state_trie_overlays: StateTrieOverlayManager<N>,
+        overlay_manager: OverlayManager<N>,
         runtime: reth_tasks::Runtime,
     ) -> Self {
         let precompile_cache_map = PrecompileCacheMap::default();
@@ -353,10 +356,10 @@ where
             invalid_block_hook,
             metrics: EngineApiMetrics::default(),
             validator,
-            changeset_cache,
             runtime,
-            state_trie_overlays,
+            overlay_manager,
             state_root_strategy: Arc::new(DefaultStateRootStrategy::default()),
+            txpool_prewarm: None,
         }
     }
 
@@ -366,6 +369,19 @@ where
         state_root_strategy: Arc<dyn StateRootStrategy<N, P, Evm>>,
     ) -> Self {
         self.state_root_strategy = state_root_strategy;
+        self
+    }
+
+    /// Installs the txpool source and starts the persistent cache-prewarming worker.
+    pub fn with_txpool_prewarming(
+        mut self,
+        source: impl crate::tree::TxPoolPrewarmSource<N> + 'static,
+    ) -> Self {
+        self.txpool_prewarm = Some(txpool_prewarm::Handle::spawn(
+            &self.runtime,
+            Arc::new(source),
+            self.evm_config.clone(),
+        ));
         self
     }
 
@@ -465,6 +481,9 @@ where
         Evm: ConfigureEngineEvm<T::ExecutionData, Primitives = N>,
     {
         let parent_hash = input.parent_hash();
+        let _txpool_pause = self.txpool_prewarm.as_ref().map(txpool_prewarm::Handle::pause);
+        let txpool_snapshot =
+            self.txpool_prewarm.as_ref().and_then(|prewarmer| prewarmer.snapshot(parent_hash));
         let _jit_pause = JitPauseGuard::new(&self.evm_config);
 
         // Fetch parent block. This goes to memory most of the time unless the parent block is
@@ -570,6 +589,7 @@ where
             gas_used: input.gas_used(),
             withdrawals: input.withdrawals().map(|w| w.to_vec()),
             decoded_bal: decoded_bal.as_ref().map(Arc::clone),
+            txpool_snapshot: txpool_snapshot.clone(),
         };
 
         // Get an iterator over the transactions in the payload
@@ -577,11 +597,7 @@ where
 
         // Create overlay factory for state-root tasks that need multiproofs.
         let provider_factory = self.provider.clone();
-        let overlay_builder = Self::overlay_builder_for_parent(
-            parent_hash,
-            ctx.state(),
-            self.changeset_cache.clone(),
-        );
+        let overlay_builder = ctx.state().tree_state.overlay_manager.overlay_builder(parent_hash);
         let overlay_factory = OverlayStateProviderFactory::new(provider_factory, overlay_builder);
 
         let parallel_bal_execution = ensure_ok!(self.bal_path_eligible(env.decoded_bal.as_deref()));
@@ -590,8 +606,9 @@ where
         let mut state_root_job =
             ensure_ok!(self.state_root_strategy.prepare(StateRootJobContext::new(
                 &self.runtime,
-                &self.state_trie_overlays,
+                &self.overlay_manager,
                 &env,
+                &parent_block,
                 provider_builder.clone(),
                 overlay_factory,
                 &self.config,
@@ -661,13 +678,16 @@ where
                 } else {
                     CacheFillMode::LookupOnly
                 };
-                Box::new(CachedStateProvider::new_with_mode(
-                    provider,
-                    caches.clone(),
-                    fill_mode,
-                    cache_metrics.clone(),
-                    cache_stats.clone(),
-                )) as StateProviderBox
+                Box::new(
+                    CachedStateProvider::new_with_mode(
+                        provider,
+                        caches.clone(),
+                        fill_mode,
+                        cache_metrics.clone(),
+                        cache_stats.clone(),
+                    )
+                    .with_txpool_snapshot(txpool_snapshot.clone()),
+                ) as StateProviderBox
             } else {
                 provider
             };
@@ -788,6 +808,7 @@ where
             self.validator.validate_block_post_execution_with_hashed_state(
                 || hashed_state.get(),
                 &block,
+                &parent_block,
                 || provider_builder.build(),
             )
         });
@@ -823,6 +844,7 @@ where
                 self.validator.validate_block_post_execution_with_hashed_state(
                     || hashed_state.get(),
                     &block,
+                    &parent_block,
                     || provider_builder.build(),
                 )
             });
@@ -1419,14 +1441,55 @@ where
         self.invalid_block_hook.on_invalid_block(parent_header, block, output, trie_updates);
     }
 
-    /// Returns an overlay builder configured for a payload parent.
-    fn overlay_builder_for_parent(
+    /// Prepares the optional payload-builder state-root handle through the installed
+    /// [`StateRootStrategy`].
+    fn payload_state_root_handle_for(
+        &self,
         parent_hash: B256,
-        state: &EngineApiTreeState<N>,
-        changeset_cache: ChangesetCache,
-    ) -> OverlayBuilder<N> {
-        OverlayBuilder::new(parent_hash, changeset_cache)
-            .with_state_trie_overlay_manager(state.tree_state.state_trie_overlays.clone())
+        parent_header: &N::BlockHeader,
+        timestamp: u64,
+        state: &mut EngineApiTreeState<N>,
+    ) -> Option<PayloadStateRootHandle> {
+        let provider_builder = match self.state_provider_builder(parent_hash, state) {
+            Ok(Some(provider_builder)) => provider_builder,
+            Ok(None) => return None,
+            Err(err) => {
+                warn!(
+                    target: "engine::tree::payload_validator",
+                    %err,
+                    %parent_hash,
+                    "failed to prepare payload-builder state-root provider"
+                );
+                return None
+            }
+        };
+        let overlay_factory = OverlayStateProviderFactory::new(
+            self.provider.clone(),
+            state.tree_state.overlay_manager.overlay_builder(parent_hash),
+        );
+
+        match self.state_root_strategy.prepare_payload_builder(PayloadStateRootJobContext::new(
+            &self.runtime,
+            &self.overlay_manager,
+            parent_hash,
+            parent_header,
+            timestamp,
+            state,
+            provider_builder,
+            overlay_factory,
+            &self.config,
+        )) {
+            Ok(handle) => handle,
+            Err(err) => {
+                warn!(
+                    target: "engine::tree::payload_validator",
+                    %err,
+                    %parent_hash,
+                    "failed to prepare payload-builder state-root job"
+                );
+                None
+            }
+        }
     }
 
     /// Spawns a background task to compute and sort trie data for the executed block.
@@ -1596,6 +1659,18 @@ where
             .unwrap_or_default();
         let (code_cache_hits, code_cache_misses) =
             cache_stats.as_ref().map(|s| (s.code_hits(), s.code_misses())).unwrap_or_default();
+        let (txpool_snapshot_account_hits, txpool_snapshot_account_misses) = cache_stats
+            .as_ref()
+            .map(|s| (s.txpool_snapshot_account_hits(), s.txpool_snapshot_account_misses()))
+            .unwrap_or_default();
+        let (txpool_snapshot_storage_hits, txpool_snapshot_storage_misses) = cache_stats
+            .as_ref()
+            .map(|s| (s.txpool_snapshot_storage_hits(), s.txpool_snapshot_storage_misses()))
+            .unwrap_or_default();
+        let (txpool_snapshot_code_hits, txpool_snapshot_code_misses) = cache_stats
+            .as_ref()
+            .map(|s| (s.txpool_snapshot_code_hits(), s.txpool_snapshot_code_misses()))
+            .unwrap_or_default();
 
         // Build execution timing stats for detailed block logging
         Box::new(ExecutionTimingStats {
@@ -1624,6 +1699,12 @@ where
             storage_cache_misses,
             code_cache_hits,
             code_cache_misses,
+            txpool_snapshot_account_hits,
+            txpool_snapshot_account_misses,
+            txpool_snapshot_storage_hits,
+            txpool_snapshot_storage_misses,
+            txpool_snapshot_code_hits,
+            txpool_snapshot_code_misses,
         })
     }
 }
@@ -1687,24 +1768,21 @@ pub trait EngineValidator<
         block: BuiltPayloadExecutedBlock<N>,
     ) -> ProviderResult<ExecutedBlock<N>>;
 
-    /// Returns [`SavedCache`] for the given block hash.
-    fn cache_for(&self, _block_hash: B256) -> Option<SavedCache>;
+    /// Notifies the validator that `hash` is the current canonical head.
+    ///
+    /// This may also be called when a forkchoice update reaffirms the existing head.
+    fn on_canonical_head_changed(&self, _hash: B256, _state: &EngineApiTreeState<N>) {}
 
-    /// Prepares the optional payload-builder state-root handle through the installed
-    /// [`StateRootStrategy`].
+    /// Prepares the resources loaned to a payload builder job.
     ///
-    /// Returns `None` when the strategy declines, in which case the payload builder computes
-    /// the state root itself.
-    ///
-    /// `timestamp` is the timestamp of the payload being built, taken from the payload
-    /// attributes.
-    fn payload_state_root_handle_for(
+    /// `timestamp` is taken from the payload attributes.
+    fn payload_builder_resources(
         &self,
         parent_hash: B256,
         parent_header: &N::BlockHeader,
         timestamp: u64,
         state: &mut EngineApiTreeState<N>,
-    ) -> Option<PayloadStateRootHandle>;
+    ) -> PayloadBuilderResources;
 }
 
 impl<N, Types, P, Evm, V> EngineValidator<Types> for BasicEngineValidator<P, Evm, V>
@@ -1784,57 +1862,79 @@ where
         ))
     }
 
-    fn cache_for(&self, block_hash: B256) -> Option<SavedCache> {
-        Some(self.payload_processor.cache_for(block_hash))
+    fn on_canonical_head_changed(&self, hash: B256, state: &EngineApiTreeState<N>) {
+        let Some(txpool_prewarm) = self.txpool_prewarm.as_ref() else { return };
+
+        // Obtain the header of the new canonical head; pool transactions are warmed on top of
+        // its state.
+        let parent = match self.sealed_header_by_hash(hash, state) {
+            Ok(Some(header)) => header,
+            Ok(None) => return,
+            Err(err) => {
+                trace!(
+                    target: "engine::tree::txpool_prewarm",
+                    %err,
+                    block_hash = ?hash,
+                    "failed to fetch canonical header for txpool prewarming"
+                );
+                return
+            }
+        };
+        // Warming reuses the head block's own environment rather than predicting the next
+        // block's: attribute-level accuracy (timestamp, basefee) doesn't matter for collecting
+        // state reads, and the worker disables the fee checks a stale basefee would trip.
+        let evm_env = match self.evm_config.evm_env(parent.header()) {
+            Ok(evm_env) => evm_env,
+            Err(err) => {
+                trace!(
+                    target: "engine::tree::txpool_prewarm",
+                    %err,
+                    block_hash = ?parent.hash(),
+                    "failed to derive canonical txpool prewarming environment"
+                );
+                return
+            }
+        };
+
+        let provider_builder = match self.state_provider_builder(parent.hash(), state) {
+            Ok(Some(provider_builder)) => provider_builder,
+            Ok(None) => return,
+            Err(err) => {
+                trace!(
+                    target: "engine::tree::txpool_prewarm",
+                    %err,
+                    block_hash = ?parent.hash(),
+                    "failed to derive canonical txpool prewarming provider"
+                );
+                return
+            }
+        };
+        txpool_prewarm.start(parent.hash(), evm_env, provider_builder)
     }
 
-    fn payload_state_root_handle_for(
+    fn payload_builder_resources(
         &self,
         parent_hash: B256,
         parent_header: &N::BlockHeader,
         timestamp: u64,
         state: &mut EngineApiTreeState<N>,
-    ) -> Option<PayloadStateRootHandle> {
-        let provider_builder = match self.state_provider_builder(parent_hash, state) {
-            Ok(Some(provider_builder)) => provider_builder,
-            Ok(None) => return None,
-            Err(err) => {
-                warn!(
-                    target: "engine::tree::payload_validator",
-                    %err,
-                    %parent_hash,
-                    "failed to prepare payload-builder state-root provider"
-                );
-                return None
-            }
-        };
-        let overlay_factory = OverlayStateProviderFactory::new(
-            self.provider.clone(),
-            Self::overlay_builder_for_parent(parent_hash, state, self.changeset_cache.clone()),
-        );
-
-        match self.state_root_strategy.prepare_payload_builder(PayloadStateRootJobContext::new(
-            &self.runtime,
-            &self.state_trie_overlays,
-            parent_hash,
-            parent_header,
-            timestamp,
-            state,
-            provider_builder,
-            overlay_factory,
-            &self.config,
-        )) {
-            Ok(handle) => handle,
-            Err(err) => {
-                warn!(
-                    target: "engine::tree::payload_validator",
-                    %err,
-                    %parent_hash,
-                    "failed to prepare payload-builder state-root job"
-                );
-                None
-            }
+    ) -> PayloadBuilderResources {
+        let execution_cache = self
+            .config
+            .share_execution_cache_with_payload_builder()
+            .then(|| self.payload_processor.cache_for(parent_hash));
+        let state_root_handle =
+            self.payload_state_root_handle_for(parent_hash, parent_header, timestamp, state);
+        let mut resources = PayloadBuilderResources::new(execution_cache, state_root_handle)
+            .with_lease(PayloadBuilderLease::new(JitPauseGuard::new(&self.evm_config)));
+        // If the txpool prewarming is enabled then we should disable it for the duration
+        // of the payload builder job. This is done by obtaining a lease that will release
+        // the txpool prewarm when dropped.
+        if let Some(txpool_prewarm) = self.txpool_prewarm.as_ref() {
+            let txpool_lease = PayloadBuilderLease::new(txpool_prewarm.pause());
+            resources = resources.with_lease(txpool_lease);
         }
+        resources
     }
 }
 
@@ -1846,7 +1946,7 @@ where
         debug!(target: "engine::tree::payload_validator", "Waiting for execution cache and sparse trie locks");
 
         let execution_cache = self.payload_processor.execution_cache();
-        let state_trie_overlays = self.state_trie_overlays.clone();
+        let overlay_manager = self.overlay_manager.clone();
         let (execution_tx, execution_rx) = std::sync::mpsc::channel();
         let (sparse_trie_tx, sparse_trie_rx) = std::sync::mpsc::channel();
 
@@ -1854,7 +1954,7 @@ where
             let _ = execution_tx.send(execution_cache.wait_for_availability());
         });
         self.runtime.spawn_blocking_named("wait-sparse-tri", move || {
-            let _ = sparse_trie_tx.send(state_trie_overlays.wait_for_sparse_trie_availability());
+            let _ = sparse_trie_tx.send(overlay_manager.wait_for_sparse_trie_availability());
         });
 
         let execution_cache =
