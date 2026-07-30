@@ -215,7 +215,8 @@ impl<N: NodePrimitives> HashedPostStateProvider for MemoryOverlayStateProviderRe
         let mut hashed_state = self.historical.hashed_post_state(bundle_state)?;
 
         for (address, account) in bundle_state.state() {
-            if !account.was_destroyed() {
+            // Accounts created in this bundle cannot have parent storage to zero.
+            if !account.was_destroyed() || account.original_info.is_none() {
                 continue
             }
 
@@ -362,5 +363,23 @@ mod tests {
             assert_eq!(storage.storage[&hashed_parent_slot], U256::ZERO);
             assert_eq!(storage.storage[&hashed_new_slot], new_value);
         }
+    }
+
+    #[test]
+    fn created_and_destroyed_account_skips_in_memory_trie_aggregation() {
+        let address = Address::with_last_byte(1);
+        let provider = MemoryOverlayStateProviderRef::<EthPrimitives>::new(
+            Box::new(NoopProvider::default()),
+            Vec::new(),
+        );
+        let mut bundle_state = BundleState::default();
+        bundle_state.state.insert(
+            address,
+            BundleAccount::new(None, None, Default::default(), AccountStatus::Destroyed),
+        );
+
+        provider.hashed_post_state(&bundle_state).unwrap();
+
+        assert!(provider.trie_input.get().is_none());
     }
 }
