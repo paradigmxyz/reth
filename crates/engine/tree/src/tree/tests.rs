@@ -1252,6 +1252,19 @@ fn test_get_save_blocks_input_with_state_masking_blocks() {
             .collect::<Vec<_>>(),
         vec![4, 5]
     );
+
+    test_harness.tree.config = test_harness.tree.config.clone().with_memory_block_buffer_target(0);
+    let input = test_harness.tree.get_save_blocks_input(PersistTarget::Threshold).unwrap();
+    assert_eq!(input.new_db_tip(), 6);
+    assert_eq!(input.new_partial_state_trie(), 4);
+    assert_eq!(
+        input
+            .persist_rest_blocks()
+            .iter()
+            .map(|block| block.recovered_block().number())
+            .collect::<Vec<_>>(),
+        vec![4, 5, 6]
+    );
 }
 
 #[test]
@@ -2406,6 +2419,48 @@ mod forkchoice_updated_tests {
 
         // Ensure we persisted right to the tip
         assert_eq!(last_persisted_number, canonical_tip);
+    }
+
+    #[test]
+    fn test_engine_termination_catches_up_state_trie_at_database_tip() {
+        let chain_spec = MAINNET.clone();
+        let mut test_block_builder = TestBlockBuilder::eth().with_chain_spec((*chain_spec).clone());
+        let blocks: Vec<_> = test_block_builder.get_executed_blocks(1..11).collect();
+        let database_tip = blocks.last().unwrap().recovered_block().num_hash();
+        let state_trie_tip = blocks[4].recovered_block().num_hash();
+        let mut test_harness = TestHarness::new(chain_spec).with_blocks(blocks);
+        test_harness.tree.persistence_state.last_persisted_block = database_tip;
+        test_harness.tree.persistence_state.last_state_trie_persisted_block = state_trie_tip;
+
+        let (terminate_tx, terminate_rx) = oneshot::channel();
+        let to_tree_tx = test_harness.to_tree_tx.clone();
+        let action_rx = test_harness.action_rx;
+        spawn_os_thread("engine", || test_harness.tree.run());
+
+        to_tree_tx
+            .send(FromEngine::Event(FromOrchestrator::Terminate { tx: terminate_tx }))
+            .unwrap();
+
+        let action = action_rx.recv_timeout(Duration::from_secs(10)).unwrap();
+        let PersistenceAction::SaveBlocks(input, sender) = action else {
+            panic!("expected state/trie catch-up save, got {action:?}")
+        };
+        assert_eq!(input.prev_db_tip(), database_tip.number);
+        assert_eq!(input.new_db_tip(), database_tip.number);
+        assert_eq!(input.prev_partial_state_trie(), state_trie_tip.number);
+        assert_eq!(input.new_partial_state_trie(), database_tip.number);
+        assert!(input.persist_rest_blocks().is_empty());
+        assert!(!input.state_trie_blocks().is_empty());
+
+        sender
+            .send(PersistenceResult {
+                last_block: database_tip,
+                last_state_trie_block: database_tip,
+                commit_duration: Some(Duration::ZERO),
+            })
+            .unwrap();
+
+        terminate_rx.blocking_recv().unwrap();
     }
 }
 

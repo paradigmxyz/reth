@@ -103,17 +103,20 @@ where
                         self.sync_metrics_tx.send(MetricEvent::SyncHeight { height: new_tip_num });
                     let _ = sender.send(result);
                 }
-                PersistenceAction::SaveBlocks(blocks, sender) => {
-                    let result = self.on_save_blocks(blocks)?;
+                PersistenceAction::SaveBlocks(input, sender) => {
+                    let db_tip_advanced = input.prev_db_tip() < input.new_db_tip();
+                    let result = self.on_save_blocks(input)?;
                     let result_number = result.last_block.number;
 
                     let _ = sender.send(result);
 
-                    // send new sync metrics based on saved blocks
-                    let _ = self
-                        .sync_metrics_tx
-                        .send(MetricEvent::SyncHeight { height: result_number });
-                    self.maybe_run_pruner(result_number)?;
+                    if db_tip_advanced {
+                        // send new sync metrics based on saved blocks
+                        let _ = self
+                            .sync_metrics_tx
+                            .send(MetricEvent::SyncHeight { height: result_number });
+                        self.maybe_run_pruner(result_number)?;
+                    }
                 }
                 PersistenceAction::SaveFinalizedBlock(finalized_block) => {
                     self.pending_finalized_block = Some(finalized_block);
@@ -161,7 +164,8 @@ where
         &mut self,
         input: SaveBlocksInput<N::Primitives>,
     ) -> Result<PersistenceResult, PersistenceError> {
-        let first_block = input.first_persist_rest_block().recovered_block().num_hash();
+        let first_block =
+            input.first_persist_rest_block().map(|block| block.recovered_block().num_hash());
         let last_block = input.last_block();
         let block_count = input.persist_rest_blocks().len();
 

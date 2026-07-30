@@ -1474,19 +1474,12 @@ where
             }
 
             let canonical_head_number = self.state.tree_state.canonical_block_number();
-            if self.persistence_state.last_persisted_block.number == canonical_head_number {
-                let state_trie_tip = self.persistence_state.last_state_trie_persisted_block.number;
-                if state_trie_tip == canonical_head_number {
-                    debug!(target: "engine::tree", "persistence complete, signaling termination");
-                    return Ok(())
-                }
-
-                assert!(
-                    state_trie_tip < canonical_head_number,
-                    "state/trie persistence cannot be ahead of the database tip"
-                );
-                self.remove_blocks(state_trie_tip);
-                continue
+            if self.persistence_state.last_persisted_block.number == canonical_head_number &&
+                self.persistence_state.last_state_trie_persisted_block.number ==
+                    canonical_head_number
+            {
+                debug!(target: "engine::tree", "persistence complete, signaling termination");
+                return Ok(())
             }
 
             let input = self.get_save_blocks_input(PersistTarget::Head)?;
@@ -2124,21 +2117,8 @@ where
         let prev_db_tip = self.persistence_state.last_persisted_block.number;
         let canonical_head_number = self.state.tree_state.canonical_block_number();
         canonical_head_number.saturating_sub(prev_db_tip) > self.config.persistence_threshold() &&
-            canonical_head_number.saturating_sub(self.effective_memory_block_buffer_target()) >
+            canonical_head_number.saturating_sub(self.config.memory_block_buffer_target()) >
                 prev_db_tip
-    }
-
-    /// Returns the in-memory block buffer used for threshold persistence.
-    ///
-    /// A masking suffix requires at least one unpersisted block so a later shutdown can advance
-    /// the database and fully flush state/trie data in the same persistence operation.
-    const fn effective_memory_block_buffer_target(&self) -> u64 {
-        let configured_target = self.config.memory_block_buffer_target();
-        if self.config.num_state_masking_blocks() > 0 && configured_target == 0 {
-            1
-        } else {
-            configured_target
-        }
     }
 
     /// Returns the blocks and frontiers for the next persistence cycle.
@@ -2159,10 +2139,9 @@ where
         let new_db_tip = match target {
             PersistTarget::Head => canonical_head_number,
             PersistTarget::Threshold => canonical_head_number
-                .saturating_sub(self.effective_memory_block_buffer_target())
+                .saturating_sub(self.config.memory_block_buffer_target())
                 .max(prev_db_tip),
         };
-        debug_assert!(new_db_tip > prev_db_tip, "database tip must advance when saving");
 
         let new_partial_state_trie = match target {
             PersistTarget::Head => new_db_tip,
@@ -2170,6 +2149,10 @@ where
                 .saturating_sub(self.config.num_state_masking_blocks())
                 .max(prev_partial_state_trie),
         };
+        debug_assert!(
+            new_db_tip > prev_db_tip || new_partial_state_trie > prev_partial_state_trie,
+            "at least one persistence frontier must advance when saving"
+        );
 
         debug!(
             target: "engine::tree",

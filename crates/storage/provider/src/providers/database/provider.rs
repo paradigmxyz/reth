@@ -616,8 +616,17 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
     ) -> ProviderResult<()> {
         let total_start = Instant::now();
         let block_count = blocks.len() as u64;
-        let first_number = blocks.first().unwrap().recovered_block().number();
-        let last_block_number = blocks.last().unwrap().recovered_block().number();
+        // With no new block data, the masking suffix still ends at the database tip. If the
+        // masking suffix is empty, the state/trie range ends there instead.
+        let last_block_number = blocks
+            .last()
+            .or_else(|| state_trie_masking_blocks.last())
+            .or_else(|| state_trie_blocks.last())
+            .expect("at least one persistence range must be non-empty")
+            .recovered_block()
+            .number();
+        let first_number =
+            blocks.first().map_or(last_block_number, |block| block.recovered_block().number());
 
         debug!(target: "providers::db", block_count, "Writing blocks and execution data to storage");
 
@@ -785,7 +794,7 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
             }
 
             // Full mode: update history indices
-            if save_mode.with_state() {
+            if save_mode.with_state() && !blocks.is_empty() {
                 let start = Instant::now();
                 self.update_history_indices(first_number..=last_block_number)?;
                 timings.update_history_indices = start.elapsed();
@@ -793,7 +802,9 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
 
             // Update pipeline progress
             let start = Instant::now();
-            self.update_pipeline_stages(last_block_number, false)?;
+            if !blocks.is_empty() {
+                self.update_pipeline_stages(last_block_number, false)?;
+            }
             if save_mode.with_state() {
                 let checkpoint = match partial_state_trie {
                     Some(partial_state_trie) => StageCheckpoint::new(last_block_number)
@@ -4704,7 +4715,20 @@ mod tests {
         );
 
         let provider_rw = factory.provider_rw().unwrap();
-        let input = SaveBlocksInput::new(vec![full_persist_block, deferred_trie_block], 0, 0, 2, 1);
+        let input = SaveBlocksInput::new(
+            vec![full_persist_block.clone(), deferred_trie_block.clone()],
+            0,
+            0,
+            2,
+            0,
+        );
+        provider_rw.save_blocks(&input).unwrap();
+        provider_rw.commit().unwrap();
+
+        let provider_rw = factory.provider_rw().unwrap();
+        let input =
+            SaveBlocksInput::new(vec![full_persist_block, deferred_trie_block.clone()], 2, 0, 2, 1);
+        assert!(input.persist_rest_blocks().is_empty());
         provider_rw.save_blocks(&input).unwrap();
         provider_rw.commit().unwrap();
 
@@ -4751,6 +4775,46 @@ mod tests {
             .collect::<Result<Vec<_>, _>>()
             .unwrap();
         assert!(masked_entries.is_empty());
+
+        drop(storage_trie);
+        drop(account_trie);
+        drop(hashed_storages);
+        drop(hashed_accounts);
+        drop(provider);
+
+        let provider_rw = factory.provider_rw().unwrap();
+        let input = SaveBlocksInput::new(vec![deferred_trie_block], 2, 1, 2, 2);
+        assert!(input.persist_rest_blocks().is_empty());
+        provider_rw.save_blocks(&input).unwrap();
+        provider_rw.commit().unwrap();
+
+        let provider = factory.provider().unwrap();
+        let finish_checkpoint = provider.get_stage_checkpoint(StageId::Finish).unwrap().unwrap();
+        assert_eq!(finish_checkpoint.block_number, 2);
+        assert!(finish_checkpoint.finish_stage_checkpoint().is_none());
+
+        let mut hashed_accounts =
+            provider.tx_ref().cursor_read::<tables::HashedAccounts>().unwrap();
+        let (_, account) = hashed_accounts.seek_exact(masked_account).unwrap().unwrap();
+        assert_eq!(account.nonce, 3);
+
+        let mut hashed_storages =
+            provider.tx_ref().cursor_dup_read::<tables::HashedStorages>().unwrap();
+        let storage =
+            hashed_storages.seek_by_key_subkey(masked_storage, masked_slot).unwrap().unwrap();
+        assert_eq!(storage.value, U256::from(4));
+
+        let mut account_trie = provider.tx_ref().cursor_read::<tables::AccountsTrie>().unwrap();
+        assert!(account_trie.seek_exact(StoredNibbles(masked_account_node)).unwrap().is_some());
+
+        let mut storage_trie = provider.tx_ref().cursor_dup_read::<tables::StoragesTrie>().unwrap();
+        let masked_entries: Vec<_> = storage_trie
+            .walk_dup(Some(masked_storage), None)
+            .unwrap()
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
+        assert_eq!(masked_entries.len(), 1);
+        assert_eq!(masked_entries[0].1.nibbles.0, masked_storage_node);
     }
 
     #[cfg(feature = "partial-persistence")]
