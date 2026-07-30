@@ -896,7 +896,7 @@ fn test_backpressure_waits_for_persistence_before_reading_incoming() {
         persist_tx
             .send(PersistenceResult {
                 last_block: Some(persisted),
-                last_state_trie_block: Some(persisted.number),
+                last_state_trie_block: Some(persisted),
                 commit_duration: Some(Duration::ZERO),
             })
             .unwrap();
@@ -1015,7 +1015,7 @@ async fn test_tree_state_on_new_head_reorg() {
     sender
         .send(PersistenceResult {
             last_block: Some(blocks[1].recovered_block().num_hash()),
-            last_state_trie_block: Some(blocks[1].recovered_block().number),
+            last_state_trie_block: Some(blocks[1].recovered_block().num_hash()),
             commit_duration: Some(Duration::ZERO),
         })
         .unwrap();
@@ -1270,7 +1270,7 @@ fn test_on_persistence_complete_retains_state_masking_blocks() {
         .on_persistence_complete(
             PersistenceResult {
                 last_block: Some(persisted_tip),
-                last_state_trie_block: Some(state_trie_tip.number),
+                last_state_trie_block: Some(state_trie_tip),
                 commit_duration: Some(Duration::ZERO),
             },
             Instant::now(),
@@ -2397,7 +2397,7 @@ mod forkchoice_updated_tests {
                 sender
                     .send(PersistenceResult {
                         last_block: Some(last),
-                        last_state_trie_block: Some(input.new_partial_state_trie()),
+                        last_state_trie_block: Some(last),
                         commit_duration: Some(Duration::ZERO),
                     })
                     .unwrap();

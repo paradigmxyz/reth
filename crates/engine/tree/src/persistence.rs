@@ -28,7 +28,7 @@ pub struct PersistenceResult {
     /// The highest block whose non-state/trie outputs are persisted, if any.
     pub last_block: Option<BlockNumHash>,
     /// The state/trie persistence frontier, if known.
-    pub last_state_trie_block: Option<u64>,
+    pub last_state_trie_block: Option<BlockNumHash>,
     /// The commit duration, only available for save-blocks operations.
     pub commit_duration: Option<Duration>,
 }
@@ -139,15 +139,25 @@ where
 
         let new_tip_hash = provider_rw.block_hash(new_tip_num)?;
         let frontiers = provider_rw.remove_block_and_execution_above(new_tip_num)?;
+        let last_block = new_tip_hash.map(|hash| BlockNumHash { hash, number: frontiers.db_tip });
+        let last_state_trie_block = match last_block {
+            Some(last_block) if frontiers.partial_state_trie == last_block.number => {
+                Some(last_block)
+            }
+            Some(_) => {
+                let hash =
+                    provider_rw.block_hash(frontiers.partial_state_trie)?.ok_or_else(|| {
+                        ProviderError::HeaderNotFound(frontiers.partial_state_trie.into())
+                    })?;
+                Some(BlockNumHash::new(frontiers.partial_state_trie, hash))
+            }
+            None => None,
+        };
         provider_rw.commit()?;
 
         debug!(target: "engine::persistence", ?new_tip_num, ?new_tip_hash, "Removed blocks from disk");
         self.metrics.remove_blocks_above_duration_seconds.record(start_time.elapsed());
-        Ok(PersistenceResult {
-            last_block: new_tip_hash.map(|hash| BlockNumHash { hash, number: frontiers.db_tip }),
-            last_state_trie_block: Some(frontiers.partial_state_trie),
-            commit_duration: None,
-        })
+        Ok(PersistenceResult { last_block, last_state_trie_block, commit_duration: None })
     }
 
     #[instrument(level = "debug", target = "engine::persistence", skip_all, fields(block_count = input.persist_rest_blocks().len()))]
@@ -158,7 +168,10 @@ where
         let first_block = input.first_persist_rest_block().recovered_block().num_hash();
         let last_block = input.last_block();
         let block_count = input.persist_rest_blocks().len();
-        let last_state_trie_block = Some(input.new_partial_state_trie());
+        let last_state_trie_block_number = input.new_partial_state_trie();
+        // Newly written static-file headers are not readable until commit finalizes their index.
+        let last_state_trie_block =
+            input.state_trie_blocks().last().map(|block| block.recovered_block().num_hash());
 
         let pending_finalized = self.pending_finalized_block.take();
         let pending_safe = self.pending_safe_block.take();
@@ -168,6 +181,14 @@ where
         let start_time = Instant::now();
 
         let provider_rw = self.provider.database_provider_rw()?;
+        let last_state_trie_block = if let Some(last_state_trie_block) = last_state_trie_block {
+            last_state_trie_block
+        } else {
+            let hash = provider_rw.block_hash(last_state_trie_block_number)?.ok_or_else(|| {
+                ProviderError::HeaderNotFound(last_state_trie_block_number.into())
+            })?;
+            BlockNumHash::new(last_state_trie_block_number, hash)
+        };
         provider_rw.save_blocks(&input)?;
 
         if let Some(finalized) = pending_finalized {
@@ -195,7 +216,7 @@ where
 
         Ok(PersistenceResult {
             last_block: Some(last_block),
-            last_state_trie_block,
+            last_state_trie_block: Some(last_state_trie_block),
             commit_duration: Some(elapsed),
         })
     }
@@ -518,8 +539,10 @@ mod tests {
         handle.save_blocks(blocks, tx).unwrap();
 
         let result = rx.recv_timeout(std::time::Duration::from_secs(10)).expect("test timed out");
+        let last_block = result.last_block.unwrap();
 
-        assert_eq!(block_hash, result.last_block.unwrap().hash);
+        assert_eq!(block_hash, last_block.hash);
+        assert_eq!(result.last_state_trie_block, Some(last_block));
     }
 
     #[test]
