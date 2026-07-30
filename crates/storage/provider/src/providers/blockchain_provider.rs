@@ -834,7 +834,7 @@ impl<N: ProviderNodeTypes> StateProviderFactory for BlockchainProvider<N> {
 
         if let Some(pending) = self.canonical_in_memory_state.pending_state() {
             // we have a pending block
-            return Ok(self.block_state_provider(&pending)?.boxed());
+            return Ok(Box::new(self.block_state_provider(&pending)?));
         }
 
         // fallback to latest state if the pending block is not available
@@ -845,14 +845,14 @@ impl<N: ProviderNodeTypes> StateProviderFactory for BlockchainProvider<N> {
         if let Some(pending) = self.canonical_in_memory_state.pending_state() &&
             pending.hash() == block_hash
         {
-            return Ok(Some(self.block_state_provider(&pending)?.boxed()));
+            return Ok(Some(Box::new(self.block_state_provider(&pending)?)));
         }
         Ok(None)
     }
 
     fn maybe_pending(&self) -> ProviderResult<Option<StateProviderBox>> {
         if let Some(pending) = self.canonical_in_memory_state.pending_state() {
-            return Ok(Some(self.block_state_provider(&pending)?.boxed()))
+            return Ok(Some(Box::new(self.block_state_provider(&pending)?)))
         }
 
         Ok(None)
