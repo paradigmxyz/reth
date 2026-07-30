@@ -164,10 +164,6 @@ where
         let first_block = input.first_persist_rest_block().recovered_block().num_hash();
         let last_block = input.last_block();
         let block_count = input.persist_rest_blocks().len();
-        let last_state_trie_block_number = input.new_partial_state_trie();
-        // Newly written static-file headers are not readable until commit finalizes their index.
-        let last_state_trie_block =
-            input.state_trie_blocks().last().map(|block| block.recovered_block().num_hash());
 
         let pending_finalized = self.pending_finalized_block.take();
         let pending_safe = self.pending_safe_block.take();
@@ -177,13 +173,18 @@ where
         let start_time = Instant::now();
 
         let provider_rw = self.provider.database_provider_rw()?;
-        let last_state_trie_block = if let Some(last_state_trie_block) = last_state_trie_block {
-            last_state_trie_block
+        let last_state_trie_block = if let Some(block) = input.state_trie_blocks().last() {
+            // Newly written static-file headers are not readable until commit finalizes their
+            // index.
+            block.recovered_block().num_hash()
         } else {
-            let hash = provider_rw.block_hash(last_state_trie_block_number)?.ok_or_else(|| {
-                ProviderError::HeaderNotFound(last_state_trie_block_number.into())
-            })?;
-            BlockNumHash::new(last_state_trie_block_number, hash)
+            // If the state/trie frontier did not advance, its block is excluded from
+            // `state_trie_blocks()` and must be loaded from already-persisted storage.
+            let number = input.new_partial_state_trie();
+            let hash = provider_rw
+                .block_hash(number)?
+                .ok_or_else(|| ProviderError::HeaderNotFound(number.into()))?;
+            BlockNumHash::new(number, hash)
         };
         provider_rw.save_blocks(&input)?;
 
