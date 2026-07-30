@@ -101,13 +101,16 @@ where
                         self.sync_metrics_tx.send(MetricEvent::SyncHeight { height: new_tip_num });
                     let _ = sender.send(PersistenceResult { last_block, commit_duration: None });
                 }
-                PersistenceAction::SaveBlocks(blocks, sender) => {
-                    let result = self.on_save_blocks(blocks)?;
+                PersistenceAction::SaveBlocks(input, sender) => {
+                    let db_tip_advanced = input.prev_db_tip() < input.new_db_tip();
+                    let result = self.on_save_blocks(input)?;
                     let result_number = result.last_block.map(|b| b.number);
 
                     let _ = sender.send(result);
 
-                    if let Some(block_number) = result_number {
+                    if db_tip_advanced &&
+                        let Some(block_number) = result_number
+                    {
                         // send new sync metrics based on saved blocks
                         let _ = self
                             .sync_metrics_tx
