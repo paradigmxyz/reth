@@ -580,12 +580,14 @@ async fn test_tree_persist_blocks() {
 
     let received_action =
         test_harness.action_rx.recv().expect("Failed to receive save blocks action");
-    if let PersistenceAction::SaveBlocks(saved_blocks, _) = received_action {
+    if let PersistenceAction::SaveBlocks(input, _) = received_action {
         // only blocks.len() - tree_config.memory_block_buffer_target() will be
         // persisted
         let expected_persist_len = blocks.len() - tree_config.memory_block_buffer_target() as usize;
-        assert_eq!(saved_blocks.len(), expected_persist_len);
-        assert_eq!(saved_blocks, blocks[..expected_persist_len]);
+        assert_eq!(input.persist_rest_blocks().len(), expected_persist_len);
+        assert_eq!(input.persist_rest_blocks(), &blocks[..expected_persist_len]);
+        assert_eq!(input.prev_db_tip(), input.prev_partial_state_trie());
+        assert_eq!(input.new_db_tip(), input.new_partial_state_trie());
     } else {
         panic!("unexpected action received {received_action:?}");
     }
@@ -1005,10 +1007,10 @@ async fn test_tree_state_on_new_head_reorg() {
 
     // get rid of the prev action
     let received_action = test_harness.action_rx.recv().unwrap();
-    let PersistenceAction::SaveBlocks(saved_blocks, sender) = received_action else {
+    let PersistenceAction::SaveBlocks(input, sender) = received_action else {
         panic!("received wrong action");
     };
-    assert_eq!(saved_blocks, vec![blocks[0].clone(), blocks[1].clone()]);
+    assert_eq!(input.persist_rest_blocks(), &blocks[..2]);
 
     // send the response so we can advance again
     sender
@@ -2286,15 +2288,14 @@ mod forkchoice_updated_tests {
                 break;
             }
 
-            if let Ok(PersistenceAction::SaveBlocks(saved_blocks, sender)) =
+            if let Ok(PersistenceAction::SaveBlocks(input, sender)) =
                 action_rx.recv_timeout(std::time::Duration::from_millis(100))
             {
-                if let Some(last) = saved_blocks.last() {
-                    last_persisted_number = last.recovered_block().number;
-                }
+                let last = input.last_block();
+                last_persisted_number = last.number;
                 sender
                     .send(PersistenceResult {
-                        last_block: saved_blocks.last().map(|b| b.recovered_block().num_hash()),
+                        last_block: Some(last),
                         commit_duration: Some(Duration::ZERO),
                     })
                     .unwrap();
