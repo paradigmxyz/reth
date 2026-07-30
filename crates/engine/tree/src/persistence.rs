@@ -95,27 +95,25 @@ where
         while let Ok(action) = self.incoming.recv() {
             match action {
                 PersistenceAction::RemoveBlocksAbove(new_tip_num, sender) => {
-                    let last_block = self.on_remove_blocks_above(new_tip_num)?;
+                    let result = self.on_remove_blocks_above(new_tip_num)?;
                     // send new sync metrics based on removed blocks
                     let _ =
                         self.sync_metrics_tx.send(MetricEvent::SyncHeight { height: new_tip_num });
-                    let _ = sender.send(PersistenceResult { last_block, commit_duration: None });
+                    let _ = sender.send(result);
                 }
                 PersistenceAction::SaveBlocks(input, sender) => {
-                    let db_tip_advanced = input.prev_db_tip() < input.new_db_tip();
+                    let new_db_tip = input.new_db_tip();
+                    let db_tip_advanced = input.prev_db_tip() < new_db_tip;
                     let result = self.on_save_blocks(input)?;
-                    let result_number = result.last_block.map(|b| b.number);
 
                     let _ = sender.send(result);
 
-                    if db_tip_advanced &&
-                        let Some(block_number) = result_number
-                    {
+                    if db_tip_advanced {
                         // send new sync metrics based on saved blocks
                         let _ = self
                             .sync_metrics_tx
-                            .send(MetricEvent::SyncHeight { height: block_number });
-                        self.maybe_run_pruner(block_number)?;
+                            .send(MetricEvent::SyncHeight { height: new_db_tip });
+                        self.maybe_run_pruner(new_db_tip)?;
                     }
                 }
                 PersistenceAction::SaveFinalizedBlock(finalized_block) => {
@@ -133,7 +131,7 @@ where
     fn on_remove_blocks_above(
         &self,
         new_tip_num: u64,
-    ) -> Result<Option<BlockNumHash>, PersistenceError> {
+    ) -> Result<PersistenceResult, PersistenceError> {
         debug!(target: "engine::persistence", ?new_tip_num, "Removing blocks");
         let start_time = Instant::now();
         let provider_rw = self.provider.database_provider_rw()?;
@@ -144,7 +142,10 @@ where
 
         debug!(target: "engine::persistence", ?new_tip_num, ?new_tip_hash, "Removed blocks from disk");
         self.metrics.remove_blocks_above_duration_seconds.record(start_time.elapsed());
-        Ok(new_tip_hash.map(|hash| BlockNumHash { hash, number: new_tip_num }))
+        Ok(PersistenceResult {
+            last_block: new_tip_hash.map(|hash| BlockNumHash { hash, number: new_tip_num }),
+            commit_duration: None,
+        })
     }
 
     #[instrument(level = "debug", target = "engine::persistence", skip_all, fields(block_count = input.persist_rest_blocks().len()))]
